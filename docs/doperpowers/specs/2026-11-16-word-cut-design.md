@@ -387,6 +387,15 @@ Kept by the session that wrote this document (sminos alias `design-experiment`, 
   - P460's Send follows the message box's arrow and spinner.
 
   None of these surfaces is drawn by the desk's web app, which draws a project channel as its own group chat. On the coordinator's call of 2026-11-22, that chat's fold follows P447 and P448 as a `new` row: "a and b · N", keeping its time range, with the count named "N messages" as its tip and as a `TouchFact` on the phone. Its single "a → b" lines stay.
+- 2026-11-22. **M3 task 5: Files and the file tab.** 17 cuts and 13 rewordings, with 22 `stays` rows left as they read; no `new` row.
+  - T305 puts Wrap in a View menu behind a sliders glyph named "View", as the row says; Review keeps its worded "View ▾" (the owner's "words wide, glyphs narrow" on Review), so the two code tools draw the menu differently.
+  - T324: the ring of a long file still arriving takes Tab, so the keyboard reaches its sizes tip.
+  - T336: CodeMirror builds the find bar's controls itself. Their tips are drawn by CSS from a data attribute, and their names are set with `aria-label`.
+  - T341 changes only the bar's notice. The save failure line and the Save-all and quit reasons keep "Changed on disk since you opened it".
+  - N16 to N20: the Read-only panel's words are one constant, which is also the button's description.
+  - N11: a command's own words show only under the generic "could not be opened / listed" notice, decided in one place (`classifyFailure`).
+  - N28 and N29: both greyed Open File… rows stay in the keyboard. N29 uses the refused menu item; N28 keeps its words and title.
+  - The desk's web app imports the code tools' copy, but no key it reads changed, so it needs no edit.
 
 ## Outcomes & Retrospective
 
