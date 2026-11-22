@@ -137,6 +137,8 @@ async function settle(page: Page) {
 // capture. Either failing leaves the scene not reached, with what Playwright saw, and the run goes on.
 async function shot(page: Page, meta: Meta, prepare: () => Promise<void>, check: (cut: boolean) => Promise<void>) {
   META.push(meta);
+  const errors: string[] = []; // the page's own errors, said with a miss
+  page.on('pageerror', (error) => errors.push(error.message.split('\n')[0]!));
   try {
     await prepare();
     await settle(page);
@@ -147,8 +149,9 @@ async function shot(page: Page, meta: Meta, prepare: () => Promise<void>, check:
     await page.screenshot({ path: join(OUT, `${meta.id}.png`), animations: 'disabled', caret: 'hide' });
     results.push({ id: meta.id, ok: true });
   } catch (error) {
-    const message = notReached(error);
+    const message = `${notReached(error)}${errors.length > 0 ? ` (page errors: ${errors.join(' | ')})` : ''}`.slice(0, 500);
     results.push({ id: meta.id, ok: false, error: message });
+    await page.screenshot({ path: join(OUT, `_miss-${meta.id}.png`) }).catch(() => {}); // what the miss looked like, for a person
     console.log(`[desk words] ${meta.id} not reached: ${message}\n${error instanceof Error ? error.stack : String(error)}`);
   }
   writeRun();
