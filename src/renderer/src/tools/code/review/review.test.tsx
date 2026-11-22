@@ -1172,6 +1172,26 @@ describe('review tool', () => {
     expect(scopeWords()).toBe('main · Working tree against HEAD');
   });
 
+  // The word cut's M3 panel (scalpel-4#2): a chip's scope words come with its own press, under the focus that pressed it;
+  // the chip shows them then, not only once the keyboard has left it and come back
+  it('shows the scope’s words on the chip just pressed from the keyboard, which keeps the focus', async () => {
+    openReview();
+    render(<TestHost />);
+    await waitFor(() => expect(header()).toBe('3 files · +3 −0'));
+    const user = userEvent.setup();
+    act(() => chipOf('staged')!.focus());
+    expect(screen.queryByRole('tooltip')).toBeNull(); // an unpressed chip has nothing to say
+    await user.keyboard(' ');
+    await waitFor(() => expect(chipOf('staged')!.getAttribute('aria-pressed')).toBe('true'));
+    await waitFor(() => expect(screen.queryByRole('tooltip')?.textContent).toBe('main · Index against HEAD'));
+    expect(document.activeElement).toBe(chipOf('staged'));
+    expect(scopeWords()).toBe('main · Index against HEAD');
+    await user.click(chipOf('uncommitted')!); // a click: the pointer shows the words on its next pointing, as any tip's
+    await waitFor(() => expect(chipOf('uncommitted')!.getAttribute('aria-pressed')).toBe('true'));
+    await act(() => new Promise<void>((resolve) => setTimeout(resolve, 400))); // past the pointing delay
+    expect(screen.queryByRole('tooltip')).toBeNull();
+  });
+
   it('keeps Staged selected but disabled once the index matches HEAD again', async () => {
     render(<TestHost />);
     openReview({ scope: 'staged' });
@@ -2188,6 +2208,18 @@ describe('This branch and the new files counted (UX wave U5b-2)', () => {
     render(<DiffTab tab={tab} />);
     await waitFor(() => expect(document.querySelector('[data-review-unavailable]')?.textContent).toBe('Diff unavailable: this Mac’s MAWS needs updating'));
     expect(main().callsOf('git.commitDiff')).toEqual([]);
+  });
+
+  // The word cut's M3 panel (scalpel-4#1): a fixed commit tab knows its hash before any read gives the subject, so a first
+  // read that fails keeps the hash in the status line's words, and the line keeps its focus stop
+  it('a diff tab on a commit whose first read fails gives its status line the commit’s hash, with the keyboard', async () => {
+    serveReads();
+    main().state.commits = () => ({ ok: false, error: { code: 'host_unavailable', message: 'the link dropped' } }) as never;
+    const tab = { kind: 'diff' as const, id: 'diff-commit-failed', appSessionId: A, ref: `commit:${SHA}`, pinned: false };
+    render(<DiffTab tab={tab} />);
+    await waitFor(() => expect(document.querySelector('[data-review-retry]')).not.toBeNull());
+    const line = document.querySelector<HTMLElement>('[data-review-unavailable]')!;
+    expect([line.tabIndex, describedBy(line)]).toEqual([0, 'Commit 3f9a1c2']);
   });
 
   it('a commit’s read that failed offline says so with Retry, which brings the diff; so does the machine heard again (S22)', async () => {

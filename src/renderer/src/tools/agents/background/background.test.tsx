@@ -838,6 +838,45 @@ describe('background work', () => {
     expect(widget()?.dataset.run).toBe(taskId);
   });
 
+  // The word cut's M3 panel (scalpel-3#4): an exited engine's kept status is no session running here, so nothing more
+  // can bring the run once the read answered without it.
+  it('a link to a run of a session whose engine exited reads Run not found once its read answered without it, in the list and on the page', async () => {
+    const [run] = workflowRunsOf();
+    const taskId = run.snapshot!.taskId!;
+    const { handle } = await mount({ status: live({ process: 'exited' }), runs: [], params: { taskId, runId: run.runId, view: 'run' } });
+    expect(handle.snapshot().pendingRun).not.toBeNull();
+    expect(screen.getByText('Run not found')).toBeTruthy();
+    await pastQuietDelay();
+    expect(screen.queryByRole('progressbar', { name: 'Loading run…' })).toBeNull();
+    act(() => handle.openRun(run.runId)); // the page on a run the graph does not hold
+    expect(within(widget()!).getByText('Run not found')).toBeTruthy();
+    await pastQuietDelay();
+    expect(screen.queryByRole('progressbar', { name: 'Loading run…' })).toBeNull();
+  });
+
+  // The word cut's M3 panel (scalpel-3#3): a host disconnect clears the engine status and leaves the running node. With
+  // its first runs read failed, nothing is left to bring its phases: the list says the read's error once, the card's
+  // line waits on nothing, and the page, where nothing else says it, says the error.
+  it('a running workflow whose session is no longer live here and whose first runs read failed says the error, and no spinner', async () => {
+    seedSessions(live());
+    const handle = create(undefined);
+    render(<Mounted state={handle} />);
+    await act(async () => {
+      await fake.answer('events', { events: [event('task.started', { taskId: 'wf1', taskType: 'local_workflow', description: 'Judge panel', workflowName: 'demo' }, { seq: 1, at: T })], lastSeq: 1, complete: true });
+      await fake.answer('subagents', []);
+      await fake.fail('workflows', 'the runs folder is unreadable');
+    });
+    setStatus(null);
+    expect(screen.getAllByText('Workflow runs unavailable: the runs folder is unreadable')).toHaveLength(1);
+    expect(summaryLine('wf1')).toBe('');
+    await pastQuietDelay();
+    expect(screen.queryByRole('progressbar')).toBeNull();
+    openWidget('wf1');
+    expect(within(widget()!).getByText('Workflow runs unavailable: the runs folder is unreadable')).toBeTruthy();
+    await pastQuietDelay();
+    expect(screen.queryByRole('progressbar')).toBeNull();
+  });
+
   it('Back keeps the list’s scroll; a pinned tab following another session leaves the widget', async () => {
     const { handle } = await mount({ events: upTo(workflow, 93) });
     const scroller = () => document.querySelector<HTMLElement>('[data-section="running"]')!.parentElement!;

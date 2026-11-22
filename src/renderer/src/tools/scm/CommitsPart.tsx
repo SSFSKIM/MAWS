@@ -37,7 +37,7 @@ export interface CommitsPartProps {
 }
 
 export function CommitsPart({ appSessionId, serves, read, mark, ui, retry }: CommitsPartProps) {
-  const state = commitsState(serves, read, mark.offline);
+  const state = commitsState(serves, read, mark.offline, mark.carrier === 'socket');
   if (state.kind !== 'ready') {
     return (
       <Part name="commits" label={SCM_COPY.commitsPart}>

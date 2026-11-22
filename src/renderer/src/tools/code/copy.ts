@@ -196,7 +196,7 @@ export const REVIEW_COPY = {
     branch: (branch: string, base: string) => `${branch} · Since ${base}`,
     staged: (branch: string) => `${branch} · Index against HEAD`,
     turn: (branch: string | null) => (branch === null ? 'Changes from the turn' : `${branch} · Changes from the turn`),
-    commit: (sha: string) => `Commit ${sha.slice(0, 7)} · `, // UX wave U5b-2 (§I; D8)
+    commit: (sha: string) => `Commit ${sha.slice(0, 7)}`, // UX wave U5b-2 (§I; D8); ` · ` and the subject follow once read
     firstParent: ' · against its first parent', // a merge commit
   },
   // The one word of the foot that stays at rest (N53): a commit HEAD no longer holds; `not in HEAD` on a detached HEAD

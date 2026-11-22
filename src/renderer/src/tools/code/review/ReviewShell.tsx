@@ -395,16 +395,18 @@ function Unavailable({ message, retry, scopeWords }: { message: string; retry?: 
 
 // What the scope reads, the faint foot line's words until the word cut (T357): the branch (or the detached head) and
 // the scope; a commit's subject, then "against its first parent" for a merge commit, with `Commit <sha7> · ` before
-// them where no chip says the hash (`named`, a diff tab). Null while there is nothing to say: no scope, no status yet,
-// This branch without its base, a commit whose subject is not read.
+// them where no chip says the hash (`named`, a diff tab), which says the hash alone while the subject is not read. Null
+// while there is nothing to say: no scope, no status yet, This branch without its base, a chip's commit whose subject is
+// not read.
 export function scopeWordsOf(scope: ReviewScope | null, data: ReviewData, listed: ReviewUi['commit'], named: boolean): string | null {
   if (scope === null) return null;
   const words = REVIEW_COPY.scopeWords;
   if (scope === 'commit') {
     const read = data.commit.commit; // the listed commit's, once its read answered: its subject and its parents
     const subject = read?.subject ?? listed?.subject ?? null;
-    if (listed === null || subject === null) return null;
-    return `${named ? words.commit(listed.sha) : ''}${subject}${read !== null && read.parents.length > 1 ? words.firstParent : ''}`;
+    if (listed === null) return null;
+    if (subject === null) return named ? words.commit(listed.sha) : null;
+    return `${named ? `${words.commit(listed.sha)} · ` : ''}${subject}${read !== null && read.parents.length > 1 ? words.firstParent : ''}`;
   }
   const status = data.status;
   const branch = status === null ? null : (status.branch ?? REVIEW_COPY.detachedAt(status.head));
@@ -419,11 +421,35 @@ export function scopeWordsOf(scope: ReviewScope | null, data: ReviewData, listed
 function ScopeChips({ ui, data, scope, appSessionId }: { ui: StoreApi<ReviewUi>; data: ReviewData; scope: ReviewScope | null; appSessionId: AppSessionId }) {
   const turnId = useStore(ui, (s) => s.turnId);
   const latest = useTranscriptStore((s) => latestTurnWithFiles(s.rows(appSessionId)));
-  const pick = (next: ReviewScope) => ui.setState((s) => (next === 'turn' ? selectLastTurn(s, latest) : selectScope(s, next)));
+  const group = useRef<HTMLDivElement>(null);
+  // The chip just pressed from the keyboard (the word cut's M3 panel): its scope's words come with its press, under the
+  // focus that pressed it, and a `Tip` shows content that arrives under focus only on the next focus (its pinned rule, so
+  // a greyed reason never springs open on the control that holds focus). Once the words are drawn the chip is given that
+  // next focus, so it says what it compares at once. Not for the pressed chip or a commit's, whose words were there
+  // before the press, which closed them; nor for a click, after which the pointer shows them, as it shows any tip.
+  const pressed = useRef<ReviewScope | null>(null);
+  const pick = (next: ReviewScope, byKeyboard = false) => {
+    pressed.current = !byKeyboard || next === scope || next === 'commit' ? null : next;
+    ui.setState((s) => (next === 'turn' ? selectLastTurn(s, latest) : selectScope(s, next)));
+  };
   const branchReason = data.branch.settled && data.branch.base === null ? data.branch.reason : null;
   const turnAvailable = turnId !== null || latest !== null;
   const stagedShown = data.staged || scope === 'staged';
   const commit = useStore(ui, (s) => s.commit); // UX wave U5b-2: listed while set, its words the subject
+  const pressedWords = scope === null ? null : scopeWordsOf(scope, data, commit, false);
+  useLayoutEffect(() => {
+    const id = pressed.current;
+    if (id === null || id !== scope) return;
+    const owner = group.current?.querySelector<HTMLElement>(`[data-chip="${id}"]`) ?? null;
+    if (owner === null || document.activeElement !== owner) {
+      pressed.current = null; // the focus has left it: its tip shows on the next pointing or focus, as any tip's
+      return;
+    }
+    if (pressedWords === null) return; // still to come (This branch's base)
+    pressed.current = null;
+    owner.blur();
+    owner.focus({ preventScroll: true });
+  }, [scope, pressedWords]);
   // A chip greyed with a reason is drawn aria-disabled, keeps the keyboard and gives the reason as its tooltip and
   // description; one greyed with none (This branch while its availability is not known) is simply disabled. Every chip
   // stands in its tip, content or none, so a chip pressed keeps its element and the keyboard. The pressed chip's tooltip and description are what its
@@ -433,14 +459,14 @@ function ScopeChips({ ui, data, scope, appSessionId }: { ui: StoreApi<ReviewUi>;
     const about = refused ?? (id === 'commit' || scope === id ? scopeWordsOf(id, data, commit, false) : null);
     return (
       <Tip key={id} content={about} description={about} {...unavailableClickProps(refused)}>
-        <button type="button" data-chip={id} className={chip} aria-pressed={scope === id} disabled={off && reason === null} onClick={() => pick(id)}>
+        <button type="button" data-chip={id} className={chip} aria-pressed={scope === id} disabled={off && reason === null} onClick={(event) => pick(id, event.detail === 0)}>
           {words}
         </button>
       </Tip>
     );
   };
   return (
-    <div role="group" aria-label={REVIEW_COPY.title} className="flex shrink-0 flex-wrap items-center gap-1 border-b border-border px-3 py-1.5">
+    <div ref={group} role="group" aria-label={REVIEW_COPY.title} className="flex shrink-0 flex-wrap items-center gap-1 border-b border-border px-3 py-1.5">
       {chipOf('uncommitted', false, null)}
       {chipOf('branch', !data.branch.settled || (data.branch.base === null && data.branch.failure === null), branchReason)}
       {chipOf('turn', !turnAvailable, turnAvailable ? null : REVIEW_COPY.noTurnChangedFiles)}

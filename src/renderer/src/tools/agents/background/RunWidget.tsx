@@ -36,6 +36,7 @@ interface Props {
 export function RunWidget({ appSessionId, handle, openedOn, phase, stopError, ctx }: Props) {
   const graph = useTaskGraph((s) => s.entries.get(appSessionId)?.graph ?? EMPTY_GRAPH);
   const runs = useTaskGraph((s) => s.entries.get(appSessionId)?.disk.runs ?? null);
+  const runsError = useTaskGraph((s) => s.entries.get(appSessionId)?.disk.runsError ?? null);
   const taskId = resolveRun(graph, [openedOn]);
   const node = taskId === null ? undefined : graph.tasks.get(taskId);
   const now = useTicker(ctx.visible && node?.status === 'running');
@@ -44,6 +45,7 @@ export function RunWidget({ appSessionId, handle, openedOn, phase, stopError, ct
   const controls = useSessionControls(appSessionId);
   const driven = controls !== null && controls.turn() !== null;
   const live = !driven && ctx.status !== null;
+  const runsHere = live && ctx.status!.process !== 'exited'; // an exited engine's kept status brings nothing more (the word cut's M3 panel)
   const back = (
     <button type="button" onClick={handle.back} className="self-start rounded-sm text-ui-sm text-fg-muted outline-accent hover:text-fg focus-visible:outline-2">
       {BACKGROUND_COPY.back}
@@ -53,7 +55,7 @@ export function RunWidget({ appSessionId, handle, openedOn, phase, stopError, ct
     return (
       <div data-view="run" className="flex h-full min-h-0 flex-col gap-2 overflow-auto px-3.5 py-2">
         {back}
-        <PendingRun appSessionId={appSessionId} live={live} error /* the word cut (T209) */ />
+        <PendingRun appSessionId={appSessionId} live={runsHere} error /* the word cut (T209) */ />
       </div>
     );
   }
@@ -84,7 +86,7 @@ export function RunWidget({ appSessionId, handle, openedOn, phase, stopError, ct
       </header>
       {view.phases.length === 0 ? (
         <p className="px-3.5 pt-3">
-          <PhasesPending node={node} canArrive={ctx.status !== null || driven || runs === null} /* the word cut (T212) */ />
+          <PhasesPending node={node} canArrive={ctx.status !== null || driven || (runs === null && runsError === null)} readError={runsError} error /* the word cut (T212) */ />
         </p>
       ) : (
         <div className="flex min-h-0 flex-1 flex-col @min-[520px]:flex-row">

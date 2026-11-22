@@ -19,6 +19,8 @@ interface Props {
   live: boolean;
   /** Whether its phases can still arrive (`PhasesPending`): the session runs, or its disk read has not answered. */
   phasesCanArrive: boolean;
+  /** The disk read's error, said once by the list on its own line: the card's line then waits on nothing and says nothing. */
+  phasesReadError: string | null;
   selected: boolean;
   stopError: string | null;
   onOpen: (taskId: TaskId) => void;
@@ -27,16 +29,16 @@ interface Props {
 
 // The word cut (T212): before the first progress, a quiet spinner in the sentence's place, the words its name, or
 // `No phases` once the run ended without any.
-const summaryText = (node: TaskNode, summary: RunSummary | null, canArrive: boolean) =>
+const summaryText = (node: TaskNode, summary: RunSummary | null, canArrive: boolean, readError: string | null) =>
   summary === null ? (
-    <PhasesPending node={node} canArrive={canArrive} />
+    <PhasesPending node={node} canArrive={canArrive} readError={readError} />
   ) : summary.kind === 'phase' ? (
     BACKGROUND_COPY.runSummary.phase(summary.title, summary.done, summary.total)
   ) : (
     BACKGROUND_COPY.runSummary[summary.kind]
   );
 
-export function WorkflowCard({ node, view, live, phasesCanArrive, selected, stopError, onOpen, onStop }: Props) {
+export function WorkflowCard({ node, view, live, phasesCanArrive, phasesReadError, selected, stopError, onOpen, onStop }: Props) {
   return (
     <article
       data-workflow={node.taskId}
@@ -71,7 +73,7 @@ export function WorkflowCard({ node, view, live, phasesCanArrive, selected, stop
         {runLine(node, view)}
       </p>
       <p data-part="summary" className="min-h-[1lh] truncate text-ui-sm tabular-nums">
-        {summaryText(node, runSummary(view.phases), phasesCanArrive)}
+        {summaryText(node, runSummary(view.phases), phasesCanArrive, phasesReadError)}
       </p>
       {node.status === 'running' && live && (
         <div className="mt-1 flex flex-col items-start gap-1">
