@@ -64,7 +64,7 @@ describe('C4 backfill through the transcript model', () => {
     expect(rows.some((row) => row.kind === 'user' && row.text.includes('<task-notification>'))).toBe(false);
     const subagents = ofKind(rows, 'subagent');
     expect(subagents).toHaveLength(1);
-    expect(subagents[0]).toMatchObject({ turnId: turns[0].id, status: 'finished', sentence: 'Read and report one.txt content and Read and report two.txt content finished' });
+    expect(subagents[0]).toMatchObject({ turnId: turns[0].id, status: 'finished', sentence: 'Read and report one.txt content and Read and report two.txt content' }); // the word cut (T86)
     expect(subagents[0].agents.map((agent) => [agent.agentId, agent.kind])).toEqual([['ad286defbc77bc090', 'agent'], ['ae75ba6ce5d866acc', 'agent']]);
     const cells = rows.flatMap((row) => (row.kind === 'group' ? row.cells : row.kind === 'cell' ? [row] : []));
     expect(cells.some((cell) => cell.toolName === 'Agent')).toBe(false);
@@ -247,7 +247,7 @@ describe('a /compact turn from disk', () => {
     const rows = rowsOf(stateOf(disk));
     const shape = rows.filter((row) => row.kind !== 'time').map((row) => (row.kind === 'user' ? `user:${row.text}` : row.kind === 'assistant_text' ? `answer:${row.markdown}` : row.kind === 'boundary' ? `boundary:${row.boundaryKind}` : row.kind === 'local_command' ? `local:${row.text.split(' ')[0]}` : row.kind));
     expect(shape).toEqual(['user:Reply ONE', 'answer:ONE', 'boundary:compaction', 'user:/compact', 'local:Compacted', 'user:Reply TWO', 'answer:TWO']);
-    expect(ofKind(rows, 'boundary')[0].text).toBe('Compacted earlier · 29k → 1k'); // the post-compaction size is on disk too
+    expect(ofKind(rows, 'boundary')[0].text).toBe('Compacted · 29k → 1k'); // the post-compaction size is on disk too
     expect(ofKind(rows, 'user').some((row) => row.text.startsWith('This session is being continued'))).toBe(false);
     expect(ofKind(rows, 'local_command').some((row) => row.text.startsWith('Caveat'))).toBe(false); // the engine's caveat for the model
     expect(ofKind(rows, 'divider')).toEqual([]);
@@ -322,7 +322,7 @@ describe('maws artifacts read from disk', () => {
     expect(artifacts(rows)).toHaveLength(3);
     expect(artifacts(rows)).toEqual(artifacts(journal));
     expect(mawsCells(rows)).toEqual([
-      ['mcp__maws__artifact_screenshot', 'done', 'Screenshot of Dashboard v1 (64 × 64)'],
+      ['mcp__maws__artifact_screenshot', 'done', 'Screenshot of Dashboard'],
       ['mcp__maws__artifact_list', 'done', 'Listed 1 artifact'],
     ]);
     expect(mawsCells(rows)).toEqual(mawsCells(journal));

@@ -103,14 +103,14 @@ describe('user row', () => {
   const wordsOf = (line: Element) => [...line.children].flatMap((part) => (part.classList.contains('transcript-user-line-actions') ? [...part.children] : [part])).map((part) => part.textContent);
 
   it('draws the time, Copy and Edit, then the caption last, on one line under the bubble', () => {
-    const row = { ...userRow('look at b too'), steer: true };
-    const { container } = renderRow(row);
+    const row = userRow('look at b too');
+    const { container } = renderRow(row, { actions: { ...spyActions(), userRowMark: () => 'Sent to Claude' } });
     const line = lineOf(container)!;
     expect(line.previousElementSibling?.classList.contains('transcript-user-body')).toBe(true);
-    expect(wordsOf(line)).toEqual([formatClock(Date.parse(row.at)), 'Copy', 'Edit', 'Sent during this turn']);
+    expect(wordsOf(line)).toEqual([formatClock(Date.parse(row.at)), 'Copy', 'Edit', 'Sent to Claude']);
     const caption = line.lastElementChild!;
     expect(caption.classList.contains('transcript-user-caption')).toBe(true);
-    expect(caption.getAttribute('title')).toBe('Sent during this turn'); // a narrow pane cuts it with an ellipsis (R14)
+    expect(caption.getAttribute('title')).toBe('Sent to Claude'); // a narrow pane cuts it with an ellipsis (R14)
     expect(line.querySelector('.transcript-user-line-actions')!.contains(screen.getByRole('button', { name: 'Copy' }))).toBe(true);
     expect(container.querySelector('.transcript-user-actions, .transcript-user-meta')).toBeNull(); // W2's overlay and its meta line are gone
   });
@@ -210,15 +210,15 @@ describe('user row', () => {
     const { container } = renderRow({ ...userRow('later'), dropped: true }, { actions });
     expect(container.querySelector('.transcript-user-line > .transcript-not-sent')?.textContent).toBe('Not read: the turn was undone');
     cleanup();
-    const steered = renderRow({ ...userRow('look at b too'), steer: true }, { actions });
-    expect(steered.container.textContent).toContain('Sent during this turn');
+    const steered = renderRow({ ...userRow('look at b too'), pending: 'next' as const }, { actions });
+    expect(steered.container.textContent).toContain('Sends at the next step');
     expect(steered.container.textContent).not.toContain('Not read');
     expect(steered.container.querySelector('[data-dropped]')).toBeNull();
   });
 });
 
-// W1 (A2): a message waiting for the engine is a dimmed bubble saying what it waits for; a steer the engine took says
-// it was sent during the turn it sits in.
+// W1 (A2): a message waiting for the engine is a dimmed bubble saying what it waits for; a steer the engine took sits in
+// the turn at full strength, with no caption (the word cut, T42).
 describe('waiting and steered bubbles', () => {
   it('a waiting next steer and a held message are dimmed with their captions, and offer no Edit', () => {
     const next = { ...userRow('look at b too'), pending: 'next' as const };
@@ -232,10 +232,15 @@ describe('waiting and steered bubbles', () => {
     expect(held.container.textContent).toContain('Sends when this turn ends');
   });
 
-  it('a steer the engine took reads Sent during this turn, at full strength', () => {
+  it('a steer the engine took sits at full strength with no caption; a mount’s own mark may stand in its place', () => {
     const { container } = renderRow({ ...userRow('look at b too'), steer: true });
     expect(container.querySelector('[data-pending]')).toBeNull();
     expect(container.querySelector('[data-steer]')).not.toBeNull();
-    expect(container.textContent).toContain('Sent during this turn');
+    expect(container.textContent).not.toContain('Sent during this turn');
+    expect(container.querySelector('.transcript-user-caption')).toBeNull();
+    expect(container.querySelector('section.transcript-user > .transcript-user-line')!.lastElementChild!.classList.contains('transcript-user-line-actions')).toBe(true);
+    cleanup();
+    const marked = renderRow({ ...userRow('look at b too'), steer: true }, { actions: { ...spyActions(), userRowMark: () => 'Sent to Claude' } });
+    expect(marked.container.querySelector('.transcript-user-caption')?.textContent).toBe('Sent to Claude');
   });
 });

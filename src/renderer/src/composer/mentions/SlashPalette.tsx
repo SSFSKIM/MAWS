@@ -5,7 +5,7 @@
 // list. Choosing a row follows the one dispatch rule: a registered widget opens; a headless command is inserted as
 // `/<name> ` for the engine to parse from the prompt; an unavailable row stays put.
 import type { Editor, Range } from '@tiptap/core';
-import { useLayoutEffect, useMemo, useRef } from 'react';
+import { useId, useLayoutEffect, useMemo, useRef } from 'react';
 import { useForkUnavailable } from '../../lane-b/remote-unavailable';
 import { textNode } from '../editor/doc'; // ticket 733a
 import { slashText } from '../editor/mention-text'; // ticket 733a
@@ -56,13 +56,12 @@ const KindIcon = ({ origin, muted }: { origin: SlashOrigin; muted: boolean }) =>
   </svg>
 );
 
-const DETAIL_ID = 'composer-slash-detail';
-const FROM_MAWS = 'MAWS';
 const GAP = 6; // between the list and the popover
 const MARGIN = 8; // between the popover and the window's edges
 
-// Where a row comes from, as its popover says it: MAWS for a panel, the plugin for a plugin's command; null otherwise.
-const fromOf = (item: SlashItem): string | null => (item.origin === 'widget' ? FROM_MAWS : item.origin === 'plugins' ? item.name.slice(0, item.name.indexOf(':')) : null);
+// Where a row comes from, as its popover says it: the plugin for a plugin's command; null otherwise (the word cut, C58:
+// a panel MAWS draws says nothing of where it is from).
+const fromOf = (item: SlashItem): string | null => (item.origin === 'plugins' ? item.name.slice(0, item.name.indexOf(':')) : null);
 const reasonOf = (item: SlashItem): string | null => (item.action.kind === 'unavailable' ? item.action.hint : null);
 const hasDetail = (item: SlashItem): boolean => item.description !== '' || item.argumentHint !== null || fromOf(item) !== null || reasonOf(item) !== null;
 
@@ -87,7 +86,7 @@ export function detailTop(listTop: number, rowTop: number, height: number, viewp
 // own fixed overlay (popup.tsx), positioned absolutely in it, so it takes no place in any layout and moves with the list;
 // it opens on the side of the list that has room (`detailSide`) and stays inside the window. Placed again when the list
 // scrolls and once the overlay itself has been placed.
-function Detail({ item, rowId }: { item: SlashItem; rowId: string }) {
+function Detail({ id, item, rowId }: { id: string; item: SlashItem; rowId: string }) {
   const box = useRef<HTMLDivElement>(null);
   useLayoutEffect(() => {
     const detail = box.current;
@@ -115,8 +114,9 @@ function Detail({ item, rowId }: { item: SlashItem; rowId: string }) {
   return (
     <div
       ref={box}
-      id={DETAIL_ID}
+      id={id}
       role="tooltip"
+      data-slash-detail=""
       onMouseDown={(event) => event.preventDefault()} // as the list: the focus stays in the editor
       className="absolute w-64 rounded-md break-words border border-border-strong bg-bg-overlay p-2 text-ui-sm text-fg"
     >
@@ -136,13 +136,16 @@ export function SlashPalette(props: PopupProps) {
   const all = useMemo(() => slashItems(catalog, widgets, forkRefused === null ? {} : { fork: forkRefused }), [catalog, widgets, forkRefused]);
   const rows = useMemo(() => paletteRows(props.query, all).map((item) => rowOf(item, (name) => openWidget(name, ''))), [all, props.query, openWidget]);
   const { active, setActive, choose } = useListKeys(props, rows);
-  const optionId = (i: number) => `composer-slash-${i}`;
+  // one per open palette, so two message boxes' palettes (split panes) never share an id
+  const paletteId = `composer-slash-${useId()}`;
+  const optionId = (i: number) => `${paletteId}-${i}`;
+  const detailId = `${paletteId}-detail`;
   if (rows.length === 0) return null;
   const highlighted = rows[active].item;
   const detail = hasDetail(highlighted);
   return (
     <>
-      <Listbox label="Commands" activeId={optionId(active)} size="slash" revealKey={rows}>
+      <Listbox label="Commands" activeId={optionId(active)} editor={props.editor} size="slash" revealKey={rows}>
         {rows.map((row, index) => (
           <div
             key={row.key}
@@ -150,7 +153,7 @@ export function SlashPalette(props: PopupProps) {
             role="option"
             aria-selected={index === active}
             aria-disabled={row.disabled || undefined}
-            aria-describedby={index === active && detail ? DETAIL_ID : undefined}
+            aria-describedby={index === active && detail ? detailId : undefined}
             data-origin={row.item.origin}
             onMouseEnter={() => setActive(index)}
             onClick={() => choose(row)}
@@ -161,7 +164,7 @@ export function SlashPalette(props: PopupProps) {
           </div>
         ))}
       </Listbox>
-      {detail && <Detail item={highlighted} rowId={optionId(active)} />}
+      {detail && <Detail id={detailId} item={highlighted} rowId={optionId(active)} />}
     </>
   );
 }

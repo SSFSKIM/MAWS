@@ -141,6 +141,8 @@ describe('pickDirectModel', () => {
     wrap(<GatewayDialogs />);
     const picked = pickDirectModel(ID);
     const dialog = await screen.findByRole('dialog', { name: 'Choose a Claude model' });
+    expect(dialog.textContent).toContain("Direct can't use a gateway model."); // the word cut (C151): why, in one short line
+    expect(dialog.textContent).not.toContain('choose one from the Claude group');
     await waitFor(() => expect(within(dialog).getByRole('radio', { checked: true }).firstChild?.textContent).toBe('Opus 5.5 (1M context)Default')); // `default`, preselected
     fireEvent.click(within(dialog).getByRole('radio', { name: /^Opus 5.5 \(1M context\)$/ }));
     fireEvent.click(within(dialog).getByRole('button', { name: 'Use this model' }));

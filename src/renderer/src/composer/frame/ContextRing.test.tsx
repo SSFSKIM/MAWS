@@ -17,6 +17,7 @@ import { resetShellStores } from '../../test-support/shell-stores';
 import { useReadLoads } from '../../widgets/read';
 import { ContextRing, contextRingOf } from './ContextRing';
 import { REL } from '../../test-support/relative-time';
+import { accessibleText } from '../../test-support/accessible-text';
 
 // P5 O6 M2: the store holds the page's id `A` (an address) and the builders' values lifted; `fake`, installed as
 // `window.maws`, stands for main, asked and answering with the bare `A_ID`.
@@ -82,22 +83,36 @@ describe('the context ring', () => {
     expect(screen.queryByRole('button')).toBeNull();
   });
 
+  // The word cut (C46): the figures are one line; the percentage and what is left until compaction wait on that line,
+  // which takes focus for them, and are its description at all times
   it('opens the context window: get_context_usage read on open, no Compact unless the catalogue lists it headless', async () => {
     mount({ 'session.getContextUsage': CONTEXT, 'session.catalog': catalog(['model', 'cost']) });
     fireEvent.click(ring());
     await settle();
     const popover = screen.getByRole('dialog', { name: 'Context window' });
-    expect(within(popover).getByText('47k of 200k · autocompact at 167k')).toBeTruthy();
-    expect(within(popover).getByText('23.4% used · 120k until compaction')).toBeTruthy();
-    expect(within(popover).queryByRole('button', { name: 'Compact now' })).toBeNull();
+    const figures = within(popover).getByText('47k of 200k · compacts at 167k');
+    expect(accessibleText(popover)).not.toContain('% used');
+    expect(document.getElementById(figures.getAttribute('aria-describedby')!)!.textContent).toBe('23.4% used · 120k until compaction');
+    act(() => figures.focus());
+    expect(document.activeElement).toBe(figures);
+    expect(screen.getByRole('tooltip').textContent).toBe('23.4% used · 120k until compaction');
+    expect(within(popover).queryByRole('button', { name: 'Compact' })).toBeNull();
+    // opened again on the cached reading, the popover takes the focus itself, so the figures' tip waits for the person
+    fireEvent.click(ring());
+    await settle();
+    expect(screen.queryByRole('dialog', { name: 'Context window' })).toBeNull();
+    fireEvent.click(ring());
+    await settle();
+    expect(screen.getByRole('dialog', { name: 'Context window' })).toBe(document.activeElement);
+    expect(screen.queryByRole('tooltip')).toBeNull();
     expect(fake.invoked('session.getContextUsage')).toEqual([{ appSessionId: A_ID, detail: 'full' }]);
   });
 
-  it('Compact now sends /compact when the catalogue lists it and it is not terminal-only', async () => {
+  it('Compact sends /compact when the catalogue lists it and it is not terminal-only (the word cut, C49: "Compact")', async () => {
     mount({ 'session.getContextUsage': CONTEXT, 'session.catalog': catalog(['compact']), 'session.send': { messageUuid: null, disposition: 'queued', queueId: 'q1' } });
     fireEvent.click(ring());
     await settle();
-    fireEvent.click(screen.getByRole('button', { name: 'Compact now' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Compact' }));
     await settle();
     expect(fake.invoked('session.send')).toEqual([{ appSessionId: A_ID, content: '/compact' }]);
     expect(screen.queryByRole('dialog', { name: 'Context window' })).toBeNull(); // closed first
@@ -106,7 +121,7 @@ describe('the context ring', () => {
     mount({ 'session.getContextUsage': CONTEXT, 'session.catalog': catalog(['compact'], ['compact']) });
     fireEvent.click(ring());
     await settle();
-    expect(screen.queryByRole('button', { name: 'Compact now' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Compact' })).toBeNull();
   });
 });
 
@@ -215,10 +230,10 @@ describe('the context ring of a session with no live process', () => {
     fireEvent.click(ring());
     await settle();
     const popover = () => screen.getByRole('dialog', { name: 'Context window' });
-    expect(within(popover()).getByText('47k of 200k · autocompact at 167k')).toBeTruthy();
+    expect(within(popover()).getByText('47k of 200k · compacts at 167k')).toBeTruthy();
     act(() => useSessions.setState({ engine: new Map([[A, pageStatus({ process: 'exited' })]]) }));
     await settle();
-    expect(within(popover()).queryByText('47k of 200k · autocompact at 167k')).toBeNull();
+    expect(within(popover()).queryByText('47k of 200k · compacts at 167k')).toBeNull();
     expect(within(popover()).getByText('31% of 200k used')).toBeTruthy();
     expect(within(popover()).getByText(`Last reading, ${REL.ago(1, 'hour')}`)).toBeTruthy();
     expect(ring().getAttribute('aria-label')).toBe(`Context window 31% full of 200k · Last reading, ${REL.ago(1, 'hour')}`);

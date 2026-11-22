@@ -22,6 +22,7 @@ export const SHEET = {
   rest: 'No open questions',
   restDetail: 'When the agent asks you something, it shows here.',
   noSession: 'Open a session to see its questions',
+  loading: 'Loading the question…', // the hover card's quiet spinner's name while the question loads (the word cut, T299)
   // the switcher between the asks a session holds
   asks: (n: number) => plural(n, 'open ask'),
   untitled: 'Questions',

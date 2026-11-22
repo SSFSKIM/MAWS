@@ -73,8 +73,9 @@ export function useDividerSummary(row: DividerRowData | undefined, open: boolean
   const spinner = useSpinnerText(variant === 'session' ? (storeKey as AppSessionId) : null, row?.state === 'working');
   // UX wave U2 (O-15): the verb and what the turn did, then its lines in the diff colours (the denied counts are links,
   // DividerDetails)
-  const head = row === undefined ? null : spinner === null ? dividerHead({ state: row.state, cause: row.cause, origin: row.origin, opener: row.opener, durationMs, caption: row.caption }) : <span data-plugin-spinner="">{spinner}</span>;
-  const label = row === undefined ? null : row.counts.added > 0 || row.counts.removed > 0 ? <>{head} <LineCounts added={row.counts.added} removed={row.counts.removed} /></> : head;
+  const words = row === undefined || spinner !== null ? null : dividerHead({ state: row.state, cause: row.cause, origin: row.origin, opener: row.opener, durationMs, caption: row.caption });
+  const head = row === undefined ? null : spinner === null ? words : <span data-plugin-spinner="">{spinner}</span>;
+  const label = row === undefined ? null : row.counts.added > 0 || row.counts.removed > 0 ? <>{head} <LineCounts added={row.counts.added} removed={row.counts.removed} apart={words !== null && row.state !== 'working' && (row.fold ?? 0) > 0} /></> : head;
   return { durationMs, controls, label };
 }
 

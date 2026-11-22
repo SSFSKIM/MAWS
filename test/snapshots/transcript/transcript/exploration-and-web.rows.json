@@ -550,11 +550,12 @@
       "removed": 0
     },
     "expanded": true,
+    "fold": 1,
     "icon": "mcp",
     "id": "group:cell:toolu_synth_x_websearch",
     "kind": "group",
     "state": "completed",
-    "summary": "Searched the web, fetched a page, ran /test-driven-development, and 2 more actions",
+    "summary": "Searched the web, fetched a page, ran /test-driven-development, used docs, +1",
     "turnId": "turn:u-exploration-and-web-002"
   },
   {
@@ -572,7 +573,7 @@
   {
     "at": "2026-09-28T10:30:00.045Z",
     "autoDenied": 0,
-    "caption": "Searched code, searched for files, read 6 files, and 5 more actions",
+    "caption": "Searched code, searched for files, ran /test-driven-development, used docs, +9",
     "counts": {
       "added": 0,
       "removed": 0
@@ -582,6 +583,7 @@
     "expanded": true,
     "files": [],
     "firstDeniedCell": null,
+    "fold": 9,
     "id": "divider:turn:u-exploration-and-web-002",
     "kind": "divider",
     "origin": "human",

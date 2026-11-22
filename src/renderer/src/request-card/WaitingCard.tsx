@@ -1,6 +1,7 @@
 // UX wave U1b (docs/doperpowers/plans/2026-11-15-ux-wave-U1b-requests-in-transcript.md, Interfaces §E `WaitingCard`;
 // acceptance 6 and 7): the card column's first card, registered in U8b's slot `sessionCardWaiting`, which the column
-// mounts only while a request of the session waits. "Waiting for you", with the count when more than one waits; one line
+// mounts only while a request of the session waits. "Waiting for you", with the count when more than one waits (the word
+// cut, N111: a bare count, "Waiting for you 2", named by what it counts); one line
 // per request of the session's list, oldest first: its kind's glyph in its tone, its summary, who asked when an agent
 // did, how long it has waited, the summary in full as the line's tooltip. A line goes to its request (`showWaiting`); it
 // answers nothing itself. In the column's own card chrome, with no fold. A settling receipt is no request and no line.
@@ -10,11 +11,12 @@ import { useNow } from '../app/use-now';
 import { itemAge } from '../sidebar/derive';
 import { selectWaitingRequests, useAttention } from '../stores/attention';
 import { useTranscriptStore } from '../transcript';
+import { BareCount } from '../ui/count';
 import { TONE_CLASS } from './controls';
+import { WAITING } from './copy';
 import { requesterName } from './requester';
 import { showWaiting } from './show-waiting';
 
-const TITLE = 'Waiting for you';
 const LINE = 'flex h-7 w-full min-w-0 items-center gap-1.5 px-3 text-left text-ui-sm text-fg outline-accent hover:bg-bg-hover focus-visible:outline-2 focus-visible:-outline-offset-2';
 
 export function WaitingCard({ appSessionId }: { appSessionId: AppSessionId }) {
@@ -23,8 +25,12 @@ export function WaitingCard({ appSessionId }: { appSessionId: AppSessionId }) {
   const now = useNow();
   if (items.length === 0) return null;
   return (
-    <section aria-label={TITLE} className="shrink-0 overflow-hidden rounded-md border border-border bg-bg-raised text-ui text-fg shadow-strip">
-      <h3 className="flex h-10 min-w-0 items-center px-3 font-medium">{items.length > 1 ? `${TITLE} · ${items.length}` : TITLE}</h3>
+    <section aria-label={WAITING.title} className="shrink-0 overflow-hidden rounded-md border border-border bg-bg-raised text-ui text-fg shadow-strip">
+      <h3 className="flex h-10 min-w-0 items-center gap-1.5 px-3 font-medium">
+        {WAITING.title}
+        {items.length > 1 && ' '}
+        {items.length > 1 && <BareCount count={items.length} meaning={WAITING.countName(items.length)} />}
+      </h3>
       <div className="flex min-w-0 flex-col pb-1">
         {items.map((item) => {
           const heading = ATTENTION_HEADINGS[item.kind];

@@ -14,7 +14,8 @@
 // directory as a project (the sheet's repository list) and the sidebar shows the session; no engine runs.
 // The M4b cases: a blocking ask is a question attention item (the Overview card, Needs you) that goes at Submit, and an
 // ask from a session not shown never switches the main view. UX wave U1b (O-17, M6): a waiting ask's form stands in its
-// capsule's row, and the sheet opens only when the person opens it (the capsule's Open beside, Open or View answers).
+// capsule's row, and the sheet opens only when the person opens it (the capsule's Open beside or Open, or its top row
+// once answered, described View answers: the word cut, T98).
 // P2-C3 (the P2 spec's Decision Log 34): a choice's previews beside its options and a note beside an answer, over the
 // same recordings with the ask's arguments rewritten (`askFixture`, which says why the replay still holds).
 // Runs under `pnpm e2e:tools` (a harness build, MAWS_HARNESS=1 for playwright.config.ts's list). MAWS_E1_SHOTS=1 also
@@ -153,7 +154,7 @@ test('a blocking ask: the capsule waits with its form in its row, which holds ev
 
     const capsule = capsuleOf(s);
     await expect(capsule).toHaveAttribute('data-ask-state', 'pending');
-    await expect(capsule).toContainText('Asked 5 questions');
+    await expect(capsule.locator('.transcript-ask-title')).toHaveText('5 questions'); // the word cut (T93, T94): headed by its count
     await expect(capsule.locator('[data-ask-chip]')).toHaveText('Waiting for you');
     const [opened] = ofKind(await s.events(id), 'maws.ask.opened');
     expect(opened).toMatchObject({ blocking: true, questions: [{ id: 'q1' }, { id: 'q2' }, { id: 'q3' }, { id: 'q4' }, { id: 'q5' }] });
@@ -185,7 +186,7 @@ test('a blocking ask: the capsule waits with its form in its row, which holds ev
     const card = overview.getByRole('article').filter({ hasText: 'Questions from the agent' });
     await expect(card).toHaveCount(1);
     await expect(card).toContainText('5 questions');
-    await expect(card.getByRole('button', { name: 'Open the Question sheet' })).toBeVisible();
+    await expect(card.getByRole('button', { name: 'Answer…', exact: true })).toBeVisible(); // the word cut (C108)
     await shoot(s, 'attention');
     await s.page.keyboard.press('Escape');
     await expect(overview).toHaveCount(0);
@@ -228,8 +229,11 @@ test('a blocking ask: the capsule waits with its form in its row, which holds ev
     await idle(s, id);
     await shoot(s, 'capsule-answered');
 
-    // View answers opens the ask read-only from the capsule's own data
-    await capsule.getByRole('button', { name: 'View answers' }).click();
+    // the answered capsule's top row opens the ask read-only from the capsule's own data (the word cut, T98: no View
+    // answers button; the row is the press, described View answers)
+    const answeredTop = capsule.locator('button.transcript-ask-top');
+    await expect(answeredTop).toHaveAccessibleDescription('View answers');
+    await answeredTop.click();
     const sheet = sheetOf(s);
     const readOnly = sheet.locator('[data-ask-readonly]');
     await expect(readOnly).toBeVisible();
@@ -360,7 +364,7 @@ test('a waiting question is answered in its sidebar hover card, never queued as 
 
 // ---- G6: the host holds the ask across a renderer reload ------------------------------------------------------------
 
-test('a reload mid-ask: the row holds the form again and the sheet opened beside lists the ask again from the host, and Submit answers it; after another reload View answers reopens it read-only', async () => {
+test('a reload mid-ask: the row holds the form again and the sheet opened beside lists the ask again from the host, and Submit answers it; after another reload the answered capsule reopens it read-only', async () => {
   await scene({ titles: ['E1 tools: reload'] }, async (s) => {
     const [id] = s.ids;
     await show(s, id);
@@ -402,7 +406,8 @@ test('a reload mid-ask: the row holds the form again and the sheet opened beside
     await s.page.reload();
     const capsule2 = capsuleOf(s);
     await expect(capsule2).toHaveAttribute('data-ask-state', 'answered', { timeout: 20_000 });
-    await capsule2.getByRole('button', { name: 'View answers' }).click();
+    await expect(capsule2.locator('button.transcript-ask-top')).toHaveAccessibleDescription('View answers'); // the word cut (T98)
+    await capsule2.locator('button.transcript-ask-top').click();
     const readOnly = sheetOf(s).locator('[data-ask-readonly]');
     await expect(readOnly).toBeVisible();
     await expect(sectionOf(readOnly, 'q3')).toContainText('Release notes');
@@ -426,7 +431,9 @@ test('a stop with a blocking ask pending: the capsule reads cancelled and its fo
     await expect(formOf(s)).toBeVisible();
     value(await invoke(s.page, 'session.stop', { appSessionId: id as never, reason: 'stop' }));
     await expect(capsule).toHaveAttribute('data-ask-state', 'cancelled');
-    await expect(capsule.locator('[data-ask-chip]')).toHaveText('Cancelled, the session ended');
+    // the word cut (T97): the chip reads Cancelled; why is its tooltip and its description
+    await expect(capsule.locator('[data-ask-chip]')).toHaveText('Cancelled');
+    await expect(capsule.locator('[data-ask-chip]')).toHaveAccessibleDescription('The session ended');
     await expect(formOf(s), 'the form leaves the row with its request').toHaveCount(0);
     await expect(sheetOf(s), 'nothing opened by itself').toHaveCount(0);
     await capsule.getByRole('button', { name: 'Open', exact: true }).click();
@@ -816,8 +823,9 @@ test('notes: an async ask answered with a note beside one answer and a skip with
     await expect(capsule).toHaveAttribute('data-ask-state', 'answered');
     await idle(s, id);
 
-    // the answers reopened read-only show each note under its answer
-    await capsule.getByRole('button', { name: 'View answers' }).click();
+    // the answers reopened read-only show each note under its answer (the capsule's top row, described View answers)
+    await expect(capsule.locator('button.transcript-ask-top')).toHaveAccessibleDescription('View answers');
+    await capsule.locator('button.transcript-ask-top').click();
     const readOnly = sheet.locator('[data-ask-readonly]');
     await expect(sectionOf(readOnly, 'q1').locator('[data-ask-note]')).toContainText('Only after the tests pass');
     await expect(sectionOf(readOnly, 'q2').locator('[data-ask-note]')).toContainText('Pick one when you open the PR');
@@ -853,7 +861,7 @@ test('show_pane: the Terminal opens in the panel, the retired artifact pane and 
     ]);
 
     // the cells: what opened, and why nothing did twice. Read on the cells' own labels: the turn's line says what the
-    // turn did in its rows' words (UX wave U2, O-15: `Worked for … · Loaded 1 tool, opened Terminal, could not open …`)
+    // turn did in its rows' words (UX wave U2, O-15, and the word cut's T1: `<duration> · Loaded 1 tool, opened Terminal, …`)
     await unfoldWork(s.pane);
     const cell = (text: RegExp) => s.pane.locator('.transcript-cell-label').filter({ hasText: text });
     await expect(cell(/^Opened Terminal$/)).toBeVisible();

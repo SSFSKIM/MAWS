@@ -5,24 +5,22 @@
 // one of an earlier launch's, from its transcript on that machine's disk. Where it gives nothing, the pane says so in
 // words: while the first snapshot is on its way, while the machine isn't giving it (a watch main refused, or one it
 // paused: the link down, or a subscription the machine ended, which main asks again), and when what it gave holds no
-// rows: then, where the session's own transcript is held here and live, also that its tree here doesn't name the agent
-// (sminos serves an agent it doesn't know as an empty stream). That says what is loaded and no more: the tree is stale
-// while its transcript reconnects, and a later `subagents` message can still add the agent. Nothing here asks the
+// rows. The word cut (C133): three states in a person's words, "Reading from <machine>…" (a pause main asks again
+// after reads as the read it is), "<machine> isn't reachable" and "Nothing from this agent yet"; an agent the session's
+// tree here doesn't name (sminos serves one it doesn't know as an empty stream) reads the last. Nothing here asks the
 // agent's subscription a read: every read is the session's, which sminos refuses on an agent's (`unsupported`).
 // `tools/agents/subagents/DrillIn.tsx` loads this module only for such a session, so the plane transcript stays out of
 // the chunk every local drill-in loads.
 import { useCallback, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useStore } from 'zustand';
-import { createStore } from 'zustand/vanilla';
-import type { AgentId, AppSessionId, TaskId } from '@shared/graph/ids';
+import type { AgentId, AppSessionId } from '@shared/graph/ids';
 import { LANE_A_WORDS } from '../../session/controls/lane-a';
+import { QuietSpinner } from '../../ui/spinner';
 import { useTranscriptStore } from '../../stores/transcript';
 import type { Row } from '../../transcript/model/rows';
 import type { TranscriptActions } from '../../transcript/view/context';
 import { Transcript, type TranscriptListHandle, type TranscriptProps } from '../../transcript/view/Transcript';
-import { emptyGraph } from '../../tools/agents/model/task-graph';
-import type { PlaneTranscriptState } from '../plane-transcript';
-import { heldRemoteTranscript, useRemoteAgentTranscript, type Unserved } from '../remote-source';
+import { useRemoteAgentTranscript, type Unserved } from '../remote-source';
 import { remoteMachineName } from '../remote-session';
 import type { StreamBlock } from '../stream/layer';
 import { drawnRows } from './drawn-rows';
@@ -31,8 +29,6 @@ import { useOlderPages } from './older-pages';
 import { streamingRows } from './streaming-rows';
 
 const NO_ROWS: readonly Row[] = [];
-// The session's transcript as this pane reads its tree while none is held here: no snapshot, so nothing is known.
-const NO_TREE = createStore<Pick<PlaneTranscriptState, 'phase' | 'tasks'>>(() => ({ phase: 'loading', tasks: emptyGraph() }));
 
 interface Props {
   appSessionId: AppSessionId;
@@ -42,10 +38,13 @@ interface Props {
   className?: string;
 }
 
-/** Why the machine gives nothing of the agent's transcript now, in words. */
-function unservedWords(why: Unserved, machine: string): string {
-  if (why.kind === 'refused') return why.reason;
-  return why.reason === 'offline' ? LANE_A_WORDS.agentOffline(machine) : LANE_A_WORDS.agentUnserved(machine);
+// What the pane says where nothing of the agent's is held, and whether a read is under way: the first, or main asking
+// again after a pause other than the link going down (the word cut, C133), which has the quiet spinner (Acceptance 5).
+function emptyWords(why: Unserved | null, live: boolean, machine: string): { words: string; reading: boolean } {
+  const reading = { words: LANE_A_WORDS.agentReading(machine), reading: true };
+  if (why === null) return live ? { words: LANE_A_WORDS.agentNoRows, reading: false } : reading;
+  if (why.kind === 'refused') return { words: why.reason, reading: false };
+  return why.reason === 'offline' ? { words: LANE_A_WORDS.agentOffline(machine), reading: false } : reading;
 }
 
 /** When this pane first drew each streaming block, on its clock: a live thinking label ticks from it. */
@@ -65,9 +64,6 @@ export function RemoteAgentTranscript({ appSessionId, agentId, actions, renderRe
   const { transcript, unserved } = useRemoteAgentTranscript(appSessionId, agentId);
   const state = useStore(transcript.state);
   const why = useStore(unserved, (s) => s.why);
-  // whether the session's tree here names the agent (a subagent's task is its agent id, as the drill-in's `taskOf`),
-  // while its own transcript is live here (null otherwise: loading, reconnecting on a stale tree, or ended)
-  const inTree = useStore(heldRemoteTranscript(appSessionId)?.state ?? NO_TREE, (s) => (s.phase === 'live' ? s.tasks.tasks.has(agentId as unknown as TaskId) : null));
   const machine = remoteMachineName(appSessionId);
   const since = useSince();
   const tail = useMemo(() => streamingRows(state.streaming, since), [state.streaming, since]);
@@ -82,15 +78,7 @@ export function RemoteAgentTranscript({ appSessionId, agentId, actions, renderRe
   useOlderPages(transcript, list, state);
   // Words only where nothing of the agent's transcript is held: what was drawn stays drawn through a pause or a reset.
   const empty = state.held.length === 0 && state.streaming.length === 0;
-  const words = !empty
-    ? null
-    : why !== null
-      ? unservedWords(why, machine)
-      : state.phase !== 'live'
-        ? LANE_A_WORDS.agentReading(machine)
-        : inTree === false
-          ? LANE_A_WORDS.agentUnnamedHere(machine)
-          : LANE_A_WORDS.agentNoRows(machine);
+  const shown = empty ? emptyWords(why, state.phase === 'live', machine) : null;
   return (
     <>
       {state.olderFailed !== null && (
@@ -101,9 +89,15 @@ export function RemoteAgentTranscript({ appSessionId, agentId, actions, renderRe
           </button>
         </div>
       )}
-      {words !== null && (
-        <p role="status" data-testid="subagent-rows-status" className="m-0 shrink-0 px-4 py-3 text-ui-sm text-fg-muted">
-          {words}
+      {shown !== null && (
+        <p role="status" data-testid="subagent-rows-status" className="m-0 flex shrink-0 items-center gap-2 px-4 py-3 text-ui-sm text-fg-muted">
+          {/* the word cut (Acceptance 5): a read under way has the app's quiet spinner beside its words, in a place kept for it */}
+          {shown.reading && (
+            <span className="inline-flex size-3 shrink-0">
+              <QuietSpinner label={shown.words} />
+            </span>
+          )}
+          {shown.words}
         </p>
       )}
       <Transcript source={state.source} variant="child" actions={actions} renderRequest={renderRequest} className={className} handle={list} tail={tail} />

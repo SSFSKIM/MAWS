@@ -57,7 +57,7 @@ const modelWords = (name: ModelName | null): Pick<ModelBinding, 'label' | 'name'
 export interface LocationView {
   path: string;
   branch: string | null;
-  note: string;
+  note: string | null; // a gate's reason, or what an unstarted chip stands for; none once started (the word cut, C22)
 }
 
 // New chat: the unstarted tab's project row, the hook's project facts with their writes gated as every chip's are.
@@ -70,8 +70,6 @@ export interface FrameBindings {
   mode: ModeBinding; // the toolbar's ModeChip, on the shared mode menu (M5)
   directories: ChipBinding<string[]>; // the "+" menu's Add directory… (W10)
 }
-
-export const LOCATION_FIXED = 'The location is fixed once the session starts';
 
 const refused = (error: string) => async (): Promise<HookResult> => ({ ok: false, error });
 
@@ -194,7 +192,7 @@ export function liveBindings(status: EngineSessionStatus | null, record: Session
     // W9 (H2): the recorded branch only until git has answered; then git's, "detached", or none for a non-repository.
     // UX wave U8c-2 (M4 decisions 1, 3 and 10): the checkout the agent works in and the branch recorded for it, from the
     // record; the engine's status folder only while the window holds no record
-    location: { path: record ? workingFolder(record).path : (status?.cwd ?? ''), branch: branchLabel(record ? workingBranch(record) : null, reads.git ?? null), note: LOCATION_FIXED },
+    location: { path: record ? workingFolder(record).path : (status?.cwd ?? ''), branch: branchLabel(record ? workingBranch(record) : null, reads.git ?? null), note: null },
     project: null,
     model: {
       value: current,

@@ -126,7 +126,7 @@ describe('the highlighted row’s popover', () => {
     const { key, popover, options, active } = open('st');
     expect(screen.getByRole('listbox').contains(popover())).toBe(false); // beside the list, never inside it
     expect(active().textContent).toBe('/status');
-    expect(popover()!.textContent).toBe(`${declared('status')}MAWS`); // a panel MAWS draws
+    expect(popover()!.textContent).toBe(declared('status')); // a panel MAWS draws: no where-from word (the word cut, C58)
     key('ArrowDown');
     expect(popover()!.textContent).toBe('Set up the status line[shape]');
     expect(active().getAttribute('aria-describedby')).toBe(popover()!.id);
@@ -169,11 +169,11 @@ describe('the highlighted row’s popover', () => {
       machineLists([SESSION_ACTS_CAPABILITY]); // one that forks there
       const there = open('fork', { appSessionId: REMOTE, widgets: PANELS });
       expect(there.options()[0].getAttribute('aria-disabled')).toBeNull();
-      expect(there.popover()!.textContent).toBe(`${declared('fork')}[prompt]MAWS`);
+      expect(there.popover()!.textContent).toBe(`${declared('fork')}[prompt]`);
       cleanup();
       const here = open('fork', { widgets: PANELS });
       expect(here.options()[0].getAttribute('aria-disabled')).toBeNull();
-      expect(here.popover()!.textContent).toBe(`${declared('fork')}[prompt]MAWS`);
+      expect(here.popover()!.textContent).toBe(`${declared('fork')}[prompt]`);
     } finally {
       useSessions.setState({ listed: new Map(), listedMachines: new Set() });
     }
@@ -291,5 +291,25 @@ describe('what the slash palette puts in the draft', () => {
     command.mock.calls[0]![0].apply(editor, { from: 1, to: 3 });
     expect((editor.getJSON().content ?? []).map((p: JSONContent) => (p.content ?? []).map((n: JSONContent) => (n.type === 'text' ? n.text : `[${n.type}]`)).join(''))).toEqual(['/x<br>y<p>z</p>\ufffdw ']);
     editor.destroy();
+  });
+});
+
+// Fix wave (sweep#1): two message boxes (split panes) can each hold an open palette; every id is the palette's own, so a
+// box's active option and its popover never name the other pane's.
+describe('two slash palettes at once', () => {
+  it('give every option and popover an id of their own, each row described by its own palette’s popover', () => {
+    open('');
+    open('');
+    const ids = [...document.querySelectorAll('[id]')].map((element) => element.id);
+    expect(ids.length).toBeGreaterThan(4);
+    expect(new Set(ids).size).toBe(ids.length);
+    const lists = screen.getAllByRole('listbox');
+    expect(lists).toHaveLength(2);
+    for (const list of lists) {
+      const active = list.querySelector<HTMLElement>(`#${CSS.escape(list.getAttribute('aria-activedescendant')!)}`)!;
+      expect(active).not.toBeNull();
+      const described = active.getAttribute('aria-describedby');
+      if (described !== null) expect(list.parentElement!.querySelector(`#${CSS.escape(described)}`)).not.toBeNull();
+    }
   });
 });

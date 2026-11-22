@@ -1,8 +1,8 @@
 // The plan body (C7 execution document, Request card): the plan through C6's `Markdown` (static), bounded with Show
-// more; Implement (Enter), Keep planning (Esc: opens and focuses the feedback box, whose Enter or ⌘Enter sends), and
-// Clear context and implement behind one confirmation, since it resets the conversation. P5 O9 M6: each outcome the
-// session's port can't carry (a terminal session's "clear and implement": /clear runs in the terminal) is drawn disabled
-// in place with its reason, and no key answers it.
+// all (the word cut, C99: the card's one wording for a long preview); Implement (Enter), Keep planning (Esc: opens and
+// focuses the feedback box, whose Enter or ⌘Enter sends), and Clear context and implement behind one confirmation,
+// since it resets the conversation. P5 O9 M6: each outcome the session's port can't carry (a terminal session's "clear
+// and implement": /clear runs in the terminal) is drawn disabled in place with its reason, and no key answers it.
 // UX wave U1a §F (A12; l4-approvals-11): Implement names the mode the session will be in afterwards, the one it had
 // before Plan, which a plain allow restores; and where a mode can be chosen (a session MAWS runs on this Mac whose engine
 // host has this build's wire, and whose port carries a named mode) a menu on it lists the other modes an approval may
@@ -25,6 +25,7 @@ import { useHosts } from '../../stores/hosts';
 import { useSessions } from '../../stores/sessions';
 import { toAnswer } from '../answers';
 import { CardButton, CardTextarea, Controls, Muted } from '../controls';
+import { SHOW } from '../copy';
 import { carried, gated, type VariantProps } from './types';
 
 const MENU = 'z-50 rounded-md border border-border-strong bg-bg-overlay p-1 text-ui text-fg';
@@ -91,7 +92,7 @@ export function PlanBody({ item, request, busy, submit, bindKeys, capability = c
         </TranscriptActionsProvider>
       </div>
       <button type="button" onClick={() => setExpanded((e) => !e)} className="self-start text-ui-sm text-fg-muted underline outline-accent focus-visible:outline-2">
-        {expanded ? 'Show less' : 'Show more'}
+        {expanded ? SHOW.less : SHOW.all}
       </button>
       {feedback !== null && (
         <div ref={box} className="flex flex-col gap-1.5">

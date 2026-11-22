@@ -1,5 +1,6 @@
-// An MCP call's detail: the server and tool, the result blocks (text through the shared markdown pipeline, inline data
-// images, anything else as JSON), and a Raw toggle showing the input, result and structured content as JSON.
+// An MCP call's detail: the result blocks (text through the shared markdown pipeline, inline data images, anything else
+// as JSON), and a Raw toggle showing the input, result and structured content as JSON. The word cut (T31): the line
+// above names the server and the tool, so the heading holds only Raw.
 import type { ContentBlock } from '@shared/graph/events';
 import { partsTruncationOf } from '../../model/cells';
 import { DETAIL } from '../../model/copy';
@@ -54,9 +55,6 @@ export function McpDetail({ cell, detail }: { cell: Cell; detail: Mcp }) {
   return (
     <div className="transcript-mcp">
       <div className="transcript-detail-heading">
-        <span>
-          {detail.server} · {detail.tool}
-        </span>
         <button type="button" aria-pressed={raw} onClick={toggleRaw}>
           {DETAIL.raw}
         </button>

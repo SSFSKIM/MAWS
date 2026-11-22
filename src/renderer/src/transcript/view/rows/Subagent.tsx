@@ -1,11 +1,15 @@
-// A subagent row (residue *Subagent rows*): up to four glyphs, then `+N`, and the lifecycle sentence; while agents
-// work, one detail line each (`{name} · {lastTool} · {t}`) updated from the child's own events, which are never
-// rendered in the parent. With C8's `openSubagent` supplied, a one-agent row is a button and each glyph of a grouped
-// row opens its agent (past four, through `+N`). Each child's status is its own: a failed child drops its detail line
-// while the others keep ticking.
+// A subagent row (residue *Subagent rows*): up to four glyphs, then `+N`, and the agents' descriptions. With C8's
+// `openSubagent` supplied, a one-agent row is a button and each glyph of a grouped row opens its agent (past four,
+// through `+N`). Each child's status is its own. The word cut (T86, T87; the owner's ruling): a spinner before the glyphs
+// while any agent works, then the descriptions the parent gave at spawn and nothing else at rest; what each working
+// agent is doing and for how long (`{name} · {lastTool} · {t}`, updated from the child's own events, which are never
+// rendered in the parent; a workflow's phase in its tool's place) is the tooltip and the description of what stands for
+// it: its glyph in a grouped row, the line of a one-agent row, and the line's words where nothing opens an agent. A
+// failed child's goes while the others keep ticking.
 import { ticks, useTranscriptStore, workingDurationMs } from '../../../stores/transcript';
+import { Tip } from '../../../ui/tip';
 import { subagentActivity } from '../../model/activity';
-import { subagentDetail } from '../../model/copy';
+import { SUBAGENT_WORKING, subagentDetail } from '../../model/copy';
 import { SUBAGENT_GLYPHS } from '../../model/glyphs';
 import type { Row, SubagentRef } from '../../model/rows';
 import { NO_ACTIONS, useDisclosure, useTranscriptContext } from '../context';
@@ -21,24 +25,30 @@ export function SubagentGlyph({ agent, className }: { agent: SubagentRef; classN
 const SHOWN = 4;
 const DONE = new Set<SubagentRowData['status']>(['finished', 'finished_with_errors', 'stopped']);
 
-function Glyph({ agent, open }: { agent: SubagentRef; open: ((ref: SubagentRef) => void) | null }) {
+// What each working agent is doing, by task id; an agent that has ended has none.
+type Details = ReadonlyMap<string, string>;
+
+// A glyph that opens its agent: what the agent is doing its tooltip while it works, else its name.
+function Glyph({ agent, detail, open }: { agent: SubagentRef; detail: string | undefined; open: ((ref: SubagentRef) => void) | null }) {
   const mark = SUBAGENT_GLYPHS[agent.glyph % SUBAGENT_GLYPHS.length];
   if (!open) return <SubagentGlyph agent={agent} />;
   return (
-    <button type="button" className="transcript-glyph" aria-label={`Open ${agent.name}`} title={agent.name} onClick={() => open(agent)}>
-      {mark}
-    </button>
+    <Tip content={detail ?? agent.name} description={detail}>
+      <button type="button" className="transcript-glyph" aria-label={`Open ${agent.name}`} onClick={() => open(agent)}>
+        {mark}
+      </button>
+    </Tip>
   );
 }
 
 // The first four glyphs, then `+N`: with `open`, every glyph opens its agent and `+N` reveals the rest as glyphs too,
 // so each child of a large group has a route to the Subagents tool.
-function Glyphs({ rowId, agents, overflow, open }: { rowId: string; agents: SubagentRef[]; overflow: number; open: ((ref: SubagentRef) => void) | null }) {
+function Glyphs({ rowId, agents, overflow, details, open }: { rowId: string; agents: SubagentRef[]; overflow: number; details: Details; open: ((ref: SubagentRef) => void) | null }) {
   const [more, toggleMore] = useDisclosure(`agents:${rowId}`);
   return (
     <span className="transcript-glyphs" data-glyphs="" aria-hidden={open ? undefined : true}>
       {agents.slice(0, SHOWN).map((ref) => (
-        <Glyph key={ref.taskId} agent={ref} open={open} />
+        <Glyph key={ref.taskId} agent={ref} detail={details.get(ref.taskId)} open={open} />
       ))}
       {overflow > 0 &&
         (open ? (
@@ -48,7 +58,7 @@ function Glyphs({ rowId, agents, overflow, open }: { rowId: string; agents: Suba
         ) : (
           <span className="transcript-glyph-overflow">+{overflow}</span>
         ))}
-      {open && more && agents.slice(SHOWN).map((ref) => <Glyph key={ref.taskId} agent={ref} open={open} />)}
+      {open && more && agents.slice(SHOWN).map((ref) => <Glyph key={ref.taskId} agent={ref} detail={details.get(ref.taskId)} open={open} />)}
     </span>
   );
 }
@@ -60,35 +70,44 @@ export function SubagentRow({ row }: { row: SubagentRowData }) {
   const live = useTranscriptStore((state) => ticks(state, storeKey));
   const now = useTicker(working && live);
   const open = actions.openSubagent === NO_ACTIONS.openSubagent ? null : actions.openSubagent;
-  const details =
-    working && turn
-      ? row.agents.flatMap((ref) => {
-          const activity = subagentActivity(turn, ref);
-          if (activity.finished) return [];
-          return [{ ref, text: subagentDetail(ref.name, activity.lastTool, workingDurationMs(useTranscriptStore.getState().entries[storeKey], row.at, now, live)) }];
-        })
-      : [];
+  const details = new Map<string, string>();
+  if (working && turn) {
+    const elapsed = workingDurationMs(useTranscriptStore.getState().entries[storeKey], row.at, now, live);
+    for (const ref of row.agents) {
+      const activity = subagentActivity(turn, ref);
+      if (!activity.finished) details.set(ref.taskId, subagentDetail(ref.name, row.phases?.[ref.taskId] ?? activity.lastTool, elapsed));
+    }
+  }
   const single = open && row.agents.length === 1 ? row.agents[0] : null;
+  const all = details.size === 0 ? null : [...details.values()].join('\n');
   const line = (
     <>
-      <Glyphs rowId={row.id} agents={row.agents} overflow={row.overflow} open={open && !single ? open : null} />
-      <span className="transcript-subagent-sentence">{row.sentence}</span>
+      {working && <span role="img" aria-label={SUBAGENT_WORKING} className="transcript-subagent-ring" />}
+      <Glyphs rowId={row.id} agents={row.agents} overflow={row.overflow} details={details} open={open && !single ? open : null} />
+      {open === null && all !== null ? (
+        // nothing here opens an agent: the words take the keyboard for what waits on them
+        <Tip content={<span className="whitespace-pre-line">{all}</span>} description={all}>
+          <span className="transcript-subagent-sentence" tabIndex={0}>
+            {row.sentence}
+          </span>
+        </Tip>
+      ) : (
+        <span className="transcript-subagent-sentence">{row.sentence}</span>
+      )}
     </>
   );
+  const detail = single ? details.get(single.taskId) : undefined;
   return (
     <div className="transcript-subagent" data-status={row.status}>
       {single ? (
-        <button type="button" className="transcript-subagent-line" onClick={() => open!(single)}>
-          {line}
-        </button>
+        <Tip content={detail} description={detail}>
+          <button type="button" className="transcript-subagent-line" onClick={() => open!(single)}>
+            {line}
+          </button>
+        </Tip>
       ) : (
         <div className="transcript-subagent-line">{line}</div>
       )}
-      {details.map(({ ref, text }) => (
-        <div key={ref.taskId} className="transcript-subagent-detail" data-agent-detail="">
-          {text}
-        </div>
-      ))}
     </div>
   );
 }

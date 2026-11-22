@@ -56,7 +56,7 @@
     "id": "subagent:ad1synthagent0001",
     "kind": "subagent",
     "overflow": 0,
-    "sentence": "Survey src for TODOs and List the tests finished",
+    "sentence": "Survey src for TODOs and List the tests",
     "status": "finished",
     "turnId": "turn:u-agents-and-messages-002"
   },
@@ -64,10 +64,11 @@
     "at": "2026-09-28T10:20:01.250Z",
     "body": "Skip node_modules entirely.",
     "direction": "to_child",
+    "flow": "out",
     "from": null,
     "id": "agentmsg:replay:journal:57:1",
     "kind": "agent_message",
-    "text": "Sent to Survey src for TODOs: Skip node_modules entirely.",
+    "text": "Survey src for TODOs: Skip node_modules entirely.",
     "to": {
       "agentId": "ad1synthagent0001",
       "glyph": 0,

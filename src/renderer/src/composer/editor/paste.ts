@@ -5,6 +5,7 @@
 // included: never bytes), and a file with no path (dragged from a browser) is read as text or refused. Pure.
 import { quotesGrant } from '@shared/engine/grant';
 import { MENTION_BREAKS } from './mention-text';
+import { PATH_REFUSAL } from '../copy'; // the word cut (N127)
 
 // The one number C1 (a 20,000-character paste on the owner's machines) may lower, if typing in the box does not stay
 // responsive with that much text in it; nothing else changes with it.
@@ -26,9 +27,11 @@ export type FileAction = { kind: 'image' } | { kind: 'pdf' } | { kind: 'mention'
 // one; a model with a shell can create one, and its lines would stand in the person's message (mention-text.ts). The
 // words for a file dropped or picked by such a path, or null when its path can be mentioned. Ticket 733a (its document,
 // Design 3, §E): a path that quotes the grant's opening is refused the same way, at a drop, a pick and the `@` menu.
+// The word cut (N127): the reason in plain words, a line break by its name and any other control character as hidden.
+const LINE_BREAK = /[\n\r\v\f\u0085\u2028\u2029]/u;
 export function pathRefusal(name: string, path: string): string | null {
-  if (MENTION_BREAKS.test(path)) return `${name} can't be attached; its path holds a line break or another control character`;
-  return quotesGrant(path) ? `${name} can't be attached; its path reads like MAWS's approval of an agent's request. Rename the file, or the folder it is in, to attach it` : null; // ticket 733a, §E as revised
+  if (MENTION_BREAKS.test(path)) return LINE_BREAK.test(path) ? PATH_REFUSAL.lineBreak(name) : PATH_REFUSAL.hidden(name);
+  return quotesGrant(path) ? PATH_REFUSAL.quotesGrant(name) : null; // ticket 733a, §E as revised
 }
 
 export function classifyFile(file: { name: string; type: string; size: number }, path: string): FileAction {

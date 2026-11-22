@@ -835,8 +835,10 @@ describe("composer DOM under C5's dispatcher", () => {
     await waitFor(() => expect(invoked('session.listModels')).toHaveLength(1)); // the mode menu reads the models as it opens
   });
 
-  // P2-A M3 review (acceptance 5): on a session with no ready process the chosen directory starts it first, said beside the "+"
-  it('Add directory… on an exited session says Starting… after the choice while the session starts, then adds it', async () => {
+  // P2-A M3 review (acceptance 5): on a session with no ready process the chosen directory starts it first, shown beside
+  // the "+". The word cut (C20): a spinner named by the wait's words, which the "+" carries as its description (its tooltip
+  // on pointing or focus); the menu item says no wait, only a real refusal.
+  it('Add directory… on an exited session shows a spinner named Starting… after the choice while the session starts, then adds it', async () => {
     live(A, { status: { process: 'exited' } });
     mount([{ index: 0, id: A }]);
     const user = userEvent.setup();
@@ -846,7 +848,10 @@ describe("composer DOM under C5's dispatcher", () => {
     await waitFor(() => expect(invoked('session.acquire')).toEqual([{ appSessionId: A_ID, reason: 'chip' }])); // after the picker answered
     expect(invoked('layout.pickFiles')).toHaveLength(1);
     const phase = composerOf(0).querySelector('[data-add-directory-phase]');
-    expect(phase?.textContent).toBe('Starting…');
+    expect(phase?.textContent).toBe(''); // no words beside the "+"
+    expect(await within(composerOf(0)).findByRole('progressbar', { name: 'Starting…' })).toBeTruthy();
+    expect(within(composerOf(0)).getByRole('button', { name: 'Add files, photos or commands', description: 'Starting…' })).toBe(plusOf());
+    expect(await addDirectoryState(user)).toBe(''); // greyed while it starts, with no words of its own
     expect(invoked('session.applyFlagSettings')).toEqual([]);
     await act(() => fake.reply('session.acquire', { status: 'ready', appSessionId: A_ID, launched: true, joined: false }));
     await waitFor(() => expect(invoked('session.applyFlagSettings')).toEqual([{ appSessionId: A_ID, settings: { permissions: { additionalDirectories: ['/work/app-a/extra', '/work/picked'] } } }]));

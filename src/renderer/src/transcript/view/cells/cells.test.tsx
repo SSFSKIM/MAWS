@@ -1,7 +1,8 @@
 // Cells and cell detail (C6 M4): the collapsed line, the disclosure through the store, each detail variant with the
 // mockup's actions, and the safeguard verdict, which appears in detail only (§19), never on the line.
-import { cleanup, fireEvent, screen, within } from '@testing-library/react';
-import { afterEach, describe, expect, it } from 'vitest';
+import { act, cleanup, fireEvent, screen, within } from '@testing-library/react';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { accessibleText } from '../../../test-support/accessible-text';
 import { loadJournal, loadUxwaveJournal } from '../../../../../../test/support/fixtures';
 import { webFetchCases } from '../../../../../../test/support/web-fetch-recorded';
 import { reviewsOf } from '../../../tools/session-info/lane';
@@ -185,7 +186,9 @@ describe('a failed call’s reason', () => {
 });
 
 describe('shell detail', () => {
-  it('shows the command, cwd, output and exit footer, with the three copy actions', async () => {
+  // The word cut (T18, T22): the copy controls are glyphs named by their words, the command's and the output's beside
+  // what they copy, Copy all in the footer; a successful command's footer is its time alone
+  it('shows the command, cwd, output and the footer’s time, with the three copy glyphs', async () => {
     const { cell } = await expandedCell((b) => {
       b.toolUse('t1', 'Bash', { command: 'bun test src/sidebar', cwd: '/w/sidebar-drag' });
       b.tick(3200);
@@ -195,20 +198,55 @@ describe('shell detail', () => {
     expect(detail.getByText('$ bun test src/sidebar')).toBeDefined();
     expect(cell.textContent).toContain('/w/sidebar-drag');
     expect(cell.querySelector('pre')?.textContent).toContain('18 pass');
-    expect(cell.textContent).toContain('✓ Exit code 0 · 3s');
-    for (const name of ['Copy command', 'Copy output', 'Copy all']) expect(detail.getByRole('button', { name })).toBeDefined();
+    expect(cell.querySelector('.transcript-shell-footer')?.textContent).toBe('3s');
+    expect(cell.textContent).not.toContain('Exit code');
+    for (const name of ['Copy command', 'Copy output', 'Copy all']) expect(detail.getByRole('button', { name }).textContent).toBe('');
+    expect(accessibleText(cell)).not.toMatch(/Copy (command|output|all)/);
+    expect(cell.querySelector('.transcript-shell-heading')!.contains(detail.getByRole('button', { name: 'Copy command' }))).toBe(true);
+    expect(cell.querySelector('.transcript-shell-output')!.contains(detail.getByRole('button', { name: 'Copy output' }))).toBe(true);
+    expect(cell.querySelector('.transcript-shell-footer')!.contains(detail.getByRole('button', { name: 'Copy all' }))).toBe(true);
     expect(detail.queryByRole('button', { name: 'Open full log' })).toBeNull(); // nothing was cut
   });
 
-  // The engine's Bash input names no cwd (a census of the probe journals): the session's directory stands in, labelled
-  // as such; a call whose input names one keeps it; with neither, no line.
-  it('without a cwd in its input, shows the session’s directory, labelled as the session directory', async () => {
+  it('each copy glyph shows its word on keyboard focus and copies its part', async () => {
+    const writeText = vi.fn(() => Promise.resolve());
+    Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true });
+    const { cell } = await expandedCell((b) => {
+      b.toolUse('t1', 'Bash', { command: 'ls', cwd: '/w/elsewhere' });
+      b.tick(1000);
+      b.result('t1', 'a.ts', { structured: BASH_RESULT('a.ts') });
+    }, 'cell:t1');
+    for (const [name, copied] of [['Copy command', 'ls'], ['Copy output', 'a.ts'], ['Copy all', '$ ls\ncwd /w/elsewhere\na.ts\n1s']] as const) {
+      const glyph = within(cell).getByRole('button', { name });
+      act(() => glyph.focus());
+      expect(screen.getByRole('tooltip').textContent).toBe(name);
+      fireEvent.click(glyph);
+      expect(writeText).toHaveBeenLastCalledWith(copied);
+    }
+  });
+
+  // The word cut (T19): the long command's toggle in short
+  it('a command longer than eight lines folds under Show more and opens to Show less', async () => {
+    const { cell } = await expandedCell((b) => {
+      b.toolUse('t1', 'Bash', { command: Array.from({ length: 9 }, (_, i) => `echo ${i}`).join('\n') });
+      b.result('t1', 'ok', { structured: BASH_RESULT('ok') });
+    }, 'cell:t1');
+    const more = within(cell).getByRole('button', { name: 'Show more' });
+    expect(more.getAttribute('aria-expanded')).toBe('false');
+    fireEvent.click(more);
+    expect(within(cell).getByRole('button', { name: 'Show less' }).getAttribute('aria-expanded')).toBe('true');
+  });
+
+  // The engine's Bash input names no cwd (a census of the probe journals). The word cut (T20): the session's own folder
+  // is the normal place a command runs, so it is not named; a call whose input names one keeps it; with neither, no line.
+  it('without a cwd in its input, names no folder: the session’s own is not named', async () => {
     const run = (b: Builder) => {
       b.toolUse('t1', 'Bash', { command: 'ls' });
       b.result('t1', 'a', { structured: BASH_RESULT('a') });
     };
     const { cell } = await expandedCell(run, 'cell:t1', { sessionDirectory: '/w/project' });
-    expect(cell.querySelector('.transcript-shell-meta')?.textContent).toBe('Session directory /w/project');
+    expect(cell.querySelector('.transcript-shell-meta')).toBeNull();
+    expect(cell.textContent).not.toContain('/w/project');
     cleanup();
     const own = await expandedCell((b) => {
       b.toolUse('t1', 'Bash', { command: 'ls', cwd: '/w/elsewhere' });
@@ -220,10 +258,10 @@ describe('shell detail', () => {
     expect(neither.cell.querySelector('.transcript-shell-meta')).toBeNull();
   });
 
-  // UX wave U8c-2 (M5, §K): a call read from rows carries the folder its row records. It reads as the session
-  // directory's line only where the slot hands a directory down (the session is in its launch folder) and the row ran
-  // there or in the agent's folder now; everywhere else it names its own folder. A call with no folder (live) names the
-  // launch folder only while one is handed down. Invented folders.
+  // UX wave U8c-2 (M5, §K): a call read from rows carries the folder its row records. It names no folder only where the
+  // slot hands a directory down (the session is in its launch folder) and the row ran there or in the agent's folder
+  // now (the word cut, T20: the session's own folder is not named); everywhere else it names its own folder. A call with
+  // no folder (live) names none. Invented folders.
   describe('a call that carries its row’s folder (UX wave U8c-2)', () => {
     const call = (rowCwd: string | undefined, input: Record<string, unknown> = { command: 'ls' }) => (b: Builder) => {
       b.toolUse('t1', 'Bash', input);
@@ -239,9 +277,9 @@ describe('shell detail', () => {
     const here = { sessionDirectory: '/repo', sessionCwd: '/repo/packages/app' };
     const worktree = '/repo/.claude/worktrees/w1';
 
-    it('the launch folder or the agent’s folder: the session directory’s line; another folder: its own', async () => {
-      expect(await meta(call('/repo'), here)).toBe('Session directory /repo');
-      expect(await meta(call('/repo/packages/app'), here)).toBe('Session directory /repo');
+    it('the launch folder or the agent’s folder: no line; another folder: its own', async () => {
+      expect(await meta(call('/repo'), here)).toBeNull();
+      expect(await meta(call('/repo/packages/app'), here)).toBeNull();
       expect(await meta(call(worktree), here)).toBe(`cwd ${worktree}`);
       expect(await meta(call('/repo/packages'), here)).toBe('cwd /repo/packages'); // a folder between the two is another folder
     });
@@ -254,14 +292,22 @@ describe('shell detail', () => {
       expect(await meta(call('/repo', { command: 'ls', cwd: '/w/elsewhere' }), here)).toBe('cwd /w/elsewhere');
     });
 
-    it('a call with no folder: the launch folder while one is handed down, never the agent’s folder; else no line', async () => {
-      expect(await meta(call(undefined), here)).toBe('Session directory /repo');
+    // fix round 1: the input's folder is the call's folder, and the session's own is not named, by input or by row
+    it('an input folder that is the session’s own names none, as a row folder there names none', async () => {
+      expect(await meta(call(undefined, { command: 'ls', cwd: '/repo' }), here)).toBeNull();
+      expect(await meta(call(worktree, { command: 'ls', cwd: '/repo/packages/app' }), here)).toBeNull();
+      expect(await meta(call(undefined, { command: 'ls', cwd: '/private/repo' }), { sessionDirectory: '/repo' })).toBeNull();
+      expect(await meta(call(undefined, { command: 'ls', cwd: '/repo' }), {})).toBe('cwd /repo');
+    });
+
+    it('a call with no folder: no line, whether or not a folder is handed down', async () => {
+      expect(await meta(call(undefined), here)).toBeNull();
       expect(await meta(call(undefined), {})).toBeNull();
     });
 
     it('compares the folders as Files compares a listed root with a record’s folder: case, and macOS’s /private prefix', async () => {
-      expect(await meta(call('/private/tmp/repo'), { sessionDirectory: '/tmp/repo' })).toBe('Session directory /tmp/repo');
-      expect(await meta(call('/Repo/Packages/App'), here)).toBe('Session directory /repo');
+      expect(await meta(call('/private/tmp/repo'), { sessionDirectory: '/tmp/repo' })).toBeNull();
+      expect(await meta(call('/Repo/Packages/App'), here)).toBeNull();
       expect(await meta(call('/repo-other'), here)).toBe('cwd /repo-other'); // a folder that merely starts alike is another
     });
   });
@@ -365,6 +411,8 @@ describe('mcp detail', () => {
       b.result('t2', 'a', { structured: BASH_RESULT('a') });
     }, 'cell:t1');
     expect(cell.querySelector('[data-streamdown="strong"]')?.textContent).toBe('two');
+    // the word cut (T31): the line above names the server and the tool, so the detail's heading holds only Raw
+    expect(cell.querySelector('.transcript-detail-heading')?.textContent).toBe('Raw');
     const raw = within(cell).getByRole('button', { name: 'Raw' });
     expect(raw.getAttribute('aria-pressed')).toBe('false');
     fireEvent.click(raw);

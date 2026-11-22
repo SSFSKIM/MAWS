@@ -269,13 +269,18 @@ function peerRowOf(el: HTMLElement): PeerRowView | null {
       resultText: error ? text(error) : (state?.getAttribute('title') ?? null),
       reply: buttonNamed(message, peerMessageCopy.reply) !== null,
       line: line ? text(line) : null,
+      why: line ? describedBy(line) : null, // the word cut (T79): the line's tooltip, its description at all times
     };
   }
   const listing = el.querySelector<HTMLElement>('.transcript-listing');
   if (!listing) return null;
+  // the word cut (T81): a read listing is a counted fold, its line a disclosure button; one still out, never answered or
+  // read as notes alone keeps its one lifecycle line
+  const fold = listing.querySelector<HTMLElement>(':scope > button[aria-expanded]');
   return {
     kind: 'listing',
-    self: text(listing.querySelector(':scope > .transcript-lifecycle span')),
+    summary: text(fold ?? listing.querySelector(':scope > .transcript-lifecycle span')),
+    open: fold?.getAttribute('aria-expanded') === 'true',
     sections: [...listing.querySelectorAll<HTMLElement>('.transcript-listing-section')].map((section) => ({
       heading: text(section.querySelector('.transcript-listing-heading')),
       rows: [...section.querySelectorAll('li.transcript-listing-entry')].map((li) => {
@@ -323,6 +328,29 @@ async function columnTexts(): Promise<string[]> {
     return false;
   });
   return texts;
+}
+
+// The word cut (T81): each folded listing's line pressed, as a person opens it; its open state is the transcript's
+// disclosure, so it stays open as the list remounts the row.
+async function openListings(): Promise<number> {
+  let opened = 0;
+  await scanColumn((row) => {
+    const line = row.querySelector<HTMLButtonElement>('.transcript-listing > button[aria-expanded="false"]');
+    if (line) {
+      line.click();
+      opened += 1;
+    }
+    return false;
+  });
+  await frames();
+  return opened;
+}
+
+// The text an element's aria-describedby names, in order, or null when it names none.
+function describedBy(el: Element): string | null {
+  const ids = el.getAttribute('aria-describedby')?.split(/\s+/).filter(Boolean) ?? [];
+  const words = ids.map((id) => text(document.getElementById(id))).filter((said) => said !== '');
+  return words.length === 0 ? null : words.join(' ');
 }
 
 async function scrollColumnTo(wanted: string): Promise<void> {
@@ -537,6 +565,7 @@ export const agentsProbes: AgentsHarnessApi = {
   peerRows,
   columnTexts,
   scrollColumnTo,
+  openListings,
   pushTasks: (listId: string, list: PersistedTask[]) => fake.fakeFs({ tasks: { [listId]: list } }),
   setClock: (iso) => setAgentsClock(iso === null ? null : Date.parse(iso)),
   clearStatus,

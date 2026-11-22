@@ -48,7 +48,8 @@ describe('the action row', () => {
     const { container } = renderRow(row, { storeKey: KEY, actions: actionsWith(forkWith()), answerActions: placed(row, { rewindTo: 'u2' }) });
     const line = container.querySelector('.transcript-answer-actions')!;
     expect([...line.children].map((child) => child.textContent)).toEqual(['Copy', 'Fork from here', formatClock(Date.parse(AT))]);
-    expect(fork()!.title).toBe('Starts a new session from this point. This one stays as it is.');
+    expect(fork()!.hasAttribute('title')).toBe(false); // the word cut (N119): no sentence about how a fork works
+    expect(fork()!.hasAttribute('aria-describedby')).toBe(false);
   });
 
   it('draws nothing on an answer the mount did not place it on', () => {
@@ -149,18 +150,28 @@ describe('Fork from here', () => {
     expect(fork()!.hasAttribute('aria-busy')).toBe(false);
   });
 
-  it('is disabled with the mount’s sentence as its title and description, and a press does nothing', () => {
+  it('is greyed and keeps the keyboard, the mount’s sentence its description and, on focus, its tooltip; a press does nothing (the word cut, N120)', () => {
     const run = vi.fn(async () => {});
     const sentence = 'Fork is unavailable while mini is offline.';
     const row = answerRow();
     renderRow(row, { storeKey: KEY, actions: actionsWith(forkWith({ run, useUnavailable: () => sentence })), answerActions: placed(row, { rewindTo: 'u2' }) });
-    expect(fork()!.disabled).toBe(true);
-    expect(fork()!.title).toBe(sentence);
-    expect(fork()!.getAttribute('aria-description')).toBe(sentence);
+    greyedFor(sentence);
     fireEvent.click(fork()!);
     expect(run).not.toHaveBeenCalled();
   });
 });
+
+// Greyed with its reason reachable by the keyboard: `aria-disabled`, never `disabled`; the reason its description and,
+// on focus, its tooltip; no system title.
+function greyedFor(sentence: string) {
+  const button = screen.getByRole<HTMLButtonElement>('button', { name: 'Fork from here', description: sentence });
+  expect(button.disabled).toBe(false);
+  expect(button.getAttribute('aria-disabled')).toBe('true');
+  expect(button.hasAttribute('title')).toBe(false);
+  act(() => button.focus());
+  expect(document.activeElement).toBe(button);
+  expect(screen.getByRole('tooltip').textContent).toBe(sentence);
+}
 
 // Acceptance 9 (UC-7): the app's adapter, U9's own two names, for a session MAWS runs on another machine.
 describe('Fork from here for a session on another machine', () => {
@@ -200,9 +211,7 @@ describe('Fork from here for a session on another machine', () => {
       const sentence = renderHook(() => useForkUnavailable(R)).result.current;
       expect(sentence).not.toBeNull();
       draw();
-      expect(fork()!.disabled).toBe(true);
-      expect(fork()!.title).toBe(sentence);
-      expect(fork()!.getAttribute('aria-description')).toBe(sentence);
+      greyedFor(sentence!);
     });
   }
 

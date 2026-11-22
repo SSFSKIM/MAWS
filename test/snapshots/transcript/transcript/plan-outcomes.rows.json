@@ -149,7 +149,7 @@
     "id": "boundary:replay:journal:59:0",
     "kind": "boundary",
     "revealed": false,
-    "text": "Conversation reset · after plan approval",
+    "text": "Reset after plan approval",
     "turnId": "turn:u-plan-outcomes-035"
   },
   {

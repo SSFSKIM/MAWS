@@ -94,8 +94,9 @@ export type Receipt = { answers: Record<string, string> } | { dismissed: true } 
 export type Delivery = { phase: 'answering' | 'sent' | 'not_pending' | 'closed' } | { phase: 'failed'; detail: string | null; answer: RequestAnswer };
 export type Outcome = 'delivered' | 'not_pending' | 'write_failed';
 export const NOT_PENDING_MS = 2_000;
-/** What a card says while its answer was too late (`not_pending`), and, after (decision 8a), its question's receipt. */
-export const ANSWERED_ELSEWHERE = 'Already answered elsewhere';
+/** What a card says while its answer was too late (`not_pending`), and, after (decision 8a), its question's receipt: the
+ * race's own words for the same fact (`lane-a/race.ts`; the word cut, N107). */
+export const ANSWERED_ELSEWHERE = 'Answered elsewhere';
 
 /** UX wave U1b (Interfaces §G "The settling receipt"): one request its terminal, or another client, answered first. */
 export interface Settling { id: AttentionId; call: ToolUseId | null; agentId: AgentId | null; summary: string; words: string; until: number }

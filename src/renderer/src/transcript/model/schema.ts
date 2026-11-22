@@ -83,17 +83,17 @@ export const RowSchema = z.discriminatedUnion('kind', [
     toolCalls: z.number(), denied: z.number(), autoDenied: z.number(), firstDeniedCell: nullable(z.string()), expanded: z.boolean(), summary: TurnSummarySchema,
     files: z.array(z.strictObject({ path: z.string(), change: z.enum(['create', 'update', 'delete']), added: z.number(), removed: z.number(), cellId: z.string() })).optional(),
     opener: z.strictObject({ class: z.enum(ARRIVAL_CLASSES), line: z.string() }).optional(), // U3
-    caption: z.string(), parts: z.array(z.string()), counts: LineCountsSchema, // UX wave U2
+    caption: z.string(), fold: z.number().int().positive().optional() /* the word cut (T2) */, parts: z.array(z.string()), counts: LineCountsSchema, // UX wave U2
   }),
-  z.strictObject({ ...base, kind: z.literal('group'), state: z.enum(['active', 'completed']), cells: z.array(CellSchema), summary: z.string(), counts: LineCountsSchema, icon: category, expanded: z.boolean() }),
+  z.strictObject({ ...base, kind: z.literal('group'), state: z.enum(['active', 'completed']), cells: z.array(CellSchema), summary: z.string(), fold: z.number().int().positive().optional() /* the word cut (T2) */, counts: LineCountsSchema, icon: category, expanded: z.boolean() }),
   z.strictObject({ ...base, kind: z.literal('cell'), ...cellShape }),
   z.strictObject({
     ...base, kind: z.literal('receipt'), files: z.array(z.strictObject({ path: z.string(), change: z.enum(['create', 'update', 'delete']), added: z.number(), removed: z.number(), cellId: z.string() })),
     added: z.number(), removed: z.number(), state: z.enum(['applied', 'undoing', 'undone', 'reapplying']), canUndo: z.boolean(), canReapply: z.boolean(),
   }),
-  z.strictObject({ ...base, kind: z.literal('subagent'), agents: z.array(SubagentRefSchema), sentence: z.string(), status: z.enum(['started', 'working', 'finished', 'finished_with_errors', 'stopped']), exited: z.literal(true).optional() /* UX wave U3b */, overflow: z.number() }),
+  z.strictObject({ ...base, kind: z.literal('subagent'), agents: z.array(SubagentRefSchema), sentence: z.string(), status: z.enum(['started', 'working', 'finished', 'finished_with_errors', 'stopped']), phases: z.record(z.string(), z.string()).optional() /* the word cut, T87 */, exited: z.literal(true).optional() /* UX wave U3b */, overflow: z.number() }),
   z.strictObject({
-    ...base, kind: z.literal('agent_message'), direction: z.enum(['to_child', 'from_child', 'between']), from: nullable(SubagentRefSchema), to: nullable(SubagentRefSchema), text: z.string(),
+    ...base, kind: z.literal('agent_message'), direction: z.enum(['to_child', 'from_child', 'between']), from: nullable(SubagentRefSchema), to: nullable(SubagentRefSchema), text: z.string(), flow: z.enum(['in', 'out']) /* the word cut, T73 */,
     peer: PeerMessageSchema.optional(), report: z.string().optional(), body: z.string().optional(), // E7
   }),
   z.strictObject({ ...base, kind: z.literal('thinking'), messageUuid: nullable(z.string()), text: z.string(), live: z.boolean(), durationMs: nullable(z.number()), recordedMs: nullable(z.number()), clock: z.literal('wall').optional() }),

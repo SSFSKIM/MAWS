@@ -1582,12 +1582,12 @@ test.describe('the floating session card (P3-G)', () => {
   // prompt at its transcript's end. Answered, the request waits nowhere and the line goes. The session's permission is
   // pending in nine-sessions.json from the start, so floating the panel shows the card open and closing it keeps it
   // closed (the raise opens a closed card for a request no list held before, never for one it already held).
-  test('a closed card’s compact composer reads Waiting for you · N while N requests wait, and its click opens the card on the request', async () => {
+  test('a closed card’s compact composer reads Waiting for you N while N requests wait, and its click opens the card on the request', async () => {
     await withScenario(async (maws, panel) => {
       const { page, app } = maws;
       const card = panel.getByRole('region', { name: 'Session card' });
       const compact = panel.getByRole('region', { name: 'Chat' });
-      const waitingLine = compact.getByRole('button', { name: /^Waiting for you · \d+$/ });
+      const waitingLine = compact.getByRole('button', { name: /^Waiting for you \d+ requests?$/ }); // the word cut (N113): the count named by its meaning
 
       await (await sidebarRow(page, SIDEBAR_DRAG)).click();
       await openSurface(page, 'Files'); // UX2: floating must have a real surface behind the card
@@ -1597,7 +1597,8 @@ test.describe('the floating session card (P3-G)', () => {
 
       await card.getByRole('button', { name: 'Close session card' }).click();
       await expect(card).toHaveCount(0);
-      await expect(waitingLine).toHaveText('Waiting for you · 1');
+      await expect(waitingLine).toHaveText('Waiting for you 1');
+      await expect(waitingLine).toHaveAccessibleName('Waiting for you 1 request');
       await expect(waitingLine).toHaveAttribute('data-waiting-count', '1');
       await expect(compact.locator('[data-request-card]'), 'the compact composer draws no request').toHaveCount(0);
 
@@ -2010,16 +2011,16 @@ test.describe('the chat over an artifact (UX wave U10b, O-43)', () => {
     });
   });
 
-  // M7 decision 11 (ruled 2026-11-15 as F6), on a head that holds U1b: its compact pane draws "Waiting for you · N"
+  // M7 decision 11 (ruled 2026-11-15 as F6), on a head that holds U1b: its compact pane draws "Waiting for you N" (the word cut, N113)
   // above the composer (`SessionPane`'s compact branch) and docks nothing of a request in it, so the bar shows the line
   // on its raised surface and the box stays the box.
-  test('the combined scene with U1b: a request while the chat is hidden opens nothing; Show chat carries the waiting mark and brings the bar with “Waiting for you · 1”; Open conversation draws the request', async () => {
+  test('the combined scene with U1b: a request while the chat is hidden opens nothing; Show chat carries the waiting mark and brings the bar with “Waiting for you 1”; Open conversation draws the request', async () => {
     await withScenario(async (maws, panel) => {
       const { page, app } = maws;
       const card = panel.getByRole('region', { name: 'Session card' });
       const bar = panel.getByRole('region', { name: 'Chat' });
       const showChat = panel.getByRole('button', { name: 'Show chat' });
-      const waitingLine = bar.getByRole('button', { name: /^Waiting for you · \d+$/ });
+      const waitingLine = bar.getByRole('button', { name: /^Waiting for you \d+ requests?$/ }); // the word cut (N113)
       await (await sidebarRow(page, CHARTER)).click(); // its permission arrives at 3 s on the scenario clock
       await openSurface(page, 'Session info');
       await menu(app, 'panel.float');
@@ -2037,7 +2038,8 @@ test.describe('the chat over an artifact (UX wave U10b, O-43)', () => {
 
       await showChat.click();
       await expect(bar).toBeVisible();
-      await expect(waitingLine).toHaveText('Waiting for you · 1');
+      await expect(waitingLine).toHaveText('Waiting for you 1');
+      await expect(waitingLine).toHaveAccessibleName('Waiting for you 1 request');
       await expect(bar.locator('[data-bar-surface][data-raised]'), 'the line stands on the raised surface').toHaveCount(1);
       const [line, box] = [(await waitingLine.boundingBox())!, (await bar.locator('[data-composer-box]').boundingBox())!];
       expect(line.y + line.height, 'the line above the box').toBeLessThanOrEqual(box.y);

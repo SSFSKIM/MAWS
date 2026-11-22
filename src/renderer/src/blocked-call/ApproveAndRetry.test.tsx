@@ -5,7 +5,7 @@
 // at each step.
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { act, cleanup, fireEvent, render, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { JsonObject } from 'desk-hub/protocol';
 import { consentMessage } from '@shared/engine/arrival';
@@ -150,6 +150,16 @@ function drawn(store: Store, id: string, over: Partial<{ rewrite: (cell: Cell) =
     cell,
     line: () => cell().querySelector<HTMLElement>(':scope > .transcript-cell-line')!.textContent,
     button: () => within(cell()).queryByRole('button', { name: BLOCKED.approve }) as HTMLButtonElement | null,
+    // closed (a grant out: `disabled`) or unavailable (`aria-disabled`, still focusable: the word cut, N102)
+    shut: () => {
+      const button = within(cell()).getByRole('button', { name: BLOCKED.approve }) as HTMLButtonElement;
+      return button.disabled || button.getAttribute('aria-disabled') === 'true';
+    },
+    // why it is unavailable: its accessible description, '' when it has none
+    reason: () => {
+      const ids = within(cell()).getByRole('button', { name: BLOCKED.approve }).getAttribute('aria-describedby') ?? '';
+      return ids.split(' ').filter((id) => id !== '').map((id) => document.getElementById(id)?.textContent ?? '').join(' ');
+    },
     subject: () => cell().querySelector('.transcript-blocked-subject')?.textContent ?? null,
     statuses: () => within(cell()).queryAllByRole('status').map((line) => line.textContent),
   };
@@ -207,16 +217,16 @@ describe('the button beside its whole subject (Design 6; Acceptance 1, 13)', () 
     expect(row.line()).toBe(`Auto mode blocked: ${MARKER}`);
     expect(row.cell().hasAttribute('data-names-whole')).toBe(true);
     expect(row.subject(), 'no subject block where the line names it').toBeNull();
-    expect(row.button()!.disabled).toBe(false);
-    expect(row.button()!.title).toBe('');
+    expect(row.shut()).toBe(false);
+    expect(row.reason()).toBe('');
     vi.useFakeTimers();
     fireEvent.click(row.button()!);
     await flush();
     expect(sent()).toEqual([{ appSessionId: 'soft-1', content: recording.content }]);
     expect(recording.content).toBe(consentMessage('command', MARKER));
-    expect(row.button()!.disabled, 'sending').toBe(true);
+    expect(row.shut(), 'sending').toBe(true);
     await answer('session.send', { disposition: 'sent', messageUuid: UUID, queueId: 'q-1' });
-    expect(row.button()!.disabled, 'delivered, the record not yet').toBe(true);
+    expect(row.shut(), 'delivered, the record not yet').toBe(true);
     await store.push(recording.after);
     expect(row.line()).toBe(`Auto mode blocked: ${MARKER} · approved`);
     expect(row.button()).toBeNull();
@@ -280,7 +290,7 @@ describe('blocked again (Acceptance 2)', () => {
     expect(first!.line()).toBe(`Auto mode blocked: ${MARKER} · approved`);
     expect(first!.button()).toBeNull();
     expect(retry!.line()).toBe(`Auto mode blocked again: ${MARKER}`);
-    expect(retry!.button()!.disabled).toBe(false);
+    expect(retry!.shut()).toBe(false);
     expect(retry!.statuses()).toEqual([BLOCKED.always.command]);
   });
 });
@@ -291,12 +301,12 @@ describe('the gate’s precedence (Design 6): approved over closed and unavailab
     const [approved, retry] = blockedIds(store);
     act(() => queueOf(store.key, { entries: [entry(store.key, consentMessage('command', MARKER))] }));
     expect(drawn(store, approved!).button(), 'closed').toBeNull();
-    expect(drawn(store, retry!).button()!.disabled, 'the retry’s row: closed').toBe(true);
+    expect(drawn(store, retry!).shut(), 'the retry’s row: closed').toBe(true);
     cleanup();
     act(() => queueOf(store.key, { entries: [] }));
     useSessions.setState({ records: new Map([[store.key, record(store.key, { holder: { kind: 'terminal', pid: 42 } })]]) });
     expect(drawn(store, approved!).button(), 'unavailable').toBeNull();
-    expect(drawn(store, retry!).button()!.title, 'the retry’s row: unavailable').toMatch(/^Held by /);
+    expect(drawn(store, retry!).reason(), 'the retry’s row: unavailable').toMatch(/^Held by /);
   });
 });
 
@@ -325,7 +335,7 @@ describe('the press and the grant that is out (Design 4; Acceptance 9, 10)', () 
     fireEvent.click(row.button()!);
     await flush();
     expect(sent()).toHaveLength(1);
-    expect(row.button()!.disabled).toBe(true);
+    expect(row.shut()).toBe(true);
   });
 
   it('a second press does not send twice: on another row of the same key', async () => {
@@ -333,7 +343,7 @@ describe('the press and the grant that is out (Design 4; Acceptance 9, 10)', () 
     const [one, two] = blockedIds(store).map((id) => drawn(store, id));
     fireEvent.click(one!.button()!);
     await flush();
-    expect(two!.button()!.disabled).toBe(true);
+    expect(two!.shut()).toBe(true);
     fireEvent.click(two!.button()!);
     await flush();
     expect(sent()).toHaveLength(1);
@@ -347,7 +357,7 @@ describe('the press and the grant that is out (Design 4; Acceptance 9, 10)', () 
     await flush();
     first.unmount();
     const again = drawn(store, id);
-    expect(again.button()!.disabled).toBe(true);
+    expect(again.shut()).toBe(true);
     fireEvent.click(again.button()!);
     await flush();
     expect(sent()).toHaveLength(1);
@@ -364,12 +374,12 @@ describe('the press and the grant that is out (Design 4; Acceptance 9, 10)', () 
     act(() => queueOf(store.key, { entries: [entry(store.key, consentMessage('command', 'make build'))] }));
     await act(() => vi.advanceTimersByTimeAsync(SETTLE_MS * 3));
     expect(row.line(), 'the queue lists it').toBe('Auto mode blocked: make build');
-    expect(row.button()!.disabled, 'listed in the queue: the clock is stopped').toBe(true);
+    expect(row.shut(), 'listed in the queue: the clock is stopped').toBe(true);
     act(() => queueOf(store.key, { entries: [] }));
     await act(() => vi.advanceTimersByTimeAsync(SETTLE_MS - 1));
-    expect(row.button()!.disabled, 'just before the clock runs out').toBe(true);
+    expect(row.shut(), 'just before the clock runs out').toBe(true);
     await act(() => vi.advanceTimersByTimeAsync(1));
-    expect(row.button()!.disabled, 'the clock ran out with no row').toBe(false);
+    expect(row.shut(), 'the clock ran out with no row').toBe(false);
     expect(row.line()).toBe('Auto mode blocked: make build');
     expect(sent()).toHaveLength(1);
   });
@@ -391,10 +401,10 @@ describe('the press and the grant that is out (Design 4; Acceptance 9, 10)', () 
     const store = await oneBlock('other-window', ['make build', 'make check']);
     const [build, check] = blockedIds(store).map((id) => drawn(store, id));
     act(() => queueOf(store.key, { entries: [entry(store.key, consentMessage('command', 'make build'))] }));
-    expect(build!.button()!.disabled).toBe(true);
-    expect(check!.button()!.disabled).toBe(false);
+    expect(build!.shut()).toBe(true);
+    expect(check!.shut()).toBe(false);
     act(() => queueOf(store.key, { entries: [] }));
-    expect(build!.button()!.disabled).toBe(false);
+    expect(build!.shut()).toBe(false);
   });
 
   it('a refused press says why: the answer’s words under the button, which stays enabled, in a row mounted afresh too; the next press clears them', async () => {
@@ -404,7 +414,7 @@ describe('the press and the grant that is out (Design 4; Acceptance 9, 10)', () 
     fireEvent.click(row.button()!);
     await flush();
     await refuse('session.send', 'The engine host could not take the message');
-    expect(row.button()!.disabled).toBe(false);
+    expect(row.shut()).toBe(false);
     expect(row.statuses()).toEqual(['The engine host could not take the message']);
     row.unmount();
     const fresh = drawn(store, id);
@@ -445,7 +455,7 @@ describe('while the grant waits, during a turn (Design 5; Acceptance 11; GRANT_D
     await press(G1, 'g1');
     expect(sent('session.send')).toEqual([]);
     expect(sent('session.steer')).toEqual([{ appSessionId: 'busy-next', content: GRANT, priority: 'next' }]);
-    expect(row.button()!.disabled, 'waiting at the next step').toBe(true);
+    expect(row.shut(), 'waiting at the next step').toBe(true);
     expect(row.line()).toBe('Auto mode blocked: make build');
     const stack = render(<QueueList appSessionId={store.key} busy queue={useQueueStore.getState().bySession.get(store.key)!} />);
     expect(within(stackRow()).getByText('You approved make build')).toBeTruthy();
@@ -453,7 +463,7 @@ describe('while the grant waits, during a turn (Design 5; Acceptance 11; GRANT_D
     expect(within(stackRow()).getAllByRole('button').map((b) => b.getAttribute('aria-label'))).toEqual(['Send now', 'Delete']);
     row.unmount();
     row = drawn(store, id);
-    expect(row.button()!.disabled, 'a waiting grant, mounted afresh').toBe(true);
+    expect(row.shut(), 'a waiting grant, mounted afresh').toBe(true);
 
     fireEvent.click(within(stackRow()).getByRole('button', { name: 'Delete' }));
     await flush();
@@ -464,10 +474,10 @@ describe('while the grant waits, during a turn (Design 5; Acceptance 11; GRANT_D
     await store.push(later(cancelled, 'cancelled'));
     act(() => queueOf(store.key, { steers: [], withdrawn: [G1] }));
     stack.unmount();
-    expect(row.button()!.disabled, 'withdrawn: the button returns at once').toBe(false);
+    expect(row.shut(), 'withdrawn: the button returns at once').toBe(false);
 
     await press(G2, 'g2');
-    expect(row.button()!.disabled).toBe(true);
+    expect(row.shut()).toBe(true);
     const taken = builder('2026-09-28T11:02:00.000Z');
     taken.emit('command.lifecycle', { commandUuid: G2, state: 'started' });
     taken.result('t-held', 'done', { structured: { stdout: 'done', stderr: '', interrupted: false, isImage: false, noOutputExpected: false } });
@@ -501,7 +511,7 @@ describe('while the grant waits, during a turn (Design 5; Acceptance 11; GRANT_D
     expect((within(stackRow()).getByRole('button', { name: 'Send now' }) as HTMLButtonElement).disabled, 'no Send now from a machine that lists no rl2.send-now').toBe(true);
     await act(() => vi.advanceTimersByTimeAsync(SETTLE_MS * 3));
     expect(useGrantsOut.getState().out.size, 'the grant stays out').toBe(1);
-    expect(row.button()!.disabled).toBe(true);
+    expect(row.shut()).toBe(true);
     expect(fake.invoked('session.steer.cancel')).toEqual([]);
   });
 
@@ -533,7 +543,7 @@ describe('while the grant waits, during a turn (Design 5; Acceptance 11; GRANT_D
     fireEvent.click(sendNow);
     await flush();
     expect(fake.invoked('session.steer.sendNow')).toEqual([{ appSessionId: 'app-r', messageUuid: G1 }]);
-    expect(row.button()!.disabled, 'the grant is still out until the record reads it').toBe(true);
+    expect(row.shut(), 'the grant is still out until the record reads it').toBe(true);
   });
 });
 
@@ -582,8 +592,8 @@ describe('where there is no button, where it is disabled, and a terminal session
     const [id] = blockedIds(store);
     const row = drawn(store, id!);
     expect(row.line()).toBe(`Auto mode blocked: ${MARKER}`);
-    expect(row.button()!.disabled).toBe(false);
-    expect(row.button()!.title).toBe('');
+    expect(row.shut()).toBe(false);
+    expect(row.reason()).toBe('');
     vi.useFakeTimers();
     fireEvent.click(row.button()!);
     await flush();
@@ -591,10 +601,10 @@ describe('where there is no button, where it is disabled, and a terminal session
     await flush();
     expect(run.sentence).toBe(consentMessage('command', MARKER));
     expect(fake.invoked('laneA.send'), 'once, the sentence whole').toEqual([{ appSessionId: bareOf(store.key), text: run.sentence }]);
-    expect(row.button()!.disabled, 'out').toBe(true);
+    expect(row.shut(), 'out').toBe(true);
     await answer('laneA.send', { key: { writer: 'maws/test', seq: 1 }, state: 'entered', uuid: run.uuid });
     expect(useGrantsOut.getState().out.size, 'delivered: out until the record says').toBe(1);
-    expect(row.button()!.disabled, 'delivered').toBe(true);
+    expect(row.shut(), 'delivered').toBe(true);
     await store.push(run.after);
     expect(row.line()).toBe(`Auto mode blocked: ${MARKER} · approved`);
     expect(row.button()).toBeNull();
@@ -620,7 +630,7 @@ describe('where there is no button, where it is disabled, and a terminal session
     await answer('laneA.send', { key: { writer: 'maws/test', seq: 1 }, state: 'entered', uuid: run.uuid });
     await store.push(run.after.slice(0, at54));
     expect(row.line(), 'waiting: not approved').toBe(`Auto mode blocked: ${MARKER}`);
-    expect(row.button()!.disabled, 'waiting: closed').toBe(true);
+    expect(row.shut(), 'waiting: closed').toBe(true);
     const stack = stackRows({ entries: [], paused: false, pauseReason: null, steers: [], withdrawn: [], loaded: true }, new Set(), readOf(store.key));
     expect(stack.map((each) => [each.kind, rowText(each), (STACK_WORDS.marks as Record<string, string>)[each.kind]])).toEqual([['handed', `You approved ${MARKER}`, 'Next step']]);
     await store.push(run.after.slice(at54));
@@ -629,12 +639,31 @@ describe('where there is no button, where it is disabled, and a terminal session
     expect(stackRows({ entries: [], paused: false, pauseReason: null, steers: [], withdrawn: [], loaded: true }, new Set(), readOf(store.key))).toEqual([]);
   });
 
-  it('a terminal session before its bridge is live: the button disabled, its title the holder’s words', async () => {
+  it('a terminal session before its bridge is live: the button greyed, its reason the holder’s words', async () => {
     const store = await storeAt(at('terminal-held'), blockedTurn(['make build']).events);
     useSessions.setState({ records: new Map([[store.key, record(store.key, { holder: { kind: 'terminal', pid: 42 } })]]) });
     const row = drawn(store, blockedIds(store)[0]!);
-    expect(row.button()!.disabled).toBe(true);
-    expect(row.button()!.title).toMatch(/^Held by /);
+    expect(row.shut()).toBe(true);
+    expect(row.reason()).toMatch(/^Held by /);
+  });
+
+  // The word cut (N102; "Every hidden fact has an owner that takes keyboard focus"): an unavailable button is drawn
+  // aria-disabled and stays in the Tab order, its reason its description and its tooltip on focus; a press does nothing.
+  // A closed one (a grant out) has no reason and stays disabled.
+  it('unavailable, the button keeps the keyboard and says why on focus, and a press sends nothing', async () => {
+    const store = await storeAt(at('terminal-held-focus'), blockedTurn(['make build']).events);
+    useSessions.setState({ records: new Map([[store.key, record(store.key, { holder: { kind: 'terminal', pid: 42 } })]]) });
+    const row = drawn(store, blockedIds(store)[0]!);
+    const button = row.button()!;
+    expect(button.disabled).toBe(false);
+    expect(button.getAttribute('aria-disabled')).toBe('true');
+    expect(button.hasAttribute('title')).toBe(false);
+    act(() => button.focus());
+    expect(document.activeElement).toBe(button);
+    expect(screen.getByRole('tooltip').textContent).toMatch(/^Held by /);
+    const sent = fake.calls.length;
+    fireEvent.click(button);
+    expect(fake.calls.length).toBe(sent);
   });
 
   it('another machine’s session: with the overlay’s send closed the button is disabled and its title is the overlay’s reason', async () => {
@@ -644,8 +673,8 @@ describe('where there is no button, where it is disabled, and a terminal session
     applyRemoteSession(remoteSessionState(remote, { controls: { ...ALL_OPEN, send: { available: false, reason: 'Studio’s link is down' } } }));
     const store = await storeAt(remote, blockedTurn(['make build']).events);
     const row = drawn(store, blockedIds(store)[0]!);
-    expect(row.button()!.disabled).toBe(true);
-    expect(row.button()!.title).toBe('Studio’s link is down');
+    expect(row.shut()).toBe(true);
+    expect(row.reason()).toBe('Studio’s link is down');
   });
 });
 

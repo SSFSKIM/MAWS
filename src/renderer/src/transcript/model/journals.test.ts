@@ -30,13 +30,13 @@ describe('fixture gates through the model', () => {
     const subagent = ofKind(rows, 'subagent');
     expect(subagent).toHaveLength(1);
     expect(subagent[0].agents.map((a) => a.taskId)).toEqual(['ad286defbc77bc090', 'ae75ba6ce5d866acc']);
-    expect(subagent[0].sentence).toBe('Read and report one.txt content and Read and report two.txt content finished');
+    expect(subagent[0].sentence).toBe('Read and report one.txt content and Read and report two.txt content'); // the word cut (T86)
     expect(subagent[0].status).toBe('finished');
     expect(cellsOf(rows).some((cell) => cell.toolName === 'Agent')).toBe(false);
     expect(ofKind(rows, 'user')).toHaveLength(1);
     const dividers = ofKind(rows, 'divider');
     expect(dividers.map((d) => [d.origin, d.state])).toEqual([['human', 'completed'], ['engine', 'completed'], ['engine', 'completed']]); // each engine turn thinks, then answers
-    expect(dividers.slice(1).map((d) => dividerCopy({ ...d, durationMs: d.summary.durationMs ?? 0 }).startsWith('Continued for '))).toEqual([true, true]);
+    expect(dividers.slice(1).map((d) => dividerCopy({ ...d, durationMs: d.summary.durationMs ?? 0 }).startsWith('Continued · '))).toEqual([true, true]);
     expect(ofKind(rows, 'assistant_text').filter((r) => r.turnId !== state.order[0])).toHaveLength(2);
     expect(dividers[0].summary.childAgents).toBe(2);
   });
@@ -270,14 +270,14 @@ describe('fixture gates through the model', () => {
 
   // W1 (A5): `/compact` opens a turn of its own (seq 39) holding the boundary (seq 43), the engine's synthetic summary
   // (seq 44) and the command's output (seq 45). Neither the boundary nor the output is work, so the turn has no
-  // "Worked for 0s" divider and both stay in view; the summary is no bubble.
+  // "0s" divider and both stay in view; the summary is no bubble.
   it('pass3/compact: the /compact turn reads its one-line prompt, the boundary and the output, with no divider and no summary bubble', () => {
     const state = stateOf('pass3', 'compact');
     const compact = state.order[1];
     const rows = rowsOf(state).filter((row) => row.turnId === compact);
     expect(rows.map((row) => row.kind)).toEqual(['user', 'boundary', 'local_command']);
     expect(ofKind(rows, 'user')[0].text).toBe('/compact');
-    expect(ofKind(rows, 'boundary')[0]).toMatchObject({ boundaryKind: 'compaction', text: 'Context compacted · 29k → 1k tokens · manual' });
+    expect(ofKind(rows, 'boundary')[0]).toMatchObject({ boundaryKind: 'compaction', text: 'Compacted · 29k → 1k' });
     expect(ofKind(rowsFor('pass3', 'compact'), 'user').map((row) => row.text)).toEqual(['Reply ONE', '/compact', 'Reply TWO']);
     expect(ofKind(rowsFor('pass3', 'compact'), 'divider')).toEqual([]); // nor any around it: two answers and a local command
   });

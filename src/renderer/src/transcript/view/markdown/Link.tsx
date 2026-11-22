@@ -39,8 +39,9 @@ function pathOf(href: string): { path: string; line: number | undefined } {
 // names the place it opens at (a document's tab or block, a deck's slide, a retained version), at the latest version
 // unless it names one; main's content form (`maws-artifact://<id>/<revision>/<path>`) names the artifact alone. The
 // mention carries the place as the grammar writes it (`data-artifact-at`, the fragment alone, so no element carries the
-// link) for a surface that takes the click before it. U6d (decision 16): one tooltip, true wherever the click lands.
-export const ARTIFACT_LINK_TITLE = 'Opens the artifact · ⌘-click opens it in a tab';
+// link) for a surface that takes the click before it. U6d (decision 16): one tooltip, true wherever the click lands; the
+// word cut (N125): the shortcut alone, since a click on the mention says it opens the artifact.
+export const ARTIFACT_LINK_TITLE = '⌘-click opens it in a tab';
 
 // UX wave U6d (Interfaces §F): what a click on a mention opens, the one rule of both click sites (this component, and a
 // mod's surface, engine-surface/SurfaceTree.tsx, which takes the click before it). With no session (a Markdown surface

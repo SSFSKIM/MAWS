@@ -280,7 +280,7 @@ it('opens the connector Manage footer for the composer project even when no sess
   act(() => connectors.focus());
   await user.keyboard('{ArrowRight}');
   const strip = useLayout.getState().main;
-  await user.click(await screen.findByRole('menuitem', { name: 'Manage connectors…' }));
+  await user.click(await screen.findByRole('menuitem', { name: 'Manage…' })); // the Connectors submenu's (the word cut, C18)
   expect(useLayout.getState().destination).toEqual({ kind: 'customize', view: 'mine', show: 'connectors' }); // UX wave U7b: a page, no tab
   expect(useLayout.getState().main).toBe(strip);
   expect(useCustomizeProject.getState().projectId).toBe(Q);

@@ -1240,8 +1240,12 @@ test.describe('S2: agents between sessions and a team (E7’s residue)', () => {
       await drive(live, live.pane, a, 'A’s listing', async () => mainTurnsEnded(await events(live, a)).length > 0 && (await idleNow(live, a)));
       await unfoldWork(live.pane); // the listing folds with its turn's work, as the owner opens it
 
-      const listing = live.pane.locator('section.transcript-listing').last();
+      // the word cut (T81): a read listing is one counted line, "Listed N agents", opening in place onto its sections
+      const listing = live.pane.locator('.transcript-listing').last();
       await expect(listing).toBeVisible();
+      const listed = listing.getByRole('button', { name: /^Listed \d+ agents?$/ });
+      if ((await listed.getAttribute('aria-expanded')) === 'false') await listed.click();
+      await expect(listed).toHaveAttribute('aria-expanded', 'true');
       const peers = listing.locator('.transcript-listing-section[data-section="Peer sessions"] li.transcript-listing-entry');
       const names = await peers.evaluateAll((lis) => lis.map((li) => li.getAttribute('data-name') ?? ''));
       note(`case S2(b): A's listing ${JSON.stringify((await listing.textContent())?.trim())}; peer rows ${JSON.stringify(names)}`);
@@ -1258,14 +1262,16 @@ test.describe('S2: agents between sessions and a team (E7’s residue)', () => {
         await row.scrollIntoViewIfNeeded({ timeout: 1_000 }).catch(() => {}); // the steer's turn below may scroll the column
         return ((await line.textContent({ timeout: 1_000 }).catch(() => null)) ?? '').trim();
       };
-      await drive(live, live.pane, a, 'A’s line reading sent', async () => / sent it with SendMessage$/.test(await lineNow()));
+      // the word cut (T79): the line is the state, Sent; how it went is its tooltip and its description
+      await drive(live, live.pane, a, 'A’s line reading sent', async () => (await lineNow()) === 'Sent');
       const lineText = await lineNow();
       const steer = outUsers(sessionRows(live, a)).slice(promptsBefore)[0]?.frame as { message?: { content?: unknown }; priority?: string } | undefined;
       const sends = ofKind(await events(live, a), 'tool.use').filter((e) => e.toolName === 'SendMessage' && e.agentId === null);
       note(`case S2(b): the steer A was sent ${JSON.stringify(steer)}; A's SendMessage inputs ${JSON.stringify(sends.map((e) => e.input))}; A's line ${JSON.stringify(lineText)}`);
       expect(contentText(steer?.message?.content), 'relay.ts’s message wording').toBe(relayText({ kind: 'peer', address: name, name, mode: 'message' }, S2_TEXT.b));
       expect(steer?.priority).toBe('next');
-      expect(lineText).toMatch(/ sent it with SendMessage$/);
+      expect(lineText).toBe('Sent');
+      await expect(line).toHaveAccessibleDescription(/ sent it with SendMessage$/);
 
       // B: the message from another session arrives (its own peer turn) and draws as an inbound row
       let inbound: Extract<SessionEvent, { kind: 'peer.message' }> | undefined;

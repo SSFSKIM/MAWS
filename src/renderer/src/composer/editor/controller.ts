@@ -30,7 +30,8 @@ import { holdsBlock, pastedBlock, type AttachedBlock } from './pasted-block'; //
 import { UNREAD, type Unread } from './unread'; // UX wave U6b-5a
 import { classifyRemoteFile, PICKED_BY_PATH } from './remote-uploads'; // P5 O7 M4
 import { mentionLabel, prefillToDoc } from './recall';
-import { draftState, modeOf, plainTextOf, serializeDraft, type Serialized } from './serialize';
+import { modeOf, plainTextOf, serializeDraft, type Serialized } from './serialize';
+import { FOLLOW_UP_PLACEHOLDER } from '../copy'; // the word cut (C2)
 import { submitSerialized } from './submit';
 
 // Where the draft lives: C4's `session.drafts.*` by default; C10's intent on an unstarted session (M4 passes it).
@@ -119,7 +120,7 @@ export interface ControllerInputs {
   disabled: string | null;
   catalog: SessionCatalog;
   widgets: ReadonlySet<string>;
-  followUp: boolean;
+  hasTranscript: boolean; // the session's transcript draws rows: its empty box asks for a follow-up
   onSubmit?(s: Serialized, when?: 'after'): Promise<boolean>;
   onPrefill?(prefill: Prefill): void;
   onDocChange?(doc: ComposerDoc): void;
@@ -146,7 +147,6 @@ export interface ControllerInputs {
 type DropAction = FileAction | { kind: 'upload' };
 export interface ControllerView {
   setMode(mode: Serialized['mode']): void;
-  setCommandEmpty(empty: boolean): void;
   setBusy(busy: boolean): void;
   setHistory(line: string | null): void; // UX wave U4a M6: the line under the text while recalling or searching, else null
 }
@@ -299,7 +299,11 @@ export class EditorController {
 
   update(inputs: ControllerInputs): void {
     const before = this.inputs.uploadsTo ?? null;
+    const hadTranscript = this.inputs.hasTranscript;
     this.inputs = inputs;
+    // the word cut (C2): the empty box's words follow the transcript appearing (an existing session's history arriving
+    // after the editor mounted) or going, which nothing else redraws
+    if (hadTranscript !== inputs.hasTranscript && this.editor && !this.editor.isDestroyed) this.editor.view.dispatch(this.editor.state.tr.setMeta('placeholder', true));
     // P5 O7 M4 (fix wave 1): the chat is now to run on another machine: a local drop's mention becomes its upload
     const after = inputs.uploadsTo ?? null;
     if (before === null && after !== null && this.heldDrops.size > 0) {
@@ -315,7 +319,7 @@ export class EditorController {
   }
 
   env(): EditorEnv {
-    const { appSessionId, cwd, additionalDirectories, catalog, widgets, followUp } = this.inputs;
+    const { appSessionId, cwd, additionalDirectories, catalog, widgets, hasTranscript } = this.inputs;
     return {
       appSessionId,
       cwd,
@@ -323,7 +327,7 @@ export class EditorController {
       catalog: catalog ?? EMPTY_CATALOG,
       widgets,
       searchesFiles: this.inputs.searchesFiles ?? true, // P5 O7 M4
-      placeholder: this.inputs.suggestion ?? this.inputs.placeholder ?? (followUp ? 'Ask a follow-up…' : 'Do anything'), // R2: a plugin's suggestion; UX wave U4a: the turn's
+      placeholder: this.inputs.suggestion ?? this.inputs.placeholder ?? (hasTranscript ? FOLLOW_UP_PLACEHOLDER : ''), // R2: a plugin's suggestion; UX wave U4a: the turn's; the word cut (C2): an empty new chat's box says nothing
       files: (files, at) => void this.addFiles(files, at),
       pasteText: (text) => this.pasteText(text),
       openWidget: (name, args) => void this.openWidget(name, args),
@@ -359,7 +363,6 @@ export class EditorController {
     const doc = editor.getJSON();
     const mode = modeOf(doc);
     this.view.setMode(mode);
-    this.view.setCommandEmpty(mode === 'send' || draftState(doc).empty); // board ticket 741: no fold on an edit
     this.inputs.onDocChange?.(doc);
     if (!this.silent && transaction.docChanged) {
       if (this.nav.index !== null) this.nav = historyNavigation(this.nav, 'edit', 0, doc).nav;

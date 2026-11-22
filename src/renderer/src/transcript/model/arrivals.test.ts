@@ -106,7 +106,7 @@ describe('where an arrival’s row sits (decision 5)', () => {
     const list = expanded(b.events);
     expect(kinds(list)).toEqual(['notice', 'divider', 'agent_message', 'divider', 'notice', 'user', 'cell', 'divider']);
     expect(divider(list, 0).opener).toEqual({ class: 'wake', line: NOTICE.wake });
-    expect(divider(list, 1).opener).toEqual({ class: 'peer', line: 'Message from @docs: hello from the docs session' });
+    expect(divider(list, 1).opener).toEqual({ class: 'peer', line: '@docs: hello from the docs session' });
     expect(divider(list, 2).opener).toBeUndefined(); // the person's own turn
   });
 
@@ -184,8 +184,8 @@ describe('what stays through a fold (Interfaces D)', () => {
   });
 
   // UX wave U1b (decision 9): the notice stays the head row a turn's `opener` is read from, so a turn the answer opened
-  // still reads as the person's, "Worked for"
-  it('an answer that opened a turn of work folds with it, and the turn still reads Worked for', () => {
+  // still reads as the person's: its duration alone (the word cut, T1), never "Continued ·"
+  it('an answer that opened a turn of work folds with it, and the turn still reads as the person’s', () => {
     const b = builder();
     engineTurn(b);
     carry(b, 'a1', [{ class: 'answer', tool: 'sminos', call: 'tu-ask', summary: 'The user answered: "Pick one?"="the first"', answers: null, dismissed: false }]);
@@ -198,7 +198,7 @@ describe('what stays through a fold (Interfaces D)', () => {
     expect(of(shown(expanded(b.events)), 'notice').map((row) => row.class)).toEqual(['answer']);
     const line = divider(folded);
     expect(line.opener?.class).toBe('answer');
-    expect(dividerCopy({ ...line, durationMs: line.summary.durationMs ?? 0 })).toMatch(/^Worked for /);
+    expect(dividerCopy({ ...line, durationMs: line.summary.durationMs ?? 0 })).toMatch(/^\d+s · /);
   });
 
   it('leaves a subagent’s started and finished rows as they were (l2-transcript-14)', () => {
@@ -209,7 +209,7 @@ describe('what stays through a fold (Interfaces D)', () => {
     b.result('ag1', 'Async agent launched', { structured: { status: 'async_launched', agentId: 'a1' } });
     b.emit('subagent.finished', { taskId: taskId('a1'), status: 'completed', summary: null, outputFile: null, reason: null });
     b.end(['u1']);
-    expect(of(expanded(b.events), 'subagent').map((row) => [row.sentence, row.status])).toEqual([['Survey notes finished', 'finished']]);
+    expect(of(expanded(b.events), 'subagent').map((row) => [row.sentence, row.status])).toEqual([['Survey notes', 'finished']]);
   });
 });
 
@@ -573,7 +573,7 @@ describe('the words of the lines (Interfaces D)', () => {
     const b = builder();
     peerTurn(b, '@notes-main can you rerun the build?\nthanks');
     const [row] = of(expanded(b.events), 'agent_message');
-    expect(row!.text).toBe('Message from @docs: can you rerun the build?');
+    expect(row!.text).toBe('@docs: can you rerun the build?');
     expect(row!.peer).toMatchObject({ preview: 'can you rerun the build?', body: '@notes-main can you rerun the build?\nthanks' });
   });
 
@@ -593,10 +593,10 @@ describe('the words of the lines (Interfaces D)', () => {
     // the architect's ruling of 2026-11-13: every message line opens to the whole message, so a subagent's message keeps
     // its whole text as `body` even when its line holds all of it
     expect(of(expanded(b.events), 'agent_message').map((row) => [row.text, row.body ?? row.report ?? row.peer?.body ?? null])).toEqual([
-      ['Sent to Survey notes: look at the index first', 'look at the index first\nthen the notes'],
-      ['Sent to @docs: done here', 'done here'],
+      ['Survey notes: look at the index first', 'look at the index first\nthen the notes'],
+      ['@docs: done here', 'done here'],
       ['Report from Survey notes: Found three notes.', 'Found three notes.\nTwo are stale.'],
-      ['Message from Survey notes: one more thing', 'one more thing'],
+      ['Survey notes: one more thing', 'one more thing'],
     ]);
   });
 
@@ -617,8 +617,8 @@ describe('the words of the lines (Interfaces D)', () => {
     endEngine(b);
     expect(of(expanded(b.events), 'notice').map((row) => [row.class, row.text, row.durationMs, row.detail])).toEqual([
       ['task', 'Agent "Survey notes" finished', 65_000, 'Found three notes.'],
-      ['schedule', 'Running scheduled task · tidy the notes folder', null, 'tidy the notes folder\nand report'],
-      ['schedule', 'Running scheduled task', null, null],
+      ['schedule', 'Scheduled · tidy the notes folder', null, 'tidy the notes folder\nand report'],
+      ['schedule', 'Scheduled', null, null],
       ['answer', 'answered: Branch → main', null, null],
       ['answer', 'answered: dismissed', null, null],
       ['wake', NOTICE.wake, null, null],

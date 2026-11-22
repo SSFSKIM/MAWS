@@ -3,9 +3,13 @@
 // (24,000 of 47,125 chars)"), the time it took, the disclosure of a snapshot's text or an eval's value, Open tab and a
 // screenshot's Open, a refusal's reason and a cancelled call's line.
 import type { AppSessionId } from '@shared/graph/ids';
-import { cleanup, fireEvent, screen } from '@testing-library/react';
-import { afterEach, describe, expect, it } from 'vitest';
+import { act, cleanup, fireEvent, screen } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
+import { afterEach, describe, expect, it, onTestFinished, vi } from 'vitest';
+import { POINTING_DELAY_MS } from '../../../ui/pointing';
+import { fakeTimeouts, realTimeouts } from '../../../test-support/fake-timeouts';
 import type { Row } from '../../model/rows';
+import { accessibleText } from '../../../test-support/accessible-text';
 import { renderRow } from './test-support';
 
 type BrowserRow = Extract<Row, { kind: 'browser_action' }>;
@@ -20,6 +24,7 @@ const BASE: BrowserRow = {
 };
 const row = (over: Partial<BrowserRow>): BrowserRow => ({ ...BASE, ...over });
 const heading = (container: HTMLElement) => container.querySelector('[data-browser-heading]')!.textContent;
+const described = (element: HTMLElement) => (element.getAttribute('aria-describedby') ?? '').split(' ').map((id) => document.getElementById(id)?.textContent ?? '').join(' ');
 const buttons = (container: HTMLElement) => [...container.querySelectorAll('button')].map((button) => button.textContent);
 
 afterEach(() => cleanup());
@@ -65,11 +70,56 @@ describe('the browser action row', () => {
     expect(heading(renderRow(row(over), { storeKey: APP }).container)).toBe(expected);
   });
 
-  it('shows the time once done, and how long the person or a sheet held it', () => {
+  it('keeps the time it took, and how long the person or a sheet held it, for pointing at or focusing its line (the word cut, T105)', () => {
     const { container } = renderRow(row({ ms: 3_400, waitedFor: 'human', waitedMs: 3_000 }), { storeKey: APP });
-    expect(container.querySelector('[data-browser-took]')!.textContent).toBe('3.4s · waited 3.0s for you');
+    const line = container.querySelector<HTMLElement>('[data-browser-heading]')!;
+    expect(accessibleText(container)).toBe('Clicked button "Submit"Open tab');
+    expect(described(line)).toBe('3.4s · waited 3.0s for you');
+    act(() => line.focus());
+    expect(document.activeElement).toBe(line);
+    expect(screen.getByRole('tooltip').textContent).toBe('3.4s · waited 3.0s for you');
     cleanup();
-    expect(renderRow(row({ ms: 40 }), { storeKey: APP }).container.querySelector('[data-browser-took]')!.textContent).toBe('40ms');
+    const quick = renderRow(row({ ms: 40 }), { storeKey: APP }).container.querySelector<HTMLElement>('[data-browser-heading]')!;
+    expect(described(quick)).toBe('40ms');
+    cleanup();
+    const running = renderRow(row({ state: 'running', ms: null, answered: false }), { storeKey: APP }).container.querySelector<HTMLElement>('[data-browser-heading]')!;
+    expect(running.hasAttribute('tabindex')).toBe(false); // nothing waits on a running call's line
+  });
+
+  // Task 2 fix round 1 (T105): the whole line is where pointing shows the time; the keyboard reaches it on the phrase
+  it('shows the time on pointing anywhere along its line, its actions not part of the tip', async () => {
+    fakeTimeouts();
+    onTestFinished(realTimeouts);
+    const { container } = renderRow(row({ ms: 3_400 }), { storeKey: APP });
+    const openTab = screen.getByRole('button', { name: 'Open tab' });
+    await userEvent.setup({ delay: null }).hover(openTab);
+    act(() => void vi.advanceTimersByTime(POINTING_DELAY_MS));
+    expect(screen.getByRole('tooltip').textContent).toBe('3.4s');
+    expect(openTab.hasAttribute('aria-describedby')).toBe(false);
+    expect(described(container.querySelector<HTMLElement>('[data-browser-heading]')!)).toBe('3.4s');
+  });
+
+  // Fix wave (scalpel-3#1): where nothing points (a phone's desk) the tip cannot open, so the time stands on the line,
+  // drawn only there (the stylesheet's `(hover: none)`, pointed-actions.test.ts) and hidden from assistive technology,
+  // which hears it as the phrase's description
+  it('carries its time on the line for a screen that cannot point, hidden from assistive technology', () => {
+    const { container } = renderRow(row({ ms: 3_400, waitedFor: 'human', waitedMs: 3_000 }), { storeKey: APP });
+    const time = container.querySelector<HTMLElement>('.transcript-browser-action-line > .transcript-browser-action-time')!;
+    expect(time.textContent).toBe('3.4s · waited 3.0s for you');
+    expect(time.getAttribute('aria-hidden')).toBe('true');
+    cleanup();
+    const running = renderRow(row({ state: 'running', ms: null, answered: false }), { storeKey: APP }).container;
+    expect(running.querySelector('.transcript-browser-action-time')).toBeNull();
+  });
+
+  it('draws its actions on pointing or focus within the line, and keeps them while the snapshot is open (T106)', () => {
+    const { container } = renderRow(row({ tool: 'browser_snapshot', action: 'snapshot', target: null, chars: 30, detail: 'x' }), { storeKey: APP });
+    const actions = container.querySelector('.transcript-browser-action-actions')!;
+    expect(actions.hasAttribute('data-on-hover')).toBe(true);
+    const root = container.querySelector('.transcript-browser-action')!;
+    expect(root.hasAttribute('data-open')).toBe(false);
+    fireEvent.click(screen.getByRole('button', { name: 'Show snapshot' }));
+    expect(root.hasAttribute('data-open')).toBe(true);
   });
 
   it('discloses a snapshot’s text and an eval’s value', () => {
@@ -105,7 +155,7 @@ describe('the browser action row', () => {
     expect(buttons(renderRow(row({})).container)).toEqual([]);
   });
 
-  it('a refusal reads what could not be done and why, without the tool’s name; a cancelled call says the turn was interrupted', () => {
+  it('a refusal reads what could not be done and why, without the tool’s name; a cancelled call reads Cancelled (T107)', () => {
     const error = 'browser_act: ref "e12" is stale or missing in the current snapshot; call browser_snapshot again and use a ref from it';
     const refused = renderRow(row({ targetRole: null, targetName: null, state: 'error', error, ms: null }), { storeKey: APP });
     expect(heading(refused.container)).toBe('Could not click e12');
@@ -113,6 +163,6 @@ describe('the browser action row', () => {
     cleanup();
     const cancelled = renderRow(row({ state: 'cancelled', ms: null, answered: false }), { storeKey: APP });
     expect(heading(cancelled.container)).toBe('Clicking button "Submit"');
-    expect(cancelled.container.querySelector('[data-browser-note]')!.textContent).toBe('Cancelled, the turn was interrupted');
+    expect(cancelled.container.querySelector('[data-browser-note]')!.textContent).toBe('Cancelled');
   });
 });

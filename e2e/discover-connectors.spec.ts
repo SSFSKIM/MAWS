@@ -703,7 +703,7 @@ test('dynamic: a plugin’s connector and one of MAWS’s own list signed in fro
       const main = page.locator('[data-region="main"]');
       await main.getByRole('button', { name: 'Add files, photos or commands' }).click();
       await page.getByRole('menuitem', { name: 'Connectors', exact: true }).hover();
-      await page.getByRole('menuitem', { name: /^Connectors in this chat…/ }).click();
+      await page.getByRole('menuitem', { name: /^In this chat…/ }).click(); // the word cut (C18): the Connectors submenu names it
       // the floating dialog's, not Customize's live list (its page is closed)
       const dialog = page.locator('[data-widget-dialog="mcp"] [data-widget="mcp"]');
       await expect(dialog).toBeVisible();

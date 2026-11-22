@@ -23,7 +23,7 @@ import { deleteRefusal, sendNowRefusal, sendsWithNextStep, stackActs, takeBackRe
 import { isWaiting, rowText, STACK_WORDS, stackRows, type StackRow, type TakenRow, type WaitingRow } from './stack';
 
 export const SUBMITTING_VISIBLE_MS = 300;
-export const UNCERTAIN_TEXT = 'May not have been delivered · check the transcript, then Resume or Delete';
+export const UNCERTAIN_TEXT = 'May not have been delivered'; // the word cut (C75): Resume, Edit and Delete beside it say what to do
 
 // The header of a paused queue, by the reason the host paused it (Decision Log "execution start 2026-09-29" item 2).
 export const PAUSED_COPY: Record<QueuePauseReason | 'none', string> = {

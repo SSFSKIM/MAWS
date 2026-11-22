@@ -63,7 +63,7 @@ import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpath
 import { connect, createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { expect, test, type ElectronApplication, type Page } from '@playwright/test';
+import { expect, test, type ElectronApplication, type Locator, type Page } from '@playwright/test';
 import { isolatedGitEnv } from '../test/support/git-env';
 import type { MachineState } from '../src/shared/ipc/schema/machines';
 import type { SessionEvent } from '../src/shared/graph/events';
@@ -102,6 +102,7 @@ import { REMOTE_UNAVAILABLE } from '../src/shared/ipc/remote-unavailable'; // P5
 import { withNativeClipboard } from './support/clipboard'; // the UX wave, U9 (A4)
 import { remoteSessionActions, SESSION_ACTIONS } from '../src/renderer/src/app/session-actions'; // the UX wave, U9 (the architect's ruling of 2026-11-13)
 import { sendNowJournal, steerStopJournal } from './support/c7-replay'; // the UX wave, U4b: U4a's journals, run on B
+import { FINISHED_TURN_LINE } from './support/turn-line'; // the word cut (T1)
 import { OUTSIDE_ACTS, OUTSIDE_FILES_CAPABILITY } from '../src/shared/files/outside'; // UX wave U6f: the four acts and their capability
 
 test.skip(process.env.MAWS_REMOTE_E2E !== '1', 'the remote scenes run under pnpm e2e:remote (MAWS_REMOTE_E2E=1)');
@@ -263,6 +264,8 @@ function keepMainLines(launch: MawsLaunch): void {
 const mainSaid = (page: Page) => (mainLines.get(page) ?? []).slice(-60).join('\n');
 
 const main = (page: Page) => page.locator('[data-region="main"]');
+// A transcript artifact row's heading, which is the press that opens it, "Open" its description (the word cut, T103).
+const artifactOpener = (row: Locator, title: string) => row.getByRole('button', { name: new RegExp(`^(Artifact|Updated artifact) ${title}( · v\\d+)?$`) });
 const composerOf = (page: Page) => main(page).getByRole('textbox', { name: 'Message' });
 // A row of the sidebar expanded (read back until it holds: a restored layout may expand it under the click): a machine's
 // row (T3: another machine's sessions whose project is listed nowhere, design §12's `known` included), or a registry
@@ -1118,7 +1121,8 @@ test('A reaches B’s mawsd over RL2, through the hub and then directly, and dri
       // from B, and the text artifact reads there
       const pageCall = main(again).locator('section.transcript-artifact[data-artifact-state="registered"]').filter({ hasText: REPORT.title });
       await quoting(expect(pageCall, 'the page’s row in B’s transcript, registered').toBeVisible({ timeout: 60_000 }), () => mainSaid(again));
-      await pageCall.getByRole('button', { name: 'Open', exact: true }).click();
+      await expect(artifactOpener(pageCall, REPORT.title)).toHaveAccessibleDescription('Open');
+      await artifactOpener(pageCall, REPORT.title).click();
       const tool = surface(again, 'artifacts');
       const pageRecord = tool.locator(`[data-artifact-record="${report.id}"]`);
       await quoting(expect(pageRecord, 'the page in the session’s Artifacts tool').toBeVisible({ timeout: 60_000 }), async () => `${await paneSaid(again)}\n${mainSaid(again)}`);
@@ -1296,7 +1300,7 @@ test('A reaches B’s mawsd over RL2, through the hub and then directly, and dri
       const [heading, paragraph] = [/<h1>([^<]*)<\/h1>/.exec(onB)?.[1], /<p>([^<]*)<\/p>/.exec(onB)?.[1]];
       expect([heading, paragraph], 'B’s store holds the page').toEqual(['Report from B', 'Rendered on B, saved on A.']);
       const pageCall = main(again).locator('section.transcript-artifact[data-artifact-state="registered"]').filter({ hasText: REPORT.title });
-      await pageCall.getByRole('button', { name: 'Open', exact: true }).click();
+      await artifactOpener(pageCall, REPORT.title).click();
       const tool = surface(again, 'artifacts');
       const pageRecord = tool.locator(`[data-artifact-record="${report.id}"]`);
       await quoting(expect(pageRecord, 'the page in the session’s Artifacts tool').toBeVisible({ timeout: 60_000 }), async () => `${await paneSaid(again)}\n${mainSaid(again)}`);
@@ -1398,7 +1402,7 @@ test('A reaches B’s mawsd over RL2, through the hub and then directly, and dri
       // query's schedule
       await sessionTab.click();
       const pageCall = main(again).locator('section.transcript-artifact[data-artifact-state="registered"]').filter({ hasText: REPORT.title });
-      await pageCall.getByRole('button', { name: 'Open', exact: true }).click();
+      await artifactOpener(pageCall, REPORT.title).click();
       const tool = surface(again, 'artifacts');
       const reportRecord = tool.locator(`[data-artifact-record="${report.id}"]`);
       await quoting(expect(reportRecord, 'the page in the session’s Artifacts tool').toBeVisible({ timeout: 60_000 }), async () => `${await paneSaid(again)}\n${mainSaid(again)}`);
@@ -1450,7 +1454,7 @@ test('A reaches B’s mawsd over RL2, through the hub and then directly, and dri
       // the consent opened on A, the redirect relayed to B, where the code is exchanged and the grant sealed
       const reopenLibrary = async () => {
         await sessionTab.click();
-        await pageCall.getByRole('button', { name: 'Open', exact: true }).click();
+        await artifactOpener(pageCall, REPORT.title).click();
         await reportRecord.getByRole('button', { name: 'Back', exact: true }).click();
         await tool.getByRole('button', { name: 'Open library', exact: true }).click();
       };
@@ -2904,7 +2908,7 @@ test('a subagent of B’s lane B session, drilled into from A: the rows it gave 
 
     await test.step('once the agent ends, its work folds behind its last reply, from the stream: nothing on B follows its transcript', async () => {
       await b.request('session.getContextUsage', { appSessionId: spawnedApp, detail: 'summary' }); // lets the agent end
-      await quoting(expect(drillIn.getByRole('button', { name: /^Worked for / }), 'its work folded, as a finished local agent’s').toBeVisible({ timeout: 60_000 }), drillInSaid);
+      await quoting(expect(drillIn.getByRole('button', { name: FINISHED_TURN_LINE }) /* the word cut (T1): its duration first */, 'its work folded, as a finished local agent’s').toBeVisible({ timeout: 60_000 }), drillInSaid);
       await expect(drillIn.getByText(SUB_SECOND, { exact: true }), 'behind its last reply').toBeVisible();
       await expect(drillIn.getByTestId('subagent-rows-gap')).toHaveCount(0);
       // B's engine host's lines about a follow of the agent's transcript, from every log of B's (M8's way of reading them)
@@ -4287,7 +4291,7 @@ test('U4b, Send now, a take-back and a Delete on B: each acts on B’s engine th
       const fork = page.getByRole('listbox', { name: 'Commands' }).getByRole('option').filter({ hasText: '/fork' });
       await expect(fork).toHaveAttribute('aria-disabled', 'true');
       await fork.hover();
-      await expect(page.locator('#composer-slash-detail')).toContainText('Wait for the turn to end, or stop it first');
+      await expect(page.locator('[data-slash-detail]')).toContainText('Wait for the turn to end, or stop it first');
       // the disabled row's detail lies over the box and would intercept a click, so the palette is closed the way a person does: Esc is safe here
       // because the open palette takes the key first (it closes the popup and returns), so it reaches nothing else and cannot stop B's turn
       await page.keyboard.press('Escape');

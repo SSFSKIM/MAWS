@@ -13,7 +13,7 @@ import { ContextPopoverBody } from '../../statusline/ContextPopover';
 import { tokens } from '../../statusline/format';
 import { contextOfUsage, useLaneAUsage } from '../../stores/lane-a'; // P5 O9 M5
 import { useSessions } from '../../stores/sessions';
-import { CHIP } from './chip-style';
+import { CHIP, focusPopoverItself } from './chip-style';
 import { useOpenWhileShown } from './draft-shown';
 
 const CONTENT = 'z-50 w-80 max-h-[var(--radix-popover-content-available-height)] overflow-auto rounded-md border border-border-strong bg-bg-overlay text-ui text-fg';
@@ -69,7 +69,7 @@ function Ring({ record }: { record: SessionRecord }) {
         </svg>
       </Popover.Trigger>
       <Popover.Portal>
-        <Popover.Content aria-label="Context window" side="top" align="end" sideOffset={6} collisionPadding={8} className={CONTENT}>
+        <Popover.Content aria-label="Context window" side="top" align="end" sideOffset={6} collisionPadding={8} onOpenAutoFocus={focusPopoverItself} className={CONTENT}>
           <ContextPopoverBody record={record} close={() => setOpen(false)} />
         </Popover.Content>
       </Popover.Portal>

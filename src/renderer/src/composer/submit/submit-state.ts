@@ -77,7 +77,7 @@ export const TERMINAL_KEEPS_NO_QUEUE = 'A terminal session takes a message at it
 export const STARTING = 'Session is starting…';
 // P5 O16 M3b: a session a successor engine host adopted, waiting for its engine's re-initialize (as long as the step the
 // handover found it in may take)
-export const REATTACHING = 'Re-attaching to the engine after the update…';
+export const REATTACHING = 'Reconnecting after the update…'; // the word cut (C52): a person's words for the re-attach
 export const reattaching = (status: EngineSessionStatus | null): boolean => status?.process === 'initializing' && status.holder?.adopted === true;
 // Fix wave 1: what the re-attaching state's Stop does (an empty editor: no turn to interrupt, the engine not answering)
 export const ENDS_REATTACHING = 'Ends the session; its engine has not answered since the update';

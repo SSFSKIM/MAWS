@@ -154,6 +154,25 @@ describe('the sections', () => {
   });
 });
 
+// The word cut (T299): a wait is never blank; the hover card's question loads behind the app's quiet spinner
+describe('the hover card while its question loads', () => {
+  it('shows nothing for half a second, then a spinner named by the wait’s words, then the question', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    try {
+      render(<HoverAsk appSessionId={A} askId={ASK.askId} />);
+      expect(screen.queryByText('Loading the question…')).toBeNull();
+      expect(screen.queryByRole('progressbar')).toBeNull();
+      act(() => void vi.advanceTimersByTime(500));
+      expect(screen.getByRole('progressbar', { name: 'Loading the question…' })).toBeTruthy();
+    } finally {
+      vi.useRealTimers();
+    }
+    await fake.reply('maws.asks.list', { asks: [ASK] });
+    expect(screen.queryByRole('progressbar')).toBeNull();
+    expect(document.querySelectorAll('[data-question-id]')).toHaveLength(5);
+  });
+});
+
 describe('editing the same ask in the hover and the sheet', () => {
   it.each([
     ['hover', 'q1', 'radio'], ['sheet', 'q1', 'radio'],

@@ -13,17 +13,18 @@
 //   WORDS_OUT=$HOME/maws-words/before pnpm shots:words
 //
 // which builds out/ (the harness variant: Settings › Org reads its seeded org through the harness build's main; every
-// window here is the product's, MAWS_HARNESS=0) and runs the nine launches, about 33 minutes (M1 added launches 6 to
-// 9 and the `m1-` scenes: the Settings and Org states the word cut's M1 changes). The pictures are
+// window here is the product's, MAWS_HARNESS=0) and runs the ten launches, about 36 minutes (M1 added launches 6 to
+// 9 and the `m1-` scenes: the Settings and Org states the word cut's M1 changes; M2 added launch 10 and the `m2-`
+// scenes: the conversation's and the message box's states its cut changes). The pictures are
 // <WORDS_OUT>/<scene id>.png, with <WORDS_OUT>/_run.json listing each scene's meta and whether it was reached (and why
-// not). WORDS_ONLY=<id>,<prefix>* narrows the run to some scenes (a launch with none wanted still starts). The "after"
+// not), and each run's build (its commit and a digest of out/). WORDS_ONLY=<id>,<prefix>* narrows the run to some scenes (a launch with none wanted still starts). The "after"
 // pictures are the same command on the build's branch into another folder.
 //
-// The `m1-` scenes are this branch's alone, so their "before" is this rig run against master's build: in a clean
-// checkout of master, `git checkout <this branch> -- e2e/words-shots.rig.ts e2e/support`, then the command above. Every
-// launch's state is set from this file and e2e/support (fixtures, seams master's main already has). Each m1 scene checks
-// its named state right before its capture, on master's build in master's terms (`cutBuild`), and is not reached when it
-// cannot.
+// The `m1-` and `m2-` scenes are this branch's alone, so their "before" is this rig run against master's build: in a
+// clean checkout of master, `git checkout <this branch> -- e2e/words-shots.rig.ts e2e/support`, then the command above.
+// Every launch's state is set from this file and e2e/support (fixtures, seams master's main already has). Each m1 and m2
+// scene checks its named state right before its capture, on master's build in master's terms (`cutBuild` for M1's
+// parts, `m2Build` for M2's), and is not reached when it cannot.
 //
 // Locators avoid the app's words (data attributes, menu ids, IPC, positions), because the words are what the other
 // build changes; where only a word reaches a target it comes from the app's own copy module, or is marked. A step that
@@ -40,9 +41,11 @@ import { readOrMintMachineRef } from '../src/shared/machine/identity-file';
 import { memberNames } from '../src/shared/org/member-name';
 import { BROWSER, INDEX, KEYBOARD, NOTIFICATIONS, ORG, SUPERVISOR, VOICE } from '../src/renderer/src/settings-tab/copy';
 import { BROWSER_COPY } from '../src/renderer/src/tools/browser/copy';
+import { BACKGROUND_COPY, SUBAGENTS_COPY } from '../src/renderer/src/tools/agents/copy';
 import { benchDeckFiles } from '../src/artifacts/slides/fixtures/bench';
 import { isolatedGitEnv } from '../test/support/git-env';
 import { ownerShapedState, writePluginCliStub } from '../test/support/plugin-cli-stub';
+import { addressed } from './support/address';
 import { invoke, launchReady, recordedBlockJournal, steerStopJournal, value } from './support/c7-replay';
 import { bindCsv, chart, insertBlocks } from './support/dashboards';
 import { createDesign, DESIGN_FILES, editDesign } from './support/design';
@@ -64,15 +67,16 @@ test.skip(!OUT, 'WORDS_OUT names the folder the captures go to');
 
 // ---- _run.json: what each capture shows, for a person and for matching a table row to it -----------------------------
 // round: 1 and 2 are the owner's rounds at the pin; 'm0' a scene the word cut's M0 added on master; 'm1' one its M1
-// added for the Settings and Org states the cut changes. A folder is under src/renderer/src, or from the repository's
-// root when it starts with src/.
-type Meta = { id: string; title: string; how: string; state: string; folders: string[]; hover?: boolean; round?: 2 | 'm0' | 'm1' };
+// added for the Settings and Org states the cut changes; 'm2' one its M2 added for the conversation's and the message
+// box's. A folder is under src/renderer/src, or from the repository's root when it starts with src/.
+type Meta = { id: string; title: string; how: string; state: string; folders: string[]; hover?: boolean; round?: 2 | 'm0' | 'm1' | 'm2' };
 const META: Meta[] = [];
 const results: { id: string; ok: boolean; error?: string; notes?: string[] }[] = [];
 const wanted = (id: string) => !ONLY || ONLY.has(id) || [...ONLY].some((o) => o.endsWith('*') && id.startsWith(o.slice(0, -1)));
 const r2 = (meta: Omit<Meta, 'round'>): Meta => ({ ...meta, round: 2 });
 const m0 = (meta: Omit<Meta, 'round'>): Meta => ({ ...meta, round: 'm0' });
 const m1 = (meta: Omit<Meta, 'round'>): Meta => ({ ...meta, round: 'm1' });
+const m2 = (meta: Omit<Meta, 'round'>): Meta => ({ ...meta, round: 'm2' });
 
 // ---- scratch fixtures ------------------------------------------------------------------------------------------------
 const FIXED_DATE = '2026-09-20T09:00:00+00:00';
@@ -262,7 +266,7 @@ async function shot(page: Page, meta: Meta, prepare: () => Promise<void>, { of, 
     if (meta.hover) await dismissToasts(page);
     // one more try after a failed step: a loaded Mac can take a press before its target has drawn
     await prepare().catch(async (first) => {
-      console.log(`[words] ${meta.id}: retrying after ${(first instanceof Error ? first.message : String(first)).split('\n')[0]!.slice(0, 120)}`);
+      console.log(`[words] ${meta.id}: retrying after ${whole(first)}`);
       await closeOverlays(page);
       await page.waitForTimeout(1500);
       notes = [];
@@ -277,11 +281,19 @@ async function shot(page: Page, meta: Meta, prepare: () => Promise<void>, { of, 
   } catch (error) {
     const message = notReached(error);
     results.push({ id: meta.id, ok: false, error: message });
-    console.log(`[words] ${meta.id} not reached: ${message}`);
+    console.log(`[words] ${meta.id} not reached: ${message}\n${whole(error)}`);
   } finally {
-    if (after) await after().catch((error: unknown) => console.log(`[words] ${meta.id} after: ${String(error).slice(0, 200)}`));
+    if (after) await after().catch((error: unknown) => console.log(`[words] ${meta.id} after:\n${whole(error)}`));
   }
 }
+// The whole of an error, its cause after it, for the console: a step that failed says all it knows, where _run.json
+// keeps the short form.
+function whole(error: unknown): string {
+  const text = (e: unknown): string => stripVTControlCharacters(e instanceof Error ? (e.stack ?? e.message) : String(e));
+  return error instanceof Error && error.cause !== undefined ? `${text(error)}\ncaused by: ${text(error.cause)}` : text(error);
+}
+// A step that stages a launch's state and failed: the whole error in the console, the scenes it was for not reached.
+const setupFailed = (what: string, error: unknown) => console.log(`[words] ${what} failed:\n${whole(error)}`);
 // Why a scene was not reached, as "<reason>: <what was found>": a failed check's message (its first line) and what
 // Playwright received ("element(s) not found", a viewport ratio, an attribute), so a miss says which way it missed.
 function notReached(error: unknown): string {
@@ -333,17 +345,18 @@ const shaped = (...rendered: string[]) =>
   new RegExp(rendered.map((text) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replaceAll(HOLE, '.+').replaceAll(String(COUNT), '\\d+')).join('|'));
 // A word's or a glyph's tooltip, shown as the keyboard shows it: by focus. The owner is brought into view first and
 // left to settle (a scroll closes an open tooltip). On master's build the words the tooltip holds here, `rest`, are
-// brought into view instead.
-async function focusTip(page: Page, owner: Locator, rest: Locator) {
-  if (!cutBuild()) return rest.first().scrollIntoViewIfNeeded({ timeout: 10_000 });
+// brought into view instead. `cutOf` says whether the build has the cut the tooltip belongs to (M1's by default; the
+// m2 scenes pass `m2Cut`).
+async function focusTip(page: Page, owner: Locator, rest: Locator, cutOf: () => boolean = cutBuild) {
+  if (!cutOf()) return rest.first().scrollIntoViewIfNeeded({ timeout: 10_000 });
   await owner.first().scrollIntoViewIfNeeded({ timeout: 10_000 });
   await page.waitForTimeout(400);
   await owner.first().focus();
 }
 // The check that `trigger`'s own tooltip is open: the element the tip wraps (the focused word or control, or the label
 // around a box) reads open to Radix, and a tooltip is drawn (one shows at a time). On master's, `rest` in view.
-const tipShown = (page: Page, trigger: Locator, what: string, rest: Locator) => async () => {
-  if (!cutBuild()) return inView(rest, `master’s words for the tooltip of ${what}`);
+const tipShown = (page: Page, trigger: Locator, what: string, rest: Locator, cutOf: () => boolean = cutBuild) => async () => {
+  if (!cutOf()) return inView(rest, `master’s words for the tooltip of ${what}`);
   await expect(trigger.first(), `the tooltip of ${what}`).toHaveAttribute('data-state', /^(delayed|instant)-open$/, { timeout: 3_000 });
   await expect(page.getByRole('tooltip').first(), `the tooltip of ${what}`).toBeVisible({ timeout: 3_000 });
 };
@@ -385,6 +398,113 @@ async function closeMenu(page: Page) {
   if (await page.getByRole('menu').count()) await page.keyboard.press('Escape');
 }
 
+// ---- the word cut's M2: the conversation and the message box ---------------------------------------------------------
+// The m2 scenes' before is this rig, with its e2e support files, run against master's build, as the m1 scenes' is
+// (scenes.md). Each proves its named state on either build before its capture: on M2's build the reveal itself (the
+// owner's own tooltip open, the fold open, the actions a pointer draws) and the state it is named for; on master's,
+// the same state in master's terms, the words master draws at rest in that place, in view.
+//
+// Whether the build has M2's cut, read once, the first time a message box draws (m2Build): the box's microphone is
+// named Dictate on both builds (composer/dictation/MicControl.tsx: master's literal, this branch's MIC), and only
+// master's carries a system `title` (master's composer/dictation/copy.ts, micTitle: "Click to dictate · on this Mac"),
+// never empty; M2 made it a named glyph whose word is a Tip (C32), with no `title`. Every session not held by a terminal
+// draws a message box, so a scene that needs the build opens one before it reads.
+//
+// The rig's imports from src/ resolve to the checkout's own modules: in the before (master's checkout with only this
+// file and e2e/support taken from this branch) they are master's, so a word M2 added or changed is absent or master's
+// there. The m2 checks therefore find their targets by data attributes, roles and places; where one needs a word of a
+// renderer module this rig cannot import (one that loads the renderer), the word is written below with its source, as
+// each build has it, and read by the build.
+//
+// The build must be the checkout's (fix wave, scalpel-5#3): out/ restored from a cache keyed elsewhere could be the other
+// side's. The checkout says which side it is by a module M2 added (composer/copy.ts, absent from master's tree), and a
+// build that draws the other side is refused, every m2 scene then not reached with why.
+let cut2: boolean | null = null;
+let cut2Refused: string | null = null;
+const MIC = '[data-composer] [role="toolbar"] button[aria-label="Dictate"]';
+const M2_SOURCE = 'src/renderer/src/composer/copy.ts';
+async function m2Build(page: Page): Promise<boolean> {
+  if (cut2 === null && cut2Refused === null) {
+    const mic = page.locator(MIC).first();
+    await expect(mic, 'a message box’s microphone, which says the build').toBeAttached({ timeout: 15_000 });
+    const drawn = (await mic.getAttribute('title')) === null;
+    const source = existsSync(join(REPO_ROOT, M2_SOURCE));
+    const head = headCommit();
+    if (CACHE_KEY !== null && !head.startsWith(CACHE_KEY)) cut2Refused = `out/ came from the build cache under key ${CACHE_KEY}, not this checkout's commit ${head}`;
+    else if (drawn === source) cut2 = drawn;
+    else cut2Refused = `out/ is not this checkout's build: it ${drawn ? 'draws' : 'does not draw'} the word cut's M2, and the checkout ${source ? 'has' : 'lacks'} ${M2_SOURCE}`;
+    console.log(`[words] ${cut2Refused ?? `this build ${drawn ? 'draws' : 'does not draw'} the word cut's M2 (the microphone ${drawn ? 'has no' : 'has its'} system title)`}`);
+  }
+  if (cut2Refused !== null) throw new Error(cut2Refused);
+  return cut2!;
+}
+function m2Cut(): boolean {
+  if (cut2 === null) throw new Error('the build is not known yet: no message box has drawn in this run');
+  return cut2;
+}
+// Master's last line under a new chat's model list (master's widgets/copy.ts, MODEL.unstarted), which P555 cut
+const MASTER_MODEL_UNSTARTED = 'Applies when the session starts';
+// widgets/copy.ts's words the checks read (that module loads the renderer's statusline), each build's own: the agents
+// dialog's empty line (AGENTS.none, the same on both), and the + menu's Connectors line for a session not running and
+// for a running one reporting none (CONNECTOR_MENU.notRunning, .noneReported; P579, P578)
+const AGENTS_NONE = 'No agents in the catalogue';
+const CONNECTORS_LINE = {
+  notRunning: { m2: 'Session not running', master: 'Live details are unavailable until this session is running' },
+  noneReported: { m2: 'No connectors', master: 'No connectors reported by this session' },
+};
+const byBuild = (words: { m2: string; master: string }) => (m2Cut() ? words.m2 : words.master);
+// The + submenus' two last items, each build's (C18): M2's composer/copy.ts PLUS_MENU (a module master lacks, so its
+// words are written here), master's composer/plus-menu/PlusMenu.tsx literals
+const SUBMENU_TAIL = (label: 'Connectors' | 'Plugins'): [string, string] => (m2Cut() ? ['In this chat…', 'Manage…'] : [`${label} in this chat…`, `Manage ${label.toLowerCase()}…`]);
+// The + menu's Connectors or Plugins submenu opened, as a person opens it (composer/plus-menu/PlusMenu.tsx: each a
+// submenu trigger named by its label, the same literal on both builds, whose menu Radix names by that trigger). Its
+// scenes are hover captures: the pointer stays on the trigger. A pointer moved off a submenu's trigger other than
+// toward the submenu hands the keyboard back to the parent menu, and that focus outside closes the submenu (Radix's
+// MenuSubContent), which is how the capture's usual move to the window's corner lost it.
+const PLUS = '[data-composer] [role="toolbar"] button[aria-haspopup="menu"]';
+async function plusSubmenu(page: Page, label: 'Connectors' | 'Plugins') {
+  await box(page).click();
+  await pane(page).locator(PLUS).first().click();
+  await expect(page.getByRole('menu').first()).toBeVisible({ timeout: 5_000 });
+  await page.getByRole('menu').first().getByRole('menuitem', { name: label, exact: true }).click();
+  await expect(page.getByRole('menu', { name: label, exact: true })).toBeVisible({ timeout: 5_000 });
+}
+// The check that the submenu named `label` is open and holds `rows` or, with none, the line `empty`, then its two last
+// items in order, worded per build (SUBMENU_TAIL). On M2 a row is named by its
+// name alone (C17: master's "Loaded" beside each plugin is cut), so a row still carrying it fails there; master's rows
+// carry it and are found by their name within it.
+const submenuHolds = (page: Page, label: 'Connectors' | 'Plugins', rows: readonly string[], empty: (() => string) | null) => async () => {
+  const sub = page.getByRole('menu', { name: label, exact: true });
+  const items = sub.getByRole('menuitem');
+  await inView(sub, `the ${label} submenu`);
+  await expect(items, `the ${label} submenu’s items`).toHaveCount(rows.length + 2, { timeout: 3_000 });
+  for (const row of rows) await inView(m2Cut() ? sub.getByRole('menuitem', { name: row, exact: true }) : items.filter({ hasText: row }), `its row ${row}`);
+  if (empty !== null) await inView(sub.getByText(empty(), { exact: true }), `its line ${empty()}`);
+  const [inThisChat, manage] = SUBMENU_TAIL(label);
+  await expect(items.nth(rows.length).locator('span').first(), `its next-to-last item ${inThisChat}`).toHaveText(inThisChat, { timeout: 3_000 });
+  await expect(items.nth(rows.length + 1), `its last item ${manage}`).toHaveText(manage, { timeout: 3_000 });
+};
+// A row of the virtual transcript brought into view: the list mounts only the rows near its window, so it is read from
+// the top down, most of a window at a time, until the row is mounted, then the row is scrolled to.
+async function seek(page: Page, target: Locator) {
+  await toTop(page);
+  for (let step = 0; step < 60 && (await target.count()) === 0; step++) {
+    const end = await scroller(page).evaluate((el) => {
+      const before = el.scrollTop;
+      el.scrollTop = before + el.clientHeight * 0.75;
+      el.dispatchEvent(new Event('scroll'));
+      return el.scrollTop === before;
+    });
+    await page.waitForTimeout(300);
+    if (end) break;
+  }
+  await target.first().scrollIntoViewIfNeeded({ timeout: 5_000 });
+  await page.waitForTimeout(500);
+}
+// The check that what a pointer or focus draws (an element at opacity 0 at rest on M2's build) is drawn; on master's
+// build it is drawn at rest, so the same check holds there.
+const drawn = (target: Locator, what: string) => () => expect(target.first(), what).toHaveCSS('opacity', '1', { timeout: 3_000 });
+
 // A scene of the pin's manifest whose surface the UX wave removed: kept in _run.json, never captured.
 function gone(meta: Meta, why: string) {
   if (!wanted(meta.id)) return;
@@ -394,12 +514,25 @@ function gone(meta: Meta, why: string) {
 
 // Escape only while an overlay is open. Since the UX wave's U1b, Escape on a waiting request's row (or on nothing while
 // its pane holds the keyboard) denies the request (request-card/prompt-guard.ts), so a bare Escape could answer one.
+// The pointer is moved aside first: what it holds open (a sidebar row's hover card, a tooltip) closes on its own once it
+// leaves, and the wait lets it go before anything is counted as open.
 const OVERLAY = '[role="dialog"], [role="alertdialog"], [role="menu"], [role="listbox"], [data-radix-popper-content-wrapper]';
 async function closeOverlays(page: Page) {
+  await pointerAside(page);
+  if ((await page.locator(OVERLAY).count()) > 0) await page.waitForTimeout(300);
   for (let i = 0; i < 4 && (await page.locator(OVERLAY).count()) > 0; i++) {
     await page.keyboard.press('Escape');
     await page.waitForTimeout(200);
   }
+}
+// The pointer at a neutral spot: inside the transcript pane by its right edge, away from the sidebar (the window's corner
+// when no transcript is drawn). A click on a sidebar row leaves the pointer on the row, whose hover card
+// (sidebar/HoverCard.tsx: open after 300 ms of hover, closed 150 ms after the pointer leaves) is drawn over the main
+// area and takes the next click there; a click Playwright finds covered never moves the pointer, so the card stays.
+async function pointerAside(page: Page) {
+  const at = await scroller(page).boundingBox({ timeout: 1_000 }).catch(() => null);
+  if (at) await page.mouse.move(at.x + at.width - 6, at.y + Math.min(at.height / 2, 240));
+  else await page.mouse.move(W - 2, H - 2);
 }
 // back to a known place: no dialog, no menu, no page
 async function reset(page: Page) {
@@ -424,6 +557,7 @@ async function library(app: ElectronApplication, page: Page) {
 }
 async function openSession(page: Page, appId: string, away?: string) {
   await (await sidebarRow(page, { appSessionId: appId })).click();
+  await pointerAside(page); // before the row's hover card opens over the transcript
   await expect(pane(page)).toBeAttached();
   await page.waitForTimeout(500);
   if (away) await gitLanded(page, appId, away);
@@ -439,6 +573,7 @@ async function gitLanded(page: Page, appId: string, away: string) {
     await (await sidebarRow(page, { appSessionId: away })).click();
     await page.waitForTimeout(1500);
     await (await sidebarRow(page, { appSessionId: appId })).click();
+    await pointerAside(page);
   }
 }
 // A side surface in view. The `surface.<id>` menu item toggles (panel/SurfaceRow.tsx), so it is pressed only when the
@@ -518,10 +653,30 @@ test.beforeAll(() => {
   mkdirSync(OUT, { recursive: true });
 });
 test.afterAll(() => {
-  const all = JSON.parse(existsSync(join(OUT, '_run.json')) ? readFileSync(join(OUT, '_run.json'), 'utf8') : '{"results":[],"screens":[]}') as { results: typeof results; screens: Meta[] };
+  const all = JSON.parse(existsSync(join(OUT, '_run.json')) ? readFileSync(join(OUT, '_run.json'), 'utf8') : '{"results":[],"screens":[]}') as { results: typeof results; screens: Meta[]; runs?: Run[] };
   const keep = <T extends { id: string }>(old: T[], fresh: T[]) => [...old.filter((o) => !fresh.some((f) => f.id === o.id)), ...fresh];
-  writeFileSync(join(OUT, '_run.json'), JSON.stringify({ results: keep(all.results, results), screens: keep(all.screens, META) }, null, 2));
+  const run: Run = { at: new Date().toISOString(), ...buildIdentity(), m1: cut, m2: cut2, scenes: results.map((result) => result.id) };
+  writeFileSync(join(OUT, '_run.json'), JSON.stringify({ results: keep(all.results, results), screens: keep(all.screens, META), runs: [...(all.runs ?? []), run] }, null, 2));
 });
+// What each run into the folder photographed (fix wave, scalpel-5#3), so a before and an after taken from one out/ (a
+// build restored twice from scripts/e2e-build.sh's cache) show as one build: the checkout's commit, the tracked files
+// it changed (the before's rig and e2e/support, taken from the branch), a digest of out/'s files, the cache key out/
+// came under, and which cut each build check read (null where no scene read it). An m2 scene refuses a cached out/
+// whose key is not the checkout's commit (m2Build).
+type Run = { at: string; commit: string; changed: string[]; out: string; cacheKey: string | null; m1: boolean | null; m2: boolean | null; scenes: string[] };
+// The key out/ was restored or stored under when scripts/e2e-build.sh's cache was on (the commit that built it), else
+// null: out/ was built from this checkout
+const CACHE_KEY = process.env.MAWS_E2E_BUILD_CACHE && process.env.MAWS_E2E_BUILD_KEY ? process.env.MAWS_E2E_BUILD_KEY : null;
+const headCommit = () => execFileSync('git', ['rev-parse', 'HEAD'], { cwd: REPO_ROOT, encoding: 'utf8' }).trim();
+function buildIdentity(): Pick<Run, 'commit' | 'changed' | 'out' | 'cacheKey'> {
+  const inRepo = (...args: string[]) => execFileSync('git', args, { cwd: REPO_ROOT, encoding: 'utf8' });
+  const out = join(REPO_ROOT, 'out');
+  const files = (dir: string): string[] => readdirSync(dir, { withFileTypes: true }).flatMap((entry) => (entry.isDirectory() ? files(join(dir, entry.name)) : [join(dir, entry.name)]));
+  const digest = createHash('sha256');
+  for (const file of files(out).sort()) digest.update(`${file.slice(out.length)}\0${createHash('sha256').update(readFileSync(file)).digest('hex')}\n`);
+  const changed = inRepo('status', '--porcelain', '--untracked-files=no').split('\n').filter((line) => line !== '').map((line) => line.slice(3));
+  return { commit: headCommit(), changed, out: digest.digest('hex'), cacheKey: CACHE_KEY };
+}
 
 const BASE_ENV = (extra: Record<string, string>) => ({
   MAWS_HARNESS: '0',
@@ -560,7 +715,9 @@ test('scenario: sidebar, Overview, waiting sessions, pages, Customize, Settings,
     await page.waitForTimeout(1500);
     await dismissToasts(page);
 
-    const SID = { approval: 'app-3eb04b84', question: 'app-d095dc75', plan: 'app-bac6130b', running: 'app-9a1d4262', terminal: 'app-466b0d0d', idle: 'app-7412a115', unvisited: 'app-1238089b' };
+    // `unopened`: a session with an engine status the rig never opens before m0-dialog-agents-none (nine-sessions.json's
+    // `engine` holds ready statuses for seven sessions only; the widget backend answers for those alone)
+    const SID = { approval: 'app-3eb04b84', question: 'app-d095dc75', plan: 'app-bac6130b', running: 'app-9a1d4262', terminal: 'app-466b0d0d', idle: 'app-7412a115', unopened: 'app-3d334c38' };
 
     // before any session is opened: the empty main area, then New chat with no session in front (U13a)
     await shot(page, m0({ id: 'm0-empty-main', title: 'The main area with no tab open', how: 'Launch the app on a fresh profile', state: 'No session opened yet: the main area’s empty state with New chat', folders: ['main', 'shell', 'sidebar'] }), async () => {
@@ -614,6 +771,19 @@ test('scenario: sidebar, Overview, waiting sessions, pages, Customize, Settings,
     await shot(page, { id: 'session-question', title: 'A session asking a question', how: 'Click the session waiting on a question', state: 'Two questions at the end of the conversation, the first shown (1 of 2) with its options; the message box under it', folders: ['request-card', 'composer', 'attention', 'session', 'panel'] }, async () => {
       await openSession(page, SID.question, SID.idle);
       await expect(request()).toBeVisible({ timeout: 15_000 });
+    }, {
+      // the pager between the arrows (request-card/variants/Question.tsx; the arrows' names are the same on both builds):
+      // the first of two shown on both builds: no earlier question to go back to, then on M2's build two dots, the first
+      // current (C103); on master's, its literal "1 of 2" between them
+      check: async () => {
+        await inView(request().getByRole('button', { name: 'Show next question', exact: true }), 'the question card’s pager');
+        await expect(request().getByRole('button', { name: 'Show previous question', exact: true }), 'the first question shown').toBeDisabled({ timeout: 3_000 });
+        if (await m2Build(page)) {
+          const dots = request().locator('[data-question-position] [data-dot]');
+          await expect(dots, 'a dot per question').toHaveCount(2);
+          await expect(dots.first(), 'the first question’s dot current').toHaveAttribute('data-dot', 'current');
+        } else await inView(request().locator('[aria-live="polite"]').filter({ hasText: /^1 of 2$/ }), 'master’s 1 of 2');
+      },
     });
     await shot(page, { id: 'session-plan', title: 'A session waiting on a plan', how: 'Click the session waiting on a plan', state: 'Plan review at the end of the conversation: the plan and its buttons; the message box under it', folders: ['request-card', 'composer', 'attention', 'session', 'panel'] }, async () => {
       await openSession(page, SID.plan, SID.idle);
@@ -621,8 +791,7 @@ test('scenario: sidebar, Overview, waiting sessions, pages, Customize, Settings,
     });
     await shot(page, { id: 'session-terminal-held', title: 'A session held by a terminal', how: 'Click a session another terminal runs', state: 'The notice in the message box’s place: live in a terminal, read-only', folders: ['session', 'composer', 'lane-a', 'resume', 'transcript'] }, async () => {
       await openSession(page, SID.terminal, SID.idle);
-      await soft(pane(page).locator('[role="note"]'), 'the holder notice');
-    });
+    }, { check: () => inView(pane(page).locator('[role="note"]'), 'the holder’s line in the message box’s place') });
     await shot(page, { id: 'session-terminal-held-info', title: 'Session info of a session held by a terminal', how: 'The terminal-held session, View › More surfaces › Session info', state: 'The rows a terminal-held session cannot use here; the side column shows its Session info tab', folders: ['tools/session-info', 'panel'] }, async () => {
       await openSession(page, SID.terminal);
       await sideSurface(app, page, 'session-info');
@@ -636,7 +805,7 @@ test('scenario: sidebar, Overview, waiting sessions, pages, Customize, Settings,
       await sidebar(page).locator(`[role="treeitem"][data-menu$="${SID.question}"]`).first().hover();
       await soft(page.locator('[data-hover-card]'), 'the hover card');
       await page.waitForTimeout(800);
-    });
+    }, { check: () => inView(page.locator('[data-hover-card]'), 'the waiting session’s hover card') });
     await shot(page, { id: 'sidebar-hover-project', title: 'Sidebar, pointer on a project row', how: 'Hover a project row in the sidebar', state: 'The first project row under the pointer: its own tools', folders: ['sidebar'], hover: true }, async () => {
       await page.mouse.move(W - 2, H - 2);
       await sidebar(page).locator('[data-kind="project"] [data-project-line]').first().hover();
@@ -797,23 +966,37 @@ test('scenario: sidebar, Overview, waiting sessions, pages, Customize, Settings,
       await open('rename', 'New title');
     });
     await reset(page);
+    // The catalogue's read is made as a session's message box attaches it (stores/catalog.ts, attachCatalog), so the session
+    // is one the rig has not opened, and one the widget backend answers for: the backend holds the scenario's `engine`
+    // statuses only (src/main/widgets/fixture-backend.ts), and a read for any other session fails with "unknown app
+    // session" (test/support/widget-backend.ts, statusOf), which is how M0's choice, a session with no status, missed.
+    // Its dialog then had no catalogue to read at all and offered Load now instead of the empty list.
+    const agentsDialog = () => dialogOf(page, 'agents');
     await shot(page, m0({ id: 'm0-dialog-agents-none', title: 'Agents dialog (/agents) with no agents', how: 'Type /agents in a session not opened before, its catalogue holding no agents', state: 'The dialog’s empty state', folders: ['widgets', 'composer'] }), async () => {
-      // the renderer reads a session's catalogue once, as it attaches: the session is one the rig has not opened
       await app.evaluate(async (_, id) => {
         const backend = (globalThis as unknown as { __maws_widget_backend: Backend; __words_undo?: (() => void)[] }).__maws_widget_backend;
         const catalog = (await backend.answer('session.catalog', { appSessionId: id })) as Record<string, unknown>;
         ((globalThis as unknown as { __words_undo?: (() => void)[] }).__words_undo ??= []).push(backend.script('session.catalog', () => ({ ...catalog, agents: [] })));
-      }, SID.unvisited);
-      await open('agents', '', SID.unvisited);
-    }, { after: () => unscriptReads(app) });
+      }, SID.unopened);
+      await open('agents', '', SID.unopened);
+    }, {
+      // the empty state: the body's one line, its own words, and no list of agents (widgets/AgentsWidget.tsx, AgentsBody;
+      // parts.tsx, Rows); a failed read or Load now draws other words in a `p` and is not this state
+      check: async () => {
+        await expect(agentsDialog().locator('ul'), 'no list of agents').toHaveCount(0);
+        await inView(agentsDialog().getByText(AGENTS_NONE, { exact: true }), 'the empty list’s line');
+      },
+      after: () => unscriptReads(app),
+    });
     await reset(page);
     // the resume chooser over the scenario's sessions, a filter typed so a session with turns is in its preview
     await shot(page, m0({ id: 'm0-resume', title: 'The resume chooser (/resume)', how: 'Type /resume in a session of the first project, then type “drag”', state: 'The project’s sessions filtered to one, its preview with the turns where it left off', folders: ['resume', 'widgets', 'composer'] }), async () => {
       await open('resume', '', SID.running);
       await page.keyboard.type('drag');
       await soft(page.locator('[data-testid="resume-preview"]'), 'the preview');
-    });
+    }, { check: checks(() => inView(page.locator('[data-resume-chooser]'), 'the chooser'), () => inView(page.locator('[data-testid="resume-preview"]'), 'the preview')) });
     await reset(page);
+    await m2Scenario(app, page, SID, open);
 
     // ---- the palette and the tab strip ----
     await shot(page, m0({ id: 'm0-palette-typed', title: 'Command palette with a query', how: 'Go › Command palette (⌘K), type “sidebar”', state: 'Sessions, artifacts, projects, channels and actions matching the query, and the row that searches the Library', folders: ['palette'] }), async () => {
@@ -1006,6 +1189,179 @@ async function settingsM1(app: ElectronApplication, page: Page) {
   }, { check: checks(() => expect(code, 'the pairing-code field').toBeFocused({ timeout: 3_000 }), noteShown(section('org').getByRole('group', { name: ORG.code, exact: true }), 'the pairing-code row')) });
 }
 
+// The word cut's M2 in launch 1 (docs/doperpowers/specs/2026-11-16-word-cut-design.md, M2): the message box's and the
+// dialogs' states a cut row changes that the scenario reaches, each opened as a person opens it (the keyboard's focus,
+// a chip pressed, a typed command), over the widget backend's recorded reads.
+async function m2Scenario(app: ElectronApplication, page: Page, SID: Record<'running' | 'terminal' | 'idle' | 'unopened', string>, open: (command: string, rest?: string, session?: string) => Promise<void>) {
+  const toolbar = () => pane(page).locator('[data-composer] [role="toolbar"]').first();
+  // C158: a filter chip's key is its tooltip (resume/ResumeChooser.tsx, the chips' group; ⌃A is the first chip's key);
+  // master draws the key in the chip
+  const chooser = () => page.locator('[data-resume-chooser]');
+  const chip = () => chooser().locator('[role="group"] button[aria-pressed]').first();
+  const chipKey = () => chooser().locator('[role="group"] kbd').first();
+  await shot(page, m2({ id: 'm2-resume-chip-key', title: 'The resume chooser, a filter chip holding the keyboard', how: 'Type /resume in a session of the first project, then Tab to its first filter chip', state: 'The All projects chip focused, its key (⌃A) its tooltip', folders: ['resume', 'widgets', 'ui'] }), async () => {
+    await openSession(page, SID.running);
+    await m2Build(page);
+    await open('resume', '', SID.running);
+    await expect(chip()).toBeVisible({ timeout: 10_000 });
+    await focusTip(page, chip(), chipKey(), m2Cut);
+  }, { check: tipShown(page, chip(), 'the first filter chip', chipKey(), m2Cut) });
+  await reset(page);
+
+  // P537: /model with a name the catalogue lacks; its line in the effort view's warning (widgets/ModelSelector.tsx,
+  // `unknown`, the same element on both builds)
+  await shot(page, m2({ id: 'm2-model-unknown-name', title: 'Model menu (/model) with a name it does not know', how: 'Type /model nonesuch in an idle session and press Enter', state: 'The menu’s line saying no model has that name', folders: ['widgets', 'composer'] }), async () => {
+    await openSession(page, SID.idle);
+    await m2Build(page); // the line is the same element on both builds: the build is checked against the checkout first
+    await open('model', 'nonesuch');
+  }, { check: () => inView(dialogOf(page, 'model').locator('p.text-warning'), 'the line for the unknown name') });
+  await reset(page);
+
+  // C32: the microphone a named glyph, Dictate its tooltip on focus; master's word is its system title, which no
+  // picture draws, so the before shows the focused button alone
+  const mic = () => pane(page).locator(MIC).first();
+  await shot(page, m2({ id: 'm2-mic-tip', title: 'Message box, the microphone holding the keyboard', how: 'An idle session; Tab to the microphone under the message box', state: 'The microphone focused, its word Dictate its tooltip (master’s is a system tooltip, not drawn here)', folders: ['composer/dictation', 'composer/frame', 'ui'] }), async () => {
+    await openSession(page, SID.idle);
+    await m2Build(page);
+    await letGo(page);
+    await mic().scrollIntoViewIfNeeded();
+    await page.waitForTimeout(400);
+    await mic().focus();
+  }, { check: checks(focusIn(mic(), 'the microphone'), tipShown(page, mic(), 'the microphone', mic(), m2Cut)) });
+  await letGo(page);
+
+  // C46: the context popover's figures line owns the percentage and what is left until compaction (statusline/
+  // ContextPopover.tsx, Breakdown: the figures the first line under the heading on both builds; master draws the
+  // percentage at rest on the line after it, which M2 cut). The reading is the widget backend's get_context_usage
+  // (test/support/widget-backend.ts: reads.jsonl seq 57, 30,433 of 200,000 tokens, 15%, compaction at 167,000), as each
+  // build writes it (statusline/copy.ts CONTEXT_POPOVER on M2, master's Breakdown literals): the check reads the figures
+  // themselves, so a lost breakdown or another reading is not taken for them
+  const context = () => page.locator('[role="dialog"][aria-label="Context window"]');
+  const figures = () => context().locator('h3 + p');
+  const masterUsed = () => context().locator('h3 + p + p'); // master's second line
+  const FIGURES = { m2: '30k of 200k · compacts at 167k', master: '30k of 200k · autocompact at 167k' };
+  const USED = '15.0% used · 137k until compaction';
+  await shot(page, m2({ id: 'm2-context-figures-tip', title: 'Context popover, its figures holding the keyboard', how: 'An idle session, the ring at the end of the row under the message box; Tab to its first line', state: 'The recorded context reading’s line focused: the percentage used and what is left until compaction its tooltip', folders: ['statusline', 'composer/frame', 'ui'] }), async () => {
+    await openSession(page, SID.idle);
+    await m2Build(page);
+    await pane(page).locator('[data-composer] [data-context-ring]').first().click();
+    await expect(context().locator('table'), 'the breakdown read').toBeVisible({ timeout: 10_000 });
+    await focusTip(page, figures(), masterUsed(), m2Cut);
+  }, {
+    check: async () => {
+      await expect(figures(), 'the recorded figures').toHaveText(byBuild(FIGURES), { timeout: 3_000 });
+      if (!m2Cut()) {
+        await inView(masterUsed(), 'master’s line of the share used');
+        return void (await expect(masterUsed(), 'master’s recorded share used').toHaveText(USED, { timeout: 3_000 }));
+      }
+      await tipShown(page, figures(), 'the context’s figures', masterUsed(), m2Cut)();
+      await expect(page.getByRole('tooltip').first(), 'the recorded share used, its tooltip').toHaveText(USED, { timeout: 3_000 });
+      await expect(figures(), 'the recorded share used, its description').toHaveAccessibleDescription(USED, { timeout: 3_000 });
+    },
+    after: () => closeOverlays(page),
+  });
+  await reset(page);
+
+  // C128: the held line's pid waits on its words (session/HolderNotice.tsx); master's line names it at rest
+  const note = () => pane(page).locator('[role="note"]').first();
+  const holder = () => note().locator('span[tabindex="0"]');
+  await shot(page, m2({ id: 'm2-held-pid-tip', title: 'A session held by a terminal, its line holding the keyboard', how: 'Click a session another terminal runs; Tab to the line in the message box’s place', state: 'Live in Terminal · read-only focused, the holder’s pid its tooltip', folders: ['session', 'ui'] }), async () => {
+    await openSession(page, SID.idle);
+    await m2Build(page);
+    await openSession(page, SID.terminal);
+    await expect(note()).toBeVisible({ timeout: 10_000 });
+    await focusTip(page, holder(), note(), m2Cut);
+  }, { check: tipShown(page, holder(), 'the holder’s line', note(), m2Cut) });
+  await letGo(page);
+  await reset(page);
+
+  // the model view by the effort view's button that names the model (widgets/ModelSelector.tsx: `data-effort-title`
+  // inside it, `data-model-selector` the view shown, on both builds); P555's new chat is launch 10's (m2-new-chat-model-view)
+  const selector = () => page.locator('[data-model-selector]').first();
+  const modelView = () => page.locator('[data-model-selector="model"]').first();
+
+  // P549: a model asked for that the engine has not confirmed: the widget backend accepts set_model and moves the
+  // status's `requested` without the init frame that would confirm it (test/support/widget-backend.ts, control), so the
+  // checked row stays on its way. On M2's build a quiet spinner in the check's place; on master's, the row's "setting…"
+  // (ModelSelector.tsx: the checked row's `ml-auto` word). The session is the unopened one, so no other scene's chip
+  // shows the change.
+  const modelChip = () => toolbar().locator('button[aria-haspopup="dialog"]:not([data-context-ring])').last();
+  const toModels = async () => {
+    await expect(selector()).toBeVisible({ timeout: 10_000 });
+    if ((await selector().getAttribute('data-model-selector')) !== 'model') await selector().locator('button:has([data-effort-title])').first().click();
+    await expect(modelView()).toBeVisible({ timeout: 5_000 });
+  };
+  const askedRow = () => modelView().locator('[role="menu"] [role="menuitemradio"][aria-checked="true"]').first();
+  await shot(page, m2({ id: 'm2-model-pending', title: 'Model menu, a model asked for and not confirmed yet', how: 'A session not opened before, the model chip under the message box; the model’s name, another model, then the model’s name again', state: 'The list with the model asked for checked, its change on its way a spinner in its check’s place', folders: ['widgets', 'composer/frame', 'ui'] }), async () => {
+    await openSession(page, SID.unopened);
+    await m2Build(page);
+    await modelChip().click();
+    await toModels();
+    await modelView().locator('[role="menu"] [role="group"] [role="menuitemradio"][aria-checked="false"]:not([disabled])').first().click();
+    await expect(selector(), 'back to the effort view').toHaveAttribute('data-model-selector', 'effort', { timeout: 5_000 });
+    await toModels();
+  }, {
+    check: async () => {
+      await inView(askedRow(), 'the model asked for, checked');
+      if (m2Cut()) await expect(askedRow().getByRole('progressbar'), 'its change on its way').toBeVisible({ timeout: 3_000 });
+      else await inView(askedRow().locator('span.ml-auto'), 'master’s setting… on the row');
+    },
+    after: () => closeOverlays(page),
+  });
+  await reset(page);
+
+  // C10: the Memory chip's menu, opened onto the memory files under no heading (composer/modes/ModeChrome.tsx: the chip
+  // is the mode's one menu trigger, inside the editor's `data-mode` element, on both builds). The files are the widget
+  // backend's get_memory_dialog answer (reads#69: User instructions and Project instructions), so the menu settles: no
+  // loading line ("Reading the memory files…", the same literal on both builds), both files listed, and master's heading
+  // "# appends to" (its DropdownMenu.Label) in view there and absent on M2.
+  const memoryChip = () => pane(page).locator('[data-composer] [data-mode="memory"] button[aria-haspopup="menu"]').first();
+  const memoryMenu = () => page.getByRole('menu').first();
+  const clearBox = async () => {
+    await closeOverlays(page);
+    await box(page).click();
+    await page.keyboard.press('Meta+a');
+    await page.keyboard.press('Backspace');
+  };
+  await shot(page, m2({ id: 'm2-memory-menu', title: 'The message box in memory mode, its Memory chip’s menu', how: 'An idle session; type # in the message box, then press the Memory chip', state: 'The menu of where # appends: the memory files read, under no heading; nothing sent', folders: ['composer', 'composer/modes'] }), async () => {
+    await openSession(page, SID.idle);
+    await m2Build(page);
+    await box(page).click();
+    await page.keyboard.type('#');
+    await memoryChip().click();
+    await expect(memoryMenu()).toBeVisible({ timeout: 5_000 });
+  }, {
+    check: checks(
+      () => expect(memoryChip(), 'the Memory chip open').toHaveAttribute('aria-expanded', 'true', { timeout: 3_000 }),
+      () => inView(memoryMenu(), 'its menu'),
+      () => expect(memoryMenu().getByText('Reading the memory files…', { exact: true }), 'the files read: no loading line').toHaveCount(0, { timeout: 5_000 }),
+      () => inView(memoryMenu().getByRole('menuitem').filter({ hasText: 'User instructions' }), 'the user’s memory file'),
+      () => inView(memoryMenu().getByRole('menuitem').filter({ hasText: 'Project instructions' }), 'the project’s memory file'),
+      () => (m2Cut() ? expect(memoryMenu().getByText('# appends to', { exact: true }), 'no heading (C10)').toHaveCount(0) : inView(memoryMenu().getByText('# appends to', { exact: true }), 'master’s heading')),
+    ),
+    after: clearBox,
+  });
+
+  // C54: an agent's description only on its highlighted row (composer/mentions/AtMenu.tsx). The widget backend's
+  // catalogue (pass2/auto-routed#4) lists Explore; typed in full, its row is the one highlighted, and its description
+  // stands in it on both builds (master draws every row's description at rest)
+  const explore = () => page.getByRole('listbox').first().getByRole('option', { name: /^Explore\b/ }).first();
+  await shot(page, m2({ id: 'm2-mention-agent', title: 'Mention menu (typing @), an agent highlighted', how: 'An idle session; type @Explore in the message box', state: 'The Explore agent highlighted, its description on its row', folders: ['composer/mentions', 'composer', 'composer/editor'] }), async () => {
+    await openSession(page, SID.idle);
+    await m2Build(page);
+    await box(page).click();
+    await page.keyboard.type('@Explore');
+    await expect(explore()).toBeVisible({ timeout: 10_000 });
+  }, {
+    check: checks(
+      () => expect(explore(), 'Explore highlighted').toHaveAttribute('aria-selected', 'true', { timeout: 5_000 }),
+      () => inView(explore().getByText(/^Fast read-only search agent/), 'its description, the catalogue’s words'),
+    ),
+    after: clearBox,
+  });
+  await reset(page);
+}
+
 // ======================================================================================================================
 // Launch 2: sessions discovered from a scratch engine store, then played through the replay engine, so their
 // transcripts have real tool calls, agents and finished turns; the right column's panels; the Artifacts library.
@@ -1044,25 +1400,36 @@ async function toEnd(page: Page) {
     await page.waitForTimeout(600);
   }
 }
-async function openTurn(page: Page, runs = false) {
-  const line = turnLine(page).last();
-  if ((await line.getAttribute('aria-expanded')) !== 'true') await line.click();
-  await page.waitForTimeout(800);
-  for (let i = 0; runs && i < 20; i++) {
-    const run = pane(page).locator('.transcript-run-line[aria-expanded="false"]');
-    if ((await run.count()) === 0) break;
-    await run.first().click();
+// A transcript control pressed with what covers it cleared first (closeOverlays), each click given a few seconds; a
+// control that takes neither of two clicks fails the step, naming what covered it, where the click's own 30 s wait,
+// repeated down a loop, outlasted the test.
+async function press(page: Page, target: Locator, what: string) {
+  for (let attempt = 0; ; attempt++) {
+    await closeOverlays(page);
+    const error = await target.click({ timeout: 4_000 }).then(() => null, (e: unknown) => e);
+    if (error === null) return;
+    if (attempt === 1) {
+      const cover = stripVTControlCharacters(error instanceof Error ? error.message : String(error)).split('\n').find((line) => line.includes('intercepts pointer events'));
+      throw new Error(`${what} took no click, twice${cover ? `: ${cover.trim().slice(0, 200)}` : ''}`, { cause: error });
+    }
+  }
+}
+// Each closed disclosure `closed` matches pressed open, the first first, until none is left or `max` presses were made.
+async function unfold(page: Page, closed: Locator, what: string, max: number) {
+  for (let i = 0; i < max && (await closed.count()) > 0; i++) {
+    await press(page, closed.first(), what);
     await page.waitForTimeout(300);
   }
+}
+async function openTurn(page: Page, runs = false) {
+  const line = turnLine(page).last();
+  if ((await line.getAttribute('aria-expanded', { timeout: 10_000 })) !== 'true') await press(page, line, 'the last turn’s line');
+  await page.waitForTimeout(800);
+  if (runs) await unfold(page, pane(page).locator('.transcript-run-line[aria-expanded="false"]'), 'a closed run’s line', 20);
   await toTop(page);
 }
 async function unfoldAll(page: Page) {
-  for (let i = 0; i < 40; i++) {
-    const closed = pane(page).locator('.transcript-row[data-kind="divider"] button.transcript-disclosure[aria-expanded="false"], .transcript-run-line[aria-expanded="false"]');
-    if ((await closed.count()) === 0) break;
-    await closed.first().click().catch(() => undefined);
-    await page.waitForTimeout(300);
-  }
+  await unfold(page, pane(page).locator('.transcript-row[data-kind="divider"] button.transcript-disclosure[aria-expanded="false"], .transcript-run-line[aria-expanded="false"]'), 'a closed turn’s or run’s line', 40);
   await toTop(page);
 }
 // A panel's own sections open (section[data-section] > h3 > button): the agents' Running, Done and On disk
@@ -1115,10 +1482,17 @@ test('replay: transcripts, the right column, the Artifacts library and an editor
         // a launched replay files the transcript under the fixture's engine id and the record loses its seeded title
         value(await invoke(page, 'session.rename', { appSessionId: ids[p.key] as never, title: p.title }));
       } catch (error) {
-        console.log(`[words] replay ${p.key} failed: ${(error as Error).message.split('\n')[0]}`);
+        setupFailed(`replay ${p.key}`, error);
       }
     }
-    // the stopped work: each prompt, then the person's stop of what it started (the recording's stop_task writes)
+    // the stopped work: each prompt, then the person's stop of what it started (the recording's stop_task writes). The
+    // replay holds at each recorded `out` row until the app writes it (engine-host/replay-transport.ts), and the shell's
+    // and the workflow's stops were written while their turns still ran: stop-task.jsonl's seq 42 comes before its first
+    // turn's result (57), and 230 before the third's (243); only the agent's (135) follows its turn's result (130). So
+    // each stop is written once the task it stops is listed running (its `background_tasks_changed`, seq 39, 104, 222,
+    // which the replay plays before it holds at the stop), and the turn's end is awaited after it; waiting for the turn
+    // to end first, as M0's run did, waited on a turn the replay could not end. After the agent's stop the engine opens a
+    // turn of its own for the stopped agent's notice (seq 141 to 166), which ends before the next prompt is sent.
     let stopped = false;
     try {
       const journal = join(SCRATCH, 'journals', 'stop-task.jsonl');
@@ -1127,14 +1501,17 @@ test('replay: transcripts, the right column, the Artifacts library and an editor
       await launchReady(page, ids.stopped!, journal, { cwd: repo });
       const prompts = promptsOf(STOPPED.fixture);
       for (let i = 0; i < STOPPED.stops.length; i++) {
+        const task = STOPPED.stops[i]!;
         value(await invoke(page, 'session.send', { appSessionId: ids.stopped as never, content: prompts[i]! }));
-        await expect.poll(async () => (await status(ids.stopped!)).turn, { timeout: 60_000 }).toBeNull();
-        value(await invoke(page, 'session.stopTask', { appSessionId: ids.stopped as never, taskId: STOPPED.stops[i]! } as never));
+        await expect.poll(async () => (await status(ids.stopped!)).backgroundTasks.some((t) => t.taskId === task), { message: `${task} listed running`, timeout: 60_000 }).toBe(true);
+        value(await invoke(page, 'session.stopTask', { appSessionId: ids.stopped as never, taskId: task } as never));
+        await expect.poll(async () => (await status(ids.stopped!)).turn, { message: `the turn of ${task}’s stop ended`, timeout: 60_000 }).toBeNull();
         await page.waitForTimeout(1500);
+        await expect.poll(async () => (await status(ids.stopped!)).turn, { message: 'the engine’s own turn after the stop ended', timeout: 60_000 }).toBeNull();
       }
       stopped = true;
     } catch (error) {
-      console.log(`[words] replay stopped failed: ${(error as Error).message.split('\n')[0]}`);
+      setupFailed('replay stopped', error);
     }
     await dismissToasts(page);
     await page.waitForTimeout(1000);
@@ -1149,9 +1526,11 @@ test('replay: transcripts, the right column, the Artifacts library and an editor
       await box(page).hover();
       await page.waitForTimeout(1200);
     });
+    // the turn's line folded (T1, T2: on M2's build its duration and what the turn did, with no "Worked for")
+    const folded = (open: boolean) => () => inView(turnLine(page).last().and(page.locator(`[aria-expanded="${open}"]`)), `the turn’s line ${open ? 'open' : 'folded'}`);
     await shot(page, { id: 'shell-tools', title: 'A finished session with many tool calls', how: 'Click the session in the sidebar', state: 'One finished turn: reads, searches, edits and commands, folded to its line', folders: ['transcript', 'tools', 'markup', 'session', 'composer'] }, async () => {
       await openSession(page, ids.tools!);
-    });
+    }, { check: folded(false) });
     await shot(page, { id: 'shell-explore', title: 'A finished session that searched and read the web', how: 'Click the session in the sidebar', state: 'Searches, reads, a web search and fetch, a skill and a connector call, folded to the turn’s line', folders: ['transcript', 'tools', 'markup'] }, async () => {
       await openSession(page, ids.explore!);
     });
@@ -1166,7 +1545,7 @@ test('replay: transcripts, the right column, the Artifacts library and an editor
     await shot(page, { id: 'shell-tools-open', title: 'A finished turn opened: its tool calls', how: 'Click the turn’s line at the end of the turn', state: 'The tool-heavy session’s turn opened, read from the top: its steps as runs of calls, one line each', folders: ['transcript', 'transcript/view', 'tools', 'markup'] }, async () => {
       await openSession(page, ids.tools!);
       await openTurn(page);
-    });
+    }, { check: () => expect(turnLine(page).last(), 'the turn’s line open').toHaveAttribute('aria-expanded', 'true', { timeout: 3_000 }) });
     await shot(page, m0({ id: 'm0-shell-tools-runs', title: 'A finished turn opened, every run opened', how: 'Then click each run’s line', state: 'The tool-heavy session’s turn with every run opened onto its calls, read from the top', folders: ['transcript', 'transcript/view', 'tools', 'markup'] }), async () => {
       await openSession(page, ids.tools!);
       await openTurn(page, true);
@@ -1176,6 +1555,46 @@ test('replay: transcripts, the right column, the Artifacts library and an editor
       await openTurn(page, true);
       await toEnd(page);
     });
+    // M2 (T18, T20, T22): a command's call opened, a copy glyph holding the keyboard. The call is mockup-turn.jsonl's
+    // `pnpm test` (toolu_synth_mock_9; a cell's id is `cell:<tool use id>`, transcript/model/keys.ts); its line opens its
+    // detail (transcript/view/cells/CellLine.tsx). Copy command is the heading's one button on both builds (master's
+    // worded button, M2's glyph named by those words, drawn while the heading is pointed at or holds focus); Copy output
+    // on M2's build is the glyph over the output's corner, drawn the same way, where master words it in the footer. Each
+    // glyph shows only for its own part, so each is its own scene.
+    const call = () => pane(page).locator('[data-cell-id="cell:toolu_synth_mock_9"]').first();
+    const callOpen = async () => {
+      await openSession(page, ids.tools!);
+      await m2Build(page);
+      await openTurn(page, true);
+      await seek(page, call());
+      const line = call().locator('button.transcript-cell-line').first();
+      if ((await line.getAttribute('aria-expanded')) !== 'true') await line.click();
+      await expect(call().locator('.transcript-shell').first(), 'the call’s detail').toBeVisible({ timeout: 10_000 });
+      await letGo(page);
+    };
+    const copyCommand = () => call().locator('.transcript-shell-heading button').first();
+    await shot(page, m2({ id: 'm2-shell-call-open', title: 'A command’s call opened, its copy glyph holding the keyboard', how: 'The tool-heavy session’s turn and runs opened, click the pnpm test call, then Tab to its Copy command', state: 'The call’s command, output and footer (its time alone), Copy command focused with its word the tooltip; Copy all a glyph in the footer', folders: ['transcript/view', 'transcript/view/cells', 'tools', 'ui'] }), async () => {
+      await callOpen();
+      await copyCommand().scrollIntoViewIfNeeded();
+      await page.waitForTimeout(400);
+      await copyCommand().focus();
+    }, { check: checks(focusIn(copyCommand(), 'Copy command'), drawn(copyCommand(), 'Copy command drawn'), tipShown(page, copyCommand(), 'Copy command', copyCommand(), m2Cut)) });
+    await letGo(page);
+    // its name on both builds (transcript/model/copy.ts DETAIL.copyOutput): M2's glyph over the output, master's worded footer button
+    const copyOutput = () => call().locator('.transcript-shell-output').getByRole('button', { name: 'Copy output', exact: true }).first();
+    await shot(page, m2({ id: 'm2-shell-output-copy', title: 'A command’s call opened, its output’s copy glyph holding the keyboard', how: 'The tool-heavy session’s turn and runs opened, click the pnpm test call, then Tab to its Copy output', state: 'The output’s copy glyph focused over the output’s corner, its word Copy output the tooltip (master words it in the footer)', folders: ['transcript/view', 'transcript/view/cells', 'ui'] }), async () => {
+      await callOpen();
+      if (!m2Cut()) return void (await call().locator('.transcript-shell-footer').scrollIntoViewIfNeeded());
+      await copyOutput().scrollIntoViewIfNeeded();
+      await page.waitForTimeout(400);
+      await copyOutput().focus();
+    }, {
+      check: async () => {
+        if (!m2Cut()) return inView(call().locator('.transcript-shell-footer').getByRole('button', { name: 'Copy output', exact: true }), 'master’s worded Copy output in the footer');
+        await checks(focusIn(copyOutput(), 'Copy output'), drawn(copyOutput(), 'Copy output drawn'), tipShown(page, copyOutput(), 'Copy output', copyOutput(), m2Cut))();
+      },
+    });
+    await letGo(page);
     await shot(page, { id: 'shell-agents-open', title: 'A finished turn opened: agents and their messages', how: 'Click the turn’s line of the agents session', state: 'Two agents dispatched, one messaged, a search, as runs read from the top', folders: ['transcript', 'transcript/view', 'tools/agents'] }, async () => {
       await openSession(page, ids.agents!);
       await openTurn(page);
@@ -1261,12 +1680,32 @@ test('replay: transcripts, the right column, the Artifacts library and an editor
       await openSession(page, ids.stopped!);
       await sideSurface(app, page, 'subagents');
       await unfoldSections(page, 'subagents');
+    }, {
+      // the recording's agent (stop-task.jsonl: ac2bd8a00d8e492f4, "Sleep 90 seconds", stopped at seq 135) under Done,
+      // its line saying stopped (tools/agents/subagents/AgentRow.tsx; the words of tools/agents/copy.ts, unchanged by M2)
+      check: async () => {
+        const row = surface(page, 'subagents').locator('section[data-section="done"] [data-agent-row="ac2bd8a00d8e492f4"]');
+        await inView(row, 'the stopped agent under Done');
+        await expect(row.locator('[data-part="state"]').first(), 'its line').toHaveText(new RegExp(`^${SUBAGENTS_COPY.stoppedUndated}\\b`), { timeout: 3_000 });
+      },
     });
     await shot(page, m0({ id: 'm0-background-stopped', title: 'Right column, Background tasks, stopped work', how: 'The same session, Background tasks with Done open', state: 'A shell and a workflow the person stopped, under Done', folders: ['tools/agents/background', 'panel'] }), async () => {
       if (!stopped) throw new Error('the stop-task replay did not reach its third stop');
       await openSession(page, ids.stopped!);
       await sideSurface(app, page, 'background');
       await unfoldSections(page, 'background');
+    }, {
+      // the recording's shell (ba3cr5gnx, stopped at seq 42) and workflow (wkmzd07jp, stopped at seq 230) under Done, each
+      // saying stopped (tools/agents/background/TaskRows.tsx's line, run-parts.tsx's badge)
+      check: async () => {
+        const done = surface(page, 'background').locator('section[data-section="done"]');
+        const shell = done.locator('[data-shell="ba3cr5gnx"]');
+        const workflow = done.locator('[data-workflow="wkmzd07jp"]');
+        await inView(shell, 'the stopped shell under Done');
+        await expect(shell.locator('[data-part="state"]').first(), 'the shell’s state').toContainText(BACKGROUND_COPY.status.stopped, { timeout: 3_000 });
+        await inView(workflow, 'the stopped workflow under Done');
+        await expect(workflow.locator('[data-part="status"]').first(), 'the workflow’s badge').toHaveText(BACKGROUND_COPY.status.stopped, { timeout: 3_000 });
+      },
     });
     await reset(page);
 
@@ -1373,22 +1812,29 @@ const DISK: { key: string; file: string; title: string; state: string; folders: 
 const diskId = (i: number) => `0b2c3d4e-0000-4000-8000-0000000002${String(i).padStart(2, '0')}`;
 // The engine's workflow files for a disk session (engine-host/fs/workflows.ts): the recorded run of pass2/workflow-disk
 const WORKFLOW = 'spikes/protocol-probe/fixtures/pass2/workflow-disk';
+// A recorded transcript's row moved onto a scratch session: its cwd onto `repo`, its session id onto `id`.
+function moveRow(line: string, id: string, repo: string): string {
+  if (!line.trim()) return line;
+  const row = JSON.parse(line) as Record<string, unknown>;
+  if ('cwd' in row) row.cwd = repo;
+  if ('sessionId' in row) row.sessionId = id;
+  return JSON.stringify(row);
+}
+// A recorded transcript written into the scratch engine store as session `id` of `repo`'s project; its project folder.
+function writeDisk(config: string, file: string, id: string, repo: string): string {
+  const project = join(config, 'projects', repo.replace(/[^a-zA-Z0-9]/g, '-'));
+  mkdirSync(project, { recursive: true });
+  const lines = readFileSync(join(REPO_ROOT, file), 'utf8').split('\n');
+  writeFileSync(join(project, `${id}.jsonl`), lines.map((l) => moveRow(l, id, repo)).join('\n'));
+  return project;
+}
 // four sessions to a project at most, so every one is a row in the sidebar's tree (it lists five, then Show more)
 function seedDisk(config: string, repos: string[]) {
-  const move = (line: string, id: string, repo: string) => {
-    if (!line.trim()) return line;
-    const row = JSON.parse(line) as Record<string, unknown>;
-    if ('cwd' in row) row.cwd = repo;
-    if ('sessionId' in row) row.sessionId = id;
-    return JSON.stringify(row);
-  };
+  const move = moveRow;
   DISK.forEach((d, i) => {
     const id = diskId(i);
     const repo = repos[i % repos.length]!;
-    const project = join(config, 'projects', repo.replace(/[^a-zA-Z0-9]/g, '-'));
-    mkdirSync(project, { recursive: true });
-    const lines = readFileSync(join(REPO_ROOT, d.file), 'utf8').split('\n');
-    writeFileSync(join(project, `${id}.jsonl`), lines.map((l) => move(l, id, repo)).join('\n'));
+    const project = writeDisk(config, d.file, id, repo);
     if (d.key === 'subagents') {
       const from = join(REPO_ROOT, 'test/fixtures/transcripts/9a1d4262-0b43-46ad-acb9-5982f31d209c/subagents');
       const to = join(project, id, 'subagents');
@@ -1452,6 +1898,36 @@ test('round 2: recorded transcripts, menus and popovers around a session', async
       await pane(page).locator('[data-view-switch] button').first().click();
       await page.waitForTimeout(800);
     });
+    // M2 (T105, T106): a done browser action pointed at: its time and wait the tooltip of its phrase, opened by pointing
+    // anywhere along its line, and its quiet actions drawn (transcript/view/rows/BrowserAction.tsx). The action is the
+    // recording's first snapshot (p1-maws-browser: toolu_01Fych5jA99p8WVKoT575nt1, done in 60 ms, its page text the
+    // result), the first done row with both quiet actions, each found by its name (BROWSER_ACTION, the same on both builds):
+    // Show snapshot (the disclosure, `aria-expanded`) and Open tab;
+    // on master's build its time stands on the line (`data-browser-took`). The row is pinned by its id (the same on both
+    // builds, transcript/model/keys.ts `browserAction`): the recording's second snapshot reads the same, so any other
+    // match would pass every check below with the wrong row
+    const action = () => pane(page).locator('[data-row-id="browser:toolu_01Fych5jA99p8WVKoT575nt1"] .transcript-browser-action[data-tool="browser_snapshot"][data-state="done"]');
+    const actionButtons = () => action().locator('.transcript-browser-action-actions button.transcript-quiet-button');
+    await shot(page, m2({ id: 'm2-browser-action-pointed', title: 'A browser action, the pointer on its line', how: 'The session that drove the browser, its turns opened; hover the first snapshot’s line', state: 'The snapshot’s time its tooltip, Show snapshot and Open tab drawn', folders: ['transcript/view', 'tools/browser', 'ui'], hover: true }), async () => {
+      await openSession(page, ids.browser!);
+      await m2Build(page);
+      await expect(pane(page).locator('.transcript-row[data-kind]').first()).toBeVisible({ timeout: 20_000 });
+      await unfoldAll(page);
+      await seek(page, action());
+      await page.mouse.move(W - 2, H - 2);
+      await action().locator('.transcript-browser-action-line').first().hover();
+      await page.waitForTimeout(1200);
+    }, {
+      check: checks(
+        pointedAt(action().locator('.transcript-browser-action-line'), 'the snapshot’s line'),
+        tipShown(page, action().locator('[data-browser-heading]'), 'the snapshot’s phrase', action().locator('[data-browser-took]'), m2Cut),
+        () => expect(actionButtons(), 'its two quiet actions').toHaveCount(2, { timeout: 3_000 }),
+        () => expect(actionButtons().filter({ hasText: /^Show snapshot$/ }), 'Show snapshot, closed').toHaveAttribute('aria-expanded', 'false'),
+        drawn(action().locator('.transcript-browser-action-actions'), 'its actions drawn'),
+        () => inView(action().getByRole('button', { name: 'Show snapshot', exact: true }), 'Show snapshot'),
+        () => inView(action().getByRole('button', { name: 'Open tab', exact: true }), 'Open tab'),
+      ),
+    });
     await shot(page, r2({ id: 'r2-subagents-finished', title: 'Right column, Subagents, two finished agents', how: 'The agents session, Subagents in the right column, its sections open', state: 'Two agents read from disk (their sidecar files only, so filed under On disk)', folders: ['tools/agents', 'panel'] }), async () => {
       await openSession(page, ids.subagents!);
       await sideSurface(app, page, 'subagents');
@@ -1496,12 +1972,22 @@ test('round 2: recorded transcripts, menus and popovers around a session', async
       await box(page).click();
       await toolbar().locator('button[aria-haspopup="dialog"]:not([data-context-ring])').last().click();
       await soft(page.locator('[data-model-selector]'), 'the model selector');
-    });
+    }, { check: () => inView(page.locator('[data-model-selector="effort"]'), 'the model menu’s effort view') });
     await reset(page);
-    await shot(page, r2({ id: 'r2-context-popover', title: 'Context popover, from the ring', how: 'Click the ring at the end of the row under the message box', state: 'The context breakdown of a finished session', folders: ['composer/frame', 'statusline'] }), async () => {
+    await shot(page, r2({ id: 'r2-context-popover', title: 'Context popover, from the ring', how: 'Click the ring at the end of the row under the message box', state: 'The context reading of a finished session no process runs: its last reading (or none yet), and Refresh', folders: ['composer/frame', 'statusline'] }), async () => {
       await openSession(page, ids.subagents!);
       await pane(page).locator('[data-composer] [data-context-ring]').first().click();
       await page.waitForTimeout(1500);
+    }, {
+      // composer/frame/ContextRing.tsx's popover, named on both builds. The session is read from disk and never started
+      // here, so its popover holds the dormant reading (statusline/ContextPopover.tsx: the breakdown draws only for a
+      // live process): the line under its heading, no breakdown, and the gesture that starts it
+      check: async () => {
+        const popover = page.locator('[role="dialog"][aria-label="Context window"]');
+        await inView(popover.locator('h3 + p'), 'the context popover’s reading');
+        await expect(popover.locator('table'), 'no live breakdown').toHaveCount(0);
+        await inView(popover.locator('[data-dormant-gesture]'), 'its Refresh');
+      },
     });
     await reset(page);
     await shot(page, r2({ id: 'r2-plus-menu', title: 'Message box, the + menu', how: 'Click + under the message box', state: 'The + menu of a finished session', folders: ['composer/frame', 'composer', 'composer/plus-menu'] }), async () => {
@@ -1523,7 +2009,7 @@ test('round 2: recorded transcripts, menus and popovers around a session', async
       await page.keyboard.type('@');
       await expect(page.locator('[role="listbox"]').first()).toBeVisible({ timeout: 5_000 });
       await page.waitForTimeout(1200);
-    }, { after: clearBox });
+    }, { check: () => inView(page.locator('[role="listbox"] [role="option"][aria-selected="true"]'), 'the menu with a row highlighted'), after: clearBox });
     await shot(page, r2({ id: 'r2-slash-menu', title: 'Slash command menu (typing /)', how: 'Type / in the message box', state: 'The command list of a finished session', folders: ['composer', 'composer/mentions', 'palette'] }), async () => {
       await openSession(page, ids.subagents!);
       await box(page).click();
@@ -1536,13 +2022,35 @@ test('round 2: recorded transcripts, menus and popovers around a session', async
       await box(page).click();
       await page.keyboard.type('!git status');
       await soft(pane(page).locator('[data-composer] [data-mode="bash"]'), 'the Bash mode');
-    }, { after: clearBox });
+    }, { check: () => inView(pane(page).locator('[data-composer] [data-mode="bash"]'), 'the box in Bash mode'), after: clearBox }); // composer/editor/Editor.tsx, data-mode
     await shot(page, m0({ id: 'm0-composer-memory', title: 'The message box in memory mode', how: 'Type # in the message box', state: '“#” typed: the memory mode’s chip and hint; nothing sent', folders: ['composer', 'composer/modes', 'composer/editor'] }), async () => {
       await openSession(page, ids.subagents!);
       await box(page).click();
       await page.keyboard.type('#');
       await soft(pane(page).locator('[data-composer] [data-mode="memory"]'), 'the memory mode');
-    }, { after: clearBox });
+    }, { check: () => inView(pane(page).locator('[data-composer] [data-mode="memory"]'), 'the box in memory mode'), after: clearBox });
+    // M2 (C22): the location chip of a started session opened: its path alone, where master adds that the location is
+    // fixed (composer/frame/LocationChip.tsx: its trigger named `Location <path>` and its popover `Location`, the same on
+    // both builds; the note is the popover's second line on master's)
+    const location = () => page.locator('[role="dialog"][aria-label="Location"]');
+    await shot(page, m2({ id: 'm2-location-popover', title: 'The location chip opened on a started session', how: 'Click the folder chip under the message box', state: 'The session’s folder, and no line saying it cannot move', folders: ['composer/frame', 'composer'] }), async () => {
+      await openSession(page, ids.subagents!);
+      await m2Build(page);
+      await toolbar().locator('button[aria-label^="Location "]').first().click();
+      await expect(location()).toBeVisible({ timeout: 5_000 });
+    }, {
+      check: async () => {
+        await inView(location().locator('p').first(), 'the session’s folder');
+        if (!m2Cut()) await inView(location().locator('p').nth(1), 'master’s line on the fixed location');
+      },
+      after: () => closeOverlays(page),
+    });
+    // M2 (P579): the + menu's Connectors, of a session that is not running: its one line says why it lists none
+    await shot(page, m2({ id: 'm2-plus-connectors-stopped', title: 'Message box, + › Connectors of a session not running', how: 'Click + under the message box, then Connectors', state: 'The Connectors submenu of a finished session no process runs: why it lists none, In this chat and Manage', folders: ['composer/plus-menu', 'composer', 'widgets'], hover: true }), async () => {
+      await openSession(page, ids.subagents!);
+      await m2Build(page);
+      await plusSubmenu(page, 'Connectors');
+    }, { check: submenuHolds(page, 'Connectors', [], () => byBuild(CONNECTORS_LINE.notRunning)), after: () => closeOverlays(page) });
     await reset(page);
     await shot(page, r2({ id: 'r2-usage-popover', title: 'Usage ring popover', how: 'Click the ring at the right end of the title bar', state: 'The ClaudeUsage fixture, newest reading two minutes old', folders: ['usage'] }), async () => {
       await page.locator('[data-toolbar] [data-usage-ring]').first().click();
@@ -1685,7 +2193,7 @@ test('round 2: running agents and shells, the queue, a blocked command, Source c
       // no rename here: a live session's rename is written to its engine, which the replay does not expect
       running = true;
     } catch (error) {
-      console.log(`[words] uxwave replay: ${(error as Error).message.split('\n')[0]}`);
+      setupFailed('uxwave replay', error);
     }
     const need = () => {
       if (!running) throw new Error('the held replay did not reach its second hold');
@@ -1695,11 +2203,59 @@ test('round 2: running agents and shells, the queue, a blocked command, Source c
       await openSession(page, ids.run!);
       await unfoldCards(page);
     });
+    // a working agent's line (transcript/view/rows/Subagent.tsx; `data-status` none of the three ended ones): on M2's
+    // build the running ring named Working before the descriptions (T86); on master's, the lines under it saying what
+    // each agent is doing (`data-agent-detail`)
+    const working = () => pane(page).locator('.transcript-subagent:not([data-status="finished"]):not([data-status="finished_with_errors"]):not([data-status="stopped"])').first();
+    const agentWorking = async () => {
+      if (await m2Build(page)) await expect(working().locator('.transcript-subagent-ring[role="img"]'), 'a working agent’s ring').toBeAttached({ timeout: 3_000 });
+      else await expect(working().locator('[data-agent-detail]').first(), 'master’s line of what a working agent is doing').toBeAttached({ timeout: 3_000 });
+    };
+    // the two agents the recording dispatched, both still at work and in view: their glyphs in the working rows (one row
+    // of two, or a row each; Subagent.tsx's Glyphs on both builds), and on master's build a line of what each is doing
+    const workingRows = () => pane(page).locator('.transcript-subagent:not([data-status="finished"]):not([data-status="finished_with_errors"]):not([data-status="stopped"])');
+    const workingGlyphs = () => workingRows().locator('.transcript-glyphs > :not(.transcript-glyph-overflow)');
+    const agentsRun = async () => {
+      await agentWorking();
+      await expect(workingGlyphs(), 'two agents at work').toHaveCount(2, { timeout: 3_000 });
+      for (const n of [0, 1]) await expect(workingGlyphs().nth(n), 'a working agent in view').toBeInViewport({ timeout: 3_000 });
+      if (!m2Cut()) await expect(workingRows().locator('[data-agent-detail]'), 'master’s line for each').toHaveCount(2);
+    };
     await shot(page, r2({ id: 'r2-run-transcript', title: 'The transcript while agents run', how: 'The same session, its turns and runs opened', state: 'Two agents running in the background', folders: ['transcript', 'transcript/view', 'tools/agents'] }), async () => {
       need();
       await openSession(page, ids.run!);
       await unfoldAll(page);
-    });
+      if ((await workingRows().count()) > 0) await workingRows().first().scrollIntoViewIfNeeded(); // a no-op when it is in view already
+    }, { check: agentsRun });
+    // M2 (T87): what a working agent is doing, and for how long, the tooltip of what stands for it: the line of a
+    // one-agent row, a glyph of a grouped row, or the line's words where nothing opens an agent
+    const agentOwner = () => working().locator('button.transcript-subagent-line, button.transcript-glyph, .transcript-subagent-sentence[tabindex="0"]').first();
+    await shot(page, m2({ id: 'm2-run-agent-tip', title: 'The transcript while agents run, a working agent holding the keyboard', how: 'The same session, its turns opened; Tab to a working agent’s line', state: 'The agent’s line focused, its type, its last tool and its time running the tooltip', folders: ['transcript/view', 'tools/agents', 'ui'] }), async () => {
+      need();
+      await openSession(page, ids.run!);
+      await m2Build(page);
+      await unfoldAll(page);
+      await seek(page, working());
+      await letGo(page);
+      await focusTip(page, agentOwner(), working().locator('[data-agent-detail]'), m2Cut);
+    }, { check: checks(agentWorking, tipShown(page, agentOwner(), 'a working agent', working().locator('[data-agent-detail]'), m2Cut)) });
+    await letGo(page);
+    // M2 (P578; C17, C18): the + menu's Connectors and Plugins of a running session, whose engine reports no connector
+    // and four plugins (the recording's `system/init`, every one of them)
+    const ready = async () => expect((await status(ids.run!)).process, 'the session running').toBe('ready');
+    const PLUGINS = ['cc-plugin-agents-md', 'cc-plugin-telemetry', 'cc-plugin-privacy', 'cc-plugin-plugin-authoring'];
+    for (const [label, id, state, rows, empty] of [
+      ['Connectors', 'm2-plus-connectors-running', 'The Connectors submenu of a running session that reports none: its one line, In this chat and Manage', [], () => byBuild(CONNECTORS_LINE.noneReported)],
+      ['Plugins', 'm2-plus-plugins-running', 'The Plugins submenu of a running session: the plugins by name alone, In this chat and Manage', PLUGINS, null],
+    ] as const) {
+      await shot(page, m2({ id, title: `Message box, + › ${label} of a running session`, how: `Click + under the message box, then ${label}`, state, folders: ['composer/plus-menu', 'composer', 'widgets'], hover: true }), async () => {
+        need();
+        await openSession(page, ids.run!);
+        await m2Build(page);
+        await plusSubmenu(page, label);
+      }, { check: checks(ready, submenuHolds(page, label, rows, empty)), after: () => closeOverlays(page) });
+    }
+    await reset(page);
     await shot(page, r2({ id: 'r2-run-subagents', title: 'Right column, Subagents, agents running', how: 'Subagents in the right column', state: 'Two agents running', folders: ['tools/agents', 'panel'] }), async () => {
       need();
       await sideSurface(app, page, 'subagents');
@@ -1723,7 +2279,7 @@ test('round 2: running agents and shells, the queue, a blocked command, Source c
         await expect(request()).toBeVisible({ timeout: 60_000 });
         third = true;
       } catch (error) {
-        console.log(`[words] uxwave third prompt: ${(error as Error).message.split('\n')[0]}`);
+        setupFailed('uxwave third prompt', error);
       }
     }
     const atApproval = () => {
@@ -1760,7 +2316,7 @@ test('round 2: running agents and shells, the queue, a blocked command, Source c
       await expect.poll(async () => (await status(ids.queue!)).turn, { timeout: 30_000 }).not.toBeNull();
       counting = true;
     } catch (error) {
-      console.log(`[words] queue: ${(error as Error).message.split('\n')[0]}`);
+      setupFailed('queue', error);
     }
     const isCounting = () => {
       if (!counting) throw new Error('the counting turn did not start');
@@ -1784,7 +2340,7 @@ test('round 2: running agents and shells, the queue, a blocked command, Source c
         await expect(pane(page).locator('li[data-queue-state="after"]').first()).toBeVisible({ timeout: 10_000 });
         queued = true;
       } catch (error) {
-        console.log(`[words] queue rows: ${(error as Error).message.split('\n')[0]}`);
+        setupFailed('queue rows', error);
       }
     }
     const isQueued = () => {
@@ -1823,18 +2379,38 @@ test('round 2: running agents and shells, the queue, a blocked command, Source c
     await reset(page);
 
     // ---- a command auto mode blocked (uxwave/u1-soft-seeded-1): the turn ends with the call refused and its retry offered
-    await shot(page, m0({ id: 'm0-auto-blocked', title: 'A command auto mode blocked', how: 'A finished turn whose command auto mode refused, its count on the turn’s line opened', state: 'The blocked call’s row with its reason and Approve and retry', folders: ['transcript', 'transcript/view', 'composer/queue'] }), async () => {
+    // A session's status is the engine host's row, which a session gets at its launch: `session.status` for one never
+    // launched fails with "internal: unknown session <id>" (engine-host/ipc.ts, sessionOf), which is how M0's run, reading
+    // the status before the launch, missed. So the launch comes first, once (a retry finds it launched), and the turn's
+    // end is awaited either way.
+    let blockLaunched = false;
+    const blocked = () => pane(page).locator('[data-cell-id="cell:toolu_01JqskAh583hVgaieABZQ9yn"]').first();
+    await shot(page, m0({ id: 'm0-auto-blocked', title: 'A command auto mode blocked', how: 'A finished turn whose command auto mode refused, its count on the turn’s line opened', state: 'The blocked call’s row, the command it blocked and Approve and retry', folders: ['transcript', 'transcript/view', 'composer/queue'] }), async () => {
       await openSession(page, ids.block!);
-      if ((await status(ids.block!)).turn === null && (await pane(page).locator('.transcript-divider-count').count()) === 0) {
+      if (!blockLaunched) {
         await launchReady(page, ids.block!, recordedBlockJournal(join(SCRATCH, 'journals'), 'blk', 'u1-soft-seeded-1'), { cwd: repo });
+        blockLaunched = true;
         await box(page).click();
         await page.keyboard.type('Run the marker command.');
         await page.keyboard.press('Enter');
-        await expect.poll(async () => (await status(ids.block!)).turn, { timeout: 60_000 }).not.toBeNull();
-        await expect.poll(async () => (await status(ids.block!)).turn, { timeout: 60_000 }).toBeNull();
       }
-      await pane(page).locator('.transcript-divider-count').last().click();
-      await soft(pane(page).locator('[data-cell-id="cell:toolu_01JqskAh583hVgaieABZQ9yn"]'), 'the blocked call’s cell');
+      // The replayed turn can start and end between two reads of the status, so its end is read from what it leaves:
+      // the turn's line counting the call auto mode denied (rows/Divider.tsx's CountLink, the same on both builds), and
+      // no turn running.
+      const count = pane(page).locator('.transcript-divider-count').filter({ hasText: 'auto-denied' });
+      await expect.poll(async () => (await count.count()) > 0 && (await status(ids.block!)).turn === null, { message: 'the marker command’s turn ended, its line counting the denied call', timeout: 60_000 }).toBe(true);
+      await press(page, count.last(), 'the turn line’s auto-denied count');
+      await soft(blocked(), 'the blocked call’s cell');
+    }, {
+      // the call's row denied (data-status), its line naming the recording's command, and Approve and retry under it
+      // (blocked-call/ApproveAndRetry.tsx: the one button of `.transcript-blocked`, on both builds). The classifier gave
+      // the stand-in reason (transcript/model/blocked.ts, STAND_IN_REASONS), so the line names no reason of its own.
+      check: async () => {
+        await inView(blocked(), 'the blocked call’s row');
+        await expect(blocked(), 'the call denied').toHaveAttribute('data-status', 'denied', { timeout: 3_000 });
+        await expect(blocked().locator('.transcript-cell-line').first(), 'its line naming the command').toContainText('marker-1.txt');
+        await inView(blocked().locator('.transcript-blocked button.transcript-button'), 'Approve and retry');
+      },
     });
     await reset(page);
 
@@ -1875,7 +2451,7 @@ test('round 2: running agents and shells, the queue, a blocked command, Source c
       created.doc = await make('document', 'Launch notes');
       created.dashboard = await make('dashboard', 'Source states');
     } catch (error) {
-      console.log(`[words] seeding: ${(error as Error).message.split('\n')[0]}`);
+      setupFailed('seeding', error);
     }
     await shot(page, r2({ id: 'r2-deck', title: 'A presentation open in the slides editor', how: 'Click a presentation in the Artifacts library', state: 'A six-slide deck, its first slide selected', folders: ['tools/presentation', 'artifacts', 'src/artifacts/slides/editor'] }), async () => {
       await openArtifact(created.deck!);
@@ -2514,6 +3090,211 @@ test('states: Settings › Usage, an account that served, an account to sign in 
       await expect(card.first()).toBeVisible({ timeout: 15_000 });
       await focusTip(page, reauth, said);
     }, { check: tipShown(page, reauth, 'Sign in again', said), after: async () => writeFileSync(accounts, original) });
+    await reset(page);
+  } finally {
+    await maws.cleanup();
+  }
+});
+
+// ======================================================================================================================
+// Launch 10: the word cut's M2, recorded transcripts read from disk for the conversation's states no earlier launch holds,
+// in a launch of their own so launch 3's sessions and pictures stay as they were: a steer the engine took mid-turn, an
+// ask the interrupt withdrew, an agents listing with a message from another session, a scheduled job's fires, and the
+// sminos bridge's wake. Each scene opens every turn and run first, as launch 3's do. Last, a new chat's model menu,
+// which needs the index's New chat (a setup intent), not the scenario's.
+// ======================================================================================================================
+const M2_DISK: { key: string; file: string; title: string; state: string }[] = [
+  // a `next` steer the engine took between the second and third Bash calls (transcript/model/disk.test.ts reads it so)
+  { key: 'steer', file: 'test/fixtures/transcripts/w1-steer-next-disk.jsonl', title: 'Steer the counting', state: 'A message sent while the turn ran, which the engine took mid-turn' },
+  // an ask whose call the interrupt withdrew (lane-a/run-routes.test.ts: `cancelled`, `withdrawn`, from the file)
+  { key: 'askcut', file: 'test/fixtures/transcripts/p1-maws-ask-interrupt.jsonl', title: 'Ask, then stop', state: 'An ask without waiting, its turn stopped by the person' },
+  // ListAgents (one peer session), a message from that session, the replies, and a send to nobody (pass 3's E7 probe)
+  { key: 'listing', file: 'spikes/protocol-probe/fixtures/pass3/e7-peer-transcripts/db45d92e-e979-4edf-a62a-61f21dc01acb.jsonl', title: 'List the peers', state: 'The agent listed the sessions it can message; another session wrote to it' },
+  // a session-only job firing every minute, three fires (lane-a/arrival-routes.test.ts reads them from the file)
+  { key: 'cron', file: 'spikes/protocol-probe/fixtures/uxwave/u3-cron-r1.transcript.jsonl', title: 'Tick every minute', state: 'A scheduled job created, then its fires' },
+  // a blocked command, an Esc, the person's grant and the bridge's wake (lane-a/blocked-routes.test.ts, u1c-t-esc-1)
+  { key: 'wake', file: 'spikes/protocol-probe/fixtures/uxwave/u1c-t-esc-1.transcript.jsonl', title: 'Carry out the task file', state: 'A command blocked, the turn stopped, a grant delivered and the bridge waking the session' },
+];
+const m2DiskId = (i: number) => `0d4e5f6a-0000-4000-8000-0000000004${String(i).padStart(2, '0')}`;
+
+test('the word cut’s M2: recorded transcripts for the conversation’s states', async () => {
+  test.setTimeout(600_000);
+  const repos = REPOS.map((name) => makeRepo(name, name === 'stages' ? 'scheduled' : undefined));
+  const config = join(SCRATCH, 'claude-config-m2');
+  rmSync(config, { recursive: true, force: true });
+  M2_DISK.forEach((d, i) => writeDisk(config, d.file, m2DiskId(i), repos[i % repos.length]!));
+  trust(config);
+  const usage = usageFixture();
+  mkdirSync(join(SCRATCH, 'profile-m2'), { recursive: true });
+  const maws = await launchMaws({ userData: join(SCRATCH, 'profile-m2'), prepare: noGh, env: BASE_ENV({ MAWS_ENGINE_REPLAY: '1', CLAUDE_CONFIG_DIR: config, MAWS_CLAUDE_USAGE_DIR: usage, PATH: NO_GH_PATH }) });
+  const { page } = maws;
+  try {
+    await size(maws);
+    await light(page);
+    // Each disk session is found by its engine id as the index lists it; one the index has not listed within the wait
+    // fails only the scenes that open it, each recorded as not reached with its fixture named.
+    const ids: Record<string, string> = {};
+    await expect.poll(async () => {
+      const { sessions } = value(await invoke(page, 'session.list', {}));
+      M2_DISK.forEach((d, i) => (ids[d.key] = sessions.find((s) => s.engineSessionId === m2DiskId(i))?.appId ?? ''));
+      return M2_DISK.every((d) => ids[d.key]);
+    }, { timeout: 30_000 }).toBe(true).catch((error: unknown) => setupFailed(`the disk sessions’ index (${M2_DISK.filter((d) => !ids[d.key]).map((d) => d.file).join(', ')} not listed)`, error));
+    await dismissToasts(page);
+    // a session opened with its turns and runs opened, the build read from its message box
+    const opened = async (key: string) => {
+      if (!ids[key]) throw new Error(`the disk session of ${M2_DISK.find((d) => d.key === key)!.file} was not listed by the index`);
+      await openSession(page, ids[key]!);
+      await m2Build(page);
+      await expect(pane(page).locator('.transcript-row[data-kind]').first()).toBeVisible({ timeout: 20_000 });
+      await unfoldAll(page);
+    };
+    const meta = (id: string, key: string, title: string, how: string, state: string, folders: string[], hover?: true) =>
+      m2({ id, title, how: `The session “${M2_DISK.find((d) => d.key === key)!.title}” (${M2_DISK.find((d) => d.key === key)!.state.toLowerCase()}), every turn and run opened; ${how}`, state, folders, ...(hover && { hover }) });
+
+    // T42: the steer stands where the engine took it, with no caption of its own; master captions it (User.tsx: the
+    // row's `data-steer`, and master's `.transcript-user-caption`, "Sent during this turn")
+    const steer = () => pane(page).locator('section.transcript-user[data-steer]').first();
+    await shot(page, meta('m2-disk-steer', 'steer', 'A message the engine took mid-turn', 'scrolled to the steer', 'The steer between two of the turn’s calls, with no line saying when it was sent', ['transcript', 'transcript/view']), async () => {
+      await opened('steer');
+      await seek(page, steer());
+    }, {
+      // the steer in view; on M2's build with no caption (User.tsx: the main pane's mount gives a taken steer none), on
+      // master's with its caption
+      check: async () => {
+        await inView(steer(), 'the steer');
+        if (m2Cut()) await expect(steer().locator('.transcript-user-caption'), 'no caption on the steer').toHaveCount(0);
+        else await inView(steer().locator('.transcript-user-caption'), 'master’s caption on the steer');
+      },
+    });
+
+    // T97: a cancelled ask's chip reads Cancelled, why its tooltip (rows/AskCapsule.tsx: the chip takes the keyboard for
+    // it); master's chip says why at rest
+    const cancelled = () => pane(page).locator('section.transcript-ask[data-ask-state="cancelled"]').first();
+    const askChip = () => cancelled().locator('[data-ask-chip]').first();
+    await shot(page, meta('m2-ask-cancelled-tip', 'askcut', 'An ask the interrupt withdrew, its chip holding the keyboard', 'Tab to the ask’s Cancelled', 'The ask’s questions, its chip Cancelled focused, why it was cancelled the tooltip', ['transcript/view', 'tools/maws/ask', 'ui']), async () => {
+      await opened('askcut');
+      await seek(page, cancelled());
+      await letGo(page);
+      await focusTip(page, askChip(), askChip(), m2Cut);
+    }, { check: tipShown(page, askChip(), 'the cancelled ask’s chip', askChip(), m2Cut) });
+    await letGo(page);
+
+    // T81, T82: the listing folded to its count (ui/counted-fold.tsx's `data-counted-fold`, its line a disclosure);
+    // master draws the sections open at rest, under the self line
+    const listing = () => pane(page).locator('.transcript-listing').first();
+    const foldLine = () => pane(page).locator('.transcript-listing[data-counted-fold] > button').first();
+    const sections = () => listing().locator('.transcript-listing-section');
+    await shot(page, meta('m2-listing-folded', 'listing', 'An agents listing, folded to its count', 'scrolled to the listing', 'The listing one line with its count, folded', ['transcript/view', 'ui']), async () => {
+      await opened('listing');
+      await seek(page, listing());
+      if (m2Cut() && (await foldLine().getAttribute('aria-expanded')) === 'true') await foldLine().click(); // a retry finds it open
+    }, {
+      check: async () => {
+        if (!m2Cut()) return inView(sections(), 'master’s listing, its sections at rest');
+        await inView(foldLine(), 'the listing’s line');
+        await expect(foldLine(), 'the listing folded').toHaveAttribute('aria-expanded', 'false', { timeout: 3_000 });
+      },
+    });
+    // T81, T84: the listing opened in place, the pointer on its one entry: its Message drawn (master draws it at rest)
+    const entry = () => listing().locator('.transcript-listing-entry').first();
+    await shot(page, meta('m2-listing-open', 'listing', 'An agents listing opened, the pointer on an entry', 'press the listing’s line, then hover its entry', 'The listing open in place under its line: its section, the peer session with its Message', ['transcript/view', 'ui'], true), async () => {
+      await opened('listing');
+      await seek(page, listing());
+      if (m2Cut() && (await foldLine().getAttribute('aria-expanded')) !== 'true') await foldLine().click();
+      await expect(entry()).toBeVisible({ timeout: 5_000 });
+      await page.mouse.move(W - 2, H - 2);
+      await entry().hover();
+      await page.waitForTimeout(1200);
+    }, {
+      check: checks(
+        async () => {
+          if (m2Cut()) await expect(foldLine(), 'the listing open').toHaveAttribute('aria-expanded', 'true', { timeout: 3_000 });
+        },
+        () => inView(sections(), 'its section'),
+        pointedAt(entry(), 'the listing’s entry'),
+        drawn(entry().locator('button.transcript-peer-toggle'), 'the entry’s Message'),
+      ),
+    });
+
+    // T75, T76: another session's message, its Reply pressed: the reply box open under the line, with no label over it
+    // (rows/AgentMessage.tsx: the line's `data-peer`, the row's `data-replying` while the box is open, on both builds)
+    const inbound = () => pane(page).locator('.transcript-peer[data-peer="inbound"]').first();
+    const reply = () => inbound().locator('button.transcript-peer-reply').first();
+    await shot(page, meta('m2-peer-reply-open', 'listing', 'A message from another session, its Reply pressed', 'point at the message from the other session, then press its Reply', 'The reply box open under the message, nothing typed', ['transcript/view', 'transcript/view/rows']), async () => {
+      await opened('listing');
+      await seek(page, inbound());
+      await inbound().hover();
+      await page.waitForTimeout(600);
+      if ((await inbound().getAttribute('data-replying')) === null) await reply().click();
+      await expect(inbound()).toHaveAttribute('data-replying', '', { timeout: 5_000 });
+    }, {
+      // the reply box open and empty under the message (rows/PeerComposer.tsx's textarea, on both builds); on M2's build
+      // with no label over it (T76), on master's under its label
+      check: async () => {
+        const field = inbound().locator('textarea').first();
+        await inView(field, 'the reply box');
+        await expect(field, 'nothing typed').toHaveValue('');
+        if (m2Cut()) await expect(inbound().locator('.transcript-peer-label'), 'no label over the reply box').toHaveCount(0);
+        else await inView(inbound().locator('.transcript-peer-label'), 'master’s label over the reply box');
+      },
+      after: async () => {
+        if ((await inbound().getAttribute('data-replying').catch(() => null)) !== null) await reply().click();
+      },
+    });
+
+    // T68, T70: the notices of a scheduled fire and of the bridge's wake (rows/Notice.tsx, `data-class`, on both builds)
+    for (const [key, kind, id, title, state] of [
+      ['cron', 'schedule', 'm2-disk-cron', 'A scheduled job’s fires', 'Each fire’s line naming the job’s prompt, and the turn it opened'],
+      ['wake', 'wake', 'm2-disk-wake', 'The bridge waking a session', 'The wake’s line in the turn it opened, after the grant the person sent'],
+    ] as const) {
+      const notice = () => pane(page).locator(`.transcript-notice[data-class="${kind}"]`).first();
+      await shot(page, meta(id, key, title, `scrolled to the first ${kind === 'schedule' ? 'fire' : 'wake'}`, state, ['transcript', 'transcript/view']), async () => {
+        await opened(key);
+        await seek(page, notice());
+      }, { check: () => inView(notice(), `the ${kind} notice`) });
+    }
+    await reset(page);
+
+    // P555: a new chat's model list has no line under it. Here, not in the scenario's launch, whose New chat mints an id
+    // with no setup intent (app/scenario-session-creator.ts), so its model menu has no unstarted binding to show: this
+    // launch's New chat is `session.create`, which writes the intent (sessions/connect.ts). The new chat is the one intent
+    // New chat added, and the tab shown is its (the pane's message box names its session, `data-composer`, on both
+    // builds); the model view as launch 1's scenes find it (widgets/ModelSelector.tsx: `data-effort-title` inside the
+    // button that names the model, `data-model-selector` the view shown, on both builds). Last in the launch, so the
+    // empty chat it leaves open is in no other scene.
+    const intents = async () => value(await invoke(page, 'session.intent.list', undefined)).intents.map((intent) => intent.appSessionId as string);
+    let before: Set<string> | null = null; // read once, by the first attempt: a retry's New chat reuses its empty chat (U13a)
+    let chat: string | null = null;
+    const newChat = () => pane(page).locator(`[data-composer="${chat}"]`);
+    const selector = () => page.locator('[data-model-selector]').first();
+    const modelView = () => page.locator('[data-model-selector="model"]').first();
+    await shot(page, m2({ id: 'm2-new-chat-model-view', title: 'New chat, the model menu’s list of models', how: 'A session in front, File › New chat (⌘N), the model chip under the message box, then the model’s name at the menu’s top', state: 'The models of a chat not started yet, Default checked, with no line under the list', folders: ['widgets', 'composer/frame', 'composer'] }), async () => {
+      await opened('steer');
+      await reset(page);
+      const known = (before ??= new Set(await intents()));
+      await menu(maws.app, 'session.new');
+      await expect.poll(async () => {
+        const made = (await intents()).find((id) => !known.has(id));
+        chat = made === undefined ? null : await addressed(page, made);
+        return chat;
+      }, { message: 'New chat’s setup intent', timeout: 10_000 }).not.toBeNull();
+      await expect(newChat(), 'the new chat’s tab shown').toBeVisible({ timeout: 10_000 });
+      await newChat().locator('[role="toolbar"] button[aria-haspopup="dialog"]:not([data-context-ring])').last().click();
+      await expect(selector()).toBeVisible({ timeout: 10_000 });
+      if ((await selector().getAttribute('data-model-selector')) !== 'model') await selector().locator('button:has([data-effort-title])').first().click();
+    }, {
+      check: async () => {
+        await expect(newChat(), 'the new chat’s tab shown').toBeVisible({ timeout: 3_000 });
+        await expect(modelView(), 'the model view').toBeVisible({ timeout: 3_000 });
+        await expect(modelView().getByRole('menu').first(), 'its list').toBeVisible();
+        // Default, the list's first row, checked (ModelSelector.tsx: the menu's own first menuitemradio, on both builds)
+        await expect(modelView().locator('[role="menu"] > [role="menuitemradio"]').first(), 'Default checked').toHaveAttribute('aria-checked', 'true', { timeout: 3_000 });
+        const line = modelView().getByText(MASTER_MODEL_UNSTARTED, { exact: true });
+        if (m2Cut()) await expect(line, 'no line under a new chat’s list').toHaveCount(0);
+        else await inView(line, 'master’s line under a new chat’s list');
+      },
+      after: () => closeOverlays(page),
+    });
     await reset(page);
   } finally {
     await maws.cleanup();

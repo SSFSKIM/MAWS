@@ -17,6 +17,7 @@ import { inlineEditOf, resubmitRecordOf, setInlineText, useComposerStore, type I
 import { useSessions } from '../stores/sessions';
 import { Backdrop } from '../sessions/scrim'; // board 523 (U11a): the one scrim
 import type { UserRow } from './edit-prefill';
+import { INLINE_EDIT_LINE } from './inline-edit-copy';
 import { cancelInlineEdit, cancelRewind, confirmRewind, forkInlineEdit, keepEditing, resubmitProvider, rewindAgain, sendInlineEdit } from './resubmit-seam';
 
 const BUTTON = 'rounded-sm px-2 py-0.5 text-ui-sm text-fg-muted outline-accent hover:bg-bg-hover hover:text-fg focus-visible:outline-2 disabled:text-fg-faint disabled:hover:bg-transparent';
@@ -26,21 +27,21 @@ export const BUSY_REASON = 'Wait for the turn to end, or stop it first';
 export const NOT_STARTABLE = 'The session is not running'; // P2-A: a session with no record cannot be started from here
 
 // What the resubmit's line says in each state; `warn` states read in the warning tone; null at rest.
-// P2-A: `starting` while the session the edit resubmits to is started first
+// P2-A: `starting` while the session the edit resubmits to is started first. The word cut (C122): the waits in a word.
 function lineCopy({ state, exited, sendFailed, sending }: Resubmit, starting = false): { text: string; warn: boolean } | null {
-  if (sending && starting) return { text: 'Starting this session…', warn: false };
-  if (sending) return { text: state === 'rewound_awaiting_send' ? 'Rewound · sending your edited message…' : 'Sending your edited message…', warn: false };
+  if (sending && starting) return { text: INLINE_EDIT_LINE.starting, warn: false };
+  if (sending) return { text: INLINE_EDIT_LINE.sending, warn: false };
   switch (state) {
     case 'rewinding':
-      return { text: 'Rewinding this session to that message…', warn: false };
+      return { text: INLINE_EDIT_LINE.rewinding, warn: false };
     case 'rewind_uncertain':
-      return { text: 'Rewind unconfirmed · checking the transcript…', warn: true };
+      return { text: INLINE_EDIT_LINE.rewindUncertain, warn: true };
     case 'rewind_unresolved':
-      return { text: 'The rewind could not be confirmed', warn: true };
+      return { text: INLINE_EDIT_LINE.rewindUnresolved, warn: true };
     case 'rewound_awaiting_send':
-      return sendFailed ? { text: 'Rewound · the message was not sent', warn: true } : { text: 'Rewound · send your edited message', warn: false };
+      return sendFailed ? { text: INLINE_EDIT_LINE.notSent, warn: true } : { text: INLINE_EDIT_LINE.awaitingSend, warn: false };
     default:
-      return exited ? { text: 'The engine exited before the rewind was confirmed · your edited text is kept', warn: true } : null;
+      return exited ? { text: INLINE_EDIT_LINE.exited, warn: true } : null;
   }
 }
 

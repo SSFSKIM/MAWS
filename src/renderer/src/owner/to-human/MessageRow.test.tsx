@@ -90,7 +90,7 @@ describe('a message tool’s call in a mounted transcript', () => {
     await waitFor(() => expect(cells()).toEqual(['cell:t1']));
     const fold = screen.getByRole('button', { name: '‹ fold to report' });
     expect(fold.getAttribute('aria-expanded')).toBe('true');
-    expect(document.querySelector('[data-kind="divider"] .transcript-turn-line')?.textContent).toMatch(/^Worked for .* · Ran a command$/); // UX wave U2 (O-15)
+    expect(document.querySelector('[data-kind="divider"] .transcript-turn-line')?.textContent).toMatch(/^\d+s · Ran a command$/); // UX wave U2 (O-15); the word cut (T1): the duration alone
     expect(document.querySelector('[data-kind="divider"] .transcript-disclosure')).toBeNull();
     expect(document.querySelectorAll('[data-kind="record_fold"]')).toHaveLength(1);
     expect(cards()).toEqual(['● messageStage 1 is done.']);

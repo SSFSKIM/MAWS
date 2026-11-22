@@ -23,6 +23,7 @@ function Icon({ path, ...rest }: { path: string } & React.SVGProps<SVGSVGElement
 
 export const CategoryIcon = ({ category }: { category: ToolCategory }) => <Icon path={CATEGORY_PATHS[category]} data-icon={category} />;
 export const FileIcon = () => <Icon path="M3 2h7l3 3v9H3zM10 2v4h3M5 9h6M5 11h4" />;
+export const CopyIcon = () => <Icon path="M6 6h7v7H6zM10 6V3H3v7h3" />; // the word cut (T18): two sheets, the copy glyph
 export const MessageIcon = () => <Icon path="M13 3H3v8h3l3 3v-3h4z" />;
 export const QuestionIcon = () => <Icon path="M8 14A6 6 0 1 0 8 2a6 6 0 0 0 0 12zM6.3 6.2a1.8 1.8 0 1 1 2.4 1.7c-.5.2-.7.6-.7 1.1v.4M8 11.3h.01" />; // E1: the ask capsule
 // E3 start: an anchored prompt's chip, by what it is about, and the side-thread row's branching thread

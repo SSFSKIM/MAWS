@@ -61,7 +61,7 @@ describe('the blocked sessions sheet and the stop sheet', () => {
       'Session sleep1 background taskStop…',
       'Session kernel1 queued message · stateful server c12-kernelStop…',
     ]);
-    expect(screen.getByRole('dialog').textContent).toContain('MAWS is using 3 GB of its 2 GB memory budget');
+    expect(screen.getByRole('dialog').textContent).toContain('3 GB of 2 GB in use. Nothing is stopped unless you stop it.'); // the word cut (C142)
   });
 
   it('Stop… shows C10’s disclosure first; Cancel stops nothing and goes back to the list', async () => {

@@ -36,7 +36,7 @@
     "id": "subagent:a36a6515462b8275c",
     "kind": "subagent",
     "overflow": 0,
-    "sentence": "Call maws ask tool finished",
+    "sentence": "Call maws ask tool",
     "status": "finished",
     "turnId": "turn:d42da5b4-ee9a-41fc-847e-e4a84522832e"
   },
@@ -149,7 +149,7 @@
     "id": "subagent:a074eb64fc2b83f49",
     "kind": "subagent",
     "overflow": 0,
-    "sentence": "Call maws ask tool finished",
+    "sentence": "Call maws ask tool",
     "status": "finished",
     "turnId": "turn:64cdb020-07d8-400e-b936-da6ed2cf4c4a"
   },

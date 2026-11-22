@@ -692,7 +692,7 @@ describe('turn origin', () => {
     const list = rows(b.events);
     const dividers = list.filter((row): row is Extract<Row, { kind: 'divider' }> => row.kind === 'divider');
     expect(dividers.map((d) => d.origin)).toEqual(['peer']); // UX wave U2 (O-15): the peer turn without work has none
-    expect(dividers.map((d) => dividerCopy({ ...d, durationMs: d.summary.durationMs ?? 0 }))).toEqual(['Peer session worked for 1s · Ran a command']);
+    expect(dividers.map((d) => dividerCopy({ ...d, durationMs: d.summary.durationMs ?? 0 }))).toEqual(['Peer session · 1s · Ran a command']);
     expect(find(list, 'user')).toMatchObject({ text: 'From the peer session' });
     expect(turnActivity(state).map((turn) => turn.origin)).toEqual(['peer', 'peer']);
   });
@@ -804,7 +804,7 @@ describe('child traffic', () => {
     expect(turn.children.get(tool('agent1'))).toHaveLength(2);
     const list = rows(b.events);
     expect(kinds(list)).toEqual(['time', 'user', 'subagent', 'assistant_text', 'divider']);
-    expect(find(list, 'subagent')).toMatchObject({ sentence: 'Survey finished', status: 'finished' });
+    expect(find(list, 'subagent')).toMatchObject({ sentence: 'Survey', status: 'finished' }); // the word cut (T86)
     expect(find(list, 'subagent').agents[0]).toMatchObject({ taskId: 'task1', toolUseId: 'agent1', name: 'Survey', kind: 'agent' });
   });
 
@@ -835,7 +835,7 @@ describe('revisable log', () => {
     const state = applyEvents(createState(null, null), b.events);
     const folded = rowsOf(state);
     const boundary = find(folded, 'boundary');
-    expect(boundary).toMatchObject({ text: 'Conversation continued from an earlier point', secondary: 'Later messages from the previous path are no longer part of the current conversation history', detail: 'transcript_branch · m1-u0' });
+    expect(boundary).toMatchObject({ text: 'Continued from an earlier point', secondary: 'Later messages from the previous path are no longer part of the current conversation history', detail: 'transcript_branch · m1-u0' });
     expect(find(rowsOf(withAllExpanded(state)), 'boundary')).toEqual(boundary);
     expect(folded.some((row) => row.kind === 'assistant_text' && row.markdown === 'Previous path')).toBe(false);
     expect(folded.some((row) => row.kind === 'error')).toBe(false);
@@ -896,7 +896,7 @@ describe('revisable log', () => {
     b.end(['u2']);
     const list = rows(b.events);
     expect(kinds(list)).toEqual(['time', 'user', 'assistant_text', 'boundary', 'user', 'cell', 'boundary', 'assistant_text', 'divider']);
-    expect(find(list, 'boundary', 0)).toMatchObject({ boundaryKind: 'compaction', turnId: null, text: 'Context compacted · 160k → 24k tokens · auto' });
+    expect(find(list, 'boundary', 0)).toMatchObject({ boundaryKind: 'compaction', turnId: null, text: 'Compacted · 160k → 24k' });
     expect(find(list, 'boundary', 1)).toMatchObject({ boundaryKind: 'reset', turnId: turnId.ofMessage(uuid('u2')) });
   });
 
@@ -919,7 +919,7 @@ describe('revisable log', () => {
     const list = rowsOf(state);
     expect(kinds(list)).toEqual(['time', 'user', 'assistant_text', 'boundary', 'user', 'assistant_text']);
     const boundary = find(list, 'boundary');
-    expect(boundary).toMatchObject({ boundaryKind: 'rewind', hiddenRows: 2, revealed: false, text: 'Rewound to here · 2 messages hidden · Show' });
+    expect(boundary).toMatchObject({ boundaryKind: 'rewind', hiddenRows: 2, revealed: false, text: 'Rewound · 2 hidden · Show' });
     const revealed = { ...state, ui: { ...state.ui, revealedBoundaries: new Set([boundary.id]), version: state.ui.version + 1 } };
     expect(kinds(rowsOf(revealed))).toEqual(['time', 'user', 'assistant_text', 'boundary', 'user', 'assistant_text', 'user', 'assistant_text']);
     expect(find(rowsOf(revealed), 'user', 1)).toMatchObject({ messageUuid: 'u2' }); // the hidden branch follows the boundary, then the live one
@@ -1066,7 +1066,8 @@ describe('determinism and sharing', () => {
 });
 
 // C12 start: the memory budget's release and its resume in quiet words (C12 execution document, Interfaces "Surfaces of
-// the budget", Transcript): a release is a notice, not an error, and the resume after it stays as one line.
+// the budget", Transcript): a release is a notice, not an error. The word cut (T56, T58): the resume after it draws no
+// line, running nor done (the session's running mark says it); one that failed says why.
 describe('a release and the resume after it', () => {
   const texts = (rows: Row[]) => rows.filter((row) => row.kind === 'error').map((row) => [(row as Extract<Row, { kind: 'error' }>).severity, (row as Extract<Row, { kind: 'error' }>).text]);
 
@@ -1075,25 +1076,23 @@ describe('a release and the resume after it', () => {
     b.turn('u1');
     b.text('m1', 0, 'Done.');
     b.emit('process.exited', { code: 0, signal: null, reason: 'budget', lostAttentionCount: 0, budget: { limitKiB: 8_388_608, totalKiB: 9_100_000 } });
-    expect(texts(rowsOf(reduce(b.events)))).toEqual([['notice', 'Released to stay under the memory budget · sending resumes it']]);
+    expect(texts(rowsOf(reduce(b.events)))).toEqual([['notice', 'Paused to save memory · send to resume']]);
   });
 
   it('an idle exit (the supervisor idle clock) reads as a release too, in its own words (E10)', () => {
     const b = builder();
     b.emit('process.exited', { code: 0, signal: null, reason: 'idle', lostAttentionCount: 0, budget: null });
-    expect(texts(rowsOf(reduce(b.events)))).toEqual([['notice', 'Stopped while idle · sending resumes it']]);
+    expect(texts(rowsOf(reduce(b.events)))).toEqual([['notice', 'Paused while idle · send to resume']]);
   });
 
-  it('a process_exit reconnect reads Resuming… and then stays as Resumed; a user reconnect still leaves no row', () => {
+  it('a process_exit reconnect draws no row while it runs nor once it succeeded; a user reconnect still leaves no row', () => {
     const b = builder();
     b.emit('process.exited', { code: 0, signal: null, reason: 'budget', lostAttentionCount: 0, budget: { limitKiB: 8_388_608, totalKiB: 9_100_000 } });
+    const released = [['notice', 'Paused to save memory · send to resume']];
     b.emit('session.reconnect', { phase: 'attempting', attempt: 1, maxAttempts: 1, trigger: 'process_exit', reason: null });
-    expect(texts(rowsOf(reduce(b.events))).at(-1)).toEqual(['transient', 'Resuming…']);
+    expect(texts(rowsOf(reduce(b.events))), 'resuming').toEqual(released);
     b.emit('session.reconnect', { phase: 'reconnected', attempt: 1, maxAttempts: 1, trigger: 'process_exit', reason: null });
-    expect(texts(rowsOf(reduce(b.events)))).toEqual([
-      ['notice', 'Released to stay under the memory budget · sending resumes it'],
-      ['notice', 'Resumed'],
-    ]);
+    expect(texts(rowsOf(reduce(b.events))), 'resumed').toEqual(released);
     const user = builder();
     user.emit('session.reconnect', { phase: 'attempting', attempt: 1, maxAttempts: 1, trigger: 'user', reason: null });
     user.emit('session.reconnect', { phase: 'reconnected', attempt: 1, maxAttempts: 1, trigger: 'user', reason: null });
@@ -1211,6 +1210,32 @@ describe('orchestration facts (E7)', () => {
     const row = find(rowsOf(withAllExpanded(state)), 'subagent');
     expect(row.id).toBe(rowId.subagent(task('toolu_wf')));
     expect(row.agents[0]).toMatchObject({ taskId: 'wayue3on6', runId: 'wf_7cacbb2d-902' });
+    // the word cut (T86, T87): the phase a working workflow is in waits on its line, out of its sentence
+    expect(row).toMatchObject({ sentence: 'Two echo agents in one phase', phases: { wayue3on6: 'Echo' } });
+    // the Markdown export has no line to point at: the phase is written beside the sentence (fix wave, scalpel-1#2)
+    expect(serializeRows([row])).toBe('- Two echo agents in one phase · Echo');
+  });
+
+  // Fix wave (scalpel-1#1): a Workflow and an Agent called from one assistant message share a row; the phase is the
+  // workflow's own, never the agent's, and it leaves with the workflow's end while the agent still runs.
+  it('keeps a workflow’s phase to its own call on a row it shares with an agent', () => {
+    const b = builder();
+    b.turn('u1');
+    b.toolUse('toolu_wf', 'Workflow', { description: 'Two echo agents in one phase' }, 'm1', 0);
+    b.toolUse('toolu_ag', 'Agent', { description: 'Survey notes', subagent_type: 'general-purpose' }, 'm1', 1);
+    b.emit('task.started', { taskId: task('wayue3on6'), toolUseId: tool('toolu_wf'), taskType: 'local_workflow', description: 'Two echo agents in one phase', isBackground: true, workflowName: 'maws-probe' });
+    b.emit('subagent.started', { taskId: task('a1'), toolUseId: tool('toolu_ag'), description: 'Survey notes', subagentType: 'general-purpose', isBackground: true, spawnDepth: 1, prompt: 'go' });
+    b.emit('workflow.progress', { taskId: task('wayue3on6'), workflowName: 'maws-probe', progress: [{ type: 'workflow_phase', index: 0, title: 'Echo', status: 'running' }] });
+    b.emit('subagent.progress', { taskId: task('a1'), description: 'Survey notes', usage: { totalTokens: 1, toolUses: 1, durationMs: 1 }, lastToolName: 'Read', summary: null });
+    const row = find(rowsOf(withAllExpanded(reduce(b.events))), 'subagent');
+    expect(row.agents.map((ref) => ref.taskId)).toEqual(['wayue3on6', 'a1']);
+    expect(row.phases).toEqual({ wayue3on6: 'Echo' });
+    expect(serializeRows([row])).toBe('- Two echo agents in one phase and Survey notes\n  - Two echo agents in one phase · Echo');
+
+    b.emit('task.notification', { taskId: task('wayue3on6'), toolUseId: tool('toolu_wf'), status: 'completed', summary: 'Echoed.', outputFile: null, reason: null });
+    const after = find(rowsOf(withAllExpanded(reduce(b.events))), 'subagent');
+    expect(after.status).toBe('working'); // the agent still runs
+    expect(after.phases).toBeUndefined();
   });
 
   it('adds the run id to a live Workflow ref its task.started already renamed', () => {

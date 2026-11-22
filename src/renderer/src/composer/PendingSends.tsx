@@ -13,7 +13,7 @@ import { toast } from '../stores/notices';
 export const PENDING_SEND = {
   label: 'Messages not confirmed yet',
   sending: 'Sending…',
-  refused: (reason: string | null) => (reason ? `Not entered: ${reason}` : 'Not entered'),
+  refused: (reason: string | null) => (reason ? `Not sent: ${reason}` : 'Not sent'), // the word cut (C79)
   unconfirmed: 'May not have arrived',
   again: 'Send again',
   dismiss: 'Dismiss',

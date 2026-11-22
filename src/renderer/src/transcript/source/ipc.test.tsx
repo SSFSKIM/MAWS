@@ -1672,7 +1672,7 @@ describe('child source provenance', () => {
     useTranscriptStore.getState().detach(CHILD_KEY);
   });
 
-  it('the parent’s finish event settles the child’s divider: Worked for …, through the reset to disk as before', async () => {
+  it('the parent’s finish event settles the child’s divider: its duration and what it did, through the reset to disk as before', async () => {
     const { parent, child } = live();
     const disk = onDisk(child);
     const fake = fakeClient();
@@ -1699,7 +1699,7 @@ describe('child source provenance', () => {
         <RowView row={divider()} />
       </TranscriptProvider>,
     );
-    expect(view.container.querySelector('button[aria-expanded]')?.textContent).toMatch(/^Worked for /);
+    expect(view.container.querySelector('button[aria-expanded]')?.textContent).toMatch(/^\d+s · /); // the word cut (T1): settled, not Working
     view.unmount();
     store.detach(CHILD_KEY);
   });

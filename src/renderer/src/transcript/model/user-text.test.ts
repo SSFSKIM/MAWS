@@ -183,7 +183,7 @@ describe('a linked read sent with the message', () => {
   it('is a chip, never text', () => {
     const text = userTextOf([{ type: 'text', text: words }, { type: 'text', text: linkedReadBlock(read, 'a1b2')! }]);
     expect(text.text).toBe(words);
-    expect(text.attachments).toEqual([{ kind: 'file', name: 'Garden plan, read at revision 25', bytes: null, dataUrl: null, mediaType: 'sent with the message: the document as artifact_read returned it', text: null }]);
+    expect(text.attachments).toEqual([{ kind: 'file', name: 'Garden plan · rev 25', bytes: null, dataUrl: null, mediaType: 'sent with the message: the document as artifact_read returned it', text: null }]);
   });
 
   // ticket 733a (acceptance 7): a read written before the landing, with no segment, is still the chip it was

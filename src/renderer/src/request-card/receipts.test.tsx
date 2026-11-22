@@ -157,13 +157,13 @@ describe('the card’s own receipt', () => {
   });
 
   // UX wave U1b M3 (decision 8a): an answer too late says where the question was answered, in its row too
-  it('an answer that came too late (not_pending) writes Already answered elsewhere, not the answer sent', async () => {
+  it('an answer that came too late (not_pending) writes Answered elsewhere, not the answer sent', async () => {
     outcome = 'not_pending';
     const item = mount(declinable);
     await userEvent.setup().click(screen.getByRole('button', { name: 'Dismiss' }));
-    await screen.findByText('Already answered elsewhere');
+    await screen.findByText('Answered elsewhere');
     expect(fake.invoked('session.answer')).toHaveLength(1);
-    expect(receiptOf(HERE, item.request.toolUseId!)).toEqual({ settled: 'Already answered elsewhere' });
+    expect(receiptOf(HERE, item.request.toolUseId!)).toEqual({ settled: 'Answered elsewhere' });
   });
 });
 

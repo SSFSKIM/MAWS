@@ -149,12 +149,18 @@ describe('TranscriptSlot', () => {
     expect(openFile).toHaveBeenCalledTimes(2);
   });
 
-  it('tells the Transcript where the session runs, from its record: a shell call with no cwd shows the worktree’s checkout', async () => {
+  // The word cut (T20): the session's own folder is not named, so a call that ran in the record's worktree checkout names
+  // no folder, and one that ran elsewhere names its own: the record's folder reached the transcript
+  it('tells the Transcript where the session runs, from its record: a shell call that ran in the worktree’s checkout names no folder', async () => {
     const id = at('app-slot-shell' as AppSessionId);
     const b = builder();
     b.turn('u1', 'List it');
     b.toolUse('t1', 'Bash', { command: 'ls' });
+    Object.assign(b.events.at(-1)!, { cwd: '/w/project-wt' }); // read from rows: the worktree's checkout
     b.result('t1', 'a', { structured: BASH_RESULT('a') });
+    b.toolUse('t2', 'Bash', { command: 'pwd' });
+    Object.assign(b.events.at(-1)!, { cwd: '/w/project' }); // read from rows: another folder
+    b.result('t2', 'b', { structured: BASH_RESULT('b') });
     b.end(['u1']);
     const records = useSessions.getState().records;
     act(() => useSessions.setState({ records: new Map([[id, { directory: '/w/project-wt', worktree: { path: '/w/project-wt', branch: 'wt' }, holder: { kind: 'self' } } as unknown as SessionRecord]]) }));
@@ -166,12 +172,12 @@ describe('TranscriptSlot', () => {
     expect(useTranscriptStore.getState().entries[id]?.phase).toBe('live');
     act(() => useTranscriptStore.getState().expandAll(id, { cells: true }));
     await settle();
-    expect(document.querySelector('.transcript-shell-meta')?.textContent).toBe('Session directory /w/project-wt');
+    expect([...document.querySelectorAll('.transcript-shell')].map((shell) => shell.querySelector('.transcript-shell-meta')?.textContent ?? null)).toEqual([null, 'cwd /w/project']);
   });
 
   // UX wave U8c-2 (M5, §K): the slot hands down the selector's launch folder and the agent's folder while the session is
-  // in its launch folder, and neither while it reads moved. A call whose event carries no folder (live) then names the
-  // launch folder, or no folder; a call read from rows names its own unless it ran in one of the two. Invented folders.
+  // in its launch folder, and neither while it reads moved. A call whose event carries no folder (live) names none; a call
+  // read from rows names its own unless it ran in one of the two (the word cut, T20). Invented folders.
   it('hands down the launch folder and the agent’s folder while the session is there, and neither while it reads moved', async () => {
     const shells = () => {
       const b = builder();
@@ -206,7 +212,7 @@ describe('TranscriptSlot', () => {
     };
     // in the launch folder, the agent in a sub-folder of its checkout (not a move)
     const there = { agentFolder: { checkout: '/repo', cwd: '/repo/packages/app', branch: 'main', linked: false } };
-    expect(await lines('app-slot-shell-there', there)).toEqual(['Session directory /repo', 'Session directory /repo', 'Session directory /repo']);
+    expect(await lines('app-slot-shell-there', there)).toEqual([null, null, null]);
     // moved by `cd` into a worktree: the live call names no folder, each row its own
     const moved = { agentFolder: { checkout: '/repo/.claude/worktrees/w1', cwd: '/repo/.claude/worktrees/w1', branch: 'w1', linked: true } };
     expect(await lines('app-slot-shell-moved', moved)).toEqual([null, 'cwd /repo/packages/app', 'cwd /repo']);
@@ -272,9 +278,9 @@ describe('TranscriptSlot', () => {
       act(() => useTranscriptStore.getState().expandAll(key));
       return useTranscriptStore.getState().rows(key).find((row) => row.kind === 'agent_message')?.text;
     };
-    expect(sent()).toBe('Sent to @a912e224: ready?'); // no graph yet; UX wave U3 (O-12): the message line's words
+    expect(sent()).toBe('@a912e224: ready?'); // no graph yet; UX wave U3 (O-12): the message line's words
     put(graph());
-    expect(sent()).toBe('Sent to Survey src: ready?');
+    expect(sent()).toBe('Survey src: ready?');
     const lookup = useTranscriptStore.getState().entries[key]!.state.agents;
     g.emit('subagent.progress', { taskId: task('a912e224'), description: 'Reading one.txt', usage: { totalTokens: 10, toolUses: 1, durationMs: 5 }, lastToolName: 'Read', summary: null });
     put(graph()); // the graph changed, the agents it names did not
@@ -441,13 +447,14 @@ describe('TranscriptSlot', () => {
       today.unmount();
     });
 
-    it('u4p2-two-1-1: after 51 neither message is drawn; after 55 both, the second as a steer at its place reading “Sent during this turn”; at 60 one bubble with both texts', async () => {
+    it('u4p2-two-1-1: after 51 neither message is drawn; after 55 both, the second as a steer at its place with no caption (the word cut, T42); at 60 one bubble with both texts', async () => {
       const ended = await mount(through('u4p2-two-1-1', 51), 'stacked');
       expect([saying('PINEAPPLE'), saying('MANGO')]).toEqual([[], []]);
       ended.unmount();
       const started = await mount(through('u4p2-two-1-1', 55), 'stacked');
       expect(saying('PINEAPPLE')).toHaveLength(1);
-      expect(saying('MANGO')).toEqual([{ text: expect.stringContaining('MANGO'), caption: 'Sent during this turn' }]);
+      expect(saying('MANGO')).toEqual([{ text: expect.stringContaining('MANGO'), caption: null }]);
+      expect(document.querySelector('section.transcript-user[data-steer]')?.textContent).toContain('MANGO');
       const order = bubbles().map((bubble) => bubble.text);
       expect(order.findIndex((text) => text.includes('PINEAPPLE'))).toBeLessThan(order.findIndex((text) => text.includes('MANGO')));
       started.unmount();
@@ -458,7 +465,7 @@ describe('TranscriptSlot', () => {
       expect(saying('MANGO')).toHaveLength(1);
     });
 
-    it('a steer the engine took into the running turn draws at its place reading “Sent during this turn”, never before it started', async () => {
+    it('a steer the engine took into the running turn draws at its place, a steer with no caption (the word cut, T42), never before it started', async () => {
       const b = builder();
       b.turn('u1', 'Count slowly');
       b.text('m1', 0, 'One, two.');
@@ -469,7 +476,8 @@ describe('TranscriptSlot', () => {
       b.emit('command.lifecycle', { commandUuid: uuid('s1'), state: 'started' });
       b.text('m2', 0, 'Three, and b.');
       await mount(b.events, 'stacked');
-      expect(saying('Look at b too')).toEqual([{ text: 'Look at b too', caption: 'Sent during this turn' }]);
+      expect(saying('Look at b too')).toEqual([{ text: 'Look at b too', caption: null }]);
+      expect(document.querySelector('section.transcript-user[data-steer]')?.textContent).toContain('Look at b too');
       const texts = [...document.querySelectorAll('[data-kind]')].map((row) => row.textContent ?? '');
       const where = (text: string) => texts.findIndex((row) => row.includes(text));
       expect([where('One, two.') < where('Look at b too'), where('Look at b too') < where('Three, and b.')]).toEqual([true, true]); // where the engine took it
@@ -784,7 +792,9 @@ describe('TranscriptSlot for another machine’s terminal session', () => {
     for (let i = 0; i < 10 && invoke.mock.calls.length === 0; i++) await settle();
     expect(invoke).toHaveBeenCalledWith('laneA.watch', { appSessionId: SESSION, agentId: 'a1' }, OTHER_MACHINE);
     await settle();
-    expect(screen.getByTestId('subagent-rows-status').textContent).toBe('Reading this agent’s transcript from mini…');
+    expect(screen.getByTestId('subagent-rows-status').textContent).toBe('Reading from mini…');
+    // the word cut (Acceptance 5; task 2 fix round 1): the app's quiet spinner beside the words, the words its name
+    expect(screen.getByTestId('subagent-rows-status').contains(await screen.findByRole('progressbar', { name: 'Reading from mini…' }))).toBe(true);
     const c = new Chain('c4a1f200', 'sminos');
     c.prompt('Survey the checkout.');
     c.answer('One file.');
@@ -810,13 +820,15 @@ describe('TranscriptSlot for another machine’s terminal session', () => {
     await settle();
     const status = () => screen.getByTestId('subagent-rows-status').textContent;
     act(() => listeners.get('laneA.plane')!({ appSessionId: SESSION, watch: 'wa', paused: 'offline' }, OTHER_MACHINE));
-    expect(status()).toBe('mini isn’t reachable: this agent’s transcript shows once it is');
+    expect(status()).toBe('mini isn’t reachable'); // the word cut (C133): three states in a person's words
+    expect(screen.queryByRole('progressbar')).toBeNull(); // nothing under way
     act(() => listeners.get('laneA.plane')!({ appSessionId: SESSION, watch: 'wa', paused: 'unavailable' }, OTHER_MACHINE));
-    expect(status()).toBe('mini isn’t giving this agent’s transcript now; asking again');
+    expect(status()).toBe('Reading from mini…'); // asked again: a read under way
+    expect(await screen.findByRole('progressbar', { name: 'Reading from mini…' })).toBeTruthy(); // with the quiet spinner (Acceptance 5)
     const empty = { project: 'p', machine: OTHER_MACHINE, session: SESSION, kind: 'snapshot', sub: 'up-a', n: 0, body: { rows: [], more: false, subagents: [], presence: { record: { status: 'idle' }, bridge: true }, streaming: [] } };
     act(() => listeners.get('laneA.plane')!({ appSessionId: SESSION, watch: 'wa', messages: [empty] }, OTHER_MACHINE));
     await settle();
-    expect(status()).toBe('mini holds no rows of this agent’s transcript yet');
+    expect(status()).toBe('Nothing from this agent yet');
   });
 
   // The desk track's note (their 578): sminos serves an agent it doesn't know as an empty stream, so where the agent's
@@ -849,13 +861,13 @@ describe('TranscriptSlot for another machine’s terminal session', () => {
       return { plane, statuses };
     };
 
-    it('says what is loaded where the agent’s snapshot came empty and the live tree here doesn’t name it', async () => {
+    it('says nothing came where the agent’s snapshot came empty, whether or not the live tree here names it', async () => {
       const { plane, statuses } = await scene();
       plane({ watch: 'w1', messages: [snapshot([meta])] });
       for (const agent of ['a1', 'a9']) plane({ watch: `w-${agent}`, messages: [snapshot([])] });
       await settle();
       await settle();
-      expect(statuses()).toEqual(['mini holds no rows of this agent’s transcript yet', 'mini holds no rows of this agent’s transcript, and the session’s tree here doesn’t name it']);
+      expect(statuses()).toEqual(['Nothing from this agent yet', 'Nothing from this agent yet']);
     });
 
     it('claims no absence while the session’s own transcript reconnects: its tree is stale until the fresh snapshot', async () => {
@@ -866,7 +878,7 @@ describe('TranscriptSlot for another machine’s terminal session', () => {
       plane({ watch: 'w1', reset: true });
       await settle();
       await settle();
-      expect(statuses()).toEqual(['mini holds no rows of this agent’s transcript yet', 'mini holds no rows of this agent’s transcript yet']);
+      expect(statuses()).toEqual(['Nothing from this agent yet', 'Nothing from this agent yet']);
     });
 
     it('reads an agent whose own snapshot hasn’t come as still being read, though the tree here doesn’t name it', async () => {
@@ -875,7 +887,7 @@ describe('TranscriptSlot for another machine’s terminal session', () => {
       plane({ watch: 'w-a1', messages: [snapshot([])] });
       await settle();
       await settle();
-      expect(statuses()).toEqual(['mini holds no rows of this agent’s transcript yet', 'Reading this agent’s transcript from mini…']);
+      expect(statuses()).toEqual(['Nothing from this agent yet', 'Reading from mini…']);
     });
   });
 });

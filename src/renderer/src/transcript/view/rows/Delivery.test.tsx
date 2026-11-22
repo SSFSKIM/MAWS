@@ -2,7 +2,7 @@
 // recorded it (the file has a deliverable id, the artifact's); a file still pending, or a refused call's, stays text. Open externally and
 // Reveal in Finder stay as E1 built them (maws.test.tsx).
 import type { AppSessionId } from '@shared/graph/ids';
-import { cleanup, fireEvent, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it } from 'vitest';
 import { addressOf } from '@shared/machine/address';
 import { loadJournal } from '../../../../../../test/support/fixtures';
@@ -58,6 +58,13 @@ describe('the delivery row’s file names', () => {
     expect(refused.container.querySelectorAll('button')).toHaveLength(0);
   });
 
+  it('draws Open externally and Reveal in Finder on pointing or focus within the file’s line, the name the press (the word cut, T101)', () => {
+    const { container } = renderRow(ROW, { storeKey: APP });
+    const lines = [...container.querySelectorAll('.transcript-delivery-file')];
+    expect(lines.map((line) => line.querySelector('.transcript-delivery-actions')?.hasAttribute('data-on-hover'))).toEqual([true, true]);
+    expect(screen.getByRole('button', { name: 'Reveal in Finder: a.txt' }).closest('.transcript-delivery-file')).toBe(lines[0]);
+  });
+
   it('outside a mounted transcript the name is disabled', () => {
     const { actions } = renderRow(ROW);
     const name = screen.getByRole<HTMLButtonElement>('button', { name: 'a.txt' });
@@ -71,14 +78,21 @@ describe('the delivery row’s file names', () => {
 // desktop. P5 O7 M5a (A10): Open externally opens a copy here; Reveal stays greyed, saying where the file is.
 describe('a delivery on another machine’s session', () => {
   // Ticket 627: a terminal (lane A) session over RL2 takes neither command and has no copy route here: both buttons are
-  // greyed with the declared sentences
+  // greyed with the declared sentences. The word cut (T101; task 2 fix round 1): each greyed button keeps the keyboard,
+  // its sentence its description and its tooltip on focus, never a system title
   it('greys Open externally and Reveal in Finder for a terminal session over RL2, each with its sentence', () => {
     const TERMINAL = addressOf(OTHER_MACHINE, 'app-a' as AppSessionId);
     overRl2(TERMINAL, {}, 'A');
     const { actions } = renderRow({ ...ROW, files: [{ path: '/repo/report.pdf', name: 'report.pdf', id: 'd-1' }] }, { storeKey: TERMINAL });
-    const open = screen.getByRole<HTMLButtonElement>('button', { name: 'Open externally: report.pdf' });
-    const reveal = screen.getByRole<HTMLButtonElement>('button', { name: 'Reveal in Finder: report.pdf' });
-    expect([open.disabled, open.title, reveal.disabled, reveal.title]).toEqual([true, REMOTE_UNAVAILABLE['files.openExternal'], true, REMOTE_UNAVAILABLE['files.reveal']]);
+    const open = screen.getByRole<HTMLButtonElement>('button', { name: 'Open externally: report.pdf', description: REMOTE_UNAVAILABLE['files.openExternal'] });
+    const reveal = screen.getByRole<HTMLButtonElement>('button', { name: 'Reveal in Finder: report.pdf', description: REMOTE_UNAVAILABLE['files.reveal'] });
+    for (const [button, sentence] of [[open, REMOTE_UNAVAILABLE['files.openExternal']], [reveal, REMOTE_UNAVAILABLE['files.reveal']]] as const) {
+      expect([button.disabled, button.getAttribute('aria-disabled'), button.hasAttribute('title')]).toEqual([false, 'true', false]);
+      act(() => button.focus());
+      expect(document.activeElement).toBe(button);
+      expect(screen.getByRole('tooltip').textContent).toBe(sentence);
+      act(() => button.blur());
+    }
     fireEvent.click(open);
     fireEvent.click(reveal);
     expect(actions.openDelivered).not.toHaveBeenCalled();
@@ -94,12 +108,12 @@ describe('a delivery on another machine’s session', () => {
     ]);
     applyRemoteSession(remoteSessionState(REMOTE));
     const { actions } = renderRow({ ...ROW, files: [{ path: '/repo/report.pdf', name: 'report.pdf', id: 'd-1' }] }, { storeKey: REMOTE });
-    const open = screen.getByRole<HTMLButtonElement>('button', { name: 'Open externally: report.pdf' });
-    const reveal = screen.getByRole<HTMLButtonElement>('button', { name: 'Reveal in Finder: report.pdf' });
-    expect([open.disabled, reveal.disabled]).toEqual([false, true]);
-    expect(open.title).toBe('Opens a copy of this file from mini on this Mac');
-    expect(reveal.title).toBe('This file is on mini, not on this Mac');
-    expect(screen.getByText('on mini')).toBeTruthy();
+    const open = screen.getByRole<HTMLButtonElement>('button', { name: 'Open externally: report.pdf', description: 'Opens a copy of this file from mini on this Mac' });
+    const reveal = screen.getByRole<HTMLButtonElement>('button', { name: 'Reveal in Finder: report.pdf', description: 'This file is on mini, not on this Mac' });
+    expect([open.disabled, open.hasAttribute('aria-disabled'), reveal.disabled, reveal.getAttribute('aria-disabled')]).toEqual([false, false, false, 'true']);
+    expect([open.hasAttribute('title'), reveal.hasAttribute('title')]).toEqual([false, false]);
+    // where the file is stays in view: outside the actions, which show only on pointing or focus (T101)
+    expect(screen.getByText('on mini').closest('[data-on-hover]')).toBeNull();
     fireEvent.click(open);
     fireEvent.click(reveal);
     expect(actions.openDelivered).toHaveBeenCalledExactlyOnceWith(REMOTE, '/repo/report.pdf');

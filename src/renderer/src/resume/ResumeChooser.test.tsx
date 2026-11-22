@@ -60,7 +60,33 @@ const mount = (projectId: ProjectId | null = P.id as ProjectId) => render(<Resum
 const selected = () => screen.getAllByRole('option').find((o) => o.getAttribute('aria-selected') === 'true')?.querySelector('[data-title]')?.textContent;
 const titles = () => screen.queryAllByRole('option').map((o) => o.querySelector('[data-title]')!.textContent);
 
+const tooltip = () => screen.queryByRole('tooltip')?.textContent ?? null;
+
 describe('the resume chooser', () => {
+  // the word cut (C155, C156, C158): the top left is the scope alone, "Resume session" staying the dialog's title (its
+  // host's); the search field's placeholder is short and its name whole; a chip is its name, its key on its tip. What
+  // stays (C161 to C163): the legend at the foot, the preview's fact labels and its heading over the messages.
+  it('heads the chooser with its scope alone, a short placeholder, and chips that keep their keys for the tip', async () => {
+    fill(base);
+    mount();
+    expect(screen.queryByRole('heading', { name: 'Resume session' })).toBeNull();
+    expect(screen.queryByText('Resume session')).toBeNull();
+    expect(screen.getByTestId('resume-scope').textContent).toBe('maws');
+    const search = screen.getByRole('combobox', { name: 'Search by title, folder, or branch' });
+    expect(search.getAttribute('placeholder')).toBe('Search sessions');
+    const chips = within(screen.getByRole('group', { name: 'Scope' })).getAllByRole('button');
+    expect(chips.map((chip) => chip.textContent)).toEqual(['All projects', 'Current branch', 'All worktrees', 'Archived']);
+    const all = screen.getByRole('button', { name: 'All projects', description: '⌃A' });
+    act(() => all.focus());
+    expect(tooltip()).toBe('⌃A');
+    act(() => all.blur());
+    expect(screen.getByRole('button', { name: 'Archived' }).getAttribute('aria-describedby')).toBeNull(); // no key, no tip
+    expect(document.querySelector('[data-legend]')?.textContent).toBe('↑↓ navigate⏎ open⌘⏎ new tabesc close');
+    const preview = screen.getByTestId('resume-preview');
+    expect([...preview.querySelectorAll('dt')].map((dt) => dt.textContent)).toEqual(['Folder', 'Project', 'Last active']);
+    expect(within(preview).getByRole('heading', { name: 'Where you left off' })).toBeTruthy();
+  });
+
   it('an empty project says so in the list and the preview', () => {
     fill(base.filter((r) => r.projectId !== P.id));
     mount();
@@ -219,7 +245,8 @@ describe('the resume chooser', () => {
     mount();
     const list = screen.getByRole('listbox');
     expect(titles()).toHaveLength(100);
-    expect(list.textContent).toContain('Showing 100 of 250. Scroll for more, or type to narrow the list.');
+    expect(list.lastElementChild?.textContent).toBe('100 of 250'); // the word cut (C159): the count, no explanation
+    expect(list.textContent).not.toMatch(/Showing|Scroll for more/);
     const scrollTo = (top: number) => {
       Object.defineProperties(list, { scrollHeight: { value: 3600, configurable: true }, clientHeight: { value: 400, configurable: true } });
       list.scrollTop = top;
@@ -229,12 +256,12 @@ describe('the resume chooser', () => {
     expect(titles()).toHaveLength(100);
     scrollTo(2900); // 300 px from the end
     expect(titles()).toHaveLength(200);
-    expect(list.textContent).toContain('Showing 200 of 250.');
+    expect(list.lastElementChild?.textContent).toBe('200 of 250');
     await user.click(screen.getAllByRole('option')[199]);
     await user.keyboard('{ArrowDown}');
     expect(titles()).toHaveLength(250);
     expect(selected()).toBe('s200');
-    expect(list.textContent).not.toContain('Scroll for more');
+    expect(list.textContent).not.toMatch(/\d of 250/);
     await user.keyboard('s'); // every session matches: the first page again
     expect(titles()).toHaveLength(100);
     expect(selected()).toBe('s000');

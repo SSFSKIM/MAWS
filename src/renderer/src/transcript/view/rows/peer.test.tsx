@@ -1,7 +1,7 @@
 // E7 (M2): the rows of messages between sessions and agents and of a listing, and the Reply composer under them (E7
 // execution document, Design §4): real rows from the model, a spy `replyToPeer`, a hand-held `peerReplies` source. UX
 // wave U3 (O-12; the U3a document, Acceptance 3): every message is one line, the line itself opens the whole message.
-import { act, cleanup, fireEvent, screen, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
@@ -16,7 +16,7 @@ import { rowsOf, withAllExpanded } from '../../model/derive';
 import { applyEvents, createState } from '../../model/reduce';
 import type { Row } from '../../model/rows';
 import { builder, task, tool, uuid } from '../../model/test-events';
-import type { PeerReply, PeerReplies, TranscriptActions } from '../context';
+import { Disclosures, type PeerReply, type PeerReplies, type TranscriptActions } from '../context';
 import { renderRow, spyActions } from './test-support';
 
 const A = at('A' as AppSessionId); // the page's; main (the fake bridge) is asked and answers with bareOf(A)
@@ -60,17 +60,23 @@ beforeEach(() => useSessions.setState({ engine: new Map(), records: new Map(), d
 afterEach(cleanup);
 
 describe('a message from another session', () => {
-  it('reads Message from @sender, the address as its tooltip, and the preview; Reply opens the composer, which sends through replyToPeer', async () => {
+  it('leads with ← and reads @sender, the address as its tooltip, and the preview, its accessible name keeping Message from; Reply opens the composer, which sends through replyToPeer', async () => {
     live();
     const { source } = replies();
     const actions: TranscriptActions = { ...spyActions(), peerReplies: source };
     const { container } = renderRow(inbound(), { storeKey: A, actions });
     expect(screen.getByText('@repo-b').getAttribute('title')).toBe(B);
     expect(screen.getByText('hello from B')).toBeTruthy();
-    expect(container.querySelector('.transcript-line-text')?.textContent).toBe('Message from @repo-b: hello from B');
+    // the word cut (T73, ruled): the direction is the arrow, the old words the line's accessible lead
+    expect(container.querySelector('.transcript-line-mark')?.textContent).toBe('←');
+    expect(container.querySelector('.transcript-line-text')?.textContent).toBe('@repo-b: hello from B');
+    expect(screen.getByRole('button', { name: /^Message from @repo-b ?: hello from B$/ })).toBeTruthy(); // jsdom's name sets the name span apart
+    expect(container.querySelector('.transcript-line-words .sr-only')?.textContent).toBe('Message from '); // drawn: the arrow alone
     fireEvent.click(screen.getByRole('button', { name: 'Reply' }));
+    // T76: no label over the box; the label's words are the box's name, the session it goes through in its placeholder
     const box = screen.getByRole('textbox', { name: 'Reply via Session A' });
-    expect(box.getAttribute('placeholder')).toBe('Reply to repo-b…');
+    expect(box.getAttribute('placeholder')).toBe('Reply to repo-b, via Session A…');
+    expect(container.querySelector('label')).toBeNull();
     fireEvent.change(box, { target: { value: '  on it  ' } });
     await act(async () => fireEvent.click(screen.getByRole('button', { name: 'Send' })));
     expect(actions.replyToPeer).toHaveBeenCalledExactlyOnceWith(A, { address: B, name: 'repo-b', mode: 'reply' }, 'on it');
@@ -133,23 +139,34 @@ describe('a message from another session', () => {
     renderRow(inbound(), { storeKey: A, actions: { ...spyActions(), peerReplies: source } });
     fireEvent.click(screen.getByRole('button', { name: 'Reply' }));
     put(B, { text: 'on it', state: { kind: 'asked', sentAt: new Date().toISOString(), parentTurnOpenAtSend: false } });
-    expect(screen.getByRole('status').textContent).toBe('Asked Session A to reply · 0s');
+    // the word cut (T79): the state and its time at rest; why it waits and how it went its tooltip and description
+    const why = () => document.getElementById(screen.getByRole('status').getAttribute('aria-describedby') ?? '')?.textContent ?? null;
+    expect(screen.getByRole('status').textContent).toBe('Sending · 0s');
+    expect(why()).toBe('Asked Session A to reply');
     expect(screen.getByRole('textbox').getAttribute('placeholder')).toBe('Waiting for the last reply');
     put(B, { text: 'on it', state: { kind: 'asked', sentAt: new Date().toISOString(), parentTurnOpenAtSend: true } });
-    expect(screen.getByRole('status').textContent).toBe('Asked Session A to reply · 0s · Session A sends it at its next tool boundary or when this turn ends');
+    expect(screen.getByRole('status').textContent).toBe('Sending · 0s');
+    expect(why()).toBe('Asked Session A to reply · Session A sends it at its next tool boundary or when this turn ends');
     expect(within(screen.getByRole('status')).getByRole('timer').textContent).toBe('0s'); // scale-review C scalpel-5#2: the tick is not re-announced
+    act(() => screen.getByRole('status').focus());
+    expect(screen.getByRole('tooltip').textContent).toBe('Asked Session A to reply · Session A sends it at its next tool boundary or when this turn ends');
     put(B, { text: 'on it', state: { kind: 'asked', sentAt: new Date(Date.now() - 40_000).toISOString(), parentTurnOpenAtSend: true } });
-    expect(screen.getByRole('status').textContent).toMatch(/^Asked Session A to reply · \d+s · Session A is inside a long tool call; it sends it when that call returns or this turn ends$/);
+    expect(screen.getByRole('status').textContent).toMatch(/^Sending · \d+s$/);
+    expect(why()).toBe('Asked Session A to reply · Session A is inside a long tool call; it sends it when that call returns or this turn ends');
     put(B, { text: 'on it', state: { kind: 'forwarded' } });
-    expect(screen.getByRole('status').textContent).toBe('Session A is replying with SendMessage');
+    expect(screen.getByRole('status').textContent).toBe('Sending');
+    expect(why()).toBe('Session A is replying with SendMessage');
     expect(screen.queryByRole('timer')).toBeNull();
     put(B, { text: 'on it', state: { kind: 'sent' } });
-    expect(screen.getByRole('status').textContent).toBe('Session A replied with SendMessage');
+    expect(screen.getByRole('status').textContent).toBe('Sent');
+    expect(why()).toBe('Session A replied with SendMessage');
     put(B, { text: 'on it', state: { kind: 'sent', reworded: true } }); // E11 W-D
-    expect(screen.getByRole('status').textContent).toBe('Session A replied with SendMessage, in its own words');
+    expect(screen.getByRole('status').textContent).toBe('Sent, reworded');
+    expect(why()).toBe('Session A replied with SendMessage, in its own words');
     expect((screen.getByRole('textbox') as HTMLTextAreaElement).value).toBe('');
     put(B, { text: 'on it', state: { kind: 'failed', message: 'the engine discarded it before starting it' } });
-    expect(screen.getByRole('status').textContent).toBe('Reply failed: the engine discarded it before starting it');
+    expect(screen.getByRole('status').textContent).toBe('Reply failed: the engine discarded it before starting it'); // a failure keeps its words
+    expect(why()).toBeNull();
     expect((screen.getByRole('textbox') as HTMLTextAreaElement).value).toBe('on it');
     fireEvent.change(screen.getByRole('textbox'), { target: { value: 'on it again' } });
     expect(source.dismiss).toHaveBeenCalledWith(A, B);
@@ -198,10 +215,22 @@ describe('a message from another session', () => {
     expect(rows.map((row) => row.direction)).toEqual(['to_child', 'from_child']);
     for (const [row, whole] of [[rows[0]!, 'look again'], [rows[1]!, 'found it']] as const) {
       const { container } = renderRow(row, { storeKey: A });
-      fireEvent.click(screen.getByRole('button', { name: row.text }));
+      fireEvent.click(screen.getByRole('button', { name: `${row.direction === 'to_child' ? 'Sent to' : 'Message from'} ${row.text}` }));
       expect(container.querySelector('.transcript-peer-body')?.textContent).toBe(whole);
       cleanup();
     }
+  });
+
+  // Task 2 fix round 1 (T73): routed up, a child's send to its parent still goes out to the party its line names
+  it('draws a child’s send to its parent as sent: → and Sent to, as its copy does', () => {
+    const rows = derived((b) => {
+      b.turn('u1');
+      b.toolUse('s1', 'SendMessage', { to: 'main', message: 'done here' });
+    }).filter((row): row is Message => row.kind === 'agent_message');
+    const { container } = renderRow(rows[0]!, { storeKey: A });
+    const line = screen.getByRole('button', { name: /^Sent to main ?: done here$/ });
+    expect(line.textContent).toContain('→');
+    expect(container.textContent).not.toContain('←');
   });
 });
 
@@ -245,9 +274,10 @@ describe('the message line', () => {
     expect(body()).toBeNull();
   });
 
-  it('offers Reply at the line’s end where the sender can be answered, and keeps it shown while its composer is open', () => {
+  it('offers Reply at the line’s end where the sender can be answered, drawn on pointing or focus, and keeps it shown while its composer is open (T75)', () => {
     const { container } = renderRow(inbound(), { storeKey: A });
     const reply = screen.getByRole('button', { name: 'Reply' });
+    expect(reply.hasAttribute('data-on-hover')).toBe(true);
     const root = container.querySelector('.transcript-peer')!;
     expect(reply.closest('.transcript-line')).not.toBeNull();
     expect(reply.closest('.transcript-line-words')).toBeNull(); // outside the words, so a cut line keeps it
@@ -290,7 +320,7 @@ describe('the owners of a message from another session', () => {
   it('names you first when you share it, the member when you don’t own it, and a name the store doesn’t hold as written', () => {
     const { container } = renderRow(labelled('ana@example.com, sam@example.com'), { storeKey: A });
     expect(owners()?.textContent).toBe('you, Ana');
-    expect(container.querySelector('.transcript-line-text')?.textContent).toBe('Message from @repo-b (you, Ana): hello from B'); // after the name, in parentheses
+    expect(container.querySelector('.transcript-line-text')?.textContent).toBe('@repo-b (you, Ana): hello from B'); // after the name, in parentheses
     expect(owners()?.getAttribute('title')).toBe('you <sam@example.com>, Ana <ana@example.com>');
     cleanup();
     renderRow(labelled('ana@example.com'), { storeKey: A });
@@ -303,7 +333,7 @@ describe('the owners of a message from another session', () => {
 });
 
 describe('a message sent to another session, and a subagent’s report', () => {
-  it('reads Sent to @recipient with the send’s state at the line’s end, and the engine’s reason when it could not send', () => {
+  it('leads with → and reads @recipient with the send’s state at the line’s end, and the engine’s reason when it could not send', () => {
     const rows = derived((b) => {
       b.turn('u1');
       b.toolUse('s1', 'SendMessage', { to: 'nobody', message: 'hi' });
@@ -311,7 +341,9 @@ describe('a message sent to another session, and a subagent’s report', () => {
       b.toolUse('s2', 'SendMessage', { to: 'peer-c', message: 'waiting' });
     }).filter((row): row is Message => row.kind === 'agent_message');
     const { container } = renderRow(rows[0]!, { storeKey: A });
-    expect(container.querySelector('.transcript-line-text')?.textContent).toBe('Sent to @nobody: hi');
+    expect(container.querySelector('.transcript-line-mark')?.textContent).toBe('→'); // the word cut (T73)
+    expect(container.querySelector('.transcript-line-text')?.textContent).toBe('@nobody: hi');
+    expect(screen.getByRole('button', { name: /^Sent to @nobody ?: hi$/ })).toBeTruthy();
     expect(screen.getByText('Not sent').closest('.transcript-line-words')).toBeNull(); // at the end, outside the cut words
     expect(container.querySelector('.transcript-line')?.lastElementChild?.textContent).toBe('Not sent');
     expect(screen.getByText("No agent named 'nobody' is reachable.")).toBeTruthy();
@@ -327,7 +359,8 @@ describe('a message sent to another session, and a subagent’s report', () => {
       b.emit('subagent.message', { direction: 'from_child', fromAgentId: 'a1' as never, toAgentId: null, text: '[Subagent hand-back] Framed. The report follows:\n  all done\n  and checked' });
     }).filter((row): row is Message => row.kind === 'agent_message');
     const { container } = renderRow(row!, { storeKey: A });
-    expect(screen.getByText('Report from a1: all done')).toBeTruthy();
+    expect(screen.getByText('Report from a1: all done')).toBeTruthy(); // keeps its words and the › mark (T73)
+    expect(container.querySelector('.transcript-line-mark')?.textContent).toBe('›');
     expect(container.querySelector('.transcript-peer-body')).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: /^Report from a1/ }));
     expect(container.querySelector('.transcript-peer-body')?.textContent).toBe('all done\nand checked');
@@ -338,16 +371,19 @@ describe('a message sent to another session, and a subagent’s report', () => {
       b.emit('turn.started', { userMessageUuid: null, origin: 'peer' });
       b.emit('subagent.message', { direction: 'from_child', fromAgentId: 'a1' as never, toAgentId: null, text: 'first line\nsecond line' });
     }).filter((row): row is Message => row.kind === 'agent_message');
-    renderRow(row!, { storeKey: A });
-    expect(screen.getByText('Message from a1: first line')).toBeTruthy();
+    const { container } = renderRow(row!, { storeKey: A });
+    expect(container.querySelector('.transcript-line-mark')?.textContent).toBe('←');
+    expect(container.querySelector('.transcript-line-text')?.textContent).toBe('a1: first line');
     expect(screen.queryByText(/second line/)).toBeNull();
-    fireEvent.click(screen.getByRole('button', { name: /^Message from a1/ }));
+    fireEvent.click(screen.getByRole('button', { name: 'Message from a1: first line' }));
     expect(screen.getByText(/second line/).textContent).toBe('first line\nsecond line');
   });
 });
 
 describe('a ListAgents listing', () => {
-  it('lists each section with its count, names, refs and extras; Message opens the composer addressed to the name', async () => {
+  // The word cut (T81, T82, T84): the listing folds to one counted line that opens in place; no self line; each row's
+  // Message on pointing or focus within it, and while its box is open
+  it('is one line counting the agents it listed, which opens to each section with its count, names, refs and extras; Message opens the composer addressed to the name', async () => {
     live();
     const row = derived((b) => {
       b.turn('u1');
@@ -355,19 +391,84 @@ describe('a ListAgents listing', () => {
       b.result('l1', 'This session is repo-a [1] — x.\n\nPeer sessions (1):\n  repo-b [61303a]  ·  interactive  ·  idle\n  (… 2 more not shown)');
     }).find((r): r is Extract<Row, { kind: 'agent_list' }> => r.kind === 'agent_list')!;
     const actions = spyActions();
-    renderRow(row, { storeKey: A, actions });
-    expect(screen.getByText('This session is repo-a [1]')).toBeTruthy();
+    const { container } = renderRow(row, { storeKey: A, actions });
+    const fold = screen.getByRole('button', { name: 'Listed 1 agent' });
+    expect(fold.getAttribute('aria-expanded')).toBe('false');
+    expect(screen.queryByText('Peer sessions · 1')).toBeNull();
+    fireEvent.click(fold);
+    expect(fold.getAttribute('aria-expanded')).toBe('true');
+    expect(screen.queryByText(/This session is/)).toBeNull();
     expect(screen.getByText('Peer sessions · 1')).toBeTruthy();
     expect(screen.getByText('repo-b')).toBeTruthy();
     expect(screen.getByText('61303a')).toBeTruthy();
     expect(screen.getByText('interactive · idle')).toBeTruthy();
     expect(screen.getByText('(… 2 more not shown)')).toBeTruthy();
-    fireEvent.click(screen.getByRole('button', { name: 'Message repo-b' }));
+    const message = screen.getByRole('button', { name: 'Message repo-b' });
+    expect(message.hasAttribute('data-on-hover')).toBe(true);
+    fireEvent.click(message);
     const box = screen.getByRole('textbox', { name: 'Message via Session A' });
-    expect(box.getAttribute('placeholder')).toBe('Message repo-b…');
+    expect(box.getAttribute('placeholder')).toBe('Message repo-b, via Session A…');
+    expect(container.querySelector('label')).toBeNull();
     fireEvent.change(box, { target: { value: 'ping' } });
     await act(async () => fireEvent.click(screen.getByRole('button', { name: 'Send' })));
     expect(actions.replyToPeer).toHaveBeenCalledExactlyOnceWith(A, { address: 'repo-b', name: 'repo-b', mode: 'message' }, 'ping');
+  });
+
+  // Task 2 fix round 1: the fold unmounts its body, so the box's draft and its start's refusal are kept above it
+  it('keeps a typed message and a start’s refusal across closing the listing, its row unmounting, and opening it again', async () => {
+    const fake = fakeClient();
+    window.maws = fake.client as unknown as PreloadBridge;
+    useSessions.setState({ engine: new Map(), records: new Map([[A, record(A, { title: { text: 'Session A', source: 'user' } })]]) });
+    const row = derived((b) => {
+      b.turn('u1');
+      b.toolUse('l1', 'ListAgents', {});
+      b.result('l1', 'Peer sessions (1):\n  repo-b [61303a]  ·  idle');
+    }).find((r): r is Extract<Row, { kind: 'agent_list' }> => r.kind === 'agent_list')!;
+    const disclosures = new Disclosures();
+    const first = renderRow(row, { storeKey: A, disclosures });
+    fireEvent.click(screen.getByRole('button', { name: 'Listed 1 agent' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Message repo-b' }));
+    fireEvent.change(screen.getByRole('textbox'), { target: { value: 'ping' } });
+    await act(async () => fireEvent.click(screen.getByRole('button', { name: 'Send' })));
+    fireEvent.click(screen.getByRole('button', { name: 'Listed 1 agent' }));
+    await waitFor(() => expect(screen.queryByRole('textbox')).toBeNull()); // the body unmounts once its close has run
+    await act(() => fake.reply('session.acquire', { status: 'missing_directory', appSessionId: bareOf(A), directory: '/gone' })); // refused while folded
+    first.unmount(); // its row virtualised away and back
+    renderRow(row, { storeKey: A, disclosures });
+    fireEvent.click(screen.getByRole('button', { name: 'Listed 1 agent' }));
+    expect((screen.getByRole('textbox') as HTMLTextAreaElement).value).toBe('ping');
+    expect(screen.getByText('Directory not found: /gone')).toBeTruthy();
+    delete (window as { maws?: unknown }).maws;
+  });
+
+  // Fix wave (scalpel-2#1): a send that returns after the fold remounted the box reaches the box now shown, which opens
+  // again, empty, rather than staying closed over the sent draft
+  it('lets a send that answers after the listing folded and opened again clear and open the box now shown', async () => {
+    live();
+    const row = derived((b) => {
+      b.turn('u1');
+      b.toolUse('l1', 'ListAgents', {});
+      b.result('l1', 'Peer sessions (1):\n  repo-b [61303a]  ·  idle');
+    }).find((r): r is Extract<Row, { kind: 'agent_list' }> => r.kind === 'agent_list')!;
+    let answer!: () => void;
+    const actions: TranscriptActions = { ...spyActions(), replyToPeer: vi.fn(() => new Promise<void>((resolve) => (answer = resolve))) };
+    const disclosures = new Disclosures();
+    renderRow(row, { storeKey: A, actions, disclosures });
+    const fold = screen.getByRole('button', { name: 'Listed 1 agent' });
+    fireEvent.click(fold);
+    fireEvent.click(screen.getByRole('button', { name: 'Message repo-b' }));
+    fireEvent.change(screen.getByRole('textbox'), { target: { value: 'ping' } });
+    await act(async () => fireEvent.click(screen.getByRole('button', { name: 'Send' })));
+    expect(actions.replyToPeer).toHaveBeenCalledOnce();
+    fireEvent.click(fold);
+    await waitFor(() => expect(screen.queryByRole('textbox')).toBeNull()); // the box unmounts with the fold
+    fireEvent.click(fold);
+    const box = screen.getByRole('textbox') as HTMLTextAreaElement;
+    expect(box.disabled).toBe(true); // still sending
+    expect(box.value).toBe('ping');
+    await act(async () => answer());
+    expect(box.disabled).toBe(false);
+    expect(box.value).toBe('');
   });
 
   it('keeps two rows of one name apart: each its own Message disclosure', () => {
@@ -377,6 +478,7 @@ describe('a ListAgents listing', () => {
       b.result('l1', 'This session is repo-a [1] — x.\n\nSubagents (2):\n  worker  ·  running\n  worker  ·  completed\n\nPeer sessions (1):\n  worker [61303a]  ·  idle');
     }).find((r): r is Extract<Row, { kind: 'agent_list' }> => r.kind === 'agent_list')!;
     const { container } = renderRow(row, { storeKey: A });
+    fireEvent.click(screen.getByRole('button', { name: 'Listed 3 agents' }));
     const buttons = screen.getAllByRole('button', { name: 'Message worker' });
     expect(buttons).toHaveLength(3);
     fireEvent.click(buttons[1]!);
@@ -384,13 +486,28 @@ describe('a ListAgents listing', () => {
     expect(container.querySelectorAll('[data-part="peer-composer"]')).toHaveLength(1);
   });
 
-  it('says it is listing until the result arrives', () => {
+  it('a result it could not read as a listing reads its notes as they came, with nothing to fold', () => {
+    const row = derived((b) => {
+      b.turn('u1');
+      b.toolUse('l1', 'ListAgents', {});
+      b.result('l1', 'Messaging is off.');
+    }).find((r): r is Extract<Row, { kind: 'agent_list' }> => r.kind === 'agent_list')!;
+    renderRow(row, { storeKey: A });
+    expect(screen.getByText('Messaging is off.')).toBeTruthy();
+    expect(screen.queryByRole('button')).toBeNull();
+  });
+
+  it('says it is listing until the result arrives, with the quiet spinner beside its words', async () => {
     const row = derived((b) => {
       b.turn('u1');
       b.toolUse('l1', 'ListAgents', {});
     }).find((r): r is Extract<Row, { kind: 'agent_list' }> => r.kind === 'agent_list')!;
-    renderRow(row, { storeKey: A });
-    expect(screen.getByText('Listing the agents and sessions…')).toBeTruthy();
+    const { container } = renderRow(row, { storeKey: A });
+    expect(screen.getByText('Listing agents…')).toBeTruthy(); // the word cut (T85)
+    expect(screen.queryByRole('button')).toBeNull(); // nothing to open yet
+    // the word cut (Acceptance 5; task 2 fix round 1): the app's quiet spinner where the static glyph stood, the words its name
+    expect(await screen.findByRole('progressbar', { name: 'Listing agents…' })).toBeTruthy();
+    expect(container.querySelector('svg')).toBeNull();
   });
 
   it('a listing and a send whose turn closed with no result say they were never answered, not busy (scale-review C scalpel-1#1)', () => {
@@ -403,6 +520,7 @@ describe('a ListAgents listing', () => {
     const { container } = renderRow(rows.find((r) => r.kind === 'agent_list')!, { storeKey: A });
     expect(screen.getByText('Listing the agents was never answered')).toBeTruthy();
     expect(container.querySelector('[aria-busy]')).toBeNull();
+    expect(screen.queryByRole('button')).toBeNull();
     cleanup();
     renderRow(rows.find((r) => r.kind === 'agent_message')!, { storeKey: A });
     expect(screen.getByText('Never answered')).toBeTruthy();

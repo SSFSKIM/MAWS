@@ -309,7 +309,7 @@
   {
     "at": "2026-09-28T10:00:00.045Z",
     "autoDenied": 0,
-    "caption": "Edited 2 files, created a file, read a file, ran a command",
+    "caption": "Edited 2 files, created a file, +2",
     "counts": {
       "added": 7,
       "removed": 4
@@ -341,6 +341,7 @@
       }
     ],
     "firstDeniedCell": null,
+    "fold": 2,
     "id": "divider:turn:u-edit-and-receipt-002",
     "kind": "divider",
     "origin": "human",

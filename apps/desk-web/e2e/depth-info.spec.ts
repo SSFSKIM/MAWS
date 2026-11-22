@@ -165,11 +165,11 @@ test("a streaming message is drawn as the message under its label and an ellipsi
   await expect(settled.locator('.owner-message-ink [data-streamdown="strong"]')).toHaveText(['notes.md:', 'words.txt:']);
   await expect(view.locator('[data-owner-card], .owner-card-label')).toHaveCount(0);
   expect(await view.evaluate((el) => el.textContent?.includes('<message>'))).toBe(false);
-  await expect(view).not.toContainText('Peer session worked');
+  await expect(view).not.toContainText('Peer session ·');
   // UX wave U2b: in the report a closed turn's line stands only while a record of its turn is open; the full
   // transcript draws every turn's line
   await page.getByRole('group', { name: 'Session view' }).getByRole('button', { name: 'Transcript' }).click();
-  await expect(view).toContainText('Continued for');
+  await expect(view).toContainText('Continued · ');
 });
 
 test("the engine's status: read when Info opens and on Refresh, never on a presence; from an older plugin, not available and what it needs", async ({ page, hub }) => {

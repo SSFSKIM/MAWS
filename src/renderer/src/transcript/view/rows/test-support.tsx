@@ -55,7 +55,6 @@ export function renderRow(
     storeKey?: string; actions?: TranscriptActions; rewind?: RewindInterface; renderRequest?: (slot: Extract<Row, { kind: 'request_slot' }>) => ReactNode; sessionDirectory?: string;
     sessionCwd?: string; // UX wave U8c-2: the agent's folder while the session is in its launch folder
     disclosures?: Disclosures; // shared across renders to stand for one transcript whose rows remount
-    effort?: string; // W8: the session's effort, as the live thinking label names it
     variant?: 'session' | 'child';
     answerActions?: AnswerActionsSource; // UX wave U3b: the mount's placement of the answers' action rows
     keepInPlace?: (rowId: RowId, ms: number) => void; // board ticket 789: the mounted list's anchor
@@ -64,7 +63,7 @@ export function renderRow(
   const actions = options.actions ?? spyActions();
   const value = {
     storeKey: options.storeKey ?? '', variant: options.variant ?? ('session' as const), actions, rewind: options.rewind ?? null, renderRequest: options.renderRequest ?? null,
-    disclosures: options.disclosures ?? new Disclosures(), idPrefix: 't', sessionDirectory: options.sessionDirectory ?? null, effort: options.effort ?? null,
+    disclosures: options.disclosures ?? new Disclosures(), idPrefix: 't', sessionDirectory: options.sessionDirectory ?? null,
     ...(options.sessionCwd !== undefined && { sessionCwd: options.sessionCwd }),
     ...(options.answerActions !== undefined && { answerActions: options.answerActions }),
     ...(options.keepInPlace !== undefined && { keepInPlace: options.keepInPlace }),

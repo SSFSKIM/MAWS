@@ -3,7 +3,7 @@
 // draws them. Invented content.
 import { describe, expect, it } from 'vitest';
 import type { SessionEvent } from '@shared/graph/events';
-import { captionParts, captionText, stepsOfCells, turnOrder, type CaptionStep } from './caption';
+import { caption, captionParts, captionText, stepsOfCells, turnOrder, type CaptionStep } from './caption';
 import { rowsOf, withAllExpanded } from './derive';
 import { applyEvents, createState } from './reduce';
 import type { Row } from './rows';
@@ -56,11 +56,13 @@ describe('a run’s caption (acceptance 2)', () => {
       grep(t, 't7', 'TODO');
     });
     const group = runOf(b);
-    expect(group.summary).toBe('Read 2 files, edited a file, ran 3 commands (1 failed), searched code');
+    expect(group.summary).toBe('Read 2 files, edited a file, +4'); // the word cut (T2): four parts are capped
+    expect(captionText(captionParts(stepsOfCells(group.cells)), false)).toBe('Read 2 files, edited a file, ran 3 commands (1 failed), searched code');
     expect(group.counts).toEqual({ added: 2, removed: 1 });
   });
 
-  it('five parts read the first three and one more item, `and N more actions`, N the left-out parts’ counts; four are not capped', () => {
+  // The word cut (T2): a capped caption keeps its first two parts, then `+N`, N the left-out parts' counts
+  it('four parts and more read the first two and `+N`, N the left-out parts’ counts; three are not capped', () => {
     const five = turnOf((t) => {
       read(t, 't1', '/w/a.ts');
       edit(t, 't2', '/w/b.ts');
@@ -69,14 +71,20 @@ describe('a run’s caption (acceptance 2)', () => {
       fetch(t, 't5', 'https://example.test/a');
       fetch(t, 't6', 'https://example.test/b');
     });
-    expect(runOf(five).summary).toBe('Read a file, edited a file, ran a command, and 3 more actions');
+    expect(runOf(five).summary).toBe('Read a file, edited a file, +4');
     const four = turnOf((t) => {
       read(t, 't1', '/w/a.ts');
       edit(t, 't2', '/w/b.ts');
       run(t, 't3', 'pnpm test');
       grep(t, 't4', 'TODO');
     });
-    expect(runOf(four).summary).toBe('Read a file, edited a file, ran a command, searched code');
+    expect(runOf(four).summary).toBe('Read a file, edited a file, +2');
+    const three = turnOf((t) => {
+      read(t, 't1', '/w/a.ts');
+      edit(t, 't2', '/w/b.ts');
+      run(t, 't3', 'pnpm test');
+    });
+    expect(runOf(three).summary).toBe('Read a file, edited a file, ran a command');
     const one = turnOf((t) => {
       read(t, 't1', '/w/a.ts');
       edit(t, 't2', '/w/b.ts');
@@ -84,7 +92,7 @@ describe('a run’s caption (acceptance 2)', () => {
       grep(t, 't4', 'TODO');
       fetch(t, 't5', 'https://example.test/a');
     });
-    expect(runOf(one).summary).toBe('Read a file, edited a file, ran a command, and 2 more actions');
+    expect(runOf(one).summary).toBe('Read a file, edited a file, +3');
   });
 
   // UX wave U3b, M5 (acceptance 12): the web plugin's fetch is a page fetched, as WebFetch's is, in the run's caption
@@ -122,7 +130,7 @@ describe('a run’s caption (acceptance 2)', () => {
     });
     expect(runOf(b).summary).toBe('Read and edited copy.ts');
     const steps = stepsOfCells(runOf(b).cells);
-    expect(captionParts(steps)).toEqual([{ text: 'read and edited copy.ts', calls: 3, count: 2, changed: true, agent: false }]);
+    expect(captionParts(steps)).toEqual([{ text: 'read and edited copy.ts', calls: 3, count: 2, changed: true, agent: false, connectors: [], connected: false }]);
   });
 
   it('a file whose edit failed and then succeeded has no mark; two failed edits of one file are one failed key', () => {
@@ -223,6 +231,59 @@ describe('a run’s caption (acceptance 2)', () => {
     expect(runOf(skill).summary).toBe('Ran a command, ran /release-notes');
   });
 
+  // The word cut (T2): which calls a capped caption names when it leaves them out: a skill by its name, a connector by
+  // its server, the computer-use plugin's server by that name; MAWS's own server is no connector. A step carries the
+  // connector it used whatever its caption kind
+  it('names a left-out skill by its name, a connector by its server and computer use by that name, but not MAWS’s own calls', () => {
+    const b = turnOf((t) => {
+      edit(t, 't1', '/w/a.ts');
+      run(t, 't2', 'pnpm test');
+      grep(t, 't3', 'TODO');
+      t.toolUse('t4', 'Skill', { skill: 'dataviz' });
+      t.result('t4', 'loaded');
+      t.toolUse('t5', 'mcp__notion__search', { q: 'x' });
+      t.result('t5', 'ok');
+      t.toolUse('t6', 'mcp__notion__create_page', { title: 'x' });
+      t.result('t6', 'ok');
+      t.toolUse('t7', 'mcp__plugin_cua_cua_repl__js', { code: '1' });
+      t.result('t7', 'ok');
+      t.toolUse('t8', 'Skill', {});
+      t.result('t8', 'loaded');
+    });
+    expect(lineOf(b).caption).toBe('Edited a.ts, ran a command, ran /dataviz, used notion, used computer use, +2');
+    const cells = drawn(b.events).flatMap((row) => (row.kind === 'group' ? row.cells : row.kind === 'cell' ? [row] : []));
+    expect(stepsOfCells(cells).map((step) => step.connector ?? null)).toEqual([null, null, null, '/dataviz', 'notion', 'notion', 'computer use', null]);
+  });
+
+  // The word cut (T2, fix round 1): a connector's call of a caption kind (the web plugin's fetch reads `fetched a page`)
+  // is named as any other when it is left out, and is not counted again
+  it('names a left-out connector whose call has a caption kind, and counts it no more', () => {
+    const b = turnOf((t) => {
+      edit(t, 't1', '/w/a.ts');
+      run(t, 't2', 'pnpm test');
+      grep(t, 't3', 'TODO');
+      t.toolUse('t4', 'mcp__web__fetch', { url: 'https://example.com' });
+      t.result('t4', 'page');
+    });
+    expect(lineOf(b).caption).toBe('Edited a.ts, ran a command, used web, +1');
+    expect(lineOf(b).parts).toContain('fetched a page');
+  });
+
+  // The word cut (T2, fix round 1): computer use is its plugin's server, whichever of its tools a call used, named once
+  it('names the computer-use server once, whichever of its tools the left-out calls used', () => {
+    const b = turnOf((t) => {
+      edit(t, 't1', '/w/a.ts');
+      run(t, 't2', 'pnpm test');
+      grep(t, 't3', 'TODO');
+      t.toolUse('t4', 'mcp__plugin_cua_cua_repl__js', { code: '1' });
+      t.result('t4', 'ok');
+      t.toolUse('t5', 'mcp__plugin_cua_cua_repl__end_task', {});
+      t.result('t5', 'ok');
+    });
+    expect(lineOf(b).caption).toBe('Edited a.ts, ran a command, used computer use, +1');
+    expect(lineOf(b).caption).not.toContain('plugin_cua');
+  });
+
   it('a stopped call of no kind is counted under its done words', () => {
     const b = turnOf((t) => {
       t.toolUse('t1', 'mcp__docs__search', { q: 'x' });
@@ -273,7 +334,7 @@ describe('the parts, by hand', () => {
       step({ kind: 'read', key: '/a', path: '/a' }), step({ kind: 'read', key: '/b', path: '/b' }), step({ kind: 'command', key: 'c1' }),
       step({ kind: 'grep', key: 'g1' }), step({ kind: 'web_fetch', key: 'f1' }), step({ kind: 'todos', key: 'd1' }), step({ kind: 'todos', key: 'd2' }),
     ]);
-    expect(captionText(parts, true)).toBe('Read 2 files, ran a command, searched code, and 3 more actions');
+    expect(captionText(parts, true)).toBe('Read 2 files, ran a command, +4');
     expect(captionText(parts, false)).toBe('Read 2 files, ran a command, searched code, fetched a page, updated todos');
     expect(captionText([], true)).toBe('');
     // a file read twice, left out, is one action: its part counts its one key, not its two calls
@@ -281,9 +342,9 @@ describe('the parts, by hand', () => {
       step({ kind: 'command', key: 'c1' }), step({ kind: 'grep', key: 'g1' }), step({ kind: 'web_fetch', key: 'f1' }), step({ kind: 'todos', key: 'd1' }),
       step({ kind: 'read', key: '/a', path: '/a' }), step({ kind: 'read', key: '/a', path: '/a' }),
     ]);
-    expect(captionText(keyed, true)).toBe('Ran a command, searched code, fetched a page, and 2 more actions');
-    expect(captionText([...keyed.slice(0, 4), ...captionParts([step({ kind: null, key: 'x', words: 'used docs · search' })])], true)).toBe('Ran a command, searched code, fetched a page, and 2 more actions');
-    expect(captionText(captionParts([step({ kind: 'command', key: 'c1' }), step({ kind: 'grep', key: 'g1' }), step({ kind: 'web_fetch', key: 'f1' }), step({ kind: 'todos', key: 'd1' }), step({ kind: 'glob', key: 'h1' })]), true)).toBe('Ran a command, searched code, fetched a page, and 2 more actions');
+    expect(captionText(keyed, true)).toBe('Ran a command, searched code, +3');
+    expect(captionText([...keyed.slice(0, 4), ...captionParts([step({ kind: null, key: 'x', words: 'used docs · search' })])], true)).toBe('Ran a command, searched code, +3');
+    expect(captionText(captionParts([step({ kind: 'command', key: 'c1' }), step({ kind: 'grep', key: 'g1' }), step({ kind: 'web_fetch', key: 'f1' }), step({ kind: 'todos', key: 'd1' }), step({ kind: 'glob', key: 'h1' })]), true)).toBe('Ran a command, searched code, +3');
   });
 
   it('three verbs of one file are joined as a list', () => {
@@ -298,7 +359,32 @@ describe('the parts, by hand', () => {
     ]);
     expect(captionText(parts, false)).toBe('Ran a command, read a file, ran an agent, edited a file, created a file, used docs · search');
     expect(captionText(turnOrder(parts), false)).toBe('Edited a file, created a file, ran an agent, ran a command, read a file, used docs · search');
-    expect(captionText(turnOrder(parts), true)).toBe('Edited a file, created a file, ran an agent, and 3 more actions');
+    expect(captionText(turnOrder(parts), true)).toBe('Edited a file, created a file, +4');
+  });
+
+  // The word cut (T2, the owner's call): a capped caption names each skill and connector its left-out parts used, once
+  // each, before the count of the rest; no count when nothing else is left out
+  it('a capped caption names the skills and connectors it leaves out, once each, then `+N` for the rest', () => {
+    const named = (words: string, connector: string, key = words) => step({ kind: null, key, words, connector });
+    const parts = captionParts([
+      step({ kind: 'edit', key: '/a', path: '/a' }), step({ kind: 'command', key: 'c1' }), step({ kind: 'grep', key: 'g1' }),
+      named('ran /dataviz', '/dataviz'), named('used notion · search', 'notion'), named('used notion · create_page', 'notion'),
+      step({ kind: 'todos', key: 'd1' }), named('ran /dataviz', '/dataviz', 'again'),
+    ]);
+    expect(caption(parts, true)).toEqual({ text: 'Edited a, ran a command, ran /dataviz, used notion, +2', fold: 2 });
+    // nothing but named parts left out: no count
+    expect(caption(captionParts([step({ kind: 'edit', key: '/a', path: '/a' }), step({ kind: 'command', key: 'c1' }), named('ran /dataviz', '/dataviz'), named('used notion · search', 'notion')]), true))
+      .toEqual({ text: 'Edited a, ran a command, ran /dataviz, used notion', fold: 0 });
+    // a connector a kept part already names is not named again: its other part is counted
+    expect(captionText(captionParts([step({ kind: 'command', key: 'c1' }), named('used notion · search', 'notion'), named('used notion · create_page', 'notion'), named('ran /dataviz', '/dataviz')]), true))
+      .toBe('Ran a command, used notion · search, ran /dataviz, +1');
+    // a part of a kind some of whose calls used a connector names it and is counted for the rest
+    expect(caption(captionParts([step({ kind: 'command', key: 'c1' }), step({ kind: 'grep', key: 'g1' }), step({ kind: 'web_fetch', key: 'w1', connector: 'web' }), step({ kind: 'web_fetch', key: 'w2' }), step({ kind: 'todos', key: 'd1' })]), true))
+      .toEqual({ text: 'Ran a command, searched code, used web, +3', fold: 3 });
+    // the fold is data, not read back from the words: a file whose name ends like a count is no fold
+    expect(caption(captionParts([step({ kind: 'edit', key: '/w/notes, +6', path: '/w/notes, +6' })]), true)).toEqual({ text: 'Edited notes, +6', fold: 0 });
+    // uncapped, every part reads its own words
+    expect(captionText(parts, false)).toBe('Edited a, ran a command, searched code, updated todos, ran /dataviz 2 times, used notion · search, used notion · create_page');
   });
 });
 
@@ -316,7 +402,7 @@ describe('a turn’s line (acceptance 7, decisions 8 and 9)', () => {
       edit(t, 't8', '/w/README.md', 'error');
     });
     const line = lineOf(b);
-    expect(line.caption).toBe('Edited 2 files (1 failed), ran 3 commands, read a file, and 2 more actions');
+    expect(line.caption).toBe('Edited 2 files (1 failed), ran 3 commands, +3');
     expect(line.parts).toEqual(['edited 2 files (1 failed)', 'ran 3 commands', 'read a file', 'searched code', 'fetched a page']);
     expect(line.counts).toEqual({ added: 2, removed: 1 });
     expect(line.toolCalls).toBe(8); // the data the report reads until U2b

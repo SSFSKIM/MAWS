@@ -36,6 +36,7 @@ import { builder, uuid } from '../transcript/model/test-events';
 import { HEADINGS as PREVIEW_HEADINGS } from '../sidebar/RequestPreview';
 import { BUTTON_LIKE_INPUTS as CARD_INPUTS, HEADINGS, RequestCard, type Placement } from './RequestCard';
 import { fixtureRequest, itemFor, permission, syntheticRequest, type RequestEvent } from './test-requests';
+import { QUIET_MS } from '../ui/spinner';
 
 const APP = at('app-test' as AppSessionId);
 const MAIN_APP = bareOf(APP); // P5 O6 M2: as main (the fake bridge) is asked
@@ -173,8 +174,9 @@ describe('dialog variants answer the two declared kinds and leave an undeclared 
       ['Cancel', 'cancelled'],
     ] as const) {
       const { view } = mount(refusal, 'inline');
-      expect(screen.getByRole('heading', { name: 'The model declined to continue' })).toBeTruthy();
-      expect(screen.getByText('claude-fable-5 declined · cyber')).toBeTruthy();
+      // the word cut (C112): one title, the model and its category, with no muted repeat under the guidance
+      expect(screen.getByRole('heading', { name: 'claude-fable-5 declined to continue · cyber' })).toBeTruthy();
+      expect(screen.queryByText('claude-fable-5 declined · cyber')).toBeNull();
       expect(screen.getByRole('button', { name: 'Edit prompt' })).toBeTruthy();
       fireEvent.click(screen.getByRole('button', { name }));
       await waitFor(() => expect(answers().at(-1)).toEqual({ kind: 'dialog', behavior: 'completed', result }));
@@ -216,7 +218,7 @@ describe('dialog variants answer the two declared kinds and leave an undeclared 
   it('an undeclared kind shows its payload and the pending notice, with no answer control and no key', async () => {
     mount(undeclared, 'end');
     expect(screen.getByRole('heading', { name: 'cost_threshold' })).toBeTruthy();
-    expect(screen.getByText(/MAWS did not declare this dialog kind and cannot answer it/)).toBeTruthy();
+    expect(screen.getByText('MAWS can’t answer this prompt; it will time out')).toBeTruthy(); // the word cut (C114)
     expect(screen.getByRole('group', { name: HEADINGS.dialog.text })).toBeTruthy(); // UX wave U1b: drawn at the end, as any request
     expect(screen.queryAllByRole('button').map((b) => b.textContent)).toEqual(['tab 0']);
     expect(bindingsOf('request.accept')).toEqual([]);
@@ -684,7 +686,7 @@ describe('request card placements and delivery states', () => {
     mount(flaggedRead, placement);
     expect(screen.queryAllByRole('button').filter((b) => /^Allow|^Always allow/.test(nameOf(b) ?? ''))).toEqual([]);
     expect(screen.queryByRole('radiogroup')).toBeNull();
-    expect(screen.getByText(/Read needs its own approval surface, which MAWS does not have/)).toBeTruthy();
+    expect(screen.getByText('MAWS can’t show this prompt · answer it in a terminal, or deny')).toBeTruthy(); // the word cut (C93)
     expect(answerButtons()).toEqual(['Deny']);
     expect(bindingsOf('request.accept')).toEqual([]);
     expect(bindingsOf('request.allowOnce')).toEqual([]);
@@ -709,7 +711,7 @@ describe('request card placements and delivery states', () => {
     outcome = 'not_pending';
     const second = mount(unflaggedRead, 'inline', { id: 'att-second' as never }); // U1b M2: a delivery is the request's, so each round is a request of its own
     fireEvent.click(screen.getByRole('button', { name: 'Deny' }));
-    expect(await screen.findByText('Already answered elsewhere')).toBeTruthy();
+    expect(await screen.findByText('Answered elsewhere')).toBeTruthy(); // the word cut (N107): the race's words
     act(() => vi.advanceTimersByTime(2_000));
     // Its closing timer is set in a passive effect, which under load React can still hold queued at the advance (the text
     // is drawn before the effect runs), so the timer then starts after it: the card goes within two seconds of that.
@@ -736,9 +738,15 @@ describe('request card placements and delivery states', () => {
     fake = fakeClient({ 'session.answer': () => ({ outcome }) });
     window.maws = fake.client as unknown as PreloadBridge;
     const item = itemFor(reapply, APP);
+    vi.useFakeTimers({ shouldAdvanceTime: true });
     render(<RequestCard item={item} request={null} placement="inline" paneIndex={null} />);
-    expect(screen.getByText('Loading the request…')).toBeTruthy();
+    // the word cut (C86): the quiet spinner, nothing for half a second, then named by the wait's words
+    expect(screen.queryByText('Loading the request…')).toBeNull();
+    expect(screen.queryByRole('progressbar')).toBeNull();
+    act(() => void vi.advanceTimersByTime(QUIET_MS));
+    expect(screen.getByRole('progressbar', { name: 'Loading the request…' })).toBeTruthy();
     await act(() => fake.reply('attention.request', { event: reapply }));
+    expect(screen.queryByRole('progressbar')).toBeNull();
     expect(screen.getByRole('heading', { name: 'Run a command' })).toBeTruthy();
     expect(fake.invoked('attention.request')).toEqual([{ appSessionId: MAIN_APP, requestId: reapply.requestId }]);
     expect(useAttention.getState().requests.get(item.id)).toEqual(reapply);
@@ -763,7 +771,7 @@ describe('request card placements and delivery states', () => {
         <RequestCard item={item} request={null} placement="inline" region="end" askInPlace paneIndex={null} />
       </EndRow>,
     ); // UX wave U1b (decision 14): drawn at the end
-    expect(screen.queryByText('Loading the request…')).toBeNull();
+    expect(screen.queryByRole('progressbar', { name: 'Loading the request…' })).toBeNull();
     expect(screen.getByRole('alert').textContent).toBe('The request could not be readRetry');
     expect(screen.getByText(item.summary)).toBeTruthy();
   });
@@ -882,7 +890,7 @@ describe('the permission card', () => {
     // call's "Why", the engine's reason, then the buttons; a command's "Why" stays its preview's own, drawn once
     it.each(['end', 'card', 'inline'] as const)('reads the preview, the call’s Why, the engine’s reason, then the buttons, for a tool that is not a command (%s)', (placement) => {
       mount(permission({ toolName: 'Read', displayName: 'Read', input: { file_path: '/w/notes.txt' }, description: 'Check the release notes', decisionReason: 'An ask rule in the project matched' }), placement);
-      const order = [screen.getByTestId('request-input'), screen.getByText('Why: Check the release notes'), screen.getByText('An ask rule in the project matched'), screen.getByRole('button', { name: 'Deny' })];
+      const order = [screen.getByTestId('request-input'), screen.getByText('Check the release notes'), screen.getByText('An ask rule in the project matched'), screen.getByRole('button', { name: 'Deny' })];
       for (const [before, after] of order.slice(0, -1).map((node, i) => [node, order[i + 1]!] as const)) {
         expect(before.compareDocumentPosition(after) & Node.DOCUMENT_POSITION_FOLLOWING, after.textContent ?? '').toBeTruthy();
       }
@@ -890,7 +898,17 @@ describe('the permission card', () => {
 
     it('draws a command’s Why once, from its preview', () => {
       mount(permission({ input: { command: 'make build', description: 'Build the site' }, description: 'Build the site' }), 'inline');
-      expect(screen.getAllByText('Why: Build the site')).toHaveLength(1);
+      expect(screen.getAllByText('Build the site')).toHaveLength(1);
+    });
+
+    // The word cut (C92, the owner's ruling of 2026-11-20): the call's own reason is a muted line, with no "Why:" label
+    it.each([
+      ['a command', permission({ input: { command: 'make build', description: 'Build the site' }, description: 'Build the site' }), 'Build the site'],
+      ['a read', permission({ toolName: 'Read', displayName: 'Read', input: { file_path: '/w/notes.txt' }, description: 'Check the release notes' }), 'Check the release notes'],
+    ])('reads %s’s reason as a muted line with no Why label', (_kind, event, reason) => {
+      mount(event, 'end');
+      expect(screen.getByText(reason).className).toContain('text-fg-muted');
+      expect(document.querySelector('[data-request-card]')!.textContent).not.toContain('Why');
     });
 
     it('says who asks only when it is not the main agent', () => {
@@ -1376,7 +1394,7 @@ describe('a card’s delivery, held by the request', () => {
     list([item]);
     const first = inPane(item);
     fireEvent.click(button('Deny'));
-    expect(await screen.findByText('Already answered elsewhere')).toBeTruthy();
+    expect(await screen.findByText('Answered elsewhere')).toBeTruthy();
     first.unmount();
     act(() => void vi.advanceTimersByTime(2_000));
     const again = inPane(item);
@@ -1549,5 +1567,108 @@ describe("a plan's next mode", () => {
     expect(caret()).toBeNull();
     await userEvent.setup().click(screen.getByRole('button', { name: 'Implement · Accept edits' }));
     await waitFor(() => expect(answers()).toEqual([{ kind: 'plan', outcome: 'implement', feedback: null }]));
+  });
+});
+
+// The word cut (M2 task 3; `docs/doperpowers/specs/2026-11-16-word-cut/session.md`, the request cards): what each card
+// keeps on screen, and the words it keeps for a screen reader where it draws a mark instead.
+describe('the word cut: the card’s words', () => {
+  type ElicitationEvent = Extract<RequestEvent, { kind: 'elicitation.requested' }>;
+  const server = (elicitation as ElicitationEvent).mcpServerName;
+  const card = () => document.querySelector<HTMLElement>('[data-request-card]')!;
+
+  // C83: one first line, the kind's mark and what is asked, as a permission prompt's; no kind word above it and no
+  // "<requester> asks" line under it
+  it.each(['end', 'card', 'inline'] as const)('a plan opens on one line, its mark and “Plan” (%s)', (placement) => {
+    mount(plan, placement);
+    expect(screen.getByRole('heading', { level: 3, name: 'Plan' }).textContent).toBe('◇Plan'); // the plan's own "# Plan" is its h1
+    expect(screen.getByRole('group', { name: 'Plan review' })).toBe(card()); // the kind word stays the card's name
+    expect(card().textContent).not.toMatch(/Plan review|proposes a plan/);
+  });
+
+  it.each(['card', 'inline'] as const)('a question outside a transcript opens on one line, its mark and its count (%s)', (placement) => {
+    mount(question, placement);
+    expect(screen.getByRole('heading', { name: '2 questions' }).textContent).toBe('?2 questions');
+    expect(card().textContent).not.toMatch(/^\?Question|Main session asks/);
+  });
+
+  it('a connector form opens on one line, its mark and the server’s name, which its button row no longer repeats (C83, C115)', () => {
+    mount(elicitation, 'end');
+    expect(screen.getByRole('heading', { name: server }).textContent).toBe(`◐${server}`);
+    expect(card().textContent).not.toMatch(/Input requested|asks for input/);
+    const row = screen.getByRole('button', { name: 'Accept' }).parentElement!;
+    expect(row.textContent).not.toContain(server);
+  });
+
+  it('says who asks on the one line only when an agent other than the session did', () => {
+    mount({ ...plan, agentId: 'agent-1' } as RequestEvent, 'end');
+    expect(screen.getByRole('heading', { name: 'Plan · from A subagent' })).toBeTruthy();
+  });
+
+  it('a notice, which has no line of its own, keeps its kind line', () => {
+    const item = itemFor(permission(), APP, { kind: 'error', request: { requestId: null, toolUseId: null, taskId: null, agentId: null }, summary: 'The engine stopped' });
+    render(<RequestCard item={item} request={null} placement="inline" paneIndex={null} />);
+    expect(card().textContent).toContain(HEADINGS.error.text);
+  });
+
+  it('the hover placement keeps its kind line, its title and the requester’s line', () => {
+    mount(question, 'hover');
+    expect(screen.getByRole('heading', { name: '2 questions' }).textContent).toBe('2 questions');
+    expect(card().textContent).toContain('Question');
+    expect(screen.getByText('Main session asks')).toBeTruthy();
+  });
+
+  // C99: one wording for every long preview's fold
+  it('a long command and a long plan open with Show all and fold with Show less', async () => {
+    const user = userEvent.setup();
+    const first = mount(permission({ input: { command: Array.from({ length: 8 }, (_, i) => `echo ${i}`).join('\n') } }), 'end');
+    await user.click(screen.getByRole('button', { name: 'Show all' }));
+    expect(screen.getByRole('button', { name: 'Show less' })).toBeTruthy();
+    first.view.unmount();
+    mount(plan, 'end');
+    await user.click(screen.getByRole('button', { name: 'Show all' }));
+    expect(screen.getByRole('button', { name: 'Show less' })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: /Show more|Expand|Collapse/ })).toBeNull();
+  });
+
+  // C103: the position among several questions is a dot per question, the current one darker (the owner's exception to
+  // rule 4); a screen reader still hears it in words
+  it('draws a question’s position as dots, its words kept for a screen reader', async () => {
+    mount(question, 'card');
+    const position = () => document.querySelector<HTMLElement>('[data-question-position]')!;
+    const dots = () => [...position().querySelectorAll<HTMLElement>('[data-dot]')];
+    expect(dots()).toHaveLength(2);
+    expect(dots().map((dot) => dot.getAttribute('aria-hidden'))).toEqual(['true', 'true']);
+    expect(dots().map((dot) => dot.dataset.dot)).toEqual(['current', '']);
+    expect(position().querySelector('.sr-only')!.textContent).toBe('1 of 2');
+    expect(position().textContent).toBe('1 of 2'); // nothing else is drawn as words
+    focusOn(article());
+    await press('1');
+    await press('{Enter}');
+    expect(dots().map((dot) => dot.dataset.dot)).toEqual(['', 'current']);
+    expect(position().querySelector('.sr-only')!.textContent).toBe('2 of 2');
+  });
+
+  // C116: a required field's label ends in an asterisk; a screen reader hears "(required)"
+  // the label's words, the asterisk and the screen reader's word are one inline run, so the asterisk ends the label's
+  // line in the column layout (a text field) and in the row layout (a checkbox), never a flex item of its own
+  it.each([
+    ['a text field', elicitation, () => screen.getByRole('textbox', { name: 'Color (required)' }), 'Color'],
+    [
+      'a checkbox',
+      { ...elicitation, payload: { ...((elicitation as ElicitationEvent).payload as object), requested_schema: { type: 'object', properties: { agree: { type: 'boolean', title: 'Agree' } }, required: ['agree'] } } } as RequestEvent,
+      () => screen.getByRole('checkbox', { name: 'Agree (required)' }),
+      'Agree',
+    ],
+  ] as const)('marks a required field (%s) with an asterisk at the end of its label, its word kept for a screen reader', (_kind, event, control, words) => {
+    mount(event, 'end');
+    const label = control().closest('label')!;
+    const run = label.querySelector<HTMLElement>('[data-field-label]')!;
+    expect(run.tagName).toBe('SPAN');
+    expect(run.parentElement).toBe(label);
+    expect(run.firstChild!.textContent).toBe(words);
+    expect(run.querySelector('[aria-hidden="true"]')!.textContent).toBe(' *');
+    expect(run.querySelector('.sr-only')!.textContent).toBe(' (required)');
+    expect(run.textContent).toBe(`${words} * (required)`);
   });
 });

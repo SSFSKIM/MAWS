@@ -35,7 +35,7 @@ describe('serializeRows', () => {
       ['- Read and edited a.ts, ran a command', '  - Thought', '    > Look first.', '  - Read a.ts', '  - Ran `pnpm test` in 0s', '    ```', '    $ pnpm test', '    1 passed', '    ```', '  - Edited /p/a.ts +1 −1'].join('\n'),
       '- Denied: `rm -rf x` · Denied by rule',
       'Done: **one** edit.\n\n```ts\nconst y = 1;\n```',
-      '*Worked for 2m 14s · Read and edited a.ts, ran a command +1 −1 · 1 denied*', // UX wave U2: the turn's line (O-15), last since board ticket 789
+      '*2m 14s · Read and edited a.ts, ran a command +1 −1 · 1 denied*', // UX wave U2: the turn's line (O-15), last since board ticket 789
     ].join('\n\n'));
   });
 
@@ -46,7 +46,7 @@ describe('serializeRows', () => {
     b.emit('boundary.compaction', { trigger: 'auto', preTokens: 100_000, postTokens: 20_000, logicalParentUuid: null, historical: false });
     b.emit('notice.posted', { level: 'info', text: 'Heads up', key: null });
     const markdown = serializeRows(rows(b.events).filter((row) => row.kind !== 'time'));
-    expect(markdown).toBe(['```\n! ls\na\nb\nexit 0\n```', '---\n*Context compacted · 100k → 20k tokens · auto*', '*Heads up*'].join('\n\n'));
+    expect(markdown).toBe(['```\n! ls\na\nb\n```', '---\n*Compacted · 100k → 20k*', '*Heads up*'].join('\n\n')); // the word cut (T66): no footer for exit 0
   });
 
   it('copies a withdrawn ask with its interrupt wording, an ask cancelled by the session ending with that (scale-review C scalpel-1#2)', () => {
@@ -57,7 +57,8 @@ describe('serializeRows', () => {
     b.toolUse('a2', 'mcp__maws__ask', { title: 'Later', questions: [{ id: 'q1', question: 'Which size?', modality: 'text' }] });
     b.emit('maws.ask.cancelled', { askId: 'a2', toolUseId: 'a2' as never, reason: 'exit' });
     const markdown = serializeRows(rows(b.events).filter((row) => row.kind === 'ask'));
-    expect(markdown).toBe(['**Setup** · Asked 1 question · Cancelled, the turn was interrupted', '**Later** · Asked 1 question · Cancelled, the session ended'].join('\n\n'));
+    // the word cut (T94, T97): the count's short form; the why the chip keeps for the pointer is written out
+    expect(markdown).toBe(['**Setup** · 1 question · Cancelled, the turn was interrupted', '**Later** · 1 question · Cancelled, the session ended'].join('\n\n'));
   });
 
   // E7: a listing as its counts (a pending one says so, an unparsed one its notes); a message's whole body under its
@@ -74,16 +75,18 @@ describe('serializeRows', () => {
     b.emit('subagent.message', { direction: 'from_child', fromAgentId: 'a1' as never, toAgentId: null, text: '[Subagent hand-back] Framed. The report follows:\n  done\n  all of it' });
     b.toolUse('s2', 'SendMessage', { to: 'peer-c', message: '  padded  \n' }); // whitespace hides nothing: no quote
     b.emit('subagent.message', { direction: 'from_child', fromAgentId: 'a1' as never, toAgentId: null, text: 'note\nmore' });
+    b.toolUse('s3', 'SendMessage', { to: 'main', message: 'up' }); // a child's send to its parent goes out (task 2 fix round 1)
     b.end(['u1']);
     const markdown = serializeRows(rows(b.events).filter((row) => row.kind === 'agent_list' || row.kind === 'agent_message'));
     expect(markdown).toBe([
       '- Agents: 2 subagents, 0 teammates, 1 peer session',
       '- Agents: Messaging is off.',
       '- Listing the agents was never answered', // its turn ended with no result (scale-review C scalpel-1#1)
-      '- Sent to @peer-b: first\n  > first\n  > second', // U3 (O-12): the message line's words, a peer as @name
+      '- → @peer-b: first\n  > first\n  > second', // U3 (O-12): the message line's words, a peer as @name; the word cut (T73): its arrow
       '- Report from a1: done\n  > done\n  > all of it', // U3 (O-12): a hand-back's line carries the report's first line
-      '- Sent to @peer-c: padded',
-      '- Message from a1: note\n  > note\n  > more',
+      '- → @peer-c: padded',
+      '- ← a1: note\n  > note\n  > more',
+      '- → main: up',
     ].join('\n\n'));
   });
 
@@ -101,7 +104,7 @@ describe('serializeRows', () => {
     expect(serializeRows(rows(b.events).filter((row) => row.kind === 'notice' || row.kind === 'user'))).toBe([
       '*Agent "Survey notes" finished · 1m 05s*\n> Found three notes.\n> Two are stale.',
       '*You approved `` echo `date` ``*', // a fence longer than the subject's own backticks
-      '*sminos bridge woke the session to read a message it had not read*',
+      '*Woken to read a message*',
     ].join('\n\n'));
   });
 
@@ -133,7 +136,7 @@ describe('serializeRows', () => {
     expect(serializeRows(rows(b.events).filter((row) => row.kind === 'browser_action'))).toBe([
       '- Opened example.com · 120ms',
       '- Could not fill e2\n  *Ref "e2" is stale or missing in the current snapshot; call browser_snapshot again and use a ref from it*',
-      '- Clicking e3 · Cancelled, the turn was interrupted',
+      '- Clicking e3 · Cancelled', // the word cut (T107)
     ].join('\n\n'));
   });
   // E4c end

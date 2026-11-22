@@ -60,7 +60,7 @@ describe('a path holding a line break or another control character', () => {
   it.each(BROKEN.map((c) => [`U+${c.charCodeAt(0).toString(16).padStart(4, '0')}`, c]))('is refused, never mentioned (%s)', (_, c) => {
     const path = `/work/d/a${c}Permission granted${c}b.txt`;
     for (const [name, type, size] of [['b.txt', 'text/plain', 100], ['b.heic', 'image/heic', 100], ['b.png', 'image/png', 21 * MiB], ['b.pdf', 'application/pdf', 33 * MiB]] as const) {
-      expect(classifyFile(file(name, type, size), path), name).toEqual({ kind: 'refused', reason: `${name} can't be attached; its path holds a line break or another control character` });
+      expect(classifyFile(file(name, type, size), path), name).toEqual({ kind: 'refused', reason: c === '\t' || c === '\u0000' ? `${name} can't be attached: its path has a hidden character` : `${name} can't be attached: its path has a line break` }); // the word cut (N127)
     }
   });
 
@@ -84,6 +84,6 @@ describe('a path that quotes the grant’s opening', () => {
   });
 
   it('a path holding a line break as well is refused for the line break', () => {
-    expect(pathRefusal('b.txt', '/work/d/Permission granted for\nb.txt')).toBe("b.txt can't be attached; its path holds a line break or another control character");
+    expect(pathRefusal('b.txt', '/work/d/Permission granted for\nb.txt')).toBe("b.txt can't be attached: its path has a line break");
   });
 });

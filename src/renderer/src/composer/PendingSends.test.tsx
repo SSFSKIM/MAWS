@@ -29,4 +29,12 @@ describe('the pending-send strip', () => {
     expect(send.mock.calls[0]![1]).toEqual({ origin: 'composer' });
     expectNoGrantSent(send.mock.calls[0]![0] as string);
   });
+
+  // the word cut (C79): a refused send says it was not sent, with the bridge's reason
+  it('says Not sent with the reason a refused send has, and Not sent alone without one', () => {
+    useLaneA.setState({ pendingSends: new Map([[APP, [{ key: { writer: 'w1', seq: 1 }, text: 'one', state: 'refused', reason: 'the prompt was cleared in the terminal' }, { key: { writer: 'w1', seq: 2 }, text: 'two', state: 'refused', reason: null }]]]) });
+    render(<PendingSends appSessionId={APP} />);
+    expect(screen.getByText('Not sent: the prompt was cleared in the terminal')).toBeTruthy();
+    expect(screen.getByText('Not sent')).toBeTruthy();
+  });
 });

@@ -134,32 +134,56 @@ describe('subagent row', () => {
     return b;
   }
 
-  it('reads its sentence with a glyph, and its detail line changes when a child tool.use arrives', async () => {
+  // The word cut (T86, T87; the owner's ruling): a spinner and the description its parent gave, nothing else at rest;
+  // what the agent is doing and for how long waits on its line, for the pointer and the keyboard
+  it('reads a spinner, its glyph and its description while it works; what it is doing, and for how long, waits on its line', async () => {
     const b = started();
     const store = await storeWith(b.events);
     const view = renderRow(rowOf(store.rows(), 'subagent'), { storeKey: store.key });
-    expect(view.container.textContent).toContain('Survey started working');
+    const line = screen.getByRole('button', { name: 'Working Survey' });
+    expect(view.container.querySelector('.transcript-subagent-sentence')!.textContent).toBe('Survey');
+    expect(view.container.textContent).not.toContain('started working');
     expect(view.container.querySelector('[data-glyphs]')?.textContent?.trim()).toHaveLength(1);
-    const detail = () => view.container.querySelector('[data-agent-detail]')?.textContent ?? '';
-    expect(detail()).not.toContain('Read');
+    expect(view.container.querySelector('[data-agent-detail]')).toBeNull(); // no line per agent under it
     const child = b.emit('tool.use', { toolUseId: tool('c1'), toolName: 'Read', input: { file_path: '/p/one.txt' }, apiMessageId: 'mc' as never, messageUuid: null }, { parentToolUseId: parent('a1') });
     act(() => store.push([child]));
     view.rerenderRow(rowOf(store.rows(), 'subagent'));
-    expect(detail()).toMatch(/^Survey · Read · /);
+    expect(described(line)).toMatch(/^Survey · Read · \d+s$/);
+    act(() => line.focus());
+    expect(screen.getByRole('tooltip').textContent).toMatch(/^Survey · Read · \d+s$/);
   });
 
-  it('is a button calling openSubagent when the action is supplied, and plain text otherwise', async () => {
-    const store = await storeWith(started().events);
+  it('once finished reads its description alone, with no spinner and nothing waiting', async () => {
+    const b = started();
+    b.emit('subagent.finished', { taskId: task('k1'), status: 'completed', summary: null, outputFile: null, reason: null });
+    const store = await storeWith(b.events);
+    const view = renderRow(rowOf(store.rows(), 'subagent'), { storeKey: store.key });
+    expect(view.container.querySelector('.transcript-subagent-sentence')!.textContent).toBe('Survey');
+    expect(screen.queryByRole('img', { name: 'Working' })).toBeNull();
+    expect(screen.getByRole('button', { name: 'Survey' }).hasAttribute('aria-describedby')).toBe(false);
+  });
+
+  it('is a button calling openSubagent when the action is supplied, and otherwise plain text whose words take the keyboard while what waits on them does', async () => {
+    const b = started();
+    b.emit('tool.use', { toolUseId: tool('c1'), toolName: 'Read', input: { file_path: '/p/one.txt' }, apiMessageId: 'mc' as never, messageUuid: null }, { parentToolUseId: parent('a1') });
+    const store = await storeWith(b.events);
     const row = rowOf(store.rows(), 'subagent');
     const actions = spyActions();
     const view = renderRow(row, { storeKey: store.key, actions });
-    fireEvent.click(screen.getByRole('button', { name: /Survey started working/ }));
+    fireEvent.click(screen.getByRole('button', { name: 'Working Survey' }));
     expect(actions.openSubagent).toHaveBeenCalledWith(row.agents[0]);
     view.unmount();
-    renderRow(row, { storeKey: store.key, actions: { ...NO_ACTIONS } });
+    const plain = renderRow(row, { storeKey: store.key, actions: { ...NO_ACTIONS } });
     expect(screen.queryByRole('button')).toBeNull();
+    const words = plain.container.querySelector<HTMLElement>('.transcript-subagent-sentence')!;
+    expect(words.tabIndex).toBe(0);
+    act(() => words.focus());
+    expect(screen.getByRole('tooltip').textContent).toMatch(/^Survey · Read · \d+s$/);
   });
 });
+
+// The texts an element's `aria-describedby` names, joined.
+const described = (element: Element) => (element.getAttribute('aria-describedby') ?? '').split(' ').map((id) => document.getElementById(id)?.textContent ?? '').join(' ');
 
 describe('grouped subagent rows', () => {
   // `n` Agent calls of one assistant message, each started.
@@ -177,19 +201,39 @@ describe('grouped subagent rows', () => {
     beforeEach(() => vi.useFakeTimers({ now: Date.parse('2026-09-28T10:00:05.000Z'), toFake: ['Date', 'setInterval', 'clearInterval'] }));
     afterEach(() => vi.useRealTimers());
 
-    it('one child failed while another still works: the row keeps working and the working child’s line keeps ticking', async () => {
+    it('one child failed while another still works: the row keeps working and what the working child does keeps ticking on its glyph', async () => {
       const b = agents(['Tester', 'Reviewer']);
       b.emit('subagent.progress', { taskId: task('k1'), description: 'Reviewer', usage: { totalTokens: 1, toolUses: 1, durationMs: 1 }, lastToolName: 'Read', summary: null });
       b.emit('subagent.finished', { taskId: task('k0'), status: 'failed', summary: null, outputFile: null, reason: 'boom' });
       const store = await storeWith(b.events);
-      const view = renderRow(rowOf(store.rows(), 'subagent'), { storeKey: store.key });
-      const lines = () => [...view.container.querySelectorAll('[data-agent-detail]')].map((line) => line.textContent ?? '');
-      expect(lines()).toHaveLength(1);
-      expect(lines()[0]).toMatch(/^Reviewer · Read · \d+s$/);
-      const seconds = () => Number(/(\d+)s$/.exec(lines()[0])![1]);
+      renderRow(rowOf(store.rows(), 'subagent'), { storeKey: store.key });
+      expect(screen.getByRole('img', { name: 'Working' })).toBeTruthy();
+      const reviewer = screen.getByRole('button', { name: 'Open Reviewer' });
+      expect(described(reviewer)).toMatch(/^Reviewer · Read · \d+s$/);
+      expect(screen.getByRole('button', { name: 'Open Tester' }).hasAttribute('aria-describedby')).toBe(false); // it has ended
+      act(() => reviewer.focus());
+      const tip = () => screen.getByRole('tooltip').textContent ?? '';
+      expect(tip()).toMatch(/^Reviewer · Read · \d+s$/);
+      const seconds = () => Number(/(\d+)s$/.exec(tip())![1]);
       const before = seconds();
       act(() => vi.advanceTimersByTime(3000));
       expect(seconds()).toBe(before + 3);
+    });
+
+    // Fix wave (scalpel-1#1): a workflow and an agent of one message share the row; the phase is the workflow's alone
+    it('a workflow’s phase waits on the workflow’s glyph alone; the agent beside it shows its own last tool', async () => {
+      const b = builder();
+      b.turn('u1');
+      b.toolUse('w0', 'Workflow', { description: 'Echo twice' }, 'm1', 0);
+      b.toolUse('a1', 'Agent', { description: 'Reviewer', prompt: 'p' }, 'm1', 1);
+      b.emit('task.started', { taskId: task('wf'), toolUseId: tool('w0'), taskType: 'local_workflow', description: 'Echo twice', isBackground: true, workflowName: 'echo' });
+      b.emit('subagent.started', { taskId: task('k1'), toolUseId: tool('a1'), description: 'Reviewer', subagentType: null, isBackground: true, spawnDepth: 1, prompt: null });
+      b.emit('workflow.progress', { taskId: task('wf'), workflowName: 'echo', progress: [{ type: 'workflow_phase', index: 0, title: 'Echo', status: 'running' }] });
+      b.emit('subagent.progress', { taskId: task('k1'), description: 'Reviewer', usage: { totalTokens: 1, toolUses: 1, durationMs: 1 }, lastToolName: 'Read', summary: null });
+      const store = await storeWith(b.events);
+      renderRow(rowOf(store.rows(), 'subagent'), { storeKey: store.key });
+      expect(described(screen.getByRole('button', { name: 'Open Echo twice' }))).toMatch(/^Echo twice · Echo · \d+s$/);
+      expect(described(screen.getByRole('button', { name: 'Open Reviewer' }))).toMatch(/^Reviewer · Read · \d+s$/);
     });
   });
 
@@ -223,6 +267,7 @@ describe('the 64 KB DOM cap on every output branch', () => {
       const store = await storeWith(b.events);
       const view = renderRow(rowOf(store.rows(), 'bash'));
       capped(view.container);
+      expect(view.container.querySelector('.transcript-replayed-footer')?.textContent).toBe('exit 1'); // a non-zero exit keeps its footer
       view.unmount();
     }
   });
@@ -236,14 +281,16 @@ describe('agent message and bash rows', () => {
     expect(container.textContent).toContain('Skip node_modules entirely.');
   });
 
-  it('pass1/queue-and-interrupt: one replayed bash row with its command, output and exit code', async () => {
+  // The word cut (T66): exit 0 is the normal state, so the replayed row draws no footer for it
+  it('pass1/queue-and-interrupt: one replayed bash row with its command and output, and no footer for exit 0', async () => {
     const store = await storeWith(journalToEvents(loadJournal('pass1', 'queue-and-interrupt')));
     const bash = ofKind(store.rows(), 'bash');
     expect(bash).toHaveLength(1);
     const { container } = renderRow(bash[0]);
     expect(container.textContent).toContain('! printf BASH_MODE_OK');
     expect(container.querySelector('pre')?.textContent).toBe('BASH_MODE_OK');
-    expect(container.textContent).toContain('exit 0');
+    expect(container.textContent).not.toContain('exit 0');
+    expect(container.querySelector('.transcript-replayed-footer')).toBeNull();
     expect(container.querySelector('[data-bubble]')).toBeNull();
   });
 });

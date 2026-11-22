@@ -76,7 +76,7 @@ describe('an artifact call names what it did to which artifact', () => {
     b.result('t2', 'artifact_screenshot: MAWS is not open; the artifact cannot be captured', { isError: true });
     b.toolUse('t3', MAWS('artifact_screenshot'), { id: 'q3-memo' });
     expect([cellOf(b, 't1').label, cellOf(b, 't2').label, cellOf(b, 't3').label]).toEqual([
-      'Screenshot of Q3 memo v2 (1280 × 800)', 'Could not screenshot ‹Q3 memo›', 'Taking a screenshot of q3-memo',
+      'Screenshot of Q3 memo', 'Could not screenshot ‹Q3 memo›', 'Taking a screenshot of q3-memo',
     ]);
     expect(cellOf(b, 't2').error).toBe('MAWS is not open; the artifact cannot be captured');
   });

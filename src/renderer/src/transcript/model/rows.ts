@@ -102,16 +102,20 @@ export type Row = RowBase &
         // text, uncapped (empty while it runs), for the popover; and the lines the main loop's finished edits added and
         // removed, for every turn, a running one included
         caption: string;
+        fold?: number; // the word cut (T2): the count the caption ends in (`+6`), absent for none
         parts: string[];
         counts: ChangedLines;
       }
     // UX wave U2 (O-29; Interfaces §B): `summary` is the run's caption (caption.ts), `counts` its finished edits' lines
-    | { kind: 'group'; state: 'active' | 'completed'; cells: Cell[]; summary: string; counts: ChangedLines; icon: ToolCategory; expanded: boolean }
+    | { kind: 'group'; state: 'active' | 'completed'; cells: Cell[]; summary: string; fold?: number /* the word cut (T2): the count `summary` ends in, absent for none */; counts: ChangedLines; icon: ToolCategory; expanded: boolean }
     | ({ kind: 'cell' } & Cell) // a standalone cell
     | { kind: 'receipt'; files: ChangedFile[]; added: number; removed: number; state: 'applied' | 'undoing' | 'undone' | 'reapplying'; canUndo: boolean; canReapply: boolean }
-    | { kind: 'subagent'; agents: SubagentRef[]; sentence: string; status: SubagentStatus; exited?: true; overflow: number } // overflow: agents beyond the four glyphs; exited (UX wave U3b, decision 19): every agent it names ended with the session's process, the row stopped
+    | { kind: 'subagent'; agents: SubagentRef[]; sentence: string; status: SubagentStatus; phases?: Record<string, string>; exited?: true; overflow: number } // overflow: agents beyond the four glyphs; phases (the word cut, T87): each working workflow's phase by its task id, for its glyph's or line's pointing; exited (UX wave U3b, decision 19): every agent it names ended with the session's process, the row stopped
     | {
         kind: 'agent_message'; direction: 'to_child' | 'from_child' | 'between'; from: SubagentRef | null; to: SubagentRef | null; text: string;
+        // the word cut (T73): whether the message comes in from the party its line names or goes out to it, apart from its
+        // routing (a child's send to `main` is routed up, `from_child`, and goes out to main)
+        flow: 'in' | 'out';
         peer?: PeerMessage; report?: string; // E7: a message between sessions (`between`); an in-process agent's hand-back report
         body?: string; // E7: an in-process agent's whole message; U3 (O-12): of every message to or from a subagent, which its line opens to
       }

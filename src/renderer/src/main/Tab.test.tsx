@@ -215,7 +215,7 @@ describe('a session tab driven through its holder’s bridge', () => {
     expect(marker()).toBeNull(); // no port yet
     act(() => applyLaneAState(A, laneAState(A)));
     expect(marker()?.textContent).toBe('Terminal');
-    expect(marker()?.title).toBe('Running in Terminal · driven through sminos’s bridge');
+    expect(marker()?.title).toBe('Running in Terminal'); // the word cut (C130): no word on the bridge
     act(() => applyLaneAState(A, null));
     expect(marker()).toBeNull();
   });
@@ -225,7 +225,7 @@ describe('a session tab driven through its holder’s bridge', () => {
     act(() => applyLaneAState(A, laneAState(A)));
     render(<Tab tab={tab} pane={0} domId="t-0" active stop onKeyDown={() => {}} />);
     expect(marker()?.textContent).toBe('Background job');
-    expect(marker()?.title).toBe('Running as bg · job-1 · driven through sminos’s bridge');
+    expect(marker()?.title).toBe('Running as bg · job-1');
   });
 });
 

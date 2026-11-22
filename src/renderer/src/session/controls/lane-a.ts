@@ -92,12 +92,11 @@ export const LANE_A_WORDS = {
   // M9: a session on another machine (Q2's words where it gives them). 2026-11-06: a subagent's own transcript crosses
   // from a machine whose endpoint lists `rl2.agent-scope`; an older one is named to update
   remoteSubagentRows: (machine: string) => `${machine} can’t send a subagent’s own transcript to this Mac yet; update MAWS on ${machine}`,
-  // the remote drill-in's words where the machine gives nothing of the agent's transcript (2026-11-06)
-  agentReading: (machine: string) => `Reading this agent’s transcript from ${machine}…`,
-  agentNoRows: (machine: string) => `${machine} holds no rows of this agent’s transcript yet`,
-  agentUnnamedHere: (machine: string) => `${machine} holds no rows of this agent’s transcript, and the session’s tree here doesn’t name it`,
-  agentOffline: (machine: string) => `${machine} isn’t reachable: this agent’s transcript shows once it is`,
-  agentUnserved: (machine: string) => `${machine} isn’t giving this agent’s transcript now; asking again`,
+  // the remote drill-in's words where the machine gives nothing of the agent's transcript (2026-11-06); the word cut
+  // (C133): three states in a person's words, a refusal it asks again after read as the read it is
+  agentReading: (machine: string) => `Reading from ${machine}…`,
+  agentNoRows: 'Nothing from this agent yet',
+  agentOffline: (machine: string) => `${machine} isn’t reachable`,
   // an older page the link could not carry (fix wave 2): the reason main gave, and a way to ask again
   olderFailed: (reason: string) => `Older messages didn’t load: ${reason}`,
   retry: 'Retry',

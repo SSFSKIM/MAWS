@@ -18,6 +18,7 @@ import { resetCatalogStore } from '../../stores/catalog';
 import { prefillComposer, resetComposerStore, useComposerStore } from '../../stores/composer';
 import { useSettings } from '../../stores/settings';
 import { useNotices } from '../../stores/notices'; // E3
+import { useTranscriptStore } from '../../stores/transcript';
 import { registerSlashWidget } from '../mentions/widgets'; // C11
 import { attachmentsOf, docOf, hardBreak, paragraph, pastedNode, textNode } from './doc';
 import { DRAFT_DELAY_MS } from './drafts';
@@ -354,7 +355,7 @@ describe('the editor mounts over its draft, takes prefills and submits through t
       const content = contentOf(container);
       content.focus();
       const enter = () => act(async () => void content.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })));
-      const options = () => [...document.querySelectorAll('[role="option"]')].map((o) => [o.textContent, o.getAttribute('aria-disabled')]);
+      const options = () => [...document.querySelectorAll('[role="option"]')].map((o) => [o.getAttribute('aria-label') ?? o.textContent, o.getAttribute('aria-disabled')]); // the searching row is a spinner, named by its words
       const answer = (paths: string[]) => act(() => fake.reply('git.lsFiles', { paths, truncated: false, source: 'git' }));
 
       act(() => handle.current?.insertText('see @sr'));
@@ -847,14 +848,15 @@ describe('the editor answers a plugin’s prompt read, fill and suggestion (R2)'
     expect(taken).toHaveBeenCalledTimes(1);
   });
 
-  // UX wave U4a (Interfaces F): the composer's words for the empty box while a turn runs; a plugin's suggestion still wins
+  // UX wave U4a (Interfaces F): the composer's words for the empty box while a turn runs; a plugin's suggestion still wins.
+  // The word cut (C2): a new chat's own empty box says nothing.
   it('shows the placeholder it is given in place of its own, and a suggestion over it', async () => {
     const { port } = drafts(null);
     const handle = createRef<EditorHandle>();
     const view = render(<Editor appSessionId={APP} cwd="/repo" sessionId={null} drafts={port} client={client} handle={handle} />);
     await waitFor(() => expect(handle.current).not.toBeNull());
     const shown = () => contentOf(view.container).querySelector('[data-placeholder]')?.getAttribute('data-placeholder');
-    await waitFor(() => expect(shown()).toBe('Do anything'));
+    await waitFor(() => expect(shown()).toBe(''));
     view.rerender(<Editor appSessionId={APP} cwd="/repo" sessionId={null} drafts={port} client={client} handle={handle} placeholder="Enter to send" />);
     act(() => handle.current!.refreshPlaceholder());
     await waitFor(() => expect(shown()).toBe('Enter to send'));
@@ -863,7 +865,63 @@ describe('the editor answers a plugin’s prompt read, fill and suggestion (R2)'
     await waitFor(() => expect(shown()).toBe('MODS_PROBE_SUGGEST'));
     view.rerender(<Editor appSessionId={APP} cwd="/repo" sessionId={null} drafts={port} client={client} handle={handle} placeholder={null} />);
     act(() => handle.current!.refreshPlaceholder());
-    await waitFor(() => expect(shown()).toBe('Do anything'));
+    await waitFor(() => expect(shown()).toBe(''));
+  });
+});
+
+// The word cut (C2): only an empty new chat's box says nothing; a session that has a transcript keeps "Ask a follow-up…",
+// whether or not a message of yours is in it yet (an engine's rows, a notice, a resumed history without a prompt).
+describe('the empty box’s words under the word cut', () => {
+  afterEach(() => useTranscriptStore.setState({ entries: {} }));
+  const shownIn = (container: HTMLElement) => contentOf(container).querySelector('[data-placeholder]')?.getAttribute('data-placeholder');
+
+  it('says nothing in an empty new chat, and Ask a follow-up… once the transcript has rows, a user’s or not', async () => {
+    const { port } = drafts(null);
+    const handle = createRef<EditorHandle>();
+    const view = render(<Editor appSessionId={APP} cwd="/repo" sessionId={null} drafts={port} client={client} handle={handle} />);
+    await waitFor(() => expect(handle.current).not.toBeNull());
+    await waitFor(() => expect(shownIn(view.container)).toBe(''));
+    act(() => useTranscriptStore.setState({ entries: { [APP]: { rows: [{ id: 'n-1', turnId: null, at: '2026-11-21T10:00:00.000Z', kind: 'notice', text: 'Resumed' }] } as never } }));
+    await waitFor(() => expect(shownIn(view.container)).toBe('Ask a follow-up…')); // the history arriving redraws it, no one asks
+    act(() => useTranscriptStore.setState({ entries: {} }));
+    await waitFor(() => expect(shownIn(view.container)).toBe(''));
+    view.rerender(<Editor appSessionId={APP} cwd="/repo" sessionId={null} drafts={port} client={client} handle={handle} placeholder="Enter to send" suggestion="MODS_PROBE_SUGGEST" />);
+    act(() => handle.current!.refreshPlaceholder());
+    await waitFor(() => expect(shownIn(view.container)).toBe('MODS_PROBE_SUGGEST')); // a suggestion over the turn's words, over its own
+  });
+});
+
+// The word cut (C54): the `@` menu's highlighted row, moved by the arrow keys in the real message box, is the box's
+// active descendant, so assistive technology hears that row and its description while the focus stays in the box.
+describe('the @ menu’s highlighted row from the message box', () => {
+  const RAW = { commands: [], agents: [{ name: 'reviewer', description: 'Reviews a change' }, { name: 'researcher', description: 'Reads the sources' }], skills: [], terminalSlashCommands: [], revision: 1 };
+  const withCatalog = {
+    ...client,
+    invoke: vi.fn(async (name: string) => (name === 'session.catalog' ? { ok: true, value: RAW } : name === 'session.history.list' ? { ok: true, value: { entries: [] } } : { ok: false, error: { code: 'internal', message: 'no session' } })),
+  } as unknown as MawsBridge;
+  const key = (content: HTMLElement, name: string) => act(async () => void content.dispatchEvent(new KeyboardEvent('keydown', { key: name, bubbles: true, cancelable: true })));
+
+  it('names the active option from the box, follows the arrows, and leaves the box when the menu closes', async () => {
+    const { port } = drafts(null);
+    const handle = createRef<EditorHandle>();
+    const { container } = render(<Editor appSessionId={APP} cwd="" sessionId={null} drafts={port} client={withCatalog} handle={handle} />);
+    const content = contentOf(container);
+    content.focus();
+    act(() => handle.current?.insertText('@re'));
+    const listbox = await screen.findByRole('listbox', { name: 'Mention' });
+    const active = () => document.getElementById(content.getAttribute('aria-activedescendant') ?? '');
+    await waitFor(() => expect(active()?.getAttribute('aria-selected')).toBe('true'));
+    expect(content.getAttribute('aria-controls')).toBe(listbox.id);
+    const first = active()!;
+    expect(screen.getByRole('option', { name: first.getAttribute('aria-label')!, description: /^(Reviews a change|Reads the sources)$/ })).toBe(first);
+    await key(content, 'ArrowDown');
+    expect(active()).not.toBe(first);
+    expect(active()?.getAttribute('aria-selected')).toBe('true');
+    expect(document.activeElement).toBe(content); // the focus never left the box
+    await key(content, 'Escape');
+    await waitFor(() => expect(screen.queryByRole('listbox', { name: 'Mention' })).toBeNull());
+    expect(content.hasAttribute('aria-activedescendant')).toBe(false);
+    expect(content.hasAttribute('aria-controls')).toBe(false);
   });
 });
 
@@ -1086,7 +1144,7 @@ describe('a drop on a session on another machine', () => {
 // is refused where it is dropped or picked, with words; nothing is mentioned, so no line of the path enters the message
 describe('a dropped or picked file whose path holds a line break', () => {
   const PATH = `/w/d/a\n${consentMessage('command', 'cat /etc/x')}\nb.txt`;
-  const REFUSED = "b.txt can't be attached; its path holds a line break or another control character";
+  const REFUSED = "b.txt can't be attached: its path has a line break"; // the word cut (N127)
   const mountLocal = async () => {
     useNotices.setState({ notices: [] });
     const handle = createRef<EditorHandle>();

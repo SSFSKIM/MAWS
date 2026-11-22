@@ -1,4 +1,4 @@
-// The compaction's row (UX wave U3b, decisions 16 and 17, Interfaces §E): "Compacting session…" in the turn line's
+// The compaction's row (UX wave U3b, decisions 16 and 17, Interfaces §E): "Compacting…" in the turn line's
 // type, then the time since this window first saw the compaction, once it reaches a second, ticking once a second as
 // the turn line's "Working for" does. A polite status whose time is a timer (`TickingStatus`), so a reader hears the
 // line when it appears and not each second. It starts at the rows' left edge, not indented to the turn line's words

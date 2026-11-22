@@ -1,12 +1,14 @@
-// A shell call's detail, after mockup 02: the command with Copy command, its cwd, the output bounded with a fade, and
-// a footer with the exit status, Copy output and Copy all, plus Open full log (C8's) when the output was cut or spilled.
-// A spilled result offers to load the whole output in place of the wire preview.
+// A shell call's detail, after mockup 02: the command, its cwd, the output bounded with a fade, and a footer with the
+// exit status, plus Open full log (C8's) when the output was cut or spilled. A spilled result offers to load the whole
+// output in place of the wire preview. The word cut (T18): the copy controls are glyphs named by their words: Copy all
+// in the footer, and Copy command and Copy output beside what they copy, shown on pointing or with focus inside (T20: the
+// session's own folder is not named; T22: a successful exit reads its time alone).
 import { sameFile } from '../../../tools/code/files/tree';
 import { truncationOf } from '../../model/cells';
 import { DETAIL, shellFooter } from '../../model/copy';
 import type { Cell, CellDetail } from '../../model/rows';
 import { useActions, useDisclosure, useTranscriptContext } from '../context';
-import { copyText } from '../rows/parts';
+import { CopyGlyph } from '../rows/parts';
 import { spilledOr, SpillLoader } from './Spill';
 import { Truncated } from './Truncated';
 
@@ -14,19 +16,16 @@ type Shell = Extract<CellDetail, { kind: 'shell' }>;
 
 const durationOf = (cell: Cell) => (cell.endedAt === null ? 0 : Date.parse(cell.endedAt) - Date.parse(cell.startedAt));
 
-// The call's own cwd when its input names one (the engine's Bash input does not). Else the session's directory,
-// labelled as such (a `cd` inside an earlier command may have moved the shell since), where one is handed down: the
-// slot hands down the launch folder and the agent's folder only while the session is in its launch folder. UX wave
-// U8c-2 (§K): a call read from rows carries the folder its row records, and names it unless it is one of those two,
-// compared as Files compares a listed root with a record's folder; a call with no folder and nothing handed down names
-// none, so a live row never names a folder its command may not have run in.
+// The call's folder: its input's when that names one (the engine's Bash input does not), else, UX wave U8c-2 (§K), the
+// folder a call read from rows carries from its row; a live call with neither names none, never a folder its command
+// may not have run in. The word cut (T20): the session's own folder is where a command runs by default, so it is not
+// named: the folder the slot hands down (the launch folder, handed down only while the session is in it) or the agent's
+// folder, compared as Files compares a listed root with a record's folder.
 function folderLine(detail: Shell, directory: string | null, agentCwd: string | null): { label: string; path: string } | null {
-  if (detail.cwd) return { label: DETAIL.cwd, path: detail.cwd };
-  const session = directory ? { label: DETAIL.sessionDirectory, path: directory } : null;
-  const row = detail.rowCwd;
-  if (row === undefined) return session;
-  const ranThere = session !== null && (sameFile(row, session.path) || (agentCwd !== null && sameFile(row, agentCwd)));
-  return ranThere ? session : { label: DETAIL.cwd, path: row };
+  const folder = detail.cwd || detail.rowCwd;
+  if (!folder) return null;
+  const ranThere = directory !== null && (sameFile(folder, directory) || (agentCwd !== null && sameFile(folder, agentCwd)));
+  return ranThere ? null : { label: DETAIL.cwd, path: folder };
 }
 
 export function ShellDetail({ cell, detail }: { cell: Cell; detail: Shell }) {
@@ -43,26 +42,27 @@ export function ShellDetail({ cell, detail }: { cell: Cell; detail: Shell }) {
     <div className="transcript-shell">
       <div className="transcript-shell-heading">
         <code className="transcript-shell-command" data-bounded={longCommand && !fullCommand ? '' : undefined}>$ {detail.command}</code>
-        <button type="button" onClick={() => copyText(detail.command)}>
-          {DETAIL.copyCommand}
-        </button>
+        <CopyGlyph label={DETAIL.copyCommand} text={detail.command} onHover />
       </div>
-      {longCommand && <button type="button" aria-expanded={fullCommand} onClick={toggleCommand}>{fullCommand ? 'Show less command' : 'Show more command'}</button>}
+      {longCommand && <button type="button" aria-expanded={fullCommand} onClick={toggleCommand}>{fullCommand ? DETAIL.showLess : DETAIL.showMore}</button>}
       {where && (
         <div className="transcript-shell-meta">
           {where.label} <span className="transcript-mono">{where.path}</span>
         </div>
       )}
       {output.length > 0 && (
-        <pre className="transcript-output transcript-output-faded">
-          <Truncated text={stdout} />
-          {detail.stderr && (
-            <span className="transcript-stderr">
-              {stdout ? '\n' : ''}
-              <Truncated text={detail.stderr} />
-            </span>
-          )}
-        </pre>
+        <div className="transcript-shell-output">
+          <pre className="transcript-output transcript-output-faded">
+            <Truncated text={stdout} />
+            {detail.stderr && (
+              <span className="transcript-stderr">
+                {stdout ? '\n' : ''}
+                <Truncated text={detail.stderr} />
+              </span>
+            )}
+          </pre>
+          <CopyGlyph label={DETAIL.copyOutput} text={output} onHover />
+        </div>
       )}
       {detail.spill && <SpillLoader cell={cell} spill={detail.spill} />}
       <div className="transcript-shell-footer">
@@ -73,12 +73,7 @@ export function ShellDetail({ cell, detail }: { cell: Cell; detail: Shell }) {
               {DETAIL.openFullLog}
             </button>
           )}
-          <button type="button" onClick={() => copyText(output)}>
-            {DETAIL.copyOutput}
-          </button>
-          <button type="button" onClick={() => copyText(all)}>
-            {DETAIL.copyAll}
-          </button>
+          <CopyGlyph label={DETAIL.copyAll} text={all} />
         </span>
       </div>
     </div>

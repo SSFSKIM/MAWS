@@ -306,9 +306,11 @@ async function acrossTheCompaction(view: Locator): Promise<void> {
   await toTheTop(view);
   const firstRow = await indexOf(view, { text: FIRST_ROW });
   expect(firstRow).not.toBeNull();
-  const divider = view.locator('[data-row-id]').filter({ hasText: 'Compacted earlier' });
+  // the compaction's row by its kind (the renderer's rows/Boundary.tsx), not its words, which the word cut (T48) changed
+  const COMPACTION = '[data-boundary-kind="compaction"]';
+  const divider = view.locator(`[data-row-id]:has(${COMPACTION})`);
   await scrollUntil(view, divider, 1);
-  const boundary = await indexOf(view, { text: 'Compacted earlier' });
+  const boundary = await indexOf(view, { selector: COMPACTION });
   const before = await indexOf(view, { text: 'Read notes part 06 and tell me what it says.' });
   await scrollUntil(view, view.getByText('Read notes part 07 and tell me what it says.'), 1);
   const after = await indexOf(view, { text: 'Read notes part 07 and tell me what it says.' });
@@ -394,7 +396,10 @@ test("G1: a send stays at the tail until its own framed row: delivered before it
   land(userRow('[sminos chat MAWS 5e0c1f2a:2 from fakepeer → @you]\nI read recorded.txt: blue, as you chose.', BRIDGE));
   const peer = view.locator('[data-kind="agent_message"]').filter({ hasText: 'I read recorded.txt: blue, as you chose.' });
   await expect(peer).toHaveCount(1);
-  await expect(peer).toContainText('Message from @fakepeer: I read recorded.txt: blue, as you chose.');
+  // the word cut (T73, ruled): the line leads with its direction's arrow; "Message from" is its accessible lead alone
+  await expect(peer.locator('.transcript-line-mark')).toHaveText('←');
+  await expect(peer.locator('.transcript-line-text')).toHaveText('@fakepeer: I read recorded.txt: blue, as you chose.');
+  await expect(peer.getByRole('button', { name: /^Message from @fakepeer ?: I read recorded\.txt: blue, as you chose\.$/ })).toHaveCount(1);
   await expect(peer).not.toContainText('[sminos');
   await expect(bubbles('I read recorded.txt: blue, as you chose.')).toHaveCount(0);
   await expect(view.getByText('From fakepeer')).toHaveCount(0);
@@ -428,7 +433,8 @@ test("G1: a send stays at the tail until its own framed row: delivered before it
   const appendedBubble = view.locator(`[data-row-id="user:${appendedUuid}"]`);
   await expect(appendedBubble).toHaveCount(1);
   await expect(appendedBubble).toContainText('Count the markdown files too.');
-  await expect(appendedBubble).toContainText('Sent during this turn');
+  await expect(appendedBubble.locator('section.transcript-user[data-steer]')).toHaveCount(1); // a steer in the turn, with no caption (the word cut, T42)
+  await expect(appendedBubble).not.toContainText('Sent during this turn');
   await expect(appendedBubble).not.toContainText('[sminos');
   await expect(appendedBubble.locator('em')).toHaveCount(0); // the owner's own: no label
 
@@ -498,7 +504,8 @@ test("a desk Steer waits at the tail until the row its result names, then is the
   const bubble = view.locator(`[data-row-id="user:${steered}"]`);
   await expect(bubble).toHaveCount(1);
   await expect(bubble).toContainText('Use the split store.');
-  await expect(bubble).toContainText('Sent during this turn');
+  await expect(bubble.locator('section.transcript-user[data-steer]')).toHaveCount(1); // a steer in the turn, with no caption (the word cut, T42)
+  await expect(bubble).not.toContainText('Sent during this turn');
   await expect(view.locator('[data-kind="user"]').filter({ hasText: 'Use the split store.' })).toHaveCount(1);
 });
 

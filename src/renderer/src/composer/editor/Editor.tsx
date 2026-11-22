@@ -89,9 +89,8 @@ export function Editor(props: EditorProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps -- holder, laneA and laneACatalog are what the port reads
     [appSessionId, client, engineCatalog, registered, holder, laneA, laneACatalog],
   );
-  const followUp = useTranscriptStore((s) => (s.entries[appSessionId]?.rows ?? []).some((r) => r.kind === 'user'));
+  const hasTranscript = useTranscriptStore((s) => (s.entries[appSessionId]?.rows.length ?? 0) > 0); // the word cut (C2): an empty new chat's box says nothing
   const [mode, setMode] = useState<Serialized['mode']>('send');
-  const [commandEmpty, setCommandEmpty] = useState(true);
   const [busy, setBusy] = useState(false);
   const [historyLine, setHistory] = useState<string | null>(null); // UX wave U4a M6
   const [dragging, setDragging] = useState(0);
@@ -104,7 +103,7 @@ export function Editor(props: EditorProps) {
     disabled,
     catalog,
     widgets,
-    followUp,
+    hasTranscript,
     onSubmit: props.onSubmit,
     onPrefill: props.onPrefill,
     onDocChange: props.onDocChange,
@@ -118,7 +117,7 @@ export function Editor(props: EditorProps) {
     uploadsTo: props.uploadsTo ?? null, // P5 O7 M4
     searchesFiles: props.searchesFiles ?? true, // P5 O7 M4 (fix wave 1)
   };
-  const [controller] = useState(() => new EditorController(client, props.drafts ?? ipcDrafts(client, appSessionId), { setMode, setCommandEmpty, setBusy, setHistory }, inputs));
+  const [controller] = useState(() => new EditorController(client, props.drafts ?? ipcDrafts(client, appSessionId), { setMode, setBusy, setHistory }, inputs));
   useLayoutEffect(() => controller.update(inputs));
 
   // Options that never change, so Tiptap's per-render comparison leaves the instance alone (a fresh extension list or
@@ -169,7 +168,7 @@ export function Editor(props: EditorProps) {
           void controller.addFiles([...event.dataTransfer.files]);
         }}
       >
-        <ModeChrome appSessionId={appSessionId} mode={mode} empty={commandEmpty} />
+        <ModeChrome appSessionId={appSessionId} mode={mode} />
         {/* W2 (C1, Codex's): the prose's size on a 20px line, growing to a quarter of the window before it scrolls */}
         <EditorContent editor={editor} className={`max-h-[25vh] overflow-y-auto text-prose leading-5 text-fg ${mode === 'bash' ? 'font-mono' : ''} ${PLACEHOLDER}`} />
         {historyLine !== null && (

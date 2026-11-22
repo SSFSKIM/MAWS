@@ -1,10 +1,10 @@
 // @vitest-environment happy-dom
 // A reply an interrupt cut off, as drawn (P5 O9, the M10 sitting): muted under the note that the session didn't keep it,
-// and, when the sminos bridge kept only a block's tail (1.27.16), saying it starts partway through.
+// and, when the sminos bridge kept only a block's tail (1.27.16), saying it starts partway through (the word cut, T65).
 import { cleanup, render } from '@testing-library/react';
 import { afterEach, expect, it } from 'vitest';
 import type { Row, RowId } from '../../transcript/model/rows';
-import { CUT_NOTE, CutTextRow, PARTWAY_NOTE } from '../../transcript/view/rows/AssistantText';
+import { CutTextRow } from '../../transcript/view/rows/AssistantText';
 
 afterEach(cleanup);
 
@@ -14,11 +14,11 @@ const row = (partway: boolean): Extract<Row, { kind: 'assistant_text' }> => ({
 
 it('draws the cut-off text under its note; the tail-only one says it starts partway through, its text after an ellipsis', () => {
   const whole = render(<CutTextRow row={row(false)} />).container;
-  expect(whole.querySelector('.transcript-cut-note')?.textContent).toBe(CUT_NOTE);
+  expect(whole.querySelector('.transcript-cut-note')?.textContent).toBe('Cut off · not kept by the session'); // the word cut (T65)
   expect(whole.querySelector('[data-cut]')?.textContent).toContain('7, 8, 9');
   expect(whole.querySelector('[data-partway]')).toBeNull();
   cleanup();
   const tail = render(<CutTextRow row={row(true)} />).container;
-  expect(tail.querySelector('.transcript-cut-note')?.textContent).toBe(`${CUT_NOTE}. ${PARTWAY_NOTE}`);
+  expect(tail.querySelector('.transcript-cut-note')?.textContent).toBe('Cut off · not kept by the session · starts partway');
   expect(tail.querySelector('[data-partway]')?.textContent).toContain('…7, 8, 9');
 });

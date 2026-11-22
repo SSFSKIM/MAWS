@@ -3,10 +3,12 @@
 // `/`, `~` or `..`) over the additional directories too, every path then absolute; Agents from the catalogue, inserting an agent
 // mention; Skills from the catalogue, whose choice puts the skill's real invocation `/<skill> ` at the start of the
 // message (the engine has no `@skill` mention). While the file search has not answered the query as it stands (the
-// debounce, a request in flight), the Files group is one disabled `Searching files…` row: the menu holds Enter and
-// the arrows, so Enter neither sends the half-typed `@token` nor picks a row an older query found.
+// debounce, a request in flight), the Files group is one disabled row named `Searching files…`, a quiet spinner (the word
+// cut, C56): the menu holds Enter and the arrows, so Enter neither sends the half-typed `@token` nor picks a row an older
+// query found. The word cut (C54): an agent's or a skill's description shows on the highlighted row alone, by the arrow
+// keys or the pointer, and is the row's description at all times; the Skills group ends at its last skill (C55).
 import type { Editor, Range } from '@tiptap/core';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useId, useMemo, useState } from 'react';
 import type { AppSessionId } from '@shared/graph/ids';
 import { machineOf } from '@shared/machine/address';
 import { ipc } from '../../ipc/client';
@@ -16,6 +18,8 @@ import { mentionNode, textNode } from '../editor/doc';
 import { MENTION_BREAKS, slashText } from '../editor/mention-text'; // ticket 733a (slashText); board ticket 739 (MENTION_BREAKS)
 import { pathRefusal } from '../editor/paste'; // ticket 733a
 import { mentionLabel } from '../editor/recall';
+import { QuietSpinner } from '../../ui/spinner';
+import { SEARCHING_FILES_NAME } from '../copy';
 import { atItems, type AtItem } from './items';
 import { GroupLabel, Listbox, useDebounced, useListKeys, type PopupItem, type PopupProps } from './popup';
 
@@ -107,6 +111,33 @@ const GROUPS: { group: AtItem['group']; label: string }[] = [
 
 const NO_DIRECTORIES: readonly string[] = [];
 
+// One row: a file by its path; an agent or a skill by its name, its description in view while the row is highlighted and
+// its accessible description throughout (the name stays the row's name, so the description is outside it).
+function AtRow({ id, item, active, onPoint, onChoose }: { id: string; item: AtItem; active: boolean; onPoint(): void; onChoose(): void }) {
+  const name = item.group === 'files' ? item.path + (item.directory ? '/' : '') : item.name;
+  const description = item.group !== 'files' && item.description ? item.description : null;
+  const descriptionId = `${id}-description`;
+  return (
+    <div
+      id={id}
+      role="option"
+      aria-selected={active}
+      aria-label={description === null ? undefined : name}
+      aria-describedby={description === null ? undefined : descriptionId}
+      onMouseEnter={onPoint}
+      onClick={onChoose}
+      className={`flex min-w-0 cursor-default items-baseline gap-2 rounded-sm px-2 py-1 ${active ? 'bg-bg-active' : ''}`}
+    >
+      <span className="truncate">{name}</span>
+      {description !== null && (
+        <span id={descriptionId} hidden={!active} className="truncate text-ui-sm text-fg-faint">
+          {description}
+        </span>
+      )}
+    </div>
+  );
+}
+
 export function AtMenu(props: PopupProps) {
   const { appSessionId, cwd, additionalDirectories, catalog, searchesFiles = true } = props.ctx;
   // P5 O7 M4 (fix wave 1): a chat to start on another machine is offered none of this Mac's files
@@ -114,10 +145,11 @@ export function AtMenu(props: PopupProps) {
   const others = useMemo(() => atItems(catalog, props.query), [catalog, props.query]);
   const rows = useMemo(() => (files === null ? [SEARCHING, ...others.slice(0, ROW_LIMIT - 1).map(rowOf)] : [...files, ...others].slice(0, ROW_LIMIT).map(rowOf)), [files, others]);
   const { active, setActive, choose } = useListKeys(props, rows);
+  const menuId = useId(); // one per open menu, so two message boxes' menus (split panes) never share an id
   if (rows.length === 0) return null;
-  const optionId = (i: number) => `composer-at-${i}`;
+  const optionId = (i: number) => `composer-at-${menuId}-${i}`;
   return (
-    <Listbox label="Mention" activeId={optionId(active)} revealKey={rows}>
+    <Listbox label="Mention" activeId={optionId(active)} editor={props.editor} revealKey={rows}>
       {GROUPS.map(({ group, label }) => {
         const inGroup = rows.map((row, index) => ({ row, index })).filter(({ row }) => (row.item?.group ?? 'files') === group);
         if (inGroup.length === 0) return null;
@@ -126,25 +158,13 @@ export function AtMenu(props: PopupProps) {
             <GroupLabel>{label}</GroupLabel>
             {inGroup.map(({ row, index }) =>
               row.item === null ? (
-                <div key={row.key} id={optionId(index)} role="option" aria-selected={index === active} aria-disabled aria-busy className={`rounded-sm px-2 py-1 text-fg-faint ${index === active ? 'bg-bg-active' : ''}`}>
-                  Searching files…
+                <div key={row.key} id={optionId(index)} role="option" aria-label={SEARCHING_FILES_NAME} aria-selected={index === active} aria-disabled aria-busy className={`flex h-7 items-center rounded-sm px-2 ${index === active ? 'bg-bg-active' : ''}`}>
+                  <QuietSpinner label={SEARCHING_FILES_NAME} />
                 </div>
               ) : (
-                <div
-                  key={row.key}
-                  id={optionId(index)}
-                  role="option"
-                  aria-selected={index === active}
-                  onMouseEnter={() => setActive(index)}
-                  onClick={() => choose(row)}
-                  className={`flex min-w-0 cursor-default items-baseline gap-2 rounded-sm px-2 py-1 ${index === active ? 'bg-bg-active' : ''}`}
-                >
-                  <span className="truncate">{row.item.group === 'files' ? row.item.path + (row.item.directory ? '/' : '') : row.item.name}</span>
-                  {row.item.group !== 'files' && row.item.description ? <span className="truncate text-ui-sm text-fg-faint">{row.item.description}</span> : null}
-                </div>
+                <AtRow key={row.key} id={optionId(index)} item={row.item} active={index === active} onPoint={() => setActive(index)} onChoose={() => choose(row)} />
               ),
             )}
-            {group === 'skills' ? <div className="px-2 pb-1 text-ui-sm text-fg-faint">A skill runs as /name at the start of the message</div> : null}
           </div>
         );
       })}

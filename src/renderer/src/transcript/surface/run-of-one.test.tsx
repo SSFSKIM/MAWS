@@ -56,7 +56,7 @@ async function mount(events: SessionEvent[]) {
   const id = store.key as AppSessionId;
   useSessions.setState({ engine: new Map([[id, { ...status(id), uiSurface: { clientId: 'maws-main' } }]]) });
   act(() => useTranscriptStore.getState().setToHumanView(store.key, { lane: false, tailMessage: false, modDraws: true }));
-  const value = { storeKey: store.key, variant: 'session' as const, actions: spyActions(), rewind: null, renderRequest: null, disclosures: new Disclosures(), idPrefix: 't', effort: null };
+  const value = { storeKey: store.key, variant: 'session' as const, actions: spyActions(), rewind: null, renderRequest: null, disclosures: new Disclosures(), idPrefix: 't' };
   const view = render(<TranscriptProvider value={value}><Rows storeKey={store.key} /></TranscriptProvider>);
   return { ...store, view, push: (batch: SessionEvent[]) => act(() => store.push(batch)) };
 }

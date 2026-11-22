@@ -36,7 +36,7 @@
     "id": "subagent:a1ba7eb1ffe9f0ffa",
     "kind": "subagent",
     "overflow": 0,
-    "sentence": "Read one.txt and reply finished",
+    "sentence": "Read one.txt and reply",
     "status": "finished",
     "turnId": "turn:22be2241-f79e-4248-a05b-7553331810d5"
   },

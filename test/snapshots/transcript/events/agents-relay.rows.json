@@ -56,7 +56,7 @@
     "id": "subagent:ad286defbc77bc090",
     "kind": "subagent",
     "overflow": 0,
-    "sentence": "Read and report one.txt content and Read and report two.txt content started working",
+    "sentence": "Read and report one.txt content and Read and report two.txt content",
     "status": "working",
     "turnId": "turn:78bf314c-d854-4662-b810-fede10ae5be3"
   },
@@ -87,10 +87,11 @@
     "at": "2026-09-28T09:22:12.388Z",
     "body": "Say PING in your next inbox line",
     "direction": "to_child",
+    "flow": "out",
     "from": null,
     "id": "agentmsg:agents-relay:journal:333:1",
     "kind": "agent_message",
-    "text": "Sent to Read and report one.txt content: Say PING in your next inbox line",
+    "text": "Read and report one.txt content: Say PING in your next inbox line",
     "to": {
       "agentId": "ad286defbc77bc090",
       "glyph": 3,
@@ -118,7 +119,7 @@
     "id": "subagent:a0f00d0f00d0f00d1",
     "kind": "subagent",
     "overflow": 0,
-    "sentence": "Read file after sleep started working",
+    "sentence": "Read file after sleep",
     "status": "started",
     "turnId": "turn:78bf314c-d854-4662-b810-fede10ae5be3"
   },

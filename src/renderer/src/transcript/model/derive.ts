@@ -21,10 +21,10 @@ import { firstJsonBlock, jsonObjectOf } from './cells'; // E2, E4c
 import { artifactTitlesOf, type ArtifactTitles } from './cells'; // UX wave U2
 import { hookNotice, type HookRecord } from './hooks';
 import { agentMessageCopy, baseName, boundaryCopy, BRANCH_HISTORY_DETAIL, PLUGIN, processExitCopy, reconnectCopy, retryCopy, subagentSentence } from './copy';
-import { HANDOVER_REINIT_COPY /* P5 O16 M3b */, RESUMED_COPY, RESUMING_COPY } from './copy'; // C12
+import { HANDOVER_REINIT_COPY /* P5 O16 M3b */ } from './copy'; // C12
 import { glyphFor } from './glyphs';
 import { collectCells, groupItems, type WorkItem } from './groups';
-import { captionParts, captionText, finishedLines, stepsOfTurn, turnOrder, type SentOutcome } from './caption'; // UX wave U2
+import { caption, captionParts, finishedLines, stepsOfTurn, turnOrder, type Caption, type SentOutcome } from './caption'; // UX wave U2
 import { cellId, rowId, turnId as turnIdOf } from './keys';
 import type { LiveBlock, TranscriptState, TranscriptUi, TurnState, TurnWork } from './reduce';
 import { isEngineOrigin, originOf, runningTurn, taskEndArrived, type ReceiptUndo } from './reduce';
@@ -58,6 +58,8 @@ type RowOf<K extends Row['kind']> = Extract<Row, { kind: K }>;
 
 const record = (value: unknown): Record<string, unknown> => (typeof value === 'object' && value !== null ? (value as Record<string, unknown>) : {});
 const str = (value: unknown, fallback = ''): string => (typeof value === 'string' ? value : fallback);
+// the turn line's caption and the count it ends in (the word cut, T2), the fold left out when there is none
+const captionFields = ({ text, fold }: Caption) => ({ caption: text, ...(fold > 0 && { fold }) });
 
 // ---------------------------------------------------------------------------------------------------------------------
 // Public surface
@@ -147,7 +149,7 @@ function flatten(state: TranscriptState, before: Map<RowId, Row>, times: Map<Row
 // folds, O-12; UX wave U1b: an answer's notice folds too where its turn did other work, its question's row saying the
 // answer), and a plan whose request
 // waits (UX wave U1b: its form is in the row). The divider folds everything else, so a turn of a local command
-// alone (`/compact`: its boundary and its output) has no work and no "Worked for 0s" divider. A question still counts as
+// alone (`/compact`: its boundary and its output) has no work and no "0s" divider. A question still counts as
 // work for where the answer starts (WORK_ROWS).
 export const isPersistentRow = (row: Row): boolean =>
   (row.kind === 'assistant_text' && row.cut === true) /* P5 O9: a reply an interrupt cut off, no work of the turn */ || row.kind === 'to_human' /* P4-R7 */ || row.kind === 'ask' || row.kind === 'delivery' /* E1 */ || row.kind === 'side_thread' /* E3 */ || row.kind === 'artifact' /* E2 */ || row.kind === 'browser_action' /* E4c */ || row.kind === 'browser_activity' /* E13: never derived here; placed by the view */ || row.kind === 'user' || row.kind === 'boundary' || row.kind === 'local_command' || row.kind === 'question' || (row.kind === 'assistant_text' && (row.phase === 'answer' || row.forHuman === true)) || (row.kind === 'error' && (row.scope === 'hook' || row.scope === 'plugin' || (row.scope === 'api' && row.severity === 'error')))
@@ -327,7 +329,7 @@ type Item =
 // UX wave U3: the questions of an ask call, by its tool-use id, for the words of an answer's line
 type CallQuestions = (call: string) => ReadonlyArray<{ question: string; header?: string }> | null;
 
-interface SubagentGroup { id: RowId; at: string; apiMessageId: string | null; refs: SubagentRef[]; statuses: Map<TaskId, SubagentStatus>; lastTool: Map<TaskId, string | null>; phase: string | null; ended: boolean /* P5 O9: made before the session's process exited (TurnState.agentsEndedAt) */ }
+interface SubagentGroup { id: RowId; at: string; apiMessageId: string | null; refs: SubagentRef[]; statuses: Map<TaskId, SubagentStatus>; lastTool: Map<TaskId, string | null>; phases: Map<TaskId, string> /* a workflow's phase, by its own task */; ended: boolean /* P5 O9: made before the session's process exited (TurnState.agentsEndedAt) */ }
 interface Pending { kind: 'question' | 'plan'; use: Event<'tool.use'>; answers: Record<string, string> | null; outcome: RowOf<'plan'>['outcome']; feedback: string | null; requestId: RequestId | null; error: string | null /* E1: the engine's refusal */ }
 
 // E1 start: what a turn's events say about one `ask` call (its capsule) and one `send_file` call (its delivery row). The
@@ -560,7 +562,7 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): TurnDerivat
     const previous = items.at(-1);
     const last = previous?.kind === 'subagents' ? previous.group : null;
     if (last && apiMessageId !== null && last.apiMessageId === apiMessageId) return last;
-    const group: SubagentGroup = { id: key, at, apiMessageId, refs: [], statuses: new Map(), lastTool: new Map(), phase: null, ended: turn.agentsEndedAt !== undefined && position < turn.agentsEndedAt };
+    const group: SubagentGroup = { id: key, at, apiMessageId, refs: [], statuses: new Map(), lastTool: new Map(), phases: new Map(), ended: turn.agentsEndedAt !== undefined && position < turn.agentsEndedAt };
     subagents.push(group);
     items.push({ kind: 'subagents', group });
     return group;
@@ -761,7 +763,7 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): TurnDerivat
         if (!group) break;
         const phases = Array.isArray(event.progress) ? event.progress.map(record).filter((entry) => entry.type === 'workflow_phase') : [];
         const title = phases.at(-1)?.title;
-        group.phase = typeof title === 'string' && title.length > 0 ? title : group.phase;
+        if (typeof title === 'string' && title.length > 0) group.phases.set(event.taskId, title);
         group.statuses.set(event.taskId, 'working');
         break;
       }
@@ -792,7 +794,7 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): TurnDerivat
         }
         const name = event.direction === 'to_child' ? event.toAgentId : event.fromAgentId;
         const preview = previewOf(event.text); // UX wave U3 (O-12): one line, the whole message opened under it
-        items.push({ kind: 'row', row: { id: rowId.agentMessage(event.id), turnId: turn.id, at: event.at, kind: 'agent_message', direction: event.direction, from: null, to: null, text: agentMessageCopy(event.direction, name, preview), body: event.text } });
+        items.push({ kind: 'row', row: { id: rowId.agentMessage(event.id), turnId: turn.id, at: event.at, kind: 'agent_message', direction: event.direction, flow: event.direction === 'to_child' ? 'out' : 'in', from: null, to: null, text: agentMessageCopy(event.direction, name, preview), body: event.text } });
         break;
       }
       case 'permission.requested':
@@ -1094,7 +1096,7 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): TurnDerivat
       id: rowId.divider(turn.id), turnId: turn.id, at: user?.at ?? turn.startedAt, kind: 'divider', state: dividerState, ...(dividerState === 'stopped' && cause !== null && { cause }), origin: turn.origin, startedAt: turn.startedAt, endedAt: turn.endedAt,
       toolCalls: summary.toolCalls, denied: denied.length, autoDenied: summary.autoDenied, firstDeniedCell: firstDenied, expanded, summary, files: changedFiles(cells, turn),
       ...(opener !== undefined && { opener }), // UX wave U3
-      caption: captionText(parts, true), parts: parts.map((part) => part.text), counts: finishedLines(cells),
+      ...captionFields(caption(parts, true)), parts: parts.map((part) => part.text), counts: finishedLines(cells),
     };
   }
   rows.push(...(expanded ? allRows : allRows.filter((row) => staysInView(row) || answerAlone))); // with no divider there is no work: every row is persistent
@@ -1321,8 +1323,15 @@ function subagentRow(group: SubagentGroup, turnId: TurnId, exited: boolean): Row
   const status: SubagentStatus = done
     ? statuses.includes('finished_with_errors') ? 'finished_with_errors' : statuses.includes('stopped') ? 'stopped' : 'finished'
     : statuses.every((s) => s === 'started') ? 'started' : 'working';
-  const sentence = subagentSentence(group.refs.map((ref) => ref.name), exited ? 'exited' : status) + (group.phase && !done ? ` · ${group.phase}` : '');
-  return { id: group.id, turnId, at: group.at, kind: 'subagent', agents: group.refs, sentence, status, ...(exited && { exited: true as const }), overflow: Math.max(0, group.refs.length - 4) };
+  const sentence = subagentSentence(group.refs.map((ref) => ref.name), exited ? 'exited' : status);
+  // the word cut (T86, T87): a working workflow's phase is what it is doing now, which waits on its line; each its own
+  // call's (fix wave, scalpel-1#1), and gone with that call's end while another agent of the row still runs
+  const working = Object.fromEntries(group.refs.flatMap((ref, i) => {
+    const phase = group.phases.get(ref.taskId);
+    return phase !== undefined && !terminal(statuses[i]!) ? [[ref.taskId, phase]] : [];
+  }));
+  const phases = Object.keys(working).length > 0 ? { phases: working } : {};
+  return { id: group.id, turnId, at: group.at, kind: 'subagent', agents: group.refs, sentence, status, ...phases, ...(exited && { exited: true as const }), overflow: Math.max(0, group.refs.length - 4) };
 }
 
 function requestOrHistoricalRow(pending: Pending, turnId: TurnId, state: TranscriptState | null): Row | null {
@@ -1540,7 +1549,7 @@ function hasCompanion(event: Event<'user.message'>, companions: ReadonlySet<Mess
 function inboundRow(event: Event<'peer.message'>, turnId: TurnId, owners: string[] | null): RowOf<'agent_message'> {
   const preview = previewOf(event.text);
   return {
-    id: rowId.agentMessage(event.id), turnId, at: event.at, kind: 'agent_message', direction: 'between', from: null, to: null, text: peerMessageCopy.inbound(peerLabel(event.from, event.fromName), preview),
+    id: rowId.agentMessage(event.id), turnId, at: event.at, kind: 'agent_message', direction: 'between', flow: 'in', from: null, to: null, text: peerMessageCopy.inbound(peerLabel(event.from, event.fromName), preview),
     peer: {
       sender: { name: event.fromName, address: event.from, session: event.fromSession, owners }, recipient: null, body: event.text, preview, replyTo: event.replyable ? event.from : null,
       toolUseId: null, messageUuid: event.messageUuid, result: null, resultText: null, summary: null,
@@ -1548,15 +1557,15 @@ function inboundRow(event: Event<'peer.message'>, turnId: TurnId, owners: string
   };
 }
 
-// A SendMessage call: to `main` or `parent` a child's report up (`from_child`), to an agent this transcript knows the
-// parent's message down (`to_child`, the agent named by its ref, P3-F L260; one no loaded turn launched by the host's
-// lookup, L197), to anything else a message to another session (`between`:
+// A SendMessage call, which goes out to whom it names: to `main` or `parent` a child's report up (`from_child`), to an
+// agent this transcript knows the parent's message down (`to_child`, the agent named by its ref, P3-F L260; one no
+// loaded turn launched by the host's lookup, L197), to anything else a message to another session (`between`:
 // a peer's name or address, a teammate), refined by its result; one whose turn closed with none was never answered (E11).
 function sendMessageRow(use: Event<'tool.use'>, result: Event<'tool.result'> | undefined, turnId: TurnId, known: KnownAgents[], agentOf: (key: string) => SubagentRef | null, context: TurnContext): RowOf<'agent_message'> {
   const input = record(use.input);
   const to = str(input.to);
   const message = str(input.message, str(input.content));
-  const base = { id: rowId.agentMessage(use.id), turnId, at: use.at, kind: 'agent_message' as const, from: null };
+  const base = { id: rowId.agentMessage(use.id), turnId, at: use.at, kind: 'agent_message' as const, flow: 'out' as const, from: null };
   const preview = previewOf(message); // UX wave U3 (O-12): every send is one line, the whole message opened under it
   const body = { body: message }; // the whole message, which the line opens to
   if (to === 'parent' || to === 'main') return { ...base, direction: 'from_child', to: null, text: agentMessageCopy('from_child', to, preview), ...body };
@@ -1581,7 +1590,7 @@ function agentMessageRow(event: Event<'subagent.message'>, turnId: TurnId, agent
   const agent = event.fromAgentId === null ? null : agentOf(event.fromAgentId);
   const title = agent?.name ?? event.fromAgentId;
   const report = handbackReport(event.text);
-  const base = { id: rowId.agentMessage(event.id), turnId, at: event.at, kind: 'agent_message' as const, direction: 'from_child' as const, from: agent, to: null };
+  const base = { id: rowId.agentMessage(event.id), turnId, at: event.at, kind: 'agent_message' as const, direction: 'from_child' as const, flow: 'in' as const, from: agent, to: null };
   if (report !== null) return { ...base, text: peerMessageCopy.report(title, previewOf(report)), report }; // UX wave U3: the report's first line on the line
   const preview = previewOf(event.text);
   return { ...base, text: agentMessageCopy('from_child', title, preview), body: event.text };
@@ -1813,6 +1822,7 @@ function boundaryRow(event: Event<'boundary.compaction' | 'boundary.reset' | 'bo
     case 'boundary.reset':
       return { ...base, boundaryKind: 'reset', text: boundaryCopy({ kind: 'reset', trigger: event.trigger }), detail: event.newConversationId };
     case 'boundary.retraction':
+      // the word cut (T50): a continued branch's second sentence is `secondary`, which waits on its line (Boundary.tsx)
       return { ...base, boundaryKind: 'retraction', text: boundaryCopy({ kind: 'retraction', reason: event.reason, fallbackModel: event.fallbackModel }), ...(event.reason === 'transcript_branch' ? { secondary: BRANCH_HISTORY_DETAIL, detail: [event.reason, ...event.retractedMessageUuids].join(' · ') } : { detail: event.retractedMessageUuids.join(', ') || null }) };
   }
 }
@@ -1925,7 +1935,7 @@ function looseRows(state: TranscriptState, events: SessionEvent[], after: TurnId
     const placedAfter = after === null ? undefined : state.turns.get(after);
     return placedAfter !== undefined && turnCommandLine(placedAfter) !== null && lastDrawnIsBubble(state, placedAfter);
   };
-  let episode: { index: number; id: RowId } | null = null; // the open reconnect episode: its row updates in place until it ends
+  let episode: { index: number | null; id: RowId } | null = null; // the open reconnect episode: its row (none while a resume runs) updates in place until it ends
   const sideThreads = new Map<AppSessionId, RowOf<'side_thread'>>(); // E3
   for (const event of events) {
     switch (event.kind) {
@@ -1985,15 +1995,15 @@ function looseRows(state: TranscriptState, events: SessionEvent[], after: TurnId
       case 'session.reconnect': {
         const id: RowId = episode?.id ?? rowId.reconnect(event.id);
         const row: RowOf<'error'> = { id, turnId: null, at: event.at, kind: 'error', severity: event.phase === 'failed' ? 'error' : 'transient', text: reconnectCopy(event.phase, event.attempt, event.maxAttempts, event.reason), attempt: { n: event.attempt, max: event.maxAttempts }, scope: 'reconnect', lostAttentionCount: null };
-        // C12 start: the resume of a session released under the memory budget reads Resuming… and stays as Resumed, the
-        // line that closes the release's own
-        const resumed = event.trigger === 'process_exit' && event.phase === 'reconnected';
-        if (event.trigger === 'process_exit' && event.phase === 'attempting') row.text = RESUMING_COPY;
-        if (resumed) Object.assign(row, { severity: 'notice', text: RESUMED_COPY, attempt: null });
+        // C12 start: the resume of a session released under the memory budget draws no row while it runs nor once it
+        // succeeded (the word cut, T56 and T58): the session's own running mark says it; one that failed says why, under
+        // the episode's id
+        const resuming = event.trigger === 'process_exit' && event.phase === 'attempting';
         // C12 end
-        if (event.phase === 'reconnected' && !resumed /* C12 */) {
-          if (episode) rows.splice(episode.index, 1); // a reconnect that succeeded leaves no row
-        } else if (episode) rows[episode.index] = row;
+        if (event.phase === 'reconnected') {
+          if (episode?.index != null) rows.splice(episode.index, 1); // a reconnect or a resume that succeeded leaves no row
+        } else if (resuming) episode ??= { index: null, id };
+        else if (episode?.index != null) rows[episode.index] = row;
         else {
           rows.push(row);
           episode = { index: rows.length - 1, id };
@@ -2009,7 +2019,7 @@ function looseRows(state: TranscriptState, events: SessionEvent[], after: TurnId
         // keyed on the cause alone, in place of the adoption's reconnect still open, never a red end
         if (event.cause !== undefined) {
           const notice: RowOf<'error'> = { id: rowId.error(event.id), turnId: null, at: event.at, kind: 'error', severity: 'notice', text: HANDOVER_REINIT_COPY, attempt: null, scope: 'exit', lostAttentionCount: null };
-          if (episode) rows[episode.index] = notice;
+          if (episode?.index != null) rows[episode.index] = notice;
           else rows.push(notice);
           episode = null;
           break;

@@ -331,9 +331,9 @@ describe('group state machine', () => {
     b.emit('subagent.progress', { taskId: task('k2'), description: 'B', usage: { totalTokens: 1, toolUses: 1, durationMs: 1 }, lastToolName: 'Read', summary: null });
     b.emit('subagent.finished', { taskId: task('k1'), status: 'failed', summary: null, outputFile: null, reason: 'boom' });
     const mixed = find(rows(b.events), 'subagent');
-    expect(mixed).toMatchObject({ status: 'working', sentence: 'A and B started working' });
+    expect(mixed).toMatchObject({ status: 'working', sentence: 'A and B' }); // the word cut (T86)
     b.emit('subagent.finished', { taskId: task('k2'), status: 'completed', summary: null, outputFile: null, reason: null });
-    expect(find(rows(b.events), 'subagent')).toMatchObject({ status: 'finished_with_errors', sentence: 'A and B finished with errors' });
+    expect(find(rows(b.events), 'subagent')).toMatchObject({ status: 'finished_with_errors', sentence: 'A and B · with errors' });
   });
 
   // UX wave U3b, M5 (decision 19, acceptance 13): an agents row whose agents all ended with the session's process says
@@ -361,18 +361,18 @@ describe('group state machine', () => {
       expect(staysInView(two)).toBe(false);
     });
 
-    it('still reads `was stopped` for an agent stopped before the exit, and so does a row one of whose agents was', () => {
+    it('still reads `· stopped` for an agent stopped before the exit, and so does a row one of whose agents was', () => {
       const stopped = agents(['Survey'], (b) => b.emit('subagent.finished', { taskId: task('k0'), status: 'stopped', summary: null, outputFile: null, reason: null }));
-      expect(stopped).toMatchObject({ status: 'stopped', sentence: 'Survey was stopped' });
+      expect(stopped).toMatchObject({ status: 'stopped', sentence: 'Survey · stopped' }); // the word cut (T86): a stop keeps its word
       expect(stopped).not.toHaveProperty('exited');
       const mixed = agents(['Survey', 'Draft'], (b) => b.emit('subagent.finished', { taskId: task('k0'), status: 'stopped', summary: null, outputFile: null, reason: null }));
-      expect(mixed).toMatchObject({ status: 'stopped', sentence: 'Survey and Draft was stopped' });
+      expect(mixed).toMatchObject({ status: 'stopped', sentence: 'Survey and Draft · stopped' });
       expect(mixed).not.toHaveProperty('exited');
     });
 
     it('leaves a finished agent’s row as it was, and a row with no exit', () => {
       const finished = agents(['Survey'], (b) => b.emit('subagent.finished', { taskId: task('k0'), status: 'completed', summary: null, outputFile: null, reason: null }));
-      expect(finished).toMatchObject({ status: 'finished', sentence: 'Survey finished' });
+      expect(finished).toMatchObject({ status: 'finished', sentence: 'Survey' });
       expect(finished).not.toHaveProperty('exited');
       const b = builder();
       b.turn('u1');
@@ -380,7 +380,7 @@ describe('group state machine', () => {
       b.emit('subagent.started', { taskId: task('k0'), toolUseId: tool('a0'), description: 'Survey', subagentType: null, isBackground: true, spawnDepth: 1, prompt: null });
       b.end(['u1']);
       const running = find(rows(b.events), 'subagent');
-      expect(running).toMatchObject({ status: 'started', sentence: 'Survey started working' });
+      expect(running).toMatchObject({ status: 'started', sentence: 'Survey' });
       expect(running).not.toHaveProperty('exited');
     });
   });
@@ -1046,7 +1046,7 @@ describe('cross-session rows (E7)', () => {
     expect(list.filter((row) => row.kind === 'user')).toEqual([]);
     const [row] = messages(list);
     expect(row).toMatchObject({
-      direction: 'between', from: null, to: null, text: 'Message from @repo-b: hello from B',
+      direction: 'between', from: null, to: null, text: '@repo-b: hello from B',
       peer: { sender: { name: 'repo-b', address: B, session: null }, recipient: null, body: 'hello from B', preview: 'hello from B', replyTo: B, toolUseId: null, messageUuid: 'p1', result: null, resultText: null, summary: null },
     });
     expect(find(list, 'assistant_text')).toMatchObject({ phase: 'answer', markdown: 'Got it' });
@@ -1064,7 +1064,7 @@ describe('cross-session rows (E7)', () => {
     expect(folded.map((row) => row.kind)).toEqual(['time', 'divider']);
     const [row] = messages(rows(b.events));
     expect(row!.peer).toMatchObject({ sender: { name: null, address: B }, body: long, preview: `${'x'.repeat(119)}…`, replyTo: null });
-    expect(row!.text).toBe(`Message from @1: ${'x'.repeat(119)}…`);
+    expect(row!.text).toBe(`@1: ${'x'.repeat(119)}…`);
   });
 
   it('draws a non-synthetic envelope as its row and no bubble; a peer text the parser refuses keeps its bubble', () => {
@@ -1077,7 +1077,7 @@ describe('cross-session rows (E7)', () => {
     b.end(['u1']);
     const list = rows(b.events);
     expect(list.filter((row) => row.kind === 'user').map((row) => row.kind === 'user' && row.text)).toEqual(['prompt u1', 'a peer text in no envelope']);
-    expect(messages(list).map((row) => row.text)).toEqual(['Message from @repo-b: hello from B']);
+    expect(messages(list).map((row) => row.text)).toEqual(['@repo-b: hello from B']);
   });
 
   // P5 O15 M2b (docs/doperpowers/plans/2026-11-10-p5-o15-recomposition.md, §J): the owners sminos's frame names for the
@@ -1121,11 +1121,11 @@ describe('cross-session rows (E7)', () => {
     b.end(['u2']);
     const outbound = messages(rows(b.events)).slice(1);
     expect(outbound.map((row) => [row.direction, row.text, row.peer?.recipient, row.peer?.result, row.peer?.resultText, row.peer?.summary, row.peer?.toolUseId])).toEqual([
-      ['between', 'Sent to @repo-b: reply', { name: 'repo-b', address: B }, 'sent', null, 'Answer B', 's1'],
-      ['between', 'Sent to @nobody: hi', { name: null, address: 'nobody' }, 'failed', "No agent named 'nobody' is reachable.", null, 's2'],
-      ['between', 'Sent to @peer-c: x', { name: null, address: 'peer-c' }, 'failed', 'InputValidationError: bad', null, 's3'],
-      ['between', 'Sent to @peer-d: waiting', { name: null, address: 'peer-d' }, 'unanswered', null, null, 's4'], // its turn ended with no result (scale-review C scalpel-1#1)
-      ['between', 'Sent to @2: unnamed', { name: null, address: 'uds:/tmp/cc-socks/2.sock' }, 'unanswered', null, null, 's5'],
+      ['between', '@repo-b: reply', { name: 'repo-b', address: B }, 'sent', null, 'Answer B', 's1'],
+      ['between', '@nobody: hi', { name: null, address: 'nobody' }, 'failed', "No agent named 'nobody' is reachable.", null, 's2'],
+      ['between', '@peer-c: x', { name: null, address: 'peer-c' }, 'failed', 'InputValidationError: bad', null, 's3'],
+      ['between', '@peer-d: waiting', { name: null, address: 'peer-d' }, 'unanswered', null, null, 's4'], // its turn ended with no result (scale-review C scalpel-1#1)
+      ['between', '@2: unnamed', { name: null, address: 'uds:/tmp/cc-socks/2.sock' }, 'unanswered', null, null, 's5'],
     ]);
     expect(outbound[0]!.peer).toMatchObject({ sender: null, body: 'reply\nmore', preview: 'reply', replyTo: null });
     const folded = messages(rowsOf(reduce(b.events)));
@@ -1133,7 +1133,7 @@ describe('cross-session rows (E7)', () => {
   });
 
   // P3-F L260: the row names a known agent by its ref's name, whatever the call addressed it by
-  it('keeps a SendMessage to a subagent this transcript knows to_child with the agent as `to` (task id, agent id or real name), named by its ref; main and parent are from_child', () => {
+  it('keeps a SendMessage to a subagent this transcript knows to_child with the agent as `to` (task id, agent id or real name), named by its ref; main and parent are from_child, each one going out to the party it names', () => {
     const b = builder();
     agentTurn(b);
     b.turn('u2');
@@ -1143,11 +1143,12 @@ describe('cross-session rows (E7)', () => {
     b.toolUse('s4', 'SendMessage', { to: 'parent', message: 'up too' });
     b.end(['u2']);
     const list = messages(rows(b.events));
-    expect(list.map((row) => [row.direction, row.text, row.to?.taskId ?? null, row.peer])).toEqual([
-      ['to_child', 'Sent to Survey src: by id', 'a1', undefined],
-      ['to_child', 'Sent to Survey src: by name', 'a1', undefined],
-      ['from_child', 'Message from main: up', null, undefined],
-      ['from_child', 'Message from parent: up too', null, undefined],
+    // Task 2 fix round 1 (T73): routed up as from_child, a child's send to its parent still goes out to the party it names
+    expect(list.map((row) => [row.direction, row.flow, row.text, row.to?.taskId ?? null, row.peer])).toEqual([
+      ['to_child', 'out', 'Survey src: by id', 'a1', undefined],
+      ['to_child', 'out', 'Survey src: by name', 'a1', undefined],
+      ['from_child', 'out', 'main: up', null, undefined],
+      ['from_child', 'out', 'parent: up too', null, undefined],
     ]);
     expect(list[0]!.to).toEqual({ taskId: 'a1', agentId: 'a1', toolUseId: 'ag1', name: 'Survey src', glyph: list[0]!.to!.glyph, kind: 'agent', subagentType: 'general-purpose' });
   });
@@ -1163,11 +1164,11 @@ describe('cross-session rows (E7)', () => {
     b.emit('subagent.message', { direction: 'from_child', fromAgentId: 'a1' as never, toAgentId: null, text: 'first line\nsecond line' });
     b.end([], { origin: 'peer' });
     const list = messages(rows(b.events));
-    expect(list.map((row) => [row.direction, row.text, row.from?.taskId ?? null, row.report, row.body])).toEqual([
-      ['from_child', 'Report from Survey src: line one', 'a1', 'line one\n\nline two', undefined],
-      ['from_child', 'Message from Survey src: a plain note', 'a1', undefined, 'a plain note'], // U3 (the ruling of 2026-11-13): the whole message the line opens to
-      ['from_child', 'Message from a9: from a stranger', null, undefined, 'from a stranger'],
-      ['from_child', 'Message from Survey src: first line', 'a1', undefined, 'first line\nsecond line'], // the preview, the body behind it
+    expect(list.map((row) => [row.direction, row.flow, row.text, row.from?.taskId ?? null, row.report, row.body])).toEqual([
+      ['from_child', 'in', 'Report from Survey src: line one', 'a1', 'line one\n\nline two', undefined],
+      ['from_child', 'in', 'Survey src: a plain note', 'a1', undefined, 'a plain note'], // U3 (the ruling of 2026-11-13): the whole message the line opens to
+      ['from_child', 'in', 'a9: from a stranger', null, undefined, 'from a stranger'],
+      ['from_child', 'in', 'Survey src: first line', 'a1', undefined, 'first line\nsecond line'], // the preview, the body behind it
     ]);
     expect(messages(rowsOf(reduce(b.events))).map((row) => row.text)).toEqual([]);
   });
@@ -1196,15 +1197,15 @@ describe('cross-session rows (E7)', () => {
     it('reads a SendMessage to it between without a lookup, and to_child named by the lookup with one, by id or name; so does its message back', () => {
       const bare = messages(rows(unknownAgent().events));
       expect(bare.map((row) => [row.direction, row.text])).toEqual([
-        ['between', 'Sent to @a912e224: by id'],
-        ['between', 'Sent to @surveyor: by name'],
-        ['from_child', 'Message from a912e224: a note back'],
+        ['between', '@a912e224: by id'],
+        ['between', '@surveyor: by name'],
+        ['from_child', 'a912e224: a note back'],
       ]);
       const named = messages(rowsOf(withAllExpanded(withAgents(reduce(unknownAgent().events), LOOKUP))));
       expect(named.map((row) => [row.direction, row.text, row.to ?? row.from])).toEqual([
-        ['to_child', 'Sent to Survey src: by id', SURVEY],
-        ['to_child', 'Sent to Survey src: by name', SURVEY],
-        ['from_child', 'Message from Survey src: a note back', SURVEY],
+        ['to_child', 'Survey src: by id', SURVEY],
+        ['to_child', 'Survey src: by name', SURVEY],
+        ['from_child', 'Survey src: a note back', SURVEY],
       ]);
     });
 
@@ -1216,7 +1217,7 @@ describe('cross-session rows (E7)', () => {
       b.end(['u2']);
       const other: SubagentRef = { ...SURVEY, taskId: 'a1' as TaskId, agentId: 'a1' as AgentId, name: 'Someone else' };
       const list = messages(rowsOf(withAllExpanded(withAgents(reduce(b.events), new Map([['a1', other]])))));
-      expect(list.map((row) => [row.text, row.to?.toolUseId])).toEqual([['Sent to Survey src: by id', 'ag1']]);
+      expect(list.map((row) => [row.text, row.to?.toolUseId])).toEqual([['Survey src: by id', 'ag1']]);
     });
 
     it('a lookup arriving after the rows derived re-derives the turn that read it, and no other', () => {
@@ -1235,7 +1236,7 @@ describe('cross-session rows (E7)', () => {
       expect(withAgents(after, LOOKUP)).toBe(after); // the same lookup changes nothing
       expect(turnRows(after, second)).toBe(secondAfter);
       expect(turnDerivations.count - derived).toBe(1);
-      expect(messages(rowsOf(withAllExpanded(after))).map((row) => row.text)).toEqual(['Sent to Survey src: by id', 'Sent to Survey src: by name', 'Message from Survey src: a note back']);
+      expect(messages(rowsOf(withAllExpanded(after))).map((row) => row.text)).toEqual(['Survey src: by id', 'Survey src: by name', 'Survey src: a note back']);
     });
   });
 
@@ -1355,7 +1356,7 @@ describe('the turn’s line (O-15; decision 9)', () => {
     b.end(['u1'], { durationMs: 72_000 });
     const after = rowsOf(reduce(b.events));
     expect(find(after, 'divider')).toMatchObject({ state: 'completed', caption: 'Edited 2 files, ran a command', parts: ['edited 2 files', 'ran a command'], counts: { added: 5, removed: 3 } });
-    expect(line(after)).toBe('Worked for 1m 12s · Edited 2 files, ran a command +5 −3');
+    expect(line(after)).toBe('1m 12s · Edited 2 files, ran a command +5 −3');
   });
 
   it('a stopped turn keeps its verb and gains the caption; denied and auto-denied counts follow it', () => {
@@ -1373,7 +1374,7 @@ describe('the turn’s line (O-15; decision 9)', () => {
     expect(line(list)).toBe('You stopped after 9s · Searched code (1 stopped) · 1 denied · 1 auto-denied');
   });
 
-  it('an engine’s turn with one answer and no work has no line; with one call it reads `Continued for …` and the call', () => {
+  it('an engine’s turn with one answer and no work has no line; with one call it reads `Continued · …` and the call', () => {
     const b = builder();
     b.emit('turn.started', { userMessageUuid: null, origin: 'engine' });
     b.text('m1', 0, 'All quiet.');
@@ -1386,7 +1387,7 @@ describe('the turn’s line (O-15; decision 9)', () => {
     b.end([], { origin: 'task-notification' });
     const list = rows(b.events);
     expect(list.filter((row) => row.kind === 'divider')).toHaveLength(1);
-    expect(line(list)).toBe('Continued for 1s · Ran a command');
+    expect(line(list)).toBe('Continued · 1s · Ran a command');
   });
 
   it('a toggle of one run derives one turn, and the turn’s line is data: no reader derives the turn again to word it', () => {
@@ -1577,7 +1578,8 @@ describe('`background` over a recorded MCP call moved to the background (uxwave/
   });
 });
 
-// UX wave U2, M2 (C2, C5; O-15): a turn an answer's notice opened reads `Worked for` where it did work, and has no line
+// UX wave U2, M2 (C2, C5; O-15): a turn an answer's notice opened reads as the person's (the word cut, T1: its duration
+// alone) where it did work, and has no line
 // where it only answers. UX wave U1b (decision 9 and the architect's ruling of 2026-11-15 on M1's D-7): with other work
 // the notice folds with it, its question's row saying the answer; as the turn's only work it stays in view
 describe('the line of a turn an answer opened', () => {
@@ -1599,12 +1601,12 @@ describe('the line of a turn an answer opened', () => {
     expect(kinds(opened(false))).toEqual(['notice', 'assistant_text']);
   });
 
-  it('with one call reads `Worked for …` and folds its notice with the call', () => {
+  it('with one call reads its duration alone, as the person’s turn, and folds its notice with the call', () => {
     const list = opened(true);
     expect(kinds(list)).toEqual(['assistant_text', 'divider']);
     const line = find(list, 'divider');
     expect(line.opener).toMatchObject({ class: 'answer' });
-    expect(dividerCopy({ ...line, durationMs: line.summary.durationMs ?? 0 })).toBe('Worked for 1s · Ran a command');
+    expect(dividerCopy({ ...line, durationMs: line.summary.durationMs ?? 0 })).toBe('1s · Ran a command');
   });
 });
 

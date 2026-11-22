@@ -110,6 +110,7 @@
   {
     "at": "2026-10-06T10:54:24.940Z",
     "direction": "between",
+    "flow": "in",
     "from": null,
     "id": "agentmsg:c2291cea-3cc9-4f6d-bdec-321a085cc0f7#2",
     "kind": "agent_message",
@@ -133,7 +134,7 @@
       "summary": null,
       "toolUseId": null
     },
-    "text": "Message from @repo-b-gen1il-79: E7 probe: hello from B",
+    "text": "@repo-b-gen1il-79: E7 probe: hello from B",
     "to": null,
     "turnId": "turn:ec2291cea-3cc9-4f6d-bdec-321a085cc0f7"
   },
@@ -188,6 +189,7 @@
   {
     "at": "2026-10-06T10:54:30.247Z",
     "direction": "between",
+    "flow": "out",
     "from": null,
     "id": "agentmsg:0e5581e0-4ff3-45d3-93c4-aa6dbe89a9d1#1",
     "kind": "agent_message",
@@ -206,7 +208,7 @@
       "summary": "Respond to peer session probe",
       "toolUseId": "toolu_01Hjvw4bRrU1xo6YfEsM31Lj"
     },
-    "text": "Sent to @repo-b-gen1il-79: Hello from A — received your probe message.",
+    "text": "@repo-b-gen1il-79: Hello from A — received your probe message.",
     "to": null,
     "turnId": "turn:ec2291cea-3cc9-4f6d-bdec-321a085cc0f7"
   },
@@ -239,7 +241,7 @@
     "kind": "divider",
     "opener": {
       "class": "peer",
-      "line": "Message from @repo-b-gen1il-79: E7 probe: hello from B"
+      "line": "@repo-b-gen1il-79: E7 probe: hello from B"
     },
     "origin": "peer",
     "parts": [
@@ -293,6 +295,7 @@
   {
     "at": "2026-10-06T10:54:49.703Z",
     "direction": "between",
+    "flow": "out",
     "from": null,
     "id": "agentmsg:b0e3d399-4f64-472f-b0e3-293491012223#1",
     "kind": "agent_message",
@@ -311,7 +314,7 @@
       "summary": null,
       "toolUseId": "toolu_014MYinuDDFrreJtW6nkbeVh"
     },
-    "text": "Sent to @repo-b-gen1il-79: E7 probe: reply from A",
+    "text": "@repo-b-gen1il-79: E7 probe: reply from A",
     "to": null,
     "turnId": "turn:fab15aee-8755-4d22-be95-fe6a693bb43e"
   },
@@ -433,6 +436,7 @@
   {
     "at": "2026-10-06T10:55:10.604Z",
     "direction": "between",
+    "flow": "in",
     "from": null,
     "id": "agentmsg:90c881e3-8b0f-4d4e-86f8-9448b25a6113#1",
     "kind": "agent_message",
@@ -453,7 +457,7 @@
       "summary": null,
       "toolUseId": null
     },
-    "text": "Message from @repo-b-gen1il-79: E7 probe: second message while you work",
+    "text": "@repo-b-gen1il-79: E7 probe: second message while you work",
     "to": null,
     "turnId": "turn:d6dcf359-401e-4c0c-b982-082a8b388515"
   },
@@ -535,6 +539,7 @@
   {
     "at": "2026-10-06T10:55:58.839Z",
     "direction": "between",
+    "flow": "out",
     "from": null,
     "id": "agentmsg:e219762f-7e81-496e-869d-4c580b4f90c5#1",
     "kind": "agent_message",
@@ -553,7 +558,7 @@
       "summary": null,
       "toolUseId": "toolu_01KC8uNWxWQ5zXJ7EU6Fh8nT"
     },
-    "text": "Sent to @nobody-e7: E7 probe: nobody",
+    "text": "@nobody-e7: E7 probe: nobody",
     "to": null,
     "turnId": "turn:c762441a-e67e-4d7d-bf40-f40a32c465ec"
   },

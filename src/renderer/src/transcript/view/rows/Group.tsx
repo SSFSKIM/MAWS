@@ -57,7 +57,7 @@ export function GroupRow({ row, renderCell }: { row: GroupRowData; renderCell?: 
         >
           {heading && <span className="transcript-run-glyph" aria-hidden="true">{heading.char}</span>}
           <span className="transcript-run-label"><LineLabel line={line} row={row} /></span>
-          {line.kind === 'caption' && <LineCounts added={row.counts.added} removed={row.counts.removed} />}
+          {line.kind === 'caption' && <LineCounts added={row.counts.added} removed={row.counts.removed} apart={(row.fold ?? 0) > 0} />}
           <Chevron />
         </button>
         <DisclosureBody open={row.expanded} id={bodyId} closed={live?.kind === 'thought' && <Thought segment={live} row={row} />}>

@@ -18,7 +18,7 @@
 // reads as what the member can do there and whom to ask for View, with no transcript and no composer; a pane opening the
 // session asks afresh (sessions/share/reader-connect.ts).
 // UX wave U1b (M5; acceptance 10): the compact composer of a closed floating card, which shows no transcript, has one
-// line above it while requests of the session wait, "Waiting for you · N"; its click opens the card and goes to the oldest
+// line above it while requests of the session wait, "Waiting for you N" (the word cut, N113); its click opens the card and goes to the oldest
 // of them. The composer's own toolbar is not touched (the architect's ruling A4).
 import { useRef, type ReactNode } from 'react';
 import type { AppSessionId } from '@shared/graph/ids';
@@ -44,6 +44,8 @@ import { BtwCard } from '../side/BtwCard'; // UX wave U4a
 import { selectWaitingRequests, useAttention } from '../stores/attention'; // UX wave U1b
 import { showWaiting } from '../request-card/show-waiting'; // UX wave U1b
 import { openCard } from '../shell/floating'; // UX wave U1b
+import { WAITING } from '../request-card/copy'; // the word cut, N113
+import { Tip } from '../ui/tip'; // the word cut, N113
 
 type PaneIndex = 0 | 1;
 
@@ -167,7 +169,10 @@ function StartedPane({ appSessionId: id, record, paneIndex, compact }: { appSess
 
 // UX wave U1b (M5): how many requests of the session wait, as one line above the compact composer; the card opens on a
 // click, and the oldest of them is shown in its transcript once that mounts, its row taking the keyboard (the card's
-// composer is not handed it).
+// composer is not handed it). The word cut (N113): "Waiting for you 2", the count bare and named by what it counts, that
+// meaning also the line's tooltip (and not its description: the name already says it, so the open tooltip is not
+// handed to the button as one). The line stays a worded button and is the count's one focusable owner, since a bare
+// count that takes focus itself (`ui/count.tsx`) cannot sit inside a button.
 function WaitingLine({ appSessionId }: { appSessionId: AppSessionId }) {
   const waiting = useAttention((s) => selectWaitingRequests(s, appSessionId).length);
   if (waiting === 0) return null;
@@ -175,9 +180,15 @@ function WaitingLine({ appSessionId }: { appSessionId: AppSessionId }) {
     openCard(false);
     showWaiting(appSessionId, null);
   };
+  const meaning = WAITING.countName(waiting);
   return (
-    <button type="button" data-waiting-count={waiting} onClick={go} className="flex w-full min-w-0 items-center rounded-sm px-2 py-1 text-left text-ui-sm text-fg outline-accent hover:bg-bg-hover focus-visible:outline-2">
-      Waiting for you · {waiting}
-    </button>
+    <Tip content={meaning}>
+      <button type="button" aria-describedby={undefined} data-waiting-count={waiting} onClick={go} className="flex w-full min-w-0 items-center gap-1.5 rounded-sm px-2 py-1 text-left text-ui-sm text-fg outline-accent hover:bg-bg-hover focus-visible:outline-2">
+        {WAITING.title}{' '}
+        <span role="img" aria-label={meaning} className="text-fg-muted tabular-nums">
+          {waiting}
+        </span>
+      </button>
+    </Tip>
   );
 }

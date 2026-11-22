@@ -323,7 +323,7 @@ test('the live sitting: send_file, a blocking ask, an async ask folded into its 
       await expect(needsYou).toHaveCount(1);
       await maws.app.evaluate(({ Menu }) => Menu.getApplicationMenu()?.getMenuItemById('tab.overview')?.click());
       const overview = page.locator('[data-region="main"]').getByRole('dialog', { name: 'Overview' });
-      const card = overview.getByRole('article').filter({ has: page.getByRole('button', { name: 'Open the Question sheet' }) });
+      const card = overview.getByRole('article').filter({ has: page.getByRole('button', { name: 'Answer…', exact: true }) }); // the word cut (C108)
       await expect(card).toHaveCount(1);
       await expect(card).toContainText(`${opened!.questions.length} questions`);
       await shoot(s, 'attention');
@@ -367,7 +367,8 @@ test('the live sitting: send_file, a blocking ask, an async ask folded into its 
       await expect(needsYou).toHaveCount(0);
       const reply = mainTurnsEnded(await s.events(session.id)).at(-1)?.resultText ?? '';
       await shoot(s, 'capsule-answered');
-      await capsule.getByRole('button', { name: 'View answers' }).click();
+      await expect(capsule.locator('button.transcript-ask-top')).toHaveAccessibleDescription('View answers'); // the word cut (T98): the row is the press
+      await capsule.locator('button.transcript-ask-top').click();
       await expect(sheetOf(s).locator('[data-ask-readonly]')).toBeVisible();
       note(`G3: Submit wrote ${JSON.stringify(answered!.answers.map((a) => [a.id, a.status, a.value ?? null, a.otherText ?? null]).map((a) => JSON.stringify(a).replace(sc.root, '<scratch>')))}; the attention item left Needs you; the capsule reads "Answered"; View answers reopened it read-only; reply ${JSON.stringify(reply.replace(sc.root, '<scratch>'))}`);
       expect(reply).toMatch(/Blue/);

@@ -1,7 +1,7 @@
 // The question body (C7 execution document, Request card; W4, the stepper after Claude Desktop's card): one question
-// at a time under a "{n} of {N}" pager, its options as numbered radios (or checkboxes when `multiSelect`) with their
-// descriptions, the `Other…` free-text row the engine always accepts last, and a single-select question's option
-// previews in a sandboxed frame (only the selected option's, so a preview frame exists only while it is shown). A
+// at a time under a pager (a dot per question, its "{n} of {N}" read to a screen reader; the word cut, C103), its
+// options as numbered radios (or checkboxes when `multiSelect`) with their descriptions, the `Other…` free-text row
+// the engine always accepts last, and a single-select question's option previews in a sandboxed frame (only the selected option's, so a preview frame exists only while it is shown). A
 // pick always waits for Next, so it can be changed before moving on; Other does too; Skip leaves the question unanswered and moves on; the last step's
 // Submit (or Skip) sends every answer as the one reply the wire takes (`question-roundtrip` seq 138), a skipped question
 // left out of it. The picks live beside the request in the attention store, so a remount resumes them. Enter is Next or
@@ -30,6 +30,7 @@ import type { Question } from '@shared/graph/events';
 import { useAttention } from '../../stores/attention';
 import { normalizeQuestionSelections, questionAnswers, questionValue, toAnswer } from '../answers';
 import { CardButton, Controls, Muted, TONE_CLASS } from '../controls';
+import { CARD_WORDS } from '../copy';
 import { SandboxedPreview } from '../preview/SandboxedPreview';
 import { advance, answerOf, EMPTY_DRAFT, goTo, pick, setOther, skip, toggle, type QuestionDraft } from '../question-steps';
 import { carried, gated, type VariantProps } from './types';
@@ -170,6 +171,20 @@ function FormHeader({ kind, count, from, note }: { kind: AttentionItem['kind']; 
 
 const ARROW = 'rounded-sm px-1 text-fg-muted outline-accent hover:bg-bg-hover hover:text-fg focus-visible:outline-2 disabled:text-fg-faint disabled:hover:bg-transparent';
 
+// The word cut (C103, the owner's exception to rule 4, seen on the question card): the position among several questions
+// is a dot per question between the arrows, the current one darker; a screen reader hears it in words ("1 of 3"),
+// announced as it changes.
+function Position({ step, count }: { step: number; count: number }) {
+  return (
+    <span aria-live="polite" data-question-position="" className="flex items-center gap-1 px-0.5">
+      <span className="sr-only">{CARD_WORDS.positionName(step + 1, count)}</span>
+      {Array.from({ length: count }, (_, i) => (
+        <span key={i} aria-hidden="true" data-dot={i === step ? 'current' : ''} className={`size-1.5 rounded-full ${i === step ? 'bg-fg-muted' : 'bg-border-strong'}`} />
+      ))}
+    </span>
+  );
+}
+
 export interface QuestionHostProps {
   dismiss?: { disabled: boolean; title: string | undefined; run(): void }; // the Dismiss button in the form's foot; no key
   doubleClick?: boolean; // a double-click on a single-choice option picks it and goes on
@@ -270,9 +285,7 @@ export function QuestionBody({ item, request, placement, busy, submit, bindKeys,
               <button type="button" aria-label="Show previous question" className={ARROW} disabled={busy || step === 0} onClick={() => show(step - 1)}>
                 ‹
               </button>
-              <span aria-live="polite" className="tabular-nums">
-                {step + 1} of {count}
-              </span>
+              <Position step={step} count={count} />
               <button type="button" aria-label="Show next question" className={ARROW} disabled={busy || step >= draft.reached} onClick={() => show(step + 1)}>
                 ›
               </button>

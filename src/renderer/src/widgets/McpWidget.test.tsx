@@ -415,8 +415,9 @@ describe('the switch waits for the sentence of what it reaches (U11a §C)', () =
 });
 
 describe('the "+" menu’s entries to the dialogs (U11a §C)', () => {
-  it('reads Connectors in this chat… and Plugins in this chat…', async () => {
-    for (const [submenu, entry] of [['Connectors', /^Connectors in this chat…/], ['Plugins', /^Plugins in this chat…/]] as const) {
+  // the word cut (C18): inside its own submenu, the entry no longer repeats the submenu's name
+  it('reads In this chat… in the Connectors and the Plugins submenu', async () => {
+    for (const [submenu, entry] of [['Connectors', /^In this chat…/], ['Plugins', /^In this chat…/]] as const) {
       const user = userEvent.setup();
       render(<QueryClientProvider client={new QueryClient()}><PlusMenu appSessionId={ID} cwd="/work/atlas" editor={{ current: null }} /></QueryClientProvider>);
       await user.click(screen.getByRole('button', { name: 'Add files, photos or commands' }));

@@ -170,7 +170,7 @@
     "id": "subagent:ac2bd8a00d8e492f4",
     "kind": "subagent",
     "overflow": 0,
-    "sentence": "Sleep 90 seconds was stopped",
+    "sentence": "Sleep 90 seconds · stopped",
     "status": "stopped",
     "turnId": "turn:e4fd229a-e799-4d3d-88cb-7ffe1dfd542f"
   },
@@ -284,7 +284,7 @@
     "id": "subagent:wkmzd07jp",
     "kind": "subagent",
     "overflow": 0,
-    "sentence": "One slow agent was stopped",
+    "sentence": "One slow agent · stopped",
     "status": "stopped",
     "turnId": "turn:1b21fa19-adda-4fd4-9a79-e6cd27f88468"
   },

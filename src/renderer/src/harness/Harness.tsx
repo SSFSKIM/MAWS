@@ -58,7 +58,6 @@ export function Harness() {
   const [child, setChild] = useState<{ ref: SubagentRef; source: TranscriptSource } | null>(null);
   const [cards, setCards] = useState(false);
   const [realCards, setRealCards] = useState(false); // UX wave U1b: the real card's renderer, from the first `raise`
-  const [effort, setEffort] = useState<string | null>(params.get('effort')); // W8
   const [stored, setStored] = useState<readonly StoredRun[] | null>(null); // UX wave U2b: the folds file's runs, if one was handed in
   const summaries = useMemo(() => (stored === null ? undefined : { stored, moved: noMoments }), [stored]); // `moved` as the product hands it, so its per-change watch is inside the measured reading
   const sessionRef = useRef<HarnessSession | null>(null);
@@ -133,7 +132,6 @@ export function Harness() {
           following: listRef.current?.following ?? true,
         };
       },
-      setEffort,
       loadPaged: async (name, delayMs) => {
         const loaded = await load(name, { delayMs });
         await current().attached;
@@ -248,7 +246,7 @@ export function Harness() {
       </div>
       {session ? (
         <div className="flex min-h-0 flex-1">
-          <Transcript key={session.id} source={session.source} variant="session" actions={actions} rewind={rewind} renderRequest={cards ? exampleRequestCard : realCards ? renderSessionRequest : undefined} handle={listRef} className="min-w-0 flex-1" effort={effort} ownerLane={session.ownerLane} summaries={summaries} />
+          <Transcript key={session.id} source={session.source} variant="session" actions={actions} rewind={rewind} renderRequest={cards ? exampleRequestCard : realCards ? renderSessionRequest : undefined} handle={listRef} className="min-w-0 flex-1" ownerLane={session.ownerLane} summaries={summaries} />
           {child && (
             <section className="flex w-[44%] min-w-0 flex-col border-l border-border" aria-label="Child transcript" data-harness-child="">
               <div className="flex items-center justify-between border-b border-border bg-bg-raised px-3 py-1 text-ui-sm text-fg-muted">

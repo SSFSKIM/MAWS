@@ -7,7 +7,7 @@
 // and what an opened run draws (`runSegments`) and what its one line reads (`runLine`) are read from its cells here.
 import type { AttentionItem } from '@shared/graph/attention';
 import type { ToolUseId } from '@shared/graph/ids';
-import { captionParts, captionText, finishedLines, stepsOfCells } from './caption';
+import { caption, captionParts, finishedLines, stepsOfCells } from './caption';
 import { thinkingCell } from './cells';
 import { rowId } from './keys';
 import type { TranscriptUi, TurnState } from './reduce';
@@ -58,8 +58,9 @@ export function groupItems(items: WorkItem[], turn: TurnState, ui: TranscriptUi 
     } else {
       // decision 4: the run's id is its first call's, whatever thoughts lead it (a textless one travels on one host only)
       const id = rowId.group(calls[0].id);
+      const { text: summary, fold } = caption(captionParts(stepsOfCells(cells)), true);
       rows.push({
-        id, turnId: turn.id, at: cells[0].startedAt, kind: 'group', state: active ? 'active' : 'completed', cells, summary: captionText(captionParts(stepsOfCells(cells)), true),
+        id, turnId: turn.id, at: cells[0].startedAt, kind: 'group', state: active ? 'active' : 'completed', cells, summary, ...(fold > 0 && { fold }),
         counts: finishedLines(cells), icon: iconOf(cells), expanded: ui?.expandedGroups.has(id) ?? false,
       });
     }

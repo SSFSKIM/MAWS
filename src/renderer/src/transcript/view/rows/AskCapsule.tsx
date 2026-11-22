@@ -4,10 +4,13 @@
 // Once answered it lists one line per question, "header (or question) → answer", as the question row does. It stays in
 // view when its turn folds (isPersistentRow). UX wave U1b (Interfaces §D, "A waiting row"): while its ask waits, the
 // capsule's top line stays, its button reads Open beside (the sheet, with the same form and draft), and the form stands
-// under the line.
-import type { ReactNode } from 'react';
+// under the line. The word cut (T93, T94, T97, T98): an ask with no title of its own is headed by its count ("3
+// questions"), a titled one keeps the count after its title; a cancelled capsule's chip reads Cancelled, why its tooltip
+// and its description; an answered capsule has no button, its top row is the press that opens its answers.
+import { useId, type ReactNode } from 'react';
 import type { AskQuestion } from '@shared/maws/tools';
-import { ASK, askAnswerCopy, askQuestionTitle, askStateCopy } from '../../model/copy';
+import { Tip } from '../../../ui/tip';
+import { ASK, askAnswerCopy, askQuestionTitle, askStateCopy, askStateWhy } from '../../model/copy';
 import type { AskRowData, Row } from '../../model/rows';
 import { useActions, useRowSession } from '../context';
 import { QuestionIcon } from './icons';
@@ -37,20 +40,48 @@ function AnswerLine({ question, row }: { question: AskQuestion; row: AskRow }) {
 export function AskCapsule({ row, form = null }: { row: AskRow; form?: ReactNode }) {
   const actions = useActions();
   const appSessionId = useRowSession();
-  const chip = askStateCopy(row);
-  return (
-    <section className="transcript-ask" aria-label={row.title ?? ASK.title} data-ask-id={row.askId} data-ask-state={row.state}>
-      <div className="transcript-ask-top">
-        <QuestionIcon />
-        <strong className="transcript-ask-title">{row.title ?? ASK.title}</strong>
-        <span className="transcript-ask-count">{ASK.count(row.questions.length)}</span>
-        <span className="transcript-ask-chip" data-ask-chip="">
-          {chip}
+  const describedBy = useId();
+  const count = ASK.count(row.questions.length);
+  const heading = row.title ?? count;
+  const why = askStateWhy(row);
+  const open = () => appSessionId && actions.openAsk(appSessionId, askRowData(row));
+  const pressed = form === null && row.state === 'answered'; // the top row is itself the press
+  // spaces between the parts, which the flex row does not draw, so a name read from them reads as words
+  const top = (
+    <>
+      <QuestionIcon />{' '}
+      <strong className="transcript-ask-title">{heading}</strong>{' '}
+      {row.title !== null && (
+        <>
+          <span className="transcript-ask-count">{count}</span>{' '}
+        </>
+      )}
+      <Tip content={why} description={why}>
+        <span className="transcript-ask-chip" data-ask-chip="" tabIndex={why === null ? undefined : 0}>
+          {askStateCopy(row)}
         </span>
-        <button type="button" className="transcript-ask-open" disabled={appSessionId === null} onClick={() => appSessionId && actions.openAsk(appSessionId, askRowData(row))}>
-          {form !== null ? ASK.openBeside : row.state === 'answered' ? ASK.viewAnswers : ASK.open}
-        </button>
-      </div>
+      </Tip>
+    </>
+  );
+  return (
+    <section className="transcript-ask" aria-label={heading} data-ask-id={row.askId} data-ask-state={row.state}>
+      {pressed ? (
+        <>
+          <button type="button" className="transcript-ask-top" aria-describedby={describedBy} disabled={appSessionId === null} onClick={open}>
+            {top}
+          </button>
+          <span id={describedBy} hidden>
+            {ASK.viewAnswers}
+          </span>
+        </>
+      ) : (
+        <div className="transcript-ask-top">
+          {top}{' '}
+          <button type="button" className="transcript-ask-open" disabled={appSessionId === null} onClick={open}>
+            {form !== null ? ASK.openBeside : ASK.open}
+          </button>
+        </div>
+      )}
       {form !== null && <div className="transcript-ask-form">{form}</div>}
       {form === null && row.state === 'answered' && (
         <ul className="transcript-question-lines">

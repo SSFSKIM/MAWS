@@ -28,7 +28,7 @@
     "hiddenRows": 0,
     "revealed": false,
     "boundaryKind": "retraction",
-    "text": "Conversation continued from an earlier point",
+    "text": "Continued from an earlier point",
     "secondary": "Later messages from the previous path are no longer part of the current conversation history",
     "detail": "transcript_branch · a · r · answer"
   },

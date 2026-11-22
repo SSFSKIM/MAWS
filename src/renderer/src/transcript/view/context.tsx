@@ -2,7 +2,7 @@
 // the callbacks C5, C7 and C8 supply (TranscriptActions; any the caller omits is a no-op), the rewind interface, the
 // request-card renderer, and view-only disclosure state (bubbles, pasted blocks, thinking) that must survive a row
 // scrolling out of the virtualised list and back.
-import { createContext, useContext, useState, useSyncExternalStore, type ReactNode } from 'react';
+import { createContext, useCallback, useContext, useEffect, useState, useSyncExternalStore, type ReactNode } from 'react';
 import type { AppSessionId, MessageUuid, SessionId } from '@shared/graph/ids';
 import type { ArtifactLocation } from '@shared/artifacts/link'; // P4-B4
 import type { MachineRef } from '@shared/machine/ref';
@@ -174,11 +174,30 @@ export function fileLinksTurned(): boolean {
   return fileLinks;
 }
 
-// Open/closed flags by id, kept per mounted transcript rather than in a row's own state.
+// Open/closed flags by id, kept per mounted transcript rather than in a row's own state; and the values a part keeps
+// past its own mount (a folded or virtualised composer's draft), by id.
 export class Disclosures {
   private open = new Set<string>();
+  private values = new Map<string, unknown>();
+  private keepers = new Map<string, Map<object, () => void>>();
   private listeners = new Set<() => void>();
   isOpen = (id: string) => this.open.has(id);
+  has = (id: string) => this.values.has(id);
+  kept = <T,>(id: string) => this.values.get(id) as T;
+  // `by`, the mount that kept it, is not told: it holds the value already
+  keep = (id: string, value: unknown, by?: object) => {
+    this.values.set(id, value);
+    for (const [mount, listener] of this.keepers.get(id) ?? []) if (mount !== by) listener();
+  };
+  // a mount told when another one (an earlier mount whose work outlived it) keeps a value under the id
+  subscribeKept = (id: string, mount: object, listener: () => void) => {
+    const mounts = this.keepers.get(id) ?? new Map<object, () => void>();
+    this.keepers.set(id, mounts.set(mount, listener));
+    return () => {
+      mounts.delete(mount);
+      if (mounts.size === 0 && this.keepers.get(id) === mounts) this.keepers.delete(id);
+    };
+  };
   toggle = (id: string) => {
     if (!this.open.delete(id)) this.open.add(id);
     for (const listener of this.listeners) listener();
@@ -228,7 +247,6 @@ export interface TranscriptContextValue {
   idPrefix: string; // unique per mounted transcript: row element ids are `<idPrefix>-<rowId>`
   sessionDirectory?: string | null; // additive: where the session runs (its record's), for a shell call that names no cwd
   sessionCwd?: string | null; // additive (UX wave U8c-2, §K): the agent's folder while the session is in its launch folder
-  effort?: string | null; // additive (W8): the effort the session runs at, which the live thinking label names; null when unknown
   motion?: WorkMotion; // additive (W8): the work area's fold as motion, one per mounted transcript
   // additive (P2-E1): 'local' draws the owner channel through MAWS's own presenter whatever the engine surface's
   // attachment (the comment card's thread, until P2-C's module takes the option over); absent, as before
@@ -267,6 +285,30 @@ export function useDisclosure(id: string): [boolean, () => void] {
   const { disclosures } = useContext(TranscriptContext);
   const open = useSyncExternalStore(disclosures.subscribe, () => disclosures.isOpen(id));
   return [open, () => disclosures.toggle(id)];
+}
+
+// A part's state that outlives its mount within this transcript: read from what was kept under the id when it mounts
+// again, else from `initial`; every set is kept, a set arriving after the part unmounted included, and reaches the
+// mount shown now (fix wave, scalpel-2#1: a send that answers after the fold remounted its box clears the new box).
+export function useKeptState<T>(id: string, initial: () => T): [T, (next: T) => void] {
+  const { disclosures } = useContext(TranscriptContext);
+  const [value, setValue] = useState<T>(() => (disclosures.has(id) ? disclosures.kept<T>(id) : initial()));
+  const [mount] = useState(() => ({}));
+  useEffect(() => {
+    const take = () => {
+      if (disclosures.has(id)) setValue(() => disclosures.kept<T>(id));
+    };
+    take(); // a value kept between this mount's first render and now
+    return disclosures.subscribeKept(id, mount, take);
+  }, [disclosures, id, mount]);
+  const set = useCallback(
+    (next: T) => {
+      disclosures.keep(id, next, mount);
+      setValue(next);
+    },
+    [disclosures, id, mount],
+  );
+  return [value, set];
 }
 
 // A fresh Disclosures per mounted transcript.

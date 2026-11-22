@@ -662,7 +662,10 @@ test.describe('sessions', () => {
     await page.keyboard.press('Escape');
     await (await row(page, id)).click();
     const notice = page.locator('[data-region="main"]').getByRole('note');
-    await expect(notice).toContainText(`Live as background job · pid ${pid} · read-only`);
+    // the word cut (C128): the line reads who holds the session and read-only; its pid waits on the line, its description
+    const jobLine = notice.getByText('Live as background job · read-only', { exact: true });
+    await expect(jobLine).toBeVisible();
+    await expect(jobLine).toHaveAccessibleDescription(`pid ${pid}`);
     await notice.getByRole('button', { name: 'Attach in a terminal tab' }).click();
     const reachedShell = () => (existsSync(reached) ? readFileSync(reached, 'utf8') : '');
     await expect.poll(reachedShell, { timeout: 10_000 }).toBe(`${realpathSync(jobDir)}\n${command}\n`);
@@ -687,7 +690,7 @@ test.describe('sessions', () => {
     await store.removeRegistryRecord(pid);
     await store.addRegistryRecord(pid, { pid, sessionId: sid, cwd: repo.root, kind: 'interactive', procStart, status: 'idle' });
     expect(value(await invoke(page, 'session.start', { appSessionId: id, message: null, options: {} }))).toEqual({ status: 'held', appSessionId: id, holder: { kind: 'terminal', pid }, attach: null });
-    await expect(notice).toContainText(`Live in Terminal · pid ${pid} · read-only`, { timeout: 5_000 });
+    await expect(notice.getByText('Live in Terminal · read-only', { exact: true }), 'the word cut (C128): its pid its description').toHaveAccessibleDescription(`pid ${pid}`, { timeout: 5_000 });
     await expect(notice.getByRole('button', { name: 'Attach in a terminal tab' })).toHaveCount(0);
     await expect(notice.getByRole('button', { name: 'Fork a copy' })).toBeVisible();
     await (await sidebarRow(page, { appSessionId: id })).click({ button: 'right' });
@@ -724,9 +727,11 @@ test.describe('sessions', () => {
     await expect.poll(holder, { timeout: 10_000 }).toBe('terminal');
     await (await sidebarRow(page, { appSessionId: id })).click();
     const main = page.locator('[data-region="main"]');
-    await expect(main.getByRole('note')).toContainText(`Live in Terminal · pid ${pid} · read-only`, { timeout: 10_000 });
+    await expect(main.getByRole('note').getByText('Live in Terminal · read-only', { exact: true }), 'the word cut (C128): its pid its description').toHaveAccessibleDescription(`pid ${pid}`, { timeout: 10_000 });
     const agentRow = main.locator('.transcript-subagent', { hasText: agent.description });
-    await expect(agentRow, 'the turn ended while its agent works: the call stays in view').toContainText(`${agent.description} started working`, { timeout: 15_000 });
+    // the word cut (T86): a working agent's line is the running ring, named Working, and the description its parent gave
+    await expect(agentRow.locator('.transcript-subagent-sentence'), 'the turn ended while its agent works: the call stays in view').toHaveText(agent.description, { timeout: 15_000 });
+    await expect(agentRow.getByRole('img', { name: 'Working', exact: true })).toBeVisible();
 
     await store.removeRegistryRecord(pid);
     await expect.poll(holder, { timeout: 10_000 }).toBe('none');
@@ -2018,8 +2023,9 @@ test.describe('sessions', () => {
       value(await invoke(page, 'host.restart', { stopSessions: true }));
       await expect.poll(async () => (await host()).state, { timeout: 30_000, message: 'the engine host is ready again' }).toBe('ready');
     };
-    // the transcript's words (src/renderer/src/transcript/model/copy.ts's HYDRATION)
-    const loading = main.getByRole('status').filter({ hasText: /^Loading…$/ });
+    // the transcript's words (src/renderer/src/transcript/model/copy.ts's HYDRATION); the word cut (T111): the wait is a
+    // quiet spinner named by them, drawn from half a second into the read
+    const loading = main.getByRole('progressbar', { name: 'Loading…', exact: true });
     const failed = main.getByRole('alert').filter({ hasText: 'Couldn’t load this conversation' });
 
     await test.step('opened while the host is away: Loading…, and its rows once the host is back, with no click', async () => {

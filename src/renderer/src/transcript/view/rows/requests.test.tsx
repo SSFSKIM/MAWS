@@ -15,6 +15,7 @@ import { api, builder, request, tool, uuid } from '../../model/test-events';
 import { Disclosures } from '../context';
 import { DEFAULT_ACTIONS } from '../default-actions';
 import { renderRow, rowOf, spyActions, storeWith } from './test-support';
+import { accessibleText } from '../../../test-support/accessible-text';
 
 afterEach(cleanup);
 
@@ -36,7 +37,7 @@ describe('plan row', () => {
       view.unmount();
       return badge;
     });
-    expect(badges).toEqual(['Implemented', 'Cleared context and implemented', 'Kept planning: Add the delta-batch measurement before I approve.']);
+    expect(badges).toEqual(['Approved', 'Approved, context cleared', 'Kept planning: Add the delta-batch measurement before I approve.']);
 
     renderRow(plans[0], { storeKey: store.key });
     const region = screen.getByRole('region', { name: 'Plan' });
@@ -250,7 +251,8 @@ describe('request slot', () => {
 });
 
 describe('boundary row', () => {
-  it('a conversation fork draws quiet primary and secondary copy, identifiers only in technical detail', async () => {
+  // The word cut (T50): the branch line reads its fact; its second sentence waits on the line, which takes the keyboard
+  it('a conversation fork draws its fact, its sentence on pointing or focus, identifiers only in technical detail', async () => {
     const b = builder();
     b.turn('u1');
     b.text('m1', 0, 'Previous path');
@@ -259,9 +261,15 @@ describe('boundary row', () => {
     const store = await storeWith(b.events);
     const boundary = ofKind(store.rows(), 'boundary')[0];
     const view = renderRow(boundary, { storeKey: store.key });
-    expect(screen.getByText('Conversation continued from an earlier point')).toBeTruthy();
-    expect(screen.getByText('Later messages from the previous path are no longer part of the current conversation history')).toBeTruthy();
-    const element = view.container.querySelector('[data-boundary-kind="retraction"]')!;
+    const sentence = 'Later messages from the previous path are no longer part of the current conversation history';
+    const element = view.container.querySelector<HTMLElement>('[data-boundary-kind="retraction"]')!;
+    expect(accessibleText(element)).toBe('Continued from an earlier point');
+    const owner = screen.getByText('Continued from an earlier point');
+    expect(owner.tabIndex).toBe(0);
+    expect(owner.getAttribute('title'), 'the identifiers’ title does not reach the sentence’s owner').toBe('');
+    expect(document.getElementById(owner.getAttribute('aria-describedby')!)?.textContent).toBe(sentence);
+    act(() => owner.focus());
+    expect(screen.getByRole('tooltip').textContent).toBe(sentence);
     expect(element.getAttribute('title')).toBe('transcript_branch · m1-u0');
     expect(element.textContent).not.toMatch(/transcript_branch|m1-u0|Another process|Response retracted/);
     expect(element.querySelector('button')).toBeNull();
@@ -385,6 +393,20 @@ describe('spilled result', () => {
     renderRow(cellRow(), { storeKey: store.key, actions: { ...spyActions(), loadSpill } });
     fireEvent.click(screen.getByRole('button', { name: 'Load full result' }));
     await waitFor(() => expect(spillOf()?.state).toBe('partial'));
+  });
+
+  // The word cut (T26): while the whole result loads, a quiet spinner stands where Load was, its words its name
+  it('while the load is out, a quiet spinner named by the wait stands where Load was, and no words', async () => {
+    const store = await storeWith(loadEventFixture('spill'));
+    useTranscriptStore.getState().expandAll(store.key, { cells: true });
+    const cellRow = () => store.rows().find((row) => row.kind === 'cell' || row.kind === 'group')!;
+    const loadSpill = vi.fn(() => new Promise<string>(() => {}));
+    const view = renderRow(cellRow(), { storeKey: store.key, actions: { ...spyActions(), loadSpill } });
+    fireEvent.click(screen.getByRole('button', { name: 'Load full result (184 KB)' }));
+    view.rerenderRow(cellRow());
+    expect(screen.queryByRole('button', { name: /Load full result/ })).toBeNull();
+    expect(view.container.textContent).not.toContain('Loading the full result');
+    expect(await screen.findByRole('progressbar', { name: 'Loading the full result…' }, { timeout: 1_000 })).toBeTruthy();
   });
 
   it('a failed load says why and offers Retry', async () => {

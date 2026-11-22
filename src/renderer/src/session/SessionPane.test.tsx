@@ -125,7 +125,7 @@ describe('session pane', () => {
     const id = idOf('Somersault terminal run');
     registerSlot('requestCard', () => <p>request</p>);
     render(<SessionPane appSessionId={id} paneIndex={0} />);
-    expect(screen.getByText('Live in Terminal · pid 7135 · read-only')).toBeTruthy();
+    expect(screen.getByText('Live in Terminal · read-only') /* the word cut (C128): the pid waits on the line */).toBeTruthy();
     expect(screen.queryByText('Composer unavailable')).toBeNull();
     expect(screen.queryByText('request')).toBeNull();
   });
@@ -139,7 +139,7 @@ describe('session pane', () => {
     expect(screen.getByText('transcript waiting stacked')).toBeTruthy();
     unmount();
     render(<SessionPane appSessionId={idOf('Somersault terminal run')} paneIndex={0} />);
-    expect(screen.getByText('Live in Terminal · pid 7135 · read-only')).toBeTruthy();
+    expect(screen.getByText('Live in Terminal · read-only') /* the word cut (C128): the pid waits on the line */).toBeTruthy();
     expect(screen.getByText('transcript waiting none')).toBeTruthy();
   });
 
@@ -156,7 +156,7 @@ describe('session pane', () => {
     expect(document.querySelector('[data-view-switch]')).toBeNull();
     act(() => inForce(true));
     expect(document.querySelector('[data-owner-bar]')).toBeNull();
-    const notice = screen.getByText('Live in Terminal · pid 7135 · read-only');
+    const notice = screen.getByText('Live in Terminal · read-only') /* the word cut (C128): the pid waits on the line */;
     const switchLine = document.querySelector('[data-view-switch]')!;
     expect(switchLine.textContent).toBe('to-human view · full transcript ›');
     expect(switchLine.compareDocumentPosition(notice) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy(); // directly above the notice
@@ -202,7 +202,7 @@ describe('session pane', () => {
   it('a background-job holder with a known id offers "Attach in a terminal tab"; one without an id only "Fork a copy"', () => {
     useSessions.setState({ records: new Map([[A, record(A, { holder: { kind: 'background_job', pid: 42, jobId: 'e6dcd828' } })]]) });
     const { unmount } = render(<SessionPane appSessionId={A} paneIndex={0} />);
-    expect(screen.getByText('Live as background job · pid 42 · read-only')).toBeTruthy();
+    expect(screen.getByText('Live as background job · read-only')).toBeTruthy();
     expect((screen.getByRole('button', { name: 'Attach in a terminal tab' }) as HTMLButtonElement).disabled).toBe(false);
     unmount();
     useSessions.setState({ records: new Map([[A, record(A, { holder: { kind: 'background_job', pid: 42, jobId: null } })]]) });

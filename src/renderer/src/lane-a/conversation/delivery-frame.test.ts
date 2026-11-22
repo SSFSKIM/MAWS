@@ -165,7 +165,7 @@ describe('a delivered send’s frame line', () => {
   it('through MAWS’s backfill and projection: a send between turns is a bubble of its words, a peer’s its message line', async () => {
     const rows = await drawn([row(`${OWN}\nRun the suites.`, BRIDGE), row(`${PEER}\nI read it.`, BRIDGE)]);
     expect(users(rows).map((u) => u.text)).toEqual(['Run the suites.']);
-    expect(messageLines(rows)).toEqual(['Message from @fakepeer: I read it.']); // UC-2, class `peer` (O-41)
+    expect(messageLines(rows)).toEqual(['@fakepeer: I read it.']); // UC-2, class `peer` (O-41)
   });
 
   it('through MAWS’s backfill and projection: a delivery queued into a running turn is a bubble in that turn, keyed by its own uuid', async () => {
@@ -213,7 +213,7 @@ describe('a delivered send’s frame line', () => {
         // a peer's: its message line in the running turn, never the owner's bubble (UC-2, class `peer`; O-41)
         expect(bubbles.map((u) => u.text), frame).toEqual(['List the files.']);
         const line = drawnRows.find((r) => r.kind === 'agent_message');
-        expect(line, frame).toMatchObject({ text: 'Message from @fakepeer: I read it.', turnId: bubbles[0].turnId });
+        expect(line, frame).toMatchObject({ text: '@fakepeer: I read it.', turnId: bubbles[0].turnId });
       } else {
         expect(bubbles.map((u) => u.text), frame).toEqual(['List the files.', text]);
         expect(bubbles[1], frame).toMatchObject({ messageUuid: delivery.uuid, steer: true });
@@ -264,7 +264,7 @@ describe('a delivered send’s frame line', () => {
         // a peer's: its one message line, in the turn that read it (UC-2, class `peer`; O-41)
         expect(bubbles, frame).toHaveLength(3);
         const lines = drawnRows.filter((r) => r.kind === 'agent_message');
-        expect(lines.map((r) => [r.text, r.turnId]), frame).toEqual([['Message from @fakepeer: I read it.', bubbles[2].turnId]]);
+        expect(lines.map((r) => [r.text, r.turnId]), frame).toEqual([['@fakepeer: I read it.', bubbles[2].turnId]]);
       } else {
         expect(bubbles[3], frame).toMatchObject({ text, messageUuid: read.uuid, steer: true });
         expect(bubbles[3].turnId, frame).toBe(bubbles[2].turnId);

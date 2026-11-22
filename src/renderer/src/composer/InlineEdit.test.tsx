@@ -112,7 +112,7 @@ describe('Edit turns the bubble into an editor in its place', () => {
     fireEvent.keyDown(field(), { key: 'Enter', metaKey: true });
     await waitFor(() => expect(fake.pending('session.rewind')).toBe(1));
     expect(fake.invoked('session.rewind')).toEqual([{ appSessionId: A_ID, targetMessageUuid: 'u-1', lastSeenMessageUuid: 'u-2', files: false }]);
-    expect(within(editor()).getByRole('status').textContent).toBe('Rewinding this session to that message…');
+    expect(within(editor()).getByRole('status').textContent).toBe('Rewinding…');
     expect(field().readOnly).toBe(true);
     await act(() => fake.reply('session.rewind', rewound));
     await waitFor(() => expect(fake.pending('session.send')).toBe(1));
@@ -131,7 +131,7 @@ describe('Edit turns the bubble into an editor in its place', () => {
       await waitFor(() => expect(fake.pending('session.rewind')).toBe(1));
       await act(() => fake.reply('session.rewind', rewound));
       await waitFor(() => expect(fake.pending('session.send')).toBe(1));
-      expect(within(editor()).getByRole('status').textContent).toBe('Rewound · sending your edited message…');
+      expect(within(editor()).getByRole('status').textContent).toBe('Sending…');
       expect(['Cancel', 'Fork', 'Send'].map((name) => (within(editor()).getByRole('button', { name }) as HTMLButtonElement).disabled)).toEqual([true, true, true]);
       expect(field().readOnly).toBe(true);
       fireEvent.keyDown(field(), { key: 'Escape' });
@@ -163,7 +163,7 @@ describe('Edit turns the bubble into an editor in its place', () => {
     expect(send.disabled).toBe(false);
     fireEvent.click(send);
     await waitFor(() => expect(fake.invoked('session.acquire')).toEqual([{ appSessionId: A_ID, reason: 'resubmit' }]));
-    expect(within(editor()).getByRole('status').textContent).toBe('Starting this session…');
+    expect(within(editor()).getByRole('status').textContent).toBe('Starting…');
     expect(send.disabled).toBe(true);
     expect((within(editor()).getByRole('button', { name: 'Cancel' }) as HTMLButtonElement).disabled, 'Cancel may leave a start').toBe(false);
     await act(() => fake.reply('session.acquire', { status: 'ready', appSessionId: A_ID, launched: true, joined: false }));
@@ -277,7 +277,7 @@ describe('once the rewind hid the bubble, the composer’s dock carries the rese
     const dock = line.closest('[data-edit-mode]') as HTMLElement;
     fireEvent.click(within(dock).getByRole('button', { name: 'Send' }));
     await waitFor(() => expect(fake.pending('session.send')).toBe(1));
-    expect(within(dock).getByRole('status').textContent).toBe('Rewound · sending your edited message…');
+    expect(within(dock).getByRole('status').textContent).toBe('Sending…');
     const buttons = [within(dock).getByRole('button', { name: 'Send' }), within(dock).getByRole('button', { name: 'Leave the edit' })] as HTMLButtonElement[];
     expect(buttons.map((b) => b.disabled)).toEqual([true, true]);
     buttons.forEach((b) => fireEvent.click(b));

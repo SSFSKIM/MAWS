@@ -116,11 +116,14 @@ export interface ScheduledView {
 }
 
 // M7: the column transcript's messages between sessions and its `ListAgents` listings, as shown (rows inside a folded
-// turn are not shown, so a row's presence before and after `expandAll` tells its persistence).
+// turn are not shown, so a row's presence before and after `expandAll` tells its persistence). The word cut (T79): a
+// reply box's line is its state, and `why` (why it waits, how it went) its accessible description. The word cut (T81,
+// T82): a read listing is one counted line (`summary`, "Listed 9 agents") with no self line, folded until opened
+// (`open`); its sections and notes are mounted only while it is open, so they read [] folded.
 export type PeerRowView =
   // P5 O15 M2b: owners, the label after the sender of the owners its sminos frame names (null: none drawn)
-  | { kind: 'message'; direction: 'inbound' | 'outbound'; who: string; owners: string | null; address: string | null; preview: string; result: string | null; resultText: string | null; reply: boolean; line: string | null }
-  | { kind: 'listing'; self: string; sections: { heading: string; rows: { name: string; ref: string | null; extras: string }[] }[]; notes: string[] };
+  | { kind: 'message'; direction: 'inbound' | 'outbound'; who: string; owners: string | null; address: string | null; preview: string; result: string | null; resultText: string | null; reply: boolean; line: string | null; why: string | null }
+  | { kind: 'listing'; summary: string; open: boolean; sections: { heading: string; rows: { name: string; ref: string | null; extras: string }[] }[]; notes: string[] };
 // E7 end
 
 export interface LogView {
@@ -162,6 +165,7 @@ export interface AgentsHarnessApi {
   peerRows(): Promise<PeerRowView[]>; // the column's rows, read from its top down (the list scrolled to mount each)
   columnTexts(): Promise<string[]>; // every row of the column as text, read from its top down
   scrollColumnTo(text: string): Promise<void>; // the column's first row whose text holds `text`, at the list's top
+  openListings(): Promise<number>; // the word cut (T81): every folded listing of the column opened in place, as its line's press opens it; answers how many
   pushTasks(listId: string, tasks: PersistedTask[]): void; // the list's new contents, announced as `fs.tasksChanged`
   setClock(iso: string | null): void; // the agent tools' clock fixed at `iso` (null: the wall clock again)
   clearStatus(id: AgentsFakeId): void; // a disk-only session: no status, its task graph started over on disk

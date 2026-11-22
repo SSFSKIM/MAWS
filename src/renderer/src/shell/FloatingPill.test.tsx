@@ -33,6 +33,7 @@ import { resetShellStores } from '../test-support/shell-stores';
 import { FloatingCardLayer, SplitCardLayer } from './FloatingCard';
 import { chatPresentation, hideChat, useFloatingCard } from './floating';
 import { drawsBesideTheBox } from './FloatingPill';
+import { accessibleText } from '../test-support/accessible-text';
 
 // P5 O6 M2: the page holds addresses; the fake `window.maws` (main) is asked with, and keys its drafts by, the bare ids
 const BARE_A = 'app-a' as AppSessionId;
@@ -242,7 +243,7 @@ it('a terminal session that cannot be driven shows the holder’s notice in the 
   mount();
   const bar = compact();
   const notice = await within(bar).findByRole('note');
-  expect(notice.textContent).toContain('Live in Terminal · pid 4242 · read-only');
+  expect(accessibleText(notice)).toContain('Live in Terminal · read-only'); // the word cut (C128): the pid waits on the line
   expect(bar.querySelector('[data-composer]'), 'no composer in its place').toBeNull();
   await waitFor(() => expect(surfaceOf(bar).hasAttribute('data-raised')).toBe(true));
   expect(surfaceOf(bar).contains(notice)).toBe(true);

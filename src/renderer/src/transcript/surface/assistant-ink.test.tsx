@@ -32,7 +32,7 @@ async function sessionStoreWith(events: SessionEvent[]) {
 
 function Transcript({ storeKey, hideCommentary = false, hideDivider = false, variant = 'session' }: { storeKey: string; hideCommentary?: boolean; hideDivider?: boolean; variant?: 'session' | 'child' }) {
   const rows = useTranscriptStore((s) => s.entries[storeKey].rows);
-  return <TranscriptProvider value={{ storeKey, variant, actions: NO_ACTIONS, rewind: null, renderRequest: null, disclosures: new Disclosures(), idPrefix: 'test', sessionDirectory: null, effort: null }}>{rows.filter((row) => (!hideDivider || row.kind !== 'divider') && (!hideCommentary || row.kind !== 'assistant_text' || row.phase !== 'commentary')).map((row) => <RowView key={row.id} row={row} />)}</TranscriptProvider>;
+  return <TranscriptProvider value={{ storeKey, variant, actions: NO_ACTIONS, rewind: null, renderRequest: null, disclosures: new Disclosures(), idPrefix: 'test', sessionDirectory: null }}>{rows.filter((row) => (!hideDivider || row.kind !== 'divider') && (!hideCommentary || row.kind !== 'assistant_text' || row.phase !== 'commentary')).map((row) => <RowView key={row.id} row={row} />)}</TranscriptProvider>;
 }
 
 it('keeps the first expanded commentary drawing mounted when ink promotes it to full contrast', async () => {
