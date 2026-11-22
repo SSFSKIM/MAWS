@@ -11,7 +11,7 @@
     "test": "vitest run",
     "e2e": "vite build && playwright test",
     "e2e:hub": "vite build && playwright test -c playwright.hub.config.ts",
-    "shots:words": "vite build && playwright test -c playwright.words.config.ts"
+    "shots:words": "playwright test -c playwright.words.config.ts"
   },
   "dependencies": {
     "@noble/hashes": "1.8.0",

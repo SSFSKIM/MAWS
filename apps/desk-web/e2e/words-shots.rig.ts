@@ -12,12 +12,15 @@
 //
 //   WORDS_OUT=$HOME/maws-words/desk-after pnpm --filter desk-web shots:words
 //
-// which builds dist/ and runs every scene, a minute or two. The pictures are <WORDS_OUT>/desk-<scene>.png, with
+// which builds dist/ from the checkout first (the config's global setup, e2e/words-build.ts, so no older dist/ is ever
+// photographed) and runs every scene, a minute or two. The pictures are <WORDS_OUT>/desk-<scene>.png, with
 // <WORDS_OUT>/_desk-run.json listing each scene's meta and whether it was reached (and why not), and each run's commit.
-// WORDS_ONLY=<id>,<prefix>* narrows the run to some scenes. The "before" is this rig run against master's build: in a
-// clean checkout of master, `git checkout <this branch> -- apps/desk-web/e2e/words-shots.rig.ts
-// apps/desk-web/playwright.words.config.ts apps/desk-web/package.json`, then the command above into another folder.
-// So it imports only modules master also has.
+// WORDS_ONLY=<id>,<prefix>* narrows the run to some scenes. A rerun into the same folder keeps only the results of its
+// own build (its commit and the files it changed): another build's are dropped from the manifest and their pictures
+// renamed _stale-<scene>.png, and a scene's old picture is removed before it is taken again. The "before" is this rig
+// run against master's build: in a clean checkout of master, `git checkout <this branch> --
+// apps/desk-web/e2e/words-shots.rig.ts apps/desk-web/e2e/words-build.ts apps/desk-web/playwright.words.config.ts
+// apps/desk-web/package.json`, then the command above into another folder. So it imports only modules master also has.
 //
 // Each scene proves its named state right before its capture, in the terms of the build it runs on: the build is read
 // from what it draws (`cutBuild`: the stylesheet holds the touch rule's `[data-touch-fact]` on the cut's build alone),
@@ -31,7 +34,7 @@
 // Words: locators use test ids and data attributes; where a check reads the words each build draws, they are written
 // here, marked with the build they belong to, because the copy modules that hold them differ between the builds.
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { stripVTControlCharacters } from 'node:util';
 import type { Locator, Page } from '@playwright/test';
@@ -57,7 +60,7 @@ const PHONE_NAME = '390x844 phone (isMobile, hasTouch, (hover: none))';
 
 // ---- _desk-run.json: what each capture shows, and whether it was reached ---------------------------------------------
 type Meta = { id: string; title: string; how: string; state: string; viewport: string; rows: string[] };
-type Result = { id: string; ok: boolean; error?: string };
+type Result = { id: string; ok: boolean; error?: string; build?: string };
 type Run = { at: string; commit: string; changed: string[]; cut: boolean | null; scenes: string[] };
 const META: Meta[] = [];
 const results: Result[] = [];
@@ -65,16 +68,32 @@ const wanted = (id: string) => !ONLY || ONLY.has(id) || [...ONLY].some((o) => o.
 const run: Run = { at: new Date().toISOString(), commit: '', changed: [], cut: null, scenes: [] };
 
 // Written after every scene, merged with what the folder holds (a scene's newer entry replaces its older one), so a run
-// cut short still leaves what it took.
+// cut short still leaves what it took. Only this build's results are kept: one of another build (an earlier run's
+// before or after, or a rebuild since) is dropped, and its picture renamed _stale-<scene>.png, so the folder never
+// presents another build's picture as this one's.
 function writeRun() {
   mkdirSync(OUT, { recursive: true });
   type File = { results: Result[]; screens: Meta[]; runs?: Run[] };
   const all = (existsSync(RUN_FILE()) ? JSON.parse(readFileSync(RUN_FILE(), 'utf8')) : { results: [], screens: [] }) as File;
   const keep = <T extends { id: string }>(old: T[], fresh: T[]) => [...old.filter((o) => !fresh.some((f) => f.id === o.id)), ...fresh];
-  if (run.commit === '') Object.assign(run, buildIdentity());
+  const build = buildKey();
+  const ours = all.results.filter((r) => r.build === build);
+  for (const stale of all.results.filter((r) => r.build !== build && !results.some((f) => f.id === r.id))) {
+    const png = join(OUT, `${stale.id}.png`);
+    if (existsSync(png)) renameSync(png, join(OUT, `_stale-${stale.id}.png`));
+  }
   run.scenes = results.map((result) => result.id);
   const runs = [...(all.runs ?? []).filter((r) => r.at !== run.at), run];
-  writeFileSync(RUN_FILE(), JSON.stringify({ results: keep(all.results, results), screens: keep(all.screens, META), runs }, null, 2));
+  const screens = keep(
+    all.screens.filter((m) => ours.some((r) => r.id === m.id)),
+    META,
+  );
+  writeFileSync(RUN_FILE(), JSON.stringify({ results: keep(ours, results), screens, runs }, null, 2));
+}
+// This run's build, as each of its results records it: the checkout's commit and the files it changed.
+function buildKey(): string {
+  if (run.commit === '') Object.assign(run, buildIdentity());
+  return run.changed.length === 0 ? run.commit : `${run.commit} +${run.changed.join(',')}`;
 }
 // The checkout's commit and the tracked files it changed (the before's rig, taken from the branch), so a pair of runs
 // says which builds it compares.
@@ -142,6 +161,7 @@ async function shot(page: Page, meta: Meta, prepare: () => Promise<void>, check:
   page.on('console', (message) => {
     if (message.type() === 'error' && !message.text().startsWith('Failed to load resource')) errors.push(message.text().split('\n')[0]!);
   });
+  for (const old of [`${meta.id}.png`, `_miss-${meta.id}.png`]) rmSync(join(OUT, old), { force: true }); // never a picture of an earlier run
   try {
     await prepare();
     await settle(page);
@@ -150,10 +170,10 @@ async function shot(page: Page, meta: Meta, prepare: () => Promise<void>, check:
     expect(await page.evaluate((query) => matchMedia(query).matches, phone ? '(hover: none)' : '(hover: hover)'), phone ? '(hover: none) matches on the phone' : '(hover: hover) matches on the desktop').toBe(true);
     await check(cut);
     await page.screenshot({ path: join(OUT, `${meta.id}.png`), animations: 'disabled', caret: 'hide' });
-    results.push({ id: meta.id, ok: true });
+    results.push({ id: meta.id, ok: true, build: buildKey() });
   } catch (error) {
     const message = `${notReached(error)}${errors.length > 0 ? ` (page errors: ${errors.join(' | ')})` : ''}`.slice(0, 500);
-    results.push({ id: meta.id, ok: false, error: message });
+    results.push({ id: meta.id, ok: false, error: message, build: buildKey() });
     await page.screenshot({ path: join(OUT, `_miss-${meta.id}.png`) }).catch(() => {}); // what the miss looked like, for a person
     console.log(`[desk words] ${meta.id} not reached: ${message}\n${error instanceof Error ? error.stack : String(error)}`);
   }
@@ -339,51 +359,7 @@ async function touchFact(surface: Locator, cut: boolean, text: string | RegExp) 
   await expect(fact).toHaveText(text);
 }
 
-// A group chat of invented sessions: two of them talk to each other three times (the folded agent run), then one writes
-// to the owner. Today's times, after local noon, so the chat's day is one.
-const CHAT = { name: 'kettle-works', a: 'atlas-7', b: 'vellum', says: 3, tail: 'The shelf labels now read lower case.' };
-async function stageChat(hub: HubDouble) {
-  const noon = (minutes: number) => {
-    const now = new Date();
-    return new Date(now.getFullYear(), now.getMonth(), now.getDate(), 12, minutes).toISOString();
-  };
-  hub.setGrid([{ id: PROJECT, name: CHAT.name, kind: 'hub', machines: 1, machines_online: 1, working: 1, waiting: 0, live: 2 }]);
-  const joined = (session: string, alias: string, ts: string) =>
-    hub.append(PROJECT, { writer: `mini/${session}`, kind: 'joined', session, alias, name_source: 'user', machine: 'mini', cwd: '/Users/owner/Developer/kettle-works', worktree: '', role: '', seat: '', by: '' }, ts);
-  const say = (from: [string, string], to: [string, string], text: string, ts: string) => hub.append(PROJECT, { writer: `mini/${from[0]}`, kind: 'say', from: from[1], to: [{ session: to[0], alias: to[1] }], text }, ts);
-  const a: [string, string] = [S.works, CHAT.a];
-  const b: [string, string] = [S.rests, CHAT.b];
-  await joined(a[0], a[1], noon(0));
-  await joined(b[0], b[1], noon(1));
-  await say(a, b, 'can you take the label casing while I fix the lookup?', noon(10));
-  await say(b, a, 'yes, starting on the labels now', noon(11));
-  await say(a, b, 'thanks, the lookup is in', noon(14));
-  await hub.append(PROJECT, { writer: `mini/${b[0]}`, kind: 'message', from: b[1], to: 'host', text: CHAT.tail, src: 'r1#0' }, noon(20));
-  hub.setMachines(PROJECT, [{ machine: 'mini', online: true, policy: { read_only: false, ceiling: 'default' }, checkouts: [] }]);
-  for (const [session, status] of [
-    [a[0], 'busy'],
-    [b[0], 'idle'],
-  ])
-    hub.sendSession(PROJECT, { project: PROJECT, machine: 'mini', session, kind: 'presence', sub: null, n: null, body: { record: { status }, bridge: true } });
-}
 const channel = (page: Page) => page.getByRole('region', { name: 'Channel' });
-// The fold's words on each build (StreamView.tsx's AgentRun): the cut's "a and b · N", its count named "N messages";
-// master's "N messages between agents · a, b".
-const FOLD = { cut: `${CHAT.a} and ${CHAT.b} · ${CHAT.says}`, count: `${CHAT.says} messages`, master: `${CHAT.says} messages between agents · ${CHAT.a}, ${CHAT.b}` };
-
-/** The group chat open, its agent run in view; on the phone through the channel list, as the owner reaches it. */
-async function openChat(page: Page, hub: HubDouble, phone: boolean): Promise<Locator> {
-  await stageChat(hub);
-  await seedKey(page, hub);
-  await page.goto(`${hub.url}/p/${PROJECT}`);
-  if (phone) await page.getByRole('navigation', { name: 'Channels' }).getByRole('button', { name: new RegExp(CHAT.name) }).click();
-  await expect(channel(page)).toContainText(CHAT.tail);
-  const run = channel(page).getByTestId('agent-run');
-  await expect(run).toHaveCount(1);
-  await run.scrollIntoViewIfNeeded();
-  await expect(run).toBeInViewport();
-  return run;
-}
 
 // ---- desktop ---------------------------------------------------------------------------------------------------------
 test.describe('desktop', () => {
@@ -391,44 +367,10 @@ test.describe('desktop', () => {
 
   scene(
     {
-      id: 'desk-diff',
-      title: "The depth column's Diff tab",
-      how: "The staged project; maws-45's session plays the two-subagents recording through; its diff is the recording's; Diff tab",
-      state: 'The cut: the header reads "<n> files · +a −d · Since main" with no "changed", and no foot line under the list. Master: "<n> files changed · …" and a foot line naming the scope ("Working tree · Since main")',
-      viewport: DESKTOP_NAME,
-      rows: ['N160'],
-    },
-    async (page, hub, meta) => {
-      let depth: Locator | null = null;
-      await shot(
-        page,
-        meta,
-        async () => {
-          ({ depth } = await openDepth(page, hub, (player) => (player.diff = { base: 'main', text: DIFF })));
-          await depth.getByTestId('depth-tab-diff').click();
-          await expect(depth.getByTestId('depth-diff').locator('[data-review-body]')).toBeVisible();
-        },
-        async (cut) => {
-          const diff = depth!.getByTestId('depth-diff');
-          const header = diff.locator('[data-review-header]');
-          if (cut) {
-            await expect(header).toHaveText(/^\d+ files? · \+\d+ −\d+ · Since main$/);
-            await expect(diff.locator('[data-review-footer]')).toHaveCount(0);
-          } else {
-            await expect(header).toHaveText(/^\d+ files? changed · \+\d+ −\d+ · Since main$/);
-            await expect(diff.locator('[data-review-footer]')).toHaveText('Working tree · Since main');
-          }
-        },
-      );
-    },
-  );
-
-  scene(
-    {
       id: 'desk-diff-hunk',
       title: "The Diff tab's hunk counter, on a file's second hunk",
-      how: `As desk-diff, the diff with an invented third file of three hunks (${SHELF}); that file selected, the next-hunk arrow pressed once`,
-      state: 'The cut: the counter reads "2 / 3" (its name "Hunk 2 of 3"). Master: "Showing hunk 2 of 3"',
+      how: `The staged project; maws-45's session plays the two-subagents recording through; its diff is the recording's with an invented third file of three hunks (${SHELF}); Diff tab, that file selected, the next-hunk arrow pressed once`,
+      state: 'The cut: the counter reads "Hunk 2 of 3", MAWS\'s shared words for the counter\'s name, in the desk\'s own plain form (the desk\'s frozen Diff tab keeps master\'s layout). Master: "Showing hunk 2 of 3"',
       viewport: DESKTOP_NAME,
       rows: ['T306'],
     },
@@ -448,146 +390,7 @@ test.describe('desktop', () => {
         },
         async (cut) => {
           const counter = diff!.locator('[data-review-hunk]');
-          if (cut) {
-            await expect(counter).toHaveText('2 / 3');
-            await expect(counter.getByRole('img')).toHaveAttribute('aria-label', 'Hunk 2 of 3');
-          } else {
-            await expect(counter).toHaveText('Showing hunk 2 of 3');
-          }
-        },
-      );
-    },
-  );
-
-  scene(
-    {
-      id: 'desk-agents',
-      title: "The depth column's Agents tab with the two agents' tree",
-      how: "The staged project; maws-45's session plays the two-subagents recording through (both agents done); the tab, then Done opened",
-      state: 'The cut: the tab and its panel read "Agents" ("Agents · 2"). Master: "Subagents" ("Subagents · 2"). The tree holds both agents',
-      viewport: DESKTOP_NAME,
-      rows: ['T152'],
-    },
-    async (page, hub, meta) => {
-      let depth: Locator | null = null;
-      await shot(
-        page,
-        meta,
-        async () => {
-          ({ depth } = await openDepth(page, hub, () => {}));
-          await depth.getByTestId('depth-tab-subagents').click();
-          const done = depth.locator('[data-section="done"] h3 button');
-          if ((await done.getAttribute('aria-expanded')) !== 'true') await done.click();
-          await expect(done).toHaveAttribute('aria-expanded', 'true');
-        },
-        async (cut) => {
-          const title = cut ? 'Agents' : 'Subagents'; // the cut's word, then master's
-          const tab = depth!.getByTestId('depth-tab-subagents');
-          await expect(tab).toHaveAttribute('aria-selected', 'true');
-          await expect(tab).toHaveText(new RegExp(`^${title} · 2$`));
-          await expect(depth!.getByRole('tabpanel', { name: title, exact: true })).toBeVisible();
-          const rows = depth!.getByTestId('depth-subagents').locator('[data-agent-row]');
-          await expect(rows).toHaveCount(2);
-          for (const row of await rows.all()) await expect(row).toBeVisible();
-        },
-      );
-    },
-  );
-
-  scene(
-    {
-      id: 'desk-agents-earlier',
-      title: "The Agents tree from an older producer: the agents whose status it does not say",
-      how: 'The staged project; the fake machine replays the session-view recording as a DC3 producer, through to its end; the Agents tab',
-      state: 'The cut: the section reads "Earlier · 1". Master: "On disk · 1". Its agent is drawn in it, its status unknown',
-      viewport: DESKTOP_NAME,
-      rows: ['T158'],
-    },
-    async (page, hub, meta) => {
-      let section: Locator | null = null;
-      await shot(
-        page,
-        meta,
-        async () => {
-          const fm = await openReplay(page, hub, loadRecording(SESSION_VIEW), 'dc3');
-          fm.playThrough();
-          const depth = page.getByTestId('depth');
-          await depth.getByTestId('depth-tab-subagents').click();
-          section = depth.getByTestId('depth-subagents').locator('[data-section="disk"]');
-          await expect(section).toBeVisible();
-        },
-        async (cut) => {
-          await expect(section!.locator('h3 button')).toHaveText(cut ? 'Earlier · 1' : 'On disk · 1'); // the cut's words, then master's
-          await expect(section!.locator('[data-agent-row][data-status="unknown"]')).toBeVisible();
-        },
-      );
-    },
-  );
-
-  scene(
-    {
-      id: 'desk-agent-page',
-      title: "One agent's page, opened from the tree",
-      how: "The staged project; maws-45's session plays the two-subagents recording through, the kettle agent's own transcript too; Agents tab, Done opened, the kettle agent's row",
-      state: 'The cut: the header holds the agent\'s title and "<model> · <elapsed> · <tokens>", with no "Dispatched by <session>" line. Master: that line under it ("Dispatched by maws-45")',
-      viewport: DESKTOP_NAME,
-      rows: ['T184'],
-    },
-    async (page, hub, meta) => {
-      let detail: Locator | null = null;
-      await shot(
-        page,
-        meta,
-        async () => {
-          const { player, depth } = await openDepth(page, hub, () => {});
-          const track = player.agent(KETTLE.agentId);
-          track.advance(track.script.length); // its snapshot holds its whole transcript
-          await depth.getByTestId('depth-tab-subagents').click();
-          const row = depth.locator(`[data-agent-row="${KETTLE.agentId}"]`);
-          if ((await row.count()) === 0) await depth.locator('[data-section="done"] h3 button').click();
-          await row.click();
-          detail = depth.getByTestId('depth-subagent');
-          await expect(detail).toHaveAttribute('data-agent', KETTLE.agentId);
-          await expect.poll(() => detail!.locator('[data-row-id]').count(), { message: "the agent's transcript drawn" }).toBeGreaterThan(0);
-        },
-        async (cut) => {
-          await expect(detail!).toContainText(String(KETTLE.meta.description));
-          await expect(detail!.locator('[data-part="agent-meta"]')).toBeVisible();
-          if (cut) await expect(detail!.locator('[data-part="dispatched-by"]')).toHaveCount(0);
-          else await expect(detail!.locator('[data-part="dispatched-by"]')).toHaveText('Dispatched by maws-45'); // master's words
-        },
-      );
-    },
-  );
-
-  scene(
-    {
-      id: 'desk-chat',
-      title: "The group chat with agents' traffic folded",
-      how: `An invented project (${CHAT.name}): ${CHAT.a} and ${CHAT.b} join, write to each other ${CHAT.says} times, then ${CHAT.b} writes to the owner; the project's group chat`,
-      state: `The cut: the fold reads "${FOLD.cut}", its count an image named "${FOLD.count}" (a tip on pointing), its touch fact (a line under the row) not drawn where the pointer can point. Master: "${FOLD.master}"`,
-      viewport: DESKTOP_NAME,
-      rows: ['N170'],
-    },
-    async (page, hub, meta) => {
-      let run: Locator | null = null;
-      await shot(
-        page,
-        meta,
-        async () => {
-          run = await openChat(page, hub, false);
-        },
-        async (cut) => {
-          const fold = run!.getByRole('button').first();
-          await expect(fold).toHaveAttribute('aria-expanded', 'false');
-          if (cut) {
-            await expect(fold).toContainText(FOLD.cut);
-            await expect(fold.getByRole('img', { name: FOLD.count })).toHaveText(String(CHAT.says));
-            await expect(run!.locator('[data-touch-fact]')).toHaveCount(1);
-            await expect(run!.locator('[data-touch-fact]')).toBeHidden(); // drawn only where nothing can point
-          } else {
-            await expect(fold).toContainText(FOLD.master);
-          }
+          await expect(counter).toHaveText(cut ? 'Hunk 2 of 3' : 'Showing hunk 2 of 3'); // REVIEW_COPY.hunkOf on each build
         },
       );
     },
@@ -600,42 +403,6 @@ test.describe('desktop', () => {
 // is the same surface at rest with what master draws there.
 test.describe('phone', () => {
   test.use(PHONE);
-
-  scene(
-    {
-      id: 'desk-phone-chat-fold',
-      title: "The group chat's folded agents' traffic on the phone",
-      how: `As desk-chat, on the phone: the channel list, then ${CHAT.name}'s group chat; the fold scrolled into view`,
-      state: `The cut: the fold reads "${FOLD.cut}" and its touch fact "${FOLD.count}" is drawn at rest on a line of its own under the row. Master: "${FOLD.master}", no touch fact`,
-      viewport: PHONE_NAME,
-      rows: ['N170', 'ticket 830'],
-    },
-    async (page, hub, meta) => {
-      let run: Locator | null = null;
-      await shot(
-        page,
-        meta,
-        async () => {
-          run = await openChat(page, hub, true);
-        },
-        async (cut) => {
-          const fold = run!.getByRole('button').first();
-          await expect(fold).toBeInViewport();
-          const fact = run!.locator('[data-touch-fact]'); // the fold's own: the run holds no other
-          if (cut) {
-            await expect(fold).toContainText(FOLD.cut);
-            await expect(fact).toBeVisible();
-            await expect(fact).toHaveText(FOLD.count);
-            await expect(fact).toHaveCSS('display', 'block');
-            await expect(fact).toBeInViewport();
-          } else {
-            await expect(fold).toContainText(FOLD.master);
-            await expect(fact).toHaveCount(0);
-          }
-        },
-      );
-    },
-  );
 
   scene(
     {

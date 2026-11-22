@@ -176,17 +176,7 @@ test('the group chat, a day of a project at desktop and phone widths', async ({ 
 
   // Agent traffic: one line per run, the messages behind it.
   const run = chat.getByTestId('agent-run');
-  // the word cut (N170, after the app's P447 and P448): "a and b · N", the count an image named by its meaning, which is
-  // also the fold's tooltip
-  await expect(run.getByRole('button')).toContainText('maws-fe and acc-ask71 · 2');
-  await expect(run).not.toContainText('messages between agents');
-  await expect(run.getByRole('img', { name: '2 messages', exact: true })).toHaveText('2');
-  // the touch rule: where the pointer can point, the count's meaning waits for the tooltip and is not drawn at rest
-  expect(await page.evaluate(() => matchMedia('(hover: hover)').matches), 'a desktop pointer that can hover').toBe(true);
-  const fact = run.locator('[data-touch-fact]');
-  await expect(fact).toHaveText('2 messages');
-  await expect(fact).toHaveAttribute('aria-hidden', 'true');
-  await expect(fact).toHaveCSS('display', 'none');
+  await expect(run).toContainText('2 messages between agents · maws-fe, acc-ask71');
   await expect(chat).not.toContainText('can you take the answer path');
   await run.getByRole('button').click();
   await expect(run.getByTestId('agent-run-messages')).toContainText('maws-fe → acc-ask71');

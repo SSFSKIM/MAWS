@@ -38,7 +38,7 @@ it("writes a finished agent's age in English, as the stream beside it does", () 
     <SubagentTree tasks={withStatuses(taskGraphOf(metas, []), metas)} view={{ ...INITIAL_TREE_VIEW, expanded: { agents: true, done: true, disk: true } }} onView={() => {}} onOpen={() => {}} statusesKnown />,
   );
   const line = (agentId: string) => container.querySelector(`[data-agent-row="${agentId}"] [data-part="line"]`)?.textContent;
-  expect([line('a1'), line('a2'), line('a3')]).toEqual(['3m ago · read it', 'failed · 2h ago', 'stopped · 1d ago']); // the word cut (T162, T163): MAWS's outcome words
+  expect([line('a1'), line('a2'), line('a3')]).toEqual(['3m ago · read it', 'failed · 2h ago', 'stopped · 1d ago']); // the word cut (T162, T163): MAWS's shared outcome words, which the desk's tree reads
 });
 
 // Card C1, the owner's answer (the UX wave's U8d, Decision Log 16 and 17): an agent another machine reports exited with
@@ -54,19 +54,4 @@ it('reads ended for an agent exited on its bridge’s word or its starter’s en
   );
   const line = (agentId: string) => container.querySelector(`[data-agent-row="${agentId}"] [data-part="line"]`)?.textContent;
   expect([line('b1'), line('p1'), line('s1')]).toEqual(['ended', 'ended', 'session ended']); // the word cut (T165)
-});
-
-// Fix round 1 of the word cut (T158, N158): the desk draws MAWS's Agents panel, so it follows its words. An older
-// producer's agents of unknown status go under Earlier, as the app's do; a tree with nothing reads No agents yet.
-it('heads an older producer’s agents of unknown status Earlier, and an empty tree No agents yet', () => {
-  const metas = [{ agentId: 'd1', meta: { agentType: 'general-purpose', description: 'left on disk', toolUseId: 'toolu_d1', spawnDepth: 1 } }] as SubagentMeta[];
-  setAgentsClock(NOW);
-  const { container, unmount } = render(
-    <SubagentTree tasks={taskGraphOf(metas, [])} view={{ ...INITIAL_TREE_VIEW, expanded: { agents: true, done: true, disk: true } }} onView={() => {}} onOpen={() => {}} />,
-  );
-  expect(container.querySelector('[data-section="disk"]')?.textContent).toContain('Earlier · 1');
-  expect(container.textContent).not.toContain('On disk');
-  unmount();
-  const empty = render(<SubagentTree tasks={taskGraphOf([], [])} view={INITIAL_TREE_VIEW} onView={() => {}} onOpen={() => {}} />);
-  expect(empty.container.textContent).toContain('No agents yet');
 });

@@ -5,10 +5,12 @@ import base from './playwright.config';
 // scenes"): its own invocation, which only `pnpm shots:words` names. The rig is not a *.spec.ts, so the shared config's
 // default testMatch never collects it and the gated run lists what it listed before. This is the shared config with the
 // rig as its whole selection, in Chromium alone (each scene sets its own viewport, the phone's included), and short
-// action and expect timeouts so a scene that cannot reach its state is recorded as not reached in seconds.
+// action and expect timeouts so a scene that cannot reach its state is recorded as not reached in seconds. Its global
+// setup builds dist/ from the checkout first (e2e/words-build.ts).
 export default defineConfig({
   ...base,
   testMatch: 'words-shots.rig.ts',
+  globalSetup: './e2e/words-build.ts',
   timeout: 120_000,
   expect: { timeout: 5_000 },
   outputDir: 'test-results/words',

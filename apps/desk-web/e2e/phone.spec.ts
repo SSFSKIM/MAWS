@@ -672,17 +672,6 @@ test('@layout on an engine without scroll anchoring (Safari before 27), a reader
   await page.waitForTimeout(300);
   await expect(line(28)).toBeInViewport();
   const runs = center(page).getByTestId('agent-run');
-  // The touch rule (the word cut's M3, board ticket 830): a folded run's count is an image named by its meaning ("8
-  // messages", the fold's tooltip on a desktop); a phone cannot point, so the meaning is drawn at rest beside it, by the
-  // stylesheet alone (`[data-touch-fact]` under `(hover: none)`), hidden from assistive technology.
-  expect(await page.evaluate(() => matchMedia('(hover: none)').matches), 'a touch screen: nothing points').toBe(true);
-  await expect(runs.first().getByRole('button')).toContainText('maws-45 · 8');
-  await expect(runs.first().getByRole('img', { name: '8 messages', exact: true })).toHaveText('8');
-  const fact = runs.first().locator('[data-touch-fact]');
-  await expect(fact).toHaveText('8 messages');
-  await expect(fact).toHaveAttribute('aria-hidden', 'true');
-  await expect(fact).not.toHaveCSS('display', 'none');
-  await expect(fact).toBeVisible();
   /** Unfolds or folds a run without scrolling to it, as a row changing on its own. */
   const toggle = async (run: Locator, open: boolean) => {
     await run.getByRole('button').evaluate((b) => (b as HTMLButtonElement).click());
@@ -742,7 +731,7 @@ test('@layout on an engine without scroll anchoring (Safari before 27), a reader
   await events.evaluate((el) => (el.scrollTop = 0));
   for (let n = 17; n <= 76; n++) await say(n);
   const tail = runs.last();
-  await expect(tail.getByRole('img', { name: '60 messages', exact: true })).toHaveText('60'); // the word cut (N170): "maws-45 · 60"
+  await expect(tail).toContainText('60 messages between agents');
   await toggle(tail, true);
   await events.evaluate((el) => (el.scrollTop = -150));
   await page.waitForTimeout(300);

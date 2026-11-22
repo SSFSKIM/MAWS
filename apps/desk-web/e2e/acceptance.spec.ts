@@ -152,10 +152,10 @@ test("G1: the report over the session's rows — each stretch of work between th
   expect(turn24.filter((id) => id.startsWith('record-fold:closed:'))).toHaveLength(1); // unmarked: its whole turn one record
   await expect(view).not.toContainText('Part 24 is forty numbered lines');
 
-  // The column: Agents (the word cut, T152: MAWS's tab), Jobs, Diff, Info; no Transcript tab.
+  // The column: Subagents, Jobs, Diff, Info; no Transcript tab.
   const depth = page.getByTestId('depth');
   await expect(depth.getByRole('tab')).toHaveCount(4);
-  await expect(depth.getByRole('tab').nth(0)).toHaveText(/^Agents/);
+  await expect(depth.getByRole('tab').nth(0)).toHaveText(/^Subagents/);
   await expect(depth.getByRole('tab').nth(1)).toHaveText(/^Jobs/);
   await expect(depth.getByRole('tab').nth(2)).toHaveText('Diff');
   await expect(depth.getByRole('tab').nth(3)).toHaveText('Info');

@@ -1,16 +1,16 @@
 // @vitest-environment happy-dom
 // The Diff tab draws what the machine answered: its changes against the base, that there are none, or — when the machine
 // could not take the diff — why, never an empty "No changes against" with no base.
-import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, expect, it, vi } from 'vitest';
 import type { PlaneTranscript, PlaneTranscriptState } from '../../../../../src/renderer/src/lane-a/plane-transcript';
 import { createDiffView, DiffPane } from './DiffPane';
 
 afterEach(cleanup);
 
-function pane(answer: { base: string; text: string; error?: string } | null) {
+function pane(answer: { base: string; text: string; error?: string }) {
   const controller = { target: { machine: 'mini', session: 's', agentId: null }, requestDiff: vi.fn() } as unknown as PlaneTranscript;
-  const state = { phase: 'live', diff: { pending: answer === null, answer } } as unknown as PlaneTranscriptState;
+  const state = { phase: 'live', diff: { pending: false, answer } } as unknown as PlaneTranscriptState;
   render(<DiffPane controller={controller} state={state} view={createDiffView()} />);
   return screen.getByTestId('depth-diff');
 }
@@ -33,7 +33,7 @@ it('says when the session has no git working tree to diff, which the machine ans
 it('says there are no changes against a base it names', () => {
   const diff = pane({ base: 'main', text: '' });
   expect(diff.querySelector('[data-review-empty]')!.textContent).toBe('No changes against main');
-  expect(diff.querySelector('[data-review-footer]')).toBeNull(); // the word cut (T357): the header names the base
+  expect(diff.querySelector('[data-review-footer]')!.textContent).toBe('Working tree · Since main');
 });
 
 // The pane's own words and its one-file walk (its view state is its own since MAWS's Review became a stack): the header's
@@ -61,9 +61,7 @@ it('heads the diff with its totals since the base and walks its files one at a t
   const fileHeader = () => diff.querySelector('[data-review-file-header]')!.textContent;
   const previous = () => screen.getByRole('button', { name: 'Previous file' }) as HTMLButtonElement;
   const next = () => screen.getByRole('button', { name: 'Next file' }) as HTMLButtonElement;
-  expect(diff.querySelector('[data-review-header]')!.textContent).toBe('2 files · +2 −1 · Since main'); // the word cut (T356)
-  expect(diff.querySelector('[data-review-footer]')).toBeNull();
-  expect(diff.textContent).not.toContain('Working tree');
+  expect(diff.querySelector('[data-review-header]')!.textContent).toBe('2 files changed · +2 −1 · Since main');
   expect(fileHeader()).toBe('src/harbour.ts · Modified');
   expect([previous().disabled, next().disabled, previous().title, next().title]).toEqual([true, false, 'Previous file', 'Next file']);
   fireEvent.click(next());
@@ -71,28 +69,4 @@ it('heads the diff with its totals since the base and walks its files one at a t
   expect([previous().disabled, next().disabled]).toEqual([false, true]);
   fireEvent.click(previous());
   expect(fileHeader()).toBe('src/harbour.ts · Modified');
-});
-
-// The word cut, as Review draws it: the hunk counter reads "n / m", named "Hunk n of m", its tooltip (T306); the wait for
-// the diff is the quiet spinner, nothing for half a second (Review's Loading).
-it('reads the hunk counter “n / m”, named “Hunk n of m”', () => {
-  const text = ['diff --git a/src/harbour.ts b/src/harbour.ts', 'index 1..2 100644', '--- a/src/harbour.ts', '+++ b/src/harbour.ts', '@@ -1,2 +1,2 @@', '-const berths = 4;', '+const berths = 6;', ' export { berths };', ''].join('\n');
-  const diff = pane({ base: 'main', text });
-  const counter = screen.getByRole('img', { name: 'Hunk 1 of 1' });
-  expect(counter.textContent).toBe('1 / 1');
-  expect(counter.tabIndex).toBe(0); // the tooltip's owner takes the keyboard
-  expect(diff.textContent).not.toContain('Showing hunk');
-});
-
-it('waits for the diff with the quiet spinner, nothing for its first half second', () => {
-  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
-  try {
-    const diff = pane(null);
-    expect(screen.queryByRole('progressbar')).toBeNull();
-    expect(diff.textContent).not.toContain('Loading');
-    act(() => vi.advanceTimersByTime(500));
-    expect(screen.getByRole('progressbar', { name: 'Loading' })).toBeTruthy();
-  } finally {
-    vi.useRealTimers();
-  }
 });

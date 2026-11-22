@@ -60,9 +60,7 @@ test("the diff is asked for when its tab opens and on Refresh, never otherwise, 
   await depth.getByTestId('depth-tab-diff').click();
   const diff = depth.getByTestId('depth-diff');
   await expect.poll(() => player.diffsAsked).toBe(1);
-  // Review's word cut (N160, after T356 and T357): the totals without "changed", and no foot line, the header naming the base
-  await expect(diff.locator('[data-review-header]')).toHaveText('2 files · +6 −0 · Since main');
-  await expect(diff.locator('[data-review-footer]')).toHaveCount(0);
+  await expect(diff.locator('[data-review-header]')).toHaveText('2 files changed · +6 −0 · Since main');
   await expect(diff.locator('[data-path]')).toHaveText(['.smns+5 −0', 'recorded.txt+1 −0']);
   // The first file's hunk, in the diff library's table.
   await expect(diff.locator('[data-review-body]')).toContainText('"name": "fakerec"');
@@ -74,7 +72,7 @@ test("the diff is asked for when its tab opens and on Refresh, never otherwise, 
   player.diff = { base: 'main', text: `${DIFF}diff --git a/notes.md b/notes.md\n--- a/notes.md\n+++ b/notes.md\n@@ -1 +1 @@\n-kettle\n+teapot\n` };
   await diff.getByTestId('depth-diff-refresh').click();
   await expect.poll(() => player.diffsAsked).toBe(2);
-  await expect(diff.locator('[data-review-header]')).toHaveText('3 files · +7 −1 · Since main');
+  await expect(diff.locator('[data-review-header]')).toHaveText('3 files changed · +7 −1 · Since main');
 
   // An empty diff says so.
   player.diff = { base: 'main', text: '' };

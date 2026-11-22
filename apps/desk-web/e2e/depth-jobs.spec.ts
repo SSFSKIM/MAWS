@@ -1,6 +1,6 @@
 // M5 of the DC9 plan, in a real browser against DC3's fake machine replaying the `session-view` recording as a DC8
-// producer (`fake-machine.ts`, `producer: 'dc8'`): the column's Agents tree with every agent's status from DX4's
-// widened body — the nested agent under its parent, none left under "Earlier" — and an `Agent` row in the center
+// producer (`fake-machine.ts`, `producer: 'dc8'`): the column's Subagents tree with every agent's status from DX4's
+// widened body — the nested agent under its parent, none left under "On disk" — and an `Agent` row in the center
 // opening its agent there, the column opened for it; the Jobs tab drawing the shells and the monitor with MAWS's
 // `ShellRow` and `MonitorRow`, a shell's Output under its row in each of DX4's variants, and the MCP names. The same
 // recording from a producer older than DC8 draws as DC6 drew it. And an interrupted turn reads stopped, not working,
@@ -221,7 +221,7 @@ test('from a producer older than DC8 the column draws as DC6 drew it: the nested
   await depth.getByTestId('depth-tab-subagents').click();
   const tree = depth.getByTestId('depth-subagents');
   const nested = nestedOf(fm.recording);
-  await expect(tree.locator('[data-section="disk"]')).toContainText('Earlier · 1'); // the word cut (T158): was On disk
+  await expect(tree.locator('[data-section="disk"]')).toContainText('On disk · 1');
   await expect(agentRow(tree, nested)).toHaveAttribute('data-status', 'unknown');
   await depth.getByTestId('depth-tab-jobs').click();
   await expect(depth.getByRole('tabpanel', { name: 'Jobs' })).toContainText(`${MACHINE}'s daemon does not report background jobs`);

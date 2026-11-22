@@ -1,5 +1,5 @@
 // M2 of the DC6 plan, in a browser against DC5's DX3 double and the recorded session's plane (`depth-player.ts`): the
-// depth column's Agents tab draws the session's subagent tree from the main subscription — matching the
+// depth column's Subagents tab draws the session's subagent tree from the main subscription — matching the
 // recording's `subagents/*.meta.json`, growing as the agents start and following each to its end — and opening an
 // agent subscribes with its `agentId` and draws its transcript and stream as the main thread's are drawn, through a
 // reconnect, a hub restart, and a chunk the snapshot already held, with no gap and no duplicated text. A subagent's
@@ -99,7 +99,7 @@ test('the tree matches the recording’s metas, grows as the agents start, and f
   await expect(tree).toContainText('Agents · 1 running');
   player.advanceTo(notificationOf(KETTLE.agentId));
   await expect(tree).toContainText('Agents · 2 running');
-  await expect(depth.getByTestId('depth-tab-subagents')).toHaveText('Agents · 2 running'); // the word cut (T152): MAWS's tab
+  await expect(depth.getByTestId('depth-tab-subagents')).toHaveText('Subagents · 2 running');
   player.advance(1); // the notes.md agent's task notification
   await expect(tree).toContainText('Agents · 1 running');
   await expect(tree).toContainText('Done · 1');
@@ -130,8 +130,7 @@ test('opening an agent subscribes with its agentId and draws its stream settling
   const detail = await openAgent(depth, KETTLE.agentId);
   await expect.poll(() => subscribes(hub, KETTLE.agentId)).toBe(1);
   await expect(detail).toContainText(String(KETTLE.meta.description));
-  await expect(detail.locator('[data-part="dispatched-by"]'), 'the word cut (T184): the session is said by the view already').toHaveCount(0);
-  await expect(detail).not.toContainText('Dispatched by');
+  await expect(detail).toContainText('Dispatched by maws-45');
   const track = player.agent(KETTLE.agentId);
   track.advanceTo(isChunk('text'));
   await expect(detail).toContainText('Report where the kettle is'); // the agent's own prompt, from its transcript
@@ -140,7 +139,7 @@ test('opening an agent subscribes with its agentId and draws its stream settling
   await settleAgentAnswer(track, detail, KETTLE_ANSWER);
   await expect(detail.locator('[data-part="agent-meta"]')).toContainText('claude-opus-5-5');
 
-  await detail.getByRole('button', { name: '‹ Agents' }).click(); // the word cut (T152)
+  await detail.getByRole('button', { name: '‹ Agents' }).click(); // MAWS's shared back link (the word cut, T152), which the desk's drill-in reads
   await expect(depth.getByTestId('depth-subagents')).toBeVisible();
   await expect.poll(() => track.subscriptions()).toBe(0); // leaving the agent closes its subscription
 });

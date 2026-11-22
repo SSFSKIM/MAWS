@@ -341,34 +341,27 @@ The desk's web app has its own rig, `apps/desk-web/e2e/words-shots.rig.ts`, for 
 
     WORDS_OUT=$HOME/maws-words/desk-after pnpm --filter desk-web shots:words
 
-That builds `dist/` and runs every scene headless in about a minute. On Linux, run `pnpm --filter desk-web exec playwright install chromium` first.
+Its global setup (`apps/desk-web/e2e/words-build.ts`) builds `dist/` from the checkout first, however the config is started, so no older `dist/` is photographed; then it runs every scene headless in about a minute. On Linux, run `pnpm --filter desk-web exec playwright install chromium` first.
 
-- **Output:** `<WORDS_OUT>/desk-<scene>.png`, plus a `_desk-run.json` recording whether each scene was reached. A missed scene also leaves `_miss-<scene>.png` and the page's errors.
-- **The before:** in a clean checkout of master, run `git checkout <branch> -- apps/desk-web/e2e/words-shots.rig.ts apps/desk-web/playwright.words.config.ts apps/desk-web/package.json`, then the same command into another folder.
+- **Output:** `<WORDS_OUT>/desk-<scene>.png`, plus a `_desk-run.json` recording whether each scene was reached, and on which build. A missed scene also leaves `_miss-<scene>.png` and the page's errors. A rerun into the same folder keeps only its own build's results: another build's are dropped from `_desk-run.json` and their pictures renamed `_stale-<scene>.png`, and a scene's old picture is removed before it is taken again.
+- **The before:** in a clean checkout of master, run `git checkout <branch> -- apps/desk-web/e2e/words-shots.rig.ts apps/desk-web/e2e/words-build.ts apps/desk-web/playwright.words.config.ts apps/desk-web/package.json`, then the same command into another folder.
 - **Narrowing:** `WORDS_ONLY` narrows the run.
 - **Checks:** each scene reads the build from the touch rule's stylesheet rule, then checks that build's form before capture. Phone scenes run at 390x844 with `isMobile` and `hasTouch`, and check `(hover: none)`. Desktop scenes run at 1440x900 and check `(hover: hover)`.
 - **Fixtures:**
   - the DX3 hub double, the staged project, and the fake machine's two-subagents and session-view recordings;
-  - an invented group chat;
   - two invented turns added to session-view, each holding one maws call: an ask the turn closed without answering, and a browser navigation with its result.
 - **VM run, 2026-11-22:** all ten scenes were reached on both builds, master b5aa8cd48 and the branch at 85d78706e. The rig read the build as master and as the cut respectively.
+- **The desk's frozen views (2026-11-22, the fix wave):** the desk's grid, project, session and depth views are frozen (`apps/desk-web/CLAUDE.md`) and keep master's words, so the six scenes of what the desk itself said there are gone: `desk-diff` (N160), `desk-agents` (T152), `desk-agents-earlier` (T158), `desk-agent-page` (T184), `desk-chat` and `desk-phone-chat-fold` (N170). What the desk draws through MAWS's own shared code still changes, and the four scenes below show it.
 
 | Scene | Viewport | Title | Rows |
 |---|---|---|---|
-| `desk-diff` | 1440x900 | The depth column's Diff tab: "2 files · +6 −0 · Since main" with no foot line (master: "2 files changed · …" and its foot line) | N160 |
-| `desk-diff-hunk` | 1440x900 | The Diff tab's hunk counter on a file's second hunk: "2 / 3" (master: "Showing hunk 2 of 3") | T306 |
-| `desk-agents` | 1440x900 | The Agents tab with the two agents' tree (master: Subagents) | T152 |
-| `desk-agents-earlier` | 1440x900 | The tree from an older producer: "Earlier · 1" (master: "On disk · 1") | T158 |
-| `desk-agent-page` | 1440x900 | One agent's page, opened from the tree, with no "Dispatched by" line | T184 |
-| `desk-chat` | 1440x900 | The group chat's folded agents' traffic: "atlas-7 and vellum · 3", its touch fact present and hidden where a pointer can point (master: "3 messages between agents · atlas-7, vellum") | N170 |
-| `desk-phone-chat-fold` | phone 390x844 | The same fold on the phone: its touch fact "3 messages" at rest, a line under the row | N170, ticket 830 |
+| `desk-diff-hunk` | 1440x900 | The Diff tab's hunk counter on a file's second hunk: "Hunk 2 of 3", MAWS's shared words in the desk's own plain form (master: "Showing hunk 2 of 3") | T306 |
 | `desk-phone-subagents` | phone 390x844 | A subagent row while its agents work: each agent's "<name> · <time>" at rest under the line | T87, ticket 830 |
 | `desk-phone-ask` | phone 390x844 | An ask the turn closed without an answer: the chip's why "The session ended" at rest under it | T97, ticket 830 |
 | `desk-phone-browser` | phone 390x844 | A browser action in the opened working record: its time "1.2s · waited 3.0s for you" at rest on its line | T105, T106, ticket 830 |
 
 **The touch rule's surfaces on the desk** (every `TouchFact` user under `src/renderer` and `apps/desk-web/src`):
 - **Reached:**
-  - the group chat's agents' fold (`desk-phone-chat-fold`);
   - a subagent row's details (`desk-phone-subagents`);
   - an ask chip's why (`desk-phone-ask`);
   - a browser action's time (`desk-phone-browser`).

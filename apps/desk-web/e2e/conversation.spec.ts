@@ -72,8 +72,7 @@ test('the group chat draws the log as §4 says: messages, humans, lifecycle line
 
   const runs = center(page).getByTestId('agent-run');
   await expect(runs).toHaveCount(2);
-  await expect(runs.first().getByRole('button')).toContainText('maws-fe and maws-45 · 3'); // the word cut (N170)
-  await expect(runs.first().getByRole('img', { name: '3 messages', exact: true })).toHaveText('3');
+  await expect(runs.first()).toContainText('3 messages between agents · maws-fe, maws-45');
   await expect(center(page)).not.toContainText('you renamed a column I read');
   await runs.first().getByRole('button').click();
   await expect(runs.first().getByTestId('agent-run-messages')).toContainText('maws-fe → maws-45');

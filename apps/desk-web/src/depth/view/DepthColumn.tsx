@@ -10,7 +10,6 @@
 // open-agent request. Loaded as a chunk of its own the first time a session is selected.
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { useStore } from 'zustand';
-import { SUBAGENTS_COPY } from '../../../../../src/renderer/src/tools/agents/copy';
 import { agentTree } from '../../../../../src/renderer/src/tools/agents/model/task-graph';
 import type { SubagentRef } from '../../../../../src/renderer/src/transcript/model/rows';
 import type { TranscriptActions } from '../../../../../src/renderer/src/transcript/view/context';
@@ -67,9 +66,7 @@ function SessionDepth({ project, session, plane }: { project: string; session: D
       </header>
       <div role="tablist" aria-label="Session depth" className="flex shrink-0 gap-1 border-b border-border px-2">
         <TabButton tab="subagents" current={tab} onSelect={setTab}>
-          {/* the word cut (T152): the tool's name, as MAWS's tab reads it */}
-          {SUBAGENTS_COPY.title}
-          {tasks.order.length > 0 ? ` · ${running > 0 ? `${running} running` : tasks.order.length}` : ''}
+          Subagents{tasks.order.length > 0 ? ` · ${running > 0 ? `${running} running` : tasks.order.length}` : ''}
         </TabButton>
         <TabButton tab="jobs" current={tab} onSelect={setTab}>
           {jobsTabLabel(state.jobs)}
@@ -83,7 +80,7 @@ function SessionDepth({ project, session, plane }: { project: string; session: D
       </div>
       <div className="relative min-h-0 flex-1">
         {tab === 'subagents' && (
-          <div role="tabpanel" aria-label={SUBAGENTS_COPY.title} className="absolute inset-0 flex flex-col">
+          <div role="tabpanel" aria-label="Subagents" className="absolute inset-0 flex flex-col">
             {agent === null ? (
               <SubagentTree tasks={tasks} view={treeView} onView={setTreeView} onOpen={setAgent} statusesKnown={state.jobs !== null} />
             ) : (

@@ -235,10 +235,6 @@
 .desk-chat-agents .desk-chat-time {
   margin-left: 4px;
 }
-/* A fold's count, said in words on a phone: a line under the fold's row, aligned with its words past the mark. */
-.desk-chat-count-fact {
-  margin-left: 24px;
-}
 .desk-chat-quiet-run[aria-expanded="true"] .desk-chat-quiet {
   padding-top: 0;
 }
