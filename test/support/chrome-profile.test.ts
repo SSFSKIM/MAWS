@@ -228,6 +228,18 @@ describe('buildChromeUserData', () => {
     }
   });
 
+  // Main lists a profile's extensions by id (import/chrome/extensions.ts) and every build draws fresh keys: the keys are
+  // handed out in id order, so every build lists Default's four in the order they are installed, and two builds'
+  // pictures of the import show the same rows in the same order.
+  it("gives Default's four extensions ids in the order they are installed, whatever keys a build draws", () => {
+    const ids = fixture.profiles.Default.extensions;
+    expect(ids).toEqual([...ids].sort());
+    for (let k = 0; k < 3; k++) {
+      const again = buildChromeUserData(scratch()).profiles.Default.extensions;
+      expect(again).toEqual([...again].sort());
+    }
+  });
+
   it('copies E0b probe extension with host permissions for the given host', () => {
     const { probe } = fixture.extensions;
     const manifest = manifestOf(probe.dir);
