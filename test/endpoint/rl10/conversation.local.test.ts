@@ -251,13 +251,15 @@ const scenes = async (step: { scene: string } & Record<string, unknown>, binding
     case 'device-words': {
       const device = devices[step.device as string];
       const at = new Date().toISOString();
-      const draft = { kind: 'human', from: 'human', member: B, to: [{ session: step.session, alias: 'bob' }], text: `from ${String(step.device)}`, created: at, nonce: base64urlEncode(crypto.getRandomValues(new Uint8Array(16))) };
-      const signed = await signEvent({ org: ORG, project: PROJECT }, draft, device.channel.privateKey, device.channel.pub);
+      // `project`: the log they go into and the scope they are signed over (P unless named); `alias`, the addressee's.
+      const project = (step.project as string | undefined) ?? PROJECT;
+      const draft = { kind: 'human', from: 'human', member: B, to: [{ session: step.session, alias: (step.alias as string | undefined) ?? 'bob' }], text: `from ${String(step.device)}`, created: at, nonce: base64urlEncode(crypto.getRandomValues(new Uint8Array(16))) };
+      const signed = await signEvent({ org: ORG, project }, draft, device.channel.privateKey, device.channel.pub);
       const event: Record<string, unknown> = { ...signed, writer: `hub/${B}`, seq: step.seq, ts: at };
       if (step.forged === true) event.text = 'words the device never signed';
-      else madeWords.set(step.seq as number, event);
+      else if (project === PROJECT) madeWords.set(step.seq as number, event);
       if (typeof step.binding === 'string') bindings[step.binding] = event;
-      return fromHub([event]);
+      return endpoint.rl10.relay.fromHub({ t: 'events', project, events: [event] });
     }
     case 'legacy-words': {
       const event = { ts: '2026-10-27T18:04:00.000Z', writer: 'old-mini/human', seq: step.seq, kind: 'human', from: 'human', to: '*', text: 'from a machine not yet moved' };
@@ -377,7 +379,7 @@ const scenes = async (step: { scene: string } & Record<string, unknown>, binding
     }
     case 'machine-event': {
       // An event of one of `machine`'s sessions in `project`'s log, signed over that project and attested to `owners`,
-      // arriving from the hub there.
+      // arriving from the hub there; with no `owners`, unattested (its operator's, `session: human`).
       const key = machines.get(step.machine as string)!;
       const at = new Date().toISOString();
       const body = {
@@ -386,7 +388,7 @@ const scenes = async (step: { scene: string } & Record<string, unknown>, binding
         writer: `${String(step.machine)}/${String(step.session)}`,
         seq: step.seq,
         ...(step.body as Record<string, unknown>),
-        attest: { owners: step.owners, ownersProof: [], origin: { kind: 'terminal' }, stateVersion: head.state.version },
+        ...(step.owners === undefined ? {} : { attest: { owners: step.owners, ownersProof: [], origin: { kind: 'terminal' }, stateVersion: head.state.version } }),
       };
       const event = await signEvent({ org: ORG, project: step.project as string }, body, key.privateKey, key.pub);
       if (typeof step.binding === 'string') bindings[step.binding] = event;

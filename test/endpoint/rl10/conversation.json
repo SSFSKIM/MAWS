@@ -79,7 +79,10 @@
     "session:S8": "88888888-8888-4888-8888-888888888888",
     "project:BM": "b3c4d5e6-f708-4192-a3b4-c5d6e7f8a9b0",
     "say:M1": "<b-mini's say to S2 in the channel's log, as the endpoint sent it down: the event with its sig and attest>",
-    "say:M2": "<b-mini's say to S1, likewise>"
+    "say:M2": "<b-mini's say to S1, likewise>",
+    "session:S9": "99999999-9999-4999-8999-999999999999",
+    "words:C": "<b2's words to S9 in the channel's log, as the endpoint sent them down: the event with its sig>",
+    "human:b-mini": "<b-mini's operator's words to S9 in the channel's log, likewise>"
   },
   "cases": [
     {
@@ -410,6 +413,35 @@
         { "down": { "t": "events", "project": "{{channel:C}}", "events": [{ "event": "{{say:M2}}", "signer": { "kind": "machine", "ref": "{{ref:b-mini}}", "name": "b-mini", "keyId": "{{kid:b-mini}}" }, "owners": [{ "id": "{{member:B}}", "email": "{{email:B}}" }] }] } },
         { "up": { "t": "reach?", "id": "r-say-2", "project": "{{channel:C}}", "session": "{{session:S1}}", "event": "{{say:M2}}" }, "vary": ["id"] },
         { "down": { "t": "reach", "id": "r-say-2", "verdict": "refuse", "reason": "not-reachable" }, "note": "S1 is still private and shared with no one: B, verified, neither owns it nor holds list on it" }
+      ]
+    },
+    {
+      "name": "words? about a human event in a channel's log: a device's words to a session that gives its member converse are words once that session's member frame is held (peer before it), another machine's operator's are peer, and this machine's operator's to a session of the machine's owners are words",
+      "steps": [
+        { "scene": "device-words", "device": "b2", "seq": 1, "project": "{{channel:C}}", "session": "{{session:S9}}", "alias": "review", "binding": "words:C", "note": "B's phone writes into the channel's log to S9, a session of this machine in P: signed over the channel's id" },
+        { "down": { "t": "events", "project": "{{channel:C}}", "events": [{ "event": "{{words:C}}", "signer": { "kind": "device", "member": "{{member:B}}", "device": "{{device:b2}}", "keyId": "{{kid:b2}}" } }] }, "note": "verified and recorded in the inbound index under the channel's id, where words? looks it up" },
+        { "up": { "t": "words?", "id": "w-ch-0", "project": "{{channel:C}}", "session": "{{session:S9}}", "event": "{{words:C}}" }, "vary": ["id"], "note": "asked before S9's member frame" },
+        { "down": { "t": "words", "id": "w-ch-0", "verdict": "peer" }, "note": "a recipient the endpoint holds no member for: peer at once" },
+        { "up": { "t": "member", "session": "{{session:S9}}", "alias": "review", "project": "{{project:P}}", "lane": "A", "state": "idle", "cwd": "{{checkout}}", "owners": ["@machine"], "ownersProof": [], "origin": { "kind": "terminal" }, "principal": "@machine", "inference": { "kind": "slot", "configDir": "{{configDir}}" }, "access": "private", "shares": [{ "member": "{{member:B}}", "grade": "converse" }], "policyRev": 1 }, "note": "S9's member frame goes under its own project, P: private, shared with B at converse" },
+        { "up": { "t": "words?", "id": "w-ch-1", "project": "{{channel:C}}", "session": "{{session:S9}}", "event": "{{words:C}}" }, "vary": ["id"] },
+        { "down": { "t": "words", "id": "w-ch-1", "verdict": "words" }, "note": "the device's member B holds converse on S9: a person's words, though S9's project is not the channel" },
+        { "scene": "machine-event", "machine": "b-mini", "session": "human", "seq": 1, "project": "{{channel:C}}", "body": { "kind": "human", "from": "human", "to": [{ "session": "{{session:S9}}", "alias": "review" }], "text": "from b-mini's operator" }, "binding": "human:b-mini", "note": "b-mini's operator writes into the channel's log to S9: machine-signed over the channel's id, unattested" },
+        { "down": { "t": "events", "project": "{{channel:C}}", "events": [{ "event": "{{human:b-mini}}", "signer": { "kind": "machine", "ref": "{{ref:b-mini}}", "name": "b-mini", "keyId": "{{kid:b-mini}}" } }] } },
+        { "up": { "t": "words?", "id": "w-ch-2", "project": "{{channel:C}}", "session": "{{session:S9}}", "event": "{{human:b-mini}}" }, "vary": ["id"] },
+        { "down": { "t": "words", "id": "w-ch-2", "verdict": "peer" }, "note": "words into another machine's session need a device's signature: a machine-signed event is peer, whoever converses on S9" },
+        { "up": { "t": "events", "project": "{{channel:C}}", "events": [{ "ts": "2026-10-27T18:11:00.000Z", "writer": "{{name}}/human", "seq": 1, "kind": "human", "from": "human", "to": [{ "session": "{{session:S8}}", "alias": "integrator" }], "text": "pick up the channel's review" }] }, "note": "this machine's operator writes into the channel's log to S8 (case 16's member of the channel)" },
+        { "scene": "hub-holds", "project": "{{channel:C}}", "writer": "{{name}}/human", "seq": 1, "created": "2026-10-27T18:11:00.000Z", "note": "signed over the channel's id; an operator's event carries no attest" },
+        { "up": { "t": "words?", "id": "w-ch-3", "project": "{{channel:C}}", "session": "{{session:S8}}", "event": { "ts": "2026-10-27T18:11:00.000Z", "writer": "{{name}}/human", "seq": 1, "kind": "human", "from": "human", "to": [{ "session": "{{session:S8}}", "alias": "integrator" }], "text": "pick up the channel's review" } }, "vary": ["id"], "note": "asked after its events frame went up; the event as stored, no created" },
+        { "down": { "t": "words", "id": "w-ch-3", "verdict": "words" }, "note": "the operator path: S8's owners (@machine) meet the machine's, and the ledger under the channel's id holds this body" }
+      ]
+    },
+    {
+      "name": "a machine's notice in a channel's log: this machine's human writer's event with a notice is peer where the same event without it is words",
+      "steps": [
+        { "up": { "t": "events", "project": "{{channel:C}}", "events": [{ "ts": "2026-10-27T18:12:00.000Z", "writer": "{{name}}/human", "seq": 2, "kind": "human", "from": "human", "to": [{ "session": "{{session:S8}}", "alias": "integrator" }], "text": "the integration build failed", "notice": "ci-watch" }] }, "note": "a program's notice to S8 under this machine's human writer, in the channel's log (X8)" },
+        { "scene": "hub-holds", "project": "{{channel:C}}", "writer": "{{name}}/human", "seq": 2, "created": "2026-10-27T18:12:00.000Z" },
+        { "up": { "t": "words?", "id": "w-ch-4", "project": "{{channel:C}}", "session": "{{session:S8}}", "event": { "ts": "2026-10-27T18:12:00.000Z", "writer": "{{name}}/human", "seq": 2, "kind": "human", "from": "human", "to": [{ "session": "{{session:S8}}", "alias": "integrator" }], "text": "the integration build failed", "notice": "ci-watch" } }, "vary": ["id"] },
+        { "down": { "t": "words", "id": "w-ch-4", "verdict": "peer" }, "note": "case 18's operator path answers words for this event; its notice makes it peer: a machine's notice is never a person's words" }
       ]
     }
   ]
