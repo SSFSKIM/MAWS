@@ -75,6 +75,11 @@ function Finished({ report }: { report: ImportReport }) {
           <Skipped key={`history-${reason}`} count={history.skipped[reason]} label={IMPORT_COPY.skippedSites('history', IMPORT_COPY.historyReasons[reason], history.skipped[reason])} hosts={history.hosts[reason]} />
         ))}
       {bookmarks !== null && <Skipped count={bookmarks.skipped} label={IMPORT_COPY.skippedBookmarks(bookmarks.skipped)} hosts={undefined} />}
+      {extensions !== null &&
+        (['copyFailed', 'loadFailed'] as const).map((status) => {
+          const n = extensions.filter((extension) => extension.status === status).length;
+          return <Skipped key={`extensions-${status}`} count={n} label={IMPORT_COPY.skippedExtensions(status, n)} hosts={undefined} />;
+        })}
       {extensions !== null && extensions.length > 0 && (
         <section aria-label={IMPORT_COPY.extensionsHeading} className="mt-1 flex flex-col gap-1.5">
           <h3 className="m-0 text-ui-sm font-medium text-fg-muted">{IMPORT_COPY.extensionsHeading}</h3>
@@ -101,7 +106,7 @@ function Finished({ report }: { report: ImportReport }) {
 }
 
 // One skip reason that skipped something: its sites as a fold (at most 20 hosts, main's cap) when main named some, else
-// its line alone. The extensions that could not be copied or loaded say so in the extension list.
+// its line alone. The extensions that could not be copied or loaded each also show it in the extension list.
 function Skipped({ count, label, hosts }: { count: number; label: string; hosts: string[] | undefined }) {
   if (count === 0) return null;
   if (!hosts || hosts.length === 0) return <p className="m-0 text-ui-sm text-fg-muted">{label}</p>;

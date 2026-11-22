@@ -168,6 +168,8 @@ export const IMPORT_COPY = {
     notVerified: 'Partitioned cookies not confirmed in the partition',
     cancelled: 'Not imported (cancelled)',
   } satisfies Record<CookieSkipReason, string>,
+  // the extensions the summary counts as skipped (fix round 1, P388); each still shows its state in the list below
+  skippedExtensions: (reason: 'copyFailed' | 'loadFailed', n: number) => `${CATEGORIES.extensions} · ${reason === 'copyFailed' ? "Couldn't be copied" : "Couldn't load"} (${count(n)})`,
   historyReasons: { hidden: 'Hidden pages', unsupportedScheme: "Pages MAWS's browser can't open", invalid: 'Unreadable history entries' } satisfies Record<HistorySkipReason, string>,
   nowActive: (name: string) => `New tabs browse as ${name}.`, // the word cut (T533)
   done: 'Done',

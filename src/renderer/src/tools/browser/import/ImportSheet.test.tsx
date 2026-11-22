@@ -376,6 +376,28 @@ describe('report', () => {
     expect(within(sheet()).getByText('Bookmarks · Not imported (1)')).toBeTruthy();
   });
 
+  // fix round 1 (P388): the extensions counted as skipped have a counted line per reason, each still shown in the list
+  it('extensions that could not be copied or loaded: a counted line per reason under the summary', () => {
+    const [first, second, third] = DONE.extensions!;
+    const extensions = [
+      { ...first!, status: 'copyFailed' as const, error: 'EACCES' },
+      { ...second!, status: 'loadFailed' as const, error: 'Manifest file is missing or unreadable' },
+      { ...third!, status: 'loadFailed' as const, error: 'Manifest file is missing or unreadable' },
+    ];
+    showReport({ ...DONE, extensions });
+    renderSheet();
+    expect(sheet().querySelector('[data-import-summary]')!.textContent).toBe('4 cookies, 4 history entries, 0 extensions · 6 skipped');
+    expect(within(sheet()).getByText("Extensions · Couldn't be copied (1)")).toBeTruthy();
+    expect(within(sheet()).getByText("Extensions · Couldn't load (2)")).toBeTruthy();
+    expect(within(extensionRow(FAILS_ID)).getByText("Couldn't load: Manifest file is missing or unreadable")).toBeTruthy();
+  });
+
+  it('the full import keeps no extension line when every extension came across', () => {
+    showReport(DONE);
+    renderSheet();
+    expect(within(sheet()).queryByText(/^Extensions · /)).toBeNull();
+  });
+
   it('the wrong key: the summary names it and the Keychain line says the password did not match', async () => {
     useSettings.setState({ state: { settings: SETTINGS_DEFAULTS_V21, resolvedTheme: 'light' } });
     showReport(WRONG_KEY_REPORT);
