@@ -1506,10 +1506,18 @@ test('a browser call’s time shows on pointing along its line and on its phrase
   const line = call.locator('.transcript-browser-action-line');
   const phrase = call.locator('[data-browser-heading]');
   const quiet = call.locator('.transcript-browser-action-actions[data-on-hover]');
+  // the touch rule (the word cut's M3, board ticket 830): the time a tip shows on pointing also stands on the line where
+  // nothing points, drawn by the stylesheet alone (`[data-touch-fact]`, ui/touch-fact.tsx) and hidden from assistive
+  // technology, which hears it as the phrase's description
+  const touchFact = line.locator('[data-touch-fact]');
   const tooltip = page.getByRole('tooltip');
   await expect(phrase).toHaveAttribute('tabindex', '0');
   await expect(phrase).toHaveAccessibleDescription('60ms');
   await expect(quiet.getByRole('button', { name: 'Show snapshot' })).toBeAttached();
+  await expect(touchFact).toHaveText('60ms');
+  await expect(touchFact).toHaveAttribute('aria-hidden', 'true');
+  expect(await page.evaluate(() => matchMedia('(hover: hover)').matches), 'a pointer that can hover').toBe(true);
+  await expect(touchFact, 'where the pointer can point, the time is not drawn at rest').toHaveCSS('display', 'none');
 
   await page.mouse.move(0, 0); // nothing on the line pointed at, nothing focused in it: the quiet actions are not drawn
   await expect(tooltip).toHaveCount(0);
@@ -1539,9 +1547,14 @@ test('a browser call’s time shows on pointing along its line and on its phrase
   await cdp.send('Emulation.setTouchEmulationEnabled', { enabled: true, maxTouchPoints: 1 });
   try {
     const noHover = await page.evaluate(() => matchMedia('(hover: none)').matches);
-    if (noHover) await expect(quiet).toHaveCSS('opacity', '1');
-    // unverified, not proof: the always-drawn rule then stands only on pointed-actions.test.ts's reading of the stylesheet
-    else test.info().annotations.push({ type: 'unverified', description: 'not reached: touch emulation left (hover: none) unmatched, so the browser actions’ always-drawn opacity was not exercised in this run' });
+    if (noHover) {
+      await expect(quiet).toHaveCSS('opacity', '1');
+      await expect(touchFact, 'where nothing points, the time stands on the line at rest').toHaveCSS('display', 'inline');
+      await expect(touchFact).toBeVisible();
+    }
+    // unverified, not proof: the always-drawn rule then stands only on pointed-actions.test.ts's and touch-fact.test.tsx's
+    // reading of the stylesheet
+    else test.info().annotations.push({ type: 'unverified', description: 'not reached: touch emulation left (hover: none) unmatched, so the browser actions’ always-drawn opacity and the time’s touch fact were not exercised in this run' });
   } finally {
     await cdp.send('Emulation.setTouchEmulationEnabled', { enabled: false });
     await cdp.detach();

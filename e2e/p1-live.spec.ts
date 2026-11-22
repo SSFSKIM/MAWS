@@ -716,7 +716,8 @@ test.describe.serial('S3: deliverables, a side thread, Send to main and /btw thr
     await sheet.getByRole('button', { name: 'Send' }).click();
     await expect(sheet).toHaveCount(0);
     // UX wave U5a (A2): the card's place says where it went, for about four seconds
-    await expect.soft(l.page.locator('[data-sent-note]'), 'the place’s line after a steer').toContainText('read at the next step');
+    // the word cut (P438): a steer's place reads as a send's, "Sent to <title>", without when it is read
+    await expect.soft(l.page.locator('[data-sent-note]'), 'the place’s line after a steer').toHaveText(/^Sent to /);
     await drive(l, l.pane, parent, 'the steered turn’s end', async () => mainTurnsEnded(await events(l, parent)).length > turnsBefore && (await idleNow(l, parent)), allowed);
 
     const written = outUsers(sessionRows(l, parent)).map((r) => r.frame as { priority?: string; message?: { content?: unknown } });

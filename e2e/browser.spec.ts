@@ -238,7 +238,9 @@ test('error pages: refused, dns, generic, each with Codex’s summary and Reload
     const [id] = s.ids as [AppSessionId];
     await show(s, id);
     const panel = await openBrowser(s);
-    await expect(paneIn(panel).locator('[data-browser-page="empty"]')).toContainText('Start browsing');
+    // the word cut (T409, T410): a tab that never navigated shows the globe alone, no words
+    await expect(paneIn(panel).locator('[data-browser-page="empty"]')).toBeVisible();
+    await expect(paneIn(panel).locator('[data-browser-page="empty"]')).toHaveText('');
 
     // an untitled page's chip reads its host, whatever title Electron gives the entry
     const PLAIN = s.server.url('/plain.html');
@@ -257,8 +259,9 @@ test('error pages: refused, dns, generic, each with Codex’s summary and Reload
     const REFUSED_TOO = `http://localhost:${await closedPort()}/`;
     await address(panel, REFUSED);
     await expect(errorPage(panel)).toHaveAttribute('data-browser-page', 'error-refused');
-    await expect(errorPage(panel)).toContainText("This site can't be reached");
-    await expect(errorPage(panel)).toContainText('127.0.0.1 refused to connect');
+    // the word cut (T415): the summary is the page's heading, with no "This site can't be reached" over it
+    await expect(errorPage(panel).getByRole('heading', { name: '127.0.0.1 refused to connect' })).toBeVisible();
+    await expect(errorPage(panel)).not.toContainText("This site can't be reached");
     await expect(errorPage(panel)).toContainText('ERR_CONNECTION_REFUSED');
     await expect(errorPage(panel).getByRole('button', { name: 'Reload' })).toBeVisible();
     let state = await tabState(s, t);
@@ -747,15 +750,17 @@ test('a relaunch restores the tabs suspended: both chips muted, the selected one
       for (const tabId of [a, b]) await expect(chipOf(panel, tabId)).toHaveAttribute('data-suspended', 'true');
       await expect(chipOf(panel, a).getByRole('tab')).toHaveText('Page A');
       const suspended = paneIn(panel).locator('[data-browser-page="suspended"]');
-      await expect(suspended.getByRole('button', { name: `Open ${A}` })).toBeVisible();
-      await expect(suspended).toContainText('Tabs are restored unloaded');
+      // the word cut (T412, T413): Load, its address its tooltip and description, and no note under it
+      await expect(suspended.getByRole('button', { name: 'Load', exact: true })).toBeVisible();
+      await expect(suspended.getByRole('button', { name: 'Load', exact: true })).toHaveAccessibleDescription(A);
+      await expect(suspended).not.toContainText('Tabs are restored unloaded');
       expect(await tabsOf(second, id)).toMatchObject({ selected: a });
       expect((await tabState(second, a)).tab).toMatchObject({ suspended: true, url: A, loading: false });
       expect(await metrics(second)).toMatchObject({ loaded: 0 });
       expect(second.maws.app.windows().some((page) => page.url() === A || page.url() === B)).toBe(false);
 
       // Open loads it, alone
-      await suspended.getByRole('button', { name: `Open ${A}` }).click();
+      await suspended.getByRole('button', { name: 'Load', exact: true }).click();
       await expect((await pageAt(second, A)).locator('#heading')).toHaveText('Page A');
       await expectOnPane(second, a, paneIn(panel), 'panel');
       await expect(chipOf(panel, a)).not.toHaveAttribute('data-suspended', 'true');
@@ -788,6 +793,25 @@ async function nativeKey(s: Scene, url: string, keyCode: string, modifiers: ('me
 }
 
 const findBar = (view: Locator) => view.getByRole('search', { name: 'Find in page' });
+
+// The word cut (T454, T455): the find count draws its numbers ("1 / 3", hidden from a screen reader) and speaks its
+// words ("1 of 3 results", screen-reader text), inside one status that has no name of its own.
+async function expectFindCount(bar: Locator, drawn: string, spoken: string): Promise<void> {
+  const status = bar.getByRole('status');
+  await expect(status.locator('[aria-hidden="true"]')).toHaveText(drawn);
+  await expect(status.locator('.sr-only')).toHaveText(spoken);
+}
+
+// The word cut (T444): Browser options' zoom is one row, a group "Zoom" of − level +, whose level resets (named "Reset
+// zoom, 125%"); a step keeps the menu open, so the steps are taken in one opening and the menu closed with Escape.
+async function zoomFromOptions(s: Scene, view: Locator, step: 'Zoom in' | 'Zoom out' | 'Reset zoom', times: number): Promise<void> {
+  await view.getByRole('button', { name: 'Browser options' }).click();
+  const row = s.page.getByRole('group', { name: 'Zoom', exact: true });
+  const item = step === 'Reset zoom' ? row.getByRole('menuitem', { name: /^Reset zoom, \d+%$/ }) : row.getByRole('menuitem', { name: step, exact: true });
+  for (let n = 0; n < times; n++) await item.click();
+  await s.page.keyboard.press('Escape');
+  await expect(row).toHaveCount(0);
+}
 
 test('the page’s guards: a permission request denied with the line; the clipboard written only on a real click; a download to the save path with Reveal; find in page; Esc reaches the page when the find bar is closed', async () => {
   await browserScene(['E4a: guards'], async (s) => {
@@ -834,9 +858,9 @@ test('the page’s guards: a permission request denied with the line; the clipbo
     const bar = findBar(panel);
     await expect(bar.getByRole('textbox', { name: 'Find in page' })).toBeFocused();
     await bar.getByRole('textbox', { name: 'Find in page' }).fill('needle');
-    await expect(bar.getByRole('status')).toHaveText('1 / 3 results');
+    await expectFindCount(bar, '1 / 3', '1 of 3 results');
     await bar.getByRole('button', { name: 'Next result' }).click();
-    await expect(bar.getByRole('status')).toHaveText('2 / 3 results');
+    await expectFindCount(bar, '2 / 3', '2 of 3 results');
     await bar.getByRole('button', { name: 'Close find' }).click();
     await expect(bar).toHaveCount(0);
 
@@ -853,7 +877,7 @@ test('the page’s guards: a permission request denied with the line; the clipbo
 
 // ---- (8) G5: the chrome in both themes ------------------------------------------------------------------------------
 
-test('the chrome in both themes: the empty state, a loaded page, the zoom banner at 125%, the find bar, the permission line, the error page (shots under MAWS_E4A_SHOTS=1)', async () => {
+test('the chrome in both themes: the empty state, a loaded page, the zoom chip at 125%, the find bar, the permission line, the error page (shots under MAWS_E4A_SHOTS=1)', async () => {
   await browserScene(['E4a: the chrome'], async (s) => {
     const [id] = s.ids as [AppSessionId];
     await show(s, id);
@@ -870,19 +894,24 @@ test('the chrome in both themes: the empty state, a loaded page, the zoom banner
     await expect(chipOf(panel, t).locator('img')).toHaveAttribute('src', /^data:image\/png/);
     await shootBrowser(s, 'page', { pane, page: pageA });
 
-    await overflow(s, panel, 'Zoom in');
-    await overflow(s, panel, 'Zoom in');
-    const zoom = panel.getByRole('group', { name: 'Page zoom' });
-    await expect(zoom).toContainText('125%');
+    await zoomFromOptions(s, panel, 'Zoom in', 2);
+    // the word cut (T452): no banner under the navigation row; a chip in it reads the level, Page zoom its tooltip
+    const zoom = panel.locator('[data-browser-nav] [data-browser-zoom]');
+    await expect(zoom).toHaveText('125%');
+    await expect(zoom).toHaveAccessibleName('Page zoom: 125%');
     await expect.poll(async () => (await tabState(s, t)).tab?.zoom).toBe(1.25);
     await expectOnPane(s, t, pane, 'panel');
     await shootBrowser(s, 'zoom', { pane, page: pageA });
-    await zoom.getByRole('button', { name: 'Reset' }).click();
+    // the chip opens − Reset +; a step keeps its menu open, and once it closes at 100% the chip goes
+    await zoom.click();
+    await s.page.getByRole('menuitem', { name: 'Reset zoom', exact: true }).click();
+    await expect.poll(async () => (await tabState(s, t)).tab?.zoom).toBe(1);
+    await s.page.keyboard.press('Escape');
     await expect(zoom).toHaveCount(0);
 
     await overflow(s, panel, 'Find in page');
     await findBar(panel).getByRole('textbox', { name: 'Find in page' }).fill('needle');
-    await expect(findBar(panel).getByRole('status')).toHaveText('1 / 3 results');
+    await expectFindCount(findBar(panel), '1 / 3', '1 of 3 results');
     await expectOnPane(s, t, pane, 'panel');
     await shootBrowser(s, 'find', { pane, page: pageA });
     await findBar(panel).getByRole('button', { name: 'Close find' }).click();
@@ -1225,15 +1254,14 @@ test('U12a (device sizes, A3 and probe 4): Viewport › Mobile draws the page 37
     await expectOnPane(s, t, pane, 'panel');
 
     // page zoom at 125%: the element grows to 469 wide and the page still reads 375; back to 100%
-    await overflow(s, panel, 'Zoom in');
-    await overflow(s, panel, 'Zoom in');
+    await zoomFromOptions(s, panel, 'Zoom in', 2);
     await expect.poll(async () => (await tabState(s, t)).tab?.zoom).toBe(1.25);
     await expect.poll(async () => Math.round((await rectOf(pane)).width)).toBe(469);
     await expectOnPane(s, t, pane, 'panel');
     // the chip reads what the page reads (the view's real size, Interfaces §D): at 125% Mobile's 1,015 points of height
     // fit this room only on a tall enough window, so both sides come from the view's bounds, the tab's zoom and the scale
     await asBlink('at a tab zoom of 125%: the page and the chip read the view as Blink does');
-    await overflow(s, panel, 'Reset zoom');
+    await zoomFromOptions(s, panel, 'Reset zoom', 1);
     await expect.poll(async () => (await tabState(s, t)).tab?.zoom).toBe(1);
     await expect.poll(async () => Math.round((await rectOf(pane)).width)).toBe(375);
     await expectOnPane(s, t, pane, 'panel');
@@ -1373,7 +1401,7 @@ test('U12a (copy screenshot, A4): Copy screenshot puts the page the pane shows o
             return 'image';
           }, SCREENSHOT_SCENE_MARK);
         await expect.poll(arrived, { message: 'Copy screenshot replaces the pasteboard with an image' }).toBe('image');
-        await expect(noticesIn(panel).filter({ hasText: 'Screenshot copied to clipboard' })).toBeVisible();
+        await expect(noticesIn(panel).filter({ has: s.page.getByText('Copied', { exact: true }) })).toBeVisible(); // the word cut (T464)
         const copied: CopiedImage = await s.maws.app.evaluate(async ({ clipboard, nativeImage }) => {
           const items = await clipboard.read();
           const types = items.flatMap((item) => item.types);
