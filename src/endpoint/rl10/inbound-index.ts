@@ -6,11 +6,14 @@
 //
 // The index keeps 30 days (a line older is dropped when its project's file is read), and a `human` event whose signed
 // `created` is more than 24 hours old is never delivered as words (words.ts), so the window bounds both. Lines are
-// `{content, writer, seq, at}`, appended and fsynced before the event goes down to sminos: a page's new contents are
-// staged as it is judged (`stage`; `seen` meets them at once, so a copy later in the page is a replay) and written in
-// one append (`commit`) before any of its events leaves, since an fsync an event held a first download to a few events
-// a second on a slow disk.
-import { appendLines, readLines, writeAtomic } from '../state/files';
+// `{content, writer, seq, at}`, each appended as its event is judged and the file fsynced once a page (`sync`), before
+// any of the page's events goes down to sminos: an fsync an event held a first download to a few events a second on a
+// slow disk. Memory and file are written together, in the same order, so what is read back after a restart is what was
+// judged. The window this leaves is accepted: a crash between a write and the sync may lose lines, but none of their
+// events reached sminos, and the hub sends them again; a snapshot the policy cache took from one of them is fed again
+// when it comes, and taking a snapshot twice changes nothing.
+import { join } from 'node:path';
+import { appendLines, readLines, syncFile, writeAtomic } from '../state/files';
 import { isProjectFileName } from './signature-ledger';
 
 export const INBOUND_KEPT_MS = 30 * 86_400_000;
@@ -19,18 +22,12 @@ type Entry = { content: string; writer: string; seq: number; at: number };
 
 export type Seen = { kind: 'new' } | { kind: 'same' } | { kind: 'replayed'; writer: string; seq: number };
 
-/**
- * Content `stage` holds for its project, from the index's generation then (`forget` begins another): on disk once a
- * `commit` took it, let go when its batch was abandoned or its write failed.
- */
-export type Staged = { readonly project: string; readonly entry: Entry; readonly generation: number; state: 'staged' | 'committed' | 'dropped'; first: boolean };
-
 export class InboundIndex {
   readonly #dir: () => string;
   readonly #now: () => number;
   readonly #projects = new Map<string, { byContent: Map<string, Entry>; byPosition: Map<string, string> }>();
-  /** Advanced by `forget`: a batch staged before it is stale, never written into what is read after it. */
-  #generation = 0;
+  /** The files written since the last `sync`, by path. */
+  readonly #dirty = new Set<string>();
 
   constructor(dir: () => string, now: () => number) {
     this.#dir = dir;
@@ -52,68 +49,24 @@ export class InboundIndex {
   /** Drops what was read: `inbound/` was moved aside (an enrollment under another authority), and is read anew. */
   forget(): void {
     this.#projects.clear();
-    this.#generation++;
   }
 
-  /** Records content new to `project` at its position, on disk before it returns. */
+  /** Records content new to `project` at its position: written before it returns, on disk once `sync` returns. */
   record(project: string, content: string, writer: string, seq: number): void {
-    const staged = this.stage(project, content, writer, seq);
-    if (staged !== null) this.commit([staged]);
-  }
-
-  /**
-   * Content new to `project` at its position, held now (`seen` meets it) and on disk once a `commit` takes it; null
-   * when the content is held already (on disk, or staged earlier in the batch). One batch of a project at a time
-   * stages (the relay judges a project's pages in order), so the first content staged at a position is the first
-   * written there, and a restart reads the position as it was judged.
-   */
-  stage(project: string, content: string, writer: string, seq: number): Staged | null {
+    const entry: Entry = { content, writer, seq, at: this.#now() };
+    const dir = this.#dir();
+    appendLines(dir, `${project}.idx`, [JSON.stringify(entry)], { sync: false });
+    this.#dirty.add(join(dir, `${project}.idx`));
     const held = this.#load(project);
-    if (held.byContent.has(content)) return null;
-    const staged: Staged = { project, entry: { content, writer, seq, at: this.#now() }, generation: this.#generation, state: 'staged', first: false };
-    held.byContent.set(content, staged.entry);
-    const key = `${writer}\n${seq}`;
-    staged.first = !held.byPosition.has(key);
-    if (staged.first) held.byPosition.set(key, content);
-    return staged;
+    held.byContent.set(content, entry);
+    if (!held.byPosition.has(`${writer}\n${seq}`)) held.byPosition.set(`${writer}\n${seq}`, content);
   }
 
-  /**
-   * Writes the batch's staged entries, one append (one fsync) a project, before it returns true. A batch staged in an
-   * earlier generation (`forget` came since), or holding an entry let go, is stale: nothing is written, the batch is
-   * abandoned, and false is answered, so its events are judged again rather than sent. A write that fails abandons the
-   * batch, as a failed write per event left the index without it, and throws.
-   */
-  commit(staged: readonly Staged[]): boolean {
-    const pending = staged.filter((s) => s.state !== 'committed');
-    if (pending.some((s) => s.state === 'dropped' || s.generation !== this.#generation)) {
-      this.abandon(staged);
-      return false;
-    }
-    const byProject = new Map<string, Staged[]>();
-    for (const s of pending) byProject.set(s.project, [...(byProject.get(s.project) ?? []), s]);
-    for (const [project, entries] of byProject) {
-      try {
-        appendLines(this.#dir(), `${project}.idx`, entries.map((s) => JSON.stringify(s.entry)));
-      } catch (error) {
-        this.abandon(staged);
-        throw error;
-      }
-      for (const s of entries) s.state = 'committed';
-    }
-    return true;
-  }
-
-  /** Lets go of what the batch staged and didn't write: its contents are new again (in this generation). */
-  abandon(staged: readonly Staged[]): void {
-    for (const s of staged) {
-      if (s.state !== 'staged') continue;
-      s.state = 'dropped';
-      if (s.generation !== this.#generation) continue;
-      const held = this.#load(s.project);
-      if (held.byContent.get(s.entry.content) === s.entry) held.byContent.delete(s.entry.content);
-      const key = `${s.entry.writer}\n${s.entry.seq}`;
-      if (s.first && held.byPosition.get(key) === s.entry.content) held.byPosition.delete(key);
+  /** Fsyncs each file written since the last call: what `record` wrote is on disk when it returns. */
+  sync(): void {
+    for (const path of [...this.#dirty]) {
+      syncFile(path);
+      this.#dirty.delete(path);
     }
   }
 

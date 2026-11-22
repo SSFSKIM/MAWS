@@ -99,7 +99,7 @@ import type { LogProject } from '../hub-link';
 import { attestFor, sessionOfWriter, verifiedOwners } from './attest';
 import { contains, digestOf, knownAudience, localPolicy, meet, sameAudience, withdrawnBy, type AudienceContext } from './audiences';
 import { PolicyCache, type Audience } from './policy-cache';
-import type { InboundIndex, Staged } from './inbound-index';
+import type { InboundIndex } from './inbound-index';
 import type { LegacyKey } from './legacy';
 import type { Members } from './members';
 import { bodyHash, uploadForm, type Signature, type SignatureLedger } from './signature-ledger';
@@ -189,8 +189,6 @@ export class LogRelay {
   readonly #held = new Map<string, Map<string, { event: unknown; since: number }>>();
   /** The keys that asked for a read, and when, in that order: each asks again only `HELD_READ_MS` later. */
   readonly #asked = new Map<string, number>();
-  /** Each project's arrivals, judged one after another (`#inOrder`). */
-  readonly #arrivals = new Map<string, Promise<void>>();
   /** The `retry`s begun (`#arrived` reads it). */
   #retries = 0;
 
@@ -316,31 +314,12 @@ export class LogRelay {
   /** The head, the certificates or the legacy key moved: every held event judged again, in the order it arrived. */
   async retry(): Promise<void> {
     this.#retries++;
-    for (const project of [...this.#held.keys()]) {
-      await this.#inOrder(project, async () => {
-        const held = this.#held.get(project);
-        if (held === undefined) return;
-        const prior = new Map(held);
-        held.clear();
-        await this.#arrived(project, [...prior.values()].map((h) => h.event), (key) => prior.get(key)?.since);
-        if (this.#held.get(project)?.size === 0) this.#held.delete(project);
-      });
+    for (const [project, held] of [...this.#held]) {
+      const prior = new Map(held);
+      held.clear();
+      await this.#arrived(project, [...prior.values()].map((h) => h.event), (key) => prior.get(key)?.since);
+      if (this.#held.get(project)?.size === 0) this.#held.delete(project);
     }
-  }
-
-  /**
-   * Runs `run` behind every arrival of `project` begun before it: the hub's pages and a `retry`'s judgement of what was
-   * held each stage the inbound index's entries and commit them as one batch, so a position's first content judged is
-   * the first written, whichever path met it.
-   */
-  #inOrder(project: string, run: () => Promise<void>): Promise<void> {
-    const next = (this.#arrivals.get(project) ?? Promise.resolve()).then(run);
-    const tail = next.catch(() => {});
-    this.#arrivals.set(project, tail);
-    void tail.then(() => {
-      if (this.#arrivals.get(project) === tail) this.#arrivals.delete(project);
-    });
-    return next;
   }
 
   /** How many arriving events are held now. */
@@ -486,7 +465,7 @@ export class LogRelay {
   /** A log-plane frame from the hub for an open project (`have`, `events`, `resend`, `refused`), in the project's order. */
   async fromHub(frame: { t: string; project: string } & Record<string, unknown>): Promise<void> {
     if (!this.#projects.has(frame.project)) return;
-    if (frame.t === 'events') return this.#inOrder(frame.project, () => this.#arrived(frame.project, frame.events));
+    if (frame.t === 'events') return this.#arrived(frame.project, frame.events);
     // A gap the hub names in what the endpoint signed: a hole, asked for once there is room (uplink.ts).
     if (frame.t === 'resend' && typeof frame.writer === 'string' && isLogSeq(frame.from) && this.#uplink.resend(frame.project, frame.writer, frame.from)) return;
     this.#toSminos(frame);
@@ -512,45 +491,18 @@ export class LogRelay {
     if (!Array.isArray(events)) return;
     let down: Wrapped[] = [];
     let read = false;
-    // The inbound index's entries of what goes down, written in one append before any of it takes effect: then the
-    // snapshots it carries feed the policy cache, in order, then the events frame goes.
-    const staged: Staged[] = [];
-    const feeds: Wrapped[] = [];
-    const flush = (): boolean => {
-      if (staged.length > 0 && !this.#ctx.index.commit(staged.splice(0))) return false;
-      for (const wrapped of feeds.splice(0)) this.#feed(wrapped, false);
-      if (down.length > 0) this.#toSminos({ t: 'events', project, events: down });
+    // The inbound index's lines of what goes down are fsynced once, before the frame leaves (inbound-index.ts).
+    const flush = () => {
+      if (down.length > 0) {
+        this.#ctx.index.sync();
+        this.#toSminos({ t: 'events', project, events: down });
+      }
       down = [];
-      return true;
     };
-    const stale = () =>
-      this.#ctx.log(`endpoint: the inbound records were moved aside while a page of project ${project} was judged: the rest of it is dropped, and comes again from the hub at sminos's next hello`);
-    try {
-      const deliver = (wrapped: Wrapped) => void (feeds.push(wrapped), down.push(wrapped));
-      if (!(await this.#judgeAll(project, events, since, staged, deliver, flush, () => (read = true)))) return stale();
-      if (!flush()) return stale();
-    } catch (error) {
-      // Nothing the batch staged was written: it is new again.
-      this.#ctx.index.abandon(staged);
-      throw error;
-    }
-    if (read) this.#ctx.behind?.();
-  }
-
-  /** `#arrived`'s judgement of each event in order: false once a flush found the inbound batch stale. */
-  async #judgeAll(
-    project: string,
-    events: unknown[],
-    since: ((key: string) => number | undefined) | undefined,
-    staged: Staged[],
-    deliver: (wrapped: Wrapped) => void,
-    flush: () => boolean,
-    asked: () => void,
-  ): Promise<boolean> {
     for (const e of events) {
       // The hub's tombstone of a position it withheld (D5): spent, in stream order, so the writer goes on past it.
       if (isWithheldTombstone(e)) {
-        if (!flush()) return false;
+        flush();
         this.#toSminos({ t: 'spent', project, writer: e.writer, seq: e.seq, reason: 'withheld' satisfies SpentReason });
         continue;
       }
@@ -559,24 +511,27 @@ export class LogRelay {
       let judged: Judged;
       for (;;) {
         const retries = this.#retries;
-        judged = await this.#verify(project, e, staged);
+        judged = await this.#verify(project, e);
         if (!('hold' in judged) || retries === this.#retries) break;
       }
       const at = position(e);
-      if ('deliver' in judged) deliver(judged.deliver);
-      else if ('hold' in judged) {
+      if ('deliver' in judged) {
+        this.#feed(judged.deliver, false);
+        down.push(judged.deliver);
+      } else if ('hold' in judged) {
         const kept = at !== null && this.#hold(project, at, e, judged.hold, since?.(`${at.writer}\n${at.seq}`));
-        if (kept && judged.read !== undefined && this.#ask(judged.read)) asked();
+        if (kept && judged.read !== undefined && this.#ask(judged.read)) read = true;
       } else {
         this.#ctx.log(`endpoint: refused an event the hub sent in project ${project}${at === null ? '' : ` at ${at.writer}:${at.seq}`}: ${judged.message}`);
         this.#ctx.hub.send({ t: 'rejected', project, event: at, reason: judged.reason, message: judged.message } satisfies Rejected);
         if (at !== null && isLogSeq(at.seq)) {
-          if (!flush()) return false;
+          flush();
           this.#toSminos({ t: 'spent', project, writer: at.writer, seq: at.seq, reason: judged.spent });
         }
       }
     }
-    return true;
+    flush();
+    if (read) this.#ctx.behind?.();
   }
 
   /**
@@ -660,8 +615,7 @@ export class LogRelay {
     return true;
   }
 
-  /** `staged` takes the inbound index's entry of a v2 event that goes down, to be committed before it does. */
-  async #verify(project: string, e: unknown, staged: Staged[]): Promise<Judged> {
+  async #verify(project: string, e: unknown): Promise<Judged> {
     if (!isObject(e) || typeof e.writer !== 'string' || !isLogSeq(e.seq) || typeof e.ts !== 'string' || typeof e.kind !== 'string') {
       return { spent: 'bad-shape', reason: 'bad-shape', message: 'not a log event (writer, seq, ts, kind)' };
     }
@@ -696,8 +650,7 @@ export class LogRelay {
       const content = sha256(eventSigningInput({ org: org.head.org, project }, event));
       const seen = this.#ctx.index.seen(project, content, event.writer, event.seq);
       if (seen.kind === 'replayed') return { spent: 'replayed', reason: 'seen-nonce', message: `replayed: its signed content arrived at ${seen.writer}:${seen.seq} before` };
-      const entry = this.#ctx.index.stage(project, content, event.writer, event.seq);
-      if (entry !== null) staged.push(entry);
+      if (seen.kind === 'new') this.#ctx.index.record(project, content, event.writer, event.seq);
       if (name !== null && isIsoMillis(event.created)) this.#saw(name, event.created);
       const owners = await verifiedOwners(event, org.head, org.certificates, this.#ctx.log);
       return { deliver: { event, signer, ...(owners === undefined ? {} : { owners }) } };

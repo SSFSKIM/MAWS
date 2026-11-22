@@ -153,4 +153,20 @@ describe('the certificate set, its signatures verified once', () => {
     expect(await keyId(long)).toBe(await keyId(long));
     expect(digest).toHaveBeenCalledTimes(2);
   });
+
+  it('views a certificate by the body it authenticated: one replaced while the set is judged lends it no key', async () => {
+    const delegation = await generateSigningKey();
+    const machine = await generateSigningKey();
+    const intruder = await generateSigningKey();
+    const s = state(delegation);
+    const genuine = await cert(delegation, machine, 'a', 'vm-one', 1);
+    const record: Signed<MachineCert> = { body: genuine.body, sig: genuine.sig };
+    const set: Certificates = { certs: [record], retirements: [] };
+    const judging = machineSigners(s, 'vm-one', set, after);
+    record.body = { ...genuine.body, pub: intruder.pub };
+    expect(await judging).toEqual([{ pub: machine.pub, notAfter: EXPIRES }]);
+    // Judged again as it now stands: a body its delegation never signed, so no signer at all.
+    expect(await machineSigners(s, 'vm-one', set, after)).toEqual([]);
+  });
 });
+

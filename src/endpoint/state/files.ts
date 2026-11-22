@@ -73,6 +73,22 @@ export function removeFile(dir: string, name: string): void {
   syncDirectory(dir);
 }
 
+/** Fsyncs the file at `path` (an fsync is the file's, whichever descriptor asks); nothing when it is gone. */
+export function syncFile(path: string): void {
+  let fd: number;
+  try {
+    fd = fs.openSync(path, 'r');
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return;
+    throw error;
+  }
+  try {
+    fs.fsyncSync(fd);
+  } finally {
+    fs.closeSync(fd);
+  }
+}
+
 export function syncDirectory(dir: string): void {
   const fd = fs.openSync(dir, 'r');
   try {
@@ -90,11 +106,12 @@ export function sweepTemporaries(dir: string): void {
 /**
  * Appends `lines` (each without its newline) to `dir/name`, created 0600 when absent, and fsyncs the file before it
  * returns: an append-only record (the signature ledger, the inbound index) is on disk before anything it vouches for
- * leaves. What follows the last newline is settled first, as `readLines` reads it: a whole record that lost only its
+ * leaves. `sync: false` leaves the file's fsync to the caller (`syncFile`), which then runs it before anything leaves
+ * (a new file's directory is fsynced here either way). What follows the last newline is settled first, as `readLines` reads it: a whole record that lost only its
  * newline (a crash between the two) is kept and terminated, and a torn one (a crash mid-record, which doesn't parse)
  * is cut off, so the new lines never join it. A file that isn't private is refused (checkPrivateFile).
  */
-export function appendLines(dir: string, name: string, lines: readonly string[]): void {
+export function appendLines(dir: string, name: string, lines: readonly string[], options: { sync?: boolean } = {}): void {
   const path = join(dir, name);
   const created = !checkPrivateFile(path);
   const fd = fs.openSync(path, 'a+', 0o600);
@@ -103,7 +120,7 @@ export function appendLines(dir: string, name: string, lines: readonly string[])
     const bytes = Buffer.from(lines.map((line) => `${line}\n`).join(''), 'utf8');
     let at = 0;
     while (at < bytes.length) at += fs.writeSync(fd, bytes, at, bytes.length - at);
-    fs.fsyncSync(fd);
+    if (options.sync !== false) fs.fsyncSync(fd);
   } finally {
     fs.closeSync(fd);
   }
