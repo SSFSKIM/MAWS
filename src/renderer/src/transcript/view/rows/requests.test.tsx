@@ -275,6 +275,22 @@ describe('boundary row', () => {
     expect(element.querySelector('button')).toBeNull();
   });
 
+  // The touch rule (ticket 830): where nothing points, the second sentence stands after the line's words, drawn by the
+  // stylesheet alone (ui/touch-fact.test.tsx) and hidden from assistive technology, which hears it as their description
+  it('stands a fork’s second sentence after its words for a screen that cannot point, hidden from assistive technology', async () => {
+    const b = builder();
+    b.turn('u1');
+    b.text('m1', 0, 'Previous path');
+    b.emit('boundary.retraction', { retractedMessageUuids: [uuid('m1-u0')], reason: 'transcript_branch', fallbackModel: null });
+    b.end(['u1']);
+    const store = await storeWith(b.events);
+    renderRow(ofKind(store.rows(), 'boundary')[0], { storeKey: store.key });
+    const owner = screen.getByText('Continued from an earlier point');
+    const fact = [...owner.parentElement!.children].find((element) => element.hasAttribute('data-touch-fact'))!; // after the words
+    expect([fact.getAttribute('data-touch-fact'), fact.getAttribute('aria-hidden')]).toEqual(['', 'true']);
+    expect(fact.textContent).toBe(document.getElementById(owner.getAttribute('aria-describedby')!)!.textContent);
+  });
+
   it('transcript/boundaries: compaction and retraction read as boundaries, and the retracted text row is gone from where the boundary stands', async () => {
     const store = await expanded(journalToEvents(loadSyntheticJournal('boundaries')));
     const boundaries = ofKind(store.rows(), 'boundary');

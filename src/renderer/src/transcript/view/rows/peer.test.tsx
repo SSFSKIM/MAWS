@@ -173,6 +173,25 @@ describe('a message from another session', () => {
     expect(screen.queryByRole('status')).toBeNull();
   });
 
+  // The touch rule (ticket 830): where nothing points, the why stands under the line, drawn by the stylesheet alone
+  // (ui/touch-fact.test.tsx) and hidden from assistive technology, which hears it as the line's description; outside the
+  // live line, so nothing extra is announced; a failure has no why and draws none
+  it('stands why it waits under the line for a screen that cannot point, hidden from assistive technology', () => {
+    live();
+    const { source, put } = replies();
+    renderRow(inbound(), { storeKey: A, actions: { ...spyActions(), peerReplies: source } });
+    fireEvent.click(screen.getByRole('button', { name: 'Reply' }));
+    put(B, { text: 'on it', state: { kind: 'forwarded' } });
+    const line = screen.getByRole('status');
+    const fact = [...line.parentElement!.children].find((element) => element.hasAttribute('data-touch-fact'))!; // under the line
+    expect([fact.getAttribute('data-touch-fact'), fact.getAttribute('aria-hidden')]).toEqual(['block', 'true']);
+    expect(fact.textContent).toBe('Session A is replying with SendMessage');
+    expect(fact.textContent).toBe(document.getElementById(line.getAttribute('aria-describedby')!)!.textContent);
+    expect(line.querySelector('[data-touch-fact]')).toBeNull();
+    put(B, { text: 'on it', state: { kind: 'failed', message: 'the engine discarded it before starting it' } });
+    expect(document.querySelector('.transcript-peer-composer [data-touch-fact]')).toBeNull();
+  });
+
   // E11 W-D (tracker row E7 "paraphrased peer reply reads notSent"): the relay store keeps a failed reply's text, so a
   // composer mounted again (its row virtualised away and back) puts it back in the box
   it('puts a failed reply’s text back in the box when the composer mounts again', () => {

@@ -99,17 +99,18 @@ describe('the browser action row', () => {
     expect(described(container.querySelector<HTMLElement>('[data-browser-heading]')!)).toBe('3.4s');
   });
 
-  // Fix wave (scalpel-3#1): where nothing points (a phone's desk) the tip cannot open, so the time stands on the line,
-  // drawn only there (the stylesheet's `(hover: none)`, pointed-actions.test.ts) and hidden from assistive technology,
-  // which hears it as the phrase's description
+  // Fix wave (scalpel-3#1; the touch rule, ticket 830): where nothing points (a phone's desk) the tip cannot open, so
+  // the time stands on the line, drawn only there by the stylesheet (ui/touch-fact.test.tsx) and hidden from assistive
+  // technology, which hears it as the phrase's description
   it('carries its time on the line for a screen that cannot point, hidden from assistive technology', () => {
     const { container } = renderRow(row({ ms: 3_400, waitedFor: 'human', waitedMs: 3_000 }), { storeKey: APP });
-    const time = container.querySelector<HTMLElement>('.transcript-browser-action-line > .transcript-browser-action-time')!;
+    const time = container.querySelector<HTMLElement>('.transcript-browser-action-line > [data-touch-fact]')!;
     expect(time.textContent).toBe('3.4s · waited 3.0s for you');
-    expect(time.getAttribute('aria-hidden')).toBe('true');
+    expect(time.textContent).toBe(described(container.querySelector<HTMLElement>('[data-browser-heading]')!));
+    expect([time.getAttribute('data-touch-fact'), time.getAttribute('aria-hidden')]).toEqual(['', 'true']);
     cleanup();
     const running = renderRow(row({ state: 'running', ms: null, answered: false }), { storeKey: APP }).container;
-    expect(running.querySelector('.transcript-browser-action-time')).toBeNull();
+    expect(running.querySelector('[data-touch-fact]')).toBeNull();
   });
 
   it('draws its actions on pointing or focus within the line, and keeps them while the snapshot is open (T106)', () => {

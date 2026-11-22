@@ -108,6 +108,19 @@ describe('the context ring', () => {
     expect(fake.invoked('session.getContextUsage')).toEqual([{ appSessionId: A_ID, detail: 'full' }]);
   });
 
+  // The touch rule (ticket 830): where nothing points, what waits on the figures stands under them, drawn by the
+  // stylesheet alone (ui/touch-fact.test.tsx) and hidden from assistive technology, which hears it as their description
+  it('stands the percentage and what is left under the figures for a screen that cannot point, hidden from assistive technology', async () => {
+    mount({ 'session.getContextUsage': CONTEXT, 'session.catalog': catalog(['model', 'cost']) });
+    fireEvent.click(ring());
+    await settle();
+    const figures = within(screen.getByRole('dialog', { name: 'Context window' })).getByText('47k of 200k · compacts at 167k');
+    const fact = [...figures.parentElement!.children].find((element) => element.hasAttribute('data-touch-fact'))!; // under the figures
+    expect([fact.getAttribute('data-touch-fact'), fact.getAttribute('aria-hidden')]).toEqual(['block', 'true']);
+    expect(fact.textContent).toBe('23.4% used · 120k until compaction');
+    expect(fact.textContent).toBe(document.getElementById(figures.getAttribute('aria-describedby')!)!.textContent);
+  });
+
   it('Compact sends /compact when the catalogue lists it and it is not terminal-only (the word cut, C49: "Compact")', async () => {
     mount({ 'session.getContextUsage': CONTEXT, 'session.catalog': catalog(['compact']), 'session.send': { messageUuid: null, disposition: 'queued', queueId: 'q1' } });
     fireEvent.click(ring());

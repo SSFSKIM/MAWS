@@ -180,6 +180,28 @@ describe('subagent row', () => {
     act(() => words.focus());
     expect(screen.getByRole('tooltip').textContent).toMatch(/^Survey · Read · \d+s$/);
   });
+
+  // The touch rule (ticket 830): where nothing points, what each working agent is doing stands under the line, whichever
+  // owner carries it (the line, the words, a glyph), drawn by the stylesheet alone (ui/touch-fact.test.tsx) and hidden from
+  // assistive technology, which hears it as that owner's description; an ended agent has none
+  it('stands what it is doing under its line for a screen that cannot point, hidden from assistive technology', async () => {
+    const b = started();
+    b.emit('tool.use', { toolUseId: tool('c1'), toolName: 'Read', input: { file_path: '/p/one.txt' }, apiMessageId: 'mc' as never, messageUuid: null }, { parentToolUseId: parent('a1') });
+    const store = await storeWith(b.events);
+    const row = rowOf(store.rows(), 'subagent');
+    const fact = (root: Element) => root.querySelector<HTMLElement>('.transcript-subagent > [data-touch-fact="block"]');
+    const view = renderRow(row, { storeKey: store.key });
+    expect(fact(view.container)!.textContent).toMatch(/^Survey · Read · \d+s$/);
+    expect(fact(view.container)!.textContent).toBe(described(screen.getByRole('button', { name: 'Working Survey' })));
+    expect(fact(view.container)!.getAttribute('aria-hidden')).toBe('true');
+    view.unmount();
+    const plain = renderRow(row, { storeKey: store.key, actions: { ...NO_ACTIONS } });
+    expect(fact(plain.container)!.textContent).toBe(described(plain.container.querySelector('.transcript-subagent-sentence')!));
+    plain.unmount();
+    b.emit('subagent.finished', { taskId: task('k1'), status: 'completed', summary: null, outputFile: null, reason: null });
+    const ended = await storeWith(b.events);
+    expect(fact(renderRow(rowOf(ended.rows(), 'subagent'), { storeKey: ended.key }).container)).toBeNull();
+  });
 });
 
 // The texts an element's `aria-describedby` names, joined.
@@ -211,6 +233,8 @@ describe('grouped subagent rows', () => {
       const reviewer = screen.getByRole('button', { name: 'Open Reviewer' });
       expect(described(reviewer)).toMatch(/^Reviewer · Read · \d+s$/);
       expect(screen.getByRole('button', { name: 'Open Tester' }).hasAttribute('aria-describedby')).toBe(false); // it has ended
+      // the touch rule (ticket 830): where nothing points, the working children's details stand under the line
+      expect(document.querySelector('.transcript-subagent > [data-touch-fact="block"]')!.textContent).toBe(described(reviewer));
       act(() => reviewer.focus());
       const tip = () => screen.getByRole('tooltip').textContent ?? '';
       expect(tip()).toMatch(/^Reviewer · Read · \d+s$/);

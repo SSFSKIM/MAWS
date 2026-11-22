@@ -119,4 +119,25 @@ describe('a delivery on another machine’s session', () => {
     expect(actions.openDelivered).toHaveBeenCalledExactlyOnceWith(REMOTE, '/repo/report.pdf');
     expect(actions.revealDelivered).not.toHaveBeenCalled();
   });
+
+  // The touch rule (ticket 830): where nothing points, what a button's tip says (what it does here, why it is greyed)
+  // stands after it, drawn by the stylesheet alone (ui/touch-fact.test.tsx) and hidden from assistive technology, which
+  // hears it as the button's description; a button with no tip draws none
+  it('stands each button’s tip after it for a screen that cannot point, hidden from assistive technology', () => {
+    const REMOTE = addressOf(OTHER_MACHINE, 'app-r' as AppSessionId);
+    useMachines.getState().applyRoster([
+      { ref: TEST_MACHINE, name: 'This Mac', local: true, state: 'up', since: '2026-10-31T10:00:00Z', generation: 0 },
+      { ref: OTHER_MACHINE, name: 'mini', local: false, state: 'up', since: '2026-10-31T10:00:00Z', generation: 0 },
+    ]);
+    applyRemoteSession(remoteSessionState(REMOTE));
+    renderRow({ ...ROW, files: [{ path: '/repo/report.pdf', name: 'report.pdf', id: 'd-1' }] }, { storeKey: REMOTE });
+    const buttons = ['Open externally: report.pdf', 'Reveal in Finder: report.pdf'].map((name) => screen.getByRole('button', { name }));
+    const drawn = [...buttons[0]!.closest('.transcript-delivery-actions')!.children]; // each button, its tip's fact after it
+    const facts = buttons.map((button) => drawn.slice(drawn.indexOf(button)).find((element) => element.hasAttribute('data-touch-fact'))!);
+    expect(facts.map((fact) => [fact.getAttribute('data-touch-fact'), fact.getAttribute('aria-hidden')])).toEqual([['', 'true'], ['', 'true']]);
+    expect(facts.map((fact) => fact.textContent)).toEqual(buttons.map((button) => document.getElementById(button.getAttribute('aria-describedby')!)!.textContent));
+    expect(drawn.indexOf(facts[0]!)).toBeLessThan(drawn.indexOf(buttons[1]!));
+    cleanup();
+    expect(renderRow(ROW, { storeKey: APP }).container.querySelector('[data-touch-fact]')).toBeNull();
+  });
 });
