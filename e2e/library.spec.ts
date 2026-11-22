@@ -985,7 +985,9 @@ test('an agent deletes its own draft while a tab shows it: the row reads Deleted
     await expect(undo).toBeEnabled({ timeout: 15_000 }); // once the library has answered
     await undo.click();
     await expect(row.locator('[data-artifact-heading]')).toHaveText('Restored Draft plan', { timeout: 20_000 });
-    await expect(row.getByRole('button', { name: 'Open', exact: true })).toBeVisible();
+    const opens = row.getByRole('button', { name: 'Restored Draft plan', exact: true }); // the word cut (T103): the heading is the press
+    await expect(opens).toBeVisible();
+    await expect(opens).toHaveAccessibleDescription('Open');
     await expect(row.locator('[data-artifact-line]')).toHaveCount(0);
     expect(value(await invoke(page, 'artifacts.get', { artifactId: draft.artifactId })).artifact?.title).toBe('Draft plan');
 

@@ -289,6 +289,16 @@ test.afterEach(() => {
 });
 
 /** The fake machine replaying `recording`, its session joined, and the phone on its channel. */
+// Taps a disclosure in the session view until it reads `expanded`. The view can scroll itself back between Playwright's
+// scroll into view and the tap's landing, so a tap can miss; it is tapped again only while it still reads the other
+// way, so a tap that landed is never undone.
+async function tapUntil(control: Locator, expanded: 'true' | 'false', message: string): Promise<void> {
+  await expect(async () => {
+    if ((await control.getAttribute('aria-expanded')) !== expanded) await control.click({ timeout: 2_000 });
+    await expect(control).toHaveAttribute('aria-expanded', expanded, { timeout: 1_000 });
+  }, message).toPass();
+}
+
 async function openReplay(page: Page, hub: HubDouble, recording: Recording): Promise<{ fm: FakeMachineReplay; view: Locator }> {
   await stageProject(hub);
   const replay = (fm = new FakeMachineReplay(hub, { project: PROJECT, machine: MACHINE }, { recording, producer: 'dc8' }));
@@ -381,8 +391,7 @@ test("@layout a session's channel on the phone is its session view: its record l
   }
 
   // A tap opens a call's input and output in place; their long lines wrap or scroll inside it.
-  await bash.click();
-  await expect(bash).toHaveAttribute('aria-expanded', 'true');
+  await tapUntil(bash, 'true', 'the call opened in place');
   const detail = view.locator(`[data-turn-id="${turn}"] .transcript-cell[data-expanded]`);
   await expect(detail).toContainText(LONG_COMMAND);
   await expect(detail).toContainText('2 passed');
@@ -409,12 +418,13 @@ test("@layout a session's channel on the phone is its session view: its record l
   expect(words.length, 'the output’s words were read').toBeGreaterThan(0);
   const covers = (a: { x: number; y: number; width: number; height: number }) => a.x < glyph.x + glyph.width && glyph.x < a.x + a.width && a.y < glyph.y + glyph.height && glyph.y < a.y + a.height;
   expect(words.filter(covers), `the copy glyph (${JSON.stringify(glyph)}) covers none of the output’s words`).toEqual([]);
-  await bash.click();
-  await expect(bash).toHaveAttribute('aria-expanded', 'false');
+  await tapUntil(bash, 'false', 'the call folded again');
 
-  // Folded again to the report.
-  await opened.click();
-  await expect(closed).toHaveText('› working record');
+  // Folded again to the report (its open line leaves when the tap lands, so it is tapped again only while it stands).
+  await expect(async () => {
+    if ((await opened.count()) > 0) await opened.click({ timeout: 2_000 });
+    await expect(closed).toHaveText('› working record', { timeout: 1_000 });
+  }, 'the record folded to the report').toPass();
   await expect(closed).toHaveAttribute('aria-expanded', 'false');
   await expect(view.locator(`[data-row-id="divider:${turn}"]`)).toHaveCount(0);
   await expect(view).not.toContainText('Ran the phone layout cases in WebKit');

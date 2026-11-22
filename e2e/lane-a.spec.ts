@@ -1602,8 +1602,9 @@ test.describe('lane A: a terminal session driven through its bridge', () => {
     await expect(notice(page)).toContainText('read-only');
     const row = await openBlocked(page, blockedId(records));
     const button = row.getByRole('button', { name: APPROVE });
-    await expect(button).toBeDisabled();
-    await expect(button).toHaveAttribute('title', /^Held by /);
+    await expect(button).toBeDisabled(); // drawn aria-disabled, still in the Tab order (the word cut, N102)
+    await expect(button).toHaveAttribute('aria-disabled', 'true');
+    await expect(button).toHaveAccessibleDescription(/^Held by /); // the reason its tooltip and its description
     await test.info().attach('u1c-s4-held', { body: await main(page).screenshot(), contentType: 'image/png' });
 
     // its bridge comes up, the session idle: offered

@@ -63,7 +63,7 @@ import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpath
 import { connect, createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { expect, test, type ElectronApplication, type Page } from '@playwright/test';
+import { expect, test, type ElectronApplication, type Locator, type Page } from '@playwright/test';
 import { isolatedGitEnv } from '../test/support/git-env';
 import type { MachineState } from '../src/shared/ipc/schema/machines';
 import type { SessionEvent } from '../src/shared/graph/events';
@@ -264,6 +264,8 @@ function keepMainLines(launch: MawsLaunch): void {
 const mainSaid = (page: Page) => (mainLines.get(page) ?? []).slice(-60).join('\n');
 
 const main = (page: Page) => page.locator('[data-region="main"]');
+// A transcript artifact row's heading, which is the press that opens it, "Open" its description (the word cut, T103).
+const artifactOpener = (row: Locator, title: string) => row.getByRole('button', { name: new RegExp(`^(Artifact|Updated artifact) ${title}( · v\\d+)?$`) });
 const composerOf = (page: Page) => main(page).getByRole('textbox', { name: 'Message' });
 // A row of the sidebar expanded (read back until it holds: a restored layout may expand it under the click): a machine's
 // row (T3: another machine's sessions whose project is listed nowhere, design §12's `known` included), or a registry
@@ -1119,7 +1121,8 @@ test('A reaches B’s mawsd over RL2, through the hub and then directly, and dri
       // from B, and the text artifact reads there
       const pageCall = main(again).locator('section.transcript-artifact[data-artifact-state="registered"]').filter({ hasText: REPORT.title });
       await quoting(expect(pageCall, 'the page’s row in B’s transcript, registered').toBeVisible({ timeout: 60_000 }), () => mainSaid(again));
-      await pageCall.getByRole('button', { name: 'Open', exact: true }).click();
+      await expect(artifactOpener(pageCall, REPORT.title)).toHaveAccessibleDescription('Open');
+      await artifactOpener(pageCall, REPORT.title).click();
       const tool = surface(again, 'artifacts');
       const pageRecord = tool.locator(`[data-artifact-record="${report.id}"]`);
       await quoting(expect(pageRecord, 'the page in the session’s Artifacts tool').toBeVisible({ timeout: 60_000 }), async () => `${await paneSaid(again)}\n${mainSaid(again)}`);
@@ -1297,7 +1300,7 @@ test('A reaches B’s mawsd over RL2, through the hub and then directly, and dri
       const [heading, paragraph] = [/<h1>([^<]*)<\/h1>/.exec(onB)?.[1], /<p>([^<]*)<\/p>/.exec(onB)?.[1]];
       expect([heading, paragraph], 'B’s store holds the page').toEqual(['Report from B', 'Rendered on B, saved on A.']);
       const pageCall = main(again).locator('section.transcript-artifact[data-artifact-state="registered"]').filter({ hasText: REPORT.title });
-      await pageCall.getByRole('button', { name: 'Open', exact: true }).click();
+      await artifactOpener(pageCall, REPORT.title).click();
       const tool = surface(again, 'artifacts');
       const pageRecord = tool.locator(`[data-artifact-record="${report.id}"]`);
       await quoting(expect(pageRecord, 'the page in the session’s Artifacts tool').toBeVisible({ timeout: 60_000 }), async () => `${await paneSaid(again)}\n${mainSaid(again)}`);
@@ -1399,7 +1402,7 @@ test('A reaches B’s mawsd over RL2, through the hub and then directly, and dri
       // query's schedule
       await sessionTab.click();
       const pageCall = main(again).locator('section.transcript-artifact[data-artifact-state="registered"]').filter({ hasText: REPORT.title });
-      await pageCall.getByRole('button', { name: 'Open', exact: true }).click();
+      await artifactOpener(pageCall, REPORT.title).click();
       const tool = surface(again, 'artifacts');
       const reportRecord = tool.locator(`[data-artifact-record="${report.id}"]`);
       await quoting(expect(reportRecord, 'the page in the session’s Artifacts tool').toBeVisible({ timeout: 60_000 }), async () => `${await paneSaid(again)}\n${mainSaid(again)}`);
@@ -1451,7 +1454,7 @@ test('A reaches B’s mawsd over RL2, through the hub and then directly, and dri
       // the consent opened on A, the redirect relayed to B, where the code is exchanged and the grant sealed
       const reopenLibrary = async () => {
         await sessionTab.click();
-        await pageCall.getByRole('button', { name: 'Open', exact: true }).click();
+        await artifactOpener(pageCall, REPORT.title).click();
         await reportRecord.getByRole('button', { name: 'Back', exact: true }).click();
         await tool.getByRole('button', { name: 'Open library', exact: true }).click();
       };
