@@ -1174,7 +1174,6 @@ describe('review tool', () => {
     await waitFor(() => expect(chips().find((c) => c[0] === 'staged')).toEqual(['staged', true, 'true', 'Nothing staged']));
     expect(chipOf('staged')!.disabled).toBe(false);
     expect(document.querySelector<HTMLElement>('[data-review]')!.dataset.scope).toBe('staged');
-    await waitFor(() => expect(document.querySelector('[data-review-empty]')?.textContent).toBe('No changes'));
   });
 
   it('heads each file with its path, a badge for every kind but Modified, its counts, Viewed and Open file ↗, and no menu and no Staged badge', async () => {

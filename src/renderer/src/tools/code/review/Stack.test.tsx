@@ -583,7 +583,7 @@ describe('the stack laid out', { timeout: SUITE_TIMEOUT }, () => {
     await waitFor(() => expect(sectionOf(held.path).querySelector('[data-review-file-changed]')).not.toBeNull());
     await page.settle();
     expect(page.headerOf(held.path)).toBe(HEADER + 28);
-    const at = Number(/hunk (\d+) of/.exec(hunkLabel()!)![1]) - 1;
+    const at = Number(/^(\d+) \//.exec(hunkLabel()!)![1]) - 1;
     for (let n = at; n < 3; n++) next(); // to the held file's second hunk
     for (let n = at; n > 3; n--) fireEvent.click(screen.getByLabelText('Previous hunk'));
     await page.settle();
