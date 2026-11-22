@@ -2,9 +2,8 @@
 // status line is gone): `session.getContextUsage { detail: 'full' }` read on open (fresh for 10 s), the digest's
 // percentage while it loads; `<used> of <max> · compacts at <threshold>` on one line, whose percentage and tokens left
 // until compaction wait on that line for the pointer or focus (the word cut, C46; under it where nothing points, the
-// touch rule, ticket 830), a segmented bar of what occupies the
-// window with the threshold marked, the categories, and `Compact` (C49), which sends `/compact` when the session's
-// catalogue lists it as a headless command.
+// touch rule, ticket 830), a segmented bar of what occupies the window with the threshold marked, the categories, and
+// `Compact` (C49), which sends `/compact` when the session's catalogue lists it as a headless command.
 // P2-A (X17): with no live process, the last reading the engine host kept for the session, labelled with when ("Last
 // reading, 3 hours ago"), else the digest's, else "Not observed yet"; nothing is read from the engine and nothing starts
 // on open; its Refresh (M3) is the owner's gesture that starts the session.
