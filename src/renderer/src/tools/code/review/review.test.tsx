@@ -1168,7 +1168,7 @@ describe('review tool', () => {
     render(<TestHost />);
     await waitFor(() => expect(document.querySelector('[data-review-unavailable]')?.textContent).toBe('Diff unavailable: git busy'));
     expect(document.querySelector('[data-review-unavailable]')!.matches('[data-review-scope-words]')).toBe(false);
-    expect(document.querySelector('[data-review-unavailable]')!.tabIndex).toBe(-1);
+    expect(document.querySelector<HTMLElement>('[data-review-unavailable]')!.tabIndex).toBe(-1);
     expect(scopeWords()).toBe('main · Working tree against HEAD');
   });
 
