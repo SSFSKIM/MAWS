@@ -252,7 +252,8 @@ function viewer(): CodeHarnessViewer | null {
     path: tab.path,
     kind: entry.kind,
     line: tab.line,
-    notice: root?.querySelector('[role="status"][data-notice]')?.textContent ?? null,
+    // the word cut (T324): a long file's arrival is a ring whose words are its name; every notice carries them as data
+    notice: root?.querySelector('[role="status"][data-notice], [role="progressbar"][data-notice]')?.getAttribute('data-notice') ?? null,
     lines,
     sourceView: entry.sourceView,
     language: root?.querySelector<HTMLElement>('[data-code-view]')?.dataset.language || null,

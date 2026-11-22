@@ -93,7 +93,8 @@ function CloseSheet({ open }: { open: Extract<EditorDialog, { kind: 'close' }> }
 
 const dismiss = () => useEditorDialog.setState({ open: null });
 
-// Any X10 anchor since E3 widened the seam; the fields a kind does not carry are left out.
+// Any X10 anchor since E3 widened the seam; the fields a kind does not carry are left out. The word cut (T352): no
+// sentence about the build plan above them.
 function AnchorPlaceholder({ anchor }: { anchor: Anchor }) {
   const line = anchor.line === undefined ? undefined : String(anchor.line);
   const fields: [string, string][] = [
@@ -114,7 +115,6 @@ function AnchorPlaceholder({ anchor }: { anchor: Anchor }) {
       data-anchor-line={line}
     >
       <div className="flex flex-col gap-3">
-        <p className="m-0 text-fg-muted">{EDITOR_COPY.anchorBody}</p>
         <dl className="m-0 grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 font-mono text-ui-sm">
           {fields.map(([name, value]) => (
             <div key={name} className="contents">

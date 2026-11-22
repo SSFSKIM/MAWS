@@ -1,6 +1,6 @@
 // The `fileTab` slot (C8c execution document, Interfaces *Viewer kinds and caps*; K4, the only reader of file bytes in
 // the renderer): a thin static shell over the viewer store that draws a file by its kind, read-only. CodeMirror loads
-// on first use behind React.lazy (ruled 2026-09-29, O2), under the `Loading` notice. A tab with no session (or one main
+// on first use behind React.lazy (ruled 2026-09-29, O2), under the wait's quiet spinner. A tab with no session (or one main
 // does not know) can only say so, since the allowlist is per session.
 //
 // E5: a code view of an editable entry edits; the bar carries the editor's controls (`editor/EditorControls.tsx`), and
@@ -37,6 +37,11 @@
 // stood: the sentences, the path (with Copy path where the path is outside the folders), Retry where reading again can
 // help, and the command's own words last, small. A folder macOS protects on another machine keeps U6f's sentence and
 // button inside the same block, the classifier not asked.
+//
+// The word cut (docs/doperpowers/specs/2026-11-16-word-cut-design.md, M3 task 5): a read on its way is the quiet spinner
+// (T302); Wrap is a check item of the View menu behind a glyph (T305, `bar-parts.tsx`); a head's notice is its two sizes
+// (T322), a long file's arrival a ring with its sizes as its tip (T324); the "Read-only" panel's sentence drops what the
+// button above it says, and the Open File… step its button says (N16 to N20).
 import { Popover } from 'radix-ui';
 import { lazy, Suspense, useCallback, useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import type { AppSessionId } from '@shared/graph/ids';
@@ -44,22 +49,23 @@ import type { TabRef } from '@shared/ipc/schema/layout';
 import { opensExternally } from '@shared/ipc/schema/files';
 import { ChevronDownIcon } from '../../../app/IconButton';
 import { useMainAreaOnScreen } from '../../../app/shell-view'; // UX wave U6b-2 (Decision Log 35)
-import { NOTICE_COPY, OPEN_FILE_COPY, VIEWER_COPY } from '../copy';
+import { EDITOR_COPY, NOTICE_COPY, OPEN_FILE_COPY, VIEWER_COPY } from '../copy';
 import '../code.css';
 import { EditorControls, SaveFailure } from '../editor/EditorControls';
 import { useRemoteStanding } from '../../../lane-b/remote-standing';
 import { useTakesRemoteRoute } from '../files/elsewhere';
 import { describeElement, FILE_TAKE_BOUND_MS, keyboardWaits, releaseKeyboard, traceKeyboard, useKeyboardRequest } from '../files/finder';
 import { openChosenFor } from '../files/open-chosen';
+import { ArrivalRing, ViewMenu } from './bar-parts';
 import { ExternalRow, OpenExternally, rowButton } from './ExternalRow';
-import { FrameBody } from './FrameBody';
+import { FrameBody, Waiting } from './FrameBody';
 import { ImageView } from './ImageView';
 import { CODE_CAP } from './kinds';
 import { MarkdownView } from './MarkdownView';
 import { useMediaZoom, ZoomControls, type MediaZoom } from './MediaZoom';
 import { classifyFailure, type NoticeCause } from './notice'; // UX wave U6b-4b
 import { useNoticePlace } from './notice-place'; // UX wave U6b-4b
-import { readOnlyReason, readOnlyWords, useViewer, type ArtifactRead, type ReadOnlyReason, type ViewerEntry } from './viewer-store';
+import { elsewhereWords, readOnlyReason, useViewer, type ArtifactRead, type ReadOnlyReason, type ViewerEntry } from './viewer-store';
 import { OpenInButton } from '../../../open-in/OpenInMenu'; // UX wave U6b-4a
 import { shownLine } from './shown-line'; // UX wave U6b-4a
 
@@ -122,6 +128,11 @@ type LabelledReason = 'maws' | 'elsewhere' | 'added' | 'result' | 'linked' | 'ou
 const labelled = (reason: ReadOnlyReason | null): reason is LabelledReason =>
   reason === 'maws' || reason === 'elsewhere' || reason === 'added' || reason === 'result' || reason === 'linked' || reason === 'outside';
 
+// The word cut (N16 to N20): the panel's sentence and the button's description, without "Read-only: ", which the button
+// says, nor the Open File… step its button under the sentence says; another machine's is the standing's sentence.
+const panelWords = (reason: LabelledReason, entry: ViewerEntry, standing: Parameters<typeof elsewhereWords>[1]): string =>
+  reason === 'elsewhere' ? elsewhereWords(entry, standing)! : EDITOR_COPY.readOnlyPanel[reason];
+
 // UX wave U6e (§D, K2, K5, K8, K10, K11, K13): "Read-only", in the normal text colour, a button whose accessible
 // description is the reason's sentence; a press (Enter or Space with the keyboard on it) opens the panel under it with the
 // sentence and, under it at the left, where choosing the file makes it editable (only added, named only by a tool's
@@ -129,7 +140,7 @@ const labelled = (reason: ReadOnlyReason | null): reason is LabelledReason =>
 // and hidden from assistive technology, so the button keeps one target and one accessible name.
 // The panel is never wider than the file's column: min(24rem, the column's width less 1rem), the column measured as it
 // opens and its edges the panel's boundary.
-// UX wave U6f: the sentence is the entry's (`readOnlyWords`), and Open File… opens the chooser the session's files call for.
+// UX wave U6f: the sentence is the entry's (`panelWords`), and Open File… opens the chooser the session's files call for.
 function ReadOnlyLabel({ reason, sentence, appSessionId }: { reason: LabelledReason; sentence: string; appSessionId: AppSessionId }) {
   const trigger = useRef<HTMLButtonElement>(null);
   const [column, setColumn] = useState<Element | null>(null);
@@ -198,7 +209,7 @@ export function FileViewer({ tab, start, end, host, inView = true, agent = false
     return (
       <>
         {start}
-        {labelled(reason) ? <ReadOnlyLabel reason={reason} sentence={readOnlyWords(entry!, standing)!} appSessionId={appSessionId} /> : null}
+        {labelled(reason) ? <ReadOnlyLabel reason={reason} sentence={panelWords(reason, entry!, standing)} appSessionId={appSessionId} /> : null}
         <PathLead path={tab.path} savesTo={savesTo} outside={outsideOf(entry)} />
       </>
     );
@@ -336,7 +347,6 @@ function CopyPath({ path }: { path: string }) {
   );
 }
 
-const Loading = () => <p className="p-4 text-ui text-fg-muted">{VIEWER_COPY.loading}</p>;
 
 interface FileBodyProps {
   tabId: string; // the viewer store's key: a file tab's id, or the File artifact viewer's `artifact:<id>:<revision>`
@@ -509,7 +519,7 @@ export function FileBody({ tabId, appSessionId, path, line = null, readOnly = fa
         {end}
         {entry ? below?.(entry) : null}
       </div>
-      <div className="relative min-h-0 flex-1">{entry ? <Body entry={entry} wrap={wrap} zoom={zoom} host={host} inView={inView} artifactView={artifactView} onEditor={takesKeyboard === undefined ? undefined : onEditor} /> : <Loading />}</div>
+      <div className="relative min-h-0 flex-1">{entry ? <Body entry={entry} wrap={wrap} zoom={zoom} host={host} inView={inView} artifactView={artifactView} onEditor={takesKeyboard === undefined ? undefined : onEditor} /> : <Waiting />}</div>
     </div>
   );
 }
@@ -533,12 +543,12 @@ const barOpens = (entry: ViewerEntry) => entry.kind === 'frame' && entry.frame !
 const showsImage = (entry: ViewerEntry) => entry.kind === 'image' && !showsCode(entry);
 
 function Body({ entry, wrap, zoom, host, inView, artifactView, onEditor }: { entry: ViewerEntry; wrap: boolean; zoom: MediaZoom; host: 'side' | 'main'; inView: boolean; artifactView: boolean; onEditor?(focus: (() => void) | null): void }) {
-  if (entry.status === 'loading') return <Loading />;
+  if (entry.status === 'loading') return <Waiting />;
   if (entry.status === 'error') return <Refused entry={entry} />;
   if (entry.kind === 'frame') return <FrameBody entry={entry} host={host} inView={inView} />;
   if (showsCode(entry)) {
     return (
-      <Suspense fallback={<Loading />}>
+      <Suspense fallback={<Waiting />}>
         <CodeView entry={entry} wrap={wrap} onEditor={onEditor} />
       </Suspense>
     );
@@ -548,16 +558,19 @@ function Body({ entry, wrap, zoom, host, inView, artifactView, onEditor }: { ent
   return <ExternalRow entry={entry} />;
 }
 
-// The one notice a file carries: removed, a bounded head, or a load still completing.
+// The one notice a file carries: removed, a bounded head, or a load still completing (the word cut, T324: drawn as a ring).
 const noticeOf = (entry: ViewerEntry): string | null =>
-  entry.removed ? VIEWER_COPY.removed : entry.kind === 'head' ? VIEWER_COPY.head(entry.loaded, entry.bytes) : entry.complete ? null : VIEWER_COPY.continuing(entry.loaded, entry.bytes);
+  entry.removed ? VIEWER_COPY.removed : entry.kind === 'head' ? VIEWER_COPY.sizes(entry.loaded, entry.bytes) : entry.complete ? null : VIEWER_COPY.continuing(entry.loaded, entry.bytes);
+const arriving = (entry: ViewerEntry) => !entry.removed && entry.kind !== 'head' && !entry.complete;
 
 function Notices({ entry }: { entry: ViewerEntry }) {
   if (entry.status !== 'ready') return null;
   const notice = noticeOf(entry);
   return (
     <>
-      {notice ? (
+      {notice && arriving(entry) ? (
+        <ArrivalRing loaded={entry.loaded} bytes={entry.bytes} notice={notice} />
+      ) : notice ? (
         <span role="status" data-notice={notice} className={`shrink-0 ${entry.removed ? 'text-warning' : 'text-fg-muted'}`}>
           {notice}
         </span>
@@ -589,11 +602,7 @@ function Controls({ entry, wrap, zoom }: { entry: ViewerEntry; wrap: boolean; zo
           {entry.sourceView ? VIEWER_COPY.rendered : VIEWER_COPY.source}
         </button>
       ) : null}
-      {showsCode(entry) ? (
-        <button type="button" className={toggle} aria-pressed={wrap} onClick={() => useViewer.getState().setWrap(!wrap)}>
-          {VIEWER_COPY.wrap}
-        </button>
-      ) : null}
+      {showsCode(entry) ? <ViewMenu wrap={wrap} onWrap={(on) => useViewer.getState().setWrap(on)} /> : null}
     </span>
   );
 }

@@ -9,7 +9,11 @@
 // reasons, why the disk's version is offered and why it cannot be, keep their whole width, their words wrapping where
 // the bar is narrower than the sentence, and the controls' row wraps, so the counter and the buttons move to a further
 // line, in their order.
+// The word cut (docs/doperpowers/specs/2026-11-16-word-cut-design.md, M3 task 5): the disk's newer version reads
+// "Changed on disk" in the notice and the merge view alike (T341), the count "3 changes" (T342), why it cannot be merged
+// its short form (T343), and Save's tooltip is its chord alone, a tip the keyboard reaches (T338).
 import { useChordHint } from '../../../app/IconButton';
+import { Tip } from '../../../ui/tip';
 import { EDITOR_COPY } from '../copy';
 import { useViewer, type ViewerEntry } from '../viewer/viewer-store';
 import { step, useEditorNavigation } from './navigation';
@@ -58,8 +62,8 @@ export function EditorControls({ entry }: { entry: ViewerEntry }) {
       ) : null}
       {theirs !== null ? (
         <>
-          <span role="status" data-theirs-notice={theirs.view} title={theirs.view === 'notice' ? EDITOR_COPY.changedOnDisk : EDITOR_COPY.conflictOnSave} className="text-warning">
-            {theirs.view === 'notice' ? EDITOR_COPY.changedOnDisk : EDITOR_COPY.conflictOnSave}
+          <span role="status" data-theirs-notice={theirs.view} title={EDITOR_COPY.changedOnDisk} className="text-warning">
+            {EDITOR_COPY.changedOnDisk}
           </span>
           {changes !== null ? (
             <Counter tabId={tabId} kind="change" count={changes} label={EDITOR_COPY.changesFromDisk(changes)} previous={EDITOR_COPY.previousChange} next={EDITOR_COPY.nextChange} />
@@ -81,15 +85,11 @@ export function EditorControls({ entry }: { entry: ViewerEntry }) {
         <Counter tabId={tabId} kind="conflict" count={conflicts} label={EDITOR_COPY.conflicts(conflicts)} previous={EDITOR_COPY.previousConflict} next={EDITOR_COPY.nextConflict} />
       ) : null}
       {savable ? (
-        <button
-          type="button"
-          className={primary}
-          disabled={saving}
-          title={saveChord ? `${EDITOR_COPY.save} · ${saveChord}` : EDITOR_COPY.save}
-          onClick={() => void viewer().save(tabId)}
-        >
-          {saving ? EDITOR_COPY.saving : EDITOR_COPY.save}
-        </button>
+        <Tip content={saveChord} description={saveChord}>
+          <button type="button" className={primary} disabled={saving} onClick={() => void viewer().save(tabId)}>
+            {saving ? EDITOR_COPY.saving : EDITOR_COPY.save}
+          </button>
+        </Tip>
       ) : null}
     </span>
   );

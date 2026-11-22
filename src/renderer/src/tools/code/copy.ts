@@ -22,7 +22,9 @@ export const FILES_COPY = {
   refresh: 'Refresh',
   noSession: 'Open a session to see its files',
   roles: { directory: 'directory', additional: 'additional directory', worktree: 'worktree' },
-  symlink: (target: string | null) => `Symbolic link → ${target ?? 'unknown target'}`,
+  // The word cut (T316): a link's row reads its arrow and target; its kind's words stay for a screen reader
+  symlink: (target: string | null) => `→ ${target ?? 'unknown target'}`,
+  symlinkName: 'Symbolic link',
   empty: 'Empty directory',
   truncated: `Showing ${FILES_LIST_MAX_ENTRIES.toLocaleString('en-US')} of many entries`,
   // UX wave U6b-4b: a listing that failed reads the notice's sentences for a folder (NOTICE_COPY below)
@@ -42,7 +44,7 @@ export const FILES_COPY = {
   // ("File search is unavailable while <machine> is offline.")
   goToFile: 'Go to file',
   noMatchingFiles: 'No matching files',
-  searchingFiles: 'Searching files…', // the `@` menu's words
+  searchingFiles: 'Searching files', // the word cut (N1): the finder's quiet spinner's name
   searchFailed: 'Files could not be searched.',
   fileSearch: 'file search',
 } as const;
@@ -51,12 +53,16 @@ export const VIEWER_COPY = {
   source: 'Source',
   rendered: 'Rendered',
   wrap: 'Wrap',
+  view: 'View', // the word cut (T305): the menu that holds Wrap, behind a glyph its word names
   openExternally: 'Open externally',
-  externalKind: (kind: string) => `${kind} files open outside MAWS`,
-  binary: (bytes: number) => `Binary file · ${formatSize(bytes)}`,
-  head: (head: number, bytes: number) => `Showing the first ${formatSize(head)} of ${formatSize(bytes)}`,
+  // The word cut (T327, T328): a file MAWS does not draw reads its kind and its size on one line, above Open externally
+  externalKind: (kind: string, bytes: number) => `${kind} · ${formatSize(bytes)}`,
+  binary: (bytes: number) => `Binary · ${formatSize(bytes)}`,
+  // The word cut (T322, T324): the two sizes, a head's notice beside Load more and the tip of a long file's arrival ring,
+  // whose name keeps `continuing`
+  sizes: (part: number, bytes: number) => `${formatSize(part)} of ${formatSize(bytes)}`,
   loadMore: 'Load more',
-  loading: 'Loading',
+  loading: 'Loading', // the word cut (T302): the quiet spinner's name
   continuing: (loaded: number, bytes: number) => `Loading ${formatSize(loaded)} of ${formatSize(bytes)}`,
   noSession: 'No session grants access to this file',
   removed: 'File removed',
@@ -81,13 +87,21 @@ export const VIEWER_COPY = {
   zoomPercent: (scale: number) => `${Math.round(scale * 100)}%`,
   // UX wave U6b-2 (docs/doperpowers/plans/2026-11-15-ux-wave-U6b-2-file-frames.md, "The sentences a person reads"): a
   // framed file's failure body and its button, the line under an HTML page's bar, and the row's sentence per reason
-  frameStopped: 'This file stopped loading: it changed, or it can no longer be read.',
+  frameStopped: 'This file stopped loading.', // the word cut (N12): no guess at the cause
   openAgain: 'Open again',
   besideFiles: 'Shown without the files beside it',
-  tooLargeHere: (bound: number) => `Too large to show here: MAWS copies at most ${formatSize(bound)} from another machine.`,
+  tooLargeHere: 'Too large to show here', // the word cut (N14): the file's size under it is the fact
   videoUnplayable: 'This video can’t be played here.',
   soundUnplayable: 'This sound can’t be played here.',
-  olderService: 'MAWS’s service on this Mac is an older version, so this file can’t be shown here yet.',
+  olderService: 'This file can’t be shown here yet.', // the word cut (N15): Open externally under it is the way out
+} as const;
+
+// The word cut (T336): the ⌘F find bar's controls as conventional glyphs, through the editor library's own phrases
+// (`glyphs`, keyed by its phrase); each keeps its word as its accessible name and its tooltip (`words`, keyed by the
+// control's `name`). "all", "replace" and "replace all" keep the library's words.
+export const FIND_COPY = {
+  glyphs: { next: '↓', previous: '↑', 'match case': 'Aa', regexp: '.*', 'by word': 'ab|' },
+  words: { next: 'Next match', prev: 'Previous match', case: 'Match case', re: 'Regular expression', word: 'By word' },
 } as const;
 
 // UX wave U6b-4b (docs/doperpowers/plans/2026-11-18-ux-wave-U6b-4b-links.md, "The sentences a person reads"; decisions 9
@@ -97,7 +111,7 @@ type Subject = 'file' | 'folder';
 export const NOTICE_COPY = {
   outside: { file: 'This file is outside the folders this session works in.', folder: 'This folder is outside the folders this session works in.' },
   outsideOn: (subject: Subject, machine: string) => `This ${subject} is outside the folders this session works in on ${machine}.`,
-  threeWays: "MAWS opens a file from elsewhere when this session's transcript links it, when you choose it with File ▸ Open File…, or when the agent sends it.",
+  chooseIt: 'Choose it with File ▸ Open File…', // the word cut (N7): the way in, without how the app opens files
   askAgent: 'Ask the agent to send the file to see it here.',
   notFound: (subject: Subject, machine: string | null) => `No ${subject} at this path${machine === null ? '' : ` on ${machine}`}.`,
   unreachableHere: "MAWS's service on this Mac is not answering.",
@@ -210,11 +224,12 @@ export const EDITOR_COPY = {
   conflictOnSave: 'Changed on disk since you opened it',
   // E11 W-D: the disk's version under unsaved edits that cannot be shown as theirs, by why
   diskUnusable: {
-    head: 'Changed on disk: now larger than the editor’s cap, so it cannot be merged',
-    binary: 'Changed on disk: no longer text, so it cannot be merged',
-    encoding: 'Changed on disk: no longer UTF-8, so it cannot be merged',
+    // the word cut (T343): the fact, shortened
+    head: 'Changed on disk · too large to merge',
+    binary: 'Changed on disk · not text, can’t merge',
+    encoding: 'Changed on disk · not UTF-8, can’t merge',
   },
-  changesFromDisk: (n: number) => `${n} ${n === 1 ? 'change' : 'changes'} from disk`,
+  changesFromDisk: (n: number) => `${n} ${n === 1 ? 'change' : 'changes'}`, // the word cut (T342): the count beside ↑ ↓
   keepMineChunk: 'Keep mine', takeTheirs: 'Take theirs', previousChange: 'Previous change', nextChange: 'Next change',
   conflicts: (n: number) => `${n} ${n === 1 ? 'conflict' : 'conflicts'}`,
   acceptMine: 'Accept mine', acceptTheirs: 'Accept theirs', acceptBoth: 'Accept both',
@@ -236,21 +251,32 @@ export const EDITOR_COPY = {
     // save there, with the sentence of the window's helper
     elsewhere: (words: string) => `Read-only: ${words}`,
   },
+  // The word cut (N16 to N20): the sentence of the panel "Read-only" opens, and the button's description; the button says
+  // "Read-only" already, and the panel's Open File… under the sentence is the way to edit (the editor's title keeps
+  // `readOnly`'s words). A file of another machine's (`elsewhere`) is the standing's sentence alone.
+  readOnlyPanel: {
+    outside: 'The file is outside the folders this session works in',
+    maws: 'MAWS does not edit its own files',
+    added: 'This file is in the Library, not in this session’s folders.',
+    result: 'Only a tool’s output names this file in this conversation.',
+    linked: 'The file that links this one is read-only in this conversation.',
+  },
   comment: (line: number) => `Comment on line ${line}`,
-  anchorTitle: (label: string) => `Comment on ${label}`, anchorBody: 'The comment composer arrives with side threads (E3). This anchor will open it:', close: 'Close',
+  anchorTitle: (label: string) => `Comment on ${label}`, close: 'Close', // the word cut (T352): the placeholder sheet has no build-plan sentence
   // M5: the quit-when-idle banner's part (the quit question's own words are main's, in quit-guard.ts)
   unsavedFilesPart: (n: number) => `${n} unsaved ${n === 1 ? 'file' : 'files'}`,
   // UX wave U6e (§D, decision 18): an outside save's failure, after "Could not save: "
   outsideRefused: 'MAWS may no longer write this file for this session. Choose it with File ▸ Open File… to save it',
-  outsideUnavailable: 'MAWS’s service on this Mac is from an earlier version and cannot save a file from outside the session’s folders. Try again in a moment',
+  outsideUnavailable: 'a file outside the session’s folders can’t be saved yet. Try again in a moment', // the word cut (N25)
 } as const;
 
 // UX wave U6e (§D): Open File…, in the File menu's row, the Files list's menu and the Read-only panel.
 export const OPEN_FILE_COPY = {
   row: 'Open File…', // the menu row and the panel's button
   elsewhere: (machine: string) => `Open File… (this session runs on ${machine})`,
-  notAFile: 'Open File opens one file. A folder or an app’s package cannot be opened here.',
-  unavailable: 'MAWS could not open the file just now. Try Open File again in a moment.',
+  // the word cut (N26, N27): the reason alone, without the action's name
+  notAFile: 'A folder or an app’s package cannot be opened here.',
+  unavailable: 'Could not open the file. Try again in a moment.',
 } as const;
 
 // UX wave U6f (§E; Card 1 as the owner answered it): the chooser MAWS draws for Open File… when the files are on another
@@ -259,13 +285,12 @@ export const REMOTE_CHOOSER_COPY = {
   title: (machine: string) => `Open a file on ${machine}`,
   go: 'Go', up: '..', more: 'More…', open: 'Open', cancel: 'Cancel', back: 'Back', retry: 'Try again',
   private: 'private', link: 'link',
-  foot: (machine: string) => `Files on ${machine}, read as its MAWS service can read them.`,
-  reading: 'Reading the folders…',
+  reading: 'Reading the folders', // the word cut (N30): the quiet spinner's name; (N32) no foot line under the list
   empty: 'Nothing here',
   openPrivate: (folder: string, machine: string) => `Open ${folder} on ${machine}? macOS protects this folder, and opening it may show a privacy prompt on ${machine}’s own screen.`,
   unreadable: (machine: string) => `MAWS on ${machine} cannot read this folder.`,
   noAnswer: (machine: string) => `${machine} has not answered yet.`,
   unreachable: (machine: string) => `${machine} is not reachable.`,
   nothingThere: (machine: string) => `There is no file or folder at that path on ${machine}.`,
-  notAFile: 'Open File opens one file. A folder or an app’s package cannot be opened here.', // U6e's sentence
+  notAFile: 'A folder or an app’s package cannot be opened here.', // U6e's sentence (the word cut, N34)
 } as const;
