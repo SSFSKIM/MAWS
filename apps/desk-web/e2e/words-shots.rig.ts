@@ -16,7 +16,7 @@
 // photographed) and runs every scene, a minute or two. The pictures are <WORDS_OUT>/desk-<scene>.png, with
 // <WORDS_OUT>/_desk-run.json listing each scene's meta and whether it was reached (and why not), and each run's commit.
 // WORDS_ONLY=<id>,<prefix>* narrows the run to some scenes. A rerun into the same folder keeps only the results of its
-// own build (its commit and the files it changed): another build's are dropped from the manifest and their pictures
+// own build (a digest of the bundle it photographed): another build's are dropped from the manifest and their pictures
 // renamed _stale-<scene>.png, and a scene's old picture is removed before it is taken again. The "before" is this rig
 // run against master's build: in a clean checkout of master, `git checkout <this branch> --
 // apps/desk-web/e2e/words-shots.rig.ts apps/desk-web/e2e/words-build.ts apps/desk-web/playwright.words.config.ts
@@ -34,6 +34,7 @@
 // Words: locators use test ids and data attributes; where a check reads the words each build draws, they are written
 // here, marked with the build they belong to, because the copy modules that hold them differ between the builds.
 import { execFileSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { stripVTControlCharacters } from 'node:util';
@@ -44,7 +45,7 @@ import type { HubDouble } from '../test/double/hub-double';
 import { readRecording } from '../../../src/renderer/src/lane-a/test-support/session-stream';
 import { DepthPlayer } from './depth-player';
 import { FakeMachineReplay } from './fake-machine';
-import { expect, seedKey, test } from './fixtures';
+import { DIST, expect, seedKey, test } from './fixtures';
 import { PROJECT, S, stageProject } from './scene';
 import { revealEarlier } from './transcript-history';
 
@@ -61,11 +62,11 @@ const PHONE_NAME = '390x844 phone (isMobile, hasTouch, (hover: none))';
 // ---- _desk-run.json: what each capture shows, and whether it was reached ---------------------------------------------
 type Meta = { id: string; title: string; how: string; state: string; viewport: string; rows: string[] };
 type Result = { id: string; ok: boolean; error?: string; build?: string };
-type Run = { at: string; commit: string; changed: string[]; cut: boolean | null; scenes: string[] };
+type Run = { at: string; dist: string; commit: string; changed: string[]; cut: boolean | null; scenes: string[] };
 const META: Meta[] = [];
 const results: Result[] = [];
 const wanted = (id: string) => !ONLY || ONLY.has(id) || [...ONLY].some((o) => o.endsWith('*') && id.startsWith(o.slice(0, -1)));
-const run: Run = { at: new Date().toISOString(), commit: '', changed: [], cut: null, scenes: [] };
+const run: Run = { at: new Date().toISOString(), dist: '', commit: '', changed: [], cut: null, scenes: [] };
 
 // Written after every scene, merged with what the folder holds (a scene's newer entry replaces its older one), so a run
 // cut short still leaves what it took. Only this build's results are kept: one of another build (an earlier run's
@@ -90,10 +91,12 @@ function writeRun() {
   );
   writeFileSync(RUN_FILE(), JSON.stringify({ results: keep(ours, results), screens, runs }, null, 2));
 }
-// This run's build, as each of its results records it: the checkout's commit and the files it changed.
+// This run's build, as each of its results records it: a digest of the bundle it photographed. dist/index.html names
+// every script and stylesheet by Vite's content hash, so any change to what the app draws changes it, an uncommitted
+// edit made again included; the commit and the files it changed stay in the run's entry as provenance.
 function buildKey(): string {
-  if (run.commit === '') Object.assign(run, buildIdentity());
-  return run.changed.length === 0 ? run.commit : `${run.commit} +${run.changed.join(',')}`;
+  if (run.dist === '') Object.assign(run, { dist: createHash('sha256').update(readFileSync(join(DIST, 'index.html'))).digest('hex').slice(0, 16) }, buildIdentity());
+  return run.dist;
 }
 // The checkout's commit and the tracked files it changed (the before's rig, taken from the branch), so a pair of runs
 // says which builds it compares.
