@@ -251,8 +251,10 @@ describe('waiting and steered bubbles', () => {
     expect(caption.textContent).toBe('✓');
     expect(screen.getByRole('img', { name: 'Sent to Claude' })).toBe(caption);
     expect(caption.getAttribute('title')).toBeNull();
-    await userEvent.tab();
-    while (document.activeElement !== caption && document.activeElement !== document.body) await userEvent.tab();
+    // bounded: one press per element that could take focus, and one more, so a caption the keyboard never reaches fails
+    // in bounded time rather than cycling
+    const stops = document.querySelectorAll('button, a[href], input, select, textarea, [tabindex]').length + 1;
+    for (let press = 0; press < stops && document.activeElement !== caption; press++) await userEvent.tab();
     expect(document.activeElement).toBe(caption);
     expect((await screen.findByRole('tooltip')).textContent).toBe('Sent to Claude');
   });
