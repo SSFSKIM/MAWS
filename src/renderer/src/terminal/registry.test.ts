@@ -1244,6 +1244,18 @@ describe('terminal registry for another machine’s session', () => {
     log.mockRestore();
   });
 
+  it('asks a remote session’s pty.listFor once after host_unavailable: only the local list is asked again', async () => {
+    const registry = makeRegistry();
+    ipc.handlers['pty.listFor'] = () => fail('host_unavailable', 'machine disconnected before answering pty.listFor');
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const onListed = vi.fn();
+    await expect(registry.adopt(undefined, onListed, R)).resolves.toEqual([]);
+    expect(onListed).toHaveBeenCalledExactlyOnceWith([], false);
+    expect(ipc.inputs('pty.listFor')).toHaveLength(1);
+    expect(log).toHaveBeenCalledOnce();
+    log.mockRestore();
+  });
+
   it('asks a remote machine’s pty host state through its link once, and keeps each machine’s apart', async () => {
     const registry = makeRegistry();
     await openRunning(registry);
