@@ -230,13 +230,13 @@ describe('background work', () => {
     expect(widget()!.querySelector('[data-part="line"]')?.textContent).toMatch(/^maws-probe · .+ · 2 agents$/);
     expect(options()).toEqual(['All phases|', '*Echo|0/2']); // the running phase by default
     expect(Array.from(widget()!.querySelectorAll('th')).map((th) => th.textContent)).toEqual(['Agent', 'Model', 'State', 'Time', 'Tokens']);
-    // a row with an agent id leads with its glyph; a running agent's state is the spinner alone, named by the engine's
-    // word (`start` while an agent runs; the word cut, T238)
+    // a row with an agent id leads with its glyph; a live agent's state is the spinner alone, named by the engine's word
+    // (the word cut, T238); a row whose time stopped without done keeps its word
     expect(tableRows().map((cells) => [cells[0], cells[2]])).toEqual([
       [expect.stringMatching(/^.alpha$/u), ''],
-      ['beta', ''],
+      ['beta', 'start'],
     ]);
-    expect(Array.from(widget()!.querySelectorAll('td[data-part="state"]'), (cell) => cell.querySelector('[role="img"]')?.getAttribute('aria-label'))).toEqual(['start', 'start']);
+    expect(Array.from(widget()!.querySelectorAll('td[data-part="state"]'), (cell) => cell.querySelector('[role="img"]')?.getAttribute('aria-label'))).toEqual(['start', undefined]);
     push(upTo(workflow, 93).filter((e) => (e.seq ?? 0) > 82));
     expect(options()).toEqual(['All phases|', '*Echo|2/2']); // the last phase once none runs
     expect(tableRows().map((cells) => cells.slice(2))).toEqual([
@@ -362,7 +362,7 @@ describe('background work', () => {
     vi.setSystemTime(Date.now() + 10 * 60_000); // ten minutes pass while the tool is hidden: no timer runs
     rerender(<Mounted state={handle} visible />);
     act(() => vi.advanceTimersByTime(0));
-    expect(line()).toBe(`Sleep 30s then write BG_DONE to bg.txt · completed ${REL.agoNarrow(12, 'minute')}`);
+    expect(line()).toBe(`Sleep 30s then write BG_DONE to bg.txt · ${REL.agoNarrow(12, 'minute')}`); // the word cut (T218)
   });
 
   it('open({ taskId }) on a fresh tab scrolls to the card once the graph shows it', async () => {
@@ -819,7 +819,7 @@ describe('background work', () => {
       expect(Array.from(document.querySelectorAll<HTMLElement>('section[data-section]')).map((el) => el.dataset.section).at(-1)).toBe('done');
       toggleSection('done');
       expect(ids('done')).toEqual(['x1', 'm1', 'sh1', 'wf1']);
-      expect(document.querySelector('[data-shell="sh1"] [data-part="line"]')?.textContent).toMatch(/^Build the site · completed /);
+      expect(document.querySelector('[data-shell="sh1"] [data-part="line"]')?.textContent).toMatch(/^Build the site · \d/); // the word cut (T218): the age alone
       unmountAll();
       await mount({ events: [startedTask('sh1', 'local_bash', 'Build the site', 1), startedTask('sh2', 'local_bash', 'Lint', 2), ends('sh1', 'completed', 1), ends('sh2', 'failed', 2)] });
       expect(heading('done')).toBe('Done 2 · 2 shells');
@@ -1233,7 +1233,7 @@ describe('scheduled jobs', () => {
     await waitFor(() => expect(heading('scheduled')).toBe('Scheduled 3'));
     const rows = scheduled();
     expect(rows.map((r) => [r.id, r.when])).toEqual([
-      ['598b1690', expect.stringMatching(/^\d{1,2}:\d{2}\s?[AP]M · in /)],
+      ['598b1690', expect.stringMatching(/^(?:[A-Z][a-z]{2} \d{1,2}, )?\d{1,2}:\d{2}\s?[AP]M · in /)], // the word cut (T224): its time (and day), then how far
       ['481abb0a', expect.stringMatching(/^Resumes with the session · Expires /)],
       ['8d1a2582', 'Resumes with the session'],
     ]);
