@@ -675,6 +675,7 @@ button.transcript-ask-top:focus-visible { outline-width: 2px; outline-style: sol
 .transcript-delivery-file { display: flex; align-items: baseline; flex-wrap: wrap; gap: 10px; padding: 2px 12px; font-size: var(--text-ui-sm); }
 .transcript-delivery-name { min-width: 0; color: var(--fg); overflow-wrap: anywhere; }
 .transcript-delivery-actions { display: inline-flex; flex-wrap: wrap; gap: 10px; margin-left: auto; } /* wraps once the touch rule stands a button's tip after it */
+.transcript-delivery-action { display: inline-flex; align-items: baseline; gap: 6px; min-width: 0; } /* a button and its tip's fact, wrapped as one */
 .transcript-delivery-actions .transcript-quiet-button { margin-top: 0; }
 /* P5 O7 M4: a remote session's file: the desktop actions greyed, and where the file is */
 .transcript-delivery-actions .transcript-quiet-button:is(:disabled, [aria-disabled="true"]) { color: var(--fg-faint); cursor: default; }

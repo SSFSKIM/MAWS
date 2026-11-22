@@ -261,6 +261,26 @@ describe('grouped subagent rows', () => {
     });
   });
 
+  // The touch rule (ticket 830; task 1 fix round 1): the block under the line carries the details of the agents whose
+  // glyphs are drawn, each of which owns its detail; past four, the rest join it when `+N` opens them, as their glyphs do
+  it('stands under the line the details of the agents whose glyphs are drawn, the rest once `+N` opens them', async () => {
+    const store = await storeWith(agents(['A', 'B', 'C', 'D', 'E', 'F']).events);
+    const row = rowOf(store.rows(), 'subagent');
+    const view = renderRow(row, { storeKey: store.key, actions: spyActions() });
+    const fact = () => view.container.querySelector('.transcript-subagent > [data-touch-fact="block"]')!.textContent!.split('\n');
+    const owners = () => ['A', 'B', 'C', 'D', 'E', 'F'].flatMap((name) => screen.queryByRole('button', { name: `Open ${name}` }) ?? []).map(described);
+    expect(fact().map((line) => line.split(' · ')[0])).toEqual(['A', 'B', 'C', 'D']);
+    expect(fact()).toEqual(owners());
+    fireEvent.click(screen.getByRole('button', { name: /\+2/ }));
+    expect(fact().map((line) => line.split(' · ')[0])).toEqual(['A', 'B', 'C', 'D', 'E', 'F']);
+    expect(fact()).toEqual(owners());
+    view.unmount();
+    // nothing opens an agent: the words own every detail, so the block carries them all
+    const plain = renderRow(row, { storeKey: store.key, actions: { ...NO_ACTIONS } });
+    expect(plain.container.querySelector('.transcript-subagent > [data-touch-fact="block"]')!.textContent).toBe(described(plain.container.querySelector('.transcript-subagent-sentence')!));
+    expect(plain.container.querySelector('.transcript-subagent > [data-touch-fact="block"]')!.textContent!.split('\n')).toHaveLength(6);
+  });
+
   it('with five agents the overflow reveals the rest, and the fifth opens through openSubagent', async () => {
     const store = await storeWith(agents(['A', 'B', 'C', 'D', 'E']).events);
     const row = rowOf(store.rows(), 'subagent');

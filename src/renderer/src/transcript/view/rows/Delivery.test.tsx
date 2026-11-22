@@ -132,11 +132,14 @@ describe('a delivery on another machine’s session', () => {
     applyRemoteSession(remoteSessionState(REMOTE));
     renderRow({ ...ROW, files: [{ path: '/repo/report.pdf', name: 'report.pdf', id: 'd-1' }] }, { storeKey: REMOTE });
     const buttons = ['Open externally: report.pdf', 'Reveal in Finder: report.pdf'].map((name) => screen.getByRole('button', { name }));
-    const drawn = [...buttons[0]!.closest('.transcript-delivery-actions')!.children]; // each button, its tip's fact after it
-    const facts = buttons.map((button) => drawn.slice(drawn.indexOf(button)).find((element) => element.hasAttribute('data-touch-fact'))!);
-    expect(facts.map((fact) => [fact.getAttribute('data-touch-fact'), fact.getAttribute('aria-hidden')])).toEqual([['', 'true'], ['', 'true']]);
-    expect(facts.map((fact) => fact.textContent)).toEqual(buttons.map((button) => document.getElementById(button.getAttribute('aria-describedby')!)!.textContent));
-    expect(drawn.indexOf(facts[0]!)).toBeLessThan(drawn.indexOf(buttons[1]!));
+    // each button and its tip's fact are one unit of the actions, so a wrap never sets one button's fact beside the other
+    const units = buttons.map((button) => button.parentElement!);
+    expect(units.map((unit) => [unit.parentElement!.classList.contains('transcript-delivery-actions'), unit.classList.contains('transcript-delivery-action')])).toEqual([[true, true], [true, true]]);
+    expect(units[0]).not.toBe(units[1]);
+    const facts = units.map((unit) => unit.querySelectorAll('[data-touch-fact]'));
+    expect(facts.map((found) => found.length)).toEqual([1, 1]);
+    expect(facts.map((found) => [found[0]!.getAttribute('data-touch-fact'), found[0]!.getAttribute('aria-hidden')])).toEqual([['', 'true'], ['', 'true']]);
+    expect(facts.map((found) => found[0]!.textContent)).toEqual(buttons.map((button) => document.getElementById(button.getAttribute('aria-describedby')!)!.textContent));
     cleanup();
     expect(renderRow(ROW, { storeKey: APP }).container.querySelector('[data-touch-fact]')).toBeNull();
   });
