@@ -369,7 +369,7 @@ describe('report', () => {
     const cookies = { ...DONE.cookies, imported: 3, partitioned: { imported: 2, verified: 1 }, skipped: { ...NO_SKIPS.cookies, notVerified: 1, corruptRow: 2 }, hosts: { notVerified: ['embed.test'] } };
     showReport({ ...DONE, cookies, bookmarks: { imported: 46, skipped: 1, error: null } });
     renderSheet();
-    expect(sheet().querySelector('[data-import-summary]')!.textContent).toBe('5 cookies, 4 history entries, 46 bookmarks, 3 extensions · 6 skipped');
+    expect(sheet().querySelector('[data-import-summary]')!.textContent).toBe('4 cookies, 4 history entries, 46 bookmarks, 3 extensions · 6 skipped'); // 3 set and 1 confirmed
     expect(within(sheet()).getByText('2 partitioned cookies set, 1 confirmed in the partition')).toBeTruthy();
     expect(within(sheet()).getByText('Cookies · Partitioned cookies not confirmed in the partition (1)').closest('details')).not.toBeNull();
     expect(within(sheet()).getByText('Cookies · Unreadable rows (2)').closest('details')).toBeNull();
