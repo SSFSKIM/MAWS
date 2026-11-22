@@ -457,7 +457,10 @@ const byBuild = (words: { m2: string; master: string }) => (m2Cut() ? words.m2 :
 // words are written here), master's composer/plus-menu/PlusMenu.tsx literals
 const SUBMENU_TAIL = (label: 'Connectors' | 'Plugins'): [string, string] => (m2Cut() ? ['In this chat…', 'Manage…'] : [`${label} in this chat…`, `Manage ${label.toLowerCase()}…`]);
 // The + menu's Connectors or Plugins submenu opened, as a person opens it (composer/plus-menu/PlusMenu.tsx: each a
-// submenu trigger named by its label, the same literal on both builds, whose menu Radix names by that trigger)
+// submenu trigger named by its label, the same literal on both builds, whose menu Radix names by that trigger). Its
+// scenes are hover captures: the pointer stays on the trigger. A pointer moved off a submenu's trigger other than
+// toward the submenu hands the keyboard back to the parent menu, and that focus outside closes the submenu (Radix's
+// MenuSubContent), which is how the capture's usual move to the window's corner lost it.
 const PLUS = '[data-composer] [role="toolbar"] button[aria-haspopup="menu"]';
 async function plusSubmenu(page: Page, label: 'Connectors' | 'Plugins') {
   await box(page).click();
@@ -511,12 +514,25 @@ function gone(meta: Meta, why: string) {
 
 // Escape only while an overlay is open. Since the UX wave's U1b, Escape on a waiting request's row (or on nothing while
 // its pane holds the keyboard) denies the request (request-card/prompt-guard.ts), so a bare Escape could answer one.
+// The pointer is moved aside first: what it holds open (a sidebar row's hover card, a tooltip) closes on its own once it
+// leaves, and the wait lets it go before anything is counted as open.
 const OVERLAY = '[role="dialog"], [role="alertdialog"], [role="menu"], [role="listbox"], [data-radix-popper-content-wrapper]';
 async function closeOverlays(page: Page) {
+  await pointerAside(page);
+  if ((await page.locator(OVERLAY).count()) > 0) await page.waitForTimeout(300);
   for (let i = 0; i < 4 && (await page.locator(OVERLAY).count()) > 0; i++) {
     await page.keyboard.press('Escape');
     await page.waitForTimeout(200);
   }
+}
+// The pointer at a neutral spot: inside the transcript pane by its right edge, away from the sidebar (the window's corner
+// when no transcript is drawn). A click on a sidebar row leaves the pointer on the row, whose hover card
+// (sidebar/HoverCard.tsx: open after 300 ms of hover, closed 150 ms after the pointer leaves) is drawn over the main
+// area and takes the next click there; a click Playwright finds covered never moves the pointer, so the card stays.
+async function pointerAside(page: Page) {
+  const at = await scroller(page).boundingBox({ timeout: 1_000 }).catch(() => null);
+  if (at) await page.mouse.move(at.x + at.width - 6, at.y + Math.min(at.height / 2, 240));
+  else await page.mouse.move(W - 2, H - 2);
 }
 // back to a known place: no dialog, no menu, no page
 async function reset(page: Page) {
@@ -541,6 +557,7 @@ async function library(app: ElectronApplication, page: Page) {
 }
 async function openSession(page: Page, appId: string, away?: string) {
   await (await sidebarRow(page, { appSessionId: appId })).click();
+  await pointerAside(page); // before the row's hover card opens over the transcript
   await expect(pane(page)).toBeAttached();
   await page.waitForTimeout(500);
   if (away) await gitLanded(page, appId, away);
@@ -556,6 +573,7 @@ async function gitLanded(page: Page, appId: string, away: string) {
     await (await sidebarRow(page, { appSessionId: away })).click();
     await page.waitForTimeout(1500);
     await (await sidebarRow(page, { appSessionId: appId })).click();
+    await pointerAside(page);
   }
 }
 // A side surface in view. The `surface.<id>` menu item toggles (panel/SurfaceRow.tsx), so it is pressed only when the
@@ -1382,25 +1400,36 @@ async function toEnd(page: Page) {
     await page.waitForTimeout(600);
   }
 }
-async function openTurn(page: Page, runs = false) {
-  const line = turnLine(page).last();
-  if ((await line.getAttribute('aria-expanded')) !== 'true') await line.click();
-  await page.waitForTimeout(800);
-  for (let i = 0; runs && i < 20; i++) {
-    const run = pane(page).locator('.transcript-run-line[aria-expanded="false"]');
-    if ((await run.count()) === 0) break;
-    await run.first().click();
+// A transcript control pressed with what covers it cleared first (closeOverlays), each click given a few seconds; a
+// control that takes neither of two clicks fails the step, naming what covered it, where the click's own 30 s wait,
+// repeated down a loop, outlasted the test.
+async function press(page: Page, target: Locator, what: string) {
+  for (let attempt = 0; ; attempt++) {
+    await closeOverlays(page);
+    const error = await target.click({ timeout: 4_000 }).then(() => null, (e: unknown) => e);
+    if (error === null) return;
+    if (attempt === 1) {
+      const cover = stripVTControlCharacters(error instanceof Error ? error.message : String(error)).split('\n').find((line) => line.includes('intercepts pointer events'));
+      throw new Error(`${what} took no click, twice${cover ? `: ${cover.trim().slice(0, 200)}` : ''}`, { cause: error });
+    }
+  }
+}
+// Each closed disclosure `closed` matches pressed open, the first first, until none is left or `max` presses were made.
+async function unfold(page: Page, closed: Locator, what: string, max: number) {
+  for (let i = 0; i < max && (await closed.count()) > 0; i++) {
+    await press(page, closed.first(), what);
     await page.waitForTimeout(300);
   }
+}
+async function openTurn(page: Page, runs = false) {
+  const line = turnLine(page).last();
+  if ((await line.getAttribute('aria-expanded', { timeout: 10_000 })) !== 'true') await press(page, line, 'the last turn’s line');
+  await page.waitForTimeout(800);
+  if (runs) await unfold(page, pane(page).locator('.transcript-run-line[aria-expanded="false"]'), 'a closed run’s line', 20);
   await toTop(page);
 }
 async function unfoldAll(page: Page) {
-  for (let i = 0; i < 40; i++) {
-    const closed = pane(page).locator('.transcript-row[data-kind="divider"] button.transcript-disclosure[aria-expanded="false"], .transcript-run-line[aria-expanded="false"]');
-    if ((await closed.count()) === 0) break;
-    await closed.first().click().catch(() => undefined);
-    await page.waitForTimeout(300);
-  }
+  await unfold(page, pane(page).locator('.transcript-row[data-kind="divider"] button.transcript-disclosure[aria-expanded="false"], .transcript-run-line[aria-expanded="false"]'), 'a closed turn’s or run’s line', 40);
   await toTop(page);
 }
 // A panel's own sections open (section[data-section] > h3 > button): the agents' Running, Done and On disk
@@ -2017,7 +2046,7 @@ test('round 2: recorded transcripts, menus and popovers around a session', async
       after: () => closeOverlays(page),
     });
     // M2 (P579): the + menu's Connectors, of a session that is not running: its one line says why it lists none
-    await shot(page, m2({ id: 'm2-plus-connectors-stopped', title: 'Message box, + › Connectors of a session not running', how: 'Click + under the message box, then Connectors', state: 'The Connectors submenu of a finished session no process runs: why it lists none, In this chat and Manage', folders: ['composer/plus-menu', 'composer', 'widgets'] }), async () => {
+    await shot(page, m2({ id: 'm2-plus-connectors-stopped', title: 'Message box, + › Connectors of a session not running', how: 'Click + under the message box, then Connectors', state: 'The Connectors submenu of a finished session no process runs: why it lists none, In this chat and Manage', folders: ['composer/plus-menu', 'composer', 'widgets'], hover: true }), async () => {
       await openSession(page, ids.subagents!);
       await m2Build(page);
       await plusSubmenu(page, 'Connectors');
@@ -2219,7 +2248,7 @@ test('round 2: running agents and shells, the queue, a blocked command, Source c
       ['Connectors', 'm2-plus-connectors-running', 'The Connectors submenu of a running session that reports none: its one line, In this chat and Manage', [], () => byBuild(CONNECTORS_LINE.noneReported)],
       ['Plugins', 'm2-plus-plugins-running', 'The Plugins submenu of a running session: the plugins by name alone, In this chat and Manage', PLUGINS, null],
     ] as const) {
-      await shot(page, m2({ id, title: `Message box, + › ${label} of a running session`, how: `Click + under the message box, then ${label}`, state, folders: ['composer/plus-menu', 'composer', 'widgets'] }), async () => {
+      await shot(page, m2({ id, title: `Message box, + › ${label} of a running session`, how: `Click + under the message box, then ${label}`, state, folders: ['composer/plus-menu', 'composer', 'widgets'], hover: true }), async () => {
         need();
         await openSession(page, ids.run!);
         await m2Build(page);
@@ -2364,10 +2393,13 @@ test('round 2: running agents and shells, the queue, a blocked command, Source c
         await box(page).click();
         await page.keyboard.type('Run the marker command.');
         await page.keyboard.press('Enter');
-        await expect.poll(async () => (await status(ids.block!)).turn, { message: 'the marker command’s turn started', timeout: 60_000 }).not.toBeNull();
       }
-      await expect.poll(async () => (await status(ids.block!)).turn, { message: 'the marker command’s turn ended', timeout: 60_000 }).toBeNull();
-      await pane(page).locator('.transcript-divider-count').last().click();
+      // The replayed turn can start and end between two reads of the status, so its end is read from what it leaves:
+      // the turn's line counting the call auto mode denied (rows/Divider.tsx's CountLink, the same on both builds), and
+      // no turn running.
+      const count = pane(page).locator('.transcript-divider-count').filter({ hasText: 'auto-denied' });
+      await expect.poll(async () => (await count.count()) > 0 && (await status(ids.block!)).turn === null, { message: 'the marker command’s turn ended, its line counting the denied call', timeout: 60_000 }).toBe(true);
+      await press(page, count.last(), 'the turn line’s auto-denied count');
       await soft(blocked(), 'the blocked call’s cell');
     }, {
       // the call's row denied (data-status), its line naming the recording's command, and Approve and retry under it
