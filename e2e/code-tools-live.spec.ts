@@ -100,7 +100,8 @@ function reviewTotals(root: string, against: string): { words: string; files: nu
   });
   const files = numstat.length + entries.length;
   const n = (v: number) => v.toLocaleString('en-US');
-  const words = `${n(files)} ${files === 1 ? 'file' : 'files'} changed · +${n(added)} −${n(removed)}${uncounted > 0 ? `, and ${n(uncounted)} untracked ${uncounted === 1 ? 'file' : 'files'} not counted` : ''}`;
+  // the word cut (T356, N35): no "changed", and the uncounted new files shortened
+  const words = `${n(files)} ${files === 1 ? 'file' : 'files'} · +${n(added)} −${n(removed)}${uncounted > 0 ? ` · ${n(uncounted)} untracked not counted` : ''}`;
   return { words, files, added, removed, uncounted };
 }
 
@@ -209,14 +210,16 @@ test('live: Files, the viewer and Review over this checkout', async () => {
           const base = await defaultBase(createGitRunner({ env: process.env }), root);
           const chip = panel.locator('[data-chip="branch"]');
           if (base === null) {
-            await expect(chip).toHaveAttribute('title', 'No default branch to compare with', { timeout: 15_000 });
+            // the word cut: greyed with a reason, the chip is aria-disabled and keeps the keyboard, the reason its tip and description
+            await expect(chip).toHaveAccessibleDescription('No default branch to compare with', { timeout: 15_000 });
             await expect(chip).toBeDisabled();
             observed.thisBranch = { branch, base: null };
             return;
           }
           await expect(chip).toBeEnabled({ timeout: 15_000 });
           await chip.click();
-          await expect(panel.locator('[data-review-footer]')).toHaveText(`${branch} · Since ${base.ref}`, { timeout: 15_000 });
+          // the word cut (T357): what the scope reads is the pressed chip's tooltip and description, no longer a foot line
+          await expect(chip).toHaveAccessibleDescription(`${branch} · Since ${base.ref}`, { timeout: 15_000 });
           const expected = reviewTotals(root, base.mergeBase);
           if (expected.files === 0) await expect(panel.locator('[data-review-empty]')).toHaveText(`Nothing on ${branch} beyond ${base.ref}`, { timeout: 15_000 });
           else await expect(panel.locator('[data-review-header]')).toHaveText(expected.words, { timeout: 15_000 });
@@ -245,7 +248,7 @@ test('live: Files, the viewer and Review over this checkout', async () => {
           await expect(roots).toHaveCount(2);
           const shown = await roots.evaluateAll((rows) => rows.map((r) => ({ path: r.getAttribute('data-path'), role: r.querySelector('span.text-fg-faint')?.textContent ?? null })));
           expect(shown).toEqual([
-            { path: mainCheckout, role: 'directory' },
+            { path: mainCheckout, role: null }, // the word cut (T314): the session's own folder is its name alone
             { path: worktree, role: 'worktree' },
           ]);
           observed.worktreeRoots = shown;

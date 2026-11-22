@@ -1540,7 +1540,8 @@ test("a read that fails before a PDF's first byte shows the sentence and Open ag
       const stopped = viewer.locator('[data-frame-stopped]');
       const again = stopped.getByRole('button', { name: 'Open again', exact: true });
       await expect(viewer, 'the read for the frame failed before its first byte').toHaveAttribute('data-frame', 'failed', { timeout: 20_000 });
-      await expect(stopped.getByText('This file stopped loading: it changed, or it can no longer be read.', { exact: true })).toBeVisible();
+      // the word cut (N12): the sentence without a guess at the cause
+      await expect(stopped.getByText('This file stopped loading.', { exact: true })).toBeVisible();
       await expect(viewer.locator('iframe'), 'no blank or broken frame').toHaveCount(0);
       await again.focus();
       await expect(again, 'the button takes the focus').toBeFocused();
@@ -1555,7 +1556,7 @@ test("a read that fails before a PDF's first byte shows the sentence and Open ag
       await again.click();
       await expect(viewer, 'the read the button made has completed').toHaveAttribute('data-loads', String(loads + 1), { timeout: 20_000 });
       await expect(viewer).toHaveAttribute('data-frame', 'failed');
-      await expect(stopped.getByText('This file stopped loading: it changed, or it can no longer be read.', { exact: true })).toBeVisible();
+      await expect(stopped.getByText('This file stopped loading.', { exact: true })).toBeVisible();
       await expect(again).toBeVisible();
       expect(frameRequests(), 'no frame asked for its URL').toBe(asked);
 

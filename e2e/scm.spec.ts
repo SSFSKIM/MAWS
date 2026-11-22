@@ -12,8 +12,8 @@
 // its four parts over the scratch, follows a commit and a push made in the checkout, and at 360 and 280 px holds the
 // frames' measured rulings (S4 to S7, S12, S13; Decision Log 30, 31 and 44), each by a measured rectangle, with a
 // measured word (a span that draws its text by `::before`) asserted by its rectangle at each width, and two states the
-// frames did not draw: a part whose first read is still out, and "Commits · latest on <a long branch>" at 280 px. Each
-// measured pass first requires the states it measures drawn (a pull request with four phrases and five check counts, a
+// frames did not draw: a part whose first read is still out, and "Commits · latest" on a long branch at 280 px. Each
+// measured pass first requires the states it measures drawn (a pull request with three phrases and three check counts, a
 // commit 1,003 days old, gh's failure on a pass of its own for S7); the machine's label (S4) is measured where one is
 // drawn, on B's page in e2e/remote.spec.ts. *A
 // commit opens in Review* from its row. The pull request, untrusted and tokens scenes read the page; main still refuses
@@ -161,19 +161,20 @@ function featureBranch(scratch: ScmScratch): void {
 }
 
 // The pull request the page scene reads (frames' S5, S6): open on feature/page with a review decision and a merge state,
-// so its state line holds four phrases, and checks in all five of gh's buckets, so its counts line holds five counts;
-// at 280 px each line wraps, and the rulings hold where it breaks.
+// and checks in all five of gh's buckets. The word cut (N72, N75): an open PR's state is not said, and the counts line
+// counts the three buckets listed under it, so the state line holds three phrases and the counts line three counts; at
+// 280 px the state line wraps, the counts line breaks or stands whole inside the page, and the rulings hold.
 const PAGE_PR = {
   number: 7, url: 'https://github.com/o/r/pull/7', title: 'Page PR', state: 'OPEN', isDraft: false, reviewDecision: 'CHANGES_REQUESTED',
   baseRefName: 'main', headRefName: 'feature/page', mergeStateStatus: 'BLOCKED',
 };
-const PAGE_PR_PHRASES = 'Open · into main · Changes requested · Merging is blocked';
+const PAGE_PR_PHRASES = 'into main · Changes requested · Merging is blocked'; // the word cut (N72): an open PR's state is not said
 const pageCheck = (name: string, bucket: string, state: string) => ({ name, bucket, state, link: `https://github.com/o/r/actions/runs/1/job/${name}`, workflow: 'CI' });
 const PAGE_CHECKS = [
   pageCheck('typecheck', 'pass', 'SUCCESS'), pageCheck('lint', 'pass', 'SUCCESS'), pageCheck('test', 'fail', 'FAILURE'),
   pageCheck('e2e', 'cancel', 'CANCELLED'), pageCheck('docs', 'pending', 'IN_PROGRESS'), pageCheck('deploy', 'skipping', 'SKIPPED'),
 ];
-const PAGE_CHECK_COUNTS = '2 passed · 1 failed · 1 cancelled · 1 pending · 1 skipped';
+const PAGE_CHECK_COUNTS = '1 failed · 1 cancelled · 1 pending'; // the word cut (N75): what is listed under the line
 
 // ---- the measured rulings (frames' S4 to S7, S12, S13), read off the page as drawn ------------------------------------------
 
@@ -190,7 +191,7 @@ interface Measures {
   uncommitted: { line: Box | null; counts: Sized | null; conflicts: (Sized & { lines: number }) | null };
   heading: { line: Box; since: (Sized & { fit: string; text: string }) | null; sinceMin: number; measuredSince: number; behind: (Sized & { lines: number }) | null; latest: (Sized & { text: string }) | null; review: boolean };
   phrases: { text: string; lines: number; top: number }[];
-  checkCounts: { text: string; lines: number; top: number }[];
+  checkCounts: { text: string; lines: number; top: number; right: number }[];
   messages: (Box & { full: number; client: number })[];
   ages: { text: string; box: Box; textLeft: number; textRight: number; textWidth: number }[];
   fourDigits: number;
@@ -279,7 +280,7 @@ function measure(p: Scm): Promise<Measures> {
         review: Array.from(headingLine.querySelectorAll('button')).some((b) => (b.textContent ?? '').trim() === 'Review ›'),
       },
       phrases: Array.from(root.querySelectorAll<HTMLElement>('[data-scm-phrase]')).map((el) => ({ text: el.textContent ?? '', lines: lines(el), top: Math.round(el.getBoundingClientRect().top) })),
-      checkCounts: Array.from(root.querySelectorAll<HTMLElement>('[data-scm-check-count]')).map((el) => ({ text: (el.parentElement!.textContent ?? '').trim(), lines: lines(el.parentElement!), top: Math.round(el.parentElement!.getBoundingClientRect().top) })),
+      checkCounts: Array.from(root.querySelectorAll<HTMLElement>('[data-scm-check-count]')).map((el) => ({ text: (el.parentElement!.textContent ?? '').trim(), lines: lines(el.parentElement!), top: Math.round(el.parentElement!.getBoundingClientRect().top), right: el.parentElement!.getBoundingClientRect().right })),
       messages: Array.from(root.querySelectorAll<HTMLElement>('[data-scm-pr-line], [data-scm-failure]')).map((el) => ({ ...box(el), full: el.scrollWidth, client: el.clientWidth })),
       ages,
       fourDigits,
@@ -293,8 +294,8 @@ const drawnWhole = (el: Sized) => el.full <= el.right - el.left + 1; // as wide 
 
 // What a pass stages and so requires drawn before it measures it, so no ruling holds over a state that is absent: the
 // state line's phrases and the checks' counts (S5, S6), the git or GitHub CLI messages (S7), the widest age's words
-// (S12), and whether the state line and the counts line must break at this width. A pass that leaves a part out (the
-// "latest on" pass) names nothing for it, and those loops then read whatever is drawn.
+// (S12), and whether the state line must break at this width. A pass that leaves a part out (the "latest" pass) names
+// nothing for it, and those loops then read whatever is drawn.
 interface Staged {
   phrases?: number;
   checkCounts?: number;
@@ -315,7 +316,9 @@ async function expectMeasuredRulings(p: Scm, width: 360 | 280, staged: Staged = 
   if (staged.widestAge !== undefined) expect(m.ages.map((age) => age.text), `${at}: the widest age drawn`).toContain(staged.widestAge);
   if (staged.wraps) {
     expect(new Set(m.phrases.map((phrase) => phrase.top)).size, `${at}: the state line breaks (between its phrases)`).toBeGreaterThan(1);
-    expect(new Set(m.checkCounts.map((count) => count.top)).size, `${at}: the counts line breaks (between its counts)`).toBeGreaterThan(1);
+    // the word cut (N75) left the counts line three counts, which may fit at this width: it breaks between them, or
+    // stands whole on one line inside the page
+    if (new Set(m.checkCounts.map((count) => count.top)).size === 1) for (const count of m.checkCounts) expect(count.right, `${at}: the count "${count.text}" inside the page on the one line`).toBeLessThanOrEqual(m.page.right + 1);
   }
   // Decision Log 44: a measured word, drawn by its ::before, is as wide as the words it measures: the Where line's
   // branch word against the branch drawn in full (the drawn span's scroll width), and "since <base>" where it is whole
@@ -400,7 +403,7 @@ test.describe('source control over a scratch repository', () => {
         const said: string[] = [];
         await openPage(p);
         await expect(where(p).locator('[data-scm-where-branch]')).toHaveText('⎇ feature/page');
-        await expect(where(p)).toHaveAttribute('title', scratch.dir);
+        await expect(where(p), 'the folder’s path, the Where line’s tooltip and description (the word cut, N57)').toHaveAccessibleDescription(scratch.dir);
 
         // A part whose first read is still out (frames' S9): its heading alone, no count and no rows. The scratch's git
         // (MAWS_GIT, which main's env carries to mawsd's git service) holds the branch read's own `rev-list` until the
@@ -410,6 +413,8 @@ test.describe('source control over a scratch repository', () => {
           expect(await words(commitsHeading(p)), 'the first read out: the heading alone').toBe('Commits');
           await expect(commitsHeading(p).locator('[data-scm-count]')).toHaveCount(0);
           await expect(commitRows(p), 'no row while the read is held').toHaveCount(0);
+          // the word cut (N63): the wait is the quiet spinner under the heading, named by it
+          await expect(part(p, 'commits').getByRole('progressbar', { name: 'Commits', exact: true })).toBeVisible();
           await expect(part(p, 'commits').locator('[data-scm-commit-group]')).toHaveCount(0);
           said.push('first read out: "Commits" alone');
         } finally {
@@ -428,7 +433,7 @@ test.describe('source control over a scratch repository', () => {
         await expect.poll(() => words(group(p, 'pushed'))).toBe('Pushed to origin/feature/page 1');
         // The first note was made 1,003 days ago: its age is five characters, the widest the column draws (frames' S12)
         await expect(commitRows(p).nth(1).locator('[data-scm-age]')).toHaveText(OLD_AGE);
-        // Pull request: #7, its four phrases and its five counts
+        // Pull request: #7, its three phrases and its three counts
         const pr = part(p, 'pr');
         await expect(pr.locator('[data-scm-pr-number]')).toHaveText('#7', { timeout: 20_000 });
         await expect.poll(() => words(pr.locator('[data-scm-pr-state]'))).toBe(PAGE_PR_PHRASES);
@@ -454,7 +459,7 @@ test.describe('source control over a scratch repository', () => {
         for (const width of [360, 280] as const) {
           await columnAt(p, width);
           await expect(commitRows(p).first()).toBeVisible();
-          said.push(await expectMeasuredRulings(p, width, { phrases: 4, checkCounts: 5, messages: 0, widestAge: OLD_AGE, wraps: width === 280 }));
+          said.push(await expectMeasuredRulings(p, width, { phrases: 3, checkCounts: 3, messages: 0, widestAge: OLD_AGE, wraps: width === 280 }));
           await shot(surface(p.page, 'source-control'), `scm-page-${width}.png`);
         }
 
@@ -469,21 +474,22 @@ test.describe('source control over a scratch repository', () => {
         }
         await columnAt(p, 280);
 
-        // "Commits · latest on <a long branch>" at 280 px (frames' S8): a branch that shares no commit with the default
-        // branch has no base. The heading names the branch, shortened at its end, inside the heading, with no "Review ›";
-        // the Where line's branch keeps its eight characters (the rulings again)
+        // "Commits · latest" on a long branch at 280 px (frames' S8): a branch that shares no commit with the default
+        // branch has no base. The word cut (N62): the heading no longer names the branch, which the Where line does; its
+        // "· latest" stands whole inside the heading, with no "Review ›"; the Where line's branch keeps its eight
+        // characters (the rulings again)
         const long = 'feature/an-orphaned-line-of-work-with-a-very-long-name-for-the-narrow-column';
         scratch.git('update-index', '--force-remove', 'conflicted.txt'); // the index resolved, so a branch can start
         scratch.git('checkout', '--quiet', '--orphan', long);
         scratch.git('commit', '--quiet', '--no-verify', '-m', 'A history of its own');
         await expect(where(p).locator('[data-scm-where-branch]')).toHaveText(`⎇ ${long}`, { timeout: 20_000 });
-        await expect.poll(async () => (await measure(p)).heading.latest?.text ?? '', { timeout: 20_000 }).toBe(`· latest on ${long}`);
+        await expect.poll(async () => (await measure(p)).heading.latest?.text ?? '', { timeout: 20_000 }).toBe('· latest');
         const m = await measure(p);
         expect(m.heading.review, 'no "Review ›" without a base').toBe(false);
-        expect(m.heading.latest!.full, 'the branch shortened at its end').toBeGreaterThan(m.heading.latest!.right - m.heading.latest!.left);
-        expect(inside(m.heading.latest!, m.heading.line), 'the shortened branch inside the heading').toBe(true);
+        expect(drawnWhole(m.heading.latest!), '"· latest" whole').toBe(true);
+        expect(inside(m.heading.latest!, m.heading.line), '"· latest" inside the heading').toBe(true);
         said.push(await expectMeasuredRulings(p, 280));
-        said.push(`at 280 px: "· latest on" a long branch, ${Math.round(m.heading.latest!.right - m.heading.latest!.left)} of ${m.heading.latest!.full} px drawn`);
+        said.push(`at 280 px: "· latest" on a long branch, ${Math.round(m.heading.latest!.right - m.heading.latest!.left)} px drawn`);
         await shot(surface(p.page, 'source-control'), 'scm-page-280-latest.png');
         test.info().annotations.push({ type: 'measured', description: said.join('; ') });
       },
@@ -505,20 +511,23 @@ test.describe('source control over a scratch repository', () => {
       const chip = review.locator('[data-chip="commit"]');
       await expect(chip).toHaveText(`Commit ${second.slice(0, 7)}`);
       await expect(chip).toHaveAttribute('aria-pressed', 'true');
-      await expect(review.locator('[data-review-header]')).toHaveText('1 file changed · +3 −0', { timeout: 20_000 });
+      await expect(review.locator('[data-review-header]')).toHaveText('1 file · +3 −0', { timeout: 20_000 }); // the word cut (T356)
       await expect(review.locator('[data-review-file="notes/note-2.md"]')).toBeVisible();
-      await expect(review.locator('[data-review-footer]')).toHaveText(`Commit ${second.slice(0, 7)} · ${NOTES[1]}`);
+      // the word cut (T357): the foot line is gone; the commit's chip, which says its hash, carries its subject as its
+      // tooltip and description
+      await expect(review.locator('[data-review-footer]')).toHaveCount(0);
+      await expect(chip).toHaveAccessibleDescription(NOTES[1]!);
 
       // This branch: every change since the merge base with origin/main, the working tree and the new file included
       await review.locator('[data-chip="branch"]').click();
       await expect(review.locator('[data-chip="branch"]')).toHaveAttribute('aria-pressed', 'true');
-      await expect(review.locator('[data-review-footer]')).toHaveText('feature/page · Since origin/main', { timeout: 20_000 });
+      await expect(review.locator('[data-chip="branch"]'), 'what the pressed scope reads, its tooltip and description').toHaveAccessibleDescription('feature/page · Since origin/main', { timeout: 20_000 });
       for (const path of ['notes/note-1.md', 'notes/note-2.md', 'README.md', 'src/app.ts', 'src/staged.ts', 'untracked.txt']) await expect(review.locator(`[data-review-file="${path}"]`), path).toBeVisible();
       // and back to the commit, kept
       await chip.click();
       await expect(chip).toHaveAttribute('aria-pressed', 'true');
-      await expect(review.locator('[data-review-header]')).toHaveText('1 file changed · +3 −0');
-      await expect(review.locator('[data-review-footer]')).toHaveText(`Commit ${second.slice(0, 7)} · ${NOTES[1]}`);
+      await expect(review.locator('[data-review-header]')).toHaveText('1 file · +3 −0');
+      await expect(chip).toHaveAccessibleDescription(NOTES[1]!);
     });
   });
 
@@ -527,20 +536,26 @@ test.describe('source control over a scratch repository', () => {
     await withScm({ setup: (scratch) => scratch.git('push', '--quiet', 'origin', 'main') }, async (p) => {
       const { scratch } = p;
       await expect(environment(p)).toContainText('Up to date with origin/main');
-      await expect(environment(p)).toContainText('No PR for main');
-      scratch.gh('view.none', null); // from now on gh has the PR: #7, BLOCKED, two checks passed and one pending
-      await environment(p).getByRole('button', { name: 'Refresh PR state' }).click();
+      // the word cut (P43): a branch with no PR draws no PR row on the card, so no Refresh there; the page still says so,
+      // beside its own Refresh, whose answer the card's row shares by key
       const line = environment(p).getByTestId('pr-line');
-      await expect(line).toHaveText('PR #7 Open · 2 passed, 1 pending');
-
+      await expect(line).toHaveCount(0);
       await openPage(p);
       const pr = part(p, 'pr');
-      await expect(pr.locator('[data-scm-pr-number]')).toHaveText('#7');
+      await expect(pr.locator('[data-scm-pr-line]')).toHaveText('No PR for main', { timeout: 20_000 });
+      scratch.gh('view.none', null); // from now on gh has the PR: #7, BLOCKED, two checks passed and one pending
+      await pr.getByRole('button', { name: 'Refresh PR state' }).click();
+      await expect(pr.locator('[data-scm-pr-number]')).toHaveText('#7', { timeout: 20_000 });
       await expect(pr.locator('[data-scm-pr-title]')).toHaveText('Panel PR');
-      await expect.poll(() => words(pr.locator('[data-scm-pr-state]'))).toBe('Open · into main · Merging is blocked');
-      await expect.poll(() => words(pr.locator('[data-scm-checks]'))).toBe('Checks 2 passed · 1 pending');
+      // the word cut (N72): an open PR's state is not said; (N75) the counts line counts what is listed under it
+      await expect.poll(() => words(pr.locator('[data-scm-pr-state]'))).toBe('into main · Merging is blocked');
+      await expect.poll(() => words(pr.locator('[data-scm-checks]'))).toBe('Checks 1 pending');
       await expect(pr.locator('[data-scm-check]')).toHaveCount(1);
       await expect(pr.locator('[data-scm-check][data-bucket="pending"]')).toContainText('test');
+      // the card's row, read where it is drawn (P44: an open PR and passed checks say nothing there)
+      await showEnvironment(p);
+      await expect(line).toHaveText('PR #7 · 1 pending');
+      await openPage(p);
 
       scratch.gh('checks.json', JSON.stringify(CHECKS_PASSED));
       scratch.gh('checks.exit', '0');
@@ -549,7 +564,7 @@ test.describe('source control over a scratch repository', () => {
       await expect.poll(() => words(pr.locator('[data-scm-fold-line]'))).toBe('Checks › 3 passed');
       // The card's line, read where it is drawn: Session cards in the side column, where the page stood
       await showEnvironment(p);
-      await expect(line).toHaveText('PR #7 Open · 3 passed');
+      await expect(line, 'nothing to say beyond the number (P44)').toHaveText('PR #7');
       await openPage(p);
 
       scratch.gh('checks.json', JSON.stringify([CHECKS_PASSED[0], { ...CHECKS_PASSED[2], bucket: 'fail', state: 'FAILURE' }, CHECKS_PASSED[1]]));
@@ -560,7 +575,7 @@ test.describe('source control over a scratch repository', () => {
       await expect(failed).toContainText('test');
       await expect(failed.locator('[data-scm-check-word]')).toHaveClass(/text-danger/);
       await expect(failed.getByRole('button', { name: 'Open test on GitHub' })).toBeVisible();
-      await expect.poll(() => words(pr.locator('[data-scm-checks]'))).toBe('Checks 2 passed · 1 failed');
+      await expect.poll(() => words(pr.locator('[data-scm-checks]'))).toBe('Checks 1 failed');
     });
   });
 
@@ -623,7 +638,7 @@ test.describe('source control over a scratch repository', () => {
         await shot(review, `review-commit-${theme}.png`);
       }
       await showEnvironment(p);
-      await expect(environment(p).getByTestId('pr-line')).toHaveText('PR #7 Open · 2 passed, 1 pending');
+      await expect(environment(p).getByTestId('pr-line')).toHaveText('PR #7 · 1 pending'); // the word cut (P44)
       await p.page.mouse.move(0, 0); // the row as it rests, Refresh neither hovered nor focused
       await p.page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
       for (const theme of themes) {

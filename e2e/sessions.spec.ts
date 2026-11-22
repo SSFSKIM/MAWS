@@ -249,7 +249,8 @@ async function forkOf(page: Page, source: string): Promise<string> {
 // enabled state by its id (null: no such item); the files service's content hash; two sentences of tools/code/copy.ts
 const menuEnabled = (maws: MawsLaunch, id: string) => maws.app.evaluate(({ Menu }, id) => Menu.getApplicationMenu()?.getMenuItemById(id)?.enabled ?? null, id);
 const sha256Of = (bytes: Buffer) => createHash('sha256').update(bytes).digest('hex');
-const MAWS_OWN = 'Read-only: MAWS does not edit its own files';
+const MAWS_OWN = 'Read-only: MAWS does not edit its own files'; // the editor's title, which keeps its words
+const MAWS_OWN_SENTENCE = 'MAWS does not edit its own files'; // the word cut (N16 to N20): "Read-only" button's description and its panel
 const OUTSIDE_REFUSED = 'MAWS may no longer write this file for this session. Choose it with File ▸ Open File… to save it';
 // A drawn box, and one held inside another (half a pixel for subpixel layout)
 type Box = { left: number; top: number; right: number; bottom: number };
@@ -275,7 +276,8 @@ async function sideColumnAt(page: Page, width: number | 'widest'): Promise<void>
   await expect(resizer).toHaveAttribute('aria-valuenow', String(width));
 }
 // K1, K3, K14, K15: a save's failure in a file's bar is a line of its own below the path and the controls, at the bar's
-// full width and drawn whole; Save and Wrap are one group on one line, which stays on the path's line where it fits
+// full width and drawn whole; Save and View (the glyph that holds Wrap since the word cut, T305) are one group on one
+// line, which stays on the path's line where it fits
 async function expectFailureLine(viewer: Locator, where: string, roomy: boolean): Promise<void> {
   const drawn = await viewer.evaluate((el) => {
     const rect = (node: Element) => {
@@ -287,7 +289,7 @@ async function expectFailureLine(viewer: Locator, where: string, roomy: boolean)
     const style = getComputedStyle(bar);
     const group = el.querySelector('[data-bar-controls]')!;
     const button = (text: string) => Array.from(group.querySelectorAll('button')).find((node) => node.textContent === text);
-    const [save, wrap] = [button('Save'), button('Wrap')];
+    const [save, view] = [button('Save'), group.querySelector('button[data-file-view]')];
     return {
       failure: rect(failure),
       whole: failure.scrollWidth <= failure.clientWidth && failure.scrollHeight <= failure.clientHeight,
@@ -296,17 +298,17 @@ async function expectFailureLine(viewer: Locator, where: string, roomy: boolean)
       lead: rect(el.querySelector('[data-path-lead]')!),
       group: rect(group),
       save: save ? rect(save) : null,
-      wrap: wrap ? rect(wrap) : null,
+      view: view ? rect(view) : null,
     };
   });
   expect(drawn.whole, `${where}: the failure drawn whole, never cut`).toBe(true);
   expectInside(drawn.failure, drawn.bar, `${where}: the failure`);
   expect(drawn.failure.right - drawn.failure.left, `${where}: the failure at the bar's full width`).toBeGreaterThanOrEqual(drawn.room - 1);
   expect(drawn.failure.top, `${where}: the failure on a line below the path`).toBeGreaterThanOrEqual(drawn.lead.bottom - 0.5);
-  expect(drawn.failure.top, `${where}: and below Save and Wrap`).toBeGreaterThanOrEqual(drawn.group.bottom - 0.5);
-  expect(drawn.save && drawn.wrap, `${where}: Save and Wrap both in the controls' group`).not.toBeNull();
-  const [save, wrap] = [drawn.save!, drawn.wrap!];
-  expect(save.top < wrap.bottom && wrap.top < save.bottom, `${where}: Save and Wrap on one line`).toBe(true);
+  expect(drawn.failure.top, `${where}: and below Save and View`).toBeGreaterThanOrEqual(drawn.group.bottom - 0.5);
+  expect(drawn.save && drawn.view, `${where}: Save and View both in the controls' group`).not.toBeNull();
+  const [save, view] = [drawn.save!, drawn.view!];
+  expect(save.top < view.bottom && view.top < save.bottom, `${where}: Save and View on one line`).toBe(true);
   if (roomy) expect(drawn.group.top < drawn.lead.bottom && drawn.lead.top < drawn.group.bottom, `${where}: the group on the path's line, where it fits`).toBe(true);
 }
 
@@ -1251,7 +1253,7 @@ test.describe('sessions', () => {
       await save.click();
       await expect(notes).toHaveAttribute('data-theirs', 'merge', { timeout: 20_000 });
       const reason = notes.locator('[data-theirs-notice="merge"]');
-      await expect(reason).toHaveText('Changed on disk since you opened it');
+      await expect(reason).toHaveText('Changed on disk'); // the word cut (T341): the merge view's notice reads as the plain notice does
       await expectDrawnWholeAtBothWidths(page, reason);
       expect(readFileSync(file('notes.txt'), 'utf8'), 'the conflicting save wrote nothing').toBe(THEIRS);
 
@@ -1312,8 +1314,8 @@ test.describe('sessions', () => {
       await expect(side.locator(`[data-file-viewer][data-path="${guidePath}"]`)).toContainText(GUIDE, { timeout: 20_000 });
 
       // L5, L7: a relative link to an outside file the transcript never writes whole opens its tab at the path it names,
-      // whose notice says why in the window, in three sentences, with the path, Copy path and the service's words small;
-      // no line begins with "Refused"; nothing of the file is read
+      // whose notice says why in the window, in three sentences, with the path and Copy path (the service's words no longer
+      // under it since the word cut, N11); no line begins with "Refused"; nothing of the file is read
       const toSecretChip = main.locator(`[data-chip="path"][title="${toSecret}"]`);
       await expect(toSecretChip).toBeVisible();
       await toSecretChip.click();
@@ -1322,17 +1324,17 @@ test.describe('sessions', () => {
       await expect(notice, 'the first notice').toHaveAttribute('data-notice-cause', 'outside', { timeout: 20_000 });
       await expect(notice).toHaveAttribute('role', 'alert');
       await expect
-        .poll(() => notice.locator('p').allTextContents(), { message: 'the three sentences, the path, the service’s words' })
+        .poll(() => notice.locator('p').allTextContents(), { message: 'the three sentences and the path' })
         .toEqual([
           'This file is outside the folders this session works in.',
-          "MAWS opens a file from elsewhere when this session's transcript links it, when you choose it with File ▸ Open File…, or when the agent sends it.",
+          'Choose it with File ▸ Open File…', // the word cut (N7): the way in, without how the app opens files
           'Ask the agent to send the file to see it here.',
           file('secret.md'),
-          "path outside the session's directories",
         ]);
       await expect(notice.locator('[data-notice-copy]'), 'Copy path, after the path').toHaveText('Copy path');
       await expect(notice.locator('[data-notice-retry]'), 'no Retry: trying again cannot help').toHaveCount(0);
-      await expect(notice.locator('[data-notice-detail]')).toHaveText("path outside the session's directories");
+      // the word cut (N11): the command's own words show only under the generic "could not be opened" notice
+      await expect(notice.locator('[data-notice-detail]')).toHaveCount(0);
       expect((await notice.locator('p').allTextContents()).filter((line) => line.startsWith('Refused') || line.startsWith('files.')), 'no line in the command’s words first').toEqual([]);
       await expect(secret.locator('.cm-content'), 'nothing of the file is read').toHaveCount(0);
       await asItWas();
@@ -1875,7 +1877,7 @@ test.describe('sessions', () => {
         await expect(ownContent).toHaveText(OWN.trimEnd(), { timeout: 20_000 });
         const label = ownViewer.locator('[data-read-only="maws"]');
         await expect(label).toHaveText('Read-only');
-        await expect(label).toHaveAttribute('aria-description', MAWS_OWN);
+        await expect(label).toHaveAttribute('aria-description', MAWS_OWN_SENTENCE);
         expect((await boxOf(label)).right, 'K2: "Read-only" before the path').toBeLessThanOrEqual((await boxOf(ownViewer.locator('[data-path-lead]'))).left + 0.5);
         await expect(ownViewer).toHaveAttribute('data-editable', 'false');
         await expect(ownContent).toHaveAttribute('title', MAWS_OWN);
@@ -1889,7 +1891,7 @@ test.describe('sessions', () => {
           await sideColumnAt(p2, width);
           await label.click();
           await expect(panel).toBeVisible();
-          await expect(panel).toHaveText(MAWS_OWN);
+          await expect(panel).toHaveText(MAWS_OWN_SENTENCE);
           await expect(panel.getByRole('button'), 'no Open File… where choosing the file changes nothing').toHaveCount(0);
           expectInside(await boxOf(panel), await boxOf(ownViewer), `the panel at a ${width} px column`);
           await p2.keyboard.press('Escape');
@@ -1932,7 +1934,7 @@ test.describe('sessions', () => {
         expect(drawn.folder.width, 'K11: two characters at the cut, so no lone glyph').toBeGreaterThanOrEqual(2 * drawn.ch - 0.5);
       });
 
-      await test.step('A7, K1, K3, K14, K15: a save the path no longer leads to fails on a line of its own, whole, in a side tab and a main tab, Save and Wrap one group; the path put back, it saves', async () => {
+      await test.step('A7, K1, K3, K14, K15: a save the path no longer leads to fails on a line of its own, whole, in a side tab and a main tab, Save and View one group; the path put back, it saves', async () => {
         await content2.click();
         await p2.keyboard.press('Meta+End');
         await p2.keyboard.type(' Then the swap.');

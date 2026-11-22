@@ -246,7 +246,7 @@ test.describe('the editor in stub mode over a scratch repository', () => {
       await typeAtTop(p, viewer, TYPED);
       writeFileSync(p.scratch.path(APP), Buffer.concat([Buffer.from('// caf'), Buffer.from([0xe9]), Buffer.from(' changed on disk\n'), Buffer.from(original)]));
       const reason = viewer.locator('[data-disk-unusable]');
-      await expect(reason).toHaveText('Changed on disk: no longer UTF-8, so it cannot be merged', { timeout: MEASURED_WAIT_MS });
+      await expect(reason).toHaveText('Changed on disk · not UTF-8, can’t merge', { timeout: MEASURED_WAIT_MS }); // the word cut (T343): the fact, shortened
       await expect(reason).toHaveAttribute('data-disk-unusable', 'encoding');
       await expect(viewer, 'no version on offer').toHaveAttribute('data-theirs', '');
       await expect(viewer, 'the edit still in the tab').toHaveAttribute('data-dirty', 'true');
@@ -267,10 +267,10 @@ test.describe('the editor in stub mode over a scratch repository', () => {
       await barButton(viewer, 'Save').click();
       await expect(viewer).toHaveAttribute('data-theirs', 'merge');
       const reason = viewer.locator('[data-theirs-notice="merge"]');
-      await expect(reason).toHaveText('Changed on disk since you opened it');
+      await expect(reason).toHaveText('Changed on disk'); // the word cut (T341): the merge view's notice reads as the plain notice does
       await expectDrawnWholeAtBothWidths(p.page, reason);
       const changes = viewer.locator('[data-merge-changes]');
-      await expect(changes).toHaveText('2 changes from disk');
+      await expect(changes).toHaveText('2 changes'); // the word cut (T342): the count beside ↑ ↓
       const chunks = viewer.locator('.cm-deletedChunk');
       await expect(chunks).toHaveCount(2);
       await expect(chunks.first().getByRole('button', { name: 'Take theirs' })).toBeVisible();
@@ -299,10 +299,10 @@ test.describe('the editor in stub mode over a scratch repository', () => {
 
       // The first chunk is the typed line, which the disk lacks: Take theirs drops it; the rest stays mine.
       await chunks.first().getByRole('button', { name: 'Take theirs' }).click();
-      await expect(changes).toHaveText('1 change from disk');
+      await expect(changes).toHaveText('1 change');
       await expect(viewer.locator('.cm-content')).not.toContainText(TYPED);
       await chunks.first().getByRole('button', { name: 'Keep mine' }).click();
-      await expect(changes).toHaveText('0 changes from disk');
+      await expect(changes).toHaveText('0 changes');
 
       await barButton(viewer, 'Save').click();
       await expect.poll(() => read(p, APP), { message: 'the resolution: the disk’s first lines, mine at line 20' }).toBe(original);
@@ -445,7 +445,7 @@ test.describe('the editor in stub mode over a scratch repository', () => {
 
         await barButton(viewer, 'Compare').click();
         await expect(viewer).toHaveAttribute('data-theirs', 'merge');
-        await expect(viewer.locator('[data-merge-changes]')).toHaveText('2 changes from disk');
+        await expect(viewer.locator('[data-merge-changes]')).toHaveText('2 changes');
         await expect(viewer.locator('.cm-deletedChunk')).toHaveCount(2);
         await scan(theme, 'the merge view');
         await shoot(viewer, 'merge', theme);

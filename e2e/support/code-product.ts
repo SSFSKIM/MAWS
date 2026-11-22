@@ -178,7 +178,8 @@ export async function openReview(p: Product): Promise<Locator> {
   await addTool(p, 'Review');
   const review = surface(p.page, 'review').locator('[data-review]');
   await expect(review.locator('[data-chip="uncommitted"]')).toHaveAttribute('aria-pressed', 'true');
-  await expect(review.locator('[data-review-header]')).toContainText(' changed · ');
+  // the word cut (T356): the totals are "2 files · +6 −0", without "changed"
+  await expect(review.locator('[data-review-header]')).toContainText(/\d files? · \+\d/);
   await expectToolbarAsDrawn(review, "Review's toolbar as drawn in the panel"); // measured, in every scene that opens it here
   return review;
 }
@@ -214,13 +215,13 @@ export async function scrollIntoSection(review: Locator, path: string, depth: nu
   );
 }
 
-// The hunk counter as drawn ("Showing hunk 3 of 6", or "3 of 6" where the long form does not fit, card 1): null while no
-// file is loaded.
+// The hunk counter: null while no file is loaded. The word cut (T306) draws it "3 / 6", named "Hunk 3 of 6", and gives
+// its numbers as data apart from the drawn words, which group thousands.
 export const hunkCounter = async (review: Locator): Promise<{ index: number; count: number } | null> => {
   const counter = review.locator('[data-review-hunk]');
   if ((await counter.count()) === 0) return null;
-  const found = /(\d+) of (\d+)/.exec((await counter.textContent()) ?? '');
-  return found ? { index: Number(found[1]), count: Number(found[2]) } : null;
+  const [index, count] = await Promise.all([counter.getAttribute('data-index'), counter.getAttribute('data-count')]);
+  return index !== null && count !== null ? { index: Number(index), count: Number(count) } : null;
 };
 
 // Where the stack is being read, measured on the page (unified rows): the section at the scroller's top, the diff row at
@@ -413,14 +414,15 @@ export async function expectLandedOn(page: Page, text: string, within?: number):
   if (at > 2 / 3) expect(atBottom, `below the middle third (${at.toFixed(2)}) only with the scroller at the bottom`).toBe(true);
 }
 
-// Records every notice the viewer shows from now on (a notice can come and go between two polls).
+// Records every notice the viewer shows from now on (a notice can come and go between two polls), by its words: a long
+// file's arrival is a ring with no text since the word cut (T324), its words its `data-notice` and its name.
 export async function recordNotices(page: Page): Promise<() => Promise<string[]>> {
   await page.evaluate(() => {
     const seen: string[] = [];
     (window as unknown as { __notices: string[] }).__notices = seen;
     const note = () => {
-      for (const el of Array.from(document.querySelectorAll('[data-file-viewer] [role="status"][data-notice]'))) {
-        const text = el.textContent ?? '';
+      for (const el of Array.from(document.querySelectorAll('[data-file-viewer] [data-notice]'))) {
+        const text = el.getAttribute('data-notice') ?? '';
         if (seen.at(-1) !== text) seen.push(text);
       }
     };
@@ -439,7 +441,9 @@ export async function shortWindow({ maws, page }: Pick<Product, 'maws' | 'page'>
   await expect.poll(() => page.evaluate(() => window.innerHeight)).toBeLessThan(480);
 }
 
-export const notice = (viewer: Locator) => viewer.locator('[role="status"][data-notice]');
+// A file's notice: a line of words (`role="status"`), or a long file's arrival ring (`role="progressbar"`, the word cut's
+// T324), each carrying its words as `data-notice`.
+export const notice = (viewer: Locator) => viewer.locator('[data-notice]');
 
 // The code view's document end, scrolled to: the last line number drawn and the texts of the last two lines.
 export async function documentEnd(viewer: Locator): Promise<{ number: number; last: string; beforeLast: string }> {

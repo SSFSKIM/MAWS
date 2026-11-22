@@ -132,7 +132,7 @@ test("the subagent tree matches the recording's metas, and the diff renders", as
 
   await depth.getByTestId('depth-tab-diff').click();
   const diff = depth.getByTestId('depth-diff');
-  await expect(diff.locator('[data-review-header]')).toHaveText('2 files changed · +6 −0 · Since main');
+  await expect(diff.locator('[data-review-header]')).toHaveText('2 files · +6 −0 · Since main'); // Review's word cut (N160)
   await expect(diff.locator('[data-review-body]')).toContainText('"name": "fakerec"');
   await diff.locator('[data-path="recorded.txt"]').click();
   await expect(diff.locator('[data-review-body]')).toContainText('blue');
