@@ -396,6 +396,7 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
       if (host === 'machine') return;
       parked[host] = isParked;
       clocks.hosts({ engine: parked['engine-host'], pty: parked['pty-host'] });
+      if (host === 'pty-host' && isParked) ptyRelay.parked(); // a hello held off the leaving host wakes its successor
     },
   });
 
@@ -839,6 +840,10 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
   let credit: 'daemon' | 'app' = 'daemon';
   let ptyCheck = 0; // a park check in flight is stale once this moved
   let ptyRequests = 0; // the endpoint's requests to the pty host in flight: no park under them
+  let ptyLeaving = false; // asked to exit now, its link not closed yet: the relay welcomes no hello onto it
+  const ptyExitNow = () => {
+    ptyLeaving = hosts.exitSupervisor('now', 'pty-host');
+  };
   const ptyReady = () => hosts.snapshot('pty-host').state === 'ready' && !hosts.parked('pty-host');
   // The credit while no app holds it: every live pty acknowledged at its offset (a pty paused while mawsd was down
   // resumes), then the pty host parks when nothing lives.
@@ -851,7 +856,7 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
     for (const pty of ptys.filter((p) => p.alive)) void hosts.dispatch('pty-host', 'pty.ack', { ptyId: pty.ptyId, offset: pty.offset });
     if (ptys.some((p) => p.alive) || ptyRelay.attachedApp() || ptyRequests > 0) return;
     log('no app on pty-host.sock and no pty alive: the pty host exits now and parks');
-    hosts.exitSupervisor('now', 'pty-host');
+    ptyExitNow();
   };
   const ptyRelay = new Relay({
     owner: 'pty-host',
@@ -863,7 +868,7 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
     onExit: (when, refused) => {
       if (when === 'idle' || refused) return log(`exit ${when} from the app on pty-host.sock ignored`);
       log('exit now from the app: the pty host exits now and parks');
-      hosts.exitSupervisor('now', 'pty-host');
+      ptyExitNow();
     },
     attached: () => {
       credit = 'app'; // before anything is forwarded: the renderer's pty.attach takes the credit back (stepFlow's attach)
@@ -881,6 +886,7 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
       void settleCredit();
     },
     holdMs: options.helloHoldMs,
+    leaving: () => ptyLeaving,
     between: () => clientsChanged(), // P5 Decision Log 124: the quiet's
   });
 
@@ -942,6 +948,7 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
     // P5 O7 M3: the endpoint's remote terminals tell the host's loss (a restart counted) from a reconnect (`ready` again)
     each(eventListeners, 'pty-host', { name: 'pty.hostState', payload: state });
     if (state.state === 'ready') return void settleCredit(); // every link while no app holds the credit
+    ptyLeaving = false; // the asked exit closed the link (or the link was lost first)
     ptyRelay.dropApp(`the pty host is ${state.state}`);
   });
   hosts.onRaw('pty-host', (message) => {

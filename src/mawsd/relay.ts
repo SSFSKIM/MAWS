@@ -58,6 +58,7 @@ export interface RelayOptions {
   departed(): void; // it left (its FIN or its close, whichever came first), once
   drain?: { start(drained: () => void): void; boundMs?: number }; // the upstream's draining close (the engine relay)
   holdMs?: number;
+  leaving?(): boolean; // the daemon asked the upstream to exit and its link has not closed yet: no hello is welcomed onto it
   between?(): void; // `between()` may have changed
   work?(): () => void; // P5 Decision Log 273: each request taken, from its receipt to its answer's settling, whether or not the app is still there
 }
@@ -99,6 +100,12 @@ export class Relay implements ServedRuntime {
     return this.admitting > 0 || (this.departing !== null && !this.departing.gone);
   }
 
+  // The upstream parked (no HostState transition tells it): a hello still admitting, held off a host that was leaving,
+  // needs a fresh one, so it wakes it rather than wait out the hold.
+  parked(): void {
+    if (this.admitting > 0 && this.options.hosts.parked(this.options.owner)) this.options.hosts.wake(this.options.owner);
+  }
+
   // The upstream link ended under an attached app (a crash, a quiet loss): its connection closes too, so main reads the
   // host's pid again, as it does when the supervisor's own socket closes.
   dropApp(why: string): void {
@@ -124,6 +131,7 @@ export class Relay implements ServedRuntime {
   private async admission(): Promise<Admission> {
     const { hosts, owner } = this.options;
     const answered = () => {
+      if (this.options.leaving?.() === true) return false; // asked to exit: its successor answers, once woken (`parked`)
       const { state } = hosts.snapshot(owner);
       return (state === 'ready' && hosts.welcome(owner) !== null) || hosts.refusal(owner) !== null || (state === 'crashed' && !hosts.parked(owner));
     };

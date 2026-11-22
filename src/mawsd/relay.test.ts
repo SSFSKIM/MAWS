@@ -155,3 +155,68 @@ describe('a relay’s request as work', () => {
     expect(open).toBe(0);
   });
 });
+
+// A hello that lands after the daemon asked its upstream to exit and before the exit closes the link (cross-build's
+// handover: the adopted pty host parked with no app, the app's reconnect a few ms later) waits for the successor; it is
+// never welcomed onto the leaving host, whose close would fail what the app sent on it.
+describe('a hello while the upstream is leaving', () => {
+  function leavingUpstream() {
+    let state = 'ready';
+    let pid = 7;
+    let parked = false;
+    let woken = 0;
+    const listeners = new Set<() => void>();
+    const tell = () => listeners.forEach((listener) => listener());
+    const hosts = {
+      snapshot: () => ({ state }),
+      parked: () => parked,
+      wake: () => {
+        if (!parked) return;
+        woken += 1;
+        [parked, state] = [false, 'starting'];
+        tell();
+      },
+      welcome: () => (state === 'ready' ? { pid, startedAt: 't', liveSessions: 0, rows: 0, peer: { minor: 0, build: 'b', capabilities: [] } } : null),
+      refusal: () => null,
+      facts: () => ({ reason: null }),
+      onState: (_owner: string, listener: () => void) => (listeners.add(listener), () => listeners.delete(listener)),
+    };
+    let leaving = true;
+    const made: Relay = new Relay({
+      owner: 'pty-host', hosts: hosts as unknown as HostSupervisor, log: () => {}, startedAt: () => 'then', onExit: () => {}, attached: () => {}, ready: () => {}, departed: () => {},
+      leaving: () => leaving,
+    });
+    // the exit lands: the link's loss (`restarting`, the daemon's flag cleared there), then the deliberate exit's park
+    const exited = () => {
+      [state, leaving] = ['restarting', false];
+      tell();
+      parked = true;
+      made.parked();
+    };
+    const successor = () => {
+      [state, pid] = ['ready', 8];
+      tell();
+    };
+    return { relay: made, exited, successor, woken: () => woken };
+  }
+
+  it('is not welcomed onto the leaving host; it wakes the parked successor and is welcomed by it', async () => {
+    const u = leavingUpstream();
+    let settled = false;
+    const admitted = u.relay.admit().then((admission) => ((settled = true), admission));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(settled).toBe(false); // not answered by the host asked to exit
+    u.exited();
+    expect(u.woken()).toBe(1);
+    u.successor();
+    const admission = await admitted;
+    expect(admission.kind).toBe('welcome');
+    expect(admission.kind === 'welcome' && admission.identity.pid).toBe(8);
+  });
+
+  it('a park with no hello admitting wakes nothing', () => {
+    const u = leavingUpstream();
+    u.exited();
+    expect(u.woken()).toBe(0);
+  });
+});

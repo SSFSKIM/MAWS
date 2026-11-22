@@ -34,6 +34,8 @@ let calls: { name: string; input: unknown }[];
 // P5 O7 M3: when set before the pty host comes up, its ledger's kill waits on it (the ledger and the table stay real)
 let killGate: Promise<void> | null;
 let killRuns: number;
+// when set before the pty host comes up, its `exit now` dies only once this settles (the window before the link closes)
+let exitGate: Promise<void> | null;
 
 beforeEach(() => {
   scene = new MawsdScene('maws-mp-');
@@ -41,6 +43,7 @@ beforeEach(() => {
   calls = [];
   killGate = null;
   killRuns = 0;
+  exitGate = null;
   scene.ptySpawn = (pid) => bringUp(pid);
   onTestFailed(() => void process.stdout.write(`--- mawsd's log\n${scene.logs.join('\n')}\n`));
   vi.spyOn(console, 'error').mockImplementation(() => {});
@@ -87,7 +90,8 @@ function bringUp(pid: number) {
       emit,
       client,
     );
-  return scene.serve(scene.ptyProfile, { pid, runtime: createHostRuntime(recorded) });
+  const exiting = exitGate;
+  return scene.serve(scene.ptyProfile, { pid, runtime: createHostRuntime(recorded), ...(exiting && { onExitNow: (supervisor) => void exiting.then(() => supervisor.die()) }) });
 }
 
 const table = () => {
@@ -129,6 +133,28 @@ describe('the pty relay', () => {
     expect(frame.ptyId).toBe(ptyId);
     expect(frame.data).toBeInstanceOf(Uint8Array);
     expect(calls.filter((call) => call.name === 'pty.recaptureEnv')).toHaveLength(1); // a fresh login-shell capture per attachment
+  });
+
+  // cross-build's handover: mawsd parks its idle pty host and an app's hello lands before that host's link closes
+  it('a hello after mawsd asked the idle pty host to exit is welcomed by the successor, never dropped with what it sent', async () => {
+    let release!: () => void;
+    exitGate = new Promise((resolve) => (release = resolve));
+    await scene.start();
+    const first = await scene.app('pty-host');
+    const leavingPid = (first.first as { pid: number }).pid;
+    first.leave();
+    await until(() => scene.logs.some((line) => line.includes('the pty host exits now and parks')), WAIT_MS, 'the park asked');
+    exitGate = null; // the successor exits as it is asked
+    const arriving = scene.app('pty-host');
+    await new Promise((resolve) => setTimeout(resolve, 50)); // the hello is in, the leaving host still linked
+    release();
+    const second = await arriving;
+    expect(second.welcomed()).toBe(true);
+    expect((second.first as { pid: number }).pid).not.toBe(leavingPid);
+    second.ready();
+    expect(await second.request('pty.list', undefined, WAIT_MS)).toMatchObject({ ok: true });
+    expect(second.closed).toBe(false);
+    expect(scene.logs.filter((line) => line.includes("closing the app's connection"))).toEqual([]);
   });
 });
 
