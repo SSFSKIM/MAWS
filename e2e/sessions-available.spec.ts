@@ -17,6 +17,7 @@ import type { CommandInput, CommandName, CommandResult } from '@shared/ipc/schem
 import { ScratchRepo } from '../test/support/scratch-repo';
 import { StoreFixture } from '../test/support/store-fixture';
 import { launchMaws, type MawsLaunch } from './support/launch';
+import { unfoldInfoGroup } from './support/session-info';
 import { seedTranscript, SideJournal, transcript } from './support/side-replay';
 import { sidebarRow } from './support/sidebar';
 import { NATIVE_TO_HUMAN_ENV } from '../src/shared/owner/contract'; // P4-R7z
@@ -98,13 +99,6 @@ async function sessionInfo(page: Page) {
   return surface(page, 'session-info').locator('[data-session-info]');
 }
 const valueOf = (info: Awaited<ReturnType<typeof sessionInfo>>, label: string) => info.getByRole('term').filter({ hasText: new RegExp(`^${label}$`) }).locator('xpath=following-sibling::dd[1]');
-// The word cut (M3): Session info's groups are disclosures and only Permissions and Usage start open, so the Model group
-// (its Main row) is opened by its heading's button before its rows are read.
-async function openModelGroup(info: Awaited<ReturnType<typeof sessionInfo>>): Promise<void> {
-  const head = info.getByRole('button', { name: 'Model', exact: true });
-  if ((await head.getAttribute('aria-expanded')) !== 'true') await head.click();
-  await expect(head).toHaveAttribute('aria-expanded', 'true');
-}
 
 test.describe('sessions available on demand (P2-A)', () => {
   test('opening a discovered session starts nothing; /skills offers Load now, which says Starting… and then shows the skills', async () => {
@@ -112,7 +106,7 @@ test.describe('sessions available on demand (P2-A)', () => {
     const { maws, page, appId } = await launchWith(SKILLS_SESSION, (journal) => journal.read({ subtype: 'get_skills_dialog' }, { skills: [SKILL] }));
     await open(page, appId);
     const info = await sessionInfo(page);
-    await openModelGroup(info);
+    await unfoldInfoGroup(info, 'Model'); // the word cut: only Permissions and Usage start open
     await expect(valueOf(info, 'Main')).toHaveText('—'); // the word cut (P174): a fact not observed yet is a dash
     await expect(info.getByRole('button', { name: 'Refresh' })).toBeVisible();
     expect(existsSync(journalDir(maws, appId)), 'nothing launched on open').toBe(false);
@@ -177,14 +171,14 @@ test.describe('sessions available on demand (P2-A)', () => {
     value(await invoke(page, 'session.stop', { appSessionId: appId as never, reason: 'stop' }));
     await expect.poll(async () => value(await invoke(page, 'session.status', { appSessionId: appId as never })).process, { timeout: 15_000 }).toBe('exited');
     let info = await sessionInfo(page);
-    await openModelGroup(info);
+    await unfoldInfoGroup(info, 'Model'); // the word cut: only Permissions and Usage start open
     // the word cut (T253): when it was reported is the value's tooltip and description, on a value the keyboard reaches
     await expect(valueOf(info, 'Main').locator('[tabindex="0"]')).toHaveAccessibleDescription(/^Last observed /);
     await page.reload();
     await expect(mainRegion(page)).toBeVisible();
     await open(page, appId);
     info = await sessionInfo(page);
-    await openModelGroup(info);
+    await unfoldInfoGroup(info, 'Model'); // the word cut: only Permissions and Usage start open
     await expect(valueOf(info, 'Main').locator('[tabindex="0"]')).toHaveAccessibleDescription(/^Last observed /);
     expect(spawns(maws, appId), 'the reload started nothing').toHaveLength(1);
   });
