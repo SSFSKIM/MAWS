@@ -332,10 +332,11 @@ describe('Reply through the human send seam', () => {
     await act(async () => {});
     expect(within(replyRow()).queryByRole('img', { name: 'Sent to Claude' })).toBeNull();
     push([b.emit('command.lifecycle', { commandUuid: uuid('t2'), state: 'started' })]);
-    // the word cut (P443): the mark is a check, "Sent to Claude" its name and tooltip
+    // the word cut (P443): the mark is a check, "Sent to Claude" its name and its tooltip, which the keyboard reaches
     const mark = await waitFor(() => within(replyRow()).getByRole('img', { name: 'Sent to Claude' }));
     expect(mark.textContent).toBe('✓');
-    expect(mark.getAttribute('title')).toBe('Sent to Claude');
+    expect(mark.getAttribute('title')).toBeNull();
+    expect(mark.tabIndex).toBe(0);
     const rows = within(card()!).getAllByRole('region', { name: 'Your message' });
     expect(within(rows[0]!).queryByRole('img', { name: 'Sent to Claude' }), 'the comment the card did not send this time carries no mark').toBeNull();
   });
