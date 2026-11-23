@@ -125,6 +125,9 @@ export interface TranscriptStore {
   mountView(key: string, compose: ComposeView): () => void;
   setView(key: string, view: 'report' | 'transcript'): void;
   toggleStretch(key: string, stretch: string): readonly string[]; // the keys the stretch's other record line can carry
+  // board ticket 850: every key the rows of the stretch `stretch` names answer to, in each mounted view of the key (the
+  // key's own rows when none is mounted): the rows its record line's motion moves
+  stretchKeys(key: string, stretch: string): readonly string[];
   // UX wave U1b (the U1b document, Interfaces §B): the calls whose row holds a waiting form, as the session's list says
   // them. An equal set changes nothing; else the turns holding a call that entered or left it derive again, every other
   // turn keeping its rows. A key whose state starts over is told again by its transcript.
@@ -692,6 +695,10 @@ export function createTranscriptStore() {
         // opened, its open line carries the key just written; folded, its closed line carries its first row's key, one of
         // the keys its rows answer to
         return held === null ? [stretch] : [...new Set([stretch, ...views.flatMap(({ rows, liveMarked }) => keysOfStretch(rows, stretch, liveMarked))])];
+      },
+      stretchKeys(key, stretch) {
+        const current = entry(key);
+        return current ? [...new Set([stretch, ...composedViews(key, current).flatMap(({ rows, liveMarked }) => keysOfStretch(rows, stretch, liveMarked))])] : [stretch];
       },
       mountView(key, compose) {
         let mounted = views.get(key);

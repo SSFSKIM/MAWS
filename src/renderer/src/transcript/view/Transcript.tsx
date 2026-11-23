@@ -837,6 +837,7 @@ export function Transcript({ source, variant, actions, rewind, renderRequest, on
     const index = rows.findIndex((row) => row.id === jump.rowId);
     const turn = index >= 0 ? rows[index].turnId : null;
     if (turn !== null) motion.unfold(turn);
+    if (index >= 0) motion.unfoldRowsHolding(rows[index]); // board ticket 850: and a fold of the stretch or branch holding it
     if (index >= 0) listRef.current?.scrollToIndex(index, jump.align);
     const frame = requestAnimationFrame(() => {
       const element = document.getElementById(rowElementId(idPrefix, jump.rowId));

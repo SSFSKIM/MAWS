@@ -14,7 +14,7 @@ import type { PeerMessage, Row } from '../../model/rows';
 import { useSessions } from '../../../stores/sessions'; // P5 O15 M2b
 import { ownerEntries, ownerIdsOf, ownersLabel } from '../../../sidebar/owners'; // P5 O15 M2b
 import { useDisclosure, useRowSession } from '../context'; // E7
-import { ArrivalLine } from './Line';
+import { ArrivalBody, ArrivalLine } from './Line';
 import { PeerComposer } from './PeerComposer'; // E7
 
 type AgentMessageData = Extract<Row, { kind: 'agent_message' }>;
@@ -56,7 +56,9 @@ export function AgentMessageRow({ row }: { row: AgentMessageData }) {
         )}
       </div>
       {peer?.result === 'failed' && peer.resultText !== null && <p className="transcript-peer-error">{peer.resultText}</p>}
-      {open && <p className="transcript-peer-body">{wholeOf(row)}</p>}
+      <ArrivalBody open={open}>
+        <p className="transcript-peer-body">{wholeOf(row)}</p>
+      </ArrivalBody>
       {peer !== null && peer.replyTo !== null && replying && (
         <PeerComposer appSessionId={appSessionId} target={{ address: peer.replyTo, name: peer.sender?.name ?? null, mode: 'reply' }} label={who} keptAs={`peer-composer:${row.id}`} />
       )}

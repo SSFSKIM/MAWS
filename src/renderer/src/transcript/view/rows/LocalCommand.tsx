@@ -8,7 +8,8 @@
 // is measured as cut and opens it; "Show less" closes it. So both states hold the same text. A line with no bubble of
 // its command in its turn names the command first, where the engine said which it ran. Line ends are kept (ruling R4) by
 // the transcript's markdown itself, whose remark-breaks draws each source line break as a break.
-import { useLayoutEffect, useRef, useState, type CSSProperties } from 'react';
+import { useLayoutEffect, useState, type CSSProperties } from 'react';
+import { useDisclosureMotion } from '../../../ui/disclosure';
 import { COMMAND_LINE, commandLead } from '../../model/copy';
 import type { Row } from '../../model/rows';
 import { useDisclosure } from '../context';
@@ -17,8 +18,10 @@ import { closedBound, drawnLineBoxes, lineHeightOf } from './command-bound';
 
 export function LocalCommandRow({ row }: { row: Extract<Row, { kind: 'local_command' }> }) {
   const [open, toggle] = useDisclosure(`line:${row.id}`);
-  const output = useRef<HTMLDivElement>(null);
   const [bound, setBound] = useState<number | null>(null);
+  // Board ticket 850: Show more and Show less move between the bound and the whole output through the shared disclosure
+  // motion (a line mounted open, its bound not measured yet, closes at once).
+  const { ref: output } = useDisclosureMotion<HTMLDivElement>(open, { closedHeight: bound ?? Number.POSITIVE_INFINITY, still: bound === null });
 
   // Ruling R19 and the branch panel's finding 3: closed, the output is never drawn taller than its bound (the bottom of
   // its second drawn line, or two lines of its type where what it draws is not text lines), measured at mount and again
@@ -36,7 +39,7 @@ export function LocalCommandRow({ row }: { row: Extract<Row, { kind: 'local_comm
     observer.observe(element);
     if (element.firstElementChild) observer.observe(element.firstElementChild);
     return () => observer.disconnect();
-  }, [open, row.text, row.plain]);
+  }, [open, row.text, row.plain, output]);
   const cut = bound !== null;
 
   // Ruling R2: a one-line output sits on the bubble's side, as wide as its words; one whose text has a line end is a block

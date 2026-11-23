@@ -317,6 +317,14 @@ export function carriedKeys(before: readonly Row[], after: readonly Row[], open:
   return [...carried];
 }
 
+/**
+ * Board ticket 850: whether a drawn row is one of a stretch's, given every key that stretch's rows answer to
+ * (`keysOfStretch`): a row by any key it answers to, a record line by the stretch it names. The test a fold's motion
+ * picks the rows it moves by, with no row of the list rebuilt.
+ */
+export const inStretch = (names: ReadonlySet<string>) => (row: Row): boolean =>
+  row.kind === 'record_fold' ? names.has(row.stretch) : namesOf(row).some((name) => names.has(name));
+
 /** Every key the stretch that holds the row `key` names answers to, by its rows: its record lines carry one of them. */
 export function keysOfStretch(rows: readonly Row[], key: string, liveMarked?: string): string[] {
   for (const stretch of stretchesOf(rows, liveMarked)) {

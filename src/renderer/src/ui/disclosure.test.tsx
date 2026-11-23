@@ -155,6 +155,23 @@ describe('useDisclosureMotion', () => {
     expect(body()!.getAttribute('style')).toBeNull();
   });
 
+  it('still, changes at once as under reduced motion (board ticket 850: a preview whose bound is not known yet)', () => {
+    function Still({ open }: { open: boolean }) {
+      const { ref, mounted } = useDisclosureMotion<HTMLDivElement>(open, { closedHeight: Number.POSITIVE_INFINITY, still: true });
+      return (
+        <div ref={ref} data-testid="body">
+          {mounted ? 'preview' : null}
+        </div>
+      );
+    }
+    const view = render(<Still open />);
+    view.rerender(<Still open={false} />);
+    view.rerender(<Still open />);
+    expect(starts).toEqual([]);
+    expect(body()!.getAttribute('style')).toBeNull();
+    expect(body()!.textContent).toBe('preview');
+  });
+
   it('with appear, runs the opening motion when it mounts open', () => {
     function Appearing() {
       const { ref } = useDisclosureMotion<HTMLDivElement>(true, { appear: true });
