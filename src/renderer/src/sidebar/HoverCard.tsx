@@ -7,13 +7,16 @@
 // the pending request, if any, through the `requestCard` slot in its `hover` placement, with the originating request
 // fetched once per item through `attention.request` and cached in the attention store. P5 O6 M5: the card always names
 // the session's machine, and for an offline machine says so and when it was last seen (the roster's `since`); P5 O7 M2:
-// for another machine reached over RL2, the carrier ("direct (tailnet)", "via the hub"), and for a machine that removed this
-// device, that. Opening it answers nothing:
+// for a machine that removed this device, that. Opening it answers nothing:
 // approval is an explicit click inside the card, and the slot offers it only for read-only tools. The project row's
 // card is `ProjectHoverCard.tsx`. P5 O8 M2: a listed row's card (`ListedHoverCard`) says what its listing does: the title,
 // the machine, the state and when it was issued, and no actions. P5 O8 M5 (Q2): a session you don't own alone, listed or a
-// record at a listed address, has its card list every owner with its email. P5 O8 M6b: a session whose row has a reach
-// mark says its access, and how many it is shared with (or, another's private session, that it is shared with you).
+// record at a listed address, has its card list every owner. P5 O8 M6b: a session whose row has a reach mark says its
+// access, and how many it is shared with (or, another's private session, that it is shared with you).
+// The word cut (W69, W70, W71, W73, W75, W77): the second line is the age alone (the context share from 80 % up), the
+// state word the glyph's name and tooltip; the machine is named without how it is reached; owners by name, without
+// emails; the place line is the branch, the worktree's folder its tooltip; a held session reads who runs it, without a
+// pid. A listed session keeps "Stopped" on its line (N155): its glyph is Done's.
 import { HoverCard as Radix } from 'radix-ui';
 import { useCallback, useContext, useEffect, useRef, useState, type FocusEvent, type ReactNode } from 'react';
 import { flushSync } from 'react-dom';
@@ -22,11 +25,13 @@ import type { AttentionItem } from '@shared/graph/attention';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { SessionRecord } from '@shared/graph/session';
 import { formatAgo } from '@shared/app/date-format';
-import { carrierWords, removedWords, useMachineMark, type MachineMark } from '../app/machine-mark';
+import { removedWords, useMachineMark, type MachineMark } from '../app/machine-mark';
 import { useSlot } from '../app/slots';
 import { useNow } from '../app/use-now';
-import { BRIDGED_LINE, holderLine, waitingItem } from '../attention/derive';
+import { BRIDGED_LINE, heldLine, waitingItem } from '../attention/derive';
 import { GlyphMark } from '../attention/GlyphMark';
+import type { Glyph } from '../attention/glyph';
+import { Tip } from '../ui/tip';
 import { glyphFor, listedGlyph } from '../attention/glyph';
 import { ipc } from '../ipc/client';
 import { branchLabel } from '../sessions/branch-label';
@@ -152,14 +157,15 @@ export function SessionHoverCard({ record, children }: { record: SessionRecord; 
 
 const basename = (path: string) => path.split('/').filter(Boolean).at(-1) ?? path;
 
-// Where the session runs: its branch, and the worktree's folder when it is in one (the full path as the title). W9 (H2):
-// a branch the record does not name is left out, never guessed as "detached" (only git can say a checkout is). UX wave
-// U8c-2 (M4 decision 11): the linked worktree and the branch of the agent's working folder, whichever way it got there.
+// Where the session runs: its branch, the worktree's folder its tooltip when it is in one (the word cut, W73), the
+// worktree's name standing in for a branch it does not know. W9 (H2): a branch the record does not name is left out,
+// never guessed as "detached" (only git can say a checkout is). UX wave U8c-2 (M4 decision 11): the linked worktree and
+// the branch of the agent's working folder, whichever way it got there.
 function placeOf(record: SessionRecord): { text: string; title: string | null } | null {
   const worktree = workingWorktree(record);
   if (worktree !== null) {
     const branch = rowBranch(record);
-    return { text: `${branch ? `⎇ ${branch} · ` : ''}worktree ${basename(worktree.path)}`, title: worktree.path };
+    return { text: branch ? `⎇ ${branch}` : `worktree ${basename(worktree.path)}`, title: worktree.path };
   }
   const branch = branchLabel(workingBranch(record));
   return branch ? { text: `⎇ ${branch}`, title: null } : null;
@@ -186,15 +192,16 @@ function Body({ appSessionId, reply }: { appSessionId: AppSessionId; reply: Quic
   const waiting = waitingItem(pending);
   const place = placeOf(record);
   const working = digest?.phase === 'working' || digest?.phase === 'starting';
-  const held = holderLine(record);
-  // P5 O9 M5 (the owner's Q1): a foreign session MAWS drives through its bridge says so
-  const doing = compacting ? COMPACTING_SESSION : ((held !== null && bridged ? BRIDGED_LINE(record.holder.kind === 'terminal' ? null : held) : held) ?? (working ? digest?.activity : null) ?? null); // UX wave U3b (M4)
-  const meta = [glyph.label, sessionAge(record, digest, now, seenAt, listing), digest?.context ? `ctx ${Math.round(digest.context.percent)}%` : null].filter(Boolean).join(' · ');
+  const held = heldLine(record); // W75: who runs it, with no pid
+  // P5 O9 M5 (the owner's Q1): a foreign session MAWS drives through its bridge says so (a terminal's line already does)
+  const doing = compacting ? COMPACTING_SESSION : ((held !== null && bridged && record.holder.kind !== 'terminal' ? BRIDGED_LINE(held) : held) ?? (working ? digest?.activity : null) ?? null); // UX wave U3b (M4)
+  const context = digest?.context && digest.context.percent >= CONTEXT_SHOWN_FROM ? `ctx ${Math.round(digest.context.percent)}%` : null; // W69
+  const meta = [sessionAge(record, digest, now, seenAt, listing), context].filter(Boolean).join(' · ');
 
   return (
     <div className="flex flex-col gap-2 text-ui-sm text-fg">
       <div className="flex min-w-0 items-start gap-2">
-        <GlyphMark glyph={glyph} className="w-[14px] shrink-0 leading-[18px]" />
+        <NamedGlyphMark glyph={glyph} />
         <h3 className="m-0 line-clamp-2 min-w-0 text-ui leading-[18px] font-semibold break-words">{displayTitle(record)}</h3>
       </div>
       <p data-testid="hover-meta" className="m-0 text-fg-muted tabular-nums">
@@ -205,11 +212,18 @@ function Body({ appSessionId, reply }: { appSessionId: AppSessionId; reply: Quic
       </p>
       <Owners appId={appSessionId} />
       <ReachLine address={appSessionId} />
-      {place && (
-        <p data-testid="hover-place" title={place.title ?? undefined} className="m-0 truncate text-fg-muted">
-          {place.text}
-        </p>
-      )}
+      {place &&
+        (place.title === null ? (
+          <p data-testid="hover-place" className="m-0 truncate text-fg-muted">
+            {place.text}
+          </p>
+        ) : (
+          <Tip content={place.title} description={place.title}>
+            <p data-testid="hover-place" tabIndex={0} className={`m-0 truncate text-fg-muted ${OWNER}`}>
+              {place.text}
+            </p>
+          </Tip>
+        ))}
       {/* E3: whose side thread or fork it is */}
       {record.lineage !== null && (
         <p data-testid="hover-lineage" className="m-0 truncate text-fg-muted">
@@ -249,11 +263,12 @@ function ListedBody({ appId }: { appId: AppSessionId }) {
   if (!listed) return null;
   const glyph = listedGlyph(listed.state);
   const issued = Date.parse(listed.issued);
-  const meta = [glyph.label, Number.isFinite(issued) ? `updated ${formatAgo(Math.max(0, now - issued), { narrow: true })}` : null].filter(Boolean).join(' · ');
+  // W77: the age alone, the state word the glyph's; N155: "Stopped" stays, since its glyph is Done's
+  const meta = [listed.state === 'stopped' ? glyph.label : null, Number.isFinite(issued) ? formatAgo(Math.max(0, now - issued), { narrow: true }) : null].filter(Boolean).join(' · ');
   return (
     <div className="flex flex-col gap-2 text-ui-sm text-fg">
       <div className="flex min-w-0 items-start gap-2">
-        <GlyphMark glyph={glyph} className="w-[14px] shrink-0 leading-[18px]" />
+        <NamedGlyphMark glyph={glyph} />
         <h3 className="m-0 line-clamp-2 min-w-0 text-ui leading-[18px] font-semibold break-words">{listedTitle(listed)}</h3>
       </div>
       <p data-testid="hover-meta" className="m-0 text-fg-muted tabular-nums">
@@ -268,7 +283,8 @@ function ListedBody({ appId }: { appId: AppSessionId }) {
   );
 }
 
-// P5 O8 M5: the owners the listing at this address names, you first, each with its email; nothing when it is you alone.
+// P5 O8 M5: the owners the listing at this address names, you first, by name (W71: no emails); nothing when it is you
+// alone.
 function Owners({ appId }: { appId: AppSessionId }) {
   const owners = useSessions((s) => s.listed.get(appId)?.owners);
   const member = useSessions((s) => s.member);
@@ -277,21 +293,34 @@ function Owners({ appId }: { appId: AppSessionId }) {
   return (
     <ul aria-label="Owners" className="m-0 flex list-none flex-col gap-0.5 p-0">
       {ownerEntries(owners, member, members).map((owner) => (
-        <li key={owner.id} className="flex min-w-0 items-baseline gap-1.5">
-          <span className="shrink-0">{owner.name}</span>
-          {owner.email !== null && <span className="min-w-0 truncate text-fg-muted">{owner.email}</span>}
+        <li key={owner.id} className="min-w-0 truncate">
+          {owner.name}
         </li>
       ))}
     </ul>
   );
 }
 
-// The machine's line: its name, with the carrier an RL2 link is up over (P5 O7 M2, A2); offline, when it was last seen; or
-// that it removed this device.
+// The machine's line: its name (W70: not how it is reached); offline, when it was last seen; or that it removed this
+// device.
 function machineLine(machine: MachineMark, now: number): string {
   if (machine.refusal === 'removed') return removedWords(machine.name);
   if (machine.offline) return [machine.name, 'offline', lastSeen(machine.since, now)].filter(Boolean).join(' · ');
-  return [machine.name, carrierWords(machine)].filter(Boolean).join(' · ');
+  return machine.name;
+}
+
+// The share of the context window from which the second line names it (W69): below, it is not worth a look.
+const CONTEXT_SHOWN_FROM = 80;
+// A focusable word or line in a card that owns a tooltip
+const OWNER = 'rounded-sm outline-accent focus-visible:outline-2';
+
+// The card's status glyph, its word its name and its tooltip, which the keyboard reaches (W69, W77)
+function NamedGlyphMark({ glyph }: { glyph: Glyph }) {
+  return (
+    <Tip content={glyph.label}>
+      <GlyphMark glyph={glyph} tabIndex={0} className={`w-[14px] shrink-0 leading-[18px] ${OWNER}`} />
+    </Tip>
+  );
 }
 
 // When an offline machine was last seen: when its link went down, as the roster says.

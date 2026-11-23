@@ -7,16 +7,18 @@
 // outside git and on an existing worktree (composer-utility-bar:8019, 8147). The chip's menu is Codex's project picker
 // (app-primary:147519-147702, 154066-154125): "Search projects", the projects most recently active first (the sidebar's
 // order) with a check on the chosen one and the folder's name where it differs from the project's, "No projects
-// found", then "New project" and "Don't work in a project". Once the session starts the row is gone and the toolbar's
+// found", then "New project" and "No project". Once the session starts the row is gone and the toolbar's
 // location chip reads where it runs. W10 (C9): the directories the "+" menu's Add directory… gave this tab are listed
 // read-only in the chip's tooltip and at the foot of its menu, as the location popover lists them once started.
 // P5 O7 M4 (docs/doperpowers/plans/2026-10-28-p5-o7-remote-lane-b.md, "The machine menu", A5): beside the project chip,
-// the machine the chat runs on (MachineMenu.tsx), and under the row the line naming another machine once it is chosen.
+// the machine the chat runs on (MachineMenu.tsx). The word cut (C65, C67, C70): the chip's tooltip is the chosen folder's
+// path ("<project> on <machine>" there) and none before a choice; no line under the row names the machine again; the
+// menu's last action reads "No project".
 // 2026-11-06 (the owner's ruling: the machine first, the place following it): with another machine chosen, the chip's
 // menu is that machine's, in the local menu's shape, and the chip names the place chosen there (the local project's
 // checkout there keeps the local project's words, as before): its own projects, most recently active first where this app knows their sessions, "New
-// project" there (RemoteSetupSheet.tsx's folder sheet: any folder, git or not, registered as a project there) and "Don't
-// work in a project" (its home); one it can't offer is greyed with why, in the item. No branch or Worktree box there:
+// project" there (RemoteSetupSheet.tsx's folder sheet: any folder, git or not, registered as a project there) and "No
+// project" (its home); one it can't offer is greyed with why, in the item. No branch or Worktree box there:
 // they are the local project's. This Mac chosen again, the local row is as it was. UX wave U4a M6 (l3-input-07):
 // in both menus a name two listed projects share shows the part of the path that tells them apart, in the folder's place,
 // and every row's title is its whole path.
@@ -39,15 +41,14 @@ import type { HookResult } from '../setup-intent';
 import type { ProjectRowBinding } from './bindings';
 import { CHIP, NOTE, POPOVER } from './chip-style';
 import { formatCwd } from './LocationChip';
-import { MachineLine, MachineMenu } from './MachineMenu'; // P5 O7 M4
+import { MachineMenu } from './MachineMenu'; // P5 O7 M4
 
 export const CHOOSE_PROJECT = 'Choose a project';
 export const NEW_PROJECT = 'New project';
-export const NO_PROJECT = "Don't work in a project";
 export const NO_PROJECT_LABEL = 'No project'; // the chip's words for a chat in no project (useSetupIntent's, for another machine's home)
+export const NO_PROJECT = NO_PROJECT_LABEL; // the menu's action for it, in the chip's words (C70)
 export const PLACE_WORDS = {
-  choose: (machine: string) => `Select a project on ${machine} to run your chat in`,
-  change: (label: string, machine: string) => `${label} on ${machine} · Change the project for this chat`,
+  chosen: (label: string, machine: string) => `${label} on ${machine}`, // the chip's tooltip for a place on another machine (C65)
 } as const;
 
 const basename = (path: string) => path.split('/').filter(Boolean).at(-1) ?? path;
@@ -275,12 +276,10 @@ export function ProjectRow({ binding, directories = [], appSessionId }: { bindin
       setPending(false);
     }
   };
-  const base =
-    binding.disabled ??
-    (there !== null ? (label === null ? PLACE_WORDS.choose(there.name) : PLACE_WORDS.change(label, there.name))
-    : chosen ? `${binding.path ?? binding.label} · Change the project for this chat`
-    : 'Select a project to run your chat in');
-  const title = directories.length > 0 && remote === null ? `${base}\n\n${ADDITIONAL_DIRECTORIES}\n${directories.map(formatCwd).join('\n')}` : base;
+  // C65: where the chat will run, once chosen; before a choice the chip says it itself
+  const base = binding.disabled ?? (there !== null ? (label === null ? null : PLACE_WORDS.chosen(label, there.name)) : chosen ? (binding.path ?? binding.label) : null);
+  const listed = directories.length > 0 && remote === null ? `${ADDITIONAL_DIRECTORIES}\n${directories.map(formatCwd).join('\n')}` : null;
+  const title = [base, listed].filter((part) => part !== null).join('\n\n') || undefined;
   return (
     <div data-project-row className="flex min-w-0 flex-col">
       <div className="flex min-w-0 items-center justify-between gap-2 px-1 py-1.5">
@@ -323,7 +322,6 @@ export function ProjectRow({ binding, directories = [], appSessionId }: { bindin
           </label>
         )}
       </div>
-      {appSessionId !== undefined && <MachineLine appSessionId={appSessionId} projectKey={projectKey} />}
       {error !== null && (
         <p role="alert" className="m-0 px-2 pb-1 text-ui-sm text-danger">
           {error}

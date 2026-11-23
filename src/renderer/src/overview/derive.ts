@@ -7,7 +7,7 @@ import type { ProjectRecord, SessionDigest, SessionPhase } from '@shared/ipc/sch
 import { machineOf } from '@shared/machine/address';
 import { machineKey, type OrgKey } from '@shared/machine/org-key';
 import type { MachineRef } from '@shared/machine/ref';
-import { holderLine, isActionable, waitingItem, type NeedsYouRow } from '../attention/derive';
+import { heldLine, isActionable, waitingItem, type NeedsYouRow } from '../attention/derive';
 import { glyphFor, wordGlyph } from '../attention/glyph';
 import { isWorking, listedStateOf } from '../sessions/listed-state'; // P5 O7 M10
 import { machineOfRow, machineOrder } from '../stores/org-projects';
@@ -80,16 +80,17 @@ export function overviewCards(input: OverviewInput): AppSessionId[] {
 // for, in words; what a working session is doing; else its state. The last answer is a separate line, so a working
 // session shows both. P5 O9 M6 (the owner's Q1): a foreign session MAWS drives through its bridge reads as any session
 // (its digest is never `foreign` then); the holder line is one with no live bridge. P5 O7 M10: another machine's lane B
-// record, with no digest, says its listing's word (`listedStateOf`) as its glyph does.
-export function cardActivity(record: SessionRecord, digest: SessionDigest | null, pending: AttentionItem[], listed?: ListedSession): string {
-  const holder = digest === null || digest.phase === 'foreign' ? holderLine(record) : null;
+// record, with no digest, says its listing's word (`listedStateOf`) as its glyph does. The word cut: a holder reads who
+// runs it, with no pid (W75); an idle session has no activity line (W107), null.
+export function cardActivity(record: SessionRecord, digest: SessionDigest | null, pending: AttentionItem[], listed?: ListedSession): string | null {
+  const holder = digest === null || digest.phase === 'foreign' ? heldLine(record) : null;
   if (holder) return holder;
   const waiting = waitingItem(pending);
   if (waiting && isActionable(waiting.oldest)) {
     return waiting.oldest.kind === 'permission' ? 'Waiting for approval' : glyphFor(record, digest, pending, listed).label;
   }
   const word = listedStateOf(digest, listed);
-  if (word !== null) return wordGlyph(word)?.label ?? 'Idle';
+  if (word !== null) return wordGlyph(word)?.label ?? null;
   switch (digest?.phase) {
     case 'working':
     case 'starting':
@@ -101,13 +102,14 @@ export function cardActivity(record: SessionRecord, digest: SessionDigest | null
     case 'exited':
       return 'Done';
   }
-  return 'Idle';
+  return null;
 }
 
 const plural = (n: number, one: string) => `${n} ${one}${n === 1 ? '' : 's'}`;
 
-// A card's footer (§5.2): context, cost since the human last looked, running child agents; each only when known.
-export function cardFooter(digest: SessionDigest | null): string[] {
+// A card's facts (§5.2): context, cost since the human last looked, running child agents; each only when known. The word
+// cut (W110): no footer draws them; they are the card's tooltip and description.
+export function cardFacts(digest: SessionDigest | null): string[] {
   if (!digest) return [];
   const parts: string[] = [];
   if (digest.context) parts.push(`ctx ${Math.round(digest.context.percent)}%`);

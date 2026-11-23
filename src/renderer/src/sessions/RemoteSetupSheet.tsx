@@ -1,7 +1,7 @@
 // The remote setup's sheet (P5 O7 M9, docs/doperpowers/plans/2026-10-28-p5-o7-remote-lane-b.md, "Remote setup";
 // remote-setup.ts for the reads and the act). For a project with no checkout on the chosen machine: which of its folders
-// holds it, warned first that a private folder may raise a privacy prompt there, the other checkouts' paths listed first,
-// then the machine's home a page at a time; the chosen folder's trust read there, its trust card shown when it isn't
+// holds it (the word cut, W166: no paragraph first; the privacy warning comes when a private folder is opened), the
+// other checkouts' paths listed first, then the machine's home a page at a time (N175: a quiet spinner while it is read); the chosen folder's trust read there, its trust card shown when it isn't
 // trusted (accepted, the spawn carries `trust: 'accepted'`), then the folder registered (Touch ID) and the New chat tab
 // pointed at it. For a registered checkout the machine refused untrusted at Send: its trust card alone, then the Send
 // again. Every step has a way back or out; a refusal is said in words and leaves the sheet where it was.
@@ -15,6 +15,7 @@ import type { TrustState } from '@shared/sessions/trust';
 import { closeDialog, useDialogs } from './dialogs';
 import { useRemoteSpawn, type SpawnTarget } from './remote-spawn';
 import { checkTrust, listFolders, registerFolder, SETUP_WORDS, type FolderPage, type SetupRequest } from './remote-setup';
+import { QuietSpinner } from '../ui/spinner';
 import { Sheet } from './Sheet';
 import { TrustCard } from './TrustCard';
 import { PRIMARY, QUIET, SECONDARY } from './ui';
@@ -150,7 +151,6 @@ function FolderSetup({ request }: { request: FolderRequest }) {
   return (
     <Sheet title={SETUP_WORDS.title(name)} width="w-[min(480px,90vw)]">
       <div className="flex flex-col gap-3">
-        <p className="m-0 text-ui-sm text-fg-muted">{SETUP_WORDS.privacy(name)}</p>
         {step.kind === 'confirmOpen' ? (
           <>
             <p className="m-0">{SETUP_WORDS.openPrivate(label(step.entry.path), name)}</p>
@@ -185,7 +185,11 @@ function FolderSetup({ request }: { request: FolderRequest }) {
             </div>
             <ul aria-label={`Folders on ${name}`} className="m-0 flex max-h-[min(280px,40vh)] list-none flex-col overflow-y-auto rounded-sm border border-border p-1">
               {page === null ? (
-                <li className="px-2 py-1 text-ui-sm text-fg-muted">{SETUP_WORDS.loading}</li>
+                error === null && (
+                  <li className="flex px-2 py-1">
+                    <QuietSpinner label={SETUP_WORDS.loading} />
+                  </li>
+                )
               ) : page.entries.length === 0 ? (
                 <li className="px-2 py-1 text-ui-sm text-fg-muted">{SETUP_WORDS.empty}</li>
               ) : (

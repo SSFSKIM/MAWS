@@ -5,7 +5,8 @@
 // one addition is a failed attempt's checkout the intent still holds once its card is dismissed
 // (`RetainedWorktreeNote`), whose resolutions would otherwise be unreachable. A restored tab whose id has neither a
 // record nor an intent closes itself, once its machine's records are in (2026-10-31: while they are unknown, as after an
-// upgrade's mawsd restart, a started session's restored tab has no record and is not gone).
+// upgrade's mawsd restart, a started session's restored tab has no record and is not gone). The word cut (W86): the
+// heading is not drawn, the tab and the project chip already naming the chat; it stays for assistive technology.
 import { useEffect } from 'react';
 import type { AppSessionId } from '@shared/graph/ids';
 import { machineOf } from '@shared/machine/address';
@@ -13,6 +14,7 @@ import { NEW_CHAT } from '../keymap/actions-runtime';
 import { useLayout } from '../stores/layout';
 import { useMachines } from '../stores/machines';
 import { useSessions } from '../stores/sessions';
+import { HiddenHeading } from '../ui/hidden-heading';
 import { RetainedWorktreeNote } from './RetainedWorktreeNote';
 import { useSetup } from './store';
 import { intentProjectName } from './useSetupIntent';
@@ -37,7 +39,7 @@ export function NewSessionEmptyState({ appSessionId }: { appSessionId: AppSessio
   const name = intentProjectName(intent, project);
   return (
     <>
-      <h1 className="m-0 mb-2 text-center text-prose font-medium text-fg">{name === null ? NEW_CHAT : `${NEW_CHAT} in ${name}`}</h1>
+      <HiddenHeading level={1}>{name === null ? NEW_CHAT : `${NEW_CHAT} in ${name}`}</HiddenHeading>
       <RetainedWorktreeNote appSessionId={appSessionId} />
     </>
   );

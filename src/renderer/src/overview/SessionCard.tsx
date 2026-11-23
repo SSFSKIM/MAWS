@@ -1,6 +1,7 @@
 // One Overview card (§5.2; residue *Overview card*): the title row (glyph, title, the project when the card sits in
 // the Needs-you group, the branch, an unread dot), the activity line, the last answer on its own line, the pending
-// request through the X4 slot (`placement: 'card'`), and the footer (context, cost since seen, running agents). A
+// request through the X4 slot (`placement: 'card'`), and its facts (context, cost since seen, running agents), which the
+// word cut (W110) moved from a footer to the card's tooltip and description; an idle card has no activity line (W107). A
 // click opens the session, a ⌘-click opens it in the split. A foreign-live card shows its holder and holds no control
 // but itself (D-12); P5 O9 M6: unless MAWS drives it through its bridge (it has a controls port), when its request is
 // answered from the card as any session's.
@@ -8,6 +9,7 @@
 // from what the page has, its listing and its item: the glyph, the title, its machine in the project's place, what it
 // waits for and the item's summary; no branch, digest or footer. A click opens it through its lane's opener (M2's pane).
 import { useEffect, type KeyboardEvent, type MouseEvent } from 'react';
+import { Tip } from '../ui/tip';
 import type { AttentionItem } from '@shared/graph/attention';
 import type { AppSessionId } from '@shared/graph/ids';
 import { useSlot } from '../app/slots';
@@ -21,7 +23,7 @@ import { workingBranch } from '@shared/sessions/working-folder'; // UX wave U8c-
 import { selectPendingOf, useAttention } from '../stores/attention';
 import { useLayout } from '../stores/layout';
 import { useSessions, type ListedSession } from '../stores/sessions'; // P5 O7 M6: ListedSession
-import { cardActivity, cardFooter } from './derive';
+import { cardActivity, cardFacts } from './derive';
 import { ReleasedMark } from '../budget/ReleasedMark'; // C12
 import { displayTitle, listedTitle } from '../sessions/title';
 import { previewLine } from '@shared/owner/preview'; // P5 O7 M6
@@ -57,49 +59,44 @@ export function SessionCard({ appSessionId, paneIndex, showProject, stop, onFocu
   const request = controlled && waiting?.tier === 1 ? waiting.oldest : null;
   const title = displayTitle(record);
   const branch = branchLabel(workingBranch(record)); // W9 (H2); UX wave U8c-2: the working folder's
-  const footer = cardFooter(digest);
+  const facts = cardFacts(digest).join(' · ');
+  const activity = cardActivity(record, digest, pending, listed);
 
   return (
-    <article
-      aria-label={title}
-      tabIndex={stop ? 0 : -1}
-      data-card={appSessionId}
-      onFocus={(event) => event.target === event.currentTarget && onFocus()}
-      onKeyDown={onKeyDown}
-      onClick={(event) => {
-        if (onControl(event)) return;
-        useLayout.getState().openSession(appSessionId, { split: event.metaKey });
-      }}
-      className="flex min-w-0 cursor-default flex-col gap-1.5 rounded-md border border-border bg-bg-raised p-3 outline-accent hover:border-border-strong focus-visible:outline-2"
-    >
-      <div className="flex min-w-0 items-center gap-2">
-        <GlyphMark glyph={glyphFor(record, digest, pending, listed)} className="shrink-0" />
-        <span className="truncate font-medium text-fg">{title}</span>
-        {showProject && project && <span className="shrink-0 text-ui-sm text-fg-muted">{project}</span>}
-        {branch && <span className="shrink-0 rounded-sm border border-border px-1.5 text-ui-sm text-fg-muted">⎇ {branch}</span>}
-        <ReleasedMark released={digest?.released} /> {/* C12: the memory budget's released mark */}
-        {record.unread && <span role="img" aria-label="Unread" className="ml-auto block size-[5px] shrink-0 rounded-full bg-info" />}
-      </div>
-      <p data-testid="card-activity" className="m-0 truncate text-ui-sm text-fg">
-        {cardActivity(record, digest, pending, listed)}
-      </p>
-      {digest?.lastAssistantLine && (
-        <p data-testid="card-answer" className="m-0 truncate text-ui-sm text-fg-muted">
-          {digest.lastAssistantLine}
-        </p>
-      )}
-      {request && <CardRequest item={request} paneIndex={paneIndex} />}
-      {footer.length > 0 && (
-        <p className="m-0 flex flex-wrap gap-x-1.5 text-ui-sm text-fg-muted tabular-nums">
-          {footer.map((part, i) => (
-            <span key={part} className="flex gap-x-1.5">
-              {i > 0 && <span aria-hidden>·</span>}
-              <span>{part}</span>
-            </span>
-          ))}
-        </p>
-      )}
-    </article>
+    <Tip content={facts} description={facts}>
+      <article
+        aria-label={title}
+        tabIndex={stop ? 0 : -1}
+        data-card={appSessionId}
+        onFocus={(event) => event.target === event.currentTarget && onFocus()}
+        onKeyDown={onKeyDown}
+        onClick={(event) => {
+          if (onControl(event)) return;
+          useLayout.getState().openSession(appSessionId, { split: event.metaKey });
+        }}
+        className="flex min-w-0 cursor-default flex-col gap-1.5 rounded-md border border-border bg-bg-raised p-3 outline-accent hover:border-border-strong focus-visible:outline-2"
+      >
+        <div className="flex min-w-0 items-center gap-2">
+          <GlyphMark glyph={glyphFor(record, digest, pending, listed)} className="shrink-0" />
+          <span className="truncate font-medium text-fg">{title}</span>
+          {showProject && project && <span className="shrink-0 text-ui-sm text-fg-muted">{project}</span>}
+          {branch && <span className="shrink-0 rounded-sm border border-border px-1.5 text-ui-sm text-fg-muted">⎇ {branch}</span>}
+          <ReleasedMark released={digest?.released} /> {/* C12: the memory budget's released mark */}
+          {record.unread && <span role="img" aria-label="Unread" className="ml-auto block size-[5px] shrink-0 rounded-full bg-info" />}
+        </div>
+        {activity !== null && (
+          <p data-testid="card-activity" className="m-0 truncate text-ui-sm text-fg">
+            {activity}
+          </p>
+        )}
+        {digest?.lastAssistantLine && (
+          <p data-testid="card-answer" className="m-0 truncate text-ui-sm text-fg-muted">
+            {digest.lastAssistantLine}
+          </p>
+        )}
+        {request && <CardRequest item={request} paneIndex={paneIndex} />}
+      </article>
+    </Tip>
   );
 }
 

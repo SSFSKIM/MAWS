@@ -4,7 +4,7 @@
 
 105 items: 70 cut, 1 reworded, 34 stay. Of the 71 that change, the owner saw 20 in a picture or ruled on them; 51 follow the pattern and were not seen.
 
-Against master (M0): 104 unchanged, 1 moot; none waits on the owner; 3 put to the owner (new rows included) and since ruled. M0 added 6 rows for the UX wave's new text (2 cut, 1 reworded, 3 stay), listed at the end.
+Against master (M0): 104 unchanged, 1 moot; none waits on the owner; 3 put to the owner (new rows included) and since ruled. M0 added 11 rows for the UX wave's new text (7 cut, 1 reworded, 3 stay), listed at the end.
 
 Columns: **Id** is the item's id in `items.json`. **Where** is the place on the surface. **Today** is the text at the pin `2c7044231` (an example value where the text is built from data). **Decision** is `cut` (the text leaves the resting surface), `reword` (it changes) or `stays` (today's text is kept; the row is here so that nobody proposes it again). **After** says what the surface shows afterwards, as it was built on the scratch branch and shown in the pictures. **Basis** is how firm the decision is, in the words of the root document's "How firm each decision is". **Source** is the file and line at the pin. **M0** is what the re-reading against master found (see the root document's "M0's record"): `unchanged`, `moved`, `rewritten by the wave`, `gone` or `moot`, with the file and line on master, and for a rewritten row the text master shows and the row decided again by the five rules. **Build** is the milestone that builds the row and the scene whose before and after pictures show it.
 
@@ -356,3 +356,35 @@ Rows added by M0 for text the UX wave added after the pin. **Today** here is the
 | Id | Where | Today | Decision | After | Basis | Source | M0 | Build |
 |---|---|---|---|---|---|---|---|---|
 | N155 | the status word in the first line of the hover card of a session another machine keeps as stopped (process ended, reopenable) | Stopped · updated 3m ago | stays | Stays. rule 2: orients with a non-default state; it replaced "Done" on the owner's decision of 2026-11-19. "Stopped" is not the default-state word rule 1 cuts | pattern | `src/renderer/src/attention/glyph.ts:90` | new `src/renderer/src/attention/glyph.ts:90` | M4 · no scene: needs a session on another machine (wanted: sidebar hover card on a listed session from another machine in the stopped state) |
+
+#### Sidebar, project hover card
+
+| Id | Where | Today | Decision | After | Basis | Source | M0 | Build |
+|---|---|---|---|---|---|---|---|---|
+| N174 | under the card's Worktrees heading while git lists the project's worktrees | Reading… | cut | Nothing for the first half second, then a quiet spinner under the Worktrees heading, "Reading worktrees" its accessible name; outside a repository the section goes once git answers. | pattern | `src/renderer/src/sidebar/ProjectHoverCard.tsx:90` | new `src/renderer/src/sidebar/ProjectHoverCard.tsx:90` | M4 · no scene: a transient wait no fixture holds (wanted: project hover card the instant it opens, before git answers) |
+
+### Projects, worktrees and archive
+
+#### Projects page
+
+| Id | Where | Today | Decision | After | Basis | Source | M0 | Build |
+|---|---|---|---|---|---|---|---|---|
+| N171 | where the list will be, while the projects are first read | Loading projects… | cut | Nothing for the first half second, then a quiet spinner where the list will be, "Loading projects" its accessible name; an empty workspace keeps "No projects yet". | pattern | `src/renderer/src/projects/ProjectsView.tsx:57` | new `src/renderer/src/projects/ProjectsView.tsx:57` | M4 · no scene: a transient wait no fixture holds (wanted: the Projects page before the first project list arrives) |
+
+#### Archived sessions window
+
+| Id | Where | Today | Decision | After | Basis | Source | M0 | Build |
+|---|---|---|---|---|---|---|---|---|
+| N172 | where the list will be (and, in the footer's sheet, under each machine's name) while the archived sessions are read | Loading… | cut | Nothing for the first half second, then a quiet spinner, "Loading archived sessions" its accessible name; a failed read keeps its error in the spinner's place. | pattern | `src/renderer/src/sessions/ArchivedSessionsDialog.tsx:111` | new `src/renderer/src/sessions/ArchivedSessionsDialog.tsx:111` | M4 · no scene: a transient wait no fixture holds (wanted: Archived sessions window while a machine's read is out) |
+
+#### Worktrees window
+
+| Id | Where | Today | Decision | After | Basis | Source | M0 | Build |
+|---|---|---|---|---|---|---|---|---|
+| N173 | the window's body while git lists the worktrees and reads each one's status | Reading worktrees… | cut | Nothing for the first half second, then a quiet spinner, "Reading worktrees" its accessible name. | pattern | `src/renderer/src/sessions/WorktreesDialog.tsx:71` | new `src/renderer/src/sessions/WorktreesDialog.tsx:71` | M4 · no scene: a transient wait no fixture holds (wanted: Worktrees window while git is read) |
+
+#### New project on another machine sheet
+
+| Id | Where | Today | Decision | After | Basis | Source | M0 | Build |
+|---|---|---|---|---|---|---|---|---|
+| N175 | in the folder list (and the Add project sheet's folder field for another machine) while that machine's folders are read | Reading the folders… | cut | Nothing for the first half second, then a quiet spinner in the list, "Reading the folders" its accessible name (the code tools' remote chooser's words, N30); a refused read shows its words and no spinner. | pattern | `src/renderer/src/sessions/remote-setup.ts:72` | new `src/renderer/src/sessions/RemoteSetupSheet.tsx:188` | M4 · no scene: needs a session on another machine (wanted: New project on another machine sheet while the folders are read) |

@@ -1,9 +1,9 @@
 // "+ Session"'s machine menu (P5 O7 M4, docs/doperpowers/plans/2026-10-28-p5-o7-remote-lane-b.md, "The machine menu",
 // A5 and P5 Decision Log 108): beside the project chip of a New chat tab, where its session will run. This Mac by
 // default; the menu, asked when it opens, offers each RL2 machine that is up and holds a checkout of the same org project
-// (sessions/remote-spawn.ts), by name. Another machine chosen, one line under the row says the session is lane B there
-// and runs on that machine's inference route (its route is the machine's settings, which no read of the menu carries),
-// and Send starts it there (`session.spawn`). An app that reaches no RL2 machine shows no menu.
+// (sessions/remote-spawn.ts), by name. Another machine chosen, the chip names it and Send starts the session there
+// (`session.spawn`); the word cut (C67) took the line under the row that said so again. An app that reaches no RL2
+// machine shows no menu. The word cut (C71): while the other machines are asked, a quiet spinner under the list.
 // P5 O7 M9 ("Remote setup"): a machine with no checkout of the project is offered too, to set it up there (the sheet,
 // RemoteSetupSheet.tsx, chooses the machine once the folder is registered); one whose owners alone could, or that predates
 // the setup, is listed greyed with why (sessions/remote-setup.ts).
@@ -18,13 +18,13 @@ import { useRemoteSpawn, useSpawnTarget, type SpawnTarget } from '../../sessions
 import { readMachines, tabProject, type MachineChoice } from '../../sessions/remote-setup';
 import { useSessions } from '../../stores/sessions';
 import { useMachines } from '../../stores/machines';
+import { QuietSpinner } from '../../ui/spinner';
 import { CHIP, NOTE, POPOVER } from './chip-style';
 
 export const MACHINE_WORDS = {
   local: 'This Mac',
   title: 'Where this chat runs',
-  looking: 'Looking for this project on other machines…',
-  line: (machine: string) => `Lane B on ${machine} · ${machine}’s inference route`,
+  looking: 'Looking for this project on other machines…', // the quiet spinner's name (C71)
 } as const;
 
 // Whether this app reaches any machine over RL2 now (the org's other machines; a socket-linked profile is not one).
@@ -100,16 +100,13 @@ export function MachineMenu({ appSessionId, projectId, projectKey, disabled }: {
               ),
             )}
           </div>
-          {choices === null && of !== null && <p className={`${NOTE} m-0`}>{MACHINE_WORDS.looking}</p>}
+          {choices === null && of !== null && (
+            <div className={`${NOTE} flex`}>
+              <QuietSpinner label={MACHINE_WORDS.looking} />
+            </div>
+          )}
         </Popover.Content>
       </Popover.Portal>
     </Popover.Root>
   );
-}
-
-/** The line under the project row once another machine is chosen. */
-export function MachineLine({ appSessionId, projectKey }: { appSessionId: AppSessionId; projectKey: string | null }) {
-  const chosen = useSpawnTarget(appSessionId, projectKey);
-  if (chosen === null) return null;
-  return <p className="m-0 px-2 pb-1 text-ui-sm text-fg-muted">{MACHINE_WORDS.line(chosen.name)}</p>;
 }

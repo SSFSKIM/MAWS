@@ -62,14 +62,12 @@ export type MachineChoice = { kind: 'ready'; target: SpawnTarget } | { kind: 'cl
 
 export const SETUP_WORDS = {
   title: (machine: string) => `New project on ${machine}`,
-  privacy: (machine: string) =>
-    `Choose the folder on ${machine} for the project, a git repository or not. Private folders macOS protects (Documents, Desktop, Downloads and the like) stay closed unless you open one, and opening one may show a privacy prompt on ${machine}.`,
   suggestions: 'Where the project’s other checkouts are',
   home: 'Home',
   up: 'Up',
   more: 'Show more',
   empty: 'No folders here',
-  loading: 'Reading the folders…',
+  loading: 'Reading the folders', // the quiet spinner's name (N175)
   private: 'private',
   openPrivate: (folder: string, machine: string) => `Open ${folder}? macOS may show a privacy prompt on ${machine}, which someone there has to answer.`,
   open: 'Open it',

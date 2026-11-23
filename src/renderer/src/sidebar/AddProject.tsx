@@ -46,14 +46,15 @@ export function AddProject() {
       <Dialog.Overlay asChild><Backdrop className="fixed inset-0 z-50" /></Dialog.Overlay>
       <Dialog.Content className="fixed top-1/2 left-1/2 z-50 flex max-h-[80vh] w-[min(480px,92vw)] -translate-x-1/2 -translate-y-1/2 flex-col gap-3 rounded-md border border-border-strong bg-bg-overlay p-4 text-ui text-fg shadow-float">
         <Dialog.Title className="m-0 text-ui font-semibold">Add project</Dialog.Title>
-        <Dialog.Description className="m-0 text-ui-sm text-fg-muted">Your sidebar projects come first. Add a hidden or discovered project, or choose a folder.</Dialog.Description>
+        {/* the word cut (W135): the sentence describes the dialog to assistive technology, undrawn */}
+        <Dialog.Description className="sr-only">Your sidebar projects come first. Add a hidden or discovered project, or choose a folder.</Dialog.Description>
         <Search value={query} onChange={setQuery} label="Search projects" onLeave={() => {}} />
         <div className="min-h-0 overflow-y-auto">
           {found.map((group) => <div role="group" aria-label={group.label} key={group.label} className="mb-3">
             <h2 className="m-0 px-2 py-1 text-ui-sm font-medium text-fg-muted">{group.label}</h2>
             {group.projects.map((p) => <button key={p.id} type="button" disabled={busy || isSidebarProject(p)} aria-label={isSidebarProject(p) ? `In sidebar: ${labels.get(p.id)}` : `Add ${labels.get(p.id)}`} onClick={() => void choose(p)}
               className="flex w-full flex-col rounded-sm px-2 py-2 text-left outline-accent enabled:hover:bg-bg-hover focus-visible:outline-2 disabled:text-fg-muted">
-              <span className="flex w-full min-w-0 items-center gap-2"><span className="min-w-0 flex-1 truncate">{labels.get(p.id)}</span>{isSidebarProject(p) && <span className="shrink-0 text-ui-sm text-fg-faint">In sidebar</span>}</span>
+              <span className="max-w-full truncate">{labels.get(p.id)}</span>{/* W136: greyed under In sidebar, with no tag of its own */}
               <span className="max-w-full truncate text-ui-sm text-fg-muted" title={p.directory}>{p.directory}</span>
             </button>)}
           </div>)}

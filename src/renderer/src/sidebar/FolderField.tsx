@@ -9,6 +9,7 @@ import type { FolderEntry } from '@shared/ipc/schema/machine';
 import type { MachineRef } from '@shared/machine/ref';
 import { ipc } from '../ipc/client';
 import { listFolders, SETUP_WORDS, type FolderPage } from '../sessions/remote-setup';
+import { QuietSpinner } from '../ui/spinner';
 import { FIELD, PRIMARY, QUIET, SECONDARY } from '../sessions/ui';
 import { REGISTRY } from './registry-copy';
 
@@ -132,7 +133,6 @@ function FolderBrowser({ machine, name, onUse }: { machine: MachineRef; name: st
   }
   return (
     <div className="flex flex-col gap-2 rounded-sm border border-border p-2">
-      <p className="m-0 text-ui-sm text-fg-muted">{SETUP_WORDS.privacy(name)}</p>
       <div className="flex items-center gap-2">
         <span className="min-w-0 flex-1 truncate font-mono text-ui-sm">{path === null ? SETUP_WORDS.home : label(path)}</span>
         {path !== null && (
@@ -143,7 +143,11 @@ function FolderBrowser({ machine, name, onUse }: { machine: MachineRef; name: st
       </div>
       <ul aria-label={`Folders on ${name}`} className="m-0 flex max-h-[min(220px,32vh)] list-none flex-col overflow-y-auto p-0">
         {page === null ? (
-          <li className="px-2 py-1 text-ui-sm text-fg-muted">{SETUP_WORDS.loading}</li>
+          error === null && (
+            <li className="flex px-2 py-1">
+              <QuietSpinner label={SETUP_WORDS.loading} />
+            </li>
+          )
         ) : page.entries.length === 0 ? (
           <li className="px-2 py-1 text-ui-sm text-fg-muted">{SETUP_WORDS.empty}</li>
         ) : (

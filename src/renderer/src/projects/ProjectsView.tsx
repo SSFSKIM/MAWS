@@ -9,11 +9,14 @@ import { runAddProject, runProjectAction, useAddProjectEnabled, useProjectAction
 import { useSessions } from '../stores/sessions';
 import { SearchField } from '../widgets/plugins/LibraryHeader';
 import { machineOf } from '@shared/machine/address';
+import { QuietSpinner } from '../ui/spinner';
 
 // UX2-K: UX1's Add-project chooser as an app destination. Discovery is a choice, not sidebar membership;
 // only the add command promotes it. Removal and the native chooser keep the shell's existing action paths. UX wave U7b
 // (O-40; its execution document, M6, decision 9): the page's name is drawn once, as the title bar's level-1 heading,
-// which labels the page's region; the view draws no heading of its own.
+// which labels the page's region; the view draws no heading of its own. The word cut (W129, W130, N171): no sentence at
+// the list's top, short group heads (In sidebar, Hidden, Discovered), and a quiet spinner while the projects are first
+// read; each row keeps its folder path and Hide from sidebar (W131, W132).
 export function ProjectsView() {
   const projects = useSessions((s) => s.projects);
   const loaded = useSessions((s) => s.loaded);
@@ -51,10 +54,11 @@ export function ProjectsView() {
       </header>
       <div className="min-h-0 overflow-x-hidden overflow-y-auto">
         <div className="mx-auto w-full max-w-(--measure-wide) px-6 py-4 @max-lg/projects:px-3">
-          <p className="m-0 mb-4 text-ui-sm leading-normal text-fg-muted">Choose projects to keep in your sidebar. Hiding a project does not delete its sessions.</p>
           {error && <p role="alert" className="m-0 mb-3 text-ui-sm text-danger">{error}</p>}
           {!loaded && projects.size === 0 ? (
-            <p role="status" className="m-0 py-3 text-ui-sm text-fg-muted">Loading projects…</p>
+            <div className="flex py-3">
+              <QuietSpinner label="Loading projects" />
+            </div>
           ) : found.length === 0 ? (
             <p className="m-0 py-3 text-ui-sm text-fg-muted">{q ? 'No matching projects' : 'No projects yet'}</p>
           ) : (
