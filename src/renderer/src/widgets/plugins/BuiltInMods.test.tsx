@@ -89,9 +89,26 @@ describe('the built-in mods section', () => {
     expect((screen.getByRole('radio', { name: 'Off' }) as HTMLInputElement).checked).toBe(true);
   });
 
+  // The M4 picture review: what the session's lane waits for is the caption of the override's choices, shown while they
+  // are, never orphaned under the name of a closed row.
+  it.each(['next-launch', 'next-compaction'] as const)('shows what the lane waits for (%s) only while the override’s choices show', async (pending) => {
+    render(<BuiltInMods appSessionId={APP} search="" />);
+    await act(() => fake.reply('mods.list', [{ ...ROW, pending }]));
+    const row = within(section()).getByRole('listitem');
+    expect(within(row).queryByRole('radiogroup')).toBeNull();
+    expect(row.querySelector('[data-mod-pending]')).toBeNull();
+    openRow();
+    expect(within(row).getByRole('radiogroup', { name: 'To-human in this session' })).toBeTruthy();
+    expect(row.querySelector('[data-mod-pending]')!.getAttribute('data-mod-pending')).toBe(pending);
+    openRow();
+    expect(within(row).queryByRole('radiogroup')).toBeNull();
+    expect(row.querySelector('[data-mod-pending]')).toBeNull();
+  });
+
   it('the app’s switch is the settings write; a settings or channel change reads the rows again', async () => {
     render(<BuiltInMods appSessionId={APP} search="" />);
     await act(() => fake.reply('mods.list', [{ ...ROW, source: 'external-compatible-style', pending: 'next-compaction', mismatch: { resolved: 'default', observed: 'doperpowers:to-human' } }]));
+    openRow(); // what the session's lane waits for is the override's caption
     expect(section().textContent).toContain('Applies after this session’s next compaction');
     expect(within(section()).getByRole('note').textContent).toContain('“doperpowers:to-human”');
     await act(async () => fireEvent.click(screen.getByRole('switch', { name: 'To-human in every session' })));
@@ -221,6 +238,7 @@ describe('the built-in mods section', () => {
     it.each([undefined, 'next-launch', 'next-compaction'] as const)('draws no pending line for it whatever the row’s pending (%s)', async (pending) => {
       render(<BuiltInMods appSessionId={APP} search="" />);
       await act(() => fake.reply('mods.list', [{ ...WITH, ...(pending !== undefined && { pending }) }]));
+      openRow(); // the row's own pending line stands with the override
       const line = summaries().closest('label')!;
       expect(line.querySelector('[data-mod-pending]')).toBeNull();
       expect(screen.getByRole('listitem').querySelectorAll('[data-mod-pending]')).toHaveLength(pending === undefined ? 0 : 1);

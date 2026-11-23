@@ -455,17 +455,18 @@ describe('Customize › Discover, Show: Plugins', () => {
     expect(card(frontend.id).querySelector('img')).toBeNull();
   });
 
-  // Panel taste (1512 wide): "by Anthr…" beside "Listed by Anthropic". The publisher keeps its line, the trust label
-  // wraps beneath it when the two do not fit, into the room under a two-line description (the card's height is fixed).
-  it('a card’s byline gives the publisher its line and wraps the trust label beneath it, the full byline as its title', async () => {
+  // Panel taste (1512 wide): "by Anthr…" beside "Listed by Anthropic". The publisher keeps its line and the trust label
+  // has its own beneath it on every card, so a shelf's descriptions start at one height (the M4 picture review; the
+  // card's height is fixed, and the line it takes is the room under a two-line description).
+  it('a card’s byline gives the publisher its line and the trust label its own beneath it, the full byline as its title', async () => {
     mountPlugins();
     await discover();
     const byline = card(hooked.id).querySelector<HTMLElement>('[data-catalog-byline]')!;
-    expect(byline.classList.contains('flex-wrap')).toBe(true);
+    expect(byline.classList.contains('flex-col')).toBe(true);
     const publisher = byline.querySelector<HTMLElement>('[data-catalog-publisher]')!;
     expect(publisher.textContent).toBe('by MAWS e2e hooks');
     expect(publisher.title).toBe('by MAWS e2e hooks');
-    expect(byline.lastElementChild!.hasAttribute('data-trust')).toBe(true); // after the publisher, so it is what wraps
+    expect(byline.lastElementChild!.hasAttribute('data-trust')).toBe(true); // after the publisher, the line beneath it
   });
 
   it('the Sources popover says which source is unavailable and counts dropped records', async () => {

@@ -175,6 +175,21 @@ describe('WidgetFrame', () => {
       expect(screen.queryByText('the body')).toBeNull();
     });
 
+    // The M4 picture review: the line keeps the pressed button's height while the start runs, so what is below does not
+    // move; its box stands from the press, through the spinner's quiet half second (layout itself is the e2e's,
+    // sessions-available.spec.ts). The glyph's square for Refresh, one line of the line's text for Load now.
+    it('starting: the wait holds the pressed button’s box from the first moment', () => {
+      setRecord();
+      const { rerender } = render(frame({ state: 'dormant', readAt: Date.now() }));
+      const glyphBox = screen.getByRole('button', { name: 'Refresh' }).className.split(' ').find((name) => name.startsWith('size-'));
+      rerender(frame({ state: 'starting', readAt: Date.now() }));
+      const wait = document.querySelector<HTMLElement>('[data-dormant-gesture] [data-gesture-wait]')!;
+      expect(screen.queryByRole('progressbar')).toBeNull(); // the spinner's quiet
+      expect(wait.classList.contains(glyphBox!)).toBe(true);
+      rerender(frame({ state: 'starting' }));
+      expect(document.querySelector('[data-dormant-gesture] [data-gesture-wait]')!.classList.contains('h-[1lh]')).toBe(true);
+    });
+
     it('unavailable: a terminal holding it offers the holder’s actions in place of Load now; an archive offers nothing; a refusal offers Load now again', () => {
       setRecord({ holder: { kind: 'terminal', pid: 4711 } }, 'foreign_held');
       const { rerender } = render(frame({ state: 'unavailable', error: 'Held by terminal · 4711', readAt: Date.now() }));

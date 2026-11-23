@@ -12,7 +12,7 @@
 import { useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { SortIcon } from '../../app/IconButton';
 import { ItemImage } from '../../customize/image/ItemImage';
-import { KindWord, NoLastControl } from '../../customize/KindWord';
+import { KindWord, NoLastControl, NoMenu } from '../../customize/KindWord';
 import { HOVER_SCOPE, ON_HOVER } from '../../ui/hover-scope';
 import { RowNote, useRowNote } from '../../ui/row-note';
 import { LIBRARY as L, PLUGIN_MANAGEMENT, SKILLS_LIBRARY as S } from '../copy';
@@ -109,6 +109,7 @@ export function SkillItem({ row, onOpen, onUse, kindWord = false }: { row: Skill
         <>
           <KindWord kind="skill" />
           <NoLastControl />
+          <NoMenu />
         </>
       )}
     </li>

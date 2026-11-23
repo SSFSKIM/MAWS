@@ -19,7 +19,12 @@ import { TextButton } from './parts';
 import { loadForRead, useDormant } from './read';
 
 // The square glyph button at the line's text size (GLYPH_BUTTON's look, a step smaller).
-const REFRESH_GLYPH = 'inline-flex size-5 shrink-0 items-center justify-center rounded-sm text-fg-muted outline-accent hover:bg-bg-hover hover:text-fg focus-visible:outline-2';
+const GLYPH_BOX = 'size-5';
+const REFRESH_GLYPH = `inline-flex ${GLYPH_BOX} shrink-0 items-center justify-center rounded-sm text-fg-muted outline-accent hover:bg-bg-hover hover:text-fg focus-visible:outline-2`;
+// The start's wait stands in the button's box, so the line keeps its height while the start runs, during the spinner's
+// quiet half second too (the M4 picture review): the glyph's square, else one line of the line's text, the worded
+// button's height.
+const waitBox = (glyph: boolean) => `inline-flex shrink-0 items-center justify-center ${glyph ? GLYPH_BOX : 'h-[1lh]'}`;
 
 type ForeignHolder = Extract<SessionRecord['holder'], { kind: 'terminal' | 'background_job' }>;
 
@@ -56,7 +61,11 @@ export function DormantGesture({ appSessionId, label, glyph = false, lead, words
   return (
     <div data-dormant-gesture className="mb-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-ui-sm text-fg-muted">
       {lead !== undefined && lead !== null && <span className="min-w-0">{lead}</span>}
-      {starting && <QuietSpinner label={FRAME.starting} />}
+      {starting && (
+        <span data-gesture-wait="" className={waitBox(glyph)}>
+          <QuietSpinner label={FRAME.starting} />
+        </span>
+      )}
       {said !== null && (
         <span role="status" className="min-w-0">
           {said}

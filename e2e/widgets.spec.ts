@@ -1731,6 +1731,29 @@ test.describe('plugin management (E8)', () => {
     expect(await idsIn('added')).toEqual(['ptc@ptc-tool', 'designer@designer', 'cua@cua', 'eli5@claude-community']);
     await expect(items.locator('[data-plugins-group]')).toHaveCount(4); // P2-C: MAWS's built-in mods close the list
     await expect(items.getByRole('heading')).toHaveText(['In this project', 'From Anthropic & Partners', 'From marketplaces you added', 'Built in'].map((h) => new RegExp(`^${h}`))); // the word cut (G223)
+    // The M4 picture review: an open row note draws above the sticky group heads it crosses. The last noted row before
+    // Built in, its note opened by focus, opening down over that group's head: where the two meet, the note is on top.
+    const noted = items.locator('[data-plugins-group="added"] [data-plugin-row]:has([data-row-note])').last();
+    await noted.evaluate((row) => row.scrollIntoView({ block: 'center' }));
+    await noted.locator('[data-row-open]').focus();
+    const note = noted.locator('[data-row-note]');
+    await expect(note).toHaveAttribute('data-open', '');
+    await expect(note, 'room below the row: the note opens down, over the next group’s head').toHaveAttribute('data-side', 'down');
+    const head = await items.locator('[data-plugins-group="builtIn"] h4').elementHandle();
+    const onTop = () => note.evaluate((element, crossed) => {
+      const card = element.firstElementChild!.getBoundingClientRect();
+      const box = crossed!.getBoundingClientRect();
+      const [top, bottom] = [Math.max(card.top, box.top), Math.min(card.bottom, box.bottom)];
+      const [left, right] = [Math.max(card.left, box.left), Math.min(card.right, box.right)];
+      if (bottom - top < 2 || right - left < 2) return 'the note does not cross the head';
+      const pass = element.style.pointerEvents;
+      element.style.pointerEvents = 'auto'; // the note lets the pointer through; hit-testing reads what is painted on top only for a target
+      const hit = document.elementFromPoint((left + right) / 2, (top + bottom) / 2);
+      element.style.pointerEvents = pass;
+      return element.contains(hit) ? 'note' : `covered by ${hit?.outerHTML.slice(0, 120)}`;
+    }, head);
+    await expect.poll(onTop, { message: 'once the opening motion has run' }).toBe('note');
+    await noted.locator('[data-row-open]').blur();
     await expect(items).not.toContainText('unknown');
     await expect(items).not.toContainText(project);
     await expect(items.locator('[data-plugin-row="doperpowers@doperpowers"]')).toHaveCount(1); // 47 installations, one row

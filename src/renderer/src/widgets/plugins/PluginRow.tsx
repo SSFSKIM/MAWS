@@ -1,7 +1,7 @@
 // A row of My items (P2-B execution document §5.4; Claude Desktop's row,
 // readable/app-2.16120.0/web/app/v1/c27f32a39-QZ0BG6_X.js:130-293, :325-395, :536-678): the image (UX wave U11c: the
 // directory's icon, which the list reads for its rows, else the plugin's letter tile), the display name with "New",
-// "by <author>", at the trailing edge the version, the overflow (Update, Uninstall…) and the switch, each change through
+// "by <author>", at the trailing edge the version, the switch and the overflow (Update, Uninstall…), each change through
 // E8's confirm sheet at the representative installation's scope. The word cut (G215, G216, G218, P683; the owner's
 // answer of 2026-11-16, ruled for All on 2026-11-20): that is the row at rest; its description (or, with none, its
 // skills counted) and its date are its row note, shown on pointing or focus and the row's description at all times; the
@@ -109,7 +109,8 @@ function managedReason(identity: PluginIdentity, managed: { text: string } | nul
 const ownControl = (target: EventTarget): boolean => target instanceof Element && target.closest('button:not([data-row-open]), a, [role="menuitem"]') !== null;
 
 // `iconUrl`: the directory's icon of this plugin, from the list's one read (`usePluginIcons`); null for its tile.
-// `kindWord`: under Customize's All (UX wave U11c, §E), "Plugin" before the menu.
+// `kindWord`: under Customize's All (UX wave U11c, §E), "Plugin" between the version and the switch, the menu last, as
+// a mod's row ends (the M4 picture review: the version and the kind word in every kind's columns).
 export function PluginRow({ identity, now, iconUrl, onOpen, kindWord = false }: { identity: PluginIdentity; now: number; iconUrl: string | null; onOpen(id: string): void; kindWord?: boolean }) {
   const { ops } = useManage();
   const target = identity.representative;
@@ -178,9 +179,9 @@ export function PluginRow({ identity, now, iconUrl, onOpen, kindWord = false }: 
           {version}
         </span>
       )}
-      <span className="relative inline-flex shrink-0">{actionable ? <RowMenu identity={identity} name={name} busy={busy} /> : <span aria-hidden className="size-7" />}</span>
       {kindWord && <KindWord kind="plugin" />}
       <Switch checked={identity.enabledHere} label={L.enable(name)} disabled={busy} unavailable={actionable ? null : managedReason(identity, managed)} onClick={() => asking(identity.enabledHere ? 'disable' : 'enable')} />
+      <span className="relative inline-flex shrink-0">{actionable ? <RowMenu identity={identity} name={name} busy={busy} /> : <span aria-hidden className="size-7" />}</span>
     </li>
   );
 }

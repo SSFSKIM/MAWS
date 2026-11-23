@@ -121,8 +121,9 @@ export function useRowNote(): RowNoteState {
 }
 
 // The outer element is placed and moved, its inner one drawn: the outer carries no border, so the height the motion
-// opens to is the height it rests at; its padding keeps the card off the row's edge either way it opens.
-const PLACE = 'pointer-events-none absolute inset-x-0 top-full z-10 flow-root py-0.5 data-[side=up]:top-auto data-[side=up]:bottom-full';
+// opens to is the height it rests at; its padding keeps the card off the row's edge either way it opens. It stacks above
+// a list's sticky group heads (z-10, `GroupHeading`), which come later in the list than the row whose note crosses them.
+const PLACE = 'pointer-events-none absolute inset-x-0 top-full z-20 flow-root py-0.5 data-[side=up]:top-auto data-[side=up]:bottom-full';
 const NOTE = 'w-fit max-w-[30rem] rounded-md border border-border-strong bg-bg-overlay px-2.5 py-1.5 text-ui-sm leading-normal text-fg-muted shadow-float [overflow-wrap:anywhere]';
 
 // `className` places the note in its row (a grid column, an indent); the note draws itself.

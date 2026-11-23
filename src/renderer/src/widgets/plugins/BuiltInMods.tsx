@@ -5,7 +5,8 @@
 // still waits for, and the style mismatch. The word cut (G223, G225, G226; the owner's ruling of 2026-11-20 for the mods
 // list and All alike): the head reads "Built in", the description is the row's note (on pointing or focus, the switch's
 // description at all times), the line on how its instructions reach the session is gone, and the override waits behind
-// opening the row, open from the start where the session overrides the default. No overflow and no Uninstall: the registry
+// opening the row, open from the start where the session overrides the default; what the session's lane still waits for
+// is the override's caption, shown with it in the opened row (the M4 picture review). No overflow and no Uninstall: the registry
 // is MAWS's, never the engine's. Hidden while the registry is empty or no row matches the library's search. A registry
 // main cannot read says so, in main's words. UX wave U11c: Customize's My items, All draws the same rows, with no heading,
 // after the plugins (customize/MineAll.tsx).
@@ -20,7 +21,7 @@ import { Segment } from '../../settings-tab/parts';
 import { REPORT } from '../../owner/view/copy'; // UX wave U2b: the view's words
 import { ItemImage } from '../../customize/image/ItemImage';
 import { RowNote, useRowNote } from '../../ui/row-note';
-import { KindWord } from '../../customize/KindWord';
+import { KindWord, NoMenu } from '../../customize/KindWord';
 import { LIBRARY as L } from '../copy';
 import { useBuiltInMods, type BuiltInModsState, type ModRowsRead } from './builtin-mods';
 import { Switch } from './manage';
@@ -71,7 +72,9 @@ export function ModsUnavailable({ read }: { read: Extract<ModRowsRead, { state: 
 const ownControl = (target: EventTarget): boolean => target instanceof Element && target.closest('button:not([data-row-open]), input, label') !== null;
 
 // One mod's row. UX wave U11c (docs/doperpowers/plans/2026-11-14-ux-wave-U11c-customize.md, §E): under Customize's All,
-// `kindWord` draws "Mod" before the switch. UX wave U2b (M7): `summariesSwitch`, passed by the mods list alone, draws the
+// `kindWord` draws "Mod" before the switch. The row ends in the empty cell of a plugin's menu, so its version, its kind
+// word and its switch stand in the plugin rows' columns (the M4 picture review). Its name, its version, its kind word and
+// its switch share one line of the image's height, whatever the opened row adds beneath (the override, its caption). UX wave U2b (M7): `summariesSwitch`, passed by the mods list alone, draws the
 // summaries' switch on a second line where the row carries `summaries`. The row's own line and the summaries' line are
 // each a row of their own for their notes, so each note floats under the line it belongs to.
 export function BuiltInModRow({ row, mods, appSessionId, kindWord = false, summariesSwitch = false }: { row: ModRow; mods: BuiltInModsState; appSessionId: AppSessionId | null; kindWord?: boolean; summariesSwitch?: boolean }) {
@@ -100,7 +103,7 @@ export function BuiltInModRow({ row, mods, appSessionId, kindWord = false, summa
         {override !== null && <button type="button" data-row-open aria-label={row.name} aria-expanded={open} aria-describedby={describedBy} className="absolute inset-0 rounded-sm outline-accent -outline-offset-2 focus-visible:outline-2" />}
         <ItemImage kind="mod" seed={row.name} iconUrl={null} size="row" />
         <div className="relative flex min-w-0 flex-1 flex-col gap-0.5 text-ui-sm text-fg-muted">
-          <span className="flex min-w-0 items-center gap-2 text-ui">
+          <span className="flex min-h-9 min-w-0 items-center gap-2 text-ui">
             <span className="truncate font-medium text-fg">{row.name}</span>
             <span className="shrink-0 rounded-sm bg-bg-active px-1.5 text-ui-sm text-fg-muted">{L.builtIn}</span>
           </span>
@@ -110,7 +113,7 @@ export function BuiltInModRow({ row, mods, appSessionId, kindWord = false, summa
               <Segment label={L.mod.sessionOverride(row.name)} value={override} options={L.mod.override(row.enabled)} onChange={(value) => void setOverride(row.id, value)} />
             </span>
           )}
-          {row.pending !== undefined && <span data-mod-pending={row.pending}>{L.mod.pending[row.pending]}</span>}
+          {open && row.pending !== undefined && <span data-mod-pending={row.pending}>{L.mod.pending[row.pending]}</span>}
           {row.mismatch !== undefined && <span role="note">{REPORT.mismatch(row.mismatch.observed, row.mismatch.resolved)}</span>}
           {failure !== null && (
             <span role="alert" className="text-danger [overflow-wrap:anywhere]">
@@ -123,16 +126,22 @@ export function BuiltInModRow({ row, mods, appSessionId, kindWord = false, summa
             {row.description}
           </RowNote>
         )}
-        <span className="relative shrink-0 text-ui-sm text-fg-muted tabular-nums">{L.mod.version(row.version)}</span>
-        {kindWord && <KindWord kind="mod" />}
-        <Switch checked={row.enabled} label={L.mod.appSwitch(row.name)} disabled={false} describedBy={describedBy} onClick={() => void setEnabled(row.id, !row.enabled)} />
+        <span className="relative flex h-9 shrink-0 items-center gap-3">
+          <span data-mod-version="" className="text-ui-sm text-fg-muted tabular-nums">
+            {L.mod.version(row.version)}
+          </span>
+          {kindWord && <KindWord kind="mod" />}
+          <Switch checked={row.enabled} label={L.mod.appSwitch(row.name)} disabled={false} describedBy={describedBy} onClick={() => void setEnabled(row.id, !row.enabled)} />
+          <NoMenu />
+        </span>
       </div>
       {summaries !== undefined && <SummariesLine on={summaries} onToggle={() => void setFoldSummaries(!summaries)} />}
     </li>
   );
 }
 
-// The summaries' line, starting at the row's middle column (past the image, size-9, and the gap); its sentence its note.
+// The summaries' line, starting at the row's middle column (past the image, size-9, and the gap); its sentence its note;
+// its switch in the row's switch column, before the empty cell of a plugin's menu.
 function SummariesLine({ on, onToggle }: { on: boolean; onToggle(): void }) {
   const note = useRowNote();
   return (
@@ -140,6 +149,7 @@ function SummariesLine({ on, onToggle }: { on: boolean; onToggle(): void }) {
       <label data-mod-summaries="" className="flex min-w-0 cursor-pointer items-start gap-3 pl-12 text-ui text-fg">
         <span className="min-w-0 flex-1">{L.mod.summaries.label}</span>
         <Switch checked={on} label={L.mod.summaries.label} disabled={false} describedBy={note.id} onClick={onToggle} />
+        <NoMenu />
       </label>
       <RowNote note={note} className="pl-14">
         {L.mod.summaries.sentence}

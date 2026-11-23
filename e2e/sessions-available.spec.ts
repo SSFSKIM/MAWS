@@ -122,11 +122,18 @@ test.describe('sessions available on demand (P2-A)', () => {
     // the word cut (P519): a dormant dialog with no earlier answer draws Load now alone, with no "Not read yet."
     await expect(frame.locator('[data-dormant-gesture]')).toHaveText('Load now');
     expect(existsSync(journalDir(maws, appId)), 'nothing launched on opening the widget').toBe(false);
+    const gesture = frame.locator('[data-dormant-gesture]');
+    const lineHeight = () => gesture.evaluate((line) => line.getBoundingClientRect().height);
+    const atRest = await lineHeight();
     await frame.getByRole('button', { name: 'Load now' }).click();
     // P523: the start's wait is the quiet spinner in Load now's place, never words
     const row = frame.locator('[data-skill-row="e8-probe:e8-hello"]'); // P2-B's skills library row
     await expect(frame.getByRole('button', { name: 'Load now' })).toHaveCount(0);
-    if (slow) await expect(frame.getByRole('progressbar', { name: 'Starting…' })).toBeVisible();
+    if (slow) {
+      await expect(frame.getByRole('progressbar', { name: 'Starting…' })).toBeVisible();
+      // the M4 picture review: the wait keeps the line's height, so nothing below it moves while the start runs
+      expect(await lineHeight(), 'the line while the start runs').toBe(atRest);
+    }
     await expect(frame.getByText('Starting…')).toHaveCount(0);
     await expect(row).toBeVisible({ timeout: 20_000 });
     expect(spawns(maws, appId), 'one launch').toHaveLength(1);

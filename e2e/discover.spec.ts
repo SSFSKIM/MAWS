@@ -354,6 +354,18 @@ test('labels: search over both names, the trust labels and tooltips, a joined pa
       await expect(card.locator('[data-trust]'), name).toHaveAttribute('data-trust', 'Verified');
       await expect(card.locator('[data-trust]'), name).toHaveAttribute('title', 'Verified — Anthropic has reviewed this plugin for quality and security.');
     }
+    // the M4 picture review: the trust label has its own line beneath the publisher on every card, so each card's
+    // description starts at one height, whatever the words beside the name
+    const lines = await results(page).locator('[data-catalog-card]').evaluateAll((cards) =>
+      cards.map((card) => {
+        const publisher = card.querySelector('[data-catalog-publisher]')?.getBoundingClientRect();
+        const trust = card.querySelector('[data-trust]')!.getBoundingClientRect();
+        const description = card.querySelector('[data-catalog-description]')!.getBoundingClientRect();
+        return { beneath: publisher === undefined || trust.top >= publisher.bottom - 0.5, offset: Math.round(description.top - card.getBoundingClientRect().top) };
+      }),
+    );
+    expect(lines.filter((line) => !line.beneath), 'a trust label beside its publisher').toEqual([]);
+    expect(new Set(lines.map((line) => line.offset)).size, `the descriptions' offsets: ${lines.map((line) => line.offset).join(', ')}`).toBe(1);
     const partner = byName(results(page), 'cocounsel-legal');
     await expect(partner).toContainText('by Thomson Reuters');
     await expect(partner.locator('[data-trust]')).toHaveAttribute('data-trust', 'Partner');
@@ -733,6 +745,22 @@ test('all: My items lists the three kinds in one list; Discover’s home has a s
     if (mods > 0) await expect(all.locator('[data-mod-row] [data-kind-word]').first()).toHaveText('Mod');
     const columns = await all.locator('[data-kind-word]').evaluateAll((words) => words.map((word) => Math.round(word.getBoundingClientRect().left)));
     expect(new Set(columns).size, `the kind words' left edges: ${columns.join(', ')}`).toBe(1);
+    // the M4 picture review: a version stands just before the kind word, a plugin's menu after its switch, so a plugin's
+    // and a mod's versions end in one column; a mod's one line (its name, version, kind word and switch) is centred on
+    // its image, as a one-line skill row's is
+    const versions = await all.locator('[data-plugin-version], [data-mod-version]').evaluateAll((marks) => marks.map((mark) => Math.round(mark.getBoundingClientRect().right)));
+    expect(new Set(versions).size, `the versions' right edges: ${versions.join(', ')}`).toBe(1);
+    if (mods > 0) {
+      const offsets = await all.locator('[data-mod-row] [data-mod-main]').first().evaluate((main) => {
+        const middle = (element: Element | null) => {
+          const box = element!.getBoundingClientRect();
+          return box.top + box.height / 2;
+        };
+        const image = middle(main.querySelector('[data-item-image]'));
+        return [main.querySelector('.font-medium'), main.querySelector('[data-mod-version]'), main.querySelector('[data-kind-word]'), main.querySelector('[role="switch"]')].map((part) => Math.abs(Math.round(middle(part) - image)));
+      });
+      expect(Math.max(...offsets), `the mod line's distances from its image's centre: ${offsets.join(', ')}`).toBeLessThanOrEqual(1);
+    }
     const rows = all.locator('li:has([data-kind-word])');
     expect(await rows.count()).toBe(PLUGINS.length + mods + SKILLS.length + CONNECTORS.length);
     expect(await rows.evaluateAll((items) => items.filter((item) => item.querySelector('[data-item-image]') === null).length), 'every row has its image').toBe(0);

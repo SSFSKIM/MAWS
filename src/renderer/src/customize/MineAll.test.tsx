@@ -194,18 +194,24 @@ describe('My items, All', () => {
   it('lists the plugins, then the mods, the skills and the connectors, each part by name, each row ending in its kind word in one column; no heading, loaded line, live list or kind’s menu', async () => {
     mountCustomize({ view: 'mine', show: 'all' });
     await drawn();
-    // the kind word is the cell before each row's last control: a plugin's switch (the word cut, G215), the mod's switch,
-    // else an empty cell of that control's width, so the words stand in one column
+    // the kind word is the cell before each row's two last controls, the switch's and the menu's: a plugin's switch (the
+    // word cut, G215) and its menu, the mod's switch and an empty menu cell, else two empty cells of those controls'
+    // widths, so the words, and the versions before them, stand in one column (the M4 picture review)
     const words = [...list().querySelectorAll<HTMLElement>('[data-kind-word]')];
     expect(words).toHaveLength(8);
     for (const word of words) {
-      expect(word.nextElementSibling).toBe(word.parentElement!.lastElementChild);
+      expect(word.nextElementSibling!.nextElementSibling).toBe(word.parentElement!.lastElementChild);
       expect(word.className).toBe(words[0]!.className);
     }
-    expect(words[0]!.nextElementSibling!.getAttribute('role')).toBe('switch');
-    expect(words[2]!.nextElementSibling!.getAttribute('role')).toBe('switch');
-    expect(words[3]!.nextElementSibling!.getAttribute('aria-hidden')).toBe('true');
-    expect(words[7]!.nextElementSibling!.getAttribute('aria-hidden')).toBe('true');
+    const after = (word: HTMLElement) => [word.nextElementSibling!, word.nextElementSibling!.nextElementSibling!];
+    const [pluginSwitch, pluginMenu] = after(words[0]!);
+    expect(pluginSwitch.getAttribute('role')).toBe('switch');
+    expect(pluginMenu.querySelector('button')!.getAttribute('aria-label')).toMatch(/^More actions for /);
+    expect(words[0]!.previousElementSibling!.hasAttribute('data-plugin-version')).toBe(true);
+    expect(after(words[2]!).map((cell) => cell.getAttribute('role') ?? cell.getAttribute('aria-hidden'))).toEqual(['switch', 'true']);
+    expect(words[2]!.previousElementSibling!.hasAttribute('data-mod-version')).toBe(true);
+    expect(after(words[3]!).map((cell) => cell.getAttribute('aria-hidden'))).toEqual(['true', 'true']);
+    expect(after(words[7]!).map((cell) => cell.getAttribute('aria-hidden'))).toEqual(['true', 'true']);
     expect(list().querySelector('h2, h3, h4, [data-plugins-group], [data-skills-group]')).toBeNull();
     expect(document.querySelector('[data-plugins-loaded], [data-plugins-session-unavailable]')).toBeNull();
     expect(screen.queryByRole('region', { name: 'Live connectors' })).toBeNull();

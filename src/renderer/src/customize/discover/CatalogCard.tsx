@@ -102,9 +102,11 @@ export function CatalogCard({ item, tab, kindWord = false, onOpen }: { item: Cat
           ) : (
             name
           )}
-          {/* the publisher keeps its line: the trust label wraps beneath it when both do not fit, into the room a
-              two-line description leaves above the components (the card's height is fixed) */}
-          <span data-catalog-byline className="flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-0.5 text-ui-sm text-fg-muted">
+          {/* the publisher keeps its line and the trust label has its own beneath it, on every card: the description
+              then starts at one height across a shelf, and the room a short one leaves is not all above the components
+              (the card's height is fixed); the label once wrapped only where it did not fit, so it moved up on a card
+              whose words beside the name grew shorter (G278's check, the M4 picture review) */}
+          <span data-catalog-byline className="flex min-w-0 flex-col items-start gap-0.5 text-ui-sm text-fg-muted">
             {item.publisher && (
               <span data-catalog-publisher title={D.by(item.publisher)} className="max-w-full truncate">
                 {D.by(item.publisher)}
@@ -115,8 +117,8 @@ export function CatalogCard({ item, tab, kindWord = false, onOpen }: { item: Cat
         </div>
         {here ? <InstalledMark /> : addable(item) && <AddButton item={item} tab={tab} />}
       </div>
-      {/* one line when the card also says where it is installed, so a wrapped byline still fits the fixed height */}
-      <p className={`relative m-0 ${item.installed === 'elsewhere' ? 'line-clamp-1' : 'line-clamp-2'} text-ui-sm text-fg-muted [overflow-wrap:anywhere]`}>{item.description ?? ''}</p>
+      {/* one line when the card also says where it is installed, so the byline's two lines still fit the fixed height */}
+      <p data-catalog-description="" className={`relative m-0 ${item.installed === 'elsewhere' ? 'line-clamp-1' : 'line-clamp-2'} text-ui-sm text-fg-muted [overflow-wrap:anywhere]`}>{item.description ?? ''}</p>
       <p className="relative m-0 mt-auto flex min-w-0 items-center gap-1.5 text-ui-sm text-fg-faint">
         <span data-catalog-components className="truncate">
           {cardContentsWords(item, tab)}
