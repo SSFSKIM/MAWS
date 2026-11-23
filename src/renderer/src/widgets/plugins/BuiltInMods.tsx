@@ -6,8 +6,8 @@
 // list and All alike): the head reads "Built in", the description is the row's note (on pointing or focus, the switch's
 // description at all times), the line on how its instructions reach the session is gone, and the override waits behind
 // opening the row, open from the start where the session overrides the default; what the session's lane still waits for
-// is the override's caption, shown with it in the opened row (the M4 picture review). No overflow and no Uninstall: the registry
-// is MAWS's, never the engine's. Hidden while the registry is empty or no row matches the library's search. A registry
+// is the override's caption, shown with it in the opened row (the M4 picture review). No overflow and no Uninstall: the
+// registry is MAWS's, never the engine's. Hidden while the registry is empty or no row matches the library's search. A registry
 // main cannot read says so, in main's words. UX wave U11c: Customize's My items, All draws the same rows, with no heading,
 // after the plugins (customize/MineAll.tsx).
 // UX wave U2b (M7; the execution document, §M, "The switch"; frame 11): in the mods list alone, a row that carries
@@ -74,9 +74,10 @@ const ownControl = (target: EventTarget): boolean => target instanceof Element &
 // One mod's row. UX wave U11c (docs/doperpowers/plans/2026-11-14-ux-wave-U11c-customize.md, §E): under Customize's All,
 // `kindWord` draws "Mod" before the switch. The row ends in the empty cell of a plugin's menu, so its version, its kind
 // word and its switch stand in the plugin rows' columns (the M4 picture review). Its name, its version, its kind word and
-// its switch share one line of the image's height, whatever the opened row adds beneath (the override, its caption). UX wave U2b (M7): `summariesSwitch`, passed by the mods list alone, draws the
-// summaries' switch on a second line where the row carries `summaries`. The row's own line and the summaries' line are
-// each a row of their own for their notes, so each note floats under the line it belongs to.
+// its switch share one line of the image's height, whatever the opened row adds beneath (the override, its caption).
+// UX wave U2b (M7): `summariesSwitch`, passed by the mods list alone, draws the summaries' switch on a second line where
+// the row carries `summaries`. The row's own line and the summaries' line are each a row of their own for their notes,
+// so each note floats under the line it belongs to.
 export function BuiltInModRow({ row, mods, appSessionId, kindWord = false, summariesSwitch = false }: { row: ModRow; mods: BuiltInModsState; appSessionId: AppSessionId | null; kindWord?: boolean; summariesSwitch?: boolean }) {
   const { failure, setEnabled, setOverride, setFoldSummaries } = mods;
   const summaries = summariesSwitch ? row.summaries : undefined;
