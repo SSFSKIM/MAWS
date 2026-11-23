@@ -7,7 +7,7 @@
 // keyboard in its row and is the row's description; its `line` stands at rest. A row whose label the cut changed keeps
 // its old label among its keywords, so the search finds it by the words it was found by.
 import type { SettingsSection } from './SettingsView';
-import { APPEARANCE, ARTIFACTS, BROWSER, BUDGET_SETTINGS, ENGINE, GATEWAY, KEYBOARD, LAUNCH_PROFILE, MCP_SERVERS, NOTIFICATIONS, SESSIONS, SUPERVISOR, VOICE } from './copy';
+import { APPEARANCE, ARTIFACTS, BROWSER, BUDGET_SETTINGS, ENGINE, GATEWAY, KEYBOARD, LAUNCH_PROFILE, MAWS_TOOLS, MCP_SERVERS, NOTIFICATIONS, SESSIONS, SUPERVISOR, VOICE } from './copy';
 import { USAGE } from '../accounts/copy'; // UX wave U7b (O-47)
 
 export interface SettingsRow {
@@ -66,6 +66,9 @@ export const SETTINGS_ROWS: readonly SettingsRow[] = [
 
   { id: 'sessions.plugins', section: 'sessions', label: LAUNCH_PROFILE.plugins, states: LAUNCH_PROFILE.pluginsNotes },
   { id: 'sessions.hooks', section: 'sessions', label: LAUNCH_PROFILE.hooks, states: LAUNCH_PROFILE.hooksNotes },
+  // board ticket 421: the machine's default set of MAWS's tools, drawn once this machine's spine answers one
+  { id: 'sessions.tools', section: 'sessions', label: MAWS_TOOLS.tools, states: MAWS_TOOLS.toolsNotes, keywords: Object.values(MAWS_TOOLS.groups).map((group) => group.word) },
+  { id: 'sessions.question', section: 'sessions', label: MAWS_TOOLS.question, states: MAWS_TOOLS.questionNotes, keywords: MAWS_TOOLS.questionWords },
   { id: 'sessions.mcpServers', section: 'sessions', label: MCP_SERVERS.label, states: MCP_SERVERS.notes, keywords: ['connectors', 'integrations', 'tools'] },
   { id: 'sessions.subagent', section: 'sessions', label: SESSIONS.subagent, states: SESSIONS.subagentNotes },
   { id: 'sessions.autoFallback', section: 'sessions', label: SESSIONS.autoFallback, states: SESSIONS.autoFallbackNotes },
