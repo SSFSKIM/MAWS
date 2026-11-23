@@ -4,7 +4,7 @@
 
 81 items: 39 cut, 5 reworded, 37 stay. Of the 44 that change, the owner saw 16 in a picture or ruled on them; 28 follow the pattern and were not seen.
 
-Against master (M0): 76 unchanged, 2 rewritten by the wave, 2 moved, 1 gone; none waits on the owner; 10 put to the owner (new rows included) and since ruled. M0 added 19 rows for the UX wave's new text (3 cut, 6 reworded, 10 stay), listed at the end.
+Against master (M0): 76 unchanged, 2 rewritten by the wave, 2 moved, 1 gone; none waits on the owner; 10 put to the owner (new rows included) and since ruled. M0 added 22 rows for the UX wave's new text (3 cut, 6 reworded, 13 stay), listed at the end.
 
 Columns: **Id** is the item's id in `items.json`. **Where** is the place on the surface. **Today** is the text at the pin `2c7044231` (an example value where the text is built from data). **Decision** is `cut` (the text leaves the resting surface), `reword` (it changes) or `stays` (today's text is kept; the row is here so that nobody proposes it again). **After** says what the surface shows afterwards, as it was built on the scratch branch and shown in the pictures. **Basis** is how firm the decision is, in the words of the root document's "How firm each decision is". **Source** is the file and line at the pin. **M0** is what the re-reading against master found (see the root document's "M0's record"): `unchanged`, `moved`, `rewritten by the wave`, `gone` or `moot`, with the file and line on master, and for a rewritten row the text master shows and the row decided again by the five rules. **Build** is the milestone that builds the row and the scene whose before and after pictures show it.
 
@@ -252,3 +252,16 @@ Rows added by M0 for text the UX wave added after the pin. **Today** here is the
 | Id | Where | Today | Decision | After | Basis | Source | M0 | Build |
 |---|---|---|---|---|---|---|---|---|
 | N149 | the second line of the to-human mod's row: what the Summaries on fold lines switch does | Each summary is one small model call by the to-human mod, on the session's own account. Off: sessions MAWS starts make no new summaries from their next start, and summaries already made stay. A session started in a terminal follows the mod's own setting. | reword | The switch row is its label "Summaries on fold lines" and the switch; the sentence opens in the row on pointing or focus, as a row note. | pattern | `src/renderer/src/widgets/copy.ts:566` | new `src/renderer/src/widgets/copy.ts:566` | M4 · `customize-plugins` |
+
+#### Plugins library, plugin row
+
+| Id | Where | Today | Decision | After | Basis | Source | M0 | Build |
+|---|---|---|---|---|---|---|---|---|
+| N186 | /plugins dialog and Customize › Plugins tab (and under All): the accessible name of the on/off switch at the end of every plugin row, which G215 puts in place of the Disabled badge and the menu's Turn on/off | Enable superpowers | stays | Stays. rule 5: a control is named by what it does to its object; the name carries the plugin's name because the list holds many such switches (the detail's single switch keeps "Enable plugin"). Met in M4 task 4, building G215 | pattern | `src/renderer/src/widgets/copy.ts:520` | new `src/renderer/src/widgets/plugins/PluginRow.tsx:183` | M4 · `customize-plugins` |
+| N187 | /plugins dialog and Customize › Plugins tab (and under All): the tooltip and description of a plugin row's greyed switch, where the installation cannot be changed from this session. The three: "In <project> · manage it from a session there", "Synced from claude.ai · change it there", "From your own folder · change it there" | In site · manage it from a session there | stays | Stays. the reason a greyed control gives ("every hidden fact has an owner that takes keyboard focus"); G217 cut the clause from the row's third line, which now reads "In <project>", and P703 keeps the same words as the detail's greyed switch's tooltip. Met in M4 task 4, building G215 and G217 | pattern | `src/renderer/src/widgets/copy.ts:529` | new `src/renderer/src/widgets/plugins/PluginRow.tsx:183` | M4 · no scene: needs a plugin installed in another project of the place shown (wanted: Customize › Plugins with a row from another project, its switch focused) |
+
+#### Reload plugins dialog
+
+| Id | Where | Today | Decision | After | Basis | Source | M0 | Build |
+|---|---|---|---|---|---|---|---|---|
+| N188 | the /reload-plugins command: the accessible name of the quiet spinner the dialog shows while the reload runs (P751) | Reloading plugins… | stays | Stays. rule 3: a wait shows the quiet spinner, its accessible name the wait's words ("What the cut builds"). Met in M4 task 4, building P751 | pattern | `src/renderer/src/widgets/copy.ts:393` | new `src/renderer/src/widgets/ReloadPluginsWidget.tsx:59` | M4 · no scene: needs a reload held open past half a second (wanted: /reload-plugins while reload_plugins has not answered) |
