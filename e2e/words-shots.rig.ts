@@ -766,6 +766,8 @@ const M4_WORDS = {
   sessionsLabel: 'Sessions', // sessions/WorktreesDialog.tsx, the label over a worktree's sessions, both builds
   refresh: 'Refresh', // widgets/copy.ts FRAME.refresh, Session info's gesture, both builds
   starting: 'Starting…', // sessions/acquire.ts STARTING_SESSION (FRAME.starting): master's status words, M4's spinner's name (P523)
+  installed: 'Installed', // customize/discover/copy.ts DISCOVER.installed: master's word beside the check, M4's mark's name (G278)
+  add: 'Add', // widgets/copy.ts LIBRARY.add, the plugin list's Add menu's name, both builds (P655)
 };
 // The scenes that existed before M4 and show its surfaces (scenes.md, "Existing scenes that show M4's surfaces"): M4's
 // evidence as much as its own `m4-` scenes, so each is refused on a build that is not the checkout's, as an m4 scene is
@@ -1426,6 +1428,39 @@ async function m4Scenario(app: ElectronApplication, page: Page, SID: Record<'run
   });
   await reset(page);
 
+  // ---- Discover: an installed card's mark (G278), the check alone on M4 with "Installed" its name and tooltip (the
+  // mark holding the keyboard), master's check and word; and the Skills catalog with no note at its top (G280)
+  const installed = () => custom(page).locator('[data-catalog-installed]').first();
+  await shot(page, meta('m4-discover-installed', 'G278', 'Customize, Discover, an installed card’s mark holding the keyboard', 'Customize, Discover, Show: Plugins; keyboard focus on the first installed card’s mark (on master, the mark in view)', 'The first card the plugin CLI stub has installed: on M4 its check alone, Installed its tooltip; master’s check and “Installed”', ['customize/discover', 'ui']), async () => {
+    await customizeAt(page, 'discover', 'plugins');
+    await letGo(page);
+    await installed().scrollIntoViewIfNeeded({ timeout: 20_000 });
+    await page.waitForTimeout(400);
+    if (m4Cut()) await installed().focus();
+  }, {
+    check: async () => {
+      await inView(installed(), 'the installed card’s mark');
+      if (m4Cut()) {
+        await expect(installed(), 'the mark named Installed').toHaveAttribute('aria-label', M4_WORDS.installed, { timeout: 3_000 });
+        await expect(installed(), 'no word beside the check').toHaveText('', { timeout: 3_000 });
+        await tipShown(page, installed(), 'the installed mark', installed(), m4Cut)();
+      } else await expect(installed(), 'master’s word beside the check').toContainText(M4_WORDS.installed, { timeout: 3_000 });
+    },
+    after: () => letGo(page),
+  });
+  await shot(page, meta('m4-discover-skills', 'G280', 'Customize, Discover, Show: Skills', 'Customize, Discover, Show: Skills', 'The Skills catalog’s top with no note on M4; master’s note that items whose contents are not known before install are under Plugins', ['customize/discover']), async () => {
+    await customizeAt(page, 'discover', 'skills');
+    await letGo(page);
+  }, {
+    check: async () => {
+      await expect(custom(page), 'Discover, Skills').toHaveAttribute('data-customize-show', 'skills', { timeout: 3_000 });
+      const note = custom(page).locator('[data-skills-note]');
+      if (m4Cut()) await expect(note, 'no note at the top').toHaveCount(0);
+      else await inView(note, 'master’s note at the top');
+    },
+  });
+  await reset(page);
+
   // ---- the sidebar's sort menu (W49): on M4 straight onto its two orders; master's first line "Sort sessions by"
   await shot(page, meta('m4-sidebar-sort-menu', 'W49', 'Sidebar, the sort menu open', 'The sort button by PROJECTS in the sidebar', 'The menu’s two orders, Priority and Recency; master’s first line “Sort sessions by” above them', ['sidebar']), async () => {
     await closeOverlays(page);
@@ -1467,7 +1502,7 @@ async function m4Scenario(app: ElectronApplication, page: Page, SID: Record<'run
   // press takes the keyboard from the row).
   let running: Locator | null = null;
   const card = () => page.locator('[data-hover-card]').first();
-  await shot(page, meta('m4-sidebar-hover-keyboard', 'W69, W73, W77', 'Sidebar, a session row’s hover card opened by the keyboard', 'The running session’s row in the sidebar, reached with ↑ then ↓ from it; the pointer aside', 'The row holding the keyboard, its hover card open: the state word at the head of its second line (M4’s keyboard form; master draws it on every card)', ['sidebar', 'sessions', 'attention'], true), async () => {
+  await shot(page, meta('m4-sidebar-hover-keyboard', 'W69', 'Sidebar, a session row’s hover card opened by the keyboard', 'The running session’s row in the sidebar, reached with ↑ then ↓ from it; the pointer aside', 'The row holding the keyboard, its hover card open: the state word at the head of its second line (M4’s keyboard form; master draws it on every card)', ['sidebar', 'sessions', 'attention'], true), async () => {
     await closeOverlays(page);
     await page.mouse.move(W - 2, H - 2);
     running = await sidebarRow(page, { appSessionId: SID.running });
@@ -4602,7 +4637,7 @@ function m4PluginState(): StubState {
     fail: {},
   };
 }
-const M4_LAUNCH = ['m4-plugins-mod-override', 'm4-plugins-mod-default', 'm4-customize-plugin-off', 'm4-customize-plugin-no-description', 'm4-customize-all-kinds', 'm4-customize-skill-pointed', 'm4-archive-sheet', 'm4-worktrees-orphan', 'm4-session-info-starting'];
+const M4_LAUNCH = ['m4-plugins-mod-override', 'm4-plugins-mod-default', 'm4-plugins-add-menu', 'm4-customize-plugin-off', 'm4-customize-plugin-no-description', 'm4-customize-all-kinds', 'm4-customize-skill-pointed', 'm4-archive-sheet', 'm4-worktrees-orphan', 'm4-session-info-starting'];
 test('the word cut’s M4: the mods’ rows, Customize’s plugin and skill rows, the archive sheet, worktrees and a start under way', async () => {
   test.setTimeout(900_000);
   if (!M4_LAUNCH.some(wanted)) return;
@@ -4696,6 +4731,27 @@ test('the word cut’s M4: the mods’ rows, Customize’s plugin and skill rows
           await inView(modRow().getByRole('radiogroup'), 'master’s override’s choices at rest');
           await expect(modRow().locator('input[type="radio"][value="inherit"]'), 'Default chosen').toBeChecked({ timeout: 3_000 });
         }
+      },
+      after: () => closeOverlays(page),
+    });
+    // ---- /plugins' Add menu open (P655): Discover plugins its first row on M4, the head with no button of its own;
+    // master's head keeps its Open Discover button, its menu the two marketplace rows
+    const addMenu = () => page.getByRole('menu').first();
+    await shot(page, m4Meta('m4-plugins-add-menu', 'P655', '/plugins, the Add menu open', 'A session’s /plugins typed in its message box, the head’s Add button pressed', 'The Add menu open: Discover plugins, Add marketplace, Manage marketplaces on M4 and no Open Discover in the head; master’s Open Discover button in the head, the menu’s two marketplace rows', ['widgets/plugins', 'widgets']), async () => {
+      await closeOverlays(page);
+      await opened('plain');
+      await typed(page, 'plugins');
+      await expect(dialogOf(page, 'plugins')).toBeVisible({ timeout: 15_000 });
+      await letGo(page);
+      await dialogOf(page, 'plugins').getByRole('button', { name: M4_WORDS.add, exact: true }).first().click();
+    }, {
+      check: async () => {
+        await inView(addMenu(), 'the Add menu');
+        const head = dialogOf(page, 'plugins').locator('button[data-open-discover]');
+        if (m4Cut()) {
+          await expect(addMenu().getByRole('menuitem').first(), 'Discover plugins first').toHaveAttribute('data-open-discover', '', { timeout: 3_000 });
+          await expect(head, 'no Open Discover in the head').toHaveCount(0);
+        } else await inView(head, 'master’s Open Discover in the head');
       },
       after: () => closeOverlays(page),
     });
