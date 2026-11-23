@@ -3,7 +3,7 @@
 // `› working record`, whose key is then its first row's, which may not be the key the open line carried: after the
 // derivation regrouped the stretch (a run of one call unwrapped at completion) and after older rows paged in above it.
 // Every text is invented.
-import { act, cleanup, fireEvent, render } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, waitFor } from '@testing-library/react';
 import { useLayoutEffect } from 'react';
 import { afterEach, describe, expect, it } from 'vitest';
 import { useTranscriptStore } from '../../stores/transcript';
@@ -73,7 +73,7 @@ describe('folding a stretch hands focus to its record line whatever key that lin
     expect(document.activeElement).toBe(line(true));
     view.rerender(<View rows={rowsAt(2, false)} />); // completed: the thought, then the call
     await press(line(true));
-    expect(line(false)).not.toBeNull();
+    await waitFor(() => expect(line(false)).not.toBeNull()); // board ticket 850: once the fold's motion has run
     expect(document.activeElement).toBe(line(false));
   });
 
@@ -83,6 +83,7 @@ describe('folding a stretch hands focus to its record line whatever key that lin
     await press(line(false)); // opened while its thought heads it
     view.rerender(<View rows={rowsAt(2, true)} />); // paged up: the commentary above it heads it now
     await press(line(true));
+    await waitFor(() => expect(line(false)).not.toBeNull()); // board ticket 850: once the fold's motion has run
     expect(document.activeElement).toBe(line(false));
   });
 });

@@ -281,16 +281,16 @@ describe('the message line', () => {
     expect(body()).not.toBeNull();
     expect(line.getAttribute('aria-expanded')).toBe('true');
     await user.click(line);
-    expect(body()).toBeNull();
+    await waitFor(() => expect(body()).toBeNull()); // board ticket 850: once its close has run
     line.focus();
     await user.keyboard('{Enter}');
     expect(body()).not.toBeNull();
     await user.keyboard('{Enter}');
-    expect(body()).toBeNull();
+    await waitFor(() => expect(body()).toBeNull()); // board ticket 850: once its close has run
     await user.keyboard(' ');
     expect(body()).not.toBeNull();
     await user.keyboard(' ');
-    expect(body()).toBeNull();
+    await waitFor(() => expect(body()).toBeNull()); // board ticket 850: once its close has run
   });
 
   it('offers Reply at the line’s end where the sender can be answered, drawn on pointing or focus, and keeps it shown while its composer is open (T75)', () => {

@@ -5,6 +5,7 @@
 // Reply) is the caller's, after it, so it stays in view however the words are cut. `markWords`, where the mark stands
 // for words (the word cut, T73: a message's arrow for "Message from"), are read in its place and not drawn.
 import type { ReactNode } from 'react';
+import { DisclosureBody } from '../../../ui/disclosure';
 
 export function ArrivalLine({ mark, markWords, open, onToggle, children }: { mark: string; markWords?: string; open: boolean; onToggle: () => void; children: ReactNode }) {
   return (
@@ -16,4 +17,9 @@ export function ArrivalLine({ mark, markWords, open, onToggle, children }: { mar
       <span className="transcript-line-text">{children}</span>
     </button>
   );
+}
+
+// What a line opens, under it (board ticket 850): through the shared disclosure motion, as every fold of the transcript.
+export function ArrivalBody({ open, children }: { open: boolean; children: ReactNode }) {
+  return <DisclosureBody open={open}>{children}</DisclosureBody>;
 }

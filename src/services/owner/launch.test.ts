@@ -443,6 +443,17 @@ describe('ownerChannelLaunch over a scratch config home', () => {
       });
     });
 
+    // Board ticket 850 (the owner, 2026-11-23): MAWS's mirror draws the view in every session again; contract.ts's switch,
+    // read with nothing injected, is off, so a lane-on launch beside a declaring installation of 0.9.0 advertises 8.
+    it('with nothing injected, a lane-on launch beside a declaring 0.9.0 installation advertises 8 and reserves 8 (ticket 850)', async () => {
+      launchesWith({});
+      installToHumanPlugin(configHome, { declares: true, version: '0.9.0' });
+      const { spec: decided, record: decision } = await decide();
+      expect(envOf(decided)[NATIVE_TO_HUMAN_ENV]).toBe('8');
+      expect(decision).toMatchObject({ advertised: 8, plugin: true, reserved: true });
+      expect(index.ownerChannel.session(record)?.advertised).toEqual({ launchId: null, number: 8, plugin: true, at: AT });
+    });
+
     it('with the switch of contract.ts off, a newer installation still advertises 8: no launch carries 9 before the cutover', async () => {
       launchesWith({ modRoute: false }); // the cutover's switch off
       installToHumanPlugin(configHome, { declares: true });

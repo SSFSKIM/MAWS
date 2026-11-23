@@ -300,9 +300,9 @@ test('Question Default: a new chat under the plugin’s style launches with neit
 });
 
 // UX wave U2b (M6; docs/doperpowers/plans/2026-11-15-ux-wave-U2b-to-human-view.md, §M): where MAWS draws the view (the
-// launch carries 8: the installation declares nothing), a record line reads what the to-human mod's file of fold
-// summaries holds for its stretch, a stretch still growing its newest call, and `working record` where there is
-// neither. The scratch configuration directory holds an invented file for the recorded session in the mod's form (a
+// launch carries 8; since board ticket 850 every launch does, a declaring installation's included), a record line
+// reads what the to-human mod's file of fold summaries holds for its stretch, a stretch still growing its newest call,
+// and `working record` where there is neither. The scratch configuration directory holds an invented file for the recorded session in the mod's form (a
 // temporary beside it, then a rename over it); the file is then replaced, by a rename, with one that holds one more run,
 // and the line changes with no reload, at the round's next read or at the window's return of focus. MAWS reads shape 2
 // alone: the same runs at shape 1, as releases before the mod's pull request write them, read as no summaries.
@@ -320,7 +320,9 @@ for (const shape of [2, 1] as const) {
     mkdirSync(project, { recursive: true });
     writeFileSync(join(config, '.claude.json'), `${JSON.stringify({ projects: { [repo]: { hasTrustDialogAccepted: true } } }, null, 2)}\n`);
     writeFileSync(join(config, 'settings.json'), `${JSON.stringify({ permissions: { defaultMode: 'default' } })}\n`);
-    installToHumanPlugin(config); // the plugin's style (6) and the plugin, no declaration: the lane on, MAWS draws
+    // Board ticket 850: an installation that declares it draws from 9, as 0.9.0's does; launches advertise 8 again
+    // whatever is installed, so MAWS draws the view and its record lines read the mod's file
+    installToHumanPlugin(config, { declares: true, version: '0.9.0' });
     const engineId = toHumanSessionId();
     const first = { parentUuid: null, isSidechain: false, type: 'user', message: { role: 'user', content: 'a session whose work is summarised' }, uuid: randomUUID(), timestamp: '2026-11-16T08:00:00.000Z', cwd: repo, sessionId: engineId, version: '2.1.322' };
     writeFileSync(join(project, `${engineId}.jsonl`), `${JSON.stringify(first)}\n`);

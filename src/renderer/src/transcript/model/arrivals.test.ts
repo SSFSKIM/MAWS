@@ -8,6 +8,7 @@ import type { ArrivalEntry, CarriedArrival } from '@shared/engine/arrival-schema
 import type { SessionId } from '@shared/graph/ids';
 import { describe, expect, it } from 'vitest';
 import { consentMessage, personsGrants, readAnswerEnvelope } from '@shared/engine/arrival';
+import { peerEventsOf } from '@shared/engine/peer-envelope'; // board ticket 850
 import { askSteerText } from '@shared/maws/ask';
 import { ChainFollower } from '../../../../engine-host/fs/chain-follower';
 import { FIXTURE_DIR, loadUxwaveJournal } from '../../../../../test/support/fixtures';
@@ -565,6 +566,25 @@ describe('a peer’s delivery with no envelope (the bubble branch)', () => {
     const list = expanded(b.events);
     expect(of(list, 'user').map((row) => row.text)).toEqual(['a peer text no reader claims']);
     expect(of(list, 'agent_message')[0]!.peer?.sender?.owners).toEqual(['ana@example.com']);
+  });
+});
+
+// Board ticket 850: a delivery to a process that takes receipts opens its envelope's body with sminos's receipt marker,
+// then the frame line; the engine host reads it (`peerEventsOf`), and the row is the peer's, its words alone.
+describe('a peer’s message whose body opens with a receipt’s marker', () => {
+  it('draws as the peer’s row, the marker and the frame cut from its words, the owners read from the frame', () => {
+    const content = '<cross-session-message from-name="docs">\n[sminos receipt 0123456789abcdef01234567.89abcdef01234567 attempt 1]\n[sminos chat hp 6d0000ff:1 from docs, owned by ana@example.com → @you]\nthe index is stale\n</cross-session-message>';
+    const payload = peerEventsOf(content, uuid('p1'), { kind: 'peer', from: 'unknown', name: 'docs' });
+    const { kind, ...peer } = payload as Extract<NonNullable<typeof payload>, { kind: 'peer.message' }>;
+    expect(kind).toBe('peer.message');
+    const b = builder();
+    b.emit('turn.started', { userMessageUuid: null, origin: 'peer' });
+    b.emit('user.message', { messageUuid: uuid('p1'), content, isReplay: true, isSynthetic: true, origin: 'peer', bash: null });
+    b.emit('peer.message', peer);
+    b.end([], { origin: 'peer' });
+    const list = expanded(b.events);
+    expect(kinds(list)).toEqual(['agent_message', 'divider']);
+    expect(of(list, 'agent_message')[0]).toMatchObject({ text: '@docs: the index is stale', peer: { body: 'the index is stale', sender: { owners: ['ana@example.com'] } } });
   });
 });
 

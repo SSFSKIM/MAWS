@@ -2,7 +2,8 @@
 // The wrapper carries the row's element id (the divider's aria-controls names work-area rows by it), its kind and turn
 // for tests and the harness, and is focusable so a jump can land on it. A row of a rewound branch the reader revealed
 // is muted and marked not in context. W8: a work-area row's wrapper runs the shared disclosure motion when its divider
-// opens or folds the work area (motion.ts).
+// opens or folds the work area (motion.ts); board ticket 850: so does a row of a stretch its record line opens or folds,
+// and of a branch its rewind's line reveals or hides.
 import { useState, useSyncExternalStore, type ReactNode, type Ref } from 'react';
 import { useTranscriptStore } from '../../../stores/transcript';
 import { useDisclosureMotion } from '../../../ui/disclosure';
@@ -83,8 +84,9 @@ const opensTurn = (row: Row, rows: readonly Row[] | undefined) => rows?.find((ca
 export function RowView({ row }: { row: Row }) {
   const motion = useWorkMotion();
   const work = inWorkArea(row);
-  const folding = useSyncExternalStore(motion.subscribe, () => work && motion.isFolding(row.turnId!));
-  const [appear] = useState(() => work && motion.isOpening(row.turnId!));
+  // board ticket 850: and a row of a set that opens or folds as one (a stretch of the to-human view, a rewound branch)
+  const folding = useSyncExternalStore(motion.subscribe, () => (work && motion.isFolding(row.turnId!)) || motion.isFoldingRow(row));
+  const [appear] = useState(() => (work && motion.isOpening(row.turnId!)) || motion.isOpeningRow(row));
   const { ref, mounted } = useDisclosureMotion<HTMLDivElement>(!folding, { appear });
   return (
     <RowFrame row={row} frameRef={ref}>

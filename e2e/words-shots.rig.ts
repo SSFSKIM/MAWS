@@ -23,6 +23,14 @@
 // another build into it moves the earlier results it does not take again aside (`stale` in _run.json, their pictures
 // under _stale/<build>/), and a scene taken again loses its old picture before it starts.
 //
+// Board ticket 850 (the report view repair) added launch 13 and the `rv-` scenes: the to-human view drawn by MAWS's
+// mirror, from recorded transcripts under an installation that declares it draws from 9 (as the mod's 0.9.0 does). One
+// launch alone, from either build:
+//
+//   WORDS_OUT=$HOME/maws-words/rv-after pnpm shots:words -g "report view repair"
+//
+// and on master, as below for the m scenes, into another folder (rv-before).
+//
 // The `m1-`, `m2-` and `m3-` scenes are each their milestone's, so their "before" is this rig run against master's build: in a
 // clean checkout of master, `git checkout <this branch> -- e2e/words-shots.rig.ts e2e/support`, then the command above.
 // Every launch's state is set from this file and e2e/support (fixtures, seams master's main already has). Each m1 and m2
@@ -49,9 +57,10 @@ import { BACKGROUND_COPY, SUBAGENTS_COPY } from '../src/renderer/src/tools/agent
 import { ACTIONS } from '../src/shared/keymap/actions';
 import { benchDeckFiles } from '../src/artifacts/slides/fixtures/bench';
 import { isolatedGitEnv } from '../test/support/git-env';
+import { installToHumanPlugin } from '../test/support/to-human-plugin'; // board ticket 850's launch
 import { ownerShapedState, writePluginCliStub } from '../test/support/plugin-cli-stub';
 import { addressed } from './support/address';
-import { invoke, launchReady, recordedBlockJournal, steerStopJournal, value } from './support/c7-replay';
+import { invoke, launchReady, recordedBlockJournal, steerStopJournal, turnsJournal, value } from './support/c7-replay';
 import { bindCsv, chart, insertBlocks } from './support/dashboards';
 import { createDesign, DESIGN_FILES, editDesign } from './support/design';
 import { closedPort, startBrowserServer } from './support/browser-server';
@@ -76,7 +85,7 @@ test.skip(!OUT, 'WORDS_OUT names the folder the captures go to');
 // round: 1 and 2 are the owner's rounds at the pin; 'm0' a scene the word cut's M0 added on master; 'm1' one its M1
 // added for the Settings and Org states the cut changes; 'm2' one its M2 added for the conversation's and the message
 // box's; 'm3' one its M3 added for the panels beside the conversation. A folder is under src/renderer/src, or from the repository's root when it starts with src/.
-type Meta = { id: string; title: string; how: string; state: string; folders: string[]; hover?: boolean; round?: 2 | 'm0' | 'm1' | 'm2' | 'm3' };
+type Meta = { id: string; title: string; how: string; state: string; folders: string[]; hover?: boolean; round?: 2 | 'm0' | 'm1' | 'm2' | 'm3' | 'rv' };
 const META: Meta[] = [];
 const results: { id: string; ok: boolean; error?: string; notes?: string[] }[] = [];
 const wanted = (id: string) => !ONLY || ONLY.has(id) || [...ONLY].some((o) => o.endsWith('*') && id.startsWith(o.slice(0, -1)));
@@ -85,6 +94,7 @@ const m0 = (meta: Omit<Meta, 'round'>): Meta => ({ ...meta, round: 'm0' });
 const m1 = (meta: Omit<Meta, 'round'>): Meta => ({ ...meta, round: 'm1' });
 const m2 = (meta: Omit<Meta, 'round'>): Meta => ({ ...meta, round: 'm2' });
 const m3 = (meta: Omit<Meta, 'round'>): Meta => ({ ...meta, round: 'm3' });
+const rv = (meta: Omit<Meta, 'round'>): Meta => ({ ...meta, round: 'rv' }); // board ticket 850, the report view repair
 
 // ---- scratch fixtures ------------------------------------------------------------------------------------------------
 const FIXED_DATE = '2026-09-20T09:00:00+00:00';
@@ -4280,6 +4290,233 @@ test('the word cut’s M3: the project Channel’s folded runs', async () => {
         } else await expect(fold(exchange), 'master’s fold').toContainText(M3_WORDS.channelBetween(exchange), { timeout: 3_000 });
       },
     });
+  } finally {
+    await maws.cleanup();
+  }
+});
+
+// ======================================================================================================================
+// Launch 13 (board ticket 850, the report view repair): the to-human view of four recorded sessions, each drawn at rest
+// by MAWS's mirror, and the first also started by MAWS. The scratch engine store holds the to-human plugin's style and an
+// installation that declares it draws from 9 (test/support/to-human-plugin.ts, as the mod's 0.9.0 does), so the lane is
+// on and a launch MAWS decides there carries what the build advertises: 9 on master (the mod draws; under the replay
+// engine no mod runs, so the picture is what MAWS's window shows of a mod-drawn session), 8 from the repair (MAWS draws).
+// Every text is invented. The sessions:
+//   steer    a turn whose work a steer cut in two, the steer taken between two calls (a queued command, as the engine
+//            keeps one), then the final message;
+//   hidden   one turn of three messages, a lone search and a lone command between them: each call a standalone cell
+//            the view hides behind its record line;
+//   receipt  a finished turn, then a peer's message with sminos's receipt line before its frame opening a turn at idle;
+//   task     a turn that started a background command, then the command's notification opening a turn at idle.
+// Each scene opens its session afresh; the started session is stopped once its scene is taken.
+const RV = { steer: 0, hidden: 1, receipt: 2, task: 3 } as const;
+const rvDiskId = (i: number) => `0e5f6a7b-0000-4000-8000-0000000005${String(i).padStart(2, '0')}`;
+function rvTranscript(i: number, repo: string): Record<string, unknown>[] {
+  const engineId = rvDiskId(i);
+  const rows: Record<string, unknown>[] = [];
+  let parent: string | null = null;
+  let n = 0;
+  let clock = Date.UTC(2026, 10, 20, 9, 0, 0) + i * 3_600_000;
+  const uuid = () => `a${i}000000-0000-4000-8000-${String(++n).padStart(12, '0')}`;
+  const base = (type: string, id: string) => ({ type, uuid: id, parentUuid: parent, isSidechain: false, cwd: repo, sessionId: engineId, version: '2.1.322', timestamp: new Date((clock += 4_000)).toISOString(), userType: 'external', entrypoint: 'sdk-ts' });
+  const add = (type: string, fields: Record<string, unknown>) => {
+    const id = uuid();
+    rows.push({ ...base(type, id), ...fields });
+    parent = id;
+    return id;
+  };
+  const prompt = (text: string) => add('user', { message: { role: 'user', content: text }, origin: { kind: 'human' }, promptSource: 'sdk', turnOrigin: 'human' });
+  const assistant = (content: unknown[], stop: string) => add('assistant', { message: { id: `msg_rv${i}${String(n).padStart(4, '0')}`, type: 'message', role: 'assistant', model: 'claude-haiku-4-5-20251001', content, stop_reason: stop, usage: { input_tokens: 1, output_tokens: 1 } } });
+  const thought = (text: string) => assistant([{ type: 'thinking', thinking: text, signature: '' }], 'tool_use');
+  const note = (text: string) => assistant([{ type: 'text', text }], 'tool_use');
+  const call = (id: string, name: string, input: Record<string, unknown>, output: unknown, content: string) => {
+    assistant([{ type: 'tool_use', id, name, input }], 'tool_use');
+    add('user', { toolUseResult: output, message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: id, content, is_error: false }] } });
+  };
+  const message = (id: string, text: string, final: boolean) => call(id, 'mcp__to-human__message', { text, final }, 'sent', 'sent');
+  const end = () => add('system', { subtype: 'turn_duration', durationMs: 42_000 });
+  const bash = (stdout: string) => ({ stdout, stderr: '', interrupted: false, isImage: false, noOutputExpected: false });
+  if (i === RV.steer) {
+    prompt('Tidy the release notes, then run the tests.');
+    note('Reading the notes first.');
+    call(`toolu_01Rv0Read`, 'Read', { file_path: `${repo}/README.md` }, { type: 'text', file: { filePath: `${repo}/README.md`, content: '# notes', numLines: 1, startLine: 1, totalLines: 1 } }, '1\t# notes');
+    call(`toolu_01Rv0Test`, 'Bash', { command: 'pnpm test', description: 'Run the tests' }, bash('42 passed'), '42 passed');
+    // the steer, as the engine keeps a message it took mid-turn: the queue's record and the attachment the turn read
+    const steer = 'Also set the changelog to today’s date.';
+    rows.push({ type: 'queue-operation', operation: 'enqueue', timestamp: new Date((clock += 1_000)).toISOString(), sessionId: engineId, content: steer });
+    add('attachment', { attachment: { type: 'queued_command', prompt: steer, source_uuid: `b${i}000000-0000-4000-8000-000000000001`, commandMode: 'prompt', origin: { kind: 'human' }, timestamp: new Date(clock).toISOString(), humanTurn: true } });
+    rows.push({ type: 'queue-operation', operation: 'remove', timestamp: new Date((clock += 1_000)).toISOString(), sessionId: engineId, content: steer, reason: 'absorbed_mid_turn' });
+    thought('The person asked for the changelog date as well.');
+    call(`toolu_01Rv0Date`, 'Bash', { command: 'grep -n "^## " CHANGELOG.md | head -1', description: 'Find the changelog’s latest heading' }, bash('3:## 1.4.0 (last week)'), '3:## 1.4.0 (last week)');
+    call(`toolu_01Rv0Edit`, 'Bash', { command: 'sed -i "" "3s/(last week)/(today)/" CHANGELOG.md', description: 'Date the heading today' }, bash(''), '');
+    message('toolu_01Rv0Done', 'The release notes are tidy and the 42 tests pass. The changelog’s latest heading now carries today’s date.', true);
+    end();
+  } else if (i === RV.hidden) {
+    prompt('Where is the retry delay set, and is it still five seconds?');
+    message('toolu_01Rv1Start', 'Looking for the retry delay now.', false);
+    call('toolu_01Rv1Grep', 'Grep', { pattern: 'retryDelay', path: repo, output_mode: 'files_with_matches' }, { mode: 'files_with_matches', filenames: ['src/quota.ts'], numFiles: 1 }, 'Found 1 file\nsrc/quota.ts');
+    message('toolu_01Rv1Found', 'It is set in `src/quota.ts`. Checking its value.', false);
+    call('toolu_01Rv1Cat', 'Bash', { command: 'grep -n retryDelay src/quota.ts', description: 'Read the retry delay' }, bash('4:export const retryDelay = 5_000;'), '4:export const retryDelay = 5_000;');
+    message('toolu_01Rv1Done', 'Yes: `retryDelay` in `src/quota.ts` is still 5,000 ms.', true);
+    end();
+  } else if (i === RV.receipt) {
+    prompt('Wait for the reviewer’s note on the change.');
+    message('toolu_01Rv2Wait', 'Waiting for the reviewer’s note.', true);
+    end();
+    // a peer's message at idle, as the engine keeps one sminos's inbox handed it: its receipt's line first, then the frame
+    const words = 'The change reads well. One nit: the new flag needs a line in the README.';
+    const body = `[sminos receipt ${'5e'.repeat(12)}.${'0c'.repeat(8)} attempt 1]\n[sminos chat orbit reviewer:7 from reviewer → @you]\n${words}`;
+    add('user', {
+      isMeta: true, origin: { kind: 'peer', from: 'unknown', name: 'reviewer', body }, promptSource: 'system', turnOrigin: 'peer',
+      message: { role: 'user', content: `Another Claude session sent a message:\n<cross-session-message from-name="reviewer">\n${body}\n</cross-session-message>\n\nThis came from another Claude session — not typed by your user, but very likely working on their behalf.` },
+    });
+    thought('The reviewer wants a README line for the flag.');
+    call('toolu_01Rv2Readme', 'Bash', { command: 'grep -n -- "--quiet" README.md', description: 'Look for the flag in the README' }, bash(''), '');
+    message('toolu_01Rv2Done', 'The reviewer approved the change with one nit: the new `--quiet` flag needs a line in the README. Shall I add it?', true);
+    end();
+  } else {
+    prompt('Run the slow suite in the background and tell me when it is done.');
+    call('toolu_01Rv3Suite', 'Bash', { command: 'pnpm test:slow', description: 'Run the slow suite', run_in_background: true }, { ...bash(''), backgroundTaskId: 'brv3slow1' }, 'Command running in background with ID: brv3slow1. Output is being written to: /tmp/rv/tasks/brv3slow1.output');
+    message('toolu_01Rv3Started', 'The slow suite is running; I will tell you when it finishes.', true);
+    end();
+    // the command's end, at idle, as the engine keeps the notification that opens a turn
+    add('user', {
+      origin: { kind: 'task-notification', producer: 'session-task', runId: 'rv3-slow-run' }, promptSource: 'system', turnOrigin: 'task_notification',
+      message: { role: 'user', content: '<task-notification>\n<task-id>brv3slow1</task-id>\n<tool-use-id>toolu_01Rv3Suite</tool-use-id>\n<output-file>/tmp/rv/tasks/brv3slow1.output</output-file>\n<status>completed</status>\n<summary>Background command "Run the slow suite" completed (exit code 0)</summary>\n</task-notification>' },
+    });
+    thought('The slow suite finished; read its tail.');
+    call('toolu_01Rv3Tail', 'Bash', { command: 'tail -1 /tmp/rv/tasks/brv3slow1.output', description: 'Read the suite’s result' }, bash('318 passed in 4m 02s'), '318 passed in 4m 02s');
+    message('toolu_01Rv3Done', 'The slow suite passed: 318 tests in about four minutes.', true);
+    end();
+  }
+  return rows;
+}
+
+test('the report view repair: the to-human view of recorded sessions, one started by MAWS', async () => {
+  test.setTimeout(600_000);
+  const ids = ['rv-steer-rest', 'rv-record-open', 'rv-record-closed', 'rv-steer-launched', 'rv-hidden', 'rv-hidden-open', 'rv-receipt', 'rv-receipt-open', 'rv-task', 'rv-task-open'];
+  if (!ids.some(wanted)) return;
+  const repos = REPOS.map((name) => makeRepo(name, name === 'stages' ? 'scheduled' : undefined));
+  const config = join(SCRATCH, 'claude-config-rv');
+  rmSync(config, { recursive: true, force: true });
+  const keys = Object.keys(RV) as (keyof typeof RV)[];
+  for (const key of keys) {
+    const i = RV[key];
+    const repo = repos[i % repos.length]!;
+    const project = join(config, 'projects', repo.replace(/[^a-zA-Z0-9]/g, '-'));
+    mkdirSync(project, { recursive: true });
+    writeFileSync(join(project, `${rvDiskId(i)}.jsonl`), `${rvTranscript(i, repo).map((row) => JSON.stringify(row)).join('\n')}\n`);
+  }
+  trust(config);
+  installToHumanPlugin(config, { declares: true, version: '0.9.0' });
+  // the steer session's one launch: the replay's handshake, then held at a prompt no one sends (no init is played, so
+  // the launch's plugins are not yet reported), its engine session the seeded one's
+  mkdirSync(join(SCRATCH, 'journals'), { recursive: true });
+  const held = turnsJournal(join(SCRATCH, 'journals'), 'rv-held', 1);
+  const heldText = readFileSync(held, 'utf8');
+  const recorded = heldText.split('\n').filter(Boolean).map((line) => JSON.parse(line) as { direction: string; frame: { session_id?: unknown } }).find((row) => row.direction === 'in' && typeof row.frame.session_id === 'string')?.frame.session_id as string;
+  writeFileSync(held, heldText.replaceAll(recorded, rvDiskId(RV.steer)));
+  const usage = usageFixture();
+  const userData = join(SCRATCH, 'profile-rv');
+  rmSync(userData, { recursive: true, force: true });
+  mkdirSync(userData, { recursive: true });
+  const maws = await launchMaws({ userData, prepare: noGh, env: BASE_ENV({ MAWS_ENGINE_REPLAY: '1', MAWS_E2E_REPLAY_FIXTURES: held, CLAUDE_CONFIG_DIR: config, MAWS_CLAUDE_USAGE_DIR: usage, PATH: NO_GH_PATH }) });
+  const { page } = maws;
+  try {
+    await size(maws);
+    await light(page);
+    value(await invoke(page, 'settings.set', { gateway: { defaultRoute: 'direct' } })); // no relay in the run
+    const sid: Record<string, string> = {};
+    await expect.poll(async () => {
+      const { sessions } = value(await invoke(page, 'session.list', {}));
+      for (const key of keys) sid[key] = sessions.find((s) => s.engineSessionId === rvDiskId(RV[key]))?.appId ?? '';
+      return keys.every((key) => sid[key]);
+    }, { timeout: 30_000 }).toBe(true).catch((error: unknown) => setupFailed('the report view sessions’ index', error));
+    await dismissToasts(page);
+    const closedLines = () => pane(page).locator('[data-row-id^="record-fold:closed:"] button');
+    const openLines = () => pane(page).locator('[data-row-id^="record-fold:open:"] button');
+    // a session opened afresh, its transcript drawn, its view read from its end
+    const opened = async (key: keyof typeof RV) => {
+      if (!sid[key]) throw new Error(`the ${key} session was not listed by the index`);
+      await openSession(page, sid[key]!);
+      await expect(pane(page).locator('.transcript-row[data-kind]').first()).toBeVisible({ timeout: 20_000 });
+      await toEnd(page);
+    };
+    // every closed record line opened, one press at a time (an opened stretch replaces its line)
+    const openAll = async () => {
+      await unfold(page, closedLines(), 'a closed record line', 8);
+      await toTop(page);
+    };
+    // every opened stretch folded back
+    const closeAll = async () => {
+      await unfold(page, openLines(), 'an opened record line', 8);
+    };
+    const meta = (id: string, key: keyof typeof RV, title: string, how: string, state: string) =>
+      rv({ id, title, how: `The ${key} session (launch 13); ${how}`, state, folders: ['owner/view', 'transcript/view', 'transcript/model'] });
+
+    await shot(page, meta('rv-steer-rest', 'steer', 'A steer mid-turn, the session at rest', 'open it', 'The to-human view at rest: the prompt, a record line, the steer, a record line, the final message'), async () => {
+      await opened('steer');
+      await closeAll();
+    }, { check: () => inView(closedLines(), 'a closed record line') });
+    await shot(page, meta('rv-record-open', 'steer', 'A record line opened', 'press its first record line', 'The first stretch’s work unfolded in place, its fold line under it'), async () => {
+      await opened('steer');
+      await closeAll();
+      await closedLines().first().click();
+      await page.waitForTimeout(800);
+    }, { check: () => inView(openLines(), 'the opened stretch’s fold line') });
+    await shot(page, meta('rv-record-closed', 'steer', 'A record line closed again', 'press its first record line, then its fold line', 'The stretch folded back to its record line'), async () => {
+      await opened('steer');
+      await closeAll();
+      await closedLines().first().click();
+      await expect(openLines().first()).toBeVisible({ timeout: 5_000 });
+      await openLines().first().click();
+      await page.waitForTimeout(800);
+    }, { check: async () => {
+      await inView(closedLines(), 'the record line, closed');
+      await expect(openLines(), 'no stretch open').toHaveCount(0);
+    } });
+    await shot(page, meta('rv-hidden', 'hidden', 'A turn with hidden standalone calls', 'open it', 'Three messages, a record line in place of each lone call between them'), async () => {
+      await opened('hidden');
+      await closeAll();
+    }, { check: () => inView(closedLines(), 'a closed record line') });
+    await shot(page, meta('rv-hidden-open', 'hidden', 'A turn with standalone calls, every record line opened', 'press each record line', 'Each lone call in place between the messages'), async () => {
+      await opened('hidden');
+      await openAll();
+    }, { check: () => inView(openLines(), 'an opened stretch’s fold line') });
+    await shot(page, meta('rv-receipt', 'receipt', 'A peer’s message with a receipt line, opening a turn at idle', 'open it', 'The to-human view: the peer’s message folded into the work it opened, or drawn where it stands'), async () => {
+      await opened('receipt');
+      await closeAll();
+    });
+    await shot(page, meta('rv-receipt-open', 'receipt', 'A peer’s message with a receipt line, its work opened', 'press each record line', 'The peer’s row as drawn: its sender and its words, or its raw text'), async () => {
+      await opened('receipt');
+      await openAll();
+      await seek(page, pane(page).locator('.transcript-row[data-kind="agent_message"], .transcript-row[data-kind="user"]').last());
+    });
+    await shot(page, meta('rv-task', 'task', 'A background command’s notification opening a turn at idle', 'open it', 'The to-human view: the notification folded into the work it opened, or drawn where it stands'), async () => {
+      await opened('task');
+      await closeAll();
+    });
+    await shot(page, meta('rv-task-open', 'task', 'A background command’s notification, its work opened', 'press each record line', 'The notification’s line and the turn it opened, in place'), async () => {
+      await opened('task');
+      await openAll();
+      await seek(page, pane(page).locator('.transcript-row[data-kind="notice"]').first());
+    });
+    // last: the steer session started by MAWS, which decides its launch (session.start; never session.launch, which
+    // bypasses the decision), held at a prompt no one sends; master's launch advertises 9, the repair's 8
+    if (wanted('rv-steer-launched')) {
+      try {
+        await openSession(page, sid.steer!);
+        value(await invoke(page, 'session.start', { appSessionId: sid.steer as never, message: null, options: { gateway: 'direct', trust: 'accepted' } }));
+        await expect.poll(async () => value(await invoke(page, 'session.status', { appSessionId: sid.steer as never })).process, { timeout: 60_000 }).toBe('ready');
+      } catch (error) {
+        setupFailed('starting the steer session', error);
+      }
+    }
+    await shot(page, meta('rv-steer-launched', 'steer', 'A steer mid-turn, the session started by MAWS', 'start it (its launch held before any prompt)', 'The same session while a launch MAWS decided runs: on master it advertises 9 and MAWS leaves the view to the mod, which the replay does not run; from the repair it advertises 8 and the mirror draws'), async () => {
+      await openSession(page, sid.steer!);
+      await expect(pane(page).locator('.transcript-row[data-kind]').first()).toBeVisible({ timeout: 20_000 });
+      await toEnd(page);
+    }, { after: async () => void (await invoke(page, 'session.stop', { appSessionId: sid.steer as never, reason: 'stop' })) });
   } finally {
     await maws.cleanup();
   }

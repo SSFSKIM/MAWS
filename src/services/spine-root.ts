@@ -394,6 +394,7 @@ export function startSpine(deps: SpineDeps): SpineRoot {
       attention: attention!, dispatch: hosts.dispatch, onHostState: (listener) => hosts.onState('engine-host', listener), onStreaming: (listener) => hosts.onStreaming('engine-host', listener),
       streaming: () => hosts.streaming('engine-host'), emit: (name, payload) => void bus.emit(name, payload), onSettings: (listener) => machineSettings.onChange(() => listener()),
       foldSummariesChanged: () => void bus.emit('mods.foldSummariesChanged', {}), // UX wave U2b (panel finding 3)
+      ...(deps.env.MAWS_E2E === '1' && deps.env.MAWS_E2E_TO_HUMAN_MOD_ROUTE === '1' && { modRoute: true }), // board ticket 850: the e2e seam that turns the mod's route on, for the scenes that prove it
     });
     parts.push(['owner channel', ownerChannel.stop]);
     settling.push(ownerChannel.work);

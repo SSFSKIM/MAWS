@@ -3,7 +3,7 @@
 // (24,000 of 47,125 chars)"), the time it took, the disclosure of a snapshot's text or an eval's value, Open tab and a
 // screenshot's Open, a refusal's reason and a cancelled call's line.
 import type { AppSessionId } from '@shared/graph/ids';
-import { act, cleanup, fireEvent, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import { POINTING_DELAY_MS } from '../../../ui/pointing';
@@ -123,13 +123,13 @@ describe('the browser action row', () => {
     expect(root.hasAttribute('data-open')).toBe(true);
   });
 
-  it('discloses a snapshot’s text and an eval’s value', () => {
+  it('discloses a snapshot’s text and an eval’s value', async () => {
     const snapshot = renderRow(row({ tool: 'browser_snapshot', action: 'snapshot', target: null, chars: 30, detail: '- heading "Order form" [ref=e1]' }), { storeKey: APP });
     expect(snapshot.container.querySelector('pre')).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: 'Show snapshot' }));
     expect(snapshot.container.querySelector('pre')!.textContent).toBe('- heading "Order form" [ref=e1]');
     fireEvent.click(screen.getByRole('button', { name: 'Hide snapshot' }));
-    expect(snapshot.container.querySelector('pre')).toBeNull();
+    await waitFor(() => expect(snapshot.container.querySelector('pre')).toBeNull()); // board ticket 850: once its close has run
     cleanup();
     renderRow(row({ tool: 'browser_eval', action: 'eval', target: null, detail: '{\n  "fields": 2\n}' }), { storeKey: APP });
     fireEvent.click(screen.getByRole('button', { name: 'Show value' }));

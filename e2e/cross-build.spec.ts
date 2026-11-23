@@ -3393,8 +3393,8 @@ async function stageWaiting(page: Page, id: AppSessionId, text: string): Promise
 
 // A launch of either build on the profile, served, with the kept session's process ready in it (adopted at a handover,
 // or served by the kept engine host of the other build)
-async function launchServed(s: Scratch, id: AppSessionId, root?: string): Promise<Run> {
-  const run = await s.launch({ MAWS_E2E_QUIT_ANSWER: 'keep' }, root);
+async function launchServed(s: Scratch, id: AppSessionId, root?: string, env: Record<string, string> = {}): Promise<Run> {
+  const run = await s.launch({ MAWS_E2E_QUIT_ANSWER: 'keep', ...env }, root);
   await s.ready(run.page, () => true, 90_000);
   await expect
     .poll(async () => {
@@ -5293,6 +5293,11 @@ test('(composed forms, to the peer) a promotion and a message with an attached r
 // Every session runs on the stub engine (test/support/stub-engine-bin.ts), as both peers take MAWS_E2E_ENGINE_BIN.
 // §H's row 5 (an earlier window on a session this build launched at 9) cannot be staged with a replayed engine: one look
 // on the trial's Mac.
+// Board ticket 850 (2026-11-23): this build's launches advertise 8 and MAWS draws every view; the mod's route stays built
+// behind its switch, and (to-human, to the peer) turns it on for this build's own launches through the e2e seam
+// (MAWS_E2E_TO_HUMAN_MOD_ROUTE, read in src/services/spine-root.ts only under MAWS_E2E), so it still proves the
+// reservation and the 9 a later change may turn back on. A peer never reads the seam.
+const MOD_ROUTE = { MAWS_E2E_TO_HUMAN_MOD_ROUTE: '1' };
 const TO_HUMAN_ROWS = { prompt: 'Check the tree and tell me what you found.', call: 'toolu_01U2bXbTree', said: 'The tree is clean; nothing to commit.' };
 // The session's transcript as the engine left it: a prompt, a Bash call and its result, then a message to the person
 function seedToHumanSession(s: Scratch): void {
@@ -5404,7 +5409,7 @@ test('(to-human, to the peer) a session this build launched at 9, with new summa
     const foldSummariesFact = () => indexed(s, "select value from index_meta where key = 'toHuman.foldSummaries'");
 
     // this build: a decided resume at 9, its reservation bound to the launch; then the switch off, and a quit
-    const ours = await s.launch({});
+    const ours = await s.launch(MOD_ROUTE);
     await s.ready(ours.page, (st) => st.daemon !== null, 60_000);
     id = await s.record(ours.page);
     await startResume(ours, here, id);
@@ -5450,7 +5455,7 @@ test('(to-human, to the peer) a session this build launched at 9, with new summa
 
     // this build again, served the peer's launch while it runs: the row's reservation is bound to this build's earlier
     // launch, not to the live one, so the advertisement is read from the row's desired state, 8, and MAWS draws
-    const again = await launchServed(s, id);
+    const again = await launchServed(s, id, undefined, MOD_ROUTE);
     expect(spawnEnvs(s, id).at(-1)!.launchId, 'no launch since the peer’s: the peer’s launch at 8 is the one that runs').toBe(eight.launchId);
     expect(launchOf(), 'the row names the peer’s running launch').toBe(eight.launchId);
     expect(JSON.parse(String(reservation() ?? 'null')), 'the reservation still bound to this build’s earlier launch').toMatchObject({ launchId: nine.launchId, number: 9 });
