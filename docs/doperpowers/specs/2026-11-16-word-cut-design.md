@@ -28,8 +28,8 @@ How to see it working: open the build beside today's build on the same fixtures 
 - [x] (2026-11-22) M1's and M2's pictures and the owner's call: the owner approved M1's on 2026-11-21 and M2's on 2026-11-22.
 - [x] (2026-11-22) M3 built: the panels beside the conversation. Its 361 rows were read against master `b5aa8cd48` and 15 `new` rows were added (N156 to N170). Of the 376 rows, 190 are cut, 37 reworded and 149 `stays` left as they read; none is skipped or held. The touch rule is a shared part, swept over the surfaces the desk's web app draws and over M2's four. Four more shared parts were added: the refused menu item, the hover scope, `WaitingWords`, and a stylesheet test helper. Desk edits followed the coordinator's standing rule. Unit tests moved with each area, and the Electron and desk e2e reads moved in task 8. The rig gained 44 `m3-` scenes in two new launches, and the desk gained a words rig of ten scenes. Nine tasks were each reviewed clean. Its picture pairs and the owner's call are owed, and the Electron e2e groups and the rig still have to run on a Mac.
 - [x] (2026-11-22) M3's pictures and the owner's call: the owner approved them on 2026-11-22.
-- [x] (2026-11-22 21:40Z) M4 task 1: the window's first half (New chat, the title bar and tabs, the sidebar, Projects, Overview), reviewed clean.
-- [x] (2026-11-22 21:40Z) M4 task 2: the window's second half (banners and toasts, the palette, the shortcuts window, the sheets, the usage ring), reviewed clean.
+- [x] (2026-11-23 03:05Z) M4 task 1: the window's first half (New chat, the title bar and tabs, the sidebar, Projects, Overview), reviewed clean.
+- [x] (2026-11-23 03:05Z) M4 task 2: the window's second half (banners and toasts, the palette, the shortcuts window, the sheets, the usage ring), reviewed clean.
 - [ ] M4 and M5: the cut built area by area, each with pictures and the owner's call.
 - [ ] Retrospective.
 
