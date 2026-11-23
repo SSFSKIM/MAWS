@@ -144,7 +144,9 @@ export function Tab({ tab, pane, domId, active, place = null, stop, onKeyDown }:
   const closeChord = useChordHint('tab.close');
   const dirty = useFileTabDirty(tab); // E5
   const holderMark = useHolderMark(tab); // P5 O9
-  const holderGlyph = useRef<HTMLElement>(null); // W10: pointing at the mark shows the tab's tip
+  // W10: pointing at the mark shows the tab's tip. The region is always mounted (`contents`: no box, so no gap while
+  // empty), since the tip reads it once and the mark comes and goes with the bridge.
+  const holderRegion = useRef<HTMLElement>(null);
   // Keep plain tabs compact, but reserve each nonshrinking mark plus its gap before truncating the title. The place
   // reserves nothing: it gives way first (U13a).
   const minWidth = Math.max(active ? 24 : 16, 16 + (label.glyph ? 4 : 0) + (label.file ? 4 : 0) + (tab.pinned ? 4 : 0) + (dirty ? 4 : 0) + (label.secondary ? 20 : 0) + (holderMark ? 16 : 0));
@@ -197,11 +199,13 @@ export function Tab({ tab, pane, domId, active, place = null, stop, onKeyDown }:
         <span className={`max-w-full shrink-0 truncate ${offline ? 'text-fg-faint' : ''}`}>{label.title}</span>
         {place && <small data-tab-place className="max-w-max min-w-0 grow basis-[5em] truncate text-fg-muted">{place}</small>}
       </span>
-      {holderMark && ( // P5 O9 (Q1); the word cut (W10): the glyph, its word its name, the holder's line the tab's tip
-        <small ref={holderGlyph} data-holder-marker role="img" aria-label={holderMark.text} className="shrink-0 text-info">
-          ⌁
-        </small>
-      )}
+      <span ref={holderRegion} className="contents">
+        {holderMark && ( // P5 O9 (Q1); the word cut (W10): the glyph, its word its name, the holder's line the tab's tip
+          <small data-holder-marker role="img" aria-label={holderMark.text} className="shrink-0 text-info">
+            ⌁
+          </small>
+        )}
+      </span>
       {label.secondary && <small className="max-w-16 shrink-0 truncate text-fg-muted">{label.secondary}</small>}
       <button
         type="button"
@@ -225,7 +229,7 @@ export function Tab({ tab, pane, domId, active, place = null, stop, onKeyDown }:
     <ContextMenu.Root modal={false}>
       {/* W10 (fix round 1): the holder's line is the tab's tip and description, shown at once on the tab's own focus stop
           and after the delay on pointing at the mark; no tip for any other tab */}
-      <Tip content={holderMark?.title ?? null} description={holderMark?.title ?? null} pointedWithin={holderGlyph}>
+      <Tip content={holderMark?.title ?? null} description={holderMark?.title ?? null} pointedWithin={holderRegion}>
         <ContextMenu.Trigger asChild>{element}</ContextMenu.Trigger>
       </Tip>
       <ContextMenu.Portal>
