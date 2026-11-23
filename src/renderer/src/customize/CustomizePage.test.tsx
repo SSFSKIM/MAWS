@@ -349,12 +349,15 @@ describe('the head', () => {
     }
   });
 
-  it('a plugin’s row gives up its version and date under the page’s narrow width only', async () => {
-    mountCustomize({ view: 'mine', show: 'plugins' });
-    const facts = (await pluginRow('buoy-log@harbour-market')).querySelector<HTMLElement>('[data-plugin-version]')!;
-    expect(facts.textContent).toContain('1.0.0');
-    expect(facts.classList.contains('@max-sm/customize:hidden')).toBe(true); // the page's container, not /plugins' dialog
-  });
+  // the word cut (G218, ruled): the version stays on the row at rest, in Plugins and under All, at every width
+  for (const show of ['plugins', 'all'] as const) {
+    it(`a plugin’s row keeps its version under the page’s narrow width (Show: ${show})`, async () => {
+      mountCustomize({ view: 'mine', show });
+      const version = (await pluginRow('buoy-log@harbour-market')).querySelector<HTMLElement>('[data-plugin-version]')!;
+      expect(version.textContent).toBe('1.0.0');
+      expect([...version.classList].filter((name) => name.startsWith('@max-'))).toEqual([]); // no container width hides it
+    });
+  }
 });
 
 // C2: what a person started is held by the page for its place, whichever view and Show value are drawn after.
@@ -704,7 +707,7 @@ describe('a skill’s actions', () => {
     skillFileAnswer = { status: 'refused', reason: 'missing', message: null };
     const detail = await openDetail('all');
     await choose(detail, 'Finder');
-    expect((await screen.findByRole('alert')).textContent).toBe("This skill's file is no longer here. Refresh, then try again.");
+    expect((await screen.findByRole('alert')).textContent).toBe("This skill's file is no longer here."); // the word cut (G247): no pointer to a Refresh
     expect(invoked('customization.skillFile')).toEqual([{ cwd: QUAY, path: SKILL, app: 'finder' }]);
     fireEvent.click(within(detail).getByRole('button', { name: /^Back/ }));
     fireEvent.click(await screen.findByRole('button', { name: 'View tide-tables' }));
@@ -718,7 +721,8 @@ describe('a skill’s actions', () => {
     fireEvent.keyDown(await within(tools()!).findByRole('button', { name: 'New skill…' }), { key: 'Enter' });
     const yours = await screen.findByRole('menuitem', { name: 'Created by you' });
     expect(yours.getAttribute('aria-disabled')).toBe('true');
-    expect(accessibleDescription(yours)).toBe('Configuration folder not known yet. Refresh to try again.'); // the word cut (N133)
+    expect(accessibleDescription(yours)).toBe('Configuration folder not known yet.'); // the word cut (N133, G247)
+    expect(within(tools()!).queryByRole('button', { name: 'Retry' })).toBeNull(); // still reading: nothing failed yet
     fireEvent.click(screen.getByRole('menuitem', { name: 'In this project' }));
     await waitFor(() => expect(prefill(1)).toBe("Let's create a new skill in .claude/skills/ of this project. First ask me what it should do."));
   });
@@ -781,25 +785,42 @@ describe('a skill’s actions', () => {
     act(() => useSettings.setState({ state: null }));
   });
 
-  // the word cut (N133): the greyed button keeps the keyboard and says why as its tooltip and description; Refresh
-  // stands under All and Connectors (G247)
-  it('when the configuration home’s first read fails, New skill… says why it waits, and Refresh reads it again', async () => {
+  // the word cut (N133, G247): the greyed button keeps the keyboard and says why as its tooltip and description; Skills
+  // has no Refresh, so the failed read's own Retry stands beside the button it holds back
+  it('when the configuration home’s first read fails, New skill… says why it waits, and its Retry reads it again, from Skills', async () => {
     useCustomizeProject.setState({ projectId: null }, true);
     envAnswer = rejected('engine unavailable');
-    mountCustomize({ view: 'mine', show: 'all' });
+    mountCustomize({ view: 'mine', show: 'skills' });
+    expect(within(tools()!).queryByRole('button', { name: 'Refresh' })).toBeNull();
     await waitFor(() => expect(invoked('plugins.env')).not.toEqual([]));
     const newSkill = () => within(tools()!).getByRole('button', { name: 'New skill…' });
     await waitFor(() => expect(newSkill().getAttribute('aria-disabled')).toBe('true'));
     expect(newSkill().hasAttribute('disabled')).toBe(false);
     expect(newSkill().hasAttribute('title')).toBe(false);
-    expect(accessibleDescription(newSkill())).toBe('Configuration folder not known yet. Refresh to try again.');
+    expect(accessibleDescription(newSkill())).toBe('Configuration folder not known yet.');
     fireEvent.click(newSkill());
     expect(prefill(1)).toBeUndefined(); // greyed: a press starts nothing
     envAnswer = null;
-    fireEvent.click(within(tools()!).getByRole('button', { name: 'Refresh' }));
+    const reads = invoked('plugins.env').length;
+    fireEvent.click(await within(tools()!).findByRole('button', { name: 'Retry' }));
+    await waitFor(() => expect(invoked('plugins.env').length).toBeGreaterThan(reads));
     await waitFor(() => expect(newSkill().hasAttribute('aria-disabled')).toBe(false));
+    expect(within(tools()!).queryByRole('button', { name: 'Retry' })).toBeNull();
     fireEvent.click(newSkill());
     await waitFor(() => expect(prefill(1)).toBe(PLAIN));
+  });
+
+  // the word cut (G247): a skill's file gone is said with its own way out, Retry, which reads the skills again in place
+  it('from Skills, a skill’s file no longer there offers Retry, which reads the skills again and clears the line', async () => {
+    skillFileAnswer = { status: 'refused', reason: 'missing', message: null };
+    const detail = await openDetail('skills');
+    await choose(detail, 'Finder');
+    const refusal = await found('[data-skill-refusal]');
+    expect(within(refusal).getByRole('alert').textContent).toBe("This skill's file is no longer here.");
+    const reads = invoked('customization.inventory').length;
+    fireEvent.click(within(refusal).getByRole('button', { name: 'Retry' }));
+    await waitFor(() => expect(invoked('customization.inventory').length).toBeGreaterThan(reads));
+    await waitFor(() => expect(document.querySelector('[data-skill-refusal]')).toBeNull());
   });
 
   it('a plugin’s skill’s detail says its plugin’s updates replace the file', async () => {

@@ -60,7 +60,7 @@ describe('a refused Open in', () => {
     answering({ ok: true, value: { status: 'opened' } });
     expect(await openSkillFile(null, notes.path, 'finder')).toBeNull();
     answering({ ok: true, value: { status: 'refused', reason: 'missing', message: null } });
-    expect(await openSkillFile(null, notes.path, 'finder')).toBe("This skill's file is no longer here. Refresh, then try again.");
+    expect(await openSkillFile(null, notes.path, 'finder')).toBe("This skill's file is no longer here.");
     answering({ ok: true, value: { status: 'refused', reason: 'unreadable', message: 'engine host unavailable' } });
     expect(await openSkillFile(null, notes.path, 'zed')).toBe('Skills could not be read: engine host unavailable');
     answering({ ok: true, value: { status: 'refused', reason: 'launch', message: 'Zed did not open' } });

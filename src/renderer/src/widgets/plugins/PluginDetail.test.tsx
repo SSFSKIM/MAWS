@@ -24,6 +24,7 @@ import type { SessionPlugins } from './LoadedLine';
 import { ManageProvider, type Manage } from './manage';
 import { PluginDetail, type PluginDetailProps } from './PluginDetail';
 import { REL } from '../../test-support/relative-time';
+import { accessibleDescription } from '../../test-support/accessible-text';
 
 const ID = 'frontend-design@claude-plugins-official';
 const DAY = 86_400_000;
@@ -282,5 +283,44 @@ describe('the word cut: What’s inside', () => {
     expect(within(detail).getAllByRole('tab').map((tab) => tab.textContent)).toEqual(['Overview', 'Skills1', 'Connectors1']);
     fireEvent.mouseDown(within(detail).getByRole('tab', { name: /^Skills/ }));
     expect(detail.textContent).not.toContain('Invoke by typing');
+  });
+});
+
+// The word cut (P703): with no line under the chips, every read-only selection keeps a focusable owner of where the
+// plugin is managed: the switch and Update drawn unavailable, their reason the tooltip and the description.
+describe('the word cut: a read-only plugin says where it is managed', () => {
+  it('a synced-only plugin draws the switch and Update unavailable, each with the reason, and a press asks nothing', () => {
+    vi.mocked(manage.ask).mockClear();
+    const p = inst(ID, { scope: 'synced' });
+    const detail = show(identityOf(p, viewOf(p)));
+    const toggle = within(detail).getByRole('switch', { name: 'Enable plugin' });
+    const update = within(detail).getByRole('button', { name: 'Update' });
+    for (const control of [toggle, update]) {
+      expect(control.getAttribute('aria-disabled')).toBe('true');
+      expect(control.hasAttribute('disabled')).toBe(false);
+      expect(accessibleDescription(control)).toBe('Synced from claude.ai · change it there');
+      fireEvent.click(control);
+    }
+    expect(manage.ask).not.toHaveBeenCalled();
+  });
+
+  it('a plugin only another project holds draws them unavailable with that project named', () => {
+    const p = inst(ID, { scope: 'project', projectPath: '/work/site' });
+    const detail = show(identityOf(p, viewOf(p)));
+    expect(accessibleDescription(within(detail).getByRole('switch', { name: 'Enable plugin' }))).toBe('In site · manage it from a session there');
+    expect(accessibleDescription(within(detail).getByRole('button', { name: 'Update' }))).toBe('In site · manage it from a session there');
+  });
+
+  it('on a read-only chip of a mixed plugin, Update on the latest version still keeps the keyboard and the reason', () => {
+    const user = inst(ID, { version: '1.0.0' });
+    const synced = inst(ID, { scope: 'synced', version: '1.0.0' });
+    const views = new Map([user, synced].map((p) => [manifestKeyOf(installationRef(p)), viewOf(p, { marketplaceVersion: '1.0.0' })]));
+    const detail = show(identitiesOf([user, synced], [], views, null)[0]);
+    expect(within(detail).getByRole('button', { name: 'Update' })).toHaveProperty('disabled', true); // the user's: On latest version
+    fireEvent.click(within(detail).getByRole('radio', { name: 'Synced' }));
+    const update = within(detail).getByRole('button', { name: 'Update' });
+    expect(update.hasAttribute('disabled')).toBe(false);
+    expect(update.getAttribute('aria-disabled')).toBe('true');
+    expect(accessibleDescription(update)).toBe('Synced from claude.ai · change it there');
   });
 });
