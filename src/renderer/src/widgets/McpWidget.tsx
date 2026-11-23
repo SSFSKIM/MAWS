@@ -245,9 +245,11 @@ function McpServerRow({ server, appSessionId, ready, live, answer, refresh, cwd,
   const checked = (position === 'unconfirmed' ? lastRead : position) === 'on'; // role=switch has no "mixed": the doubt is in data-state and the line
   // U11a: a failed row with nothing done says Failed on its line and its error in the opened part, with no line under it;
   // the word cut (P569, P570): a working act is its control's spinner, and a success has no line
+  // P570 keeps a late success's correction, "Applied after all", once its read-back has not put it in doubt
   const settledLine = view?.line ?? null;
   const quiet = (state: typeof toggle.state) => (state.phase === 'working' ? null : operationLine(state, () => null));
-  const line = last === 'reconnect' ? quiet(reconnect.state) : toggle.state.phase === 'settled' ? settledLine : (quiet(toggle.state) ?? settledLine);
+  const lateApplied = toggle.state.phase === 'settled' && toggle.state.late && toggle.state.outcome.ok && view?.position !== 'unconfirmed';
+  const line = last === 'reconnect' ? quiet(reconnect.state) : toggle.state.phase === 'settled' ? (lateApplied ? quiet(toggle.state) : settledLine) : (quiet(toggle.state) ?? settledLine);
 
   const flip = async () => {
     setLast('toggle');

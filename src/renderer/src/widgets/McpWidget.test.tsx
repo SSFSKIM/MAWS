@@ -127,6 +127,19 @@ describe('mcp toggle reads its state back after either outcome', () => {
     expect(backend.calls.find((c) => c.subtype === 'mcp_toggle')?.input).toEqual({ appSessionId: BARE, serverName: DOCS, enabled: true });
   });
 
+  // P570 keeps the late correction (the word cut's fix wave for M4): a toggle that timed out and then succeeded, its second
+  // read-back confirming the requested position, says "Applied after all"
+  it('a toggle that timed out and then succeeded reads Applied after all once its read-back confirms it', async () => {
+    backend.scriptOutcome('session.mcpToggle', () => ({ ok: false, error: { code: 'timeout', message: 'mcp_toggle unanswered after 8 s', engineCode: null } }));
+    mount();
+    fireEvent.click(await serverSwitch(DOCS));
+    await waitFor(async () => expect((await statusOf(DOCS)).textContent).toBe('Unconfirmed · mcp_toggle unanswered after 8 s · timeout'));
+    backend.script('session.mcpStatus', () => withServer(DOCS, { status: 'disabled' }));
+    act(() => backend.emitOperation({ appSessionId: BARE, opId: 'op-1', command: 'session.mcpToggle', late: true, outcome: { ok: true, value: null as never } }));
+    await waitFor(async () => expect((await serverSwitch(DOCS)).getAttribute('aria-checked')).toBe('false'));
+    await waitFor(async () => expect((await statusOf(DOCS)).textContent).toBe('Applied after all'));
+  });
+
   it('when the read-back fails the switch reads Unconfirmed with the outcome’s words, and Read again reads once more', async () => {
     mount();
     fireEvent.click(await serverSwitch(DOCS));
