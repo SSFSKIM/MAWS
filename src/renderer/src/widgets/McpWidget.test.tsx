@@ -293,7 +293,7 @@ describe('the Connectors dialog: one line per connector (U11a §C)', () => {
     const state = () => calendar.querySelector<HTMLElement>('[data-connector-state]')!;
     expect(await within(state()).findByRole('progressbar', { name: 'Connecting…' })).toBeTruthy();
     act(() => useSessions.setState({ engine: new Map([[ID, { ...lifted(backend.status(BARE)), process: 'exited' }]]) }));
-    await waitFor(() => expect(within((await row('calendar')).querySelector<HTMLElement>('[data-connector-state]')!).queryByRole('progressbar')).toBeNull());
+    await waitFor(async () => expect(within((await row('calendar')).querySelector<HTMLElement>('[data-connector-state]')!).queryByRole('progressbar')).toBeNull());
     expect((await row('calendar')).querySelector('[data-connector-state]')?.textContent).toBe('Connecting…');
   });
 
