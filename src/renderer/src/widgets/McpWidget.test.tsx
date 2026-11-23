@@ -17,7 +17,7 @@ import type { PreloadBridge } from '@shared/ipc/schema';
 import { heard, resetSignIns } from '../customize/connectors/sign-in';
 import { useSessions } from '../stores/sessions';
 import { PlusMenu } from '../composer/plus-menu/PlusMenu';
-import { accessibleDescription } from '../test-support/accessible-text';
+import { accessibleDescription, accessibleText } from '../test-support/accessible-text';
 import { McpBody, McpWidget, present, toggleView } from './McpWidget';
 
 const ROOT = join(__dirname, '../../../..');
@@ -274,7 +274,27 @@ describe('the Connectors dialog: one line per connector (U11a §C)', () => {
     expect(note.hidden).toBe(true);
     act(() => within(notes).getByRole('switch').focus());
     expect(note.hidden).toBe(false);
-    expect(document.body.textContent).not.toContain('~/.claude.json');
+  });
+
+  // N148: the tooltip that named where the engine records the switch goes with the sentence into the note
+  it('says in the row note where the engine records the switch, and nowhere at rest', async () => {
+    mount();
+    const notes = await row('notes');
+    await waitFor(() => expect(accessibleDescription(notes)).toMatch(/afterwards\. The engine records it in ~\/\.claude\.json\.$/));
+    expect(accessibleText(document.querySelector<HTMLElement>('[data-widget="mcp"]')!)).not.toContain('~/.claude.json');
+    expect(document.querySelector('[data-widget="mcp"] header')?.textContent).not.toContain('~/.claude.json');
+  });
+
+  // P565: the quiet spinner stands only while something can still end the wait: once the session's process exits the
+  // frame keeps its last answer, and a connector that was connecting then says so in words, dated by the frame
+  it('settles a connecting connector to its words when the session exits', async () => {
+    mount();
+    const calendar = await row('calendar');
+    const state = () => calendar.querySelector<HTMLElement>('[data-connector-state]')!;
+    expect(await within(state()).findByRole('progressbar', { name: 'Connecting…' })).toBeTruthy();
+    act(() => useSessions.setState({ engine: new Map([[ID, { ...lifted(backend.status(BARE)), process: 'exited' }]]) }));
+    await waitFor(() => expect(within((await row('calendar')).querySelector<HTMLElement>('[data-connector-state]')!).queryByRole('progressbar')).toBeNull());
+    expect((await row('calendar')).querySelector('[data-connector-state]')?.textContent).toBe('Connecting…');
   });
 
   it('puts Sign in and Reconnect on the line of a row that needs a sign-in or failed, and Reconnect inside a connected row', async () => {
@@ -310,6 +330,16 @@ describe('the Connectors dialog: one line per connector (U11a §C)', () => {
     await waitFor(() => expect(backend.calls.some((c) => c.command === 'connectors.signInServer')).toBe(true));
   });
 
+  // P565: Customize's live list spins for a connecting connector only over a live session
+  it('spins for a connecting connector in the list without actions only when the session is live', async () => {
+    const view = present({ mcpServers: [server('calendar', 'pending')] } as unknown as McpStatusResponse);
+    const { rerender } = render(<McpBody view={view} live />);
+    expect(await screen.findByRole('progressbar', { name: 'Connecting…' })).toBeTruthy();
+    rerender(<McpBody view={view} live={false} />);
+    expect(screen.queryByRole('progressbar')).toBeNull();
+    expect(lineOf(screen.getByRole('listitem'))).toEqual(['calendar', 'Connecting…']);
+  });
+
   it('reads a disabled connector as Off where no switch is drawn, as Customize’s live list draws it', () => {
     render(<McpBody view={present({ mcpServers: [server('files', 'disabled'), server('notes', 'connected')] } as unknown as McpStatusResponse)} />);
     const [files, notes] = screen.getAllByRole('listitem');
@@ -321,6 +351,25 @@ describe('the Connectors dialog: one line per connector (U11a §C)', () => {
 });
 
 describe('held open: an act that is out (U11a §C)', () => {
+  // P569: a connected row's Reconnect is in its opened part; folding the row while Reconnect is out keeps its spinner on
+  // the row's line, and opening it again shows the one beside Reconnect only
+  it('keeps one Reconnect spinner on a connected row folded while Reconnect is out', async () => {
+    backend.holdOperations(true);
+    mount();
+    fireEvent.click(disclosure(await row(DOCS)));
+    fireEvent.click(within(await row(DOCS)).getByRole('button', { name: 'Reconnect' }));
+    expect(await within(await row(DOCS)).findByRole('progressbar', { name: 'Working…' })).toBeTruthy();
+    fireEvent.click(disclosure(await row(DOCS)));
+    expect(within(await row(DOCS)).queryByRole('button', { name: /^Reconnect/ })).toBeNull();
+    expect(await within(await row(DOCS)).findByRole('progressbar', { name: 'Working…' })).toBeTruthy();
+    fireEvent.click(disclosure(await row(DOCS)));
+    await waitFor(async () => expect(within(await row(DOCS)).getAllByRole('progressbar')).toHaveLength(1));
+    expect(within(within(await row(DOCS)).getByRole('button', { name: /^Reconnect/ })).getByRole('progressbar')).toBeTruthy();
+    act(() => void backend.settleOperations());
+    fireEvent.click(disclosure(await row(DOCS)));
+    await waitFor(async () => expect(within(await row(DOCS)).queryByRole('progressbar')).toBeNull());
+  });
+
   it('disables that row’s switch and Reconnect while a toggle is out, and the answer lands under the row closed meanwhile', async () => {
     backend.holdOperations(true);
     mount();

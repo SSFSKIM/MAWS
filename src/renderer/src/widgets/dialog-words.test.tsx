@@ -21,7 +21,7 @@ describe('Config (P606, P607, P608, P586)', () => {
         view={{ effective: [], sources: [{ source: 'userSettings', label: 'user', keys: [] }, { source: 'projectSettings', label: 'project', keys: ['model'] }], applied: [], errors: [] }}
         machine={TEST_MACHINE}
         cwd="/work/atlas"
-        configHome="/home/example/.claude"
+        configHome="/Users/example/.claude"
         close={() => {}}
       />,
     );
@@ -34,6 +34,29 @@ describe('Config (P606, P607, P608, P586)', () => {
     expect(word.textContent).toBe('user');
     expect(accessibleDescription(word)).toBe('Edited in ~/.claude/settings.json');
     expect(project.textContent).toContain('model');
+  });
+
+  // P586: the file under the pointer is the one Reveal opens, the engine's config home and the session's folder resolved
+  it('names under the pointer the file Reveal opens, under a config home of its own and in the session’s folder', () => {
+    render(
+      <ConfigBody
+        view={{ effective: [], sources: [{ source: 'userSettings', label: 'user', keys: [] }, { source: 'projectSettings', label: 'project', keys: [] }], applied: [], errors: [] }}
+        machine={TEST_MACHINE}
+        cwd="/work/atlas"
+        configHome="/Users/example/.config/claude"
+        close={() => {}}
+      />,
+    );
+    const [user, project] = within(screen.getByRole('list', { name: 'Settings sources' })).getAllByRole('listitem');
+    expect(accessibleDescription(user.querySelector<HTMLElement>('[data-rule-source]')!)).toBe('Edited in ~/.config/claude/settings.json');
+    expect(accessibleDescription(project.querySelector<HTMLElement>('[data-rule-source]')!)).toBe('Edited in /work/atlas/.claude/settings.json');
+  });
+
+  it('names no file under the pointer while the file Reveal would open is unknown', () => {
+    render(<ConfigBody view={{ effective: [], sources: [{ source: 'userSettings', label: 'user', keys: [] }], applied: [], errors: [] }} machine={TEST_MACHINE} cwd={null} configHome={null} close={() => {}} />);
+    const user = within(screen.getByRole('list', { name: 'Settings sources' })).getByRole('listitem');
+    expect(within(user).queryByRole('button', { name: 'Reveal' })).toBeNull();
+    expect(accessibleDescription(user.querySelector<HTMLElement>('[data-rule-source]')!)).toBe('');
   });
 });
 

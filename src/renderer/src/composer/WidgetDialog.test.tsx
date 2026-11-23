@@ -34,6 +34,32 @@ describe('the widget dialog', () => {
     }
   });
 
+  // A widget's close puts away the dialog it was opened in and no other: a close that lands after a second open
+  // replaced it (a rename's reply, before the first widget's cleanup ran) leaves the replacement open.
+  it('a widget’s close after a second open replaced it leaves the replacement open', async () => {
+    const closes: (() => void)[] = [];
+    const off = registerSlashWidget('rename', {
+      title: 'Rename',
+      component: ({ args, close }) => {
+        closes.push(close);
+        return <p>rename {args}</p>;
+      },
+    });
+    try {
+      render(<WidgetDialogHost />);
+      act(() => openWidgetDialog(A, 'rename', 'first'));
+      const closeFirst = closes.at(-1)!;
+      act(() => openWidgetDialog(A, 'rename', 'second'));
+      expect(screen.getByRole('dialog', { name: 'Rename' }).textContent).toContain('rename second');
+      act(() => closeFirst());
+      expect(screen.getByRole('dialog', { name: 'Rename' }).textContent).toContain('rename second');
+      act(() => closes.at(-1)!());
+      await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    } finally {
+      off();
+    }
+  });
+
   it('closes on Esc and on the widget’s close, and the composer’s editor takes the keyboard back', async () => {
     const focusEditor = vi.fn();
     registerFocusTarget(A, { focusEditor, focusFrame: () => {}, insertText: () => {} });

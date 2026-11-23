@@ -160,6 +160,22 @@ it('keeps the MCP session picker beside live connectors and switches only the li
   expect(backend.calls.filter((call) => call.command === 'session.acquire')).toEqual([]);
 });
 
+// the word cut (P565): a connecting connector in the live list is the quiet spinner, and the session's MCP table moving
+// reads the list again, so the wait it stands for can end
+it('reads the live connectors again when the session’s MCP table moves, ending a connecting connector’s spinner', async () => {
+  const live = { ...pageStatus('mcp-moves'), cwd: '/one' };
+  useSessions.setState({ engine: new Map([[live.appSessionId, live]]) });
+  let calendar = 'pending';
+  backend.script('session.mcpStatus', () => ({ mcpServers: [{ name: 'calendar', status: calendar, tools: [] }] }));
+  mount('mcp');
+  const region = await screen.findByRole('region', { name: 'Live connectors' });
+  expect(await within(region).findByRole('progressbar', { name: 'Connecting…' })).toBeTruthy();
+  calendar = 'connected';
+  act(() => useSessions.setState({ engine: new Map([[live.appSessionId, { ...live, mcpServers: [{ name: 'calendar', status: 'connected', source: 'user' }] }]]) }));
+  await waitFor(() => expect(within(screen.getByRole('region', { name: 'Live connectors' })).queryByRole('progressbar')).toBeNull());
+  expect(within(screen.getByRole('region', { name: 'Live connectors' })).getByText('Connected')).toBeTruthy();
+});
+
 it('reads the focused project without a session and switches the disk inventory with the project picker', async () => {
   mount('skills');
   await screen.findByRole('button', { name: 'View review' });
