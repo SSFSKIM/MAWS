@@ -29,6 +29,7 @@ import { launchMaws, REPO_ROOT, test, type MawsLaunch } from './support/launch';
 import { CHARTER } from './support/panel-support';
 import { sidebarOf, sidebarRow } from './support/sidebar';
 import { openSurface } from './support/shell';
+import { FINISHED_TURN_LINE } from './support/turn-line';
 
 function skipReason(): string | null {
   if (process.env.MAWS_CODE_LIVE !== '1') return 'the C8c live acceptance runs only under MAWS_CODE_LIVE=1';
@@ -328,7 +329,7 @@ test('live: a turn that edits a file opens Review on Last turn and the viewer at
     observed.sent = sent;
     await expect.poll(() => readFileSync(join(clone, target), 'utf8').includes(edited), { timeout: 180_000, message: 'the turn edits the file' }).toBe(true);
     const turn = page.locator('[data-kind="divider"]').last();
-    await expect(turn).toContainText('Worked', { timeout: 120_000 });
+    await expect(turn).toHaveText(FINISHED_TURN_LINE, { timeout: 120_000 }); // the word cut (M2's T1): a finished turn's line is its time, then its caption
     observed.turnSummary = await turn.textContent();
     await expect(page.locator('.transcript-receipt')).toHaveCount(0);
 
