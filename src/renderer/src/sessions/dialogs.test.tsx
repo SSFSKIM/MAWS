@@ -324,6 +324,24 @@ describe('dialogs', () => {
     expect(within(dialog).queryByRole('progressbar')).toBeNull();
   });
 
+  // the review of task 2: the preview's failure is its own, so a confirm that follows it never brings the read's spinner
+  // back (no preview is asked again), and the delete's own outcome is said apart from it
+  it('delete keeps a failed preview apart from the delete that follows it', async () => {
+    withMain({ 'session.delete': () => ({ status: 'partial', trashed: [], failed: { path: '/b.json', error: 'EPERM' } }), 'session.deletions.list': () => ({ manifests: [] }) });
+    render(<SessionDialogs />);
+    act(() => openDialog({ kind: 'delete', appSessionId: IDLE1 }));
+    const dialog = await screen.findByRole('dialog', { name: 'Delete “Idle one”?' });
+    await act(() => fake.fail('session.deletions.preview', 'no store'));
+    await userEvent.click(within(dialog).getByRole('checkbox', { name: 'Move the transcript to the Trash' }));
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Delete' }));
+    await waitFor(() => expect(fake.invoked('session.delete')).toHaveLength(1));
+    await act(() => new Promise((resolve) => setTimeout(resolve, 600))); // past the quiet half second
+    expect(within(dialog).queryByRole('progressbar'), 'no read is out').toBeNull();
+    expect(fake.invoked('session.deletions.preview')).toHaveLength(1);
+    expect(within(dialog).getByText('no store')).toBeTruthy();
+    expect(within(dialog).getByText(/b\.json could not be moved/)).toBeTruthy();
+  });
+
   it('a live session is stopped and deleted', async () => {
     withMain({ 'session.deletions.preview': () => ({ transcript: null, subagents: 0, recordings: 0, paths: 0, store: '~/.claude' }), 'session.delete': () => ({ status: 'deleted', trashed: [] }) });
     useLayout.getState().openTab({ kind: 'session', appSessionId: LIVE });

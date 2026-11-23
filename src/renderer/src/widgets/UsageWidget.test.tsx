@@ -1,6 +1,6 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { cleanup, render, screen, within } from '@testing-library/react';
-import { afterEach, describe, expect, it } from 'vitest';
+import { act, cleanup, render, screen, within } from '@testing-library/react';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { AccountUsage, UsageSnapshot } from '@shared/usage/types';
 import type { GetUsageResponse } from '@shared/wire/control';
@@ -8,7 +8,9 @@ import { accessibleText } from '../test-support/accessible-text';
 import { record, status } from '../../../../test/support/builders';
 import { at } from '../../../../test/support/machine';
 import { useSessions } from '../stores/sessions';
-import { useUsage } from '../stores/usage';
+import { connectUsage, useUsage } from '../stores/usage';
+import { useLayout } from '../stores/layout';
+import { fakeClient } from '../../../../test/support/fake-client';
 import { useReadLoads } from './read';
 import { USAGE } from './copy';
 import { present, UsageBody, UsageWidget } from './UsageWidget';
@@ -18,7 +20,7 @@ const ID = at('app-direct-1' as AppSessionId);
 afterEach(() => {
   cleanup();
   useSessions.setState({ engine: new Map(), records: new Map() });
-  useUsage.setState({ direct: new Map(), snapshot: null, windows: null, pinsFor: {} });
+  useUsage.setState({ direct: new Map(), snapshot: null, windows: null, pinsFor: {}, readError: null });
   useReadLoads.setState({ loads: new Map() });
 });
 
@@ -102,6 +104,23 @@ describe('UsageBody on a routed session', () => {
     useUsage.getState().applySnapshot(snapshot([account('drain', new Date(Date.now() - 60_000).toISOString())]));
     mountBody();
     expect(screen.getByText(USAGE.fiveHour).nextElementSibling!.textContent).toBe('0%');
+  });
+
+  // the review of task 2: a failed first read settles the line on its failure, never a spinner nothing will end
+  it('settles the account line on a failed read, and on the answer that follows it', async () => {
+    const fake = fakeClient();
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const off = connectUsage(fake.client, { usage: useUsage, sessions: useSessions, layout: useLayout });
+    mountBody();
+    expect(await screen.findByRole('progressbar', { name: 'Reading ClaudeUsage' })).toBeTruthy();
+    await act(() => fake.fail('settings.usage', 'pins.json unreadable'));
+    expect(screen.queryByRole('progressbar')).toBeNull();
+    expect(screen.getByText(USAGE.readFailed)).toBeTruthy();
+    act(() => fake.event('settings.usageChanged', snapshot([account('drain', new Date(Date.now() + 3_600_000).toISOString())])));
+    expect(screen.queryByText(USAGE.readFailed)).toBeNull();
+    expect(screen.getByText(/^drain@example\.test/)).toBeTruthy();
+    off();
+    vi.restoreAllMocks();
   });
 
   it('shows a quiet spinner for the account while ClaudeUsage has not answered, and says so when it names no account', async () => {

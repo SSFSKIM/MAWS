@@ -137,6 +137,22 @@ describe('usage store: connectUsage', () => {
     return { fake, usage, sessions, layout };
   };
 
+  // the word cut (P596): a failed read is held apart from the last good snapshot, so the account line settles on it; a
+  // later snapshot (a reply or an event) clears it
+  it('holds a failed read until a snapshot answers', async () => {
+    const { fake, usage, sessions, layout } = setup();
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const off = connectUsage(fake.client, { usage, sessions, layout });
+    expect(usage.getState().readError).toBeNull();
+    await fake.fail('settings.usage', 'pins.json unreadable');
+    expect(usage.getState()).toMatchObject({ snapshot: null, readError: 'pins.json unreadable' });
+    fake.event('settings.usageChanged', SNAP);
+    expect(usage.getState().readError).toBeNull();
+    expect(usage.getState().snapshot).not.toBeNull();
+    off();
+    vi.restoreAllMocks();
+  });
+
   it('subscribes before it asks, and asks with the engine ids of the open session tabs', async () => {
     const { fake, usage, sessions, layout } = setup();
     layout.getState().openSession(at('a') as AppSessionId);

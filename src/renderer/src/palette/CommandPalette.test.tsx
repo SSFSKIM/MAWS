@@ -575,10 +575,14 @@ it('words the input, the search and the indexing as the cut has them', async () 
     expect(within(dialog()).queryByText(/Searching/), 'no line while it searches').toBeNull();
     await act(() => vi.advanceTimersByTimeAsync(500));
     expect(within(dialog()).getByRole('progressbar', { name: 'Searching conversations' })).toBeTruthy();
+    expect(within(dialog()).queryByText('Nothing matches'), 'no empty word beside the spinner while the query is out').toBeNull();
     await act(async () => answer({ ok: true, value: { hits: [{ appSessionId: id, snippet: 'Available conversation text' }], indexing: true, incomplete: false } }));
     expect(within(dialog()).queryByRole('progressbar')).toBeNull();
     expect(within(dialog()).getByRole('status').textContent).toBe('Indexing…');
     expect(screen.getByText('Available conversation text')).toBeTruthy();
+    await act(() => vi.advanceTimersByTimeAsync(1000)); // the indexing retry asks again
+    await act(async () => answer({ ok: true, value: { hits: [], indexing: false, incomplete: false } }));
+    expect(within(dialog()).getByText('Nothing matches'), 'a settled empty answer says so').toBeTruthy();
   } finally { invoke.mockRestore(); vi.useRealTimers(); }
 });
 

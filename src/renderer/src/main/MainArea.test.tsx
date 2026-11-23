@@ -124,8 +124,8 @@ describe('tab strip reorders, closes, reopens', () => {
     const user = userEvent.setup();
     render(<Shell />);
     expect(tabNames()).toEqual([]);
-    const panel = within(main()).getByRole('tabpanel');
-    expect(within(panel).getByText('No open tabs')).toBeTruthy();
+    const panel = within(main()).getByRole('tabpanel', { name: 'No open tabs' }); // the word cut (W22): the panel's name says it; its two ways in are drawn
+    expect(within(panel).getByRole('button', { name: 'Overview' })).toBeTruthy();
     expect((within(panel).getByRole('button', { name: 'New chat' }) as HTMLButtonElement).disabled).toBe(true); // no creator registered
     expect(within(main()).queryByRole('dialog', { name: 'Overview' })).toBeNull();
     await user.click(within(panel).getByRole('button', { name: /^Overview/ }));
@@ -190,7 +190,7 @@ describe('tab strip reorders, closes, reopens', () => {
     act(() => useLayout.getState().openSession(idOf('Charter + research')));
     await act(async () => runAction('tab.close'));
     expect(tabNames()).toEqual([]);
-    expect(within(within(main()).getByRole('tabpanel')).getByText('No open tabs')).toBeTruthy();
+    expect(within(within(main()).getByRole('tabpanel', { name: 'No open tabs' })).getByRole('button', { name: 'New chat' })).toBeTruthy();
     const before = useLayout.getState().main;
     await act(async () => runAction('tab.close'));
     expect(useLayout.getState().main).toBe(before);
@@ -923,13 +923,13 @@ describe('before the layout has hydrated', () => {
     const hydrating = useLayout.getState().hydrate(layoutMain.client, (id) => useSessions.getState().records.has(id));
     await act(async () => {});
     expect(layoutMain.pending('layout.get')).toBe(3); // the snapshot is still outstanding
-    expect(within(main()).queryByText('No open tabs')).toBeNull();
+    expect(main().querySelector('[data-empty-pane]')).toBeNull();
     expect(within(main()).queryByRole('tabpanel', { name: 'No open tabs' })).toBeNull();
     await act(async () => {
       for (let i = 0; i < 3; i++) await layoutMain.reply('layout.get', { value: null });
       await hydrating;
     });
-    expect(within(main()).getByText('No open tabs')).toBeTruthy();
+    expect(main().querySelector('[data-empty-pane]')).not.toBeNull();
     expect(within(main()).getByRole('tabpanel', { name: 'No open tabs' })).toBeTruthy();
   });
 

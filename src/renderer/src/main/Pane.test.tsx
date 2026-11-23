@@ -155,8 +155,8 @@ describe('a session tab of this Mac', () => {
   });
 });
 
-// The word cut, W22 and W23: an empty main area draws its two ways in and no sentence; "No open tabs" stays for a screen
-// reader, and the Overview button's chord waits in its tooltip, which focus reaches.
+// The word cut, W22 and W23: an empty main area draws its two ways in and no sentence (the pane's tabpanel is named "No
+// open tabs"), and the Overview button's chord waits in its tooltip, which focus reaches.
 describe('the empty main area', () => {
   it('draws Overview and New chat with no sentence, Overview’s chord in its description', () => {
     const offOverview = registerAction('tab.overview', () => {});
@@ -165,8 +165,7 @@ describe('the empty main area', () => {
       const overview = screen.getByRole('button', { name: 'Overview' });
       expect(overview.textContent).toBe('Overview');
       expect(accessibleDescription(overview)).toBe('⌘0');
-      const said = screen.getByText('No open tabs');
-      expect(said.className, 'kept for a screen reader, not drawn').toContain('sr-only');
+      expect(screen.queryByText('No open tabs')).toBeNull();
       expect(document.querySelector('[data-empty-pane]')).not.toBeNull();
     } finally {
       offOverview();
