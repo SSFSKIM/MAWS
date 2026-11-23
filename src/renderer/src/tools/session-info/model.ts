@@ -31,6 +31,8 @@ import type { BudgetState } from '@shared/ipc/schema/engine';
 import { BUDGET } from '../../budget/copy';
 // C12 end
 import { BROWSER_COPY } from '../browser/copy'; // E4a
+import { FULL_MAWS_TOOL_SET } from '@shared/maws/tool-set'; // board ticket 421
+import { MAWS_TOOLS } from '../../settings-tab/copy'; // board ticket 421
 // P2-A start (2026-10-09; X17)
 import type { Fact, ObservedFactsAnswer } from '@shared/engine/observed-facts';
 import { FRESHNESS } from '../../sessions/observed';
@@ -129,6 +131,19 @@ function observedRow<T>(label: string, observed: NonNullable<SessionInfoInput['o
 }
 // P2-A end
 
+// Board ticket 421 (docs/doperpowers/plans/2026-11-23-tool-choice.md, A4 and §H): the set of MAWS's tools a session MAWS
+// is running started with, which it keeps (D1): its record's, absent meaning the full set. With no engine status the
+// session may be one MAWS never launched, whose record holds no set and which has no `maws` tools; no row guesses for it.
+export function mawsToolsRows(record: SessionRecord, status: EngineSessionStatus | null): InfoRow[] {
+  if (status === null) return [];
+  const set = record.mawsTools ?? FULL_MAWS_TOOL_SET;
+  const on = (Object.keys(MAWS_TOOLS.groups) as (keyof typeof MAWS_TOOLS.groups)[]).filter((group) => set[group]);
+  return [
+    { label: INFO.mawsTools, value: on.length === 0 ? INFO.mawsToolsNone : on.map((group) => MAWS_TOOLS.groups[group].word).join(', ') },
+    { label: INFO.questionTool, value: MAWS_TOOLS.questionTools[set.question] },
+  ];
+}
+
 function engineSection({ record, status, digest, budget, browserTabs, observed, now, driven }: SessionInfoInput): InfoSection { // C12: digest, budget; E4a: browserTabs; P2-A: observed, now
   const version = status?.engineVersion ?? record.engineVersion;
   const tree = status?.memory.treeRssKiB ?? null;
@@ -141,6 +156,7 @@ function engineSection({ record, status, digest, budget, browserTabs, observed, 
       { label: INFO.version, value: version ?? NONE },
       ...(observed ? [observedRow(INFO.plugins, observed, (f) => f.plugins, (p) => INFO.pluginsLoaded(p.plugins.length), now)] : []), // P2-A
       { label: INFO.binary, value: status ? homeAbbreviated(status.bin) : NONE },
+      ...mawsToolsRows(record, status), // board ticket 421
       { label: INFO.sessionId, value: record.engineSessionId ?? NONE },
       heldByRow(record, { bridged: driven != null }), // W7; P5 O9 M5
       { label: INFO.processTree, value: tree === null ? NONE : INFO.tree(mb(tree), status?.memory.rssKiB == null ? null : mb(status.memory.rssKiB)) },

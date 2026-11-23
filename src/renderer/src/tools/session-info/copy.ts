@@ -5,6 +5,7 @@
 import type { PermissionMode } from '@shared/graph/enums';
 import { PERMISSION_MODE_LABELS } from '@shared/sessions/permission-mode-labels';
 import type { ControlKey } from '../../session/controls/types'; // P5 O9 M5
+import { MAWS_TOOLS } from '../../settings-tab/copy'; // board ticket 421: the groups' and the question tools' words
 
 export const LANE = {
   off: (mode: PermissionMode) => `Auto mode is off · ${PERMISSION_MODE_LABELS[mode]}`,
@@ -71,6 +72,11 @@ export const INFO = {
     'take-over': 'Take over in MAWS',
     reopen: 'Reopen',
   } satisfies Record<ControlKey, string>,
+  // Board ticket 421 (docs/doperpowers/plans/2026-11-23-tool-choice.md, §H): the set of MAWS's tools a running session
+  // started with, in Settings › Sessions' words
+  mawsTools: MAWS_TOOLS.tools,
+  mawsToolsNone: 'None',
+  questionTool: MAWS_TOOLS.question,
   processTree: 'Process tree',
   tree: (tree: string, own: string | null) => (own === null ? tree : `${tree} · own ${own}`),
   // Model
