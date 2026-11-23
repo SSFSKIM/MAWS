@@ -30,7 +30,7 @@ export const RELAY_WORDS = {
 const greyedLook = (look: string) => (look === PRIMARY ? 'aria-disabled:cursor-default aria-disabled:border-fg-faint aria-disabled:bg-fg-faint aria-disabled:hover:bg-fg-faint' : UNAVAILABLE_LOOK);
 
 // A button whose explanation is its tooltip and description (with `refused`, its reason, greyed and still focusable)
-function Explained({ why, refused = null, children }: { why: string; refused?: string | null; children: ReactElement }) {
+function Explained({ why, refused = null, children }: { why: string; refused?: string | null; children: ReactElement<{ 'aria-describedby'?: string }> }) {
   const said = refused ?? why;
   return (
     <Tip content={said} description={said} {...unavailableClickProps(refused)}>

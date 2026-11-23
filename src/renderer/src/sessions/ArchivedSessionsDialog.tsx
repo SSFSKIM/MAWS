@@ -189,10 +189,10 @@ function MachineLines({ lines }: { lines: readonly string[] }) {
 }
 
 // A read still out (N172: a quiet spinner, its words its name), or the error it ended in
+const READING = 'Loading archived sessions';
 function Reading({ error }: { error: string | null }) {
   return error !== null ? <p className="m-0 text-fg-muted">{error}</p> : <QuietSpinner label={READING} />;
 }
-export const READING = 'Loading archived sessions';
 
 // "No archived sessions." unless a machine's line says why it wasn't asked.
 const NoneArchived = ({ saidElsewhere }: { saidElsewhere: boolean }) => (saidElsewhere ? null : <p className="m-0 text-fg-muted">No archived sessions.</p>);
@@ -225,7 +225,7 @@ function ArchivedRow({ record: r, onUnarchive }: { record: SessionRecord; onUnar
   );
 }
 
-export const ARCHIVED_ROW = {
+const ARCHIVED_ROW = {
   actions: (title: string) => `Actions for ${title}`,
   removeWorktree: 'Remove worktree…',
   delete: 'Delete…',

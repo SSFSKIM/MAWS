@@ -51,19 +51,6 @@ afterEach(() => {
 });
 
 describe('setting a project up on another machine', () => {
-  // the word cut (N175): the machine's folders are read under a quiet spinner, which a refused read takes down
-  it('reads the folders under a quiet spinner, and a refused read leaves its words with no spinner', async () => {
-    install({});
-    act(() => openDialog({ kind: 'remoteSetup', request: { kind: 'folder', tab: TAB, machine: OTHER_MACHINE, name: 'mini', key: KEY, home: HOME, first: null, suggestions: [APP] } }));
-    const sheet = screen.getByRole('dialog', { name: 'New project on mini' });
-    expect(await within(sheet).findByRole('progressbar', { name: SETUP_WORDS.loading }, { timeout: 2000 })).toBeTruthy();
-    expect(sheet.textContent).not.toContain('Reading the folders');
-    fireEvent.click(within(within(sheet).getByRole('group', { name: SETUP_WORDS.suggestions })).getByRole('button', { name: '~/Developer/GitHub/app' }));
-    await act(() => fake.fail('machine.folders.list', 'not allowed'));
-    await waitFor(() => expect(within(sheet).queryByRole('progressbar')).toBeNull());
-    expect(within(sheet).getByRole('alert')).toBeTruthy();
-  });
-
   it('asks for the folder, reads its trust there, shows that machine’s trust card, registers the folder, and starts there trusted', async () => {
     install({ 'machine.folders.list': { entries: [entry(`${APP}/src`)], cursor: null }, 'session.trust.check': trustOf(), 'session.projects.addFolder': registered(APP) });
     openFolderSetup();

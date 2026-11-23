@@ -30,9 +30,8 @@ import { useSlot } from '../app/slots';
 import { useNow } from '../app/use-now';
 import { BRIDGED_LINE, heldLine, waitingItem } from '../attention/derive';
 import { GlyphMark } from '../attention/GlyphMark';
-import type { Glyph } from '../attention/glyph';
+import { glyphFor, listedGlyph, type Glyph } from '../attention/glyph';
 import { Tip } from '../ui/tip';
-import { glyphFor, listedGlyph } from '../attention/glyph';
 import { ipc } from '../ipc/client';
 import { branchLabel } from '../sessions/branch-label';
 import { workingBranch, workingWorktree } from '@shared/sessions/working-folder'; // UX wave U8c-2
