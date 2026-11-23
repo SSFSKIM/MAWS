@@ -251,9 +251,11 @@ const scenes = async (step: { scene: string } & Record<string, unknown>, binding
     case 'device-words': {
       const device = devices[step.device as string];
       const at = new Date().toISOString();
-      // `project`: the log they go into and the scope they are signed over (P unless named); `alias`, the addressee's.
+      // `project`: the log they go into and the scope they are signed over (P unless named); `alias`, the addressee's;
+      // `thread`, the addressee's thread the words are owed to (inside a channel's log, where every addressee names one).
       const project = (step.project as string | undefined) ?? PROJECT;
-      const draft = { kind: 'human', from: 'human', member: B, to: [{ session: step.session, alias: (step.alias as string | undefined) ?? 'bob' }], text: `from ${String(step.device)}`, created: at, nonce: base64urlEncode(crypto.getRandomValues(new Uint8Array(16))) };
+      const to = { session: step.session, alias: (step.alias as string | undefined) ?? 'bob', ...(step.thread === undefined ? {} : { thread: step.thread }) };
+      const draft = { kind: 'human', from: 'human', member: B, to: [to], text: `from ${String(step.device)}`, created: at, nonce: base64urlEncode(crypto.getRandomValues(new Uint8Array(16))) };
       const signed = await signEvent({ org: ORG, project }, draft, device.channel.privateKey, device.channel.pub);
       const event: Record<string, unknown> = { ...signed, writer: `hub/${B}`, seq: step.seq, ts: at };
       if (step.forged === true) event.text = 'words the device never signed';
