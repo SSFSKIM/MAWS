@@ -19,6 +19,7 @@
 // In the gate it is the live group e2e:plugins-live (`ci-gate.sh --live`), its cap and the installed engine in its script.
 // With MAWS_LIVE_MAX_USD set (at most 1), the engine is reached through support/live-budget.ts's forwarding script,
 // which adds `--max-budget-usd <that cap>` to every session process (P2-F's re-run cap); unset, the engine itself.
+import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { expect, test, type Locator, type Page } from '@playwright/test';
 import type { AppSessionId } from '@shared/graph/ids';
@@ -63,6 +64,18 @@ test.beforeAll(() => {
 // ---- the page --------------------------------------------------------------------------------------------------
 
 const status = async (page: Page, id: string) => value(await invoke(page, 'session.status', { appSessionId: id as AppSessionId }));
+// The control requests of `subtype` in the session's journal (its current launch's), oldest first, each with whether the
+// engine answered it with a success: a reload's own receipt, since Reload plugins and Reload skills share one line and
+// its word (the word cut, P672)
+async function controlRequests(page: Page, id: string, subtype: string): Promise<{ requestId: string; succeeded: boolean }[]> {
+  type Row = { direction: string; frame: { type?: string; request_id?: string; request?: { subtype?: string }; response?: { subtype?: string; request_id?: string } } };
+  const rows = readFileSync((await status(page, id)).journalPath, 'utf8').split('\n').filter(Boolean).map((line) => JSON.parse(line) as Row);
+  const succeeded = new Set(rows.filter((r) => r.direction === 'in' && r.frame.type === 'control_response' && r.frame.response?.subtype === 'success').map((r) => r.frame.response!.request_id));
+  return rows
+    .filter((r) => r.direction === 'out' && r.frame.type === 'control_request' && r.frame.request?.subtype === subtype && typeof r.frame.request_id === 'string')
+    .map((r) => ({ requestId: r.frame.request_id!, succeeded: succeeded.has(r.frame.request_id!) }));
+}
+const pluginCount = (n: number) => `${n} ${n === 1 ? 'plugin' : 'plugins'}`; // panel/copy.ts's SUMMARY_COPY.pluginsLoaded (the word cut, P65)
 async function idle(page: Page, id: string): Promise<void> {
   await page.waitForTimeout(1_500);
   await expect.poll(async () => {
@@ -401,19 +414,23 @@ test('E8 live: marketplaces and plugins managed from /plugins and the panel thro
       expect(s.plugins.map((p) => p.name)).toContain('e8-probe');
     });
 
-    await step('panel-reload', 'the Connectors card: Plugins · N loaded (the built-in ones and e8-probe), Reload plugins, Reload skills', async () => {
+    await step('panel-reload', 'the Connectors card: N plugins (the built-in ones and e8-probe), Reload plugins, Reload skills', async () => {
       await closeWidgets(page);
       const panel = await unfoldSessionCard(page, 'Connectors');
-      await expect(panel).toContainText(`Plugins · ${builtin + 1} loaded`);
+      await expect(panel.getByText(pluginCount(builtin + 1), { exact: true })).toBeVisible(); // the word cut (P65): the count alone
       const mods = panel.getByRole('button', { name: 'Reload plugins' });
       const line = mods.locator('xpath=following-sibling::*[@role="status"]');
       await mods.click();
       await expect(line).toHaveText('Reloaded', { timeout: 60_000 }); // the word cut (P672): no errors, no counts; the card's count above holds the plugins
       scratch.log(`Reload plugins: ${await line.innerText()}`);
       await shot(`${String(n).padStart(2, '0')}-panel-reload-mods`);
+      const earlier = (await controlRequests(page, id, 'reload_skills')).length;
       await panel.getByRole('button', { name: 'Reload skills' }).click();
-      // the word cut (P672): the skills' receipt is the word; the line went to "Reloaded" for the plugins already, so the
-      // receipt is waited for as the line leaving its busy state and staying at the word
+      // the word cut (P672): the skills' receipt is the same word as the plugins' already on the line, so the press is
+      // proved by its own reload_skills, answered with a success, and only then is the line read
+      await expect
+        .poll(async () => (await controlRequests(page, id, 'reload_skills')).slice(earlier), { timeout: 60_000, message: 'a fresh reload_skills, answered' })
+        .toEqual([expect.objectContaining({ succeeded: true })]);
       await expect(panel.getByRole('button', { name: 'Reload skills' })).toBeEnabled({ timeout: 60_000 });
       await expect(line).toHaveText('Reloaded', { timeout: 60_000 });
       scratch.log(`Reload skills: ${await line.innerText()}`);

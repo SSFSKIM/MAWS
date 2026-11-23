@@ -4,7 +4,7 @@ import { expect, type ElectronApplication, type Locator, type Page } from '@play
 import { localRef } from './address';
 import { applicationOf } from './launch';
 import { menu } from './menu';
-import { expectScreenReaderOnly } from './screen-reader-only'; // the word cut (W6)
+import { expectDrawn, expectScreenReaderOnly } from './screen-reader-only'; // the word cut (W6)
 
 export const surfaceRow = (page: Page): Locator => page.locator('[data-surface-row][role="toolbar"]');
 export const surface = (page: Page, toolId: string): Locator => page.locator(`[data-surface="${toolId}"]`);
@@ -47,7 +47,7 @@ export async function openAppDestination(page: Page, name: 'Projects' | 'Artifac
   // the word cut (W6): only the Projects page draws its title; Artifacts and Customize keep it as a screen-reader heading,
   // which Playwright's toBeVisible would count as drawn
   const title = pageTitle(page).getByRole('heading', { level: 1, name, exact: true });
-  if (name === 'Projects') await expect(title).toBeVisible();
+  if (name === 'Projects') await expectDrawn(title, 'W6: the Projects page draws its title');
   else await expectScreenReaderOnly(title, `W6: ${name}’s title is for a screen reader`);
   await expect(pageRegion(page)).toBeVisible();
   await expect(mountedTab(page, name), 'no tab of the page is mounted in the strip').toHaveCount(0);

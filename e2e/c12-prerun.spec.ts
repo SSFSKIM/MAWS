@@ -1338,10 +1338,20 @@ test('§10.8 every palette widget opens backed by its read; ! and # work; a live
         await expect(w).toBeVisible();
         await expect(w.locator('footer')).toHaveCount(0); // E11 §2.2: no provenance foot
         // the word cut (P518): the read is a quiet spinner named "Reading…", drawn after 500 ms and no text, so the wait is
-        // for the body's answer (its words or its alert) with the frame's spinner gone
-        await expect
-          .poll(() => w.locator('[data-widget-body]').evaluate((body) => (body.textContent ?? '').trim() !== '' && body.querySelector(':scope > [role="progressbar"]') === null), { timeout: 20_000, message: `/${name} answered its read` })
-          .toBe(true);
+        // for the answer. A framed widget: its body's words or its alert, the frame's spinner gone. /model and /effort are
+        // the selector, with no frame and no body: its own control drawn (the models menu, the effort slider) and no wait
+        // spinner, on two samples further apart than the spinner's quiet half second, so a read still out has shown it.
+        if (name === 'model' || name === 'effort') {
+          const control = name === 'model' ? w.getByRole('menu') : w.getByRole('slider');
+          const settled = async () => (await control.count()) > 0 && (await w.getByRole('progressbar').count()) === 0;
+          await expect
+            .poll(async () => (await settled()) && (await new Promise((r) => setTimeout(r, 600))) === undefined && (await settled()), { timeout: 20_000, message: `/${name} answered its read` })
+            .toBe(true);
+        } else {
+          await expect
+            .poll(() => w.locator('[data-widget-body]').evaluate((body) => (body.textContent ?? '').trim() !== '' && body.querySelector(':scope > [role="progressbar"]') === null), { timeout: 20_000, message: `/${name} answered its read` })
+            .toBe(true);
+        }
         const error = await w.getByRole('alert').count();
         if (name === 'context' || name === 'mcp') opened[`${name}.screenshots`] = await shoot(page, `10.8-widget-${name}`);
         opened[name] = { error };

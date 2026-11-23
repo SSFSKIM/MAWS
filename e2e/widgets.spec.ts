@@ -142,6 +142,13 @@ async function openPage(page: Page, pane: WidgetsPane): Promise<void> {
 }
 
 const widget = (page: Page, name: string): Locator => page.locator(`[data-widget="${name}"]`);
+// A row's action drawn on pointing or focus within it (`ON_HOVER`, styles/app.css) read at rest: the pointer parked off
+// the dialog and the keyboard on the frame's own close button, so neither the e2e window's cursor nor the dialog's
+// opening focus reveals it
+async function atRest(page: Page, frame: Locator): Promise<void> {
+  await page.mouse.move(1, 1);
+  await frame.getByRole('button', { name: /^Close / }).first().focus();
+}
 // The value beside a key of a widget's key/value list.
 const valueOf = (scope: Locator, label: string): Locator => scope.getByRole('term').filter({ hasText: new RegExp(`^${label}$`) }).locator('xpath=following-sibling::dd[1]');
 // The word cut (N148): a Connectors switch row's note, what the switch reaches and where the engine records it.
@@ -471,6 +478,7 @@ test.describe('interactive', () => {
     await expect(files.nth(0)).toContainText('User instructions');
     // the word cut (P624): Reveal is drawn while its row is pointed at or holds focus (Playwright's visible ignores opacity)
     const reveal = files.nth(0).getByRole('button', { name: 'Reveal' });
+    await atRest(page, memory);
     await expect(reveal).toHaveCSS('opacity', '0');
     await files.nth(0).hover();
     await expect(reveal).toHaveCSS('opacity', '1');
@@ -616,6 +624,7 @@ test.describe('interactive', () => {
     const agents = widget(page, 'agents').getByRole('list', { name: 'Agents' }).getByRole('listitem');
     await expect(agents).toHaveCount(5);
     const mention = agents.filter({ hasText: 'Explore' }).getByRole('button', { name: 'Mention' });
+    await atRest(page, widget(page, 'agents'));
     await expect(mention).toHaveCSS('opacity', '0'); // the word cut (P628): drawn while its row is pointed at or focused
     await mention.click(); // the click points at the row first
     await expect(widget(page, 'agents')).toBeHidden();
@@ -1296,7 +1305,7 @@ test.describe('plugin management (E8)', () => {
     const market = marketplaceRow(manage, MARKET);
     await expect(market).toHaveAttribute('data-marketplace-source', 'directory');
     await expect(market).toContainText(join(backend.userData, 'market'));
-    await expect(market).toContainText('1 plugin'); // the word cut (P740)
+    await expect(market.getByText('1 plugin', { exact: true })).toBeVisible(); // the word cut (P740): the count line alone
     await manage.getByRole('button', { name: 'Done' }).click();
     await expect(manage).toBeHidden();
     // E11 §2.2: no foot; what a change writes is named in its sheet (below)
@@ -1602,7 +1611,9 @@ test.describe('plugin management (E8)', () => {
       const argv = await argvOf(sheet);
       expect(argv).toEqual(['plugin', 'marketplace', 'add', source, '--scope', 'user', '--json']); // P4-AGG M3: the confirmation's scope, user by default
       await expect(sheet.getByRole('list', { name: "The engine's CLI writes:" }).getByRole('listitem')).toHaveText(writes);
-      await expect(sheet).toContainText('Nothing to reload: an added marketplace loads no plugin');
+      // the word cut (P720): an added marketplace loads no plugin, so the sheet says nothing about reloading
+      await expect(sheet).not.toContainText('Nothing to reload');
+      await expect(sheet).not.toContainText(/Reloads plugins in/);
       shown.push(argv);
       await sheet.getByRole('button', { name: 'Add', exact: true }).click();
       await expect(sheet).toBeHidden();
@@ -1671,7 +1682,7 @@ test.describe('plugin management (E8)', () => {
 
     // the marketplace removal uninstalls all three: the sheet names them and the files that writes
     const manage = await openAdd(w, 'Manage marketplaces');
-    await expect(marketplaceRow(manage, MARKET)).toContainText('3 plugins'); // the word cut (P740)
+    await expect(marketplaceRow(manage, MARKET).getByText('3 plugins', { exact: true })).toBeVisible(); // the word cut (P740): the count line alone
     await marketplaceAction(marketplaceRow(manage, MARKET), 'Remove…');
     const remove = sheetOf(page, 'marketplace-remove');
     shown.push(await argvOf(remove));

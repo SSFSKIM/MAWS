@@ -140,6 +140,23 @@ function journalRows(maws: MawsLaunch, id: string): JournalRow[] {
     .sort((a, b) => a.at.localeCompare(b.at) || a.seq - b.seq);
 }
 type Frame = Record<string, unknown> & { type?: string; subtype?: string; request?: { subtype?: string } };
+// The control requests of `subtype` the host sent the engine for `serverName`, oldest first, each with whether the engine
+// answered it with a success: a control's own receipt where the surface draws none (the word cut, P570)
+function controlRequests(maws: MawsLaunch, id: string, subtype: string, serverName: string): { requestId: string; succeeded: boolean }[] {
+  const rows = journalRows(maws, id);
+  const succeeded = new Set(
+    rows
+      .filter((r) => r.direction === 'in' && (r.frame as Frame).type === 'control_response')
+      .map((r) => (r.frame as { response?: { subtype?: string; request_id?: string } }).response)
+      .filter((response) => response?.subtype === 'success')
+      .map((response) => response!.request_id),
+  );
+  return rows
+    .filter((r) => r.direction === 'out' && (r.frame as Frame).type === 'control_request')
+    .map((r) => r.frame as { request_id?: string; request?: { subtype?: string; serverName?: string } })
+    .filter((frame) => frame.request?.subtype === subtype && frame.request.serverName === serverName && typeof frame.request_id === 'string')
+    .map((frame) => ({ requestId: frame.request_id!, succeeded: succeeded.has(frame.request_id!) }));
+}
 const inits = (maws: MawsLaunch, id: string) =>
   journalRows(maws, id)
     .filter((r) => r.direction === 'in' && (r.frame as Frame).type === 'system' && (r.frame as Frame).subtype === 'init')
@@ -325,9 +342,15 @@ test('every widget opens with live engine data; controls take effect and are rea
       const before = { disabled: project().disabledMcpServers ?? null };
       await row.locator('button[aria-expanded]').click();
       const reconnect = row.getByRole('button', { name: /^Reconnect/ });
+      const earlier = controlRequests(maws, id, 'mcp_reconnect', 'c11probe').length;
       await reconnect.click();
-      // the word cut (P569, P570): Reconnect is busy, with its spinner, while it works, and a confirmed success draws no line
+      // the word cut (P569, P570): Reconnect is busy, with its spinner, while it works, and a confirmed success draws no
+      // line. Neither proves the press, so the wait is for this press's own mcp_reconnect, answered with a success.
+      await expect
+        .poll(() => controlRequests(maws, id, 'mcp_reconnect', 'c11probe').slice(earlier), { timeout: 30_000, message: 'a fresh mcp_reconnect of c11probe, answered' })
+        .toEqual([expect.objectContaining({ succeeded: true })]);
       await expect.poll(async () => (await reconnect.getAttribute('aria-busy')) !== 'true', { timeout: 30_000 }).toBe(true);
+      await expect(row.getByRole('progressbar')).toHaveCount(0);
       await expect(row.getByRole('status')).toHaveCount(0);
       await expect(w).not.toContainText('Reconnected');
       const toggle = w.getByRole('switch', { name: 'Enabled: c11probe' });

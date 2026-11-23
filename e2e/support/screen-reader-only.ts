@@ -18,22 +18,23 @@ function drawnNowhere({ w, h, clip, clipPath }: Draw): boolean {
   return w <= 1 && h <= 1 && (CLIPPED_TO_NOTHING.test(clip.trim()) || /^inset\((50|100)%\)$/.test(clipPath.trim()));
 }
 
+const drawOf = (target: Locator): Promise<Draw> =>
+  target.evaluate((el) => {
+    const box = el.getBoundingClientRect();
+    const style = getComputedStyle(el);
+    return { w: box.width, h: box.height, clip: style.clip, clipPath: style.clipPath };
+  });
+
 /** The one element `target` names is in the document and drawn nowhere: a box of at most one pixel clipped to nothing. */
 export async function expectScreenReaderOnly(target: Locator, message = 'kept for a screen reader, drawn nowhere'): Promise<void> {
   await expect(target, message).toHaveCount(1);
-  await expect
-    .poll(
-      async () =>
-        drawnNowhere(
-          await target.evaluate((el) => {
-            const box = el.getBoundingClientRect();
-            const style = getComputedStyle(el);
-            return { w: box.width, h: box.height, clip: style.clip, clipPath: style.clipPath };
-          }),
-        ),
-      { message },
-    )
-    .toBe(true);
+  await expect.poll(async () => drawnNowhere(await drawOf(target)), { message }).toBe(true);
+}
+
+/** The positive twin: the one element `target` names is visible and drawn, not the screen-reader box `toBeVisible` passes. */
+export async function expectDrawn(target: Locator, message = 'drawn, not only kept for a screen reader'): Promise<void> {
+  await expect(target, message).toBeVisible();
+  await expect.poll(async () => drawnNowhere(await drawOf(target)), { message }).toBe(false);
 }
 
 /** New chat's heading (W86): a screen-reader `h1` naming the project, drawn nowhere. */
