@@ -32,6 +32,7 @@ import { created } from './support/nothing-created'; // UX wave U6b-2: B8
 import { processesNaming } from './support/processes'; // the UX wave, U9: A6's scene signals only its own engine host
 import { assistantRecord, backgroundAgentRecords, backgroundAgentSidecars, turnEndRecords, userRecord } from './support/lane-a'; // UX wave U6b-4c: assistantRecord, a subagent's answer
 import { newChatIn, openProject, projectLine, projectRow, showProjectList, sidebarRow } from './support/sidebar';
+import { unfoldInfoGroup } from './support/session-info'; // board ticket 421's M5: Session info's Engine group
 
 const FIXTURES = 'spikes/protocol-probe/fixtures';
 const AUTO_ROUTED = `${FIXTURES}/pass2/auto-routed.jsonl`;
@@ -480,6 +481,14 @@ test.describe('sessions', () => {
     const resumed = await launchOf(source);
     expect(resumed, 'the resume is a launch of its own').not.toBe(firstLaunch);
     expectServed(spawnRowOf(maws, source, resumed), 'the resume');
+    // M5 (A4): Session info reads the set the running session keeps, from its record, whatever the machine's default
+    await mainTabById(page, `session:${await addressed(page, source)}`).click();
+    await openSurface(page, 'Session info');
+    const info = page.locator(`[data-session-info="${await addressed(page, source)}"]`);
+    const engine = await unfoldInfoGroup(info, 'Engine'); // the word cut: the Engine group starts folded
+    const infoValue = (label: string) => engine.getByRole('term').filter({ hasText: new RegExp(`^${label}$`) }).locator('xpath=following-sibling::dd[1]');
+    await expect(infoValue('MAWS tools')).toHaveText('Auxiliary');
+    await expect(infoValue('Question tool')).toHaveText('Default');
 
     // M4: a new chat starts from the machine's default: its intent holds it, and its first launch serves it
     const fresh = await plus(page, project.name);
