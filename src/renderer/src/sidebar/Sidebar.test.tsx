@@ -2230,7 +2230,14 @@ describe('listed rows from another machine', () => {
     act(() => useLayout.getState().setSidebar({ expandedProjects: [ORG] as ProjectKey[] }));
     render(<Sidebar />);
     const tabsBefore = useLayout.getState().main;
+    // a pointer's focus is not `:focus-visible` in a browser, which happy-dom does not model: the card a click shows is the
+    // pointer's, its state word the glyph's (the word cut's fix wave for M4: a row the keyboard holds shows it at rest)
+    const matches = HTMLElement.prototype.matches;
+    const pointer = vi.spyOn(HTMLElement.prototype, 'matches').mockImplementation(function (this: HTMLElement, selector: string) {
+      return selector === ':focus-visible' ? false : matches.call(this, selector);
+    });
     await userEvent.click(row('Studio build'));
+    pointer.mockRestore();
     expect(row('Studio build').getAttribute('aria-selected')).toBe('true');
     const card = await screen.findByRole('dialog', { name: 'Studio build' });
     expect(within(card).getByTestId('hover-meta').textContent, 'the word cut (W77): the age alone').toMatch(/^(now|[^·]+ ago)$/);

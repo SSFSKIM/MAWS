@@ -18,7 +18,7 @@
 // emails; the place line is the branch, the worktree's folder its tooltip; a held session reads who runs it, without a
 // pid. A listed session keeps "Stopped" on its line (N155): its glyph is Done's.
 import { HoverCard as Radix } from 'radix-ui';
-import { createContext, useCallback, useContext, useEffect, useLayoutEffect, useRef, useState, type FocusEvent, type ReactNode } from 'react';
+import { createContext, useCallback, useContext, useEffect, useRef, useState, type FocusEvent, type ReactNode } from 'react';
 import { flushSync } from 'react-dom';
 import { QuickReply, useQuickReply, type QuickReplyState } from './QuickReply';
 import type { AttentionItem } from '@shared/graph/attention';
@@ -65,7 +65,8 @@ const OpenedByKeyboard = createContext(false);
 
 export function SidebarHoverCard({ label, children, content, open, onOpenChange }: SidebarHoverCardProps) {
   const [internalOpen, setInternalOpen] = useState(false);
-  const [byKeyboard, setByKeyboard] = useState(false);
+  const [byKeyboard, setByKeyboard] = useState(false); // opened while the row held the keyboard
+  const [keyboardOnRow, setKeyboardOnRow] = useState(false); // the row holds the keyboard's focus now
   const contentRef = useRef<HTMLDivElement>(null);
   const releaseRemoved = useContext(SidebarInteractionContext);
   const setContentRef = useCallback((node: HTMLDivElement | null) => {
@@ -81,11 +82,6 @@ export function SidebarHoverCard({ label, children, content, open, onOpenChange 
   // The change renders at once: Radix's controlled HoverCard checks each change against the `open` it last rendered, so
   // a pointer leaving between an open and its render scheduled a close that found the card closed already, and the
   // card stayed open (the hosted Macs, 2026-10-26).
-  const shown = open ?? internalOpen;
-  useLayoutEffect(() => {
-    if (!shown) setByKeyboard(false);
-    else if (keyboardHeld(triggerRef.current)) setByKeyboard(true);
-  }, [shown]);
   const changeOpen = (next: boolean) => {
     const explicit = dismissing.current;
     dismissing.current = false;
@@ -102,15 +98,16 @@ export function SidebarHoverCard({ label, children, content, open, onOpenChange 
     queueMicrotask(() => (dismissing.current = false)); // a dismissal Radix does not carry out holds nothing later
   };
   return (
-    <Radix.Root openDelay={300} closeDelay={150} open={shown} onOpenChange={changeOpen}>
+    <Radix.Root openDelay={300} closeDelay={150} open={open ?? internalOpen} onOpenChange={changeOpen}>
       <Radix.Trigger
         asChild
         ref={triggerRef}
         onFocus={(event) => {
+          setKeyboardOnRow(focusVisible(event.currentTarget));
           if (restoring.current) event.preventDefault();
-          else if (shown && focusVisible(event.currentTarget)) setByKeyboard(true);
           else guardPointerFocus(event);
         }}
+        onBlur={() => setKeyboardOnRow(false)}
       >
         {children}
       </Radix.Trigger>
@@ -145,7 +142,7 @@ export function SidebarHoverCard({ label, children, content, open, onOpenChange 
           collisionPadding={8}
           className="z-50 w-[342px] rounded-md border border-border-strong bg-bg-overlay p-4"
         >
-          <OpenedByKeyboard.Provider value={byKeyboard}>{content}</OpenedByKeyboard.Provider>
+          <OpenedByKeyboard.Provider value={byKeyboard || keyboardOnRow}>{content}</OpenedByKeyboard.Provider>
         </Radix.Content>
       </Radix.Portal>
     </Radix.Root>
