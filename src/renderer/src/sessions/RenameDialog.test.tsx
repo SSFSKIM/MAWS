@@ -21,6 +21,7 @@ import { FIXTURE_DIR } from '../../../../test/support/fixtures';
 import { at } from '../../../../test/support/machine';
 import { recordedJoin } from '../../../../test/support/recorded-joins';
 import { useSessions } from '../stores/sessions';
+import { preloadOf } from '../test-support/preload-of';
 import { resetShellStores } from '../test-support/shell-stores';
 import { closeDialog, openDialog } from './dialogs';
 import { SessionDialogs } from './SessionDialogs';
@@ -76,7 +77,7 @@ it('Regenerate keeps its word while it waits, with a quiet spinner named by the 
 // again on a refusal, with its words
 it('Regenerate is busy from its press through a delayed receipt until the operation ends, and idle again on a refusal', async () => {
   fake = fakeClient({ 'session.events': { events: [withContent(firstPrompt('u704-end-env-first-1'), 'm1', 'Name this one')], lastSeq: 1, complete: true } });
-  window.maws = fake.client as unknown as PreloadBridge;
+  window.maws = preloadOf(fake); // the operation's event goes through the page's real client
   render(<SessionDialogs />);
   act(() => openDialog({ kind: 'rename', appSessionId: LIVE }));
   const dialog = await screen.findByRole('dialog', { name: 'Rename' });
