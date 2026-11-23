@@ -394,7 +394,7 @@ test.describe('interactive', () => {
         // own, says the answer once in a toast and closes
         const dialog = page.locator('[data-widget-dialog="reload-plugins"]');
         await expect(dialog.getByRole('progressbar', { name: 'Reloading plugins…' })).toBeVisible();
-        await expect(dialog.getByRole('button', { name: 'Reload plugins' })).toHaveCount(0);
+        await expect(dialog.getByRole('button', { name: 'Reload plugins', exact: true })).toHaveCount(0); // not its Close
         await expect.poll(() => settleOperations(backend)).toBe(1);
         await expect(page.getByText('Plugins reloaded', { exact: true })).toBeVisible();
         await expect(widget(page, name)).toHaveCount(0);
@@ -1397,8 +1397,9 @@ test.describe('plugin management (E8)', () => {
     const home = configHome(backend);
     await expect(sheet.getByRole('list', { name: "The engine's CLI writes:" }).getByRole('listitem')).toHaveText([`${home}/settings.json`, `${home}/plugins/installed_plugins.json`, `${home}/plugins/cache/e8-scratch/e8-probe/<version>/`, `${home}/plugins/cache/<any-marketplace>/<dependency>/`]);
     await expect(sheet).toContainText(`and keeps its own records in ${home}/.claude.json`);
-    // the word cut (P720): with no running session to reload (the scenario's have no process) the sheet says nothing of it
-    await expect(sheet).not.toContainText(/Reloads plugins in \d+ running sessions?|No running session to reload/);
+    // the word cut (P720): the sheet never says that nothing will reload; "Reloads plugins in N running sessions" stays
+    // where one will (the open session's, whose process this backend runs, on the Mac lane)
+    await expect(sheet).not.toContainText('No running session to reload');
     expect(mutations(backend)).toEqual([]); // nothing ran before the confirm
     await expect(detailOfCard(w)).toHaveCount(0); // + keeps its own click
 

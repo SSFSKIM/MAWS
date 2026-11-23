@@ -918,7 +918,7 @@ test.describe('sessions', () => {
 
   test('Overview New chat on an empty board closes the panel and hands typing to the new composer', async () => {
     const { page, maws } = await begin({ fixtures: [] });
-    await page.getByRole('button', { name: 'Overview', exact: true }).click();
+    await page.locator('[data-toolbar]').getByRole('button', { name: 'Overview', exact: true }).click(); // the title bar's (the empty pane's reads Overview too, W23)
     const overview = page.getByRole('dialog', { name: 'Overview' });
     await expect(overview.getByText('Nothing live or unread', { exact: true })).toBeVisible();
     await overview.getByRole('button', { name: 'New chat', exact: true }).click();
@@ -936,7 +936,7 @@ test.describe('sessions', () => {
   test('the slash palette opens above an unstarted New chat’s centred composer and moves nothing', async () => {
     const { page, maws } = await begin({ fixtures: [] });
     await maws.app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setBounds({ x: 72, y: 48, width: 1200, height: 640 }));
-    await page.getByRole('button', { name: 'Overview', exact: true }).click();
+    await page.locator('[data-toolbar]').getByRole('button', { name: 'Overview', exact: true }).click(); // the title bar's (the empty pane's reads Overview too, W23)
     const overview = page.getByRole('dialog', { name: 'Overview' });
     await overview.getByRole('button', { name: 'New chat', exact: true }).click();
     await expect(overview).toHaveCount(0);

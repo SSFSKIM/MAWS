@@ -853,11 +853,15 @@ test('all: My items lists the three kinds in one list; Discover’s home has a s
           near((await edges(actions().last())).right, row.right, `${at}: the last action's right edge`);
         }
         if (width === 400) {
-          // the search takes the line; actions that no longer fit beside it start the next one from the left
+          // actions that no longer fit beside the search start the next line from the left, the search taking its own;
+          // actions that still fit (Discover's, since the word cut took its Refresh, G267) stand at the line's right end
+          // beside the search grown to meet them, as at 620 px
           near(search.left, row.left, `${at}: the search's left edge`);
-          near(search.right, row.right, `${at}: the search's right edge`);
           const first = await edges(actions().first());
-          if (first.top >= search.bottom) near(first.left, row.left, `${at}: the first action's left edge, wrapped`);
+          if (first.top >= search.bottom) {
+            near(search.right, row.right, `${at}: the search's right edge`);
+            near(first.left, row.left, `${at}: the first action's left edge, wrapped`);
+          } else near((await edges(actions().last())).right, row.right, `${at}: the last action's right edge, beside the search`);
         }
         await info.attach(`customize-head-${view === 'My items' ? 'mine' : 'discover'}-all-${width}x${height}.png`, { body: await customizeHead(page).screenshot(), contentType: 'image/png' });
       }
