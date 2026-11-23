@@ -10,15 +10,15 @@ import { useWorkingFolder } from '../../../sessions/working-folder';
 import { SUMMARY_COPY } from '../../../panel/copy';
 import { changeWords } from '../../../panel/summary/ChangeWords';
 import { actionClass } from '../../../panel/summary/Section';
-import { checkoutKey, machineFor } from '../../../ipc/machine';
-import { useGit } from '../../../stores/git';
+import { machineFor } from '../../../ipc/machine';
+import { entryOf, useGit } from '../../../stores/git';
 import { Tip } from '../../../ui/tip';
 import type { ReviewParams } from './review-model';
 
 export function ReviewSummary({ appSessionId, open }: { appSessionId: AppSessionId; open(params?: ReviewParams): void }) {
   const countsId = useId();
   const directory = useWorkingFolder(appSessionId)?.path ?? null;
-  const entry = useGit((s) => (directory === null ? undefined : s.entries.get(checkoutKey(machineFor(appSessionId), directory))));
+  const entry = useGit((s) => entryOf(s, machineFor(appSessionId), directory));
   if (!entry) return null;
   const { words, uncounted } = changeWords(entry);
   return (

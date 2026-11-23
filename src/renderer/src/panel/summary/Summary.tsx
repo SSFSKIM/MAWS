@@ -18,6 +18,7 @@ import { useLayout } from '../../stores/layout';
 import { useSessions } from '../../stores/sessions';
 import { useTaskGraph } from '../../tools/agents/store';
 import { BackgroundTasksCard } from './BackgroundWork';
+import { CardBoundary } from './CardBoundary';
 import { Connectors } from './Connectors';
 import { Context } from './Context';
 import { Environment } from './Environment';
@@ -49,13 +50,13 @@ function SessionCards({ appSessionId, record }: { appSessionId: AppSessionId; re
     <div className="flex h-full w-70 max-w-full min-h-0 flex-col">
       <div aria-label="Session cards" className="flex min-h-0 flex-col gap-1.5 overflow-y-auto p-1">
         {/* eslint-disable-next-line react-hooks/static-components -- registered once at composition, not created in render */}
-        {waiting && <Waiting appSessionId={appSessionId} />}
+        {waiting && <CardBoundary name="Waiting requests"><Waiting appSessionId={appSessionId} /></CardBoundary>}
         {record && <RecordCards appSessionId={appSessionId} record={record} />}
-        <SubagentsCard appSessionId={appSessionId} />
-        <BackgroundTasksCard appSessionId={appSessionId} />
+        <CardBoundary name="Agents"><SubagentsCard appSessionId={appSessionId} /></CardBoundary>
+        <CardBoundary name="Background"><BackgroundTasksCard appSessionId={appSessionId} /></CardBoundary>
       </div>
       {/* eslint-disable-next-line react-hooks/static-components -- registered once at composition, not created in render */}
-      <Foot appSessionId={appSessionId} />
+      <CardBoundary name="Foot"><Foot appSessionId={appSessionId} /></CardBoundary>
     </div>
   );
 }
@@ -71,9 +72,9 @@ function RecordCards({ appSessionId, record }: { appSessionId: AppSessionId; rec
   const fold = (card: CardId): CardFold => ({ open: open.includes(card), onToggle: () => useLayout.getState().setCardOpen(card, !open.includes(card)) });
   return (
     <>
-      <Environment appSessionId={appSessionId} record={record} folder={folder} fold={fold('environment')} />
-      <Context appSessionId={appSessionId} directory={directory} fold={fold('context')} />
-      <Connectors appSessionId={appSessionId} fold={fold('connectors')} />
+      <CardBoundary name="Environment"><Environment appSessionId={appSessionId} record={record} folder={folder} fold={fold('environment')} /></CardBoundary>
+      <CardBoundary name="Context"><Context appSessionId={appSessionId} directory={directory} fold={fold('context')} /></CardBoundary>
+      <CardBoundary name="Connectors"><Connectors appSessionId={appSessionId} fold={fold('connectors')} /></CardBoundary>
     </>
   );
 }

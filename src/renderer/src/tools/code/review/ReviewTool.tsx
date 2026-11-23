@@ -24,7 +24,7 @@ export interface ReviewState {
 
 // `params` is undefined for a tab restored from layout.json (X5); a request is applied against the shown session.
 function createState({ appSessionId, session, params }: PanelToolInit<ReviewParams>): ReviewState {
-  return { ui: createReviewUi({ session: appSessionId, directory: session ? workingFolder(session).path : null, params: params ?? null }) };
+  return { ui: createReviewUi({ session: appSessionId, directory: (session && workingFolder(session).path) || null, params: params ?? null }) };
 }
 
 // Re-targeting (X5): a receipt's `{ scope: 'turn', turnId, path }`, C11's `{}` or `{ scope, path }`. Applied by the
@@ -44,7 +44,7 @@ export function ReviewIcon({ className }: { className?: string }) {
 function ReviewBody({ state, ctx }: { state: ReviewState; ctx: PanelToolContext }) {
   const { ui } = state;
   const shown = ctx.appSessionId;
-  const directory = ctx.session ? workingFolder(ctx.session).path : null;
+  const directory = (ctx.session && workingFolder(ctx.session).path) || null; // '' is a session with no folder: no checkout
   // A pinned tool shown for another session starts over there, and so does a session whose working folder changed (UX
   // wave U8c-2: the agent moved); an open() waiting is applied after that. Until then nothing renders, so no read is made
   // for the old scope and nothing chosen in the old folder is applied to the new one; the same session in the same folder

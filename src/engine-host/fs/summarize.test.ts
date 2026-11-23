@@ -7,7 +7,7 @@ import { previewLine } from '@shared/owner/preview';
 import { currentChain } from '@shared/wire/transcript';
 import { FIXTURE_DIR, loadJournal, loadTranscriptFixture, TEST_FIXTURE_DIR } from '../../../test/support/fixtures';
 import { recordedJoin } from '../../../test/support/recorded-joins'; // ticket 704
-import { HEAD_TAIL_BYTES, summarize } from './summarize';
+import { headCwd, HEAD_TAIL_BYTES, lineCwd, summarize } from './summarize';
 
 const PARENT_FIXTURE = join(TEST_FIXTURE_DIR, 'transcripts/subagent-parent.jsonl');
 // The session id is the file name under projects/<slug>/ (§4.3); the fixture copy carries its own name, so the
@@ -488,6 +488,33 @@ describe("the newest row's folder", () => {
 
   it('is null for a file of bookkeeping rows only', () => {
     expect(of(whole({ type: 'custom-title', customTitle: 't' }, { type: 'relocated', relocatedCwd: '/repo' })).newestCwd).toBeNull();
+  });
+});
+
+describe('the launch folder past the head window', () => {
+  const snapshot = (n: number) => line({ type: 'file-history-snapshot', messageId: `m${n}`, snapshot: { f: 'z'.repeat(40 * 1024) } });
+  const first = (cwd: string) => line({ type: 'user', uuid: 'u1', parentUuid: null, cwd, isSidechain: false, message: { role: 'user', content: 'hi' } });
+  const later = line({ type: 'assistant', uuid: 'a1', parentUuid: 'u1', cwd: '/later', isSidechain: false, message: { role: 'assistant', content: [{ type: 'text', text: 'y'.repeat(150 * 1024) }] } });
+  const last = line({ type: 'assistant', uuid: 'a2', parentUuid: 'a1', cwd: '/tail', isSidechain: false, message: { role: 'assistant', content: 'done' } });
+  const of = (bytes: Buffer, launchCwd: string | null) => {
+    const { head, tail } = headAndTail(bytes);
+    return summarize(head, tail, { size: bytes.length, mtimeMs: 1, birthtimeMs: 0 }, '/p/S.jsonl', '-p', null, launchCwd);
+  };
+
+  it('is the folder discovery found past the head, and unknown without one: never a later row\'s', () => {
+    const bytes = Buffer.from(snapshot(1) + snapshot(2) + first('/launched') + later + last, 'utf8');
+    expect(headCwd(headAndTail(bytes).head, bytes.length)).toBeNull(); // the head window is all snapshots
+    expect(of(bytes, '/launched').directory).toBe('/launched');
+    expect(of(bytes, null)).toMatchObject({ directory: null, newestCwd: '/tail' }); // a later `cd` refiles nothing
+  });
+
+  it("lineCwd reads a record's top-level cwd from its line's start, never a nested or escaped one", () => {
+    const at = (text: string) => lineCwd(Buffer.from(text, 'utf8'));
+    expect(at(line({ type: 'progress', input: { cwd: '/nested' }, note: '"cwd":"/escaped"' }))).toBeNull();
+    const record = first('/real');
+    expect(at(record)).toBe('/real');
+    expect(at(record.slice(0, 120))).toBe('/real'); // a line's start, cut anywhere after the key
+    expect(at(line({ type: 'progress', input: { cwd: '/nested' }, cwd: '/own' }))).toBe('/own');
   });
 });
 

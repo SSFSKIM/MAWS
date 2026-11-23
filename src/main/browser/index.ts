@@ -114,9 +114,9 @@ export function startBrowser({ userData, settings, view, data, register, emit: e
   const { file, broken } = readTabsFile(tabsFile);
   // P5 O7 M3: another machine's session keyed by its address, and every browser event naming one said from its machine
   // with its bare id (machines.ts)
-  const machines = remote ? new SessionMachines(remote.local, file.machines) : null;
+  const machines = remote ? new SessionMachines(remote.local, file.machines, [...file.tabs.map((tab) => tab.appSessionId), ...Object.keys(file.selected)]) : null;
   const emit: BrowserEmit = machines && remote ? machines.stamped(emitHere, remote.emitFrom) : emitHere;
-  const restored = knownSessionsOnly(file, view);
+  const restored = knownSessionsOnly(file, view, machines);
   // Each partition's browser preload (Decision Log 56), permission and download handlers. The last two close over `store`
   // and `downloads`, declared below: a partition is first opened by a tab's open or load (resolvePartition,
   // createTabView), never while startBrowser runs, so both exist by then (startBrowser opens no tab, and a restored tab is
@@ -127,7 +127,8 @@ export function startBrowser({ userData, settings, view, data, register, emit: e
   );
   const writer = new TabsFileWriter(tabsFile, () => {
     const snapshot = store.snapshot();
-    return { ...snapshot, ...machines?.kept(snapshot.tabs.map((tab) => tab.appSessionId)) };
+    // the selection's keys too: a remote session whose last tab closed keeps its selection, and so its machine
+    return { ...snapshot, ...machines?.kept([...snapshot.tabs.map((tab) => tab.appSessionId), ...Object.keys(snapshot.selected)]) };
   });
   const store: TabStore = new TabStore({
     emit,
@@ -367,9 +368,9 @@ function sessionSnapshot(view: BrowserDeps['view']): string[] | null {
 
 // The restored tabs whose session the spine knows; all of them while the view is unavailable (nothing is known then).
 // P5 O7 M3: a session of another machine (`machines`) is never the spine's: its tabs are kept.
-function knownSessionsOnly(file: TabsFile, view: BrowserDeps['view']): TabsFile {
+function knownSessionsOnly(file: TabsFile, view: BrowserDeps['view'], machines: SessionMachines | null): TabsFile {
   if (view.unavailable() !== null) return file;
-  const knows = (appSessionId: string) => file.machines?.[appSessionId as AppSessionId] !== undefined || view.record(appSessionId as AppSessionId) !== null;
+  const knows = (appSessionId: string) => (machines?.away(appSessionId) ?? null) !== null || file.machines?.[appSessionId as AppSessionId] !== undefined || view.record(appSessionId as AppSessionId) !== null;
   const tabs = file.tabs.filter((tab) => knows(tab.appSessionId));
   const selected = Object.fromEntries(Object.entries(file.selected).filter(([appSessionId]) => knows(appSessionId)));
   return { ...file, tabs, selected };

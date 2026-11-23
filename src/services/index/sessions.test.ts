@@ -78,6 +78,28 @@ describe('session records in the index', () => {
       expect(index.sessions.upsertFromSummary(summary({ sessionId, directory: b, size: 120, mtimeMs: 3_000 })).record.projectId).toBe(first);
     });
 
+    // Seen 2026-11-23: discovery once read a transcript whose first folder lay past its head window as naming none, and
+    // the record was stored with an empty folder. Once per index such a record reads stale, so the next scan summarises
+    // it again and that summary (now naming the folder) fills it in; a record without a folder after that is not rescanned.
+    it('a record stored with no folder reads stale to the scan once, and heals on the next summary that names one', () => {
+      const sessionId = sessionIdFor(0x503);
+      const first = summary({ sessionId, directory: null, relocatedCwd: null, newestCwd: null, size: 700, mtimeMs: 2_000 });
+      const { record } = index.sessions.upsertFromSummary(first);
+      expect(record.directory).toBe('');
+      const bindingOf = (id: SessionId) => index.sessions.bindings().find((b) => b.sessionId === id);
+      expect(bindingOf(sessionId)).toMatchObject({ size: 700, mtimeMs: -1 });
+      const a = realpathSync(dir.path);
+      expect(index.sessions.upsertFromSummary({ ...first, directory: a }).record).toMatchObject({ appId: record.appId, directory: a });
+      expect(bindingOf(sessionId)).toMatchObject({ size: 700, mtimeMs: 2_000 });
+      // one time only: a folderless record met afterwards, in this index or reopened, keeps its stamp
+      const later = sessionIdFor(0x504);
+      index.sessions.upsertFromSummary({ ...first, sessionId: later });
+      expect(bindingOf(later)).toMatchObject({ mtimeMs: 2_000 });
+      index.close();
+      index = new Index(join(dir.path, 'index.sqlite'));
+      expect(bindingOf(later)).toMatchObject({ mtimeMs: 2_000 });
+    });
+
     it('locates nothing, so no git runs for it inside the transaction', async () => {
       const main = realpathSync(await gitCheckout(join(dir.path, 'repo'), 'main'));
       const sessionId = sessionIdFor(0x502);
