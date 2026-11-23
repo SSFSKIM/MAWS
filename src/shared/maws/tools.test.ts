@@ -38,8 +38,6 @@ import {
   mawsToolList,
   parseRecordedToolArguments, // U6d
   parseToolArguments,
-  SendFileInputSchema,
-  SendFileResultSchema,
   ShowPaneInputSchema,
   ShowPaneRecordedInputSchema, // U6d
   ShowPaneResultSchema,
@@ -47,6 +45,8 @@ import {
   TOOL_ERRORS,
 } from './tools';
 import { ArtifactUpdateInputSchema, ArtifactUpdateResultSchema } from './artifact-update';
+import { HISTORICAL_SEND_FILE, SendFileInputSchema, SendFileResultSchema } from './send-file'; // board ticket 848
+import { mawsServerInstructions } from './instructions';
 
 describe('X9: the maws server and its twelve tools', () => {
   it('names the server and the tools as the contract says (E2 appends the artifact tools; P3-A M6 retires artifact_update and appends six)', () => {
@@ -138,6 +138,32 @@ describe('X9: the maws server and its twelve tools', () => {
     expect(MAWS_TOOLS.artifact_create.description.endsWith("To name it to the user, write a Markdown link [its title](maws-artifact:<artifactId>): a click opens it in MAWS. When the artifact's Space has instructions from the user, the answer carries them as spaceInstructions, the first time and again after they change: follow them for work in that Space.")).toBe(true);
     expect(MAWS_TOOLS.artifact_create.description).toHaveLength(1458 + 184); // UX wave U10b: designSystem's sentence; M10: the instructions' sentence
     for (const name of MAWS_TOOL_NAMES) if (name !== 'show_pane') expect(MAWS_TOOLS[name].description, name).not.toContain('show_pane');
+  });
+});
+
+// Board ticket 848 (the X9 amendment of 2026-11-23): `send_file` left the server; a file reaches the user as a link to
+// its path in the agent's message. Its name and schemas stay in `./send-file`, only to read the records written before.
+describe('send_file, retired (board ticket 848)', () => {
+  it('is not listed, and nothing the server serves names it', () => {
+    expect(MAWS_TOOL_NAMES as readonly string[]).not.toContain('send_file');
+    expect(mawsToolList().map((tool) => tool.name)).not.toContain('send_file');
+    for (const tool of mawsToolList()) expect(tool.description, tool.name).not.toMatch(/send_file/);
+    expect(mawsServerInstructions({ inAppBrowser: true })).not.toMatch(/send_file/);
+    expect(TOOL_ERRORS.unknownTool('echo')).not.toMatch(/send_file/);
+    expect(Object.keys(TOOL_ERRORS)).not.toContain('notAFile');
+    expect(Object.keys(TOOL_ERRORS)).not.toContain('deliveryUnavailable');
+  });
+
+  it('answers a call with the sentence that teaches the path link and what its click does', () => {
+    expect(TOOL_ERRORS.sendFileRetired).toBe(
+      'send_file: MAWS no longer delivers files. Link the file in your message as a Markdown link to its absolute path, [its name](/absolute/path): a click opens it beside the chat, and ⌘-click opens it in the main area.',
+    );
+  });
+
+  it('keeps the name and the schemas a record was written under', () => {
+    expect(HISTORICAL_SEND_FILE).toBe('send_file');
+    expect(SendFileInputSchema.parse({ files: ['a.txt'], caption: 'c', urgency: 'high' })).toEqual({ files: ['a.txt'], caption: 'c', urgency: 'high' });
+    expect(SendFileResultSchema.safeParse({ status: 'delivered', deliverables: [{ id: 'd1', path: '/r/a.pdf', name: 'a.pdf' }] }).success).toBe(true);
   });
 });
 
