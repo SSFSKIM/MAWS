@@ -22,7 +22,7 @@ Columns: **Id** is the item's id in `items.json`. **Where** is the place on the 
 
 | Id | Where | Today | Decision | After | Basis | Source | M0 | Build |
 |---|---|---|---|---|---|---|---|---|
-| C70 | last action under the list | Don't work in a project | cut | The project menu's last action reads "No project". | pattern | `src/renderer/src/composer/frame/ProjectRow.tsx:46` | unchanged `src/renderer/src/composer/frame/ProjectRow.tsx:46` | M4 · no scene: needs that window, sidebar or banner state (wanted: New chat, the project menu open) |
+| C70 | last action under the list | Don't work in a project | cut | The project menu's last action reads "No project". | pattern | `src/renderer/src/composer/frame/ProjectRow.tsx:46` | unchanged `src/renderer/src/composer/frame/ProjectRow.tsx:46` | M4 · `m4-new-chat-project-menu` |
 
 ### New chat, machine menu
 

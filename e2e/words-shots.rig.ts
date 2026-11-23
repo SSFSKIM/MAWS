@@ -766,6 +766,8 @@ const M4_WORDS = {
   sessionsLabel: 'Sessions', // sessions/WorktreesDialog.tsx, the label over a worktree's sessions, both builds
   refresh: 'Refresh', // widgets/copy.ts FRAME.refresh, Session info's gesture, both builds
   starting: 'Starting…', // sessions/acquire.ts STARTING_SESSION (FRAME.starting): master's status words, M4's spinner's name (P523)
+  chooseProject: 'Choose a project', // composer/frame/ProjectRow.tsx, the project menu's name, both builds
+  noProject: { m4: 'No project', master: 'Don’t work in a project' }, // composer/frame/ProjectRow.tsx NO_PROJECT (C70)
   installed: 'Installed', // customize/discover/copy.ts DISCOVER.installed: master's word beside the check, M4's mark's name (G278)
   add: 'Add', // widgets/copy.ts LIBRARY.add, the plugin list's Add menu's name, both builds (P655)
 };
@@ -1523,6 +1525,28 @@ async function m4Scenario(app: ElectronApplication, page: Page, SID: Record<'run
     after: async () => {
       await letGo(page);
       await closeOverlays(page);
+    },
+  });
+
+  // ---- New chat's project menu (C70): its last action in the chip's words on M4, "No project"; master's sentence. The
+  // new chat opens over the idle session, so a project is chosen and the action is offered; its tab is closed after.
+  const chooser = () => page.getByRole('dialog', { name: M4_WORDS.chooseProject, exact: true });
+  await shot(page, meta('m4-new-chat-project-menu', 'C70', 'New chat, the project menu open', 'The idle session in front, File › New chat (⌘N), then its project chip pressed', 'The project menu over the new chat: the projects, the scratch project ticked, then New project and the last action (“No project” on M4, master “Don’t work in a project”)', ['composer', 'composer/frame']), async () => {
+    await closeOverlays(page);
+    await openSession(page, SID.idle);
+    await menu(app, 'session.new');
+    await expect(pane(page).locator('[data-project-row]')).toBeVisible({ timeout: 10_000 });
+    await page.waitForTimeout(800);
+    await pane(page).locator('[data-project-row] button[aria-haspopup="dialog"]').first().click();
+  }, {
+    check: async () => {
+      await inView(chooser(), 'the project menu');
+      await inView(chooser().getByRole('option', { name: byM4(M4_WORDS.noProject), exact: true }), 'the menu’s last action');
+    },
+    after: async () => {
+      await closeOverlays(page);
+      await menu(app, 'tab.close');
+      await page.waitForTimeout(500);
     },
   });
 
