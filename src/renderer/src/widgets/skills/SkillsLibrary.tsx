@@ -139,7 +139,9 @@ export function SkillDetail({ row, onBack, onUse, backTo = S.list, extras = {} }
       <div className="flex items-center gap-3">
         <ItemImage kind="skill" seed={labelOf(row)} iconUrl={null} size="head" />
         <div className="flex min-w-0 flex-1 flex-col gap-0.5">
-          <h3 className="m-0 truncate text-prose font-semibold text-fg">{labelOf(row)}</h3>
+          <h3 tabIndex={-1} data-skill-heading className="m-0 truncate rounded-sm text-prose font-semibold text-fg outline-accent focus-visible:outline-2">
+            {labelOf(row)}
+          </h3>
         </div>
         {onUse && invocation !== null && <button type="button" className={PRIMARY} disabled={row.unavailable != null} title={row.unavailable ?? undefined} onClick={() => onUse(invocation)}>
           {S.useInChat}
@@ -191,7 +193,9 @@ export function SkillsLibrary({ groups, shown, onUse, onDetail, onReset, toList,
     if (selectedKey !== null || from === null || pane.current === null) return;
     left.current = null;
     pane.current.scrollTop = from.scrollTop;
-    pane.current.querySelector<HTMLElement>(`[data-skill-key="${CSS.escape(from.key)}"] [data-row-open]`)?.focus(); // a name two scopes can share
+    // its row (a name two scopes can share); a row a new answer no longer lists, the list's first row, else the list
+    const row = pane.current.querySelector<HTMLElement>(`[data-skill-key="${CSS.escape(from.key)}"] [data-row-open]`) ?? pane.current.querySelector<HTMLElement>('[data-row-open]');
+    (row ?? pane.current).focus();
   }, [selectedKey]);
 
   const total = groups.reduce((n, g) => n + g.rows.length, 0);
@@ -227,7 +231,7 @@ export function SkillsLibrary({ groups, shown, onUse, onDetail, onReset, toList,
   return (
     <>
       {selected !== null && <SkillDetail row={selected} onBack={back} onUse={onUse} extras={extrasOf?.(selected)} />}
-      <div ref={pane} data-skills-list className={`min-h-0 flex-1 overflow-y-auto px-1 pb-2 ${selected !== null ? 'hidden' : ''}`}>
+      <div ref={pane} tabIndex={-1} data-skills-list className={`min-h-0 flex-1 overflow-y-auto px-1 pb-2 outline-none ${selected !== null ? 'hidden' : ''}`}>
         {body}
       </div>
     </>

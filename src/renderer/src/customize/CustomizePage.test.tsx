@@ -823,6 +823,35 @@ describe('a skill’s actions', () => {
     await waitFor(() => expect(document.querySelector('[data-skill-refusal]')).toBeNull());
   });
 
+  // the word cut's fix wave for M4: Retry goes from under the keyboard, which stays on the detail's heading while the
+  // detail stays, and lands on the list when the read finds the skill gone
+  const MISSING = { status: 'refused', reason: 'missing', message: null };
+  const pressRetry = async (detail: HTMLElement) => {
+    await choose(detail, 'Finder');
+    const retry = within(await found('[data-skill-refusal]')).getByRole('button', { name: 'Retry' });
+    act(() => retry.focus());
+    fireEvent.click(retry);
+  };
+  it('Retry keeps the keyboard on the detail’s heading while the detail stays', async () => {
+    skillFileAnswer = MISSING;
+    const detail = await openDetail('skills');
+    const reads = invoked('customization.inventory').length;
+    await pressRetry(detail);
+    await waitFor(() => expect(invoked('customization.inventory').length).toBeGreaterThan(reads));
+    await waitFor(() => expect(document.querySelector('[data-skill-refusal]')).toBeNull());
+    expect(document.activeElement).toBe(within(detail).getByRole('heading', { name: 'tide-tables' }));
+  });
+
+  it('Retry that finds the skill gone puts the keyboard on the list', async () => {
+    extraSkills = [{ name: 'harbour-notes', description: 'Notes on the harbour', source: 'user', path: `${HOME}/.claude/skills/harbour-notes/SKILL.md`, plugin: null }];
+    skillFileAnswer = MISSING;
+    const detail = await openDetail('skills', 'harbour-notes');
+    extraSkills = [];
+    await pressRetry(detail);
+    await waitFor(() => expect(document.querySelector('[data-skill-detail]')).toBeNull());
+    expect(document.activeElement?.closest('[data-skills-list]')).not.toBeNull();
+  });
+
   it('a plugin’s skill’s detail says its plugin’s updates replace the file', async () => {
     extraSkills = [{ name: 'chart-reader', description: 'Reads charts', source: 'plugin', path: `${HOME}/plugins/cache/quay-ledger/skills/chart-reader/SKILL.md`, plugin: 'quay-ledger@harbour-market', pluginName: 'quay-ledger' }];
     await openDetail('skills', 'chart-reader');

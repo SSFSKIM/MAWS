@@ -54,7 +54,9 @@ function SkillRefusal({ row }: { row: SkillRow }) {
         <button
           type="button"
           className="rounded-sm px-2 py-1 text-ui-sm text-fg outline-accent hover:bg-bg-hover focus-visible:outline-2"
-          onClick={() => {
+          onClick={(event) => {
+            // the button goes: the keyboard stays on the detail's heading (and on the list, should the read find the skill gone)
+            event.currentTarget.closest('[data-skill-detail]')?.querySelector<HTMLElement>('[data-skill-heading]')?.focus();
             useRefusal.setState({ text: null });
             void inventory.refetch();
           }}
