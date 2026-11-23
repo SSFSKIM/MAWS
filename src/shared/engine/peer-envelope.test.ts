@@ -436,3 +436,41 @@ describe("sminos's note after the words", () => {
     expect(sminosParts(`${FRAME}\nRebase on main.\n\n${SECOND}\nThen tell me.\n\n${NOTE}`)).toEqual({ frame: FRAME, body: `Rebase on main.\n\n${SECOND}\nThen tell me.`, note: NOTE_TEXT });
   });
 });
+
+// Board ticket 850: a delivery to a session whose process takes receipts (sminos's holder deliveries, O12 M4b) opens its
+// text with the receipt's marker line, `[sminos receipt <24 hex>.<16 hex> attempt <n>]` (` wake` before the bracket for
+// a wake, whose frame says `→ @you, again`), before sminos's frame line. The marker is sminos's, for its own bridge
+// mod; the text is read as the frame, its words and its note, as without it.
+describe("sminos's receipt marker before the frame", () => {
+  const ID = '0123456789abcdef01234567.89abcdef01234567';
+  const FRAME = '[sminos chat demo a1b2c3d4:7 from sky-lab → @you]';
+  const REPLY = '[To reply, run in Bash: /opt/tools/sminos say "@demo/a1b2c3d4 <your reply>"]';
+
+  it('cuts the marker line and reads the frame after it, on every route', () => {
+    for (const attempt of [1, 12]) {
+      const text = `[sminos receipt ${ID} attempt ${attempt}]\n${FRAME}\nThe fixtures are ready.\n${REPLY}`;
+      expect(parsePeerMessage(ENVELOPE('from-name="sky-lab"', text))).toMatchObject({ frame: FRAME, body: 'The fixtures are ready.', note: null });
+      expect(sminosParts(`[sminos receipt ${ID} attempt ${attempt}]\n${FRAME}\nThe fixtures are ready.`)).toEqual({ frame: FRAME, body: 'The fixtures are ready.', note: null });
+    }
+    expect(sminosParts(`[sminos receipt ${ID} attempt 1]\n[sminos message from human id=0f0e0d0c]\nAlso run the linter.`)).toEqual({ frame: '[sminos message from human id=0f0e0d0c]', body: 'Also run the linter.', note: null });
+  });
+
+  it("reads a wake's marker and its frame, whose target says again", () => {
+    const again = '[sminos chat demo a1b2c3d4:7 from sky-lab → @you, again]';
+    expect(sminosFrameSender(again)).toBe('sky-lab');
+    expect(parsePeerMessage(ENVELOPE('from-name="sky-lab"', `[sminos receipt ${ID} attempt 2 wake]\n${again}\nIt is above in this conversation, delivered before: read it there.`))).toMatchObject({
+      frame: again, body: 'It is above in this conversation, delivered before: read it there.',
+    });
+  });
+
+  it('keeps the text whole where the marker is not whole, not first, or has no frame after it', () => {
+    for (const text of [
+      `[sminos receipt 0123 attempt 1]\n${FRAME}\nWords.`, // not the id's shape
+      `[sminos receipt ${ID} attempt 0]\n${FRAME}\nWords.`, // no attempt 0
+      `[sminos receipt ${ID} attempt 1] \n${FRAME}\nWords.`, // not the whole line
+      `[sminos receipt ${ID} attempt 1]\nWords with no frame.`,
+      `[sminos receipt ${ID} attempt 1]`,
+    ]) expect(sminosParts(text), text).toEqual({ frame: null, body: text, note: null });
+    expect(sminosParts(`${FRAME}\n[sminos receipt ${ID} attempt 1]\nWords.`)).toEqual({ frame: FRAME, body: `[sminos receipt ${ID} attempt 1]\nWords.`, note: null });
+  });
+});

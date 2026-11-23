@@ -240,6 +240,15 @@ describe('the reader, on deliveries written by hand', () => {
     expect(readNext(mirror(text), open).arrivals).toEqual([]);
   });
 
+  // Board ticket 850: a receipt's marker line before the frame (sminos's holder deliveries) leaves a peer's message a peer's
+  it('a peer’s message by the inbox whose text opens with a receipt’s marker: the peer’s, framed, the marker not among its words', () => {
+    const marker = '[sminos receipt 0123456789abcdef01234567.89abcdef01234567 attempt 1]';
+    expect(readArrivals(inbox(`${marker}\n${CHAT_FRAME}\nThe fixtures are ready.`, { kind: 'peer', from: 'unknown', name: 'sky-lab' }))).toEqual([
+      { class: 'peer', via: 'inbox', sender: { name: 'sky-lab', address: '', session: null, owners: null }, body: 'The fixtures are ready.', frame: CHAT_FRAME, midTurn: false, lineage: 'peer', replyTo: null, note: null },
+    ]);
+    expect(readArrivals(inbox(`${marker}\n[sminos message from human id=0f0e0d0c]\nAlso run the linter.`, { kind: 'peer', from: 'unknown' })).map(said)).toEqual(['own chat: Also run the linter.']);
+  });
+
   it('the owner’s steer by `sminos steer`’s inbox fallback is the owner’s (X-032); the frame line decides when the origin names no one', () => {
     expect(readArrivals(inbox('[sminos steer from human]\nStop after the tests.'))).toEqual([{ class: 'own', via: 'steer', words: 'Stop after the tests.', frame: '[sminos steer from human]', note: null }]);
     expect(readArrivals(inbox('[sminos message from human id=0f0e0d0c]\nAlso run the linter.', { kind: 'peer', from: 'unknown' })).map(said)).toEqual(['own chat: Also run the linter.']);

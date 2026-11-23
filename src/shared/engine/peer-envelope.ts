@@ -72,6 +72,13 @@ const SMINOS_NOTE = /\n\n\[sminos\] ([^\n]*)$/;
 // `@you`, or a broadcast's: `@all`, or from sminos 1.2.0 its scope's label (`scope_label`: `@org`, `@org (<states>)`,
 // or `@all in <projects>`, `@all on <machines>` or both, then perhaps ` (<states>)`).
 const SMINOS_CHAT_HEAD = /^\[sminos chat .+? \S+:\d+ from /;
+// Board ticket 850: sminos's receipt marker (O12 M4b, `sminos_holder_deliveries.py`, `MARKER_RE`): to a session whose
+// process takes receipts, the delivery's text opens with `[sminos receipt <24 hex>.<16 hex> attempt <n>]`, ` wake` before
+// the bracket for a wake (a retry that points at the body the conversation already holds), and the frame line follows
+// it. The marker is for sminos's own bridge mod; the text is read as without it. A wake's frame ends its target with
+// `, again` (`holder_wake`).
+const SMINOS_RECEIPT_LINE = /^\[sminos receipt [0-9a-f]{24}\.[0-9a-f]{16} attempt [1-9][0-9]{0,8}(?: wake)?\]$/;
+const AGAIN = ', again';
 const SMINOS_UNREAD = / \| unread [1-9][0-9]*$/;
 // sminos's `STATES`, the words `--state` takes.
 const SMINOS_STATE = '(?:busy|idle|waiting|stopped|gone|vacant|retired)';
@@ -112,6 +119,7 @@ function quotedAlias(text: string): { alias: string; length: number } | null {
 function chatTargetAt(rest: string, at: number, lastBracket: number): boolean {
   const length = rest.length - at;
   if (length === 4 && (rest.startsWith('@you', at) || rest.startsWith('@all', at))) return true;
+  if (length === 4 + AGAIN.length && rest.startsWith(`@you${AGAIN}`, at)) return true; // a wake's (board ticket 850)
   if (rest.startsWith('@all in ', at) || rest.startsWith('@all on ', at)) return length > 8 && lastBracket < at;
   if (!rest.startsWith('@org', at)) return false;
   SMINOS_ORG_TARGET.lastIndex = at;
@@ -177,14 +185,24 @@ function senderParts(frame: string): { alias: string; label: string } | null {
   return end < 0 ? { alias: sender, label: '' } : { alias: sender.slice(0, end), label: sender.slice(end) };
 }
 
+/** The text after sminos's receipt marker where it opens with one and a whole frame line follows; else the text. */
+function withoutReceipt(text: string): string {
+  const end = text.indexOf('\n');
+  if (end < 0 || !SMINOS_RECEIPT_LINE.test(text.slice(0, end))) return text;
+  const rest = text.slice(end + 1);
+  const next = rest.indexOf('\n');
+  return next >= 0 && sminosFrameSender(rest.slice(0, next)) !== null ? rest : text;
+}
+
 /**
  * A sminos message's text as drawn: its frame line (whole, the first, with the text after it), its reply line and its
- * note cut. The note is read only in a text that opens with a frame line: after the reply line is cut, the last
+ * note cut, and a receipt's marker before the frame line with it (board ticket 850). The note is read only in a text that opens with a frame line: after the reply line is cut, the last
  * paragraph when it is one line opening with `[sminos] ` (`SMINOS_NOTE`), with the sender's words before its blank line;
  * `note` is its words after the marker. One text may hold several frames, each a paragraph: the first is the frame, the
  * rest stay in the words, and the note, written once at the end, is cut the same.
  */
-export function sminosParts(body: string): { frame: string | null; body: string; note: string | null } {
+export function sminosParts(text: string): { frame: string | null; body: string; note: string | null } {
+  const body = withoutReceipt(text);
   const first = body.split('\n', 1)[0]!;
   const frame = body.includes('\n') && sminosFrameSender(first) !== null ? first : null;
   const words = (frame === null ? body : body.slice(frame.length + 1)).replace(SMINOS_REPLY_LINE, '');
