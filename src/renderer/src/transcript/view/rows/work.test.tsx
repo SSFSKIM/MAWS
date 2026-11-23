@@ -180,6 +180,28 @@ describe('subagent row', () => {
     act(() => words.focus());
     expect(screen.getByRole('tooltip').textContent).toMatch(/^Survey · Read · \d+s$/);
   });
+
+  // The touch rule (ticket 830): where nothing points, what each working agent is doing stands under the line, whichever
+  // owner carries it (the line, the words, a glyph), drawn by the stylesheet alone (ui/touch-fact.test.tsx) and hidden from
+  // assistive technology, which hears it as that owner's description; an ended agent has none
+  it('stands what it is doing under its line for a screen that cannot point, hidden from assistive technology', async () => {
+    const b = started();
+    b.emit('tool.use', { toolUseId: tool('c1'), toolName: 'Read', input: { file_path: '/p/one.txt' }, apiMessageId: 'mc' as never, messageUuid: null }, { parentToolUseId: parent('a1') });
+    const store = await storeWith(b.events);
+    const row = rowOf(store.rows(), 'subagent');
+    const fact = (root: Element) => root.querySelector<HTMLElement>('.transcript-subagent > [data-touch-fact="block"]');
+    const view = renderRow(row, { storeKey: store.key });
+    expect(fact(view.container)!.textContent).toMatch(/^Survey · Read · \d+s$/);
+    expect(fact(view.container)!.textContent).toBe(described(screen.getByRole('button', { name: 'Working Survey' })));
+    expect(fact(view.container)!.getAttribute('aria-hidden')).toBe('true');
+    view.unmount();
+    const plain = renderRow(row, { storeKey: store.key, actions: { ...NO_ACTIONS } });
+    expect(fact(plain.container)!.textContent).toBe(described(plain.container.querySelector('.transcript-subagent-sentence')!));
+    plain.unmount();
+    b.emit('subagent.finished', { taskId: task('k1'), status: 'completed', summary: null, outputFile: null, reason: null });
+    const ended = await storeWith(b.events);
+    expect(fact(renderRow(rowOf(ended.rows(), 'subagent'), { storeKey: ended.key }).container)).toBeNull();
+  });
 });
 
 // The texts an element's `aria-describedby` names, joined.
@@ -211,6 +233,8 @@ describe('grouped subagent rows', () => {
       const reviewer = screen.getByRole('button', { name: 'Open Reviewer' });
       expect(described(reviewer)).toMatch(/^Reviewer · Read · \d+s$/);
       expect(screen.getByRole('button', { name: 'Open Tester' }).hasAttribute('aria-describedby')).toBe(false); // it has ended
+      // the touch rule (ticket 830): where nothing points, the working children's details stand under the line
+      expect(document.querySelector('.transcript-subagent > [data-touch-fact="block"]')!.textContent).toBe(described(reviewer));
       act(() => reviewer.focus());
       const tip = () => screen.getByRole('tooltip').textContent ?? '';
       expect(tip()).toMatch(/^Reviewer · Read · \d+s$/);
@@ -235,6 +259,26 @@ describe('grouped subagent rows', () => {
       expect(described(screen.getByRole('button', { name: 'Open Echo twice' }))).toMatch(/^Echo twice · Echo · \d+s$/);
       expect(described(screen.getByRole('button', { name: 'Open Reviewer' }))).toMatch(/^Reviewer · Read · \d+s$/);
     });
+  });
+
+  // The touch rule (ticket 830; task 1 fix round 1): the block under the line carries the details of the agents whose
+  // glyphs are drawn, each of which owns its detail; past four, the rest join it when `+N` opens them, as their glyphs do
+  it('stands under the line the details of the agents whose glyphs are drawn, the rest once `+N` opens them', async () => {
+    const store = await storeWith(agents(['A', 'B', 'C', 'D', 'E', 'F']).events);
+    const row = rowOf(store.rows(), 'subagent');
+    const view = renderRow(row, { storeKey: store.key, actions: spyActions() });
+    const fact = () => view.container.querySelector('.transcript-subagent > [data-touch-fact="block"]')!.textContent!.split('\n');
+    const owners = () => ['A', 'B', 'C', 'D', 'E', 'F'].flatMap((name) => screen.queryByRole('button', { name: `Open ${name}` }) ?? []).map(described);
+    expect(fact().map((line) => line.split(' · ')[0])).toEqual(['A', 'B', 'C', 'D']);
+    expect(fact()).toEqual(owners());
+    fireEvent.click(screen.getByRole('button', { name: /\+2/ }));
+    expect(fact().map((line) => line.split(' · ')[0])).toEqual(['A', 'B', 'C', 'D', 'E', 'F']);
+    expect(fact()).toEqual(owners());
+    view.unmount();
+    // nothing opens an agent: the words own every detail, so the block carries them all
+    const plain = renderRow(row, { storeKey: store.key, actions: { ...NO_ACTIONS } });
+    expect(plain.container.querySelector('.transcript-subagent > [data-touch-fact="block"]')!.textContent).toBe(described(plain.container.querySelector('.transcript-subagent-sentence')!));
+    expect(plain.container.querySelector('.transcript-subagent > [data-touch-fact="block"]')!.textContent!.split('\n')).toHaveLength(6);
   });
 
   it('with five agents the overflow reveals the rest, and the fifth opens through openSubagent', async () => {

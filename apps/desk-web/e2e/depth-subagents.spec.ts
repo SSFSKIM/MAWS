@@ -91,7 +91,7 @@ test('the tree matches the recording’s metas, grows as the agents start, and f
   const { player, depth } = await openDepth(page, hub, { growTree: true });
   await depth.getByTestId('depth-tab-subagents').click();
   const tree = depth.getByTestId('depth-subagents');
-  await expect(tree).toContainText('No subagents yet');
+  await expect(tree).toContainText('No agents yet'); // the word cut (N158)
 
   // The first `Agent` call: its meta, then its row.
   player.advanceTo((item) => item.kind === 'subagents' && item.body.subagents.length === 2);
@@ -120,7 +120,8 @@ test('the tree matches the recording’s metas, grows as the agents start, and f
   );
   const metas = recording.subagents.map(({ agentId, meta }) => ({ agentId, status: 'completed', title: meta.description }));
   expect(drawn.sort((a, b) => a.agentId!.localeCompare(b.agentId!))).toEqual(metas.sort((a, b) => a.agentId.localeCompare(b.agentId)));
-  await expect(tree.locator(`[data-agent-row="${KETTLE.agentId}"] [data-part="line"]`)).toContainText('finished');
+  // the word cut (T162): a finished agent's line is its age (then its summary), with no `finished` word
+  await expect(tree.locator(`[data-agent-row="${KETTLE.agentId}"] [data-part="line"]`)).toHaveText(/^(?!finished|failed|stopped)\S/);
 });
 
 test('opening an agent subscribes with its agentId and draws its stream settling once into its transcript', async ({ page, hub }) => {
@@ -138,7 +139,7 @@ test('opening an agent subscribes with its agentId and draws its stream settling
   await settleAgentAnswer(track, detail, KETTLE_ANSWER);
   await expect(detail.locator('[data-part="agent-meta"]')).toContainText('claude-opus-5-5');
 
-  await detail.getByRole('button', { name: '‹ Subagents' }).click();
+  await detail.getByRole('button', { name: '‹ Agents' }).click(); // MAWS's shared back link (the word cut, T152), which the desk's drill-in reads
   await expect(depth.getByTestId('depth-subagents')).toBeVisible();
   await expect.poll(() => track.subscriptions()).toBe(0); // leaving the agent closes its subscription
 });

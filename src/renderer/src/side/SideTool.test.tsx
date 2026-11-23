@@ -52,6 +52,11 @@ import { FILES_READ_DEFAULT_LENGTH } from '@shared/ipc/schema/files'; // UX wave
 import { FileViewer } from '../tools/code/viewer/FileViewer';
 import { useViewer } from '../tools/code/viewer/viewer-store';
 import { openFile } from '../tools/code/open-file';
+import { accessibleText } from '../test-support/accessible-text';
+
+const TOGGLE = 'Questions: /btw side questions';
+const descriptionOf = (element: Element) => document.getElementById(element.getAttribute('aria-describedby') ?? '')?.textContent ?? null;
+
 // UX wave U6b-4b (R4): the opener the answers' chips call, spied through to the real one, so a case counts its calls
 vi.mock('../tools/code/open-file', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../tools/code/open-file')>();
@@ -137,7 +142,7 @@ describe('the Side pane', () => {
 
   it('with no thread, the empty state says how to start one', () => {
     mount();
-    expect(screen.getByText('No side threads yet. Comment on a line, or type /btw in the composer.')).toBeTruthy();
+    expect(screen.getByText('Comment on a line to start a thread.')).toBeTruthy(); // the word cut (P419)
   });
 
   it('the thread view yields to a main tab of the thread, and comes back when that tab closes; it publishes the child only while drawn', async () => {
@@ -147,10 +152,12 @@ describe('the Side pane', () => {
     expect(screen.getByRole('button', { name: 'Open x.ts:42' })).toBeTruthy();
     expect(sideChildrenShown()).toEqual(new Map([[A, ONE]]));
     await userEvent.click(screen.getByRole('button', { name: 'Open as tab' }));
-    expect(screen.getByText('Shown in the main area')).toBeTruthy();
+    // the word cut (P424): only the button is drawn, the sentence its tooltip and description
+    expect(descriptionOf(screen.getByRole('button', { name: 'Go to tab' }))).toBe('Shown in the main area');
+    expect(accessibleText(document.body)).not.toContain('Shown in the main area');
     expect(sideChildrenShown()).toEqual(new Map());
     act(() => useLayout.getState().closeTab(`session:${ONE}`));
-    expect(screen.queryByText('Shown in the main area')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Go to tab' })).toBeNull();
     expect(sideChildrenShown()).toEqual(new Map([[A, ONE]]));
     cleanup();
     mount({ visible: false });
@@ -239,7 +246,7 @@ describe('the Side pane', () => {
       withThreads(thread(ONE, '2026-10-06T01:00:00.000Z', { anchor: ELEMENT }));
       act(() => useLayout.getState().openTab({ kind: 'session', appSessionId: ONE }));
       render(<ThreadView parent={A} child={ONE} visible />);
-      expect(screen.getByText('Shown in the main area')).toBeTruthy();
+      expect(descriptionOf(screen.getByRole('button', { name: 'Go to tab' }))).toBe('Shown in the main area');
       expect(screen.queryByRole('button', { name: SHOW })).toBeNull();
     });
 
@@ -323,7 +330,7 @@ describe('the Side pane', () => {
         target: { kind: 'browser', pageUrl: PAGE }, phase: { kind: 'thread', child: ONE, echo: null },
       });
       expect(sideChildrenShown().get(A), 'the pane stopped drawing the thread, so the page’s pane may claim its card').toBeUndefined();
-      expect(screen.getByText('Shown in the card under the page')).toBeTruthy();
+      expect(descriptionOf(screen.getByRole('button', { name: 'Show here' }))).toBe('Shown in the card under the page'); // P424
       expect(screen.queryByRole('button', { name: SHOW })).toBeNull();
       await userEvent.click(screen.getByRole('button', { name: 'Show here' }));
       expect(useCommentCard.getState().open).toBeNull();
@@ -424,19 +431,22 @@ describe('the Side pane and side questions', () => {
     listing([exchange({})]);
     act(() => openSideThread(A, ONE));
     mount();
-    expect(screen.queryByRole('button', { name: '/btw side questions' })).toBeNull(); // none asked, none open
+    expect(screen.queryByRole('button', { name: TOGGLE })).toBeNull(); // none asked, none open
     act(() => setInlineQuestions(ONE, true));
     await screen.findByText('ZEBRA');
     expect(document.querySelector(`[data-side-thread-view="${ONE}"] [data-side-btw-view="${ONE}"]`)).not.toBeNull();
     expect(fake.invoked('side.question.list')).toEqual([{ appSessionId: ONE_ID }]);
     expect(shown()).toBe(A); // the main view stays
-    const toggle = screen.getByRole('button', { name: '/btw side questions' }); // scale-review C scalpel-5#4: the name holds the visible "/btw"
-    expect(toggle.textContent).toBe('/btw');
+    // the word cut (P422): the toggle reads "Questions" in the normal face; its name begins with that word (scale-review C
+    // scalpel-5#4, WCAG 2.5.3) and keeps the command that asks there
+    const toggle = screen.getByRole('button', { name: TOGGLE });
+    expect(toggle.textContent).toBe('Questions');
+    expect(toggle.className).not.toContain('font-mono');
     expect(toggle.getAttribute('aria-pressed')).toBe('true');
     await userEvent.click(toggle);
     expect(document.querySelector(`[data-side-btw-view="${ONE}"]`)).toBeNull();
-    expect(screen.getByRole('button', { name: '/btw side questions' }).getAttribute('aria-pressed')).toBe('false'); // still offered: it has exchanges
-    await userEvent.click(screen.getByRole('button', { name: '/btw side questions' }));
+    expect(screen.getByRole('button', { name: TOGGLE }).getAttribute('aria-pressed')).toBe('false'); // still offered: it has exchanges
+    await userEvent.click(screen.getByRole('button', { name: TOGGLE }));
     expect(document.querySelector(`[data-side-btw-view="${ONE}"]`)).not.toBeNull();
   });
 
@@ -552,13 +562,12 @@ describe('a path in a side thread’s question answers (U6b-4b)', () => {
     await act(() => new Promise((resolve) => setTimeout(resolve, 0)));
     expect(fake.invoked('files.read')).toEqual([{ appSessionId: ONE_ID, path: '/elsewhere/o.md', offset: 0, length: FILES_READ_DEFAULT_LENGTH, hash: true, named: true }]);
     await act(() => fake.fail('files.read', "path outside the session's directories"));
-    // UX wave U6b-4b (M3): the first notice, as this Mac says it: its sentences, the path, the command's words
+    // UX wave U6b-4b (M3): the first notice, as this Mac says it: its sentences and the path
     expect([...document.querySelectorAll('[data-refusal] p')].map((p) => p.textContent)).toEqual([
       'This file is outside the folders this session works in.',
-      "MAWS opens a file from elsewhere when this session's transcript links it, when you choose it with File ▸ Open File…, or when the agent sends it.",
+      'Choose it with File ▸ Open File…', // the word cut (N7)
       'Ask the agent to send the file to see it here.',
-      '/elsewhere/o.md',
-      "path outside the session's directories",
+      '/elsewhere/o.md', // the word cut (N11): no command's words under a notice that names its cause
     ]);
   });
 });

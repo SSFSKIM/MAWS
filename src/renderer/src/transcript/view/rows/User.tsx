@@ -28,6 +28,7 @@ import { useRegisteredBubbleEditor } from '../registry';
 import { Markdown } from '../markdown/Markdown';
 import { formatClock } from '@shared/app/date-format';
 import { Chevron, copyText } from './parts';
+import { Tip } from '../../../ui/tip';
 import { AnchorIcon } from './icons'; // E3
 
 type UserRowData = Extract<Row, { kind: 'user' }>;
@@ -79,9 +80,10 @@ function UserBubble({ row }: { row: UserRowData }) {
   const [overflows, setOverflows] = useState(false);
   const claimed = new Set(row.comments?.flatMap((comment) => (comment.attachment === undefined ? [] : [comment.attachment]))); // UX wave U5a
   const files = row.attachments.filter((a, i) => a.kind !== 'text' && !claimed.has(i));
-  // P2-F L121: the mount's own mark (the card's "Sent to Claude") stands where no caption already says the row's state
+  // P2-F L121: the mount's own mark (the card's check) stands where no caption already says the row's state
   // the word cut (T42): a steer the engine took has no caption of its own, so the mount's mark may stand for it
-  const caption = row.pending ? PENDING_CAPTION[row.pending] : row.dropped ? null : (actions.userRowMark?.(row) ?? null);
+  const mark = row.pending || row.dropped ? null : (actions.userRowMark?.(row) ?? null);
+  const caption = row.pending ? PENDING_CAPTION[row.pending] : (mark?.name ?? null);
   const notSent = row.dropped ? (actions.droppedRowMark?.(row) ?? NOT_SENT) : null;
 
   // Measured while folded only: an open bubble has no bound. Open stays in the transcript-wide disclosures while the
@@ -153,7 +155,17 @@ function UserBubble({ row }: { row: UserRowData }) {
         )}
       </span>
       {notSent !== null && <span className="transcript-not-sent" title={notSent}>{notSent}</span>}
-      {caption !== null && <span className="transcript-user-caption" title={caption}>{caption}</span>}
+      {caption !== null &&
+        (mark !== null && mark.shown !== mark.name ? (
+          // the word cut (P443): a mark drawn as a glyph, its words its name and its tooltip, which the keyboard reaches
+          <Tip content={mark.name}>
+            <span className="transcript-user-caption" role="img" aria-label={mark.name} aria-describedby={undefined} tabIndex={0}>
+              {mark.shown}
+            </span>
+          </Tip>
+        ) : (
+          <span className="transcript-user-caption" title={caption}>{caption}</span>
+        ))}
     </div>
   );
   const bubble = (

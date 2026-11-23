@@ -118,8 +118,8 @@ export async function showSessionCards(page: Page): Promise<Locator> {
 }
 
 // UX wave U8b (Interfaces §D): a card of the column by its title; Environment, Context and Connectors fold, the two cards
-// for running work (Subagents, Background tasks) are drawn only while something runs and do not fold.
-export const sessionCard = (page: Page, name: 'Environment' | 'Context' | 'Connectors' | 'Subagents' | 'Background tasks'): Locator => sessionCards(page).getByRole('region', { name, exact: true });
+// for running work (Agents, Background: the word cut's P66 and P72) are drawn only while something runs and do not fold.
+export const sessionCard = (page: Page, name: 'Environment' | 'Context' | 'Connectors' | 'Agents' | 'Background'): Locator => sessionCards(page).getByRole('region', { name, exact: true });
 
 export async function unfoldSessionCard(page: Page, name: 'Environment' | 'Context' | 'Connectors'): Promise<Locator> {
   const cards = await showSessionCards(page);
@@ -138,10 +138,11 @@ export async function pinSurfaceForSessions(page: Page, name: string, pinned = t
     await entry.focus();
     await entry.press('Shift+F10');
   }
-  const action = page.getByRole('menuitem', { name: pinned ? 'Keep open for every session' : 'Keep with this session only', exact: true });
+  // the word cut (P8): "Pin tab" and "Unpin tab", where they read "Keep open for every session" and "Keep with this session only"
+  const action = page.getByRole('menuitem', { name: pinned ? 'Pin tab' : 'Unpin tab', exact: true });
   if (await action.count()) await action.click();
   else {
-    await expect(page.getByRole('menuitem', { name: pinned ? 'Keep with this session only' : 'Keep open for every session', exact: true })).toBeVisible();
+    await expect(page.getByRole('menuitem', { name: pinned ? 'Unpin tab' : 'Pin tab', exact: true })).toBeVisible();
     await page.keyboard.press('Escape');
   }
 }

@@ -10,6 +10,7 @@ import { Dialog } from 'radix-ui';
 import { createContext, useContext, type FormEvent, type ReactNode } from 'react';
 import { closeDialog } from './dialogs';
 import { Backdrop } from './scrim';
+import { WaitingWords } from '../ui/spinner';
 import { SECONDARY } from './ui';
 
 // What the sheet's Cancel calls: the sheet's own close.
@@ -45,11 +46,13 @@ export function Sheet({
 
 // The sheet's form: `onSubmit` runs only while `canSubmit`; the footer holds Cancel (the sheet's close) and the default
 // button, absent while `submitLabel` is (a sheet with nothing to confirm, as an Org change the checks refused), when
-// Enter submits nothing.
+// Enter submits nothing. `submitWait`: the words of a wait on the default button's action, which keeps its label and
+// draws a quiet spinner beside it named by them (the word cut, "What the cut builds"; the comment sheet's Send, P432).
 export function SheetForm({
   canSubmit,
   onSubmit,
   submitLabel,
+  submitWait = null,
   submitClass,
   cancelLabel = 'Cancel',
   children,
@@ -60,6 +63,7 @@ export function SheetForm({
   canSubmit: boolean;
   onSubmit(): void;
   submitLabel?: string;
+  submitWait?: string | null;
   submitClass: string;
   cancelLabel?: string;
   children: ReactNode;
@@ -79,8 +83,8 @@ export function SheetForm({
           {cancelLabel}
         </button>
         {submitLabel !== undefined && (
-          <button type="submit" autoFocus={focusSubmit} disabled={!canSubmit} className={submitClass}>
-            {submitLabel}
+          <button type="submit" autoFocus={focusSubmit} disabled={!canSubmit} aria-busy={submitWait !== null || undefined} className={submitClass}>
+            {submitWait === null ? submitLabel : <WaitingWords words={submitLabel} wait={submitWait} />}
           </button>
         )}
       </div>

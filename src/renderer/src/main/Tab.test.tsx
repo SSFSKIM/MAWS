@@ -84,7 +84,8 @@ describe('Show in panel on an artifact tab', () => {
     render(<MainArea />);
     const item = await menuItem();
     expect(item.getAttribute('aria-disabled')).toBe('true');
-    expect(item.getAttribute('title')).toBe(TRANSFER_COPY.noProjectSession);
+    expect(item.getAttribute('title')).toBeNull(); // the word cut (N94): the reason is the item's description and note
+    expect(document.getElementById(item.getAttribute('aria-describedby')!)?.textContent).toBe(TRANSFER_COPY.noProjectSession);
     fireEvent.click(item);
     await act(async () => {});
     expect(artifactTabOpen()).toBe(true);
@@ -96,7 +97,8 @@ describe('Show in panel on an artifact tab', () => {
     render(<MainArea />);
     const item = await menuItem();
     expect(item.getAttribute('aria-disabled')).toBe('true');
-    expect(item.getAttribute('title')).toBe(TRANSFER_COPY.noProjectSession);
+    expect(item.getAttribute('title')).toBeNull(); // the word cut (N94): the reason is the item's description and note
+    expect(document.getElementById(item.getAttribute('aria-describedby')!)?.textContent).toBe(TRANSFER_COPY.noProjectSession);
     fireEvent.click(item);
     await act(async () => {});
     expect(artifactTabOpen()).toBe(true);

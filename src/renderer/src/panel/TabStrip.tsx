@@ -25,9 +25,11 @@ import type { PanelTabRef } from '@shared/ipc/schema/layout';
 import { machineOf } from '@shared/machine/address';
 import { Icon, IconButton } from '../app/IconButton';
 import { useLayout, type LayoutState } from '../stores/layout';
+import { RefusedMenuItem } from '../ui/refused-menu-item';
+import { Tip } from '../ui/tip';
 import { COPY } from './copy';
 import { openPaneTab, usePanes } from '../engine-surface/panes'; // R2
-import { PANE_COPY } from '../engine-surface/PaneTool'; // R2
+import { PANE_COPY } from '../engine-surface/copy'; // R2
 import { beginDrag, endDrag, endDragFrom, holdSideViews, moveToMain, panelTabMoves, panelTabOfDrop, usePanelRecord, useTransferRefusal } from '../shell/transfer'; // P4-B3
 import { DropHighlight, DropOverlay } from '../shell/DropOverlay'; // UX wave U6b-1 (M4)
 import { TRANSFER_COPY } from '../tools/artifacts/copy'; // P4-B3
@@ -344,6 +346,7 @@ function Tab({ tab, appSessionId, group, selected, shape, maxWidth, canPin, body
       {!iconOnly && pinnable && (
         <GlyphButton
           label={tab.pinned ? COPY.unpin(title) : COPY.pin(title)}
+          tip={tab.pinned ? COPY.unpinTip : COPY.pinTip}
           pressed={tab.pinned}
           disabled={!canPin}
           className={tab.pinned ? 'text-fg' : revealed}
@@ -353,7 +356,7 @@ function Tab({ tab, appSessionId, group, selected, shape, maxWidth, canPin, body
         </GlyphButton>
       )}
       {!iconOnly && (
-        <GlyphButton label={COPY.close(title)} disabled={closing} className={revealed} onClick={() => void panelHost.closeTab(tab.id)}>
+        <GlyphButton label={COPY.close(title)} tip={COPY.closeTip} disabled={closing} className={revealed} onClick={() => void panelHost.closeTab(tab.id)}>
           <CloseIcon />
         </GlyphButton>
       )}
@@ -388,7 +391,7 @@ function Tab({ tab, appSessionId, group, selected, shape, maxWidth, canPin, body
   );
 }
 
-const MENU_ITEM = 'flex h-7 cursor-default items-center rounded-sm px-2 outline-none select-none data-disabled:text-fg-faint data-highlighted:bg-bg-hover';
+const MENU_ITEM = 'flex h-7 cursor-default items-center rounded-sm px-2 outline-none select-none data-disabled:text-fg-faint aria-disabled:text-fg-faint data-highlighted:bg-bg-hover';
 
 // Shift+F10 opens a tab's menu at the tab, as it opens an icon's (`SurfaceRow.tsx`).
 function openMenuOnShiftF10(event: KeyboardEvent<HTMLDivElement>) {
@@ -402,31 +405,31 @@ function openMenuOnShiftF10(event: KeyboardEvent<HTMLDivElement>) {
 // UX wave U6b-1: a file likewise.
 function MoveToMainItem({ tabId }: { tabId: string }) {
   const refusal = useTransferRefusal({ to: 'tab', panelTabId: tabId });
+  if (refusal !== null) return <RefusedMenuItem kit={ContextMenu} label={TRANSFER_COPY.moveToMain} reason={refusal} className={MENU_ITEM} />; // the word cut (N94's pattern)
   return (
-    <ContextMenu.Item
-      disabled={refusal !== null}
-      title={refusal ?? undefined}
-      onSelect={() => void moveToMain(tabId)}
-      className={MENU_ITEM}
-    >
+    <ContextMenu.Item onSelect={() => void moveToMain(tabId)} className={MENU_ITEM}>
       {TRANSFER_COPY.moveToMain}
     </ContextMenu.Item>
   );
 }
 
-function GlyphButton(props: { label: string; pressed?: boolean; disabled?: boolean; className: string; onClick(): void; children: ReactNode }) {
+// The word cut (P11): the glyph's tooltip is its verb alone ("Pin", "Close"), a Tip the keyboard reaches; its accessible
+// name keeps the tab's title ("Pin Terminal"), which the tooltip does not repeat as a description.
+function GlyphButton(props: { label: string; tip: string; pressed?: boolean; disabled?: boolean; className: string; onClick(): void; children: ReactNode }) {
   return (
-    <button
-      type="button"
-      aria-label={props.label}
-      aria-pressed={props.pressed}
-      title={props.label}
-      disabled={props.disabled}
-      onClick={props.onClick}
-      className={`inline-flex size-5 shrink-0 items-center justify-center rounded-sm text-fg-muted outline-accent hover:bg-bg-hover hover:text-fg focus-visible:outline-2 disabled:pointer-events-none disabled:text-fg-faint ${props.className}`}
-    >
-      {props.children}
-    </button>
+    <Tip content={props.tip}>
+      <button
+        type="button"
+        aria-label={props.label}
+        aria-describedby={undefined}
+        aria-pressed={props.pressed}
+        disabled={props.disabled}
+        onClick={props.onClick}
+        className={`inline-flex size-5 shrink-0 items-center justify-center rounded-sm text-fg-muted outline-accent hover:bg-bg-hover hover:text-fg focus-visible:outline-2 disabled:pointer-events-none disabled:text-fg-faint ${props.className}`}
+      >
+        {props.children}
+      </button>
+    </Tip>
   );
 }
 

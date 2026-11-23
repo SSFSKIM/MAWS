@@ -122,7 +122,6 @@ function Chip({ node, icon, hidden, onOpen, onMenu }: ChipProps) {
       <button
         type="button"
         data-bookmark-folder={node.id}
-        title={BROWSER_COPY.bookmarks.folderTitle(node.name)}
         onClick={(event) => onMenu(below(event.currentTarget))}
         className={`${CHIP} ${hidden ? 'invisible' : ''}`}
         inert={hidden}

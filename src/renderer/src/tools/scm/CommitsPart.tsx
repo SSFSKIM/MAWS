@@ -2,13 +2,15 @@
 // §H; the frames' S1, S2, S6, S8, S9, S12 and S13): the branch read's commits since the base, newest first, under "Not
 // pushed" and "Pushed to <upstream>"; eight rows, then the control; a row opens its commit in Review by the one act
 // Review's folder exports (`openCommit`, the transcript's chip's too). A failed read keeps the bare heading and its
-// sentence, told apart by `readFailure`, with the refresh control where a new read can change the answer.
+// sentence, told apart by `readFailure`, with the refresh control where a new read can change the answer. The word cut:
+// while the first read is out, the quiet spinner under the heading (N63); a failure's sentence no longer repeats the
+// heading (N68 to N71); with no base the heading reads "Commits · latest", the Where line naming the branch (N62).
 import { useLayoutEffect, useRef, type RefObject } from 'react';
 import { useStore } from 'zustand';
 import type { StoreApi } from 'zustand/vanilla';
 import { formatDateTime } from '@shared/app/date-format';
 import type { AppSessionId } from '@shared/graph/ids';
-import type { GitBranchCommit, GitStatus } from '@shared/ipc/schema/git';
+import type { GitBranchCommit } from '@shared/ipc/schema/git';
 import type { MachineMark } from '../../app/machine-mark';
 import { useNow } from '../../app/use-now';
 import { SUMMARY_COPY } from '../../panel/copy';
@@ -19,6 +21,7 @@ import { openCommit } from '../code/review/open-commit';
 import type { ReadFailure } from '../code/review/reads';
 import { REVIEW_TOOL_ID } from '../code/review/ReviewTool';
 import { REVIEW_COPY } from '../code/copy';
+import { QuietSpinner } from '../../ui/spinner';
 import { SCM_COPY } from './copy';
 import { ageColumnChars, commitAge, commitList, commitsHeadingFit, commitsState, type CommitGroup, type CommitList, type CommitsHeading } from './page-model';
 import { CountBadge, fixedWidth, Measured, measuredWidth, Part, quietControl, RefreshButton, shortest, useLineFit } from './page-parts';
@@ -26,7 +29,6 @@ import type { PageUi } from './SourceControlPage';
 
 export interface CommitsPartProps {
   appSessionId: AppSessionId;
-  status: GitStatus;
   serves: boolean | null; // the machine serves the reads (`servesReads`)
   read: BranchRead | undefined;
   mark: MachineMark;
@@ -34,8 +36,8 @@ export interface CommitsPartProps {
   retry(): void; // asks the branch read again
 }
 
-export function CommitsPart({ appSessionId, status, serves, read, mark, ui, retry }: CommitsPartProps) {
-  const state = commitsState(serves, read, mark.offline);
+export function CommitsPart({ appSessionId, serves, read, mark, ui, retry }: CommitsPartProps) {
+  const state = commitsState(serves, read, mark.offline, mark.carrier === 'socket');
   if (state.kind !== 'ready') {
     return (
       <Part name="commits" label={SCM_COPY.commitsPart}>
@@ -48,10 +50,15 @@ export function CommitsPart({ appSessionId, status, serves, read, mark, ui, retr
             {failureWords(state.failure, mark)}
           </p>
         )}
+        {state.kind === 'outstanding' && (
+          <div data-scm-commits-wait className="flex h-6 items-center">
+            <QuietSpinner label={SCM_COPY.commitsPart} />
+          </div>
+        )}
       </Part>
     );
   }
-  return <CommitsList appSessionId={appSessionId} status={status} answer={state.answer} ui={ui} />;
+  return <CommitsList appSessionId={appSessionId} answer={state.answer} ui={ui} />;
 }
 
 // §H's Commits column of "Refusals told apart"; a refusal's code word is no tooltip (frames' S14).
@@ -68,9 +75,9 @@ function failureWords(failure: ReadFailure, mark: MachineMark): string {
   }
 }
 
-function CommitsList({ appSessionId, status, answer, ui }: { appSessionId: AppSessionId; status: GitStatus; answer: NonNullable<BranchRead['answer']>; ui: StoreApi<PageUi> }) {
+function CommitsList({ appSessionId, answer, ui }: { appSessionId: AppSessionId; answer: NonNullable<BranchRead['answer']>; ui: StoreApi<PageUi> }) {
   const whole = useStore(ui, (s) => s.commitsWhole);
-  const list = commitList(answer, status.branch, whole);
+  const list = commitList(answer, whole);
   const heading = useRef<HTMLDivElement>(null);
   const folding = useRef(false);
   const now = useNow(); // the shared clock for ages, ticking every 30 s while read
@@ -119,8 +126,8 @@ function headingToTop(heading: HTMLElement): void {
   box.scrollTop = Math.min(room, Math.max(0, box.scrollTop + reviewLayout.offsetWithin(heading, box)));
 }
 
-// "Commits N since <base>" with "· N behind" and "Review ›" on This branch; with no base "Commits · latest on <branch>"
-// and no "Review ›" (frames' S8). The base's name shortens at its end to eight characters, "· N behind" stays whole, and
+// "Commits N since <base>" with "· N behind" and "Review ›" on This branch; with no base "Commits · latest" and no
+// "Review ›" (frames' S8; the word cut, N62). The base's name shortens at its end to eight characters, "· N behind" stays whole, and
 // where even that does not fit "since <base>" is left out whole (frames' S6).
 function Heading({ ref, heading, review, appSessionId }: { ref: RefObject<HTMLDivElement | null>; heading: CommitsHeading; review: boolean; appSessionId: AppSessionId }) {
   const since = heading.kind === 'since' ? SCM_COPY.since(heading.base) : null;
@@ -157,7 +164,7 @@ function Heading({ ref, heading, review, appSessionId }: { ref: RefObject<HTMLDi
       ) : (
         <>
           {' '}
-          <span className="min-w-[9ch] truncate text-ui-sm text-fg-muted">{heading.branch === null ? SCM_COPY.latest : SCM_COPY.latestOn(heading.branch)}</span>
+          <span className="min-w-[9ch] truncate text-ui-sm text-fg-muted">{SCM_COPY.latest}</span>
         </>
       )}
       {review && (

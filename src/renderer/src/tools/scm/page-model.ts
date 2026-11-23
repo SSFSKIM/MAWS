@@ -27,8 +27,8 @@ export interface CommitGroup {
   upstream: string | null;
   count: number | null;
 }
-/** "Commits N since <base>" with "· N behind", or with no base "Commits · latest on <branch>" ("Commits · latest" detached). */
-export type CommitsHeading = { kind: 'since'; count: number; base: string; behind: number } | { kind: 'latest'; branch: string | null };
+/** "Commits N since <base>" with "· N behind", or with no base "Commits · latest" (the word cut, N62: the Where line names the branch). */
+export type CommitsHeading = { kind: 'since'; count: number; base: string; behind: number } | { kind: 'latest' };
 export interface CommitList {
   heading: CommitsHeading;
   review: boolean; // the heading's "Review ›": only where there is a base (the scope it opens is disabled without one)
@@ -37,11 +37,11 @@ export interface CommitList {
 }
 
 /** What the list draws of a branch read's answer: `whole` is the page's fold (the list shown whole). */
-export function commitList(answer: GitBranchCommits, branch: string | null, whole: boolean): CommitList {
+export function commitList(answer: GitBranchCommits, whole: boolean): CommitList {
   const { base, upstream, commits, counts } = answer;
   if (base === null) {
     const rows = commits.slice(0, COMMITS_FOLDED);
-    return { heading: { kind: 'latest', branch }, review: false, sections: sectionsOf(rows, upstream, null), control: { kind: 'none' } };
+    return { heading: { kind: 'latest' }, review: false, sections: sectionsOf(rows, upstream, null), control: { kind: 'none' } };
   }
   const total = counts?.all ?? commits.length;
   const heading: CommitsHeading = { kind: 'since', count: total, base: base.ref, behind: answer.behind ?? 0 };
@@ -90,19 +90,28 @@ export const ageColumnChars = (ages: readonly string[]): number => Math.max(4, .
 
 // The Commits part's state (§H's "Refusals told apart"; frames' S9)
 
-export type CommitsState = { kind: 'outstanding' } | { kind: 'ready'; answer: GitBranchCommits } | { kind: 'failed'; failure: ReadFailure; refresh: boolean };
+export type CommitsState = { kind: 'outstanding' } | { kind: 'unasked' } | { kind: 'ready'; answer: GitBranchCommits } | { kind: 'failed'; failure: ReadFailure; refresh: boolean };
 
 /**
- * `serves`: the machine serves the reads (`servesReads`); `read`: the branch read's entry; `offline`: the machine's phase.
+ * `serves`: the machine serves the reads (`servesReads`); `read`: the branch read's entry; `offline`: the machine's phase;
+ * `socket`: the machine is up over a profile's socket, whose roster entry never lists capabilities.
  * An answer in hand stays shown when the machine stops serving the reads, by a disconnect or by no longer listing them
  * (the branch's max panel, Decision Log 49: what a tab has loaded, it keeps). With no answer: outstanding while nothing is
- * known; older, with nothing asked and no refresh, for a machine that lists its capabilities without the reads. While the
+ * known; offline, with no refresh, while nothing is known and the machine is offline; unasked (the bare heading) while
+ * nothing is known over a socket, where nothing will tell; older, with nothing asked and no
+ * refresh, for a machine that lists its capabilities without the reads. While the
  * reads are served, an offline failure keeps what was last read; every other failure is said, with a refresh where a new
  * read can change the answer.
  */
-export function commitsState(serves: boolean | null, read: BranchRead | undefined, offline: boolean): CommitsState {
+export function commitsState(serves: boolean | null, read: BranchRead | undefined, offline: boolean, socket = false): CommitsState {
   if (serves !== true && read?.answer) return { kind: 'ready', answer: read.answer };
   if (serves === false) return { kind: 'failed', failure: { kind: 'older' }, refresh: false };
+  // Not known whether it serves the reads, and offline: no read is asked until it is heard again, so this says offline
+  // rather than wait (the word cut, N63: the spinner is for a wait that can end); heard again, the read is asked by itself
+  if (serves === null && offline) return { kind: 'failed', failure: { kind: 'offline' }, refresh: false };
+  // Up over a socket, whose roster entry lists no capabilities, so no read is asked and nothing will tell: the bare heading,
+  // as before the cut, rather than a spinner for a wait that cannot end (the word cut's M3 panel)
+  if (serves === null && socket) return { kind: 'unasked' };
   if (serves === null || read === undefined) return { kind: 'outstanding' };
   if (read.failure === null) return read.answer === null ? { kind: 'outstanding' } : { kind: 'ready', answer: read.answer };
   const failure = readFailure(read.failure, offline);
@@ -140,14 +149,14 @@ export function mergeWords(pr: Pr): MergeWords {
 
 const isOpen = (pr: Pr) => pr.state !== 'MERGED' && pr.state !== 'CLOSED';
 
-/** The state line's phrases: the state, "into <base>", the review decision in the card's words, and while open the merge words. */
+/**
+ * The state line's phrases: the state, "into <base>", the review decision in the card's words, and while open the merge
+ * words. The word cut (N72): an open pull request's state is the normal one and is not said; Draft, Merged and Closed are.
+ */
 export function stateLine(pr: Pr): { words: string; tone: Tone }[] {
   const words = SUMMARY_COPY.prState;
-  const state = pr.state === 'MERGED' ? words.merged : pr.state === 'CLOSED' ? words.closed : pr.isDraft ? words.draft : words.open;
-  const phrases: { words: string; tone: Tone }[] = [
-    { words: state, tone: 'fg' },
-    { words: SCM_COPY.into(pr.baseRefName), tone: 'fg' },
-  ];
+  const state = pr.state === 'MERGED' ? words.merged : pr.state === 'CLOSED' ? words.closed : pr.isDraft ? words.draft : null;
+  const phrases: { words: string; tone: Tone }[] = [...(state === null ? [] : [{ words: state, tone: 'fg' as const }]), { words: SCM_COPY.into(pr.baseRefName), tone: 'fg' }];
   const review = pr.reviewDecision === null ? undefined : SUMMARY_COPY.reviewDecision[pr.reviewDecision];
   if (review !== undefined) phrases.push({ words: review, tone: 'fg' });
   const merge = isOpen(pr) ? mergeWords(pr) : null;
@@ -166,7 +175,7 @@ const countsOf = (items: readonly Check[], buckets: readonly Check['bucket'][]) 
 
 export interface Checks {
   countsLine: boolean; // the counts line is drawn: not when nothing is listed and the folded line can stand in its place (Decision Log 41)
-  counts: string; // the counts line, in the card's bucket words and order ("3 passed · 1 failed · 1 pending")
+  counts: string; // the counts line, in the card's bucket words and order ("1 failed · 1 pending"; "No checks")
   countParts: string[]; // the same, one count apiece (the line wraps between them)
   attention: Check[]; // failed, cancelled and pending, in that order
   folded: Check[]; // passed and skipped, in the answer's order
@@ -176,12 +185,14 @@ export interface Checks {
 /**
  * An open pull request's checks; null for a merged or a closed one, which lists none. With no check to list (none failed,
  * was cancelled or is pending) the counts line is not drawn and the folded line stands in its place, its words the same
- * counts (Decision Log 41); where nothing folds either (no checks yet, checks unavailable) the counts line says so.
+ * counts (Decision Log 41); where nothing folds either (no checks yet, checks unavailable) the counts line says so. The
+ * word cut (N75): the counts line counts what is listed under it, the failed, cancelled and pending, and leaves the
+ * passed and skipped to the folded line, as the card's row does.
  */
 export function checksOf(pr: Pr): Checks | null {
   if (!isOpen(pr)) return null;
   const { summary, items } = pr.checks;
-  const countParts = summary === 'unknown' ? [SUMMARY_COPY.checksUnavailable] : items.length === 0 ? [SUMMARY_COPY.noChecks] : countsOf(items, ['pass', 'fail', 'cancel', 'pending', 'skipping']);
+  const countParts = summary === 'unknown' ? [SUMMARY_COPY.checksUnavailable] : items.length === 0 ? [SUMMARY_COPY.noChecks] : countsOf(items, ATTENTION);
   const folded = items.filter((item) => item.bucket === 'pass' || item.bucket === 'skipping');
   const fold = countsOf(items, ['pass', 'skipping']);
   const attention = ATTENTION.flatMap((bucket) => items.filter((item) => item.bucket === bucket));

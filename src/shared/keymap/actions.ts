@@ -72,8 +72,9 @@ export const ACTIONS = {
   'surface.files': { title: 'Files', chord: 'Cmd+Shift+F', sink: 'menu', menu: 'view', scope: 'app' },
   'surface.browser': { title: 'Browser', chord: null, sink: 'menu', menu: 'view', scope: 'app' },
   'surface.source-control': { title: 'Source control', chord: null, sink: 'menu', menu: 'view', submenu: 'More surfaces', scope: 'app' },
-  'surface.subagents': { title: 'Subagents', chord: null, sink: 'menu', menu: 'view', submenu: 'More surfaces', scope: 'app' },
-  'surface.background': { title: 'Background tasks', chord: null, sink: 'menu', menu: 'view', submenu: 'More surfaces', scope: 'app' },
+  // the word cut (T152, T153): the surfaces' names, as their tabs read them
+  'surface.subagents': { title: 'Agents', chord: null, sink: 'menu', menu: 'view', submenu: 'More surfaces', scope: 'app' },
+  'surface.background': { title: 'Background', chord: null, sink: 'menu', menu: 'view', submenu: 'More surfaces', scope: 'app' },
   'surface.session-info': { title: 'Session info', chord: null, sink: 'menu', menu: 'view', submenu: 'More surfaces', scope: 'app' },
   'surface.ask-sheet': { title: 'Questions', chord: null, sink: 'menu', menu: 'view', submenu: 'More surfaces', scope: 'app' },
   // P4-B3 (X38; its Decision Log 21): the focused main artifact tab into the panel ("Show in panel"), and the shown

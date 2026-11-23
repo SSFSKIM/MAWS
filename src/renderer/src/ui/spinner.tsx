@@ -16,3 +16,15 @@ export function QuietSpinner({ label, className = '' }: { label: string; classNa
   if (!shown) return null;
   return <span role="progressbar" aria-label={label} className={`${SPINNER} ${className}`} />;
 }
+
+// A control's words kept while its action waits (Send while a comment goes, Submit while answers go): the words, then
+// the quiet spinner named by the wait's words, never words in the words' place; the words alone while nothing waits.
+// The control says `aria-busy` itself, since it alone knows its own state.
+export function WaitingWords({ words, wait }: { words: string; wait: string | null }) {
+  return (
+    <>
+      <span>{words}</span>
+      {wait !== null && <QuietSpinner label={wait} className="ml-1.5 align-[-1px]" />}
+    </>
+  );
+}

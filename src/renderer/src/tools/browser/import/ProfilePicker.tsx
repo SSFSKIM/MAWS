@@ -1,13 +1,15 @@
 // The sheet's pick state (E4b Design §2): the profiles Chrome's `Local State` names in the default folder, or in one the
 // owner points at ("Choose another Chrome folder…"), the last-used one preselected; a profile already imported shows
 // when and cannot be chosen until removed (Decision Log 2). Continue inspects the chosen profile. cua board #90: a
-// re-import opens it on the removed record's Chrome folder with that profile chosen (`preselect`).
+// re-import opens it on the removed record's Chrome folder with that profile chosen (`preselect`). The word cut (T503):
+// the reads are quiet spinners named by their words, in the list's place and under it.
 import { useState } from 'react';
 import type { ChromeProfile } from '@shared/browser/import';
 import { ipc } from '../../../ipc/client';
 import { useCommand } from '../../../ipc/query';
 import { SheetForm } from '../../../sessions/Sheet';
 import { CHOICE, PRIMARY, QUIET } from '../../../sessions/ui';
+import { QuietSpinner } from '../../../ui/spinner';
 import { IMPORT_COPY, importDate } from './copy';
 import { inspect, useBrowserImport } from './store';
 
@@ -60,9 +62,9 @@ export function ProfilePicker({ preselect }: { preselect?: PickerPreselect }) {
             {IMPORT_COPY.profilesFailed(query.error.message)}
           </p>
         ) : (
-          <p role="status" className="m-0 text-ui-sm text-fg-muted">
-            {IMPORT_COPY.reading}
-          </p>
+          <div className="flex justify-center py-2">
+            <QuietSpinner label={IMPORT_COPY.reading} />
+          </div>
         )
       ) : !answer.found ? (
         <p role="alert" className="m-0 text-ui-sm break-all text-fg-muted">
@@ -108,9 +110,9 @@ export function ProfilePicker({ preselect }: { preselect?: PickerPreselect }) {
         </p>
       )}
       {busy && (
-        <p role="status" className="m-0 text-ui-sm text-fg-muted">
-          {IMPORT_COPY.inspecting}
-        </p>
+        <div className="flex">
+          <QuietSpinner label={IMPORT_COPY.inspecting} />
+        </div>
       )}
     </SheetForm>
   );

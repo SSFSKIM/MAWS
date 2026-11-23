@@ -53,7 +53,7 @@ function CommentSheet({ anchor, parent, destination }: { anchor: Anchor; parent:
   const form = useCommentForm({ anchor, parent, gone: () => useCommentComposer.getState().open?.anchor !== anchor, onSent: close, destination }); // P3-F1: destination
   return (
     <Sheet title={COPY.title(anchor.kind === 'none' ? null : anchor.label)} width="w-[min(560px,90vw)]" onClose={close} data-comment-composer="" data-anchor-kind={anchor.kind} data-anchor-locator={anchor.locator}>
-      <SheetForm canSubmit={form.canSend(form.destination)} onSubmit={() => void form.send(form.destination)} submitLabel={form.submitLabel} submitClass={PRIMARY}>
+      <SheetForm canSubmit={form.canSend(form.destination)} onSubmit={() => void form.send(form.destination)} submitLabel={form.submitLabel} submitWait={form.submitWait} submitClass={PRIMARY}>
         {anchor.kind !== 'none' && (
           <p className="-mt-2 mb-0 font-mono text-ui-sm break-all text-fg-muted" title={anchor.locator}>
             {anchor.locator}

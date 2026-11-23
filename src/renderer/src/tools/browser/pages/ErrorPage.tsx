@@ -1,5 +1,6 @@
 // E4a: a page that failed to load (Design §5; Decision Log 3): Codex's error page drawn as DOM in the pane while main
-// hides the view: the heading, the summary for the kind with the host, "Try:" over two suggestions whose second opens
+// hides the view: the summary for the kind with the host as the heading (the word cut, T415: Codex's "This site can't be
+// reached" over it said it twice), "Try:" over two suggestions whose second opens
 // the details (every kind but a certificate's), the error's name, and Reload, which loads the failed URL again (main
 // turns `reload` into `loadURL(loadError.url)`, since the committed entry is Chromium's own error page).
 import { useId, useState } from 'react';
@@ -16,7 +17,7 @@ export function ErrorPage({ tabId, loadError }: { tabId: string; loadError: Load
   const copy = BROWSER_COPY.loadError;
   const host = loadError.host || loadError.url;
   return (
-    <PageFrame page={`error-${loadError.kind}`} heading={copy.heading} summary={copy.summary[loadError.kind](host)}>
+    <PageFrame page={`error-${loadError.kind}`} heading={copy.summary[loadError.kind](host)}>
       {loadError.kind !== 'certificate' && (
         <div>
           <p className="m-0">{copy.try}</p>

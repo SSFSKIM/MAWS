@@ -1,9 +1,9 @@
 // The context popover (§5.5; mockup 04 vignette 5; W2: the toolbar's context ring opens it, `ContextRing.tsx`, since the
 // status line is gone): `session.getContextUsage { detail: 'full' }` read on open (fresh for 10 s), the digest's
 // percentage while it loads; `<used> of <max> · compacts at <threshold>` on one line, whose percentage and tokens left
-// until compaction wait on that line for the pointer or focus (the word cut, C46), a segmented bar of what occupies the
-// window with the threshold marked, the categories, and `Compact` (C49), which sends `/compact` when the session's
-// catalogue lists it as a headless command.
+// until compaction wait on that line for the pointer or focus (the word cut, C46; under it where nothing points, the
+// touch rule, ticket 830), a segmented bar of what occupies the window with the threshold marked, the categories, and
+// `Compact` (C49), which sends `/compact` when the session's catalogue lists it as a headless command.
 // P2-A (X17): with no live process, the last reading the engine host kept for the session, labelled with when ("Last
 // reading, 3 hours ago"), else the digest's, else "Not observed yet"; nothing is read from the engine and nothing starts
 // on open; its Refresh (M3) is the owner's gesture that starts the session.
@@ -19,6 +19,7 @@ import { useSessions } from '../stores/sessions';
 import { FRAME } from '../widgets/copy'; // P2-A
 import { DormantGesture } from '../widgets/DormantGesture'; // P2-A
 import { Tip } from '../ui/tip';
+import { TouchFact } from '../ui/touch-fact';
 import { CONTEXT_POPOVER } from './copy';
 import { tokens } from './format';
 
@@ -37,6 +38,9 @@ function Breakdown({ usage }: { usage: GetContextUsageResponse }) {
           {CONTEXT_POPOVER.figures(tokens(usage.totalTokens), tokens(usage.maxTokens), threshold === null ? null : tokens(threshold))}
         </p>
       </Tip>
+      <TouchFact block className="-mt-2 text-ui-sm">
+        {onPointing}
+      </TouchFact>
       <div role="img" aria-label={`Context breakdown: ${label}${threshold !== null ? `. Autocompact at ${tokens(threshold)}` : ''}`} className="relative flex h-2 overflow-hidden rounded-sm bg-bg-active">
         {used.map((c, i) => (
           <span key={c.name} title={`${c.name}: ${tokens(c.tokens)}`} className={`h-full shrink-0 border-r border-bg-overlay ${SEGMENT[i % SEGMENT.length]}`} style={{ width: `${share(c.tokens)}%` }} />

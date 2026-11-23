@@ -33,6 +33,17 @@ const frames = async (n = 2) => {
   for (let i = 0; i < n; i += 1) await frame();
 };
 const text = (el: Element | null | undefined) => el?.textContent?.trim() ?? '';
+// What an element shows: its text without its hidden parts' (a tip's description is a hidden span beside its owner,
+// ui/tip.tsx, so a row whose part carries a tip reads it as drawn).
+const shownText = (el: Element | null | undefined) => {
+  if (!el) return '';
+  const copy = el.cloneNode(true) as Element;
+  for (const hidden of copy.querySelectorAll('[hidden]')) hidden.remove();
+  return text(copy);
+};
+// A run's ended state (`RunBadge`): its word, or the word naming its mark (the word cut, T213: completed is a check named
+// "completed")
+const runStatus = (el: Element | null) => (el?.getAttribute('role') === 'img' ? (el.getAttribute('aria-label') ?? '') : text(el));
 
 // ---- where things are ------------------------------------------------------------------------------------------------------
 
@@ -53,7 +64,8 @@ function click(el: Element | null | undefined, what: string): void {
   if (el instanceof HTMLButtonElement && el.disabled) throw new Error(`agents: ${what} is disabled`);
   el.click();
 }
-const buttonNamed = (root: ParentNode | null | undefined, name: string) => [...(root?.querySelectorAll('button') ?? [])].find((b) => text(b) === name) ?? null;
+// by its text, or by its accessible name where the word cut made its word a glyph (Open creating turn, T222)
+const buttonNamed = (root: ParentNode | null | undefined, name: string) => [...(root?.querySelectorAll('button') ?? [])].find((b) => text(b) === name || b.getAttribute('aria-label') === name) ?? null;
 
 // ---- Subagents -------------------------------------------------------------------------------------------------------------
 
@@ -141,14 +153,14 @@ function background(): BackgroundView | null {
   const body = bodyOf('background');
   if (!body) return null;
   const tasks = body.querySelector('section[data-section="tasks"]');
-  const earlier = [...(tasks?.querySelectorAll('button') ?? [])].map(text).find((t) => / earlier tasks? completed$/.test(t));
+  const earlier = [...(tasks?.querySelectorAll('button') ?? [])].map(text).find((t) => /^\d+ done$/.test(t)); // `4 done` (the word cut, T231)
   const notes = [...(tasks?.querySelectorAll(':scope > p') ?? [])].map(text);
   return {
     workflows: [...body.querySelectorAll<HTMLElement>('[data-workflow]')].map((card) => ({
       taskId: card.dataset.workflow!,
       title: text(card.querySelector('h4')),
       line: text(card.querySelector('[data-part="line"]')),
-      status: text(card.querySelector('[data-part="status"]')),
+      status: runStatus(card.querySelector('[data-part="status"]')),
       summary: text(card.querySelector('[data-part="summary"]')),
       stopping: stoppingIn(card),
       error: errorOf(card),
@@ -184,7 +196,7 @@ function widget(): RunWidgetView | null {
     taskId: root.dataset.run ?? '',
     header: text(root.querySelector('h2')),
     line: text(root.querySelector('[data-part="line"]')),
-    status: text(root.querySelector('[data-part="status"]')),
+    status: runStatus(root.querySelector('[data-part="status"]')),
     phases: [...root.querySelectorAll<HTMLElement>('[role="option"]')].map((option) => ({
       title: text(option.querySelector('[data-part="title"]')),
       count: text(option.querySelector('[data-part="count"]')),
@@ -233,7 +245,8 @@ function scheduled(): ScheduledView | null {
   if (!body || body.querySelector('[data-view="run"]')) return null;
   const section = body.querySelector<HTMLElement>('section[data-section="scheduled"]');
   if (!section) return { heading: null, rows: [], error: null };
-  const part = (row: Element, name: string) => text(row.querySelector(`[data-part="${name}"]`));
+  // a part read as drawn: a tip's description, a hidden node, is no part of what it shows
+  const part = (row: Element, name: string) => shownText(row.querySelector(`[data-part="${name}"]`));
   return {
     heading: text(section.querySelector('h3 button')),
     rows: [...section.querySelectorAll<HTMLElement>('[data-scheduled]')].map((row) => ({
@@ -462,7 +475,7 @@ async function sendRelay(): Promise<void> {
 async function stop(taskId: string): Promise<void> {
   const body = region();
   const row = body?.querySelector(`[data-task-id="${CSS.escape(taskId)}"]`);
-  if (row) click(buttonNamed(row, BACKGROUND_COPY.stopWorkflow) ?? buttonNamed(row, BACKGROUND_COPY.stop), `Stop for ${taskId}`);
+  if (row) click(buttonNamed(row, BACKGROUND_COPY.stop), `Stop for ${taskId}`); // a workflow's too (the word cut, T215)
   else {
     click(buttonNamed(agentView(), SUBAGENTS_COPY.stopAgent), 'Stop agent');
     await frames(1);

@@ -4,7 +4,7 @@
 // - The sheet is U11's `Sheet` at the remote folder sheet's width (`RemoteSetupSheet.tsx`), so it takes the scrim,
 //   Escape and the focus rules sheets have; Escape and the scrim cancel as Cancel does.
 // - The list's area keeps one height in every state (that sheet's list at its tallest, capped by the window as that list
-//   is): a listing scrolls inside it, and the reading words and each failure, with Try again, stand inside it. ".." is its
+//   is): a listing scrolls inside it, and the reading spinner and each failure, with Try again, stand inside it. ".." is its
 //   first row wherever a parent is known. More… is a quiet button under it, outside its scroll, its place kept with no
 //   further page. A private folder's question alone replaces the field, the list and the footer, as that sheet's does.
 // - A folder's mark is the Files list's chevron, closed; every other mark slot is empty and as wide. A row's title is
@@ -15,12 +15,15 @@
 //   answers (or that it is not reachable) rather than standing as if nothing had happened.
 // - Fix wave (review finding 2): the ownership going while the sheet is open withdraws the offer: its sentence stands in
 //   the list's place, and the sheet sends nothing more.
+// - The word cut (N30, N32): a folder being read is the quiet spinner, nothing for its first half second; no line under
+//   the list says how the files are read, the title names the machine.
 import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type FormEvent } from 'react';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { OutsideEntry } from '@shared/ipc/schema/files';
 import { useRemoteStanding } from '../../../lane-b/remote-standing';
 import { Sheet } from '../../../sessions/Sheet';
 import { FIELD, PRIMARY, QUIET, SECONDARY } from '../../../sessions/ui';
+import { QuietSpinner } from '../../../ui/spinner';
 import { REMOTE_CHOOSER_COPY } from '../copy';
 import { ownersOnly } from './elsewhere';
 import { Chevron } from './FilesTool';
@@ -104,7 +107,9 @@ export function RemoteChooser({ appSessionId, chooser, onClose, onChosen }: { ap
             </button>
           )}
           {state.at === 'reading' ? (
-            <p className={`m-0 ${LINE}`}>{REMOTE_CHOOSER_COPY.reading}</p>
+            <div className={`flex ${LINE}`}>
+              <QuietSpinner label={REMOTE_CHOOSER_COPY.reading} />
+            </div>
           ) : state.at === 'failed' ? (
             <div className="flex shrink-0 items-center gap-2 py-1 pr-1 pl-2">
               <span role="alert" className="min-w-0 flex-1 text-ui-sm text-fg-muted">
@@ -129,7 +134,6 @@ export function RemoteChooser({ appSessionId, chooser, onClose, onChosen }: { ap
         >
           {REMOTE_CHOOSER_COPY.more}
         </button>
-        <p className="m-0 text-ui-sm text-fg-muted">{REMOTE_CHOOSER_COPY.foot(machine)}</p>
         <div className="flex items-center justify-end gap-2">
           <button type="button" className={SECONDARY} onClick={close}>
             {REMOTE_CHOOSER_COPY.cancel}

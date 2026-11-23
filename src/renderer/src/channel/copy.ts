@@ -14,9 +14,9 @@ export const CHANNEL = {
   someone: (member: string) => `member ${member.slice(0, 8)}`,
   signedBy: (name: string | null) => (name === null ? 'Signed by one of your devices' : `Signed by one of ${name}’s devices`),
   to: 'to',
-  exchange: (count: number) => `${count} messages between`,
-  broadcast: (count: number) => `${count} messages from`,
-  toEveryone: 'to everyone',
+  // the word cut (P447, P448): a folded run reads "<name> and <name> · 12" or "<name> · 12", the count named by this; the
+  // default audience ("to everyone") is not said
+  messages: (count: number) => (count === 1 ? '1 message' : `${count} messages`),
   and: 'and',
   migrated: (by: string) => `attested at migration by ${by}`,
   legacy: 'unverified (from before the move)',
@@ -25,17 +25,17 @@ export const CHANNEL = {
   toHuman: {
     answer: 'Answered',
     asOf: (time: string) => `as of ${time}`,
-    unavailable: (machine: string) => `${machine} can’t share its sessions’ messages here: its MAWS is older`,
+    unavailable: (machine: string) => `${machine}: update MAWS there to see its sessions`, // the word cut (P454)
   },
   unverified: (count: number) => (count === 1 ? '1 event didn’t verify' : `${count} events didn’t verify`),
   empty: 'Nothing in this channel yet.',
-  noCopy: 'This Mac has no copy of this channel yet.', // U11a M4: open, nothing held, never caught up
-  opening: 'Reading the channel…',
+  noCopy: 'Not loaded on this Mac yet.', // U11a M4: open, nothing held, never caught up (the word cut, N168)
+  opening: 'Reading the channel…', // the first read's quiet spinner's name (the word cut, P457)
   failed: 'Couldn’t open the channel.',
   retry: 'Retry',
   closed: {
     'signed-out': 'Sign this Mac in to the org to read its project channels.',
-    'no-hub': 'This Mac isn’t connected to the hub, and has no copy of this channel yet.',
+    'no-hub': 'Not connected to the hub, and not loaded on this Mac yet.', // the word cut, N169
     'unknown-project': 'The hub holds no channel for this project.',
   } as const,
   waiting: 'Waiting on you',
@@ -56,6 +56,7 @@ export const CHANNEL = {
   composer: {
     label: 'Message the project',
     placeholder: 'Message everyone, or start with @alias to address a session',
+    // the word cut (P460): the message box's round arrow, named and tipped Send; a spinner named Sending… while it goes
     send: 'Send',
     sending: 'Sending…',
   },

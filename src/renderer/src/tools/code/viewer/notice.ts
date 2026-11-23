@@ -31,7 +31,9 @@ export interface FileNotice {
   lines: readonly string[]; // the sentences, in order; the first is the headline
   retry: boolean;
   copyPath: boolean;
-  detail: string; // the command's own words, drawn small; empty where the headline is those words already
+  // the command's own words, drawn small, only under the generic failure (the word cut, N11), where they are the one clue
+  // to the cause; empty under a notice that names its cause, and where the headline is those words already
+  detail: string;
 }
 
 const LEAD = failureWords('files.readOutside', ''); // "Not opened: "
@@ -41,7 +43,7 @@ export function classifyFailure(failure: FileFailure, where: { machine: string |
   const { machine, mine, subject } = where;
   const viaAct = message.startsWith(LEAD);
   const said = viaAct ? message.slice(LEAD.length) : message;
-  const notice = (cause: NoticeCause, lines: readonly string[], retry: boolean): FileNotice => ({ cause, lines, retry, copyPath: cause === 'outside', detail: message });
+  const notice = (cause: NoticeCause, lines: readonly string[], retry: boolean): FileNotice => ({ cause, lines, retry, copyPath: cause === 'outside', detail: cause === 'other' ? message : '' });
 
   // The machine refused the plain read at its grade: what the listing says of the session decides the words.
   if (machine !== null && !viaAct && refusal === 'grade') {
@@ -52,10 +54,10 @@ export function classifyFailure(failure: FileFailure, where: { machine: string |
   if (code === 'host_unavailable' || code === 'timeout') return notice('unreachable', [machine === null ? NOTICE_COPY.unreachableHere : NOTICE_COPY.unreachable(machine)], true);
   if (said === REFUSAL) {
     const lines = [machine === null ? NOTICE_COPY.outside[subject] : NOTICE_COPY.outsideOn(subject, machine)];
-    // The two sentences about opening a file: the three ways hold where the daemon that refused ran the open itself (this
-    // Mac's always; another machine's only through the act), and no folder is opened from elsewhere.
+    // The two sentences about opening a file: Open File… is a way in where the daemon that refused ran the open itself
+    // (this Mac's always; another machine's only through the act), and no folder is opened from elsewhere.
     if (subject === 'file') {
-      if (machine === null || viaAct) lines.push(NOTICE_COPY.threeWays);
+      if (machine === null || viaAct) lines.push(NOTICE_COPY.chooseIt);
       lines.push(NOTICE_COPY.askAgent);
     }
     return notice('outside', lines, false);

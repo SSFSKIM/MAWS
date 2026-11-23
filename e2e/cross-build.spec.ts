@@ -2828,12 +2828,12 @@ test('(side column, from the peer) two surfaces the peer stacked open as two gro
     // tasks then closed, which gives its group's tab back to view
     const otherGroup = holder === 'upper' ? 'lower' : 'upper';
     await sideGroup(run.page, otherGroup).getByRole('button', { name: 'Add a tool', exact: true }).click();
-    await run.page.getByRole('menuitem', { name: 'Background tasks', exact: true }).click();
-    await expect(sideGroup(run.page, otherGroup), 'Background tasks in the other group').toHaveAttribute('aria-label', 'Background tasks');
+    await run.page.getByRole('menuitem', { name: 'Background', exact: true }).click();
+    await expect(sideGroup(run.page, otherGroup), 'Background tasks in the other group').toHaveAttribute('aria-label', 'Background');
     await expect(sideGroup(run.page, holder), `${PINNED_TOOL} in view`).toHaveAttribute('aria-label', PINNED_TOOL);
     await expect(panelResizer(run.page), 'a width dragged under the peer is not the narrow one').toHaveAttribute('aria-valuenow', String(NARROW_AUTOMATIC_WIDTH));
-    await sideGroup(run.page, otherGroup).getByRole('button', { name: 'Close Background tasks', exact: true }).click();
-    await expect(sideTab(sideColumn(run.page), 'Background tasks'), 'Background tasks closed').toHaveCount(0);
+    await sideGroup(run.page, otherGroup).getByRole('button', { name: 'Close Background', exact: true }).click();
+    await expect(sideTab(sideColumn(run.page), 'Background'), 'Background tasks closed').toHaveCount(0);
     await sideTab(sideGroup(run.page, holder), other).click();
     await expect(sideGroup(run.page, holder)).toHaveAttribute('aria-label', other);
     await expect(sideTab(sideColumn(run.page), PINNED_TOOL), `${PINNED_TOOL} a tab`).toHaveCount(1);
@@ -3017,11 +3017,11 @@ test('(side column, to the peer) two groups, a hidden column, a folded card and 
     expect(sideOf(s, address).added['panelTools.widths'], 'the narrow width still 380').toEqual({ version: 1, wide: null, narrow: F_AUTOMATIC_WIDTH });
     // drawn, not only stored (Addendum 8): a narrow tool in view above, beside the artifact below, and the column is 380
     await sideGroup(back.page, 'upper').getByRole('button', { name: 'Add a tool', exact: true }).click();
-    await back.page.getByRole('menuitem', { name: 'Background tasks', exact: true }).click();
-    await expect(sideGroup(back.page, 'upper'), 'Background tasks above').toHaveAttribute('aria-label', 'Background tasks');
+    await back.page.getByRole('menuitem', { name: 'Background', exact: true }).click();
+    await expect(sideGroup(back.page, 'upper'), 'Background tasks above').toHaveAttribute('aria-label', 'Background');
     await expect(panelResizer(back.page), 'the column drawn at the stored narrow width').toHaveAttribute('aria-valuenow', String(F_AUTOMATIC_WIDTH));
     // the view put back: Background tasks closed, the terminal in view above and the column wide again
-    await sideGroup(back.page, 'upper').getByRole('button', { name: 'Close Background tasks', exact: true }).click();
+    await sideGroup(back.page, 'upper').getByRole('button', { name: 'Close Background', exact: true }).click();
     await expect.poll(() => sortedTitlesIn(back.page, 'upper')).toEqual(['Review', 'Terminal', 'Terminal']);
     await sideTab(sideGroup(back.page, 'upper'), /^Terminal/).first().click();
     await expect(sideGroup(back.page, 'upper'), 'the terminal above again').toHaveAttribute('aria-label', 'Terminal');
@@ -4248,7 +4248,7 @@ test('(outside file, on the peer’s daemon) this build’s app on the peer’s 
         const refusal = viewer.locator('[data-refusal]');
         await expect(refusal.locator('p').first(), 'F’s daemon drops `named`: the file is refused, as F refuses it, and this build’s notice says why').toHaveText(NOTICE_OUTSIDE, { timeout: 20_000 });
         await expect(refusal).toHaveAttribute('data-notice-cause', 'outside');
-        await expect(refusal.locator('[data-notice-detail]'), 'the service’s own words, small').toHaveText("path outside the session's directories");
+        await expect(refusal.locator('[data-notice-detail]'), 'the word cut (N11): no service words under a notice that names its cause').toHaveCount(0);
       } else {
         await expect(viewer.locator('.cm-content'), 'master’s daemon answers `named`: the file is read').toContainText('linked.txt', { timeout: 20_000 });
         await expect(viewer.locator('[data-read-only="outside"]'), 'with no `outside`, held read-only (W6)').toBeVisible();
@@ -4259,7 +4259,7 @@ test('(outside file, on the peer’s daemon) this build’s app on the peer’s 
       // Open File…: the grant is a command neither older daemon knows, so main answers refused and the page says so
       await run.maws.app.evaluate((_electron, p) => void (process.env.MAWS_E2E_PICK_PATHS = p), chosen);
       await menu(run.maws.app, 'file.open');
-      await expect(run.page.locator('[data-toast-viewport]').getByText('MAWS could not open the file just now. Try Open File again in a moment.'), 'Open File… says it could not open the file').toBeVisible({ timeout: 20_000 });
+      await expect(run.page.locator('[data-toast-viewport]').getByText('Could not open the file. Try again in a moment.') /* the word cut (N26) */, 'Open File… says it could not open the file').toBeVisible({ timeout: 20_000 });
       await expect(run.page.locator(`[data-file-viewer][data-path="${chosen}"]`), 'and opens nothing').toHaveCount(0);
       expect(existsSync(grantsOf(s)), 'nothing granted').toBe(false);
 
@@ -4515,8 +4515,12 @@ test('(another machine’s outside file, the peer as that machine) this build’
     await expect(checkoutRow, 'B’s checkout in A’s Files tool').toBeVisible({ timeout: 60_000 });
     await checkoutRow.click({ button: 'right' });
     const openRow = page.locator('[data-files-menu] [data-open-file]');
-    await expect(openRow).toHaveAttribute('data-disabled', /.*/);
-    await expect(openRow, 'the Files list’s row says to update B').toHaveAttribute('title', `Can’t open a file on ${B_NAME} yet. Update MAWS on ${B_NAME} and try again.`);
+    // the word cut (N29): the greyed row keeps the menu's keyboard, drawn aria-disabled; its sentence is its description
+    // (and its row note on pointing or focus), no longer a system title
+    await expect(openRow).toHaveAttribute('aria-disabled', 'true');
+    await expect(openRow).not.toHaveAttribute('data-disabled', /.*/);
+    await expect(openRow, 'the Files list’s row says to update B').toHaveAccessibleDescription(`Can’t open a file on ${B_NAME} yet. Update MAWS on ${B_NAME} and try again.`);
+    await expect(openRow).not.toHaveAttribute('title', /.*/);
     await page.keyboard.press('Escape');
     await chip.click();
     const refusal = sideColumn(page).locator(`[data-file-viewer][data-path="${notes}"] [data-refusal]`);
@@ -4673,7 +4677,7 @@ test('(a command’s output, both ways) a session kept with a slash command’s 
 //                            build's mawsd refuses the peer's app (one from before O4), that half says it is not run.
 const knowsRaw = (build: Build) => (commandOf(build, 'files.read')?.input as { properties?: Record<string, unknown> } | undefined)?.properties?.raw !== undefined;
 const knowsRawWhy = (peer: Build) => `the peer (wire ${wireOf(peer)}) knows files.read's raw: a daemon of this landing or later serves a frame; the runs of record have build F and build M as the peer, --peer-exact f1852de3a and 2c7044231`;
-const OLDER_SERVICE = 'MAWS’s service on this Mac is an older version, so this file can’t be shown here yet.'; // this build's row (tools/code/copy.ts)
+const OLDER_SERVICE = 'This file can’t be shown here yet.'; // this build's row (tools/code/copy.ts; the word cut, N15)
 const PEER_ROW = 'PDF files open outside MAWS'; // the row of both peers (tools/code/copy.ts at f1852de3a and at 2c7044231)
 // What either end would log had it refused the other's read: the validation's own words (src/shared/ipc/validate.ts)
 const READ_REFUSED = /invalid (?:input for|output of) files\.read/;
@@ -4832,8 +4836,8 @@ const U5B_CHILD = 'e5b20000-0000-4000-8000-000000000002';
 const U5B_FIRST_PROMPT = 'Read src/app.ts and say what v3 holds.';
 const U5B_FIRST_REPLY = 'v3 holds the sum of a short list.';
 const U5B_THREAD_REPLY = 'sumOf keeps v3 in step with the list it names.';
-const COMMITS_OLDER = 'Commits unavailable: this Mac’s MAWS service is older than this window'; // tools/scm/copy.ts, commitsOlder(null)
-const BRANCH_NEEDS_READS = 'This branch needs this Mac’s MAWS service to be updated'; // tools/code/copy.ts, branchNeedsReads(null)
+const COMMITS_OLDER = 'Unavailable: this Mac’s MAWS service is older than this window'; // tools/scm/copy.ts, commitsOlder(null) (the word cut, N68)
+const BRANCH_NEEDS_READS = 'This branch needs a newer MAWS on this Mac'; // tools/code/copy.ts, branchNeedsReads(null) (the word cut)
 const PR_UNTRUSTED = 'Trust this folder to see PR state'; // panel/copy.ts, SUMMARY_COPY.prUntrusted
 
 // The scratch's repository made a git repository on `main` with its own identity, no signing and no hooks: src/app.ts
@@ -4927,8 +4931,12 @@ test('(reads, on the peer’s daemon) this build’s app on the peer’s unit ma
       await expect(added.locator('[data-review-badge]'), 'the new file’s badge').toHaveText('Untracked');
       await expect(added.locator('[data-review-counts]'), 'and no count').toHaveCount(0);
       const branch = review.locator('[data-chip="branch"]');
+      // the word cut ("What the cut builds"): a greyed chip with a reason keeps the keyboard, drawn aria-disabled, its reason
+      // its tooltip and description rather than a system title
       await expect(branch, 'This branch disabled').toBeDisabled();
-      await expect(branch, 'with its title').toHaveAttribute('title', BRANCH_NEEDS_READS);
+      await expect(branch).toHaveAttribute('aria-disabled', 'true');
+      await expect(branch, 'with its reason').toHaveAccessibleDescription(BRANCH_NEEDS_READS);
+      await expect(branch).not.toHaveAttribute('title', /.*/);
       expect(run.maws.consoleErrors()).toEqual([]);
       said.push(`  Review: added.txt Untracked with no count beside notes.txt; This branch disabled, "${BRANCH_NEEDS_READS}"`);
       await s.quit(run);

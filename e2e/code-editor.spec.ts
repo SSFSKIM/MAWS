@@ -171,6 +171,76 @@ test.describe('the editor in stub mode over a scratch repository', () => {
     });
   });
 
+  // The word cut (T336; viewer/find-glyphs.ts): the ⌘F bar's controls are glyphs that keep their words as their names
+  // and as tips the stylesheet draws from `data-find-tip`, which jsdom cannot vouch for. Read here as drawn (the tip is
+  // the owner's ::after, shown once it is visible and opaque): pointing shows a glyph's word after the pointing delay,
+  // also while the search field holds the focus; a glyph reached by Tab shows its word at once, and the pointed one's
+  // gives way, so one tip shows at a time. Waits are on the tip, never on a time.
+  test('the find bar’s glyphs show their words as tips, one at a time: pointed after the delay, reached by Tab at once', async () => {
+    await withProduct(async (p) => {
+      const viewer = await openEditor(p, APP);
+      const first = viewer.locator('.cm-content .cm-line').first();
+      await first.click();
+      await p.page.keyboard.press('Meta+f');
+      const bar = viewer.locator('.cm-panel.cm-search');
+      await expect(bar).toBeVisible();
+      const field = bar.locator('input[name="search"]');
+      await expect(field, 'the bar opens with its search field focused').toBeFocused();
+      const next = bar.getByRole('button', { name: 'Next match', exact: true });
+      const previous = bar.getByRole('button', { name: 'Previous match', exact: true });
+      const matchCase = bar.locator('label[data-find-tip="Match case"]');
+      await expect(next).toHaveText('↓');
+      await expect(previous).toHaveText('↑');
+      await expect(bar.getByRole('checkbox', { name: 'Match case', exact: true })).toHaveCount(1);
+      await expect(matchCase).toContainText('Aa');
+      // every tip drawn now, by the words its `::after` renders (its computed `content`) and the delay it opened after
+      // (its computed transition delay, the pointing delay's stand-in for a wall-clock wait)
+      type Drawn = { words: string; attribute: string | null; delay: string };
+      const drawn = () =>
+        bar.locator('[data-find-tip]').evaluateAll((owners) =>
+          owners.flatMap((owner): Drawn[] => {
+            const tip = getComputedStyle(owner, '::after');
+            if (tip.visibility !== 'visible' || tip.opacity !== '1') return [];
+            return [{ words: tip.content.replace(/^"(.*)"$/, '$1'), attribute: owner.getAttribute('data-find-tip'), delay: tip.transitionDelay }];
+          }),
+        );
+      // The words as drawn: the computed `content`, which Chromium resolves from `attr()`; where an engine leaves it
+      // unresolved, the attribute it names stands in and the run says so.
+      let unresolved = false;
+      const shown = async () =>
+        (await drawn()).map((tip) => {
+          if (tip.words === 'attr(data-find-tip)') {
+            unresolved = true;
+            return tip.attribute;
+          }
+          return tip.words;
+        });
+      const delays = async () => (await drawn()).map((tip) => tip.delay);
+      await p.page.mouse.move(0, 0);
+      await expect.poll(shown, { message: 'nothing pointed, no glyph focused: no tip' }).toEqual([]);
+
+      // pointing while the search field holds the focus: the pointed glyph's word, after the pointing delay (300 ms)
+      await previous.hover();
+      await expect.poll(shown, { message: 'Previous pointed, the field focused' }).toEqual(['Previous match']);
+      expect(await delays(), 'opened after the pointing delay').toEqual(['0.3s, 0.3s']);
+      await expect(field).toBeFocused();
+
+      // the pointer held on Previous, Tab takes the focus to Next: its word at once, and Previous's gives way
+      await p.page.keyboard.press('Tab');
+      await expect(next).toBeFocused();
+      await expect.poll(shown, { message: 'Next reached by Tab while Previous stays pointed' }).toEqual(['Next match']);
+      expect(await delays(), 'opened by the keyboard at once').toEqual(['0s']);
+
+      // the focus back in the code, the pointer on a toggle: its word alone, after the pointing delay
+      await first.click();
+      await expect.poll(shown, { message: 'the focus in the code, the pointer on it' }).toEqual([]);
+      await matchCase.hover();
+      await expect.poll(shown, { message: 'Match case pointed' }).toEqual(['Match case']);
+      expect(await delays()).toEqual(['0.3s, 0.3s']);
+      if (unresolved) test.info().annotations.push({ type: 'unverified', description: 'the engine left the tips’ computed content as attr(data-find-tip): their words were read from the attribute it names' });
+    });
+  });
+
   test('asks before closing a dirty tab: Cancel keeps it, Don’t save closes it and leaves the disk alone', async () => {
     await withProduct(async (p) => {
       const original = read(p, APP);
@@ -246,7 +316,7 @@ test.describe('the editor in stub mode over a scratch repository', () => {
       await typeAtTop(p, viewer, TYPED);
       writeFileSync(p.scratch.path(APP), Buffer.concat([Buffer.from('// caf'), Buffer.from([0xe9]), Buffer.from(' changed on disk\n'), Buffer.from(original)]));
       const reason = viewer.locator('[data-disk-unusable]');
-      await expect(reason).toHaveText('Changed on disk: no longer UTF-8, so it cannot be merged', { timeout: MEASURED_WAIT_MS });
+      await expect(reason).toHaveText('Changed on disk · not UTF-8, can’t merge', { timeout: MEASURED_WAIT_MS }); // the word cut (T343): the fact, shortened
       await expect(reason).toHaveAttribute('data-disk-unusable', 'encoding');
       await expect(viewer, 'no version on offer').toHaveAttribute('data-theirs', '');
       await expect(viewer, 'the edit still in the tab').toHaveAttribute('data-dirty', 'true');
@@ -267,10 +337,10 @@ test.describe('the editor in stub mode over a scratch repository', () => {
       await barButton(viewer, 'Save').click();
       await expect(viewer).toHaveAttribute('data-theirs', 'merge');
       const reason = viewer.locator('[data-theirs-notice="merge"]');
-      await expect(reason).toHaveText('Changed on disk since you opened it');
+      await expect(reason).toHaveText('Changed on disk'); // the word cut (T341): the merge view's notice reads as the plain notice does
       await expectDrawnWholeAtBothWidths(p.page, reason);
       const changes = viewer.locator('[data-merge-changes]');
-      await expect(changes).toHaveText('2 changes from disk');
+      await expect(changes).toHaveText('2 changes'); // the word cut (T342): the count beside ↑ ↓
       const chunks = viewer.locator('.cm-deletedChunk');
       await expect(chunks).toHaveCount(2);
       await expect(chunks.first().getByRole('button', { name: 'Take theirs' })).toBeVisible();
@@ -299,10 +369,10 @@ test.describe('the editor in stub mode over a scratch repository', () => {
 
       // The first chunk is the typed line, which the disk lacks: Take theirs drops it; the rest stays mine.
       await chunks.first().getByRole('button', { name: 'Take theirs' }).click();
-      await expect(changes).toHaveText('1 change from disk');
+      await expect(changes).toHaveText('1 change');
       await expect(viewer.locator('.cm-content')).not.toContainText(TYPED);
       await chunks.first().getByRole('button', { name: 'Keep mine' }).click();
-      await expect(changes).toHaveText('0 changes from disk');
+      await expect(changes).toHaveText('0 changes');
 
       await barButton(viewer, 'Save').click();
       await expect.poll(() => read(p, APP), { message: 'the resolution: the disk’s first lines, mine at line 20' }).toBe(original);
@@ -445,7 +515,7 @@ test.describe('the editor in stub mode over a scratch repository', () => {
 
         await barButton(viewer, 'Compare').click();
         await expect(viewer).toHaveAttribute('data-theirs', 'merge');
-        await expect(viewer.locator('[data-merge-changes]')).toHaveText('2 changes from disk');
+        await expect(viewer.locator('[data-merge-changes]')).toHaveText('2 changes');
         await expect(viewer.locator('.cm-deletedChunk')).toHaveCount(2);
         await scan(theme, 'the merge view');
         await shoot(viewer, 'merge', theme);

@@ -230,9 +230,12 @@ export function buildChromeUserData(dir: string, { host = '127.0.0.1', slowCopy 
     picture: null,
   };
 
-  const probe = installExtension(personDir, (manifestKey) => probeManifest(host, manifestKey), probeFiles);
+  // Default's four list in this order in the import sheet, in every build (`keysInIdOrder`)
+  const [probeKey, failsKey, walletKey, disabledKey] = keysInIdOrder(4) as [Buffer, Buffer, Buffer, Buffer];
+  const probe = installExtension(personDir, probeKey, (manifestKey) => probeManifest(host, manifestKey), probeFiles);
   const fails = installExtension(
     personDir,
+    failsKey,
     (manifestKey, version) => ({
       manifest_version: 3,
       name: 'Probe fails',
@@ -251,6 +254,7 @@ export function buildChromeUserData(dir: string, { host = '127.0.0.1', slowCopy 
   );
   const wallet = installExtension(
     personDir,
+    walletKey,
     (manifestKey, version) => ({ manifest_version: 3, name: '__MSG_extName__', description: '__MSG_extDescription__', default_locale: 'en', version, key: manifestKey }),
     (versionDir) => writeJson(join(versionDir, '_locales', 'en', 'messages.json'), { extName: { message: 'Probe Wallet' }, extDescription: { message: 'A crypto wallet for testing' } }),
     ['2.0'],
@@ -258,11 +262,12 @@ export function buildChromeUserData(dir: string, { host = '127.0.0.1', slowCopy 
   );
   const disabled = installExtension(
     personDir,
+    disabledKey,
     (manifestKey, version) => ({ manifest_version: 3, name: 'Disabled in Chrome', version, description: 'Chrome has this extension turned off', key: manifestKey }),
     () => {},
     ['0.1'],
   );
-  const workProbe = installExtension(workDir, (manifestKey) => probeManifest(host, manifestKey), (versionDir) => {
+  const workProbe = installExtension(workDir, freshKey(), (manifestKey) => probeManifest(host, manifestKey), (versionDir) => {
     probeFiles(versionDir);
     if (slowCopy) writeZeros(join(versionDir, 'padding.bin'), SLOW_COPY_BYTES);
   });
@@ -392,14 +397,25 @@ function writeCookies(file: string, entries: FixtureCookie[], key: Buffer, nowMs
 
 // An installed extension under <profile>/Extensions/<id>/<version>_0/, its manifest carrying the `key` Chrome writes into
 // an installed extension, so the id Electron derives on load is the directory's.
+// A fresh manifest key (an RSA public key's SPKI DER): Chrome derives the extension's id from it.
+const freshKey = () => generateKeyPairSync('rsa', { modulusLength: 2048 }).publicKey.export({ type: 'spki', format: 'der' });
+// `n` fresh keys, in the order of the ids they derive: main lists a profile's extensions by id
+// (src/main/browser/import/chrome/extensions.ts), so extensions installed with them list in the order they are installed,
+// the same in every build, though every build draws new keys.
+const keysInIdOrder = (n: number): Buffer[] =>
+  Array.from({ length: n }, freshKey)
+    .map((der) => ({ der, id: chromeExtensionId(der) }))
+    .sort((a, b) => (a.id < b.id ? -1 : 1))
+    .map(({ der }) => der);
+
 function installExtension(
   profileDir: string, // the profile directory's path
+  der: Buffer, // its manifest key
   manifest: (manifestKey: string, version: string) => Record<string, unknown>,
   files: (versionDir: string) => void,
   versions: string[] = ['1.0'],
   resolvedName?: string,
 ): FixtureExtension {
-  const der = generateKeyPairSync('rsa', { modulusLength: 2048 }).publicKey.export({ type: 'spki', format: 'der' });
   const id = chromeExtensionId(der);
   const manifestKey = der.toString('base64');
   let written: Record<string, unknown> = {};

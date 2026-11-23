@@ -24,6 +24,7 @@ import { drawnRows, keyboardBefore, takeKeyboard, useFinder, useKeyboardRequest,
 import { folderFromEnd, measureIn } from './path-cut';
 import { FILES_ROW_HEIGHT, indent, rowFonts, useWidth } from './row-metrics';
 import { treeOf, useTreeState } from './tree-state';
+import { QuietSpinner } from '../../../ui/spinner'; // the word cut (N1)
 
 // The look: one row of 33 px with its bottom border, so its line meets the file bar's; 8 px at each side (the tree's
 // root indent); the app's own text-field outline, inside its box.
@@ -154,6 +155,14 @@ function FinderList({ tabId, directory, state, choose, clicked }: { tabId: strin
     if (highlighted !== null) document.getElementById(highlighted)?.scrollIntoView?.({ block: 'nearest' }); // the highlight stays in view
   }, [highlighted, state]);
   const said = lineOf(state);
+  // The word cut (N1): the wait for a first answer is the quiet spinner, nothing for its first half second
+  if (said?.line === 'searching') {
+    return (
+      <div data-files-line="" data-line={said.line} className={`${LINE} flex text-fg-muted`}>
+        <QuietSpinner label={said.words} />
+      </div>
+    );
+  }
   if (said !== null) {
     return (
       <p role="status" data-files-line="" data-line={said.line} className={`${LINE} ${said.line === 'failed' ? 'text-danger' : 'text-fg-muted'}`}>

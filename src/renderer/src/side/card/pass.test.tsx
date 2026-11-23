@@ -78,7 +78,7 @@ const placement = (hostId = 'h1'): CommentPlacement => ({ kind: 'card', host: 'a
 const pick = (n: number, screenshot?: AnchorScreenshot) => act(() => openCommentComposer({ ...page(n), ...(screenshot && { screenshot }) }, { appSessionId: PARENT, placement: placement() }));
 const card = () => document.querySelector<HTMLElement>('[data-comment-card]');
 const field = () => screen.getByRole('textbox', { name: 'Comment' }) as HTMLTextAreaElement;
-const sendButton = () => within(card()!).getByRole('button', { name: /^(Send|Sending…|Starting…)/ }) as HTMLButtonElement;
+const sendButton = () => within(card()!).getByRole('button', { name: /^Send\b(?! to main)/ }) as HTMLButtonElement;
 const box = () => screen.getByRole('checkbox', { name: 'Send to main' }) as HTMLInputElement;
 const pass = () => useCommentCard.getState().passes.get(KEY) ?? null;
 const chip = () => document.querySelector<HTMLElement>('[data-unsent-chip]');
@@ -319,7 +319,8 @@ describe('a pass’s send (§D), each awaited promise held open', () => {
     expect(field().disabled).toBe(true);
     expect((within(card()!).getByRole('button', { name: 'Remove comment' }) as HTMLButtonElement).disabled).toBe(true);
     expect(sendButton().disabled).toBe(true);
-    expect(sendButton().textContent).toBe('Sending…');
+    expect(sendButton().textContent).toBe('Send 2 comments'); // the word cut (P432): the word stays while it goes, busy
+    expect(sendButton().getAttribute('aria-busy')).toBe('true');
     fireEvent.click(sendButton());
     expect(fake.invoked('side.comment.content')).toHaveLength(1);
     fireEvent.click(within(card()!).getByRole('button', { name: 'Close' }));

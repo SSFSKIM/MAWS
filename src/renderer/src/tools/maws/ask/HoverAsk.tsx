@@ -11,7 +11,7 @@ import { useRemoteUnavailable } from '../../../lane-b/remote-unavailable';
 import { CardButton } from '../../../request-card/controls';
 import { selectProjectOrder, useSessions } from '../../../stores/sessions';
 import { TranscriptActionsProvider } from '../../../transcript/view/context';
-import { QuietSpinner } from '../../../ui/spinner';
+import { QuietSpinner, WaitingWords } from '../../../ui/spinner';
 import { openFile } from '../../code/open-file';
 import { SHEET } from './copy';
 import { canSubmit, EMPTY_DRAFT } from './draft';
@@ -62,8 +62,8 @@ export function HoverAsk({ appSessionId, askId }: { appSessionId: AppSessionId; 
       </div>}
       <div className="flex items-center justify-end gap-2">
         <CardButton disabled={busy || unavailable !== null} title={unavailable ?? undefined} onClick={dismiss} className="mr-auto">{SHEET.dismiss}</CardButton>
-        <CardButton tone="primary" disabled={busy || !ready} title={ready ? undefined : (unavailable ?? SHEET.incomplete)} onClick={submit}>
-          {state.submitting === askId ? SHEET.submitting : skipped > 0 ? SHEET.submitSkipping(skipped) : SHEET.submit}
+        <CardButton tone="primary" disabled={busy || !ready} aria-busy={state.submitting === askId || undefined} title={ready ? undefined : (unavailable ?? SHEET.incomplete)} onClick={submit}>
+          <WaitingWords words={skipped > 0 ? SHEET.submitSkipping(skipped) : SHEET.submit} wait={state.submitting === askId ? SHEET.submitting : null} />
         </CardButton>
       </div>
     </div>

@@ -21,7 +21,8 @@ export interface ScratchRepository {
 
 // `main` with three commits, the second pushed to a local bare `origin` and tracked (`git branch -u origin/main`), the
 // third not pushed; then one tracked file edited by one appended line and one untracked file. So the summary reads
-// `⎇ main`, `+1 −0 across 2 files · 1 untracked` and `1 ahead of origin/main`, and no "Open on GitHub" (a local remote).
+// `⎇ main`, `+1 −0 · 2 files` (1 untracked its tooltip) and `↑1` (named `1 ahead of origin/main`), and no "Open on
+// GitHub" (a local remote).
 export function scratchRepository(): ScratchRepository {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'maws-panel-repo-')));
   const dir = join(root, 'repo');

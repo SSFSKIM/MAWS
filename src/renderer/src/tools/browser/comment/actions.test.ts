@@ -168,7 +168,7 @@ describe('openForwardedLink', () => {
     for (const url of ['http://[::ffff:127.0.0.1]:3000/', 'http://127.0.0.2:3000/', 'ws://localhost:3000/']) expect(openForwardedLink(R, url), url).toBe(true);
     expect(browserTabs(R)).toEqual([]);
     expect(main.calls.map(({ name }) => name)).toEqual([]); // no forward, and nothing sent to main to open
-    expect(toasts()).toEqual(Array(3).fill('This link points at mini’s own loopback and can’t be forwarded (only http(s) on localhost, 127.0.0.1, 0.0.0.0, [::] or [::1])'));
+    expect(toasts()).toEqual(Array(3).fill('This link is local to mini and can’t be opened from here')); // the word cut (T470)
     useMachines.setState({ machines: new Map() });
   });
 

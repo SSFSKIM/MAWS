@@ -117,7 +117,11 @@ describe('the page (S1, S2)', () => {
     await waitFor(() => expect(text(part('pr'))).toBe('Pull request No PR for feature/x'));
     expect(parts()).toEqual(['uncommitted', 'commits', 'pr']);
     expect(text(document.querySelector('[data-scm-where]'))).toBe('⎇ feature/x · worktree');
-    expect(document.querySelector('[data-scm-where]')?.getAttribute('title')).toBe(DIR);
+    // the word cut (N57): the folder's path is the line's tooltip and description, the line taking the keyboard
+    const where = document.querySelector<HTMLElement>('[data-scm-where]')!;
+    expect([where.hasAttribute('title'), where.tabIndex, document.getElementById(where.getAttribute('aria-describedby')!)?.textContent]).toEqual([false, 0, DIR]);
+    where.focus();
+    expect((await screen.findByRole('tooltip')).textContent).toBe(DIR);
     expect(text(part('uncommitted'))).toBe('Uncommitted 3 +48 −12 Review ›');
     expect(text(part('commits')?.querySelector('[data-scm-commits-heading]'))).toBe('Commits 4 since origin/main Review ›');
     expect([...part('commits')!.querySelectorAll('[data-scm-commit-group]')].map(text)).toEqual(['Not pushed 2', 'Pushed to origin/feature/x 2']);
@@ -143,6 +147,17 @@ describe('the page (S1, S2)', () => {
     expect(screen.queryAllByRole('checkbox')).toEqual([]);
     expect(document.querySelectorAll('input, textarea, select')).toHaveLength(0);
     expect(screen.getAllByRole('button').every((button) => button.tagName === 'BUTTON')).toBe(true);
+  });
+
+  it('waits for the first git read with the quiet spinner, nothing for its first half second (the word cut, P211)', async () => {
+    serves();
+    main.state.answers['git.watch'] = () => new Promise(() => {});
+    mount();
+    await waitFor(() => expect(main.callsOf('git.watch')).toHaveLength(1));
+    expect(text(document.querySelector('[data-scm-page]'))).toBe('');
+    expect(screen.queryByRole('progressbar')).toBeNull();
+    expect(await screen.findByRole('progressbar', { name: 'Loading' }, { timeout: 2000 })).toBeTruthy();
+    expect(parts()).toEqual([]);
   });
 
   it('says "Not a git repository" alone outside a repository', async () => {
@@ -340,13 +355,13 @@ describe('the links (S8; frames’ S8)', () => {
     expect(part('uncommitted')!.querySelector('[data-scm-conflicts]')!.className).toContain('text-danger');
   });
 
-  it('with no base: "Commits · latest on <branch>" and no "Review ›"; a group line only with an upstream, with no count; "Commits · latest" on a detached HEAD', async () => {
+  it('with no base: "Commits · latest" (the word cut, N62: the Where line names the branch) and no "Review ›"; a group line only with an upstream, with no count; "Commits · latest" on a detached HEAD', async () => {
     serves();
     const rows = Array.from({ length: 10 }, (_, i) => branchCommitOf(i + 1, true));
     main.state.branch = { base: null, upstream: 'origin/feature/x', commits: rows, counts: null, behind: null };
     mount();
     await waitFor(() => expect(commitRows()).toHaveLength(8));
-    expect(text(part('commits')!.querySelector('[data-scm-commits-heading]'))).toBe('Commits · latest on feature/x');
+    expect(text(part('commits')!.querySelector('[data-scm-commits-heading]'))).toBe('Commits · latest');
     expect(within(part('commits')!).queryByRole('button', { name: 'Review ›' })).toBeNull();
     expect([...part('commits')!.querySelectorAll('[data-scm-commit-group]')].map(text)).toEqual(['Pushed to origin/feature/x']);
     cleanup();
@@ -379,7 +394,7 @@ describe('a failed read, told apart (S9; frames’ S9, S14)', () => {
   it('another machine that lists capabilities without the reads: "runs an older MAWS", nothing asked, no refresh', async () => {
     servesRemote({ capabilities: ['rl2.session-acts'] });
     mount(REMOTE);
-    await waitFor(() => expect(sentence()).toBe('Commits unavailable: berth-mini runs an older MAWS'));
+    await waitFor(() => expect(sentence()).toBe('Unavailable: berth-mini runs an older MAWS'));
     expect(text(part('commits')!.querySelector('[data-scm-commits-heading]'))).toBe('Commits');
     expect(refresh()).toBeNull();
     expect(branchAsks()).toBe(0);
@@ -387,11 +402,11 @@ describe('a failed read, told apart (S9; frames’ S9, S14)', () => {
     otherParts();
   });
 
-  it('this Mac’s service answering unknown_command: "this Mac’s MAWS service is older than this window", no refresh', async () => {
+  it('this Mac’s service answering unknown_command: "Unavailable: this Mac’s MAWS service is older than this window" (N68: not the heading again), no refresh', async () => {
     serves();
     main.state.answers['git.branchCommits'] = failed('unknown_command', 'no such command');
     mount();
-    await waitFor(() => expect(sentence()).toBe('Commits unavailable: this Mac’s MAWS service is older than this window'));
+    await waitFor(() => expect(sentence()).toBe('Unavailable: this Mac’s MAWS service is older than this window'));
     expect(refresh()).toBeNull();
     await waitFor(otherParts);
   });
@@ -400,15 +415,15 @@ describe('a failed read, told apart (S9; frames’ S9, S14)', () => {
     servesRemote();
     main.state.answers['git.branchCommits'] = failed('internal', 'not offered', { refusal: 'not-offered' });
     mount(REMOTE);
-    await waitFor(() => expect(sentence()).toBe('Commits unavailable: berth-mini runs an older MAWS'));
+    await waitFor(() => expect(sentence()).toBe('Unavailable: berth-mini runs an older MAWS'));
     expect(refresh()).toBeNull();
   });
 
-  it('host_unavailable with nothing read: "Commits are unavailable while <machine> is offline", whose refresh asks again', async () => {
+  it('host_unavailable with nothing read: "Unavailable while <machine> is offline" (N69), whose refresh asks again', async () => {
     servesRemote();
     main.state.answers['git.branchCommits'] = failed('host_unavailable', 'the link dropped');
     mount(REMOTE);
-    await waitFor(() => expect(sentence()).toBe('Commits are unavailable while berth-mini is offline'));
+    await waitFor(() => expect(sentence()).toBe('Unavailable while berth-mini is offline'));
     expect(branchAsks()).toBe(1);
     fireEvent.click(refresh()!);
     await waitFor(() => expect(branchAsks()).toBe(2));
@@ -427,31 +442,57 @@ describe('a failed read, told apart (S9; frames’ S9, S14)', () => {
     expect(sentence()).toBeNull();
   });
 
-  it('another refusal: "<machine> refused this read", with no tooltip and a refresh', async () => {
+  it('another refusal: "Unavailable: <machine> refused" (N70), with no tooltip and a refresh', async () => {
     servesRemote();
     main.state.answers['git.branchCommits'] = failed('internal', 'refused', { refusal: 'no-target' });
     mount(REMOTE);
-    await waitFor(() => expect(sentence()).toBe('Commits unavailable: berth-mini refused this read'));
+    await waitFor(() => expect(sentence()).toBe('Unavailable: berth-mini refused'));
     expect(part('commits')!.querySelector('[data-scm-failure]')!.hasAttribute('title')).toBe(false);
     expect(refresh()).not.toBeNull();
   });
 
-  it('git’s failure: "Commits unavailable: <message>", breaking anywhere inside its box, with a refresh', async () => {
+  it('git’s failure: "Unavailable: <message>" (N71), breaking anywhere inside its box, with a refresh', async () => {
     serves();
     main.state.answers['git.branchCommits'] = () => fail('git rev-list failed: object file .git/objects/7e/0123456789abcdef is empty');
     mount();
-    await waitFor(() => expect(sentence()).toBe('Commits unavailable: git rev-list failed: object file .git/objects/7e/0123456789abcdef is empty'));
+    await waitFor(() => expect(sentence()).toBe('Unavailable: git rev-list failed: object file .git/objects/7e/0123456789abcdef is empty'));
     expect(part('commits')!.querySelector('[data-scm-failure]')!.className).toContain('wrap-anywhere');
     expect(refresh()).not.toBeNull();
   });
 
-  it('draws the heading with no count and no rows while the first read is out', async () => {
+  it('draws the heading with no count and no rows while the first read is out, and after half a second the quiet spinner under it, named "Commits" (N63)', async () => {
     serves();
     main.state.answers['git.branchCommits'] = () => new Promise(() => {});
     mount();
     await waitFor(() => expect(branchAsks()).toBe(1));
     expect(text(part('commits'))).toBe('Commits');
     expect(commitRows()).toHaveLength(0);
+    expect(within(part('commits')!).queryByRole('progressbar')).toBeNull();
+    expect(await within(part('commits')!).findByRole('progressbar', { name: 'Commits' }, { timeout: 2000 })).toBeTruthy();
+  });
+
+  // The word cut (N63): a machine offline before its capabilities were heard is asked nothing, so the part says offline
+  // rather than spin
+  it('says "Unavailable while <machine> is offline", with no spinner and no refresh, for a machine offline before its capabilities were heard', async () => {
+    roster([{ capabilities: ['rl2.git-reads'] }, { ref: OTHER_MACHINE, name: 'berth-mini', local: false, state: 'down', since: '2026-01-01T00:00:00.000Z' }]);
+    mount(REMOTE);
+    await waitFor(() => expect(sentence()).toBe('Unavailable while berth-mini is offline'));
+    expect(refresh()).toBeNull();
+    expect(branchAsks()).toBe(0);
+    await flush();
+    expect(within(part('commits')!).queryByRole('progressbar')).toBeNull();
+  });
+
+  // The word cut's M3 panel (scalpel-3#2): a machine up over a profile's socket lists no capabilities, so nothing is asked
+  // and nothing will tell; the part keeps its bare heading, as before the cut, rather than spin for a wait that cannot end
+  it('keeps the bare heading, with no spinner, for a machine up over a socket, which never lists its capabilities', async () => {
+    roster([{ capabilities: ['rl2.git-reads'] }, { ref: OTHER_MACHINE, name: 'berth-mini', local: false, state: 'up', carrier: 'socket', since: '2026-01-01T00:00:00.000Z' }]);
+    mount(REMOTE);
+    await waitFor(() => expect(text(part('commits'))).toBe('Commits'));
+    await act(() => new Promise<void>((resolve) => setTimeout(resolve, 600))); // past the quiet spinner's delay
+    expect(within(part('commits')!).queryByRole('progressbar')).toBeNull();
+    expect(text(part('commits'))).toBe('Commits');
+    expect(branchAsks()).toBe(0);
   });
 
   it('names the machine in the header, "· offline" after it while its link is down', async () => {
@@ -474,8 +515,9 @@ describe('the pull request (S5, S6, S10; frames’ S11)', () => {
     const pr = part('pr')!;
     expect(text(pr.querySelector('[data-scm-pr-heading]'))).toBe('Pull request #7');
     expect(text(pr.querySelector('[data-scm-pr-title]'))).toBe('Export the berths as CSV');
-    expect(text(pr.querySelector('[data-scm-pr-state]'))).toBe('Open · into main · Changes requested');
-    expect(text(pr.querySelector('[data-scm-checks]'))).toBe('Checks 3 passed · 1 failed · 1 pending');
+    // the word cut: an open pull request's state is not said (N72), and the counts line counts what it lists (N75)
+    expect(text(pr.querySelector('[data-scm-pr-state]'))).toBe('into main · Changes requested');
+    expect(text(pr.querySelector('[data-scm-checks]'))).toBe('Checks 1 failed · 1 pending');
     expect(checkRows().map((row) => text(row))).toEqual(['unit tests failed ↗', 'integration pending ↗']);
     expect(checkRows()[0]!.querySelector('[data-scm-check-word]')!.className).toContain('text-danger');
     expect(checkRows()[0]!.querySelector('[data-scm-dot]')!.className).toContain('bg-danger');
@@ -493,7 +535,7 @@ describe('the pull request (S5, S6, S10; frames’ S11)', () => {
     scripted({ mergeStateStatus: 'BLOCKED', checks: { summary: 'fail', items: [check('build', 'pass'), check('e2e (macOS)', 'cancel'), check('docs preview', 'skipping', null), check('integration', 'pending'), check('unit tests', 'pass')] } });
     mount();
     await waitFor(() => expect(checkRows()).toHaveLength(2));
-    expect(text(part('pr')!.querySelector('[data-scm-pr-state]'))).toBe('Open · into main · Merging is blocked');
+    expect(text(part('pr')!.querySelector('[data-scm-pr-state]'))).toBe('into main · Merging is blocked');
     const cancelled = checkRows()[0]!;
     expect(text(cancelled)).toBe('e2e (macOS) cancelled ↗');
     expect(cancelled.querySelector('[data-scm-check-word]')!.className).not.toContain('text-danger');
@@ -555,12 +597,12 @@ describe('the pull request (S5, S6, S10; frames’ S11)', () => {
     scripted({ checks: { summary: 'fail', items: [check('build', 'pass'), check('unit tests', 'fail'), check('lint', 'pass'), check('types', 'pass')] } });
     mount();
     await screen.findByRole('button', { name: '3 passed' });
-    expect(checksLines()).toEqual(['Checks 3 passed · 1 failed', '› 3 passed']);
+    expect(checksLines()).toEqual(['Checks 1 failed', '› 3 passed']);
     expect(foldText()).toBe('› 3 passed');
     expect(checksWords()).toBe(1);
   });
 
-  it('reads "Merged · into main" with no checks, and words a merge state GitHub adds later under the line', async () => {
+  it('reads "Merged · into main" with no checks, and words a merge state GitHub adds later under the line, "Merge state: <value>" (N74)', async () => {
     serves();
     scripted({ state: 'MERGED', mergeStateStatus: 'CLEAN', checks: { summary: 'pass', items: [check('build', 'pass')] } });
     mount();
@@ -570,8 +612,8 @@ describe('the pull request (S5, S6, S10; frames’ S11)', () => {
     queryClient.clear();
     scripted({ mergeStateStatus: 'QUEUED' });
     mount();
-    await waitFor(() => expect(text(part('pr')?.querySelector('[data-scm-merge-unknown]'))).toBe('GitHub reports a merge state MAWS does not know: QUEUED'));
-    expect(text(part('pr')!.querySelector('[data-scm-pr-state]'))).toBe('Open · into main');
+    await waitFor(() => expect(text(part('pr')?.querySelector('[data-scm-merge-unknown]'))).toBe('Merge state: QUEUED'));
+    expect(text(part('pr')!.querySelector('[data-scm-pr-state]'))).toBe('into main');
   });
 
   it('breaks the state line only between its phrases, each phrase whole', async () => {
@@ -580,9 +622,9 @@ describe('the pull request (S5, S6, S10; frames’ S11)', () => {
     mount();
     await waitFor(() => expect(part('pr')?.querySelector('[data-scm-pr-state]')).toBeTruthy());
     const phrases = [...part('pr')!.querySelectorAll<HTMLElement>('[data-scm-pr-state] [data-scm-phrase]')];
-    expect(phrases.map(text)).toEqual(['Open ·', 'into main ·', 'Approved ·', 'Ready to merge']);
+    expect(phrases.map(text)).toEqual(['into main ·', 'Approved ·', 'Ready to merge']);
     expect(phrases.every((phrase) => phrase.className.includes('whitespace-nowrap'))).toBe(true);
-    expect(phrases[3]!.className).toContain('text-success');
+    expect(phrases[2]!.className).toContain('text-success');
   });
 
   it('in an untrusted folder draws the first three parts, says "Trust this folder to see PR state", and asks no PR state', async () => {

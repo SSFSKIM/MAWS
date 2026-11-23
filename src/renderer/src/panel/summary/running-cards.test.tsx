@@ -34,6 +34,7 @@ import { applyTaskEvents, emptyGraph } from '../../tools/agents/model/task-graph
 import { useOpenAgents } from '../../tools/agents/open-agents';
 import { registerRemoteTaskFeed, useTaskGraph } from '../../tools/agents/store';
 import { subagentsTool, type SubagentsHandle, type SubagentsParams } from '../../tools/agents/subagents/SubagentsTool';
+import { backgroundTool } from '../../tools/agents/background/BackgroundTool';
 import type { PanelToolContext } from '../tool';
 import { panelHost } from '../host';
 import { Summary } from './Summary';
@@ -92,24 +93,24 @@ async function mount(events: SessionEvent[] = []) {
   return view;
 }
 
-const card = (name: 'Subagents' | 'Background tasks') => screen.queryByRole('region', { name });
+const card = (name: 'Agents' | 'Background') => screen.queryByRole('region', { name });
 const cardNames = () => screen.queryAllByRole('region').filter((r) => r.tagName === 'SECTION').map((r) => r.getAttribute('aria-label'));
-const running = () => cardNames().filter((name) => name === 'Subagents' || name === 'Background tasks'); // the two running cards, in their order
-const headingOf = (name: 'Subagents' | 'Background tasks') => within(card(name)!).getByRole('heading').textContent;
-const agentRow = (id: string) => card('Subagents')!.querySelector<HTMLElement>(`[data-agent-row="${id}"]`)!;
+const running = () => cardNames().filter((name) => name === 'Agents' || name === 'Background'); // the two running cards, in their order
+const headingOf = (name: 'Agents' | 'Background') => within(card(name)!).getByRole('heading').textContent;
+const agentRow = (id: string) => card('Agents')!.querySelector<HTMLElement>(`[data-agent-row="${id}"]`)!;
 const disclosure = (id: string) => agentRow(id).querySelector<HTMLButtonElement>(':scope > [data-part="under"]');
 const toggleUnder = (id: string) => fireEvent.click(disclosure(id)!);
 const openRow = (id: string) => fireEvent.click(agentRow(id).querySelector<HTMLElement>(':scope > [data-part="open"]')!);
 // The card's tree as drawn: each row by id and depth, with its disclosure's text (`▸` closed, `▾` open).
 const tree = () =>
-  Array.from(card('Subagents')?.querySelectorAll<HTMLElement>('[data-agent-row]') ?? []).map((row) => {
+  Array.from(card('Agents')?.querySelectorAll<HTMLElement>('[data-agent-row]') ?? []).map((row) => {
     const under = row.querySelector<HTMLElement>(':scope > [data-part="under"]');
     const mark = under === null ? '' : ` ${under.querySelector('[data-part="under-count"]')?.textContent ?? ''}${under.getAttribute('aria-expanded') === 'true' ? '▾' : '▸'}`;
     return `${'  '.repeat(Number(row.dataset.depth))}${row.dataset.agentRow}${mark}`;
   });
 const lineOf = (id: string) => agentRow(id).querySelector<HTMLElement>('[data-part="line"]')!;
-const taskRows = () => Array.from(card('Background tasks')?.querySelectorAll<HTMLElement>('[data-task-id]') ?? []).map((row) => row.dataset.taskId);
-const button = (name: 'Subagents' | 'Background tasks', text: string) => within(card(name)!).getByRole('button', { name: text });
+const taskRows = () => Array.from(card('Background')?.querySelectorAll<HTMLElement>('[data-task-id]') ?? []).map((row) => row.dataset.taskId);
+const button = (name: 'Agents' | 'Background', text: string) => within(card(name)!).getByRole('button', { name: text });
 
 beforeEach(() => {
   resetPanelStores();
@@ -136,11 +137,20 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
+// The word cut (T152, T153, the owner's card 4 of 2026-11-20): the panels the cards open bear the cards' names, in
+// their tabs and the panel's menus
+it('names the two panels Agents and Background, as their cards are named', () => {
+  expect([subagentsTool.title, backgroundTool.title]).toEqual(['Agents', 'Background']);
+});
+
 describe('the Subagents card', () => {
   it('lists the running first-level agents, (+1) and its arrow on the one with an agent under it, and the child beneath it once that control is pressed', async () => {
     await mount([started('p', 1), started('q', 2), ...nested('p', 'c', 3)]);
-    expect(cardNames()).toEqual(['Environment', 'Context', 'Connectors', 'Subagents']);
-    expect(headingOf('Subagents')).toBe('Subagents 3 running');
+    expect(cardNames()).toEqual(['Environment', 'Context', 'Connectors', 'Agents']);
+    expect(headingOf('Agents')).toBe('Agents 3');
+    // the word cut (P66, P67): the card is "Agents", its count bare and named by its meaning, which the heading reads
+    expect(within(card('Agents')!).getByRole('heading', { name: 'Agents 3 running' })).toBeTruthy();
+    expect(within(card('Agents')!).getByRole('img', { name: '3 running' }).textContent).toBe('3');
     expect(tree()).toEqual(['p (+1)▸', 'q']);
     expect(disclosure('p')!.getAttribute('aria-label')).toBe('1 agent running under Agent p');
     toggleUnder('p');
@@ -166,7 +176,7 @@ describe('the Subagents card', () => {
     expect(tree()).toEqual(['p (+1)▸', 'q']);
     openRow('q');
     expect(addTool).toHaveBeenLastCalledWith('subagents', { appSessionId: A, params: { agentId: 'q', appSessionId: A } });
-    fireEvent.click(within(card('Subagents')!).getByRole('heading').querySelector('button')!);
+    fireEvent.click(within(card('Agents')!).getByRole('heading').querySelector('button')!);
     expect(addTool).toHaveBeenLastCalledWith('subagents', { appSessionId: A, params: { appSessionId: A } });
   });
 
@@ -188,7 +198,7 @@ describe('the Subagents card', () => {
     expect(tree()).toEqual(['p', 'x']);
     push([...nested('p', 'c', 6), finished('p', 8, { status: 'failed' }, at(50))]);
     expect(tree()).toEqual(['p (+1)▸', 'x']);
-    expect(lineOf('p').textContent).toBe('finished with errors');
+    expect(lineOf('p').textContent).toBe('failed'); // the word cut (T163): the outcome word the panel's rows read
     expect(lineOf('p').className).toContain('text-danger');
     expect(agentRow('p').querySelector('[data-part="elapsed"]')!.textContent).toBe('');
   });
@@ -199,7 +209,7 @@ describe('the Subagents card', () => {
     push([finished('c', 5), finished('q', 6)]);
     expect(tree()).toEqual(['p']);
     push([finished('p', 7)]);
-    expect(card('Subagents')).toBeNull();
+    expect(card('Agents')).toBeNull();
     expect(cardNames()).toEqual(['Environment', 'Context', 'Connectors']);
     expect(['Environment', 'Context', 'Connectors'].map((name) => screen.getByRole('region', { name }))).toEqual(above);
     above.forEach((node, i) => expect(screen.getByRole('region', { name: ['Environment', 'Context', 'Connectors'][i] })).toBe(node));
@@ -208,7 +218,7 @@ describe('the Subagents card', () => {
   it('draws four rows at most, then N more, which opens the panel', async () => {
     await mount(['a', 'b', 'c', 'd', 'e'].map((id, i) => started(id, i + 1)));
     expect(tree()).toEqual(['a', 'b', 'c', 'd']);
-    fireEvent.click(button('Subagents', '1 more'));
+    fireEvent.click(button('Agents', '1 more'));
     expect(addTool).toHaveBeenLastCalledWith('subagents', { appSessionId: A, params: { appSessionId: A } });
   });
 
@@ -230,13 +240,13 @@ describe('the Subagents card', () => {
     await mount([started('p', 1), shellOf('s1', 'p', 2), ...nested('p', 'c', 3), event('subagent.progress', { taskId: 'p', description: 'Reading a very long path name that cannot fit in a card of this width.ts' }, { seq: 5 })]);
     expect(lineOf('p').textContent).toBe('Reading a very long path name that cannot fit in a card of this width.ts');
     expect(lineOf('p').className).toContain('truncate');
-    expect(card('Subagents')!.textContent).not.toMatch(/running under it|background task|nested ·|\d+ nested/);
+    expect(card('Agents')!.textContent).not.toMatch(/running under it|background task|nested ·|\d+ nested/);
   });
 
   it('N finished is the panel’s Done count and opens it with Done unfolded; an ended agent its shell keeps is in neither until the shell ends', async () => {
     await mount([started('r', 1), started('f1', 2), finished('f1', 3), started('f2', 4), finished('f2', 5), started('f3', 6), finished('f3', 7), started('k', 8), shellOf('sk', 'k', 9), finished('k', 10)]);
-    expect(headingOf('Subagents')).toBe('Subagents 1 running');
-    expect(button('Subagents', '3 finished')).toBeTruthy();
+    expect(headingOf('Agents')).toBe('Agents 1');
+    expect(button('Agents', '3 finished')).toBeTruthy();
     const handle: SubagentsHandle = subagentsTool.createState({ appSessionId: A, session: useSessions.getState().records.get(A) ?? null, instanceId: 'subagents:test', params: undefined as unknown as SubagentsParams });
     offs.push(() => subagentsTool.dispose(handle));
     const ctx: PanelToolContext = { appSessionId: A, session: useSessions.getState().records.get(A) ?? null, status: useSessions.getState().engine.get(A) ?? null, pinned: false, visible: true, focusRequest: 0, setTitle: () => {}, close: () => {}, openTool: () => 'x', editorHost: { surface: 'panel', tabId: 'subagents:test' } };
@@ -245,9 +255,9 @@ describe('the Subagents card', () => {
     const panelHeading = (name: string) => panel.container.querySelector(`[data-section="${name}"] h3`)?.textContent;
     expect([panelHeading('running'), panelHeading('done')]).toEqual(['Running 1', 'Done 3']);
     push([taskEnds('sk', 11)]);
-    expect(button('Subagents', '4 finished')).toBeTruthy();
+    expect(button('Agents', '4 finished')).toBeTruthy();
     expect(panelHeading('done')).toBe('Done 4');
-    fireEvent.click(button('Subagents', '4 finished'));
+    fireEvent.click(button('Agents', '4 finished'));
     expect(addTool).toHaveBeenLastCalledWith('subagents', { appSessionId: A, params: { appSessionId: A, section: 'done' } });
   });
 
@@ -270,30 +280,30 @@ describe('the Subagents card', () => {
 describe('the Background tasks card', () => {
   it('stands last while a shell runs, one row with its mark, description and coarse time; a press opens the panel at it; its end removes the card', async () => {
     await mount([shellOf('s1', null, 1)]);
-    expect(cardNames()).toEqual(['Environment', 'Context', 'Connectors', 'Background tasks']);
-    expect(headingOf('Background tasks')).toBe('Background tasks 1 running');
+    expect(cardNames()).toEqual(['Environment', 'Context', 'Connectors', 'Background']);
+    expect(headingOf('Background')).toBe('Background 1');
     expect(taskRows()).toEqual(['s1']);
-    const row = card('Background tasks')!.querySelector<HTMLElement>('[data-task-id="s1"]')!;
+    const row = card('Background')!.querySelector<HTMLElement>('[data-task-id="s1"]')!;
     expect(row.querySelector('[data-kind-mark="shell"]')).toBeTruthy();
     expect(row.querySelector('[data-part="description"]')!.textContent).toBe('Shell s1');
-    expect(within(card('Background tasks')!).queryByRole('button', { name: /Stop/ })).toBeNull();
+    expect(within(card('Background')!).queryByRole('button', { name: /Stop/ })).toBeNull();
     fireEvent.click(row);
     expect(addTool).toHaveBeenLastCalledWith('background', { appSessionId: A, params: { taskId: 's1', appSessionId: A } });
     const above = screen.getByRole('region', { name: 'Connectors' });
     push([taskEnds('s1', 2, 'stopped')]);
-    expect(card('Background tasks')).toBeNull();
+    expect(card('Background')).toBeNull();
     expect(screen.getByRole('region', { name: 'Connectors' })).toBe(above);
   });
 
   it('opens a workflow at its run, lists every kind in start order after Subagents, and its N finished is the panel’s Done count', async () => {
     await mount([started('p', 1), workflowOf('w1', 2), shellOf('s1', null, 3), shellOf('s0', null, 4), taskEnds('s0', 5), event('task.started', { taskId: 'm1', taskType: 'monitor_ws', description: 'Monitor m1', isBackground: true }, { seq: 6, at: at(0) })]);
-    expect(cardNames()).toEqual(['Environment', 'Context', 'Connectors', 'Subagents', 'Background tasks']);
+    expect(cardNames()).toEqual(['Environment', 'Context', 'Connectors', 'Agents', 'Background']);
     expect(taskRows()).toEqual(['w1', 's1', 'm1']);
-    fireEvent.click(card('Background tasks')!.querySelector<HTMLElement>('[data-task-id="w1"]')!);
+    fireEvent.click(card('Background')!.querySelector<HTMLElement>('[data-task-id="w1"]')!);
     expect(addTool).toHaveBeenLastCalledWith('background', { appSessionId: A, params: { taskId: 'w1', view: 'run', appSessionId: A } });
-    fireEvent.click(button('Background tasks', '1 finished'));
+    fireEvent.click(button('Background', '1 finished'));
     expect(addTool).toHaveBeenLastCalledWith('background', { appSessionId: A, params: { appSessionId: A, section: 'done' } });
-    fireEvent.click(within(card('Background tasks')!).getByRole('heading').querySelector('button')!);
+    fireEvent.click(within(card('Background')!).getByRole('heading').querySelector('button')!);
     expect(addTool).toHaveBeenLastCalledWith('background', { appSessionId: A, params: { appSessionId: A } });
   });
 
@@ -305,7 +315,7 @@ describe('the Background tasks card', () => {
       await fake.answer('subagents', []);
       await fake.answer('workflows', []);
     });
-    expect(card('Background tasks')).toBeNull();
+    expect(card('Background')).toBeNull();
     expect(cardNames()).toEqual(['Environment', 'Context', 'Connectors']);
   });
 
@@ -330,21 +340,21 @@ describe('the Background tasks card', () => {
     expect(running()).toEqual([]); // the sidecars alone: every agent's status unknown
     const above = cardNames().map((name) => screen.getByRole('region', { name: name! }));
     plane('snapshot', [job('bsleep01'), job('bdone02', { status: 'completed', endedAt: T })], [runs('p'), ends('q')]);
-    expect(running()).toEqual(['Subagents', 'Background tasks']);
-    expect(headingOf('Subagents')).toBe('Subagents 1 running');
+    expect(running()).toEqual(['Agents', 'Background']);
+    expect(headingOf('Agents')).toBe('Agents 1');
     expect(tree()).toEqual(['p']);
     expect(taskRows()).toEqual(['bsleep01']);
-    expect(button('Background tasks', '1 finished')).toBeTruthy();
+    expect(button('Background', '1 finished')).toBeTruthy();
     act(() => fake.subagentsChanged(A, [sidecar('p'), sidecar('q'), sidecar('c', 'p')])); // the nested agent's sidecar, then its status
     plane('subagents', [job('bsleep01'), job('bdone02', { status: 'completed', endedAt: T })], [runs('p'), ends('q'), runs('c', 'p')]);
-    expect(headingOf('Subagents')).toBe('Subagents 2 running');
+    expect(headingOf('Agents')).toBe('Agents 2');
     expect(tree()).toEqual(['p (+1)▸']);
     toggleUnder('p');
     expect(tree()).toEqual(['p ▾', '  c']);
     plane('subagents', [job('bsleep01'), job('bdone02', { status: 'completed', endedAt: T })], [runs('p'), ends('q'), ends('c', 'p')]);
     expect(tree()).toEqual(['p']);
     plane('subagents', [job('bsleep01'), job('bdone02', { status: 'completed', endedAt: T })], [ends('p'), ends('q'), ends('c', 'p')]);
-    expect(running()).toEqual(['Background tasks']);
+    expect(running()).toEqual(['Background']);
     plane('subagents', [job('bsleep01', { status: 'stopped', endedAt: T }), job('bdone02', { status: 'completed', endedAt: T })], [ends('p'), ends('q'), ends('c', 'p')]);
     expect(running()).toEqual([]);
     cardNames().forEach((name, i) => expect(screen.getByRole('region', { name: name! })).toBe(above[i])); // nothing above them moved
@@ -365,7 +375,7 @@ describe('the Background tasks card', () => {
     await waitFor(() => expect(bridge.invoked('laneA.watch')).toEqual([{ appSessionId: bareOf(A) }]));
     act(() => bridge.event('laneA.plane', { appSessionId: bareOf(A), watch: 'w1', messages: [{ project: '', machine: 'm', session: `eng-${A}`, kind: 'snapshot', sub: 'w1', n: 0, body: { streaming: [], usage: null, jobs: [job] } }] }));
     act(() => bridge.event('laneA.plane', { appSessionId: bareOf(A), watch: 'w1', messages: [{ project: '', machine: 'm', session: `eng-${A}`, kind: 'subagents', sub: 'w1', n: 1, body: { subagents: [], jobs: [job], mcp: [] } }] }));
-    expect(running()).toEqual(['Background tasks']);
+    expect(running()).toEqual(['Background']);
     expect(taskRows()).toEqual(['bsleep01']);
   });
 
@@ -376,10 +386,10 @@ describe('the Background tasks card', () => {
     offs.push(registerRemoteTaskFeed((id) => (id === REMOTE ? (onGraph) => (onGraph(applyTaskEvents(emptyGraph(), [started('r1', 1), ...nested('r1', 'r2', 2)])), () => {}) : null)));
     render(column(REMOTE));
     await act(async () => {});
-    expect(cardNames()).toEqual(['Subagents']);
+    expect(cardNames()).toEqual(['Agents']);
     expect(tree()).toEqual(['r1 (+1)▸']);
     act(() => noteLaneAJobs(REMOTE, [{ taskId: 'bremote1', kind: 'shell', toolUseId: 'toolu_bremote1', startedAt: T, description: 'run the suites', outputFile: null, status: 'running' }]));
-    expect(cardNames()).toEqual(['Subagents', 'Background tasks']);
+    expect(cardNames()).toEqual(['Agents', 'Background']);
     expect(taskRows()).toEqual(['bremote1']);
   });
 });
@@ -388,7 +398,7 @@ describe('the Background tasks card', () => {
 // engine's Stop callback writes, read through `kindOf` on the path the cards read: the status's list applied to the
 // session's graph. Moved here from `panel/summary/derive.test.ts` with `backgroundCounts`, the old card's reader.
 describe('a task named by its type or by the Stop’s label', () => {
-  const drawn = () => ({ cards: cardNames(), subagents: headingOf('Subagents'), background: headingOf('Background tasks'), agents: tree(), tasks: taskRows(), marks: Array.from(card('Background tasks')!.querySelectorAll<HTMLElement>('[data-kind-mark]')).map((el) => el.dataset.kindMark) });
+  const drawn = () => ({ cards: cardNames(), subagents: headingOf('Agents'), background: headingOf('Background'), agents: tree(), tasks: taskRows(), marks: Array.from(card('Background')!.querySelectorAll<HTMLElement>('[data-kind-mark]')).map((el) => el.dataset.kindMark) });
   async function mountListing(backgroundTasks: EngineSessionStatus['backgroundTasks']) {
     seed(live({ backgroundTasks }));
     render(column());
@@ -399,7 +409,7 @@ describe('a task named by its type or by the Stop’s label', () => {
     });
   }
   const listed = (pairs: [string, string][]): EngineSessionStatus['backgroundTasks'] => pairs.map(([taskId, taskType]) => ({ taskId: taskId as TaskId, taskType, description: `Task ${taskId}`, ambient: false }));
-  const ALIKE = { cards: ['Environment', 'Context', 'Connectors', 'Subagents', 'Background tasks'], subagents: 'Subagents 1 running', background: 'Background tasks 4 running', agents: ['a1'], tasks: ['b1', 'w1', 'm1', 'x1'], marks: ['shell', 'workflow', 'monitor', 'other'] };
+  const ALIKE = { cards: ['Environment', 'Context', 'Connectors', 'Agents', 'Background'], subagents: 'Agents 1', background: 'Background 4', agents: ['a1'], tasks: ['b1', 'w1', 'm1', 'x1'], marks: ['shell', 'workflow', 'monitor', 'other'] };
 
   it.each([
     ['the task types', [['b1', 'local_bash'], ['w1', 'local_workflow'], ['m1', 'monitor_mcp'], ['x1', 'mcp_task'], ['a1', 'local_agent']]],
@@ -423,6 +433,6 @@ describe('a task named by its type or by the Stop’s label', () => {
     const tasks = tracker.snapshot().backgroundTasks;
     expect(tasks.map((t) => t.taskType)).toEqual(which === 'listing' ? ['local_bash', 'local_agent'] : ['shell', 'subagent']); // the status keeps the engine's words
     await mountListing(tasks);
-    expect(drawn()).toMatchObject({ subagents: 'Subagents 1 running', background: 'Background tasks 1 running', agents: ['a75a34c79539c9b3c'], tasks: ['bzgk2epjt'], marks: ['shell'] });
+    expect(drawn()).toMatchObject({ subagents: 'Agents 1', background: 'Background 1', agents: ['a75a34c79539c9b3c'], tasks: ['bzgk2epjt'], marks: ['shell'] });
   });
 });

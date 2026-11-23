@@ -1,8 +1,8 @@
 // A workflow run's card (C8b execution document, M3; mockup 03 study 03; compact since E7, Design §2): the task's
-// description as its title (the progress frame's `summary` is not on X1 for a workflow), `workflow <name> · <elapsed> ·
-// <n> agents · <tokens>`, then one summary line (`<phase> · <done>/<total> agents`, `Queued` before any start, `Done`
-// after) where its per-phase tables were: those live in the run's widget, which the title and the chevron open.
-// `Stop workflow` asks no confirmation (Codex stops a workflow in one click) and reads `stopping…` at once. The UX wave's
+// description as its title (the progress frame's `summary` is not on X1 for a workflow), `<name> · <elapsed> · <n>
+// agents`, then one summary line (`<phase> · <done>/<total> agents`, `Queued` before any start, `Done` after, a quiet
+// spinner before the first progress, `No phases` for a run that ended before any) where its per-phase tables were: those live in the run's widget, which the title and
+// the chevron open. `Stop` asks no confirmation (Codex stops a workflow in one click) and reads `stopping…` at once. The UX wave's
 // U8b (M7): the title leads with the workflow's kind mark, since the Background tasks panel lists every kind together.
 import type { TaskId } from '@shared/graph/ids';
 import { Icon } from '../../../app/IconButton';
@@ -10,27 +10,35 @@ import { BACKGROUND_COPY } from '../copy';
 import { KindMark } from '../marks';
 import type { TaskNode } from '../model/task-graph';
 import { runSummary, type RunSummary, type RunView } from '../model/workflow-run';
-import { RunBadge, runLine } from './run-parts';
+import { PhasesPending, RunBadge, runLine } from './run-parts';
 import { StopButton, StopError } from './TaskRows';
 
 interface Props {
   node: TaskNode;
   view: RunView;
   live: boolean;
+  /** Whether its phases can still arrive (`PhasesPending`): the session runs, or its disk read has not answered. */
+  phasesCanArrive: boolean;
+  /** The disk read's error, said once by the list on its own line: the card's line then waits on nothing and says nothing. */
+  phasesReadError: string | null;
   selected: boolean;
   stopError: string | null;
   onOpen: (taskId: TaskId) => void;
   onStop: (taskId: TaskId) => void;
 }
 
-const summaryText = (summary: RunSummary | null): string =>
-  summary === null
-    ? BACKGROUND_COPY.phasesPending
-    : summary.kind === 'phase'
-      ? BACKGROUND_COPY.runSummary.phase(summary.title, summary.done, summary.total)
-      : BACKGROUND_COPY.runSummary[summary.kind];
+// The word cut (T212): before the first progress, a quiet spinner in the sentence's place, the words its name, or
+// `No phases` once the run ended without any.
+const summaryText = (node: TaskNode, summary: RunSummary | null, canArrive: boolean, readError: string | null) =>
+  summary === null ? (
+    <PhasesPending node={node} canArrive={canArrive} readError={readError} />
+  ) : summary.kind === 'phase' ? (
+    BACKGROUND_COPY.runSummary.phase(summary.title, summary.done, summary.total)
+  ) : (
+    BACKGROUND_COPY.runSummary[summary.kind]
+  );
 
-export function WorkflowCard({ node, view, live, selected, stopError, onOpen, onStop }: Props) {
+export function WorkflowCard({ node, view, live, phasesCanArrive, phasesReadError, selected, stopError, onOpen, onStop }: Props) {
   return (
     <article
       data-workflow={node.taskId}
@@ -64,12 +72,12 @@ export function WorkflowCard({ node, view, live, selected, stopError, onOpen, on
       <p data-part="line" className="truncate text-ui-sm text-fg-muted tabular-nums">
         {runLine(node, view)}
       </p>
-      <p data-part="summary" className="truncate text-ui-sm tabular-nums">
-        {summaryText(runSummary(view.phases))}
+      <p data-part="summary" className="min-h-[1lh] truncate text-ui-sm tabular-nums">
+        {summaryText(node, runSummary(view.phases), phasesCanArrive, phasesReadError)}
       </p>
       {node.status === 'running' && live && (
         <div className="mt-1 flex flex-col items-start gap-1">
-          <StopButton node={node} label={BACKGROUND_COPY.stopWorkflow} onStop={onStop} />
+          <StopButton node={node} label={BACKGROUND_COPY.stop} onStop={onStop} />
         </div>
       )}
       <StopError message={stopError} />

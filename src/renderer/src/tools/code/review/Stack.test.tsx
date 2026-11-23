@@ -104,7 +104,12 @@ function statusOf(files: readonly Made[], options: { staged?: boolean; untracked
   };
 }
 
-const numstat = (file: Made): GitDiffFile => ({ path: file.path, oldPath: null, insertions: file.added.length, deletions: 0, binary: false });
+const numstat = (file: Made): GitDiffFile => ({ path: file.path, oldPath: null, insertions: file.added.length, deletions: 0, binary: file.patch.includes('\nBinary files ') });
+// A tracked binary: its header alone, and no body (the word cut, N44)
+function binaryMade(index: number): Made {
+  const path = `img/logo-${String(index).padStart(3, '0')}.png`;
+  return { path, patch: `diff --git a/${path} b/${path}\nindex 1..2 100644\nBinary files a/${path} and b/${path} differ\n`, added: [], starts: [] };
+}
 
 // Main over a scope of `files`, the whole patch in one answer, or past the scope's cap with each file read alone; `hold`
 // keeps a file's own read open until the test releases it (its patch) or refuses it (a failed read). An untracked file
@@ -377,7 +382,7 @@ describe('the stack laid out', { timeout: SUITE_TIMEOUT }, () => {
     await page.settle();
     for (let n = 0; n < 5; n++) fireEvent.click(screen.getByLabelText('Next hunk')); // to the third file's second hunk
     await page.settle();
-    expect(hunkLabel()).toBe('Showing hunk 6 of 10');
+    expect(hunkLabel()).toBe('6 / 10');
     const jumped = { path: files[2].path, side: 'new', line: files[2].starts[1] };
     expect(page.rowAtTop()).toEqual(jumped);
     hide();
@@ -417,7 +422,7 @@ describe('the stack laid out', { timeout: SUITE_TIMEOUT }, () => {
     show();
     await page.settle();
     const third = sectionOf(files[2].path);
-    expect(third.querySelector('[data-review-body]')?.textContent).toBe('Loading');
+    expect(third.querySelector('[data-review-body] [data-review-loading]')).not.toBeNull(); // the wait's line (the quiet spinner)
     expect(scroller().scrollTop).toBe(page.topOf(third)); // the section, by its estimate
     return { main, reading, third };
   }
@@ -467,6 +472,19 @@ describe('the stack laid out', { timeout: SUITE_TIMEOUT }, () => {
     expect(scroller().scrollTop).toBe(at);
   });
 
+  // The word cut (N44): a tracked binary draws no body, so the stack weighs none for it; a request for a file after
+  // binaries lands at its top, as drawn
+  it('weighs no body for a tracked binary, so a request for a file after binaries brings it to its top', async () => {
+    const binaries = Array.from({ length: 6 }, (_, i) => binaryMade(i));
+    const texts = Array.from({ length: 4 }, (_, i) => made(i, 1, 40));
+    await mount([...binaries, ...texts]);
+    for (const binary of binaries) expect(sectionOf(binary.path).querySelector('[data-review-body]')).toBeNull();
+    request(texts[2].path);
+    await page.settle();
+    expect(scroller().scrollTop).toBe(page.topOf(sectionOf(texts[2].path)));
+    expect(scroller().scrollTop).toBe(6 * HEADER + 2 * page.height(sectionOf(texts[0].path)));
+  });
+
   it('brings the same file to the top again on a second request after the person scrolled away', async () => {
     const files = Array.from({ length: 5 }, (_, i) => made(i, 1, 40));
     await mount(files);
@@ -490,7 +508,7 @@ describe('the stack laid out', { timeout: SUITE_TIMEOUT }, () => {
     await page.settle();
     expect(sixth.querySelector('[data-review-body] table')).not.toBeNull();
     expect(page.rowAtTop()).toEqual({ path: files[5].path, side: 'new', line: files[5].starts[0] + 2 }); // the place kept
-    expect(hunkLabel()).toBe('Showing hunk 11 of 40');
+    expect(hunkLabel()).toBe('11 / 40');
   });
 
   it('lands a reveal into a file still being read on its row once the read answers, and keeps that place', async () => {
@@ -511,37 +529,37 @@ describe('the stack laid out', { timeout: SUITE_TIMEOUT }, () => {
     await mount(files);
     fireEvent.click(sectionOf(files[1].path).querySelector('[data-review-fold]')!);
     await page.settle();
-    expect(hunkLabel()).toBe('Showing hunk 1 of 10'); // the folded file's hunks are counted
+    expect(hunkLabel()).toBe('1 / 10'); // the folded file's hunks are counted
     for (let n = 0; n < 3; n++) fireEvent.click(screen.getByLabelText('Next hunk')); // into the folded file's second hunk
     await page.settle();
-    expect(hunkLabel()).toBe('Showing hunk 4 of 10');
+    expect(hunkLabel()).toBe('4 / 10');
     expect(sectionOf(files[1].path).hasAttribute('data-folded')).toBe(false); // unfolded where it landed
     expect(page.rowAtTop()).toEqual({ path: files[1].path, side: 'new', line: files[1].starts[1] });
 
     page.scrollTo(page.topOf(sectionOf(files[3].path)) + HEADER + 8 * ROW); // by hand, past the fourth file's first hunk
     await page.settle();
-    expect(hunkLabel()).toBe('Showing hunk 7 of 10');
+    expect(hunkLabel()).toBe('7 / 10');
 
     for (let n = 0; n < 3; n++) fireEvent.click(screen.getByLabelText('Next hunk'));
     await page.settle();
     expect(scroller().scrollTop).toBe(scroller().scrollHeight - VIEWPORT); // the last hunk cannot reach the top
-    expect(hunkLabel()).toBe('Showing hunk 10 of 10');
+    expect(hunkLabel()).toBe('10 / 10');
     expect(screen.getByLabelText('Next hunk')).toHaveProperty('disabled', true);
   });
   // The branch panel's first finding: the counter is read again whenever the live place is set, a reveal reached included.
   it('counts the hunk at the reading edge once a requested file is reached, and moves on from it', async () => {
     const files = Array.from({ length: 5 }, (_, i) => made(i, 2, 10));
     await mount(files);
-    expect(hunkLabel()).toBe('Showing hunk 1 of 10');
+    expect(hunkLabel()).toBe('1 / 10');
     request(files[3].path);
     await page.settle();
     expect(scroller().scrollTop).toBe(page.topOf(sectionOf(files[3].path)));
     // The section's top at the scroller's top: the reading edge is on the library's row over the file's first line, so the
     // hunk last passed is the third file's last, as a hand scroll there reads it.
-    expect(hunkLabel()).toBe('Showing hunk 6 of 10');
+    expect(hunkLabel()).toBe('6 / 10');
     next();
     await page.settle();
-    expect(hunkLabel()).toBe('Showing hunk 7 of 10');
+    expect(hunkLabel()).toBe('7 / 10');
     expect(page.rowAtTop()).toEqual({ path: files[3].path, side: 'new', line: files[3].starts[0] });
   });
 
@@ -550,19 +568,19 @@ describe('the stack laid out', { timeout: SUITE_TIMEOUT }, () => {
     await mount(files, { staged: true });
     for (let n = 0; n < 5; n++) next(); // to the third file's second hunk
     await page.settle();
-    expect(hunkLabel()).toBe('Showing hunk 6 of 10');
+    expect(hunkLabel()).toBe('6 / 10');
     const jumped = { path: files[2].path, side: 'new', line: files[2].starts[1] };
     expect(page.rowAtTop()).toEqual(jumped);
     fireEvent.click(chipOf('staged')); // another scope: its counter starts at its first hunk; this scope's place is kept
     await page.settle();
-    expect(hunkLabel()).toBe('Showing hunk 1 of 10');
+    expect(hunkLabel()).toBe('1 / 10');
     fireEvent.click(chipOf('uncommitted'));
     await page.settle();
     expect(page.rowAtTop()).toEqual(jumped); // the saved place
-    expect(hunkLabel()).toBe('Showing hunk 6 of 10'); // and the counter read there
+    expect(hunkLabel()).toBe('6 / 10'); // and the counter read there
     next();
     await page.settle();
-    expect(hunkLabel()).toBe('Showing hunk 7 of 10');
+    expect(hunkLabel()).toBe('7 / 10');
     expect(page.rowAtTop()).toEqual({ path: files[3].path, side: 'new', line: files[3].starts[0] });
   });
 
@@ -583,11 +601,11 @@ describe('the stack laid out', { timeout: SUITE_TIMEOUT }, () => {
     await waitFor(() => expect(sectionOf(held.path).querySelector('[data-review-file-changed]')).not.toBeNull());
     await page.settle();
     expect(page.headerOf(held.path)).toBe(HEADER + 28);
-    const at = Number(/hunk (\d+) of/.exec(hunkLabel()!)![1]) - 1;
+    const at = Number(/^(\d+) \//.exec(hunkLabel()!)![1]) - 1;
     for (let n = at; n < 3; n++) next(); // to the held file's second hunk
     for (let n = at; n > 3; n--) fireEvent.click(screen.getByLabelText('Previous hunk'));
     await page.settle();
-    expect(hunkLabel()).toBe('Showing hunk 4 of 10');
+    expect(hunkLabel()).toBe('4 / 10');
     expect(page.topOf(hunkTop(held.path, held.starts[1])) - scroller().scrollTop).toBe(page.headerOf(held.path));
     expect(page.rowAtTop()).toEqual({ path: held.path, side: 'new', line: held.starts[1] });
   });
@@ -755,7 +773,7 @@ describe('the stack laid out', { timeout: SUITE_TIMEOUT }, () => {
       main.state.hold = files[0].path; // shown again, the scope reads afresh and the first file's own read stays out
       show();
       await page.settle();
-      expect(sectionOf(files[0].path).querySelector('[data-review-body]')?.textContent).toBe('Loading');
+      expect(sectionOf(files[0].path).querySelector('[data-review-body] [data-review-loading]')).not.toBeNull();
       fireEvent.click(document.querySelector<HTMLElement>('[data-review-toolbar] [data-unsent-chip]')!);
       await page.settle();
       expect(card()).toBeNull(); // waiting on the read

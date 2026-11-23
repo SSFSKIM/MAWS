@@ -357,7 +357,7 @@ export const rowOf = (root: Locator, record: { id: string }) => root.locator(`[d
 // side column, or brings its tab back into view; a record it was left on goes Back to the list.
 export async function openArtifacts(s: Scene): Promise<void> {
   await openSurface(s.page, 'Artifacts');
-  const back = s.panel.getByRole('button', { name: 'Back', exact: true });
+  const back = s.panel.getByRole('button', { name: 'Back to list', exact: true }); // the word cut (T556): the record bar's chevron
   if (await back.count()) await back.click();
   await expect(listOf(s)).toBeVisible();
 }

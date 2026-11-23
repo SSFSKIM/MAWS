@@ -691,6 +691,8 @@ test('2. a pick sent to main writes [image, anchored text] whose tag round-trips
       await expect(card.getByRole('region', { name: 'Your message' }).filter({ hasText: THREAD_FOLLOW_UP })).toBeVisible();
       expect(writtenUsers(s, parent), 'the main conversation received only its own comment').toHaveLength(1);
       await expect(card.locator('[data-needs-you]'), 'the thread’s request, said in the card').toContainText('Waiting for your permission', { timeout: 20_000 });
+      // the word cut (P440): what is drawn is the waiting disc and its noun; the sentence is heard
+      await expect(card.locator('[data-needs-you] [data-needs-noun]')).toHaveText('Permission');
       await expectOnPane(s, t.tabId, paneIn(t.panel), 'panel');
       const [threadView, threadCard] = [(await viewOf(s, t.tabId))!, (await card.boundingBox())!];
       expect(threadView.visible && !(await tabState(s, t.tabId)).tab?.covered, 'the page stays up beside the thread').toBe(true);
@@ -791,7 +793,9 @@ test('2b. a page thread in the Side pane re-docks into the card under the pane s
       const view = (await viewOf(s, t.tabId))!;
       expect(view.visible && !(await tabState(s, t.tabId)).tab?.covered, 'the page stays up over the card').toBe(true);
       expect((await card.boundingBox())!.y, 'the card under the view').toBeGreaterThanOrEqual(view.bounds!.y + view.bounds!.height);
-      await expect(pane.getByText('Shown in the card under the page')).toBeVisible();
+      // the word cut (P424): the Side pane draws Show here alone, the sentence its tooltip and description
+      await expect(pane.getByRole('button', { name: 'Show here' })).toHaveAccessibleDescription('Shown in the card under the page');
+      await expect(pane.getByText('Shown in the card under the page')).not.toBeVisible();
       await expect(pane.getByRole('group', { name: 'Approval needed' }), 'the Side pane does not draw it meanwhile').toHaveCount(0);
       await expect(pane.locator('header').getByRole('button', { name: 'Show in browser' })).toHaveCount(0);
 

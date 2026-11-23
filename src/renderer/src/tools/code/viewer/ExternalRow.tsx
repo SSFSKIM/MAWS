@@ -15,11 +15,12 @@
 // under the test the tab's reads and its frame's ask take (`opens`): a path the person opened on that machine this run.
 // UX wave U6b-4b (docs/doperpowers/plans/2026-11-18-ux-wave-U6b-4b-links.md, M3; decision 9): a refused open reads the
 // first sentence of its cause, as the viewer's notice classifies it (`notice.ts`).
+// The word cut (T327, T328): a kind MAWS does not frame reads its kind and its size on one line ("PDF · 2.3 MB"); a
+// framed file's row keeps its sentence with the size on a line under it.
 import { useState } from 'react';
 import type { AppSessionId } from '@shared/graph/ids';
 import { framedKindOf } from '@shared/files/framed';
 import { opensExternally } from '@shared/ipc/schema/files';
-import { REMOTE_COPY_MAX_BYTES } from '@shared/ipc/schema/remote';
 import { ipc } from '../../../ipc/client';
 import { machineFor } from '../../../ipc/machine';
 import { COPY_WORDS, openSessionFile } from '../../../lane-b/open-copy';
@@ -66,22 +67,22 @@ export function OpenExternally({ appSessionId, path, agent = false }: { appSessi
 export function rowWords(entry: ViewerEntry): { sentence: string; open: boolean } {
   const { frame } = entry;
   if (frame?.status === 'row') {
-    if (frame.why === 'too-large') return { sentence: VIEWER_COPY.tooLargeHere(REMOTE_COPY_MAX_BYTES), open: false };
+    if (frame.why === 'too-large') return { sentence: VIEWER_COPY.tooLargeHere, open: false };
     if (frame.why === 'unplayable') return { sentence: framedKindOf(entry.mime) === 'audio' ? VIEWER_COPY.soundUnplayable : VIEWER_COPY.videoUnplayable, open: true };
     return { sentence: VIEWER_COPY.olderService, open: true };
   }
   const kind = externalKindOf(entry) ?? 'Binary';
-  return { sentence: kind === 'Binary' ? VIEWER_COPY.binary(entry.bytes) : VIEWER_COPY.externalKind(kind), open: true };
+  return { sentence: kind === 'Binary' ? VIEWER_COPY.binary(entry.bytes) : VIEWER_COPY.externalKind(kind, entry.bytes), open: true };
 }
 
 export function ExternalRow({ entry }: { entry: ViewerEntry }) {
   const { sentence, open } = rowWords(entry);
-  const binary = entry.frame === null && (externalKindOf(entry) ?? 'Binary') === 'Binary'; // its sentence holds its size
+  const sized = entry.frame?.status === 'row'; // a framed file's row: its sentence, then its size; any other's holds it
   return (
     <div data-external-row className="flex h-full items-center justify-center p-6">
       <div className="flex flex-col items-center gap-2 text-center">
         <p className="text-ui text-fg">{sentence}</p>
-        {binary ? null : <p className="text-ui-sm text-fg-muted">{formatSize(entry.bytes)}</p>}
+        {sized ? <p className="text-ui-sm text-fg-muted">{formatSize(entry.bytes)}</p> : null}
         {open && opensExternally(entry.path) && entry.appSessionId !== null ? <OpenExternally appSessionId={entry.appSessionId} path={entry.path} agent={entry.agent} /> : null /* P3-L: none for a file read by its artifact (its header opens it) */}
       </div>
     </div>

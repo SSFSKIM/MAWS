@@ -493,14 +493,16 @@ describe('the list (decision 4; M2 decisions 2 and 3)', () => {
     expect(document.activeElement).toBe(field()); // the keyboard stays in the field
   });
 
-  it('while the text’s answer is awaited: “Searching files…” with nothing drawn; the earlier rows, none highlighted and the list busy, once something is', async () => {
+  // The word cut (N1): the wait is the quiet spinner named "Searching files", nothing for its first half second
+  it('while the text’s answer is awaited: the quiet spinner with nothing drawn; the earlier rows, none highlighted and the list busy, once something is', async () => {
     holdSearches();
     render(<Page />);
     goToFile();
     await inField();
     type('s');
     await waitFor(() => expect(searches).toHaveLength(1));
-    expect([lineOf()?.getAttribute('data-line'), lineOf()?.textContent, lineOf()?.getAttribute('role')]).toEqual(['searching', 'Searching files…', 'status']);
+    expect([lineOf()?.getAttribute('data-line'), lineOf()?.textContent]).toEqual(['searching', '']);
+    expect(await within(lineOf()!).findByRole('progressbar', { name: 'Searching files' }, { timeout: 2000 })).toBeTruthy();
     expect(field()!.getAttribute('aria-expanded')).toBe('false');
     reply(0, listed('src/app.ts', 'notes.md'));
     await waitFor(() => expect(shownPaths()).toEqual(['/r/src/app.ts', '/r/notes.md']));

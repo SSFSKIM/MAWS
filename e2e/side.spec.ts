@@ -514,14 +514,16 @@ test.describe('side threads, Send to main and /btw (E3)', () => {
     await expect(mainRegion(page).getByText(CHILD_REPLY)).toBeVisible();
     // the panel follows the shown session (now the thread): back to the parent's tab to see its pane
     await showSession(page, parent);
-    await expect(thread.getByText('Shown in the main area')).toBeVisible();
+    // the word cut (P424): the pane draws Go to tab alone, the sentence its tooltip and description
     await expect(thread.getByRole('button', { name: 'Go to tab' })).toBeVisible();
+    await expect(thread.getByRole('button', { name: 'Go to tab' })).toHaveAccessibleDescription('Shown in the main area');
+    await expect(thread.getByText('Shown in the main area')).not.toBeVisible();
     await expect(thread.locator('[data-composer]'), 'one live composer per session').toHaveCount(0);
 
     // closing that tab brings the thread back into the pane
     await clickRevealed(tab, tab.getByRole('button', { name: /^Close / }));
     await expect(tab).toHaveCount(0);
-    await expect(thread.getByText('Shown in the main area')).toHaveCount(0);
+    await expect(thread.getByRole('button', { name: 'Go to tab' })).toHaveCount(0);
     await expect(thread.getByText(CHILD_REPLY)).toBeVisible();
     await expect(thread.locator(`[data-composer="${await addressed(page, child)}"]`)).toBeVisible();
 
@@ -731,7 +733,7 @@ test.describe('side threads, Send to main and /btw (E3)', () => {
     await expect(main.locator('[data-btw-card], [data-btw-chip]')).toHaveCount(0);
     await expect.poll(() => columnBoxes(page), { message: 'the cards’ list and each card where they were before /btw' }).toEqual(before);
 
-    // opened again by a bare /btw, with its two exchanges; Continue as a side thread: a fork whose first prompt lists the
+    // opened again by a bare /btw, with its two exchanges; Continue as thread: a fork whose first prompt lists the
     // exchanges, shown in the Side pane, the column gone with the side surface open, and the card, where still open, at the
     // pane's corner
     await composer.click();
@@ -743,7 +745,7 @@ test.describe('side threads, Send to main and /btw (E3)', () => {
     await page.keyboard.press('ControlOrMeta+a');
     await page.keyboard.press('Backspace');
     await expect(composer).toHaveText('');
-    await foot.getByRole('button', { name: 'Continue as a side thread' }).click();
+    await foot.getByRole('button', { name: 'Continue as thread' }).click(); // the word cut (P409)
     const promoted = await sideThreadOf(page, parent, 'btw');
     const thread = panelRegion(page).locator(`[data-side-thread-view="${await addressed(page, promoted)}"]`);
     await expect(thread).toBeVisible();
@@ -988,7 +990,10 @@ test.describe('side threads, Send to main and /btw (E3)', () => {
     await card.getByRole('button', { name: 'Send' }).click();
     await expect(card).toHaveAttribute('data-card-phase', 'thread', { timeout: 20_000 });
     await expect(card.locator('[data-request-end] [data-request-card]'), 'at the thread transcript’s end (UX wave U1b)').toContainText('echo themed', { timeout: 20_000 });
+    // the word cut (P440): the strip draws the waiting disc and its noun; the sentence is screen-reader text in it
     await expect(card.locator('[data-needs-you]')).toContainText('Waiting for your permission');
+    await expect(card.locator('[data-needs-you] [data-needs-noun]')).toHaveText('Permission');
+    await expect(card.locator('[data-needs-you] [data-needs-disc]')).toBeVisible();
     // the strip's words on one line at the card's width, its two buttons wrapping under them rather than squeezing them
     const stripLines = await card.locator('[data-needs-you] > span').evaluate((text) => Math.round(text.getBoundingClientRect().height / parseFloat(getComputedStyle(text).lineHeight)));
     expect(stripLines, 'the needs-you text on one line').toBe(1);
@@ -1087,6 +1092,7 @@ test.describe('side threads, Send to main and /btw (E3)', () => {
     await expect(request).toContainText('echo first-step');
     const strip = card.locator('[data-needs-you]');
     await expect(strip).toContainText('Waiting for your permission');
+    await expect(strip.locator('[data-needs-noun]'), 'drawn: the noun, the sentence heard (the word cut, P440)').toHaveText('Permission');
     await expect(strip.getByRole('button', { name: 'Open in Side pane' })).toBeVisible();
     await expect(strip.getByRole('button', { name: 'Open as tab' })).toBeVisible();
     const allow = request.getByRole('button', { name: 'Allow once', exact: true });

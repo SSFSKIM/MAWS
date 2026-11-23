@@ -175,10 +175,11 @@ const codeText = () => document.querySelector('.cm-content')?.textContent ?? nul
 // sentences, the path, the command's own words), and its cause
 const noticeLines = () => [...document.querySelectorAll('[data-refusal] p')].map((p) => p.textContent);
 const noticeCause = () => document.querySelector('[data-refusal]')?.getAttribute('data-notice-cause') ?? null;
-const THREE_WAYS = "MAWS opens a file from elsewhere when this session's transcript links it, when you choose it with File ▸ Open File…, or when the agent sends it.";
+const THREE_WAYS = 'Choose it with File ▸ Open File…'; // the word cut (N7): the way in alone
 const ASK_AGENT = 'Ask the agent to send the file to see it here.';
-// The first notice, as this Mac says it, for `path`
-const outsideHere = (path: string) => ['This file is outside the folders this session works in.', THREE_WAYS, ASK_AGENT, path, "path outside the session's directories"];
+// The first notice, as this Mac says it, for `path`; the word cut (N11): the command's own words are not drawn under a
+// notice that names its cause
+const outsideHere = (path: string) => ['This file is outside the folders this session works in.', THREE_WAYS, ASK_AGENT, path];
 
 describe('viewer', () => {
   const offs: (() => void)[] = [];
@@ -377,24 +378,24 @@ describe('viewer', () => {
     const main = serve({ '/r/doc.pdf': { base64: 'JVBERi0xLjQ=', bytes: 30 }, '/r/data.bin': { base64: 'AAEC', bytes: 12, mime: 'application/octet-stream' } });
     const { unmount } = render(<FileViewer tab={fileTab('/r/doc.pdf')} />);
     await waitFor(() => expect(document.querySelector('[data-artifact-frame="pdf"]')).not.toBeNull());
-    expect(screen.queryByText('PDF files open outside MAWS')).toBeNull();
+    expect(screen.queryByText('PDF · 30 B')).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: 'Open externally' }));
     await waitFor(() => expect(main.callsOf('files.openExternal')).toEqual([{ appSessionId: MAIN_A, path: '/r/doc.pdf', named: true }]));
     unmount();
     render(<FileViewer tab={fileTab('/r/data.bin')} />);
-    expect(await screen.findByText('Binary file · 12 B')).toBeTruthy();
+    expect(await screen.findByText('Binary · 12 B')).toBeTruthy(); // the word cut (T328)
     expect(screen.queryByRole('button', { name: 'Open externally' })).toBeNull();
   });
 
   it('opens a 20 MB text as a bounded head that grows by Load more', async () => {
     const main = serve({ '/r/big.log': { generated: 20 * MiB, line: 'log line\n' } });
     render(<FileViewer tab={fileTab('/r/big.log')} />);
-    await waitFor(() => expect(notice()).toBe('Showing the first 1.0 MB of 20.0 MB'));
+    await waitFor(() => expect(notice()).toBe('1.0 MB of 20.0 MB'));
     expect(screen.getByRole('button', { name: 'Open externally' })).toBeTruthy();
     const loadMore = screen.getByRole<HTMLButtonElement>('button', { name: 'Load more' });
     fireEvent.click(loadMore);
     expect(loadMore.disabled).toBe(true); // `loadMore` sets `loadingMore` inside the click's act, before its read answers
-    await waitFor(() => expect(notice()).toBe('Showing the first 2.0 MB of 20.0 MB'));
+    await waitFor(() => expect(notice()).toBe('2.0 MB of 20.0 MB'));
     expect(loadMore.disabled).toBe(false); // the read that grew the head cleared `loadingMore` in the same patch
     expect(main.callsOf('files.read').map((input) => [input.offset, input.length])).toEqual([
       [0, MiB],
@@ -438,14 +439,14 @@ describe('viewer', () => {
     const main = serve({ '/r/big.log': { generated: 20 * MiB, line: `${'log line '.repeat(28)}\n` } });
     connect();
     render(<FileViewer tab={fileTab('/r/big.log')} />);
-    await waitFor(() => expect(notice()).toBe('Showing the first 1.0 MB of 20.0 MB'));
+    await waitFor(() => expect(notice()).toBe('1.0 MB of 20.0 MB'));
     fireEvent.click(screen.getByRole('button', { name: 'Load more' }));
-    await waitFor(() => expect(notice()).toBe('Showing the first 2.0 MB of 20.0 MB'));
+    await waitFor(() => expect(notice()).toBe('2.0 MB of 20.0 MB'));
     main.calls.splice(0);
     act(() => main.emit('files.changed', { appSessionId: MAIN_A, path: '/r/big.log', kind: 'changed' }));
     await waitFor(() => expect(main.callsOf('files.read').map((input) => input.offset)).toEqual([0, MiB]));
     await waitFor(() => expect(document.querySelector('[data-updated]')).not.toBeNull());
-    expect(notice()).toBe('Showing the first 2.0 MB of 20.0 MB');
+    expect(notice()).toBe('2.0 MB of 20.0 MB');
   });
 
   // Gates the reads of a head at an offset, one call at a time, in the order they are asked for.
@@ -743,7 +744,7 @@ describe('a file the transcript names (U6c), from a daemon of the parent pin', (
 
     const OTHER = '/elsewhere/other.txt';
     const first = show(OTHER);
-    expect((await screen.findByRole('alert')).textContent).toContain(OUTSIDE_REFUSAL);
+    expect((await screen.findByRole('alert')).textContent).toContain('This file is outside the folders this session works in.'); // the word cut (N11): the headline, no command's words
     first.unmount();
     main.names.add(OTHER);
     render(<FileViewer tab={fileTab(OTHER)} />); // shown again
@@ -776,7 +777,7 @@ describe('a file the transcript names (U6c), from a daemon of the parent pin', (
     });
     const offs = [connectCodeEvents()];
     const first = show(PATH);
-    expect((await screen.findByRole('alert')).textContent).toContain(`not found: ${PATH}`);
+    expect((await screen.findByRole('alert')).textContent).toContain('No file at this path.'); // the word cut (N11)
     files[PATH] = 'one\n'; // the folder and the file are made
     if (how === 'its link is clicked again') act(() => void openFile(A, PATH));
     else {
@@ -842,7 +843,7 @@ describe('a file the transcript names (U6c), from a daemon of the parent pin', (
     await waitFor(() => expect(codeText()).toBe('was named'));
     main.names.delete(OUT); // the transcript no longer names it
     act(() => void openFile(A, OUT));
-    expect((await screen.findByRole('alert')).textContent).toContain(OUTSIDE_REFUSAL);
+    expect((await screen.findByRole('alert')).textContent).toContain('This file is outside the folders this session works in.'); // the word cut (N11): the headline, no command's words
     expect(shown()).toMatchObject({ status: 'error', named: false, text: '', kind: null, hash: null, editable: false });
     expect(codeText()).toBeNull();
   });
@@ -905,7 +906,7 @@ describe('a file the transcript names (U6c), from a daemon of the parent pin', (
     await waitFor(() => expect(main.callsOf('files.read')).toHaveLength(1));
     act(() => void openFile(B, OUT)); // the tab is one per machine and path: it takes session B
     rerender(<FileViewer tab={fileTab(OUT, null, B)} />);
-    expect((await screen.findByRole('alert')).textContent).toContain(OUTSIDE_REFUSAL);
+    expect((await screen.findByRole('alert')).textContent).toContain('This file is outside the folders this session works in.'); // the word cut (N11): the headline, no command's words
     gate.release(); // session A's answer, the file's text
     await settle();
     expect(shown()).toMatchObject({ appSessionId: B, status: 'error', named: false, text: '' });
@@ -925,15 +926,22 @@ describe('a file from outside the folders edits and saves (U6e)', () => {
   const REAL = '/elsewhere/real/notes.txt'; // OUT's real path: a link on the way
   const SWAPPED = '/elsewhere/swapped/notes.txt';
   const REMOTE = addressOf(OTHER_MACHINE, 'app-r' as AppSessionId);
-  const SENTENCES = {
+  // The editor's title, and (the word cut, N16 to N18, N20) the panel's sentence under "Read-only", which says it already
+  const TITLES = {
     maws: 'Read-only: MAWS does not edit its own files',
     added: 'Read-only: this file is in the Library, not in this session’s folders. Choose it with File ▸ Open File… to edit it',
     result: 'Read-only: only a tool’s output names this file in this conversation. Choose it with File ▸ Open File… to edit it',
     outside: 'Read-only: the file is outside the folders this session works in',
   } as const;
+  const SENTENCES = {
+    maws: 'MAWS does not edit its own files',
+    added: 'This file is in the Library, not in this session’s folders.',
+    result: 'Only a tool’s output names this file in this conversation.',
+    outside: 'The file is outside the folders this session works in',
+  } as const;
   const MOVED = 'Could not save: the path no longer leads to the file that was opened';
   const REFUSED = 'Could not save: MAWS may no longer write this file for this session. Choose it with File ▸ Open File… to save it';
-  const UNAVAILABLE = 'Could not save: MAWS’s service on this Mac is from an earlier version and cannot save a file from outside the session’s folders. Try again in a moment';
+  const UNAVAILABLE = 'Could not save: a file outside the session’s folders can’t be saved yet. Try again in a moment'; // the word cut (N25)
   const offs: (() => void)[] = [];
   beforeAll(() => import('./CodeView'));
   beforeEach(() => {
@@ -1113,7 +1121,7 @@ describe('a file from outside the folders edits and saves (U6e)', () => {
     const order = [...bar.children];
     expect(order.indexOf(bar.querySelector('[data-start]')!)).toBe(order.indexOf(at) - 1);
     expect(order.indexOf(lead())).toBe(order.indexOf(at) + 1);
-    await waitFor(() => expect(title()).toBe(SENTENCES[reason]));
+    await waitFor(() => expect(title()).toBe(TITLES[reason]));
     expect(document.querySelector('[data-file-viewer]')!.getAttribute('data-editable')).toBe('false');
     expect(saveButton()).toBeNull();
     vi.spyOn(document.querySelector('[data-file-viewer]')!, 'getBoundingClientRect').mockReturnValue({ width: 320, height: 600, top: 0, left: 0, right: 320, bottom: 600, x: 0, y: 0, toJSON: () => ({}) });
@@ -1255,7 +1263,7 @@ describe('a file from outside the folders edits and saves (U6e)', () => {
     fireEvent.click(saveButton()!);
     await waitFor(() => expect(shown()).toMatchObject({ saving: false, theirs: { view: 'merge', text: 'other\n', real: OUT } }));
     expect(main.files[OUT]).toBe('other\n');
-    expect(screen.getByText('Changed on disk since you opened it')).toBeTruthy();
+    expect(document.querySelector('[data-theirs-notice="merge"]')!.textContent).toBe('Changed on disk'); // the word cut (T341)
   });
 
   it('W6: named with no outside (a daemon of the parent pin) is read-only with U6c’s title, and Save sends nothing', async () => {
@@ -1263,7 +1271,7 @@ describe('a file from outside the folders edits and saves (U6e)', () => {
     show();
     await waitFor(() => expect(shown()).toMatchObject({ status: 'ready', named: true, pin: null, locked: null, editable: false }));
     expect(readOnlyReason(shown())).toBe('outside');
-    await waitFor(() => expect(title()).toBe(SENTENCES.outside));
+    await waitFor(() => expect(title()).toBe(TITLES.outside));
     expect(lead().getAttribute('title')).toBe(OUT);
     expect(await useViewer.getState().save(FILE(OUT))).toBe('noop');
     expect(main.saves()).toEqual([]);
@@ -1327,8 +1335,9 @@ describe('a file from outside the folders edits and saves (U6e)', () => {
     expect(main.callsOf('files.writeOutside')).toEqual([]);
   });
 
-  // K1, K14, K15, K3: the failure on a line of its own at the bar's full width, never cut; Save and Wrap one group.
-  it('a save’s failure takes a line of its own, never cut; Save and Wrap stay one group on the path’s line', async () => {
+  // K1, K14, K15, K3: the failure on a line of its own at the bar's full width, never cut; Save and Wrap one group (the word
+  // cut, T305: Wrap is in the View menu, whose glyph stands in that group).
+  it('a save’s failure takes a line of its own, never cut; Save and the View menu stay one group on the path’s line', async () => {
     const main = disk({ [OUT]: 'one\n' }, { names: [OUT] });
     show();
     await editable();
@@ -1346,7 +1355,7 @@ describe('a file from outside the folders edits and saves (U6e)', () => {
     const group = bar.querySelector('[data-bar-controls]')!;
     expect(group.parentElement).toBe(bar);
     expect(within(group as HTMLElement).getByRole('button', { name: 'Save' })).toBeTruthy();
-    expect(within(group as HTMLElement).getByRole('button', { name: 'Wrap' })).toBeTruthy();
+    expect(within(group as HTMLElement).getByRole('button', { name: 'View' })).toBeTruthy();
   });
 
   // Review finding 5 (K1, K14): an unbroken run (a long path component) wraps anywhere within the failure's own line.
@@ -1682,7 +1691,7 @@ describe('a file from outside the folders edits and saves (U6e)', () => {
     main.grant(MAIN_A, OUT);
     act(() => void openFile(A, OUT, null, { main: true }));
     const { rerender } = render(<FileViewer tab={fileTab(OUT)} agent />);
-    expect((await screen.findByRole('alert')).textContent).toContain(OUTSIDE_REFUSAL);
+    expect((await screen.findByRole('alert')).textContent).toContain('This file is outside the folders this session works in.'); // the word cut (N11): the headline, no command's words
     expect(main.callsOf('files.read')).toEqual([expect.objectContaining({ path: OUT, named: true, agent: true })]);
     rerender(<FileViewer tab={fileTab(OUT)} />); // the person's open removes the mark
     await editable();
@@ -1773,7 +1782,7 @@ describe('a framed file (UX wave U6b-2)', () => {
     );
     const ID = '00000000-0000-4000-8000-0000000000aa';
     render(<FileBody tabId={`artifact:${ID}:1`} appSessionId={null} path="/w/ledger.pdf" readOnly artifact={{ artifactId: ID, machine: TEST_MACHINE, revision: 1 }} />);
-    expect((await screen.findByText('PDF files open outside MAWS')).tagName).toBe('P');
+    expect((await screen.findByText('PDF · 8 B')).tagName).toBe('P'); // the word cut (T327): the kind and the size, one line
     await settle();
     expect(main.callsOf('layout.frameFile')).toEqual([]);
     expect(document.querySelector('iframe')).toBeNull();
@@ -1797,7 +1806,7 @@ describe('a framed file (UX wave U6b-2)', () => {
     let served = false;
     const main = installDisk({ [PDF]: '%PDF-1.4 invented\n' }, { frames: (_, issue) => (served ? issue() : ok({ status: 'row', why: 'unserved' })) });
     const first = show();
-    expect((await screen.findByText('MAWS’s service on this Mac is an older version, so this file can’t be shown here yet.')).tagName).toBe('P');
+    expect((await screen.findByText('This file can’t be shown here yet.')).tagName).toBe('P'); // the word cut (N15)
     expect(entry()!.frame).toEqual({ status: 'row', why: 'unserved' });
     first.unmount();
     served = true;
@@ -2259,7 +2268,7 @@ describe('a file outside the folders on another machine (U6f)', () => {
     await waitFor(() => expect(body()).not.toBeNull());
     // UX wave U6b-4b: the plain read's refusal there: the path is outside the folders on studio; the three ways are not said,
     // since studio's daemon did not run the open itself
-    expect(noticeLines()).toEqual(['This file is outside the folders this session works in on studio.', ASK_AGENT, '/elsewhere/unnamed.txt', OUTSIDE_REFUSAL]);
+    expect(noticeLines()).toEqual(['This file is outside the folders this session works in on studio.', ASK_AGENT, '/elsewhere/unnamed.txt']);
     expect(shown('/elsewhere/unnamed.txt').said).toBe(false);
   });
 
@@ -2281,10 +2290,10 @@ describe('a file outside the folders on another machine (U6f)', () => {
       await waitFor(() => expect(label()).not.toBeNull());
       expect(readOnlyReason(shown())).toBe('elsewhere');
       expect(label()!.getAttribute('data-read-only')).toBe('elsewhere');
-      expect(label()!.getAttribute('aria-description')).toBe('Read-only: Only studio’s owners can save this file there.');
+      expect(label()!.getAttribute('aria-description')).toBe('Only studio’s owners can save this file there.');
       fireEvent.click(label()!);
       const panel = await waitFor(() => document.querySelector<HTMLElement>('[data-read-only-panel]')!);
-      expect(panel.textContent).toBe('Read-only: Only studio’s owners can save this file there.');
+      expect(panel.textContent).toBe('Only studio’s owners can save this file there.'); // the word cut (N16)
       expect(within(panel).queryByRole('button')).toBeNull();
       expect(document.querySelector('.cm-content')?.getAttribute('title')).toBe('Read-only: Only studio’s owners can save this file there.');
     });
@@ -2315,7 +2324,7 @@ describe('a file outside the folders on another machine (U6f)', () => {
       expect(shown()).toMatchObject({ dirty: true, editable: false, pin: OUT });
       expect(readOnlyReason(shown())).toBe('elsewhere');
       expect(existingViewState(shown().tabId)?.docOf?.()).toBe('mine one\n');
-      expect(label()!.getAttribute('aria-description')).toBe('Read-only: Only studio’s owners can save this file there.');
+      expect(label()!.getAttribute('aria-description')).toBe('Only studio’s owners can save this file there.');
       await act(() => useViewer.getState().save(shown().tabId));
       expect(saveFailure()).toBe('Not saved: only studio’s owners can'); // UC-7's sentence, said once (Decision Log 30 d)
       expect(main.callsOf('files.writeOutside')).toEqual([]);
@@ -2330,7 +2339,7 @@ describe('a file outside the folders on another machine (U6f)', () => {
       await waitFor(() => expect(shown().dirty).toBe(true));
       act(() => rosterSays(T, { capabilities: ['rl2.channel'] }));
       await waitFor(() => expect(label()?.getAttribute('data-read-only')).toBe('elsewhere'));
-      expect(label()!.getAttribute('aria-description')).toBe('Read-only: Can’t save this file on studio yet. Update MAWS on studio and try again.');
+      expect(label()!.getAttribute('aria-description')).toBe('Can’t save this file on studio yet. Update MAWS on studio and try again.');
       // Fix wave (review finding 7; decision 14, B9): Save answers the refusal as the save's failure, nothing sent
       await act(() => useViewer.getState().save(shown().tabId));
       expect(saveFailure()).toBe('Not saved: update MAWS on studio and try again');
@@ -2698,8 +2707,9 @@ describe('a link followed from a shown Markdown file, or from a subagent’s tra
   const DOC = '/r/docs/guide.md';
   const LINKED = `[the notes](${OUT})`;
   const FROM_DOC = { appSessionId: MAIN_A, path: OUT, from: { file: DOC } };
-  const LINKED_ONLY = 'Read-only: the file that links this one is read-only in this conversation. Choose it with File ▸ Open File… to edit it';
-  const RESULT_ONLY = 'Read-only: only a tool’s output names this file in this conversation. Choose it with File ▸ Open File… to edit it';
+  // The panel's sentence under "Read-only" and the button's description (the word cut, N18 and N19)
+  const LINKED_ONLY = 'The file that links this one is read-only in this conversation.';
+  const RESULT_ONLY = 'Only a tool’s output names this file in this conversation.';
   const REFUSED = 'Could not save: MAWS may no longer write this file for this session. Choose it with File ▸ Open File… to save it';
   const offs: (() => void)[] = [];
   beforeAll(() => import('./CodeView'));
@@ -3450,7 +3460,7 @@ describe('the notice of a file that cannot be read (U6b-4b)', () => {
       expect(noticeCause()).toBe('outside');
       expect(noticeLines()).toEqual(outsideHere(OUT));
       expect(block()!.querySelector('p')!.textContent).toBe('This file is outside the folders this session works in.'); // the headline, first
-      expect(block()!.querySelector('[data-notice-detail]')!.textContent).toBe(OUTSIDE_REFUSAL);
+      expect(block()!.querySelector('[data-notice-detail]')).toBeNull(); // the word cut (N11): the headline names the cause
       for (const line of noticeLines()) expect(line).not.toMatch(/^(Refused|files\.)/);
       expect(retry()).toBeNull();
       await act(async () => void fireEvent.click(within(block()!).getByRole('button', { name: 'Copy path' })));
@@ -3489,7 +3499,7 @@ describe('the notice of a file that cannot be read (U6b-4b)', () => {
     show('/r/gone.md');
     await waitFor(() => expect(block()).not.toBeNull());
     expect(noticeCause()).toBe('not-found');
-    expect(noticeLines()).toEqual(['No file at this path.', '/r/gone.md', 'not found: /r/gone.md']);
+    expect(noticeLines()).toEqual(['No file at this path.', '/r/gone.md']);
     expect(block()!.querySelector('[data-notice-copy]')).toBeNull();
     expect(retry()).toBeNull();
   });
@@ -3499,7 +3509,7 @@ describe('the notice of a file that cannot be read (U6b-4b)', () => {
     main.answers.by = (name) => (name === 'files.read' ? unreachable() : null);
     show(CODE);
     await waitFor(() => expect(noticeCause()).toBe('unreachable'));
-    expect(noticeLines()).toEqual(["MAWS's service on this Mac is not answering.", CODE, 'files.read: the files service is not running']);
+    expect(noticeLines()).toEqual(["MAWS's service on this Mac is not answering.", CODE]);
     expect(retry()!.textContent).toBe('Retry');
     expect(retry()!.disabled).toBe(false);
     main.answers.by = (name, input) => (name === 'files.read' ? fail(`not found: ${input.path as string}`) : null); // back, and the file is not there
@@ -3622,9 +3632,9 @@ describe('the notice of a file that cannot be read (U6b-4b)', () => {
     const before = reads(main, CODE).length;
     main.answers.by = (name) => (name === 'files.read' ? fail('files.read: no answer within 10 s', 'timeout') : null);
     fireEvent.click(retry()!);
-    await waitFor(() => expect(document.querySelector('[data-notice-detail]')?.textContent).toBe('files.read: no answer within 10 s'));
+    await waitFor(() => expect(reads(main, CODE)).toHaveLength(before + 1));
     await waitFor(() => expect(retry()!.disabled).toBe(false));
-    expect(reads(main, CODE)).toHaveLength(before + 1);
+    expect(document.querySelector('[data-notice-detail]')).toBeNull(); // the word cut (N11): the headline names the cause
     expect(noticeCause()).toBe('unreachable');
     expect(shown(CODE)).toMatchObject({ status: 'error', dirty: true });
     expect(existingViewState(tabOf(CODE).id)?.docOf?.()).toBe('mine one\n');
@@ -3790,7 +3800,7 @@ describe('the notice of a file that cannot be read (U6b-4b)', () => {
       listed(mine);
       show('/r/a.ts', T);
       await waitFor(() => expect(noticeCause()).toBe(cause));
-      expect(noticeLines()).toEqual([headline, '/r/a.ts', 'files.read: refused grade by machine studio']);
+      expect(noticeLines()).toEqual(cause === 'other' ? [headline, '/r/a.ts', 'files.read: refused grade by machine studio'] : [headline, '/r/a.ts']); // N11
       expect(retry() !== null).toBe(offersRetry);
     });
 
@@ -3870,7 +3880,7 @@ describe('the notice of a file that cannot be read (U6b-4b)', () => {
       main.answers.by = (name) => (name === 'files.read' ? fail(failureWords('files.readOutside', OUTSIDE_REFUSAL)) : null);
       show(OUT, T);
       await waitFor(() => expect(noticeCause()).toBe('outside'));
-      expect(noticeLines()).toEqual(['This file is outside the folders this session works in on studio.', THREE_WAYS, ASK_AGENT, OUT, `Not opened: ${OUTSIDE_REFUSAL}`]);
+      expect(noticeLines()).toEqual(['This file is outside the folders this session works in on studio.', THREE_WAYS, ASK_AGENT, OUT]);
       expect(block()!.querySelector('[data-notice-copy]')).not.toBeNull();
 
       cleanup();
@@ -3893,5 +3903,84 @@ describe('the notice of a file that cannot be read (U6b-4b)', () => {
       expect(retry()).toBeNull();
       expect(shown('/elsewhere/Documents/rota.txt', T)!.failure).toEqual({ code: 'internal', message: 'Not opened: the file is in a folder macOS protects on studio', refusal: 'protected' });
     });
+  });
+});
+
+// The word cut (docs/doperpowers/specs/2026-11-16-word-cut-design.md, M3 task 5): the file tab's bar and its waits.
+describe('the file tab’s bar, cut', () => {
+  beforeAll(() => import('./CodeView'));
+  beforeEach(() => {
+    useViewer.getState().reset();
+    useFiles.getState().reset();
+    useLayout.setState({ main: LAYOUT_DEFAULTS.main, hydrated: true });
+  });
+  afterEach(() => cleanup());
+  const bar = () => document.querySelector<HTMLElement>('[data-bar-controls]')!.parentElement!;
+
+  // T302: nothing for a read's first half second, then the quiet spinner named "Loading", in place of the word
+  it('a read on its way shows no word, then the quiet spinner named Loading', async () => {
+    const gate = deferred<void>();
+    serve({ '/r/app.ts': 'const a = 1;\n' }, () => gate.promise);
+    render(<FileViewer tab={fileTab('/r/app.ts')} />);
+    expect(screen.queryByText('Loading')).toBeNull();
+    expect(await screen.findByRole('progressbar', { name: 'Loading' }, { timeout: 2000 })).toBeTruthy();
+    await act(async () => gate.resolve());
+    await waitFor(() => expect(screen.queryByRole('progressbar', { name: 'Loading' })).toBeNull());
+  });
+
+  // T305: Wrap is a check item in the View menu behind a glyph named "View", not a button of the bar
+  it('holds Wrap in the View menu, a glyph named View with its word as its tip', async () => {
+    serve({ '/r/app.ts': 'const a = 1;\n' });
+    const user = userEvent.setup();
+    render(<FileViewer tab={fileTab('/r/app.ts')} />);
+    const view = await screen.findByRole('button', { name: 'View' });
+    expect(within(bar()).queryByRole('button', { name: 'Wrap' })).toBeNull();
+    expect(view.textContent).toBe(''); // a glyph, its word the name
+    expect(view.hasAttribute('title')).toBe(false);
+    act(() => view.focus());
+    expect((await screen.findByRole('tooltip')).textContent).toBe('View');
+    const wrapped = useViewer.getState().wrap;
+    expect(view.getAttribute('aria-expanded')).toBe('false');
+    await user.click(view);
+    const wrap = await screen.findByRole('menuitemcheckbox', { name: 'Wrap' });
+    expect(view.getAttribute('aria-expanded')).toBe('true'); // the open look keys on this, not the tooltip's data-state
+    expect(wrap.getAttribute('aria-checked')).toBe(String(wrapped));
+    await user.click(wrap);
+    expect(useViewer.getState().wrap).toBe(!wrapped);
+    await user.click(view);
+    expect((await screen.findByRole('menuitemcheckbox', { name: 'Wrap' })).getAttribute('aria-checked')).toBe(String(!wrapped));
+    await user.keyboard('{Escape}');
+    act(() => useViewer.getState().setWrap(wrapped));
+  });
+
+  // T322: a file past the viewer's cap reads its two sizes beside Load more, without the sentence
+  it('a file past the viewer’s cap reads its two sizes', async () => {
+    serve({ '/r/big.log': { generated: 20 * MiB, line: 'log line\n' } });
+    render(<FileViewer tab={fileTab('/r/big.log')} />);
+    await waitFor(() => expect(document.querySelector('[data-notice]')?.textContent).toBe('1.0 MB of 20.0 MB'));
+    expect(screen.getByRole('button', { name: 'Load more' })).toBeTruthy();
+  });
+
+  // T324: a long file arriving is a ring filling up, named by the wait's words; its two sizes are its tip
+  it('a long file arriving is a progress ring named by its words, its two sizes the tip the keyboard reaches', async () => {
+    const text = lines(40_000, (n) => `export const v${n} = 'x';`.padEnd(54, ' '));
+    const gates = new Map<number, ReturnType<typeof deferred<void>>>();
+    const gateAt = (offset: number) => {
+      if (!gates.has(offset)) gates.set(offset, deferred<void>());
+      return gates.get(offset)!;
+    };
+    serve({ '/r/generated.ts': text }, (offset) => gateAt(offset).promise);
+    render(<FileViewer tab={fileTab('/r/generated.ts')} />);
+    await act(async () => gateAt(0).resolve());
+    const ring = await screen.findByRole('progressbar', { name: 'Loading 1.0 MB of 2.1 MB' });
+    expect(ring.getAttribute('aria-valuenow')).toBe(String(Math.round((MiB / text.length) * 100)));
+    expect(within(bar()).queryByText(/Loading/)).toBeNull(); // no words at rest
+    expect(screen.getByRole('progressbar', { description: '1.0 MB of 2.1 MB' })).toBe(ring);
+    act(() => ring.focus());
+    expect((await screen.findByRole('tooltip')).textContent).toBe('1.0 MB of 2.1 MB');
+    await act(async () => gateAt(MiB).resolve());
+    await waitFor(() => expect(screen.getByRole('progressbar', { name: 'Loading 2.0 MB of 2.1 MB' })).toBeTruthy());
+    await act(async () => gateAt(2 * MiB).resolve());
+    await waitFor(() => expect(screen.queryByRole('progressbar')).toBeNull());
   });
 });

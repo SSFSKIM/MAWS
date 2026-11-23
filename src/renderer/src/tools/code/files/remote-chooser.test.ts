@@ -424,7 +424,7 @@ describe('the choice (C3)', () => {
     const chosen = chooser.choose();
     await chooses[0].answer(refusedChoice('not-a-file'));
     expect(await chosen).toBeNull();
-    expect(chooser.state()).toEqual({ at: 'failed', path: HOME, words: 'Open File opens one file. A folder or an app’s package cannot be opened here.' });
+    expect(chooser.state()).toEqual({ at: 'failed', path: HOME, words: 'A folder or an app’s package cannot be opened here.' }); // the word cut (N34)
     expect(lists).toHaveLength(1);
     chooser.retry();
     await lists[1].answer(listed(HOME, AT_HOME));

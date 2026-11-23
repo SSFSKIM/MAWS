@@ -33,6 +33,7 @@ import { documentText, editing, editingExtensions, fromStore } from '../editor/e
 import { changeCount, mergedWith, mergeView, merging, redrawMergeView, stepChange } from '../editor/merge';
 import { attachNavigation, reportCounts } from '../editor/navigation';
 import { codeHighlightStyle, codeThemeDark, codeThemeLight } from './code-theme';
+import { findGlyphs } from './find-glyphs';
 import { jumpTarget } from './kinds';
 import { languageFor, languageNameFor } from './languages';
 import { existingViewState, readOnlyWords, useViewer, viewState, type ViewerEntry } from './viewer-store';
@@ -87,6 +88,7 @@ const extensions = (tabId: string, wrap: boolean): Extension[] => [
   highlightActiveLine(),
   highlightActiveLineGutter(),
   search({ top: true }),
+  findGlyphs, // the word cut (T336): after the search panel's own plugin
   highlightSelectionMatches(),
   keymap.of(searchKeymap),
   syntaxHighlighting(codeHighlightStyle),

@@ -400,8 +400,22 @@ test('channel: a seeded project channel offline, its exchange of 40 opened, its 
       await toHuman.last().evaluate((el) => el.scrollIntoView({ block: 'end', behavior: 'instant' }));
       await test.info().attach('channel-to-human-foot', { body: await channel.screenshot(), contentType: 'image/png' });
 
+      // The word cut (P448): the folded exchange reads its names, then "· 40", the count an image named by its meaning
+      // ("40 messages", the fold button's tooltip too), with no count words before the names.
+      const fold = exchange.getByRole('button').first();
+      await expect(fold.getByRole('img', { name: `${EXCHANGE} messages`, exact: true })).toHaveText(String(EXCHANGE));
+      await expect(fold).not.toContainText('messages between');
+      // The count follows the last name in the names' group (pair review of M3's pictures), not carried to the far end.
+      expect(await fold.evaluate((button) => {
+        const parts = button.querySelectorAll(':scope > [data-names] [data-name-part]');
+        const last = parts[parts.length - 1]!.getBoundingClientRect();
+        const count = button.querySelector(':scope > [data-names] > [role="img"]');
+        if (count === null) return false;
+        const left = count.getBoundingClientRect().left;
+        return left >= last.right && left - last.right <= 32;
+      }), 'the count stands right after the names').toBe(true);
       // The exchange opened in place: its 40 messages, each under its sender.
-      await exchange.getByRole('button').first().click();
+      await fold.click();
       await expect(exchange.getByRole('button').first()).toHaveAttribute('aria-expanded', 'true');
       await expect(exchange.locator('[data-channel-exchange-messages] > li')).toHaveCount(EXCHANGE);
       // The stream clips what it scrolls past, so the opened exchange is photographed at its head and at its foot.
@@ -537,6 +551,12 @@ for (const scrollbars of ['Always', 'WhenScrolling'] as const) {
         const channel = page.locator(`[data-channel="${PROJECT}"]`);
         const composer = channel.locator('[data-channel-composer]');
         await expect(composer).toBeVisible();
+        // the word cut (P460): Send is the message box's round arrow, named Send; with nothing typed it is greyed by
+        // aria-disabled and stays in the Tab order, so its tooltip is reached
+        const send = composer.getByRole('button', { name: 'Send', exact: true });
+        await expect(send).toBeDisabled();
+        await expect(send).toHaveAttribute('aria-disabled', 'true');
+        await expect(send).not.toHaveAttribute('disabled', /.*/);
         const gutter = () => channel.getByRole('log').evaluate((el) => (el as HTMLElement).offsetWidth - el.clientWidth);
         if (scrollbars === 'Always') await expect.poll(gutter, { message: "the stream's scrollbar takes width (classic scrollbars)" }).toBeGreaterThan(0);
         else expect(await gutter(), 'overlay scrollbars take no width').toBe(0);

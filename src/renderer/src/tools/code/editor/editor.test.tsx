@@ -2,11 +2,14 @@
 // service does, with answers held back so the interleavings are exact (`editor state`), and the code view's editing
 // half (`code view editing`): editable by kind, the dirty listener, the baseline counter.
 import { isolateHistory, undo } from '@codemirror/commands';
+import { openSearchPanel } from '@codemirror/search';
 import { EditorView, keymap, runScopeHandlers } from '@codemirror/view';
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
 import { FILES_READ_MAX_LENGTH } from '@shared/ipc/schema/files';
+import { effectiveChord } from '@shared/keymap/actions';
+import { formatChord } from '@shared/keymap/chord';
 import { LAYOUT_DEFAULTS, type TabRef } from '@shared/ipc/schema/layout';
 import { at, TEST_MACHINE } from '../../../../../../test/support/machine';
 import { connectCodeEvents } from '../../../ipc/events';
@@ -256,13 +259,13 @@ describe('editor', () => {
       const unusable = () => document.querySelector('[data-disk-unusable]');
       disk.files[APP] = { text: 'log line\n', bytes: 5 * MiB };
       changed(disk);
-      await waitFor(() => expect(unusable()?.textContent).toBe('Changed on disk: now larger than the editor’s cap, so it cannot be merged'));
+      await waitFor(() => expect(unusable()?.textContent).toBe('Changed on disk · too large to merge'));
       expect(unusable()?.getAttribute('data-disk-unusable')).toBe('head');
       expect(entry()).toMatchObject({ dirty: true, theirs: null });
       expect(doc()).toBe('// mine\nconst a = 1;\n');
       disk.files[APP] = { text: 'caf�\n', bytes: 5, utf8: false };
       changed(disk);
-      await waitFor(() => expect(unusable()?.textContent).toBe('Changed on disk: no longer UTF-8, so it cannot be merged'));
+      await waitFor(() => expect(unusable()?.textContent).toBe('Changed on disk · not UTF-8, can’t merge'));
       disk.files[APP] = 'const a = 2;\n';
       changed(disk);
       await waitFor(() => expect(theirsNotice()).toBe('Changed on disk'));
@@ -656,7 +659,7 @@ describe('editor', () => {
       changed(disk);
       await waitFor(() => expect(theirsNotice()).toBe('Changed on disk'));
       fireEvent.click(saveButton()!);
-      await waitFor(() => expect(theirsNotice()).toBe('Changed on disk since you opened it'));
+      await waitFor(() => expect(theirsNotice()).toBe('Changed on disk'));
       expect(disk.callsOf('files.write')[0].expectedHash).toBe(fakeHash('const a = 1;\n'));
       expect(disk.files[APP]).toBe('const a = 2;\n'); // nothing written
       expect(viewer().getAttribute('data-theirs')).toBe('merge');
@@ -675,7 +678,7 @@ describe('editor', () => {
       changed(disk);
       fireEvent.click(await screen.findByRole('button', { name: 'Compare' }));
       await waitFor(() => expect(entry().theirs?.view).toBe('merge'));
-      expect(theirsNotice()).toBe('Changed on disk since you opened it');
+      expect(theirsNotice()).toBe('Changed on disk');
     });
 
     // U1c (the architect's ruling on the notice cut at the side panel's width): the reason, in both its forms and where it
@@ -687,7 +690,7 @@ describe('editor', () => {
       const REASON = '[data-theirs-notice], [data-disk-unusable]';
       const row = () => document.querySelector<HTMLElement>('[data-editor-controls]')!;
       const parts = () =>
-        Array.from(row().children).map((part) =>
+        Array.from(row().children).filter((part) => !(part as HTMLElement).hidden).map((part) => // a tip's hidden description is no part of the layout
           part.matches(REASON) ? 'reason' : part.querySelector('[data-merge-changes]') ? 'changes' : (part.textContent ?? ''),
         );
       const expectLaidOut = (order: string[]) => {
@@ -702,14 +705,14 @@ describe('editor', () => {
       type('// mine\n');
       disk.files[APP] = { text: 'caf\uFFFD\n', bytes: 5, utf8: false };
       changed(disk);
-      await waitFor(() => expect(document.querySelector('[data-disk-unusable]')?.textContent).toBe('Changed on disk: no longer UTF-8, so it cannot be merged'));
+      await waitFor(() => expect(document.querySelector('[data-disk-unusable]')?.textContent).toBe('Changed on disk · not UTF-8, can’t merge'));
       expectLaidOut(['reason', 'Save']);
       disk.files[APP] = 'const a = 2;\n';
       changed(disk);
       await waitFor(() => expect(theirsNotice()).toBe('Changed on disk'));
       expectLaidOut(['reason', 'Reload', 'Keep mine', 'Compare', 'Save']);
       fireEvent.click(saveButton()!);
-      await waitFor(() => expect(theirsNotice()).toBe('Changed on disk since you opened it'));
+      await waitFor(() => expect(theirsNotice()).toBe('Changed on disk'));
       await waitFor(() => expect(row().querySelector('[data-merge-changes]')).not.toBeNull());
       expectLaidOut(['reason', 'changes', 'Reload', 'Keep mine', 'Save']);
     });
@@ -892,6 +895,54 @@ describe('editor', () => {
       const answered = await act(() => saved);
       expect(entry()).toMatchObject({ text: 'const a = 3;\n', saving: false, dirty: false, theirs: null, saveError: null });
       expect(answered).toBe('noop');
+    });
+  });
+
+  // The word cut (docs/doperpowers/specs/2026-11-16-word-cut-design.md, M3 task 5)
+  describe('the word cut', () => {
+    // T338: the Save button's tooltip is its chord alone, a tip the keyboard reaches; none when no chord is bound
+    it('Save’s tooltip is the chord alone, shown on focus; no system tooltip', async () => {
+      await open({ [APP]: 'const a = 1;\n' });
+      type('// mine\n');
+      const save = await screen.findByRole('button', { name: 'Save' });
+      const chord = formatChord(effectiveChord('file.save', {})!);
+      expect(save.hasAttribute('title')).toBe(false);
+      act(() => save.focus());
+      expect((await screen.findByRole('tooltip')).textContent).toBe(chord);
+      expect(screen.getByRole('button', { name: 'Save', description: chord })).toBe(save);
+    });
+
+    // T336: the find bar's words as conventional glyphs, each keeping its word as its accessible name and its tooltip
+    it('the find bar draws ↓ ↑ Aa .* ab| with their words as names and tips; all, replace and replace all keep their words', async () => {
+      await open({ [APP]: 'const a = 1;\n' });
+      act(() => void openSearchPanel(view()));
+      await waitFor(() => expect(document.querySelector('.cm-search')).not.toBeNull());
+      const panel = document.querySelector<HTMLElement>('.cm-search')!;
+      const control = (name: string) => panel.querySelector<HTMLElement>(`[name="${name}"]`)!;
+      const tipOf = (element: HTMLElement) => (element.closest('label') ?? element).getAttribute('data-find-tip');
+      for (const [name, glyph, word] of [
+        ['next', '↓', 'Next match'],
+        ['prev', '↑', 'Previous match'],
+      ] as const) {
+        expect(control(name).textContent).toBe(glyph);
+        expect(control(name).getAttribute('aria-label')).toBe(word);
+        expect(tipOf(control(name))).toBe(word);
+      }
+      for (const [name, glyph, word] of [
+        ['case', 'Aa', 'Match case'],
+        ['re', '.*', 'Regular expression'],
+        ['word', 'ab|', 'By word'],
+      ] as const) {
+        const box = control(name);
+        expect(box.closest('label')!.textContent).toBe(glyph);
+        expect(box.getAttribute('aria-label')).toBe(word);
+        expect(tipOf(box)).toBe(word);
+        expect(screen.getByRole('checkbox', { name: word })).toBe(box);
+      }
+      expect(control('select').textContent).toBe('all');
+      expect(panel.querySelector('button[name="replace"]')!.textContent).toBe('replace'); // the field shares its name
+      expect(control('replaceAll').textContent).toBe('replace all');
+      expect(panel.querySelectorAll('[title]')).toHaveLength(0);
     });
   });
 });

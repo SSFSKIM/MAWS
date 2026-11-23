@@ -55,36 +55,36 @@ const groups = (list: ReturnType<typeof commitList>) => list.sections.map((secti
 
 describe('the commit list’s control (frames’ S1, S2)', () => {
   it('draws eight rows and no control for a branch of eight commits', () => {
-    const list = commitList(branchOf(8, 2), 'feature/x', false);
+    const list = commitList(branchOf(8, 2), false);
     expect(shown(list)).toBe(8);
     expect(list.control).toEqual({ kind: 'none' });
   });
 
   it('offers "Show all 50 commits" for a branch of fifty, and lists all fifty once pressed, "Show fewer" after the last', () => {
-    const folded = commitList(branchOf(50, 2), 'feature/x', false);
+    const folded = commitList(branchOf(50, 2), false);
     expect(shown(folded)).toBe(8);
     expect(folded.control).toEqual({ kind: 'show-all', total: 50 });
-    const whole = commitList(branchOf(50, 2), 'feature/x', true);
+    const whole = commitList(branchOf(50, 2), true);
     expect(shown(whole)).toBe(50);
     expect(whole.control).toEqual({ kind: 'fewer', older: 0 });
   });
 
   it('never says "all" for a branch of sixty: "Show 50 of 60 commits", then "10 older commits not shown" before "Show fewer"', () => {
-    const folded = commitList(branchOf(60, 55), 'feature/x', false);
+    const folded = commitList(branchOf(60, 55), false);
     expect(folded.control).toEqual({ kind: 'show-some', shown: 50, total: 60 });
-    const whole = commitList(branchOf(60, 55), 'feature/x', true);
+    const whole = commitList(branchOf(60, 55), true);
     expect(shown(whole)).toBe(50);
     expect(whole.control).toEqual({ kind: 'fewer', older: 10 });
   });
 
   it('counts one older commit for a branch of fifty-one', () => {
-    expect(commitList(branchOf(51, 1), 'feature/x', true).control).toEqual({ kind: 'fewer', older: 1 });
+    expect(commitList(branchOf(51, 1), true).control).toEqual({ kind: 'fewer', older: 1 });
   });
 });
 
 describe('the commit list’s groups and heading (S1, S4; frames’ S8)', () => {
   it('groups the rows under "Not pushed" and "Pushed to <upstream>", each count the whole range’s', () => {
-    const list = commitList(branchOf(4, 2), 'feature/x', false);
+    const list = commitList(branchOf(4, 2), false);
     expect(list.heading).toEqual({ kind: 'since', count: 4, base: 'origin/main', behind: 0 });
     expect(list.review).toBe(true);
     expect(groups(list)).toEqual([
@@ -95,7 +95,7 @@ describe('the commit list’s groups and heading (S1, S4; frames’ S8)', () => 
   });
 
   it('keeps a group’s count true when its rows are cut, and draws a group whose rows fall below the cut', () => {
-    const list = commitList(branchOf(60, 55), 'feature/x', false);
+    const list = commitList(branchOf(60, 55), false);
     expect(groups(list)).toEqual([
       ['not-pushed', 55, 8],
       ['pushed', 5, 0],
@@ -103,35 +103,31 @@ describe('the commit list’s groups and heading (S1, S4; frames’ S8)', () => 
   });
 
   it('draws one group when the other is empty, and no group with no upstream but "Not pushed"', () => {
-    expect(groups(commitList(branchOf(5, 0), 'feature/x', false))).toEqual([['pushed', 5, 5]]);
+    expect(groups(commitList(branchOf(5, 0), false))).toEqual([['pushed', 5, 5]]);
     const unpublished = branchOf(3, 3, { upstream: null, counts: { all: 3, notPushed: 3, pushed: 0 } });
-    expect(groups(commitList(unpublished, 'feature/x', false))).toEqual([['not-pushed', 3, 3]]);
+    expect(groups(commitList(unpublished, false))).toEqual([['not-pushed', 3, 3]]);
   });
 
   it('lists the rows with no groups when git cannot resolve the upstream', () => {
     const gone = branchOf(3, 0, { commits: [commit(1, null), commit(2, null), commit(3, null)], counts: { all: 3, notPushed: null, pushed: null } });
-    expect(groups(commitList(gone, 'feature/x', false))).toEqual([null]);
+    expect(groups(commitList(gone, false))).toEqual([null]);
   });
 
-  it('with no base, reads "latest on <branch>", lists eight rows of HEAD with no "Review ›", and groups only where an upstream exists, with no count', () => {
+  it('with no base, reads "latest" (the word cut, N62), lists eight rows of HEAD with no "Review ›", and groups only where an upstream exists, with no count', () => {
     const rows = Array.from({ length: 12 }, (_, i) => commit(i + 1, true));
-    const tracked = commitList({ base: null, upstream: 'origin/feature/x', commits: rows, counts: null, behind: null }, 'feature/x', false);
-    expect(tracked.heading).toEqual({ kind: 'latest', branch: 'feature/x' });
+    const tracked = commitList({ base: null, upstream: 'origin/feature/x', commits: rows, counts: null, behind: null }, false);
+    expect(tracked.heading).toEqual({ kind: 'latest' });
     expect(tracked.review).toBe(false);
     expect(tracked.control).toEqual({ kind: 'none' });
     expect(groups(tracked)).toEqual([['pushed', null, 8]]);
-    const local = commitList({ base: null, upstream: null, commits: rows.map((row) => ({ ...row, pushed: false })), counts: null, behind: null }, 'main', false);
+    const local = commitList({ base: null, upstream: null, commits: rows.map((row) => ({ ...row, pushed: false })), counts: null, behind: null }, false);
     expect(groups(local)).toEqual([null]);
     expect(shown(local)).toBe(8);
   });
 
-  it('with no base on a detached HEAD, reads "latest" with no name', () => {
-    const list = commitList({ base: null, upstream: null, commits: [commit(1, false)], counts: null, behind: null }, null, false);
-    expect(list.heading).toEqual({ kind: 'latest', branch: null });
-  });
 
   it('carries how far behind the base the branch is', () => {
-    expect(commitList(branchOf(5, 1, { behind: 3 }), 'feature/x', false).heading).toEqual({ kind: 'since', count: 5, base: 'origin/main', behind: 3 });
+    expect(commitList(branchOf(5, 1, { behind: 3 }), false).heading).toEqual({ kind: 'since', count: 5, base: 'origin/main', behind: 3 });
   });
 });
 
@@ -156,6 +152,23 @@ describe('the Commits part’s state over the branch read (frames’ S9)', () =>
     expect(commitsState(true, undefined, false)).toEqual({ kind: 'outstanding' });
     expect(commitsState(true, { answer: null, failure: null }, false)).toEqual({ kind: 'outstanding' });
     expect(commitsState(null, undefined, false)).toEqual({ kind: 'outstanding' });
+  });
+
+  // The word cut (N63): the spinner stands for a wait that can end; with nothing known and the machine offline no read is
+  // asked, so the part says offline, with no refresh (heard again, the read is asked by itself), and keeps an earlier answer
+  it('is offline, with no refresh, while whether the machine serves the reads is not known and it is offline', () => {
+    expect(commitsState(null, undefined, true)).toEqual({ kind: 'failed', failure: { kind: 'offline' }, refresh: false });
+    expect(commitsState(null, { answer: null, failure: null }, true)).toEqual({ kind: 'failed', failure: { kind: 'offline' }, refresh: false });
+    expect(commitsState(null, { answer, failure: null }, true)).toEqual({ kind: 'ready', answer });
+  });
+
+  // The word cut's M3 panel (scalpel-3#2): up over a profile's socket, which lists no capabilities, nothing is asked and
+  // nothing will tell, so nothing waits; an earlier answer stays
+  it('is unasked, not outstanding, while whether the machine serves the reads is not known and it is up over a socket', () => {
+    expect(commitsState(null, undefined, false, true)).toEqual({ kind: 'unasked' });
+    expect(commitsState(null, { answer: null, failure: null }, false, true)).toEqual({ kind: 'unasked' });
+    expect(commitsState(null, { answer, failure: null }, false, true)).toEqual({ kind: 'ready', answer });
+    expect(commitsState(true, undefined, false, true)).toEqual({ kind: 'outstanding' });
   });
 
   it('is older, with no refresh, for a machine that lists its capabilities without the reads, an unknown command and an endpoint that does not offer them', () => {
@@ -210,9 +223,8 @@ describe('the pull request’s state line and checks (S5, S6; frames’ S11)', (
     expect(of('QUEUED')).toEqual({ kind: 'unknown', value: 'QUEUED' });
   });
 
-  it('is the state, the base, the review decision and, while open, the merge words, phrase by phrase', () => {
+  it('is the state, the base, the review decision and, while open, the merge words, phrase by phrase; an open pull request’s state unsaid (the word cut, N72)', () => {
     expect(stateLine(prOf({ reviewDecision: 'CHANGES_REQUESTED', mergeStateStatus: 'DIRTY' }))).toEqual([
-      { words: 'Open', tone: 'fg' },
       { words: 'into main', tone: 'fg' },
       { words: 'Changes requested', tone: 'fg' },
       { words: 'Conflicts with main', tone: 'danger' },
@@ -223,12 +235,13 @@ describe('the pull request’s state line and checks (S5, S6; frames’ S11)', (
       { words: 'Approved', tone: 'fg' },
     ]);
     expect(stateLine(prOf({ isDraft: true }))[0]).toEqual({ words: 'Draft', tone: 'fg' });
+    expect(stateLine(prOf({ state: 'CLOSED' }))[0]).toEqual({ words: 'Closed', tone: 'fg' });
   });
 
-  it('counts the checks in the card’s words, lists failed, cancelled and pending rows in that order, and folds the passed and skipped in the answer’s order', () => {
+  it('counts the listed checks in the card’s words (the word cut, N75: the passed and skipped are the folded line’s), lists failed, cancelled and pending rows in that order, and folds the passed and skipped in the answer’s order', () => {
     const items = [check('build', 'pass'), check('integration', 'pending'), check('docs', 'skipping', null), check('e2e', 'cancel'), check('unit tests', 'fail'), check('lint', 'pass'), check('types', 'pass')];
     const checks = checksOf(prOf({ checks: { summary: 'fail', items } }))!;
-    expect(checks.counts).toBe('3 passed · 1 failed · 1 cancelled · 1 pending · 1 skipped');
+    expect(checks.counts).toBe('1 failed · 1 cancelled · 1 pending');
     expect(checks.attention.map((c) => [c.name, c.bucket])).toEqual([
       ['unit tests', 'fail'],
       ['e2e', 'cancel'],
@@ -257,7 +270,7 @@ describe('the pull request’s state line and checks (S5, S6; frames’ S11)', (
   it('draws both lines when one check failed beside the passed', () => {
     const checks = checksOf(prOf({ checks: { summary: 'fail', items: [check('build', 'pass'), check('unit tests', 'fail'), check('lint', 'pass')] } }))!;
     expect(checks.countsLine).toBe(true);
-    expect(checks.counts).toBe('2 passed · 1 failed');
+    expect(checks.counts).toBe('1 failed');
     expect(checks.attention.map((c) => c.name)).toEqual(['unit tests']);
     expect(checks.foldWords).toBe('2 passed');
   });

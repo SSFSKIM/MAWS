@@ -119,9 +119,11 @@ function formOf(route: ReturnType<typeof useRoute>, state: { wantsMain: boolean;
     ready: route.ready,
     // Decision Log 52 (2): never more comments than a message carries, which both destinations would refuse
     canSend: (to: CommentDestination) => state.withText > 0 && state.withText <= MESSAGE_COMMENTS_MAX && !busy && refusalOf(to) === null,
-    // P2-A: a send that starts its session (a side thread, or main on a session that is not running) reads Starting…;
-    // UX wave U5a: a pass of several comments with text reads how many go
-    submitLabel: busy ? (state.flightTo === 'thread' || starts ? COPY.starting : COPY.sending) : state.withText > 1 ? COPY.sendMany(state.withText) : COPY.send,
+    // UX wave U5a: a pass of several comments with text reads how many go; the word cut (P432): the words stay while it
+    // goes, and `submitWait` names the quiet spinner beside them (P2-A: Starting… for a send that starts its session, a
+    // side thread or main on a session that is not running), null while nothing is on its way
+    submitLabel: state.withText > 1 ? COPY.sendMany(state.withText) : COPY.send,
+    submitWait: busy ? (state.flightTo === 'thread' || starts ? COPY.starting : COPY.sending) : null,
   };
 }
 // UX wave U5a end

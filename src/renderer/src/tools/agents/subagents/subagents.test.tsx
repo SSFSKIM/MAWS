@@ -178,6 +178,8 @@ const treeOf = (name: Section) =>
   );
 const expandDone = () => fireEvent.click(within(section('done')!).getByRole('button', { name: /^Done \d+/ })); // Done is folded by default
 const row = (id: string) => document.querySelector<HTMLElement>(`[data-agent-row="${id}"]`)!;
+// what assistive technology hears after a control's name: the text of the elements its `aria-describedby` names
+const descriptionOf = (element: Element) => (element.getAttribute('aria-describedby') ?? '').split(' ').map((id) => document.getElementById(id)?.textContent ?? '').join(' ').trim();
 const openRow = (id: string) => fireEvent.click(row(id).querySelector<HTMLElement>(':scope > [data-part="open"]')!);
 // The UX wave's U8b (M7 decision 4): a row's disclosure, `(+N)` and its arrow, a control of its own.
 const disclosure = (id: string) => row(id).querySelector<HTMLButtonElement>(':scope > [data-part="under"]');
@@ -215,7 +217,7 @@ afterEach(() => {
 
 describe('subagents lists', () => {
   // The UX wave's U8b (M7; Interfaces §F): Running N, Done N folded, On disk N folded.
-  it('heads Running N, eight rows shown; Done folded by default, ten shown once opened; Show N more', async () => {
+  it('heads Running N, eight rows shown; Done folded by default, ten shown once opened; N more (the word cut, T174), no footer (T178)', async () => {
     const running = Array.from({ length: 10 }, (_, i) => started(`r${i}`, i + 1));
     const ended = Array.from({ length: 12 }, (_, i) => [started(`d${i}`, 20 + 2 * i), finished(`d${i}`, 21 + 2 * i, {}, at(100 + i))]).flat();
     await mount({ events: [...running, ...ended] });
@@ -228,11 +230,11 @@ describe('subagents lists', () => {
     expandDone();
     expect(rowsOf('done')).toHaveLength(10);
     expect(rowsOf('done')[0].id).toBe('d11'); // newest end first
-    fireEvent.click(within(section('running')!).getByRole('button', { name: 'Show 2 more' }));
+    fireEvent.click(within(section('running')!).getByRole('button', { name: '2 more' }));
     expect(rowsOf('running')).toHaveLength(10);
-    fireEvent.click(within(section('done')!).getByRole('button', { name: 'Show 2 more' }));
+    fireEvent.click(within(section('done')!).getByRole('button', { name: '2 more' }));
     expect(rowsOf('done')).toHaveLength(12);
-    expect(screen.getByText('Live activity · includes nested agents')).toBeTruthy();
+    expect(screen.queryByText(/Live activity/)).toBeNull();
   });
 
   it('lists first-level agents only; (+1) opens the child beneath its parent, the arrow turned and the count gone, and a second press hides it', async () => {
@@ -253,7 +255,7 @@ describe('subagents lists', () => {
     expect(treeOf('running')).toEqual(['p ▾', '  [Done · 1]']);
     fireEvent.click(within(section('running')!).getByRole('button', { name: 'Done · 1 under Agent p' }));
     expect(treeOf('running')).toEqual(['p ▾', '  [Done · 1 open]', '  c']);
-    expect(rowsOf('running')[1]).toMatchObject({ id: 'c', depth: 1, line: expect.stringMatching(/^finished · /), elapsed: '' });
+    expect(rowsOf('running')[1]).toMatchObject({ id: 'c', depth: 1, line: expect.not.stringMatching(/finished/), elapsed: '' });
     expect(handle.snapshot().expandedFolds).toEqual(new Set(['p']));
     // both finished: Done lists the first level, the child reached by opening its parent
     push([finished('p', 5, {}, at(30))]);
@@ -301,21 +303,21 @@ describe('subagents lists', () => {
     expect(rowsOf('running').map((r) => [r.id, r.elapsed, r.line])).toEqual([
       ['p', '', 'finished'],
       ['c', '1m 00s', 'Working'],
-      ['d', '', `finished · ${REL.now}`],
+      ['d', '', REL.now], // the word cut (T162): a finished agent's line is its age
     ]);
     expect(section('done')).toBeNull();
   });
 
   // Item 359 (M7 decision 5): a task the agent started keeps it under Running, said in words; the heading counts
   // agents only.
-  it('keeps an ended agent under Running by its shell: finished · 1 background task running, the heading with no number, until the shell ends', async () => {
+  it('keeps an ended agent under Running by its shell: finished · 1 task running, the heading with no number, until the shell ends', async () => {
     await mount({ events: [started('p', 1), shellOf('s1', 'p', 2), finished('p', 3, {}, at(30))] });
     expect(heading('running')).toBe('Running'); // no agent runs: no number, never "Running 0"
-    expect(rowsOf('running')).toEqual([expect.objectContaining({ id: 'p', line: 'finished · 1 background task running', elapsed: '', under: null })]);
+    expect(rowsOf('running')).toEqual([expect.objectContaining({ id: 'p', line: 'finished · 1 task running', elapsed: '', under: null })]);
     expect(row('p').querySelector('[data-part="tasks"]')?.className).toContain('shrink-0'); // the words about its tasks are never the part cut
     expect(row('p').querySelector('[data-part="state"]')?.className).not.toContain('truncate');
     push([shellOf('s2', 'p', 4)]);
-    expect(rowsOf('running')[0].line).toBe('finished · 2 background tasks running');
+    expect(rowsOf('running')[0].line).toBe('finished · 2 tasks running') /* the word cut (T169) */;
     // two agents run beside it: the heading counts them, the card's number
     push([started('x', 5), started('y', 6)]);
     expect(heading('running')).toBe('Running 2');
@@ -323,7 +325,7 @@ describe('subagents lists', () => {
     // a nested agent runs under it as well: the same words beside (+1)
     push([dispatch('p', 'tu-n', 7), started('n', 8)]);
     expect(treeOf('running')[0]).toBe('p (+1)▸');
-    expect(rowsOf('running')[0].line).toBe('finished · 2 background tasks running');
+    expect(rowsOf('running')[0].line).toBe('finished · 2 tasks running') /* the word cut (T169) */;
     push([finished('n', 9, {}, at(35)), shellEnds('s1', 10), shellEnds('s2', 11)]);
     expect(rowsOf('running').map((r) => r.id)).toEqual(['x', 'y']);
     expect(heading('done')).toBe('Done 1');
@@ -336,9 +338,9 @@ describe('subagents lists', () => {
     expect(rowsOf('running')[0].line).toBe('Working');
   });
 
-  it('an ended agent kept under Running reads finished with errors in the danger colour, or stopped', async () => {
+  it('an ended agent kept under Running reads failed in the danger colour, or stopped', async () => {
     await mount({ events: [started('bad', 1), shellOf('s1', 'bad', 2), finished('bad', 3, { status: 'failed' }), started('halt', 4), shellOf('s2', 'halt', 5), finished('halt', 6, { status: 'stopped' })] });
-    expect(rowsOf('running').map((r) => r.line)).toEqual(['finished with errors · 1 background task running', 'stopped · 1 background task running']);
+    expect(rowsOf('running').map((r) => r.line)).toEqual(['failed · 1 task running', 'stopped · 1 task running'] /* the word cut (T163, T169) */);
     expect(row('bad').querySelector('[data-part="state"]')?.className).toContain('text-danger');
     expect(row('bad').querySelector('[data-part="tasks"]')?.className ?? '').not.toContain('text-danger');
     expect(row('halt').querySelector('[data-part="state"]')?.className).toContain('text-fg-muted');
@@ -360,18 +362,18 @@ describe('subagents lists', () => {
     expect(rowsOf('done').map((r) => r.id)).toEqual(['ok']);
   });
 
-  it('folds On disk over the nested-agents sidecars of a disk-only session, with status unavailable and the header line', async () => {
+  it('folds Earlier over the nested-agents sidecars of a disk-only session, its rows with no second line, and the header line', async () => {
     await mount({ status: null, sidecars: sidecarsOf('pass3/nested-agents-sidecars') });
-    expect(heading('disk')).toBe('On disk 2');
+    expect(heading('disk')).toBe('Earlier 2');
     expect(rowsOf('disk')).toEqual([]);
-    fireEvent.click(within(section('disk')!).getByRole('button', { name: 'On disk 2' }));
+    fireEvent.click(within(section('disk')!).getByRole('button', { name: 'Earlier 2' }));
     expect(rowsOf('disk').map((r) => [r.title, r.depth, r.line, r.under])).toEqual([
-      ['Outer agent dispatching inner', 0, 'status unavailable', null],
-      ['Inner reads one.txt', 1, 'status unavailable', null],
+      ['Outer agent dispatching inner', 0, undefined, null], // the word cut (T167): a missing value is a blank
+      ['Inner reads one.txt', 1, undefined, null],
     ]);
     expect(screen.getByText('Status is known only while the session runs here')).toBeTruthy();
     expect(section('running')).toBeNull();
-    expect(screen.queryByText('Live activity · includes nested agents')).toBeNull();
+    expect(screen.queryByText(/Live activity/)).toBeNull();
   });
 
   it('marks a child whose parent is known only on disk as an orphan root, its tooltip naming the parent (Decision Log 19)', async () => {
@@ -379,7 +381,7 @@ describe('subagents lists', () => {
     await mount({ events: [dispatch(outer.agentId, 'tu-c', 1), started('c', 2)], sidecars: [outer] });
     expect(rowsOf('running')).toEqual([expect.objectContaining({ id: 'c', depth: 0, nested: 'Child of Outer agent dispatching inner' })]);
     expect(row('c').querySelector('[data-part="nested"]')?.textContent).toBe('· nested');
-    fireEvent.click(within(section('disk')!).getByRole('button', { name: 'On disk 1' }));
+    fireEvent.click(within(section('disk')!).getByRole('button', { name: 'Earlier 1' }));
     expect(rowsOf('disk')).toEqual([expect.objectContaining({ id: outer.agentId, depth: 0, nested: null })]);
   });
 
@@ -390,7 +392,7 @@ describe('subagents lists', () => {
 
   // E7 (Design §5; Decision Log 7, 24): a hand-built roster, for what the one recorded team (below) does not hold: a
   // teammate no agent matches, drawn as a roster row.
-  it('groups the running teammates the newest listing names under Team · led by this session, a teammate no agent matches as a roster row, in one labelled group', async () => {
+  it('groups the running teammates the newest listing names under Team, a teammate no agent matches as a roster row, in one labelled group', async () => {
     vi.useFakeTimers({ toFake: ['Date'] });
     const b = builder();
     b.turn('u1');
@@ -405,19 +407,20 @@ describe('subagents lists', () => {
     const [one] = sidecarsOf('subagent-sidecars');
     await mount({ events: [started('solo', 1), started(one.agentId, 2)], sidecars: [{ ...one, meta: { ...one.meta!, name: 'researcher' } }] });
     // E11 W-D (tracker row E7 "teammate joined extra frozen"): the listing's joined age, frozen at its time, is dropped
-    expect(treeOf('running')).toEqual(['Team · led by this session', `  ${one.agentId}`, `  testergeneral-purpose · idle · listed ${REL.agoNarrow(2, 'minute')}`, 'solo']);
+    expect(treeOf('running')).toEqual(['Team', `  ${one.agentId}`, `  testergeneral-purpose · idle · ${REL.agoNarrow(2, 'minute')}`, 'solo']); // the word cut (T175, T176)
     expect(heading('running')).toBe('Running 2');
-    const group = within(section('running')!).getByRole('group', { name: 'Team · led by this session' });
+    const group = within(section('running')!).getByRole('group', { name: 'Team' });
     expect(Array.from(group.querySelectorAll<HTMLElement>('[data-agent-row], [data-roster]')).map((el) => el.dataset.agentRow ?? el.dataset.roster)).toEqual([one.agentId, 'tester']);
     expect(row('solo').closest('[role="group"]')).toBeNull();
     const roster = document.querySelector<HTMLElement>('[data-roster="tester"]')!;
     expect(roster.tagName).not.toBe('BUTTON'); // no transcript to open
     expect(roster.querySelector('[data-part="title"]')?.textContent).toBe('tester');
+    expect(roster.title).toBe('No transcript here'); // the word cut (T177)
   });
 
   // E11 S2(d): the listing of the team an interactive terminal formed under the teams gate on 2.1.293 (pass3/e7-team-terminal),
   // its teammate scout matched by the sidecar's name, as the recording's sidecar meta names it.
-  it('groups the recorded team’s running teammate under Team · led by this session', async () => {
+  it('groups the recorded team’s running teammate under Team', async () => {
     const b = builder();
     b.turn('u1');
     b.toolUse('l1', 'ListAgents', {});
@@ -425,7 +428,7 @@ describe('subagents lists', () => {
     await act(() => useTranscriptStore.getState().attach(A, { subscribe: () => () => {}, snapshot: () => Promise.resolve(b.events) }));
     const [one] = sidecarsOf('subagent-sidecars');
     await mount({ events: [started('solo', 1), started(one.agentId, 2)], sidecars: [{ ...one, meta: { ...one.meta!, name: 'scout' } }] });
-    expect(treeOf('running')).toEqual(['Team · led by this session', `  ${one.agentId}`, 'solo']);
+    expect(treeOf('running')).toEqual(['Team', `  ${one.agentId}`, 'solo']);
     expect(heading('running')).toBe('Running 2');
   });
 
@@ -448,38 +451,79 @@ describe('subagents lists', () => {
     const runs = workflowRunsOf();
     await mount({ status: null, sidecars: sidecarsOf('pass2/workflow-disk', runs[0].runId), runs });
     expect(section('running') ?? section('done') ?? section('disk')).toBeNull();
-    expect(screen.getByText('No subagents yet')).toBeTruthy();
+    expect(screen.getByText('No agents yet')).toBeTruthy(); // the word cut (N158): the tool is Agents
     const nodes = [...useTaskGraph.getState().entries.get(A)!.graph.tasks.values()].filter((n) => n.kind === 'agent');
     expect(nodes.map((n) => n.agent?.runId)).toEqual([runs[0].runId, runs[0].runId]);
   });
 
-  it('reads Approval needed in the warning colour for an agent with an open request of its own', async () => {
+  // The word cut (T166): the waiting mark beside the glyph, the row's own line kept, Approval needed on pointing and focus.
+  it('marks an agent with an open request of its own beside its glyph, keeps its line, and says Approval needed on pointing', async () => {
     await mount({ events: [started('a1', 1), started('a2', 2)] });
     act(() =>
       useAttention.getState().applySnapshot([item(A, 'permission', T, { request: { requestId: 'r1' as RequestId, toolUseId: null, taskId: null, agentId: 'a1' as AgentId } })], TEST_MACHINE),
     );
-    expect(rowsOf('running').map((r) => [r.id, r.waiting, r.line])).toEqual([['a1', true, 'Approval needed'], ['a2', false, 'Working']]);
-    expect(row('a1').querySelector('[data-part="state"]')?.className).toContain('text-warning');
+    expect(rowsOf('running').map((r) => [r.id, r.waiting, r.line])).toEqual([['a1', true, 'Working'], ['a2', false, 'Working']]);
+    expect(row('a1').querySelector('[data-part="state"]')?.className).not.toContain('text-warning');
+    const mark = row('a1').querySelector<HTMLElement>('[data-part="waiting"]')!;
+    expect(mark.className).toContain('bg-warning');
+    expect(mark.getAttribute('aria-hidden')).toBe('true');
+    expect(row('a2').querySelector('[data-part="waiting"]')).toBeNull();
+    const open = row('a1').querySelector<HTMLElement>(':scope > [data-part="open"]')!;
+    expect(descriptionOf(open)).toBe('Approval needed');
+    expect(row('a2').querySelector<HTMLElement>(':scope > [data-part="open"]')!.getAttribute('aria-describedby')).toBeNull();
+    act(() => open.focus());
+    expect((await screen.findByRole('tooltip')).textContent).toContain('Approval needed');
   });
 
-  it('ticks elapsed once a second, and reads elapsed unavailable for an agent known only from the snapshot', async () => {
+  // Pair review of M3's pictures (T166): the mark takes no room in the row's flow, so a waiting row's title and line
+  // start where every sibling's do. It is drawn out of flow (absolute) within the glyph's own slot, beside the glyph.
+  it('draws the waiting mark within the glyph’s slot, out of the row’s flow, so the title does not move', async () => {
+    await mount({ events: [started('a1', 1), started('a2', 2)] });
+    act(() =>
+      useAttention.getState().applySnapshot([item(A, 'permission', T, { request: { requestId: 'r1' as RequestId, toolUseId: null, taskId: null, agentId: 'a1' as AgentId } })], TEST_MACHINE),
+    );
+    // what precedes the text in the row's flow: the same parts, in the same order, waiting or not
+    const flow = (id: string) => Array.from(row(id).querySelector('[data-part="title"]')!.closest('[id$="-text"]')!.parentElement!.children).map((c) => c.getAttribute('data-part') ?? c.id.replace(/^.*-/, ''));
+    expect(flow('a1')).toEqual(flow('a2'));
+    const mark = row('a1').querySelector<HTMLElement>('[data-part="waiting"]')!;
+    const slot = mark.parentElement!;
+    expect(slot.dataset.part).toBe('glyph');
+    expect(slot.className.split(' ')).toContain('relative');
+    expect(slot.className.split(' ')).toContain('shrink-0');
+    expect(mark.className.split(' ')).toContain('absolute');
+  });
+
+  // Fix round 1 of the word cut (T166): pointing anywhere on the row opens it, its disclosure included, which is the
+  // row's own control and not the tip's trigger; the keyboard still reaches it on the row's open button alone.
+  it('says Approval needed on pointing at the row’s disclosure as on the row, the disclosure staying its own control', async () => {
+    await mount({ events: [started('p', 1), dispatch('p', 'tu-c', 2), started('c', 3)] });
+    act(() =>
+      useAttention.getState().applySnapshot([item(A, 'permission', T, { request: { requestId: 'r1' as RequestId, toolUseId: null, taskId: null, agentId: 'p' as AgentId } })], TEST_MACHINE),
+    );
+    const under = disclosure('p')!;
+    expect(under.getAttribute('aria-describedby')).toBeNull();
+    fireEvent.pointerOver(under);
+    expect((await screen.findByRole('tooltip')).textContent).toContain('Approval needed');
+  });
+
+  it('ticks elapsed once a second, and shows no elapsed for an agent known only from the snapshot', async () => {
     vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval', 'Date'] });
     vi.setSystemTime(Date.parse(at(5)));
     const snapshotBorn = { taskId: 'snap' as TaskId, taskType: 'local_agent', description: 'From the snapshot', ambient: false };
     await mount({ status: live({ backgroundTasks: [snapshotBorn] }), events: [started('a1', 1)] });
-    expect(rowsOf('running').map((r) => [r.id, r.elapsed])).toEqual([['snap', 'elapsed unavailable'], ['a1', '5s']]);
+    expect(rowsOf('running').map((r) => [r.id, r.elapsed])).toEqual([['snap', ''], ['a1', '5s']]); // the word cut (T168)
     act(() => vi.advanceTimersByTime(3000));
     expect(rowsOf('running')[1].elapsed).toBe('8s');
   });
 
-  it('a disk-only session: On disk with status unavailable, a stoppedByUser sidecar under Done as stopped, never Running', async () => {
+  it('a disk-only session: Earlier with no second line, a stoppedByUser sidecar under Done as stopped, never Running', async () => {
     const [one, two] = sidecarsOf('subagent-sidecars');
     await mount({ status: null, sidecars: [one, { ...two, meta: { ...two.meta!, stoppedByUser: true } }] });
     expect(section('running')).toBeNull();
     expandDone();
     expect(rowsOf('done')).toEqual([expect.objectContaining({ id: two.agentId, line: 'stopped' })]);
-    fireEvent.click(within(section('disk')!).getByRole('button', { name: 'On disk 1' }));
-    expect(rowsOf('disk')).toEqual([expect.objectContaining({ id: one.agentId, line: 'status unavailable' })]);
+    fireEvent.click(within(section('disk')!).getByRole('button', { name: 'Earlier 1' }));
+    expect(rowsOf('disk')).toEqual([expect.objectContaining({ id: one.agentId, line: undefined })]);
   });
 
   it('says why the sidecars are missing', async () => {
@@ -490,10 +534,10 @@ describe('subagents lists', () => {
       await fake.fail('subagents', 'fs refused');
       await fake.answer('workflows', []);
     });
-    expect(screen.getByText('Sidecars unavailable: fs refused')).toBeTruthy();
+    expect(screen.getByText("Couldn't read agents: fs refused")).toBeTruthy(); // the word cut (T160)
   });
 
-  it('shows the Done rows’ outcome: finished, with errors, stopped and ended with the session', async () => {
+  it('shows the Done rows’ outcome: its age, failed, stopped and session ended', async () => {
     vi.useFakeTimers({ toFake: ['Date'] });
     vi.setSystemTime(Date.parse(at(10 + 180)));
     await mount({
@@ -506,7 +550,7 @@ describe('subagents lists', () => {
     });
     expandDone();
     const lines = Object.fromEntries(rowsOf('done').map((r) => [r.id, r.line]));
-    expect(lines).toEqual({ ok: `finished · ${M3} · Read both files`, bad: `finished with errors · ${M3}`, halt: `stopped · ${M3}`, gone: 'ended with the session' });
+    expect(lines).toEqual({ ok: `${M3} · Read both files`, bad: `failed · ${M3}`, halt: `stopped · ${M3}`, gone: 'session ended' }); // the word cut (T162, T163, T165)
     expect(row('bad').querySelector('[data-part="state"]')?.className).toContain('text-danger');
   });
 
@@ -523,7 +567,7 @@ describe('subagents lists', () => {
     });
     expandDone();
     const lines = Object.fromEntries(rowsOf('done').map((r) => [r.id, r.line]));
-    expect(lines).toEqual({ hb: `finished · ${M3} · Found 3 files.`, wait: `finished · ${M3}` });
+    expect(lines).toEqual({ hb: `${M3} · Found 3 files.`, wait: M3 });
   });
 
   it('clicking a row opens its drill-in', async () => {
@@ -618,7 +662,8 @@ describe('drill-in', () => {
     expect(handle.snapshot().view).toEqual({ kind: 'agent', agentId: 'a1' });
     act(() => subagentsTool.open!(handle, { toolUseId: 'tu-late' as ToolUseId }));
     expect(handle.snapshot().view).toEqual({ kind: 'pending', toolUseId: 'tu-late' });
-    expect(screen.getByText('Waiting for the agent to start')).toBeTruthy();
+    expect(screen.queryByText('Waiting for the agent to start')).toBeNull(); // the word cut (T189): a quiet spinner
+    expect(await screen.findByRole('progressbar', { name: 'Waiting for the agent to start' })).toBeTruthy();
     push([started('late', 2, { toolUseId: 'tu-late' })]);
     expect(handle.snapshot().view).toEqual({ kind: 'agent', agentId: 'late' });
   });
@@ -639,7 +684,7 @@ describe('drill-in', () => {
     fireEvent.scroll(lists);
     openRow('a2');
     expect(document.querySelector('[data-view="lists"]')).toBeNull();
-    fireEvent.click(screen.getByRole('button', { name: '‹ Subagents' }));
+    fireEvent.click(screen.getByRole('button', { name: '‹ Agents' }) /* the word cut (T152) */);
     expect(handle.snapshot().view).toEqual({ kind: 'lists' });
     expect(document.querySelector<HTMLElement>('[data-view="lists"]')!.scrollTop).toBe(120);
   });
@@ -653,7 +698,7 @@ describe('drill-in', () => {
     expect(document.querySelector('[data-part="agent-meta"]')?.textContent).toBe('haiku · 2s · 11.5k tokens');
   });
 
-  it('heads the agent with model · elapsed · tokens, the unavailable words, no effort cell, and Dispatched by', async () => {
+  it('heads the agent with model · elapsed · tokens, only the values it has, no effort cell, and no Dispatched by', async () => {
     installBridge([]);
     vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval', 'Date'] });
     vi.setSystemTime(Date.parse(at(12)));
@@ -667,12 +712,13 @@ describe('drill-in', () => {
     });
     const meta = () => document.querySelector('[data-part="agent-meta"]')?.textContent;
     expect(meta()).toBe('haiku · 12s · 38.1k tokens');
-    expect(document.querySelector('[data-part="dispatched-by"]')?.textContent).toBe(`Dispatched by ${TITLE}`);
+    expect(document.querySelector('[data-part="dispatched-by"]')).toBeNull(); // the word cut (T184)
+    expect(document.body.textContent).not.toContain('Dispatched by');
     expect(meta()).not.toMatch(/high/i);
     act(() => handle.openAgent('snap' as AgentId));
-    expect(meta()).toBe('model unknown · elapsed unavailable · tokens unavailable');
+    expect(meta()).toBe(''); // the word cut (T183, P97): a missing value leaves no words
     setStatus(live({ backgroundTasks: [snapshotBorn], subagentModel: 'claude-haiku-4-5' }));
-    expect(meta()).toBe('claude-haiku-4-5 · elapsed unavailable · tokens unavailable');
+    expect(meta()).toBe('claude-haiku-4-5');
   });
 
   it('Stop agent asks first, then calls stop', async () => {
@@ -703,6 +749,7 @@ describe('drill-in', () => {
           invoked.push([name, input]);
           if (name === 'session.events') return { ok: true, value: { events: [], lastSeq: 0, complete: true } };
           if (name === 'laneA.stopAgent') return { ok: true, value: stopAgent };
+          if (name === 'laneA.tell') return { ok: true, value: { state: 'done', result: null } };
           return { ok: false, error: { code: 'internal', message: `unexpected ${name}` } };
         },
         on: () => () => {},
@@ -725,14 +772,23 @@ describe('drill-in', () => {
 
     it('reads the lists as not live here once a terminal drives the session, whatever engine status was kept', async () => {
       await mount({ events: [started('a1', 1, { description: 'Long survey' })] });
-      expect(screen.getByText('Live activity · includes nested agents')).toBeTruthy();
       expect(screen.queryByText('Status is known only while the session runs here')).toBeNull();
       act(() => {
         useSessions.setState((s) => ({ records: new Map(s.records).set(A, { ...s.records.get(A)!, holder: { kind: 'terminal', pid: 4242 } }) }));
         applyLaneAState(A, laneAState(A));
       });
-      expect(screen.queryByText('Live activity · includes nested agents')).toBeNull();
       expect(screen.getByText('Status is known only while the session runs here')).toBeTruthy();
+    });
+
+    // The word cut (T191, T203): the box's label is for screen readers only, and a told agent's line reads Sent.
+    it('tells the agent through the bridge: its box labelled for screen readers alone, the line after a send reading Sent', async () => {
+      await mountDriven();
+      const box = screen.getByLabelText('Message Long survey') as HTMLTextAreaElement;
+      expect(document.querySelector(`label[for="${box.id}"]`)?.className).toContain('sr-only');
+      fireEvent.change(box, { target: { value: 'Also read the README' } });
+      fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+      await waitFor(() => expect(document.querySelector('[data-part="relay-line"]')?.textContent).toBe('Sent'));
+      expect(invoked.find(([name]) => name === 'laneA.tell')?.[1]).toMatchObject({ agentId: 'a1', text: 'Also read the README' });
     });
 
     it('stops the agent through the bridge, though an exited engine status is kept', async () => {
@@ -846,14 +902,14 @@ describe('a terminal session this Mac drives, its statuses from its watch', () =
 
   it('lists Running, then Done with each agent’s own outcome, in place of On disk; one row moves when its agent ends', async () => {
     await mountTerminal(['ok', 'bad', 'halt', 'gone', 'busy'].map((id) => sidecar(id)));
-    expect(heading('disk')).toBe('On disk 5'); // the sidecars alone
+    expect(heading('disk')).toBe('Earlier 5'); // the sidecars alone
     body('snapshot', [ends('ok', 'completed', 'completed'), ends('bad', 'failed', 'failed'), ends('halt', 'stopped', 'killed'), gone('gone'), runs('busy')]);
     expect(section('disk')).toBeNull();
     expect(heading('running')).toBe('Running 1');
     expect(rowsOf('running').map((r) => [r.id, r.line])).toEqual([['busy', 'Working']]);
     expect(heading('done')).toBe('Done 4 · 1 failed · 1 stopped');
     expandDone();
-    expect(Object.fromEntries(rowsOf('done').map((r) => [r.id, r.line]))).toEqual({ ok: `finished · ${M3}`, bad: `finished with errors · ${M3}`, halt: `stopped · ${M3}`, gone: 'ended with the session' });
+    expect(Object.fromEntries(rowsOf('done').map((r) => [r.id, r.line]))).toEqual({ ok: M3, bad: `failed · ${M3}`, halt: `stopped · ${M3}`, gone: 'session ended' });
     expect(row('bad').querySelector('[data-part="state"]')?.className).toContain('text-danger');
     body('subagents', [ends('ok', 'completed', 'completed'), ends('bad', 'failed', 'failed'), ends('halt', 'stopped', 'killed'), gone('gone'), ends('busy', 'completed', 'completed')]);
     expect(section('running')).toBeNull();
@@ -863,7 +919,7 @@ describe('a terminal session this Mac drives, its statuses from its watch', () =
   // Card C1, the owner's answer (option 2, 2026-11-15): with the terminal still open, an agent known to have ended with
   // no record of how (the bridge holds it as stopped; its starter ended) reads "ended"; once the terminal went, one the
   // rows hold no end for reads "ended with the session". The other outcomes keep their words.
-  it('reads ended for an agent the bridge holds as stopped or whose starter ended, and ended with the session once the terminal went', async () => {
+  it('reads ended for an agent the bridge holds as stopped or whose starter ended, and session ended once the terminal went', async () => {
     await mountTerminal([sidecar('ok'), sidecar('bad'), sidecar('halt'), sidecar('quit'), sidecar('p'), sidecar('orphan', 'p')]);
     const quit = { agentId: 'quit', meta: meta('quit'), status: 'exited', evidence: 'bridge', running: false, outcome: { status: 'running', raw: 'async_launched', at: at(0) }, startedAt: at(0) };
     const orphan = { agentId: 'orphan', meta: meta('orphan', 'p'), status: 'exited', evidence: 'parent', startedAt: at(0) };
@@ -871,10 +927,10 @@ describe('a terminal session this Mac drives, its statuses from its watch', () =
     expandDone();
     toggleUnder('p');
     const lines = () => Object.fromEntries(rowsOf('done').map((r) => [r.id, r.line]));
-    expect(lines()).toEqual({ ok: `finished · ${M3}`, bad: `finished with errors · ${M3}`, halt: `stopped · ${M3}`, quit: 'ended', p: `stopped · ${M3}`, orphan: 'ended' });
+    expect(lines()).toEqual({ ok: M3, bad: `failed · ${M3}`, halt: `stopped · ${M3}`, quit: 'ended', p: `stopped · ${M3}`, orphan: 'ended' });
     expect(row('quit').querySelector('[data-part="state"]')?.className).toContain('text-fg-muted');
     body('subagents', [ends('ok', 'completed', 'completed'), ends('bad', 'failed', 'failed'), ends('halt', 'stopped', 'killed'), { ...gone('quit') }, ends('p', 'stopped', 'killed'), { ...orphan, evidence: 'session' }]);
-    expect(lines()).toMatchObject({ quit: 'ended with the session', orphan: 'ended with the session', ok: `finished · ${M3}` });
+    expect(lines()).toMatchObject({ quit: 'session ended', orphan: 'session ended', ok: M3 });
   });
 
   // Decision Log 17 (a): the drill-in's reason says what the row's word says, from the same rule.
@@ -919,12 +975,11 @@ describe('a terminal session this Mac drives, its statuses from its watch', () =
     expect(screen.getByText(SENTENCE)).toBeTruthy();
     body('subagents', [unknown('a1'), unknown('a2')]);
     expect(screen.getByText(SENTENCE)).toBeTruthy();
-    expect(heading('disk')).toBe('On disk 2');
+    expect(heading('disk')).toBe('Earlier 2');
     body('subagents', [runs('a1'), unknown('a2')]);
     expect(screen.queryByText(SENTENCE)).toBeNull();
     body('subagents', [ends('a1', 'completed', 'completed'), unknown('a2')]);
     expect(screen.queryByText(SENTENCE)).toBeNull();
-    expect(screen.queryByText('Live activity · includes nested agents')).toBeNull(); // the footer stays this app's own
   });
 
   it('offers Stop agent for a running agent of the session and not for one that has ended', async () => {
@@ -955,7 +1010,7 @@ describe('relay composer', () => {
   it.each<[string, Setup, string]>([
     ['an agent known only from disk', { status: null, events: [] }, 'Known only from disk'],
     ['a running agent of a session no longer live here', { status: 'drop', events: [started('a1', 1)] }, 'Relay needs the session running here'],
-    ['a foreground child', { events: [started('a1', 1, { isBackground: false })] }, `${TITLE} is waiting on this agent and reads messages only after it returns`],
+    ['a foreground child', { events: [started('a1', 1, { isBackground: false })] }, `${TITLE} is waiting on this agent`], // the word cut (T195)
     ['a child whose background flag is unknown', { status: live({ backgroundTasks: [{ taskId: 'a1' as TaskId, taskType: 'local_agent', description: 'x', ambient: false }] }), events: [] }, `Not known whether ${TITLE} is waiting on this agent`],
     ['a finished agent', { events: [started('a1', 1), finished('a1', 2)] }, 'This agent has finished'],
     ['a stopped agent', { events: [started('a1', 1), finished('a1', 2, { status: 'stopped' })] }, 'This agent was stopped'],
@@ -983,6 +1038,21 @@ describe('relay composer', () => {
     expect(box().placeholder).toBe('This agent has finished');
   });
 
+  // The word cut (T190, T193): the label above the box is for screen readers only, and Send is the main message box's
+  // round arrow, its word kept as hidden text and as a tooltip the keyboard reaches.
+  it('labels the box for screen readers alone and draws Send as the round arrow, its word hidden text and its tooltip', async () => {
+    await mount({ events: [started('a1', 1)], params: { agentId: 'a1' as AgentId } });
+    expect(document.querySelector(`label[for="${box().id}"]`)?.className).toContain('sr-only');
+    fireEvent.change(box(), { target: { value: 'Also check README' } });
+    const send = sendButton();
+    expect(send.className).toContain('rounded-full');
+    expect(send.className).toContain('bg-accent');
+    expect(send.querySelector('svg')?.getAttribute('aria-hidden')).toBe('true');
+    expect(send.querySelector('.sr-only')?.textContent).toBe('Send');
+    act(() => send.focus());
+    expect((await screen.findByRole('tooltip')).textContent).toContain('Send');
+  });
+
   it('gives a foreground child’s reason its tooltip', async () => {
     await mount({ events: [started('a1', 1, { isBackground: false })], params: { agentId: 'a1' as AgentId } });
     expect(box().title).toBe('A message sent now would resume the finished agent instead of reaching this one');
@@ -991,7 +1061,7 @@ describe('relay composer', () => {
   it('is enabled for a running background child whether the parent is idle or mid-turn, and for a foreground child once backgrounded', async () => {
     const { handle } = await mount({ events: [started('a1', 1), started('fg', 2, { isBackground: false })], params: { agentId: 'a1' as AgentId } });
     expect(box().disabled).toBe(false);
-    expect(box().placeholder).toBe('Message Agent a1…');
+    expect(box().placeholder).toBe(`Message Agent a1 via ${TITLE}…`); // the word cut (T190)
     setStatus(live({ turn: openTurn }));
     expect(box().disabled).toBe(false);
     act(() => subagentsTool.open!(handle, { agentId: 'fg' as AgentId }));
@@ -1000,7 +1070,7 @@ describe('relay composer', () => {
     expect(box().disabled).toBe(false);
   });
 
-  it('sends one next steer, disables the box and walks the line: asked with the turn clause, the long wait, forwarded, resting there, then a receipt clears it', async () => {
+  it('sends one next steer, disables the box and walks the line: asked with its wait alone (no turn clause, no long-wait clause), forwarded, resting there, then a receipt clears it', async () => {
     vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval', 'Date'] });
     vi.setSystemTime(Date.parse(at(0)));
     await mount({ status: live({ turn: openTurn }), events: [started('a1', 1)], params: { agentId: 'a1' as AgentId } });
@@ -1012,16 +1082,16 @@ describe('relay composer', () => {
     await act(() => fake.answer('steer', { messageUuid: 'steer-1' }));
     expect(box().value).toBe('');
     expect(box().placeholder).toBe('Waiting for the last relay');
-    expect(line()).toBe(`Asked ${TITLE} to relay · 0s · ${TITLE} forwards at its next tool boundary or when this turn ends`);
+    expect(line()).toBe(`Asked ${TITLE} to relay · 0s`); // the word cut (T199)
     act(() => vi.advanceTimersByTime(5000));
-    expect(line()).toBe(`Asked ${TITLE} to relay · 5s · ${TITLE} forwards at its next tool boundary or when this turn ends`);
+    expect(line()).toBe(`Asked ${TITLE} to relay · 5s`);
     act(() => vi.advanceTimersByTime(RELAY_LONG_WAIT_MS));
-    expect(line()).toBe(`Asked ${TITLE} to relay · 35s · ${TITLE} is inside a long tool call; it forwards when that call returns or this turn ends`);
+    expect(line()).toBe(`Asked ${TITLE} to relay · 35s`);
     const round = event('assistant.block.complete', { messageUuid: 'm-send', block: { type: 'tool_use', id: 'tu-send', name: 'SendMessage', input: {} } }, { seq: 5 });
     push([round, event('tool.use', { toolUseId: 'tu-send', toolName: 'SendMessage', input: { to: 'a1', message: 'Also check README' } }, { seq: 5, n: 1 })]);
-    expect(line()).toBe(`${TITLE} sent it with SendMessage after 1 parent round · Agent a1 gets it at its next tool round`);
+    expect(line()).toBe('Sent · Agent a1 reads it at its next step'); // the word cut (T200)
     push([event('subagent.progress', { taskId: 'a1', description: 'Reading README.md' }, { seq: 6 })]);
-    expect(line()).toBe(`${TITLE} sent it with SendMessage after 1 parent round · Agent a1 gets it at its next tool round`); // no receipt on 2.1.283 (O3)
+    expect(line()).toBe('Sent · Agent a1 reads it at its next step'); // the word cut (T200) // no receipt on 2.1.283 (O3)
     push([event('user.message', { content: 'Also check README' }, { seq: 7 })].map((e) => ({ ...e, agentId: 'a1' as AgentId })));
     expect(line()).toBeNull();
     expect(box().disabled).toBe(false);
@@ -1034,10 +1104,10 @@ describe('relay composer', () => {
     await act(() => fake.answer('steer', { messageUuid: 'steer-one' }));
     expect(box().placeholder).toBe('Waiting for the last relay');
     push([event('tool.use', { toolUseId: 'tu-send', toolName: 'SendMessage', input: { to: 'a1', message: 'first' } }, { seq: 5 })]);
-    expect(line()).toBe(`${TITLE} sent it with SendMessage after 0 parent rounds · Agent a1 gets it at its next tool round`);
+    expect(line()).toBe('Sent · Agent a1 reads it at its next step');
     expect(box().disabled).toBe(false);
     fireEvent.change(box(), { target: { value: 'second' } });
-    expect(line()).toMatch(/sent it with SendMessage/); // the forwarded line shows until the next send
+    expect(line()).toMatch(/^Sent · /); // the forwarded line shows until the next send
     fireEvent.click(sendButton());
     expect(fake.inputs.steer.map(([, content]) => content)).toEqual([relayText({ agentId: 'a1' as AgentId, name: null }, 'first'), relayText({ agentId: 'a1' as AgentId, name: null }, 'second')]);
     await act(() => fake.answer('steer', { messageUuid: 'steer-two' }));
@@ -1116,13 +1186,13 @@ describe('relay composer', () => {
     expect(box().value).toBe('dropped text');
   });
 
-  it('warns that a relay to an agent that ended first would resume it', async () => {
+  it('says the agent finished before the message reached it', async () => {
     await mount({ events: [started('a1', 1)], params: { agentId: 'a1' as AgentId } });
     fireEvent.change(box(), { target: { value: 'late words' } });
     fireEvent.click(sendButton());
     await act(() => fake.answer('steer', { messageUuid: 'steer-late' }));
     push([finished('a1', 2)]);
-    expect(line()).toBe(`Agent a1 finished before ${TITLE} forwarded it · a SendMessage now would resume it`);
+    expect(line()).toBe('Agent a1 finished before the message reached it'); // the word cut (T201)
   });
 });
 
@@ -1190,9 +1260,9 @@ describe('subagents tool', () => {
     await mount({ events: [started('a1', 1)] });
     push([finished('a1', 2, {}, at(1))]);
     expandDone();
-    expect(rowsOf('done')[0].line).toBe(`finished · ${REL.now}`);
+    expect(rowsOf('done')[0].line).toBe(REL.now);
     act(() => vi.advanceTimersByTime(90_000));
-    expect(rowsOf('done')[0].line).toBe(`finished · ${REL.agoNarrow(1, 'minute')}`);
+    expect(rowsOf('done')[0].line).toBe(REL.agoNarrow(1, 'minute'));
   });
 
   it('a pinned tab passing through the Overview keeps its view and draft', async () => {
@@ -1262,7 +1332,7 @@ describe('subagents summary', () => {
     expect(summary().textContent).toContain('2 on disk');
   });
 
-  it('reads No subagents yet when nothing is known', async () => {
+  it('reads No subagents yet when nothing is known (the summary card’s words, T145, stay)', async () => {
     seedSessions(null);
     showSummary();
     await act(async () => {

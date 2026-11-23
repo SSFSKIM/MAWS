@@ -73,6 +73,7 @@ import { basename, expandTo, firstRoot, roleOf, rootsFor, rowsOf, sameFile, work
 import { FILE_WIDTH_MIN, treeOf, treePlace, TREE_WIDTH_DEFAULT, TREE_WIDTH_MIN, useTreeState } from './tree-state';
 import { useSetup } from '../../../sessions/store'; // E11
 import type { SetupIntent } from '@shared/sessions/intent'; // E11
+import { RefusedMenuItem } from '../../../ui/refused-menu-item'; // the word cut (N29)
 
 export { FILES_TOOL_ID };
 export { FILES_ROW_HEIGHT }; // U6b-3b: kept in `row-metrics.ts`, which the result rows read too
@@ -520,7 +521,9 @@ function SessionTree({ tabId, appSessionId, session, marked, chosen, searching }
 // element that holds the keyboard, as it opens an icon's. Its one row draws no chord: no in-page menu of the app draws
 // one, and the File menu shows ⌘O (K7).
 const MENU = 'z-50 min-w-[min(12rem,calc(var(--files-menu-column,25rem)_-_1rem))] max-w-[min(24rem,calc(var(--files-menu-column,25rem)_-_1rem))] rounded-md border border-border-strong bg-bg-overlay p-1 text-fg shadow-float';
-const MENU_ROW = 'block h-8 cursor-default truncate rounded-sm px-2 text-ui leading-8 outline-none data-highlighted:bg-bg-hover data-disabled:text-fg-faint';
+const MENU_ROW = 'block h-8 cursor-default truncate rounded-sm px-2 text-ui leading-8 outline-none data-highlighted:bg-bg-hover data-disabled:text-fg-faint aria-disabled:text-fg-faint';
+// A greyed row whose reason is its note (the word cut, N29): not cut by its own box, which the note opens under
+const MENU_REFUSED = 'flex h-8 cursor-default items-center rounded-sm px-2 text-ui outline-none data-highlighted:bg-bg-hover aria-disabled:text-fg-faint';
 
 function FilesMenu({ appSessionId, children }: { appSessionId: AppSessionId; children: ReactNode }) {
   const list = useRef<HTMLElement>(null);
@@ -561,9 +564,11 @@ function FilesMenu({ appSessionId, children }: { appSessionId: AppSessionId; chi
     const box = (event.target as Element).getBoundingClientRect();
     event.target.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: box.left, clientY: box.bottom }));
   };
-  // Another machine (U6e's Decision Log 6): the row disabled, its parenthesis in the muted colour, a long name cut with
+  // Another machine (U6e's Decision Log 6): the row greyed, its parenthesis in the muted colour, a long name cut with
   // the whole row as its title. A session that takes the remote route (UX wave U6f, §E; decision 12): the row opens MAWS's
-  // own chooser there, or is disabled with the helper's sentence as its title (the sentence alone, decision 12's words).
+  // own chooser there, or is greyed with the helper's sentence (the sentence alone, decision 12's words). The word cut
+  // (N28, N29; "What the cut builds"): a greyed row keeps the menu's keyboard, drawn aria-disabled, and selecting it does
+  // nothing; the helper's sentence is its description and its row note, no longer a system tooltip.
   const remote = useTakesRemoteRoute(appSessionId);
   const unavailable = useRemoteUnavailable(remote ? appSessionId : null, 'files.chooseOutside');
   const whole = elsewhere === null || remote ? null : OPEN_FILE_COPY.elsewhere(elsewhere);
@@ -583,15 +588,13 @@ function FilesMenu({ appSessionId, children }: { appSessionId: AppSessionId; chi
           style={column && column.width > 0 ? ({ '--files-menu-column': `${column.width}px` } as CSSProperties) : undefined}
         >
           {remote && unavailable !== null ? (
-            <ContextMenu.Item data-open-file="" disabled title={unavailable} aria-description={unavailable} className={MENU_ROW}>
-              {OPEN_FILE_COPY.row}
-            </ContextMenu.Item>
+            <RefusedMenuItem kit={ContextMenu} data-open-file="" label={OPEN_FILE_COPY.row} reason={unavailable} className={MENU_REFUSED} />
           ) : whole === null ? (
             <ContextMenu.Item data-open-file="" className={MENU_ROW} onSelect={() => void openChosenFor(appSessionId)}>
               {OPEN_FILE_COPY.row}
             </ContextMenu.Item>
           ) : (
-            <ContextMenu.Item data-open-file="" disabled title={whole} className={MENU_ROW}>
+            <ContextMenu.Item data-open-file="" aria-disabled title={whole} onSelect={(event) => event.preventDefault()} className={MENU_ROW}>
               {OPEN_FILE_COPY.row}
               <span className="text-fg-muted">{whole.slice(OPEN_FILE_COPY.row.length)}</span>
             </ContextMenu.Item>
@@ -974,8 +977,10 @@ function Row({ row, marks, selected, activate, keepRow, place }: { row: ListedRo
   }
   const directory = row.kind === 'root' || row.entry.kind === 'dir';
   const name = row.kind === 'root' ? row.name : row.entry.name;
-  const secondary =
-    row.kind === 'root' ? row.role : row.entry.kind === 'symlink' ? FILES_COPY.symlink(row.entry.target) : null;
+  // The word cut (T314): the session's own folder is its name alone; the other roots keep the word that tells them apart.
+  // (T316) A link reads its arrow and target, its kind's words kept for a screen reader.
+  const link = row.kind === 'entry' && row.entry.kind === 'symlink';
+  const secondary = row.kind === 'root' ? (row.role === 'directory' ? null : row.role) : row.entry.kind === 'symlink' ? FILES_COPY.symlink(row.entry.target) : null;
   const inert = row.kind === 'entry' && (row.entry.kind === 'symlink' || row.entry.kind === 'other');
   // UX wave U6b-3a (decisions 9 and 15): a changed entry's letter, a dot on a folder with a change beneath it and no letter
   // of its own, and an entry git ignores muted (the selected row keeps its own colour)
@@ -1005,7 +1010,12 @@ function Row({ row, marks, selected, activate, keepRow, place }: { row: ListedRo
       <span data-name className={`truncate ${row.kind === 'root' ? 'font-medium' : ''} ${ignored && !selected ? 'text-fg-muted' : ''}`}>
         {name}
       </span>
-      {secondary ? <span className="truncate text-ui-sm text-fg-faint">{secondary}</span> : null}
+      {secondary ? (
+        <span className="truncate text-ui-sm text-fg-faint">
+          {link ? <span className="sr-only">{FILES_COPY.symlinkName} </span> : null}
+          {secondary}
+        </span>
+      ) : null}
       {ignored ? <span className="sr-only"> {FILES_COPY.ignored}</span> : null}
       {state !== null ? <span className="sr-only"> {state}</span> : null}
       <Mark letter={letter} dot={dot} plain={selected} />

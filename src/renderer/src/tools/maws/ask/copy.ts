@@ -19,15 +19,14 @@ const phrase = (text: string): string => clip(text.split(/\s+\(|:(?=\s|$)|;|\s[�
 
 export const SHEET = {
   title: 'Questions',
-  rest: 'No open questions',
-  restDetail: 'When the agent asks you something, it shows here.',
+  rest: 'No open questions', // the word cut (T292): the resting state is these words alone
   noSession: 'Open a session to see its questions',
   loading: 'Loading the question…', // the hover card's quiet spinner's name while the question loads (the word cut, T299)
   // the switcher between the asks a session holds
   asks: (n: number) => plural(n, 'open ask'),
   untitled: 'Questions',
-  waitingNote: 'The agent is waiting for these answers.',
-  asyncNote: 'The agent keeps working; your answers reach it as its next message.',
+  // the word cut: a blocking ask has no line under its title (T276); one the agent keeps working through reads as its
+  // capsule does, the transcript's `ASK.state.asked` (T277)
   // per section
   decideForMe: 'Decide for me',
   skip: 'Skip',
@@ -51,7 +50,7 @@ export const SHEET = {
   // Submit
   submit: 'Submit',
   submitSkipping: (n: number) => `Submit · ${n} skipped`,
-  submitting: 'Sending…',
+  submitting: 'Sending…', // Submit's quiet spinner's name while the answers go; Submit keeps its words (the word cut, N164)
   failed: "Couldn't deliver the answers",
   retry: 'Retry',
   answeredElsewhere: 'Already answered elsewhere',
@@ -61,17 +60,16 @@ export const SHEET = {
   // a cancelled ask, by why (null: no event said, as on the disk path)
   cancelled: (reason: AskCancelReason | null) => (reason === 'withdrawn' ? 'The turn was interrupted before you answered' : 'This session ended before you answered'),
   answered: 'Answered',
-  notHeld: 'MAWS no longer holds this ask, so it cannot be answered here.',
+  notHeld: 'Can no longer be answered here', // the word cut (T296)
   answerSkipped: 'Skipped',
   answerDecided: 'Decided for me',
   answerNone: 'Not answered',
   otherAnswer: (text: string) => `Other: ${text}`,
-  note: 'Note',
+  note: 'Note', // the label over a note left, heard and not drawn (the word cut, T298)
   // P3-D start: a design_system question (docs/doperpowers/plans/2026-10-12-p3-d-design-systems.md D13)
-  buildSystem: 'Build one with me',
-  buildSystemDetail: 'The agent works out a new design system with you.',
+  buildSystem: 'Build one with me', // with no line under it (the word cut, T285)
   noSystems: 'You have no design systems yet.',
-  readingSystems: 'Reading your design systems…',
+  readingSystems: 'Reading your design systems…', // the read's quiet spinner's name (the word cut, N163)
   systemsUnread: "Couldn't read your design systems.",
   // F (L176): Submit found a picked system deleted since the pick, and sent nothing
   systemDeleted: (names: readonly string[]) => `${names.join(', ')} ${names.length === 1 ? 'was' : 'were'} deleted. Choose another design system.`,

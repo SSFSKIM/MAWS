@@ -1,6 +1,6 @@
 // The Review surface both the panel tool and a diff tab render (C8c execution document, Interfaces *Copy*; UX wave U5b,
 // the execution document's §F): the scope chips (the tool only; a diff tab's ref fixes its scope), the toolbar, the
-// stack of every changed file and the footer. Static and thin: a section's diff (`FileBody`, with the library, its
+// stack of every changed file. Static and thin: a section's diff (`FileBody`, with the library, its
 // stylesheet and the highlighter) loads on first use under the `Loading` fallback (ruled 2026-09-29, O2), while the
 // chips, the toolbar and the headers draw at once. Review reads no file bytes (K4): an untracked file is read as
 // Source control reads it, its diff against /dev/null.
@@ -11,9 +11,15 @@
 // the commented line. `hostId` is the surface's own (the tool's tab id, a diff tab's id).
 //
 // UX wave U5b-2 (docs/doperpowers/plans/2026-11-15-ux-wave-U5b-review-source-control.md, §E, §G and §I): This branch is the
-// working tree against the merge base with the default branch, its footer naming that base; a commit is a scope of its
-// own, its chip listed while `ReviewUi.commit` is set, its footer the commit's; its kept read is asked again only by Retry,
+// working tree against the merge base with the default branch, its words naming that base; a commit is a scope of its
+// own, its chip listed while `ReviewUi.commit` is set, its words the commit's; its kept read is asked again only by Retry,
 // Review shown again and the machine heard again; the totals name the new files not counted.
+//
+// The word cut (T357, N51 to N53): no faint line at the foot. What it said, the scope's words, is the pressed chip's
+// tooltip and description, a commit's chip carrying its subject (and "against its first parent" for a merge commit);
+// in a diff tab, which has no chips, the totals line's, or the empty line's over an empty scope. The one word of the
+// foot that stays at rest is a commit HEAD no longer holds. A greyed chip with a reason keeps the keyboard and gives
+// the reason (P288, N37 to N39); a wait for the list is the quiet spinner.
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useStore } from 'zustand';
@@ -26,6 +32,8 @@ import { CommentCardHost, type CardFrame } from '../../../side/card/CardHost';
 import { focusAtEnd } from '../../../side/card/CommentCard';
 import { leaveCard, useCommentCard } from '../../../side/card/store';
 import { useTranscriptStore } from '../../../transcript';
+import { QuietSpinner } from '../../../ui/spinner';
+import { Tip, UNAVAILABLE_LOOK, unavailableClickProps } from '../../../ui/tip';
 import { REFUSAL, REVIEW_COPY } from '../copy';
 import { useViewer } from '../viewer/viewer-store';
 import '../code.css';
@@ -40,7 +48,7 @@ import { Toolbar, totalsWords } from './Toolbar';
 import { commitSubject, decide, foldAll, placeKey, selectLastTurn, selectScope, type ReviewMode, type ReviewUi } from './view-state';
 
 const retryButton = 'inline-flex h-6 min-w-6 shrink-0 items-center whitespace-nowrap rounded-sm border border-border px-2 text-ui-sm text-fg-muted outline-accent hover:bg-bg-hover hover:text-fg focus-visible:outline-2';
-const chip = 'rounded-sm border border-border px-2 py-0.5 text-ui-sm text-fg-muted hover:bg-bg-hover hover:text-fg aria-pressed:bg-bg-active aria-pressed:text-fg disabled:cursor-default disabled:opacity-50 disabled:hover:bg-transparent';
+const chip = `rounded-sm border border-border px-2 py-0.5 text-ui-sm text-fg-muted outline-accent hover:bg-bg-hover hover:text-fg focus-visible:outline-2 aria-pressed:bg-bg-active aria-pressed:text-fg disabled:cursor-default disabled:opacity-50 disabled:hover:bg-transparent ${UNAVAILABLE_LOOK}`;
 
 export interface ReviewShellProps {
   appSessionId: AppSessionId;
@@ -53,7 +61,12 @@ export interface ReviewShellProps {
   visible?: boolean; // the panel tool's: becoming visible re-reads the scope
 }
 
-const Loading = () => <p className="p-3 text-ui-sm text-fg-muted">{REVIEW_COPY.loading}</p>;
+// The list's wait (the word cut): nothing for half a second, then the quiet spinner where the list will be
+const Loading = () => (
+  <div data-review-loading className="flex h-10 items-center px-3">
+    <QuietSpinner label={REVIEW_COPY.loading} />
+  </div>
+);
 
 // A path the list does not hold that names nothing in the repository: shown as the refusal, never opened.
 const outside = (path: string, status: GitStatus | null, scope: ReviewScope | null) =>
@@ -90,6 +103,7 @@ export function ReviewShell({ appSessionId, directory, ui, hostId, hostMode, chi
   const redecide = useStore(ui, (s) => s.redecide);
   const requested = useStore(ui, (s) => s.request !== null); // an open() the tool applies next: decide nothing before it
   const listed = useStore(ui, (s) => s.commit?.sha ?? null); // UX wave U5b-2: the commit whose chip is listed
+  const commitOf = useStore(ui, (s) => s.commit);
   const data = useReviewData({ appSessionId, directory, scope, turnId, commit: listed, visible, tab: ui }); // the tab's view state: what the tab keeps (Decision Log 49)
   const files = data.list.phase === 'ready' ? data.list.files : null;
 
@@ -199,25 +213,12 @@ export function ReviewShell({ appSessionId, directory, ui, hostId, hostMode, chi
       )}
       {!stacked && bare.unplaced.length > 0 ? <UnplacedComments appSessionId={appSessionId} passKey={bare.key} hostId={hostId} unplaced={bare.unplaced} opened={bare.opened} onRow={setRow} claimFocus={claimFocus} /> : null}
       {data.list.phase === 'unavailable' ? (
-        data.list.retry ? (
-          // UX wave U5b-2 (S22; M9 fix 2): a commit's diff, or a first branch read, that failed, with Retry in its row
-          <div role="status" data-review-unavailable className="flex items-start gap-2 px-3 py-2">
-            <p className="m-0 min-w-0 flex-1 text-ui text-fg-muted">{data.list.message}</p>
-            <button type="button" data-review-retry className={retryButton} onClick={data.list.retry}>
-              {REVIEW_COPY.retry}
-            </button>
-          </div>
-        ) : (
-          <p role="status" data-review-unavailable className="px-3 py-2 text-ui text-fg-muted">
-            {data.list.message}
-          </p>
-        )
+        // UX wave U5b-2 (S22; M9 fix 2): a commit's diff, or a first branch read, that failed, with Retry in its row
+        <Unavailable message={data.list.message} retry={data.list.retry} scopeWords={chips ? null : scopeWordsOf(scope, data, commitOf, true)} />
       ) : data.list.phase === 'pending' ? (
         <Loading />
       ) : files && files.length === 0 ? (
-        <p data-review-empty className="px-3 py-2 text-ui text-fg-muted">
-          {emptyOf(scope, data)}
-        </p>
+        <EmptyLine words={emptyOf(scope, data)} scopeWords={chips ? null : scopeWordsOf(scope, data, commitOf, true)} />
       ) : files ? (
         <StackView
           appSessionId={appSessionId}
@@ -231,13 +232,18 @@ export function ReviewShell({ appSessionId, directory, ui, hostId, hostMode, chi
           files={files}
           placeKey={key}
           commit={commentCommit}
+          scopeWords={chips ? null : scopeWordsOf(scope, data, commitOf, true)}
           width={width}
           reveal={revealed && reveal ? { path: revealed.path, n: reveal.n } : null}
           onRevealed={onRevealed}
           refused={refused && reveal !== null ? reveal.path : null}
         />
       ) : null}
-      <Footer scope={scope} data={data} listed={listed} />
+      {scope === 'commit' && data.commit.onHead === false ? (
+        <p data-review-stale className="mt-auto shrink-0 truncate border-t border-border px-3 py-1.5 text-ui-sm text-fg-faint">
+          {REVIEW_COPY.notOnBranch(data.status?.branch ?? null)}
+        </p>
+      ) : null}
     </div>
   );
 }
@@ -257,6 +263,7 @@ interface StackViewProps {
   files: readonly ReviewFile[];
   placeKey: string;
   commit: string | null; // UX wave U5b-2: the commit whose diff the stack shows, which its comments name
+  scopeWords: string | null; // a diff tab's: the totals line's tooltip (T357)
   width: number;
   reveal: { path: string; n: number } | null;
   onRevealed(): void;
@@ -265,7 +272,7 @@ interface StackViewProps {
 
 // The toolbar over the stack, both from one resolution of the scope's files; the comment card's host shown in the
 // toolbar, and the comments on lines over the stack (M5).
-function StackView({ appSessionId, hostId, cardSlot, setRow, keyboardToCard, claimFocus, ui, data, files, placeKey: key, commit, width, reveal, onRevealed, refused }: StackViewProps) {
+function StackView({ appSessionId, hostId, cardSlot, setRow, keyboardToCard, claimFocus, ui, data, files, placeKey: key, commit, scopeWords, width, reveal, onRevealed, refused }: StackViewProps) {
   const [held, setHeld] = useState<HeldFile | null>(null);
   const { sections, order } = useStack({ files, target: data.target, placeKey: key, pastCap: data.pastCap, ui, held });
   const scopeDiff = useReview((s) => (data.target ? diffOf(s, data.target) : undefined));
@@ -301,6 +308,7 @@ function StackView({ appSessionId, hostId, cardSlot, setRow, keyboardToCard, cla
     <LineCommentsContext.Provider value={value}>
       <Toolbar
         totals={totalsWords(totals(files), data.servesReads === null ? 0 : uncountedFiles(files)) /* UX wave U5b-2 (§I; Decision Log 29, 4): never while the reads are not known */}
+        scopeWords={scopeWords}
         chip={<CardSlot element={cardSlot} />}
         allFolded={allFolded}
         onFoldAll={() => ui.setState((s) => foldAll(s, key, files.map((file) => file.path), allFolded ? 'open' : 'closed'))}
@@ -334,20 +342,78 @@ function StackView({ appSessionId, hostId, cardSlot, setRow, keyboardToCard, cla
   );
 }
 
+// An empty scope says it is empty (the word cut, T362 and N40: "No changes", the pressed chip naming the scope); This
+// branch keeps its base. In a diff tab the line owns the scope's words, as the totals line does over a stack.
 function emptyOf(scope: ReviewScope | null, data: ReviewData): string {
-  const branch = data.status?.branch ?? '';
-  switch (scope) {
-    case 'branch':
-      return REVIEW_COPY.nothingOnBranch(branch, data.branch.base ?? '');
-    case 'staged':
-      return REVIEW_COPY.nothingStaged;
-    case 'turn':
-      return REVIEW_COPY.turnChangedNothing;
-    case 'commit':
-      return REVIEW_COPY.emptyCommit; // UX wave U5b-2 (Decision Log 37): no change against its first parent
-    default:
-      return REVIEW_COPY.noUncommitted;
+  if (scope === 'branch') return REVIEW_COPY.nothingOnBranch(data.status?.branch ?? '', data.branch.base ?? '');
+  return REVIEW_COPY.noChanges;
+}
+
+function EmptyLine({ words, scopeWords }: { words: string; scopeWords: string | null }) {
+  const className = 'm-0 text-ui text-fg-muted';
+  return (
+    <div className="px-3 py-2">
+      {scopeWords === null ? (
+        <p data-review-empty className={className}>
+          {words}
+        </p>
+      ) : (
+        // its hidden description stands beside the line, outside its text
+        <Tip content={scopeWords} description={scopeWords}>
+          <p data-review-empty data-review-scope-words tabIndex={0} className={`${className} w-fit max-w-full rounded-sm outline-accent focus-visible:outline-2`}>
+            {words}
+          </p>
+        </Tip>
+      )}
+    </div>
+  );
+}
+
+// A failed read's line, with Retry where the read can be asked again. In a diff tab (scope words known) it owns the
+// words, as the empty line does: the status itself takes the keyboard, so the words' hidden description stands beside
+// it, outside the status's text.
+function Unavailable({ message, retry, scopeWords }: { message: string; retry?: () => void; scopeWords: string | null }) {
+  const owned = scopeWords === null ? {} : { 'data-review-scope-words': '', tabIndex: 0 };
+  const line = (
+    <div role="status" data-review-unavailable {...owned} className={`${retry ? 'flex items-start gap-2 ' : ''}px-3 py-2${scopeWords === null ? '' : ' rounded-sm outline-accent focus-visible:outline-2'}`}>
+      <p className={`m-0 text-ui text-fg-muted${retry ? ' min-w-0 flex-1' : ''}`}>{message}</p>
+      {retry ? (
+        <button type="button" data-review-retry className={retryButton} onClick={retry}>
+          {REVIEW_COPY.retry}
+        </button>
+      ) : null}
+    </div>
+  );
+  return scopeWords === null ? (
+    line
+  ) : (
+    <Tip content={scopeWords} description={scopeWords}>
+      {line}
+    </Tip>
+  );
+}
+
+// What the scope reads, the faint foot line's words until the word cut (T357): the branch (or the detached head) and
+// the scope; a commit's subject, then "against its first parent" for a merge commit, with `Commit <sha7> · ` before
+// them where no chip says the hash (`named`, a diff tab), which says the hash alone while the subject is not read. Null
+// while there is nothing to say: no scope, no status yet, This branch without its base, a chip's commit whose subject is
+// not read.
+export function scopeWordsOf(scope: ReviewScope | null, data: ReviewData, listed: ReviewUi['commit'], named: boolean): string | null {
+  if (scope === null) return null;
+  const words = REVIEW_COPY.scopeWords;
+  if (scope === 'commit') {
+    const read = data.commit.commit; // the listed commit's, once its read answered: its subject and its parents
+    const subject = read?.subject ?? listed?.subject ?? null;
+    if (listed === null) return null;
+    if (subject === null) return named ? words.commit(listed.sha) : null;
+    return `${named ? `${words.commit(listed.sha)} · ` : ''}${subject}${read !== null && read.parents.length > 1 ? words.firstParent : ''}`;
   }
+  const status = data.status;
+  const branch = status === null ? null : (status.branch ?? REVIEW_COPY.detachedAt(status.head));
+  if (scope === 'turn') return words.turn(branch);
+  if (branch === null) return null;
+  if (scope === 'branch') return data.branch.base !== null ? words.branch(branch, data.branch.base) : null;
+  return scope === 'staged' ? words.staged(branch) : words.uncommitted(branch);
 }
 
 // Last turn is always listed (l5-code-12 c): chosen with no turn set, it shows the latest turn of the session's own
@@ -355,23 +421,57 @@ function emptyOf(scope: ReviewScope | null, data: ReviewData): string {
 function ScopeChips({ ui, data, scope, appSessionId }: { ui: StoreApi<ReviewUi>; data: ReviewData; scope: ReviewScope | null; appSessionId: AppSessionId }) {
   const turnId = useStore(ui, (s) => s.turnId);
   const latest = useTranscriptStore((s) => latestTurnWithFiles(s.rows(appSessionId)));
-  const pick = (next: ReviewScope) => ui.setState((s) => (next === 'turn' ? selectLastTurn(s, latest) : selectScope(s, next)));
+  const group = useRef<HTMLDivElement>(null);
+  // The chip just pressed from the keyboard (the word cut's M3 panel): its scope's words come with its press, under the
+  // focus that pressed it, and a `Tip` shows content that arrives under focus only on the next focus (its pinned rule, so
+  // a greyed reason never springs open on the control that holds focus). Once the words are drawn the chip is given that
+  // next focus, so it says what it compares at once. Not for the pressed chip or a commit's, whose words were there
+  // before the press, which closed them; nor for a click, after which the pointer shows them, as it shows any tip.
+  const pressed = useRef<ReviewScope | null>(null);
+  const pick = (next: ReviewScope, byKeyboard = false) => {
+    pressed.current = !byKeyboard || next === scope || next === 'commit' ? null : next;
+    ui.setState((s) => (next === 'turn' ? selectLastTurn(s, latest) : selectScope(s, next)));
+  };
   const branchReason = data.branch.settled && data.branch.base === null ? data.branch.reason : null;
   const turnAvailable = turnId !== null || latest !== null;
   const stagedShown = data.staged || scope === 'staged';
-  const commit = useStore(ui, (s) => s.commit); // UX wave U5b-2: listed while set, its title the subject
-  const chipOf = (id: ReviewScope, disabled: boolean, reason: string | null, words: string = REVIEW_COPY.scopes[id]) => (
-    <button key={id} type="button" data-chip={id} className={chip} aria-pressed={scope === id} disabled={disabled} title={reason ?? undefined} onClick={() => pick(id)}>
-      {words}
-    </button>
-  );
+  const commit = useStore(ui, (s) => s.commit); // UX wave U5b-2: listed while set, its words the subject
+  const pressedWords = scope === null ? null : scopeWordsOf(scope, data, commit, false);
+  useLayoutEffect(() => {
+    const id = pressed.current;
+    if (id === null || id !== scope) return;
+    const owner = group.current?.querySelector<HTMLElement>(`[data-chip="${id}"]`) ?? null;
+    if (owner === null || document.activeElement !== owner) {
+      pressed.current = null; // the focus has left it: its tip shows on the next pointing or focus, as any tip's
+      return;
+    }
+    if (pressedWords === null) return; // still to come (This branch's base)
+    pressed.current = null;
+    owner.blur();
+    owner.focus({ preventScroll: true });
+  }, [scope, pressedWords]);
+  // A chip greyed with a reason is drawn aria-disabled, keeps the keyboard and gives the reason as its tooltip and
+  // description; one greyed with none (This branch while its availability is not known) is simply disabled. Every chip
+  // stands in its tip, content or none, so a chip pressed keeps its element and the keyboard. The pressed chip's tooltip and description are what its
+  // scope reads; a commit's chip's are its subject's words, pressed or not.
+  const chipOf = (id: ReviewScope, off: boolean, reason: string | null, words: string = REVIEW_COPY.scopes[id]) => {
+    const refused = off ? reason : null;
+    const about = refused ?? (id === 'commit' || scope === id ? scopeWordsOf(id, data, commit, false) : null);
+    return (
+      <Tip key={id} content={about} description={about} {...unavailableClickProps(refused)}>
+        <button type="button" data-chip={id} className={chip} aria-pressed={scope === id} disabled={off && reason === null} onClick={(event) => pick(id, event.detail === 0)}>
+          {words}
+        </button>
+      </Tip>
+    );
+  };
   return (
-    <div role="group" aria-label={REVIEW_COPY.title} className="flex shrink-0 flex-wrap items-center gap-1 border-b border-border px-3 py-1.5">
+    <div ref={group} role="group" aria-label={REVIEW_COPY.title} className="flex shrink-0 flex-wrap items-center gap-1 border-b border-border px-3 py-1.5">
       {chipOf('uncommitted', false, null)}
       {chipOf('branch', !data.branch.settled || (data.branch.base === null && data.branch.failure === null), branchReason)}
       {chipOf('turn', !turnAvailable, turnAvailable ? null : REVIEW_COPY.noTurnChangedFiles)}
-      {stagedShown ? chipOf('staged', !data.staged, data.staged ? null : REVIEW_COPY.indexMatchesHead) : null}
-      {commit ? chipOf('commit', false, commit.subject, REVIEW_COPY.commitChip(commit.sha)) : null}
+      {stagedShown ? chipOf('staged', !data.staged, data.staged ? null : REVIEW_COPY.nothingStaged) : null}
+      {commit ? chipOf('commit', false, null, REVIEW_COPY.commitChip(commit.sha)) : null}
     </div>
   );
 }
@@ -382,47 +482,5 @@ function RefusedPath({ path }: { path: string }) {
       <span className="text-ui-sm text-danger">{REVIEW_COPY.refused(REFUSAL)}</span>
       <span className="truncate font-mono text-ui-sm text-fg-muted">{path}</span>
     </div>
-  );
-}
-
-function Footer({ scope, data, listed }: { scope: ReviewScope | null; data: ReviewData; listed: string | null }) {
-  if (scope === null) return null;
-  if (scope === 'commit') return listed === null ? null : <CommitFooter sha={listed} data={data} />;
-  const status = data.status;
-  const branch = status === null ? null : (status.branch ?? REVIEW_COPY.detachedAt(status.head));
-  const text =
-    scope === 'turn'
-      ? REVIEW_COPY.footer.turn(branch)
-      : branch === null
-        ? null
-        : scope === 'branch'
-          ? data.branch.base !== null
-            ? REVIEW_COPY.footer.branch(branch, data.branch.base)
-            : null
-          : scope === 'staged'
-            ? REVIEW_COPY.footer.staged(branch)
-            : REVIEW_COPY.footer.uncommitted(branch);
-  if (text === null) return null;
-  return (
-    <p data-review-footer className="mt-auto shrink-0 truncate border-t border-border px-3 py-1.5 text-ui-sm text-fg-faint">
-      {text}
-    </p>
-  );
-}
-
-// UX wave U5b-2 (§I; D8): `Commit <sha7> · <subject>`, then `· against its first parent` for a merge commit, then `· not on
-// <branch> now` once HEAD no longer holds it (`· not in HEAD now` on a detached HEAD). The subject is a span of its own
-// and shortens first, so the words after it stay whole.
-function CommitFooter({ sha, data }: { sha: string; data: ReviewData }) {
-  const commit = data.commit.commit;
-  const after = `${commit !== null && commit.parents.length > 1 ? REVIEW_COPY.footer.firstParent : ''}${data.commit.onHead === false ? REVIEW_COPY.footer.notOnBranch(data.status?.branch ?? null) : ''}`;
-  return (
-    <p data-review-footer className="mt-auto flex min-w-0 shrink-0 border-t border-border px-3 py-1.5 text-ui-sm whitespace-nowrap text-fg-faint">
-      <span className="shrink-0">{REVIEW_COPY.footer.commit(sha)}</span>
-      <span data-review-footer-subject className="min-w-0 truncate">
-        {commit?.subject ?? ''}
-      </span>
-      {after !== '' && <span className="shrink-0">{after}</span>}
-    </p>
   );
 }

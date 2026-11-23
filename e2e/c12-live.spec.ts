@@ -15,6 +15,7 @@
 // The support writes the MCP fixtures and the two repositories into $C12 on first use. MAWS_C12_LIVE_MAX_USD (default
 // 5) stops the run before it starts another session once the journals show that much spent.
 import { addressed } from './support/address';
+import { unfoldInfoGroup } from './support/session-info';
 import { openSurface, settingsDialog } from './support/shell';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -402,6 +403,7 @@ test('nine sessions under a memory budget: releases, the released surfaces, Send
       await open(page, ids.B1!);
       await openSurface(page, 'Session info');
       const info = page.locator(`[data-session-info="${await addressed(page, ids.B1)}"]`);
+      await unfoldInfoGroup(info, 'Engine'); // the word cut: the Engine group starts folded
       const dd = (term: string) => info.getByRole('term').filter({ hasText: new RegExp(`^${term}$`) }).locator('xpath=following-sibling::dd[1]');
       await expect(dd('Process')).toHaveText(new RegExp(String.raw`^Released at ${CLOCK} to stay under [\d.]+ GB$`));
       record('releasedSurfaces', {

@@ -237,7 +237,7 @@ describe('surface icons and same-tool tabs', () => {
     expect(useLayout.getState().panelSurfaces.pinnedTools).toEqual(['subagents']);
     expect(pinIds()).toEqual([]);
     fireEvent.contextMenu(icon('Subagents'));
-    await user.click(await screen.findByRole('menuitem', { name: 'Keep open for every session' }));
+    await user.click(await screen.findByRole('menuitem', { name: 'Pin tab' })); // the word cut (P8)
     expect(pinIds()).toEqual([id]);
     await user.click(icon('Subagents'));
     expect(icon('Subagents').getAttribute('aria-pressed')).toBe('false');
@@ -246,6 +246,25 @@ describe('surface icons and same-tool tabs', () => {
     expect(useLayout.getState().panelSurfaces.pinnedTools).toEqual([]);
     expect(within(surfaceRow()).queryByRole('button', { name: 'Subagents' })).toBeNull();
     expect(pinIds()).toEqual([id]);
+  });
+
+  // the word cut (P9): an icon's menu offers no "Open surface" (a press opens it), "Hide surface" while it is open, and
+  // an icon with nothing to offer opens no menu
+  it('offers Hide surface on an open surface’s icon, and opens no menu on an icon with nothing to offer', async () => {
+    const user = userEvent.setup();
+    register(probeTool('terminal', { title: 'Terminal', pinnable: false }).tool);
+    renderHost();
+    fireEvent.contextMenu(icon('Terminal'));
+    await act(async () => {});
+    expect(screen.queryByRole('menu')).toBeNull();
+    await user.click(icon('Terminal'));
+    fireEvent.contextMenu(icon('Terminal'));
+    expect((await menuItems()).map((item) => item.textContent)).toEqual(['Hide surface']);
+    await user.click(screen.getByRole('menuitem', { name: 'Hide surface' }));
+    expect(icon('Terminal').getAttribute('aria-pressed')).toBe('false');
+    fireEvent.contextMenu(icon('Terminal'));
+    await act(async () => {});
+    expect(screen.queryByRole('menuitem', { name: 'Open surface' })).toBeNull();
   });
 
   it('the More surfaces keyboard submenu can show, pin, unpin and close a saved unavailable tool without deleting its ref on hide', async () => {
@@ -265,13 +284,13 @@ describe('surface icons and same-tool tabs', () => {
     await chooseSaved('Show saved surface');
     expect(panelOf(A)!.activeTabId).toBe(saved.id);
     expect(screen.getByRole('tabpanel', { name: 'files' }).textContent).toBe('files is not available');
-    await chooseSaved('Keep open for every session');
+    await chooseSaved('Pin tab'); // the word cut (P8)
     expect(pinIds()).toEqual([saved.id]);
     expect(panelOf(A)!).toEqual({ tabs: [], activeTabId: saved.id });
     await user.click(screen.getByRole('button', { name: 'Hide side column' }));
     expect(screen.queryByRole('tabpanel')).toBeNull();
     expect(pinIds()).toEqual([saved.id]);
-    await chooseSaved('Keep with this session only');
+    await chooseSaved('Unpin tab');
     expect(pinIds()).toEqual([]);
     expect(panelOf(A)!.tabs).toEqual([saved]);
     await chooseSaved('Close saved tab');

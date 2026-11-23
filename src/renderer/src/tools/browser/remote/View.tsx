@@ -16,6 +16,9 @@
 //   an IME's commit or what reached the target outside a composition (an IME's word space, the Character Viewer) brought
 //   it. A cancelled pointer releases what it held. A paste past what §G's input queue carries is refused, with a notice.
 // - In a narrow panel the image keeps the width and the agent's tabs collapse to a picker.
+// - The word cut: while the link is made the group's label is dimmed beside a quiet spinner named "Connecting to
+//   <machine>" (T491), the picture's waits are quiet spinners named by their words (T498), and no View only badge sits
+//   beside Take control (T493).
 import { useCallback, useEffect, useEffectEvent, useMemo, useRef, useSyncExternalStore, type ClipboardEvent, type CompositionEvent, type FormEvent, type KeyboardEvent, type PointerEvent } from 'react';
 import type { BrowserFrame, BrowserInventory, BrowserTabSummary } from '@shared/browser/screencast';
 import type { AppSessionId } from '@shared/graph/ids';
@@ -28,6 +31,7 @@ import { machineName } from '../../../stores/org-projects';
 import { moveAlongTabs, tabStop } from '../chrome/TabStrip';
 import { BROWSER_COPY } from '../copy';
 import { BrowserIcon, PersonIcon } from '../icons';
+import { QuietSpinner } from '../../../ui/spinner';
 import { RemoteBrowserClient, type RemoteBrowserState } from './client';
 import { buttonOf, ClickCounter, fitImage, keyInputs, pointAt, pointerInput, pointerRelease, textInputs, wheelInput, type PointerButton } from './input';
 
@@ -131,10 +135,14 @@ export function AgentGroup({ remote, machine, onShow }: { remote: RemoteBrowser;
   const stop = tabStop(tabs.map((tab) => tab.tabId), shownId);
   const status = remoteStatus(state.view, state.inventory, machine);
   const label = C.group(machine);
+  const connecting = state.view.kind === 'connecting';
   return (
     <div role="group" aria-label={label} data-browser-agent-group="" className="flex min-w-0 shrink items-center gap-0.5 border-l border-border pl-1">
-      <span className="shrink-0 px-1 text-ui-sm font-medium text-fg-muted">{label}</span>
-      {status !== null ? (
+      <span data-browser-agent-label="" className={`flex shrink-0 items-center gap-1.5 px-1 text-ui-sm font-medium ${connecting ? 'text-fg-faint' : 'text-fg-muted'}`}>
+        {label}
+        {connecting && <QuietSpinner label={C.connecting(machine)} />}
+      </span>
+      {connecting ? null : status !== null ? (
         <span role="status" data-browser-agent-status={state.view.kind} className="flex min-w-0 items-center gap-1 text-ui-sm text-fg-faint">
           <span className="min-w-0 truncate" title={status}>
             {status}
@@ -225,9 +233,6 @@ export function RemoteNav({ remote, machine }: { remote: RemoteBrowser; machine:
           </>
         ) : (
           <>
-            <span role="status" data-remote-control-state="view" className="shrink-0 rounded-sm border border-border px-1.5 py-0.5 text-ui-sm text-fg-muted">
-              {C.viewOnly}
-            </span>
             <button
               type="button"
               disabled={tab === null || state.control === 'taking'}
@@ -406,6 +411,7 @@ export function RemoteCanvas({ remote, machine, draw = drawJpeg }: RemoteCanvasP
   const stale = frame !== null && state.stream !== 'live';
   // the view's kind words what is wrong with the view; the stream's state only what is wrong with this tab's stream
   const overlay = status ?? (state.stream === 'stopped' ? C.stopped : state.stream === 'waiting' ? C.waiting : frame === null || state.stream === 'opening' ? C.loading : null);
+  const waits = state.view.kind === 'connecting' || overlay === C.loading; // a wait: a spinner named by its words
   const retry = status === null && (state.stream === 'stopped' || state.stream === 'waiting');
   const label = `${tab ? C.page(titleOf(tab), machine) : C.group(machine)}. ${held ? C.youControlHint : C.viewOnlyHint}`;
   return (
@@ -442,19 +448,23 @@ export function RemoteCanvas({ remote, machine, draw = drawJpeg }: RemoteCanvasP
       />
       {overlay !== null && (
         <div role="status" data-remote-overlay="" className="pointer-events-none absolute inset-0 flex items-center justify-center p-6 text-center">
-          <span className="pointer-events-auto flex max-w-full flex-col items-center gap-2 rounded-md bg-bg/90 px-3 py-2 text-ui text-fg-muted">
-            {overlay}
-            {retry && (
-              <button type="button" onPointerDown={(event) => event.stopPropagation()} onClick={() => client.retry()} className="h-6 rounded-sm border border-border px-2 text-ui-sm text-fg outline-accent hover:bg-bg-hover focus-visible:outline-2">
-                {C.retry}
-              </button>
-            )}
-            {state.view.kind === 'ended' && (
-              <button type="button" onPointerDown={(event) => event.stopPropagation()} onClick={() => client.reopen()} className="h-6 rounded-sm border border-border px-2 text-ui-sm text-fg outline-accent hover:bg-bg-hover focus-visible:outline-2">
-                {C.reconnect}
-              </button>
-            )}
-          </span>
+          {waits ? (
+            <QuietSpinner label={overlay} className="size-4" />
+          ) : (
+            <span className="pointer-events-auto flex max-w-full flex-col items-center gap-2 rounded-md bg-bg/90 px-3 py-2 text-ui text-fg-muted">
+              {overlay}
+              {retry && (
+                <button type="button" onPointerDown={(event) => event.stopPropagation()} onClick={() => client.retry()} className="h-6 rounded-sm border border-border px-2 text-ui-sm text-fg outline-accent hover:bg-bg-hover focus-visible:outline-2">
+                  {C.retry}
+                </button>
+              )}
+              {state.view.kind === 'ended' && (
+                <button type="button" onPointerDown={(event) => event.stopPropagation()} onClick={() => client.reopen()} className="h-6 rounded-sm border border-border px-2 text-ui-sm text-fg outline-accent hover:bg-bg-hover focus-visible:outline-2">
+                  {C.reconnect}
+                </button>
+              )}
+            </span>
+          )}
         </div>
       )}
     </div>

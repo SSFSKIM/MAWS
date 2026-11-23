@@ -39,7 +39,7 @@ describe("Session info for a session driven through its terminal's bridge", () =
     const observed = { facts: null, loading: false };
     const driven = laneAControls(laneAState(A), rec, { appSessionId: A, client: fakeClient().client });
     expect(modeRow({ record: rec, status: null, observed, now: 0, driven })).toEqual({ label: 'Mode', value: LANE_A_WORDS.modeNotReported, note: LANE_A_WORDS.mode });
-    expect(modeRow({ record: rec, status: null, observed, now: 0 }).value).toBe('Not observed yet'); // held, not driven: as before
+    expect(modeRow({ record: rec, status: null, observed, now: 0 }).value).toBe('—'); // held, not driven: as before, a dash since the word cut (P174)
   });
 
   // sminos 1.27.14: the mode the session reported through its bridge, with how long ago; never an observation or a default

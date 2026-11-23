@@ -13,11 +13,11 @@ describe('the job adapter', () => {
   it('gives a running shell the line MAWS draws: its description and elapsed, its output file for Output', () => {
     const node = taskNodeOf(job('b1', { command: 'npm test' }));
     expect(node).toMatchObject({ taskId: 'b1', kind: 'shell', taskType: 'local_bash', toolUseId: 'toolu_b1', status: 'running', isBackground: true, outputFile: '/private/tmp/claude-501/p/s/tasks/b1.output', endedAt: null });
-    expect(taskLine(node, NOW)).toBe('job b1 · running 5m 00s');
+    expect(taskLine(node, NOW)).toBe('job b1 · 5m 00s'); // the word cut (T216): no running word
   });
 
   it('ends a job as its status and time say, and one that ended with the session undated', () => {
-    expect(taskLine(taskNodeOf(job('b1', { status: 'completed', endedAt: '2026-10-17T10:01:00.000Z', summary: 'exit 0' })), NOW)).toMatch(/^job b1 · completed /);
+    expect(taskLine(taskNodeOf(job('b1', { status: 'completed', endedAt: '2026-10-17T10:01:00.000Z', summary: 'exit 0' })), NOW)).toMatch(/^job b1 · [^·]+ ago$/); // the word cut (T218): a finished job's age alone, no completed word
     expect(taskLine(taskNodeOf(job('b2', { status: 'failed', endedAt: '2026-10-17T10:01:00.000Z' })), NOW)).toMatch(/^job b2 · failed /);
     expect(taskLine(taskNodeOf(job('b3', { status: 'exited' })), NOW)).toBe('job b3 · ended with the session');
     expect(taskNodeOf(job('b1', { summary: 'exit 0', status: 'completed' })).summary).toBe('exit 0');

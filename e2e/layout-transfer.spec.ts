@@ -86,7 +86,7 @@ async function pinArtifactsTool(page: Page): Promise<void> {
   await expect(editorIn(inMain(page, artifact.id))).toBeVisible({ timeout: 15_000 });
   const record = await moveMainArtifactToPanel(page, artifact.id);
   await pinSurfaceForSessions(page, 'Artifacts');
-  await record.getByRole('button', { name: 'Back', exact: true }).click();
+  await record.getByRole('button', { name: 'Back to list', exact: true }).click();
   await expect(surface(page, 'artifacts').locator('[data-artifacts-list]')).toBeVisible();
 }
 

@@ -24,6 +24,7 @@ import { useLayoutEffect, useRef, useState } from 'react';
 import { formatDayTime } from '@shared/app/date-format';
 import { ipc } from '../ipc/client';
 import { useHubAccess, type HubAccess } from '../stores/hub-access';
+import { QuietSpinner } from '../ui/spinner';
 import { useSessions } from '../stores/sessions';
 import { CHANNEL } from './copy';
 import { Composer } from './Composer';
@@ -75,7 +76,8 @@ export function ChannelView({ project }: { project: string }) {
           head, where the composer frame's shadow draws. */}
       <div ref={scroller} onScroll={onScroll} role="log" aria-label={CHANNEL.title(null)} className="scroll-gutter min-h-0 flex-1 overflow-y-auto">
         <div className="thread-column flex min-h-full flex-col gap-5 pt-6 pb-2">
-          {held.phase === 'opening' && channel.failed === null && <p className="m-0 text-fg-muted">{CHANNEL.opening}</p>}
+          {/* the word cut (P457): the first read is a quiet spinner named by its words */}
+          {held.phase === 'opening' && channel.failed === null && <QuietSpinner label={CHANNEL.opening} className="self-center" />}
           {channel.failed !== null && (
             <div role="alert" className="flex flex-wrap items-center gap-2 text-danger">
               <span className="min-w-0 break-words" title={channel.failed}>

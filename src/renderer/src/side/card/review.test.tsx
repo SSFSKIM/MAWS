@@ -94,7 +94,7 @@ const row = () => screen.getByTestId('row');
 const toolbar = () => screen.getByTestId('toolbar');
 const field = () => screen.getByRole('textbox', { name: 'Comment' }) as HTMLTextAreaElement;
 const type = (text: string) => fireEvent.change(field(), { target: { value: text } });
-const sendButton = () => within(card()!).getByRole('button', { name: /^(Send|Sending…|Starting…)/ }) as HTMLButtonElement;
+const sendButton = () => within(card()!).getByRole('button', { name: /^Send\b(?! to main)/ }) as HTMLButtonElement;
 const box = () => screen.getByRole('checkbox', { name: 'Send to main' }) as HTMLInputElement;
 const pass = () => useCommentCard.getState().passes.get(KEY) ?? null;
 const settle = () => act(() => new Promise((resolve) => setTimeout(resolve, 0)));

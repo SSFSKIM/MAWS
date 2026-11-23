@@ -128,7 +128,7 @@ describe('the detail: enabled for this project and loaded in this session', () =
     expect(within(fact('loaded')).queryByRole('button', { name: 'Refresh' })).toBeNull();
   });
 
-  it('a ready session offers Reload plugins instead; a disabled plugin is offered neither; no list is Not observed yet', () => {
+  it('a ready session offers Reload plugins instead; a disabled plugin is offered neither; no list is a dash (the word cut, P174)', () => {
     const p = inst(ID);
     const reloadMods = vi.fn();
     show(identityOf(p, viewOf(p)), { availability: 'usable', loaded: loadedWith(['other@x'], { kind: 'now' }), loadedIds: new Set(['other@x']), reloads: { reloadMods, reloadSkills: () => {}, line: null, failed: false, busy: false, modsUnavailable: null, skillsUnavailable: null } });
@@ -140,7 +140,7 @@ describe('the detail: enabled for this project and loaded in this session', () =
     expect(fact('loaded').textContent).toBe('Not loaded in this session');
     cleanup();
     show(identityOf(p, viewOf(p)));
-    expect(fact('loaded').textContent).toBe('Not observed yet');
+    expect(fact('loaded').textContent).toBe('—');
   });
 });
 

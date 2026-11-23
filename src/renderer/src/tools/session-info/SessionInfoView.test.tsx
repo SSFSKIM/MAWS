@@ -41,6 +41,7 @@ import { RouteSwitch } from './RouteSwitch';
 import { REMOTE_UNAVAILABLE } from '@shared/ipc/remote-unavailable';
 import { heldModel, resetModelRequests, useModelRequests, type HeldModel } from '../../widgets/model';
 import { liveBindings } from '../../composer/frame/bindings';
+import { accessibleText } from '../../test-support/accessible-text';
 // E4a start
 import { browserTab, T1, T2, T3 } from '../../test-support/browser';
 import { browser, resetBrowser } from '../browser/store';
@@ -93,51 +94,90 @@ const mount = (ctx: PanelToolContext) => {
     </QueryClientProvider>,
   );
 };
-// The value beside a key, with its note.
-const valueOf = (label: string) => screen.getByText(label, { selector: 'dt' }).nextElementSibling?.textContent ?? '';
-// UX wave U4a (decision 19): a value's title, where it has one (the Main row's raw model id)
-const titleOf = (label: string) => screen.getByText(label, { selector: 'dt' }).nextElementSibling?.querySelector('[title]')?.getAttribute('title') ?? null;
+// The value beside a key, with its note, as the accessibility tree keeps it (a tooltip's description waits hidden beside
+// its value).
+const valueOf = (label: string) => {
+  const value = screen.getByText(label, { selector: 'dt' }).nextElementSibling;
+  return value ? accessibleText(value) : '';
+};
+// UX wave U4a (decision 19), the word cut (T253): a value's tooltip, where it has one (the Main row's raw model id; where
+// a value came from), on the value itself, which takes the keyboard and carries it as its description
+const tipOf = (label: string) => {
+  const owner = screen.getByText(label, { selector: 'dt' }).nextElementSibling?.querySelector<HTMLElement>('[tabindex="0"]');
+  return owner ? descriptionOf(owner) : null;
+};
+const descriptionOf = (element: Element) =>
+  (element.getAttribute('aria-describedby') ?? '').split(' ').filter(Boolean).map((id) => document.getElementById(id)?.textContent ?? '').join(' ') || null;
+// The word cut (T252): every group folded to its head but Permissions and Usage; opens them all, for the rows they hold.
+const unfold = () => {
+  for (const head of screen.queryAllByRole('button', { expanded: false })) fireEvent.click(head);
+};
+const heads = () => screen.getAllByRole('heading', { level: 4 }).map((h) => [h.textContent, within(h).getByRole('button').getAttribute('aria-expanded')]);
 
 describe('session info renders the six sections', () => {
-  it('Engine, Model, Gateway, Permissions, Context·usage·cost, Hooks and MCP over a routed scenario session', async () => {
+  // The word cut (T252): each group's head is its disclosure; Permissions and Usage start open, a press opens another
+  it('folds every group to its head but Permissions and Usage, and a press on a head opens it', async () => {
     mount(ctxOf(READY));
-    for (const title of ['Engine', 'Model', 'Gateway', 'Permissions', 'Context, usage, cost', 'Hooks and MCP']) expect(screen.getByRole('region', { name: title })).toBeTruthy();
+    expect(heads()).toEqual([['Engine', 'false'], ['Model', 'false'], ['Gateway', 'false'], ['Permissions', 'true'], ['Usage', 'true'], ['Hooks and MCP', 'false']]);
+    expect(screen.getAllByRole('term').map((t) => t.textContent)).toEqual(['Mode', 'Auto-mode lane', 'Rules', 'Cost']);
+    fireEvent.click(within(screen.getByRole('heading', { name: 'Engine' })).getByRole('button'));
+    expect(within(screen.getByRole('region', { name: 'Engine' })).getAllByRole('term')[0]!.textContent).toBe('Version');
+    const permissions = within(screen.getByRole('heading', { name: 'Permissions' })).getByRole('button');
+    const body = document.getElementById(permissions.getAttribute('aria-controls')!)!;
+    expect(body.hasAttribute('inert')).toBe(false);
+    fireEvent.click(permissions);
+    expect(permissions.getAttribute('aria-expanded')).toBe('false');
+    // while its close runs, the closing body is still drawn but out of the keyboard's and the pointer's reach
+    expect(body.isConnected).toBe(true);
+    expect(body.hasAttribute('inert')).toBe(true);
+    await waitFor(() => expect(within(screen.getByRole('region', { name: 'Permissions' })).queryAllByRole('term')).toEqual([])); // after the close's motion
+  });
+
+  it('Engine, Model, Gateway, Permissions, Usage, Hooks and MCP over a routed scenario session', async () => {
+    mount(ctxOf(READY));
+    unfold();
+    for (const title of ['Engine', 'Model', 'Gateway', 'Permissions', 'Usage', 'Hooks and MCP']) expect(screen.getByRole('region', { name: title })).toBeTruthy();
     const labels = screen.getAllByRole('term').map((t) => t.textContent);
-    expect(labels).toEqual(['Version', 'Binary', 'Session id', 'Held by' /* W7 */, 'Process tree', 'Memory budget' /* C12 */, 'Browser tabs' /* E4a */, 'Main', 'Subagents', 'Route', 'Account', 'Tool search', 'Mode', 'Auto-mode lane', 'Rules', 'Context', 'Usage', 'Cost', 'Hooks', 'MCP']);
+    // the word cut: no Browser tabs row while no page is loaded (T540), no Context and Usage rows (P176)
+    expect(labels).toEqual(['Version', 'Binary', 'Session id', 'Held by' /* W7 */, 'Process tree', 'Memory budget' /* C12 */, 'Main', 'Subagents', 'Route', 'Account', 'Tool search', 'Mode', 'Auto-mode lane', 'Rules', 'Cost', 'Hooks', 'MCP']);
     expect(valueOf('Version')).toBe('2.1.283'); // W13: the session's own, no pin note
     expect(valueOf('Binary')).toBe('~/.local/share/claude/versions/2.1.283'); // W13: the file it was spawned from, not today's setting
     expect(valueOf('Session id')).toBe(record.engineSessionId);
     // UX wave U4a (decision 19): before any selector has listed the engine's models, the chip's name from the route's
     // catalogue (`engine.models`), as the chip reads it; the raw id as its title
     await waitFor(() => expect(valueOf('Main')).toBe('Sonnet 5'));
-    expect(titleOf('Main')).toBe('claude-sonnet-5[1m]');
+    expect(tipOf('Main')).toBe('claude-sonnet-5[1m]');
     const routeCatalogue = (fixtureLine(ROOT, RESPONSES.list_models) as { models: ListedModel[] }).models; // the backend's engine.models
     expect(liveBindings(useSessions.getState().engine.get(READY)!, record, { modelNames: routeCatalogue }).model.label).toBe('Sonnet 5'); // the chip, before any menu
     expect(valueOf('Subagents')).toBe("each agent's own, else Main"); // W3: no "engine default"
-    expect(valueOf('Route')).toBe('Gateway · ClaudeUsage relay · http://127.0.0.1:8641Switch to Direct…Back to the machine’s own…'); // W2: the switch; P5 O7 M9: and back
-    expect(valueOf('Account')).toBe('1@example.test · pinned for this session');
-    expect(valueOf('Tool search')).toBe('on · ENABLE_TOOL_SEARCH, needed behind a base URL');
-    expect(valueOf('Mode')).toBe('Auto · effective, from the init frame');
+    expect(valueOf('Route')).toBe('Gateway · http://127.0.0.1:8641Switch to Direct…Back to the machine’s own…'); // W2: the switch; P5 O7 M9: and back; the word cut (T256)
+    expect(valueOf('Account')).toBe('1@example.test · pinned'); // T259
+    expect(valueOf('Tool search')).toBe('on'); // P163
+    expect(valueOf('Mode')).toBe('Auto'); // T253: where it came from is its tooltip
+    expect(tipOf('Mode')).toBe('effective, from the init frame');
     // the stores first, the reads as they answer
-    // the engine's summary (pass1/reads seq 57: 30,433, 15 %) corrected as C3 corrects its sample: 21,507 measured + 1
-    await waitFor(() => expect(valueOf('Context')).toBe('21,508 of 200,000 · 11% · autocompact at 167,000'));
-    // C3 has not read the row for this scenario status; Session info's own get_status answer (auto-routed seq 145) has
-    await waitFor(() => expect(valueOf('Auto-mode lane')).toBe('Server · reviews ride on the main request · no charge · model chosen server-side'));
+    // C3 has not read the row for this scenario status; Session info's own get_status answer (auto-routed seq 145) has;
+    // the word cut (T254): the lane in a word, its sentence the tooltip
+    await waitFor(() => expect(valueOf('Auto-mode lane')).toBe('Server'));
+    expect(tipOf('Auto-mode lane')).toBe('Server · reviews ride on the main request · no charge · model chosen server-side');
+    expect(backend.calls.filter((c) => c.command === 'session.getContextUsage')).toEqual([]); // P176: nothing reads the context here
     await waitFor(() => expect(valueOf('Rules')).toMatch(/^1 allow · 1 ask · 0 deny · 0 session grants/));
     await waitFor(() => expect(valueOf('Hooks')).toBe('1 settings hook · 0 plugin hooks'));
     await waitFor(() => expect(valueOf('MCP')).toMatch(/^3 connected · plugin:ptc:ptc \(stdio\), .*openaiDeveloperDocs \(http\)/));
     expect(within(screen.getByRole('region', { name: 'Permissions' })).getByRole('button', { name: '/permissions' })).toBeTruthy();
   });
 
-  // Debt wave 3: C3 samples the context at ready and after every turn (`context.sample` → the digest), so the row reads
-  // the digest and asks the engine only while no sample has arrived.
-  it('reads the context from the digest once C3 has sampled it, with no read of its own', async () => {
-    const digest = { appSessionId: READY, context: { percent: 21.4, totalTokens: 42_812, maxTokens: 200_000, autoCompactThreshold: 167_000 } };
+  // The word cut (P176, T264): the context and the usage windows are the context ring's and the usage displays', so the
+  // Usage group reads the cost alone (and the pace when a window runs short), and nothing reads the context here.
+  it('keeps the cost in Usage, in its short form, and reads no context of its own', async () => {
+    const digest = { appSessionId: READY, context: { percent: 21.4, totalTokens: 42_812, maxTokens: 200_000, autoCompactThreshold: 167_000 }, cost: { totalUsd: 1.2, sinceSeenUsd: 0.3 } };
     useSessions.setState({ digests: new Map([[READY, digest as never]]) });
     mount(ctxOf(READY));
-    expect(valueOf('Context')).toBe('42,812 of 200,000 · 21% · autocompact at 167,000');
+    expect(within(screen.getByRole('region', { name: 'Usage' })).getAllByRole('term').map((t) => t.textContent)).toEqual(['Cost']);
+    expect(valueOf('Cost')).toBe('$1.20 · $0.30 new');
     await waitFor(() => expect(valueOf('Rules')).toMatch(/^1 allow/)); // the other reads answered meanwhile
     expect(backend.calls.filter((c) => c.command === 'session.getContextUsage')).toEqual([]);
+    unfold();
     // UX wave U4a (decision 19): the Main row names the model from the route's catalogue, as the chip does (the lane's
     // entry still reads the listed models only)
     await waitFor(() => expect(backend.calls.filter((c) => c.command === 'engine.models')).toHaveLength(1));
@@ -151,15 +191,18 @@ describe('session info renders the six sections', () => {
     const status = pageStatus();
     useSessions.setState({ engine: new Map([[READY, { ...status, model: { requested: 'claude/astra', resolved: 'claude-sonnet-5[1m]' } }]]) });
     mount(ctxOf(READY));
-    expect(valueOf('Main')).toMatch(/^astra( [A-Z][a-z]+( high)?)? · setting…$/); // the word cut (C39): the model menu's pending word
-    expect(titleOf('Main')).toBe('claude/astra');
-    expect(valueOf('Auto-mode lane')).toMatch(/^Local \(expected\)/);
+    unfold();
+    expect(valueOf('Main')).toMatch(/^astra( [A-Z][a-z]+( high)?)? · setting…$/); // the word cut (C39): the model menu's pending word, a state at rest
+    expect(tipOf('Main')).toBe('claude/astra');
+    expect(valueOf('Auto-mode lane')).toBe('Local'); // T254
+    expect(tipOf('Auto-mode lane')).toMatch(/^Local \(expected\)/);
     cleanup();
     useSessions.setState({ engine: new Map([[READY, { ...status, model: { requested: 'sonnet', resolved: 'claude-sonnet-5[1m]' } }]]) });
     mount(ctxOf(READY));
+    unfold();
     expect(valueOf('Main')).not.toContain('setting…'); // the alias resolved: confirmed
     expect(valueOf('Main')).toMatch(/^Sonnet 5/);
-    expect(titleOf('Main')).toBe('claude-sonnet-5[1m]');
+    expect(tipOf('Main')).toBe('claude-sonnet-5[1m]');
     useComposerStore.setState({ models: new Map() });
   });
 
@@ -191,6 +234,7 @@ describe('session info renders the six sections', () => {
       useSessions.setState({ engine: new Map([[READY, status]]) });
       if (held) useModelRequests.setState({ model: new Map([[READY, held]]) });
       mount(ctxOf(READY));
+      unfold();
       expect(valueOf('Main')).toMatch(main);
       expect(valueOf('Main').endsWith(PENDING)).toBe(pending);
       expect(chipText(status)).toBe(valueOf('Main').replace(` · ${PENDING}`, '')); // the chip's words
@@ -209,20 +253,22 @@ describe('session info renders the six sections', () => {
     const entry = (rows: unknown[]) => ({ state, rows, phase: 'live', error: null, following: true, working: false, clock: null, jump: null }) as unknown as TranscriptEntry;
     useTranscriptStore.setState({ entries: { [READY]: entry([{}]) } });
     mount(ctxOf(READY));
-    await waitFor(() => expect(valueOf('Auto-mode lane')).toMatch(/ · 1 tool call evaluated, 1 flagged$/));
+    await waitFor(() => expect(valueOf('Auto-mode lane')).toBe('Server · 1 reviewed · 1 flagged')); // the word cut (T255)
     cleanup();
     useTranscriptStore.setState({ entries: { [READY]: entry([]) } });
     mount(ctxOf(READY));
-    await waitFor(() => expect(valueOf('Auto-mode lane')).toMatch(/^Server/));
-    expect(valueOf('Auto-mode lane')).not.toContain('evaluated');
+    await waitFor(() => expect(valueOf('Auto-mode lane')).toBe('Server'));
     useTranscriptStore.setState({ entries: {} });
   });
 
   it('names the overrides when the launch passed some, and the subagent model chosen at launch', () => {
     useSessions.setState({ engine: new Map([[READY, { ...pageStatus(), subagentModel: 'haiku', modelOverrides: { ANTHROPIC_DEFAULT_OPUS_MODEL: 'claude-opus-5-5' } }]]) });
     mount(ctxOf(READY));
-    expect(valueOf('Subagents')).toBe('haiku · CLAUDE_CODE_SUBAGENT_MODEL, chosen at launch');
-    expect(valueOf('Overrides')).toBe('ANTHROPIC_DEFAULT_OPUS_MODEL → claude-opus-5-5 · passed through from your shell');
+    unfold();
+    expect(valueOf('Subagents')).toBe('haiku'); // the word cut (T253): where each came from is its tooltip
+    expect(tipOf('Subagents')).toBe('CLAUDE_CODE_SUBAGENT_MODEL, chosen at launch');
+    expect(valueOf('Overrides')).toBe('ANTHROPIC_DEFAULT_OPUS_MODEL → claude-opus-5-5');
+    expect(tipOf('Overrides')).toBe('passed through from your shell');
   });
 
   it("a direct session reads the engine's own login from its get_status (routing-flag-override seq 12)", async () => {
@@ -230,7 +276,8 @@ describe('session info renders the six sections', () => {
     useSessions.setState({ engine: new Map([[READY, direct]]) });
     backend.script('session.getStatus', () => fixtureLine(ROOT, 'pass2/routing-flag-override#12'));
     mount(ctxOf(READY));
-    await waitFor(() => expect(valueOf('Route')).toBe("Direct · engine's own login · Expired — log in againSwitch to gateway…Back to the machine’s own…")); // W2: the switch
+    unfold();
+    await waitFor(() => expect(valueOf('Route')).toBe('Direct · Expired — log in againSwitch to gateway…Back to the machine’s own…')); // W2: the switch; the word cut (T256)
     expect(valueOf('Email')).toBe('owner@redacted.invalid');
     expect(valueOf('Tool search')).toBe('off');
     expect(screen.queryByText('Account', { selector: 'dt' })).toBeNull();
@@ -244,13 +291,15 @@ describe('session info renders the six sections', () => {
     });
     useSessions.setState({ engine: new Map([[READY, onMachine({ kind: 'claudeusage', baseUrl: 'http://127.0.0.1:8641' }, 'gateway')]]) });
     mount(ctxOf(READY));
+    unfold();
     expect(valueOf('Route')).toBe('The machine’s own · ClaudeUsage relay · http://127.0.0.1:8641Switch to gateway…Switch to Direct…');
-    expect(valueOf('Account')).toBe('1@example.test · pinned for this session');
+    expect(valueOf('Account')).toBe('1@example.test · pinned');
     expect(valueOf('Tool search')).toBe('as the machine’s settings set it');
     cleanup();
 
     useSessions.setState({ engine: new Map([[READY, onMachine({ kind: 'login', baseUrl: null, login: 'Claude Max', organization: 'Acme' }, 'direct')]]) });
     mount(ctxOf(READY));
+    unfold();
     expect(valueOf('Route')).toBe('The machine’s own · Anthropic login · Claude MaxSwitch to gateway…Switch to Direct…');
     expect(valueOf('Organization')).toBe('Acme');
     expect(screen.queryByText('Account', { selector: 'dt' })).toBeNull();
@@ -258,6 +307,7 @@ describe('session info renders the six sections', () => {
 
     useSessions.setState({ engine: new Map([[READY, onMachine({ kind: 'host', baseUrl: 'https://llm.example.test/v1' }, 'direct')]]) });
     mount(ctxOf(READY));
+    unfold();
     expect(valueOf('Route')).toBe('The machine’s own · llm.example.testSwitch to gateway…Switch to Direct…');
     expect(valueOf('Route')).not.toMatch(/unverified|match/);
     expect(screen.queryByText('Account', { selector: 'dt' })).toBeNull();
@@ -265,18 +315,19 @@ describe('session info renders the six sections', () => {
 
   it('reads nothing while the tab is hidden, and says what to do without a session', async () => {
     mount(ctxOf(READY, false));
+    unfold();
     await new Promise((r) => setTimeout(r, 30));
     expect(backend.calls.filter((c) => c.command.startsWith('session.'))).toEqual([]);
-    expect(valueOf('Route')).toBe('Gateway · ClaudeUsage relay · http://127.0.0.1:8641Switch to Direct…Back to the machine’s own…'); // the stores render at once
+    expect(valueOf('Route')).toBe('Gateway · http://127.0.0.1:8641Switch to Direct…Back to the machine’s own…'); // the stores render at once
     cleanup();
     mount(ctxOf(null));
     expect(screen.getByText('Open a session to see its details')).toBeTruthy();
   });
 });
 
-// P2-A start (2026-10-09; X17): with no live process the sections show what the engine last reported, each labelled
-// with when, and "Not observed yet" for a session MAWS never ran; the record's requested values are never shown as
-// observed, and no engine read runs
+// P2-A start (2026-10-09; X17): with no live process the sections show what the engine last reported, when each was
+// reported its tooltip (the word cut, T253), and a dash for a session MAWS never ran (P174); the record's requested
+// values are never shown as observed, and no engine read runs
 describe('session info of a session with no live process', () => {
   const ago = (ms: number) => new Date(Date.now() - ms - 60_000).toISOString();
   const facts = (over: Record<string, unknown>) => ({
@@ -285,7 +336,7 @@ describe('session info of a session with no live process', () => {
   });
   const offline = () => useSessions.setState({ engine: new Map(), records: new Map([[READY, record]]), digests: new Map() });
 
-  it('labels the observed model, effort, mode, output style, plugin count and context with when', async () => {
+  it('gives the observed model, effort, mode, output style and plugin count when each was reported as its tooltip', async () => {
     offline();
     const days = ago(2 * 86_400_000);
     const hours = ago(3 * 3_600_000);
@@ -297,22 +348,26 @@ describe('session info of a session with no live process', () => {
       }),
     );
     mount(ctxOf(READY));
-    await waitFor(() => expect(valueOf('Main')).toBe(`claude-haiku-4-5 · Last observed ${REL.ago(2, 'day')}`));
-    expect(valueOf('Effort')).toBe(`high · Last observed ${REL.ago(3, 'hour')}`); // its own age, not the model's
-    expect(valueOf('Output style')).toBe(`Explanatory · Last observed ${REL.ago(2, 'day')}`);
-    expect(valueOf('Plugins')).toBe(`1 loaded · Last observed ${REL.ago(2, 'day')}`);
-    expect(valueOf('Mode')).toBe(`Plan · Last observed ${REL.ago(3, 'hour')}`);
-    expect(valueOf('Context')).toBe(`42,812 of 200,000 · 21% · autocompact at 167,000 · Last observed ${REL.ago(3, 'hour')}`);
+    unfold();
+    await waitFor(() => expect(valueOf('Main')).toBe('claude-haiku-4-5'));
+    expect(tipOf('Main')).toBe(`Last observed ${REL.ago(2, 'day')}`);
+    expect([valueOf('Effort'), tipOf('Effort')]).toEqual(['high', `Last observed ${REL.ago(3, 'hour')}`]); // its own age, not the model's
+    expect([valueOf('Output style'), tipOf('Output style')]).toEqual(['Explanatory', `Last observed ${REL.ago(2, 'day')}`]);
+    expect([valueOf('Plugins'), tipOf('Plugins')]).toEqual(['1 loaded', `Last observed ${REL.ago(2, 'day')}`]);
+    expect([valueOf('Mode'), tipOf('Mode')]).toEqual(['Plan', `Last observed ${REL.ago(3, 'hour')}`]);
+    expect(screen.queryByText('Context', { selector: 'dt' })).toBeNull(); // P176
     expect(screen.queryByText(/Not running in this app/)).toBeNull();
     expect(backend.calls.filter((c) => c.command !== 'session.observedFacts' && c.command.startsWith('session.get'))).toEqual([]);
   });
 
-  it('reads "Not observed yet" where a fact would be for a session MAWS never ran, never the record’s defaults', async () => {
+  it('reads a dash where a fact would be for a session MAWS never ran, never the record’s defaults', async () => {
     offline();
     backend.script('session.observedFacts', () => null);
     mount(ctxOf(READY));
-    await waitFor(() => expect(valueOf('Main')).toBe('Not observed yet'));
-    for (const label of ['Effort', 'Output style', 'Plugins', 'Mode', 'Context']) expect(valueOf(label)).toBe('Not observed yet');
+    unfold();
+    await waitFor(() => expect(backend.calls.some((c) => c.command === 'session.observedFacts')).toBe(true));
+    for (const label of ['Main', 'Effort', 'Output style', 'Plugins', 'Mode']) expect(valueOf(label)).toBe('—'); // the word cut (P174)
+    expect(screen.queryByText('Not observed yet')).toBeNull();
   });
 
   // M3: the Refresh is the owner's gesture; opening the tab starts nothing
@@ -320,7 +375,7 @@ describe('session info of a session with no live process', () => {
     offline();
     backend.script('session.observedFacts', () => null);
     mount(ctxOf(READY));
-    await waitFor(() => expect(valueOf('Main')).toBe('Not observed yet'));
+    await waitFor(() => expect(backend.calls.some((c) => c.command === 'session.observedFacts')).toBe(true));
     const acquires = () => backend.calls.filter((c) => c.command === 'session.acquire').map((c) => c.input);
     expect(acquires()).toEqual([]);
     fireEvent.click(screen.getByRole('button', { name: 'Refresh' }));
@@ -332,7 +387,8 @@ describe('session info of a session with no live process', () => {
     useSessions.setState({ engine: new Map(), records: new Map([[READY, { ...record, holder: { kind: 'terminal', pid: 4711 } }]]), digests: new Map([[READY, digest(READY, { availability: 'foreign_held' })]]) });
     backend.script('session.observedFacts', () => null);
     mount(ctxOf(READY));
-    await waitFor(() => expect(valueOf('Main')).toBe('Not observed yet'));
+    unfold();
+    await waitFor(() => expect(backend.calls.some((c) => c.command === 'session.observedFacts')).toBe(true));
     expect(screen.getByText('Held by terminal · 4711')).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Take over here' })).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Fork a copy' })).toBeTruthy();
@@ -345,7 +401,10 @@ describe('session info of a session with no live process', () => {
 // W2 (C3; §5.5 as amended 2026-10-01): the status line is gone, so what only its usage popover's footer offered lives here.
 describe('the route switch and the Direct poll, re-homed from the status line', () => {
   const settingsWith = (gateway: Partial<Settings['gateway']>) => useSettings.setState({ state: { settings: { ...SETTINGS_DEFAULTS_V21, gateway: { ...SETTINGS_DEFAULTS_V21.gateway, ...gateway } }, resolvedTheme: 'light' } as never });
-  const route = () => screen.getByText('Route', { selector: 'dt' }).nextElementSibling as HTMLElement;
+  const route = () => {
+    unfold();
+    return screen.getByText('Route', { selector: 'dt' }).nextElementSibling as HTMLElement;
+  };
 
   // P5 O7 M8: the switch's restart (`session.stop`) is declared not offered on another machine (REMOTE_UNAVAILABLE): the
   // button is greyed with the declared words
@@ -390,7 +449,8 @@ describe('the route switch and the Direct poll, re-homed from the status line', 
     useGateway.setState({ switching: new Map() });
     useSessions.setState({ records: new Map([[READY, { ...record, holder: { kind: 'terminal', pid: 7 } as never }]]) });
     mount(ctxOf(READY));
-    expect(valueOf('Route')).toBe('Gateway · ClaudeUsage relay · http://127.0.0.1:8641 · Held by a terminal · switch it there');
+    unfold();
+    expect(valueOf('Route')).toBe('Gateway · http://127.0.0.1:8641 · Held by a terminal · switch it there');
     expect(within(route()).queryByRole('button')).toBeNull();
   });
 
@@ -423,9 +483,10 @@ describe('the route switch and the Direct poll, re-homed from the status line', 
 describe('session info names the browser’s loaded pages', () => {
   afterEach(() => resetBrowser());
 
-  it('reads none, then the loaded tabs across sessions with the sum of their sampled working sets', () => {
+  it('draws no row with none loaded, then the loaded tabs across sessions with the sum of their sampled working sets', () => {
     mount(ctxOf(READY));
-    expect(valueOf('Browser tabs')).toBe('No tabs loaded');
+    unfold();
+    expect(screen.queryByText('Browser tabs', { selector: 'dt' })).toBeNull(); // the word cut (T540)
     cleanup();
     const other = at('app-other' as AppSessionId);
     browser.setState({
@@ -435,7 +496,9 @@ describe('session info names the browser’s loaded pages', () => {
       ]),
     });
     mount(ctxOf(READY));
-    expect(valueOf('Browser tabs')).toBe('2 loaded · 412 MB · outside the engine budget');
+    unfold();
+    expect(valueOf('Browser tabs')).toBe('2 loaded · 412 MB'); // T539
+    expect(tipOf('Browser tabs')).toBe('outside the engine budget'); // P162
   });
 });
 // E4a end
@@ -460,6 +523,11 @@ describe('session info for another machine’s terminal session', () => {
     useSessions.setState({ listed: new Map([[REMOTE, { ...remoteRow(OTHER_MACHINE, 'eng-r', { lane: 'A', availability: 'foreign_held' }), appId: REMOTE }]]) });
     applyLaneAState(REMOTE, laneAState(REMOTE, { engineSessionId: 'eng-r', link: LINK, acts: [], turn: { running: true, unknown: false } }));
     mount({ ...ctxOf(REMOTE), session: null });
+    // the word cut (T266): folded to its head, the count beside it
+    const head = within(screen.getByRole('heading', { name: /^Not available here/ })).getByRole('button', { expanded: false });
+    expect(head.textContent).toMatch(/^Not available here\d+$/);
+    expect(within(head).getByRole('img').getAttribute('aria-label')).toMatch(/^\d+ not available$/);
+    fireEvent.click(head);
     const unavailable = screen.getByRole('region', { name: 'Not available here' });
     const rows = within(unavailable).getAllByRole('term').map((term) => [term.textContent, term.nextElementSibling?.textContent]);
     expect(rows).toEqual(expect.arrayContaining([
@@ -472,6 +540,7 @@ describe('session info for another machine’s terminal session', () => {
     cleanup();
     machine(['rl2.feeds', 'rl2.agent-scope']);
     mount({ ...ctxOf(REMOTE), session: null });
+    unfold();
     const terms = within(screen.getByRole('region', { name: 'Not available here' })).getAllByRole('term').map((term) => term.textContent);
     expect(terms).not.toContain('Subagent rows');
     expect(terms).toContain('Take over in MAWS');

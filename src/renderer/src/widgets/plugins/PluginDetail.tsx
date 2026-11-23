@@ -270,7 +270,7 @@ function SessionFacts({ appSessionId, availability, identity, loaded, loadedIds,
   const refresh = useRefresh(loaded.refresh);
   const problems = present(loaded).problems.filter((p) => p.plugin === identity.name || p.plugin === identity.id);
   let loadedWords: string;
-  if (fact.kind === 'unknown') loadedWords = FRESHNESS.notObserved;
+  if (fact.kind === 'unknown') loadedWords = FRESHNESS.unknown; // the word cut (P174)
   else if (fact.kind === 'absent') loadedWords = L.notLoadedHere;
   else if (fact.freshness.kind === 'now') loadedWords = `${L.loadedHere} · ${FRESHNESS.loadedNow}`;
   else if (fact.freshness.kind === 'last') loadedWords = `${L.loadedHere} · ${FRESHNESS.loadedLast(fact.freshness.at, now)}`;

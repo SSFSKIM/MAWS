@@ -42,6 +42,8 @@ const PR: ScmPrState = {
     mergeStateStatus: 'CLEAN', checks: { summary: 'pending', items: [check('pass', 'lint'), check('pass', 'unit'), check('pending', 'e2e')] },
   },
 };
+// Another PR, for the answers that must differ from the first one's (the word cut, P43: a branch with no PR draws no row)
+const OTHER_PR = (branch: string, over: Partial<ScmPrState> = {}): ScmPrState => ({ ...PR, branch, ...over, pr: { ...PR.pr!, number: 14, url: 'https://github.com/o/r/pull/14', headRefName: branch } });
 const PASSED: ScmPrState = { ...PR, checkedAt: '2026-10-06T10:01:00.000Z', pr: { ...PR.pr!, checks: { summary: 'pass', items: [check('pass', 'lint'), check('pass', 'unit'), check('pass', 'e2e')] } } };
 
 let fake: FakeClient;
@@ -93,7 +95,7 @@ describe('push state row shows PR state, install and sign-in states and opens th
   it('reads the PR, its state and its checks, polling the shared query with refresh off; the number opens the PR', async () => {
     const user = userEvent.setup();
     await mount();
-    await lineReads('PR #12 Open · 2 passed, 1 pending');
+    await lineReads('PR #12 · 1 pending');
     expect(fake.invoked('scm.status')).toEqual([{ appSessionId: MAIN_A }]);
     expect(fake.invoked('scm.pr.state')).toEqual([{ appSessionId: MAIN_A, refresh: false }]);
     await user.click(within(push()).getByRole('button', { name: 'PR #12' }));
@@ -103,11 +105,11 @@ describe('push state row shows PR state, install and sign-in states and opens th
   it('Refresh asks gh again, shows its answer and re-reads scm.status', async () => {
     const user = userEvent.setup();
     await mount();
-    await lineReads('PR #12 Open · 2 passed, 1 pending');
+    await lineReads('PR #12 · 1 pending');
     const refresh = within(push()).getByRole('button', { name: 'Refresh PR state' });
     expect(refresh.getAttribute('title')).toMatch(/^Checked /);
     await user.click(refresh);
-    await lineReads('PR #12 Open · 3 passed');
+    await lineReads('PR #12'); // the word cut (P44): an open PR whose checks passed says its number alone
     expect(fake.invoked('scm.pr.state')).toEqual([{ appSessionId: MAIN_A, refresh: false }, { appSessionId: MAIN_A, refresh: true }]);
     await waitFor(() => expect(fake.invoked('scm.status')).toEqual([{ appSessionId: MAIN_A }, { appSessionId: MAIN_A }]));
   });
@@ -118,7 +120,7 @@ describe('push state row shows PR state, install and sign-in states and opens th
   it('writes no Refresh answer that lands after a move reset the PR state', async () => {
     const user = userEvent.setup();
     let moved = false;
-    bridge({ 'scm.pr.state': () => (moved ? { ...PR, pr: null } : PR) });
+    bridge({ 'scm.pr.state': () => (moved ? OTHER_PR('feature') : PR) });
     let held!: (answer: ScmPrState) => void;
     const invoke = fake.client.invoke;
     fake.client.invoke = ((command: CommandName, input: never, opts: never) =>
@@ -126,15 +128,15 @@ describe('push state row shows PR state, install and sign-in states and opens th
         ? (void invoke(command, input, opts), new Promise((resolve) => (held = (value) => resolve({ ok: true, value })))) // recorded, then held
         : invoke(command, input, opts)) as never;
     await mount();
-    await lineReads('PR #12 Open · 2 passed, 1 pending');
+    await lineReads('PR #12 · 1 pending');
     await user.click(within(push()).getByRole('button', { name: 'Refresh PR state' }));
     await waitFor(() => expect(fake.invoked('scm.pr.state')).toContainEqual({ appSessionId: MAIN_A, refresh: true }));
     moved = true;
     act(() => resetScmQueries((appSessionId) => appSessionId === A));
-    await lineReads('No PR for feature'); // the new checkout's answer
+    await lineReads('PR #14 · 1 pending'); // the new checkout's answer
     held(PASSED); // the old checkout's Refresh lands
     for (let i = 0; i < 4; i++) await settle();
-    expect(prLine()?.textContent).toBe('No PR for feature');
+    expect(prLine()?.textContent).toBe('PR #14 · 1 pending');
   });
 
   // The branch review (finding 7): the PR state is the checkout's as well as the session's. Two checkouts on branches of
@@ -157,19 +159,23 @@ describe('push state row shows PR state, install and sign-in states and opens th
       return <QueryClientProvider client={queryClient}><PushState directory={directory} appSessionId={A} /></QueryClientProvider>;
     }
     const view = render(<At directory={DIR} />);
-    await lineReads('PR #12 Open · 2 passed, 1 pending');
+    await lineReads('PR #12 · 1 pending');
     view.rerender(<At directory={OTHER_DIR} />);
     for (let i = 0; i < 4; i++) await settle();
     expect(prLine()?.textContent ?? '').not.toContain('#12');
     await waitFor(() => expect(asks).toBe(2));
-    act(() => held({ ...PR, pr: null }));
-    await lineReads('No PR for feature');
+    act(() => held(OTHER_PR('feature')));
+    await lineReads('PR #14 · 1 pending');
   });
 
-  it('says No PR for the branch, and why the PR state is unavailable', async () => {
+  it('draws no PR row for a branch with no PR, and says why the PR state is unavailable', async () => {
     bridge({ 'scm.pr.state': { ...PR, pr: null } });
     let view = await mount();
-    await lineReads('No PR for feature');
+    await waitFor(() => expect(fake.invoked('scm.pr.state')).toHaveLength(1));
+    for (let i = 0; i < 4; i++) await settle();
+    expect(prLine()).toBeNull(); // the word cut (P43)
+    expect(within(push()).queryByRole('button', { name: 'Refresh PR state' })).toBeNull();
+    expect(within(push()).queryByText(/No PR/)).toBeNull();
     view.unmount();
     bridge({ 'scm.pr.state': { ...PR, pr: null, error: 'gh pr view: HTTP 502' } });
     view = await mount();
@@ -253,7 +259,7 @@ describe('push state row shows PR state, install and sign-in states and opens th
 
     it('after a switch, says nothing of the old branch’s PR until the new branch’s answer', async () => {
       await mount();
-      await lineReads('PR #12 Open · 2 passed, 1 pending');
+      await lineReads('PR #12 · 1 pending');
       let answer: (value: ScmPrState) => void = () => {};
       const invoke = fake.client.invoke;
       fake.client.invoke = (async (command: CommandName, input: never) =>
@@ -263,28 +269,28 @@ describe('push state row shows PR state, install and sign-in states and opens th
       await settle();
       expect(within(push()).getByText('Up to date with origin/other')).toBeTruthy();
       expect(prLine()).toBeNull();
-      act(() => answer({ ...PR, checkedAt: '2026-10-06T10:02:00.000Z', branch: 'other', pr: null }));
-      await lineReads('No PR for other');
+      act(() => answer(OTHER_PR('other', { checkedAt: '2026-10-06T10:02:00.000Z' })));
+      await lineReads('PR #14 · 1 pending');
     });
 
     // E11 (tracker row E6 "PR-state answer naming another branch not re-asked"): a fresh answer for the old branch is
     // asked again at once rather than waiting out the poll
     it('remounted after a switch made while nothing showed it, asks again once and shows the new branch’s answer', async () => {
       let branch = 'feature';
-      bridge({ 'git.watch': () => (branch === 'feature' ? GIT : OTHER), 'scm.pr.state': () => (branch === 'feature' ? PR : { ...PR, checkedAt: '2026-10-06T10:02:00.000Z', branch: 'other', pr: null }) });
+      bridge({ 'git.watch': () => (branch === 'feature' ? GIT : OTHER), 'scm.pr.state': () => (branch === 'feature' ? PR : OTHER_PR('other', { checkedAt: '2026-10-06T10:02:00.000Z' })) });
       const view = await mount();
-      await lineReads('PR #12 Open · 2 passed, 1 pending');
+      await lineReads('PR #12 · 1 pending');
       view.unmount();
       branch = 'other';
       setStatus(OTHER); // no surface mounted: the shared query keeps feature's answer, still fresh
       await mount();
-      await lineReads('No PR for other');
+      await lineReads('PR #14 · 1 pending');
       expect(fake.invoked('scm.pr.state')).toEqual([{ appSessionId: MAIN_A, refresh: false }, { appSessionId: MAIN_A, refresh: false }]);
     });
 
     it('hides on a detached head, and back on another branch shows no PR of the branch it left', async () => {
       await mount();
-      await lineReads('PR #12 Open · 2 passed, 1 pending');
+      await lineReads('PR #12 · 1 pending');
       setStatus({ ...GIT, branch: null, upstream: null });
       await settle();
       expect(screen.queryByRole('region', { name: 'Push state' })).toBeNull();
@@ -311,6 +317,23 @@ describe('push state row shows PR state, install and sign-in states and opens th
     expect(addTool).toHaveBeenCalledWith('source-control', { appSessionId: A });
   });
 
+  // the word cut (P39): commits ahead and behind are marks, the sentence with the remote's name their name and tooltip
+  it('draws ahead and behind as marks named by the sentence, plain words when level or not pushed', async () => {
+    const setStatus = (status: GitStatus) =>
+      act(() => useGit.setState((s) => ({ entries: new Map(s.entries).set(checkoutKey(TEST_MACHINE, DIR), { ...s.entries.get(checkoutKey(TEST_MACHINE, DIR))!, status }) })));
+    registerPanelTool(probeTool('source-control', { multiInstance: false }).tool);
+    await mount();
+    setStatus({ ...GIT, ahead: 2, behind: 1 });
+    const marks = within(push()).getByRole('button', { name: '2 ahead of origin/feature · 1 behind', description: 'Open Source control' });
+    expect(marks.textContent).toBe('↑2 ↓1');
+    setStatus({ ...GIT, ahead: 0, behind: 3 });
+    expect(within(push()).getByRole('button', { name: '3 behind origin/feature', description: 'Open Source control' }).textContent).toBe('↓3'); // not "Up to date": that is a level branch's
+    setStatus({ ...GIT, ahead: 0, behind: 0 });
+    expect(within(push()).getByRole('button', { name: 'Up to date with origin/feature' }).textContent).toBe('Up to date with origin/feature');
+    setStatus({ ...GIT, upstream: null });
+    expect(within(push()).getByRole('button', { name: 'Not pushed' }).textContent).toBe('Not pushed');
+  });
+
   it('leaves the trust sentence once the folder is trusted in a session’s setup, without another click', async () => {
     const user = userEvent.setup();
     let scm: ScmStatus = { ...SCM, trusted: false };
@@ -323,7 +346,7 @@ describe('push state row shows PR state, install and sign-in states and opens th
     scm = { ...SCM, checkedAt: '2026-10-06T10:02:00.000Z' }; // main records the trust in the `trusting` phase
     act(() => fake.event('session.setup', { appSessionId: MAIN_A, phase: 'trusting', detail: null, outcome: null }));
     for (let i = 0; i < 4; i++) await settle();
-    await lineReads('PR #12 Open · 2 passed, 1 pending');
+    await lineReads('PR #12 · 1 pending');
     expect(fake.invoked('scm.pr.state')).toEqual([{ appSessionId: MAIN_A, refresh: false }]);
   });
 
@@ -332,14 +355,14 @@ describe('push state row shows PR state, install and sign-in states and opens th
     const answers: ScmPrState[] = [{ ...PR, checkedAt: '2026-10-06T09:59:00.000Z', gh: signedOut, pr: null, error: 'gh_unauthenticated' }, PR];
     bridge({ 'scm.pr.state': () => answers.shift() ?? PR });
     await mount();
-    await lineReads('PR #12 Open · 2 passed, 1 pending');
+    await lineReads('PR #12 · 1 pending');
     expect(fake.invoked('scm.pr.state')).toEqual([{ appSessionId: MAIN_A, refresh: false }, { appSessionId: MAIN_A, refresh: false }]);
   });
 
   it('polls the PR state every 2 minutes while the row is shown, and not at all once it is gone', async () => {
     vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
     const view = await mount();
-    await lineReads('PR #12 Open · 2 passed, 1 pending'); // the line's own render wakes the wait (its interval is faked)
+    await lineReads('PR #12 · 1 pending'); // the line's own render wakes the wait (its interval is faked)
     expect(fake.invoked('scm.pr.state')).toHaveLength(1);
     act(() => vi.advanceTimersByTime(119_999));
     await settle();
@@ -365,7 +388,7 @@ describe('push state row shows PR state, install and sign-in states and opens th
         <PushState directory={DIR} appSessionId={A} />
       </QueryClientProvider>,
     );
-    await lineReads('PR #12 Open · 2 passed, 1 pending');
+    await lineReads('PR #12 · 1 pending');
     expect(fake.calls.slice(before).filter((call) => call.startsWith('on '))).toEqual([]);
     await user.click(within(push()).getByRole('button', { name: 'Up to date with origin/feature' }));
     expect(addTool).toHaveBeenCalledWith('source-control', { appSessionId: A });

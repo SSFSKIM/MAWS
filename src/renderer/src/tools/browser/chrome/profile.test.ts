@@ -18,11 +18,13 @@ describe('avatarTone', () => {
 });
 
 describe('accountLine', () => {
-  it('names the signed-in account, or says the profile is not signed in', () => {
-    expect(accountLine({ gaiaName: 'Probe Owner', userName: 'probe@example.test' })).toBe('Signed in as Probe Owner · probe@example.test');
-    expect(accountLine({ gaiaName: 'Probe Owner', userName: null })).toBe('Signed in as Probe Owner');
-    expect(accountLine({ gaiaName: null, userName: 'probe@example.test' })).toBe('Signed in as probe@example.test');
-    expect(accountLine({ gaiaName: null, userName: null })).toBe('Not signed in to Chrome');
+  // the word cut (T478, T479): the account's names alone, and no line for a profile with no account
+  it('names the signed-in account, or nothing when the profile is signed in to none', () => {
+    expect(accountLine({ gaiaName: 'Probe Owner', userName: 'probe@example.test' })).toBe('Probe Owner · probe@example.test');
+    expect(accountLine({ gaiaName: 'Probe Owner', userName: null })).toBe('Probe Owner');
+    expect(accountLine({ gaiaName: null, userName: 'probe@example.test' })).toBe('probe@example.test');
+    expect(accountLine({ gaiaName: null, userName: null })).toBeNull();
+    expect(accountLine({ gaiaName: '', userName: '' })).toBeNull();
   });
 });
 
@@ -35,6 +37,13 @@ describe('syncLine', () => {
     expect(syncLine(state({}), NOW)).toBe('Last synced 5 minutes ago');
     expect(syncLine(state({ syncedAt: at(0.5) }), NOW)).toBe('Last synced now'); // the age is the date module's, in English (P4 DL 4)
     expect(syncLine(state({ syncedAt: null }), NOW)).toBeNull();
+  });
+
+  // the word cut (T484): under the popover's Sync bookmarks the age alone; Settings' note keeps the sentence
+  it('in its short form says the age alone, and a failure as the sentence form does', () => {
+    expect(syncLine(state({}), NOW, 'age')).toBe('5 minutes ago');
+    expect(syncLine(state({ syncedAt: null }), NOW, 'age')).toBeNull();
+    expect(syncLine(state({ error: 'missing', errorAt: at(1) }), NOW, 'age')).toBe('Couldn’t read Chrome’s bookmarks file · Last synced 5 minutes ago');
   });
 
   it('says the file could not be read, with the last good sync, or that the index is unavailable', () => {

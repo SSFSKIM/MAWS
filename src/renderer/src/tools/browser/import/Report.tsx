@@ -1,8 +1,10 @@
 // The sheet's report state (E4b Design §10): the summary line, the Keychain outcome when cookies were not imported,
-// the partitioned line, the sites per skip reason (hosts only, Decision Log 22), each extension with its state and the
-// permissions MAWS doesn't support, and which profile new tabs now browse as. A run that did not finish kept nothing
-// (main rolled it back, Decision Log 2), so its counts are framed as what the run reached before it stopped, and no
-// extension state or active line is shown for it.
+// the partitioned line, the lines per skip reason (the sites as a fold where main named some, hosts only, Decision Log
+// 22), each extension with its state and the permissions MAWS doesn't support, and which profile new tabs now browse
+// as. A run that did not finish kept nothing (main rolled it back, Decision Log 2), so it says so and the failure, and
+// shows no count, extension state or active line. The word cut: the summary ends at the skipped count, each reason one
+// of the lines under it, a reason main named no site for a line of its own (P388); no "Before it stopped" counts (P398);
+// the partitioned line only when some were not confirmed (T527).
 import { COOKIE_SKIP_REASONS, HISTORY_SKIP_REASONS, type ImportedExtension, type ImportReport } from '@shared/browser/import';
 import { PRIMARY, SECONDARY } from '../../../sessions/ui';
 import { useSettings } from '../../../stores/settings';
@@ -33,9 +35,6 @@ function Stopped({ report }: { report: ImportReport }) {
         </p>
       )}
       <p className="m-0 text-fg">{IMPORT_COPY.nothingKept(report.name)}</p>
-      <p data-import-summary className="m-0 text-ui-sm text-fg-muted">
-        {IMPORT_COPY.reached(IMPORT_COPY.summary(report))}
-      </p>
     </>
   );
 }
@@ -64,17 +63,23 @@ function Finished({ report }: { report: ImportReport }) {
           {IMPORT_COPY.bookmarksError(bookmarks.error)}
         </p>
       )}
-      {cookies !== null && cookies.partitioned.imported > 0 && (
+      {cookies !== null && cookies.partitioned.imported > cookies.partitioned.verified && (
         <p className="m-0 text-ui-sm text-fg-muted">{IMPORT_COPY.partitionedLine(cookies.partitioned.imported, cookies.partitioned.verified)}</p>
       )}
       {cookies !== null &&
         COOKIE_SKIP_REASONS.map((reason) => (
-          <Sites key={`cookies-${reason}`} label={IMPORT_COPY.skippedSites('cookies', IMPORT_COPY.cookieReasons[reason], cookies.skipped[reason])} hosts={cookies.hosts[reason]} />
+          <Skipped key={`cookies-${reason}`} count={cookies.skipped[reason]} label={IMPORT_COPY.skippedSites('cookies', IMPORT_COPY.cookieReasons[reason], cookies.skipped[reason])} hosts={cookies.hosts[reason]} />
         ))}
       {history !== null &&
         HISTORY_SKIP_REASONS.map((reason) => (
-          <Sites key={`history-${reason}`} label={IMPORT_COPY.skippedSites('history', IMPORT_COPY.historyReasons[reason], history.skipped[reason])} hosts={history.hosts[reason]} />
+          <Skipped key={`history-${reason}`} count={history.skipped[reason]} label={IMPORT_COPY.skippedSites('history', IMPORT_COPY.historyReasons[reason], history.skipped[reason])} hosts={history.hosts[reason]} />
         ))}
+      {bookmarks !== null && <Skipped count={bookmarks.skipped} label={IMPORT_COPY.skippedBookmarks(bookmarks.skipped)} hosts={undefined} />}
+      {extensions !== null &&
+        (['copyFailed', 'loadFailed'] as const).map((status) => {
+          const n = extensions.filter((extension) => extension.status === status).length;
+          return <Skipped key={`extensions-${status}`} count={n} label={IMPORT_COPY.skippedExtensions(status, n)} hosts={undefined} />;
+        })}
       {extensions !== null && extensions.length > 0 && (
         <section aria-label={IMPORT_COPY.extensionsHeading} className="mt-1 flex flex-col gap-1.5">
           <h3 className="m-0 text-ui-sm font-medium text-fg-muted">{IMPORT_COPY.extensionsHeading}</h3>
@@ -100,9 +105,11 @@ function Finished({ report }: { report: ImportReport }) {
   );
 }
 
-// One skip reason's sites (at most 20 hosts, main's cap), shown only when main named some.
-function Sites({ label, hosts }: { label: string; hosts: string[] | undefined }) {
-  if (!hosts || hosts.length === 0) return null;
+// One skip reason that skipped something: its sites as a fold (at most 20 hosts, main's cap) when main named some, else
+// its line alone. The extensions that could not be copied or loaded each also show it in the extension list.
+function Skipped({ count, label, hosts }: { count: number; label: string; hosts: string[] | undefined }) {
+  if (count === 0) return null;
+  if (!hosts || hosts.length === 0) return <p className="m-0 text-ui-sm text-fg-muted">{label}</p>;
   return (
     <details className="text-ui-sm text-fg-muted">
       <summary className="cursor-default">{label}</summary>

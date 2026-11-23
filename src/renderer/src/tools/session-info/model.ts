@@ -4,23 +4,23 @@
 // inputs and renders what this answers. A value not known yet reads `—`, never a guess. W2 (§5.5 as amended
 // 2026-10-01): with the status line gone, the Route row carries the Direct⇄gateway switch as its action, with the reason
 // when none is offered, and the usage rows carry the pace line the usage popover's footer showed.
+// The word cut (M3): where a value came from, and when a dormant session reported it, is the value's tooltip (`tip`),
+// not a note at rest (T253, P162); the Usage group keeps the pace and the cost, the context and the usage windows being
+// the context ring's and the usage displays' (P176); a fact not known reads `—` (P174).
 import { PERMISSION_MODE_LABELS } from '@shared/sessions/permission-mode-labels';
 import type { EngineSessionStatus } from '@shared/engine/status';
 import type { SessionRecord } from '@shared/graph/session';
 import type { SessionDigest } from '@shared/ipc/schema';
-import { contextTotal, type GetContextUsageResponse, type GetHooksListingResponse, type GetStatusResponse, type ListPermissionRulesResponse, type McpStatusResponse } from '@shared/wire/control';
+import type { GetHooksListingResponse, GetStatusResponse, ListPermissionRulesResponse, McpStatusResponse } from '@shared/wire/control';
 import type { SessionWindows } from '../../stores/usage';
 import { MODE_REFUSAL_WORDS, modeReported } from '../../statusline/mode-menu';
-import { resetsIn, windowShown } from '../../statusline/format';
 import { directLoginOf } from '../../gateway/direct-login';
 import { MACHINE_ROUTE, type SwitchTarget } from '../../gateway/copy'; // P5 O7 M9: MACHINE_ROUTE, SwitchTarget
 import { paceLine, type DirectLogin, type RoutingFacts } from '../../gateway/routing-facts';
-import { present as presentContext } from '../../widgets/ContextWidget';
 import { present as presentMcp } from '../../widgets/McpWidget';
-import { CONTEXT, MODEL } from '../../widgets/copy';
+import { MODEL } from '../../widgets/copy';
 import type { ModelRow } from '../../widgets/model';
 import { DEFAULT_ROW, modelAsk, modelName, type HeldAsk } from '@shared/sessions/model-label';
-import { num } from '../../widgets/parts';
 import { INFO, LANE } from './copy';
 import { contestLine, holderLine } from '../../attention/derive'; // W7
 import type { Lane } from './lane';
@@ -36,9 +36,10 @@ import type { Fact, ObservedFactsAnswer } from '@shared/engine/observed-facts';
 import { FRESHNESS } from '../../sessions/observed';
 // P2-A end
 
-// W2: `route` is the Direct⇄gateway switch, offering `targets` (the routing facts' own). UX wave U4a: `title`, the value's
-// tooltip (the Main row's raw model id).
-export type InfoRow = { label: string; value: string; title?: string; note?: string; action?: 'permissions' | 'route'; targets?: SwitchTarget[] };
+// W2: `route` is the Direct⇄gateway switch, offering `targets` (the routing facts' own). UX wave U4a, the word cut (T253):
+// `tip`, the value's tooltip, which the keyboard reaches (the Main row's raw model id; where a value came from); `note`,
+// what stays after the value at rest (a state: a refusal, a model still setting, a mismatch, who holds the session).
+export type InfoRow = { label: string; value: string; tip?: string; note?: string; action?: 'permissions' | 'route'; targets?: SwitchTarget[] };
 export type InfoSection = { title: string; rows: InfoRow[] };
 // A catalogue row as the model's name reads it (the listed models' and the route catalogue's alike).
 type NamingRow = { value: string; displayName: string; resolvedModel?: string };
@@ -68,7 +69,6 @@ export interface SessionInfoInput {
     rules: ListPermissionRulesResponse | null;
     hooks: GetHooksListingResponse | null;
     mcp: McpStatusResponse | null;
-    context: GetContextUsageResponse | null;
   };
 }
 
@@ -91,10 +91,11 @@ export function budgetRows(budget: BudgetState | null, digest: SessionDigest | n
 // C12 end
 
 // E4a: the app's browser pages beside the budget (E4a execution document, Design §12; Decision Log 5): renderer
-// processes of the app's own, which the engine budget does not count and never releases.
-export function browserTabsRow({ loaded, memoryKiB }: SessionInfoInput['browserTabs']): InfoRow {
-  const value = loaded === 0 ? BROWSER_COPY.sessionInfoNone : BROWSER_COPY.sessionInfo(loaded, memoryKiB === null ? null : Math.round(memoryKiB / 1024));
-  return { label: BROWSER_COPY.sessionInfoLabel, value };
+// processes of the app's own, which the engine budget does not count and never releases. The word cut: no row while no
+// page is loaded (T540), and that they stand outside the budget is the tooltip (T539, P162).
+export function browserTabsRow({ loaded, memoryKiB }: SessionInfoInput['browserTabs']): InfoRow | null {
+  if (loaded === 0) return null;
+  return { label: BROWSER_COPY.sessionInfoLabel, value: BROWSER_COPY.sessionInfo(loaded, memoryKiB === null ? null : Math.round(memoryKiB / 1024)), tip: BROWSER_COPY.sessionInfoSource };
 }
 
 // W7: who holds the session, read through the same derivation as the glyph and the tab (§5.7).
@@ -119,18 +120,19 @@ export function drivenSection(capability: (key: ControlKey) => Capability): Info
   return rows.length === 0 ? null : { title: INFO.unavailableTitle, rows };
 }
 
-// P2-A start (2026-10-09; X17): a row from one observed fact, labelled with when; "Not observed yet" for an unknown one
-// (never a record's default), `—` while the facts are being read
+// P2-A start (2026-10-09; X17): a row from one observed fact, when it was reported its tooltip (the word cut, T253); `—`
+// for an unknown one (P174: never a record's default) and while the facts are being read
 function observedRow<T>(label: string, observed: NonNullable<SessionInfoInput['observed']>, fact: (facts: ObservedFactsAnswer) => Fact<T>, value: (v: T) => string, now: number): InfoRow {
   const known = observed.facts ? fact(observed.facts) : null;
-  if (known) return { label, value: value(known.value), note: FRESHNESS.lastObserved(known.at, now) };
-  return { label, value: observed.loading ? NONE : FRESHNESS.notObserved };
+  if (known) return { label, value: value(known.value), tip: FRESHNESS.lastObserved(known.at, now) };
+  return { label, value: NONE };
 }
 // P2-A end
 
 function engineSection({ record, status, digest, budget, browserTabs, observed, now, driven }: SessionInfoInput): InfoSection { // C12: digest, budget; E4a: browserTabs; P2-A: observed, now
   const version = status?.engineVersion ?? record.engineVersion;
   const tree = status?.memory.treeRssKiB ?? null;
+  const tabs = browserTabsRow(browserTabs); // E4a
   return {
     title: INFO.sections.engine,
     rows: [
@@ -143,7 +145,7 @@ function engineSection({ record, status, digest, budget, browserTabs, observed, 
       heldByRow(record, { bridged: driven != null }), // W7; P5 O9 M5
       { label: INFO.processTree, value: tree === null ? NONE : INFO.tree(mb(tree), status?.memory.rssKiB == null ? null : mb(status.memory.rssKiB)) },
       ...budgetRows(budget, digest), // C12
-      browserTabsRow(browserTabs), // E4a
+      ...(tabs ? [tabs] : []), // E4a
     ],
   };
 }
@@ -163,16 +165,20 @@ function modelSection(input: SessionInfoInput): InfoSection {
   const pending = ask !== null && ask.pending;
   const id = ask !== null && ask.pending ? (ask.asked ?? catalogue.find((r) => r.value === DEFAULT_ROW)?.resolvedModel ?? DEFAULT_ROW) : (model.resolved ?? model.requested);
   // UX wave U4a (decision 19): the chip's name for it ("Opus 5.5 High", Fast while the status says fast mode is on), the
-  // raw id as its title; an id the name cannot be read from (`default` with no catalogue) as it is
+  // raw id as its tooltip; an id the name cannot be read from (`default` with no catalogue) as it is. A model still
+  // setting says so at rest: since the word cut's C39 that is a state ("setting…"), no longer the note T253 moved.
   const named = modelName(id, catalogue, { effort, fast: status?.fastMode.state === 'on' });
   const rows: InfoRow[] = [
-    { label: INFO.main, value: named?.text ?? id ?? NONE, ...(id !== null && { title: id }), note: pending ? MODEL.pending : undefined },
-    status?.subagentModel ? { label: INFO.subagents, value: status.subagentModel, note: INFO.subagentChosen } : { label: INFO.subagents, value: status ? INFO.subagentsInherit : NONE },
+    { label: INFO.main, value: named?.text ?? id ?? NONE, ...(id !== null && { tip: id }), note: pending ? MODEL.pending : undefined },
+    subagentsRow(status),
   ];
   const overrides = Object.entries(status?.modelOverrides ?? {});
-  if (overrides.length > 0) rows.push({ label: INFO.overrides, value: overrides.map(([k, v]) => `${k} → ${v}`).join('; '), note: INFO.passedThrough });
+  if (overrides.length > 0) rows.push({ label: INFO.overrides, value: overrides.map(([k, v]) => `${k} → ${v}`).join('; '), tip: INFO.passedThrough });
   return { title: INFO.sections.model, rows };
 }
+
+const subagentsRow = (status: EngineSessionStatus | null): InfoRow =>
+  status?.subagentModel ? { label: INFO.subagents, value: status.subagentModel, tip: INFO.subagentChosen } : { label: INFO.subagents, value: status ? INFO.subagentsInherit : NONE };
 
 // P2-A (X17): with no live process, the model, the effort and the output style the engine last reported, each with its
 // own age (they are reported at different moments)
@@ -182,7 +188,7 @@ function observedModelSection({ status, now }: SessionInfoInput, observed: NonNu
     rows: [
       observedRow(INFO.main, observed, (f) => f.model, (model) => model, now),
       observedRow(INFO.effort, observed, (f) => f.effort, (effort) => effort, now),
-      status?.subagentModel ? { label: INFO.subagents, value: status.subagentModel, note: INFO.subagentChosen } : { label: INFO.subagents, value: status ? INFO.subagentsInherit : NONE },
+      subagentsRow(status),
       observedRow(INFO.outputStyle, observed, (f) => f.outputStyle, (style) => style, now),
     ],
   };
@@ -199,7 +205,7 @@ function gatewaySection({ status, facts, directLogin, reads }: SessionInfoInput)
   if (!status || facts.machine) route = { label: INFO.route, value: facts.line };
   else if (status.gateway.verified === 'routed') route = { label: INFO.route, value: INFO.routed(status.gateway.baseUrl ?? NONE) };
   else if (status.gateway.verified === 'direct') route = { label: INFO.route, value: login ? INFO.directLogin(login.login) : INFO.direct };
-  else route = { label: INFO.route, value: INFO.unverified, note: status.gateway.verified === 'mismatch' ? INFO.mismatch(status.gateway.mode) : INFO.pending };
+  else route = { label: INFO.route, value: INFO.unverified, ...(status.gateway.verified === 'mismatch' && { note: INFO.mismatch(status.gateway.mode) }) }; // T258: no note until checked
   // W2: the switch the usage popover's footer offered, or why there is none (held elsewhere, archived)
   const note = [route.note, facts.refusal].filter((n): n is string => typeof n === 'string').join(' · ');
   rows.push({ ...route, note: note || undefined, ...(facts.targets.length > 0 ? { action: 'route' as const, targets: facts.targets } : {}) });
@@ -225,7 +231,7 @@ export function modeRow({ record, status, observed, now, driven }: Pick<SessionI
   if (driven) return drivenModeRow(driven, now);
   if (observed) return observedRow(INFO.mode, observed, (f) => f.mode, (m) => PERMISSION_MODE_LABELS[m], now);
   const mode = status?.permissionMode ?? record.permissionMode;
-  return { label: INFO.mode, value: PERMISSION_MODE_LABELS[mode.effective], note: mode.refusal ? `${INFO.effectiveNote} · ${MODE_REFUSAL_WORDS[mode.refusal]}` : INFO.effectiveNote };
+  return { label: INFO.mode, value: PERMISSION_MODE_LABELS[mode.effective], tip: INFO.effectiveNote, ...(mode.refusal && { note: MODE_REFUSAL_WORDS[mode.refusal] }) }; // a refusal stays at rest
 }
 
 // A driven session's Mode row, from its chip's binding: the mode as the session reported it, with how long ago.
@@ -240,43 +246,26 @@ function permissionsSection(input: SessionInfoInput): InfoSection {
   const grants = status?.grants.length ?? 0;
   const rules = reads.rules?.state.rules;
   const count = (behavior: string) => rules?.filter((r) => r.behavior === behavior).length ?? 0;
-  const laneValue = lane ? lane.sentence : NONE;
+  const laneValue = lane ? lane.short : NONE;
   return {
     title: INFO.sections.permissions,
     rows: [
       modeRow(input),
-      { label: INFO.lane, value: laneValue, note: lane?.reviews ? LANE.reviews(lane.reviews.evaluated, lane.reviews.flagged) : undefined },
+      { label: INFO.lane, value: laneValue, ...(lane !== null && lane.short !== lane.sentence && { tip: lane.sentence }), note: lane?.reviews ? LANE.reviews(lane.reviews.evaluated, lane.reviews.flagged) : undefined },
       { label: INFO.rules, value: rules ? INFO.ruleCounts(count('allow'), count('ask'), count('deny'), grants) : INFO.grantsOnly(grants), action: 'permissions' },
     ],
   };
 }
 
-function usageSection({ digest, windows, now, reads, observed }: SessionInfoInput): InfoSection { // P2-A: observed
-  // C3's sample (the digest, at ready and after every turn) first; the engine's summary only before one arrived
-  const sampled = digest?.context;
-  // P2-A: with no live process, the last reading the engine host kept, labelled with when; the digest's (this app run's,
-  // with no time) when the host kept none
-  const contextLine = (c: NonNullable<SessionDigest['context']>) => CONTEXT.line(num(c.totalTokens), num(c.maxTokens), Math.round(c.percent), c.autoCompactThreshold === null ? null : num(c.autoCompactThreshold));
-  const contextRow: InfoRow | null =
-    observed && (observed.facts?.contextUsage || !sampled) ? observedRow(INFO.context, observed, (f) => f.contextUsage, contextLine, now) : null;
-  const context = sampled
-    ? contextLine(sampled)
-    : reads.context
-      ? presentContext({ ...reads.context, ...contextTotal(reads.context) }).line // corrected as C3 corrects its sample (debt wave 4)
-      : NONE;
-  const meter = (label: string, w: NonNullable<SessionWindows['windows']>['fiveHour']) => {
-    if (!w) return null;
-    const shown = windowShown(w, now);
-    return `${label} ${Math.round(shown.percent)}%${shown.resetInMs === null ? '' : ` · resets in ${resetsIn(shown.resetInMs)}`}`;
-  };
-  const usage = windows.windows ? [meter('5h', windows.windows.fiveHour), meter('Weekly', windows.windows.sevenDay)].filter((m) => m !== null).join(' · ') : '';
+// The word cut (P176): the context and the usage windows are the context ring's and the usage displays' (the status
+// line's popover's figures), not repeated here; the pace, which only this panel shows since the status line went, and
+// the cost stay.
+function usageSection({ digest, windows, now }: SessionInfoInput): InfoSection {
   // W2: the pace the usage popover's footer gave a routed session, when a window runs out before it resets
   const pace = windows.source === 'direct' || !windows.windows ? [] : [paceLine(windows.windows.sevenDay, 'weekly', now), paceLine(windows.windows.fiveHour, 'fiveHour', now)].filter((l) => l !== null);
   return {
     title: INFO.sections.usage,
     rows: [
-      contextRow ?? { label: INFO.context, value: context },
-      { label: INFO.usage, value: usage || NONE, note: usage ? (windows.source === 'direct' ? INFO.fromEngine : INFO.fromClaudeUsage) : undefined },
       ...(pace.length > 0 ? [{ label: INFO.pace, value: pace.join(' · ') }] : []),
       { label: INFO.cost, value: digest?.cost ? INFO.costLine(usd(digest.cost.totalUsd), usd(digest.cost.sinceSeenUsd)) : NONE },
     ],

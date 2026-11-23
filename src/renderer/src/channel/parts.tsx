@@ -28,10 +28,10 @@ function useMachineOfName(name: string | null): MachineRef | null {
  * first, to nothing, then the labels, then the chip, then the alias, never under its twelve. The weights make the order
  * exact in practice (what leaks to the next part is a thousandth) and approximate in principle.
  *
- * A row's names, with the words between them ("and", "to everyone"), are one group (`Names`), which never wraps; the
- * row (`NAMES_ROW`) wraps around it, so a row too narrow for the names' minimums and its fixed parts (the chevron, the
- * count's words, the host's word, the time, which never shrink) moves the fixed parts after the names under them, and
- * the names never split between lines. The group enters its line at the sum of the parts' minimums (`min-w-min`, its
+ * A row's names, with the words between them ("and") and a folded run's count after them, are one group (`Names`),
+ * which never wraps; the row (`NAMES_ROW`) wraps around it, so a row too narrow for the names' minimums and its fixed
+ * parts (the chevron, the host's word, the time, which never shrink) moves the fixed parts after the names under them,
+ * and the names never split between lines. The group enters its line at the sum of the parts' minimums (`min-w-min`, its
  * min-content: a part's width is also its intrinsic contribution, which a flex basis is not), because `flex-wrap`
  * breaks lines by the items' base sizes, before any of them would shrink.
  */

@@ -69,6 +69,15 @@ const nestedOf = (recording: Recording) => Object.keys(recording.meta).find((age
 const agentRow = (depth: Locator, agentId: string) => depth.locator(`[data-agent-row="${agentId}"]`);
 const isRowNaming = (text: string) => (step: Step) => step.k === 'row' && JSON.stringify(step.row).includes(text);
 const jobRow = (depth: Locator, taskId: string) => depth.locator('[data-job-row]').filter({ has: depth.page().locator(`[data-task-id="${taskId}"]`) });
+// The word cut (T218): a completed job's state is its age alone (MAWS's shared row draws no `completed`); it reads as
+// ended (no Stop) and draws the time since the recording's completion of the suites, in whole weeks (the narrow age's
+// largest unit; the recording is weeks old), with no word for the outcome.
+const SUITE_COMPLETED_AT = Date.parse('2026-10-15T18:52:47.006Z'); // its task-notification's timestamp in SESSION_VIEW
+const WEEK = 7 * 24 * 3_600_000;
+async function expectCompleted(row: Locator): Promise<void> {
+  await expect(row.getByRole('button', { name: STOP_BUTTON })).toHaveCount(0);
+  await expect(row.locator('[data-part="state"]')).toHaveText(` · ${Math.floor((Date.now() - SUITE_COMPLETED_AT) / WEEK)}w ago`);
+}
 const outputOf = (depth: Locator, taskId: string) => depth.locator(`[data-testid="job-output"][data-task="${taskId}"]`);
 
 /** Scrolls the virtualized list a step at a time (`direction` -1 up, 1 down) until `target` is drawn. */
@@ -167,7 +176,7 @@ test('the jobs view: shells and the monitor with MAWS’s rows, Stop offered on 
 
   fm.playThrough();
   await expect(tab).toHaveText('Jobs · 4');
-  await expect(jobRow(jobs, SUITE)).toContainText('completed');
+  await expectCompleted(jobRow(jobs, SUITE));
   await expect(jobRow(jobs, SERVE)).toContainText('stopped');
   // Its file is still gone; its summary, from the notification, stands under MAWS's row beside the open output.
   await expect(outputOf(jobs, SERVE)).toHaveAttribute('data-phase', 'missing');
@@ -281,7 +290,8 @@ test('G4: a stop the engine refuses shows its message under the row, which keeps
   await serve.getByRole('button', { name: 'Stop' }).click();
   await expect(serve).toContainText(`Couldn't stop it: ${engine}`);
   await expect(serve).toHaveAttribute('data-stop', 'failed');
-  await expect(serve.locator('[data-part="line"]')).toContainText('running');
+  // the word cut (T216): a running row's state is its time alone, with no "running"; it names no outcome
+  await expect(serve.locator('[data-part="state"]')).not.toHaveText(/stopped|failed|ended with the session/);
   await expect(serve.getByRole('button', { name: 'Stop' })).toBeEnabled();
   await shot(page, 'dc10-failed');
 
@@ -350,7 +360,7 @@ test('G2: Stop stays disabled with §5’s reason without the bridge, on a read-
 
   // A job that has ended draws no Stop at all: its row says how it ended.
   fm.playThrough(isRowNaming(`<task-id>${SUITE}</task-id>`));
-  await expect(jobRow(jobs, SUITE)).toContainText('completed');
+  await expectCompleted(jobRow(jobs, SUITE));
   await expect(jobRow(jobs, SUITE).getByRole('button', { name: STOP_BUTTON })).toHaveCount(0);
 });
 

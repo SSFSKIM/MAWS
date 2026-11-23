@@ -235,17 +235,21 @@ function clip(text: string, cap: number): string {
   return `${text.slice(0, end)}…`;
 }
 
-// The answered exchanges a promotion carries (the most recent fifty, the command's bound), each clipped to the command's
-// caps, so a long pasted question or answer shortens its own exchange rather than refusing the promotion.
+/** Whether an exchange holds an answer with words in it: one with none reads "No answer", and nothing of it continues. */
+export const hasAnswer = (e: SideExchange): e is SideExchange & { response: string } => e.state === 'answered' && e.response !== null && e.response.trim() !== '';
+
+// The answered exchanges a promotion carries (the most recent fifty with an answer, the command's bound), each clipped
+// to the command's caps, so a long pasted question or answer shortens its own exchange rather than refusing the promotion.
 export const promotable = (exchanges: readonly SideExchange[]): { question: string; response: string }[] =>
   exchanges
-    .flatMap((e) => (e.state === 'answered' && e.response !== null ? [{ question: clip(e.question, SIDE_QUESTION_CAP), response: clip(e.response, SIDE_ANSWER_CAP) }] : []))
-    .slice(-50);
+    .filter(hasAnswer)
+    .slice(-50)
+    .map((e) => ({ question: clip(e.question, SIDE_QUESTION_CAP), response: clip(e.response, SIDE_ANSWER_CAP) }));
 
 // The ids of the exchanges `promotable` carries, in its order.
 const promotedIds = (exchanges: readonly SideExchange[]): string[] =>
   exchanges
-    .filter((e) => e.state === 'answered' && e.response !== null)
+    .filter(hasAnswer)
     .slice(-50)
     .map((e) => e.id);
 

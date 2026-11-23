@@ -549,13 +549,14 @@ export class TabStore {
   }
 
   // Room for one more loaded tab: true under the cap, or once the least recently shown eligible tab (never the page that
-  // opened it) is suspended for it (with the notice on `entry`); false when no tab is eligible.
+  // opened it) is suspended for it; false when no tab is eligible. cua #90: an internal
+  // victim is closed instead, and its own session told without the tab that is gone (as the memory cap tells it).
   private makeRoom(entry: TabEntry, opener?: TabEntry): boolean {
     if (this.loadedCount() < BROWSER_LOADED_TABS_MAX) return true;
     const victim = this.capVictim(entry, ...(opener ? [opener] : []));
     if (!victim) return false;
-    this.evict(victim.tab.tabId); // cua #90: an internal tab is closed instead
-    this.capNotice(entry);
+    const { appSessionId, tabId } = victim.tab;
+    if (this.evict(tabId) === 'closed') this.deps.emit('browser.notice', { appSessionId, tabId: null, kind: 'tabsCap', count: BROWSER_LOADED_TABS_MAX });
     return true;
   }
 
@@ -581,8 +582,9 @@ export class TabStore {
     return true;
   }
 
-  // Told in the chrome of the session whose open or resume met the cap, on the tab it opened or resumed (whether another
-  // tab, perhaps another session's, was unloaded for it, or it was itself left unloaded) (Design §2).
+  // Told in the chrome of the session whose open or resume met the cap, on the tab it opened or resumed, when that tab
+  // was itself left unloaded (Design §2). The word cut (T462): a tab unloaded to make room for it is told by its greyed
+  // chip alone, so a tab that got its room is told nothing; the refusal is, since its Load did nothing.
   private capNotice(opened: TabEntry): void {
     const { appSessionId, tabId } = opened.tab;
     this.deps.emit('browser.notice', { appSessionId, tabId, kind: 'tabsCap', count: BROWSER_LOADED_TABS_MAX });

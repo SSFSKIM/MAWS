@@ -3,6 +3,7 @@
 // Retry (`reload`, Decision Log 44 (c)); a suspended tab offering its last URL as parsed (Decision Log 34); a tab that
 // never navigated; a main tab whose tab is gone.
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { LOAD_ERROR_KINDS } from '@shared/browser/errors';
 import type { BrowserTab } from '@shared/browser/tab';
@@ -32,19 +33,27 @@ afterEach(() => {
 });
 
 const show = (over: Partial<BrowserTab>) => render(<BrowserPane tab={browserTab(T1, A, over)} surface="panel" />);
+const described = (element: Element) =>
+  (element.getAttribute('aria-describedby') ?? '')
+    .split(' ')
+    .filter(Boolean)
+    .map((id) => document.getElementById(id)?.textContent ?? '')
+    .join(' ');
 const loadError = (kind: (typeof LOAD_ERROR_KINDS)[number], description = 'ERR_X') => ({ url: 'http://127.0.0.1:1/', host: '127.0.0.1', kind, code: -102, description });
 
 describe('the error page', () => {
-  it.each(LOAD_ERROR_KINDS)('%s: Codex’s heading and the summary for the kind, with the host', (kind) => {
+  // the word cut (T415): the summary for the kind is the heading; "This site can't be reached" is gone. T417, T418: the
+  // tips stay.
+  it.each(LOAD_ERROR_KINDS)('%s: the summary for the kind, with the host, is the heading', (kind) => {
     show({ loadError: loadError(kind) });
-    expect(screen.getByRole('heading', { name: BROWSER_COPY.loadError.heading })).toBeTruthy();
-    expect(screen.getByText(BROWSER_COPY.loadError.summary[kind]('127.0.0.1'))).toBeTruthy();
+    expect(screen.getAllByRole('heading').map((heading) => heading.textContent)).toEqual([BROWSER_COPY.loadError.summary[kind]('127.0.0.1')]);
+    expect(screen.queryByText("This site can't be reached")).toBeNull();
     expect(screen.queryByText(BROWSER_COPY.loadError.try) === null).toBe(kind === 'certificate');
   });
 
   it('refused: the exact sentence, the error’s name, the details behind the second suggestion, and Reload', () => {
     show({ loadError: loadError('refused', 'ERR_CONNECTION_REFUSED') });
-    expect(screen.getByText('127.0.0.1 refused to connect')).toBeTruthy();
+    expect(screen.getByRole('heading', { name: '127.0.0.1 refused to connect' })).toBeTruthy();
     expect(screen.getByText('ERR_CONNECTION_REFUSED')).toBeTruthy();
     expect(screen.getByText('Checking the connection')).toBeTruthy();
     expect(screen.queryByText('Check your DNS settings')).toBeNull();
@@ -91,28 +100,37 @@ describe('the other pages', () => {
     useMachines.setState({ machines: new Map() });
   });
 
-  it('suspended with a URL: its title, Open <url> loading it as parsed, the restored note', () => {
+  // the word cut (T412, T413): Load, the address as its tooltip and description (the address field has it too); no note
+  it('suspended with a URL: its title, and Load, which loads it as parsed and carries the address', async () => {
     show({ suspended: true, url: 'https://Example.com/a', title: 'Page A' });
     expect(screen.getByText('Page A')).toBeTruthy();
-    expect(screen.getByText(BROWSER_COPY.suspended.note)).toBeTruthy();
-    fireEvent.click(screen.getByRole('button', { name: 'Open https://example.com/a' }));
+    expect(screen.queryByText('Tabs are restored unloaded')).toBeNull();
+    const load = screen.getByRole('button', { name: 'Load' });
+    expect(load.textContent).toBe('Load');
+    expect(load.hasAttribute('title')).toBe(false);
+    expect(described(load)).toBe('https://example.com/a');
+    await userEvent.setup().tab();
+    expect(document.activeElement).toBe(load);
+    expect((await screen.findByRole('tooltip')).textContent).toBe('https://example.com/a');
+    fireEvent.click(load);
     expect(navigations()).toEqual([{ tabId: T1, to: { url: 'https://example.com/a' } }]);
   });
 
-  it('a tab that never navigated, and a session with no tab: Start browsing', () => {
+  // the word cut (T409, T410): the globe alone; the address field's placeholder says what to do
+  it('a tab that never navigated, and a session with no tab: the globe alone, with no words', () => {
     show({ url: '', title: '' });
-    expect(screen.getByRole('heading', { name: BROWSER_COPY.empty.title })).toBeTruthy();
-    expect(screen.getByText(BROWSER_COPY.empty.body)).toBeTruthy();
+    const empty = () => document.querySelector('[data-browser-page="empty"]')!;
+    expect(empty().textContent).toBe('');
+    expect(screen.queryByRole('heading')).toBeNull();
     cleanup();
     render(<BrowserPane tab={null} surface="panel" />);
-    expect(screen.getByRole('heading', { name: BROWSER_COPY.empty.title })).toBeTruthy();
+    expect(empty().textContent).toBe('');
     expect(screen.queryByText(BROWSER_COPY.tabGone)).toBeNull();
   });
 
-  it('a main tab whose tab is gone: Start browsing, headed That tab was closed', () => {
+  it('a main tab whose tab is gone: That tab was closed, over the globe', () => {
     render(<BrowserPane tab={null} surface="main" gone />);
-    expect(screen.getByText(BROWSER_COPY.tabGone)).toBeTruthy();
-    expect(screen.getByRole('heading', { name: BROWSER_COPY.empty.title })).toBeTruthy();
+    expect(document.querySelector('[data-browser-page="empty"]')!.textContent).toBe(BROWSER_COPY.tabGone);
   });
 
   it('a refusal other than an unknown tab is warned; an unknown tab (closed meanwhile) is not', async () => {

@@ -39,7 +39,7 @@ const PDF = '/r/ledger.pdf';
 const PAGE = '/r/styled.html';
 const VIDEO = '/r/tide.webm';
 const SOUND = '/r/bell.wav';
-const STOPPED = 'This file stopped loading: it changed, or it can no longer be read.';
+const STOPPED = 'This file stopped loading.'; // the word cut (N12)
 const BESIDE = 'Shown without the files beside it';
 const FILES = { [PDF]: '%PDF-1.4 invented\n', [PAGE]: '<link rel="stylesheet" href="ledger.css"><p>Kassenbuch</p>', '/r/alone.html': '<p>Kassenbuch</p>', [VIDEO]: 'invented clip bytes', [SOUND]: 'invented sound bytes' };
 
@@ -81,13 +81,15 @@ const show = (path = PDF, host?: 'side' | 'main') => {
 const drawn = (path = PDF) => waitFor(() => expect(entry(path)?.frame?.status).toBe('ready'));
 
 describe('what a framed file’s body draws', () => {
-  it('draws Loading while its token is asked and nothing is drawn yet', async () => {
+  // The word cut (T302): nothing for the wait's first half second, then the quiet spinner named "Loading"
+  it('draws the quiet spinner named Loading while its token is asked and nothing is drawn yet', async () => {
     const main = disk();
     main.hold('layout.frameFile');
     show();
     await waitFor(() => expect(main.callsOf('layout.frameFile')).toHaveLength(1));
     expect(marker()).toBe('loading');
-    expect(within(body()).getByText('Loading')).toBeTruthy();
+    expect(within(body()).queryByText('Loading')).toBeNull();
+    expect(await within(body()).findByRole('progressbar', { name: 'Loading' }, { timeout: 2000 })).toBeTruthy();
     expect(document.querySelector('iframe')).toBeNull();
   });
 
@@ -112,7 +114,7 @@ describe('what a framed file’s body draws', () => {
     disk({ frames: () => ok({ status: 'row', why: 'too-large' }) });
     show();
     await waitFor(() => expect(marker()).toBe('row'));
-    expect(within(body()).getByText('Too large to show here: MAWS copies at most 64.0 MB from another machine.')).toBeTruthy();
+    expect(within(body()).getByText('Too large to show here')).toBeTruthy(); // the word cut (N14)
     expect(screen.queryByRole('button', { name: 'Open externally' })).toBeNull();
   });
 

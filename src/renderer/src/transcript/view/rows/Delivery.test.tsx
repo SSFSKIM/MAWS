@@ -119,4 +119,28 @@ describe('a delivery on another machine’s session', () => {
     expect(actions.openDelivered).toHaveBeenCalledExactlyOnceWith(REMOTE, '/repo/report.pdf');
     expect(actions.revealDelivered).not.toHaveBeenCalled();
   });
+
+  // The touch rule (ticket 830): where nothing points, what a button's tip says (what it does here, why it is greyed)
+  // stands after it, drawn by the stylesheet alone (ui/touch-fact.test.tsx) and hidden from assistive technology, which
+  // hears it as the button's description; a button with no tip draws none
+  it('stands each button’s tip after it for a screen that cannot point, hidden from assistive technology', () => {
+    const REMOTE = addressOf(OTHER_MACHINE, 'app-r' as AppSessionId);
+    useMachines.getState().applyRoster([
+      { ref: TEST_MACHINE, name: 'This Mac', local: true, state: 'up', since: '2026-10-31T10:00:00Z', generation: 0 },
+      { ref: OTHER_MACHINE, name: 'mini', local: false, state: 'up', since: '2026-10-31T10:00:00Z', generation: 0 },
+    ]);
+    applyRemoteSession(remoteSessionState(REMOTE));
+    renderRow({ ...ROW, files: [{ path: '/repo/report.pdf', name: 'report.pdf', id: 'd-1' }] }, { storeKey: REMOTE });
+    const buttons = ['Open externally: report.pdf', 'Reveal in Finder: report.pdf'].map((name) => screen.getByRole('button', { name }));
+    // each button and its tip's fact are one unit of the actions, so a wrap never sets one button's fact beside the other
+    const units = buttons.map((button) => button.parentElement!);
+    expect(units.map((unit) => [unit.parentElement!.classList.contains('transcript-delivery-actions'), unit.classList.contains('transcript-delivery-action')])).toEqual([[true, true], [true, true]]);
+    expect(units[0]).not.toBe(units[1]);
+    const facts = units.map((unit) => unit.querySelectorAll('[data-touch-fact]'));
+    expect(facts.map((found) => found.length)).toEqual([1, 1]);
+    expect(facts.map((found) => [found[0]!.getAttribute('data-touch-fact'), found[0]!.getAttribute('aria-hidden')])).toEqual([['', 'true'], ['', 'true']]);
+    expect(facts.map((found) => found[0]!.textContent)).toEqual(buttons.map((button) => document.getElementById(button.getAttribute('aria-describedby')!)!.textContent));
+    cleanup();
+    expect(renderRow(ROW, { storeKey: APP }).container.querySelector('[data-touch-fact]')).toBeNull();
+  });
 });

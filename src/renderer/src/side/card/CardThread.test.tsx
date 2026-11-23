@@ -39,6 +39,7 @@ import { showSideChild, sidePaneOf, useSidePane } from '../store';
 import { CommentCardHost, type CardFrame } from './CardHost';
 import { useCommentCard } from './store';
 import { preloadOf } from '../../test-support/preload-of';
+import { accessibleText } from '../../test-support/accessible-text';
 
 // One spy for every run of the mock's factory (P2-F S): vitest caches an async factory's exports only once it resolves,
 // so an importer arriving meanwhile runs the factory again. The transcript's lazy chunks, started at module evaluation,
@@ -154,8 +155,11 @@ describe('the card becomes the thread', () => {
     expect(useNotices.getState().notices).toEqual([]);
     const echo = card()!.querySelector('[data-card-echo]')!;
     expect(echo.textContent).toContain(COMMENT);
-    expect(echo.textContent).toContain('Starting…');
+    // the word cut (P432): the echo's wait is a quiet spinner named by its words; the field keeps its own placeholder
+    expect(echo.textContent).not.toContain('Starting…');
+    expect(await within(echo as HTMLElement).findByRole('progressbar', { name: 'Starting…' })).toBeTruthy();
     expect(replyField().disabled).toBe(true); // no record yet
+    expect(replyField().placeholder).toBe('Reply…'); // P442
 
     withRecord();
     await waitFor(() => expect(useTranscriptStore.getState().entries[child]?.phase).toBe('live'));
@@ -326,11 +330,15 @@ describe('Reply through the human send seam', () => {
     const replyRow = () => within(card()!).getAllByRole('region', { name: 'Your message' }).at(-1)!;
     await waitFor(() => expect(replyRow().textContent).toContain('Also the subtitle'));
     await act(async () => {});
-    expect(replyRow().textContent).not.toContain('Sent to Claude');
+    expect(within(replyRow()).queryByRole('img', { name: 'Sent to Claude' })).toBeNull();
     push([b.emit('command.lifecycle', { commandUuid: uuid('t2'), state: 'started' })]);
-    await waitFor(() => expect(replyRow().textContent).toContain('Sent to Claude'));
+    // the word cut (P443): the mark is a check, "Sent to Claude" its name and its tooltip, which the keyboard reaches
+    const mark = await waitFor(() => within(replyRow()).getByRole('img', { name: 'Sent to Claude' }));
+    expect(mark.textContent).toBe('✓');
+    expect(mark.getAttribute('title')).toBeNull();
+    expect(mark.tabIndex).toBe(0);
     const rows = within(card()!).getAllByRole('region', { name: 'Your message' });
-    expect(rows[0]!.textContent, 'the comment the card did not send this time carries no mark').not.toContain('Sent to Claude');
+    expect(within(rows[0]!).queryByRole('img', { name: 'Sent to Claude' }), 'the comment the card did not send this time carries no mark').toBeNull();
   });
 
   it('a queued reply is marked once the host releases it under its minted uuid and the engine starts it', async () => {
@@ -343,7 +351,7 @@ describe('Reply through the human send seam', () => {
     b.turn('t3', 'Later then');
     b.emit('command.lifecycle', { commandUuid: uuid('t3'), state: 'started' });
     push(b.events.slice(-4));
-    await waitFor(() => expect(within(card()!).getAllByRole('region', { name: 'Your message' }).at(-1)!.textContent).toContain('Sent to Claude'));
+    await waitFor(() => expect(within(within(card()!).getAllByRole('region', { name: 'Your message' }).at(-1)!).getByRole('img', { name: 'Sent to Claude' })).toBeTruthy());
   });
 
   // P2-A's final shape: the seam starts a released thread first and then sends, so a started reply is already the host's
@@ -472,7 +480,11 @@ describe('needs you', () => {
     await waitFor(() => expect(card()!.querySelector('[data-request-card]')?.textContent).toBe('Approval needed · request-end'));
     const strip = card()!.querySelector<HTMLElement>('[data-needs-you]')!;
     expect(strip.dataset.needsYou).toBe('attention');
-    expect(strip.textContent).toContain('Waiting for your permission');
+    // the word cut (P440): the waiting disc and a noun drawn, the sentence heard
+    expect(strip.querySelector('[data-needs-noun]')?.textContent).toBe('Permission');
+    expect(strip.querySelector('[data-needs-noun]')?.getAttribute('aria-hidden')).toBe('true');
+    expect(strip.querySelector('[data-needs-disc]')).not.toBeNull();
+    expect(accessibleText(strip)).toContain('Waiting for your permission');
     expect(within(strip).getByRole('button', { name: 'Open in Side pane' })).toBeTruthy();
     expect(within(strip).getByRole('button', { name: 'Open as tab' })).toBeTruthy();
   });
@@ -494,6 +506,7 @@ describe('needs you', () => {
     act(() => useSessions.setState({ records: new Map(useSessions.getState().records).set(child, { ...record(child), lineage: lineage(), holder: { kind: 'terminal', pid: 4242 } }) }));
     const strip = card()!.querySelector<HTMLElement>('[data-needs-you]')!;
     expect(strip.textContent).toContain('Held by terminal · 4242');
+    expect(strip.querySelector('[data-needs-disc]'), 'a held thread keeps its words, with no waiting disc').toBeNull();
     expect(within(strip).queryByRole('button', { name: 'Open in Side pane' })).toBeNull();
     expect(within(strip).getByRole('button', { name: 'Open as tab' })).toBeTruthy();
     expect(replyField().disabled).toBe(true);

@@ -1581,12 +1581,12 @@ async function relaunchedInstance(maws: MawsLaunch, saved: Saved): Promise<void>
   expect(file['window.main']).toMatchObject({ bounds: saved.bounds });
 
   // UX wave U8b (A5): the two widths after the relaunch. Files, a reading tool, opens at the wide width it was dragged to;
-  // Background tasks, any other tool, at the narrow automatic 360 px; neither changes what is stored.
+  // Background, any other tool, at the narrow automatic 360 px; neither changes what is stored.
   const panelResizer = page.locator('[data-region="panel"]').getByRole('separator', { name: 'Resize right panel' });
   await page.locator('[data-surface-row]').getByRole('button', { name: 'Files', exact: true }).click();
   await expect(page.locator('[data-region="panel"] [data-surface="files"]')).toBeVisible();
   await expect(panelResizer, 'Files as wide as it was left').toHaveAttribute('aria-valuenow', '320');
-  await openSurface(page, 'Background tasks');
+  await openSurface(page, 'Background'); // the word cut (T153)
   await expect(panelResizer, 'a narrow tool at its automatic width').toHaveAttribute('aria-valuenow', '360');
   expect(await layoutGet(page, 'panelTools.widths'), 'opening the tools wrote no width').toEqual(saved.side.widths);
 

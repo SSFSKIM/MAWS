@@ -218,7 +218,7 @@ export interface StackHunk {
   anchor: { side: 'old' | 'new'; line: number }; // the row it opens at (`hunkAnchor`)
 }
 
-// What "Showing hunk n of m" counts and ↑ and ↓ move through (§F): the hunks of every loaded file that is not marked
+// What the hunk counter ("n / m") counts and ↑ and ↓ move through (§F): the hunks of every loaded file that is not marked
 // Viewed and not past the per-file cap, in stack order, crossing files. A folded file's hunks count (a jump unfolds it);
 // a file whose hunks are not read yet (null) has none.
 export function hunkOrder(files: readonly { path: string; hunks: readonly string[] | null; blocks: readonly number[]; viewed: boolean }[]): StackHunk[] {

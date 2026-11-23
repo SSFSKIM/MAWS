@@ -226,6 +226,31 @@ describe('a strip too narrow for its tabs (decision 5)', () => {
   });
 });
 
+// The word cut (P11): a tab's glyphs show their verb alone as a tooltip the keyboard reaches, and keep the tab's title in
+// their names, which the tooltip does not repeat as a description.
+describe('the tab glyphs', () => {
+  it('reads Pin, Unpin and Close as tooltips on focus, the tab’s title in their names, and no system tooltip', () => {
+    register(probeTool('t', { title: 'Tee' }).tool);
+    useLayout.setState({
+      panelPinned: [ref('t:aaaa0001', true)],
+      panelBySession: new Map([[A, { tabs: [ref('t:aaaa0002')], activeTabId: 't:aaaa0002' }]]),
+      panelSurfaces: { version: 2, stacks: { [A]: ['t:aaaa0002'] }, pinnedTools: [], contexts: {} },
+    });
+    render(<Strip />);
+    const tooltip = () => screen.queryByRole('tooltip')?.textContent ?? null;
+    for (const [name, tip] of [['Unpin Tee', 'Unpin'], ['Pin Tee', 'Pin']] as const) {
+      const glyph = screen.getByRole('button', { name });
+      expect(glyph.hasAttribute('title')).toBe(false);
+      act(() => glyph.focus());
+      expect(tooltip()).toBe(tip);
+      expect(glyph.getAttribute('aria-describedby')).toBeNull();
+    }
+    const close = screen.getAllByRole('button', { name: 'Close Tee' })[0]!;
+    act(() => close.focus());
+    expect(tooltip()).toBe('Close');
+  });
+});
+
 // UX wave U6b-1 (M2): a file's side tab carries the unsaved mark a main file tab carries, read from the viewer's entry
 // under the file's key.
 describe('a file’s unsaved mark', () => {

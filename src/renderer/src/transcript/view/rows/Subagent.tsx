@@ -5,9 +5,12 @@
 // agent is doing and for how long (`{name} · {lastTool} · {t}`, updated from the child's own events, which are never
 // rendered in the parent; a workflow's phase in its tool's place) is the tooltip and the description of what stands for
 // it: its glyph in a grouped row, the line of a one-agent row, and the line's words where nothing opens an agent. A
-// failed child's goes while the others keep ticking.
+// failed child's goes while the others keep ticking. The touch rule (ticket 830): where nothing points, the details
+// whose owners are drawn stand under the line, one a line: in a grouped row the drawn glyphs' (past four, the rest once
+// `+N` opens them), else every working agent's, which the line or its words carry.
 import { ticks, useTranscriptStore, workingDurationMs } from '../../../stores/transcript';
 import { Tip } from '../../../ui/tip';
+import { TouchFact } from '../../../ui/touch-fact';
 import { subagentActivity } from '../../model/activity';
 import { SUBAGENT_WORKING, subagentDetail } from '../../model/copy';
 import { SUBAGENT_GLYPHS } from '../../model/glyphs';
@@ -80,6 +83,9 @@ export function SubagentRow({ row }: { row: SubagentRowData }) {
   }
   const single = open && row.agents.length === 1 ? row.agents[0] : null;
   const all = details.size === 0 ? null : [...details.values()].join('\n');
+  const [more] = useDisclosure(`agents:${row.id}`); // the glyphs' `+N`, whose agents' glyphs are drawn only while it is open
+  const drawnGlyphs = open && !single ? (more ? row.agents : row.agents.slice(0, SHOWN)) : null;
+  const owned = drawnGlyphs === null ? all : drawnGlyphs.flatMap((ref) => details.get(ref.taskId) ?? []).join('\n');
   const line = (
     <>
       {working && <span role="img" aria-label={SUBAGENT_WORKING} className="transcript-subagent-ring" />}
@@ -108,6 +114,9 @@ export function SubagentRow({ row }: { row: SubagentRowData }) {
       ) : (
         <div className="transcript-subagent-line">{line}</div>
       )}
+      <TouchFact block className="text-ui-sm">
+        {owned}
+      </TouchFact>
     </div>
   );
 }

@@ -124,19 +124,39 @@ describe('a file’s bar', () => {
   });
 
   // Review of 785e66161, finding 2: a file outside the session's folders has no folder MAWS hands a terminal, so the
-  // terminal rows are drawn disabled with the reason; Finder and the editors stay
-  it('draws the terminal rows disabled for a file outside the folders, saying why', async () => {
+  // terminal rows are drawn disabled with the reason; Finder and the editors stay. The word cut (N90): the rows stay in
+  // the keyboard's reach, drawn aria-disabled, the reason their description and their note, never a system tooltip
+  it('draws the terminal rows greyed for a file outside the folders, the keyboard reaching them and their reason', async () => {
     const user = userEvent.setup();
     render(<OpenInButton appSessionId={S} path="/elsewhere/notes.md" line={() => null} outside />);
     await user.click(screen.getByRole('button', { name: OPEN_IN_COPY.label }));
     const menu = (await screen.findByRole('menuitem', { name: 'Finder' })).closest<HTMLElement>('[role="menu"]')!;
-    expect(within(menu).getAllByRole('menuitem').map((item) => [item.textContent, item.getAttribute('aria-disabled'), item.getAttribute('title')])).toEqual([
-      ['VS Code', null, null],
-      ['Zed', null, null],
-      ['Terminal', 'true', OPEN_IN_COPY.terminalOutside],
-      ['Ghostty', 'true', OPEN_IN_COPY.terminalOutside],
-      ['Finder', null, null],
+    const described = (item: HTMLElement) => (item.getAttribute('aria-describedby') ? document.getElementById(item.getAttribute('aria-describedby')!)?.textContent : null);
+    expect(within(menu).getAllByRole('menuitem').map((item) => [item.getAttribute('aria-label') ?? item.textContent, item.getAttribute('aria-disabled'), described(item), item.getAttribute('title')])).toEqual([
+      ['VS Code', null, null, null],
+      ['Zed', null, null, null],
+      ['Terminal', 'true', "This file is outside the session's folders", null],
+      ['Ghostty', 'true', "This file is outside the session's folders", null],
+      ['Finder', null, null, null],
     ]);
+    const terminal = within(menu).getByRole('menuitem', { name: 'Terminal' });
+    act(() => within(menu).getByRole('menuitem', { name: 'Zed' }).focus());
+    await user.keyboard('{ArrowDown}');
+    expect(document.activeElement).toBe(terminal); // no longer skipped
+    expect(terminal.querySelector('[data-row-note]')?.hasAttribute('hidden')).toBe(false); // its note opens at once on focus
+    await user.keyboard('{Enter}');
+    expect(main.callsOf('layout.openIn')).toEqual([]);
+    expect(screen.getByRole('menu')).toBeTruthy(); // the press kept the menu open
+  });
+
+  // the word cut (N88): nothing for half a second while main is asked, then a quiet spinner named by the wait
+  it('shows a quiet spinner, not words, while the apps are being asked for', async () => {
+    const user = userEvent.setup();
+    main = installFakeMain(async (name) => (name === 'layout.openInApps' ? new Promise<never>(() => {}) : fail(`unexpected ${name}`)));
+    render(<OpenInButton appSessionId={S} path="/work/app/notes.md" line={() => null} />);
+    await user.click(screen.getByRole('button', { name: OPEN_IN_COPY.label }));
+    expect(screen.queryByText(/Looking for apps/)).toBeNull();
+    expect(await screen.findByRole('progressbar', { name: 'Looking for apps' }, { timeout: 2000 })).toBeTruthy();
   });
 
   it('is drawn disabled for a session on another machine', () => {

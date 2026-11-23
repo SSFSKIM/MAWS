@@ -119,6 +119,24 @@ describe('the ask capsule', () => {
     const asked = renderRow({ ...base, state: 'asked', cancelReason: null }, { storeKey: APP }).container.querySelector('[data-ask-chip]')!;
     expect(asked.hasAttribute('tabindex')).toBe(false); // a chip with nothing waiting takes no stop
   });
+
+  // The touch rule (ticket 830): where nothing points, the why stands after the chip, drawn by the stylesheet alone
+  // (ui/touch-fact.test.tsx) and hidden from assistive technology, which hears it as the chip's description
+  it('stands a cancelled capsule’s why after its chip for a screen that cannot point, hidden from assistive technology', () => {
+    const base: RowOf<'ask'> = {
+      id: 'ask:t1' as never, turnId: null, at: '2026-10-06T00:00:00.000Z', kind: 'ask', toolUseId: 't1' as never, askId: 't1', title: null, context: null, blocking: false,
+      questions: [{ id: 'q1', question: 'Proceed?', modality: 'choice', options: [{ label: 'Yes' }] }], state: 'cancelled', answers: null, error: null, cancelReason: 'exit',
+    };
+    const { container } = renderRow(base, { storeKey: APP });
+    const chip = container.querySelector<HTMLElement>('[data-ask-chip]')!;
+    const fact = [...chip.parentElement!.children].find((element) => element.hasAttribute('data-touch-fact'))!; // after the chip
+    expect([fact.getAttribute('data-touch-fact'), fact.getAttribute('aria-hidden')]).toEqual(['', 'true']);
+    expect(fact.textContent).toBe(document.getElementById(chip.getAttribute('aria-describedby')!)!.textContent);
+    expect(screen.getByRole('region', { name: '1 question' }).querySelector('[data-touch-fact]')).toBe(fact);
+    cleanup();
+    const asked = renderRow({ ...base, state: 'asked', cancelReason: null }, { storeKey: APP }).container;
+    expect(asked.querySelector('[data-touch-fact]')).toBeNull();
+  });
 });
 
 describe('the delivery row', () => {

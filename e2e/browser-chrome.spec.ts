@@ -113,8 +113,9 @@ test('1, 6, 10: the import asks about Bookmarks and counts them, the rows reach 
       const sheet = await openImportSheet(s);
       await sheet.getByRole('button', { name: 'Continue' }).click();
       await expect(sheet).toHaveAttribute('data-browser-import', 'consent');
+      // the word cut (T511): no disabled Saved passwords row
       expect(await sheet.locator('[data-category]').evaluateAll((rows) => rows.map((row) => row.getAttribute('data-category')))).toEqual([
-        'history', 'cookies', 'bookmarks', 'passwords', 'extensions',
+        'history', 'cookies', 'bookmarks', 'extensions',
       ]);
       await expect(sheet.locator('[data-category="bookmarks"]')).toContainText('46 bookmarks');
       await expect(sheet.getByRole('checkbox', { name: 'Bookmarks', exact: true })).toBeChecked();
@@ -122,12 +123,25 @@ test('1, 6, 10: the import asks about Bookmarks and counts them, the rows reach 
 
       // (1) the report: 46 imported, 1 skipped; the phase between verifying and extensions; the rows in the browser's database
       const done = await importThrough(s);
-      await expect(done.locator('[data-import-summary]')).toContainText('46 bookmarks');
-      await expect(done.locator('[data-import-summary]')).toContainText('1 bookmark not imported');
+      const summary = done.locator('[data-import-summary]');
+      await expect(summary).toContainText('46 bookmarks');
+      // the word cut (P388): the summary ends at the skipped count; the reasons are the lines under it. The count is every
+      // category's (the fixture's hidden and unsupported history rows among them, beside the one bookmark), so it is
+      // checked against the record's report below.
+      await expect(summary).toHaveText(/ · [\d,]+ skipped$/);
+      const skippedShown = Number(/ · ([\d,]+) skipped$/.exec((await summary.textContent()) ?? '')![1]!.replace(/,/g, ''));
+      await expect(summary).not.toContainText('not imported');
+      await expect(done.getByText('Bookmarks · Not imported (1)', { exact: true })).toBeVisible();
       expect(await phasesHeard(s)).toEqual(['copying', 'history', 'keychain', 'cookies', 'verifying', 'bookmarks', 'extensions', 'cleaning']);
       await closeSheet(s);
       const record = (await recordOf(s, 'Default'))!;
       expect(record.report.bookmarks).toEqual({ imported: 46, skipped: 1, error: null });
+      const { cookies, history, extensions } = record.report;
+      const skippedReported = [
+        ...Object.values(cookies?.skipped ?? {}), ...Object.values(history?.skipped ?? {}), record.report.bookmarks!.skipped,
+        (extensions ?? []).filter((extension) => extension.status === 'copyFailed' || extension.status === 'loadFailed').length,
+      ].reduce((sum, n) => sum + n, 0);
+      expect(skippedShown, 'the summary’s skipped count is the report’s, over every category').toBe(skippedReported);
       expect(record.bookmarks).toMatchObject({ consentedAt: record.report.startedAt, count: 46, error: null, errorAt: null });
       expect(record.bookmarks!.syncedAt).not.toBeNull();
       expect(await barOf(s.page)).toEqual(['A', 'B', ['F', ['F1', 'F2', ['G', ['G1']]]], ...N]);
@@ -419,7 +433,10 @@ test('4, 6: ⌘⇧B in the page hides the bar and the page grows by 28 px; a rel
       expect(marks.slice(1, 1 + marks.filter(Boolean).length).every(Boolean)).toBe(true);
       const historyTitle = chrome.profiles.Default.history.entries.find((entry) => entry.expected === 'imported')!.title;
       await field.fill(historyTitle);
-      await expect(listbox.getByRole('option').filter({ hasText: new RegExp(`^${historyTitle}`) })).toHaveCount(1); // the history row (the typed search row quotes it too)
+      // the word cut (T433): the typed search row draws the query itself beside its glyph, "Search for “…”" its accessible
+      // name; so the history row is the one option whose name starts with the title
+      await expect(listbox.getByRole('option', { name: `Search for “${historyTitle}”`, exact: true })).toHaveCount(1);
+      await expect(listbox.getByRole('option', { name: new RegExp(`^${historyTitle}`) })).toHaveCount(1); // the history row
       await expect(listbox.locator('[data-suggestion-bookmark]')).toHaveCount(0);
       await field.press('Escape');
     } catch (error) {
@@ -517,13 +534,19 @@ test('5, 7, 8, 10: the pill\'s avatar and its popover: the account, Sync bookmar
       let popover = await openPopover(s, main);
       await expect(popover).toHaveAttribute('data-profile-popover', 'profile');
       await expect(popover.locator('header')).toContainText('Person 1');
-      await expect(popover.locator('[data-profile-account]')).toHaveText('Signed in as Probe Owner · probe@example.test');
-      await expect(popover.getByRole('region', { name: 'Switch profile' })).toContainText('Applies to new tabs');
+      // the word cut (T478, T480, T481): the account's names alone; the list headed "New tabs as", with no caption, its rows
+      // named in full
+      await expect(popover.locator('[data-profile-account]')).toHaveText('Probe Owner · probe@example.test');
+      await expect(popover.getByRole('region', { name: 'New tabs as', exact: true })).toBeVisible();
+      await expect(popover).not.toContainText('Applies to new tabs');
+      await expect(popover.locator('[data-profile-switch="Profile 1"]')).toHaveAccessibleName('Open a new tab as Work');
       expect(await popover.locator('[data-profile-switch]').evaluateAll((rows) => rows.map((row) => row.getAttribute('data-profile-switch')))).toEqual(['Profile 1', 'default']);
       await expect(popover.locator('[data-profile-switch="Profile 1"] [data-profile-avatar="initials"]')).toHaveText('W');
-      await expect(popover.locator('[data-profile-sync]')).toContainText('Sync bookmarks now');
-      await expect(popover.locator('[data-profile-sync-line]')).toHaveText(/^Last synced (now|\d+ minutes? ago)$/);
-      await expect(popover.locator('[data-profile-reimport]')).toHaveText('Re-import this profile…');
+      // the word cut (T483, T484, T486): Sync bookmarks over the age alone; Re-import…
+      await expect(popover.locator('[data-profile-sync]')).toContainText('Sync bookmarks');
+      await expect(popover.locator('[data-profile-sync]')).not.toContainText('Sync bookmarks now');
+      await expect(popover.locator('[data-profile-sync-line]')).toHaveText(/^(now|\d+ minutes? ago)$/);
+      await expect(popover.locator('[data-profile-reimport]')).toHaveText('Re-import…');
       await expect(popover.locator('[data-profile-settings]')).toHaveText('Browser settings');
       // the main area keeps the Browser tab: Settings not opened (UX wave U7b: it would be the dialog over the window)
       await expect(main).toBeVisible();
@@ -565,9 +588,9 @@ test('5, 7, 8, 10: the pill\'s avatar and its popover: the account, Sync bookmar
       expect(settingsFile(userData).browser.profile).toBe('Profile 1');
       await expect(pillIn(main)).toContainText('Work');
       await expect(pillIn(main).locator('[data-profile-avatar="initials"]')).toHaveText('W');
-      // Work's popover: not signed in, no Sync row (its bookmarks were not imported)
+      // Work's popover: not signed in, so no account line (the word cut, T479), and no Sync row (its bookmarks were not imported)
       popover = await openPopover(s, main);
-      await expect(popover.locator('[data-profile-account]')).toHaveText('Not signed in to Chrome');
+      await expect(popover.locator('[data-profile-account]')).toHaveCount(0);
       await expect(popover.locator('[data-profile-sync]')).toHaveCount(0);
       await s.page.keyboard.press('Escape');
       await expect(popover).toHaveCount(0);

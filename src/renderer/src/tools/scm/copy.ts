@@ -8,7 +8,7 @@ import { formatCount } from '@shared/app/date-format';
 export const SCM_COPY = {
   title: 'Source control',
   noSession: 'Open a session to see its changes',
-  loading: 'Loading',
+  loading: 'Loading', // the word cut (P211): the quiet spinner's name while the page's first git read is out
   notRepository: 'Not a git repository', // C8a's sentence
   gitUnavailable: (message: string) => `Git unavailable: ${message}`,
   branch: (branch: string) => `⎇ ${branch}`,
@@ -23,8 +23,7 @@ export const SCM_COPY = {
   conflicts: (n: number) => `· ${formatCount(n)} ${n === 1 ? 'conflict' : 'conflicts'}`, // frames' S14
   commitsPart: 'Commits',
   since: (base: string) => `since ${base}`,
-  latestOn: (branch: string) => `· latest on ${branch}`, // frames' S8: "Commits · latest on <branch>"
-  latest: '· latest', // and on a detached HEAD, "Commits · latest"
+  latest: '· latest', // frames' S8 with no base; the word cut (N62): on a branch too, which the Where line names
   pushedTo: (upstream: string) => `Pushed to ${upstream}`,
   showAll: (n: number) => `Show all ${formatCount(n)} commits`, // frames' S1: 9 to 50
   showSome: (shown: number, n: number) => `Show ${formatCount(shown)} of ${formatCount(n)} commits`, // above 50
@@ -33,10 +32,11 @@ export const SCM_COPY = {
   openCommit: (sha7: string) => `Open commit ${sha7} in Review`,
   commitTitle: (author: string, date: string, sha: string) => `${author}\n${date}\n${sha}`, // a row's tooltip
   age: (n: number, unit: 'm' | 'h' | 'd') => `${n}${unit}`, // "12m", "2h", "3d" (frames' S12): the one format
-  commitsOlder: (machine: string | null) => (machine === null ? 'Commits unavailable: this Mac’s MAWS service is older than this window' : `Commits unavailable: ${machine} runs an older MAWS`),
-  commitsOffline: (machine: string) => `Commits are unavailable while ${machine} is offline`,
-  commitsRefused: (machine: string) => `Commits unavailable: ${machine} refused this read`,
-  commitsFailed: (message: string) => `Commits unavailable: ${message}`,
+  // A failed read's sentence, under the bare "Commits" heading, which the word cut (N68 to N71) no longer repeats
+  commitsOlder: (machine: string | null) => (machine === null ? 'Unavailable: this Mac’s MAWS service is older than this window' : `Unavailable: ${machine} runs an older MAWS`),
+  commitsOffline: (machine: string) => `Unavailable while ${machine} is offline`,
+  commitsRefused: (machine: string) => `Unavailable: ${machine} refused`,
+  commitsFailed: (message: string) => `Unavailable: ${message}`,
   pullRequest: 'Pull request',
   prNumber: (n: number) => `#${n}`,
   into: (base: string) => `into ${base}`,
@@ -44,7 +44,7 @@ export const SCM_COPY = {
   conflictsWith: (base: string) => `Conflicts with ${base}`,
   behindBase: (base: string) => `Behind ${base}`,
   mergeBlocked: 'Merging is blocked',
-  unknownMergeState: (value: string) => `GitHub reports a merge state MAWS does not know: ${value}`,
+  unknownMergeState: (value: string) => `Merge state: ${value}`, // the word cut (N74): GitHub's value, without the sentence about it
   checks: 'Checks',
   checkCount: (n: number, word: string) => `${formatCount(n)} ${word}`,
   openCheck: (name: string) => `Open ${name} on GitHub`, // the accessible name of a check's "↗", as `prLinkLabel` names the PR's

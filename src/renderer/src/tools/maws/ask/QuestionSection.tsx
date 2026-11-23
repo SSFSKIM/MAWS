@@ -180,7 +180,7 @@ export function AnsweredSection({ question, answers }: { question: AskQuestion; 
       {answers !== null && <AnswerValue question={question} answer={answer} />}
       {answer?.note !== undefined && (
         <div data-ask-note="" className="flex flex-col gap-0.5">
-          <span className="text-ui-sm text-fg-faint">{SHEET.note}</span>
+          <span className="sr-only">{SHEET.note}</span>
           <p className="m-0 whitespace-pre-wrap text-ui text-fg-muted">{answer.note}</p>
         </div>
       )}

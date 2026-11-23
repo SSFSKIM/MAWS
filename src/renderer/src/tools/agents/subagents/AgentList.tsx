@@ -2,8 +2,8 @@
 // document, M7): **Running N**, the first-level agents that run or have running work under them, in the order they
 // started (N every running agent at any depth, the card's number; no number while none runs), the running teammates
 // grouped first under the team header in one labelled group; **Done N**, the other first-level agents, newest end first,
-// folded at first, its heading naming the failed and the stopped; **On disk N**, folded, as before (status unknown,
-// `agentRows`). A row with agents under it has its own disclosure, `(+N)` and an arrow, which shows them beneath it one
+// folded at first, its heading naming the failed and the stopped; **Earlier N** (the word cut, T158: was On disk),
+// folded, as before (status unknown, `agentRows`; its rows have no second line, T167). A row with agents under it has its own disclosure, `(+N)` and an arrow, which shows them beneath it one
 // level at a time (`panel-rows.ts`; the set the Subagents card shares). A child whose parent the tree does not hold reads
 // `· nested` at depth 0 with a tooltip naming the parent. A workflow's agents are in no list. A row reads by its own
 // status wherever it sits: a running one ticks its elapsed once a second while shown and the tool visible, a finished
@@ -70,7 +70,7 @@ export function AgentList({ appSessionId, handle, expanded, shown, expandedFolds
   const headings: Record<ListSection, PanelHeading> = {
     running: SUBAGENTS_COPY.running(runningAgents(graph)),
     done: SUBAGENTS_COPY.doneHeading(doneIds.length, doneByOutcome(graph, doneIds)),
-    disk: SUBAGENTS_COPY.onDisk(rows.disk.length),
+    disk: SUBAGENTS_COPY.earlier(rows.disk.length),
   };
   const boundOf = (name: ListSection) => (name === 'disk' ? rows.disk.length : shown[name]);
   const visible = SECTIONS.flatMap((name) => (expanded[name] ? rows[name].slice(0, boundOf(name)) : []));
@@ -100,7 +100,7 @@ export function AgentList({ appSessionId, handle, expanded, shown, expandedFolds
   return (
     <div data-view="lists" ref={scroller} onScroll={(e) => handle.setScrollTop(e.currentTarget.scrollTop)} className="flex h-full min-h-0 flex-col overflow-auto">
       {!live && !reported && <p className="shrink-0 px-3.5 pt-3 text-ui-sm text-fg-muted">{SUBAGENTS_COPY.diskOnly}</p>}
-      {sidecarsError !== null && <p className="shrink-0 px-3.5 pt-3 text-ui-sm text-danger">{SUBAGENTS_COPY.sidecarsUnavailable(sidecarsError)}</p>}
+      {sidecarsError !== null && <p className="shrink-0 px-3.5 pt-3 text-ui-sm text-danger">{SUBAGENTS_COPY.readFailed(sidecarsError)}</p>}
       {SECTIONS.filter((name) => rows[name].length > 0).map((name) => (
         <section key={name} data-section={name} aria-label={headingText(headings[name])} className="flex shrink-0 flex-col border-b border-border pb-1 last-of-type:border-b-0">
           <h3 className="flex h-9 items-center px-3.5 text-ui font-semibold">
@@ -123,12 +123,6 @@ export function AgentList({ appSessionId, handle, expanded, shown, expandedFolds
         </section>
       ))}
       {!any && sidecarsError === null && <p className="flex flex-1 items-center justify-center p-4 text-ui text-fg-muted">{SUBAGENTS_COPY.empty}</p>}
-      {live && any && (
-        <footer className="mt-auto flex shrink-0 items-center gap-2 border-t border-border px-3.5 py-2.5 text-ui-sm text-fg-muted">
-          <span aria-hidden className="size-1.5 rounded-full bg-success" />
-          {SUBAGENTS_COPY.footer}
-        </footer>
-      )}
     </div>
   );
 }

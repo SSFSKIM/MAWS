@@ -8,6 +8,7 @@ import type { AppSessionId } from '@shared/graph/ids';
 import { ipc } from '../ipc/client';
 import { useRemoteUnavailable } from '../lane-b/remote-unavailable'; // P5 O7 M8
 import { CHOICE, QUIET, SECONDARY } from '../sessions/ui';
+import { Tip } from '../ui/tip';
 import type { CommentForm } from './comment-form';
 import { SIDE_COPY } from './copy';
 
@@ -15,7 +16,8 @@ const COPY = SIDE_COPY.composer;
 
 // E11 F2b (Q4, owner-decided: "a small image preview"): the producer's screenshot as a thumbnail of itself, so the area can
 // be checked before sending, named as the chip was ("Screenshot · W × H"); main reads it through the send's own checks
-// (`side.screenshot.preview`). Until it answers, or when it refuses, the size in words stands in. Remove is its own button.
+// (`side.screenshot.preview`). Until it answers, or when it refuses, the word stands in, its size (and why no picture
+// was asked for) its tooltip (the word cut, P434). Remove is its own worded button (rule 4: Remove stays a word).
 export function ScreenshotThumbnail({ parent, screenshot, disabled, onRemove }: { parent: AppSessionId; screenshot: AnchorScreenshot; disabled: boolean; onRemove(): void }) {
   const [dataUrl, setDataUrl] = useState<string | null>(null);
   const unavailable = useRemoteUnavailable(parent, 'side.screenshot.preview'); // P5 O7 M8: the size in words stands in, asked nothing
@@ -30,12 +32,27 @@ export function ScreenshotThumbnail({ parent, screenshot, disabled, onRemove }: 
     };
   }, [parent, screenshot, unavailable]);
   const name = COPY.screenshot(screenshot.width, screenshot.height);
+  const size = COPY.screenshotSize(screenshot.width, screenshot.height);
   return (
     <div className="flex items-end justify-between gap-2 rounded-sm border border-border bg-bg-raised p-1.5 text-ui-sm text-fg-muted" data-comment-screenshot="">
       {dataUrl === null ? (
-        <span className="px-0.5" title={unavailable ?? undefined}>
-          {name}
-        </span>
+        <Tip
+          content={
+            unavailable === null ? (
+              size
+            ) : (
+              <>
+                <span className="block">{size}</span>
+                <span className="block text-fg-muted">{unavailable}</span>
+              </>
+            )
+          }
+          description={unavailable === null ? size : `${size} · ${unavailable}`}
+        >
+          <span tabIndex={0} className="rounded-sm px-0.5 outline-accent focus-visible:outline-2">
+            {COPY.screenshotWord}
+          </span>
+        </Tip>
       ) : (
         <img src={dataUrl} alt={name} title={name} className="max-h-24 max-w-[60%] rounded-sm border border-border object-contain" />
       )}

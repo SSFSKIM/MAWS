@@ -168,19 +168,27 @@ function review(surface?: ReviewSurface): CodeHarnessReview | null {
   const scope = (root.dataset.scope || null) as ReviewScope | null;
   const files = sectionsOf(root).map(fileOf);
   const selected = topSection(root)?.dataset.reviewFile ?? null;
-  const counter = /(\d+) of (\d+)/.exec(root.querySelector('[data-review-hunk]')?.textContent ?? '');
+  const counted = root.querySelector<HTMLElement>('[data-review-hunk]'); // its numbers as data, apart from the grouped words
   return {
     scope,
     turnId: targetOf(root)?.turnId ?? null,
     files,
     selected,
     hunks: hunksOf(root, scope, selected),
-    hunk: counter ? { index: Number(counter[1]), count: Number(counter[2]) } : null,
+    hunk: counted ? { index: Number(counted.dataset.index), count: Number(counted.dataset.count) } : null,
     mode: root.dataset.mode === 'split' ? 'split' : 'unified',
     wrap: useViewer.getState().wrap,
-    footer: root.querySelector('[data-review-footer]')?.textContent ?? '',
+    scopeWords: scopeWordsIn(root),
     header: root.querySelector('[data-review-header]')?.textContent ?? '',
   };
+}
+
+// What the scope reads (the word cut, T357): the description of the chip that is pressed, or of the line that owns the
+// words in a diff tab; '' while none is said.
+function scopeWordsIn(root: HTMLElement): string {
+  const owner = root.querySelector('[data-review-scope-words]') ?? root.querySelector('[data-chip][aria-pressed="true"]');
+  const ids = owner?.getAttribute('aria-describedby')?.split(' ') ?? [];
+  return ids.map((id) => document.getElementById(id)?.textContent ?? '').join(' ');
 }
 
 // A reader brings a file into view by scrolling its section to the top of the stack: a wheel, then the scroll, so the
@@ -244,7 +252,8 @@ function viewer(): CodeHarnessViewer | null {
     path: tab.path,
     kind: entry.kind,
     line: tab.line,
-    notice: root?.querySelector('[role="status"][data-notice]')?.textContent ?? null,
+    // the word cut (T324): a long file's arrival is a ring whose words are its name; every notice carries them as data
+    notice: root?.querySelector('[role="status"][data-notice], [role="progressbar"][data-notice]')?.getAttribute('data-notice') ?? null,
     lines,
     sourceView: entry.sourceView,
     language: root?.querySelector<HTMLElement>('[data-code-view]')?.dataset.language || null,

@@ -413,7 +413,9 @@ describe('the menus and actions share the drop’s refusal (M1 to M5)', () => {
     fireEvent.contextMenu(panelTab(id));
     let item = within(await screen.findByRole('menu')).getByRole('menuitem', { name: TRANSFER_COPY.moveToMain });
     expect(item.getAttribute('aria-disabled')).toBe('true');
-    expect(item.getAttribute('title')).toBe(TRANSFER_COPY.noRecord);
+    // the word cut (N94's pattern): the reason is the item's description and note, not a system tooltip
+    expect(item.getAttribute('title')).toBeNull();
+    expect(within(screen.getByRole('menu')).getByRole('menuitem', { name: TRANSFER_COPY.moveToMain, description: TRANSFER_COPY.noRecord })).toBe(item);
     fireEvent.keyDown(item, { key: 'Escape' });
     await waitFor(() => expect(screen.queryByRole('menu')).toBeNull());
 
@@ -447,7 +449,8 @@ describe('the menus and actions share the drop’s refusal (M1 to M5)', () => {
     fireEvent.contextMenu(mainTab(DOC_TAB.id));
     const item = within(await screen.findByRole('menu')).getByRole('menuitem', { name: SHOW_IN_PANEL_COPY.label });
     expect(item.getAttribute('aria-disabled')).toBe('true');
-    expect(item.getAttribute('title')).toBe(TRANSFER_COPY.noProjectSession);
+    expect(item.getAttribute('title')).toBeNull(); // the word cut (N94): the reason is the item's description and note
+    expect(document.getElementById(item.getAttribute('aria-describedby')!)?.textContent).toBe(TRANSFER_COPY.noProjectSession);
   });
 
   it('M4: “Move to side surface” and “Move to tab” are keymap actions with no chord; a refusal says why', async () => {

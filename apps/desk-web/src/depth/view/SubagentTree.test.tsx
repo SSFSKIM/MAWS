@@ -38,7 +38,7 @@ it("writes a finished agent's age in English, as the stream beside it does", () 
     <SubagentTree tasks={withStatuses(taskGraphOf(metas, []), metas)} view={{ ...INITIAL_TREE_VIEW, expanded: { agents: true, done: true, disk: true } }} onView={() => {}} onOpen={() => {}} statusesKnown />,
   );
   const line = (agentId: string) => container.querySelector(`[data-agent-row="${agentId}"] [data-part="line"]`)?.textContent;
-  expect([line('a1'), line('a2'), line('a3')]).toEqual(['finished · 3m ago · read it', 'finished with errors · 2h ago', 'stopped · 1d ago']);
+  expect([line('a1'), line('a2'), line('a3')]).toEqual(['3m ago · read it', 'failed · 2h ago', 'stopped · 1d ago']); // the word cut (T162, T163): MAWS's shared outcome words, which the desk's tree reads
 });
 
 // Card C1, the owner's answer (the UX wave's U8d, Decision Log 16 and 17): an agent another machine reports exited with
@@ -53,5 +53,5 @@ it('reads ended for an agent exited on its bridge’s word or its starter’s en
     <SubagentTree tasks={withStatuses(taskGraphOf(metas, []), metas)} view={{ ...INITIAL_TREE_VIEW, expanded: { agents: true, done: true, disk: true } }} onView={() => {}} onOpen={() => {}} statusesKnown />,
   );
   const line = (agentId: string) => container.querySelector(`[data-agent-row="${agentId}"] [data-part="line"]`)?.textContent;
-  expect([line('b1'), line('p1'), line('s1')]).toEqual(['ended', 'ended', 'ended with the session']);
+  expect([line('b1'), line('p1'), line('s1')]).toEqual(['ended', 'ended', 'session ended']); // the word cut (T165)
 });

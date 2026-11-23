@@ -73,7 +73,7 @@ afterEach(() => {
 });
 
 describe('the chooser’s sheet', () => {
-  it('is a sheet titled by the machine, with the path field, Go, the list’s area, More…, the foot, Cancel and Open', async () => {
+  it('is a sheet titled by the machine, with the path field, Go, the list’s area, More…, Cancel and Open, and no foot line', async () => {
     open();
     await lists[0].answer(listed(HOME, AT_HOME, 'pipe'));
     expect(within(sheet()).getByRole('heading', { name: 'Open a file on studio' })).toBeTruthy();
@@ -82,7 +82,7 @@ describe('the chooser’s sheet', () => {
     expect(list()).toBeTruthy();
     expect(more().textContent).toBe('More…');
     expect(list()!.contains(more())).toBe(false); // under the list, outside its scroll
-    expect(sheet().textContent).toContain('Files on studio, read as its MAWS service can read them.');
+    expect(sheet().textContent).not.toContain('read as its MAWS service'); // the word cut (N32)
     expect(button('Cancel')).toBeTruthy();
     expect(button('Open')).toBeTruthy();
   });
@@ -119,14 +119,16 @@ describe('the chooser’s sheet', () => {
     expect(lists[2].input).toEqual({ appSessionId: R, path: '/srv/many', cursor: 'a.txt' });
   });
 
-  it('holds its states inside the list’s area: the reading words and the failures with Try again, ".." first where a parent is known', async () => {
+  // The word cut (N30): the reading is the quiet spinner named "Reading the folders", nothing for its first half second
+  it('holds its states inside the list’s area: the reading spinner and the failures with Try again, ".." first where a parent is known', async () => {
     const { chooser } = open();
-    expect(list()!.textContent).toContain('Reading the folders…');
+    expect(list()!.textContent).toBe('');
+    expect(await within(list()!).findByRole('progressbar', { name: 'Reading the folders' }, { timeout: 2000 })).toBeTruthy();
     await lists[0].answer(listed(HOME, AT_HOME));
     chooser.enter(entry(`${HOME}/garden-club`, 'dir'));
     await settle();
     expect(list()!.querySelector('[data-up]')).not.toBeNull();
-    expect(list()!.textContent).toContain('Reading the folders…');
+    expect(await within(list()!).findByRole('progressbar', { name: 'Reading the folders' }, { timeout: 2000 })).toBeTruthy();
     await lists[1].answer({ ok: true, value: { status: 'refused', reason: 'unreadable' } });
     expect(list()!.textContent).toContain('MAWS on studio cannot read this folder.');
     expect(list()!.querySelector('[data-up]')).not.toBeNull();

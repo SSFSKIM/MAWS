@@ -104,7 +104,7 @@ describe('user row', () => {
 
   it('draws the time, Copy and Edit, then the caption last, on one line under the bubble', () => {
     const row = userRow('look at b too');
-    const { container } = renderRow(row, { actions: { ...spyActions(), userRowMark: () => 'Sent to Claude' } });
+    const { container } = renderRow(row, { actions: { ...spyActions(), userRowMark: () => ({ shown: 'Sent to Claude', name: 'Sent to Claude' }) } });
     const line = lineOf(container)!;
     expect(line.previousElementSibling?.classList.contains('transcript-user-body')).toBe(true);
     expect(wordsOf(line)).toEqual([formatClock(Date.parse(row.at)), 'Copy', 'Edit', 'Sent to Claude']);
@@ -240,7 +240,22 @@ describe('waiting and steered bubbles', () => {
     expect(container.querySelector('.transcript-user-caption')).toBeNull();
     expect(container.querySelector('section.transcript-user > .transcript-user-line')!.lastElementChild!.classList.contains('transcript-user-line-actions')).toBe(true);
     cleanup();
-    const marked = renderRow({ ...userRow('look at b too'), steer: true }, { actions: { ...spyActions(), userRowMark: () => 'Sent to Claude' } });
+    const marked = renderRow({ ...userRow('look at b too'), steer: true }, { actions: { ...spyActions(), userRowMark: () => ({ shown: 'Sent to Claude', name: 'Sent to Claude' }) } });
     expect(marked.container.querySelector('.transcript-user-caption')?.textContent).toBe('Sent to Claude');
+  });
+
+  // the word cut (P443): a mount's mark drawn as a glyph keeps its words as its name and its tooltip
+  it('a mark drawn as a glyph is named by its words, its tooltip reached by the keyboard', async () => {
+    const { container } = renderRow(userRow('look at b too'), { actions: { ...spyActions(), userRowMark: () => ({ shown: '✓', name: 'Sent to Claude' }) } });
+    const caption = container.querySelector<HTMLElement>('.transcript-user-caption')!;
+    expect(caption.textContent).toBe('✓');
+    expect(screen.getByRole('img', { name: 'Sent to Claude' })).toBe(caption);
+    expect(caption.getAttribute('title')).toBeNull();
+    // bounded: one press per element that could take focus, and one more, so a caption the keyboard never reaches fails
+    // in bounded time rather than cycling
+    const stops = document.querySelectorAll('button, a[href], input, select, textarea, [tabindex]').length + 1;
+    for (let press = 0; press < stops && document.activeElement !== caption; press++) await userEvent.tab();
+    expect(document.activeElement).toBe(caption);
+    expect((await screen.findByRole('tooltip')).textContent).toBe('Sent to Claude');
   });
 });

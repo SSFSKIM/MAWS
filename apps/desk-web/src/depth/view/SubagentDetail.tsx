@@ -21,6 +21,9 @@ import { deskTranscript } from '../source/desk-source';
 import { JobsPane } from './JobsPane';
 import { TranscriptPane, transcriptStatus, useDeskTranscript } from './TranscriptPane';
 
+// The desk's own words: MAWS's copy dropped this line in the word cut (T184), and the desk's frozen depth view keeps it.
+const dispatchedBy = (session: string) => `Dispatched by ${session}`;
+
 type Props = {
   project: string;
   session: DeskSession;
@@ -59,7 +62,7 @@ export function SubagentDetail({ project, session, plane, agentId, node, actions
               {meta}
             </p>
             <p data-part="dispatched-by" className="m-0 truncate text-ui-sm text-fg-muted">
-              {SUBAGENTS_COPY.dispatchedBy(sessionName(session))}
+              {dispatchedBy(sessionName(session))}
             </p>
           </div>
           <span className="shrink-0 text-ui-sm text-fg-muted" data-testid="depth-subagent-status">

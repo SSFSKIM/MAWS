@@ -1,6 +1,7 @@
 // E4a (Task 3.3): the chrome (E4a execution document, Design §4; Decision Log 17 and 48), above the pane in both
-// surfaces: the tab strip, the navigation row, then the zoom banner while the page is not at 100%, the find bar while it
-// is open, and the notice lines. Every row sits on whole px, so the pane under it starts on an integral edge.
+// surfaces: the tab strip, the navigation row (the zoom's chip in it while the page is not at 100%: the word cut, T452),
+// the find bar while it is open, and the notice lines. Every row sits on whole px, so the pane under it starts on an
+// integral edge.
 //
 // Main's `browser.chrome.command` (⌘L, ⌘F, and Esc pressed inside a page) goes to the chrome whose pane holds the page's
 // view (`owns`), for the tab it names: `focusAddress` focuses the address field, `openFind` opens the find bar (or takes
@@ -32,7 +33,7 @@ import { FindBar } from './FindBar';
 import { NavRow } from './NavRow';
 import { Notices } from './Notices';
 import { TabStrip } from './TabStrip';
-import { ZoomBanner } from './ZoomBanner';
+
 import type { Room } from '../viewport'; // U12a
 
 export interface ChromeProps {
@@ -102,7 +103,7 @@ export function Chrome({ appSessionId, surface, tab, tabs, owns = false, room = 
       <NavRow appSessionId={appSessionId} surface={surface} tab={tab} addressRef={addressRef} owns={owns} room={room} onFind={openFind} />
       {tab?.control === 'human' && <ControlSlot tab={tab} />}
       {tab && tab.partition !== DEFAULT_PARTITION && <BookmarksBar tab={tab} /> /* cua #90 */}
-      {tab && tab.zoom !== 1 && <ZoomBanner tab={tab} owns={owns} />}
+
       {tab && finding !== null && <FindBar tab={tab} focusRequest={finding.focus} onClose={() => setFinding(null)} />}
       <Notices appSessionId={appSessionId} tab={tab} />
     </div>

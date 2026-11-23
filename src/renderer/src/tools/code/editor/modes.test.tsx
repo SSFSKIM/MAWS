@@ -100,7 +100,7 @@ describe('editor modes', () => {
       expect(document.querySelector('.cm-editor')?.classList.contains('cm-merge-b')).toBe(true);
       expect(getOriginalDoc(view().state).toString()).toBe(numbered(10, { 8: 'theirs 8' }));
       expect(getChunks(view().state)?.chunks).toHaveLength(2);
-      expect(within(bar()!).getByText('2 changes from disk')).toBeTruthy();
+      expect(within(bar()!).getByText('2 changes')).toBeTruthy();
       expect(bar()!.querySelector('[data-merge-changes]')?.getAttribute('data-merge-changes')).toBe('2');
       const controls = [...document.querySelectorAll<HTMLButtonElement>('.cm-deletedChunk button.cm-merge-control')].map((button) => button.textContent);
       expect(controls).toEqual(['Keep mine', 'Take theirs', 'Keep mine', 'Take theirs']);
@@ -110,11 +110,11 @@ describe('editor modes', () => {
     it('takes theirs for one chunk and keeps mine for the other, and Save writes the resolution against theirs’ hash', async () => {
       const { disk } = await merging();
       fireEvent.click(chunkControl(1, 'Take theirs'));
-      await waitFor(() => expect(within(bar()!).getByText('1 change from disk')).toBeTruthy());
+      await waitFor(() => expect(within(bar()!).getByText('1 change')).toBeTruthy());
       expect(doc()).toBe(numbered(10, { 2: 'mine 2', 8: 'theirs 8' }));
       expect(getChunks(view().state)?.chunks).toHaveLength(1);
       fireEvent.click(chunkControl(0, 'Keep mine'));
-      await waitFor(() => expect(within(bar()!).getByText('0 changes from disk')).toBeTruthy());
+      await waitFor(() => expect(within(bar()!).getByText('0 changes')).toBeTruthy());
       expect(doc()).toBe(numbered(10, { 2: 'mine 2', 8: 'theirs 8' })); // keeping mine changes no line
       fireEvent.click(barButton('Save'));
       await waitFor(() => expect(disk.files[APP]).toBe(numbered(10, { 2: 'mine 2', 8: 'theirs 8' })));
@@ -150,7 +150,7 @@ describe('editor modes', () => {
     it('answers a save from the merge view with conflict when the disk moved on unseen, keeping the resolution and taking the newer version as the original', async () => {
       const { disk } = await merging();
       fireEvent.click(chunkControl(1, 'Take theirs'));
-      await waitFor(() => expect(within(bar()!).getByText('1 change from disk')).toBeTruthy());
+      await waitFor(() => expect(within(bar()!).getByText('1 change')).toBeTruthy());
       const resolution = numbered(10, { 2: 'mine 2', 8: 'theirs 8' });
       expect(doc()).toBe(resolution);
       const third = numbered(10, { 8: 'theirs 8', 10: 'third 10' });
@@ -178,10 +178,10 @@ describe('editor modes', () => {
       );
       await waitFor(() => expect(document.querySelectorAll('.cm-deletedChunk')).toHaveLength(1));
       expect(getChunks(view().state)?.chunks).toHaveLength(1);
-      expect(within(bar()!).getByText('1 change from disk')).toBeTruthy();
+      expect(within(bar()!).getByText('1 change')).toBeTruthy();
       // the controls drawn again act on the tab's new view (UX wave U6b-1, the Mac run's second failure)
       fireEvent.click(chunkControl(0, 'Take theirs'));
-      await waitFor(() => expect(within(bar()!).getByText('0 changes from disk')).toBeTruthy());
+      await waitFor(() => expect(within(bar()!).getByText('0 changes')).toBeTruthy());
       expect(doc()).toBe(numbered(10, { 2: 'mine 2', 8: 'theirs 8' })); // mine kept on line 2, theirs taken on line 8
     });
 
@@ -323,7 +323,7 @@ describe('editor modes', () => {
       expect(placeholder.getAttribute('data-anchor-line')).toBe('3');
       expect(placeholder.getAttribute('data-anchor-locator')).toBe(`${APP}#L3`);
       expect(placeholder.getAttribute('data-anchor-label')).toBe('app.ts:3');
-      expect(within(sheet).getByText('The comment composer arrives with side threads (E3). This anchor will open it:')).toBeTruthy();
+      expect(within(sheet).queryByText(/arrives with side threads/)).toBeNull(); // the word cut (T352): no build-plan sentence
       for (const field of [`${APP}#L3`, 'app.ts:3', APP, '3']) expect(within(sheet).getByText(field)).toBeTruthy();
       fireEvent.click(within(sheet).getByRole('button', { name: 'Close' }));
       await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());

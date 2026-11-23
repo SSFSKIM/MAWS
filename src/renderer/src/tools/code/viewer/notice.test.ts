@@ -9,7 +9,8 @@ import { NOT_KEPT_REFUSAL } from '@shared/files/outside';
 import { classifyFailure, failureOf, type FileFailure, type NoticeCause } from './notice';
 
 const OUTSIDE = "path outside the session's directories";
-const HERE = "MAWS opens a file from elsewhere when this session's transcript links it, when you choose it with File ▸ Open File…, or when the agent sends it.";
+// The word cut (N7): the way in alone, without how the app opens files
+const HERE = 'Choose it with File ▸ Open File…';
 const ASK = 'Ask the agent to send the file to see it here.';
 const OTHER_FILE = 'This file could not be opened.';
 const OTHER_FOLDER = 'This folder could not be listed.';
@@ -81,8 +82,9 @@ describe('classifyFailure', () => {
   it.each(ROWS)('%s', (_, failure, where, subject, cause, lines, retry) => {
     const notice = classifyFailure(failure, { ...where, subject });
     expect(notice).toMatchObject({ cause, lines, retry, copyPath: cause === 'outside' });
-    // the command's own words, drawn small; none under UC-7's sentence, which is the message already
-    expect(notice.detail).toBe(cause === 'said' ? '' : failure.message);
+    // the command's own words, drawn small, only under the generic failure, where they are the one clue to the cause (the
+    // word cut, N11); none under a notice that names its cause, nor under UC-7's sentence, which is the message already
+    expect(notice.detail).toBe(cause === 'other' ? failure.message : '');
   });
 
   it('no sentence of any notice begins with “Refused” or with a command’s name', () => {

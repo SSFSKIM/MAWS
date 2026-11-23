@@ -10,7 +10,7 @@ export const SIDE_COPY = {
   composer: {
     title: (label: string | null) => (label === null ? 'Comment' : `Comment on ${label}`),
     field: 'Comment',
-    placeholder: 'What should the agent look at or change here?',
+    placeholder: 'Comment…', // the word cut (P428)
     // UX wave U5a (docs/doperpowers/plans/2026-11-12-ux-wave-U5a-comment-card.md, §E): one checkbox in place of the two
     // destinations; its title says what ticking does now, or why it can't change
     main: SEND_TO_MAIN_LABEL,
@@ -24,11 +24,15 @@ export const SIDE_COPY = {
     notSent: 'The comment was not sent', // a refusal the port gave no words for
     send: 'Send',
     sendMany: (count: number) => `Send ${count} comments`, // UX wave U5a (§E): a pass with more than one comment that has text
+    // the word cut (P432): Send keeps its word while it goes, a quiet spinner in it named by these
     starting: 'Starting…',
     sending: 'Sending…',
     retry: 'Retry',
     mainInstead: 'Send to main instead',
-    screenshot: (width: number, height: number) => `Screenshot · ${width} × ${height}`,
+    screenshot: (width: number, height: number) => `Screenshot · ${width} × ${height}`, // the thumbnail's name
+    // the word cut (P434): with no thumbnail, the word alone, its size its tooltip
+    screenshotWord: 'Screenshot',
+    screenshotSize: (width: number, height: number) => `${width} × ${height}`,
     removeScreenshot: 'Remove screenshot',
     openedElsewhere: (parentTitle: string) => `Side thread opened in the panel of ${parentTitle}`,
     refusedAfterClose: (error: string) => `The comment was not sent: ${error}`,
@@ -37,9 +41,9 @@ export const SIDE_COPY = {
   // to" only for a confirmed delivery; a terminal session's hand-off that is not confirmed follows its pending send in
   // the strip's words (`PENDING_SEND`'s, the session named), with one action, Show
   place: {
+    // the word cut (P438): a steer's place reads as a send's, a queued one's without how the queue goes on
     sent: (title: string) => `Sent to ${title}`,
-    steered: (title: string) => `Sent to ${title}; read at the next step`,
-    queued: (title: string) => `Queued for ${title}; it sends when the queue resumes`,
+    queued: (title: string) => `Queued for ${title}`,
     sending: (title: string) => `Not confirmed yet in ${title}`,
     unconfirmed: (title: string) => `May not have arrived in ${title}`,
     refused: (title: string, reason: string | null) => (reason ? `Not entered in ${title}: ${reason}` : `Not entered in ${title}`),
@@ -57,19 +61,22 @@ export const SIDE_COPY = {
     limit: (max: number) => `A message carries at most ${max} comments: send these first`,
     // the thread phase
     replyField: 'Reply',
-    replyPlaceholder: 'Reply to this thread',
+    replyPlaceholder: 'Reply…', // the word cut (P442)
     send: 'Send',
     sendReply: 'Send reply',
-    starting: 'Starting…',
+    starting: 'Starting…', // the echo's quiet spinner's name while the thread starts (the word cut, P432)
     retry: 'Retry',
     replyRefused: 'The reply was not sent', // a refusal the seam gave no reason for
     replyRefusedAfterClose: (reason: string) => `The reply was not sent: ${reason}`, // P2-F F-C1: the card went meanwhile
     copyReply: 'Copy reply',
     replyNotCopied: (why: string) => `The reply was not copied: ${why}`, // tech debt L117: the clipboard refused it
-    sentToClaude: 'Sent to Claude', // P2-F L121: a reply's row once the engine took it (Desktop's mark)
+    sentToClaude: 'Sent to Claude', // P2-F L121: a reply's row once the engine took it (Desktop's mark); the check's name and tooltip
+    sentMark: '✓', // the word cut (P443): the mark drawn
     openInSidePane: 'Open in Side pane',
     openAsTab: 'Open as tab',
-    // the needs-you strip above Reply
+    // the needs-you strip above Reply: the sentence heard; what waits on the person drawn as the waiting disc and its noun
+    // (`nouns`, the word cut, P440), an error, a holder and the trust card (a consent step, never a candidate) by their words
+    nouns: { permission: 'Permission', question: 'Question', plan: 'Plan', input: 'Input' },
     needs: {
       trust: 'Waiting for you to trust this folder',
       relay: 'The relay is not answering',
@@ -88,20 +95,23 @@ export const SIDE_COPY = {
   pane: {
     title: 'Side',
     threads: 'Side threads',
-    empty: 'No side threads yet. Comment on a line, or type /btw in the composer.',
+    empty: 'Comment on a line to start a thread.', // the word cut (P419)
     noSession: 'Open a session to see its side threads.',
     openAsTab: 'Open as tab',
-    shownInMain: 'Shown in the main area',
+    shownInMain: 'Shown in the main area', // the word cut (P424): Go to tab's tooltip and description, not drawn
     goToTab: 'Go to tab',
     showInArtifact: 'Show in artifact', // P2-E1 (E2's 'Show in deliverable'; P3-L M6b): a thread on an artifact element, back in a card beside the element
     showInBrowser: 'Show in browser', // P2-F L146: a thread on a page element, back in the card under the page
     reopenInBrowser: 'Reopen in browser', // P2-F: the same, when the Side pane took Browser's place in the panel
-    shownInCard: 'Shown in the card under the page',
+    shownInCard: 'Shown in the card under the page', // the same, for Show here
     showHere: 'Show here',
     openFile: (label: string) => `Open ${label}`,
-    questions: '/btw', // a thread's toggle for its questions under its view: the command that asks there (a promoted thread is titled "Side question")
+    // a thread's toggle for its questions under its view, in the normal face (the word cut, P422; a promoted thread is
+    // titled "Side question"); its name begins with its visible text (scale-review C scalpel-5#4, WCAG 2.5.3) and keeps
+    // the command that asks there
+    questions: 'Questions',
     questionsTitle: 'Side questions',
-    questionsLabel: '/btw side questions', // the thread header's toggle: its name begins with its visible text (scale-review C scalpel-5#4, WCAG 2.5.3)
+    questionsLabel: 'Questions: /btw side questions',
   },
   // `/btw`: the widget, the session's card (UX wave U4a) and a thread's questions under its thread view (the composer's
   // refusals are its own copy, `editor/controller.ts`)
@@ -117,15 +127,17 @@ export const SIDE_COPY = {
     followUp: 'Follow up…',
     fold: 'Fold side chat',
     close: 'Close side chat',
-    unfold: 'Open side chat', // the folded chip's title (its name is its word, "Side chat")
+    unfold: 'Open', // the folded chip's title (its name is its word, "Side chat"; the word cut, P405)
     unseen: 'New answer', // the chip's dot
     empty: 'Ask about the conversation without adding to it. The model answers beside the running turn, with no tools.',
     answering: 'Answering…',
-    synthetic: 'The engine substituted this answer',
-    noAnswer: 'The engine answered with no text',
+    synthetic: 'Not from Claude', // the word cut, N167: an answer the engine put in Claude's place
+    noAnswer: 'No answer', // the word cut (P413)
     retry: 'Retry',
+    // the word cut (P409, P408): drawn only once they can act; Continue keeps its words while the thread starts, a quiet
+    // spinner in it named by `promoting` (N165)
     clear: 'Clear',
-    promote: 'Continue as a side thread',
+    promote: 'Continue as thread',
     promoting: 'Starting…',
     log: 'Side questions',
   },

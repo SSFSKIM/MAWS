@@ -1,7 +1,9 @@
 // Review's toolbar (UX wave U5b, M3; the execution document's §F and card 1 at its default): the totals without the
 // scope's name, the unsent-comments chip's place, Collapse all, the hunk counter with its arrows and the View menu, on
 // one line when they fit and otherwise wrapped by measure. happy-dom lays nothing out: the widths are stubbed through
-// the stack's one seam.
+// the stack's one seam. The word cut: the totals drop "changed" (T356) and shorten the uncounted files (N35); the
+// counter reads "n / m" at every width, "Hunk n of m" its name and tooltip (T306); in a diff tab, which has no scope
+// chips, the totals line owns the scope's words (T357).
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type { ComponentProps } from 'react';
@@ -24,12 +26,9 @@ function widths(table: Record<string, number>): void {
   });
 }
 const PARTS = {
-  '[data-review-header]': 200, // "12 files changed · +340 −120"
+  '[data-review-header]': 200, // "12 files · +340 −120"
   '[data-review-toolbar-chip]': 130, // "2 unsent comments"
   '[data-review-collapse]': 80,
-  '[data-review-hunk]': 130,
-  '[data-review-counter="long"]': 130, // "Showing hunk 3 of 41"
-  '[data-review-counter="short"]': 50, // "3 of 41"
   '[data-review-nav]': 250, // the counter, ↑, ↓ and View
 };
 
@@ -49,11 +48,40 @@ const props = (over: Partial<ComponentProps<typeof Toolbar>> = {}): ComponentPro
 const chip = <span>2 unsent comments</span>;
 const lines = () => document.querySelector<HTMLElement>('[data-review-toolbar]')!.dataset.lines;
 const counter = () => document.querySelector('[data-review-hunk]')?.textContent ?? null;
+const described = (element: Element) =>
+  (element.getAttribute('aria-describedby') ?? '')
+    .split(' ')
+    .filter(Boolean)
+    .map((id) => document.getElementById(id)?.textContent ?? '')
+    .join(' ');
 
 describe('the totals (card 1: the pressed chip names the scope)', () => {
-  it('say the files and the lines, with the locale’s separator, and not the scope', () => {
-    expect(totalsWords({ files: 12, added: 340, removed: 120 })).toBe('12 files changed · +340 −120');
-    expect(totalsWords({ files: 1, added: 21530, removed: 4210 })).toBe('1 file changed · +21,530 −4,210');
+  it('say the files and the lines, with the locale’s separator, and neither the scope nor “changed” (T356)', () => {
+    expect(totalsWords({ files: 12, added: 340, removed: 120 })).toBe('12 files · +340 −120');
+    expect(totalsWords({ files: 1, added: 21530, removed: 4210 })).toBe('1 file · +21,530 −4,210');
+  });
+
+  it('end with the new files whose lines are not counted, shortened (N35)', () => {
+    expect(totalsWords({ files: 4, added: 14, removed: 0 }, 2)).toBe('4 files · +14 −0 · 2 untracked not counted');
+    expect(totalsWords({ files: 2, added: 2, removed: 0 }, 1)).toBe('2 files · +2 −0 · 1 untracked not counted');
+  });
+
+  it('own the scope’s words where no chip does (a diff tab, T357): the line takes the keyboard, the words its tooltip and description', async () => {
+    const user = userEvent.setup();
+    render(<Toolbar {...props({ scopeWords: 'main · Working tree against HEAD' })} />);
+    const line = document.querySelector<HTMLElement>('[data-review-header]')!;
+    expect(line.textContent).toBe('12 files · +340 −120');
+    expect(described(line)).toBe('main · Working tree against HEAD');
+    await user.tab();
+    expect(document.activeElement).toBe(line);
+    expect((await screen.findByRole('tooltip')).textContent).toBe('main · Working tree against HEAD');
+  });
+
+  it('is a plain line where a chip owns the scope’s words (the panel)', () => {
+    render(<Toolbar {...props()} />);
+    const line = document.querySelector<HTMLElement>('[data-review-header]')!;
+    expect(line.tabIndex).toBe(-1);
+    expect(line.getAttribute('aria-describedby')).toBeNull();
   });
 });
 
@@ -62,14 +90,14 @@ describe('the toolbar’s lines', () => {
     widths({ '[data-review-toolbar]': 720, ...PARTS });
     render(<Toolbar {...props({ chip })} />);
     expect(lines()).toBe('1');
-    expect(counter()).toBe('Showing hunk 3 of 41');
+    expect(counter()).toBe('3 / 41');
   });
 
   it('otherwise puts the totals on the first line and the controls on the next, the chip beside the totals while it fits there', () => {
     widths({ '[data-review-toolbar]': 360, ...PARTS });
     render(<Toolbar {...props({ chip })} />);
     expect(lines()).toBe('2');
-    expect(counter()).toBe('Showing hunk 3 of 41');
+    expect(counter()).toBe('3 / 41');
   });
 
   it('gives the chip a line of its own when it does not fit beside the totals', () => {
@@ -78,11 +106,11 @@ describe('the toolbar’s lines', () => {
     expect(lines()).toBe('3');
   });
 
-  it('shortens the counter last, to “n of m”, where “Showing hunk n of m” does not fit the controls’ line', () => {
+  it('keeps the counter’s one form where the controls’ line is narrow (T306)', () => {
     widths({ '[data-review-toolbar]': 280, ...PARTS });
     render(<Toolbar {...props()} />);
     expect(lines()).toBe('2');
-    expect(counter()).toBe('3 of 41');
+    expect(counter()).toBe('3 / 41');
   });
 
   it('measures its room inside its padding and border', () => {
@@ -105,6 +133,23 @@ describe('the toolbar’s lines', () => {
 });
 
 describe('the toolbar’s controls', () => {
+  it('reads the counter “n / m”, named “Hunk n of m”, which is its tooltip on pointing and on keyboard focus (T306)', async () => {
+    const user = userEvent.setup();
+    render(<Toolbar {...props()} />);
+    const count = screen.getByRole('img', { name: 'Hunk 3 of 41' });
+    expect(count.textContent).toBe('3 / 41');
+    expect(document.body.textContent).not.toContain('Showing hunk');
+    count.focus();
+    expect((await screen.findByRole('tooltip')).textContent).toBe('Hunk 3 of 41');
+    await user.keyboard('{Escape}');
+  });
+
+  it('carries the counter’s numbers as data, apart from the drawn words, which group thousands', () => {
+    render(<Toolbar {...props({ counter: { index: 0, count: 1002 } })} />);
+    const hunk = document.querySelector<HTMLElement>('[data-review-hunk]')!;
+    expect([hunk.textContent, hunk.dataset.index, hunk.dataset.count]).toEqual(['1 / 1,002', '1', '1002']);
+  });
+
   it('draws no counter and no arrows while no file is loaded', () => {
     render(<Toolbar {...props({ counter: null })} />);
     expect(counter()).toBeNull();

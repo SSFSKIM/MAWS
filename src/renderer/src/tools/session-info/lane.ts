@@ -14,7 +14,9 @@ import { LANE } from './copy';
 // `unknown` (the row not read yet) is the one kind beyond the document's five: it renders `Not read yet`.
 export type LaneKind = 'server' | 'local_expected' | 'local_observed' | 'off' | 'unavailable' | 'unknown';
 export type Reviews = { evaluated: number; flagged: number };
-export type Lane = { kind: LaneKind; sentence: string; reviews: Reviews | null };
+// `short`, the lane as the row reads it (the word cut, T254: "Server", "Local", "Off"; a refusal and `unknown` keep
+// their words); `sentence`, the whole of it, the row's tooltip.
+export type Lane = { kind: LaneKind; short: string; sentence: string; reviews: Reviews | null };
 
 // The catalogue entry of the session's model, when known (only its value is read).
 export type LaneModelEntry = { value: string } | null;
@@ -23,7 +25,7 @@ export type LaneModelEntry = { value: string } | null;
 // engine's own login); `null` when not known.
 export function autoModeLane(status: EngineSessionStatus, entry: LaneModelEntry, reviews: Reviews | null, account: string | null = null): Lane {
   // the counts belong to a lane that reviews: none beside `off` or `unavailable`
-  const lane = (kind: LaneKind, sentence: string): Lane => ({ kind, sentence, reviews: kind === 'off' || kind === 'unavailable' ? null : reviews });
+  const lane = (kind: LaneKind, sentence: string): Lane => ({ kind, short: shortOf(kind, sentence), sentence, reviews: kind === 'off' || kind === 'unavailable' ? null : reviews });
   const { effective, refusal } = status.permissionMode;
   // A refusal first: it is set exactly when the requested auto mode was not honoured, so the effective mode is another.
   if (refusal !== null) return lane('unavailable', MODE_REFUSAL_WORDS[refusal]);
@@ -36,6 +38,13 @@ export function autoModeLane(status: EngineSessionStatus, entry: LaneModelEntry,
   if (status.gateway.autoModeServer === 'enabled') return lane('server', LANE.server);
   if (status.gateway.autoModeServer === 'disabled') return lane('local_expected', LANE.expectedDisabled);
   return lane('unknown', LANE.unknown);
+}
+
+function shortOf(kind: LaneKind, sentence: string): string {
+  if (kind === 'server') return LANE.short.server;
+  if (kind === 'local_expected' || kind === 'local_observed') return LANE.short.local;
+  if (kind === 'off') return LANE.short.off;
+  return sentence;
 }
 
 // The session's tool calls the server lane evaluated, from C6's transcript: each tool use counted once, by its latest

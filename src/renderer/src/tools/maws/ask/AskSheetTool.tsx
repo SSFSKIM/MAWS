@@ -20,11 +20,13 @@ import { CardButton } from '../../../request-card/controls';
 import { useRemoteUnavailable } from '../../../lane-b/remote-unavailable'; // P5 O7 M8
 import { selectProjectOrder, useSessions } from '../../../stores/sessions';
 import { TranscriptActionsProvider } from '../../../transcript/view/context'; // P2-C3
+import { ASK } from '../../../transcript/model/copy'; // the word cut (T277): a non-blocking ask's line, its capsule's
 import { openFile } from '../../code/open-file'; // P2-C3
 import type { AskSheetParams } from '../actions';
 import { SHEET } from './copy';
 import { canSubmit, EMPTY_DRAFT } from './draft';
 import { AnsweredSection, QuestionSection } from './QuestionSection';
+import { WaitingWords } from '../../../ui/spinner';
 import { askSheet, canRetry, chooseOption, dismissAsk, editDraft, ensureLoaded, loadAsks, retryAsk, selectAsk, shownAsk, submitAsk, type AskSheetState as SheetStore, type SheetAsk } from './store';
 
 export interface AskSheetState {
@@ -47,11 +49,10 @@ function QuestionsIcon({ className }: { className?: string }) {
 
 const SCROLL = 'flex h-full min-h-0 flex-col bg-bg text-ui text-fg';
 
-function Centered({ title, detail }: { title: string; detail?: string }) {
+function Centered({ title }: { title: string }) {
   return (
-    <div className="flex flex-1 flex-col items-center justify-center gap-1 p-6 text-center">
+    <div className="flex flex-1 flex-col items-center justify-center p-6 text-center">
       <p className="m-0 text-ui text-fg-muted">{title}</p>
-      {detail && <p className="m-0 text-ui-sm text-fg-faint">{detail}</p>}
     </div>
   );
 }
@@ -139,7 +140,7 @@ function LiveAsk({ appSessionId, ask, state, directory }: { appSessionId: AppSes
   return (
     <>
       <div className="min-h-0 flex-1 overflow-y-auto">
-        <Header title={ask.title} status={ask.blocking ? SHEET.waitingNote : SHEET.asyncNote} context={ask.context} />
+        <Header title={ask.title} status={ask.blocking ? null : ASK.state.asked} context={ask.context} />
         {/* P2-C3: a preview's file references open in the ask's own session, as the plan card's do */}
         <TranscriptActionsProvider actions={{ openFile: (path, line) => openFile(appSessionId, path, line) }}>
           <div className="flex flex-col">
@@ -177,8 +178,9 @@ function LiveAsk({ appSessionId, ask, state, directory }: { appSessionId: AppSes
           <CardButton disabled={busy || unavailable !== null} title={unavailable ?? undefined} onClick={dismiss} className="mr-auto">
             {SHEET.dismiss}
           </CardButton>
-          <CardButton tone="primary" disabled={busy || !ready || unavailable !== null} title={why} onClick={submit}>
-            {sending ? SHEET.submitting : skipped > 0 ? SHEET.submitSkipping(skipped) : SHEET.submit}
+          <CardButton tone="primary" disabled={busy || !ready || unavailable !== null} aria-busy={sending || undefined} title={why} onClick={submit}>
+            {/* the word cut (N164): Submit keeps its words while the answers go */}
+            <WaitingWords words={skipped > 0 ? SHEET.submitSkipping(skipped) : SHEET.submit} wait={sending ? SHEET.submitting : null} />
           </CardButton>
         </div>
       </Footer>
@@ -211,7 +213,7 @@ function Sheet({ appSessionId, ctx }: { appSessionId: AppSessionId; ctx: PanelTo
       </div>
     );
   } else if (state.readError === null) {
-    body = <Centered title={SHEET.rest} detail={SHEET.restDetail} />;
+    body = <Centered title={SHEET.rest} />;
   }
 
   return (

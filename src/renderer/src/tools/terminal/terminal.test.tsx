@@ -496,7 +496,7 @@ describe('a restored tab whose shell closed when MAWS quit', () => {
     const state = restoredState('terminal:restored');
     render(<View state={state} ctx={context()} />);
     const line = screen.getByRole('status', { name: 'previous shell' });
-    expect(line.textContent).toContain('The previous shell closed when MAWS quit');
+    expect(line.textContent).toContain('Previous shell closed at quit'); // the word cut (T269)
     act(() => void fireEvent.click(within(line).getByRole('button', { name: 'Dismiss' })));
     expect(screen.queryByRole('status', { name: 'previous shell' })).toBeNull();
     expect(lost(state)).toBe(false);
@@ -672,9 +672,9 @@ describe('a restored tab of another machine’s session', () => {
     const remote = remoteAdoption();
     const state = restoredRemote('terminal:r');
     render(<View state={state} ctx={context({ appSessionId: R, session: SESSION_R })} />);
-    expect(screen.getByRole('status', { name: 'terminal pending' }).textContent).toBe('Reconnecting to this tab’s shell…');
+    expect(screen.getByRole('status', { name: 'terminal pending' }).textContent).toBe('Reconnecting…'); // the word cut (T268)
     await act(async () => remote.list([]));
-    await vi.waitFor(() => expect(screen.getByRole('status', { name: 'previous shell' }).textContent).toContain('The previous shell no longer runs on mini'));
+    await vi.waitFor(() => expect(screen.getByRole('status', { name: 'previous shell' }).textContent).toContain('Previous shell no longer runs on mini')); // T269
     useMachines.setState({ machines: new Map() });
   });
 });

@@ -10,6 +10,7 @@
 // nothing points.
 import { useRef } from 'react';
 import { Tip } from '../../../ui/tip';
+import { TouchFact } from '../../../ui/touch-fact';
 import { BROWSER_ACTION, browserActionError, browserActionHeading, took } from '../../model/copy';
 import type { Row } from '../../model/rows';
 import { Output } from '../cells/Truncated';
@@ -38,13 +39,8 @@ export function BrowserActionRow({ row }: { row: BrowserActionRowData }) {
             {browserActionHeading(row)}
           </span>
         </Tip>
-        {/* the touch rule (fix wave, scalpel-3#1): where nothing points no tip opens, so the time stands on the line
-            there, drawn under `(hover: none)` alone; assistive technology hears it as the phrase's description */}
-        {time !== null && (
-          <span className="transcript-browser-action-time" aria-hidden="true">
-            {time}
-          </span>
-        )}
+        {/* the touch rule (fix wave, scalpel-3#1): where nothing points no tip opens, so the time stands on the line */}
+        <TouchFact>{time}</TouchFact>
         {running && <RunningTime startedAt={row.at} />}
         {appSessionId !== null && (detail !== null || shot !== null || tab !== null) && (
           <span className="transcript-browser-action-actions" data-on-hover="">

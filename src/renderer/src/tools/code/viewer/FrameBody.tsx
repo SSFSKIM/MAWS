@@ -2,7 +2,8 @@
 // 9, 12, 13, 14 and 15; Interfaces §E): a PDF, an HTML page, a video or a sound a session's path names, drawn by the
 // artifact store's own frames from the token main issued (`entry.frame`, the viewer store's).
 //
-// - Asking, with nothing drawn before: "Loading". Asking with a frame drawn: that frame, until the new token is ready.
+// - Asking, with nothing drawn before: the quiet spinner named "Loading" (the word cut, T302). Asking with a frame drawn:
+//   that frame, until the new token is ready.
 // - Ready: `PdfFrame`, `HtmlFrame` or `Media`, each keyed by the URL it is given, so a new URL makes a new element (and
 //   the frame loads the file again from the route). A file's HTML frame is given its URL and title and no other prop:
 //   no pick, no locate, no connector port (decision 13). Its title is the file's base name (decision 9).
@@ -19,6 +20,7 @@ import { useEffect, useRef, type ReactNode } from 'react';
 import { HtmlFrame } from '../../artifacts/viewers/frames/HtmlFrame';
 import { Media } from '../../artifacts/viewers/frames/Media';
 import { PdfFrame } from '../../artifacts/viewers/frames/PdfFrame';
+import { QuietSpinner } from '../../../ui/spinner';
 import { VIEWER_COPY } from '../copy';
 import { ExternalRow, rowButton } from './ExternalRow';
 import { useViewer, viewState, type ReadyFrame, type ViewerEntry } from './viewer-store';
@@ -41,7 +43,7 @@ export function FrameBody({ entry, host, inView }: { entry: ViewerEntry; host: '
   if (frame === null || frame.status === 'row') return <ExternalRow entry={entry} />;
   if (frame.status === 'failed') return <Stopped tabId={tabId} />;
   const shown = frame.status === 'asking' ? frame.shown : frame;
-  if (shown === null) return <p className="p-4 text-ui text-fg-muted">{VIEWER_COPY.loading}</p>;
+  if (shown === null) return <Waiting />;
   if (!inView) return null;
   return <Drawn tabId={tabId} frame={shown} title={nameOf(entry.path)} host={host} />;
 }
@@ -88,6 +90,15 @@ function Stopped({ tabId }: { tabId: string }) {
           {VIEWER_COPY.openAgain}
         </button>
       </div>
+    </div>
+  );
+}
+
+// A wait in the body's place: nothing for its first half second, then the quiet spinner (the word cut, T302)
+export function Waiting() {
+  return (
+    <div className="flex p-4">
+      <QuietSpinner label={VIEWER_COPY.loading} />
     </div>
   );
 }

@@ -57,20 +57,25 @@ export function prStateBehind(scm: ScmStatus | undefined, pr: ScmPrState | undef
   return (scm.trusted && pr.error === 'untrusted') || (scm.gh.state === 'ready' && pr.gh.state !== 'ready');
 }
 
-// `Open · Changes requested · 3 passed, 1 pending`: the state (a draft only while open), the review decision when it is
-// one the owner acts on, and the checks counted by gh's buckets.
+// `Changes requested · 1 pending`: the state when it is not the normal one (Draft, Merged, Closed; the word cut, P44:
+// an open PR says nothing), the review decision when it is one the owner acts on, and the checks counted by gh's buckets
+// that carry news (P44: passed and skipped say nothing; P45: no checks, or checks that could not be read, say nothing).
+// Empty when there is nothing to say: the card's row then reads the PR's number alone.
 export function prDetails(pr: NonNullable<ScmPrState['pr']>): string {
   const words = SUMMARY_COPY.prState;
-  const state = pr.state === 'MERGED' ? words.merged : pr.state === 'CLOSED' ? words.closed : pr.isDraft ? words.draft : words.open;
+  const state = pr.state === 'MERGED' ? words.merged : pr.state === 'CLOSED' ? words.closed : pr.isDraft ? words.draft : undefined;
   const review = pr.reviewDecision === null ? undefined : SUMMARY_COPY.reviewDecision[pr.reviewDecision];
   return [state, review, checksText(pr.checks)].filter(Boolean).join(' · ');
 }
 
+const QUIET_BUCKETS: ReadonlySet<string> = new Set(['pass', 'skipping']);
+
 function checksText({ summary, items }: NonNullable<ScmPrState['pr']>['checks']): string {
-  if (summary === 'unknown') return SUMMARY_COPY.checksUnavailable;
-  const counts = SUMMARY_COPY.checkBuckets
+  if (summary === 'unknown') return '';
+  return SUMMARY_COPY.checkBuckets
+    .filter(([bucket]) => !QUIET_BUCKETS.has(bucket))
     .map(([bucket, word]) => [items.filter((item) => item.bucket === bucket).length, word] as const)
     .filter(([n]) => n > 0)
-    .map(([n, word]) => `${n} ${word}`);
-  return counts.length === 0 ? SUMMARY_COPY.noChecks : counts.join(', ');
+    .map(([n, word]) => `${n} ${word}`)
+    .join(', ');
 }

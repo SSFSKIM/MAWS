@@ -4,13 +4,18 @@
 // parent (an idle parent starts the forwarding turn, a busy one folds the steer in at its next tool boundary), disabled
 // with the reason as its placeholder otherwise. The line above the box walks the observables: asked, forwarded (where
 // it rests on 2.1.283), and gone on a receipt. A plain textarea mirroring C7's composer: its own focus, keys and send.
+// The word cut (T190, T191, T193, T199 to T201, T203): the box's label is for screen readers only (the engine relay's
+// placeholder names the session it goes through), Send is the main message box's round arrow with its word hidden and
+// as its tooltip, and the line says what happened and how long it has waited, not how the engine forwards it.
 import { useEffect, useEffectEvent, useId, useRef, useState } from 'react';
 import type { EngineSessionStatus } from '@shared/engine/status';
 import type { AgentId, AppSessionId } from '@shared/graph/ids';
 import { useKeyChord } from '../../../keymap/useKeyChord';
 import { useSessionControls } from '../../../session/controls/controls-for'; // P5 O9 M5
 import type { SessionControls } from '../../../session/controls/types'; // P5 O9 M5
-import { RELAY_LONG_WAIT_MS } from '../../../relay-wait';
+import { GLYPHS } from '../../../composer/submit/glyphs';
+import { useChordHint } from '../../../app/IconButton';
+import { Tip } from '../../../ui/tip';
 import { RELAY_COPY } from '../copy';
 import { formatElapsed } from '../model/elapsed';
 import { isPending, restoreDraft, type Relay } from '../model/relay';
@@ -47,21 +52,16 @@ export function relayDisabledReason({ node, status, relay, session }: { node: Ta
   return null;
 }
 
-// The pending line: asked (the elapsed wait, the parent's turn clause, the long wait, or the agent ending first), then
-// forwarded with the parent rounds, or why it failed. Delivered is cleared, never shown.
+// The pending line: asked (the elapsed wait, or the agent ending first), then forwarded, or why it failed. Delivered is
+// cleared, never shown.
 export function relayLine(relay: Relay | undefined, now: number, session: string, title: string): string | null {
   const state = relay?.state;
   if (!state) return null;
   switch (state.kind) {
-    case 'asked': {
-      if (state.childEndedAt !== null) return RELAY_COPY.childEnded(title, session);
-      const waited = now - Date.parse(state.sentAt);
-      const elapsed = formatElapsed(waited);
-      if (!state.parentTurnOpenAtSend) return RELAY_COPY.asked(session, elapsed);
-      return waited >= RELAY_LONG_WAIT_MS ? RELAY_COPY.askedLongWait(session, elapsed) : RELAY_COPY.askedTurnOpen(session, elapsed);
-    }
+    case 'asked':
+      return state.childEndedAt !== null ? RELAY_COPY.childEnded(title) : RELAY_COPY.asked(session, formatElapsed(now - Date.parse(state.sentAt)));
     case 'forwarded':
-      return RELAY_COPY.forwarded(session, state.parentRounds, title);
+      return RELAY_COPY.forwarded(title);
     case 'failed':
       return RELAY_COPY.failed(state.message);
     case 'delivered':
@@ -101,7 +101,7 @@ function TellComposer({ agentId, node, draft, onDraft, onSent, controls }: Props
     const result = await controls.tell(agentId, draft.trim());
     setSending(false);
     if (result.state === 'refused') return setLine({ text: RELAY_COPY.driven.failed(result.message), failed: true }); // the draft stays
-    setLine({ text: result.state === 'done' ? RELAY_COPY.driven.told(title) : RELAY_COPY.driven.unknown, failed: false });
+    setLine({ text: result.state === 'done' ? RELAY_COPY.driven.told : RELAY_COPY.driven.unknown, failed: false });
     onSent();
   };
   const root = useRef<HTMLDivElement>(null);
@@ -115,7 +115,7 @@ function TellComposer({ agentId, node, draft, onDraft, onSent, controls }: Props
         </p>
       )}
       <div className="m-3 flex flex-col gap-1.5 rounded-md border border-border-strong p-2.5">
-        <label htmlFor={id} className="text-ui-sm text-fg-muted">
+        <label htmlFor={id} className="sr-only">
           {RELAY_COPY.driven.label(title)}
         </label>
         <textarea
@@ -136,14 +136,7 @@ function TellComposer({ agentId, node, draft, onDraft, onSent, controls }: Props
           </p>
         )}
         <div className="flex justify-end">
-          <button
-            type="button"
-            disabled={!canSend}
-            onClick={() => void send()}
-            className="rounded-sm border border-border-strong bg-bg-active px-2.5 py-0.5 text-ui-sm text-fg outline-accent hover:bg-bg-hover focus-visible:outline-2 disabled:text-fg-faint disabled:hover:bg-bg-active"
-          >
-            {RELAY_COPY.send}
-          </button>
+          <SendGlyph disabled={!canSend} onSend={() => void send()} />
         </div>
       </div>
     </div>
@@ -202,7 +195,7 @@ function EngineRelayComposer({ appSessionId, agentId, node, status, sessionTitle
         </p>
       )}
       <div className="m-3 flex flex-col gap-1.5 rounded-md border border-border-strong p-2.5">
-        <label htmlFor={id} className="text-ui-sm text-fg-muted">
+        <label htmlFor={id} className="sr-only">
           {RELAY_COPY.label(sessionTitle)}
         </label>
         <textarea
@@ -210,7 +203,7 @@ function EngineRelayComposer({ appSessionId, agentId, node, status, sessionTitle
           rows={2}
           value={draft}
           disabled={disabled}
-          placeholder={reason?.text ?? RELAY_COPY.placeholder(title)}
+          placeholder={reason?.text ?? RELAY_COPY.placeholderVia(title, sessionTitle)}
           title={reason?.tooltip ?? undefined}
           onChange={(e) => edit(e.target.value)}
           className="block w-full resize-none bg-transparent text-ui text-fg outline-accent placeholder:text-fg-muted focus-visible:outline-2 disabled:cursor-not-allowed"
@@ -222,16 +215,29 @@ function EngineRelayComposer({ appSessionId, agentId, node, status, sessionTitle
           </p>
         )}
         <div className="flex justify-end">
-          <button
-            type="button"
-            disabled={!canSend}
-            onClick={() => void send()}
-            className="rounded-sm border border-border-strong bg-bg-active px-2.5 py-0.5 text-ui-sm text-fg outline-accent hover:bg-bg-hover focus-visible:outline-2 disabled:text-fg-faint disabled:hover:bg-bg-active"
-          >
-            {RELAY_COPY.send}
-          </button>
+          <SendGlyph disabled={!canSend} onSend={() => void send()} />
         </div>
       </div>
     </div>
+  );
+}
+
+// The main message box's Send (composer/submit/SubmitControl.tsx): the round accent button with the up arrow, its word
+// kept as hidden text (its name) and as its tooltip with the chord, which pointing or focus opens while it can send.
+function SendGlyph({ disabled, onSend }: { disabled: boolean; onSend: () => void }) {
+  const chord = useChordHint('composer.send');
+  const Arrow = GLYPHS.arrow;
+  return (
+    <Tip content={chord ? `${RELAY_COPY.send} · ${chord}` : RELAY_COPY.send}>
+      <button
+        type="button"
+        disabled={disabled}
+        onClick={onSend}
+        className="inline-flex size-7 shrink-0 items-center justify-center rounded-full bg-accent text-bg outline-accent hover:opacity-90 focus-visible:outline-2 disabled:bg-bg-hover disabled:text-fg-faint"
+      >
+        <Arrow />
+        <span className="sr-only">{RELAY_COPY.send}</span>
+      </button>
+    </Tip>
   );
 }

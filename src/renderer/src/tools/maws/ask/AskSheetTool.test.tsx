@@ -204,6 +204,32 @@ describe('editing the same ask in the hover and the sheet', () => {
   });
 });
 
+// The word cut: a blocking ask has no line under its title (T276); one the agent keeps working through reads as its
+// capsule does (T277, the transcript's `ASK.state.asked`); the resting state is its words alone (T292).
+describe('the line under an ask’s title, and the resting state', () => {
+  const statusUnderTitle = () => document.querySelector('[data-ask-sheet] header [role="status"]');
+
+  it('a blocking ask has none', async () => {
+    await mountWithAsk();
+    expect(await screen.findByRole('heading', { name: 'Setup' })).toBeTruthy();
+    expect(statusUnderTitle()).toBeNull();
+    expect(document.body.textContent).not.toContain('The agent is waiting for these answers.');
+  });
+
+  it('an ask the agent works through reads as its capsule does', async () => {
+    await mountWithAsk([{ ...ASK, blocking: false }]);
+    expect(await screen.findByRole('heading', { name: 'Setup' })).toBeTruthy();
+    expect(statusUnderTitle()?.textContent).toBe('Asked, answer when ready');
+  });
+
+  it('with no ask open, the panel says only that there are no open questions', async () => {
+    mount(undefined);
+    await fake.reply('maws.asks.list', { asks: [] });
+    const rest = await screen.findByText('No open questions');
+    expect(rest.parentElement!.textContent).toBe('No open questions');
+  });
+});
+
 describe('Submit', () => {
   it('counts only intentional skips, and waits while an Other answer is blank', async () => {
     await mountWithAsk();
@@ -230,7 +256,11 @@ describe('Submit', () => {
     fireEvent.click(within(section('q5')).getByRole('button', { name: 'Decide for me' }));
     fireEvent.click(within(section('q4')).getByRole('button', { name: 'Skip' }));
     fireEvent.click(submitButton());
-    expect((screen.getByRole('button', { name: 'Sending…' }) as HTMLButtonElement).disabled).toBe(true);
+    // the word cut (N164): Submit keeps its words while the answers go, a quiet spinner beside them named by the wait
+    expect((submitButton() as HTMLButtonElement).disabled).toBe(true);
+    expect(submitButton().getAttribute('aria-busy')).toBe('true');
+    expect(within(submitButton()).getByText('Submit · 2 skipped')).toBeTruthy();
+    expect(await within(submitButton()).findByRole('progressbar', { name: 'Sending…' })).toBeTruthy();
     expect((within(section('q1')).getByRole('radio', { name: 'Red' }) as HTMLButtonElement).disabled).toBe(true);
     expect(fake.invoked('maws.ask.answer')).toEqual([{
       appSessionId: A, askId: 'toolu_a', answers: [
@@ -244,6 +274,16 @@ describe('Submit', () => {
     await fake.reply('maws.ask.answer', { outcome: 'delivered' });
     expect(await screen.findByText('No open questions')).toBeTruthy();
     expect(screen.queryByRole('button', { name: /^Submit/ })).toBeNull();
+  });
+
+  it('the in-place form keeps Submit’s words while its answers go too', async () => {
+    render(<HoverAsk appSessionId={A} askId={ASK.askId} />);
+    await fake.reply('maws.asks.list', { asks: [ASK] });
+    for (const id of ['q1', 'q2', 'q3', 'q4', 'q5']) fireEvent.click(within(section(id)).getByRole('button', { name: 'Decide for me' }));
+    fireEvent.click(submitButton());
+    expect((submitButton() as HTMLButtonElement).disabled).toBe(true);
+    expect(within(submitButton()).getByText('Submit')).toBeTruthy();
+    expect(await within(submitButton()).findByRole('progressbar', { name: 'Sending…' })).toBeTruthy();
   });
 
   it('write_failed keeps the drafts and offers Retry', async () => {
@@ -547,6 +587,7 @@ describe('a capsule’s ask, read-only', () => {
     expect(within(section('q2')).getByText('Mon, Wed')).toBeTruthy();
     expect(within(section('q3')).getByText('Skipped')).toBeTruthy();
     expect(section('q3').querySelector('[data-ask-note]')?.textContent).toBe('NoteName it\nafter the release'); // P2-C3
+    expect(within(section('q3')).getByText('Note').className).toContain('sr-only'); // the word cut (T298): the label is heard, not drawn
     expect(section('q2').querySelector('[data-ask-note]')).toBeNull();
     expect(within(section('q4')).getByText('/work/app-a/assets')).toBeTruthy();
     expect(within(section('q5')).getByText('Decided for me')).toBeTruthy();
@@ -573,7 +614,7 @@ describe('a capsule’s ask, read-only', () => {
   it('a pending capsule the host turns out not to hold says so, still read-only', async () => {
     mount({ askId: 'toolu_gone', historical: { ...ANSWERED, askId: 'toolu_gone', state: 'asked', answers: null } });
     await fake.reply('maws.asks.list', { asks: [] });
-    expect(await screen.findByText('MAWS no longer holds this ask, so it cannot be answered here.')).toBeTruthy();
+    expect(await screen.findByText('Can no longer be answered here')).toBeTruthy(); // the word cut (T296)
     expect(screen.queryByRole('button', { name: /^Submit/ })).toBeNull();
   });
 

@@ -52,14 +52,14 @@ describe('routingFacts names the account and the switch', () => {
     const facts = routingFacts(record, direct, snapshot(), settings(), { login: 'Expired — log in again', email: null, organization: null });
     expect(facts).toMatchObject({
       route: 'direct',
-      line: "Direct · engine's own login · Expired — log in again",
+      line: 'Direct · Expired — log in again', // the word cut (T256)
       note: 'no gateway models · usage windows from the engine',
       account: null,
       canSwitch: true,
       switchLabel: 'Switch to gateway…',
       targets: ['gateway', 'machine'],
     });
-    expect(routingFacts(record, direct, snapshot(), settings(), null).line).toBe("Direct · engine's own login");
+    expect(routingFacts(record, direct, snapshot(), settings(), null).line).toBe('Direct');
   });
 
   it('a session without a status states the last route; one not held elsewhere can be started on the other route', () => {

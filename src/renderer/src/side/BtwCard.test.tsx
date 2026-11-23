@@ -60,6 +60,7 @@ const chip = () => document.querySelector<HTMLElement>('[data-btw-chip]');
 const waiting = (within: ParentNode = document) => [...within.querySelectorAll('[data-btw-waiting]')].map((line) => line.textContent);
 const field = () => screen.getByRole('textbox', { name: 'Ask a side question' }) as HTMLTextAreaElement;
 const settle = () => act(() => new Promise((resolve) => setTimeout(resolve, 0)));
+const descriptionOf = (element: Element) => document.getElementById(element.getAttribute('aria-describedby') ?? '')?.textContent ?? null;
 
 let fake: FakeClient;
 function listing(exchanges: SideExchange[], more: Parameters<typeof fakeClient>[0] = {}) {
@@ -191,20 +192,23 @@ describe('the /btw card', () => {
   });
 
   // the panel's finding 9: the guard on a promotion in flight outlives the card's fold, so a second press opens no second thread
-  it('a “Continue as a side thread” in flight stays in flight across a fold: the button still reads Starting… and a second press asks nothing', async () => {
+  it('a “Continue as thread” in flight stays in flight across a fold: the button still waits, its spinner named Starting…, and a second press asks nothing', async () => {
     fake = fakeClient({ 'side.question.list': { exchanges: [exchange({})] } }); // `side.thread.open` left unanswered
     window.maws = fake.client as unknown as PreloadBridge;
     withProcess(A, 'ready');
     act(() => openBtwCard(A));
     render(<BtwCard appSessionId={A} />);
     await screen.findByText('ZEBRA');
-    await userEvent.click(within(card()!).getByRole('button', { name: 'Continue as a side thread' }));
+    await userEvent.click(within(card()!).getByRole('button', { name: 'Continue as thread' }));
     expect(fake.invoked('side.thread.open')).toHaveLength(1);
     await userEvent.click(within(card()!).getByRole('button', { name: 'Fold side chat' }));
     await userEvent.click(chip()!);
     await screen.findByText('ZEBRA');
-    const again = within(card()!).getByRole('button', { name: 'Starting…' }) as HTMLButtonElement;
+    // the word cut (N165): the button keeps its words while the thread starts, busy, a quiet spinner in it
+    const again = within(card()!).getByRole('button', { name: /^Continue as thread/ }) as HTMLButtonElement;
     expect(again.disabled).toBe(true);
+    expect(again.getAttribute('aria-busy')).toBe('true');
+    expect(await within(again).findByRole('progressbar', { name: 'Starting…' })).toBeTruthy();
     await userEvent.click(again);
     expect(fake.invoked('side.thread.open')).toHaveLength(1);
   });
@@ -294,14 +298,14 @@ describe('the /btw card', () => {
     expect(waiting(card()!)).toHaveLength(1); // pending at once
   });
 
-  it('Clear starts a new side conversation; “Continue as a side thread” opens the thread from the answered exchanges', async () => {
+  it('Clear starts a new side conversation; “Continue as thread” opens the thread from the answered exchanges', async () => {
     withProcess(A, 'ready');
     listing([exchange({})], { 'side.question.clear': {} });
     act(() => openBtwCard(A));
     render(<BtwCard appSessionId={A} />);
     await screen.findByText('ZEBRA');
     await userEvent.type(field(), 'Now fix it.');
-    await userEvent.click(within(card()!).getByRole('button', { name: 'Continue as a side thread' }));
+    await userEvent.click(within(card()!).getByRole('button', { name: 'Continue as thread' }));
     expect(fake.invoked('side.thread.open')).toEqual([{ appSessionId: A_ID, from: { kind: 'btw', exchanges: [{ question: 'What word?', response: 'ZEBRA' }], text: 'Now fix it.' } }]);
     await userEvent.click(within(card()!).getByRole('button', { name: 'Clear' }));
     expect(fake.invoked('side.question.clear')).toEqual([{ appSessionId: A_ID }]);
@@ -407,7 +411,7 @@ describe('the /btw card', () => {
     expect(within(card()!).getByText('Held by terminal · 42')).toBeTruthy();
     await userEvent.type(field(), 'More?{Enter}');
     expect((within(card()!).getByRole('button', { name: 'Retry' }) as HTMLButtonElement).disabled).toBe(true);
-    expect((within(card()!).getByRole('button', { name: 'Continue as a side thread' }) as HTMLButtonElement).disabled).toBe(false);
+    expect((within(card()!).getByRole('button', { name: 'Continue as thread' }) as HTMLButtonElement).disabled).toBe(false);
     expect(fake.invoked('session.acquire')).toEqual([]);
     expect(fake.invoked('session.sideQuestion')).toEqual([]);
   });
@@ -511,19 +515,24 @@ describe('the /btw card for a session on another machine', () => {
   });
 
   // moved from side/BtwView-remote.test.tsx
-  it('greys Continue as a side thread with the declared reason, and Clear once the machine was heard not offering it', async () => {
+  // the word cut (P408, P409): a greyed reason keeps the keyboard ("Every hidden fact has an owner that takes keyboard focus")
+  it('greys Continue as thread with the declared reason, and Clear once the machine was heard not offering it', async () => {
     remoteListing([exchange({}), exchange({ id: 'op-2', question: 'Again?', state: 'failed', response: null, error: 'The side question failed' })]);
     act(() => openBtwCard(R));
     render(<BtwCard appSessionId={R} />);
     await screen.findByText('ZEBRA');
-    const promote = within(card()!).getByRole('button', { name: 'Continue as a side thread' });
-    expect(promote).toHaveProperty('disabled', true);
-    expect(promote.title).toBe(REMOTE_UNAVAILABLE['side.thread.open']);
+    const promote = within(card()!).getByRole('button', { name: 'Continue as thread' });
+    expect(promote).toHaveProperty('disabled', false);
+    expect(promote.getAttribute('aria-disabled')).toBe('true');
+    expect(descriptionOf(promote)).toBe(REMOTE_UNAVAILABLE['side.thread.open']);
+    await userEvent.click(promote);
+    expect(fake.invoked('side.thread.open')).toEqual([]);
     const clear = within(card()!).getByRole('button', { name: 'Clear' });
-    expect(clear).toHaveProperty('disabled', false);
+    expect(clear.getAttribute('aria-disabled')).toBeNull();
     act(() => heardRefusal('side.question.clear', { issues: { refusal: 'not-offered' } }, OTHER_MACHINE, TEST_MACHINE));
-    expect(clear).toHaveProperty('disabled', true);
-    expect(clear.title).toBe('mini doesn’t offer this');
+    const greyed = within(card()!).getByRole('button', { name: 'Clear' });
+    expect(greyed.getAttribute('aria-disabled')).toBe('true');
+    expect(descriptionOf(greyed)).toBe('mini doesn’t offer this');
   });
 
   it('greys Enter and Retry once the machine was heard not offering side questions, and asks nothing', async () => {
@@ -611,13 +620,75 @@ describe('a path in the card’s answer (U6b-4b)', () => {
     await settle();
     expect(fake.invoked('files.read')).toEqual([{ appSessionId: A_ID, path: '/elsewhere/o.md', offset: 0, length: FILES_READ_DEFAULT_LENGTH, hash: true, named: true }]);
     await act(() => fake.fail('files.read', "path outside the session's directories"));
-    // UX wave U6b-4b (M3): the first notice, as this Mac says it: its sentences, the path, the command's words
+    // UX wave U6b-4b (M3): the first notice, as this Mac says it: its sentences and the path
     expect([...document.querySelectorAll('[data-refusal] p')].map((p) => p.textContent)).toEqual([
       'This file is outside the folders this session works in.',
-      "MAWS opens a file from elsewhere when this session's transcript links it, when you choose it with File ▸ Open File…, or when the agent sends it.",
+      'Choose it with File ▸ Open File…', // the word cut (N7)
       'Ask the agent to send the file to see it here.',
-      '/elsewhere/o.md',
-      "path outside the session's directories",
+      '/elsewhere/o.md', // the word cut (N11): no command's words under a notice that names its cause
     ]);
+  });
+});
+
+// The word cut: Clear and Continue as thread are drawn only once they can act (P409, P408), the folded chip's tooltip is
+// "Open" (P405), and an answer with no text reads "No answer" (P413).
+describe('the card’s words, after the cut', () => {
+  it('draws neither Clear nor Continue as thread before anything is asked, nor while the only question waits', async () => {
+    withProcess(A, 'ready');
+    act(() => openBtwCard(A));
+    render(<BtwCard appSessionId={A} />);
+    await settle();
+    expect(within(card()!).queryByRole('button', { name: 'Clear' })).toBeNull();
+    expect(within(card()!).queryByRole('button', { name: /^Continue as thread/ })).toBeNull();
+    cleanup();
+    listing([pending()]);
+    act(() => openBtwCard(A));
+    render(<BtwCard appSessionId={A} />);
+    await screen.findByText('What word?');
+    expect(within(card()!).queryByRole('button', { name: 'Clear' })).toBeNull();
+    expect(within(card()!).queryByRole('button', { name: /^Continue as thread/ })).toBeNull();
+  });
+
+  it('draws Clear once an exchange settled, and Continue as thread once one was answered', async () => {
+    listing([exchange({ state: 'failed', response: null, error: 'The side question failed' })]);
+    act(() => openBtwCard(A));
+    render(<BtwCard appSessionId={A} />);
+    await screen.findByText('The side question failed');
+    expect(within(card()!).getByRole('button', { name: 'Clear' })).toBeTruthy();
+    expect(within(card()!).queryByRole('button', { name: /^Continue as thread/ })).toBeNull();
+    cleanup();
+    listing([exchange({})]);
+    act(() => openBtwCard(A));
+    render(<BtwCard appSessionId={A} />);
+    await screen.findByText('ZEBRA');
+    expect(within(card()!).getByRole('button', { name: 'Continue as thread' })).toBeTruthy();
+  });
+
+  it('the folded chip’s tooltip is Open, its name the card’s word', async () => {
+    act(() => openBtwCard(A));
+    render(<BtwCard appSessionId={A} />);
+    await userEvent.click(within(card()!).getByRole('button', { name: 'Fold side chat' }));
+    expect(chip()!.getAttribute('title')).toBe('Open');
+    expect(screen.getByRole('button', { name: 'Side chat' })).toBe(chip());
+  });
+
+  // P408: an answer with no text is nothing to continue: Clear is drawn, Continue as thread is not
+  it('an answer with no text reads No answer, and leaves nothing to continue as a thread', async () => {
+    listing([exchange({ response: '  ' })]);
+    act(() => openBtwCard(A));
+    render(<BtwCard appSessionId={A} />);
+    const empty = await within(card()!).findByText('No answer');
+    expect(empty.closest('[data-side-exchange="answered"]')).not.toBeNull();
+    expect(within(card()!).getByRole('button', { name: 'Clear' })).toBeTruthy();
+    expect(within(card()!).queryByRole('button', { name: /^Continue as thread/ })).toBeNull();
+  });
+
+  // N167: an answer the engine put in Claude's place says so in plain words
+  it('an answer the engine substituted reads Not from Claude', async () => {
+    listing([exchange({ synthetic: true, response: 'Prompt is too long' })]);
+    act(() => openBtwCard(A));
+    render(<BtwCard appSessionId={A} />);
+    await within(card()!).findByText('Prompt is too long');
+    expect(card()!.querySelector('[data-side-synthetic]')?.textContent).toBe('Not from Claude');
   });
 });

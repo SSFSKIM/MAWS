@@ -204,8 +204,9 @@ async function reviewAppTs(h: Harness, opts: { pin?: boolean } = {}): Promise<vo
   const uncommitted = h.region.locator('[data-chip="uncommitted"]');
   await uncommitted.click();
   await expect(uncommitted).toHaveAttribute('aria-pressed', 'true');
-  // UX wave U5b (card 1 at its default): the totals no longer name the scope; the pressed chip above them does
-  await expect.poll(async () => (await h.review('panel'))?.header).toBe('5 files changed · +4 −0');
+  // UX wave U5b (card 1 at its default): the totals no longer name the scope; the pressed chip above them does. The word
+  // cut (T356): nor "changed".
+  await expect.poll(async () => (await h.review('panel'))?.header).toBe('5 files · +4 −0');
   await h.code('selectFile', 'src/app.ts', 'panel');
   await expect.poll(async () => (await h.review('panel'))?.hunk).toEqual({ index: 1, count: SCRATCH_HUNKS });
 }
@@ -266,7 +267,7 @@ test.describe('the #panel harness: Review and its hand-offs', () => {
     expect(collapsed.scope).toBe('turn');
     expect(collapsed.files.map(({ path, added, removed }) => ({ path, added, removed }))).toEqual(turnFiles);
     const sum = turnFiles.reduce((a, f) => ({ added: a.added + f.added, removed: a.removed + f.removed }), { added: 0, removed: 0 });
-    expect(collapsed.header).toBe(`3 files changed · +${sum.added} −${sum.removed}`); // the scope is the pressed chip's (card 1)
+    expect(collapsed.header).toBe(`3 files · +${sum.added} −${sum.removed}`); // the scope is the pressed chip's (card 1)
     expect(collapsed.selected, 'the first file’s section is at the top').toBe(turnFiles[0].path);
     expect(collapsed.hunks?.length, 'the file at the top has hunks').toBeGreaterThan(0);
     expect(collapsed.files.map((f) => f.folded), 'every section unfolded').toEqual([false, false, false]);
@@ -486,11 +487,13 @@ test.describe('the #panel harness: Review and its hand-offs', () => {
     await withScratch(h, async () => {
       await hideSurfaces(h.page);
       const environment = await unfoldSessionCard(h.page, 'Environment');
-      await expect(environment.getByTestId('change-line')).toHaveText('+4 −0 across 5 files · 3 untracked · 1 staged');
+      // the word cut (P36, T364): the line reads the counted lines and files; the untracked count is its tooltip and the end
+      // of its description, and the staged count is gone
+      await expect(environment.getByTestId('change-line')).toHaveText('+4 −0 · 5 files');
       // UX wave U8b (M4 decision 4, A8): the change line is the card's control into Review, named Open changes with its
       // counts as its description; the branch row's Review button is gone.
       const changes = environment.getByRole('button', { name: 'Open changes', exact: true });
-      await expect(changes).toHaveAccessibleDescription('+4 −0 across 5 files · 3 untracked · 1 staged');
+      await expect(changes).toHaveAccessibleDescription('+4 −0 · 5 files 3 untracked');
       await expect(environment.getByRole('button', { name: 'Review', exact: true })).toHaveCount(0);
       await changes.click();
       await expect.poll(async () => (await h.review('panel'))?.scope).toBe('uncommitted');
@@ -578,7 +581,7 @@ test.describe('the product in stub mode over a scratch repository', () => {
       await expect(roots).toHaveCount(1);
       await expect(roots).toHaveAttribute('data-path', p.scratch.dir);
       await expect(roots).toContainText('repo');
-      await expect(roots).toContainText('directory');
+      await expect(roots, 'the session’s own folder is its name alone (the word cut, T314)').not.toContainText('directory');
       await expect(roots).toHaveAttribute('aria-expanded', 'true');
       const dotfile = treeRow(p, p.scratch.path('.editorconfig'));
       await expect(dotfile, 'dotfiles shown without an opening click').toBeVisible();
@@ -764,7 +767,7 @@ test.describe('the product in stub mode over a scratch repository', () => {
         await expect(viewer).toHaveAttribute('data-kind', 'frame');
         await expect(viewer).toHaveAttribute('data-frame', 'pdf');
         await expect(viewer.locator('[data-external-row]')).toHaveCount(0);
-        await expect(viewer.getByText('PDF files open outside MAWS')).toHaveCount(0);
+        await expect(viewer.getByText(/^PDF · /), 'no kind-and-size line (the word cut, T327)').toHaveCount(0);
         const frame = viewer.locator('[data-artifact-frame="pdf"]');
         await expect(frame, 'a token and the file’s name, with the side tab’s fragment').toHaveAttribute('src', /^maws-artifact:\/\/[0-9a-f]{32}\/doc\.pdf#toolbar=0&navpanes=0$/);
         const side = (await frame.getAttribute('src'))!;
@@ -1013,7 +1016,7 @@ test.describe('the product in stub mode over a scratch repository', () => {
   test('a binary is an Open externally row', async () => {
     await withProduct(async (p) => {
       const viewer = await openInViewer(p, 'data.bin');
-      await expect(viewer.locator('[data-external-row]')).toContainText('Binary file · 12 B');
+      await expect(viewer.locator('[data-external-row]')).toContainText('Binary · 12 B'); // the word cut (T327): its kind and its size
       await expect(viewer.getByRole('button', { name: 'Open externally' }), 'MAWS hands the OS no unknown binary').toHaveCount(0);
     });
   });
@@ -1025,7 +1028,7 @@ test.describe('the product in stub mode over a scratch repository', () => {
       const started = Date.now();
       await row.click();
       const viewer = p.page.locator(`[data-file-viewer][data-path="${p.scratch.path('big.log')}"]`);
-      await expect(notice(viewer)).toHaveText('Showing the first 1.0 MB of 20.0 MB', { timeout: MEASURED_WAIT_MS });
+      await expect(notice(viewer)).toHaveText('1.0 MB of 20.0 MB', { timeout: MEASURED_WAIT_MS }); // the word cut (T322): the two sizes, beside Load more
       await expect(viewer.locator('[data-code-view] .cm-line').first()).toBeVisible({ timeout: MEASURED_WAIT_MS });
       within('big.log head shown after', Date.now() - started, 2_000, 'the read completed within two seconds');
       await expect(viewer.getByRole('button', { name: 'Load more' })).toBeVisible();
@@ -1049,8 +1052,9 @@ test.describe('the product in stub mode over a scratch repository', () => {
         await expect(notice(viewer)).toHaveCount(0, { timeout: MEASURED_WAIT_MS });
         within('generated.ts complete after', Date.now() - started, 2_000, 'the file loaded whole and landed within two seconds');
         const seen = await notices();
+        // the word cut (T324): the arrival is a ring named by these words; a bounded head's notice is the two sizes alone (T322)
         expect(seen.some((text) => /^Loading .+ of 2\.1 MB$/.test(text)), `a Loading notice was shown: ${JSON.stringify(seen)}`).toBe(true);
-        expect(seen.filter((text) => text.startsWith('Showing the first'))).toEqual([]);
+        expect(seen.filter((text) => /^[\d.]+ [KM]?B of /.test(text)), 'never a bounded head').toEqual([]);
         await expect.poll(async () => (await documentEnd(viewer)).number).toBe(GENERATED_LINES + 1); // the empty line after the last newline
         const end = await documentEnd(viewer);
         expect(end.last).toBe('');
@@ -1086,7 +1090,7 @@ test.describe('the product in stub mode over a scratch repository', () => {
       expect(sum).toEqual({ files: 2, added: 4, removed: 0 });
       // UX wave U5b-2 (§I; Decision Log 29, 4): the new files' lines are counted (scratch.txt's one line and link-out's
       // target, one line), and big.log, past the per-file cap, is named after the totals; the scope is the pressed chip's
-      await expect(review.locator('[data-review-header]')).toHaveText(`5 files changed · +${sum.added + 2} −${sum.removed}, and 1 untracked file not counted`);
+      await expect(review.locator('[data-review-header]')).toHaveText(`5 files · +${sum.added + 2} −${sum.removed} · 1 untracked not counted`); // the word cut (T356, N35)
       // over the product's stack, the View menu opens against its button inside the window (measured)
       await expectViewMenuPlaced(review);
       await p.page.keyboard.press('Escape');
@@ -1124,7 +1128,8 @@ test.describe('the product in stub mode over a scratch repository', () => {
       await expect(big.locator('[data-review-too-large]')).toHaveText('Diff too large to display. Open the file', { timeout: 30_000 });
       await expect(big.locator('[data-review-body] table'), 'no diff drawn').toHaveCount(0);
       await expect(review.locator('[data-review-note]')).toHaveCount(0);
-      await expect(review.locator('[data-review-footer]')).toHaveText('main · Working tree against HEAD');
+      // the word cut (T357): what the scope reads left the foot line for the pressed chip's tooltip and description
+      await expect(review.locator('[data-chip="uncommitted"]')).toHaveAccessibleDescription('main · Working tree against HEAD');
     });
   });
 
@@ -1139,7 +1144,7 @@ test.describe('the product in stub mode over a scratch repository', () => {
       await expect.poll(() => staged.count(), { timeout: MEASURED_WAIT_MS, intervals: [25] }).toBe(0);
       within('Staged gone after git reset', Date.now() - reset, 1_000, 'Staged gone within a second of the reset');
       // src/staged.ts, untracked now, keeps its one line in the totals (UX wave U5b-2: a new file's lines are counted)
-      await expect(review.locator('[data-review-header]')).toHaveText('5 files changed · +6 −0, and 1 untracked file not counted');
+      await expect(review.locator('[data-review-header]')).toHaveText('5 files · +6 −0 · 1 untracked not counted');
       await expect(reviewSection(review, 'src/staged.ts')).toHaveAttribute('data-kind', 'untracked');
     });
   });
@@ -1184,7 +1189,7 @@ test.describe('the product in stub mode over a scratch repository', () => {
       // a change above the place: README.md's section is drawn before src/app.ts's
       writeFileSync(p.scratch.path('README.md'), `${readFileSync(p.scratch.path('README.md'), 'utf8')}One more line.\n`);
       await expect(reviewSection(review, 'README.md')).toHaveCount(1, { timeout: 5_000 });
-      await expect(review.locator('[data-review-header]')).toHaveText('6 files changed · +7 −0, and 1 untracked file not counted');
+      await expect(review.locator('[data-review-header]')).toHaveText('6 files · +7 −0 · 1 untracked not counted');
       expect((await sectionPaths(review))[0], 'the new section stands above the place').toBe('README.md');
       await expectPlaceAtTop(review, before, 'the same file and line at the top after the refresh');
     });
@@ -1348,13 +1353,15 @@ test.describe('the product in stub mode over a scratch repository', () => {
     await withProduct(
       async (p) => {
         // A refused row: an in-root directory the service cannot open is answered with the refusal. UX wave U6b-4b (§G;
-        // L11): the row reads the folder's first sentence in place of the command's words, which its title keeps.
+        // L11): the row reads the folder's first sentence in place of the command's words. Its title holds the sentence whole
+        // (a narrow row cuts it); the word cut (N11) drops the command's words under a notice that names its cause.
         const locked = await reveal(p, 'locked');
         await locked.click();
         const refusedRow = p.panel.locator('[data-tool="files"] [data-notice="refused"]');
         await expect(refusedRow).toContainText(FOLDER_OUTSIDE);
         await expect(refusedRow).toHaveAttribute('data-notice-cause', 'outside');
-        await expect(refusedRow, 'the sentence whole and the service’s words, in the row’s title').toHaveAttribute('title', `${FOLDER_OUTSIDE}\n${REFUSAL}`);
+        await expect(refusedRow, 'the sentence whole, in the row’s title, without the service’s words (N11)').toHaveAttribute('title', FOLDER_OUTSIDE);
+        await expect(refusedRow).not.toContainText(REFUSAL);
         await expect(refusedRow, 'no “Refused: …”').not.toContainText('Refused');
         // UX wave U6b-2 (M6; Interfaces §H): a framed file whose load failed, its body the sentence and Open again. A PDF
         // kept in its tab is removed (its folder's watch says so, and its frame, already drawn, stays); shown again after
@@ -1609,7 +1616,7 @@ test.describe('the product over a session discovered from its transcript', () =>
       await expect(root).toHaveAttribute('data-path', worktree, { timeout: 20_000 });
       await expect(root).toContainText('working folder');
       let scm = await sourceControl();
-      await expect(where(scm), 'the page reads the worktree').toHaveAttribute('title', worktree, { timeout: 20_000 });
+      await expect(where(scm), 'the page reads the worktree (its path the Where line’s tip, the word cut N57)').toHaveAccessibleDescription(worktree, { timeout: 20_000 });
       await expect(where(scm).locator('[data-scm-where-branch]')).toHaveText('⎇ worktree-w1');
       await expect(where(scm).locator('[data-scm-where-worktree]')).toHaveText('· worktree');
       await expect(uncommittedCount(scm), 'its one change, worktree-note.txt, and not the repository’s').toHaveText('1');
@@ -1650,9 +1657,9 @@ test.describe('the product over a session discovered from its transcript', () =>
       await expect(reviewRow(body, 'worktree-note.txt')).toHaveCount(0);
       root = await firstRoot();
       await expect(root).toHaveAttribute('data-path', repo.root, { timeout: 20_000 });
-      await expect(root).toContainText('directory');
+      await expect(root, 'the session’s own folder is its name alone (the word cut, T314)').not.toContainText('directory');
       scm = await sourceControl();
-      await expect(where(scm), 'the page reads the repository again').toHaveAttribute('title', repo.root, { timeout: 20_000 });
+      await expect(where(scm), 'the page reads the repository again').toHaveAccessibleDescription(repo.root, { timeout: 20_000 });
       await expect(where(scm).locator('[data-scm-where-branch]')).toHaveText('⎇ main');
       await expect(where(scm).locator('[data-scm-where-worktree]'), 'no worktree word').toHaveCount(0);
       await expect(uncommittedCount(scm), 'its one change, README.md').toHaveText('1');
@@ -1813,8 +1820,9 @@ test.describe('UX wave U6b-1: a file opens beside the chat', () => {
 
 test.describe('UX wave U6b-4b: the notice of a file that cannot be read', () => {
   // L8 (docs/doperpowers/plans/2026-11-18-ux-wave-U6b-4b-links.md, §G): a path link to a file that is not there opens its
-  // tab beside the chat, which reads the notice of its cause in place of the command's words: "No file at this path.", the
-  // path under it and the service's words small, with neither Copy path nor Retry. Waits on the notice's cause.
+  // tab beside the chat, which reads the notice of its cause in place of the command's words: "No file at this path." and the
+  // path under it, with neither Copy path nor Retry; the word cut (N11) drops the service's words under a notice that names
+  // its cause. Waits on the notice's cause.
   test('a path with no file reads “No file at this path.”', async () => {
     const repo = await ScratchRepo.create({ sentinels: false });
     const store = await StoreFixture.create();
@@ -1842,7 +1850,8 @@ test.describe('UX wave U6b-4b: the notice of a file that cannot be read', () => 
       const notice = sideColumn(page).locator(`[data-file-viewer][data-path="${missing}"] [data-refusal]`);
       await expect(notice, 'the notice of a missing file').toHaveAttribute('data-notice-cause', 'not-found', { timeout: 20_000 });
       await expect(notice).toHaveAttribute('role', 'alert');
-      expect(await notice.locator('p').allTextContents(), 'the sentence, the path, the service’s words').toEqual(['No file at this path.', missing, `not found: ${missing}`]);
+      expect(await notice.locator('p').allTextContents(), 'the sentence and the path').toEqual(['No file at this path.', missing]);
+      await expect(notice.locator('[data-notice-detail]'), 'no service words under a notice that names its cause (N11)').toHaveCount(0);
       await expect(notice.locator('[data-notice-copy], [data-notice-retry]'), 'neither Copy path nor Retry').toHaveCount(0);
       expect(existsSync(missing), 'nothing created').toBe(false);
       expect(maws.consoleErrors(), 'the console stays free of errors').toEqual([]);

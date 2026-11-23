@@ -2,7 +2,8 @@
 // about (a file or PR line opens its file at the line in the parent's context; a page URL is text until E4's browser
 // exists) with Open as tab, then the thread itself as `SessionPane` draws any session: its transcript, docked request,
 // holder notice, setup state and composer, no second implementation of any. One `SessionPane` per session: while a main
-// tab shows the thread (Open as tab), the pane says so with Go to tab instead, and closing that tab brings it back.
+// tab shows the thread (Open as tab), the pane draws Go to tab instead, the place its tooltip, and closing that tab brings
+// it back.
 // While the pane draws the thread on screen it is published as shown, so the thread's unread mark clears as a main
 // tab's would. A thread continued from side questions has no anchor to name: its header shows the opening question,
 // read from the thread's own first prompt (the promotion message, whose tag parses to the `none` anchor `btw`). A `/btw`
@@ -35,6 +36,7 @@ import type { AppSessionId } from '@shared/graph/ids';
 import { tabId } from '@shared/ipc/schema/layout';
 import { SessionPane } from '../session/SessionPane';
 import { QUIET, SECONDARY } from '../sessions/ui';
+import { Tip } from '../ui/tip';
 import { useLayout } from '../stores/layout';
 import { isOpen } from '../stores/layout-model';
 import { useSessions } from '../stores/sessions';
@@ -172,7 +174,7 @@ export function ThreadView({ parent, child, visible }: { parent: AppSessionId; c
             aria-pressed={questionsOpen}
             title={COPY.questionsTitle}
             aria-label={COPY.questionsLabel}
-            className={`${QUIET} font-mono text-ui-sm aria-pressed:bg-bg-active aria-pressed:text-fg`}
+            className={`${QUIET} text-ui-sm aria-pressed:bg-bg-active aria-pressed:text-fg`}
             onClick={() => setInlineQuestions(child, !questionsOpen)}
           >
             {COPY.questions}
@@ -201,19 +203,22 @@ export function ThreadView({ parent, child, visible }: { parent: AppSessionId; c
           </button>
         )}
       </header>
+      {/* the word cut (P424): a thread drawn elsewhere draws its button alone, the sentence its tooltip and description */}
       {inMain ? (
-        <div className="flex flex-1 flex-col items-center justify-center gap-2 p-6 text-center">
-          <p className="m-0 text-ui text-fg-muted">{COPY.shownInMain}</p>
-          <button type="button" className={SECONDARY} onClick={() => useLayout.getState().activateTab(childTab)}>
-            {COPY.goToTab}
-          </button>
+        <div className="flex flex-1 flex-col items-center justify-center p-6 text-center">
+          <Tip content={COPY.shownInMain} description={COPY.shownInMain}>
+            <button type="button" className={SECONDARY} onClick={() => useLayout.getState().activateTab(childTab)}>
+              {COPY.goToTab}
+            </button>
+          </Tip>
         </div>
       ) : inCard ? (
-        <div className="flex flex-1 flex-col items-center justify-center gap-2 p-6 text-center">
-          <p className="m-0 text-ui text-fg-muted">{COPY.shownInCard}</p>
-          <button type="button" className={SECONDARY} onClick={() => closeCard()}>
-            {COPY.showHere}
-          </button>
+        <div className="flex flex-1 flex-col items-center justify-center p-6 text-center">
+          <Tip content={COPY.shownInCard} description={COPY.shownInCard}>
+            <button type="button" className={SECONDARY} onClick={() => closeCard()}>
+              {COPY.showHere}
+            </button>
+          </Tip>
         </div>
       ) : (
         <>

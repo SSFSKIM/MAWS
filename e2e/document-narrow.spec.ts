@@ -336,7 +336,7 @@ test('at the panel’s 280 px minimum a document’s and a dashboard’s toolbar
     expect((await box(toolbar)).height, `${kind}: one row's height`).toBeLessThan(44);
     expect(await wrappedLabels(toolbar), `${kind}: every label one line inside its button`).toEqual([]);
     expect(await squeezedControls(toolbar), `${kind}: no control squeezed`).toEqual([]);
-    await record.getByRole('button', { name: 'Back', exact: true }).click();
+    await record.getByRole('button', { name: 'Back to list', exact: true }).click();
   }
   for (const body of shots) await test.info().attach('panel-280-toolbars', { body, contentType: 'image/png' });
 });

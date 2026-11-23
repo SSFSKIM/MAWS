@@ -93,6 +93,7 @@ import { startRemoteScene, B_NAME, type RemoteScene } from './support/remote-sce
 import type { PlaneRow } from './support/fake-sminos'; // 2026-11-06
 import { answered, BUTTON, FIELD, startPages } from './support/headless-browser'; // P5 O17 M10
 import { connectorControl, writeCuaEngine, type ConnectorControl } from '../test/support/cua-engine'; // P5 O17 M10
+import { unfoldInfoGroup } from './support/session-info';
 import { activeMainTab, backToTabs, hideSurface, mainTabById, mainTabs, moveSideTab, openSurface, sessionCard, showSessionCards, sideColumn, sideGroup, sideTab, surface } from './support/shell';
 import { backgroundAgentRecords, backgroundBashRecords, turnEndRecords, userRecord } from './support/lane-a'; // UX wave U8b M9
 import { seedTranscript, SIDE_QUESTION, SideJournal, slugOf, transcript } from './support/side-replay';
@@ -917,7 +918,7 @@ test('A reaches B’s mawsd over RL2, through the hub and then directly, and dri
       const review = surface(page, 'review');
       await expect(review.locator('[data-chip="commit"]')).toHaveText(`Commit ${sha.slice(0, 7)}`, { timeout: 60_000 });
       await expect(review.locator('[data-chip="commit"]')).toHaveAttribute('aria-pressed', 'true');
-      await expect(review.locator('[data-review-header]'), `the commit's diff, read on B\n${mainSaid(page)}`).toHaveText('1 file changed · +1 −0', { timeout: 60_000 });
+      await expect(review.locator('[data-review-header]'), `the commit's diff, read on B\n${mainSaid(page)}`).toHaveText('1 file · +1 −0', { timeout: 60_000 }); // the word cut (T356): no "changed"
       await expect(review.locator(`[data-review-file="${NOTES}"] [data-review-block]`).first()).toContainText(TYPED, { timeout: 60_000 });
     });
 
@@ -1017,6 +1018,9 @@ test('A reaches B’s mawsd over RL2, through the hub and then directly, and dri
       await link.click();
       const mark = page.locator('[data-browser-view="panel"] [data-browser-chip] [data-forward-mark]');
       await expect(mark, `the browser's tab, marked forwarded\n${mainSaid(page)}\nB's log:\n${bPtyLines()}`).toHaveText(`forwarded from ${B_NAME}`, { timeout: 60_000 });
+      // the word cut (T429): what is drawn is the machine's name; "forwarded from" before it is for a screen reader alone
+      await expect(mark.locator('.sr-only')).toHaveText('forwarded from ');
+      expect(await mark.evaluate((el) => Array.from(el.childNodes).filter((node) => !(node instanceof Element && node.classList.contains('sr-only'))).map((node) => node.textContent).join('')), 'drawn: the machine alone').toBe(B_NAME);
       await expect(mark).toHaveAttribute('title', `Port ${devPort} on ${B_NAME}, forwarded to this Mac`);
       type Tab = { tabId: string; url: string; forward?: { machine: string; port: number; localPort: number } };
       const forwardedTab = async () => (await invoke<{ tabs: Tab[] }>(page, 'browser.tabs.list', { appSessionId: app }, b.ref)).tabs.find((t) => t.forward?.port === devPort);
@@ -1126,7 +1130,7 @@ test('A reaches B’s mawsd over RL2, through the hub and then directly, and dri
       const tool = surface(again, 'artifacts');
       const pageRecord = tool.locator(`[data-artifact-record="${report.id}"]`);
       await quoting(expect(pageRecord, 'the page in the session’s Artifacts tool').toBeVisible({ timeout: 60_000 }), async () => `${await paneSaid(again)}\n${mainSaid(again)}`);
-      await pageRecord.getByRole('button', { name: 'Back', exact: true }).click();
+      await pageRecord.getByRole('button', { name: 'Back to list', exact: true }).click();
       await tool.getByRole('button', { name: 'This session', exact: true }).click();
       const toolRow = (id: string) => tool.locator(`button[data-artifact-row][data-artifact-id="${id}"]`);
       await quoting(expect(toolRow(notes.id), 'the text artifact in the session’s Artifacts tool').toBeVisible({ timeout: 60_000 }), () => mainSaid(again));
@@ -1134,7 +1138,7 @@ test('A reaches B’s mawsd over RL2, through the hub and then directly, and dri
       await toolRow(notes.id).click();
       const record = tool.locator(`[data-artifact-record="${notes.id}"]`);
       await quoting(expect(record, 'the text read from B').toContainText(NOTES_ARTIFACT.text.trim(), { timeout: 60_000 }), async () => `the record: ${await record.innerText().catch(() => '')}\n${mainSaid(again)}`);
-      await record.getByRole('button', { name: 'Back', exact: true }).click();
+      await record.getByRole('button', { name: 'Back to list', exact: true }).click();
 
       // Open library opens B's library; a rename there is B's store's, as B's own library reads it
       await tool.getByRole('button', { name: 'Open library', exact: true }).click();
@@ -1252,7 +1256,7 @@ test('A reaches B’s mawsd over RL2, through the hub and then directly, and dri
       const largeViewer = again.locator(`[data-file-viewer][data-path="${join(checkout, LARGE_ON_B)}"]`);
       await quoting(expect(largeViewer, 'its row, not a frame').toHaveAttribute('data-frame', 'row', { timeout: 60_000 }), async () => `the viewer: ${await largeViewer.innerText().catch(() => '')}\n${mainSaid(again)}`);
       const largeShown = largeViewer.locator('[data-external-row]');
-      await expect(largeShown.getByText('Too large to show here: MAWS copies at most 64.0 MB from another machine.', { exact: true })).toBeVisible();
+      await expect(largeShown.getByText('Too large to show here', { exact: true }) /* the word cut (N14): the size under it is the fact */).toBeVisible();
       await expect(largeShown.getByText('64.0 MB', { exact: true }), 'its size').toBeVisible();
       await expect(largeViewer.getByRole('button', { name: 'Open externally' }), 'no act that can only fail').toHaveCount(0);
       expect(frameCopies(), 'A’s frame-copies folder lists no entry after the refused copy').toEqual([]);
@@ -1310,7 +1314,7 @@ test('A reaches B’s mawsd over RL2, through the hub and then directly, and dri
       console.log(`[e2e:remote] M5b: B's page renders in A's frame: ${heading}`);
 
       // The plan in A's editor: what A types there lands in B's store, as B's own export of it reads it
-      await pageRecord.getByRole('button', { name: 'Back', exact: true }).click();
+      await pageRecord.getByRole('button', { name: 'Back to list', exact: true }).click();
       await tool.getByRole('button', { name: 'This session', exact: true }).click();
       const planRow = tool.locator(`button[data-artifact-row][data-artifact-id="${plan!.id}"]`);
       await quoting(expect(planRow, 'the plan in the session’s Artifacts tool').toBeVisible({ timeout: 60_000 }), () => mainSaid(again));
@@ -1406,7 +1410,7 @@ test('A reaches B’s mawsd over RL2, through the hub and then directly, and dri
       const tool = surface(again, 'artifacts');
       const reportRecord = tool.locator(`[data-artifact-record="${report.id}"]`);
       await quoting(expect(reportRecord, 'the page in the session’s Artifacts tool').toBeVisible({ timeout: 60_000 }), async () => `${await paneSaid(again)}\n${mainSaid(again)}`);
-      await reportRecord.getByRole('button', { name: 'Back', exact: true }).click();
+      await reportRecord.getByRole('button', { name: 'Back to list', exact: true }).click();
       await tool.getByRole('button', { name: 'Open library', exact: true }).click();
       const library = again.locator('[data-library]');
       await expect(library.locator('button[data-library-machine]'), 'the library is B’s').toHaveAttribute('data-library-machine', b.ref, { timeout: 30_000 });
@@ -1455,7 +1459,7 @@ test('A reaches B’s mawsd over RL2, through the hub and then directly, and dri
       const reopenLibrary = async () => {
         await sessionTab.click();
         await artifactOpener(pageCall, REPORT.title).click();
-        await reportRecord.getByRole('button', { name: 'Back', exact: true }).click();
+        await reportRecord.getByRole('button', { name: 'Back to list', exact: true }).click();
         await tool.getByRole('button', { name: 'Open library', exact: true }).click();
       };
       await reopenLibrary();
@@ -1898,7 +1902,10 @@ test('O17 M10: the agent’s tab on B, which runs no app, seen and driven from A
       await expect(chips).toHaveAttribute('aria-selected', 'true');
       await expect(chips).toContainText('remote');
       await expect(tool.locator('[data-browser-remote-url]')).toHaveText(pages.url('/remote'));
-      await expect(tool.locator('[data-remote-control-state="view"]')).toHaveText('View only');
+      // the word cut (T493): no View only badge; under view Take control is offered and the page says so in its name
+      await expect(tool.locator('[data-remote-control-state]')).toHaveCount(0);
+      await expect(tool.getByRole('button', { name: 'Take control', exact: true })).toBeVisible();
+      await expect(canvas.locator('[data-remote-focus]')).toHaveAccessibleName(/\. View only; take control to use the page$/);
       await expect.poll(async () => isWhite(await remotePixel(page, BLANK_AT)), { timeout: 30_000, message: 'the page’s white, drawn' }).toBe(true);
       console.log(`[e2e:remote] M10: A shows B's agent tab ${await canvas.getAttribute('data-remote-tab')}, frame ${await canvas.getAttribute('data-remote-seq')}, ${await canvas.getAttribute('data-remote-viewport')}`);
     });
@@ -1956,7 +1963,8 @@ test('O17 M10: the agent’s tab on B, which runs no app, seen and driven from A
       await page.keyboard.type('b');
       await expect(async () => expect(await onB(`[window.__submitted, document.querySelector('#area').value]`), 'the form submitted once; the text area has two lines').toEqual([1, 'a\nb'])).toPass({ timeout: 30_000 });
       await tool.getByRole('button', { name: 'Give back', exact: true }).click();
-      await expect(tool.locator('[data-remote-control-state="view"]')).toHaveText('View only', { timeout: 30_000 });
+      await expect(tool.getByRole('button', { name: 'Take control', exact: true }), 'back under view (the word cut, T493: no badge)').toBeVisible({ timeout: 30_000 });
+      await expect(tool.locator('[data-remote-control-state]')).toHaveCount(0);
       await page.mouse.click(field.x, field.y);
       await page.keyboard.type('x');
       await new Promise((resolve) => setTimeout(resolve, 4_000)); // past the person's grace, had anything been sent
@@ -2354,10 +2362,14 @@ test('M8: a session spawned on B leads a full project past its cap and stays amo
       await expect(view.locator('[data-side-exchange="answered"]'), 'the answer in A’s view').toContainText(M8_SIDE_ANSWER, { timeout: 60_000 });
       await expect(view.locator('[data-side-exchange="pending"]'), 'nothing left pending').toHaveCount(0);
       expect(await completions(), 'its completion came once').toHaveLength(1);
-      // on another machine the card's "Continue as a side thread" is closed with the declared words; Clear is offered
-      const promote = view.getByRole('button', { name: 'Continue as a side thread', exact: true });
+      // on another machine the card's "Continue as thread" is closed with the declared words; Clear is offered. The word
+      // cut (P409): the closed control is drawn `aria-disabled` and keeps the keyboard, its reason its tooltip and
+      // description rather than a system `title`
+      const promote = view.getByRole('button', { name: 'Continue as thread', exact: true });
       await expect(promote, 'no side thread over the link yet').toBeDisabled();
-      await expect(promote).toHaveAttribute('title', REMOTE_UNAVAILABLE['side.thread.open']!);
+      await expect(promote).toHaveAttribute('aria-disabled', 'true');
+      await expect(promote).toHaveAccessibleDescription(REMOTE_UNAVAILABLE['side.thread.open']!);
+      await expect(promote).not.toHaveAttribute('title', /.*/);
       await expect(view.getByRole('button', { name: 'Clear', exact: true }), 'Clear, by the helper').toBeEnabled();
     });
 
@@ -2568,6 +2580,7 @@ test('M9: "+ Session" on B with no registered checkout sets its folder up there:
         .poll(async () => (await b.request<{ gateway: Gateway }>('session.status', { appSessionId: spawnedApp })).gateway, { timeout: 30_000, message: 'B’s status of the session' })
         .toMatchObject({ mode: 'direct', verified: 'direct', route: 'machine', observed: { kind: 'login', login: M9_LOGIN, organization: M9_ORGANIZATION } });
       await openSurface(page, 'Session info');
+      await unfoldInfoGroup(surface(page, 'session-info').locator('[data-session-info]'), 'Gateway'); // the word cut: folded at first
       const route = surface(page, 'session-info').locator('[data-session-info]').getByRole('term').filter({ hasText: /^Route$/ }).locator('xpath=following-sibling::dd[1]');
       await quoting(expect(route, 'the Route row names what B reports').toContainText(`The machine’s own · Anthropic login · ${M9_LOGIN}`, { timeout: 30_000 }), async () => `Session info: ${await surface(page, 'session-info').innerText().catch(() => 'none')}\n${mainSaid(page)}`);
       console.log(`[e2e:remote] M9: ${address} on B's own route; Session info's Route row: ${await route.innerText()}`);
@@ -2891,7 +2904,7 @@ test('a subagent of B’s lane B session, drilled into from A: the rows it gave 
     await test.step('the drill-in into the running agent shows the reply it gave before the drill-in opened', async () => {
       await expect.poll(async () => (await sliceOnB()).includes(SUB_FIRST), { timeout: 60_000, message: `B's engine gave the agent's first reply\n${await bSaid()}` }).toBe(true);
       expect(await sliceOnB(), 'and holds before its next').not.toContain(SUB_SECOND);
-      await openSurface(page, 'Subagents');
+      await openSurface(page, 'Agents');
       const row = tool.locator(`[data-agent-row="${SUB_AGENT.id}"]`);
       await quoting(expect(row, 'the agent in A’s Subagents tool').toBeVisible({ timeout: 60_000 }), async () => `the tool: ${await tool.innerText().catch(() => 'none')}\n${mainSaid(page)}`);
       await row.click();
@@ -2989,7 +3002,7 @@ async function terminalAgent(opts: { root: string; aUserData: string; bEnv?: Rec
   await expect(row, `the terminal session's row in A's sidebar\n${mainSaid(page)}`).toBeVisible({ timeout: 30_000 });
   await row.click();
   await quoting(expect(main(page).getByText(TERMINAL_REPLY).first(), 'the terminal session’s own transcript in A’s pane').toBeVisible({ timeout: 60_000 }), said);
-  await openSurface(page, 'Subagents');
+  await openSurface(page, 'Agents');
   const tool = surface(page, 'subagents');
   const agentRow = tool.locator(`[data-agent-row="${agent}"]`);
   await quoting(expect(agentRow, 'the agent in A’s Subagents tool').toBeVisible({ timeout: 60_000 }), async () => `the tool: ${await tool.innerText().catch(() => 'none')}\n${said()}`);
@@ -3639,17 +3652,17 @@ test('X-168 on B’s terminal session: the Subagents and Background tasks cards 
     await row.click();
     await quoting(expect(main(page).getByText('It is working in the background.').first(), 'the terminal session’s transcript in A’s pane').toBeVisible({ timeout: 60_000 }), said);
     const agentRow = main(page).locator('.transcript-subagent', { hasText: GONE_AGENT.description });
-    const subagentsCard = sessionCard(page, 'Subagents');
-    const backgroundCard = sessionCard(page, 'Background tasks');
+    const subagentsCard = sessionCard(page, 'Agents');
+    const backgroundCard = sessionCard(page, 'Background');
     const onCard = subagentsCard.locator(`[data-agent-row="${GONE_AGENT.agentId}"]`);
 
     await test.step('the turn ended while its agent works: its row stays in view, and the column has a card for each kind of running work', async () => {
       await quoting(expect(agentRow, 'the agent’s call stays in view under the ended turn').toBeVisible({ timeout: 60_000 }), said);
       await showSessionCards(page);
       await quoting(expect(onCard, 'the agent on the Subagents card, from B’s subagent tree').toContainText(GONE_AGENT.description, { timeout: 60_000 }), said);
-      await expect(subagentsCard.getByRole('button', { name: 'Subagents 1 running', exact: true })).toBeVisible();
+      await expect(subagentsCard.getByRole('button', { name: 'Agents 1 running', exact: true })).toBeVisible();
       await quoting(expect(backgroundCard.locator(`[data-task-id="${GONE_SHELL.taskId}"]`), 'the shell on the Background tasks card, from the session’s lane A watch').toContainText(GONE_SHELL.description, { timeout: 60_000 }), said);
-      await expect(backgroundCard.getByRole('button', { name: 'Background tasks 1 running', exact: true })).toBeVisible();
+      await expect(backgroundCard.getByRole('button', { name: 'Background 1 running', exact: true })).toBeVisible();
     });
 
     await test.step('a pause of A’s link to B changes nothing', async () => {
@@ -3672,14 +3685,14 @@ test('X-168 on B’s terminal session: the Subagents and Background tasks cards 
       plane.presence(null);
       await quoting(expect(agentRow, 'the agent’s row folds with the ended turn').toHaveCount(0, { timeout: 60_000 }), said);
       await expect(subagentsCard, 'nothing of the session’s runs as an agent: the Subagents card leaves').toHaveCount(0, { timeout: 30_000 });
-      await openSurface(page, 'Subagents');
+      await openSurface(page, 'Agents');
       const tool = surface(page, 'subagents');
       const done = tool.locator('section[data-section="done"]');
       await quoting(expect(done, 'the agent under Done').toHaveAttribute('aria-label', 'Done 1', { timeout: 30_000 }), async () => `the tool: ${await tool.innerText().catch(() => 'none')}\n${said()}`);
       await expect(tool.locator('section[data-section="running"]'), 'nothing under Running').toHaveCount(0);
       const unfold = done.getByRole('heading').getByRole('button');
       if ((await unfold.getAttribute('aria-expanded')) !== 'true') await unfold.click(); // Done is folded at first
-      await expect(done.locator(`[data-agent-row="${GONE_AGENT.agentId}"]`)).toContainText('ended with the session');
+      await expect(done.locator(`[data-agent-row="${GONE_AGENT.agentId}"]`)).toContainText('session ended'); // the word cut (T162 to T165): the Agents panel's short form
       console.log(`[e2e:remote] X-168: ${GONE.engine}/${GONE_AGENT.agentId} ended with the session on B's presence`);
     });
   } finally {
@@ -3958,11 +3971,12 @@ test('U6b-4b L9, a session on B: a file outside B’s folders reads why, naming 
         .poll(() => notice.locator('p').allTextContents(), { message: 'the sentences, the path, and the words B answered' })
         .toEqual([
           `This file is outside the folders this session works in on ${B_NAME}.`,
-          "MAWS opens a file from elsewhere when this session's transcript links it, when you choose it with File ▸ Open File…, or when the agent sends it.",
+          'Choose it with File ▸ Open File…', // the word cut (N7): the way in, without how the app opens files
           'Ask the agent to send the file to see it here.',
           outside,
-          "Not opened: path outside the session's directories",
         ]);
+      // the word cut (N11): the command's own words show only under the generic notice, not under one that names its cause
+      await expect(notice.locator('[data-notice-detail]')).toHaveCount(0);
       await expect(notice.locator('[data-notice-copy]')).toHaveText('Copy path');
       await expect(notice.locator('[data-notice-retry]'), 'no Retry: trying again cannot help').toHaveCount(0);
     });
@@ -4470,7 +4484,7 @@ const answerOnA = (page: Page, name: string, input: unknown, machine: MachineRef
 const sha256Of = (path: string) => createHash('sha256').update(readFileSync(path)).digest('hex');
 const menuEnabled = (app: ElectronApplication, id: string) => app.evaluate(({ Menu }, id) => Menu.getApplicationMenu()?.getMenuItemById(id)?.enabled ?? null, id);
 // The chooser's sheet as it stands: its height, the list's area and More… (their boxes, the list's scroll), the window's
-// height and the words in the list's area
+// height and the words in the list's area (a wait's words are its quiet spinner's name: the word cut, N30)
 type SheetNow = { height: number; listBottom: number; moreTop: number; moreBottom: number; windowHeight: number; listScrolled: number; words: string };
 const sheetNow = (page: Page) =>
   page.evaluate((): SheetNow | null => {
@@ -4479,7 +4493,8 @@ const sheetNow = (page: Page) =>
     const more = sheet?.querySelector('[data-chooser-more]');
     if (!sheet || !list || !more) return null;
     const [s, l, m] = [sheet, list, more].map((el) => el.getBoundingClientRect()) as [DOMRect, DOMRect, DOMRect];
-    return { height: Math.round(s.height), listBottom: l.bottom, moreTop: m.top, moreBottom: m.bottom, windowHeight: window.innerHeight, listScrolled: list.scrollTop, words: list.textContent ?? '' };
+    const waits = Array.from(list.querySelectorAll('[role="progressbar"]')).map((spinner) => spinner.getAttribute('aria-label') ?? '');
+    return { height: Math.round(s.height), listBottom: l.bottom, moreTop: m.top, moreBottom: m.bottom, windowHeight: window.innerHeight, listScrolled: list.scrollTop, words: [list.textContent ?? '', ...waits].join(' ') };
   });
 // The sheet caught in the state whose words its list's area shows, or null: a window a scene only stages (the held pipe's
 // reading), tried for a while and then skipped and said by the caller, never asserted
@@ -4606,7 +4621,7 @@ test('U6f: a file outside the session’s folders on B opens in A, is edited, an
       // one height while it reads (A's way to B held: nothing answers) and while it says B is not reachable (the way cut)
       scene.aHub.hold();
       await goTo(w.many);
-      const reading = await sheetSaying(page, 'Reading the folders…', 10_000);
+      const reading = await sheetSaying(page, 'Reading the folders', 10_000);
       if (reading === null) test.info().annotations.push({ type: 'skipped check', description: 'the sheet’s height while it reads: the held read was not caught reading' });
       else expect(reading.height, 'the sheet as tall while it reads as while it lists').toBe(listed.height);
       scene.aHub.cut();
@@ -4755,8 +4770,12 @@ test('U6f: with B’s endpoint listing no rl2.outside-files, Open File… is dis
     await expect(checkoutRow, 'B’s checkout in A’s Files tool').toBeVisible({ timeout: 60_000 });
     await checkoutRow.click({ button: 'right' });
     const openRow = page.locator('[data-files-menu] [data-open-file]');
-    await expect(openRow).toHaveAttribute('data-disabled', /.*/);
-    await expect(openRow, 'the Files list’s row says to update B').toHaveAttribute('title', `Can’t open a file on ${B_NAME} yet. Update MAWS on ${B_NAME} and try again.`);
+    // the word cut (N29): the greyed row keeps the menu's keyboard, drawn aria-disabled; its sentence is its description
+    // (and its row note on pointing or focus), no longer a system title
+    await expect(openRow).toHaveAttribute('aria-disabled', 'true');
+    await expect(openRow).not.toHaveAttribute('data-disabled', /.*/);
+    await expect(openRow, 'the Files list’s row says to update B').toHaveAccessibleDescription(`Can’t open a file on ${B_NAME} yet. Update MAWS on ${B_NAME} and try again.`);
+    await expect(openRow).not.toHaveAttribute('title', /.*/);
     await page.keyboard.press('Escape');
 
     const chip = main(page).locator(`[data-chip="path"][title="${w.notes}"]`).first();

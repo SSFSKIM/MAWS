@@ -95,6 +95,7 @@ describe('the bookmarks bar', () => {
     expect(chip(3).querySelector('img')).toBeNull(); // never shown in this partition: the glyph, no fetch
     expect(chip(6).getAttribute('aria-label')).toBe('https://icon-only.example/');
     expect(chip(3).title).toBe('B\nhttps://b.example/B');
+    expect(chip(4).hasAttribute('title')).toBe(false); // the word cut (T449): a folder's tooltip only said its name again
     expect(main.callsOf('browser.bookmarks.favicons')).toContainEqual({ partition: WORK, origins: ['https://a.example', 'https://b.example', 'https://icon-only.example'] });
     // the bar sits between the navigation row and anything below it
     const chrome = document.querySelector('[data-browser-chrome]')!;

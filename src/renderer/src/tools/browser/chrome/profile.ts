@@ -16,19 +16,21 @@ export function avatarTone(profileDir: string): (typeof AVATAR_TONES)[number] {
   return AVATAR_TONES[(hash >>> 0) % AVATAR_TONES.length]!;
 }
 
-// The Chrome account the profile is signed in to, as `Local State` named it; or that it is signed in to none.
-export function accountLine({ gaiaName, userName }: Pick<BrowserProfileListItem, 'gaiaName' | 'userName'>): string {
+// The Chrome account the profile is signed in to, as `Local State` named it; null for none (the word cut, T478, T479).
+export function accountLine({ gaiaName, userName }: Pick<BrowserProfileListItem, 'gaiaName' | 'userName'>): string | null {
   const parts = [gaiaName, userName].filter((part): part is string => part !== null && part !== '');
-  return parts.length > 0 ? BROWSER_COPY.profile.signedIn(parts) : BROWSER_COPY.profile.notSignedIn;
+  return parts.length > 0 ? BROWSER_COPY.profile.account(parts) : null;
 }
 
-// Under Sync bookmarks now: when the mirror last read Chrome's file, or why the last read failed (the rows kept from
-// the last good one); null before any read succeeded or failed.
-export function syncLine(bookmarks: ImportedBookmarks, now: number): string | null {
+// Under Sync bookmarks: when the mirror last read Chrome's file, or why the last read failed (the rows kept from the
+// last good one); null before any read succeeded or failed. Settings' note says "Last synced 5 minutes ago"; the
+// popover's line, under its Sync bookmarks, the age alone (`'age'`, the word cut, T484).
+export function syncLine(bookmarks: ImportedBookmarks, now: number, form: 'sentence' | 'age' = 'sentence'): string | null {
   const age = bookmarks.syncedAt === null ? null : formatAgo(Math.max(0, now - Date.parse(bookmarks.syncedAt)));
   if (bookmarks.error === 'indexUnavailable') return BROWSER_COPY.profile.indexUnavailable;
   if (bookmarks.error !== null) return BROWSER_COPY.profile.unreadable(age);
-  return age === null ? null : BROWSER_COPY.profile.lastSynced(age);
+  if (age === null) return null;
+  return form === 'age' ? age : BROWSER_COPY.profile.lastSynced(age);
 }
 
 // Switch profile's rows from a tab of `partition`: every other imported profile in the list's order, then Default

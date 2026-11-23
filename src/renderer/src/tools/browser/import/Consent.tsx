@@ -1,7 +1,8 @@
-// The sheet's consent state (E4b Design §3): what the profile holds, the five categories (Saved passwords disabled,
-// P-17; Bookmarks since cua board #90), the line saying agents' tabs will be signed in as the profile (P-23; Decision
-// Log 29), the extension list with its facts, and the unverified-files acknowledgement, required while any extension is
-// chosen. Import sends exactly what is checked; extensions go only with the acknowledgement.
+// The sheet's consent state (E4b Design §3): what the profile holds, the four categories (Bookmarks since cua board #90;
+// the word cut, T511: no disabled Saved passwords row promising later work), the line saying agents' tabs will be signed
+// in as the profile (P-23; Decision Log 29), the extension list with its facts (T516: no MV2 or No background chip), and
+// the unverified-files acknowledgement, required while any extension is chosen. Import sends exactly what is checked;
+// extensions go only with the acknowledgement.
 import { useState, type ReactNode } from 'react';
 import type { ExtensionCandidate } from '@shared/browser/import';
 import type { BrowserImportInspection } from '@shared/ipc/schema/browser';
@@ -82,7 +83,6 @@ export function Consent({ inspection }: { inspection: BrowserImportInspection })
         <Category name={IMPORT_COPY.categories.bookmarks} checked={bookmarksOn} onChange={setBookmarks} disabled={bookmarks === null} data-category="bookmarks">
           {bookmarks === null ? IMPORT_COPY.noBookmarks : IMPORT_COPY.bookmarks(bookmarks.count)}
         </Category>
-        <Category name={IMPORT_COPY.passwords} checked={false} onChange={() => {}} disabled data-category="passwords" />
         <Category
           name={IMPORT_COPY.categories.extensions}
           checked={extensionsOn}
@@ -161,11 +161,7 @@ function StoreError({ store, code }: { store: 'history' | 'cookies'; code: strin
 
 function CandidateFacts({ candidate }: { candidate: ExtensionCandidate }) {
   if (candidate.error !== null) return <span className="ml-6 text-ui-sm text-danger">{IMPORT_COPY.candidateError(candidate.error)}</span>;
-  const facts = [
-    candidate.chromeState === 'disabled' && IMPORT_COPY.disabledInChrome,
-    candidate.manifestVersion === 2 && IMPORT_COPY.mv2,
-    candidate.background === 'none' && IMPORT_COPY.noBackground,
-  ].filter((fact): fact is string => fact !== false);
+  const facts = [candidate.chromeState === 'disabled' && IMPORT_COPY.disabledInChrome].filter((fact): fact is string => fact !== false);
   if (!candidate.wallet && facts.length === 0 && candidate.unsupportedPermissions.length === 0) return null;
   return (
     <span className="ml-6 flex flex-wrap gap-1">

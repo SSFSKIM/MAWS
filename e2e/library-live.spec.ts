@@ -231,7 +231,7 @@ test('an agent makes an html artifact and a file artifact through the tools; the
 
     // the panel's Artifacts tool, This session: both rows
     const record = await openArtifactInPanel(page, pageId);
-    await record.getByRole('button', { name: 'Back', exact: true }).click();
+    await record.getByRole('button', { name: 'Back to list', exact: true }).click();
     const list = panel.locator('[data-artifacts-list]');
     await expect(list).toBeVisible();
     await expect(list.getByRole('group', { name: 'Show artifacts of' }).getByRole('button', { name: 'This session' })).toHaveAttribute('aria-pressed', 'true');

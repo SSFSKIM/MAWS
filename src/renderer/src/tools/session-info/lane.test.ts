@@ -87,6 +87,16 @@ describe('autoModeLane derives the lane from status and model', () => {
     expect(autoModeLane(status({ server: 'unknown' }), null, null)).toMatchObject({ kind: 'unknown', sentence: 'Not read yet' });
   });
 
+  // the word cut (T254): the row reads the lane in a word; a refusal and an unread row keep their words
+  it('says the lane in a word, Server, Local or Off, and a refusal or an unread row in its own words', () => {
+    expect(autoModeLane(status(), null, null).short).toBe('Server');
+    expect(autoModeLane(status({ fast: 'on' }), null, null).short).toBe('Local');
+    expect(autoModeLane(status({ model: 'claude/astra', localLane: T12, turn: T12 }), null, null).short).toBe('Local');
+    expect(autoModeLane(status({ effective: 'default' }), null, null).short).toBe('Off');
+    expect(autoModeLane(status({ effective: 'default', refusal: 'auto_mode_fast_mode' }), null, null).short).toBe('Auto mode is unavailable with fast mode');
+    expect(autoModeLane(status({ server: 'unknown' }), null, null).short).toBe('Not read yet');
+  });
+
   it('carries the reviews it was given, never beside off or unavailable', () => {
     const reviews = { evaluated: 3, flagged: 1 };
     expect(autoModeLane(status(), null, reviews).reviews).toEqual(reviews);

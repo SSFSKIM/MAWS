@@ -108,7 +108,7 @@ describe('the chrome yields to the tab strip', () => {
     const item = await screen.findByRole('menuitem', { name: 'artifacts' });
     act(() => item.focus());
     await user.keyboard('{Shift>}{F10}{/Shift}');
-    const keep = await screen.findByRole('menuitem', { name: 'Keep open for every session' });
+    const keep = await screen.findByRole('menuitem', { name: 'Pin tab' });
     await user.click(keep);
     expect(useLayout.getState().panelPinned.map((tab) => tab.id)).toContain('artifacts:aaaaaaaa');
   });
