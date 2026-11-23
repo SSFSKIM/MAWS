@@ -15,6 +15,8 @@
 // A resolution that fails or is uncertain shows nothing and defers to the engine, whose get_status stays authoritative;
 // to an older host it is never taken for an equivalent one. A new worktree is resolved before it exists by the project
 // settings its branch tracks (`newWorktreeSettings`).
+// Board ticket 421 (docs/doperpowers/plans/2026-11-23-tool-choice.md, D8): beside the route, a spec that carries a set
+// of MAWS's tools goes only to a host that lists `engine.mawsTools`; one replaced since by an older host is refused.
 import { legacyRouteOf, readRoute, type LegacyRoute, type Route } from '@shared/engine/route';
 import type { Location } from '@shared/sessions/intent';
 import type { LaunchSpec } from '@shared/engine/launch-spec';

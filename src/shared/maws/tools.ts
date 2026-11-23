@@ -88,8 +88,8 @@ export const ARTIFACT_SCREENSHOT_DEFAULT = { width: 1280, height: 800 } as const
 export const ARTIFACT_SCREENSHOT_MAX_BYTES = 3.5 * 1024 * 1024; // A-34: its base64 stays under the API's 5 MB per image
 
 // ---------------------------------------------------------------------------------------------------------------------
-// Inputs (strict; validators never default: `blocking`, `multi`, `allowOther`, `multiple` and a question's `id` take
-// their defaults where they are read)
+// Inputs (strict; validators never default: a recorded ask's `blocking` (board ticket 420: a live call must give it),
+// `multi`, `allowOther`, `multiple` and a question's `id` take their defaults where they are read)
 
 export const ASK_MODALITIES = ['choice', 'text', 'file', 'folder', 'repository', 'design_system' /* P3-D */] as const;
 export type AskModality = (typeof ASK_MODALITIES)[number];

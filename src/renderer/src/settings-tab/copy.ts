@@ -7,6 +7,9 @@
 // and the keyboard in the row and is its accessible description; a `line` stands at rest (a condition the person must
 // act on, `state`, or a line the owner kept: a consent). Words cut from view but kept as a control's name, a tooltip or
 // a search keyword are named for that here.
+// Amended 2026-11-23, board ticket 421 (docs/doperpowers/plans/2026-11-23-tool-choice.md, §H): Settings › Sessions' two
+// rows of the machine's default set of MAWS's tools (`MAWS_TOOLS`), whose words the composer's Tools submenu and
+// Session info share.
 import { MAX_IDLE_MINUTES } from '@shared/ipc/schema/settings'; // E10
 import { MAX_APP_MCP_SERVERS } from '@shared/engine/app-mcp-servers'; // P4-R8
 

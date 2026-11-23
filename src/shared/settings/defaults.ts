@@ -6,6 +6,9 @@
 // (their schemas in ../ipc/schema/settings.ts); the merged `Settings` at 21 is what the renderer reads, composed from
 // both. `migrateSettings` still takes a unified file of any version to the merged settings, which `splitSettings` cuts
 // into the two files; the engine host reads a unified file's machine half the same way while no split build has run.
+// Board ticket 421 (docs/doperpowers/plans/2026-11-23-tool-choice.md, "The settings migration"): beside them,
+// `machine-session-defaults.json`'s version 1, validated loosely (`migrateMachineSessionDefaults`), and the machine's
+// default set of MAWS's tools resolved from it (`resolveMawsTools`); neither file above changes.
 import * as z from 'zod';
 import { RETIRED_ACTION_IDS } from '../keymap/actions';
 import {

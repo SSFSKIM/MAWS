@@ -4,6 +4,9 @@
 // message sent after it. Nothing rolls back: the record is the conversation's. A failure
 // hands the message back (`onFailed`; the renderer returns it to the editor), except C3's `relay_unreachable`, whose
 // card's continuation still sends it.
+// Board ticket 421 (docs/doperpowers/plans/2026-11-23-tool-choice.md, D1 and D8): the resume launches under the
+// record's own set of MAWS's tools, answered once (served-set.ts) before the bootstrap; a host that cannot serve it
+// refuses it.
 import type { SessionId } from '@shared/graph/ids';
 import type { SessionRecord } from '@shared/graph/session';
 import type { FirstMessage } from '@shared/sessions/intent';

@@ -1,6 +1,8 @@
 // The profile's two settings files (P5 O3-A §1: `settings.json` the client's, written by main; `machine-settings.json`
 // the machine's, written by the spine under `spine.lock`). Neutral ground (P5 O3-C): main reads the client file's shape
 // before the spine's data is opened, and the spine's split (src/services/settings/split.ts) writes both.
+// Beside them, each the spine's: P5 O7 M9's `machine-route.json` and board ticket 421's `machine-session-defaults.json`
+// (docs/doperpowers/plans/2026-11-23-tool-choice.md, D4).
 import { join } from 'node:path';
 
 // P5 O7 M9: `route`, the machine's default route (machine-route.json), beside the machine file and written with it

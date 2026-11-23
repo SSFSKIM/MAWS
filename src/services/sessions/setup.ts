@@ -7,6 +7,10 @@
 // `launching`, `progress.send` at the handoff), so a crash leaves `progress` truthful for the start-time
 // reconciliation; `session.launch` answering `launching` is the linearisation point after which the process is C3's to
 // report; rollback is per resource, never forced, and never a transcript.
+//
+// Board ticket 421 (docs/doperpowers/plans/2026-11-23-tool-choice.md, D8): the set of MAWS's tools an attempt serves is
+// answered once (`servedSet`), after the launch gate and before the record, the supplement and the spec are made from
+// it, so a refusal leaves nothing to roll back.
 import { randomUUID } from 'node:crypto';
 import type { AppSessionId, MessageUuid, SessionId } from '@shared/graph/ids';
 import type { Lineage, SessionRecord } from '@shared/graph/session';

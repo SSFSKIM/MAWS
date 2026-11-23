@@ -1,6 +1,8 @@
 // Intent or record → LaunchSpec (C10 execution document, Interfaces "Trust" (attestation mapping, trust bootstrap) and
 // "Session service" (Resume)): the exact X6 spec a session, its resume or its trust bootstrap launches with. C10 never
 // spawns the engine; everything here ends in C3's `session.launch`.
+// Board ticket 421 (docs/doperpowers/plans/2026-11-23-tool-choice.md, Interfaces §E): a spec carries the set of MAWS's
+// tools it is given (the set the attempt serves, served-set.ts), and none at the full set.
 import type { AppSessionId, SessionId } from '@shared/graph/ids';
 import type { PermissionMode } from '@shared/graph/enums';
 import type { LaunchedBy, SessionRecord } from '@shared/graph/session';

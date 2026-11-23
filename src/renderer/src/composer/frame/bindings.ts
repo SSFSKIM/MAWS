@@ -9,6 +9,10 @@
 // recomposition entry). New chat (2026-10-01, the owner's ruling after Codex's new-thread composer): an unstarted
 // tab chooses where it runs in the project row above the box (the project chip with its read-only branch, and the
 // Worktree checkbox), so the toolbar's location chip is a started session's and only reads.
+// Board ticket 421 (docs/doperpowers/plans/2026-11-23-tool-choice.md, D11 and §H): an unstarted new chat's intent also
+// binds the "+" menu's Tools submenu, the set of MAWS's tools it starts with, where that choice is honoured (a spine
+// that knows it, the chat starting on its own machine); a fork, a started or ended session and every other case bind
+// no submenu.
 import type { Effort } from '@shared/engine/launch-spec';
 import { EffortSchema } from '@shared/engine/launch-spec';
 import type { EngineSessionStatus } from '@shared/engine/status';

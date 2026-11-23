@@ -8,6 +8,9 @@
 // streams as `session.setup`. MAWS's own lifecycle operations on one app id are serialised through a per-id lock, so
 // two never interleave on one session. Guards never read `SessionRecord.holder`: "live in MAWS" is C3's process table
 // and "foreign" a fresh registry read (holders.ts), which fails closed.
+//
+// Board ticket 421 (docs/doperpowers/plans/2026-11-23-tool-choice.md, Interfaces §E, D5): `create` seeds a new intent's
+// set of MAWS's tools from the machine's default; `patch` refuses a set on a fork and drops the key at the full set.
 import { NO_USER_DEFAULTS } from '../settings/user-engine-defaults'; // W3
 import { randomUUID } from 'node:crypto';
 import { homedir } from 'node:os';

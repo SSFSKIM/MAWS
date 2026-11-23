@@ -4,6 +4,8 @@
 // call, so a change reaches the next create and the next launch without a restart.
 // P5 O7 M9: `route`, the machine's default route resolved (MachineSettingsService.defaultRoute()), which seeds a new
 // intent's `route` beside the legacy `defaultRoute`.
+// Board ticket 421 (docs/doperpowers/plans/2026-11-23-tool-choice.md, Interfaces §G): `mawsTools`, the machine's
+// default set of MAWS's tools (MachineSettingsService.mawsTools()), which seeds a new intent's.
 import type { MachineSettings } from '@shared/ipc/schema/settings';
 import type { Route } from '@shared/engine/route';
 import type { C10Settings } from '../sessions/launch-mapping';

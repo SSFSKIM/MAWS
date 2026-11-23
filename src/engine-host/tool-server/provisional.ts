@@ -23,6 +23,8 @@
 // the owner takes agent edits as suggestions, the layer is the suggestion doc's; a `mode: 'suggest'` read late moves it
 // there, dropped on the main doc (R7). Nothing here writes a doc, a row or a version (rule 1), and nothing here throws
 // into a tool: a failure is logged and the layer is left to the call's ending.
+// Board ticket 421 (docs/doperpowers/plans/2026-11-23-tool-choice.md, Interfaces §D): a call is previewed only for a
+// tool the session lists (`lists`); the engine refuses a call of any other itself.
 import { datasetIdFromSource } from '@artifacts/dashboard/datasets';
 import { chartSpecs } from '@artifacts/dashboard/views';
 import { DocIndex } from '@artifacts/document/block-index';

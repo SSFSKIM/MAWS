@@ -17,6 +17,9 @@
 // accepted call of the plugin's tool as a to-human message at the call's place (`message-call.ts`), and of MAWS's former
 // tool in a recorded session too. A session recorded under an earlier contract or supplement (1, 5 or 7; 1 or 2), or
 // with P4-R7y's alias, keeps what it recorded until the launch decision's "off" lets the prompt render again.
+//
+// Board ticket 421 (docs/doperpowers/plans/2026-11-23-tool-choice.md, Interfaces §F): a session whose question tool is
+// the engine's own is appended supplement 4 in place of 3, naming the native AskUserQuestion.
 export const CONTRACT_HEADER = (version: number): string => `# Messages to the human (MAWS to-human contract ${version})`;
 export const SUPPLEMENT_HEADER = (version: number): string => `# Messages to the human (MAWS to-human supplement ${version})`;
 

@@ -3,6 +3,9 @@
 // charter describes: the binary by its real path (resolved per launch by binary-info.ts, W13), the fixed flag set in
 // order, a constructed environment (allowlist, exclusions, the gateway variables) and the `--settings` JSON with the
 // host's protected keys applied last. Nothing here spawns; `transport.ts` runs the plan.
+// Board ticket 421 (docs/doperpowers/plans/2026-11-23-tool-choice.md, Interfaces §C): the plan carries the set of
+// MAWS's tools the launch serves (the spec's, else the full set); MAWS's two ask flags are passed only when its
+// question tool is `maws`, and the spawn row records the set, from which an adopter takes it.
 import { randomBytes, randomUUID } from 'node:crypto';
 import { isAbsolute } from 'node:path';
 import { canonicalize } from 'org-protocol';

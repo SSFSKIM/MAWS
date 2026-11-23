@@ -7,6 +7,8 @@
 // The word cut (M3): where a value came from, and when a dormant session reported it, is the value's tooltip (`tip`),
 // not a note at rest (T253, P162); the Usage group keeps the pace and the cost, the context and the usage windows being
 // the context ring's and the usage displays' (P176); a fact not known reads `—` (P174).
+// Board ticket 421 (docs/doperpowers/plans/2026-11-23-tool-choice.md, §H): Engine gains two rows for a session MAWS is
+// running, the set of MAWS's tools it started with (`mawsToolsRows`).
 import { PERMISSION_MODE_LABELS } from '@shared/sessions/permission-mode-labels';
 import type { EngineSessionStatus } from '@shared/engine/status';
 import type { SessionRecord } from '@shared/graph/session';

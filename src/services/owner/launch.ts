@@ -24,6 +24,10 @@
 // decision's last act reserves it in the index before the launch is sent; a 9 that cannot be reserved goes as 8. The
 // record at `launching` binds the reservation to the host's launch id. The summaries' switch is read once here, and a
 // launch decided while it is off carries TO_HUMAN_FOLD_SUMMARIES=off.
+//
+// Board ticket 421 (docs/doperpowers/plans/2026-11-23-tool-choice.md, Interfaces §F, D12): the supplement names the
+// session's question tool, supplement 3 for MAWS's ask and 4 for the engine's own, read off the set the launch serves
+// (`spec.mawsTools`); a session's question tool never changes, so the recorded state never differs on that alone.
 import { homedir } from 'node:os';
 import type { LaunchSpec } from '@shared/engine/launch-spec';
 import type { SessionEvent } from '@shared/graph/events';

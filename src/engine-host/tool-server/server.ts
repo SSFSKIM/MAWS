@@ -10,6 +10,8 @@
 // `withdrawn` or `exit`) and answered with nothing: no one waits. A call may instead be answered from outside its tool
 // through `reply` (a blocking ask, whose answer must be committed only once its write settled: residue 12); the tool
 // settling after that writes nothing more. Nothing here builds an event: the normaliser maps the `tools/call` rows and their answers.
+// Board ticket 421 (docs/doperpowers/plans/2026-11-23-tool-choice.md, Interfaces §B and §D): `tools/list` names the
+// tools the server is given, the session's set's, and a call of any other name is refused naming those (`unknownTool`).
 import type { AppSessionId, RequestId, ToolUseId } from '@shared/graph/ids';
 import { cancelledCallOf, readMcpMessage, toolCallOf, type RpcId } from '@shared/maws/rpc';
 import { mawsServerInfo, mawsToolList, TOOL_ERRORS, type MawsToolName } from '@shared/maws/tools';

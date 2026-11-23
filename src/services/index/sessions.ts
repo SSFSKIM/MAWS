@@ -10,6 +10,10 @@
 // act wins in either direction. Projection: override, else custom title (`user`), else AI title (`generated`), else first
 // prompt (`none`) less the engine's slash-command wrappers (`promptTitle`) and cut to six words (`cutPrompt`), else an
 // empty title.
+//
+// Board ticket 421 (docs/doperpowers/plans/2026-11-23-tool-choice.md, Interfaces §E): a record's set of MAWS's tools
+// (`maws_tools`) is written once, when its first launch's record is made, and only when it is not the full set; nothing
+// updates it after, but a `/clear`, whose record for the old transcript takes the same set.
 import { randomUUID } from 'node:crypto';
 import { homedir } from 'node:os';
 import type { AppSessionId, MessageUuid, ProjectId, SessionId } from '@shared/graph/ids';

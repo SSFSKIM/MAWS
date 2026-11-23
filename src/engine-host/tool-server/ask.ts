@@ -8,6 +8,9 @@
 // P2-C3 (the P2 spec's Decision Log 35): a subagent's ask is held as a blocking one whatever its `blocking` said, since
 // an async ask's answers travel as a steer into the main conversation, which never asked, while the subagent never hears
 // them; its call returns the answers, and its attention item is a `question`.
+// Board ticket 420 (docs/doperpowers/plans/2026-11-23-tool-choice.md, D7): a live call must say `blocking`, and one
+// that leaves it out is refused `askBlockingRequired` before anything is held; an ask an earlier engine host had
+// admitted, raised again at a handover or restored (`admitted`), is read as recorded, absent meaning it waits.
 import { quotesGrant } from '@shared/engine/arrival';
 import type { PendingAsk } from '@shared/maws/ask';
 import { withQuestionIds } from '@shared/maws/ask';

@@ -8,6 +8,9 @@
 // `machine-settings.json` takes the machine's on a version line of its own from 1 (both schemas below), while the
 // renderer keeps one merged `Settings` whose version is the client file's. Migrations live in
 // `src/shared/settings/defaults.ts`, run by main's stores; the schema never defaults.
+// Board ticket 421 (docs/doperpowers/plans/2026-11-23-tool-choice.md, D4): a third file,
+// `machine-session-defaults.json`, read loosely, holds the machine's session defaults (the set of MAWS's tools);
+// neither schema above changes.
 import * as z from 'zod';
 import { BUILD_F_ACTION_IDS } from '../../keymap/build-f'; // U6a (UC-14)
 import { CHORD_PATTERN } from '../../keymap/chord';
