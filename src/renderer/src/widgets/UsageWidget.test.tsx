@@ -13,6 +13,7 @@ import { useLayout } from '../stores/layout';
 import { fakeClient } from '../../../../test/support/fake-client';
 import { useReadLoads } from './read';
 import { USAGE } from './copy';
+import { REL } from '../test-support/relative-time';
 import { present, UsageBody, UsageWidget } from './UsageWidget';
 
 const ID = at('app-direct-1' as AppSessionId);
@@ -47,7 +48,7 @@ describe('UsageWidget', () => {
     expect(screen.getByText(USAGE.direct)).toBeTruthy();
     expect(screen.getByText(USAGE.fiveHour)).toBeTruthy();
     expect(document.body.textContent).toContain('42');
-    expect(document.body.textContent).toContain('Read ');
+    expect(document.body.textContent).toContain(REL.ago(5, 'minute')); // the word cut (P521): the age alone
   });
 
   it('says it has not read yet when nothing is held', () => {

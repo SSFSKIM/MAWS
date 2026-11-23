@@ -105,7 +105,7 @@ describe('the detail: enabled for this project and loaded in this session', () =
     expect(refresh).not.toHaveBeenCalled();
     fireEvent.click(within(fact('loaded')).getByRole('button', { name: 'Refresh' }));
     expect(refresh).toHaveBeenCalledTimes(1);
-    expect(within(fact('loaded')).getByRole('status').textContent).toBe('Starting…');
+    expect(await within(fact('loaded')).findByRole('progressbar', { name: 'Starting…' })).toBeTruthy(); // the word cut (P523)
     await act(async () => settle({ status: 'refused', appSessionId: SESSION_ID, reason: 'busy', message: 'The session is busy elsewhere' } as AcquireOutcome));
     await waitFor(() => expect(fact('loaded').textContent).toContain('The session is busy elsewhere'));
     expect(refresh).toHaveBeenCalledTimes(1);

@@ -15,7 +15,7 @@ import { resetShellStores } from '../test-support/shell-stores';
 import { ipcSource, useTranscriptStore } from '../transcript';
 import { builder } from '../transcript/model/test-events';
 import { commentsMessage } from '@shared/anchor/message'; // UX wave U5a
-import { accessibleDescription } from '../test-support/accessible-text';
+import { accessibleDescription, accessibleText } from '../test-support/accessible-text';
 import { RewindWidget, rewindTargets } from './RewindWidget';
 
 // P5 O6 M2: the fake is main: asked with the bare id; the page holds the address
@@ -89,7 +89,7 @@ describe('the rewind picker', () => {
       fireEvent.click(option(name));
       expect(option(name).getAttribute('aria-checked')).toBe('false');
     }
-    expect(screen.queryByText(why)).toBeNull();
+    expect(accessibleText(document.body)).not.toContain(why);
     cleanup();
     useSessions.setState({ engine: new Map([[A, { ...status(A), fileCheckpointing: true }]]) });
     const close = mount();

@@ -3,7 +3,7 @@
 import { cleanup, render, screen, within } from '@testing-library/react';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
-import { TEST_MACHINE } from '../../../../test/support/machine';
+import { at, TEST_MACHINE } from '../../../../test/support/machine';
 import { accessibleDescription } from '../test-support/accessible-text';
 import { AgentsBody } from './AgentsWidget';
 import { ConfigBody } from './ConfigWidget';
@@ -11,7 +11,7 @@ import { ContextBody } from './ContextWidget';
 import { HooksBody } from './HooksWidget';
 import { MemoryBody } from './MemoryWidget';
 
-const ID = 'app-words' as AppSessionId;
+const ID = at('app-words' as AppSessionId);
 afterEach(() => cleanup());
 
 describe('Config (P606, P607, P608, P586)', () => {

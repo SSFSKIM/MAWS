@@ -470,7 +470,8 @@ describe('plugins widget: loaded in this session and the reloads', () => {
     mount();
     await waitFor(() => expect(row('e8-probe@e8-scratch')).toBeTruthy());
     expect(loadedLine().getAttribute('data-loaded-freshness')).toBe('last');
-    expect(loadedLine().textContent).toMatch(/^11 plugins loaded in this session·Loaded last time, [^·]+Refresh$/);
+    expect(loadedLine().textContent).toMatch(/^11 plugins loaded in this session·Loaded last time, [^·]+$/); // the word cut (P522): Refresh is the glyph
+    expect(within(loadedLine()).getByRole('button', { name: 'Refresh' }).textContent).toBe('');
     expect(screen.queryByRole('button', { name: 'Reload plugins' })).toBeNull();
     expect(screen.queryByText(/not running/)).toBeNull();
     expect(menuItems('e8-probe@e8-scratch')).toEqual(['Turn off', 'Update', 'Uninstall…']);
@@ -589,7 +590,8 @@ describe('plugins widget: loaded in this session and the reloads', () => {
     mount();
     await waitFor(() => expect(row('e8-probe@e8-scratch')).toBeTruthy());
     await waitFor(() => expect(invoked('session.observedFacts')).toEqual([{ appSessionId: BARE }]));
-    expect(loadedLine().textContent).toBe('Not observed yetRefresh');
+    expect(loadedLine().textContent).toBe('Not observed yet'); // the word cut (P522): Refresh is the glyph
+    expect(within(loadedLine()).getByRole('button', { name: 'Refresh' })).toBeTruthy();
     expect(screen.queryByText(/not running|loaded no plugins/)).toBeNull();
     expect(starts()).toEqual([]);
   });
@@ -1516,7 +1518,7 @@ describe('plugins widget: the detail', () => {
     });
     act(() => emit('plugins.changed', {}));
     const warning = await waitFor(() => within(detail()!).getByText(/Path does not exist: \/nope/));
-    expect(warning.textContent).toBe('Path does not exist: /nope · showing the last value it reported');
+    expect(warning.textContent).toBe('Path does not exist: /nope · last reading shown'); // the word cut (P525)
     expect(warning.getAttribute('role')).toBe('status');
     expect(switchOf().getAttribute('aria-checked')).toBe('true'); // the last read's position, now disclosed as such
   });

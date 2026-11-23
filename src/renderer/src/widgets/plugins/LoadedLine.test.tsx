@@ -100,7 +100,7 @@ describe('the loaded line', () => {
     expect(acquires()).toEqual([]);
     fireEvent.click(screen.getByRole('button', { name: 'Refresh' }));
     expect(acquires()).toEqual([['session.acquire', { appSessionId: BARE, reason: 'read' }, TEST_MACHINE]]);
-    expect(screen.getByText('Starting…')).toBeTruthy();
+    expect(await screen.findByRole('progressbar', { name: 'Starting…' })).toBeTruthy(); // the word cut (P523)
     expect(screen.queryByRole('button', { name: 'Refresh' })).toBeNull();
     await act(async () => answer(READY));
     expect(screen.getByRole('button', { name: 'Refresh' })).toBeTruthy();
@@ -141,9 +141,9 @@ describe('the loaded line', () => {
     expect(screen.getByText('Reloaded · 2 skills')).toBeTruthy();
   });
 
-  it('starting: Starting… in place of Refresh', () => {
+  it('starting: the quiet spinner in place of Refresh', async () => {
     line({ availability: 'starting' });
-    expect(screen.getByText('Starting…')).toBeTruthy();
+    expect(await screen.findByRole('progressbar', { name: 'Starting…' })).toBeTruthy(); // the word cut (P523)
     expect(screen.queryByRole('button', { name: 'Refresh' })).toBeNull();
   });
 
@@ -170,7 +170,7 @@ describe('the loaded line', () => {
     expect(el.textContent).toContain(`Loaded last time, ${REL.ago(2, 'day')}`);
   });
 
-  it('a still-pending Refresh keeps Starting… once the process is ready, until its outcome lands', async () => {
+  it('a still-pending Refresh keeps its spinner once the process is ready, until its outcome lands', async () => {
     let answer: (outcome: AcquireOutcome) => void = () => {};
     acquire = () => new Promise((resolve) => (answer = resolve));
     withSession('resumable');
@@ -179,10 +179,10 @@ describe('the loaded line', () => {
     const view = render(<LoadedLine {...props} />);
     fireEvent.click(screen.getByRole('button', { name: 'Refresh' }));
     view.rerender(<LoadedLine {...props} availability="usable" loaded={{ ...loaded, ...NOW_FACTS }} reloads={RELOADS} />);
-    expect(screen.getByText('Starting…')).toBeTruthy();
+    expect(await screen.findByRole('progressbar', { name: 'Starting…' })).toBeTruthy();
     expect(screen.queryByRole('button', { name: 'Reload plugins' })).toBeNull();
     await act(async () => answer(READY));
-    expect(screen.queryByText('Starting…')).toBeNull();
+    expect(screen.queryByRole('progressbar', { name: 'Starting…' })).toBeNull();
     expect(screen.getByRole('button', { name: 'Reload plugins' })).toBeTruthy();
   });
 });

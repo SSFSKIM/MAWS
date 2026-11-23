@@ -263,7 +263,7 @@ describe('the Connectors dialog: one line per connector (U11a §C)', () => {
   // description at rest; nothing of it in the head, and no tooltip of where the engine records it
   it('makes what the switch reaches each switch row’s note, with nothing in the head', async () => {
     mount();
-    const list = await screen.findByRole('list', { name: 'Connectors' });
+    await screen.findByRole('list', { name: 'Connectors' });
     const header = document.querySelector<HTMLElement>('[data-widget="mcp"] header')!;
     expect(header.querySelector('h3')?.textContent).toBe('Connectors');
     expect(header.querySelector('[data-widget-subtitle]')?.textContent).toBe('MCP servers');
