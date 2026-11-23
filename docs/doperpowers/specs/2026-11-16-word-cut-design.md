@@ -32,6 +32,8 @@ How to see it working: open the build beside today's build on the same fixtures 
 - [x] (2026-11-23 03:05Z) M4 task 2: the window's second half (banners and toasts, the palette, the shortcuts window, the sheets, the usage ring), reviewed clean.
 - [x] (2026-11-23 05:45Z) M4 task 3: the dialogs typed commands open, reviewed clean.
 - [x] (2026-11-23 05:45Z) M4 task 4: Customize, reviewed clean.
+- [x] (2026-11-23 07:04Z) M4 task 5: the e2e moves, reviewed clean.
+- [x] (2026-11-23 07:04Z) M4 task 6: the rig's M4 scenes, reviewed clean.
 - [ ] M4 and M5: the cut built area by area, each with pictures and the owner's call.
 - [ ] Retrospective.
 
@@ -477,6 +479,25 @@ Kept by the session that wrote this document (sminos alias `design-experiment`, 
   - P664's "as of" is one constant, which the panel's Plugins summary also reads.
   - P731 keeps "Done" only where the engine prints no message.
   - G264 is left as it reads: it stands in place of a list (rule 3), and P573's surface does not overlap it.
+- 2026-11-23. **M4 task 5: the e2e moves.** Every Electron read of a control M4 changed now reads what the surface draws: its role and accessible name, a moved fact in its description or in the tip once opened, a greyed control by `aria-disabled`. No spec was added or deleted, and the groups are unchanged; no harness probe and no desk e2e spec read a changed control.
+  - A heading or a word cut from view is checked by its role and by a computed draw check (`e2e/support/screen-reader-only.ts`: `expectScreenReaderOnly`, `expectDrawn`). Tailwind 4's `sr-only` clips with `inset(50%)`, which `design-geometry.ts`'s older predicate does not know, so the new predicate stands beside it. `expectNewChatInFront` replaces the "New chat in <project>" heading's visibility waits (W86); `openAppDestination` asserts W6 for every caller; the empty main area is read by its named tabpanel (`e2e/support/empty-pane.ts`).
+  - A "not drawn" check on a row holding a hidden note reads its inner text, so the note's hidden words cannot make it pass (M3's kind of red).
+  - A check left without its subject moves to one the cut kept: W4's to the front tab's place and the palette's project row, W70's to the machines list's carrier, C67's to the machine chip.
+  - A wait that read a cut wait word now waits for the answer, since a wordless spinner would let it pass at once (c11-live's `settled()`, c12-prerun's widget tour, which waits for `/model`'s and `/effort`'s own controls, the share sheet's `[data-share-reading]`).
+  - Where a surface draws the same before and after a press (P570's quiet Reconnect, P672's shared "Reloaded"), the press is proved by its own control request answered with a success in the engine's journal.
+  - P523's spinner is required where a paced replay holds the start past the spinner's half second, and the fast replay reads the result alone.
+  - P650's greyed `/rewind` options are checked by the keyboard in widgets.spec: each is reached by Tab, its reason shows on focus, and Enter, Space and a click leave Conversation checked.
+  - The groups that need a Mac run: layout, widgets, settings, supervisor-daemon, c12, discover, lane-a, code, available, side, remote, machines, cross-build, library and document-app (through shared helpers), and default. The live groups that spend usage are plugins-live, plugins-library-live, available-live and discover-live.
+- 2026-11-23. **M4 task 6: the rig's M4 scenes.** The rig takes 25 `m4-` scenes, 307 in all. Twelve join launch 1. Thirteen are in a new launch 13 on fixtures of its own: a `mods` repository with an orphan worktree, its own config home with a user connector and two user skills, four sessions in the engine's store, and fixed plugin dates. Launch 1's scenario sessions are not in the index, so a mod's override cannot be written there, and the new plugin states would have changed launch 1's pictures.
+  - A scene reads which build it is on from the sidebar search's hover scope (W40), cross-checked against the checkout. It proves its named state in that build's words before capture, and resets what it depends on.
+  - Acceptance 1's two scenes, `m4-projects` and `m4-customize-plugin-row` with `-focus`, prove their words as drawn, not only as named: the title, the folder path and "Hide from sidebar", the version in frame, and the date where each build puts it.
+  - G225 has a pair proving `aria-expanded`: `m4-plugins-mod-override`, an override written through the store, so the row is open; and `m4-plugins-mod-default`, closed.
+  - P523's start wait is `m4-session-info-starting`, launch 13's last scene. An engine stays silent for 90 s on a never-started session, and Refresh is pressed.
+  - N189 is `m4-skill-file-gone`. A scratch skill's folder is removed under its open detail, then Open in is chosen; main checks the file before it calls a launcher. The scene restores the skill.
+  - N133's failed folder read has no seam and is not staged.
+  - The keyboard-opened hover card is `m4-sidebar-hover-keyboard`.
+  - W4's chip leaves the title bar of every scene with a session in front, M3's included. `m3-shortcuts-surfaces` and `m3-settings-keyboard-surfaces` also change in content.
+  - `scenes.md`'s "M4's states with no scene" lists the 98 changed M4 rows still without a scene, by reason (board ticket 816).
 
 ## Outcomes & Retrospective
 
