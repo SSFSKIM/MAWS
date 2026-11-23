@@ -5,7 +5,8 @@
 // `.claude.json` trusting the scratch repository), through ClaudeUsage's relay (GET /api/hello, one retry two minutes
 // later, else the run is `blocked: relay`), on Haiku in default permission mode, every permission allowed once through
 // the request card at the transcript’s end (UX wave U1b). One session, one prompt: the agent makes an `html` artifact with
-// `artifact_create` from a page the test wrote and a `file` artifact with `send_file`. Then, without any stand-in:
+// `artifact_create` from a page the test wrote and a `file` artifact with `artifact_create` too (board ticket 848 retired
+// `send_file`, which made it before). Then, without any stand-in:
 // main's library (`library.get`) holds both linked `created` to the session with the session as last editor; the
 // panel's Artifacts tool lists both under This session, each row's line saying Created (the relationship it draws
 // there); the Artifacts page shows both with the session's chip and "by <the session's title>"; and its search finds a
@@ -27,7 +28,7 @@ import { expect, test } from '@playwright/test';
 import type { SessionEvent } from '@shared/graph/events';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { LibraryRow } from '@shared/ipc/schema/library';
-import type { ArtifactCreateResult, SendFileResult } from '@shared/maws/tools';
+import type { ArtifactCreateResult } from '@shared/maws/tools';
 import { launchDefaults } from '../src/shared/composer/launch-defaults';
 import { RELAY_URL } from '../src/engine-host/launch';
 import { assertConfigHomeSafe } from '../test/live/support/live';
@@ -60,7 +61,7 @@ const FILE_NAME = 'p3l-notes.txt';
 const PROMPT =
   'Do these steps yourself, one after another, never through an agent, and do not read, list or inspect any file. ' +
   `First call mcp__maws__artifact_create with kind "html", title "${PAGE_TITLE}" and path "page.html". ` +
-  `Then call mcp__maws__send_file with files ["${FILE_NAME}"]. ` +
+  `Then call mcp__maws__artifact_create with kind "file", title "${FILE_NAME}" and path "${FILE_NAME}". ` +
   'Then reply with exactly one word: DONE.';
 
 type Result<T> = { ok: true; value: T } | { ok: false; error: { code: string; message: string } };
@@ -189,21 +190,22 @@ test('an agent makes an html artifact and a file artifact through the tools; the
     const [init] = ofKind(await events(), 'session.init');
     expect(ownerPlugins(init?.plugins ?? [], [root]), 'none of the owner plugins').toEqual([]);
     note(`init plugins ${JSON.stringify(initPluginsOf(rows))} (none of the owner's)`);
-    const create = calls.find((c) => c.name === 'artifact_create');
-    const send = calls.find((c) => c.name === 'send_file');
-    expect(create, 'the agent called artifact_create').toBeDefined();
-    expect(send, 'the agent called send_file').toBeDefined();
+    const create = calls.find((c) => c.name === 'artifact_create' && c.args.kind !== 'file');
+    const send = calls.find((c) => c.name === 'artifact_create' && c.args.kind === 'file');
+    expect(create, 'the agent called artifact_create for the page').toBeDefined();
+    expect(send, 'the agent called artifact_create for the file').toBeDefined();
     const createAnswer = mcpResultOf(rows, create!.requestId);
     const sendAnswer = mcpResultOf(rows, send!.requestId);
-    expect(createAnswer?.isError, `artifact_create answered ${createAnswer ? resultText(createAnswer) : 'nothing'}`).toBeUndefined();
-    expect(sendAnswer?.isError, `send_file answered ${sendAnswer ? resultText(sendAnswer) : 'nothing'}`).toBeUndefined();
+    expect(createAnswer?.isError, `artifact_create (html) answered ${createAnswer ? resultText(createAnswer) : 'nothing'}`).toBeUndefined();
+    expect(sendAnswer?.isError, `artifact_create (file) answered ${sendAnswer ? resultText(sendAnswer) : 'nothing'}`).toBeUndefined();
     const created = JSON.parse(resultText(createAnswer!)) as ArtifactCreateResult;
-    const sent = JSON.parse(resultText(sendAnswer!)) as SendFileResult;
+    const sent = JSON.parse(resultText(sendAnswer!)) as ArtifactCreateResult;
     expect(created).toMatchObject({ status: 'created', kind: 'html', title: PAGE_TITLE });
-    expect(sent.deliverables).toEqual([{ id: expect.any(String), path: join(repo, FILE_NAME), name: FILE_NAME }]);
+    expect(sent).toMatchObject({ status: 'created', kind: 'file', title: FILE_NAME });
     const pageId = created.artifactId;
-    const fileId = sent.deliverables[0]!.id;
-    note(`artifact_create: ${JSON.stringify({ status: created.status, artifactId: pageId, kind: created.kind, title: created.title, revision: created.revision })}; send_file: ${JSON.stringify(sent)}`);
+    const fileId = sent.artifactId;
+    const summary = (r: ArtifactCreateResult) => JSON.stringify({ status: r.status, artifactId: r.artifactId, kind: r.kind, title: r.title, revision: r.revision });
+    note(`artifact_create: ${summary(created)}; artifact_create (file): ${summary(sent)}`);
 
     // main's library: both rows, linked `created` to the session, the session their last editor and named by its title
     const libraryRow = async (artifactId: string): Promise<LibraryRow | null> => {
@@ -269,7 +271,7 @@ test('an agent makes an html artifact and a file artifact through the tools; the
     note(`the window's console errors: ${JSON.stringify(errors)}`);
     expect.soft(errors).toEqual([]);
     note(`tool time (P4-A2, X34): ${guardToolTime(journalPath).line}`); // after the last turn; throws over the bound
-    note('PASS: an html artifact through artifact_create and a file artifact through send_file, each linked created to the session with the session as last editor; the panel tool lists both for the session; the library shows both with the session chip; search finds the page’s word');
+    note('PASS: an html artifact and a file artifact through artifact_create, each linked created to the session with the session as last editor; the panel tool lists both for the session; the library shows both with the session chip; search finds the page’s word');
   } catch (error) {
     failure = error;
     note(`FAILED: ${error instanceof Error ? error.message : String(error)}`);

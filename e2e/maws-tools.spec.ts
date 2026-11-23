@@ -1,7 +1,7 @@
 // E1's `tools` group (docs/doperpowers/plans/2026-10-05-e1-tool-server.md, M5; P1 spec §9 E1, gates G1 to G7): the
 // `maws` tool server end to end in the product app, replayed through C3's replay transport (MAWS_ENGINE_REPLAY=1). Three
-// of M2's recordings, made live through MAWS's own host, replay as recorded (`pass3/p1-maws-send-file`, `-ask-blocking`,
-// `-ask-async`), and so does E0a's `p1-sdk-mcp-roundtrip`. The other cases replay copies derived from a recording:
+// of M2's recordings, made live through MAWS's own host, replay as recorded (`pass3/p1-maws-send-file`, whose call the
+// host now refuses since board ticket 848 retired the tool, `-ask-blocking`, `-ask-async`), and so does E0a's `p1-sdk-mcp-roundtrip`. The other cases replay copies derived from a recording:
 // show_pane a checked-in copy of `pass3/p1-maws-show-pane` with its retired `deliverable` pane renamed `artifact`
 // (`e2e/fixtures/derived/`, its provenance in its first row), the previews and notes cases an ask with its arguments
 // rewritten (`askFixture`), and the document cases E2's `pass3/p1-maws-artifacts` with its calls made a document's
@@ -93,50 +93,29 @@ async function answersWritten(s: Scene, id: string, requestId: string): Promise<
   return parsed.answers;
 }
 
-// ---- G2: send_file --------------------------------------------------------------------------------------------------
+// ---- G2: send_file, retired (board ticket 848) ----------------------------------------------------------------------
 
-test('send_file: the delivery row names hello.txt and the caption, its two buttons reach the seams, and the X12 record is written', async () => {
-  // The host's send_file stats the path for real, in the recording's working directory (the engine's cwd is the
-  // recorded `system/init.cwd`): the directory is recreated with the file before the launch, and the scratch transcript
-  // names it so the indexed session's directory (the files allowlist root) is the same path.
-  const repo = recordedCwd(SEND_FILE);
-  const existed = existsSync(repo);
-  mkdirSync(repo, { recursive: true });
-  writeFileSync(join(repo, 'hello.txt'), 'HELLO_E1');
-  try {
-    await scene({ titles: ['E1 tools: send_file'], repo }, async (s) => {
-      const [id] = s.ids;
-      await show(s, id);
-      await replay(s, id, SEND_FILE);
-      await allowNext(s, id); // Write (seq 67)
-      await allowNext(s, id); // mcp__maws__send_file (seq 99)
-
-      const delivery = s.pane.locator('[data-delivery]');
-      await expect(delivery.locator('[data-delivery-heading]')).toHaveText('Delivered hello.txt · the greeting');
-      const path = join(repo, 'hello.txt');
-      const file = delivery.locator(`[data-path="${path}"]`);
-      await file.getByRole('button', { name: 'Open externally' }).click();
-      await file.getByRole('button', { name: 'Reveal in Finder' }).click();
-      await expect.poll(() => (existsSync(s.openLog) ? readFileSync(s.openLog, 'utf8').trim().split('\n') : [])).toEqual([path, `reveal ${path}`]);
-
-      // the result the host wrote lists the deliverable it recorded, and (P3-L M6b) it is a File artifact of the session,
-      // the file in place; the caption is the row's (above), not the artifact's
-      const [call] = mcpCalls(s.journal(id));
-      expect(call).toMatchObject({ name: 'send_file', args: { files: ['hello.txt'], caption: 'the greeting' } });
-      const result = mcpResultOf(s.journal(id), call!.requestId)!;
-      expect(result.isError).toBeUndefined();
-      const delivered = JSON.parse(resultText(result)) as { status: string; deliverables: { id: string; path: string; name: string }[] };
-      expect(delivered).toMatchObject({ status: 'delivered', deliverables: [{ path, name: 'hello.txt' }] });
-      const { artifact } = value(await invoke(s.page, 'artifacts.get', { artifactId: delivered.deliverables[0]!.id }));
-      expect(artifact).toMatchObject({ id: delivered.deliverables[0]!.id, kind: 'file', linkedPath: path, title: 'hello.txt', createdBy: { kind: 'session', appSessionId: id } });
-      expect(existsSync(join(s.maws.userData, 'deliverables'))).toBe(false); // no X12 record
-      expect(ofKind(await s.events(id), 'maws.delivery.file')).toMatchObject([{ deliverables: delivered.deliverables, caption: 'the greeting', urgency: 'normal' }]);
-      await idle(s, id);
-      await shoot(s, 'delivery');
-    });
-  } finally {
-    if (!existed) rmSync(repo, { recursive: true, force: true });
-  }
+// The recording's send_file call reaches the app's host, which no longer serves the tool: it answers the sentence that
+// teaches the path link and tells no delivery. The replay goes on with the engine's recorded result, which the host's
+// answer does not change, so the row is not this case's; a record written before is drawn by library.spec.ts's upgrade
+// case (e2e:library).
+test('send_file, retired: the host answers the recorded call with the sentence that teaches the path link, and tells no delivery', async () => {
+  await scene({ titles: ['E1 tools: send_file retired'] }, async (s) => {
+    const [id] = s.ids;
+    await show(s, id);
+    await replay(s, id, SEND_FILE);
+    await allowNext(s, id); // Write (seq 67)
+    await allowNext(s, id); // mcp__maws__send_file (seq 99)
+    let requestId: string | undefined;
+    await expect.poll(() => (requestId = mcpCalls(s.journal(id)).find((c) => c.name === 'send_file')?.requestId) !== undefined, { timeout: 20_000 }).toBe(true);
+    let result: McpResult | null = null;
+    await expect.poll(() => (result = mcpResultOf(s.journal(id), requestId!)) !== null, { timeout: 20_000 }).toBe(true);
+    expect(result!.isError).toBe(true);
+    expect(resultText(result!)).toBe(TOOL_ERRORS.sendFileRetired);
+    await idle(s, id);
+    expect(ofKind(await s.events(id), 'maws.delivery.file')).toEqual([]);
+    expect(existsSync(join(s.maws.userData, 'deliverables'))).toBe(false); // no X12 record
+  });
 });
 
 // ---- G3 and the attention item: a blocking ask ----------------------------------------------------------------------
@@ -1015,7 +994,7 @@ test('an artifact link in the agent’s reply: link text that wraps, a click ope
 
 // ---- G1 and G7 in the app: E0a's round trip ------------------------------------------------------------------------
 
-test('the SDK MCP round trip: the app answers the engine’s handshake with the nineteen tools and refuses the probe’s own tool', async () => {
+test('the SDK MCP round trip: the app answers the engine’s handshake with the eighteen tools and refuses the probe’s own tool', async () => {
   // The probe's journal: its scratch directory is the engine cwd, and from seq 96 on it holds at the probe's own writes,
   // which the app never makes (M1's decisions), so the case ends after the first turn.
   await scene({ titles: ['E1 tools: round trip'] }, async (s) => {
@@ -1029,7 +1008,6 @@ test('the SDK MCP round trip: the app answers the engine’s handshake with the 
     const handshake = rows.filter((r) => r.direction === 'out' && (r.frame as Frame).type === 'control_response').map((r) => (r.frame as { response: { response?: { mcp_response?: { result?: { tools?: { name: string; annotations: unknown }[]; serverInfo?: { name: string } } } } } }).response.response?.mcp_response?.result).filter((r) => r !== undefined);
     expect(handshake.find((r) => r.serverInfo)?.serverInfo?.name).toBe('maws');
     expect(handshake.find((r) => r.tools)?.tools?.map((t) => [t.name, t.annotations])).toEqual([
-      ['send_file', { title: 'Send file', readOnlyHint: true, openWorldHint: false }],
       ['ask', { title: 'Ask questions', readOnlyHint: true, openWorldHint: false }],
       ['show_pane', { title: 'Show pane', readOnlyHint: true, openWorldHint: false }],
       // E2: the artifact tools, listed from the first `tools/list`; the two writers are not read-only, so the engine never
