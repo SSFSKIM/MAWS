@@ -58,6 +58,22 @@ withdrawn in words, an always-loaded tool that left stays offered and fails when
 changes. A session's set is therefore fixed when it starts, and a fork, which resumes its source's transcript, keeps its
 source's.
 
+The upgrade: a session from before keeps the tools it was sent, as it was sent them.
+(uxwave-421-upgrade-first, -upgrade-resumed; asked by the plan's adversarial review)
+- First launch under the list as it is before ticket 420: the ask deferred, its description marked old ("with blocking
+  true (the default) the call waits"), artifact_read always loaded. The scripted model loads the ask through ToolSearch
+  (`select:mcp__maws__ask`, answered with a tool_reference) and calls it; from then on the request carries the ask with
+  `defer_loading: true` and the old description.
+- The same session resumed under the list as it is after: the ask always loaded with a new description, artifact_read
+  with no `_meta`. Every request of the resumed session still carries the ask with the old description and
+  `defer_loading: true`, and artifact_read whole. The new description reaches the model nowhere; a call still reaches the
+  new process's server.
+So the engine holds a conversation to the tool schemas it was sent: a resumed session reads the description of its
+first launch, not the one the server lists now. Whatever a description promises (here, whether a question waits by
+default) is therefore the session's for good, and the host has to keep that promise for a session started before it
+changed. A session that never loaded the ask before the change was not probed: it holds no schema of it, so by P2 the
+always-loaded ask arrives whole as an addition, with whatever description the server lists at that launch.
+
 P3: yes. (uxwave-421-native-ask)
 - Launched without `--disallowedTools AskUserQuestion`, with a `maws` server that lists no ask, the first request's
   tools hold `AskUserQuestion` whole (not deferred) and no maws tool.
@@ -69,7 +85,9 @@ P3: yes. (uxwave-421-native-ask)
   e2e/requests.spec.ts; test/snapshots/transcript/pass1/question-roundtrip.rows.json). The built-in waits for its
   answer: it has no form that returns at once.
 
-Not covered. MAWS's own descriptions and schemas (the list was a stand-in; the build re-records P1 with
-`mawsToolList()`); a first-party base URL (the stub's address is local; the default was read in the engine's code); the
-sminos question tool in a session MAWS runs (board ticket 600); the tested engine 2.1.312 as a binary (its code was
-read, not run).
+Not covered. Permission mode `auto` for P3 (the probe ran in `default`; the request carries
+`requires_user_interaction`, which no mode answers for the person; the plan's live run covers it); a relaunch that
+renders the prompt anew (`--system-prompt-snapshot off`) for P2; MAWS's own descriptions and schemas (the list was a
+stand-in; the build re-records P1 with `mawsToolList()`); a first-party base URL (the stub's address is local; the
+default was read in the engine's code); the sminos question tool in a session MAWS runs (board ticket 600); the tested
+engine 2.1.312 as a binary (its code was read, not run).

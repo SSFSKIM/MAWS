@@ -1495,3 +1495,15 @@ test('tickets 421/420 P3: with the built-in ask left in and no maws ask, AskUser
  const answer=meta421(rows,'answer_p3')[0];
  assert.equal(answer.results.length,1);assert.equal(answer.results[0].is_error,false);assert.match(answer.results[0].content,/"Which colour do you want\?"="Blue"/);
 });
+test('tickets 421/420, a session from before resumed under the new list: the engine keeps the ask\'s old description and artifact_read whole, whatever the server lists now',()=>{
+ const first=meta421(load421('upgrade-first'),'answer_upgrade')[0].requests;
+ assert.deepEqual(first[0].maws,[{name:'mcp__maws__artifact_read',defer_loading:null}]); // the old list: the ask deferred, artifact_read loaded
+ assert.match(first.at(-1).descriptions['mcp__maws__ask'],/^PROBE-421-OLD-ASK/); // loaded through ToolSearch, then called
+ const rows=load421('upgrade-resumed');const resumed=meta421(rows,'answer_upgrade')[0].requests;
+ assert.ok(meta421(rows,'provenance')[0].extraFlags.includes('--resume'));
+ for(const request of resumed){
+  assert.match(request.descriptions['mcp__maws__ask'],/^PROBE-421-OLD-ASK/); // the new list's description never reaches the model
+  assert.deepEqual(request.maws,[{name:'mcp__maws__artifact_read',defer_loading:null},{name:'mcp__maws__ask',defer_loading:true}]); // neither moved with its `_meta`
+ }
+ assert.deepEqual(meta421(rows,'server_calls')[0].calls.map(c=>c.name),['ask']); // and the call still reaches the new server
+});

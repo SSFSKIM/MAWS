@@ -18,6 +18,11 @@
 //                                (ask and artifact_dataset gone, artifact_edit added): does the engine ask `tools/list`
 //                                again, and does the next request carry the new set
 //   uxwave-421-list-changed-flat the same with ENABLE_TOOL_SEARCH=false, where every tool is in the request whole
+//   uxwave-421-upgrade-first,    the upgrade ticket 420 makes, for a session started before it: under the old list (the
+//   uxwave-421-upgrade-resumed   ask deferred, its description saying it waits by default; artifact_read always
+//                                loaded) the scripted model loads the ask through ToolSearch and calls it; then a
+//                                `--resume` under the new list (the ask always loaded with a changed description,
+//                                artifact_read deferred): which description of the ask, and is artifact_read still whole
 //   uxwave-421-native-ask        P3: MAWS's launch without `--disallowedTools AskUserQuestion` and a maws server that
 //                                lists no ask: is the built-in in the request's tools up front, does a call raise
 //                                `can_use_tool` on the wire, and does the host's allow with `updatedInput.answers`
@@ -33,6 +38,10 @@ const SHOW_PANE=tool('show_pane','Show pane','Open a MAWS pane for the user (dra
 const artifact=(name,title)=>tool(name,title,`${title} (the ticket 421 probe's draft).`,obj({artifact:{type:'string'}},['artifact']));
 const CREATE=artifact('artifact_create','Create artifact'),READ=artifact('artifact_read','Read artifact'),PUBLISH=artifact('artifact_publish','Publish artifact'),SEARCH=artifact('artifact_search','Search artifacts'),EDIT=artifact('artifact_edit','Edit document'),DATASET=artifact('artifact_dataset','Dashboard dataset');
 const FULL=[ASK,SHOW_PANE,CREATE,READ,PUBLISH,DATASET,SEARCH];
+// The list before ticket 420 and after it, for the upgrade pair: the ask's two descriptions are told apart by a marker.
+const {_meta:_always,...ASK_DEFERRED}=ASK;
+const OLD_LIST=[{...ASK_DEFERRED,description:'PROBE-421-OLD-ASK: with blocking true (the default) the call waits.'},SHOW_PANE,CREATE,{...READ,_meta:{'anthropic/alwaysLoad':true}},PUBLISH,DATASET,SEARCH];
+const NEW_LIST=[{...ASK,description:'PROBE-421-NEW-ASK: with blocking false (the default) the call returns at once.'},SHOW_PANE,CREATE,READ,PUBLISH,DATASET,SEARCH];
 const INSTRUCTIONS='PROBE-421-PARAGRAPH: MAWS artifacts are the user\'s documents. To find one, call mcp__maws__artifact_search.';
 const CHANGED_INSTRUCTIONS='PROBE-421-CHANGED-PARAGRAPH: this session has no MAWS artifact tools.';
 const CHANGED=[SHOW_PANE,CREATE,READ,PUBLISH,SEARCH,EDIT]; // ask and artifact_dataset gone, artifact_edit added
@@ -65,7 +74,7 @@ function record(body){
   if(b.type==='tool_result')return {type:'tool_result',tool_use_id:b.tool_use_id,is_error:b.is_error??false,content:typeof b.content==='string'?b.content.slice(0,2000):(b.content??[]).map(c=>c.type==='text'?{type:'text',text:c.text.slice(0,2000)}:{type:c.type})};
   return {type:b.type};
  })}));
- return {mcpSection:at<0?null:system.slice(at,at+600),messages,tools:(body.tools??[]).map(t=>({name:t.name,defer_loading:t.defer_loading??null}))};
+ return {mcpSection:at<0?null:system.slice(at,at+600),messages,tools:(body.tools??[]).map(t=>({name:t.name,defer_loading:t.defer_loading??null})),mawsDescriptions:Object.fromEntries((body.tools??[]).filter(t=>String(t.name).startsWith('mcp__maws__')).map(t=>[t.name,t.description??null]))};
 }
 const mawsOf=request=>request.tools.filter(t=>t.name.startsWith('mcp__maws__'));
 const PROVENANCE={charter:'docs/charter.md',child:'board tickets 421 and 420',document:'docs/doperpowers/plans/2026-11-23-tool-choice.md',api:'stub-api.mjs (nothing spent)'};
@@ -121,6 +130,11 @@ const resumed=async(p,{stub})=>{
  const last=stub.requests.filter(r=>r.main).at(-1);
  p.note({event:'answer_resume',paragraphs:paragraphsOf(last),maws:mawsOf(last),mentions:last.messages.flatMap(m=>m.blocks.flatMap(b=>(b.mentions??[]).map(text=>({i:m.i,role:m.role,text}))))});
 };
+const upgraded=async(p,{stub})=>{
+ await p.turn('Ask me which colour I want.');
+ const main=stub.requests.filter(r=>r.main);
+ p.note({event:'answer_upgrade',requests:main.map(r=>({maws:mawsOf(r),descriptions:r.mawsDescriptions,mentions:r.messages.flatMap(m=>m.blocks.flatMap(b=>(b.mentions??[]).filter(t=>t.startsWith('The following deferred')).map(text=>({i:m.i,text}))))}))});
+};
 const nativeAsk=async(p,{stub})=>{
  await p.turn('Ask me which colour I want.');
  const main=stub.requests.filter(r=>r.main);
@@ -139,10 +153,15 @@ const SCENARIOS={
 export default async()=>{
  const only=(process.env.UX421_ONLY??'').split(',').filter(Boolean);
  for(const [name,scenario] of Object.entries(SCENARIOS))if(only.length===0||only.includes(name))await probe(name,scenario);
- if(only.length>0&&!only.includes('uxwave-421-resume-changed'))return;
+ if(only.length>0&&!only.includes('uxwave-421-resume-changed')&&!only.includes('uxwave-421-upgrade'))return;
  const run=scratchRun('421-resume');const id=randomUUID();
  try{
   await probe('uxwave-421-resume-first',{question:'the session the resume reads: one turn under the full list and the first paragraph',run,sessionId:id,script:[textTurn('ready')],body:resumed});
   await probe('uxwave-421-resume-changed',{question:'P2 at a relaunch: a --resume of that session under a changed paragraph and a changed set',run,resume:id,tools:CHANGED,instructions:CHANGED_INSTRUCTIONS,script:[textTurn('ready again')],body:resumed});
  }finally{removeRun(run);}
+ const run2=scratchRun('421-upgrade');const id2=randomUUID();const ask={questions:[{question:'Which colour?',modality:'text'}]};
+ try{
+  await probe('uxwave-421-upgrade-first',{question:'a session before ticket 420: the ask deferred and loaded through ToolSearch, artifact_read always loaded',run:run2,sessionId:id2,tools:OLD_LIST,script:[toolTurn('toolu_stub_search','ToolSearch',{query:'select:mcp__maws__ask',max_results:5}),toolTurn('toolu_stub_old','mcp__maws__ask',ask),textTurn('Thanks.')],body:upgraded});
+  await probe('uxwave-421-upgrade-resumed',{question:'the same session resumed after ticket 420: which description of the ask the request carries, and whether artifact_read stays whole',run:run2,resume:id2,tools:NEW_LIST,script:[toolTurn('toolu_stub_new','mcp__maws__ask',ask),textTurn('Thanks again.')],body:upgraded});
+ }finally{removeRun(run2);}
 };
