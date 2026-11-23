@@ -76,7 +76,9 @@ test('Worktrees…: every checkout with its state and bound session; New chat he
   ]);
   await expect(rowOf(dialog, 'bound').getByRole('button', { name: boundRecord.title.text })).toBeVisible();
   await expect(rowOf(dialog, 'orphan').getByText('dirty · 1 change')).toBeVisible();
-  await expect(rowOf(dialog, 'orphan').getByText('No session')).toBeVisible();
+  // the word cut (W155): a worktree no session uses draws no Sessions block (no "No session" line); its Remove… stands
+  await expect(rowOf(dialog, 'orphan').getByText(/^(Sessions|No session)$/)).toHaveCount(0);
+  await expect(rowOf(dialog, 'orphan').getByRole('button', { name: 'Remove…' })).toBeEnabled();
   await expect(rowOf(dialog, 'gone').getByText('missing', { exact: true })).toBeVisible();
   await expect(rowOf(dialog, project.name).getByRole('button', { name: 'Remove…' })).toHaveCount(0);
 

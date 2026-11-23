@@ -22,6 +22,7 @@ import { ComputerUseJournal } from './support/computer-use-replay';
 import { launchMaws, type MawsLaunch } from './support/launch';
 import { journalOf, metaEvents } from './support/maws-tools';
 import { newChatIn, openProject } from './support/sidebar';
+import { expectNewChatInFront } from './support/screen-reader-only';
 
 test.describe.configure({ timeout: 180_000 });
 
@@ -68,7 +69,7 @@ async function computerUseCase(build: (cwd: string) => ComputerUseJournal[]): Pr
     await openProject(page, project.name);
     const start = async (prompt: string) => {
       await newChatIn(page, project.name);
-      await expect(page.getByRole('heading', { name: `New chat in ${project.name}` })).toBeVisible();
+      await expectNewChatInFront(page, project.name); // the word cut (W86): a screen reader's heading
       const id = value(await invoke(page, 'session.intent.list', undefined)).intents.at(-1)!.appSessionId;
       value(await invoke(page, 'session.intent.patch', { appSessionId: id, patch: { gateway: 'direct' } }));
       value(await invoke(page, 'session.start', { appSessionId: id, message: { content: prompt, display: prompt }, options: {} }));

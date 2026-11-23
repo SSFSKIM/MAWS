@@ -293,7 +293,7 @@ test('two machines in one sidebar by org project; one leaving reads reconnecting
       await expect(projectRowByKey(a.page, sharedKey), 'the shared row has A’s checkout, so stays live').toHaveAttribute('aria-label', 'shared');
       await expect(sessionRowIn(a.page, sharedKey, bSharedAt).locator('[data-machine-chip]')).toHaveText('offline');
       await expect(tab.locator('span.text-fg-faint', { hasText: 'B’s shared session' }), 'its title in the disabled token (T5)').toBeVisible();
-      await expect(linkWords(a.page, 'line'), 'the status line says B is offline').toHaveText(`${B_NAME} is offline · this session reconnects when it’s back`);
+      await expect(linkWords(a.page, 'line'), 'the status line says B is offline').toHaveText(`${B_NAME} is offline`); // the word cut (W25): the fact, not how it comes back
       await expect(composerOf(a.page), 'over the same pane').toHaveText(DRAFT);
       expect(await rowsOfMachine(a.page, aRef), 'A’s rows, statuses and Needs-you entries are as they were').toEqual(aBefore);
       await expect(invoke(a.page, 'session.list', {}, bRef)).rejects.toThrow(/host_unavailable/);
@@ -335,7 +335,7 @@ test('two machines in one sidebar by org project; one leaving reads reconnecting
       const tab = mainTabById(a.page, `session:${bSharedAt}`);
       await expect(tab, 'B’s tab is kept with B down').toBeVisible({ timeout: 20_000 });
       // nothing to keep in this run (B's record was never read), so the words in the pane's middle (U9, #563)
-      await expect(linkWords(a.page, 'middle'), 'greyed: its content says B is offline').toHaveText(`${B_NAME} is offline · this session reconnects when it’s back`, { timeout: 15_000 });
+      await expect(linkWords(a.page, 'middle'), 'greyed: its content says B is offline').toHaveText(`${B_NAME} is offline`, { timeout: 15_000 }); // W25
       await expect(linkWords(a.page, 'line')).toHaveCount(0);
       // its title in the disabled token (T5): the session's own, which the tab kept, since B has not loaded in this run
       await expect(tab.locator('span.text-fg-faint', { hasText: 'B’s shared session' })).toBeVisible();

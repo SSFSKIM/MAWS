@@ -80,7 +80,9 @@ test('a release reads idle and marked, offers resume on Send; over budget with n
     await overviewButton.click();
     const card = overview.getByRole('article', { name: RELEASED_TITLE });
     await expect(card.getByText('released', { exact: true })).toBeVisible(); // still on the Overview, idle
-    await expect(card.getByTestId('card-activity')).toHaveText('Idle');
+    // the word cut (W107): an idle card draws no activity line; its glyph names the state
+    await expect(card.getByRole('img', { name: /^Idle(, unread)?$/ })).toBeVisible();
+    await expect(card.getByTestId('card-activity')).toHaveCount(0);
     // No Needs-you item. W5 has no Needs-you list: what waits is counted on the project's row (◐N) and the Overview
     // button, and both count nothing.
     await expect(projectRow(page, 'MAWS').locator('[aria-label$=" waiting"]')).toHaveCount(0);
