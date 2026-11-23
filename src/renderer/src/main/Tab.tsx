@@ -124,6 +124,27 @@ export const tabName = (label: TabLabel, place: string | null): string => {
   return after ? `${label.title} · ${after}` : label.title;
 };
 
+// A file's name split before its extension, which stays drawn when the name clips (the word cut's fix wave for M4: two
+// long names that differ only in it stay told apart). A leading dot opens a name, not an extension; a "suffix" longer
+// than an extension is part of the name.
+export function fileNameParts(name: string): { stem: string; suffix: string } {
+  const dot = name.lastIndexOf('.');
+  if (dot <= 0 || name.length - dot > 12) return { stem: name, suffix: '' };
+  return { stem: name.slice(0, dot), suffix: name.slice(dot) };
+}
+
+// The title of a file's tab: the stem clips first, to nothing if it must; the extension clips only in a title narrower
+// than itself.
+function FileTitle({ name, className }: { name: string; className: string }) {
+  const { stem, suffix } = fileNameParts(name);
+  return (
+    <span className={`flex max-w-full min-w-0 shrink-0 truncate ${className}`}>
+      <span className="min-w-0 truncate">{stem}</span>
+      {suffix && <span data-tab-suffix className="max-w-full shrink-0 truncate">{suffix}</span>}
+    </span>
+  );
+}
+
 // E11 F2b (plan 2.5; owner decision 2): opening a session replaces the shown tab unless it is pinned.
 export const PINNED_HINT = 'Pinned: stays open when you open another session';
 
@@ -147,6 +168,7 @@ export function Tab({ tab, pane, domId, active, place = null, stop, onKeyDown }:
   // W10: pointing at the mark shows the tab's tip. The region is always mounted (`contents`: no box, so no gap while
   // empty), since the tip reads it once and the mark comes and goes with the bridge.
   const holderRegion = useRef<HTMLElement>(null);
+  const tip = holderMark?.title ?? (tab.kind === 'file' ? tab.path : null);
   // Keep plain tabs compact, but reserve each nonshrinking mark plus its gap before truncating the title. The place
   // reserves nothing: it gives way first (U13a).
   const minWidth = Math.max(active ? 24 : 16, 16 + (label.glyph ? 4 : 0) + (label.file ? 4 : 0) + (tab.pinned ? 4 : 0) + (dirty ? 4 : 0) + (label.secondary ? 20 : 0) + (holderMark ? 16 : 0));
@@ -163,7 +185,9 @@ export function Tab({ tab, pane, domId, active, place = null, stop, onKeyDown }:
       id={domId}
       aria-selected={active}
       aria-label={name}
-      title={tab.kind === 'file' ? tab.path : name} // UX wave U6e (decision 11; U13's): a file's tab has its full path as its tooltip
+      // UX wave U6e (decision 11; U13's): a file's tab has its full path as its tooltip, a `Tip` the keyboard reaches (the
+      // word cut's fix wave for M4); any other tab its name, the system's
+      title={tab.kind === 'file' ? undefined : name}
       tabIndex={stop ? 0 : -1}
       data-tab-id={tab.id}
       data-dirty={dirty ? 'true' : undefined} // E5
@@ -196,7 +220,11 @@ export function Tab({ tab, pane, domId, active, place = null, stop, onKeyDown }:
           5em, whichever is less (four characters and an ellipsis are never wider), and grows to its whole text from there;
           a line with less room wraps it out of sight, with its gap, and the title takes the room. */}
       <span className="flex h-[1lh] min-w-0 flex-wrap items-baseline gap-x-1.5 overflow-hidden">
-        <span className={`max-w-full shrink-0 truncate ${offline ? 'text-fg-faint' : ''}`}>{label.title}</span>
+        {tab.kind === 'file' ? (
+          <FileTitle name={label.title} className={offline ? 'text-fg-faint' : ''} />
+        ) : (
+          <span className={`max-w-full shrink-0 truncate ${offline ? 'text-fg-faint' : ''}`}>{label.title}</span>
+        )}
         {place && <small data-tab-place className="max-w-max min-w-0 grow basis-[5em] truncate text-fg-muted">{place}</small>}
       </span>
       <span ref={holderRegion} className="contents">
@@ -228,8 +256,8 @@ export function Tab({ tab, pane, domId, active, place = null, stop, onKeyDown }:
   return (
     <ContextMenu.Root modal={false}>
       {/* W10 (fix round 1): the holder's line is the tab's tip and description, shown at once on the tab's own focus stop
-          and after the delay on pointing at the mark; no tip for any other tab */}
-      <Tip content={holderMark?.title ?? null} description={holderMark?.title ?? null} pointedWithin={holderRegion}>
+          and after the delay on pointing at the mark. A file's tab: its full path, on pointing at the tab or its focus */}
+      <Tip content={tip} description={tip} pointedWithin={holderMark ? holderRegion : undefined}>
         <ContextMenu.Trigger asChild>{element}</ContextMenu.Trigger>
       </Tip>
       <ContextMenu.Portal>

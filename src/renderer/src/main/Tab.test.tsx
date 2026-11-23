@@ -290,14 +290,19 @@ describe('a session tab of another machine by its link’s phase', () => {
 });
 
 // UX wave U6e (decision 11; Decision Log 14 (b)): a main file tab has the file's full path as its tooltip; its accessible
-// name stays its title; any other tab's tooltip is its name.
+// name stays its title; any other tab's tooltip is its name. The word cut's fix wave for M4: the path is a `Tip` keyboard
+// focus reaches, and the name clips its stem, keeping its extension drawn.
 describe('a file tab’s tooltip (U6e)', () => {
-  it('is the full path, the name staying the base name, a file glyph before it', () => {
-    const file: TabRef = { id: tabId({ kind: 'file', path: '/elsewhere/notes/plans/todo.txt', line: null, appSessionId: A, machine: TEST_MACHINE }), kind: 'file', path: '/elsewhere/notes/plans/todo.txt', line: null, appSessionId: A, machine: TEST_MACHINE, pinned: false };
-    render(<Tab tab={file} pane={0} domId="t-file" active stop onKeyDown={() => {}} />);
+  const fileTab = (path: string): TabRef => ({ id: tabId({ kind: 'file', path, line: null, appSessionId: A, machine: TEST_MACHINE }), kind: 'file', path, line: null, appSessionId: A, machine: TEST_MACHINE, pinned: false });
+
+  it('is the full path, shown on the tab’s focus, the name staying the base name, a file glyph before it', async () => {
+    render(<Tab tab={fileTab('/elsewhere/notes/plans/todo.txt')} pane={0} domId="t-file" active stop onKeyDown={() => {}} />);
     const element = document.getElementById('t-file')!;
-    expect(element.getAttribute('title')).toBe('/elsewhere/notes/plans/todo.txt');
+    expect(element.getAttribute('title')).toBeNull();
     expect(element.getAttribute('aria-label')).toBe('todo.txt');
+    expect(accessibleDescription(element)).toBe('/elsewhere/notes/plans/todo.txt');
+    act(() => element.focus());
+    expect((await screen.findByRole('tooltip')).textContent).toBe('/elsewhere/notes/plans/todo.txt');
     // the word cut (W13): a file glyph before the name, where the blue extension stood
     expect(element.querySelector('svg')).not.toBeNull();
     expect(element.textContent).not.toContain('TXT');
@@ -305,5 +310,27 @@ describe('a file tab’s tooltip (U6e)', () => {
     render(<Tab tab={sessionTab(A)} pane={0} domId="t-session" active stop onKeyDown={() => {}} />);
     const session = document.getElementById('t-session')!;
     expect(session.getAttribute('title')).toBe(session.getAttribute('aria-label'));
+  });
+
+  it('clips the stem of a long name and keeps its extension, so two names that differ only there stay apart', () => {
+    const stem = 'a-rather-long-module-name-for-the-strip';
+    render(
+      <>
+        <Tab tab={fileTab(`/w/${stem}.ts`)} pane={0} domId="t-ts" active={false} stop={false} onKeyDown={() => {}} />
+        <Tab tab={fileTab(`/w/${stem}.json`)} pane={0} domId="t-json" active={false} stop={false} onKeyDown={() => {}} />
+        <Tab tab={fileTab('/w/.env')} pane={0} domId="t-dot" active={false} stop={false} onKeyDown={() => {}} />
+      </>,
+    );
+    for (const [id, suffix] of [['t-ts', '.ts'], ['t-json', '.json']] as const) {
+      const tab = document.getElementById(id)!;
+      const kept = tab.querySelector<HTMLElement>('[data-tab-suffix]')!;
+      expect(kept.textContent).toBe(suffix);
+      expect(kept.className).toContain('shrink-0');
+      const clipped = kept.previousElementSibling as HTMLElement;
+      expect(clipped.textContent).toBe(stem);
+      expect(clipped.className).toContain('truncate');
+      expect(tab.textContent).toContain(`${stem}${suffix}`);
+    }
+    expect(document.getElementById('t-dot')!.querySelector('[data-tab-suffix]'), 'a leading dot opens the name').toBeNull();
   });
 });

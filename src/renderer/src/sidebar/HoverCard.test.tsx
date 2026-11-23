@@ -22,7 +22,8 @@ import { projectList } from './derive';
 import { RequestPreview } from './RequestPreview';
 import { useLayout } from '../stores/layout';
 import { Sidebar } from './Sidebar';
-import { SidebarHoverCard } from './HoverCard';
+import { ListedHoverCard, SidebarHoverCard } from './HoverCard';
+import { useState } from 'react';
 import { accessibleDescription } from '../test-support/accessible-text';
 import { formatAgo } from '@shared/app/date-format';
 import { registerSlot, resetSlots } from '../app/slots';
@@ -291,6 +292,42 @@ describe('a session row’s hover card', () => {
     expect(within(card).getByTestId('hover-meta').textContent!.startsWith(word)).toBe(true);
     expect(within(card).getByTestId('hover-place').textContent).toBe('⎇ feature/sibling');
     expect(within(card).getByTestId('hover-place-path').textContent).toBe('/work/MAWS-sibling');
+  });
+
+  // The word cut's fix wave for M4: a card the pointer opened, which the keyboard then reaches on its row, is held by the
+  // keyboard from then on (Radix opens nothing it holds open already)
+  it('a card the pointer opened draws its facts at rest once the keyboard reaches its row', async () => {
+    withMain();
+    const charter = bareIdOf('Charter + research');
+    act(() => fillStores({ ...nine, sessions: nine.sessions.map((r) => (r.appId === charter ? { ...r, worktree: { path: '/work/MAWS-sibling', branch: 'feature/sibling' } } : r)) }));
+    render(<Sidebar />);
+    const card = await open('Charter + research');
+    expect(within(card).queryByTestId('hover-place-path')).toBeNull();
+    act(() => needsRow('Charter + research').focus());
+    const word = card.querySelector('h3')!.parentElement!.querySelector('[role="img"]')!.getAttribute('aria-label')!;
+    expect(within(card).getByTestId('hover-meta').textContent!.startsWith(word)).toBe(true);
+    expect(within(card).getByTestId('hover-place-path').textContent).toBe('/work/MAWS-sibling');
+  });
+
+  // A listed row's Enter opens its card itself (`open`), with the keyboard on the row
+  it('a listed card its row’s Enter opens draws the state word at rest', async () => {
+    const b1 = addressOf(OTHER_MACHINE, 'b1' as AppSessionId);
+    useSessions.setState({ listed: new Map([[b1, { ...remoteRow(OTHER_MACHINE, 'b1', { state: 'failed', title: 'Studio build' }), appId: b1 }]]) });
+    function Row() {
+      const [shown, setShown] = useState(false);
+      return (
+        <ListedHoverCard appId={b1} title="Studio build" open={shown} onOpenChange={setShown}>
+          <div role="treeitem" aria-selected={false} tabIndex={0} onKeyDown={(event) => event.key === 'Enter' && setShown(true)}>
+            Studio build
+          </div>
+        </ListedHoverCard>
+      );
+    }
+    render(<Row />);
+    act(() => screen.getByRole('treeitem').focus());
+    fireEvent.keyDown(screen.getByRole('treeitem'), { key: 'Enter' });
+    const card = await screen.findByRole('dialog', { name: 'Studio build' });
+    expect(within(card).getByTestId('hover-meta').textContent).toMatch(/^Failed · /);
   });
 
   it('a card opened by the pointer leaves the state word to the glyph', async () => {

@@ -1070,13 +1070,19 @@ test('Acceptance: compact inactive file tabs contain their file glyph, pin, dirt
         const close = node.querySelector<HTMLButtonElement>('button')!;
         const target = close.getBoundingClientRect();
         const title = titleNode.getBoundingClientRect();
+        // the word cut's fix wave for M4: the stem clips first, the extension stays drawn in the title, whole unless the
+        // title is narrower than it
+        const suffix = node.querySelector<HTMLElement>('[data-tab-suffix]');
+        const kept = suffix?.getBoundingClientRect();
         return {
+          suffixKept: suffix?.textContent === '.typescript' && kept !== undefined && kept.width > 0 && kept.left >= title.left - 0.5 && kept.right <= title.right + 0.5
+            && (suffix.scrollWidth <= Math.ceil(kept.width) || kept.width >= title.width - 0.5),
           inside: children.every((child) => child.left >= bounds.left && child.right <= bounds.right),
           noOverlap: children.every((child, index) => index === 0 || child.left >= children[index - 1]!.right),
           titleHasRoom: title.width >= 8,
           closeHit: close.contains(document.elementFromPoint(target.x + target.width / 2, target.y + target.height / 2)),
         };
-      }), { message: 'each adornment and the visible Close target stays inside its own inactive tab, without overlap' }).toEqual({ inside: true, noOverlap: true, titleHasRoom: true, closeHit: true });
+      }), { message: 'each adornment and the visible Close target stays inside its own inactive tab, without overlap, the name’s extension drawn' }).toEqual({ suffixKept: true, inside: true, noOverlap: true, titleHasRoom: true, closeHit: true });
     }
     await tab.click();
     await menu(maws.app, 'file.save');
