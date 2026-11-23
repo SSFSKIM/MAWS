@@ -273,6 +273,22 @@ Both branches edit: `src/shared/maws/tools.ts` and `tools.test.ts`; `src/shared/
 - Gates: class 1a through `scripts/ci-gate.sh <worktree> --gates static,unit,probes`; each e2e group named below through `scripts/ci-gate.sh <worktree> --gates e2e:<group>`; the live runs on a Mac under the load rule (`docs/doperpowers/plans/2026-10-14-gate-offload.md` §3.5). This plan adds cases to existing specs and no spec file, so `default`'s pin does not move.
 - The repository is public: no path under a home directory, no address and no machine fact in a fixture, a test or a document.
 
+## Progress
+
+A milestone is ticked once its review is clean.
+
+- [x] M0 · The probes (before the build).
+- [ ] M1 · The wire's shapes, and the set at the host.
+- [ ] M2 · Ticket 420: the ask up front, `blocking` required, the edit tools deferred.
+- [ ] M3 · The set kept with the session.
+- [ ] M4 · The machine's default, and Settings › Sessions.
+- [ ] M5 · The composer's Tools submenu, and Session info.
+- [ ] M6 · Records, and the real engine (live runs wait for the owner).
+
+**How checks run while building.** Dependencies are installed in the worktree, so typecheck and focused vitest runs go here first. The build VM is reached through `~/.local/share/maws-ux-wave/wordcut-m3/vmqb.sh ux-wave/tool-choice -- '<cmd>'` (a lock serializes every call; its queue is shared with other branches, so each call is bounded with `timeout`), for what only the VM or Node 26 shows and for the gate's script tests. The whole unit suite runs once, at the end of M6. Electron e2e runs only on the Mac mini, through the coordinator's queue.
+
+**Pre-flight (2026-11-23).** §B's split checked against 848's paragraph as it landed on `4598840e4`: six sentences, the first four through "… call mcp__maws__artifact_search." are the artifact sentences, the last two (the path link, and where to write a file meant for the user) are the file sentences. The split holds as written.
+
 ## Plan of Work
 
 ### M0 · The probes (done, on this branch)
