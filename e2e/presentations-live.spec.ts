@@ -15,7 +15,9 @@
 //      read in one call: refused, naming the second slide's file, the element `title` and `font-family`, and nothing of
 //      the publish landed (the deck's files and revision unchanged);
 //   3. the agent reads again and publishes the same change in one multi-file call: it lands at one revision (the
-//      store's next), every heading is in Verdana and the owner's retitle, colour and notes are intact;
+//      store's next), every heading is in Verdana and the owner's retitle, colour and notes are intact; since board
+//      ticket 420 `artifact_read` and `artifact_publish` are deferred, so each was loaded by a ToolSearch before the
+//      session's first call of it (the tool-choice plan's M6, A12);
 //   4. the agent exports the deck as PPTX with `artifact_export`: the file is a zip with one slide part per slide, whose
 //      shapes are named by element ids (`title` on every slide).
 // The owner's ~/.claude.json is only read, for the A-15 delta before the launch and after the app closed. The run's lines
@@ -52,6 +54,7 @@ import { eventsOf, mcpCalls, mcpResultOf, ofKind, recordEvents, resultText, seed
 import { a15Line, a15Reading, chargeOf, initPluginsOf, installedEngine } from './support/p1-live';
 import { sidebarRow } from './support/sidebar';
 import { allowForTheSession } from './support/request-keys';
+import { throughToolSearch } from './support/tool-search'; // the tool-choice plan's M6 (A12)
 
 test.skip(process.env.MAWS_LIVE !== '1', 'the P3-C live run runs only under MAWS_LIVE=1');
 test.describe.configure({ timeout: 1_800_000 });
@@ -337,6 +340,12 @@ test('the agent builds a deck from a brief; its stale deck-wide publish is refus
     expect(publishedSlides.length, 'a multi-file publish').toBeGreaterThanOrEqual(4);
     expect.soft(published.revision, 'the whole publish is one revision: the store’s next after the owner’s last edit').toBe(ownerRevision + 1);
     expect(await revisionOf(artifactId)).toBe(published.revision);
+    // A12 (board ticket 420): the edit landed with both its tools deferred, each loaded through tool search first
+    for (const tool of ['artifact_read', 'artifact_publish']) {
+      const first = throughToolSearch(rows(), tool);
+      note(`A12: the session's first ${tool} call at seq ${first.callSeq}, its definition loaded by ToolSearch at seq ${first.loadSeq ?? 'none'}`);
+      expect(first.loadSeq, `${tool} is deferred: a ToolSearch loaded it before its first call`).not.toBeNull();
+    }
     for (const slideId of order) {
       const slide = await deck(page, 'slide', artifactId, slideId);
       expect(family(find(slide.children, 'title')?.style['font-family']), `slide ${slideId}'s title in ${AGENT_FONT} at revision ${published.revision}`).toBe(family(AGENT_FONT));

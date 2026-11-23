@@ -3,7 +3,11 @@
 // (`settings.json` `{}`, a `.claude.json` that trusts the scratch repository), through ClaudeUsage's relay, on Haiku in
 // default permission mode. M2's prompts run in a session each, the async one asking for a foreground command so its
 // answer folds into the running turn. Board ticket 848 retired `send_file`: its session and step are gone, G1's check of
-// the init moved to the blocking ask's session, and the init lists no `send_file`. The human's part is done through the
+// the init moved to the blocking ask's session, and the init lists no `send_file`. The tool-choice plan's M6 (board
+// tickets 421 and 420, docs/doperpowers/plans/2026-11-23-tool-choice.md) adds two sessions, each in the permission mode a
+// new chat has (auto): one with Question "Default", whose set lists no `ask`, so the engine's built-in AskUserQuestion
+// asks and is answered in its call's row; one with MAWS's ask, told only of a question it can work past, which passes
+// `blocking: false` of itself, keeps working and takes the answer as a message. The human's part is done through the
 // real surfaces: every permission through the request card (since UX wave U1b at the transcript's end), every ask through
 // its form in the capsule's row (the Question sheet's own sections; the folder through main's pick seam); the open seam
 // stays set, so nothing opens on this Mac. The owner's ~/.claude.json is read
@@ -27,7 +31,10 @@ import { expect, test, type Locator, type Page } from '@playwright/test';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { SessionEvent } from '@shared/graph/events';
 import type { AskQuestion } from '@shared/maws/tools';
+import type { MawsToolSet } from '@shared/maws/tool-set';
+import type { PermissionMode } from '@shared/graph/enums';
 import { TOOL_ERRORS } from '../src/shared/maws/tools';
+import { FULL_MAWS_TOOL_SET } from '../src/shared/maws/tool-set';
 import { launchDefaults } from '../src/shared/composer/launch-defaults';
 import { RELAY_URL } from '../src/engine-host/launch';
 import { isolatedGitEnv } from '../test/support/git-env';
@@ -54,6 +61,10 @@ const PROMPTS = {
   // M2's async prompt, asking for the command in the foreground so the answer folds into the running turn (Surprises)
   async: 'Use the maws ask tool with blocking false to ask me one choice question with id q1 and options Yes, No ("Proceed?"). Then, without waiting, run the Bash command `sleep 15; echo WAITED` in the foreground, never in the background, and report its output. When my answer arrives, reply with ANSWER: followed by it.',
   showPane: 'Call the maws show_pane tool three times: first with pane "terminal", then with pane "artifact" and target "none", then with pane "nope". Reply with one line per call: the pane name and the result status or error text.', // P3-L M6b: E2's `deliverable` pane renamed
+  // the tool-choice plan's M6: a session whose question tool is the engine's own (no `ask` listed)
+  engineQuestion: 'Use your AskUserQuestion tool to ask me one question, "Proceed?", with the options Yes and No. When I have answered, reply with ANSWER: followed by my answer.',
+  // ... and one with MAWS's ask, told of a question it can work past and nothing of `blocking`
+  keepWorking: 'Use the maws ask tool to ask me one choice question with id q1 and options Tea and Coffee ("Which drink should the note name?"). You do not need my answer to start: meanwhile run the Bash command `sleep 15; echo WORKED` in the foreground, never in the background, and report its output. When my answer arrives, reply with ANSWER: followed by it.',
 } as const;
 
 // ---- the owner file (A-15), the engine, the evidence ------------------------------------------------------------------
@@ -152,15 +163,17 @@ interface Session {
 const begun: Session[] = []; // every session the sitting launched, so a failed step's session is still stopped and booked
 
 // The session shown (its sidebar row clicked), launched fresh as the app launches (C7's one list of X6 fields; Haiku,
-// default permission mode, the gateway), and the prompt sent from the real composer.
-async function begin(s: Sitting, label: string, id: string, prompt: string): Promise<Session> {
+// default permission mode unless `opts` names another, the gateway; the full set of MAWS's tools unless `opts` names a
+// set), and the prompt sent from the real composer.
+async function begin(s: Sitting, label: string, id: string, prompt: string, opts: { permissionMode?: PermissionMode; mawsTools?: MawsToolSet } = {}): Promise<Session> {
   await (await sidebarRow(s.page, { appSessionId: id })).click();
   await s.page.mouse.move(700, 20);
   await expect(s.pane.locator(`[data-composer="${await addressed(s.page, id)}"]`)).toBeVisible();
   const maxBudgetUsd = Number(remainingUsd().toFixed(4));
   expect(maxBudgetUsd, `${label}: the sitting's cap US$${CAP_USD} has room left`).toBeGreaterThan(0);
-  const spec = { ...launchDefaults(id as AppSessionId, s.scratch.repo), model: 'haiku', permissionMode: 'default' as const, subagentModel: 'haiku', maxBudgetUsd };
-  note(`  ${label}: launched with maxBudgetUsd ${maxBudgetUsd} (the cap less the sitting's spend so far)`);
+  const permissionMode = opts.permissionMode ?? 'default';
+  const spec = { ...launchDefaults(id as AppSessionId, s.scratch.repo), model: 'haiku', permissionMode, subagentModel: 'haiku', maxBudgetUsd, ...(opts.mawsTools && { mawsTools: opts.mawsTools }) };
+  note(`  ${label}: launched in ${permissionMode} mode${opts.mawsTools ? ` with the set of MAWS's tools ${JSON.stringify(opts.mawsTools)}` : ''}, with maxBudgetUsd ${maxBudgetUsd} (the cap less the sitting's spend so far)`);
   expect(value(await invoke(s.page, 'session.launch', { spec }))).toMatchObject({ status: 'launching' });
   // booked as soon as the host holds it (its journal is named at the reservation), so a launch that fails before the
   // prompt is still stopped and booked by the sitting's `finally`
@@ -235,7 +248,7 @@ const sectionFor = (sheet: Locator, question: AskQuestion) => sheet.locator(`sec
 
 // ---- the sitting -----------------------------------------------------------------------------------------------------
 
-test('the live sitting: a blocking ask, an async ask folded into its turn, show_pane', async () => {
+test('the live sitting: a blocking ask, an async ask folded into its turn, show_pane, the engine’s question under Question Default, an ask that keeps working', async () => {
   mkdirSync(EVIDENCE, { recursive: true });
   let relay = relaySkipReason(RELAY_URL);
   if (relay !== null) {
@@ -246,7 +259,7 @@ test('the live sitting: a blocking ask, an async ask folded into its turn, show_
   const engine = installedEngine();
   expect(engine.version).toMatch(/^\d+\.\d+\.\d+$/);
   const before = a15();
-  const sc = scratch(['E1 sitting: blocking ask', 'E1 sitting: async ask', 'E1 sitting: show_pane']);
+  const sc = scratch(['E1 sitting: blocking ask', 'E1 sitting: async ask', 'E1 sitting: show_pane', 'E1 sitting: Question Default', 'E1 sitting: ask and keep working']);
   const openLog = join(sc.root, 'open.txt');
   note(`E1 live sitting (M5), ${new Date().toISOString()}`);
   note(`engine: ${engine.bin.replace(homedir(), '~')} (${engine.version}), unmodified, through ClaudeUsage's relay ${RELAY_URL} (GET /api/hello 200), Haiku, default permission mode, the sitting's cap US$${CAP_USD} (MAWS_E1_LIVE_MAX_USD), each session launched with what is left of it as maxBudgetUsd`);
@@ -272,7 +285,7 @@ test('the live sitting: a blocking ask, an async ask folded into its turn, show_
         return ids.every((id) => id !== '');
       }, { timeout: 30_000 })
       .toBe(true);
-    const [blockingId, asyncId, showPaneId] = ids as [string, string, string];
+    const [blockingId, asyncId, showPaneId, engineQuestionId, keepWorkingId] = ids as [string, string, string, string, string];
 
     await test.step('2 a blocking ask: the init lists the maws tools without send_file; the capsule with its form in its row, five modalities, no sheet opened, the attention item, Submit, the reply', async () => {
       const session = await begin(s, 'blocking ask', blockingId, PROMPTS.blocking);
@@ -427,6 +440,70 @@ test('the live sitting: a blocking ask, an async ask folded into its turn, show_
       note(`G5: maws.pane.shown ${JSON.stringify(shown.map((e) => ({ pane: e.pane, opened: e.opened, error: e.error })))}; the Terminal tab opened in the panel; the cells read "Opened Terminal", "Could not open pane: MAWS no longer opens an artifact for the user. …", "Could not open pane: unknown pane "nope"…"; reply ${JSON.stringify(reply)}`);
       await end(s, session, before);
     });
+
+    // The tool-choice plan's M6 (A2 on a real engine; P3, `uxwave-421-native-ask`, recorded it in default mode): Question
+    // "Default" lists no `ask` and passes neither ask flag, so the engine offers its built-in AskUserQuestion, whose call
+    // raises MAWS's question in the call's row; the answer given there is the tool's result.
+    await test.step('5 Question Default, in auto mode: the built-in AskUserQuestion asks in its call’s row and the answer reaches the agent', async () => {
+      const set: MawsToolSet = { ...FULL_MAWS_TOOL_SET, question: 'engine' };
+      const session = await begin(s, 'Question Default', engineQuestionId, PROMPTS.engineQuestion, { permissionMode: 'auto', mawsTools: set });
+      const spawn = journal(session.journalPath).find((r) => r.direction === 'meta' && (r.frame as { event?: string }).event === 'spawn')!.frame as { args: string[]; mawsTools?: unknown };
+      expect(spawn.args, 'no --disallowedTools AskUserQuestion').not.toContain('--disallowedTools');
+      expect(spawn.args, 'no --allowedTools mcp__maws__ask').not.toContain('--allowedTools');
+      expect(spawn.mawsTools, 'the spawn row records the set').toEqual(set);
+      await drive(s, session, 'the question', async () => ofKind(await s.events(session.id), 'question.requested').length > 0);
+      const [init] = ofKind(await s.events(session.id), 'session.init');
+      expect(init!.tools).toContain('AskUserQuestion');
+      expect(init!.tools, 'no MAWS ask is listed').not.toContain('mcp__maws__ask');
+      expect(init!.tools).toContain('mcp__maws__show_pane');
+      expect((await statusOf(s, session.id)).permissionMode, 'the case runs in auto, the mode a new chat has').toMatchObject({ requested: 'auto', effective: 'auto' });
+      const [requested] = ofKind(await s.events(session.id), 'question.requested');
+      const form = s.pane.locator('.transcript-row[data-kind="question"]').getByRole('group', { name: 'Question' });
+      await expect(form, 'the question’s form stands in the row of its call').toBeVisible();
+      await form.getByRole('radio', { name: 'Yes' }).click();
+      await clearToasts(page);
+      await form.getByRole('button', { name: /^Submit/ }).click();
+      await drive(s, session, 'the answer and the reply', async () => ofKind(await s.events(session.id), 'question.answered').length > 0 && (await idleNow(s, session.id)));
+      const [answered] = ofKind(await s.events(session.id), 'question.answered');
+      expect(answered!.requestId).toBe(requested!.requestId);
+      expect(Object.values(answered!.answers)).toEqual(['Yes']);
+      expect(ofKind(await s.events(session.id), 'maws.ask.opened'), 'no MAWS ask').toEqual([]);
+      const reply = mainTurnsEnded(await s.events(session.id)).at(-1)?.resultText ?? '';
+      note(`G6: Question Default (${JSON.stringify(set)}) in auto mode: the spawn row's args hold neither ask flag; session.init lists AskUserQuestion and no mcp__maws__ask; question.requested ${JSON.stringify(requested!.questions.map((q) => [q.question, q.options.map((o) => o.label)]))}; answered in the call's row ${JSON.stringify(answered!.answers)}; reply ${JSON.stringify(reply)}`);
+      expect(reply).toMatch(/ANSWER:\s*"?Yes\b/i);
+      await end(s, session, before);
+    });
+
+    // The tool-choice plan's M6 (A10 on a real engine): MAWS's ask, whose `blocking` is required and whose description
+    // steers it to false unless the answer is needed before the next step; the prompt names a question the agent can work
+    // past and says nothing of `blocking`.
+    await test.step('6 an ask the agent can work past, in auto mode: it passes blocking false itself, keeps working, and takes the answer as a message', async () => {
+      const session = await begin(s, 'ask and keep working', keepWorkingId, PROMPTS.keepWorking, { permissionMode: 'auto' });
+      await drive(s, session, 'the ask', async () => ofKind(await s.events(session.id), 'maws.ask.opened').length > 0);
+      expect((await statusOf(s, session.id)).permissionMode, 'the case runs in auto, the mode a new chat has').toMatchObject({ requested: 'auto', effective: 'auto' });
+      const [opened] = ofKind(await s.events(session.id), 'maws.ask.opened');
+      const askCall = mcpCalls(journal(session.journalPath)).find((c) => c.name === 'ask')!;
+      note(`G7: the ask's arguments ${JSON.stringify(askCall.args)}`);
+      expect(askCall.args.blocking, 'the agent passed blocking: false of itself').toBe(false);
+      expect(opened!.blocking).toBe(false);
+      // it keeps working: its Bash call starts while the ask waits, and the answer goes from the row's form meanwhile
+      await drive(s, session, 'the Bash call', async () => ofKind(await s.events(session.id), 'tool.use').some((e) => e.toolName === 'Bash'));
+      const form = formOf(s);
+      await expect(form).toHaveAttribute('data-hover-ask', opened!.askId);
+      await form.getByRole('radio', { name: 'Tea' }).click();
+      await clearToasts(page);
+      await form.getByRole('button', { name: 'Submit', exact: true }).click();
+      await drive(s, session, 'the reply', async () => ofKind(await s.events(session.id), 'maws.ask.answered').length > 0 && (await idleNow(s, session.id)));
+      const rows = journal(session.journalPath);
+      expect(JSON.parse(resultText(mcpResultOf(rows, askCall.requestId)!)), 'the call returned at once').toEqual({ status: 'asked', askId: opened!.askId });
+      const steer = rows.find((r) => r.direction === 'out' && (r.frame as { type?: string }).type === 'user' && new RegExp(`^\\[MAWS ask ${opened!.askId}\\]`).test(String((r.frame as { message?: { content?: unknown } }).message?.content ?? '')));
+      expect(steer, 'the answer went to the agent as a message naming the askId').toBeDefined();
+      const replies = mainTurnsEnded(await s.events(session.id)).map((t) => t.resultText ?? '');
+      note(`G7: maws.ask.opened blocking false, acknowledged {status: "asked"}; the agent ran Bash while the ask waited; the answer's message at seq ${steer!.seq}; replies ${JSON.stringify(replies)}`);
+      // the message names a pick by its place, `option <k>` (board ticket 711): the model may report either
+      expect(replies.some((r) => /ANSWER:\s*(?:"?Tea\b|option 1\b)/i.test(r)), `the answer reached the model\n${replies.join('\n---\n')}`).toBe(true);
+      await end(s, session, before);
+    });
   } finally {
     for (const session of sitting === null ? [] : begun.filter((b) => !b.ended)) {
       note(`  ${session.label}: the step failed; the session is stopped and booked here`);
@@ -440,5 +517,5 @@ test('the live sitting: a blocking ask, an async ask folded into its turn, show_
   }
   // after the finally, so a failed step's own error is the one reported
   checkA15('after the run', before, a15(), [sc.root, maws.userData]);
-  expect(readdirSync(join(sc.root, 'journals'))).toHaveLength(3); // a session each (board ticket 848: four before send_file's left)
+  expect(readdirSync(join(sc.root, 'journals'))).toHaveLength(5); // a session each (board ticket 848: four before send_file's left; the tool-choice plan's M6: two more)
 });

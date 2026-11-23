@@ -125,6 +125,7 @@
     "e2e/support/best-effort-evidence.ts", // Reload diagnostics' bounded teardown, exercised by test/support/best-effort-evidence.test.ts
     "e2e/support/scratch-env.ts",
     "e2e/support/cross-build-samples.ts", // P5 O4 M2: the cross-build probe's samples, held to the registry by test/support/cross-build-samples.test.ts
+    "e2e/support/tool-search.ts", // the tool-choice plan's M6: the live runs' reading of a deferred tool, held to recordings by test/support/tool-search.test.ts
     "e2e/support/local-org.ts", // P5 O10 M10: test/support/local-org.test.ts enrolls a built mawsd in the enrolled idle scene's org
     "e2e/support/p1-live.ts",
     "e2e/support/oopif-page.ts",
