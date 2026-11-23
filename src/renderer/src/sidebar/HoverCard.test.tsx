@@ -328,6 +328,32 @@ describe('a session row’s hover card', () => {
     fireEvent.keyDown(screen.getByRole('treeitem'), { key: 'Enter' });
     const card = await screen.findByRole('dialog', { name: 'Studio build' });
     expect(within(card).getByTestId('hover-meta').textContent).toMatch(/^Failed · /);
+    cleanup();
+    // a row the pointer focused (a click, which is not `:focus-visible` in a browser and which happy-dom does not model),
+    // then Enter: the keyboard is in use on it from the key on
+    render(<Row />);
+    const matches = HTMLElement.prototype.matches;
+    const pointer = vi.spyOn(HTMLElement.prototype, 'matches').mockImplementation(function (this: HTMLElement, selector: string) {
+      return selector === ':focus-visible' ? false : matches.call(this, selector);
+    });
+    await userEvent.setup().click(screen.getByRole('treeitem'));
+    pointer.mockRestore();
+    fireEvent.keyDown(screen.getByRole('treeitem'), { key: 'Enter' });
+    const clicked = await screen.findByRole('dialog', { name: 'Studio build' });
+    expect(within(clicked).getByTestId('hover-meta').textContent).toMatch(/^Failed · /);
+  });
+
+  // The word cut's fix wave for M4: one card shows at a time. A card its row's keyboard focus holds open (which the pointer
+  // leaving never closes) gives way to the card the pointer opens on another row
+  it('closes a card the keyboard holds open when the pointer opens another row’s', async () => {
+    withMain();
+    render(<Sidebar />);
+    act(() => needsRow('Charter + research').focus());
+    await screen.findByRole('dialog', { name: 'Charter + research' });
+    await userEvent.setup().hover(needsRow('Fix sidebar drag'));
+    await screen.findByRole('dialog', { name: 'Fix sidebar drag' });
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Charter + research' })).toBeNull());
+    expect(screen.getAllByRole('dialog')).toHaveLength(1);
   });
 
   it('a card opened by the pointer leaves the state word to the glyph', async () => {

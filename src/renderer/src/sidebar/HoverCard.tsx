@@ -63,6 +63,10 @@ export interface SidebarHoverCardProps {
 // already), or by the row's own Enter (a listed row's, which sets `open` itself).
 const OpenedByKeyboard = createContext(false);
 
+// The card that shows: one at a time (the word cut's fix wave for M4). A card the keyboard holds open, or one Radix keeps
+// open (its text selected), is never closed by the pointer leaving its row, so the next card to open closes it.
+let showingCard: { close(): void } | null = null;
+
 export function SidebarHoverCard({ label, children, content, open, onOpenChange }: SidebarHoverCardProps) {
   const [internalOpen, setInternalOpen] = useState(false);
   const [byKeyboard, setByKeyboard] = useState(false); // opened while the row held the keyboard
@@ -93,12 +97,32 @@ export function SidebarHoverCard({ label, children, content, open, onOpenChange 
       onOpenChange?.(next);
     });
   };
+  const shown = open ?? internalOpen;
+  const changed = useRef(onOpenChange);
+  useEffect(() => {
+    changed.current = onOpenChange;
+  });
+  useEffect(() => {
+    if (!shown) return;
+    const me = {
+      close: () => {
+        setByKeyboard(false);
+        setInternalOpen(false);
+        changed.current?.(false);
+      },
+    };
+    showingCard?.close();
+    showingCard = me;
+    return () => {
+      if (showingCard === me) showingCard = null;
+    };
+  }, [shown]);
   const dismiss = () => {
     dismissing.current = true;
     queueMicrotask(() => (dismissing.current = false)); // a dismissal Radix does not carry out holds nothing later
   };
   return (
-    <Radix.Root openDelay={300} closeDelay={150} open={open ?? internalOpen} onOpenChange={changeOpen}>
+    <Radix.Root openDelay={300} closeDelay={150} open={shown} onOpenChange={changeOpen}>
       <Radix.Trigger
         asChild
         ref={triggerRef}
@@ -108,6 +132,7 @@ export function SidebarHoverCard({ label, children, content, open, onOpenChange 
           else guardPointerFocus(event);
         }}
         onBlur={() => setKeyboardOnRow(false)}
+        onKeyDown={() => setKeyboardOnRow(true)} // a key on a row the pointer focused: the keyboard holds it from now
       >
         {children}
       </Radix.Trigger>
