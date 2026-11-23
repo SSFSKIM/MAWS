@@ -1959,7 +1959,9 @@ test.describe('sessions', () => {
         await todo2.locator('[data-move-to-main]').click();
         const machine = await localRef(p2);
         await expect(mainTabById(p2, `file:${machine}:${chosen}`), 'moved to the main area, in front').toHaveAttribute('aria-selected', 'true', { timeout: 20_000 });
-        await expect(mainTabById(p2, `file:${machine}:${chosen}`), 'its tooltip the full path').toHaveAttribute('title', chosen);
+        // its tooltip the full path, a Tip the keyboard reaches and the tab's description (the word cut's fix wave for M4)
+        await expect(mainTabById(p2, `file:${machine}:${chosen}`), 'its tooltip the full path').toHaveAccessibleDescription(chosen);
+        await expect(mainTabById(p2, `file:${machine}:${chosen}`), 'no system tooltip').not.toHaveAttribute('title');
         const inMain = p2.locator('[data-region="main"]').locator(`[data-file-viewer][data-path="${chosen}"]`);
         await expect(inMain).toHaveAttribute('data-dirty', 'true', { timeout: 20_000 });
         await saveButton(inMain).click();
