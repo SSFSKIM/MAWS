@@ -26,6 +26,7 @@ const BARE = 'app-7412a115' as AppSessionId;
 const ID = at(BARE);
 const lifted = (status: EngineSessionStatus): EngineSessionStatus => ({ ...status, appSessionId: at(status.appSessionId) });
 const DOCS = 'openaiDeveloperDocs';
+const TURN: EngineSessionStatus['turn'] = { id: 'ev-turn-open' as never, origin: 'human', startedAt: '2026-11-01T10:00:00Z', acceptedAt: null, userMessageUuids: [] };
 let backend: WidgetBackend;
 
 beforeEach(() => {
@@ -245,10 +246,9 @@ describe('the Connectors dialog: one line per connector (U11a §C)', () => {
       ['notes', 'Connected · 2 tools'],
       ['tickets', 'Sign in needed'],
       ['search', 'Failed'],
-      ['calendar', ''], // the word cut (P565): the quiet spinner in the status place
+      ['calendar', 'Connecting…'], // the word cut (P565): its words, since nothing can end the wait of an idle session's answered read
       ['files', null], // disabled: the switch says it
     ]);
-    expect(await within(rows[3].querySelector<HTMLElement>('[data-connector-state]')!).findByRole('progressbar', { name: 'Connecting…' })).toBeTruthy();
     for (const unopened of ['example.test', 'files-mcp', 'scope ', 'from ', 'find_note', 'Connection refused']) expect(list.textContent).not.toContain(unopened);
     const [notes, , , , files] = rows;
     fireEvent.click(disclosure(notes));
@@ -285,9 +285,26 @@ describe('the Connectors dialog: one line per connector (U11a §C)', () => {
     expect(document.querySelector('[data-widget="mcp"] header')?.textContent).not.toContain('~/.claude.json');
   });
 
+  // P565 (the word cut's fix wave for M4): a connecting connector spins only while something can still end its wait, a
+  // read out or an open turn, whose close reads again. The engine host asks once at ready, so an idle session's
+  // answered read brings nothing more: its words stand
+  it('spins for a connecting connector only while a read is out or a turn is open', async () => {
+    mount();
+    const state = async () => (await row('calendar')).querySelector<HTMLElement>('[data-connector-state]')!;
+    await waitFor(async () => expect((await state()).textContent).toBe('Connecting…'));
+    expect(within(await state()).queryByRole('progressbar')).toBeNull();
+    act(() => useSessions.setState({ engine: new Map([[ID, { ...lifted(backend.status(BARE)), turn: TURN }]]) }));
+    expect(await within(await state()).findByRole('progressbar', { name: 'Connecting…' })).toBeTruthy();
+    const before = reads();
+    act(() => useSessions.setState({ engine: new Map([[ID, lifted(backend.status(BARE))]]) }));
+    await waitFor(() => expect(reads()).toBeGreaterThan(before)); // the turn's close reads again
+    await waitFor(async () => expect((await state()).textContent).toBe('Connecting…'));
+  });
+
   // P565: the quiet spinner stands only while something can still end the wait: once the session's process exits the
   // frame keeps its last answer, and a connector that was connecting then says so in words, dated by the frame
   it('settles a connecting connector to its words when the session exits', async () => {
+    useSessions.setState({ engine: new Map([[ID, { ...lifted(backend.status(BARE)), turn: TURN }]]) });
     mount();
     const calendar = await row('calendar');
     const state = () => calendar.querySelector<HTMLElement>('[data-connector-state]')!;
