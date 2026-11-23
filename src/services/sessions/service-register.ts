@@ -30,10 +30,11 @@ export function registerSessionServiceHandlers(service: SessionService, { regist
   register('session.create', ({ projectId, location }) => relay(() => service.create({ projectId: projectId as ProjectId | null, location })));
   register('session.intent.get', ({ appSessionId }) => service.getIntent(id(appSessionId)));
   register('session.intent.list', async () => ({ intents: await service.listIntents() }));
-  register('session.intent.patch', async ({ appSessionId, patch }) => {
-    await holdPatch?.(patch as SetupIntentPatch);
-    return relay(() => service.patch(id(appSessionId), patch as SetupIntentPatch));
-  });
+  const patchIntent = (appSessionId: string, patch: SetupIntentPatch) => relay(() => service.patch(id(appSessionId), patch));
+  // with no hold the patch reaches the service in the tick it was asked, before any later operation on its intent
+  register('session.intent.patch', ({ appSessionId, patch }) =>
+    holdPatch === undefined ? patchIntent(appSessionId, patch as SetupIntentPatch) : holdPatch(patch as SetupIntentPatch).then(() => patchIntent(appSessionId, patch as SetupIntentPatch)),
+  );
   register('session.intent.release', ({ appSessionId }) => relay(() => service.release(id(appSessionId))));
   register('session.intent.discard', ({ appSessionId }) => relay(() => service.discard(id(appSessionId))));
   register('session.intent.resolveWorktree', ({ appSessionId, resolution }) => relay(() => service.resolveRetainedWorktree(id(appSessionId), resolution)));
