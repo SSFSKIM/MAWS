@@ -39,6 +39,12 @@ export interface GitStore {
   retryUnanswered(machine: MachineRef): void; // that machine's host was heard again (host.status): its watches it could not answer are asked again
 }
 
+// The entry of a checkout, or none for a session with no folder: the index stores '' for a session whose folder it does
+// not know (workingFolder answers it as is), which is no checkout, so it has no entry and no watch.
+export function entryOf(s: Pick<GitStore, 'entries'>, machine: MachineRef, directory: string | null): GitEntry | undefined {
+  return directory ? s.entries.get(checkoutKey(machine, directory)) : undefined;
+}
+
 export const GIT_DIFF_DELAY_MS = 250; // trailing debounce of the diffs git.changed schedules
 
 // P5 O7 M4: one session's hold on a watched directory (none: a local panel's), its own git.watch and git.unwatch
@@ -136,6 +142,7 @@ export function createGitStore(client: MawsBridge, options: { diffDelayMs?: numb
       entries: new Map(),
 
       watch(machine, directory, session) {
+        if (directory === '') return () => {}; // no folder: no checkout to watch (entryOf)
         const key = checkoutKey(machine, directory);
         let w = watched.get(key);
         if (!w) {

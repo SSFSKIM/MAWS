@@ -485,7 +485,7 @@ export function useFinder(appSessionId: AppSessionId, directory: string | null, 
   const machine = machineFor(appSessionId);
   const standing = useRemoteStanding(appSessionId); // a session reached over the link (U9)
   const offline = standing?.phase === 'offline' ? disabledWords('git.lsFiles', standing, FILES_COPY.fileSearch) : null;
-  const key = directory === null ? null : checkoutKey(machine, directory);
+  const key = directory ? checkoutKey(machine, directory) : null; // '' is no checkout
   // the drawn tree's hold on the git store stands while the list is in its place (M2 decision 4): the hook takes none
   const set = useGit((s) => {
     const status = key === null ? null : s.entries.get(key)?.status;
