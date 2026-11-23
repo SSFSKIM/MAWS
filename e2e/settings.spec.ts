@@ -242,6 +242,66 @@ test('settings: the to-human switch and the two notification groups for an agent
   }
 });
 
+// Board ticket 421 (docs/doperpowers/plans/2026-11-23-tool-choice.md, M4, §H): Settings › Sessions, the machine's default
+// set of MAWS's tools for a new session. Its two rows are drawn and found by search; Artifacts off turns Documents and
+// Dashboards off and greys them; the switch and the Question segment write `machine-session-defaults.json` (which
+// `machine-settings.json` does not gain), and the choice stands after a relaunch over the same profile.
+test('settings: the machine’s default tools: two rows found by search; a switch and the segment write their file, and stand after a relaunch', async () => {
+  const userData = realpathSync(mkdtempSync(join(tmpdir(), 'maws-421-settings-')));
+  const chosen = { artifacts: false, documents: false, dashboards: false, auxiliary: true, question: 'engine' };
+  const defaultsFile = join(userData, 'machine-session-defaults.json');
+  try {
+    let maws = await launchMaws({ userData });
+    try {
+      const { app, page } = maws;
+      await menu(app, 'settings.open');
+      const view = panel(page);
+      const nav = view.getByRole('navigation', { name: 'Settings sections' });
+      const field = nav.getByRole('combobox', { name: 'Search settings' });
+      const options = nav.getByRole('listbox', { name: 'Search settings' }).getByRole('option');
+      const option = (name: string) => options.filter({ has: page.getByText(name, { exact: true }) }).filter({ has: page.getByText('Sessions', { exact: true }) });
+      for (const [query, name] of [['tools', 'MAWS tools'], ['question', 'Question tool']] as const) {
+        await field.fill(query);
+        await expect(option(name), query).toHaveCount(1);
+      }
+      await option('Question tool').click();
+      const sessions = view.getByRole('region', { name: 'Sessions', exact: true });
+      await expect(sessions.getByRole('group', { name: 'Question tool', exact: true })).toBeFocused();
+      expect(existsSync(defaultsFile), 'no file until the first choice').toBe(false);
+
+      const tools = sessions.getByRole('group', { name: 'MAWS tools', exact: true });
+      const toggle = (name: string) => tools.getByRole('switch', { name, exact: true });
+      await toggle('Artifacts').click();
+      for (const name of ['Documents', 'Dashboards']) {
+        await expect(toggle(name), name).toHaveAttribute('aria-checked', 'false');
+        await expect(toggle(name), `${name}: greyed`).toBeDisabled();
+      }
+      await sessions.getByRole('radiogroup', { name: 'Question tool' }).getByRole('radio', { name: 'Default', exact: true }).check();
+      await expect.poll(() => (existsSync(defaultsFile) ? JSON.parse(readFileSync(defaultsFile, 'utf8')) : null)).toEqual({ version: 1, mawsTools: chosen });
+      if (existsSync(join(userData, 'machine-settings.json'))) expect(readMachineSettings(userData), 'the machine file gains nothing').not.toHaveProperty('mawsTools');
+      expect(maws.consoleErrors()).toEqual([]);
+    } finally {
+      await maws.cleanup();
+    }
+
+    // Relaunched over the same profile, the choice is where it was left
+    maws = await launchMaws({ userData });
+    try {
+      const { app, page } = maws;
+      await menu(app, 'settings.open');
+      const sessions = panel(page).getByRole('region', { name: 'Sessions', exact: true });
+      const tools = sessions.getByRole('group', { name: 'MAWS tools', exact: true });
+      for (const [name, on] of [['Artifacts', false], ['Documents', false], ['Dashboards', false], ['Auxiliary', true]] as const) await expect(tools.getByRole('switch', { name, exact: true }), name).toHaveAttribute('aria-checked', String(on));
+      await expect(sessions.getByRole('radiogroup', { name: 'Question tool' }).getByRole('radio', { name: 'Default', exact: true })).toBeChecked();
+      expect(maws.consoleErrors()).toEqual([]);
+    } finally {
+      await maws.cleanup();
+    }
+  } finally {
+    rmSync(userData, { recursive: true, force: true });
+  }
+});
+
 test('settings: the monospace font applies to the root --font-mono and to the Appearance preview', async () => {
   const maws = await launchMaws();
   try {

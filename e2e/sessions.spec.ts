@@ -438,9 +438,11 @@ test.describe('sessions', () => {
   // set of MAWS's tools that is not the full set launches with it, and its fork and its resume keep it, whatever the
   // machine's default. Each launch's own spawn row says so: the host's line has neither ask flag (the engine's question
   // tool) and the row records the set. The list itself is the unit proof's: these recordings hold no `tools/list`.
-  test('the set of MAWS’s tools kept with the session: a new chat at Artifacts off and Question Default launches with no ask flag and the set in its spawn row; its fork and its resume, each by its own launch, say the same', async () => {
+  // Its M4 (D5): the machine's default is set to another set after the fork; the resume keeps the session's own, and a
+  // new chat made after it starts from the default, its first launch's spawn row holding it (MAWS's ask: both flags).
+  test('the set of MAWS’s tools kept with the session: a new chat at Artifacts off and Question Default launches with no ask flag and the set in its spawn row; its fork and its resume, each by its own launch, say the same; a new chat takes the machine’s default', async () => {
     const tools = { artifacts: false, documents: false, dashboards: false, auxiliary: true, question: 'engine' } as const;
-    const { page, maws, trustedRepos } = await begin({ fixtures: [FORK_START, FORK_FORK, FORK_START] });
+    const { page, maws, trustedRepos } = await begin({ fixtures: [FORK_START, FORK_FORK, FORK_START, AUTO_ROUTED] });
     const project = await addProject(page, trustedRepos[0]!.root);
     const source = await plus(page, project.name);
     await collectTurns(page);
@@ -464,7 +466,13 @@ test.describe('sessions', () => {
     expectServed(spawnRowOf(maws, fork, await launchOf(fork)), 'the fork');
     expect(value(await invoke(page, 'session.get', { appSessionId: fork as never }))!.mawsTools, 'the fork’s record holds its source’s set').toEqual(tools);
 
-    // resumed: stopped, then started again; its second spawn row is the resume's
+    // M4: the machine's default, set as Settings › Sessions sets it (this machine's spine, machine-session-defaults.json)
+    const machineDefault = { artifacts: false, documents: false, dashboards: false, auxiliary: true, question: 'maws' } as const;
+    const machine = await localRef(page);
+    const chosen = await page.evaluate(([set, ref]) => window.maws.invoke('machineSettings.set', { patch: {}, mawsTools: set }, { machine: ref }), [machineDefault, machine] as const);
+    expect(value(chosen).mawsTools, 'the spine answers the default it wrote').toEqual(machineDefault);
+
+    // resumed: stopped, then started again; its second spawn row is the resume's, its own set whatever the default
     value(await invoke(page, 'session.stop', { appSessionId: source as never, reason: 'stop' }));
     await expect.poll(async () => value(await invoke(page, 'session.status', { appSessionId: source as never })).process, { timeout: 15_000 }).toBe('exited');
     expect(value(await invoke(page, 'session.start', { appSessionId: source, message: null, options: {} }))).toMatchObject({ status: 'starting' });
@@ -472,6 +480,17 @@ test.describe('sessions', () => {
     const resumed = await launchOf(source);
     expect(resumed, 'the resume is a launch of its own').not.toBe(firstLaunch);
     expectServed(spawnRowOf(maws, source, resumed), 'the resume');
+
+    // M4: a new chat starts from the machine's default: its intent holds it, and its first launch serves it
+    const fresh = await plus(page, project.name);
+    expect(value(await invoke(page, 'session.intent.get', { appSessionId: fresh }))!.mawsTools, 'the new intent starts from the default').toEqual(machineDefault);
+    const freshPrompt = fixtureIdentity(AUTO_ROUTED).firstPrompt!;
+    await startDirect(page, fresh, {}, { content: freshPrompt.content as string, display: freshPrompt.display });
+    await untilPhase(page, fresh, 'ready');
+    const freshRow = spawnRowOf(maws, fresh, await launchOf(fresh));
+    expect(freshRow.mawsTools, 'the default in its spawn row').toEqual(machineDefault);
+    expect(freshRow.args!.flatMap((arg, k) => (arg === '--disallowedTools' ? [freshRow.args![k + 1]] : [])), 'MAWS’s ask: the built-in disallowed').toEqual(['AskUserQuestion']);
+    expect(value(await invoke(page, 'session.get', { appSessionId: fresh as never }))!.mawsTools, 'its record holds the default').toEqual(machineDefault);
     expect(maws.consoleErrors()).toEqual([]);
   });
 
