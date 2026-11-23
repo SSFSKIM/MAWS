@@ -224,7 +224,8 @@ export class MawsToolServer {
     const tool = typeof name === 'string' ? this.tools.get(name) : undefined;
     if (!tool) {
       // board ticket 848: a call of the retired send_file reads the sentence that teaches the path link
-      const refusal = name === HISTORICAL_SEND_FILE ? TOOL_ERRORS.sendFileRetired : TOOL_ERRORS.unknownTool(String(name));
+      // board ticket 421: an unknown tool's refusal names the tools this session was listed (a tool its set leaves out is one)
+      const refusal = name === HISTORICAL_SEND_FILE ? TOOL_ERRORS.sendFileRetired : TOOL_ERRORS.unknownTool(String(name), [...this.tools.keys()]);
       void this.result(requestId, id, toolError(refusal)).then(() => this.retire(requestId));
       return;
     }

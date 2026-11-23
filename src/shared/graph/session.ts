@@ -5,6 +5,7 @@ import { AutoModeRefusalCodeSchema, PermissionModeSchema, TITLE_SOURCES } from '
 import { AppSessionIdSchema, MessageUuidSchema, ProjectIdSchema, SessionIdSchema } from './ids';
 import { JsonValueSchema } from '../ipc/schema/common'; // P5 O7 M4: `launchedBy.action`, a JSON value
 import { ObservedRouteSchema, RouteSchema } from '../engine/route'; // P5 O7 M9
+import { MawsToolSetSchema } from '../maws/tool-set'; // board ticket 421
 
 // Requested versus effective permission mode with the refusal code when they differ (D-18): `refusal` is null exactly
 // when the request was honoured, and one of AUTO_MODE_REFUSAL_CODES exactly when it was not. Both the silent downgrade
@@ -88,6 +89,10 @@ export const SessionRecordSchema = z.strictObject({
   // tree; its realpath; the branch recorded for that checkout; whether the checkout is a linked worktree)
   launchFolder: z.string().optional(),
   agentFolder: z.strictObject({ checkout: z.string(), cwd: z.string(), branch: z.string().nullable(), linked: z.boolean() }).optional(),
+  // Board ticket 421 (docs/doperpowers/plans/2026-11-23-tool-choice.md, Interfaces §E; X1, additive): the set of MAWS's
+  // tools the session was launched with, written once at its first launch and only when it is not the full set; absent,
+  // the full set (every record written before, and every default session's). A resume and a fork keep it (D1).
+  mawsTools: MawsToolSetSchema.optional(),
   createdAt: z.string(),
   updatedAt: z.string(),
 });

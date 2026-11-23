@@ -7,7 +7,9 @@
 // end closes the session's agent replicas (their bases and presence with them). P4-A2 (X35): the session's events feed
 // its `ProvisionalEmitter`, which shows an artifact call on the documents' ports while its input streams. P4-A3: a human
 // message the queue submits carries the reads of the artifacts it links (`withLinkedReads`), read through the session's
-// own `artifact_read`.
+// own `artifact_read`. Board ticket 421 (docs/doperpowers/plans/2026-11-23-tool-choice.md, Interfaces §D): the server
+// lists the tools of the session's set and gives the instructions it calls for; the linked reads keep the host's own
+// `artifact_read` whatever the set (D10), and the provisional layer previews only a tool the session lists.
 import { randomUUID } from 'node:crypto';
 import type { AttentionItem } from '@shared/graph/attention';
 import type { SessionEvent } from '@shared/graph/events';
@@ -18,6 +20,7 @@ import { askAnswersProblem, askSteerText, type PendingAsk } from '@shared/maws/a
 import { CAPTURE_ANSWER_MS } from '@shared/maws/panes';
 import { EXPORT_ANSWER_MS, type AskAnswer, type AskResult } from '@shared/maws/tools';
 import { mawsServerInstructions } from '@shared/maws/instructions'; // U12a
+import { listedTools, type MawsToolSet } from '@shared/maws/tool-set'; // board ticket 421
 import type { ControlRequestFrame } from '@shared/wire/frames';
 import type { LinkedArtifact } from '@shared/maws/linked-read'; // P4-A3
 import { recordDownload } from './library/downloads'; // E13; P3-L M6b: a File artifact
@@ -61,6 +64,7 @@ export interface SessionMawsHost {
   artifacts?: () => ArtifactStore | null; // P3-A (M6): EngineSessionOptions.artifacts
   datasetRefresh?: Pick<DatasetRefreshRequests, 'ask'>; // E3: EngineSessionOptions.datasetRefresh
   inAppBrowser: boolean; // U12a: the launch spec carried a browser backend (the instructions' second paragraph, show_pane's note)
+  toolSet: MawsToolSet; // board ticket 421: the session's set of MAWS's tools, fixed for the launch (D1)
   emit<K extends keyof MawsListeners>(name: K, payload: Parameters<MawsListeners[K]>[0]): void;
   respond(requestId: RequestId, response: unknown, opts?: WriteOptions): Promise<void>;
   cwd(): string; // the engine's working directory as the frames report it, else the launch's
@@ -99,8 +103,9 @@ export class SessionMaws {
         host.touch();
       },
     });
-    this.provisional = new ProvisionalEmitter({ store: () => host.artifacts?.() ?? null, appSessionId: host.appSessionId, artifactScope: host.artifactScope, log: host.log });
-    const tools = mawsTools({
+    const listed = new Set<string>(listedTools(host.toolSet)); // board ticket 421
+    this.provisional = new ProvisionalEmitter({ store: () => host.artifacts?.() ?? null, appSessionId: host.appSessionId, artifactScope: host.artifactScope, log: host.log, lists: (tool) => listed.has(tool) });
+    const every = mawsTools({
       bridge: this.panes, capture: this.captures /* E2 */,
       asks: this.askTable, askCancelled: (ask, reason) => this.askCancelled(ask, reason),
       artifactScope: host.artifactScope, // P2-E1
@@ -109,10 +114,10 @@ export class SessionMaws {
       datasetRefresh: host.datasetRefresh, // E3
       provisional: this.provisional, // P4-A2
     });
-    this.read = tools.find((tool) => tool.name === 'artifact_read')!;
+    this.read = every.find((tool) => tool.name === 'artifact_read')!; // board ticket 421 (D10): listed or not
     this.toolServer = new MawsToolServer({
-      tools,
-      instructions: mawsServerInstructions({ inAppBrowser: host.inAppBrowser }), // U12a
+      tools: every.filter((tool) => listed.has(tool.name)), // board ticket 421: the set's, in MAWS_TOOL_NAMES order
+      instructions: mawsServerInstructions({ inAppBrowser: host.inAppBrowser /* U12a */, artifacts: host.toolSet.artifacts /* board ticket 421 */ }),
       respond: (requestId, response, writeOpts) => host.respond(requestId, response, writeOpts),
       cwd: () => host.cwd(),
       appSessionId: host.appSessionId,

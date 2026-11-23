@@ -38,6 +38,7 @@ import { DurableCronSource, type ReadTextFile } from './durable-crons'; // P5 O2
 import { REAP_TERM_MS, type ReapView } from './holder/reap'; // O16 M5
 import { expectedArgv, type Binding, type StdioServers } from './holder/descendants'; // O16 M5, D52; D69
 import { RELAY_URL, spawnMeta, type LaunchPlan } from './launch';
+import { FULL_MAWS_TOOL_SET } from '@shared/maws/tool-set'; // board ticket 421
 import { HostMap } from './holder/checkpoint'; // P5 O16 M2
 import { numbersReadBack, type JournalPosition } from './journal'; // P5 O15 M2b (§L; Decision Log 30)
 import { launchRows, OutstandingSet, type Outstanding } from './holder/restore'; // P5 O16 M3
@@ -405,6 +406,7 @@ export class EngineSession {
     this.maws = new SessionMaws({
       appSessionId: opts.spec.appSessionId, appVersion: opts.appVersion, appAttached: opts.appAttached, rendersAnswered: opts.rendersAnswered /* P5 O5 M4 */, artifactScope: opts.artifactScope /* P2-E1 */, artifacts: opts.artifacts /* P3-A */, datasetRefresh: opts.datasetRefresh /* E3 */,
       inAppBrowser: hasInAppBrowser(opts.spec), // U12a
+      toolSet: opts.spec.mawsTools ?? FULL_MAWS_TOOL_SET, // board ticket 421: a launch's from its spec, an adoption's from its spawn row (launcher.ts)
       emit: (name, payload) => this.emit(name, payload),
       respond: (requestId, response, writeOpts) => this.respond(requestId, response, writeOpts),
       cwd: () => this.tracker.engineCwd ?? this.spec.cwd,

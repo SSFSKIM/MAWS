@@ -42,7 +42,7 @@ import { StoreFixture } from '../../test/support/store-fixture'; // UX wave, tic
 import { MemorySessionStateStore } from './store/memory-session-state-store';
 // E1 start
 import * as mawsSchema from '@shared/ipc/schema/maws';
-import { TOOL_ERRORS } from '@shared/maws/tools'; // E10
+import { MAWS_TOOL_NAMES, TOOL_ERRORS } from '@shared/maws/tools'; // E10; board ticket 421: MAWS_TOOL_NAMES
 import { MAWS_DEADLINE_SHAPES } from './ipc';
 // E1 end
 // E3 start
@@ -1506,7 +1506,7 @@ describe('the removed browser bridge over IPC (E4c)', () => {
     const answered = () =>
       (transport.writes.find((w) => w.type === 'control_response' && (w as { response: { request_id: string } }).response.request_id === 'mcp-act') as { response: { response: { mcp_response: { result: unknown } } } } | undefined)?.response.response.mcp_response.result;
     await until(() => answered() !== undefined, 'the answer');
-    expect(answered()).toEqual({ content: [{ type: 'text', text: TOOL_ERRORS.unknownTool('browser_act') }], isError: true });
+    expect(answered()).toEqual({ content: [{ type: 'text', text: TOOL_ERRORS.unknownTool('browser_act', MAWS_TOOL_NAMES) }], isError: true });
     expect(host.emitted.filter((e) => (e.name as string).startsWith('maws.browser.'))).toEqual([]);
     transport.exit(0);
     await host.ipc.table.get(id)!.exited;

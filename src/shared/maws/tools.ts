@@ -627,7 +627,8 @@ const MIB = 1024 * 1024;
 
 export const TOOL_ERRORS = {
   invalidArguments: (tool: MawsToolName, issues: string) => `${tool}: invalid arguments: ${issues}`,
-  unknownTool: (name: string) => `unknown tool "${name}"; the maws server has ${MAWS_TOOL_NAMES.join(', ')}`,
+  // board ticket 421: `listed`, the tools the session was listed (its set's, `./tool-set`), not the server's every tool
+  unknownTool: (name: string, listed: readonly string[]) => `unknown tool "${name}"; the maws server has ${listed.length > 0 ? listed.join(', ') : 'no tools in this session'}`,
   // Board ticket 848: a call of the retired `send_file`, whatever it holds; the agent is told to write the path link
   sendFileRetired: 'send_file: MAWS no longer delivers files. Link the file in your message as a Markdown link to its absolute path, [its name](/absolute/path): a click opens it beside the chat, and ⌘-click opens it in the main area. Keep the file inside this session\'s folders, where everyone who sees the session can open it.',
   sessionEnded: 'ask: the session ended before the user answered',

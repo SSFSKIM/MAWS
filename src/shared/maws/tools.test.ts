@@ -144,8 +144,8 @@ describe('send_file, retired (board ticket 848)', () => {
     expect(MAWS_TOOL_NAMES as readonly string[]).not.toContain('send_file');
     expect(mawsToolList().map((tool) => tool.name)).not.toContain('send_file');
     for (const tool of mawsToolList()) expect(tool.description, tool.name).not.toMatch(/send_file/);
-    expect(mawsServerInstructions({ inAppBrowser: true })).not.toMatch(/send_file/);
-    expect(TOOL_ERRORS.unknownTool('echo')).not.toMatch(/send_file/);
+    expect(mawsServerInstructions({ inAppBrowser: true, artifacts: true })).not.toMatch(/send_file/);
+    expect(TOOL_ERRORS.unknownTool('echo', MAWS_TOOL_NAMES)).not.toMatch(/send_file/);
     expect(Object.keys(TOOL_ERRORS)).not.toContain('notAFile');
     expect(Object.keys(TOOL_ERRORS)).not.toContain('deliveryUnavailable');
   });
@@ -564,7 +564,10 @@ describe('X9 artifact tools (E2)', () => {
     // U6d: P3-L M6b's artifactNotFound and artifactUnreadable left with the window's lookup of the retired pane
     expect(Object.keys(TOOL_ERRORS)).not.toContain('artifactNotFound');
     expect(Object.keys(TOOL_ERRORS)).not.toContain('artifactUnreadable');
-    expect(TOOL_ERRORS.unknownTool('echo')).toMatch(/^unknown tool "echo"; the maws server has ask, show_pane, artifact_create, artifact_list, artifact_screenshot, /); // E4c: thirteen; P1 A-54: seven; P3-A: twelve; board ticket 848: send_file left
+    expect(TOOL_ERRORS.unknownTool('echo', MAWS_TOOL_NAMES)).toMatch(/^unknown tool "echo"; the maws server has ask, show_pane, artifact_create, artifact_list, artifact_screenshot, /); // E4c: thirteen; P1 A-54: seven; P3-A: twelve; board ticket 848: send_file left
+    // board ticket 421: the refusal names the tools the session was listed, not the server's whole list
+    expect(TOOL_ERRORS.unknownTool('artifact_edit', ['ask', 'show_pane'])).toBe('unknown tool "artifact_edit"; the maws server has ask, show_pane');
+    expect(TOOL_ERRORS.unknownTool('ask', [])).toBe('unknown tool "ask"; the maws server has no tools in this session');
   });
 });
 // E2 end

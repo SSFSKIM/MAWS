@@ -308,6 +308,24 @@ describe('the layer’s endings', () => {
     expect(layer(end)).toMatchObject([{ toolUseId: 'toolu_ours', ops: [{ op: 'delete', block: 'p4' }] }]);
   });
 
+  // board ticket 421 (Interfaces §D): a session whose set leaves a tool out is never shown a call of it
+  it('shows nothing for a tool the session does not list, and the same call where it is listed', async () => {
+    const doc = await world.seeded();
+    const end = world.connect(doc, HUMAN);
+    const unlisted = new ProvisionalEmitter({ store: () => world.store, appSessionId: SELF, lists: (tool) => tool !== 'artifact_edit' });
+    const input = `{"artifact":"${doc}","baseRevision":3,"ops":[{"op":"delete","id":"p4"}]}`;
+    try {
+      unlisted.delta(id('toolu_unlisted'), 'artifact_edit', input);
+      await tick();
+      expect(layer(end)).toEqual([]);
+      expect(presence(doc) ?? {}).toEqual({});
+    } finally {
+      unlisted.processExited();
+    }
+    await feed(id('toolu_listed'), input);
+    expect(layer(end)).toMatchObject([{ toolUseId: 'toolu_listed', ops: [{ op: 'delete', block: 'p4' }] }]);
+  });
+
   it('leaves the outline to a later call still streaming when an earlier batch’s hold ends', async () => {
     const call = id('toolu_first');
     const { doc, args } = await streamed(call);
@@ -546,6 +564,26 @@ describe('on an engine session', () => {
     run.transport.push({ type: 'user', message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'toolu_denied', content: 'denied', is_error: true }] }, parent_tool_use_id: null, session_id: '33333333-3333-4333-8333-333333333333', uuid: 'u-denied' });
     await until(() => layer(end).length === 5, 'the denied call’s drop');
     expect(layer(end).at(-1)).toMatchObject({ toolUseId: 'toolu_denied', state: 'dropped' });
+    run.transport.exit(0);
+  });
+
+  // board ticket 421: a session launched with Documents off lists no artifact_edit; a call of it the model streams
+  // anyway (the engine refuses it itself) shows nothing on the document
+  it('shows nothing for a streamed call of a tool the session’s set leaves out', async () => {
+    const doc = await world.seeded();
+    const end = world.connect(doc, HUMAN);
+    const run = scriptedSession({ spec: { cwd: world.dir, mawsTools: { artifacts: true, documents: false, dashboards: true, auxiliary: true, question: 'maws' } }, session: { appVersion: '0.9.0', artifacts: () => world.store } });
+    await run.session.start();
+    const stream = (event: Record<string, unknown>, k: number) => run.transport.push({ type: 'stream_event', event, session_id: '33333333-3333-4333-8333-333333333333', parent_tool_use_id: null, uuid: `se-${k}` });
+    stream({ type: 'content_block_start', index: 0, content_block: { type: 'tool_use', id: 'toolu_off', name: 'mcp__maws__artifact_edit', input: {} } }, 0);
+    stream({ type: 'content_block_delta', index: 0, delta: { type: 'input_json_delta', partial_json: `{"artifact":"${doc}","baseRevision":1,"ops":[{"op":"delete","id":"p4"}]}` } }, 1);
+    stream({ type: 'content_block_stop', index: 0 }, 2);
+    for (let k = 0; k < 2_000 && !run.events.some((e) => e.kind === 'assistant.block.delta'); k++) await new Promise((resolve) => setTimeout(resolve, 5));
+    expect(run.events.some((e) => e.kind === 'assistant.block.delta' && e.toolUseId === 'toolu_off')).toBe(true); // the session read the delta
+    await tick();
+    await tick();
+    expect(layer(end)).toEqual([]);
+    expect(presence(doc) ?? {}).toEqual({});
     run.transport.exit(0);
   });
 });

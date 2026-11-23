@@ -5,6 +5,7 @@ import { LaunchSpecSchema } from '@shared/engine/launch-spec';
 import type { AppSessionId } from '@shared/graph/ids';
 import { parseJournalRow } from '@shared/wire/journal';
 import { GATEWAY_KEYS } from '@shared/engine/route'; // P5 O7 M9
+import { FULL_MAWS_TOOL_SET, withArtifacts, type MawsToolSet } from '@shared/maws/tool-set'; // board ticket 421
 import {
   buildLaunch,
   CHARTER_PIN,
@@ -548,6 +549,46 @@ describe('the native ask withdrawn where the maws server is offered (P2-C2)', ()
     expect(allowed(buildLaunch(spec({ permissionMode }), CAPTURED, OPTS).args)).toEqual(['mcp__maws__ask']);
     expect(allowed(buildLaunch(spec({ permissionMode }), CAPTURED, { ...OPTS, sdkMcpServers: [] }).args)).toEqual([]);
     expect(allowed(buildLaunch(spec({ permissionMode }), CAPTURED, { ...OPTS, sdkMcpServers: ['other'] }).args)).toEqual([]);
+  });
+});
+
+// Board ticket 421 (docs/doperpowers/plans/2026-11-23-tool-choice.md, Interfaces §C; A2's and A3's launch half): the
+// spec's set decides the two ask flags alone, and every launch's spawn row records the set it serves.
+describe('the set of MAWS’s tools on the launch line and the spawn row (board ticket 421)', () => {
+  const PINNED: Partial<LaunchSpec> = { sessionId: '33333333-3333-4333-8333-333333333333' as LaunchSpec['sessionId'] };
+  const engineAsk: MawsToolSet = { ...FULL_MAWS_TOOL_SET, question: 'engine' };
+
+  it('a spec with no set, or the full set, launches the line as it was, the two ask flags included', () => {
+    const before = buildLaunch(spec(PINNED), CAPTURED, OPTS);
+    expect(buildLaunch(spec({ ...PINNED, mawsTools: FULL_MAWS_TOOL_SET }), CAPTURED, OPTS).args).toEqual(before.args);
+    expect(before.args.join(' ')).toContain('--disallowedTools AskUserQuestion --allowedTools mcp__maws__ask');
+    expect(before.mawsTools).toEqual(FULL_MAWS_TOOL_SET);
+  });
+
+  it('the engine’s question tool: neither flag, and nothing else on the line moves', () => {
+    const full = buildLaunch(spec(PINNED), CAPTURED, OPTS).args;
+    const engine = buildLaunch(spec({ ...PINNED, mawsTools: engineAsk }), CAPTURED, OPTS).args;
+    expect(engine).not.toContain('--disallowedTools');
+    expect(engine).not.toContain('--allowedTools');
+    expect(engine).not.toContain('mcp__maws__ask');
+    expect(engine).toEqual(full.filter((arg) => !['--disallowedTools', 'AskUserQuestion', '--allowedTools', 'mcp__maws__ask'].includes(arg)));
+  });
+
+  it('a group switched off changes nothing on the line: the host lists the set, the engine is told nothing', () => {
+    const full = buildLaunch(spec(PINNED), CAPTURED, OPTS).args;
+    for (const mawsTools of [withArtifacts(FULL_MAWS_TOOL_SET, false), { ...FULL_MAWS_TOOL_SET, auxiliary: false }]) expect(buildLaunch(spec({ ...PINNED, mawsTools }), CAPTURED, OPTS).args).toEqual(full);
+  });
+
+  it('the spawn row records the set every launch serves, the full set included', () => {
+    const chosen: MawsToolSet = { ...withArtifacts(FULL_MAWS_TOOL_SET, false), question: 'engine' };
+    expect(spawnMeta(buildLaunch(spec(), CAPTURED, OPTS), { appVersion: 'x' }).mawsTools).toEqual(FULL_MAWS_TOOL_SET);
+    const frame = spawnMeta(buildLaunch(spec({ mawsTools: chosen }), CAPTURED, OPTS), { appVersion: 'x' });
+    expect(frame.mawsTools).toEqual(chosen);
+    expect(() => parseJournalRow({ seq: 1, direction: 'meta', at: new Date().toISOString(), frame })).not.toThrow();
+  });
+
+  it('the spec refuses a set with documents but no artifacts', () => {
+    expect(() => spec({ mawsTools: { ...FULL_MAWS_TOOL_SET, artifacts: false } })).toThrow(/documents and dashboards need artifacts/);
   });
 });
 

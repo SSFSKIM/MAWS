@@ -99,4 +99,17 @@ describe('the launch\'s rows', () => {
     writer.row('meta', { event: 'spawn', bin: '/x/claude', args: ['-p'], envKeys: ['PATH'], cwd: '/w', gateway: 'gateway', route: 'machine', engineVersion: '2.1.283', launchId: 'launch03', sessionId: 'eng-3' });
     expect(spawnRowOf(launchRows(dir, 'launch03'))).toMatchObject({ gateway: 'gateway', route: 'machine' });
   });
+
+  // board ticket 421: the set of MAWS's tools the launch served, when its row records one that parses; else none
+  it('reads the set of MAWS’s tools from the spawn row, and none from a row without one or with one that does not parse', () => {
+    const set = { artifacts: false, documents: false, dashboards: false, auxiliary: true, question: 'engine' };
+    const row = (launchId: string, extra: Record<string, unknown>) => {
+      const writer = new JournalWriter(dir, launchId, { maxBytes: 4_000 });
+      writer.row('meta', { event: 'spawn', bin: '/x/claude', args: ['-p'], envKeys: ['PATH'], cwd: '/w', gateway: 'gateway', engineVersion: '2.1.283', launchId, sessionId: 'eng-4', ...extra });
+      return spawnRowOf(launchRows(dir, launchId));
+    };
+    expect(row('launch04', { mawsTools: set })).toMatchObject({ mawsTools: set });
+    expect(row('launch05', {})).not.toHaveProperty('mawsTools');
+    expect(row('launch06', { mawsTools: { ...set, documents: true } })).not.toHaveProperty('mawsTools');
+  });
 });

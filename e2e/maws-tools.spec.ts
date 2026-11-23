@@ -27,7 +27,7 @@ import { join } from 'node:path';
 import { expect, test, type Locator, type Page } from '@playwright/test';
 import type { AskAnswer } from '@shared/maws/tools';
 import { parseAskSteer } from '../src/shared/maws/ask';
-import { TOOL_ERRORS } from '../src/shared/maws/tools';
+import { MAWS_TOOL_NAMES, TOOL_ERRORS } from '../src/shared/maws/tools';
 import { askWaitJournal, invoke, value } from './support/c7-replay';
 import { asDocumentReplay } from './support/document-replay'; // P3-B (M7)
 import { FIRST_CREATED_REVISION } from './support/design-systems'; // P3-D (the P3 spec's Decision Log 67)
@@ -1036,7 +1036,7 @@ test('the SDK MCP round trip: the app answers the engine’s handshake with the 
       ['artifact_delete', { title: 'Delete artifact', readOnlyHint: false, destructiveHint: true, openWorldHint: false }],
     ]);
     const [echo] = mcpCalls(rows);
-    expect(mcpResultOf(rows, echo!.requestId)).toEqual({ content: [{ type: 'text', text: TOOL_ERRORS.unknownTool('echo_file') }], isError: true });
+    expect(mcpResultOf(rows, echo!.requestId)).toEqual({ content: [{ type: 'text', text: TOOL_ERRORS.unknownTool('echo_file', MAWS_TOOL_NAMES) }], isError: true });
     const [init] = ofKind(await s.events(id), 'session.init');
     expect(init!.mcpServers).toContainEqual({ name: 'maws', status: 'connected', source: 'sdk' });
   });
