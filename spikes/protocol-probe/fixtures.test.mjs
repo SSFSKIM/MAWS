@@ -1445,3 +1445,53 @@ test('U2b second round: in a terminal, before and after, the record line reads t
   const lines=d.captures.map(c=>(/^\s*› (.+)$/m.exec(c.pane)??[])[1]).filter(Boolean);
   assert.ok(lines.length>=2,w);assert.equal(lines.at(-1).trim(),runs.at(-1)[2],w);assert.ok(lines.some(l=>/^(Read|Search|Tool search|List)/.test(l)),w);}
 });
+// Board tickets 421 and 420 (findings-uxwave-421-tool-choice.txt; scenarios/pass3/uxwave-421-tool-choice.mjs; the plan
+// docs/doperpowers/plans/2026-11-23-tool-choice.md, "Probes"): what the engine does with the `maws` server's list when
+// one tool is always loaded, when the list changes mid-session or at a resume, and with the built-in ask left in.
+// Recorded against the scripted Messages API stand-in (stub-api.mjs, nothing spent).
+const load421=n=>readFileSync(new URL('./fixtures/uxwave/uxwave-421-'+n+'.jsonl',import.meta.url),'utf8').trim().split('\n').map(JSON.parse);
+const meta421=(rows,event)=>rows.filter(r=>r.direction==='meta'&&r.frame.event===event).map(r=>r.frame);
+const main421=rows=>meta421(rows,'stub_requests')[0].requests.filter(r=>r.main);
+const maws421=request=>request.tools.filter(t=>t.name.startsWith('mcp__maws__')).map(t=>t.name);
+const said421=request=>request.messages.flatMap(m=>m.blocks.flatMap(b=>b.mentions??[]));
+test('tickets 421/420 P1: under tool search the always-loaded ask is the one maws tool in the request, whole, and the rest are named as deferred',()=>{
+ for(const n of ['ask-upfront','ask-upfront-unset']){
+  const rows=load421(n);const [first]=main421(rows);
+  assert.deepEqual(first.tools.filter(t=>t.name.startsWith('mcp__maws__')),[{name:'mcp__maws__ask',defer_loading:null}],n);
+  assert.ok(first.tools.some(t=>t.name==='ToolSearch'),n);assert.ok(!first.tools.some(t=>t.name==='AskUserQuestion'),n);
+  const deferred=said421(first).find(t=>t.startsWith('The following deferred tools are now available'));
+  for(const name of ['artifact_create','artifact_dataset','artifact_publish','artifact_read','artifact_search','show_pane'])assert.ok(deferred.includes('mcp__maws__'+name),n+name);
+  assert.ok(!deferred.includes('mcp__maws__ask'),n);
+  assert.deepEqual(meta421(rows,'server_calls')[0].calls.map(c=>c.name),['ask'],n); // called with no ToolSearch first
+ }
+});
+test('tickets 421/420 P2: a list_changed from the host is honoured (the engine lists again, a new tool arrives, a deferred one is withdrawn), but an always-loaded tool that left stays in the request',()=>{
+ const rows=load421('list-changed');const main=main421(rows);const sent=meta421(rows,'list_changed_sent')[0];
+ assert.equal(sent.answer.subtype,'success');assert.equal(sent.listsAfter,sent.listsBefore+1);
+ const inits=rows.filter(r=>r.direction==='in'&&r.frame.type==='system'&&r.frame.subtype==='init').map(r=>r.frame.tools.filter(t=>t.startsWith('mcp__maws__')));
+ assert.ok(inits[0].includes('mcp__maws__ask')&&!inits[0].includes('mcp__maws__artifact_edit'));
+ assert.ok(!inits.at(-1).includes('mcp__maws__ask')&&!inits.at(-1).includes('mcp__maws__artifact_dataset')&&inits.at(-1).includes('mcp__maws__artifact_edit')); // the engine's own registry follows the list
+ const said=said421(main.at(-1));
+ assert.ok(said.some(t=>t.startsWith('The following deferred tools are now available')&&t.endsWith('mcp__maws__artifact_edit')));
+ assert.ok(said.some(t=>t.startsWith('The following deferred tools are no longer available')&&t.includes('mcp__maws__artifact_dataset')));
+ assert.deepEqual(maws421(main.at(-1)),['mcp__maws__ask']); // the residue: the ask the server no longer lists
+ const flat=main421(load421('list-changed-flat'));
+ assert.ok(!maws421(flat[0]).includes('mcp__maws__artifact_edit')&&maws421(flat.at(-1)).includes('mcp__maws__artifact_edit'));
+ for(const gone of ['mcp__maws__ask','mcp__maws__artifact_dataset'])assert.ok(maws421(flat.at(-1)).includes(gone),gone); // without tool search nothing that left is taken out
+});
+test('tickets 421/420 P2 at a relaunch: a resumed session keeps the paragraph it was first given and the always-loaded tool that left; the deferred names follow the new list',()=>{
+ const first=meta421(load421('resume-first'),'answer_resume')[0];assert.deepEqual(first.paragraphs,{first:true,changed:false});
+ const rows=load421('resume-changed');const resumed=meta421(rows,'answer_resume')[0];
+ assert.deepEqual(resumed.paragraphs,{first:true,changed:false});
+ assert.deepEqual(resumed.maws,[{name:'mcp__maws__ask',defer_loading:null}]);
+ assert.ok(!meta421(rows,'init_tools')[0].maws.includes('mcp__maws__ask'));
+ assert.ok(resumed.mentions.some(m=>m.text.startsWith('The following deferred tools are no longer available')&&m.text.includes('mcp__maws__artifact_dataset')));
+});
+test('tickets 421/420 P3: with the built-in ask left in and no maws ask, AskUserQuestion is in the request up front, raises can_use_tool, and the host\'s answers are its result',()=>{
+ const rows=load421('native-ask');const main=main421(rows);
+ assert.deepEqual(main[0].tools.find(t=>t.name==='AskUserQuestion'),{name:'AskUserQuestion',defer_loading:null});assert.deepEqual(maws421(main[0]),[]);
+ const asked=rows.filter(r=>r.direction==='in'&&r.frame.type==='control_request'&&r.frame.request.subtype==='can_use_tool').map(r=>r.frame.request);
+ assert.equal(asked.length,1);assert.equal(asked[0].tool_name,'AskUserQuestion');assert.equal(asked[0].requires_user_interaction,true);
+ const answer=meta421(rows,'answer_p3')[0];
+ assert.equal(answer.results.length,1);assert.equal(answer.results[0].is_error,false);assert.match(answer.results[0].content,/"Which colour do you want\?"="Blue"/);
+});

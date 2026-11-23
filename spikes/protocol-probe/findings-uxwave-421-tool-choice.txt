@@ -1,0 +1,75 @@
+Board tickets 421 and 420: what the engine does with the `maws` server's tool list
+(docs/doperpowers/plans/2026-11-23-tool-choice.md, "Probes"; 2026-11-23)
+
+Questions (D-1). Three unknowns decide how a session's choice of MAWS's tools can be built:
+P1. Is a tool an SDK-hosted server lists with `_meta["anthropic/alwaysLoad"]: true` in the request whole under tool
+    search, and are the server's other tools deferred?
+P2. Does the engine honour `notifications/tools/list_changed` from an SDK server in the middle of a session, so that a
+    change of the list could apply to a running session? And what does a resumed session get when the list changed
+    between its launches?
+P3. With the built-in AskUserQuestion no longer disallowed and no `ask` listed by `maws`, does the built-in reach the
+    host as the `can_use_tool` request MAWS already answers?
+
+Method. scenarios/pass3/uxwave-421-tool-choice.mjs: MAWS's launch line and initialize (p1-common), a `maws` server the
+probe hosts (`sdkMcpServers: ['maws']`) with a stand-in list of seven tools under MAWS's names (ask, show_pane, five
+artifact tools; the schemas are drafts, since no question here is about a description), and the scripted Messages API
+stand-in (stub-api.mjs) as the engine's ANTHROPIC_BASE_URL, so nothing was spent and every request the engine made is
+recorded: each tool's name and `defer_loading`, and every text block that names the server. Engine 2.1.330, the one
+installed on the Mac that ran it (MAWS's tested version is 2.1.312; the engine's readable source was read at 2.1.312
+and 2.1.325 for the code named below). Fixtures fixtures/uxwave/uxwave-421-*.jsonl; tests in fixtures.test.mjs
+("tickets 421/420").
+
+P1: yes. (uxwave-421-ask-upfront)
+- The first request's tools hold `mcp__maws__ask` whole and no other maws tool. The other six are not in the array at
+  all: the engine names them in a system-role message ("The following deferred tools are now available via ToolSearch
+  …"), one name a line, beside its own deferred built-ins. On 2.1.304 (fixtures/p4/p4-b4-*, p4-r7-*) a deferred tool was
+  in the array with `defer_loading: true`; on 2.1.330 it is a name in that message. Either way its schema is not sent.
+- The scripted model called `mcp__maws__ask` with no ToolSearch before it, and the server ran it.
+- The server's `instructions` reach the model in the same system-role message ("# MCP Server Instructions / ## maws").
+- With ENABLE_TOOL_SEARCH absent (uxwave-421-ask-upfront-unset) the result is the same: tool search is on. The engine's
+  mode function returns "tst" when the variable is unset (2.1.325 cli.pretty.js:1005987-1006003), for any base URL. So a
+  direct launch, where MAWS leaves the variable to the engine, defers as a gateway launch does. The fixture's
+  provenance row lists the key among `envKeys` because the harness lists a key whose value is undefined; such a key is
+  not passed to the child process.
+
+P2: honoured, with a residue that rules out changing a session's set.
+(uxwave-421-list-changed, -list-changed-flat, -resume-first, -resume-changed)
+- The host sends the notification as `control_request {subtype: 'mcp_message', server_name: 'maws', message:
+  {jsonrpc: '2.0', method: 'notifications/tools/list_changed'}}`; the engine answers success, logs "Received
+  tools/list_changed notification, refreshing tools" and asks `tools/list` again at once (2.1.312
+  cli.pretty.js:547642-547655 hands the message to the server's client).
+- The engine's own registry follows the new list: the next turn's `system/init` frame lists the added tool and neither
+  of the two that left.
+- Under tool search the model is told of the deferred changes in a system-role message: "The following deferred tools
+  are now available via ToolSearch … mcp__maws__artifact_edit" and "The following deferred tools are no longer
+  available. Do not search for them … mcp__maws__artifact_dataset".
+- The residue: a tool that was in the request whole stays there after it left the list. `mcp__maws__ask`, always
+  loaded and no longer listed, is in every later request with its schema; a call of it is answered by the engine
+  "No such tool available: mcp__maws__ask. Its MCP server 'maws' is connected but does not offer this tool here.
+  Continue without it." (an ad hoc run of the same scenario, not kept as a fixture). With ENABLE_TOOL_SEARCH=false,
+  where every tool is in the request whole, an added tool arrives and nothing that left is taken out.
+- The server's `instructions` are read once, at initialize: nothing re-reads them after a list change.
+- At a relaunch the same holds. A session resumed under a changed paragraph and a changed list
+  (uxwave-421-resume-changed) carries the paragraph it was first given and not the new one (P4-B4's Surprise 2, again on
+  2.1.330), keeps `mcp__maws__ask` in its request though the new process's server never listed it, and is told the
+  deferred names that came and went.
+So a change of the list reaches a running or a resumed session only in part: additions arrive, a deferred tool is
+withdrawn in words, an always-loaded tool that left stays offered and fails when called, and the paragraph never
+changes. A session's set is therefore fixed when it starts, and a fork, which resumes its source's transcript, keeps its
+source's.
+
+P3: yes. (uxwave-421-native-ask)
+- Launched without `--disallowedTools AskUserQuestion`, with a `maws` server that lists no ask, the first request's
+  tools hold `AskUserQuestion` whole (not deferred) and no maws tool.
+- The scripted model's call raised `control_request {subtype: 'can_use_tool', tool_name: 'AskUserQuestion',
+  requires_user_interaction: true, input: {questions: […]}}`. The host's answer, `{behavior: 'allow', updatedInput:
+  {…input, answers: {"Which colour do you want?": "Blue"}}}`, became the tool's result in the next request: "Your
+  questions have been answered: "Which colour do you want?"="Blue". You can now continue with these answers in mind."
+- That is the request MAWS's broker already raises as a question (the `c7-question` recording behind
+  e2e/requests.spec.ts; test/snapshots/transcript/pass1/question-roundtrip.rows.json). The built-in waits for its
+  answer: it has no form that returns at once.
+
+Not covered. MAWS's own descriptions and schemas (the list was a stand-in; the build re-records P1 with
+`mawsToolList()`); a first-party base URL (the stub's address is local; the default was read in the engine's code); the
+sminos question tool in a session MAWS runs (board ticket 600); the tested engine 2.1.312 as a binary (its code was
+read, not run).
