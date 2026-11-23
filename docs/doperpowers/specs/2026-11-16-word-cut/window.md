@@ -22,7 +22,7 @@ Columns: **Id** is the item's id in `items.json`. **Where** is the place on the 
 
 | Id | Where | Today | Decision | After | Basis | Source | M0 | Build |
 |---|---|---|---|---|---|---|---|---|
-| C70 | last action under the list | Don't work in a project | cut | The project menu's last action reads "No project". | pattern | `src/renderer/src/composer/frame/ProjectRow.tsx:46` | unchanged `src/renderer/src/composer/frame/ProjectRow.tsx:46` | M4 · no scene: needs that window, sidebar or banner state (wanted: New chat, the project menu open) |
+| C70 | last action under the list | Don't work in a project | cut | The project menu's last action reads "No project". | pattern | `src/renderer/src/composer/frame/ProjectRow.tsx:46` | unchanged `src/renderer/src/composer/frame/ProjectRow.tsx:46` | M4 · `m4-new-chat-project-menu` |
 
 ### New chat, machine menu
 
@@ -125,7 +125,7 @@ Columns: **Id** is the item's id in `items.json`. **Where** is the place on the 
 | Id | Where | Today | Decision | After | Basis | Source | M0 | Build |
 |---|---|---|---|---|---|---|---|---|
 | W45 | small capitals above the project list, with three icons at its right | PROJECTS | stays | Stays. brought back on shell-tools, shell-tools-open, shell-tools-transcript-view | brought back | `src/renderer/src/sidebar/Sidebar.tsx:499` | unchanged `src/renderer/src/sidebar/Sidebar.tsx:501` | M4 · `shell-tools` |
-| W49 | grey label at the top of the sort menu | Sort sessions by | cut | The sort menu holds just Priority and Recency, with no "Sort sessions by" label. | pattern | `src/renderer/src/sidebar/Sidebar.tsx:569` | unchanged `src/renderer/src/sidebar/Sidebar.tsx:571` | M4 · no scene: needs that window, sidebar or banner state (wanted: Sidebar sort menu open) |
+| W49 | grey label at the top of the sort menu | Sort sessions by | cut | The sort menu holds just Priority and Recency, with no "Sort sessions by" label. | pattern | `src/renderer/src/sidebar/Sidebar.tsx:569` | unchanged `src/renderer/src/sidebar/Sidebar.tsx:571` | M4 · `m4-sidebar-sort-menu` |
 | W52 | grey text at the right of a project row whose folders are on other machines | mini · studio offline | stays | Stays. which machine, and that one is offline (machine names came back with "This Mac", P29; an exception keeps its word) | pattern | `src/renderer/src/sidebar/ProjectRow.tsx:99` | unchanged `src/renderer/src/sidebar/ProjectRow.tsx:99` | M4 · no scene: needs a session on another machine (wanted: Sidebar project whose folders are on other machines (one offline)) |
 | W53 | grey text at the right of a project row when teammates' sessions are not shown | +4 others | stays | Stays. a count turned into a dimmed mark, like the Overview count the owner brought back (W3) | pattern | `src/renderer/src/sidebar/ProjectRow.tsx:212` | unchanged `src/renderer/src/sidebar/ProjectRow.tsx:212` | M4 · no scene: needs that window, sidebar or banner state (wanted: Sidebar project row with teammates' sessions not shown (+N others)) |
 | W58 | grey link at the very end of the list, when any project is hidden | Hidden projects… | stays | Stays. a way in (to hidden projects), like the Projects row and the Customize link the owner brought back (W37, G5) | pattern | `src/renderer/src/sidebar/Sidebar.tsx:524` | unchanged `src/renderer/src/sidebar/Sidebar.tsx:526` | M4 · no scene: needs that window, sidebar or banner state (wanted: Sidebar with a hidden project (the Hidden projects link)) |
@@ -201,7 +201,7 @@ Columns: **Id** is the item's id in `items.json`. **Where** is the place on the 
 |---|---|---|---|---|---|---|---|---|
 | W125 | under the title | Your current bindings. Change them in Settings → Keyboard. | cut | Under the Keyboard shortcuts title: "Change in Settings" (plain text, not a link). | seen | `src/renderer/src/keymap/KeyboardShortcuts.tsx:32` | unchanged `src/renderer/src/keymap/KeyboardShortcuts.tsx:39` | M4 · `r2-shortcuts` |
 | W126 | the search field | Search actions or shortcuts | cut | The Keyboard shortcuts search field's placeholder reads "Search"; its accessible name is unchanged. | seen | `src/renderer/src/keymap/KeyboardShortcuts.tsx:53` | unchanged `src/renderer/src/keymap/KeyboardShortcuts.tsx:60` | M4 · `r2-shortcuts` |
-| W127 | when the search finds nothing | No shortcuts match your search. | cut | A search with no match says "Nothing matches". | pattern | `src/renderer/src/keymap/KeyboardShortcuts.tsx:66` | unchanged `src/renderer/src/keymap/KeyboardShortcuts.tsx:73` | M4 · no scene: needs that window, sidebar or banner state (wanted: Shortcuts window with a search that finds nothing) |
+| W127 | when the search finds nothing | No shortcuts match your search. | cut | A search with no match says "Nothing matches". | pattern | `src/renderer/src/keymap/KeyboardShortcuts.tsx:66` | unchanged `src/renderer/src/keymap/KeyboardShortcuts.tsx:73` | M4 · `m4-shortcuts-nomatch` |
 
 ### Menu bar
 
@@ -226,8 +226,8 @@ Columns: **Id** is the item's id in `items.json`. **Where** is the place on the 
 
 | Id | Where | Today | Decision | After | Basis | Source | M0 | Build |
 |---|---|---|---|---|---|---|---|---|
-| W135 | under the title | Your sidebar projects come first. Add a hidden or discovered project, or choose a folder. | cut | The Add project window shows no sentence under its title (kept as the dialog's description for assistive tech). | pattern | `src/renderer/src/sidebar/AddProject.tsx:49` | unchanged `src/renderer/src/sidebar/AddProject.tsx:49` | M4 · no scene: needs that window, sidebar or banner state (wanted: Add project window open (the + on the project list)) |
-| W136 | grey tag on rows already in the sidebar | In sidebar | cut | Rows already in the sidebar carry no "In sidebar" tag; they stand greyed under the In sidebar head. | pattern | `src/renderer/src/sidebar/AddProject.tsx:56` | unchanged `src/renderer/src/sidebar/AddProject.tsx:56` | M4 · no scene: needs that window, sidebar or banner state (wanted: Add project window open (the + on the project list)) |
+| W135 | under the title | Your sidebar projects come first. Add a hidden or discovered project, or choose a folder. | cut | The Add project window shows no sentence under its title (kept as the dialog's description for assistive tech). | pattern | `src/renderer/src/sidebar/AddProject.tsx:49` | unchanged `src/renderer/src/sidebar/AddProject.tsx:49` | M4 · `m4-add-project` |
+| W136 | grey tag on rows already in the sidebar | In sidebar | cut | Rows already in the sidebar carry no "In sidebar" tag; they stand greyed under the In sidebar head. | pattern | `src/renderer/src/sidebar/AddProject.tsx:56` | unchanged `src/renderer/src/sidebar/AddProject.tsx:56` | M4 · `m4-add-project` |
 
 ### Locate folder sheet
 
@@ -246,7 +246,7 @@ Columns: **Id** is the item's id in `items.json`. **Where** is the place on the 
 | Id | Where | Today | Decision | After | Basis | Source | M0 | Build |
 |---|---|---|---|---|---|---|---|---|
 | W154 | second line of the empty state | Worktrees MAWS or Claude Code create in this repository appear here | cut | The Worktrees window's empty state reads "No worktrees yet" alone. | pattern | `src/renderer/src/sessions/WorktreesDialog.tsx:109` | unchanged `src/renderer/src/sessions/WorktreesDialog.tsx:109` | M4 · no scene: needs that window, sidebar or banner state (wanted: Worktrees window open (one worktree with no session, and the empty state)) |
-| W155 | a grey label and a grey line on every worktree that has no session | Sessions No session | cut | A worktree with no session shows no Sessions label and no "No session" line. | pattern | `src/renderer/src/sessions/WorktreesDialog.tsx:167` | unchanged `src/renderer/src/sessions/WorktreesDialog.tsx:167` | M4 · no scene: needs that window, sidebar or banner state (wanted: Worktrees window open (one worktree with no session, and the empty state)) |
+| W155 | a grey label and a grey line on every worktree that has no session | Sessions No session | cut | A worktree with no session shows no Sessions label and no "No session" line. | pattern | `src/renderer/src/sessions/WorktreesDialog.tsx:167` | unchanged `src/renderer/src/sessions/WorktreesDialog.tsx:167` | M4 · `m4-worktrees-orphan` |
 
 ### New project on another machine sheet
 
@@ -260,14 +260,14 @@ Columns: **Id** is the item's id in `items.json`. **Where** is the place on the 
 
 | Id | Where | Today | Decision | After | Basis | Source | M0 | Build |
 |---|---|---|---|---|---|---|---|---|
-| W143 | grey line under the title field | Generated by the engine from the first prompt | cut | The Rename sheet no longer says where the current name came from; Regenerate stays (for a live session). | pattern | `src/renderer/src/sessions/RenameDialog.tsx:24` | unchanged `src/renderer/src/sessions/RenameDialog.tsx:26` | M4 · no scene: needs that sheet opened (wanted: Rename sheet open) |
-| W144 | second grey line | Kept in MAWS until the session runs again; a /rename in the terminal replaces it. | cut | The Rename sheet has no second grey line (neither "The engine records the new title." nor the terminal /rename warning). | pattern | `src/renderer/src/sessions/RenameDialog.tsx:100` | unchanged `src/renderer/src/sessions/RenameDialog.tsx:110` | M4 · no scene: needs that sheet opened (wanted: Rename sheet open) |
+| W143 | grey line under the title field | Generated by the engine from the first prompt | cut | The Rename sheet no longer says where the current name came from; Regenerate stays (for a live session). | pattern | `src/renderer/src/sessions/RenameDialog.tsx:24` | unchanged `src/renderer/src/sessions/RenameDialog.tsx:26` | M4 · `m0-dialog-rename-index` |
+| W144 | second grey line | Kept in MAWS until the session runs again; a /rename in the terminal replaces it. | cut | The Rename sheet has no second grey line (neither "The engine records the new title." nor the terminal /rename warning). | pattern | `src/renderer/src/sessions/RenameDialog.tsx:100` | unchanged `src/renderer/src/sessions/RenameDialog.tsx:110` | M4 · `m0-dialog-rename-index` |
 
 ### Archive sheet
 
 | Id | Where | Today | Decision | After | Basis | Source | M0 | Build |
 |---|---|---|---|---|---|---|---|---|
-| W146 | the paragraph under "Archive “<title>”?" | Ends its engine process on mini and hides it from app. The transcript stays where Claude Code keeps it; resume it from Archived sessions or with claude --resume in the terminal. The worktree is not touched. | cut | The Archive sheet's paragraph reads "Stops it and hides it. Find it again under Archived sessions." | pattern | `src/renderer/src/sessions/ArchiveDialog.tsx:65` | unchanged `src/renderer/src/sessions/ArchiveDialog.tsx:65` | M4 · no scene: needs that sheet opened (wanted: Archive sheet open) |
+| W146 | the paragraph under "Archive “<title>”?" | Ends its engine process on mini and hides it from app. The transcript stays where Claude Code keeps it; resume it from Archived sessions or with claude --resume in the terminal. The worktree is not touched. | cut | The Archive sheet's paragraph reads "Stops it and hides it. Find it again under Archived sessions." | pattern | `src/renderer/src/sessions/ArchiveDialog.tsx:65` | unchanged `src/renderer/src/sessions/ArchiveDialog.tsx:65` | M4 · `m4-archive-sheet` |
 
 ### Share sheet
 
