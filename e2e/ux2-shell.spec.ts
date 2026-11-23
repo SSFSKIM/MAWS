@@ -14,8 +14,10 @@ import { CATALOG_FIXTURES_ENV } from '../src/main/catalog/fetch';
 import { launchMaws, REPO_ROOT, test, type MawsLaunch } from './support/launch';
 import { menu } from './support/menu';
 import { goToFileRow } from './support/go-to-file'; // UX wave U6b-3b
+import { expectEmptyPane } from './support/empty-pane'; // the word cut (W22, W23)
+import { expectScreenReaderOnly } from './support/screen-reader-only'; // the word cut (W6)
 import { sidebarRow } from './support/sidebar';
-import { activeMainTab, backToTabs, hideSurface, mainTab, mountedTab, mountedTabs, moveSideTab, openAppDestination, openSurface, pageRegion, sessionCard, settingsDialog, sideColumn, sideGroup, sideTab, sideTabNames, unfoldSessionCard } from './support/shell';
+import { activeMainTab, backToTabs, hideSurface, mainTab, mountedTab, mountedTabs, moveSideTab, openAppDestination, openSurface, pageRegion, pageTitle, sessionCard, settingsDialog, sideColumn, sideGroup, sideTab, sideTabNames, unfoldSessionCard } from './support/shell';
 import { formatChord } from '../src/shared/keymap/chord'; // UX wave U6b-5a
 import { pointerOffToasts, zoomAct, zoomItemEnabled, zoomLineOf, zoomLines, zoomOfPage, zoomTo, type ZoomItem } from './support/zoom'; // UX wave U6b-5b
 
@@ -290,7 +292,8 @@ test('Chrome: live Customize keeps scopes on the head’s two rows and loaded fe
       await page.getByRole('combobox', { name: 'Project', exact: true }).selectOption(await addressed(page, 'proj-harness')); // P5 O6 M2: the option's value is the project's address
       await chooseCustomize(page, { show: 'Plugins' }); // the sidebar opens All; the loaded line is Plugins'
       // UX wave U7b (O-40): Customize is a page; its name is the title bar's heading, and the content is measured against
-      // the page's box
+      // the page's box. The word cut (W6): that heading is for a screen reader, drawn nowhere
+      await expectScreenReaderOnly(pageTitle(page).getByRole('heading', { level: 1, name: 'Customize', exact: true }), 'W6: Customize’s title is for a screen reader');
       const header = customizeHead(page);
       const viewRow = header.locator('[data-customize-row="view"]');
       const showRow = header.locator('[data-customize-row="show"]');
@@ -332,7 +335,7 @@ test('Chrome: live Customize keeps scopes on the head’s two rows and loaded fe
 // UX wave U7b (O-40): Settings is no tab, so Diagnostics stands for the tab of no session; Settings adds no tab.
 test('UX2: one chrome row and no reserved column for empty main or a tab of no session', async ({ maws }, info) => {
   const { page } = maws;
-  await expect(main(page).getByText('No open tabs')).toBeVisible({ timeout: 15_000 });
+  await expectEmptyPane(main(page), { timeout: 15_000 }); // the word cut (W22): the area's name, not a drawn sentence
   for (const { width, height } of SIZES) {
     await size(maws, width, height);
     await singleChromeRow(page);
@@ -345,7 +348,7 @@ test('UX2: one chrome row and no reserved column for empty main or a tab of no s
     await noReservedPanel(page);
     await shot(maws, info, 'diagnostics');
     await menu(maws.app, 'tab.close');
-    await expect(main(page).getByText('No open tabs')).toBeVisible();
+    await expectEmptyPane(main(page)); // the word cut (W22)
   }
   expect(maws.consoleErrors()).toEqual([]);
 });
@@ -1015,7 +1018,8 @@ test('Acceptance: overflowing tabs remain reachable and F6 visits cards and surf
   expect(maws.consoleErrors()).toEqual([]);
 });
 
-test('Acceptance: compact inactive file tabs contain their extension, pin, dirty mark and close hit target', async () => {
+// The word cut (W13): a file tab's mark is the file glyph, where the extension's badge was; the extension is in its name.
+test('Acceptance: compact inactive file tabs contain their file glyph, pin, dirty mark and close hit target', async () => {
   test.setTimeout(90_000);
   const { writeFileSync } = await import('node:fs');
   const { restoreWithTab, withProduct } = await import('./support/code-product');
@@ -1046,6 +1050,8 @@ test('Acceptance: compact inactive file tabs contain their extension, pin, dirty
     await expect(tab).toHaveAttribute('aria-selected', 'false');
     await expect(tab.getByRole('img', { name: 'Pinned', exact: true })).toBeVisible();
     await expect(tab.getByRole('img', { name: 'Unsaved changes', exact: true })).toBeVisible();
+    await expect(tab.locator(':scope > svg'), 'W13: the file glyph marks the tab').toHaveCount(1);
+    await expect(tab, 'W13: no extension badge beside the name').not.toContainText('TYPESCRIPT');
     for (const dimensions of [...SIZES, { width: 900, height: 820 }]) {
       await size(maws, dimensions.width, dimensions.height);
       await tab.hover(); // reveals Close without activating the inactive tab
@@ -1054,10 +1060,12 @@ test('Acceptance: compact inactive file tabs contain their extension, pin, dirty
       await expect.poll(() => tab.evaluate((node) => {
         const bounds = node.getBoundingClientRect();
         // U13a: the title shares a box with the tab's place (drawn in a strip that mixes places), so the walk measures
-        // that box's own children, the title and the place, beside the marks and the close button
+        // that box's own children, the title and the place, beside the marks and the close button. The word cut (W10):
+        // the holder mark's region is `display: contents` (no box of its own, always mounted), so the walk measures what
+        // it holds, if anything
         const titleNode = node.querySelector<HTMLElement>(':scope > span > span.truncate')!;
         const children = Array.from(node.children)
-          .flatMap((child) => (child.contains(titleNode) ? Array.from(child.children) : [child]))
+          .flatMap((child) => (child.contains(titleNode) || getComputedStyle(child).display === 'contents' ? Array.from(child.children) : [child]))
           .map((child) => child.getBoundingClientRect());
         const close = node.querySelector<HTMLButtonElement>('button')!;
         const target = close.getBoundingClientRect();
@@ -1325,7 +1333,7 @@ test('G5: Go ▸ Go to file stands under Command palette with ⌘P; disabled wit
   expect(goRows[palette + 1], 'Go to file directly under Command palette, with ⌘P, no separator between them').toEqual({ id: 'files.goToFile', type: 'normal', label: 'Go to file', accelerator: 'Cmd+P' });
 
   const enabled = async () => (await goToFileRow(app))?.enabled ?? null;
-  await expect(main(page).getByText('No open tabs')).toBeVisible({ timeout: 15_000 });
+  await expectEmptyPane(main(page), { timeout: 15_000 }); // the word cut (W22): the area's name, not a drawn sentence
   await expect.poll(enabled, { message: 'disabled with no session in the side column' }).toBe(false);
   await openSession(page);
   await expect.poll(enabled, { message: 'enabled with a session in the side column' }).toBe(true);

@@ -564,10 +564,11 @@ for (const [width, height] of [[1280, 820], [1512, 982]] as const) test(`the doc
 // Loaded in main before its entry (launchMaws's requireFirst): a frame preload registered on the window's session before
 // any window exists, so it runs in the page before the renderer's own code and watches the DOM from its first node. It
 // marks the document element when "No open tabs" is ever drawn (a text node or the empty pane's label), which a
-// relaunch over saved tabs must never do; a fresh profile's empty main area draws it, the watch's positive control.
+// relaunch over saved tabs must never do; a fresh profile's empty main area draws it, the watch's positive control. The
+// word cut (W22) left the words only as the empty tabpanel's name, so an added subtree is searched for that label too.
 const NO_TABS_PRELOAD = `const NEEDLE = 'No open tabs';
 const seen = () => document.documentElement && document.documentElement.setAttribute('data-e2e-saw-no-open-tabs', '');
-const has = (node) => node && ((node.textContent || '').includes(NEEDLE) || (node.getAttribute && node.getAttribute('aria-label') === NEEDLE));
+const has = (node) => node && ((node.textContent || '').includes(NEEDLE) || (node.getAttribute && node.getAttribute('aria-label') === NEEDLE) || Boolean(node.querySelector && node.querySelector('[aria-label="' + NEEDLE + '"]')));
 new MutationObserver((records) => {
   for (const record of records) {
     if (record.type === 'attributes' || record.type === 'characterData') { if (has(record.target)) seen(); continue; }

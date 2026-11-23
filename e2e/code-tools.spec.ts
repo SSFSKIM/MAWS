@@ -1629,7 +1629,11 @@ test.describe('the product over a session discovered from its transcript', () =>
       expect(await shellAnswer(), 'a new terminal’s shell starts in the worktree').toBe(worktree);
       await expect(surface(page, 'terminal').getByRole('status', { name: 'worktree warning' }), 'and warns of nothing').toHaveCount(0);
       await expect(await mark(), 'the sidebar row carries the worktree mark').toBeVisible({ timeout: 20_000 });
-      await expect(await hoverPlace()).toContainText('worktree w1');
+      // the word cut (W73): the hover card's place line is the branch ("worktree w1" where it knows none), the worktree's
+      // folder its tooltip and description
+      const place = await hoverPlace();
+      await expect(place).toHaveText(/^(⎇ \S+|worktree w1)$/);
+      await expect(place).toHaveAccessibleDescription(worktree);
       await page.mouse.move(700, 20);
 
       // `cd` into a sub-folder of the worktree: the folder row's text ends with it, at the same height; nothing else moves.

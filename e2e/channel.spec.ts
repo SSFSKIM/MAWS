@@ -597,7 +597,7 @@ test('channel: ⌘K lists "<project> · channel" with what waits in it and opens
       const search = async (query: string) => {
         await menu(app, 'palette.open');
         // Under load the first keystrokes can land before the input takes focus; type only once it holds it.
-        await expect(palette.getByPlaceholder('Search sessions, projects and actions')).toBeFocused();
+        await expect(palette.getByPlaceholder('Search', { exact: true })).toBeFocused(); // the word cut (W113): the placeholder
         await page.keyboard.type(query);
       };
       const enabled = () => app.evaluate(({ Menu }) => Menu.getApplicationMenu()?.getMenuItemById('channel.open')?.enabled ?? null);
