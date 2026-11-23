@@ -498,8 +498,13 @@ test('the live sitting: a blocking ask, an async ask folded into its turn, show_
       expect(JSON.parse(resultText(mcpResultOf(rows, askCall.requestId)!)), 'the call returned at once').toEqual({ status: 'asked', askId: opened!.askId });
       const steer = rows.find((r) => r.direction === 'out' && (r.frame as { type?: string }).type === 'user' && new RegExp(`^\\[MAWS ask ${opened!.askId}\\]`).test(String((r.frame as { message?: { content?: unknown } }).message?.content ?? '')));
       expect(steer, 'the answer went to the agent as a message naming the askId').toBeDefined();
+      // the work came after the ask's acknowledgement: the turn went on past the question
+      const ack = rows.find((r) => r.direction === 'out' && (r.frame as { type?: string }).type === 'control_response' && (r.frame as { response?: { request_id?: string } }).response?.request_id === askCall.requestId)!;
+      const bashUse = rows.find((r) => r.direction === 'in' && (r.frame as Frame).type === 'assistant' && JSON.stringify((r.frame as Frame).message ?? null).includes('"name":"Bash"'));
+      expect(bashUse, 'the agent called Bash').toBeDefined();
+      expect(bashUse!.seq, 'the Bash call came after the ask returned').toBeGreaterThan(ack.seq);
       const replies = mainTurnsEnded(await s.events(session.id)).map((t) => t.resultText ?? '');
-      note(`G7: maws.ask.opened blocking false, acknowledged {status: "asked"}; the agent ran Bash while the ask waited; the answer's message at seq ${steer!.seq}; replies ${JSON.stringify(replies)}`);
+      note(`G7: maws.ask.opened blocking false, acknowledged {status: "asked"} at seq ${ack.seq}; the agent's Bash call at seq ${bashUse!.seq}, while the ask waited; the answer's message at seq ${steer!.seq}; replies ${JSON.stringify(replies)}`);
       // the message names a pick by its place, `option <k>` (board ticket 711): the model may report either
       expect(replies.some((r) => /ANSWER:\s*(?:"?Tea\b|option 1\b)/i.test(r)), `the answer reached the model\n${replies.join('\n---\n')}`).toBe(true);
       await end(s, session, before);
