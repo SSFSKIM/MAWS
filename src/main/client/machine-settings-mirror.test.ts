@@ -333,6 +333,27 @@ describe('the machine settings mirror (Interfaces §G)', () => {
       expect(host.asked).toHaveLength(asked); // nothing sent
     });
 
+    // The review of M4: an older mawsd's missing key and a newer one's explicit full set serve the same set but not the
+    // same choice, so a mawsd replaced by the other, all else equal, is told: the window then offers the rows, or stops
+    it('tells its listeners when mawsd is replaced by one that knows the choice, or one that does not, at the full set alike', async () => {
+      const host = machineHost();
+      host.answers.set('machineSettings.get', async () => ({ ok: true, value: { settings: machineSettingsDefaults(), version: 1, defaultRoute: 'machine' } })); // predates
+      const mirror = createMachineSettingsMirror({ file, hosts: host.hosts, log: () => {} });
+      const told = vi.fn();
+      mirror.onChange(told);
+      host.stream();
+      await mirror.answered();
+      expect(told).not.toHaveBeenCalled(); // the first answer is the state it started from
+      host.fire('machineSettings.changed', { settings: machineSettingsDefaults(), defaultRoute: 'machine', mawsTools: FULL_MAWS_TOOL_SET }); // upgraded
+      expect(told).toHaveBeenCalledTimes(1);
+      expect(mirror.mawsTools()).toEqual(FULL_MAWS_TOOL_SET);
+      host.fire('machineSettings.changed', { settings: machineSettingsDefaults(), defaultRoute: 'machine', mawsTools: FULL_MAWS_TOOL_SET });
+      expect(told).toHaveBeenCalledTimes(1); // nothing moved
+      host.fire('machineSettings.changed', { settings: machineSettingsDefaults(), defaultRoute: 'machine' }); // downgraded
+      expect(told).toHaveBeenCalledTimes(2);
+      await expect(mirror.setMawsTools(FULL_MAWS_TOOL_SET)).rejects.toThrow('predates');
+    });
+
     it('sets the default as machineSettings.set’s mawsTools and resolves with mawsd’s answer; a refusal changes nothing', async () => {
       const host = machineHost();
       host.answers.set('machineSettings.get', async () => ({ ok: true, value: { settings: machineSettingsDefaults(), version: 1, defaultRoute: 'machine', mawsTools: FULL_MAWS_TOOL_SET } }));

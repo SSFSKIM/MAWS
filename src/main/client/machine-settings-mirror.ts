@@ -45,10 +45,14 @@ export function createMachineSettingsMirror({ file, hosts, log }: MachineSetting
   const listeners = new Set<(state: MachineSettings) => void>();
   const take = ({ settings: next, defaultRoute: nextRoute, mawsTools: nextTools }: Answered) => {
     routeKnown = nextRoute !== undefined;
+    // board ticket 421: a mawsd replaced by one that knows the choice, or by one that does not, is a change even where
+    // both serve the full set: the window offers the choice on the first alone (the first answer is the state it started from)
+    const toolsWereKnown = toolsKnown;
     toolsKnown = nextTools !== undefined;
+    const replaced = toolsWereKnown !== null && toolsWereKnown !== toolsKnown;
     const resolved = nextRoute ?? next.gateway.defaultRoute;
     const served = nextTools ?? FULL_MAWS_TOOL_SET; // what a mawsd that predates the choice launches
-    if (JSON.stringify(next) === JSON.stringify(current) && resolved === route && JSON.stringify(served) === JSON.stringify(tools)) return;
+    if (!replaced && JSON.stringify(next) === JSON.stringify(current) && resolved === route && JSON.stringify(served) === JSON.stringify(tools)) return;
     current = next;
     route = resolved;
     tools = served;

@@ -21,10 +21,9 @@ export async function readMawsTools(client: MawsBridge = ipc, machine: MachineRe
   return result.value.mawsTools ?? null;
 }
 
-/** `machine`'s default set, read once per mount and machine (and again when `revision` moves): undefined until the read
- *  answers, null when its spine predates the choice or the read failed, which is also the sign that it would not honour
- *  a set sent to it. */
-export function useMachineMawsTools(machine: MachineRef, client: MawsBridge = ipc, revision?: unknown): MawsToolSet | null | undefined {
+/** `machine`'s default set, read once per mount and machine: undefined until the read answers, null when its spine
+ *  predates the choice or the read failed, which is also the sign that it would not honour a set sent to it. */
+export function useMachineMawsTools(machine: MachineRef, client: MawsBridge = ipc): MawsToolSet | null | undefined {
   const [read, setRead] = useState<{ machine: MachineRef; set: MawsToolSet | null } | null>(null);
   useEffect(() => {
     let live = true;
@@ -32,7 +31,7 @@ export function useMachineMawsTools(machine: MachineRef, client: MawsBridge = ip
     return () => {
       live = false;
     };
-  }, [client, machine, revision]);
+  }, [client, machine]);
   return read !== null && read.machine === machine ? read.set : undefined;
 }
 

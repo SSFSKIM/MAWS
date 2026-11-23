@@ -5,14 +5,14 @@
 // Default (the engine's own) or MAWS's. Documents and Dashboards need Artifacts: turning Artifacts off turns them off and
 // greys them, their word saying so, and turning it on turns both on (`withArtifacts`). The set is this machine's spine's
 // (`machineSettings.*`, read again whenever the settings change); a spine whose answer carries none predates the choice,
-// and neither row is drawn.
-import { useRef, useState } from 'react';
+// and neither row is drawn. An edit is made over the newest choice, which a read sent before its write settled never
+// takes back (the review of M4).
+import { useEffect, useRef, useState } from 'react';
 import type { Settings } from '@shared/ipc/schema';
 import { withArtifacts, type MawsToolSet } from '@shared/maws/tool-set';
-import { ipc } from '../ipc/client';
 import { toast } from '../stores/notices';
 import { MAWS_TOOLS } from './copy';
-import { chooseMawsTools, useMachineMawsTools } from './maws-tools-default';
+import { chooseMawsTools, readMawsTools } from './maws-tools-default';
 import { Segment, Setting, Switch, TipWord, WORD_OWNER } from './parts';
 
 type Group = keyof typeof MAWS_TOOLS.groups;
@@ -21,20 +21,32 @@ const QUESTION_TOOLS = (['engine', 'maws'] as const).map((value) => ({ value, la
 const NEEDS_ARTIFACTS: readonly Group[] = ['documents', 'dashboards'];
 
 export function MawsToolsSettings({ settings }: { settings: Settings }) {
-  const held = useMachineMawsTools(ipc.localMachine, ipc, settings); // main publishes a change of the machine half, a set-only one included
-  // the set being written, then the set its answer holds, shown until the spine's set is read again. Writes go out in
-  // the order made and the spine takes them in that order, so the latest one's answer is the one shown.
-  const [local, setLocal] = useState<{ set: MawsToolSet; over: MawsToolSet | null | undefined } | null>(null);
-  if (local !== null && local.over !== held) setLocal(null); // read again: the spine's set stands
+  // The spine's set, read again whenever the settings change (main publishes a change of the machine half, a set-only one
+  // included); each read numbered when it is sent, a superseded one's answer dropped.
+  const sent = useRef(0);
+  const [held, setHeld] = useState<{ set: MawsToolSet | null; read: number } | null>(null);
+  useEffect(() => {
+    let live = true;
+    const read = ++sent.current;
+    void readMawsTools().then((set) => live && setHeld({ set, read }));
+    return () => {
+      live = false;
+    };
+  }, [settings]);
+  // The newest choice, the base of the next edit: while its write is out (`settled` null) no read takes it back, and once
+  // it settled (the set its answer holds) only a read sent after that does, since one sent before may answer the set as
+  // it was before the write. Writes go out in the order made and the spine takes them in that order.
+  const [local, setLocal] = useState<{ set: MawsToolSet; settled: number | null } | null>(null);
+  if (local !== null && local.settled !== null && held !== null && held.read > local.settled) setLocal(null);
   const latest = useRef(0);
-  if (held === undefined || held === null) return null;
-  const shown = local?.set ?? held;
+  if (held === null || held.set === null) return null;
+  const shown = local?.set ?? held.set;
   const write = async (next: MawsToolSet) => {
     const mine = ++latest.current;
-    setLocal({ set: next, over: held });
+    setLocal({ set: next, settled: null });
     const answer = await chooseMawsTools(next);
     if (!answer.ok) toast({ level: 'warning', text: answer.error, actions: [], dismissible: true });
-    if (mine === latest.current) setLocal(answer.ok ? { set: answer.set, over: held } : null);
+    if (mine === latest.current) setLocal(answer.ok ? { set: answer.set, settled: sent.current } : null);
   };
   const toggle = (group: Group, on: boolean) => void write(group === 'artifacts' ? withArtifacts(shown, on) : { ...shown, [group]: on });
   return (
