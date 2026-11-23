@@ -4,7 +4,7 @@ A file on disk that the user's Library keeps as it is: a PDF, an image, a spread
 
 ## When to use this kind
 
-To show the user a file, you need no artifact: write a Markdown link to its absolute path in your message, [its name](/absolute/path). A click opens it beside the chat, and ⌘-click opens it in the main area. Make a File artifact only when the file should also stay in the Library, linked to this session. MAWS does not edit a file's content; for content you and the user work on inside MAWS, create an `html`, `document` or `presentation` artifact instead.
+To show the user a file, you need no artifact: write a Markdown link to its absolute path in your message, [its name](/absolute/path). A click opens it beside the chat, and ⌘-click opens it in the main area. Keep a file meant for the user inside this session's folders, where everyone who sees the session can open it. Make a File artifact only when the file should also stay in the Library, linked to this session. MAWS does not edit a file's content; for content you and the user work on inside MAWS, create an `html`, `document` or `presentation` artifact instead.
 
 ## Creating one
 

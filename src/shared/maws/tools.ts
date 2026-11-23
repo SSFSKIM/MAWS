@@ -629,7 +629,7 @@ export const TOOL_ERRORS = {
   invalidArguments: (tool: MawsToolName, issues: string) => `${tool}: invalid arguments: ${issues}`,
   unknownTool: (name: string) => `unknown tool "${name}"; the maws server has ${MAWS_TOOL_NAMES.join(', ')}`,
   // Board ticket 848: a call of the retired `send_file`, whatever it holds; the agent is told to write the path link
-  sendFileRetired: 'send_file: MAWS no longer delivers files. Link the file in your message as a Markdown link to its absolute path, [its name](/absolute/path): a click opens it beside the chat, and ⌘-click opens it in the main area.',
+  sendFileRetired: 'send_file: MAWS no longer delivers files. Link the file in your message as a Markdown link to its absolute path, [its name](/absolute/path): a click opens it beside the chat, and ⌘-click opens it in the main area. Keep the file inside this session's folders, where everyone who sees the session can open it.',
   sessionEnded: 'ask: the session ended before the user answered',
   askQuotesGrant: 'An ask may not quote a permission grant. Ask the question in your own words.', // board ticket 711
   unknownPane: (pane: string) => `show_pane: unknown pane "${pane}"; known panes: ${AGENT_PANE_NAMES.join(', ')}`,

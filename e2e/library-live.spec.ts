@@ -229,6 +229,8 @@ test('an agent makes an html artifact and a file artifact through the tools; the
       expect(row.lastEditorTitle).toBe(sessionTitle);
     }
     expect([pageRow.kind, pageRow.title, fileRow.kind, fileRow.title]).toEqual(['html', PAGE_TITLE, 'file', FILE_NAME]);
+    // the File artifact points at the file the prompt named, in place (its title is given apart from its path)
+    expect(value(await invoke(page, 'artifacts.get', { artifactId: fileId })).artifact).toMatchObject({ kind: 'file', linkedPath: join(repo, FILE_NAME) });
     note(`library.get: ${JSON.stringify([pageRow, fileRow].map((r) => ({ id: r.id, kind: r.kind, title: r.title, revision: r.revision, lastEditor: r.lastEditor, lastEditorTitle: r.lastEditorTitle, sessions: r.sessions.map((s) => ({ appSessionId: s.appSessionId, title: s.title, roles: s.roles })) })))}`);
 
     // the panel's Artifacts tool, This session: both rows

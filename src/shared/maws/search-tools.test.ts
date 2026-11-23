@@ -73,11 +73,11 @@ describe('artifact_search (X33, P4-B4)', () => {
 describe('the maws server’s instructions (X33, route (b))', () => {
   it('is the one paragraph, word for word', () => {
     expect(MAWS_SERVER_INSTRUCTIONS).toBe(
-      "MAWS artifacts are the user's documents, presentations, designs, dashboards, html pages and files. When you name one to the user, write a Markdown link to it, [its title](maws-artifact:<artifactId>): a click opens it in MAWS, so the user never has to ask where it is. To open it at a place, add a fragment: #block=<blockId> for a document's block, #tab=<tabId> for a document's tab, #slide=<slideId> for a presentation's slide, #v<version> for a retained version, with the ids mcp__maws__artifact_read and mcp__maws__artifact_search return. To find an artifact you did not make or open in this session, call mcp__maws__artifact_search. To show the user a file, write a Markdown link to its absolute path, [its name](/absolute/path): a click opens it beside the chat, and ⌘-click opens it in the main area.",
+      "MAWS artifacts are the user's documents, presentations, designs, dashboards, html pages and files. When you name one to the user, write a Markdown link to it, [its title](maws-artifact:<artifactId>): a click opens it in MAWS, so the user never has to ask where it is. To open it at a place, add a fragment: #block=<blockId> for a document's block, #tab=<tabId> for a document's tab, #slide=<slideId> for a presentation's slide, #v<version> for a retained version, with the ids mcp__maws__artifact_read and mcp__maws__artifact_search return. To find an artifact you did not make or open in this session, call mcp__maws__artifact_search. To show the user a file, write a Markdown link to its absolute path, [its name](/absolute/path): a click opens it beside the chat, and ⌘-click opens it in the main area. Write a file meant for the user inside this session's folders, where everyone who sees the session can open it.",
     );
     // UX wave U6d: 699 before O-44 took out the sentence that invited show_pane; U6b-4b: 635 before the sentence on file
-    // links (197 characters with its space); board ticket 848: 832 before that sentence stopped naming send_file
-    expect(MAWS_SERVER_INSTRUCTIONS).toHaveLength(805);
+    // links (197 characters with its space); board ticket 848: 832 before that sentence stopped naming send_file and a sentence kept a file inside the session's folders
+    expect(MAWS_SERVER_INSTRUCTIONS).toHaveLength(917);
   });
 
   it('names only tools the server lists', () => {
