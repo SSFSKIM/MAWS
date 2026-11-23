@@ -278,8 +278,9 @@ Both branches edit: `src/shared/maws/tools.ts` and `tools.test.ts`; `src/shared/
 A milestone is ticked once its review is clean.
 
 - [x] M0 · The probes (before the build).
-- [ ] M1 · The wire's shapes, and the set at the host.
+- [x] M1 · The wire's shapes, and the set at the host. (2026-11-23 04:10, reviewed; e2e with M2's request.)
   As built (`2ddcce6c4`): the host takes its set from `spec.mawsTools ?? FULL`; `LaunchPlan.mawsTools` is required; an adopter puts the spawn row's set on its spec only when it is not full, and `spawnRowOf` safe-parses the row's set (absent or invalid: the full set). The provisional emitter takes an optional `lists` predicate (absent: every tool). `WIRE_MINOR` is 61. `src/engine-host/detached.test.ts` pins the engine host's welcome capabilities word for word, so a capability added there moves it too. The node project's typecheck needs `NODE_OPTIONS=--max-old-space-size=8192` on the MacBook.
+  Left to M3 (from M1's review): `SetupIntentPatchSchema` already admits `mawsTools`, and the generic patch merge stores it as sent; M3's `patch` rules (refused on a fork, the full set removes the key) are what close that.
 - [ ] M2 · Ticket 420: the ask up front, `blocking` required, the edit tools deferred.
 - [ ] M3 · The set kept with the session.
 - [ ] M4 · The machine's default, and Settings › Sessions.
