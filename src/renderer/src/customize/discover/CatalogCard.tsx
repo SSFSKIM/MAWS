@@ -19,6 +19,9 @@ import { DISCOVER as D } from './copy';
 import { addable, cardContentsWords, metricWords, trustOf } from './present';
 
 export const CARD_HEIGHT = 'h-36';
+// While a change's line stands on a card, the card grows from that height to hold it (the M4 picture review): the fixed
+// height has no room for it beside the byline's two lines and a two-line description.
+const CARD_HEIGHT_WITH_LINE = 'min-h-36';
 
 const CheckIcon = () => (
   <svg viewBox="0 0 16 16" aria-hidden className="size-3.5 shrink-0 fill-none stroke-current [stroke-linecap:round] [stroke-linejoin:round] [stroke-width:1.75]">
@@ -70,6 +73,8 @@ export function InstalledMark() {
 }
 
 export function CatalogCard({ item, tab, kindWord = false, onOpen }: { item: CatalogItem; tab: CatalogKindTab; kindWord?: boolean; onOpen(item: CatalogItem): void }) {
+  const { ops } = useManage();
+  const lined = ops.entries.has(catalogKey(item));
   const metric = metricWords(item);
   const here = item.installed === 'here';
   const name = (
@@ -83,7 +88,7 @@ export function CatalogCard({ item, tab, kindWord = false, onOpen }: { item: Cat
       data-installed={item.installed}
       data-install-name={item.install.kind === 'plugin' ? item.install.pluginName : undefined}
       data-install-marketplace={item.install.kind === 'plugin' ? item.install.marketplaceName : undefined}
-      className={`relative flex ${CARD_HEIGHT} min-w-0 flex-col gap-1 rounded-lg border border-border bg-bg-raised p-3 hover:border-border-strong`}
+      className={`relative flex ${lined ? CARD_HEIGHT_WITH_LINE : CARD_HEIGHT} min-w-0 flex-col gap-1 rounded-lg border border-border bg-bg-raised p-3 hover:border-border-strong`}
       onClick={(event) => {
         if (!(event.target instanceof Element && event.target.closest('button:not([data-card-open])'))) onOpen(item);
       }}
@@ -105,12 +110,15 @@ export function CatalogCard({ item, tab, kindWord = false, onOpen }: { item: Cat
           {/* the publisher keeps its line and the trust label has its own beneath it, on every card: the description
               then starts at one height across a shelf, and the room a short one leaves is not all above the components
               (the card's height is fixed); the label once wrapped only where it did not fit, so it moved up on a card
-              whose words beside the name grew shorter (G278's check, the M4 picture review) */}
+              whose words beside the name grew shorter (G278's check, the M4 picture review). A card with no publisher
+              keeps the publisher's line, empty, so its label and description stand where its neighbours' do */}
           <span data-catalog-byline className="flex min-w-0 flex-col items-start gap-0.5 text-ui-sm text-fg-muted">
-            {item.publisher && (
+            {item.publisher ? (
               <span data-catalog-publisher title={D.by(item.publisher)} className="max-w-full truncate">
                 {D.by(item.publisher)}
               </span>
+            ) : (
+              <span aria-hidden="true" className="h-[1lh]" />
             )}
             <TrustLabel item={item} />
           </span>

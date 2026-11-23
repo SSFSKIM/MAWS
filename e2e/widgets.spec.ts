@@ -1737,7 +1737,7 @@ test.describe('plugin management (E8)', () => {
     await noted.evaluate((row) => row.scrollIntoView({ block: 'center' }));
     await noted.locator('[data-row-open]').focus();
     const note = noted.locator('[data-row-note]');
-    await expect(note).toHaveAttribute('data-open', '');
+    await expect(note).toHaveAttribute('data-open'); // present while open (`data-open="true"`)
     await expect(note, 'room below the row: the note opens down, over the next group’s head').toHaveAttribute('data-side', 'down');
     const head = await items.locator('[data-plugins-group="builtIn"] h4').elementHandle();
     const onTop = () => note.evaluate((element, crossed) => {

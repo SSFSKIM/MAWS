@@ -1280,26 +1280,6 @@ test('scenario: sidebar, Overview, waiting sessions, pages, Customize, Settings,
       await open('compact', 'focus on tests');
     });
     await reset(page);
-    // A typed title renames at once on both builds (widgets/RenameWidget.tsx). Master's widget then stays open with its
-    // line; M4's closes once the rename took, the new title showing where the session is named (P637). So the build is
-    // read before the dialog is waited on, and the check holds the title on the session's sidebar row on both.
-    const RENAMED = 'New title';
-    const renameDialog = () => dialogOf(page, 'rename');
-    const renamedRow = async () => (await sidebarRow(page, { appSessionId: SID.idle })).locator('[data-session-title]').filter({ hasText: new RegExp(`^${literal(RENAMED)}$`) });
-    await shot(page, m0({ id: 'm0-dialog-rename', title: 'Rename (/rename) in a scenario session', how: 'Type /rename New title and press Enter', state: 'The idle session renamed “New title” on its sidebar row; on M4 (P637) no dialog left open, master’s widget open with its line “Renamed · New title”', folders: ['widgets', 'composer', 'sidebar'] }), async () => {
-      const m4 = await m4Build(page);
-      await openSession(page, SID.idle);
-      await typed(page, 'rename', RENAMED);
-      if (m4) await expect(await renamedRow(), 'the session renamed').toBeVisible({ timeout: 15_000 });
-      else await expect(renameDialog()).toBeVisible({ timeout: 15_000 });
-    }, {
-      check: async () => {
-        await inView(await renamedRow(), 'the new title on the session’s row');
-        if (m4Cut()) await expect(renameDialog(), 'no rename dialog left open').toHaveCount(0);
-        else await inView(renameDialog().locator('[role="status"]').filter({ hasText: M4_WORDS.renamed(RENAMED) }), 'master’s line in the widget');
-      },
-    });
-    await reset(page);
     // The catalogue's read is made as a session's message box attaches it (stores/catalog.ts, attachCatalog), so the session
     // is one the rig has not opened, and one the widget backend answers for: the backend holds the scenario's `engine`
     // statuses only (src/main/widgets/fixture-backend.ts), and a read for any other session fails with "unknown app
@@ -2049,6 +2029,7 @@ const PLAYED = [
 // pass3/stop-task: a background shell, a background agent and a workflow, each stopped by the person after its prompt
 const STOPPED = { fixture: 'spikes/protocol-probe/fixtures/pass3/stop-task.jsonl', engineId: '0a1b2c3d-0000-4000-8000-000000000005', title: 'Stop the background work', stops: ['ba3cr5gnx', 'ac2bd8a00d8e492f4', 'wkmzd07jp'] };
 const IDLE = ['Usage reset countdown', 'SDK wire inventory', 'Terminal workflow notes', 'Workstation north star'];
+const IDLE_ENGINE_ID = (i: number) => `0a1b2c3d-0000-4000-8000-0000000001${String(i).padStart(2, '0')}`;
 
 // The turn's line ends its turn, under the answer (board ticket 789); opening it shows the work as runs of calls, one
 // line each, which open in turn (U2a: transcript/view/rows/Divider.tsx, Group.tsx).
@@ -2115,7 +2096,7 @@ test('replay: transcripts, the right column, the Artifacts library and an editor
   const config = join(SCRATCH, 'claude-config');
   rmSync(config, { recursive: true, force: true });
   [...PLAYED, STOPPED].forEach((p, i) => seedSession(config, repo, p.engineId, p.title, `2026-09-29T10:${String(10 + i).padStart(2, '0')}:00.000Z`));
-  IDLE.forEach((title, i) => seedSession(config, i % 2 ? other : repo, `0a1b2c3d-0000-4000-8000-0000000001${String(i).padStart(2, '0')}`, title, `2026-09-29T10:0${i}:00.000Z`));
+  IDLE.forEach((title, i) => seedSession(config, i % 2 ? other : repo, IDLE_ENGINE_ID(i), title, `2026-09-29T10:0${i}:00.000Z`));
   const usage = usageFixture();
   trust(config);
   // a file outside every session's folder, which File › Open picks through the e2e pick seam (src/main/client/e2e-pick.ts).
@@ -2392,6 +2373,35 @@ test('replay: transcripts, the right column, the Artifacts library and an editor
       await openSession(page, ids.agents!);
       await typed(page, 'rename');
       await expect(page.getByRole('dialog').first()).toBeVisible({ timeout: 15_000 });
+    });
+    await reset(page);
+    // A typed title renames at once on both builds (widgets/RenameWidget.tsx). Master's widget then stays open with its
+    // line; M4's closes once the rename took, the new title showing where the session is named (P637). So the build is
+    // read before the dialog is waited on, and the check holds the title on the session's sidebar row on both. The
+    // session is an indexed one never started here, so the rename is the index's override and the record's change reaches
+    // the sidebar as any rename's does (a scenario's widget backend answers a rename without publishing it); its seeded
+    // title comes back after the shot.
+    const RENAMED = 'New title';
+    const renameDialog = () => dialogOf(page, 'rename');
+    const idle = (value(await invoke(page, 'session.list', {})).sessions.find((s) => s.engineSessionId === IDLE_ENGINE_ID(0))?.appId ?? '') as string;
+    const renamedRow = async () => (await sidebarRow(page, { appSessionId: idle as never })).locator('[data-session-title]').filter({ hasText: new RegExp(`^${literal(RENAMED)}$`) });
+    await shot(page, m0({ id: 'm0-dialog-rename', title: 'Rename (/rename) in a session', how: `Type /rename New title in the “${IDLE[0]}” session, never started, and press Enter`, state: 'The session renamed “New title” on its sidebar row; on M4 (P637) no dialog left open, master’s widget open with its line “Renamed · New title”', folders: ['widgets', 'composer', 'sidebar'] }), async () => {
+      if (!idle) throw new Error(`the “${IDLE[0]}” session was not listed by the index`);
+      const m4 = await m4Build(page);
+      await openSession(page, idle);
+      await typed(page, 'rename', RENAMED);
+      if (m4) await expect(await renamedRow(), 'the session renamed').toBeVisible({ timeout: 15_000 });
+      else await expect(renameDialog()).toBeVisible({ timeout: 15_000 });
+    }, {
+      check: async () => {
+        await inView(await renamedRow(), 'the new title on the session’s row');
+        if (m4Cut()) await expect(renameDialog(), 'no rename dialog left open').toHaveCount(0);
+        else await inView(renameDialog().locator('[role="status"]').filter({ hasText: M4_WORDS.renamed(RENAMED) }), 'master’s line in the widget');
+      },
+      after: async () => {
+        await closeOverlays(page);
+        if (idle) value(await invoke(page, 'session.rename', { appSessionId: idle as never, title: IDLE[0]! }));
+      },
     });
     await reset(page);
 

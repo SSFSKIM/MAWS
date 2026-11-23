@@ -471,6 +471,22 @@ test('install: + adds the marketplace and installs through the real CLI; warning
     // the word cut (G278): the check alone, "Installed" its name and its tooltip
     await expect(byName(results(page), 'hooked').locator('[data-catalog-installed]')).toHaveAccessibleName('Installed');
     await expect(byName(results(page), 'hooked').locator('[data-catalog-installed]')).toHaveText('');
+    // the M4 picture review, round 2: the install's line stands on the card, which grows to hold it; the line is not cut
+    // and no part of the card runs into the next
+    const installed = byName(results(page), 'hooked');
+    await expect(installed.getByRole('status')).toBeVisible();
+    const overlaps = await installed.evaluate((card) => {
+      const status = card.querySelector('[role="status"]')!;
+      const holder = status.closest('div')!; // the card's holder of the operation line
+      const [description, meta, line, outer] = [card.querySelector('[data-catalog-description]')!, card.querySelector('[data-catalog-components]')!.parentElement!, holder, card].map((part) => part.getBoundingClientRect());
+      const found: string[] = [];
+      if (holder.clientHeight + 0.5 < status.getBoundingClientRect().height) found.push(`the line cut to ${holder.clientHeight}px`);
+      if (description!.bottom > meta!.top + 0.5) found.push('the description runs into the components');
+      if (meta!.bottom > line!.top + 0.5) found.push('the components run into the line');
+      if (line!.bottom > outer!.bottom + 0.5) found.push('the line passes the card’s edge');
+      return found;
+    });
+    expect(overlaps).toEqual([]);
   });
 
   await test.step('installed: the scratch settings, the engine’s own listing, My items', async () => {
@@ -516,7 +532,19 @@ test('install: + adds the marketplace and installs through the real CLI; warning
     const copy = join(userData, 'maws-second-test');
     cpSync(marketplace, copy, { recursive: true });
     const manifest = join(copy, '.claude-plugin', 'marketplace.json');
-    writeFileSync(manifest, readFileSync(manifest, 'utf8').replace(`"name": "${TEST_MARKETPLACE}"`, '"name": "maws-second-test"'));
+    // its hooked is someone else's code with no author (the M4 picture review, round 2): kept outside the owner's
+    // plugins (`external_plugins/`, so the owner does not stand in) and naming no author, its card has no publisher
+    type Listed = { name: string; source: string; author?: unknown };
+    const listing = JSON.parse(readFileSync(manifest, 'utf8')) as { name: string; plugins: Listed[] };
+    listing.name = 'maws-second-test';
+    listing.plugins = listing.plugins.map(({ author, ...entry }) => (entry.name === 'hooked' ? { ...entry, source: './external_plugins/hooked' } : { ...entry, author }));
+    writeFileSync(manifest, `${JSON.stringify(listing, null, 2)}\n`);
+    cpSync(join(copy, 'plugins', 'hooked'), join(copy, 'external_plugins', 'hooked'), { recursive: true });
+    rmSync(join(copy, 'plugins', 'hooked'), { recursive: true, force: true });
+    const hookedManifest = join(copy, 'external_plugins', 'hooked', '.claude-plugin', 'plugin.json');
+    const unsignedManifest = JSON.parse(readFileSync(hookedManifest, 'utf8')) as Record<string, unknown>;
+    delete unsignedManifest.author;
+    writeFileSync(hookedManifest, `${JSON.stringify(unsignedManifest)}\n`);
     const second = realpathSync(copy);
     await searchAfresh(page, 'local-server');
     await expect(byName(results(page), 'local-server')).toHaveCount(1);
@@ -533,6 +561,20 @@ test('install: + adds the marketplace and installs through the real CLI; warning
     const skills = results(page).locator(`[data-catalog-card^="local:${second}"][data-install-name="skills-only"]`);
     await expect(skills.locator('[data-catalog-components]')).toHaveText('2 skills');
     await expect(skills).toContainText('by MAWS e2e skills');
+    // the M4 picture review, round 2: on a mixed grid, a card with no publisher keeps the publisher's line, so its trust
+    // label and its description stand where its neighbour's do
+    await searchAfresh(page, 'hooked');
+    await expect(byName(results(page), 'hooked')).toHaveCount(2, { timeout: CLI_MS });
+    const unsigned = results(page).locator(`[data-catalog-card^="local:${second}"][data-install-name="hooked"]`);
+    await expect(unsigned.locator('[data-catalog-publisher]')).toHaveCount(0);
+    await expect(results(page).locator('[data-catalog-card][data-install-name="hooked"] [data-catalog-publisher]')).toHaveCount(1);
+    const offsets = await results(page).locator('[data-catalog-card][data-install-name="hooked"]').evaluateAll((cards) =>
+      cards.map((card) => {
+        const top = card.getBoundingClientRect().top;
+        return [card.querySelector('[data-trust]')!, card.querySelector('[data-catalog-description]')!].map((part) => Math.round(part.getBoundingClientRect().top - top)).join('/');
+      }),
+    );
+    expect(new Set(offsets).size, `the trust labels' and descriptions' offsets: ${offsets.join(', ')}`).toBe(1);
   });
 });
 

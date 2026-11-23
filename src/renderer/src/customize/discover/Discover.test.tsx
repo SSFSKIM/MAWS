@@ -469,6 +469,34 @@ describe('Customize › Discover, Show: Plugins', () => {
     expect(byline.lastElementChild!.hasAttribute('data-trust')).toBe(true); // after the publisher, the line beneath it
   });
 
+  // The M4 picture review, round 2: a card with no publisher (an added listing with neither author nor owner) keeps the
+  // publisher's line empty, so its trust label and description stand where its neighbours' do.
+  it('a card with no publisher keeps the publisher’s line, empty, above its trust label', async () => {
+    catalog = catalog.map((i) => (i.id === skillsOnly.id ? { ...i, publisher: null } : i));
+    mountPlugins();
+    await discover();
+    const byline = card(skillsOnly.id).querySelector<HTMLElement>('[data-catalog-byline]')!;
+    expect(byline.querySelector('[data-catalog-publisher]')).toBeNull();
+    expect(byline.children).toHaveLength(2);
+    const held = byline.firstElementChild as HTMLElement;
+    expect([held.textContent, held.getAttribute('aria-hidden'), held.classList.contains('h-[1lh]')]).toEqual(['', 'true', true]);
+    expect(byline.lastElementChild!.hasAttribute('data-trust')).toBe(true);
+  });
+
+  // The M4 picture review, round 2: the card's height is fixed so a shelf aligns, but not while a change's line stands on
+  // it: then it grows to hold the line, rather than squeezing it into the description's room.
+  it('a card grows past its fixed height while a change’s line stands on it, and its neighbours keep theirs', async () => {
+    mountPlugins();
+    await discover();
+    expect(card(hooked.id).classList.contains('h-36')).toBe(true);
+    fireEvent.click(within(card(hooked.id)).getByRole('button', { name: 'Add hooked' }));
+    await resolved();
+    fireEvent.click(within(sheet()).getByRole('button', { name: 'Install' }));
+    await waitFor(() => expect(within(card(hooked.id)).getByRole('status').textContent).toBe('done'));
+    expect([card(hooked.id).classList.contains('h-36'), card(hooked.id).classList.contains('min-h-36')]).toEqual([false, true]);
+    expect(card(skillsOnly.id).classList.contains('h-36')).toBe(true);
+  });
+
   it('the Sources popover says which source is unavailable and counts dropped records', async () => {
     mountPlugins();
     await discover();
