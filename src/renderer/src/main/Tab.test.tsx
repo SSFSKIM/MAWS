@@ -212,7 +212,7 @@ describe('a session tab driven through its holder’s bridge', () => {
 
   const tabElement = () => document.querySelector<HTMLElement>(`[data-tab-id="${tab.id}"]`)!;
 
-  it('marks a bridged terminal session with the glyph named Terminal, titled with the hover card’s line, and nothing else', () => {
+  it('marks a bridged terminal session with the glyph named Terminal, titled with the hover card’s line, and nothing else', async () => {
     holding({ kind: 'self' });
     render(<Tab tab={tab} pane={0} domId="t-0" active stop onKeyDown={() => {}} />);
     expect(marker()).toBeNull(); // MAWS's own
@@ -229,6 +229,10 @@ describe('a session tab driven through its holder’s bridge', () => {
     expect(marker()?.hasAttribute('title')).toBe(false);
     expect(accessibleDescription(tabElement())).toBe('Running in Terminal');
     expect(tabElement().getAttribute('aria-label'), 'the tab’s name is its title alone').toBe('Fix drag');
+    // fix round 2: the glyph inserted once the bridge went live, after the tab mounted, still shows the line on pointing
+    await userEvent.setup().hover(marker()!);
+    expect((await screen.findByRole('tooltip', {}, { timeout: 2000 })).textContent).toBe('Running in Terminal');
+    await userEvent.setup().unhover(marker()!);
     act(() => applyLaneAState(A, null));
     expect(marker()).toBeNull();
     expect(tabElement().hasAttribute('aria-describedby')).toBe(false);
