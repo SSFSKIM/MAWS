@@ -66,13 +66,21 @@ describe('/sandbox on 2.1.295', () => {
   it('reads the answer as it read 2.1.29x’s: Sandbox off, not turned on in your settings, its settings under Details', () => {
     const view = present(ANSWER_2_1_295);
     expect(view).toMatchObject({ headline: 'Sandbox off', reason: 'Not turned on in your settings', outside: null, locked: false, excluded: [], restrictions: [] });
-    expect(view.rows).toEqual([
-      { label: 'In your settings', value: 'off' },
-      { label: 'Set by policy', value: 'no' },
-      { label: 'Auto-allow', value: 'available' },
-      { label: 'Unsandboxed fallback', value: 'allowed' },
-    ]);
+    // the word cut (P617): Details keeps Auto-allow, Network and the lists, not the first read's repeats
+    expect(view.rows).toEqual([{ label: 'Auto-allow', value: 'available' }]);
     expect(view.dependencies).toEqual({ errors: [], warnings: [] });
+  });
+
+  // the word cut (P614): a policy lock says who set it, nothing more
+  it('says "Set by your organization" under a policy-locked sandbox', async () => {
+    backend.script('session.getSandboxDialog', () => ({ ...ANSWER_2_1_295, locked: true }));
+    render(
+      <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+        <SandboxWidget appSessionId={ID} args="" close={() => {}} />
+      </QueryClientProvider>,
+    );
+    expect(await screen.findByText('Set by your organization')).toBeTruthy();
+    expect(document.querySelector('[data-widget="sandbox"]')!.textContent).not.toContain('cannot be changed here');
   });
 
   it('draws the first read with Details beneath and offers no control that writes settings, in the utility box', async () => {

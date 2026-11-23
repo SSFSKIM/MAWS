@@ -61,9 +61,10 @@ describe('every widget renders its fixture response', () => {
       ['Ask', 1],
       ['Deny', 0],
     ]);
-    expect(view.groups[0].rules[0]).toEqual({ rule: 'Bash(git log --oneline)', source: 'this session · grant', editability: 'session', description: { prefix: 'The Bash command ', emphasis: 'git log --oneline' } });
-    expect(view.groups[1].rules[0]).toMatchObject({ rule: 'Bash(git:*)', source: 'startup settings', editability: 'readonly' });
-    expect(view.workspace).toEqual([{ path: '/private/tmp/maws-probe2-UVKiUq', note: 'original directory' }]);
+    // the word cut (P586, P588): a source is one word, the file under it only where one is named; no note on the first folder
+    expect(view.groups[0].rules[0]).toEqual({ rule: 'Bash(git log --oneline)', source: 'session', file: null, editability: 'session', description: { prefix: 'The Bash command ', emphasis: 'git log --oneline' } });
+    expect(view.groups[1].rules[0]).toMatchObject({ rule: 'Bash(git:*)', source: 'startup', file: null, editability: 'readonly' });
+    expect(view.workspace).toEqual([{ path: '/private/tmp/maws-probe2-UVKiUq', note: null }]);
     expect(view.mode).toBeNull();
   });
 
@@ -74,9 +75,9 @@ describe('every widget renders its fixture response', () => {
       permissionMode: { requested: 'auto', effective: 'default', refusal: 'auto_mode_model' },
       grants: ['Bash(ls)'],
     } as Pick<EngineSessionStatus, 'permissionMode' | 'grants'>);
-    expect(odd.groups[2].rules[0]).toMatchObject({ source: 'someNewSource', editability: null, description: null });
+    expect(odd.groups[2].rules[0]).toMatchObject({ source: 'someNewSource', file: null, editability: null, description: null });
     expect(odd.workspace).toEqual([
-      { path: '/o', note: 'original directory' },
+      { path: '/o', note: null },
       { path: '/w', note: 'added' },
     ]);
     expect(odd.mode).toEqual({ effective: 'default', refusal: 'This model does not support auto mode' });
@@ -84,10 +85,17 @@ describe('every widget renders its fixture response', () => {
     expect(odd.grants).toBe(1);
   });
 
+  // the word cut (N184): a hook's source in the permission rules' one word, the engine's label only for a source they do
+  // not name
   it('hooks: one PostToolUse hook from startup settings with its matcher and display text', () => {
     const view = Hooks.present(line<GetHooksListingResponse>('pass2/hooks', 46));
     expect(view.events).toEqual([{ name: 'PostToolUse', summary: 'After tool execution', count: 1 }]);
-    expect(view.hooks).toEqual([{ event: 'PostToolUse', matcher: 'Bash', source: 'Startup settings (--settings option)', text: 'echo MAWS_POSTHOOK', type: 'command' }]);
+    expect(view.hooks).toEqual([{ event: 'PostToolUse', matcher: 'Bash', source: 'startup', file: null, text: 'echo MAWS_POSTHOOK', type: 'command' }]);
+    const other = Hooks.present({ events: [], hooks: [{ event: 'Stop', source: 'userSettings', sourceLabel: 'User settings' }, { event: 'Stop', source: 'pluginHook', sourceLabel: 'Plugin hooks' }] });
+    expect(other.hooks.map((h) => [h.source, h.file])).toEqual([
+      ['user', '~/.claude/settings.json'],
+      ['Plugin hooks', null],
+    ]);
     expect(view.policy).toBeNull();
     expect(Hooks.present(line<GetHooksListingResponse>('reads', 66)).hooks).toEqual([]);
   });
@@ -96,7 +104,7 @@ describe('every widget renders its fixture response', () => {
     const view = Memory.present(line<GetMemoryDialogResponse>('reads', 69));
     expect(view.files.map((f) => [f.label, f.exists, f.note])).toEqual([
       ['User instructions', true, null],
-      ['Project instructions', false, 'does not exist yet'],
+      ['Project instructions', false, 'not created'], // the word cut (P623)
     ]);
     expect(view.files[1].path).toBe('/private/tmp/maws-probe-35ZnCO/CLAUDE.md');
     expect(view.folders).toEqual([{ label: 'Open auto-memory folder', path: '/Users/new/.claude/projects/-private-tmp-maws-probe-35ZnCO/memory/' }]);
@@ -110,8 +118,8 @@ describe('every widget renders its fixture response', () => {
     expect(view.headline).toBe('Sandbox off');
     expect(view.reason).toBe('Not turned on in your settings');
     expect(view.locked).toBe(false);
-    expect(view.rows).toContainEqual({ label: 'In your settings', value: 'off' });
-    expect(view.rows).toContainEqual({ label: 'Unsandboxed fallback', value: 'allowed' });
+    // the word cut (P617): Details no longer repeats the first read's settings, policy lock or fallback
+    expect(view.rows.map((r) => r.label)).toEqual(['Auto-allow']);
     expect(view.restrictions).toEqual([]);
     expect(view.dependencies).toEqual({ errors: [], warnings: [] });
   });
@@ -143,9 +151,11 @@ describe('every widget renders its fixture response', () => {
     expect(Sandbox.present({ ...base, excluded_commands: ['docker'] }).outside, 'off: every command already runs outside it').toBeNull();
   });
 
+  // the word cut (P643, P647): the line counts alone, "· against <branch>" only for a branch comparison; "No diff" with
+  // its two reasons kept for the pointer
   it('diff: 0 files on the working tree; a null diff says why', () => {
-    expect(Diff.present(line<GetWorkspaceDiffResponse>('reads', 81))).toEqual({ line: '0 files · +0 −0 · working tree', files: [], skippedLarge: 0, restricted: 0, scope: 'uncommitted' });
-    expect(Diff.present({ diff: null }).line).toBe('No diff · not a git repository, or a merge, rebase or cherry-pick is in progress');
+    expect(Diff.present(line<GetWorkspaceDiffResponse>('reads', 81))).toEqual({ line: '+0 −0', why: null, files: [], skippedLarge: 0, restricted: 0, scope: 'uncommitted' });
+    expect(Diff.present({ diff: null })).toMatchObject({ line: 'No diff', why: 'Not a git repository, or a merge, rebase or cherry-pick is in progress' });
     const one = Diff.present({
       diff: {
         stats: { filesCount: 2, linesAdded: 3, linesRemoved: 1 },
@@ -159,7 +169,7 @@ describe('every widget renders its fixture response', () => {
         source: { kind: 'branch', baseBranch: 'main', baseRef: 'abc' },
       },
     });
-    expect(one.line).toBe('2 files · +3 −1 · against main');
+    expect(one.line).toBe('+3 −1 · against main');
     expect(one.files).toEqual([
       { path: 'a.ts', stat: '+3 −1', note: null },
       { path: 'b.png', stat: '', note: 'binary · untracked' },
@@ -240,10 +250,9 @@ describe('every widget renders its fixture response', () => {
   it('config: the effective settings, their sources and what was applied', () => {
     const view = Config.present(line<GetSettingsResponse>('pass2/dialogs', 58));
     expect(view.effective).toEqual([{ key: 'dialogExpiry', value: '"never"' }]);
-    expect(view.sources).toEqual([{ source: 'flagSettings', label: 'startup settings', keys: ['dialogExpiry'] }]);
+    // the word cut (P586, P609): Sources in the permission rules' words; Applied without Model and Effort, which the chip carries
+    expect(view.sources).toEqual([{ source: 'flagSettings', label: 'startup', keys: ['dialogExpiry'] }]);
     expect(view.applied).toEqual([
-      { label: 'Model', value: 'claude-sonnet-5[1m]' },
-      { label: 'Effort', value: 'high' },
       { label: 'Advisor', value: 'none' },
       { label: 'Ultracode', value: 'off' },
     ]);

@@ -246,7 +246,7 @@ describe('skills widget: states', () => {
   });
 
   // P2-A's dormant state (§5.10; A §5.6) through the frame: opening reads and starts nothing; Load now acquires for a read
-  it('an exited session shows Not read yet with Load now and starts nothing until it is clicked; then the skills are read', async () => {
+  it('an exited session shows Load now and starts nothing until it is clicked; then the skills are read', async () => {
     useSessions.setState({ engine: new Map([[ID, { ...lifted(backend.status(BARE)), process: 'exited' }]]), records: new Map([[ID, record(ID, { directory: cwd })]]), digests: new Map([[ID, digest(ID, { availability: 'resumable' })]]) });
     backend.script('session.getSkillsDialog', () => DIALOG);
     backend.script('session.acquire', () => {
@@ -254,15 +254,14 @@ describe('skills widget: states', () => {
       return { status: 'ready', appSessionId: BARE, launched: true, joined: false };
     });
     mount();
-    await waitFor(() => expect(screen.getByText('Not read yet.')).toBeTruthy());
-    expect(screen.getByRole('button', { name: 'Load now' })).toBeTruthy();
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Load now' })).toBeTruthy()); // the word cut (P519): Load now alone
     expect(backend.calls.filter((c) => c.command === 'session.getSkillsDialog')).toEqual([]);
     expect(backend.calls.filter((c) => /^session\.(acquire|start|resume|launch|reloadSkills)/.test(c.command))).toEqual([]);
     expect(screen.getByRole('button', { name: 'Reload skills' })).toHaveProperty('disabled', true);
     fireEvent.click(screen.getByRole('button', { name: 'Load now' }));
     await waitFor(() => expect(screen.getByRole('region', { name: 'In this project' })).toBeTruthy());
     expect(backend.calls.filter((c) => c.command === 'session.acquire').map((c) => c.input)).toEqual([{ appSessionId: BARE, reason: 'read' }]);
-    expect(screen.queryByText('Not read yet.')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Load now' })).toBeNull();
   });
 
 });

@@ -489,7 +489,7 @@ describe('plugins widget: loaded in this session and the reloads', () => {
     mount();
     await waitFor(() => expect(row('e8-probe@e8-scratch')).toBeTruthy());
     fireEvent.click(within(loadedLine()).getByRole('button', { name: 'Refresh' }));
-    expect(loadedLine().textContent).toContain('Starting…');
+    expect(within(loadedLine()).queryByRole('button', { name: 'Refresh' })).toBeNull(); // the word cut (P523): the quiet spinner stands in its place
     await waitFor(() => expect(backend.calls.filter((c) => c.subtype === 'reload_plugins')).toHaveLength(1));
     expect(invoked('session.acquire')).toEqual([{ appSessionId: BARE, reason: 'read' }]);
     await waitFor(() => expect(loadedLine().textContent).toContain('Loaded now'));

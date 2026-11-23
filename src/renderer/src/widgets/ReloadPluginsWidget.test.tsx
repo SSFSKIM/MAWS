@@ -64,7 +64,7 @@ describe('/reload-plugins', () => {
     useSessions.setState({ engine: new Map([[ID, lifted(backend.status(BARE))]]), records: new Map([[ID, record(ID)]]) });
     act(() => void backend.emitStatus(BARE, { process: 'exited' })); // the backend's engine and the store alike
     mount();
-    expect(screen.getByText('Not read yet.')).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Load now' })).toBeTruthy(); // the word cut (P519): Load now alone
     expect(screen.queryByText(/not running/)).toBeNull();
     expect(screen.queryByRole('button', { name: 'Reload plugins' })).toBeNull();
     expect(reloads()).toEqual([]);

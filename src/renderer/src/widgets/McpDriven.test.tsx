@@ -64,6 +64,20 @@ describe('McpDriven', () => {
     await waitFor(() => expect(command).toHaveBeenCalledWith('mcp', 'disable probe'));
   });
 
+  // the word cut (P576, P569): the list's partial reach in a few words, and the quiet spinner while a command runs
+  it('says the list is partial in a few words, and shows the quiet spinner, not "Working…", while a command runs', async () => {
+    let finish: (result: ControlResult) => void = () => {};
+    const command = vi.fn(() => new Promise<ControlResult>((resolve) => (finish = resolve)));
+    render(<McpDriven appSessionId={ID} controls={controlsWith({}, command)} close={() => {}} />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Reconnect' }));
+    expect(screen.getByText('Partial list · the terminal’s /mcp shows all')).toBeTruthy();
+    expect(await screen.findByRole('progressbar', { name: 'Working…' })).toBeTruthy();
+    expect(screen.queryByText('Working…')).toBeNull();
+    await act(async () => finish({ state: 'refused', code: 'x', message: 'no' }));
+    expect(screen.queryByRole('progressbar')).toBeNull();
+    expect(screen.getByRole('status').textContent).toBe('no');
+  });
+
   it('sends one enable while one runs, Enter included', async () => {
     let finish: (result: ControlResult) => void = () => {};
     const command = vi.fn(() => new Promise<ControlResult>((resolve) => (finish = resolve)));

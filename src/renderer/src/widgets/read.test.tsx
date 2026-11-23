@@ -197,7 +197,7 @@ describe('useEngineRead', () => {
       throw new WidgetBackendError({ code: 'timeout', message: 'get_workspace_diff unanswered after 8 s' });
     });
     act(() => result.current.refetch());
-    await waitFor(() => expect(result.current.error).toBe('The engine did not answer · showing the last value it reported'));
+    await waitFor(() => expect(result.current.error).toBe('The engine did not answer · last reading shown')); // the word cut (P525)
     expect(result.current.state).toBe('ready');
     expect(result.current.data).toMatchObject({ diff: expect.anything() });
     off();
@@ -205,7 +205,7 @@ describe('useEngineRead', () => {
       throw new WidgetBackendError({ code: 'internal', message: 'the diff read failed' });
     });
     act(() => result.current.refetch());
-    await waitFor(() => expect(result.current.error).toBe('the diff read failed · showing the last value it reported'));
+    await waitFor(() => expect(result.current.error).toBe('the diff read failed · last reading shown'));
   });
 
   it('in passive mode issues nothing and renders what the harness read into the cache under its key', async () => {

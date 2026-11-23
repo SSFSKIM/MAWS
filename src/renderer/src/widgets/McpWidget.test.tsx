@@ -17,6 +17,7 @@ import type { PreloadBridge } from '@shared/ipc/schema';
 import { heard, resetSignIns } from '../customize/connectors/sign-in';
 import { useSessions } from '../stores/sessions';
 import { PlusMenu } from '../composer/plus-menu/PlusMenu';
+import { accessibleDescription } from '../test-support/accessible-text';
 import { McpBody, McpWidget, present, toggleView } from './McpWidget';
 
 const ROOT = join(__dirname, '../../../..');
@@ -57,17 +58,24 @@ const withServer = (name: string, patch: Record<string, unknown>): McpAnswer => 
 };
 
 describe('mcp reconnect runs as an operation', () => {
-  it('calls session.mcpReconnect for the server, shows Working…, and reads mcp_status again on completion', async () => {
+  // the word cut (P569, P570): Reconnect keeps its word with a quiet spinner beside it while it works, and a success says
+  // nothing under the row
+  it('calls session.mcpReconnect for the server, shows its spinner, and reads mcp_status again on completion', async () => {
     backend.holdOperations(true);
     mount();
     fireEvent.click(disclosure(await row(DOCS))); // U11a: a connected row's Reconnect is in its opened part
     fireEvent.click(within(await row(DOCS)).getByRole('button', { name: 'Reconnect' }));
-    await waitFor(() => expect((within(document.body).getAllByRole('status').find((s) => s.textContent === 'Working…'))).toBeTruthy());
+    const reconnect = within(await row(DOCS)).getByRole('button', { name: /^Reconnect/ });
+    expect(await within(reconnect).findByRole('progressbar', { name: 'Working…' })).toBeTruthy();
+    expect(reconnect.getAttribute('aria-busy')).toBe('true');
+    expect(within(await row(DOCS)).queryByRole('status')).toBeNull();
     expect(backend.calls.find((c) => c.subtype === 'mcp_reconnect')?.input).toEqual({ appSessionId: BARE, serverName: DOCS });
     expect(reads()).toBe(1);
     act(() => void backend.settleOperations());
     await waitFor(() => expect(reads()).toBe(2));
-    await waitFor(async () => expect((await statusOf(DOCS)).textContent).toBe('Reconnected'));
+    await waitFor(async () => expect(within(await row(DOCS)).queryByRole('progressbar')).toBeNull());
+    expect(within(await row(DOCS)).queryByRole('status')).toBeNull();
+    expect((await row(DOCS)).textContent).not.toContain('Reconnected');
   });
 });
 
@@ -78,14 +86,18 @@ describe('mcp toggle reads its state back after either outcome', () => {
     const docs = await serverSwitch(DOCS);
     expect(docs.getAttribute('aria-checked')).toBe('true');
     fireEvent.click(docs);
-    await waitFor(async () => expect((await statusOf(DOCS)).textContent).toBe('Working…'));
+    // the word cut (P569, P570): the switch's knob spins while it works, and a success says nothing under the row
+    expect(await within(docs).findByRole('progressbar', { name: 'Working…' })).toBeTruthy();
+    expect(docs.getAttribute('aria-busy')).toBe('true');
+    expect(within(await row(DOCS)).queryByRole('status')).toBeNull();
     expect(backend.calls.find((c) => c.subtype === 'mcp_toggle')?.input).toEqual({ appSessionId: BARE, serverName: DOCS, enabled: false });
     expect(reads()).toBe(1);
     act(() => void backend.settleOperations());
     await waitFor(async () => expect((await serverSwitch(DOCS)).getAttribute('aria-checked')).toBe('false'));
     await new Promise((r) => setTimeout(r, 20));
     expect(reads()).toBe(2); // exactly one read-back after the outcome
-    expect((await statusOf(DOCS)).textContent).toBe('Done');
+    expect(within(await row(DOCS)).queryByRole('status')).toBeNull();
+    expect((await row(DOCS)).textContent).not.toContain('Done');
   });
 
   it('a refusal before the write (Server not found) leaves the switch where the read puts it, with the words', async () => {
@@ -233,9 +245,10 @@ describe('the Connectors dialog: one line per connector (U11a §C)', () => {
       ['notes', 'Connected · 2 tools'],
       ['tickets', 'Sign in needed'],
       ['search', 'Failed'],
-      ['calendar', 'Connecting…'],
+      ['calendar', ''], // the word cut (P565): the quiet spinner in the status place
       ['files', null], // disabled: the switch says it
     ]);
+    expect(await within(rows[3].querySelector<HTMLElement>('[data-connector-state]')!).findByRole('progressbar', { name: 'Connecting…' })).toBeTruthy();
     for (const unopened of ['example.test', 'files-mcp', 'scope ', 'from ', 'find_note', 'Connection refused']) expect(list.textContent).not.toContain(unopened);
     const [notes, , , , files] = rows;
     fireEvent.click(disclosure(notes));
@@ -246,21 +259,22 @@ describe('the Connectors dialog: one line per connector (U11a §C)', () => {
     expect(files.textContent).toContain('scope project');
   });
 
-  it('says once, in the head, what the switch reaches, with where the engine records it as the tooltip; no row repeats it', async () => {
+  // the word cut (N148): what the switch reaches is each switch row's note, opened on pointing or focus and its
+  // description at rest; nothing of it in the head, and no tooltip of where the engine records it
+  it('makes what the switch reaches each switch row’s note, with nothing in the head', async () => {
     mount();
     const list = await screen.findByRole('list', { name: 'Connectors' });
     const header = document.querySelector<HTMLElement>('[data-widget="mcp"] header')!;
     expect(header.querySelector('h3')?.textContent).toBe('Connectors');
     expect(header.querySelector('[data-widget-subtitle]')?.textContent).toBe('MCP servers');
-    const note = await waitFor(() => {
-      const found = header.querySelector<HTMLElement>('[data-widget-note]');
-      expect(found).not.toBeNull();
-      return found!;
-    });
-    expect(note.textContent).toMatch(/^A switch here is for this chat, and every session started in .+ afterwards\.$/);
-    expect(note.title).toBe('The engine records it in ~/.claude.json.');
-    expect(screen.getAllByText(/A switch here/)).toHaveLength(1);
-    expect(list.textContent).not.toContain('~/.claude.json');
+    const notes = await row('notes');
+    await waitFor(() => expect(accessibleDescription(notes)).toMatch(/^A switch here is for this chat, and every session started in .+ afterwards\.$/));
+    expect(header.textContent).not.toContain('A switch here');
+    const note = notes.querySelector<HTMLElement>('[data-row-note]')!;
+    expect(note.hidden).toBe(true);
+    act(() => within(notes).getByRole('switch').focus());
+    expect(note.hidden).toBe(false);
+    expect(document.body.textContent).not.toContain('~/.claude.json');
   });
 
   it('puts Sign in and Reconnect on the line of a row that needs a sign-in or failed, and Reconnect inside a connected row', async () => {
@@ -313,13 +327,14 @@ describe('held open: an act that is out (U11a §C)', () => {
     const docs = await row(DOCS);
     fireEvent.click(disclosure(docs));
     fireEvent.click(within(docs).getByRole('switch'));
-    await waitFor(async () => expect((await statusOf(DOCS)).textContent).toBe('Working…'));
+    expect(await within(docs).findByRole('progressbar', { name: 'Working…' })).toBeTruthy();
     expect(within(docs).getByRole('switch')).toHaveProperty('disabled', true);
     expect(within(docs).getByRole('button', { name: 'Reconnect' })).toHaveProperty('disabled', true);
     fireEvent.click(disclosure(docs));
     expect(disclosure(docs).getAttribute('aria-expanded')).toBe('false');
     act(() => void backend.settleOperations());
-    await waitFor(async () => expect((await statusOf(DOCS)).textContent).toBe('Done'));
+    await waitFor(async () => expect(within(await row(DOCS)).queryByRole('progressbar')).toBeNull());
+    expect(within(await row(DOCS)).queryByRole('status')).toBeNull();
     expect(disclosure(await row(DOCS)).getAttribute('aria-expanded')).toBe('false');
     expect((await serverSwitch(DOCS)).getAttribute('aria-checked')).toBe('false');
   });
@@ -333,12 +348,15 @@ describe('the place the head names (U11a §C, "<place>")', () => {
   const WORKTREE = `${MAIN}/.claude/worktrees/feature`;
   const listed = (toplevel: string) => ({ repoRoot: MAIN, commonDir: `${MAIN}/.git`, worktrees: [], toplevel });
   const inFolder = (cwd: string) => useSessions.setState({ engine: new Map([[ID, { ...lifted(backend.status(BARE)), cwd }]]) });
-  const head = () =>
-    waitFor(() => {
-      const note = document.querySelector<HTMLElement>('[data-widget="mcp"] [data-widget-note]');
-      expect(note).not.toBeNull();
-      return note!.textContent;
+  // the word cut (N148): the sentence is a switch row's note, read from its description
+  const head = async () => {
+    const docs = await row(DOCS);
+    return waitFor(() => {
+      const said = accessibleDescription(docs);
+      expect(said).not.toBe('');
+      return said;
     });
+  };
   const gitReads = () => backend.calls.filter((c) => c.command === 'git.worktree.list').map((c) => c.input);
   afterEach(() => useSessions.setState({ records: new Map(), projects: new Map() }));
 
@@ -382,7 +400,10 @@ describe('the place the head names (U11a §C, "<place>")', () => {
 describe('the switch waits for the sentence of what it reaches (U11a §C)', () => {
   const MAIN = '/Users/example/code/atlas';
   const WORKTREE = `${MAIN}/.claude/worktrees/feature`;
-  const note = () => document.querySelector<HTMLElement>('[data-widget="mcp"] [data-widget-note]');
+  const note = () => {
+    const docs = document.querySelector<HTMLElement>(`[data-mcp-server="${DOCS}"]`);
+    return docs && docs.hasAttribute('data-note-row') ? { textContent: accessibleDescription(docs) } : null;
+  };
   let settle: { resolve(value: unknown): void; reject(error: unknown): void };
   beforeEach(() => {
     useSessions.setState({ engine: new Map([[ID, { ...lifted(backend.status(BARE)), cwd: WORKTREE }]]) });
@@ -434,8 +455,9 @@ describe('toggleView: the switch from the read, never from the outcome', () => {
   const ok = { ok: true as const, value: null };
   const failed = (message: string) => ({ ok: false as const, error: { code: 'engine_error' as const, message, engineCode: null } });
   it('reads disabled as off, any other status as on, failed as on and not connected', () => {
-    expect(toggleView(false, ok, { status: 'disabled', error: null })).toEqual({ position: 'off', line: 'Done' });
-    expect(toggleView(true, ok, { status: 'pending', error: null })).toEqual({ position: 'on', line: 'Done' });
+    // the word cut (P570): a success says nothing
+    expect(toggleView(false, ok, { status: 'disabled', error: null })).toEqual({ position: 'off', line: null });
+    expect(toggleView(true, ok, { status: 'pending', error: null })).toEqual({ position: 'on', line: null });
     expect(toggleView(true, failed('Connection failed'), { status: 'failed', error: 'Connection failed' })).toEqual({ position: 'on', line: 'On · not connected · Connection failed' });
   });
   it('is unconfirmed when the read failed, the server is gone, or a disable that failed after its write still reads connected', () => {

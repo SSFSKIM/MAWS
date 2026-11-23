@@ -42,11 +42,20 @@ describe('the /btw widget on a session with no ready process', () => {
     expect(screen.getByText('Starts this session')).toBeTruthy();
     await userEvent.click(screen.getByRole('button', { name: 'Ask' }));
     expect(fake.invoked('session.acquire')).toEqual([{ appSessionId: A_ID, reason: 'side' }]);
-    expect(screen.getByText('Starting…')).toBeTruthy();
+    expect(await screen.findByRole('progressbar', { name: 'Starting…' })).toBeTruthy(); // the word cut (N185)
+    expect(screen.queryByText('Starting…')).toBeNull();
     expect(fake.invoked('session.sideQuestion')).toEqual([]);
     await act(() => fake.reply('session.acquire', { status: 'ready', appSessionId: A_ID, launched: true, joined: false }));
     expect(fake.invoked('session.sideQuestion')).toEqual([{ appSessionId: A_ID, question: 'why?' }]);
     expect(close).toHaveBeenCalledTimes(1);
+  });
+
+  // the word cut (P415, P416): the field's name is not drawn over it, and its placeholder asks plainly
+  it('names its field without a visible label, with a plain placeholder', () => {
+    render(<BtwWidget appSessionId={A} args="" close={() => {}} />);
+    const field = screen.getByRole('textbox', { name: 'Ask a side question' });
+    expect(screen.queryByText('Ask a side question')).toBeNull();
+    expect(field.getAttribute('placeholder')).toBe('Ask a quick question…');
   });
 
   it('dismissed while its start runs, it still asks but never closes the widget that replaced it', async () => {

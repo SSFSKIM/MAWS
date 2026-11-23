@@ -15,6 +15,7 @@ import { resetShellStores } from '../test-support/shell-stores';
 import { ipcSource, useTranscriptStore } from '../transcript';
 import { builder } from '../transcript/model/test-events';
 import { commentsMessage } from '@shared/anchor/message'; // UX wave U5a
+import { accessibleDescription } from '../test-support/accessible-text';
 import { RewindWidget, rewindTargets } from './RewindWidget';
 
 // P5 O6 M2: the fake is main: asked with the bare id; the page holds the address
@@ -67,11 +68,28 @@ describe('the rewind picker', () => {
     expect(useComposerStore.getState().prefills.get(A)).toEqual({ text: 'first prompt' });
   });
 
+  // the word cut (P648)
+  it('says "Nothing to rewind to" while the person has sent nothing', () => {
+    act(() => useTranscriptStore.getState().drop(A));
+    mount();
+    expect(screen.getByText('Nothing to rewind to')).toBeTruthy();
+    expect(screen.queryByRole('radiogroup', { name: 'Your messages' })).toBeNull();
+  });
+
   it('offers files only while the session checkpoints them; Files restores the checkpoint alone, Both rewinds with files', async () => {
     useSessions.setState({ engine: new Map([[A, { ...status(A), fileCheckpointing: false }]]) });
     mount();
-    expect([option('Files').disabled, option('Both').disabled]).toEqual([true, true]); // rewind_files: "File rewinding is not enabled."
-    expect(screen.getByText('File checkpointing is off for this session, so its files cannot be rewound')).toBeTruthy();
+    // rewind_files: "File rewinding is not enabled." The word cut (P650): no sentence under the segment; Files and Both are
+    // greyed, still in the keyboard, with the reason as their tooltip and description, and a press chooses nothing
+    const why = 'File checkpointing is off for this session, so its files cannot be rewound';
+    for (const name of ['Files', 'Both']) {
+      expect(option(name).disabled).toBe(false);
+      expect(option(name).getAttribute('aria-disabled')).toBe('true');
+      expect(accessibleDescription(option(name))).toBe(why);
+      fireEvent.click(option(name));
+      expect(option(name).getAttribute('aria-checked')).toBe('false');
+    }
+    expect(screen.queryByText(why)).toBeNull();
     cleanup();
     useSessions.setState({ engine: new Map([[A, { ...status(A), fileCheckpointing: true }]]) });
     const close = mount();

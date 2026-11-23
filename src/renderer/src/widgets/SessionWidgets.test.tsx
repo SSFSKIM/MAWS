@@ -55,15 +55,19 @@ const mount = (Widget: typeof RenameWidget, appSessionId: AppSessionId, args = '
 };
 
 describe('rename widget', () => {
-  it("`/rename <title>` renames through C10's session.rename at once and says so", async () => {
-    mount(RenameWidget, READY, 'Live C11');
-    await waitFor(() => expect(screen.getByRole('status').textContent).toBe('Renamed · Live C11'));
+  // the word cut (P637): no "Renamed · <title>" line; the new title shows where the session is named, and the dialog
+  // closes once the rename took
+  it("`/rename <title>` renames through C10's session.rename at once and closes", async () => {
+    const close = mount(RenameWidget, READY, 'Live C11');
+    await waitFor(() => expect(close).toHaveBeenCalledTimes(1));
+    expect(screen.queryByRole('status')).toBeNull();
     expect(backend.calls.filter((c) => c.command === 'session.rename').map((c) => c.input)).toEqual([{ appSessionId: READY_ID, title: 'Live C11' }]);
   });
 
   it('renames a session without a process too (C10 names it through its record)', async () => {
-    mount(RenameWidget, at('app-bdb23713' as AppSessionId), 'Later');
-    await waitFor(() => expect(screen.getByRole('status').textContent).toBe('Renamed · Later'));
+    const close = mount(RenameWidget, at('app-bdb23713' as AppSessionId), 'Later');
+    await waitFor(() => expect(close).toHaveBeenCalledTimes(1));
+    expect(backend.calls.filter((c) => c.command === 'session.rename').map((c) => c.input)).toEqual([{ appSessionId: 'app-bdb23713', title: 'Later' }]);
   });
 
   it('says a refused rename in its words', async () => {
@@ -83,13 +87,16 @@ describe('rename widget', () => {
     off();
   });
 
+  // the word cut (P635): the field keeps "New title" as its name, with no label drawn over it
   it('without a title and no dialog registered, offers the title to edit', async () => {
-    mount(RenameWidget, READY);
+    const close = mount(RenameWidget, READY);
     const field = screen.getByRole('textbox', { name: 'New title' }) as HTMLInputElement;
+    expect(screen.queryByText('New title')).toBeNull();
     expect(field.value).toBe('Settings idle probe');
     fireEvent.change(field, { target: { value: 'Settings probe, renamed' } });
     fireEvent.click(screen.getByRole('button', { name: 'Rename' }));
-    await waitFor(() => expect(screen.getByRole('status').textContent).toBe('Renamed · Settings probe, renamed'));
+    await waitFor(() => expect(close).toHaveBeenCalledTimes(1));
+    expect(backend.calls.filter((c) => c.command === 'session.rename').map((c) => c.input)).toEqual([{ appSessionId: READY_ID, title: 'Settings probe, renamed' }]);
   });
 
   // P5 O7 M8 declared `session.rename` not offered on another machine; the UX wave, U9 (M1, M4) offers it behind

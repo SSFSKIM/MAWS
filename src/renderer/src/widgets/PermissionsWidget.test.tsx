@@ -1,6 +1,6 @@
 import { join } from 'node:path';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { EngineSessionStatus } from '@shared/engine/status';
@@ -9,6 +9,7 @@ import { createWidgetBackend, fixtureLine, RESPONSES, WidgetBackendError, type W
 import { at, TEST_MACHINE } from '../../../../test/support/machine';
 import { ipc } from '../ipc/client';
 import { useSessions } from '../stores/sessions';
+import { accessibleDescription } from '../test-support/accessible-text';
 import { PermissionsWidget } from './PermissionsWidget';
 import { engineReadKey } from './read';
 
@@ -38,15 +39,26 @@ const mount = () =>
   );
 
 describe('permissions widget shows effective mode and rules with sources', () => {
+  // the word cut (P580, P582, P516): the segment's checked row is the effective mode, with no "Effective … · from the init
+  // frame" line above it; the scope sentence is the segment's note, opened on focus and its description at rest
   it('reads the effective mode from the status, never the requested one, and the refusal in words', async () => {
     const status = lifted(backend.status(BARE));
     useSessions.setState({ engine: new Map([[ID, { ...status, permissionMode: { requested: 'auto', effective: 'default', refusal: 'auto_mode_model' }, grants: ['Bash(git log --oneline)'] }]]) });
     mount();
-    const mode = await screen.findByText('Manual', { selector: 'strong' });
-    expect(mode.closest('p')?.textContent).toBe('Effective Manual · from the init frame');
+    expect((await screen.findByRole('menuitemradio', { checked: true })).textContent).toMatch(/^Manual/); // the segment selects the effective mode
+    const frame = document.querySelector<HTMLElement>('[data-widget="permissions"]')!;
+    expect(frame.querySelector('h3')?.textContent).toBe('Permissions');
+    expect(frame.textContent).not.toContain('from the init frame');
+    expect(frame.textContent).not.toContain('Effective');
     expect(screen.getByText('This model does not support auto mode')).toBeTruthy();
     expect(screen.getByText('1 session grant · re-applied after a resume')).toBeTruthy();
-    expect(screen.getByRole('menuitemradio', { checked: true }).textContent).toMatch(/^Manual/); // the segment selects the effective mode
+    const segment = screen.getByRole('menu', { name: 'Permission mode' }).closest<HTMLElement>('[data-note-row]')!;
+    expect(accessibleDescription(segment)).toBe('The mode applies to this session only');
+    const note = segment.querySelector<HTMLElement>('[data-row-note]')!;
+    expect(note.hidden).toBe(true);
+    act(() => screen.getByRole('menuitemradio', { checked: true }).focus());
+    expect(note.hidden).toBe(false);
+    expect(frame.textContent).not.toContain('rules are edited in their settings files');
   });
 
   // C11 M6, live: a rules read cached before an approval card's session grant (fresh, so a mount does not refetch it)
@@ -63,24 +75,56 @@ describe('permissions widget shows effective mode and rules with sources', () =>
       </QueryClientProvider>,
     );
     const allow = await screen.findByRole('list', { name: 'Allow rules' });
-    expect(within(allow).getByRole('listitem').textContent).toContain('this session · grant');
+    expect(within(allow).getByRole('listitem').textContent).toContain('session');
   });
 
+  // the word cut (P586, P587, P588): a rule's source is one word; no "original directory" on the first folder
   it("lists every rule under allow, ask and deny with the engine's phrasing and its source (pass2/grant-askrule-start seq 65)", async () => {
     useSessions.setState({ engine: new Map([[ID, lifted(backend.status(BARE))]]) });
     mount();
     const allow = await screen.findByRole('list', { name: 'Allow rules' });
     const grant = within(allow).getByRole('listitem');
     expect(within(grant).getByText('Bash(git log --oneline)').tagName).toBe('CODE');
-    expect(grant.textContent).toContain('this session · grant');
+    expect(grant.querySelector('[data-rule-source]')?.textContent).toBe('session');
     expect(grant.textContent).toContain('The Bash command git log --oneline');
     expect(grant.textContent).toContain('this session'); // editability
     const ask = within(screen.getByRole('list', { name: 'Ask rules' })).getByRole('listitem');
     expect(ask.textContent).toContain('Bash(git:*)');
-    expect(ask.textContent).toContain('startup settings');
+    expect(ask.querySelector('[data-rule-source]')?.textContent).toBe('startup');
     expect(ask.textContent).toContain('read-only here');
     expect(screen.queryByRole('list', { name: 'Deny rules' })).toBeNull(); // an empty group is not drawn
-    expect(within(screen.getByRole('list', { name: 'Workspace directories' })).getByRole('listitem').textContent).toContain('/private/tmp/maws-probe2-UVKiUq');
+    const folder = within(screen.getByRole('list', { name: 'Workspace directories' })).getByRole('listitem');
+    expect(folder.textContent).toBe('/private/tmp/maws-probe2-UVKiUq');
+  });
+
+  // the word cut (P586, P587, P584): a source that names a file takes the keyboard and has the file as its tooltip and
+  // description; "in a settings file" leaves the rule's second line; an empty list reads "No rules"
+  it('names a settings file under its source word, drops "in a settings file", and says No rules when there are none', async () => {
+    useSessions.setState({ engine: new Map([[ID, lifted(backend.status(BARE))]]) });
+    backend.script('session.listPermissionRules', () => ({
+      state: { rules: [{ behavior: 'deny', source: 'userSettings', rule: 'Read(.env)', editability: 'persistent', description: { prefix: 'Reading ', emphasis: '.env' } }], workspaceDirectories: [], originalCwd: '/w', managedOnly: false },
+    }));
+    mount();
+    const deny = within(await screen.findByRole('list', { name: 'Deny rules' })).getByRole('listitem');
+    const source = deny.querySelector<HTMLElement>('[data-rule-source]')!;
+    expect(source.textContent).toBe('user');
+    expect(source.tabIndex).toBe(0);
+    expect(accessibleDescription(source)).toBe('Edited in ~/.claude/settings.json');
+    expect(deny.textContent).not.toContain('in a settings file');
+    expect(deny.textContent).toContain('Reading .env');
+    cleanup();
+    backend.script('session.listPermissionRules', () => ({ state: { rules: [], workspaceDirectories: [], originalCwd: '/w', managedOnly: false } }));
+    mount();
+    expect(await screen.findByText('No rules')).toBeTruthy();
+  });
+
+  // the word cut (P518): the rules read's wait is the quiet spinner, under the segment
+  it('shows the quiet spinner while the rules are read', async () => {
+    useSessions.setState({ engine: new Map([[ID, lifted(backend.status(BARE))]]) });
+    backend.script('session.listPermissionRules', () => new Promise(() => {}));
+    mount();
+    expect(await screen.findByRole('progressbar', { name: 'Reading…' })).toBeTruthy();
+    expect(screen.queryByText('Reading…')).toBeNull();
   });
 });
 

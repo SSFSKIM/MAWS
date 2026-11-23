@@ -40,7 +40,7 @@ const mount = (args = '', close = vi.fn()) => {
   );
   return close;
 };
-const compactNow = () => screen.getByRole('button', { name: 'Compact now' });
+const compactNow = () => screen.getByRole('button', { name: 'Compact' });
 
 describe('compact widget', () => {
   // Debt wave 4: the engine's summary total is floored by its overhead estimate until the measured input passes it
@@ -49,6 +49,19 @@ describe('compact widget', () => {
     mount();
     await screen.findByText('21,508 of 200,000 · 11% · autocompact at 167,000');
     expect(backend.calls.find((c) => c.subtype === 'get_context_usage')?.input).toEqual({ appSessionId: BARE, detail: 'summary' });
+  });
+
+  // the word cut (P629, P631, P518): no visible "Instructions" over the field (its name), "Compact" on the button, and the
+  // quiet spinner where the context line will be
+  it('names the field without a visible label, reads Compact, and waits for the context line with the quiet spinner', async () => {
+    backend.script('session.getContextUsage', () => new Promise(() => {}));
+    mount();
+    const field = screen.getByRole('textbox', { name: 'Instructions' });
+    expect(field.getAttribute('placeholder')).toBe('What the summary should keep (optional)');
+    expect(screen.queryByText('Instructions')).toBeNull();
+    expect(compactNow().textContent).toBe('Compact');
+    expect(await screen.findByRole('progressbar', { name: 'Reading…' })).toBeTruthy();
+    expect(screen.queryByText('Reading…')).toBeNull();
   });
 
   it("shows C3's sample (the status line's ctx) once one arrived", async () => {
@@ -71,7 +84,7 @@ describe('compact widget', () => {
     expect(((await screen.findByRole('textbox', { name: 'Instructions' })) as HTMLTextAreaElement).value).toBe('focus on tests');
     cleanup();
     mount();
-    fireEvent.click(await screen.findByRole('button', { name: 'Compact now' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Compact' }));
     await waitFor(() => expect(backend.calls.find((c) => c.command === 'session.send')?.input).toEqual({ appSessionId: BARE, content: '/compact' }));
   });
 
@@ -118,7 +131,7 @@ describe('compact widget', () => {
       throw new WidgetBackendError({ code: 'timeout', message: 'session.send unanswered after 10 s' });
     });
     const close = mount();
-    fireEvent.click(await screen.findByRole('button', { name: 'Compact now' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Compact' }));
     await waitFor(() => expect(screen.getByRole('alert').textContent).toBe('The engine did not answer · the command may still run; check the transcript before sending again'));
     expect(compactNow()).toHaveProperty('disabled', true); // no immediate second /compact
     expect(close).not.toHaveBeenCalled();
@@ -131,7 +144,7 @@ describe('compact widget', () => {
       throw new WidgetBackendError({ code: 'internal', message: 'the session is not ready' });
     });
     const close = mount();
-    fireEvent.click(await screen.findByRole('button', { name: 'Compact now' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Compact' }));
     await waitFor(() => expect(screen.getByRole('alert').textContent).toBe('the session is not ready'));
     expect(close).not.toHaveBeenCalled();
   });

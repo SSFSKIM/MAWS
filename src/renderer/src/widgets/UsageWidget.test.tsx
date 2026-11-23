@@ -58,7 +58,7 @@ describe('UsageWidget', () => {
     });
     mount();
     expect(screen.queryByText(USAGE.direct)).toBeNull();
-    expect(screen.getByText('Not read yet.')).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Load now' })).toBeTruthy(); // the word cut (P519): Load now alone
   });
 });
 

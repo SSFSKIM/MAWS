@@ -33,7 +33,7 @@ describe('the compact widget of a driven terminal session', () => {
         <CompactWidget appSessionId={ID} args="" close={() => {}} />
       </QueryClientProvider>,
     );
-    expect(screen.getByRole('button', { name: 'Compact now' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Compact' })).toBeTruthy();
     expect(screen.getByText('—')).toBeTruthy();
     expect(screen.queryByText('Not observed yet')).toBeNull();
   });
