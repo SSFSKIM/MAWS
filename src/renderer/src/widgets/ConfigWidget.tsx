@@ -1,21 +1,23 @@
 // `/config` (C11 execution document, the widget table): `get_settings` as the engine merged it: the effective settings,
-// the sources that contributed (each with the keys it set, and "Open file" revealing a settings file in Finder through
-// `settings.reveal`), what the session applied (model, effort, advisor, ultracode) and any errors. The terminal's
-// `/config` writes settings; the widget shows them (D-12). "MAWS settings" opens MAWS's own Settings tab.
+// the sources that contributed (each with the keys it set, and Reveal showing a settings file in Finder through
+// `settings.reveal`), what the session applied (advisor, ultracode) and any errors. The terminal's `/config` writes
+// settings; the widget shows them (D-12). "MAWS settings" opens MAWS's own Settings tab. The word cut (P606 to P609,
+// P586): "Defaults only", no line under a source that sets nothing, Reveal, a source in the permission rules' one word,
+// and Applied without Model and Effort, which the model chip carries.
 import * as z from 'zod';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { GetSettingsResponse } from '@shared/wire/control';
 import { runAction } from '../keymap/actions-runtime';
 import { useSessions } from '../stores/sessions';
-import { CONFIG, PERMISSIONS, SHARED, WIDGET_TITLE } from './copy';
-import { Group, KeyValues, Mono, parseEach, RevealButton, Row, Rows, TextButton } from './parts';
+import { CONFIG, SHARED, WIDGET_TITLE } from './copy';
+import { Group, KeyValues, Mono, parseEach, RevealButton, Row, Rows, SourceWord, sourceWords, TextButton } from './parts';
 import { useEngineRead } from './read';
 import { WidgetFrame } from './WidgetFrame';
 import { machineOf } from '@shared/machine/address';
 import type { MachineRef } from '@shared/machine/ref';
 
 const SourceSchema = z.looseObject({ source: z.string(), settings: z.record(z.string(), z.unknown()).catch({}) });
-const AppliedSchema = z.looseObject({ model: z.string().nullable().optional(), effort: z.string().nullable().optional(), advisor: z.unknown().optional(), ultracode: z.boolean().optional() });
+const AppliedSchema = z.looseObject({ advisor: z.unknown().optional(), ultracode: z.boolean().optional() });
 const ErrorSchema = z.union([z.string(), z.looseObject({ message: z.string() }).transform((e) => e.message)]);
 
 export interface ConfigView {
@@ -31,11 +33,9 @@ export function present(answer: GetSettingsResponse): ConfigView {
   const applied = AppliedSchema.safeParse(answer.applied ?? null);
   return {
     effective: Object.entries(answer.effective).map(([key, value]) => ({ key, value: JSON.stringify(value) })),
-    sources: parseEach(SourceSchema, answer.sources).map((s) => ({ source: s.source, label: PERMISSIONS.source[s.source] ?? s.source, keys: Object.keys(s.settings) })),
+    sources: parseEach(SourceSchema, answer.sources).map((s) => ({ source: s.source, label: sourceWords(s.source).word, keys: Object.keys(s.settings) })),
     applied: applied.success
       ? [
-          { label: CONFIG.model, value: shown(applied.data.model) },
-          { label: CONFIG.effort, value: shown(applied.data.effort) },
           { label: CONFIG.advisor, value: shown(applied.data.advisor) },
           { label: CONFIG.ultracode, value: applied.data.ultracode ? SHARED.on : SHARED.off },
         ]
@@ -68,7 +68,7 @@ export function ConfigBody({ view, machine, cwd, configHome, close }: { view: Co
           <Rows label={CONFIG.sourceList}>
             {view.sources.map((s) => {
               const file = sourceFile(s.source, cwd, configHome);
-              return <Row key={s.source} main={s.label} detail={s.keys.length > 0 ? s.keys.join(', ') : CONFIG.noKeys} actions={file ? <RevealButton path={file} machine={machine}>{CONFIG.openFile}</RevealButton> : null} />;
+              return <Row key={s.source} main={<SourceWord word={s.label} file={sourceWords(s.source).file} />} detail={s.keys.length > 0 ? s.keys.join(', ') : null} actions={file ? <RevealButton path={file} machine={machine}>{SHARED.reveal}</RevealButton> : null} />;
             })}
           </Rows>
         </Group>

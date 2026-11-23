@@ -1,7 +1,8 @@
 // `/memory` (C11 execution document, the widget table): `get_memory_dialog`'s files with whether each exists yet, the
 // memory folders and the auto-memory state. Reveal shows a file or folder in Finder through `settings.reveal`, which
 // main admits under the config home and the session's directories (ruled 2026-09-29). "Add a note" prefills the
-// composer in `#` mode, whose append is C3's `session.memoryAppend` (C7's `#`).
+// composer in `#` mode, whose append is C3's `session.memoryAppend` (C7's `#`). The word cut (P623, P624): a missing file
+// reads "not created", and Reveal is drawn on the row pointed at or holding focus (always where nothing can point).
 import * as z from 'zod';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { GetMemoryDialogResponse } from '@shared/wire/control';
@@ -10,6 +11,7 @@ import { MEMORY, SHARED, WIDGET_TITLE } from './copy';
 import { Group, Mono, RevealButton, Row, Rows, TextButton } from './parts';
 import { useEngineRead } from './read';
 import { WidgetFrame } from './WidgetFrame';
+import { HOVER_SCOPE, ON_HOVER } from '../ui/hover-scope';
 import { machineOf } from '@shared/machine/address';
 
 const StatusSchema = z.looseObject({ status: z.string() });
@@ -41,6 +43,7 @@ export function MemoryBody({ view, appSessionId, close }: { view: MemoryView; ap
           {view.files.map((f) => (
             <Row
               key={f.path}
+              {...HOVER_SCOPE}
               main={f.label}
               note={f.note}
               detail={
@@ -49,7 +52,13 @@ export function MemoryBody({ view, appSessionId, close }: { view: MemoryView; ap
                   {f.description && <span> · {f.description}</span>}
                 </>
               }
-              actions={f.exists ? <RevealButton path={f.path} machine={machineOf(appSessionId)}>{SHARED.reveal}</RevealButton> : null}
+              actions={
+                f.exists ? (
+                  <RevealButton path={f.path} machine={machineOf(appSessionId)} {...ON_HOVER}>
+                    {SHARED.reveal}
+                  </RevealButton>
+                ) : null
+              }
             />
           ))}
         </Rows>
@@ -58,7 +67,17 @@ export function MemoryBody({ view, appSessionId, close }: { view: MemoryView; ap
         <Group label={MEMORY.folders}>
           <Rows label={MEMORY.folderList}>
             {view.folders.map((f) => (
-              <Row key={f.path} main={f.label} detail={<Mono>{f.path}</Mono>} actions={<RevealButton path={f.path} machine={machineOf(appSessionId)}>{SHARED.reveal}</RevealButton>} />
+              <Row
+                key={f.path}
+                {...HOVER_SCOPE}
+                main={f.label}
+                detail={<Mono>{f.path}</Mono>}
+                actions={
+                  <RevealButton path={f.path} machine={machineOf(appSessionId)} {...ON_HOVER}>
+                    {SHARED.reveal}
+                  </RevealButton>
+                }
+              />
             ))}
           </Rows>
         </Group>

@@ -11,7 +11,9 @@
 // UX wave U11a (§C, l8-settings-04): the dialog is Connectors, with "MCP servers" muted beside the title. Each connector
 // is one line (`ConnectorRow`): the switch, the name, the status in words (connector-status.ts) and the tool count;
 // opening the row shows the rest. Sign in and Reconnect sit on the line of a row that needs a sign-in or failed, and
-// Reconnect is in the opened part of any other. What the switch reaches is said once, in the head, never on a row.
+// Reconnect is in the opened part of any other. The word cut (N148): what the switch reaches is each switch row's note,
+// shown on pointing or focus; P565 draws a connecting connector's status as the quiet spinner; P569 and P570 draw the
+// quiet spinner on the knob or beside Reconnect while either works, and nothing under the row after a success.
 // U11a M8 (§A): a dynamic connector that needs a sign-in, a plugin's or one of MAWS's own list, offers Sign in too, by its
 // name (`connectors.signInDynamicServer`); for a session on another machine it is drawn disabled with U9's sentence until
 // U11f, a file-scope row beside it keeping its own.
@@ -39,6 +41,8 @@ import { homeAbbreviated } from '../tools/session-info/model';
 import { usePluginsOff } from './connector-menu';
 import { connectorStatusWords } from './connector-status';
 import { McpDriven } from './McpDriven'; // P5 O9 M5
+import { RowNote, useRowNote } from '../ui/row-note';
+import { QuietSpinner, WaitingWords } from '../ui/spinner';
 import { useRemoteUnavailable } from '../lane-b/remote-unavailable'; // P5 O7 M8
 import { BEFORE_START, MCP, MCP_ACTIONS, WIDGET_TITLE } from './copy';
 import { operationLine, outcomeWords, useOperation } from './operation';
@@ -101,35 +105,41 @@ export interface ToggleView {
 const BEFORE_THE_WRITE = /^Server not found: |is blocked by enterprise managed policy|is not approved for this project|^mcp_toggle: /;
 const positionOf = (status: string): 'on' | 'off' => (status === 'disabled' ? 'off' : 'on');
 const toggleWords = (outcome: Outcome) => outcomeWords(outcome, () => MCP_ACTIONS.done);
+const failureWords = (outcome: Outcome): string | null => (outcome.ok ? null : toggleWords(outcome)); // a success says nothing (P570)
 
 // Where the switch stands after a toggle's outcome, from the read that followed it and never from the outcome: the engine
 // writes the toggle before it connects or cleans up, so an error says nothing about what was persisted (Interfaces,
-// "The toggle is read back, never inferred").
+// "The toggle is read back, never inferred"). A confirmed success has no line; a doubt keeps the outcome's words.
 export function toggleView(requested: boolean, outcome: Outcome, read: ReadBack): ToggleView {
   const unconfirmed = { position: 'unconfirmed' as const, line: MCP_ACTIONS.unconfirmed(toggleWords(outcome)) };
   if (read === 'unread' || read === null) return unconfirmed;
   const position = positionOf(read.status);
-  const words = read.status === 'failed' ? MCP_ACTIONS.notConnected(read.error ?? toggleWords(outcome)) : toggleWords(outcome);
+  const words = read.status === 'failed' ? MCP_ACTIONS.notConnected(read.error ?? toggleWords(outcome)) : failureWords(outcome);
   if (!outcome.ok && BEFORE_THE_WRITE.test(outcome.error.message)) return { position, line: words };
   return position === (requested ? 'on' : 'off') ? { position, line: words } : unconfirmed;
 }
 
 const SWITCH = 'relative mt-0.5 inline-flex h-4 w-7 shrink-0 items-center rounded-full border border-border outline-accent focus-visible:outline-2 disabled:opacity-50';
 const DISCLOSURE = 'flex min-w-0 flex-1 flex-wrap items-baseline gap-x-2 rounded-sm text-left outline-accent focus-visible:outline-2';
+const knobAt = (position: ToggleView['position']) => (position === 'on' ? 'right-0.5' : position === 'off' ? 'left-0.5' : 'left-1.5');
 const tone = (status: string) => (status === 'connected' ? 'text-success' : status === 'failed' ? 'text-danger' : 'text-fg-muted');
 
 // U11a (§C, "The row"): one connector on one line. The switch (`control`) stands before the disclosure and the line's
 // `actions` after it, so a press on either never opens the row. Opened: the transport (the full command as its tooltip),
 // where it comes from, its scope, an error, the tool names, then `opened`. `words` is the status in words, or what a
 // list before the first message says in their place; `under` is the answer of an act on the row, drawn whether the row
-// is open or not. M7 and M8 build on it.
-export function ConnectorRow({ server, words, control, actions, opened, under }: { server: McpServerView; words: string; control?: ReactNode; actions?: ReactNode; opened?: ReactNode; under?: ReactNode }) {
+// is open or not; `note` is the row's note (the word cut, N148: what the switch reaches). M7 and M8 build on it. A
+// connecting connector's words name the quiet spinner drawn in their place (P565).
+export function ConnectorRow({ server, words, control, actions, opened, under, note }: { server: McpServerView; words: string; control?: ReactNode; actions?: ReactNode; opened?: ReactNode; under?: ReactNode; note?: string | null }) {
   const [open, setOpen] = useState(false);
   const part = useId();
+  const rowNote = useRowNote();
+  const noted = note !== undefined && note !== null;
   const tools = server.tools.length > 0 ? MCP.tools(server.tools.length) : '';
   const where = [server.source && MCP.from(server.source), server.scope && MCP.scope(server.scope)].filter(Boolean).join(' · ');
+  const connecting = server.status === 'pending' && words !== '';
   return (
-    <li data-mcp-server={server.name} className="flex flex-col gap-0.5 border-t border-border py-1 text-ui-sm first:border-t-0">
+    <li data-mcp-server={server.name} {...(noted ? rowNote.rowProps : {})} className={`relative flex flex-col gap-0.5 border-t border-border py-1 text-ui-sm first:border-t-0`}>
       <div className="flex min-w-0 items-start gap-2">
         {control}
         <button type="button" aria-expanded={open} aria-controls={open ? part : undefined} onClick={() => setOpen(!open)} className={DISCLOSURE}>
@@ -138,7 +148,7 @@ export function ConnectorRow({ server, words, control, actions, opened, under }:
           </span>
           {(words !== '' || tools !== '') && (
             <span data-connector-state className="shrink-0 text-fg-muted">
-              {words !== '' && <span className={tone(server.status)}>{words}</span>}
+              {connecting ? <QuietSpinner label={words} className="align-[-1px]" /> : words !== '' && <span className={tone(server.status)}>{words}</span>}
               {words !== '' && tools !== '' && ' · '}
               {tools}
             </span>
@@ -160,6 +170,7 @@ export function ConnectorRow({ server, words, control, actions, opened, under }:
         </div>
       )}
       {under}
+      {noted && <RowNote note={rowNote}>{note}</RowNote>}
     </li>
   );
 }
@@ -197,8 +208,9 @@ const SIGN_IN = 'shrink-0 rounded-sm px-1 text-ui-sm text-accent outline-accent 
 // Reconnect sits on the line of a row that needs a sign-in or failed, and in the opened part of any other (U11a).
 const RECONNECT_ON_LINE = new Set(['needs-auth', 'failed']);
 
-// `reachSaid`: the head says what the switch reaches; until it can, the switch waits (Reconnect reaches this session only)
-function McpServerRow({ server, appSessionId, ready, answer, refresh, cwd, readAt, reachSaid }: { server: McpServerView; appSessionId: AppSessionId; ready: boolean; answer: McpStatusResponse; refresh: EngineRead<McpStatusResponse>['refresh']; cwd: string | null; readAt: number | null; reachSaid: boolean }) {
+// `reach`: the row's note, what the switch reaches; until it can be said, the switch waits (Reconnect reaches this session
+// only)
+function McpServerRow({ server, appSessionId, ready, answer, refresh, cwd, readAt, reach }: { server: McpServerView; appSessionId: AppSessionId; ready: boolean; answer: McpStatusResponse; refresh: EngineRead<McpStatusResponse>['refresh']; cwd: string | null; readAt: number | null; reach: string | null }) {
   const [last, setLast] = useState<'reconnect' | 'toggle' | null>(null);
   // the toggle's view, from the read that followed its outcome (`basis`: the answer that read produced)
   const [toggled, setToggled] = useState<(ToggleView & { basis: McpStatusResponse | undefined }) | null>(null);
@@ -217,16 +229,20 @@ function McpServerRow({ server, appSessionId, ready, answer, refresh, cwd, readA
     void readBack();
   });
   const signIn = useSignIn({ server, appSessionId, cwd, readAt });
-  const busy = reconnect.state.phase === 'working' || toggle.state.phase === 'working';
+  const reconnecting = reconnect.state.phase === 'working';
+  const toggling = toggle.state.phase === 'working';
+  const busy = reconnecting || toggling;
 
   // Any later answer (a status move, a manual read) reconciles; until one arrives, the toggle's view holds.
   const view = toggled && toggled.basis === answer ? toggled : null;
   const lastRead = positionOf(server.status); // the answer held is the last read that succeeded
   const position = view?.position ?? lastRead;
   const checked = (position === 'unconfirmed' ? lastRead : position) === 'on'; // role=switch has no "mixed": the doubt is in data-state and the line
-  // U11a: a failed row with nothing done says Failed on its line and its error in the opened part, with no line under it
+  // U11a: a failed row with nothing done says Failed on its line and its error in the opened part, with no line under it;
+  // the word cut (P569, P570): a working act is its control's spinner, and a success has no line
   const settledLine = view?.line ?? null;
-  const line = last === 'reconnect' ? operationLine(reconnect.state, () => MCP_ACTIONS.reconnected) : toggle.state.phase === 'settled' ? settledLine : (operationLine(toggle.state, () => MCP_ACTIONS.done) ?? settledLine);
+  const quiet = (state: typeof toggle.state) => (state.phase === 'working' ? null : operationLine(state, () => null));
+  const line = last === 'reconnect' ? quiet(reconnect.state) : toggle.state.phase === 'settled' ? settledLine : (quiet(toggle.state) ?? settledLine);
 
   const flip = async () => {
     setLast('toggle');
@@ -246,8 +262,9 @@ function McpServerRow({ server, appSessionId, ready, answer, refresh, cwd, readA
       }}
       disabled={!ready || busy || reconnect.unavailable !== null}
       title={reconnect.unavailable ?? undefined}
+      busy={reconnecting}
     >
-      {MCP_ACTIONS.reconnect}
+      <WaitingWords words={MCP_ACTIONS.reconnect} wait={reconnecting ? MCP_ACTIONS.working : null} />
     </TextButton>
   );
   const onLine = RECONNECT_ON_LINE.has(server.status);
@@ -255,19 +272,22 @@ function McpServerRow({ server, appSessionId, ready, answer, refresh, cwd, readA
     <ConnectorRow
       server={server}
       words={connectorStatusWords(server.status, { switchDrawn: true })}
+      note={reach}
       control={
         <button
           type="button"
           role="switch"
           aria-checked={checked}
           aria-label={MCP_ACTIONS.enabled(server.name)}
+          aria-busy={toggling || undefined}
           data-state={position}
-          disabled={!ready || !reachSaid || busy || toggle.unavailable !== null}
+          disabled={!ready || reach === null || busy || toggle.unavailable !== null}
           title={toggle.unavailable ?? undefined}
           onClick={() => void flip()}
           className={`${SWITCH} ${position === 'on' ? 'bg-accent' : 'bg-bg-active'}`}
         >
-          <span aria-hidden className={`absolute size-3 rounded-full bg-bg-raised ${position === 'on' ? 'right-0.5' : position === 'off' ? 'left-0.5' : 'left-1.5'}`} />
+          <span aria-hidden className={`absolute size-3 rounded-full bg-bg-raised ${knobAt(position)}`} />
+          {toggling && <QuietSpinner label={MCP_ACTIONS.working} className={`absolute ${knobAt(position)}`} />}
         </button>
       }
       actions={
@@ -302,7 +322,7 @@ function McpServerRow({ server, appSessionId, ready, answer, refresh, cwd, readA
 
 // The list of a session's connectors. With `actions`, each row is the dialog's (switch, Sign in, Reconnect); without,
 // the row has none and a disabled connector reads Off (Customize's live list).
-export function McpBody({ view, actions }: { view: { servers: McpServerView[] }; actions?: { appSessionId: AppSessionId; ready: boolean; answer: McpStatusResponse; refresh: EngineRead<McpStatusResponse>['refresh']; cwd: string | null; readAt: number | null; reachSaid: boolean } }) {
+export function McpBody({ view, actions }: { view: { servers: McpServerView[] }; actions?: { appSessionId: AppSessionId; ready: boolean; answer: McpStatusResponse; refresh: EngineRead<McpStatusResponse>['refresh']; cwd: string | null; readAt: number | null; reach: string | null } }) {
   if (view.servers.length === 0) return <p className="m-0 text-ui-sm text-fg-muted">{MCP.none}</p>;
   return (
     <Rows label={MCP.list}>
@@ -319,7 +339,7 @@ export function McpBody({ view, actions }: { view: { servers: McpServerView[] };
 // alike, and outside any repository under the folder exactly. So: the project's name when the session's record names
 // one; else the main root of the repository holding the session's folder (`git.worktree.list`'s `repoRoot`, the parent
 // of its common dir), the home abbreviated; else, in no repository or where git answers nothing, the folder itself.
-// Null, and no sentence, while the main root is being read; the switch waits for the sentence (`reachSaid`).
+// Null, and no sentence, while the main root is being read; the switch waits for the sentence (`reach`).
 function useSwitchPlace(appSessionId: AppSessionId, folder: string | null): string | null {
   const project = useSessions((s) => {
     const id = s.records.get(appSessionId)?.projectId;
@@ -393,14 +413,13 @@ function McpEngine({ appSessionId, close }: { appSessionId: AppSessionId; args: 
       appSessionId={appSessionId}
       title={WIDGET_TITLE.mcp}
       subtitle={MCP.subtitle}
-      note={place === null ? undefined : { text: MCP.reach(place), tooltip: MCP.reachTip }}
       command="mcp"
       state={read.state}
       error={read.error}
       readAt={read.readAt}
       close={close}
     >
-      {read.data && <McpBody view={present(read.data)} actions={{ appSessionId, ready, answer: read.data, refresh: read.refresh, cwd, readAt: read.readAt, reachSaid: place !== null }} />}
+      {read.data && <McpBody view={present(read.data)} actions={{ appSessionId, ready, answer: read.data, refresh: read.refresh, cwd, readAt: read.readAt, reach: place === null ? null : MCP.reach(place) }} />}
     </WidgetFrame>
   );
 }

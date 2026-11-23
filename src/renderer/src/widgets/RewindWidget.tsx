@@ -7,7 +7,9 @@
 // conversation rewind the composer holds the engine's `prefillText`, the chosen message's text, as the Edit path does;
 // the transcript hides the rewound turns from C3's boundary. Nothing is issued while a turn runs. UX wave U5a (Decision
 // Log 49): a message of several comments is a target too, and a rewind onto it leaves the composer as it is, since its
-// `prefillText` is MAWS's framed comments, never what the person typed.
+// `prefillText` is MAWS's framed comments, never what the person typed. The word cut (P648, P650): "Nothing to rewind to"
+// with nothing sent, and with checkpointing off no sentence under the segment: Files and Both are greyed and still in the
+// keyboard, the reason their tooltip and description.
 import { useState } from 'react';
 import { formatClock } from '@shared/app/date-format';
 import type { AppSessionId, MessageUuid } from '@shared/graph/ids';
@@ -21,6 +23,7 @@ import { useTranscriptStore, type Row } from '../transcript';
 import { REWIND, WIDGET_TITLE } from './copy';
 import { useDormant } from './read';
 import { WidgetFrame } from './WidgetFrame';
+import { UNAVAILABLE_LOOK, UnavailableButton } from '../ui/tip';
 
 type What = 'conversation' | 'files' | 'both';
 const WHAT: readonly What[] = ['conversation', 'files', 'both'];
@@ -96,22 +99,20 @@ export function RewindWidget({ appSessionId, close }: { appSessionId: AppSession
           {WHAT.map((option) => {
             const off = option !== 'conversation' && !checkpointing;
             return (
-              <button
-                key={option}
-                type="button"
-                role="radio"
-                aria-checked={option === what}
-                disabled={off}
-                title={off ? REWIND.noCheckpoints : undefined}
-                onClick={() => setWhat(option)}
-                className="flex-1 rounded-sm border border-border px-2 py-0.5 text-ui-sm outline-accent hover:bg-bg-hover focus-visible:outline-2 disabled:text-fg-faint disabled:hover:bg-transparent aria-checked:bg-bg-active"
-              >
-                {REWIND.option[option]}
-              </button>
+              <UnavailableButton key={option} reason={off ? REWIND.noCheckpoints : null}>
+                <button
+                  type="button"
+                  role="radio"
+                  aria-checked={option === what}
+                  onClick={() => setWhat(option)}
+                  className={`flex-1 rounded-sm border border-border px-2 py-0.5 text-ui-sm outline-accent hover:bg-bg-hover focus-visible:outline-2 aria-checked:bg-bg-active ${UNAVAILABLE_LOOK}`}
+                >
+                  {REWIND.option[option]}
+                </button>
+              </UnavailableButton>
             );
           })}
         </div>
-        {!checkpointing && <p className="m-0 text-ui-sm text-fg-muted">{REWIND.noCheckpoints}</p>}
         <p className="m-0 text-ui-sm text-fg-muted">{REWIND.consequence}</p>
         <div className="flex items-center justify-end gap-2">
           {why !== null && <span className="mr-auto text-ui-sm text-fg-muted">{why}</span>}

@@ -4,17 +4,20 @@
 // so; without one, C10's rename dialog opens (the session action `rename` C10 registers into C5's registry), or, while
 // no dialog is registered, the widget offers the title to edit.
 // P5 O7 M8: a session on another machine can't be renamed from here yet (lane-b/remote-unavailable.ts): nothing is asked
-// and no dialog opens; the title field and Rename are greyed, with the reason.
+// and no dialog opens; the title field and Rename are greyed, with the reason. The word cut (P635, P637): the field is
+// named "New title" without a label drawn over it, and a rename that took closes the dialog, the new title showing where
+// the session is named; a typed title's rename shows the quiet spinner while it is out, so the dialog is never blank.
 import { useEffect, useRef, useState } from 'react';
 import type { AppSessionId } from '@shared/graph/ids';
 import { runSessionAction, useSessionActionEnabled } from '../app/session-actions';
 import { ipc } from '../ipc/client';
 import { remoteUnavailableOf, useRemoteUnavailable } from '../lane-b/remote-unavailable'; // P5 O7 M8
 import { useSessions } from '../stores/sessions';
+import { QuietSpinner } from '../ui/spinner';
 import { RENAME, WIDGET_TITLE } from './copy';
 import { WidgetFrame } from './WidgetFrame';
 
-type Outcome = { renamed: string } | { refused: string } | null;
+type Outcome = { refused: string } | null;
 
 async function renameSession(appSessionId: AppSessionId, title: string): Promise<{ ok: true } | { ok: false; error: string }> {
   const result = await ipc.invoke('session.rename', { appSessionId, title });
@@ -30,13 +33,14 @@ export function RenameWidget({ appSessionId, args, close }: { appSessionId: AppS
   const [outcome, setOutcome] = useState<Outcome>(null);
   const unavailable = useRemoteUnavailable(appSessionId, 'session.rename');
 
-  const renamed = (next: string) => (answer: Awaited<ReturnType<typeof renameSession>>) => {
+  const renamed = (answer: Awaited<ReturnType<typeof renameSession>>) => {
     setBusy(false);
-    setOutcome(answer.ok ? { renamed: next } : { refused: answer.error });
+    if (answer.ok) close();
+    else setOutcome({ refused: answer.error });
   };
   const rename = (next: string) => {
     setBusy(true);
-    void renameSession(appSessionId, next).then(renamed(next));
+    void renameSession(appSessionId, next).then(renamed);
   };
   // once, on open: the palette's title renames; no title hands over to C10's dialog when it is registered
   const started = useRef(false);
@@ -44,7 +48,7 @@ export function RenameWidget({ appSessionId, args, close }: { appSessionId: AppS
     if (started.current) return;
     started.current = true;
     if (unavailable !== null) return;
-    if (given !== '') void renameSession(appSessionId, given).then(renamed(given));
+    if (given !== '') void renameSession(appSessionId, given).then(renamed);
     else if (dialog) {
       close();
       runSessionAction('rename', appSessionId);
@@ -59,11 +63,12 @@ export function RenameWidget({ appSessionId, args, close }: { appSessionId: AppS
             {unavailable}
           </p>
         )}
+        {given !== '' && busy && <QuietSpinner label={RENAME.renaming} />}
         {given === '' && (
           <div className="flex items-end gap-2">
             <label className="flex min-w-0 flex-1 flex-col gap-1 text-ui-sm">
-              <span className="text-fg-muted">{RENAME.title}</span>
               <input
+                aria-label={RENAME.title}
                 value={title}
                 disabled={unavailable !== null}
                 onChange={(event) => setTitle(event.target.value)}
@@ -84,12 +89,7 @@ export function RenameWidget({ appSessionId, args, close }: { appSessionId: AppS
             </button>
           </div>
         )}
-        {outcome && 'renamed' in outcome && (
-          <p role="status" className="m-0 text-ui-sm">
-            {RENAME.renamed(outcome.renamed)}
-          </p>
-        )}
-        {outcome && 'refused' in outcome && (
+        {outcome && (
           <p role="alert" className="m-0 text-ui-sm text-danger">
             {outcome.refused}
           </p>

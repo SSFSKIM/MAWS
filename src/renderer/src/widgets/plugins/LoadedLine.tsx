@@ -3,9 +3,9 @@
 // fresh that is, from A's observed facts (`useLoadedPlugins`: "Loaded now" from a ready process that reported them,
 // "Loaded last time, 2 days ago" from the last report, "Not observed yet" when there is none), then what the session's
 // availability allows: the reloads on a ready process; otherwise A's line every surface shows (`DormantGesture`):
-// Refresh (acquire, then `reload_plugins`), "Starting…" while it or a launch runs, a refusal in words, the holder's
-// actions for a session held elsewhere, an archive's words with no Refresh. "Starting…" stays until Refresh's outcome is
-// in, so a process that turns ready mid-Refresh shows the reloads only then; a reload that fails after the start says so
+// Refresh (acquire, then `reload_plugins`; on the line the circular arrow named by the word, the word cut's P522), the
+// quiet spinner while it or a launch runs (P523), a refusal in words, the holder's actions for a session held elsewhere,
+// an archive's words with no Refresh. The spinner stays until Refresh's outcome is in, so a process that turns ready mid-Refresh shows the reloads only then; a reload that fails after the start says so
 // on the line. The count and the problems open Show › "Loaded in this session". Nothing here acquires on mount or on a
 // timer, only on Refresh's click.
 import { useState, type ReactNode } from 'react';
@@ -51,13 +51,14 @@ export function useRefresh(refresh: () => Promise<AcquireOutcome>): RefreshClick
   return { pending, run };
 }
 
-// What a surface draws where Refresh goes: its own reloads on a ready process (`ready`), else A's line.
-export function RefreshGesture({ appSessionId, availability, refresh, ready }: { appSessionId: AppSessionId; availability: Availability | null; refresh: RefreshClick; ready: ReactNode }) {
+// What a surface draws where Refresh goes: its own reloads on a ready process (`ready`), else A's line; `glyph` draws
+// Refresh as the circular arrow.
+export function RefreshGesture({ appSessionId, availability, refresh, ready, glyph = false }: { appSessionId: AppSessionId; availability: Availability | null; refresh: RefreshClick; ready: ReactNode; glyph?: boolean }) {
   const directory = useSessions((s) => s.records.get(appSessionId)?.directory ?? '');
   if (availability === 'usable' && !refresh.pending) return ready;
   // a missing directory is main's memory of the last attempt (A §5.2); the next may succeed, so Refresh stays offered
   const words = availability === 'missing_directory' ? L.missingDirectory(directory) : null;
-  return <DormantGesture appSessionId={appSessionId} label={L.refresh} onGesture={refresh.run} busy={refresh.pending} starting={refresh.pending} words={words} />;
+  return <DormantGesture appSessionId={appSessionId} label={L.refresh} glyph={glyph} onGesture={refresh.run} busy={refresh.pending} starting={refresh.pending} words={words} />;
 }
 
 // UX wave U11a (§D "Plugins"): an unstarted tab's line, the loaded line's "Not observed yet" alone: nothing has loaded,
@@ -101,7 +102,7 @@ export function LoadedLine({ appSessionId, availability, loaded, reloads, allowA
       )}
       <span className="ml-auto flex min-w-0 flex-wrap items-center gap-2 [&>[data-dormant-gesture]]:mb-0">
         {allowAcquire
-          ? <RefreshGesture appSessionId={appSessionId} availability={availability} refresh={refresh} ready={reloads && <ReloadControls reloads={reloads} />} />
+          ? <RefreshGesture appSessionId={appSessionId} availability={availability} refresh={refresh} ready={reloads && <ReloadControls reloads={reloads} />} glyph />
           : reloads && <ReloadControls reloads={reloads} />}
       </span>
       {reloadLine !== null && (

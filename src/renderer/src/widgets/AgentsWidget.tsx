@@ -1,6 +1,7 @@
 // `/agents` (C11 execution document, the widget table): the catalogue's agents with their descriptions, from the
 // initialize response (the headless `/agents` is a removed stub, SPEC 28 §5). "Mention" puts `@agent-<name> ` at the
-// composer's caret through C7's insertion seam.
+// composer's caret through C7's insertion seam. The word cut (P627, P628): "No agents" for an empty list, and Mention is
+// drawn on the row pointed at or holding focus (always where nothing can point).
 import type { AppSessionId } from '@shared/graph/ids';
 import { insertComposerText } from '../composer';
 import { mentionText } from '../composer/editor/mention-text'; // ticket 733a
@@ -10,6 +11,7 @@ import { AGENTS, WIDGET_TITLE } from './copy';
 import { Row, Rows, TextButton } from './parts';
 import { useDormant } from './read';
 import { WidgetFrame } from './WidgetFrame';
+import { HOVER_SCOPE, ON_HOVER } from '../ui/hover-scope';
 
 export function present(catalog: SessionCatalog): { name: string; description: string }[] {
   return catalog.agents.map((a) => ({ name: a.name, description: a.description }));
@@ -24,7 +26,17 @@ export function AgentsBody({ agents, appSessionId, close }: { agents: { name: st
   return (
     <Rows label={AGENTS.list}>
       {agents.map((a) => (
-        <Row key={a.name} main={a.name} detail={a.description ? <span className="line-clamp-2">{a.description}</span> : null} actions={<TextButton onClick={() => mention(a.name)}>{AGENTS.mention}</TextButton>} />
+        <Row
+          key={a.name}
+          {...HOVER_SCOPE}
+          main={a.name}
+          detail={a.description ? <span className="line-clamp-2">{a.description}</span> : null}
+          actions={
+            <TextButton onClick={() => mention(a.name)} {...ON_HOVER}>
+              {AGENTS.mention}
+            </TextButton>
+          }
+        />
       ))}
     </Rows>
   );

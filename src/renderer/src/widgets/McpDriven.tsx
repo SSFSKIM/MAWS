@@ -5,7 +5,8 @@
 // drawn from its own capability: one the bridge can't run stays in place, disabled, with its reason. The outcome is the
 // command op's end, worded as the slash palette words it; the list is read again after each.
 // UX wave U11a (§C): the Connectors dialog's title and subtitle, and each status in the dialog's words; its switch, and
-// so the sentence of what it reaches, is the terminal's own `/mcp`.
+// so the sentence of what it reaches, is the terminal's own `/mcp`. The word cut (P576, P569, P565): the partial list
+// said in a few words, and the quiet spinner while a command runs and in a connecting server's status place.
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { OpBody } from 'desk-hub/protocol';
 import type { AppSessionId } from '@shared/graph/ids';
@@ -18,15 +19,15 @@ import { FIELD } from '../sessions/ui';
 import { connectorStatusWords } from './connector-status';
 import { MCP, MCP_ACTIONS, WIDGET_TITLE } from './copy';
 import { Row, Rows, TextButton } from './parts';
+import { QuietSpinner } from '../ui/spinner';
 import type { ReadState } from './read';
 import { WidgetFrame } from './WidgetFrame';
 
 export const MCP_DRIVEN = {
-  inexact: 'Only servers connected with tools are listed; the terminal’s /mcp shows every server',
+  inexact: 'Partial list · the terminal’s /mcp shows all',
   enableLabel: 'Server to enable',
   enable: 'Enable',
   disable: 'Disable',
-  working: 'Working…',
 };
 
 interface Server {
@@ -41,6 +42,19 @@ const serversOf = (result: unknown): Server[] => {
     ? servers.flatMap((s: { name?: unknown; status?: unknown; tools?: unknown }) => (typeof s?.name === 'string' ? [{ name: s.name, status: typeof s.status === 'string' ? s.status : 'unknown', tools: typeof s.tools === 'number' ? s.tools : 0 }] : []))
     : [];
 };
+
+// A server's status and tool count; a connecting one's status is the quiet spinner its words name.
+function StatusNote({ status, tools }: { status: string; tools: number }) {
+  const words = connectorStatusWords(status);
+  const count = tools > 0 ? MCP.tools(tools) : '';
+  if (status !== 'pending' || words === '') return [words, count].filter((part) => part !== '').join(' · ');
+  return (
+    <>
+      <QuietSpinner label={words} className="align-[-1px]" />
+      {count !== '' && ` · ${count}`}
+    </>
+  );
+}
 
 export function McpDriven({ appSessionId, controls, close }: { appSessionId: AppSessionId; controls: SessionControls; close(): void }) {
   const [read, setRead] = useState<{ state: ReadState; servers: Server[]; error: string | null }>({ state: 'loading', servers: [], error: null });
@@ -65,7 +79,7 @@ export function McpDriven({ appSessionId, controls, close }: { appSessionId: App
     if (running.current) return;
     running.current = true;
     setBusy(true);
-    setLine(MCP_DRIVEN.working);
+    setLine(null);
     const result = await controls.command('mcp', `${verb} ${server}`);
     if (result.state !== 'done') {
       running.current = false;
@@ -100,7 +114,7 @@ export function McpDriven({ appSessionId, controls, close }: { appSessionId: App
                 key={server.name}
                 data-mcp-server={server.name}
                 main={<span className="font-semibold">{server.name}</span>}
-                note={[connectorStatusWords(server.status), server.tools > 0 ? MCP.tools(server.tools) : ''].filter((part) => part !== '').join(' · ')}
+                note={<StatusNote status={server.status} tools={server.tools} />}
                 actions={
                   <>
                     <TextButton onClick={() => void run('reconnect', server.name)} disabled={busy || !reconnect.available} title={reconnect.available ? undefined : reconnect.reason}>
@@ -128,10 +142,14 @@ export function McpDriven({ appSessionId, controls, close }: { appSessionId: App
             {MCP_DRIVEN.enable}
           </TextButton>
         </form>
-        {line !== null && (
-          <span role="status" className="text-ui-sm text-fg-muted">
-            {line}
-          </span>
+        {busy ? (
+          <QuietSpinner label={MCP_ACTIONS.working} />
+        ) : (
+          line !== null && (
+            <span role="status" className="text-ui-sm text-fg-muted">
+              {line}
+            </span>
+          )
         )}
       </div>
     </WidgetFrame>

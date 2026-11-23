@@ -3,7 +3,9 @@
 // as the next message (a headless local command; the compaction boundary follows in the transcript as C6's row) and
 // closes. It refuses while a turn is open (a mid-turn `/compact` would compact a conversation the human has not seen
 // end) and while messages wait in C3's queue, which a send never overtakes, naming why a paused queue paused.
-// P5 O9 M4: Compact now is the session's controls port's `compact` (lane B: that send).
+// P5 O9 M4: Compact is the session's controls port's `compact` (lane B: that send). The word cut (P629, P631, P518): the
+// field is named Instructions without a label drawn over it, the button reads Compact, and the context line's wait is the
+// quiet spinner.
 import { useState } from 'react';
 import type { AppSessionId } from '@shared/graph/ids';
 import { contextTotal } from '@shared/wire/control';
@@ -16,6 +18,7 @@ import { FRESHNESS } from '../sessions/observed'; // P5 O9 M5
 import { present as presentContext } from './ContextWidget';
 import { COMPACT, CONTEXT, FRAME, WIDGET_TITLE } from './copy';
 import { num } from './parts';
+import { QuietSpinner } from '../ui/spinner';
 import { isDormant, MOVES_READS, useEngineRead } from './read';
 import { WidgetFrame } from './WidgetFrame';
 
@@ -66,11 +69,11 @@ export function CompactWidget({ appSessionId, args, close }: { appSessionId: App
             ? CONTEXT.line(num(sampled.totalTokens), num(sampled.maxTokens), Math.round(sampled.percent), sampled.autoCompactThreshold === null ? null : num(sampled.autoCompactThreshold))
             : read.data
               ? presentContext({ ...read.data, ...contextTotal(read.data) }).line
-              : (read.error ?? FRAME.reading)}
+              : (read.error ?? <QuietSpinner label={FRAME.reading} />)}
         </p>
         <label className="flex flex-col gap-1 text-ui-sm">
-          <span className="text-fg-muted">{COMPACT.instructions}</span>
           <textarea
+            aria-label={COMPACT.instructions}
             value={instructions}
             onChange={(event) => setInstructions(event.target.value)}
             placeholder={COMPACT.placeholder}

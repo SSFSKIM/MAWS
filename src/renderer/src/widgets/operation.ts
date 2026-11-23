@@ -92,8 +92,9 @@ export function useOperation<C extends OperationCommand>(appSessionId: AppSessio
   return { state, run, unavailable: useRemoteUnavailable(appSessionId, command) };
 }
 
-// What an operation's line says: nothing before it runs, `Working…`, the outcome, or the correction a late one made.
-export function operationLine(state: OperationState, summarise: (value: unknown) => string): string | null {
+// What an operation's line says: nothing before it runs, `Working…`, the outcome, or the correction a late one made. A
+// success `summarise` answers null for says nothing (the word cut, P570: the Connectors dialog's switch and Reconnect).
+export function operationLine(state: OperationState, summarise: (value: unknown) => string | null): string | null {
   switch (state.phase) {
     case 'idle':
       return null;
@@ -102,6 +103,7 @@ export function operationLine(state: OperationState, summarise: (value: unknown)
     case 'unsent':
       return state.error;
     case 'settled':
-      return state.late && state.outcome.ok ? OPERATION.appliedAfterAll : outcomeWords(state.outcome, summarise);
+      if (state.late && state.outcome.ok) return OPERATION.appliedAfterAll;
+      return state.outcome.ok ? summarise(state.outcome.value) : OPERATION.failed(state.outcome.error.message, state.outcome.error.code);
   }
 }

@@ -4,7 +4,7 @@
 
 52 items: 43 cut, 0 reworded, 9 stay. Of the 43 that change, the owner saw 14 in a picture or ruled on them; 29 follow the pattern and were not seen.
 
-Against master (M0): 51 unchanged, 1 rewritten by the wave; none waits on the owner; 1 put to the owner (new rows included) and since ruled. M0 added 1 rows for the UX wave's new text (0 cut, 1 reworded, 0 stay), listed at the end.
+Against master (M0): 51 unchanged, 1 rewritten by the wave; none waits on the owner; 1 put to the owner (new rows included) and since ruled. M0 added 3 rows for the UX wave's new text (1 cut, 2 reworded, 0 stay), listed at the end.
 
 Columns: **Id** is the item's id in `items.json`. **Where** is the place on the surface. **Today** is the text at the pin `2c7044231` (an example value where the text is built from data). **Decision** is `cut` (the text leaves the resting surface), `reword` (it changes) or `stays` (today's text is kept; the row is here so that nobody proposes it again). **After** says what the surface shows afterwards, as it was built on the scratch branch and shown in the pictures. **Basis** is how firm the decision is, in the words of the root document's "How firm each decision is". **Source** is the file and line at the pin. **M0** is what the re-reading against master found (see the root document's "M0's record"): `unchanged`, `moved`, `rewritten by the wave`, `gone` or `moot`, with the file and line on master, and for a rewritten row the text master shows and the row decided again by the five rules. **Build** is the milestone that builds the row and the scene whose before and after pictures show it.
 
@@ -148,3 +148,15 @@ Rows added by M0 for text the UX wave added after the pin. **Today** here is the
 | Id | Where | Today | Decision | After | Basis | Source | M0 | Build |
 |---|---|---|---|---|---|---|---|---|
 | N148 | the small note under the Reconnect/switch row of the /mcp dialog, once the dialog names a place | A switch here is for this chat, and every session started in ~/work/site afterwards. | reword | The sentence opens in the row as a note when the switch row is pointed at or focused; nothing at rest. Its tooltip (where the engine records it) goes with it. | pattern | `src/renderer/src/widgets/copy.ts:159` | new `src/renderer/src/widgets/copy.ts:159` | M4 · `r2-dialog-mcp` |
+
+#### Hooks dialog (/hooks)
+
+| Id | Where | Today | Decision | After | Basis | Source | M0 | Build |
+|---|---|---|---|---|---|---|---|---|
+| N184 | at the right of every hook row: where the hook comes from, the engine's own label (for example "Startup settings (--settings option)", "Managed settings (set by your organization)") | Startup settings (--settings option) | reword | A hook's source is the permission rules' one word (startup, project, user, local, managed, session, command line), the settings file under the pointer where one is named, as P586 has it for the rules and Config's Sources; a source those words do not name (a plugin's hooks) keeps the engine's label. | pattern | `src/renderer/src/widgets/HooksWidget.tsx:45` | new `src/renderer/src/widgets/HooksWidget.tsx:45` | M4 · no scene: needs /hooks on a session with a hook configured (wanted: /hooks in a session started with a --settings hook, as pass2/hooks seq 46 records) |
+
+#### Side question dialog (/btw)
+
+| Id | Where | Today | Decision | After | Basis | Source | M0 | Build |
+|---|---|---|---|---|---|---|---|---|
+| N185 | above the field of the side-question dialog while its session starts (Ask pressed on a session with no ready process, or a start already under way) | Starting… | cut | The quiet spinner, named "Starting…", stands where the words stood; the dialog's other notes (why it cannot start, "Starts this session") keep their words. | pattern | `src/renderer/src/side/BtwWidget.tsx:63` | new `src/renderer/src/side/BtwWidget.tsx:63` | M4 · no scene: a transient wait no fixture holds (wanted: Ask pressed in /btw on a finished replayed session, with the session start held) |

@@ -3,19 +3,19 @@
 // turned on but unavailable or not in effect, or not supported on this Mac) or, when on, what happens to a command that
 // fails inside it (the unsandboxed fallback), the excluded commands that run outside it whatever the fallback says
 // (named there, so "only inside" is never read without its exceptions), and a policy lock. Dependency problems stay in
-// view; the settings behind the first read, the full excluded list and every non-empty restriction are under Details.
-// Read-only: the terminal's toggle writes settings.
+// view; Auto-allow, a managed network, the full excluded list and every non-empty restriction are under Details (the
+// word cut, P617: no longer the first read's settings, policy lock or fallback again). Read-only: the terminal's toggle
+// writes settings.
 import * as z from 'zod';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { GetSandboxDialogResponse } from '@shared/wire/control';
-import { SANDBOX, SHARED, WIDGET_TITLE } from './copy';
+import { SANDBOX, WIDGET_TITLE } from './copy';
 import { Group, KeyValues, Mono, Row, Rows } from './parts';
 import { useEngineRead } from './read';
 import { WidgetFrame } from './WidgetFrame';
 
 const Strings = z.array(z.string());
 const DependenciesSchema = z.looseObject({ errors: Strings.catch([]), warnings: Strings.catch([]) });
-const yes = (value: unknown) => (value === true ? SHARED.yes : value === false ? SHARED.no : '—');
 const text = (value: unknown): string | null => (typeof value === 'string' && value.trim() !== '' ? value : null);
 
 export interface SandboxView {
@@ -47,10 +47,7 @@ export function present(dialog: GetSandboxDialogResponse): SandboxView {
     outside: dialog.enabled && excluded.length > 0 ? SANDBOX.outside(excluded) : null,
     locked: dialog.locked === true,
     rows: [
-      { label: SANDBOX.inSettings, value: dialog.enabled_in_settings === true ? SHARED.on : dialog.enabled_in_settings === false ? SHARED.off : '—' },
-      { label: SANDBOX.lockedRow, value: yes(dialog.locked) },
       { label: SANDBOX.autoAllow, value: dialog.auto_allow_available === true ? SANDBOX.available : SANDBOX.notAvailable },
-      { label: SANDBOX.fallback, value: dialog.unsandboxed_fallback === true ? SANDBOX.allowed : dialog.unsandboxed_fallback === false ? SANDBOX.refused : '—' },
       ...(restrictions.network_managed === true ? [{ label: SANDBOX.network, value: SANDBOX.managed }] : []),
     ],
     dependencies: DependenciesSchema.catch({ errors: [], warnings: [] }).parse(dialog.dependencies),
