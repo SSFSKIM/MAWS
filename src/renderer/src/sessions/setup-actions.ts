@@ -61,11 +61,16 @@ function refusalOf(outcome: StartOutcome): string | null {
 // provisional record, and an id whose intent has not reached this page yet (a side thread's), stay C10's.
 const isRecordCard = (appSessionId: AppSessionId) => !useSetup.getState().intents.has(appSessionId) && useSessions.getState().records.has(appSessionId);
 
+// Board ticket 854: the start waits for every write of the intent this page made before it, answered or refused (the
+// spine refuses a write once the start is marked, and one still waiting behind another at the spine would be lost), so
+// a chip picked just before Send is the launch's. It is held as starting meanwhile, which greys the frame: no pick made
+// after the press is waited for, or lost to it.
 async function start(appSessionId: AppSessionId, message: FirstMessage | null, options: StartOptions): Promise<StartOutcome | { error: string }> {
   const store = useSetup.getState();
   store.undock(appSessionId);
   store.setInvoking(appSessionId, true);
   try {
+    await Promise.allSettled(writing.get(appSessionId) ?? []);
     const result = await ipc.invoke('session.start', { appSessionId, message, options });
     // P5 O7 M8: a New chat this window started (its first Send, or a card's continuation) leads its sidebar group until
     // its first turn ends
@@ -78,23 +83,29 @@ async function start(appSessionId: AppSessionId, message: FirstMessage | null, o
 
 // ---- the hook's commands -----------------------------------------------------------------------------------------
 
-// U13a (the branch review): the intent writes this page has sent and main has not answered, per session, counted as the
-// write leaves; until its answer reaches the setup store a chat may hold a draft its intent does not show yet.
-const writing = new Map<AppSessionId, number>();
+// U13a (the branch review): the intent writes this page has sent and main has not answered, per session, held as the
+// write leaves; until its answer reaches the setup store a chat may hold a draft its intent does not show yet, and a
+// start waits for them (board ticket 854).
+const writing = new Map<AppSessionId, Set<Promise<HookResult>>>();
 export const resetIntentWrites = (): void => writing.clear(); // for suites: a write a failed test left unanswered
 
-export async function patchIntent(appSessionId: AppSessionId, patch: SetupIntentPatch): Promise<HookResult> {
-  writing.set(appSessionId, (writing.get(appSessionId) ?? 0) + 1);
-  try {
-    const result = await ipc.invoke('session.intent.patch', { appSessionId, patch });
-    if (!result.ok) return { ok: false, error: result.error.message };
-    useSetup.getState().setIntent(result.value);
-    return { ok: true };
-  } finally {
-    const left = (writing.get(appSessionId) ?? 1) - 1;
-    if (left > 0) writing.set(appSessionId, left);
-    else writing.delete(appSessionId);
-  }
+export function patchIntent(appSessionId: AppSessionId, patch: SetupIntentPatch): Promise<HookResult> {
+  const write = writeIntent(appSessionId, patch);
+  const held = writing.get(appSessionId) ?? new Set();
+  writing.set(appSessionId, held.add(write));
+  const settle = () => {
+    held.delete(write);
+    if (held.size === 0 && writing.get(appSessionId) === held) writing.delete(appSessionId);
+  };
+  write.then(settle, settle);
+  return write;
+}
+
+async function writeIntent(appSessionId: AppSessionId, patch: SetupIntentPatch): Promise<HookResult> {
+  const result = await ipc.invoke('session.intent.patch', { appSessionId, patch });
+  if (!result.ok) return { ok: false, error: result.error.message };
+  useSetup.getState().setIntent(result.value);
+  return { ok: true };
 }
 
 // Send on an unstarted session: `starting`, `needs_trust` and `relay_unreachable` are `{ ok: true }` (the message is
