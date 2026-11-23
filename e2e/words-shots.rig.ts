@@ -1354,6 +1354,35 @@ const drawnText = (target: Locator, what: string) =>
       { message: `${what} drawn`, timeout: 3_000 },
     )
     .toBe(true);
+// Words painted, not only present: a text node under `target` that holds them laid out at a readable size inside the
+// viewport, with nothing from it up to `target` hiding or clipping it to a screen reader's box (the word cut's fix wave for
+// M4: a box's descendant text can be an `sr-only` label's, or Radix's clipped mirror of a tooltip, under a box that is
+// itself drawn).
+const paintedWords = (target: Locator, words: string, what: string) =>
+  expect
+    .poll(
+      () =>
+        target.first().evaluate((root, words) => {
+          const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+          for (let node = walker.nextNode(); node !== null; node = walker.nextNode()) {
+            if (!(node.textContent ?? '').includes(words)) continue;
+            const range = document.createRange();
+            range.selectNodeContents(node);
+            const box = range.getBoundingClientRect();
+            if (box.width < 4 || box.height < 4 || box.left < 0 || box.top < 0 || box.right > innerWidth || box.bottom > innerHeight) continue;
+            let clear = true;
+            for (let at: Element | null = node.parentElement; at !== null && clear; at = at === root ? null : at.parentElement) {
+              const style = getComputedStyle(at);
+              const frame = at.getBoundingClientRect();
+              clear = style.visibility !== 'hidden' && style.opacity !== '0' && style.clip === 'auto' && style.clipPath === 'none' && (style.overflow === 'visible' || (frame.width > 4 && frame.height > 4));
+            }
+            if (clear) return true;
+          }
+          return false;
+        }, words),
+      { message: `${what}: its words painted`, timeout: 3_000 },
+    )
+    .toBe(true);
 const literal = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 const m4Meta = (id: string, rows: string, title: string, how: string, state: string, folders: string[], hover = false): Meta => m4({ id, title, how, state: `${state} (${rows})`, folders, ...(hover ? { hover } : {}) });
 async function m4Scenario(app: ElectronApplication, page: Page, SID: Record<'running' | 'idle', string>, open: (command: string, rest?: string, session?: string) => Promise<void>) {
@@ -1384,6 +1413,7 @@ async function m4Scenario(app: ElectronApplication, page: Page, SID: Record<'run
       await inView(hide, 'its Hide from sidebar');
       await expect(hide, 'Hide from sidebar in words on the button').toHaveText(M4_WORDS.hideFromSidebar, { timeout: 3_000 });
       await drawnText(hide, 'Hide from sidebar');
+      await paintedWords(hide, M4_WORDS.hideFromSidebar, 'Hide from sidebar'); // the label itself, not the button's box alone
       const sentence = projectsPage().getByText(M4_WORDS.projectsSentence, { exact: true });
       if (m4Cut()) await expect(sentence, 'no sentence at the list’s top').toHaveCount(0);
       else await inView(sentence, 'master’s sentence at the list’s top');
@@ -1491,6 +1521,10 @@ async function m4Scenario(app: ElectronApplication, page: Page, SID: Record<'run
         await expect(installed(), 'the mark named Installed').toHaveAttribute('aria-label', M4_WORDS.installed, { timeout: 3_000 });
         await expect(installed(), 'no word beside the check').toHaveText('', { timeout: 3_000 });
         await tipShown(page, installed(), 'the installed mark', installed(), m4Cut)();
+        // the painted tooltip, not Radix's clipped mirror of it: its own words, in frame
+        const tip = page.locator('[data-radix-popper-content-wrapper]').filter({ has: page.getByRole('tooltip') }).first();
+        await expect(page.getByRole('tooltip').first(), 'the tooltip reads Installed').toHaveText(M4_WORDS.installed, { timeout: 3_000 });
+        await paintedWords(tip, M4_WORDS.installed, 'the Installed tooltip');
       } else await expect(installed(), 'master’s word beside the check').toContainText(M4_WORDS.installed, { timeout: 3_000 });
     },
     after: () => letGo(page),
@@ -1511,12 +1545,17 @@ async function m4Scenario(app: ElectronApplication, page: Page, SID: Record<'run
       else await inView(refresh, 'master’s Refresh in the toolbar');
     },
   });
+  const skillCards = () => custom(page).locator('[data-catalog-results] [data-catalog-card]');
   await shot(page, meta('m4-discover-skills', 'G280', 'Customize, Discover, Show: Skills', 'Customize, Discover, Show: Skills', 'The Skills catalog’s top with no note on M4; master’s note that items whose contents are not known before install are under Plugins', ['customize/discover']), async () => {
     await customizeAt(page, 'discover', 'skills');
     await letGo(page);
+    await soft(skillCards().first(), 'a Skills catalog card', 20_000);
   }, {
     check: async () => {
       await expect(custom(page), 'Discover, Skills').toHaveAttribute('data-customize-show', 'skills', { timeout: 3_000 });
+      // the catalog's content drawn, not its wait or its error (the word cut's fix wave for M4)
+      await inView(skillCards(), 'the Skills catalog’s first card');
+      await drawnText(skillCards(), 'the Skills catalog’s first card');
       const note = custom(page).locator('[data-skills-note]');
       if (m4Cut()) await expect(note, 'no note at the top').toHaveCount(0);
       else await inView(note, 'master’s note at the top');

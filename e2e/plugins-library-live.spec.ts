@@ -346,8 +346,11 @@ test('P2-B acceptance: the plugin and skills libraries on the installed engine, 
       expect(await starts()).toBe(launched); // opening /skills started nothing
       await shot('skills-dormant');
       await w.getByRole('button', { name: 'Load now' }).click();
-      await expect(w.getByRole('progressbar', { name: 'Starting…' })).toBeVisible({ timeout: 10_000 }); // the word cut (P523): the quiet spinner
-      await expect(w.locator('[data-skill-row="p2b-project"]')).toBeVisible({ timeout: 120_000 });
+      // the word cut (P523): the start's wait is the quiet spinner, drawn once the start outlasts its half second; a start
+      // quicker than that goes straight to its result, asserted next (the paced replay in sessions-available proves the spinner)
+      const skillRow = w.locator('[data-skill-row="p2b-project"]');
+      await expect.poll(async () => (await w.getByRole('progressbar', { name: 'Starting…' }).isVisible()) || (await skillRow.isVisible()), { timeout: 10_000, message: 'the start’s spinner, or its result' }).toBe(true);
+      await expect(skillRow).toBeVisible({ timeout: 120_000 });
       expect(await starts()).toBe(launched + 1); // one acquisition, the click's
       expect(await invokes(['session.send', 'session.steer'])).toBe(sent); // no prompt to read them
       scratch.log(`after Load now: ${(await status(page, id)).process}; skills rows ${await w.locator('[data-skill-row]').count()}`);
@@ -376,7 +379,8 @@ test('P2-B acceptance: the plugin and skills libraries on the installed engine, 
       await expect(line).toHaveAttribute('data-loaded-freshness', 'last');
       expect(await starts()).toBe(launched);
       await line.getByRole('button', { name: 'Refresh' }).click();
-      await expect(line.getByRole('progressbar', { name: 'Starting…' })).toBeVisible({ timeout: 10_000 }); // the word cut (P523): the quiet spinner
+      // the word cut (P523): the quiet spinner while the start outlasts its half second, else straight to the result below
+      await expect.poll(async () => (await line.getByRole('progressbar', { name: 'Starting…' }).isVisible()) || (await line.getAttribute('data-loaded-freshness')) === 'now', { timeout: 10_000, message: 'the start’s spinner, or its result' }).toBe(true);
       scratch.log(`after the click: ${(await line.textContent()) ?? ''}`);
       await expect(line).toHaveAttribute('data-loaded-freshness', 'now', { timeout: 120_000 });
       await expect(line).toContainText('Loaded now');

@@ -1286,6 +1286,24 @@ const WIDGET_READS: Record<string, string | null> = {
   plugins: null, mcp: 'mcp_status', sandbox: 'get_sandbox_dialog', hooks: 'get_hooks_listing', memory: 'get_memory_dialog', skills: 'get_skills_dialog',
 };
 
+// A widget's read of `subtype` answered: none of them still out on the wire, and at least one answered with a success (the
+// word cut's fix wave for M4: a widget can draw words before its reply, such as /permissions' mode, so its wait is for
+// the engine's reply; a read served from the cache, /effort's after /model's, sends nothing more)
+function readAnswered(path: string, subtype: string): boolean {
+  const rows = readJournal(path);
+  const asked = rows
+    .filter((r) => r.direction === 'out' && r.frame.type === 'control_request' && (r.frame as { request?: { subtype?: string } }).request?.subtype === subtype)
+    .map((r) => (r.frame as { request_id?: string }).request_id);
+  const answered = new Set(
+    rows
+      .filter((r) => r.direction === 'in' && r.frame.type === 'control_response')
+      .map((r) => (r.frame as { response?: { subtype?: string; request_id?: string } }).response)
+      .filter((response) => response?.subtype === 'success')
+      .map((response) => response!.request_id),
+  );
+  return asked.length > 0 && asked.every((requestId) => answered.has(requestId));
+}
+
 async function closeWidgets(page: Page): Promise<void> {
   for (const w of await page.locator('[data-widget]').all()) await w.getByRole('button', { name: /^Close / }).first().click().catch(() => undefined);
 }
@@ -1338,9 +1356,15 @@ test('§10.8 every palette widget opens backed by its read; ! and # work; a live
         await expect(w).toBeVisible();
         await expect(w.locator('footer')).toHaveCount(0); // E11 §2.2: no provenance foot
         // the word cut (P518): the read is a quiet spinner named "Reading…", drawn after 500 ms and no text, so the wait is
-        // for the answer. A framed widget: its body's words or its alert, the frame's spinner gone. /model and /effort are
+        // for the answer: the engine's reply on the wire first, then what draws it. A framed widget: its body's words or its
+        // alert, the frame's spinner gone. /model and /effort are
         // the selector, with no frame and no body: its own control drawn (the models menu, the effort slider) and no wait
         // spinner, on two samples further apart than the spinner's quiet half second, so a read still out has shown it.
+        const sub = WIDGET_READS[name];
+        if (sub !== null) {
+          const journal = (await statusOf(page, id)).journalPath;
+          await expect.poll(() => readAnswered(journal, sub), { timeout: 20_000, message: `/${name}'s ${sub} answered on the wire` }).toBe(true);
+        }
         if (name === 'model' || name === 'effort') {
           const control = name === 'model' ? w.getByRole('menu') : w.getByRole('slider');
           const settled = async () => (await control.count()) > 0 && (await w.getByRole('progressbar').count()) === 0;

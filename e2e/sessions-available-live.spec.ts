@@ -263,11 +263,14 @@ test('P2-A live: discovered sessions open with nothing started; Send, Load now a
       await expect(frame.locator('[data-dormant-gesture]')).toHaveText('Load now');
       const before = spawns(skillsId).length;
       await frame.getByRole('button', { name: 'Load now' }).click();
-      // P523: the start's wait is the quiet spinner in Load now's place, never words (a real start outlasts its half second)
-      await expect(frame.getByRole('progressbar', { name: 'Starting…' })).toBeVisible({ timeout: 10_000 });
+      // P523: the start's wait is the quiet spinner in Load now's place, never words. It is drawn once the start outlasts
+      // its half second; a start quicker than that goes straight to its result, asserted next (the paced replay in
+      // sessions-available proves the spinner)
+      const skillRow = frame.locator(`[data-skill-row="${SKILL}"]`);
+      await expect.poll(async () => (await frame.getByRole('progressbar', { name: 'Starting…' }).isVisible()) || (await skillRow.isVisible()), { timeout: 10_000, message: 'the start’s spinner, or its result' }).toBe(true);
       await expect(frame.getByText('Starting…')).toHaveCount(0);
-      log('frame read: the start spinner');
-      await expect(frame.locator(`[data-skill-row="${SKILL}"]`)).toBeVisible({ timeout: 120_000 }); // P2-B's skills library row
+      log('frame read: the start spinner or its result');
+      await expect(skillRow).toBeVisible({ timeout: 120_000 }); // P2-B's skills library row
       expect(spawns(skillsId).length, 'one more launch').toBe(before + 1);
       expect(userFrames(skillsId), 'no prompt to populate it').toHaveLength(0);
       const rows = await frame.locator('li').allInnerTexts();
