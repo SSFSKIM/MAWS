@@ -280,7 +280,7 @@ describe('the word cut: What’s inside', () => {
     expect(inside.querySelector('h4')).toBeNull();
     expect([...inside.querySelectorAll('[data-inside]')].map((row) => row.textContent)).toEqual(['Connectors · 1· tides', 'Skills · 1· review']);
     expect(within(detail).getAllByRole('tab').map((tab) => tab.textContent)).toEqual(['Overview', 'Skills1', 'Connectors1']);
-    fireEvent.mouseDown(within(detail).getByRole('tab', { name: 'Skills1' }));
+    fireEvent.mouseDown(within(detail).getByRole('tab', { name: /^Skills/ }));
     expect(detail.textContent).not.toContain('Invoke by typing');
   });
 });
