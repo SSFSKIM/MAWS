@@ -192,6 +192,28 @@ describe('floating session cards', () => {
     expect(screen.queryByRole('region', { name: 'Waiting for you' })).toBeNull();
   });
 
+  // Seen 2026-11-23: a session whose folder the index does not know (directory '') threw in Environment, and with nothing
+  // to catch it the window went blank. It has no checkout: no git entry and no watch, and its cards draw.
+  it('a session with no known folder draws its cards with no git facts and watches nothing', async () => {
+    act(() => useSessions.setState((s) => ({ records: new Map([...s.records, [A, record(A, { projectId: P, directory: '' })]]) })));
+    mount();
+    expect(cardNames()).toEqual(['Environment', 'Context', 'Connectors']);
+    expect(within(region('Environment')).getByText('This Mac')).toBeTruthy();
+    expect(screen.queryByTestId('card-failed')).toBeNull();
+    expect(fake.invoked('git.watch')).toEqual([]);
+  });
+
+  it('a card that throws while drawing says so in its place, and the other cards still draw', () => {
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
+    registerSlot('sessionCardFoot', () => {
+      throw new Error('foot broke');
+    });
+    mount();
+    expect(screen.getByTestId('card-failed').textContent).toBe(SUMMARY_COPY.cardFailed('Foot'));
+    expect(cardNames()).toEqual(['Environment', 'Context', 'Connectors']);
+    expect(errors.mock.calls.some((call) => String(call[0]).includes('the Foot card failed to draw'))).toBe(true);
+  });
+
   it('with nothing registered in the two slots, neither draws an element', () => {
     setAttention([waiting(A)]);
     mount();

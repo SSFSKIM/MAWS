@@ -20,7 +20,7 @@ export interface ScmState {
 }
 
 function createState({ appSessionId, session }: PanelToolInit): ScmState {
-  return { ui: createPageUi(appSessionId, session ? workingFolder(session).path : null) };
+  return { ui: createPageUi(appSessionId, (session && workingFolder(session).path) || null) };
 }
 
 export function ScmIcon({ className }: { className?: string }) {
@@ -37,7 +37,7 @@ export function ScmIcon({ className }: { className?: string }) {
 function ScmBody({ state, ctx }: { state: ScmState; ctx: PanelToolContext }) {
   const { ui } = state;
   const shown = ctx.appSessionId;
-  const directory = ctx.session ? workingFolder(ctx.session).path : null;
+  const directory = (ctx.session && workingFolder(ctx.session).path) || null; // '' is a session with no folder: no checkout
   // A pinned tool shown for another session starts over there, and so does a session whose working folder changed (UX
   // wave U8c-2: the agent moved): the two folds go back to folded. Until then nothing renders, so nothing of the old
   // checkout is shown or read for the new one.

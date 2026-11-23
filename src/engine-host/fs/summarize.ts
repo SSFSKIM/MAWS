@@ -24,6 +24,7 @@ export function summarize(
   path: string,
   slug: string,
   sidecarTitle: string | null = null, // `custom-title.json`'s `customTitle`, which discovery reads beside the transcript (M2)
+  launchCwd: string | null = null, // the first record's folder when it lies past the head window (discovery's scan past it)
 ): TranscriptSummary {
   const headText = head.toString('utf8');
   const tailText = tail.toString('utf8');
@@ -49,7 +50,10 @@ export function summarize(
     sessionId: basename(path, '.jsonl') as SessionId,
     transcriptPath: path,
     slug,
-    directory: firstString(headRecords, 'cwd'),
+    // The folder the session was launched in: the head's first, else the one discovery found past the head (a transcript
+    // whose head is all bookkeeping: file-history snapshots of tens of KiB each). Never a later row's: a shell `cd` does
+    // not refile the session (newestCwd follows it). Unknown (null) when neither names one, which the index keeps.
+    directory: firstString(headRecords, 'cwd') ?? launchCwd,
     relocatedCwd: lastString(tailReversed, 'relocated', 'relocatedCwd'),
     newestCwd: newestCwd(tailReversed), // UX wave U8c-2 (§A): the tail only; a head's newest folder in a long file is old
     size: stat.size,
@@ -83,6 +87,20 @@ export function summarize(
 function newestCwd(records: TranscriptRecord[]): string | null {
   for (const record of records) if (record.isSidechain !== true && typeof record.cwd === 'string') return record.cwd;
   return null;
+}
+
+// The folder the head window's first record names (what `summarize` files the session under), or null.
+export function headCwd(head: Buffer, size: number): string | null {
+  return firstString(parseWindow(head.toString('utf8'), { dropLast: size > head.length }), 'cwd');
+}
+
+// The top-level `cwd` of the record whose line begins with `start` (a line's first bytes, cut anywhere), or null: the
+// fragment scan below reads depth-1 keys only, so a `cwd` inside a tool input is never the record's. A line without the
+// key's bytes costs a byte search.
+export function lineCwd(start: Buffer): string | null {
+  if (start.indexOf('"cwd":"') === -1) return null;
+  const cwd = scanRecordStart(start.toString('utf8'))?.cwd;
+  return typeof cwd === 'string' ? cwd : null;
 }
 
 // Whole lines in the window parse as records. A line cut by the window's edge that begins at a record's start (the

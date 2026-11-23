@@ -158,6 +158,17 @@ describe('words?', () => {
     });
   });
 
+  it('answers peer at once for a session it holds no member for, whatever signed the words', async () => {
+    const { b1, A, B, head } = await org();
+    const event = await words(b1, B, 1);
+    const index = new InboundIndex(scratch, Date.now);
+    index.record(P, contentOf(event), event.writer, event.seq);
+    const ctx = { org: () => ({ head: head.state, certificates: NO_CERTS, ref: REF }), machineOwners: async () => [A], members: members(), ledger: new SignatureLedger(scratch), index, now: Date.now };
+    expect(await decideWords(ctx, { t: 'words?', id: 'w', project: P, session: S, event })).toBe('peer');
+    // The same words once the member is held, B conversing on it: words.
+    expect(await decide(head, event, [A], { access: 'private', shares: [{ member: B, grade: 'converse' }] })).toBe('words');
+  });
+
   it('answers no remote words past the head’s 30-day backstop (finding 2)', async () => {
     const issued = iso(Date.now() - 31 * 86_400_000);
     const { b1, A, B, head } = await org({ issued });

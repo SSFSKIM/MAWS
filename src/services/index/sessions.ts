@@ -27,6 +27,8 @@ import { planPromptOpened } from '@shared/engine/host-prompts'; // ticket 733a
 import { locate, type ProjectStore } from './projects';
 import { FolderReads, factsOf, folderColumns } from './folder-facts'; // UX wave U8c-2
 
+const FOLDERLESS_RESCAN_KEY = 'folderlessRescan'; // rescanFolderlessOnce
+
 // The home directory as `locate` answers it (realpathed), which discovery never makes a project of; read once.
 let home: string | null | undefined;
 const homeDirectory = () => (home === undefined ? (home = locate(homedir()).realpath) : home);
@@ -301,6 +303,7 @@ export class SessionStore {
   // Every engine session's record bound to an engine id, with its transcript's size and mtime while one is on disk.
   // Replay records are not among them: their ids live only as long as the host's runner.
   bindings(): Binding[] {
+    this.rescanFolderlessOnce();
     return this.db
       .all<{ engine_session_id: string; app_id: string; transcript_path: string | null; transcript_size: number | null; transcript_mtime_ms: number | null }>(
         "SELECT engine_session_id, app_id, transcript_path, transcript_size, transcript_mtime_ms FROM sessions WHERE engine_session_id IS NOT NULL AND kind = 'engine'",
@@ -311,6 +314,20 @@ export class SessionStore {
         size: row.transcript_path === null ? null : row.transcript_size,
         mtimeMs: row.transcript_path === null ? null : row.transcript_mtime_ms,
       }));
+  }
+
+  // Once per index (2026-11-23): discovery once stopped at the head window and stored no folder for a transcript whose
+  // first `cwd` lay past it. Each such record's mtime is stored as -1, as migration 4 did, so the next scan summarises it
+  // again and fills the folder; a record still without one after that is read again only when its transcript changes.
+  private folderlessRescanned = false;
+  private rescanFolderlessOnce(): void {
+    if (this.folderlessRescanned) return;
+    this.folderlessRescanned = true;
+    this.db.transaction(() => {
+      if (this.db.get<{ value: string }>('SELECT value FROM index_meta WHERE key = ?', FOLDERLESS_RESCAN_KEY)) return;
+      this.db.run("UPDATE sessions SET transcript_mtime_ms = -1 WHERE directory = '' AND transcript_path IS NOT NULL AND kind = 'engine'");
+      this.db.run("INSERT INTO index_meta (key, value) VALUES (?, '1')", FOLDERLESS_RESCAN_KEY);
+    });
   }
 
   // Discovery: the record for the summary's engine id, created (with a fresh app id) when there is none. Overwrites the

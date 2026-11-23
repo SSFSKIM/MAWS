@@ -126,13 +126,19 @@ export function matches(expected: unknown, got: unknown, vary: readonly string[]
 
 const join = (path: string, key: string) => (path === '' ? key : `${path}.${key}`);
 
+/** Throws when `sminos` received a line of one of `kinds` that no `down` step matched: kinds the conversation lists whole. */
+export function expectListed(sminos: FakeSminos, kinds: readonly string[], where: string): void {
+  const unlisted = sminos.received.filter((f, i) => kinds.includes(f.t) && !sminos.matched.has(i));
+  if (unlisted.length > 0) throw new Error(`${where}: lines the conversation doesn't list: ${JSON.stringify(unlisted).slice(0, 600)}`);
+}
+
 export type Scenes = (step: { scene: string } & Record<string, unknown>, bindings: Record<string, unknown>) => Promise<void>;
 
 /**
  * Plays one case against the endpoint: `socket()` is where the socket is now (it moves at a restart), `scenes` does what
  * the endpoint's side does, and `connections` carries the open connections from case to case.
  */
-export async function replayCase(c: Case, options: { socket(): string; scenes: Scenes; bindings: Record<string, unknown>; connections: Map<string, FakeSminos> }): Promise<void> {
+export async function replayCase(c: Case, options: { socket(): string; scenes: Scenes; bindings: Record<string, unknown>; connections: Map<string, FakeSminos>; listed?: readonly string[] }): Promise<void> {
   const { connections, bindings } = options;
   const conn = (step: Step) => {
     const name = step.conn ?? 'main';
@@ -143,7 +149,9 @@ export async function replayCase(c: Case, options: { socket(): string; scenes: S
   for (const [i, step] of c.steps.entries()) {
     const where = `${c.name}, step ${i}`;
     if (step.open !== undefined) {
-      connections.get(step.open)?.close();
+      const replaced = connections.get(step.open);
+      if (replaced !== undefined && options.listed !== undefined) expectListed(replaced, options.listed, where);
+      replaced?.close();
       connections.set(step.open, await FakeSminos.open(options.socket()));
     } else if (step.up !== undefined) {
       conn(step).send(bind(step.up, bindings) as object);
@@ -160,6 +168,7 @@ export async function replayCase(c: Case, options: { socket(): string; scenes: S
       while (c2 !== undefined && !c2.closed && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 10));
       if (c2 === undefined || !c2.closed) throw new Error(`${where}: ${step.closed} was not closed`);
       if (step.closed !== 'main' && c2.received.length > 0) throw new Error(`${where}: ${step.closed} was written to before its close`);
+      if (options.listed !== undefined) expectListed(c2, options.listed, where);
       connections.delete(step.closed);
     } else if (step.quiet !== undefined) {
       const quiet = step.quiet;

@@ -14,10 +14,10 @@ import { modelName } from '@shared/sessions/model-label';
 import type { WorkingFolder } from '@shared/sessions/working-folder';
 import { useMachineMark } from '../../app/machine-mark';
 import { catalogueRoute } from '../../gateway/observed-route'; // P5 O7 M9
-import { checkoutKey, machineFor } from '../../ipc/machine';
+import { machineFor } from '../../ipc/machine';
 import { useCommand } from '../../ipc/query';
 import { NOT_A_REPOSITORY } from '../../sessions/branch-label'; // C4's message (W9: one constant for every reader)
-import { useGit, type GitEntry } from '../../stores/git';
+import { entryOf, useGit, type GitEntry } from '../../stores/git';
 import { useSessions } from '../../stores/sessions';
 import { Tip } from '../../ui/tip';
 import { SUMMARY_COPY } from '../copy';
@@ -28,7 +28,7 @@ import { Row, ToolButton, ToolSummary, useToolSummary } from './Section';
 
 export function Environment({ appSessionId, record, folder, fold }: { appSessionId: AppSessionId; record: SessionRecord; folder: WorkingFolder; fold: CardFold }) {
   const directory = folder.path; // the checkout
-  const entry = useGit((s) => s.entries.get(checkoutKey(machineFor(appSessionId), directory)));
+  const entry = useGit((s) => entryOf(s, machineFor(appSessionId), directory));
   const reviewSummary = useToolSummary('review');
   const status = entry?.status ?? null;
   const machine = useMachineMark(appSessionId); // P5 O6 M5: where it runs, this Mac's as before, another's by name

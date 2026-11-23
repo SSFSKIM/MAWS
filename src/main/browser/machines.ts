@@ -32,12 +32,19 @@ export type AwaySession = { machine: MachineRef; bare: AppSessionId };
 export class SessionMachines {
   readonly #away = new Map<string, AwaySession>();
 
+  // `keys`: every session key tabs.json holds (its tabs' and its selection's). An address among them is another machine's
+  // session whether or not `machines` names it (a selection kept after the session's last tab closed was written without
+  // one), since a key fixes its machine; unregistered, it would be said as this machine's and its address refused.
   constructor(
     readonly local: MachineRef,
     restored: Readonly<Record<string, MachineRef>> = {},
+    keys: Iterable<string> = [],
   ) {
     for (const [key, machine] of Object.entries(restored)) {
       if (machine !== local && isAddress(key) && machineOf(key) === machine) this.#away.set(key, { machine, bare: bareOf(key as AppSessionId) });
+    }
+    for (const key of keys) {
+      if (isAddress(key) && machineOf(key) !== local && !this.#away.has(key)) this.#away.set(key, { machine: machineOf(key), bare: bareOf(key as AppSessionId) });
     }
   }
 
