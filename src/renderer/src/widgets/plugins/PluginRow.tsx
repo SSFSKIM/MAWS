@@ -173,8 +173,8 @@ export function PluginRow({ identity, now, iconUrl, onOpen, kindWord = false }: 
         </RowNote>
       )}
       {version !== null && (
-        // Customize's narrow page (under its container's 24rem) gives it up; /plugins' dialog has no such container
-        <span data-plugin-version className="relative shrink-0 text-ui-sm text-fg-muted tabular-nums @max-sm/customize:hidden">
+        // the word cut (G218, ruled): the version stays at rest at every width, Customize's narrow page included
+        <span data-plugin-version className="relative shrink-0 text-ui-sm text-fg-muted tabular-nums">
           {version}
         </span>
       )}

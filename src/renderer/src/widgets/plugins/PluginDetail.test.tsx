@@ -311,16 +311,12 @@ describe('the word cut: a read-only plugin says where it is managed', () => {
     expect(accessibleDescription(within(detail).getByRole('button', { name: 'Update' }))).toBe('In site · manage it from a session there');
   });
 
-  it('on a read-only chip of a mixed plugin, Update on the latest version still keeps the keyboard and the reason', () => {
-    const user = inst(ID, { version: '1.0.0' });
-    const synced = inst(ID, { scope: 'synced', version: '1.0.0' });
-    const views = new Map([user, synced].map((p) => [manifestKeyOf(installationRef(p)), viewOf(p, { marketplaceVersion: '1.0.0' })]));
-    const detail = show(identitiesOf([user, synced], [], views, null)[0]);
-    expect(within(detail).getByRole('button', { name: 'Update' })).toHaveProperty('disabled', true); // the user's: On latest version
-    fireEvent.click(within(detail).getByRole('radio', { name: 'Synced' }));
+  it('a read-only installation on the latest version still keeps Update in the keyboard with its reason', () => {
+    const p = inst(ID, { scope: 'project', projectPath: '/work/site', coversHere: true, version: '1.0.0' });
+    const detail = show(identityOf(p, viewOf(p, { marketplaceVersion: '1.0.0' })));
     const update = within(detail).getByRole('button', { name: 'Update' });
-    expect(update.hasAttribute('disabled')).toBe(false);
+    expect(update.hasAttribute('disabled')).toBe(false); // not the native On latest version, which would drop the reason
     expect(update.getAttribute('aria-disabled')).toBe('true');
-    expect(accessibleDescription(update)).toBe('Synced from claude.ai · change it there');
+    expect(accessibleDescription(update)).toBe('In site · manage it from a session there');
   });
 });

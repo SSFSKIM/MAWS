@@ -10,6 +10,8 @@
 // freshness), the last init's problems for this plugin, and What's inside; a tab per non-empty kind lists it. A chip
 // that is not here or the user's offers no change: its switch and Update stay in the Tab order, greyed, and say where
 // the plugin is managed as their tooltip and description, with no line under the chips repeating it (word cut P703).
+// A plugin no installation of which this session can change draws them so too, without the overflow; Update's native
+// "On latest version" is only a changeable installation's, so it never takes a read-only one's reason out of reach.
 // A version not reported is a blank in the byline (P698).
 import { DropdownMenu } from 'radix-ui';
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
@@ -56,8 +58,8 @@ export interface PluginDetailProps {
 }
 
 const ACTION = 'inline-flex h-7 shrink-0 items-center rounded-md px-2.5 text-ui outline-accent focus-visible:outline-2 disabled:cursor-default';
-const SECONDARY = `${ACTION} border border-border text-fg hover:bg-bg-hover disabled:text-fg-faint disabled:hover:bg-transparent`;
-const PRIMARY = `${ACTION} bg-accent text-bg hover:opacity-90 disabled:bg-bg-active disabled:text-fg-faint`;
+const SECONDARY = `${ACTION} border border-border text-fg hover:bg-bg-hover disabled:text-fg-faint disabled:hover:bg-transparent aria-disabled:cursor-default aria-disabled:text-fg-faint aria-disabled:hover:bg-transparent`;
+const PRIMARY = `${ACTION} bg-accent text-bg hover:opacity-90 disabled:bg-bg-active disabled:text-fg-faint aria-disabled:cursor-default aria-disabled:bg-bg-active aria-disabled:text-fg-faint aria-disabled:hover:opacity-100`;
 const ITEM = 'flex h-7 cursor-default items-center rounded-sm px-2 outline-none select-none data-disabled:text-fg-faint data-highlighted:bg-bg-hover';
 
 type Change = Extract<PluginsAction, 'update' | 'uninstall' | 'enable' | 'disable'>;
@@ -94,7 +96,7 @@ export function PluginDetail({ appSessionId, availability, identity, loaded, loa
   const date = dateWords(updated, now);
   const byline = [view?.author ? L.by(view.author) : null, version, identity.marketplace].filter((part): part is string => part !== null);
 
-  const offered = identity.actionable.length > 0; // a switch, Update and Uninstall… only where this session can change it
+  const offered = identity.actionable.length > 0; // the overflow's Uninstall… only where this session can change it
   const actionable = chip?.actionable ?? false;
   const busy = chip !== null && ops.entries.get(chip.key)?.state.phase === 'working';
   const managed = chip === null ? L.whereManaged(projectCount(others) === 1 ? L.managedIn(basename(others[0].projectPath ?? '')) : L.managedInMany(projectCount(others))) : chipManagedWords(chip);
@@ -139,18 +141,18 @@ export function PluginDetail({ appSessionId, availability, identity, loaded, loa
               )}
             </p>
           </div>
-          {offered ? (
-            <div className="flex shrink-0 items-center gap-2">
-              <span className="inline-flex" title={managed === null ? (identity.enabledHere ? L.turnOff : L.turnOn) : undefined}>
-                <Switch checked={identity.enabledHere} label={L.enablePlugin} disabled={busy} unavailable={managed} onClick={() => change(identity.enabledHere ? 'disable' : 'enable')} />
-              </span>
-              <span className="inline-flex" title={managed === null ? update.title : undefined}>
-                <UnavailableButton reason={managed}>
-                  <button type="button" className={update.available ? PRIMARY : SECONDARY} disabled={busy || update.latest} onClick={() => change('update')}>
-                    {L.update}
-                  </button>
-                </UnavailableButton>
-              </span>
+          <div className="flex shrink-0 items-center gap-2">
+            <span className="inline-flex" title={managed === null ? (identity.enabledHere ? L.turnOff : L.turnOn) : undefined}>
+              <Switch checked={identity.enabledHere} label={L.enablePlugin} disabled={busy} unavailable={managed} onClick={() => change(identity.enabledHere ? 'disable' : 'enable')} />
+            </span>
+            <span className="inline-flex" title={managed === null ? update.title : undefined}>
+              <UnavailableButton reason={managed}>
+                <button type="button" className={update.available ? PRIMARY : SECONDARY} disabled={busy || (managed === null && update.latest)} onClick={() => change('update')}>
+                  {L.update}
+                </button>
+              </UnavailableButton>
+            </span>
+            {offered && (
               <DropdownMenu.Root modal={false}>
                 <DropdownMenu.Trigger asChild>
                   <button
@@ -170,8 +172,8 @@ export function PluginDetail({ appSessionId, availability, identity, loaded, loa
                   </DropdownMenu.Content>
                 </DropdownMenu.Portal>
               </DropdownMenu.Root>
-            </div>
-          ) : null}
+            )}
+          </div>
         </div>
         <ScopeChips chips={chips} others={others} value={selected} onChange={setChosen} />
         {chips.map((c) => (

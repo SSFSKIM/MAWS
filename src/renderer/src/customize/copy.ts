@@ -18,11 +18,12 @@ export const SKILL_ACTIONS = {
   newSkill: 'New skill…',
   inProject: 'In this project', // the skills' own group headings (widgets/copy.ts)
   yours: 'Created by you',
-  homeUnknown: 'Configuration folder not known yet. Refresh to try again.', // why "Created by you" waits (word cut N133)
+  homeUnknown: 'Configuration folder not known yet.', // why "Created by you" waits (word cut N133; its way out is `retry`, G247)
+  retry: 'Retry', // a failed read's own way out, beside what it holds back: the folder's, a skill's file gone
   // the composer's text, sent by the person; `creator` is skill-creator's invocation when it can run here
   firstMessage: (where: 'project' | 'yours', skillsHome: string, creator: string | null) =>
     `${creator === null ? '' : `/${creator} `}Let's create a new skill in ${where === 'project' ? '.claude/skills/ of this project' : `${skillsHome}, for all my projects`}. First ask me what it should do.`,
   pluginLine: (plugin: string) => `Comes with the plugin ${plugin}. An update of the plugin replaces this file, and any edit in it.`,
-  missing: "This skill's file is no longer here. Refresh, then try again.",
+  missing: "This skill's file is no longer here.", // with `retry`, which reads the skills again in place (word cut G247)
   unreadable: (reason: string) => `Skills could not be read: ${reason}`,
 } as const;

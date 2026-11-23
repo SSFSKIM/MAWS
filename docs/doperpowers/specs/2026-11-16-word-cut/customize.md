@@ -4,7 +4,7 @@
 
 81 items: 39 cut, 5 reworded, 37 stay. Of the 44 that change, the owner saw 16 in a picture or ruled on them; 28 follow the pattern and were not seen.
 
-Against master (M0): 76 unchanged, 2 rewritten by the wave, 2 moved, 1 gone; none waits on the owner; 10 put to the owner (new rows included) and since ruled. M0 added 22 rows for the UX wave's new text (3 cut, 6 reworded, 13 stay), listed at the end.
+Against master (M0): 76 unchanged, 2 rewritten by the wave, 2 moved, 1 gone; none waits on the owner; 10 put to the owner (new rows included) and since ruled. M0 added 23 rows for the UX wave's new text (3 cut, 7 reworded, 13 stay), listed at the end.
 
 Columns: **Id** is the item's id in `items.json`. **Where** is the place on the surface. **Today** is the text at the pin `2c7044231` (an example value where the text is built from data). **Decision** is `cut` (the text leaves the resting surface), `reword` (it changes) or `stays` (today's text is kept; the row is here so that nobody proposes it again). **After** says what the surface shows afterwards, as it was built on the scratch branch and shown in the pictures. **Basis** is how firm the decision is, in the words of the root document's "How firm each decision is". **Source** is the file and line at the pin. **M0** is what the re-reading against master found (see the root document's "M0's record"): `unchanged`, `moved`, `rewritten by the wave`, `gone` or `moot`, with the file and line on master, and for a rewritten row the text master shows and the row decided again by the five rules. **Build** is the milestone that builds the row and the scene whose before and after pictures show it.
 
@@ -213,13 +213,14 @@ Rows added by M0 for text the UX wave added after the pin. **Today** here is the
 
 | Id | Where | Today | Decision | After | Basis | Source | M0 | Build |
 |---|---|---|---|---|---|---|---|---|
-| N133 | the tooltip of the greyed New skill… button (and of its greyed "Created by you" menu item) while the engine's configuration folder is not yet known | Your Claude configuration folder is not known yet. Refresh to try again. | reword | The button stays focusable (drawn aria-disabled) and its tooltip reads "Configuration folder not known yet. Refresh to try again."; the greyed item in the menu is reached the same way. | pattern | `src/renderer/src/customize/copy.ts:21` | new `src/renderer/src/customize/copy.ts:21` | M4 · no scene: a transient wait no fixture holds (wanted: Customize › Skills (user configuration) before the engine has reported its configuration folder) |
+| N133 | the tooltip of the greyed New skill… button (and of its greyed "Created by you" menu item) while the engine's configuration folder is not yet known | Your Claude configuration folder is not known yet. Refresh to try again. | reword | The button stays focusable (drawn aria-disabled) and its tooltip and description read "Configuration folder not known yet."; the greyed item in the menu is reached the same way. When the folder's read failed, a Retry beside New skill… reads it again (Skills has no Refresh to point at: G247). | pattern | `src/renderer/src/customize/copy.ts:21` | new `src/renderer/src/customize/copy.ts:21` | M4 · no scene: a transient wait no fixture holds (wanted: Customize › Skills (user configuration) before the engine has reported its configuration folder) |
 
 #### Customize, a skill's own page
 
 | Id | Where | Today | Decision | After | Basis | Source | M0 | Build |
 |---|---|---|---|---|---|---|---|---|
 | N134 | the line under a plugin skill's detail head | Comes with the plugin superpowers. An update of the plugin replaces this file, and any edit in it. | stays | Stays. what is lost on an update is a destructive consequence (an edit disappears); "Comes with the plugin X" also orients (rule 2). It is wordy but never cut: the consent rule | consent | `src/renderer/src/customize/copy.ts:25` | new `src/renderer/src/customize/copy.ts:25` | M4 · no scene: needs a Customize fixture in that state (wanted: Customize › Skills, a skill that comes with a plugin opened (its page with Open in)) |
+| N189 | under the head of a skill's detail, in the danger tone, after Open in found the skill's file gone | This skill's file is no longer here. Refresh, then try again. | reword | The line reads "This skill's file is no longer here." with a Retry button beside it, which reads the page's skills again and clears the line. | pattern | `src/renderer/src/customize/copy.ts:27` | new `src/renderer/src/customize/SkillFile.tsx:43` | M4 · no scene: needs a skill whose file is removed after the list was read (wanted: Customize › Skills, a skill's detail, Open in › Finder on a file gone) |
 
 ### Customize, Connectors
 

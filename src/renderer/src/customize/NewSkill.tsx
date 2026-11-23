@@ -3,7 +3,8 @@
 // be made, "In this project" and "Created by you"; on the user configuration's page a button that makes the person's own.
 // Each opens a new chat in the page's place with its first message filled in (./skill-actions.ts). While the engine's
 // configuration folder is unknown, the button and "Created by you" stay reachable, greyed, and give the reason as their
-// description (word cut N133: every hidden fact has an owner that takes keyboard focus).
+// description (word cut N133: every hidden fact has an owner that takes keyboard focus); when the folder's read failed,
+// a Retry beside it reads it again, the error's own way out where it stands (G247 took Refresh from Skills).
 import { DropdownMenu } from 'radix-ui';
 import { useMemo } from 'react';
 import { useSettings } from '../stores/settings';
@@ -22,8 +23,15 @@ const ITEM = 'flex h-7 cursor-default items-center rounded-sm px-2 outline-none 
 export function NewSkill() {
   const { cwd, projectId, directory, inventory } = usePlace();
   // the folder a person's skill goes in: the engine's configuration home, once plugins.env has answered; until then
-  // "Created by you" waits, greyed, rather than guess it
-  const configHome = usePluginsEnv().data?.configHome ?? null;
+  // "Created by you" waits, greyed, rather than guess it; a failed read offers its own Retry beside the button (word
+  // cut G247: Skills has no Refresh to point at)
+  const env = usePluginsEnv();
+  const configHome = env.data?.configHome ?? null;
+  const retry = env.state === 'error' && (
+    <button type="button" data-new-skill-retry className={BUTTON} onClick={() => void env.reread()}>
+      {A.retry}
+    </button>
+  );
   // the plugins a chat started here goes without, as the session's Skills dialog reads them (widgets/SkillsWidget.tsx)
   const off = useSettings((s) => s.state?.settings.engine.launchProfile.plugins.off);
   const pluginsOff = useMemo(() => (off === undefined ? null : new Set(off)), [off]);
@@ -46,34 +54,40 @@ export function NewSkill() {
   const waiting = configHome === null;
   if (cwd === null) {
     return (
-      <UnavailableButton reason={waiting ? A.homeUnknown : null}>
-        <button type="button" data-new-skill className={BUTTON} onClick={() => start('yours')}>
-          {A.newSkill}
-        </button>
-      </UnavailableButton>
+      <>
+        <UnavailableButton reason={waiting ? A.homeUnknown : null}>
+          <button type="button" data-new-skill className={BUTTON} onClick={() => start('yours')}>
+            {A.newSkill}
+          </button>
+        </UnavailableButton>
+        {retry}
+      </>
     );
   }
   return (
-    <DropdownMenu.Root modal={false}>
-      <DropdownMenu.Trigger asChild>
-        <button type="button" data-new-skill className={BUTTON}>
-          {A.newSkill}
-        </button>
-      </DropdownMenu.Trigger>
-      <DropdownMenu.Portal>
-        <DropdownMenu.Content align="end" sideOffset={4} className="z-50 min-w-48 rounded-md border border-border-strong bg-bg-overlay p-1 text-ui text-fg shadow-float">
-          <DropdownMenu.Item className={ITEM} onSelect={() => start('project')}>
-            {A.inProject}
-          </DropdownMenu.Item>
-          {waiting ? (
-            <RefusedMenuItem kit={DropdownMenu} label={A.yours} reason={A.homeUnknown} className={ITEM} />
-          ) : (
-            <DropdownMenu.Item className={ITEM} onSelect={() => start('yours')}>
-              {A.yours}
+    <>
+      <DropdownMenu.Root modal={false}>
+        <DropdownMenu.Trigger asChild>
+          <button type="button" data-new-skill className={BUTTON}>
+            {A.newSkill}
+          </button>
+        </DropdownMenu.Trigger>
+        <DropdownMenu.Portal>
+          <DropdownMenu.Content align="end" sideOffset={4} className="z-50 min-w-48 rounded-md border border-border-strong bg-bg-overlay p-1 text-ui text-fg shadow-float">
+            <DropdownMenu.Item className={ITEM} onSelect={() => start('project')}>
+              {A.inProject}
             </DropdownMenu.Item>
-          )}
-        </DropdownMenu.Content>
-      </DropdownMenu.Portal>
-    </DropdownMenu.Root>
+            {waiting ? (
+              <RefusedMenuItem kit={DropdownMenu} label={A.yours} reason={A.homeUnknown} className={ITEM} />
+            ) : (
+              <DropdownMenu.Item className={ITEM} onSelect={() => start('yours')}>
+                {A.yours}
+              </DropdownMenu.Item>
+            )}
+          </DropdownMenu.Content>
+        </DropdownMenu.Portal>
+      </DropdownMenu.Root>
+      {retry}
+    </>
   );
 }
