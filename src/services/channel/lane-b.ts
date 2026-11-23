@@ -19,7 +19,8 @@
 // - board ticket 421 (docs/doperpowers/plans/2026-11-23-tool-choice.md, D13): each question the engine's own question
 //   tool puts through MAWS's question path (`question.requested`, a subagent's too), for a session whose question tool is
 //   the engine's, is a `question` with its options' labels, and each answer (`question.answered`, keyed by the question's
-//   text, as the engine takes it) an `answered`, keyed by the request and the question as an ask's are by its id.
+//   text, as the engine takes it) an `answered`, keyed by the request and a digest of the question's text (`digestOf`) as
+//   an ask's are by its id.
 // Only what a MAWS process said is read (an event with its journal row, `seq`): history read back from disk is no entry
 // (M7b, "Back-fill": none), and nor is a transcript followed while a terminal or a job holds the session, whose words are
 // lane A's, sminos's to tell.
@@ -29,6 +30,7 @@
 // sminos id) records nothing. One whose project's org id is not derived yet (the start's refresh, which waits on git) is
 // held, CHANNEL_BOUNDS.held at most across sessions, and recorded in the order it was said once the id is
 // (`placesChanged`), so nothing said early in a run is lost to the join.
+import { createHash } from 'node:crypto';
 import type { SessionEvent } from '@shared/graph/events';
 import type { AppSessionId, SessionId } from '@shared/graph/ids';
 import type { NewHostEntry } from '@shared/ipc/schema/channel';
@@ -54,6 +56,10 @@ const UNMATCHED_MAX = 256;
 // A `src` or an anchor from its parts, each encoded (`encodeURIComponent`), so no id holding a `/` can make one entry's
 // identity another's: a question `q`'s answer (`…/q/answered`) and a question `q/answered` (`…/q%2Fanswered`) stay apart.
 const pathOf = (...parts: readonly (string | number)[]): string => parts.map((part) => encodeURIComponent(String(part))).join('/');
+
+// An engine question's identity within its request is its text, which has no bound (an entry's text is cut to
+// CHANNEL_BOUNDS.textBytes, its `src` never is): its SHA-256, 43 characters of base64url, on the question and its answer.
+const digestOf = (text: string): string => createHash('sha256').update(text).digest('base64url');
 
 export interface LaneBPlace {
   project: string; // sminos's project id of the session's checkout (OX3's smnsId)
@@ -112,13 +118,13 @@ export class LaneBSource {
       if (event.kind === 'question.requested') {
         for (const question of event.questions) {
           const choices = question.options.map((option) => option.label);
-          this.add(appSessionId, event.sessionId, { kind: 'question', text: question.question, at: event.at, ...(choices.length > 0 ? { choices } : {}) }, pathOf('question', event.requestId, question.question));
+          this.add(appSessionId, event.sessionId, { kind: 'question', text: question.question, at: event.at, ...(choices.length > 0 ? { choices } : {}) }, pathOf('question', event.requestId, digestOf(question.question)));
         }
         continue;
       }
       if (event.kind === 'question.answered') {
         for (const [question, answer] of Object.entries(event.answers)) {
-          this.add(appSessionId, event.sessionId, { kind: 'answered', text: answer, at: event.at }, pathOf('question', event.requestId, question, 'answered'), pathOf('question', event.requestId, question));
+          this.add(appSessionId, event.sessionId, { kind: 'answered', text: answer, at: event.at }, pathOf('question', event.requestId, digestOf(question), 'answered'), pathOf('question', event.requestId, digestOf(question)));
         }
         continue;
       }

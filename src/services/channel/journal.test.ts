@@ -288,13 +288,20 @@ describe('the project channel journal', () => {
       const answeredAt = iso(NOW - 30_000);
       const answered = questionAnswered(e, answeredAt, 'req-1', { 'Which backend should the board use?': 'SQLite', 'Which folders?': 'src, test' });
       h.batch(appSessionId, [answered, answered]);
-      const prefix = `proj-1/lane-b/${appSessionId}/question/req-1`;
-      expect(h.history({ project: 'proj-1' }).entries.map(({ kind, text, choices, at, src }) => ({ kind, text, choices, at, src }))).toEqual([
-        { kind: 'answered', text: 'src, test', choices: undefined, at: answeredAt, src: `${prefix}/Which%20folders%3F/answered` },
-        { kind: 'answered', text: 'SQLite', choices: undefined, at: answeredAt, src: `${prefix}/Which%20backend%20should%20the%20board%20use%3F/answered` },
-        { kind: 'question', text: 'Which folders?', choices: ['src', 'test'], at: asked, src: `${prefix}/Which%20folders%3F` },
-        { kind: 'question', text: 'Which backend should the board use?', choices: ['Postgres', 'SQLite'], at: asked, src: `${prefix}/Which%20backend%20should%20the%20board%20use%3F` },
+      const prefix = `proj-1/lane-b/${appSessionId}/question/req-1/`;
+      const { entries } = h.history({ project: 'proj-1' });
+      expect(entries.map(({ kind, text, choices, at }) => ({ kind, text, choices, at }))).toEqual([
+        { kind: 'answered', text: 'src, test', choices: undefined, at: answeredAt },
+        { kind: 'answered', text: 'SQLite', choices: undefined, at: answeredAt },
+        { kind: 'question', text: 'Which folders?', choices: ['src', 'test'], at: asked },
+        { kind: 'question', text: 'Which backend should the board use?', choices: ['Postgres', 'SQLite'], at: asked },
       ]);
+      // each question keyed by the request and a digest of its text, its answer under it
+      const [folders, backend] = entries.slice(2).map((entry) => entry.src);
+      expect(folders).toMatch(new RegExp(`^${prefix}[\\w-]+$`));
+      expect(backend).toMatch(new RegExp(`^${prefix}[\\w-]+$`));
+      expect(folders).not.toBe(backend);
+      expect(entries.slice(0, 2).map((entry) => entry.src)).toEqual([`${folders}/answered`, `${backend}/answered`]);
       expect(h.emitted).toHaveLength(4);
       // a subagent's question, which the person answers alike; an answer to a request never heard asked records nothing
       h.batch(appSessionId, [
@@ -304,6 +311,22 @@ describe('the project channel journal', () => {
       ]);
       expect(h.history({ project: 'proj-1' }).entries.slice(0, 2).map((entry) => `${entry.kind}: ${entry.text}`)).toEqual(['answered: Yes', 'question: Ship it?']);
       expect(h.emitted).toHaveLength(6);
+    });
+
+    // The tool-choice branch review: an entry's text is cut to CHANNEL_BOUNDS.textBytes, its `src` never is, so the
+    // question's identity holds a digest of its text, the same size whatever the text, on the question and its answer.
+    it('keys an engine question of any length by a digest of the same size, and still matches its answer', () => {
+      const { appSessionId, engineSessionId: e } = h.session('proj-1');
+      const long = `Which of these should ship first? ${'Every detail of the plan, spelled out. '.repeat(8_000)}`;
+      h.batch(appSessionId, [
+        questionRequested(e, iso(NOW - 9_000), 'req-long', [{ question: long, header: 'Ship', options: [], multiSelect: false }, { question: 'Ship it?', header: 'Ship', options: [], multiSelect: false }]),
+        questionAnswered(e, iso(NOW - 8_000), 'req-long', { [long]: 'The first.', 'Ship it?': 'Yes' }),
+      ]);
+      const { entries } = h.history({ project: 'proj-1' });
+      expect(entries.map((entry) => `${entry.kind}: ${entry.text.slice(0, 16)}`)).toEqual(['answered: Yes', 'answered: The first.', 'question: Ship it?', 'question: Which of these s']);
+      const [short, longSrc] = entries.slice(2).map((entry) => entry.src);
+      expect(longSrc!.length).toBe(short!.length);
+      expect(entries.slice(0, 2).map((entry) => entry.src)).toEqual([`${short}/answered`, `${longSrc}/answered`]);
     });
 
     // The tool-choice branch review: since board ticket 420 the host refuses a live ask that leaves `blocking` out (a
