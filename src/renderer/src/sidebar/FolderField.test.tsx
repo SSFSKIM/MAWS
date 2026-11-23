@@ -56,4 +56,21 @@ describe('browsing another machine’s folders', () => {
     await act(() => fake.reply('machine.folders.list', { entries: [{ name: 'work', path: '/home/ada/work', protected: false }], cursor: null }));
     await settled();
   });
+
+  // N175: the spinner stands only while no error stands, a later read still out included
+  it('takes the spinner down for a refused read while another is still out', async () => {
+    const fake = fakeClient({});
+    window.maws = fake.client as unknown as PreloadBridge;
+    render(<FolderField machine={OTHER_MACHINE} name="mini" local={false} value="" onChange={() => {}} />);
+    fireEvent.click(screen.getByText(REGISTRY.browse));
+    await act(() => fake.reply('machine.folders.list', { entries: [{ name: 'work', path: '/home/ada/work', protected: false }, { name: 'play', path: '/home/ada/play', protected: false }], cursor: null }));
+    const head = () => screen.getByRole('list', { name: 'Folders on mini' }).previousElementSibling as HTMLElement;
+    fireEvent.click(screen.getByRole('button', { name: 'work' }));
+    fireEvent.click(screen.getByRole('button', { name: 'play' }));
+    await waitFor(() => expect(head().querySelector('[role="progressbar"]')).not.toBeNull(), { timeout: 2000 });
+    await act(() => fake.fail('machine.folders.list', 'not allowed'));
+    expect(screen.getByRole('alert')).toBeTruthy();
+    await new Promise((settle) => setTimeout(settle, 600)); // past the spinner's quiet half second
+    expect(head().querySelector('[role="progressbar"]')).toBeNull();
+  });
 });

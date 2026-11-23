@@ -74,7 +74,7 @@ function FolderBrowser({ machine, name, onUse }: { machine: MachineRef; name: st
   const [confirming, setConfirming] = useState<FolderEntry | null>(null);
   const [error, setError] = useState<string | null>(null);
   // N175: the reads out after the first page (a folder entered, the way up, the next page), the quiet spinner beside the
-  // folder shown while any is; the page shown stays under it
+  // folder shown while any is and no error stands; the page shown stays under it
   const reads = useRef(0);
   const [reading, setReading] = useState(false);
   const label = (at: string) => (home !== null && within(at, home) ? `~${at.slice(home.length)}` : at);
@@ -143,7 +143,7 @@ function FolderBrowser({ machine, name, onUse }: { machine: MachineRef; name: st
     <div className="flex flex-col gap-2 rounded-sm border border-border p-2">
       <div className="flex items-center gap-2">
         <span className="min-w-0 flex-1 truncate font-mono text-ui-sm">{path === null ? SETUP_WORDS.home : label(path)}</span>
-        {reading && <QuietSpinner label={SETUP_WORDS.loading} />}
+        {reading && error === null && <QuietSpinner label={SETUP_WORDS.loading} />}
         {path !== null && (
           <button type="button" className={QUIET} onClick={up}>
             {SETUP_WORDS.up}
