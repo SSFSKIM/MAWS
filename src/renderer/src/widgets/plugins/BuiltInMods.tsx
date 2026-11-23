@@ -81,8 +81,11 @@ export function BuiltInModRow({ row, mods, appSessionId, kindWord = false, summa
   const noted = row.description !== '';
   const describedBy = noted ? note.id : undefined;
   const override = appSessionId !== null && row.perSession !== undefined ? row.perSession : null;
-  const [opened, setOpened] = useState(override !== null && override !== 'inherit');
-  const open = override !== null && opened;
+  // G225: opened is the session's and the mod's together, starting from that session's rule (the row is keyed by the mod)
+  const rule = override !== null && override !== 'inherit';
+  const [opened, setOpened] = useState({ session: appSessionId, open: rule });
+  if (opened.session !== appSessionId) setOpened({ session: appSessionId, open: rule });
+  const open = override !== null && (opened.session === appSessionId ? opened.open : rule);
   return (
     <li data-mod-row={row.id} className="border-b border-border last:border-b-0">
       <div
@@ -91,7 +94,7 @@ export function BuiltInModRow({ row, mods, appSessionId, kindWord = false, summa
         aria-describedby={describedBy}
         className={`relative flex items-start gap-3 px-2 py-2${override === null ? '' : ' hover:bg-bg-hover'}`}
         onClick={override === null ? undefined : (event: MouseEvent) => {
-          if (!ownControl(event.target)) setOpened((was) => !was);
+          if (!ownControl(event.target)) setOpened({ session: appSessionId, open: !open });
         }}
       >
         {override !== null && <button type="button" data-row-open aria-label={row.name} aria-expanded={open} aria-describedby={describedBy} className="absolute inset-0 rounded-sm outline-accent -outline-offset-2 focus-visible:outline-2" />}

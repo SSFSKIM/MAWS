@@ -59,6 +59,24 @@ describe('the built-in mods section', () => {
     expect(row.textContent).not.toContain('Uninstall');
   });
 
+  // G225 (the word cut's fix wave for M4): a row's opened state is its session's and its mod's together. Rows read for
+  // another session start from that session's own rule (open where it overrides the default), whatever the last
+  // session's row was; the last session's rows are not drawn as the next one's while its read is out
+  it('starts each session’s rows from that session’s own rule', async () => {
+    const OTHER = 'app-mods-other' as AppSessionId;
+    const expanded = () => within(section()).getByRole('button', { name: 'To-human' }).getAttribute('aria-expanded');
+    const { rerender } = render(<BuiltInMods appSessionId={APP} search="" />);
+    await act(() => fake.reply('mods.list', [ROW]));
+    expect(expanded()).toBe('false');
+    rerender(<BuiltInMods appSessionId={OTHER} search="" />);
+    expect(screen.queryByRole('region', { name: 'Built in' }), 'the last session’s rows are not the next one’s').toBeNull();
+    await act(() => fake.reply('mods.list', [{ ...ROW, perSession: 'on' }]));
+    expect(expanded()).toBe('true');
+    rerender(<BuiltInMods appSessionId={APP} search="" />);
+    await act(() => fake.reply('mods.list', [ROW]));
+    expect(expanded()).toBe('false');
+  });
+
   it('the override writes the session’s and reads again, showing what it waits for', async () => {
     render(<BuiltInMods appSessionId={APP} search="" />);
     await act(() => fake.reply('mods.list', [ROW]));
