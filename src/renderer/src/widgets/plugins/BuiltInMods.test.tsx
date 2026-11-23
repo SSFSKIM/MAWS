@@ -123,8 +123,7 @@ describe('the built-in mods section', () => {
     act(() => fake.event('ownerChannel.changed', { appSessionId: APP, state: {} }));
     expect(fake.invoked('mods.list')).toHaveLength(4);
     await act(() => fake.reply('mods.list', [{ ...ROW, enabled: false }]));
-    openRow(); // the word cut (G225): the session's override shows on opening the row
-    expect(screen.getByRole('radio', { name: 'Default (Off)' })).toBeTruthy();
+    expect(screen.getByRole('radio', { name: 'Default (Off)' })).toBeTruthy(); // the row opened above stays open
   });
 
   it('a refused write says so in main’s words, and the rows read again show what holds', async () => {
