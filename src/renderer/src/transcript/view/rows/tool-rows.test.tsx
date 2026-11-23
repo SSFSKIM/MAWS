@@ -1,5 +1,7 @@
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { cleanup, fireEvent, screen } from '@testing-library/react';
-import { afterEach, expect, it } from 'vitest';
+import { afterEach, expect, it, onTestFinished } from 'vitest';
 import { useTranscriptStore } from '../../../stores/transcript';
 import { builder, tool } from '../../model/test-events';
 import { cellId } from '../../model/keys';
@@ -53,4 +55,24 @@ it('bounds a long multiline command behind Show more without losing the command'
   expect(view.container.querySelector('.transcript-shell-command')?.textContent).toBe(`$ ${command}`);
   fireEvent.click(more);
   expect(more.getAttribute('aria-expanded')).toBe('true');
+});
+
+// Board ticket 850, item 6: a standalone call's wrapper leaves no space of its own where what it holds draws nothing (a
+// mod's answer that hides the call); the space above and below a call is the call's own line's, kept inside the wrapper.
+it('a standalone call’s space is its line’s: the wrapper with nothing drawn in it takes no height of its own', async () => {
+  const style = document.createElement('style');
+  style.textContent = readFileSync(join(__dirname, '../transcript.css'), 'utf8');
+  document.head.append(style);
+  onTestFinished(() => style.remove());
+  const b = builder(); b.turn('u'); b.toolUse('ls', 'Bash', { command: 'ls', description: 'List the files' }); b.result('ls', 'a.txt'); b.end(['u']);
+  const store = await storeWith(b.events);
+  useTranscriptStore.getState().expandAll(store.key);
+  const view = renderRow(rowOf(store.rows(), 'cell'), { storeKey: store.key });
+  const wrapper = view.container.querySelector<HTMLElement>('.transcript-standalone')!;
+  const space = (element: Element) => { const s = getComputedStyle(element); return [s.paddingTop, s.paddingBottom, s.marginTop, s.marginBottom].map((value) => value || '0px'); }; // jsdom: '' where nothing is declared
+  expect(space(wrapper)).toEqual(['0px', '0px', '0px', '0px']);
+  expect(getComputedStyle(wrapper).display).toBe('flow-root'); // the line's margins stay inside the row the list measures
+  expect(space(wrapper.querySelector('.transcript-cell')!)).toEqual(['0px', '0px', '1px', '6px']);
+  wrapper.querySelector('.transcript-cell')!.remove(); // what a hiding answer leaves: nothing drawn
+  expect(space(wrapper)).toEqual(['0px', '0px', '0px', '0px']);
 });

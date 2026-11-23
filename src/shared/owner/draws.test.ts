@@ -9,9 +9,9 @@ const AT = '2026-11-16T10:00:00.000Z';
 const reservation = (over: Partial<Reservation> = {}): Reservation => ({ launchId: null, number: 9, plugin: true, at: AT, ...over });
 
 describe('the numbers and the switch', () => {
-  it('advertise 9 where the mod draws and 8 where MAWS does; the mod route is on since the cutover (M5)', () => {
+  it('advertise 9 where the mod draws and 8 where MAWS does; the mod route is off again since board ticket 850', () => {
     expect([TO_HUMAN_CONTRACT_VERSION, TO_HUMAN_MIRROR_VERSION]).toEqual([9, 8]);
-    expect(TO_HUMAN_MOD_ROUTE).toBe(true);
+    expect(TO_HUMAN_MOD_ROUTE).toBe(false);
   });
 });
 

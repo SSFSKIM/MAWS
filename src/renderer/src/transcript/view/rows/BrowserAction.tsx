@@ -9,6 +9,7 @@
 // points; the quiet actions show on pointing or focus within the line, while the snapshot is open, and always where
 // nothing points.
 import { useRef } from 'react';
+import { DisclosureBody } from '../../../ui/disclosure';
 import { Tip } from '../../../ui/tip';
 import { TouchFact } from '../../../ui/touch-fact';
 import { BROWSER_ACTION, browserActionError, browserActionHeading, took } from '../../model/copy';
@@ -72,7 +73,11 @@ export function BrowserActionRow({ row }: { row: BrowserActionRowData }) {
           {BROWSER_ACTION.cancelled}
         </p>
       )}
-      {detail !== null && open && <Output text={detail} />}
+      {detail !== null && (
+        <DisclosureBody open={open} data-detail="">
+          <Output text={detail} />
+        </DisclosureBody>
+      )}
     </section>
   );
 }

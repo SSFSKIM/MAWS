@@ -3,7 +3,9 @@
 // output in place of the wire preview. The word cut (T18): the copy controls are glyphs named by their words: Copy all
 // in the footer, and Copy command and Copy output beside what they copy, shown on pointing or with focus inside (T20: the
 // session's own folder is not named; T22: a successful exit reads its time alone).
+import { useLayoutEffect, useState } from 'react';
 import { sameFile } from '../../../tools/code/files/tree';
+import { CLOSE_MOTION, useDisclosureMotion } from '../../../ui/disclosure';
 import { truncationOf } from '../../model/cells';
 import { DETAIL, shellFooter } from '../../model/copy';
 import type { Cell, CellDetail } from '../../model/rows';
@@ -32,6 +34,21 @@ export function ShellDetail({ cell, detail }: { cell: Cell; detail: Shell }) {
   const actions = useActions();
   const [fullCommand, toggleCommand] = useDisclosure(`command:${cell.id}`);
   const longCommand = detail.command.split('\n').length > 8 || detail.command.length > 800;
+  const bounded = longCommand && !fullCommand;
+  // Board ticket 850: Show more and Show less move between the bound (measured while bounded and at rest) and the whole
+  // command through the shared disclosure motion.
+  const [bound, setBound] = useState<number | null>(null);
+  const { ref: command } = useDisclosureMotion<HTMLElement>(!bounded, { closedHeight: bound ?? Number.POSITIVE_INFINITY, still: bound === null });
+  useLayoutEffect(() => {
+    const element = command.current;
+    if (!element || !bounded) return;
+    const measure = () => {
+      if (element.style.height === '') setBound(element.clientHeight);
+    };
+    measure();
+    const rested = setTimeout(measure, CLOSE_MOTION.ms);
+    return () => clearTimeout(rested);
+  }, [bounded, detail.command, command]);
   const { sessionDirectory, sessionCwd } = useTranscriptContext();
   const where = folderLine(detail, sessionDirectory ?? null, sessionCwd ?? null);
   const stdout = spilledOr(detail.spill, detail.stdout); // the whole result once the reader loaded the spill
@@ -41,7 +58,7 @@ export function ShellDetail({ cell, detail }: { cell: Cell; detail: Shell }) {
   return (
     <div className="transcript-shell">
       <div className="transcript-shell-heading">
-        <code className="transcript-shell-command" data-bounded={longCommand && !fullCommand ? '' : undefined}>$ {detail.command}</code>
+        <code ref={command} className="transcript-shell-command" data-bounded={bounded ? '' : undefined}>$ {detail.command}</code>
         <CopyGlyph label={DETAIL.copyCommand} text={detail.command} onHover />
       </div>
       {longCommand && <button type="button" aria-expanded={fullCommand} onClick={toggleCommand}>{fullCommand ? DETAIL.showLess : DETAIL.showMore}</button>}

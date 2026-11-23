@@ -3,12 +3,19 @@
 // request's rows never inside a record (UC-3); one asynchronous answer stated once outside the record (R13). Rows are
 // built by hand where only their kind and the fields the rule reads matter, and from events where the derivation's
 // own shapes do. Every text is invented.
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
+import type { SessionEvent } from '@shared/graph/events';
+import { ChainFollower } from '../../../../engine-host/fs/chain-follower'; // board ticket 850
+import { FIXTURE_DIR, loadJournal, loadUxwaveJournal } from '../../../../../test/support/fixtures';
+import { MemoryFileReader } from '../../../../../test/support/memory-reader';
+import { journalToEvents } from '../../transcript/dev/journal';
 import { rowsOf, withQueueTail } from '../../transcript/model/derive';
 import { rowId } from '../../transcript/model/keys';
 import { applyEvents, createState, withUi } from '../../transcript/model/reduce';
 import type { Row, TurnId } from '../../transcript/model/rows';
-import { BASH_RESULT, builder } from '../../transcript/model/test-events';
+import { BASH_RESULT, builder, SESSION } from '../../transcript/model/test-events';
 import { carriedKeys, holdsMessage, liveMarkedRowIds, liveMarksOf, mirrorRows, mirrorsView, reportViewOf, stretchesOf, stretchHolding, stretchKey, type Stretch } from './mirror';
 import { labelsOf } from './label'; // UX wave U2b, M7
 
@@ -111,6 +118,19 @@ describe('a stretch’s edges', () => {
     const rows = [prompt(), cell(), divider(T1), time(T2), row('notice', { class: 'task', outcome: 'completed', toolUseId: null }, T2), divider(T2), cell(undefined, T2), text('<message>Both done.</message>', { turnId: T2 })];
     expect(stretchesOf(rows)).toHaveLength(1);
     expect(closed(rows).filter((kind) => kind === '› record')).toHaveLength(1);
+  });
+
+  // Board ticket 850: where the mod drew, a steered turn became one stretch (the mod placed a row only by its uuid, and
+  // MAWS asked a steer under another); the mirror reads the steer as the person's row it is, at the place the engine took
+  // it (pass3/steer-next: between the second and third Bash calls).
+  it('a steer the engine took mid-turn cuts the stretch: the work before it and the work after it, each under its own line', () => {
+    const state = applyEvents(createState(null, null), journalToEvents(loadJournal('pass3', 'steer-next')));
+    const rows = rowsOf(withUi(state, { ...state.ui, ownerLane: true, noTurnFold: true, version: state.ui.version + 1, global: state.ui.global + 1 }));
+    const users = rows.filter((r): r is Extract<Row, { kind: 'user' }> => r.kind === 'user');
+    expect(users.map((r) => r.steer)).toEqual([false, true]);
+    expect(stretchesOf(rows)).toHaveLength(2);
+    expect(closed(rows).filter((kind) => kind !== 'time')).toEqual(['user', '› record', 'user', '› record', 'error']); // the recording's last row: its process's end
+    expect(mirrorRows(rows, {}).filter((r) => r.kind === 'user').map((r) => r.id)).toEqual(users.map((r) => r.id));
   });
 
   it('a waiting request splits it', () => {
@@ -361,6 +381,59 @@ describe('over a derived session', () => {
     const rows = rowsOf(flat);
     expect(closed(rows)).toEqual(['time', 'user', 'head', '› record', 'user', '› record', 'assistant_text']);
     expect(opened(rows)).toEqual(['time', 'user', 'assistant_text', 'cell', 'assistant_text', '‹ fold', 'divider', 'user', 'cell', '‹ fold', 'assistant_text', 'divider']);
+  });
+});
+
+// Board ticket 850, item 4: a notice or a delivery is record unless it is a message to the person, also where it opens a
+// turn while the session is idle, and a thought after it folds with it. Over recorded sessions (the engine's own rows:
+// sminos's deliveries by the inbox and the bridge, background tasks' ends and a hand-back, idle and busy), live and from
+// the file: no peer's or agent's message, no task's end and no thought is in sight while every stretch is closed; the
+// person's own words sminos delivered stay, as their prompt does.
+describe('a delivery or a notice that opens a turn at idle folds into its stretch (board ticket 850)', () => {
+  const flat = (events: readonly SessionEvent[]) => {
+    const state = applyEvents(createState(null, null), [...events]);
+    return rowsOf(withUi(state, { ...state.ui, ownerLane: true, noTurnFold: true, version: state.ui.version + 1, global: state.ui.global + 1 }));
+  };
+  const fromFile = async (name: string) => {
+    const events: SessionEvent[] = [];
+    const follower = new ChainFollower(new MemoryFileReader(readFileSync(join(FIXTURE_DIR, 'uxwave', `${name}.transcript.jsonl`))), SESSION, null, (e) => e.t === 'events' && events.push(...e.events), { holders: () => 0 });
+    await follower.start();
+    follower.stop();
+    return events;
+  };
+  const inSight = (rows: readonly Row[]) => mirrorRows(rows, {}).filter((r) => r.kind === 'agent_message' || r.kind === 'thinking' || (r.kind === 'notice' && r.class === 'task'));
+  // one that opens its turn: the first row of its turn (a turn the session started at idle, the arrival its opener)
+  const opensAtIdle = (rows: readonly Row[], kind: 'agent_message' | 'notice') => rows.some((r, i) => r.kind === kind && r.turnId !== null && !rows.slice(0, i).some((before) => before.turnId === r.turnId));
+
+  for (const [name, kind] of [['u3-sminos-r1-maws', 'agent_message'], ['u3-sminos-r1-bridge', 'agent_message'], ['u3-tasks-r1', 'notice']] as const) {
+    it(`${name}, live and from its file: none in sight, each one under a record line`, async () => {
+      for (const rows of [flat(journalToEvents(loadUxwaveJournal(name))), flat(await fromFile(name))]) {
+        expect(opensAtIdle(rows, kind), 'the recording holds one that opens a turn at idle').toBe(true);
+        expect(rows.some((r) => r.kind === 'thinking')).toBe(true);
+        expect(inSight(rows)).toEqual([]);
+        expect(mirrorRows(rows, {}).filter((r) => r.kind === 'user').map((r) => (r as Extract<Row, { kind: 'user' }>).text)).toEqual(rows.filter((r) => r.kind === 'user').map((r) => (r as Extract<Row, { kind: 'user' }>).text));
+      }
+    });
+  }
+
+  it('a task’s end that opens a turn at idle, a thought, then a message: the end and the thought under one record line, the message in sight', () => {
+    const b = builder();
+    b.turn('u1', 'Start the count');
+    b.toolUse('t1', 'Bash', { command: 'sleep 5; wc -l notes', run_in_background: true });
+    b.result('t1', 'started', { structured: BASH_RESULT('started') });
+    b.text('m1', 0, '<message>Counting in the background.</message>');
+    b.end(['u1']);
+    b.emit('turn.started', { userMessageUuid: null, origin: 'engine' });
+    b.emit('user.message', {
+      messageUuid: 'n1' as never, content: '<task-notification>…</task-notification>', isReplay: true, isSynthetic: true, origin: 'task-notification', bash: null,
+      arrival: [{ class: 'task', taskId: 'bt1', toolUseId: 't1', runId: 'run-1', outcome: 'completed', summary: 'Background command "count" completed (exit code 0)', durationMs: null, outputFile: '/tmp/work/bt1.output', detail: null }],
+    });
+    b.thinking('m2', 0, 'The count is in the output file.');
+    b.text('m3', 0, '<message>The notes hold 42 lines.</message>');
+    b.end([], { origin: 'task-notification' });
+    const rows = flat(b.events);
+    expect(shown(rows)).toEqual(['time', 'user', 'cell', 'assistant_text', 'divider', 'notice', 'thinking', 'assistant_text', 'divider']);
+    expect(closed(rows)).toEqual(['time', 'user', '› record', 'assistant_text', '› record', 'assistant_text']);
   });
 });
 

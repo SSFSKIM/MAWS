@@ -9,6 +9,7 @@
 // whose owners are drawn stand under the line, one a line: in a grouped row the drawn glyphs' (past four, the rest once
 // `+N` opens them), else every working agent's, which the line or its words carry.
 import { ticks, useTranscriptStore, workingDurationMs } from '../../../stores/transcript';
+import { useDisclosureMotion } from '../../../ui/disclosure';
 import { Tip } from '../../../ui/tip';
 import { TouchFact } from '../../../ui/touch-fact';
 import { subagentActivity } from '../../model/activity';
@@ -61,7 +62,21 @@ function Glyphs({ rowId, agents, overflow, details, open }: { rowId: string; age
         ) : (
           <span className="transcript-glyph-overflow">+{overflow}</span>
         ))}
-      {open && more && agents.slice(SHOWN).map((ref) => <Glyph key={ref.taskId} agent={ref} detail={details.get(ref.taskId)} open={open} />)}
+      {open && <MoreGlyphs more={more} agents={agents.slice(SHOWN)} details={details} open={open} />}
+    </span>
+  );
+}
+
+// Board ticket 850: the glyphs `+N` reveals come and go through the shared disclosure motion. They stand on the line, so
+// its height does not move; they fade in lifted and fade out, and are drawn until their close has run.
+function MoreGlyphs({ more, agents, details, open }: { more: boolean; agents: SubagentRef[]; details: Details; open: (ref: SubagentRef) => void }) {
+  const { ref, mounted } = useDisclosureMotion<HTMLSpanElement>(more);
+  if (!mounted || agents.length === 0) return null;
+  return (
+    <span ref={ref} className="transcript-glyphs-more" data-glyphs-more="">
+      {agents.map((agent) => (
+        <Glyph key={agent.taskId} agent={agent} detail={details.get(agent.taskId)} open={open} />
+      ))}
     </span>
   );
 }
