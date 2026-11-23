@@ -9,7 +9,8 @@ import type { SessionEvent } from '@shared/graph/events';
 import type { AgentId, AppSessionId, MessageUuid, RequestId, TaskId, ToolUseId } from '@shared/graph/ids';
 import { askAnswersFromSteer /* board ticket 711 */, withQuestionIds, type AskCancelReason } from '@shared/maws/ask'; // E1
 import { answerEnvelopeOf } from '@shared/engine/persons-message'; // ticket 704: a steer read as the split reads it
-import { AskInputSchema, AskResultSchema, SendFileInputSchema, SendFileResultSchema, type AskAnswer, type AskInput, type DeliveredFile, type SendFileInput } from '@shared/maws/tools'; // E1
+import { AskInputSchema, AskResultSchema, type AskAnswer, type AskInput } from '@shared/maws/tools'; // E1
+import { SendFileInputSchema, SendFileResultSchema, type DeliveredFile, type SendFileInput } from '@shared/maws/send-file'; // board ticket 848: retired, its records drawn as before
 import { ArtifactDeleteResultSchema, ArtifactDeliverySchema } from '@shared/maws/tools'; // E2; P3-A; UX wave U10b: the delete's answer
 import { MCP_TOOL, presentationOf, tableRowOf } from './classify';
 import { HISTORICAL_BROWSER_TOOL_USE, MAWS_TOOL_USE } from './classify'; // E2, E4c

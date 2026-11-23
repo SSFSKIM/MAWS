@@ -385,7 +385,6 @@ test('the bridge script picks an element of an artifact in a sandboxed frame and
 // ---- M7: the product, as the owner drives it ------------------------------------------------------------------------
 
 const ARTIFACTS = `${PASS3}/p1-maws-artifacts.jsonl`;
-const SEND_FILE = `${PASS3}/p1-maws-send-file.jsonl`;
 const SHOW_PANE = `${PASS3}/p1-maws-show-pane.jsonl`;
 const SHOW_PANE_ARTIFACT = 'e2e/fixtures/derived/p1-maws-show-pane-artifact.jsonl'; // derived, not recorded: SHOW_PANE with its retired `deliverable` pane renamed `artifact`, which (4) needs to open the viewer
 const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
@@ -2004,37 +2003,17 @@ test('a pass on an HTML page: Escape keeps the text in the card, a second pick l
 
 // P3-L M6b: the two pages are X12 records written between the launches, so the second launch's host imports them at its
 // start, as an upgrade does. The All scope's row naming its session ("E2: the other session") was the Deliverables
-// list's alone and is gone with it.
-test('a relaunch over the same profile lists every deliverable; the All scope shows another session’s and opens it; a delivered file’s name opens the viewer', async () => {
+// list's alone and is gone with it. Board ticket 848 retired send_file, whose delivery this case made live in its first
+// launch; a delivery row of a record written before, opening its File artifact, is library.spec.ts's upgrade case.
+test('a relaunch over the same profile lists every deliverable; the All scope shows another session’s and opens it', async () => {
   test.setTimeout(180_000);
-  // send_file stats the file in the recording's working directory, recreated before the launch (as E1's case does)
-  const repo = recordedCwd(SEND_FILE);
-  const existed = existsSync(repo);
-  mkdirSync(repo, { recursive: true });
-  writeFileSync(join(repo, 'hello.txt'), 'HELLO_E1');
-  const scratch = scratchProject({ titles: ['E2: delivered here', 'E2: the other session'], repo });
+  const scratch = scratchProject({ titles: ['E2: delivered here', 'E2: the other session'] });
   try {
     const first = await launchScene(scratch);
     const [here, other] = first.ids;
-    let hello: string;
     let dashboard: DeliverableRecord;
     let report: DeliverableRecord;
     try {
-      await show(first, here);
-      await replay(first, here, SEND_FILE);
-      await allowNext(first, here); // Write (seq 67)
-      await allowNext(first, here); // mcp__maws__send_file (seq 99)
-      await idle(first, here);
-      const [delivered] = ofKind(await first.events(here), 'maws.delivery.file');
-      hello = delivered!.deliverables[0]!.id;
-      // the delivery row's file name opens the Artifacts viewer on the File artifact (G5; P3-L M6b)
-      const name = first.pane.locator('[data-delivery] button.transcript-delivery-open');
-      await expect(name).toHaveText('hello.txt');
-      await name.click();
-      await expect(viewerOf(first.panel)).toHaveAttribute('data-artifact-viewer', hello);
-      await expect(viewerOf(first.panel).locator('[data-file-viewer]')).toContainText('HELLO_E1');
-      await first.pane.locator('[data-delivery]').scrollIntoViewIfNeeded();
-      await shoot(first, 'delivery-row');
       dashboard = seedArtifact(first.maws.userData, here, 'dash', 'Dashboard', [pageOf('DASHBOARD', '#ad1457')]);
       report = seedArtifact(first.maws.userData, other, 'report', 'Other report', [pageOf('OTHER_REPORT', '#283593')]);
     } catch (error) {
@@ -2052,13 +2031,12 @@ test('a relaunch over the same profile lists every deliverable; the All scope sh
       await expect(list.or(viewer).or(surfaceRow(second.page)).first()).toBeVisible();
       if (await viewer.isVisible()) await second.panel.getByRole('button', { name: 'Back' }).click();
       else if (!(await list.isVisible())) await openArtifacts(second);
-      await expect(list.locator('[data-artifact-row] [data-part="title"]')).toHaveText(['Dashboard', 'hello.txt'], { timeout: 20_000 });
-      await expect(rowOf(list, { id: hello })).toHaveAttribute('data-kind', 'file');
+      await expect(list.locator('[data-artifact-row] [data-part="title"]')).toHaveText(['Dashboard'], { timeout: 20_000 });
       await expect(rowOf(list, dashboard)).toHaveAttribute('data-kind', 'html');
 
       await list.getByRole('button', { name: 'All', exact: true }).click();
-      // the case's own three among the whole library (P3-D seeds default design systems: Decision Log 32c)
-      await expect(list.locator('[data-artifact-row][data-kind="html"], [data-artifact-row][data-kind="file"]')).toHaveCount(3);
+      // the case's own two among the whole library (P3-D seeds default design systems: Decision Log 32c)
+      await expect(list.locator('[data-artifact-row][data-kind="html"], [data-artifact-row][data-kind="file"]')).toHaveCount(2);
       await rowOf(list, report).click();
       await expect(viewer).toHaveAttribute('data-artifact-viewer', report.id);
       await expect((await frameAt(second.page, await pageUrlOf(second.page, report.id))).locator('#heading')).toHaveText('OTHER_REPORT');
@@ -2069,7 +2047,6 @@ test('a relaunch over the same profile lists every deliverable; the All scope sh
     await closeScene(second);
   } finally {
     rmSync(scratch.root, { recursive: true, force: true });
-    if (!existed) rmSync(repo, { recursive: true, force: true });
   }
 });
 

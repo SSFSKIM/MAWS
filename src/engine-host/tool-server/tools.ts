@@ -1,5 +1,6 @@
 // The `maws` server's tools in `tools/list` order (X9; E2 appends the artifact tools after `show_pane`; E4c's six
-// browser tools after them were removed on 2026-10-08, P1 A-54: cua_repl drives the in-app browser). P3-A (M6, X25)
+// browser tools after them were removed on 2026-10-08, P1 A-54: cua_repl drives the in-app browser; board ticket 848
+// retired `send_file` on 2026-11-23, which the server answers `sendFileRetired`). P3-A (M6, X25)
 // serves the artifact namespace over the engine host's artifact store, `artifact_update` retired into
 // `artifact_publish`; one `ArtifactSession` per session holds what its calls remember between them.
 import type { AppSessionId } from '@shared/graph/ids';
@@ -17,7 +18,6 @@ import { artifactScreenshotTool, type CaptureBridge } from './artifacts';
 import { askTool } from './ask';
 import type { AskCancelReason, AskTable } from './asks';
 import type { PaneBridge } from './panes';
-import { sendFileTool } from './send-file';
 import type { McpToolDefinition } from './server';
 import { showPaneTool } from './show-pane';
 import { documentCreateTool, documentReadTool, documentTools, DocumentToolSession } from './documents'; // P3-B (M7)
@@ -58,7 +58,7 @@ export function mawsTools(deps: {
   const genericRead = artifactReadTool(artifacts);
   const legacyRead = artifactReadTool(artifacts, { instructs: false }); // P3-E: the raw read of a held legacy dashboard (UX wave U10b M10: it gives no Space's instructions)
   return [
-    afterImport(sendFileTool(artifacts)), askTool({ asks: deps.asks, cancelled: deps.askCancelled }), showPaneTool(deps),
+    askTool({ asks: deps.asks, cancelled: deps.askCancelled }), showPaneTool(deps),
     // P3-E (E2 M2 fix wave): a dashboard made from files before E2 is held, read raw and never written
     ...legacyDashboardTools(artifacts, [
       documentCreateTool(documents, artifactCreateTool(artifacts)), artifactListTool(artifacts), artifactScreenshotTool({ ...artifacts, capture: deps.capture, exporter: deps.exporter }), // E2

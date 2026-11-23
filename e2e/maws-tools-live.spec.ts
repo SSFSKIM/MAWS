@@ -1,11 +1,12 @@
 // E1's live sitting (docs/doperpowers/plans/2026-10-05-e1-tool-server.md, M5; P1 spec §9 E1): the product app, built
 // as MAWS ships it, with the installed Claude Code (never patched, D-1) under a scratch CLAUDE_CONFIG_DIR under /tmp
 // (`settings.json` `{}`, a `.claude.json` that trusts the scratch repository), through ClaudeUsage's relay, on Haiku in
-// default permission mode. M2's four prompts run in four sessions, the async one asking for a foreground command so its
-// answer folds into the running turn. The human's part is done through the real surfaces: every permission through the
-// request card (since UX wave U1b at the transcript's end), every ask through its form in the capsule's row (the Question
-// sheet's own sections; the folder through main's pick seam),
-// the delivery row's two buttons through the open seam (nothing opens on this Mac). The owner's ~/.claude.json is read
+// default permission mode. M2's prompts run in a session each, the async one asking for a foreground command so its
+// answer folds into the running turn. Board ticket 848 retired `send_file`: its session and step are gone, G1's check of
+// the init moved to the blocking ask's session, and the init lists no `send_file`. The human's part is done through the
+// real surfaces: every permission through the request card (since UX wave U1b at the transcript's end), every ask through
+// its form in the capsule's row (the Question sheet's own sections; the folder through main's pick seam); the open seam
+// stays set, so nothing opens on this Mac. The owner's ~/.claude.json is read
 // only, for the A-15 delta before the first launch and after every session. Writes the plain-text evidence
 // (`live-sitting.txt`) and the screenshots in both themes (`e1-<surface>-<theme>.png`) into the directory
 // MAWS_E1_LIVE_OUT names (E11 W-E: a re-run records into its own directory, E1's committed evidence untouched),
@@ -19,7 +20,7 @@ import { addressed } from './support/address';
 import { surface } from './support/shell';
 import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
-import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
+import { cpSync, mkdirSync, mkdtempSync, readdirSync, realpathSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { expect, test, type Locator, type Page } from '@playwright/test';
@@ -48,7 +49,6 @@ const EVIDENCE_FILE = join(EVIDENCE, 'live-sitting.txt');
 const TURN_MS = 300_000;
 
 const PROMPTS = {
-  sendFile: 'Write a file named hello.txt containing exactly HELLO_E1 in the working directory, then deliver it to me with the maws send_file tool with the caption "the greeting". Reply DELIVERED when done.',
   blocking:
     'Use the maws ask tool (blocking) to ask me five questions, with these ids and modalities: q1 choice single with options Red, Green, Blue ("Which colour?"); q2 choice multi with options Mon, Tue, Wed ("Which days?"); q3 text ("What should the title be?"); q4 folder ("Which folder holds the assets?"); q5 repository ("Which repository is this for?"). Then reply with one line per question: id, then the answer or SKIPPED or DECIDE.',
   // M2's async prompt, asking for the command in the foreground so the answer folds into the running turn (Surprises)
@@ -235,7 +235,7 @@ const sectionFor = (sheet: Locator, question: AskQuestion) => sheet.locator(`sec
 
 // ---- the sitting -----------------------------------------------------------------------------------------------------
 
-test('the live sitting: send_file, a blocking ask, an async ask folded into its turn, show_pane', async () => {
+test('the live sitting: a blocking ask, an async ask folded into its turn, show_pane', async () => {
   mkdirSync(EVIDENCE, { recursive: true });
   let relay = relaySkipReason(RELAY_URL);
   if (relay !== null) {
@@ -246,11 +246,11 @@ test('the live sitting: send_file, a blocking ask, an async ask folded into its 
   const engine = installedEngine();
   expect(engine.version).toMatch(/^\d+\.\d+\.\d+$/);
   const before = a15();
-  const sc = scratch(['E1 sitting: send_file', 'E1 sitting: blocking ask', 'E1 sitting: async ask', 'E1 sitting: show_pane']);
+  const sc = scratch(['E1 sitting: blocking ask', 'E1 sitting: async ask', 'E1 sitting: show_pane']);
   const openLog = join(sc.root, 'open.txt');
   note(`E1 live sitting (M5), ${new Date().toISOString()}`);
   note(`engine: ${engine.bin.replace(homedir(), '~')} (${engine.version}), unmodified, through ClaudeUsage's relay ${RELAY_URL} (GET /api/hello 200), Haiku, default permission mode, the sitting's cap US$${CAP_USD} (MAWS_E1_LIVE_MAX_USD), each session launched with what is left of it as maxBudgetUsd`);
-  note(`app: the product build (out/main/index.js, MAWS_HARNESS=0) over a scratch CLAUDE_CONFIG_DIR ${sc.config} (settings.json {}, .claude.json trusting ${sc.repo}); MAWS_E2E_OPEN_LOG seam for the delivery row's buttons`);
+  note(`app: the product build (out/main/index.js, MAWS_HARNESS=0) over a scratch CLAUDE_CONFIG_DIR ${sc.config} (settings.json {}, .claude.json trusting ${sc.repo}); the MAWS_E2E_OPEN_LOG seam, so nothing opens on this Mac`);
   note(`A-15 before the first launch: ${before.keys.length} keys, sha1 ${before.digest}`);
 
   let sitting: Sitting | null = null;
@@ -272,38 +272,18 @@ test('the live sitting: send_file, a blocking ask, an async ask folded into its 
         return ids.every((id) => id !== '');
       }, { timeout: 30_000 })
       .toBe(true);
-    const [sendFileId, blockingId, asyncId, showPaneId] = ids as [string, string, string, string];
+    const [blockingId, asyncId, showPaneId] = ids as [string, string, string];
 
-    await test.step('1 send_file: the delivery row, its two buttons, the record; the init lists the maws tools', async () => {
-      const session = await begin(s, 'send_file', sendFileId, PROMPTS.sendFile);
-      await drive(s, session, 'the delivery and the turn end', async () => ofKind(await s.events(session.id), 'maws.delivery.file').length > 0 && (await idleNow(s, session.id)));
-      const events = await s.events(session.id);
-      const [init] = ofKind(events, 'session.init');
-      expect(init!.tools).toEqual(expect.arrayContaining(['mcp__maws__send_file', 'mcp__maws__ask', 'mcp__maws__show_pane']));
+    await test.step('2 a blocking ask: the init lists the maws tools without send_file; the capsule with its form in its row, five modalities, no sheet opened, the attention item, Submit, the reply', async () => {
+      const session = await begin(s, 'blocking ask', blockingId, PROMPTS.blocking);
+      await drive(s, session, 'the ask', async () => ofKind(await s.events(session.id), 'maws.ask.opened').length > 0);
+      // G1 (board ticket 848: moved here with send_file's step gone; the init lists no send_file)
+      const [init] = ofKind(await s.events(session.id), 'session.init');
+      expect(init!.tools).toEqual(expect.arrayContaining(['mcp__maws__ask', 'mcp__maws__show_pane']));
+      expect(init!.tools).not.toContain('mcp__maws__send_file');
       expect(init!.mcpServers).toContainEqual({ name: 'maws', status: 'connected', source: 'sdk' });
       expect(ownerPlugins(init!.plugins, [sc.root]), 'none of the owner plugins (no inherited CLAUDE_CODE_PLUGIN_DIRS)').toEqual([]);
       note(`G1: session.init (the journal's system/init) lists ${init!.tools.length} tools, ${JSON.stringify(init!.tools.filter((t) => t.startsWith('mcp__')))}; mcp_servers ${JSON.stringify(init!.mcpServers)}; plugins ${JSON.stringify(init!.plugins)} (none of the owner's)`);
-      const [delivered] = ofKind(events, 'maws.delivery.file');
-      const path = join(sc.repo, 'hello.txt');
-      expect(delivered).toMatchObject({ caption: 'the greeting', deliverables: [{ path, name: 'hello.txt' }] });
-      // P3-L M6b: a File artifact of the session, the file in place (the caption is the row's, below, not the artifact's)
-      const { artifact: record } = value(await invoke(s.page, 'artifacts.get', { artifactId: delivered!.deliverables[0]!.id }));
-      expect(record).toMatchObject({ kind: 'file', linkedPath: path, title: 'hello.txt' });
-      const delivery = s.pane.locator('[data-delivery]').last();
-      await expect(delivery.locator('[data-delivery-heading]')).toHaveText('Delivered hello.txt · the greeting');
-      const file = delivery.locator(`[data-path="${path}"]`);
-      await file.getByRole('button', { name: 'Open externally' }).click();
-      await file.getByRole('button', { name: 'Reveal in Finder' }).click();
-      await expect.poll(() => (existsSync(openLog) ? readFileSync(openLog, 'utf8').trim().split('\n') : [])).toEqual([path, `reveal ${path}`]);
-      await shoot(s, 'delivery');
-      const reply = mainTurnsEnded(events).at(-1)?.resultText ?? null;
-      note(`G2: maws.delivery.file ${JSON.stringify(delivered!.deliverables.map((d) => ({ id: d.id, name: d.name })))} caption "the greeting"; File artifact ${record!.id}; the row reads "Delivered hello.txt · the greeting"; Open externally and Reveal in Finder logged ${JSON.stringify(readFileSync(openLog, 'utf8').trim().split('\n').map((l) => l.replace(sc.root, '<scratch>')))}; reply ${JSON.stringify(reply)}`);
-      await end(s, session, before);
-    });
-
-    await test.step('2 a blocking ask: the capsule with its form in its row, five modalities, no sheet opened, the attention item, Submit, the reply', async () => {
-      const session = await begin(s, 'blocking ask', blockingId, PROMPTS.blocking);
-      await drive(s, session, 'the ask', async () => ofKind(await s.events(session.id), 'maws.ask.opened').length > 0);
       const [opened] = ofKind(await s.events(session.id), 'maws.ask.opened');
       expect(opened!.blocking).toBe(true);
       const capsule = capsuleOf(s);
@@ -460,5 +440,5 @@ test('the live sitting: send_file, a blocking ask, an async ask folded into its 
   }
   // after the finally, so a failed step's own error is the one reported
   checkA15('after the run', before, a15(), [sc.root, maws.userData]);
-  expect(readdirSync(join(sc.root, 'journals'))).toHaveLength(4);
+  expect(readdirSync(join(sc.root, 'journals'))).toHaveLength(3); // a session each (board ticket 848: four before send_file's left)
 });

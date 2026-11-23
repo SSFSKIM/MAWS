@@ -23,7 +23,7 @@ describe('the maws server’s instructions, by what the session has (U12a, l9-br
   // UC-15: the wave's own bound on the instructions is 2,048 characters, half the engine's cut (probe 3)
   it('the second names no maws tool, and the whole stays within the wave’s 2,048 characters', () => {
     expect(MAWS_BROWSER_INSTRUCTIONS).not.toMatch(/mcp__maws__/);
-    expect(mawsServerInstructions({ inAppBrowser: true })).toHaveLength(1177); // U6d: 1,044 before O-44 took a sentence out; U6b-4b: 980 before the sentence on file links
+    expect(mawsServerInstructions({ inAppBrowser: true })).toHaveLength(1262); // U6d: 1,044 before O-44 took a sentence out; U6b-4b: 980 before the sentence on file links; board ticket 848: 1,177 before it stopped naming send_file and gained the sentence on the session's folders
     expect(mawsServerInstructions({ inAppBrowser: true }).length).toBeLessThanOrEqual(2048);
   });
 });

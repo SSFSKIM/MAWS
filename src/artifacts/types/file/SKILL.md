@@ -1,19 +1,19 @@
 # File: guide
 
-A file you hand to the user as it is: a PDF, an image, a spreadsheet, an archive, any file on disk.
+A file on disk that the user's Library keeps as it is: a PDF, an image, a spreadsheet, an archive, any file.
 
 ## When to use this kind
 
-Use it to deliver a file you produced with other tools. MAWS does not edit a file's content; for content you and the user work on inside MAWS, create an `html`, `document` or `presentation` artifact instead.
+To show the user a file, you need no artifact: write a Markdown link to its absolute path in your message, [its name](/absolute/path). A click opens it beside the chat, and ⌘-click opens it in the main area. Keep a file meant for the user inside this session's folders, where everyone who sees the session can open it. Make a File artifact only when the file should also stay in the Library, linked to this session. MAWS does not edit a file's content; for content you and the user work on inside MAWS, create an `html`, `document` or `presentation` artifact instead.
 
 ## Creating one
 
-Call `send_file` with the files' paths (absolute or relative to the working directory) and an optional caption. Each file becomes a File artifact linked to this session, shown in the transcript with buttons to open it or reveal it in Finder. The file stays where it is: MAWS references it in place and does not copy it, so moving or deleting it breaks the artifact.
+Call `artifact_create` with `kind: "file"`, the file's `path` (absolute or relative to the working directory) and a `title`. The file stays where it is: MAWS references it in place and does not copy it, so moving or deleting it breaks the artifact.
 
 ## Reading and editing
 
-`artifact_read` returns a File artifact's name, path, size and content hash, whether the file is still there, and its text when it is a UTF-8 text file under 1 MiB. A File artifact is not published to: to deliver a changed file, write it and call `send_file` again, which delivers it as a new File artifact. `artifact_create` with `kind: "file"`, a `path` and a `title` delivers one file the same way, with a title of your choosing.
+`artifact_read` returns a File artifact's name, path, size and content hash, whether the file is still there, and its text when it is a UTF-8 text file under 1 MiB. A File artifact is not published to: change the file with your own tools, and link it again in your message.
 
 ## Before you finish
 
-Tell the user what the file is for in the caption; they see it beside the file.
+Link the file by its path in your message and say what it is for.
