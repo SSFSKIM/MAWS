@@ -112,7 +112,8 @@ const showPaneServed = () => ({
 // `blocking`, and its recorded schema; the tools an edit needs, each still always loaded as P4-A3 listed them
 const sourceTool = (name: string) => mawsToolList().find((tool) => tool.name === name)!;
 const askServed = () => {
-  const { _meta: _always, ...ask } = sourceTool('ask');
+  const ask = { ...sourceTool('ask') };
+  delete ask._meta; // served deferred
   const opening = ask.description.slice(0, ask.description.indexOf('blocking is required.'));
   return {
     ...ask,

@@ -33,13 +33,18 @@ import { asDocumentReplay } from './support/document-replay'; // P3-B (M7)
 import { FIRST_CREATED_REVISION } from './support/design-systems'; // P3-D (the P3 spec's Decision Log 67)
 import { REPO_ROOT } from './support/launch';
 import {
-  allowNext, askFixture, clearToasts, fixtureRows, idle, mcpCalls, mcpResultOf, metaEvents, ofKind, PASS3, recordedCwd, recordEvents, replay, resultText, scene as sharedScene, shootThemes, show,
+  allowNext, askFixture, askRefusedJournal /* board ticket 420 */, clearToasts, fixtureRows, idle, mcpCalls, mcpResultOf, metaEvents, ofKind, PASS3, recordedCwd, recordEvents, replay, resultText, scene as sharedScene, shootThemes, show,
   unfoldWork, type Frame, type McpResult, type Scene,
 } from './support/maws-tools';
 import { sidebarOf } from './support/sidebar';
 
 const SEND_FILE = `${PASS3}/p1-maws-send-file.jsonl`;
 const ASK_BLOCKING = `${PASS3}/p1-maws-ask-blocking.jsonl`;
+// Board ticket 420 (the tool-choice plan's M2): the blocking recording's call carries no `blocking`, which a live call
+// must now say, so its cases replay it with the call's own arguments and `blocking: true` (askFixture), as its sitting
+// asked; the derived asks below state it too
+const ASK_BLOCKING_ARGS = { ...mcpCalls(fixtureRows(ASK_BLOCKING)).find((call) => call.name === 'ask')!.args, blocking: true };
+const blockingAsk = (s: Scene) => askFixture(s.scratch.root, ASK_BLOCKING, ASK_BLOCKING_ARGS);
 const ASK_ASYNC = `${PASS3}/p1-maws-ask-async.jsonl`;
 const SHOW_PANE = 'e2e/fixtures/derived/p1-maws-show-pane-artifact.jsonl'; // derived, not recorded: pass3/p1-maws-show-pane with its retired `deliverable` pane renamed `artifact`, the pane the host serves now
 const ROUNDTRIP = `${PASS3}/p1-sdk-mcp-roundtrip.jsonl`;
@@ -124,7 +129,7 @@ test('a blocking ask: the capsule waits with its form in its row, which holds ev
   await scene({ titles: ['E1 tools: blocking ask'] }, async (s) => {
     const [id] = s.ids;
     await show(s, id);
-    await replay(s, id, ASK_BLOCKING);
+    await replay(s, id, blockingAsk(s));
     // P2-C Design §7 defaults lane-on panes to Report, and this case checks transcript follow mode. UX wave U2b: the
     // recording holds no message, so no to-human view is in force: the pane is the plain transcript, the switch that
     // would offer the full transcript is absent, and there is nothing to press.
@@ -347,7 +352,7 @@ test('a reload mid-ask: the row holds the form again and the sheet opened beside
   await scene({ titles: ['E1 tools: reload'] }, async (s) => {
     const [id] = s.ids;
     await show(s, id);
-    await replay(s, id, ASK_BLOCKING);
+    await replay(s, id, blockingAsk(s));
     await allowNext(s, id);
     const capsule = capsuleOf(s);
     await expect(capsule).toHaveAttribute('data-ask-state', 'pending');
@@ -403,7 +408,7 @@ test('a stop with a blocking ask pending: the capsule reads cancelled and its fo
   await scene({ titles: ['E1 tools: stop'] }, async (s) => {
     const [id] = s.ids;
     await show(s, id);
-    await replay(s, id, ASK_BLOCKING);
+    await replay(s, id, blockingAsk(s));
     await allowNext(s, id);
     const capsule = capsuleOf(s);
     await expect(capsule).toHaveAttribute('data-ask-state', 'pending');
@@ -433,7 +438,7 @@ test('an ask from a session not shown never switches the main view; when that se
   await scene({ titles: ['E1 tools: shown', 'E1 tools: asking'] }, async (s) => {
     const [shown, asking] = s.ids;
     await show(s, shown);
-    await replay(s, asking, ASK_BLOCKING);
+    await replay(s, asking, blockingAsk(s));
     // the asking session's permission, answered through its card on the Overview (it is not docked anywhere shown)
     await expect.poll(async () => ofKind(await s.events(asking), 'permission.requested').length, { timeout: 30_000 }).toBe(1);
     await s.maws.app.evaluate(({ Menu }) => Menu.getApplicationMenu()?.getMenuItemById('tab.overview')?.click());
@@ -478,6 +483,7 @@ test('an ask from a session not shown never switches the main view; when that se
 // Two questions in place of the blocking recording's five (invented words); the replay matches the ask's result by its id
 // alone, so whatever the form answers is written.
 const BESIDE_ASK = {
+  blocking: true,
   title: 'Release notes',
   questions: [
     { id: 'tone', header: 'Tone', question: 'Which tone should the release notes take?', modality: 'choice', options: [{ label: 'Plain' }, { label: 'Upbeat' }] },
@@ -566,7 +572,7 @@ test('an ask beside an open file: its form stands in the capsule’s row under t
 
 // One single-choice question in place of the blocking recording's five (invented words). The replay matches the ask's
 // result by its id alone, so whatever the form answers is written; the result read back is the form's answer.
-const ONE_QUESTION_ASK = { questions: [{ id: 'q1', header: 'Release', question: 'Ship the release notes today?', modality: 'choice', options: [{ label: 'Yes' }, { label: 'Not yet' }] }] };
+const ONE_QUESTION_ASK = { blocking: true, questions: [{ id: 'q1', header: 'Release', question: 'Ship the release notes today?', modality: 'choice', options: [{ label: 'Yes' }, { label: 'Not yet' }] }] };
 
 test('the ask’s Dismiss in its row sends one answer with every question skipped, and the capsule reads Dismissed with its line Skipped', async () => {
   await scene({ titles: ['U1a: ask dismissed'] }, async (s) => {
@@ -669,12 +675,53 @@ test('an async ask: acknowledged at once, an async_input item while it waits (P2
   });
 });
 
+// ---- Board ticket 420: blocking required -----------------------------------------------------------------------------
+
+// The tool-choice plan's A10 (M2): the ask's `blocking` is required. A call that leaves it out is refused with the one
+// sentence that names it, and its capsule reads as the call's error; asked again with `blocking: false`, the call is
+// answered `asked` at once, the turn writes on past it and ends, and the question waits in its capsule's row as an
+// `async_input` item. Over the ticket 421/420 probe's recording on MAWS's own list (`askRefusedJournal`).
+test('an ask without blocking is refused with the sentence, and asked again with blocking: false it leaves the turn running and reads as waiting', async () => {
+  await scene({ titles: ['Ticket 420: an ask without blocking'] }, async (s) => {
+    const [id] = s.ids;
+    await show(s, id);
+    await replay(s, id, askRefusedJournal(s.scratch.root));
+
+    let asks: ReturnType<typeof mcpCalls> = [];
+    await expect.poll(() => (asks = mcpCalls(s.journal(id)).filter((call) => call.name === 'ask')).length, { timeout: 30_000 }).toBe(2);
+    const [bare, again] = asks as [(typeof asks)[number], (typeof asks)[number]];
+    expect([bare.args.blocking, again.args.blocking]).toEqual([undefined, false]);
+    let refused: McpResult | null = null;
+    await expect.poll(() => (refused = mcpResultOf(s.journal(id), bare.requestId)) !== null, { timeout: 20_000 }).toBe(true);
+    expect(refused!.isError).toBe(true);
+    expect(resultText(refused!)).toBe(TOOL_ERRORS.askBlockingRequired);
+    let acknowledged: McpResult | null = null;
+    await expect.poll(() => (acknowledged = mcpResultOf(s.journal(id), again.requestId)) !== null, { timeout: 20_000 }).toBe(true);
+    const opened = ofKind(await s.events(id), 'maws.ask.opened');
+    expect(opened.map((event) => [event.requestId, event.blocking])).toEqual([[bare.requestId, true], [again.requestId, false]]); // the first read as a record without it is
+    expect(JSON.parse(resultText(acknowledged!))).toEqual({ status: 'asked', askId: opened[1]!.askId });
+
+    // the turn went on past the second ask and ended with its question still to answer
+    await idle(s, id);
+    await expect(s.pane.getByText('meanwhile I will lay out the rest of the chart', { exact: false })).toBeVisible();
+    const capsules = capsuleOf(s);
+    await expect(capsules).toHaveCount(2);
+    await expect(capsules.nth(0)).toHaveAttribute('data-ask-state', 'error');
+    await expect(capsules.nth(1)).toHaveAttribute('data-ask-state', 'asked');
+    await expect(capsules.nth(1).locator('[data-ask-chip]')).toHaveText('Asked, answer when ready');
+    await expect(formOf(s)).toHaveAttribute('data-hover-ask', opened[1]!.askId);
+    const items = async () => value(await invoke(s.page, 'attention.list', undefined)).filter((item) => item.appSessionId === id);
+    await expect.poll(async () => (await items()).map((item) => [item.kind, item.state, item.request.requestId])).toEqual([['async_input', 'pending', again.requestId]]);
+  });
+});
+
 // ---- P2-C3: previews and notes --------------------------------------------------------------------------------------
 
 // One single-select question whose options carry markdown previews (an ASCII mockup and a tab strip in fences, a JSON
 // configuration under a sentence) and one option that has none.
 const MOCKUP = ['```', '+-----------+-------------------------+', '| General   | Theme      [ Light  v ] |', '| Editor    | Font size  [ 14     ] |', '| Keys      |                       |', '+-----------+-------------------------+', '```'].join('\n');
 const LAYOUT_ASK = {
+  blocking: true,
   questions: [{
     id: 'q1', header: 'Layout', question: 'How should the settings page be laid out?', modality: 'choice',
     options: [

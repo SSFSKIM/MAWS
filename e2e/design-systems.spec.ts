@@ -627,8 +627,9 @@ interface AskFrame {
 // E1's recorded blocking ask with `QUESTIONS` in place of its five: the tool_use, its streamed input (the whole input in
 // the first delta, the others empty), the permission request and its answer, the tools/call; and the recorded answers in
 // the results replaced by `answers`, so the transcript the replay feeds back reads the same answers the host wrote.
+// Board ticket 420: the input states `blocking: true`, which a live call must (the recording's carries none).
 function designSystemAskJournal(dir: string, answers: AskAnswer[]): string {
-  const input = { title: 'A look for the handout', questions: QUESTIONS };
+  const input = { blocking: true, title: 'A look for the handout', questions: QUESTIONS };
   const result = JSON.stringify({ status: 'answered', askId: ASK_TOOL_USE, answers }, null, 2);
   let firstDelta = true;
   const rows = fixtureRows(ASK_BLOCKING).map((row) => {

@@ -99,6 +99,26 @@ export function mcpResultOf(rows: JournalRow[], requestId: string): McpResult | 
   }
   return null;
 }
+// The tool-choice plan's M2 (board ticket 420): an ask refused for leaving out `blocking`, then asked again with
+// `blocking: false`, as the ticket 421/420 probe recorded it on MAWS's own list (spikes/protocol-probe/fixtures/uxwave/
+// uxwave-421-ask-refused.jsonl; findings-uxwave-421-tool-choice.txt). C3's prelude stands in for the probe's handshake:
+// its initialize and the `maws` server's own initialize, whose echo the engine sent after the prompt and which is cut
+// with it. Then the prompt, the engine's notification and `tools/list` for the host's server to answer, the two ask
+// calls the host answers, the turn's end and the end_session the host never writes, so the replay waits for the test's
+// end. The meta rows go.
+export const ASK_REFUSED_RECORDING = 'spikes/protocol-probe/fixtures/uxwave/uxwave-421-ask-refused.jsonl';
+export function askRefusedJournal(dir: string): string {
+  const rows = fixtureRows(ASK_REFUSED_RECORDING);
+  const prompt = rows.find((row) => row.direction === 'out' && (row.frame as Frame).type === 'user')!.seq;
+  type Request = { type?: string; request_id?: string; request?: { subtype?: string; message?: { method?: string } }; response?: { request_id?: string } };
+  const probeInit = rows.find((row) => row.direction === 'in' && (row.frame as Request).request?.subtype === 'mcp_message' && (row.frame as Request).request?.message?.method === 'initialize')!;
+  const initId = (probeInit.frame as Request).request_id;
+  const kept = rows.filter((row) => row.seq >= prompt && row.direction !== 'meta' && !((row.frame as Request).type === 'control_response' && (row.frame as Request).response?.request_id === initId));
+  const path = join(dir, 'uxwave-421-ask-refused-derived.jsonl');
+  writeFileSync(path, [...fixtureRows('test/fixtures/engine/replay-handshake.jsonl'), ...kept].map((row) => JSON.stringify(row)).join('\n') + '\n');
+  return path;
+}
+
 // The engine's `tools/call` requests of the `maws` server, in order: their request ids, names and arguments.
 export function mcpCalls(rows: JournalRow[]): { requestId: string; name: string; args: Record<string, unknown> }[] {
   return rows.flatMap((row) => {
