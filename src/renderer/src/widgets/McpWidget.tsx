@@ -139,7 +139,7 @@ export function ConnectorRow({ server, words, control, actions, opened, under, n
   const where = [server.source && MCP.from(server.source), server.scope && MCP.scope(server.scope)].filter(Boolean).join(' · ');
   const connecting = server.status === 'pending' && words !== '';
   return (
-    <li data-mcp-server={server.name} {...(noted ? rowNote.rowProps : {})} className={`relative flex flex-col gap-0.5 border-t border-border py-1 text-ui-sm first:border-t-0`}>
+    <li data-mcp-server={server.name} {...(noted ? rowNote.rowProps : {})} className="relative flex flex-col gap-0.5 border-t border-border py-1 text-ui-sm first:border-t-0">
       <div className="flex min-w-0 items-start gap-2">
         {control}
         <button type="button" aria-expanded={open} aria-controls={open ? part : undefined} onClick={() => setOpen(!open)} className={DISCLOSURE}>

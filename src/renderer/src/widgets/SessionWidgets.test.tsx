@@ -3,7 +3,7 @@
 // C10 registers it; `/resume` is P2-D's chooser.
 import { join } from 'node:path';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId, ProjectId } from '@shared/graph/ids';
 import type { OrgKey } from '@shared/machine/org-key';
@@ -68,6 +68,23 @@ describe('rename widget', () => {
     const close = mount(RenameWidget, at('app-bdb23713' as AppSessionId), 'Later');
     await waitFor(() => expect(close).toHaveBeenCalledTimes(1));
     expect(backend.calls.filter((c) => c.command === 'session.rename').map((c) => c.input)).toEqual([{ appSessionId: 'app-bdb23713', title: 'Later' }]);
+  });
+
+  // the host's close puts away whichever widget is open by then, so a rename that lands after its dialog was put away
+  // closes nothing
+  it('closes nothing when its rename lands after the dialog was put away, and shows the quiet spinner while it is out', async () => {
+    let answer: (value: unknown) => void = () => {};
+    backend.script('session.rename', () => new Promise((resolve) => (answer = resolve)));
+    const close = vi.fn();
+    render(
+      <QueryClientProvider client={new QueryClient()}>
+        <RenameWidget appSessionId={READY} args="Later" close={close} />
+      </QueryClientProvider>,
+    );
+    expect(await screen.findByRole('progressbar', { name: 'Renaming' })).toBeTruthy();
+    cleanup();
+    await act(async () => answer({ record: record(READY_ID), via: 'override' }));
+    expect(close).not.toHaveBeenCalled();
   });
 
   it('says a refused rename in its words', async () => {

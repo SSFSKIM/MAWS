@@ -1,12 +1,14 @@
 // `/rename` (C11 execution document, the widget table; M3 refresh task "rename and resume through C10's landed
 // actions"): with a title, the session is renamed at once through C10's `session.rename` (`/rename Live C11`: through
-// the engine while its process is ready, so the terminal sees it; the record's override otherwise) and the widget says
-// so; without one, C10's rename dialog opens (the session action `rename` C10 registers into C5's registry), or, while
+// the engine while its process is ready, so the terminal sees it; the record's override otherwise) and the widget
+// closes once it took; without one, C10's rename dialog opens (the session action `rename` C10 registers into C5's registry), or, while
 // no dialog is registered, the widget offers the title to edit.
 // P5 O7 M8: a session on another machine can't be renamed from here yet (lane-b/remote-unavailable.ts): nothing is asked
 // and no dialog opens; the title field and Rename are greyed, with the reason. The word cut (P635, P637): the field is
 // named "New title" without a label drawn over it, and a rename that took closes the dialog, the new title showing where
-// the session is named; a typed title's rename shows the quiet spinner while it is out, so the dialog is never blank.
+// the session is named; a typed title's rename shows the quiet spinner while it is out, so the dialog is never blank. A
+// widget put away while its rename is out closes nothing when it lands: the host's close puts away whichever widget is
+// open by then.
 import { useEffect, useRef, useState } from 'react';
 import type { AppSessionId } from '@shared/graph/ids';
 import { runSessionAction, useSessionActionEnabled } from '../app/session-actions';
@@ -32,8 +34,14 @@ export function RenameWidget({ appSessionId, args, close }: { appSessionId: AppS
   const [busy, setBusy] = useState(given !== '' && remoteUnavailableOf(appSessionId, 'session.rename') === null);
   const [outcome, setOutcome] = useState<Outcome>(null);
   const unavailable = useRemoteUnavailable(appSessionId, 'session.rename');
+  const mounted = useRef(false);
+  useEffect(() => {
+    mounted.current = true; // StrictMode runs setup, cleanup, setup
+    return () => void (mounted.current = false);
+  }, []);
 
   const renamed = (answer: Awaited<ReturnType<typeof renameSession>>) => {
+    if (!mounted.current) return;
     setBusy(false);
     if (answer.ok) close();
     else setOutcome({ refused: answer.error });
