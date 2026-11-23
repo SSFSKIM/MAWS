@@ -51,6 +51,52 @@ afterEach(() => {
 });
 
 describe('setting a project up on another machine', () => {
+  // Fix round 1 of the word cut's M4 task 1 (N175): a folder read out keeps the folder shown under a quiet spinner, which
+  // its answer or its refusal takes down
+  it('reads a folder under a quiet spinner, keeping the folder shown; an answer or a refusal takes it down', async () => {
+    install({});
+    openFolderSetup();
+    const sheet = screen.getByRole('dialog', { name: 'New project on mini' });
+    expect(within(sheet).queryByRole('progressbar')).toBeNull();
+    fireEvent.click(folders().getByRole('button', { name: 'Developer' }));
+    expect(await within(sheet).findByRole('progressbar', { name: SETUP_WORDS.loading }, { timeout: 2000 })).toBeTruthy();
+    expect(folders().getAllByRole('button').map((b) => b.textContent)).toEqual(['Developer', 'Documentsprivate']); // the page shown stays
+    await act(() => fake.reply('machine.folders.list', { entries: [entry(`${HOME}/Developer/app`)], cursor: null }));
+    await waitFor(() => expect(within(sheet).queryByRole('progressbar')).toBeNull());
+    expect(folders().getAllByRole('button').map((b) => b.textContent)).toEqual(['app']);
+    fireEvent.click(folders().getByRole('button', { name: 'app' }));
+    expect(await within(sheet).findByRole('progressbar', { name: SETUP_WORDS.loading }, { timeout: 2000 })).toBeTruthy();
+    await act(() => fake.fail('machine.folders.list', 'not allowed'));
+    await waitFor(() => expect(within(sheet).queryByRole('progressbar')).toBeNull());
+    expect(within(sheet).getByRole('alert')).toBeTruthy();
+    expect(folders().getAllByRole('button').map((b) => b.textContent)).toEqual(['app']);
+  });
+
+  // N182: the trust read is a quiet spinner; registering keeps its words, which ask for Touch ID
+  it('reads the folder’s trust under a quiet spinner, and registering keeps its Touch ID words', async () => {
+    install({});
+    openFolderSetup();
+    const sheet = screen.getByRole('dialog', { name: 'New project on mini' });
+    fireEvent.click(within(within(sheet).getByRole('group', { name: SETUP_WORDS.suggestions })).getByRole('button', { name: '~/Developer/GitHub/app' }));
+    await act(() => fake.reply('machine.folders.list', { entries: [], cursor: null }));
+    fireEvent.click(within(sheet).getByRole('button', { name: SETUP_WORDS.use }));
+    expect(await within(sheet).findByRole('progressbar', { name: SETUP_WORDS.checking('mini') }, { timeout: 2000 })).toBeTruthy();
+    expect(sheet.textContent).not.toContain(SETUP_WORDS.checking('mini'));
+    await act(() => fake.reply('session.trust.check', trustOf({ trusted: true })));
+    expect(await within(sheet).findByRole('status')).toHaveProperty('textContent', SETUP_WORDS.registering('mini'));
+    expect(within(sheet).queryByRole('progressbar')).toBeNull();
+  });
+
+  it('the trust sheet of a refused Send reads the place’s trust under a quiet spinner, and a refused read shows its words alone', async () => {
+    install({});
+    act(() => openDialog({ kind: 'remoteSetup', request: { kind: 'trust', tab: TAB, target: { machine: OTHER_MACHINE, name: 'mini', checkout: APP, key: null } } }));
+    const sheet = await screen.findByRole('dialog');
+    expect(await within(sheet).findByRole('progressbar', { name: SETUP_WORDS.checking('mini') }, { timeout: 2000 })).toBeTruthy();
+    await act(() => fake.fail('session.trust.check', 'not allowed'));
+    await waitFor(() => expect(within(sheet).queryByRole('progressbar')).toBeNull());
+    expect(within(sheet).getByRole('alert')).toBeTruthy();
+  });
+
   it('asks for the folder, reads its trust there, shows that machine’s trust card, registers the folder, and starts there trusted', async () => {
     install({ 'machine.folders.list': { entries: [entry(`${APP}/src`)], cursor: null }, 'session.trust.check': trustOf(), 'session.projects.addFolder': registered(APP) });
     openFolderSetup();

@@ -6,6 +6,7 @@
 // which carries the editor's state, so the tab's own guard is not asked.
 import { act, cleanup, fireEvent, render, renderHook, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import userEvent from '@testing-library/user-event';
 import { LAYOUT_DEFAULTS, tabId, type Strip, type TabRef } from '@shared/ipc/schema/layout';
 import { resetSlots } from '../app/slots';
 import type { LibraryRow } from '@shared/ipc/schema/library';
@@ -223,8 +224,10 @@ describe('a session tab driven through its holder’s bridge', () => {
     expect(marker()?.textContent).toBe('⌁');
     expect(marker()?.getAttribute('role')).toBe('img');
     expect(marker()?.getAttribute('aria-label')).toBe('Terminal');
-    expect(marker()?.title).toBe('Running in Terminal'); // the word cut (C130): no word on the bridge
-    expect(accessibleDescription(tabElement())).toBe('Terminal');
+    // the word cut (C130): no word on the bridge. Fix round 1 (W10): the line is the tab's tip, which the tab's own focus
+    // stop shows at once and pointing at the glyph shows after the delay; no system title on an unfocusable glyph
+    expect(marker()?.hasAttribute('title')).toBe(false);
+    expect(accessibleDescription(tabElement())).toBe('Running in Terminal');
     expect(tabElement().getAttribute('aria-label'), 'the tab’s name is its title alone').toBe('Fix drag');
     act(() => applyLaneAState(A, null));
     expect(marker()).toBeNull();
@@ -237,8 +240,20 @@ describe('a session tab driven through its holder’s bridge', () => {
     render(<Tab tab={tab} pane={0} domId="t-0" active stop onKeyDown={() => {}} />);
     expect(marker()?.textContent).toBe('⌁');
     expect(marker()?.getAttribute('aria-label')).toBe('Background job');
-    expect(accessibleDescription(tabElement())).toBe('Background job');
-    expect(marker()?.title).toBe('Running as bg · job-1');
+    expect(accessibleDescription(tabElement())).toBe('Running as bg · job-1');
+    expect(marker()?.hasAttribute('title')).toBe(false);
+  });
+
+  it('shows the holder’s line as the tab’s tip on keyboard focus, and on pointing at the glyph', async () => {
+    holding({ kind: 'terminal', pid: 4242 });
+    act(() => applyLaneAState(A, laneAState(A)));
+    render(<Tab tab={tab} pane={0} domId="t-0" active stop onKeyDown={() => {}} />);
+    act(() => tabElement().focus());
+    expect((await screen.findByRole('tooltip')).textContent).toBe('Running in Terminal');
+    act(() => tabElement().blur());
+    await waitFor(() => expect(screen.queryByRole('tooltip')).toBeNull());
+    await userEvent.setup().hover(marker()!);
+    expect((await screen.findByRole('tooltip', {}, { timeout: 2000 })).textContent).toBe('Running in Terminal');
   });
 });
 

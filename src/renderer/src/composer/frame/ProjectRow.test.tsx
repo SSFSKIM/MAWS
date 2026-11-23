@@ -291,6 +291,25 @@ describe('the project row on another machine', () => {
     await vi.waitFor(() => expect(within(menu()).getAllByRole('option').slice(1).map((o) => o.getAttribute('aria-disabled'))).toEqual(['false', 'false']));
   });
 
+  // Fix round 1 of the word cut's M4 task 1 (N181): while the machine's projects are read, a quiet spinner their words
+  // name, gone once they answer
+  it('reads the machine’s projects under a quiet spinner, gone once they answer', async () => {
+    roster();
+    let projects: (value: unknown) => void = () => {};
+    vi.spyOn(ipc, 'invoke').mockImplementation((async (name: string) => {
+      if (name === 'session.projects.list') return new Promise((resolve) => (projects = resolve));
+      if (name === 'machine.folders.list') return { ok: true, value: HOME_PAGE };
+      return { ok: false, error: { code: 'internal', message: `unexpected ${name}` } };
+    }) as never);
+    onMini();
+    render(<ProjectRow binding={binding()} appSessionId={TAB} />);
+    await userEvent.setup().click(screen.getByRole('button', { name: 'Choose a project' }));
+    expect(await within(menu()).findByRole('progressbar', { name: SETUP_WORDS.reading('mini') }, { timeout: 2000 })).toBeTruthy();
+    expect(menu().textContent).not.toContain(SETUP_WORDS.reading('mini'));
+    await act(async () => projects({ ok: true, value: { projects: [theirs('notes', 'notes', '/Users/mini/notes')], revision: 1 } }));
+    await vi.waitFor(() => expect(within(menu()).queryByRole('progressbar')).toBeNull());
+  });
+
   it('reads Choose a project there, lists that machine’s projects newest first, and a choice is the place there, no branch or Worktree box', async () => {
     roster();
     const invoke = answer();

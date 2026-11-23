@@ -365,6 +365,15 @@ describe('relay card', () => {
     expect(container.querySelector('ul')).toBeNull();
     expect(accessibleDescription(screen.getByRole('button', { name: 'Run direct' }))).toBe(RELAY_WORDS.direct);
     expect(accessibleDescription(screen.getByRole('button', { name: 'Open ClaudeUsage, then start' }))).toBe(RELAY_WORDS.open(false));
+    // Fix round 1 (W98): until C11 registers its hand-off, the button is greyed and still the keyboard's, its focus showing
+    // what it would do, its click doing nothing
+    const handOff = screen.getByRole('button', { name: 'Open ClaudeUsage, then start' });
+    expect(handOff.hasAttribute('disabled')).toBe(false);
+    expect(handOff.getAttribute('aria-disabled')).toBe('true');
+    act(() => handOff.focus());
+    expect(document.activeElement).toBe(handOff);
+    expect((await screen.findByRole('tooltip')).textContent).toBe(RELAY_WORDS.open(false));
+    act(() => handOff.blur());
     rerender(<RelayCard health={health()} policy="ask" now={Date.parse('2026-09-29T10:00:04.000Z')} gatewayModel openClaudeUsage={null} onAccept={onAccept} onDecline={vi.fn()} onRecheck={vi.fn()} />);
     const direct = screen.getByRole('button', { name: 'Run direct' });
     // greyed with its reason and still in the keyboard's reach

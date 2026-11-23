@@ -211,6 +211,10 @@ describe('a session row’s hover card', () => {
     act(() => useSessions.setState({ listed: listing('failed') }));
     expect(within(card).getByRole('img', { name: 'Failed' })).toBeTruthy();
     expect(within(card).getByTestId('hover-meta').textContent).not.toContain('Failed');
+    // N155: a stopped listing draws Done's ✓, so its word stays on the line at rest
+    act(() => useSessions.setState({ listed: listing('stopped') }));
+    expect(within(card).getByRole('img', { name: 'Stopped' })).toBeTruthy();
+    expect(within(card).getByTestId('hover-meta').textContent).toMatch(/^Stopped · /);
   });
 
   it('a foreign-live session names its holder', async () => {
@@ -267,9 +271,34 @@ describe('a session row’s hover card', () => {
     expect(place.textContent).toBe('⎇ feature/sibling');
     expect(place.hasAttribute('title')).toBe(false);
     expect(accessibleDescription(place)).toBe('/work/MAWS-sibling');
+    expect(within(sibling).queryByTestId('hover-place-path')).toBeNull(); // under the pointer, the folder is the tooltip's
     await userEvent.setup().unhover(needsRow('Charter + research'));
     const main = await open('Fix sidebar drag');
     expect(within(main).getByTestId('hover-place').textContent).toBe('⎇ master');
+  });
+
+  // Fix round 1 of the word cut's M4 task 1: nothing in a hover card takes focus, so a card its row's keyboard focus
+  // opened draws at rest what the pointer's card leaves to tooltips: the state word first on the second line, the
+  // worktree's folder on a line of its own
+  it('a card opened by keyboard focus draws the state word and the worktree’s folder at rest', async () => {
+    withMain();
+    const charter = bareIdOf('Charter + research');
+    act(() => fillStores({ ...nine, sessions: nine.sessions.map((r) => (r.appId === charter ? { ...r, worktree: { path: '/work/MAWS-sibling', branch: 'feature/sibling' } } : r)) }));
+    render(<Sidebar />);
+    act(() => needsRow('Charter + research').focus());
+    const card = await screen.findByRole('dialog', { name: 'Charter + research' });
+    const word = card.querySelector('h3')!.parentElement!.querySelector('[role="img"]')!.getAttribute('aria-label')!;
+    expect(within(card).getByTestId('hover-meta').textContent!.startsWith(word)).toBe(true);
+    expect(within(card).getByTestId('hover-place').textContent).toBe('⎇ feature/sibling');
+    expect(within(card).getByTestId('hover-place-path').textContent).toBe('/work/MAWS-sibling');
+  });
+
+  it('a card opened by the pointer leaves the state word to the glyph', async () => {
+    withMain();
+    render(<Sidebar />);
+    const card = await open('Charter + research');
+    const word = card.querySelector('h3')!.parentElement!.querySelector('[role="img"]')!.getAttribute('aria-label')!;
+    expect(within(card).getByTestId('hover-meta').textContent).not.toContain(word);
   });
 
   // UX wave U8c-2 (M4 decision 11): the row's worktree mark and the card's "worktree <name>" follow the agent: a session
