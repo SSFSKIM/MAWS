@@ -377,7 +377,7 @@ describe('a path in a surface’s Markdown (U6b-4b)', () => {
     expect([...document.querySelectorAll('[data-refusal] p')].map((p) => p.textContent)).toEqual([
       'This file is outside the folders this session works in.',
       'Choose it with File ▸ Open File…', // the word cut (N7)
-      'Ask the agent to send the file to see it here.',
+      'Ask the agent to copy the file into this session’s folders to see it here.',
       '/elsewhere/o.md', // the word cut (N11): no command's words under a notice that names its cause
     ]);
   });

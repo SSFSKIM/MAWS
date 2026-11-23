@@ -3972,7 +3972,7 @@ test('U6b-4b L9, a session on B: a file outside B’s folders reads why, naming 
         .toEqual([
           `This file is outside the folders this session works in on ${B_NAME}.`,
           'Choose it with File ▸ Open File…', // the word cut (N7): the way in, without how the app opens files
-          'Ask the agent to send the file to see it here.',
+          'Ask the agent to copy the file into this session’s folders to see it here.',
           outside,
         ]);
       // the word cut (N11): the command's own words show only under the generic notice, not under one that names its cause
