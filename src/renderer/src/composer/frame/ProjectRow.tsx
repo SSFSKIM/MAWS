@@ -42,6 +42,7 @@ import type { ProjectRowBinding } from './bindings';
 import { CHIP, NOTE, POPOVER } from './chip-style';
 import { formatCwd } from './LocationChip';
 import { MachineMenu } from './MachineMenu'; // P5 O7 M4
+import { QuietSpinner } from '../../ui/spinner';
 
 export const CHOOSE_PROJECT = 'Choose a project';
 export const NEW_PROJECT = 'New project';
@@ -146,7 +147,11 @@ function RemoteMenu({ appSessionId, target, projectId, projectKey, disabled, onD
       />
       <Command.List>
         <Command.Group className="max-h-40 overflow-y-auto py-1">
-          {places.reading !== null && <p className="m-0 px-2 py-1.5 text-ui-sm text-fg-muted">{places.reading}</p>}
+          {places.reading !== null && ( // N181: the read's quiet spinner, its words its name
+            <div className="flex px-2 py-1.5">
+              <QuietSpinner label={places.reading} />
+            </div>
+          )}
           {places.error !== null && <p className="m-0 px-2 py-1.5 text-ui-sm text-fg-muted">{places.error}</p>}
           {places.projects !== null && shown.length === 0 && <p className="m-0 px-2 py-1.5 text-ui-sm text-fg-muted">No projects found</p>}
           {shown.map((project) => {

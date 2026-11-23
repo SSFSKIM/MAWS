@@ -18,7 +18,7 @@
 // emails; the place line is the branch, the worktree's folder its tooltip; a held session reads who runs it, without a
 // pid. A listed session keeps "Stopped" on its line (N155): its glyph is Done's.
 import { HoverCard as Radix } from 'radix-ui';
-import { useCallback, useContext, useEffect, useRef, useState, type FocusEvent, type ReactNode } from 'react';
+import { createContext, useCallback, useContext, useEffect, useRef, useState, type FocusEvent, type ReactNode } from 'react';
 import { flushSync } from 'react-dom';
 import { QuickReply, useQuickReply, type QuickReplyState } from './QuickReply';
 import type { AttentionItem } from '@shared/graph/attention';
@@ -30,7 +30,7 @@ import { useSlot } from '../app/slots';
 import { useNow } from '../app/use-now';
 import { BRIDGED_LINE, heldLine, waitingItem } from '../attention/derive';
 import { GlyphMark } from '../attention/GlyphMark';
-import { glyphFor, listedGlyph, type Glyph } from '../attention/glyph';
+import { glyphFor, listedGlyph, wordAtRest, type Glyph } from '../attention/glyph';
 import { Tip } from '../ui/tip';
 import { ipc } from '../ipc/client';
 import { branchLabel } from '../sessions/branch-label';
@@ -56,8 +56,14 @@ export interface SidebarHoverCardProps {
   onOpenChange?(open: boolean): void;
 }
 
+// Whether the card open now was opened by its row's keyboard focus. Nothing in a Radix hover card takes focus (Radix sets
+// every tabbable in it to tabindex -1), so such a card draws at rest what the pointer's leaves to tooltips (the word cut,
+// fix round 1 of M4's task 1): the row is the owner the keyboard holds, and its card shows at once.
+const OpenedByKeyboard = createContext(false);
+
 export function SidebarHoverCard({ label, children, content, open, onOpenChange }: SidebarHoverCardProps) {
   const [internalOpen, setInternalOpen] = useState(false);
+  const [byKeyboard, setByKeyboard] = useState(false);
   const contentRef = useRef<HTMLDivElement>(null);
   const releaseRemoved = useContext(SidebarInteractionContext);
   const setContentRef = useCallback((node: HTMLDivElement | null) => {
@@ -77,7 +83,9 @@ export function SidebarHoverCard({ label, children, content, open, onOpenChange 
     const explicit = dismissing.current;
     dismissing.current = false;
     if (!next && !explicit && contentRef.current?.contains(document.activeElement)) return;
+    const trigger = triggerRef.current;
     flushSync(() => {
+      setByKeyboard(next && trigger !== null && trigger === document.activeElement && focusVisible(trigger));
       setInternalOpen(next);
       onOpenChange?.(next);
     });
@@ -115,6 +123,7 @@ export function SidebarHoverCard({ label, children, content, open, onOpenChange 
           onPointerDownOutside={dismiss} // the press moves focus where it lands
           onBlurCapture={(event) => {
             if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
+              setByKeyboard(false);
               setInternalOpen(false);
               onOpenChange?.(false);
             }
@@ -128,7 +137,7 @@ export function SidebarHoverCard({ label, children, content, open, onOpenChange 
           collisionPadding={8}
           className="z-50 w-[342px] rounded-md border border-border-strong bg-bg-overlay p-4"
         >
-          {content}
+          <OpenedByKeyboard.Provider value={byKeyboard}>{content}</OpenedByKeyboard.Provider>
         </Radix.Content>
       </Radix.Portal>
     </Radix.Root>
@@ -186,6 +195,7 @@ function Body({ appSessionId, reply }: { appSessionId: AppSessionId; reply: Quic
   const controlled = useSessionControls(appSessionId) !== null; // P5 O9 M4: a session held elsewhere takes no reply
   const bridged = useLaneAState(appSessionId)?.bridge === 'live'; // P5 O9 M5
   const compacting = useCompactingSince(appSessionId) !== null; // UX wave U3b (M4)
+  const atRest = useContext(OpenedByKeyboard);
   if (!record) return null;
   const glyph = glyphFor(record, digest, pending, listing);
   const waiting = waitingItem(pending);
@@ -195,7 +205,8 @@ function Body({ appSessionId, reply }: { appSessionId: AppSessionId; reply: Quic
   // P5 O9 M5 (the owner's Q1): a foreign session MAWS drives through its bridge says so (a terminal's line already does)
   const doing = compacting ? COMPACTING_SESSION : ((held !== null && bridged && record.holder.kind !== 'terminal' ? BRIDGED_LINE(held) : held) ?? (working ? digest?.activity : null) ?? null); // UX wave U3b (M4)
   const context = digest?.context && digest.context.percent >= CONTEXT_SHOWN_FROM ? `ctx ${Math.round(digest.context.percent)}%` : null; // W69
-  const meta = [sessionAge(record, digest, now, seenAt, listing), context].filter(Boolean).join(' · ');
+  // W69: the age; the state word the glyph's, at rest only on a card the keyboard opened, or a word the glyph doesn't tell (N155)
+  const meta = [atRest ? glyph.label : wordAtRest(glyph), sessionAge(record, digest, now, seenAt, listing), context].filter(Boolean).join(' · ');
 
   return (
     <div className="flex flex-col gap-2 text-ui-sm text-fg">
@@ -212,10 +223,17 @@ function Body({ appSessionId, reply }: { appSessionId: AppSessionId; reply: Quic
       <Owners appId={appSessionId} />
       <ReachLine address={appSessionId} />
       {place &&
-        (place.title === null ? (
-          <p data-testid="hover-place" className="m-0 truncate text-fg-muted">
-            {place.text}
-          </p>
+        (place.title === null || atRest ? (
+          <>
+            <p data-testid="hover-place" className="m-0 truncate text-fg-muted">
+              {place.text}
+            </p>
+            {place.title !== null && (
+              <p data-testid="hover-place-path" className="m-0 text-fg-muted [overflow-wrap:anywhere]">
+                {place.title}
+              </p>
+            )}
+          </>
         ) : (
           <Tip content={place.title} description={place.title}>
             <p data-testid="hover-place" className="m-0 truncate text-fg-muted">
@@ -259,11 +277,12 @@ function ListedBody({ appId }: { appId: AppSessionId }) {
   const listed = useSessions((s) => s.listed.get(appId));
   const machine = useMachineMark(appId);
   const now = useNow();
+  const atRest = useContext(OpenedByKeyboard);
   if (!listed) return null;
   const glyph = listedGlyph(listed.state);
   const issued = Date.parse(listed.issued);
-  // W77: the age alone, the state word the glyph's; N155: "Stopped" stays, since its glyph is Done's
-  const meta = [listed.state === 'stopped' ? glyph.label : null, Number.isFinite(issued) ? formatAgo(Math.max(0, now - issued), { narrow: true }) : null].filter(Boolean).join(' · ');
+  // W77: the age alone, the state word the glyph's (at rest on a card the keyboard opened); N155: "Stopped" stays, since its glyph is Done's
+  const meta = [atRest ? glyph.label : wordAtRest(glyph), Number.isFinite(issued) ? formatAgo(Math.max(0, now - issued), { narrow: true }) : null].filter(Boolean).join(' · ');
   return (
     <div className="flex flex-col gap-2 text-ui-sm text-fg">
       <div className="flex min-w-0 items-start gap-2">
@@ -310,9 +329,8 @@ function machineLine(machine: MachineMark, now: number): string {
 
 // The share of the context window from which the second line names it (W69): below, it is not worth a look.
 const CONTEXT_SHOWN_FROM = 80;
-// The card's status glyph, its word its name and its tooltip (W69, W77). Nothing in a Radix hover card takes focus
-// (Radix sets every tabbable inside it to tabindex -1), so the card's tips are the pointer's; the word stays the
-// glyph's accessible name.
+// The card's status glyph, its word its name and its tooltip (W69, W77): the pointer's, since nothing in a hover card
+// takes focus; a card the keyboard opened has the word on its second line.
 function NamedGlyphMark({ glyph }: { glyph: Glyph }) {
   return (
     <Tip content={glyph.label}>

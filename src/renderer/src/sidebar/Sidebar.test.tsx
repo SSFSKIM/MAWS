@@ -37,7 +37,8 @@ import { registerProjectAction } from './project-actions';
 import { useResumeChooser } from '../resume/host'; // P2-D
 import { clearPreviewCache } from '../resume/preview'; // P2-D
 import { revealProject } from './reveal';
-import { SEARCH_IN_CONVERSATIONS, Sidebar } from './Sidebar';
+import { SEARCH_IN_CONVERSATIONS } from './copy';
+import { Sidebar } from './Sidebar';
 import { Search } from './Search';
 import { formatClock } from '@shared/app/date-format'; // L129
 import { togglePalette, usePalette } from '../palette/CommandPalette';

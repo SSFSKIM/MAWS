@@ -74,7 +74,7 @@ export const SETUP_WORDS = {
   back: 'Back',
   use: 'Use this folder',
   useHint: 'Open the folder that holds the project, then use it',
-  checking: (machine: string) => `Reading its trust on ${machine}…`,
+  checking: (machine: string) => `Reading its trust on ${machine}`, // the quiet spinner's name (N182)
   registering: (machine: string) => `Registering it on ${machine}; confirm with Touch ID…`,
   trustTitle: (machine: string) => `Trust this folder on ${machine}?`,
   trust: 'Trust',
@@ -85,7 +85,7 @@ export const SETUP_WORDS = {
   homeNotOwner: (machine: string) => `Only ${machine}’s owners can start a chat outside a project there`, // 2026-11-06
   noSpawn: (machine: string) => `You can’t start sessions on ${machine}; ask its owner for the right to`, // 2026-11-06: no `spawn` there
   projectsUnread: (machine: string) => `Couldn’t read ${machine}’s projects; open the menu again`, // 2026-11-06
-  reading: (machine: string) => `Reading ${machine}’s projects…`, // 2026-11-06
+  reading: (machine: string) => `Reading ${machine}’s projects`, // 2026-11-06; the quiet spinner's name (N181)
   notOffered: (machine: string) => `${machine} can’t set up projects from this Mac yet; update MAWS on ${machine}`,
   noFolder: (machine: string) => `That folder isn’t on ${machine} any more; choose it again`,
   outsideHome: (machine: string) => `${machine} sets up only folders in its home folder`,

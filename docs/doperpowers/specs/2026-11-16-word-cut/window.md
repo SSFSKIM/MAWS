@@ -4,7 +4,7 @@
 
 105 items: 70 cut, 1 reworded, 34 stay. Of the 71 that change, the owner saw 20 in a picture or ruled on them; 51 follow the pattern and were not seen.
 
-Against master (M0): 104 unchanged, 1 moot; none waits on the owner; 3 put to the owner (new rows included) and since ruled. M0 added 16 rows for the UX wave's new text (12 cut, 1 reworded, 3 stay), listed at the end.
+Against master (M0): 104 unchanged, 1 moot; none waits on the owner; 3 put to the owner (new rows included) and since ruled. M0 added 18 rows for the UX wave's new text (14 cut, 1 reworded, 3 stay), listed at the end.
 
 Columns: **Id** is the item's id in `items.json`. **Where** is the place on the surface. **Today** is the text at the pin `2c7044231` (an example value where the text is built from data). **Decision** is `cut` (the text leaves the resting surface), `reword` (it changes) or `stays` (today's text is kept; the row is here so that nobody proposes it again). **After** says what the surface shows afterwards, as it was built on the scratch branch and shown in the pictures. **Basis** is how firm the decision is, in the words of the root document's "How firm each decision is". **Source** is the file and line at the pin. **M0** is what the re-reading against master found (see the root document's "M0's record"): `unchanged`, `moved`, `rewritten by the wave`, `gone` or `moot`, with the file and line on master, and for a rewritten row the text master shows and the row decided again by the five rules. **Build** is the milestone that builds the row and the scene whose before and after pictures show it.
 
@@ -387,7 +387,8 @@ Rows added by M0 for text the UX wave added after the pin. **Today** here is the
 
 | Id | Where | Today | Decision | After | Basis | Source | M0 | Build |
 |---|---|---|---|---|---|---|---|---|
-| N175 | in the folder list (and the Add project sheet's folder field for another machine) while that machine's folders are read | Reading the folders… | cut | Nothing for the first half second, then a quiet spinner in the list, "Reading the folders" its accessible name (the code tools' remote chooser's words, N30); a refused read shows its words and no spinner. | pattern | `src/renderer/src/sessions/remote-setup.ts:72` | new `src/renderer/src/sessions/RemoteSetupSheet.tsx:188` | M4 · no scene: needs a session on another machine (wanted: New project on another machine sheet while the folders are read) |
+| N175 | in the folder list's header (and the Add project sheet's folder field for another machine) while a read of that machine's folders is out | Reading the folders… | cut | Nothing for the first half second, then a quiet spinner beside the folder shown, "Reading the folders" its accessible name, the page shown staying until the answer replaces it; the Add project field's first read shows it in the empty list. An answer or a refused read takes it down, the refusal showing its words. | pattern | `src/renderer/src/sessions/remote-setup.ts:72` | new `src/renderer/src/sessions/RemoteSetupSheet.tsx:194` | M4 · no scene: needs a session on another machine (wanted: New project on another machine sheet while the folders are read) |
+| N182 | under the folder list after Use this folder, and in the trust sheet a refused Send opens, while the folder's trust is read on that machine | Reading its trust on mini… | cut | Nothing for the first half second, then a quiet spinner, "Reading its trust on <machine>" its accessible name; the trust card, or a refused read's words, replace it. Registering's line, which asks for Touch ID, stays as it reads. | pattern | `src/renderer/src/sessions/remote-setup.ts:77` | new `src/renderer/src/sessions/RemoteSetupSheet.tsx:73` | M4 · no scene: needs a session on another machine (wanted: New project on another machine sheet while the folder's trust is read) |
 
 ### Sheets (rename, share, archive, delete)
 
@@ -420,3 +421,11 @@ Rows added by M0 for text the UX wave added after the pin. **Today** here is the
 | Id | Where | Today | Decision | After | Basis | Source | M0 | Build |
 |---|---|---|---|---|---|---|---|---|
 | N180 | in place of what would move to the Trash, while it is read | Reading what would move… | cut | Nothing for the first half second, then a quiet spinner where the sentence will be, "Reading what would move" its accessible name; a failed read shows its error and no spinner. The sentence itself, a destructive step's text, stays as it reads. | pattern | `src/renderer/src/sessions/DeleteDialog.tsx:67` | new `src/renderer/src/sessions/DeleteDialog.tsx:69` | M4 · no scene: a transient wait no fixture holds (wanted: Delete sheet before what would move is read) |
+
+### New chat
+
+#### New chat, project menu
+
+| Id | Where | Today | Decision | After | Basis | Source | M0 | Build |
+|---|---|---|---|---|---|---|---|---|
+| N181 | on another machine, the menu's first row while that machine's projects are read | Reading mini’s projects… | cut | Nothing for the first half second, then a quiet spinner where the projects will be, "Reading <machine>’s projects" its accessible name; the projects, or a failed read's words, replace it. | pattern | `src/renderer/src/sessions/remote-setup.ts:88` | new `src/renderer/src/composer/frame/ProjectRow.tsx:149` | M4 · no scene: needs a session on another machine (wanted: New chat project menu for another machine before its projects answer) |

@@ -13,3 +13,6 @@ export const HIDDEN = {
   row: (count: number) => `Hidden · ${count}`,
   label: (count: number) => `Hidden, ${count} ${count === 1 ? 'session' : 'sessions'}`,
 } as const;
+
+// The word cut (W41): the row under the search field while it holds a query, which it does not repeat
+export const SEARCH_IN_CONVERSATIONS = 'Search inside conversations';

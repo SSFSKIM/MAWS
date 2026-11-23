@@ -44,6 +44,7 @@ import { RefusedMenuItem } from '../ui/refused-menu-item';
 import { QuietSpinner } from '../ui/spinner';
 import { Tip } from '../ui/tip';
 import { displayTitle } from './title';
+import { ARCHIVED_WORDS } from './copy';
 
 export function ArchivedSessionsDialog({ projectId, machine: named }: { projectId: ProjectId | null; machine?: MachineRef }) {
   const local = ipc.localMachine;
@@ -189,9 +190,8 @@ function MachineLines({ lines }: { lines: readonly string[] }) {
 }
 
 // A read still out (N172: a quiet spinner, its words its name), or the error it ended in
-const READING = 'Loading archived sessions';
 function Reading({ error }: { error: string | null }) {
-  return error !== null ? <p className="m-0 text-fg-muted">{error}</p> : <QuietSpinner label={READING} />;
+  return error !== null ? <p className="m-0 text-fg-muted">{error}</p> : <QuietSpinner label={ARCHIVED_WORDS.reading} />;
 }
 
 // "No archived sessions." unless a machine's line says why it wasn't asked.
@@ -216,7 +216,7 @@ function ArchivedRow({ record: r, onUnarchive }: { record: SessionRecord; onUnar
         Unarchive
       </button>
       <ArchivedRowMenu
-        label={ARCHIVED_ROW.actions(title)}
+        label={ARCHIVED_WORDS.actions(title)}
         removeWorktree={removable ? () => openDialog({ kind: 'cleanup', target: cleanupTargetOf(r)! }) : null}
         remove={() => openDialog({ kind: 'delete', appSessionId: r.appId })}
         refused={deleteUnavailable}
@@ -224,12 +224,6 @@ function ArchivedRow({ record: r, onUnarchive }: { record: SessionRecord; onUnar
     </li>
   );
 }
-
-const ARCHIVED_ROW = {
-  actions: (title: string) => `Actions for ${title}`,
-  removeWorktree: 'Remove worktree…',
-  delete: 'Delete…',
-} as const;
 
 const ROW_GLYPH = 'inline-flex size-6 shrink-0 items-center justify-center rounded-sm text-fg-muted outline-accent hover:bg-bg-hover hover:text-fg focus-visible:outline-2 data-[state=open]:bg-bg-active data-[state=open]:text-fg';
 const MENU = 'z-50 min-w-44 rounded-md border border-border-strong bg-bg-overlay p-1 text-ui text-fg shadow-float';
@@ -256,14 +250,14 @@ function ArchivedRowMenu({ label, removeWorktree, remove, refused }: { label: st
         <DropdownMenu.Content align="end" sideOffset={4} className={MENU}>
           {removeWorktree !== null && (
             <DropdownMenu.Item className={MENU_ITEM} onSelect={() => run(removeWorktree)}>
-              {ARCHIVED_ROW.removeWorktree}
+              {ARCHIVED_WORDS.removeWorktree}
             </DropdownMenu.Item>
           )}
           {refused !== null ? (
-            <RefusedMenuItem kit={DropdownMenu} label={ARCHIVED_ROW.delete} reason={refused} className={`${MENU_ITEM} text-fg-faint`} />
+            <RefusedMenuItem kit={DropdownMenu} label={ARCHIVED_WORDS.delete} reason={refused} className={`${MENU_ITEM} text-fg-faint`} />
           ) : (
             <DropdownMenu.Item className={`${MENU_ITEM} text-danger`} onSelect={() => run(remove)}>
-              {ARCHIVED_ROW.delete}
+              {ARCHIVED_WORDS.delete}
             </DropdownMenu.Item>
           )}
         </DropdownMenu.Content>

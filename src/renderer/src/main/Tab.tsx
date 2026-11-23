@@ -6,12 +6,13 @@
 // the panel, P3-F wave S) and closes it, the others or those to its right. (The Overview is no tab since W5: it floats
 // over the main area.)
 import { ContextMenu } from 'radix-ui';
-import { useEffect, useId, type KeyboardEvent, type MouseEvent } from 'react';
+import { useEffect, useRef, type KeyboardEvent, type MouseEvent } from 'react';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { Strip, TabRef } from '@shared/ipc/schema/layout';
 import { FileIcon, PinIcon, useChordHint } from '../app/IconButton';
 import { BRIDGED_LINE, heldLine } from '../attention/derive'; // P5 O9
 import { GlyphMark } from '../attention/GlyphMark';
+import { Tip } from '../ui/tip';
 import { useSessionControls } from '../session/controls/controls-for'; // P5 O9
 import { glyphFor, type Glyph } from '../attention/glyph';
 import { requestCloseTab, useUnstartedTitle } from '../keymap/actions-runtime';
@@ -97,10 +98,10 @@ export function useTabLabel(tab: TabRef): TabLabel {
 }
 
 // P5 O9 (the owner's Q1): a session a terminal or a `--bg` job holds reads like any MAWS session while MAWS drives it
-// through its bridge (its controls port is lane A: `turn()` non-null), with a small mark of where it runs, titled with
-// the hover card's line. The word cut (W10): the mark is the ⌁ the status glyph draws for a session live elsewhere, in
-// its tone, the word ("Terminal", "Background job") its accessible name and the tab's description. Null for every other
-// tab.
+// through its bridge (its controls port is lane A: `turn()` non-null), with a small mark of where it runs. The word cut
+// (W10): the mark is the ⌁ the status glyph draws for a session live elsewhere, in its tone, the word ("Terminal",
+// "Background job") its accessible name; the hover card's line (`title`) is the tab's tip and description. Null for every
+// other tab.
 function useHolderMark(tab: TabRef): { text: string; title: string } | null {
   const appSessionId = tab.kind === 'session' ? tab.appSessionId : null;
   const record = useSessions((s) => (appSessionId === null ? null : (s.records.get(appSessionId) ?? null)));
@@ -143,7 +144,7 @@ export function Tab({ tab, pane, domId, active, place = null, stop, onKeyDown }:
   const closeChord = useChordHint('tab.close');
   const dirty = useFileTabDirty(tab); // E5
   const holderMark = useHolderMark(tab); // P5 O9
-  const holderId = useId(); // W10: the mark's word describes the tab, whose own name hides the mark's
+  const holderGlyph = useRef<HTMLElement>(null); // W10: pointing at the mark shows the tab's tip
   // Keep plain tabs compact, but reserve each nonshrinking mark plus its gap before truncating the title. The place
   // reserves nothing: it gives way first (U13a).
   const minWidth = Math.max(active ? 24 : 16, 16 + (label.glyph ? 4 : 0) + (label.file ? 4 : 0) + (tab.pinned ? 4 : 0) + (dirty ? 4 : 0) + (label.secondary ? 20 : 0) + (holderMark ? 16 : 0));
@@ -160,7 +161,6 @@ export function Tab({ tab, pane, domId, active, place = null, stop, onKeyDown }:
       id={domId}
       aria-selected={active}
       aria-label={name}
-      aria-describedby={holderMark ? holderId : undefined}
       title={tab.kind === 'file' ? tab.path : name} // UX wave U6e (decision 11; U13's): a file's tab has its full path as its tooltip
       tabIndex={stop ? 0 : -1}
       data-tab-id={tab.id}
@@ -197,15 +197,10 @@ export function Tab({ tab, pane, domId, active, place = null, stop, onKeyDown }:
         <span className={`max-w-full shrink-0 truncate ${offline ? 'text-fg-faint' : ''}`}>{label.title}</span>
         {place && <small data-tab-place className="max-w-max min-w-0 grow basis-[5em] truncate text-fg-muted">{place}</small>}
       </span>
-      {holderMark && ( // P5 O9 (Q1); the word cut (W10): the glyph, its word its name and the tab's description
-        <>
-          <small data-holder-marker role="img" aria-label={holderMark.text} title={holderMark.title} className="shrink-0 text-info">
-            ⌁
-          </small>
-          <span id={holderId} hidden>
-            {holderMark.text}
-          </span>
-        </>
+      {holderMark && ( // P5 O9 (Q1); the word cut (W10): the glyph, its word its name, the holder's line the tab's tip
+        <small ref={holderGlyph} data-holder-marker role="img" aria-label={holderMark.text} className="shrink-0 text-info">
+          ⌁
+        </small>
       )}
       {label.secondary && <small className="max-w-16 shrink-0 truncate text-fg-muted">{label.secondary}</small>}
       <button
@@ -228,7 +223,11 @@ export function Tab({ tab, pane, domId, active, place = null, stop, onKeyDown }:
 
   return (
     <ContextMenu.Root modal={false}>
-      <ContextMenu.Trigger asChild>{element}</ContextMenu.Trigger>
+      {/* W10 (fix round 1): the holder's line is the tab's tip and description, shown at once on the tab's own focus stop
+          and after the delay on pointing at the mark; no tip for any other tab */}
+      <Tip content={holderMark?.title ?? null} description={holderMark?.title ?? null} pointedWithin={holderGlyph}>
+        <ContextMenu.Trigger asChild>{element}</ContextMenu.Trigger>
+      </Tip>
       <ContextMenu.Portal>
         <ContextMenu.Content data-tab-focus-owner={tab.id} className="z-50 min-w-44 rounded-md border border-border-strong bg-bg-overlay p-1 text-ui text-fg">
           <TabMenuItem onSelect={() => useLayout.getState().togglePinned(tab.id)}>{tab.pinned ? 'Unpin tab' : 'Pin tab'}</TabMenuItem>

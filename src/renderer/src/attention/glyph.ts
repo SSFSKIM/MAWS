@@ -74,6 +74,11 @@ export function listedGlyph(state: string, pending: AttentionItem[] = []): Glyph
   return waitingGlyph(pending.filter((i) => waits(i) && isActionable(i))) ?? wordGlyph(state) ?? glyph('○', 'faint', 'Idle');
 }
 
+const STOPPED = 'Stopped';
+// The word cut (N155): a glyph whose word a line keeps at rest beside where the glyph stands, since the glyph alone does
+// not tell it from another state's: Stopped draws Done's ✓. Null for every other glyph, whose word is its name.
+export const wordAtRest = (shown: Glyph): string | null => (shown.label === STOPPED ? shown.label : null);
+
 // A listing's word as the glyph table draws it; null for idle and any word it doesn't know (the caller's idle glyph).
 export function wordGlyph(state: string): Glyph | null {
   switch (state) {
@@ -87,7 +92,7 @@ export function wordGlyph(state: string): Glyph | null {
     case 'retired':
       return glyph('✓', 'faint', 'Done');
     case 'stopped': // the owner's decision (2026-11-19): kept listed after its process ended, reopenable; only the word differs
-      return glyph('✓', 'faint', 'Stopped');
+      return glyph('✓', 'faint', STOPPED);
     default:
       return null;
   }

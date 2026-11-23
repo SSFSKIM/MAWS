@@ -53,6 +53,7 @@ import { NeedsYou, RECONNECTING } from './NeedsYou';
 import { SectionHeading } from './SectionHeading';
 import { HubNotice } from './HubNotice'; // P5 O7 M2
 import { hiddenNodeId, moreNodeId, projectNodeId, sessionNodeId, treeCommand, TreeContext, type TreeNode } from './tree';
+import { SEARCH_IN_CONVERSATIONS } from './copy';
 
 export function Sidebar() {
   const sessionsLoaded = useSessions((s) => s.loaded);
@@ -79,8 +80,6 @@ interface ShownProject {
   hidden: HiddenRows; // UX wave U7, O-16
 }
 const NO_HIDDEN: HiddenRows = { count: 0, open: false, rows: [] };
-// The word cut (W41): the row under the search field while it holds a query, which it does not repeat
-export const SEARCH_IN_CONVERSATIONS = 'Search inside conversations';
 const rowId = (row: SidebarTreeRow): AppSessionId => (isListedRow(row) ? row.listed.appId : row.record.appId);
 
 const MORE_PROJECTS = moreNodeId(null);
