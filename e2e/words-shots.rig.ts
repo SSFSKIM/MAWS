@@ -1545,7 +1545,9 @@ async function m4Scenario(app: ElectronApplication, page: Page, SID: Record<'run
       else await inView(refresh, 'master’s Refresh in the toolbar');
     },
   });
-  const skillCards = () => custom(page).locator('[data-catalog-results] [data-catalog-card]');
+  // the top of Discover, Skills: its featured item or a shelf's card, in the frame the scene captures (the grid of every
+  // item sits below the shelves, out of it)
+  const skillCards = () => custom(page).locator('[data-featured], [data-shelf] [data-catalog-card]');
   await shot(page, meta('m4-discover-skills', 'G280', 'Customize, Discover, Show: Skills', 'Customize, Discover, Show: Skills', 'The Skills catalog’s top with no note on M4; master’s note that items whose contents are not known before install are under Plugins', ['customize/discover']), async () => {
     await customizeAt(page, 'discover', 'skills');
     await letGo(page);
@@ -1554,8 +1556,8 @@ async function m4Scenario(app: ElectronApplication, page: Page, SID: Record<'run
     check: async () => {
       await expect(custom(page), 'Discover, Skills').toHaveAttribute('data-customize-show', 'skills', { timeout: 3_000 });
       // the catalog's content drawn, not its wait or its error (the word cut's fix wave for M4)
-      await inView(skillCards(), 'the Skills catalog’s first card');
-      await drawnText(skillCards(), 'the Skills catalog’s first card');
+      await inView(skillCards(), 'the Skills catalog’s featured item or first shelf card');
+      await drawnText(skillCards(), 'the Skills catalog’s featured item or first shelf card');
       const note = custom(page).locator('[data-skills-note]');
       if (m4Cut()) await expect(note, 'no note at the top').toHaveCount(0);
       else await inView(note, 'master’s note at the top');
