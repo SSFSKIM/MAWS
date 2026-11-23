@@ -71,6 +71,8 @@ function journal(maws: MawsLaunch, appSessionId: string): Row[] {
     .flatMap((file) => readFileSync(join(dir, file), 'utf8').split('\n').filter(Boolean).map((line) => JSON.parse(line) as Row));
 }
 const spawnRow = (maws: MawsLaunch, id: string) => journal(maws, id).find((r) => r.direction === 'meta' && r.frame.event === 'spawn')!.frame;
+// board ticket 421: the spawn row of one launch of a session, told apart by its launch id (a resume writes another)
+const spawnRowOf = (maws: MawsLaunch, id: string, launchId: string) => journal(maws, id).find((r) => r.direction === 'meta' && r.frame.event === 'spawn' && r.frame.launchId === launchId)!.frame;
 const initializeRequest = (maws: MawsLaunch, id: string) => journal(maws, id).find((r) => r.direction === 'out' && r.frame.request?.subtype === 'initialize')!.frame.request!;
 
 interface Case {
@@ -430,6 +432,47 @@ test.describe('sessions', () => {
     expect(records.map((r) => r.engineSessionId).sort()).toEqual([sourceId, forkId].sort());
     expect(records.map((r) => r.gateway.routed)).toEqual([false, false]);
     await expect(page.getByRole('tab')).toHaveCount(2); // the source, the fork (W5: the Overview is no tab)
+  });
+
+  // Board ticket 421 (docs/doperpowers/plans/2026-11-23-tool-choice.md, D1 and D8; its M3): a new chat whose intent holds a
+  // set of MAWS's tools that is not the full set launches with it, and its fork and its resume keep it, whatever the
+  // machine's default. Each launch's own spawn row says so: the host's line has neither ask flag (the engine's question
+  // tool) and the row records the set. The list itself is the unit proof's: these recordings hold no `tools/list`.
+  test('the set of MAWS’s tools kept with the session: a new chat at Artifacts off and Question Default launches with no ask flag and the set in its spawn row; its fork and its resume, each by its own launch, say the same', async () => {
+    const tools = { artifacts: false, documents: false, dashboards: false, auxiliary: true, question: 'engine' } as const;
+    const { page, maws, trustedRepos } = await begin({ fixtures: [FORK_START, FORK_FORK, FORK_START] });
+    const project = await addProject(page, trustedRepos[0]!.root);
+    const source = await plus(page, project.name);
+    await collectTurns(page);
+    const prompt = fixtureIdentity(FORK_START).firstPrompt!;
+    await startDirect(page, source, { mawsTools: tools }, { content: prompt.content as string, display: prompt.display });
+    await untilPhase(page, source, 'ready');
+    await turnEnded(page, source);
+    const launchOf = async (id: string) => value(await invoke(page, 'session.status', { appSessionId: id as never })).launchId;
+    const expectServed = (row: Row['frame'], what: string) => {
+      expect(row.args, `${what}: no --disallowedTools AskUserQuestion`).not.toContain('--disallowedTools');
+      expect(row.args, `${what}: no --allowedTools mcp__maws__ask`).not.toContain('--allowedTools');
+      expect(row.mawsTools, `${what}: the set in its spawn row`).toEqual(tools);
+    };
+    const firstLaunch = await launchOf(source);
+    expectServed(spawnRowOf(maws, source, firstLaunch), 'the first launch');
+    expect(value(await invoke(page, 'session.get', { appSessionId: source as never }))!.mawsTools, 'the record holds the set').toEqual(tools);
+
+    await menu(page, source, 'Fork');
+    const fork = await forkOf(page, source);
+    await untilPhase(page, fork, 'ready');
+    expectServed(spawnRowOf(maws, fork, await launchOf(fork)), 'the fork');
+    expect(value(await invoke(page, 'session.get', { appSessionId: fork as never }))!.mawsTools, 'the fork’s record holds its source’s set').toEqual(tools);
+
+    // resumed: stopped, then started again; its second spawn row is the resume's
+    value(await invoke(page, 'session.stop', { appSessionId: source as never, reason: 'stop' }));
+    await expect.poll(async () => value(await invoke(page, 'session.status', { appSessionId: source as never })).process, { timeout: 15_000 }).toBe('exited');
+    expect(value(await invoke(page, 'session.start', { appSessionId: source, message: null, options: {} }))).toMatchObject({ status: 'starting' });
+    await expect.poll(async () => (await setupOf(page, source)).filter((e) => e.phase === 'ready').length, { timeout: 20_000 }).toBe(2);
+    const resumed = await launchOf(source);
+    expect(resumed, 'the resume is a launch of its own').not.toBe(firstLaunch);
+    expectServed(spawnRowOf(maws, source, resumed), 'the resume');
+    expect(maws.consoleErrors()).toEqual([]);
   });
 
   // U1a §J (A13): a folder with nothing to load says so in one line, in place of the list of what trust would turn on
