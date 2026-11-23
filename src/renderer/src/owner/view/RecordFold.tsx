@@ -9,7 +9,8 @@
 // Board ticket 850: the stretch opens and folds through the shared disclosure motion, as a turn's work area does
 // (`transcript/view/motion.ts`): opened, its rows and its `‹ fold to report` grow in from nothing; folded, they close to
 // nothing before the store folds it, and a second press while they close takes the fold back. The rows moved are the
-// ones that answer to a key of the stretch (`inStretch`); under reduced motion it changes at once.
+// ones the fold adds or takes away (`inStretch`: a mixed head, in sight either way, is not one); under reduced motion it
+// changes at once. The other line takes focus only where the reader left it on the line pressed, or nowhere.
 import { useLayoutEffect, useRef, useSyncExternalStore } from 'react';
 import { useTranscriptStore } from '../../stores/transcript';
 import { rowId } from '../../transcript/model/keys';
@@ -33,13 +34,18 @@ export function RecordFold({ row }: { row: Extract<Row, { kind: 'record_fold' }>
   // first key, not always the key the reader opened it by (regrouping or a page may have moved its first row since)
   const toggle = () => {
     const store = useTranscriptStore.getState();
-    const member = inStretch(new Set(store.stretchKeys(storeKey, row.stretch)));
-    motion.toggleRows(set, member, row.open, () => {
+    const { keys: names, moving } = store.stretchKeys(storeKey, row.stretch);
+    const pressed = button.current;
+    motion.toggleRows(set, inStretch(new Set(names), new Set(moving)), row.open, () => {
       const state = useTranscriptStore.getState();
       // a fold that ran while something else closed the stretch (who draws changed) leaves it as it is
       if (row.open && !(state.entries[storeKey]?.state.ui.openStretches?.has(row.stretch) ?? false)) return;
+      // focus goes to the other line only where the reader left it on the line pressed, or nowhere: focus they moved
+      // elsewhere while the fold ran stays where they put it (the review of 2026-11-23)
+      const active = document.activeElement;
+      const keepsFocus = active === null || active === document.body || active === pressed;
       const keys = state.toggleStretch(storeKey, row.stretch);
-      handFocus(idPrefix, keys.map((key) => rowId.recordFold(key, !row.open)));
+      if (keepsFocus) handFocus(idPrefix, keys.map((key) => rowId.recordFold(key, !row.open)));
     });
   };
   return (

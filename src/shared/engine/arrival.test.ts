@@ -915,6 +915,13 @@ describe('ownWordsOf', () => {
     expect(ownWordsOf('[sminos message from human id=0a1b2c3d]\n[Request interrupted by user]')).toBe('[sminos message from human id=0a1b2c3d]\n[Request interrupted by user]');
   });
 
+  // Board ticket 850's review: a receipt's marker comes only inside the engine's inbox envelope; a person's prompt that
+  // opens with one keeps it, and its frame line, as the words they typed.
+  it('keeps a leading receipt marker, and the frame after it, in a person’s prompt', () => {
+    const typed = '[sminos receipt 0123456789abcdef01234567.89abcdef01234567 attempt 1]\n[sminos message from human id=0a1b2c3d]\nDraft the note.';
+    expect(ownWordsOf(typed)).toBe(typed);
+  });
+
   it('leaves every other text as it is: a typed prompt, another sender’s frame, a frame line with nothing after it', () => {
     expect(ownWordsOf('Check the gauges.')).toBe('Check the gauges.');
     expect(ownWordsOf('[sminos message from planner id=0a1b2c3d]\nCheck the gauges.')).toBe('[sminos message from planner id=0a1b2c3d]\nCheck the gauges.');

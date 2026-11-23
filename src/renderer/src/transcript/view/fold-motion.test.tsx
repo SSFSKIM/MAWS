@@ -237,12 +237,14 @@ describe('a fold whose body is rows of the list', () => {
   describe('a stretch of the to-human view, opened and folded by its record line', () => {
     const KEY = 'motion-stretch';
     afterEach(() => useTranscriptStore.getState().drop(KEY));
-    function viewRows(): Row[] {
+    // `head`: a mixed reply (a message and words of its own) that heads the stretch, in sight whether it is open or not
+    function viewRows(head?: string): Row[] {
       const b = builder();
       b.turn('u0', 'Set it up');
       b.text('m0', 0, '<message>Ready.</message>');
       b.end(['u0']);
       b.turn('u1', 'Check the files');
+      if (head !== undefined) b.text('h1', 0, head);
       b.toolUse('t1', 'Bash', { command: 'ls' });
       b.result('t1', 'ok', { structured: BASH_RESULT('ok') });
       b.toolUse('t2', 'Bash', { command: 'pwd' });
@@ -257,10 +259,10 @@ describe('a fold whose body is rows of the list', () => {
       const openStretches = useTranscriptStore((state) => state.entries[KEY]?.state.ui.openStretches);
       return <List storeKey={KEY} rows={mirrorRows(rows, { openStretches })} />;
     }
-    async function mounted() {
+    async function mounted(head?: string) {
       const source: TranscriptSource = { key: KEY, subscribe: () => () => {}, snapshot: () => Promise.resolve([]) };
       await useTranscriptStore.getState().attach(KEY, source);
-      const rows = viewRows();
+      const rows = viewRows(head);
       render(<Mounted rows={rows} />);
     }
     const line = (open: boolean) => document.querySelector<HTMLButtonElement>(`.owner-record-fold${open ? '[data-open]' : ':not([data-open])'} > button`);
@@ -303,6 +305,54 @@ describe('a fold whose body is rows of the list', () => {
       advance(1);
       expect(work()).toHaveLength(0);
       expect(line(false)).not.toBeNull();
+    });
+
+    // The review of 2026-11-23: a mixed head stays in sight in both states (closed, only its message), so the fold moves
+    // only the rows it adds and takes away.
+    it('a mixed reply that heads the stretch does not move, opened or folded', async () => {
+      await mounted('Looking at the tree first. <message>Starting on the files.</message>');
+      const head = () => [...wrapper('assistant_text')].find((row) => row.textContent?.includes('Starting on the files.'))!;
+      expect(head()).toBeDefined();
+      await act(async () => {
+        fireEvent.click(line(false)!);
+      });
+      expect(work().every((row) => opening(row))).toBe(true);
+      expect(head().style.transition).toBe('');
+      advance(300);
+      fireEvent.click(line(true)!);
+      expect(work().every((row) => closing(row))).toBe(true);
+      expect(head().style.transition).toBe('');
+      advance(150);
+      expect(work()).toHaveLength(0);
+      expect(head().style.transition).toBe('');
+      expect(head().textContent).toContain('Starting on the files.');
+    });
+
+    // The review of 2026-11-23: the fold hands focus to the closed line only while the reader left it on the pressed line
+    // (or nowhere); focus they moved elsewhere during the close stays there.
+    it('folded, it hands focus to the closed line only where the reader left focus on the pressed line', async () => {
+      await mounted();
+      await act(async () => {
+        fireEvent.click(line(false)!);
+      });
+      advance(300);
+      line(true)!.focus();
+      fireEvent.click(line(true)!);
+      advance(150);
+      expect(document.activeElement).toBe(line(false));
+
+      await act(async () => {
+        fireEvent.click(line(false)!);
+      });
+      advance(300);
+      const elsewhere = document.body.appendChild(document.createElement('input'));
+      line(true)!.focus();
+      fireEvent.click(line(true)!);
+      elsewhere.focus(); // the reader moved on before the close had run
+      advance(150);
+      expect(line(false)).not.toBeNull();
+      expect(document.activeElement).toBe(elsewhere);
+      elsewhere.remove();
     });
 
     it('under reduced motion, it opens and folds at once', async () => {

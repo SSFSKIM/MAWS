@@ -9,7 +9,7 @@ import type { AgentId, MessageUuid, ToolUseId } from '@shared/graph/ids';
 import { turnActivity, type TurnActivity } from '../transcript/model/activity';
 import { expandedTurnRows, rowsOf, turnRows } from '../transcript/model/derive';
 import { marksOfText } from '../transcript/model/owner-marks';
-import { carriedKeys, holdsMessage, keysOfStretch, lostKey, liveMarkedRowIds, mirrorsView, openKeysOf, stretchHolding } from '../owner/view/mirror'; // UX wave U2b
+import { carriedKeys, holdsMessage, keysOfStretch, lostKey, liveMarkedRowIds, mirrorsView, movingKeysOfStretch, openKeysOf, stretchHolding } from '../owner/view/mirror'; // UX wave U2b
 import { applyEvents, createState, RECEIPT_APPLIED, withAgents, withReaderState, withUi, type AgentLookup, type ReceiptUndo, type SpillLoad, type TranscriptState, type TranscriptUi } from '../transcript/model/reduce';
 import type { CellId, Row, RowId, TurnId } from '../transcript/model/rows';
 import { attachSource, type Attachment } from '../transcript/source/hydrate';
@@ -125,9 +125,10 @@ export interface TranscriptStore {
   mountView(key: string, compose: ComposeView): () => void;
   setView(key: string, view: 'report' | 'transcript'): void;
   toggleStretch(key: string, stretch: string): readonly string[]; // the keys the stretch's other record line can carry
-  // board ticket 850: every key the rows of the stretch `stretch` names answer to, in each mounted view of the key (the
-  // key's own rows when none is mounted): the rows its record line's motion moves
-  stretchKeys(key: string, stretch: string): readonly string[];
+  // board ticket 850: in each mounted view of the key (the key's own rows when none is mounted), every key the stretch
+  // `stretch` names answers to (`keys`, its record lines') and the keys of its folding rows alone (`moving`, its head's
+  // not among them): the rows its record line's motion moves
+  stretchKeys(key: string, stretch: string): { keys: readonly string[]; moving: readonly string[] };
   // UX wave U1b (the U1b document, Interfaces §B): the calls whose row holds a waiting form, as the session's list says
   // them. An equal set changes nothing; else the turns holding a call that entered or left it derive again, every other
   // turn keeping its rows. A key whose state starts over is told again by its transcript.
@@ -698,7 +699,11 @@ export function createTranscriptStore() {
       },
       stretchKeys(key, stretch) {
         const current = entry(key);
-        return current ? [...new Set([stretch, ...composedViews(key, current).flatMap(({ rows, liveMarked }) => keysOfStretch(rows, stretch, liveMarked))])] : [stretch];
+        const views = current ? composedViews(key, current) : [];
+        return {
+          keys: [...new Set([stretch, ...views.flatMap(({ rows, liveMarked }) => keysOfStretch(rows, stretch, liveMarked))])],
+          moving: [...new Set(views.flatMap(({ rows, liveMarked }) => movingKeysOfStretch(rows, stretch, liveMarked)))],
+        };
       },
       mountView(key, compose) {
         let mounted = views.get(key);

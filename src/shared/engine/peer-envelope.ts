@@ -185,7 +185,11 @@ function senderParts(frame: string): { alias: string; label: string } | null {
   return end < 0 ? { alias: sender, label: '' } : { alias: sender.slice(0, end), label: sender.slice(end) };
 }
 
-/** The text after sminos's receipt marker where it opens with one and a whole frame line follows; else the text. */
+/**
+ * The text after sminos's receipt marker where it opens with one and a whole frame line follows; else the text. Read only
+ * inside the engine's inbox envelope (`parsePeerMessage`), the one route a receipt's marker arrives by (board ticket 850):
+ * any other text, a person's own prompt among them, keeps such a line as its words.
+ */
 function withoutReceipt(text: string): string {
   const end = text.indexOf('\n');
   if (end < 0 || !SMINOS_RECEIPT_LINE.test(text.slice(0, end))) return text;
@@ -196,13 +200,12 @@ function withoutReceipt(text: string): string {
 
 /**
  * A sminos message's text as drawn: its frame line (whole, the first, with the text after it), its reply line and its
- * note cut, and a receipt's marker before the frame line with it (board ticket 850). The note is read only in a text that opens with a frame line: after the reply line is cut, the last
+ * note cut. The note is read only in a text that opens with a frame line: after the reply line is cut, the last
  * paragraph when it is one line opening with `[sminos] ` (`SMINOS_NOTE`), with the sender's words before its blank line;
  * `note` is its words after the marker. One text may hold several frames, each a paragraph: the first is the frame, the
  * rest stay in the words, and the note, written once at the end, is cut the same.
  */
-export function sminosParts(text: string): { frame: string | null; body: string; note: string | null } {
-  const body = withoutReceipt(text);
+export function sminosParts(body: string): { frame: string | null; body: string; note: string | null } {
   const first = body.split('\n', 1)[0]!;
   const frame = body.includes('\n') && sminosFrameSender(first) !== null ? first : null;
   const words = (frame === null ? body : body.slice(frame.length + 1)).replace(SMINOS_REPLY_LINE, '');
@@ -240,7 +243,7 @@ export function parsePeerMessage(text: string): PeerEnvelope | AgentMessage | nu
   return {
     kind: 'cross-session', from: attributes.get('from') ?? '', fromSession: attributes.get('from-session') ?? null, fromName: attributes.get('from-name') ?? null,
     fromMode: attributes.get('from-mode') ?? null, fromPlugin: attributes.get('from-plugin') ?? null,
-    hopChain: attributes.get('hop-chain')?.split(',').filter((hop) => hop.length > 0) ?? [], ...sminosParts(body), ...delivery,
+    hopChain: attributes.get('hop-chain')?.split(',').filter((hop) => hop.length > 0) ?? [], ...sminosParts(withoutReceipt(body)), ...delivery,
   };
 }
 

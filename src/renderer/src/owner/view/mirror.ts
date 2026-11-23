@@ -318,12 +318,22 @@ export function carriedKeys(before: readonly Row[], after: readonly Row[], open:
 }
 
 /**
- * Board ticket 850: whether a drawn row is one of a stretch's, given every key that stretch's rows answer to
- * (`keysOfStretch`): a row by any key it answers to, a record line by the stretch it names. The test a fold's motion
- * picks the rows it moves by, with no row of the list rebuilt.
+ * Board ticket 850: whether a drawn row is one a stretch's fold adds or takes away, given every key the stretch answers to
+ * (`keys`, its record lines carry one) and the keys of its folding rows alone (`moving`, `movingKeysOfStretch`): a record
+ * line by the stretch it names, any other row by a key it answers to. A mixed head stays in sight in both states, so it
+ * is none. The test a fold's motion picks the rows it moves by, with no row of the list rebuilt.
  */
-export const inStretch = (names: ReadonlySet<string>) => (row: Row): boolean =>
-  row.kind === 'record_fold' ? names.has(row.stretch) : namesOf(row).some((name) => names.has(name));
+export const inStretch = (keys: ReadonlySet<string>, moving: ReadonlySet<string>) => (row: Row): boolean =>
+  row.kind === 'record_fold' ? keys.has(row.stretch) : namesOf(row).some((name) => moving.has(name));
+
+/** Board ticket 850: the keys of the folding rows of the stretch that holds the row `key` names, its head's not among them. */
+export function movingKeysOfStretch(rows: readonly Row[], key: string, liveMarked?: string): string[] {
+  for (const stretch of stretchesOf(rows, liveMarked)) {
+    const names = (stretch.head === null ? stretch.rows : [stretch.head, ...stretch.rows]).flatMap(namesOf);
+    if (names.includes(key)) return stretch.rows.flatMap(namesOf);
+  }
+  return [];
+}
 
 /** Every key the stretch that holds the row `key` names answers to, by its rows: its record lines carry one of them. */
 export function keysOfStretch(rows: readonly Row[], key: string, liveMarked?: string): string[] {
