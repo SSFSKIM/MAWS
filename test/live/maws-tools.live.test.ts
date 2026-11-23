@@ -2,16 +2,17 @@
 // `maws` tool server against the installed Claude Code (`binary: null`, as main configures a fresh install), through
 // MAWS's own engine host (LiveHost: registerEngineIpc, the launcher, EngineSession, the journal), under one scratch
 // config home under /tmp, through ClaudeUsage's relay, on Haiku in default permission mode with every permission allowed
-// once. Four cases each record a pass-3 fixture (send_file, a blocking ask, an async ask, show_pane), answering the
-// human's part through the X2 commands the renderer uses (`maws.ask.answer`, `maws.pane.answer`); a fifth resumes case
-// 1's session headless outside MAWS (no initialize, so no SDK server) for G1's terminal half. The owner's ~/.claude.json
+// once. The cases each record a pass-3 fixture (a blocking ask, an async ask, show_pane), answering the human's part
+// through the X2 commands the renderer uses (`maws.ask.answer`, `maws.pane.answer`); a fifth resumes case 2's session
+// headless outside MAWS (no initialize, so no SDK server) for G1's terminal half. Board ticket 848 retired `send_file`:
+// its case 1 is gone (its fixture, pass3/p1-maws-send-file, stays a record), and G1's check of the init moved to case 2. The owner's ~/.claude.json
 // is read only, for the A-15 delta before the first launch and after every case. Exports land under the run's
 // `<userData>/exports/` (printed) and are copied into spikes/protocol-probe/fixtures/pass3/ and
 // test/fixtures/transcripts/ by hand after a look by eye.
 // `MAWS_LIVE=1 pnpm exec vitest run --project live test/live/maws-tools.live.test.ts`
 import { execFile } from 'node:child_process';
 import { mkdirSync, writeFileSync } from 'node:fs';
-import { basename, join } from 'node:path';
+import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { SessionEvent } from '@shared/graph/events';
 import type { LaunchSpec } from '@shared/engine/launch-spec';
@@ -20,7 +21,7 @@ import type { MawsPaneShow } from '@shared/ipc/schema/maws';
 import { TOOL_ERRORS, type AskAnswer } from '@shared/maws/tools';
 import type { JournalRow } from '@shared/wire/journal';
 import { buildEnvironment, RELAY_URL } from '../../src/engine-host/launch';
-import { openDocuments } from '../../src/engine-host/documents'; // P3-L M6b: send_file delivers into the artifact store
+import { openDocuments } from '../../src/engine-host/documents'; // P3-L M6b: the artifact tools' store
 import { liveSpec, redactJournal } from './support/live';
 import { LiveHost } from './support/live-host';
 import { a15, answerWhileRunning, checkA15, closeSession, exportTranscript, liveCase, openGate, readJournal, scratchRepo, type GateResult, type LiveGate } from './support/harness';
@@ -39,7 +40,7 @@ const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 let gate: GateResult;
 const costs: { label: string; costUsd: number }[] = [];
 const exports: string[] = [];
-let case1: { repo: string; engineSessionId: string } | null = null;
+let resumable: { repo: string; engineSessionId: string } | null = null; // case 2's session, which case 5 resumes
 
 beforeAll(async () => {
   gate = await openGate('e1');
@@ -58,9 +59,8 @@ afterAll(() => {
 // One session of one case, through the X2 surface: launched on Haiku in default mode, every permission the engine asks
 // allowed once as it arrives, ended with session.stop; the journal booked (cost), exported with E1's provenance, the
 // engine's init plugin list and the A-15 delta checked, whatever the case's outcome (the shared harness's closeSession).
-// P3-L M6b: the open case's artifact store, and an artifact in it
+// P3-L M6b: the open case's artifact store
 let documents: ReturnType<typeof openDocuments> = null;
-const artifactOf = (id: string) => documents?.store.get(id) ?? null;
 
 async function withSession(g: LiveGate, scenario: string, fn: (s: ReturnType<typeof view>, repo: string, spec: LaunchSpec) => Promise<void>): Promise<{ journalPath: string; spec: LaunchSpec; repo: string }> {
   documents = openDocuments(g.userData); // P3-L M6b: no X12 record stands in for a store that did not open
@@ -116,29 +116,15 @@ const outRows = (rows: JournalRow[]) => rows.filter((r) => r.direction === 'out'
 const textOf = (content: unknown): string => (typeof content === 'string' ? content : JSON.stringify(content));
 
 describe('the maws tool server, live (E1 M2)', () => {
-  it('1 send_file delivers hello.txt with its caption', async (ctx) => {
-    const g = liveCase(gate, ctx);
-    const { spec, repo } = await withSession(g, 'p1-maws-send-file', async (s, repo, spec) => {
-      await s.send('Write a file named hello.txt containing exactly HELLO_E1 in the working directory, then deliver it to me with the maws send_file tool with the caption "the greeting". Reply DELIVERED when done.');
-      const init = await s.wait('session.init', 'the init');
-      expect(init.tools).toEqual(expect.arrayContaining(['mcp__maws__send_file', 'mcp__maws__ask', 'mcp__maws__show_pane']));
-      expect(init.mcpServers).toContainEqual({ name: 'maws', status: 'connected', source: 'sdk' });
-      const delivered = await s.wait('maws.delivery.file', 'the delivery');
-      expect(delivered.deliverables).toHaveLength(1);
-      expect(basename(delivered.deliverables[0]!.path)).toBe('hello.txt');
-      expect(delivered.caption).toBe('the greeting');
-      // P3-L M6b: a File artifact of the session, the file in place (the caption is the row's, not the artifact's)
-      expect(artifactOf(delivered.deliverables[0]!.id)).toMatchObject({ kind: 'file', linkedPath: join(repo, 'hello.txt'), title: 'hello.txt', createdBy: { kind: 'session', appSessionId: spec.appSessionId } });
-      const ended = await s.host.waitFor(() => mainTurnsEnded(s.events())[0], 'the turn', TURN_MS);
-      console.log(`   reply: ${JSON.stringify(ended.resultText)}`);
-    });
-    case1 = { repo, engineSessionId: spec.sessionId! };
-  }, CASE_MS);
-
   it('2 a blocking ask with five modalities, answered through maws.ask.answer', async (ctx) => {
     const g = liveCase(gate, ctx);
-    await withSession(g, 'p1-maws-ask-blocking', async (s, repo) => {
+    const { spec, repo: caseRepo } = await withSession(g, 'p1-maws-ask-blocking', async (s, repo) => {
       await s.send('Use the maws ask tool (blocking) to ask me five questions, with these ids and modalities: q1 choice single with options Red, Green, Blue ("Which colour?"); q2 choice multi with options Mon, Tue, Wed ("Which days?"); q3 text ("What should the title be?"); q4 folder ("Which folder holds the assets?"); q5 repository ("Which repository is this for?"). Then reply with one line per question: id, then the answer or SKIPPED or DECIDE.');
+      // G1 (board ticket 848: moved here from send_file's case; the init lists no send_file)
+      const init = await s.wait('session.init', 'the init');
+      expect(init.tools).toEqual(expect.arrayContaining(['mcp__maws__ask', 'mcp__maws__show_pane']));
+      expect(init.tools).not.toContain('mcp__maws__send_file');
+      expect(init.mcpServers).toContainEqual({ name: 'maws', status: 'connected', source: 'sdk' });
       const opened = await s.wait('maws.ask.opened', 'the ask');
       console.log(`   opened: ${JSON.stringify(opened.questions)}`);
       expect(opened.blocking).toBe(true);
@@ -160,6 +146,7 @@ describe('the maws tool server, live (E1 M2)', () => {
       expect(ended.resultText).toMatch(/Blue/);
       expect(ended.resultText).toMatch(/SKIPPED/);
     });
+    resumable = { repo: caseRepo, engineSessionId: spec.sessionId! };
   }, CASE_MS);
 
   it('3 an async ask: acknowledged at once, answered later as a next steer', async (ctx) => {
@@ -213,10 +200,10 @@ describe('the maws tool server, live (E1 M2)', () => {
 
   // residue 15: the same session resumed outside MAWS (headless, no --input-format stream-json, no initialize, so no
   // SDK server) lists no maws tool, and the turn completes
-  it('5 a terminal resume of case 1 has no maws tools and completes', async (ctx) => {
+  it('5 a terminal resume of case 2 has no maws tools and completes', async (ctx) => {
     const g = liveCase(gate, ctx);
-    if (case1 === null) ctx.skip('case 1 did not record a session');
-    const { repo, engineSessionId } = case1!;
+    if (resumable === null) ctx.skip('case 2 did not record a session');
+    const { repo, engineSessionId } = resumable!;
     const captured = { ...withoutClaudeVariables(await captureShellEnvironment()), CLAUDE_CONFIG_DIR: g.home }; // E11 W-E: no inherited CLAUDE*
     const env = buildEnvironment(liveSpec(repo, { subagentModel: null }), captured, RELAY_URL, process.pid);
     delete env.CLAUDE_CODE_ENTRYPOINT; // a terminal launch, not the SDK's

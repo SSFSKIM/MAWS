@@ -1328,7 +1328,7 @@ test.describe('sessions', () => {
         .toEqual([
           'This file is outside the folders this session works in.',
           'Choose it with File ▸ Open File…', // the word cut (N7): the way in, without how the app opens files
-          'Ask the agent to send the file to see it here.',
+          'Ask the agent to copy the file into this session’s folders to see it here.',
           file('secret.md'),
         ]);
       await expect(notice.locator('[data-notice-copy]'), 'Copy path, after the path').toHaveText('Copy path');

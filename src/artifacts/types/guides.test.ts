@@ -33,7 +33,11 @@ describe('the kinds’ guides and format references', () => {
       for (const text of [KIND_GUIDES[kind].guide, KIND_GUIDES[kind].format]) expect(text, kind).not.toMatch(PLACEHOLDER);
     }
     expect(KIND_GUIDES.html.guide).toMatch(/artifact_publish/);
-    expect(KIND_GUIDES.file.guide).toMatch(/send_file/);
+    // board ticket 848: send_file retired; a file is shown by a path link, and kept in the Library by artifact_create
+    expect(KIND_GUIDES.file.guide).not.toMatch(/send_file/);
+    expect(KIND_GUIDES.file.format).not.toMatch(/send_file/);
+    expect(KIND_GUIDES.file.guide).toContain('write a Markdown link to its absolute path in your message, [its name](/absolute/path). A click opens it beside the chat, and ⌘-click opens it in the main area.');
+    expect(KIND_GUIDES.file.guide).toContain('`artifact_create` with `kind: "file"`');
   });
 
   // UX wave U10b (l6-artifacts-18, §A.4): when a reader filters, an html page; a rebuilt page publishes from its file

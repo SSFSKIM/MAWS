@@ -1,5 +1,5 @@
 // E1 M1 (E1 execution document, Plan of Work M1, "What it proves"): the `maws` server on a real EngineSession. Scripted:
-// the handshake, the tool list, `send_file` writing its record and yielding `maws.delivery.file`, `show_pane` through
+// the handshake, the tool list, the retired `send_file` refused (board ticket 848), `show_pane` through
 // the pane bridge (answered, refused, silent), the withdrawn and exited calls, and every event reproduced by a journal
 // rebuild. Replayed: E0a's pass3/p1-sdk-mcp-roundtrip through the app's own handshake, up to the probe's own writes.
 // E1 M2 (Plan of Work M2, "What it proves"): the `ask` lifecycle on the same scripted session (blocking and async, the
@@ -94,7 +94,8 @@ describe('the maws server on an EngineSession (scripted)', () => {
     const list = await run.answered(run.mcp({ id: 1, method: 'tools/list' }));
     expect(list.result!.tools).toEqual(mawsToolList());
     expect((list.result!.tools as { name: string; annotations: unknown }[]).map((t) => [t.name, t.annotations])).toEqual([
-      ['send_file', { ...MAWS_TOOL_ANNOTATIONS, title: 'Send file' }], ['ask', { ...MAWS_TOOL_ANNOTATIONS, title: 'Ask questions' }], ['show_pane', { ...MAWS_TOOL_ANNOTATIONS, title: 'Show pane' }],
+      // board ticket 848: send_file left on 2026-11-23
+      ['ask', { ...MAWS_TOOL_ANNOTATIONS, title: 'Ask questions' }], ['show_pane', { ...MAWS_TOOL_ANNOTATIONS, title: 'Show pane' }],
       // E2 (Decision Log 4): the writers are not read-only
       ['artifact_create', { readOnlyHint: false, openWorldHint: false, title: 'Create artifact' }],
       ['artifact_list', { ...MAWS_TOOL_ANNOTATIONS, title: 'List artifacts' }], ['artifact_screenshot', { ...MAWS_TOOL_ANNOTATIONS, title: 'Screenshot artifact' }],
@@ -122,23 +123,19 @@ describe('the maws server on an EngineSession (scripted)', () => {
     await run.session.exited;
   });
 
-  it('send_file makes a File artifact and yields maws.delivery.file, live and on rebuild', async () => {
+  // Board ticket 848: send_file left the server. A call, valid or not, is answered with the sentence that teaches the
+  // path link; nothing is written and no delivery is told, live or on rebuild. A journal written before still yields its
+  // `maws.delivery.file` (conformance/fixtures.test.ts, p1-maws-send-file).
+  it('refuses a call of the retired send_file with the sentence, writes no artifact and yields no event, live and on rebuild', async () => {
     const documents = openDocuments(userData, () => {})!;
     const run = await mawsSession({}, { artifacts: () => documents.store });
-    const id = run.call('send_file', { files: ['hello.txt'], caption: 'the greeting' }, 'toolu_send');
-    const rpc = await run.answered(id);
-    const result = JSON.parse(rpc.result!.content![0]!.text) as { status: string; deliverables: { id: string; path: string; name: string }[] };
-    expect(result).toMatchObject({ status: 'delivered', deliverables: [{ path: join(cwd, 'hello.txt'), name: 'hello.txt' }] });
-    expect(documents.store.get(result.deliverables[0]!.id)).toMatchObject({ kind: 'file', linkedPath: join(cwd, 'hello.txt'), title: 'hello.txt', createdBy: { kind: 'session', appSessionId: run.session.status().appSessionId } });
-    expect(existsSync(join(userData, 'deliverables'))).toBe(false); // P3-L M6b: no X12 record
-    await until(() => run.maws().length > 0, 'the delivery event');
-    expect(run.maws()).toMatchObject([{ kind: 'maws.delivery.file', toolUseId: 'toolu_send', requestId: id, deliverables: result.deliverables, caption: 'the greeting', urgency: 'normal' }]);
-    // a refused call: an error result and no event (residue 1's admission rule)
-    const refused = await run.answered(run.call('send_file', { files: ['gone.txt'] }));
-    expect(refused.result).toEqual({ content: [{ type: 'text', text: TOOL_ERRORS.notAFile(join(cwd, 'gone.txt')) }], isError: true });
-    const invalid = await run.answered(run.call('send_file', { files: [] }));
-    expect(invalid.result!.isError).toBe(true);
-    expect(run.maws()).toHaveLength(1);
+    for (const args of [{ files: ['hello.txt'], caption: 'the greeting' }, { files: ['gone.txt'] }, { files: [] }]) {
+      const rpc = await run.answered(run.call('send_file', args));
+      expect(rpc.result, JSON.stringify(args)).toEqual({ content: [{ type: 'text', text: TOOL_ERRORS.sendFileRetired }], isError: true });
+    }
+    expect(documents.store.list({ kind: 'file' })).toEqual([]);
+    expect(existsSync(join(userData, 'deliverables'))).toBe(false);
+    expect(run.maws()).toEqual([]);
     run.transport.exit(0);
     await run.session.exited;
     expect(run.rebuilt()).toEqual(run.events);
@@ -700,12 +697,15 @@ describe('the artifact tools on an EngineSession (scripted)', () => {
     expect(run.rebuilt()).toEqual(run.events);
   });
 
-  it('answers unavailable when the host has no artifact store, and delivers no file (P3-L M6b: no X12 record stands in)', async () => {
+  it('answers unavailable when the host has no artifact store, and writes no file artifact (P3-L M6b: no X12 record stands in)', async () => {
     const run = await mawsSession({}, { artifacts: () => null });
     const refused = await run.answered(run.call('artifact_list', {}));
     expect(refused.result!.isError).toBe(true);
     expect(refused.result!.content![0]!.text).toContain('"reason":"unavailable"');
-    expect((await run.answered(run.call('send_file', { files: ['hello.txt'] }))).result).toEqual({ content: [{ type: 'text', text: TOOL_ERRORS.deliveryUnavailable }], isError: true });
+    // board ticket 848: send_file's own refusal left with it; a file artifact is artifact_create's
+    const file = await run.answered(run.call('artifact_create', { kind: 'file', path: 'hello.txt', title: 'hello.txt' }));
+    expect(file.result!.isError).toBe(true);
+    expect(file.result!.content![0]!.text).toContain('"reason":"unavailable"');
     expect(existsSync(join(userData, 'deliverables'))).toBe(false);
   });
 

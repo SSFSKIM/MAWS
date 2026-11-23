@@ -367,9 +367,9 @@ export class ArtifactStore {
     return this.get(id)!;
   }
 
-  // Several creates as one operation (an agent's `send_file`, M6): every entity row, link and content write in one
-  // savepoint, with `inFrame` (an op row) last, so the delivery commits whole or not at all; other operations sharing
-  // the batch are untouched by its failure. No `initial` here: a Y kind's first content is per document.
+  // Several creates as one operation (made for an agent's `send_file`, M6, which board ticket 848 retired): every entity
+  // row, link and content write in one savepoint, with `inFrame` (an op row) last, so the delivery commits whole or not
+  // at all; other operations sharing the batch are untouched by its failure. No `initial` here: a Y kind's first content is per document.
   async createAll(inputs: CreateInput[], actor: Actor, inFrame?: InFrame<Artifact[]>): Promise<Artifact[]> {
     const handles = new Set<string>();
     for (const input of inputs) {
