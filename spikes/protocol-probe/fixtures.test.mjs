@@ -1454,16 +1454,40 @@ const meta421=(rows,event)=>rows.filter(r=>r.direction==='meta'&&r.frame.event==
 const main421=rows=>meta421(rows,'stub_requests')[0].requests.filter(r=>r.main);
 const maws421=request=>request.tools.filter(t=>t.name.startsWith('mcp__maws__')).map(t=>t.name);
 const said421=request=>request.messages.flatMap(m=>m.blocks.flatMap(b=>b.mentions??[]));
-test('tickets 421/420 P1: under tool search the always-loaded ask is the one maws tool in the request, whole, and the rest are named as deferred',()=>{
+// P1 was recorded again by the plan's M2 with MAWS's own list and paragraph, a full set's (scenarios/pass3/
+// uxwave-421-maws-tools.json, which src/shared/maws/tools.test.ts pins to the source): the tool-choice plan's A7 and A8.
+const own421=JSON.parse(readFileSync(new URL('./scenarios/pass3/uxwave-421-maws-tools.json',import.meta.url),'utf8'));
+test('tickets 421/420 P1 (A7): with MAWS\'s own list, under tool search, the always-loaded ask is the one maws tool in the request, whole, and every other is named as deferred',()=>{
+ assert.deepEqual(own421.tools.filter(t=>t._meta?.['anthropic/alwaysLoad']===true).map(t=>t.name),['ask']);
  for(const n of ['ask-upfront','ask-upfront-unset']){
   const rows=load421(n);const [first]=main421(rows);
+  const prov=meta421(rows,'provenance')[0];assert.equal(prov.served,'uxwave-421-maws-tools.json',n);assert.match(prov.engineVersion,/^2\.1\.\d+$/,n);
+  assert.ok(rows.find(r=>r.direction==='out'&&r.frame.response?.response?.mcp_response?.result?.tools)?.frame.response.response.mcp_response.result.tools.length===own421.tools.length,n); // served whole
   assert.deepEqual(first.tools.filter(t=>t.name.startsWith('mcp__maws__')),[{name:'mcp__maws__ask',defer_loading:null}],n);
   assert.ok(first.tools.some(t=>t.name==='ToolSearch'),n);assert.ok(!first.tools.some(t=>t.name==='AskUserQuestion'),n);
-  const deferred=said421(first).find(t=>t.startsWith('The following deferred tools are now available'));
-  for(const name of ['artifact_create','artifact_dataset','artifact_publish','artifact_read','artifact_search','show_pane'])assert.ok(deferred.includes('mcp__maws__'+name),n+name);
+  const deferred=said421(first).find(t=>t.startsWith('The following deferred tools are now available')).split('\n');
+  assert.deepEqual(own421.tools.map(t=>'mcp__maws__'+t.name).filter(name=>deferred.includes(name)),own421.tools.filter(t=>t.name!=='ask').map(t=>'mcp__maws__'+t.name),n);
   assert.ok(!deferred.includes('mcp__maws__ask'),n);
-  assert.deepEqual(meta421(rows,'server_calls')[0].calls.map(c=>c.name),['ask'],n); // called with no ToolSearch first
+  // A8: the paragraph the model is given names the two artifact tools it points to
+  const paragraph=said421(first).find(t=>t.startsWith('## maws\n'));
+  assert.ok(paragraph.startsWith('## maws\n'+own421.instructions.slice(0,600)),n);
+  for(const name of ['mcp__maws__artifact_search','mcp__maws__artifact_read'])assert.ok(paragraph.includes(name),n+name);
+  assert.deepEqual(meta421(rows,'server_calls')[0].calls.map(c=>[c.name,c.arguments.blocking]),[['ask',false]],n); // called with no ToolSearch first
  }
+});
+// Ticket 420's required `blocking` on MAWS's own list (scenarios/pass3/uxwave-421-tool-choice.mjs, uxwave-421-ask-refused):
+// the server refuses as MAWS's host does, the engine hands the model the refusal as the call's error, and the call asked
+// again with `blocking: false` is acknowledged at once and the turn writes on. e2e/maws-tools.spec.ts replays it.
+test('tickets 421/420: an ask without blocking reaches the model as its refusal; asked again with false it is acknowledged and the turn writes on',()=>{
+ const rows=load421('ask-refused');
+ assert.equal(meta421(rows,'provenance')[0].served,'uxwave-421-maws-tools.json');
+ const answer=meta421(rows,'answer_refused')[0];
+ assert.deepEqual(answer.calls.map(c=>c.arguments.blocking),[undefined,false]);
+ assert.deepEqual(answer.results.map(r=>[r.tool_use_id,r.is_error]),[['toolu_stub_bare',true],['toolu_stub_async',false]]);
+ assert.equal(answer.results[0].content,'ask: pass blocking: false to keep working while the user answers, or blocking: true to wait for the answers.');
+ assert.deepEqual(JSON.parse(answer.results[1].content[0].text),{status:'asked',askId:'toolu_stub_async'});
+ assert.ok(rows.some(r=>r.direction==='in'&&r.frame.type==='result'&&r.frame.subtype==='success'),'the turn ended with no answer given');
+ assert.ok(meta421(rows,'spend')[0].result.total_cost_usd<0.0001); // the stand-in API: nothing spent
 });
 test('tickets 421/420 P2: a list_changed from the host is honoured (the engine lists again, a new tool arrives, a deferred one is withdrawn), but an always-loaded tool that left stays in the request',()=>{
  const rows=load421('list-changed');const main=main421(rows);const sent=meta421(rows,'list_changed_sent')[0];

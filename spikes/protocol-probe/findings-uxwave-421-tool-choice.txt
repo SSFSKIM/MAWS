@@ -91,3 +91,18 @@ renders the prompt anew (`--system-prompt-snapshot off`) for P2; MAWS's own desc
 stand-in; the build re-records P1 with `mawsToolList()`); a first-party base URL (the stub's address is local; the
 default was read in the engine's code); the sminos question tool in a session MAWS runs (board ticket 600); the tested
 engine 2.1.312 as a binary (its code was read, not run).
+
+P1 recorded again with MAWS's own list (the plan's M2; 2026-11-23). Engine 2.1.330 again, the one installed on the Mac
+that ran it (2.1.312 is not installed there), against the same stand-in API, nothing spent. The probe's server now lists
+`mawsToolList()` and the full set's paragraph as the build lists them (scenarios/pass3/uxwave-421-maws-tools.json, which
+src/shared/maws/tools.test.ts pins to the source: the ask alone with `_meta["anthropic/alwaysLoad"]: true`, `blocking`
+required), and each fixture's provenance names it (`served`).
+- uxwave-421-ask-upfront and -unset: the first request's tools hold `mcp__maws__ask` whole and no other maws tool; the
+  other seventeen, the four an edit needs among them, are names in the deferred-tools message; the paragraph reaches
+  the model under "## maws" and names mcp__maws__artifact_read and mcp__maws__artifact_search. The scripted call
+  (`blocking: false`) ran with no ToolSearch first. The same with ENABLE_TOOL_SEARCH absent. (The plan's A7, A8, A9.)
+- uxwave-421-ask-refused (new): the server answers an ask as MAWS's host answers one whose answers are still to come,
+  and refuses one without `blocking` with the host's sentence. The scripted model's first call left `blocking` out; the
+  engine handed the model the refusal as the call's error (`is_error: true`, the sentence whole). Its second call, with
+  `blocking: false`, was answered `{status: "asked", askId}` at once and the turn wrote on and ended with the answer
+  still to come. e2e/maws-tools.spec.ts replays this recording through MAWS's own host.

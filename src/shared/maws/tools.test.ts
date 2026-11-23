@@ -342,6 +342,14 @@ describe('the ticket 421/420 probe’s snapshot of the maws server', () => {
     if (process.env.MAWS_WRITE_421_TOOLS === '1') writeFileSync(PROBE_421, source);
     expect(readFileSync(PROBE_421, 'utf8')).toBe(source);
   });
+
+  // the probe's server refuses an ask without `blocking` with a literal of its own; the recording holds it to the host's
+  it('refused the recorded ask without blocking with the host’s own sentence', () => {
+    const fixture = fileURLToPath(new URL('../../../spikes/protocol-probe/fixtures/uxwave/uxwave-421-ask-refused.jsonl', import.meta.url));
+    const rows = readFileSync(fixture, 'utf8').trim().split('\n').map((line) => JSON.parse(line) as { direction: string; frame: { event?: string; results?: { is_error: boolean; content: unknown }[] } });
+    const [refusal] = rows.find((row) => row.direction === 'meta' && row.frame.event === 'answer_refused')!.frame.results!;
+    expect(refusal).toMatchObject({ is_error: true, content: TOOL_ERRORS.askBlockingRequired });
+  });
 });
 
 // U6d (Interfaces §B): records are read with the schema they were written under; only show_pane's differs
