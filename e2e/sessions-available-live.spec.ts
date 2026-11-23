@@ -130,6 +130,7 @@ function journal(id: string): JournalRow[] {
   const dir = join(userData, 'engine-host', 'journal', id);
   if (!existsSync(dir)) return [];
   return readdirSync(dir)
+    .filter((file) => file.endsWith('.jsonl')) // the journal only: the host map (`<launchId>.hseq`, "<hostSeq> <journalSeq>" lines) sits beside it
     .sort()
     .flatMap((file) => readFileSync(join(dir, file), 'utf8').split('\n').filter(Boolean).map((line) => JSON.parse(line) as JournalRow));
 }
