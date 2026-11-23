@@ -54,7 +54,7 @@ import { ownerShapedState, writePluginCliStub, type StubState } from '../test/su
 import { addressed } from './support/address';
 import { invoke, launchReady, recordedBlockJournal, steerStopJournal, value } from './support/c7-replay';
 import { bindCsv, chart, insertBlocks } from './support/dashboards';
-import { createDesign, DESIGN_FILES, editDesign } from './support/design';
+import { createDesign, DESIGN_FILES, editDesign, threadsOf } from './support/design';
 import { closedPort, startBrowserServer } from './support/browser-server';
 import { closeSettings, closeSheet, importThrough, openImportSheet, profilesFile, sheetOf } from './support/browser-import-scene';
 import { buildChromeUserData } from '../test/support/chrome-profile';
@@ -523,10 +523,9 @@ function m2Cut(): boolean {
 }
 // Master's last line under a new chat's model list (master's widgets/copy.ts, MODEL.unstarted), which P555 cut
 const MASTER_MODEL_UNSTARTED = 'Applies when the session starts';
-// widgets/copy.ts's words the checks read (that module loads the renderer's statusline), each build's own: the agents
-// dialog's empty line (AGENTS.none, the same on both), and the + menu's Connectors line for a session not running and
-// for a running one reporting none (CONNECTOR_MENU.notRunning, .noneReported; P579, P578)
-const AGENTS_NONE = 'No agents in the catalogue';
+// widgets/copy.ts's words the checks read (that module loads the renderer's statusline), each build's own: the + menu's
+// Connectors line for a session not running and for a running one reporting none (CONNECTOR_MENU.notRunning,
+// .noneReported; P579, P578). The agents dialog's empty line, which M4 cut, is M4_WORDS.agentsNone.
 const CONNECTORS_LINE = {
   notRunning: { m2: 'Session not running', master: 'Live details are unavailable until this session is running' },
   noneReported: { m2: 'No connectors', master: 'No connectors reported by this session' },
@@ -775,6 +774,10 @@ const M4_WORDS = {
   noProject: { m4: 'No project', master: "Don't work in a project" }, // composer/frame/ProjectRow.tsx NO_PROJECT (C70)
   installed: 'Installed', // customize/discover/copy.ts DISCOVER.installed: master's word beside the check, M4's mark's name (G278)
   add: 'Add', // widgets/copy.ts LIBRARY.add, the plugin list's Add menu's name, both builds (P655)
+  agentsNone: { m4: 'No agents', master: 'No agents in the catalogue' }, // widgets/copy.ts AGENTS.none, the agents dialog's empty line (P627)
+  // master's widgets/copy.ts RENAME.renamed, the line a typed title's rename leaves in its dialog, which M4 removed with
+  // the dialog itself: M4's closes once the rename took (P637)
+  renamed: (title: string) => `Renamed · ${title}`,
 };
 // The scenes that existed before M4 and show its surfaces (scenes.md, "Existing scenes that show M4's surfaces"): M4's
 // evidence as much as its own `m4-` scenes, so each is refused on a build that is not the checkout's, as an m4 scene is
@@ -904,6 +907,12 @@ async function customizeAt(page: Page, view: (typeof VIEWS)[number], show: (type
   await expect(custom(page)).toHaveAttribute('data-customize-show', show);
   await page.waitForTimeout(1500);
 }
+// An item of Customize (a plugin's or a skill's row, a catalog card) opened as a pointer opens it: a click on the item
+// itself, whose own handler opens it wherever the click lands off its own controls. Its whole-item target
+// (`[data-row-open]`, `[data-card-open]`) is an absolute button drawn under the item's positioned content, on both
+// builds (widgets/plugins/PluginRow.tsx, widgets/skills/SkillsLibrary.tsx, customize/discover/CatalogCard.tsx), so a
+// click aimed at that button finds the content on top of its centre and waits until it times out.
+const openItem = (item: Locator) => item.first().click();
 // A typed command: the palette's highlighted row is the command (its name, not the app's copy) before Enter, so a
 // ranking difference cannot open another widget. `rest` is typed after the command (its arguments).
 async function typed(page: Page, command: string, rest = '') {
@@ -1180,7 +1189,7 @@ test('scenario: sidebar, Overview, waiting sessions, pages, Customize, Settings,
     await closeOverlays(page);
     await shot(page, r2({ id: 'r2-plugin-detail', title: 'Customize, a plugin’s own page', how: 'Click a plugin row in Customize (My items)', state: 'The first user plugin’s page, from the plugin CLI stub', folders: ['customize', 'widgets/plugins'] }), async () => {
       await customizeAt(page, 'mine', 'plugins');
-      await custom(page).locator('[data-plugin-row]:visible [data-row-open]').first().click();
+      await openItem(custom(page).locator('[data-plugin-row]:visible'));
       await expect(custom(page).locator('[data-plugin-detail]').first()).toBeVisible({ timeout: 15_000 });
       await page.waitForTimeout(1500);
     });
@@ -1189,9 +1198,10 @@ test('scenario: sidebar, Overview, waiting sessions, pages, Customize, Settings,
       await customizeAt(page, 'discover', 'all');
       await soft(custom(page).locator('[data-catalog-card], [data-featured]'), 'a catalog card', 20_000);
     });
-    await shot(page, m0({ id: 'm0-discover-detail', title: 'Customize, Discover, a card opened', how: 'Click the first card in Discover', state: 'A catalog entry’s detail', folders: ['customize/discover'] }), async () => {
+    // the first card not installed here: one installed here opens its row's detail in My items (CatalogCard.tsx)
+    await shot(page, m0({ id: 'm0-discover-detail', title: 'Customize, Discover, a card opened', how: 'Click the first card in Discover not installed here', state: 'A catalog entry’s detail', folders: ['customize/discover'] }), async () => {
       if ((await custom(page).locator('[data-catalog-card]').count()) === 0) await customizeAt(page, 'discover', 'all');
-      await custom(page).locator('[data-catalog-card] [data-card-open]').first().click();
+      await openItem(custom(page).locator('[data-catalog-card]:not([data-installed="here"])'));
       await expect(page.locator('[data-catalog-detail]').first()).toBeVisible({ timeout: 15_000 });
     });
     await closeOverlays(page);
@@ -1270,8 +1280,24 @@ test('scenario: sidebar, Overview, waiting sessions, pages, Customize, Settings,
       await open('compact', 'focus on tests');
     });
     await reset(page);
-    await shot(page, m0({ id: 'm0-dialog-rename', title: 'Rename (/rename) in a scenario session', how: 'Type /rename New title and press Enter', state: 'The widget’s own title field, renamed (a scenario launch registers no session actions)', folders: ['widgets', 'composer'] }), async () => {
-      await open('rename', 'New title');
+    // A typed title renames at once on both builds (widgets/RenameWidget.tsx). Master's widget then stays open with its
+    // line; M4's closes once the rename took, the new title showing where the session is named (P637). So the build is
+    // read before the dialog is waited on, and the check holds the title on the session's sidebar row on both.
+    const RENAMED = 'New title';
+    const renameDialog = () => dialogOf(page, 'rename');
+    const renamedRow = async () => (await sidebarRow(page, { appSessionId: SID.idle })).locator('[data-session-title]').filter({ hasText: new RegExp(`^${literal(RENAMED)}$`) });
+    await shot(page, m0({ id: 'm0-dialog-rename', title: 'Rename (/rename) in a scenario session', how: 'Type /rename New title and press Enter', state: 'The idle session renamed “New title” on its sidebar row; on M4 (P637) no dialog left open, master’s widget open with its line “Renamed · New title”', folders: ['widgets', 'composer', 'sidebar'] }), async () => {
+      const m4 = await m4Build(page);
+      await openSession(page, SID.idle);
+      await typed(page, 'rename', RENAMED);
+      if (m4) await expect(await renamedRow(), 'the session renamed').toBeVisible({ timeout: 15_000 });
+      else await expect(renameDialog()).toBeVisible({ timeout: 15_000 });
+    }, {
+      check: async () => {
+        await inView(await renamedRow(), 'the new title on the session’s row');
+        if (m4Cut()) await expect(renameDialog(), 'no rename dialog left open').toHaveCount(0);
+        else await inView(renameDialog().locator('[role="status"]').filter({ hasText: M4_WORDS.renamed(RENAMED) }), 'master’s line in the widget');
+      },
     });
     await reset(page);
     // The catalogue's read is made as a session's message box attaches it (stores/catalog.ts, attachCatalog), so the session
@@ -1292,7 +1318,7 @@ test('scenario: sidebar, Overview, waiting sessions, pages, Customize, Settings,
       // parts.tsx, Rows); a failed read or Load now draws other words in a `p` and is not this state
       check: async () => {
         await expect(agentsDialog().locator('ul'), 'no list of agents').toHaveCount(0);
-        await inView(agentsDialog().getByText(AGENTS_NONE, { exact: true }), 'the empty list’s line');
+        await inView(agentsDialog().getByText(byM4(M4_WORDS.agentsNone), { exact: true }), 'the empty list’s line');
       },
       after: () => unscriptReads(app),
     });
@@ -3211,14 +3237,24 @@ test('round 2: running agents and shells, the queue, a blocked command, Source c
       await tab(created.design!).locator('[data-board-title="broken"]').first().click();
       await soft(tab(created.design!).locator('[data-board-inspector]'), 'the board inspector');
     });
-    await shot(page, m0({ id: 'm0-design-comments', title: 'Design workbench, the comments rail', how: 'The design with two comments, its header’s Comments', state: 'Two threads on the desktop board in the comments rail', folders: ['tools/design', 'src/artifacts/design/editor'] }), async () => {
+    const commentsRail = () => tab(created.design!).locator('[data-deck-rail="comments"]').first();
+    await shot(page, m0({ id: 'm0-design-comments', title: 'Design workbench, the comments rail', how: 'The design with two comments, Comments in its toolbar', state: 'Two threads on the desktop board in the comments rail', folders: ['tools/design', 'src/artifacts/design/editor'] }), async () => {
       if (!(await tab(created.design!).isVisible().catch(() => false))) await openArtifact(created.design!);
-      if ((await tab(created.design!).locator('[data-thread-id], [data-comment-thread]').count()) === 0) {
-        await editDesign(page, created.design!, { op: 'addThread', threadId: 'on-a', boardId: 'desktop', elementId: 'a', body: 'Can the headline sit higher?' });
-        await editDesign(page, created.design!, { op: 'addThread', threadId: 'on-b', boardId: 'desktop', elementId: 'b', body: 'The button reads small here.' });
-      }
-      await page.locator('[data-region="main"] [data-editor-action="comments"]').first().click();
-      await page.waitForTimeout(1200);
+      // the threads as the design's seam reads them, so a retry adds none twice
+      const have = new Set((await threadsOf(page, created.design!)).map((thread) => thread.id));
+      if (!have.has('on-a')) await editDesign(page, created.design!, { op: 'addThread', threadId: 'on-a', boardId: 'desktop', elementId: 'a', body: 'Can the headline sit higher?' });
+      if (!have.has('on-b')) await editDesign(page, created.design!, { op: 'addThread', threadId: 'on-b', boardId: 'desktop', elementId: 'b', body: 'The button reads small here.' });
+      // The workbench's own Comments in its toolbar (design/editor/comments.tsx, DesignCommentButtons), pressed while the
+      // rail is open. Not the header's action: while a thread is open the header draws the comments action as its count
+      // instead, a button with no `data-editor-action` (panel/PanelHeader.tsx, CommentCount), on both builds.
+      const toggle = tab(created.design!).locator('[data-comments-toggle]').first();
+      if ((await toggle.getAttribute('aria-pressed', { timeout: 10_000 })) !== 'true') await toggle.click();
+      await expect(commentsRail(), 'the comments rail').toBeVisible({ timeout: 10_000 });
+    }, {
+      check: async () => {
+        await inView(commentsRail(), 'the comments rail');
+        for (const id of ['on-a', 'on-b']) await inView(commentsRail().locator(`[data-thread="${id}"]`), `the thread ${id} in the rail`);
+      },
     });
     await reset(page);
     await shot(page, r2({ id: 'r2-design-system', title: 'A design system page', how: 'Click the MAWS design system in the Artifacts library', state: 'The built-in MAWS design system: its type samples and components', folders: ['src/artifacts/design-system/page', 'artifacts/design-system', 'library'] }), async () => {
@@ -4941,7 +4977,7 @@ test('the word cut’s M4: the mods’ rows, Customize’s plugin and skill rows
       await customizeAt(page, 'mine', 'skills');
       const row = custom(page).locator('[data-skill-row="old-draft"]').first();
       await row.scrollIntoViewIfNeeded({ timeout: 10_000 });
-      await row.locator('[data-row-open]').first().click();
+      await openItem(row);
       await expect(gone(), 'the skill’s detail').toBeVisible({ timeout: 10_000 });
       rmSync(draft, { recursive: true, force: true });
       await gone().locator('[data-open-in-trigger]').first().click();
