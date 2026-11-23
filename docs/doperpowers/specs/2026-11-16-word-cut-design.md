@@ -35,6 +35,7 @@ How to see it working: open the build beside today's build on the same fixtures 
 - [x] (2026-11-23 07:04Z) M4 task 5: the e2e moves, reviewed clean.
 - [x] (2026-11-23 07:04Z) M4 task 6: the rig's M4 scenes, reviewed clean.
 - [x] (2026-11-23) M4 built: the window, the typed dialogs and Customize. Its 260 rows were read against master `0153952c2` and 19 `new` rows were added (N171 to N189). Of the 279, 166 cuts and 17 rewordings are built, 95 `stays` rows read as on master, and one cut is not built: G224, whose mark the ruled G225 keeps. No shared part in `ui/` was added or changed, and the desk's web app needed no edit of its own. Unit tests moved with each area. The Electron e2e reads moved in task 5 (no harness probe or desk spec read a changed control), and the rig gained 25 `m4-` scenes in launch 1 and a new launch 13. Six tasks were each reviewed clean, and eight rare or cosmetic findings went to the tech-debt tracker. Class 1a passed at `6ce7297aa`. Its picture pairs and the owner's call are owed, and the Electron e2e groups and the rig still have to run on a Mac.
+- [x] (2026-11-23) M4's reviews and the owner's call: an xhigh panel on the range (18 findings, 12 fixed, 1 logged, 5 dismissed); a pair review of the before/after pictures, whose six layout defects were fixed and photographed again; a medium review of those fixes (3 findings, fixed). The owner approved the pictures on 2026-11-23.
 - [ ] M5: the cut built area by area, each with pictures and the owner's call.
 - [ ] Retrospective.
 
