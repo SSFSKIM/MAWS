@@ -383,7 +383,7 @@ function McpBeforeStart({ appSessionId, place, close }: { appSessionId: AppSessi
           <p data-before-start className="m-0 mb-1 text-ui-sm text-fg-muted">
             {BEFORE_START.connectors(place.place)}
           </p>
-          <InventoryState error={inventory.error} pending={inventory.isPending} warnings={inventory.data?.warnings} pluginServers={inventory.data?.pluginServers} refresh={() => void inventory.refetch()} />
+          <InventoryState error={inventory.error} pending={inventory.isPending} warnings={inventory.data?.warnings} refresh={() => void inventory.refetch()} />
           {servers !== null &&
             (servers.length + pluginServers.length === 0 ? (
               <p className="m-0 text-ui-sm text-fg-muted">{MCP.none}</p>

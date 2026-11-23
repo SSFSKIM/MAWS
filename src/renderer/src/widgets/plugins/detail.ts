@@ -81,7 +81,7 @@ export function projectLabels(paths: readonly string[]): Map<string, string> {
 export function chipManagedWords(chip: ScopeChip): string | null {
   if (chip.actionable) return null;
   if (chip.kind === 'synced') return L.syncedThere;
-  if (chip.kind === 'covering') return L.managedIn(chipLabel(chip));
+  if (chip.kind === 'covering') return L.whereManaged(L.managedIn(chipLabel(chip)));
   return L.yoursThere;
 }
 

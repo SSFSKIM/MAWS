@@ -98,11 +98,6 @@ export function DiscoverPane({ tab, cwd, onOpenInstalled, onDetail, toList = 0 }
       <div ref={pane} data-discover-pane className={showing ? 'hidden' : 'flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-2 pt-1 pb-4'}>
         <FilterRow tab={tab} cwd={cwd} />
         <LeftResults cwd={cwd} />
-        {tab === 'skills' && (
-          <p data-skills-note className="m-0 text-ui-sm text-fg-muted">
-            {D.skillsNote}
-          </p>
-        )}
         {narrowed ? (
           <QueryGrid
             input={queryOf(tab, cwd, choices)}

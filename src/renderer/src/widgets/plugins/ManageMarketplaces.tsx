@@ -45,7 +45,7 @@ function MarketplaceRow({ marketplace, installed }: { marketplace: Marketplace; 
           <button
             type="button"
             aria-label={L.moreActions(marketplace.name)}
-            title={L.moreActions(marketplace.name)}
+            title={L.more}
             disabled={busy}
             className="inline-flex size-7 shrink-0 items-center justify-center rounded-sm text-fg-muted outline-accent hover:bg-bg-hover hover:text-fg focus-visible:outline-2 disabled:text-fg-faint data-[state=open]:bg-bg-active"
           >

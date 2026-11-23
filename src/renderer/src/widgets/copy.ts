@@ -168,7 +168,7 @@ export const MCP = {
 // "+" › Connectors submenu say for a tab set to another machine, and the place named with no folder chosen.
 export const BEFORE_START = {
   connectors: (place: string) => `Configured for ${place}`, // the word cut (P573, ruled 2026-11-20)
-  skills: (place: string) => `On disk for ${place}. The chat may load more once it starts.`,
+  skills: (place: string) => `On disk for ${place}`, // the word cut (P744)
   remote: (machine: string) => `Shown once the chat starts on ${machine}`,
   userConfiguration: 'your user configuration',
 };
@@ -382,17 +382,20 @@ export const TYPED = {
   modeUnknown: (arg: string) => `No permission mode named ${arg}`,
 };
 
-// Plugins' Reload.
+// Plugins' Reload. The word cut (P672): the receipt is "Reloaded", with the errors counted when there are some; P751:
+// `/reload-plugins` says it in a toast and closes, its quiet spinner named `reloading` while it runs.
+const errorCount = (n: number) => `${n} error${n === 1 ? '' : 's'}`;
 export const RELOAD = {
   reload: 'Reload',
   done: 'Reloaded',
-  reloaded: (commands: number, agents: number, plugins: number, errors: number) => `Reloaded · ${commands} commands · ${agents} agents · ${plugins} plugins · ${errors} error${errors === 1 ? '' : 's'}`,
-  skills: (n: number) => `Reloaded · ${n} skill${n === 1 ? '' : 's'}`, // E8: `reload_skills`
+  reloaded: (errors: number) => (errors === 0 ? 'Reloaded' : `Reloaded · ${errorCount(errors)}`),
+  skills: 'Reloaded', // E8: `reload_skills`
+  reloading: 'Reloading plugins…',
+  pluginsReloaded: (errors: number) => (errors === 0 ? 'Plugins reloaded' : `Plugins reloaded · ${errorCount(errors)}`),
 };
 
 // E8: plugin management in `/plugins` (E8 execution document, M2): the sections, the confirm sheet and a row's
 // operation line. The engine's own `message` and `failureCode` are shown as it printed them, never paraphrased.
-const sessionCount = (n: number) => `${n} session${n === 1 ? '' : 's'}`;
 export const PLUGIN_MANAGEMENT = {
   otherMachine: 'This session runs on another machine; its plugins can’t be managed here yet.', // P5 O6 M4: until O4 spans machines
   reloadMods: 'Reload plugins', // E11 §2.2: one name for `reload_plugins` here, in the panel and as `/reload-plugins`
@@ -424,19 +427,15 @@ export const PLUGIN_MANAGEMENT = {
   dependencies: 'and the cache directories of any dependencies the marketplace declares, from this or an allowlisted marketplace, each enabled in the settings file above',
   overrides: 'and any enable or disable override for them in these settings files',
   alsoUninstalls: (plugins: string[]) => `Also uninstalls ${plugins.length} plugin${plugins.length === 1 ? '' : 's'}: ${plugins.join(', ')}`,
-  resolving: 'Resolving the engine…',
+  resolving: 'Resolving the engine…', // the word cut (P724): the quiet spinner's name
   unresolved: 'The engine could not be resolved; choose a binary in Settings › Engine', // a refusal that came with no words
   reloadsIn: (n: number) => `Reloads plugins in ${n} running ${n === 1 ? 'session' : 'sessions'}`,
-  noSessionToReload: 'No running session to reload',
-  nothingToReload: 'Nothing to reload: an added marketplace loads no plugin',
   understand: 'I understand',
   declaredTitle: (target: string) => `Run the command ${target} declares?`,
   declared: "The marketplace declares this command; the engine's CLI runs it only once you accept it:",
   runIt: 'Run it',
   // a row's operation line
   reloading: 'Reloading running sessions…',
-  reloadedIn: (n: number) => `Reloaded in ${sessionCount(n)}`,
-  reflected: 'reflected',
   notReflectedIn: (title: string) => `not reflected in ${title}`,
   mayOverride: 'a project setting may override it',
   failedIn: (title: string, error: string) => `failed in ${title} · ${error}`,
@@ -496,7 +495,7 @@ export const LIBRARY = {
     anthropic: 'From Anthropic & Partners',
     added: 'From marketplaces you added',
     otherProjects: 'Other projects',
-    builtIn: 'MAWS mods · Built in',
+    builtIn: 'Built in', // the word cut (G223)
   } as const,
   list: 'Plugins',
   noneHere: 'No plugins installed for this project yet.',
@@ -504,24 +503,30 @@ export const LIBRARY = {
   firstBody: 'Give Claude role-level expertise with plugins. Find them in Discover.',
   noMatch: 'Nothing matches these filters.',
   resetFilters: 'Reset filters',
-  loadedUnknown: 'What this session loaded is not observed yet.', // Show › Loaded in this session with nothing observed
-  showAll: 'Show all plugins',
+  // Filter › Loaded in this session with nothing observed, or with no session (the word cut, P678)
+  loadedUnknown: 'Not known yet',
+  noSession: 'No running session',
+  showAll: 'Show all',
   failed: "Couldn't load your plugins.",
   retry: 'Retry',
   manifestsFailed: "Couldn't read your plugins' details.", // `plugins.manifest` refused: the rows stay, by name
-  // a row
+  // a row. The word cut (G215, G216, G218, G217, P683, P685): its switch in place of "Disabled" and the menu's Turn on or
+  // off; its description (or its skills counted) and its date in its row note; where it is managed in a few words, the
+  // switch's reason saying the rest; the three dots' tooltip "More", its name the longer words
   isNew: 'New',
   newTooltip: 'Added or updated in the last 14 days',
-  disabled: 'Disabled',
   by: (author: string) => `by ${author}`,
   skills: (n: number) => `${n} skill${n === 1 ? '' : 's'}`,
+  enable: (name: string) => `Enable ${name}`,
+  more: 'More',
   moreActions: (name: string) => `More actions for ${name}`,
   turnOn: 'Turn on',
   turnOff: 'Turn off',
   update: 'Update',
   uninstall: 'Uninstall…',
-  managedIn: (project: string) => `In ${project} · manage it from a session there`,
-  managedInMany: (n: number) => `In ${n} other projects · manage it from a session there`,
+  managedIn: (project: string) => `In ${project}`,
+  managedInMany: (n: number) => `In ${n} other projects`,
+  whereManaged: (where: string) => `${where} · manage it from a session there`, // a greyed switch's and Update's reason
   // the loaded line
   loadedCount: (n: number) => `${n} plugin${n === 1 ? '' : 's'} loaded in this session`,
   problems: (n: number) => `${n} problem${n === 1 ? '' : 's'}`,
@@ -534,6 +539,7 @@ export const LIBRARY = {
   // P2-C start (2026-10-09): the section's words (the P2-C document, §9 and its M6 Decision Log), in place of P2-B's interim words
   mod: {
     version: (n: number) => `Version ${n}`,
+    // the word cut (G225, G226, N149): the description and the summaries' sentence are row notes; the source line is gone
     unavailable: (reason: string) => `MAWS mods can’t be read right now: ${reason}`,
     refused: (reason: string) => `Not saved: ${reason}`,
     appSwitch: (name: string) => `${name} in every session`,
@@ -544,12 +550,6 @@ export const LIBRARY = {
       { value: 'on', label: 'On' },
       { value: 'off', label: 'Off' },
     ],
-    source: {
-      'maws-contract': 'MAWS gives the agent its instructions',
-      'external-compatible-style': 'The output style gives the agent its instructions',
-      'external-style-plus-supplement': 'Compatible style with MAWS’s supplement', // P2-C2 (the architect's words, Decision Log 31)
-      off: 'Off: the agent is not asked to mark anything',
-    } satisfies Record<ModRow['source'], string>,
     pending: {
       'next-launch': 'Applies the next time this session starts',
       'next-compaction': 'Applies after this session’s next compaction',
@@ -565,7 +565,6 @@ export const LIBRARY = {
   view: (name: string) => `View ${name}`,
   myItems: 'My items',
   backTo: (library: string) => `Back to ${library}`,
-  versionNotReported: 'Version not reported',
   updated: (when: string) => `updated ${when}`,
   enablePlugin: 'Enable plugin',
   updateTo: (version: string) => `Update to ${version}`,
@@ -574,27 +573,17 @@ export const LIBRARY = {
   chip: { local: 'This project · only you', project: 'This project', user: 'User', yours: 'Created by you', synced: 'Synced' } as const,
   onlyYou: 'only you',
   otherProjects: (n: number) => `${n} other project${n === 1 ? '' : 's'}`,
-  manageThere: 'manage it from a session there',
   syncedThere: 'Synced from claude.ai · change it there',
   yoursThere: 'From your own folder · change it there',
-  enabledHere: 'Enabled for this project',
+  // the word cut (G235, P710, P712, P713, G239, G240, P706): "Not enabled" alone, "Not loaded yet" with Reload, no
+  // heading over What's inside (its region's name), no sentence under its kinds or atop the Skills tab; "Connectors"
   notEnabledHere: 'Not enabled for this project',
   loadedHere: 'Loaded in this session',
-  notLoadedHere: 'Not loaded in this session',
+  notLoadedHere: 'Not loaded yet',
   overview: 'Overview',
   whatsInside: 'What’s inside',
-  more: (n: number) => `and ${n} more`,
-  kind: { mcpServers: 'MCP servers', agents: 'Agents', hooks: 'Hooks', monitors: 'Monitors', lspServers: 'Language servers', commands: 'Commands', skills: 'Skills' } as const,
-  kindLine: {
-    mcpServers: 'Services and tools Claude can reach.',
-    agents: 'Helpers Claude can hand a longer job to.',
-    hooks: 'Run on their own during a session.',
-    monitors: 'Keep watch in the background during a session.',
-    lspServers: 'Help Claude read and check code in a language.',
-    commands: 'Shortcuts you type with a slash.',
-    skills: 'Things Claude can do when you ask.',
-  } as const,
-  skillsHelper: 'Invoke by typing / in chat, or let Claude use them automatically for relevant tasks.',
+  andMore: (n: number) => `and ${n} more`,
+  kind: { mcpServers: 'Connectors', agents: 'Agents', hooks: 'Hooks', monitors: 'Monitors', lspServers: 'Language servers', commands: 'Commands', skills: 'Skills' } as const,
   bundles: (n: number) => `${n} MCP bundle${n === 1 ? '' : 's'}`,
   hookModules: (n: number) => `${n} hooks module${n === 1 ? '' : 's'}`,
   partial: 'Some of this plugin’s files could not be read, so what’s inside may not all be listed.',
@@ -604,11 +593,12 @@ export const LIBRARY = {
   // the switch and the Add menu (M5; §5.8, §5.9; Desktop's words where it has them)
   library: 'Library',
   add: 'Add',
+  discoverPlugins: 'Discover plugins', // the word cut (P655): the /plugins Add menu's first row
   addMarketplace: 'Add marketplace',
   manageMarketplaces: 'Manage marketplaces',
   manageLine: 'Marketplaces added with Claude Code on this computer. Removing one also uninstalls its plugins.',
-  noMarketplaces: 'No marketplaces added yet.',
-  pluginsInstalled: (n: number) => `${n} plugin${n === 1 ? '' : 's'} installed`,
+  noMarketplaces: 'None yet.', // the word cut (P739, P740)
+  pluginsInstalled: (n: number) => `${n} plugin${n === 1 ? '' : 's'}`,
   checkForUpdates: 'Check for updates',
   remove: 'Remove…',
   done: 'Done',
@@ -623,7 +613,7 @@ export const SKILLS_LIBRARY = {
   list: 'Skills',
   search: 'Search skills',
   sort: { name: 'Name', plugin: 'Plugin name' } as const,
-  useInChat: 'Use in chat',
+  useInChat: 'Use in chat', // the word cut (P746): on a row, drawn on pointing or focus
   // U11a (the branch panel's finding 1): why Use in chat is greyed for a skill of a plugin the launch profile turns off
   pluginOff: 'Off in the sessions MAWS runs: Settings › Sessions › Plugins in sessions',
   pluginsUnread: 'Reading Settings › Sessions › Plugins in sessions…',

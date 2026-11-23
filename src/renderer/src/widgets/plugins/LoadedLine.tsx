@@ -1,7 +1,7 @@
 // The loaded line (P2-B execution document §5.6; P2-A's G2, its `/plugins` half): one line under the library's head
 // about this session, MAWS's own (Desktop's library shows no runtime state). How many plugins the engine loaded and how
 // fresh that is, from A's observed facts (`useLoadedPlugins`: "Loaded now" from a ready process that reported them,
-// "Loaded last time, 2 days ago" from the last report, "Not observed yet" when there is none), then what the session's
+// "as of 2 days ago" from the last report, "Not observed yet" when there is none), then what the session's
 // availability allows: the reloads on a ready process; otherwise A's line every surface shows (`DormantGesture`):
 // Refresh (acquire, then `reload_plugins`; on the line the circular arrow named by the word, the word cut's P522), the
 // quiet spinner while it or a launch runs (P523), a refusal in words, the holder's actions for a session held elsewhere,
@@ -89,7 +89,7 @@ export function LoadedLine({ appSessionId, availability, loaded, reloads, allowA
             {L.loadedCount(loaded.plugins.length)}
           </button>
           <span aria-hidden>·</span>
-          <span>{freshness.kind === 'now' ? FRESHNESS.loadedNow : FRESHNESS.loadedLast(freshness.at, now)}</span>
+          <span>{freshness.kind === 'now' ? FRESHNESS.loadedNow : FRESHNESS.asOf(freshness.at, now)}</span>
           {problems > 0 && (
             <>
               <span aria-hidden>·</span>

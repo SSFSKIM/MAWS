@@ -142,7 +142,7 @@ function SkillsMine({ onDetail, toList }: { onDetail(open: boolean): void; toLis
   useLayoutEffect(() => () => onDetail(false), [onDetail]);
   return (
     <div data-customize-body="skills" className="flex min-h-0 flex-1 flex-col p-3">
-      <InventoryState error={inventory.error} pending={inventory.isPending} warnings={inventory.data?.warnings} pluginServers={inventory.data?.pluginServers} refresh={() => void inventory.refetch()} />
+      <InventoryState error={inventory.error} pending={inventory.isPending} warnings={inventory.data?.warnings} refresh={() => void inventory.refetch()} />
       {inventory.data && <DiskSkills inventory={inventory.data} onDetail={onDetail} toList={toList} />}
     </div>
   );
@@ -180,7 +180,7 @@ function ConnectorsBody() {
           inventory={inventory.data}
           pluginList={pluginList}
           readAt={inventory.dataUpdatedAt}
-          inventoryState={<InventoryState error={inventory.error} pending={inventory.isPending} warnings={inventory.data?.warnings} pluginServers={inventory.data?.pluginServers} refresh={() => void inventory.refetch()} />}
+          inventoryState={<InventoryState error={inventory.error} pending={inventory.isPending} warnings={inventory.data?.warnings} refresh={() => void inventory.refetch()} />}
           attached={attached}
           askIn={askIn}
           search={search}

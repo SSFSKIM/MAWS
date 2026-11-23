@@ -244,7 +244,7 @@ export function MineAll({ onDetail, toList }: { onDetail(open: boolean): void; t
               )}
             </>
           )}
-          <InventoryState error={null} pending={false} warnings={inventory.data?.warnings} pluginServers={inventory.data?.pluginServers} refresh={() => void inventory.refetch()} />
+          <InventoryState error={null} pending={false} warnings={inventory.data?.warnings} refresh={() => void inventory.refetch()} />
         </div>
       </div>
     </div>

@@ -19,7 +19,6 @@ const FILTERS: readonly LibraryFilter[] = ['all', 'enabled', 'disabled', 'loaded
 const SORTS: readonly LibrarySort[] = ['updated', 'name'];
 const MENU = 'z-50 min-w-48 rounded-md border border-border-strong bg-bg-overlay p-1 text-ui text-fg shadow-float';
 const ITEM = 'flex h-7 cursor-default items-center gap-2 rounded-sm px-2 outline-none select-none data-highlighted:bg-bg-hover';
-const LABEL = 'px-2 py-1 text-ui-sm text-fg-muted';
 const NARROW = '@max-sm/customize:w-full'; // inside Customize's page only (its container)
 const set = (patch: Partial<ReturnType<typeof useLibraryStore.getState>['plugins']>) => useLibraryStore.setState((s) => ({ plugins: { ...s.plugins, ...patch } }));
 
@@ -82,7 +81,7 @@ function Menu({ label, icon, pressed, children }: { label: string; icon: ReactNo
         </IconButton>
       </DropdownMenu.Trigger>
       <DropdownMenu.Portal>
-        <DropdownMenu.Content align="end" sideOffset={4} className={MENU}>
+        <DropdownMenu.Content aria-label={label} align="end" sideOffset={4} className={MENU}>
           {children}
         </DropdownMenu.Content>
       </DropdownMenu.Portal>
@@ -109,10 +108,10 @@ function Radios<T extends string>({ value, values, words, onChange }: { value: T
   );
 }
 
+// The word cut (P659): the menu opens straight onto its choices, named by its icon's word, with no first line repeating it.
 export function Choice<T extends string>({ label, icon, value, values, words, isDefault, onChange }: { label: string; icon: ReactNode; value: T; values: readonly T[]; words: Record<T, string>; isDefault: boolean; onChange(value: T): void }) {
   return (
     <Menu label={label} icon={icon} pressed={!isDefault}>
-      <DropdownMenu.Label className={LABEL}>{label}</DropdownMenu.Label>
       <Radios value={value} values={values} words={(v) => words[v]} onChange={onChange} />
     </Menu>
   );

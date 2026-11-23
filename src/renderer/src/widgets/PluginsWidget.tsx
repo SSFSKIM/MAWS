@@ -1,8 +1,9 @@
 // `/plugins` (C11; E8 execution document, M2; P2-B execution document §5.2 to §5.9): the plugin library, Claude Desktop's
 // grouped plugin library as its 2.16120.0 bundle ships it, over E8's management through the engine's own CLI. A
-// library-sized dialog (X19) whose head carries the title and, at the left, Open Discover (P4-AGG Decision Log 10: new
-// plugins are found in Customize's Discover, which it opens for the session's directory) and, at the right, My items'
-// Search, Filter and Sort, and the Add menu (Add marketplace, Manage marketplaces). My items: the loaded line about this
+// library-sized dialog (X19) whose head carries the title and, at the right, My items' Search, Filter and Sort, and the
+// Add menu (Discover plugins, Add marketplace, Manage marketplaces). Discover plugins (P4-AGG Decision Log 10: new
+// plugins are found in Customize's Discover, which it opens for the session's directory) is that menu's first row, the
+// head's own button gone (word cut P655). My items: the loaded line about this
 // session, then one row per plugin in Desktop's source groups. Selecting a row opens its detail in place of the list
 // (§5.7): the list stays mounted beneath it, hidden, so Back returns to it with its search, filter, scroll and focus as
 // they were; the head's controls and the loaded line belong to the list and leave with it. The two marketplace dialogs
@@ -40,7 +41,6 @@ import { usePluginsEnv, usePluginsRead, type PluginsReadResult } from './plugins
 import { useReloads } from './plugins/reload';
 import { SESSION_UNAVAILABLE, type PluginSession } from './plugins/session';
 import { WidgetFrame } from './WidgetFrame';
-import { DISCOVER } from '../customize/discover/copy';
 import { openDiscover } from '../customize/open';
 import { machineOf } from '@shared/machine/address';
 import { ipc } from '../ipc/client';
@@ -232,7 +232,7 @@ export function PluginsList({ library, session, selection, beforeStart = false, 
   );
 }
 
-// The session's dialog. `beforeStart`: an unstarted tab's library (U11a), with the page Open Discover opens.
+// The session's dialog. `beforeStart`: an unstarted tab's library (U11a), with the page Discover plugins opens.
 function LibraryBody({ cwd, session, presentation, beforeStart }: { cwd: string | null; session: PluginSession | null; presentation: LibraryPresentation; beforeStart?: { discoverAt: string | null } }) {
   const readySessions = useSessions((s) => readyCount(s.engine));
   const env = usePluginsEnv();
@@ -247,30 +247,20 @@ function LibraryBody({ cwd, session, presentation, beforeStart }: { cwd: string 
   const selection = useLibrarySelection(library.identities, '[data-widget]');
   const showing = selection.detail !== null;
 
-  const add = <AddMenu onOpen={setDialog} />;
-  const toolbar = showing ? null : <PluginsToolbar add={add} />;
   // the session's `/plugins` finds new plugins in Discover (Decision Log 10): Customize's Discover, Plugins, for the
-  // session's own directory (the CLI's cwd here), the modal closed; with no directory known there is nothing to open
+  // session's own directory (the CLI's cwd here), the modal closed; with no directory known there is nothing to open,
+  // and the Add menu offers no Discover plugins (word cut P655: the first row of that menu, the head's button gone)
   const discoverAt = beforeStart ? beforeStart.discoverAt : cwd;
-  const heading = (
-    <button
-      type="button"
-      data-open-discover
-      disabled={discoverAt === null && !beforeStart}
-      onClick={() => {
-        if (discoverAt === null && !beforeStart) return;
-        presentation.close();
-        openDiscover(discoverAt);
-      }}
-      className="inline-flex h-7 shrink-0 items-center rounded-md border border-border px-2.5 text-ui text-fg outline-accent hover:bg-bg-hover focus-visible:outline-2 disabled:text-fg-faint"
-    >
-      {DISCOVER.openDiscover}
-    </button>
-  );
+  const discover = discoverAt === null && !beforeStart ? null : () => {
+    presentation.close();
+    openDiscover(discoverAt);
+  };
+  const add = <AddMenu onOpen={setDialog} onDiscover={discover} />;
+  const toolbar = showing ? null : <PluginsToolbar add={add} />;
 
   return (
     <ManageProvider value={manage}>
-      <WidgetFrame {...presentation} title={WIDGET_TITLE.plugins} command="plugins" state="ready" error={null} size="library" heading={heading} toolbar={toolbar}>
+      <WidgetFrame {...presentation} title={WIDGET_TITLE.plugins} command="plugins" state="ready" error={null} size="library" toolbar={toolbar}>
         <PluginsList library={library} session={session} selection={selection} beforeStart={beforeStart !== undefined} />
       </WidgetFrame>
       {dialog === 'manage' && <ManageMarketplaces marketplaces={library.marketplaces} installed={library.installed.data?.plugins ?? []} onClose={() => setDialog(null)} />}

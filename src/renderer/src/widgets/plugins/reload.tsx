@@ -1,26 +1,23 @@
 // Reload plugins and Reload skills (E8 execution document, M2; parent G3): `reload_plugins` and `reload_skills` as C3's
 // session operations, from `/plugins`, `/reload-plugins` (E11 §2.2) and the panel's Plugins section, with one operation
 // line for whichever ran last:
-// `Working…`, then `Reloaded · N commands · N agents · N plugins · N errors` or `Reloaded · N skills`, or the error in
+// `Working…`, then `Reloaded` (`Reloaded · N errors` when the engine counted errors; word cut P672), or the error in
 // the operation's words. A reload's answer also replaces the session's loaded plugins and its catalogue's commands and
 // agents (the host's `applyReload`), so the "Loaded in this session" list, the panel's count and the slash palette
 // follow it at once.
 import { useState } from 'react';
 import type { AppSessionId } from '@shared/graph/ids';
-import { ReloadPluginsResponseSchema, ReloadSkillsResponseSchema } from '@shared/wire/control';
+import { ReloadPluginsResponseSchema } from '@shared/wire/control';
 import { PLUGIN_MANAGEMENT, RELOAD } from '../copy';
 import { operationLine, useOperation, type OperationState } from '../operation';
 import { TextButton } from '../parts';
 
 export const reloadSummary = (value: unknown): string => {
   const parsed = ReloadPluginsResponseSchema.safeParse(value);
-  return parsed.success ? RELOAD.reloaded(parsed.data.commands.length, parsed.data.agents.length, parsed.data.plugins.length, parsed.data.error_count) : RELOAD.done;
+  return parsed.success ? RELOAD.reloaded(parsed.data.error_count) : RELOAD.done;
 };
 
-export const skillsSummary = (value: unknown): string => {
-  const parsed = ReloadSkillsResponseSchema.safeParse(value);
-  return parsed.success ? RELOAD.skills(parsed.data.skills.length) : RELOAD.done;
-};
+export const skillsSummary = (): string => RELOAD.skills; // `reload_skills` counts no errors: its receipt is the word
 
 // The line is an error (drawn in red, G3): a refused invoke, or a failure no late success corrected.
 export const lineFailed = (state: OperationState): boolean => state.phase === 'unsent' || (state.phase === 'settled' && !state.outcome.ok && !state.late);

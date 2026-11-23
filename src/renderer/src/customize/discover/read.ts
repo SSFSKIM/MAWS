@@ -3,7 +3,8 @@
 // item, the sources' states and an icon are cached queries; `catalog.changed` (a refresh that changed the network data,
 // or the engine's reads invalidated by an install, a marketplace change or an outside edit) reads every one of them
 // again, and a query starts again from its first page, since its cursors belong to the catalog revision they came from.
-// A page that answers `restarted` (its cursor's revision has gone) starts its query again the same way.
+// A page that answers `restarted` (its cursor's revision has gone) starts its query again the same way, without a notice
+// (word cut G281).
 import { useInfiniteQuery, useQuery, useQueryClient, type InfiniteData, type QueryClient } from '@tanstack/react-query';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { CommandInput, CommandName, CommandOutput, InvokeRest, MawsBridge } from '@shared/ipc/schema';
@@ -63,16 +64,15 @@ export function useCatalogQuery(input: Omit<CatalogQueryInput, 'cursor'>) {
     staleTime: Infinity,
   });
   const inputKey = JSON.stringify(input);
-  const [restartedFor, setRestartedFor] = useState<string | null>(null); // the input whose list started again
   const pages = query.data?.pages;
   const stale = pages?.some((page) => page.restarted) ?? false;
   useEffect(() => {
     if (!stale) return;
-    void client.resetQueries({ queryKey }).then(() => setRestartedFor(inputKey));
+    void client.resetQueries({ queryKey });
     // eslint-disable-next-line react-hooks/exhaustive-deps -- the key is the input's, compared by value
   }, [stale, client, inputKey]);
   const items = pages && !stale ? pages.flatMap((page) => page.items) : undefined;
-  return { query, items, total: pages?.[0]?.total ?? null, restarted: restartedFor === inputKey, more: query.fetchNextPage };
+  return { query, items, total: pages?.[0]?.total ?? null, more: query.fetchNextPage };
 }
 
 export const useCatalogSources = () =>

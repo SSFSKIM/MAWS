@@ -12,7 +12,7 @@ const limit = (n: number): string => String(n).replace(/\B(?=(\d{3})+(?!\d))/g, 
 export const CONNECTORS = {
   tab: 'Connectors',
   configured: 'Configured on disk',
-  none: 'No connectors are configured here.',
+  none: 'No connectors yet', // the word cut (G261)
   live: 'Live in the attached session',
   noLive: 'Connection state and tools are unavailable without a running session in this project.',
   refresh: 'Refresh',
@@ -82,12 +82,12 @@ export const CONNECTORS = {
   // UX wave U11h (docs/doperpowers/plans/2026-11-14-ux-wave-U11h-plugin-connectors.md, §E, §G): a plugin's connector's
   // row, and the lines that stand in its state's place
   fromPlugin: (plugin: string) => `from ${plugin}`,
-  pluginNameUnread: 'Its plugin’s name can’t be read, so it can’t be matched to a session.',
+  pluginNameUnread: 'Plugin name can’t be read', // the word cut (N136)
   sameAddressAs: (name: string) => `Not loaded: same address as ${name}`,
   pluginOff: 'Plugin turned off',
-  collision: (plugins: readonly string[]) => `More than one plugin supplies a connector with this name (${plugins.join(', ')}). Claude Code keeps only one. Turn the others off to sign in.`,
+  collision: (plugins: readonly string[]) => `Supplied by more than one plugin (${plugins.join(', ')}). Turn the others off to sign in.`, // the word cut (N137)
   nameTooLong: 'Its name is too long to sign in from MAWS.',
-  addressAtStart: 'Its address is set when a chat starts. Sign in from that chat’s Connectors dialog.',
+  addressAtStart: 'Sign in from a chat’s Connectors dialog.', // the word cut (N138)
   notInAttached: 'Not in the attached session',
   otherPlugin: 'That session loaded this connector’s name from another plugin.',
   otherVersion: 'That session loaded another version of this plugin. Start a new session, then sign in.',
@@ -106,12 +106,10 @@ export const CONNECTORS = {
   allProjects: 'All projects',
   projectOnly: (project: string) => `${project} only`,
   projectShared: (project: string) => `${project}, shared in its .mcp.json`,
-  savedAsWritten: 'Saved in Claude Code’s configuration file as written.',
   // the one named place for the warning under "Add to" (R9)
   sharedFileWarning: 'This file is usually committed with the repository. Write a secret as ${NAME}, with a name of your own, and set NAME under env in ~/.claude/settings.json or in the environment Claude Code starts with.',
   sentEmpty: (name: string) => `Claude Code sends ${name} to a remote server as empty. Use a name of your own.`,
   argsAsTyped: 'Arguments are shown and saved as typed and are hidden nowhere. Put a secret in Environment.',
-  emptyRow: 'An empty row is not added.',
   rowNameMissing: { headers: 'Enter a name for this header.', env: 'Enter a name for this variable.' } as const,
   reserved: 'This name is reserved by Claude Code or by MAWS.',
   addHeader: 'Add header',
@@ -121,7 +119,7 @@ export const CONNECTORS = {
   rowValue: 'Value',
   commandRequired: 'Enter the command.',
   commandSpaces: 'Taken whole as the program to run, spaces included. Arguments go in Arguments.',
-  argCount: (count: number) => (count === 0 ? 'No arguments' : count === 1 ? '1 argument' : `${count} arguments`),
+  argCount: (count: number) => (count === 1 ? '1 argument' : `${count} arguments`), // drawn only for one or more (the word cut, N145)
   emptyArg: '(empty)',
   argsOpenQuote: 'The arguments end inside a quote.',
   argsBackslash: 'The arguments end with a backslash.',

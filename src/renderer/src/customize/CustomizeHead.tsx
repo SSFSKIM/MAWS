@@ -1,6 +1,6 @@
 // Customize's head (UX wave U11c, docs/doperpowers/plans/2026-11-14-ux-wave-U11c-customize.md, §D "The head"; the child's
-// O-14, "The head, two rows"). First row: the view switch (My items | Discover), and at the right "Showing" with the
-// project select and, in My items only (the approved drawing; ruled point 7), "Live session" while a session MAWS runs on
+// O-14, "The head, two rows"). First row: the view switch (My items | Discover), and at the right the project select
+// (no "Showing" before it: word cut G199) and, in My items only (the approved drawing; ruled point 7), "Live session" while a session MAWS runs on
 // this Mac is ready in exactly that folder. Second row: "Show:" and its four choices, All, Plugins, Skills, Connectors,
 // drawn in the shape the section tabs had (the chosen one on the active background, apart from Discover's bordered
 // chips), and at the right the tools of what is shown; none while a plugin's or a skill's detail is open. Pressing the
@@ -11,7 +11,8 @@
 // their content's width, at the line's right end) and on a line of their own the tools, alone, take all of it.
 // The tools, per view and Show (§D's table): My items, All: the search ("Search my items"), "New skill…", "Add custom
 // connector…" and Refresh; Plugins: the search, Filter, Sort by and the Add menu; Skills: the search, Sort by while a
-// plugin brings a skill, "New skill…", Refresh (UX wave U11's skill actions, ./NewSkill.tsx); Connectors: the search ("Search connectors"), "Add custom connector…" and Refresh (U11g's action, which
+// plugin brings a skill, "New skill…" (UX wave U11's skill actions, ./NewSkill.tsx; no Refresh: word cut G247, ruled per
+// view, which All and Connectors keep); Connectors: the search ("Search connectors"), "Add custom connector…" and Refresh (U11g's action, which
 // stands in My items under Connectors and under All; ruled point 7). Discover: that kind's own tools, the Add menu under
 // Plugins; under All, All's own search, Refresh and the catalog's age.
 import { useQueryClient } from '@tanstack/react-query';
@@ -46,7 +47,7 @@ export function CustomizeHead({ view, show, inDetail, onView, onShow, project, l
   inDetail: boolean; // a plugin's or a skill's detail is open: no tools
   onView(view: PageView): void; // the view pressed, the one shown included
   onShow(show: CustomizeShow): void; // a Show value pressed, the one shown included
-  project: ReactNode; // "Showing" and its select
+  project: ReactNode; // the project select
   live: ReactNode; // "Live session" and its select, or nothing
 }) {
   return (
@@ -138,7 +139,6 @@ function MineTools({ show, addCustom }: { show: CustomizeShow; addCustom: ReactN
             <>
               <SkillsSort />
               <NewSkill />
-              <Refresh />
             </>
           }
         />

@@ -39,7 +39,7 @@ export interface DormantGestureProps {
   appSessionId: AppSessionId;
   label: string; // the button: Load now or Refresh
   glyph?: boolean; // the button as the circular arrow, the label its name and tooltip (the word cut, P522: a dialog's Refresh)
-  lead?: ReactNode; // what the surface knows, before the state ("5 minutes ago", "Loaded last time, …")
+  lead?: ReactNode; // what the surface knows, before the state ("5 minutes ago", "as of …")
   words?: string | null; // the surface's own words for why it cannot start, when it has them; else the session's
   onGesture?: () => void; // the gesture; by default an acquisition for a read (`loadForRead`)
   busy?: boolean; // the surface's own gesture is running

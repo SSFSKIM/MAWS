@@ -45,8 +45,6 @@ export interface CustomCheck {
   rowsField: RowsField; // the chosen type's rows
   rows: RowCheck[]; // by the row's index among the chosen type's rows
   rowsProblem: string | null; // too many rows
-  hasRows: boolean;
-  emptyRow: boolean; // a row with neither a name nor a value: not sent
   sharedWarning: boolean; // the project's .mcp.json, with a header or a variable filled in
   entryProblem: string | null; // the whole entry too large
   entry: McpEntry | null; // what Add sends, when every field holds
@@ -154,8 +152,6 @@ export function checkCustom(fields: CustomFields, servers: readonly Customizatio
     rowsField,
     rows,
     rowsProblem,
-    hasRows: pairs.length > 0,
-    emptyRow: pairs.some(isEmptyRow),
     sharedWarning: fields.scope === 'project' && pairs.some((pair) => !isEmptyRow(pair)),
     entryProblem: wholeProblem ? boundWords(wholeProblem) : null,
     entry: wholeProblem ? null : built,

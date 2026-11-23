@@ -101,7 +101,7 @@ export { Placeholders as CardPlaceholders };
 
 /** A query's grid: its pages so far, and the next asked at the end. */
 export function QueryGrid({ input, tab, onOpen, header, empty }: { input: Omit<CatalogQueryInput, 'cursor'>; tab: CatalogTab; onOpen(item: CatalogItem): void; header(total: number | null): ReactNode; empty: ReactNode }) {
-  const { query, items, total, restarted, more } = useCatalogQuery(input);
+  const { query, items, total, more } = useCatalogQuery(input);
   const end = useRef<HTMLButtonElement>(null);
   const { hasNextPage, isFetchingNextPage } = query;
   useEffect(() => {
@@ -149,11 +149,6 @@ export function QueryGrid({ input, tab, onOpen, header, empty }: { input: Omit<C
   return (
     <section data-catalog-results className="flex flex-col gap-3">
       {header(total)}
-      {restarted && (
-        <p role="status" className="m-0 text-ui-sm text-fg-muted">
-          {D.restarted}
-        </p>
-      )}
       {body}
     </section>
   );

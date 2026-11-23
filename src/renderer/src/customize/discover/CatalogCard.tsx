@@ -3,12 +3,13 @@
 // the trust label with its tooltip, two lines of description, the components ("3 skills · MCP server · runs code" or
 // "Contents shown after install") and the count where a source has one, and + at the trailing edge. Fixed height, so a
 // shelf's cards align. The whole card is one target, "View <name>" (its detail; an item installed here opens it in My
-// items); + is its own focus stop. Installed here reads "Installed" in place of +; installed only in another project
-// reads "Installed in another project" and keeps +. A change's operation line sits on the card it was asked from.
+// items); + is its own focus stop. Installed here shows a check in place of + ("Installed" its name and tooltip; word cut
+// G278); installed only in another project reads "In another project" and keeps +. A change's operation line sits on the card it was asked from.
 // In Discover › All's grid (UX wave U11c M4, §F) the card says its kind, Plugin or Connector, muted, beside its name; a
 // card is always drawn as one kind's (`tab`), which decides what its + asks and what its contents say.
 import type { CatalogItem, CatalogKindTab } from '@shared/ipc/schema/catalog';
 import { IconButton, PlusIcon } from '../../app/IconButton';
+import { Tip } from '../../ui/tip';
 import { OperationLine, useManage } from '../../widgets/plugins/manage';
 import { PAGE } from '../copy';
 import { ItemImage } from '../image/ItemImage';
@@ -56,12 +57,15 @@ export function AddButton({ item, tab, variant = 'icon' }: { item: CatalogItem; 
   );
 }
 
+// An installed item's mark: the check alone, "Installed" its name and tooltip, focusable so the keyboard reaches the
+// tooltip (word cut G278).
 export function InstalledMark() {
   return (
-    <span data-catalog-installed className="inline-flex h-7 shrink-0 items-center gap-1 text-ui-sm text-fg-muted">
-      <CheckIcon />
-      {D.installed}
-    </span>
+    <Tip content={D.installed}>
+      <span role="img" aria-label={D.installed} tabIndex={0} data-catalog-installed className="inline-flex h-7 shrink-0 items-center rounded-sm text-fg-muted outline-accent focus-visible:outline-2">
+        <CheckIcon />
+      </span>
+    </Tip>
   );
 }
 

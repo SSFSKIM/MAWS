@@ -138,9 +138,9 @@ export function uninstallsWords(request: PluginsRequest): string | null {
   return W.alsoUninstalls(uninstalls.map(({ id, scope, projectPath }) => `${id} (${projectPath !== null && scope !== 'user' ? `${scope}, ${projectPath}` : scope})`));
 }
 
-// What follows a confirmed change: the reload of every running session, or nothing for an added marketplace.
-export const thenWords = (action: RunnerAction, readySessions: number): string =>
-  action === 'marketplace-add' ? W.nothingToReload : readySessions > 0 ? W.reloadsIn(readySessions) : W.noSessionToReload;
+// What follows a confirmed change: the reload of every running session; null (nothing said) when none will reload or
+// for an added marketplace, which loads no plugin (word cut P720).
+export const thenWords = (action: RunnerAction, readySessions: number): string | null => (action !== 'marketplace-add' && readySessions > 0 ? W.reloadsIn(readySessions) : null);
 
 // ---- a row's operation ---------------------------------------------------------------------------------------------
 
@@ -158,21 +158,18 @@ export interface OperationWords {
 
 const str = (value: unknown): string | null => (typeof value === 'string' ? value : null);
 
+// The sessions the reload fell short in, each named; a reload that reached every session says nothing (word cut P731).
 function reloadParts(reload: NonNullable<PluginsOperationEvent['reload']>, titleOf: (appSessionId: string) => string, scope: PluginsScope): string[] {
   const { sessions } = reload;
-  if (sessions.length === 0) return [W.noSessionToReload];
   const parts: string[] = [];
-  const reloaded = sessions.filter((s) => s.outcome !== 'failed').length;
-  if (reloaded > 0) parts.push(W.reloadedIn(reloaded));
   const missed = sessions.filter((s) => s.outcome === 'not_reflected');
-  if (missed.length === 0 && sessions.some((s) => s.outcome === 'reflected')) parts.push(W.reflected);
   for (const s of missed) parts.push(scope === 'user' ? `${W.notReflectedIn(titleOf(s.appSessionId))} · ${W.mayOverride}` : W.notReflectedIn(titleOf(s.appSessionId)));
   for (const s of sessions) if (s.outcome === 'failed') parts.push(W.failedIn(titleOf(s.appSessionId), s.error ?? ''));
   return parts;
 }
 
 // `Working…`, the CLI's last line while it runs, then its result (`message`, an update's version change) or its failure
-// (`message · failureCode`), and on a success the reload of the running sessions, each named where it fell short.
+// (`message · failureCode`), and on a success each running session the reload fell short in, named.
 export function operationWords(state: PluginOpState, titleOf: (appSessionId: string) => string, scope: PluginsScope): OperationWords | null {
   switch (state.phase) {
     case 'idle':

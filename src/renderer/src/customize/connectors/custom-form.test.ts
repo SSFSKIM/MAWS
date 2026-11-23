@@ -24,13 +24,9 @@ describe('the entry Add sends', () => {
     expect(checkCustom(local(), []).entry).toEqual({ type: 'stdio', command: '/opt/probe/bin/files-probe', args: [], env: [] });
   });
 
-  it('a row with neither a name nor a value is not sent, and is said; a name with an empty value is sent', () => {
+  it('a row with neither a name nor a value is not sent; a name with an empty value is sent', () => {
     const check = checkCustom(fields({ headers: [{ name: '', value: '' }, { name: 'X-Empty', value: '' }] }), []);
     expect(check.entry).toEqual({ type: 'http', url: 'https://files.example.test/mcp', headers: [{ name: 'X-Empty', value: '' }] });
-    expect(check.emptyRow).toBe(true);
-    expect(check.hasRows).toBe(true);
-    expect(checkCustom(fields({ headers: [{ name: 'X-Empty', value: '' }] }), []).emptyRow).toBe(false);
-    expect(checkCustom(fields(), []).hasRows).toBe(false);
   });
 
   it('a pair is sent as exactly its name and value, whatever else the sheet keeps on a row', () => {
