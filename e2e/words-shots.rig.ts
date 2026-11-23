@@ -766,8 +766,13 @@ const M4_WORDS = {
   sessionsLabel: 'Sessions', // sessions/WorktreesDialog.tsx, the label over a worktree's sessions, both builds
   refresh: 'Refresh', // widgets/copy.ts FRAME.refresh, Session info's gesture, both builds
   starting: 'Starting…', // sessions/acquire.ts STARTING_SESSION (FRAME.starting): master's status words, M4's spinner's name (P523)
+  updated: (when: string) => `updated ${when}`, // widgets/copy.ts LIBRARY.updated, the date in a plugin row's note on M4 (G218)
+  discoverPlugins: 'Discover plugins', // widgets/copy.ts LIBRARY.discoverPlugins, the Add menu's first row on M4 (P655)
+  featured: { m4: 'Featured', master: 'Featured · From Anthropic' }, // customize/discover/copy.ts DISCOVER.featured / featuredFrom (G272)
+  skillGone: { m4: "This skill's file is no longer here.", master: "This skill's file is no longer here. Refresh, then try again." }, // customize/copy.ts SKILL_ACTIONS.missing (N189)
+  retry: 'Retry', // customize/copy.ts SKILL_ACTIONS.retry, M4 only (N189)
   chooseProject: 'Choose a project', // composer/frame/ProjectRow.tsx, the project menu's name, both builds
-  noProject: { m4: 'No project', master: 'Don’t work in a project' }, // composer/frame/ProjectRow.tsx NO_PROJECT (C70)
+  noProject: { m4: 'No project', master: "Don't work in a project" }, // composer/frame/ProjectRow.tsx NO_PROJECT (C70)
   installed: 'Installed', // customize/discover/copy.ts DISCOVER.installed: master's word beside the check, M4's mark's name (G278)
   add: 'Add', // widgets/copy.ts LIBRARY.add, the plugin list's Add menu's name, both builds (P655)
 };
@@ -1335,6 +1340,20 @@ test('scenario: sidebar, Overview, waiting sessions, pages, Customize, Settings,
 // that the scenario already holds, each reached as a person reaches it (a page, a menu, the keyboard, the pointer) or,
 // for a dialog's other answer, through the widget backend's recorded read, put back after its capture. Every scene sets
 // up what it depends on, so WORDS_ONLY on any one reaches its state.
+// The check that `target`'s words are drawn: a box larger than the 1-pixel box of what is kept for assistive technology
+// alone (`sr-only`), not clipped away, not hidden
+const drawnText = (target: Locator, what: string) =>
+  expect
+    .poll(
+      () =>
+        target.first().evaluate((el) => {
+          const box = el.getBoundingClientRect();
+          const style = getComputedStyle(el);
+          return box.width > 4 && box.height > 4 && style.visibility !== 'hidden' && style.opacity !== '0' && style.clip === 'auto' && style.clipPath === 'none';
+        }),
+      { message: `${what} drawn`, timeout: 3_000 },
+    )
+    .toBe(true);
 const literal = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 const m4Meta = (id: string, rows: string, title: string, how: string, state: string, folders: string[], hover = false): Meta => m4({ id, title, how, state: `${state} (${rows})`, folders, ...(hover ? { hover } : {}) });
 async function m4Scenario(app: ElectronApplication, page: Page, SID: Record<'running' | 'idle', string>, open: (command: string, rest?: string, session?: string) => Promise<void>) {
@@ -1348,12 +1367,23 @@ async function m4Scenario(app: ElectronApplication, page: Page, SID: Record<'run
     await destination(page, 'projects');
   }, {
     check: async () => {
-      await expect(page.locator('[data-toolbar] [data-page-title] h1'), 'the page’s title in the title bar').toHaveText('Projects', { timeout: 3_000 });
+      // the title drawn (both builds draw the Projects page's name; Customize's and Artifacts' stay hidden on M4)
+      const title = page.locator('[data-toolbar] [data-page-title] h1');
+      await expect(title, 'the page’s title in the title bar').toHaveText('Projects', { timeout: 3_000 });
+      await expect(title, 'the title drawn, not kept for assistive technology').not.toHaveClass(/\bsr-only\b/);
+      await drawnText(title, 'the page’s title');
       const listed = projectsPage().locator(`ul[aria-label="${byM4(M4_WORDS.inSidebar)}"]`);
       await inView(listed, 'the projects the sidebar lists, under their head');
       const first = listed.locator(':scope > li').first();
-      await inView(first.locator('[title^="/"]'), 'the first project’s folder path under its name');
-      await inView(first.getByRole('button', { name: new RegExp(`^${literal(M4_WORDS.hideFromSidebar)}: `) }), 'its Hide from sidebar');
+      // the folder path drawn under the name: the line whose title is the folder shows the folder itself
+      const path = first.locator('div[title^="/"]').first();
+      await inView(path, 'the first project’s folder path under its name');
+      await expect(path, 'the folder path’s words').toHaveText((await path.getAttribute('title'))!, { timeout: 3_000 });
+      await drawnText(path, 'the folder path');
+      const hide = first.getByRole('button', { name: new RegExp(`^${literal(M4_WORDS.hideFromSidebar)}: `) });
+      await inView(hide, 'its Hide from sidebar');
+      await expect(hide, 'Hide from sidebar in words on the button').toHaveText(M4_WORDS.hideFromSidebar, { timeout: 3_000 });
+      await drawnText(hide, 'Hide from sidebar');
       const sentence = projectsPage().getByText(M4_WORDS.projectsSentence, { exact: true });
       if (m4Cut()) await expect(sentence, 'no sentence at the list’s top').toHaveCount(0);
       else await inView(sentence, 'master’s sentence at the list’s top');
@@ -1369,7 +1399,14 @@ async function m4Scenario(app: ElectronApplication, page: Page, SID: Record<'run
   }, {
     check: async () => {
       const dialog = page.getByRole('dialog').first();
-      await inView(dialog.locator(`[role="group"][aria-label="${byM4(M4_WORDS.inSidebar)}"]`), 'the projects the sidebar lists, under their head');
+      const group = dialog.locator(`[role="group"][aria-label="${byM4(M4_WORDS.inSidebar)}"]`);
+      await inView(group, 'the projects the sidebar lists, under their head');
+      // W136: a project already in the sidebar, greyed under the head; its own "In sidebar" tag on master only
+      const listedRow = group.locator('button:disabled').first();
+      await inView(listedRow, 'a project already in the sidebar, greyed');
+      const tag = listedRow.getByText(M4_WORDS.inSidebar.m4, { exact: true });
+      if (m4Cut()) await expect(tag, 'no In sidebar tag on the row').toHaveCount(0);
+      else await inView(tag, 'master’s In sidebar tag on the row');
       const sentence = dialog.getByText(M4_WORDS.addProjectSentence, { exact: true });
       if (m4Cut()) await expect(sentence, 'the description kept for assistive technology, undrawn').toHaveClass(/\bsr-only\b/, { timeout: 3_000 });
       else await inView(sentence, 'master’s description at the top');
@@ -1389,10 +1426,15 @@ async function m4Scenario(app: ElectronApplication, page: Page, SID: Record<'run
     check: async () => {
       await inView(designer(), 'Designer’s row');
       await inView(pluginByline(designer(), 'Owner', 'Design work'), 'its byline');
-      await expect(designer().locator('[data-plugin-version]'), 'its version').toContainText('2.6.0', { timeout: 3_000 });
+      const version = designer().locator('[data-plugin-version]');
+      await inView(version, 'its version at the row’s end');
       if (m4Cut()) {
+        await expect(version, 'the version alone at rest, its date in the note').toHaveText('2.6.0', { timeout: 3_000 });
         await expect(designer().locator('[data-row-note]'), 'its note waits').toBeHidden({ timeout: 3_000 });
         await inView(designer().getByRole('switch'), 'its switch');
+      } else {
+        await expect(version, 'master’s version, then its date').toContainText('2.6.0', { timeout: 3_000 });
+        await inView(version.locator('time'), 'master’s date beside the version');
       }
     },
   });
@@ -1405,9 +1447,12 @@ async function m4Scenario(app: ElectronApplication, page: Page, SID: Record<'run
       await focusIn(designer(), 'Designer’s row')();
       if (m4Cut()) {
         const note = designer().locator('[data-row-note][data-open]');
-        await expect(note, 'the row’s note open').toBeVisible({ timeout: 3_000 });
-        await expect(note, 'its description').toContainText('Design work');
-      } else await inView(pluginByline(designer(), 'Owner', 'Design work'), 'master’s byline with the description');
+        await inView(note, 'the row’s note open');
+        await expect(note, 'its description, then its date').toHaveText(new RegExp(`^Design work · ${literal(M4_WORDS.updated(''))}\\S`), { timeout: 3_000 });
+      } else {
+        await inView(pluginByline(designer(), 'Owner', 'Design work'), 'master’s byline with the description');
+        await inView(designer().locator('[data-plugin-version] time'), 'master’s date beside the version');
+      }
     },
     after: () => letGo(page),
   });
@@ -1450,6 +1495,22 @@ async function m4Scenario(app: ElectronApplication, page: Page, SID: Record<'run
     },
     after: () => letGo(page),
   });
+  // Discover's home (G267, G272): no Refresh in the toolbar on M4 (the Sources popover keeps its own), and the featured
+  // item's caption "Featured"; master's Refresh and "Featured · From Anthropic"
+  const featured = () => custom(page).locator('section[data-featured]').first();
+  await shot(page, meta('m4-discover-home', 'G267, G272', 'Customize, Discover’s home', 'Customize, Discover, Show: All', 'Discover’s toolbar and the featured item at the top: on M4 no Refresh in the toolbar and the caption “Featured”; master’s Refresh and “Featured · From Anthropic”', ['customize/discover']), async () => {
+    await customizeAt(page, 'discover', 'all');
+    await letGo(page);
+    await expect(featured(), 'the featured item').toBeVisible({ timeout: 20_000 });
+  }, {
+    check: async () => {
+      await inView(featured(), 'the featured item');
+      await inView(featured().getByText(byM4(M4_WORDS.featured), { exact: true }), 'its caption');
+      const refresh = custom(page).locator('[data-catalog-refresh]');
+      if (m4Cut()) await expect(refresh, 'no Refresh in the toolbar').toHaveCount(0);
+      else await inView(refresh, 'master’s Refresh in the toolbar');
+    },
+  });
   await shot(page, meta('m4-discover-skills', 'G280', 'Customize, Discover, Show: Skills', 'Customize, Discover, Show: Skills', 'The Skills catalog’s top with no note on M4; master’s note that items whose contents are not known before install are under Plugins', ['customize/discover']), async () => {
     await customizeAt(page, 'discover', 'skills');
     await letGo(page);
@@ -1481,7 +1542,7 @@ async function m4Scenario(app: ElectronApplication, page: Page, SID: Record<'run
   });
 
   // ---- the shortcuts window with a search that finds nothing (W127), its description at the top (W125)
-  await shot(page, meta('m4-shortcuts-nomatch', 'W125, W126, W127', 'The shortcuts window, a search that finds nothing', 'Help › Keyboard shortcuts (⌘/), “zzqx” typed in its search', 'The empty search’s line (“Nothing matches” on M4, master “No shortcuts match your search.”) under the window’s description', ['keymap']), async () => {
+  await shot(page, meta('m4-shortcuts-nomatch', 'W125, W127', 'The shortcuts window, a search that finds nothing', 'Help › Keyboard shortcuts (⌘/), “zzqx” typed in its search', 'The empty search’s line (“Nothing matches” on M4, master “No shortcuts match your search.”) under the window’s description', ['keymap']), async () => {
     await closeOverlays(page);
     await menu(app, 'shortcuts.open');
     const dialog = page.getByRole('dialog').first();
@@ -1525,28 +1586,6 @@ async function m4Scenario(app: ElectronApplication, page: Page, SID: Record<'run
     after: async () => {
       await letGo(page);
       await closeOverlays(page);
-    },
-  });
-
-  // ---- New chat's project menu (C70): its last action in the chip's words on M4, "No project"; master's sentence. The
-  // new chat opens over the idle session, so a project is chosen and the action is offered; its tab is closed after.
-  const chooser = () => page.getByRole('dialog', { name: M4_WORDS.chooseProject, exact: true });
-  await shot(page, meta('m4-new-chat-project-menu', 'C70', 'New chat, the project menu open', 'The idle session in front, File › New chat (⌘N), then its project chip pressed', 'The project menu over the new chat: the projects, the scratch project ticked, then New project and the last action (“No project” on M4, master “Don’t work in a project”)', ['composer', 'composer/frame']), async () => {
-    await closeOverlays(page);
-    await openSession(page, SID.idle);
-    await menu(app, 'session.new');
-    await expect(pane(page).locator('[data-project-row]')).toBeVisible({ timeout: 10_000 });
-    await page.waitForTimeout(800);
-    await pane(page).locator('[data-project-row] button[aria-haspopup="dialog"]').first().click();
-  }, {
-    check: async () => {
-      await inView(chooser(), 'the project menu');
-      await inView(chooser().getByRole('option', { name: byM4(M4_WORDS.noProject), exact: true }), 'the menu’s last action');
-    },
-    after: async () => {
-      await closeOverlays(page);
-      await menu(app, 'tab.close');
-      await page.waitForTimeout(500);
     },
   });
 
@@ -4661,7 +4700,7 @@ function m4PluginState(): StubState {
     fail: {},
   };
 }
-const M4_LAUNCH = ['m4-plugins-mod-override', 'm4-plugins-mod-default', 'm4-plugins-add-menu', 'm4-customize-plugin-off', 'm4-customize-plugin-no-description', 'm4-customize-all-kinds', 'm4-customize-skill-pointed', 'm4-archive-sheet', 'm4-worktrees-orphan', 'm4-session-info-starting'];
+const M4_LAUNCH = ['m4-plugins-mod-override', 'm4-plugins-mod-default', 'm4-plugins-add-menu', 'm4-new-chat-project-menu', 'm4-customize-plugin-off', 'm4-customize-plugin-no-description', 'm4-customize-all-kinds', 'm4-customize-skill-pointed', 'm4-skill-file-gone', 'm4-archive-sheet', 'm4-worktrees-orphan', 'm4-session-info-starting'];
 test('the word cut’s M4: the mods’ rows, Customize’s plugin and skill rows, the archive sheet, worktrees and a start under way', async () => {
   test.setTimeout(900_000);
   if (!M4_LAUNCH.some(wanted)) return;
@@ -4682,6 +4721,13 @@ test('the word cut’s M4: the mods’ rows, Customize’s plugin and skill rows
   writeFileSync(join(config, '.claude.json'), `${JSON.stringify({ ...globalConfig, mcpServers: { 'notes-index': { type: 'stdio', command: 'node', args: ['server.js'] } } }, null, 2)}\n`);
   mkdirSync(join(config, 'skills', 'release-notes'), { recursive: true });
   writeFileSync(join(config, 'skills', 'release-notes', 'SKILL.md'), '---\nname: release-notes\ndescription: Drafts release notes from the merged pull requests\n---\nWrite the notes.\n');
+  // a second user skill, the one whose file N189's scene removes and puts back
+  const draft = join(config, 'skills', 'old-draft');
+  const writeDraft = () => {
+    mkdirSync(draft, { recursive: true });
+    writeFileSync(join(draft, 'SKILL.md'), '---\nname: old-draft\ndescription: An early draft of the release checklist\n---\nDraft the checklist.\n');
+  };
+  writeDraft();
   const usage = usageFixture();
   const userData = join(SCRATCH, 'profile-m4');
   mkdirSync(userData, { recursive: true });
@@ -4773,7 +4819,9 @@ test('the word cut’s M4: the mods’ rows, Customize’s plugin and skill rows
         await inView(addMenu(), 'the Add menu');
         const head = dialogOf(page, 'plugins').locator('button[data-open-discover]');
         if (m4Cut()) {
-          await expect(addMenu().getByRole('menuitem').first(), 'Discover plugins first').toHaveAttribute('data-open-discover', '', { timeout: 3_000 });
+          const first = addMenu().getByRole('menuitem').first();
+          await expect(first, 'Discover plugins first').toHaveAttribute('data-open-discover', { timeout: 3_000 });
+          await expect(first, 'Discover plugins first').toHaveAccessibleName(M4_WORDS.discoverPlugins, { timeout: 3_000 });
           await expect(head, 'no Open Discover in the head').toHaveCount(0);
         } else await inView(head, 'master’s Open Discover in the head');
       },
@@ -4813,13 +4861,12 @@ test('the word cut’s M4: the mods’ rows, Customize’s plugin and skill rows
       },
       after: () => letGo(page),
     });
-    await shot(page, m4Meta('m4-customize-all-kinds', 'G215, G216, G218, G225, G248', 'Customize, My items (All) with every kind', 'Customize in the sidebar, Show: All (user configuration)', 'The plugins, the mod, the skills and the connectors each in its row form at rest, each row’s kind word in one column (on M4 a plugin’s switch after it)', ['customize', 'widgets/plugins', 'widgets/skills', 'customize/connectors']), async () => {
+    await shot(page, m4Meta('m4-customize-all-kinds', 'G215, G216, G218, G225, G248', 'Customize, My items (All) with every kind', 'Customize in the sidebar, Show: All (user configuration)', 'The plugins, the mods and the skills each in its row form at rest, each row’s kind word in one column (on M4 a plugin’s switch after it); the connector below them, out of frame', ['customize', 'widgets/plugins', 'widgets/skills', 'customize/connectors']), async () => {
       await customizeAt(page, 'mine', 'all');
       await letGo(page);
     }, {
       check: async () => {
         for (const kind of ['plugin', 'mod', 'skill'] as const) await inView(custom(page).locator(`[data-kind-word="${kind}"]`), `a ${kind}’s row`);
-        await expect(custom(page).locator('[data-kind-word="connector"]').first(), 'a connector’s row').toBeAttached({ timeout: 3_000 });
       },
     });
     const skill = () => custom(page).locator('[data-skill-row="release-notes"]').first();
@@ -4839,6 +4886,41 @@ test('the word cut’s M4: the mods’ rows, Customize’s plugin and skill rows
         } else await inView(skill().getByText(description, { exact: true }), 'master’s description at rest');
       }),
       after: () => letGo(page),
+    });
+
+    // ---- a skill's file gone (N189): its detail open, its folder removed, then Open in › Finder. Main reads the place's
+    // inventory again and the file before it calls any app (main/customization/skill-file.ts `admitSkillFile`), so a file
+    // no longer there opens nothing and answers `missing`, on both builds. M4's line is short with Retry beside it;
+    // master's says to refresh. The skill is written back after the capture.
+    const gone = () => custom(page).locator('[data-skill-detail="old-draft"]').first();
+    const refusal = () => gone().locator('[data-skill-refusal]').first();
+    await shot(page, m4Meta('m4-skill-file-gone', 'N189', 'Customize, a skill’s detail after Open in found its file gone', 'Customize, Show: Skills (user configuration), the old-draft skill’s detail; its folder removed, then Open in › Finder (nothing opens: main finds the file gone)', 'The detail’s line in the danger tone: on M4 “This skill’s file is no longer here.” with Retry beside it; master’s sentence asking to refresh', ['customize', 'widgets/skills', 'open-in']), async () => {
+      await closeOverlays(page);
+      writeDraft();
+      await customizeAt(page, 'mine', 'skills');
+      const row = custom(page).locator('[data-skill-row="old-draft"]').first();
+      await row.scrollIntoViewIfNeeded({ timeout: 10_000 });
+      await row.locator('[data-row-open]').first().click();
+      await expect(gone(), 'the skill’s detail').toBeVisible({ timeout: 10_000 });
+      rmSync(draft, { recursive: true, force: true });
+      await gone().locator('[data-open-in-trigger]').first().click();
+      const finder = page.locator('[role="menu"] [data-open-in="finder"]').first();
+      await expect(finder, 'Open in’s Finder row').toBeVisible({ timeout: 10_000 });
+      await finder.click();
+      await expect(refusal(), 'the refusal under the head').toBeVisible({ timeout: 10_000 });
+      await pointerAside(page);
+    }, {
+      check: async () => {
+        await inView(refusal().getByRole('alert'), 'the refusal');
+        await expect(refusal().getByRole('alert'), 'the refusal’s words').toHaveText(byM4(M4_WORDS.skillGone), { timeout: 3_000 });
+        const retry = refusal().getByRole('button', { name: M4_WORDS.retry, exact: true });
+        if (m4Cut()) await inView(retry, 'Retry beside the line');
+        else await expect(retry, 'no Retry on master').toHaveCount(0);
+      },
+      after: async () => {
+        writeDraft();
+        await closeOverlays(page);
+      },
     });
     await reset(page);
 
@@ -4878,6 +4960,44 @@ test('the word cut’s M4: the mods’ rows, Customize’s plugin and skill rows
         } else await inView(none, 'master’s No session');
       },
       after: () => closeOverlays(page),
+    });
+    await reset(page);
+
+    // ---- New chat's project menu (C70): its last action in the chip's words on M4, "No project"; master's sentence. Here,
+    // on the index, whose New chat writes a setup intent (sessions/connect.ts); launch 1's scenario mints an id with none
+    // (app/scenario-session-creator.ts) and draws no project row. The new chat is the one intent New chat added, opened
+    // over the plain session, so its project is chosen and the action is offered; only that chat's tab is closed after.
+    const intents = async () => value(await invoke(page, 'session.intent.list', undefined)).intents.map((intent) => intent.appSessionId as string);
+    let before: Set<string> | null = null; // read once, by the first attempt: a retry's New chat reuses its empty chat (U13a)
+    let chat: string | null = null;
+    const newChat = () => pane(page).locator(`[data-composer="${chat}"]`);
+    const chooser = () => page.getByRole('dialog', { name: M4_WORDS.chooseProject, exact: true });
+    await shot(page, m4Meta('m4-new-chat-project-menu', 'C70', 'New chat, the project menu open', 'A session in front, File › New chat (⌘N), then the new chat’s project chip pressed', 'The project menu over the new chat: the projects, this launch’s project ticked, then New project and the last action (“No project” on M4, master “Don\'t work in a project”)', ['composer', 'composer/frame']), async () => {
+      await closeOverlays(page);
+      await opened('plain');
+      const known = (before ??= new Set(await intents()));
+      await menu(app, 'session.new');
+      await expect.poll(async () => {
+        const made = (await intents()).find((id) => !known.has(id));
+        chat = made === undefined ? null : await addressed(page, made);
+        return chat;
+      }, { message: 'New chat’s setup intent', timeout: 10_000 }).not.toBeNull();
+      await expect(newChat(), 'the new chat’s tab shown').toBeVisible({ timeout: 10_000 });
+      const row = pane(page).locator('[data-project-row]').first();
+      await expect(row, 'the new chat’s project row').toBeVisible({ timeout: 10_000 });
+      await page.waitForTimeout(800);
+      await row.locator('button[aria-haspopup="dialog"]').first().click();
+    }, {
+      check: async () => {
+        await inView(chooser(), 'the project menu');
+        await inView(chooser().getByRole('option', { name: byM4(M4_WORDS.noProject), exact: true }), 'the menu’s last action');
+      },
+      after: async () => {
+        await closeOverlays(page);
+        // only the chat this scene made, and only while it is the tab in front
+        if (chat !== null && (await newChat().isVisible())) await menu(app, 'tab.close');
+        await page.waitForTimeout(500);
+      },
     });
     await reset(page);
 
