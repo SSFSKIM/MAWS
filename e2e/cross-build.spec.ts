@@ -386,6 +386,10 @@ interface CrossingSteps {
   awayOnKept?(id: AppSessionId): Promise<string[]>; // P5 O17 M8: the kept session's id
   awayOnOwn?(id: AppSessionId): Promise<string[]>;
   attacherMoved?(run: Run): Promise<string[]>;
+  // board ticket 421: a check of the attacher's own session service while the kept engine host serves it, after the
+  // launch there; its one launch takes the replay journal `kept-host-launch`, after the machine route's. Only the
+  // fallback crossing reaches it: a scene that passes it must first skip a crossing that hands over (both list host.holder)
+  onKeptHost?(page: Page): Promise<string[]>;
 }
 
 // A crossing needs the attacher's engine host to be another build's. Two builds a minor apart always differ there; two
@@ -398,7 +402,11 @@ async function skipOneEngineHost(attaching: Run, keptBuild: string, keeper: Buil
 }
 
 async function crossing(s: Scratch, keeper: Build, attacher: Build, gap: { newer: Build; older: Build } | null, shapes: Shapes, steps: CrossingSteps = {}): Promise<string[]> {
-  if (holds(keeper) && holds(attacher)) return handedOverCrossing(s, keeper, attacher, shapes, steps); // P5 O16 M3c
+  if (holds(keeper) && holds(attacher)) {
+    // board ticket 421: a check that needs the kept host to serve the attacher never passes unrun across a handover
+    expect(steps.onKeptHost, `${keeper.label} and ${attacher.label} hand over: the kept engine host never serves the attacher, so its check cannot run`).toBeUndefined();
+    return handedOverCrossing(s, keeper, attacher, shapes, steps); // P5 O16 M3c
+  }
   const shapeOf = (shape: Shape) => (shape === 'daemon' ? ' on the daemon shape' : '');
   const said: string[] = [`${keeper.label} (wire ${wireOf(keeper)})${shapeOf(shapes.keeper)} keeps a session; ${attacher.label} (wire ${wireOf(attacher)})${shapeOf(shapes.attacher)} attaches`];
   // an equal wire has no gap to probe: neither build lacks a command of the other's
@@ -436,9 +444,9 @@ async function crossing(s: Scratch, keeper: Build, attacher: Build, gap: { newer
   const idleMs = shapes.attacher === 'daemon' ? REATTACH_IDLE_MS : IDLE_MS;
   // P5 O7 M9: the journal the service's legacy launch on the older host plays (its replay seam hands it to that start)
   const legacyRoute = routesMachine(attacher) && !routesMachine(keeper) ? turnsJournal(s.root, 'machine-legacy', 1) : null;
-  // board ticket 421: the journal of the service's new chat whose set the older host cannot serve, played after the above
-  const toolsOnOlder = servesMawsTools(attacher) && !servesMawsTools(keeper) ? turnsJournal(s.root, 'maws-tools-older', 1) : null;
-  const replays = [legacyRoute, toolsOnOlder].filter((journal) => journal !== null);
+  // board ticket 421: the journal of the one launch `steps.onKeptHost` makes through the service, played after the above
+  const keptHostLaunch = steps.onKeptHost ? turnsJournal(s.root, 'kept-host-launch', 1) : null;
+  const replays = [legacyRoute, keptHostLaunch].filter((journal) => journal !== null);
   const attach = () => s.launch({ MAWS_HOST_MODE: shapes.attacher, MAWS_E2E_SUPERVISOR_IDLE_MS: String(idleMs), ...(replays.length > 0 && { MAWS_E2E_REPLAY_FIXTURES: replays.join(',') }), ...steps.env }, attacher.root);
   let second = await attach();
   await skipOneEngineHost(second, kept.buildId, keeper, attacher);
@@ -531,7 +539,7 @@ async function crossing(s: Scratch, keeper: Build, attacher: Build, gap: { newer
   await turnEnded(second.page, launched, 30_000);
   await s.ready(second.page, (st) => st.supervisor!.pid === kept.pid && st.supervisor!.liveSessions === 2); // the launch ran on the kept supervisor
   if (legacyRoute !== null) said.push(...(await machineRouteOnOlderHost(s, second.page, keeper))); // P5 O7 M9
-  if (toolsOnOlder !== null) said.push(...(await mawsToolsOnOlderHost(s, second.page, keeper))); // board ticket 421
+  if (steps.onKeptHost) said.push(...(await steps.onKeptHost(second.page))); // board ticket 421
 
   // the kept request answered through this app: the kept supervisor plays on, its rows arriving live
   await second.page.evaluate(() => {
@@ -901,7 +909,8 @@ async function machineRouteOnOlderHost(s: Scratch, page: Page, older: Build): Pr
 // Board ticket 421 (docs/doperpowers/plans/2026-11-23-tool-choice.md, D8): whether a build's engine host serves a launch
 // spec's set of MAWS's tools, and this build's spine on an older one: a new chat whose intent holds a set that is not the
 // full set is served the full set there, so the host is sent none (its line carries MAWS's ask flags, and its spawn row,
-// of a build before the key, no set) and the record holds none
+// of a build before the key, no set) and the record holds none. Run by its own scene, below, which reaches it only where
+// the older host serves this build's spine: a peer from before host.holder (as the machine route's check above).
 const servesMawsTools = (build: Build) => build.manifest.capabilities.includes('engine.mawsTools');
 async function mawsToolsOnOlderHost(s: Scratch, page: Page, older: Build): Promise<string[]> {
   const id = value(await invoke(page, 'session.create', { projectId: null, location: { kind: 'directory', path: s.repo } })).appSessionId;
@@ -1100,6 +1109,20 @@ test('(update, daemon) the peer’s app keeps a session on its own supervisor; t
     });
     record(said);
   }, { shortRoot: true });
+});
+
+// Board ticket 421 (docs/doperpowers/plans/2026-11-23-tool-choice.md, D8; its M3): the update crossing whose kept engine
+// host, of a build that serves no set of MAWS's tools, serves this build's spine, which launches a new chat there at the
+// full set (mawsToolsOnOlderHost). That fallback is reached only where the kept host serves the attacher: a peer from
+// before host.holder (--peer 95050efd1, as the machine route's check). Any other peer skips the scene, saying why, so it
+// never passes without its assertions.
+test('(maws tools, older engine host) the peer’s engine host, which serves no set of MAWS’s tools, serves this build’s spine: a new chat holding a set launches at the full set, none sent and none recorded', async () => {
+  const { here, peer } = builds();
+  test.skip(servesMawsTools(peer), `the peer (wire ${wireOf(peer)}) serves engine.mawsTools: there is no older engine host to fall back on`);
+  test.skip(holds(peer) && holds(here), `the peer (wire ${wireOf(peer)}) lists ${HOLDER_CAPABILITY}: it hands the kept session over at the attach, so its engine host never serves this build's spine; run with a peer from before it (--peer 95050efd1)`);
+  const [crosses, why] = crossesOnMawsd(peer);
+  test.skip(!crosses, why);
+  await withScratch('xb-maws-tools', async (s) => record(await crossing(s, peer, here, null, ON_MAWSD, { onKeptHost: (page) => mawsToolsOnOlderHost(s, page, peer) })));
 });
 
 // P5 O4 M4 (D11's downgrade residual): before the crossing, a launch of this build seals a grant as a pre-O4 build kept it
