@@ -4,13 +4,18 @@
 // can still be waiting behind an earlier one. So a start sent while writes are unanswered launches without them, and a
 // session's tool set cannot be repaired after its start. Send waits for every write made before it.
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import type { AppSessionId } from '@shared/graph/ids';
 import type { PreloadBridge } from '@shared/ipc/schema';
+import { addressOf } from '@shared/machine/address';
 import { FULL_MAWS_TOOL_SET, withArtifacts, type MawsToolSet } from '@shared/maws/tool-set';
 import type { SetupIntent, SetupIntentPatch } from '@shared/sessions/intent';
 import { fakeClient, type FakeClient } from '../../../../test/support/fake-client';
-import { at, TEST_MACHINE } from '../../../../test/support/machine';
+import { at, OTHER_MACHINE, TEST_MACHINE } from '../../../../test/support/machine';
+import { docOf, paragraph, textNode } from '../composer/editor/doc';
+import { serializeDraft } from '../composer/editor/serialize';
 import { preloadOf } from '../test-support/preload-of';
 import { ID, intent, MESSAGE, putIntent, resetSetupStore } from '../test-support/setup-intents';
+import { resetRemoteSpawn, spawnOnMachine } from './remote-spawn';
 import { patchIntent, startIntent } from './setup-actions';
 import { resetSpawnedHere } from './spawned-here';
 import { isStarting, useSetup } from './store';
@@ -57,7 +62,10 @@ function fakeSpine(initial: SetupIntent) {
   return { bridge: preloadOf({ client } as unknown as Pick<FakeClient, 'client'>), launched };
 }
 
-beforeEach(() => resetSetupStore());
+beforeEach(() => {
+  resetSetupStore();
+  resetRemoteSpawn();
+});
 afterEach(() => {
   resetSpawnedHere();
   delete (window as { maws?: PreloadBridge }).maws;
@@ -93,5 +101,24 @@ describe('Send right after a pick', () => {
     expect(fake.invoked('session.start')).toEqual([{ appSessionId: ID, message: MESSAGE, options: {} }]);
     await fake.reply('session.start', { status: 'starting', appSessionId: ID });
     await expect(sent).resolves.toEqual({ ok: true });
+  });
+
+  // A chat whose Send goes to another machine (`session.spawn`) sends the model, effort and mode of the intent, which
+  // were drawn before the press: it waits for the same writes and reads the intent they left.
+  it('on another machine, spawns with a model and a mode picked just before Send', async () => {
+    const fake = fakeClient({ 'session.spawn': { status: 'ok', appSessionId: addressOf(OTHER_MACHINE, 'spawned-1' as AppSessionId) }, 'session.intent.discard': { leftover: null } });
+    window.maws = preloadOf(fake);
+    const drawn = intent({ appSessionId: A, model: 'opus', effort: 'high', permissionMode: null });
+    putIntent(drawn);
+    const writing = patchIntent(A, { model: 'haiku', effort: null, permissionMode: 'plan' });
+    const doc = docOf([paragraph(textNode('fix the build'))]);
+    const target = { machine: OTHER_MACHINE, name: 'mini', checkout: '/srv/app', key: null };
+    const spawned = spawnOnMachine({ from: A, target, s: serializeDraft(doc, { sessionId: null, cwd: '' }), doc, intent: drawn, mode: 'auto' }, fake.client);
+    await settled();
+    expect(fake.invoked('session.spawn'), 'the spawn waits for the write').toEqual([]);
+    await fake.reply('session.intent.patch', intent({ model: 'haiku', effort: null, permissionMode: 'plan' }));
+    await expect(writing).resolves.toEqual({ ok: true });
+    await expect(spawned).resolves.toEqual({ started: true });
+    expect(fake.invoked('session.spawn')).toEqual([{ checkout: '/srv/app', permission_mode: 'plan', model: 'haiku', brief: 'fix the build' }]);
   });
 });

@@ -88,6 +88,7 @@ import { ReplaySeam } from './sessions/replay-seam';
 import { readRestoredCost } from './sessions/restored-cost';
 import { SessionService } from './sessions/service';
 import { engineHostSettled, registerSessionServiceHandlers } from './sessions/service-register';
+import { intentPatchHoldFor } from './sessions/e2e-patch-hold'; // board ticket 854's e2e
 import { registerSpawn } from './sessions/spawn'; // P5 O7 M4
 import { createSpineView } from './sessions/spine-view';
 import { stopParts, type Part } from './stop-parts';
@@ -432,7 +433,7 @@ export function startSpine(deps: SpineDeps): SpineRoot {
       systemRoot: data.systemRoot, // P5 O7 M9: the machine route's managed settings (the tests' seam)
       ...(deps.aboveCeiling === undefined ? {} : { aboveCeiling: deps.aboveCeiling }), // the UX wave (U9, M2)
     });
-    const unintercept = registerSessionServiceHandlers(service, bus, sessions.mode); // P5 O3-D M4: the rewind repair's intercepts in launch mode index only
+    const unintercept = registerSessionServiceHandlers(service, bus, sessions.mode, intentPatchHoldFor(deps.env)); // P5 O3-D M4: the rewind repair's intercepts in launch mode index only; board ticket 854: the e2e's hold on a Tools choice's write
     registerSpawn(bus, { sessions: service, projects: () => index.projects.list({ includeHidden: true }) }); // P5 O7 M4: a spawn from another device
     registerSetupTrust(bus.register, service, setupGuard); // P5 O7 M9: a remote setup's trust read, guarded
     sessionService = service;

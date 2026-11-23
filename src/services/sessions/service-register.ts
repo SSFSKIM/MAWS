@@ -22,13 +22,18 @@ import { CONVERSATION_ACTS } from './rewind-note'; // P5 O3-D M4
 // intercepted on their way to the engine host (rewind-note.ts), and from M5a (D47) lane B's claimed `host.op` that runs
 // one of them; in mode `scenario` no engine runs, and the e2e fixture
 // seams intercept some of those names themselves. Answers the intercepts' removal, for the root's stop.
-export function registerSessionServiceHandlers(service: SessionService, { register, intercept }: Pick<ServicesBus, 'register' | 'intercept'>, mode: LaunchMode): () => void {
+// Board ticket 854's e2e: `holdPatch` (./e2e-patch-hold.ts, absent outside MAWS_E2E) holds a Tools choice's write before
+// the service reads it.
+export function registerSessionServiceHandlers(service: SessionService, { register, intercept }: Pick<ServicesBus, 'register' | 'intercept'>, mode: LaunchMode, holdPatch?: (patch: SetupIntentPatch) => Promise<void>): () => void {
   const id = (appSessionId: string) => appSessionId as AppSessionId;
   register('session.trust.check', ({ directory }) => service.trustCheck(directory));
   register('session.create', ({ projectId, location }) => relay(() => service.create({ projectId: projectId as ProjectId | null, location })));
   register('session.intent.get', ({ appSessionId }) => service.getIntent(id(appSessionId)));
   register('session.intent.list', async () => ({ intents: await service.listIntents() }));
-  register('session.intent.patch', ({ appSessionId, patch }) => relay(() => service.patch(id(appSessionId), patch as SetupIntentPatch)));
+  register('session.intent.patch', async ({ appSessionId, patch }) => {
+    await holdPatch?.(patch as SetupIntentPatch);
+    return relay(() => service.patch(id(appSessionId), patch as SetupIntentPatch));
+  });
   register('session.intent.release', ({ appSessionId }) => relay(() => service.release(id(appSessionId))));
   register('session.intent.discard', ({ appSessionId }) => relay(() => service.discard(id(appSessionId))));
   register('session.intent.resolveWorktree', ({ appSessionId, resolution }) => relay(() => service.resolveRetainedWorktree(id(appSessionId), resolution)));

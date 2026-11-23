@@ -36,7 +36,9 @@ import { rememberRemoteDraft } from '../composer/editor/drafts';
 import type { Serialized } from '../composer/editor/serialize';
 import { ipc } from '../ipc/client';
 import { useLayout } from '../stores/layout';
+import { intentWritesSettled, writingIntent } from './intent-writes';
 import { markSpawnedHere } from './spawned-here';
+import { useSetup } from './store';
 
 /** A machine a New chat tab can start its session on, with the place there it starts in once one is chosen. */
 export interface SpawnTarget {
@@ -243,8 +245,8 @@ export interface SpawnRequest {
   target: SpawnTarget;
   s: Serialized; // the first message as the composer serialized it
   doc: ComposerDoc; // the composer's document, its attachments with it
-  intent: { model: string | null; effort: string | null; location: Location | null };
-  mode: string; // the composer's permission mode
+  intent: { model: string | null; effort: string | null; location: Location | null }; // as drawn; the setup store's, once its writes settle, wins
+  mode: string; // the composer's permission mode as drawn; the intent's own, once its writes settle, wins
   fresh?: boolean; // the person chose "Start a new session": a new attempt key, the held one let go
 }
 
@@ -265,7 +267,14 @@ export type SpawnOutcome = { started: true; note?: string } | { started: false; 
 
 /** Starts the session on the target's machine and moves the tab there. */
 export async function spawnOnMachine(request: SpawnRequest, client: MawsBridge = ipc): Promise<SpawnOutcome> {
-  const { from, target, s, doc, intent, mode } = request;
+  const { from, target, s, doc } = request;
+  // board ticket 854: the request's intent and mode were drawn before the press; the spawn waits for the tab's intent
+  // writes made before it and reads the intent they left (the mode the request names stands for an intent that chose
+  // none, the person's default). With none on its way it goes on in the same tick, as before.
+  if (writingIntent(from)) await intentWritesSettled(from);
+  const settled = useSetup.getState().intents.get(from);
+  const intent = settled ?? request.intent;
+  const mode = settled?.permissionMode ?? request.mode;
   const { checkout } = target;
   if (checkout === null) return { started: false, words: SPAWN_WORDS.noPlace(target.name), again: null }; // 2026-11-06
   const home = checkout === HOME_CHECKOUT;

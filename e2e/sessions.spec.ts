@@ -503,6 +503,57 @@ test.describe('sessions', () => {
     expect(maws.consoleErrors()).toEqual([]);
   });
 
+  // Board ticket 854 (docs/doperpowers/plans/2026-11-23-tool-choice.md, Decision Log 10): a Tools choice made in the "+"
+  // menu and still being written when Send is pressed is the launch's. The spine holds the write while the hold file
+  // exists (MAWS_E2E_INTENT_PATCH_HOLD, src/services/sessions/e2e-patch-hold.ts): Send waits for it, starting nothing,
+  // and once the hold lifts the first launch's own spawn row holds the choice. Before the ticket the start went out at
+  // once, the spine then refused the write, and the launch had every tool.
+  test('a Tools choice still being written when Send is pressed is in that launch’s spawn row', async () => {
+    const repo = await ScratchRepo.create();
+    const store = await StoreFixture.create();
+    const hold = join(store.configHome, 'e2e-intent-patch-hold');
+    const launched = await launchCase({ fixtures: [AUTO_ROUTED], trusted: [repo.root], store, env: { MAWS_E2E_INTENT_PATCH_HOLD: hold } });
+    current = { ...launched, repos: [repo] };
+    const { page, maws } = launched;
+    const project = await addProject(page, repo.root);
+    const id = await plus(page, project.name);
+    await routeDirect(page, id);
+    const prompt = fixtureIdentity(AUTO_ROUTED).firstPrompt!;
+    await editor(page).click();
+    await page.keyboard.type(prompt.display);
+    await expect(editor(page)).toHaveText(prompt.display);
+    // the choice, by keyboard in the "+" menu, its write held at the spine
+    writeFileSync(hold, '');
+    await page.locator('[data-region="main"]').getByRole('button', { name: 'Add files, photos or commands' }).focus();
+    await page.keyboard.press('Enter');
+    const tools = page.getByRole('menuitem', { name: 'Tools' });
+    await expect(tools).toBeVisible();
+    await page.keyboard.press('End');
+    await expect(tools).toBeFocused();
+    await page.keyboard.press('ArrowRight');
+    const artifacts = page.getByRole('menuitemcheckbox', { name: 'Artifacts' });
+    await expect(artifacts).toBeFocused();
+    await page.keyboard.press('Enter');
+    await expect(artifacts, 'the menu shows the choice being written').toHaveAttribute('aria-checked', 'false');
+    await page.keyboard.press('Escape');
+    await page.keyboard.press('Escape');
+    await expect(tools).toHaveCount(0);
+    expect(value(await invoke(page, 'session.intent.get', { appSessionId: id }))!.mawsTools, 'the write is held: the intent has no set yet').toBeUndefined();
+    const control = page.locator('[data-region="main"] [data-submit-state]');
+    await expect(control).toHaveText('Send');
+    await control.click();
+    // Send waits for the write: no setup phase while it is held (a window that only stages the premise, not a bound)
+    await page.waitForTimeout(1_000);
+    expect(await setupOf(page, id), 'nothing starts while the choice is being written').toEqual([]);
+    rmSync(hold);
+    await untilPhase(page, id, 'ready');
+    const off = { artifacts: false, documents: false, dashboards: false, auxiliary: true, question: 'maws' };
+    expect(value(await invoke(page, 'session.get', { appSessionId: id as never }))!.mawsTools, 'the record holds the choice').toEqual(off);
+    const launchId = value(await invoke(page, 'session.status', { appSessionId: id as never })).launchId;
+    expect(spawnRowOf(maws, id, launchId).mawsTools, 'the choice in the launch’s own spawn row').toEqual(off);
+    expect(maws.consoleErrors()).toEqual([]);
+  });
+
   // U1a §J (A13): a folder with nothing to load says so in one line, in place of the list of what trust would turn on
   test('trust card, nothing to load: a folder with no project settings and no .mcp.json shows its path, one line saying so and where trust is recorded, and no list; the frame reads its title alone', async () => {
     const repo = await ScratchRepo.create({ sentinels: false });

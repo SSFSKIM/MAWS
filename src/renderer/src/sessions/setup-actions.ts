@@ -20,6 +20,7 @@ import { heldToast } from './attach';
 import { cleanupTargetAt, confirm, removeWorktreeAction } from './dialogs';
 import { holderWords } from './holder-words';
 import { returnMessage } from './message-return';
+import { holdIntentWrite, intentWritesSettled, writingIntent } from './intent-writes'; // board ticket 854
 import { markSpawnedHere } from './spawned-here'; // P5 O7 M8
 import { failureOf, isStarting, startNoticeId, useSetup, type HeldMessage } from './store'; // P2-A: startNoticeId; P2-F: HeldMessage; U13a: failureOf
 import { machineOf } from '@shared/machine/address';
@@ -70,7 +71,7 @@ async function start(appSessionId: AppSessionId, message: FirstMessage | null, o
   store.undock(appSessionId);
   store.setInvoking(appSessionId, true);
   try {
-    await Promise.allSettled(writing.get(appSessionId) ?? []);
+    await intentWritesSettled(appSessionId);
     const result = await ipc.invoke('session.start', { appSessionId, message, options });
     // P5 O7 M8: a New chat this window started (its first Send, or a card's continuation) leads its sidebar group until
     // its first turn ends
@@ -83,22 +84,12 @@ async function start(appSessionId: AppSessionId, message: FirstMessage | null, o
 
 // ---- the hook's commands -----------------------------------------------------------------------------------------
 
-// U13a (the branch review): the intent writes this page has sent and main has not answered, per session, held as the
-// write leaves; until its answer reaches the setup store a chat may hold a draft its intent does not show yet, and a
-// start waits for them (board ticket 854).
-const writing = new Map<AppSessionId, Set<Promise<HookResult>>>();
-export const resetIntentWrites = (): void => writing.clear(); // for suites: a write a failed test left unanswered
+// Every intent write is held as on its way until it settles (./intent-writes.ts): an empty chat's rule and the first
+// start read it.
+export { resetIntentWrites } from './intent-writes';
 
 export function patchIntent(appSessionId: AppSessionId, patch: SetupIntentPatch): Promise<HookResult> {
-  const write = writeIntent(appSessionId, patch);
-  const held = writing.get(appSessionId) ?? new Set();
-  writing.set(appSessionId, held.add(write));
-  const settle = () => {
-    held.delete(write);
-    if (held.size === 0 && writing.get(appSessionId) === held) writing.delete(appSessionId);
-  };
-  write.then(settle, settle);
-  return write;
+  return holdIntentWrite(appSessionId, writeIntent(appSessionId, patch));
 }
 
 async function writeIntent(appSessionId: AppSessionId, patch: SetupIntentPatch): Promise<HookResult> {
@@ -374,7 +365,7 @@ export function isEmptyChat(appSessionId: AppSessionId): boolean {
   if (intent === undefined || useSessions.getState().records.has(appSessionId) || !isEmptyIntent(intent)) return false;
   if (isStarting(setup, appSessionId) || setup.cards.has(appSessionId) || failureOf(setup, appSessionId) !== null) return false;
   const composer = useComposerStore.getState();
-  if (writing.has(appSessionId) || composer.prefills.has(appSessionId) || (composer.attachmentQueue.get(appSessionId)?.length ?? 0) > 0) return false;
+  if (writingIntent(appSessionId) || composer.prefills.has(appSessionId) || (composer.attachmentQueue.get(appSessionId)?.length ?? 0) > 0) return false;
   const liveDoc = liveDraftDoc(appSessionId);
   return liveDoc === undefined || isEmptyDoc(liveDoc);
 }
