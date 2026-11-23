@@ -102,7 +102,7 @@ it('keeps the plugin session picker with its library controls and reloads the se
   await waitFor(() => expect(backend.calls.filter((call) => call.command === 'session.reloadSkills').map((call) => call.input)).toEqual([{ appSessionId: bareOf(second.appSessionId) }]));
   expect(screen.getByText('Working…').getAttribute('role')).toBe('status');
   act(() => backend.emitOperation({ appSessionId: bareOf(second.appSessionId), opId: 'chrome-skills', command: 'session.reloadSkills', late: false, outcome: { ok: true, value: { skills: [{ name: 'review' }, { name: 'release' }] } } }));
-  expect((await screen.findByText('Reloaded · 2 skills')).getAttribute('role')).toBe('status');
+  expect((await screen.findByText('Reloaded')).getAttribute('role')).toBe('status'); // the word cut (P672)
   expect(screen.getByRole('button', { name: 'Reload plugins' })).toBeTruthy();
 
   // P4-AGG M3: Customize's second view is Discover, over the catalog with the page's cwd, not the engine's listing
@@ -302,19 +302,21 @@ it('attaches live facts only from a ready session in the selected directory and 
   expect(backend.calls.filter((call) => call.command === 'session.acquire')).toEqual([]);
 });
 
-it.each(['skills', 'mcp'] as const)('shows normal inventory coverage quietly in %s, separately from actionable read warnings', async (section) => {
+// The word cut (G205, N135): the inventory's standing coverage draws nothing; an actionable read warning still does.
+it.each(['skills', 'mcp'] as const)('draws no coverage note in %s, and still shows actionable read warnings', async (section) => {
   const coverage = 'Plugin MCP servers and marketplace-only skill declarations are not inventoried; see Plugins.';
   const unreadable = '/config/settings.json: not valid JSON';
   backend.script('customization.inventory', () => ({ skills: [], servers: [], warnings: [coverage], serversRead: true }));
   mount(section);
-  const note = await screen.findByText('Inventory coverage');
-  expect(note.closest('details')?.classList.contains('text-fg-muted')).toBe(true);
+  await waitFor(() => expect(backend.calls.some((call) => call.command === 'customization.inventory')).toBe(true));
+  await act(async () => {});
+  expect(screen.queryByText('Inventory coverage')).toBeNull();
+  expect(screen.queryByText(coverage)).toBeNull();
   expect(screen.queryByText('Some configuration could not be read')).toBeNull();
-  fireEvent.click(note);
-  expect(screen.getByText(coverage)).toBeTruthy();
+  cleanup();
 
   backend.script('customization.inventory', () => ({ skills: [], servers: [], warnings: [coverage, unreadable], serversRead: false }));
-  fireEvent.click(screen.getByRole('button', { name: 'Refresh' }));
+  mount(section);
   const warning = await screen.findByText('Some configuration could not be read');
   expect(warning.closest('details')?.classList.contains('text-warning')).toBe(true);
   expect(within(warning.closest('details')!).getByText(unreadable)).toBeTruthy();

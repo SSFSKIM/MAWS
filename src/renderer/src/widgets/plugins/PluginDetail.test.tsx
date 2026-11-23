@@ -89,7 +89,7 @@ describe('the detail: enabled for this project and loaded in this session', () =
     const at = new Date(Date.now() - 2 * DAY).toISOString();
     show(identityOf(p, viewOf(p)), { loaded: loadedWith([ID], { kind: 'last', at }), loadedIds: new Set([ID]) });
     expect(fact('enabled').textContent).toBe('Not enabled for this project');
-    expect(fact('loaded').textContent).toBe(`Loaded in this session · Loaded last time, ${REL.ago(2, 'day')}`);
+    expect(fact('loaded').textContent).toBe(`Loaded in this session · as of ${REL.ago(2, 'day')}`); // the word cut (P664)
   });
 
   it('enabled and absent from a known list on a dormant session: Refresh, called once from its click and never on mount', async () => {
@@ -100,8 +100,8 @@ describe('the detail: enabled for this project and loaded in this session', () =
     window.maws = { localMachine: TEST_MACHINE, invoke, on: () => () => {}, pathForFile: () => '' } as unknown as PreloadBridge;
     useSessions.setState({ records: new Map([[SESSION, record(SESSION)]]), digests: new Map([[SESSION, digest(SESSION, { availability: 'resumable' })]]) });
     show(identityOf(p, viewOf(p)), { loaded: loadedWith(['other@x'], { kind: 'last', at: new Date().toISOString() }, refresh), loadedIds: new Set(['other@x']) });
-    expect(fact('enabled').textContent).toBe('Enabled for this project');
-    expect(within(fact('loaded')).getByText('Not loaded in this session')).toBeTruthy();
+    expect(screen.queryByText('Enabled for this project')).toBeNull(); // the word cut (G235)
+    expect(within(fact('loaded')).getByText('Not loaded yet')).toBeTruthy(); // the word cut (P710)
     expect(refresh).not.toHaveBeenCalled();
     fireEvent.click(within(fact('loaded')).getByRole('button', { name: 'Refresh' }));
     expect(refresh).toHaveBeenCalledTimes(1);
@@ -128,16 +128,16 @@ describe('the detail: enabled for this project and loaded in this session', () =
     expect(within(fact('loaded')).queryByRole('button', { name: 'Refresh' })).toBeNull();
   });
 
-  it('a ready session offers Reload plugins instead; a disabled plugin is offered neither; no list is a dash (the word cut, P174)', () => {
+  it('a ready session offers Reload instead; a disabled plugin is offered neither; no list is a dash (the word cut, P174, P710)', () => {
     const p = inst(ID);
     const reloadMods = vi.fn();
     show(identityOf(p, viewOf(p)), { availability: 'usable', loaded: loadedWith(['other@x'], { kind: 'now' }), loadedIds: new Set(['other@x']), reloads: { reloadMods, reloadSkills: () => {}, line: null, failed: false, busy: false, modsUnavailable: null, skillsUnavailable: null } });
-    fireEvent.click(within(fact('loaded')).getByRole('button', { name: 'Reload plugins' }));
+    fireEvent.click(within(fact('loaded')).getByRole('button', { name: 'Reload' }));
     expect(reloadMods).toHaveBeenCalledTimes(1);
     cleanup();
     const off = inst(ID, { enabled: false });
     show(identityOf(off, viewOf(off)), { availability: 'usable', loaded: loadedWith(['other@x'], { kind: 'now' }), loadedIds: new Set(['other@x']) });
-    expect(fact('loaded').textContent).toBe('Not loaded in this session');
+    expect(fact('loaded').textContent).toBe('Not loaded yet');
     cleanup();
     show(identityOf(p, viewOf(p)));
     expect(fact('loaded').textContent).toBe('—');
@@ -145,11 +145,11 @@ describe('the detail: enabled for this project and loaded in this session', () =
 });
 
 describe('the detail: the head', () => {
-  it('the byline names the author, the version (or that none is reported), the marketplace and the update', () => {
+  it('the byline names the author, the version (nothing where none is reported: the word cut, P698), the marketplace and the update', () => {
     const p = inst(ID, { version: 'unknown', lastUpdated: new Date(Date.now() - 3 * DAY).toISOString() });
     const detail = show(identityOf(p, viewOf(p, { author: 'Anthropic' })));
     expect(within(detail).getByRole('heading', { name: 'Frontend design' })).toBeTruthy();
-    expect(detail.querySelector('h3 + p')!.textContent).toBe(`by Anthropic · Version not reported · claude-plugins-official · updated ${REL.ago(3, 'day')}`);
+    expect(detail.querySelector('h3 + p')!.textContent).toBe(`by Anthropic · claude-plugins-official · updated ${REL.ago(3, 'day')}`);
     expect(detail.textContent).not.toContain('unknown');
   });
 
@@ -262,9 +262,25 @@ describe('the detail over the reader’s answers', () => {
       fireEvent.mouseDown(tab);
       seen.push(document.body.innerHTML);
     }
-    expect(seen).toHaveLength(5); // Overview, MCP servers, Hooks, Monitors, Language servers
+    expect(seen).toHaveLength(5); // Overview, Connectors, Hooks, Monitors, Language servers
     for (const html of seen) for (const secret of ['sk-secret', 'Bearer', 'hooks.example', 'mcp.example', 'API_KEY_VALUE', 'curl', 'tail sk']) expect(html, secret).not.toContain(secret);
     expect(seen.join('')).toContain('PostToolUse · Write');
     expect(seen.join('')).toContain('Tails the log');
+  });
+});
+
+// The word cut (P706, P712, P713, G239, G240): What's inside lists its kinds under no drawn heading (the region keeps
+// the name) and with no sentence under each kind or atop the Skills tab; a plugin's MCP servers are its Connectors.
+describe('the word cut: What’s inside', () => {
+  it('draws the kinds alone, Connectors among them, and the Skills tab with no helper sentence', () => {
+    const p = inst(ID);
+    const components = { ...EMPTY, mcpServers: [{ name: 'tides', transport: 'http' as const }], skills: [{ name: 'review', description: 'Reviews' }] };
+    const detail = show(identityOf(p, viewOf(p, { components })));
+    const inside = within(detail).getByRole('region', { name: 'What’s inside' });
+    expect(inside.querySelector('h4')).toBeNull();
+    expect([...inside.querySelectorAll('[data-inside]')].map((row) => row.textContent)).toEqual(['Connectors · 1· tides', 'Skills · 1· review']);
+    expect(within(detail).getAllByRole('tab').map((tab) => tab.textContent)).toEqual(['Overview', 'Skills1', 'Connectors1']);
+    fireEvent.mouseDown(within(detail).getByRole('tab', { name: 'Skills1' }));
+    expect(detail.textContent).not.toContain('Invoke by typing');
   });
 });

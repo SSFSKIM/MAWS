@@ -1,10 +1,11 @@
 // `/reload-plugins` (E11's sitting, owner-notes 00-consolidated-plan §2.2): the engine lists it as a terminal-only command,
-// and MAWS runs it as its own action over the existing `reload_plugins` control: choosing it reloads at once and says
-// what the reload did; a session with no ready process is told so and nothing is asked of the engine.
+// and MAWS runs it as its own action over the existing `reload_plugins` control: choosing it reloads at once; a session
+// with no ready process is told so and nothing is asked of the engine. The word cut (P751): the quiet spinner while it
+// reloads, then a toast says what it did and the dialog closes.
 import { join } from 'node:path';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { EngineSessionStatus } from '@shared/engine/status';
 import { loadScenario } from '../../../../test/support/scenario';
@@ -15,6 +16,7 @@ import { addressOf } from '@shared/machine/address';
 import { heardRefusal, resetRemoteSurfaces } from '../artifacts/remote-surfaces';
 import { useMachines } from '../stores/machines';
 import { ipc } from '../ipc/client';
+import { useNotices } from '../stores/notices';
 import { useSessions } from '../stores/sessions';
 import { ReloadPluginsWidget } from './ReloadPluginsWidget';
 
@@ -32,30 +34,45 @@ beforeEach(() => {
 afterEach(() => {
   cleanup();
   useSessions.setState({ engine: new Map() });
+  useNotices.setState({ notices: [] });
   delete (window as { maws?: unknown }).maws;
 });
 
-const mount = (appSessionId: AppSessionId = ID) =>
+const mount = (appSessionId: AppSessionId = ID, close: () => void = () => {}) =>
   render(
     <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
-      <ReloadPluginsWidget appSessionId={appSessionId} args="" close={() => {}} />
+      <ReloadPluginsWidget appSessionId={appSessionId} args="" close={close} />
     </QueryClientProvider>,
   );
 const reloads = () => backend.calls.filter((c) => c.subtype === 'reload_plugins');
 
 describe('/reload-plugins', () => {
-  it('reloads once on opening, says Working… and then what the reload loaded; Reload plugins runs it again', async () => {
+  const toasts = () => useNotices.getState().notices.map((notice) => [notice.kind, notice.level, notice.text]);
+
+  it('reloads once on opening under the quiet spinner, then says so in a toast and closes', async () => {
     backend.holdOperations(true);
     useSessions.setState({ engine: new Map([[ID, lifted(backend.status(BARE))]]) });
-    mount();
+    const close = vi.fn();
+    mount(ID, close);
     expect(document.querySelector('[data-widget="reload-plugins"] h3')?.textContent).toBe('Reload plugins');
-    await waitFor(() => expect(screen.getByText('Working…')).toBeTruthy());
+    expect(await screen.findByRole('progressbar', { name: 'Reloading plugins…' })).toBeTruthy();
     expect(reloads()).toHaveLength(1);
-    expect(screen.getByRole('button', { name: 'Reload plugins' })).toHaveProperty('disabled', true);
+    expect(screen.queryByRole('button', { name: 'Reload plugins' })).toBeNull();
+    expect(screen.queryByText('Working…')).toBeNull();
+    expect(close).not.toHaveBeenCalled();
     act(() => void backend.settleOperations());
-    await waitFor(() => expect(screen.getByText('Reloaded · 52 commands · 5 agents · 11 plugins · 0 errors')).toBeTruthy());
-    fireEvent.click(screen.getByRole('button', { name: 'Reload plugins' }));
-    await waitFor(() => expect(reloads()).toHaveLength(2));
+    await waitFor(() => expect(close).toHaveBeenCalledTimes(1));
+    expect(toasts()).toEqual([['toast', 'info', 'Plugins reloaded']]);
+    expect(reloads()).toHaveLength(1);
+  });
+
+  it('a failed reload says the failure in its words in a toast, and closes', async () => {
+    backend.scriptOutcome('session.reloadPlugins', () => ({ ok: false, error: { code: 'timeout', message: 'reload_plugins unanswered after 60 s', engineCode: null } }));
+    useSessions.setState({ engine: new Map([[ID, lifted(backend.status(BARE))]]) });
+    const close = vi.fn();
+    mount(ID, close);
+    await waitFor(() => expect(close).toHaveBeenCalledTimes(1));
+    expect(toasts()).toEqual([['toast', 'danger', 'reload_plugins unanswered after 60 s · timeout']]);
   });
 
   // P2-A (2026-10-09; the execution document §5.6): no ready process offers Load now; opening starts and asks nothing

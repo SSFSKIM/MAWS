@@ -214,7 +214,7 @@ describe('the Skills dialog before the first message', () => {
   it('lists the skills on disk in Customize’s three groups under its line, with no Reload', async () => {
     mount(SkillsWidget);
     await screen.findByRole('region', { name: 'In this project' });
-    expect(lead()).toBe('On disk for Atlas. The chat may load more once it starts.');
+    expect(lead()).toBe('On disk for Atlas'); // the word cut (P744)
     const rowsOf = (name: string) => within(screen.getByRole('region', { name })).getAllByRole('listitem').map((li) => li.getAttribute('data-skill-row'));
     expect(rowsOf('In this project')).toEqual(['review']);
     expect(rowsOf('Created by you')).toEqual(['translate']);
@@ -327,12 +327,14 @@ describe('the Plugins dialog before the first message', () => {
     await waitFor(() => expect(invoked('plugins.list')).toContainEqual({ cwd: CONFIG_HOME }));
   });
 
-  it('opens Customize for the user configuration from Open Discover when no folder is chosen', async () => {
+  it('opens Customize for the user configuration from Discover plugins when no folder is chosen', async () => {
     resetSetupStore();
     putIntent(intent({ appSessionId: ID, projectId: null, location: null }));
     const close = vi.fn();
     mount(PluginsWidget, close);
-    fireEvent.click(await screen.findByRole('button', { name: 'Open Discover' }));
+    await screen.findByRole('button', { name: 'Add' });
+    fireEvent.keyDown(screen.getByRole('button', { name: 'Add' }), { key: 'Enter' });
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Discover plugins' })); // the word cut (P655)
     expect(close).toHaveBeenCalled();
     expect(useCustomizeProject.getState()).toEqual({ projectId: null });
     expect(useLayout.getState().destination).toEqual({ kind: 'customize', view: 'discover', show: 'plugins' });
@@ -372,7 +374,7 @@ describe('held open', () => {
     await screen.findByRole('list', { name: 'Connectors' });
     act(() => putIntent(intent({ appSessionId: ID, projectId: null, location: { kind: 'directory', path: '/work/other' } })));
     await waitFor(() => expect(screen.queryByRole('list', { name: 'Connectors' })).toBeNull());
-    expect(screen.getByText('Reading configuration…')).toBeTruthy();
+    expect(await screen.findByRole('progressbar', { name: 'Reading configuration…' })).toBeTruthy(); // the word cut (G203)
     expect(document.body.textContent).not.toContain('notion');
     await act(async () => answer({ ...ATLAS_INVENTORY, servers: [{ name: 'linear', scope: 'project', path: '/work/other/.mcp.json', transport: 'http' }] }));
     const list = await screen.findByRole('list', { name: 'Connectors' });

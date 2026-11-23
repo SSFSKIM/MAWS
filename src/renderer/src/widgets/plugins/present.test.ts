@@ -110,11 +110,12 @@ describe('the sheet’s command and writes', () => {
     expect(sourceKindOfTyped('https://example.com/m.git')).toBeNull();
   });
 
-  it('says what follows: the reload of the running sessions, or that an added marketplace loads nothing', () => {
+  // the word cut (P720): nothing said when no session will reload, nor for an added marketplace
+  it('says what follows: the reload of the running sessions, and nothing when none reloads', () => {
     expect(thenWords('install', 1)).toBe('Reloads plugins in 1 running session');
     expect(thenWords('marketplace-remove', 3)).toBe('Reloads plugins in 3 running sessions');
-    expect(thenWords('disable', 0)).toBe('No running session to reload');
-    expect(thenWords('marketplace-add', 2)).toBe('Nothing to reload: an added marketplace loads no plugin');
+    expect(thenWords('disable', 0)).toBeNull();
+    expect(thenWords('marketplace-add', 2)).toBeNull();
   });
 });
 
@@ -131,17 +132,18 @@ describe('a row’s operation line', () => {
     expect(operationWords({ phase: 'unsent', error: 'The engine host is not running' }, title, 'user')).toEqual({ text: 'The engine host is not running', failed: true, reloadAgain: false });
   });
 
-  it('words a success as the engine’s message with the reload summarised', () => {
+  // the word cut (P731): a success is the engine's message and the version change, with only a session that fell short
+  it('words a success as the engine’s message alone where every session reflected it', () => {
     const installed = ok({ command: 'install', outcome: 'ok', message: 'Successfully installed plugin: e8-probe@e8-scratch (scope: user)' });
     expect(operationWords(done({ outcome: installed, reload: { sessions: [{ appSessionId: 'app-a' as AppSessionId, outcome: 'reflected', error: null }] } }), title, 'user')).toEqual({
-      text: 'Successfully installed plugin: e8-probe@e8-scratch (scope: user) · Reloaded in 1 session · reflected',
+      text: 'Successfully installed plugin: e8-probe@e8-scratch (scope: user)',
       failed: false,
       reloadAgain: false,
     });
-    expect(operationWords(done({ outcome: installed, reload: { sessions: [] } }), title, 'user')?.text).toBe('Successfully installed plugin: e8-probe@e8-scratch (scope: user) · No running session to reload');
-    // a reflected session beside one with no expectation (another directory under project scope) still reads reflected
+    expect(operationWords(done({ outcome: installed, reload: { sessions: [] } }), title, 'user')?.text).toBe('Successfully installed plugin: e8-probe@e8-scratch (scope: user)');
+    // a reflected session beside one with no expectation (another directory under project scope) says nothing more
     expect(operationWords(done({ outcome: installed, reload: { sessions: [{ appSessionId: 'app-a' as AppSessionId, outcome: 'reflected', error: null }, { appSessionId: 'app-b' as AppSessionId, outcome: 'no_expectation', error: null }] } }), title, 'project')?.text).toBe(
-      'Successfully installed plugin: e8-probe@e8-scratch (scope: user) · Reloaded in 2 sessions · reflected',
+      'Successfully installed plugin: e8-probe@e8-scratch (scope: user)',
     );
     // marketplace add reloads nothing and carries no reload report
     expect(operationWords(done({ action: 'marketplace-add', outcome: ok({ message: 'Successfully added marketplace: e8-scratch (declared in user settings)' }) }), title, 'user')?.text).toBe('Successfully added marketplace: e8-scratch (declared in user settings)');
@@ -154,17 +156,17 @@ describe('a row’s operation line', () => {
       { appSessionId: 'app-b' as AppSessionId, outcome: 'failed' as const, error: 'reload_plugins unanswered after 60 s' },
     ];
     expect(operationWords(done({ action: 'disable', outcome, reload: { sessions } }), title, 'user')).toEqual({
-      text: 'Successfully disabled plugin: e8-probe (scope: user) · Reloaded in 1 session · not reflected in Alpha · a project setting may override it · failed in Beta · reload_plugins unanswered after 60 s',
+      text: 'Successfully disabled plugin: e8-probe (scope: user) · not reflected in Alpha · a project setting may override it · failed in Beta · reload_plugins unanswered after 60 s',
       failed: false,
       reloadAgain: true,
     });
-    expect(operationWords(done({ action: 'disable', outcome, reload: { sessions: [sessions[0]] } }), title, 'local')?.text).toBe('Successfully disabled plugin: e8-probe (scope: user) · Reloaded in 1 session · not reflected in Alpha');
+    expect(operationWords(done({ action: 'disable', outcome, reload: { sessions: [sessions[0]] } }), title, 'local')?.text).toBe('Successfully disabled plugin: e8-probe (scope: user) · not reflected in Alpha');
   });
 
   it('reports an update’s version change and a failure as the engine’s message and code', () => {
-    expect(operationWords(done({ action: 'update', outcome: ok({ message: 'Updated e8-probe', oldVersion: '0.1.0', newVersion: '0.2.0' }), reload: { sessions: [] } }), title, 'user')?.text).toBe('Updated e8-probe · 0.1.0 → 0.2.0 · No running session to reload');
+    expect(operationWords(done({ action: 'update', outcome: ok({ message: 'Updated e8-probe', oldVersion: '0.1.0', newVersion: '0.2.0' }), reload: { sessions: [] } }), title, 'user')?.text).toBe('Updated e8-probe · 0.1.0 → 0.2.0');
     expect(operationWords(done({ action: 'update', outcome: ok({ message: 'e8-probe is already at the latest version (0.1.0).', oldVersion: '0.1.0', newVersion: '0.1.0' }), reload: { sessions: [] } }), title, 'user')?.text).toBe(
-      'e8-probe is already at the latest version (0.1.0). · No running session to reload',
+      'e8-probe is already at the latest version (0.1.0).',
     );
     const notFound = { ok: false as const, error: { code: 'cli_failed' as const, message: 'Plugin "nope" not found in marketplace "e8-scratch".', failureCode: 'not_found', shownCommand: null } };
     expect(operationWords(done({ outcome: notFound }), title, 'user')).toEqual({ text: 'Plugin "nope" not found in marketplace "e8-scratch". · not_found', failed: true, reloadAgain: false });

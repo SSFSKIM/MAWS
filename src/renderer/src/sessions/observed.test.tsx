@@ -35,7 +35,7 @@ describe('freshness and its words', () => {
 
   it('says when in the person’s words', () => {
     expect(FRESHNESS.loadedNow).toBe('Loaded now');
-    expect(FRESHNESS.loadedLast(TWO_DAYS_AGO, NOW)).toBe(`Loaded last time, ${REL.ago(2, 'day')}`);
+    expect(FRESHNESS.asOf(TWO_DAYS_AGO, NOW)).toBe(`as of ${REL.ago(2, 'day')}`); // the word cut (P664): a last loaded list's age too
     expect(FRESHNESS.lastReading('2026-10-09T09:00:00.000Z', NOW)).toBe(`Last reading, ${REL.ago(3, 'hour')}`);
     expect(FRESHNESS.lastObserved(TWO_DAYS_AGO, NOW)).toBe(`Last observed ${REL.ago(2, 'day')}`);
     expect(FRESHNESS.notObserved).toBe('Not observed yet');

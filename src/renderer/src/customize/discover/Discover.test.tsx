@@ -266,8 +266,9 @@ describe('Customize › Discover, Show: Plugins', () => {
     const shown = () => all.querySelectorAll('[data-catalog-grid] [data-catalog-card]').length;
     await waitFor(() => expect(shown()).toBe(2));
     fireEvent.click(within(all).getByRole('button', { name: 'Show more' }));
-    expect(await within(all).findByText('The catalog changed, so the list started again from the top.')).toBeTruthy();
+    await waitFor(() => expect(restartOnCursor).toBe(false)); // main answered the cursor with its restart
     await waitFor(() => expect(shown()).toBe(2));
+    expect(within(all).queryByText(/catalog changed/)).toBeNull(); // the word cut (G281): the list restarts without a notice
     fireEvent.click(within(all).getByRole('button', { name: 'Show more' }));
     await waitFor(() => expect(shown()).toBe(4));
     expect(invoked('catalog.query').filter((input) => (input as CatalogQueryInput).cursor === null)).toHaveLength(2); // the first page, asked again
@@ -350,7 +351,12 @@ describe('Customize › Discover, Show: Plugins', () => {
     catalog = catalog.map((i) => (i.id === frontend.id ? { ...frontend, alsoListedBy: ['claude-community'] } : i));
     mountPlugins();
     await discover();
-    expect(card(installedHere.id).querySelector('[data-catalog-installed]')!.textContent).toBe('Installed');
+    // the word cut (G278): the check alone, "Installed" its name and its tooltip
+    const mark = card(installedHere.id).querySelector<HTMLElement>('[data-catalog-installed]')!;
+    expect(mark.textContent).toBe('');
+    expect(mark.getAttribute('role')).toBe('img');
+    expect(mark.getAttribute('aria-label')).toBe('Installed');
+    expect(mark.tabIndex).toBe(0);
     expect(within(card(installedHere.id)).queryByRole('button', { name: 'Add code-review' })).toBeNull();
     fireEvent.click(within(card(frontend.id)).getByRole('button', { name: 'View frontend-design' }));
     const detail = await found('[data-catalog-detail]');
@@ -416,7 +422,9 @@ describe('Customize › Discover, Show: Plugins', () => {
     await waitFor(() => expect(invoked('catalog.icon').length).toBeGreaterThan(0));
     expect(card(frontend.id).querySelector('[data-item-image]')!.getAttribute('data-item-image')).toBe('tile');
     up = true;
-    fireEvent.click(screen.getByRole('button', { name: 'Refresh' }));
+    expect(screen.queryByRole('button', { name: 'Refresh' })).toBeNull(); // the word cut (G267): the Sources popover keeps it
+    fireEvent.click(screen.getByRole('button', { name: 'Sources' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Refresh' }));
     await waitFor(() => expect(card(frontend.id).querySelector('[data-item-image]')!.getAttribute('data-item-image')).toBe('icon'));
   });
 
@@ -503,11 +511,11 @@ describe('Customize: an add-then-install outlives a change of the page’s proje
 });
 
 describe('Customize › Discover, Show: Skills', () => {
-  it('names the plugin that carries the skills, and notes that unknown contents are under Plugins', async () => {
+  it('names the plugin that carries the skills, with no note about Plugins (the word cut, G280)', async () => {
     mountAt('skills', 'discover');
-    expect((await screen.findByText('Items whose contents are not known before install are under Plugins.')).tagName).toBe('P');
-    expect(invoked('catalog.home')).toEqual([{ tab: 'skills', cwd: PROJECT }]);
     const shelf = await found(`[data-shelf] [data-catalog-card="${CSS.escape(skillsOnly.id)}"]`);
+    expect(screen.queryByText('Items whose contents are not known before install are under Plugins.')).toBeNull();
+    expect(invoked('catalog.home')).toEqual([{ tab: 'skills', cwd: PROJECT }]);
     fireEvent.click(within(shelf).getByRole('button', { name: 'Add skills-only' }));
     await resolved();
     expect(shelf.querySelector('[data-catalog-components]')!.textContent).toBe('greet, summarize-diff'); // a Skills card lists its skills by name

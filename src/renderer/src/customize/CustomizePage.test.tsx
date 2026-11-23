@@ -20,6 +20,7 @@ import { SETTINGS_DEFAULTS_V21 } from '@shared/settings/defaults';
 import { useLayout } from '../stores/layout';
 import { useSessions } from '../stores/sessions';
 import { mountCustomize } from '../test-support/customize-page';
+import { accessibleDescription } from '../test-support/accessible-text';
 import { useLibraryStore } from '../widgets/plugins/library-store';
 import { CustomizeView } from './CustomizeView';
 import { forgetKeptOperations } from '../widgets/plugins/operation';
@@ -210,6 +211,7 @@ describe('the head', () => {
     expect(rows).toHaveLength(2);
     expect(within(rows[0]!).getByRole('radiogroup', { name: 'Library' })).toBeTruthy();
     expect(within(rows[0]!).getByRole('combobox', { name: 'Project' })).toHaveProperty('value', A);
+    expect(rows[0]!.textContent).not.toContain('Showing'); // the word cut (G199): the select is named Project
     expect(rows[1]!.textContent).toMatch(/^Show:/);
     const choices = within(rows[1]!).getAllByRole('radio');
     expect(choices.map((choice) => choice.textContent)).toEqual(['All', 'Plugins', 'Skills', 'Connectors']);
@@ -235,12 +237,13 @@ describe('the head', () => {
     const table: [view: 'mine' | 'discover', show: 'all' | 'plugins' | 'skills' | 'connectors', search: string, present: string[], absent: string[]][] = [
       ['mine', 'all', 'Search my items', ['New skill…', 'Add custom connector…', 'Refresh'], ['Filter', 'Sort by', 'Add', 'Sources']],
       ['mine', 'plugins', 'Search plugins', ['Filter', 'Sort by', 'Add'], ['New skill…', 'Add custom connector…', 'Refresh', 'Sources']],
-      ['mine', 'skills', 'Search skills', ['New skill…', 'Refresh'], ['Filter', 'Add', 'Add custom connector…', 'Sources']],
+      ['mine', 'skills', 'Search skills', ['New skill…'], ['Filter', 'Add', 'Add custom connector…', 'Sources', 'Refresh']], // the word cut (G247)
       ['mine', 'connectors', 'Search connectors', ['Add custom connector…', 'Refresh'], ['New skill…', 'Filter', 'Sort by', 'Add', 'Sources']],
-      ['discover', 'plugins', 'Search all sources', ['Refresh', 'Sources', 'Add'], ['New skill…', 'Filter', 'Add custom connector…']],
-      ['discover', 'skills', 'Search all sources', ['Refresh', 'Sources'], ['New skill…', 'Add', 'Add custom connector…']],
-      ['discover', 'connectors', 'Search all sources', ['Refresh', 'Sources'], ['New skill…', 'Add', 'Add custom connector…']],
-      ['discover', 'all', 'Search all sources', ['Refresh', 'Sources'], ['New skill…', 'Add', 'Add custom connector…', 'Filter']],
+      // the word cut (G267): Discover's Refresh is the Sources popover's alone
+      ['discover', 'plugins', 'Search all sources', ['Sources', 'Add'], ['New skill…', 'Filter', 'Add custom connector…', 'Refresh']],
+      ['discover', 'skills', 'Search all sources', ['Sources'], ['New skill…', 'Add', 'Add custom connector…', 'Refresh']],
+      ['discover', 'connectors', 'Search all sources', ['Sources'], ['New skill…', 'Add', 'Add custom connector…', 'Refresh']],
+      ['discover', 'all', 'Search all sources', ['Sources'], ['New skill…', 'Add', 'Add custom connector…', 'Filter', 'Refresh']],
     ];
     mountCustomize({ view: 'mine', show: 'all' });
     for (const [view, show, search, present, absent] of table) {
@@ -713,7 +716,9 @@ describe('a skill’s actions', () => {
     envAnswer = new Promise(() => {});
     mountCustomize({ view: 'mine', show: 'skills' });
     fireEvent.keyDown(await within(tools()!).findByRole('button', { name: 'New skill…' }), { key: 'Enter' });
-    expect((await screen.findByRole('menuitem', { name: 'Created by you' })).getAttribute('aria-disabled')).toBe('true');
+    const yours = await screen.findByRole('menuitem', { name: 'Created by you' });
+    expect(yours.getAttribute('aria-disabled')).toBe('true');
+    expect(accessibleDescription(yours)).toBe('Configuration folder not known yet. Refresh to try again.'); // the word cut (N133)
     fireEvent.click(screen.getByRole('menuitem', { name: 'In this project' }));
     await waitFor(() => expect(prefill(1)).toBe("Let's create a new skill in .claude/skills/ of this project. First ask me what it should do."));
   });
@@ -776,17 +781,23 @@ describe('a skill’s actions', () => {
     act(() => useSettings.setState({ state: null }));
   });
 
+  // the word cut (N133): the greyed button keeps the keyboard and says why as its tooltip and description; Refresh
+  // stands under All and Connectors (G247)
   it('when the configuration home’s first read fails, New skill… says why it waits, and Refresh reads it again', async () => {
     useCustomizeProject.setState({ projectId: null }, true);
     envAnswer = rejected('engine unavailable');
-    mountCustomize({ view: 'mine', show: 'skills' });
+    mountCustomize({ view: 'mine', show: 'all' });
     await waitFor(() => expect(invoked('plugins.env')).not.toEqual([]));
     const newSkill = () => within(tools()!).getByRole('button', { name: 'New skill…' });
-    await waitFor(() => expect(newSkill().hasAttribute('disabled')).toBe(true));
-    expect(newSkill().getAttribute('title')).toBe('Your Claude configuration folder is not known yet. Refresh to try again.');
+    await waitFor(() => expect(newSkill().getAttribute('aria-disabled')).toBe('true'));
+    expect(newSkill().hasAttribute('disabled')).toBe(false);
+    expect(newSkill().hasAttribute('title')).toBe(false);
+    expect(accessibleDescription(newSkill())).toBe('Configuration folder not known yet. Refresh to try again.');
+    fireEvent.click(newSkill());
+    expect(prefill(1)).toBeUndefined(); // greyed: a press starts nothing
     envAnswer = null;
     fireEvent.click(within(tools()!).getByRole('button', { name: 'Refresh' }));
-    await waitFor(() => expect(newSkill().hasAttribute('disabled')).toBe(false));
+    await waitFor(() => expect(newSkill().hasAttribute('aria-disabled')).toBe(false));
     fireEvent.click(newSkill());
     await waitFor(() => expect(prefill(1)).toBe(PLAIN));
   });
