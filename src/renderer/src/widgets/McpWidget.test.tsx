@@ -140,6 +140,23 @@ describe('mcp toggle reads its state back after either outcome', () => {
     await waitFor(async () => expect((await statusOf(DOCS)).textContent).toBe('Applied after all'));
   });
 
+  // P570: the correction is said only over a read-back that confirms with nothing of its own to say; an enable that
+  // persisted late and then failed to connect keeps its failure's words
+  it('a toggle that timed out, succeeded late and then failed to connect keeps its failure’s words', async () => {
+    let answer: McpAnswer = withServer(DOCS, { status: 'disabled' });
+    backend.script('session.mcpStatus', () => answer);
+    backend.scriptOutcome('session.mcpToggle', () => ({ ok: false, error: { code: 'timeout', message: 'mcp_toggle unanswered after 8 s', engineCode: null } }));
+    mount();
+    const docs = await serverSwitch(DOCS);
+    await waitFor(() => expect(docs.getAttribute('aria-checked')).toBe('false'));
+    fireEvent.click(docs);
+    await waitFor(async () => expect((await statusOf(DOCS)).textContent).toBe('Unconfirmed · mcp_toggle unanswered after 8 s · timeout'));
+    answer = withServer(DOCS, { status: 'failed', error: 'Connection failed' });
+    act(() => backend.emitOperation({ appSessionId: BARE, opId: 'op-1', command: 'session.mcpToggle', late: true, outcome: { ok: true, value: null as never } }));
+    await waitFor(async () => expect((await statusOf(DOCS)).textContent).toBe('On · not connected · Connection failed'));
+    expect((await serverSwitch(DOCS)).getAttribute('aria-checked')).toBe('true');
+  });
+
   it('when the read-back fails the switch reads Unconfirmed with the outcome’s words, and Read again reads once more', async () => {
     mount();
     fireEvent.click(await serverSwitch(DOCS));
