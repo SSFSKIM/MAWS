@@ -638,6 +638,7 @@ After M2, in a pull request of its own (Decision Log 17), the fixture takes the 
 | the retention | seven days with no counted record listing the id as `known`; active again at the next stored record that lists it; a hello alone does not bring it back | CH |
 | the fixture | `test/endpoint/rl10/conversation.json` at the master commit that holds M2 | CH |
 | addressing inside a channel | an event under a channel's id names a recipient by `to[].thread` (the recipient's thread id) beside `session` and `alias`; the app writes it when it writes into a channel (a phone's words under C), from the recipient's `joined`/member record; the endpoint reads `thread` as no addressing ref | CH, the app |
+| `channels` implies `access` and `reach` | every endpoint that welcomes `channels` also welcomes `access` and `reach` (`welcomeCapabilities` lists both unconditionally since before M2; `channels` is added after them), so sminos never holds a channel event without a `reach?` to ask | CH |
 
 #### §K. The baseline oracle (`test/endpoint/mixed-fleet.local.test.ts`, `test/endpoint/mixed-fleet-baseline.json`; M2)
 
