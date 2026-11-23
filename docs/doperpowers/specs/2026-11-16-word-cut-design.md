@@ -30,6 +30,8 @@ How to see it working: open the build beside today's build on the same fixtures 
 - [x] (2026-11-22) M3's pictures and the owner's call: the owner approved them on 2026-11-22.
 - [x] (2026-11-23 03:05Z) M4 task 1: the window's first half (New chat, the title bar and tabs, the sidebar, Projects, Overview), reviewed clean.
 - [x] (2026-11-23 03:05Z) M4 task 2: the window's second half (banners and toasts, the palette, the shortcuts window, the sheets, the usage ring), reviewed clean.
+- [x] (2026-11-23 05:45Z) M4 task 3: the dialogs typed commands open, reviewed clean.
+- [x] (2026-11-23 05:45Z) M4 task 4: Customize, reviewed clean.
 - [ ] M4 and M5: the cut built area by area, each with pictures and the owner's call.
 - [ ] Retrospective.
 
@@ -453,6 +455,28 @@ Kept by the session that wrote this document (sminos alias `design-experiment`, 
   - P597 and P598 go behind a native `<details>`, as the Sandbox dialog has it; P599's line goes with the code only it used.
   - Regenerate (rename) is busy from its press until its operation ends, and idle again on a refusal. The delete sheet's preview is kept apart from the delete's error: its spinner stands only while the preview is out, and a failed preview's words stand in the sentence's place. A wait word's destructive-step paragraph and acknowledgement stay.
   - New words are in `palette/copy.ts`, `keymap/copy.ts` and `sessions/copy.ts`.
+- 2026-11-23. **M4 task 3: the dialogs typed commands open.** 44 cuts and rewordings, with the 9 `stays` rows left as they read (P559 and P600 as ruled), and two `new` rows: N184, the Hooks dialog's source label "Startup settings (--settings option)" reads "startup" (the scratch build's leftover the spec names), and N185, `/btw`'s "Starting…" becomes the quiet spinner.
+  - A quiet spinner's name keeps the existing constant's words ("Reading…", "Starting…", "Connecting…"), so no constant forks.
+  - P521's age is the app's own long form ("5 minutes ago"). P522's Refresh glyph is the dialog frame's and the `/plugins` loaded line's, as the row names them; Session info, the context popover and the plugin detail keep the word. P523's spinner is drawn inside `DormantGesture`, so those three surfaces also show it while a start runs, and owe that state's picture. P525 changes only the dialog's stale line; a control's refusal (`transportWords`) keeps its words, since they say another fact.
+  - P582's scope sentence is a row note on a group named "Mode" around the segment (a menu of radios has no single owner for a `Tip`); "Edited in <file>" is a file source's tip, drawn only where the renderer can name the file. P586: Config's Sources and the hooks list draw the same one-word source with that tip.
+  - P569: Reconnect keeps its word with `WaitingWords`; the switch's spinner sits on its knob, with `aria-busy`. P570: a confirmed success draws no line; "Done" survives only inside a doubt. P565's "+" › Connectors menu row keeps "Connecting…", since a menu item's detail is no wait drawn in content.
+  - P637: a rename that took closes the dialog, and a quiet spinner ("Renaming") fills the body while a typed title's rename is out. P640: Copy shows a check for 1.5 s, with "Copied" announced to a screen reader. N148's reach sentence is a note on each switch row.
+  - After the task review: a connector still connecting on a stopped session reads "Connecting…" with no spinner, dated by the frame's age line (nothing can end that wait); the terminal form (`McpDriven`) never spins for it, since nothing reads its list again; Customize's live connector list reads again when the session's MCP table moves and spins only while the session is ready. A Reconnect out on a folded row keeps its spinner on the line. N148's note also says where the engine records the switch. Config's "Edited in" tip names the file Reveal opens, and is absent while that file is unknown. A widget's own close is bound to the open that drew it (`closeWidgetDialog(nonce)`), so a late rename closes nothing that replaced it; Escape and other callers still close whatever is open. Copy's check keeps the button's width, and its live region is mounted empty.
+- 2026-11-23. **M4 task 4: Customize.** 41 cuts and 11 rewordings, with 46 `stays` rows left as they read, its ten ruled rows built as ruled, one row not built, and four `new` rows.
+  - G224 (the mod's Built in mark) is not built: the ruled G225 keeps the mark at rest.
+  - The plugin, mod and skill rows share one `RowNote` overlay. A plugin's note is its description, or "N skills" where it has none (P683), then " · updated <age>" (G216, G218), and the full-date `title` goes. A plugin row keeps its version at every width; the old container rule that hid the version and date below 24 rem is gone.
+  - G225: a mod row opens to show this session's override, through a disclosure on its main line named by the mod. It starts open when the session overrides, so an active override is never hidden, and a row with no session has no opener.
+  - G215: a plugin row ends in an "Enable <name>" switch (N186). Where the switch cannot change here, it is an `UnavailableButton` that says where the plugin is managed (N187). The tail is version, menu, kind word, switch, so the kind words stand in one column under All.
+  - P703: the plugin detail always draws its switch and Update. With nothing changeable here, both are greyed, focusable and carry the reason. Update's "On latest version" is a native `disabled` only for a selection that can change.
+  - G247 removes Refresh from the Skills view only, as ruled. Its errors carry their own Retry beside what they hold back:
+    - New skill…'s reason reads "Configuration folder not known yet." (N133), with a Retry once the folder read has failed;
+    - a skill whose file is gone reads "This skill's file is no longer here." (N189), with a Retry that reads the skills again.
+  - P751: Reload runs its operation in the dialog, toasts once on the first answer or a refused invoke, then closes. It is built in part, as its row says: the dialog still opens for the wait. N188 is the reload spinner's name.
+  - P655: "Discover plugins" stands only in the `/plugins` "+" menu, and is left out when no folder is known.
+  - P659's shared `Choice` also drops the label line from the `/skills` and Discover menus.
+  - P664's "as of" is one constant, which the panel's Plugins summary also reads.
+  - P731 keeps "Done" only where the engine prints no message.
+  - G264 is left as it reads: it stands in place of a list (rule 3), and P573's surface does not overlap it.
 
 ## Outcomes & Retrospective
 
