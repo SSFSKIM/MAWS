@@ -373,8 +373,9 @@ test('custom: a local command for all projects and a remote one shared in the pr
     await sheet.locator('[data-connector-command-field]').fill('/bin/sh');
     await sheet.locator('[data-connector-args-field]').fill("-c 'exit 0'");
     await expect(sheet.locator('[data-connector-arg]')).toHaveText(['-c', 'exit 0']);
+    await expect(sheet.locator('[data-connector-args] > p')).toHaveText('2 arguments'); // counted for one or more (N145)
     await addRow(sheet, 'Add variable', 'FILES_PROBE_MODE', 'value-one');
-    await expect(sheet).toContainText('Saved in Claude Code’s configuration file as written.');
+    await expect(sheet).not.toContainText('Saved in Claude Code’s configuration file as written.'); // the word cut (N142)
     await openDetails(sheet);
     await expect(sheet.locator('[data-plugins-argv]')).toHaveAttribute('data-plugins-argv', JSON.stringify(['mcp', 'add-json', 'files-probe', '{"type":"stdio","command":"/bin/sh","args":["-c","exit 0"],"env":{"FILES_PROBE_MODE":"•••"}}', '--scope', 'user']));
     await expect(sheet.locator('[data-connector-writes]')).toHaveText(configFile);
@@ -388,7 +389,7 @@ test('custom: a local command for all projects and a remote one shared in the pr
     await second.locator('[data-connector-name]').fill('files-probe-2');
     await second.getByRole('radio', { name: 'Local command', exact: true }).check();
     await second.locator('[data-connector-command-field]').fill('/usr/bin/true');
-    await expect(second.locator('[data-connector-args]')).toHaveText('No arguments');
+    await expect(second.locator('[data-connector-args]')).toHaveText(''); // the word cut (N145): nothing to count, nothing said
     await addAndClose(second);
     await expect(row(page, 'files-probe-2')).toContainText('user scope · stdio', { timeout: CLI_MS });
     expect(config().mcpServers?.['files-probe-2']).toEqual({ type: 'stdio', command: '/usr/bin/true', args: [] });
@@ -410,7 +411,7 @@ test('custom: a local command for all projects and a remote one shared in the pr
     await expect(sheet.locator('[data-connector-shared-warning]')).toHaveCount(0);
     await addRow(sheet, 'Add header', 'X-Probe-Key', 'value-two');
     await expect(sheet.locator('[data-connector-shared-warning]')).toHaveText('This file is usually committed with the repository. Write a secret as ${NAME}, with a name of your own, and set NAME under env in ~/.claude/settings.json or in the environment Claude Code starts with.');
-    await expect(sheet).toContainText('Saved in Claude Code’s configuration file as written.');
+    await expect(sheet).not.toContainText('Saved in Claude Code’s configuration file as written.'); // the word cut (N142)
     await openDetails(sheet);
     await expect(sheet.locator('[data-plugins-argv]')).toHaveAttribute('data-plugins-argv', JSON.stringify(['mcp', 'add-json', 'remote-probe', '{"type":"http","url":"https://files.example.test/mcp","headers":{"X-Probe-Key":"•••"}}', '--scope', 'project']));
     await expect(sheet.locator('[data-plugins-argv] [data-command-mask]')).toHaveText(['•••']);
@@ -773,7 +774,7 @@ test('dynamic: a plugin’s connector and one of MAWS’s own list signed in fro
     });
 
     await test.step('U11h: a third plugin of the same manifest and server names: the collision on both rows, no Sign in; one turned off gives Sign in back on the other', async () => {
-      const collision = 'More than one plugin supplies a connector with this name (Fx row, Fx twin). Claude Code keeps only one. Turn the others off to sign in.';
+      const collision = 'Supplied by more than one plugin (Fx row, Fx twin). Turn the others off to sign in.'; // the word cut (N137)
       const bothRefused = async () => {
         for (const key of [ROW_PLUGIN, TWIN_PLUGIN]) {
           await expect(lineOf(key)).toHaveText(collision, { timeout: 30_000 });

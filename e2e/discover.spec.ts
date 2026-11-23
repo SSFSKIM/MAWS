@@ -17,7 +17,7 @@
 //              real CLI adds and installs; settings, the engine's own listing, My items; Skills names the plugin and its
 //              skills; a second marketplace nobody else lists, added while Discover shows, brings its plugins from the
 //              host's read (acceptance 3, 5, 7).
-//   projects:  installed at project scope in A reads Installed there and "Installed in another project" in B, where
+//   projects:  installed at project scope in A reads Installed there and "In another project" in B, where
 //              Not installed keeps it and + installs it at B's project scope (acceptance 4).
 //   offline:   without the directory's and plugin-details' recordings, the manifests' items stay, plainer, with no
 //              counts and no Featured, and the Sources popover says which sources are unavailable; Connectors' Discover
@@ -48,7 +48,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { expect, test, type Locator, type Page, type TestInfo } from '@playwright/test';
 import { invoke, value } from './support/c7-replay';
-import { chooseCustomize, customizeHead, customizePage, showChoice, viewChoice } from './support/customize';
+import { chooseCustomize, customizeHead, customizePage, pluginRowSwitch, showChoice, viewChoice } from './support/customize';
 import { firstRead } from './support/discover-read';
 import { TEST_MARKETPLACE } from './support/discover-scratch';
 import { launchMaws, type MawsLaunch } from './support/launch';
@@ -456,7 +456,9 @@ test('install: + adds the marketplace and installs through the real CLI; warning
     await s.getByRole('button', { name: 'Install', exact: true }).click();
     await expect(s).toBeHidden();
     await expect(byName(results(page), 'hooked')).toHaveAttribute('data-installed', 'here', { timeout: 2 * CLI_MS });
-    await expect(byName(results(page), 'hooked').locator('[data-catalog-installed]')).toHaveText('Installed');
+    // the word cut (G278): the check alone, "Installed" its name and its tooltip
+    await expect(byName(results(page), 'hooked').locator('[data-catalog-installed]')).toHaveAccessibleName('Installed');
+    await expect(byName(results(page), 'hooked').locator('[data-catalog-installed]')).toHaveText('');
   });
 
   await test.step('installed: the scratch settings, the engine’s own listing, My items', async () => {
@@ -483,10 +485,11 @@ test('install: + adds the marketplace and installs through the real CLI; warning
     await cancel(s);
   });
 
-  await test.step('Skills › Discover: the note; skills-only’s sheet names the plugin and its skills', async () => {
+  await test.step('Skills › Discover: no note (the word cut, G280); skills-only’s sheet names the plugin and its skills', async () => {
     await openDiscover(page, 'Skills');
     const skills = page.locator('[data-discover="skills"]');
-    await expect(skills.locator('[data-skills-note]')).toHaveText('Items whose contents are not known before install are under Plugins.');
+    await expect(skills.locator('[data-catalog-card]').first()).toBeVisible();
+    await expect(skills.locator('[data-skills-note]')).toHaveCount(0);
     await search(page, 'skills-only');
     const card = byName(results(page, skills), 'skills-only');
     await expect(card.locator('[data-catalog-components]')).toHaveText('greet, summarize-diff'); // a Skills card lists its skills
@@ -521,7 +524,7 @@ test('install: + adds the marketplace and installs through the real CLI; warning
   });
 });
 
-test('projects: installed at project scope in A reads Installed there and Installed in another project in B; Not installed', async () => {
+test('projects: installed at project scope in A reads Installed there and In another project in B; Not installed', async () => {
   maws = await launchMaws({ realEngine: { projects: 2 } });
   const { page } = maws;
   const [a, b] = maws.realEngine!.scratch.projects;
@@ -548,11 +551,11 @@ test('projects: installed at project scope in A reads Installed there and Instal
     await expect(card()).toHaveCount(1);
   });
 
-  await test.step('in B: Installed in another project, + kept; Not installed shows it; installed from B at project scope', async () => {
+  await test.step('in B: In another project, + kept; Not installed shows it; installed from B at project scope', async () => {
     await chooseProject(page, 'project-b');
     await searchAfresh(page, 'remote-server');
     await expect(card()).toHaveAttribute('data-installed', 'elsewhere', { timeout: CLI_MS });
-    await expect(card()).toContainText('Installed in another project');
+    await expect(card()).toContainText('In another project'); // the word cut (G278)
     // + still works: B's own install. The marketplace A added at project scope is in the engine's own registry
     // (plugins/known_marketplaces.json, one per configuration), which `plugin marketplace list` reads in B too, so the
     // engine has it there and the sheet is the install alone (measured on 2.1.309, gate run 40189614848).
@@ -735,16 +738,21 @@ test('all: My items lists the three kinds in one list; Discover’s home has a s
     expect(await rows.evaluateAll((items) => items.filter((item) => item.querySelector('[data-item-image]') === null).length), 'every row has its image').toBe(0);
   });
 
-  await test.step('a plugin’s menu from All: Turn off runs through the real CLI, and the row reads Disabled in its place', async () => {
+  // the word cut (G215): the row's own switch, where the menu's Turn off and the "Disabled" badge stood
+  await test.step('a plugin’s switch from All: off runs through the real CLI, and the row’s switch reads off in its place', async () => {
     const hooked = all.locator(`[data-plugin-row="${PLUGINS[0]!}"]`);
-    await hooked.getByRole('button', { name: /^More actions for / }).click();
-    await page.getByRole('menuitem', { name: 'Turn off', exact: true }).click();
+    await expect(pluginRowSwitch(hooked)).toHaveAttribute('aria-checked', 'true');
+    await expect(pluginRowSwitch(hooked)).not.toHaveAttribute('aria-disabled', 'true'); // the user's own: changeable here
+    await hooked.getByRole('button', { name: /^More actions for / }).click(); // the menu keeps Update and Uninstall… alone
+    await expect(page.getByRole('menu').getByRole('menuitem')).toHaveText(['Update', 'Uninstall…']);
+    await page.keyboard.press('Escape');
+    await pluginRowSwitch(hooked).click();
     const s = page.locator('[data-plugins-sheet="disable"]');
     const disable = s.getByRole('button', { name: 'Disable', exact: true });
     await expect(disable).toBeEnabled({ timeout: 30_000 }); // once plugins.env answered
     await disable.click();
     await expect(s).toBeHidden();
-    await expect(hooked.getByText('Disabled', { exact: true })).toBeVisible({ timeout: CLI_MS });
+    await expect(pluginRowSwitch(hooked)).toHaveAttribute('aria-checked', 'false', { timeout: CLI_MS });
     expect(await marks(all, 'data-plugin-row')).toEqual(PLUGINS);
     const settings = JSON.parse(readFileSync(join(configDir, 'settings.json'), 'utf8')) as { enabledPlugins?: Record<string, boolean> };
     expect(settings.enabledPlugins?.[PLUGINS[0]!]).toBe(false);
@@ -861,7 +869,7 @@ test('all: My items lists the three kinds in one list; Discover’s home has a s
   // minimum; a docked sidebar is clamped to 200..480 px (SIDEBAR_BOUNDS, src/renderer/src/app/regions.ts). The page is under
   // the `customize` container's 24rem only beside a widened docked sidebar: here the window at 700 px and the sidebar at
   // 480, the page about 220 px.
-  await test.step('700 px with the sidebar docked at 480 px: the page under 24rem; the switch, Showing, the Show choices, then the search at full width', async () => {
+  await test.step('700 px with the sidebar docked at 480 px: the page under 24rem; the switch, the project select, the Show choices, then the search at full width', async () => {
     await app.evaluate(({ BrowserWindow }) => {
       const win = BrowserWindow.getAllWindows()[0]!;
       win.setMinimumSize(600, 600);
@@ -878,17 +886,20 @@ test('all: My items lists the three kinds in one list; Discover’s home has a s
     expect(containerWidth, `the customize container, ${containerWidth} px`).toBeLessThan(24 * rem!);
     const viewRow = await edges(head.locator('[data-customize-row="view"]'));
     const row = await edges(showRow());
-    const showing = await edges(head.getByRole('combobox', { name: 'Project', exact: true }).locator('xpath=ancestor::label[1]'));
+    // the word cut (G199): no "Showing" before the select; its label holds the select alone
+    const projectLabel = head.getByRole('combobox', { name: 'Project', exact: true }).locator('xpath=ancestor::label[1]');
+    await expect(projectLabel).not.toContainText('Showing');
+    const showing = await edges(projectLabel);
     const live = head.getByRole('combobox', { name: 'Live session', exact: true }).locator('xpath=ancestor::label[1]');
     const stacked = [
       ['the switch', await edges(head.getByRole('radiogroup', { name: 'Library', exact: true }))],
-      ['Showing', showing],
+      ['the project select', showing],
       ...((await live.count()) > 0 ? [['Live session', await edges(live)] as const] : []),
       ['the Show choices', await edges(head.getByRole('radiogroup', { name: 'Show', exact: true }))],
       ['the search', await edges(searchField())],
     ] as const;
     for (let i = 1; i < stacked.length; i += 1) expect(stacked[i]![1].top, `${stacked[i]![0]} under ${stacked[i - 1]![0]}`).toBeGreaterThanOrEqual(stacked[i - 1]![1].bottom);
-    for (const [name, box] of stacked.filter(([part]) => part === 'Showing' || part === 'Live session')) {
+    for (const [name, box] of stacked.filter(([part]) => part === 'the project select' || part === 'Live session')) {
       near(box.left, viewRow.left, `${name}'s left edge`);
       near(box.right, viewRow.right, `${name}'s right edge`);
     }
@@ -969,7 +980,10 @@ test('skills: a skill’s Open in hands its listed file to an editor or Finder; 
       const before = logged();
       rmSync(join(mine, '..'), { recursive: true, force: true });
       await choose('outline-notes', 'Zed');
-      await expect(detail('outline-notes').getByRole('alert')).toHaveText("This skill's file is no longer here. Refresh, then try again.");
+      // the word cut (G247, N189): Skills has no Refresh, so the refusal carries its own Retry beside its words
+      await expect(detail('outline-notes').getByRole('alert')).toHaveText("This skill's file is no longer here.");
+      await expect(detail('outline-notes').locator('[data-skill-refusal]').getByRole('button', { name: 'Retry', exact: true })).toBeVisible();
+      await expect(customizeHead(page).getByRole('button', { name: 'Refresh', exact: true })).toHaveCount(0);
       expect(logged()).toBe(before);
     });
 

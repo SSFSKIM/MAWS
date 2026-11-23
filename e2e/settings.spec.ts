@@ -859,7 +859,9 @@ test('Customize and Projects are reachable without a chat, at desktop and narrow
         await shot(`ux2k-plugins-${width}x${height}`);
         await chooseCustomize(page, { show: 'Skills' });
         await expect(page.getByRole('button', { name: 'View review-quarterly' })).toBeVisible();
-        await expect(customizePage(page).locator('[data-customize-body="skills"]').getByText('Inventory coverage', { exact: true })).toBeVisible(); // the skills' own, under the head
+        // the word cut (G205): the skills' body under the head holds its rows and no "Inventory coverage" fold
+        await expect(customizePage(page).locator('[data-customize-body="skills"]').getByRole('button', { name: 'View review-quarterly' })).toBeVisible();
+        await expect(customizePage(page).locator('[data-customize-body="skills"]').getByText('Inventory coverage', { exact: true })).toHaveCount(0);
         await expect(page.getByText('Some configuration could not be read', { exact: true })).toHaveCount(0);
         await shot(`ux2k-skills-${width}x${height}`);
         await chooseCustomize(page, { show: 'Connectors' });
