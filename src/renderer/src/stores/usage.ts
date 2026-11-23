@@ -27,11 +27,15 @@ export interface UsageState {
   updatedAt: string | null;
   // C7 start
   snapshot: UsageSnapshot | null; // the latest, null until main has answered
+  // The word cut (P596): the last `settings.usage` reply's failure, held apart from the last good snapshot and cleared by
+  // the next one, so a reader with no snapshot can tell a failed read from one still out
+  readError: string | null;
   pinsFor: Record<string, string>; // engine session id → account uuid, for the open session tabs
   direct: ReadonlyMap<AppSessionId, DirectReading>; // the direct fallback: `get_usage` per direct session
   // `pins`: a reply answers for exactly the ids it was asked, so it replaces them; an event's pins are for whoever
   // asked last, so they are laid over the held ones.
   applySnapshot(snapshot: UsageSnapshot, pins?: 'replace' | 'merge'): void;
+  failRead(message: string): void;
   setDirect(appSessionId: AppSessionId, reading: DirectReading | null): void;
   // C7 end
   // W6 route executor start: a Route ClaudeUsage answered, laid over every snapshot until C7's reader catches up
@@ -64,6 +68,7 @@ export function createUsageStore() {
     windows: null,
     updatedAt: null,
     snapshot: null,
+    readError: null,
     pinsFor: {},
     direct: new Map(),
     routed: null, // W6 route executor
@@ -77,11 +82,15 @@ export function createUsageStore() {
       const drain = snapshot.available ? snapshot.accounts.find((a) => a.uuid === snapshot.drainTarget) : undefined;
       set({
         snapshot,
+        readError: null,
         windows: drain?.windows ?? null,
         updatedAt: snapshot.readAt,
         pinsFor: pins === 'replace' ? snapshot.pinsFor : { ...get().pinsFor, ...snapshot.pinsFor },
         routed, // W6 route executor
       });
+    },
+    failRead(message) {
+      set({ readError: message });
     },
     // W6 route executor start
     applyRoute(drainTarget, drainTargetIsManual) {
@@ -166,8 +175,10 @@ export function connectUsage(client: MawsBridge = ipc, stores: UsageStores = { u
     asked = engineSessionIds.join('\n');
     const fresh = freshness.stamp();
     void client.invoke('settings.usage', { engineSessionIds }, { machine: client.localMachine }).then((result) => {
-      if (!result.ok) console.warn('[usage] settings.usage failed', result.error);
-      else if (fresh()) stores.usage.getState().applySnapshot(result.value);
+      if (!result.ok) {
+        console.warn('[usage] settings.usage failed', result.error);
+        if (fresh()) stores.usage.getState().failRead(result.error.message);
+      } else if (fresh()) stores.usage.getState().applySnapshot(result.value);
     });
   };
   const askIfChanged = () => {

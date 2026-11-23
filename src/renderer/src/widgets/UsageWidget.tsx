@@ -83,13 +83,17 @@ function HeldDirectWindows({ windows }: { windows: Windows | null }) {
 function AccountWindows({ record, status, answer }: { record: SessionRecord; status: EngineSessionStatus | null; answer: GetUsageResponse }) {
   const shown = useSessionWindows(record, status);
   const snapshot = useUsage((s) => s.snapshot);
+  const readError = useUsage((s) => s.readError);
   const now = useNow(POPOVER_TICK_MS);
   if (shown.source === 'direct') return <DirectWindows windows={windowsFromGetUsage(answer, new Date(now).toISOString())} now={now} />;
-  // until ClaudeUsage answers, a wait its next answer ends; once it has, what it said
+  // until ClaudeUsage answers, a wait its answer ends; a failed read is said (a later snapshot replaces it); once it has
+  // answered, what it said
   const who = shown.account
     ? [shown.account.email, shown.account.planLabel].filter(Boolean).join(' · ')
     : snapshot === null
-      ? <QuietSpinner label={USAGE.readingClaudeUsage} />
+      ? readError === null
+        ? <QuietSpinner label={USAGE.readingClaudeUsage} />
+        : USAGE.readFailed
       : snapshot.available
         ? USAGE.noAccount
         : USAGE.unavailable;

@@ -27,6 +27,7 @@ import { ACTIONS, effectiveChord, idsOf, type ActionId, type ActionTable } from 
 import { formatChord } from '@shared/keymap/chord';
 import { GlyphMark } from '../attention/GlyphMark';
 import { QuietSpinner } from '../ui/spinner';
+import { PALETTE } from './copy';
 import { glyphFor, listedGlyph } from '../attention/glyph';
 import { enabledActions, runAction, subscribeActions } from '../keymap/actions-runtime';
 import { modalHandoff } from '../keymap/modal-handoff';
@@ -119,22 +120,6 @@ function useHandled(): ReadonlySet<string> {
   const key = useSyncExternalStore(subscribeActions, handledKey);
   return new Set(key.split('\n'));
 }
-
-// U6b-5a M4: the words of the palette's new groups and its last row (the execution document, "The sentences a person reads").
-// The word cut (W113, W116 to W119): the input's placeholder, the search's wait (the quiet spinner's name) and the
-// lines above the results, each in its shortest plain form.
-const PALETTE = {
-  placeholder: 'Search',
-  placeholderConversations: 'Search in conversations',
-  searching: 'Searching conversations',
-  indexing: 'Indexing…',
-  incomplete: 'Some conversations are not indexed; results may be incomplete.',
-  firstShown: (limit: number) => `First ${limit} shown`,
-  recent: 'Recent',
-  artifacts: 'Artifacts',
-  artifactsOn: (machine: string) => `Artifacts · ${machine}`,
-  searchLibrary: (text: string) => `Search the Library for “${text}”`,
-};
 
 // Bound item registration and subscriptions; filtering still searches the complete index.
 const RESULT_LIMIT = 50;
@@ -399,7 +384,8 @@ function Palette({ run }: { run(id: ActionId): void }) {
         onPointerMoveCapture={personActs}
         className="max-h-[min(420px,60vh)] overflow-y-auto p-1"
       >
-        <Command.Empty className="p-3 text-ui-sm text-fg-muted">Nothing matches</Command.Empty>
+        {/* only for an answered query: while one is out the spinner speaks, and an empty word would be a false negative */}
+        {!searching && <Command.Empty className="p-3 text-ui-sm text-fg-muted">{PALETTE.nothing}</Command.Empty>}
         {recent.length > 0 && (
           <Command.Group heading={PALETTE.recent} className={GROUP}>
             {recent.map((row) =>

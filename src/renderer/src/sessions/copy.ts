@@ -19,3 +19,22 @@ export const ARCHIVED_WORDS = {
   delete: 'Delete…',
   reading: 'Loading archived sessions',
 } as const;
+
+// The rename sheet's Regenerate (N176): its word, and its wait's words (the quiet spinner's name beside it).
+export const RENAME_WORDS = {
+  regenerate: 'Regenerate',
+  regenerating: 'Regenerating the title',
+} as const;
+
+// The archive sheet's paragraph (W146): what archiving does and where the session is found again; the machine that stops
+// it, when it is another (rule 2), and nothing of the engine process, the transcript's place, `claude --resume` or the
+// worktree.
+export const ARCHIVE_WORDS = {
+  body: (machine: string | null) => `Stops it${machine !== null ? ` on ${machine}` : ''} and hides it. Find it again under Archived sessions.`,
+} as const;
+
+// The delete sheet's read of what would move (N180): the quiet spinner's name. The destructive-step text stays in
+// DeleteDialog.tsx as it reads.
+export const DELETE_WORDS = {
+  reading: 'Reading what would move',
+} as const;

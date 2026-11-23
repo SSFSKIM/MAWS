@@ -95,7 +95,8 @@ export const USAGE = {
   pinned: 'Pinned account',
   routing: 'Routing account',
   readingClaudeUsage: 'Reading ClaudeUsage', // the word cut (P596): the quiet spinner's name in the account line's place
-  noAccount: 'Account not found', // ClaudeUsage answered and names no account for this session: a settled state, no wait
+  noAccount: 'Account not found', // N183: ClaudeUsage answered and names no account for this session, a settled state
+  readFailed: "Couldn't read ClaudeUsage", // N183: the read failed and no snapshot is held; a later one replaces it
   unavailable: 'ClaudeUsage is not installed or has no data', // W2: the status line's usage popover said it; its own words now
   fiveHour: '5h',
   weekly: 'Weekly',

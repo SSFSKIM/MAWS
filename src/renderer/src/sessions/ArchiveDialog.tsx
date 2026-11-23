@@ -23,6 +23,7 @@ import { archiveSession, onAnotherMachine } from './record-ops';
 import { Sheet, SheetForm } from './Sheet';
 import { PRIMARY } from './ui';
 import { displayTitle, listedTitle } from './title';
+import { ARCHIVE_WORDS } from './copy';
 
 export const isManagedWorktree = (path: string) => path.includes('/.claude/worktrees/');
 
@@ -34,10 +35,6 @@ export function lastOfWorktree(record: SessionRecord, records: Iterable<SessionR
   for (const other of records) if (other.appId !== record.appId && !other.archived && (other.worktree?.path ?? other.directory) === path) return null;
   return path;
 }
-
-// The word cut (W146): what archiving does and where the session is found again; the machine that stops it, when it is
-// another (rule 2), and nothing of the engine process, the transcript's place, `claude --resume` or the worktree.
-const archiveWords = (machine: string | null): string => `Stops it${machine !== null ? ` on ${machine}` : ''} and hides it. Find it again under Archived sessions.`;
 
 export function ArchiveDialog({ appSessionId }: { appSessionId: AppSessionId }) {
   const record = useSessions((s) => s.records.get(appSessionId) ?? null);
@@ -64,7 +61,7 @@ export function ArchiveDialog({ appSessionId }: { appSessionId: AppSessionId }) 
   return (
     <Sheet title={`Archive “${record !== null ? displayTitle(record) : listedTitle(listing!)}”?`}>
       <SheetForm focusSubmit canSubmit={!busy && unavailable === null} onSubmit={() => void submit()} submitLabel="Archive" submitClass={PRIMARY}>
-        <p className="m-0 text-fg-muted">{archiveWords(machine)}</p>
+        <p className="m-0 text-fg-muted">{ARCHIVE_WORDS.body(machine)}</p>
         <BackgroundWorkDisclosure appSessionId={appSessionId} />
         {unavailable !== null && <p className="m-0 text-ui-sm text-fg-muted">{unavailable}</p>}
         {error && <p className="m-0 text-ui-sm text-danger">{error}</p>}

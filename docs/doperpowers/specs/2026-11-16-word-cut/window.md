@@ -4,7 +4,7 @@
 
 105 items: 70 cut, 1 reworded, 34 stay. Of the 71 that change, the owner saw 20 in a picture or ruled on them; 51 follow the pattern and were not seen.
 
-Against master (M0): 104 unchanged, 1 moot; none waits on the owner; 3 put to the owner (new rows included) and since ruled. M0 added 18 rows for the UX wave's new text (14 cut, 1 reworded, 3 stay), listed at the end.
+Against master (M0): 104 unchanged, 1 moot; none waits on the owner; 3 put to the owner (new rows included) and since ruled. M0 added 19 rows for the UX wave's new text (14 cut, 2 reworded, 3 stay), listed at the end.
 
 Columns: **Id** is the item's id in `items.json`. **Where** is the place on the surface. **Today** is the text at the pin `2c7044231` (an example value where the text is built from data). **Decision** is `cut` (the text leaves the resting surface), `reword` (it changes) or `stays` (today's text is kept; the row is here so that nobody proposes it again). **After** says what the surface shows afterwards, as it was built on the scratch branch and shown in the pictures. **Basis** is how firm the decision is, in the words of the root document's "How firm each decision is". **Source** is the file and line at the pin. **M0** is what the re-reading against master found (see the root document's "M0's record"): `unchanged`, `moved`, `rewritten by the wave`, `gone` or `moot`, with the file and line on master, and for a rewritten row the text master shows and the row decided again by the five rules. **Build** is the milestone that builds the row and the scene whose before and after pictures show it.
 
@@ -429,3 +429,11 @@ Rows added by M0 for text the UX wave added after the pin. **Today** here is the
 | Id | Where | Today | Decision | After | Basis | Source | M0 | Build |
 |---|---|---|---|---|---|---|---|---|
 | N181 | on another machine, the menu's first row while that machine's projects are read | Reading mini’s projects… | cut | Nothing for the first half second, then a quiet spinner where the projects will be, "Reading <machine>’s projects" its accessible name; the projects, or a failed read's words, replace it. | pattern | `src/renderer/src/sessions/remote-setup.ts:88` | new `src/renderer/src/composer/frame/ProjectRow.tsx:149` | M4 · no scene: needs a session on another machine (wanted: New chat project menu for another machine before its projects answer) |
+
+### Usage ring and its popover
+
+#### Usage dialog (/usage)
+
+| Id | Where | Today | Decision | After | Basis | Source | M0 | Build |
+|---|---|---|---|---|---|---|---|---|
+| N183 | the account line of a routed session once ClaudeUsage has answered with no account for it, or its read has failed with no snapshot held | Reading ClaudeUsage… | reword | "Account not found" once ClaudeUsage answered and names no account for the session; "Couldn't read ClaudeUsage" once its read failed and no snapshot is held (a later snapshot replaces either). The quiet spinner (P596) stands only while no answer has come. | pattern | `src/renderer/src/widgets/copy.ts:100` | new `src/renderer/src/widgets/UsageWidget.tsx:98` | M4 · no scene: needs a ClaudeUsage that answers with no account for the session, or a failed read (wanted: /usage on a routed session with no matching account, and after a failed settings.usage) |

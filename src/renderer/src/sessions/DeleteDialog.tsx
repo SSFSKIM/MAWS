@@ -13,6 +13,7 @@ import { deleteOutcomeWords, deleteSession, useRecord } from './record-ops';
 import { Sheet, SheetForm } from './Sheet';
 import { CHOICE, DANGER } from './ui';
 import { QuietSpinner } from '../ui/spinner';
+import { DELETE_WORDS } from './copy';
 import { displayTitle } from './title';
 
 type Preview = CommandOutput<'session.deletions.preview'>;
@@ -33,7 +34,9 @@ export function DeleteDialog({ appSessionId }: { appSessionId: AppSessionId }) {
     const process = s.engine.get(appSessionId)?.process;
     return process !== undefined && process !== 'exited';
   });
-  const [preview, setPreview] = useState<Preview | null>(null);
+  // The preview's read and the delete each keep their own outcome (the review of task 2): a confirm after a failed preview
+  // asks for no preview again, so nothing brings the read's spinner back.
+  const [preview, setPreview] = useState<{ answer: Preview } | { error: string } | null>(null);
   const [acknowledged, setAcknowledged] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -42,8 +45,7 @@ export function DeleteDialog({ appSessionId }: { appSessionId: AppSessionId }) {
     let active = true;
     void ipc.invoke('session.deletions.preview', { appSessionId }).then((result) => {
       if (!active) return;
-      if (result.ok) setPreview(result.value);
-      else setError(result.error.message);
+      setPreview(result.ok ? { answer: result.value } : { error: result.error.message });
     });
     return () => {
       active = false;
@@ -65,8 +67,14 @@ export function DeleteDialog({ appSessionId }: { appSessionId: AppSessionId }) {
     <Sheet title={`Delete “${displayTitle(record)}”?`}>
       <SheetForm canSubmit={acknowledged && !busy} onSubmit={() => void submit()} submitLabel={live ? 'Stop and delete' : 'Delete'} submitClass={DANGER}>
         <p className="m-0 font-mono text-ui-sm break-all text-fg-muted">{record.worktree?.path ?? record.directory}</p>
-        {/* the word cut (N180): the read is a quiet spinner, standing only while nothing has answered it */}
-        {preview ? <p className="m-0 text-fg-muted">{deletionWords(preview)}</p> : error === null && <QuietSpinner label="Reading what would move" />}
+        {/* the word cut (N180): the read is a quiet spinner, standing only while the preview is out */}
+        {preview === null ? (
+          <QuietSpinner label={DELETE_WORDS.reading} />
+        ) : 'answer' in preview ? (
+          <p className="m-0 text-fg-muted">{deletionWords(preview.answer)}</p>
+        ) : (
+          <p className="m-0 text-ui-sm text-danger">{preview.error}</p>
+        )}
         {live && <p className="m-0 text-ui-sm text-fg-muted">The session is running; it stops before anything moves.</p>}
         <label className="flex items-center gap-2 text-ui-sm text-fg">
           <input type="checkbox" aria-label="Move the transcript to the Trash" checked={acknowledged} onChange={(e) => setAcknowledged(e.target.checked)} className={CHOICE} />

@@ -7,14 +7,7 @@ import { modalHandoff } from './modal-handoff';
 import { Backdrop } from '../sessions/scrim'; // board 523 (U11a): the one scrim
 import { keymapGroups } from '../settings-tab/keymap';
 import { useSettings } from '../stores/settings';
-
-// The word cut (W125 to W127): where bindings change, in plain text; the field's placeholder (its name is unchanged); an
-// empty search's line.
-const SHORTCUTS = {
-  description: 'Change in Settings',
-  placeholder: 'Search',
-  nothing: 'Nothing matches',
-};
+import { SHORTCUTS } from './copy';
 
 const useShortcuts = create<{ open: boolean }>(() => ({ open: false }));
 export const toggleKeyboardShortcuts = () => useShortcuts.setState((s) => ({ open: !s.open }));

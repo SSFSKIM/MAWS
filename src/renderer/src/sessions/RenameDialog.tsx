@@ -20,6 +20,7 @@ import { onAnotherMachine } from './record-ops';
 import { Sheet, SheetForm } from './Sheet';
 import { FIELD, PRIMARY, QUIET } from './ui';
 import { WaitingWords } from '../ui/spinner';
+import { RENAME_WORDS } from './copy';
 
 // What the title summarises: the conversation's first prompt with words from the host's events, else the current title.
 // The UX wave, ticket 704: the person's words of a message, MAWS's answer envelopes read out (an older host's message
@@ -48,20 +49,23 @@ export function RenameDialog({ appSessionId }: { appSessionId: AppSessionId }) {
   const current = record?.title.text ?? listing?.title ?? '';
   const [title, setTitle] = useState(current);
   const [error, setError] = useState<string | null>(null);
-  const [regenerating, setRegenerating] = useState<string | null>(null); // the operation in flight
+  // Regenerate's wait, from its press (the transcript read, then the receipt, `opId` null until it names the operation)
+  // until the operation ends or the request is refused
+  const [regenerating, setRegenerating] = useState<{ opId: string | null } | null>(null);
   const unavailable = useRemoteUnavailable(appSessionId, 'session.rename'); // the UX wave, U9: null on this Mac
 
+  const awaited = regenerating?.opId ?? null;
   useEffect(() => {
-    if (regenerating === null) return;
+    if (awaited === null) return;
     return ipc.on('session.operation', (event) => {
-      if (event.opId !== regenerating) return;
+      if (event.opId !== awaited) return;
       setRegenerating(null);
       if (event.outcome.ok) {
         const value = event.outcome.value as { title?: unknown };
         if (typeof value.title === 'string') setTitle(value.title);
       } else setError(event.outcome.error.message);
     });
-  }, [regenerating]);
+  }, [awaited]);
 
   if (record === null && listing === null) return null;
   const trimmed = title.trim();
@@ -74,10 +78,13 @@ export function RenameDialog({ appSessionId }: { appSessionId: AppSessionId }) {
   };
   const regenerate = async () => {
     setError(null);
+    setRegenerating({ opId: null });
     const description = await describe(appSessionId, current);
     const receipt = await ipc.invoke('session.generateTitle', { appSessionId, description, persist: true });
-    if (!receipt.ok) setError(receipt.error.message);
-    else setRegenerating(receipt.value.opId);
+    if (!receipt.ok) {
+      setRegenerating(null);
+      setError(receipt.error.message);
+    } else setRegenerating({ opId: receipt.value.opId });
   };
 
   return (
@@ -87,7 +94,7 @@ export function RenameDialog({ appSessionId }: { appSessionId: AppSessionId }) {
         {record !== null && live && (
           <p className="m-0 flex items-center gap-2 text-ui-sm text-fg-muted">
             <button type="button" disabled={regenerating !== null} aria-busy={regenerating !== null || undefined} onClick={() => void regenerate()} className={QUIET}>
-              <WaitingWords words="Regenerate" wait={regenerating === null ? null : 'Regenerating the title'} />
+              <WaitingWords words={RENAME_WORDS.regenerate} wait={regenerating === null ? null : RENAME_WORDS.regenerating} />
             </button>
           </p>
         )}

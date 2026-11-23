@@ -203,15 +203,14 @@ export function SessionTab({ tab, paneIndex }: { tab: Extract<TabRef, { kind: 's
 const TEXT_BUTTON =
   'rounded-sm border border-border-strong px-2.5 py-1 text-ui-sm text-fg outline-accent hover:bg-bg-hover focus-visible:outline-2 disabled:border-border disabled:text-fg-faint disabled:hover:bg-transparent';
 
-// The word cut (W22, W23): an empty main area draws its two ways in, which say what to do; "No open tabs" stays for a screen
-// reader, and Overview's chord waits in its tooltip, which focus reaches.
+// The word cut (W22, W23): an empty main area draws its two ways in, which say what to do (the pane's tabpanel is named "No
+// open tabs" for a screen reader), and Overview's chord waits in its tooltip, which focus reaches.
 export function EmptyPane() {
   const canCreate = useSessionCreatorRegistered();
   const canOverview = useActionEnabled('tab.overview');
   const chord = useChordHint('tab.overview');
   return (
     <div data-empty-pane className="flex h-full flex-col items-center justify-center gap-3 text-ui text-fg-muted">
-      <p className="sr-only">No open tabs</p>
       <div className="flex gap-2">
         <Tip content={chord} description={chord}>
           <button type="button" disabled={!canOverview} onClick={() => runAction('tab.overview')} className={TEXT_BUTTON}>
