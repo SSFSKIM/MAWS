@@ -1286,22 +1286,32 @@ const WIDGET_READS: Record<string, string | null> = {
   plugins: null, mcp: 'mcp_status', sandbox: 'get_sandbox_dialog', hooks: 'get_hooks_listing', memory: 'get_memory_dialog', skills: 'get_skills_dialog',
 };
 
-// A widget's read of `subtype` answered: none of them still out on the wire, and at least one answered with a success (the
-// word cut's fix wave for M4: a widget can draw words before its reply, such as /permissions' mode, so its wait is for
-// the engine's reply; a read served from the cache, /effort's after /model's, sends nothing more)
-function readAnswered(path: string, subtype: string): boolean {
+// The control requests of `subtype` on the wire, each with whether the engine answered it with a success.
+function readsOf(path: string, subtype: string): { requestId: string; succeeded: boolean }[] {
   const rows = readJournal(path);
-  const asked = rows
-    .filter((r) => r.direction === 'out' && r.frame.type === 'control_request' && (r.frame as { request?: { subtype?: string } }).request?.subtype === subtype)
-    .map((r) => (r.frame as { request_id?: string }).request_id);
-  const answered = new Set(
+  const succeeded = new Set(
     rows
       .filter((r) => r.direction === 'in' && r.frame.type === 'control_response')
       .map((r) => (r.frame as { response?: { subtype?: string; request_id?: string } }).response)
       .filter((response) => response?.subtype === 'success')
       .map((response) => response!.request_id),
   );
-  return asked.length > 0 && asked.every((requestId) => answered.has(requestId));
+  return rows
+    .filter((r) => r.direction === 'out' && r.frame.type === 'control_request' && (r.frame as { request?: { subtype?: string } }).request?.subtype === subtype)
+    .map((r) => (r.frame as { request_id?: string }).request_id)
+    .filter((requestId): requestId is string => typeof requestId === 'string')
+    .map((requestId) => ({ requestId, succeeded: succeeded.has(requestId) }));
+}
+
+// A widget's own read answered (the word cut's fix wave for M4: a widget can draw words before its reply, such as
+// /permissions' mode, so its wait is for the engine's reply to the request its opening sent, `before` naming the
+// requests of the subtype already on the wire). /model and /effort may be served from the cache (/effort's after
+// /model's) and send nothing more: for them, none of the subtype's still out and one answered.
+function readAnswered(path: string, subtype: string, before: ReadonlySet<string>, cached: boolean): boolean {
+  const reads = readsOf(path, subtype);
+  const mine = reads.filter((read) => !before.has(read.requestId));
+  if (mine.length > 0) return mine.every((read) => read.succeeded);
+  return cached && reads.length > 0 && reads.every((read) => read.succeeded);
 }
 
 async function closeWidgets(page: Page): Promise<void> {
@@ -1351,6 +1361,9 @@ test('§10.8 every palette widget opens backed by its read; ! and # work; a live
         const chosen = page.getByRole('listbox', { name: 'Commands' }).locator('[role="option"][aria-selected="true"]');
         await expect(chosen).toContainText(`/${name}`);
         await expect(chosen).not.toHaveAttribute('aria-disabled', 'true');
+        const sub = WIDGET_READS[name];
+        const journal = (await statusOf(page, id)).journalPath;
+        const before = new Set(sub === null ? [] : readsOf(journal, sub).map((read) => read.requestId));
         await page.keyboard.press('Enter');
         const w = page.locator(`[data-widget="${name}"]`);
         await expect(w).toBeVisible();
@@ -1360,10 +1373,9 @@ test('§10.8 every palette widget opens backed by its read; ! and # work; a live
         // alert, the frame's spinner gone. /model and /effort are
         // the selector, with no frame and no body: its own control drawn (the models menu, the effort slider) and no wait
         // spinner, on two samples further apart than the spinner's quiet half second, so a read still out has shown it.
-        const sub = WIDGET_READS[name];
         if (sub !== null) {
-          const journal = (await statusOf(page, id)).journalPath;
-          await expect.poll(() => readAnswered(journal, sub), { timeout: 20_000, message: `/${name}'s ${sub} answered on the wire` }).toBe(true);
+          const cached = name === 'model' || name === 'effort';
+          await expect.poll(() => readAnswered(journal, sub, before, cached), { timeout: 20_000, message: `/${name}'s own ${sub} answered on the wire` }).toBe(true);
         }
         if (name === 'model' || name === 'effort') {
           const control = name === 'model' ? w.getByRole('menu') : w.getByRole('slider');
