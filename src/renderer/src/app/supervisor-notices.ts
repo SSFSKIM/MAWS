@@ -9,8 +9,9 @@
 //   Restart now and Wait. Main armed that supervisor's exit-when-idle itself (Decision Log b2e4a1b1), so Wait only
 //   acknowledges and dismisses; a launch refused with `host_unavailable` while still waiting shows it again (90f959f4).
 // - `supervisor.crashed`, a toast once per unexpected exit main reports after the page's first word (a reload after a
-//   crash does not repeat it), naming the interrupted sessions and the exit's cause when known; P5 O16 M3b (D21): and
-//   the sessions the successor re-adopted, once main has their count (status.ts holds the exit until then).
+//   crash does not repeat it), naming the interrupted sessions; P5 O16 M3b (D21): and the sessions the successor
+//   re-adopted, once main has their count (status.ts holds the exit until then). The word cut (W32) took the exit's cause
+//   from it: Diagnostics' row keeps it.
 import type { CommandName, IpcError, MawsBridge } from '@shared/ipc/schema';
 import type { HostStatus } from '@shared/ipc/schema/host';
 import { ipc, onCommandRefused } from '../ipc/client';
@@ -62,7 +63,7 @@ export function connectSupervisorNotices({ client = ipc, hosts = useHosts, notic
       // P5 O16 M3c fix wave 2 (D63): an update that waits for MAWS tool calls says so (Restart now while the old build
       // is served); E10's copy only while the older build's exit when idle is armed, which is what it promises
       updated: status.handover
-        ? { text: ENGINE_HOST_UPDATE.waiting(status.handover.inFlight, status.handover.tool), actions: status.state === 'ready' ? [restartNow] : [] }
+        ? { text: ENGINE_HOST_UPDATE.waiting(status.handover.inFlight), actions: status.state === 'ready' ? [restartNow] : [] }
         : status.state === 'ready' && status.matches === 'build' && live > 0 && status.supervisor?.exitWhenIdle === true
           ? { text: SUPERVISOR_NOTICES.updated(live), actions: [restartNow] }
           : null,
@@ -108,7 +109,7 @@ export function connectSupervisorNotices({ client = ipc, hosts = useHosts, notic
     notices.getState().toast({
       id: SUPERVISOR_NOTICE_IDS.crashed,
       level: 'warning',
-      text: SUPERVISOR_NOTICES.crashed(lastExit.code, lastExit.signal, lastExit.interrupted, lastExit.adopted),
+      text: SUPERVISOR_NOTICES.crashed(lastExit.interrupted, lastExit.adopted),
       actions: [],
       dismissible: true,
     });

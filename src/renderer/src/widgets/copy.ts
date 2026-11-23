@@ -90,25 +90,24 @@ export const USAGE = {
   wallTime: 'Wall time',
   lines: 'Lines',
   model: (input: string, output: string, cacheRead: string, cacheWrite: string) => `${input} in · ${output} out · ${cacheRead} cache read · ${cacheWrite} cache write`,
-  engineNone: 'the engine reports no windows through the relay',
-  engineNoneDirect: 'the engine reports no windows for this login',
-  engineDirect: "the engine's own windows (a direct session)",
-  direct: 'Direct · the engine’s own login',
+  direct: 'Direct', // the word cut (P592)
   noPlanLimits: 'The engine reported no plan limits',
   pinned: 'Pinned account',
   routing: 'Routing account',
-  readingClaudeUsage: 'Reading ClaudeUsage…',
+  readingClaudeUsage: 'Reading ClaudeUsage', // the word cut (P596): the quiet spinner's name in the account line's place
+  noAccount: 'Account not found', // ClaudeUsage answered and names no account for this session: a settled state, no wait
   unavailable: 'ClaudeUsage is not installed or has no data', // W2: the status line's usage popover said it; its own words now
   fiveHour: '5h',
   weekly: 'Weekly',
   windows: 'Windows',
   noReading: 'no reading',
-  sinceReset: '0% · no reading since the window reset',
+  sinceReset: '0%', // the word cut (P594): the figure alone
   resetsIn: (percent: number, when: string) => `${percent}% · resets in ${when}`,
   session: 'This session',
   accounting: 'Session accounting',
   models: 'Models',
   byModel: 'Tokens by model',
+  details: 'Details', // the word cut (P597, P598): the session's times, lines and tokens per model fold under it
   noRecord: 'No record for this session',
 };
 

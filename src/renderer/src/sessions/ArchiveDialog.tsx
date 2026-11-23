@@ -35,10 +35,13 @@ export function lastOfWorktree(record: SessionRecord, records: Iterable<SessionR
   return path;
 }
 
+// The word cut (W146): what archiving does and where the session is found again; the machine that stops it, when it is
+// another (rule 2), and nothing of the engine process, the transcript's place, `claude --resume` or the worktree.
+const archiveWords = (machine: string | null): string => `Stops it${machine !== null ? ` on ${machine}` : ''} and hides it. Find it again under Archived sessions.`;
+
 export function ArchiveDialog({ appSessionId }: { appSessionId: AppSessionId }) {
   const record = useSessions((s) => s.records.get(appSessionId) ?? null);
   const listing = useSessions((s) => (record === null ? (s.listed.get(appSessionId) ?? null) : null)); // the UX wave, U9
-  const project = useSessions((s) => (record?.projectId ? (s.projects.get(record.projectId)?.name ?? null) : null));
   const there = onAnotherMachine(appSessionId);
   const machine = useMachines((s) => (there ? machineName(s.machines, machineOf(appSessionId), ipc.localMachine) : null));
   const [error, setError] = useState<string | null>(null);
@@ -61,10 +64,7 @@ export function ArchiveDialog({ appSessionId }: { appSessionId: AppSessionId }) 
   return (
     <Sheet title={`Archive “${record !== null ? displayTitle(record) : listedTitle(listing!)}”?`}>
       <SheetForm focusSubmit canSubmit={!busy && unavailable === null} onSubmit={() => void submit()} submitLabel="Archive" submitClass={PRIMARY}>
-        <p className="m-0 text-fg-muted">
-          Ends its engine process{machine !== null ? ` on ${machine}` : ''} and hides it{project ? ` from ${project}` : ''}. The transcript stays where Claude Code keeps it; resume it from Archived sessions or with claude
-          --resume in the terminal. The worktree is not touched.
-        </p>
+        <p className="m-0 text-fg-muted">{archiveWords(machine)}</p>
         <BackgroundWorkDisclosure appSessionId={appSessionId} />
         {unavailable !== null && <p className="m-0 text-ui-sm text-fg-muted">{unavailable}</p>}
         {error && <p className="m-0 text-ui-sm text-danger">{error}</p>}

@@ -4,7 +4,7 @@
 
 105 items: 70 cut, 1 reworded, 34 stay. Of the 71 that change, the owner saw 20 in a picture or ruled on them; 51 follow the pattern and were not seen.
 
-Against master (M0): 104 unchanged, 1 moot; none waits on the owner; 3 put to the owner (new rows included) and since ruled. M0 added 11 rows for the UX wave's new text (7 cut, 1 reworded, 3 stay), listed at the end.
+Against master (M0): 104 unchanged, 1 moot; none waits on the owner; 3 put to the owner (new rows included) and since ruled. M0 added 16 rows for the UX wave's new text (12 cut, 1 reworded, 3 stay), listed at the end.
 
 Columns: **Id** is the item's id in `items.json`. **Where** is the place on the surface. **Today** is the text at the pin `2c7044231` (an example value where the text is built from data). **Decision** is `cut` (the text leaves the resting surface), `reword` (it changes) or `stays` (today's text is kept; the row is here so that nobody proposes it again). **After** says what the surface shows afterwards, as it was built on the scratch branch and shown in the pictures. **Basis** is how firm the decision is, in the words of the root document's "How firm each decision is". **Source** is the file and line at the pin. **M0** is what the re-reading against master found (see the root document's "M0's record"): `unchanged`, `moved`, `rewritten by the wave`, `gone` or `moot`, with the file and line on master, and for a rewritten row the text master shows and the row decided again by the five rules. **Build** is the milestone that builds the row and the scene whose before and after pictures show it.
 
@@ -388,3 +388,35 @@ Rows added by M0 for text the UX wave added after the pin. **Today** here is the
 | Id | Where | Today | Decision | After | Basis | Source | M0 | Build |
 |---|---|---|---|---|---|---|---|---|
 | N175 | in the folder list (and the Add project sheet's folder field for another machine) while that machine's folders are read | Reading the folders… | cut | Nothing for the first half second, then a quiet spinner in the list, "Reading the folders" its accessible name (the code tools' remote chooser's words, N30); a refused read shows its words and no spinner. | pattern | `src/renderer/src/sessions/remote-setup.ts:72` | new `src/renderer/src/sessions/RemoteSetupSheet.tsx:188` | M4 · no scene: needs a session on another machine (wanted: New project on another machine sheet while the folders are read) |
+
+### Sheets (rename, share, archive, delete)
+
+#### Rename sheet
+
+| Id | Where | Today | Decision | After | Basis | Source | M0 | Build |
+|---|---|---|---|---|---|---|---|---|
+| N176 | Regenerate, for a live session, while the engine names the session | Regenerating… | cut | Regenerate keeps its word while the engine names the session, greyed and busy, with a quiet spinner beside it named "Regenerating the title". | pattern | `src/renderer/src/sessions/RenameDialog.tsx:105` | new `src/renderer/src/sessions/RenameDialog.tsx:90` | M4 · no scene: a transient wait no fixture holds (wanted: Rename sheet of a live session while Regenerate is out) |
+
+#### Share sheet and Add owner sheet
+
+| Id | Where | Today | Decision | After | Basis | Source | M0 | Build |
+|---|---|---|---|---|---|---|---|---|
+| N177 | in place of the policy, while the session's reach is read | Reading its reach… | cut | Nothing for the first half second, then a quiet spinner where the policy will be, "Reading its reach" its accessible name. | pattern | `src/renderer/src/sessions/share/copy.ts:81` | new `src/renderer/src/sessions/share/ShareSheet.tsx:232` | M4 · no scene: a transient wait no fixture holds (wanted: Share sheet before the session's reach is read) |
+
+#### Share sheet
+
+| Id | Where | Today | Decision | After | Basis | Source | M0 | Build |
+|---|---|---|---|---|---|---|---|---|
+| N178 | Save, while the change goes | Saving… | cut | Save keeps its word while the change goes, greyed and busy, with a quiet spinner beside it named "Saving" (SheetForm's submitWait). | pattern | `src/renderer/src/sessions/share/copy.ts:77` | new `src/renderer/src/sessions/share/ShareSheet.tsx:197` | M4 · no scene: a transient wait no fixture holds (wanted: Share sheet with a save in flight) |
+
+#### Add owner sheet
+
+| Id | Where | Today | Decision | After | Basis | Source | M0 | Build |
+|---|---|---|---|---|---|---|---|---|
+| N179 | Add owner, while the add goes | Adding… | cut | Add owner keeps its words while the add goes, greyed and busy, with a quiet spinner beside them named "Adding the owner" (SheetForm's submitWait). | pattern | `src/renderer/src/sessions/share/copy.ts:150` | new `src/renderer/src/sessions/share/AddOwnerSheet.tsx:114` | M4 · no scene: a transient wait no fixture holds (wanted: Add owner sheet with an add in flight) |
+
+#### Delete sheet
+
+| Id | Where | Today | Decision | After | Basis | Source | M0 | Build |
+|---|---|---|---|---|---|---|---|---|
+| N180 | in place of what would move to the Trash, while it is read | Reading what would move… | cut | Nothing for the first half second, then a quiet spinner where the sentence will be, "Reading what would move" its accessible name; a failed read shows its error and no spinner. The sentence itself, a destructive step's text, stays as it reads. | pattern | `src/renderer/src/sessions/DeleteDialog.tsx:67` | new `src/renderer/src/sessions/DeleteDialog.tsx:69` | M4 · no scene: a transient wait no fixture holds (wanted: Delete sheet before what would move is read) |

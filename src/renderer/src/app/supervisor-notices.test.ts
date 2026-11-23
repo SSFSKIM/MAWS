@@ -52,7 +52,7 @@ describe('the update banner while an update waits for tool calls', () => {
   const waitingFor = (inFlight: number, tool: string | undefined, state: HostStatus['state'] = 'ready') =>
     hostStatus({ state, matches: state === 'ready' ? 'build' : null, supervisor: state === 'ready' ? supervisorStatus({ buildId: 'old', liveSessions: 2, exitWhenIdle: false }) : null, handover: { inFlight, ...(tool !== undefined && { tool }) } });
 
-  it('names the tool and the calls running, served or deferred, and goes when the wait ends', async () => {
+  it('counts the calls running, served or deferred, and goes when the wait ends', async () => {
     const t = await setup();
     t.status(waitingFor(1, 'artifact_list'));
     const notice = t.one(SUPERVISOR_NOTICE_IDS.updated)!;

@@ -8,6 +8,14 @@ import { Backdrop } from '../sessions/scrim'; // board 523 (U11a): the one scrim
 import { keymapGroups } from '../settings-tab/keymap';
 import { useSettings } from '../stores/settings';
 
+// The word cut (W125 to W127): where bindings change, in plain text; the field's placeholder (its name is unchanged); an
+// empty search's line.
+const SHORTCUTS = {
+  description: 'Change in Settings',
+  placeholder: 'Search',
+  nothing: 'Nothing matches',
+};
+
 const useShortcuts = create<{ open: boolean }>(() => ({ open: false }));
 export const toggleKeyboardShortcuts = () => useShortcuts.setState((s) => ({ open: !s.open }));
 const closeShortcuts = () => useShortcuts.setState({ open: false });
@@ -36,7 +44,7 @@ export function KeyboardShortcuts() {
             <Dialog.Title className="flex-1 text-ui font-semibold">Keyboard shortcuts</Dialog.Title>
             <Dialog.Close className="rounded-sm px-2 py-1 text-ui-sm text-fg-muted outline-accent hover:bg-bg-hover focus-visible:outline-2" aria-label="Close keyboard shortcuts">Close</Dialog.Close>
           </header>
-          <Dialog.Description className="px-4 pb-3 text-ui-sm text-fg-muted">Your current bindings. Change them in Settings → Keyboard.</Dialog.Description>
+          <Dialog.Description className="px-4 pb-3 text-ui-sm text-fg-muted">{SHORTCUTS.description}</Dialog.Description>
           <ShortcutList searchRef={search} />
         </Dialog.Content>
       </Dialog.Portal>
@@ -57,7 +65,7 @@ function ShortcutList({ searchRef }: { searchRef: React.RefObject<HTMLInputEleme
       ref={searchRef}
       type="search"
       aria-label="Search keyboard shortcuts"
-      placeholder="Search actions or shortcuts"
+      placeholder={SHORTCUTS.placeholder}
       value={query}
       onChange={(event) => setQuery(event.target.value)}
       className="mx-4 mb-2 rounded-sm border border-border-strong bg-bg px-2.5 py-2 text-ui text-fg outline-accent placeholder:text-fg-faint focus-visible:outline-2"
@@ -70,7 +78,7 @@ function ShortcutList({ searchRef }: { searchRef: React.RefObject<HTMLInputEleme
           <td className="py-2 text-right whitespace-nowrap text-fg-muted"><kbd className="font-sans">{row.display}</kbd></td>
         </tr>)}</tbody>
       </table>)}
-      {groups.length === 0 && <p role="status" className="py-6 text-ui text-fg-muted">No shortcuts match your search.</p>}
+      {groups.length === 0 && <p role="status" className="py-6 text-ui text-fg-muted">{SHORTCUTS.nothing}</p>}
     </div>
   </>;
 }

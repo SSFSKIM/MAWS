@@ -26,6 +26,7 @@ import { fuzzyScore } from '@shared/composer/fuzzy';
 import { ACTIONS, effectiveChord, idsOf, type ActionId, type ActionTable } from '@shared/keymap/actions';
 import { formatChord } from '@shared/keymap/chord';
 import { GlyphMark } from '../attention/GlyphMark';
+import { QuietSpinner } from '../ui/spinner';
 import { glyphFor, listedGlyph } from '../attention/glyph';
 import { enabledActions, runAction, subscribeActions } from '../keymap/actions-runtime';
 import { modalHandoff } from '../keymap/modal-handoff';
@@ -120,7 +121,15 @@ function useHandled(): ReadonlySet<string> {
 }
 
 // U6b-5a M4: the words of the palette's new groups and its last row (the execution document, "The sentences a person reads").
+// The word cut (W113, W116 to W119): the input's placeholder, the search's wait (the quiet spinner's name) and the
+// lines above the results, each in its shortest plain form.
 const PALETTE = {
+  placeholder: 'Search',
+  placeholderConversations: 'Search in conversations',
+  searching: 'Searching conversations',
+  indexing: 'Indexing…',
+  incomplete: 'Some conversations are not indexed; results may be incomplete.',
+  firstShown: (limit: number) => `First ${limit} shown`,
   recent: 'Recent',
   artifacts: 'Artifacts',
   artifactsOn: (machine: string) => `Artifacts · ${machine}`,
@@ -360,13 +369,16 @@ function Palette({ run }: { run(id: ActionId): void }) {
 
   return (
     <Command ref={root} label="Command palette" shouldFilter={false} value={value} onValueChange={onValueChange} onKeyDown={onKeyDown} loop>
-      <Command.Input
-        value={query}
-        onValueChange={setQuery}
-        placeholder={scope === 'sessions' ? 'Search in conversations' : 'Search sessions, projects and actions'}
-        maxLength={1000}
-        className="h-11 w-full border-b border-border bg-transparent px-3 text-ui text-fg outline-none placeholder:text-fg-faint"
-      />
+      <div className="relative">
+        <Command.Input
+          value={query}
+          onValueChange={setQuery}
+          placeholder={scope === 'sessions' ? PALETTE.placeholderConversations : PALETTE.placeholder}
+          maxLength={1000}
+          className="h-11 w-full border-b border-border bg-transparent pr-8 pl-3 text-ui text-fg outline-none placeholder:text-fg-faint"
+        />
+        {searching && <QuietSpinner key={query} label={PALETTE.searching} className="absolute top-1/2 right-3 -translate-y-1/2" />}
+      </div>
       <div className="flex gap-1 border-b border-border px-2 py-1" aria-label="Search scope">
         {(['all', 'sessions'] as const).map((value) => <button key={value} type="button" aria-pressed={scope === value}
           onClick={() => usePalette.setState({ scope: value })}
@@ -374,14 +386,13 @@ function Palette({ run }: { run(id: ActionId): void }) {
           {value === 'all' ? 'All' : 'Conversations'}
         </button>)}
       </div>
-      {answered?.indexing && <p role="status" className="m-0 px-3 py-2 text-ui-sm text-fg-muted">Indexing conversations… Results will update.</p>}
-      {answered?.incomplete && <p role="alert" className="m-0 px-3 py-2 text-ui-sm text-fg-muted">Some conversations could not be indexed. Results may be incomplete. Indexing will retry after a restart or when those conversations change.</p>}
-      {searching && <p role="status" className="m-0 px-3 py-2 text-ui-sm text-fg-muted">Searching conversations…</p>}
+      {answered?.indexing && <p role="status" className="m-0 px-3 py-2 text-ui-sm text-fg-muted">{PALETTE.indexing}</p>}
+      {answered?.incomplete && <p role="alert" className="m-0 px-3 py-2 text-ui-sm text-fg-muted">{PALETTE.incomplete}</p>}
       {answered?.errors.map((error) => <p key={error.machine} role="alert" className="m-0 px-3 py-2 text-ui-sm text-fg-muted">{errorOf(error)}</p>)}
       {(scope === 'sessions'
         ? groups.some((g) => g.entries.length >= RESULT_LIMIT)
         : typed && (entries.sessions.length > RESULT_LIMIT || entries.projects.length > RESULT_LIMIT || entries.channels.length > RESULT_LIMIT || artifactGroups.some((g) => g.rows.length > RESULT_LIMIT))) && (
-        <p className="m-0 px-3 py-2 text-ui-sm text-fg-muted">Showing the first {RESULT_LIMIT} matches per group. Type to narrow results.</p>
+        <p className="m-0 px-3 py-2 text-ui-sm text-fg-muted">{PALETTE.firstShown(RESULT_LIMIT)}</p>
       )}
       <Command.List
         // the pointer selects the row it moves over (cmdk, in the bubble after this): the person's move when the row changes

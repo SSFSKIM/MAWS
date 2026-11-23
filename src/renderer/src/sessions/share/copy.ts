@@ -74,10 +74,10 @@ export const SHARE = {
   noMembers: "The org's people can't be listed right now.",
   foot: 'What was already shared stays shared.',
   save: 'Save',
-  saving: 'Saving…',
+  saving: 'Saving', // the word cut (N178): the quiet spinner's name beside Save
   close: 'Close',
   reload: 'Reload',
-  reading: 'Reading its reach…',
+  reading: 'Reading its reach', // the word cut (N177): the quiet spinner's name
   unsupported: REFUSALS['not-supported'],
   unavailable: REFUSALS.unavailable(''),
   changedElsewhere: REFUSALS['changed-elsewhere'](''),
@@ -147,11 +147,9 @@ export const OWNER = {
   nobodyToAdd: 'Everyone in the org already owns it.',
   noMembers: SHARE.noMembers,
   add: 'Add owner',
-  adding: 'Adding…',
+  adding: 'Adding the owner', // the word cut (N179): the quiet spinner's name beside Add owner
   added: 'Added as an owner',
   already: 'Already an owner',
-  /** After an add: the row's owners come from the session's next listing, not from the sheet. */
-  relisted: (machine: string) => `Its row names them once ${machine} lists the session again.`,
 };
 
 /** What became of an owner added: Share's words for a line, but a `done` reads added, or already an owner for a no-op. */

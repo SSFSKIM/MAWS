@@ -40,7 +40,7 @@ export function phaseWords(phase: LinkPhase, machine: string): string | null {
     case 'reconnecting':
       return `Reconnecting to ${machine}…`;
     case 'offline':
-      return `${machine} is offline · this session reconnects when it’s back`;
+      return `${machine} is offline`; // the word cut (W25): the fact, not how it comes back
     case 'removed':
       return removedWords(machine);
   }

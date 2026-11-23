@@ -27,6 +27,7 @@ import { useLayout } from '../stores/layout';
 import { currentSet, floatingPane, paneShowsSession } from '../stores/layout-model';
 import { focusPaneElement, paneDomId } from './pane-dom';
 import { TabStrip } from './TabStrip';
+import { Tip } from '../ui/tip';
 import { createPortal } from 'react-dom';
 import { useChromeTabs } from './chrome-tabs';
 import { ChannelView } from '../channel/ChannelView'; // P5 O8 M7a
@@ -202,17 +203,21 @@ export function SessionTab({ tab, paneIndex }: { tab: Extract<TabRef, { kind: 's
 const TEXT_BUTTON =
   'rounded-sm border border-border-strong px-2.5 py-1 text-ui-sm text-fg outline-accent hover:bg-bg-hover focus-visible:outline-2 disabled:border-border disabled:text-fg-faint disabled:hover:bg-transparent';
 
-function EmptyPane() {
+// The word cut (W22, W23): an empty main area draws its two ways in, which say what to do; "No open tabs" stays for a screen
+// reader, and Overview's chord waits in its tooltip, which focus reaches.
+export function EmptyPane() {
   const canCreate = useSessionCreatorRegistered();
   const canOverview = useActionEnabled('tab.overview');
   const chord = useChordHint('tab.overview');
   return (
-    <div className="flex h-full flex-col items-center justify-center gap-3 text-ui text-fg-muted">
-      <p className="m-0">No open tabs</p>
+    <div data-empty-pane className="flex h-full flex-col items-center justify-center gap-3 text-ui text-fg-muted">
+      <p className="sr-only">No open tabs</p>
       <div className="flex gap-2">
-        <button type="button" disabled={!canOverview} onClick={() => runAction('tab.overview')} className={TEXT_BUTTON}>
-          {chord ? `Overview ${chord}` : 'Overview'}
-        </button>
+        <Tip content={chord} description={chord}>
+          <button type="button" disabled={!canOverview} onClick={() => runAction('tab.overview')} className={TEXT_BUTTON}>
+            Overview
+          </button>
+        </Tip>
         <button type="button" disabled={!canCreate} title={canCreate ? undefined : 'Not available here'} onClick={() => void newChat()} className={TEXT_BUTTON}>
           {NEW_CHAT}
         </button>
