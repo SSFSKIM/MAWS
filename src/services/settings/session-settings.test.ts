@@ -11,6 +11,7 @@ import { sessionIdFor, summary } from '../../../test/support/index-fixture'; // 
 import { T0 } from '../../../test/support/builders'; // P4-A2
 import { userScopeProfile, type LaunchProfile } from '@shared/engine/launch-profile'; // P4-A2
 import { sessionSettingsOf } from './session-settings';
+import { FULL_MAWS_TOOL_SET } from '@shared/maws/tool-set'; // board ticket 421
 import { machineSettingsDefaults } from '@shared/settings/defaults'; // P5 O7 M9
 import { openSettingsFiles } from '../../../test/support/settings-files'; // P5 O3-A: the two files
 
@@ -99,6 +100,6 @@ describe('the session service reads the settings store', () => {
     expect(sessionSettingsOf(store.settings).engine.launchProfile).toEqual(userScopeProfile()); // P4-A2: the default
     const launchProfile: LaunchProfile = { plugins: { off: ['cua@cua'] }, hooks: 'none' };
     store.update({ gateway: { relayUnreachable: 'wait', offerDirect: false }, engine: { subagentModel: 'haiku', memoryBudgetMiB: 4096, mcpServers: [{ name: 'notion', type: 'http', url: 'https://mcp.notion.com/mcp' }], launchProfile } });
-    expect(sessionSettingsOf(store.settings)).toEqual({ gateway: { defaultRoute: 'gateway', relayUnreachable: 'wait' }, engine: { subagentModel: 'haiku', mcpServers: [{ name: 'notion', type: 'http', url: 'https://mcp.notion.com/mcp' }], launchProfile }, permissions: { autoFallback: 'acceptEdits' } });
+    expect(sessionSettingsOf(store.settings)).toEqual({ gateway: { defaultRoute: 'gateway', relayUnreachable: 'wait' }, engine: { subagentModel: 'haiku', mcpServers: [{ name: 'notion', type: 'http', url: 'https://mcp.notion.com/mcp' }], launchProfile }, permissions: { autoFallback: 'acceptEdits' }, mawsTools: FULL_MAWS_TOOL_SET });
   });
 });

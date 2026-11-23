@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
@@ -15,11 +16,14 @@ import { directRouteRefusal } from './start-guards';
 import { RETRY_DETAIL, RETRY_REASON } from './resume'; // C3 corrective
 import { ScratchRepo } from '../../../test/support/scratch-repo'; // C12
 import { OwnerChannelLaunches } from '../owner/launch'; // P2-C
-import { LEGACY_CONTRACT_7, NATIVE_TO_HUMAN_ENV, TO_HUMAN_MIRROR_VERSION, TO_HUMAN_SUPPLEMENT } from '@shared/owner/contract'; // P2-C; U2b: the mirror's number by name
+import { LEGACY_CONTRACT_7, NATIVE_TO_HUMAN_ENV, TO_HUMAN_MIRROR_VERSION, TO_HUMAN_SUPPLEMENT, TO_HUMAN_SUPPLEMENT_ENGINE } from '@shared/owner/contract'; // P2-C; U2b: the mirror's number by name; board ticket 421: supplement 4
 import { userScopeProfile } from '@shared/engine/launch-profile'; // P4-A2
 import type { StartOptions } from '@shared/ipc/schema/session'; // P5 O7 M9
-import { ENGINE_ROUTE_MACHINE_CAPABILITY, PEER_CAPABILITIES } from '@shared/host/socket-protocol'; // P5 O7 M9
-import type { C10Settings } from './launch-mapping'; // P5 O7 M9
+import { ENGINE_MAWS_TOOLS_CAPABILITY, ENGINE_ROUTE_MACHINE_CAPABILITY, PEER_CAPABILITIES } from '@shared/host/socket-protocol'; // P5 O7 M9; board ticket 421
+import { C10_SETTING_DEFAULTS, type C10Settings } from './launch-mapping'; // P5 O7 M9; board ticket 421: the defaults
+import { FULL_MAWS_TOOL_SET, type MawsToolSet } from '@shared/maws/tool-set'; // board ticket 421
+import type { SessionRecord } from '@shared/graph/session'; // board ticket 421
+import { MAWS_TOOLS_UNSUPPORTED } from './served-set'; // board ticket 421
 import { machineRouteRefusal, ROUTE_RELAY_UNSUPPORTED, ROUTE_UNSUPPORTED } from './machine-route'; // P5 O7 M9
 
 // The service is Electron-free (its handlers are service-register.ts's).
@@ -260,7 +264,7 @@ describe('session service', () => {
 
     it("falls back to direct for a Claude model when settings say so, with the session's notice", async () => {
       h.dispose();
-      h = await new SessionHarness({ settings: () => ({ gateway: { defaultRoute: 'gateway', relayUnreachable: 'direct' }, engine: { subagentModel: null, mcpServers: [], launchProfile: userScopeProfile() }, permissions: { autoFallback: 'acceptEdits' } }) }).start();
+      h = await new SessionHarness({ settings: () => ({ gateway: { defaultRoute: 'gateway', relayUnreachable: 'direct' }, engine: { subagentModel: null, mcpServers: [], launchProfile: userScopeProfile() }, permissions: { autoFallback: 'acceptEdits' }, mawsTools: FULL_MAWS_TOOL_SET }) }).start();
       h.trustDirectory(h.work);
       h.host.relay = DOWN_RELAY;
       const id = await create();
@@ -1158,8 +1162,162 @@ describe('P2-C: the to-human lane on the session service’s launches', () => {
     expect(h.host.launches.at(-1)).toMatchObject({ appSessionId: outcome.appSessionId, resume: { sessionId: SID, fork: true }, systemPromptSnapshot: 'off' });
     expect(h.index.ownerChannel.session(outcome.appSessionId)).toMatchObject({ recorded: 'contract:7', applied: 'off' });
   });
+
+  // Board ticket 421 (Interfaces §F, D8, D12): the supplement is chosen from the set the attempt serves
+  it('board ticket 421: a new session asking with the engine’s question tool appends supplement 4; on an older host it is served the full set, with supplement 3', async () => {
+    pluginStyle();
+    h.trustDirectory(h.work);
+    const engineSet: MawsToolSet = { ...FULL_MAWS_TOOL_SET, question: 'engine' };
+    const started = async () => {
+      const { appSessionId: id } = await h.service.create({ projectId: null, location: { kind: 'directory', path: h.work } });
+      await h.service.patch(id, { mawsTools: engineSet });
+      await h.service.startSession(id, { message: null, options: {} });
+      expect(await h.settled(id)).toMatchObject({ phase: 'ready' });
+      return h.host.launches.find((l) => l.appSessionId === id)!;
+    };
+    expect(await started()).toMatchObject({ appendSystemPrompt: TO_HUMAN_SUPPLEMENT_ENGINE, mawsTools: engineSet });
+    h.host.capabilities = PEER_CAPABILITIES.engineHost.filter((c) => c !== ENGINE_MAWS_TOOLS_CAPABILITY);
+    const older = await started();
+    expect(older.appendSystemPrompt).toBe(TO_HUMAN_SUPPLEMENT);
+    expect(older).not.toHaveProperty('mawsTools');
+    expect(h.index.sessions.get(older.appSessionId)).not.toHaveProperty('mawsTools');
+  });
 });
 // P2-C end
+
+// Board ticket 421 (docs/doperpowers/plans/2026-11-23-tool-choice.md, Interfaces §E, D1, D3, D5, D8): a set travels from
+// a create intent, seeded from the machine's default, to its record and its launch; a resume keeps the record's and a fork
+// its source's; the set an attempt serves is answered once, and a session never runs under another list than its own.
+describe('board ticket 421: the set of MAWS’s tools kept with the session', () => {
+  const PARTIAL: MawsToolSet = { artifacts: false, documents: false, dashboards: false, auxiliary: true, question: 'engine' };
+  const DOCS_OFF: MawsToolSet = { ...FULL_MAWS_TOOL_SET, documents: false };
+  let h: SessionHarness;
+  let settings: C10Settings;
+  beforeEach(async () => {
+    settings = C10_SETTING_DEFAULTS;
+    h = await new SessionHarness({ settings: () => settings }).start();
+    h.trustDirectory(h.work);
+  });
+  afterEach(() => h.dispose());
+
+  const olderHost = () => void (h.host.capabilities = PEER_CAPABILITIES.engineHost.filter((c) => c !== ENGINE_MAWS_TOOLS_CAPABILITY));
+  const launchesOf = (id: string) => h.host.launches.filter((l) => l.appSessionId === id);
+  const create = async () => (await h.service.create({ projectId: null, location: { kind: 'directory', path: h.work } })).appSessionId;
+  // a session MAWS launched before, under `set` (none: the full set), its transcript on disk
+  const launchedRecord = (set: MawsToolSet | null, n: number): SessionRecord => {
+    const appSessionId = randomUUID() as AppSessionId;
+    const sessionId = sessionIdFor(0x4210 + n);
+    h.index.sessions.createForLaunch({
+      appSessionId, directory: h.work, additionalDirectories: [], worktree: null, model: { requested: null, resolved: null }, effort: null,
+      permissionMode: { requested: 'default', effective: 'default', refusal: null }, ...(set !== null && { mawsTools: set }),
+    });
+    h.index.sessions.bindEngineId(appSessionId, sessionId);
+    h.writeTranscript(h.work, sessionId);
+    return h.index.sessions.get(appSessionId)!;
+  };
+  const start = async (id: AppSessionId, nth = 1) => {
+    await h.service.startSession(id, { message: null, options: {} });
+    return h.settled(id, nth);
+  };
+
+  it('create seeds a new intent’s set from the machine’s default, and writes none at the full set', async () => {
+    settings = { ...C10_SETTING_DEFAULTS, mawsTools: PARTIAL };
+    const seeded = await h.service.create({ projectId: null, location: null });
+    expect(seeded.intent.mawsTools).toEqual(PARTIAL);
+    expect(intentFile(h, seeded.appSessionId)!.mawsTools).toEqual(PARTIAL);
+    settings = C10_SETTING_DEFAULTS;
+    const full = await h.service.create({ projectId: null, location: null });
+    expect(full.intent).not.toHaveProperty('mawsTools');
+    expect(intentFile(h, full.appSessionId)).not.toHaveProperty('mawsTools');
+  });
+
+  it('a patch keeps a set that is not full and removes the key at the full set; on a fork’s intent it is refused and nothing changes', async () => {
+    const id = await create();
+    expect((await h.service.patch(id, { mawsTools: DOCS_OFF })).mawsTools).toEqual(DOCS_OFF);
+    expect(intentFile(h, id)!.mawsTools).toEqual(DOCS_OFF);
+    expect(await h.service.patch(id, { mawsTools: FULL_MAWS_TOOL_SET })).not.toHaveProperty('mawsTools');
+    expect(intentFile(h, id)).not.toHaveProperty('mawsTools');
+    // a fork's intent, kept by a failed start
+    const src = launchedRecord(null, 1);
+    h.host.script = () => ({ answer: { refused: 'binary_missing', message: 'no engine binary' } });
+    const fork = await h.service.fork(src.appId, { kind: 'inPlace' }, { message: null, rewindTo: null });
+    expect(await h.settled(fork.appSessionId)).toMatchObject({ phase: 'failed' });
+    const before = intentFile(h, fork.appSessionId)!;
+    await expect(h.service.patch(fork.appSessionId, { mawsTools: PARTIAL })).rejects.toMatchObject({ reason: 'invalid', field: 'mawsTools' });
+    expect(intentFile(h, fork.appSessionId)).toEqual(before);
+  });
+
+  it('a new session launches and records its intent’s set on a host that lists engine.mawsTools; at the full set neither carries one', async () => {
+    const id = await create();
+    await h.service.patch(id, { mawsTools: PARTIAL });
+    expect(await start(id)).toMatchObject({ phase: 'ready' });
+    expect(launchesOf(id)).toHaveLength(1);
+    expect(launchesOf(id)[0]!.mawsTools).toEqual(PARTIAL);
+    expect(h.index.sessions.get(id)!.mawsTools).toEqual(PARTIAL);
+    const plain = await create();
+    expect(await start(plain)).toMatchObject({ phase: 'ready' });
+    expect(launchesOf(plain)[0]).not.toHaveProperty('mawsTools');
+    expect(h.index.sessions.get(plain)).not.toHaveProperty('mawsTools');
+  });
+
+  it('a new session on an older host is served the full set: no set on its spec or its record', async () => {
+    olderHost();
+    const id = await create();
+    await h.service.patch(id, { mawsTools: PARTIAL });
+    expect(await start(id)).toMatchObject({ phase: 'ready' });
+    expect(launchesOf(id)[0]).not.toHaveProperty('mawsTools');
+    expect(h.index.sessions.get(id)).not.toHaveProperty('mawsTools');
+  });
+
+  it('a resume keeps its record’s set, whatever the default is now, and its retry sends the same spec; a record with none resumes at the full set', async () => {
+    settings = { ...C10_SETTING_DEFAULTS, mawsTools: DOCS_OFF };
+    const kept = launchedRecord(PARTIAL, 2);
+    let n = 0;
+    h.host.script = () => (++n === 1 ? { exit: { error: NO_OUTPUT_TEXT, code: 'no_output' } } : {});
+    expect(await start(kept.appId)).toMatchObject({ phase: 'ready' });
+    const [first, retry] = launchesOf(kept.appId);
+    expect(first!.mawsTools).toEqual(PARTIAL);
+    expect(retry).toMatchObject({ ...first, retry: { attempt: 2 } });
+    h.host.script = () => ({});
+    const none = launchedRecord(null, 3);
+    expect(await start(none.appId)).toMatchObject({ phase: 'ready' });
+    expect(launchesOf(none.appId)[0]).not.toHaveProperty('mawsTools');
+  });
+
+  it('on an older host a resume of a session whose set is not full is refused with the sentence and nothing launched; at the full set it goes', async () => {
+    olderHost();
+    const kept = launchedRecord(PARTIAL, 4);
+    expect(await start(kept.appId)).toMatchObject({ phase: 'failed', outcome: { kind: 'error', message: MAWS_TOOLS_UNSUPPORTED } });
+    expect(launchesOf(kept.appId)).toEqual([]);
+    expect(h.host.calledWith('fs.unfollow')).toEqual([]); // refused before the handover
+    expect(h.index.sessions.get(kept.appId)!.mawsTools).toEqual(PARTIAL);
+    const none = launchedRecord(null, 5);
+    expect(await start(none.appId)).toMatchObject({ phase: 'ready' });
+    expect(launchesOf(none.appId)[0]).not.toHaveProperty('mawsTools');
+  });
+
+  it('a fork takes its source’s set, and the full set from a source with none; on an older host a fork of a set not full is refused', async () => {
+    settings = { ...C10_SETTING_DEFAULTS, mawsTools: DOCS_OFF }; // a fork never reads the default
+    const src = launchedRecord(PARTIAL, 6);
+    const fork = await h.service.fork(src.appId, { kind: 'inPlace' }, { message: null, rewindTo: null });
+    expect(await h.settled(fork.appSessionId)).toMatchObject({ phase: 'ready' });
+    expect(launchesOf(fork.appSessionId)[0]!.mawsTools).toEqual(PARTIAL);
+    expect(h.index.sessions.get(fork.appSessionId)!.mawsTools).toEqual(PARTIAL);
+    const plain = launchedRecord(null, 7);
+    const plainFork = await h.service.fork(plain.appId, { kind: 'inPlace' }, { message: null, rewindTo: null });
+    expect(await h.settled(plainFork.appSessionId)).toMatchObject({ phase: 'ready' });
+    expect(launchesOf(plainFork.appSessionId)[0]).not.toHaveProperty('mawsTools');
+    expect(h.index.sessions.get(plainFork.appSessionId)).not.toHaveProperty('mawsTools');
+
+    olderHost();
+    const refused = await h.service.fork(src.appId, { kind: 'inPlace' }, { message: null, rewindTo: null });
+    expect(await h.settled(refused.appSessionId)).toMatchObject({ phase: 'failed', outcome: { kind: 'error', message: MAWS_TOOLS_UNSUPPORTED, resources: { record: 'none' } } });
+    expect(launchesOf(refused.appSessionId)).toEqual([]);
+    expect(h.index.sessions.get(refused.appSessionId)).toBeNull();
+    const plainAgain = await h.service.fork(plain.appId, { kind: 'inPlace' }, { message: null, rewindTo: null });
+    expect(await h.settled(plainAgain.appSessionId)).toMatchObject({ phase: 'ready' });
+  });
+});
 
 // P3-H (P3 Decision Log 88): `requireEmptyMessage` marks a start that must run no model turn (a connector's owner Start).
 // Main refuses it while a first message is in the request or retained for the session (an intent's, or a resume's
@@ -1278,7 +1436,7 @@ describe('P5 O12 M11: the spawner named at every launch of a spawned record', ()
 describe('the machine route (P5 O7 M9)', () => {
   const RELAY = 'http://127.0.0.1:8641';
   const OTHER = 'https://inference.example.invalid';
-  const MACHINE: C10Settings = { gateway: { defaultRoute: 'gateway', relayUnreachable: 'ask', route: 'machine' }, engine: { subagentModel: null, mcpServers: [], launchProfile: userScopeProfile() }, permissions: { autoFallback: 'acceptEdits' } };
+  const MACHINE: C10Settings = { gateway: { defaultRoute: 'gateway', relayUnreachable: 'ask', route: 'machine' }, engine: { subagentModel: null, mcpServers: [], launchProfile: userScopeProfile() }, permissions: { autoFallback: 'acceptEdits' }, mawsTools: FULL_MAWS_TOOL_SET };
   let h: SessionHarness;
   beforeEach(async () => {
     h = await new SessionHarness({ settings: () => MACHINE }).start();

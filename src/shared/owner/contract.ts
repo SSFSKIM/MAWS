@@ -175,6 +175,23 @@ export const SUPPLEMENT: ContractText = SUPPLEMENT_3;
 export const TO_HUMAN_SUPPLEMENT_VERSION = SUPPLEMENT.version;
 export const TO_HUMAN_SUPPLEMENT = SUPPLEMENT.text;
 
+// Board ticket 421 (docs/doperpowers/plans/2026-11-23-tool-choice.md, Interfaces §F, D12): supplement 4, appended in place
+// of 3 beside the plugin's style for a session whose question tool is the engine's own (`question: 'engine'`), which
+// lists no `mcp__maws__ask`. A session's question tool is fixed at its start, so the supplement its prompt recorded is
+// always the one its launches want. Ticket 600 (sminos's question in a session MAWS runs) brings a supplement 5 that
+// names sminos's tool where it is registered.
+const ASK_ENGINE = 'Ask the human with the native AskUserQuestion; it waits for their answer. Neither `mcp__sminos__AskUserQuestion` nor `mcp__doperpowers__AskUserQuestion` is available here.';
+
+const SUPPLEMENT_4: ContractText = {
+  version: 4,
+  text: `${SUPPLEMENT_HEADER(4)}
+
+This session runs in MAWS. ${ASK_ENGINE}`,
+};
+
+export const TO_HUMAN_SUPPLEMENT_ENGINE_VERSION = SUPPLEMENT_4.version;
+export const TO_HUMAN_SUPPLEMENT_ENGINE = SUPPLEMENT_4.text;
+
 // P4-R7y's alias (2026-10-21, the owner's ask; withdrawn by P4-R7z): the text a SessionStart hook gave the model at
 // every start of a lane-on session, and P4-A2 appended to the system prompt under hooks off, saying the plugin's message
 // tool was MAWS's there. Kept so the prompt-state reader still tells a snapshot that recorded it alone (`alias`) from

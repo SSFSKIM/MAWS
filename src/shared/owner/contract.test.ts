@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest';
 import {
   carriesPluginMessageTool, CONTRACT_HEADER, LEGACY_CONTRACT_1, LEGACY_CONTRACT_5, LEGACY_CONTRACT_7, LEGACY_MESSAGE_TOOL_ALIAS, LEGACY_SUPPLEMENT_1, LEGACY_SUPPLEMENT_2, NATIVE_TO_HUMAN_ENV, PLUGIN_MESSAGE_TOOL_FROM,
   STYLE_CONTRACT_KEY, styleShape, SUPPLEMENT, SUPPLEMENT_HEADER, TO_HUMAN_CONTRACT_VERSION, TO_HUMAN_MIRROR_VERSION, TO_HUMAN_SUPPLEMENT, TO_HUMAN_SUPPLEMENT_VERSION,
+  TO_HUMAN_SUPPLEMENT_ENGINE, TO_HUMAN_SUPPLEMENT_ENGINE_VERSION,
 } from './contract';
 import { MAWS_MESSAGE_TOOL, PLUGIN_MESSAGE_TOOL } from './message-call';
 import type { MessageUuid } from '../graph/ids';
@@ -131,6 +132,19 @@ describe('the supplement: supplement 3 (P4-R7z)', () => {
     }
     for (const withdrawn of [MAWS_MESSAGE_TOOL, PLUGIN_MESSAGE_TOOL, '<message>', 'final', 'not available here.', 'report', 'mark']) expect(TO_HUMAN_SUPPLEMENT).not.toContain(withdrawn);
     expect(marksOf(TO_HUMAN_SUPPLEMENT, { messageUuid: 'u' as MessageUuid, blockIndex: 0 })).toEqual([]);
+  });
+});
+
+// Board ticket 421 (docs/doperpowers/plans/2026-11-23-tool-choice.md, Interfaces §F, D12): the supplement of a session
+// whose question tool is the engine's own, which lists no `mcp__maws__ask`; word for word, as X18's texts are held.
+describe('supplement 4: the engine’s question tool (board ticket 421)', () => {
+  it('is version 4, opens with its header, and names the native AskUserQuestion, word for word', () => {
+    expect(TO_HUMAN_SUPPLEMENT_ENGINE_VERSION).toBe(4);
+    expect(TO_HUMAN_SUPPLEMENT_ENGINE).toBe(
+      '# Messages to the human (MAWS to-human supplement 4)\n\nThis session runs in MAWS. Ask the human with the native AskUserQuestion; it waits for their answer. Neither `mcp__sminos__AskUserQuestion` nor `mcp__doperpowers__AskUserQuestion` is available here.',
+    );
+    expect(TO_HUMAN_SUPPLEMENT_ENGINE).not.toContain('mcp__maws__ask');
+    expect(marksOf(TO_HUMAN_SUPPLEMENT_ENGINE, { messageUuid: 'u' as MessageUuid, blockIndex: 0 })).toEqual([]);
   });
 });
 

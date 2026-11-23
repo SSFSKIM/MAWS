@@ -19,7 +19,7 @@ import { legacyRouteOf, readRoute, type LegacyRoute, type Route } from '@shared/
 import type { Location } from '@shared/sessions/intent';
 import type { LaunchSpec } from '@shared/engine/launch-spec';
 import type { RelayHealth } from '@shared/engine/relay-health';
-import { ENGINE_ROUTE_MACHINE_CAPABILITY } from '@shared/host/socket-protocol';
+import { ENGINE_MAWS_TOOLS_CAPABILITY, ENGINE_ROUTE_MACHINE_CAPABILITY } from '@shared/host/socket-protocol';
 import { isGatewayModel } from '@shared/sessions/models';
 import { RELAY_URL } from '../../engine-host/launch';
 import { effectiveBaseUrl, type BaseUrlResolution } from '../../engine-host/models-cache';
@@ -28,6 +28,7 @@ import type { SetupPhase } from '@shared/sessions/setup';
 import { hostCall } from './context';
 import { newWorktreeTarget } from './intent-rules';
 import { SetupFailure, type Setup } from './setup-steps';
+import { MAWS_TOOLS_UNSUPPORTED } from './served-set'; // board ticket 421
 
 export const ROUTE_UNSUPPORTED = "This machine's engine host predates the machine route; restart MAWS there, or choose gateway or direct for this session.";
 
@@ -100,7 +101,11 @@ export async function guardMachineRoute(s: Setup, args: { site: SettingsSite; mo
 // The spec a launch sends this engine host: `route` only for the machine route on a host that lists it (the legacy field
 // beside it the resolved base URL's), the legacy route alone otherwise; or the refusal of a machine-route launch an
 // older host would serve on another inference.
+// Board ticket 421 (D8): a spec carries a set of MAWS's tools only when the attempt's one answer (served-set.ts) found a
+// host that lists `engine.mawsTools`, so nothing is taken off here; a host replaced by an older one since is refused, as
+// that answer would have refused it, rather than serving the session another list.
 export async function specForHost(s: Setup, spec: LaunchSpec): Promise<{ spec: LaunchSpec } | { refused: string }> {
+  if (spec.mawsTools !== undefined && !(await s.hostLists(ENGINE_MAWS_TOOLS_CAPABILITY))) return { refused: MAWS_TOOLS_UNSUPPORTED };
   const { route: _route, ...legacy } = spec;
   void _route;
   const chosen: Route = readRoute(spec);

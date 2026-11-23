@@ -27,7 +27,7 @@ import type { ArchiveOutcome, DeleteOutcome, StartOptions } from '@shared/ipc/sc
 import { emptyProgress, HostError, hostCall, STOP_WAIT_MS, WATCHDOG_MS, type SessionServiceDeps } from './context';
 import { DeletionManifests, type DeletionManifest } from './delete-manifest';
 import { checkAdditionalDirectories, checkLocation, sessionDirectoryOf, trustDirectoryOf, type RuleVerdict } from './intent-rules';
-import { readSettings, routeOfSettings, seedPermissionMode } from './launch-mapping';
+import { mawsToolsOf, readSettings, routeOfSettings, seedPermissionMode } from './launch-mapping'; // board ticket 421: mawsToolsOf
 import { archiveRecord, deleteRecord, forkIntentOf, previewDeletion, renameRecord, revealablePath } from './record-actions';
 import type { BootstrapNote } from './intents';
 import { awaitsReady, liveRows, markInterrupted, reconcileIntent, type LiveRows } from './recovery';
@@ -488,6 +488,7 @@ export class SessionService {
       permissionMode: seedPermissionMode(await s.userDefaults()), // W3: the user's defaultMode, else auto
       gateway: s.settings().gateway.defaultRoute,
       ...routeOfSettings(s.settings()), // P5 O7 M9: the machine's default route, when its settings carry one
+      ...mawsToolsOf(s.settings().mawsTools), // board ticket 421 (D5): the machine's default set, when it is not the full set
       trust: 'unanswered',
       trustKey: null,
       message: null,
@@ -534,7 +535,15 @@ export class SessionService {
       if (patch.location !== undefined && intent.progress.worktree?.createdHere) {
         throw new IntentRefused('retained_worktree', `retained_worktree: the failed attempt's worktree ${intent.progress.worktree.path} is kept; discard it or keep it first`);
       }
+      // board ticket 421 (D1, D3): a fork's tools are its source's; a create intent keeps a set only when it is not the full
+      // set, so a draft at the full set stays readable to a build that predates the choice
+      if (patch.mawsTools !== undefined && intent.kind !== 'create') throw new IntentRefused('invalid', 'mawsTools: a fork keeps the tools of the session it forks', 'mawsTools');
       let next: SetupIntent = { ...intent, ...patch, ...routePatch(intent, patch), updatedAt: this.now() };
+      if (patch.mawsTools !== undefined) {
+        const { mawsTools: _set, ...rest } = next;
+        void _set;
+        next = { ...rest, ...mawsToolsOf(patch.mawsTools) };
+      }
       if (patch.location !== undefined) {
         this.rule(await checkLocation(s, next, { forStart: false }));
         if (intent.progress.worktree !== null) next = { ...next, progress: { ...next.progress, worktree: null } }; // an existing worktree's note: the next start re-reads it

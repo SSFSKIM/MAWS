@@ -7,11 +7,15 @@
 import type { MachineSettings } from '@shared/ipc/schema/settings';
 import type { Route } from '@shared/engine/route';
 import type { C10Settings } from '../sessions/launch-mapping';
+import { FULL_MAWS_TOOL_SET, type MawsToolSet } from '@shared/maws/tool-set'; // board ticket 421
 
-export function sessionSettingsOf(settings: Pick<MachineSettings, 'gateway' | 'engine' | 'permissions'>, route?: Route): C10Settings {
+// Board ticket 421 (docs/doperpowers/plans/2026-11-23-tool-choice.md, Interfaces §G): `mawsTools`, the machine's default
+// set of MAWS's tools, which seeds a new intent's; the full set until the spine reads the machine's file for it (its M4).
+export function sessionSettingsOf(settings: Pick<MachineSettings, 'gateway' | 'engine' | 'permissions'>, route?: Route, mawsTools: MawsToolSet = FULL_MAWS_TOOL_SET): C10Settings {
   return {
     gateway: { defaultRoute: settings.gateway.defaultRoute, relayUnreachable: settings.gateway.relayUnreachable, ...(route !== undefined && { route }) },
     engine: { subagentModel: settings.engine.subagentModel, mcpServers: settings.engine.mcpServers, launchProfile: settings.engine.launchProfile }, // P4-R8; P4-A2
     permissions: { autoFallback: settings.permissions.autoFallback }, // W3
+    mawsTools, // board ticket 421
   };
 }

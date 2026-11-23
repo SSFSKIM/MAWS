@@ -19,6 +19,8 @@ import { exitFailure, heldOutcome, HeldFailure, messageOf, RelayFailure, SetupFa
 import { trustStateOf } from './trust';
 import { ownerChannelLaunch, ownerChannelLaunched } from '../owner/launch'; // P2-C (2026-10-09)
 import { launchScopeOf } from './artifact-scope'; // P2-E1
+import { FULL_MAWS_TOOL_SET } from '@shared/maws/tool-set'; // board ticket 421
+import { servedSet } from './served-set'; // board ticket 421
 
 export const PAUSED_READY_MS = 15_000; // W14: a resume over a paused terminal CLI is ready within this, or rolled back
 
@@ -37,6 +39,10 @@ export async function runResume(
   let launched = false;
   try {
     await passLaunchGate(s); // C12: the gate refuses before the trust bootstrap and the handover
+    // board ticket 421 (D1, D8): the record's own set, answered once; a host that cannot serve it refuses the resume here,
+    // before the bootstrap and the handover
+    const served = await servedSet(s, { kind: 'kept', set: record.mawsTools ?? FULL_MAWS_TOOL_SET });
+    if ('refused' in served) throw new SetupFailure('launching', served.refused);
     const trust = await trustStateOf(record.directory, { git: s.git, env: s.env });
     const attestation = input.decision === 'accepted' ? { accepted: true as const, directory: trust.trustKey } : null;
     const route = resumeRouteOf(record, input.options, s.settings()); // P5 O7 M9: `route` before `routed`
@@ -70,7 +76,7 @@ export async function runResume(
     // P2-C start (2026-10-09): the owner channel's decision for this launch, over the session's own transcript
     // P5 O12 M11: the record's spawner, as at its start; the bootstrap above named none
     const proofFile = s.spawnerProofs.pathOf(appSessionId);
-    const decided = await ownerChannelLaunch(s, resumeLaunchSpec(record, input.options, { trust: attestation, replay: fixture?.path ?? null, browserBackend: s.browserBackend(appSessionId), proofFile }, s.settings()), { kind: 'resume', transcriptOf: appSessionId });
+    const decided = await ownerChannelLaunch(s, resumeLaunchSpec(record, input.options, { trust: attestation, replay: fixture?.path ?? null, browserBackend: s.browserBackend(appSessionId), proofFile, mawsTools: served.set /* board ticket 421 */ }, s.settings()), { kind: 'resume', transcriptOf: appSessionId });
     let spec = decided.spec;
     // P2-C end
     let end: LaunchEnd;

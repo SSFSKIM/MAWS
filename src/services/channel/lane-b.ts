@@ -12,7 +12,11 @@
 // - each question of a MAWS ask (`mcp__maws__ask`, a subagent's too: the person answers it alike) is a `question` from
 //   the ask's own record as the engine host journals it (`maws.ask.opened`: the question and its options), and each
 //   answer an `answered` (`maws.ask.answered`), keyed by the ask's id; the host's ask table is its one store, held in its
-//   memory (src/engine-host/tool-server/asks.ts), and these events are what it tells of it.
+//   memory (src/engine-host/tool-server/asks.ts), and these events are what it tells of it;
+// - board ticket 421 (docs/doperpowers/plans/2026-11-23-tool-choice.md, D13): each question the engine's own question
+//   tool puts through MAWS's question path (`question.requested`, a subagent's too), for a session whose question tool is
+//   the engine's, is a `question` with its options' labels, and each answer (`question.answered`, keyed by the question's
+//   text, as the engine takes it) an `answered`, keyed by the request and the question as an ask's are by its id.
 // Only what a MAWS process said is read (an event with its journal row, `seq`): history read back from disk is no entry
 // (M7b, "Back-fill": none), and nor is a transcript followed while a terminal or a job holds the session, whose words are
 // lane A's, sminos's to tell.
@@ -89,6 +93,19 @@ export class LaneBSource {
       if (event.kind === 'maws.ask.answered') {
         for (const answer of event.answers) {
           this.add(appSessionId, event.sessionId, { kind: 'answered', text: askAnswerOf(answer), at: event.at }, pathOf('ask', event.askId, answer.id, 'answered'), pathOf('ask', event.askId, answer.id));
+        }
+        continue;
+      }
+      if (event.kind === 'question.requested') {
+        for (const question of event.questions) {
+          const choices = question.options.map((option) => option.label);
+          this.add(appSessionId, event.sessionId, { kind: 'question', text: question.question, at: event.at, ...(choices.length > 0 ? { choices } : {}) }, pathOf('question', event.requestId, question.question));
+        }
+        continue;
+      }
+      if (event.kind === 'question.answered') {
+        for (const [question, answer] of Object.entries(event.answers)) {
+          this.add(appSessionId, event.sessionId, { kind: 'answered', text: answer, at: event.at }, pathOf('question', event.requestId, question, 'answered'), pathOf('question', event.requestId, question));
         }
         continue;
       }

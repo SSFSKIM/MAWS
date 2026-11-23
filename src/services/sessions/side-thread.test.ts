@@ -2,6 +2,7 @@
 // C10's fork path with a guard of its own (a running turn does not refuse it), lineage from the intent, the anchored
 // first message, the thread named by its anchor, and `side.thread.opened` in the parent's stream; and C10's own Fork
 // now carrying `fork` lineage.
+import { randomUUID } from 'node:crypto';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -15,6 +16,7 @@ import { sessionIdFor, summary } from '../../../test/support/index-fixture';
 import { SessionHarness } from '../../../test/support/session-harness';
 import { InvalidSideInput } from '@shared/anchor/invalid';
 import { ScreenshotRefused } from '@shared/anchor/screenshot';
+import type { MawsToolSet } from '@shared/maws/tool-set'; // board ticket 421
 
 vi.mock('electron', () => {
   throw new Error('SessionService must not load Electron');
@@ -74,6 +76,30 @@ describe('side threads', () => {
     ]);
     expect(h.index.sideThreads.of(parent.appId).map((row) => row.childAppSessionId)).toEqual([child]);
     expect(h.host.calledWith('session.send').filter((c) => (c as { appSessionId: string }).appSessionId === parent.appId)).toEqual([]); // the main conversation got nothing
+  });
+
+  // Board ticket 421 (docs/doperpowers/plans/2026-11-23-tool-choice.md, D1): a side thread is a fork of its parent's
+  // conversation, so it keeps the parent's set of MAWS's tools, and a parent with none gives it the full set
+  it('board ticket 421: a thread takes its parent’s set of MAWS’s tools, and the full set from a parent with none', async () => {
+    const set: MawsToolSet = { artifacts: true, documents: false, dashboards: true, auxiliary: false, question: 'maws' };
+    h.trustDirectory(h.work);
+    const withSet = randomUUID() as AppSessionId;
+    const engineId = sessionIdFor(0x5f);
+    h.index.sessions.createForLaunch({
+      appSessionId: withSet, directory: h.work, additionalDirectories: [], worktree: null, model: { requested: null, resolved: null }, effort: null,
+      permissionMode: { requested: 'default', effective: 'default', refusal: null }, mawsTools: set,
+    });
+    h.index.sessions.bindEngineId(withSet, engineId);
+    h.writeTranscript(h.work, engineId);
+    const kept = await h.service.openSideThread(withSet, { kind: 'comment', anchor, text: 'Why?', screenshot: null });
+    expect(await h.settled(kept.appSessionId)).toMatchObject({ phase: 'ready' });
+    expect(h.host.launches.find((s: LaunchSpec) => s.appSessionId === kept.appSessionId)!.mawsTools).toEqual(set);
+    expect(h.index.sessions.get(kept.appSessionId)!.mawsTools).toEqual(set);
+    const plain = parentRecord();
+    const full = await h.service.openSideThread(plain.appId, { kind: 'comment', anchor, text: 'Why?', screenshot: null });
+    expect(await h.settled(full.appSessionId)).toMatchObject({ phase: 'ready' });
+    expect(h.host.launches.find((s: LaunchSpec) => s.appSessionId === full.appSessionId)).not.toHaveProperty('mawsTools');
+    expect(h.index.sessions.get(full.appSessionId)).not.toHaveProperty('mawsTools');
   });
 
   it('continues answered side questions as a thread titled "Side question", with the promotion as its first prompt', async () => {

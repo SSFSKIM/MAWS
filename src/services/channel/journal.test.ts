@@ -126,6 +126,12 @@ const askOpened = (engine: SessionId, at: string, askId: string, questions: unkn
 const askAnswered = (engine: SessionId, at: string, askId: string, answers: unknown[], over: Record<string, unknown> = {}) =>
   ev(engine, at, { kind: 'maws.ask.answered', askId, toolUseId: askId, answers, delivery: 'result', ...over });
 
+// board ticket 421 (D13): the engine's own question tool, raised and answered through MAWS's question path
+const questionRequested = (engine: SessionId, at: string, requestId: string, questions: unknown[], over: Record<string, unknown> = {}) =>
+  ev(engine, at, { kind: 'question.requested', requestId, toolUseId: `toolu-${requestId}`, questions, ...over });
+const questionAnswered = (engine: SessionId, at: string, requestId: string, answers: Record<string, string>, over: Record<string, unknown> = {}) =>
+  ev(engine, at, { kind: 'question.answered', requestId, toolUseId: `toolu-${requestId}`, answers, ...over });
+
 const laneA = (over: Partial<NewHostEntry> = {}): NewHostEntry => ({
   project: 'proj-a', appSessionId: null, engineSessionId: '11111111-1111-4111-8111-111111111111' as SessionId, lane: 'A', kind: 'message', text: 'From the terminal.',
   at: iso(NOW - 60_000), src: 'proj-a/mini/s1/7', ...over,
@@ -260,6 +266,40 @@ describe('the project channel journal', () => {
         { kind: 'question', text: 'What should it be called?', choices: undefined, at: asked, src: `${prefix}/q2` },
         { kind: 'question', text: 'Which backend should the board use?', choices: ['Postgres', 'SQLite'], at: asked, src: `${prefix}/q1` },
       ]);
+      expect(h.emitted).toHaveLength(6);
+    });
+
+    // Board ticket 421 (docs/doperpowers/plans/2026-11-23-tool-choice.md, D13): a session whose question tool is the
+    // engine's answers its questions in MAWS through the request path; they reach the channel as a MAWS ask's do
+    it('records each question of the engine’s own question tool with its options, and each answer, each once across a replay; a subagent’s too', () => {
+      const { appSessionId, engineSessionId: e } = h.session('proj-1');
+      const asked = iso(NOW - 60_000);
+      const option = (label: string) => ({ label, description: null, preview: null });
+      const questions = [
+        { question: 'Which backend should the board use?', header: 'Backend', options: [option('Postgres'), option('SQLite')], multiSelect: false },
+        { question: 'Which folders?', header: 'Folders', options: [option('src'), option('test')], multiSelect: true },
+      ];
+      const requested = questionRequested(e, asked, 'req-1', questions);
+      h.batch(appSessionId, [requested]);
+      h.batch(appSessionId, [requested]); // a replay
+      const answeredAt = iso(NOW - 30_000);
+      const answered = questionAnswered(e, answeredAt, 'req-1', { 'Which backend should the board use?': 'SQLite', 'Which folders?': 'src, test' });
+      h.batch(appSessionId, [answered, answered]);
+      const prefix = `proj-1/lane-b/${appSessionId}/question/req-1`;
+      expect(h.history({ project: 'proj-1' }).entries.map(({ kind, text, choices, at, src }) => ({ kind, text, choices, at, src }))).toEqual([
+        { kind: 'answered', text: 'src, test', choices: undefined, at: answeredAt, src: `${prefix}/Which%20folders%3F/answered` },
+        { kind: 'answered', text: 'SQLite', choices: undefined, at: answeredAt, src: `${prefix}/Which%20backend%20should%20the%20board%20use%3F/answered` },
+        { kind: 'question', text: 'Which folders?', choices: ['src', 'test'], at: asked, src: `${prefix}/Which%20folders%3F` },
+        { kind: 'question', text: 'Which backend should the board use?', choices: ['Postgres', 'SQLite'], at: asked, src: `${prefix}/Which%20backend%20should%20the%20board%20use%3F` },
+      ]);
+      expect(h.emitted).toHaveLength(4);
+      // a subagent's question, which the person answers alike; an answer to a request never heard asked records nothing
+      h.batch(appSessionId, [
+        questionRequested(e, iso(NOW - 9_000), 'req-sub', [{ question: 'Ship it?', header: 'Ship', options: [], multiSelect: false }], { parentToolUseId: 'toolu_agent' }),
+        questionAnswered(e, iso(NOW - 8_000), 'req-sub', { 'Ship it?': 'Yes' }, { parentToolUseId: 'toolu_agent' }),
+        questionAnswered(e, iso(NOW - 7_000), 'req-unheard', { 'Earlier?': 'No' }),
+      ]);
+      expect(h.history({ project: 'proj-1' }).entries.slice(0, 2).map((entry) => `${entry.kind}: ${entry.text}`)).toEqual(['answered: Yes', 'question: Ship it?']);
       expect(h.emitted).toHaveLength(6);
     });
 

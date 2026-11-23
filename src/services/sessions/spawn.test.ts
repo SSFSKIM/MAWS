@@ -144,6 +144,10 @@ describe('session.spawn on the spine', () => {
     expect(await record(bus, appSessionId)).toMatchObject({ appId: appSessionId, directory: checkout });
     expect((await record(bus, appSessionId))?.launchedBy).toBeUndefined(); // a local client's own command claims nothing
     await expect.poll(() => sent).toEqual(['look at the tests']); // the brief, once the engine is ready
+    // board ticket 421 (A5): the machine's default set of MAWS's tools, through `create` as the composer's own; the full
+    // set until the machine's default becomes a choice (the plan's M4), so neither the spec nor the record carries one
+    expect(launched[0]).not.toHaveProperty('mawsTools');
+    expect(await record(bus, appSessionId)).not.toHaveProperty('mawsTools');
   });
 
   // UX wave U1c, the review round's R3 (b): a spawned session's display text, and so its title, holds no joiner; the
