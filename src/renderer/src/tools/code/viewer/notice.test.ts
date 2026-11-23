@@ -11,7 +11,7 @@ import { classifyFailure, failureOf, type FileFailure, type NoticeCause } from '
 const OUTSIDE = "path outside the session's directories";
 // The word cut (N7): the way in alone, without how the app opens files
 const HERE = 'Choose it with File ▸ Open File…';
-const ASK = 'Ask the agent to send the file to see it here.';
+const ASK = 'Ask the agent to copy the file into this session’s folders to see it here.';
 const OTHER_FILE = 'This file could not be opened.';
 const OTHER_FOLDER = 'This folder could not be listed.';
 

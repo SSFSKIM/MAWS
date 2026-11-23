@@ -11,7 +11,8 @@ import { CanUseToolRequestSchema, ElicitationRequestSchema, HookCallbackRequestS
 // E1 start
 import { withQuestionIds } from '@shared/maws/ask';
 import { readMcpMessage, toolCallOf } from '@shared/maws/rpc';
-import { ArtifactDeliverySchema, AskAnswerSchema, AskResultSchema, isMawsToolName, parseRecordedToolArguments, SendFileResultSchema, ShowPaneResultSchema } from '@shared/maws/tools';
+import { ArtifactDeliverySchema, AskAnswerSchema, AskResultSchema, isMawsToolName, parseRecordedToolArguments, ShowPaneResultSchema } from '@shared/maws/tools';
+import { HISTORICAL_SEND_FILE, SendFileInputSchema, SendFileResultSchema } from '@shared/maws/send-file'; // board ticket 848: retired, read as before
 import { ArtifactUpdateInputSchema, HISTORICAL_ARTIFACT_UPDATE } from '@shared/maws/artifact-update'; // P3-A: retired, read as before
 // E1 end
 // E4c start (frozen since the browser tools left the server, P1 A-54)
@@ -153,12 +154,14 @@ export function mapInboundRequest(inbound: InboundTable, frame: ControlRequestFr
       const tool = typeof name === 'string' ? name : '';
       // E4c: a call of a removed browser tool (P1 A-54) is admitted as the server admitted it then, so a journal written
       // before the removal maps as it always did
-      // P3-A: so is a call of the retired `artifact_update`
+      // P3-A: so is a call of the retired `artifact_update`; board ticket 848: and of the retired `send_file`
       const admitted = isMawsToolName(tool)
         ? parseRecordedToolArguments(tool, args).ok
         : tool === HISTORICAL_ARTIFACT_UPDATE
           ? ArtifactUpdateInputSchema.safeParse(args).success
-          : isBrowserToolName(tool) && parseBrowserToolArguments(tool, args).ok;
+          : tool === HISTORICAL_SEND_FILE
+            ? SendFileInputSchema.safeParse(args).success
+            : isBrowserToolName(tool) && parseBrowserToolArguments(tool, args).ok;
       const ask = admitted && tool === 'ask' ? parseRecordedToolArguments('ask', args) : null;
       const askId = ask?.ok ? (toolUseId ?? requestId) : null;
       remember({ kind: 'mcp', toolUseId, callbackId: null, mcp: { tool, askId, toolUseId, args, admitted } });
@@ -221,7 +224,8 @@ export function mapOutboundResponse(inbound: InboundTable, frame: ControlRespons
 }
 
 // E1 start: the host's answer to a `tools/call` of the `maws` server, for an admitted call only: `maws.delivery.file`
-// for a `send_file` whose result reads `delivered`, `maws.pane.shown` for a `show_pane` (what opened, or the error text
+// for a `send_file` whose result reads `delivered` (retired by board ticket 848: a journal written before; a later call is
+// refused and yields nothing), `maws.pane.shown` for a `show_pane` (what opened, or the error text
 // of a pane this build lacks, a window that never answered or, since U6d, the retired `artifact` pane),
 // `maws.ask.answered` for a blocking ask answered with its AskResult (an async ask's `asked` acknowledgement yields
 // nothing: its answers come with the `maws_ask_answered` meta row). Anything else (another tool, a result that parses as
@@ -234,10 +238,10 @@ function mapMawsAnswer(requestId: RequestId, call: McpCall, rpc: unknown, out: E
   if (text === undefined) return;
   const isError = result.isError === true;
   const json = isError ? null : parseJson(text);
-  if (call.tool === 'send_file') {
+  if (call.tool === HISTORICAL_SEND_FILE) {
     const parsed = SendFileResultSchema.safeParse(json);
-    const args = parseRecordedToolArguments('send_file', call.args);
-    if (!parsed.success || !args.ok) return;
+    const args = SendFileInputSchema.safeParse(call.args);
+    if (!parsed.success || !args.success) return;
     out.emit({ kind: 'maws.delivery.file', toolUseId: call.toolUseId, requestId, deliverables: parsed.data.deliverables, caption: args.data.caption ?? null, urgency: args.data.urgency ?? 'normal' }, attribution);
     return;
   }

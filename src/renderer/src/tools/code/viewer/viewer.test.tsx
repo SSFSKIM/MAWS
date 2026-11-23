@@ -176,7 +176,7 @@ const codeText = () => document.querySelector('.cm-content')?.textContent ?? nul
 const noticeLines = () => [...document.querySelectorAll('[data-refusal] p')].map((p) => p.textContent);
 const noticeCause = () => document.querySelector('[data-refusal]')?.getAttribute('data-notice-cause') ?? null;
 const THREE_WAYS = 'Choose it with File ▸ Open File…'; // the word cut (N7): the way in alone
-const ASK_AGENT = 'Ask the agent to send the file to see it here.';
+const ASK_AGENT = 'Ask the agent to copy the file into this session’s folders to see it here.';
 // The first notice, as this Mac says it, for `path`; the word cut (N11): the command's own words are not drawn under a
 // notice that names its cause
 const outsideHere = (path: string) => ['This file is outside the folders this session works in.', THREE_WAYS, ASK_AGENT, path];

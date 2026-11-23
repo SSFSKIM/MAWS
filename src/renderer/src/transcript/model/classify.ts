@@ -6,6 +6,7 @@ import type { SessionEvent } from '@shared/graph/events';
 import type { AgentId, ApiMessageId, ToolUseId } from '@shared/graph/ids';
 import { MAWS_SERVER_NAME, MAWS_TOOL_NAMES, type MawsToolName } from '@shared/maws/tools'; // E1
 import { HISTORICAL_ARTIFACT_UPDATE } from '@shared/maws/artifact-update'; // P3-A
+import { HISTORICAL_SEND_FILE } from '@shared/maws/send-file'; // board ticket 848
 import type { BrowserToolName } from '@shared/maws/browser'; // E4c
 import { isMessageTool } from '@shared/owner/message-call'; // P4-R7
 import { WEB_FETCH_TOOLS } from '@shared/engine/web-fetch'; // UX wave U3b
@@ -19,6 +20,9 @@ export const MAWS_TOOL_USE = Object.fromEntries(MAWS_TOOL_NAMES.map((name) => [n
 // P3-A: E2's `artifact_update` as tool uses carried it, retired into `artifact_publish`; frozen, classifying only the
 // journals and fixtures written before
 export const HISTORICAL_ARTIFACT_UPDATE_TOOL_USE = `mcp__${MAWS_SERVER_NAME}__${HISTORICAL_ARTIFACT_UPDATE}`;
+// Board ticket 848: E1's `send_file` as tool uses carried it, retired on 2026-11-23 (a file reaches the user as a path
+// link); frozen, its records still drawn as delivery rows. A later call is refused by the host and its row shows that.
+export const HISTORICAL_SEND_FILE_TOOL_USE = `mcp__${MAWS_SERVER_NAME}__${HISTORICAL_SEND_FILE}`;
 
 // E4c start: the six browser tools' names as tool uses carried them (each call a `browser_action` row). Frozen: the tools
 // left the `maws` server on 2026-10-08 (P1 A-54), and these names classify only journals and fixtures written before.
@@ -53,7 +57,7 @@ const ROW_KIND_TOOLS: Record<string, Presentation> = {
   ExitPlanMode: 'plan',
   // E1 start: an ask is a capsule, a delivered file a delivery row
   [MAWS_TOOL_USE.ask]: 'ask',
-  [MAWS_TOOL_USE.send_file]: 'delivery',
+  [HISTORICAL_SEND_FILE_TOOL_USE]: 'delivery', // board ticket 848: retired, its records drawn as before
   // E1 end
   // E7 start: a listing of the agents and sessions this one can message is a row of its own (E7 execution document,
   // Design §4)

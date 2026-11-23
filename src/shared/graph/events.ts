@@ -19,7 +19,8 @@ import { PaneRosterSchema, PromptFillModeSchema, SURFACE_ASKS } from '../engine/
 import { ArrivalEntrySchema } from '../engine/arrival-schema'; // UX wave U3 (UC-2)
 // E1 start
 import { PaneSchema } from '../maws/panes';
-import { AskAnswerSchema, AskQuestionSchema, DeliveredFileSchema, ShowPaneOpenedSchema } from '../maws/tools';
+import { AskAnswerSchema, AskQuestionSchema, ShowPaneOpenedSchema } from '../maws/tools';
+import { DeliveredFileSchema } from '../maws/send-file'; // board ticket 848: the retired send_file's, for the records written before
 // E1 end
 // E4c start
 import { BROWSER_TOOL_NAMES, BrowserWaitReasonSchema } from '../maws/browser';

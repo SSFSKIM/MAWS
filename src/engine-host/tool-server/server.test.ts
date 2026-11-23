@@ -61,15 +61,15 @@ describe('the maws server speaks MCP over mcp_message (E0a Q1)', () => {
 
   it('calls a tool with the context of the call and answers its result', async () => {
     const seen: { args: unknown; ctx: McpToolContext }[] = [];
-    const tool = defineMawsTool('send_file', async (args, ctx) => {
+    const tool = defineMawsTool('artifact_list', async (args, ctx) => {
       seen.push({ args, ctx });
-      return toolText({ status: 'delivered', deliverables: [] });
+      return toolText({ status: 'listed', artifacts: [] });
     });
     const { send, rpcOf } = harness([tool]);
-    const id = send({ method: 'tools/call', params: { name: 'send_file', arguments: { files: ['a.txt'] }, _meta: { 'claudecode/toolUseId': 'toolu_01', progressToken: 2 } }, jsonrpc: '2.0', id: 2 });
+    const id = send({ method: 'tools/call', params: { name: 'artifact_list', arguments: { query: 'a' }, _meta: { 'claudecode/toolUseId': 'toolu_01', progressToken: 2 } }, jsonrpc: '2.0', id: 2 });
     await flush();
-    expect(seen).toMatchObject([{ args: { files: ['a.txt'] }, ctx: { appSessionId: 'app-1', cwd: '/r/repo', toolUseId: 'toolu_01', requestId: id } }]);
-    expect(rpcOf(id)).toEqual({ jsonrpc: '2.0', id: 2, result: { content: [{ type: 'text', text: JSON.stringify({ status: 'delivered', deliverables: [] }, null, 2) }] } });
+    expect(seen).toMatchObject([{ args: { query: 'a' }, ctx: { appSessionId: 'app-1', cwd: '/r/repo', toolUseId: 'toolu_01', requestId: id } }]);
+    expect(rpcOf(id)).toEqual({ jsonrpc: '2.0', id: 2, result: { content: [{ type: 'text', text: JSON.stringify({ status: 'listed', artifacts: [] }, null, 2) }] } });
   });
 
   it('answers an unknown tool, and a tool that throws, as tool errors (isError), never JSON-RPC errors', async () => {
@@ -82,10 +82,20 @@ describe('the maws server speaks MCP over mcp_message (E0a Q1)', () => {
     await flush();
     expect(rpcOf(unknown)).toEqual({ jsonrpc: '2.0', id: 2, result: { content: [{ type: 'text', text: TOOL_ERRORS.unknownTool('echo_file') }], isError: true } });
     expect(TOOL_ERRORS.unknownTool('echo_file')).toBe(
-      'unknown tool "echo_file"; the maws server has send_file, ask, show_pane, artifact_create, artifact_list, artifact_screenshot, artifact_describe_type, artifact_read, artifact_publish, artifact_upload_asset, artifact_list_assets, artifact_export, artifact_dataset, artifact_edit, artifact_comments, artifact_reply, artifact_resolve, artifact_search, artifact_delete',
-    ); // E2: seven; E4c: thirteen; P1 A-54 (2026-10-08): seven again; P3-A (M6): twelve, artifact_update retired; P3-B (M7): sixteen; P4-B4: eighteen; UX wave U10b (M4): nineteen
+      'unknown tool "echo_file"; the maws server has ask, show_pane, artifact_create, artifact_list, artifact_screenshot, artifact_describe_type, artifact_read, artifact_publish, artifact_upload_asset, artifact_list_assets, artifact_export, artifact_dataset, artifact_edit, artifact_comments, artifact_reply, artifact_resolve, artifact_search, artifact_delete',
+    ); // E2: seven; E4c: thirteen; P1 A-54 (2026-10-08): seven again; P3-A (M6): twelve, artifact_update retired; P3-B (M7): sixteen; P4-B4: eighteen; UX wave U10b (M4): nineteen; board ticket 848: eighteen, send_file retired
     expect(rpcOf(thrown)).toEqual({ jsonrpc: '2.0', id: 3, result: { content: [{ type: 'text', text: 'show_pane: disk on fire' }], isError: true } });
     expect(logs.join('\n')).toContain('disk on fire');
+  });
+
+  // board ticket 848: the retired send_file is no tool of the server's, and its call reads the sentence that teaches the
+  // path link, whatever it holds
+  it('answers a call of the retired send_file with the sentence that teaches the path link', async () => {
+    const { send, rpcOf } = harness(mawsToolList().map((entry) => defineMawsTool(entry.name, async () => toolText({}))));
+    const valid = send({ method: 'tools/call', params: { name: 'send_file', arguments: { files: ['a.txt'], caption: 'c' } }, jsonrpc: '2.0', id: 2 });
+    const invalid = send({ method: 'tools/call', params: { name: 'send_file', arguments: { files: [] } }, jsonrpc: '2.0', id: 3 });
+    await flush();
+    for (const [id, rpcId] of [[valid, 2], [invalid, 3]] as const) expect(rpcOf(id)).toEqual({ jsonrpc: '2.0', id: rpcId, result: { content: [{ type: 'text', text: TOOL_ERRORS.sendFileRetired }], isError: true } });
   });
 
   it('answers an unknown method -32601, a malformed message -32600, and another server -32601 naming it', async () => {
@@ -292,7 +302,7 @@ describe('the calls in flight through delivery (the handover drain)', () => {
     };
     return { server, writes, call, cancel, changes: () => changes };
   }
-  const blocking = (name: 'show_pane' | 'ask' | 'send_file') => {
+  const blocking = (name: 'show_pane' | 'ask' | 'artifact_list') => {
     let finish: () => void = () => {};
     const tool = defineMawsTool(name, () => new Promise((resolve) => (finish = () => resolve(toolText({ ok: true })))));
     return { tool, finish: () => finish() };
@@ -383,7 +393,7 @@ describe('the calls in flight through delivery (the handover drain)', () => {
   // P5 O16 M3c fix wave 2 (D63): the engine host's status names what an update waits for
   it('names the first call in flight through delivery, and tells each change, the start of a call included', async () => {
     const pane = blocking('show_pane');
-    const file = blocking('send_file');
+    const file = blocking('artifact_list');
     const ask = blocking('ask');
     const { server, writes, call, changes } = gated([pane.tool, file.tool, ask.tool]);
     expect(server.deliveringTool()).toBeNull();
@@ -393,7 +403,7 @@ describe('the calls in flight through delivery (the handover drain)', () => {
     let told = changes();
     call('show_pane', 2);
     expect(changes()).toBeGreaterThan(told);
-    call('send_file', 3);
+    call('artifact_list', 3);
     await flush();
     expect(server.deliveringTool()).toBe('show_pane');
     pane.finish();
@@ -402,7 +412,7 @@ describe('the calls in flight through delivery (the handover drain)', () => {
     writes.find((w) => w.requestId === 'req-2')!.settle(true);
     await flush();
     expect(changes()).toBeGreaterThan(told);
-    expect(server.deliveringTool()).toBe('send_file');
+    expect(server.deliveringTool()).toBe('artifact_list');
     file.finish();
     await flush();
     writes.find((w) => w.requestId === 'req-3')!.settle(true);

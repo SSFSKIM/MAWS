@@ -112,7 +112,8 @@ export const NOTICE_COPY = {
   outside: { file: 'This file is outside the folders this session works in.', folder: 'This folder is outside the folders this session works in.' },
   outsideOn: (subject: Subject, machine: string) => `This ${subject} is outside the folders this session works in on ${machine}.`,
   chooseIt: 'Choose it with File ▸ Open File…', // the word cut (N7): the way in, without how the app opens files
-  askAgent: 'Ask the agent to send the file to see it here.',
+  // board ticket 848: the agent no longer sends a file; a copy inside the session's folders opens on every machine
+  askAgent: 'Ask the agent to copy the file into this session’s folders to see it here.',
   notFound: (subject: Subject, machine: string | null) => `No ${subject} at this path${machine === null ? '' : ` on ${machine}`}.`,
   unreachableHere: "MAWS's service on this Mac is not answering.",
   unreachable: (machine: string) => `${machine} is not reachable.`,
