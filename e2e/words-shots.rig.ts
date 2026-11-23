@@ -4861,7 +4861,7 @@ test('the word cut’s M4: the mods’ rows, Customize’s plugin and skill rows
       },
       after: () => letGo(page),
     });
-    await shot(page, m4Meta('m4-customize-all-kinds', 'G215, G216, G218, G225, G248', 'Customize, My items (All) with every kind', 'Customize in the sidebar, Show: All (user configuration)', 'The plugins, the mods and the skills each in its row form at rest, each row’s kind word in one column (on M4 a plugin’s switch after it); the connector below them, out of frame', ['customize', 'widgets/plugins', 'widgets/skills', 'customize/connectors']), async () => {
+    await shot(page, m4Meta('m4-customize-all-kinds', 'G215, G216, G218, G225, G248', 'Customize, My items (All), its plugins, mods and skills', 'Customize in the sidebar, Show: All (user configuration)', 'The plugins, the mods and the skills each in its row form at rest, each row’s kind word in one column (on M4 a plugin’s switch after it); the connector below them, out of frame', ['customize', 'widgets/plugins', 'widgets/skills', 'customize/connectors']), async () => {
       await customizeAt(page, 'mine', 'all');
       await letGo(page);
     }, {
@@ -4911,8 +4911,10 @@ test('the word cut’s M4: the mods’ rows, Customize’s plugin and skill rows
       await pointerAside(page);
     }, {
       check: async () => {
-        await inView(refusal().getByRole('alert'), 'the refusal');
-        await expect(refusal().getByRole('alert'), 'the refusal’s words').toHaveText(byM4(M4_WORDS.skillGone), { timeout: 3_000 });
+        // the alert is the refusal itself on master (one paragraph with both) and a paragraph inside it on M4
+        const said = gone().locator('[data-skill-refusal][role="alert"], [data-skill-refusal] [role="alert"]').first();
+        await inView(said, 'the refusal');
+        await expect(said, 'the refusal’s words').toHaveText(byM4(M4_WORDS.skillGone), { timeout: 3_000 });
         const retry = refusal().getByRole('button', { name: M4_WORDS.retry, exact: true });
         if (m4Cut()) await inView(retry, 'Retry beside the line');
         else await expect(retry, 'no Retry on master').toHaveCount(0);
