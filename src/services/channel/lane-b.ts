@@ -12,7 +12,10 @@
 // - each question of a MAWS ask (`mcp__maws__ask`, a subagent's too: the person answers it alike) is a `question` from
 //   the ask's own record as the engine host journals it (`maws.ask.opened`: the question and its options), and each
 //   answer an `answered` (`maws.ask.answered`), keyed by the ask's id; the host's ask table is its one store, held in its
-//   memory (src/engine-host/tool-server/asks.ts), and these events are what it tells of it;
+//   memory (src/engine-host/tool-server/asks.ts), and these events are what it tells of it. An ask whose call (its
+//   `tool.use`) left `blocking` out waits for its fate before its questions are recorded: the host refuses such a call
+//   made live since board ticket 420 (an error result: nothing is recorded), and one recorded before held it (answered,
+//   cancelled, or a result that is no error: recorded as it was asked);
 // - board ticket 421 (docs/doperpowers/plans/2026-11-23-tool-choice.md, D13): each question the engine's own question
 //   tool puts through MAWS's question path (`question.requested`, a subagent's too), for a session whose question tool is
 //   the engine's, is a `question` with its options' labels, and each answer (`question.answered`, keyed by the question's
@@ -36,6 +39,10 @@ import { finishedTextOf, messageOfCall, toHumanOfText } from '@shared/owner/to-h
 import { CHANNEL_BOUNDS } from './journal';
 
 type ToolUse = Extract<SessionEvent, { kind: 'tool.use' }>;
+type AskOpened = Extract<SessionEvent, { kind: 'maws.ask.opened' }>;
+
+const MAWS_ASK = 'mcp__maws__ask';
+const hasBlocking = (input: unknown): boolean => typeof input === 'object' && input !== null && Object.hasOwn(input, 'blocking');
 type Said = Pick<NewHostEntry, 'kind' | 'text' | 'at' | 'choices'>;
 
 // The message calls of a session waiting for their results. A call whose result never comes (its session gone mid-call)
@@ -72,6 +79,8 @@ interface Held {
 
 export class LaneBSource {
   private readonly pending = new Map<AppSessionId, Map<string, ToolUse>>();
+  private readonly unstated = new Map<string, true>(); // `<appSessionId>/<toolUseId>`: an ask call with no `blocking`
+  private readonly fates = new Map<string, { appSessionId: AppSessionId; event: AskOpened }>(); // the asks waiting for their fate, by the same key
   private held: Held[] = [];
   private readonly heldKeys = new Set<string>(); // `<appSessionId>/<anchor>`: a replay or a state stated again holds nothing more
   private readonly unmatched = new Map<string, Map<string, Held>>(); // by its question's src: the answers waiting for it, by their src
@@ -84,13 +93,17 @@ export class LaneBSource {
     for (const event of events) {
       if (event.seq === null) continue; // read back from disk (no journal row): history, or a transcript another process holds
       if (event.kind === 'maws.ask.opened') {
-        event.questions.forEach((question, index) => {
-          const choices = question.options?.map((option) => option.label) ?? [];
-          this.add(appSessionId, event.sessionId, { kind: 'question', text: question.question, at: event.at, ...(choices.length > 0 ? { choices } : {}) }, pathOf('ask', event.askId, askQuestionId(question, index)));
-        });
+        const unstated = event.toolUseId !== null && this.unstated.delete(pathOf(appSessionId, event.toolUseId));
+        if (unstated) this.awaitFate(appSessionId, event);
+        else this.asked(appSessionId, event);
+        continue;
+      }
+      if (event.kind === 'maws.ask.cancelled') {
+        this.settleFate(appSessionId, event.toolUseId, true); // an ask the host had held: its question was put
         continue;
       }
       if (event.kind === 'maws.ask.answered') {
+        this.settleFate(appSessionId, event.toolUseId, true);
         for (const answer of event.answers) {
           this.add(appSessionId, event.sessionId, { kind: 'answered', text: askAnswerOf(answer), at: event.at }, pathOf('ask', event.askId, answer.id, 'answered'), pathOf('ask', event.askId, answer.id));
         }
@@ -109,6 +122,8 @@ export class LaneBSource {
         }
         continue;
       }
+      if (event.kind === 'tool.use' && event.toolName === MAWS_ASK && !hasBlocking(event.input)) this.noteUnstated(appSessionId, event.toolUseId);
+      if (event.kind === 'tool.result') this.settleFate(appSessionId, event.toolUseId, !event.isError);
       if (event.parentToolUseId !== null) continue; // a subagent's words: drawn in its own transcript, not its parent's
       if (event.kind === 'tool.use') this.called(appSessionId, event);
       else if (event.kind === 'tool.result') {
@@ -154,6 +169,41 @@ export class LaneBSource {
       this.deps.log(`${this.letGo} held entries were let go past ${CHANNEL_BOUNDS.held}`);
       this.letGo = 0;
     }
+  }
+
+  // Each question of an ask, as it was asked.
+  private asked(appSessionId: AppSessionId, event: AskOpened): void {
+    event.questions.forEach((question, index) => {
+      const choices = question.options?.map((option) => option.label) ?? [];
+      this.add(appSessionId, event.sessionId, { kind: 'question', text: question.question, at: event.at, ...(choices.length > 0 ? { choices } : {}) }, pathOf('ask', event.askId, askQuestionId(question, index)));
+    });
+  }
+
+  // An ask call that left `blocking` out, by its tool use, until its ask opens.
+  private noteUnstated(appSessionId: AppSessionId, toolUseId: string): void {
+    this.unstated.set(pathOf(appSessionId, toolUseId), true);
+    if (this.unstated.size > PENDING_MAX) this.unstated.delete(this.unstated.keys().next().value!);
+  }
+
+  // An ask whose call left `blocking` out waits for its fate: an ask recorded before board ticket 420 waited for its
+  // answer, and the host since refuses one made live. Past the bound the oldest is recorded, as every ask was before.
+  private awaitFate(appSessionId: AppSessionId, event: AskOpened): void {
+    this.fates.set(pathOf(appSessionId, event.toolUseId!), { appSessionId, event });
+    if (this.fates.size <= PENDING_MAX) return;
+    const [key, oldest] = this.fates.entries().next().value!;
+    this.fates.delete(key);
+    this.asked(oldest.appSessionId, oldest.event);
+  }
+
+  // The fate of an ask that waits for it: held by the host (answered, cancelled, a result that is no error), its
+  // questions are recorded; refused (an error result), nothing is.
+  private settleFate(appSessionId: AppSessionId, toolUseId: string | null, held: boolean): void {
+    if (toolUseId === null) return;
+    const key = pathOf(appSessionId, toolUseId);
+    const waiting = this.fates.get(key);
+    if (waiting === undefined) return;
+    this.fates.delete(key);
+    if (held) this.asked(waiting.appSessionId, waiting.event);
   }
 
   private called(appSessionId: AppSessionId, use: ToolUse): void {
