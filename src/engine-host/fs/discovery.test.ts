@@ -114,6 +114,19 @@ describe('discovery lists and summarises the store', () => {
     expect(summary).toMatchObject({ directory: '/work/a', leafUuid: 'a1', lastAssistantText: 'the end' });
   });
 
+  // Seen 2026-11-23: a transcript that opens with file-history snapshots of ~58 KiB each, its first `cwd` far past the
+  // head window, was stored with no folder, and the renderer threw on the empty one.
+  it('finds the folder of a transcript whose head window holds none, past the head and before the tail', async () => {
+    const snapshot = (n: number) => ({ type: 'file-history-snapshot', messageId: `m${n}`, snapshot: { trackedFileBackups: { f: 'z'.repeat(58 * 1024) } } });
+    const filler = { type: 'attachment', uuid: 'f1', parentUuid: 'u1', cwd: '/work/later', attachment: { type: 'x', text: 'y'.repeat(2 * HEAD_TAIL_BYTES) } };
+    const nested = { type: 'progress', toolInput: { cwd: '/not/the/record' } }; // a nested `cwd` is no record's folder
+    const records = [snapshot(1), snapshot(2), nested, snapshot(3), user('u1', null, '/work/launched', 'hi'), filler];
+    const path = await fixture.addTranscript('/work/launched', S1, records);
+    const discovery = new Discovery(fixture.paths);
+    expect((await discovery.summarizeOne(path))?.directory).toBe('/work/launched');
+    expect((await discovery.summarizeOne(path))?.directory).toBe('/work/launched'); // the cached answer
+  });
+
   it('answers null for a transcript that no longer exists', async () => {
     expect(await new Discovery(fixture.paths).summarizeOne(join(fixture.paths.projects, '-x', `${S1}.jsonl`))).toBeNull();
   });

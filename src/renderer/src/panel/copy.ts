@@ -38,6 +38,7 @@ export const SUMMARY_COPY = {
   notRepository: 'Not a git repository',
   gitUnavailable: 'Git unavailable',
   pending: '…', // git has not answered yet; the change line while its diff has not
+  cardFailed: (card: string) => `${card} could not be shown`, // a card that threw while drawing (CardBoundary)
   clean: 'Clean',
   // the word cut (P36): the change line is its counts and its files, "+12 −3 · 4 files"; the untracked and binary counts
   // are its tooltip, "2 untracked · 1 binary" (empty when there are none)

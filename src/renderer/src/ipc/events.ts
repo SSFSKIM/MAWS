@@ -39,10 +39,9 @@ import type { RekeyOf } from '../stores/layout-model';
 import { NO_PROJECT } from '@shared/ipc/schema/layout';
 import { toast } from '../stores/notices';
 import { ipc } from './client';
-import { checkoutKey } from './machine';
 import { askUntilAnswered } from './until-answered';
 // C8a start
-import { useGit } from '../stores/git';
+import { entryOf, useGit } from '../stores/git';
 import { queryClient } from './query';
 import type { ScmStatus } from '@shared/ipc/schema/scm';
 import { workingFolder } from '@shared/sessions/working-folder';
@@ -519,7 +518,7 @@ export function connectPanelEvents(client: MawsBridge = ipc): () => void {
 // the checkout): the checkout from the session's record, else from its `scm.status` answer.
 function repoRootOf(appSessionId: AppSessionId): string | null {
   const checkout = checkoutOf(appSessionId);
-  return checkout === null ? null : (useGit.getState().entries.get(checkoutKey(machineOf(appSessionId), checkout))?.status?.repoRoot ?? null);
+  return entryOf(useGit.getState(), machineOf(appSessionId), checkout)?.status?.repoRoot ?? null;
 }
 
 // The checkout a session works in as the page knows it: its record's working folder, else the folder its `scm.status` answered.

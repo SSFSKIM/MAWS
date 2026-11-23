@@ -299,11 +299,13 @@ export class SessionStore {
   }
 
   // Every engine session's record bound to an engine id, with its transcript's size and mtime while one is on disk.
-  // Replay records are not among them: their ids live only as long as the host's runner.
+  // Replay records are not among them: their ids live only as long as the host's runner. A record with no folder reads
+  // as stale (mtime -1), so every scan summarises its transcript again: discovery once stopped at the head window and
+  // stored no folder for a transcript whose first `cwd` lay past it, and such a record heals on the next scan.
   bindings(): Binding[] {
     return this.db
       .all<{ engine_session_id: string; app_id: string; transcript_path: string | null; transcript_size: number | null; transcript_mtime_ms: number | null }>(
-        "SELECT engine_session_id, app_id, transcript_path, transcript_size, transcript_mtime_ms FROM sessions WHERE engine_session_id IS NOT NULL AND kind = 'engine'",
+        "SELECT engine_session_id, app_id, transcript_path, transcript_size, CASE WHEN directory = '' THEN -1 ELSE transcript_mtime_ms END AS transcript_mtime_ms FROM sessions WHERE engine_session_id IS NOT NULL AND kind = 'engine'",
       )
       .map((row) => ({
         sessionId: row.engine_session_id as SessionId,

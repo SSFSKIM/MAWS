@@ -24,6 +24,7 @@ export function summarize(
   path: string,
   slug: string,
   sidecarTitle: string | null = null, // `custom-title.json`'s `customTitle`, which discovery reads beside the transcript (M2)
+  launchCwd: string | null = null, // the first record's folder when it lies past the head window (discovery's `firstCwd` over a longer head)
 ): TranscriptSummary {
   const headText = head.toString('utf8');
   const tailText = tail.toString('utf8');
@@ -49,7 +50,10 @@ export function summarize(
     sessionId: basename(path, '.jsonl') as SessionId,
     transcriptPath: path,
     slug,
-    directory: firstString(headRecords, 'cwd'),
+    // The folder the session was launched in: the head's first, else the one discovery found past the head (a transcript
+    // whose head is all bookkeeping: file-history snapshots of tens of KiB each), else the tail's earliest. A session
+    // with no folder at all has none (null), which the index keeps rather than filing it under no folder.
+    directory: firstString(headRecords, 'cwd') ?? launchCwd ?? firstString(tailRecords, 'cwd'),
     relocatedCwd: lastString(tailReversed, 'relocated', 'relocatedCwd'),
     newestCwd: newestCwd(tailReversed), // UX wave U8c-2 (§A): the tail only; a head's newest folder in a long file is old
     size: stat.size,
@@ -82,6 +86,25 @@ export function summarize(
 // `relocated` row, so the rows' own `cwd` is the one signal of it (spikes/protocol-probe/findings-uxwave-U8-working-folder.txt).
 function newestCwd(records: TranscriptRecord[]): string | null {
   for (const record of records) if (record.isSidechain !== true && typeof record.cwd === 'string') return record.cwd;
+  return null;
+}
+
+// The `cwd` of the first record in `window` (read from the file's start) that names one, or null: the whole lines that
+// hold the key are parsed (the line cut by the window's end through the fragment scan), and only those, so a window of
+// megabytes costs a byte search. A `"cwd":"` inside a string is escaped, so the search meets only keys; a nested one
+// (a tool input's) parses as no record's folder and the search goes on past its line.
+export function firstCwd(window: Buffer): string | null {
+  const needle = '"cwd":"';
+  let at = window.indexOf(needle);
+  while (at !== -1) {
+    const start = window.lastIndexOf(0x0a, at) + 1;
+    const newline = window.indexOf(0x0a, at);
+    const line = window.subarray(start, newline === -1 ? window.length : newline).toString('utf8');
+    const record = parseRecord(line) ?? (newline === -1 ? scanRecordStart(line) : null);
+    if (typeof record?.cwd === 'string') return record.cwd;
+    if (newline === -1) return null;
+    at = window.indexOf(needle, newline);
+  }
   return null;
 }
 

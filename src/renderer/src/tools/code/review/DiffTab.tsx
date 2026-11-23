@@ -75,7 +75,7 @@ function Unavailable({ message, detail }: { message: string; detail: string }) {
 
 export function DiffTab({ tab }: { tab: DiffTabRef }) {
   const ref = parseRef(tab.ref);
-  const directory = useWorkingFolder(tab.appSessionId)?.path ?? null;
+  const directory = useWorkingFolder(tab.appSessionId)?.path || null; // '' is a session with no folder: no checkout
   if (!ref) return <Unavailable message={REVIEW_COPY.unavailable(REVIEW_COPY.unknownRef)} detail={tab.ref} />;
   if (directory === null) return <Unavailable message={REVIEW_COPY.noSession} detail={tab.ref} />;
   return <DiffTabBody tab={tab} parsed={ref} directory={directory} />;

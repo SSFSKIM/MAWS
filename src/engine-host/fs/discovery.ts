@@ -9,7 +9,7 @@ import type { SessionId } from '@shared/graph/ids';
 import type { TranscriptSummary } from '@shared/wire/store';
 import type { StorePaths } from './paths';
 import { isMissing, noteReadable, noteUnreadable, readJsonWithRetry } from './sidecars';
-import { HEAD_TAIL_BYTES, summarize } from './summarize';
+import { firstCwd, HEAD_TAIL_BYTES, summarize } from './summarize';
 import { SESSION_ID } from './watcher';
 
 export interface ListedTranscript {
@@ -21,6 +21,9 @@ export interface ListedTranscript {
 }
 
 export const SUMMARY_CONCURRENCY = 16;
+// How far from a transcript's start discovery looks for its first folder when the head window names none (a head of
+// file-history snapshots: seen 2026-11-23, a 620 MB transcript's first `cwd` at byte 473,059). Windows double up to it.
+export const LAUNCH_CWD_SCAN_BYTES = 16 * 1024 * 1024;
 
 // U8c-1 (M1 decision 8): a test-only hook that holds an interleaving open, awaited at a named point with what the point is
 // about: before a scan's listing reads a project folder (its name), before a transcript is summarised (its path), and
@@ -35,6 +38,8 @@ const CustomTitleSchema = z.looseObject({ customTitle: z.string() });
 export class Discovery {
   // The last title each `custom-title.json` read whole, by sidecar path: what a torn rewrite falls back to.
   private readonly sidecarTitles = new Map<string, string>();
+  // The first folder found past the head window, by transcript path: the file's start does not change as it grows.
+  private readonly launchCwds = new Map<string, string>();
 
   constructor(
     private readonly paths: StorePaths,
@@ -115,16 +120,34 @@ export class Discovery {
       throw error;
     }
     let head: Buffer, tail: Buffer, info;
+    let launchCwd: string | null = null;
     try {
       info = await file.stat();
       head = await readRange(file, 0, Math.min(HEAD_TAIL_BYTES, info.size));
       tail = info.size <= HEAD_TAIL_BYTES ? head : await readRange(file, info.size - HEAD_TAIL_BYTES, HEAD_TAIL_BYTES);
+      if (info.size > head.length && firstCwd(head) === null) launchCwd = await this.launchCwd(file, path, info.size);
     } finally {
       await file.close();
     }
     const sessionId = basename(path, '.jsonl');
     const sidecarTitle = await this.readSidecarTitle(join(dirname(path), sessionId, 'custom-title.json'));
-    return summarize(head, tail, { size: info.size, mtimeMs: info.mtimeMs, birthtimeMs: info.birthtimeMs }, path, basename(dirname(path)), sidecarTitle);
+    return summarize(head, tail, { size: info.size, mtimeMs: info.mtimeMs, birthtimeMs: info.birthtimeMs }, path, basename(dirname(path)), sidecarTitle, launchCwd);
+  }
+
+  // The first folder of a transcript whose head window names none, from windows doubling up to LAUNCH_CWD_SCAN_BYTES;
+  // null when none of them holds one (the summary then falls back to the tail's).
+  private async launchCwd(file: Awaited<ReturnType<typeof open>>, path: string, size: number): Promise<string | null> {
+    const known = this.launchCwds.get(path);
+    if (known !== undefined) return known;
+    for (let length = HEAD_TAIL_BYTES * 4; ; length *= 2) {
+      const window = await readRange(file, 0, Math.min(length, size, LAUNCH_CWD_SCAN_BYTES));
+      const cwd = firstCwd(window);
+      if (cwd !== null) {
+        this.launchCwds.set(path, cwd);
+        return cwd;
+      }
+      if (window.length >= size || window.length >= LAUNCH_CWD_SCAN_BYTES) return null;
+    }
   }
 
   // A sidecar that never reads whole (torn, or unreadable) keeps the title it last had; one that is gone has none.

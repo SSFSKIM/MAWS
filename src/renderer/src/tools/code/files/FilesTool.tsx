@@ -412,7 +412,7 @@ function SessionTree({ tabId, appSessionId, session, marked, chosen, searching }
   // UX wave U6b-3a (M2 decision 1): the git store's watch of the working folder, the drawn tree's while it is drawn, and
   // the status it holds; none: no Changed group and no mark (decision 3).
   const machine = machineFor(appSessionId);
-  const working = folder?.path ?? null;
+  const working = folder?.path || null; // '' is a session with no folder: no checkout
   useEffect(() => (working === null ? undefined : useGit.getState().watch(machine, working, appSessionId)), [machine, working, appSessionId]);
   const gitKey = working === null ? null : checkoutKey(machine, working);
   const status = useGit((s) => (gitKey === null ? null : (s.entries.get(gitKey)?.status ?? null)));

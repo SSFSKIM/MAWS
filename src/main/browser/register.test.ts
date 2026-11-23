@@ -16,6 +16,7 @@ const { ViewManager } = await import('./view');
 const { Navigator } = await import('./navigation');
 const { BookmarkBar } = await import('./bookmarks/bar'); // cua #90
 const { ProfileAvatars } = await import('./profile-avatars'); // cua #90
+const { SessionMachines } = await import('./machines');
 
 const A = 'App-A' as AppSessionId;
 
@@ -405,6 +406,32 @@ describe('browser.* handlers in main (E4a Interfaces "IPC")', () => {
     expect(call('browser.tabs.list', { appSessionId: A })).toMatchObject({ tabs: [{ tabId: tab.tabId }], selected: { [A]: tab.tabId } });
     call('browser.tabs.close', { tabId: tab.tabId });
     expect(call('browser.tabs.list', {})).toEqual({ tabs: [], selected: { [A]: null } });
+  });
+
+  // Seen 2026-11-23: tabs.json's selection held this machine's sessions by bare id and one of another machine's by its
+  // address, written without its machine (its last tab had closed). Read back, that key was said as this machine's, and
+  // the renderer's lift refused the address it already was, so listing tabs failed for every session.
+  it('lists a selection mixing bare and address keys from tabs.json: the address key is another machine\'s, kept as is', async () => {
+    const { addressOf } = await import('@shared/machine/address');
+    const LOCAL = 'LocalMachineRef0000' as never;
+    const OTHER = 'OtherMachineRef0000' as never;
+    const away = addressOf(OTHER, 'App-R') as AppSessionId;
+    const selected = { [A]: null, [away]: null };
+    const store = new TabStore({
+      emit: () => {},
+      createView: () => ({}) as never,
+      resolvePartition: () => DEFAULT_PARTITION,
+      schedule: () => {},
+      restored: { tabs: [], selected },
+    });
+    const sessions = new SessionMachines(LOCAL, {}, Object.keys(selected));
+    const handlers = new Map<CommandName, (input: unknown, context?: unknown) => unknown>();
+    registerBrowserHandlers({ store, sessions, register: (name, handler) => void handlers.set(name, handler as never) } as never);
+    const list = (target: unknown) => handlers.get('browser.tabs.list')!({}, { ...contextOf(fakePage()), target });
+    expect(list(LOCAL)).toEqual({ tabs: [], selected: { [A]: null } });
+    expect(list(OTHER)).toEqual({ tabs: [], selected: { 'App-R': null } });
+    // and the file written back names the key's machine, the selection's keys included
+    expect(sessions.kept(Object.keys(store.snapshot().selected))).toEqual({ machines: { [away]: OTHER } });
   });
 
   it('answers an unknown tab as invalid_input ("unknown browser tab")', () => {
