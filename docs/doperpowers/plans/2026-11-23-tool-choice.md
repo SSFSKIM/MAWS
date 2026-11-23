@@ -151,7 +151,7 @@ The canonical form has no "documents on, artifacts off": the schema refuses it, 
 - `AskInputSchema.blocking` is `z.boolean()`: what `tools/list` lists (`blocking` among `required`) and what the host admits. `AskRecordedInputSchema` is the schema as it stands on the parent pin (`blocking` optional), and `parseRecordedToolArguments('ask', …)` reads with it, as `show_pane`'s records are read with `ShowPaneRecordedInputSchema`.
 - `TOOL_ERRORS.askBlockingRequired = 'ask: pass blocking: false to keep working while the user answers, or blocking: true to wait for the answers.'` `parseToolArguments('ask', …)` answers it alone for a call whose only fault is the missing argument, as it answers `publishPathOrFiles` alone.
 - `mawsServerInstructions(session: { inAppBrowser: boolean; artifacts: boolean })`. The first paragraph is two constants: `MAWS_ARTIFACT_INSTRUCTIONS` (its first four sentences, through "… call mcp__maws__artifact_search.") and `MAWS_FILE_INSTRUCTIONS` (everything after, which ticket 848 leaves as two sentences on linking a file and where to write one). `MAWS_SERVER_INSTRUCTIONS` stays their join with one space, byte for byte. With `artifacts` false the first paragraph is the file sentences alone. The browser paragraph is as before.
-- `TOOL_ERRORS.unknownTool(name, listed)` names the session's tools, not `MAWS_TOOL_NAMES`.
+- `TOOL_ERRORS.unknownTool(name, listed)` names the session's tools, not `MAWS_TOOL_NAMES`: `unknown tool "<name>"; the maws server has <listed, joined by ", ">`, and with nothing listed (every switch off and Question Default) `…; the maws server has no tools in this session`. The server passes its own tool map's keys, which are exactly the listed tools (as built in M1; both forms pinned in `tools.test.ts`, and both go into M6's dated X9 line).
 - A session's `tools/list` is `listedTools(set)`, in that order.
 
 ### §C · X6, as amended (`src/shared/engine/launch-spec.ts`, `src/engine-host/launch.ts`)
@@ -279,6 +279,7 @@ A milestone is ticked once its review is clean.
 
 - [x] M0 · The probes (before the build).
 - [ ] M1 · The wire's shapes, and the set at the host.
+  As built (`2ddcce6c4`): the host takes its set from `spec.mawsTools ?? FULL`; `LaunchPlan.mawsTools` is required; an adopter puts the spawn row's set on its spec only when it is not full, and `spawnRowOf` safe-parses the row's set (absent or invalid: the full set). The provisional emitter takes an optional `lists` predicate (absent: every tool). `WIRE_MINOR` is 61. `src/engine-host/detached.test.ts` pins the engine host's welcome capabilities word for word, so a capability added there moves it too. The node project's typecheck needs `NODE_OPTIONS=--max-old-space-size=8192` on the MacBook.
 - [ ] M2 · Ticket 420: the ask up front, `blocking` required, the edit tools deferred.
 - [ ] M3 · The set kept with the session.
 - [ ] M4 · The machine's default, and Settings › Sessions.
