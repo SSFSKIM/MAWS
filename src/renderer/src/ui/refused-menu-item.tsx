@@ -9,10 +9,12 @@ import { RowNote, useRowNote } from './row-note';
 
 type MenuKit = typeof DropdownMenu | typeof ContextMenu;
 
-export function RefusedMenuItem({ kit, label, reason, className = '', ...data }: { kit: MenuKit; label: string; reason: ReactNode; className?: string } & { [attribute: `data-${string}`]: string }) {
+// `lead`, drawn before the label, keeps the room a menu's other rows give their check (board ticket 421's Tools submenu).
+export function RefusedMenuItem({ kit, label, reason, lead = null, className = '', ...data }: { kit: MenuKit; label: string; reason: ReactNode; lead?: ReactNode; className?: string } & { [attribute: `data-${string}`]: string }) {
   const note = useRowNote();
   return (
     <kit.Item {...data} aria-disabled aria-label={label} textValue={label} {...note.rowProps} onSelect={(event) => event.preventDefault()} className={`relative ${className}`}>
+      {lead}
       {label}
       <RowNote note={note}>{reason}</RowNote>
     </kit.Item>

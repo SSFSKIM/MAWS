@@ -459,7 +459,7 @@ describe('an unstarted session writes its intent, with D-19’s route', () => {
 
   function stub(over: Partial<SetupIntentHook['intent']> = {}, tab: AppSessionId = INTENT) {
     const patches: unknown[] = [];
-    let current: SetupIntentHook['intent'] = { location: { kind: 'directory', path: '/repo' }, additionalDirectories: [], model: null, effort: null, permissionMode: null, message: null, draft: null, ...over };
+    let current: SetupIntentHook['intent'] = { kind: 'create', location: { kind: 'directory', path: '/repo' }, additionalDirectories: [], model: null, effort: null, permissionMode: null, message: null, draft: null, ...over };
     const models = [
       { value: 'default', resolvedModel: 'claude-opus-5-5[1m]', displayName: 'Default (recommended)', supportedEffortLevels: ['low', 'medium', 'high', 'xhigh', 'max'] },
       { value: 'opus', resolvedModel: 'claude-opus-5-5[1m]', displayName: 'Opus 5.5 (1M context)', supportedEffortLevels: ['low', 'medium', 'high', 'xhigh', 'max'] },

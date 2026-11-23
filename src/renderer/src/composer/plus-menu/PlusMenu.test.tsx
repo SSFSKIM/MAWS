@@ -4,14 +4,16 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { act, cleanup, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { EngineSessionStatus } from '@shared/engine/status';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { PreloadBridge } from '@shared/ipc/schema';
 import { record, status } from '../../../../../test/support/builders';
 import { fakeClient } from '../../../../../test/support/fake-client';
 import { at } from '../../../../../test/support/machine';
+import { FULL_MAWS_TOOL_SET, type MawsToolSet } from '@shared/maws/tool-set';
 import { useSessions } from '../../stores/sessions';
+import type { ChipBinding } from '../frame/bindings';
 import { PlusMenu } from './PlusMenu';
 
 const BARE = 'app-plus' as AppSessionId;
@@ -69,5 +71,124 @@ describe('the "+" menu’s submenus', () => {
     started({ process: 'exited' } as Partial<EngineSessionStatus>);
     await openSubmenu('Connectors');
     expect(screen.getByText('Session not running')).toBeTruthy();
+  });
+});
+
+// Board ticket 421 (docs/doperpowers/plans/2026-11-23-tool-choice.md, D11 and §H): the Tools submenu of a chat not yet
+// started, after Connectors and Plugins: the four groups as checkbox items, then the question tool as a radio group;
+// each item's fact is its row note, open at once on keyboard focus and its description at all times.
+describe('the "+" menu’s Tools submenu', () => {
+  const NO_ARTIFACTS: MawsToolSet = { artifacts: false, documents: false, dashboards: false, auxiliary: true, question: 'maws' };
+  const binding = (value: MawsToolSet = FULL_MAWS_TOOL_SET, disabled: string | null = null) => ({
+    value,
+    options: [],
+    disabled,
+    set: vi.fn<ChipBinding<MawsToolSet>['set']>(async () => ({ ok: true })),
+  });
+
+  async function openTools(tools: ChipBinding<MawsToolSet> | null) {
+    const user = userEvent.setup();
+    render(
+      <QueryClientProvider client={new QueryClient()}>
+        <PlusMenu cwd="/work/atlas" editor={{ current: null }} tools={tools} />
+      </QueryClientProvider>,
+    );
+    await user.click(screen.getByRole('button', { name: 'Add files, photos or commands' }));
+    return user;
+  }
+  async function enterTools(user: ReturnType<typeof userEvent.setup>) {
+    act(() => screen.getByRole('menuitem', { name: 'Tools' }).focus());
+    await user.keyboard('{ArrowRight}');
+    await screen.findByRole('menuitemcheckbox', { name: 'Artifacts' });
+  }
+  const descriptionOf = (item: HTMLElement) => document.getElementById(item.getAttribute('aria-describedby') ?? '');
+
+  it('is drawn after Plugins, with the four groups checked as the set says and the question tool as a radio group', async () => {
+    const user = await openTools(binding({ ...FULL_MAWS_TOOL_SET, auxiliary: false, question: 'engine' }));
+    const rows = screen.getAllByRole('menuitem').map((item) => item.getAttribute('aria-label') ?? item.textContent);
+    expect(rows.slice(-3)).toEqual(['Connectors›', 'Plugins›', 'Tools›']);
+    await enterTools(user);
+    const checks = screen.getAllByRole('menuitemcheckbox');
+    expect(checks.map((item) => [item.getAttribute('aria-label'), item.getAttribute('aria-checked')])).toEqual([
+      ['Artifacts', 'true'],
+      ['Documents', 'true'],
+      ['Dashboards', 'true'],
+      ['Auxiliary', 'false'],
+    ]);
+    const question = screen.getByRole('group', { name: 'Question' });
+    expect(question).toBeTruthy();
+    const radios = screen.getAllByRole('menuitemradio');
+    expect(radios.map((item) => [item.getAttribute('aria-label'), item.getAttribute('aria-checked')])).toEqual([
+      ['Default', 'true'],
+      ['MAWS', 'false'],
+    ]);
+  });
+
+  it('toggles a group through the binding and stays open; Artifacts turns Documents and Dashboards with it', async () => {
+    const tools = binding();
+    const user = await openTools(tools);
+    await enterTools(user);
+    await user.click(screen.getByRole('menuitemcheckbox', { name: 'Auxiliary' }));
+    expect(screen.getByRole('menuitemcheckbox', { name: 'Auxiliary' })).toBeTruthy(); // the menu stays open
+    await user.click(screen.getByRole('menuitemcheckbox', { name: 'Artifacts' }));
+    expect(tools.set.mock.calls.map(([set]) => set)).toEqual([
+      { ...FULL_MAWS_TOOL_SET, auxiliary: false },
+      { ...FULL_MAWS_TOOL_SET, artifacts: false, documents: false, dashboards: false },
+    ]);
+  });
+
+  it('refuses Documents and Dashboards while Artifacts is off, saying it needs Artifacts, and turns them on with it', async () => {
+    const tools = binding(NO_ARTIFACTS);
+    const user = await openTools(tools);
+    await enterTools(user);
+    for (const name of ['Documents', 'Dashboards']) {
+      const item = screen.getByRole('menuitem', { name });
+      expect(item.getAttribute('aria-disabled')).toBe('true');
+      expect(descriptionOf(item)?.textContent).toBe('Needs Artifacts');
+      await user.click(item);
+    }
+    expect(tools.set).not.toHaveBeenCalled();
+    expect(screen.getByRole('menuitem', { name: 'Documents' })).toBeTruthy(); // still open
+    await user.click(screen.getByRole('menuitemcheckbox', { name: 'Artifacts' }));
+    expect(tools.set.mock.calls.map(([set]) => set)).toEqual([{ ...NO_ARTIFACTS, artifacts: true, documents: true, dashboards: true }]);
+  });
+
+  it('chooses the question tool through the binding', async () => {
+    const tools = binding();
+    const user = await openTools(tools);
+    await enterTools(user);
+    await user.click(screen.getByRole('menuitemradio', { name: 'Default' }));
+    expect(tools.set.mock.calls.map(([set]) => set)).toEqual([{ ...FULL_MAWS_TOOL_SET, question: 'engine' }]);
+  });
+
+  it('opens each item’s note at once on keyboard focus, and keeps it as the item’s description', async () => {
+    const user = await openTools(binding());
+    await enterTools(user);
+    const facts: [string, string][] = [
+      ['Artifacts', 'Create, read and publish artifacts'],
+      ['Documents', 'Edit documents and dashboard blocks. Answer comments on any artifact.'],
+      ['Dashboards', "Bind a dashboard's data"],
+      ['Auxiliary', 'Open panes for you'],
+      ['Default', "Claude Code's own question"],
+      ['MAWS', "MAWS's question"],
+    ];
+    const items = [...screen.getAllByRole('menuitemcheckbox'), ...screen.getAllByRole('menuitemradio')];
+    expect(items.map((item) => [item.getAttribute('aria-label'), descriptionOf(item)?.textContent])).toEqual(facts);
+    for (const item of [...items].reverse()) {
+      act(() => item.focus()); // the keyboard lands on it: its note opens at once, and only its own
+      expect(items.filter((row) => descriptionOf(row)!.hasAttribute('data-open'))).toEqual([item]);
+    }
+  });
+
+  it('greys the submenu with the frame’s reason while the first send is starting', async () => {
+    await openTools(binding(FULL_MAWS_TOOL_SET, 'Session is starting…'));
+    const tools = screen.getByRole('menuitem', { name: 'Tools' });
+    expect(tools.getAttribute('aria-disabled')).toBe('true');
+    expect(descriptionOf(tools)?.textContent).toBe('Session is starting…');
+  });
+
+  it('draws no Tools submenu without a binding', async () => {
+    await openTools(null);
+    expect(screen.queryByRole('menuitem', { name: /^Tools/ })).toBeNull();
   });
 });

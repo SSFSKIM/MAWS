@@ -26,6 +26,7 @@ import { availabilityRefusal } from '../../sessions/availability'; // P2-A
 import { locationPath, type HookResult, type ModelInfo, type SetupIntentHook, type SetupProject } from '../setup-intent';
 import { ENDED, MESSAGE_HELD, STARTING } from '../submit/submit-state';
 import { DEFAULT_ROW, modelAsk, modelName, NO_MODEL, type HeldAsk, type ModelName } from '@shared/sessions/model-label';
+import { FULL_MAWS_TOOL_SET, type MawsToolSet } from '@shared/maws/tool-set'; // board ticket 421
 
 export interface ChipBinding<V, O = never> {
   value: V;
@@ -69,6 +70,17 @@ export interface FrameBindings {
   model: ModelBinding; // the toolbar's ModelChip; the selector C11 registers opens from it (W3)
   mode: ModeBinding; // the toolbar's ModeChip, on the shared mode menu (M5)
   directories: ChipBinding<string[]>; // the "+" menu's Add directory… (W10)
+  // Board ticket 421 (docs/doperpowers/plans/2026-11-23-tool-choice.md, D1, D11 and §H): the "+" menu's Tools submenu, the
+  // set of MAWS's tools a new session starts with; null wherever the choice would not be honoured, and for a started session
+  tools: ChipBinding<MawsToolSet> | null;
+}
+
+// Board ticket 421 (§H): whether the Tools submenu's choice would be honoured beyond the intent itself: the intent's
+// machine's spine knows the choice (`useMachineMawsTools` answered a set), and the chat will not start on another
+// machine, where Send's `session.spawn` carries no set and that machine's default applies.
+export interface ToolsChoice {
+  honoured: boolean;
+  elsewhere: boolean;
 }
 
 const refused = (error: string) => async (): Promise<HookResult> => ({ ok: false, error });
@@ -86,7 +98,7 @@ export function intentModelName(intent: Pick<SetupIntentHook['intent'], 'model' 
   return modelName(intent.model ?? defaults?.model ?? DEFAULT_ROW, models, { effort: intent.effort ?? defaults?.effortLevel ?? null });
 }
 
-export function intentBindings(hook: SetupIntentHook, gate: { starting: boolean }, defaults: UserEngineDefaults | null = null): FrameBindings {
+export function intentBindings(hook: SetupIntentHook, gate: { starting: boolean }, defaults: UserEngineDefaults | null = null, tools: ToolsChoice = { honoured: false, elsewhere: false }): FrameBindings {
   const { intent, options } = hook;
   const gated = gate.starting ? STARTING : intent.message !== null ? MESSAGE_HELD : null;
   const through = <V>(write: (v: V) => Parameters<SetupIntentHook['patch']>[0]) => (gated === null ? (v: V) => hook.patch(write(v)) : refused(gated));
@@ -121,6 +133,11 @@ export function intentBindings(hook: SetupIntentHook, gate: { starting: boolean 
       set: through((permissionMode) => ({ permissionMode })),
     },
     directories: { value: intent.additionalDirectories, options: [], disabled: gated, set: through((additionalDirectories: string[]) => ({ additionalDirectories })) },
+    // a set chosen and then left behind by choosing another machine stays on the intent, for when the person comes back
+    tools:
+      intent.kind === 'create' && tools.honoured && !tools.elsewhere
+        ? { value: intent.mawsTools ?? FULL_MAWS_TOOL_SET, options: [], disabled: gated, set: through((mawsTools: MawsToolSet) => ({ mawsTools })) }
+        : null,
   };
 }
 
@@ -238,6 +255,7 @@ export function liveBindings(status: EngineSessionStatus | null, record: Session
         return { ok: true };
       },
     },
+    tools: null, // board ticket 421: a started session keeps the set it started with (D1)
   };
 }
 
@@ -251,5 +269,6 @@ export function endedBindings(reason: string = ENDED): FrameBindings {
     model: { value: { model: null, effort: null }, ...modelWords(null), options: [], disabled: reason, set: none },
     mode: { value: null, options: MODE_OPTIONS.map((o) => o.mode), disabled: reason, refusal: null, autoUnavailable: null, set: none },
     directories: { value: [], options: [], disabled: reason, set: none },
+    tools: null,
   };
 }

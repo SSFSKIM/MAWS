@@ -3,6 +3,7 @@ import type { MawsBridge } from '@shared/ipc/schema';
 import { record, status } from '../../../../../test/support/builders';
 import type { SetupIntentHook, SetupProject } from '../setup-intent';
 import { MESSAGE_HELD, STARTING } from '../submit/submit-state';
+import { FULL_MAWS_TOOL_SET, type MawsToolSet } from '@shared/maws/tool-set';
 import { gitAnswerOf } from '../../sessions/branch-label';
 import { endedBindings, intentBindings, liveBindings, workspaceDirectoriesOf, type LiveReads } from './bindings';
 
@@ -15,7 +16,7 @@ function bridge(answers: Record<string, unknown> = {}) {
 
 function hook(over: Partial<SetupIntentHook['intent']> = {}, project?: SetupProject): SetupIntentHook & { patch: ReturnType<typeof vi.fn> } {
   return {
-    intent: { location: { kind: 'directory', path: '/repo' }, additionalDirectories: [], model: null, effort: null, permissionMode: null, message: null, draft: null, ...over },
+    intent: { kind: 'create', location: { kind: 'directory', path: '/repo' }, additionalDirectories: [], model: null, effort: null, permissionMode: null, message: null, draft: null, ...over },
     options: {
       models: [{ value: 'sonnet', displayName: 'Sonnet' }, { value: 'haiku', displayName: 'Haiku', supportsAutoMode: false }],
       autoModeNote: null,
@@ -69,6 +70,49 @@ describe('the frame binds its chips to the setup intent or to the live session',
     expect(await held.model.set({ model: 'sonnet', effort: null })).toEqual({ ok: false, error: MESSAGE_HELD });
     expect(await held.project!.choose(null)).toEqual({ ok: false, error: MESSAGE_HELD });
     expect(facts.choose).not.toHaveBeenCalled();
+  });
+
+  // Board ticket 421 (docs/doperpowers/plans/2026-11-23-tool-choice.md, D1, D11 and §H): the "+" menu's Tools submenu is
+  // bound only where the choice will be honoured: a `create` intent, on a spine that knows the choice, for a chat that
+  // starts on this intent's own machine.
+  describe('the Tools binding', () => {
+    const HONOURED = { honoured: true, elsewhere: false };
+    const PARTIAL: MawsToolSet = { artifacts: false, documents: false, dashboards: false, auxiliary: true, question: 'engine' };
+
+    it('binds a create intent to its set, the full set when it holds none, and writes a choice through the patch', async () => {
+      const h = hook();
+      const b = intentBindings(h, { starting: false }, null, HONOURED);
+      expect(b.tools).toMatchObject({ value: FULL_MAWS_TOOL_SET, disabled: null });
+      expect(intentBindings(hook({ mawsTools: PARTIAL }), { starting: false }, null, HONOURED).tools?.value).toEqual(PARTIAL);
+      expect(await b.tools!.set(PARTIAL)).toEqual({ ok: true });
+      expect(h.patch.mock.calls.map(([p]) => p)).toEqual([{ mawsTools: PARTIAL }]);
+    });
+
+    it('shares the frame’s one disabled reason while starting or while the first message is held', async () => {
+      expect(intentBindings(hook(), { starting: true }, null, HONOURED).tools?.disabled).toBe(STARTING);
+      const h = hook({ message: { content: 'hi', display: 'hi' } });
+      const held = intentBindings(h, { starting: false }, null, HONOURED).tools!;
+      expect(held.disabled).toBe(MESSAGE_HELD);
+      expect(await held.set(PARTIAL)).toEqual({ ok: false, error: MESSAGE_HELD });
+      expect(h.patch).not.toHaveBeenCalled();
+    });
+
+    it('is absent for a fork, on a spine that predates the choice or has not answered, and by default', () => {
+      expect(intentBindings(hook({ kind: 'fork' }), { starting: false }, null, HONOURED).tools).toBeNull();
+      expect(intentBindings(hook(), { starting: false }, null, { honoured: false, elsewhere: false }).tools).toBeNull();
+      expect(intentBindings(hook(), { starting: false }).tools).toBeNull();
+    });
+
+    it('is absent for a chat that will start on another machine, a set already chosen included, and back once it is not', () => {
+      const chosen = hook({ mawsTools: PARTIAL });
+      expect(intentBindings(chosen, { starting: false }, null, { honoured: true, elsewhere: true }).tools).toBeNull();
+      expect(intentBindings(chosen, { starting: false }, null, HONOURED).tools?.value).toEqual(PARTIAL); // the intent kept it
+    });
+
+    it('is absent for a started session and for one nothing knows', () => {
+      expect(liveBindings(status(APP), record(APP), {}, bridge().client).tools).toBeNull();
+      expect(endedBindings().tools).toBeNull();
+    });
   });
 
   it('applies a live session’s model, effort and directories through C3, and keeps location and branch read-only', async () => {

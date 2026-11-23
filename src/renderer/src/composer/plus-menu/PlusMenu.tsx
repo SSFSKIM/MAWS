@@ -5,9 +5,14 @@
 // disabled with the palette's Not available here where a host registers no widgets. The toolbar that holds it is the
 // Composer's (M4); the menu drives the editor through its handle. The word cut: a plugin row is its name alone (C17), a
 // submenu's last rows "In this chat…" and "Manage…" (C18), an empty submenu says so in two words (C19, P578, P579), and
-// Add directory…'s wait is a spinner beside the "+" whose words are the "+"'s tooltip (C20).
+// Add directory…'s wait is a spinner beside the "+" whose words are the "+"'s tooltip (C20). Board ticket 421
+// (docs/doperpowers/plans/2026-11-23-tool-choice.md, D11 and §H): after them, a chat not yet started offers Tools, the set
+// of MAWS's tools it will start with: the four groups as checkbox items (a choice keeps the menu open; Documents and
+// Dashboards refused, saying they need Artifacts, while it is off), then the question tool as a radio group, each item's
+// fact its row note; given the frame's binding, which is null wherever the choice would not be honoured.
 import { DropdownMenu } from 'radix-ui';
-import type { RefObject } from 'react';
+import { useId, type RefObject } from 'react';
+import { withArtifacts, type MawsToolSet } from '@shared/maws/tool-set';
 import { ipc } from '../../ipc/client';
 import type { EditorHandle } from '../editor/controller';
 import { ADD_DIRECTORY, useAddDirectory } from '../frame/add-directory';
@@ -21,8 +26,12 @@ import { useSessions } from '../../stores/sessions';
 import { openCustomize } from '../../customize/open';
 import { useConnectorMenu } from '../../widgets/connector-menu'; // UX wave U11a: the Connectors submenu's rows and line
 import { QuietSpinner } from '../../ui/spinner';
-import { PLUS_MENU } from '../copy';
+import { PLUS_MENU, TOOLS_MENU } from '../copy';
 import { Tip } from '../../ui/tip';
+import { RefusedMenuItem } from '../../ui/refused-menu-item';
+import { RowNote, useRowNote } from '../../ui/row-note';
+import { Icon } from '../../app/IconButton';
+import { MAWS_TOOLS } from '../../settings-tab/copy'; // the group words and facts Settings › Sessions shows
 
 const ITEM = 'flex cursor-default flex-col rounded-sm px-2 py-1 outline-none select-none data-highlighted:bg-bg-hover data-disabled:text-fg-faint';
 const NO_DIRECTORIES: ChipBinding<string[]> = { value: [], options: [], disabled: 'No session to add a directory to', set: async () => ({ ok: false, error: 'No session to add a directory to' }) };
@@ -32,9 +41,10 @@ export interface PlusMenuProps {
   cwd: string;
   editor: RefObject<EditorHandle | null>;
   directories?: ChipBinding<string[]>; // the frame's binding: a started session's flag settings, or an unstarted one's intent
+  tools?: ChipBinding<MawsToolSet> | null; // board ticket 421: the frame's binding; none, no Tools submenu
 }
 
-export function PlusMenu({ appSessionId, cwd, editor, directories }: PlusMenuProps) {
+export function PlusMenu({ appSessionId, cwd, editor, directories, tools = null }: PlusMenuProps) {
   const widgets = useRegisteredWidgets();
   const [open, setOpen] = useOpenWhileShown(); // closed as a docked card hides the toolbar
   const status = useSessions((s) => appSessionId ? s.engine.get(appSessionId) : undefined);
@@ -92,6 +102,7 @@ export function PlusMenu({ appSessionId, cwd, editor, directories }: PlusMenuPro
             <DropdownMenu.Separator className="my-1 h-px bg-border" />
             {widgetItem('Connectors', 'mcp')}
             {widgetItem('Plugins', 'plugins')}
+            {tools !== null && <ToolsSubmenu tools={tools} />}
           </DropdownMenu.Content>
         </DropdownMenu.Portal>
       </DropdownMenu.Root>
@@ -103,5 +114,85 @@ export function PlusMenu({ appSessionId, cwd, editor, directories }: PlusMenuPro
         </span>
       )}
     </>
+  );
+}
+
+// ---- board ticket 421: the Tools submenu ---------------------------------------------------------------------------
+
+type Group = keyof typeof MAWS_TOOLS.groups;
+const GROUPS = Object.keys(MAWS_TOOLS.groups) as Group[];
+const NEEDS_ARTIFACTS: readonly Group[] = ['documents', 'dashboards'];
+const QUESTION_TOOLS = ['engine', 'maws'] as const satisfies readonly MawsToolSet['question'][];
+const SUBMENU = 'z-50 min-w-56 max-w-80 rounded-md border border-border-strong bg-bg-overlay p-1 text-ui text-fg shadow-float';
+const CHOICE = `${ITEM} relative flex-row items-center gap-2 aria-disabled:text-fg-faint`;
+
+const CheckIcon = () => (
+  <Icon className="size-3.5">
+    <path d="M3.5 8.5 6.5 11.5 12.5 4.5" />
+  </Icon>
+);
+// The check's room, its mark drawn while the item is checked (panel/PanelHeader.tsx's indicator); a refused row keeps
+// the room with no mark, so every label starts at one edge.
+const Check = ({ mark = true }: { mark?: boolean }) => (
+  <span aria-hidden data-menu-check className="inline-flex size-3.5 shrink-0 items-center justify-center text-accent">
+    {mark && (
+      <DropdownMenu.ItemIndicator>
+        <CheckIcon />
+      </DropdownMenu.ItemIndicator>
+    )}
+  </span>
+);
+
+function ToolsSubmenu({ tools }: { tools: ChipBinding<MawsToolSet> }) {
+  const questionLabel = useId();
+  // the frame's one reason while the first send starts or its message is held: the whole submenu greyed with it
+  if (tools.disabled !== null) return <RefusedMenuItem kit={DropdownMenu} label={TOOLS_MENU.label} reason={tools.disabled} className={CHOICE} />;
+  const set = tools.value;
+  const choose = (next: MawsToolSet) =>
+    void tools.set(next).then((result) => {
+      if (!result.ok) toast({ level: 'warning', text: result.error, actions: [], dismissible: true });
+    });
+  return (
+    <DropdownMenu.Sub>
+      <DropdownMenu.SubTrigger className={`${ITEM} flex-row items-center justify-between gap-3`}><span>{TOOLS_MENU.label}</span><span aria-hidden>›</span></DropdownMenu.SubTrigger>
+      <DropdownMenu.Portal>
+        <DropdownMenu.SubContent sideOffset={4} className={SUBMENU}>
+          {GROUPS.map((group) => {
+            const { word, fact } = MAWS_TOOLS.groups[group];
+            if (NEEDS_ARTIFACTS.includes(group) && !set.artifacts) return <RefusedMenuItem key={group} kit={DropdownMenu} label={word} reason={MAWS_TOOLS.needsArtifacts} lead={<Check mark={false} />} className={CHOICE} />;
+            return <GroupItem key={group} word={word} fact={fact} checked={set[group]} onChecked={(on) => choose(group === 'artifacts' ? withArtifacts(set, on) : { ...set, [group]: on })} />;
+          })}
+          <DropdownMenu.Separator className="my-1 h-px bg-border" />
+          <DropdownMenu.Label id={questionLabel} className="px-2 py-1 text-ui-sm text-fg-muted">{TOOLS_MENU.question}</DropdownMenu.Label>
+          <DropdownMenu.RadioGroup aria-labelledby={questionLabel} value={set.question} onValueChange={(question) => choose({ ...set, question: question as MawsToolSet['question'] })}>
+            {QUESTION_TOOLS.map((question) => <QuestionItem key={question} value={question} word={MAWS_TOOLS.questionTools[question]} fact={TOOLS_MENU.questionFacts[question]} />)}
+          </DropdownMenu.RadioGroup>
+        </DropdownMenu.SubContent>
+      </DropdownMenu.Portal>
+    </DropdownMenu.Sub>
+  );
+}
+
+// A group's checkbox item: its word the name, its fact the row note; a choice keeps the menu open.
+function GroupItem({ word, fact, checked, onChecked }: { word: string; fact: string; checked: boolean; onChecked(on: boolean): void }) {
+  const note = useRowNote();
+  return (
+    <DropdownMenu.CheckboxItem checked={checked} onCheckedChange={onChecked} onSelect={(event) => event.preventDefault()} aria-label={word} textValue={word} {...note.rowProps} className={CHOICE}>
+      <Check />
+      {word}
+      <RowNote note={note}>{fact}</RowNote>
+    </DropdownMenu.CheckboxItem>
+  );
+}
+
+// A question tool's radio item: as a group's, a choice keeps the menu open over the submenu's other choices.
+function QuestionItem({ value, word, fact }: { value: MawsToolSet['question']; word: string; fact: string }) {
+  const note = useRowNote();
+  return (
+    <DropdownMenu.RadioItem value={value} onSelect={(event) => event.preventDefault()} aria-label={word} textValue={word} {...note.rowProps} className={CHOICE}>
+      <Check />
+      {word}
+      <RowNote note={note}>{fact}</RowNote>
+    </DropdownMenu.RadioItem>
   );
 }

@@ -22,10 +22,12 @@ export async function readMawsTools(client: MawsBridge = ipc, machine: MachineRe
 }
 
 /** `machine`'s default set, read once per mount and machine: undefined until the read answers, null when its spine
- *  predates the choice or the read failed, which is also the sign that it would not honour a set sent to it. */
-export function useMachineMawsTools(machine: MachineRef, client: MawsBridge = ipc): MawsToolSet | null | undefined {
+ *  predates the choice or the read failed, which is also the sign that it would not honour a set sent to it. No machine,
+ *  no read (undefined): the composer asks only for a chat that could offer the choice (board ticket 421's M5). */
+export function useMachineMawsTools(machine: MachineRef | null, client: MawsBridge = ipc): MawsToolSet | null | undefined {
   const [read, setRead] = useState<{ machine: MachineRef; set: MawsToolSet | null } | null>(null);
   useEffect(() => {
+    if (machine === null) return;
     let live = true;
     void readMawsTools(client, machine).then((set) => live && setRead({ machine, set }));
     return () => {
