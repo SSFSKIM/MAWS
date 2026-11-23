@@ -116,11 +116,16 @@ test.describe('sessions available on demand (P2-A)', () => {
     await page.keyboard.type('/skills');
     await page.keyboard.press('Enter');
     const frame = page.locator('[data-widget="skills"]');
-    await expect(frame.getByText('Not read yet.')).toBeVisible();
+    // the word cut (P519): a dormant dialog with no earlier answer draws Load now alone, with no "Not read yet."
+    await expect(frame.locator('[data-dormant-gesture]')).toHaveText('Load now');
     expect(existsSync(journalDir(maws, appId)), 'nothing launched on opening the widget').toBe(false);
     await frame.getByRole('button', { name: 'Load now' }).click();
-    await expect(frame.getByText('Starting…')).toBeVisible();
-    await expect(frame.locator('[data-skill-row="e8-probe:e8-hello"]')).toBeVisible({ timeout: 20_000 }); // P2-B's skills library row
+    // P523: the start's wait is the quiet spinner in Load now's place (drawn once it has lasted half a second), never words
+    const row = frame.locator('[data-skill-row="e8-probe:e8-hello"]'); // P2-B's skills library row
+    await expect(frame.getByRole('button', { name: 'Load now' })).toHaveCount(0);
+    await expect(frame.getByRole('progressbar', { name: 'Starting…' }).or(row).first()).toBeVisible();
+    await expect(frame.getByText('Starting…')).toHaveCount(0);
+    await expect(row).toBeVisible({ timeout: 20_000 });
     expect(spawns(maws, appId), 'one launch').toHaveLength(1);
     expect(spawns(maws, appId)[0]!.frame.args).toEqual(expect.arrayContaining(['--resume', SKILLS_SESSION]));
     expect(writtenUsers(maws, appId), 'no prompt sent to populate the widget').toEqual([]);

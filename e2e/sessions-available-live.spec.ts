@@ -6,7 +6,7 @@
 // discovered from transcripts seeded in the scratch home: the first is opened (nothing launches; its model "—", unknown),
 // then sent "Reply with OK" (Starting…, then the one-line Haiku reply in the same conversation) and stopped; the second
 // is started once with no prompt from Session info's Refresh and stopped, so it is an exited MAWS-run session, and its
-// `/skills` reads "Not read yet." with Load now, which says Starting… and then shows the scratch home's skill. MAWS then
+// `/skills` offers Load now alone, which starts it under a quiet spinner and then shows the scratch home's skill. MAWS then
 // quits and relaunches over the same profile: the first session's ring and Session info read "Last reading, …" and
 // "Last observed …" with no engine started. The product launches with no `--max-budget-usd` (C11's rule; the
 // architect's accepted form): the spend is one Haiku reply, read from the session's own receipts. With
@@ -253,17 +253,20 @@ test('P2-A live: discovered sessions open with nothing started; Send, Load now a
       log(`launches so far: ${spawns(skillsId).length}; user frames ${userFrames(skillsId).length}`);
     });
 
-    await step('skills', '/skills on the exited MAWS-run session: Not read yet. with Load now, which says Starting… and then shows the skill', async () => {
+    await step('skills', '/skills on the exited MAWS-run session: Load now alone, its start a quiet spinner, then the skill', async () => {
       await main(page).getByRole('textbox', { name: 'Message' }).click();
       await page.keyboard.type('/skills');
       await expect(page.getByRole('listbox', { name: 'Commands' }).locator('[role="option"][aria-selected="true"]')).toContainText('/skills');
       await page.keyboard.press('Enter');
       const frame = page.locator('[data-widget="skills"]');
-      await expect(frame.getByText('Not read yet.')).toBeVisible();
+      // the word cut (P519): Load now alone, with no "Not read yet."
+      await expect(frame.locator('[data-dormant-gesture]')).toHaveText('Load now');
       const before = spawns(skillsId).length;
       await frame.getByRole('button', { name: 'Load now' }).click();
-      await expect(frame.getByText('Starting…')).toBeVisible({ timeout: 10_000 });
-      log('frame read: Starting…');
+      // P523: the start's wait is the quiet spinner in Load now's place, never words (a real start outlasts its half second)
+      await expect(frame.getByRole('progressbar', { name: 'Starting…' })).toBeVisible({ timeout: 10_000 });
+      await expect(frame.getByText('Starting…')).toHaveCount(0);
+      log('frame read: the start spinner');
       await expect(frame.locator(`[data-skill-row="${SKILL}"]`)).toBeVisible({ timeout: 120_000 }); // P2-B's skills library row
       expect(spawns(skillsId).length, 'one more launch').toBe(before + 1);
       expect(userFrames(skillsId), 'no prompt to populate it').toHaveLength(0);

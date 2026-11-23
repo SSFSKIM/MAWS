@@ -31,6 +31,7 @@ import type { AppSessionId } from '@shared/graph/ids'; // P2-E1
 import { frameAt, headerAction, importSeeded, mcpCalls, mcpResultOf, metaEvents, ofKind, pageUrlOf, resultText, seedArtifact } from './support/maws-tools'; // P2-E1; P3-L M6b; P3-F (case 12's evidence)
 import { newChatIn, openProject, sidebarOf, sidebarRow } from './support/sidebar';
 import { hideSurfaces, mainTabById, mountedTabs, openArtifactInPanel, openSurface, sessionCards, sideColumn, sideTab, surface, surfaceRow } from './support/shell';
+import { expectNewChatInFront } from './support/screen-reader-only';
 // Ticket 733a (its document, Design 3): the ids of the pasted segments a sent text holds, in order. A form composed for
 // the main conversation carries the session's own (`pastedTagId` of its engine id), a thread's first message, composed
 // before its session exists, a random one, so a scene reads that id from what was sent and compares the bytes at it.
@@ -180,7 +181,7 @@ async function startParent(page: Page, repo: ScratchRepo): Promise<string> {
   const project = value(await invoke(page, 'session.projects.add', { directory: repo.root }));
   await openProject(page, project.name);
   await newChatIn(page, project.name);
-  await expect(page.getByRole('heading', { name: `New chat in ${project.name}` })).toBeVisible();
+  await expectNewChatInFront(page, project.name); // the word cut (W86): the page's heading for a screen reader alone
   const id = value(await invoke(page, 'session.intent.list', undefined)).intents.at(-1)!.appSessionId;
   value(await invoke(page, 'session.intent.patch', { appSessionId: id, patch: { gateway: 'direct' } }));
   value(await invoke(page, 'session.start', { appSessionId: id, message: { content: FIRST_PROMPT, display: FIRST_PROMPT }, options: {} }));

@@ -566,7 +566,7 @@ test('bash, memory, paste, history recall, the palette, the status line and Add 
       await expect(chosen).toContainText('/compact');
       const compactRow = await chosen.innerText();
       await page.keyboard.press('Enter'); // the compact widget opens
-      await page.locator('[data-widget="compact"]').getByRole('button', { name: 'Compact now' }).click(); // sends /compact
+      await page.locator('[data-widget="compact"]').getByRole('button', { name: 'Compact', exact: true }).click(); // sends /compact (the word cut, P631: the button reads Compact)
       // C11 end
       await expect.poll(() => framesOf(rowsOf(m.journalPath), 'in').some(({ frame }) => frame.type === 'system' && frame.subtype === 'compact_boundary'), { timeout: 180_000 }).toBe(true);
       await idle(page, m.id);
