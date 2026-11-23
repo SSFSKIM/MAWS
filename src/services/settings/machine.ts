@@ -7,10 +7,12 @@
 // `Settings` and routes each field of a patch here or there.
 // P5 O7 M9 (docs/doperpowers/plans/2026-10-28-p5-o7-remote-lane-b.md, M9 "The default, without a v2"): and the machine's
 // default route, in `machine-route.json` beside it, under the same writer and the same refusal.
+// Board ticket 421 (docs/doperpowers/plans/2026-11-23-tool-choice.md, D4 and Interfaces §G): and the machine's default set
+// of MAWS's tools, in `machine-session-defaults.json` beside it, under the same writer and the same refusal.
 import { dirname, join } from 'node:path';
 import type { LegacyRoute, Route } from '@shared/engine/route';
-import { MACHINE_ROUTE_VERSION, MachineRouteSchema, MachineSettingsSchema, type MachineRoute, type MachineSettings } from '@shared/ipc/schema/settings';
-import { applyMachinePatch, legacyDefaultRoute, machineSettingsDefaults, migrateMachineRoute, migrateMachineSettings, resolveDefaultRoute } from '@shared/settings/defaults';
+import { MACHINE_ROUTE_VERSION, MACHINE_SESSION_DEFAULTS_VERSION, MachineRouteSchema, MachineSessionDefaultsSchema, MachineSettingsSchema, type MachineRoute, type MachineSessionDefaults, type MachineSettings } from '@shared/ipc/schema/settings';
+import { applyMachinePatch, legacyDefaultRoute, machineSettingsDefaults, migrateMachineRoute, migrateMachineSessionDefaults, migrateMachineSettings, resolveDefaultRoute, resolveMawsTools } from '@shared/settings/defaults';
 import { openSettingsFile, type SettingsFileRules, type SettingsFileStore } from '@shared/settings/file-store';
 import { SETTINGS_FILES } from '@shared/settings/paths';
 import type { MachineSettingsService } from '@shared/spine/machine-settings';
@@ -29,6 +31,14 @@ export const machineRouteRules: SettingsFileRules<MachineRoute | null> = {
   validate: (value) => MachineRouteSchema.parse(value),
 };
 
+// Board ticket 421: null while the file is absent (or unreadable, or a version this build does not know, which also
+// refuses its writes): the default is then the full set. Loose: a later build's keys are kept across a write.
+export const machineSessionDefaultsRules: SettingsFileRules<MachineSessionDefaults | null> = {
+  read: (raw) => ({ value: migrateMachineSessionDefaults(raw) }),
+  defaults: () => null,
+  validate: (value) => MachineSessionDefaultsSchema.parse(value),
+};
+
 export interface MachineSettingsOptions {
   refused: string | null;
   unsplit?: MachineSettings | null;
@@ -45,6 +55,7 @@ export function startMachineSettings(file: string, { refused, unsplit = null, le
   const rules = unsplit === null ? machineSettingsRules : { ...machineSettingsRules, defaults: () => structuredClone(unsplit) };
   const store = openSettingsFile(file, rules, { refused });
   const routeStore = openSettingsFile(join(dirname(file), SETTINGS_FILES.route), machineRouteRules, { refused });
+  const sessionDefaults = openSettingsFile(join(dirname(file), SETTINGS_FILES.sessionDefaults), machineSessionDefaultsRules, { refused }); // board ticket 421
   const listeners = new Set<(state: MachineSettings) => void>();
   const tell = () => {
     for (const listener of listeners) listener(store.value);
@@ -73,6 +84,13 @@ export function startMachineSettings(file: string, { refused, unsplit = null, le
       choose(store, routeStore, (current) => ({ next: applyMachinePatch(current, { gateway: { defaultRoute: legacyDefaultRoute(route, machineLegacy) } }), route }));
       tell();
       return route;
+    },
+    // Board ticket 421: the file read again for the write, so a key a later build wrote since is kept
+    mawsTools: () => resolveMawsTools(sessionDefaults.value),
+    setMawsTools: async (set) => {
+      sessionDefaults.update((current) => ({ ...current, version: MACHINE_SESSION_DEFAULTS_VERSION, mawsTools: set }));
+      tell();
+      return resolveMawsTools(sessionDefaults.value);
     },
   };
 }

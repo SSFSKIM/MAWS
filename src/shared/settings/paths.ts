@@ -4,7 +4,8 @@
 import { join } from 'node:path';
 
 // P5 O7 M9: `route`, the machine's default route (machine-route.json), beside the machine file and written with it
-export const SETTINGS_FILES = { client: 'settings.json', machine: 'machine-settings.json', route: 'machine-route.json' } as const;
+// Board ticket 421: `sessionDefaults`, the machine's per-machine session defaults (the set of MAWS's tools), beside it too
+export const SETTINGS_FILES = { client: 'settings.json', machine: 'machine-settings.json', route: 'machine-route.json', sessionDefaults: 'machine-session-defaults.json' } as const;
 export interface SettingsPaths {
   client: string;
   machine: string;

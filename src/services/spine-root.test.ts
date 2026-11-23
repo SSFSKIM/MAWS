@@ -4,9 +4,10 @@
 // attention, the checkouts over the spine's view (P5 O3-E M2: composed by the root itself, its last parts), and the
 // root's stop releasing what it held. The exact commands, intercepts and taps the root installs are pinned here.
 import { execFileSync } from 'node:child_process';
-import { chmodSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { FULL_MAWS_TOOL_SET } from '@shared/maws/tool-set'; // board ticket 421
 import { NO_CLIENT, type ClientPort } from '@shared/client/port';
 import type { AppSessionId, SessionId } from '@shared/graph/ids';
 import { REGISTRY } from '@shared/ipc/registry';
@@ -820,18 +821,28 @@ describe('the spine and the checkouts composed under plain Node', () => {
     const bus = fakeBus();
     compose(data, host, bus);
     await host.ready();
-    expect(await bus.main('machineSettings.get', undefined)).toEqual({ ok: true, value: { settings: data.machineSettings.state(), version: 0, defaultRoute: 'machine' } }); // P5 O7 M9: the resolved default beside the file
+    expect(await bus.main('machineSettings.get', undefined)).toEqual({ ok: true, value: { settings: data.machineSettings.state(), version: 0, defaultRoute: 'machine', mawsTools: FULL_MAWS_TOOL_SET } }); // P5 O7 M9: the resolved default beside the file; board ticket 421: the default set
     const set = await bus.main('machineSettings.set', { patch: { supervisor: { idleExitMinutes: 7 } } });
     expect(set).toMatchObject({ ok: true, value: { settings: { supervisor: { idleExitMinutes: 7 } }, defaultRoute: 'machine' } });
     expect(JSON.parse(readFileSync(data.paths.machine, 'utf8'))).toMatchObject({ supervisor: { idleExitMinutes: 7 } }); // persisted before the answer
-    expect(bus.emittedOf('machineSettings.changed')).toEqual([{ settings: data.machineSettings.state(), defaultRoute: 'machine' }]);
+    expect(bus.emittedOf('machineSettings.changed')).toEqual([{ settings: data.machineSettings.state(), defaultRoute: 'machine', mawsTools: FULL_MAWS_TOOL_SET }]);
     expect(await bus.main('machineSettings.get', undefined)).toMatchObject({ ok: true, value: { version: 1 } });
     // P5 O7 M9: a set of the default alone writes machine-route.json and the legacy field, and is told once
     expect(await bus.main('machineSettings.set', { patch: {}, defaultRoute: 'gateway' })).toMatchObject({ ok: true, value: { settings: { gateway: { defaultRoute: 'gateway' } }, defaultRoute: 'gateway' } });
     expect(JSON.parse(readFileSync(join(profile, 'machine-route.json'), 'utf8'))).toEqual({ version: 1, defaultRoute: 'gateway' });
-    expect(bus.emittedOf('machineSettings.changed').at(-1)).toEqual({ settings: data.machineSettings.state(), defaultRoute: 'gateway' });
+    expect(bus.emittedOf('machineSettings.changed').at(-1)).toEqual({ settings: data.machineSettings.state(), defaultRoute: 'gateway', mawsTools: FULL_MAWS_TOOL_SET });
     expect(bus.emittedOf('machineSettings.changed')).toHaveLength(2);
     expect(await bus.main('machineSettings.get', undefined)).toMatchObject({ ok: true, value: { version: 2, defaultRoute: 'gateway' } });
+    // board ticket 421: a set of the default set of MAWS's tools alone writes machine-session-defaults.json, the machine
+    // file untouched, and is told once; the next new session's intent starts from it
+    const machineFile = readFileSync(data.paths.machine, 'utf8');
+    const tools = { artifacts: false, documents: false, dashboards: false, auxiliary: true, question: 'engine' } as const;
+    expect(await bus.main('machineSettings.set', { patch: {}, mawsTools: tools })).toEqual({ ok: true, value: { settings: data.machineSettings.state(), defaultRoute: 'gateway', mawsTools: tools } });
+    expect(JSON.parse(readFileSync(join(profile, 'machine-session-defaults.json'), 'utf8'))).toEqual({ version: 1, mawsTools: tools });
+    expect(readFileSync(data.paths.machine, 'utf8')).toBe(machineFile);
+    expect(bus.emittedOf('machineSettings.changed').at(-1)).toEqual({ settings: data.machineSettings.state(), defaultRoute: 'gateway', mawsTools: tools });
+    expect(bus.emittedOf('machineSettings.changed')).toHaveLength(3);
+    expect(await bus.main('machineSettings.get', undefined)).toMatchObject({ ok: true, value: { version: 3, mawsTools: tools } });
 
     const id = '11111111-1111-4111-8111-111111111111';
     expect(await bus.main('session.visible', undefined)).toEqual({ ok: true, value: { sessions: [] } });
@@ -1097,6 +1108,8 @@ describe('the spine and the checkouts composed under plain Node', () => {
     // P5 O3-D M5b: the machine half is read, and a set is refused with nothing changed or told
     expect(await bus.main('machineSettings.get', undefined)).toMatchObject({ ok: true, value: { settings: data.machineSettings.state() } });
     expect(await bus.main('machineSettings.set', { patch: { supervisor: { idleExitMinutes: 7 } } })).toMatchObject({ ok: false });
+    expect(await bus.main('machineSettings.set', { patch: {}, mawsTools: { artifacts: false, documents: false, dashboards: false, auxiliary: false, question: 'maws' } })).toMatchObject({ ok: false }); // board ticket 421
+    expect(existsSync(join(profile, 'machine-session-defaults.json'))).toBe(false);
     expect(bus.emittedOf('machineSettings.changed')).toEqual([]);
     expect(bus.intercepted()).toEqual(SPINE_REFUSED_INTERCEPTS);
     expect(bus.tapped().sort()).toEqual(SPINE_REFUSED_TAPS);

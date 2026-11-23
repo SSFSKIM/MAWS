@@ -3,7 +3,8 @@ import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import * as z from 'zod';
 import { ClientSettingsSchema, MachineSettingsSchema, SettingsPatchSchema, SettingsSchema, type Settings, type SettingsPatch } from '../ipc/schema/settings';
-import { applyClientPatch, applyMachinePatch, applySettingsPatch, clientSettingsDefaults, isUnifiedSettings, legacyDefaultRoute, machineSettingsDefaults, mergeSettings, migrateClientSettings, migrateMachineRoute, migrateMachineSettings, migrateSettings, resolveDefaultRoute, SETTINGS_DEFAULTS_V21, splitSettings, splitSettingsPatch } from './defaults';
+import { applyClientPatch, applyMachinePatch, applySettingsPatch, clientSettingsDefaults, isUnifiedSettings, legacyDefaultRoute, machineSettingsDefaults, mergeSettings, migrateClientSettings, migrateMachineRoute, migrateMachineSessionDefaults, migrateMachineSettings, migrateSettings, resolveDefaultRoute, resolveMawsTools, SETTINGS_DEFAULTS_V21, splitSettings, splitSettingsPatch } from './defaults';
+import { FULL_MAWS_TOOL_SET } from '../maws/tool-set'; // board ticket 421
 
 // P3-D: design-system and Space ids (host UUIDs)
 const DS_A = '6f1c1d2e-0b7a-4c55-9a3e-2f1b0c9d8e71';
@@ -932,5 +933,36 @@ describe("the machine's default route (P5 O7 M9)", () => {
     expect(() => migrateMachineRoute({ version: 2, defaultRoute: 'machine' })).toThrow();
     expect(() => migrateMachineRoute({ version: 1, defaultRoute: 'relay' })).toThrow();
     expect(() => migrateMachineRoute({ version: 1, defaultRoute: 'machine', extra: true })).toThrow();
+  });
+});
+
+// Board ticket 421 (docs/doperpowers/plans/2026-11-23-tool-choice.md, Interfaces §G and "The settings migration"): the
+// machine's default set of MAWS's tools, in `machine-session-defaults.json` beside the two settings files, which keep
+// their schemas and versions (the split's partition above holds as it was)
+describe("the machine's default set of MAWS's tools (board ticket 421)", () => {
+  const PARTIAL = { artifacts: false, documents: false, dashboards: false, auxiliary: true, question: 'engine' } as const;
+
+  it('is the file’s set when it holds one, else the full set: no file, or a file without one', () => {
+    expect(resolveMawsTools(null)).toEqual(FULL_MAWS_TOOL_SET);
+    expect(resolveMawsTools({ version: 1 })).toEqual(FULL_MAWS_TOOL_SET);
+    expect(resolveMawsTools({ version: 1, mawsTools: PARTIAL })).toEqual(PARTIAL);
+    expect(resolveMawsTools({ version: 1, mawsTools: FULL_MAWS_TOOL_SET })).toEqual(FULL_MAWS_TOOL_SET); // the person chose it
+  });
+
+  it('reads machine-session-defaults.json at version 1 alone, keeping a key a later build added', () => {
+    expect(migrateMachineSessionDefaults({ version: 1, mawsTools: PARTIAL })).toEqual({ version: 1, mawsTools: PARTIAL });
+    expect(migrateMachineSessionDefaults({ version: 1 })).toEqual({ version: 1 });
+    expect(migrateMachineSessionDefaults({ version: 1, mawsTools: PARTIAL, later: { kept: true } })).toEqual({ version: 1, mawsTools: PARTIAL, later: { kept: true } });
+    expect(() => migrateMachineSessionDefaults({ version: 2, mawsTools: PARTIAL })).toThrow();
+    expect(() => migrateMachineSessionDefaults({ version: 1, mawsTools: { ...PARTIAL, documents: true } })).toThrow(); // documents without artifacts
+    expect(() => migrateMachineSessionDefaults({ version: 1, mawsTools: { ...PARTIAL, extra: true } })).toThrow(); // a set is strict
+  });
+
+  it('adds nothing to either settings file: neither schema names the set, and their versions stand', () => {
+    expect(Object.keys(MachineSettingsSchema.shape)).not.toContain('mawsTools');
+    expect(Object.keys(ClientSettingsSchema.shape)).not.toContain('mawsTools');
+    expect(machineSettingsDefaults().version).toBe(1);
+    expect(clientSettingsDefaults().version).toBe(21);
+    expect(() => migrateMachineSettings({ ...machineSettingsDefaults(), mawsTools: PARTIAL })).toThrow(); // still strict
   });
 });

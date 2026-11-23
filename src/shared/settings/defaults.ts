@@ -14,18 +14,21 @@ import {
   ClientSettingsSchema,
   MACHINE_SETTINGS_VERSION,
   MachineRouteSchema,
+  MachineSessionDefaultsSchema,
   MachineSettingsSchema,
   SettingsSchema,
   SupervisorSettingsSchema,
   ThemeSettingSchema,
   type ClientSettings,
   type MachineRoute,
+  type MachineSessionDefaults,
   type MachineSettings,
   type Settings,
   type SettingsPatch,
 } from '../ipc/schema/settings';
 import { LaunchProfileSchema, userScopeProfile } from '../engine/launch-profile'; // P4-A2
 import type { LegacyRoute, Route } from '../engine/route'; // P5 O7 M9
+import { FULL_MAWS_TOOL_SET, type MawsToolSet } from '../maws/tool-set'; // board ticket 421
 
 export const SETTINGS_DEFAULTS_V21: Settings = {
   version: 21, // C12: 4; W2: 5; W3: 6; W7: 7; W13: 8; E9: 9; E10: 10; E4a: 11; cua #90: 12; P2-C: 13; P3-D: 14; P4-B1: 15; P4-R8: 16; P4-A2: 17; UX1: 18; the launch profile's style removed: 19; P5 O2: 20; P5 O3-A: 21 (the client file's)
@@ -355,6 +358,18 @@ export function resolveDefaultRoute(chosen: MachineRoute | null, legacy: LegacyR
 // (src/shared/engine/route.ts's legacyRouteOf over the machine's effective base URL).
 export function legacyDefaultRoute(route: Route, machineLegacy: LegacyRoute): LegacyRoute {
   return route === 'machine' ? machineLegacy : route;
+}
+
+// Board ticket 421 (docs/doperpowers/plans/2026-11-23-tool-choice.md, "The settings migration"):
+// `machine-session-defaults.json`: version 1 is validated and returned with any key a later build added; anything else
+// throws, which its store reads as a file it cannot own (the full set in memory, writes refused).
+export function migrateMachineSessionDefaults(input: unknown): MachineSessionDefaults {
+  return MachineSessionDefaultsSchema.parse(input);
+}
+
+// The machine's default set of MAWS's tools: the file's, else the full set (no file, or one that names none).
+export function resolveMawsTools(file: MachineSessionDefaults | null): MawsToolSet {
+  return file?.mawsTools ?? FULL_MAWS_TOOL_SET;
 }
 
 // A patch cut by owner, field by field (`supervisor` and `artifacts` have both kinds): each half holds only its own

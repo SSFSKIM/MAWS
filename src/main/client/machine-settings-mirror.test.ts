@@ -9,6 +9,7 @@ import { readTolerant } from '@shared/ipc/tolerant';
 import { MachineSettingsPatchSchema, type MachineSettings } from '@shared/ipc/schema/settings';
 import { applyMachinePatch, machineSettingsDefaults } from '@shared/settings/defaults';
 import { createMachineSettingsMirror } from './machine-settings-mirror';
+import { FULL_MAWS_TOOL_SET, type MawsToolSet } from '@shared/maws/tool-set'; // board ticket 421
 
 type Answer = { ok: true; value: unknown } | { ok: false; error: { code: string; message: string } };
 
@@ -284,6 +285,86 @@ describe('the machine settings mirror (Interfaces §G)', () => {
       await expect(mirror.setDefaultRoute('machine')).rejects.toThrow('predates the machine route');
       expect(host.asked).toHaveLength(asked); // nothing sent
       expect(mirror.defaultRoute()).toBe('direct');
+    });
+  });
+
+  // Board ticket 421 (docs/doperpowers/plans/2026-11-23-tool-choice.md, Interfaces §G): the machine's default set of MAWS's
+  // tools on the route's terms: from `machine-session-defaults.json` until mawsd answers, then from its answers'
+  // `mawsTools`; a mawsd whose answers carry none predates the choice, and its launches are the full set
+  describe("the machine's default set of MAWS's tools (board ticket 421)", () => {
+    const PARTIAL: MawsToolSet = { artifacts: false, documents: false, dashboards: false, auxiliary: true, question: 'engine' };
+
+    it('starts from machine-session-defaults.json, read and never written, or the full set without a readable one', () => {
+      const host = machineHost();
+      expect(createMachineSettingsMirror({ file, hosts: host.hosts, log: () => {} }).mawsTools()).toEqual(FULL_MAWS_TOOL_SET);
+      expect(readdirSync(dir)).toEqual([]);
+      writeFileSync(join(dir, 'machine-session-defaults.json'), JSON.stringify({ version: 1, mawsTools: PARTIAL }));
+      expect(createMachineSettingsMirror({ file, hosts: host.hosts, log: () => {} }).mawsTools()).toEqual(PARTIAL);
+      writeFileSync(join(dir, 'machine-session-defaults.json'), '{"version":1,');
+      expect(createMachineSettingsMirror({ file, hosts: host.hosts, log: () => {} }).mawsTools()).toEqual(FULL_MAWS_TOOL_SET);
+    });
+
+    it('takes mawsd’s set from its answers and changes, telling its listeners when the set alone changed', async () => {
+      const host = machineHost();
+      host.answers.set('machineSettings.get', async () => ({ ok: true, value: { settings: machineSettingsDefaults(), version: 1, defaultRoute: 'machine', mawsTools: PARTIAL } }));
+      const mirror = createMachineSettingsMirror({ file, hosts: host.hosts, log: () => {} });
+      const told: MawsToolSet[] = [];
+      mirror.onChange(() => void told.push(mirror.mawsTools()));
+      host.stream();
+      await mirror.answered();
+      expect(mirror.mawsTools()).toEqual(PARTIAL);
+      expect(told).toEqual([PARTIAL]); // the settings and the route as it started: the set moved alone
+      host.fire('machineSettings.changed', { settings: machineSettingsDefaults(), defaultRoute: 'machine', mawsTools: PARTIAL });
+      expect(told).toHaveLength(1); // nothing moved: nothing told
+      host.fire('machineSettings.changed', { settings: machineSettingsDefaults(), defaultRoute: 'machine', mawsTools: FULL_MAWS_TOOL_SET });
+      expect(told).toEqual([PARTIAL, FULL_MAWS_TOOL_SET]);
+    });
+
+    it('reads a mawsd whose answer carries no set as one that predates the choice: the full set, which its launches serve', async () => {
+      const host = machineHost();
+      writeFileSync(join(dir, 'machine-session-defaults.json'), JSON.stringify({ version: 1, mawsTools: PARTIAL })); // a newer build's file
+      host.answers.set('machineSettings.get', async () => ({ ok: true, value: { settings: machineSettingsDefaults(), version: 1, defaultRoute: 'machine' } }));
+      const mirror = createMachineSettingsMirror({ file, hosts: host.hosts, log: () => {} });
+      host.stream();
+      await mirror.answered();
+      expect(mirror.mawsTools()).toEqual(FULL_MAWS_TOOL_SET);
+      const asked = host.asked.length;
+      await expect(mirror.setMawsTools(PARTIAL)).rejects.toThrow('predates');
+      expect(host.asked).toHaveLength(asked); // nothing sent
+    });
+
+    it('sets the default as machineSettings.set’s mawsTools and resolves with mawsd’s answer; a refusal changes nothing', async () => {
+      const host = machineHost();
+      host.answers.set('machineSettings.get', async () => ({ ok: true, value: { settings: machineSettingsDefaults(), version: 1, defaultRoute: 'machine', mawsTools: FULL_MAWS_TOOL_SET } }));
+      host.answers.set('machineSettings.set', async () => ({ ok: true, value: { settings: machineSettingsDefaults(), defaultRoute: 'machine', mawsTools: PARTIAL } }));
+      const mirror = createMachineSettingsMirror({ file, hosts: host.hosts, log: () => {} });
+      host.stream();
+      await mirror.answered();
+      expect(await mirror.setMawsTools(PARTIAL)).toEqual(PARTIAL);
+      expect(host.asked.at(-1)).toEqual({ name: 'machineSettings.set', input: { patch: {}, mawsTools: PARTIAL } });
+      expect(mirror.mawsTools()).toEqual(PARTIAL);
+      host.answers.set('machineSettings.set', async () => ({ ok: false, error: { code: 'host_unavailable', message: 'spine.lock is held by pid 4242' } }));
+      await expect(mirror.setMawsTools(FULL_MAWS_TOOL_SET)).rejects.toThrow('spine.lock is held by pid 4242');
+      expect(mirror.mawsTools()).toEqual(PARTIAL);
+    });
+
+    it('learns whether mawsd carries the set before its first write, and never takes a dropped write for done', async () => {
+      // a mawsd that predates the choice, its set input read tolerantly (an unknown key dropped), answering with no set
+      const host = machineHost();
+      host.answers.set('machineSettings.get', async () => ({ ok: true, value: { settings: machineSettingsDefaults(), version: 1, defaultRoute: 'machine' } }));
+      const unanswered = createMachineSettingsMirror({ file, hosts: host.hosts, log: () => {} }); // not streaming: no answer yet
+      await expect(unanswered.setMawsTools(PARTIAL)).rejects.toThrow('predates');
+      expect(host.asked.map(({ name }) => name)).toEqual(['machineSettings.get']); // asked first; nothing written
+
+      // a mawsd replaced by an older one between its read and the write
+      const swapped = machineHost();
+      swapped.answers.set('machineSettings.get', async () => ({ ok: true, value: { settings: machineSettingsDefaults(), version: 1, defaultRoute: 'machine', mawsTools: FULL_MAWS_TOOL_SET } }));
+      swapped.answers.set('machineSettings.set', async () => ({ ok: true, value: { settings: machineSettingsDefaults(), defaultRoute: 'machine' } }));
+      const mirrored = createMachineSettingsMirror({ file, hosts: swapped.hosts, log: () => {} });
+      swapped.stream();
+      await mirrored.answered();
+      await expect(mirrored.setMawsTools(PARTIAL)).rejects.toThrow('predates');
+      expect(mirrored.mawsTools()).toEqual(FULL_MAWS_TOOL_SET);
     });
   });
 });
