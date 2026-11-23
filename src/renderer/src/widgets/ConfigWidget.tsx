@@ -11,6 +11,7 @@ import { runAction } from '../keymap/actions-runtime';
 import { useSessions } from '../stores/sessions';
 import { CONFIG, SHARED, WIDGET_TITLE } from './copy';
 import { Group, KeyValues, Mono, parseEach, RevealButton, Row, Rows, SourceWord, sourceWords, TextButton } from './parts';
+import { homeAbbreviated } from '../tools/session-info/model';
 import { useEngineRead } from './read';
 import { WidgetFrame } from './WidgetFrame';
 import { machineOf } from '@shared/machine/address';
@@ -45,7 +46,8 @@ export function present(answer: GetSettingsResponse): ConfigView {
 }
 
 // The file a source lives in, where the renderer can name it: the project's two files under the session's directory,
-// the user's under the engine's config home (the directory of the user memory file the engine itself names).
+// the user's under the engine's config home (the directory of the user memory file the engine itself names). The word
+// cut (P586): the file under a source's word is this one, the one Reveal opens, and none while it cannot be named.
 export function sourceFile(source: string, cwd: string | null, configHome: string | null): string | null {
   if (source === 'projectSettings' && cwd) return `${cwd}/.claude/settings.json`;
   if (source === 'localSettings' && cwd) return `${cwd}/.claude/settings.local.json`;
@@ -68,7 +70,7 @@ export function ConfigBody({ view, machine, cwd, configHome, close }: { view: Co
           <Rows label={CONFIG.sourceList}>
             {view.sources.map((s) => {
               const file = sourceFile(s.source, cwd, configHome);
-              return <Row key={s.source} main={<SourceWord word={s.label} file={sourceWords(s.source).file} />} detail={s.keys.length > 0 ? s.keys.join(', ') : null} actions={file ? <RevealButton path={file} machine={machine}>{SHARED.reveal}</RevealButton> : null} />;
+              return <Row key={s.source} main={<SourceWord word={s.label} file={file && homeAbbreviated(file)} />} detail={s.keys.length > 0 ? s.keys.join(', ') : null} actions={file ? <RevealButton path={file} machine={machine}>{SHARED.reveal}</RevealButton> : null} />;
             })}
           </Rows>
         </Group>

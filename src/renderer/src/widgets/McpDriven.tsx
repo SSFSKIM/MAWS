@@ -5,8 +5,8 @@
 // drawn from its own capability: one the bridge can't run stays in place, disabled, with its reason. The outcome is the
 // command op's end, worded as the slash palette words it; the list is read again after each.
 // UX wave U11a (§C): the Connectors dialog's title and subtitle, and each status in the dialog's words; its switch, and
-// so the sentence of what it reaches, is the terminal's own `/mcp`. The word cut (P576, P569, P565): the partial list
-// said in a few words, and the quiet spinner while a command runs and in a connecting server's status place.
+// so the sentence of what it reaches, is the terminal's own `/mcp`. The word cut (P576, P569): the partial list
+// said in a few words, and the quiet spinner while a command runs.
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { OpBody } from 'desk-hub/protocol';
 import type { AppSessionId } from '@shared/graph/ids';
@@ -43,18 +43,9 @@ const serversOf = (result: unknown): Server[] => {
     : [];
 };
 
-// A server's status and tool count; a connecting one's status is the quiet spinner its words name.
-function StatusNote({ status, tools }: { status: string; tools: number }) {
-  const words = connectorStatusWords(status);
-  const count = tools > 0 ? MCP.tools(tools) : '';
-  if (status !== 'pending' || words === '') return [words, count].filter((part) => part !== '').join(' · ');
-  return (
-    <>
-      <QuietSpinner label={words} className="align-[-1px]" />
-      {count !== '' && ` · ${count}`}
-    </>
-  );
-}
+// A server's status and tool count, in words: the list is read only when the dialog opens and after its own commands,
+// so nothing would end a connecting server's quiet spinner (P565 is the dialog's and Customize's live list's).
+const statusNote = (status: string, tools: number) => [connectorStatusWords(status), tools > 0 ? MCP.tools(tools) : ''].filter((part) => part !== '').join(' · ');
 
 export function McpDriven({ appSessionId, controls, close }: { appSessionId: AppSessionId; controls: SessionControls; close(): void }) {
   const [read, setRead] = useState<{ state: ReadState; servers: Server[]; error: string | null }>({ state: 'loading', servers: [], error: null });
@@ -114,7 +105,7 @@ export function McpDriven({ appSessionId, controls, close }: { appSessionId: App
                 key={server.name}
                 data-mcp-server={server.name}
                 main={<span className="font-semibold">{server.name}</span>}
-                note={<StatusNote status={server.status} tools={server.tools} />}
+                note={statusNote(server.status, server.tools)}
                 actions={
                   <>
                     <TextButton onClick={() => void run('reconnect', server.name)} disabled={busy || !reconnect.available} title={reconnect.available ? undefined : reconnect.reason}>

@@ -1,8 +1,8 @@
 // `/mcp` (C11 execution document, the widget table): `mcp_status`'s servers with their status, transport (`stdio ·
 // <command>` or `http · <url>`), scope and source, an error when one is reported, and their tools as a count with a
 // disclosure. It refetches when the session's MCP table in C3's status moves. Each server offers Reconnect (for this
-// session) and the enable switch, which the engine records in ~/.claude.json (U11a: said once, in the head); both run
-// as operations, and the switch's position after either outcome is the next read's.
+// session) and the enable switch, which the engine records in ~/.claude.json (the word cut, N148: said in each switch
+// row's note); both run as operations, and the switch's position after either outcome is the next read's.
 // P5 O7 M8 ("Sign in from the session's MCP widget"): a server that needs auth also offers Sign in, for a session on this Mac
 // or another machine alike: by its name and scope (`connectors.signInServer`, the entry read on the session's machine),
 // with the session's directory, its progress and result in Customize's words (customize/connectors/sign-in.ts).
@@ -12,8 +12,9 @@
 // is one line (`ConnectorRow`): the switch, the name, the status in words (connector-status.ts) and the tool count;
 // opening the row shows the rest. Sign in and Reconnect sit on the line of a row that needs a sign-in or failed, and
 // Reconnect is in the opened part of any other. The word cut (N148): what the switch reaches is each switch row's note,
-// shown on pointing or focus; P565 draws a connecting connector's status as the quiet spinner; P569 and P570 draw the
-// quiet spinner on the knob or beside Reconnect while either works, and nothing under the row after a success.
+// shown on pointing or focus; P565 draws a connecting connector's status as the quiet spinner while the session is live;
+// P569 and P570 draw the quiet spinner on the knob or beside Reconnect while either works (on the line of a row folded
+// meanwhile), and nothing under the row after a success.
 // U11a M8 (§A): a dynamic connector that needs a sign-in, a plugin's or one of MAWS's own list, offers Sign in too, by its
 // name (`connectors.signInDynamicServer`); for a session on another machine it is drawn disabled with U9's sentence until
 // U11f, a file-scope row beside it keeping its own.
@@ -128,16 +129,19 @@ const tone = (status: string) => (status === 'connected' ? 'text-success' : stat
 // `actions` after it, so a press on either never opens the row. Opened: the transport (the full command as its tooltip),
 // where it comes from, its scope, an error, the tool names, then `opened`. `words` is the status in words, or what a
 // list before the first message says in their place; `under` is the answer of an act on the row, drawn whether the row
-// is open or not; `note` is the row's note (the word cut, N148: what the switch reaches). M7 and M8 build on it. A
-// connecting connector's words name the quiet spinner drawn in their place (P565).
-export function ConnectorRow({ server, words, control, actions, opened, under, note }: { server: McpServerView; words: string; control?: ReactNode; actions?: ReactNode; opened?: ReactNode; under?: ReactNode; note?: string | null }) {
+// is open or not; `folded`, what stands on the line only while the row is closed (a wait on a control of its opened
+// part); `note` is the row's note (the word cut, N148: what the switch reaches and where the engine records it). M7 and
+// M8 build on it. A connecting connector's words name the quiet spinner drawn in their place while the session is
+// `live` (P565); over a stopped session nothing can end that wait, so the last answer's words stand, the frame dating
+// them.
+export function ConnectorRow({ server, words, control, actions, opened, under, note, folded, live = false }: { server: McpServerView; words: string; control?: ReactNode; actions?: ReactNode; opened?: ReactNode; under?: ReactNode; note?: string | null; folded?: ReactNode; live?: boolean }) {
   const [open, setOpen] = useState(false);
   const part = useId();
   const rowNote = useRowNote();
   const noted = note !== undefined && note !== null;
   const tools = server.tools.length > 0 ? MCP.tools(server.tools.length) : '';
   const where = [server.source && MCP.from(server.source), server.scope && MCP.scope(server.scope)].filter(Boolean).join(' · ');
-  const connecting = server.status === 'pending' && words !== '';
+  const connecting = live && server.status === 'pending' && words !== '';
   return (
     <li data-mcp-server={server.name} {...(noted ? rowNote.rowProps : {})} className="relative flex flex-col gap-0.5 border-t border-border py-1 text-ui-sm first:border-t-0">
       <div className="flex min-w-0 items-start gap-2">
@@ -154,6 +158,7 @@ export function ConnectorRow({ server, words, control, actions, opened, under, n
             </span>
           )}
         </button>
+        {!open && folded}
         {actions}
       </div>
       {open && (
@@ -272,7 +277,9 @@ function McpServerRow({ server, appSessionId, ready, answer, refresh, cwd, readA
     <ConnectorRow
       server={server}
       words={connectorStatusWords(server.status, { switchDrawn: true })}
+      live={ready}
       note={reach}
+      folded={!onLine && reconnecting ? <QuietSpinner label={MCP_ACTIONS.working} className="mt-0.5 shrink-0" /> : null}
       control={
         <button
           type="button"
@@ -321,14 +328,15 @@ function McpServerRow({ server, appSessionId, ready, answer, refresh, cwd, readA
 }
 
 // The list of a session's connectors. With `actions`, each row is the dialog's (switch, Sign in, Reconnect); without,
-// the row has none and a disabled connector reads Off (Customize's live list).
-export function McpBody({ view, actions }: { view: { servers: McpServerView[] }; actions?: { appSessionId: AppSessionId; ready: boolean; answer: McpStatusResponse; refresh: EngineRead<McpStatusResponse>['refresh']; cwd: string | null; readAt: number | null; reach: string | null } }) {
+// the row has none and a disabled connector reads Off (Customize's live list, `live` while its session's process is
+// ready).
+export function McpBody({ view, actions, live = false }: { view: { servers: McpServerView[] }; live?: boolean; actions?: { appSessionId: AppSessionId; ready: boolean; answer: McpStatusResponse; refresh: EngineRead<McpStatusResponse>['refresh']; cwd: string | null; readAt: number | null; reach: string | null } }) {
   if (view.servers.length === 0) return <p className="m-0 text-ui-sm text-fg-muted">{MCP.none}</p>;
   return (
     <Rows label={MCP.list}>
       {view.servers.map((server) => {
         const key = `${server.name}:${server.scope}:${server.source}`;
-        return actions ? <McpServerRow key={key} server={server} {...actions} /> : <ConnectorRow key={key} server={server} words={connectorStatusWords(server.status)} />;
+        return actions ? <McpServerRow key={key} server={server} {...actions} /> : <ConnectorRow key={key} server={server} words={connectorStatusWords(server.status)} live={live} />;
       })}
     </Rows>
   );
@@ -352,7 +360,7 @@ function useSwitchPlace(appSessionId: AppSessionId, folder: string | null): stri
 }
 
 // A server's status in C3's table moving is reason to read `mcp_status` again.
-const MOVES_MCP = (s: Parameters<typeof MOVES_READS>[0]) => `${MOVES_READS(s)}|${s.mcpServers.map((m) => `${m.name}=${m.status}`).join(',')}`;
+export const MOVES_MCP = (s: Parameters<typeof MOVES_READS>[0]) => `${MOVES_READS(s)}|${s.mcpServers.map((m) => `${m.name}=${m.status}`).join(',')}`;
 
 export function McpWidget(props: { appSessionId: AppSessionId; args: string; close(): void }) {
   const place = useTabPlace(props.appSessionId); // U11a: an unstarted tab's dialog branches before the frame's read
@@ -419,7 +427,7 @@ function McpEngine({ appSessionId, close }: { appSessionId: AppSessionId; args: 
       readAt={read.readAt}
       close={close}
     >
-      {read.data && <McpBody view={present(read.data)} actions={{ appSessionId, ready, answer: read.data, refresh: read.refresh, cwd, readAt: read.readAt, reach: place === null ? null : MCP.reach(place) }} />}
+      {read.data && <McpBody view={present(read.data)} actions={{ appSessionId, ready, answer: read.data, refresh: read.refresh, cwd, readAt: read.readAt, reach: place === null ? null : `${MCP.reach(place)} ${MCP.recorded}` }} />}
     </WidgetFrame>
   );
 }

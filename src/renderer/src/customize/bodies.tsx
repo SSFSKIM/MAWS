@@ -11,11 +11,12 @@
 // under Discover's All, per card, `KindLines`).
 import { Fragment, useEffect, useLayoutEffect, useMemo, useState } from 'react';
 import type { AppSessionId } from '@shared/graph/ids';
-import { McpBody, present } from '../widgets/McpWidget';
+import { McpBody, MOVES_MCP, present } from '../widgets/McpWidget';
 import { useLibraryStore } from '../widgets/plugins/library-store';
 import { usePluginsEnv } from '../widgets/plugins/read';
 import { PluginsList, useLibrarySelection, usePluginsLibrary } from '../widgets/PluginsWidget';
 import { useEngineRead } from '../widgets/read';
+import { useSessions } from '../stores/sessions';
 import { SkillsLibrary } from '../widgets/skills/SkillsLibrary';
 import { skillExtrasOf } from './SkillFile'; // UX wave U11's skill actions
 import { diskSkillGroups, hasPluginSkills, skillsView } from '../widgets/skills/skills';
@@ -201,12 +202,15 @@ function LiveConnectors({ appSessionId }: { appSessionId: AppSessionId }) {
   );
 }
 
+// The word cut (P565): read again as the session's MCP table moves, as the dialog reads, so a connecting connector's
+// quiet spinner ends with the connection; over a process no longer ready it is the last answer's words.
 function LiveConnectorStatus({ appSessionId }: { appSessionId: AppSessionId }) {
-  const read = useEngineRead('session.mcpStatus', { appSessionId });
+  const read = useEngineRead('session.mcpStatus', { appSessionId }, { refreshOn: MOVES_MCP });
+  const live = useSessions((s) => s.engine.get(appSessionId)?.process === 'ready');
   return (
     <>
       <InventoryState error={read.error ? new Error(read.error) : null} pending={read.state === 'loading'} refresh={read.refetch} />
-      {read.data && <McpBody view={{ servers: present(read.data).servers.map((server) => ({ ...server, transport: null, command: null })) }} />}
+      {read.data && <McpBody view={{ servers: present(read.data).servers.map((server) => ({ ...server, transport: null, command: null })) }} live={live} />}
     </>
   );
 }

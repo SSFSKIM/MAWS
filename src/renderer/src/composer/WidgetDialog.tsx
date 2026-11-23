@@ -26,8 +26,11 @@ export function openWidgetDialog(appSessionId: AppSessionId, name: string, args:
   useWidgetDialog.setState({ open: { appSessionId, name, args, nonce } });
 }
 
-export function closeWidgetDialog(): void {
-  if (useWidgetDialog.getState().open !== null) useWidgetDialog.setState({ open: null });
+// With `opened`, the nonce of the open it was handed to: a widget's close puts away its own dialog and never one a later
+// open put in its place (a reply that lands after the replacement was published, before the old widget's cleanup).
+export function closeWidgetDialog(opened?: number): void {
+  const open = useWidgetDialog.getState().open;
+  if (open !== null && (opened === undefined || open.nonce === opened)) useWidgetDialog.setState({ open: null });
 }
 
 // P2-B start (2026-10-09): X19 (the P2-B execution document §5.2): the content box by the widget's size, one table so
@@ -75,7 +78,7 @@ export function WidgetDialogHost() {
           // P2-B end
         >
           <Dialog.Title className="sr-only">{widget.title}</Dialog.Title>
-          <Widget key={open.nonce} appSessionId={open.appSessionId} args={open.args} close={closeWidgetDialog} />
+          <Widget key={open.nonce} appSessionId={open.appSessionId} args={open.args} close={() => closeWidgetDialog(open.nonce)} />
         </Dialog.Content>
       </Dialog.Portal>
     </Dialog.Root>

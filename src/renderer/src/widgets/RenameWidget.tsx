@@ -7,8 +7,8 @@
 // and no dialog opens; the title field and Rename are greyed, with the reason. The word cut (P635, P637): the field is
 // named "New title" without a label drawn over it, and a rename that took closes the dialog, the new title showing where
 // the session is named; a typed title's rename shows the quiet spinner while it is out, so the dialog is never blank. A
-// widget put away while its rename is out closes nothing when it lands: the host's close puts away whichever widget is
-// open by then.
+// widget put away while its rename is out sets nothing when it lands, and its close is bound to the open it was handed
+// (WidgetDialog's nonce), so it never puts away a widget opened in its place.
 import { useEffect, useRef, useState } from 'react';
 import type { AppSessionId } from '@shared/graph/ids';
 import { runSessionAction, useSessionActionEnabled } from '../app/session-actions';

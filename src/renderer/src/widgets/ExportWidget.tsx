@@ -1,8 +1,8 @@
 // `/export` (C11 execution document, the widget table): `export_conversation`'s plain text under the engine's default
 // filename, copied through the clipboard or saved through `layout.saveTextFile` (main's save dialog, a temp file then
 // a rename). The text is written as the engine produced it; the JSONL stays where it is. The word cut (P638, P640): the
-// preview line has no line count, and Copy shows a check for a moment in place of its word, "Copied" said to a screen
-// reader alone.
+// preview line has no line count, and Copy shows a check for a moment over its word, which stays unseen so the button
+// keeps its width and Save as… stays put; "Copied" is said to a screen reader alone, by a live region mounted empty.
 import { useEffect, useState } from 'react';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { ExportConversationResponse } from '@shared/wire/control';
@@ -61,13 +61,18 @@ export function ExportBody({ view }: { view: ExportView }) {
       </p>
       <div className="flex items-baseline gap-2">
         <TextButton onClick={() => void copy()} aria-label={EXPORT.copy}>
-          {copied === 0 ? EXPORT.copy : <span aria-hidden>✓</span>}
-        </TextButton>
-        {copied !== 0 && (
-          <span role="status" className="sr-only">
-            {EXPORT.copied}
+          <span className="inline-grid">
+            <span className={`[grid-area:1/1] ${copied === 0 ? '' : 'invisible'}`}>{EXPORT.copy}</span>
+            {copied !== 0 && (
+              <span aria-hidden className="[grid-area:1/1] text-center">
+                ✓
+              </span>
+            )}
           </span>
-        )}
+        </TextButton>
+        <span role="status" className="sr-only">
+          {copied === 0 ? '' : EXPORT.copied}
+        </span>
         <TextButton onClick={() => void save()}>{EXPORT.saveAs}</TextButton>
         {done && (
           <span role="status" className="min-w-0 truncate text-ui-sm text-fg-muted">

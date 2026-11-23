@@ -150,13 +150,14 @@ export const CONFIG = {
 export const PLUGINS = { none: 'The engine loaded no plugins', problems: 'Problems', problemList: 'Plugin problems', loaded: 'Loaded in this session', loadedList: 'Loaded plugins' };
 
 // MCP. UX wave U11a (§C): the Connectors dialog's head, its muted subtitle and the one sentence of what the switch
-// reaches, each switch row's note (the word cut, N148); `failed` and `off` are the status words Customize's copy does not
+// reaches, each switch row's note with where the engine records the switch after it (the word cut, N148); `failed` and `off` are the status words Customize's copy does not
 // hold (connector-status.ts).
 export const MCP = {
   none: 'No connectors',
   list: 'Connectors',
   subtitle: 'MCP servers',
   reach: (place: string) => `A switch here is for this chat, and every session started in ${place} afterwards.`,
+  recorded: 'The engine records it in ~/.claude.json.',
   failed: 'Failed',
   off: 'Off',
   scope: (scope: string) => `scope ${scope}`,
