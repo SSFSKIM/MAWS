@@ -54,6 +54,7 @@ let servers: { name: string; scope: string; path: string; transport: string }[];
 let opSeq: number;
 let extraSkills: object[]; // UX wave U11's skill actions
 let skillFileAnswer: unknown;
+let inventoryGate: Promise<void> | null = null; // a held inventory read, answered when the promise settles
 let envAnswer: Promise<unknown> | null; // plugins.env's answer, when a test holds it
 
 const deliver = (name: EventName, payload: unknown) => listeners.get(name)?.forEach((listener) => listener(payload));
@@ -79,8 +80,10 @@ function answer(name: CommandName, input: unknown): unknown {
       return { manifests: [] };
     case 'mods.list':
       return [];
-    case 'customization.inventory':
-      return { skills: [{ name: 'tide-tables', description: 'Reads the tides', source: 'project', path: `${QUAY}/.claude/skills/tide-tables/SKILL.md`, plugin: null }, ...extraSkills], servers, warnings: [], serversRead: true };
+    case 'customization.inventory': {
+      const answer = { skills: [{ name: 'tide-tables', description: 'Reads the tides', source: 'project', path: `${QUAY}/.claude/skills/tide-tables/SKILL.md`, plugin: null }, ...extraSkills], servers, warnings: [], serversRead: true };
+      return inventoryGate === null ? answer : inventoryGate.then(() => answer);
+    }
     case 'layout.openInApps': // UX wave U11's skill actions: the rows this Mac has
       return { apps: [{ id: 'zed', name: 'Zed' }, { id: 'terminal', name: 'Terminal' }, { id: 'finder', name: 'Finder' }] };
     case 'customization.skillFile':
@@ -135,6 +138,7 @@ beforeEach(() => {
   opSeq = 0;
   extraSkills = [];
   skillFileAnswer = { status: 'opened' };
+  inventoryGate = null;
   envAnswer = null;
   shelf = [ledger, berth];
   const bridge: PreloadBridge = {
@@ -850,6 +854,21 @@ describe('a skill’s actions', () => {
     await pressRetry(detail);
     await waitFor(() => expect(document.querySelector('[data-skill-detail]')).toBeNull());
     expect(document.activeElement?.closest('[data-skills-list]')).not.toBeNull();
+  });
+
+  it('a read that finds the skill gone leaves the keyboard where the person has since taken it', async () => {
+    extraSkills = [{ name: 'harbour-notes', description: 'Notes on the harbour', source: 'user', path: `${HOME}/.claude/skills/harbour-notes/SKILL.md`, plugin: null }];
+    skillFileAnswer = MISSING;
+    const detail = await openDetail('skills', 'harbour-notes');
+    extraSkills = [];
+    let answer = () => {};
+    inventoryGate = new Promise<void>((resolve) => (answer = resolve));
+    await pressRetry(detail);
+    const elsewhere = within(header()).getAllByRole('radio')[0]!;
+    act(() => elsewhere.focus());
+    await act(async () => answer());
+    await waitFor(() => expect(document.querySelector('[data-skill-detail]')).toBeNull());
+    expect(document.activeElement).toBe(elsewhere);
   });
 
   it('a plugin’s skill’s detail says its plugin’s updates replace the file', async () => {

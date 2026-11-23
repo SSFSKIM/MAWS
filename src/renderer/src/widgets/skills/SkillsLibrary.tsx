@@ -193,9 +193,11 @@ export function SkillsLibrary({ groups, shown, onUse, onDetail, onReset, toList,
     if (selectedKey !== null || from === null || pane.current === null) return;
     left.current = null;
     pane.current.scrollTop = from.scrollTop;
-    // its row (a name two scopes can share); a row a new answer no longer lists, the list's first row, else the list
-    const row = pane.current.querySelector<HTMLElement>(`[data-skill-key="${CSS.escape(from.key)}"] [data-row-open]`) ?? pane.current.querySelector<HTMLElement>('[data-row-open]');
-    (row ?? pane.current).focus();
+    // its row (a name two scopes can share); a row a new answer no longer lists, the list's first row, else the list, but
+    // only when the keyboard went with the closing detail (not where the person has since taken it)
+    const row = pane.current.querySelector<HTMLElement>(`[data-skill-key="${CSS.escape(from.key)}"] [data-row-open]`);
+    if (row !== null) row.focus();
+    else if (document.activeElement === null || document.activeElement === document.body) (pane.current.querySelector<HTMLElement>('[data-row-open]') ?? pane.current).focus();
   }, [selectedKey]);
 
   const total = groups.reduce((n, g) => n + g.rows.length, 0);
