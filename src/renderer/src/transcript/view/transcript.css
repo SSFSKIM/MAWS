@@ -446,7 +446,10 @@ button.transcript-chip:hover { background: var(--bg-hover); }
 .transcript-cell[data-status="stopped"] > .transcript-cell-line::before { content: '■'; font-size: 0.7em; }
 .transcript-cell[data-status="denied"] > .transcript-cell-line { color: var(--danger); }
 .transcript-cell:focus-visible, .transcript-cell:focus { outline: 1px solid var(--danger); outline-offset: 4px; border-radius: var(--radius-sm); }
-.transcript-standalone { padding: 1px 0 6px; }
+/* Board ticket 850: the space around a standalone call is its line's, inside a wrapper that keeps the line's margins in
+   the row the list measures; where nothing is drawn (an answer that hides the call) the wrapper takes no height. */
+.transcript-standalone { display: flow-root; }
+.transcript-standalone .transcript-cell { margin: 1px 0 6px; }
 .transcript-cell-detail { display: flex; flex-direction: column; gap: 6px; margin: 2px 0 8px 19px; font-size: var(--text-ui-sm); }
 .transcript-detail-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; color: var(--fg-muted); }
 .transcript-mcp > .transcript-detail-heading { justify-content: flex-end; } /* the word cut (T31): Raw alone, where it stood */
@@ -544,6 +547,7 @@ button.transcript-chip:hover { background: var(--bg-hover); }
 button.transcript-subagent-line:hover { color: var(--fg); }
 .transcript-subagent[data-status="finished_with_errors"] .transcript-subagent-line { color: var(--danger); }
 .transcript-glyphs { display: inline-flex; align-items: center; gap: 5px; color: var(--fg); font-size: calc(var(--text-ui) * 1.2); }
+.transcript-glyphs-more { display: inline-flex; align-items: center; gap: 5px; } /* board ticket 850: the glyphs `+N` reveals, one box for their motion */
 .transcript-glyph { border-radius: var(--radius-sm); }
 .transcript-glyph:hover { background: var(--bg-hover); }
 .transcript-glyph-overflow { color: var(--fg-muted); font-size: var(--text-ui-sm); }
@@ -806,7 +810,7 @@ button.transcript-line-words:focus-visible { outline-width: 2px; outline-style: 
 .transcript-browser-action-actions { display: inline-flex; align-items: center; gap: 10px; margin-left: auto; }
 .transcript-browser-action-actions .transcript-quiet-button { margin-top: 0; }
 .transcript-browser-action-note { margin: 0 0 2px 23px; overflow-wrap: anywhere; }
-.transcript-browser-action > .transcript-output { margin: 4px 0 2px 23px; }
+.transcript-browser-action > [data-detail] > .transcript-output { margin: 4px 0 2px 23px; } /* board ticket 850: inside its disclosure's body */
 /* E4c end */
 
 /* Code-mode transcript: factual summaries occupy one quiet line; details earn space only when opened. */

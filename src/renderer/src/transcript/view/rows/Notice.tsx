@@ -9,7 +9,7 @@ import { duration } from '../../model/time';
 import { NOTICE, noticeLine } from '../../model/copy';
 import type { Row } from '../../model/rows';
 import { useActions, useDisclosure, useRowSession } from '../context';
-import { ArrivalLine } from './Line';
+import { ArrivalBody, ArrivalLine } from './Line';
 
 type NoticeData = Extract<Row, { kind: 'notice' }>;
 
@@ -26,7 +26,7 @@ export function NoticeRow({ row }: { row: NoticeData }) {
           {row.durationMs !== null && <span className="transcript-notice-duration">{` · ${duration(row.durationMs)}`}</span>}
         </ArrivalLine>
       </div>
-      {open && (
+      <ArrivalBody open={open}>
         <div className="transcript-notice-detail">
           <p className="transcript-peer-body">{noticeLine(row)}</p>
           {row.detail !== null && <p className="transcript-peer-body">{row.detail}</p>}
@@ -36,7 +36,7 @@ export function NoticeRow({ row }: { row: NoticeData }) {
             </button>
           )}
         </div>
-      )}
+      </ArrivalBody>
     </div>
   );
 }

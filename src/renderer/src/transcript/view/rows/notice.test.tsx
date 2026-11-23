@@ -1,6 +1,6 @@
 // UX wave U3, first landing (docs/doperpowers/plans/2026-11-12-ux-wave-U3a-arrivals.md, M2; Interfaces D and I): the
 // notice line and the consent line, from rows the model made of hand-made events (every word invented).
-import { cleanup, fireEvent, screen } from '@testing-library/react';
+import { cleanup, fireEvent, screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { ArrivalEntry } from '@shared/engine/arrival-schema';
 import { consentMessage } from '@shared/engine/arrival';
@@ -58,7 +58,7 @@ describe('a notice', () => {
     expect(container.querySelector('.transcript-notice-duration')?.textContent).toBe(' · 1m 05s');
   });
 
-  it('opens what the engine delivered with it under the line, on a click, and hides it again', () => {
+  it('opens what the engine delivered with it under the line, on a click, and hides it again', async () => {
     const { container } = renderRow(taskEnd({ detail: 'counted 42 files' }), { storeKey: A });
     const line = screen.getByRole('button', { name: /^Background command/ });
     expect(container.querySelector('.transcript-notice-detail')).toBeNull();
@@ -66,7 +66,7 @@ describe('a notice', () => {
     expect(screen.getByText('counted 42 files')).toBeTruthy();
     expect(screen.queryByRole('button', { name: 'Open output' })).toBeNull(); // it names no output file
     fireEvent.click(line);
-    expect(container.querySelector('.transcript-notice-detail')).toBeNull();
+    await waitFor(() => expect(container.querySelector('.transcript-notice-detail')).toBeNull()); // board ticket 850: once its close has run
   });
 
   it('draws no “Open output” where the mount gives no act, and calls the act the mount gave with the path, the task and the line’s words', () => {

@@ -5,7 +5,8 @@
 // kept across a relaunch. The scratch config home holds the doperpowers, to-human and sminos plugins, installed by the
 // engine's own CLI from a copy of the mod's pull request's checkout (MAWS_U2B_MOD_CHECKOUT: a worktree of the plugin's
 // repository at that pull request's head, whose to-human installation carries the declaration `maws-surface.json`),
-// with the to-human style selected, so a session MAWS starts there advertises 9 and the mod draws its view. Sessions
+// with the to-human style selected and the mod's route on through its e2e seam (board ticket 850 turned the route off for
+// every other launch), so a session MAWS starts there advertises 9 and the mod draws its view. Sessions
 // start through the app's own path (a new chat and the composer's first Send; `session.start` for a resume), never
 // `session.launch`, since the to-human decision lives in main's launch path. This file replaces P2-C's live run, whose
 // arms read contracts MAWS no longer appends (its record stays in docs/doperpowers/evidence/p2-c).
@@ -239,7 +240,10 @@ function opening(text: string): string | null {
 
 // ---- the page --------------------------------------------------------------------------------------------------------
 
-const launch = () => launchMaws({ defaultRoute: 'gateway', userData, env: { MAWS_E2E_ENGINE_BIN: engineScript, MAWS_HARNESS: '0', CLAUDE_CONFIG_DIR: config } });
+// Board ticket 850 (2026-11-23): launches advertise 8 again and MAWS's mirror draws every session; the mod's route stays
+// built behind its switch, which this trial turns on through the e2e seam (MAWS_E2E_TO_HUMAN_MOD_ROUTE, read in
+// src/services/spine-root.ts only under MAWS_E2E), so it still proves the route a later change may turn back on.
+const launch = () => launchMaws({ defaultRoute: 'gateway', userData, env: { MAWS_E2E_ENGINE_BIN: engineScript, MAWS_HARNESS: '0', CLAUDE_CONFIG_DIR: config, MAWS_E2E_TO_HUMAN_MOD_ROUTE: '1' } });
 const paneOf = (page: Page) => page.locator('[data-region="main"] [data-pane="0"]');
 const composer = (page: Page) => paneOf(page).getByRole('textbox', { name: 'Message' });
 const status = async (page: Page, id: string) => value(await invoke(page, 'session.status', { appSessionId: id as AppSessionId }));

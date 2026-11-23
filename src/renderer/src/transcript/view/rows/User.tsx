@@ -15,7 +15,8 @@
 // "Approve and retry" prompt (`consent`) is the person's act, drawn as one line and never as a bubble. UX wave U5a (M5;
 // decision 13): a message of several comments draws each comment's chip over its own text and its own screenshot, in the
 // order made, and after them the attachments no comment claimed.
-import { useLayoutEffect, useRef, useState } from 'react';
+import { useLayoutEffect, useState } from 'react';
+import { CLOSE_MOTION, useDisclosureMotion } from '../../../ui/disclosure';
 import type { Anchor } from '@shared/anchor/anchor'; // E3
 import { CONSENT, NOT_SENT, PENDING_CAPTION } from '../../model/copy';
 import type { Attachment, Row, UserComment } from '../../model/rows';
@@ -76,8 +77,11 @@ function UserBubble({ row }: { row: UserRowData }) {
   const author = promptAuthor?.(row) ?? null; // board 525
   const renderEditor = useRegisteredBubbleEditor();
   const [open, toggle] = useDisclosure(`bubble:${row.id}`);
-  const content = useRef<HTMLDivElement>(null);
   const [overflows, setOverflows] = useState(false);
+  // Board ticket 850: Show more and Show less move between the bound and the whole message through the shared disclosure
+  // motion; the bound is the closed bubble's height as measured (unknown in a bubble mounted open, which then closes at once).
+  const [bound, setBound] = useState<number | null>(null);
+  const { ref: content } = useDisclosureMotion<HTMLDivElement>(open, { closedHeight: bound ?? Number.POSITIVE_INFINITY, still: bound === null });
   const claimed = new Set(row.comments?.flatMap((comment) => (comment.attachment === undefined ? [] : [comment.attachment]))); // UX wave U5a
   const files = row.attachments.filter((a, i) => a.kind !== 'text' && !claimed.has(i));
   // P2-F L121: the mount's own mark (the card's check) stands where no caption already says the row's state
@@ -88,17 +92,25 @@ function UserBubble({ row }: { row: UserRowData }) {
 
   // Measured while folded only: an open bubble has no bound. Open stays in the transcript-wide disclosures while the
   // measurement is this mount's, so an open bubble always offers Show less (a virtualiser remount resets the
-  // measurement), and folding measures again.
+  // measurement), and folding measures again, once the fold's motion has run (while it runs the bubble is not at its bound).
   useLayoutEffect(() => {
     const element = content.current;
     if (!element || open) return;
-    const measure = () => setOverflows(element.scrollHeight > element.clientHeight + 1);
+    const measure = () => {
+      if (element.style.height !== '') return;
+      setOverflows(element.scrollHeight > element.clientHeight + 1);
+      setBound(element.clientHeight);
+    };
     measure();
-    if (typeof ResizeObserver === 'undefined' || !element.firstElementChild) return;
+    const rested = setTimeout(measure, CLOSE_MOTION.ms);
+    if (typeof ResizeObserver === 'undefined' || !element.firstElementChild) return () => clearTimeout(rested);
     const observer = new ResizeObserver(measure);
     observer.observe(element.firstElementChild);
-    return () => observer.disconnect();
-  }, [open, row.text, row.attachments]);
+    return () => {
+      clearTimeout(rested);
+      observer.disconnect();
+    };
+  }, [open, row.text, row.attachments, content]);
 
   const body = (
     <div className="transcript-user-body">

@@ -19,6 +19,7 @@ import { applyEvents, createState } from '../../model/reduce';
 import type { Row } from '../../model/rows';
 import { Disclosures } from '../context';
 import { renderRow } from './test-support';
+import { advance, reduceMotion, restoreMotionLayout, stubMotionLayout } from '../../../test-support/motion-layout'; // board ticket 850
 
 type CommandRow = Extract<Row, { kind: 'local_command' }>;
 const SESSION = '0f0e0d0c-0000-4000-8000-00000000c0de';
@@ -93,6 +94,41 @@ describe('a command’s output, drawn', () => {
       expect(output.textContent, text).toBe(closed);
       cleanup();
     }
+  });
+
+  // Board ticket 850: the output moves between its bound and its whole through the shared disclosure motion (300 ms open,
+  // 150 ms close, nothing under reduced motion), and stays drawn closed.
+  it('u3-commands-r1, live: Show more opens /cost from its bound over 300 ms, Show less closes it to the bound over 150 ms', () => {
+    const starts = stubMotionLayout();
+    onTestFinished(restoreMotionLayout);
+    renderedOutputs(longOutput);
+    const { container } = renderRow(starting(live('u3-commands-r1'), 'Total cost:'), { disclosures: new Disclosures() });
+    const output = container.querySelector<HTMLElement>('.transcript-command-output')!;
+    fireEvent.click(within(container).getByRole('button', { name: 'Show more' }));
+    expect(starts.at(-1)).toMatchObject({ height: '35.75px', opacity: '' });
+    expect(output.style.transition).toContain('height 300ms');
+    expect(output.style.height).toBe('120px');
+    advance(300);
+    expect(output.style.height).toBe('');
+    fireEvent.click(within(container).getByRole('button', { name: 'Show less' }));
+    expect(output.style.transition).toContain('height 150ms');
+    expect(output.style.height).toBe('35.75px');
+    advance(150);
+    expect(output.style.height).toBe('');
+    expect(output.style.getPropertyValue('--command-bound')).toBe('35.75px');
+    expect(output.textContent).toContain('Total cost:');
+  });
+
+  it('u3-commands-r1, live: under reduced motion, /cost opens and closes at once', () => {
+    const starts = stubMotionLayout();
+    onTestFinished(restoreMotionLayout);
+    reduceMotion();
+    renderedOutputs(longOutput);
+    const { container } = renderRow(starting(live('u3-commands-r1'), 'Total cost:'), { disclosures: new Disclosures() });
+    fireEvent.click(within(container).getByRole('button', { name: 'Show more' }));
+    fireEvent.click(within(container).getByRole('button', { name: 'Show less' }));
+    expect(starts).toEqual([]);
+    expect(container.querySelector<HTMLElement>('.transcript-command-output')!.style.height).toBe('');
   });
 
   it('u3-commands-r1: /context draws its tables as tables and no heading marker, on the live route and from the file', async () => {

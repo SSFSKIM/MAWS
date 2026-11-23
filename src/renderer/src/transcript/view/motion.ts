@@ -15,9 +15,16 @@ import type { Row, TurnId } from '../model/rows';
 // agents work among them.
 export const inWorkArea = (row: Row) => row.turnId !== null && row.kind !== 'divider' && row.kind !== 'receipt' && row.kind !== 'time' && !staysInView(row);
 
+// Board ticket 850: the other folds whose body is rows of the list, not one element: a stretch of the to-human view
+// (`owner/view/RecordFold.tsx`) and the branch a rewind's boundary hides (`rows/Boundary.tsx`). Each is a set of rows
+// the list adds or takes away together, named by a key and told by a test on a row, and moves as a turn's work area does.
+type Member = (row: Row) => boolean;
+
 export class WorkMotion {
   private folding = new Map<TurnId, { timer: ReturnType<typeof setTimeout>; settle: () => void }>();
   private opening = new Map<TurnId, number>(); // until, on performance.now()
+  private foldingRows = new Map<string, { member: Member; timer: ReturnType<typeof setTimeout>; settle: () => void }>();
+  private openingRows = new Map<string, { member: Member; until: number }>();
   private listeners = new Set<() => void>();
 
   subscribe = (listener: () => void) => {
@@ -47,6 +54,56 @@ export class WorkMotion {
     }
     this.opening.set(turn, performance.now() + OPEN_MOTION.ms);
     settle();
+  }
+
+  // Board ticket 850: whether the set `key` is folding; a row of a set that is folding, or one that mounts while its
+  // set opens.
+  isFoldingRows = (key: string) => this.foldingRows.has(key);
+  isFoldingRow = (row: Row) => {
+    for (const { member } of this.foldingRows.values()) if (member(row)) return true;
+    return false;
+  };
+  isOpeningRow = (row: Row) => {
+    const now = performance.now();
+    for (const [key, { member, until }] of this.openingRows) {
+      if (until <= now) this.openingRows.delete(key);
+      else if (member(row)) return true;
+    }
+    return false;
+  };
+
+  // A set's control, as `toggle` is a divider's: `expanded` whether the set's rows are in the list now, `member` which
+  // rows they are, `settle` the store's change. A second press while the set folds calls the fold off.
+  toggleRows(key: string, member: Member, expanded: boolean, settle: () => void): void {
+    if (this.unfoldRows(key)) return;
+    if (prefersReducedMotion()) return settle();
+    if (expanded) {
+      const timer = setTimeout(() => {
+        this.foldingRows.delete(key);
+        settle();
+        this.emit();
+      }, CLOSE_MOTION.ms);
+      this.foldingRows.set(key, { member, timer, settle });
+      this.emit();
+      return;
+    }
+    this.openingRows.set(key, { member, until: performance.now() + OPEN_MOTION.ms });
+    settle();
+  }
+
+  // Calls off the fold of a set still running; whether there was one.
+  unfoldRows(key: string): boolean {
+    const running = this.foldingRows.get(key);
+    if (running === undefined) return false;
+    clearTimeout(running.timer);
+    this.foldingRows.delete(key);
+    this.emit();
+    return true;
+  }
+
+  // A jump to `row`: every fold of a set that holds it is called off, or it would take the row away.
+  unfoldRowsHolding(row: Row): void {
+    for (const [key, { member }] of this.foldingRows) if (member(row)) this.unfoldRows(key);
   }
 
   // Calls off a fold still running, so the turn's rows open again; whether there was one.

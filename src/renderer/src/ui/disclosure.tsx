@@ -36,6 +36,9 @@ export interface DisclosureMotionOptions {
   closedHeight?: number;
   // Run the opening motion when the element mounts open (a row that appears because its disclosure was opened).
   appear?: boolean;
+  // Change at once, as under reduced motion, while set: a preview whose bound is not known yet (one mounted open), which
+  // has no closed end to move to (board ticket 850).
+  still?: boolean;
 }
 
 const clear = (style: CSSStyleDeclaration) => {
@@ -46,9 +49,9 @@ const clear = (style: CSSStyleDeclaration) => {
 // stays true through a close until its motion has run. The element carries no vertical border (its height is set from
 // its scrollHeight).
 export function useDisclosureMotion<T extends HTMLElement>(open: boolean, options: DisclosureMotionOptions = {}): { ref: RefObject<T | null>; mounted: boolean } {
-  const { closedHeight = 0, appear = false } = options;
+  const { closedHeight = 0, appear = false, still = false } = options;
   const full = closedHeight === 0;
-  const reduced = useReducedMotion();
+  const reduced = useReducedMotion() || still;
   const ref = useRef<T>(null);
   const [closing, setClosing] = useState(false);
   const [rendered, setRendered] = useState(open);
