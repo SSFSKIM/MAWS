@@ -267,7 +267,7 @@ describe('relay card', () => {
       putIntent(intent({ message: MESSAGE, gateway: 'gateway', route: 'machine' }));
       render(<Docked />);
       await act(() => startIntent(ID, MESSAGE));
-      expect(await screen.findByText(/this machine’s own settings send it there/)).toBeTruthy();
+      expect(await screen.findByRole('button', { name: 'Start anyway', description: RELAY_WORDS.anyway })).toBeTruthy(); // the word cut (W98): the sentence is its description
       await userEvent.click(screen.getByRole('button', { name: 'Start anyway' }));
       expect(fake.invoked('session.start').at(-1)).toEqual({ appSessionId: BARE_ID, message: null, options: { startAnyway: true } });
       await screen.findByRole('button', { name: 'Start anyway' }); // answered relay_unreachable again: docked again
@@ -294,7 +294,7 @@ describe('relay card', () => {
       useSessions.setState({ records: new Map([[ID, { ...discovered, gateway: { ...discovered.gateway, routed: null } }]]) });
       render(<Docked />);
       expect(await act(() => resumeSession(ID))).toBe(true);
-      expect(await screen.findByText(/this machine’s own settings send it there/)).toBeTruthy();
+      expect(await screen.findByRole('button', { name: 'Start anyway', description: RELAY_WORDS.anyway })).toBeTruthy(); // the word cut (W98): the sentence is its description
       expect(screen.getByRole('button', { name: 'Start anyway' })).toBeTruthy();
       up = true;
       await act(() => vi.advanceTimersByTimeAsync(5_000));
@@ -358,7 +358,9 @@ describe('relay card', () => {
     const checked = screen.getByText(`Checked ${REL.now}`);
     expect(checked.getAttribute('tabindex')).toBe('0');
     expect(accessibleDescription(checked)).toBe('http://127.0.0.1:8641/api/hello · connect ECONNREFUSED');
-    expect(container.textContent).not.toContain('/api/hello');
+    const shown = container.cloneNode(true) as HTMLElement; // what is drawn: the tips' descriptions are hidden spans
+    shown.querySelectorAll('[hidden]').forEach((hidden) => hidden.remove());
+    expect(shown.textContent).not.toContain('/api/hello');
     // W98: no explaining lines; each sentence is its button's description
     expect(container.querySelector('ul')).toBeNull();
     expect(accessibleDescription(screen.getByRole('button', { name: 'Run direct' }))).toBe(RELAY_WORDS.direct);

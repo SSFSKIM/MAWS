@@ -159,7 +159,7 @@ describe('a session row’s hover card', () => {
   };
 
   // the word cut (W69): the second line is the age alone, the context share from 80 % up; the state word is the glyph's
-  // name and tooltip, which the keyboard reaches
+  // name and tooltip (the pointer's: nothing in a hover card takes focus)
   it('a working session: its age, its context from 80 %, its state on the glyph, its activity and its last answer', async () => {
     withMain();
     useLayout.getState().setSidebar({ expandedProjects: [at('proj-claude-usage-menubar' as ProjectId)] });
@@ -170,9 +170,8 @@ describe('a session row’s hover card', () => {
     expect(within(card).getByRole('heading', { name: 'Usage reset countdown' })).toBeTruthy();
     expect(within(card).getByTestId('hover-meta').textContent).toBe(REL.now);
     const glyph = within(card).getByRole('img', { name: 'Working' });
-    expect(glyph.getAttribute('tabindex')).toBe('0');
-    act(() => glyph.focus());
-    expect(await screen.findByRole('tooltip')).toHaveProperty('textContent', 'Working');
+    await userEvent.setup().hover(glyph);
+    expect(await screen.findByRole('tooltip', {}, { timeout: 2000 })).toHaveProperty('textContent', 'Working');
     act(() => useSessions.getState().applyDigest({ ...digest, context: { percent: 85.4, totalTokens: 854_000, maxTokens: 1_000_000, autoCompactThreshold: null }, revision: digest.revision + 2 }, TEST_MACHINE));
     expect(within(card).getByTestId('hover-meta').textContent).toBe(`${REL.now} · ctx 85%`);
     expect(within(card).getByTestId('hover-activity').textContent).toBe('Running curl -sI https://example.com | head -1');
@@ -245,7 +244,7 @@ describe('a session row’s hover card', () => {
     expect(within(plain).queryByTestId('hover-lineage')).toBeNull();
   });
 
-  // the word cut (W73): the branch, the worktree's folder its tooltip and description, on a line the keyboard reaches
+  // the word cut (W73): the branch, the worktree's folder its tooltip and description, on its line
   it('a worktree session names its branch, the worktree’s folder its tooltip; a main session its branch', async () => {
     withMain();
     const charter = bareIdOf('Charter + research'); // fillStores takes the scenario as main's
@@ -267,7 +266,6 @@ describe('a session row’s hover card', () => {
     const place = within(sibling).getByTestId('hover-place');
     expect(place.textContent).toBe('⎇ feature/sibling');
     expect(place.hasAttribute('title')).toBe(false);
-    expect(place.getAttribute('tabindex')).toBe('0');
     expect(accessibleDescription(place)).toBe('/work/MAWS-sibling');
     await userEvent.setup().unhover(needsRow('Charter + research'));
     const main = await open('Fix sidebar drag');

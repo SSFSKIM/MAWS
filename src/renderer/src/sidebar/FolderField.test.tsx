@@ -19,7 +19,7 @@ describe('browsing another machine’s folders', () => {
     const fake = fakeClient({});
     window.maws = fake.client as unknown as PreloadBridge;
     render(<FolderField machine={OTHER_MACHINE} name="mini" local={false} value="" onChange={() => {}} />);
-    fireEvent.click(screen.getByRole('button', { name: REGISTRY.browse }));
+    fireEvent.click(screen.getByText(REGISTRY.browse)); // the button sits in the field's label, which names it
     expect(await screen.findByRole('progressbar', { name: SETUP_WORDS.loading }, { timeout: 2000 })).toBeTruthy();
     expect(screen.getByRole('list', { name: 'Folders on mini' }).textContent).toBe('');
     await act(() => fake.fail('machine.folders.list', 'not allowed'));

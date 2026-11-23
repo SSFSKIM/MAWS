@@ -218,7 +218,7 @@ function Body({ appSessionId, reply }: { appSessionId: AppSessionId; reply: Quic
           </p>
         ) : (
           <Tip content={place.title} description={place.title}>
-            <p data-testid="hover-place" tabIndex={0} className={`m-0 truncate text-fg-muted ${OWNER}`}>
+            <p data-testid="hover-place" className="m-0 truncate text-fg-muted">
               {place.text}
             </p>
           </Tip>
@@ -310,14 +310,13 @@ function machineLine(machine: MachineMark, now: number): string {
 
 // The share of the context window from which the second line names it (W69): below, it is not worth a look.
 const CONTEXT_SHOWN_FROM = 80;
-// A focusable word or line in a card that owns a tooltip
-const OWNER = 'rounded-sm outline-accent focus-visible:outline-2';
-
-// The card's status glyph, its word its name and its tooltip, which the keyboard reaches (W69, W77)
+// The card's status glyph, its word its name and its tooltip (W69, W77). Nothing in a Radix hover card takes focus
+// (Radix sets every tabbable inside it to tabindex -1), so the card's tips are the pointer's; the word stays the
+// glyph's accessible name.
 function NamedGlyphMark({ glyph }: { glyph: Glyph }) {
   return (
     <Tip content={glyph.label}>
-      <GlyphMark glyph={glyph} tabIndex={0} className={`w-[14px] shrink-0 leading-[18px] ${OWNER}`} />
+      <GlyphMark glyph={glyph} className="w-[14px] shrink-0 leading-[18px]" />
     </Tip>
   );
 }
