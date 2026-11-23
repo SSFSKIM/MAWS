@@ -11,7 +11,7 @@ import { digest, item, project, record, remoteRow } from '../../../../test/suppo
 import { TEST_FIXTURE_DIR } from '../../../../test/support/fixtures';
 import { at as addr, OTHER_MACHINE, TEST_MACHINE } from '../../../../test/support/machine';
 import { loadScenario } from '../../../../test/support/scenario';
-import { holderLine, needsYou, waitingItem, type NeedsYouRow } from '../attention/derive';
+import { heldLine, holderLine, needsYou, waitingItem, type NeedsYouRow } from '../attention/derive';
 import { listedGlyph } from '../attention/glyph';
 import type { ListedSession } from '../stores/sessions';
 import type { RowKey } from '../stores/org-projects';
@@ -724,6 +724,14 @@ describe('sidebar row text', () => {
     expect(holderLine(record('b', { holder: { kind: 'background_job', pid: 4242, jobId: null } }))).toBe('bg · pid 4242');
     expect(holderLine(record('b', { holder: { kind: 'background_job', pid: null, jobId: null } }))).toBe('Background job');
     expect(holderLine(record('s'))).toBeNull();
+  });
+
+  // the word cut (W75): the hover card's and the Overview card's line says who runs it, with no pid
+  it('the line a card says for a foreign-live session: who runs it, a background job by its short id, never a pid', () => {
+    expect(heldLine(record('t', { holder: { kind: 'terminal', pid: 7135 } }))).toBe('Running in Terminal');
+    expect(heldLine(record('b', { holder: { kind: 'background_job', pid: 4242, jobId: 'e6dcd828' } }))).toBe('bg · e6dcd828');
+    expect(heldLine(record('b', { holder: { kind: 'background_job', pid: 4242, jobId: null } }))).toBe('Background job');
+    expect(heldLine(record('s'))).toBeNull();
   });
 
   it('a worktree session’s branch, none for a session in the project directory', () => {

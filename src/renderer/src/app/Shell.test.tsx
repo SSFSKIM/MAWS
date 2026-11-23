@@ -672,7 +672,7 @@ describe('the Artifacts entry', () => {
     expect(useLayout.getState().destination).toEqual({ kind: 'library' });
     expect(useLayout.getState().main).toBe(strip);
     const header = document.querySelector<HTMLElement>('[data-toolbar]')!;
-    expect(within(header).getByRole('heading', { level: 1, name: 'Artifacts' })).toBeTruthy();
+    expect(within(header).getByRole('heading', { level: 1, name: 'Artifacts' }).classList.contains('sr-only'), 'the word cut (W6): named for assistive technology alone').toBe(true);
     const page = document.getElementById('region-page')!;
     expect(within(page).getByRole('radiogroup', { name: 'View' })).toBeTruthy();
     expect(within(page).getByRole('searchbox', { name: 'Search artifacts' })).toBeTruthy();
@@ -958,7 +958,7 @@ describe('a page beside the sidebar', () => {
     expect(page.getAttribute('aria-labelledby')).toBe(within(header()).getByRole('heading', { level: 1 }).id);
     expect(page.className).toContain('col-[2/-1]');
     expect(page.className).toContain('row-start-3');
-    expect(within(header()).getByRole('heading', { level: 1, name: 'Projects' })).toBeTruthy();
+    expect(within(header()).getByRole('heading', { level: 1, name: 'Projects' }).classList.contains('sr-only'), 'the word cut (W6): the Projects page keeps its drawn name').toBe(false);
     expect(within(header()).queryByRole('button', { name: 'Session cards' }), 'the surface icons are not drawn').toBeNull();
     expect(within(header()).queryByRole('button', { name: /in sidebar$/ }), 'nor the project chip').toBeNull();
     expect(hiddenNow(strips()), 'the strips stay mounted, hidden').toEqual([true, true]);

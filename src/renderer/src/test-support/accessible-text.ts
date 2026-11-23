@@ -14,3 +14,10 @@ export function accessibleText(root: Element): string {
   walk(root);
   return text;
 }
+
+// The description `aria-describedby` gives an element: the text of each element it names, in order, joined by a space.
+// A named element counts even when hidden, as the accessibility tree reads a description.
+export function accessibleDescription(element: Element): string {
+  const ids = (element.getAttribute('aria-describedby') ?? '').split(/\s+/).filter(Boolean);
+  return ids.map((id) => element.ownerDocument.getElementById(id)?.textContent ?? '').join(' ');
+}

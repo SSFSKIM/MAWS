@@ -20,6 +20,7 @@ import { A, panelOf, resetPanelStores, sessionTab } from '../test-support/panel'
 import { ARTIFACTS_TOOL_ID, artifactsTool, type ArtifactsHandle } from '../tools/artifacts/ArtifactsTool';
 import { MainArea } from './MainArea';
 import { SHOW_IN_PANEL_COPY, Tab, useTabLabel } from './Tab';
+import { accessibleDescription } from '../test-support/accessible-text';
 import type { SessionRecord } from '@shared/graph/session';
 import { record, remoteRow } from '../../../../test/support/builders';
 import { laneAState } from '../lane-a/test-support/lane-a-state'; // P5 O9
@@ -200,14 +201,17 @@ describe('a remote lane B session tab’s glyph', () => {
 
 // P5 O9 (the owner's Q1): a session a terminal or a `--bg` job holds and MAWS drives through its bridge reads like any
 // MAWS session, with a small marker in its pane's tab naming where it runs, the hover card's line as its title; only
-// while the session's controls port is lane A.
+// while the session's controls port is lane A. The word cut (W10): the marker is the ⌁ glyph, its word its accessible
+// name and the tab's description.
 describe('a session tab driven through its holder’s bridge', () => {
   const tab = sessionTab(A);
   const holding = (holder: SessionRecord['holder']) => act(() => useSessions.setState({ records: new Map([[A, record(A, { title: { text: 'Fix drag', source: 'user' }, holder })]]) }));
   const marker = () => document.querySelector<HTMLElement>(`[data-tab-id="${tab.id}"] [data-holder-marker]`);
   afterEach(() => resetLaneAStore());
 
-  it('marks a bridged terminal session Terminal, titled with the hover card’s line, and nothing else', () => {
+  const tabElement = () => document.querySelector<HTMLElement>(`[data-tab-id="${tab.id}"]`)!;
+
+  it('marks a bridged terminal session with the glyph named Terminal, titled with the hover card’s line, and nothing else', () => {
     holding({ kind: 'self' });
     render(<Tab tab={tab} pane={0} domId="t-0" active stop onKeyDown={() => {}} />);
     expect(marker()).toBeNull(); // MAWS's own
@@ -216,17 +220,24 @@ describe('a session tab driven through its holder’s bridge', () => {
     act(() => applyLaneAState(A, laneAState(A, { bridge: 'starting', reason: 'the session’s bridge is starting' })));
     expect(marker()).toBeNull(); // no port yet
     act(() => applyLaneAState(A, laneAState(A)));
-    expect(marker()?.textContent).toBe('Terminal');
+    expect(marker()?.textContent).toBe('⌁');
+    expect(marker()?.getAttribute('role')).toBe('img');
+    expect(marker()?.getAttribute('aria-label')).toBe('Terminal');
     expect(marker()?.title).toBe('Running in Terminal'); // the word cut (C130): no word on the bridge
+    expect(accessibleDescription(tabElement())).toBe('Terminal');
+    expect(tabElement().getAttribute('aria-label'), 'the tab’s name is its title alone').toBe('Fix drag');
     act(() => applyLaneAState(A, null));
     expect(marker()).toBeNull();
+    expect(tabElement().hasAttribute('aria-describedby')).toBe(false);
   });
 
-  it('marks a bridged background job’s session Background job', () => {
+  it('marks a bridged background job’s session with the glyph named Background job', () => {
     holding({ kind: 'background_job', pid: null, jobId: 'job-1' });
     act(() => applyLaneAState(A, laneAState(A)));
     render(<Tab tab={tab} pane={0} domId="t-0" active stop onKeyDown={() => {}} />);
-    expect(marker()?.textContent).toBe('Background job');
+    expect(marker()?.textContent).toBe('⌁');
+    expect(marker()?.getAttribute('aria-label')).toBe('Background job');
+    expect(accessibleDescription(tabElement())).toBe('Background job');
     expect(marker()?.title).toBe('Running as bg · job-1');
   });
 });
@@ -262,12 +273,15 @@ describe('a session tab of another machine by its link’s phase', () => {
 // UX wave U6e (decision 11; Decision Log 14 (b)): a main file tab has the file's full path as its tooltip; its accessible
 // name stays its title; any other tab's tooltip is its name.
 describe('a file tab’s tooltip (U6e)', () => {
-  it('is the full path, the name staying the base name', () => {
+  it('is the full path, the name staying the base name, a file glyph before it', () => {
     const file: TabRef = { id: tabId({ kind: 'file', path: '/elsewhere/notes/plans/todo.txt', line: null, appSessionId: A, machine: TEST_MACHINE }), kind: 'file', path: '/elsewhere/notes/plans/todo.txt', line: null, appSessionId: A, machine: TEST_MACHINE, pinned: false };
     render(<Tab tab={file} pane={0} domId="t-file" active stop onKeyDown={() => {}} />);
     const element = document.getElementById('t-file')!;
     expect(element.getAttribute('title')).toBe('/elsewhere/notes/plans/todo.txt');
     expect(element.getAttribute('aria-label')).toBe('todo.txt');
+    // the word cut (W13): a file glyph before the name, where the blue extension stood
+    expect(element.querySelector('svg')).not.toBeNull();
+    expect(element.textContent).not.toContain('TXT');
     cleanup();
     render(<Tab tab={sessionTab(A)} pane={0} domId="t-session" active stop onKeyDown={() => {}} />);
     const session = document.getElementById('t-session')!;

@@ -59,14 +59,22 @@ describe('Projects sidebar membership', () => {
     setProjects([discovered, hidden, other, mine]);
     render(<><ProjectsView /><AddProject /></>);
     const lists = screen.getAllByRole('list');
-    expect(lists.map((list) => list.getAttribute('aria-label'))).toEqual(['Sidebar projects', 'Hidden projects', 'Discovered projects']);
+    expect(lists.map((list) => list.getAttribute('aria-label'))).toEqual(['In sidebar', 'Hidden', 'Discovered']); // the word cut (W130)
+    expect(screen.getAllByRole('heading', { level: 2 }).map((head) => head.textContent)).toEqual(['In sidebar', 'Hidden', 'Discovered']);
+    expect(document.body.textContent, 'the word cut (W129): no sentence at the top').not.toContain('Choose projects to keep in your sidebar');
+    const z = screen.getByRole('listitem', { name: 'z-workstation' });
+    expect(within(z).getByText(mine.directory), 'W132: the folder path under the name').toBeTruthy();
+    expect(within(z).getByRole('button', { name: 'Hide from sidebar: z-workstation' }).textContent, 'W131').toBe('Hide from sidebar');
     expect(screen.getAllByRole('listitem').map((r) => r.getAttribute('aria-label'))).toEqual(['z-workstation', 'b-notes', 'y-hidden', 'a-temporary']);
     await userEvent.click(screen.getByRole('button', { name: 'Add project' }));
     const chooser = await screen.findByRole('dialog', { name: 'Add project' });
     const groups = within(chooser).getAllByRole('group');
-    expect(groups.map((group) => group.getAttribute('aria-label'))).toEqual(['Sidebar projects', 'Hidden projects', 'Discovered projects']);
+    expect(groups.map((group) => group.getAttribute('aria-label'))).toEqual(['In sidebar', 'Hidden', 'Discovered']);
+    // the word cut (W135, W136): the sentence under the title is the dialog's description, undrawn; no "In sidebar" tag
+    expect(chooser.getAttribute('aria-describedby') && document.getElementById(chooser.getAttribute('aria-describedby')!)!.className).toContain('sr-only');
     expect(within(groups[0]).getAllByRole('button').map((button) => button.textContent)).toEqual(expect.arrayContaining([expect.stringContaining('z-workstation'), expect.stringContaining('b-notes')]));
     expect(within(chooser).getByRole('button', { name: 'In sidebar: z-workstation' })).toHaveProperty('disabled', true);
+    expect(within(chooser).getByRole('button', { name: 'In sidebar: z-workstation' }).textContent).toBe(`z-workstation${mine.directory}`);
     await userEvent.click(within(chooser).getByRole('button', { name: 'Add y-hidden' }));
     expect(fake.invoked('session.projects.add')).toEqual([{ directory: hidden.directory }]);
     await act(() => fake.reply('session.projects.add', asMain({ ...hidden, hidden: false })));
@@ -169,13 +177,16 @@ describe('Projects sidebar membership', () => {
     await act(() => fake.reply('session.projects.add', project('selected', 4, { directory: '/work/selected' })));
   });
 
-  it('distinguishes loading from an empty workspace and still offers the folder chooser when empty', () => {
+  // the word cut (N171): the first read is a quiet spinner, nothing for its first half second
+  it('distinguishes loading from an empty workspace and still offers the folder chooser when empty', async () => {
     setProjects([], false);
     render(<ProjectsView />);
-    expect(screen.getByRole('status').textContent).toContain('Loading projects');
+    expect(screen.queryByRole('progressbar')).toBeNull();
+    expect(await screen.findByRole('progressbar', { name: 'Loading projects' }, { timeout: 2000 })).toBeTruthy();
+    expect(document.body.textContent).not.toContain('Loading projects');
     expect(screen.queryByText('No projects yet')).toBeNull();
     setProjects([]);
-    expect(screen.queryByRole('status')).toBeNull();
+    expect(screen.queryByRole('progressbar')).toBeNull();
     expect(screen.getByText('No projects yet')).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Choose folder…' })).toBeTruthy();
   });

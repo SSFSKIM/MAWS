@@ -62,7 +62,7 @@ describe("a failed setup's retained tab", () => {
     );
     // New chat: the intent's project row (an intent with no project runs in its directory), not the live location chip
     const chip = await screen.findByRole('button', { name: 'Project No project' });
-    expect(chip.title).toBe(`${REPO} · Change the project for this chat`);
+    expect(chip.title).toBe(REPO); // the word cut (C65): the chosen folder
     expect(screen.queryByRole('button', { name: `Location ${REPO}` })).toBeNull();
     const editor = screen.getByRole('textbox', { name: 'Message', hidden: true }) as HTMLElement & { editor: { commands: { insertContent(text: string): boolean } } };
     act(() => void editor.editor.commands.insertContent('typed after the failure'));

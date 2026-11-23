@@ -355,6 +355,23 @@ describe('dialogs', () => {
     expect(fake.invoked('session.list')[0]).toEqual({ includeArchived: true });
   });
 
+  // the word cut (W151): a row shows Unarchive and a "…" menu, which holds Remove worktree… for a managed worktree and Delete…
+  it('an archived row’s Remove worktree… and Delete… are in its "…" menu, Unarchive its one button', async () => {
+    const P = at('p1' as ProjectId);
+    const archived = record(BARE_IDLE1, { projectId: 'p1' as ProjectId, archived: true, title: { text: 'Old work', source: 'user' }, worktree: { path: WT, branch: 'worktree-accept-one' } });
+    withMain({ 'session.list': () => ({ sessions: [archived], revision: 3 }) });
+    useSessions.setState({ projects: new Map([[P, project(P, 0, { name: 'maws' })]]) });
+    render(<SessionDialogs />);
+    act(() => openDialog({ kind: 'archived', projectId: P }));
+    const row = await within(await screen.findByRole('dialog', { name: 'Archived sessions · maws' })).findByRole('listitem', { name: 'Old work' });
+    expect(within(row).getAllByRole('button').map((button) => button.getAttribute('aria-label') ?? button.textContent)).toEqual(['Unarchive', 'Actions for Old work']);
+    await userEvent.click(within(row).getByRole('button', { name: 'Actions for Old work' }));
+    const menu = await screen.findByRole('menu');
+    expect(within(menu).getAllByRole('menuitem').map((item) => item.textContent)).toEqual(['Remove worktree…', 'Delete…']);
+    await userEvent.click(within(menu).getByRole('menuitem', { name: 'Delete…' }));
+    await waitFor(() => expect(useDialogs.getState().open).toMatchObject({ kind: 'delete' }));
+  });
+
   // P5 O6 M5: a row's archived sessions are the row's, read from each machine its projects are on
   it('an org project’s archived sessions come from every checkout it groups, each read on its machine', async () => {
     const org = { key: 'repo:maws' as OrgKey, name: 'MAWS', source: 'remote' as const, smnsId: null };
@@ -418,10 +435,15 @@ describe('dialogs', () => {
       const row = await within(await archivedOn()).findByRole('listitem', { name: 'In tmp' });
       const unarchive = within(row).getByRole('button', { name: 'Unarchive' });
       expect(unarchive).toHaveProperty('disabled', false);
-      const del = within(row).getByRole('button', { name: 'Delete…' });
-      expect(del).toHaveProperty('disabled', true);
-      expect(del.title).toBe(REMOTE_UNAVAILABLE['session.delete']);
-      expect(within(row).queryByRole('button', { name: 'Remove worktree…' })).toBeNull();
+      // the word cut (W151): Delete… is in the row's "…" menu, greyed there with the declared words
+      expect(within(row).queryByRole('button', { name: 'Delete…' })).toBeNull();
+      await userEvent.click(within(row).getByRole('button', { name: 'Actions for In tmp' }));
+      const menu = await screen.findByRole('menu');
+      const del = within(menu).getByRole('menuitem', { name: 'Delete…', description: REMOTE_UNAVAILABLE['session.delete'] });
+      expect(del.getAttribute('aria-disabled')).toBe('true');
+      expect(within(menu).queryByRole('menuitem', { name: 'Remove worktree…' })).toBeNull();
+      await userEvent.keyboard('{Escape}');
+      await waitFor(() => expect(screen.queryByRole('menu')).toBeNull());
       await userEvent.click(unarchive);
       await waitFor(() => expect(fake.invoked('session.update')).toEqual([{ appSessionId: BARE_IDLE1, patch: { archived: false } }]));
       expect(fake.machines('session.update')).toEqual([OTHER_MACHINE]);
@@ -433,7 +455,7 @@ describe('dialogs', () => {
       withMain({ 'session.list': () => ({ sessions: [], revision: 1 }) });
       const dialog = await archivedOn();
       expect(await within(dialog).findByText('Can’t list archived sessions on Studio yet. Update MAWS on Studio and try again.')).toBeTruthy();
-      expect(within(dialog).queryByText('Loading…')).toBeNull();
+      expect(within(dialog).queryByRole('progressbar')).toBeNull();
       expect(fake.invoked('session.list')).toEqual([]);
     });
 
@@ -472,7 +494,7 @@ describe('dialogs', () => {
       await act(() => fake.reply('session.list', { sessions: [], revision: 1 }, order.findIndex((machine) => machine !== OTHER_MACHINE))); // this Mac's
       const here = within(dialog).getByRole('region', { name: 'This Mac' });
       expect(await within(here).findByText('No archived sessions.')).toBeTruthy();
-      expect(within(within(dialog).getByRole('region', { name: 'Studio' })).getByText('Loading…')).toBeTruthy();
+      expect(await within(within(dialog).getByRole('region', { name: 'Studio' })).findByRole('progressbar', { name: 'Loading archived sessions' }, { timeout: 2000 })).toBeTruthy(); // the word cut (N172)
       expect(within(within(dialog).getByRole('region', { name: 'Loft' })).getByText('Can’t list archived sessions on Loft yet. Update MAWS on Loft and try again.')).toBeTruthy();
       await act(() => fake.reply('session.list', { sessions: [], revision: 1 }));
       await waitFor(() => expect(within(dialog).queryByRole('region', { name: 'Studio' })).toBeNull());

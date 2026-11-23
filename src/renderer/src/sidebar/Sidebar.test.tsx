@@ -37,7 +37,8 @@ import { registerProjectAction } from './project-actions';
 import { useResumeChooser } from '../resume/host'; // P2-D
 import { clearPreviewCache } from '../resume/preview'; // P2-D
 import { revealProject } from './reveal';
-import { Sidebar } from './Sidebar';
+import { SEARCH_IN_CONVERSATIONS, Sidebar } from './Sidebar';
+import { Search } from './Search';
 import { formatClock } from '@shared/app/date-format'; // L129
 import { togglePalette, usePalette } from '../palette/CommandPalette';
 
@@ -112,7 +113,8 @@ it('keeps conversation search beside the input and keyboard-reachable with all 7
   // The count belongs to the header: a label query over all 785 rows needlessly traverses every descendant's text.
   const header = chosenRow.querySelector<HTMLElement>('[data-project-line]')!;
   expect(within(header).getByLabelText('785 matching sessions')).toBeTruthy();
-  const search = within(screen.getByRole('navigation', { name: 'App destinations' })).getByRole('button', { name: 'Search in conversations for ‘test’' });
+  const search = within(screen.getByRole('navigation', { name: 'App destinations' })).getByRole('button', { name: SEARCH_IN_CONVERSATIONS });
+  expect(search.textContent, 'the word cut (W41): the query is not repeated').toBe('Search inside conversations');
   await userEvent.tab();
   expect(document.activeElement).toBe(search);
   await userEvent.keyboard('{Enter}');
@@ -321,51 +323,6 @@ describe('sidebar recovery routes', () => {
     expect(useLayout.getState().regions.sidebar.collapsed).toBe(true);
     expect(expanded()).not.toContain(at(project.id));
     expect(useNotices.getState().notices.at(-1)).toMatchObject({ level: 'danger', text: 'Directory no longer exists' });
-  });
-
-  // P3-F wave S (F17); UX wave U13a (O-31): the title bar's project chip reveals its row; a hidden project's is restored
-  // first, as the chip's menu item did before the click became the reveal
-  it('the title bar chip shows a hidden project: restored first, then its row revealed, expanded and focused', async () => {
-    const project = nine.projects.find((p) => p.name === 'MAWS')!;
-    fillStores({ ...nine, projects: nine.projects.map((p) => ({ ...p, hidden: p.id === project.id })) });
-    useMachines.setState({ loaded: new Set([TEST_MACHINE]) }); // U13a: the chip's project is the session in front's
-    offs.push(() => useMachines.setState({ loaded: new Set() }));
-    useLayout.getState().openSession(idOf('Charter + research'), { how: 'tab' });
-    useLayout.getState().setSidebar({ collapsed: true });
-    const fake = fakeClient();
-    window.maws = fake.client as unknown as PreloadBridge;
-    render(<><Sidebar /><Toolbar /></>);
-    const chip = () => document.querySelector<HTMLElement>('[data-toolbar-project]')!;
-    expect(screen.queryByRole('treeitem', { name: 'MAWS' })).toBeNull();
-    expect(chip().getAttribute('aria-label')).toBe('Show MAWS in sidebar');
-    await userEvent.click(chip());
-    expect(fake.invoked('session.projects.add')).toEqual([{ directory: project.directory }]);
-    expect(useLayout.getState().regions.sidebar.collapsed).toBe(true);
-    await act(() => fake.reply('session.projects.add', { ...project, hidden: false }));
-    // Main's project event may arrive after its command response.
-    act(() => useSessions.getState().applyProjects({ projects: page.projects, revision: 10 }, TEST_MACHINE));
-    await waitFor(() => expect(document.activeElement).toBe(row('MAWS')));
-    expect(row('MAWS').getAttribute('aria-expanded')).toBe('true');
-    expect(useLayout.getState().regions.sidebar.collapsed).toBe(false);
-    expect(chip().getAttribute('aria-label')).toBe('Reveal MAWS in sidebar');
-    await userEvent.click(chip());
-    expect(fake.invoked('session.projects.add')).toHaveLength(1);
-    expect(useSessions.getState().unstarted.size).toBe(0); // the chip created nothing
-  });
-
-  it('the title bar chip reveals a machine’s own row: the sidebar shown, the row expanded and focused', async () => {
-    fillStores(nine);
-    useMachines.setState({ loaded: new Set([TEST_MACHINE]) });
-    offs.push(() => useMachines.setState({ loaded: new Set() }));
-    useLayout.getState().openSession(idOf('Terminal workflow notes'), { how: 'tab' }); // a session in no project
-    useLayout.getState().setSidebar({ collapsed: true, expandedProjects: [] });
-    render(<><Sidebar /><Toolbar /></>);
-    const chip = document.querySelector<HTMLElement>('[data-toolbar-project]')!;
-    expect(chip.getAttribute('aria-label')).toBe('Reveal This Mac in sidebar');
-    await userEvent.click(chip);
-    await waitFor(() => expect(document.activeElement).toBe(row('This Mac')));
-    expect(row('This Mac').getAttribute('aria-expanded')).toBe('true');
-    expect(useLayout.getState().regions.sidebar).toMatchObject({ collapsed: false, expandedProjects: [machineKey(TEST_MACHINE)] });
   });
 });
 
@@ -625,7 +582,10 @@ describe('an expanded project', () => {
     render(<Sidebar />);
     expect(sessionRows(row('claude-usage-menubar'))).toEqual(['Usage reset countdown', 'Settings idle probe', 'SDK wire inventory']);
     await user.click(screen.getByRole('button', { name: 'Sort sessions' }));
-    await user.click(await screen.findByRole('menuitemradio', { name: 'Recency' }));
+    const menu = await screen.findByRole('menu');
+    expect(menu.textContent, 'the word cut (W49): no label over the two orders').not.toContain('Sort sessions by');
+    expect(within(menu).getAllByRole('menuitemradio').map((item) => item.textContent?.replace('●', ''))).toEqual(['Priority', 'Recency']);
+    await user.click(within(menu).getByRole('menuitemradio', { name: 'Recency' }));
     expect(useLayout.getState().regions.sidebar.sort).toBe('recency');
   });
 
@@ -2272,15 +2232,16 @@ describe('listed rows from another machine', () => {
     await userEvent.click(row('Studio build'));
     expect(row('Studio build').getAttribute('aria-selected')).toBe('true');
     const card = await screen.findByRole('dialog', { name: 'Studio build' });
-    expect(within(card).getByTestId('hover-meta').textContent).toMatch(/^Idle · updated /);
+    expect(within(card).getByTestId('hover-meta').textContent, 'the word cut (W77): the age alone').toMatch(/^(now|[^·]+ ago)$/);
+    expect(within(card).getByRole('img', { name: 'Idle' })).toBeTruthy(); // the state word is the glyph's name
     expect(within(card).getByTestId('hover-machine').textContent).toBe('Studio');
     expect(useLayout.getState().main).toBe(tabsBefore);
     expect(row('Studio build').getAttribute('data-menu')).toBe(`session:${studio('b1')}`);
     fireEvent.contextMenu(row('Studio build'));
     const items = within(await screen.findByRole('menu')).getAllByRole('menuitem');
     expect(items.map((m) => [m.textContent, m.hasAttribute('data-disabled'), m.getAttribute('title')])).toEqual([
-      ['Open', true, 'Not available here'],
-      ['Open in new tab', true, 'Not available here'],
+      ['Open', true, null], // the word cut (W68): no "Not available here"
+      ['Open in new tab', true, null],
       ['Open in (the folder is on Studio)', true, null], // UX wave U6b-4a
       ['Hide', false, null], // UX wave U7, O-16: hiding needs no opener
     ]);
@@ -2295,6 +2256,16 @@ describe('listed rows from another machine', () => {
     await userEvent.click(row('Studio build'));
     expect(open).toHaveBeenCalledWith(expect.objectContaining({ appId: studio('b1'), lane: 'A' }), undefined);
     expect(useLayout.getState().main).toBe(tabsBefore);
+  });
+
+  // N155: a stopped listing keeps its word on the card's line, since its glyph is Done's
+  it('a stopped listing’s card keeps “Stopped” before its age', async () => {
+    fill([listedOn('b1', { title: 'Studio build', lane: 'A', state: 'stopped' })]);
+    act(() => useLayout.getState().setSidebar({ expandedProjects: [ORG] as ProjectKey[] }));
+    render(<Sidebar />);
+    await userEvent.click(row('Studio build'));
+    const card = await screen.findByRole('dialog', { name: 'Studio build' });
+    expect(within(card).getByTestId('hover-meta').textContent).toMatch(/^Stopped · [^·]+ ago$/);
   });
 
   it('its menu offers Open and Open in new tab; ⌘-click and a middle click open it in a tab of its own, Enter as a click, each through its lane’s opener', async () => {
@@ -2501,7 +2472,7 @@ describe('owners and the People toggle', () => {
     expect(row('Theirs late').querySelector('[data-machine-chip]')?.textContent).toBe('@Studio');
   });
 
-  it('lists every owner with its email in the hover card of a listed row and of a record at a listed address', async () => {
+  it('lists every owner by name in the hover card of a listed row and of a record at a listed address', async () => {
     const opened = record(studio('b4'), { projectId: null, title: { text: 'Opened', source: 'user' } });
     fill([listedOn('b1', { title: 'Co-owned', owners: ['ana', ME, 'gone'], lane: 'A' }), theirs('b4', { owners: ['ben'] })], [here, opened]);
     people(ORG); // P5 O7 M2: the record is filed where its listing is
@@ -2510,10 +2481,10 @@ describe('owners and the People toggle', () => {
     await userEvent.click(row('Co-owned'));
     const card = await screen.findByRole('dialog', { name: 'Co-owned' });
     const entries = (list: HTMLElement) => within(list).getAllByRole('listitem').map((li) => li.textContent);
-    expect(entries(within(card).getByRole('list', { name: 'Owners' }))).toEqual(['yousam@example.com', 'Anaana.lopez@example.com', 'former member']);
+    expect(entries(within(card).getByRole('list', { name: 'Owners' }))).toEqual(['you', 'Ana', 'former member']); // the word cut (W71): no emails
     act(() => row('Opened').focus());
     const recordCard = await screen.findByRole('dialog', { name: 'Opened' });
-    expect(entries(within(recordCard).getByRole('list', { name: 'Owners' }))).toEqual(['Benben@example.com']);
+    expect(entries(within(recordCard).getByRole('list', { name: 'Owners' }))).toEqual(['Ben']);
   });
 
   // The project registry's M11 (review 1, finding 4): a project you see only through others' sessions is a row with no
@@ -2677,5 +2648,26 @@ describe('a registry row’s machines line by the link’s phase', () => {
     expect(machinesLine(), 'a first attempt that failed').toBe('studio offline');
     act(() => useMachines.getState().applyRoster([here, studio({})]));
     expect(machinesLine(), 'up').toBe('studio');
+  });
+});
+
+// The word cut's sidebar at rest: what waits for the pointer or the keyboard keeps its place, undrawn (happy-dom draws
+// no CSS, so the classes and attributes that draw it are read).
+describe('the sidebar at rest (the word cut)', () => {
+  it('W40: the search field’s chord is drawn only while the field is pointed at or holds focus', () => {
+    render(<Search value="" label="Search projects and sessions" onChange={() => {}} onLeave={() => {}} onSearch={() => {}} chord="⌘K" />);
+    const chord = screen.getByText('⌘K');
+    expect(chord.hasAttribute('data-on-hover')).toBe(true);
+    expect(chord.closest('[data-hover-scope]')).toBe(screen.getByRole('searchbox').closest('label'));
+  });
+
+  it('W59: "Archived sessions…" is drawn while the pointer or the keyboard is in the sidebar, and keeps the keyboard', async () => {
+    fillStores(nine);
+    render(<Sidebar />);
+    const archived = screen.getByRole('button', { name: 'Archived sessions…' });
+    expect(archived.className.split(/\s+/)).toEqual(expect.arrayContaining(['opacity-0', 'group-hover/sidebar:opacity-100', 'group-focus-within/sidebar:opacity-100']));
+    expect(archived.closest('.group\\/sidebar')).not.toBeNull();
+    act(() => archived.focus());
+    expect(document.activeElement).toBe(archived);
   });
 });

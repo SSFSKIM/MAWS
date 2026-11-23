@@ -10,6 +10,7 @@ import { activeTab, currentSet } from '../stores/layout-model';
 import { useSessions } from '../stores/sessions';
 import { fillStores, pageScenario, resetShellStores, scenarioFile } from '../test-support/shell-stores';
 import { Overview } from './Overview';
+import { accessibleDescription } from '../test-support/accessible-text';
 import { TEST_MACHINE } from '../../../../test/support/machine';
 import { formatClock } from '@shared/app/date-format'; // L129
 import type { AppSessionId } from '@shared/graph/ids'; // P5 O7 M6
@@ -51,6 +52,8 @@ describe('overview board', () => {
       'claude-usage-menubar',
       'This Mac', // P5 O6 M5 (T3): the sessions of no project are their machine's
     ]);
+    // the word cut (W104): the Needs-you heading is for assistive technology alone; the projects' are drawn
+    expect(screen.getAllByRole('heading', { level: 2 }).map((h) => h.classList.contains('sr-only'))).toEqual([true, false, false, false, false]);
     expect(cardTitles(group('Needs you'))).toEqual(['Fix sidebar drag', 'Sidebar interaction pass', 'Quota reset recovery']);
     expect(cardTitles(group('claude-usage-menubar'))).toEqual(['Usage reset countdown', 'Settings idle probe']);
   });
@@ -71,10 +74,13 @@ describe('overview board', () => {
     expect(within(fix).queryByRole('button', { name: 'Approve' })).toBeNull();
   });
 
-  it('a working card shows its activity, child agents, context and cost since seen', () => {
+  // the word cut (W110): context, cost since seen and child agents are the card's tooltip and description, no footer
+  it('a working card shows its activity; its child agents, context and cost since seen are its description', () => {
     render(<Overview paneIndex={0} />);
     const charter = card('Charter + research');
-    for (const text of ['Running bun test', '2 agents', 'ctx 41%', '$0.00 since seen']) expect(within(charter).getByText(text)).toBeTruthy();
+    expect(within(charter).getByText('Running bun test')).toBeTruthy();
+    expect(accessibleDescription(charter)).toBe('ctx 41% · $0.00 since seen · 2 agents');
+    for (const text of ['2 agents', 'ctx 41%', 'since seen']) expect(charter.textContent).not.toContain(text);
   });
 
   // UX wave U8c-2 (M4 decision 10): a card names the branch recorded for the working folder, where the agent is.
@@ -94,10 +100,10 @@ describe('overview board', () => {
     expect(lines[1].textContent).toMatch(/^The request succeeded/);
   });
 
-  it('the idle, read, live session reads Idle over its last answer', () => {
+  it('the idle, read, live session has no activity line over its last answer (the word cut, W107)', () => {
     render(<Overview paneIndex={0} />);
     const idle = card('Settings idle probe');
-    expect(within(idle).getByTestId('card-activity').textContent).toBe('Idle');
+    expect(within(idle).queryByTestId('card-activity')).toBeNull();
     expect(within(idle).getByTestId('card-answer').textContent).toMatch(/^Settings loaded/);
   });
 
@@ -105,7 +111,7 @@ describe('overview board', () => {
     render(<Overview paneIndex={0} />);
     const foreign = card('Somersault terminal run');
     expect(cardTitles(group('codex_somersault'))).toContain('Somersault terminal run');
-    expect(within(foreign).getByTestId('card-activity').textContent).toBe('Terminal · pid 7135');
+    expect(within(foreign).getByTestId('card-activity').textContent).toBe('Running in Terminal'); // the word cut (W75)
     expect(within(foreign).queryAllByRole('button')).toEqual([]);
     expect(foreign.querySelectorAll('[tabindex], a, input, textarea, select')).toHaveLength(0);
   });
@@ -262,7 +268,7 @@ describe('a released session’s card', () => {
     act(() => useSessions.getState().applyDigest({ ...digest, released: { at: AT_RELEASE, reason: 'budget', limitKiB: 8 * 1024 * 1024 }, revision: digest.revision + 1 }, TEST_MACHINE));
     render(<Overview paneIndex={0} />);
     const released = card('Settings idle probe');
-    expect(within(released).getByTestId('card-activity').textContent).toBe('Idle');
+    expect(within(released).queryByTestId('card-activity')).toBeNull();
     expect(within(released).getByText('released').getAttribute('title')).toBe(`Released at ${formatClock(Date.parse(AT_RELEASE))} to stay under the 8 GB memory budget · Send resumes it`);
     expect(cardTitles(group('Needs you'))).not.toContain('Settings idle probe');
   });

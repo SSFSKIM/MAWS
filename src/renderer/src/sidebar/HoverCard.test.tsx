@@ -23,6 +23,7 @@ import { RequestPreview } from './RequestPreview';
 import { useLayout } from '../stores/layout';
 import { Sidebar } from './Sidebar';
 import { SidebarHoverCard } from './HoverCard';
+import { accessibleDescription } from '../test-support/accessible-text';
 import { formatAgo } from '@shared/app/date-format';
 import { registerSlot, resetSlots } from '../app/slots';
 import { RequestCard } from '../request-card/RequestCard';
@@ -157,7 +158,9 @@ describe('a session row’s hover card', () => {
     return screen.findByRole('dialog', { name: title });
   };
 
-  it('a working session: its status, age and context, its activity and its last answer', async () => {
+  // the word cut (W69): the second line is the age alone, the context share from 80 % up; the state word is the glyph's
+  // name and tooltip, which the keyboard reaches
+  it('a working session: its age, its context from 80 %, its state on the glyph, its activity and its last answer', async () => {
     withMain();
     useLayout.getState().setSidebar({ expandedProjects: [at('proj-claude-usage-menubar' as ProjectId)] });
     const digest = useSessions.getState().digests.get(idOf('Usage reset countdown'))!;
@@ -165,7 +168,13 @@ describe('a session row’s hover card', () => {
     render(<Sidebar />);
     const card = await open('Usage reset countdown');
     expect(within(card).getByRole('heading', { name: 'Usage reset countdown' })).toBeTruthy();
-    expect(within(card).getByTestId('hover-meta').textContent).toBe(`Working · ${REL.now} · ctx 41%`);
+    expect(within(card).getByTestId('hover-meta').textContent).toBe(REL.now);
+    const glyph = within(card).getByRole('img', { name: 'Working' });
+    expect(glyph.getAttribute('tabindex')).toBe('0');
+    act(() => glyph.focus());
+    expect(await screen.findByRole('tooltip')).toHaveProperty('textContent', 'Working');
+    act(() => useSessions.getState().applyDigest({ ...digest, context: { percent: 85.4, totalTokens: 854_000, maxTokens: 1_000_000, autoCompactThreshold: null }, revision: digest.revision + 2 }, TEST_MACHINE));
+    expect(within(card).getByTestId('hover-meta').textContent).toBe(`${REL.now} · ctx 85%`);
     expect(within(card).getByTestId('hover-activity').textContent).toBe('Running curl -sI https://example.com | head -1');
     expect(within(card).getByTestId('hover-answer').textContent).toMatch(/^The request succeeded/);
     expect(within(card).queryByRole('button', { name: 'Approve' })).toBeNull(); // nothing waits
@@ -198,9 +207,11 @@ describe('a session row’s hover card', () => {
     useLayout.getState().setSidebar({ expandedProjects: [machineKey(OTHER_MACHINE)] });
     render(<Sidebar />);
     const card = await open('Studio build');
-    expect(within(card).getByTestId('hover-meta').textContent).toBe(`Working · ${REL.now}`);
+    expect(within(card).getByTestId('hover-meta').textContent).toBe(REL.now);
+    expect(within(card).getByRole('img', { name: 'Working' })).toBeTruthy();
     act(() => useSessions.setState({ listed: listing('failed') }));
-    expect(within(card).getByTestId('hover-meta').textContent).toMatch(/^Failed · /);
+    expect(within(card).getByRole('img', { name: 'Failed' })).toBeTruthy();
+    expect(within(card).getByTestId('hover-meta').textContent).not.toContain('Failed');
   });
 
   it('a foreign-live session names its holder', async () => {
@@ -208,8 +219,9 @@ describe('a session row’s hover card', () => {
     useLayout.getState().setSidebar({ expandedProjects: [at('proj-codex-somersault' as ProjectId)] });
     render(<Sidebar />);
     const card = await open('Somersault terminal run');
-    expect(within(card).getByTestId('hover-activity').textContent).toBe('Terminal · pid 7135');
-    expect(within(card).getByTestId('hover-meta').textContent).toMatch(/^Live in terminal · /);
+    expect(within(card).getByTestId('hover-activity').textContent).toBe('Running in Terminal'); // the word cut (W75): no pid
+    expect(within(card).getByRole('img', { name: 'Live in terminal' })).toBeTruthy();
+    expect(within(card).getByTestId('hover-meta').textContent).not.toContain('Live in terminal');
   });
 
   // E3: whose side thread or fork it is
@@ -233,7 +245,8 @@ describe('a session row’s hover card', () => {
     expect(within(plain).queryByTestId('hover-lineage')).toBeNull();
   });
 
-  it('a worktree session names its branch and the worktree’s folder; a main session its branch', async () => {
+  // the word cut (W73): the branch, the worktree's folder its tooltip and description, on a line the keyboard reaches
+  it('a worktree session names its branch, the worktree’s folder its tooltip; a main session its branch', async () => {
     withMain();
     const charter = bareIdOf('Charter + research'); // fillStores takes the scenario as main's
     const drag = bareIdOf('Fix sidebar drag');
@@ -242,7 +255,7 @@ describe('a session row’s hover card', () => {
         ...nine,
         sessions: nine.sessions.map((r) =>
           r.appId === charter
-            ? { ...r, worktree: { path: '/Users/new/Developer/GitHub/MAWS-sibling', branch: 'feature/sibling' } }
+            ? { ...r, worktree: { path: '/work/MAWS-sibling', branch: 'feature/sibling' } }
             : r.appId === drag
               ? { ...r, branch: 'master' }
               : r,
@@ -252,8 +265,10 @@ describe('a session row’s hover card', () => {
     render(<Sidebar />);
     const sibling = await open('Charter + research');
     const place = within(sibling).getByTestId('hover-place');
-    expect(place.textContent).toBe('⎇ feature/sibling · worktree MAWS-sibling');
-    expect(place.getAttribute('title')).toBe('/Users/new/Developer/GitHub/MAWS-sibling');
+    expect(place.textContent).toBe('⎇ feature/sibling');
+    expect(place.hasAttribute('title')).toBe(false);
+    expect(place.getAttribute('tabindex')).toBe('0');
+    expect(accessibleDescription(place)).toBe('/work/MAWS-sibling');
     await userEvent.setup().unhover(needsRow('Charter + research'));
     const main = await open('Fix sidebar drag');
     expect(within(main).getByTestId('hover-place').textContent).toBe('⎇ master');
@@ -270,8 +285,8 @@ describe('a session row’s hover card', () => {
       act(() => fillStores({ ...nine, sessions: nine.sessions.map((r) => (r.appId === charter ? { ...r, directory: '/work/repo', worktree: null, branch: 'master', ...over } : r)) }));
     const mark = () => within(needsRow('Charter + research')).queryByTestId('row-branch');
     const cases: [Partial<SessionRecord>, string | null, string][] = [
-      [{ agentFolder: { checkout: W1, cwd: `${W1}/src`, branch: 'w1', linked: true } }, W1, '⎇ w1 · worktree w1'], // a cd
-      [{ directory: W1, worktree: { path: W1, branch: 'w1' }, launchFolder: '/work/repo', branch: 'w1' }, W1, '⎇ w1 · worktree w1'], // the tool
+      [{ agentFolder: { checkout: W1, cwd: `${W1}/src`, branch: 'w1', linked: true } }, W1, '⎇ w1'], // a cd
+      [{ directory: W1, worktree: { path: W1, branch: 'w1' }, launchFolder: '/work/repo', branch: 'w1' }, W1, '⎇ w1'], // the tool
       [{ agentFolder: { checkout: '/work/repo', cwd: '/work/repo', branch: 'master', linked: false } }, null, '⎇ master'], // back by cd
       [{ directory: W1, worktree: { path: W1, branch: 'w1' }, launchFolder: '/work/repo', branch: 'w1', agentFolder: { checkout: '/work/repo', cwd: '/work/repo', branch: 'master', linked: false } }, null, '⎇ master'], // filed in the worktree, back by cd
     ];
@@ -281,7 +296,7 @@ describe('a session row’s hover card', () => {
       expect(mark() !== null).toBe(worktree !== null);
       const card = await open('Charter + research');
       expect(within(card).getByTestId('hover-place').textContent).toBe(place);
-      expect(within(card).getByTestId('hover-place').getAttribute('title')).toBe(worktree);
+      expect(accessibleDescription(within(card).getByTestId('hover-place')) || null).toBe(worktree);
       view.unmount();
     }
   });
@@ -311,14 +326,14 @@ describe('a session row’s hover card', () => {
     expect(within(await open('Fix sidebar drag')).getByTestId('hover-machine').textContent).toBe('Studio');
   });
 
-  // P5 O7 M2 (A2): how this app reaches the machine, on the machine's line; a machine that removed this device greys its
-  // rows with that in place of "offline"
-  it('says the carrier an RL2 link is up over, nothing for a socket, and that the machine removed this device', async () => {
+  // P5 O7 M2 (A2): a machine that removed this device greys its rows with that in place of "offline". The word cut
+  // (W70): the machine's line names it alone, whatever carries the link
+  it('names the machine without its carrier, and says that the machine removed this device', async () => {
     withMain();
     const since = new Date(Date.now() - 5 * 60_000).toISOString();
     const roster = (over: { state?: 'up' | 'down'; carrier?: 'socket' | 'direct' | 'relay'; refusal?: string }) =>
       useMachines.getState().applyRoster([{ ref: TEST_MACHINE, name: 'Studio', local: false, state: 'up', since, generation: 0, ...over }]);
-    for (const [carrier, words] of [['direct', 'Studio · direct (tailnet)'], ['relay', 'Studio · via the hub'], ['socket', 'Studio']] as const) {
+    for (const [carrier, words] of [['direct', 'Studio'], ['relay', 'Studio'], ['socket', 'Studio']] as const) {
       act(() => roster({ carrier }));
       render(<Sidebar />);
       expect(within(await open('Fix sidebar drag')).getByTestId('hover-machine').textContent, carrier).toBe(words);
@@ -360,7 +375,7 @@ describe('a project’s hover card', () => {
     const s = useSessions.getState();
     const last = projectList({ records: s.records, digests: s.digests, projects: s.projects, rows: [], local: TEST_MACHINE, machineName: () => 'This Mac' }).find((e) => e.key === at('proj-maws'))!.lastActivity!;
     const elapsed = Date.now() - last;
-    expect(within(card).getByTestId('project-activity').textContent).toBe(elapsed < 60_000 ? 'Active now' : `Last active ${formatAgo(elapsed, { narrow: true })}`);
+    expect(within(card).getByTestId('project-activity').textContent).toBe(elapsed < 60_000 ? 'Active now' : formatAgo(elapsed, { narrow: true })); // the word cut (W79)
     const worktrees = await within(card).findByRole('list', { name: 'Worktrees' });
     expect(within(worktrees).getAllByRole('listitem').map((li) => li.textContent)).toEqual(['⎇ mastermain checkout', '⎇ worktree-accept-oneaccept-one']);
     expect(fake.invoked('git.worktree.list')).toEqual([{ repoRoot: maws.directory }]);
@@ -372,10 +387,10 @@ describe('a project’s hover card', () => {
     render(<Sidebar />);
     act(() => screen.getByRole('treeitem', { name: 'codex_somersault' }).focus());
     const card = await screen.findByRole('dialog', { name: 'codex_somersault' });
-    expect(within(card).getByTestId('project-counts').textContent).toBe('3 sessions · 1 waiting · 0 working');
-    expect(within(card).getByText('Reading…')).toBeTruthy();
+    expect(within(card).getByTestId('project-counts').textContent).toBe('3 sessions · 1 waiting'); // the word cut (W78): no part at zero
+    expect(await within(card).findByRole('progressbar', { name: 'Reading worktrees' }, { timeout: 2000 })).toBeTruthy(); // N174
     await act(() => fake.fail('git.worktree.list', 'not a repository'));
-    expect(within(card).queryByText('Reading…')).toBeNull();
+    expect(within(card).queryByRole('progressbar')).toBeNull();
     expect(within(card).queryByRole('list', { name: 'Worktrees' })).toBeNull();
     act(() => screen.getByRole('treeitem', { name: 'codex_somersault' }).blur());
     await waitFor(() => expect(screen.queryByRole('dialog', { name: 'codex_somersault' })).toBeNull());

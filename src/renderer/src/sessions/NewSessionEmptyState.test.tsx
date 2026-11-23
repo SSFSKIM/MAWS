@@ -26,10 +26,11 @@ beforeEach(() => {
 afterEach(cleanup);
 
 describe('the unstarted empty state', () => {
-  it('renders one heading naming the project and nothing else', () => {
+  // the word cut (W86): the heading is not drawn; it stays for assistive technology
+  it('renders one heading naming the project, for assistive technology alone, and nothing else', () => {
     putIntent(intent({ projectId: P }));
     const { container } = render(<NewSessionEmptyState appSessionId={ID} />);
-    expect(screen.getByRole('heading', { name: 'New chat in maws' })).toBeTruthy();
+    expect(screen.getByRole('heading', { level: 1, name: 'New chat in maws' }).classList.contains('sr-only')).toBe(true);
     expect(container.children).toHaveLength(1); // the heading; no card waits
     expect(container.textContent).toBe('New chat in maws');
   });
