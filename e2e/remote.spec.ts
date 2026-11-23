@@ -2058,7 +2058,9 @@ const M8_PARTIAL = 'Started on B';
 const M8_REPLY = 'Started on B from A, first turn over.';
 const M8_ASK_PROMPT = 'Ask me before you go on.';
 const M8_QUESTION = 'Go on with the plan on B?';
-const M8_ASK = { questions: [{ id: 'q1', question: M8_QUESTION, modality: 'choice', options: [{ label: 'Yes' }, { label: 'No' }] }] };
+// board ticket 420: `blocking` is required of a live call (docs/doperpowers/plans/2026-11-23-tool-choice.md, D7); this one
+// waits for A's answer, so it says so
+const M8_ASK = { questions: [{ id: 'q1', question: M8_QUESTION, modality: 'choice', options: [{ label: 'Yes' }, { label: 'No' }] }], blocking: true };
 const M8_ASK_REPLY = 'Going on, as A answered.';
 const M8_SIDE_ANSWER = 'ZEBRA'; // p1-side-question-session seq 92's
 const M8_IDLE = 9; // past the cap: SESSIONS_CAP (8) in src/renderer/src/sidebar/derive.ts
