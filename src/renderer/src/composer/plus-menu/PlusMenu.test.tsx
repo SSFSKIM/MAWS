@@ -221,6 +221,22 @@ describe('the "+" menu’s Tools submenu', () => {
     expect(tools.set.mock.calls.map(([set]) => set)).toEqual([{ ...NO_ARTIFACTS, artifacts: true, documents: true, dashboards: true }]);
   });
 
+  it('walks by the arrow keys alone from Artifacts, turned off, through the two refused rows to the question tool', async () => {
+    const intent = intentBinding(FULL_MAWS_TOOL_SET);
+    const user = await openLive(intent.Menu);
+    const focused = () => document.activeElement?.getAttribute('aria-label') ?? null;
+    act(() => screen.getByRole('menuitemcheckbox', { name: 'Artifacts' }).focus());
+    await user.keyboard('{Enter}');
+    await waitFor(() => expect(checked('menuitemcheckbox', 'Artifacts')).toBe('false'));
+    expect(focused()).toBe('Artifacts');
+    const walked: (string | null)[] = [];
+    for (let row = 0; row < 5; row++) {
+      await user.keyboard('{ArrowDown}');
+      walked.push(focused());
+    }
+    expect(walked).toEqual(['Documents', 'Dashboards', 'Auxiliary', 'Default', 'MAWS']);
+  });
+
   it('chooses the question tool through the binding', async () => {
     const tools = binding();
     const user = await openTools(tools);

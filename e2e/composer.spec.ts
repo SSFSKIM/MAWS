@@ -733,7 +733,13 @@ test('an unstarted chat chooses its tools in the "+" menu by keyboard alone; a s
   await expect(documents).toHaveAccessibleDescription('Needs Artifacts');
   await expect(documents.locator('[data-row-note]')).toBeVisible(); // its note, open at once on keyboard focus
   const engine = page.getByRole('menuitemradio', { name: 'Default' });
-  for (let row = 0; row < 3; row++) await page.keyboard.press('ArrowDown'); // Dashboards, Auxiliary, then Default past the question's label
+  // each press lands before the next is made, and one that lands elsewhere says where: Dashboards (refused, yet reached),
+  // Auxiliary, then Default past the question's label
+  const focusedRow = () => page.evaluate(() => document.activeElement?.getAttribute('aria-label') ?? `${document.activeElement?.tagName ?? 'nothing'} (no row)`);
+  for (const row of ['Dashboards', 'Auxiliary', 'Default']) {
+    await page.keyboard.press('ArrowDown');
+    await expect.poll(focusedRow, { message: `ArrowDown lands on ${row}` }).toBe(row);
+  }
   await expect(engine).toBeFocused();
   await expect(engine).toHaveAccessibleDescription("Claude Code's own question");
   await page.keyboard.press('Enter');
