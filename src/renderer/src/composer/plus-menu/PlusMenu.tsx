@@ -11,7 +11,7 @@
 // Dashboards refused, saying they need Artifacts, while it is off), then the question tool as a radio group, each item's
 // fact its row note; given the frame's binding, which is null wherever the choice would not be honoured.
 import { DropdownMenu } from 'radix-ui';
-import { useId, type RefObject } from 'react';
+import { useId, useRef, useState, type RefObject } from 'react';
 import { withArtifacts, type MawsToolSet } from '@shared/maws/tool-set';
 import { ipc } from '../../ipc/client';
 import type { EditorHandle } from '../editor/controller';
@@ -51,6 +51,7 @@ export function PlusMenu({ appSessionId, cwd, editor, directories, tools = null 
   const projectId = useSessions((s) => (appSessionId ? s.records.get(appSessionId)?.projectId : null) ?? [...s.projects.values()].find((project) => project.directory === cwd)?.id ?? null);
   const addDirectory = useAddDirectory(directories ?? NO_DIRECTORIES, cwd);
   const connectors = useConnectorMenu(appSessionId, { enabled: open });
+  const toolEdits = useToolEdits(tools); // board ticket 421: held here, so a menu closed and opened again keeps a write still out
   const pick = async (kind: 'files' | 'photos') => {
     const result = await ipc.invoke('layout.pickFiles', { kind, directory: cwd === '' ? null : cwd, multiple: true });
     if (!result.ok) return void toast({ level: 'warning', text: result.error.message, actions: [], dismissible: true });
@@ -102,7 +103,7 @@ export function PlusMenu({ appSessionId, cwd, editor, directories, tools = null 
             <DropdownMenu.Separator className="my-1 h-px bg-border" />
             {widgetItem('Connectors', 'mcp')}
             {widgetItem('Plugins', 'plugins')}
-            {tools !== null && <ToolsSubmenu tools={tools} />}
+            {tools !== null && <ToolsSubmenu tools={tools} edits={toolEdits} />}
           </DropdownMenu.Content>
         </DropdownMenu.Portal>
       </DropdownMenu.Root>
@@ -143,15 +144,41 @@ const Check = ({ mark = true }: { mark?: boolean }) => (
   </span>
 );
 
-function ToolsSubmenu({ tools }: { tools: ChipBinding<MawsToolSet> }) {
+// The set the submenu shows and edits (the review of M5): the menu stays open for one choice after another, and the
+// intent takes a write's set only when its answer arrives, so each choice is made over the newest set chosen, not the
+// one last drawn from the intent, and every write carries all the choices before it. The newest choice is held until
+// its own write settles: by then a successful answer is the intent's (C10's `patchIntent` stores it before it
+// resolves), and a refused one leaves the intent's set to show again. Writes go out in the order made and the spine
+// takes them in that order (Settings › Sessions' rule, MawsToolsSettings.tsx).
+interface ToolEdits {
+  shown(tools: ChipBinding<MawsToolSet>): MawsToolSet;
+  choose(tools: ChipBinding<MawsToolSet>, edit: (set: MawsToolSet) => MawsToolSet): void;
+}
+function useToolEdits(tools: ChipBinding<MawsToolSet> | null): ToolEdits {
+  const [newest, setNewest] = useState<MawsToolSet | null>(null);
+  const latest = useRef(0);
+  // a set chosen while the binding offered no choice (a chat since sent elsewhere, or started) is not carried back
+  if (tools === null && newest !== null) setNewest(null);
+  return {
+    shown: (bound) => newest ?? bound.value,
+    choose: (bound, edit) => {
+      const next = edit(newest ?? bound.value);
+      const mine = ++latest.current;
+      setNewest(next);
+      void bound.set(next).then((result) => {
+        if (!result.ok) toast({ level: 'warning', text: result.error, actions: [], dismissible: true });
+        if (mine === latest.current) setNewest(null);
+      });
+    },
+  };
+}
+
+function ToolsSubmenu({ tools, edits }: { tools: ChipBinding<MawsToolSet>; edits: ToolEdits }) {
   const questionLabel = useId();
   // the frame's one reason while the first send starts or its message is held: the whole submenu greyed with it
   if (tools.disabled !== null) return <RefusedMenuItem kit={DropdownMenu} label={TOOLS_MENU.label} reason={tools.disabled} className={CHOICE} />;
-  const set = tools.value;
-  const choose = (next: MawsToolSet) =>
-    void tools.set(next).then((result) => {
-      if (!result.ok) toast({ level: 'warning', text: result.error, actions: [], dismissible: true });
-    });
+  const set = edits.shown(tools);
+  const choose = (edit: (set: MawsToolSet) => MawsToolSet) => edits.choose(tools, edit);
   return (
     <DropdownMenu.Sub>
       <DropdownMenu.SubTrigger className={`${ITEM} flex-row items-center justify-between gap-3`}><span>{TOOLS_MENU.label}</span><span aria-hidden>›</span></DropdownMenu.SubTrigger>
@@ -160,11 +187,11 @@ function ToolsSubmenu({ tools }: { tools: ChipBinding<MawsToolSet> }) {
           {GROUPS.map((group) => {
             const { word, fact } = MAWS_TOOLS.groups[group];
             if (NEEDS_ARTIFACTS.includes(group) && !set.artifacts) return <RefusedMenuItem key={group} kit={DropdownMenu} label={word} reason={MAWS_TOOLS.needsArtifacts} lead={<Check mark={false} />} className={CHOICE} />;
-            return <GroupItem key={group} word={word} fact={fact} checked={set[group]} onChecked={(on) => choose(group === 'artifacts' ? withArtifacts(set, on) : { ...set, [group]: on })} />;
+            return <GroupItem key={group} word={word} fact={fact} checked={set[group]} onChecked={(on) => choose((base) => (group === 'artifacts' ? withArtifacts(base, on) : { ...base, [group]: on }))} />;
           })}
           <DropdownMenu.Separator className="my-1 h-px bg-border" />
           <DropdownMenu.Label id={questionLabel} className="px-2 py-1 text-ui-sm text-fg-muted">{TOOLS_MENU.question}</DropdownMenu.Label>
-          <DropdownMenu.RadioGroup aria-labelledby={questionLabel} value={set.question} onValueChange={(question) => choose({ ...set, question: question as MawsToolSet['question'] })}>
+          <DropdownMenu.RadioGroup aria-labelledby={questionLabel} value={set.question} onValueChange={(question) => choose((base) => ({ ...base, question: question as MawsToolSet['question'] }))}>
             {QUESTION_TOOLS.map((question) => <QuestionItem key={question} value={question} word={MAWS_TOOLS.questionTools[question]} fact={TOOLS_MENU.questionFacts[question]} />)}
           </DropdownMenu.RadioGroup>
         </DropdownMenu.SubContent>

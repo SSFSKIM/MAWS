@@ -2,8 +2,9 @@
 // read "In this chat…" and "Manage…" (C18), and a submenu with no rows says so in a few words: "No plugins" (C19),
 // "No connectors" (P578), "Session not running" (P579).
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { act, cleanup, render, screen } from '@testing-library/react';
+import { act, cleanup, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { useState } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { EngineSessionStatus } from '@shared/engine/status';
 import type { AppSessionId } from '@shared/graph/ids';
@@ -96,6 +97,46 @@ describe('the "+" menu’s Tools submenu', () => {
     await user.click(screen.getByRole('button', { name: 'Add files, photos or commands' }));
     return user;
   }
+  // A binding over an intent as C10's store holds it: a write's set reaches the value when its answer arrives, before the
+  // write resolves (sessions/setup-actions.ts `patchIntent`), the answers in the order the test gives them; `held`
+  // withholds every answer until `answer(i)`.
+  function intentBinding(initial: MawsToolSet, held = false) {
+    const writes: MawsToolSet[] = [];
+    const answers: (() => void)[] = [];
+    function Menu() {
+      const [value, setValue] = useState(initial);
+      const tools: ChipBinding<MawsToolSet> = {
+        value,
+        options: [],
+        disabled: null,
+        set: (next) => {
+          writes.push(next);
+          return new Promise((resolve) => {
+            const answer = () => {
+              setValue(next);
+              resolve({ ok: true });
+            };
+            if (held) answers.push(answer);
+            else answer();
+          });
+        },
+      };
+      return <PlusMenu cwd="/work/atlas" editor={{ current: null }} tools={tools} />;
+    }
+    return { writes, Menu, answer: (i: number) => act(async () => answers[i]!()) };
+  }
+  async function openLive(Menu: () => ReturnType<typeof PlusMenu>) {
+    const user = userEvent.setup();
+    render(
+      <QueryClientProvider client={new QueryClient()}>
+        <Menu />
+      </QueryClientProvider>,
+    );
+    await user.click(screen.getByRole('button', { name: 'Add files, photos or commands' }));
+    await enterTools(user);
+    return user;
+  }
+  const checked = (role: 'menuitemcheckbox' | 'menuitemradio', name: string) => screen.getByRole(role, { name }).getAttribute('aria-checked');
   async function enterTools(user: ReturnType<typeof userEvent.setup>) {
     act(() => screen.getByRole('menuitem', { name: 'Tools' }).focus());
     await user.keyboard('{ArrowRight}');
@@ -125,16 +166,43 @@ describe('the "+" menu’s Tools submenu', () => {
   });
 
   it('toggles a group through the binding and stays open; Artifacts turns Documents and Dashboards with it', async () => {
+    const intent = intentBinding(FULL_MAWS_TOOL_SET);
+    const user = await openLive(intent.Menu);
+    await user.click(screen.getByRole('menuitemcheckbox', { name: 'Auxiliary' }));
+    expect(checked('menuitemcheckbox', 'Auxiliary')).toBe('false'); // the menu stays open, over the new set
+    await user.click(screen.getByRole('menuitemcheckbox', { name: 'Artifacts' }));
+    expect(intent.writes).toEqual([
+      { ...FULL_MAWS_TOOL_SET, auxiliary: false },
+      { ...FULL_MAWS_TOOL_SET, auxiliary: false, artifacts: false, documents: false, dashboards: false }, // the first change kept
+    ]);
+  });
+
+  // The review of M5: the menu stays open for one edit after another, and the intent takes a write's set only when its
+  // answer arrives, so each edit is made over the newest set chosen, never the one last drawn from the intent.
+  it('makes a second choice over the first while the first’s answer is still out, and both survive', async () => {
+    const intent = intentBinding(FULL_MAWS_TOOL_SET, true);
+    const user = await openLive(intent.Menu);
+    await user.click(screen.getByRole('menuitemcheckbox', { name: 'Auxiliary' }));
+    await user.click(screen.getByRole('menuitemradio', { name: 'Default' }));
+    const both = { ...FULL_MAWS_TOOL_SET, auxiliary: false, question: 'engine' as const };
+    expect(intent.writes).toEqual([{ ...FULL_MAWS_TOOL_SET, auxiliary: false }, both]);
+    expect([checked('menuitemcheckbox', 'Auxiliary'), checked('menuitemradio', 'Default')]).toEqual(['false', 'true']);
+    await intent.answer(0); // the first answer: the intent holds the first set alone, the menu still the newest choice
+    expect([checked('menuitemcheckbox', 'Auxiliary'), checked('menuitemradio', 'Default')]).toEqual(['false', 'true']);
+    await user.click(screen.getByRole('menuitemcheckbox', { name: 'Dashboards' })); // a third, still over the newest
+    expect(intent.writes.at(-1)).toEqual({ ...both, dashboards: false });
+    await intent.answer(1);
+    await intent.answer(2);
+    expect([checked('menuitemcheckbox', 'Auxiliary'), checked('menuitemcheckbox', 'Dashboards'), checked('menuitemradio', 'Default')]).toEqual(['false', 'false', 'true']);
+  });
+
+  it('shows the intent’s set again when the newest write is refused', async () => {
     const tools = binding();
+    tools.set.mockResolvedValueOnce({ ok: false, error: 'refused' });
     const user = await openTools(tools);
     await enterTools(user);
     await user.click(screen.getByRole('menuitemcheckbox', { name: 'Auxiliary' }));
-    expect(screen.getByRole('menuitemcheckbox', { name: 'Auxiliary' })).toBeTruthy(); // the menu stays open
-    await user.click(screen.getByRole('menuitemcheckbox', { name: 'Artifacts' }));
-    expect(tools.set.mock.calls.map(([set]) => set)).toEqual([
-      { ...FULL_MAWS_TOOL_SET, auxiliary: false },
-      { ...FULL_MAWS_TOOL_SET, artifacts: false, documents: false, dashboards: false },
-    ]);
+    await waitFor(() => expect(checked('menuitemcheckbox', 'Auxiliary')).toBe('true'));
   });
 
   it('refuses Documents and Dashboards while Artifacts is off, saying it needs Artifacts, and turns them on with it', async () => {
