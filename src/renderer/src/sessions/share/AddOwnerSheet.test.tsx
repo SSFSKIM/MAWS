@@ -109,6 +109,22 @@ describe('who it offers', () => {
 });
 
 describe('the add and its outcome', () => {
+  // the word cut (N177, N179): the read is a quiet spinner; Add owner keeps its words while the add goes, busy, with one
+  it('shows a quiet spinner while it reads, and keeps Add owner’s words while the add goes', async () => {
+    install({});
+    const sheet = await open();
+    expect(within(sheet).queryByText(SHARE.reading)).toBeNull();
+    expect(await within(sheet).findByRole('progressbar', { name: SHARE.reading })).toBeTruthy();
+    await fake.reply('org.policy.get', read(OTHER_MACHINE, [entry()]));
+    await within(sheet).findByRole('combobox', { name: OWNER.person });
+    choose(sheet, BEN);
+    fireEvent.click(submit(sheet));
+    const add = within(sheet).getByRole('button', { name: /^Add owner\b/ });
+    expect(add.getAttribute('aria-busy')).toBe('true');
+    expect(within(add).getByText(OWNER.add)).toBeTruthy();
+    expect(await within(add).findByRole('progressbar', { name: OWNER.adding })).toBeTruthy();
+  });
+
   it('sends org.owners.add for the person chosen, shows them added, and offers them no more', async () => {
     install({ 'org.policy.get': read(OTHER_MACHINE, [entry()]), 'org.owners.add': added(BEN) });
     const sheet = await open();
@@ -120,7 +136,7 @@ describe('the add and its outcome', () => {
     const outcome = sheet.querySelector('[data-owner-outcome]')!;
     expect(outcome.getAttribute('data-owner-outcome')).toBe('done');
     expect(outcome.textContent).toBe(`Ben · ${OWNER.added}`);
-    expect(within(sheet).getByText(OWNER.relisted('studio-mini'))).toBeTruthy();
+    expect(sheet.textContent, 'the word cut (W165): the outcome alone, no line about the next listing').not.toMatch(/lists the session again/);
     expect(offered(sheet)).toEqual([CHEN]);
     expect(picker(sheet).value).toBe('');
     expect(within(sheet).getByRole('button', { name: SHARE.close })).toBeTruthy();
@@ -152,7 +168,6 @@ describe('the add and its outcome', () => {
     const outcome = sheet.querySelector('[data-owner-outcome]')!;
     expect(outcome.getAttribute('data-owner-outcome')).toBe('refused');
     expect(outcome.textContent).toBe(`Ben · ${REFUSALS.grade('studio-mini')}`);
-    expect(within(sheet).queryByText(OWNER.relisted('studio-mini'))).toBeNull();
     expect(offered(sheet)).toEqual([BEN, CHEN]); // nothing changed: still offered
 
     fake = fakeClient({ 'org.view': VIEW, 'org.policy.get': read(OTHER_MACHINE, [entry()]), 'org.owners.add': { ok: false, reason: 'cancelled' } satisfies OrgPolicySetResult });

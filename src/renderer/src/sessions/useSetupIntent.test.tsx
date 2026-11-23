@@ -367,7 +367,7 @@ describe('replace verdict', () => {
     putIntent(pageIntent());
     expect(unstartedReplaceVerdict(A)).toBeNull();
     putIntent(pageIntent({ draft: { doc: { type: 'doc', content: [{ type: 'paragraph', content: [{ type: 'text', text: 'half a thought' }] }] }, attachments: [], updatedAt: '2026-09-29T10:00:00.000Z' } }));
-    expect(unstartedReplaceVerdict(A)).toEqual({ aside: 'The new chat’s draft is kept; ⌘⇧T or Reopen brings it back' });
+    expect(unstartedReplaceVerdict(A)).toEqual({ aside: 'Draft kept' }) // the word cut (W34): the toast's Reopen says the way back;
     expect(useDialogs.getState().open, 'nothing asked').toBeNull();
     putIntent(pageIntent({ message: MESSAGE }));
     expect(unstartedReplaceVerdict(A)).toMatchObject({ aside: expect.any(String) });

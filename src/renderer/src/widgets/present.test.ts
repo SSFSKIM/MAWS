@@ -223,23 +223,18 @@ describe('every widget renders its fixture response', () => {
     expect(agents[1].description).toMatch(/^Fast read-only search agent for locating code/);
   });
 
-  it("usage: the engine's session accounting, and no windows reported through the relay", () => {
+  // the word cut (P597, P598, P599): the cost in view, the times and lines and the tokens per model for Details, and
+  // nothing about the engine's windows
+  it("usage: the engine's session accounting, its cost apart from the readings behind Details", () => {
     const view = Usage.present(line<GetUsageResponse>('reads', 54));
-    expect(view.rows).toEqual([
-      { label: 'Cost', value: '$0.0208' },
+    expect(view.cost).toEqual({ label: 'Cost', value: '$0.0208' });
+    expect(view.readings).toEqual([
       { label: 'API time', value: '1.7 s' },
       { label: 'Wall time', value: '1.5 s' },
       { label: 'Lines', value: '+0 −0' },
     ]);
     expect(view.models).toEqual([{ model: 'claude-haiku-4-5-20251001', line: '906 in · 56 out · 12,318 cache read · 9,179 cache write' }]);
-    expect(view.engineWindows).toEqual({ fact: 'rate_limits_available: false', sentence: 'the engine reports no windows through the relay' });
-  });
-
-  // C11 M6, live: a session switched to Direct under a login the engine reports no limits for reads the same answer, and
-  // the sentence names the login, not the relay.
-  it('usage on a direct session: no windows reported is said of the login', () => {
-    const view = Usage.present(line<GetUsageResponse>('reads', 54), 'direct');
-    expect(view.engineWindows).toEqual({ fact: 'rate_limits_available: false', sentence: 'the engine reports no windows for this login' });
+    expect(Object.keys(view).sort()).toEqual(['cost', 'models', 'readings']);
   });
 
   it('config: the effective settings, their sources and what was applied', () => {

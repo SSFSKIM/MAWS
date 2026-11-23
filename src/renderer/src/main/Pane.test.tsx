@@ -19,7 +19,9 @@ import { resetRemoteLaneBStore } from '../lane-b/remote-session';
 import { useMachines } from '../stores/machines';
 import { useSessions } from '../stores/sessions';
 import { resetShellStores } from '../test-support/shell-stores';
-import { SessionTab } from './Pane';
+import { registerAction } from '../keymap/actions-runtime';
+import { accessibleDescription } from '../test-support/accessible-text';
+import { EmptyPane, SessionTab } from './Pane';
 
 const addressing = addressingOf(REGISTRY);
 const NOW = Date.parse('2026-11-13T09:00:00.000Z');
@@ -78,7 +80,7 @@ function holdAcross(appSessionId: AppSessionId) {
   expect(statusLine()?.dataset.linkPhase).toBe('reconnecting');
   fireEvent.change(kept().draft, { target: { value: 'a draft typed before the outage, and during it' } });
   act(() => vi.advanceTimersByTime(REMOTE_ACT_PENDING_MS));
-  expect(statusLine()?.textContent).toBe('Studio is offline · this session reconnects when it’s back');
+  expect(statusLine()?.textContent).toBe('Studio is offline');
 
   link('up');
   expect(statusLine(), 'the line goes at up').toBeNull();
@@ -127,7 +129,7 @@ describe('a session tab of another machine through an outage', () => {
     expect(statusLine()?.dataset.linkWords).toBe('middle');
     expect(screen.queryByText('Opening on Studio…')).toBeNull();
     link('down', { generation: 0 }); // the first attempt failed
-    expect(statusLine()?.textContent).toBe('Studio is offline · this session reconnects when it’s back');
+    expect(statusLine()?.textContent).toBe('Studio is offline');
     link('up');
     expect(statusLine()).toBeNull();
     expect(screen.getByRole('status').textContent, 'the pane, opening the session there').toBe('Opening on Studio…');
@@ -150,5 +152,24 @@ describe('a session tab of this Mac', () => {
     render(<SessionTab tab={tab(LOCAL)} paneIndex={0} />);
     expect(statusLine()).toBeNull();
     expect(screen.getByTestId('scroller')).toBeTruthy();
+  });
+});
+
+// The word cut, W22 and W23: an empty main area draws its two ways in and no sentence; "No open tabs" stays for a screen
+// reader, and the Overview button's chord waits in its tooltip, which focus reaches.
+describe('the empty main area', () => {
+  it('draws Overview and New chat with no sentence, Overview’s chord in its description', () => {
+    const offOverview = registerAction('tab.overview', () => {});
+    try {
+      render(<EmptyPane />);
+      const overview = screen.getByRole('button', { name: 'Overview' });
+      expect(overview.textContent).toBe('Overview');
+      expect(accessibleDescription(overview)).toBe('⌘0');
+      const said = screen.getByText('No open tabs');
+      expect(said.className, 'kept for a screen reader, not drawn').toContain('sr-only');
+      expect(document.querySelector('[data-empty-pane]')).not.toBeNull();
+    } finally {
+      offOverview();
+    }
   });
 });

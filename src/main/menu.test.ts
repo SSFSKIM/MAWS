@@ -491,7 +491,7 @@ describe('the menus drawn from the table', () => {
     // a subsequence, so a later row may stand between them (U6b's zoom rows, U11's channel)
     expect(subsequence(shape(view), [
       'Overview', 'Artifacts', 'Tabs ▸', '—', 'Split / move to other pane', 'Focus other pane', 'Expand pane', '—',
-      'Toggle sidebar', 'Toggle session cards', 'Expand surface', 'Float conversation over surface', '—',
+      'Toggle sidebar', 'Toggle session cards', 'Expand surface', 'Float chat' /* the word cut (W185) */, '—',
       'Terminal', 'Review', 'Files', 'Browser', 'More surfaces ▸', '—', 'Move to side surface', 'Move to tab', '—',
       'Comments ▸', 'Appearance ▸', 'Usage', '—', 'Developer ▸', '—', 'togglefullscreen',
     ]), shape(view).join(' · ')).toBe(true);

@@ -61,6 +61,17 @@ afterEach(() => {
   delete (window as { maws?: PreloadBridge }).maws;
 });
 
+// The word cut (N176): Regenerate keeps its word while the engine names the session, busy, with a quiet spinner in it
+it('Regenerate keeps its word while it waits, with a quiet spinner named by the wait', async () => {
+  await regenerateWith([withContent(firstPrompt('u704-end-env-first-1'), 'm1', 'Name this one')]);
+  const button = screen.getByRole('button', { name: /^Regenerate\b/ }) as HTMLButtonElement;
+  await waitFor(() => expect(button.getAttribute('aria-busy')).toBe('true'));
+  expect(button.disabled).toBe(true);
+  expect(within(button).getByText('Regenerate')).toBeTruthy();
+  expect(screen.queryByText('Regenerating…')).toBeNull();
+  expect(await within(button).findByRole('progressbar', { name: 'Regenerating the title' })).toBeTruthy();
+});
+
 describe('Regenerate’s description and an answer envelope (ticket 704)', () => {
   it('a first message with no words, then an answer sent alone (u704-end-env-first-1’s envelope), then words: the words', async () => {
     const template = firstPrompt('u704-end-env-first-1');
