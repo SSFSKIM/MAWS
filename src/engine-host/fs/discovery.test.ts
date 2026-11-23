@@ -1,4 +1,5 @@
-import { chmod, mkdir, rm, utimes, writeFile } from 'node:fs/promises';
+import { appendFile, chmod, mkdir, open, rename, rm, stat, utimes, writeFile } from 'node:fs/promises';
+import { readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { SessionId } from '@shared/graph/ids';
@@ -116,15 +117,90 @@ describe('discovery lists and summarises the store', () => {
 
   // Seen 2026-11-23: a transcript that opens with file-history snapshots of ~58 KiB each, its first `cwd` far past the
   // head window, was stored with no folder, and the renderer threw on the empty one.
-  it('finds the folder of a transcript whose head window holds none, past the head and before the tail', async () => {
+  describe('the launch folder past the head window', () => {
     const snapshot = (n: number) => ({ type: 'file-history-snapshot', messageId: `m${n}`, snapshot: { trackedFileBackups: { f: 'z'.repeat(58 * 1024) } } });
-    const filler = { type: 'attachment', uuid: 'f1', parentUuid: 'u1', cwd: '/work/later', attachment: { type: 'x', text: 'y'.repeat(2 * HEAD_TAIL_BYTES) } };
+    const snapshots = (count: number) => Array.from({ length: count }, (_, n) => snapshot(n));
+    const filler = (cwd: string) => ({ type: 'attachment', uuid: 'f1', parentUuid: 'u1', cwd, attachment: { type: 'x', text: 'y'.repeat(2 * HEAD_TAIL_BYTES) } });
     const nested = { type: 'progress', toolInput: { cwd: '/not/the/record' } }; // a nested `cwd` is no record's folder
-    const records = [snapshot(1), snapshot(2), nested, snapshot(3), user('u1', null, '/work/launched', 'hi'), filler];
-    const path = await fixture.addTranscript('/work/launched', S1, records);
-    const discovery = new Discovery(fixture.paths);
-    expect((await discovery.summarizeOne(path))?.directory).toBe('/work/launched');
-    expect((await discovery.summarizeOne(path))?.directory).toBe('/work/launched'); // the cached answer
+
+    // Every read a summary makes (position, length), through the file handle's prototype.
+    async function spyReads(path: string) {
+      const probe = await open(path, 'r');
+      const proto = Object.getPrototypeOf(probe) as { read: (...args: unknown[]) => Promise<{ bytesRead: number }> };
+      await probe.close();
+      const reads: { position: number; length: number }[] = [];
+      const original = proto.read;
+      const read = vi.spyOn(proto, 'read').mockImplementation(function (this: unknown, ...args: unknown[]) {
+        reads.push({ position: args[3] as number, length: args[2] as number });
+        return original.apply(this, args);
+      });
+      return { reads, read, original };
+    }
+    afterEach(() => vi.restoreAllMocks());
+
+    it('finds the folder, past the head and before the tail, never a nested one; an unchanged file is not scanned again', async () => {
+      const path = await fixture.addTranscript('/work/launched', S1, [...snapshots(2), nested, snapshot(9), user('u1', null, '/work/launched', 'hi'), filler('/work/later')]);
+      const discovery = new Discovery(fixture.paths);
+      expect((await discovery.summarizeOne(path))?.directory).toBe('/work/launched');
+      const spy = await spyReads(path);
+      expect((await discovery.summarizeOne(path))?.directory).toBe('/work/launched');
+      expect(spy.reads.length).toBe(2); // the head and the tail: the folder is remembered
+    });
+
+    it('remembers a scan that found no folder: an unchanged file is not read past its head again, an append only past where it stopped', async () => {
+      const path = await fixture.addTranscript('/work/none', S2, [...snapshots(4)]);
+      const discovery = new Discovery(fixture.paths);
+      expect((await discovery.summarizeOne(path))?.directory).toBeNull();
+      const spy = await spyReads(path);
+      expect((await discovery.summarizeOne(path))?.directory).toBeNull();
+      expect(spy.reads.length).toBe(2); // the head and the tail only
+      const before = (await stat(path)).size;
+      await appendFile(path, JSON.stringify(user('u1', null, '/work/none', 'hi')) + '\n');
+      spy.reads.length = 0;
+      expect((await discovery.summarizeOne(path))?.directory).toBe('/work/none');
+      const scanned = spy.reads.slice(2); // past the head and the tail: the scan
+      expect(scanned.length).toBeGreaterThan(0);
+      expect(Math.min(...scanned.map((r) => r.position))).toBeGreaterThanOrEqual(before);
+    });
+
+    it('scans afresh a transcript replaced at the same path, and one that shrank', async () => {
+      const path = await fixture.addTranscript('/work/a', S3, [...snapshots(2), user('u1', null, '/work/a', 'hi'), filler('/work/a')]);
+      const discovery = new Discovery(fixture.paths);
+      expect((await discovery.summarizeOne(path))?.directory).toBe('/work/a');
+      // replaced: a new file renamed over it (a new inode), as large or larger
+      const next = `${path}.next`;
+      await writeFile(next, [...snapshots(3), user('u1', null, '/work/b', 'hi'), filler('/work/b')].map((r) => JSON.stringify(r)).join('\n') + '\n');
+      await rename(next, path);
+      expect((await discovery.summarizeOne(path))?.directory).toBe('/work/b');
+      // shrank in place (same inode): shorter than where the scan found its folder
+      await writeFile(path, [...snapshots(2), user('u1', null, '/work/c', 'hi'), filler('/work/c')].map((r) => JSON.stringify(r)).join('\n') + '\n');
+      expect((await discovery.summarizeOne(path))?.directory).toBe('/work/c');
+    });
+
+    it('a file that shrinks under the scan is read again from its new stat, and leaves no handle open', async () => {
+      const handles = () => readdirSync('/dev/fd').length;
+      const path = await fixture.addTranscript('/work/t', S4, [...snapshots(2), user('u1', null, '/work/t', 'hi'), filler('/work/t')]);
+      const spy = await spyReads(path);
+      const open0 = handles();
+      let truncations = 1;
+      spy.read.mockImplementation(function (this: unknown, ...args: unknown[]) {
+        const [buffer] = args as [Buffer];
+        spy.reads.push({ position: args[3] as number, length: args[2] as number });
+        if (buffer.length !== HEAD_TAIL_BYTES && truncations > 0) { // the scan's chunk (the head's and the tail's are 64 KiB)
+          truncations -= 1;
+          return Promise.resolve({ bytesRead: 0, buffer });
+        }
+        return spy.original.apply(this, args);
+      });
+      expect((await new Discovery(fixture.paths).summarizeOne(path))?.directory).toBe('/work/t');
+      expect(spy.reads.filter((r) => r.length !== HEAD_TAIL_BYTES)).toHaveLength(2); // the scan's chunk, read again
+      // a file that keeps shrinking: no summary of a stale stat, an error after the retries, never a loop
+      truncations = Infinity;
+      spy.reads.length = 0;
+      await expect(new Discovery(fixture.paths).summarizeOne(path)).rejects.toThrow(/shrank/);
+      expect(spy.reads.filter((r) => r.length !== HEAD_TAIL_BYTES)).toHaveLength(3); // one per attempt
+      expect(handles()).toBe(open0);
+    });
   });
 
   it('answers null for a transcript that no longer exists', async () => {

@@ -7,7 +7,7 @@ import { previewLine } from '@shared/owner/preview';
 import { currentChain } from '@shared/wire/transcript';
 import { FIXTURE_DIR, loadJournal, loadTranscriptFixture, TEST_FIXTURE_DIR } from '../../../test/support/fixtures';
 import { recordedJoin } from '../../../test/support/recorded-joins'; // ticket 704
-import { firstCwd, HEAD_TAIL_BYTES, summarize } from './summarize';
+import { headCwd, HEAD_TAIL_BYTES, lineCwd, summarize } from './summarize';
 
 const PARENT_FIXTURE = join(TEST_FIXTURE_DIR, 'transcripts/subagent-parent.jsonl');
 // The session id is the file name under projects/<slug>/ (§4.3); the fixture copy carries its own name, so the
@@ -501,20 +501,20 @@ describe('the launch folder past the head window', () => {
     return summarize(head, tail, { size: bytes.length, mtimeMs: 1, birthtimeMs: 0 }, '/p/S.jsonl', '-p', null, launchCwd);
   };
 
-  it("is the folder discovery found past the head, else the tail's earliest, never null while a row names one", () => {
+  it('is the folder discovery found past the head, and unknown without one: never a later row\'s', () => {
     const bytes = Buffer.from(snapshot(1) + snapshot(2) + first('/launched') + later + last, 'utf8');
-    expect(firstCwd(headAndTail(bytes).head)).toBeNull(); // the head window is all snapshots
-    expect(firstCwd(bytes)).toBe('/launched');
+    expect(headCwd(headAndTail(bytes).head, bytes.length)).toBeNull(); // the head window is all snapshots
     expect(of(bytes, '/launched').directory).toBe('/launched');
-    expect(of(bytes, null).directory).toBe('/tail');
+    expect(of(bytes, null)).toMatchObject({ directory: null, newestCwd: '/tail' }); // a later `cd` refiles nothing
   });
 
-  it('firstCwd passes over a nested cwd and an escaped one, and reads a line cut by the window from its start', () => {
-    const nested = line({ type: 'progress', input: { cwd: '/nested' }, note: '"cwd":"/escaped"' });
-    const text = nested + first('/real');
-    expect(firstCwd(Buffer.from(text, 'utf8'))).toBe('/real');
-    expect(firstCwd(Buffer.from(text.slice(0, text.length - 30), 'utf8'))).toBe('/real'); // cut inside the message
-    expect(firstCwd(Buffer.from(nested, 'utf8'))).toBeNull();
+  it("lineCwd reads a record's top-level cwd from its line's start, never a nested or escaped one", () => {
+    const at = (text: string) => lineCwd(Buffer.from(text, 'utf8'));
+    expect(at(line({ type: 'progress', input: { cwd: '/nested' }, note: '"cwd":"/escaped"' }))).toBeNull();
+    const record = first('/real');
+    expect(at(record)).toBe('/real');
+    expect(at(record.slice(0, 120))).toBe('/real'); // a line's start, cut anywhere after the key
+    expect(at(line({ type: 'progress', input: { cwd: '/nested' }, cwd: '/own' }))).toBe('/own');
   });
 });
 

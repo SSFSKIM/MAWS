@@ -9,7 +9,7 @@ import type { SessionId } from '@shared/graph/ids';
 import type { TranscriptSummary } from '@shared/wire/store';
 import type { StorePaths } from './paths';
 import { isMissing, noteReadable, noteUnreadable, readJsonWithRetry } from './sidecars';
-import { firstCwd, HEAD_TAIL_BYTES, summarize } from './summarize';
+import { HEAD_TAIL_BYTES, headCwd, lineCwd, summarize } from './summarize';
 import { SESSION_ID } from './watcher';
 
 export interface ListedTranscript {
@@ -22,8 +22,27 @@ export interface ListedTranscript {
 
 export const SUMMARY_CONCURRENCY = 16;
 // How far from a transcript's start discovery looks for its first folder when the head window names none (a head of
-// file-history snapshots: seen 2026-11-23, a 620 MB transcript's first `cwd` at byte 473,059). Windows double up to it.
+// file-history snapshots: seen 2026-11-23, a 620 MB transcript's first `cwd` at byte 473,059), in all; it reads in
+// chunks of SCAN_CHUNK_BYTES through one buffer, and of each line looks only at its first LINE_START_BYTES, where a
+// record's own keys sit, so a scan holds at most a chunk and a line's start however long the lines are.
 export const LAUNCH_CWD_SCAN_BYTES = 16 * 1024 * 1024;
+const SCAN_CHUNK_BYTES = 1024 * 1024;
+const LINE_START_BYTES = 64 * 1024;
+const CHANGED_RETRIES = 2;
+
+// The file shrank under a read (truncated or rewritten after its stat): nothing read describes the stat taken.
+class TranscriptChanged extends Error {}
+
+// What the scan past the head learned of one transcript: the file it read (device and inode), the folder it found or
+// null, and how far it looked: the end of the line that named the folder, else where to go on from (the start of the
+// line it had not seen whole, or the cap). A file replaced (another inode) or shorter than it was is scanned afresh.
+interface LaunchScan {
+  dev: number;
+  ino: number;
+  cwd: string | null;
+  scanned: number;
+  size: number; // the file's size when it was scanned: an unchanged file is not read again
+}
 
 // U8c-1 (M1 decision 8): a test-only hook that holds an interleaving open, awaited at a named point with what the point is
 // about: before a scan's listing reads a project folder (its name), before a transcript is summarised (its path), and
@@ -38,8 +57,9 @@ const CustomTitleSchema = z.looseObject({ customTitle: z.string() });
 export class Discovery {
   // The last title each `custom-title.json` read whole, by sidecar path: what a torn rewrite falls back to.
   private readonly sidecarTitles = new Map<string, string>();
-  // The first folder found past the head window, by transcript path: the file's start does not change as it grows.
-  private readonly launchCwds = new Map<string, string>();
+  // The scan past the head window, by transcript path: a transcript only grows, so an unchanged one is not read again and
+  // a grown one only past where the scan stopped.
+  private readonly launchScans = new Map<string, LaunchScan>();
 
   constructor(
     private readonly paths: StorePaths,
@@ -111,7 +131,18 @@ export class Discovery {
 
   // The first and last 64 KiB of one transcript through `summarize`, with the `custom-title.json` beside it folded
   // in; null when the transcript does not exist. Size and mtime are the opened file's, so they describe the bytes read.
+  // A file that shrank while it was read is read again, from its new stat, up to CHANGED_RETRIES times.
   async summarizeOne(path: string): Promise<TranscriptSummary | null> {
+    for (let attempt = 0; ; attempt++) {
+      try {
+        return await this.summarizeOnce(path);
+      } catch (error) {
+        if (!(error instanceof TranscriptChanged) || attempt >= CHANGED_RETRIES) throw error;
+      }
+    }
+  }
+
+  private async summarizeOnce(path: string): Promise<TranscriptSummary | null> {
     let file;
     try {
       file = await open(path, 'r');
@@ -123,9 +154,9 @@ export class Discovery {
     let launchCwd: string | null = null;
     try {
       info = await file.stat();
-      head = await readRange(file, 0, Math.min(HEAD_TAIL_BYTES, info.size));
-      tail = info.size <= HEAD_TAIL_BYTES ? head : await readRange(file, info.size - HEAD_TAIL_BYTES, HEAD_TAIL_BYTES);
-      if (info.size > head.length && firstCwd(head) === null) launchCwd = await this.launchCwd(file, path, info.size);
+      head = await readWhole(file, 0, Math.min(HEAD_TAIL_BYTES, info.size), path);
+      tail = info.size <= HEAD_TAIL_BYTES ? head : await readWhole(file, info.size - HEAD_TAIL_BYTES, HEAD_TAIL_BYTES, path);
+      if (info.size > head.length && headCwd(head, info.size) === null) launchCwd = await this.launchCwd(file, path, info);
     } finally {
       await file.close();
     }
@@ -134,20 +165,17 @@ export class Discovery {
     return summarize(head, tail, { size: info.size, mtimeMs: info.mtimeMs, birthtimeMs: info.birthtimeMs }, path, basename(dirname(path)), sidecarTitle, launchCwd);
   }
 
-  // The first folder of a transcript whose head window names none, from windows doubling up to LAUNCH_CWD_SCAN_BYTES;
-  // null when none of them holds one (the summary then falls back to the tail's).
-  private async launchCwd(file: Awaited<ReturnType<typeof open>>, path: string, size: number): Promise<string | null> {
-    const known = this.launchCwds.get(path);
-    if (known !== undefined) return known;
-    for (let length = HEAD_TAIL_BYTES * 4; ; length *= 2) {
-      const window = await readRange(file, 0, Math.min(length, size, LAUNCH_CWD_SCAN_BYTES));
-      const cwd = firstCwd(window);
-      if (cwd !== null) {
-        this.launchCwds.set(path, cwd);
-        return cwd;
-      }
-      if (window.length >= size || window.length >= LAUNCH_CWD_SCAN_BYTES) return null;
-    }
+  // The first folder of a transcript whose head window names none, from the scan past it (`launchScans`); null when the
+  // first LAUNCH_CWD_SCAN_BYTES name none.
+  private async launchCwd(file: FileHandle, path: string, info: { dev: number; ino: number; size: number }): Promise<string | null> {
+    const known = this.launchScans.get(path);
+    const same = known !== undefined && known.dev === info.dev && known.ino === info.ino && info.size >= known.size;
+    if (same && (known.cwd !== null || known.size === info.size)) return known.cwd;
+    const from = same ? known.scanned : 0;
+    if (from >= Math.min(info.size, LAUNCH_CWD_SCAN_BYTES)) return null; // the cap reached: nothing more is looked at
+    const { cwd, scanned } = await scanForCwd(file, from, info.size, path);
+    this.launchScans.set(path, { dev: info.dev, ino: info.ino, cwd, scanned, size: info.size });
+    return cwd;
   }
 
   // A sidecar that never reads whole (torn, or unreadable) keeps the title it last had; one that is gone has none.
@@ -217,7 +245,53 @@ async function writtenLast(paths: readonly string[]): Promise<string | null> {
   return last?.path ?? null;
 }
 
-async function readRange(file: Awaited<ReturnType<typeof open>>, position: number, length: number): Promise<Buffer> {
+type FileHandle = Awaited<ReturnType<typeof open>>;
+
+// `length` bytes at `position`, which the stat said are there; fewer is a file that shrank since (TranscriptChanged).
+async function readWhole(file: FileHandle, position: number, length: number, path: string): Promise<Buffer> {
+  const buffer = await readRange(file, position, length);
+  if (buffer.length < length) throw new TranscriptChanged(`${path} shrank while it was read`);
+  return buffer;
+}
+
+// The first record's top-level `cwd` from `from` (a line's start) up to LAUNCH_CWD_SCAN_BYTES or `size`, and how far it
+// looked (LaunchScan's `scanned`). Each line's first LINE_START_BYTES are kept across chunk edges; the rest of a line is
+// passed over. The last line, unfinished or cut by the cap, is looked at too, but scanned again when the scan goes on.
+async function scanForCwd(file: FileHandle, from: number, size: number, path: string): Promise<{ cwd: string | null; scanned: number }> {
+  const end = Math.min(size, LAUNCH_CWD_SCAN_BYTES);
+  const chunk = Buffer.alloc(Math.min(SCAN_CHUNK_BYTES, end - from));
+  const start = Buffer.alloc(LINE_START_BYTES);
+  let kept = 0; // bytes of the current line's start in `start`
+  let lineStart = from;
+  for (let position = from; position < end; ) {
+    const length = Math.min(chunk.length, end - position);
+    let filled = 0;
+    while (filled < length) {
+      const { bytesRead } = await file.read(chunk, filled, length - filled, position + filled);
+      if (bytesRead === 0) throw new TranscriptChanged(`${path} shrank while it was read`);
+      filled += bytesRead;
+    }
+    const bytes = chunk.subarray(0, length);
+    for (let i = 0; i < length; ) {
+      const newline = bytes.indexOf(0x0a, i);
+      const stop = newline === -1 ? length : newline;
+      const take = Math.min(stop - i, LINE_START_BYTES - kept);
+      if (take > 0) kept += bytes.copy(start, kept, i, i + take);
+      if (newline === -1) break;
+      const cwd = lineCwd(start.subarray(0, kept));
+      if (cwd !== null) return { cwd, scanned: position + newline + 1 };
+      kept = 0;
+      lineStart = position + newline + 1;
+      i = newline + 1;
+    }
+    position += length;
+  }
+  const cwd = kept > 0 ? lineCwd(start.subarray(0, kept)) : null;
+  if (cwd !== null) return { cwd, scanned: end };
+  return { cwd: null, scanned: end >= LAUNCH_CWD_SCAN_BYTES ? LAUNCH_CWD_SCAN_BYTES : lineStart };
+}
+
+async function readRange(file: FileHandle, position: number, length: number): Promise<Buffer> {
   const buffer = Buffer.alloc(length);
   let filled = 0;
   while (filled < length) {

@@ -426,7 +426,7 @@ describe('browser.* handlers in main (E4a Interfaces "IPC")', () => {
     });
     const sessions = new SessionMachines(LOCAL, {}, Object.keys(selected));
     const handlers = new Map<CommandName, (input: unknown, context?: unknown) => unknown>();
-    registerBrowserHandlers({ store, sessions, register: (name, handler) => void handlers.set(name, handler as never) } as never);
+    registerBrowserHandlers({ store, sessions, register: (name: CommandName, handler: unknown) => void handlers.set(name, handler as (input: unknown) => unknown) } as never);
     const list = (target: unknown) => handlers.get('browser.tabs.list')!({}, { ...contextOf(fakePage()), target });
     expect(list(LOCAL)).toEqual({ tabs: [], selected: { [A]: null } });
     expect(list(OTHER)).toEqual({ tabs: [], selected: { 'App-R': null } });

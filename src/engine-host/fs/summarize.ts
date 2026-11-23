@@ -24,7 +24,7 @@ export function summarize(
   path: string,
   slug: string,
   sidecarTitle: string | null = null, // `custom-title.json`'s `customTitle`, which discovery reads beside the transcript (M2)
-  launchCwd: string | null = null, // the first record's folder when it lies past the head window (discovery's `firstCwd` over a longer head)
+  launchCwd: string | null = null, // the first record's folder when it lies past the head window (discovery's scan past it)
 ): TranscriptSummary {
   const headText = head.toString('utf8');
   const tailText = tail.toString('utf8');
@@ -51,9 +51,9 @@ export function summarize(
     transcriptPath: path,
     slug,
     // The folder the session was launched in: the head's first, else the one discovery found past the head (a transcript
-    // whose head is all bookkeeping: file-history snapshots of tens of KiB each), else the tail's earliest. A session
-    // with no folder at all has none (null), which the index keeps rather than filing it under no folder.
-    directory: firstString(headRecords, 'cwd') ?? launchCwd ?? firstString(tailRecords, 'cwd'),
+    // whose head is all bookkeeping: file-history snapshots of tens of KiB each). Never a later row's: a shell `cd` does
+    // not refile the session (newestCwd follows it). Unknown (null) when neither names one, which the index keeps.
+    directory: firstString(headRecords, 'cwd') ?? launchCwd,
     relocatedCwd: lastString(tailReversed, 'relocated', 'relocatedCwd'),
     newestCwd: newestCwd(tailReversed), // UX wave U8c-2 (§A): the tail only; a head's newest folder in a long file is old
     size: stat.size,
@@ -89,23 +89,18 @@ function newestCwd(records: TranscriptRecord[]): string | null {
   return null;
 }
 
-// The `cwd` of the first record in `window` (read from the file's start) that names one, or null: the whole lines that
-// hold the key are parsed (the line cut by the window's end through the fragment scan), and only those, so a window of
-// megabytes costs a byte search. A `"cwd":"` inside a string is escaped, so the search meets only keys; a nested one
-// (a tool input's) parses as no record's folder and the search goes on past its line.
-export function firstCwd(window: Buffer): string | null {
-  const needle = '"cwd":"';
-  let at = window.indexOf(needle);
-  while (at !== -1) {
-    const start = window.lastIndexOf(0x0a, at) + 1;
-    const newline = window.indexOf(0x0a, at);
-    const line = window.subarray(start, newline === -1 ? window.length : newline).toString('utf8');
-    const record = parseRecord(line) ?? (newline === -1 ? scanRecordStart(line) : null);
-    if (typeof record?.cwd === 'string') return record.cwd;
-    if (newline === -1) return null;
-    at = window.indexOf(needle, newline);
-  }
-  return null;
+// The folder the head window's first record names (what `summarize` files the session under), or null.
+export function headCwd(head: Buffer, size: number): string | null {
+  return firstString(parseWindow(head.toString('utf8'), { dropLast: size > head.length }), 'cwd');
+}
+
+// The top-level `cwd` of the record whose line begins with `start` (a line's first bytes, cut anywhere), or null: the
+// fragment scan below reads depth-1 keys only, so a `cwd` inside a tool input is never the record's. A line without the
+// key's bytes costs a byte search.
+export function lineCwd(start: Buffer): string | null {
+  if (start.indexOf('"cwd":"') === -1) return null;
+  const cwd = scanRecordStart(start.toString('utf8'))?.cwd;
+  return typeof cwd === 'string' ? cwd : null;
 }
 
 // Whole lines in the window parse as records. A line cut by the window's edge that begins at a record's start (the
