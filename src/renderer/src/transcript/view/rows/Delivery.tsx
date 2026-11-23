@@ -1,5 +1,6 @@
 // E1 (M3): a `send_file` call's delivery row (E1 execution document, M3's decisions; X12: the record and the viewer are
-// E2's). A file glyph, "Delivered hello.txt" (or "Delivered N files") with the agent's caption, then a line per file:
+// E2's). Board ticket 848 retired the tool on 2026-11-23: the row draws the records written before, and a later call's
+// refusal. A file glyph, "Delivered hello.txt" (or "Delivered N files") with the agent's caption, then a line per file:
 // its name (the full path as its title) and two quiet buttons, Open externally and Reveal in Finder (on pointing or focus
 // within the file's line, and always where nothing points: the word cut, T101), which go through
 // `files.openExternal` and `files.reveal` with the row's session; a refusal shows inline for a moment. Open externally

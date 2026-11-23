@@ -73,16 +73,16 @@ describe('artifact_search (X33, P4-B4)', () => {
 describe('the maws server’s instructions (X33, route (b))', () => {
   it('is the one paragraph, word for word', () => {
     expect(MAWS_SERVER_INSTRUCTIONS).toBe(
-      "MAWS artifacts are the user's documents, presentations, designs, dashboards, html pages and files. When you name one to the user, write a Markdown link to it, [its title](maws-artifact:<artifactId>): a click opens it in MAWS, so the user never has to ask where it is. To open it at a place, add a fragment: #block=<blockId> for a document's block, #tab=<tabId> for a document's tab, #slide=<slideId> for a presentation's slide, #v<version> for a retained version, with the ids mcp__maws__artifact_read and mcp__maws__artifact_search return. To find an artifact you did not make or open in this session, call mcp__maws__artifact_search. A Markdown link to a file's absolute path, [its name](/absolute/path), opens the file in MAWS when it is inside this session's folders; deliver a file from anywhere else with mcp__maws__send_file.",
+      "MAWS artifacts are the user's documents, presentations, designs, dashboards, html pages and files. When you name one to the user, write a Markdown link to it, [its title](maws-artifact:<artifactId>): a click opens it in MAWS, so the user never has to ask where it is. To open it at a place, add a fragment: #block=<blockId> for a document's block, #tab=<tabId> for a document's tab, #slide=<slideId> for a presentation's slide, #v<version> for a retained version, with the ids mcp__maws__artifact_read and mcp__maws__artifact_search return. To find an artifact you did not make or open in this session, call mcp__maws__artifact_search. To show the user a file, write a Markdown link to its absolute path, [its name](/absolute/path): a click opens it beside the chat, and ⌘-click opens it in the main area.",
     );
     // UX wave U6d: 699 before O-44 took out the sentence that invited show_pane; U6b-4b: 635 before the sentence on file
-    // links (197 characters with its space)
-    expect(MAWS_SERVER_INSTRUCTIONS).toHaveLength(832);
+    // links (197 characters with its space); board ticket 848: 832 before that sentence stopped naming send_file
+    expect(MAWS_SERVER_INSTRUCTIONS).toHaveLength(805);
   });
 
   it('names only tools the server lists', () => {
     const named = [...MAWS_SERVER_INSTRUCTIONS.matchAll(/mcp__maws__(\w+)/g)].map((m) => m[1]);
-    expect(new Set(named)).toEqual(new Set(['artifact_read', 'artifact_search', 'send_file'])); // U6d: show_pane no longer; U6b-4b: send_file
+    expect(new Set(named)).toEqual(new Set(['artifact_read', 'artifact_search'])); // U6d: show_pane no longer; U6b-4b: send_file, until board ticket 848
     for (const name of named) expect(MAWS_TOOL_NAMES as readonly string[], name).toContain(name);
   });
 });
@@ -95,8 +95,9 @@ const PROBE_TOOLS = fileURLToPath(new URL('../../../spikes/protocol-probe/scenar
 const probeTools = () => `${JSON.stringify({ instructions: MAWS_SERVER_INSTRUCTIONS, tools: mawsToolList() }, null, 2)}\n`;
 
 // P4-R7z (the P4 spec's Decision Log 92) took P4-R7's `message` off the server after the probe recorded its fixtures
-// against this snapshot, which keeps it so the fixtures still match what they were served; less that one tool it is the
-// source. Re-recording the probe drops it (the tracker's row).
+// against this snapshot, which keeps it so the fixtures still match what they were served, and so did board ticket 848
+// with `send_file` (2026-11-23); less those two tools it is the source. Re-recording the probe drops them (the tracker's
+// row).
 // The places where the snapshot is older than the source for the same reason: the recorded fixtures are compared with
 // them (spikes/protocol-probe/fixtures.test.mjs: `served4.instructions`, and `show_pane`'s `at`). Each holds what the
 // snapshot has there, with the date and the reason; the snapshot's case checks it there and compares the rest whole, so
@@ -111,7 +112,7 @@ const OLDER_IN_SNAPSHOT = [
   {
     place: 'instructions',
     since: '2026-11-14',
-    reason: 'UX wave U6d (O-44) took the sentence that invited show_pane out of the source; the fixtures were served it; UX wave U6b-4b (2026-11-18) appended the sentence on file links, which the fixtures were not served',
+    reason: 'UX wave U6d (O-44) took the sentence that invited show_pane out of the source; the fixtures were served it; UX wave U6b-4b (2026-11-18) appended the sentence on file links, which the fixtures were not served; board ticket 848 (2026-11-23) rewrote it without send_file',
     held: () => "MAWS artifacts are the user's documents, presentations, designs, dashboards, html pages and files. When you name one to the user, write a Markdown link to it, [its title](maws-artifact:<artifactId>): a click opens it in MAWS, so the user never has to ask where it is. To open it at a place, add a fragment: #block=<blockId> for a document's block, #tab=<tabId> for a document's tab, #slide=<slideId> for a presentation's slide, #v<version> for a retained version, with the ids mcp__maws__artifact_read and mcp__maws__artifact_search return. Call mcp__maws__show_pane only when the user should see it now. To find an artifact you did not make or open in this session, call mcp__maws__artifact_search.",
   },
   {
@@ -123,17 +124,17 @@ const OLDER_IN_SNAPSHOT = [
 ] as const;
 
 describe('the probe’s snapshot of the maws server', () => {
-  it('is the paragraph and tools/list as the source has them, less the message tool P4-R7z took out and the places named older', () => {
+  it('is the paragraph and tools/list as the source has them, less the tools taken out since (P4-R7z’s message, board ticket 848’s send_file) and the places named older', () => {
     if (process.env.MAWS_WRITE_PROBE_TOOLS === '1') writeFileSync(PROBE_TOOLS, probeTools());
     const snapshot = JSON.parse(readFileSync(PROBE_TOOLS, 'utf8')) as { instructions: string; tools: { name: string }[] };
-    expect(snapshot.tools.map((tool) => tool.name).filter((name) => !MAWS_TOOL_NAMES.includes(name as never))).toEqual(['message']);
+    expect(snapshot.tools.map((tool) => tool.name).filter((name) => !MAWS_TOOL_NAMES.includes(name as never))).toEqual(['send_file', 'message']);
     const source = JSON.parse(probeTools()) as typeof snapshot;
     const [instructions, showPane] = OLDER_IN_SNAPSHOT;
     expect(snapshot.instructions, `${instructions.place}, older since ${instructions.since}: ${instructions.reason}`).toBe(instructions.held());
     expect(snapshot.tools.find((tool) => tool.name === 'show_pane'), `${showPane.place}, older since ${showPane.since}: ${showPane.reason}`).toEqual(showPane.held());
     // the rest whole: the named places as the source has them, everything else as the snapshot holds it
     const sourcePane = source.tools.find((tool) => tool.name === 'show_pane')!;
-    const rest = { instructions: source.instructions, tools: snapshot.tools.filter((tool) => tool.name !== 'message').map((tool) => (tool.name === 'show_pane' ? sourcePane : tool)) };
+    const rest = { instructions: source.instructions, tools: snapshot.tools.filter((tool) => tool.name !== 'message' && tool.name !== 'send_file').map((tool) => (tool.name === 'show_pane' ? sourcePane : tool)) };
     expect(`${JSON.stringify(rest, null, 2)}\n`).toBe(probeTools());
   });
 });

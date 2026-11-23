@@ -71,7 +71,7 @@ export function artifactPublishTool(deps: PublishDeps): McpToolDefinition {
       const artifact = await store.readCommitted(() => store.get(artifactId));
       if (!artifact) throw refuse(TOOL, { reason: 'notFound', artifactId }, `the artifact ${input.artifact} was deleted`);
       if (input.path !== undefined && artifact.kind !== 'html') throw new ToolRefusal(TOOL_ERRORS.publishPathHtmlOnly(artifact.kind)); // U10b
-      if (artifact.kind === 'file') throw refuse(TOOL, { reason: 'invalid', kind: 'file' }, 'a file artifact is delivered again with send_file, not published');
+      if (artifact.kind === 'file') throw refuse(TOOL, { reason: 'invalid', kind: 'file' }, 'a file artifact is not published to: change the file with your own tools and link it in your message');
       if (artifact.kind === 'document') throw refuse(TOOL, { reason: 'invalid', kind: 'document' }, 'a document is edited block by block, not published');
       // P3-E (E2 M2; ledger X25; parent Decision Log 16): a dashboard is a document, its data bound by artifact_dataset
       // (fix wave R1) one made from files before E2 is held, named with its files and the way forward

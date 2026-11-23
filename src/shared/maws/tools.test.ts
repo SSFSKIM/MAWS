@@ -49,10 +49,10 @@ import { HISTORICAL_SEND_FILE, SendFileInputSchema, SendFileResultSchema } from 
 import { mawsServerInstructions } from './instructions';
 
 describe('X9: the maws server and its twelve tools', () => {
-  it('names the server and the tools as the contract says (E2 appends the artifact tools; P3-A M6 retires artifact_update and appends six)', () => {
+  it('names the server and the tools as the contract says (E2 appends the artifact tools; P3-A M6 retires artifact_update and appends six; board ticket 848 retires send_file)', () => {
     expect(MAWS_SERVER_NAME).toBe('maws');
     expect(MAWS_TOOL_NAMES).toEqual([
-      'send_file', 'ask', 'show_pane', 'artifact_create', 'artifact_list', 'artifact_screenshot',
+      'ask', 'show_pane', 'artifact_create', 'artifact_list', 'artifact_screenshot',
       // E4c's six browser tools left on 2026-10-08 (P1 A-54): none of them, and no other tool moved
       'artifact_describe_type', 'artifact_read', 'artifact_publish', 'artifact_upload_asset', 'artifact_list_assets', 'artifact_export',
       'artifact_dataset', // P3-E (E2 M2): the dashboard's tool, before B's
@@ -71,9 +71,6 @@ describe('X9: the maws server and its twelve tools', () => {
   // A-18: ToolSearch indexes descriptions, so the fallback sentence comes first
   it('opens every description with its fallback sentence, word for word', () => {
     for (const name of MAWS_TOOL_NAMES) expect(MAWS_TOOLS[name].description, name).toMatch(/^[^.]*without this tool/);
-    expect(MAWS_TOOLS.send_file.description).toBe(
-      'Deliver files to the user inside MAWS; without this tool, write the file and tell the user its path. Each delivered file becomes a row in the MAWS transcript with your caption and buttons to open it or reveal it in Finder; use it when you have produced something the user should look at (a PDF, an HTML page, an image, a document). Paths may be absolute or relative to the working directory and must name existing files. Each becomes a File artifact; returns their artifact ids.',
-    );
     expect(MAWS_TOOLS.ask.description).toBe(
       'Ask the user one or several questions at once through a MAWS sheet; without this tool, use AskUserQuestion. Each question has a modality: "choice" (options, single or multi, with an Other row), "text" (free text), "file" or "folder" (a native picker returning absolute paths), "repository" (one of the user\'s MAWS projects), or "design_system" (one of the user\'s design systems, answered with its designSystemId and name; unless allowCreate is false, the user may answer create: true instead, asking you to build a new one with them). The user may answer any question with "decide for me" or skip it. With blocking true (the default) the call waits for the answers and returns them; with blocking false it returns {status: "asked", askId} at once and the answers arrive later as a user message that names the askId, so you can keep working meanwhile. In a subagent the call always waits and returns the answers, as with blocking true.',
     );
@@ -105,7 +102,6 @@ describe('X9: the maws server and its twelve tools', () => {
     for (const tool of alwaysLoaded) expect(tool._meta, tool.name).toEqual({ 'anthropic/alwaysLoad': true });
     // E2 (Decision Log 4): the two writers are not read-only, so the engine never batches them nor runs them in plan mode
     expect(list.map((t) => [t.name, t.annotations])).toEqual([
-      ['send_file', { readOnlyHint: true, openWorldHint: false, title: 'Send file' }],
       ['ask', { readOnlyHint: true, openWorldHint: false, title: 'Ask questions' }],
       ['show_pane', { readOnlyHint: true, openWorldHint: false, title: 'Show pane' }],
       ['artifact_create', { readOnlyHint: false, openWorldHint: false, title: 'Create artifact' }],
@@ -168,7 +164,7 @@ describe('send_file, retired (board ticket 848)', () => {
 });
 
 describe('X9 inputs: strict, bounded, never defaulted', () => {
-  it('send_file takes 1 to 20 non-empty paths, a caption up to 2000 characters and an urgency', () => {
+  it('send_file (retired by board ticket 848; its records) took 1 to 20 non-empty paths, a caption up to 2000 characters and an urgency', () => {
     expect(SendFileInputSchema.parse({ files: ['a.txt'] })).toEqual({ files: ['a.txt'] });
     expect(SendFileInputSchema.safeParse({ files: ['a.txt'], caption: 'c', urgency: 'high' }).success).toBe(true);
     expect(SendFileInputSchema.safeParse({ files: [] }).success).toBe(false);
@@ -273,11 +269,9 @@ describe('X9 refusals: one text per offender', () => {
     expect(at.ok === false && at.error).toMatch(/^show_pane: invalid arguments: .*"at"/);
     const missing = parseToolArguments('show_pane', {});
     expect(missing.ok === false && missing.error).toMatch(/^show_pane: invalid arguments: pane: /);
-    const files = parseToolArguments('send_file', { files: [] });
-    expect(files.ok === false && files.error).toMatch(/^send_file: invalid arguments: files: /);
     const ask = parseToolArguments('ask', { questions: [{ question: 'Q?', modality: 'choice' }] });
     expect(ask.ok === false && ask.error).toMatch(/^ask: invalid arguments: questions\.0\.options: /);
-    expect(parseToolArguments('send_file', { files: ['a.txt'] })).toEqual({ ok: true, data: { files: ['a.txt'] } });
+    expect(parseToolArguments('show_pane', { pane: 'terminal' })).toEqual({ ok: true, data: { pane: 'terminal' } });
     expect(parseToolArguments('show_pane', null).ok).toBe(false);
   });
 
@@ -293,7 +287,6 @@ describe('X9 refusals: one text per offender', () => {
   });
 
   it('carries the exact texts of every host refusal', () => {
-    expect(TOOL_ERRORS.notAFile('/r/x')).toBe('send_file: not a file: /r/x');
     expect(TOOL_ERRORS.sessionEnded).toBe('ask: the session ended before the user answered');
     expect(TOOL_ERRORS.paneUnavailable('artifact')).toBe('show_pane: the artifact pane is not available in this build of MAWS');
     expect(TOOL_ERRORS.targetRequired('file')).toBe('show_pane: a target is required for the file pane');
@@ -323,7 +316,6 @@ describe('X9 records: parseRecordedToolArguments', () => {
 
   it('is parseToolArguments for every other tool', () => {
     const calls: [Parameters<typeof parseToolArguments>[0], unknown][] = [
-      ['send_file', { files: ['a.txt'], caption: 'Report' }], ['send_file', { files: [] }],
       ['ask', { questions: [{ question: 'Q?', modality: 'choice', options: [{ label: 'Yes' }] }] }], ['ask', { questions: [] }],
       ['artifact_create', { kind: 'document', title: 'Notes', content: '# Notes' }], ['artifact_read', { id: 'dash' }], ['artifact_read', { id: 3 }],
       ['artifact_search', { query: 'launch plan' }], ['artifact_list', {}], ['artifact_screenshot', { id: 'dash', width: 10 }],
@@ -572,8 +564,7 @@ describe('X9 artifact tools (E2)', () => {
     // U6d: P3-L M6b's artifactNotFound and artifactUnreadable left with the window's lookup of the retired pane
     expect(Object.keys(TOOL_ERRORS)).not.toContain('artifactNotFound');
     expect(Object.keys(TOOL_ERRORS)).not.toContain('artifactUnreadable');
-    expect(TOOL_ERRORS.deliveryUnavailable).toBe('send_file: the artifact store is unavailable in this run of MAWS; nothing was delivered');
-    expect(TOOL_ERRORS.unknownTool('echo')).toMatch(/^unknown tool "echo"; the maws server has send_file, ask, show_pane, artifact_create, artifact_list, artifact_screenshot, /); // E4c: thirteen; P1 A-54: seven; P3-A: twelve
+    expect(TOOL_ERRORS.unknownTool('echo')).toMatch(/^unknown tool "echo"; the maws server has ask, show_pane, artifact_create, artifact_list, artifact_screenshot, /); // E4c: thirteen; P1 A-54: seven; P3-A: twelve; board ticket 848: send_file left
   });
 });
 // E2 end

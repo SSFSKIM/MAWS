@@ -30,7 +30,10 @@
 // 2026-11-14-ux-wave-U6d-artifact-link.md, Interfaces §A and §B; the X9 amendment of 2026-11-14) takes the `artifact`
 // pane and `at` out of `show_pane`: a call that names the pane is refused with `artifactPaneRetired`, the description and
 // `artifact_create`'s lose their invitation to call it, and records are read with the schema they were written under
-// (`ShowPaneRecordedInputSchema`, `parseRecordedToolArguments`).
+// (`ShowPaneRecordedInputSchema`, `parseRecordedToolArguments`). Board ticket 848 (the X9 amendment of 2026-11-23, the
+// P1 spec's Decision Log) retires `send_file`: a file reaches the user as a Markdown link to its path in the agent's
+// message, a call is answered `sendFileRetired`, and `./send-file` keeps its name and schemas for the records written
+// before.
 import * as z from 'zod';
 import { ArtifactKindSchema } from '../artifacts/entity'; // P3-A
 import { ArtifactLocationSchema } from '../artifacts/link'; // P4-B4
@@ -49,7 +52,8 @@ export { ArtifactEditorSchema, ListedArtifactSchema, type ArtifactEditor, type L
 
 export const MAWS_SERVER_NAME = 'maws';
 export const MAWS_TOOL_NAMES = [
-  'send_file', 'ask', 'show_pane', 'artifact_create', 'artifact_list', 'artifact_screenshot',
+  // board ticket 848: `send_file`, first until 2026-11-23, left the server (`./send-file`)
+  'ask', 'show_pane', 'artifact_create', 'artifact_list', 'artifact_screenshot',
   // P3-A (M6)
   'artifact_describe_type', 'artifact_read', 'artifact_publish', 'artifact_upload_asset', 'artifact_list_assets', 'artifact_export',
   // P3-E (E2 M2): the dashboard's `artifact_dataset` (`./dashboard-tools`), after A's namespace; B's tools close the list
@@ -83,13 +87,6 @@ export const ARTIFACT_SCREENSHOT_MAX_BYTES = 3.5 * 1024 * 1024; // A-34: its bas
 // ---------------------------------------------------------------------------------------------------------------------
 // Inputs (strict; validators never default: `blocking`, `multi`, `allowOther`, `multiple` and a question's `id` take
 // their defaults where they are read)
-
-export const SendFileInputSchema = z.strictObject({
-  files: z.array(z.string().min(1)).min(1).max(20),
-  caption: z.string().max(2000).optional(),
-  urgency: z.enum(['normal', 'high']).optional(),
-});
-export type SendFileInput = z.infer<typeof SendFileInputSchema>;
 
 export const ASK_MODALITIES = ['choice', 'text', 'file', 'folder', 'repository', 'design_system' /* P3-D */] as const;
 export type AskModality = (typeof ASK_MODALITIES)[number];
@@ -334,11 +331,6 @@ export const artifactExportName = (revision: number, format: ArtifactExportForma
 
 export const ASK_NOTE_MAX = 2000; // P2-C3: an answer's note, as long as a question may be
 
-export const DeliveredFileSchema =z.strictObject({ id: z.string(), path: z.string(), name: z.string() });
-export type DeliveredFile = z.infer<typeof DeliveredFileSchema>;
-export const SendFileResultSchema = z.strictObject({ status: z.literal('delivered'), deliverables: z.array(DeliveredFileSchema) });
-export type SendFileResult = z.infer<typeof SendFileResultSchema>;
-
 export const AskAnswerSchema = z.strictObject({
   id: z.string(),
   question: z.string(),
@@ -510,13 +502,6 @@ export type ArtifactRefusal = z.infer<typeof ArtifactRefusalSchema>;
 // The tools as `tools/list` describes them (descriptions exact; A-18: the fallback sentence first)
 
 export const MAWS_TOOLS = {
-  send_file: {
-    title: 'Send file',
-    description:
-      'Deliver files to the user inside MAWS; without this tool, write the file and tell the user its path. Each delivered file becomes a row in the MAWS transcript with your caption and buttons to open it or reveal it in Finder; use it when you have produced something the user should look at (a PDF, an HTML page, an image, a document). Paths may be absolute or relative to the working directory and must name existing files. Each becomes a File artifact; returns their artifact ids.',
-    input: SendFileInputSchema,
-    annotations: MAWS_TOOL_ANNOTATIONS,
-  },
   ask: {
     title: 'Ask questions',
     description:
@@ -643,8 +628,8 @@ const MIB = 1024 * 1024;
 export const TOOL_ERRORS = {
   invalidArguments: (tool: MawsToolName, issues: string) => `${tool}: invalid arguments: ${issues}`,
   unknownTool: (name: string) => `unknown tool "${name}"; the maws server has ${MAWS_TOOL_NAMES.join(', ')}`,
-  notAFile: (path: string) => `send_file: not a file: ${path}`,
-  deliveryUnavailable: 'send_file: the artifact store is unavailable in this run of MAWS; nothing was delivered', // P3-L (M6b): no X12 record stands in for it
+  // Board ticket 848: a call of the retired `send_file`, whatever it holds; the agent is told to write the path link
+  sendFileRetired: 'send_file: MAWS no longer delivers files. Link the file in your message as a Markdown link to its absolute path, [its name](/absolute/path): a click opens it beside the chat, and ⌘-click opens it in the main area.',
   sessionEnded: 'ask: the session ended before the user answered',
   askQuotesGrant: 'An ask may not quote a permission grant. Ask the question in your own words.', // board ticket 711
   unknownPane: (pane: string) => `show_pane: unknown pane "${pane}"; known panes: ${AGENT_PANE_NAMES.join(', ')}`,
@@ -655,7 +640,7 @@ export const TOOL_ERRORS = {
   fileNotFound: (path: string) => `show_pane: file not found: ${path}`,
   paneTimeout: `show_pane: no MAWS window answered within ${PANE_ANSWER_MS / 1000} s`,
   paneNotReady: 'show_pane: the MAWS window was still loading its layout; try again', // UX wave U6b-1: the window's wait for its layout ran out
-  // E2 start: each artifact refusal names the tool whose call it answers (E1's `notAFile` stays `send_file`'s)
+  // E2 start: each artifact refusal names the tool whose call it answers
   artifactNotAFile: (tool: ArtifactToolName, path: string) => `${tool}: not a file: ${path}`,
   notHtml: (tool: ArtifactToolName, path: string) => `${tool}: not an HTML file: ${path}`,
   tooLarge: (tool: ArtifactToolName, path: string, bytes: number) => `${tool}: too large: ${path} (${bytes} bytes; the limit is ${ARTIFACT_MAX_BYTES / MIB} MiB)`,
