@@ -30,6 +30,7 @@ import { join, resolve } from 'node:path';
 import { expect, test, type Locator, type Page } from '@playwright/test';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { SessionEvent } from '@shared/graph/events';
+import type { JournalRow } from '@shared/wire/journal';
 import type { AskQuestion } from '@shared/maws/tools';
 import type { MawsToolSet } from '@shared/maws/tool-set';
 import type { PermissionMode } from '@shared/graph/enums';
@@ -490,23 +491,52 @@ test('the live sitting: a blocking ask, an async ask folded into its turn, show_
       await drive(s, session, 'the Bash call', async () => ofKind(await s.events(session.id), 'tool.use').some((e) => e.toolName === 'Bash'));
       const form = formOf(s);
       await expect(form).toHaveAttribute('data-hover-ask', opened!.askId);
+      // the steer names a pick by its place among the options the model wrote (board ticket 711), so Tea's place is read
+      // from the ask itself
+      const teaPlace = (opened!.questions[0]!.options ?? []).findIndex((option) => option.label === 'Tea') + 1;
+      expect(teaPlace, `the ask offers Tea: ${JSON.stringify(opened!.questions[0])}`).toBeGreaterThan(0);
       await form.getByRole('radio', { name: 'Tea' }).click();
       await clearToasts(page);
       await form.getByRole('button', { name: 'Submit', exact: true }).click();
-      await drive(s, session, 'the reply', async () => ofKind(await s.events(session.id), 'maws.ask.answered').length > 0 && (await idleNow(s, session.id)));
+      // the answer's message, as the host wrote it to the engine: a user frame opening with the ask's id
+      const steerOf = (all: JournalRow[]) => all.find((r) => r.direction === 'out' && (r.frame as Frame).type === 'user' && String(((r.frame as Frame).message as { content?: unknown } | undefined)?.content ?? '').startsWith(`[MAWS ask ${opened!.askId}]`));
+      // the model's own text after that message, in the main conversation
+      const textsAfter = (all: JournalRow[], seq: number) =>
+        all.flatMap((r) => {
+          const frame = r.frame as Frame & { parent_tool_use_id?: string | null };
+          if (r.direction !== 'in' || frame.type !== 'assistant' || (frame.parent_tool_use_id ?? null) !== null || r.seq <= seq) return [];
+          const content = (frame.message as { content?: unknown } | undefined)?.content;
+          return Array.isArray(content) ? (content as { type?: string; text?: string }[]).flatMap((b) => (b.type === 'text' && typeof b.text === 'string' ? [{ seq: r.seq, text: b.text }] : [])) : [];
+        });
+      const ANSWERED = new RegExp(`ANSWER:\\s*(?:"?Tea\\b|option ${teaPlace}\\b)`, 'i');
+      await drive(s, session, 'a reply naming the answer after its message', async () => {
+        const all = journal(session.journalPath);
+        const steer = steerOf(all);
+        return steer !== undefined && textsAfter(all, steer.seq).some((reply) => ANSWERED.test(reply.text)) && (await idleNow(s, session.id));
+      });
       const rows = journal(session.journalPath);
       expect(JSON.parse(resultText(mcpResultOf(rows, askCall.requestId)!)), 'the call returned at once').toEqual({ status: 'asked', askId: opened!.askId });
-      const steer = rows.find((r) => r.direction === 'out' && (r.frame as { type?: string }).type === 'user' && new RegExp(`^\\[MAWS ask ${opened!.askId}\\]`).test(String((r.frame as { message?: { content?: unknown } }).message?.content ?? '')));
-      expect(steer, 'the answer went to the agent as a message naming the askId').toBeDefined();
-      // the work came after the ask's acknowledgement: the turn went on past the question
-      const ack = rows.find((r) => r.direction === 'out' && (r.frame as { type?: string }).type === 'control_response' && (r.frame as { response?: { request_id?: string } }).response?.request_id === askCall.requestId)!;
-      const bashUse = rows.find((r) => r.direction === 'in' && (r.frame as Frame).type === 'assistant' && JSON.stringify((r.frame as Frame).message ?? null).includes('"name":"Bash"'));
-      expect(bashUse, 'the agent called Bash').toBeDefined();
-      expect(bashUse!.seq, 'the Bash call came after the ask returned').toBeGreaterThan(ack.seq);
-      const replies = mainTurnsEnded(await s.events(session.id)).map((t) => t.resultText ?? '');
-      note(`G7: maws.ask.opened blocking false, acknowledged {status: "asked"} at seq ${ack.seq}; the agent's Bash call at seq ${bashUse!.seq}, while the ask waited; the answer's message at seq ${steer!.seq}; replies ${JSON.stringify(replies)}`);
-      // the message names a pick by its place, `option <k>` (board ticket 711): the model may report either
-      expect(replies.some((r) => /ANSWER:\s*(?:"?Tea\b|option 1\b)/i.test(r)), `the answer reached the model\n${replies.join('\n---\n')}`).toBe(true);
+      const ack = rows.find((r) => r.direction === 'out' && (r.frame as Frame).type === 'control_response' && ((r.frame as Frame).response as { request_id?: string } | undefined)?.request_id === askCall.requestId)!;
+      const steer = steerOf(rows)!;
+      const steerText = String(((steer.frame as Frame).message as { content?: unknown }).content);
+      expect(steerText, 'the message carries the pick the person made, by its place').toContain(`\n1. option ${teaPlace}\n`); // `askSteerText`'s line for question 1 (src/shared/maws/ask.ts)
+      expect(ofKind(await s.events(session.id), 'maws.ask.answered').find((e) => e.askId === opened!.askId)?.answers[0], 'the answer recorded is Tea').toMatchObject({ status: 'answered', value: ['Tea'] });
+      // the work: the Bash call the model made after the ask returned, matched to its result, which succeeded
+      type Block = { type?: string; id?: string; name?: string; tool_use_id?: string; is_error?: boolean; content?: unknown; input?: { command?: string } };
+      const blocksOf = (r: JournalRow): Block[] => {
+        const content = ((r.frame as Frame).message as { content?: unknown } | undefined)?.content;
+        return Array.isArray(content) ? (content as Block[]) : [];
+      };
+      const bashUse = rows.find((r) => r.direction === 'in' && (r.frame as Frame).type === 'assistant' && r.seq > ack.seq && blocksOf(r).some((b) => b.type === 'tool_use' && b.name === 'Bash'));
+      expect(bashUse, 'the agent called Bash after the ask returned').toBeDefined();
+      const bashBlock = blocksOf(bashUse!).find((b) => b.type === 'tool_use' && b.name === 'Bash')!;
+      const bashResultRow = rows.find((r) => r.direction === 'in' && (r.frame as Frame).type === 'user' && blocksOf(r).some((b) => b.type === 'tool_result' && b.tool_use_id === bashBlock.id));
+      expect(bashResultRow, 'the Bash call has its result').toBeDefined();
+      const bashResult = blocksOf(bashResultRow!).find((b) => b.type === 'tool_result' && b.tool_use_id === bashBlock.id)!;
+      expect(bashResult.is_error ?? false, `the Bash call ran: ${JSON.stringify(bashResult.content)}`).toBe(false);
+      expect(JSON.stringify(bashResult.content ?? ''), 'the command ran to its output').toContain('WORKED');
+      const replies = textsAfter(rows, steer.seq).filter((reply) => ANSWERED.test(reply.text));
+      note(`G7: maws.ask.opened blocking false, acknowledged {status: "asked"} at seq ${ack.seq}; Bash ${JSON.stringify(bashBlock.input?.command ?? null)} called at seq ${bashUse!.seq} and answered at seq ${bashResultRow!.seq} without error; the answer's message (option ${teaPlace}) at seq ${steer.seq}; the reply naming it at seq ${replies[0]!.seq}: ${JSON.stringify(replies[0]!.text)}`);
       await end(s, session, before);
     });
   } finally {
