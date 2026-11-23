@@ -329,6 +329,9 @@ describe('a file tab’s tooltip (U6e)', () => {
       const clipped = kept.previousElementSibling as HTMLElement;
       expect(clipped.textContent).toBe(stem);
       expect(clipped.className).toContain('truncate');
+      // a compact tab keeps a little of the stem drawn: the stem never goes under two characters, the extension gives way first
+      expect(clipped.className).toContain('min-w-[2ch]');
+      expect(kept.className).toContain('max-w-[calc(100%-2ch)]');
       expect(tab.textContent).toContain(`${stem}${suffix}`);
     }
     expect(document.getElementById('t-dot')!.querySelector('[data-tab-suffix]'), 'a leading dot opens the name').toBeNull();

@@ -133,14 +133,14 @@ export function fileNameParts(name: string): { stem: string; suffix: string } {
   return { stem: name.slice(0, dot), suffix: name.slice(dot) };
 }
 
-// The title of a file's tab: the stem clips first, to nothing if it must; the extension clips only in a title narrower
-// than itself.
+// The title of a file's tab: the stem clips first, down to two characters, so a compact tab still shows where its name
+// starts; the extension clips only in a title too narrow for both.
 function FileTitle({ name, className }: { name: string; className: string }) {
   const { stem, suffix } = fileNameParts(name);
   return (
     <span className={`flex max-w-full min-w-0 shrink-0 truncate ${className}`}>
-      <span className="min-w-0 truncate">{stem}</span>
-      {suffix && <span data-tab-suffix className="max-w-full shrink-0 truncate">{suffix}</span>}
+      <span className={`${suffix ? 'min-w-[2ch]' : 'min-w-0'} truncate`}>{stem}</span>
+      {suffix && <span data-tab-suffix className="max-w-[calc(100%-2ch)] shrink-0 truncate">{suffix}</span>}
     </span>
   );
 }
