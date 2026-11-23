@@ -32,6 +32,9 @@ export interface McpToolContext {
   // UX wave U10b (M10): the read MAWS makes for an artifact a human message links (P4-A3, SessionMaws.readLinked), not a
   // call of the agent's; absent for every call the engine makes
   linkedRead?: boolean;
+  // board ticket 420: a call an earlier engine host had already admitted, re-raised at a handover (an ask, read with the
+  // schema records are read with); absent for every call the engine sends this host
+  admitted?: true;
 }
 
 // E2: an image block (`artifact_screenshot`'s PNG) reaches the model unchanged; the engine inserts its own text block
@@ -127,8 +130,9 @@ export class MawsToolServer {
   }
 
   // Every `mcp_message` the engine sends, read as the normaliser reads it (src/shared/maws/rpc.ts); answered through
-  // `respond`, a call once its tool settles.
-  accept(req: ControlRequestFrame): void {
+  // `respond`, a call once its tool settles. `admitted` (board ticket 420): a call an earlier engine host had admitted,
+  // carried to its tool's context.
+  accept(req: ControlRequestFrame, opts: { admitted?: true } = {}): void {
     const requestId = req.request_id as RequestId;
     const message = readMcpMessage(req.request);
     if (message.kind === 'other_server') {
@@ -164,9 +168,9 @@ export class MawsToolServer {
         // fix wave 2: the e2e's race keeps a call out of flight until a handover is asked (under MAWS_E2E alone)
         if (this.deps.gate && toolCallOf(params).name !== 'ask') {
           this.deps.log(`e2e: ${requestId} waits for the call gate`);
-          void this.deps.gate().then(() => (this.deps.log(`e2e: ${requestId} passed the call gate`), this.call(requestId, id, params)));
+          void this.deps.gate().then(() => (this.deps.log(`e2e: ${requestId} passed the call gate`), this.call(requestId, id, params, opts.admitted)));
         }
-        else void this.call(requestId, id, params);
+        else void this.call(requestId, id, params, opts.admitted);
         return;
       default:
         this.error(requestId, id, JSONRPC_METHOD_NOT_FOUND, `Method not found: ${message.method}`);
@@ -215,7 +219,7 @@ export class MawsToolServer {
     }
   }
 
-  private async call(requestId: RequestId, id: RpcId, params: Record<string, unknown>): Promise<void> {
+  private async call(requestId: RequestId, id: RpcId, params: Record<string, unknown>, admitted?: true): Promise<void> {
     const { name, args, toolUseId } = toolCallOf(params);
     if (name !== 'ask') {
       this.delivering.set(requestId, String(name)); // P5 O16 M3b
@@ -237,7 +241,7 @@ export class MawsToolServer {
     let result: McpToolResult;
     try {
       if (name !== 'ask' && this.deps.hold) await this.deps.hold();
-      result = await tool.call(args, { appSessionId: this.deps.appSessionId, cwd: this.deps.cwd(), toolUseId, requestId, signal: controller.signal, fromSubagent: this.deps.fromSubagent?.(toolUseId) ?? false });
+      result = await tool.call(args, { appSessionId: this.deps.appSessionId, cwd: this.deps.cwd(), toolUseId, requestId, signal: controller.signal, fromSubagent: this.deps.fromSubagent?.(toolUseId) ?? false, ...(admitted && { admitted }) });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       this.deps.log(`${tool.name} ${requestId} failed: ${message}`);

@@ -111,10 +111,8 @@ describe('the maws server on an EngineSession (scripted)', () => {
       ['artifact_search', { ...MAWS_TOOL_ANNOTATIONS, title: 'Search artifacts' }], // P4-B4: after B's; P4-R7z took P4-R7's message out after it
       ['artifact_delete', { readOnlyHint: false, destructiveHint: true, openWorldHint: false, title: 'Delete artifact' }], // UX wave U10b (M4): last
     ]);
-    // P4-A3's tools an edit needs are listed always loaded
-    expect((list.result!.tools as { name: string; _meta?: unknown }[]).filter((t) => t._meta !== undefined)).toMatchObject(
-      ['artifact_describe_type', 'artifact_read', 'artifact_publish', 'artifact_edit'].map((name) => ({ name, _meta: { 'anthropic/alwaysLoad': true } })),
-    );
+    // board ticket 420: the ask alone is listed always loaded (P4-A3's tools an edit needs were, until then)
+    expect((list.result!.tools as { name: string; _meta?: unknown }[]).filter((t) => t._meta !== undefined)).toEqual([expect.objectContaining({ name: 'ask', _meta: { 'anthropic/alwaysLoad': true } })]);
     expect((await run.answered(run.mcp({ id: 2, method: 'resources/list' }))).error).toEqual({ code: -32601, message: 'Method not found: resources/list' });
     expect((await run.answered(run.mcp({ id: 0, method: 'initialize' }, 'maws2'))).error!.code).toBe(-32601);
     // handshake traffic is protocol, never an unknown frame or an event of its own
@@ -371,7 +369,7 @@ describe('ask on an EngineSession (scripted)', () => {
 
   it('a blocking ask holds its call until answered, then answers the AskResult (a skip has no value) and yields opened, answered', async () => {
     const run = await mawsSession();
-    const id = run.call('ask', { title: 'Setup', questions: QUESTIONS }, 'toolu_ask');
+    const id = run.call('ask', { blocking: true, title: 'Setup', questions: QUESTIONS }, 'toolu_ask');
     await until(() => run.session.asks().length === 1, 'the pending ask');
     expect(run.session.asks()).toEqual([{ askId: 'toolu_ask', toolUseId: 'toolu_ask', requestId: id, blocking: true, title: 'Setup', context: null, questions: HELD, openedAt: expect.any(String) }]);
     expect(run.session.status().pendingRequests).toBe(1); // the call in flight, counted once
@@ -458,7 +456,7 @@ describe('ask on an EngineSession (scripted)', () => {
 
   it('refuses answers that do not fit the questions before any claim, writing nothing', async () => {
     const run = await mawsSession();
-    run.call('ask', { questions: QUESTIONS }, 'toolu_bad');
+    run.call('ask', { blocking: true, questions: QUESTIONS }, 'toolu_bad');
     await until(() => run.session.asks().length === 1, 'the pending ask');
     await expect(run.session.answerAsk('toolu_bad', ANSWERS.slice(1))).rejects.toThrow(AskAnswerMismatch);
     await expect(run.session.answerAsk('toolu_bad', ANSWERS.slice(1))).rejects.toThrow('ask toolu_bad: no answer for question q1');
@@ -473,7 +471,7 @@ describe('ask on an EngineSession (scripted)', () => {
     const held = new Promise<void>((resolve) => (release = resolve));
     let holding: RequestId | null = null;
     const run = await mawsSession({ holdWrite: (frame) => (holding !== null && isAnswerTo(holding)(frame) ? held : null) });
-    holding = run.call('ask', { questions: QUESTIONS }, 'toolu_twice');
+    holding = run.call('ask', { blocking: true, questions: QUESTIONS }, 'toolu_twice');
     await until(() => run.session.asks().length === 1, 'the pending ask');
     const first = run.session.answerAsk('toolu_twice', ANSWERS);
     expect(await run.session.answerAsk('toolu_twice', ANSWERS)).toBe('not_pending');
@@ -529,7 +527,7 @@ describe('ask on an EngineSession (scripted)', () => {
     let holding: RequestId | null = null;
     let reached = false;
     const run = await mawsSession({ holdWrite: (frame) => (holding !== null && isAnswerTo(holding)(frame) ? ((reached = true), new Promise<void>(() => {})) : null) });
-    holding = run.call('ask', { questions: QUESTIONS }, 'toolu_exit');
+    holding = run.call('ask', { blocking: true, questions: QUESTIONS }, 'toolu_exit');
     run.call('ask', { blocking: false, questions: QUESTIONS }, 'toolu_later');
     await until(() => run.session.asks().length === 2, 'both asks');
     const answering = run.session.answerAsk('toolu_exit', ANSWERS);
@@ -553,7 +551,7 @@ describe('ask on an EngineSession (scripted)', () => {
 
   it('an ask the engine withdrew is cancelled (withdrawn) and answered with nothing', async () => {
     const run = await mawsSession();
-    const id = run.call('ask', { questions: QUESTIONS }, 'toolu_gone');
+    const id = run.call('ask', { blocking: true, questions: QUESTIONS }, 'toolu_gone');
     await until(() => run.session.asks().length === 1, 'the pending ask');
     run.transport.push({ type: 'control_cancel_request', request_id: id });
     await until(() => run.session.asks().length === 0, 'the withdrawal');
@@ -569,7 +567,7 @@ describe('ask on an EngineSession (scripted)', () => {
 
   it('a refused ask call answers an error, holds nothing and yields no maws event; without _meta the askId is the request id', async () => {
     const run = await mawsSession();
-    const refused = await run.answered(run.call('ask', { questions: [{ question: 'Q?', modality: 'choice' }] }));
+    const refused = await run.answered(run.call('ask', { blocking: true, questions: [{ question: 'Q?', modality: 'choice' }] }));
     expect(refused.result!.isError).toBe(true);
     expect(refused.result!.content![0]!.text).toMatch(/^ask: invalid arguments: /);
     expect(run.session.asks()).toEqual([]);
@@ -577,6 +575,31 @@ describe('ask on an EngineSession (scripted)', () => {
     const bare = run.mcp({ id: 99, method: 'tools/call', params: { name: 'ask', arguments: { blocking: false, questions: [QUESTIONS[1]] } } });
     expect(JSON.parse((await run.answered(bare)).result!.content![0]!.text)).toEqual({ status: 'asked', askId: bare });
     expect(run.maws()).toMatchObject([{ kind: 'maws.ask.opened', askId: bare, toolUseId: null }]);
+    run.transport.exit(0);
+    await run.session.exited;
+    expect(run.rebuilt()).toEqual(run.events);
+  });
+});
+
+// Board ticket 420 (the tool-choice plan's A10): a live call without `blocking` is refused with the one sentence that
+// names it; the normaliser, reading the call as records are read, opens its ask and the refusal closes it, so the row reads
+// as the call's error; asked again with `blocking: false`, the call returns at once and the ask waits for its answer
+describe('ask with blocking required on an EngineSession (scripted, board ticket 420)', () => {
+  const QUESTIONS = [{ question: 'Which colour?', modality: 'choice', options: [{ label: 'Red' }, { label: 'Blue' }] }];
+
+  it('a call without blocking is refused with the sentence and holds nothing; asked again with false it is acknowledged and waits', async () => {
+    const run = await mawsSession();
+    const refused = await run.answered(run.call('ask', { questions: QUESTIONS }, 'toolu_bare'));
+    expect(refused.result).toEqual({ content: [{ type: 'text', text: TOOL_ERRORS.askBlockingRequired }], isError: true });
+    expect(run.session.asks()).toEqual([]);
+    expect(run.session.brokerItems()).toEqual([]);
+    const again = await run.answered(run.call('ask', { blocking: false, questions: QUESTIONS }, 'toolu_again'));
+    expect(JSON.parse(again.result!.content![0]!.text)).toEqual({ status: 'asked', askId: 'toolu_again' });
+    expect(run.session.asks()).toMatchObject([{ askId: 'toolu_again', blocking: false }]);
+    expect(run.maws().map((e) => [e.kind, (e as { askId?: string }).askId, (e as { blocking?: boolean }).blocking])).toEqual([
+      ['maws.ask.opened', 'toolu_bare', true], // as a record without it reads; its refusal closes it
+      ['maws.ask.opened', 'toolu_again', false],
+    ]);
     run.transport.exit(0);
     await run.session.exited;
     expect(run.rebuilt()).toEqual(run.events);
@@ -606,7 +629,7 @@ describe('a blocking ask as a question attention item (scripted)', () => {
 
   it('is pending while the ask waits, with its summary and request, and retires once answered', async () => {
     const run = await attended();
-    const id = run.call('ask', { title: 'Setup', questions: QUESTIONS }, 'toolu_att');
+    const id = run.call('ask', { blocking: true, title: 'Setup', questions: QUESTIONS }, 'toolu_att');
     await until(() => run.session.asks().length === 1, 'the pending ask');
     const { appSessionId } = run.session.status();
     const openedAt = run.session.asks()[0]!.openedAt;
@@ -654,8 +677,8 @@ describe('a blocking ask as a question attention item (scripted)', () => {
 
   it('summarises an untitled ask by its first question, and retires when the engine withdraws it or the process ends', async () => {
     const run = await attended();
-    const gone = run.call('ask', { questions: QUESTIONS }, 'toolu_gone');
-    run.call('ask', { questions: QUESTIONS }, 'toolu_exit');
+    const gone = run.call('ask', { blocking: true, questions: QUESTIONS }, 'toolu_gone');
+    run.call('ask', { blocking: true, questions: QUESTIONS }, 'toolu_exit');
     await until(() => run.session.asks().length === 2, 'both asks');
     expect(run.last().map((i) => [i.request.toolUseId, i.summary, i.state])).toEqual([['toolu_gone', 'Which colour?', 'pending'], ['toolu_exit', 'Which colour?', 'pending']]);
     run.transport.push({ type: 'control_cancel_request', request_id: gone });
@@ -673,7 +696,7 @@ describe('a blocking ask as a question attention item (scripted)', () => {
   // a withdrawn control request withdraws it, so nobody can answer it and no one sees an answer the model never got.
   it('a blocking ask abandoned by notifications/cancelled is cancelled (withdrawn): item gone, nothing written, rebuild equal', async () => {
     const run = await attended();
-    const id = run.mcp({ id: 7, method: 'tools/call', params: { name: 'ask', arguments: { title: 'Setup', questions: QUESTIONS }, _meta: { 'claudecode/toolUseId': 'toolu_int', progressToken: 7 } } });
+    const id = run.mcp({ id: 7, method: 'tools/call', params: { name: 'ask', arguments: { blocking: true, title: 'Setup', questions: QUESTIONS }, _meta: { 'claudecode/toolUseId': 'toolu_int', progressToken: 7 } } });
     await until(() => run.session.asks().length === 1, 'the pending ask');
     expect(run.last().map((i) => [i.kind, i.request.toolUseId])).toEqual([['question', 'toolu_int']]);
     expect(run.session.status().pendingRequests).toBe(1);
@@ -706,7 +729,7 @@ describe('a blocking ask as a question attention item (scripted)', () => {
     run.transport.push({ type: 'control_request', request_id: 'perm-1', request: { subtype: 'can_use_tool', tool_name: 'mcp__maws__ask', input: { questions: QUESTIONS }, tool_use_id: 'toolu_lost' } });
     await until(() => run.last().length === 1, 'the permission');
     expect(await run.session.answer('perm-1' as RequestId, { kind: 'permission', decision: 'allow', scope: 'once' })).toBe('delivered');
-    run.call('ask', { questions: QUESTIONS }, 'toolu_lost');
+    run.call('ask', { blocking: true, questions: QUESTIONS }, 'toolu_lost');
     run.call('ask', { blocking: false, questions: QUESTIONS }, 'toolu_async');
     await until(() => run.session.asks().length === 2, 'both asks');
     expect(run.last().map((i) => [i.kind, i.state])).toEqual([['permission', 'confirmed'], ['question', 'pending'], ['async_input', 'pending']]); // P2-C2: the async ask's item

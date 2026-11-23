@@ -5,10 +5,16 @@
 // question here is about the engine and none about a description.
 //   uxwave-421-ask-upfront       P1: under ENABLE_TOOL_SEARCH=true, is the one tool listed with
 //                                `_meta["anthropic/alwaysLoad"]: true` (ask) sent without `defer_loading`, and every
-//                                other maws tool deferred; the scripted model calls the ask directly
+//                                other maws tool deferred; the scripted model calls the ask directly. Recorded again by
+//                                the plan's M2 with MAWS's own list and paragraph (./uxwave-421-maws-tools.json, a full
+//                                set's, which src/shared/maws/tools.test.ts pins to the source), so it answers A7
 //   uxwave-421-ask-upfront-unset the same list with ENABLE_TOOL_SEARCH absent (what MAWS leaves a direct launch with);
 //                                the stub's address is not Anthropic's, so this records the engine's default for a
 //                                third-party base URL only
+//   uxwave-421-ask-refused       ticket 420's required `blocking`, on MAWS's own list: the scripted model asks without
+//                                it, the server refuses as MAWS's host does (ASK_BLOCKING_REQUIRED), and the model asks
+//                                again with `blocking: false`, is answered `{status: "asked", askId}` and writes on;
+//                                e2e/maws-tools.spec.ts replays it through MAWS's host
 //   uxwave-421-resume-first,     P2's other half, a change at a relaunch: one session under the full list, then a
 //   uxwave-421-resume-changed    `--resume` of it with the server answering a changed paragraph and the changed set:
 //                                which paragraph and which tools does the resumed session's request carry
@@ -27,6 +33,7 @@
 //                                lists no ask: is the built-in in the request's tools up front, does a call raise
 //                                `can_use_tool` on the wire, and does the host's allow with `updatedInput.answers`
 //                                reach the model as the tool's result
+import {readFileSync} from 'node:fs';
 import {check,success,initFrame,endAsStop,launch,scratchRun,removeRun,initPayload,toolResults,toolUses,delay,randomUUID} from './p1-common.mjs';
 import {SdkServer} from '../../sdk-mcp.mjs';
 import {startStubApi,toolTurn,textTurn} from '../../stub-api.mjs';
@@ -45,13 +52,25 @@ const NEW_LIST=[{...ASK,description:'PROBE-421-NEW-ASK: with blocking false (the
 const INSTRUCTIONS='PROBE-421-PARAGRAPH: MAWS artifacts are the user\'s documents. To find one, call mcp__maws__artifact_search.';
 const CHANGED_INSTRUCTIONS='PROBE-421-CHANGED-PARAGRAPH: this session has no MAWS artifact tools.';
 const CHANGED=[SHOW_PANE,CREATE,READ,PUBLISH,SEARCH,EDIT]; // ask and artifact_dataset gone, artifact_edit added
+// M2: MAWS's own `tools/list` and paragraph for a full-set session (mawsToolList() and the instructions, dumped beside
+// this file; the unit test that pins it says how to write it again)
+const MAWS_OWN=JSON.parse(readFileSync(new URL('./uxwave-421-maws-tools.json',import.meta.url),'utf8'));
+const OWN_LIST={tools:MAWS_OWN.tools,instructions:MAWS_OWN.instructions,served:'uxwave-421-maws-tools.json'};
+// The refusal MAWS's host answers an ask that leaves `blocking` out (TOOL_ERRORS.askBlockingRequired in
+// src/shared/maws/tools.ts; src/shared/maws/tools.test.ts holds the recorded fixture's to it)
+const ASK_BLOCKING_REQUIRED='ask: pass blocking: false to keep working while the user answers, or blocking: true to wait for the answers.';
 
 class MawsServer extends SdkServer{
- constructor(tools,instructions=INSTRUCTIONS){super('maws',[]);this.listed=tools;this.instructions=instructions;this.lists=0;}
+ constructor(tools,instructions=INSTRUCTIONS,{askAsHost=false}={}){super('maws',[]);this.listed=tools;this.instructions=instructions;this.lists=0;this.askAsHost=askAsHost;}
  handle(message){
   if(message.method==='tools/call'){
    this.seen.push({method:message.method,id:message.id,kind:'request'});this.calls.push({name:message.params?.name,arguments:message.params?.arguments??null});
    const known=this.listed.some(t=>t.name===message.params?.name);
+   // `askAsHost`: an ask answered as MAWS's host answers one whose answers are yet to come, refused without `blocking`
+   if(this.askAsHost&&message.params?.name==='ask'){
+    const blocking=message.params.arguments?.blocking;const askId=message.params._meta?.['claudecode/toolUseId']??null;
+    return {jsonrpc:'2.0',id:message.id,result:typeof blocking!=='boolean'?{content:[{type:'text',text:ASK_BLOCKING_REQUIRED}],isError:true}:{content:[{type:'text',text:JSON.stringify({status:'asked',askId},null,2)}]}};
+   }
    return {jsonrpc:'2.0',id:message.id,result:known?{content:[{type:'text',text:JSON.stringify({status:'ok',tool:message.params.name},null,2)}]}:{content:[{type:'text',text:`unknown tool "${message.params?.name}"`}],isError:true}};
   }
   const answer=super.handle(message);
@@ -82,12 +101,12 @@ const PROVENANCE={charter:'docs/charter.md',child:'board tickets 421 and 420',do
 // `toolSearch: null` leaves ENABLE_TOOL_SEARCH out of the engine's environment (an undefined value is not passed on).
 // `run`, `sessionId` and `resume`: a later launch of an earlier run's session, its run kept by the caller.
 const MAWS_ASK_FLAGS=['--disallowedTools','AskUserQuestion','--allowedTools','mcp__maws__ask'];
-async function probe(name,{question,script,tools=FULL,instructions=INSTRUCTIONS,toolSearch='true',flags=MAWS_ASK_FLAGS,body,run:given=null,sessionId,resume=null}){
+async function probe(name,{question,script,tools=FULL,instructions=INSTRUCTIONS,toolSearch='true',flags=MAWS_ASK_FLAGS,body,run:given=null,sessionId,resume=null,served=null,askAsHost=false}){
  const run=given??scratchRun(name.replace(/^uxwave-/,''));
  const stub=await startStubApi({script,record});
- const server=new MawsServer(tools,instructions);
+ const server=new MawsServer(tools,instructions,{askAsHost});
  try{
-  await launch(name,run,{dir:'fixtures/uxwave/',relay:false,spendCap:'0.01',...(resume!==null?{sessionId:null}:sessionId!==undefined?{sessionId}:{}),vars:{ANTHROPIC_BASE_URL:stub.url,ANTHROPIC_AUTH_TOKEN:'stub-token',ENABLE_TOOL_SEARCH:toolSearch??undefined},flags:[...flags,...(resume!==null?['--resume',resume]:[])],provenance:{...PROVENANCE,question}},async p=>{
+  await launch(name,run,{dir:'fixtures/uxwave/',relay:false,spendCap:'0.01',...(resume!==null?{sessionId:null}:sessionId!==undefined?{sessionId}:{}),vars:{ANTHROPIC_BASE_URL:stub.url,ANTHROPIC_AUTH_TOKEN:'stub-token',ENABLE_TOOL_SEARCH:toolSearch??undefined},flags:[...flags,...(resume!==null?['--resume',resume]:[])],provenance:{...PROVENANCE,question,...(served!==null&&{served})}},async p=>{
    p.serve('maws',server);
    p.on('can_use_tool',r=>{
     p.note({event:'permission_asked',tool:r.tool_name,input:r.input});
@@ -141,11 +160,20 @@ const nativeAsk=async(p,{stub})=>{
  const results=main.at(-1).messages.flatMap(m=>m.blocks.filter(b=>b.type==='tool_result'));
  p.note({event:'answer_p3',nativeAsk:main[0].tools.find(t=>t.name==='AskUserQuestion')??null,maws:mawsOf(main[0]),results});
 };
+// M2: the refused ask and the one asked again; the second's answer stays to come, so the turn writes on and ends
+const refused=async(p,{stub,server})=>{
+ await p.turn('Ask me which colour the chart should use, and keep working while I answer.');
+ const main=stub.requests.filter(r=>r.main);
+ p.note({event:'answer_refused',calls:server.calls,results:main.at(-1).messages.flatMap(m=>m.blocks.filter(b=>b.type==='tool_result')),maws:mawsOf(main[0])});
+};
+const OWN_ASK={blocking:false,questions:[{question:'Which colour?',modality:'text'}]};
+const CHART_ASK={questions:[{id:'q1',question:'Which colour should the chart use?',modality:'choice',options:[{label:'Teal'},{label:'Amber'}]}]};
 const QUESTION={questions:[{question:'Which colour do you want?',header:'Colour',options:[{label:'Red',description:'Warm.'},{label:'Blue',description:'Cool.'}],multiSelect:false}]};
 
 const SCENARIOS={
- 'uxwave-421-ask-upfront':{question:'P1: is the ask, listed with alwaysLoad, loaded up front under tool search, and every other maws tool deferred',script:[toolTurn('toolu_stub_ask','mcp__maws__ask',{questions:[{question:'Which colour?',modality:'text'}]}),textTurn('Thanks.')],body:upfront},
- 'uxwave-421-ask-upfront-unset':{question:'P1 with ENABLE_TOOL_SEARCH absent (the engine\'s default for a base URL that is not Anthropic\'s)',toolSearch:null,script:[toolTurn('toolu_stub_ask','mcp__maws__ask',{questions:[{question:'Which colour?',modality:'text'}]}),textTurn('Thanks.')],body:upfront},
+ 'uxwave-421-ask-upfront':{question:'P1: is the ask, listed with alwaysLoad, loaded up front under tool search, and every other maws tool deferred',...OWN_LIST,script:[toolTurn('toolu_stub_ask','mcp__maws__ask',OWN_ASK),textTurn('Thanks.')],body:upfront},
+ 'uxwave-421-ask-upfront-unset':{question:'P1 with ENABLE_TOOL_SEARCH absent (the engine\'s default for a base URL that is not Anthropic\'s)',toolSearch:null,...OWN_LIST,script:[toolTurn('toolu_stub_ask','mcp__maws__ask',OWN_ASK),textTurn('Thanks.')],body:upfront},
+ 'uxwave-421-ask-refused':{question:'ticket 420: an ask without blocking is refused as MAWS\'s host refuses it; asked again with blocking false it is acknowledged and the turn writes on',...OWN_LIST,askAsHost:true,script:[toolTurn('toolu_stub_bare','mcp__maws__ask',CHART_ASK),toolTurn('toolu_stub_async','mcp__maws__ask',{blocking:false,...CHART_ASK}),textTurn('I asked which colour you want; meanwhile I will lay out the rest of the chart.')],body:refused},
  'uxwave-421-list-changed':{question:'P2: does the engine honour tools/list_changed from an SDK server mid-session, under tool search',script:[textTurn('ready'),textTurn('ready again')],body:listChanged},
  'uxwave-421-list-changed-flat':{question:'P2 without tool search (ENABLE_TOOL_SEARCH=false)',toolSearch:'false',script:[textTurn('ready'),textTurn('ready again')],body:listChanged},
  'uxwave-421-native-ask':{question:'P3: with AskUserQuestion not disallowed and no maws ask listed, does the built-in raise can_use_tool and take the host\'s answers',tools:FULL.filter(t=>t.name!=='ask'),flags:[],script:[toolTurn('toolu_stub_native','AskUserQuestion',QUESTION),textTurn('Blue it is.')],body:nativeAsk},

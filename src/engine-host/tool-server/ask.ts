@@ -11,7 +11,7 @@
 import { quotesGrant } from '@shared/engine/arrival';
 import type { PendingAsk } from '@shared/maws/ask';
 import { withQuestionIds } from '@shared/maws/ask';
-import { parseToolArguments, TOOL_ERRORS, type AskResult } from '@shared/maws/tools';
+import { parseRecordedToolArguments, parseToolArguments, TOOL_ERRORS, type AskResult } from '@shared/maws/tools';
 import type { AskCancelReason, AskTable } from './asks';
 import { defineMawsTool, toolError, toolText, type McpToolDefinition, type McpToolResult } from './server';
 
@@ -30,9 +30,11 @@ const anyQuotesGrant = (value: unknown): boolean =>
 
 // The ask a call's arguments open (its parse error's text when they do not parse, or the refusal of an ask that quotes a
 // grant): the one place an ask's arguments are admitted, a blocking or an async one, and where P5 O16 M3's adopter
-// restores an async ask the old manager acknowledged from the same call's journaled arguments.
-export function pendingAskOf(args: unknown, ctx: { toolUseId: PendingAsk['toolUseId']; requestId: PendingAsk['requestId']; fromSubagent: boolean }, openedAt: string): PendingAsk | string {
-  const parsed = parseToolArguments('ask', args);
+// restores an async ask the old manager acknowledged from the same call's journaled arguments. Board ticket 420: a live
+// call must say `blocking` (`askBlockingRequired`); `admitted` marks an ask an earlier host had already admitted (re-raised
+// at a handover, or restored), read with the schema records are read with, so one with no `blocking` keeps waiting.
+export function pendingAskOf(args: unknown, ctx: { toolUseId: PendingAsk['toolUseId']; requestId: PendingAsk['requestId']; fromSubagent: boolean; admitted?: true }, openedAt: string): PendingAsk | string {
+  const parsed = ctx.admitted ? parseRecordedToolArguments('ask', args) : parseToolArguments('ask', args);
   if (!parsed.ok) return parsed.error;
   if (anyQuotesGrant(parsed.data)) return TOOL_ERRORS.askQuotesGrant;
   const { title, context, questions } = parsed.data;

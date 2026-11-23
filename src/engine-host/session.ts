@@ -1578,9 +1578,12 @@ export class EngineSession {
       switch (req.request.subtype) {
         case 'mcp_message': {
           const message = readMcpMessage(req.request);
-          // an ask is raised again under its request id, so the human's answer settles the engine's own call; any other
-          // tool call may have acted, so it is answered with the orphan text and never run again
-          if (message.kind === 'request' && message.method === 'tools/call' && toolCallOf(message.params).name !== 'ask') this.maws.orphaned(req);
+          // an ask is raised again under its request id, so the human's answer settles the engine's own call (read as the
+          // earlier host admitted it: board ticket 420); any other tool call may have acted, so it is answered with the
+          // orphan text and never run again
+          const call = message.kind === 'request' && message.method === 'tools/call';
+          if (call && toolCallOf(message.params).name !== 'ask') this.maws.orphaned(req);
+          else if (call) this.maws.reraiseAsk(req);
           else this.maws.accept(req);
           break;
         }

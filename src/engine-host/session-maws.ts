@@ -209,16 +209,21 @@ export class SessionMaws {
 
   // P5 O16 M3 (Interfaces §D's table): the `maws` requests an earlier engine host left unanswered. A call of any tool but
   // `ask` is answered with the orphan text (never run again); an `ask` call is re-raised from its own arguments under its
-  // request id (`accept`), so the human's answer settles the engine's call; an async ask the old manager acknowledged
-  // and the human has not answered is open again, its answers to go as a steer.
+  // request id (`reraiseAsk`), so the human's answer settles the engine's call; an async ask the old manager acknowledged
+  // and the human has not answered is open again, its answers to go as a steer. Board ticket 420: both asks are ones an
+  // earlier host admitted, so their arguments are read as recorded (one with no `blocking` waits, as it did there).
   orphaned(req: ControlRequestFrame): void {
     this.toolServer.orphaned(req);
+  }
+
+  reraiseAsk(req: ControlRequestFrame): void {
+    this.toolServer.accept(req, { admitted: true });
   }
 
   restoreAsyncAsk(req: ControlRequestFrame, openedAt: string): void {
     const params = ((req.request as { message?: { params?: unknown } }).message?.params ?? {}) as Record<string, unknown>;
     const { args, toolUseId } = toolCallOf(params);
-    const ask = pendingAskOf(args, { toolUseId, requestId: req.request_id as RequestId, fromSubagent: false }, openedAt);
+    const ask = pendingAskOf(args, { toolUseId, requestId: req.request_id as RequestId, fromSubagent: false, admitted: true }, openedAt);
     if (typeof ask === 'string') {
       this.host.log(`the async ask of ${req.request_id} could not be restored: ${ask}`);
       return;

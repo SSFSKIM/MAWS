@@ -1257,7 +1257,7 @@ describe('maws.* commands (E1 M1)', () => {
     await host.call('session.launch', { spec: spec() });
     await until(() => host.statuses(id).some((s) => s.process === 'ready'), 'ready');
     const question = { id: 'q1', question: 'Proceed?', modality: 'choice', options: [{ label: 'Yes' }, { label: 'No' }] };
-    transport.push({ type: 'control_request', request_id: 'mcp-ask', request: { subtype: 'mcp_message', server_name: 'maws', message: { jsonrpc: '2.0', id: 5, method: 'tools/call', params: { name: 'ask', arguments: { questions: [question] }, _meta: { 'claudecode/toolUseId': 'toolu_ask' } } } } });
+    transport.push({ type: 'control_request', request_id: 'mcp-ask', request: { subtype: 'mcp_message', server_name: 'maws', message: { jsonrpc: '2.0', id: 5, method: 'tools/call', params: { name: 'ask', arguments: { blocking: true, questions: [question] }, _meta: { 'claudecode/toolUseId': 'toolu_ask' } } } } });
     const listed = { askId: 'toolu_ask', toolUseId: 'toolu_ask', requestId: 'mcp-ask', blocking: true, title: null, context: null, questions: [question], openedAt: expect.any(String) };
     await until(() => host.ipc.table.get(id)!.asks().length === 1, 'the pending ask');
     expect(await host.call('maws.asks.list', { appSessionId: id })).toEqual({ asks: [listed] });

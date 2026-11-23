@@ -13,7 +13,7 @@ import {
   SEARCH_TOOL_NAMES,
   searchHint,
 } from './search-tools';
-import { artifactRefusalOf, MAWS_TOOL_NAMES, mawsToolList, parseToolArguments, ShowPaneRecordedInputSchema } from './tools';
+import { artifactRefusalOf, AskRecordedInputSchema, MAWS_TOOL_NAMES, mawsToolList, parseToolArguments, ShowPaneRecordedInputSchema } from './tools';
 
 const UUID = '7d1c2b3a-4e5f-4a6b-8c7d-9e0f1a2b3c4d';
 
@@ -108,6 +108,19 @@ const showPaneServed = () => ({
   description: 'Open a MAWS pane for the user: "diff", "file", "terminal", "tasks", "artifact", "browser" or "source-control"; without this tool, describe where the user should look. target names what to open: a file path for diff or file (line optional), an artifact id or handle for artifact, a URL for browser (a page already open is reloaded, unless the user is using that tab). at opens an artifact at a place: {block} or {tab} of a document, {slide} of a presentation, {version} of any. Returns what was opened, or an error for an unknown pane or a pane this build of MAWS does not have.',
   inputSchema: z.toJSONSchema(ShowPaneRecordedInputSchema) as Record<string, unknown>,
 });
+// Board ticket 420 (2026-11-23): the ask as the snapshot keeps it, deferred, its description before the required
+// `blocking`, and its recorded schema; the tools an edit needs, each still always loaded as P4-A3 listed them
+const sourceTool = (name: string) => mawsToolList().find((tool) => tool.name === name)!;
+const askServed = () => {
+  const { _meta: _always, ...ask } = sourceTool('ask');
+  const opening = ask.description.slice(0, ask.description.indexOf('blocking is required.'));
+  return {
+    ...ask,
+    description: `${opening}With blocking true (the default) the call waits for the answers and returns them; with blocking false it returns {status: "asked", askId} at once and the answers arrive later as a user message that names the askId, so you can keep working meanwhile. In a subagent the call always waits and returns the answers, as with blocking true.`,
+    inputSchema: z.toJSONSchema(AskRecordedInputSchema) as Record<string, unknown>,
+  };
+};
+const alwaysLoadedServed = (name: string) => () => ({ ...sourceTool(name), _meta: { 'anthropic/alwaysLoad': true } });
 const OLDER_IN_SNAPSHOT = [
   {
     place: 'instructions',
@@ -121,7 +134,19 @@ const OLDER_IN_SNAPSHOT = [
     reason: 'UX wave U6d (O-44) retired the artifact pane and at; the snapshot keeps the description before it and the recorded input schema',
     held: showPaneServed,
   },
-] as const;
+  {
+    place: 'tools.ask',
+    since: '2026-11-23',
+    reason: 'board ticket 420 loads the ask up front and requires its blocking; the fixtures were served it deferred, blocking optional and true by default',
+    held: askServed,
+  },
+  ...(['artifact_describe_type', 'artifact_read', 'artifact_publish', 'artifact_edit'] as const).map((name) => ({
+    place: `tools.${name}` as const,
+    since: '2026-11-23',
+    reason: 'board ticket 420 gives the tools an edit needs back to tool search; P4-A3\'s fixtures were served them always loaded',
+    held: alwaysLoadedServed(name),
+  })),
+];
 
 describe('the probe’s snapshot of the maws server', () => {
   it('is the paragraph and tools/list as the source has them, less the tools taken out since (P4-R7z’s message, board ticket 848’s send_file) and the places named older', () => {
@@ -129,12 +154,13 @@ describe('the probe’s snapshot of the maws server', () => {
     const snapshot = JSON.parse(readFileSync(PROBE_TOOLS, 'utf8')) as { instructions: string; tools: { name: string }[] };
     expect(snapshot.tools.map((tool) => tool.name).filter((name) => !MAWS_TOOL_NAMES.includes(name as never))).toEqual(['send_file', 'message']);
     const source = JSON.parse(probeTools()) as typeof snapshot;
-    const [instructions, showPane] = OLDER_IN_SNAPSHOT;
-    expect(snapshot.instructions, `${instructions.place}, older since ${instructions.since}: ${instructions.reason}`).toBe(instructions.held());
-    expect(snapshot.tools.find((tool) => tool.name === 'show_pane'), `${showPane.place}, older since ${showPane.since}: ${showPane.reason}`).toEqual(showPane.held());
+    const older = new Set<string>(OLDER_IN_SNAPSHOT.map((entry) => entry.place));
+    for (const entry of OLDER_IN_SNAPSHOT) {
+      const held = entry.place === 'instructions' ? snapshot.instructions : snapshot.tools.find((tool) => `tools.${tool.name}` === entry.place);
+      expect(held, `${entry.place}, older since ${entry.since}: ${entry.reason}`).toEqual(entry.held());
+    }
     // the rest whole: the named places as the source has them, everything else as the snapshot holds it
-    const sourcePane = source.tools.find((tool) => tool.name === 'show_pane')!;
-    const rest = { instructions: source.instructions, tools: snapshot.tools.filter((tool) => tool.name !== 'message' && tool.name !== 'send_file').map((tool) => (tool.name === 'show_pane' ? sourcePane : tool)) };
+    const rest = { instructions: source.instructions, tools: snapshot.tools.filter((tool) => tool.name !== 'message' && tool.name !== 'send_file').map((tool) => (older.has(`tools.${tool.name}`) ? source.tools.find((own) => own.name === tool.name)! : tool)) };
     expect(`${JSON.stringify(rest, null, 2)}\n`).toBe(probeTools());
   });
 });
