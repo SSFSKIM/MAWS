@@ -42,10 +42,11 @@ import { CHANNEL_BOUNDS } from './journal';
 
 type ToolUse = Extract<SessionEvent, { kind: 'tool.use' }>;
 type AskOpened = Extract<SessionEvent, { kind: 'maws.ask.opened' }>;
+type Said = Pick<NewHostEntry, 'kind' | 'text' | 'at' | 'choices'>;
 
+// A MAWS ask's call, and whether its input states `blocking` (board ticket 420 made it required).
 const MAWS_ASK = 'mcp__maws__ask';
 const hasBlocking = (input: unknown): boolean => typeof input === 'object' && input !== null && Object.hasOwn(input, 'blocking');
-type Said = Pick<NewHostEntry, 'kind' | 'text' | 'at' | 'choices'>;
 
 // The message calls of a session waiting for their results. A call whose result never comes (its session gone mid-call)
 // is let go, oldest first, past this many.
