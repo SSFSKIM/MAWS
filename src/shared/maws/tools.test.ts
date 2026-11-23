@@ -152,7 +152,7 @@ describe('send_file, retired (board ticket 848)', () => {
 
   it('answers a call with the sentence that teaches the path link and what its click does', () => {
     expect(TOOL_ERRORS.sendFileRetired).toBe(
-      'send_file: MAWS no longer delivers files. Link the file in your message as a Markdown link to its absolute path, [its name](/absolute/path): a click opens it beside the chat, and ⌘-click opens it in the main area. Keep the file inside this session's folders, where everyone who sees the session can open it.',
+      'send_file: MAWS no longer delivers files. Link the file in your message as a Markdown link to its absolute path, [its name](/absolute/path): a click opens it beside the chat, and ⌘-click opens it in the main area. Keep the file inside this session\'s folders, where everyone who sees the session can open it.',
     );
   });
 
