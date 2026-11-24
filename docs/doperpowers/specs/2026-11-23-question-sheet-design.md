@@ -33,6 +33,7 @@
 - [x] (2026-11-23) C0's verdicts for P1 to P5 written into their sections: no binding sentence overturned; §2.3 gained three limits, §6's race is no longer called harmless.
 - [x] (2026-11-23) C1's harness runs end to end (smoke: 12 sessions). The owner ruled that an agent asks when a question comes up, batching the frontier (§2.4), and sized the baseline: both wordings, the subject on Opus 5.5 at medium effort, every effort medium or low.
 - [x] (2026-11-23) Buildability review of C2's execution document: eighteen findings, sixteen taken (one in part), one dismissed against §5.2's intent, one accepted as a stated limit; the author's fix wave is under way.
+- [x] (2026-11-23) C1's baseline (207 sessions, $113.73). The owner set Acceptance 14's thresholds as proposed, dropped automatic capture, and kept the ask-early ruling in a shorter wording.
 - [x] (2026-11-23) Second, narrower review of what C2's M1 freezes: twelve findings, all taken, three by a simpler rule than the mechanism the first wave had added (places for picks; "more follows" in place of numbered parts; three first lines for a stored call). Review of C2's document stops here; M1 dispatched.
 - [x] (2026-11-23) This document landed on master (#864, `eac9da2b2`); later revisions go as one pull request per child landing.
 - [ ] Children: see the Tracking Map.
@@ -129,9 +130,9 @@ Capture goes through the engine's own Read tool, not the plugin's file access: f
 
 #### 2.4 What the description asks of the agent
 
-Three things, each because one of the observed problems is behavioural and no mechanism fixes it: ask when a question comes up instead of holding it to the end of the turn, with the whole frontier of questions you have at that moment batched in one call, and keep working; revise a question you asked instead of asking a second one that overrides it; and put in `context` and `references` what a reader who sees only the card needs to judge it, marking an option `recommended` when you have a recommendation.
+Three things, each because one of the observed problems is behavioural and no mechanism fixes it: ask when a question comes up, then keep working; revise a question you asked instead of asking a second one that overrides it; and put in `context` and `references` what a reader who sees only the card needs to judge it, marking an option `recommended` when you have a recommendation.
 
-"When a question comes up" is the owner's ruling of 2026-11-23. It was made on C1's smoke run, in which agents told only to put every question in one call asked in the last response or two of their turn. C1's baseline then showed that was mostly the test's simulated shell, whose inconsistencies the agents spent their turns on: on a consistent session the earlier wording asks 2 to 4 responses after a question arises, and this wording asks no sooner. What it does change is what follows the call: the agent kept working after asking in 11 of 40 runs, against 3 of 40. On revising and on the cards the two wordings are equal. Whether the ruling stands on that evidence is with the owner.
+"When a question comes up" is the owner's ruling of 2026-11-23. It was made on C1's smoke run, in which agents told only to put every question in one call asked in the last response or two of their turn. C1's baseline then showed that was mostly the test's simulated shell, whose inconsistencies the agents spent their turns on: on a consistent session the earlier wording asks 2 to 4 responses after a question arises, and this wording asks no sooner. What it does change is what follows the call: the agent kept working after asking in 11 of 40 runs, against 3 of 40. On revising and on the cards the two wordings are equal. Shown this, the owner kept the ruling and shortened it (2026-11-23): "ask when a question comes up, then keep working", with no further eval for a change this small. The sentence on batching went with it: a call takes twenty entries, and in the baseline every run that asked put its questions in one call under either wording.
 
 It does not ask the agent to withdraw a question the human's message has already answered: the human dismisses it (the owner's ruling, 2026-11-23: the agent's context is not spent on tending the sheet).
 
@@ -346,7 +347,7 @@ A terminal session's default changes to the sheet only after this works (the own
 
 - An archive or a "recently answered" list: the transcript is the record.
 - A "work is stopped on this" mark, and any blocking mode.
-- Capturing the agent's preceding text as a question's context automatically. Under the to-human style that text is working notes, not something written for the human. Behaviour test E2 (§12) decides: if agents leave `context` empty where a reader of the card alone needs it, capture is added then.
+- Capturing the agent's preceding text as a question's context automatically. Under the to-human style that text is working notes, not something written for the human. Behaviour test E2 (§12) decided it: agents do not leave `context` empty where the card needs it, and appending their preceding text made more cards worse than better, so the owner dropped capture (2026-11-23).
 - An overview across machines on the local page: the page shows this machine. The phone and the MAWS app show others.
 - Starting a stopped terminal session in order to deliver an answer. It is delivered at the next resume.
 
@@ -387,7 +388,7 @@ The observable state that closes the unit as a whole; each item is observed in t
 11. **The page refuses strangers.** A request for a sheet's data without the credential, a write or a live connection from another Origin, and any request with another Host are refused; an unpaired browser still gets the pairing screen; a referenced HTML or SVG file is shown as text; the page loads nothing from outside itself.
 12. **`ask` is gone for new sessions.** After the flip a new MAWS-run session lists no `ask`; an old transcript's `ask` rows are drawn; a launch that started with `ask` and has one outstanding is adopted by a new host and still gets its answer.
 13. **The flip.** A terminal session's default is the sheet; open asks of today's tool appear on it once.
-14. **Behaviour.** E1 and E2 pass at the thresholds C1 proposes and the owner sets.
+14. **Behaviour.** E1 and E2 pass at the thresholds the owner set on 2026-11-23 from C1's baseline, run with C1's harness, the subject at the shipped sessions' effort, the judges at their calibrated efforts and the calibration passing 6 of 6 first. E1, far history: at most 1 failure in 30 changed-scenario runs (a duplicated question, a revise plus a duplicate, an untouched target, or a run cut off), and no repurposed question in 10 control runs. E2, long history, over the cards about the session's own matters: every essential fact on at least 80% of them; a reader's "no" on at most 2; at least 85% of the personal-data and time-zone cards passing; the row-cap matter's rate reported and not gated until its reader is calibrated for an open-ended choice. Timing is reported, not gated.
 15. **A reference that may not be read.** A question that references a file the session's permissions do not allow (a `.env`) is refused with the reason, and nothing of the file is in the sheet's directory.
 16. **Withdraw.** The agent withdraws a question it asked; its card disappears and its row reads "Withdrawn". A subagent cannot revise or withdraw the main agent's question.
 17. **After a compaction and in a fork.** After a compaction the agent can still name its open questions and their options; a fork starts with an empty sheet, is told so, and its first new id is past every id its conversation holds.
@@ -535,9 +536,9 @@ The observable state that closes the unit as a whole; each item is observed in t
 
 ## Deferred / Out of Scope
 
-**Deferred (may return):** removing today's sminos tool from the plugin, once every machine the owner uses has a surface; an overview across machines on the local page; starting a stopped terminal session to deliver an answer; automatic capture of context (decided by C1); pasting an image on the phone.
+**Deferred (may return):** removing today's sminos tool from the plugin, once every machine the owner uses has a surface; an overview across machines on the local page; starting a stopped terminal session to deliver an answer; pasting an image on the phone; calibrating E2's reader for an open-ended choice, so the row-cap matter can be gated.
 
-**Out of scope (standing):** a blocking mode; an archive of answered questions; a mark that a session is stopped on the human; MAWS's file, folder, repository and design-system answer kinds.
+**Out of scope (standing):** a blocking mode; an archive of answered questions; a mark that a session is stopped on the human; MAWS's file, folder, repository and design-system answer kinds; automatic capture of the agent's preceding text as a question's context (the owner's ruling on C1's baseline).
 
 ## Tracking Map
 
@@ -548,7 +549,7 @@ Tickets are on MAWS's board, children of #600.
 | child | artifact | status |
 |---|---|---|
 | C0 engine probes (#865) | verdicts in §12 and the sections it names; `spikes/protocol-probe/findings-qsheet-c0.txt` and `fixtures/qsheet/`, pull request #874 | landed: master `90ce5c017`; ticket closed with the findings |
-| C1 behaviour baseline (#866) | ledger in doperpowers `docs/doperpowers/ledgers/2026-11-23-question-sheet-c1.md`; the evals under `tests/output-styles/` (branch `question-sheet-c1`) | baseline run; the thresholds and the capture ruling are with the owner |
+| C1 behaviour baseline (#866) | ledger in doperpowers `docs/doperpowers/ledgers/2026-11-23-question-sheet-c1.md`; the evals under `tests/output-styles/` (branch `question-sheet-c1`) | baseline run; thresholds set and capture dropped by the owner; the evals' pull request to follow |
 | C2 the sheet in sminos (#867) | execution document in doperpowers `docs/doperpowers/plans/2026-11-23-question-sheet-c2-sminos.md` (branch `question-sheet-c2`, reviewed twice, at `198dff493`) | in-flight: M1 (G1) built, doperpowers pull request #628 under its high-rung review |
 | C3 the sheet in the MAWS app (#868) | execution document `docs/doperpowers/plans/2026-11-23-question-sheet-c3-maws-app.md` (branch `question-sheet-c3`) | in-flight: the document being written |
 | C4 the local page (#869) | execution document in `docs/doperpowers/plans/` | not-dispatched |
