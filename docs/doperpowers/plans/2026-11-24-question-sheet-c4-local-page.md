@@ -18,7 +18,7 @@ How to see each of these is Concrete Steps. What closes the child is its accepta
 - [x] (2026-11-24) The document's buildability review: twelve findings, all taken. Four needed a ruling of the composite's writer or a new mechanism (a tab proves the server before it sends its credential, T28; Node's HTTP server owns the listeners, T1; the memory stored one entry a thing, T19; a revocation answered only once it is saved, T10); the other eight are repaired where they stood (the count of headers, the read at every snapshot, the test launchers' switch, the pack's `--no-page`, a refused write judged from the wire, the stopped session's seeding and T29's discovery, M5's steps, the third pinned file). C3's and C2's authors took what this child asked of them, and the composite's writer its thirteen entries. It is the document's only review round: the milestones' task reviews and the branch reviews check it from here.
 - [x] (2026-11-24) The look: the page's own screens drawn as six frames; five matters and three corrections settled by the composite's writer (F1 to F8).
 - [x] (2026-11-24) The look: the owner's answers to the four open questions, asked on the drawn example: one column, with a left panel added (the outline, F9, designed by the composite's writer); the fixed foot; the count in the tab's title; served by default once M5's live checks pass. The two-pane layout is dropped.
-- [ ] M1 — The page server: who is let in. Blocked by: nothing.
+- [x] (2026-11-24) M1 — The page server: who is let in. Built in 8f32955f1..015aedc45 (three fix rounds of its task review: bind readiness, aborted bodies, owed and unread revocations, eviction and expiry on live connections, malformed codes, the refusal evidence at the request boundary, the remote bench's launcher); task review clean on 015aedc45; class 1a green there. What it decided is under §J's "As built in M1", §K and §L.
 - [ ] M2 — The page's shell, shipped and paired in a browser. Blocked by: M1.
 - [ ] M3 — Sheets through the page server, and the registration. Blocked by: M1; C3's first landing merged.
 - [ ] M4 — The overview and the sheet on the page, and the outline (F9). Blocked by: M2, M3.
@@ -267,7 +267,8 @@ Paths are from the repository's root. `R/` is `src/renderer/src/`. A name given 
 
     src/mawsd/sheet-page/
       serve.ts          on the daemon's run path: the decision, the two HTTP servers, the state, the heartbeat's timer; loads the chunk
-      headers.ts        on the run path: the standing headers and a refusal's bytes (§M), so an answer made without the chunk carries them
+      headers.ts        on the run path: the standing headers and a refusal's bytes (§M), so an answer made without the chunk carries them; SHEET_HOST, SHEET_PORT, HEADERS_MAX and pageOrigin, which serve.ts and checks.ts re-export
+      timing.ts         on the run path: SheetPageTiming and its defaults, which the chunk's pairing.ts needs without importing serve.ts
       registration.ts   on the run path: the file of §O (M3)
       handler.ts        the chunk: the routes, the opening of the live connection (M1); the sheet's routes and messages (M3)
       checks.ts         the three checks, pure (§L)
@@ -275,7 +276,7 @@ Paths are from the repository's root. `R/` is `src/renderer/src/`. A name given 
       static.ts         the bundle's table (§M)
       sheets.ts         C3's service through the spine (§N, M3)
 
-`serve.ts`, `headers.ts` and `registration.ts` import Node builtins, `@shared/host/shell-env` and `sminosHome`, and nothing else, and `serve.ts` imports `node:http` itself only once it has decided to serve; everything else is behind one deferred import, as `loadEndpointChunk` is in `src/mawsd/artifacts-endpoint.ts`. The bundle guard gains a case that the chunk and `ws` stay off the run path. Should the guard's case for the services library object to `sminosHome` being imported from `src/services/lane-a/discovery.ts`, the function moves to `src/shared/` with a re-export left behind, and the executor reports it.
+`serve.ts`, `headers.ts` and `registration.ts` import Node builtins, `@shared/host/shell-env` and `sminosHome`, and nothing else, and `serve.ts` asks for `node:http` itself only once it has decided to serve, through `process.getBuiltinModule('node:http')` (Node 22.3 and later; `mawsd` runs on Node 24): the guarded-entry rule (`test/support/guarded-entry.ts`) refuses a deferred `import()` of a builtin, since a deferred load may only be a chunk beside the entry; everything else is behind one deferred import, as `loadEndpointChunk` is in `src/mawsd/artifacts-endpoint.ts`. The bundle guard gains a case that the chunk and `ws` stay off the run path. Should the guard's case for the services library object to `sminosHome` being imported from `src/services/lane-a/discovery.ts`, the function moves to `src/shared/` with a re-export left behind, and the executor reports it.
 
     export const SHEET_HOST = 'sheet.localhost'
     export const SHEET_PORT = 47590
@@ -286,20 +287,21 @@ Paths are from the repository's root. `R/` is `src/renderer/src/`. A name given 
       defaultProfile: boolean;                                              // profileDir is defaultProfileDir(...), both made real
       env: NodeJS.ProcessEnv; shell(): Promise<Record<string, string>>;     // one capture, made at the first need and kept
       bundleDir: string;                                                    // join(dirname(<the entry's real path>), '..', 'sheet-page'): the real path, as daemon.ts's entryOnDisk, so a release flipped under a running daemon is never half-served
-      sheets: SheetAccess;                                                  // §N; a stand-in that refuses until M3
-      discovery(): Promise<void>;                                           // T29: daemon.ts's wakeForDiscovery, as for a session.list that is not the app's; resolves at once until M3
-      onEvent: DaemonServices['onEvent']; hold: DaemonServices['hold'];
+      sheets: SheetAccess;                                                  // §N; as built in M1, NO_SHEETS (refuses with no-service) and SheetAccess live in serve.ts: M3 moves SheetAccess and SheetsUnavailable to sheets.ts
+      discovery(): Promise<void>;                                           // T29, M3: daemon.ts's wakeForDiscovery, as for a session.list that is not the app's
+      onEvent: DaemonServices['onEvent']; hold: DaemonServices['hold'];   // M3: not in M1's options, which use neither; M3 adds the three with their use
       log(line: string): void;
       load?(): Promise<SheetPageChunk>; now?(): number;                     // test seams
       listen?(server: http.Server, host: string, port: number): Promise<void>;   // test seam: a bind that fails as told
+      write?(file: string, text: string): void;                                 // test seam: the browsers' file's replace that fails (T10)
       timing?: Partial<SheetPageTiming>;
     }
     export interface SheetPage {
       start(): void;                                   // returns at once; T6
       status(): DaemonSheetPage;                       // daemon.status.sheetPage
       pair(): Promise<SheetPairAnswer>;                // §K
-      browsers(): Promise<PairedBrowser[]>;
-      unpair(id: string | null): Promise<{ removed: number; saved: boolean }>;
+      browsers(): Promise<BrowserList>;                // { browsers: PairedBrowser[]; why?: string }: why is the read error's code when the file could not be read
+      unpair(id: string | null): Promise<{ removed: number; saved: boolean; why?: string; unread?: true }>;
       spineState(state: SpineState): void;             // T15: anything but 'loaded' is said on the live connections
       stop(): Promise<void>;                           // listeners closed, connections ended, the registration removed if ours; at most 500 ms
     }
@@ -330,7 +332,16 @@ Paths are from the repository's root. `R/` is `src/renderer/src/`. A name given 
 
 `detail` is one sentence and holds no path; `browsers` and `connections` are null until the chunk has loaded, since a status reads no file and loads nothing. `mawsd status` prints one line from it: `sheet page: http://sheet.localhost:47590 (2 browsers paired, 1 open)`, or `sheet page: not served (the port is in use)`.
 
-**The test launchers** (T2). `launchEnvironment` in `e2e/support/scratch-env.ts` returns `MAWS_SHEET_PAGE: '0'` and no `MAWS_SHEET_PORT`, whatever the runner's environment holds; `test/support/scratch-env.test.ts` pins it. A suite that starts a daemon in its own process (`startDaemon`) gives it an environment it built, never the runner's whole.
+**The test launchers** (T2). `launchEnvironment` in `e2e/support/scratch-env.ts` returns `MAWS_SHEET_PAGE: '0'` and no `MAWS_SHEET_PORT`, whatever the runner's environment holds; `test/support/scratch-env.test.ts` pins it. `test/support/remote-bench.ts`, which builds its daemon's environment itself, does the same; M1's sweep found no other launcher that starts a `mawsd` from an inherited environment. A suite that starts a daemon in its own process (`startDaemon`) gives it an environment it built, never the runner's whole.
+
+**As built in M1** (each a decision of the milestone, reviewed):
+
+- **The bind decision is committed before anything is served.** A connection that arrives on the first listener while the second bind is pending is dropped and loads nothing; a stop during the pending bind closes the provisional listener (T3).
+- **The commands' reach by state.** `pair` only in `listening` (T8). `browsers` and `unpair` read and change the browsers' file in every state but `stopped`, loading the chunk on demand, so a browser can be unpaired while the port is taken or the page is off; in `stopped` they answer `[]` and `{ removed: 0, saved: false, why: 'stopping' }`. Each rechecks the state after the chunk's load, so a stop that lands during the load mints no code and writes nothing. An idle start with no command and no request still loads nothing.
+- **Status reads no file.** `daemon.status.sheetPage.browsers` is counted in memory: null before the chunk has loaded and while the browsers' file cannot be read.
+- **The timer's tick** (an owed save retried, T10; from M3 the heartbeat, gated on `listening`) starts when the chunk loads, not when the page starts listening.
+- **The live connection.** The upgrade is checked before `ws` sees it (`Upgrade: websocket`, version 13, a well-formed key, no subprotocol) and refused 400 with the standing headers, so `ws` never writes an answer of its own; the 101 carries the standing headers; past 32 live or 8 unpaired, 503 at the upgrade. A server-initiated close ends the socket one second later (`CLOSE_GRACE_MS`) whether or not the peer answers, since `ws` otherwise holds it 30 seconds. In M1 the spine's state is said (`unavailable`, `why: 'refused' | 'yielded'`) only on paired connections and only for those two states; a stop closes 1001.
+- **An aborted body is not an empty one.** A request whose body was cut off changes nothing and is answered nothing; a parser error after a response's headers were sent destroys the socket and writes nothing.
 
 ### §K · Pairing (M1)
 
@@ -357,20 +368,22 @@ Paths are from the repository's root. `R/` is `src/renderer/src/`. A name given 
 
     the proof key   HMAC-SHA-256( key: the credential's 32 bytes, message: PROOF_KEY_LABEL )      made by both sides at the exchange; the page makes it again at each load
 
-A typed code is read without its dash and without regard to case. `exchange` answers `none` when no code is live, `busy` past the minute's ten, and `not-saved` when the file could not be replaced, in which case no credential was made and the code is still live. The label is a browser's family and system read from the user agent ("Chrome on macOS"), from a fixed set of words, so nothing a requester wrote reaches a terminal. A file that does not parse, or whose `v` is not 1, is read as no browsers and replaced at the next write: the cost is a pairing, and a file half-read is worse. `write` is the test's seam for a replace that fails. Nothing here logs a code, a credential, a hash or a key.
+A typed code is read without its dash and without regard to case; one that holds anything outside the alphabet, or is not eight characters, is a wrong try like any other. `exchange` answers `none` when no code is live, `busy` past the minute's ten, and `not-saved` when the file could not be replaced, in which case no credential was made and the code is still live. The label is a browser's family and system read from the user agent ("Chrome on macOS"), from a fixed set of words, so nothing a requester wrote reaches a terminal. A file that does not parse, or whose `v` is not 1, is read as no browsers and replaced at the next write: the cost is a pairing, and a file half-read is worse. **Only a missing file is no file.** A file that exists and cannot be read (any error but `ENOENT`) pairs nobody while it lasts, is never overwritten, and is read again at the next command, credential check or hello, so a passing error heals without a restart; the commands report it and claim nothing done. The credential's SHA-256 and the proof key are both taken over the credential's 32 decoded bytes, not its base64url text. A browser dropped as the seventeenth's eviction or past its 90 days is revoked as `unpair` revokes: its live connections close with 4403. `write` is the test's seam for a replace that fails. Nothing here logs a code, a credential, a hash or a key.
 
 The wire, in `src/shared/ipc/schema/daemon.ts` with its names and grades (each main-only, `owner: 'machine'`, graded `internal`), served in `daemon.ts`'s switch and listed in `FRONT_COMMANDS`:
 
     daemon.sheetPair       void                     → SheetPairAnswer
-    daemon.sheetBrowsers   void                     → { served: boolean; browsers: PairedBrowser[] }
-    daemon.sheetUnpair     { id: string | null }    → { removed: number; saved: boolean }
+    daemon.sheetBrowsers   void                     → { served: boolean; browsers: PairedBrowser[]; why?: string }
+    daemon.sheetUnpair     { id: string | null }    → { removed: number; saved: boolean; why?: string; unread?: true }
+
+`why` is an error code (`ENOSPC`, `EISDIR`), never a message, which would name a path. `unread` says the browsers' file could not be read, so nothing was revoked; without it, `saved: false` says a revocation held in memory could not be saved (T10). `WIRE_MINOR` rose from 62 to 63 for the whole of M1's change.
 
 `daemon.sheetPair` answers `{ ok: false }` with the reason in any state but `listening` (T8).
 
 The command line (`src/mawsd/cli.ts`, with its usage text):
 
     mawsd sheet pair                 the code alone on the first line of standard output, then one sentence; exit 2 with the reason where this mawsd serves no page now, 3 where none runs
-    mawsd sheet browsers [--json]    one line a browser: its id, its label, when paired, when last seen
+    mawsd sheet browsers [--json]    one line a browser: its id, its label, when paired, when last seen; exit 1 with "the browsers' file could not be read (<code>)" where it could not be read
     mawsd sheet unpair <id>|--all    "unpaired 1 browser"; exit 1 where the change could not be saved, with:
                                      "unpaired 1 browser for now: the change could not be saved (<the reason>). It is paired again if mawsd restarts before a save succeeds."
 
@@ -383,7 +396,7 @@ The command line (`src/mawsd/cli.ts`, with its usage text):
 `checks.ts` is pure: a request's method, target and raw headers in, a refusal or a route out. The order is fixed, and each check runs only if the one before passed: **the count of headers (§J), then Host, then the route and its method, then Origin, then the credential, then the body.**
 
     export function pageOrigin(port: number): string                                       // http://sheet.localhost:<port>
-    export type Refusal = { status: 400 | 401 | 403 | 404 | 405 | 413 | 417 | 421 | 429 | 431 | 500 | 503; body: string }   // body: one of a fixed list of sentences
+    export type Refusal = { status: 400 | 401 | 403 | 404 | 405 | 408 | 413 | 417 | 421 | 429 | 431 | 500 | 503; body: string }   // body: one of a fixed list of sentences
     export function hostPasses(rawHeaders: readonly string[], port: number): boolean       // exactly one Host header, equal to sheet.localhost:<port>, case folded; nothing else
     export function originOf(rawHeaders: readonly string[], port: number): 'absent' | 'page' | 'other'   // 'null' and a repeated header are 'other'
     export function bearerOf(rawHeaders: readonly string[]): string | null                 // the one Authorization header, scheme Bearer; two are none; never a cookie, never the target
@@ -404,7 +417,7 @@ Every check reads `rawHeaders`, which keeps each header as it came; Node's parse
 | `GET /live`, upgrading | required | **the page's** | on the connection, after the proof | 101, then the opening below |
 | anything else | required | | | 404; a known path with another method, 405 |
 
-A refused Host is 421, a refused Origin 403, a missing, malformed, repeated, unknown or revoked credential 401, each with its constant sentence as `text/plain` and every header of §M.
+A refused Host is 421, a refused Origin 403, a missing, malformed, repeated, unknown or revoked credential 401, each with its constant sentence as `text/plain` and every header of §M, with `Connection: close` and `Cache-Control: no-store`; Node's own request deadline is answered 408 the same way. The Origin is compared exactly, with no case folding: only the Host is folded. As built in M1, the routes the table leaves open: any method but `GET` and `POST` is 405 on any path (`OPTIONS` and `HEAD` included), and a `POST` to a file's path is 405; an unknown path under `/api/` is 404 (M3 adds the sheet's); a target that is not origin-form is 400; an upgrade to any path but `/live` is 404, and `GET /live` without an upgrade is 400. An `Expect` is answered 417 before the Host check (Node's `checkExpectation`), which tells a stranger nothing, the body being a constant. Files are `no-cache` with an ETag of size and time, answered 304 on `If-None-Match`.
 
 **Rule 2, read for a browser.** The composite's rule asks for the Origin "exactly the page's" on every write and on the live connection, and a browser sends one on every `POST` and every WebSocket handshake, so those require it. A browser sends none on a same-origin `GET`, so a read cannot require one; it requires the credential, and refuses an Origin that is present and is not the page's. A navigation carries none, and the shell and the pairing screen stand on the Host check alone, as the rule says.
 
@@ -423,7 +436,7 @@ A refused Host is 421, a refused Origin 403, a missing, malformed, repeated, unk
     close codes:  4401 the browser is not known, the credential was refused, or a step did not come in time; 4403 this browser was unpaired while connected;
                   1008 the tab sent something this opening does not have; 1001 mawsd is stopping
 
-The server answers one hello a connection and sends nothing before it. A tab holds a connection **proven** from step 3's check until that socket closes, and `src/api.ts` asks that before every request that carries the credential (§P).
+The server answers one hello a connection and sends nothing before it. The credential of step 4 must be the one of the browser the hello named; another browser's is closed 4401. A tab holds a connection **proven** from step 3's check until that socket closes, and `src/api.ts` asks that before every request that carries the credential (§P).
 
 ### §M · The headers, and the bundle's table (M1)
 
@@ -607,7 +620,7 @@ Five milestones in two landings. M1 is the page server with its three checks, th
 
 - T1 to T13 and T28. `sheets` is a stand-in here that rejects with `no-service`, so a paired connection is told `unavailable`; the sheet's routes of §L are not in `routeOf` until M3, so in this milestone they are 404. The one route that needs the credential here is `POST /api/unpair`, and rule 1 is pinned on it and on the live connection.
 - The checks are written and tested as a table before the server exists: `checks.test.ts` holds §L's table row by row, each row as the request that passes and the requests that are refused, so the table in this document and the code cannot drift without a test moving.
-- The process-level suite follows `src/mawsd/process-spine.test.ts`: `startDaemon` in the test's process with the product's options, a scratch profile, the fixture bundle given as `bundleDir`, port 0, and an environment the suite builds. Its clients are Node's `net`, `http` and `ws`, which write any header and any bytes; a connection is made to the address under test and the Host header set by hand, so no test depends on how its machine resolves a name.
+- The process-level suite starts the daemon in the test's process on `MawsdScene` (stand-in hosts, so it needs no build and runs in every unit job), with the product's options, a scratch profile, the fixture bundle given as `bundleDir`, port 0, and an environment the suite builds. Its clients are Node's `net`, `http` and `ws`, which write any header and any bytes; a connection is made to the address under test and the Host header set by hand, so no test depends on how its machine resolves a name.
 - A machine with no IPv6 loopback is common among containers. The suite asserts both addresses where `::1` can be bound and one where it cannot, and T3's rule itself (one bind refused as in use means neither is served) is tested through `listen`, the seam.
 - What Node's HTTP server does by itself is confirmed by a test before a check is trusted to it, since two of these were found by reading the runtime and not its documentation (the facts above): the deadlines run only for a server that listens; the parser cuts the list of headers at its limit without a word; the parsed `headers` keeps one of a repeated header; and the server answers a missing `Host`, an `Expect` and a malformed request itself unless told otherwise. `server.address()` is the proof of what was bound, not the options passed.
 - The wire moves by three commands and one field of `daemon.status`. All three pinned files are regenerated: `pnpm wire:manifest` rewrites the manifest and the fingerprint, and `routes.json` is rewritten only by its own test under `MAWS_ROUTES_WRITE=1` (Concrete Steps). Both steps are run again when C3's landing, which also moves the wire, is merged under this branch.
