@@ -38,8 +38,9 @@ export function savedStateOf(state: DocumentState): SavedState {
   return state.unsaved > 0 ? 'saving' : 'saved';
 }
 
-// The header draws "Saving…" at once (panel/SavedStatus.tsx), so the body holds it back as the document's and the
-// deck's tab-states do: edits acknowledged within the half second leave the header at "All changes saved".
+// The header draws "Saving…" at once (panel/SavedStatus.tsx), so the body holds the ring back as the document's and the
+// deck's tab-states do: edits acknowledged within the half second leave the header at "All changes saved". The edits
+// are said at once all the same (the registration's `pendingEdits`), so the replace rule keeps the tab meanwhile.
 function useHeldSaving(saved: SavedState): SavedState {
   const waiting = saved === 'saving';
   const [late, setLate] = useState(false);
@@ -90,16 +91,18 @@ export function DesignSystemBody(props: DesignSystemBodyProps) {
   const scope = useEditorHostScope();
   const key = keyOf(scope, artifactId);
   const reveal = useCheckRequests((s) => s.serials[key] ?? 0);
-  const saved = useHeldSaving(useSyncExternalStore(
+  const replica = useSyncExternalStore(
     (listener) => handle.subscribe(listener),
     () => savedStateOf(handle.state()),
-  ));
+  );
+  const saved = useHeldSaving(replica);
   const name = usePageState(handle.doc).system.meta?.name ?? null;
   const shownTitle = title ?? name ?? DESIGN_SYSTEM_COPY.untitled;
 
   useEditorHost(scope, {
     title: shownTitle,
     saved,
+    pendingEdits: replica === 'saving',
     actions: [
       { id: 'design-system.check', label: DESIGN_SYSTEM_COPY.check, onSelect: () => requestCheck(key) },
       { id: 'design-system.set-default', label: DESIGN_SYSTEM_COPY.setDefault, onSelect: () => onSetDefault?.(), disabled: !onSetDefault || isDefault },

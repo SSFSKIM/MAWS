@@ -12,6 +12,9 @@ import { markupSurfaceOf, resetMarkupSurfaces } from '../../markup/surface';
 import { askEditorHostClose, editorHostOf, EditorHostScopeContext, resetEditorHosts, type EditorHostScope } from '../../panel/editor-host';
 import { closeDialog, useDialogs } from '../../sessions/dialogs';
 import { useNotices } from '../../stores/notices';
+import type { TabRef } from '@shared/ipc/schema/layout';
+import { TEST_MACHINE } from '../../../../../test/support/machine';
+import { artifactReplaceVerdict } from '../../library/ArtifactTab';
 import { DesignSystemBody, savedStateOf } from './DesignSystemBody';
 import { OpenedSystem } from './editor';
 
@@ -72,12 +75,20 @@ describe('the Design System body (X32, Mark-up)', () => {
       ['Set as my default', true],
     ]);
     expect(registration.exports!.map((e) => e.label)).toEqual(['Export for Claude']);
+    // P23: the ring waits the quiet half second; the edits do not: a tab whose edits wait is never replaced (replacing
+    // skips the closeGuard), the ring drawn or not
+    const tab = { id: SCOPE.tabId, kind: 'artifact', artifactId: 'ds1', machine: TEST_MACHINE } as TabRef;
+    expect(artifactReplaceVerdict(tab), 'nothing waits: replaceable').toBeNull();
     act(() => set({ unsaved: 2 }));
     expect(editorHostOf(SCOPE)!.saved, 'held back: the header draws saving at once').toBe('saved');
+    expect(editorHostOf(SCOPE)!.pendingEdits).toBe(true);
+    expect(artifactReplaceVerdict(tab), 'kept before the ring is drawn').toEqual({ keep: expect.stringContaining('being saved') });
     await act(() => new Promise((resolve) => setTimeout(resolve, 550)));
     expect(editorHostOf(SCOPE)!.saved).toBe('saving');
     act(() => set({ unsaved: 0 }));
     expect(editorHostOf(SCOPE)!.saved).toBe('saved');
+    expect(editorHostOf(SCOPE)!.pendingEdits).toBe(false);
+    expect(artifactReplaceVerdict(tab)).toBeNull();
     act(() => setLaw(doc, '# Harbor Press\n'));
     expect(editorHostOf(SCOPE)!.title).toBe('Harbor Press');
   });

@@ -25,6 +25,9 @@ export interface EditorHostRegistration {
   toolbarHost?: { element: HTMLElement; menuLabel: string } | null;
   breadcrumb?: readonly string[];
   saved?: SavedState | null; // absent or null: no indicator
+  // Edits the host has not acknowledged yet, said at once by an editor whose `saved` holds "Saving…" back for the quiet
+  // half second (the word cut, P23): what the replace rule reads, since replacing a tab skips its closeGuard.
+  pendingEdits?: boolean;
   unresolved?: number; // 0 or absent: no count
   actions?: readonly EditorHostAction[]; // version history, Open in tab, comments, …
   exports?: readonly EditorHostExport[];
@@ -148,7 +151,7 @@ export const EditorHostScopeContext = createContext<EditorHostScope | null>(null
 export const useEditorHostScope = (): EditorHostScope | null => useContext(EditorHostScopeContext);
 
 // Every optional field named, so a render that drops one clears it from the registration.
-const CLEARED: Partial<EditorHostRegistration> = { breadcrumb: undefined, saved: undefined, unresolved: undefined, actions: undefined, exports: undefined, closeGuard: undefined };
+const CLEARED: Partial<EditorHostRegistration> = { breadcrumb: undefined, saved: undefined, pendingEdits: undefined, unresolved: undefined, actions: undefined, exports: undefined, closeGuard: undefined };
 
 // Registers on mount, updates with each render's fields. The registration outlives the body: an unmount (a tab switch)
 // keeps it for the tab, and the tab's body mounting again replaces it. A mounted body that changes its scope moves its

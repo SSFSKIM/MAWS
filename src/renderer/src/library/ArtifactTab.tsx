@@ -246,12 +246,13 @@ function Gone({ scope, deleted }: { scope: EditorHostScope; deleted: boolean }) 
 // E11 F2b's replace rule for this kind: a session opened over an unpinned `artifact` tab takes its place unless the
 // editor's header says its changes are not saved yet (saving, unsaved, or waiting to reconnect), when the tab stays and
 // the session opens beside it, as an unsaved file's does. Replacing skips the closeGuard, so the sync answer is the
-// header's saved state.
+// header's saved state, and its pending edits where the header holds "Saving…" back (the word cut, P23).
 // Fix wave 4 (the panel's P1): a replica parked by an agent's delete reads read-only in the header, yet keeps the edit the
 // deletion's fence refused, which a replacement would close away; such a tab stays too.
 export function artifactReplaceVerdict(ref: TabRef): ReplaceVerdict {
   if (ref.kind !== 'artifact') return null;
-  const saved = editorHostOf({ surface: 'main', tabId: ref.id })?.saved;
+  const header = editorHostOf({ surface: 'main', tabId: ref.id });
+  const saved = header?.pendingEdits === true ? 'saving' : header?.saved;
   const kept = unsentWhileDeleted(ref.artifactId, ref.machine);
   if (!kept && saved !== 'saving' && saved !== 'unsaved' && saved !== 'reconnecting') return null;
   const title = libraryRow(library.getState(), ref.artifactId, ref.machine).value?.title ?? LIBRARY_COPY.fallbackTitle;
