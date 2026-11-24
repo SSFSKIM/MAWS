@@ -241,7 +241,9 @@ describe('the threads rail', () => {
     const field = (id: string) => within(rail().querySelector<HTMLElement>(`[data-thread="${id}"]`)!).getByRole('textbox', { name: 'Reply' }) as HTMLTextAreaElement;
     expect(ids()).toEqual([first]);
     act(() => fireEvent.click(within(rail()).getByRole('button', { name: /^Deleted \(/ })));
-    expect(ids()).toEqual([first, 'zz000001', second]); // All: open first, then the resolved section
+    // All: the open thread first, then the Deleted fold's own in thread order, the resolved thread whose passage is gone
+    // among them (the pair review's fix wave, G395)
+    expect(ids()).toEqual([first, second, 'zz000001']);
     expect(within(rail()).getByRole('radio', { name: 'All' })).toHaveProperty('checked', true);
     expect(within(rail()).getByRole('radio', { name: 'All tabs' })).toHaveProperty('checked', true);
     act(() => fireEvent.change(field(first), { target: { value: 'Draft kept' } }));
@@ -264,14 +266,14 @@ describe('the threads rail', () => {
     expect(ids()).toEqual(['zz000001']);
     search('claude'); // an author: the agent replied to the first and wrote the third
     expect(ids()).toEqual([first, 'zz000001']);
-    search('owners'); // a resolved thread's quote: listed under Resolved, no note above it
+    search('owners'); // a resolved thread's quote, its passage gone: listed under the Deleted fold, no note above it
     expect(ids()).toEqual([second]);
     expect(rail().querySelector('.doc-rail-empty')).toBeNull();
     search('nothing like it');
     expect(ids()).toEqual([]);
     expect(rail().querySelector('.doc-rail-empty')?.textContent).toBe('No matches'); // the word cut (G398)
     search('');
-    expect(ids()).toEqual([first, 'zz000001', second]);
+    expect(ids()).toEqual([first, second, 'zz000001']);
     expect(field(first).value).toBe('Draft kept');
   });
 

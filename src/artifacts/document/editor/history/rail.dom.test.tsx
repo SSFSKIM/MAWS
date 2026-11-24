@@ -550,13 +550,15 @@ describe('the owner’s actions', () => {
     expect(screen.queryByRole('alertdialog')).toBeNull();
     expect(document.activeElement).toBe(restore);
     await userEvent.click(restore);
-    await userEvent.click(within(screen.getByRole('alertdialog', { name: 'Restore this version?' })).getByRole('button', { name: 'Restore', exact: true }));
+    await userEvent.click(within(screen.getByRole('alertdialog', { name: 'Restore this version?' })).getByRole('button', { name: 'Restore' }));
     await until(() => screen.queryByRole('status', { name: 'Restored' }) !== null, 'the restore');
     expect(screen.getByRole('status', { name: 'Restored' }).textContent).toContain('Restored from Clean draft');
   });
 
   it('puts the keyboard in the version’s name field when Name this version is chosen from the menu', async () => {
-    await setup(async ({ history: hist }) => void hist.version('auto', HUMAN));
+    await setup(async ({ history: hist }) => {
+      hist.version('auto', HUMAN);
+    });
     await openHistory();
     click(within(rail()).getAllByRole('button', { name: /^Version / })[0]);
     await previewing();
@@ -617,7 +619,9 @@ describe('the owner’s actions', () => {
   // The pair review's fix wave (G379): the "…" is a drawn glyph in the ×'s own box, centred as the × is rather than a
   // text ellipsis on the baseline, and it shows its pressed state while its menu is open (the app's open-menu trigger).
   it('draws the version’s actions as a glyph in the ×’s box, pressed while its menu is open', async () => {
-    await setup(async ({ history: hist }) => void hist.version('auto', HUMAN));
+    await setup(async ({ history: hist }) => {
+      hist.version('auto', HUMAN);
+    });
     await openHistory();
     click(within(rail()).getAllByRole('button', { name: /^Version / })[0]);
     await previewing();
@@ -631,7 +635,7 @@ describe('the owner’s actions', () => {
     expect(actions.getAttribute('data-state')).toBe('open');
     expect(actions.getAttribute('aria-expanded')).toBe('true');
     const css = chromeCss.replace(/\/\*[\s\S]*?\*\//g, '');
-    const pressed = [...css.matchAll(/([^{}]+)\{([^{}]*)\}/g)].find(([head]) => head!.split(',').some((selector) => selector.trim() === ".doc-tool[data-state='open']"));
+    const pressed = [...css.matchAll(/([^{}]+)\{([^{}]*)\}/g)].find(([, head]) => head!.split(',').some((selector) => selector.trim() === ".doc-tool[data-state='open']"));
     expect(pressed?.[2]).toContain('background: var(--bg-active);');
   });
 

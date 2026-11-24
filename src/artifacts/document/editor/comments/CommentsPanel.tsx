@@ -128,7 +128,8 @@ export function CommentsPanel({ doc, tabs, activeTab, activeThread, author, read
     );
   };
   // nothing to list: under All, a search that only resolved threads match lists those without a note
-  const empty = status === 'resolved' ? resolved.length === 0 : open.length === 0 && (needle === '' || resolved.length === 0);
+  // (the pair review's fix wave: a fold that lists a match under the filter or the search is something listed too)
+  const empty = status === 'resolved' ? resolved.length === 0 && deleted.length === 0 : open.length === 0 && (needle === '' || resolved.length + deleted.length === 0);
   const emptyText = needle !== '' ? W.noMatches : status === 'resolved' ? W.noResolved : W.noOpen;
 
   return (
