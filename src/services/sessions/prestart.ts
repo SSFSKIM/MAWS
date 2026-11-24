@@ -86,6 +86,9 @@ export async function prestartLaunch(s: Setup, intent: SetupIntent, browserSocke
 // - the generation the host gave last, with the engine host connection it was given on: it is withdrawn only on that
 //   connection (a successor host counts its own from 1, and the old one's prestarts died with its connection).
 // - whether a request reached the host, which Send's launch reads once to offer the host its engine.
+// - the tokens withdrawn that ended no line (M4, Decision Log 14): nothing orders the window's withdraw behind the request
+//   carrying its token, so a withdraw that arrives first leaves a tombstone and that request is answered `skipped`,
+//   dispatching nothing. At most WITHDRAWN_KEPT per intent, the newest kept; a discard, and a Send that launched, clear them.
 export type PrestartLink = object; // an engine host connection (its welcome), compared by identity
 
 interface PrestartId {
@@ -95,7 +98,11 @@ interface PrestartId {
   pending: number; // host calls queued or under way
   known: { generation: number; link: PrestartLink } | null;
   requested: boolean;
+  withdrawn: string[]; // tombstones, oldest first
 }
+
+/** The tombstones kept per intent: a window withdraws at most its last token at each move, and moves are few. */
+export const WITHDRAWN_KEPT = 4;
 
 export class PrestartRequests {
   private seq = 0;
@@ -107,7 +114,7 @@ export class PrestartRequests {
   begin(appSessionId: AppSessionId, token: string): number | null {
     if (this.stopped) return null;
     const id = this.of(appSessionId);
-    if (id.fences > 0) return null;
+    if (id.fences > 0 || id.withdrawn.includes(token)) return null;
     id.line = { token, epoch: ++this.seq };
     return id.line.epoch;
   }
@@ -121,12 +128,27 @@ export class PrestartRequests {
     return this.ids.get(appSessionId)?.line?.token ?? null;
   }
 
-  // Ends the line (with `token`, only that token's): whether one ended.
+  // Ends the line (with `token`, only that token's): whether one ended. A token that ends no line is the window's withdraw
+  // ahead of its request (or after it ended): a tombstone, so a request still to come under it begins nothing.
   end(appSessionId: AppSessionId, token?: string): boolean {
+    if (token !== undefined && this.ids.get(appSessionId)?.line?.token !== token) {
+      if (this.stopped) return false;
+      const id = this.of(appSessionId);
+      if (!id.withdrawn.includes(token)) id.withdrawn = [...id.withdrawn, token].slice(-WITHDRAWN_KEPT);
+      return false;
+    }
     const id = this.ids.get(appSessionId);
-    if (id?.line == null || (token !== undefined && id.line.token !== token)) return false;
+    if (id?.line == null) return false;
     id.line = null;
     return true;
+  }
+
+  // The intent was discarded or launched: its tombstones go.
+  clearWithdrawn(appSessionId: AppSessionId): void {
+    const id = this.ids.get(appSessionId);
+    if (id === undefined) return;
+    id.withdrawn = [];
+    this.prune(appSessionId, id);
   }
 
   // A discard or a Send: the line ends with nothing withdrawn, and no request of the id begins or dispatches until the
@@ -195,11 +217,11 @@ export class PrestartRequests {
 
   private of(appSessionId: AppSessionId): PrestartId {
     let id = this.ids.get(appSessionId);
-    if (id === undefined) this.ids.set(appSessionId, (id = { line: null, fences: 0, calls: Promise.resolve(), pending: 0, known: null, requested: false }));
+    if (id === undefined) this.ids.set(appSessionId, (id = { line: null, fences: 0, calls: Promise.resolve(), pending: 0, known: null, requested: false, withdrawn: [] }));
     return id;
   }
 
   private prune(appSessionId: AppSessionId, id: PrestartId): void {
-    if (id.line === null && id.fences === 0 && id.pending === 0 && id.known === null && !id.requested && this.ids.get(appSessionId) === id) this.ids.delete(appSessionId);
+    if (id.line === null && id.fences === 0 && id.pending === 0 && id.known === null && !id.requested && id.withdrawn.length === 0 && this.ids.get(appSessionId) === id) this.ids.delete(appSessionId);
   }
 }

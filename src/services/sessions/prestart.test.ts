@@ -717,6 +717,31 @@ describe('M3’s review: the spine’s findings', () => {
   });
 });
 
+describe('the window’s withdraw ahead of its own request (M4, Decision Log 14)', () => {
+  it('a withdraw that reaches the spine before the request carrying its token: the request is skipped and dispatches nothing', async () => {
+    await harness();
+    const id = await create();
+    await h.service.withdrawPrestart(id, 'window-token-1'); // the move, overtaking the edit's request on its way
+    expect(await ask(id, 'window-token-1')).toMatchObject({ status: 'skipped', token: null });
+    expect(prestartCalls()).toEqual([]);
+    expect(h.host.prestarts.size).toBe(0);
+    // a later edit's request, under a token of its own, is served
+    expect(await ask(id, 'window-token-2')).toMatchObject({ status: 'started', token: 'window-token-2' });
+  });
+
+  it('keeps a few tombstones per intent, and a discard clears them', async () => {
+    await harness();
+    const id = await create();
+    for (let i = 1; i <= 20; i += 1) await h.service.withdrawPrestart(id, `early-${i}`);
+    const kept = () => (h.service as unknown as { prestarts: { ids: Map<string, { withdrawn: string[] }> } }).prestarts.ids.get(id)?.withdrawn ?? [];
+    expect(kept().length).toBeLessThanOrEqual(4);
+    expect(kept()).toContain('early-20');
+    expect(await ask(id, 'early-20')).toMatchObject({ status: 'skipped' });
+    await h.service.discard(id);
+    expect(kept()).toEqual([]);
+  });
+});
+
 describe('the switches (D9)', () => {
   it('prestarts in launch mode index; under MAWS_E2E=1 only with MAWS_E2E_PRESTART=1; never in launch mode scenario (the stub source)', () => {
     expect(prestartSwitchedOn({}, 'index')).toBe(true);

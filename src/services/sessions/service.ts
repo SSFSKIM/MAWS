@@ -615,7 +615,7 @@ export class SessionService {
     try {
       return await this.discardFenced(appSessionId);
     } finally {
-      this.endFence(appSessionId, unfence, false);
+      this.endFence(appSessionId, unfence, false, true);
     }
   }
 
@@ -901,7 +901,7 @@ export class SessionService {
   prestart(appSessionId: AppSessionId, token: string): Promise<PrestartAnswer> {
     if (this.deps.prestart === undefined) return Promise.resolve(skipped('off: this spine prestarts nothing'));
     const epoch = this.prestarts.begin(appSessionId, token);
-    if (epoch === null) return Promise.resolve(skipped('ended: a discard or a Send of the intent is under way, or the spine stopped'));
+    if (epoch === null) return Promise.resolve(skipped('ended: a discard or a Send of the intent is under way, the window withdrew this token, or the spine stopped'));
     return this.requestPrestart(appSessionId, token, epoch, this.deps.prestart);
   }
 
@@ -986,9 +986,10 @@ export class SessionService {
   // a failed setup may not have reached its launch, a discard's forget already ended it), queued behind a dispatch still
   // on its way. Counted in the service's work.
   // With no prestart (the switches off) nothing here runs: the flag-off path is today's.
-  private endFence(appSessionId: AppSessionId, unfence: () => void, launched: boolean): void {
+  private endFence(appSessionId: AppSessionId, unfence: () => void, launched: boolean, discarded = false): void {
     if (this.deps.prestart !== undefined) {
       this.prestarts.takeRequested(appSessionId); // a later start offers no adoption unless a request reaches the host again
+      if (launched || discarded) this.prestarts.clearWithdrawn(appSessionId); // M4 (Decision Log 14): the intent is gone
       if (launched) void this.prestarts.serial(appSessionId, async () => void this.prestarts.takeKnown(appSessionId, null));
       else void this.work.track(this.withdrawKnown(appSessionId));
     }
