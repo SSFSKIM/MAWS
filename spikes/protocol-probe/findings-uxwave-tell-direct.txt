@@ -1,0 +1,61 @@
+UX wave, the direct subagent tell: can MAWS's engine host message a session's subagent itself, as a terminal session's
+bridge does with `$.session.send({ to: { agentId }, text })`, instead of asking the parent to `SendMessage` it?
+(scenarios/pass3/uxwave-tell-direct.mjs; fixtures fixtures/uxwave/uxwave-tell-*.jsonl; tests in fixtures.test.mjs,
+"the direct tell"; engine 2.1.331, the scripted Messages API stand-in, nothing spent; 2026-11-24)
+
+Isolation. Each run has a scratch CLAUDE_CONFIG_DIR under /tmp and an environment rebuilt from the base keys, so no
+sminos variable and no token other than the stand-in's reaches the engine. No app window is opened. The probe mod is
+written into the run's scratch root and loaded with `--plugin-dir`.
+
+Engine facts read first (2.1.331 cli.pretty.js):
+  - `send_task_message` is declared by the control protocol, but a local session's handler throws "Unsupported control
+    request subtype: send_task_message". The same holds in 2.1.312, 2.1.322 and 2.1.325.
+  - `$.session.send` runs the SendMessage tool itself.
+      A running agent: the message is queued for its next tool round.
+      A finished agent: it is resumed with the message.
+      An agent stopped by the person: refused.
+  - A plugin's `$.tool.register` tool is served as an "http" MCP server on loopback. That server answers every
+    tools/call with "no hook answered this call": only a `tool.run` hook answers the tool.
+
+The probe mod. One tool, `mcp__maws-tell-probe__tell` {agent, text}. Its `tool.run` hook sends the text.
+  - It refuses a call whose id does not begin `toolu_mcp_call_` (the id of a host's checked call):
+    `{ deny: 'TELL_NOT_HOST …' }`.
+  - It answers `{ result }` when the send was delivered, and `{ deny: 'TELL_REFUSED <reason>' }` when it was not.
+  - Optional hooks: `tool.offer` ({isOffered:false}), and `tool.check` allowing the host's own call.
+
+Verdicts.
+  1. A plain `mcp_call` never runs `tool.run`. The answer is "registered the tool tell but no hook answered this call",
+     with or without a matcher (register, register-open).
+  2. `mcp_call` with `check_permissions: true` runs the call through the engine's tool pipeline, so the hook runs.
+     a. Without a `tool.check` hook, the engine first sends the host a `can_use_tool` for the tool.
+     b. The answer is always an error:
+          delivered: "The tool did not run: The result went to the host that asked for this call."
+          refused:   "The tool did not run: TELL_REFUSED <the engine's reason>".
+     c. The two read apart only by the hook's marker.
+  3. A `--disallowedTools` rule hides the tool from the model, but it also refuses the host's checked call
+     ("Permission to use … has been denied"; register).
+  4. With no rule, the tool is deferred behind ToolSearch, so the model could still load and call it.
+     a. A `tool.offer` hook answering isOffered:false keeps it out of the model's request. A model's call is then
+        refused by the engine ("No such tool available"), and the host's checked call still runs the hook (hidden).
+     b. Without `tool.offer`, the model's own call first asks the host, then the hook refuses it on its id (guard).
+  5. Delivery (live-bg, live-fg, live-fg-waited, ended, stopped):
+     a. A running background child, held at a permission request: its next request carried the text.
+     b. A child asked for in the foreground (run_in_background false): this engine launched it in the background anyway
+        (task_started is_backgrounded true, "Async agent launched"). With CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1 the
+        parent truly waited (is_backgrounded false; the parent's Agent result was the hand-back). That waited child's
+        next request carried the text too.
+     c. A finished background child was resumed with the text (a second task_started, then a new notification).
+     d. A child stopped with stop_task: refused, "was stopped and was not resumed".
+  6. Permission modes, for a finished child told after set_permission_mode:
+     a. plan: refused, "requires interactive approval, and permission prompts are not available". The mod's
+        `tool.check` allow does not change it: in plan mode a hook only tightens a call not shown to be a read.
+        So this path cannot deliver in plan mode.
+     b. dontAsk: refused ("denied because Claude Code is running in don't ask mode"), unless the mod allows the host's
+        own call at `tool.check`. With that allow it is delivered and the child resumed (mode-dontask-check).
+     c. Default mode: the same `tool.check` allow removes the `can_use_tool` to the host (check-default: no ask,
+        delivered).
+  7. `ui_message` (surface → plugin) answers {handled:false} when the plugin has no Client drawn, so it is no channel
+     into the mod.
+
+Not probed: the function-hooks rollout flag (`tengu_plugin_hooks_modules`, R0 finding 4). A scratch config home has a
+cold cache, under which mods run. Where the flag is served off, the mod would not load, and the host would see no tool.
