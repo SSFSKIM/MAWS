@@ -53,7 +53,7 @@ describe('the confirm sheet', () => {
     expect(writes).toHaveLength(1 + manifest.others.length + manifest.globalConfig.length);
     expect(writes[0].textContent).toBe(scope === 'user' ? '/tmp/home/settings.json' : `/work/app/${writesOf(action, scope, null).settings}`);
     // a .claude.json key the person's choice lands in is named with the engine's global config file
-    expect(writes.slice(writes.length - manifest.globalConfig.length).map((item) => item.textContent)).toEqual(manifest.globalConfig.map((key) => `/Users/me/.claude.json › ${key}`));
+    expect(writes.slice(writes.length - manifest.globalConfig.length).map((item) => item.textContent)).toEqual(manifest.globalConfig.map((key) => `${ENV.engine.state === 'ready' ? ENV.engine.env.globalConfig : ''} › ${key}`));
   });
 
   it('opens with the commands and the files behind a closed Details, what installs and the scope in view; Details shows both steps and the files', () => {
