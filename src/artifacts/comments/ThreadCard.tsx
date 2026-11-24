@@ -20,6 +20,7 @@ import { NamedGlyph } from '../../renderer/src/ui/glyph';
 import { HOVER_SCOPE, ON_HOVER } from '../../renderer/src/ui/hover-scope';
 import { Tip } from '../../renderer/src/ui/tip';
 import { SendIcon } from '../ui/icons';
+import { THREAD_CARD_COPY as W } from './copy';
 import type { ThreadState } from '../document/threads';
 import './comments.css';
 
@@ -55,10 +56,11 @@ export interface ThreadCardProps {
   tabTitle?: string | null;
   /** The store is read-only: no reply field, Resolve and Reopen disabled. */
   readOnly?: boolean;
+  /** A request (its serial) to take the keyboard to the reply field once the card is active: the word cut (G385) put
+   * the field on the active card only, and the card that asked may have closed before this one became active. */
+  replyAsked?: number;
 }
 
-const REMOVED = 'The commented passage was removed.';
-const REPLY_UNAVAILABLE = 'Write a reply first';
 
 /** The latest replies a compacted card keeps after the first message. */
 const COMPACT_LATEST = 2;
@@ -81,7 +83,7 @@ const isTextField = (target: EventTarget): boolean =>
   (target instanceof HTMLTextAreaElement || target instanceof HTMLInputElement || target instanceof HTMLSelectElement || (target instanceof HTMLElement && target.isContentEditable)) &&
   !(target instanceof HTMLInputElement && ['checkbox', 'radio', 'button', 'submit', 'reset'].includes(target.type));
 
-export function ThreadCard({ thread, active, compact, onActivate, onReply, onResolve, onReopen, draft, onDraftChange, onNext, onPrevious, onExit, position, showQuote = false, tabTitle = null, readOnly = false }: ThreadCardProps) {
+export function ThreadCard({ thread, active, compact, onActivate, onReply, onResolve, onReopen, draft, onDraftChange, onNext, onPrevious, onExit, position, showQuote = false, tabTitle = null, readOnly = false, replyAsked }: ThreadCardProps) {
   const replyField = useRef<HTMLTextAreaElement>(null);
   // set by the card's own click, so the activation that click causes moves the keyboard to the reply field; cleared
   // once the activation lands or the focus leaves the card
@@ -94,6 +96,14 @@ export function ThreadCard({ thread, active, compact, onActivate, onReply, onRes
   const open = thread.status === 'open';
   const whole = active || !compact;
   const replying = active && open && !readOnly; // the word cut (G385): the active card's only
+  // the word cut (G385): a reply asked of this card from elsewhere (the panel's card that asked closed with the panel)
+  // takes the keyboard to the field once the card is active, once per request
+  const answered = useRef<number | undefined>(undefined);
+  useEffect(() => {
+    if (replyAsked === undefined || replyAsked === answered.current || !replying) return;
+    answered.current = replyAsked;
+    replyField.current?.focus();
+  }, [replyAsked, replying]);
   const { messages } = thread;
   const hidden = whole ? 0 : Math.max(0, messages.length - 1 - COMPACT_LATEST);
   const head = hidden > 0 ? messages.slice(0, 1) : messages;
@@ -155,7 +165,7 @@ export function ThreadCard({ thread, active, compact, onActivate, onReply, onRes
       {showQuote && (
         // the class names after the card's own are the panel's long-standing hooks (the e2e cases read them); an
         // orphan's quote is struck, the sentence its tooltip (the word cut, G388)
-        <Tip content={thread.orphan ? REMOVED : null} description={thread.orphan ? REMOVED : null}>
+        <Tip content={thread.orphan ? W.removedTip : null} description={thread.orphan ? W.removedTip : null}>
           <button type="button" className="thread-card-quote doc-thread-quote" aria-label={`Show passage: ${thread.quote}`} onClick={activateByClick}>
             {tabTitle !== null && <span className="thread-card-tab doc-thread-tab">{tabTitle}</span>}
             {thread.orphan ? (
@@ -169,9 +179,9 @@ export function ThreadCard({ thread, active, compact, onActivate, onReply, onRes
         </Tip>
       )}
       {thread.orphan && !showQuote && (
-        <Tip content={REMOVED} description={REMOVED}>
+        <Tip content={W.removedTip} description={W.removedTip}>
           <span className="thread-card-removed" tabIndex={0}>
-            Removed
+            {W.removed}
           </span>
         </Tip>
       )}
@@ -246,7 +256,7 @@ function ReplyField({ ref, draft, onDraftChange, onReply, onExit }: { ref: Ref<H
       }}
     >
       <textarea ref={ref} className="thread-card-reply-field" aria-label="Reply" placeholder="Reply…" rows={1} value={draft} onChange={(event) => onDraftChange(event.target.value)} onKeyDown={onKeyDown} />
-      <NamedGlyph type="submit" label="Reply" unavailable={body === '' ? REPLY_UNAVAILABLE : null} className="thread-card-button thread-card-send">
+      <NamedGlyph type="submit" label={W.replyName} unavailable={body === '' ? W.replyUnavailable : null} className="thread-card-button thread-card-send">
         <SendIcon />
       </NamedGlyph>
     </form>

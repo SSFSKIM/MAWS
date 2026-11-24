@@ -156,6 +156,28 @@ describe('the card’s forms', () => {
     expect(within(actions()).getByRole('button', { name: 'Reopen' })).toBeTruthy();
   });
 
+  // happy-dom lays nothing out, so the slot is pinned by the stylesheet: the action has its own column in the first row
+  // beside the quote (or the first message), always laid out, never positioned over the card's text
+  it('gives Resolve its own slot beside the first row, laid out at rest, so it covers no text and moves none as it shows', () => {
+    const rule = (selector: string) => {
+      const css = commentsCss.replace(/\/\*[\s\S]*?\*\//g, '');
+      const found = [...css.matchAll(/([^{}]+)\{([^{}]*)\}/g)].find(([, head]) => head!.trim() === selector);
+      if (!found) throw new Error(`no rule ${selector}`);
+      return found[2]!.replace(/\s+/g, ' ');
+    };
+    expect(rule('.thread-card')).toContain('display: grid;');
+    expect(rule('.thread-card')).toContain('grid-template-columns: minmax(0, 1fr) auto;');
+    expect(rule('.thread-card > *')).toContain('grid-column: 1 / -1;');
+    expect(rule('.thread-card > :first-child')).toContain('grid-column: 1;');
+    expect(rule('.thread-card > .thread-card-actions')).toContain('grid-column: 2;');
+    expect(rule('.thread-card > .thread-card-actions')).toContain('grid-row: 1;');
+    expect(commentsCss).not.toMatch(/\.thread-card-actions[^{]*\{[^}]*position:/);
+    const { card } = show({ showQuote: true });
+    const children = [...card().children].filter((child) => !(child as HTMLElement).hidden);
+    expect(children[0]!.matches('.thread-card-quote')).toBe(true); // the first row's text, beside the action
+    expect(children.at(-1)!.matches('.thread-card-actions')).toBe(true);
+  });
+
   it('offers Resolve on an open thread, Reopen and no reply field on a resolved one', () => {
     const { card, on, view } = show({ active: true });
     act(() => fireEvent.click(within(card()).getByRole('button', { name: 'Resolve' })));

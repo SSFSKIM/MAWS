@@ -1,9 +1,10 @@
 // The word cut in the document editor (docs/doperpowers/specs/2026-11-16-word-cut-design.md, M5 task 2; editors.md):
 // the toolbar's comment, comments, history and find controls are named glyphs (G332, G333, G335, G336), the table's
-// eight commands are one Table menu (G331), a button whose words show draws no tooltip repeating them (G337), and the
+// eight commands are one Table menu (G331), a menu from the keyboard, a button whose words show draws no tooltip repeating them (G337), and the
 // page's opening wait is the quiet spinner (G345). Happy-dom over the in-memory host, as the toolbar's own suite.
 import type { Editor, JSONContent } from '@tiptap/core';
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it } from 'vitest';
 import { accessibleDescription, accessibleText } from '../../../renderer/src/test-support/accessible-text';
 import { listThreads, reply } from '../threads';
@@ -82,23 +83,55 @@ describe('the toolbar’s glyphs (G332, G333, G335, G336)', () => {
 });
 
 describe('the table’s commands (G331) and the worded buttons (G337)', () => {
-  it('puts the table’s eight commands in one Table menu while the caret is in a table', async () => {
+  const inTable = async () => {
     const editor = await mount({ type: 'doc', content: [{ ...tableJSON(2, 2), attrs: { id: 'tb1' } }, { type: 'paragraph', attrs: { id: 'p1' }, content: [{ type: 'text', text: 'After.' }] }] });
     act(() => void editor.chain().focus().setTextSelection(4).run());
     await until(() => within(toolbar()).queryByRole('button', { name: 'Table' }) !== null, 'the Table menu’s button');
+    return editor;
+  };
+  const focused = () => document.activeElement;
+
+  it('puts the table’s eight commands in one Table menu while the caret is in a table', async () => {
+    const editor = await inTable();
     for (const name of ['Add row above', 'Add row below', 'Delete table']) expect(within(toolbar()).queryByRole('button', { name }), `${name} is not a toolbar button`).toBeNull();
     const table = button('Table');
     expect(table.getAttribute('title')).toBeNull();
-    act(() => fireEvent.click(table));
+    expect(table.getAttribute('aria-haspopup')).toBe('menu');
+    await userEvent.click(table);
     const menu = screen.getByRole('menu', { name: 'Table' });
     expect(within(menu).getAllByRole('menuitem').map((item) => item.textContent)).toEqual(['Add row above', 'Add row below', 'Add column left', 'Add column right', 'Delete row', 'Delete column', 'Header row', 'Delete table']);
     const rows = () => editor.state.doc.firstChild!.childCount;
     expect(rows()).toBe(2);
-    act(() => fireEvent.click(within(menu).getByRole('menuitem', { name: 'Add row below' })));
+    await userEvent.click(within(menu).getByRole('menuitem', { name: 'Add row below' }));
     expect(rows()).toBe(3);
     expect(screen.queryByRole('menu', { name: 'Table' })).toBeNull();
     act(() => void editor.chain().focus().setTextSelection(editor.state.doc.content.size - 2).run());
     await until(() => within(toolbar()).queryByRole('button', { name: 'Table' }) === null, 'the Table menu gone outside the table');
+  });
+
+  it('is a menu from the keyboard: Enter opens it on its first command, ↓ moves, Enter runs one in the page, Escape gives the focus back', async () => {
+    const editor = await inTable();
+    const selection = editor.state.selection.from;
+    const table = button('Table');
+    act(() => table.focus());
+    await userEvent.keyboard('{Enter}');
+    const menu = screen.getByRole('menu', { name: 'Table' });
+    await until(() => focused() === within(menu).getByRole('menuitem', { name: 'Add row above' }), 'the first command focused');
+    await userEvent.keyboard('{ArrowDown}');
+    expect(focused()).toBe(within(menu).getByRole('menuitem', { name: 'Add row below' }));
+    await userEvent.keyboard('{Enter}');
+    expect(editor.state.doc.firstChild!.childCount).toBe(3);
+    expect(screen.queryByRole('menu', { name: 'Table' })).toBeNull();
+    expect(editor.view.dom.contains(focused()), 'the command runs in the page, which keeps the focus').toBe(true);
+    expect(editor.state.selection.from).toBe(selection); // the caret where it was: the row went below it
+
+    act(() => button('Table').focus());
+    await userEvent.keyboard('{ArrowDown}');
+    await until(() => screen.queryByRole('menu', { name: 'Table' }) !== null && screen.getByRole('menu', { name: 'Table' }).contains(focused()), 'the menu open on a command');
+    await userEvent.keyboard('{Escape}');
+    await until(() => screen.queryByRole('menu', { name: 'Table' }) === null, 'the menu closed');
+    expect(focused()).toBe(button('Table'));
+    expect(editor.state.doc.firstChild!.childCount).toBe(3);
   });
 
   it('draws no tooltip on Insert, whose word shows', async () => {

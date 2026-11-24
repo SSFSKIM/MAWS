@@ -12,11 +12,13 @@
 import type { Editor, JSONContent } from '@tiptap/core';
 import { NodeSelection, Selection } from '@tiptap/pm/state';
 import { useEditorState } from '@tiptap/react';
+import { DropdownMenu } from 'radix-ui';
 import { useEffect, useRef, useState, type ComponentType, type ChangeEvent, type FormEvent, type MouseEvent, type ReactNode, type Ref } from 'react';
 import { actorKey } from '@shared/artifacts/actor';
 import { formatChord } from '@shared/keymap/chord';
 import { NamedGlyph } from '../../../renderer/src/ui/glyph';
 import { CommentPlusIcon, CommentsIcon, HistoryIcon, SearchIcon } from '../../ui/icons';
+import { TOOLBAR_COPY as W } from './copy';
 import { nanoid8 } from '../schema';
 import type { EditorHost } from './host-types';
 import { MentionPicker, type MentionSource } from './MentionPicker';
@@ -35,8 +37,6 @@ const STATUSES = ['Not started', 'In progress', 'Done'];
 const DIAGRAM = 'graph TD\n  A[Start] --> B[Finish]';
 // the glyphs' chords, as the editor binds them (comments/plugins.ts's Mod-Alt-M; DocumentEditor's find and history keys)
 const CHORDS = { comment: formatChord('Cmd+Alt+M'), history: formatChord('Cmd+Alt+Shift+H'), find: formatChord('Cmd+F') };
-// why Add comment is greyed (the shared NamedGlyph keeps a greyed glyph focusable, its reason the tooltip)
-const COMMENT_UNAVAILABLE = { readOnly: 'Read-only', noSelection: 'Select text to comment on' };
 
 const today = (): string => {
   const now = new Date();
@@ -157,8 +157,7 @@ export function Toolbar({ editor, artifactId, host, onFind, comments, history, m
   const strip = useRef<HTMLDivElement>(null);
   const linkAnchor = useRef<HTMLSpanElement>(null);
   const insertAnchor = useRef<HTMLSpanElement>(null);
-  const tableAnchor = useRef<HTMLSpanElement>(null);
-  useToolbarStrip({ bar, strip, anchor: menu === 'link' ? linkAnchor : menu === 'table' ? tableAnchor : menu === null ? null : insertAnchor, menu, tools: `${state.table}:${state.codeBlock}:${uploadError !== null}` });
+  useToolbarStrip({ bar, strip, anchor: menu === 'link' ? linkAnchor : menu === null || menu === 'table' ? null : insertAnchor, menu, tools: `${state.table}:${state.codeBlock}:${uploadError !== null}` });
   // an upload's error is scrolled to in the strip as it appears
   const uploadErrorRow = useRef<HTMLSpanElement>(null);
   useEffect(() => {
@@ -182,15 +181,15 @@ export function Toolbar({ editor, artifactId, host, onFind, comments, history, m
   const insertButton = useRef<HTMLButtonElement>(null);
   const viewAnchor = useRef<HTMLSpanElement>(null); // P4-B1: the comments' view menu, closed as Insert's is
   const viewButton = useRef<HTMLButtonElement>(null);
-  const tableButton = useRef<HTMLButtonElement>(null); // the word cut (G331): the Table menu, closed as Insert's is
+  const tableChosen = useRef(false); // the word cut (G331): an item chosen leaves the focus in the page, not on Table ▾
   // the Table menu goes when the caret leaves the table
   useEffect(() => {
     if (!state.table) setMenu((open) => (open === 'table' ? null : open));
   }, [state.table]);
   useEffect(() => {
-    if (menu !== 'insert' && menu !== 'comments-view' && menu !== 'table') return;
-    const anchor = menu === 'insert' ? insertAnchor : menu === 'table' ? tableAnchor : viewAnchor; // P4-B1
-    const button = menu === 'insert' ? insertButton : menu === 'table' ? tableButton : viewButton;
+    if (menu !== 'insert' && menu !== 'comments-view') return;
+    const anchor = menu === 'insert' ? insertAnchor : viewAnchor; // P4-B1
+    const button = menu === 'insert' ? insertButton : viewButton;
     const within = (element: Element | null, target: EventTarget | null) => target instanceof Node && Boolean(element?.contains(target));
     const onPointerDown = (event: PointerEvent) => {
       if (!within(anchor.current, event.target)) setMenu(null);
@@ -392,40 +391,51 @@ export function Toolbar({ editor, artifactId, host, onFind, comments, history, m
         {state.table && (
           <>
             <span className="doc-toolbar-separator" />
-            {/* the word cut (G331): the table's eight commands in one menu */}
-            <span ref={tableAnchor} className="doc-menu-anchor">
-              <Tool ref={tableButton} label="Table" worded disabled={disabled} expanded={menu === 'table'} onClick={() => setMenu(menu === 'table' ? null : 'table')}>
-                Table ▾
-              </Tool>
-              {menu === 'table' && (
-                <div role="menu" className="doc-menu" aria-label="Table">
+            {/* the word cut (G331): the table's eight commands in one menu (Radix's: Enter, Space or ↓ opens it, ↑ ↓ move
+                through it, Escape gives the focus back to the button); a command chosen runs in the page, its selection kept */}
+            <DropdownMenu.Root modal={false} open={menu === 'table'} onOpenChange={(open) => setMenu(open ? 'table' : null)}>
+              <DropdownMenu.Trigger asChild>
+                <button type="button" className="doc-tool" aria-label={W.table} disabled={disabled} onMouseDown={keepSelection}>
+                  {W.table} ▾
+                </button>
+              </DropdownMenu.Trigger>
+              <DropdownMenu.Portal>
+                <DropdownMenu.Content
+                  className="doc-tab-menu"
+                  align="start"
+                  sideOffset={4}
+                  aria-label={W.table}
+                  onCloseAutoFocus={(event) => {
+                    if (!tableChosen.current) return;
+                    tableChosen.current = false;
+                    event.preventDefault(); // the command focused the page
+                  }}
+                >
                   {tableControls.map(([label, command]) => (
-                    <button
+                    <DropdownMenu.Item
                       key={label}
-                      type="button"
-                      role="menuitem"
-                      onMouseDown={keepSelection}
-                      onClick={() => {
-                        setMenu(null);
+                      className="doc-tab-menu-item"
+                      onSelect={() => {
+                        tableChosen.current = true;
                         command();
                       }}
                     >
                       {label}
-                    </button>
+                    </DropdownMenu.Item>
                   ))}
-                </div>
-              )}
-            </span>
+                </DropdownMenu.Content>
+              </DropdownMenu.Portal>
+            </DropdownMenu.Root>
           </>
         )}
       </div>
       <div className="doc-toolbar-end">
         {comments.comment && (
-          <Glyph label="Add comment" shortcut={CHORDS.comment} unavailable={disabled ? COMMENT_UNAVAILABLE.readOnly : state.selected ? null : COMMENT_UNAVAILABLE.noSelection} onClick={comments.comment} data-doc-glyph="comment">
+          <Glyph label={W.addCommentName} shortcut={CHORDS.comment} unavailable={disabled ? W.commentReadOnly : state.selected ? null : W.commentNoSelection} onClick={comments.comment} data-doc-glyph="comment">
             <CommentPlusIcon />
           </Glyph>
         )}
-        <Glyph label={`Comments (${comments.openCount} open)`} active={comments.railOpen} onClick={comments.toggleRail} data-doc-glyph="comments">
+        <Glyph label={W.commentsName(comments.openCount)} active={comments.railOpen} onClick={comments.toggleRail} data-doc-glyph="comments">
           <CommentsIcon />
           {comments.openCount > 0 && <span className="doc-tool-count">{comments.openCount}</span>}
         </Glyph>
@@ -457,11 +467,11 @@ export function Toolbar({ editor, artifactId, host, onFind, comments, history, m
           </span>
         )}
         {history && (
-          <Glyph label="Version history" shortcut={CHORDS.history} active={history.open} onClick={history.toggle} data-doc-glyph="history">
+          <Glyph label={W.versionHistoryName} shortcut={CHORDS.history} active={history.open} onClick={history.toggle} data-doc-glyph="history">
             <HistoryIcon />
           </Glyph>
         )}
-        <Glyph label="Find" shortcut={CHORDS.find} onClick={onFind} data-doc-glyph="find">
+        <Glyph label={W.findName} shortcut={CHORDS.find} onClick={onFind} data-doc-glyph="find">
           <SearchIcon />
         </Glyph>
       </div>

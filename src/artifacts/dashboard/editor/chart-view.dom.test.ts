@@ -15,6 +15,7 @@ import { editorExtensions } from '../../document/editor/extensions';
 import { memoryEditorHost } from '../../document/editor/memory-host';
 import { createChartRenderer, type SourceCapture } from './chart-view';
 import { SnapshotReader } from '../snapshots';
+import sheetCss from './sheet.css?raw';
 
 const AT = Date.UTC(2026, 9, 16, 8, 30);
 const descriptor = (ref: string, over: Partial<FileDatasetDescriptor> = {}): FileDatasetDescriptor => ({ // E3: the file arm of the descriptor union
@@ -235,6 +236,26 @@ describe('the chart view', () => {
     expect(other.into.querySelector('svg')?.textContent).toContain('dataset "sales" has no column "revenue"');
   });
 
+  // the word cut (G603, G596): a folded pie's note goes to the ⚠ mark the keyboard reaches; the view's other limits stay
+  // at rest under it, and a pie with no column mismatch still has the mark
+  it('says a folded pie’s note in the ⚠ mark, with no column mismatch, and keeps the other limits at rest', async () => {
+    const doc = newDoc();
+    const regions = ['서울', '부산', '제주', '대구', '광주', '대전', '울산', '수원'];
+    SNAPSHOTS['assets/eight.csv'] = { columns: descriptor('').columns, rows: [...regions.map((region, i) => [region, 10 - i] as [string, number]), ['세종', null as unknown as number]], total: 9, truncated: false };
+    setDataset(doc, 'sales', descriptor('assets/eight.csv', { rows: 9 }));
+    const w = world();
+    const { into } = mount(w.renderChart, doc, node('sales', { view: 'pie', x: 'region', y: 'sales', title: 'Share' }));
+    await settle();
+    const mark = into.querySelector<HTMLElement>('.dash-source .dash-warning')!;
+    expect([mark.textContent, mark.getAttribute('role'), mark.tabIndex]).toEqual(['⚠', 'img', 0]);
+    expect(mark.getAttribute('aria-label')).toBe('Top 5 of 8 slices; the rest as “other”');
+    expect(mark.dataset.note).toBe('Top 5 of 8 slices; the rest as “other”');
+    const atRest = into.querySelector('.dash-notes')?.textContent ?? '';
+    expect(atRest).not.toContain('slices; the rest');
+    expect(atRest).toContain('1 row has no sales; not drawn'); // another limit of the view, at rest (G596)
+    delete SNAPSHOTS['assets/eight.csv'];
+  });
+
   it('follows the displayed document when it moves (a preview put on another version)', async () => {
     const live = newDoc();
     setDataset(live, 'sales', descriptor('assets/sales-2.csv'));
@@ -416,7 +437,7 @@ describe('the word cut on the tile', () => {
     expect(short.querySelector('.dash-notes')?.textContent).toBe('no rows to draw'); // what the view could not draw stays (G596)
   });
 
-  it('shows its first load as a spinner named by the wait, and no words', async () => {
+  it('shows its first load as a quiet spinner named by the wait, and no words: nothing to assistive technology for half a second', async () => {
     const doc = newDoc();
     setDataset(doc, 'sales', descriptor('assets/sales.csv'));
     const w = world({ hold: true });
@@ -424,8 +445,13 @@ describe('the word cut on the tile', () => {
     await settle();
     const frame = into.querySelector<HTMLElement>('.dash-figure')!;
     expect(frame.textContent).toBe('');
+    const ring = frame.querySelector<HTMLElement>('.dash-loading-ring')!;
+    expect([ring.getAttribute('role'), ring.getAttribute('aria-label')], 'unnamed and roleless in the quiet half second').toEqual([null, null]);
+    await new Promise((resolve) => setTimeout(resolve, 600));
     const spinner = frame.querySelector<HTMLElement>('[role="progressbar"]')!;
+    expect(spinner).toBe(ring);
     expect(spinner.getAttribute('aria-label')).toBe('Loading 지역별 매출…');
+    expect(sheetCss.replace(/\s+/g, ' ')).toContain('.ds-doc .dash-loading-ring:not([role]) { visibility: hidden; }');
     w.pending[0].resolve();
     await settle();
     expect(frame.querySelector('[role="progressbar"]')).toBeNull();

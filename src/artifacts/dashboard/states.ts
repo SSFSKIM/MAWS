@@ -41,6 +41,9 @@ export const VIEW_STATES = {
   labelsShortened: 'some category labels are shortened; the source table has them whole',
 } as const;
 
+/** The word cut (G603): a folded pie's note, which the editor's tile says in its ⚠ mark rather than under the view. */
+export const isSlicesFolded = (note: string): boolean => /^Top 5 of \d+ slices; the rest as “other”$/.test(note);
+
 /**
  * The source label under a view (parent §2 "Views"): the dataset's title, where its snapshot came from, when and by whom
  * it was last bound, and its state when not `ok`. `by` is the actor's shown name (the human "You", a session its title).

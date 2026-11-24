@@ -27,6 +27,7 @@ import { nanoid8 } from '../../schema';
 import { reopen, reply, resolve, type ThreadState } from '../../threads';
 import type { TabInfo } from '../../tabs';
 import { COMMENTS_ORIGIN } from './plugins';
+import { COMMENTS_PANEL_COPY as W } from '../copy';
 import type { CommentAuthor } from './surface';
 import { useThreadStates } from './use-threads';
 
@@ -59,7 +60,6 @@ const SCOPE: [ScopeFilter, string][] = [
   ['all', 'All tabs'],
 ];
 
-const DELETED_TIP = 'Comments on deleted text';
 
 // A thread matches a search when any message's body, its quote, or the name of anyone who wrote in it holds the text.
 function matches(thread: ThreadState, needle: string): boolean {
@@ -124,26 +124,26 @@ export function CommentsPanel({ doc, tabs, activeTab, activeThread, author, read
   };
   // nothing to list: under All, a search that only resolved threads match lists those without a note
   const empty = status === 'resolved' ? resolved.length === 0 : open.length === 0 && (needle === '' || resolved.length === 0);
-  const emptyText = needle !== '' ? 'No matches' : status === 'resolved' ? 'No resolved comments' : 'No open comments. Select text and choose Add comment.';
+  const emptyText = needle !== '' ? W.noMatches : status === 'resolved' ? W.noResolved : W.noOpen;
 
   return (
     <aside className="doc-rail" aria-label="Comments">
       <header className="doc-rail-header">
         <h2 className="doc-rail-title">All comments</h2>
-        <button type="button" className="doc-tool" aria-label="Close comments" title="Close" onClick={onClose}>
+        <button type="button" className="doc-tool" aria-label="Close comments" title={W.closeTip} onClick={onClose}>
           ×
         </button>
       </header>
       <div className="doc-rail-filters">
         <Segments<StatusFilter> name={`${name}-status`} label="Status" options={STATUS} value={status} onChange={setStatus} />
         {scoped && <Segments<ScopeFilter> name={`${name}-scope`} label="Scope" options={SCOPE} value={scope} onChange={setScope} />}
-        <input type="search" className="doc-rail-search" aria-label="Search comments" placeholder="Search" value={query} onChange={(event) => setQuery(event.target.value)} />
+        <input type="search" className="doc-rail-search" aria-label="Search comments" placeholder={W.searchPlaceholder} value={query} onChange={(event) => setQuery(event.target.value)} />
       </div>
       <div ref={body} className="doc-rail-body">
         {deleted > 0 && (
-          <Tip content={DELETED_TIP} description={DELETED_TIP}>
+          <Tip content={W.deletedTip} description={W.deletedTip}>
             <button type="button" className="doc-rail-section" aria-pressed={showDeleted} onClick={() => setShowDeleted(!showDeleted)}>
-              {`Deleted (${deleted})`}
+              {W.deleted(deleted)}
             </button>
           </Tip>
         )}

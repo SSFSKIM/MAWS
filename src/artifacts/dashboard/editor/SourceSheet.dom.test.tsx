@@ -11,6 +11,7 @@ import { accessibleDescription } from '../../../renderer/src/test-support/access
 import { SourceSheet } from './SourceSheet';
 import { SourceSheetState } from './sheet';
 import { SnapshotReader } from '../snapshots';
+import sheetCss from './sheet.css?raw';
 
 const AT = Date.UTC(2026, 9, 16, 8, 30);
 const descriptor = (ref: string, rows: number, over: Partial<FileDatasetDescriptor> = {}): FileDatasetDescriptor => ({ // E3: the file arm of the descriptor union
@@ -298,5 +299,30 @@ describe('the word cut in the source sheet', () => {
     expect(dialog().querySelector('.dash-sheet-count')!.textContent).toBe('3 rows');
     const copy = within(dialog()).getByRole('button', { name: 'Copy rows' });
     expect(copy.textContent).toBe('Copy');
+  });
+
+  // the quiet spinner's contract: nothing for half a second, in a line that already holds its height, then the spinner
+  it('waits for its rows quietly in a line of held height, then shows the spinner named by the wait', async () => {
+    let answer: (page: DatasetPage) => void = () => {};
+    readDataset.mockImplementationOnce(() => new Promise<DatasetPage>((resolve) => (answer = resolve)));
+    mount();
+    act(() => sheet.open([{ id: 'sales', descriptor: descriptor('assets/sales.tsv', 3) }]));
+    const line = dialog().querySelector<HTMLElement>('.dash-sheet-loading')!;
+    expect(line.textContent).toBe('');
+    expect(within(line).queryByRole('progressbar')).toBeNull();
+    await act(() => new Promise((resolve) => setTimeout(resolve, 600)));
+    expect(within(line).getByRole('progressbar', { name: 'Reading the rows…' })).toBeTruthy();
+    expect(sheetCss.replace(/\s+/g, ' ')).toMatch(/\.dash-sheet-loading \{[^}]*min-height: 1lh;/); // the line's height held from the start
+    act(() => answer(page('assets/sales.tsv')));
+    await until(() => bodyRows().length > 0, 'the rows');
+  });
+
+  it('draws no outline on the sheet that holds the keyboard as it opens, and keeps the sort buttons’ focus ring', () => {
+    const css = sheetCss.replace(/\/\*[\s\S]*?\*\//g, '');
+    const rules = [...css.matchAll(/([^{}]+)\{([^{}]*)\}/g)].map(([, head, body]) => ({ selectors: head!.split(',').map((part) => part.trim()), body: body! }));
+    const of = (selector: string) => rules.filter((rule) => rule.selectors.includes(selector)).map((rule) => rule.body.replace(/\s+/g, ' ').trim());
+    expect(of('.dash-sheet:focus')).toEqual(['outline: none;']);
+    expect(of('.dash-sheet-sort:focus-visible').join(' ')).toContain('outline: 2px solid var(--accent);');
+    expect(of('.dash-sheet-sort:focus-visible').join(' ')).not.toContain('outline: none');
   });
 });

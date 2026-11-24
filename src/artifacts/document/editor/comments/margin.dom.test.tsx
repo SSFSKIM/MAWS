@@ -940,6 +940,31 @@ describe('resolve, orphans, the panel (Z1 to Z3, Z5) and the rail state (D5)', (
     expect(m.rails.slice(-2)).toEqual([null, 'margin']);
   });
 
+  // the word cut (G385): the reply field is the active card's only, so R on an inactive panel card activates it; the
+  // panel closes as the margin takes the thread, and the margin's card takes the keyboard to its field in its place
+  it('R on an inactive panel card hands the thread to the margin, whose card takes the keyboard to its reply field (G385)', async () => {
+    const m = await mount(content());
+    comment(m, 't1', 'ships quarterly', 140);
+    comment(m, 't2', 'track the budget', 300);
+    await settle();
+    m.rerender({ rail: 'comments' });
+    await settle();
+    const card = screen.getByRole('complementary', { name: 'Comments' }).querySelector<HTMLElement>('[data-thread="t1"]')!;
+    expect(card.getAttribute('aria-current')).toBeNull();
+    expect(within(card).queryByRole('textbox', { name: 'Reply' })).toBeNull();
+    act(() => card.focus());
+    act(() => void fireEvent.keyDown(card, { key: 'r' }));
+    await settle();
+    expect(screen.queryByRole('complementary', { name: 'Comments' })).toBeNull();
+    expect(activeThread(m.editor().state)).toBe('t1');
+    await until(() => document.activeElement === within(entry('t1')!).queryByRole('textbox', { name: 'Reply' }), 'the margin card’s reply field focused');
+    // asked once: the field does not take the keyboard back after it leaves
+    act(() => (document.activeElement as HTMLElement).blur());
+    m.rerender({ rail: null });
+    await settle();
+    expect(document.activeElement).not.toBe(within(entry('t1')!).queryByRole('textbox', { name: 'Reply' }));
+  });
+
   // P4-B1 (review finding 2): an orphan has no passage for the margin to draw it beside, so choosing it keeps the panel
   it('choosing an orphan in the panel keeps the panel open, its card the only place it shows (Z3, D5)', async () => {
     const m = await mount(content());

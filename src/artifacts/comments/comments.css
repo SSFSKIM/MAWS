@@ -1,9 +1,11 @@
 /* X36, the shared comment card (ThreadCard.tsx; P4-B1): app chrome wherever it is drawn (a document's margin and panel,
    a deck's or a design's pin popover), so it reads the app's tokens only. */
+/* a grid of one column, but for the first row, which keeps a second for the card's action (the word cut, G384): the
+   action's slot is always laid out, so it neither covers the quote or the first message nor moves them as it shows */
 .thread-card {
-  position: relative;
-  display: flex;
-  flex-direction: column;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
   gap: var(--space);
   padding: calc(var(--space) * 2);
   border: 1px solid var(--border);
@@ -98,15 +100,18 @@
   border-radius: var(--radius-sm);
   padding: var(--space) calc(var(--space) * 2);
 }
-/* the word cut (G384): Resolve or Reopen over the card's top right, taking no height; the hover scope's rule
-   (styles/app.css) draws it on the card pointed at or focused, the card draws it while active */
-.thread-card-actions {
-  position: absolute;
-  top: var(--space);
-  right: var(--space);
+.thread-card > * {
+  grid-column: 1 / -1;
+}
+.thread-card > :first-child {
+  grid-column: 1;
+}
+/* the word cut (G384): Resolve or Reopen in the first row's second column, beside the quote (or the first message); the
+   hover scope's rule (styles/app.css) shows it on the card pointed at or focused, the card shows it while active */
+.thread-card > .thread-card-actions {
+  grid-column: 2;
+  grid-row: 1;
   display: flex;
-  border-radius: var(--radius-sm);
-  background: inherit;
 }
 /* the word cut (G388): a card whose passage is gone, where it draws no quote (a deck's or a design's pin popover) */
 .thread-card-removed {

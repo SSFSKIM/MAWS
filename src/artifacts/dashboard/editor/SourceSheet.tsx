@@ -17,6 +17,7 @@ import type { Actor } from '@shared/artifacts/actor';
 import { NamedGlyph } from '../../../renderer/src/ui/glyph';
 import { QuietSpinner } from '../../../renderer/src/ui/spinner';
 import { Tip } from '../../../renderer/src/ui/tip';
+import { SHEET_COPY as W } from './copy';
 import type { ArtifactHost } from '../../host';
 import { snapshotOf, type Cell, type DatasetDescriptor } from '../datasets';
 import { compareCells, viewRows, type ViewTable } from '../render';
@@ -77,7 +78,7 @@ export function SourceSheet({ artifactId, sheet, reader, host, actorName, live, 
     <aside ref={panel} className="dash-sheet" role="dialog" tabIndex={-1} aria-label={shown ? `Source of ${shown.descriptor.title}` : 'Datasets'} onKeyDown={onKeyDown}>
       <header className="dash-sheet-header">
         <h2 className="dash-sheet-title">{shown ? shown.descriptor.title : 'Datasets'}</h2>
-        <NamedGlyph label="Close" className="dash-sheet-close doc-tool" onClick={() => sheet.close()}>
+        <NamedGlyph label={W.closeName} className="dash-sheet-close doc-tool" onClick={() => sheet.close()}>
           ×
         </NamedGlyph>
       </header>
@@ -97,7 +98,7 @@ export function SourceSheet({ artifactId, sheet, reader, host, actorName, live, 
       {shown ? (
         <DatasetDetail key={`${state.opened}:${state.capture}:${shown.id}`} artifactId={artifactId} id={shown.id} descriptor={shown.descriptor} view={shown.view} hold={state.hold} reader={reader} host={host} actorName={actorName} live={state.preview || state.previewing ? undefined : live /* E3 M3 fix: no live controls while a preview runs */} onReopen={onReopen} />
       ) : (
-        <p className="dash-sheet-empty">No data yet. Ask an agent to add a data file.</p>
+        <p className="dash-sheet-empty">{W.noData}</p>
       )}
     </aside>
   );
@@ -189,17 +190,17 @@ function DatasetDetail({ artifactId, id, descriptor, view, hold, reader, host, a
       {view && snapshot && (
         <div className="dash-sheet-shown" role="group" aria-label="Rows shown">
           <button type="button" className="doc-tool" aria-pressed={shown === 'view'} data-active={shown === 'view' ? '' : undefined} onClick={() => choose('view')}>
-            {viewed?.ok ? `This view (${viewed.table.rows.length.toLocaleString('en-US')})` : 'This view'}
+            {W.thisView(viewed?.ok ? viewed.table.rows.length : null)}
           </button>
           <button type="button" className="doc-tool" aria-pressed={shown === 'source'} data-active={shown === 'source' ? '' : undefined} onClick={() => choose('source')}>
-            {`All rows (${descriptor.rows.toLocaleString('en-US')})`}
+            {W.allRows(descriptor.rows)}
           </button>
         </div>
       )}
       <div className="dash-sheet-actions">
         <span className="dash-sheet-count">{shown === 'view' && view ? (table ? `${table.rows.length.toLocaleString('en-US')} ${table.rows.length === 1 ? 'row' : 'rows'}` : '…') : `${descriptor.rows.toLocaleString('en-US')} ${descriptor.rows === 1 ? 'row' : 'rows'}`}</span>
-        <button type="button" className="doc-tool" aria-label="Copy rows" disabled={!table} onClick={() => void copy()}>
-          Copy
+        <button type="button" className="doc-tool" aria-label={W.copyName} disabled={!table} onClick={() => void copy()}>
+          {W.copy}
         </button>
         {snapshot && hold !== 'unavailable' && (
           <button type="button" className="doc-tool" aria-label={`Download ${name}`} disabled={hold !== 'held'} onClick={() => void download()}>
@@ -218,16 +219,16 @@ function DatasetDetail({ artifactId, id, descriptor, view, hold, reader, host, a
           </p>
         ))}
       {!snapshot ? (
-        <p className="dash-sheet-note">Not fetched yet</p>
+        <p className="dash-sheet-note">{W.notFetched}</p>
       ) : hold === 'unavailable' ? (
-        <p className="dash-sheet-note" role="alert">Snapshot gone; reopen to see the current one</p>
+        <p className="dash-sheet-note" role="alert">{W.snapshotGone}</p>
       ) : held && failed !== null ? (
         <p className="dash-sheet-note" role="alert">{`The rows could not be read: ${failed}`}</p>
       ) : shown === 'view' && viewed && !viewed.ok ? (
         <p className="dash-sheet-note" role="alert">{`This view cannot be drawn: ${viewed.error}`}</p>
       ) : table === null ? (
         <p className="dash-sheet-loading">
-          <QuietSpinner label="Reading the rows…" />
+          <QuietSpinner label={W.readingRowsName} />
         </p>
       ) : (
         <Rows key={shown} table={table} order={order} sort={sort} onSort={cycle} overflowed={shown === 'view' && viewed?.ok ? viewed.overflowed : undefined} />

@@ -184,13 +184,11 @@
   border: 1px solid var(--border-strong);
   border-top-color: var(--accent);
   border-radius: 50%;
-  opacity: 0;
-  animation: dash-ring-shown 0s linear 500ms forwards, dash-ring-turn 1s linear infinite;
+  animation: dash-ring-turn 1s linear infinite;
 }
-@keyframes dash-ring-shown {
-  to {
-    opacity: 1;
-  }
+/* the quiet half second: chart-view.ts gives the ring its role and name once it is over */
+.ds-doc .dash-loading-ring:not([role]) {
+  visibility: hidden;
 }
 @keyframes dash-ring-turn {
   to {
@@ -199,7 +197,7 @@
 }
 @media (prefers-reduced-motion: reduce) {
   .ds-doc .dash-loading-ring {
-    animation: dash-ring-shown 0s linear 500ms forwards;
+    animation: none;
   }
 }
 
@@ -264,6 +262,10 @@
 .dash-sheet-status,
 .dash-sheet-empty,
 .dash-sheet-loading {
+  /* the line the rows' wait stands in holds its height from the start, so the quiet spinner moves nothing as it shows */
+  display: flex;
+  align-items: center;
+  min-height: 1lh;
   margin: 0;
   overflow-wrap: anywhere;
   word-break: keep-all;
@@ -366,11 +368,11 @@
 .dash-sheet-sort:hover {
   color: var(--fg);
 }
-.dash-sheet-sort:focus-visible,
 /* the word cut (G608): the sheet takes the keyboard itself as it opens, a container's focus drawn by nothing */
 .dash-sheet:focus {
   outline: none;
 }
+.dash-sheet-sort:focus-visible,
 .dash-sheet-close:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 1px;

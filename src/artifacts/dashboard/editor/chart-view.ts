@@ -21,7 +21,9 @@ import { datasetIdFromSource, readDataset, snapshotOf, type DatasetDescriptor } 
 import { dsOverrides } from '../../document/meta';
 import { captionOf, renderFailure, renderView, themeFrom, THEME_PROPERTIES, type Rendered, type Theme } from '../render';
 import { parseSpec } from '../spec';
-import { DATASET_STATES, mismatchNotes, sourceLabel } from '../states';
+import { QUIET_MS } from '../../../renderer/src/ui/spinner';
+import { DATASET_STATES, isSlicesFolded, mismatchNotes, sourceLabel } from '../states';
+import { TILE_COPY } from './copy';
 import { attachHover } from './hover';
 import { livePauseLabel, livePauseOf, type LiveDatasets } from './live'; // E3
 import type { SnapshotReader } from '../snapshots';
@@ -187,23 +189,25 @@ export function createChartRenderer(deps: ChartRendererDeps): NonNullable<ViewEn
       frame.append(tip);
       tip.hidden = true;
       label(descriptor);
-      // a column's wrong-type values: a mark that takes the keyboard, the notes its name and what it shows (sheet.css)
-      const mismatches = descriptor ? mismatchNotes(descriptor) : [];
-      if (mismatches.length > 0) {
+      // what the view could not show as asked; a view that cannot be drawn says so in its own frame already
+      const drawnInPlace = rendered.svg?.includes('<desc>This view cannot be drawn: ') ?? false;
+      const viewNotes = [...new Set(drawnInPlace ? [] : rendered.warnings.filter((warning) => !specWarnings.has(warning)))];
+      // a column's wrong-type values (G598) and a folded pie's note (G603): a mark that takes the keyboard, the notes
+      // its name and what it shows (sheet.css); the view's other limits stay at rest under it (G596)
+      const marked = [...(descriptor ? mismatchNotes(descriptor) : []), ...viewNotes.filter(isSlicesFolded)];
+      if (marked.length > 0) {
         const mark = element('span', 'dash-warning');
         mark.textContent = '⚠';
         mark.setAttribute('role', 'img');
         mark.tabIndex = 0;
-        mark.setAttribute('aria-label', mismatches.join(' · '));
-        mark.dataset.note = mismatches.join(' · ');
+        mark.setAttribute('aria-label', marked.join(' · '));
+        mark.dataset.note = marked.join(' · ');
         source.append(mark);
       }
-      // what the view could not show as asked; a view that cannot be drawn says so in its own frame already
-      const drawnInPlace = rendered.svg?.includes('<desc>This view cannot be drawn: ') ?? false;
-      const notes = drawnInPlace ? [] : rendered.warnings.filter((warning) => !specWarnings.has(warning));
+      const notes = viewNotes.filter((note) => !isSlicesFolded(note));
       if (notes.length > 0) {
         const list = element('div', 'dash-notes');
-        list.textContent = [...new Set(notes)].join(' · ');
+        list.textContent = notes.join(' · ');
         source.append(list);
       }
       view.removeAttribute('aria-busy');
@@ -222,12 +226,17 @@ export function createChartRenderer(deps: ChartRendererDeps): NonNullable<ViewEn
       shown = { descriptor };
       if (frame.querySelector('svg, table')) view.setAttribute('aria-busy', 'true'); // the earlier view stays, dimmed
       else if (descriptor) {
-        // the word cut (G604): the quiet spinner, its half second's quiet the stylesheet's (sheet.css)
+        // the word cut (G604): the quiet spinner. For its quiet half second the ring is nothing, to the eye (sheet.css) and
+        // to assistive technology alike; then it is a progressbar named by the wait
         const spinner = element('span', 'dash-loading-ring');
-        spinner.setAttribute('role', 'progressbar');
-        spinner.setAttribute('aria-label', `Loading ${descriptor.title}…`);
         frame.replaceChildren(spinner);
         frame.classList.add('dash-loading');
+        const wait = TILE_COPY.loadingName(descriptor.title);
+        setTimeout(() => {
+          if (released || spinner.parentNode !== frame) return;
+          spinner.setAttribute('role', 'progressbar');
+          spinner.setAttribute('aria-label', wait);
+        }, QUIET_MS);
       }
       let rendered: Rendered;
       let started: number | null = null;

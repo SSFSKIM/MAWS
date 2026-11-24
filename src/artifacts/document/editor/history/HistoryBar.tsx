@@ -15,6 +15,7 @@ import { NamedGlyph } from '../../../../renderer/src/ui/glyph';
 import { unboundExtras /* P3-E */, type DiffTab, type ExtraChange /* P3-E */, type TabChanges } from '../../history';
 import type { HistoryController, Preview } from './controller';
 import { changesOf, goToChange } from './paint';
+import { HISTORY_COPY as W } from '../copy';
 
 interface Stop {
   tabId: string;
@@ -119,23 +120,23 @@ export function HistoryBar({ editor, preview, controller, onBack }: { editor: Ed
         <span className="doc-toolbar-spacer" />
         {preview.versionId !== null && (
           <>
-            <Button label="Restore this version" worded onClick={() => setConfirming(true)}>
-              Restore
+            <Button label={W.restoreName} worded onClick={() => setConfirming(true)}>
+              {W.restore}
             </Button>
             <DropdownMenu.Root modal={false}>
               <DropdownMenu.Trigger asChild>
-                <NamedGlyph label="Actions for this version" className="doc-tool doc-tool-glyph" data-history-actions="">
+                <NamedGlyph label={W.actionsName} className="doc-tool doc-tool-glyph" data-history-actions="">
                   <span aria-hidden="true">…</span>
                 </NamedGlyph>
               </DropdownMenu.Trigger>
               <DropdownMenu.Portal>
-                <DropdownMenu.Content className="doc-tab-menu" align="end" sideOffset={4} aria-label="Actions for this version">
+                <DropdownMenu.Content className="doc-tab-menu" align="end" sideOffset={4} aria-label={W.actionsName}>
                   <DropdownMenu.Item className="doc-tab-menu-item" onSelect={() => void controller.duplicate()}>
-                    Make a copy
+                    {W.makeCopy}
                   </DropdownMenu.Item>
                   {controller.canName && (
                     <DropdownMenu.Item className="doc-tab-menu-item" onSelect={() => setNaming(true)}>
-                      Name this version
+                      {W.nameVersion}
                     </DropdownMenu.Item>
                   )}
                 </DropdownMenu.Content>
@@ -143,7 +144,7 @@ export function HistoryBar({ editor, preview, controller, onBack }: { editor: Ed
             </DropdownMenu.Root>
           </>
         )}
-        <NamedGlyph label="Back to document" className="doc-tool doc-tool-glyph" onMouseDown={(event) => event.preventDefault()} onClick={onBack} data-history-back="">
+        <NamedGlyph label={W.backName} className="doc-tool doc-tool-glyph" onMouseDown={(event) => event.preventDefault()} onClick={onBack} data-history-back="">
           ×
         </NamedGlyph>
       </div>
@@ -202,7 +203,7 @@ function NameForm({ onName, onDone }: { onName(label: string): Promise<boolean>;
   };
   return (
     <form className="doc-history-save" aria-label="Name this version" onSubmit={submit}>
-      <input aria-label="Version name" placeholder="Name" maxLength={200} value={label} onChange={(event) => setLabel(event.target.value)} />
+      <input aria-label="Version name" placeholder={W.namePlaceholder} maxLength={200} value={label} onChange={(event) => setLabel(event.target.value)} />
       <div className="doc-history-save-actions">
         <Button label="Cancel" worded onClick={onDone}>
           Cancel

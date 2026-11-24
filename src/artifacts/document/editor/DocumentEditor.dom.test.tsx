@@ -122,7 +122,8 @@ describe('the toolbar', () => {
     type(editor(), 'cell one'); // the first cell
     act(() => void editor().commands.goToNextCell());
     type(editor(), 'cell two');
-    press('Table'); // the word cut (G331): the table's commands are one menu
+    // the word cut (G331): the table's commands are one menu, Radix's, opened by the pointer's press
+    act(() => void fireEvent.pointerDown(within(toolbar()).getByRole('button', { name: 'Table' }), { button: 0, ctrlKey: false }));
     act(() => fireEvent.click(screen.getByRole('menuitem', { name: 'Add row below' })));
 
     freshLine(editor());

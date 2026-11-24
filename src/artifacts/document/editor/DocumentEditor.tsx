@@ -79,6 +79,7 @@ import { useRailLayout } from './rail-layout'; // P3-F1
 import type { ProvisionalLayers } from '../../provisional'; // P4-A2 (X35)
 import { useProvisionalLayers } from './provisional'; // P4-A2 (X35)
 import { QuietSpinner } from '../../../renderer/src/ui/spinner'; // the word cut: the editors draw the shared parts
+import { PAGE_COPY } from './copy';
 import './chrome.css';
 import './theme.css';
 
@@ -168,7 +169,12 @@ function holdsTypedText(element: Element): boolean {
 interface Showing {
   threadId: string;
   serial: number;
+  /** The word cut (G385): the panel's card that asked closed with the panel, so the margin's card takes the keyboard to
+   * its reply field once active, as the panel's would have (a click on the card, or R). */
+  reply?: boolean;
 }
+/** The word cut (G385): a thread whose margin card takes the keyboard to its reply field, once per serial. */
+type ReplyAsked = { threadId: string; serial: number };
 /** P4-B4: a block to put the caret at, in the tab that holds it, once its editor has bound. */
 interface Revealing {
   blockId: string;
@@ -417,7 +423,7 @@ export function DocumentEditor(props: DocumentEditorProps) {
           ) : (
             // the word cut (G345): the opening wait is the quiet spinner, no words
             <div className="doc-editor-loading">
-              <QuietSpinner label="Loading…" />
+              <QuietSpinner label={PAGE_COPY.loadingName} />
             </div>
           )}
         </div>
@@ -433,12 +439,13 @@ export function DocumentEditor(props: DocumentEditorProps) {
             onDraftChange={onDraftChange} // P4-B1
             onShow={(thread) => {
               if (tabs.some((tab) => tab.id === thread.tabId)) setSelected(thread.tabId);
-              setShowing({ threadId: thread.id, serial: (showing?.serial ?? 0) + 1 });
               // P4-B1 (the activation table): where the margin would host, the item chosen closes the panel and the
               // margin returns with that thread active (the shown thread's activation reports 'margin', D5); the drawer
               // stays open as before, and so does the panel for an orphan, which the margin cannot draw (Z3). The margin
               // is not drawn while the panel is, so the panel's own layout says whether it would host (the same 720 px)
-              if (!thread.orphan && commentsView !== 'hide' && railLayout.mode === 'beside') openRail(null);
+              const handedToMargin = !thread.orphan && commentsView !== 'hide' && railLayout.mode === 'beside';
+              setShowing({ threadId: thread.id, serial: (showing?.serial ?? 0) + 1, reply: handedToMargin });
+              if (handedToMargin) openRail(null);
             }}
             onClose={() => openRail(null)}
           />
@@ -487,6 +494,8 @@ interface TabEditorProps extends DocumentEditorProps {
 
 function TabEditor({ tabId, tabTitle, newSection, artifactId, handle, host, renderDiagram, onEditor, comments, author, rail, openRail, historyController, historySnapshot, hold, provisional, readOnly, showing, onShown, revealing, onRevealed /* P4-B4 */, onActiveThread, onPassageClick, marginView, onMarginTier, drafts, onDraftChange /* P4-B1 */, commentsView, onCommentsViewChange /* P4-B1 */, pageScope, onPage, mentions, renderChart, previewRevision: shownRevision, blockCommentQuote /* P3-E */ }: TabEditorProps) {
   const [findOpen, setFindOpen] = useState(false);
+  // the word cut (G385): a shown thread whose margin card takes the keyboard to its reply field (Showing's `reply`)
+  const [replyAsked, setReplyAsked] = useState<ReplyAsked | null>(null);
   const preview = historySnapshot?.preview ?? null;
   const openCount = useOpenThreadCount(handle.doc);
   // What Comment reads when it runs (a keystroke or a click after any render), kept current after each render.
@@ -586,6 +595,7 @@ function TabEditor({ tabId, tabTitle, newSection, artifactId, handle, host, rend
       const block = range ? -1 : blockPos(editor, handle.doc, showing.threadId);
       if (!range && block < 0) return false;
       (range ? editor.chain().setTextSelection(range) : editor.chain().setNodeSelection(block)).setActiveThread(showing.threadId).scrollIntoView().run();
+      if (showing.reply) setReplyAsked({ threadId: showing.threadId, serial: showing.serial });
       onShown();
       return true;
     };
@@ -693,6 +703,7 @@ function TabEditor({ tabId, tabTitle, newSection, artifactId, handle, host, rend
       )}
       {findOpen && <FindBar ref={findField} editor={shown} onClose={() => setFindOpen(false)} />}
       <PageFrame
+        replyAsked={replyAsked}
         editor={shown}
         live={editor}
         previewEditor={preview ? previewEditor : null}
@@ -727,6 +738,8 @@ function TabEditor({ tabId, tabTitle, newSection, artifactId, handle, host, rend
 // the comments, that frame callback tells the margin what moved and renders nothing (a resize re-lays it in that frame,
 // edits alone owe it a pass once they pause).
 interface PageFrameProps {
+  /** The word cut (G385): the margin card that takes the keyboard to its reply field once active. */
+  replyAsked: ReplyAsked | null;
   /** The editor on screen: the preview's while a version shows, else the live one. */
   editor: Editor;
   live: Editor;
@@ -755,7 +768,7 @@ interface PageFrameProps {
   onNewChanges(): void;
 }
 
-function PageFrame({ editor, live, previewEditor, handle, author, comments, tabId, preview, history, pill, pageScope: Scope, onPage, marginView, onMarginTier, drafts, onDraftChange /* P4-B1 */, readOnly, onComment, enterRef, growRef /* P4-A2 */, onNewChanges }: PageFrameProps) {
+function PageFrame({ replyAsked, editor, live, previewEditor, handle, author, comments, tabId, preview, history, pill, pageScope: Scope, onPage, marginView, onMarginTier, drafts, onDraftChange /* P4-B1 */, readOnly, onComment, enterRef, growRef /* P4-A2 */, onNewChanges }: PageFrameProps) {
   const editors = useShowEditors(live, history, tabId, preview === null);
   const frame = useRef<HTMLDivElement>(null);
   const [layout, setLayout] = useState(0);
@@ -910,6 +923,7 @@ function PageFrame({ editor, live, previewEditor, handle, author, comments, tabI
           enterRef={enterRef}
           drafts={drafts} // P4-B1
           onDraftChange={onDraftChange} // P4-B1
+          replyAsked={replyAsked} // the word cut (G385)
         />
       )}
     </div>
@@ -921,7 +935,7 @@ function PageFrame({ editor, live, previewEditor, handle, author, comments, tabI
       {pill && (
         <div className="doc-pill" data-markup-occluder>
           <button type="button" className="doc-pill-open" onClick={onNewChanges}>
-            {pill.count === null ? 'New changes' : `${pill.count} new ${pill.count === 1 ? 'change' : 'changes'}` /* the word cut (G347) */}
+            {PAGE_COPY.newChanges(pill.count) /* the word cut (G347) */}
           </button>
           {pill.failed !== null && (
             <button type="button" className="doc-pill-retry" aria-label="Count the new changes again" title={`Counting failed: ${pill.failed}`} onClick={() => void history?.recount()}>

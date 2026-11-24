@@ -29,6 +29,9 @@ function expectNewer(at: number): void {
   expect(accessibleText(note)).toBe(`Newer rows at ${utcTime(at).slice(11, 16)} Show latest`);
   expect(clock.tabIndex).toBe(0);
   expect(accessibleDescription(clock)).toBe(utcTime(at));
+  // the description's node sits outside the line, so a read of the line's text is what it shows
+  expect(note.querySelector('[hidden]')).toBeNull();
+  expect(note.textContent).toBe(`Newer rows at ${utcTime(at).slice(11, 16)} Show latest`);
 }
 
 const AT = Date.UTC(2026, 9, 17, 9, 0);

@@ -12,6 +12,7 @@ import { DOMSerializer, Fragment, Slice, type Node as PMNode, type Schema } from
 import { Plugin, PluginKey } from '@tiptap/pm/state';
 import type { EditorView } from '@tiptap/pm/view';
 import type { EditorHost } from './host-types';
+import { PAGE_COPY } from './copy';
 
 /** On a clipboard image, the artifact its asset belongs to. */
 const SOURCE_ATTR = 'data-maws-artifact';
@@ -80,7 +81,7 @@ export const AssetPaste = Extension.create<AssetPasteOptions>({
         return failed(view, `Couldn’t paste the ${foreign.size === 1 ? 'image' : 'images'} from another document: ${reason(error)}`);
       }
       if (view.isDestroyed) return;
-      if (!view.editable) return failed(view, 'Couldn’t paste: the document is read-only' /* the word cut (G330) */);
+      if (!view.editable) return failed(view, PAGE_COPY.pasteReadOnly /* the word cut (G330) */);
       const content = mapImages(slice.content, (image) => {
         const source = sources.get(String(image.attrs.assetId));
         const copied = source === undefined ? undefined : copies.get(keyOf(source, String(image.attrs.src)));

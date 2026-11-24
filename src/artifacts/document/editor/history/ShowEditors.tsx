@@ -6,6 +6,7 @@
 import type { Editor } from '@tiptap/core';
 import { useCallback, useEffect, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react';
 import { QuietSpinner } from '../../../../renderer/src/ui/spinner';
+import { HISTORY_COPY as W } from '../copy';
 import type { HistoryController, ShownEditor } from './controller';
 
 interface Open {
@@ -74,21 +75,21 @@ export function ShowEditorsMenu({ open, onShow, onClose }: { open: Open; onShow(
       </div>
     );
   return (
-    <div ref={root} className="doc-popover doc-editors" role="dialog" aria-label="Editors" style={style} data-markup-occluder>
+    <div ref={root} className="doc-popover doc-editors" role="dialog" aria-label={W.editors} style={style} data-markup-occluder>
       <header className="doc-editors-header">
-        <span className="doc-editors-title">Editors</span>
+        <span className="doc-editors-title">{W.editors}</span>
         <button type="button" className="doc-tool" aria-label="Close editors" onClick={close}>
           ×
         </button>
       </header>
       {open.editors === null ? (
         <p className="doc-editors-empty">
-          <QuietSpinner label="Reading the history…" />
+          <QuietSpinner label={W.readingHistoryName} />
         </p>
       ) : open.error ? (
         <p className="doc-editors-empty">{open.error}</p>
       ) : open.editors.length === 0 ? (
-        <p className="doc-editors-empty">No edits recorded</p>
+        <p className="doc-editors-empty">{W.noEdits}</p>
       ) : (
         <ul className="doc-editors-list">
           {open.editors.map((who) => (
