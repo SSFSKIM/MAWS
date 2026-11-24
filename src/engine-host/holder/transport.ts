@@ -31,7 +31,7 @@ import { AsyncQueue, cleanLine, parseStdoutLine, TransportClosed, type EngineTra
 import { Frontier } from './checkpoint';
 import { HostConnection, type HostEvent } from './client';
 import { sessionHostPaths, type SessionHostPaths } from './files';
-import { stdinRecord, type ClientMessage, type Hello, type HostMessage } from './protocol';
+import { HOST_EXIT_GRACE_MS, stdinRecord, type ClientMessage, type Hello, type HostMessage } from './protocol';
 
 export const HOST_START_MS = 5_000; // a session host's time to answer `hello` after its spawn, and a reconnect's
 const BUSY_RETRY_MS = 100;
@@ -203,6 +203,35 @@ export async function releaseHost(entry: { holderId: string; pid: number; socket
   }
 }
 
+// Ticket 851, M1's review (docs/doperpowers/plans/2026-11-24-prestart-engine.md, Decision Log 9): a successor's end of a
+// host its roster entry marks `prestart`. Taken as writer at the next fence (a predecessor's promote still in its socket
+// is then refused as fenced), and asked `discard`, which the host decides under its lock: still marked, it closes
+// promotion and ends its engine, then exits keeping its entry; already promoted, it does nothing and is adopted as any
+// host. `discarded` once the host has exited (its entry may then go), `discarding` when it still lives past `exitMs`
+// (its staged files may go, its entry not: the host writes it again at its exit), `promoted` otherwise. Throws when the
+// host cannot be asked, so its end is left to the guard and the next start.
+export async function discardHost(
+  entry: { holderId: string; pid: number; procStart: string; socket: string },
+  deps: Pick<SessionHostDeps, 'log' | 'startMs'> & { token: string; exitMs?: number },
+): Promise<'discarded' | 'discarding' | 'promoted'> {
+  const deadline = Date.now() + (deps.startMs ?? HOST_START_MS);
+  const { connection, hello } = await HostConnection.open(entry.socket, deps.token, { deadline, gone: () => (isAlive(entry.pid) ? null : 'its process is gone'), log: deps.log });
+  try {
+    if (hello.holderId !== entry.holderId) throw new HostAdoptFailed(`the socket answered as ${hello.holderId}, not ${entry.holderId}`);
+    connection.send({ t: 'attach', role: 'writer', fence: hello.fence + 1 });
+    await connection.expect('attached', deadline);
+    connection.send({ t: 'discard' });
+    if (!(await connection.expect('discarded', deadline)).marked) return 'promoted';
+  } finally {
+    connection.close();
+  }
+  // its ladder: SIGTERM and its grace, then SIGKILL and the reap's
+  const until = Date.now() + (deps.exitMs ?? 2 * HOST_EXIT_GRACE_MS + 2_000);
+  while (isAlive(entry.pid) && Date.now() < until) await new Promise((resolve) => setTimeout(resolve, 50));
+  const same = isAlive(entry.pid) && (entry.procStart === '' || procStartOf(entry.pid) === entry.procStart);
+  return same ? 'discarding' : 'discarded';
+}
+
 interface InFlight {
   offset: number;
   end: number;
@@ -339,7 +368,8 @@ class HostedTransport {
     if (this.ended) return Promise.resolve({ ok: false, message: 'the session is over on this transport: its engine exited, or it was handed over' });
     const connection = this.connection;
     if (connection === null || this.reconnecting) return Promise.resolve({ ok: false, message: 'the session host has no writer connection' });
-    const ms = opts.withinMs ?? this.o.deps.startMs ?? HOST_START_MS;
+    const bound = this.o.deps.startMs ?? HOST_START_MS;
+    const ms = Math.min(opts.withinMs ?? bound, bound); // a caller shortens the bound, never lengthens it
     return new Promise<Promotion>((resolve) => {
       let settled = false;
       const settle = (answer: Promotion) => {

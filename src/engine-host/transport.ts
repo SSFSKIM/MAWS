@@ -58,7 +58,8 @@ export interface EngineTransport {
   // (`ack`) acknowledges the frontier first and ends the connection gracefully
   detach?(opts?: { ack?: boolean }): void;
   // Ticket 851, M1 (holder/transport.ts): a prestart's promotion, the host's answer once its roster entry is written
-  // without the mark, or a refusal (its reason, no answer within the bound, no connection); never rejects
+  // without the mark, or a refusal (its reason, no answer within the bound, no connection); never rejects. `withinMs`
+  // shortens the bound (the host start's), never lengthens it
   promote?(opts?: { withinMs?: number }): Promise<Promotion>;
 }
 

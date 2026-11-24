@@ -124,7 +124,7 @@ function successor(stub: string, opts: { env?: Record<string, string> } = {}) {
   const adopt = async () => {
     const { live } = liveHosts(readRoster(hostsDir(), () => {}), { isAlive, procStartOf });
     ipc.table.holdForAdoption(live.flatMap((entry) => (entry.appSessionId ? [entry.appSessionId as AppSessionId] : [])));
-    const outcome = await adoptAll(live, { adopt: (entry) => ipc.adopt(entry), end: async () => 'gone' as const /* no prestart here (ticket 851) */, log: () => {} });
+    const outcome = await adoptAll(live, { adopt: (entry) => ipc.adopt(entry), end: async () => 'ended' as const /* no prestart here (ticket 851) */, log: () => {} });
     for (const entry of live) if (entry.appSessionId) ipc.table.adoptionEnded(entry.appSessionId as AppSessionId);
     return { live, outcome };
   };

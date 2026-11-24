@@ -71,3 +71,12 @@ describe('the prestart lines', () => {
     expect(HostMessageSchema.safeParse({ t: 'promoted' }).success).toBe(false);
   });
 });
+
+// Ticket 851, M1's review: a successor's discard, decided by the host against a promotion in flight.
+describe('the discard lines', () => {
+  it('writes a discard and reads its answer', () => {
+    expect(controlLine({ t: 'discard' }).toString()).toBe('{"t":"discard"}\n');
+    expect(HostMessageSchema.parse({ t: 'discarded', marked: true })).toEqual({ t: 'discarded', marked: true });
+    expect(HostMessageSchema.safeParse({ t: 'discarded' }).success).toBe(false);
+  });
+});

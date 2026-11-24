@@ -8,7 +8,9 @@
 // Ticket 851, M1 (docs/doperpowers/plans/2026-11-24-prestart-engine.md, R4-1): `launch` may be marked `prestart`, which
 // the host's roster entry carries until the writer's `promote` is answered `promoted {ok: true}`, only once the entry
 // without the mark is written; `ok: false` carries the reason and the mark stays. A marked host whose writer is lost
-// ends its child and exits.
+// ends its child and exits. A successor's `discard` (writer only) is decided under the host's lock against a promotion in
+// flight: `discarded {marked: true}` closes promotion and ends the child, the host then exiting with its entry kept, still
+// marked; `marked: false` (promoted) does nothing.
 import * as z from 'zod';
 
 export const SESSION_HOST_PROTOCOL = 1;
@@ -31,6 +33,7 @@ export type ClientMessage =
   | { t: 'attach'; role: 'observer' }
   | { t: 'launch'; appSessionId: string; engineSessionId: string; argv: string[]; cwd: string; env: Record<string, string>; prestart?: true }
   | { t: 'promote' }
+  | { t: 'discard' }
   | { t: 'commit' }
   | { t: 'read'; fromSeq: number }
   | { t: 'ack'; seq: number }
@@ -79,6 +82,7 @@ export const HostMessageSchema = z.discriminatedUnion('t', [
   z.looseObject({ t: z.literal('problem'), kind: z.string(), length: z.number().int().optional(), stream: z.enum(['out', 'err']).optional(), message: z.string().optional() }),
   z.looseObject({ t: z.literal('error'), message: z.string() }),
   z.looseObject({ t: z.literal('promoted'), ok: z.boolean(), message: z.string().optional() }), // ticket 851
+  z.looseObject({ t: z.literal('discarded'), marked: z.boolean() }), // ticket 851, M1's review
 ]);
 export type HostMessage = z.infer<typeof HostMessageSchema>;
 export type Hello = Extract<HostMessage, { t: 'hello' }>;

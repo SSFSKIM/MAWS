@@ -8,10 +8,12 @@
 // or is about to, so it is held and adopted as one, never released as empty. An adoption is counted by its outcome, not
 // by what the entry said at the start: one that ends in the host's accepted release (`null`) is no failure, and every
 // other end that adopts nothing is counted, so no host is left running unaccounted.
-// Ticket 851, M1 (docs/doperpowers/plans/2026-11-24-prestart-engine.md, R4-1 and R4-2): an entry marked `prestart` is a
-// prestart whose promotion was never acknowledged, so its engine belongs to no session yet. It is never adopted: it is
-// recorded unattached at the start (a launch, a forget or a stop all of its session stops it first), its host ended
-// through its own shutdown, and that launch's staged files (its journal and host map, base and rotations) removed.
+// Ticket 851, M1 (docs/doperpowers/plans/2026-11-24-prestart-engine.md, R4-1 and R4-2; Decision Logs 8 and 9): an entry
+// marked `prestart` is a prestart whose promotion was never acknowledged. Its session is held at the start (a launch of it
+// is refused until its end is decided). Its host is asked to discard it (transport.ts `discardHost`), which the host
+// decides atomically against a promotion in flight: discarded, that launch's staged files (its journal and host map,
+// base and rotations) are removed, then its entry, which the host kept for that; promoted meanwhile, it is adopted as
+// any host. A discard that fails is a failed adoption, its host then guarded as unattached.
 import { readdirSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import type { AppSessionId } from '@shared/graph/ids';
@@ -28,7 +30,7 @@ export function holdsEngine(entry: RosterEntry): boolean {
 export interface AdoptionOutcome {
   adopted: AppSessionId[];
   failed: { entry: RosterEntry; reason: string }[];
-  ended: RosterEntry[]; // ticket 851: the prestarts never promoted, ended rather than adopted
+  ended: RosterEntry[]; // ticket 851: the prestarts never promoted, discarded rather than adopted
 }
 
 // The entries an adoption takes, the prestarts it ends, and the rest with the reason they are left: the rows
@@ -61,44 +63,91 @@ export function adoptable(entries: readonly RosterEntry[]): { take: RosterEntry[
 }
 
 // `adopt` answers the session adopted, or null for a host that held no engine and accepted its release; `end` ends a
-// prestart never promoted (endPrestart). An end that fails is logged, not counted: the start recorded the host
-// unattached (recordStart), and that record guards its engine until it is gone.
+// prestart never promoted (endPrestart), answering `promoted` for one its host found promoted, which is then adopted. An
+// end that throws is a failed adoption, counted, and its host guarded (recordFailed).
 export async function adoptAll(
   entries: readonly RosterEntry[],
-  deps: { adopt(entry: RosterEntry): Promise<AppSessionId | null>; end(entry: RosterEntry): Promise<HeldStopOutcome>; log(line: string): void },
+  deps: { adopt(entry: RosterEntry): Promise<AppSessionId | null>; end(entry: RosterEntry): Promise<'ended' | 'promoted'>; log(line: string): void },
 ): Promise<AdoptionOutcome> {
   const { take, leave, end } = adoptable(entries);
   for (const { entry, reason } of leave) deps.log(`session host ${entry.holderId} (pid ${entry.pid}) not adopted: ${reason}`);
-  const outcome: AdoptionOutcome = { adopted: [], failed: [...leave], ended: [...end] };
-  const ending = end.map(async (entry) => {
+  const outcome: AdoptionOutcome = { adopted: [], failed: [...leave], ended: [] };
+  const counted = async (entry: RosterEntry, step: () => Promise<void>) => {
     try {
-      await deps.end(entry);
-    } catch (error) {
-      deps.log(`session host ${entry.holderId} (pid ${entry.pid}) holds a prestart never promoted; its end failed: ${error instanceof Error ? error.message : String(error)}`);
-    }
-  });
-  await Promise.all([...ending, ...take.map(async (entry) => {
-    try {
-      const adopted = await deps.adopt(entry);
-      if (adopted !== null) outcome.adopted.push(adopted); // null: released, nothing was there to adopt
+      await step();
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error);
       deps.log(`session host ${entry.holderId} (pid ${entry.pid}) not adopted: ${reason}`);
       outcome.failed.push({ entry, reason });
     }
-  })]);
+  };
+  const adoptOne = async (entry: RosterEntry) => {
+    const adopted = await deps.adopt(entry);
+    if (adopted !== null) outcome.adopted.push(adopted); // null: released, nothing was there to adopt
+  };
+  await Promise.all([
+    ...end.map((entry) => counted(entry, async () => {
+      if ((await deps.end(entry)) === 'ended') outcome.ended.push(entry);
+      else await adoptOne({ ...entry, prestart: false }); // promoted meanwhile: an ordinary host
+    })),
+    ...take.map((entry) => counted(entry, () => adoptOne(entry))),
+  ]);
   return outcome;
 }
 
-// Ticket 851, M1: a prestart never promoted, ended through its host's own shutdown (`stop`, stop-held.ts
-// `stopHeldHost`), then its launch's staged files removed from its session's journal directory (`stagedDir`, null for an
-// entry that names no session). Answers the stop's outcome.
-export async function endPrestart(entry: RosterEntry, deps: { stop(entry: RosterEntry): Promise<HeldStopOutcome>; stagedDir(entry: RosterEntry): string | null; log(line: string): void }): Promise<HeldStopOutcome> {
-  const outcome = await deps.stop(entry);
-  const dir = deps.stagedDir(entry);
-  const removed = dir === null ? 0 : removeStagedFiles(dir, entry.holderId);
-  deps.log(`session host ${entry.holderId} (pid ${entry.pid}) holds a prestart never promoted: not adopted; ended (${outcome}), ${removed} staged file(s) removed`);
-  return outcome;
+export interface PrestartFiles {
+  stagedDir(entry: RosterEntry): string | null; // its session's journal directory; null for an entry that names none
+  removeEntry(entry: RosterEntry): void; // its roster entry, token and socket (roster.ts `removeHostFiles`)
+  log(line: string): void;
+}
+
+// The launch's staged files removed, or null when one could not be (logged: the entry then stays for the next start).
+function removeStaged(entry: RosterEntry, deps: PrestartFiles): number | null {
+  try {
+    const dir = deps.stagedDir(entry);
+    return dir === null ? 0 : removeStagedFiles(dir, entry.holderId);
+  } catch (error) {
+    deps.log(`session host ${entry.holderId} (pid ${entry.pid}) held a prestart never promoted: its staged files could not all be removed (${error instanceof Error ? error.message : String(error)}); its entry stays for the next start`);
+    return null;
+  }
+}
+
+function removeEntry(entry: RosterEntry, deps: PrestartFiles): boolean {
+  try {
+    deps.removeEntry(entry);
+    return true;
+  } catch (error) {
+    deps.log(`session host ${entry.holderId} (pid ${entry.pid}): its files could not be removed (${error instanceof Error ? error.message : String(error)})`);
+    return false;
+  }
+}
+
+// Ticket 851, M1: a live prestart never promoted, discarded by its host (`discard`, transport.ts `discardHost`); then
+// its launch's staged files removed, then its entry once its host has exited. Answers `promoted` for one its host found
+// promoted meanwhile, and removes nothing of it. Throws only when the discard does.
+export async function endPrestart(entry: RosterEntry, deps: PrestartFiles & { discard(entry: RosterEntry): Promise<'discarded' | 'discarding' | 'promoted'> }): Promise<'ended' | 'promoted'> {
+  const answer = await deps.discard(entry);
+  const name = `session host ${entry.holderId} (pid ${entry.pid})`;
+  if (answer === 'promoted') {
+    deps.log(`${name} was marked prestart and its host says it was promoted: adopted as any host`);
+    return 'promoted';
+  }
+  const removed = removeStaged(entry, deps);
+  if (removed === null) return 'ended';
+  const entryGone = answer === 'discarded' && removeEntry(entry, deps);
+  deps.log(`${name} holds a prestart never promoted: discarded, ${removed} staged file(s) removed, ${entryGone ? 'its entry removed' : 'its entry kept until its host has exited'}`);
+  return 'ended';
+}
+
+// A dead host's files at the start, never throwing: a marked one's staged files first, and its entry only once they
+// are gone (the entry is the only record naming them), else kept for the next start.
+export function clearDeadHost(entry: RosterEntry, deps: PrestartFiles): void {
+  if (entry.prestart === true) {
+    const removed = removeStaged(entry, deps);
+    if (removed === null) return;
+    deps.log(`session host ${entry.holderId} held a prestart never promoted: ${removed} staged file(s) removed`);
+  }
+  removeEntry(entry, deps);
 }
 
 const STAGED_FILE = /^([A-Za-z0-9_-]+?)(?:\.\d+)?\.(?:jsonl|hseq)$/;
@@ -136,7 +185,8 @@ export interface HeldHosts {
   child(entry: RosterEntry): ProcStartKey | null;
 }
 
-const unattachable = (entry: RosterEntry): boolean => holdsEngine(entry) && entry.protocol === SESSION_HOST_PROTOCOL;
+// ticket 851: a marked host naming a session is guarded with no child known too, since a commit may be in flight to it
+const unattachable = (entry: RosterEntry): boolean => (holdsEngine(entry) || (entry.prestart === true && entry.appSessionId !== null)) && entry.protocol === SESSION_HOST_PROTOCOL;
 
 function unattachEntry(table: StartTable, entry: RosterEntry, held: HeldHosts): void {
   table.unattach(entry.appSessionId as AppSessionId, { holderId: entry.holderId, host: { pid: entry.pid, procStart: entry.procStart }, child: () => held.child(entry), stop: () => held.stop(entry) });
@@ -147,9 +197,15 @@ function unattachEntry(table: StartTable, entry: RosterEntry, held: HeldHosts): 
 export function recordStart(table: StartTable, live: readonly RosterEntry[], held: HeldHosts): AppSessionId[] {
   const { take, leave, end } = adoptable(live);
   const holding = new Map(take.filter(holdsEngine).map((entry) => [entry.appSessionId as AppSessionId, entry]));
+  // ticket 851: a prestart's session is held until its discard is decided, a commit in flight to it too; beside an
+  // ordinary host of its session, which takes the hold, it is guarded as unattached
+  for (const entry of end) {
+    if (entry.appSessionId === null) continue;
+    if (holding.has(entry.appSessionId as AppSessionId)) unattachEntry(table, entry, held);
+    else holding.set(entry.appSessionId as AppSessionId, entry);
+  }
   table.holdForAdoption([...holding.keys()], (id) => held.stop(holding.get(id)!));
   for (const { entry } of leave) if (unattachable(entry)) unattachEntry(table, entry, held);
-  for (const entry of end) if (unattachable(entry)) unattachEntry(table, entry, held); // ticket 851: ended, never held
   return [...holding.keys()];
 }
 

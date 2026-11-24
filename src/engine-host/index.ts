@@ -29,9 +29,9 @@ import { readMachineRole } from './role'; // P5 O2 M2
 import { buildIdOf, isAlive, procStartOf } from './supervisor-files';
 import { signalOrphan, type LiveRow } from './live-ledger'; // P5 O16 M2; M3: LiveRow
 import { gateSocketPath, hostsDirOf, sessionHostBinary, sessionHostPaths } from './holder/files'; // P5 O16 M2; M3: sessionHostPaths
-import { adoptHosted, releaseHost, startSessionHost } from './holder/transport'; // P5 O16 M2; M3: adoptHosted, releaseHost
+import { adoptHosted, discardHost, releaseHost, startSessionHost } from './holder/transport'; // P5 O16 M2; M3: adoptHosted, releaseHost; ticket 851: discardHost
 import { liveHosts, pruneHostLogs, readRoster, removeHostFiles, type RosterEntry } from './holder/roster'; // P5 O16 M3
-import { adoptAll, endPrestart, recordFailed, recordStart, removeStagedFiles } from './holder/adopt'; // P5 O16 M3; wave 1 verification: the start's records; ticket 851: a prestart's end
+import { adoptAll, clearDeadHost, endPrestart, recordFailed, recordStart } from './holder/adopt'; // P5 O16 M3; wave 1 verification: the start's records; ticket 851: a prestart's end
 import { journalDir } from './launcher'; // ticket 851: a prestart's staged files
 import type { AppSessionId } from '@shared/graph/ids'; // ticket 851
 import { heldChild, stopHeldHost } from './holder/stop-held'; // P5 O16 panel fix wave 1; re-verification: heldChild
@@ -332,8 +332,9 @@ function adoptAtStart(dir: string): { liveHolders: ReadonlySet<string>; deadHost
   const prunedLogs = pruneHostLogs(hostsDir, new Set(roster.map((entry) => entry.holderId)), { maxAgeDays: JOURNAL_MAX_AGE_DAYS });
   if (prunedLogs > 0) log(`${prunedLogs} session host log(s) past ${JOURNAL_MAX_AGE_DAYS} days pruned`);
   const { live, dead } = liveHosts(roster, { isAlive, procStartOf });
-  // ticket 851 (docs/doperpowers/plans/2026-11-24-prestart-engine.md, R4-1): a prestart never promoted is never adopted;
-  // its launch's staged files are removed once its host is ended, or here for a host already gone
+  // ticket 851 (docs/doperpowers/plans/2026-11-24-prestart-engine.md, R4-1, Decision Logs 8 and 9): a prestart never
+  // promoted is discarded, never adopted; its launch's staged files are removed before its entry, here for a host already
+  // gone, and a removal that fails keeps the entry for the next start
   const stagedDir = (entry: RosterEntry): string | null => {
     if (entry.appSessionId === null) return null;
     try {
@@ -342,12 +343,11 @@ function adoptAtStart(dir: string): { liveHolders: ReadonlySet<string>; deadHost
       return null; // an id no journal directory could have
     }
   };
+  const prestartFiles = { stagedDir, removeEntry: (entry: RosterEntry) => removeHostFiles(hostsDir, entry), log };
   const deadHostChildren: LiveRow[] = dead.flatMap((entry) => (entry.child !== null && entry.exit === null ? [{ appSessionId: entry.appSessionId ?? '', pid: entry.child.pid, procStart: entry.child.procStart, launchId: entry.holderId, holderId: entry.holderId }] : []));
   for (const entry of dead) {
     log(`session host ${entry.holderId} (pid ${entry.pid}) is gone: its files removed`);
-    removeHostFiles(hostsDir, entry);
-    const staged = entry.prestart === true ? stagedDir(entry) : null;
-    if (staged !== null) log(`session host ${entry.holderId} held a prestart never promoted: ${removeStagedFiles(staged, entry.holderId)} staged file(s) removed`);
+    clearDeadHost(entry, prestartFiles);
   }
   // P5 O16 panel fix wave 1: a committed spawn with no child yet is held too (sweep#3), and a stop-all before a hold's
   // adoption reserves its row stops it through its session host (scalpel-1#1)
@@ -368,7 +368,7 @@ function adoptAtStart(dir: string): { liveHolders: ReadonlySet<string>; deadHost
   // P5 O17 M8's scene 6: the e2e's hold on the adoptions, armed only under MAWS_E2E=1 with its own variable; unarmed,
   // the adoptions run as before
   const e2eHold = e2eHoldFor(process.env, 'MAWS_E2E_ADOPTION_HOLD');
-  const adoptDeps = { adopt: (entry: RosterEntry) => engine.adopt(entry), end: (entry: RosterEntry) => endPrestart(entry, { stop: heldHosts.stop, stagedDir, log }), log };
+  const adoptDeps = { adopt: (entry: RosterEntry) => engine.adopt(entry), end: (entry: RosterEntry) => endPrestart(entry, { ...prestartFiles, discard: (e) => discardHost(e, { log, token: tokenOf(dir, e.holderId) }) }), log };
   if (e2eHold === undefined) void adoptAll(live, adoptDeps).then(ended);
   else void e2eHold().then(() => adoptAll(live, adoptDeps).then(ended));
   return { liveHolders: new Set(live.map((entry) => entry.holderId)), deadHostChildren };
