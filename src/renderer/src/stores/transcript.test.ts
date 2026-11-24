@@ -879,3 +879,28 @@ describe('transcript store: the calls that hold a waiting form', () => {
     expect(mirrored(store.getState().rows(KEY)).filter((row) => row.kind === 'plan').map((row) => row.toolUseId)).toEqual([tool('plan-1')]);
   });
 });
+
+// Board ticket 852: a run of one is toggled by its run's id, which the store resolves to its row; a run whose id is the
+// same (a later copy of the same call, as a replay's echo of a seeded history draws one) is resolved as itself first,
+// so its own turn is derived again and it opens.
+describe('a run’s toggle beside a run of one of the same call', () => {
+  it('opens the run itself, not the run of one before it', async () => {
+    const b = builder();
+    b.turn('u1');
+    b.toolUse('x', 'Bash', { command: 'printf R3' }, 'm1', 0);
+    b.result('x', 'R3', { structured: BASH_RESULT('R3') });
+    b.end(['u1']);
+    b.turn('u2');
+    b.toolUse('x', 'Bash', { command: 'printf R3' }, 'm2', 0); // the same call, again, in a turn still open
+    b.result('x', 'R3', { structured: BASH_RESULT('R3') });
+    const store = createTranscriptStore();
+    await store.getState().attach(KEY, pushSource(b.events).source);
+    const first = store.getState().entries[KEY].state.order[0];
+    store.getState().toggleTurn(KEY, first);
+    const run = rowId.group(cellId.tool(tool('x')));
+    expect(store.getState().rows(KEY).filter((row) => row.kind === 'cell' || row.kind === 'group').map((row) => `${row.kind}:${row.id}`)).toEqual([`cell:${cellId.tool(tool('x'))}`, `group:${run}`]);
+    store.getState().toggleGroup(KEY, run);
+    const group = store.getState().rows(KEY).find((row) => row.kind === 'group');
+    expect(group?.kind === 'group' && group.expanded).toBe(true);
+  });
+});

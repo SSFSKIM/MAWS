@@ -271,8 +271,10 @@ function locate(rows: Row[], id: string): { row: Row; group: Row | null } | null
   for (const row of rows) {
     if (row.id === id) return { row, group: null };
     if (row.kind === 'group' && row.cells.some((cell) => cell.id === id)) return { row, group: row };
-    if (row.kind === 'cell' && drawsAsRun(row) && runOfOneId(row) === id) return { row, group: null }; // board ticket 852: a run of one by its run's id
   }
+  // board ticket 852: a run of one by its run's id, only where no row is that run itself (a later copy of the same call,
+  // as a replay's echo of a seeded history draws one, is a run of the same id)
+  for (const row of rows) if (row.kind === 'cell' && drawsAsRun(row) && runOfOneId(row) === id) return { row, group: null };
   return null;
 }
 
