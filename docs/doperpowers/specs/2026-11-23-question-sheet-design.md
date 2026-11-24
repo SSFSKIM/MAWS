@@ -31,6 +31,7 @@
 - [x] (2026-11-23) The owner approved the cut and asked for C0, C1 and C2.G1 to start.
 - [x] (2026-11-23) C0, C1 and C2 dispatched. C2's execution document written; its 27 entries for this document taken, among them one reading of a binding sentence (§3's one writer is the plugin's step, on the tool's order) and the cases §4.2 did not carry.
 - [x] (2026-11-23) C0's verdicts for P1 to P5 written into their sections: no binding sentence overturned; §2.3 gained three limits, §6's race is no longer called harmless.
+- [x] (2026-11-23) C1's harness runs end to end (smoke: 12 sessions). The owner ruled that an agent asks when a question comes up, batching the frontier (§2.4), and sized the baseline: both wordings, the subject on Opus 5.5 at medium effort, every effort medium or low.
 - [x] (2026-11-23) Buildability review of C2's execution document: eighteen findings, sixteen taken (one in part), one dismissed against §5.2's intent, one accepted as a stated limit; the author's fix wave is under way.
 - [ ] Children: see the Tracking Map.
 
@@ -126,7 +127,9 @@ Capture goes through the engine's own Read tool, not the plugin's file access: f
 
 #### 2.4 What the description asks of the agent
 
-Three things, each because one of the observed problems is behavioural and no mechanism fixes it: put every question you have in one call; revise a question you asked instead of asking a second one that overrides it; and put in `context` and `references` what a reader who sees only the card needs to judge it, marking an option `recommended` when you have a recommendation.
+Three things, each because one of the observed problems is behavioural and no mechanism fixes it: ask when a question comes up instead of holding it to the end of the turn, with the whole frontier of questions you have at that moment batched in one call, and keep working; revise a question you asked instead of asking a second one that overrides it; and put in `context` and `references` what a reader who sees only the card needs to judge it, marking an option `recommended` when you have a recommendation.
+
+"When a question comes up" is the owner's ruling of 2026-11-23, on C1's smoke run: told only to put every question in one call, with a call that never blocks, every agent held its questions to the last response or two of its turn, so a question from early in a long turn would reach the human late. C1's baseline compares the two wordings.
 
 It does not ask the agent to withdraw a question the human's message has already answered: the human dismisses it (the owner's ruling, 2026-11-23: the agent's context is not spent on tending the sheet).
 
