@@ -373,7 +373,7 @@ describe('the notes under a composition and the dialect’s limits (findings 1 a
     expect(add.disabled).toBe(false);
     expect(add.getAttribute('aria-disabled')).toBe('true');
     expect(accessibleDescription(add)).toBe('A deck holds at most 500 slides: delete one to add another.');
-    expect(screen.queryByText(/at most 500 slides/)).toBeNull();
+    expect(screen.queryByText(/at most 500 slides/, { ignore: '[hidden], script, style' })).toBeNull();
     fireEvent.click(add);
     expect(slideOrder(doc)).toHaveLength(DECK_LIMITS.slides);
   });
@@ -641,18 +641,18 @@ describe('Fit follows the stage, with the rails open and closed and after a vers
     cardWidth = 288;
     const { container } = withHistory();
     const tools = within(screen.getByRole('toolbar', { name: 'Deck' }));
-    expect(shown()).toBe('Fit (60%)');
+    expect(shown()).toBe('60%');
     fireEvent.click(tools.getByRole('button', { name: 'Inspector' }));
-    expect(shown()).toBe('Fit (44%)');
+    expect(shown()).toBe('44%');
     fireEvent.click(tools.getByRole('button', { name: 'Version history' }));
     expect(screen.getByRole('complementary', { name: 'Version history' })).toBeTruthy();
     expect(screen.getByRole('complementary', { name: 'Inspector' })).toBeTruthy();
-    expect(shown()).toBe('Fit (44%)');
+    expect(shown()).toBe('44%');
     expect(container.querySelector('.deck-editor-body')!.getAttribute('style')).toContain('--deck-card-reserve: 304px');
     fireEvent.click(tools.getByRole('button', { name: 'Inspector' }));
-    expect(shown()).toBe('Fit (44%)');
+    expect(shown()).toBe('44%');
     fireEvent.click(tools.getByRole('button', { name: 'Version history' }));
-    expect(shown()).toBe('Fit (60%)');
+    expect(shown()).toBe('60%');
   });
 
   it('moves the filmstrip below the stage when the editor narrows, keeping the selected slide', () => {
@@ -712,13 +712,13 @@ describe('Fit follows the stage, with the rails open and closed and after a vers
 
   it('refits as a rail opens and closes beside the stage', () => {
     const { session } = withHistory();
-    expect(shown()).toBe('Fit (60%)');
+    expect(shown()).toBe('60%');
     act(() => session.toggleRail('comments'));
     layout(NARROW);
-    expect(shown()).toBe('Fit (44%)');
+    expect(shown()).toBe('44%');
     act(() => session.toggleRail('comments'));
     layout(WIDE);
-    expect(shown()).toBe('Fit (60%)');
+    expect(shown()).toBe('60%');
   });
 
   for (const rail of ['closed', 'open'] as const)
@@ -727,7 +727,7 @@ describe('Fit follows the stage, with the rails open and closed and after a vers
       await preview();
       if (rail === 'open') act(() => session.toggleRail('comments'));
       layout(rail === 'open' ? NARROW : WIDE);
-      expect(shown()).toBe(rail === 'open' ? 'Fit (44%)' : 'Fit (60%)');
+      expect(shown()).toBe(rail === 'open' ? '44%' : '60%');
       expect(container.querySelector('[data-stage-slide] .maws-slide')).not.toBeNull();
     });
 
@@ -735,9 +735,9 @@ describe('Fit follows the stage, with the rails open and closed and after a vers
     withHistory();
     layout(WIDE);
     layout({ w: 0, h: 0 });
-    expect(shown()).toBe('Fit (60%)');
+    expect(shown()).toBe('60%');
     layout(NARROW);
-    expect(shown()).toBe('Fit (44%)');
+    expect(shown()).toBe('44%');
   });
 
   it('Fit chosen again after a fixed zoom draws at the fit of the stage a preview gave back', async () => {
@@ -746,8 +746,8 @@ describe('Fit follows the stage, with the rails open and closed and after a vers
     layout(WIDE);
     fireEvent.change(zoom(), { target: { value: '1' } });
     expect(shown()).toBe('100%');
-    expect(zoom().options[0]!.text).toBe('Fit (60%)'); // what Fit would draw at, read before it is chosen
+    expect(zoom().options[0]!.text).toBe('Fit'); // the word cut (G400): Fit, while another zoom is chosen
     fireEvent.change(zoom(), { target: { value: 'fit' } });
-    expect(shown()).toBe('Fit (60%)');
+    expect(shown()).toBe('60%');
   });
 });
