@@ -386,6 +386,18 @@ function whole(error: unknown): string {
 }
 // A step that stages a launch's state and failed: the whole error in the console, the scenes it was for not reached.
 const setupFailed = (what: string, error: unknown) => console.log(`[words] ${what} failed:\n${whole(error)}`);
+// A launch that stopped before some of its scenes ran (its app's start, its window's size or theme, a step outside every
+// scene): each such scene this run wanted is not reached with the launch's failure and loses an earlier run's picture,
+// so a rerun of the same build into the folder keeps no earlier success under its name (afterAll keeps a same-build
+// result this run did not take again). A scene that already has this run's result keeps it.
+function launchStopped(launch: string, ids: readonly string[], error: unknown) {
+  setupFailed(launch, error);
+  for (const id of ids) {
+    if (!wanted(id) || results.some((result) => result.id === id)) continue;
+    clearPicture(id);
+    results.push({ id, ok: false, error: `${launch} stopped: ${notReached(error)}` });
+  }
+}
 // Why a scene was not reached, as "<reason>: <what was found> · waiting for <locator>": a failed check's message (its
 // first line), what Playwright received ("element(s) not found", a viewport ratio, an attribute), so a miss says which
 // way it missed, and the locator it waited on (an assertion's `Locator:` line, else an action's first "waiting for"
@@ -2760,6 +2772,12 @@ test('replay: transcripts, the right column, the Artifacts library and an editor
       await closeOverlays(page);
       await libraryAtRest(app, page);
     };
+    // the list itself narrowed: a document's row in view and no other kind's left (a slow read keeps All types' rows
+    // under a pressed control), read from the rows' kind, which both builds draw
+    const narrowedToDocuments = async () => {
+      await expect(page.locator('[data-library] article[data-artifact-row]:not([data-kind="document"])'), 'no row of another kind').toHaveCount(0, { timeout: 10_000 });
+      await inView(page.locator('[data-library] article[data-artifact-row][data-kind="document"]'), 'a document’s row');
+    };
     await shot(page, m5Meta('m5-library-head-more', 'G289, G290, G291', 'Artifacts library, the head and Make something new’s More menu', 'Artifacts, All, the last button of Make something new', 'The page’s head (the view switch, the search, the type filter, New Space) over the strip, its More menu open: whether New Space moves into that menu is the owner’s call by this picture', ['library']), async () => {
       await libraryAtRest(app, page);
       await make.locator('> div:last-child > button').last().click();
@@ -2779,6 +2797,7 @@ test('replay: transcripts, the right column, the Artifacts library and an editor
         await expect(typeFilter(page), 'the type filter pressed').toHaveAttribute('aria-pressed', 'true', { timeout: 3_000 });
         await inView(kindChosen(), m5Cut() ? 'the Documents chip' : 'master’s button naming Documents');
         if (m5Cut()) await expect(kindChosen().first(), 'the chip named by what it does').toHaveAccessibleName(M5_WORDS.clearKind(M5_WORDS.documents), { timeout: 3_000 });
+        await narrowedToDocuments();
       },
       after: backAtRest,
     });
@@ -2790,6 +2809,7 @@ test('replay: transcripts, the right column, the Artifacts library and an editor
       check: async () => {
         await expect(kindMenu(page), 'the type menu').toBeVisible({ timeout: 3_000 });
         await expect(kindMenu(page).getByRole('menuitemradio', { name: new RegExp(`^${literal(M5_WORDS.documents)}`) }), 'Documents ticked').toHaveAttribute('aria-checked', 'true', { timeout: 3_000 });
+        await narrowedToDocuments();
       },
       after: backAtRest,
     });
@@ -5837,7 +5857,11 @@ test('the word cut’s M5: the library’s Spaces, opened artifacts, the documen
   mkdirSync(config, { recursive: true });
   const linked = join(SCRATCH, 'home', 'field-research');
   mkdirSync(linked, { recursive: true });
-  const maws = await launchMaws({ userData, prepare: noGh, env: BASE_ENV({ MAWS_ENGINE_REPLAY: '1', MAWS_DOCUMENT_PERF: '1', MAWS_DASHBOARD_E2E: '1', CLAUDE_CONFIG_DIR: config, PATH: NO_GH_PATH }) });
+  const stopped = (error: unknown) => {
+    launchStopped('launch 15', M5_LAUNCH, error);
+    throw error;
+  };
+  const maws = await launchMaws({ userData, prepare: noGh, env: BASE_ENV({ MAWS_ENGINE_REPLAY: '1', MAWS_DOCUMENT_PERF: '1', MAWS_DASHBOARD_E2E: '1', CLAUDE_CONFIG_DIR: config, PATH: NO_GH_PATH }) }).catch(stopped);
   const { app, page } = maws;
   try {
     await size(maws);
@@ -6535,6 +6559,14 @@ test('the word cut’s M5: the library’s Spaces, opened artifacts, the documen
         await inView(picker(), 'the dataset picker');
         for (const [title, id] of [['Sales', 'sales'], ['Visits', 'visits']])
           await expect(picker().locator('option').filter({ hasText: new RegExp(`^${literal(m5Cut() ? title : `${title} (${id})`)}$`) }), `the ${title} option`).toHaveCount(1, { timeout: 3_000 });
+        // the selected dataset's own rows drawn under the picker, not its wait or a failed read: its first column's head
+        // and its first row's first value (SALES_CSV's, VISITS_CSV's)
+        const selected = await picker().inputValue();
+        const first = ({ sales: ['region', 'North'], visits: ['channel', 'Search'] } as Record<string, [string, string]>)[selected];
+        if (!first) throw new Error(`the picker chose ${JSON.stringify(selected)}, neither fixture’s dataset`);
+        const rows = sheet().getByRole('table', { name: 'Rows', exact: true });
+        await expect(rows.getByRole('button', { name: `Sort by ${first[0]}`, exact: true }), `the ${selected} rows’ head`).toBeVisible({ timeout: 10_000 });
+        await inView(rows.getByRole('cell', { name: first[1], exact: true }), `the ${selected} rows`);
       },
       after: () => closeOverlays(page),
     });
@@ -7527,6 +7559,8 @@ test('the word cut’s M5: the library’s Spaces, opened artifacts, the documen
         await inView(page.locator('[data-region="main"]').getByText(M5_WORDS.notFound, { exact: true }), 'the tab’s title');
       },
     });
+  } catch (error) {
+    stopped(error);
   } finally {
     await maws.cleanup();
   }
