@@ -16,6 +16,7 @@ import { DECK_LIMITS } from '../deck';
 import { loadSlide } from '../parse';
 import { addThread } from '../threads';
 import { accessibleDescription } from '../../../renderer/src/test-support/accessible-text';
+import { fakeTimeouts, realTimeouts } from '../../../renderer/src/test-support/fake-timeouts';
 import { DeckEditor } from './DeckEditor';
 import chromeCss from './chrome.css?raw';
 import type { DeckReveal } from './reveal';
@@ -413,6 +414,31 @@ describe('final fix wave B4: an awaited edit writes only while the deck takes wr
     await act(async () => upload.resolve('assets/b.png'));
     expect(pictures(doc)).toEqual([]);
     expect(screen.getByText('Not placed: the deck became read-only')).toBeTruthy(); // the word cut (G416)
+  });
+
+  // fix round (task 3's review; G413, G415): the upload's status lasts as long as the upload, and its end clears only it
+  const noticeText = () => document.querySelector('[data-deck-notice]')!.textContent;
+
+  it('an upload past six seconds says Uploading… until its picture is placed, then nothing', async () => {
+    fakeTimeouts();
+    onTestFinished(realTimeouts);
+    const { doc, upload, pick } = withUpload();
+    pick();
+    expect(noticeText()).toBe('Uploading…');
+    act(() => vi.advanceTimersByTime(10_000));
+    expect(noticeText()).toBe('Uploading…');
+    await act(async () => upload.resolve('assets/b.png'));
+    expect(pictures(doc)).toHaveLength(1);
+    expect(noticeText()).toBe('');
+  });
+
+  it('an upload whose picture the slide refuses leaves the refusal shown, its reason on it', async () => {
+    const { doc, upload, pick } = withUpload();
+    pick();
+    await act(async () => upload.resolve('https://example.com/b.png'));
+    expect(pictures(doc)).toEqual([]);
+    expect(noticeText()).toBe('Can’t insert this here');
+    expect(accessibleDescription(document.querySelector('[data-deck-notice]')!)).not.toBe('');
   });
 
   it('an image whose upload finishes after the tab closed writes nothing into the disposed session', async () => {

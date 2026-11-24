@@ -65,7 +65,19 @@ describe('the toolbar’s glyphs (G401 to G404)', () => {
     }
     expect(accessibleText(tool('Inspector')).trim()).toBe('');
     expect(accessibleText(tool('Add comment')).trim()).toBe('');
-    expect(tool('Comments (1 open)').textContent).toBe('1'); // the count stays a number beside the glyph
+    // G404 (seen): the open count is a small corner badge on the glyph, and the tooltip says Comments
+    const toggle = tool('Comments (1 open)');
+    expect(toggle.querySelector('[data-comments-count]')?.textContent).toBe('1');
+    act(() => toggle.focus());
+    expect(screen.getByRole('tooltip').textContent).toBe('Comments');
+  });
+
+  it('keeps Add comment’s tooltip, Comment on the selected element, with its chord; its name stays Add comment', () => {
+    const { session } = mount(deck(), { comments: true });
+    act(() => session.select(['ta']));
+    const add = tool('Add comment');
+    act(() => add.focus());
+    expect(screen.getByRole('tooltip').textContent).toBe('Comment on the selected element · ⌘⌥M');
   });
 
   it('greys Add comment, still focusable, until one element is selected, its chord in the tooltip', () => {
@@ -81,7 +93,7 @@ describe('the toolbar’s glyphs (G401 to G404)', () => {
 
   it('draws no comment count at zero', () => {
     mount(deck(), { comments: true });
-    expect(tool('Comments').textContent).toBe('');
+    expect(tool('Comments').querySelector('[data-comments-count]')).toBeNull();
   });
 });
 
@@ -220,8 +232,11 @@ describe('the version bar (G489, G490, G492)', () => {
     expect(named('Restore this version').textContent).toBe('Restore');
     expect(named('Make a copy').textContent).toBe('Make a copy');
     expect(named('Name this version').textContent).toBe('Name');
-    expect(named('Back to presentation').textContent).toBe('Done');
-    for (const name of ['Restore this version', 'Name this version', 'Back to presentation']) expect(named(name).getAttribute('title')).toBeNull();
+    // the review's fix: the name begins with the word drawn (label in name, WCAG 2.5.3); the tooltip says where it goes
+    expect(named('Done, back to presentation').textContent).toBe('Done');
+    for (const name of ['Restore this version', 'Name this version', 'Done, back to presentation']) expect(named(name).getAttribute('title')).toBeNull();
+    act(() => named('Done, back to presentation').focus());
+    expect(screen.getByRole('tooltip').textContent).toBe('Back to presentation');
     fireEvent.click(named('Name this version'));
     expect((screen.getByRole('textbox', { name: 'Version name' }) as HTMLInputElement).placeholder).toBe('Version name');
   });

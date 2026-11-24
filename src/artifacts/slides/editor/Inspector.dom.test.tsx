@@ -457,6 +457,46 @@ describe('fix wave 3: a transform that is a design-system token', () => {
   });
 });
 
+// fix round (task 3's review; G449, G450): a read-only deck keeps each greyed field's reason on an owner the keyboard
+// reaches, and still writes nothing
+describe('the reasons of greyed fields in a read-only deck', () => {
+  it('Rotation keeps the keyboard and its reason, and writes nothing', async () => {
+    const { setStyles } = await import('../writers-elements');
+    const { doc } = mount(['box'], { readOnly: true });
+    act(() => setStyles(doc, 'a', { box: { transform: 'var(--ds-pose, scale(1.5))' } }));
+    const rotation = box('Rotation');
+    act(() => rotation.focus());
+    expect(document.activeElement).toBe(rotation);
+    expect(rotation.getAttribute('aria-disabled')).toBe('true');
+    expect(accessibleDescription(rotation)).toMatch(/design-system token/);
+    fireEvent.keyDown(rotation, { key: 'ArrowUp' });
+    expect(styleOf(doc, 'box').transform).toBe('var(--ds-pose, scale(1.5))');
+    expect(box('Opacity').disabled).toBe(true); // a field with no reason stays plainly off
+  });
+
+  it('Spread and Inset keep the keyboard and the outline’s reason, and write nothing', async () => {
+    const { setAttrsOf, setStyles } = await import('../writers-elements');
+    const shape = mount(['shape'], { readOnly: true });
+    act(() => {
+      setAttrsOf(shape.doc, 'a', { shape: { kind: 'ellipse' } });
+      setStyles(shape.doc, 'a', { shape: { 'box-shadow': '0px 8px 24px 0px #00000033' } });
+    });
+    const reason = 'This shape’s shadow is drawn from its outline, which casts no inset shadow and no spread.';
+    const before = styleOf(shape.doc, 'shape')['box-shadow'];
+    const spread = box('Shadow spread');
+    act(() => spread.focus());
+    expect(document.activeElement).toBe(spread);
+    expect(accessibleDescription(spread)).toBe(reason);
+    fireEvent.keyDown(spread, { key: 'ArrowUp' });
+    const inset = screen.getByRole('checkbox', { name: 'Inset shadow' }) as HTMLInputElement;
+    act(() => inset.focus());
+    expect(document.activeElement).toBe(inset);
+    expect(accessibleDescription(inset)).toBe(reason);
+    fireEvent.click(inset);
+    expect(styleOf(shape.doc, 'shape')['box-shadow']).toBe(before);
+  });
+});
+
 // final fix wave (B4): Replace's upload is an awaited edit; one finishing after the tab closed writes nothing
 describe('final fix wave B4: a replacement finishing after the tab closed', () => {
   it('writes nothing into the disposed session', async () => {

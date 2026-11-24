@@ -14,4 +14,8 @@ describe('the words for an element’s change', () => {
   it('keeps a key it has no word for as the key reads', () => {
     expect(changedWords(['style:clip-path'])).toBe('Clip-path');
   });
+
+  it('names a transform as a transform: the change does not tell a rotation from a scale or a move', () => {
+    expect(changedWords(['style:transform'])).toBe('Transform');
+  });
 });
