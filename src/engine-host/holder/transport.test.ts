@@ -2,6 +2,7 @@
 // tests): a host started and attached, the launch's records handed on with their sequences, writes settled by the host's
 // answers, the frontier's acks trimming the ring, the release after the exit, a reconnect while the host lives (D45),
 // and a host that dies (`host_lost`, its child ended). Runs wherever a prebuild matches the platform.
+import { execFileSync } from 'node:child_process';
 import { chmodSync, existsSync, mkdtempSync, readFileSync, renameSync, rmSync, statSync } from 'node:fs';
 import { createServer, type Socket } from 'node:net';
 import { tmpdir } from 'node:os';
@@ -15,6 +16,17 @@ import type { EngineTransport, StderrItem, TransportItem } from '../transport';
 import { HostConnection } from './client';
 import { hostsDirOf, sessionHostBinary } from './files';
 import { adoptHosted, discardHost, HostStartFailed, startSessionHost, type SessionHostDeps, type StartedHost } from './transport';
+
+// SIGSTOP is delivered asynchronously: a host running on another core can still read and answer a line written right
+// after kill() returns. Wait until the kernel reports it stopped (ps state T) before writing what it must not answer.
+async function stopped(pid: number): Promise<void> {
+  process.kill(pid, 'SIGSTOP');
+  for (let i = 0; i < 200; i++) {
+    if (execFileSync('ps', ['-o', 'stat=', '-p', String(pid)], { encoding: 'utf8' }).trim().startsWith('T')) return;
+    await new Promise((r) => setTimeout(r, 5));
+  }
+  throw new Error(`session host ${pid} never reported stopped`);
+}
 
 const BINARY = sessionHostBinary(resolve(__dirname, '..', '..', '..', 'out', 'main', 'index.js'));
 const LONG = 30_000;
@@ -531,7 +543,7 @@ describe.skipIf(!existsSync(BINARY))('a prestart\'s promotion', () => {
     const host = await start(deps);
     const t = host.transport(plan(['/bin/cat']), { appSessionId: 'app-1', maxLineChars: 1024, prestart: true });
     await t.write({ type: 'keep_alive' } as never);
-    process.kill(host.pid, 'SIGSTOP');
+    await stopped(host.pid);
     try {
       const began = Date.now();
       expect(await t.promote!({ withinMs: 300 })).toEqual({ ok: false, message: expect.stringContaining('no answer') });
@@ -552,7 +564,7 @@ describe.skipIf(!existsSync(BINARY))('a prestart\'s promotion', () => {
     const host = await start({ ...deps, onConnection: (c) => (first ??= c) });
     const t = host.transport(plan(['/bin/cat']), { appSessionId: 'app-1', maxLineChars: 1024 });
     await t.write({ type: 'keep_alive' } as never);
-    process.kill(host.pid, 'SIGSTOP'); // the promote is written and not answered
+    await stopped(host.pid); // the promote is written and not answered
     let answer;
     try {
       const promotion = t.promote!();
@@ -604,7 +616,7 @@ describe.skipIf(!existsSync(BINARY))('a successor\'s discard', () => {
     const host = await start({ ...deps, startMs: 1_500 });
     const t = host.transport(plan(['/bin/cat']), { appSessionId: 'app-1', maxLineChars: 1024, prestart: true });
     await t.write({ type: 'keep_alive' } as never);
-    process.kill(host.pid, 'SIGSTOP');
+    await stopped(host.pid);
     try {
       const answer = await Promise.race([t.promote!({ withinMs: 60_000 }), sleep(4_000).then(() => 'pending' as const)]);
       expect(answer).toEqual({ ok: false, message: expect.stringContaining('within 1500 ms') });
