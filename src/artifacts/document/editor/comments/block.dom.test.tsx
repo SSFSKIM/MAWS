@@ -147,7 +147,7 @@ describe('commenting a block (P3-E)', () => {
     expect(within(rail()).queryByRole('group')).toBeNull();
     expect(within(toolbar()).getByRole('button', { name: 'Comments (0 open)' })).toBeTruthy();
     const before = getThread(handle.doc, id);
-    const reveal = within(rail()).getByRole('button', { name: /^(Show|Hide) deleted-target comments$/ });
+    const reveal = within(rail()).getByRole('button', { name: /^Deleted \(\d+\)$/ /* the word cut (G395) */ });
     act(() => fireEvent.click(reveal));
     expect(getThread(handle.doc, id)).toEqual(before);
     expect(item().dataset.orphan).toBe('');

@@ -122,7 +122,8 @@ describe('the toolbar', () => {
     type(editor(), 'cell one'); // the first cell
     act(() => void editor().commands.goToNextCell());
     type(editor(), 'cell two');
-    press('Add row below');
+    press('Table'); // the word cut (G331): the table's commands are one menu
+    act(() => fireEvent.click(screen.getByRole('menuitem', { name: 'Add row below' })));
 
     freshLine(editor());
     insert('Divider');
@@ -1017,7 +1018,8 @@ describe('a read-only document', () => {
     act(() => set(true));
     expect(editor().isEditable).toBe(false);
     expect(editor().view.dom.getAttribute('contenteditable')).toBe('false');
-    for (const name of ['Bold', 'Insert', 'Add comment']) expect(within(toolbar()).getByRole('button', { name })).toHaveProperty('disabled', true);
+    for (const name of ['Bold', 'Insert']) expect(within(toolbar()).getByRole('button', { name })).toHaveProperty('disabled', true);
+    expect(within(toolbar()).getByRole('button', { name: 'Add comment' }).getAttribute('aria-disabled'), 'a greyed glyph keeps the keyboard').toBe('true');
     expect(screen.getByRole('button', { name: 'Add tab' })).toHaveProperty('disabled', true);
     act(() => fireEvent.doubleClick(screen.getByRole('tab', { selected: true })));
     expect(screen.queryByLabelText('Tab title')).toBeNull();
@@ -1029,14 +1031,14 @@ describe('a read-only document', () => {
     await until(() => screen.queryByRole('menu') === null, 'the menu closed');
     const rail = screen.getByRole('complementary', { name: 'Comments' });
     expect(within(rail).getByRole('button', { name: 'Resolve' })).toHaveProperty('disabled', true);
-    expect(within(rail).queryByLabelText('Reply')).toBeNull();
+    expect(within(rail).queryByRole('textbox', { name: 'Reply' })).toBeNull();
 
     act(() => set(false));
     expect(editor().isEditable).toBe(true);
     expect(within(toolbar()).getByRole('button', { name: 'Bold' })).toHaveProperty('disabled', false);
     expect(screen.getByRole('button', { name: 'Add tab' })).toHaveProperty('disabled', false);
     expect(within(rail).getByRole('button', { name: 'Resolve' })).toHaveProperty('disabled', false);
-    expect(within(rail).getByLabelText('Reply')).toBeTruthy();
+    expect(within(rail).getByRole('textbox', { name: 'Reply' })).toBeTruthy();
   });
 
   it('opens read-only on a handle that already is', async () => {

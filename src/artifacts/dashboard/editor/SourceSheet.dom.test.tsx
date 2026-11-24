@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { DatasetPage } from '../../host';
 import type { FileDatasetDescriptor } from '../datasets'; // E3: the file arm
+import { accessibleDescription } from '../../../renderer/src/test-support/accessible-text';
 import { SourceSheet } from './SourceSheet';
 import { SourceSheetState } from './sheet';
 import { SnapshotReader } from '../snapshots';
@@ -222,12 +223,12 @@ describe('the source sheet', () => {
     act(() => sheet.open([{ id: 'sales', descriptor: descriptor('assets/sales.tsv', 3), view }], 'sales'));
     await until(() => bodyRows().length > 0, 'the view rows');
     const pressed = (name: RegExp) => within(dialog()).getByRole('button', { name }).getAttribute('aria-pressed');
-    expect(pressed(/^This view’s rows \(2\)$/)).toBe('true');
+    expect(pressed(/^This view \(2\)$/)).toBe('true'); // the word cut (G612)
     expect(bodyRows().map(cells)).toEqual([['부산', '7', '2026-02-01'], ['서울', '12', '2026-01-01']]);
     await act(async () => void fireEvent.click(within(dialog()).getByRole('button', { name: 'Copy rows' })));
     expect(writeText).toHaveBeenLastCalledWith('region\tsales\tmonth\n부산\t7\t2026-02-01\n서울\t12\t2026-01-01\n');
-    act(() => void fireEvent.click(within(dialog()).getByRole('button', { name: /^All source rows \(3\)$/ })));
-    expect(pressed(/^All source rows/)).toBe('true');
+    act(() => void fireEvent.click(within(dialog()).getByRole('button', { name: /^All rows \(3\)$/ })));
+    expect(pressed(/^All rows/)).toBe('true');
     expect(bodyRows().map((row) => cells(row)[0])).toEqual(['서울', '부산', '제주']);
     // an aggregating view's rows are its groups and measures
     act(() => sheet.open([{ id: 'sales', descriptor: descriptor('assets/sales.tsv', 3), view: { spec: { view: 'pie', x: 'region', y: 'region', agg: 'count' }, caption: 'Regions' } }], 'sales'));
@@ -248,13 +249,54 @@ describe('the source sheet', () => {
     await act(async () => void fireEvent.click(within(dialog()).getByRole('button', { name: 'Copy rows' })));
     expect(writeText).toHaveBeenLastCalledWith('region\tsales\n서울\t\n부산\t7\n');
     // the snapshot as bound has no such note
-    act(() => void fireEvent.click(within(dialog()).getByRole('button', { name: /^All source rows/ })));
+    act(() => void fireEvent.click(within(dialog()).getByRole('button', { name: /^All rows/ })));
     expect(within(dialog()).queryByText('sum of sales overflows in 1 group: too large to represent')).toBeNull();
   });
 
   it('says so when the dashboard has no dataset', () => {
     mount();
     act(() => sheet.open([]));
-    expect(within(dialog()).getByText('No data is bound to this dashboard yet. An agent binds a file with artifact_dataset.')).toBeTruthy();
+    expect(within(dialog()).getByText('No data yet. Ask an agent to add a data file.')).toBeTruthy(); // the word cut (G615)
+  });
+});
+
+// The word cut in the source sheet (docs/doperpowers/specs/2026-11-16-word-cut-design.md, M5 task 2; G608, G609, G613):
+// it closes by a × named Close; the dataset picker is the select alone, its options by title (an id only where two
+// titles meet), the chosen dataset's id its tooltip; the actions row reads the count, Copy and Download.
+describe('the word cut in the source sheet', () => {
+  it('closes by a × named and tipped Close, the keyboard on the sheet as it opens', async () => {
+    mount();
+    act(() => sheet.open([{ id: 'sales', descriptor: descriptor('assets/sales.tsv', 3) }]));
+    const close = within(dialog()).getByRole('button', { name: 'Close' });
+    expect(close.textContent).toBe('×');
+    expect(close.getAttribute('title')).toBeNull();
+    expect(document.activeElement).toBe(dialog());
+    act(() => void fireEvent.click(close));
+    expect(screen.queryByRole('dialog')).toBeNull();
+  });
+
+  it('picks a dataset by its title, an id only where two titles meet, the chosen one’s id its tooltip', () => {
+    mount();
+    act(() => sheet.open([
+      { id: 'costs', descriptor: descriptor('assets/sales.tsv', 3, { title: 'Costs' }) },
+      { id: 'sales', descriptor: descriptor('assets/sales.tsv', 3, { title: 'Sales' }) },
+      { id: 'sales-2025', descriptor: descriptor('assets/sales.tsv', 3, { title: 'Sales' }) },
+    ], 'costs'));
+    const picker = within(dialog()).getByRole('combobox', { name: 'Dataset' });
+    expect(dialog().querySelector('.dash-sheet-picker')!.textContent).not.toMatch(/^Dataset/);
+    expect([...picker.querySelectorAll('option')].map((option) => option.textContent)).toEqual(['Costs', 'Sales (sales)', 'Sales (sales-2025)']);
+    expect(accessibleDescription(picker)).toBe('costs');
+    act(() => void fireEvent.change(picker, { target: { value: 'sales' } }));
+    expect(accessibleDescription(within(dialog()).getByRole('combobox', { name: 'Dataset' }))).toBe('sales');
+  });
+
+  it('reads the actions row as the count, Copy and Download, Copy named by what it copies', async () => {
+    mount();
+    const view = { spec: { view: 'bar', x: 'month', y: 'sales' }, caption: 'Sales by month' };
+    act(() => sheet.open([{ id: 'sales', descriptor: descriptor('assets/sales.tsv', 3), view }], 'sales'));
+    await until(() => bodyRows().length > 0, 'the view rows');
+    expect(dialog().querySelector('.dash-sheet-count')!.textContent).toBe('3 rows');
+    const copy = within(dialog()).getByRole('button', { name: 'Copy rows' });
+    expect(copy.textContent).toBe('Copy');
   });
 });

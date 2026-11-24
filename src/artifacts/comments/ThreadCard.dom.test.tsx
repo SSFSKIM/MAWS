@@ -9,6 +9,7 @@ import { actorDisplay, type Actor } from '@shared/artifacts/actor';
 import type { DeckThreadState } from '../slides/threads';
 import commentsCss from './comments.css?raw';
 import tokensCss from '../../renderer/src/styles/tokens.css?raw';
+import { accessibleDescription, accessibleText } from '../../renderer/src/test-support/accessible-text';
 import { ThreadCard, type ThreadCardProps, type ThreadCardThread } from './ThreadCard';
 
 afterEach(cleanup);
@@ -101,7 +102,9 @@ describe('the card’s forms', () => {
     expect(card().querySelector('.thread-card-more')).toBeNull();
   });
 
-  it('shows every message and the reply field when active, or when the host does not compact', () => {
+  // the word cut (G385): a card that does not compact (the panel's) shows every message, and its reply field only once
+  // it is active, as every other card
+  it('shows every message when active, or when the host does not compact; the reply field only when active', () => {
     const messages = [0, 1, 2, 3, 4, 5].map((n) => message(n));
     const { card, view } = show({ thread: thread({ messages }), active: true });
     expect(bodies(card())).toHaveLength(6);
@@ -109,12 +112,26 @@ describe('the card’s forms', () => {
     expect(within(card()).getByRole('textbox', { name: 'Reply' })).toBeTruthy();
     view.rerender(<ThreadCard thread={thread({ messages })} active={false} compact={false} draft="" {...handlers()} />);
     expect(bodies(card())).toHaveLength(6);
+    expect(within(card()).queryByRole('textbox', { name: 'Reply' })).toBeNull();
+    view.rerender(<ThreadCard thread={thread({ messages })} active compact={false} draft="" {...handlers()} />);
     expect(within(card()).getByRole('textbox', { name: 'Reply' })).toBeTruthy();
   });
 
-  it('notes an orphan', () => {
-    const { card } = show({ thread: thread({ orphan: true }) });
-    expect(within(card()).getByText('The commented passage was removed.')).toBeTruthy();
+  // the word cut (G388): a card whose passage is gone says so by its struck quote where it draws one (the panel), or by
+  // a Removed tag (a deck's or a design's pin popover); the sentence is each one's tooltip and description
+  it('marks an orphan by its struck quote, or a Removed tag, the sentence in its tooltip', () => {
+    const SENTENCE = 'The commented passage was removed.';
+    const { card, view } = show({ thread: thread({ orphan: true }) });
+    expect(accessibleText(card())).not.toContain(SENTENCE);
+    const tag = within(card()).getByText('Removed');
+    expect(tag.tabIndex).toBe(0);
+    expect(accessibleDescription(tag)).toBe(SENTENCE);
+    view.rerender(<ThreadCard thread={thread({ orphan: true })} active={false} compact={false} showQuote draft="" {...handlers()} />);
+    expect(within(card()).queryByText('Removed')).toBeNull();
+    const quote = within(card()).getByRole('button', { name: 'Show passage: ships quarterly' });
+    expect(quote.querySelector('s, del, [data-removed]')?.textContent).toBe('ships quarterly');
+    expect(accessibleDescription(quote)).toBe(SENTENCE);
+    expect(accessibleText(card())).not.toContain(SENTENCE);
   });
 
   it('chips each message with its author’s name and colour', () => {
@@ -122,6 +139,21 @@ describe('the card’s forms', () => {
     const authors = [...card().querySelectorAll('.thread-card-author')];
     expect(authors.map((a) => a.textContent)).toEqual([actorDisplay(HUMAN).name, actorDisplay(SESSION).name]);
     expect(authors.map((a) => (a.querySelector('.thread-card-chip') as HTMLElement).style.background)).toEqual([`var(${actorDisplay(HUMAN).color})`, `var(${actorDisplay(SESSION).color})`]);
+  });
+
+  // the word cut (G384): Resolve or Reopen shows on the card pointed at, holding the keyboard or active, over its top
+  // right; at rest an inactive card is its messages alone (the hover scope's rule in styles/app.css draws it)
+  it('draws Resolve and Reopen only on the card pointed at, focused or active', () => {
+    const { card, view } = show();
+    expect(card().hasAttribute('data-hover-scope')).toBe(true);
+    const actions = () => card().querySelector<HTMLElement>('.thread-card-actions')!;
+    expect(actions().hasAttribute('data-on-hover')).toBe(true);
+    expect(within(actions()).getByRole('button', { name: 'Resolve' })).toBeTruthy(); // still in the Tab order
+    view.rerender(<ThreadCard thread={thread()} active compact draft="" {...handlers()} />);
+    expect(actions().hasAttribute('data-on-hover')).toBe(false);
+    view.rerender(<ThreadCard thread={thread({ status: 'resolved' })} active={false} compact draft="" {...handlers()} />);
+    expect(actions().hasAttribute('data-on-hover')).toBe(true);
+    expect(within(actions()).getByRole('button', { name: 'Reopen' })).toBeTruthy();
   });
 
   it('offers Resolve on an open thread, Reopen and no reply field on a resolved one', () => {
@@ -207,7 +239,13 @@ describe('the draft', () => {
     expect(on.onReply).toHaveBeenCalledWith('Monthly works.');
     expect(on.onDraftChange).toHaveBeenCalledWith('');
     view.rerender(<ThreadCard thread={thread()} active compact draft="   " {...on} />);
-    expect((within(card()).getByRole('button', { name: 'Reply' }) as HTMLButtonElement).disabled).toBe(true);
+    // the word cut (G385): the send is a glyph named Reply, greyed with its reason and still focusable
+    const send = within(card()).getByRole('button', { name: 'Reply' });
+    expect(send.getAttribute('aria-disabled')).toBe('true');
+    expect(send.querySelector('svg')).not.toBeNull();
+    expect(accessibleText(send).trim()).toBe('');
+    act(() => fireEvent.click(send));
+    expect(on.onReply).toHaveBeenCalledOnce();
     act(() => fireEvent.keyDown(field(), { key: 'Enter' }));
     expect(on.onReply).toHaveBeenCalledOnce();
   });

@@ -24,7 +24,7 @@ describe('the editors of a selection', () => {
     expect(getComputedStyle(popover).alignItems).toBe('stretch');
     const header = popover.querySelector<HTMLElement>('.doc-editors-header')!;
     const [title, close] = [...header.children] as HTMLElement[];
-    expect(title.textContent).toBe('Editors of the selection');
+    expect(title.textContent).toBe('Editors'); // the word cut (G359)
     expect(getComputedStyle(title).whiteSpace).toBe('nowrap');
     expect(close).toBe(screen.getByRole('button', { name: 'Close editors' }));
     expect(getComputedStyle(header).justifyContent).toBe('space-between');

@@ -219,7 +219,13 @@ describe('the chart view', () => {
     expect(into.querySelector('svg')?.textContent).toContain('the file of "sales" could not be read');
     setDataset(doc, 'sales', descriptor('assets/sales.csv', { columns: [{ name: 'region', type: 'string' }, { name: 'sales', type: 'number', mismatches: 1 }] }));
     await settle();
-    expect(into.querySelector('.dash-notes')?.textContent).toContain('1 of 3 values in sales are not number');
+    // the word cut (G598): a column's wrong-type note leaves the line under the tile for a ⚠ mark that takes the keyboard,
+    // the note its name and what it shows when pointed at or focused; the source sheet says it as before
+    expect(into.querySelector('.dash-notes')).toBeNull();
+    const mark = into.querySelector<HTMLElement>('.dash-source .dash-warning')!;
+    expect([mark.textContent, mark.getAttribute('role'), mark.tabIndex]).toEqual(['⚠', 'img', 0]);
+    expect(mark.getAttribute('aria-label')).toBe('1 of 3 values in sales are not number');
+    expect(mark.dataset.note).toBe('1 of 3 values in sales are not number');
     removeDataset(doc, 'sales');
     await settle();
     expect(into.querySelector('svg')?.textContent).toContain('no dataset "sales"');
@@ -390,5 +396,39 @@ describe('hover', () => {
     const bar = hatched.map((h) => h.previousElementSibling!).find((el) => el.hasAttribute('data-tip'))!; // the legend's keys come first
     bar.dispatchEvent(new PointerEvent('pointermove', { bubbles: true, clientX: 10, clientY: 10 }));
     expect(into.querySelector('.dash-tip')?.textContent).toBe('서울 · c · sales: 3');
+  });
+});
+
+// The word cut on the chart tile (docs/doperpowers/specs/2026-11-16-word-cut-design.md, M5 task 2; G597, G604): the
+// spec's own warnings (an unknown key, an invalid value) are not on the tile at all, and the first load is the quiet
+// spinner named by its wait, with no words.
+describe('the word cut on the tile', () => {
+  it('draws no warning about the spec itself, and keeps what the view could not draw', async () => {
+    const doc = newDoc();
+    setDataset(doc, 'sales', descriptor('assets/sales.csv'));
+    const { into } = mount(world().renderChart, doc, node('sales', { view: 'bar', x: 'region', y: 'sales', colour: 'red', limit: 'many' }));
+    await settle();
+    expect(into.querySelector('.dash-source')?.textContent).not.toMatch(/ignored/);
+    expect(into.querySelector('.dash-notes')).toBeNull();
+    const short = mount(world().renderChart, doc, node('sales', { view: 'bar', x: 'region', y: 'sales', colour: 'red', filter: [{ column: 'region', op: 'eq', value: '없음' }] })).into;
+    await settle();
+    expect(short.querySelector('.dash-source')?.textContent).not.toMatch(/ignored/);
+    expect(short.querySelector('.dash-notes')?.textContent).toBe('no rows to draw'); // what the view could not draw stays (G596)
+  });
+
+  it('shows its first load as a spinner named by the wait, and no words', async () => {
+    const doc = newDoc();
+    setDataset(doc, 'sales', descriptor('assets/sales.csv'));
+    const w = world({ hold: true });
+    const { into } = mount(w.renderChart, doc);
+    await settle();
+    const frame = into.querySelector<HTMLElement>('.dash-figure')!;
+    expect(frame.textContent).toBe('');
+    const spinner = frame.querySelector<HTMLElement>('[role="progressbar"]')!;
+    expect(spinner.getAttribute('aria-label')).toBe('Loading 지역별 매출…');
+    w.pending[0].resolve();
+    await settle();
+    expect(frame.querySelector('[role="progressbar"]')).toBeNull();
+    expect(tips(into)).toEqual(['서울 · sales: 12', '부산 · sales: 7', '제주 · sales: 3']);
   });
 });
