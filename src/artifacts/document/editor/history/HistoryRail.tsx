@@ -4,7 +4,10 @@
 // "Named only"; "Save version" with a name and a note. A click previews a version in the editor in place; a
 // shift-click compares it with the selected one. App chrome, so it reads the app's tokens (chrome.css). P4 W1-B: a
 // turn's line names its blocks and comments by the controller's `words`, the live document's, read once per list.
+// The word cut (G364 to G374): the ×'s tooltip "Close", a row's "Shift-click to compare", the waits quiet spinners (none
+// under a failed read), an empty list "No versions", the Save version form's placeholders "Name" and "Note (optional)".
 import { preserveSubmenuPointer } from '../../../ui/menu-pointer';
+import { QuietSpinner } from '../../../../renderer/src/ui/spinner';
 import { useMemo, useState, type FormEvent, type MouseEvent } from 'react';
 import { DropdownMenu } from 'radix-ui';
 import './version-export.css';
@@ -74,7 +77,7 @@ export function HistoryRail({ controller, snapshot, sessionTitle, saving, onSavi
     <aside className="doc-rail" aria-label="Version history">
       <header className="doc-rail-header">
         <h2 className="doc-rail-title">Version history</h2>
-        <button type="button" className="doc-tool" aria-label="Close version history" title="Close version history" onClick={onClose}>
+        <button type="button" className="doc-tool" aria-label="Close version history" title="Close" onClick={onClose}>
           ×
         </button>
       </header>
@@ -90,14 +93,19 @@ export function HistoryRail({ controller, snapshot, sessionTitle, saving, onSavi
       {saving && <SaveForm onSave={(version) => controller.save(version)} onDone={() => setSaving(false)} />}
       {(snapshot.error || snapshot.loading) && (
         <p className="doc-history-status" role="status" data-error={snapshot.error ? '' : undefined}>
-          {snapshot.error ?? 'Loading the version…'}
+          {snapshot.error ?? <QuietSpinner label="Loading the version…" />}
         </p>
       )}
       <div className="doc-rail-body">
         {snapshot.versions === null ? (
-          <p className="doc-rail-empty">Loading versions…</p>
+          // a list that failed to read waits for nothing: its error is the status line's
+          snapshot.error ? null : (
+            <p className="doc-rail-empty">
+              <QuietSpinner label="Loading versions…" />
+            </p>
+          )
         ) : groups.length === 0 ? (
-          <p className="doc-rail-empty">{namedOnly ? 'No named versions yet.' : 'No versions yet.'}</p>
+          <p className="doc-rail-empty">{namedOnly ? 'No named versions' : 'No versions'}</p>
         ) : (
           groups.map((group) => (
             <section key={group.key} className="doc-version-day" aria-label={group.label}>
@@ -121,7 +129,7 @@ function VersionRow({ version, selected, sessionTitle, onSelect }: { version: Ar
       className="doc-version"
       aria-pressed={selected}
       aria-label={`Version ${title} by ${author.name}${summary ? `: ${summary}` : ''}`}
-      title="Click to preview; Shift-click to compare with the selected version"
+      title="Shift-click to compare"
       data-kind={version.kind}
       onClick={(event) => onSelect(version, event)}
     >
@@ -179,8 +187,8 @@ function SaveForm({ onSave, onDone }: { onSave(version: { label: string; note?: 
   };
   return (
     <form className="doc-history-save" onSubmit={submit}>
-      <input aria-label="Version name" placeholder="Name, e.g. Draft to legal" maxLength={200} value={label} onChange={(event) => setLabel(event.target.value)} />
-      <textarea aria-label="What changed" placeholder="What changed (optional)" rows={2} value={note} onChange={(event) => setNote(event.target.value)} />
+      <input aria-label="Version name" placeholder="Name" maxLength={200} value={label} onChange={(event) => setLabel(event.target.value)} />
+      <textarea aria-label="What changed" placeholder="Note (optional)" rows={2} value={note} onChange={(event) => setNote(event.target.value)} />
       <div className="doc-history-save-actions">
         <button type="button" className="doc-tool" onClick={onDone}>
           Cancel

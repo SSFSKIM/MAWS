@@ -145,8 +145,8 @@ export const LIVE_COPY = {
     failed: 'The last refresh did not reach the dashboard.',
   }),
   hidden: 'Refresh is available while this dashboard is on screen.',
-  replaced: 'This query was replaced or removed after the source opened, so it cannot be refreshed from here.',
+  replaced: 'Query changed since opening', // the word cut (G622)
   showCurrent: 'Show current',
-  newer: (at: string) => `Newer rows were fetched at ${at}; the rows here are the ones captured when the source opened.`,
+  newer: 'Newer rows at', // the word cut (G621): then the fetch's UTC clock, its full time the clock's tooltip
   showLatest: 'Show latest',
 } as const;

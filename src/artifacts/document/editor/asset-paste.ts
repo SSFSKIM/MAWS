@@ -80,7 +80,7 @@ export const AssetPaste = Extension.create<AssetPasteOptions>({
         return failed(view, `Couldn’t paste the ${foreign.size === 1 ? 'image' : 'images'} from another document: ${reason(error)}`);
       }
       if (view.isDestroyed) return;
-      if (!view.editable) return failed(view, 'Couldn’t paste: the document stopped taking edits while the images were copied');
+      if (!view.editable) return failed(view, 'Couldn’t paste: the document is read-only' /* the word cut (G330) */);
       const content = mapImages(slice.content, (image) => {
         const source = sources.get(String(image.attrs.assetId));
         const copied = source === undefined ? undefined : copies.get(keyOf(source, String(image.attrs.src)));

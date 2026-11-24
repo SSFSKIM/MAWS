@@ -15,8 +15,12 @@
 // names. Each card's reply draft is the editor's (DocumentEditor holds one per thread, the margin draws the same), so a
 // filter hiding the card or the panel closing loses none. J and K move the focus between the cards.
 // WR 49: deleted-target conversations are hidden in every status filter until explicitly revealed.
+// The word cut (docs/doperpowers/specs/2026-11-16-word-cut-design.md, M5; G391 to G398): the ×'s tooltip is Close; This
+// tab / All tabs only where the document has two tabs or more; the search's placeholder Search; the deleted-text toggle
+// "Deleted (N)", what it holds its tooltip; the empty lists in few words.
 import { useEffect, useId, useRef, useState } from 'react';
 import { actorDisplay } from '@shared/artifacts/actor';
+import { Tip } from '../../../../renderer/src/ui/tip';
 import { ThreadCard } from '../../../comments/ThreadCard';
 import type { Doc } from '../../../yjs';
 import { nanoid8 } from '../../schema';
@@ -55,6 +59,8 @@ const SCOPE: [ScopeFilter, string][] = [
   ['all', 'All tabs'],
 ];
 
+const DELETED_TIP = 'Comments on deleted text';
+
 // A thread matches a search when any message's body, its quote, or the name of anyone who wrote in it holds the text.
 function matches(thread: ThreadState, needle: string): boolean {
   if (needle === '') return true;
@@ -73,8 +79,12 @@ export function CommentsPanel({ doc, tabs, activeTab, activeThread, author, read
   const name = useId();
 
   const needle = query.trim().toLowerCase();
+  // the word cut (G393): one tab has no scope to choose, so it is All tabs
+  const scoped = tabs.length > 1;
+  const inScope = scoped ? scope : 'all';
   // WR 49: a resolved thread can also have a missing target, so filter by liveness, not just `orphan`.
-  const shown = threads.filter((thread) => (showDeleted || thread.live) && (scope === 'all' || thread.tabId === activeTab) && matches(thread, needle));
+  const deleted = threads.filter((thread) => !thread.live).length;
+  const shown = threads.filter((thread) => (showDeleted || thread.live) && (inScope === 'all' || thread.tabId === activeTab) && matches(thread, needle));
   const open = status === 'resolved' ? [] : shown.filter((thread) => thread.status === 'open');
   const resolved = status === 'open' ? [] : shown.filter((thread) => thread.status === 'resolved');
   const listed = [...open, ...(status === 'all' && !showResolved ? [] : resolved)];
@@ -114,26 +124,28 @@ export function CommentsPanel({ doc, tabs, activeTab, activeThread, author, read
   };
   // nothing to list: under All, a search that only resolved threads match lists those without a note
   const empty = status === 'resolved' ? resolved.length === 0 : open.length === 0 && (needle === '' || resolved.length === 0);
-  const emptyText = needle !== '' ? 'No comments match the search.' : status === 'resolved' ? 'No resolved comments.' : 'No open comments. Select text and choose Comment.';
+  const emptyText = needle !== '' ? 'No matches' : status === 'resolved' ? 'No resolved comments' : 'No open comments. Select text and choose Add comment.';
 
   return (
     <aside className="doc-rail" aria-label="Comments">
       <header className="doc-rail-header">
         <h2 className="doc-rail-title">All comments</h2>
-        <button type="button" className="doc-tool" aria-label="Close comments" title="Close comments" onClick={onClose}>
+        <button type="button" className="doc-tool" aria-label="Close comments" title="Close" onClick={onClose}>
           ×
         </button>
       </header>
       <div className="doc-rail-filters">
         <Segments<StatusFilter> name={`${name}-status`} label="Status" options={STATUS} value={status} onChange={setStatus} />
-        <Segments<ScopeFilter> name={`${name}-scope`} label="Scope" options={SCOPE} value={scope} onChange={setScope} />
-        <input type="search" className="doc-rail-search" aria-label="Search comments" placeholder="Search comments" value={query} onChange={(event) => setQuery(event.target.value)} />
+        {scoped && <Segments<ScopeFilter> name={`${name}-scope`} label="Scope" options={SCOPE} value={scope} onChange={setScope} />}
+        <input type="search" className="doc-rail-search" aria-label="Search comments" placeholder="Search" value={query} onChange={(event) => setQuery(event.target.value)} />
       </div>
       <div ref={body} className="doc-rail-body">
-        {threads.some((thread) => !thread.live) && (
-          <button type="button" className="doc-rail-section" aria-pressed={showDeleted} onClick={() => setShowDeleted(!showDeleted)}>
-            {showDeleted ? 'Hide deleted-target comments' : 'Show deleted-target comments'}
-          </button>
+        {deleted > 0 && (
+          <Tip content={DELETED_TIP} description={DELETED_TIP}>
+            <button type="button" className="doc-rail-section" aria-pressed={showDeleted} onClick={() => setShowDeleted(!showDeleted)}>
+              {`Deleted (${deleted})`}
+            </button>
+          </Tip>
         )}
         {empty && <p className="doc-rail-empty">{emptyText}</p>}
         {open.map(card)}

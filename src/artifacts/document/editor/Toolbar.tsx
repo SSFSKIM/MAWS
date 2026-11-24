@@ -4,6 +4,9 @@
 // the comments rail (M4), version history (M5), and Find.
 // P3-F1: one row in any width, the tools scrolling in a strip and the comment, history and find controls after it, the
 // menus placed by the toolbar so the strip does not clip them (toolbar-strip.ts).
+// The word cut (docs/doperpowers/specs/2026-11-16-word-cut-design.md, M5; G331 to G337): comment, comments, history and
+// find are named glyphs (the shared NamedGlyph: the word its name and tooltip, with its chord), the table's commands one
+// Table menu, and a button whose word shows (Insert, Table) draws no tooltip repeating it.
 // An inserted atom (math, a diagram, a chip, a pending section) is selected with its field focused, so the person types
 // its content next, wherever the keyboard was as the Insert menu was used (P3-F).
 import type { Editor, JSONContent } from '@tiptap/core';
@@ -11,6 +14,9 @@ import { NodeSelection, Selection } from '@tiptap/pm/state';
 import { useEditorState } from '@tiptap/react';
 import { useEffect, useRef, useState, type ComponentType, type ChangeEvent, type FormEvent, type MouseEvent, type ReactNode, type Ref } from 'react';
 import { actorKey } from '@shared/artifacts/actor';
+import { formatChord } from '@shared/keymap/chord';
+import { NamedGlyph } from '../../../renderer/src/ui/glyph';
+import { CommentPlusIcon, CommentsIcon, HistoryIcon, SearchIcon } from '../../ui/icons';
 import { nanoid8 } from '../schema';
 import type { EditorHost } from './host-types';
 import { MentionPicker, type MentionSource } from './MentionPicker';
@@ -27,6 +33,10 @@ const BLOCK_STYLES = [
 const LANGUAGES = ['', 'bash', 'css', 'go', 'html', 'java', 'javascript', 'json', 'markdown', 'python', 'rust', 'sql', 'typescript', 'yaml'];
 const STATUSES = ['Not started', 'In progress', 'Done'];
 const DIAGRAM = 'graph TD\n  A[Start] --> B[Finish]';
+// the glyphs' chords, as the editor binds them (comments/plugins.ts's Mod-Alt-M; DocumentEditor's find and history keys)
+const CHORDS = { comment: formatChord('Cmd+Alt+M'), history: formatChord('Cmd+Alt+Shift+H'), find: formatChord('Cmd+F') };
+// why Add comment is greyed (the shared NamedGlyph keeps a greyed glyph focusable, its reason the tooltip)
+const COMMENT_UNAVAILABLE = { readOnly: 'Read-only', noSelection: 'Select text to comment on' };
 
 const today = (): string => {
   const now = new Date();
@@ -139,7 +149,7 @@ export function Toolbar({ editor, artifactId, host, onFind, comments, history, m
       table: e.isActive('table'),
     }),
   });
-  const [menu, setMenu] = useState<'insert' | 'link' | 'mention' | 'comments-view' /* P4-B1 */ | null>(null);
+  const [menu, setMenu] = useState<'insert' | 'table' /* the word cut, G331 */ | 'link' | 'mention' | 'comments-view' /* P4-B1 */ | null>(null);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const imageFile = useRef<HTMLInputElement>(null);
   // P3-F1: one row, its tools in a scrolling strip and the comment, history and find controls after it (toolbar-strip.ts)
@@ -147,7 +157,8 @@ export function Toolbar({ editor, artifactId, host, onFind, comments, history, m
   const strip = useRef<HTMLDivElement>(null);
   const linkAnchor = useRef<HTMLSpanElement>(null);
   const insertAnchor = useRef<HTMLSpanElement>(null);
-  useToolbarStrip({ bar, strip, anchor: menu === 'link' ? linkAnchor : menu === null ? null : insertAnchor, menu, tools: `${state.table}:${state.codeBlock}:${uploadError !== null}` });
+  const tableAnchor = useRef<HTMLSpanElement>(null);
+  useToolbarStrip({ bar, strip, anchor: menu === 'link' ? linkAnchor : menu === 'table' ? tableAnchor : menu === null ? null : insertAnchor, menu, tools: `${state.table}:${state.codeBlock}:${uploadError !== null}` });
   // an upload's error is scrolled to in the strip as it appears
   const uploadErrorRow = useRef<HTMLSpanElement>(null);
   useEffect(() => {
@@ -171,10 +182,15 @@ export function Toolbar({ editor, artifactId, host, onFind, comments, history, m
   const insertButton = useRef<HTMLButtonElement>(null);
   const viewAnchor = useRef<HTMLSpanElement>(null); // P4-B1: the comments' view menu, closed as Insert's is
   const viewButton = useRef<HTMLButtonElement>(null);
+  const tableButton = useRef<HTMLButtonElement>(null); // the word cut (G331): the Table menu, closed as Insert's is
+  // the Table menu goes when the caret leaves the table
   useEffect(() => {
-    if (menu !== 'insert' && menu !== 'comments-view') return;
-    const anchor = menu === 'insert' ? insertAnchor : viewAnchor; // P4-B1
-    const button = menu === 'insert' ? insertButton : viewButton;
+    if (!state.table) setMenu((open) => (open === 'table' ? null : open));
+  }, [state.table]);
+  useEffect(() => {
+    if (menu !== 'insert' && menu !== 'comments-view' && menu !== 'table') return;
+    const anchor = menu === 'insert' ? insertAnchor : menu === 'table' ? tableAnchor : viewAnchor; // P4-B1
+    const button = menu === 'insert' ? insertButton : menu === 'table' ? tableButton : viewButton;
     const within = (element: Element | null, target: EventTarget | null) => target instanceof Node && Boolean(element?.contains(target));
     const onPointerDown = (event: PointerEvent) => {
       if (!within(anchor.current, event.target)) setMenu(null);
@@ -328,7 +344,7 @@ export function Toolbar({ editor, artifactId, host, onFind, comments, history, m
         )}
         <span className="doc-toolbar-separator" />
         <span ref={insertAnchor} className="doc-menu-anchor">
-          <Tool ref={insertButton} label="Insert" disabled={disabled} expanded={menu === 'insert'} onClick={() => setMenu(menu === 'insert' ? null : 'insert')}>
+          <Tool ref={insertButton} label="Insert" worded disabled={disabled} expanded={menu === 'insert'} onClick={() => setMenu(menu === 'insert' ? null : 'insert')}>
             Insert ▾
           </Tool>
           {menu === 'insert' && (
@@ -376,23 +392,43 @@ export function Toolbar({ editor, artifactId, host, onFind, comments, history, m
         {state.table && (
           <>
             <span className="doc-toolbar-separator" />
-            {tableControls.map(([label, command]) => (
-              <Tool key={label} label={label} disabled={disabled} onClick={command}>
-                {label}
+            {/* the word cut (G331): the table's eight commands in one menu */}
+            <span ref={tableAnchor} className="doc-menu-anchor">
+              <Tool ref={tableButton} label="Table" worded disabled={disabled} expanded={menu === 'table'} onClick={() => setMenu(menu === 'table' ? null : 'table')}>
+                Table ▾
               </Tool>
-            ))}
+              {menu === 'table' && (
+                <div role="menu" className="doc-menu" aria-label="Table">
+                  {tableControls.map(([label, command]) => (
+                    <button
+                      key={label}
+                      type="button"
+                      role="menuitem"
+                      onMouseDown={keepSelection}
+                      onClick={() => {
+                        setMenu(null);
+                        command();
+                      }}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </span>
           </>
         )}
       </div>
       <div className="doc-toolbar-end">
         {comments.comment && (
-          <Tool label="Add comment" disabled={disabled || !state.selected} onClick={comments.comment}>
-            Add comment
-          </Tool>
+          <Glyph label="Add comment" shortcut={CHORDS.comment} unavailable={disabled ? COMMENT_UNAVAILABLE.readOnly : state.selected ? null : COMMENT_UNAVAILABLE.noSelection} onClick={comments.comment} data-doc-glyph="comment">
+            <CommentPlusIcon />
+          </Glyph>
         )}
-        <Tool label={`Comments (${comments.openCount} open)`} active={comments.railOpen} onClick={comments.toggleRail}>
-          Comments{comments.openCount > 0 ? ` ${comments.openCount}` : ''}
-        </Tool>
+        <Glyph label={`Comments (${comments.openCount} open)`} active={comments.railOpen} onClick={comments.toggleRail} data-doc-glyph="comments">
+          <CommentsIcon />
+          {comments.openCount > 0 && <span className="doc-tool-count">{comments.openCount}</span>}
+        </Glyph>
         {comments.view && (
           /* P4-B1: View › Comments beside the toolbar's Comments: Expand (cards in the margin), Minimize (icons), Hide */
           <span ref={viewAnchor} className="doc-menu-anchor">
@@ -421,13 +457,13 @@ export function Toolbar({ editor, artifactId, host, onFind, comments, history, m
           </span>
         )}
         {history && (
-          <Tool label="Version history" active={history.open} onClick={history.toggle}>
-            History
-          </Tool>
+          <Glyph label="Version history" shortcut={CHORDS.history} active={history.open} onClick={history.toggle} data-doc-glyph="history">
+            <HistoryIcon />
+          </Glyph>
         )}
-        <Tool label="Find" onClick={onFind}>
-          Find
-        </Tool>
+        <Glyph label="Find" shortcut={CHORDS.find} onClick={onFind} data-doc-glyph="find">
+          <SearchIcon />
+        </Glyph>
       </div>
     </div>
   );
@@ -436,14 +472,15 @@ export function Toolbar({ editor, artifactId, host, onFind, comments, history, m
 // A toolbar button keeps the editor's selection: the mousedown that would move focus off the page is cancelled.
 const keepSelection = (event: MouseEvent) => event.preventDefault();
 
-function Tool({ label, active, disabled, expanded, onClick, children, ref }: { label: string; active?: boolean; disabled?: boolean; expanded?: boolean; onClick(): unknown; children: ReactNode; ref?: Ref<HTMLButtonElement> }) {
+// `worded`: the button shows its word, so no tooltip repeats it (the word cut, G337); a glyph's word is its tooltip.
+function Tool({ label, worded = false, active, disabled, expanded, onClick, children, ref }: { label: string; worded?: boolean; active?: boolean; disabled?: boolean; expanded?: boolean; onClick(): unknown; children: ReactNode; ref?: Ref<HTMLButtonElement> }) {
   return (
     <button
       ref={ref}
       type="button"
       className="doc-tool"
       aria-label={label}
-      title={label}
+      title={worded ? undefined : label}
       aria-pressed={active}
       aria-expanded={expanded}
       data-active={active ? '' : undefined}
@@ -453,6 +490,16 @@ function Tool({ label, active, disabled, expanded, onClick, children, ref }: { l
     >
       {children}
     </button>
+  );
+}
+
+// A toolbar control whose word became a glyph (the word cut, G332 to G336): the shared NamedGlyph in the toolbar's
+// look, keeping the editor's selection as every tool does; `active` is its pressed state, as a tool's.
+function Glyph({ label, shortcut, unavailable, active, onClick, children, ...data }: { label: string; shortcut?: string; unavailable?: string | null; active?: boolean; onClick(): unknown; children: ReactNode; 'data-doc-glyph': string }) {
+  return (
+    <NamedGlyph label={label} shortcut={shortcut} unavailable={unavailable} pressed={active} data-active={active ? '' : undefined} className="doc-tool doc-tool-glyph" onMouseDown={keepSelection} onClick={() => void onClick()} {...data}>
+      {children}
+    </NamedGlyph>
   );
 }
 

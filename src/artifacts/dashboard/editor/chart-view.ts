@@ -6,7 +6,11 @@
 // through the tab's shared reader, drops any paint a later change has made stale, keeps the earlier figure dimmed while
 // a replacement's rows are read, and releases everything (its subscriptions, its pending paint, its hover) through the
 // disposer it answers. Under the figure: the source label (a button opening the source sheet on the descriptor as it
-// was drawn) and the notes (validation mismatches, what the view could not show). The caption above is the spec's title.
+// was drawn) and the notes (what the view could not show). The caption above is the spec's title. The word cut
+// (docs/doperpowers/specs/2026-11-16-word-cut-design.md, M5; G597, G598, G604): the spec's own warnings are not on the
+// tile (the host's answers to the agent carry them); a column's wrong-type values are a ⚠ mark after the label, the note
+// its name and what it shows pointed at or focused (the source sheet says them as before); the first load is a quiet
+// spinner named by its wait.
 // Portable: DOM only, no window.maws; the renderer's tab supplies the reader and the source sheet.
 import type { TiptapEditorHTMLElement } from '@tiptap/core';
 import type { Node as PMNode } from '@tiptap/pm/model';
@@ -176,14 +180,27 @@ export function createChartRenderer(deps: ChartRendererDeps): NonNullable<ViewEn
       button.addEventListener('click', () => deps.openSource(captured));
       source.append(button);
     };
+    // the spec's own warnings (an unknown key, an invalid value): the agent's to read in the host's answers, not the tile's
+    const specWarnings = new Set(parsed.ok ? parsed.warnings : []);
     const show = (rendered: Rendered, descriptor: DatasetDescriptor | null) => {
       frame.innerHTML = rendered.svg ?? rendered.html; // the renderer's escaped, script-free SVG or table (its grade), never a string of the page's
       frame.append(tip);
       tip.hidden = true;
       label(descriptor);
+      // a column's wrong-type values: a mark that takes the keyboard, the notes its name and what it shows (sheet.css)
+      const mismatches = descriptor ? mismatchNotes(descriptor) : [];
+      if (mismatches.length > 0) {
+        const mark = element('span', 'dash-warning');
+        mark.textContent = '⚠';
+        mark.setAttribute('role', 'img');
+        mark.tabIndex = 0;
+        mark.setAttribute('aria-label', mismatches.join(' · '));
+        mark.dataset.note = mismatches.join(' · ');
+        source.append(mark);
+      }
       // what the view could not show as asked; a view that cannot be drawn says so in its own frame already
       const drawnInPlace = rendered.svg?.includes('<desc>This view cannot be drawn: ') ?? false;
-      const notes = [...(descriptor ? mismatchNotes(descriptor) : []), ...(drawnInPlace ? [] : rendered.warnings)];
+      const notes = drawnInPlace ? [] : rendered.warnings.filter((warning) => !specWarnings.has(warning));
       if (notes.length > 0) {
         const list = element('div', 'dash-notes');
         list.textContent = [...new Set(notes)].join(' · ');
@@ -205,7 +222,11 @@ export function createChartRenderer(deps: ChartRendererDeps): NonNullable<ViewEn
       shown = { descriptor };
       if (frame.querySelector('svg, table')) view.setAttribute('aria-busy', 'true'); // the earlier view stays, dimmed
       else if (descriptor) {
-        frame.textContent = `Loading ${descriptor.title}…`;
+        // the word cut (G604): the quiet spinner, its half second's quiet the stylesheet's (sheet.css)
+        const spinner = element('span', 'dash-loading-ring');
+        spinner.setAttribute('role', 'progressbar');
+        spinner.setAttribute('aria-label', `Loading ${descriptor.title}…`);
+        frame.replaceChildren(spinner);
         frame.classList.add('dash-loading');
       }
       let rendered: Rendered;

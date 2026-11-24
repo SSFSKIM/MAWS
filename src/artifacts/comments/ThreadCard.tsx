@@ -10,8 +10,16 @@
 // activates it as a click does first), E resolves or reopens, J and K the next and previous thread, U and Escape back
 // to the text (the prior art's K3); Escape in the reply field exits too and keeps a written draft (X36's draft rule).
 // Each key acts only when the host gave its handler. App chrome: comments.css, app tokens only.
+// The word cut (docs/doperpowers/specs/2026-11-16-word-cut-design.md, M5; G384, G385, G388): Resolve or Reopen shows over
+// the card's top right on the card pointed at, holding the keyboard or active (the shared hover scope); the reply field
+// is the active card's only, the panel's cards included, and its send a glyph named Reply; a card whose passage is gone
+// strikes its quote where it draws one, or carries a Removed tag, the sentence each one's tooltip.
 import { useEffect, useRef, type KeyboardEvent, type MouseEvent, type Ref } from 'react';
 import { actorDisplay } from '@shared/artifacts/actor';
+import { NamedGlyph } from '../../renderer/src/ui/glyph';
+import { HOVER_SCOPE, ON_HOVER } from '../../renderer/src/ui/hover-scope';
+import { Tip } from '../../renderer/src/ui/tip';
+import { SendIcon } from '../ui/icons';
 import type { ThreadState } from '../document/threads';
 import './comments.css';
 
@@ -49,6 +57,9 @@ export interface ThreadCardProps {
   readOnly?: boolean;
 }
 
+const REMOVED = 'The commented passage was removed.';
+const REPLY_UNAVAILABLE = 'Write a reply first';
+
 /** The latest replies a compacted card keeps after the first message. */
 const COMPACT_LATEST = 2;
 const NAME_WORDS = 8;
@@ -82,7 +93,7 @@ export function ThreadCard({ thread, active, compact, onActivate, onReply, onRes
 
   const open = thread.status === 'open';
   const whole = active || !compact;
-  const replying = whole && open && !readOnly;
+  const replying = active && open && !readOnly; // the word cut (G385): the active card's only
   const { messages } = thread;
   const hidden = whole ? 0 : Math.max(0, messages.length - 1 - COMPACT_LATEST);
   const head = hidden > 0 ? messages.slice(0, 1) : messages;
@@ -126,6 +137,7 @@ export function ThreadCard({ thread, active, compact, onActivate, onReply, onRes
 
   return (
     <article
+      {...HOVER_SCOPE}
       className="thread-card"
       role="group"
       aria-label={accessibleName(thread, position)}
@@ -141,13 +153,28 @@ export function ThreadCard({ thread, active, compact, onActivate, onReply, onRes
       }}
     >
       {showQuote && (
-        // the class names after the card's own are the panel's long-standing hooks (the e2e cases read them)
-        <button type="button" className="thread-card-quote doc-thread-quote" aria-label={`Show passage: ${thread.quote}`} onClick={activateByClick}>
-          {tabTitle !== null && <span className="thread-card-tab doc-thread-tab">{tabTitle}</span>}
-          <span className="thread-card-quote-text doc-thread-quote-text">{thread.quote}</span>
-        </button>
+        // the class names after the card's own are the panel's long-standing hooks (the e2e cases read them); an
+        // orphan's quote is struck, the sentence its tooltip (the word cut, G388)
+        <Tip content={thread.orphan ? REMOVED : null} description={thread.orphan ? REMOVED : null}>
+          <button type="button" className="thread-card-quote doc-thread-quote" aria-label={`Show passage: ${thread.quote}`} onClick={activateByClick}>
+            {tabTitle !== null && <span className="thread-card-tab doc-thread-tab">{tabTitle}</span>}
+            {thread.orphan ? (
+              <s className="thread-card-quote-text doc-thread-quote-text" data-removed="">
+                {thread.quote}
+              </s>
+            ) : (
+              <span className="thread-card-quote-text doc-thread-quote-text">{thread.quote}</span>
+            )}
+          </button>
+        </Tip>
       )}
-      {thread.orphan && <p className="thread-card-note">The commented passage was removed.</p>}
+      {thread.orphan && !showQuote && (
+        <Tip content={REMOVED} description={REMOVED}>
+          <span className="thread-card-removed" tabIndex={0}>
+            Removed
+          </span>
+        </Tip>
+      )}
       {head.length > 0 && <Messages messages={head} />}
       {hidden > 0 && (
         <>
@@ -156,7 +183,8 @@ export function ThreadCard({ thread, active, compact, onActivate, onReply, onRes
         </>
       )}
       {replying && <ReplyField ref={replyField} draft={draft} onDraftChange={onDraftChange} onReply={onReply} onExit={onExit} />}
-      <div className="thread-card-actions">
+      {/* the word cut (G384): over the card's top right, drawn on the card pointed at, focused or active */}
+      <div className="thread-card-actions" {...(active ? {} : ON_HOVER)}>
         {open ? (
           <button type="button" className="thread-card-button" disabled={readOnly} onClick={onResolve}>
             Resolve
@@ -218,9 +246,9 @@ function ReplyField({ ref, draft, onDraftChange, onReply, onExit }: { ref: Ref<H
       }}
     >
       <textarea ref={ref} className="thread-card-reply-field" aria-label="Reply" placeholder="Reply…" rows={1} value={draft} onChange={(event) => onDraftChange(event.target.value)} onKeyDown={onKeyDown} />
-      <button type="submit" className="thread-card-button" disabled={body === ''}>
-        Reply
-      </button>
+      <NamedGlyph type="submit" label="Reply" unavailable={body === '' ? REPLY_UNAVAILABLE : null} className="thread-card-button thread-card-send">
+        <SendIcon />
+      </NamedGlyph>
     </form>
   );
 }

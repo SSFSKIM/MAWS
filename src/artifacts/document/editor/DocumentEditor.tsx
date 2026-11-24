@@ -16,7 +16,7 @@
 // History (M5, D10): with a `history` api, the History action (and Mod-Alt-Shift-H) opens the version history rail in
 // the same place; a version shown from it replaces the page's content in place, read-only (the editor's `editable`
 // follows the preview, Decision Log 22), with the preview's bar in place of the toolbar and the version's pinned
-// tokens on the page. "See N new changes", the "Restored from …" banner and Show editors (a right-click over a
+// tokens on the page. "N new changes", the "Restored from …" banner and Show editors (a right-click over a
 // selection) come with it. M9 (the scale gate): the version is drawn by an editor of its own, read-only, bound to the
 // version's doc from its creation, while the live editor stays bound to the tab, hidden: entering and leaving history
 // never re-binds (and re-renders) the live tab, and leaving keeps its undo. Awareness (D11): the other replicas' cursors and an agent's editing blocks.
@@ -78,6 +78,7 @@ import { useReadOnly } from './read-only';
 import { useRailLayout } from './rail-layout'; // P3-F1
 import type { ProvisionalLayers } from '../../provisional'; // P4-A2 (X35)
 import { useProvisionalLayers } from './provisional'; // P4-A2 (X35)
+import { QuietSpinner } from '../../../renderer/src/ui/spinner'; // the word cut: the editors draw the shared parts
 import './chrome.css';
 import './theme.css';
 
@@ -414,8 +415,8 @@ export function DocumentEditor(props: DocumentEditorProps) {
               previewRevision={shownVersion} /* P3-E */
             />
           ) : (
-            <div className="doc-editor-loading" role="status">
-              Loading…
+            <div className="doc-editor-loading">
+              <QuietSpinner label="Loading…" /> {/* the word cut (G345) */}
             </div>
           )}
         </div>
@@ -919,7 +920,7 @@ function PageFrame({ editor, live, previewEditor, handle, author, comments, tabI
       {pill && (
         <div className="doc-pill" data-markup-occluder>
           <button type="button" className="doc-pill-open" onClick={onNewChanges}>
-            {pill.count === null ? 'See new changes' : `See ${pill.count} new ${pill.count === 1 ? 'change' : 'changes'}`}
+            {pill.count === null ? 'New changes' : `${pill.count} new ${pill.count === 1 ? 'change' : 'changes'}` /* the word cut (G347) */}
           </button>
           {pill.failed !== null && (
             <button type="button" className="doc-pill-retry" aria-label="Count the new changes again" title={`Counting failed: ${pill.failed}`} onClick={() => void history?.recount()}>

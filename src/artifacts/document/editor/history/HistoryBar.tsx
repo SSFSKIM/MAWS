@@ -4,9 +4,14 @@
 // changes (on by default), "N changes" of the whole comparison with ↑ ↓ stepping through every tab's changes in order
 // (a tab's own rename or deletion first, then its body's), Restore this version (confirmed first), Make a copy, Name this
 // version (M8: its label alone, A's `artifacts.nameVersion`), and Back to document. The count is the controller's whole-document list, the one the pill counts.
+// The word cut (G377, G379, G337): the bar ends with Restore (named Restore this version), the version's other actions in
+// one menu, and a × named Back to document; a deleted tab is said by its label alone; a button whose word shows draws no
+// tooltip repeating it.
 import type { Editor } from '@tiptap/core';
 import { useEditorState } from '@tiptap/react';
+import { DropdownMenu } from 'radix-ui';
 import { useState, type FormEvent, type ReactNode } from 'react';
+import { NamedGlyph } from '../../../../renderer/src/ui/glyph';
 import { unboundExtras /* P3-E */, type DiffTab, type ExtraChange /* P3-E */, type TabChanges } from '../../history';
 import type { HistoryController, Preview } from './controller';
 import { changesOf, goToChange } from './paint';
@@ -87,7 +92,6 @@ export function HistoryBar({ editor, preview, controller, onBack }: { editor: Ed
             ))}
           </select>
         )}
-        {shownTab?.change === 'removed' && <span className="doc-history-tab-note">This tab was deleted.</span>}
         {preview.showChanges && extraReached && (
           // P3-E: the unbound change ↑ ↓ reached, named
           <span className="doc-history-tab" data-current="" data-extra={extraReached.key}>
@@ -115,33 +119,45 @@ export function HistoryBar({ editor, preview, controller, onBack }: { editor: Ed
         <span className="doc-toolbar-spacer" />
         {preview.versionId !== null && (
           <>
-            <Button label="Restore this version" onClick={() => setConfirming(true)}>
-              Restore this version
+            <Button label="Restore this version" worded onClick={() => setConfirming(true)}>
+              Restore
             </Button>
-            <Button label="Make a copy" onClick={() => void controller.duplicate()}>
-              Make a copy
-            </Button>
-            {controller.canName && (
-              <Button label="Name this version" onClick={() => setNaming(true)}>
-                Name this version
-              </Button>
-            )}
+            <DropdownMenu.Root modal={false}>
+              <DropdownMenu.Trigger asChild>
+                <NamedGlyph label="Actions for this version" className="doc-tool doc-tool-glyph" data-history-actions="">
+                  <span aria-hidden="true">…</span>
+                </NamedGlyph>
+              </DropdownMenu.Trigger>
+              <DropdownMenu.Portal>
+                <DropdownMenu.Content className="doc-tab-menu" align="end" sideOffset={4} aria-label="Actions for this version">
+                  <DropdownMenu.Item className="doc-tab-menu-item" onSelect={() => void controller.duplicate()}>
+                    Make a copy
+                  </DropdownMenu.Item>
+                  {controller.canName && (
+                    <DropdownMenu.Item className="doc-tab-menu-item" onSelect={() => setNaming(true)}>
+                      Name this version
+                    </DropdownMenu.Item>
+                  )}
+                </DropdownMenu.Content>
+              </DropdownMenu.Portal>
+            </DropdownMenu.Root>
           </>
         )}
-        <Button label="Back to document" onClick={onBack}>
-          Back to document
-        </Button>
+        <NamedGlyph label="Back to document" className="doc-tool doc-tool-glyph" onMouseDown={(event) => event.preventDefault()} onClick={onBack} data-history-back="">
+          ×
+        </NamedGlyph>
       </div>
       {naming && <NameForm onName={(label) => controller.name(label)} onDone={() => setNaming(false)} />}
       {confirming && (
         <div className="doc-history-confirm" role="alertdialog" aria-label="Restore this version?">
           <p>Restore this version? The document goes back to it as a new version; everything since stays in history, and comment conversations are kept.</p>
           <div className="doc-history-save-actions">
-            <Button label="Cancel" onClick={() => setConfirming(false)}>
+            <Button label="Cancel" worded onClick={() => setConfirming(false)}>
               Cancel
             </Button>
             <Button
               label="Restore"
+              worded
               onClick={() => {
                 setConfirming(false);
                 void controller.restore();
@@ -166,9 +182,10 @@ function tabLabel(tab: DiffTab, showChanges: boolean): string {
   return title;
 }
 
-function Button({ label, disabled, onClick, children }: { label: string; disabled?: boolean; onClick(): void; children: ReactNode }) {
+// `worded`: the button shows its word, so no tooltip repeats it (the word cut, G337); a glyph's word is its tooltip.
+function Button({ label, worded = false, disabled, onClick, children }: { label: string; worded?: boolean; disabled?: boolean; onClick(): void; children: ReactNode }) {
   return (
-    <button type="button" className="doc-tool" aria-label={label} title={label} disabled={disabled} onMouseDown={(event) => event.preventDefault()} onClick={onClick}>
+    <button type="button" className="doc-tool" aria-label={label} title={worded ? undefined : label} disabled={disabled} onMouseDown={(event) => event.preventDefault()} onClick={onClick}>
       {children}
     </button>
   );
@@ -185,9 +202,9 @@ function NameForm({ onName, onDone }: { onName(label: string): Promise<boolean>;
   };
   return (
     <form className="doc-history-save" aria-label="Name this version" onSubmit={submit}>
-      <input aria-label="Version name" placeholder="Name, e.g. Draft to legal" maxLength={200} value={label} onChange={(event) => setLabel(event.target.value)} />
+      <input aria-label="Version name" placeholder="Name" maxLength={200} value={label} onChange={(event) => setLabel(event.target.value)} />
       <div className="doc-history-save-actions">
-        <Button label="Cancel" onClick={onDone}>
+        <Button label="Cancel" worded onClick={onDone}>
           Cancel
         </Button>
         <button type="submit" className="doc-tool" disabled={label.trim() === ''}>

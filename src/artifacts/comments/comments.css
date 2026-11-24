@@ -1,6 +1,7 @@
 /* X36, the shared comment card (ThreadCard.tsx; P4-B1): app chrome wherever it is drawn (a document's margin and panel,
    a deck's or a design's pin popover), so it reads the app's tokens only. */
 .thread-card {
+  position: relative;
   display: flex;
   flex-direction: column;
   gap: var(--space);
@@ -45,7 +46,6 @@
   overflow: hidden;
 }
 .thread-card-tab,
-.thread-card-note,
 .thread-card-more {
   margin: 0;
   font-size: var(--text-ui-sm);
@@ -98,9 +98,33 @@
   border-radius: var(--radius-sm);
   padding: var(--space) calc(var(--space) * 2);
 }
+/* the word cut (G384): Resolve or Reopen over the card's top right, taking no height; the hover scope's rule
+   (styles/app.css) draws it on the card pointed at or focused, the card draws it while active */
 .thread-card-actions {
+  position: absolute;
+  top: var(--space);
+  right: var(--space);
   display: flex;
-  justify-content: flex-end;
+  border-radius: var(--radius-sm);
+  background: inherit;
+}
+/* the word cut (G388): a card whose passage is gone, where it draws no quote (a deck's or a design's pin popover) */
+.thread-card-removed {
+  align-self: flex-start;
+  padding: 0 var(--space);
+  font-size: var(--text-ui-sm);
+  color: var(--fg-muted);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+.thread-card-removed:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+.thread-card-send {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 }
 .thread-card-button {
   font: inherit;
@@ -112,10 +136,11 @@
   border: 0;
   border-radius: var(--radius-sm);
 }
-.thread-card-button:hover:not(:disabled) {
+.thread-card-button:hover:not(:disabled):not([aria-disabled='true']) {
   background: var(--bg-hover);
 }
-.thread-card-button:disabled {
+.thread-card-button:disabled,
+.thread-card-button[aria-disabled='true'] {
   color: var(--fg-faint);
 }
 

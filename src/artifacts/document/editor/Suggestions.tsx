@@ -255,7 +255,7 @@ function Review({ view, artifactId, tabId, host, editorHost, pageScope: Scope, r
       <button type="button" className="doc-tool" aria-label={`Reject suggestion ${index + 1}`} disabled={busy || !block?.ranges.length || readOnly} onClick={() => void settle('rejectSuggestion')}>Reject</button>
     </div>
     {error && <div className="doc-banner" role="alert">{error}</div>}
-    {block && block.ranges.length === 0 && <div className="doc-banner" role="status">This change cannot be resolved to a review range.</div>}
+    {block && block.ranges.length === 0 && <div className="doc-banner" role="status">This change can’t be accepted or rejected here.</div>}
     <div className="doc-page-frame"><div className="doc-page-scope">{Scope ? <Scope>{sheet}</Scope> : sheet}</div></div>
   </section>;
 }

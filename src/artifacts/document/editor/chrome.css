@@ -172,7 +172,7 @@
   border: 0;
   border-radius: var(--radius-sm);
 }
-.doc-tool:hover:not(:disabled),
+.doc-tool:hover:not(:disabled):not([aria-disabled='true']),
 .doc-icon-button:hover:not(:disabled) {
   background: var(--bg-hover);
 }
@@ -181,8 +181,23 @@
   color: var(--accent);
 }
 .doc-tool:disabled,
+.doc-tool[aria-disabled='true'],
 .doc-icon-button:disabled {
   color: var(--fg-faint);
+}
+/* the word cut (G332 to G336): a toolbar control whose word became a glyph (the shared NamedGlyph), a count beside the
+   comments' glyph; a greyed one stays focusable (aria-disabled) */
+.doc-tool-glyph {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space);
+}
+.doc-tool[aria-disabled='true'] {
+  cursor: default;
+}
+.doc-tool-count {
+  font-variant-numeric: tabular-nums;
 }
 .doc-toolbar-select {
   font: inherit;
@@ -623,6 +638,10 @@
   border: 0;
   padding: var(--space) 0;
 }
+/* the word cut (G395): the toggle for comments on deleted text, drawn darker while on */
+.doc-rail-section[aria-pressed='true'] {
+  color: var(--fg);
+}
 /* P4-B1: a thread in the panel is X36's card, styled by src/artifacts/comments/comments.css; the panel's filters: */
 .doc-rail-filters {
   display: flex;
@@ -719,7 +738,7 @@
   white-space: pre-wrap;
 }
 .ds-doc .doc-provisional-block::before {
-  content: attr(data-provisional-by) " is writing…";
+  content: attr(data-provisional-by);
   display: block;
   width: fit-content;
   margin-bottom: var(--space);
@@ -1008,11 +1027,6 @@
 .doc-history-bar select[data-current] {
   outline: 2px solid var(--accent);
   outline-offset: 1px;
-}
-.doc-history-tab-note {
-  padding: 0 var(--space);
-  color: var(--danger);
-  white-space: nowrap;
 }
 .doc-context-menu,
 .doc-editors {
