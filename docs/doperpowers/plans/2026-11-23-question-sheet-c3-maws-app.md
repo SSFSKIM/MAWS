@@ -376,12 +376,25 @@ M2 makes the summaries, the models and the connection; M4 adds the memory (§G).
       openFile?: (abs: string, line: number | null) => void;   // a reference's file as it is now; absent: no such control
     }
 
-    // R/sheet/memory.ts
-    export interface SentAct { key: string; kind: 'answer' | 'dismiss' | 'retract'; id: string | null; draft: QuestionDraft | null; sentAt: number;
-                               state: 'sending' | SheetSentState | 'failed'; note: string | null }
-    export interface SheetMemory { drafts: ReadonlyMap<string, QuestionDraft>; seen: ReadonlyMap<string, number>; marked: ReadonlySet<string>;
-                                   acts: readonly SentAct[]; sending: { lines: readonly SheetLine[]; state: 'sending' | 'failed'; note: string | null } | null;
-                                   headers: ReadonlyMap<string, string> }   // a question's header as last drawn, for the hidden line (as built, M3; exact shapes in R/sheet/memory.ts)
+    // R/sheet/memory.ts (as built, M3's second fix round)
+    export interface SentAct {
+      key: string;
+      kind: 'answer' | 'dismiss' | 'retract';
+      id: string | null;                       // the question: an answer's or a dismissal's own, a retract's target's
+      draft: QuestionDraft | null;             // an answer's draft as it was sent: restored when the answer is refused as stale, or its Send released
+      sentAt: number;
+      state: 'sending' | SheetSentState | 'failed'; // 'sending' until the model knows the key (S15)
+      note: string | null;                     // what the sheet's head says of it: an act that came second, a retract too late, a Send the door released
+    }
+    export interface SheetMemory {
+      drafts: ReadonlyMap<string, QuestionDraft>;
+      seen: ReadonlyMap<string, number>;
+      marked: ReadonlySet<string>;
+      headers: ReadonlyMap<string, string>;    // the header of each question drawn, while it is listed (with a header) or hidden: the hidden line's
+      acts: readonly SentAct[];
+      // the lines of one Send, held from the press until the door answers; `attempt` names the call that carries them now
+      sending: { attempt: string; lines: readonly SheetLine[]; state: 'sending' | 'failed'; note: string | null } | null;
+    }
     export const EMPTY_MEMORY: SheetMemory
     export function reconcile(memory: SheetMemory, model: SheetModel): SheetMemory
 
@@ -393,13 +406,13 @@ M2 makes the summaries, the models and the connection; M4 adds the memory (§G).
       question: SheetQuestion;
       draft: QuestionDraft | undefined;
       mark: 'none' | 'updated' | 'stale';
-      busy: boolean;                                           // an act of this surface is held (`memory.sending`): every card waits while one is, since no other act starts
+      busy: boolean;                           // a Send of this surface is held (`memory.sending`), or an act on this question is still sending
       host: SheetHost;
-      density?: 'full' | 'compact';                            // compact: folded to its row line until chosen
+      density?: 'full' | 'compact';            // compact: folded to its row line until chosen
       onDraft(next: QuestionDraft | null): void;
       onDismiss(): void;
-      onRetract(key: string): void;                            // take back the queued answer that stands on the question
-      onAttach(image: …): void;                                // required: a pasted image is merged by the sheet into the draft as it is now (M3's fix wave)
+      onRetract(key: string): void;            // take back the queued answer that stands on the question
+      onAttach(path: string): void;            // a pasted image, saved (`uploads/<name>`): the handler the card had when the image was pasted is the one called, so it carries that session and question; it joins the draft as it is when it lands, confirming nothing
     }
 
     // R/sheet/OutcomeCard.tsx: an outcome accepted and not yet delivered, read-only
@@ -409,11 +422,11 @@ M2 makes the summaries, the models and the connection; M4 adds the memory (§G).
     export interface SessionSheetProps {
       model: SheetModel;
       memory: SheetMemory;
-      onMemory(update: (current: SheetMemory) => SheetMemory): void;   // the consumer applies it to that session's memory as it is at commit; it may be called after the component unmounted (a late paste, a late answer of the door), so it must not depend on the mount
+      onMemory(update: (current: SheetMemory) => SheetMemory): void; // applied to this session's memory as it is at commit; may be called after unmount
       host: SheetHost;
-      focus?: { id: string; request: number } | null;          // bring this question's card into view and put the keyboard on it; `request` grows with each ask
+      focus?: { id: string; request: number } | null;
       density?: 'full' | 'compact';
-      unavailable?: string | null;                             // why this surface cannot send now; drawn in place of Send
+      unavailable?: string | null;
     }
 
     // R/sheet/SheetOverview.tsx: the sessions of a machine that have a sheet
