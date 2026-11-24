@@ -19,9 +19,9 @@ import { applyV2, newDoc, stateV2 } from '../../yjs';
 import * as Y from '../../yjs/slides';
 import { boardFrame, isMissingSource } from '../model';
 import { moveElementToBoard } from '../move';
-import { BoardError } from '../writers';
 import { boardLabel, type BoardView } from './boards';
 import { DESIGN_COPY as C } from './copy';
+import { boardRefusal } from './refusals';
 
 /** The selected elements a move takes: each one none of whose ancestors is selected too (their subtrees go with them). */
 export function movedRoots(session: DeckSession, boardId: string, selection: readonly string[]): string[] {
@@ -87,7 +87,7 @@ export interface MoveToBoardProps {
   readOnly: boolean;
   /** After a move: the destination and the moved roots' ids there. */
   onMoved(to: BoardView, ids: string[]): void;
-  onNotice(text: string): void;
+  onNotice(text: string, why?: string | null): void;
 }
 
 const takesWrites = (b: BoardView) => b.frame !== null && b.held === null && !b.missing;
@@ -103,7 +103,8 @@ export function MoveToBoard({ session, boards, active, selection, canvas, zoom, 
       const ids = moveSelectionToBoard(session, active.id, to.id, now.selection, canvas, zoom);
       if (ids) onMoved(to, ids);
     } catch (error) {
-      onNotice(error instanceof BoardError ? error.problems.join('; ') : error instanceof Error ? error.message : String(error));
+      const refused = boardRefusal(session.doc, error, 'move'); // the word cut (G518): in a person's words
+      onNotice(refused.text, refused.why);
     }
   };
   return (

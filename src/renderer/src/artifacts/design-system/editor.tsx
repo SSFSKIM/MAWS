@@ -8,7 +8,7 @@
 // sheet (so a re-target or a disposal ends the request with the showing), and a system with no law asks the agent to adopt it by adding the request to the shown session's
 // message box (P3-G's composer queue, which never replaces a draft). `onShown` is called once the system is on screen
 // and the body is visible; L's surface records the view.
-import { useSyncExternalStore } from 'react';
+import { useSyncExternalStore, type ReactNode } from 'react';
 import type { ArtifactHost, DocumentHandle } from '@artifacts/host';
 import { usePageState } from '@artifacts/design-system/page/use-system';
 import { shownSession } from '../../panel/host';
@@ -19,6 +19,7 @@ import { useArtifactTitle } from '../../library/store';
 import { useLayout } from '../../stores/layout';
 import { toast } from '../../stores/notices';
 import { useSettings } from '../../stores/settings';
+import { QuietSpinner } from '../../ui/spinner';
 import type { MachineRef } from '@shared/machine/ref';
 import { artifactHost } from '..';
 import { registerArtifactEditor, type ArtifactEditor, type ArtifactEditorProps } from '../registry';
@@ -120,7 +121,7 @@ export const registerDesignSystemEditor = (deps: DesignSystemEditorDeps = { host
 
 function DesignSystemPanel({ artifactId, machine, state, scope, visible, onShown }: ArtifactEditorProps<OpenedSystem>) {
   const opening = useSyncExternalStore(state.subscribe, state.get);
-  if (opening.status === 'opening') return <Quiet>{C.opening}</Quiet>;
+  if (opening.status === 'opening') return <Quiet><QuietSpinner label={C.openingName} /></Quiet>; // the word cut (G562)
   if (opening.status === 'failed') return <Quiet>{C.openFailed(opening.error)}</Quiet>;
   return (
     <EditorHostScopeContext.Provider value={scope}>
@@ -165,6 +166,6 @@ function OpenBody(props: { artifactId: string; machine: MachineRef; handle: Docu
   );
 }
 
-function Quiet({ children }: { children: string }) {
+function Quiet({ children }: { children: ReactNode }) {
   return <div className="flex h-full items-center justify-center p-6 text-center text-ui text-fg-muted">{children}</div>;
 }

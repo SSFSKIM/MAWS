@@ -19,6 +19,9 @@
 // workbench's regions (C's a11y.ts), keeping the selection.
 // P4-A2 G2.4 (X35; G-R6 of docs/doperpowers/plans/2026-10-19-p4-a2-agent-experience.md): an agent's publish drawn as it
 // streams, from the tab's provisional layers, in the live world (World.tsx, ./provisional.tsx).
+// The word cut (docs/doperpowers/specs/2026-11-16-word-cut-design.md, M5 task 4): a refused board edit is said in a
+// person's words (G518, ./refusals.ts); the held banner is one line that opens the loader's reasons (G533, G534); the
+// toolbar keeps Add comment alone, the header's Comments opening the rail (G512); the pill's ↻ is a named glyph (N204).
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from 'react';
 import { DesignSystemScope, useDesignSystem, type DesignSystemRef } from '../../design-system/apply';
 import type { CommentAuthor, DocumentComments } from '../../document/editor/comments/surface';
@@ -50,7 +53,8 @@ import { measure } from '../../slides/editor/transform/measure';
 import { BOARD_CSS } from '../board-css';
 import { designChanges } from '../history';
 import { placementAfter, writeBoardEntry } from '../model';
-import { BoardError, deleteBoard, duplicateBoard, insertBoard } from '../writers';
+import { deleteBoard, duplicateBoard, insertBoard } from '../writers';
+import { NamedGlyph } from '../../../renderer/src/ui/glyph';
 import { BoardInspector } from './BoardInspector';
 import { BoardList } from './BoardList';
 import { boardLabel, keepEqualBoards, readBoards, type BoardView, type DesignBoards } from './boards';
@@ -58,6 +62,7 @@ import { DESIGN_COPY as C, type BoardPreset } from './copy';
 import { DesignCommentButtons, DesignCommentFrame, designRailLabels, useDesignComments } from './comments';
 import { DesignHistoryBar, HistoryBoardList, historyBoards, HistoryWorld, useDesignFocus } from './history';
 import { boardElement } from './insert';
+import { boardRefusal, type BoardAct } from './refusals';
 import { MoveToBoard } from './MoveToBoard';
 import { BOARD_FIT_MAX, DesignView, unionRect, ZOOM_MAX, ZOOM_MIN, ZOOM_STEPS, type Rect } from './viewport';
 import { useViewFrame, useViewZoom, WithZoom } from './use-view';
@@ -346,12 +351,13 @@ export function DesignWorkbench(props: DesignWorkbenchProps) {
   );
 
   // ---- board commands (each one gesture, one undo step)
-  const tryEdit = (write: (origin: object) => void): boolean => {
+  const tryEdit = (act: BoardAct, write: (origin: object) => void, frame?: Parameters<typeof boardRefusal>[3]): boolean => {
     try {
       session.edit(write);
       return true;
     } catch (error) {
-      setNotice(error instanceof BoardError ? error.problems.join('; ') : error instanceof Error ? error.message : String(error));
+      const refused = boardRefusal(doc, error, act, frame); // G518: in a person's words, the model's kept where none fit
+      setNotice(refused.text, refused.why);
       return false;
     }
   };
@@ -363,17 +369,17 @@ export function DesignWorkbench(props: DesignWorkbenchProps) {
   const addBoard = (preset: BoardPreset) => {
     const id = mintSlideId(doc);
     const frame = { ...placementAfter(doc), w: preset.w, h: preset.h };
-    if (!tryEdit((origin) => insertBoard(doc, { id, frame, title: preset.label }, order.at(-1) ?? null, origin))) return;
+    if (!tryEdit('add', (origin) => insertBoard(doc, { id, frame, title: preset.label }, order.at(-1) ?? null, origin), frame)) return;
     selectBoard(id);
     view.fitTo(frame, BOARD_FIT_MAX);
   };
   const duplicate = (boardId: string) => {
     let made: string | null = null;
-    if (!tryEdit((origin) => (made = duplicateBoard(doc, boardId, {}, origin).id)) || made === null) return;
+    if (!tryEdit('duplicate', (origin) => (made = duplicateBoard(doc, boardId, {}, origin).id)) || made === null) return;
     selectBoard(made);
   };
   const remove = (boardId: string) => {
-    tryEdit((origin) => deleteBoard(doc, boardId, origin));
+    tryEdit('delete', (origin) => deleteBoard(doc, boardId, origin));
     if (view.snapshot().frame === boardId) view.selectFrame(null);
   };
   // M6 final review: a rename commits only while the replica takes writes and the board, as the model holds it now, is
@@ -381,7 +387,7 @@ export function DesignWorkbench(props: DesignWorkbenchProps) {
   const rename = (boardId: string, title: string) => {
     const now = readBoards(doc).boards.find((b) => b.id === boardId);
     if (readOnly || !session.writable() || !now || now.held !== null || now.missing) return false;
-    return tryEdit(() => writeBoardEntry(doc, boardId, { title: title || undefined })); // inside the edit's transaction
+    return tryEdit('rename', () => writeBoardEntry(doc, boardId, { title: title || undefined })); // inside the edit's transaction
   };
 
   const editable = !readOnly && active !== null && active.held === null && !active.missing;
@@ -460,7 +466,7 @@ export function DesignWorkbench(props: DesignWorkbenchProps) {
         <DesignHistoryBar preview={preview} controller={history} count={projected.count} onStep={step} onBack={() => history.close()} />
       ) : (
       <div className="deck-toolbar" role="toolbar" aria-label={C.toolbar}>
-        <button type="button" className="deck-button" aria-label={C.boards} aria-pressed={boardsOpen} title={C.showBoards} onClick={() => setBoardsOpen((open) => !open)}>
+        <button type="button" className="deck-button" aria-label={C.boards} aria-pressed={boardsOpen} title={C.boards /* G510: the same word open or closed */} onClick={() => setBoardsOpen((open) => !open)}>
           ☷
         </button>
         <span className="deck-toolbar-divider" aria-hidden />
@@ -489,7 +495,7 @@ export function DesignWorkbench(props: DesignWorkbenchProps) {
             </ElementBar>
           )}
         </WithZoom>
-        <DesignCommentButtons api={commentsApi} view={view} railOpen={state.rail === 'comments'} onToggleRail={() => session.toggleRail('comments')} />
+        <DesignCommentButtons api={commentsApi} view={view} />
         <ToolbarNotice notice={notice} />
         <span className="deck-toolbar-spacer" />
         <ZoomControls view={view} onFitAll={fitAll} onFitSelection={fitSelection} />
@@ -497,12 +503,16 @@ export function DesignWorkbench(props: DesignWorkbenchProps) {
       )}
       {!preview && active?.held && (
         <div role="status" className="deck-held-banner" data-held-banner>
-          <strong>{C.heldBanner}</strong>
-          <ul>
-            {active.held.map((reason) => (
-              <li key={reason}>{reason}</li>
-            ))}
-          </ul>
+          <details className="design-held-details">
+            <summary>
+              <strong>{C.heldBanner}</strong>
+            </summary>
+            <ul>
+              {active.held.map((reason) => (
+                <li key={reason}>{reason}</li>
+              ))}
+            </ul>
+          </details>
         </div>
       )}
       {!preview && active?.missing && (
@@ -550,9 +560,9 @@ export function DesignWorkbench(props: DesignWorkbenchProps) {
               {HISTORY_COPY.pill(historySnapshot.pill.count)}
             </button>
             {historySnapshot.pill.failed !== null && (
-              <button type="button" className="deck-button" aria-label={HISTORY_COPY.pillRetry} title={historySnapshot.pill.failed} onClick={() => void history?.recount()}>
-                ↻
-              </button>
+              <NamedGlyph label={HISTORY_COPY.pillRetry} className="deck-button" onClick={() => void history?.recount()}>
+                <span aria-hidden>↻</span>
+              </NamedGlyph>
             )}
             <button type="button" className="deck-button" aria-label={HISTORY_COPY.pillDismiss} onClick={() => history?.dismissPill()}>
               ×

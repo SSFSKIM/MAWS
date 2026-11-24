@@ -101,7 +101,9 @@ export function designVersionExports(artifactId: string, machine: MachineRef, ve
 
 export type DesignExportAsk = (sheet: ConfirmRequest) => Promise<boolean>;
 
-const percent = (scale: number) => `${Math.round(scale * 10_000) / 100}%`;
+// the word cut (G556): a whole-number percentage in the sheet, rounded down so a board just over the cap never reads
+// "100%"; the export takes the exact scale
+const percent = (scale: number) => `${Math.max(1, Math.floor(scale * 100))}%`;
 
 /** The sheet for a board too large to picture at the size asked: the scale that fits. */
 function fittingSheet(name: string, format: 'png' | 'pdf', maxScale: number): ConfirmRequest {

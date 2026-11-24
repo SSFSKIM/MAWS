@@ -3,7 +3,9 @@
 // title has); the tooltip is a Tip, so the keyboard reaches it. The shortcut, and the reason of a greyed glyph, are its
 // accessible description. A greyed glyph is `unavailable` with its reason, never `disabled`: it keeps the keyboard.
 // Only for the glyphs rule 4 allows. The shortcut comes formatted (a renderer caller reads it with
-// `useChordHint(action)`, app/IconButton.tsx), so the part reads no store and an editor bundle can draw it.
+// `useChordHint(action)`, app/IconButton.tsx), so the part reads no store and an editor bundle can draw it. A `detail`
+// says what the press acts on now (the board a design's comment goes on, M5's G514): a line of the tooltip under the
+// word, and part of the description, the name staying the word.
 import type { ComponentPropsWithRef, ReactNode } from 'react';
 import { Tip, UNAVAILABLE_LOOK, unavailableClickProps } from './tip';
 
@@ -15,20 +17,22 @@ export interface NamedGlyphProps extends Omit<ComponentPropsWithRef<'button'>, '
   label: string; // the word: the accessible name and the tooltip
   shortcut?: string | null;
   unavailable?: string | null; // why it is greyed
+  detail?: string | null; // what the press acts on now
   pressed?: boolean;
   children: ReactNode; // the icon, aria-hidden
 }
 
-export function NamedGlyph({ label, shortcut, unavailable, pressed, className = GLYPH_BUTTON, children, ref, ...button }: NamedGlyphProps) {
+export function NamedGlyph({ label, shortcut, unavailable, detail, pressed, className = GLYPH_BUTTON, children, ref, ...button }: NamedGlyphProps) {
   const named = shortcut ? `${label} · ${shortcut}` : label;
-  const description = [unavailable, shortcut].filter((part) => part).join(' · ');
+  const description = [unavailable, detail, shortcut].filter((part) => part).join(' · ');
   return (
     <Tip
       content={
-        unavailable ? (
+        unavailable || detail ? (
           <>
             <span className="block">{named}</span>
-            <span className="block text-fg-muted">{unavailable}</span>
+            {detail && <span className="block">{detail}</span>}
+            {unavailable && <span className="block text-fg-muted">{unavailable}</span>}
           </>
         ) : (
           named

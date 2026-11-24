@@ -4,12 +4,16 @@
 // so the page holds nothing unsaved; the previews follow the replica in the same frame. Portable (§4.10): the page
 // takes the system's open handle and the host, and draws its chrome in the app's tokens, the system only inside its
 // previews' scopes. The app's header registration (X32) and Mark-up are the renderer body's that mounts this page.
+// The word cut (docs/doperpowers/specs/2026-11-16-word-cut-design.md, M5 task 4): the wait for a system is a quiet
+// spinner (G562); tokens that do not resolve are one line with their count that opens to each (G565).
 import { useLayoutEffect, useRef } from 'react';
+import { QuietSpinner } from '../../../renderer/src/ui/spinner';
 import type { ArtifactHost, DocumentHandle } from '../../host';
 import type { HtmlParser } from '../canon';
 import type { SystemOrigin } from '../model';
 import { scopeKeyOf } from '../scope-style';
 import { Canon } from './Canon';
+import { PAGE_COPY } from './copy';
 import { Check } from './Check';
 import { Law, type AskAdopt } from './Law';
 import { Measures } from './Measures';
@@ -56,7 +60,7 @@ export function DesignSystemPage(props: DesignSystemPageProps) {
   if (!system.meta) {
     return (
       <div className="dsp-page" data-ds-page={artifactId}>
-        <p className="dsp-muted">Loading the design system…</p>
+        <QuietSpinner label={PAGE_COPY.loadingName} />
       </div>
     );
   }
@@ -67,10 +71,18 @@ export function DesignSystemPage(props: DesignSystemPageProps) {
         <h1 className="dsp-title">{props.title ?? system.meta.name}</h1>
         {system.meta.persona ? <p className="dsp-muted">persona: {system.meta.persona}</p> : null}
         {resolved.problems.length ? (
-          <p role="status" className="dsp-problems">
-            {resolved.problems.length === 1 ? 'One token does not resolve' : `${resolved.problems.length} tokens do not resolve`}:{' '}
-            {resolved.problems.map((p) => `${p.path} (${p.message})`).join('; ')}
-          </p>
+          <div role="status" className="dsp-problems">
+            <details>
+              <summary>{PAGE_COPY.unresolved(resolved.problems.length)}</summary>
+              <ul>
+                {resolved.problems.map((p, i) => (
+                  <li key={i}>
+                    <code className="dsp-name">{p.path}</code> {p.message}
+                  </li>
+                ))}
+              </ul>
+            </details>
+          </div>
         ) : null}
       </header>
       <Palette {...sections} />

@@ -12,6 +12,7 @@ import { parseTokens, type TokenSet } from '../tokens';
 import { defaultSystem, type DefaultSystemSource } from '../../types/design_system/defaults';
 import { COMPONENT_CANVASES, componentCanvas, componentFrameCss, type ComponentCanvas } from './component-canvas';
 import { assetSource, frameCsp, frameDocument, rewriteHtmlAssets } from './frame';
+import { PAGE_COPY } from './copy';
 
 const SLIDE = { width: 1920, height: 1080 };
 const BASE = 'html, body { margin: 0; }';
@@ -120,7 +121,7 @@ export function Canon(props: { tokens: TokenSet; files: Readonly<Record<string, 
       <h2 id="dsp-canon" className="dsp-heading">
         Canon
       </h2>
-      {empty ? <p className="dsp-muted">No layouts, components or document styles yet.</p> : null}
+      {empty ? <p className="dsp-muted">{PAGE_COPY.canonEmpty /* the word cut, G575 */}</p> : null}
       {frames.layouts.length ? (
         <div className="dsp-canon-grid">
           {frames.layouts.map((frame) => (
@@ -144,7 +145,7 @@ export function Canon(props: { tokens: TokenSet; files: Readonly<Record<string, 
       {frames.document !== null ? (
         <figure className="dsp-canon-item">
           <iframe title={DOCUMENT_CSS_PATH} sandbox="" referrerPolicy="no-referrer" srcDoc={frames.document} className="dsp-document-frame" />
-          <figcaption className="dsp-name">{DOCUMENT_CSS_PATH} on a sample handout</figcaption>
+          <figcaption className="dsp-name">{DOCUMENT_CSS_PATH /* the word cut, G577: its file, as the others' */}</figcaption>
         </figure>
       ) : null}
     </section>

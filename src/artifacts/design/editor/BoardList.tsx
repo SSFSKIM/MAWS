@@ -5,11 +5,15 @@
 // Space), and each board's options zoom to it, rename it, duplicate it, move it up or down and delete it. Add board
 // offers the size presets. Every gesture is one transaction and one undo step (the session's `edit`), read-only offers
 // none.
+// The word cut (docs/doperpowers/specs/2026-11-16-word-cut-design.md, M5 task 4): a row is its board's name at rest, its
+// size drawn while the row is pointed at or holds focus and always in its name (G522, the inspector says it too); an
+// empty design says so once, in the canvas (G526); at the limit the note is the limit alone (G527).
 import { memo, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
 import { DropdownMenu } from 'radix-ui';
 import { closestCenter, DndContext, KeyboardSensor, PointerSensor, useSensor, useSensors, type DragEndEvent } from '@dnd-kit/core';
 import { arrayMove, SortableContext, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
+import { HOVER_SCOPE, ON_HOVER } from '../../../renderer/src/ui/hover-scope';
 import { moveSlide } from '../../slides/model';
 import { useReorderAccessibility } from '../../slides/editor/announcements';
 import type { DeckSession } from '../../slides/editor/session';
@@ -111,9 +115,7 @@ export function BoardList(props: BoardListProps) {
           </DropdownMenu.Root>
         )}
       </div>
-      {boards.length === 0 ? (
-        <p className="deck-quiet">{C.noBoards}</p>
-      ) : (
+      {boards.length === 0 ? null : (
         <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={onDragEnd} accessibility={accessibility}>
           <SortableContext items={ids} strategy={verticalListSortingStrategy} disabled={readOnly}>
             <ol className="design-boards-list" aria-label={C.boardsInOrder}>
@@ -174,6 +176,7 @@ const Row = memo(function Row(props: { board: BoardView; current: boolean; frame
       data-missing={board.missing || undefined}
       data-dragging={isDragging || undefined}
       style={{ transform: CSS.Transform.toString(transform), transition }}
+      {...HOVER_SCOPE}
     >
       <RowContent board={board} current={current} readOnly={readOnly} first={first} last={last} full={full} actions={actions} attributes={attributes} listeners={listeners} onRename={setRenaming} />
     </li>
@@ -237,7 +240,11 @@ const RowContent = memo(function RowContent(props: {
         <span className="design-board-name">{label}</span>
         {board.held && <span className="design-board-badge">{C.held}</span>}
         {board.missing && <span className="design-board-badge">{C.missing}</span>}
-        {board.frame && <span className="design-board-size">{C.size(board.frame.w, board.frame.h)}</span>}
+        {board.frame && (
+          <span className="design-board-size" {...ON_HOVER}>
+            {C.size(board.frame.w, board.frame.h)}
+          </span>
+        )}
       </button>
       <DropdownMenu.Root modal={false}>
         <DropdownMenu.Trigger asChild>

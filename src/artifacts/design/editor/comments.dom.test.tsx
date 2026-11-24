@@ -294,7 +294,10 @@ describe('Move to board…', () => {
     fireEvent.click(screen.getByRole('menuitem', { name: 'Full' }));
     expect(Y.elementIds(doc, 'full')).toHaveLength(before);
     expect(Y.hasElement(doc, 'b1', 'cta') && Y.hasElement(doc, 'b1', 'cta2')).toBe(true);
-    expect(container.querySelector('[data-deck-notice]')!.textContent).toMatch(/board full/);
+    // the word cut (G518): the notice in a person's words, the model's reason its description
+    const notice = container.querySelector<HTMLElement>('[data-deck-notice]')!;
+    expect(notice.textContent).toBe('Can’t move these elements there');
+    expect(accessibleDescription(notice)).toMatch(/board full/);
     expect(session.snapshot().canUndo).toBe(false);
   });
 });

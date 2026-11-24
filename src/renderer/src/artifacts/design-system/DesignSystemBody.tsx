@@ -11,6 +11,8 @@
 // but the replica keeps it durably only once the host acknowledges it, so the closeGuard (./close-guard.ts) reads the
 // tab's handle and keeps a showing whose edits are unacknowledged until they save or the owner discards them
 // (whole-branch review F-I1). Hidden (`visible` false), the body reports nothing shown and offers no Mark-up surface.
+// The word cut (docs/doperpowers/specs/2026-11-16-word-cut-design.md, M5 task 4; G558): the three actions are icons, as
+// other editors' headers draw theirs, each label its name and tooltip; the owner saw them so.
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { create } from 'zustand';
 import type { ArtifactHost, DocumentHandle, DocumentState } from '@artifacts/host';
@@ -23,6 +25,7 @@ import { toast } from '../../stores/notices';
 import { QUIET_MS } from '../../ui/spinner';
 import { allowSystemClose } from './close-guard';
 import { DESIGN_SYSTEM_COPY } from './copy';
+import { CheckLawIcon, DefaultStarIcon, DeleteBinIcon } from './icons';
 
 // "Check against law" asks the tab's page to bring its check into view: a serial per tab, outside any component.
 const useCheckRequests = create<{ serials: Readonly<Record<string, number>> }>()(() => ({ serials: {} }));
@@ -104,9 +107,9 @@ export function DesignSystemBody(props: DesignSystemBodyProps) {
     saved,
     pendingEdits: replica === 'saving',
     actions: [
-      { id: 'design-system.check', label: DESIGN_SYSTEM_COPY.check, onSelect: () => requestCheck(key) },
-      { id: 'design-system.set-default', label: DESIGN_SYSTEM_COPY.setDefault, onSelect: () => onSetDefault?.(), disabled: !onSetDefault || isDefault },
-      ...(onDelete ? [{ id: 'design-system.delete', label: DESIGN_SYSTEM_COPY.deleteAction, onSelect: () => onDelete() }] : []),
+      { id: 'design-system.check', label: DESIGN_SYSTEM_COPY.check, icon: CheckLawIcon, onSelect: () => requestCheck(key) },
+      { id: 'design-system.set-default', label: DESIGN_SYSTEM_COPY.setDefault, icon: DefaultStarIcon, onSelect: () => onSetDefault?.(), disabled: !onSetDefault || isDefault },
+      ...(onDelete ? [{ id: 'design-system.delete', label: DESIGN_SYSTEM_COPY.deleteAction, icon: DeleteBinIcon, onSelect: () => onDelete() }] : []),
     ],
     exports: [{ id: 'design-system.export-claude', label: DESIGN_SYSTEM_COPY.exportClaude, onSelect: () => exportForClaude(host, artifactId) }],
     closeGuard: () => allowSystemClose(handle, shownTitle, ended), // the tab's handle and showing (L's createState), never this body's state

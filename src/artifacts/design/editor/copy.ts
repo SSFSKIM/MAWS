@@ -1,5 +1,7 @@
 // P3-E1 M3 (docs/doperpowers/plans/2026-10-16-p3-e1-design-workbench.md, M3): the workbench's words. The control names
 // are the accessible names the e2e drives it by. The element engine's words stay C's (DECK_COPY, INSPECTOR_COPY).
+// The word cut (docs/doperpowers/specs/2026-11-16-word-cut-design.md, M5 task 4): a word kept only as a control's name
+// or a landmark's is named `…Name`; a refused board edit is said in a person's words (`refused`, ./refusals.ts).
 
 /** The board sizes offered by Add board and the inspector (the parent's §1). */
 export const BOARD_PRESETS = [
@@ -21,7 +23,6 @@ export const DESIGN_COPY = {
   boardsInOrder: 'Boards, back to front',
   // W1: a board in a reorder's announcements, by its position and name (an untitled one by position)
   reorderItem: (n: number, title: string) => (title ? `Board ${n}, ${title}` : `Board ${n}`),
-  showBoards: 'Show boards',
   addBoard: 'Add board',
   preset: (label: string, w: number, h: number) => `${label} ${size(w, h)}`,
   size,
@@ -33,17 +34,17 @@ export const DESIGN_COPY = {
   rename: 'Rename',
   boardName: 'Board name',
   renameBoard: 'Rename board',
-  duplicate: 'Duplicate board',
+  duplicate: 'Duplicate', // G525
   moveUp: 'Move up',
   moveDown: 'Move down',
-  deleteBoard: 'Delete board',
-  full: (max: number) => `A design holds at most ${max} boards: delete one to add another.`,
+  deleteBoard: 'Delete', // G525
+  full: (max: number) => `${max} boards is the most`, // G527
   resizeBoard: (at: string) =>
     `Resize board ${({ n: 'top', s: 'bottom', e: 'right', w: 'left', ne: 'top right', nw: 'top left', se: 'bottom right', sw: 'bottom left' } as Record<string, string>)[at] ?? at}`,
   held: 'Held',
   missing: 'File not received',
-  heldBanner: 'This board’s file does not load, so it shows its last good version, read-only. The agent’s next valid file for it clears this.',
-  missingBanner: 'The design names this board but its file never arrived, so it has nothing to edit yet. The agent’s file for it fills it.',
+  heldBanner: 'This board’s file doesn’t load; showing its last good version.', // G533: the loader's reasons fold under it (G534)
+  missingBanner: 'This board’s file hasn’t arrived yet.', // G535
   noBoards: 'This design has no boards yet.',
   // the inspector's board section
   board: 'Board',
@@ -51,29 +52,33 @@ export const DESIGN_COPY = {
   boardY: 'Board Y',
   boardWidth: 'Board width',
   boardHeight: 'Board height',
-  boardSize: 'Board size',
+  boardSize: 'Size', // G538: the select's caption
+  boardSizeName: 'Board size',
   custom: 'Custom',
   // M4: comments and the move across boards
-  commentTitle: 'Comment on the selected element, or on the board when no element is selected (⌥⌘M)',
-  commentBoard: (label: string) => `Comment on board ${label} (⌥⌘M)`,
-  /** P4-B2 (V15): pins merged on a zoomed-out world; the press zooms to them. */
-  pinCluster: (n: number) => `${n} comments here; zoom to them`,
+  // G511, G513, G514: Add comment is a named glyph (its word and chord are the tooltip, the deck's form); with no element
+  // selected its tooltip also says the board the comment goes on
+  comment: 'Add comment',
+  commentOn: (label: string) => `On ${label}`,
+  commentUnavailable: 'Select one element or a board to comment on',
+  /** P4-B2 (V15): pins merged on a zoomed-out world; the press zooms to them. G532: the tooltip is the count alone. */
+  pinCluster: (n: number) => `${n} comments`,
+  pinClusterName: (n: number) => `${n} comments here; zoom to them`,
   moveToBoard: 'Move to board…',
-  moveToBoardTitle: 'Move the selected elements to another board (they take new ids there; their comments go with them)',
+  moveToBoardTitle: 'Move to another board', // G541
   movedTo: (label: string) => `Moved to ${label}.`,
   // the comments rail's words for a design (the P3-E spec's Decision Log 29)
-  commentsEmpty: 'No open comments. Select a board or an element and choose Comment.',
-  threadBoard: (label: string) => `Board ${label}`,
-  threadDeletedBoard: 'A deleted board',
+  commentsEmpty: 'No open comments. Select a board or an element and choose Add comment.', // G542
+  threadDeletedBoard: 'A deleted board', // G543, G545: a thread is located by its board's name; a deleted board's says so once
   showBoard: (quote: string) => `Show board: ${quote}`,
   showElement: (quote: string) => `Show element: ${quote}`,
-  orphanBoard: 'The commented board was deleted.',
-  orphanElement: 'The commented element was deleted.',
+  orphanElement: 'Element deleted', // G545, as the deck's (G481)
   // M4: version history (the rail and Restore's question are B's and C's; the design's own words here)
   historyBack: 'Back to design',
   historyRestoreBody: 'The design goes back to it as a new version: its boards, their places and sizes, their content and the design’s settings. Everything since stays in history, and comment conversations are kept.',
   historyWorld: 'Design in this version',
-  historyBoards: 'Boards in this version',
+  historyBoards: 'Boards', // G549: the preview's list heading
+  historyBoardsName: 'Boards in this version',
   historyDeck: (keys: string) => `Design settings changed: ${keys}`,
   historyBoardRow: (label: string, kind: string | null) => `${label}${kind === 'added' ? ', new' : kind === 'removed' ? ', deleted' : kind === 'changed' ? ', changed' : ''}`,
   movedFrom: (label: string) => `Moved from ${label}`,
@@ -85,4 +90,19 @@ export const DESIGN_COPY = {
   fitAll: 'Fit all',
   fitSelection: 'Fit selection',
   percent: (zoom: number) => `${Math.round(zoom * 100)}%`,
+  // G518, G539: a refused board edit in a person's words (./refusals.ts); `act` is what was asked
+  refused: {
+    held: (act: string) => `Can’t ${act} a board that doesn’t load`,
+    missing: (act: string) => `Can’t ${act} a board whose file hasn’t arrived`,
+    full: (act: string, max: number) => `Can’t ${act} a board: ${max} boards is the most`,
+    gone: 'That board was deleted',
+    other: (act: string) => `Can’t ${act} this board`,
+    moveHeld: 'Can’t move elements to a board that doesn’t load',
+    moveMissing: 'Can’t move elements to a board whose file hasn’t arrived',
+    moveOther: 'Can’t move these elements there',
+    side: (max: string) => `At most ${max} px a side`,
+    empty: 'More than 0 px a side',
+    area: (max: string) => `At most ${max} px in area`,
+    notNumber: 'Not a number',
+  },
 } as const;

@@ -16,22 +16,30 @@
 // (V15); the open popover's pin never merges. A pin opens C's popover (PinPopover.tsx), which follows its pin through a
 // pan or a zoom and hides while the pin is outside the world's visible rect (V6); the compose card stands at its pin and
 // hides under a popover, as the deck's.
+//
+// The word cut (docs/doperpowers/specs/2026-11-16-word-cut-design.md, M5 task 4): Add comment is the deck's named glyph,
+// its tooltip the word and the chord, and the board the comment goes on when no element is selected (G511, G513, G514);
+// greyed with its reason, still focusable, while neither target is there. The toolbar has no Comments of its own: the
+// header's, with its count, opens the rail (G512). A thread is located by its board's name, a board's own thread too;
+// a deleted board's says so once, in its location (G543, G545). A merged pin's tooltip is its count (G532).
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type FocusEvent, type KeyboardEvent, type ReactNode } from 'react';
 import { clusterPins } from '../../comments/pin-clusters';
 import type { CommentAuthor, CommentOverlayProps, DocumentComments, PassageRect } from '../../document/editor/comments/surface';
+import { formatChord } from '@shared/keymap/chord';
+import { NamedGlyph } from '../../../renderer/src/ui/glyph';
 import type { SlideCanvas } from '../../slides/canvas';
 import type { Box } from '../../slides/geometry';
 import { resolveAnchor, ROOT } from '../../slides/model';
 import { addThread, discardThread, elementQuote, getThread, newThreadId, reopen, reply, resolve, threadStatus, type DeckThread } from '../../slides/threads';
 import { commentKeys, pinRectOf } from '../../slides/editor/comments/CommentFrame';
 import { COMMENTS_ORIGIN, HUMAN_AUTHOR, samePin, useDeckComments, type DeckCommentsApi } from '../../slides/editor/comments/controller';
-import { COMMENTS_COPY } from '../../slides/editor/comments/copy';
 import type { CommentsRailLabels } from '../../slides/editor/comments/CommentsRail';
 import { PinPopover } from '../../slides/editor/comments/PinPopover';
 import { inSlideOrder, PinButton, pinKey, pinNode, samePinBoxes, threadsByElement } from '../../slides/editor/comments/Pins';
-import { useOpenDeckThreads, useOpenThreadCount } from '../../slides/editor/comments/use-threads';
+import { useOpenDeckThreads } from '../../slides/editor/comments/use-threads';
 import type { DeckSession } from '../../slides/editor/session';
 import { measure } from '../../slides/editor/transform/measure';
+import { CommentPlusIcon } from '../../ui/icons';
 import { useDocVersion } from '../../slides/editor/transform/use-doc-version';
 import * as Y from '../../yjs/slides';
 import type { BoardFrame } from '../canvas';
@@ -117,8 +125,8 @@ export function useDesignComments({ session, view, surface, author = HUMAN_AUTHO
 
 /**
  * The rail's words for a design (C's rail's optional labels, the P3-E spec's Decision Log 29): where a thread is by its
- * board's name ("Board …" for a board's own thread), a deleted board said so; Show and the orphan note name a board or an
- * element.
+ * board's name, a board's own thread too (G543), a deleted board said so there and nowhere else (G545); Show names a
+ * board or an element, and an element deleted from a board still there says "Element deleted", as the deck's.
  */
 export function designRailLabels(boards: readonly BoardView[]): CommentsRailLabels {
   const names = new Map(boards.map((b) => [b.id, boardLabel(b)]));
@@ -128,33 +136,34 @@ export function designRailLabels(boards: readonly BoardView[]): CommentsRailLabe
       const board = thread.elementId === ROOT;
       const name = names.get(thread.slideId);
       return {
-        location: name === undefined ? C.threadDeletedBoard : board ? C.threadBoard(name) : name,
+        location: name === undefined ? C.threadDeletedBoard : name,
         show: board ? C.showBoard(thread.quote) : C.showElement(thread.quote),
-        orphan: board ? C.orphanBoard : C.orphanElement,
+        orphan: name === undefined || board ? null : C.orphanElement,
       };
     },
   };
 }
 
-/** The toolbar's Comment (the one selected element, else the selected or active board) and Comments with the open count. */
-export function DesignCommentButtons({ api, view, railOpen, onToggleRail }: { api: DeckCommentsApi; view: DesignView; railOpen: boolean; onToggleRail(): void }) {
+const COMMENT_CHORD = formatChord('Cmd+Alt+M'); // the frame's own key (C's CommentFrame)
+
+/** The toolbar's Add comment (the one selected element, else the selected or active board); the header's Comments opens the rail. */
+export function DesignCommentButtons({ api, view }: { api: DeckCommentsApi; view: DesignView }) {
   const { session } = api;
   const selection = useSyncExternalStore(session.subscribe, () => session.snapshot().selection);
   const target = useSyncExternalStore(view.subscribe, () => boardTarget(session, view));
-  const open = useOpenThreadCount(session.doc);
   const board = selection.length === 0 && target !== null;
+  if (!api.canComment) return null;
   return (
-    <>
-      {api.canComment && (
-        <button type="button" className="deck-button" title={board ? C.commentBoard(labelOf(session, target)) : C.commentTitle} disabled={selection.length !== 1 && !board} onClick={() => api.comment()}>
-          {COMMENTS_COPY.comment}
-        </button>
-      )}
-      <button type="button" className="deck-button" aria-label={COMMENTS_COPY.commentsOpen(open)} aria-pressed={railOpen} data-comments-toggle onClick={onToggleRail}>
-        {COMMENTS_COPY.comments}
-        {open > 0 ? ` ${open}` : ''}
-      </button>
-    </>
+    <NamedGlyph
+      label={C.comment}
+      shortcut={COMMENT_CHORD}
+      detail={board ? C.commentOn(labelOf(session, target)) : null}
+      unavailable={selection.length !== 1 && !board ? C.commentUnavailable : null}
+      className="deck-button deck-glyph"
+      onClick={() => api.comment()}
+    >
+      <CommentPlusIcon />
+    </NamedGlyph>
   );
 }
 
@@ -365,15 +374,14 @@ function WorldPins(props: { api: DeckCommentsApi; threads: readonly DeckThread[]
           return <PinButton key={`${p.slideId}/${p.elementId}`} api={api} slideId={p.slideId} elementId={p.elementId} threads={p.threads} style={{ left: p.x, top: p.y }} data={data} />;
         }
         const count = members.reduce((n, p) => n + p.threads.length, 0);
-        const label = C.pinCluster(count);
         return (
           <button
             key={members.map((p) => `${p.slideId}/${p.elementId}`).join(' ')}
             type="button"
             className="deck-comment-pin"
             data-pin-cluster={members.map((p) => `${p.slideId}/${p.elementId}`).join(' ')}
-            aria-label={label}
-            title={label}
+            aria-label={C.pinClusterName(count)}
+            title={C.pinCluster(count) /* G532: the count, its press's zoom in its name */}
             style={{ left: cluster.x, top: cluster.y }}
             onClick={() => {
               const rect = unionRect(members.map((p) => p.world));
