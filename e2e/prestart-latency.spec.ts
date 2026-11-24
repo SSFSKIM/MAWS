@@ -8,8 +8,10 @@
 // branch with MAWS_E2E_PRESTART unset, where Send takes today's path (the "before" arm, Decision Log 2), flag-on sets it.
 // Each run types for 3 s from its first key press to Send, longer than the stub's 2 s boot. A run whose key-to-Send
 // interval falls outside 3 s ± 100 ms is reported and not counted. The bound: flag-on's median Send-to-paint at least
-// 1.5 s below flag-off's; and each flag-on run started exactly one engine for its Send, the one Send adopted. Both
-// medians and their difference go to the log as one line, to an annotation and to test-results/prestart-latency.json.
+// 1.5 s below flag-off's, evaluated on a valid measure alone: each flag-on run started exactly one engine, before its
+// Send, the one Send adopted, and each flag-off run none before its Send and exactly one after (the starts file's wall
+// clock against the instant Enter was pressed). Both medians and their difference go to the log as one line, to an
+// annotation and to test-results/prestart-latency.json.
 //
 // A measured group (gate.yml's MEASURED_E2E): `pnpm e2e:prestart-latency` sets MAWS_PRESTART_LATENCY_PERF=1 and runs in
 // the foreground, since the paint is read through a frame a window behind another never draws. It spends nothing: the
