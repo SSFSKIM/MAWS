@@ -102,9 +102,9 @@ export function groupItems(items: WorkItem[], turn: TurnState, ui: TranscriptUi 
 // A standalone cell is a flat `cell` row keyed by its CellId (X3).
 const standaloneRow = (cell: Cell, turnId: TurnId): RowOf<'cell'> => ({ ...cell, id: rowId.cell(cell.id), turnId, at: cell.startedAt, kind: 'cell', classification: { ...cell.classification, startsGroup: false } });
 
-// Board ticket 852: a run of one carries its run's open state, as a run's row does
+// Board ticket 852: a call alone in its run carries its one line's open state, as a run's row does
 function runOfOneRow(row: RowOf<'cell'>, ui: TranscriptUi | undefined): RowOf<'cell'> {
-  return drawsAsRun(row) ? { ...row, runExpanded: ui?.expandedGroups.has(runOfOneId(row)) ?? false } : row;
+  return aloneInRun(row) ? { ...row, runExpanded: ui?.expandedGroups.has(runOfOneId(row)) ?? false } : row;
 }
 
 function runRow(first: CellId, turnId: TurnId | null, cells: Cell[], active: boolean, expanded: boolean): RowOf<'group'> {
@@ -115,21 +115,32 @@ function runRow(first: CellId, turnId: TurnId | null, cells: Cell[], active: boo
   };
 }
 
-// Board ticket 852: a standalone row drawn as a run: the one call of a completed run (decision 19), which stands apart
-// while its classification still joins runs, but not a failed one, whose own line keeps its error mark and its error.
-// Its line and its open state are its run's (`expandedGroups` under the run's row id, the id `standaloneRunInput` asks
-// the run's site by). Which calls stand alone is unchanged; only how this one is drawn.
-export const drawsAsRun = (row: RowOf<'cell'>): boolean => row.classification.groupable && row.status !== 'error';
-export const runOfOneId = (row: RowOf<'cell'>): RowId => rowId.group(row.id);
+// Board ticket 852: a standalone row whose classification still joins runs is the one call of its run (decision 19, or
+// a call left alone while it runs): one line, whatever its result, whose open state is kept under `runOfOneId`, a key of
+// its turn's (the same call's id can recur in a later turn's run); the run's site keeps the run's own id. It reads as a
+// run (`runOfOneLabel`) unless it failed, when its own line keeps its error mark and its error. Which calls stand alone
+// is unchanged; only how this one is drawn.
+export const aloneInRun = (row: RowOf<'cell'>): boolean => row.classification.groupable;
+export const drawsAsRun = (row: RowOf<'cell'>): boolean => aloneInRun(row) && row.status !== 'error';
+export const runOfOneId = (row: RowOf<'cell'>): RowId => `${rowId.group(row.id)}@${row.turnId ?? ''}` as RowId;
+// What a run of one's line reads in place of its call's own words, null where it reads them: the owner's call of
+// 2026-11-24, its call's description ("Ran the linter"), inflected as its call's own line reads one; a moved call's moved
+// label (UX wave U4a, decision 33) and a running or stopped call's own words (U2a decision 23, R2: "Stopped a command")
+// where it has none; else the run's words.
+export function runOfOneLabel(row: RowOf<'cell'>): string | null {
+  if (!drawsAsRun(row) || (row.detail.kind === 'shell' && row.moved === true)) return null;
+  const description = row.detail.kind === 'shell' ? row.detail.description?.trim().split(/\r?\n/, 1)[0] : undefined;
+  if (description) return descriptionLabel(description, row.status);
+  if (row.status === 'running' || row.status === 'stopped') return null;
+  return runRow(row.id, row.turnId, [row], false, false).summary;
+}
 // The owner's call of 2026-11-24: a run of one reads its call's description ("Ran the linter"), inflected as its call's
 // own line reads one; the run's usual words only where the call has none. A call the engine moved to the background reads
 // its moved label first, as its own line does (UX wave U4a, decision 33).
+// A run of one as a run's row: its call read where its own line is drawn, in its run opened (the tests' view of a call)
 export function runOfOne(row: RowOf<'cell'>): RowOf<'group'> {
   const run = runRow(row.id, row.turnId, [row], false, row.runExpanded === true);
-  if (row.detail.kind === 'shell' && row.moved === true) return { ...run, summary: row.label };
-  const description = row.detail.kind === 'shell' ? row.detail.description?.trim().split(/\r?\n/, 1)[0] : undefined;
-  if (!description) return run;
-  return { ...run, summary: descriptionLabel(description, row.status) }; // one call's caption has no count to fold
+  return { ...run, summary: runOfOneLabel(row) ?? row.label }; // one call's caption has no count to fold
 }
 
 export const iconOf = (cells: Cell[]): ToolCategory => {

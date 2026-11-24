@@ -898,7 +898,7 @@ test('U4a, Send now: on a next-step row it writes the engine’s send-now reques
   const toggle = transcript.locator('button[aria-expanded]').filter({ hasText: 'Ended for your message after' });
   if ((await toggle.count()) > 0 && (await toggle.first().getAttribute('aria-expanded')) === 'false') await toggle.first().click();
   // the command is its cut turn's one call, a run of one (board ticket 852), whose line reads its moved label
-  const moved = transcript.locator('[data-row-id="cell:toolu_01Gx93c9u7cmXMhky2vE5tjp"] .transcript-run-line');
+  const moved = transcript.locator('[data-row-id="cell:toolu_01Gx93c9u7cmXMhky2vE5tjp"] [data-run-of-one] > .transcript-cell-line');
   await expect(moved).toHaveText(/Moved\s*`?node wait\.cjs a1 30`?\s*to the background after/);
   await expect(transcript).toContainText(message); // drawn once the engine started it
   await expect(list).toHaveCount(0);
@@ -1261,7 +1261,7 @@ const toTop = (page: Page) =>
 // A call alone in its run (board ticket 852: a finished turn's lone call is a run of one, reading its description or the
 // run's words, its call's element mounted once its line opens): its run's line, by the call's own row (never "the last
 // run": an earlier one stands until the call's rows land), and that line opened.
-const runOfOne = (page: Page, toolUseId: string) => transcriptOf(page, 0).locator(`[data-row-id="cell:${toolUseId}"] .transcript-run-line`);
+const runOfOne = (page: Page, toolUseId: string) => transcriptOf(page, 0).locator(`[data-row-id="cell:${toolUseId}"] [data-run-of-one] > .transcript-cell-line`);
 async function openRunOfOne(page: Page, toolUseId: string): Promise<void> {
   await expect(runOfOne(page, toolUseId)).toBeVisible();
   if ((await runOfOne(page, toolUseId).getAttribute('aria-expanded')) === 'false') await runOfOne(page, toolUseId).click();

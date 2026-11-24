@@ -26,8 +26,7 @@ type DrawCell = (cell: Cell) => ReactNode;
 
 const NO_CALLS: ReadonlyMap<ToolUseId, AttentionItem> = new Map();
 
-// `renderBody` (board ticket 852): what the opened run draws in place of its blocks of calls, a run of one's call's detail
-export function GroupRow({ row, renderCell, renderBody }: { row: GroupRowData; renderCell?: (cell: Cell) => ReactNode; renderBody?: () => ReactNode }) {
+export function GroupRow({ row, renderCell }: { row: GroupRowData; renderCell?: (cell: Cell) => ReactNode }) {
   const { storeKey, variant, idPrefix } = useTranscriptContext();
   // decision 16: the waiting calls of the row's own session (a subagent's transcript reads its parent's list, which
   // keys the subagent's requests by its calls); a transcript with no session reads none
@@ -61,10 +60,9 @@ export function GroupRow({ row, renderCell, renderBody }: { row: GroupRowData; r
           {line.kind === 'caption' && <LineCounts added={row.counts.added} removed={row.counts.removed} apart={(row.fold ?? 0) > 0} />}
           <Chevron />
         </button>
-        {/* board ticket 852: a run's blocks of calls hang 19 px in from its line's text, as everything opened under a line
-            does; a run of one's body is its call's detail, which hangs so itself */}
-        <DisclosureBody open={row.expanded} id={bodyId} className={renderBody ? undefined : 'transcript-run-body'} closed={live?.kind === 'thought' && <Thought segment={live} row={row} />}>
-          {renderBody ? renderBody() : <RunBody row={row} draw={draw} />}
+        {/* board ticket 852: a run's blocks of calls hang 19 px in from its line's text, as everything opened under a line does */}
+        <DisclosureBody open={row.expanded} id={bodyId} className="transcript-run-body" closed={live?.kind === 'thought' && <Thought segment={live} row={row} />}>
+          <RunBody row={row} draw={draw} />
         </DisclosureBody>
       </div>
     </FilePathsContext>

@@ -9,7 +9,10 @@ import { join } from 'node:path';
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import type { SessionEvent } from '@shared/graph/events';
+import type { JournalRow } from '@shared/wire/journal';
+import { loadUxwaveJournal } from '../../../../../../test/support/fixtures';
 import { useTranscriptStore } from '../../../stores/transcript';
+import { journalToEvents } from '../../dev/journal';
 import { browserActivityRow } from '../../model/browser-activity';
 import { cellId, turnId } from '../../model/keys';
 import type { Row } from '../../model/rows';
@@ -154,19 +157,18 @@ describe('each case of the table, as a line', () => {
     const row = cellRow(store.rows(), 'one');
     expect(row.kind).toBe('cell'); // the rule that puts it apart is unchanged
     const view = renderRow(row, { storeKey: store.key });
-    const line = screen.getByRole('button', { name: 'Listed the notes' });
-    expect(line.className).toBe('transcript-run-line');
-    expect(line.getAttribute('aria-expanded')).toBe('false');
-    expect(view.container.querySelector('[data-cell-id]')).toBeNull();
+    const line = screen.getByRole('button', { name: 'Listed the notes' }); // the call's one line, read as its run
+    const call = view.container.querySelector<HTMLElement>(`[data-cell-id="${cellId.tool(tool('one'))}"][data-run-of-one][data-standalone]`)!;
+    expect([line.parentElement, line.getAttribute('aria-expanded'), call.dataset.status]).toEqual([call, 'false', 'done']);
     expect(boxed(view.container)).toEqual([]);
     fireEvent.click(line);
     view.rerenderRow(cellRow(store.rows(), 'one'));
-    expect(screen.getByRole('button', { name: 'Listed the notes' }).getAttribute('aria-expanded')).toBe('true');
-    const call = view.container.querySelector<HTMLElement>(`[data-cell-id="${cellId.tool(tool('one'))}"][data-run-of-one]`)!;
+    expect(screen.getByRole('button', { name: 'Listed the notes' })).toBe(line); // the same line, open
+    expect(line.getAttribute('aria-expanded')).toBe('true');
     expect(call.querySelector('.transcript-shell-command')?.textContent).toBe('$ ls notes');
     expect(call.textContent).toContain('alpha.txt');
-    expect([view.container.querySelector('.transcript-cell-line'), view.container.querySelector('.transcript-tool-block')]).toEqual([null, null]);
-    expect(getComputedStyle(call.querySelector('.transcript-cell-detail')!).marginLeft).toBe('19px'); // under the label
+    expect([view.container.querySelectorAll('.transcript-cell-line').length, view.container.querySelector('.transcript-tool-block')]).toEqual([1, null]); // no line of the call's own, no block
+    expect(getComputedStyle(call.querySelector('.transcript-cell-detail')!).marginLeft).toBe('19px'); // 19 px in from the text
   });
 
   it('running: the running ring in the mark’s place on a line with no box', async () => {
@@ -303,7 +305,7 @@ describe('no tool call draws a box', () => {
 });
 
 // The turn line's "N denied" lands on the denied call itself, which takes focus.
-it('the denied call is still the jump target, and takes focus; a run of one opens to its call', async () => {
+it('the denied call is still the jump target, and takes focus; a run of one’s line takes it', async () => {
   const offsetHeight = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'offsetHeight')!;
   Object.defineProperty(HTMLElement.prototype, 'offsetHeight', {
     configurable: true,
@@ -317,14 +319,95 @@ it('the denied call is still the jump target, and takes focus; a run of one open
     act(() => useTranscriptStore.getState().jumpTo(source.key!, target));
     await waitFor(() => expect(document.activeElement?.getAttribute('data-cell-id')).toBe(target));
     expect(document.activeElement?.hasAttribute('data-standalone')).toBe(true);
-    // and a jump to a run of one's call opens its run, as a jump into a run does, and lands on the run's line
+    // and a jump to a run of one's call lands on its one line, as a jump to any lone call does
     const lone = cellId.tool(tool('one'));
     act(() => useTranscriptStore.getState().jumpTo(source.key!, lone));
-    const runLine = () => document.querySelector(`[data-row-id="${lone}"] .transcript-run-line`);
-    await waitFor(() => expect(document.activeElement).toBe(runLine()));
-    expect(runLine()?.getAttribute('aria-expanded')).toBe('true');
-    expect(document.querySelector(`[data-cell-id="${lone}"][data-run-of-one]`)).not.toBeNull();
+    const line = () => document.querySelector(`[data-cell-id="${lone}"][data-run-of-one] > .transcript-cell-line`);
+    await waitFor(() => expect(document.activeElement).toBe(line()));
   } finally {
     Object.defineProperty(HTMLElement.prototype, 'offsetHeight', offsetHeight);
   }
+});
+
+// The fix wave of 2026-11-24 (the medium review of the branch). Each case failed before its fix.
+describe('the fix wave', () => {
+  // (1) A call that stands alone while it runs (a non-groupable call follows it in the same message) is drawn as its run
+  // of one; when its result fails it is drawn as its own failed line. One disclosure across the change: opened, it stays
+  // open, and the button that held the keyboard is the same element, still holding it.
+  it('a lone call opened while it runs keeps its detail open and its focus when its result fails', async () => {
+    const b = builder('2026-11-20T10:00:00.000Z');
+    b.turn('u1', 'Build, then look');
+    b.toolUse('mk', 'Bash', { command: 'make', description: 'Build the app' }, 'm1', 0);
+    b.toolUse('js', JS, { code: "await page.goto('http://127.0.0.1:17391/')" }, 'm1', 1);
+    const store = await opened(b.events);
+    const row = () => cellRow(store.rows(), 'mk');
+    expect(row().status).toBe('running');
+    const view = renderRow(row(), { storeKey: store.key });
+    const button = () => view.container.querySelector<HTMLElement>(`[data-cell-id="${cellId.tool(tool('mk'))}"] button[aria-expanded]`)!;
+    const first = button();
+    fireEvent.click(first);
+    view.rerenderRow(row());
+    act(() => button().focus());
+    expect([button().getAttribute('aria-expanded'), document.activeElement === button()]).toEqual(['true', true]);
+    const sent = b.events.length;
+    b.result('mk', 'make: *** [all] Error 2', { isError: true });
+    act(() => store.push(b.events.slice(sent)));
+    expect(row().status).toBe('error');
+    view.rerenderRow(row());
+    expect(button()).toBe(first); // the same element: the change of presentation remounted nothing
+    expect([button().getAttribute('aria-expanded'), document.activeElement === button()]).toEqual(['true', true]);
+    expect(view.container.querySelector('.transcript-cell-detail')).not.toBeNull();
+  });
+
+  // (3) At the narrowest column the gutter is the column's whole 16 px padding: the denied jump's focus ring is drawn
+  // inside the call's box, so it stays in the scrollport, and still takes in the mark.
+  it('the denied call’s focus ring is drawn inside its box, within the 16 px gutter, round the mark', async () => {
+    const slotLeft = px(slotRule().style.marginLeft);
+    const store = await opened(everyCase());
+    const cell = renderRow(cellRow(store.rows(), 'deny'), { storeKey: store.key }).container.querySelector<HTMLElement>('[data-cell-id]')!;
+    const ring = sheetRules().find((rule) => rule.selectorText.includes('.transcript-cell[data-standalone]:focus'))!;
+    const offset = px(ring.style.outlineOffset);
+    const width = 1; // the ring's 1 px (`.transcript-cell:focus`'s outline; happy-dom drops a shorthand holding a token)
+    expect(style.textContent).toContain('.transcript-cell:focus-visible, .transcript-cell:focus { outline: 1px solid');
+    const boxLeft = px(getComputedStyle(cell).marginLeft);
+    expect(boxLeft - offset - width).toBeGreaterThanOrEqual(-16); // the ring's outer edge inside the column's padding
+    expect(boxLeft - offset).toBeLessThanOrEqual(slotLeft + 2); // its inner edge left of the right-aligned mark
+  });
+
+  // (4) A lone call keeps the status cue on its one line: a call the engine moved to the background reads its moved
+  // label with its running ring, then none once its task ends; a stopped call with no description reads its stopped label
+  // with its stop mark, not the run's count of a stopped step.
+  it('a lone call moved to the background keeps its status on its line, running and done', async () => {
+    for (const [seq, status] of [[50, 'running'], [204, 'done']] as const) {
+      const store = await storeWith(journalToEvents(loadUxwaveJournal('u4p1-a-seeded-1').filter((row: JournalRow) => row.seq <= seq)));
+      useTranscriptStore.getState().expandAll(store.key);
+      const row = cellRow(store.rows(), 'toolu_01UK719ATPuRjLtWeTEn9rZ1');
+      const view = renderRow(row, { storeKey: store.key });
+      const cell = view.container.querySelector<HTMLElement>('[data-cell-id]')!;
+      expect([cell.dataset.status, cell.querySelector('button')?.textContent]).toEqual([status, expect.stringMatching(/^Moved node wait\.cjs a1 40 to the background after /)]);
+      cleanup();
+    }
+  });
+
+  it('a lone stopped call with no description reads “Stopped a command” with its stop mark', async () => {
+    const b = builder('2026-11-20T10:00:00.000Z');
+    b.turn('u1', 'Deploy');
+    b.toolUse('dep', 'Bash', { command: './deploy.sh production' });
+    b.end(['u1'], { isError: true, result: 'error_during_execution', terminalReason: 'aborted_tools' });
+    const store = await opened(b.events);
+    const row = cellRow(store.rows(), 'dep');
+    expect([row.kind, row.status]).toEqual(['cell', 'stopped']);
+    const cell = renderRow(row, { storeKey: store.key }).container.querySelector<HTMLElement>('[data-cell-id]')!;
+    expect([cell.dataset.status, cell.querySelector('button')?.textContent]).toEqual(['stopped', 'Stopped a command']);
+  });
+
+  // (5) Where nothing can point, a closed lone line shows its chevron at rest, as a fact shown on pointing is drawn at
+  // rest there (ui/touch-fact.tsx); a pointer screen keeps it hover-only (the owner's ruling).
+  it('under (hover: none) a lone line’s chevron shows at rest', () => {
+    const media = [...style.sheet!.cssRules].filter((rule): rule is CSSMediaRule => rule instanceof CSSMediaRule && rule.conditionText.replace(/\s+/g, '') === '(hover:none)');
+    const rules = media.flatMap((rule) => [...rule.cssRules]).filter((rule): rule is CSSStyleRule => rule instanceof CSSStyleRule);
+    expect(rules.some((rule) => rule.selectorText.includes('.transcript-cell[data-standalone] > .transcript-cell-line > .transcript-chevron') && rule.style.opacity === '1')).toBe(true);
+    const pointer = sheetRules().find((rule) => rule.selectorText === '.transcript-cell-line > .transcript-chevron')!;
+    expect(pointer.style.opacity).toBe('0'); // a pointer screen: hover-only
+  });
 });

@@ -368,10 +368,9 @@ describe('Transcript', () => {
     const key = await mounted(deniedThenAnswer());
     const turn = turnId.ofMessage(uuid('u2'));
     const toggle = () => document.querySelector<HTMLElement>(`[data-row-id="${rowId.divider(turn)}"] button[aria-expanded]`)!;
-    const target = cellId.tool(tool('t2')); // the turn's standalone cell, its own row: a run of one, folded (board ticket 852)
+    const target = cellId.tool(tool('t2')); // the turn's standalone cell, its own row
     fireEvent.click(toggle());
-    await waitFor(() => expect(document.querySelector(`[data-row-id="${target}"]`)).not.toBeNull());
-    expect(document.querySelector(`[data-cell-id="${target}"]`)).toBeNull();
+    await waitFor(() => expect(document.querySelector(`[data-cell-id="${target}"]`)).not.toBeNull());
     fireEvent.click(toggle());
     expect(toggle().getAttribute('aria-expanded')).toBe('false');
     act(() => useTranscriptStore.getState().jumpTo(key, target));

@@ -80,8 +80,8 @@ describe('group row', () => {
 });
 
 describe('standalone cell row', () => {
-  // board ticket 852: drawn as its run, opened here (expandAll opens a run of one as it opens any run) straight onto its
-  // call's detail, with no line of the call's own
+  // board ticket 852: one line read as its run, opened here (expandAll opens a run of one as it opens any run) straight
+  // onto its call's detail
   it('a completed single-cell group renders as a standalone cell row, drawn as a run of one', async () => {
     const b = builder();
     b.turn('u1');
@@ -91,10 +91,10 @@ describe('standalone cell row', () => {
     const store = await expanded(b.events);
     expect(ofKind(store.rows(), 'group')).toHaveLength(0);
     const view = renderRow(rowOf(store.rows(), 'cell'), { storeKey: store.key });
-    expect(view.container.querySelector('[data-cell-count]')?.getAttribute('data-cell-count')).toBe('1');
-    expect(view.container.querySelector('.transcript-run-line')?.textContent).toBe('Ran a command'); // no description: the run's words
-    expect(view.container.querySelector('[data-cell-id="cell:t1"][data-run-of-one] .transcript-cell-detail .transcript-shell-command')?.textContent).toBe('$ git status --short');
-    expect(view.container.querySelector('.transcript-cell-line')).toBeNull();
+    const line = view.container.querySelector('[data-cell-id="cell:t1"][data-run-of-one] > .transcript-cell-line');
+    expect([line?.textContent, line?.getAttribute('aria-expanded')]).toEqual(['Ran a command', 'true']); // no description: the run's words
+    expect(view.container.querySelector('[data-cell-id="cell:t1"] .transcript-cell-detail .transcript-shell-command')?.textContent).toBe('$ git status --short');
+    expect(view.container.querySelector('[data-cell-count], .transcript-run-line')).toBeNull();
   });
 
   it('pass1/permission-roundtrip: the denied call is a standalone, focusable cell row, never inside a group', async () => {

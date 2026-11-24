@@ -8,7 +8,7 @@ import type { SessionEvent } from '@shared/graph/events';
 import type { AgentId, MessageUuid, ToolUseId } from '@shared/graph/ids';
 import { turnActivity, type TurnActivity } from '../transcript/model/activity';
 import { expandedTurnRows, rowsOf, turnRows } from '../transcript/model/derive';
-import { drawsAsRun, runOfOneId } from '../transcript/model/groups'; // board ticket 852
+import { aloneInRun, runOfOneId } from '../transcript/model/groups'; // board ticket 852
 import { marksOfText } from '../transcript/model/owner-marks';
 import { carriedKeys, holdsMessage, keysOfStretch, lostKey, liveMarkedRowIds, mirrorsView, movingKeysOfStretch, openKeysOf, stretchHolding } from '../owner/view/mirror'; // UX wave U2b
 import { applyEvents, createState, RECEIPT_APPLIED, withAgents, withReaderState, withUi, type AgentLookup, type ReceiptUndo, type SpillLoad, type TranscriptState, type TranscriptUi } from '../transcript/model/reduce';
@@ -272,9 +272,9 @@ function locate(rows: Row[], id: string): { row: Row; group: Row | null } | null
     if (row.id === id) return { row, group: null };
     if (row.kind === 'group' && row.cells.some((cell) => cell.id === id)) return { row, group: row };
   }
-  // board ticket 852: a run of one by its run's id, only where no row is that run itself (a later copy of the same call,
-  // as a replay's echo of a seeded history draws one, is a run of the same id)
-  for (const row of rows) if (row.kind === 'cell' && drawsAsRun(row) && runOfOneId(row) === id) return { row, group: null };
+  // board ticket 852: a call alone in its run by its line's key (a key of its turn's: a later run of the same call has
+  // the run's id, and is found above)
+  for (const row of rows) if (row.kind === 'cell' && aloneInRun(row) && runOfOneId(row) === id) return { row, group: null };
   return null;
 }
 
@@ -435,9 +435,7 @@ export function createTranscriptStore() {
       // UX wave U2b (Interfaces §C): in the to-human view MAWS draws, a row inside a closed stretch is out of sight: the
       // jump opens the stretch that holds it
       const closed = closedStretchesHolding(key, current, id);
-      // board ticket 852: a run of one drawn folded holds its call out of sight, as a folded run does
-      const foldedRunOfOne = (row: Row) => row.kind === 'cell' && row.id === id && drawsAsRun(row) && !current.state.ui.expandedGroups.has(runOfOneId(row));
-      if (visible && (!visible.group || (visible.group.kind === 'group' && visible.group.expanded)) && !foldedRunOfOne(visible.row) && closed.length === 0) {
+      if (visible && (!visible.group || (visible.group.kind === 'group' && visible.group.expanded)) && closed.length === 0) {
         const ui = copyUi(current.state.ui, touched(visible.row.turnId));
         ui.revealed = id;
         put(key, { state: withUi(current.state, ui), jump: request(visible.row.id) });
@@ -450,7 +448,6 @@ export function createTranscriptStore() {
       for (const stretch of closed) ui.openStretches!.add(stretch); // UX wave U2b
       if (found.row.turnId !== null && !isExpanded(current.state, found.row.turnId)) expandTurn(ui, found.row.turnId);
       if (found.group) ui.expandedGroups.add(found.group.id);
-      if (foldedRunOfOne(found.row)) ui.expandedGroups.add(runOfOneId(found.row as Extract<Row, { kind: 'cell' }>)); // board ticket 852
       put(key, { state: withUi(current.state, ui), jump: request(found.row.id) });
     };
     // The keys of the closed stretches whose records hold the row or cell out of sight, while the view is the report, is
@@ -813,7 +810,7 @@ export function createTranscriptStore() {
           for (const id of state.order) expandTurn(ui, id);
           for (const row of allExpandedRows(state)) {
             if (row.kind === 'group') ui.expandedGroups.add(row.id);
-            if (row.kind === 'cell' && drawsAsRun(row)) ui.expandedGroups.add(runOfOneId(row)); // board ticket 852: a run of one opens as a run does
+            if (row.kind === 'cell' && aloneInRun(row)) ui.expandedGroups.add(runOfOneId(row)); // board ticket 852: a call alone in its run opens as a run does
             if (!options.cells) continue;
             if (row.kind === 'group') for (const cell of row.cells) ui.expandedCells.add(cell.id);
             else if (row.kind === 'cell') ui.expandedCells.add(row.id);

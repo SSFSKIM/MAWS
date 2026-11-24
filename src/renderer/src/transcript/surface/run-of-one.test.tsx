@@ -13,6 +13,7 @@ import { status } from '../../../../../test/support/builders';
 import { resetSurfaceRegistry } from '../../engine-surface/registry';
 import { useSessions } from '../../stores/sessions';
 import { useTranscriptStore } from '../../stores/transcript';
+import { runOfOneId } from '../model/groups';
 import { builder } from '../model/test-events';
 import { Disclosures, TranscriptProvider } from '../view/context';
 import { RowView } from '../view/rows/Row';
@@ -252,7 +253,8 @@ describe('a run of one opened by a mod’s rewrite', () => {
     expect(store.rows().find((row) => row.kind === 'cell')).toMatchObject({ runExpanded: false });
     const value = (idPrefix: string) => ({ storeKey: store.key, variant: 'session' as const, actions: spyActions(), rewind: null, renderRequest: null, disclosures: new Disclosures(), idPrefix });
     render(<><TranscriptProvider value={value('t')}><Rows storeKey={store.key} /></TranscriptProvider><TranscriptProvider value={value('u')}><Rows storeKey={store.key} /></TranscriptProvider></>); // two mounts at once
-    const open = () => useTranscriptStore.getState().entries[store.key].state.ui.expandedGroups.has('group:cell:t1' as never);
+    const lone = store.rows().find((row): row is Extract<typeof row, { kind: 'cell' }> => row.kind === 'cell')!;
+    const open = () => useTranscriptStore.getState().entries[store.key].state.ui.expandedGroups.has(runOfOneId(lone));
     await waitFor(() => expect(open()).toBe(true));
     await act(() => new Promise((resolve) => setTimeout(resolve, 100)));
     expect(open()).toBe(true);

@@ -2357,13 +2357,13 @@ test('child transcript renders the subagent\u2019s events only', async ({ harnes
   await expect(childDivider).toHaveText(FINISHED_TURN_LINE);
   await expect(childDivider).toHaveAttribute('aria-expanded', 'false');
   await childDivider.click();
-  // board ticket 852: the child's one call is a run of one, folded to its run's words (a Read has no description) until
-  // one press opens it straight onto the call's detail
-  const childRun = child.locator('[data-kind="cell"] .transcript-group[data-cell-count="1"] .transcript-run-line');
+  // board ticket 852: the child's one call is a run of one, its one line in its run's words (a Read has no description),
+  // folded until one press opens it straight onto the call's detail
+  const childRun = child.locator(`[data-cell-id="${CHILD_READS[0]}"][data-run-of-one] > .transcript-cell-line`);
   await expect(childRun).toHaveText(/^Read /);
-  await expect(child.locator(`[data-cell-id="${CHILD_READS[0]}"]`)).toHaveCount(0);
+  await expect(child.locator(`[data-cell-id="${CHILD_READS[0]}"] .transcript-cell-detail`)).toHaveCount(0);
   await childRun.click();
-  await expect(child.locator(`[data-cell-id="${CHILD_READS[0]}"][data-run-of-one] .transcript-cell-detail`)).toHaveCount(1);
+  await expect(child.locator(`[data-cell-id="${CHILD_READS[0]}"] .transcript-cell-detail`)).toHaveCount(1);
   // Only that agent's events: not the other agent's Read, not the parent's prompt, sentence or answers.
   await expect(child.locator(`[data-cell-id="${CHILD_READS[1]}"]`)).toHaveCount(0);
   await expect(child.locator('[data-kind="user"], [data-kind="subagent"]')).toHaveCount(0);
@@ -2657,7 +2657,7 @@ for (const { site, component, outcome } of r3DomCases) {
       } else if (component === 'ToolResult') {
         // X3 renders a completed one-tool run as a standalone cell, drawn as a run of one (board ticket 852): its line
         // (`printf` has no description, so the run's words) opens straight onto the call's detail, which mounts ToolResult.
-        const run = pane.locator('[data-kind="cell"] .transcript-group[data-cell-count="1"] .transcript-run-line');
+        const run = pane.locator('[data-kind="cell"] [data-run-of-one] > .transcript-cell-line');
         await expect(run).toHaveText('Ran a command');
         await run.click();
         const cell = pane.locator('[data-kind="cell"] .transcript-cell[data-run-of-one]');
@@ -2976,11 +2976,11 @@ test('the to-human view folds work by stretch, draws each message as the mod doe
     await expect(pane.locator('.transcript-divider .transcript-disclosure')).toHaveCount(0);
     // The turn's one call is a run of one (board ticket 852; the owner's call of 2026-11-24: it reads its description):
     // the tool summary appears immediately, and the command remains on demand, one press away.
-    const detailToggle = pane.locator('[data-row-id="cell:toolu_01P2cM5Bash01"] .transcript-run-line');
+    const detailToggle = pane.locator('[data-row-id="cell:toolu_01P2cM5Bash01"] [data-run-of-one] > .transcript-cell-line');
     await expect(detailToggle).toHaveText('Checked the tree');
     await expect(detailToggle).toHaveAttribute('aria-expanded', 'false');
-    await expect(tool).toHaveCount(0);
     const command = tool.locator('.transcript-shell-command');
+    await expect(command).toHaveCount(0);
     await detailToggle.click();
     await expect(detailToggle).toHaveAttribute('aria-expanded', 'true');
     await expect(command).toBeVisible();

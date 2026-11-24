@@ -9,6 +9,7 @@ import type { TranscriptSource } from '../transcript/source/types';
 import { synthesise } from '../../../../test/support/synth-transcript';
 import { turnDerivations } from '../transcript/model/derive';
 import { createTranscriptStore, liveBuffer } from './transcript';
+import { runOfOneId } from '../transcript/model/groups';
 
 // A source whose snapshot is fixed and whose batches the test pushes.
 function pushSource(snapshot: SessionEvent[] = []) {
@@ -902,5 +903,26 @@ describe('a run’s toggle beside a run of one of the same call', () => {
     store.getState().toggleGroup(KEY, run);
     const group = store.getState().rows(KEY).find((row) => row.kind === 'group');
     expect(group?.kind === 'group' && group.expanded).toBe(true);
+  });
+
+  // The fix wave of 2026-11-24 (finding 2): the run of one's own toggle, by the id its line presses, opens it, in its own
+  // turn, and leaves the later run of the same call as it was; the engine's site keeps the run's id.
+  it('opens the run of one itself, by the id its line presses, not the later run of the same call', async () => {
+    const b = builder();
+    b.turn('u1');
+    b.toolUse('x', 'Bash', { command: 'printf R3' }, 'm1', 0);
+    b.result('x', 'R3', { structured: BASH_RESULT('R3') });
+    b.end(['u1']);
+    b.turn('u2');
+    b.toolUse('x', 'Bash', { command: 'printf R3' }, 'm2', 0);
+    b.result('x', 'R3', { structured: BASH_RESULT('R3') });
+    const store = createTranscriptStore();
+    await store.getState().attach(KEY, pushSource(b.events).source);
+    store.getState().toggleTurn(KEY, store.getState().entries[KEY].state.order[0]);
+    const lone = () => store.getState().rows(KEY).find((row): row is Extract<Row, { kind: 'cell' }> => row.kind === 'cell')!;
+    store.getState().toggleGroup(KEY, runOfOneId(lone()));
+    const group = store.getState().rows(KEY).find((row) => row.kind === 'group');
+    expect([lone().runExpanded, group?.kind === 'group' && group.expanded]).toEqual([true, false]);
+    expect(runOfOneId(lone())).not.toBe(rowId.group(cellId.tool(tool('x')))); // a key of its turn's, not the run's site id
   });
 });

@@ -101,8 +101,9 @@ function RestThumbnail({ cell }: { cell: Cell }) {
   return image === undefined ? null : <img className="transcript-cell-thumb" src={image.dataUrl} alt="" />;
 }
 
-// `standalone`: the call stands outside any run (board ticket 852: one quiet line like a run's, no box; `data-standalone`)
-export function CellLine({ cell: model, turnId, focusable = false, standalone = false, renderDetail, onToggle }: { cell: Cell; turnId: TurnId | null; focusable?: boolean; standalone?: boolean; renderDetail?: (cell: Cell) => ReactNode; onToggle?: () => void }) {
+// `standalone`: the call stands outside any run (board ticket 852: one quiet line like a run's, no box; `data-standalone`);
+// `runOfOne`, it is read as its run (`data-run-of-one`), in `label`'s words in place of its own
+export function CellLine({ cell: model, turnId, focusable = false, standalone = false, runOfOne = false, label, renderDetail, onToggle }: { cell: Cell; turnId: TurnId | null; focusable?: boolean; standalone?: boolean; runOfOne?: boolean; label?: string; renderDetail?: (cell: Cell) => ReactNode; onToggle?: () => void }) {
   const { storeKey, variant, actions } = useTranscriptContext();
   const blocked = useBlockedState(storeKey, model);
   const cell = blocked === undefined ? model : { ...model, label: blockedLabel(model, blocked) }; // UX wave U1c: "again", "· approved"
@@ -123,11 +124,12 @@ export function CellLine({ cell: model, turnId, focusable = false, standalone = 
       data-expanded={cell.expanded ? '' : undefined}
       data-names-whole={onLine ? '' : undefined}
       data-standalone={standalone ? '' : undefined}
+      data-run-of-one={runOfOne ? '' : undefined}
       tabIndex={focusable ? -1 : undefined}
     >
       <button type="button" className="transcript-cell-line" title={cell.paths.length > 0 ? cell.paths.join('\n') : undefined} aria-expanded={cell.expanded} onClick={onToggle ?? (() => useTranscriptStore.getState().toggleCell(storeKey, cell.id))}>
         <span className="transcript-cell-label">
-          {waiting ? <CodeText text={waitingLabel(cell)} /> : <CellLabel cell={cell} />}
+          {waiting ? <CodeText text={waitingLabel(cell)} /> : label !== undefined ? <CodeText text={label} /> : <CellLabel cell={cell} />}
           {cell.error !== undefined && <>{' '}<span className="transcript-cell-reason">{cell.error}</span></>}
         </span>
         {counts && <LineCounts added={Number(counts[1])} removed={Number(counts[2])} />}

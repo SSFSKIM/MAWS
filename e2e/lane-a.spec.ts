@@ -1590,7 +1590,7 @@ test.describe('lane A: a terminal session driven through its bridge', () => {
   // of one (the running case's 30 s call) stands last until the retry's rows land.
   async function retried(page: Page, retry: string): Promise<void> {
     const cell = main(page).locator(`[data-cell-id="cell:${retry}"]`);
-    const run = main(page).locator(`[data-row-id="cell:${retry}"] .transcript-run-line`);
+    const run = main(page).locator(`[data-row-id="cell:${retry}"] [data-run-of-one] > .transcript-cell-line`);
     await expect(async () => {
       const line = main(page).locator('.transcript-divider .transcript-disclosure').last();
       if ((await line.getAttribute('aria-expanded')) === 'false') await line.click();

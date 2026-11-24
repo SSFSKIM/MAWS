@@ -842,11 +842,9 @@ export function Transcript({ source, variant, actions, rewind, renderRequest, on
     const frame = requestAnimationFrame(() => {
       const element = document.getElementById(rowElementId(idPrefix, jump.rowId));
       // A cell, standalone (its id is also the row id) or inside a group, takes focus itself when it is focusable
-      // (M4's denied cell), else through its own disclosure button, a run of one's through its run's line (board ticket
-      // 852: the call's detail is its run's body); any other row focuses its wrapper.
+      // (M4's denied cell), else through its own disclosure button; any other row focuses its wrapper.
       const cell = element?.querySelector<HTMLElement>(`[data-cell-id="${CSS.escape(jump.focus)}"]`);
-      const button = (of: HTMLElement) => (of.hasAttribute('data-run-of-one') ? of.closest('.transcript-group')?.querySelector<HTMLElement>('.transcript-run-line') : of.querySelector<HTMLElement>('button')) ?? null;
-      const target = cell ? (cell.hasAttribute('tabindex') ? cell : button(cell)) : element;
+      const target = cell ? (cell.hasAttribute('tabindex') ? cell : cell.querySelector<HTMLElement>('button')) : element;
       const focused = target ?? element;
       focused?.focus({ preventScroll: true });
       if (focused && document.activeElement === focused) handledFocus.current = jump.focus;

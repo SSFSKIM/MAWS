@@ -24,7 +24,7 @@ import { hookNotice, type HookRecord } from './hooks';
 import { agentMessageCopy, baseName, boundaryCopy, BRANCH_HISTORY_DETAIL, PLUGIN, processExitCopy, reconnectCopy, retryCopy, subagentSentence } from './copy';
 import { HANDOVER_REINIT_COPY /* P5 O16 M3b */ } from './copy'; // C12
 import { glyphFor } from './glyphs';
-import { collectCells, drawsAsRun, groupItems, runOfOneId, type WorkItem } from './groups';
+import { aloneInRun, collectCells, groupItems, runOfOneId, type WorkItem } from './groups';
 import { caption, captionParts, finishedLines, stepsOfTurn, turnOrder, type Caption, type SentOutcome } from './caption'; // UX wave U2
 import { cellId, rowId, turnId as turnIdOf } from './keys';
 import type { LiveBlock, TranscriptState, TranscriptUi, TurnState, TurnWork } from './reduce';
@@ -288,7 +288,7 @@ export function withAllExpanded(state: TranscriptState): TranscriptState {
       for (const cell of row.cells) ui.expandedCells.add(cell.id);
     } else if (row.kind === 'cell') {
       ui.expandedCells.add(row.id);
-      if (drawsAsRun(row)) ui.expandedGroups.add(runOfOneId(row)); // board ticket 852: a run of one opens as a run does
+      if (aloneInRun(row)) ui.expandedGroups.add(runOfOneId(row)); // board ticket 852: a call alone in its run opens as a run does
     } else if (row.kind === 'boundary' && row.boundaryKind === 'rewind') ui.revealedBoundaries.add(row.id);
   }
   ui.version += 1;

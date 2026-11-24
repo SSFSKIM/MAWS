@@ -5375,6 +5375,7 @@ test('the word cut’s M4: the mods’ rows, Customize’s plugin and skill rows
 //               runs here: main's own list stays empty, the window keeps what it heard);
 //   autodenied  (recorded: uxwave/u1c-t-idle-1) a Read alone, a command the auto mode classifier denied, the grant's turn;
 //   artifacts   (recorded: p1-maws-artifacts) an artifact's screenshot standing between two runs, one with a failed edit;
+//   stopped     (recorded: w1-steer-next-interrupted) a lone command with no description, its turn stopped mid-call;
 //   report      (invented) the cases above in one turn between the person's messages: the to-human view;
 //   run, rvrun  started here, each on a replay journal of e2e/support/computer-use-replay.ts held while its `js` call
 //               runs (rvrun after a finished to-human turn, so the to-human view is in force over the running call).
@@ -5383,7 +5384,7 @@ test('the word cut’s M4: the mods’ rows, Customize’s plugin and skill rows
 // Every check finds the call by its row (`data-row-id`) or its cell (`data-cell-id`) and the state both builds share
 // (`data-status`, `aria-expanded`), never by what the ticket added, so each holds on master's build too.
 // ======================================================================================================================
-const TC = { failed: 0, rhythm: 1, js: 2, report: 3, run: 4, rvrun: 5, autodenied: 6, artifacts: 7 } as const;
+const TC = { failed: 0, rhythm: 1, js: 2, report: 3, run: 4, rvrun: 5, autodenied: 6, artifacts: 7, stopped: 8 } as const;
 type TcKey = keyof typeof TC;
 const tcDiskId = (key: TcKey) => `0f7a8b9c-0000-4000-8000-0000000008${String(TC[key]).padStart(2, '0')}`;
 const tcTool = (key: TcKey, name: string) => `toolu_01Tc${TC[key]}${name}`;
@@ -5391,6 +5392,9 @@ const tcTool = (key: TcKey, name: string) => `toolu_01Tc${TC[key]}${name}`;
 const TC_RECORDED = {
   autodenied: { file: 'spikes/protocol-probe/fixtures/uxwave/u1c-t-idle-1.transcript.jsonl', read: 'toolu_01Mpxuxmngz99geTTNyNthTG', denied: 'toolu_01VDYnnq8V7AE4hW16wRC3Fe', again: 'toolu_01XuWvu9Gg5Hg9K7cyn78zVe' },
   artifacts: { file: 'test/fixtures/transcripts/p1-maws-artifacts.jsonl', shot: 'toolu_017TH1WuYWAd1Gmq4QRn3DCV', edits: 'toolu_01Trfn7ugsMF9Yv4PnL5DaGr' },
+  // a lone `sleep 6 && echo 1` with no description, its turn stopped mid-call (the person's Esc: the rejected result, then
+  // the interrupt's marker): a standalone row, `stopped`, “Stopped a command” on both builds (the disk derivation's rows)
+  stopped: { file: 'test/fixtures/transcripts/w1-steer-next-interrupted.jsonl', call: 'toolu_018A2pQ8opsSUGLt6bscFJ4R' },
 } as const;
 const TC_COVER = 'spikes/p3-design/results/run-38887236196/f-deck.png'; // 390 × 844
 const TC_TAB = 'b_7c0de0852a01';
@@ -5512,7 +5516,7 @@ const TC_LIVE = {
   rvrun: { title: 'Keep an eye on the sign-in page', prompt: 'The deploy is out: check the sign-in page now.' },
 } as const;
 
-const TC_IDS = ['tc-failed', 'tc-failed-open', 'tc-hover-run-of-one', 'tc-auto-denied', 'tc-run-of-one-open', 'tc-rhythm', 'tc-hover-run', 'tc-denied-jump', 'tc-image-open', 'tc-image-recorded', 'tc-run-opened', 'tc-js-activity', 'tc-js-open', 'tc-rv-rest', 'tc-rv-open', 'tc-rv-open-js', 'tc-rv-denied-jump', 'tc-running-js', 'tc-rv-running'];
+const TC_IDS = ['tc-failed', 'tc-failed-open', 'tc-hover-run-of-one', 'tc-auto-denied', 'tc-run-of-one-open', 'tc-stopped-run-of-one', 'tc-rhythm', 'tc-hover-run', 'tc-denied-jump', 'tc-image-open', 'tc-image-recorded', 'tc-run-opened', 'tc-js-activity', 'tc-js-open', 'tc-rv-rest', 'tc-rv-open', 'tc-rv-open-js', 'tc-rv-denied-jump', 'tc-running-js', 'tc-rv-running'];
 test('the tool card retired: lone calls failed, denied, a js call, an image, a run of one, running, in the transcript and the report view', async () => {
   test.setTimeout(900_000);
   if (!TC_IDS.some(wanted)) return;
@@ -5528,7 +5532,7 @@ test('the tool card retired: lone calls failed, denied, a js call, an image, a r
     writeFileSync(join(project, `${tcDiskId(key)}.jsonl`), `${rows.map((row) => JSON.stringify(row)).join('\n')}\n`);
     if (js) spans[key] = js;
   }
-  for (const key of ['autodenied', 'artifacts'] as const) writeDisk(config, TC_RECORDED[key].file, tcDiskId(key), repoOf(key));
+  for (const key of ['autodenied', 'artifacts', 'stopped'] as const) writeDisk(config, TC_RECORDED[key].file, tcDiskId(key), repoOf(key));
   seedSession(config, repoOf('run'), tcDiskId('run'), TC_LIVE.run.title, '2026-11-21T08:00:00.000Z');
   trust(config);
   installToHumanPlugin(config, { declares: true, version: '0.9.0' });
@@ -5639,8 +5643,9 @@ test('the tool card retired: lone calls failed, denied, a js call, an image, a r
       }).catch((error: unknown) => `the list not read: ${String(error)}`);
       throw new Error(`${what} in sight, nothing over it: ${last}; ${scene}`);
     };
-    // A run's line (or, on master's build, a lone call's card line, the first disclosure of its row) pointed at, and the
-    // check that its chevron is drawn: lines and runs show it only on pointing, focus or open (a card always did)
+    // A line pointed at (a run's, a lone call's, or on master's build a lone call's card line: the first disclosure of its
+    // row), and the check that its chevron is drawn: lines and runs show it only on pointing, focus or open (a card always
+    // did)
     const pointAt = async (line: Locator) => {
       await letGo(page);
       await line.hover();
@@ -5667,10 +5672,10 @@ test('the tool card retired: lone calls failed, denied, a js call, an image, a r
       await place(cellOf(fail));
       await openLine(fail);
     }, { check: checks(seen(cellOf(fail), 'the failed call'), () => lineOpen(fail)) });
-    // the passing command pointed at: on the ticket's build its run's line (the call's description, the chevron after
-    // it); on master's, the call's card line
+    // the passing command pointed at: on the ticket's build its call's one line (the call's description, the chevron
+    // after it); on master's, the call's card line
     const lintLine = () => rowOf(`cell:${lint}`).locator('button[aria-expanded]').first();
-    await shot(page, hoverMeta('tc-hover-run-of-one', 'A run of one pointed at', 'The session “failed” (invented), its turn opened, the pointer on the lone passing command (`pnpm lint`, described “Run the linter”)', 'The run of one’s line under the pointer with its chevron drawn (master: the call’s card, its chevron always drawn)'), async () => {
+    await shot(page, hoverMeta('tc-hover-run-of-one', 'A run of one pointed at', 'The session “failed” (invented), its turn opened, the pointer on the lone passing command (`pnpm lint`, described “Run the linter”)', 'The lone call’s line (“Ran the linter”) under the pointer with its chevron drawn (master: the call’s card, its chevron always drawn)'), async () => {
       await opened('failed');
       await turns(true);
       await place(rowOf(`cell:${lint}`));
@@ -5683,17 +5688,23 @@ test('the tool card retired: lone calls failed, denied, a js call, an image, a r
       await turns(true);
       await place(rowOf(`cell:${auto.read}`));
     }, { check: checks(seen(rowOf(`cell:${auto.read}`), 'the lone Read before it'), seen(cellOf(auto.denied), 'the denied call'), () => status(auto.denied, 'denied')) });
-    // the lone command of the grant's turn pressed: on the ticket's build its run's line, opening straight onto the call's
-    // detail (its command and result); on master's, the call's own card (the first disclosure of the call's row, on either
+    // the lone command of the grant's turn pressed: on the ticket's build its call's one line, opening its detail (its
+    // command and result) under it; on master's, the call's own card (the first disclosure of the call's row, on either
     // build)
     const again = () => rowOf(`cell:${auto.again}`).locator('button[aria-expanded]').first();
-    await shot(page, meta('tc-run-of-one-open', 'A run of one, opened', 'The session “autodenied” (recorded, uxwave/u1c-t-idle-1), both turns opened, then the second turn’s lone command pressed', 'On the ticket’s build the run’s line open onto the call’s command and result, no inner line; on master the call’s card open'), async () => {
+    await shot(page, meta('tc-run-of-one-open', 'A run of one, opened', 'The session “autodenied” (recorded, uxwave/u1c-t-idle-1), both turns opened, then the second turn’s lone command pressed', 'On the ticket’s build the call’s line open, its command and result under it; on master the call’s card open'), async () => {
       await opened('autodenied');
       await turns(true);
       await place(rowOf(`cell:${auto.again}`));
       if ((await again().getAttribute('aria-expanded')) !== 'true') await press(page, again(), 'the lone command’s first line');
       await page.waitForTimeout(800);
     }, { check: checks(seen(rowOf(`cell:${auto.again}`), 'the lone command'), () => expect(again(), 'its line open').toHaveAttribute('aria-expanded', 'true', { timeout: 3_000 })) });
+    const stopped = TC_RECORDED.stopped.call;
+    await shot(page, meta('tc-stopped-run-of-one', 'A lone command the person stopped', 'The session “stopped” (recorded, w1-steer-next-interrupted), its turns opened', 'The lone `sleep 6 && echo 1`, no description, stopped mid-call: its stopped mark and “Stopped a command” (master: the same call’s card)'), async () => {
+      await opened('stopped');
+      await turns(true);
+      await place(cellOf(stopped));
+    }, { check: checks(seen(cellOf(stopped), 'the stopped call'), () => status(stopped, 'stopped')) });
 
     const deny = tcTool('rhythm', 'Deny');
     const cover = tcTool('rhythm', 'Cover');

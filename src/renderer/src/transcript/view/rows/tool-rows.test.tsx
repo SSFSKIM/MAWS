@@ -59,7 +59,7 @@ it('bounds a long multiline command behind Show more without losing the command'
 
 // Board ticket 850, item 6: a standalone call's wrapper leaves no space of its own where what it holds draws nothing (a
 // mod's answer that hides the call); the space above and below a call is the call's own line's, kept inside the wrapper.
-// Board ticket 852: a lone finished call is drawn as its run of one, whose line's space is the run's.
+// Board ticket 852: a lone finished call is its one line, read as its run of one, with a run's space.
 it('a standalone call’s space is its line’s: the wrapper with nothing drawn in it takes no height of its own', async () => {
   const style = document.createElement('style');
   style.textContent = readFileSync(join(__dirname, '../transcript.css'), 'utf8');
@@ -73,7 +73,7 @@ it('a standalone call’s space is its line’s: the wrapper with nothing drawn 
   const space = (element: Element) => { const s = getComputedStyle(element); return [s.paddingTop, s.paddingBottom, s.marginTop, s.marginBottom].map((value) => value || '0px'); }; // jsdom: '' where nothing is declared
   expect(space(wrapper)).toEqual(['0px', '0px', '0px', '0px']);
   expect(getComputedStyle(wrapper).display).toBe('flow-root'); // the line's margins stay inside the row the list measures
-  expect(space(wrapper.querySelector('.transcript-group')!)).toEqual(['1px', '6px', '0px', '0px']);
-  wrapper.querySelector('.transcript-group')!.remove(); // what a hiding answer leaves: nothing drawn
+  expect(space(wrapper.querySelector('.transcript-cell')!)).toEqual(['0px', '0px', '1px', '6px']);
+  wrapper.querySelector('.transcript-cell')!.remove(); // what a hiding answer leaves: nothing drawn
   expect(space(wrapper)).toEqual(['0px', '0px', '0px', '0px']);
 });

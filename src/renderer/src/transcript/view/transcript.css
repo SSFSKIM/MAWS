@@ -457,9 +457,14 @@ button.transcript-chip:hover { background: var(--bg-hover); }
    Board ticket 852: no box; a standalone call is one quiet line as a run's is (its size, its 24 px line, its chevron
    after the text, shown on pointing, focus or open), with a run's space around it, so standalone lines and runs keep one
    rhythm; what it shows at rest (an image's thumbnail, a blocked call's control) and its opened detail sit under it,
-   indented 19 px from its text. A run of one is a run (`.transcript-group`). */
+   indented 19 px from its text. A call alone in its run is the same line, read as its run (`data-run-of-one`). */
 .transcript-standalone { display: flow-root; }
 .transcript-cell[data-standalone] { margin: 1px 0 6px -16px; padding-left: 16px; } /* board ticket 852: the box takes in the hung glyph's gutter, so a focus ring (the denied jump's target) rings the mark too */
+/* its ring inside that box: at the narrowest column the gutter is the column's whole padding, and a ring outside it would
+   fall out of the scrollport */
+.transcript-cell[data-standalone]:focus-visible, .transcript-cell[data-standalone]:focus { outline-offset: -1px; }
+/* where nothing can point, a closed lone line shows its chevron at rest, as a fact shown on pointing is (ui/touch-fact.tsx) */
+@media (hover: none) { .transcript-cell[data-standalone] > .transcript-cell-line > .transcript-chevron { opacity: 1; } }
 .transcript-cell[data-standalone] > .transcript-cell-line { display: flex; width: fit-content; gap: 6px; max-width: 100%; min-width: 0; min-height: 24px; font-size: var(--text-ui); line-height: 24px; }
 .transcript-cell[data-standalone] > .transcript-cell-line > .transcript-chevron { margin-left: 0; }
 .transcript-cell-thumb { display: block; max-width: min(240px, calc(100% - 19px)); max-height: 96px; margin: 2px 0 2px 19px; border: 1px solid var(--border); border-radius: var(--radius-sm); object-fit: contain; }

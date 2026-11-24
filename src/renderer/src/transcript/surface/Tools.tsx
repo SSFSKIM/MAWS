@@ -3,12 +3,11 @@ import type { TranscriptProps } from '@shared/engine/surface-rows';
 import { SurfaceRow } from '../../engine-surface/SurfaceRow';
 import { useSurfaceAttached, useSurfaceHooked } from '../../engine-surface/site';
 import { useTranscriptStore } from '../../stores/transcript';
-import { drawsAsRun, runOfOne, runOfOneId } from '../model/groups';
+import { aloneInRun, drawsAsRun, runOfOneId, runOfOneLabel } from '../model/groups';
 import type { Cell, Row, TurnId } from '../model/rows';
 import { CellDetailView } from '../view/cells/CellDetail';
 import { CellLine } from '../view/cells/CellLine';
 import { useDisclosure } from '../view/context';
-import { GroupRow } from '../view/rows/Group';
 import { asksAsRun, resultInput, standaloneRunInput, toolInputs, withToolProps, type ToolInput } from './adapters';
 import { useTranscriptSurface } from './context';
 
@@ -50,33 +49,28 @@ function ToolResult({ input, drawnProps = input.props, turnId, enabled = true }:
   </SurfaceRow>;
 }
 
-// A run of one: the `ToolGroup` site under the run's id, MAWS's own drawing in its engine slot (an answer with none
-// replaces it, as a run's does). Mounted while it asks nothing (a request waits on the call, the jump's target), so the
-// drawing keeps its element. Board ticket 852: drawn as a run is, its one line reading its run's caption, its open state
-// its run's (a run's rewrite of that state opens it, as a run's does); one press opens it straight onto its call's detail
-// (the command and its result), under the line with no block, the call's own element (`data-cell-id`, its status) holding
-// it. A call the classification put apart (a refusal, an image) or a failed one is its call's own line.
+// A call alone in its run: the `ToolGroup` site under the run's id, MAWS's own drawing in its engine slot (an answer with
+// none replaces it, as a run's does). Mounted while it asks nothing (a request waits on the call, the jump's target), so
+// the drawing keeps its element. Board ticket 852: one quiet line, its call's own `CellLine`, whatever its presentation:
+// read as its run (`runOfOneLabel`: its description, else the run's words) unless it failed, its status mark its call's
+// (a running ring, a stop), one press opening it straight onto its command and result. Its open state is one, its run's
+// key of its turn's (a run's rewrite of that state opens it, as a run's does), so a result that turns it into a failed
+// line keeps it open, and the line keeps its element and the keyboard.
 const NO_GROUP = { calls: [], isActive: false, isExpanded: false };
 function RunOfOne({ cell, turnId, focusable, inputs }: { cell: Extract<Row, { kind: 'cell' }>; turnId: TurnId | null; focusable: boolean; inputs: ToolInput[] }) {
   const { appSessionId, state, turn, storeKey } = useTranscriptSurface({ turnId });
   const input = state ? standaloneRunInput(cell, turn, state, state.ui.revealed) : null;
-  const run = drawsAsRun(cell);
   const id = runOfOneId(cell);
   const expand = useCallback((props: TranscriptProps['ToolGroup']) => {
-    if (!run || !props.isExpanded) return;
+    if (!props.isExpanded) return;
     // read now, not from the render: two mounts of one transcript answered alike must not open it and close it again
     const open = useTranscriptStore.getState().entries[storeKey]?.state.ui.expandedGroups.has(id) ?? false;
     if (!open) useTranscriptStore.getState().toggleGroup(storeKey, id);
-  }, [run, storeKey, id]);
-  const detail = (concealed: boolean) => (
-    <div className="transcript-cell" data-cell-id={cell.id} data-status={cell.status} data-expanded="" data-run-of-one="">
-      {inputs.length === 1 ? <ToolResult input={{ ...inputs[0], cell }} turnId={turnId} enabled={!concealed} /> : <CellDetailView cell={cell} turnId={turnId} />}
-    </div>
-  );
-  const line = (concealed: boolean) => <CellLine cell={cell} turnId={turnId} focusable={focusable && !concealed} standalone renderDetail={inputs.length === 1 ? (drawn) => <ToolResult input={{ ...inputs[0], cell: drawn }} turnId={turnId} enabled={!concealed} /> : undefined} />;
+  }, [storeKey, id]);
+  const toggle = useCallback(() => useTranscriptStore.getState().toggleGroup(storeKey, id), [storeKey, id]);
+  const alone = aloneInRun(cell); // else a call its result put apart (a refusal, an image): its own line and open state
   return <SurfaceRow appSessionId={appSessionId} component="ToolGroup" instanceId={input?.instanceId ?? cell.id} props={input?.props ?? NO_GROUP} enabled={input !== null} onRewrite={expand} placeholder={<span className="text-fg-faint">…</span>}>
-    {(_props, { concealed }) => run
-      ? <GroupRow row={runOfOne(cell)} renderBody={() => detail(concealed)} />
-      : line(concealed)}
+    {(_props, { concealed }) => <CellLine cell={alone ? { ...cell, expanded: cell.runExpanded === true } : cell} turnId={turnId} focusable={focusable && !concealed} standalone runOfOne={drawsAsRun(cell)} label={runOfOneLabel(cell) ?? undefined} onToggle={alone ? toggle : undefined}
+      renderDetail={inputs.length === 1 ? (drawn) => <ToolResult input={{ ...inputs[0], cell: drawn }} turnId={turnId} enabled={!concealed} /> : undefined} />}
   </SurfaceRow>;
 }
