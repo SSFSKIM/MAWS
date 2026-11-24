@@ -597,8 +597,9 @@ describe('P3-F: Tab leaves the stage past its last element (scalpel-4#1, WCAG 2.
     expect(document.activeElement).toBe(notes);
     await user.keyboard('{Enter}');
     expect(notes.getAttribute('aria-expanded')).toBe('true');
-    await user.tab();
+    // the pair review (G436): opening the notes puts the caret in the field, so no Tab is needed to reach it
     expect(document.activeElement).toBe(screen.getByRole('textbox', { name: 'Speaker notes' }));
+    await user.tab();
     expect(document.activeElement).not.toBe(stage);
   });
 
