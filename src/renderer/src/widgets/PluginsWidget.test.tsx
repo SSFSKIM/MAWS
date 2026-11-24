@@ -1082,6 +1082,7 @@ describe('plugins widget: whole-branch review fixes', () => {
       '/work/other/.claude/settings.local.json',
       `${cwd}/.claude/settings.json`,
       `${cwd}/.claude/settings.local.json`,
+      `${GLOBAL} › declinedPlugins`,
     ]);
     expect(within(sheet()).getByText('and any enable or disable override for them in these settings files')).toBeTruthy();
     const confirm = within(sheet()).getByRole('button', { name: 'Remove' });
