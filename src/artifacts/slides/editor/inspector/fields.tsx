@@ -99,7 +99,8 @@ export interface NumberFieldProps {
 
 export function NumberField({ label, caption, value, mixed = false, hint = '', unit, step = 1, onCommit, disabled = false, whole = false, unavailable = null }: NumberFieldProps) {
   const readOnly = useInspector().readOnly || disabled;
-  const greyed = !readOnly && unavailable !== null && unavailable !== '';
+  // a reason keeps its field focusable in a read-only deck too (the reason's owner), edits refused either way
+  const greyed = unavailable !== null && unavailable !== '';
   const id = useId();
   const [draft, setDraft] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -134,7 +135,7 @@ export function NumberField({ label, caption, value, mixed = false, hint = '', u
           aria-invalid={error !== null || undefined}
           aria-describedby={[error !== null ? `${id}-error` : '', greyed ? `${id}-why` : ''].filter(Boolean).join(' ') || undefined}
           aria-disabled={greyed || undefined}
-          disabled={readOnly}
+          disabled={readOnly && !greyed}
           readOnly={greyed || undefined}
           value={shown}
           placeholder={mixed ? C.mixed : token !== null ? tokenLabel(token) : hint}

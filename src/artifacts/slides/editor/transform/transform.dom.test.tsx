@@ -188,7 +188,7 @@ describe('the gestures', () => {
 
 describe('the always-available Arrange menu', () => {
   function mount(ctx = gestureContext(deck())) {
-    const props = { session: ctx.session, slideId: ctx.slideId, canvas: ctx.canvas, scale: ctx.scale, onInsert: vi.fn(), onNotice: vi.fn(), inspectorOpen: false, onToggleInspector: vi.fn() };
+    const props = { session: ctx.session, slideId: ctx.slideId, canvas: ctx.canvas, scale: ctx.scale, onInsert: vi.fn(), onNotice: vi.fn(), onStatus: vi.fn(() => () => {}), inspectorOpen: false, onToggleInspector: vi.fn() };
     const utils = render(<ElementBar {...props} readOnly={false} />);
     const user = userEvent.setup();
     const choose = async (name: string) => {

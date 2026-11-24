@@ -5,7 +5,8 @@
 // Only for the glyphs rule 4 allows. The shortcut comes formatted (a renderer caller reads it with
 // `useChordHint(action)`, app/IconButton.tsx), so the part reads no store and an editor bundle can draw it. A `detail`
 // says what the press acts on now (the board a design's comment goes on, M5's G514): a line of the tooltip under the
-// word, and part of the description, the name staying the word.
+// word, and part of the description, the name staying the word. A `tip` is the tooltip's words where a row the owner
+// saw keeps a longer tooltip than the name (the deck's Add comment, G403), the shortcut still after it.
 import type { ComponentPropsWithRef, ReactNode } from 'react';
 import { Tip, UNAVAILABLE_LOOK, unavailableClickProps } from './tip';
 
@@ -18,12 +19,13 @@ export interface NamedGlyphProps extends Omit<ComponentPropsWithRef<'button'>, '
   shortcut?: string | null;
   unavailable?: string | null; // why it is greyed
   detail?: string | null; // what the press acts on now
+  tip?: string; // the tooltip's words, when they are not the name's
   pressed?: boolean;
   children: ReactNode; // the icon, aria-hidden
 }
 
-export function NamedGlyph({ label, shortcut, unavailable, detail, pressed, className = GLYPH_BUTTON, children, ref, ...button }: NamedGlyphProps) {
-  const named = shortcut ? `${label} · ${shortcut}` : label;
+export function NamedGlyph({ label, shortcut, unavailable, detail, tip = label, pressed, className = GLYPH_BUTTON, children, ref, ...button }: NamedGlyphProps) {
+  const named = shortcut ? `${tip} · ${shortcut}` : tip;
   const description = [unavailable, detail, shortcut].filter((part) => part).join(' · ');
   return (
     <Tip

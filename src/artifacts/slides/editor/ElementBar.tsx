@@ -12,7 +12,7 @@ import type { SlideCanvas } from '../canvas';
 import type { NewKind } from '../writers-elements';
 import { DECK_COPY as C } from './copy';
 import { InsertMenu } from './menus/Insert';
-import type { ShowNotice } from './notice';
+import type { ShowNotice, StartStatus } from './notice';
 import type { DeckSession } from './session';
 import { selectionCommands } from './transform/commands';
 import { useDocVersion } from './transform/use-doc-version';
@@ -26,13 +26,15 @@ export interface ElementBarProps {
   onInsert: (kind: NewKind) => void;
   uploadAsset?: (file: File) => Promise<string>;
   onNotice: ShowNotice;
+  /** A status that lasts while its operation runs (an image's upload). */
+  onStatus: StartStatus;
   inspectorOpen: boolean;
   onToggleInspector: () => void;
   /** Text style belongs between Insert and Arrange in both editors. */
   children?: ReactNode;
 }
 
-export function ElementBar({ session, slideId, canvas, scale, readOnly, onInsert, uploadAsset, onNotice, inspectorOpen, onToggleInspector, children }: ElementBarProps) {
+export function ElementBar({ session, slideId, canvas, scale, readOnly, onInsert, uploadAsset, onNotice, onStatus, inspectorOpen, onToggleInspector, children }: ElementBarProps) {
   const state = useSyncExternalStore(session.subscribe, session.snapshot);
   useDocVersion(session);
   const cmds = slideId && canvas?.slideId === slideId ? selectionCommands({ session, slideId, canvas, scale }, state.selection, readOnly) : null;
@@ -45,7 +47,7 @@ export function ElementBar({ session, slideId, canvas, scale, readOnly, onInsert
   );
   return (
     <div className="deck-element-bar" role="group" aria-label={C.arrange}>
-      <InsertMenu session={session} disabled={readOnly || slideId === null} onInsert={onInsert} uploadAsset={uploadAsset} onNotice={onNotice} />
+      <InsertMenu session={session} disabled={readOnly || slideId === null} onInsert={onInsert} uploadAsset={uploadAsset} onNotice={onNotice} onStatus={onStatus} />
       {children}
       <DropdownMenu.Root modal={false}>
         <DropdownMenu.Trigger asChild>

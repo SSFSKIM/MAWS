@@ -488,6 +488,7 @@ export function DesignWorkbench(props: DesignWorkbenchProps) {
               onInsert={insert}
               uploadAsset={uploadAsset}
               onNotice={setNotice}
+              onStatus={notice.begin}
               inspectorOpen={inspectorOpen}
               onToggleInspector={() => setInspectorOpen((open) => !open)}
             >

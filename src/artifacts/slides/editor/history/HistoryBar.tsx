@@ -40,20 +40,20 @@ export function HistoryBar({ preview, controller, onBack, toolbarEnd }: { previe
         <span className="deck-toolbar-spacer" />
         {preview.versionId !== null && (
           <>
-            <Button label={C.restore} tip onClick={() => setConfirming(true)}>
+            <Button label={C.restore} tip={C.restore} onClick={() => setConfirming(true)}>
               {C.restoreWord}
             </Button>
             <Button label={C.copy} onClick={() => void controller.duplicate()}>
               {C.copy}
             </Button>
             {controller.canName && (
-              <Button label={C.name} tip onClick={() => setNaming(true)}>
+              <Button label={C.name} tip={C.name} onClick={() => setNaming(true)}>
                 {C.nameWord}
               </Button>
             )}
           </>
         )}
-        <Button label={C.back} tip onClick={onBack}>
+        <Button label={C.backName} tip={C.back} onClick={onBack}>
           {C.backWord}
         </Button>
         {toolbarEnd}
@@ -82,15 +82,15 @@ export function HistoryBar({ preview, controller, onBack, toolbarEnd }: { previe
   );
 }
 
-// `tip`: its words are shorter than its name, so the name is its tooltip (G490); a button whose words are its name has
+// `tip`: its words are shorter than its name, so the full words are its tooltip (G490); a button whose words are its name has
 // none, and the arrows keep their system `title` as on master (board ticket 815).
-function Button({ label, disabled, tip = false, onClick, children }: { label: string; disabled?: boolean; tip?: boolean; onClick(): void; children: ReactNode }) {
+function Button({ label, disabled, tip, onClick, children }: { label: string; disabled?: boolean; tip?: string; onClick(): void; children: ReactNode }) {
   const button = (
-    <button type="button" className="deck-button" aria-label={label} title={tip ? undefined : label} disabled={disabled} onClick={onClick}>
+    <button type="button" className="deck-button" aria-label={label} title={tip !== undefined ? undefined : label} disabled={disabled} onClick={onClick}>
       {children}
     </button>
   );
-  return tip ? <Tip content={label}>{button}</Tip> : button;
+  return tip !== undefined ? <Tip content={tip}>{button}</Tip> : button;
 }
 
 function NameForm({ onName, onDone }: { onName(label: string): Promise<boolean>; onDone(): void }) {

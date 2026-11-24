@@ -23,7 +23,8 @@ export const HISTORY_COPY = {
   nameField: 'Version name',
   namePlaceholder: 'Version name', // G492
   save: 'Save',
-  back: 'Back to presentation',
+  back: 'Back to presentation', // G490: Done's tooltip
+  backName: 'Done, back to presentation', // Done's name begins with the word it draws (label in name, WCAG 2.5.3)
   backWord: 'Done',
   filmstrip: 'Slides in this version',
   slideLabel: (n: number, kind: string | null) => `Slide ${n}${kind === 'added' ? ', new' : kind === 'removed' ? ', deleted' : kind === 'changed' ? ', changed' : ''}`,
@@ -72,7 +73,7 @@ const CHANGE_WORDS: Record<string, string> = {
   'style:border-radius': 'corners',
   'style:box-shadow': 'shadow',
   'style:opacity': 'opacity',
-  'style:transform': 'rotation',
+  'style:transform': 'transform', // the change does not say whether it turned, scaled or moved
   'style:left': 'position',
   'style:top': 'position',
   'style:right': 'position',

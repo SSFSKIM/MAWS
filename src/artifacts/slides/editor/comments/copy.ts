@@ -4,8 +4,9 @@
 // is named `…Name`.
 export const COMMENTS_COPY = {
   comment: 'Add comment',
+  commentTip: 'Comment on the selected element', // G403 (seen): the glyph's tooltip, its chord after it
   commentUnavailable: 'Select one element to comment on', // G403: the greyed glyph's reason
-  comments: 'Comments',
+  comments: 'Comments', // G404 (seen): the toggle's tooltip
   commentsOpen: (open: number) => (open > 0 ? `Comments (${open} open)` : 'Comments'),
   rail: 'Comments',
   close: 'Close comments',

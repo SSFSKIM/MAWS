@@ -277,8 +277,8 @@ export function ShadowSection() {
     }, how);
   // a shape other than a rect draws its shadow from its outline (drop-shadow, fix wave 1): it has no inset and no spread
   const outline = picked.some((p) => p.tag === 'x-shape' && p.attrs.kind !== 'rect');
+  // Spread's and Inset's reason; each stays focusable with it in a read-only deck too, its edits refused
   const outlineReason = outline ? C.outlineShadow : null;
-  const insetReason = readOnly ? null : outlineReason;
   const len = (label: string, key: 'x' | 'y' | 'blur' | 'spread', unavailable: string | null = null) => (
     <NumberField label={label} caption={C.shadowCaptions[key]} unit="px" value={first?.[key] ?? null} mixed={value.mixed} unavailable={unavailable} onCommit={(n, how) => (n === null && key !== 'spread' ? [] : write({ [key]: n }, how))} />
   );
@@ -305,14 +305,14 @@ export function ShadowSection() {
           <div className="deck-inspector-triple">
             {len(C.shadowSpread, 'spread', outlineReason)}
             <label className="deck-inspector-check">
-              <Tip content={insetReason} {...unavailableClickProps(insetReason)}>
-                <input type="checkbox" aria-label={C.shadowInset} aria-describedby={insetReason ? insetWhy : undefined} checked={!outline && (first?.inset ?? false)} disabled={readOnly || (!outline && value.mixed)} onChange={() => !outline && write({ inset: !(first?.inset ?? false) }, 'edit')} />
+              <Tip content={outlineReason} {...unavailableClickProps(outlineReason)}>
+                <input type="checkbox" aria-label={C.shadowInset} aria-describedby={outlineReason ? insetWhy : undefined} checked={!outline && (first?.inset ?? false)} disabled={!outline && (readOnly || value.mixed)} onChange={() => !outline && write({ inset: !(first?.inset ?? false) }, 'edit')} />
               </Tip>
               <span>{C.shadowInset}</span>
             </label>
-            {insetReason && (
+            {outlineReason && (
               <span id={insetWhy} hidden>
-                {insetReason}
+                {outlineReason}
               </span>
             )}
           </div>

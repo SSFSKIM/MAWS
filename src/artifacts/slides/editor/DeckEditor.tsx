@@ -437,6 +437,7 @@ export function DeckEditor({ session, assetUrl, system, readOnly, compact = fals
               onInsert={insert}
               uploadAsset={uploadAsset}
               onNotice={setNotice}
+              onStatus={notice.begin}
               inspectorOpen={inspectorOpen}
               onToggleInspector={() => setInspectorOpen((open) => !open)}
             >
