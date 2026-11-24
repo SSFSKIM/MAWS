@@ -44,6 +44,7 @@
 import { mkdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { test, expect, type Locator } from '@playwright/test';
+import { expectDrawn } from './support/screen-reader-only';
 import { daemonPaths } from '@shared/daemon/files';
 import { CONNECTOR_OPERATION_DEADLINE_MS } from '@shared/artifacts/connectors';
 import { DATASET_STATES, utcTime } from '../src/artifacts/dashboard/states';
@@ -102,8 +103,10 @@ const PROOF = 'test-results/dashboard-live-data';
 // the full time as its description.
 async function expectNewerRows(block: Locator): Promise<void> {
   const line = block.locator('[data-live-newer]');
-  await expect(line).toContainText(/^Newer rows at \d{2}:\d{2}/);
-  await expect(line.locator('[data-live-newer-at]')).toHaveAccessibleDescription(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2} UTC$/);
+  await expect(line).toContainText(/^Newer rows at \d{2}:\d{2}/, { useInnerText: true }); // the line as rendered
+  const clock = line.locator('[data-live-newer-at]');
+  await expectDrawn(clock, 'the fetch’s clock drawn');
+  await expect(clock).toHaveAccessibleDescription(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2} UTC$/);
 }
 const SOAK_MS = 10 * 60_000;
 const SAMPLE_MS = 30_000;

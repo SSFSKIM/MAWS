@@ -15,6 +15,7 @@ import { expect, type Locator, type Page } from '@playwright/test';
 import { DatasetError, parseDataset } from '../../src/artifacts/dashboard/parse';
 import { launchMaws, type MawsLaunch } from './launch';
 import { sidebarRow } from './sidebar';
+import { replyThroughActiveCard } from './comment-reply';
 
 type Result<T> = { ok: true; value: T } | { ok: false; error: { code: string; message: string } };
 /** A's command from the page, its value or a thrown refusal. */
@@ -200,17 +201,9 @@ export async function railOf(record: Locator): Promise<Locator> {
   return rail;
 }
 
-// The word cut (G385): only the active card has a reply field. Chosen in the rail, a card becomes the active one there
-// (the drawer, or an orphan), or hands its thread to the margin's card and closes the rail (beside the page). The reply
-// goes to the active card wherever it stands, and the rail is open again afterwards, so the caller reads it as before.
+// A reply from the active card (support/comment-reply.ts), the rail open again afterwards so the caller reads it as before.
 export async function reply(record: Locator, threadId: string, text: string): Promise<void> {
-  const rail = await railOf(record);
-  await rail.locator(`article[data-thread="${threadId}"]`).click();
-  const card = record.locator(`article[data-thread="${threadId}"][aria-current="true"]`);
-  const field = card.getByRole('textbox', { name: 'Reply' });
-  await field.fill(text);
-  await field.press('Enter');
-  await expect(card.getByRole('listitem').filter({ hasText: text }), 'the reply posted').toHaveCount(1);
+  await replyThroughActiveCard(record, await railOf(record), threadId, text);
   await railOf(record);
 }
 

@@ -19,6 +19,7 @@ import { openArtifactInPanel, openArtifactReplicaInPanel, pinSurfaceForSessions 
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs';
 import { expect, test, type Locator, type Page } from '@playwright/test';
 import { withNativeClipboard } from './support/clipboard';
+import { replyThroughActiveCard } from './support/comment-reply';
 import { traceForeground } from './support/foreground-trace';
 import { launchMaws, type MawsLaunch } from './support/launch';
 import { sidebarRow } from './support/sidebar';
@@ -886,18 +887,6 @@ async function commentOn(page: Page, record: Locator, text: Locator, index: numb
   return threadId;
 }
 
-// The word cut (G385): only the active card has a reply field. A card chosen in the panel becomes the active one there
-// (the drawer) or hands its thread to the margin's card and closes the panel (beside the page, from 720 px), so the
-// field is the active card's, wherever it stands. Answers that card.
-async function replyTo(record: Locator, rail: Locator, threadId: string, words: string): Promise<Locator> {
-  await rail.locator(`article[data-thread="${threadId}"]`).click();
-  const card = record.locator(`article[data-thread="${threadId}"][aria-current="true"]`);
-  const field = card.getByRole('textbox', { name: 'Reply' });
-  await field.fill(words);
-  await field.press('Enter');
-  return card;
-}
-
 // The Comments rail open, its thread articles (open, then resolved).
 async function railOf(record: Locator): Promise<Locator> {
   const rail = record.getByRole('complementary', { name: 'Comments' });
@@ -1034,7 +1023,7 @@ test('restore brings back a deleted tab and the earlier text while a later reply
   await expect(tabs).toHaveCount(0);
   await expect(text.locator('p')).toHaveText(['The budget review is on Friday.']);
   let rail = await railOf(record);
-  const replied = await replyTo(record, rail, older, 'Posted after the version.');
+  const replied = await replyThroughActiveCard(record, rail, older, 'Posted after the version.'); // the word cut (G385)
   await expect(replied.getByRole('listitem')).toHaveText(['YouPosted after the version.']);
   if (await rail.isVisible()) await record.getByRole('toolbar', { name: 'Formatting' }).getByRole('button', { name: /^Comments/ }).click();
   await caretAtEndOf(page, text, 0);

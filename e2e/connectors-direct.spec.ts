@@ -1023,8 +1023,12 @@ test('engine only: an entry with a reference is the session’s alone; with its 
       await expect(sessionOnly, 'and why').toHaveAccessibleDescription(S.engineOnlyWhy('unattested'));
       await expect(serverRow(sheet, SERVER, 'source'), 'no direct source for it').toHaveCount(0);
       await shot(info, 'engine-only-servers.png', sheet);
+      const why = engineOnly.getByText(S.engineOnlyWhy('unattested'), { exact: true });
+      await run.page.mouse.move(0, 0); // the row not pointed at
+      await expect(why, 'the why undrawn at rest').toBeHidden();
       await sessionOnly.focus();
-      await expect(engineOnly.getByText(S.engineOnlyWhy('unattested'), { exact: true }), 'the why opens in the row on keyboard focus').toBeVisible();
+      await expect(sessionOnly, 'the word takes the keyboard').toBeFocused();
+      await expect(why, 'the why opens in the row on keyboard focus').toBeVisible();
       await scene.closeSheet(run.page);
       await allow(scene, run.page, TOOL_NAME);
       await expect(frame.locator('#last')).toHaveText('ok n=1 via=engine', { timeout: 20_000 });

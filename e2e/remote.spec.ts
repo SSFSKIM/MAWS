@@ -64,6 +64,7 @@ import { connect, createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { expect, test, type ElectronApplication, type Locator, type Page } from '@playwright/test';
+import { expectDrawn } from './support/screen-reader-only';
 import { isolatedGitEnv } from '../test/support/git-env';
 import type { MachineState } from '../src/shared/ipc/schema/machines';
 import type { SessionEvent } from '../src/shared/graph/events';
@@ -1522,7 +1523,8 @@ test('A reaches B’s mawsd over RL2, through the hub and then directly, and dri
       await expect(sendTo).toHaveAttribute('data-send-to', 'notion');
       // the word cut (T134): the line reads "Connected", and the source sentence is that word's description
       const readyLine = sendTo.locator('[data-send-to-connection] [data-send-to-line]');
-      await quoting(expect(readyLine, 'B’s Notion server, MAWS’s own connection there').toHaveText('Connected', { timeout: 60_000 }), async () => `${await sendTo.innerText().catch(() => '')}\n${mainSaid(again)}`);
+      await quoting(expect(readyLine, 'B’s Notion server, MAWS’s own connection there').toHaveText('Connected', { timeout: 60_000, useInnerText: true }), async () => `${await sendTo.innerText().catch(() => '')}\n${mainSaid(again)}`);
+      await expectDrawn(readyLine.locator('[aria-describedby]'), 'the word “Connected” drawn');
       await expect(readyLine.locator('[aria-describedby]')).toHaveAccessibleDescription(/Through MAWS’s own connection: “notion” in your user settings\./);
       const sentBefore = callsOn(mcpLog, NOTION).length;
       await sendTo.getByRole('button', { name: 'Send', exact: true }).click();

@@ -27,6 +27,7 @@ import { appendFileSync, chmodSync, existsSync, mkdirSync, mkdtempSync, readdirS
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { expect, test, type Locator, type Page } from '@playwright/test';
+import { expectDrawn } from './support/screen-reader-only';
 import { FIXTURE_SERVER } from './support/connector-engine';
 import { expectQuietJournals, sessionJournals } from './support/connector-direct-scene';
 import { invoke, value, wait, withScene } from './support/connector-scene';
@@ -80,7 +81,8 @@ const connection = (page: Page) => sheetOf(page).locator('[data-send-to-connecti
 const readyLine = (page: Page) => connection(page).locator('[data-send-to-line]');
 const readyWord = (page: Page) => readyLine(page).locator('[aria-describedby]');
 async function expectNotionReady(page: Page): Promise<void> {
-  await expect(readyLine(page)).toHaveText('Connected', { timeout: 30_000 });
+  await expect(readyLine(page)).toHaveText('Connected', { timeout: 30_000, useInnerText: true }); // the line as rendered
+  await expectDrawn(readyWord(page), 'the word “Connected” drawn');
   await expect(readyWord(page)).toHaveAccessibleDescription(/Through MAWS’s own connection: “notion” in your user settings\./);
 }
 
