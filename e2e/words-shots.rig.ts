@@ -1117,6 +1117,30 @@ async function libraryAtRest(app: ElectronApplication, page: Page) {
   await libraryView(page, 'all');
   if ((await typeFilter(page).getAttribute('aria-pressed')) === 'true') await libraryKind(page, null);
 }
+// An artifact's row in the library's list, scrolled to as a person scrolls to it. The list mounts only the rows near
+// its scroll (library/Rows.tsx, a virtualiser, on both builds), so an artifact far down it (the bundled systems, made
+// with the profile, under every fixture made since) has no row until the list is scrolled to it: from the top, a screen
+// at a time, until it is mounted or the list ends, and again while the list has not yet read a new artifact.
+async function libraryRow(page: Page, id: string): Promise<Locator> {
+  const row = page.locator(`[data-library] article[data-artifact-row="${id}"]`);
+  const scroller = page.locator('[data-library] [data-library-scroller]').first();
+  const deadline = Date.now() + 20_000;
+  while ((await row.count()) === 0) {
+    if (Date.now() > deadline) throw new Error(`no row for ${id} anywhere in the library’s list`);
+    await scroller.evaluate((el) => el.scrollTo({ top: 0, behavior: 'instant' }));
+    await page.waitForTimeout(100);
+    for (let moved = true; moved && (await row.count()) === 0; ) {
+      moved = await scroller.evaluate((el) => {
+        const before = el.scrollTop;
+        el.scrollTo({ top: before + el.clientHeight * 0.8, behavior: 'instant' });
+        return el.scrollTop !== before;
+      });
+      await page.waitForTimeout(100);
+    }
+    if ((await row.count()) === 0) await page.waitForTimeout(500);
+  }
+  return row;
+}
 // The build read where its sign is sure to be drawn, the library's head, before a launch's first scene that asks: an
 // editor's saved state is drawn only once the editor has saved, so a carried editor scene taken alone (WORDS_ONLY)
 // would otherwise find neither sign. Only when the launch takes such a scene.
@@ -6291,11 +6315,15 @@ const TALK_FILES: Record<string, string> = {
   'project/slides/s1.html': '<section id="s1" style="background:#ffffff; padding:128px"><h2 id="title" style="font-size:72px">Field talk</h2><p id="body" style="position:absolute; left:300px; top:500px; width:500px; height:120px; font-size:48px">Three sites, one week</p><x-shape id="dot" kind="ellipse" style="position:absolute; left:1300px; top:420px; width:320px; height:320px; background:#2b7a78; box-shadow:4px 6px 12px #00000040"></x-shape></section>',
   'project/slides/s2.html': '<section id="s2" style="background:#ffffff; padding:128px"><h2 id="t2" style="font-size:72px">Findings</h2></section>',
 };
-// launch 4's planning deck (sections, a hidden slide, a held one) with one more slide whose heading is a colour no system has
+// launch 4's planning deck (sections, a hidden slide, a held one) with one more slide whose heading is a colour no system has,
+// and a border colour of its own
 function checkDeckFiles(): Record<string, string> {
   const files = deckFiles();
-  const deck = JSON.parse(files['project/deck.json']!) as { order: string[] };
+  const deck = JSON.parse(files['project/deck.json']!) as { order: string[]; dsOverrides?: Record<string, string> };
   deck.order = [...deck.order, 'loud'];
+  // the deck's own border colour over its system's (X28's dsOverrides), so Theme draws its reset, which both builds
+  // draw only while the deck overrides a colour or a face (menus/Theme.tsx)
+  deck.dsOverrides = { '--ds-color-border': '#c9b8a6' };
   files['project/deck.json'] = JSON.stringify(deck);
   files['project/slides/loud.html'] = '<section id="loud" style="background:#ffffff; padding:128px"><h2 id="l" style="font-size:64px; color:#7a1f5c">Late deliveries</h2></section>';
   return files;
@@ -6535,7 +6563,7 @@ test('the word cut’s M5: the library’s Spaces, opened artifacts, the documen
       await closeOverlays(page);
       if (await tab(key).isVisible().catch(() => false)) return;
       await libraryAtRest(app, page);
-      await page.locator(`[data-library] article[data-artifact-row="${idOf(key)}"]`).click();
+      await (await libraryRow(page, idOf(key))).click();
       await expect(tab(key), `the ${key} artifact’s tab`).toBeVisible({ timeout: 20_000 });
       await page.waitForTimeout(1500);
     };
@@ -7160,10 +7188,17 @@ test('the word cut’s M5: the library’s Spaces, opened artifacts, the documen
       const closeInspector = tab(key).getByRole('button', { name: E.closeInspector, exact: true });
       if (await closeInspector.isVisible()) await closeInspector.click();
       await expect(tab(key).locator('[data-deck-rail]').or(deckHistoryRail(key)).or(closeInspector), 'no rail and no inspector').toHaveCount(0, { timeout: 5_000 });
-      // the first slide shown, nothing on it selected
+      // the first slide shown, nothing on it selected. The selection outlives the slide's thumbnail, and Escape lets go of
+      // it only from the stage (transform/Overlay.tsx's keys, while the stage holds the focus): the stage takes the
+      // keyboard, then Escape, once per level the selection is nested (escapeUp)
       await tab(key).locator('[data-slide-thumb] .deck-thumb-button').first().click();
-      if ((await tab(key).locator('[data-overlay] [data-selected]').count()) > 0) await page.keyboard.press('Escape');
-      await expect(tab(key).locator('[data-overlay] [data-selected]'), 'nothing selected').toHaveCount(0, { timeout: 5_000 });
+      const selected = tab(key).locator('[data-overlay] [data-selected]');
+      for (let level = 0; level < 4 && (await selected.count()) > 0; level++) {
+        await tab(key).locator('[data-stage-surface]').first().focus();
+        await page.keyboard.press('Escape');
+        await page.waitForTimeout(150);
+      }
+      await expect(selected, 'nothing selected').toHaveCount(0, { timeout: 5_000 });
       await letGo(page);
     };
     // an element of the shown slide selected as a person selects it, a click at its centre, and the inspector open
@@ -7365,7 +7400,7 @@ test('the word cut’s M5: the library’s Spaces, opened artifacts, the documen
         await expect(rail.getByRole('heading', { name: byM5(E.byHand), exact: true }), 'the don’ts to judge by hand').toHaveCount(1);
       },
     });
-    await shot(page, m5Meta('m5-slides-theme', 'G463, G468', 'A deck, the Theme rail', 'Planning deck, Deck actions › Theme', 'The Theme rail: the Faces rows captioned Display and Body, the reset “Reset all” (master: “Display face”, “Use the system’s colours and faces”)', ['tools/presentation', 'src/artifacts/slides/editor/menus']), async () => {
+    await shot(page, m5Meta('m5-slides-theme', 'G463, G468', 'A deck, the Theme rail', 'Planning deck (a border colour of its own over its system’s), Deck actions › Theme', 'The Theme rail: the Faces rows captioned Display and Body, the reset “Reset all” (master: “Display face”, “Use the system’s colours and faces”)', ['tools/presentation', 'src/artifacts/slides/editor/menus']), async () => {
       await deckAtRest('planning');
       await toggleDeckRail('planning', 'theme');
       await expect(deckRail('planning', 'theme'), 'the Theme rail').toBeVisible({ timeout: 10_000 });
