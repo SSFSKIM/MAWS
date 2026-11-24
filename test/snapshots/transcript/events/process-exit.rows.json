@@ -54,6 +54,7 @@
     "kind": "cell",
     "label": "Stopped: Run the release script",
     "paths": [],
+    "runExpanded": true,
     "startedAt": "2026-09-28T12:00:01.010Z",
     "status": "stopped",
     "toolName": "Bash",

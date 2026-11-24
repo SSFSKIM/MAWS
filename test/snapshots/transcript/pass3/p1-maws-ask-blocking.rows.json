@@ -75,6 +75,7 @@
     "kind": "cell",
     "label": "Loaded 1 tool",
     "paths": [],
+    "runExpanded": true,
     "startedAt": "2026-10-06T06:35:22.990Z",
     "status": "done",
     "toolName": "ToolSearch",

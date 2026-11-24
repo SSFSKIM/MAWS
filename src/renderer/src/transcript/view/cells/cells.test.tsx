@@ -54,12 +54,13 @@ describe('cell line', () => {
     useTranscriptStore.getState().expandAll(store.key);
     const row = store.rows().find((r) => r.kind === 'cell')!;
     const view = renderRow(row, { storeKey: store.key });
-    const line = screen.getByRole('button', { expanded: false });
+    const line = view.container.querySelector<HTMLElement>('[data-cell-id] > .transcript-cell-line')!; // inside its opened run of one (board ticket 852)
+    expect(line.getAttribute('aria-expanded')).toBe('false');
     expect(line.textContent).toBe('Ran pnpm test'); // UX wave U2 (O-49): the short form of the command, in the code font
     expect(line.querySelector('code')?.textContent).toBe('pnpm test');
     fireEvent.click(line);
     view.rerenderRow(store.rows().find((r) => r.kind === 'cell')!);
-    expect(screen.getByRole('button', { expanded: true })).toBe(line);
+    expect(view.container.querySelector<HTMLElement>('[data-cell-id] > .transcript-cell-line')!.getAttribute('aria-expanded')).toBe('true');
     expect(view.container.querySelector('[data-cell-id][data-expanded]')).not.toBeNull();
   });
 });

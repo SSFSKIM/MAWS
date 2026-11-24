@@ -79,7 +79,8 @@ describe('group row', () => {
 });
 
 describe('standalone cell row', () => {
-  it('a completed single-cell group renders as a standalone cell row', async () => {
+  // board ticket 852: drawn as its run, opened here (expandAll opens a run of one as it opens any run)
+  it('a completed single-cell group renders as a standalone cell row, drawn as a run of one', async () => {
     const b = builder();
     b.turn('u1');
     b.toolUse('t1', 'Bash', { command: 'git status --short' });
@@ -88,7 +89,8 @@ describe('standalone cell row', () => {
     const store = await expanded(b.events);
     expect(ofKind(store.rows(), 'group')).toHaveLength(0);
     const view = renderRow(rowOf(store.rows(), 'cell'), { storeKey: store.key });
-    expect(view.container.querySelector('[data-cell-count]')).toBeNull();
+    expect(view.container.querySelector('[data-cell-count]')?.getAttribute('data-cell-count')).toBe('1');
+    expect(view.container.querySelector('.transcript-run-line')?.textContent).toBe('Ran a command');
     expect(view.container.querySelector('[data-cell-id="cell:t1"] > button')?.textContent).toBe('Ran git status…');
   });
 

@@ -367,12 +367,12 @@ button.transcript-chip:hover { background: var(--bg-hover); }
 @keyframes transcript-spin { to { transform: rotate(360deg); } }
 
 /* Tool summaries share a block; a run's thought line stands between two blocks (UX wave U2). */
-.transcript-tool-block, .transcript-standalone .transcript-cell { border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; }
+.transcript-tool-block { border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; }
 .transcript-tool-block:empty { display: none; }
 .transcript-tool-block > * + * { border-top: 1px solid var(--border); }
-.transcript-tool-block .transcript-cell-line, .transcript-standalone .transcript-cell-line { padding: 8px 12px; min-height: 36px; font-size: var(--text-ui); }
-.transcript-tool-block .transcript-cell-detail, .transcript-standalone .transcript-cell-detail { margin: 0 12px 12px; }
-.transcript-tool-block .transcript-chevron, .transcript-standalone .transcript-chevron { opacity: 1; }
+.transcript-tool-block .transcript-cell-line { padding: 8px 12px; min-height: 36px; font-size: var(--text-ui); }
+.transcript-tool-block .transcript-cell-detail { margin: 0 12px 12px; }
+.transcript-tool-block .transcript-chevron { opacity: 1; }
 .transcript-cell-line:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; border-radius: var(--radius-sm); }
 .transcript-group { padding: 1px 0 6px; }
 /* UX wave U2 (O-29; the U2a document, M4 "The row"): a run is one line, its chevron trailing its text as the old
@@ -403,7 +403,7 @@ button.transcript-chip:hover { background: var(--bg-hover); }
    kept, so the whole command is on the line at any width; "Approve and retry" under it, or under the subject's block */
 .transcript-cell[data-names-whole] .transcript-cell-label { white-space: pre-wrap; overflow-wrap: anywhere; }
 .transcript-blocked { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; margin: 2px 0 8px 19px; font-size: var(--text-ui-sm); }
-.transcript-tool-block .transcript-blocked, .transcript-standalone .transcript-blocked { margin: 0 12px 12px; }
+.transcript-tool-block .transcript-blocked { margin: 0 12px 12px; }
 .transcript-blocked-subject {
   align-self: stretch;
   max-height: calc(12 * 1.6em + 12px); /* twelve lines at its line height, and its padding */
@@ -447,9 +447,16 @@ button.transcript-chip:hover { background: var(--bg-hover); }
 .transcript-cell[data-status="denied"] > .transcript-cell-line { color: var(--danger); }
 .transcript-cell:focus-visible, .transcript-cell:focus { outline: 1px solid var(--danger); outline-offset: 4px; border-radius: var(--radius-sm); }
 /* Board ticket 850: the space around a standalone call is its line's, inside a wrapper that keeps the line's margins in
-   the row the list measures; where nothing is drawn (an answer that hides the call) the wrapper takes no height. */
+   the row the list measures; where nothing is drawn (an answer that hides the call) the wrapper takes no height.
+   Board ticket 852: no box; a standalone call is one quiet line as a run's is (its size, its 24 px line, its chevron
+   after the text, shown on pointing, focus or open), with a run's space around it, so standalone lines and runs keep one
+   rhythm; what it shows at rest (an image's thumbnail, a blocked call's control) and its opened detail sit under it,
+   indented to the label. A run of one is a run (`.transcript-group`). */
 .transcript-standalone { display: flow-root; }
-.transcript-standalone .transcript-cell { margin: 1px 0 6px; }
+.transcript-cell[data-standalone] { margin: 1px 0 6px; }
+.transcript-cell[data-standalone] > .transcript-cell-line { display: inline-flex; width: auto; max-width: 100%; min-width: 0; min-height: 24px; font-size: var(--text-ui); line-height: 24px; }
+.transcript-cell[data-standalone] > .transcript-cell-line > .transcript-chevron { margin-left: 0; }
+.transcript-cell-thumb { display: block; max-width: min(240px, calc(100% - 19px)); max-height: 96px; margin: 2px 0 2px 19px; border: 1px solid var(--border); border-radius: var(--radius-sm); object-fit: contain; }
 .transcript-cell-detail { display: flex; flex-direction: column; gap: 6px; margin: 2px 0 8px 19px; font-size: var(--text-ui-sm); }
 .transcript-detail-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; color: var(--fg-muted); }
 .transcript-mcp > .transcript-detail-heading { justify-content: flex-end; } /* the word cut (T31): Raw alone, where it stood */
@@ -800,6 +807,7 @@ button.transcript-line-words:focus-visible { outline-width: 2px; outline-style: 
 /* E4c start: a browser tool call's row: one compact line like a standalone cell's, the glyph giving way to the running
    ring while the call runs, quiet actions at the end; the waiting line, a refusal or a cancellation under it. */
 .transcript-browser-action { padding: 1px 0 6px; font-size: var(--text-ui-sm); }
+.transcript-browser-action[data-tool-use] { margin-left: 19px; } /* board ticket 852: under its `js` call's line, indented to the label */
 .transcript-browser-action-line { display: flex; align-items: center; flex-wrap: wrap; gap: 7px; min-height: 26px; color: var(--fg-muted); }
 .transcript-browser-action-heading { min-width: 0; color: var(--fg); overflow-wrap: anywhere; }
 .transcript-browser-action-heading[tabindex] { border-radius: var(--radius-sm); outline-color: var(--accent); } /* the word cut (T105): its time on pointing or focus */

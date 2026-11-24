@@ -11,7 +11,7 @@ import { caption, captionParts, finishedLines, stepsOfCells } from './caption';
 import { thinkingCell } from './cells';
 import { rowId } from './keys';
 import type { TranscriptUi, TurnState } from './reduce';
-import { TOOL_CATEGORIES, type Cell, type CellId, type Row, type ToolCategory, type TurnId } from './rows';
+import { TOOL_CATEGORIES, type Cell, type CellId, type Row, type RowId, type ToolCategory, type TurnId } from './rows';
 
 type RowOf<K extends Row['kind']> = Extract<Row, { kind: K }>;
 
@@ -54,15 +54,10 @@ export function groupItems(items: WorkItem[], turn: TurnState, ui: TranscriptUi 
     const calls = cells.filter((cell) => cell.toolName !== 'thinking');
     if (!active && calls.length === 1) {
       // decision 19: the call and its thoughts in event order
-      for (const cell of cells) rows.push(...(cell.toolName === 'thinking' ? thoughtRow(cell) : [standaloneRow(cell, turn.id)]));
+      for (const cell of cells) rows.push(...(cell.toolName === 'thinking' ? thoughtRow(cell) : [runOfOneRow(standaloneRow(cell, turn.id), ui)]));
     } else {
       // decision 4: the run's id is its first call's, whatever thoughts lead it (a textless one travels on one host only)
-      const id = rowId.group(calls[0].id);
-      const { text: summary, fold } = caption(captionParts(stepsOfCells(cells)), true);
-      rows.push({
-        id, turnId: turn.id, at: cells[0].startedAt, kind: 'group', state: active ? 'active' : 'completed', cells, summary, ...(fold > 0 && { fold }),
-        counts: finishedLines(cells), icon: iconOf(cells), expanded: ui?.expandedGroups.has(id) ?? false,
-      });
+      rows.push(runRow(calls[0].id, turn.id, cells, active, ui?.expandedGroups.has(rowId.group(calls[0].id)) ?? false));
     }
     rows.push(...slots);
   };
@@ -104,7 +99,28 @@ export function groupItems(items: WorkItem[], turn: TurnState, ui: TranscriptUi 
 }
 
 // A standalone cell is a flat `cell` row keyed by its CellId (X3).
-const standaloneRow = (cell: Cell, turnId: TurnId): Row => ({ ...cell, id: rowId.cell(cell.id), turnId, at: cell.startedAt, kind: 'cell', classification: { ...cell.classification, startsGroup: false } });
+const standaloneRow = (cell: Cell, turnId: TurnId): RowOf<'cell'> => ({ ...cell, id: rowId.cell(cell.id), turnId, at: cell.startedAt, kind: 'cell', classification: { ...cell.classification, startsGroup: false } });
+
+// Board ticket 852: a run of one carries its run's open state, as a run's row does
+function runOfOneRow(row: RowOf<'cell'>, ui: TranscriptUi | undefined): RowOf<'cell'> {
+  return drawsAsRun(row) ? { ...row, runExpanded: ui?.expandedGroups.has(runOfOneId(row)) ?? false } : row;
+}
+
+function runRow(first: CellId, turnId: TurnId | null, cells: Cell[], active: boolean, expanded: boolean): RowOf<'group'> {
+  const { text: summary, fold } = caption(captionParts(stepsOfCells(cells)), true);
+  return {
+    id: rowId.group(first), turnId, at: cells[0].startedAt, kind: 'group', state: active ? 'active' : 'completed', cells, summary, ...(fold > 0 && { fold }),
+    counts: finishedLines(cells), icon: iconOf(cells), expanded,
+  };
+}
+
+// Board ticket 852: a standalone row drawn as a run: the one call of a completed run (decision 19), which stands apart
+// while its classification still joins runs, but not a failed one, whose own line keeps its error mark and its error.
+// Its line and its open state are its run's (`expandedGroups` under the run's row id, the id `standaloneRunInput` asks
+// the run's site by). Which calls stand alone is unchanged; only how this one is drawn.
+export const drawsAsRun = (row: RowOf<'cell'>): boolean => row.classification.groupable && row.status !== 'error';
+export const runOfOneId = (row: RowOf<'cell'>): RowId => rowId.group(row.id);
+export const runOfOne = (row: RowOf<'cell'>): RowOf<'group'> => runRow(row.id, row.turnId, [row], false, row.runExpanded === true);
 
 export const iconOf = (cells: Cell[]): ToolCategory => {
   const present = new Set(cells.filter((cell) => cell.toolName !== 'thinking').map((cell) => cell.category));

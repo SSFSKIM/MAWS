@@ -53,6 +53,7 @@
     "kind": "cell",
     "label": "Ran `sleep 1 && echo 1` in 2s",
     "paths": [],
+    "runExpanded": true,
     "startedAt": "2026-09-29T01:50:05.140Z",
     "status": "done",
     "toolName": "Bash",

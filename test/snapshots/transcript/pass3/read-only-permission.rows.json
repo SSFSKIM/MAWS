@@ -64,6 +64,7 @@
     "paths": [
       "/private/tmp/maws-probe3-outside-hdvwZL/outside.txt"
     ],
+    "runExpanded": true,
     "startedAt": "2026-09-29T08:19:57.833Z",
     "status": "done",
     "toolName": "Read",
