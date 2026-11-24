@@ -59,3 +59,19 @@ Verdicts.
 
 Not probed: the function-hooks rollout flag (`tengu_plugin_hooks_modules`, R0 finding 4). A scratch config home has a
 cold cache, under which mods run. Where the flag is served off, the mod would not load, and the host would see no tool.
+
+The shipped mod (uxwave-tell-builtin-*; 2026-11-24, after the owner chose "Built-in mod, hidden"). The same questions
+asked of mods/maws-tell as the app ships it, loaded with --plugin-dir from the repository. It has the offer hook, the
+host-id check in tool.check and tool.run, and the marker.
+  - system/init and mcp_status list its server {name: maws-tell, status: connected, source: plugin}, and the plugin as
+    maws-tell@inline. The engine host leaves both out of the session's servers and plugins, and says the server as the
+    status's `tell`.
+  - Delivered, with no can_use_tool to the host:
+      a running background child (its next request carried the text);
+      a child the parent waits on (CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1);
+      a finished child (resumed with the text);
+      dontAsk mode.
+  - Refused:
+      a child stopped with stop_task ("TELL_REFUSED Agent … was stopped and was not resumed");
+      plan mode (the engine's own refusal, not the mod's), so the window keeps the relay there.
+  - No request the model got names the tool, and the model's own call is answered "No such tool available".

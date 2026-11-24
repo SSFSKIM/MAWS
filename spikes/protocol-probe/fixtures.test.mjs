@@ -1573,3 +1573,14 @@ test('the direct tell in plan and dontAsk mode: refused unless the mod allows th
  const dontAsk=loadTell('mode-dontask');assert.match(tellAnswers(dontAsk)[0],/denied because Claude Code is running in don't ask mode/);assert.equal(toldTell(dontAsk),false);
  for(const n of ['mode-dontask-check','check-default']){const rows=loadTell(n);assert.deepEqual(tellAnswers(rows),[DELIVERED]);assert.equal(toldTell(rows),true);assert.equal(askedTell(rows),0);}
 });
+test('the direct tell, the mod the app ships (mods/maws-tell): every case without asking the host, plan mode refused, the model never offered it',()=>{
+ const builtin=n=>loadTell('builtin-'+n);
+ for(const n of ['live-bg','waited','ended','dontask']){const rows=builtin(n);assert.deepEqual(tellAnswers(rows),[DELIVERED],n);assert.equal(toldTell(rows),true,n);assert.equal(askedTell(rows),0,n);}
+ assert.deepEqual(metaTell(builtin('live-bg'),'builtin_listed')[0].server,{name:'maws-tell',status:'connected',source:'plugin',tools:['tell']});
+ assert.match(tellAnswers(builtin('stopped'))[0],/^The tool did not run: TELL_REFUSED Agent "\w+" was stopped and was not resumed/);
+ assert.match(tellAnswers(builtin('plan'))[0],/requires interactive approval, and permission prompts are not available/);
+ assert.equal(toldTell(builtin('plan')),false);
+ const model=builtin('model');
+ assert.deepEqual(metaTell(model,'named_in_requests')[0].named,[false,false]);
+ assert.match(metaTell(model,'model_call_result')[0].results[0].content,/No such tool available: mcp__maws-tell__tell/);
+});

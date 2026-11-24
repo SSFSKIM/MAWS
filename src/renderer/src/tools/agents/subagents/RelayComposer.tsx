@@ -83,17 +83,23 @@ interface Props {
 
 export function RelayComposer(props: Props) {
   const controls = useSessionControls(props.appSessionId); // P5 O9 M5: a session driven through its bridge tells the agent itself
-  return controls && controls.turn() !== null ? <TellComposer {...props} controls={controls} /> : <EngineRelayComposer {...props} />;
+  // The direct tell: a session on this Mac whose engine took the built-in mod tells it too (lane B, which has no turn of
+  // its own); without the mod, in plan mode and on another machine its `tell` is closed and the parent relays
+  const direct = controls !== null && controls.turn() === null && controls.capability('tell').available;
+  return controls && (controls.turn() !== null || direct) ? <TellComposer {...props} controls={controls} resumesFinished={direct} /> : <EngineRelayComposer {...props} />;
 }
 
 // P5 O9 M5 start: the bridge's `tell` reaches the agent itself, so no parent relays it: the box is open while the agent
-// has not ended and the session's `tell` control is, and the line says what the bridge answered.
-function TellComposer({ agentId, node, draft, onDraft, onSent, controls }: Props & { controls: SessionControls }) {
+// has not ended and the session's `tell` control is, and the line says what the bridge answered. The direct tell
+// (`resumesFinished`): the engine's own send resumes a finished agent with the message (uxwave-tell-builtin-ended), so
+// only a stopped one, or one that ended with its session, stays closed.
+function TellComposer({ agentId, node, draft, onDraft, onSent, controls, resumesFinished }: Props & { controls: SessionControls; resumesFinished: boolean }) {
   const [sending, setSending] = useState(false);
   const [line, setLine] = useState<{ text: string; failed: boolean } | null>(null);
   const title = node ? rowTitle(node) : agentId;
   const tell = controls.capability('tell');
-  const reason = node && isEnded(node.status) ? endedReason(node) : tell.available ? null : tell.reason;
+  const finished = resumesFinished && (node?.status === 'completed' || node?.status === 'failed');
+  const reason = node && isEnded(node.status) && !finished ? endedReason(node) : tell.available ? null : tell.reason;
   const canSend = reason === null && !sending && draft.trim() !== '';
   const send = async () => {
     if (!canSend) return;
@@ -101,7 +107,7 @@ function TellComposer({ agentId, node, draft, onDraft, onSent, controls }: Props
     const result = await controls.tell(agentId, draft.trim());
     setSending(false);
     if (result.state === 'refused') return setLine({ text: RELAY_COPY.driven.failed(result.message), failed: true }); // the draft stays
-    setLine({ text: result.state === 'done' ? RELAY_COPY.driven.told : RELAY_COPY.driven.unknown, failed: false });
+    setLine({ text: result.state === 'done' ? (finished ? RELAY_COPY.driven.resumes(title) : RELAY_COPY.driven.told) : RELAY_COPY.driven.unknown, failed: false });
     onSent();
   };
   const root = useRef<HTMLDivElement>(null);

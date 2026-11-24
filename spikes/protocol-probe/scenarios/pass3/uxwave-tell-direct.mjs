@@ -23,11 +23,13 @@
 //   uxwave-tell-ended           a background child that has finished: the tell's answer, and whether the child is
 //                               resumed with the text
 //   uxwave-tell-stopped         a background child stopped with stop_task: the tell's answer
+//   uxwave-tell-builtin-*       the same questions of the mod the app ships (mods/maws-tell)
 //   uxwave-tell-mode-<mode>     a finished child told after `set_permission_mode` plan or dontAsk: whether the host is
 //                               asked and the hook runs; `-check` adds the mod's `tool.check` allow for the host's own
 //                               call, and uxwave-tell-check-default asks whether that allow spares the `can_use_tool`
 import {check,success,endAsStop,launch,scratchRun,removeRun,initPayload,delay,join,mkdirSync,writeFileSync} from './p1-common.mjs';
 import {startStubApi,textTurn,toolTurn} from '../../stub-api.mjs';
+import {fileURLToPath} from 'node:url';
 
 const MOD='maws-tell-probe';
 const CHILD_MARK='TELL-PROBE-CHILD';
@@ -93,16 +95,29 @@ async function tell(p,tool,agent,label,{checked=true}={}){
 // The agent ids the engine reported for the session's tasks (task_started frames), newest last.
 const agentIds=p=>p.frames.filter(r=>r.frame.type==='system'&&r.frame.subtype==='task_started').map(r=>r.frame.task_id);
 
-async function probe(name,{question,flags=[],vars={},mod,respond,body,permission=()=>({behavior:'deny',message:'the probe denies the call'})}){
+// MAWS's own mod as the app ships it (mods/maws-tell), for the builtin scenarios
+const BUILTIN=fileURLToPath(new URL('../../../../mods/maws-tell',import.meta.url));
+const BUILTIN_TOOL='mcp__maws-tell__tell';
+async function builtinTool(p){
+ for(let i=0;i<20;i++){
+  const status=await p.request('mcp_status',{},15000).catch(()=>null);
+  const server=status?.response?.mcpServers?.find(s=>s.name==='maws-tell');
+  if(server?.status==='connected'&&server.tools?.some(t=>t.name==='tell')){p.note({event:'builtin_listed',server:{name:server.name,status:server.status,source:server.source,tools:server.tools.map(t=>t.name)}});return BUILTIN_TOOL;}
+  await delay(250);
+ }
+ return null;
+}
+
+async function probe(name,{question,flags=[],vars={},mod,builtin=false,respond,body,permission=()=>({behavior:'deny',message:'the probe denies the call'})}){
  const run=scratchRun(name.replace(/^uxwave-/,''));
- const plugin=writeMod(run.root,mod);
+ const plugin=builtin?BUILTIN:writeMod(run.root,mod);
  const stub=await startStubApi({record,respond});
  try{
   await launch(name,run,{dir:'fixtures/uxwave/',relay:false,spendCap:'0.01',flags:['--plugin-dir',plugin,...flags],debugPattern:/plugin|tool\.register|session\.send|SendMessage|mcp_call|TELL/i,vars:{ANTHROPIC_BASE_URL:stub.url,ANTHROPIC_AUTH_TOKEN:'stub-token',...vars},provenance:{...PROVENANCE,question}},async p=>{
    // the host's own tell is allowed at once (the checked call asks); any other call is the scenario's
    p.on('can_use_tool',r=>{if(String(r.tool_name).endsWith('__tell')){p.note({event:'permission_asked',tool:r.tool_name,agentId:r.agent_id??null});return {behavior:'allow',updatedInput:r.input};}return permission(p,r);});
    success(await p.init(initPayload(run.cwd)),'initialize');
-   const tool=await registeredTool(p);
+   const tool=builtin?await builtinTool(p):await registeredTool(p);
    check(p,'the mod registered its tool',tool!==null,tool);
    await body(p,{stub,tool});
    p.note({event:'stub_requests',requests:stub.requests});
@@ -160,6 +175,25 @@ const modeBody=mode=>async(p,{stub,tool})=>{
 };
 const modeScenarios=(mode,checkAllow)=>({[`uxwave-tell-mode-${mode.toLowerCase()}${checkAllow?'-check':''}`]:{question:`a finished child told in ${mode} mode${checkAllow?', the mod allowing the host\'s own call at tool.check':''}: is the host asked, does the hook run, is the child resumed`,mod:{checkAllow},respond:family(true),body:modeBody(mode)}});
 
+// The same questions asked of the mod the app ships, the host's call made as the engine host makes it: a running
+// background child, a child the parent waits on, a finished child, a stopped child, and plan and dontAsk mode (whose
+// tool.check allow the mod carries), and the model's own call of the tool (refused: not offered).
+function builtinScenarios(){
+ const held=(label)=>async(p,r)=>{p.note({event:'held',tool:r.tool_name,agentId:r.agent_id??null});await tell(p,BUILTIN_TOOL,r.agent_id??agentIds(p).at(-1),label);return {behavior:'deny',message:'the probe denies the call'};};
+ const told=async(p,{stub})=>{await p.turn('Start the child.');await p.wait(()=>stub.requests.some(r=>r.child&&r.told),{timeout:30000}).catch(()=>{});await delay(3000);p.note({event:'child_told',value:stub.requests.some(r=>r.child&&r.told)});};
+ const stopping=async(p,r)=>{const id=agentIds(p).at(-1);const stop=await p.request('stop_task',{task_id:id},15000).catch(e=>({error:String(e.message)}));p.note({event:'stop_task',answer:stop});await delay(1500);await tell(p,BUILTIN_TOOL,id,'stopped background child');return {behavior:'deny',message:'the probe denies the call'};};
+ const base={builtin:true};
+ return {
+  'uxwave-tell-builtin-live-bg':{...base,question:'the shipped mod: a running background child, held at a permission request',respond:family(true),permission:held('running background child'),body:told},
+  'uxwave-tell-builtin-waited':{...base,question:'the shipped mod: a child the parent waits on, held at a permission request',vars:{CLAUDE_CODE_DISABLE_BACKGROUND_TASKS:'1'},respond:family(false),permission:held('waited foreground child'),body:told},
+  'uxwave-tell-builtin-ended':{...base,question:'the shipped mod: a finished background child is resumed with the text',respond:family(true),body:modeBody(null)},
+  'uxwave-tell-builtin-stopped':{...base,question:'the shipped mod: a child stopped with stop_task refuses',respond:family(true),permission:stopping,body:async(p)=>{await p.turn('Start the child.');await delay(4000);}},
+  'uxwave-tell-builtin-plan':{...base,question:'the shipped mod in plan mode: refused',respond:family(true),body:modeBody('plan')},
+  'uxwave-tell-builtin-dontask':{...base,question:'the shipped mod in dontAsk mode: delivered, the mod allowing the host\'s own call',respond:family(true),body:modeBody('dontAsk')},
+  'uxwave-tell-builtin-model':{...base,question:'the shipped mod: no request names the tool, and the model\'s own call of it is refused',respond:(()=>{let n=0;return body=>isChild(body)?undefined:n++===0?toolTurn('toolu_tell_model',BUILTIN_TOOL,MODEL_CALL):textTurn('parent done');})(),body:modelCallBody},
+ };
+}
+
 const SCENARIOS={
  'uxwave-tell-register':{question:'a --plugin-dir mod registers a tool withheld from the model by --disallowedTools: is it listed, absent from the request, and callable through mcp_call',mod:{offer:false},flags:['--disallowedTools','mcp__*__tell'],body:registerBody(true)},
  'uxwave-tell-register-open':{question:'the same mod with no deny rule: mcp_call reaches its hook only when checked',mod:{offer:false},body:registerBody(false)},
@@ -199,6 +233,7 @@ const SCENARIOS={
   await tell(p,p.tellTool,id,'stopped background child');
   return {behavior:'deny',message:'the probe denies the call'};
  },body:async(p,{stub,tool})=>{p.tellTool=tool;await p.turn('Start the child.');await delay(4000);}},
+ ...builtinScenarios(),
 };
 
 export default async()=>{

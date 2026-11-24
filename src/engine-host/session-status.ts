@@ -13,6 +13,7 @@ import type { EngineSessionStatus } from '@shared/engine/status';
 import type { InitializeResponse, McpStatusResponse, ReloadPluginsResponse } from '@shared/wire/control';
 import type { CronRecord } from '@shared/engine/session-state-store'; // P5 O2 M2
 import { browserHoldOf, CRON_TOOLS, sessionCronsOf, WorkState, type BrowserEntry, type CronRead, type LaunchKind } from './work-state'; // P5 O2 M2; P5 O17 M7: the browser entry
+import { isTellPlugin, isTellServer } from '@shared/maws/tell'; // the direct tell
 
 export const HELD_PEER_MESSAGE_TTL_MS = 5 * 60_000;
 
@@ -23,14 +24,15 @@ type Gateway = Omit<EngineSessionStatus['gateway'], 'mode'>;
 export type TrackedStatus = Pick<
   EngineSessionStatus,
   'engineState' | 'activity' | 'permissionMode' | 'prePlanMode' | 'fastMode' | 'plugins' | 'pluginErrors' | 'pluginWarnings' | 'backgroundTasks' | 'mcpServers' | 'heldPeerMessages' | 'memory'
-  | 'pluginsObservedAt' /* P2-A */ | 'published' /* P5 E312 */
+  | 'pluginsObservedAt' /* P2-A */ | 'published' /* P5 E312 */ | 'tell' /* the direct tell */
 > & { gateway: Gateway; resolvedModel: string | null; engineVersion: string | null; work: NonNullable<EngineSessionStatus['work']> /* P5 O2 M2 */ };
 
 const FAST_MODE_STATES = ['off', 'cooldown', 'on'] as const;
 const str = (v: unknown): string | null => (typeof v === 'string' ? v : null);
 const list = (v: unknown): Record<string, unknown>[] => (Array.isArray(v) ? (v.filter((x) => typeof x === 'object' && x !== null) as Record<string, unknown>[]) : []);
 // system/init's and reload_plugins' plugin items alike: `name`, `path`, `source`, `version` (E8: pass3/e8-plugins-reload seq 26, 31)
-export const pluginsOf = (v: unknown): EngineSessionStatus['plugins'] => list(v).map((p) => ({ name: String(p.name), path: str(p.path) ?? '', source: str(p.source), version: str(p.version) }));
+// the direct tell: the built-in mod is the host's own channel, never one of the person's plugins
+export const pluginsOf = (v: unknown): EngineSessionStatus['plugins'] => list(v).map((p) => ({ name: String(p.name), path: str(p.path) ?? '', source: str(p.source), version: str(p.version) })).filter((p) => !isTellPlugin(p));
 // system/init's `mcp_servers` and reload_plugins' `mcpServers` alike (mcp_status's projection: pass3/p2-no-prompt-resume-1
 // seq 30): each server's name, status and source
 const mcpServersOf = (v: unknown): EngineSessionStatus['mcpServers'] => list(v).map((s) => ({ name: String(s.name), status: String(s.status), source: str(s.source) }));
@@ -72,6 +74,7 @@ export class SessionStatusTracker {
   pluginWarnings: EngineSessionStatus['pluginWarnings'] = [];
   pluginsObservedAt: string | null = null; // P2-A: when this launch's init or reload last reported the plugins (null: not yet); U11h: and its MCP servers
   mcpServers: EngineSessionStatus['mcpServers'] = [];
+  tell = false; // the direct tell: the built-in mod's server listed connected, which `mcpServers` leaves out
   // ticket 619: the init frames' and reloads' reports of the servers, the mcp_status asks, and the latest ask applied
   private mcpReports = 0;
   private mcpAsks = 0;
@@ -124,6 +127,7 @@ export class SessionStatusTracker {
       backgroundTasks: this.backgroundTasks.map((t) => ({ ...t })), mcpServers: this.mcpServers.map((s) => ({ ...s })), heldPeerMessages: this.heldPeerMessages.map((m) => ({ ...m })), memory: { ...this.memory },
       work: this.work.snapshot(), // P5 O2 M2
       ...(this.published && { published: { ...this.published } }), // P5 E312
+      ...(this.tell && { tell: true as const }), // the direct tell
     };
   }
 
@@ -285,14 +289,20 @@ export class SessionStatusTracker {
   applyMcpStatus(answer: McpStatusResponse, asked: McpAsk): boolean {
     if (asked.reports !== this.mcpReports || asked.seq <= this.mcpApplied) return false;
     this.mcpApplied = asked.seq;
-    const before = JSON.stringify(this.mcpServers);
-    this.mcpServers = mcpServersOf(answer.mcpServers);
-    return JSON.stringify(this.mcpServers) !== before;
+    const before = JSON.stringify([this.mcpServers, this.tell]);
+    this.setServers(mcpServersOf(answer.mcpServers));
+    return JSON.stringify([this.mcpServers, this.tell]) !== before;
   }
 
   private reportMcp(servers: EngineSessionStatus['mcpServers']): void {
-    this.mcpServers = servers;
+    this.setServers(servers);
     this.mcpReports += 1;
+  }
+
+  // the direct tell: the built-in mod's server is said as `tell`, never listed among the person's servers
+  private setServers(servers: EngineSessionStatus['mcpServers']): void {
+    this.tell = servers.some((server) => isTellServer(server) && server.status === 'connected');
+    this.mcpServers = servers.filter((server) => !isTellServer(server));
   }
 
   recordMemory(sample: EngineSessionStatus['memory']): void {
