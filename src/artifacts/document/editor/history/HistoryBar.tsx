@@ -10,7 +10,7 @@
 import type { Editor } from '@tiptap/core';
 import { useEditorState } from '@tiptap/react';
 import { DropdownMenu } from 'radix-ui';
-import { useState, type FormEvent, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type FormEvent, type ReactNode, type Ref } from 'react';
 import { NamedGlyph } from '../../../../renderer/src/ui/glyph';
 import { unboundExtras /* P3-E */, type DiffTab, type ExtraChange /* P3-E */, type TabChanges } from '../../history';
 import type { HistoryController, Preview } from './controller';
@@ -68,6 +68,16 @@ function step(editor: Editor, preview: Preview, controller: HistoryController, d
 export function HistoryBar({ editor, preview, controller, onBack }: { editor: Editor; preview: Preview; controller: HistoryController; onBack(): void }) {
   const [confirming, setConfirming] = useState(false);
   const [naming, setNaming] = useState(false);
+  // The pair review's fix wave: the restore's confirm is an alertdialog and takes the keyboard on its Cancel (as the
+  // transcript's restore dialog does), so no focus is left behind it, and the "…"'s tooltip, which a menu's close leaves
+  // open on its focused trigger, closes with that focus; Cancel gives the keyboard back to Restore. Name this version,
+  // chosen in the menu, keeps the keyboard in its field.
+  const restoreButton = useRef<HTMLButtonElement>(null);
+  const cancelButton = useRef<HTMLButtonElement>(null);
+  const namingChosen = useRef(false);
+  useEffect(() => {
+    if (confirming) cancelButton.current?.focus();
+  }, [confirming]);
   // re-rendered as ↑ ↓ moves within the tab (the count itself is the whole comparison's)
   useEditorState({ editor, selector: ({ editor: e }) => (e ? changesOf(e.state).current : null) });
   const unbound = unboundExtras(preview.extras); // P3-E
@@ -121,7 +131,7 @@ export function HistoryBar({ editor, preview, controller, onBack }: { editor: Ed
         <span className="doc-toolbar-spacer" />
         {preview.versionId !== null && (
           <>
-            <Button label={W.restoreName} worded onClick={() => setConfirming(true)}>
+            <Button ref={restoreButton} label={W.restoreName} worded onClick={() => setConfirming(true)}>
               {W.restore}
             </Button>
             <DropdownMenu.Root modal={false}>
@@ -131,12 +141,29 @@ export function HistoryBar({ editor, preview, controller, onBack }: { editor: Ed
                 </NamedGlyph>
               </DropdownMenu.Trigger>
               <DropdownMenu.Portal>
-                <DropdownMenu.Content className="doc-tab-menu" align="end" sideOffset={4} aria-label={W.actionsName}>
+                <DropdownMenu.Content
+                  className="doc-tab-menu"
+                  align="end"
+                  sideOffset={4}
+                  aria-label={W.actionsName}
+                  onCloseAutoFocus={(event) => {
+                    // Name this version takes the keyboard to its field (NameForm), not back to the "…"
+                    if (!namingChosen.current) return;
+                    namingChosen.current = false;
+                    event.preventDefault();
+                  }}
+                >
                   <DropdownMenu.Item className="doc-tab-menu-item" onSelect={() => void controller.duplicate()}>
                     {W.makeCopy}
                   </DropdownMenu.Item>
                   {controller.canName && (
-                    <DropdownMenu.Item className="doc-tab-menu-item" onSelect={() => setNaming(true)}>
+                    <DropdownMenu.Item
+                      className="doc-tab-menu-item"
+                      onSelect={() => {
+                        namingChosen.current = true;
+                        setNaming(true);
+                      }}
+                    >
                       {W.nameVersion}
                     </DropdownMenu.Item>
                   )}
@@ -154,7 +181,15 @@ export function HistoryBar({ editor, preview, controller, onBack }: { editor: Ed
         <div className="doc-history-confirm" role="alertdialog" aria-label="Restore this version?">
           <p>Restore this version? The document goes back to it as a new version; everything since stays in history, and comment conversations are kept.</p>
           <div className="doc-history-save-actions">
-            <Button label="Cancel" worded onClick={() => setConfirming(false)}>
+            <Button
+              ref={cancelButton}
+              label="Cancel"
+              worded
+              onClick={() => {
+                setConfirming(false);
+                restoreButton.current?.focus();
+              }}
+            >
               Cancel
             </Button>
             <Button
@@ -185,9 +220,9 @@ function tabLabel(tab: DiffTab, showChanges: boolean): string {
 }
 
 // `worded`: the button shows its word, so no tooltip repeats it (the word cut, G337); a glyph's word is its tooltip.
-function Button({ label, worded = false, disabled, onClick, children }: { label: string; worded?: boolean; disabled?: boolean; onClick(): void; children: ReactNode }) {
+function Button({ ref, label, worded = false, disabled, onClick, children }: { ref?: Ref<HTMLButtonElement>; label: string; worded?: boolean; disabled?: boolean; onClick(): void; children: ReactNode }) {
   return (
-    <button type="button" className="doc-tool" aria-label={label} title={worded ? undefined : label} disabled={disabled} onMouseDown={(event) => event.preventDefault()} onClick={onClick}>
+    <button ref={ref} type="button" className="doc-tool" aria-label={label} title={worded ? undefined : label} disabled={disabled} onMouseDown={(event) => event.preventDefault()} onClick={onClick}>
       {children}
     </button>
   );
@@ -204,7 +239,7 @@ function NameForm({ onName, onDone }: { onName(label: string): Promise<boolean>;
   };
   return (
     <form className="doc-history-save" aria-label="Name this version" onSubmit={submit}>
-      <input aria-label="Version name" placeholder={W.namePlaceholder} maxLength={200} value={label} onChange={(event) => setLabel(event.target.value)} />
+      <input autoFocus aria-label="Version name" placeholder={W.namePlaceholder} maxLength={200} value={label} onChange={(event) => setLabel(event.target.value)} />
       <div className="doc-history-save-actions">
         <Button label="Cancel" worded onClick={onDone}>
           Cancel

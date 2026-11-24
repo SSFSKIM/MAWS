@@ -103,8 +103,8 @@
 /* the word cut (G384), placed by the pair review's fix wave: Resolve or Reopen over the right end of the first message's
    author line, which holds only a name, centred on it and masking what runs under it with the card's own ground; it
    takes no space and moves no text as it shows. The hover scope's rule (styles/app.css) shows it on the card pointed at
-   or focused, the card shows it while active. Each card anchors its own (`anchor-scope`); a card with no message puts it
-   at its top right. It stays last in the card, after the reply field, so the Tab order is unchanged. */
+   or focused, the card shows it while active. Each card anchors its own (`anchor-scope`); a card with no message keeps
+   it in a row of its own (below). It stays last in the card, after the reply field, so the Tab order is unchanged. */
 .thread-card > .thread-card-messages:first-of-type > .thread-card-message:first-child > .thread-card-author {
   anchor-name: --thread-head;
 }
@@ -119,6 +119,12 @@
 }
 .thread-card > .thread-card-actions > .thread-card-button {
   height: calc(var(--space) * 6);
+}
+/* a card with no message (a thread whose first comment was never written) has no author line: its action keeps a row
+   of its own at the foot, under the reply field, rather than over the field's send */
+.thread-card:not(:has(> .thread-card-messages)) > .thread-card-actions {
+  position: static;
+  justify-self: end;
 }
 /* the word cut (G388): a card whose passage is gone, where it draws no quote (a deck's or a design's pin popover) */
 .thread-card-removed {
