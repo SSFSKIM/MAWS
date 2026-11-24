@@ -41,6 +41,7 @@ import { HolderRegistry, type HolderDeps } from './holders';
 import { isMissing } from './sidecars';
 import type { StorePaths } from './paths';
 import { SubagentReader, subagentLookup } from './subagents';
+import { readTail, type TailRead } from './tail-first';
 import { sanitizeListId, TaskReader } from './tasks';
 import { StoreWatcher, type StoreChange, type WatchFn } from './watcher';
 import { progressKey, WorkflowReader, workflowProgressEvent, workflowProgressId } from './workflows';
@@ -87,6 +88,7 @@ export interface FsServiceOptions {
   reconcileMs?: number;
   startScanFallbackMs?: number;
   window?: WindowBudget; // tests' smaller pages
+  tailRungs?: readonly number[]; // tests' smaller tail-first rungs (TAIL_RUNGS)
   releaseMs?: number; // FOLLOW_RELEASE_MS
   agentRetryMs?: number; // AGENT_RETRY_MS
   log?: (line: string) => void; // P5 O7 M8: the follows' holds and drops (stderr, the host's log, by default)
@@ -200,6 +202,7 @@ export class FsService {
   private readonly reconcileMs: number;
   private reconcile: ReturnType<typeof setInterval> | null = null;
   private readonly window: WindowBudget | undefined;
+  private readonly tailRungs: readonly number[] | undefined;
   private readonly releaseMs: number;
   private readonly agentRetryMs: number;
   private interest: InterestSource | null = null; // absent (tests, diagnostics), follows are never released for it
@@ -237,6 +240,7 @@ export class FsService {
     this.openReader = options.openReader ?? ((locate) => new FsFileReader(locate));
     this.reconcileMs = options.reconcileMs ?? RECONCILE_MS;
     this.window = options.window;
+    this.tailRungs = options.tailRungs;
     this.releaseMs = options.releaseMs ?? FOLLOW_RELEASE_MS;
     this.agentRetryMs = options.agentRetryMs ?? AGENT_RETRY_MS;
     this.startScanFallbackMs = options.startScanFallbackMs ?? START_SCAN_FALLBACK_MS;
@@ -412,11 +416,19 @@ export class FsService {
   // page and sends its newest window as `session.eventBatch` when done, and the deterministic ids make any overlap
   // harmless. `complete` is true once backfilled. `quiet`: the session's live process writes the transcript, and only
   // its older pages are asked of it, from a follow that emits nothing (`historyKey`) unless one already follows it.
+  // 2026-11-24, tail-first (tail-first.ts): a read that takes a `provisional` newest window, of a session whose follow has
+  // not read its transcript through, is answered from the transcript's end while the follow reads it from the start,
+  // when the tail answers first; the follow's `following` then says its own window is there to be read.
   async eventsSnapshot(appSessionId: AppSessionId, agentId: AgentId | null, request: HistoryRequest = {}, quiet = false): Promise<HistoryPage> {
     if (agentId !== null) return this.agentEvents(appSessionId, agentId, request);
     const replay = this.replays?.snapshot(appSessionId);
     if (replay) return replay;
-    return snapshotOf(await this.historyFollow(appSessionId, quiet), request);
+    if (quiet || !takesProvisional(request) || this.follows.get(followKey(appSessionId, null))?.follow.backfillDone) return snapshotOf(await this.historyFollow(appSessionId, quiet), request);
+    const tail = this.readTail(appSessionId, (follow) => {
+      const page = follow.tailWindow();
+      return page === null ? null : { value: page };
+    });
+    return tailOrFull(this.historyFollow(appSessionId, false, tail), tail, (follow) => follow.snapshot(request));
   }
 
   // UX wave, ticket 777: the cursor before a live launch's seam in its session's transcript (Follow.seamCursor), read
@@ -424,25 +436,73 @@ export class FsService {
   // when the transcript holds nothing before the seam or was not read through in that time, and for a replay.
   // `journal`, the launch's message uuids, is read once the transcript has been: a message of the launch it already
   // holds has reached the stream by then, so the seam is never past it; null when they cannot place it.
+  // 2026-11-24, tail-first: a quiet follow not yet read through places the seam from the transcript's end when the tail
+  // holds the launch's first message and history before it (Follow.seamCursor's `located`), so a live launch's first
+  // page waits for that tail, not for the whole transcript.
   async historySeam(appSessionId: AppSessionId, journal: () => Promise<readonly MessageUuid[] | null>): Promise<EventId | null> {
     if (this.replays?.snapshot(appSessionId)) return null;
-    const follow = await this.historyFollow(appSessionId, true);
-    await backfilled(follow);
-    if (!follow.backfillDone) return null;
-    const launched = await journal();
-    return launched === null ? null : follow.seamCursor(launched);
+    const held = this.follows.get(followKey(appSessionId, null)) ?? this.follows.get(historyKey(appSessionId));
+    const tail = held?.follow.backfillDone
+      ? Promise.resolve(null)
+      : this.readTail(appSessionId, async (follow) => {
+          const launched = await journal();
+          if (launched === null) return { value: null };
+          const cursor = follow.seamCursor(launched, true);
+          return cursor === undefined ? null : { value: cursor };
+        });
+    return tailOrFull(this.historyFollow(appSessionId, true, tail), tail, async (follow) => {
+      if (!follow.backfillDone) return null;
+      const launched = await journal();
+      return launched === null ? null : (follow.seamCursor(launched) ?? null);
+    });
   }
 
   // The session's own follow, started if none follows it (quiet: a live process writes the transcript, and only its
-  // older pages are read).
-  private async historyFollow(appSessionId: AppSessionId, quiet: boolean): Promise<Follow> {
+  // older pages are read). `tail`: a tail-first read running for it, given a head start before the follow's agent
+  // listing and its read begin (TAIL_HEAD_START_MS), so neither takes the host's one thread from the tail.
+  private async historyFollow(appSessionId: AppSessionId, quiet: boolean, tail?: Promise<unknown>): Promise<Follow> {
     const sessionId = this.sessionOf(appSessionId);
     const followed = this.follows.get(followKey(appSessionId, null));
+    const after = tail === undefined ? null : headStart(tail);
     const entry = followed ?? (quiet
-      ? await this.ensureFollow(appSessionId, null, () => this.quietFollow(appSessionId, sessionId), historyKey(appSessionId))
-      : await this.ensureFollow(appSessionId, null, () => this.followSession(appSessionId, sessionId)));
+      ? await this.ensureFollow(appSessionId, null, () => this.quietFollow(appSessionId, sessionId, after), historyKey(appSessionId))
+      : await this.ensureFollow(appSessionId, null, () => this.followSession(appSessionId, sessionId, after)));
     entry.usedAt = Date.now();
     return entry.follow;
+  }
+
+  // 2026-11-24, tail-first: a tail of the session's transcript read until `accept` takes it (tail-first.ts), its follows
+  // mapped as the session's own is, quiet. Null when the transcript is not known yet, or the read fails.
+  private readTail<T>(appSessionId: AppSessionId, accept: TailRead<T>['accept']): Promise<{ value: T } | null> {
+    const sessionId = this.sessionOf(appSessionId);
+    const path = this.listed.get(sessionId)?.path ?? null;
+    if (path === null) return Promise.resolve(null);
+    const dir = this.sessionDir(sessionId);
+    const read = readTail({
+      reader: this.openReader(() => path),
+      follow: (reader, startAt, subagents) => new Follow({
+        quiet: true,
+        ...(this.window && { window: this.window }),
+        appSessionId,
+        sessionId,
+        agent: null,
+        reader,
+        startAt,
+        subagents,
+        holders: () => this.holders.liveCount(sessionId),
+        pinned: () => this.holders.holderOf(sessionId).kind !== 'none',
+        isOwnRecord: (record) => this.holders.ownsTranscriptRecord(sessionId, record),
+        emit: this.send,
+      }),
+      agents: dir === null ? null : { listed: () => this.agents.get(sessionId) ?? [], recent: (since) => this.subagentReader.recent(dir, since), lookup: (agents) => subagentLookup(() => agents, this.subagentReader) },
+      accept,
+      live: () => !this.stopped,
+      ...(this.tailRungs && { rungs: this.tailRungs }),
+    });
+    return read.catch((error: unknown) => {
+      console.error(`[fs] cannot read the tail of ${sessionId}:`, error instanceof Error ? error.message : error);
+      return null;
+    });
   }
 
   // Main's interest (process-table.ts): a follow whose session no client has held open for FOLLOW_RELEASE_MS is stopped
@@ -641,7 +701,8 @@ export class FsService {
 
   // The session's own transcript, with its agents listed first so the backfill's `Agent` tool uses find their metas,
   // and its workflow runs' progress delivered once the backfill is done.
-  private async followSession(appSessionId: AppSessionId, sessionId: SessionId): Promise<FollowEntry> {
+  private async followSession(appSessionId: AppSessionId, sessionId: SessionId, after: Promise<unknown> | null = null): Promise<FollowEntry> {
+    await after;
     await this.listAgents(sessionId);
     const entry = this.newFollow(appSessionId, sessionId, this.listed.get(sessionId)?.path ?? null, null);
     void entry.follow.started.then(() => this.syncWorkflows(entry, null));
@@ -651,7 +712,8 @@ export class FsService {
   // The quiet follow of a session's older history (eventsSnapshot): its backfill finds the agents' metas in the listing,
   // so a listing held is brought up to date first (a session nothing read meanwhile gathered its changes), and a
   // session never listed is walked, as the session's own follow walks.
-  private async quietFollow(appSessionId: AppSessionId, sessionId: SessionId): Promise<FollowEntry> {
+  private async quietFollow(appSessionId: AppSessionId, sessionId: SessionId, after: Promise<unknown> | null = null): Promise<FollowEntry> {
+    await after;
     await (this.agents.has(sessionId) ? this.agentsCaughtUp(sessionId) : this.listAgents(sessionId));
     return this.newFollow(appSessionId, sessionId, this.listed.get(sessionId)?.path ?? null, null, true);
   }
@@ -1305,6 +1367,39 @@ const followName = (entry: FollowEntry): string => `${entry.follow.appSessionId}
 function historyKey(appSessionId: AppSessionId): string {
   return `${appSessionId}\0\0history`;
 }
+
+// 2026-11-24, tail-first: a read the follow and a tail of its transcript both answer: the follow's answer once it has read
+// its transcript through within SNAPSHOT_WAIT_MS, the tail's when that comes first; with neither, the follow's answer as
+// it stands at the wait's end (`answer`), as a read with no tail is answered.
+async function tailOrFull<T>(pending: Promise<Follow>, tail: Promise<{ value: T } | null>, answer: (follow: Follow) => T | Promise<T>): Promise<T> {
+  let follow: Follow | null = null;
+  const read = pending.then((followed) => {
+    follow = followed;
+    return followed.started;
+  });
+  read.catch(() => undefined); // a failure the race below has already passed on, or that comes after the tail answered
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const late = new Promise<'late'>((resolve) => (timer = setTimeout(() => resolve('late'), SNAPSHOT_WAIT_MS)));
+  try {
+    const first = await Promise.race([read.then(() => 'read' as const), tail.then((taken) => taken ?? ('none' as const)), late]);
+    if (typeof first === 'object' && !(follow as Follow | null)?.backfillDone) return first.value;
+    if (first === 'none') await Promise.race([read, late]);
+    return await answer(await pending);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+// How long a follow waits for a tail-first read of its transcript before it lists the session's agents and reads.
+export const TAIL_HEAD_START_MS = 250;
+const headStart = (tail: Promise<unknown>): Promise<unknown> => {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  return Promise.race([tail, new Promise((resolve) => (timer = setTimeout(resolve, TAIL_HEAD_START_MS)))]).finally(() => clearTimeout(timer));
+};
+
+// A read that takes a provisional window: the newest one, unbounded, from the session's own transcript.
+const takesProvisional = (request: HistoryRequest): boolean =>
+  request.provisional === true && (request.before ?? null) === null && request.limit == null && !request.agentId && !request.seek && request.maxBytes == null;
 
 // A fresh follow gets SNAPSHOT_WAIT_MS to finish its backfill before the read answers (an empty page while it reads).
 async function snapshotOf(follow: Follow, request: HistoryRequest): Promise<HistoryPage> {

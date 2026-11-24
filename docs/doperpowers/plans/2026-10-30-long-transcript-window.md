@@ -248,5 +248,50 @@ On the 625 MB transcript:
    them in again.
 4. **Two follows of one transcript.** A session whose live stream was dropped while a quiet follow existed gets a
    normal follow beside the quiet one until the release. Rare, bounded by the release.
-5. **First paint on the very largest transcripts.** Sub-second first paint above about 300 MB would take a tail-first
-   read (Claude Desktop's ladder) or a persisted follow checkpoint.
+5. ~~**First paint on the very largest transcripts.** Sub-second first paint above about 300 MB would take a tail-first
+   read (Claude Desktop's ladder) or a persisted follow checkpoint.~~ Done by tail-first (`ux-wave/tail-first-load`;
+   Decision Log, 2026-11-24).
+
+## Decision Log
+
+- **2026-11-24 (ux-wave's tail-first builder): the newest window is answered from the transcript's end first.** A
+  636 MiB transcript took about 3 s to its first row: the engine host listed the session's 1,530 agents (0.3 s), then
+  read and mapped the whole file (2.6 to 2.8 s) before it could answer a window that needs the last 1% of it.
+  - *The read.* A `session.events` read that carries the new `provisional: true` (the newest, unbounded window of a
+    session with no stream; minor 62) on a follow not yet read through is answered by a tail-first read
+    (`src/engine-host/fs/tail-first.ts`), when that answers within the usual `SNAPSHOT_WAIT_MS` before the follow does.
+    The tail is a quiet `Follow` started at the first line past `size - rung` (the follower's new `startAt`, so every
+    offset and every id is the file's own), on rungs of 8, 32 and 128 MiB, the file's size frozen at the tail's stat. A
+    file no longer than a rung, or one replaced or cut short under the read, answers no tail.
+  - *When a tail's window is the window* (`Follow.tailWindow`, the "never a wrong window" rule): it starts at a whole
+    turn and the tail holds a turn before it; every `boundary.rewind` in it names a message the tail holds; every
+    `task.notification` in it names a tool use the tail holds (a task started before the tail ends there as the read
+    from the start ends it otherwise); and the chain the tail ends on is rooted before the window (a chain cut at a gap
+    inside the window is a branch from before the tail, which the read from the start reads as a rewind or a
+    retraction). Otherwise the next rung, and past the last the read from the start, as before. A turn longer than the
+    tail, or cut at the window's hard cap, never satisfies the first test. The answer is `complete: false`,
+    `provisional: true`, with the window's `earlier` cursor and no `cronHistory` (it needs the whole log).
+  - *Agents.* The tail maps with the listing held now (none on a first open). When an `Agent` tool use in it found no
+    meta, the agents whose transcripts were written since the earliest such tool use (less five minutes) are read
+    (`SubagentReader.recent`: a stat of each, a meta and a head only for those), and the tail is mapped again with
+    them. The session's listing, and the read from the start behind it, begin once the tail has answered or 250 ms
+    have passed (`TAIL_HEAD_START_MS`), so neither takes the host's one thread from the tail.
+  - *The swap.* The renderer's session source asks for a provisional window for a session on this machine only (another
+    machine's history crosses its link as before). It draws it, holds back the follow's own disk-form batches while it
+    is provisional, and at that follow's `fs.followState` `following` (heard while the answer was on its way too)
+    rebuilds the key through the pager's `refresh`: staged, so the rows drawn stay until the follow's window is whole.
+    Older pages and jumps asked meanwhile wait as they did for a follow still reading (the pager asks again each
+    second). The Scheduled section shows the window's cron calls until the swap fills in the older history's, with no
+    words of its own (the architect's ruling of 2026-11-24); its rows are keyed by store and id, not place, so the rows
+    already drawn keep their items when older ones arrive above them.
+  - *Older hosts.* An engine host lists `engine.provisionalWindow` on its welcome; main sends the field only to one that
+    does, and an older host, which would refuse it, is asked the same read without it.
+  - *Lane B.* A live launch's first page waited for the quiet follow's whole read to place its seam (`historySeam`, up to
+    2 s). The same tail places it (`Follow.seamCursor`'s `located`) when the tail holds the launch's first message and
+    history before it, else the read from the start does, as before.
+  - *The silent records.* The follower now knows every record type it drops by its first key without parsing it (it
+    knew `api-request` and `file-history-snapshot`), except the four whose facts it reads; one `Set` lookup a line.
+  - *Measured* (an M-series Mac under load, warm cache): the 636 MiB transcript's tail answers in 127 to 164 ms, the same
+    841 events and 160 rows, identical as JSON, as the read from the start's window (master: 2.9 to 3.1 s to the
+    first window, listing included). A generated 300 MB transcript: 31 ms against 975 ms without a provisional read on
+    this branch and 1.0 to 1.4 s on master (`src/engine-host/fs/tail-first-bench.test.ts`, the unit:darwin lane).

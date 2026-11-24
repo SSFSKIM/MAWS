@@ -85,6 +85,10 @@ export interface ChainFollowerOptions {
   // branch another writer starts does not displace records MAWS wrote; absent, never.
   pinned?: () => boolean;
   isOwnRecord?: (record: TranscriptRecord) => boolean; // holder-backed writer attribution; absent, no ownership evidence
+  // Where reading starts: a line's first byte (absent, the file's). A tail-first read (tail-first.ts) maps the transcript
+  // from there, every offset and every id derived from one still the file's own, so its events carry the ids the read
+  // from the start gives them.
+  startAt?: number;
 }
 
 const PAGE_BYTES = 1024 * 1024;
@@ -113,7 +117,7 @@ interface Produced {
 // reconciles the two, which is why the state lives apart from the follower's delivery bookkeeping.
 class FollowerCore {
   ino: number | null = null;
-  offset = 0;
+  offset: number;
   partial: Buffer = Buffer.alloc(0);
   private deferredLine: number | null = null; // oversized unsealed line: keep its offset, not its bytes
   readonly skeletons = new Map<MessageUuid, Skeleton>();
@@ -136,7 +140,10 @@ class FollowerCore {
     private readonly holders: () => number = () => 0,
     private readonly pinned: () => boolean = () => false,
     private readonly isOwnRecord: (record: TranscriptRecord) => boolean = () => false,
-  ) {}
+    readonly startAt = 0,
+  ) {
+    this.offset = startAt;
+  }
 
   // One chunk read at the cursor: dispatch every complete line, keep the remainder, advance the cursor.
   async consume(chunk: Buffer): Promise<void> {
@@ -581,21 +588,34 @@ class FollowerCore {
 export const HELD_NOTICE = 'Another process is writing a sibling branch into this transcript; MAWS keeps its own branch in view until that process exits';
 export const REFOLD_NOTICE = 'The other process exited; this transcript now shows the branch a resume continues from';
 
-// The two record types the engine writes most of a long transcript's bytes in (2.1.312: `api-request` carries each
-// model request, `file-history-snapshot` the tracked files' backups; 66% of a 625 MB transcript measured), neither
-// carrying a uuid or anything for the graph: a line that opens with one is known by its first key without parsing it
-// (2026-10-30, the long-transcript window). The engine writes `type` first in both; a line that opens otherwise, or
-// holds these words anywhere later, is parsed as any other.
-const SILENT_PREFIXES: readonly (readonly [Buffer, TranscriptRecord])[] = ['api-request', 'file-history-snapshot'].map((type) => [Buffer.from(`{"type":"${type}"`), { type }] as const);
+// The record types the follower drops, known by their first key without parsing them (2026-10-30, the long-transcript
+// window: `api-request` and `file-history-snapshot`, 66% of a 625 MB transcript's bytes; 2026-11-24, tail-first: every
+// other silent type, `api-request-blob` and `queue-operation` the largest, another 20% of a 636 MB one's parse time).
+// None carries a uuid. The engine writes `type` first in each; a line that opens otherwise, or holds these words anywhere
+// later, is parsed as any other. The four whose facts the follower reads (`handleAnonymous`) are always parsed.
+const PARSED_SILENT = new Set(['last-prompt', 'custom-title', 'ai-title', 'relocated']);
+const SKIPPED: ReadonlyMap<string, TranscriptRecord> = new Map([...KNOWN_SILENT_TYPES].filter((type) => !PARSED_SILENT.has(type)).map((type) => [type, { type }]));
+const TYPE_FIRST = Buffer.from('{"type":"');
+const QUOTE = 0x22;
+const LONGEST_TYPE = Math.max(...[...KNOWN_SILENT_TYPES].map((type) => type.length));
+
+// The dropped record a line that opens with one's type is, without parsing it; null for any other line.
+function skipped(lineBytes: Buffer, start: number): TranscriptRecord | null {
+  const from = start + TYPE_FIRST.length;
+  if (lineBytes.length <= from || lineBytes.compare(TYPE_FIRST, 0, TYPE_FIRST.length, start, from) !== 0) return null;
+  const quote = lineBytes.subarray(from, from + LONGEST_TYPE + 1).indexOf(QUOTE);
+  // the closing quote, and something after it (a line cut off there is no record)
+  if (quote === -1 || from + quote + 1 >= lineBytes.length) return null;
+  return SKIPPED.get(lineBytes.toString('latin1', from, from + quote)) ?? null;
+}
 
 // One line's bytes to a record: leading NULs stripped, unparseable lines are null (the engine's own reader rule).
 function parseLine(lineBytes: Buffer): TranscriptRecord | null {
   let start = 0;
   while (start < lineBytes.length && lineBytes[start] === 0) start++;
   if (start === lineBytes.length) return null;
-  for (const [prefix, record] of SILENT_PREFIXES) {
-    if (lineBytes.length - start > prefix.length && lineBytes.compare(prefix, 0, prefix.length, start, start + prefix.length) === 0) return record;
-  }
+  const known = skipped(lineBytes, start);
+  if (known !== null) return known;
   let parsed: unknown;
   try {
     parsed = JSON.parse(lineBytes.subarray(start).toString('utf8'));
@@ -758,13 +778,28 @@ export class ChainFollower {
     };
   }
 
+  // 2026-11-24, tail-first: where the chain starts when the read could not root it (a gap: its first record's parent is
+  // not in what was read), as that record's byte position; null when it starts at a root the read holds (a session's
+  // first record, a compaction's boundary).
+  chainRoot(): { offset: number } | null {
+    const core = this.core;
+    if (core.gap === null && core.chain.length > 0) return null;
+    const root = core.chain[0];
+    return { offset: (root === undefined ? undefined : core.skeletons.get(root)?.offset) ?? Infinity };
+  }
+
+  // The byte position of the record `uuid`, when it was read.
+  offsetOf(uuid: MessageUuid): number | null {
+    return this.core.skeletons.get(uuid)?.offset ?? null;
+  }
+
   // Every event delivered so far, in order, for the snapshot command.
   materialized(): SessionEvent[] {
     return [...this.delivered];
   }
 
   private freshCore(): FollowerCore {
-    return new FollowerCore(this.reader, createBackfillContext({ sessionId: this.sessionId, agent: this.agent, subagents: this.options.subagents }), this.options.holders, this.options.pinned, this.options.isOwnRecord);
+    return new FollowerCore(this.reader, createBackfillContext({ sessionId: this.sessionId, agent: this.agent, subagents: this.options.subagents }), this.options.holders, this.options.pinned, this.options.isOwnRecord, this.options.startAt);
   }
 
   private enqueue(task: () => Promise<void>): Promise<void> {
@@ -800,7 +835,7 @@ export class ChainFollower {
       if (stat === null) return 'absent';
       const core = this.core;
       // Nothing read yet (a start interrupted before its first byte): the new file is simply the file.
-      const nothingRead = core.offset === 0 && core.skeletons.size === 0;
+      const nothingRead = core.offset === core.startAt && core.skeletons.size === 0;
       if (nothingRead) core.ino = stat.ino;
       // After an interrupted attempt the file is reloaded whatever the stat says: a rewrite in place (same inode, same
       // or greater size) looks unchanged to it, and the interrupted pass holds chain records it never delivered.

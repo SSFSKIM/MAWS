@@ -130,7 +130,7 @@ import { startReaper } from './lifecycle/reaper'; // the quit reaper
 import { flushSessions } from './lifecycle/flush-sessions'; // the quit reaper's flush
 import { session as electronSession } from 'electron'; // the quit reaper's flush: `session` below is the org's
 import { CLOSE_GRACE_MS } from '@shared/host/socket-port';
-import { MACHINE_DELIVERY_CAPABILITY, MACHINE_RENDER_CAPABILITY } from '@shared/host/socket-protocol'; // P5 O5 M4; P5 O7 M5c: delivery
+import { ENGINE_PROVISIONAL_WINDOW_CAPABILITY, MACHINE_DELIVERY_CAPABILITY, MACHINE_RENDER_CAPABILITY } from '@shared/host/socket-protocol'; // P5 O5 M4; P5 O7 M5c: delivery; tail-first
 // E11 end
 // E4a start
 import { startBrowser, type Browser } from './browser';
@@ -553,7 +553,18 @@ function startMain(launch: LaunchShape, { local, localName }: { local: MachineRe
   // go through the spine's watch replay, which sends them under units of its own and gives them back at each streaming
   let forwardedToMachine: ((name: string, input: unknown, client: ClientRef | undefined) => void) | null = null;
   let watchReplay: DaemonSpine['watches'] | null = null;
+  // Tail-first: `session.events`' `provisional` goes only to an engine host that lists engine.provisionalWindow; an older
+  // one, which would refuse the field, answers the same read without it (a utility host is this build: no peer, sent)
+  const engineTakesProvisional = () => {
+    const peer = hosts.peer('engine-host');
+    return peer === null || peer.capabilities.includes(ENGINE_PROVISIONAL_WINDOW_CAPABILITY);
+  };
   const dispatchToHost: typeof hosts.dispatch = (owner, name, input, client) => {
+    if (owner === 'engine-host' && name === 'session.events' && typeof input === 'object' && input !== null && 'provisional' in input && !engineTakesProvisional()) {
+      const older: Record<string, unknown> = { ...(input as Record<string, unknown>) };
+      delete older.provisional;
+      return hosts.dispatch(owner, name, older, client);
+    }
     if (owner === 'machine' && client !== undefined && watchReplay?.owns(name)) return watchReplay.dispatch(name as 'git.watch' | 'git.unwatch', input, client);
     if (owner === 'machine') forwardedToMachine?.(name, input, client);
     return hosts.dispatch(owner, name, input, client);
