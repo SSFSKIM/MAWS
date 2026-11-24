@@ -29,6 +29,7 @@ const comparisons = (text: string): number => (text.includes('delivered') ? COMP
 // A file whose `state` is not an attention item's. Adding one is an edit here, with its count and its reason.
 const EXCEPTIONS: Record<string, { count: number; why: string }> = {
   'src/services/channel/lane-b.ts': { count: 1, why: "an owner mark's question state, not an attention item's" },
+  'src/renderer/src/sheet/memory.ts': { count: 1, why: "a question sheet inbox line's state as the sheet's model reads it, not an attention item's" },
 };
 
 function sources(dir: string): string[] {

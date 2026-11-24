@@ -21,7 +21,7 @@ import { join } from 'node:path';
 import { isActionable as archiveActionable, waits as archiveWaits } from '@shared/attention/kinds';
 import type { ClientPort } from '@shared/client/port';
 import { claudeConfigDir } from '@shared/engine/config-dir';
-import type { AppSessionId, ProjectId } from '@shared/graph/ids';
+import type { AppSessionId, ProjectId, SessionId } from '@shared/graph/ids';
 import type { HostSupervisor } from '@shared/host/host-supervisor';
 import { OpLedger } from '@shared/host/op-ledger';
 import type { HandlerContext } from '@shared/ipc/client'; // P5 O7 M5c
@@ -60,6 +60,7 @@ import { IndexSessionSource } from './index/source';
 import { laneAAttention } from './lane-a/attention';
 import { sminosHome } from './lane-a/discovery';
 import { createLaneADriver, registerLaneA, type LaneAView } from './lane-a/driver';
+import { createSheetService, registerSheet, type SheetService } from './sheet/service'; // the question sheet's C3 M2
 import { startLibrary } from './library';
 import { registerLibraryReads } from './library/files';
 import { registerMachineOps } from './machine-ops';
@@ -190,6 +191,10 @@ export interface SpineRoot {
   // endpoint reads of the index (its declared rows and stored statements), which mawsd hands on while the spine is loaded;
   // asked only by mawsd's wiring (src/mawsd/projects-seam.ts), so building a root reads nothing of it
   projects?: () => ProjectsSource;
+  // The question sheet's C3 M2 (docs/doperpowers/plans/2026-11-23-question-sheet-c3-maws-app.md §C): the sheet's service,
+  // which C4's page server calls in process (the wire's `sheet.put` stamps `by: 'maws'`, and the page's lines are not the
+  // app's); absent in a run refused the spine.
+  sheet?: SheetService;
 }
 
 export function startSpine(deps: SpineDeps): SpineRoot {
@@ -307,6 +312,28 @@ export function startSpine(deps: SpineDeps): SpineRoot {
         laneA.stop();
       }]);
     } else parts.push(['lane A', () => laneA.stop()]);
+  }
+
+  // The question sheet's C3 M2 (docs/doperpowers/plans/2026-11-23-question-sheet-c3-maws-app.md §C, S3): the sheet's
+  // service, beside lane A and under its condition: it follows every record under the same sminos home, joins each to the
+  // index's session by its engine id, and appends through `sminos sheet put`, found only once there is a record to answer.
+  let sheet: SheetService | undefined;
+  if (attention) {
+    const service = createSheetService({
+      home: engineEnv.then((shellEnv) => sminosHome(deps.env, shellEnv)),
+      shell: engineEnv,
+      env: deps.env,
+      configHome: engineEnv.then((env) => claudeConfigDir(env, env.HOME || deps.home)),
+      sessionOf: (engineSessionId) => {
+        const record = index.unavailable === null ? index.sessions.getByEngineId(engineSessionId as SessionId) : null;
+        return record === null ? null : { appSessionId: record.appId, title: record.title.text, live: record.holder.kind !== 'none' };
+      },
+      onSessionsChanged: (listener) => (index.unavailable === null ? index.sessions.onChange(() => listener()) : () => {}),
+      emit: (name, payload) => void bus.emit(name, payload),
+    });
+    registerSheet(service, bus.register);
+    parts.push(['sheet', () => service.stop()]);
+    sheet = service;
   }
 
   // C5: the read side (launch mode, read model, the stub source in launch mode scenario). A relative scenario path is
@@ -673,6 +700,7 @@ export function startSpine(deps: SpineDeps): SpineRoot {
     discovery: { applied: () => indexSource.discoveryApplied(), onApplied: (listener) => indexSource.onDiscoveryApplied(listener) },
     ...(channel === undefined ? {} : { channel }), // P5 O8 M7b
     projects: () => index.projectsSource(), // the project registry: asked by mawsd alone
+    ...(sheet === undefined ? {} : { sheet }), // the question sheet's C3 M2
   };
 }
 

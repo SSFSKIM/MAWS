@@ -294,6 +294,7 @@
 "commands.session.update.input":[".appSessionId AppSessionId"],
 "commands.session.update.output":[".appId AppSessionId",".lineage.parentAppSessionId AppSessionId",".projectId ProjectId"],
 "commands.session.visible.output":[".sessions[] AppSessionId"],
+"commands.sheet.list.output":[".sessions[].appSessionId AppSessionId"],
 "commands.side.question.clear.input":[".appSessionId AppSessionId"],
 "commands.side.question.list.input":[".appSessionId AppSessionId"],
 "commands.side.screenshot.preview.input":[".appSessionId AppSessionId"],
@@ -355,5 +356,6 @@
 "events.session.replay.progress":[".appSessionId AppSessionId"],
 "events.session.setup":[".appSessionId AppSessionId"],
 "events.session.status":[".appSessionId AppSessionId",".status.appSessionId AppSessionId"],
-"events.session.visibleChanged":[".appSessionId AppSessionId"]
+"events.session.visibleChanged":[".appSessionId AppSessionId"],
+"events.sheet.changed":[".summary.appSessionId AppSessionId"]
 }

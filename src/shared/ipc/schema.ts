@@ -67,6 +67,7 @@ import * as machine from './schema/machine'; // P5 O6 M1
 import * as machines from './schema/machines'; // P5 O6 M3
 import * as org from './schema/org'; // P5 O8 M1
 import * as laneA from './schema/lane-a'; // P5 O9 M2
+import * as sheet from './schema/sheet'; // the question sheet's C3 M2
 import * as machineSettings from './schema/machine-settings'; // P5 O3-D
 import * as clientPort from './schema/client-port'; // P5 O3-D
 import * as render from './schema/render'; // P5 O5 M3
@@ -179,6 +180,7 @@ export const commands = {
   ...machines.commands, // P5 O6 M3
   ...org.commands, // P5 O8 M1
   ...laneA.commands, // P5 O9 M2
+  ...sheet.commands, // the question sheet's C3 M2
   ...machineSettings.commands, // P5 O3-D
   ...clientPort.commands, // P5 O3-D
   ...render.commands, // P5 O5 M3
@@ -239,6 +241,7 @@ export const events = {
   ...machines.events, // P5 O6 M3
   ...org.events, // P5 O8 M1
   ...laneA.events, // P5 O9 M2
+  ...sheet.events, // the question sheet's C3 M2
   ...machineSettings.events, // P5 O3-D
   ...clientPort.events, // P5 O3-D
   ...render.events, // P5 O5 M3
@@ -318,6 +321,7 @@ export const MACHINE_EVENTS = [
   'channel.changed', // P5 O8 M7b: the project channel's journal, composed with the spine
   'projects.act.request', // the project registry's M12: `maws` aimed at another machine, to the attached app alone (the front's own)
   'projects.act.withdrawn', // the project registry's M12 (Decision Log 22): that request's terminal has gone (the front's own)
+  'sheet.changed', // the question sheet's C3 M2: a record under the sminos home appeared, changed or went (the spine's sheet service)
 ] as const satisfies readonly EventName[];
 export type CommandInput<N extends CommandName> = z.input<(typeof commands)[N]['input']>;
 export type CommandOutput<N extends CommandName> = z.output<(typeof commands)[N]['output']>;

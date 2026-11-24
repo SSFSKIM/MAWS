@@ -18,6 +18,7 @@ import { fakeBus, type FakeBus } from '../../test/support/fake-bus';
 import { startFakeBridge, type FakeBridge } from '../../test/support/fake-bridge';
 import { FakeSpineHost } from '../../test/support/fake-spine-host';
 import { CHECKOUTS_COMMANDS, CONNECTORS_COMMANDS, LIBRARY_CATALOG_COMMANDS, SPINE_COMMANDS } from '../../test/support/spine-lists';
+import { seedRecord } from '../../test/support/sheet-records';
 import { FIXTURE_DIR } from '../../test/support/fixtures';
 import { item, status as engineStatus } from '../../test/support/builders';
 import { summary, tempDir } from '../../test/support/index-fixture';
@@ -277,6 +278,19 @@ describe('the spine and the checkouts composed under plain Node', () => {
 
   // P5 O9 (O3 Decision Log 13): lane A drives, from the spine, a terminal session the index held at start, and its
   // bridge's request reaches attention and the session's digest
+  // The question sheet's C3 M2: the sheet's service, composed beside lane A, follows the records under the same sminos home
+  it('follows the question sheets under the sminos home, joined to the index’s sessions, and serves them to C4’s page in process', async () => {
+    const session = seedRecord(sminos, 'two-surfaces');
+    const seeded = new Index(join(profile, 'index.sqlite'));
+    const appSessionId = seeded.sessions.upsertFromSummary(summary({ sessionId: session as SessionId })).record.appId;
+    seeded.close();
+    const bus = fakeBus();
+    const { spine } = compose(await openSpineData(profile, { build: BUILD }), new FakeSpineHost(), bus);
+    await expect.poll(async () => bus.invoke('sheet.list', {}), { timeout: 5000 }).toMatchObject({ ok: true, value: { sessions: [expect.objectContaining({ session, appSessionId, open: 1 })], door: { known: false } } });
+    expect(await spine.sheet?.list()).toEqual([expect.objectContaining({ session, appSessionId })]);
+    expect(await spine.sheet?.read(session)).toMatchObject({ session, open: [expect.objectContaining({ id: 'q1' })] });
+  });
+
   it('drives a terminal session the index holds through its bridge: laneA.state, its request in attention, its digest', async () => {
     const engineSessionId = '0e5b1c0d-0000-4000-8000-0000000000a1';
     const seeded = new Index(join(profile, 'index.sqlite'));
@@ -755,7 +769,8 @@ describe('the spine and the checkouts composed under plain Node', () => {
     mkdirSync(repository);
     execFileSync('git', ['init', '-q', '-b', 'main', repository]);
     const bus = fakeBus();
-    compose(data, new FakeSpineHost(), bus);
+    const { spine } = compose(data, new FakeSpineHost(), bus);
+    expect(spine.sheet).toBeUndefined(); // the question sheet's C3 M2: no sheet service where lane A has none
     expect(await bus.invoke('git.status', { directory: repository })).toMatchObject({ ok: true, value: { repoRoot: realpathSync(repository), branch: 'main' } });
     const unknown = '11111111-1111-4111-8111-111111111111';
     expect(await bus.invoke('files.list', { appSessionId: unknown })).toMatchObject({ ok: false, error: { message: `unknown app session: ${unknown}` } });

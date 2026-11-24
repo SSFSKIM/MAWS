@@ -209,6 +209,7 @@ const REVIEWED_STRING_RECORDS: Readonly<Record<string, string>> = {
   'commands.settings.get.output.settings.artifacts.spaceDesignSystems': SPACE_SYSTEMS,
   'commands.settings.set.input.artifacts.spaceDesignSystems': SPACE_SYSTEMS,
   'commands.settings.set.output.settings.artifacts.spaceDesignSystems': SPACE_SYSTEMS,
+  'commands.sheet.read.output.model.closed': 'a question sheet question id (`q7`) → how it closed', // the question sheet's C3 M2
   'commands.settings.usage.output.pinsFor': PINS,
   'events.connectors.watchUpdate.update.result': JSON_OBJECT,
   'events.laneA.changed.state.controls': BRIDGE_CONTROLS, // P5 O9 M2

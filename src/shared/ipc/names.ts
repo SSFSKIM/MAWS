@@ -60,6 +60,7 @@ import * as machine from './names/machine'; // P5 O6 M1
 import * as machines from './names/machines'; // P5 O6 M3
 import * as org from './names/org'; // P5 O8 M1
 import * as laneA from './names/lane-a'; // P5 O9 M2
+import * as sheet from './names/sheet'; // the question sheet's C3 M2
 import * as machineSettings from './names/machine-settings'; // P5 O3-D
 import * as clientPort from './names/client-port'; // P5 O3-D
 import * as render from './names/render'; // P5 O5 M3
@@ -117,6 +118,7 @@ export const NAMESPACES = [
   'channel', // P5 O8 M7b
   'endpoint', // P5 O8 M6b
   'projects', // the project registry's M12
+  'sheet', // the question sheet's C3 M2
 ] as const;
 export type Namespace = (typeof NAMESPACES)[number];
 
@@ -153,6 +155,7 @@ export const NAMES = {
   channel, // P5 O8 M7b
   endpoint, // P5 O8 M6b
   projects, // the project registry's M12
+  sheet, // the question sheet's C3 M2
 } as const satisfies { [N in Namespace]: { commands: readonly `${N}.${string}`[]; events: readonly `${N}.${string}`[] } };
 
 type Names = typeof NAMES;
