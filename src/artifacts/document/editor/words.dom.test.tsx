@@ -134,7 +134,7 @@ describe('the table’s commands (G331) and the worded buttons (G337)', () => {
     await until(() => menu() !== null && menu()!.contains(focused()), 'the menu open on a command');
     press('Escape');
     await until(() => menu() === null, 'the menu closed');
-    expect(focused()).toBe(button('Table'));
+    await until(() => focused() === button('Table'), 'the focus back on Table ▾'); // Radix returns it as the menu unmounts
     expect(editor.state.doc.firstChild!.childCount).toBe(3);
   });
 

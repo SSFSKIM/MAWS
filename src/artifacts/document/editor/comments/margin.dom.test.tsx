@@ -958,14 +958,15 @@ describe('resolve, orphans, the panel (Z1 to Z3, Z5) and the rail state (D5)', (
     expect(screen.queryByRole('complementary', { name: 'Comments' })).toBeNull();
     expect(activeThread(m.editor().state)).toBe('t1');
     await until(() => document.activeElement === within(entry('t1')!).queryByRole('textbox', { name: 'Reply' }), 'the margin card’s reply field focused');
-    // asked once: the editor drops the request once the field has the keyboard, so a card drawn again (the icon tier
-    // unmounts an inactive card) opens with no new gesture and takes nothing
+    // asked once: the editor drops the request once the field has the keyboard, so the card drawn again (the margin is
+    // not drawn while the panel is, and returns with the thread still active) takes nothing with no new gesture
     act(() => (document.activeElement as HTMLElement).blur());
-    act(() => void m.editor().commands.setActiveThread(null));
+    m.rerender({ rail: 'comments' });
     await settle();
-    expect(entry('t1')!.querySelector('[data-thread]'), 'the card unmounted with its activation').toBeNull();
-    act(() => void m.editor().commands.setActiveThread('t1'));
+    expect(margin(), 'the margin unmounted under the panel').toBeNull();
+    m.rerender({ rail: null });
     await settle();
+    expect(activeThread(m.editor().state)).toBe('t1');
     const field = within(entry('t1')!).getByRole('textbox', { name: 'Reply' });
     expect(document.activeElement).not.toBe(field);
   });
