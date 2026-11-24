@@ -2,7 +2,7 @@
 
 > **Parent:** the MAWS charter (`docs/charter.md`) and board ticket 600 ("O-19 step two: the sminos question tool in a session MAWS runs"), which this design carries out and widens: the tool is redesigned on the way. **Consumes:** the sminos plugin in the doperpowers repository (`sminos/hooks/mods/`, `sminos/skills/sminos/scripts/`), MAWS's engine host, services, renderer, `mawsd` and `apps/desk-web`. **Amends:** the UX wave's U1 (`docs/doperpowers/specs/2026-11-12-ux-wave/U1-requests.md`, sections l4-approvals-08, O-17, O-21, O-22) and the tool choice (`docs/doperpowers/plans/2026-11-23-tool-choice.md`, D6), each where §8 and §9 say.
 >
-> **Status:** the design below was approved by the owner on 2026-11-23, in conversation, after the grill and a critique debate of two rounds.
+> **Status:** the design below was approved by the owner on 2026-11-23, in conversation, after the grill and a critique debate of two rounds. The roadmap sections (Children, Cross-Child Contracts, Ordering, Tracking Map) were added the same day by doperpowers:decomposing and await the owner's gate. Children dispatch per their grain hint, each carrying its section as its spec; each child's artifact (plan, ledger, findings, pull request, ticket) opens by citing this document by path, child id and parent pin.
 
 ## Purpose
 
@@ -24,9 +24,10 @@
 
 - [x] (2026-11-23) Design approved by the owner in conversation; critique debate converged (two rounds).
 - [x] (2026-11-23) Spec written and committed as approved (this commit is the baseline).
-- [ ] Independent spec review and buildability review.
-- [ ] The cut into children (doperpowers:decomposing), then the owner's gate on the cut.
-- [ ] Children: see the Tracking Map once the cut is added.
+- [x] (2026-11-23) The cut into children added (Children, Cross-Child Contracts, Ordering, Tracking Map).
+- [ ] Independent spec review and buildability review of the roadmap.
+- [ ] The owner's gate on the cut.
+- [ ] Children: see the Tracking Map.
 
 ## Terms
 
@@ -100,6 +101,8 @@ The result names only what the call touched:
     Added q7, q8. Revised q3 (revision 2). Withdrew q2.
     Not done: q5 is not open (answered at 14:05). The reference src/x.ts of your second new question could not be read: permission denied.
 
+Its first line has a fixed grammar (contract X7): the sentences `Added …`, `Revised …`, `Withdrew …`, each present only when it names something, ids in the order of the call's entries. A transcript row is drawn from it, also long after the sheet's directory is gone, so no reader needs the file to know which id an entry got.
+
 It does not list the rest of the sheet: the agent's context is spent on its work, and the full open list is supplied only when the agent has lost it (§5.5). When no surface can show the questions at this moment (§7), one sentence says so.
 
 #### 2.3 References
@@ -126,7 +129,7 @@ One directory per session on the session's machine:
 
 `state.json` holds the open questions with every field of §1, the accepted outcomes not yet delivered (`pending`), the next id, how far the inbox has been read, and a verdict per recent inbox key (§4.3). It is written before the tool call returns.
 
-**One writer.** Only the tool writes `state.json`. Every surface, on every route, changes the sheet by appending a line to the inbox, through one code path in the `sminos` command (`sminos sheet put`, under a lock), and the tool applies it. Two writers on one file lose an answer when a resuming session loads and rewrites the file while a surface writes into it.
+**One writer.** Only the tool writes `state.json`. Every surface, on every route, changes the sheet by appending a line to the inbox, through one code path in sminos (`sminos sheet put`, under a lock; contract X2), and the tool applies it. Two writers on one file lose an answer when a resuming session loads and rewrites the file while a surface writes into it.
 
 **Readers read the file.** Every local reader (the page, the MAWS app for terminal and MAWS-run sessions alike, the `sminos` command) reads `state.json` plus the inbox lines past the recorded offset. MAWS does not rebuild a sheet from its own event stream of a session: a second record has no job the file cannot do, and each place the two could disagree (an answer the tool refused as stale, a dismissal held for delivery, a session answered while stopped and then resumed in MAWS, a fork, a rewind) is a fault the human would see. MAWS's journal draws the transcript's rows and nothing else of the sheet.
 
@@ -228,7 +231,7 @@ A session offers the sheet only where the human can reach it. A surface register
 
 `reach` is `remote` when the machine's endpoint is enrolled and carries sheets to the phone and to other machines (§8.4).
 
-At session start the tool offers the sheet's schema when a registered surface is alive and its reach suits the session: under `SSH_CONNECTION` a `remote` one is required, because a local page answers and the human cannot open it. Otherwise it offers today's tool, with the engine's dialog in the terminal. Today's tool, not the bare built-in, is the fallback: a machine without `mawsd` keeps the asynchronous asks its phone cards answer today. Today's tool therefore stays in the plugin until every machine the owner uses has a surface.
+At session start the tool offers the sheet's schema when the setting `SMINOS_QUESTION_SHEET` is on and a registered surface is alive and its reach suits the session. The setting is off by default until the last child turns the default on (§9), so that through every earlier step a terminal session takes the sheet only where someone opted in. On reach: under `SSH_CONNECTION` a `remote` surface is required, because a local page answers and the human cannot open it. Otherwise the tool offers today's tool, with the engine's dialog in the terminal. Today's tool, not the bare built-in, is the fallback: a machine without `mawsd` keeps the asynchronous asks its phone cards answer today. Today's tool therefore stays in the plugin until every machine the owner uses has a surface.
 
 The choice is made once per process and kept in `$.state`: the engine runs `session.start` again when a module reloads, and a plugin update must not change a running session's schema.
 
@@ -287,7 +290,7 @@ A terminal session's default changes to the sheet only after this works (the own
 - **MAWS's `ask`** (`src/shared/maws/tools.ts`, `src/engine-host/tool-server/ask.ts`), with its four answer kinds the sheet does not have (file, folder, repository, design system; the owner's ruling). It stops being offered to new sessions when MAWS-run sessions take the sheet. The host keeps serving it to sessions launched with it until they end, a session adopted across a host handover included, and journals that hold `ask` rows are still drawn.
 - **The `maws` value of the question-tool switch** (`src/shared/maws/tool-set.ts`). The stored value is kept and read as the default; nothing is migrated (the tool choice's D6 stands). "Default" then means the sheet where the tool runs, the engine's built-in otherwise.
 - **U1's two question forms** (the stepper and the one-page form with Skip and "Decide for me") for sheet questions: one card.
-- **Today's sminos tool**, last, once every machine has a surface (§7). When a session with open asks of today's tool first starts under the sheet's schema, those asks are imported once as sheet questions and the SessionStart context says so.
+- **Today's sminos tool**, later and outside this unit: it stays in the plugin as §7's fallback until every machine the owner uses has a surface. What this unit does is change the default (C7): when a session with open asks of today's tool first starts under the sheet's schema, those asks are imported once as sheet questions and the SessionStart context says so.
 
 ### 10. What the design leaves out
 
@@ -315,9 +318,9 @@ Three consumers read today's asks and must read the sheet's: the `AskSnapshot` t
 
 P1 to P5 are spikes: their deliverable is a verdict written into the section that posed the question. E1 and E2 follow the pattern of the repository's existing behaviour evals (`output-styles/to-human-*-eval.py` in doperpowers). Three of the four observed problems depend on what the agent does, so E1 and E2 decide whether the design works more than any mechanism does.
 
-## Acceptance
+## Acceptance (parent level)
 
-Each is observed in the running system.
+The observable state that closes the unit as a whole; each item is observed in the running system. Children carry their own gates in their sections.
 
 1. **Many questions, one call.** A terminal session's agent adds eight questions in one call, one with a file reference. The terminal shows `8 open questions` and a link; the page shows eight cards and the reference as captured. The tool's result names eight ids and nothing else.
 2. **A subset.** The human answers three and presses Send. The agent quotes the three at its next tool result; five cards remain.
@@ -336,16 +339,162 @@ Each is observed in the running system.
 
 ## Execution
 
-**Verification.** One independent spec review of this document and one buildability review of the roadmap, both before the owner's gate on the cut. The design was debated with the design critic before approval. Branch reviews through doperpowers:review-code: *high* for the sminos child that holds the sheet's record and delivery (a fault loses or duplicates the human's answer) and for the page (it is a door into every session); *medium* for the rest.
-
-**Constraints on every child.**
+**Constraints on every child [binding].**
 - The engine is unmodified (charter D-1); the tool reaches it through function hooks only.
 - Board ticket 711: no user-role text MAWS sends holds text a model wrote.
-- §3's one writer and §4.2's table are binding on every surface.
+- §3's one writer and §4.2's table bind every surface.
 - MAWS: tokens only, light theme default; gates through `scripts/ci-gate.sh` as `CLAUDE.md` says. doperpowers: the mods' suite `sminos/tests/mods/run.sh` and the command's suite `sminos/tests/run-sminos-tests.sh`.
 - Nothing the owner uses today stops working at any step: a new path lands beside the old one, and a default changes only after its replacement is verified.
 
-**Order.** (0) The probes and behaviour tests of §12. (1) sminos: the tool's sheet schema behind the start choice of §7, the record of §3, §4 and §5.2, `sminos answer`. (2) MAWS: the components of §8, reading sheets from the file, §8.1. (3) `mawsd`'s page and surface registration, and the terminal's line. (4) MAWS-run sessions: §5.4, `MAWS_QUESTION_SHEET`, §9's retirement of `ask`. (5) §8.4. (6) The terminal's default, and the import of §9. The cut into children, their contracts and their edges are the roadmap sections that doperpowers:decomposing adds below.
+**Grades.** Binding, because only the whole picture could settle them: §1's shape, §2.1's ownership rule and name, §3 (the directory, one writer, readers read the file), §4, §5.1, §5.3, §5.4's ticket 711 form, §6's routes, §7, §8.1 (the owner's ruling), §8.2's four rules, §9, and the contracts below. Everything else in the design is advisory inheritance: a child starts from it and may overturn it with evidence, stating its choice in its own document and listing the sentence for this document's writer.
+
+## Children
+
+### C0: Engine probes — spike (findings, never a merge)
+
+- **Purpose:** Answer §12's P1 to P5 against the pinned engine before anything depends on the answers: what a function hook sees and can do in a MAWS-run session, how a message reaches a subagent, how a reference is captured safely, whether the file and the inbox hold under concurrent processes, and what SessionStart context delivers.
+- **Acceptance:** A verdict for each of P1 to P5 with its evidence, written by this document's writer into the section that posed the question (§2.3, §3, §5.4, §5.5, §6), and each fixture kept: terminal probes as a probe plugin's transcript, MAWS-run probes as scenarios and fixtures under `spikes/protocol-probe/`.
+- **Edges:** blocked-by: —; blocks: C2 (P2 terminal, P3, P4, P5), C5 (P1, P2 in a MAWS-run session).
+- **Contracts:** none; its verdicts may move X3 and §6.
+- **Design inheritance:** §12; `docs/doperpowers/specs/2026-10-13-ask-async-design.md` in doperpowers ("How the engine is reached") shows the probe-plugin method used for today's tool.
+- **Required:** required.
+- **Status:** not-dispatched (dispatchable now).
+
+### C1: Behaviour baseline — spike (findings, never a merge)
+
+- **Purpose:** Find out whether agents use the sheet as the design needs, since three of the four observed problems are behavioural: E1 (revise instead of asking again) and E2 (a card that can be judged alone), on long sessions, with a stub of the tool that accepts §2.1's input and records calls.
+- **Acceptance:** The two evals exist in doperpowers beside the existing behaviour evals and run from one command each; a baseline result for each with the description wording of §2.4; the pass thresholds proposed to the owner and, once the owner sets them, written into Acceptance 14; a recommendation, with the evidence, on automatic capture of context (§10). E2's judge sees only the card.
+- **Edges:** blocked-by: —; blocks: C2's description wording (C2 starts without it and takes its result before its last gate).
+- **Contracts:** X7 (it fixes nothing; it consumes §2.1's input shape).
+- **Design inheritance:** §2.4, §10, §12.
+- **Required:** required.
+- **Status:** not-dispatched (dispatchable now).
+
+### C2: The sheet in sminos — plan (doperpowers repository)
+
+- **Purpose:** The tool's new form and the sheet's record: the schema of §2 behind the start choice of §7, the directory, the inbox and the apply table of §3 and §4, delivery in terminal sessions (§5.2, §5.3, §5.5), subagents in terminal sessions (§6), the command-line surface, and the terminal's own drawing (§8.3). It lands beside today's tool and changes no default.
+- **Acceptance:**
+  - *G1, the contract published:* a JSON Schema for `state.json`, the inbox line and the surface registration, and a set of fixture directories covering every row of §4.2's table, in `sminos/types/sheet/`; `sminos sheet put` and `sminos sheet show --json` work against a directory with no session running.
+  - *G2, a terminal session:* with `SMINOS_QUESTION_SHEET` on and a surface registration file present, Acceptance 1 to 6 hold with `sminos answer` standing in for the page, and Acceptance 8 holds; with the setting off, or no live registration, or `SSH_CONNECTION` with a local one only, the session has today's tool unchanged (Acceptance 9).
+  - *G3, the other readers:* the `AskSnapshot` in `$.state` and the project log's `question` and `answered` events carry sheet questions (§11); the description passes C1's thresholds.
+- **Edges:** blocked-by: C0 (P2 in a terminal, P3, P4, P5) for G2; G1 is not blocked. blocks: C3.G2, C4, C5, C6.
+- **Contracts:** owner of X1, X2, X3 (the terminal form), X6, X7; consumer of X4.
+- **Design inheritance:** §1 to §7, §8.3, §11. Advisory: when the inbox is drained (§3), how the terminal line is composed with the to-human band (the ask-async design in doperpowers, "Composing with to-human", is how today's line does it).
+- **Required:** required.
+- **Status:** not-dispatched (G1 dispatchable now; G2 blocked-by C0).
+
+### C3: The sheet in the MAWS app — plan
+
+- **Purpose:** The components every surface draws (the card, a session's sheet, the overview), MAWS's reading of sheets from their files and its appending through sminos's writer, and the app's own drawing for terminal sessions on this machine: the row's lines and receipts, the side sheet, the "Waiting for you" card and the attention items (§8.1), with U1 amended where §8.1 says.
+- **Acceptance:**
+  - *G1, on fixtures:* the components render every fixture directory of C2.G1, a card for each state a surface can show (open, updated since seen, queued, accepted, refused as stale); the reader lists every session directory under a given `$SMINOS_HOME`.
+  - *G2, live:* for a terminal session on this machine with the sheet on, Acceptance 7's drawing holds in the app (nothing opens by itself; the row's lines; Open shows the side sheet at the question; the receipt), an answer sent in the app reaches the agent, and a stopped session's questions show.
+- **Edges:** blocked-by: — for G1 (it builds on X1 as this document states it and re-reads C2.G1's fixtures when they exist); C2.G2 for G2. blocks: C4, C5, C6.
+- **Contracts:** owner of X5; consumer of X1, X2, X3, X7.
+- **Design inheritance:** §3 (readers read the file), §4.3, §8 (the card, the sheet), §8.1 [binding], U1's sections named in the header. Advisory: where the reader runs (`mawsd`'s spine, beside the terminal-session driver in `src/services/lane-a/`), and whether MAWS reaches the writer through the `sminos` command or the sminos daemon's socket (`src/endpoint/rl10/`): C2 and C3 settle it between them and record it under X2.
+- **Required:** required.
+- **Status:** not-dispatched (G1 dispatchable now).
+
+### C4: The local page — plan
+
+- **Purpose:** `mawsd` serves the sheet to a browser beside the terminal (§8.2) and registers itself as a surface (§7), so that a terminal session with the sheet on has a place to be answered.
+- **Acceptance:** With `mawsd` running, a paired browser at `http://sheet.localhost:47831/` sees the overview of this machine's sessions, stopped ones apart, and `/s/<session>` live; Acceptance 1 to 6 hold end to end with the page as the surface; Acceptance 11 holds (each refusal shown by a request that is refused); the registration file exists while `mawsd` runs and is stale within its heartbeat after it stops; the terminal's line shows the link.
+- **Edges:** blocked-by: C2.G2, C3.G1. blocks: C7.
+- **Contracts:** owner of X4; consumer of X1, X2, X5.
+- **Design inheritance:** §7, §8.2 (its four rules binding; the port, the pairing command and the bundle's build are advisory). This is `mawsd`'s first HTTP door: everything else it serves is a token-authenticated socket or a sealed channel (`src/shared/daemon/files.ts`), so the page's serving code is new and is reviewed at the *high* rung.
+- **Required:** required.
+- **Status:** not-dispatched (blocked-by C2, C3).
+
+### C5: MAWS-run sessions — plan (ticket 600)
+
+- **Purpose:** The sheet in a session MAWS runs: the launch sets `MAWS_QUESTION_SHEET` and stops offering `ask`; MAWS appends answers and delivers them with its steer in ticket 711's form (§5.4); an open question no longer holds an engine process; the rows, the side sheet and the cards of C3 draw these sessions too; `ask` and the switch's `maws` value are retired as §9 says.
+- **Acceptance:** Acceptance 7 (with the engine process released, an answer resumes the session), 8 in a MAWS-run session by the route P2 allows, and 12; a dismissal reaches the agent with MAWS's next message and starts no turn; a MAWS-run session on another machine is answered from this one (the steer travels as today's does).
+- **Edges:** blocked-by: C0 (P1, P2), C2.G2, C3.G2. blocks: C6, C7.
+- **Contracts:** owner of X3's steer form; setter of X6's `MAWS_QUESTION_SHEET`; consumer of X1, X2, X5, X7.
+- **Design inheritance:** §5.1, §5.4, §6's last paragraph, §7 (the MAWS-run paragraph), §9; the tool choice's "What ticket 600 changes" (`docs/doperpowers/plans/2026-11-23-tool-choice.md`). Two of ticket 600's three blockers are already answered by the design: the built-in is not needed, because the sheet uses no engine dialog, and answers come in through the inbox and the steer, not through the bridge.
+- **Required:** required.
+- **Status:** not-dispatched (blocked-by C0, C2, C3).
+
+### C6: The phone and other machines — decomposing run at dispatch
+
+- **Purpose:** A sheet question is answered from desk-web's cards and, in the MAWS app, for a session on another machine (§8.4), so that the terminal's default can change without taking away what works today.
+- **Acceptance:** Acceptance 10; a reference's body is fetched on demand and is in no hub record; an answer resent over the remote path is applied once (§4.2's key).
+- **Edges:** blocked-by: C2, C3, C5. blocks: C7.
+- **Contracts:** consumer of X1, X2, X5.
+- **Design inheritance:** §8.4, advisory in full: the carriage spans sminos's remote operations, the endpoint's grades and offers (`src/endpoint/lane-a.ts`, `src/endpoint/offers.ts`, `src/endpoint/by-effect.ts`), org-protocol's actions and desk-web's cards (`apps/desk-web/src/cards/`), and is cut when it nears dispatch, against what C2 to C5 landed.
+- **Required:** required.
+- **Status:** not-dispatched (deliberately late).
+
+### C7: The flip — brief
+
+- **Purpose:** The sheet becomes the default for terminal sessions, and open asks of today's tool move onto it once (§9).
+- **Acceptance:** Acceptance 13; with no setting given, a new terminal session on a machine with a live surface of suitable reach has the sheet, and one on a machine without has today's tool.
+- **Edges:** blocked-by: C4, C5, C6.
+- **Contracts:** flips X6's default.
+- **Design inheritance:** §7, §9.
+- **Required:** required.
+- **Status:** not-dispatched (deliberately late).
+
+## Cross-Child Contracts
+
+- **X1 · The sheet's record.** The directory of §3, the fields of §1, the inbox line of §4.1, the apply table of §4.2 and the three shown states of §4.3. *Owner:* C2, which publishes the JSON Schema and the fixture directories at C2.G1. *Binds:* C3, C4, C5, C6. A change after C2.G1 goes through this document's writer.
+- **X2 · The writer's door.** Every change to a sheet from outside the tool is one inbox line appended by sminos's own code under its lock: `sminos sheet put` (a line on standard input, the verdict or `queued` on standard output) and `sminos sheet show --json`. Whether MAWS calls the command or the same code over the sminos daemon's socket is settled by C2 and C3 and recorded here. *Owner:* C2. *Binds:* C3, C4, C5, C6.
+- **X3 · The envelope.** §5.3's text and its `<sheet-delivery>` block, and §5.4's form for a user-role steer (ids, option places, the human's text as JSON strings). *Owner:* C2 for the terminal form, C5 for the steer form; the block's JSON is one schema, published with X1. *Readers:* the tool, MAWS's reader of arrivals, the project log's export.
+- **X4 · Surface registration.** The file of §7 and its heartbeat. *Owner:* C4 (it writes it). *Reader:* C2.
+- **X5 · The components.** The question card, the session's sheet and the overview, over one model of a sheet read from X1, importable from MAWS's renderer by the page and by desk-web. *Owner:* C3. *Consumers:* C4, C5, C6.
+- **X6 · The start choice.** `SMINOS_QUESTION_SHEET` (terminal sessions; off by default until C7) and `MAWS_QUESTION_SHEET=1` (set by MAWS at launch), read once per process and kept in `$.state`. *Owner:* C2. C5 sets MAWS's; C7 changes the default.
+- **X7 · The stored call.** §2.1's input and the fixed first line of §2.2's result, from which a transcript row is drawn without the sheet's directory. *Owner:* C2. *Consumers:* C3, C5, and C1's stub.
+
+## Ordering & Dependency Map
+
+    C0 probes ──────────────┬────────────────────────────┐
+    C1 behaviour ──┐        │                            │
+                   ▼        ▼                            ▼
+    C2.G1 ──► C2.G2/G3 ──► C4 the page ────────────► C7 the flip
+       │          │                                      ▲
+       ▼          ▼                                      │
+    C3.G1 ──► C3.G2 ──────► C5 MAWS-run ──► C6 phone, other machines
+
+- C0, C1, C2.G1 and C3.G1 start together: the contract X1 is stated in this document, so the app's components and the tool's record are built against the same fixtures before either runs live.
+- C4 and C5 run in parallel once C2.G2 and C3 are in.
+- C6 is cut and run last but one; C7 is the only step that changes what a terminal session gets with no setting, and it waits for everything.
+- Today's sminos tool is not removed in this unit (Deferred).
+
+## Verification
+
+- This document: one independent spec review and one buildability review of the roadmap, before the owner's gate on the cut. The design was debated with the design critic before approval.
+- Each plan child's execution document: the buildability review.
+- Branch reviews through doperpowers:review-code: *high* for C2 (a fault loses or duplicates the human's answer) and C4 (a door into every session on the machine); *medium* for C3, C5 and C7; C6 names its own at its cut.
+- Recomposition: Acceptance 1 to 14 run as written on the owner's machines by the session holding this document, then a scale review, since the unit spans two repositories and one cross-child record.
+
+## Risks & Mitigations
+
+- **Agents do not revise, or leave context empty.** C1 measures it before the tool is built; the description's wording and §10's capture are its levers.
+- **The two repositories drift on X1.** One schema and one set of fixtures, published by C2.G1 and read by MAWS's tests.
+- **A hook cannot do in a MAWS-run session what it does in a terminal.** The design needs only that it sees the host's prompt (shipped); C0's P1 decides the rest before C5 starts.
+- **The page is a new door.** §8.2's four rules are binding and each has a refused request in C4's acceptance.
+- **A long wait between C4 and C7.** The setting lets the owner use the sheet on this machine from C4 on, while the default waits.
+
+## Deferred / Out of Scope
+
+**Deferred (may return):** removing today's sminos tool from the plugin, once every machine the owner uses has a surface; an overview across machines on the local page; starting a stopped terminal session to deliver an answer; automatic capture of context (decided by C1); pasting an image on the phone.
+
+**Out of scope (standing):** a blocking mode; an archive of answered questions; a mark that a session is stopped on the human; MAWS's file, folder, repository and design-system answer kinds.
+
+## Tracking Map
+
+Approved design: commit `2fe16c685` (the design, 2026-11-23). The roadmap's approval is recorded here when the owner gives it.
+
+| child | artifact | status |
+|---|---|---|
+| C0 engine probes | findings in §12's sections; fixtures under `spikes/protocol-probe/` and the probe plugin's transcripts | not-dispatched |
+| C1 behaviour baseline | the evals and their report in doperpowers | not-dispatched |
+| C2 the sheet in sminos | execution document in doperpowers `docs/doperpowers/plans/` | not-dispatched |
+| C3 the sheet in the MAWS app | execution document in `docs/doperpowers/plans/` | not-dispatched |
+| C4 the local page | execution document in `docs/doperpowers/plans/` | not-dispatched |
+| C5 MAWS-run sessions (ticket 600) | execution document in `docs/doperpowers/plans/` | not-dispatched |
+| C6 the phone and other machines | its own cut at dispatch | not-dispatched (deliberately late) |
+| C7 the flip | ledger in doperpowers `docs/doperpowers/ledgers/` | not-dispatched (deliberately late) |
 
 ## Outcomes & Retrospective
 
