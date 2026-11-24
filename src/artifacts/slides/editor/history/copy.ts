@@ -35,7 +35,7 @@ export const HISTORY_COPY = {
   notes: 'Speaker notes in this version',
   noNotes: 'No speaker notes.',
   stage: 'Slide in this version',
-  pill: (count: number | null) => (count === null ? 'New changes' : `${count} new ${count === 1 ? 'change' : 'changes'}`), // NEWROW, as the document's G347
+  pill: (count: number | null) => (count === null ? 'New changes' : `${count} new ${count === 1 ? 'change' : 'changes'}`), // N201, as the document's G347
   pillRetry: 'Count the new changes again', // G498: the ↻'s name and tooltip
   pillDismiss: 'Dismiss new changes',
   dismiss: 'Dismiss',
