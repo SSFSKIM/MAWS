@@ -54,7 +54,7 @@ import { useDockedCards } from './docked/registry';
 import { noticeOf } from './docked/swap';
 import { attachmentsOf, emptyDoc, type ComposerDoc } from './editor/doc';
 import { ipcDrafts, type DraftPort, type EditorHandle } from './editor/controller';
-import { rememberingRemoteDrafts } from './editor/drafts'; // P5 O7 M2
+import { isEmptyDoc, rememberingRemoteDrafts } from './editor/drafts'; // P5 O7 M2; ticket 851, M3: isEmptyDoc
 import { isRemoteLaneB, useIsRemoteLaneB, useRemoteSending } from '../lane-b/remote-session'; // P5 O7 M2
 import { useReaderClosed } from '../sessions/share/reader'; // board 525
 import { remoteUnavailableOf, useRemoteUnavailable } from '../lane-b/remote-unavailable'; // P5 O7 M8
@@ -67,6 +67,7 @@ import { acquireBeforeMode, precheck, submitHumanSerialized, submitRemoteSeriali
 import { fileMentionsOf, ON_THIS_MAC } from './editor/remote-uploads'; // P5 O7 M4 (fix wave 1)
 import { firstSendPending, sendFirstOnce, SPAWN_WORDS, spawnOnMachine, spawnTargetOf, useSpawning, useSpawnTarget } from '../sessions/remote-spawn'; // P5 O7 M4: the machine menu's spawn
 import { openDialog } from '../sessions/dialogs'; // P5 O7 M9: the machine's trust card
+import { leftThisMachine, notePrestartEdit } from '../sessions/prestart'; // ticket 851, M3
 import { useEffectiveEffort } from './effective-effort'; // W3
 import { autoFallbackNotice } from '@shared/sessions/models'; // W3
 import { workingFolder } from '@shared/sessions/working-folder';
@@ -262,6 +263,13 @@ export function Composer({ appSessionId, paneIndex, client = ipc }: ComposerProp
   // knows the choice (read once, for such an intent alone), starting on this machine and not spawned on another
   const toolsDefault = useMachineMawsTools(setup?.intent.kind === 'create' ? machineOf(appSessionId) : null, client);
   const tools = { honoured: toolsDefault != null, elsewhere: spawnTarget !== null };
+  // Ticket 851, M3 (D8, D10): an unstarted New chat on this machine asks its spine to prestart the engine as the person
+  // types; a pick of another machine withdraws it, the draft left as it is
+  const spawnsElsewhere = spawnTarget !== null;
+  const prestarts = setup !== null && setup.intent.kind === 'create' && !spawnsElsewhere;
+  useEffect(() => {
+    if (spawnsElsewhere) leftThisMachine(appSessionId, client);
+  }, [spawnsElsewhere, appSessionId, client]);
   const bindings: FrameBindings = setup ? intentBindings(setup, { starting }, userDefaults, tools) : controls ? controls.bindings() : endedBindings(heldWords(appSessionId));
   // P5 O9 M5: a session another process runs and the port drives (lane A): its turn is that process's, and Send and Stop
   // go by the port's capabilities
@@ -674,6 +682,7 @@ export function Composer({ appSessionId, paneIndex, client = ipc }: ComposerProp
               handle={handle}
               client={client}
               onDocChange={setDoc}
+              onEdit={prestarts ? (edited) => notePrestartEdit(appSessionId, { empty: isEmptyDoc(edited) }, client) : undefined}
               onEscape={onEscape}
               onTakeBack={onTakeBack}
               onStage={(stage) => void carryForward(appSessionId, stage, takeBackDeps)}

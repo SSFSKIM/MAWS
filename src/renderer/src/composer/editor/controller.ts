@@ -124,6 +124,7 @@ export interface ControllerInputs {
   onSubmit?(s: Serialized, when?: 'after'): Promise<boolean>;
   onPrefill?(prefill: Prefill): void;
   onDocChange?(doc: ComposerDoc): void;
+  onEdit?(doc: ComposerDoc): void; // ticket 851, M3: a change the person made (typed, pasted, a prefill), never a load or a clear
   onEscape?(): boolean;
   onRestore?(doc: ComposerDoc): void; // a draft was restored into the editor
   suggestion?: string | null; // R2: a plugin's suggested prompt, the empty box's placeholder; Tab takes it
@@ -372,6 +373,7 @@ export class EditorController {
     if (this.silent || !transaction.docChanged) return;
     this.revision += 1;
     this.writer.change(doc);
+    this.inputs.onEdit?.(doc); // ticket 851, M3: the edits the draft's save follows, told at once
   }
 
   keyDown(view: EditorView, event: KeyboardEvent): boolean {
