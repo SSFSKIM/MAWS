@@ -21,6 +21,11 @@
 // parser collects one header more than HEADERS_MAX, so the checks only ever read a complete list. At most
 // CONNECTIONS_MAX connections across both servers; one past it is destroyed at once.
 //
+// The registration (T18, §O): while listening, the page's file under the sminos home is written at once and then at
+// each tick of the page server's timer, which needs nothing loaded; the home is `sminosHome` over the daemon's
+// environment and, unless that names SMINOS_HOME, the one capture of the login shell's, the rule C3's reader reads by.
+// A stop removes the file if it still names this process.
+//
 // Never in the way (T6): `start()` returns at once and nothing in it can stop or delay the daemon; each failure is a
 // state and a log line. `stop()` ends the listeners and every connection within half a second.
 import { existsSync } from 'node:fs';
@@ -29,10 +34,13 @@ import type { AddressInfo, Socket } from 'node:net';
 import { join } from 'node:path';
 import type { Duplex } from 'node:stream';
 import type { DaemonSheetPage } from '@shared/ipc/schema/daemon';
+import { sminosHome } from '../../services/lane-a/discovery';
 import type { SpineState } from '../spine-seam';
 import type { SheetPageChunk, SheetPageHandler } from './handler';
 import { HEADERS_MAX, pageOrigin, refusal, refusalBytes, refusalHeaders, SHEET_HOST, SHEET_PORT, type Refusal } from './headers';
 import type { BrowserList, SheetPairAnswer } from './pairing';
+import { registrationName, removeRegistration, writeRegistration } from './registration';
+import type { SheetAccess } from './sheets';
 import { SHEET_PAGE_TIMING, type SheetPageTiming } from './timing';
 
 export { SHEET_HOST, SHEET_PORT, SHEET_PAGE_TIMING, type SheetPageTiming };
@@ -44,13 +52,6 @@ const HEADER_BYTES_MAX = 16 * 1024;
 
 export type SheetPageState = 'off' | 'no-bundle' | 'port-taken' | 'listening' | 'stopped';
 
-// §N's access to the sheets, M3's to make real. Until then the daemon gives the stand-in below, which refuses, so a
-// paired connection is told `unavailable`.
-export interface SheetAccess {
-  service(): Promise<unknown>;
-}
-export const NO_SHEETS: SheetAccess = { service: () => Promise.reject(Object.assign(new Error('no sheet service yet'), { why: 'no-service' })) };
-
 export interface SheetPageOptions {
   kind: 'unit' | 'private';
   profileDir: string;
@@ -59,7 +60,10 @@ export interface SheetPageOptions {
   env: NodeJS.ProcessEnv;
   shell(): Promise<Record<string, string>>; // one capture, made at the first need and kept
   bundleDir: string; // beside the build: join(dirname(<the entry's real path>), '..', 'sheet-page')
-  sheets: SheetAccess;
+  sheets: SheetAccess; // §N: C3's service through the spine (sheets.ts)
+  discovery(): Promise<void>; // T29: the daemon's discovery wake, as for a session.list that is not the app's
+  onEvent(listener: (owner: 'engine-host' | 'pty-host' | 'machine', message: { name: string; payload: unknown }) => void): () => void; // DaemonServices.onEvent
+  hold(reason: string, standing?: boolean): () => void; // DaemonServices.hold (T15)
   log(line: string): void;
   // test seams
   load?(): Promise<SheetPageChunk>;
@@ -76,7 +80,7 @@ export interface SheetPage {
   browsers(): Promise<BrowserList>;
   unpair(id: string | null): Promise<{ removed: number; saved: boolean; why?: string; unread?: true }>;
   spineState(state: SpineState): void; // T15: a spine that cannot be had is said on the live connections
-  stop(): Promise<void>; // listeners closed, connections ended; at most STOP_MS
+  stop(): Promise<void>; // listeners closed, connections ended, the registration removed if ours; at most STOP_MS
 }
 
 export const loadSheetPageChunk = (): Promise<SheetPageChunk> => import('./handler');
@@ -121,6 +125,13 @@ export function createSheetPage(options: SheetPageOptions): SheetPage {
   let spine: SpineState = 'cold';
   let retryTimer: NodeJS.Timeout | null = null;
   let tickTimer: NodeJS.Timeout | null = null;
+  const now = options.now ?? Date.now;
+  let captured: Promise<Record<string, string>> | null = null;
+  const shell = () => (captured ??= options.shell()); // one capture, at the first need: the port, the switch, the home
+  const name = registrationName(options.defaultProfile, options.profileDir);
+  let home: string | null | undefined; // the sminos home: undefined until it is looked for, null when there is none to write in
+  let registered = false; // the last tick wrote the registration
+  let written: string | null = null; // the last tick's outcome, logged when it changes
   let started = false;
   let stopping: Promise<void> | null = null;
 
@@ -137,9 +148,9 @@ export function createSheetPage(options: SheetPageOptions): SheetPage {
     if (own === '0') return 'turned off by MAWS_SHEET_PAGE=0';
     if (own !== '1' && !(options.defaultProfile && SHEET_PAGE_DEFAULT_ON)) return options.defaultProfile ? 'served only under MAWS_SHEET_PAGE=1 for now' : `a ${options.kind} mawsd of another profile serves it only under MAWS_SHEET_PAGE=1`;
     const fromEnv = portOf(options.env.MAWS_SHEET_PORT, 'environment', log);
-    const shell = own === '1' && fromEnv !== null ? {} : await options.shell();
-    if (own !== '1' && shell.MAWS_SHEET_PAGE === '0') return 'turned off by MAWS_SHEET_PAGE=0 in the login shell';
-    port = fromEnv ?? portOf(shell.MAWS_SHEET_PORT, 'login shell', log) ?? SHEET_PORT;
+    const login = own === '1' && fromEnv !== null ? {} : await shell();
+    if (own !== '1' && login.MAWS_SHEET_PAGE === '0') return 'turned off by MAWS_SHEET_PAGE=0 in the login shell';
+    port = fromEnv ?? portOf(login.MAWS_SHEET_PORT, 'login shell', log) ?? SHEET_PORT;
     return null;
   }
 
@@ -228,11 +239,52 @@ export function createSheetPage(options: SheetPageOptions): SheetPage {
     if (stopping) return void (await Promise.all([...made].map(close)));
     if (outcome === 'bound') {
       committed = true;
-      return become('listening', `served on ${servers.length === 2 ? '127.0.0.1 and ::1' : '127.0.0.1'}, port ${port}`);
+      become('listening', `served on ${servers.length === 2 ? '127.0.0.1 and ::1' : '127.0.0.1'}, port ${port}`);
+      return register();
     }
     become('port-taken', outcome === 'again' ? 'no port was free on both loopback addresses' : outcome);
     retryTimer = setTimeout(() => void bind().catch((error: unknown) => become('port-taken', `the bind failed: ${messageOf(error)}`)), timing.portRetryMs);
     retryTimer.unref();
+  }
+
+  // --- the timer and the registration (T10, T18) ------------------------------------------------------------------------
+  // One timer, started at the first of the listeners being up and the chunk's load: the heartbeat while listening, and a
+  // replace of the browsers' file still owed
+  function ticking(): void {
+    if (tickTimer !== null || stopping) return;
+    tickTimer = setInterval(() => {
+      heartbeat();
+      handler?.tick();
+    }, timing.heartbeatMs);
+    tickTimer.unref();
+  }
+
+  async function register(): Promise<void> {
+    if (home === undefined) {
+      try {
+        home = sminosHome(options.env, options.env.SMINOS_HOME ? null : await shell()); // the reader's rule
+      } catch (error) {
+        home = null;
+        log(`the registration: no sminos home to write in (${messageOf(error)})`);
+      }
+    }
+    if (stopping) return;
+    heartbeat(); // the first tick after the listeners are up
+    ticking();
+  }
+
+  function heartbeat(): void {
+    if (state !== 'listening' || !home) return void (registered = false);
+    let outcome: string;
+    try {
+      outcome = writeRegistration(home, { v: 1, name, pid: process.pid, url: pageOrigin(port), reach: 'local', heartbeatAt: new Date(now()).toISOString() });
+    } catch (error) {
+      outcome = `could not be written (${codeOf(error) ?? messageOf(error)})`;
+    }
+    registered = outcome === 'written';
+    if (outcome === written) return;
+    written = outcome;
+    log(`the registration: ${outcome === 'written' ? `written as ${name}, every ${timing.heartbeatMs / 1000} s` : outcome === 'no-home' ? 'the sminos home does not exist, so nothing is written; looked for at each tick' : outcome === 'refused' ? 'refused: the home’s sheet/ or sheet/surfaces/ is a link or not a directory' : outcome}`);
   }
 
   // --- the chunk ----------------------------------------------------------------------------------------------------
@@ -245,9 +297,12 @@ export function createSheetPage(options: SheetPageOptions): SheetPage {
           bundleDir: options.bundleDir,
           file: join(options.dir, 'sheet-page.json'),
           sheets: options.sheets,
+          discovery: options.discovery,
+          onEvent: options.onEvent,
+          hold: options.hold,
           spine,
           log,
-          now: options.now ?? Date.now,
+          now,
           ...(options.write && { write: options.write }),
           timing,
         }),
@@ -257,11 +312,7 @@ export function createSheetPage(options: SheetPageOptions): SheetPage {
           handler = loaded;
           log('its handler loaded at its first use');
           if (stopping) loaded.close();
-          else {
-            // the timer's tick: a replace of the browsers' file still owed, tried again until it succeeds (T10)
-            tickTimer = setInterval(() => loaded.tick(), timing.heartbeatMs);
-            tickTimer.unref();
-          }
+          else ticking(); // a replace of the browsers' file still owed is tried again at each tick (T10)
           return loaded;
         },
         (error: unknown) => {
@@ -315,7 +366,7 @@ export function createSheetPage(options: SheetPageOptions): SheetPage {
       url: state === 'listening' ? pageOrigin(port) : null,
       browsers: handler ? handler.count() : null, // memory alone: a status reads no file
       connections: handler ? handler.connections() : null,
-      registered: false, // the registration is M3's
+      registered: state === 'listening' && registered,
     }),
 
     async pair() {
@@ -348,9 +399,13 @@ export function createSheetPage(options: SheetPageOptions): SheetPage {
 
     stop() {
       stopping ??= (async () => {
+        const wasListening = state === 'listening';
         if (state === 'listening' || state === 'port-taken') become('stopped', 'mawsd is stopping');
         if (retryTimer) clearTimeout(retryTimer);
         if (tickTimer) clearInterval(tickTimer);
+        // first, so no session is offered a page that is going; only a file that still names this process
+        if (wasListening && home) removeRegistration(home, name, process.pid);
+        registered = false;
         handler?.close(); // the live connections told 1001
         await Promise.race([Promise.all([...made].map(close)), new Promise((resolve) => setTimeout(resolve, STOP_MS).unref())]);
         for (const socket of sockets) socket.destroy(); // what is left: an upgraded socket, which its server no longer holds

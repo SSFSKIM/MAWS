@@ -207,13 +207,15 @@ describe.skipIf(graph === null)('the built mawsd’s run path (P5 O5)', () => {
   // a chunk the page server loads at the first request or pairing command, never at start; the page server, which is
   // on the run path, holds none of it
   it('keep the sheet page’s handler off the run path, in the chunk the page server loads at its first use', () => {
-    const markers = { createSheetPageHandler: /\bfunction createSheetPageHandler\(/, admit: /\bfunction admit\(/, createPairing: /\bfunction createPairing\(/, readBundle: /\bfunction readBundle\(/ };
+    const markers = { createSheetPageHandler: /\bfunction createSheetPageHandler\(/, admit: /\bfunction admit\(/, createPairing: /\bfunction createPairing\(/, readBundle: /\bfunction readBundle\(/, createSheetRoutes: /\bfunction createSheetRoutes\(/ /* M3: the sheet's routes */ };
     const run = runPathOf(MAWSD);
     for (const [what, marker] of Object.entries(markers)) {
       expect([...run].filter(([, text]) => marker.test(text)).map(([file]) => file), what).toEqual([]);
       expect([...graph!].some(([, text]) => marker.test(text)), `${what} beside it`).toBe(true);
     }
     expect([...run].some(([, text]) => /\bfunction createSheetPage\(/.test(text)), 'the page server is on the run path').toBe(true);
+    // M3 (T18): the registration's heartbeat needs nothing loaded
+    expect([...run].some(([, text]) => /\bfunction writeRegistration\(/.test(text)), 'the registration is on the run path').toBe(true);
   });
 });
 

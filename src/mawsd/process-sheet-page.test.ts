@@ -4,20 +4,20 @@
 // suite builds. Its clients are Node's `net` and `ws`, which write any header and any bytes: each request is made to a
 // loopback address with its Host set by hand, so nothing depends on how the machine resolves a name. Every request a
 // rule refuses is sent and seen refused, and every answer is seen to carry the standing headers.
-import { createHash, createHmac, randomBytes } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 import { cpSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { createConnection, createServer, type AddressInfo, type Server, type Socket } from 'node:net';
 import { networkInterfaces, tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, onTestFailed, vi } from 'vitest';
-import { WebSocket } from 'ws';
 import { atomicWriteFileSync } from '@shared/fs/atomic-write';
 import { gradeOf } from '@shared/ipc/grades';
 import { launchEnvironment } from '../../e2e/support/scratch-env';
 import { MawsdScene, until } from '../../test/support/mawsd-scene';
+import { exchangeBytes, type Headers, HOST, ORIGIN, JSON_BODY, request, jsonOf, macOf, nonce, Tab, pairedTab } from '../../test/support/sheet-page-client';
 import { runCli, sheetPageLine, type CliDeps } from './cli';
 import type { DaemonOptions, RunningDaemon } from './daemon';
-import { PROOF_KEY_LABEL, PROOF_MAC_LABEL } from './sheet-page/pairing';
+import { NO_SHEETS } from './sheet-page/sheets';
 import type { SheetPageTiming } from './sheet-page/timing';
 
 const FIXTURE = resolve(__dirname, '../../test/fixtures/sheet-page/bundle');
@@ -63,6 +63,7 @@ function options(env: Record<string, string> = {}, sheetPage: DaemonOptions['she
         atomicWriteFileSync(file, text);
       },
       timing: TIMING,
+      sheets: NO_SHEETS, // who is let in asks nothing of the spine: the sheets themselves are process-sheet-page-sheets.test.ts's
       ...sheetPage,
     },
   };
@@ -75,74 +76,6 @@ async function served(env: Record<string, string> = {}, sheetPage: DaemonOptions
 }
 
 const decided = (daemon: RunningDaemon) => until(() => daemon.sheetPage.status().detail !== null, 5_000, 'the sheet page’s decision');
-
-// --- raw HTTP -----------------------------------------------------------------------------------------------------------
-
-interface Answer {
-  status: number;
-  headers: Record<string, string[]>;
-  body: Buffer;
-  closedAfterMs: number;
-}
-
-// What one connection was answered, read to its close
-function exchangeBytes(port: number, bytes: string | Buffer, host = '127.0.0.1'): Promise<Answer> {
-  return new Promise((done, failed) => {
-    const began = Date.now();
-    const socket = createConnection({ host, port });
-    const chunks: Buffer[] = [];
-    socket.on('data', (chunk) => void chunks.push(chunk));
-    socket.on('error', (error: NodeJS.ErrnoException) => (error.code === 'ECONNRESET' ? undefined : failed(error)));
-    socket.on('close', () => {
-      const answer = parse(Buffer.concat(chunks), Date.now() - began);
-      try {
-        if (answer.status !== 0) standing(answer, port); // every answer, whatever its status
-        done(answer);
-      } catch (error) {
-        failed(error); // the test's failure, not an uncaught throw it would time out on
-      }
-    });
-    socket.write(bytes);
-  });
-}
-
-function parse(bytes: Buffer, closedAfterMs: number): Answer {
-  const end = bytes.indexOf('\r\n\r\n');
-  if (end < 0) return { status: 0, headers: {}, body: bytes, closedAfterMs };
-  const [line, ...lines] = bytes.subarray(0, end).toString('latin1').split('\r\n');
-  const headers: Record<string, string[]> = {};
-  for (const header of lines) {
-    const at = header.indexOf(':');
-    (headers[header.slice(0, at).toLowerCase()] ??= []).push(header.slice(at + 1).trim());
-  }
-  return { status: Number(line!.split(' ')[1]), headers, body: bytes.subarray(end + 4), closedAfterMs };
-}
-
-type Headers = [string, string][];
-const HOST = (port: number): [string, string] => ['Host', `sheet.localhost:${port}`];
-const ORIGIN = (port: number): [string, string] => ['Origin', `http://sheet.localhost:${port}`];
-const JSON_BODY: [string, string] = ['Content-Type', 'application/json'];
-
-function request(port: number, method: string, target: string, headers: Headers, body = ''): Promise<Answer> {
-  const lines = [`${method} ${target} HTTP/1.1`, ...headers.map(([name, value]) => `${name}: ${value}`), 'Connection: close'];
-  if (body !== '' || method === 'POST') lines.push(`Content-Length: ${Buffer.byteLength(body)}`);
-  return exchangeBytes(port, `${lines.join('\r\n')}\r\n\r\n${body}`);
-}
-
-// The six headers of §M, written out here and not read from the code under test. Every answer the suite receives is held
-// to them by the helpers that receive it (exchangeBytes, and Tab for an upgrade's answer).
-const SIX = (port: number): Record<string, string> => ({
-  'referrer-policy': 'no-referrer',
-  'x-content-type-options': 'nosniff',
-  'content-security-policy': `default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self' ws://sheet.localhost:${port}; base-uri 'none'; form-action 'none'; frame-ancestors 'none'`,
-  'x-frame-options': 'DENY',
-  'cross-origin-opener-policy': 'same-origin',
-  'cross-origin-resource-policy': 'same-origin',
-});
-function standing(answer: { headers: Record<string, string[]> }, port: number): void {
-  for (const [name, value] of Object.entries(SIX(port))) expect(answer.headers[name], name).toEqual([value]);
-}
-const jsonOf = (answer: Answer) => JSON.parse(answer.body.toString('utf8')) as Record<string, unknown>;
 
 // --- pairing --------------------------------------------------------------------------------------------------------------
 
@@ -157,100 +90,6 @@ async function pairBrowser(daemon: RunningDaemon, port: number): Promise<{ id: s
   expect(answer.status).toBe(200);
   clock += MINUTE / 10 + 1; // ten exchanges a minute
   return jsonOf(answer) as { id: string; credential: string };
-}
-
-const macOf = (credential: string, id: string, nonce: string) => {
-  const key = createHmac('sha256', Buffer.from(credential, 'base64url')).update(PROOF_KEY_LABEL).digest();
-  return createHmac('sha256', key).update(`${PROOF_MAC_LABEL}\n${id}\n${nonce}`).digest('base64url');
-};
-const nonce = () => randomBytes(32).toString('base64url');
-
-// --- a tab's live connection --------------------------------------------------------------------------------------------
-
-class Tab {
-  readonly frames: Record<string, unknown>[] = [];
-  closed: number | null = null;
-  refused: { status: number; headers: Record<string, string[]> } | null = null;
-  upgradeHeaders: Record<string, string[]> = {};
-  private waiters: (() => void)[] = [];
-
-  private constructor(readonly ws: WebSocket) {}
-
-  static open(port: number, headers: Record<string, string> = {}): Promise<Tab> {
-    return Tab.opened(port, headers).then((tab) => {
-      if (tab.refused) standing(tab.refused, port);
-      else if (tab.closed === null || Object.keys(tab.upgradeHeaders).length > 0) standing({ headers: tab.upgradeHeaders }, port); // the 101 too
-      return tab;
-    });
-  }
-
-  private static opened(port: number, headers: Record<string, string>): Promise<Tab> {
-    const ws = new WebSocket(`ws://127.0.0.1:${port}/live`, { headers: { Host: `sheet.localhost:${port}`, Origin: `http://sheet.localhost:${port}`, ...headers } });
-    const tab = new Tab(ws);
-    return new Promise((done) => {
-      ws.on('upgrade', (res) => void (tab.upgradeHeaders = asLists(res.headers)));
-      ws.on('open', () => done(tab));
-      ws.on('unexpected-response', (_req, res) => {
-        tab.refused = { status: res.statusCode ?? 0, headers: asLists(res.headers) };
-        res.resume();
-        ws.terminate();
-        done(tab);
-      });
-      ws.on('error', () => done(tab));
-      ws.on('message', (data) => {
-        tab.frames.push(JSON.parse(String(data)) as Record<string, unknown>);
-        tab.wake();
-      });
-      ws.on('close', (code) => {
-        tab.closed = code;
-        tab.wake();
-        done(tab);
-      });
-    });
-  }
-
-  send(message: object): void {
-    this.ws.send(JSON.stringify(message));
-  }
-
-  // The next frame after `seen` of them, or the close
-  async next(seen = this.frames.length, ms = 3_000): Promise<Record<string, unknown> | { closed: number }> {
-    const until = Date.now() + ms;
-    while (this.frames.length <= seen && this.closed === null) {
-      if (Date.now() > until) throw new Error('no frame and no close in time');
-      await new Promise<void>((done) => {
-        this.waiters.push(done);
-        setTimeout(done, 50);
-      });
-    }
-    return this.frames.length > seen ? this.frames[seen]! : { closed: this.closed! };
-  }
-
-  async closedWith(ms = 3_000): Promise<number> {
-    const until = Date.now() + ms;
-    while (this.closed === null) {
-      if (Date.now() > until) throw new Error('not closed in time');
-      await new Promise((done) => setTimeout(done, 20));
-    }
-    return this.closed;
-  }
-
-  private wake(): void {
-    for (const waiter of this.waiters.splice(0)) waiter();
-  }
-}
-
-const asLists = (headers: Record<string, string | string[] | undefined>) => Object.fromEntries(Object.entries(headers).map(([name, value]) => [name, Array.isArray(value) ? value : [value ?? '']]));
-
-// A tab through the opening up to `paired`
-async function pairedTab(port: number, browser: { id: string; credential: string }): Promise<Tab> {
-  const tab = await Tab.open(port);
-  const once = nonce();
-  tab.send({ t: 'hello', v: 1, id: browser.id, nonce: once });
-  expect(await tab.next(0)).toEqual({ t: 'proof', mac: macOf(browser.credential, browser.id, once) });
-  tab.send({ t: 'credential', credential: browser.credential });
-  expect(await tab.next(1)).toEqual({ t: 'paired' });
-  return tab;
 }
 
 // --- the command line, as cli.test.ts drives it -----------------------------------------------------------------------
@@ -605,7 +444,7 @@ describe('the server’s proof (T28) and the live connection (Acceptance 11, “
     expect(await tab.next(0)).toEqual({ t: 'proof', mac: macOf(browser.credential, browser.id, once) });
     tab.send({ t: 'credential', credential: browser.credential });
     expect(await tab.next(1)).toEqual({ t: 'paired' });
-    expect(await tab.next(2)).toEqual({ t: 'unavailable', why: 'no-service' }); // no sheet is served until M3
+    expect(await tab.next(2)).toEqual({ t: 'unavailable', why: 'no-service' }); // this suite's sheets are none
     expect(daemon.sheetPage.status().connections).toBe(1);
   });
 

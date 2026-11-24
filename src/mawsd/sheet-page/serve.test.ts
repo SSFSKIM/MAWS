@@ -3,12 +3,14 @@
 // src/mawsd/process-sheet-page.test.ts's. No case here listens on the real port: a bind is port 0, a port this test
 // holds, or the `listen` seam, which records and refuses.
 import type * as Http from 'node:http';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { createConnection, createServer, type AddressInfo, type Server } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { createSheetPage, listenExclusive, NO_SHEETS, SHEET_PORT, type SheetPage, type SheetPageOptions } from './serve';
+import { createSheetPage, listenExclusive, SHEET_PORT, type SheetPage, type SheetPageOptions } from './serve';
+import { registrationName } from './registration';
+import { NO_SHEETS } from './sheets';
 
 // Whether the page asked for `node:http` (T26: a daemon that serves no page loads nothing for it)
 const askedForHttp = () => vi.mocked(process.getBuiltinModule).mock.calls.filter(([id]) => id === 'node:http').length;
@@ -39,10 +41,13 @@ function page(overrides: Partial<SheetPageOptions> = {}): SheetPage {
     profileDir: scratch,
     dir: join(scratch, 'mawsd'),
     defaultProfile: false,
-    env: { MAWS_SHEET_PAGE: '1', MAWS_SHEET_PORT: '0' },
+    env: { MAWS_SHEET_PAGE: '1', MAWS_SHEET_PORT: '0', SMINOS_HOME: join(scratch, 'no-home') }, // a home that does not exist: nothing registered
     shell: async () => ({}),
     bundleDir: FIXTURE,
     sheets: NO_SHEETS,
+    discovery: async () => {},
+    onEvent: () => () => {},
+    hold: () => () => {},
     log: (line) => void logs.push(line),
     ...overrides,
   });
@@ -56,6 +61,13 @@ async function settled(made: SheetPage, ms = 3_000): Promise<string> {
   return made.status().state;
 }
 
+const until = async (check: () => boolean, ms = 3_000) => {
+  const deadline = Date.now() + ms;
+  while (!check()) {
+    if (Date.now() > deadline) throw new Error('not in time');
+    await new Promise((done) => setTimeout(done, 10));
+  }
+};
 const inUse = () => Object.assign(new Error('listen EADDRINUSE'), { code: 'EADDRINUSE' });
 const portOf = (made: SheetPage) => Number(new URL(made.status().url!).port);
 const reaches = (host: string, port: number) =>
@@ -117,13 +129,14 @@ describe('the port (T4)', () => {
     const told = page({ shell });
     told.start();
     expect(await settled(told)).toBe('listening');
-    expect(shell).not.toHaveBeenCalled(); // the switch and the port both its own
+    expect(shell).not.toHaveBeenCalled(); // the switch, the port and the sminos home all its own
     expect(askedForHttp()).toBe(1);
 
     const fromShell = page({ env: { MAWS_SHEET_PAGE: '1' }, shell });
     fromShell.start();
     expect(await settled(fromShell)).toBe('listening');
-    expect(shell).toHaveBeenCalledOnce();
+    await until(() => logs.some((line) => line.startsWith('the registration: ')));
+    expect(shell).toHaveBeenCalledOnce(); // for the port, and the same capture for the home (M3)
     expect(portOf(fromShell)).not.toBe(SHEET_PORT);
   });
 
@@ -313,5 +326,89 @@ describe('the chunk and the stop (T1, T6)', () => {
     expect(await listing).toEqual({ browsers: [] });
     expect(await unpairing).toEqual({ removed: 0, saved: false, why: 'stopping' });
     expect(write).not.toHaveBeenCalled();
+  });
+});
+
+describe('the registration (T18, §O): the heartbeat, on the page server’s own timer', () => {
+  const heartbeatMs = 40;
+  const fileIn = (home: string, name: string) => join(home, 'sheet', 'surfaces', `${name}.json`);
+  const read = (file: string) => JSON.parse(readFileSync(file, 'utf8')) as Record<string, unknown>;
+
+  it('is written as soon as the listeners are up, with no request made and nothing loaded, and again at each tick, the clock injected', async () => {
+    const home = join(scratch, 'sminos');
+    mkdirSync(home);
+    let clock = Date.parse('2026-11-24T10:00:00.000Z');
+    const load = vi.fn(() => Promise.reject(new Error('not loaded by a heartbeat')));
+    const made = page({ env: { MAWS_SHEET_PAGE: '1', MAWS_SHEET_PORT: '0', SMINOS_HOME: home }, now: () => clock, load, timing: { heartbeatMs } });
+    made.start();
+    expect(await settled(made)).toBe('listening');
+    const file = fileIn(home, registrationName(false, scratch));
+    await until(() => existsSync(file));
+    expect(read(file)).toEqual({ v: 1, name: registrationName(false, scratch), pid: process.pid, url: made.status().url, reach: 'local', heartbeatAt: '2026-11-24T10:00:00.000Z' });
+    expect(made.status().url).toMatch(/^http:\/\/sheet\.localhost:\d+$/); // an origin: no path, no trailing slash
+    expect(made.status().registered).toBe(true);
+    clock += 10_000;
+    await until(() => read(file).heartbeatAt === '2026-11-24T10:00:10.000Z');
+    expect(load).not.toHaveBeenCalled();
+    await made.stop();
+    expect(existsSync(file)).toBe(false); // a clean stop removes it
+    expect(made.status().registered).toBe(false);
+  });
+
+  it('is named mawsd for the default profile', async () => {
+    const home = join(scratch, 'sminos');
+    mkdirSync(home);
+    const made = page({ env: { MAWS_SHEET_PAGE: '1', MAWS_SHEET_PORT: '0', SMINOS_HOME: home }, defaultProfile: true, timing: { heartbeatMs } });
+    made.start();
+    await until(() => existsSync(fileIn(home, 'mawsd')));
+  });
+
+  it('writes nothing and makes no directory where the home does not exist, and writes once it appears', async () => {
+    const home = join(scratch, 'sminos');
+    const made = page({ env: { MAWS_SHEET_PAGE: '1', MAWS_SHEET_PORT: '0', SMINOS_HOME: home }, timing: { heartbeatMs } });
+    made.start();
+    expect(await settled(made)).toBe('listening');
+    await new Promise((done) => setTimeout(done, heartbeatMs * 3));
+    expect(existsSync(home)).toBe(false);
+    expect(made.status().registered).toBe(false);
+    mkdirSync(home);
+    await until(() => existsSync(fileIn(home, registrationName(false, scratch))));
+    expect(made.status().registered).toBe(true);
+  });
+
+  it('does not remove a file that names another process at a stop', async () => {
+    const home = join(scratch, 'sminos');
+    mkdirSync(home);
+    const made = page({ env: { MAWS_SHEET_PAGE: '1', MAWS_SHEET_PORT: '0', SMINOS_HOME: home }, timing: { heartbeatMs: 60_000 } });
+    made.start();
+    const file = fileIn(home, registrationName(false, scratch));
+    await until(() => existsSync(file));
+    writeFileSync(file, JSON.stringify({ ...read(file), pid: process.pid + 1 })); // another daemon took the name meanwhile
+    await made.stop();
+    expect(read(file).pid).toBe(process.pid + 1);
+  });
+
+  it('writes nothing while the port is taken', async () => {
+    const home = join(scratch, 'sminos');
+    mkdirSync(home);
+    const made = page({ env: { MAWS_SHEET_PAGE: '1', MAWS_SHEET_PORT: '0', SMINOS_HOME: home }, listen: async () => Promise.reject(inUse()), timing: { heartbeatMs, portRetryMs: heartbeatMs } });
+    made.start();
+    expect(await settled(made)).toBe('port-taken');
+    await made.browsers(); // the chunk loaded, and with it the timer: its ticks still write nothing
+    await new Promise((done) => setTimeout(done, heartbeatMs * 4));
+    expect(existsSync(join(home, 'sheet'))).toBe(false);
+    expect(made.status().registered).toBe(false);
+  });
+
+  it('logs no path and no change but a change of what the tick did', async () => {
+    const home = join(scratch, 'sminos');
+    mkdirSync(home);
+    const made = page({ env: { MAWS_SHEET_PAGE: '1', MAWS_SHEET_PORT: '0', SMINOS_HOME: home }, timing: { heartbeatMs } });
+    made.start();
+    await until(() => existsSync(join(home, 'sheet', 'surfaces')) && readdirSync(join(home, 'sheet', 'surfaces')).length > 0);
+    await new Promise((done) => setTimeout(done, heartbeatMs * 4));
+    const lines = logs.filter((line) => line.startsWith('the registration: '));
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).not.toContain(scratch);
   });
 });

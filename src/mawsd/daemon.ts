@@ -94,7 +94,9 @@
 // so nothing of it can stop or delay the start; the spine's states are told to it; its stop runs first in the exit
 // order, right after the sockets stop accepting; `daemon.status.sheetPage` is its status; `daemon.sheetPair`,
 // `daemon.sheetBrowsers` and `daemon.sheetUnpair` are `mawsd sheet pair|browsers|unpair`. Its answering code is a chunk
-// loaded at the first request or pairing command.
+// loaded at the first request or pairing command. M3 (§N, §O): it reaches C3's sheet service in process, through the
+// spine's root (sheet-page/sheets.ts); a live connection holds the daemon and wakes its discovery before a snapshot;
+// and while it listens it registers the page under the sminos home, every ten seconds, from its own timer.
 import { execFileSync } from 'node:child_process';
 import * as fs from 'node:fs';
 import { createServer, type Server } from 'node:net';
@@ -164,7 +166,8 @@ import { createBrowserWork } from './browser-work'; // P5 O17 M3
 import { createBrowserRoute } from './browser-route'; // P5 O17 M5
 import type { BrowserFeedService } from './browser-feed'; // P5 O17 M6: types alone, the feed is a deferred chunk
 import { loadPeerAddon, peerAddonPath, type PeerAddon } from '../main/browser/cua/peer'; // P5 O5 M5: the app's policy, loaded here too
-import { createSheetPage, loadSheetPageChunk, NO_SHEETS, type SheetPage, type SheetPageOptions } from './sheet-page/serve'; // the question sheet's C4
+import { createSheetPage, loadSheetPageChunk, type SheetPage, type SheetPageOptions } from './sheet-page/serve'; // the question sheet's C4
+import { sheetsOf } from './sheet-page/sheets'; // the question sheet's C4 M3: C3's service through the spine
 
 export const EXIT_RESTART = 75; // a requested restart: the units restart on it
 // P5 O3-D D38 (the owner's ruling on D5): re-executing a unit daemon after its spine's release is built and off; a later
@@ -234,7 +237,7 @@ export interface DaemonOptions {
   routeResolution?: { env?(): Promise<Record<string, string>>; systemRoot?: string };
   // the question sheet's C4 (sheet-page/serve.ts): the bundle's directory (a test's fixture; else beside this build), the
   // login shell's capture, the chunk's load, the clock, the binds, the browsers' file's replace and the timings
-  sheetPage?: Partial<Pick<SheetPageOptions, 'bundleDir' | 'shell' | 'load' | 'now' | 'listen' | 'write' | 'timing'>>;
+  sheetPage?: Partial<Pick<SheetPageOptions, 'bundleDir' | 'shell' | 'load' | 'now' | 'listen' | 'write' | 'timing' | 'sheets'>>; // sheets: a suite that asks nothing of the spine (M3)
 }
 
 export interface RunningDaemon {
@@ -424,7 +427,13 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
     env,
     shell: () => captureShellEnvironment(), // one capture, kept (the default cache), and only once the page is going to serve
     bundleDir: join(dirname(entryOnDisk), '..', 'sheet-page'), // the real path, so a release flipped under it is never half-served
-    sheets: NO_SHEETS, // until M3
+    // M3 (§N; T15, T29): the sheets through the spine, which a request loads; the discovery wake a session.list from a
+    // client that is not the app makes; the spine's events and the daemon's holds. Each is read when it is used, after
+    // the start, so the parts declared below are there.
+    sheets: sheetsOf({ ensure: (reason) => spine.ensure(reason) }),
+    discovery: () => wakeForDiscovery('session.list', false, Date.now()),
+    onEvent: (listener) => services.onEvent(listener),
+    hold: (reason, standing) => services.hold(reason, standing),
     load: () => {
       const refused = deferredLoadRefused(); // P5 O2 (the bundle swap, above)
       return refused === null ? loadSheetPageChunk() : Promise.reject(new Error(refused));

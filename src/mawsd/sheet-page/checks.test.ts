@@ -8,6 +8,7 @@ const PORT = 47591;
 const HOST = `sheet.localhost:${PORT}`;
 const ORIGIN = `http://sheet.localhost:${PORT}`;
 const CREDENTIAL = 'A'.repeat(43);
+const SESSION = '5eed0000-0000-4000-8000-000000000019';
 
 const ask = (method: string, target: string, headers: [string, string][] = [], upgrade = false): Asked => ({ method, target, rawHeaders: headers.flat(), upgrade });
 const host = (value = HOST): [string, string] => ['Host', value];
@@ -99,9 +100,33 @@ describe('routeOf', () => {
       expect(routeOf(method, target), `${method} ${target}`).toMatchObject({ status: 405 });
     }
   });
-  it('answers 404 for anything else under /api/ (the sheet’s routes come at M3)', () => {
-    expect(routeOf('GET', '/api/sheets/5eed0000-0000-4000-8000-000000000019')).toMatchObject({ status: 404 });
-    expect(routeOf('POST', '/api/anything')).toMatchObject({ status: 404 });
+  it('answers 404 for anything else under /api/', () => {
+    for (const target of ['/api/anything', '/api/sheets', '/api/sheets/', `/api/sheets/${SESSION}/other`, `/api/sheets/${SESSION}/body/x`, `/api/sheets/${SESSION}/`, '/api/sheets//put', '/api/sheets/%E0%A4%A/put']) {
+      expect(routeOf('GET', target), target).toMatchObject({ status: 404 });
+      expect(routeOf('POST', target), target).toMatchObject({ status: 404 });
+    }
+  });
+  it('reads the sheet’s four routes (M3), the session decoded once and passed on as the path gave it', () => {
+    expect(routeOf('GET', `/api/sheets/${SESSION}`)).toEqual({ kind: 'read', session: SESSION });
+    expect(routeOf('POST', `/api/sheets/${SESSION}/put`)).toEqual({ kind: 'put', session: SESSION });
+    expect(routeOf('POST', `/api/sheets/${SESSION}/uploads`)).toEqual({ kind: 'upload', session: SESSION });
+    expect(routeOf('GET', `/api/sheets/${SESSION}/body?ref=${'a'.repeat(64)}`)).toEqual({ kind: 'body', session: SESSION, of: { ref: 'a'.repeat(64) } });
+    expect(routeOf('GET', `/api/sheets/${SESSION}/body?text=${'b'.repeat(64)}`)).toEqual({ kind: 'body', session: SESSION, of: { text: 'b'.repeat(64) } });
+    expect(routeOf('GET', `/api/sheets/${SESSION}/body?upload=maws-1.png`)).toEqual({ kind: 'body', session: SESSION, of: { upload: 'uploads/maws-1.png' } });
+    // the service is the boundary that holds a name: whatever the path gave, decoded once, goes on
+    expect(routeOf('GET', '/api/sheets/not-a-session')).toEqual({ kind: 'read', session: 'not-a-session' });
+    expect(routeOf('GET', '/api/sheets/..%2F..%2Fetc')).toEqual({ kind: 'read', session: '../../etc' });
+    expect(routeOf('GET', '/api/sheets/%2525')).toEqual({ kind: 'read', session: '%25' });
+  });
+  it('reads a body asked by no one thing, or by two, as asking nothing', () => {
+    for (const query of ['', '?', '?ref=', `?ref=${'a'.repeat(64)}&text=${'b'.repeat(64)}`, `?ref=${'a'.repeat(64)}&ref=${'a'.repeat(64)}`, '?other=1']) {
+      expect(routeOf('GET', `/api/sheets/${SESSION}/body${query}`), query).toEqual({ kind: 'body', session: SESSION, of: null });
+    }
+  });
+  it('answers 405 for a sheet’s route with another method', () => {
+    for (const [method, target] of [['POST', `/api/sheets/${SESSION}`], ['POST', `/api/sheets/${SESSION}/body`], ['GET', `/api/sheets/${SESSION}/put`], ['GET', `/api/sheets/${SESSION}/uploads`], ['OPTIONS', `/api/sheets/${SESSION}/put`]] as const) {
+      expect(routeOf(method, target), `${method} ${target}`).toMatchObject({ status: 405 });
+    }
   });
   it('refuses a target that is not origin-form', () => {
     for (const target of ['*', 'http://sheet.localhost:47591/', 'sheet.localhost:47591', '']) expect(routeOf('GET', target), target).toMatchObject({ status: 400 });
@@ -144,6 +169,29 @@ describe('admit: §L’s table, row by row', () => {
     for (const headers of [[], ...FOREIGN_ORIGINS]) expect(status(admit(ask('GET', '/live', [host(), ...headers], true), PORT)), JSON.stringify(headers)).toBe(403);
     expect(status(admit(ask('GET', '/live', [host(), origin()]), PORT))).toBe(400); // not upgrading
     expect(status(admit(ask('GET', '/', [host(), origin()], true), PORT))).toBe(404); // an upgrade anywhere else
+  });
+
+  it('GET /api/sheets/<session> and …/body: the Host, the page’s Origin or none, then the credential', () => {
+    for (const target of [`/api/sheets/${SESSION}`, `/api/sheets/${SESSION}/body?ref=${'a'.repeat(64)}`]) {
+      const route = routeOf('GET', target);
+      expect(admit(ask('GET', target, [host(), bearer()]), PORT)).toEqual({ route, credential: CREDENTIAL });
+      expect(admit(ask('GET', target, [host(), origin(), bearer()]), PORT)).toEqual({ route, credential: CREDENTIAL });
+      for (const headers of FOREIGN_HOSTS) expect(status(admit(ask('GET', target, [...headers, bearer()]), PORT))).toBe(421);
+      for (const headers of FOREIGN_ORIGINS) expect(status(admit(ask('GET', target, [host(), ...headers, bearer()]), PORT)), JSON.stringify(headers)).toBe(403);
+      const credentials: [string, string][][] = [[], [['Authorization', `Basic ${CREDENTIAL}`]], [bearer(), bearer('B'.repeat(43))], [['Cookie', `credential=${CREDENTIAL}`]]];
+      for (const headers of credentials) expect(status(admit(ask('GET', target, [host(), ...headers]), PORT)), JSON.stringify(headers)).toBe(401);
+    }
+  });
+
+  it('POST …/put and …/uploads: the Host, exactly the page’s Origin, then the credential', () => {
+    for (const target of [`/api/sheets/${SESSION}/put`, `/api/sheets/${SESSION}/uploads`]) {
+      const route = routeOf('POST', target);
+      expect(admit(ask('POST', target, [host(), origin(), bearer()]), PORT)).toEqual({ route, credential: CREDENTIAL });
+      for (const headers of FOREIGN_HOSTS) expect(status(admit(ask('POST', target, [...headers, origin(), bearer()]), PORT))).toBe(421);
+      for (const headers of [[], ...FOREIGN_ORIGINS]) expect(status(admit(ask('POST', target, [host(), ...headers, bearer()]), PORT)), JSON.stringify(headers)).toBe(403);
+      expect(status(admit(ask('POST', target, [host(), origin()]), PORT))).toBe(401);
+      expect(status(admit(ask('POST', target, [host(), origin(), bearer(), bearer()]), PORT))).toBe(401);
+    }
   });
 
   it('anything else: the Host, then 404, or 405 for a known path with another method', () => {

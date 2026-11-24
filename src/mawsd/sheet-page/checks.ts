@@ -10,11 +10,25 @@
 // Rule 2, read for a browser: a browser sends an Origin on every POST and every WebSocket handshake, so the writes and
 // the live connection require exactly the page's; it sends none on a same-origin GET, so a read cannot require one (the
 // sheet's reads, M3, refuse only another's), and a navigation carries none: the shell stands on the Host alone.
+//
+// The sheet's routes (M3, §N) pass a session on as the path gave it, decoded once: C3's service is the boundary that
+// holds it to the engine's id form. A body is asked by exactly one of `ref`, `upload` or `text`, an upload by its name
+// under the record's `uploads/`; anything else asks nothing, which the handler answers as a body that is gone.
+import type { SheetBodyRequest } from '@shared/sheet/model';
 import { HEADERS_MAX, pageOrigin, refusal, SHEET_HOST, type Refusal } from './headers';
 
 export { HEADERS_MAX, pageOrigin, type Refusal };
 
-export type Route = { kind: 'shell' } | { kind: 'file'; path: string } | { kind: 'pair' } | { kind: 'unpair' } | { kind: 'live' };
+export type Route =
+  | { kind: 'shell' }
+  | { kind: 'file'; path: string }
+  | { kind: 'pair' }
+  | { kind: 'unpair' }
+  | { kind: 'live' }
+  | { kind: 'read'; session: string }
+  | { kind: 'body'; session: string; of: SheetBodyRequest | null }
+  | { kind: 'put'; session: string }
+  | { kind: 'upload'; session: string };
 
 export interface Asked {
   method: string;
@@ -69,12 +83,45 @@ export function routeOf(method: string, target: string): Route | Refusal {
   if (path === '/api/pair') return only('POST', { kind: 'pair' });
   if (path === '/api/unpair') return only('POST', { kind: 'unpair' });
   if (path === '/live') return only('GET', { kind: 'live' });
+  if (path.startsWith('/api/sheets/')) return sheetRouteOf(method, path.slice('/api/sheets/'.length), target);
   if (path.startsWith('/api/')) return refusal(404);
   return only('GET', { kind: 'file', path });
 }
 
-const ORIGIN_REQUIRED: ReadonlySet<Route['kind']> = new Set(['pair', 'unpair', 'live']);
-const CREDENTIAL_REQUIRED: ReadonlySet<Route['kind']> = new Set(['unpair']);
+// `/api/sheets/<session>[/body|/put|/uploads]`, `rest` being what follows `/api/sheets/`
+function sheetRouteOf(method: string, rest: string, target: string): Route | Refusal {
+  const [segment, tail, ...beyond] = rest.split('/');
+  if (segment === undefined || segment === '' || beyond.length > 0) return refusal(404);
+  let session: string;
+  try {
+    session = decodeURIComponent(segment);
+  } catch {
+    return refusal(404); // a malformed escape names nothing
+  }
+  const only = (allowed: string, route: Route): Route | Refusal => (method === allowed ? route : refusal(405));
+  if (tail === undefined) return only('GET', { kind: 'read', session });
+  if (tail === 'body') return only('GET', { kind: 'body', session, of: bodyOf(target) });
+  if (tail === 'put') return only('POST', { kind: 'put', session });
+  if (tail === 'uploads') return only('POST', { kind: 'upload', session });
+  return refusal(404);
+}
+
+// The one body a query asks for, or null
+function bodyOf(target: string): SheetBodyRequest | null {
+  const at = target.indexOf('?');
+  const params = [...new URLSearchParams(at < 0 ? '' : target.slice(at + 1))];
+  if (params.length !== 1) return null;
+  const [[name, value]] = params as [[string, string]];
+  if (value === '') return null;
+  if (name === 'ref') return { ref: value };
+  if (name === 'text') return { text: value };
+  if (name === 'upload') return { upload: `uploads/${value}` };
+  return null;
+}
+
+const ORIGIN_REQUIRED: ReadonlySet<Route['kind']> = new Set(['pair', 'unpair', 'live', 'put', 'upload']);
+const ORIGIN_REFUSED_IF_OTHER: ReadonlySet<Route['kind']> = new Set(['read', 'body']); // a browser sends none on a same-origin GET
+const CREDENTIAL_REQUIRED: ReadonlySet<Route['kind']> = new Set(['unpair', 'read', 'body', 'put', 'upload']);
 
 export function admit(asked: Asked, port: number): Admitted | Refusal {
   if (asked.rawHeaders.length / 2 > HEADERS_MAX) return refusal(431);
@@ -83,6 +130,7 @@ export function admit(asked: Asked, port: number): Admitted | Refusal {
   if ('status' in route) return route;
   if (asked.upgrade !== (route.kind === 'live')) return refusal(asked.upgrade ? 404 : 400);
   if (ORIGIN_REQUIRED.has(route.kind) && originOf(asked.rawHeaders, port) !== 'page') return refusal(403);
+  if (ORIGIN_REFUSED_IF_OTHER.has(route.kind) && originOf(asked.rawHeaders, port) === 'other') return refusal(403);
   if (!CREDENTIAL_REQUIRED.has(route.kind)) return { route, credential: null };
   const credential = bearerOf(asked.rawHeaders);
   return credential === null ? refusal(401) : { route, credential };

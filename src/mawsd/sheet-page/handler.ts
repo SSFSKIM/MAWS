@@ -10,6 +10,14 @@
 // of at most FRAME_MAX bytes; a ping every `pingMs`, and one silent for `silentMs` is ended. A browser revoked while
 // connected is closed with 4403. A connection the server closes is ended CLOSE_GRACE_MS later whether or not the peer
 // answered the close (`ws` would wait 30 s for a peer that never does).
+//
+// Once paired (M3, §N; T14, T15, T29), a connection is a standing hold on the daemon, and is sent a snapshot of every
+// record's summary and then one `changed` for each change. A snapshot is made in a fixed order: the hold, the spine
+// (the sheets' service), the daemon's discovery brought up to date (a parked engine host woken for one pass, so a
+// session's running or stopped is the index's fact as of now), the connection's subscription to `sheet.changed`, and only
+// then the list, so a change during the list is delivered after the snapshot and none is lost. Sheets that cannot be had
+// are said as `unavailable`, and the connection stays: it is also the tab's proof of the server. The sheet's HTTP routes
+// are sheet-routes.ts's.
 import { randomBytes } from 'node:crypto';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { Duplex } from 'node:stream';
@@ -18,7 +26,8 @@ import type { SpineState } from '../spine-seam';
 import { admit } from './checks';
 import { isRefusal, refusal, refusalBytes, refusalHeaders, STANDING_HEADERS, type Refusal } from './headers';
 import { createPairing, type BrowserList } from './pairing';
-import type { SheetAccess } from './serve';
+import { createSheetRoutes, isSheetRoute } from './sheet-routes';
+import { unavailableWhy, type SheetAccess } from './sheets';
 import { readBundle, type BundleFile, type BundleTable } from './static';
 import type { SheetPageTiming } from './timing';
 
@@ -36,6 +45,9 @@ export interface HandlerDeps {
   bundleDir: string;
   file: string; // <profile>/mawsd/sheet-page.json
   sheets: SheetAccess;
+  discovery(): Promise<void>; // T29: the daemon's discovery brought up to date, as for a session.list that is not the app's
+  onEvent(listener: (owner: 'engine-host' | 'pty-host' | 'machine', message: { name: string; payload: unknown }) => void): () => void; // the spine's events, owner `machine`, across loads
+  hold(reason: string, standing?: boolean): () => void; // T15: the daemon is not quiet while one is out
   spine: SpineState; // the spine's state when the chunk loaded
   log(line: string): void;
   now(): number;
@@ -74,6 +86,10 @@ interface Live {
   browser: string | null; // the id its hello named
   heard: number;
   listed: number; // when it last asked for a snapshot
+  release: (() => void) | null; // its standing hold, taken at its first snapshot
+  unsubscribe: (() => void) | null; // its subscription to `sheet.changed`, made once
+  ready: boolean; // a snapshot was sent: a change goes out as it comes
+  held: object[] | null; // the changes heard while a list is out, sent after its snapshot
 }
 
 export async function createSheetPageHandler(deps: HandlerDeps): Promise<SheetPageHandler> {
@@ -88,6 +104,7 @@ export async function createSheetPageHandler(deps: HandlerDeps): Promise<SheetPa
   const pairing = createPairing({ file: deps.file, ...(deps.write && { write: deps.write }), now: deps.now, random: randomBytes, log, timing });
   const live = new Set<Live>();
   let spine = deps.spine;
+  const sheetRoutes = createSheetRoutes({ port: deps.port, sheets: deps.sheets, hold: deps.hold, readBody: (req, max) => readBody(req, max), json: (res, status, value) => json(res, status, value), refuse: (res, refused) => refuse(res, refused) });
   const wss = new WebSocketServer({ noServer: true, maxPayload: FRAME_MAX, perMessageDeflate: false, clientTracking: false });
   wss.on('headers', (headers: string[]) => {
     for (const [name, value] of Object.entries(STANDING_HEADERS(deps.port()))) headers.push(`${name}: ${value}`); // the 101 too
@@ -171,17 +188,47 @@ export async function createSheetPageHandler(deps: HandlerDeps): Promise<SheetPa
   const send = (connection: Live, message: object) => {
     if (connection.ws.readyState === connection.ws.OPEN) connection.ws.send(JSON.stringify(message));
   };
-  // What a paired connection is told of the sheets. Until M3 the access is a stand-in that refuses, so it is told
-  // `unavailable`; M3 sends the snapshot when the service answers.
-  const tellSheets = (connection: Live) => {
-    deps.sheets.service().then(
-      () => send(connection, { t: 'unavailable', why: 'no-service' }),
-      (error: unknown) => send(connection, { t: 'unavailable', why: whyOf(error) }),
-    );
+  // A change, as the spine's service announced it: sent at once after a snapshot, held while a list is out
+  const changed = (connection: Live, payload: unknown) => {
+    const { session, summary } = (payload ?? {}) as { session?: unknown; summary?: unknown };
+    if (typeof session !== 'string') return;
+    const message = { t: 'changed', session, summary: summary ?? null };
+    if (connection.held) connection.held.push(message);
+    else if (connection.ready) send(connection, message);
+  };
+  // A snapshot, in §N's order: the hold, the service, discovery, the subscription, then the list
+  async function snapshot(connection: Live): Promise<void> {
+    if (connection.held || !live.has(connection)) return; // one is out: its answer is the snapshot asked for
+    connection.held = [];
+    try {
+      connection.release ??= deps.hold('the sheet page: a live connection', true);
+      const service = await deps.sheets.service();
+      await deps.discovery();
+      if (!live.has(connection)) return;
+      connection.unsubscribe ??= deps.onEvent((owner, message) => {
+        if (owner === 'machine' && message.name === 'sheet.changed') changed(connection, message.payload);
+      });
+      const sessions = await service.list();
+      const door = service.door();
+      const held = connection.held;
+      connection.held = null;
+      connection.ready = true;
+      send(connection, { t: 'ready', v: 1, sessions, door });
+      for (const message of held) send(connection, message);
+    } catch (error) {
+      connection.held = null; // what it heard is in the next snapshot
+      send(connection, { t: 'unavailable', why: unavailableWhy(error) });
+    }
+  }
+  const ended = (connection: Live) => {
+    live.delete(connection);
+    connection.unsubscribe?.();
+    connection.release?.();
+    connection.unsubscribe = connection.release = null;
   };
 
   function open(ws: WebSocket): void {
-    const connection: Live = { ws, step: 'hello', browser: null, heard: Date.now(), listed: 0 };
+    const connection: Live = { ws, step: 'hello', browser: null, heard: Date.now(), listed: 0, release: null, unsubscribe: null, ready: false, held: null };
     live.add(connection);
     const late = () => closeWith(ws, CLOSE.refused, 'too late');
     let deadline = setTimeout(late, timing.helloMs);
@@ -196,7 +243,7 @@ export async function createSheetPageHandler(deps: HandlerDeps): Promise<SheetPa
     ws.on('close', () => {
       clearTimeout(deadline);
       clearInterval(ping);
-      live.delete(connection);
+      ended(connection);
     });
     ws.on('message', (data: RawData, binary: boolean) => {
       connection.heard = Date.now();
@@ -220,12 +267,12 @@ export async function createSheetPageHandler(deps: HandlerDeps): Promise<SheetPa
         connection.step = 'paired';
         connection.listed = Date.now();
         send(connection, { t: 'paired' });
-        return tellSheets(connection);
+        return void snapshot(connection);
       }
       if (message.t !== 'list') return closeWith(ws, CLOSE.unexpected, 'unexpected');
       if (Date.now() - connection.listed < 1_000) return; // one sooner than a second after the last is ignored (§N)
       connection.listed = Date.now();
-      tellSheets(connection);
+      void snapshot(connection);
     });
   }
 
@@ -257,6 +304,11 @@ export async function createSheetPageHandler(deps: HandlerDeps): Promise<SheetPa
         case 'live':
           return refuse(res, refusal(400)); // admit refuses it first: a live connection arrives as an upgrade
       }
+      if (!isSheetRoute(route)) return;
+      // rule 1: everything that reads or changes a sheet requires a credential this server knows, and nothing of the
+      // sheets is asked before it is checked
+      if (pairing.check(credential!) === null) return refuse(res, refusal(401));
+      sheetRoutes(route, req, res).catch(failed);
     },
 
     upgrade(req, socket, head) {
@@ -280,10 +332,13 @@ export async function createSheetPageHandler(deps: HandlerDeps): Promise<SheetPa
     },
     connections: () => [...live].filter((connection) => connection.step === 'paired').length,
     spineState(state) {
+      const was = spine;
       spine = state;
-      // T15: a spine that cannot be had is said on every paired connection, which stays open (it is the tab's proof)
-      if (spine !== 'refused' && spine !== 'yielded') return;
-      for (const connection of live) if (connection.step === 'paired') send(connection, { t: 'unavailable', why: spine });
+      // T15: a spine that cannot be had, or that leaves `loaded`, is said on every paired connection, which stays open
+      // (it is the tab's proof); the tab asks for the snapshot again
+      if (state !== 'refused' && state !== 'yielded' && !(was === 'loaded' && state !== 'loaded')) return;
+      const why = state === 'refused' || state === 'yielded' ? state : 'no-service';
+      for (const connection of live) if (connection.step === 'paired') send(connection, { t: 'unavailable', why });
     },
     tick: () => void pairing.retry(),
     close() {
@@ -302,7 +357,3 @@ function parsed(data: RawData): Record<string, unknown> | null {
   }
 }
 
-const whyOf = (error: unknown): string => {
-  const why = (error as { why?: unknown } | null)?.why;
-  return typeof why === 'string' ? why : 'no-service';
-};
