@@ -3509,7 +3509,7 @@ test('round 2: running agents and shells, the queue, a blocked command, Source c
       await soft(tab(created.design!).locator('[data-board-inspector]'), 'the board inspector');
     });
     const commentsRail = () => tab(created.design!).locator('[data-deck-rail="comments"]').first();
-    await shot(page, m0({ id: 'm0-design-comments', title: 'Design workbench, the comments rail', how: 'The design with two comments, Comments in its toolbar', state: 'Two threads on the desktop board in the comments rail', folders: ['tools/design', 'src/artifacts/design/editor'] }), async () => {
+    await shot(page, m0({ id: 'm0-design-comments', title: 'Design workbench, the comments rail', how: 'The design with two comments, the header’s count of them', state: 'Two threads on the desktop board in the comments rail', folders: ['tools/design', 'src/artifacts/design/editor'] }), async () => {
       if (!(await tab(created.design!).isVisible().catch(() => false))) await openArtifact(created.design!);
       // the threads as the design's seam reads them, so a retry adds none twice
       const have = new Set((await threadsOf(page, created.design!)).map((thread) => thread.id));
@@ -3518,7 +3518,10 @@ test('round 2: running agents and shells, the queue, a blocked command, Source c
       // The workbench's own Comments in its toolbar (design/editor/comments.tsx, DesignCommentButtons), pressed while the
       // rail is open. Not the header's action: while a thread is open the header draws the comments action as its count
       // instead, a button with no `data-editor-action` (panel/PanelHeader.tsx, CommentCount), on both builds.
-      const toggle = tab(created.design!).locator('[data-comments-toggle]').first();
+      // The header's count of open comments, which opens the rail on both builds: while a thread is open the header draws
+      // the comments action as its count, a button pressed while the rail is open (panel/PanelHeader.tsx, CommentCount).
+      // Not the workbench's own toolbar button, which M5 removed (G512).
+      const toggle = page.locator('[data-region="main"] [data-editor-header]').filter({ visible: true }).getByRole('button', { name: /^\d+ open comments?$/ }).first();
       if ((await toggle.getAttribute('aria-pressed', { timeout: 10_000 })) !== 'true') await toggle.click();
       await expect(commentsRail(), 'the comments rail').toBeVisible({ timeout: 10_000 });
     }, {
@@ -5616,7 +5619,7 @@ const M5_LAUNCH = [
   'm5-artifact-legacy-dashboard', 'm5-artifact-agent-deleted', 'm5-doc-rest', 'm5-doc-comment-tip', 'm5-doc-history-tip', 'm5-doc-table-menu', 'm5-doc-editors', 'm5-doc-comments',
   'm5-doc-comments-deleted', 'm5-doc-margin-active', 'm5-doc-comments-nomatch', 'm5-doc-export-menu', 'm5-doc-version-actions', 'm5-doc-restore-confirm', 'm5-doc-restored',
   'm5-doc-saved', 'm5-doc-comments-empty', 'm5-doc-comments-resolved', 'm5-doc-versions-named', 'm5-dash-tiles', 'm5-dash-warning', 'm5-dash-unrenderable', 'm5-dash-sheet',
-  'm5-dash-export-menu', 'm5-dash-pie-note', 'm5-dash-selected', 'm5-dash-saved', 'm5-dash-sheet-empty', 'm5-artifact-deleted',
+  'm5-dash-sheet-picker', 'm5-dash-export-menu', 'm5-dash-pie-note', 'm5-dash-selected', 'm5-dash-saved', 'm5-dash-sheet-empty', 'm5-artifact-deleted',
 ];
 const SPACE = 'Field research';
 const DRAFTER = 'words-drafter'; // the agent's session, as the dashboard seam names it
@@ -5725,6 +5728,16 @@ test('the word cut’s M5: the library’s Spaces, opened artifacts, the documen
     };
     const tab = (key: Fixture) => page.locator(`[data-region="main"] [data-artifact-tab="${idOf(key)}"]`);
     const header = () => page.locator('[data-region="main"] [data-editor-header]').filter({ visible: true }).first();
+    // A notice the tab draws once it has settled, waited on (a document says it is empty only after waiting 5 s for a
+    // first page: tools/document/tab-state.ts, NO_CONTENT_MS); not drawn, the miss says what the tab reads instead.
+    const noticeDrawn = async (key: Fixture, notice: Locator, what: string) => {
+      try {
+        await expect(notice.first(), what).toBeVisible({ timeout: 15_000 });
+      } catch (error) {
+        const read = (await tab(key).innerText({ timeout: 2_000 }).catch(() => '(nothing)')).replace(/\s+/g, ' ').trim().slice(0, 240);
+        throw new Error(`${what} not drawn; the tab reads: ${read}`, { cause: error });
+      }
+    };
     const openArtifact = async (key: Fixture) => {
       await ensure(key);
       await closeOverlays(page);
@@ -5822,11 +5835,13 @@ test('the word cut’s M5: the library’s Spaces, opened artifacts, the documen
     });
     await shot(page, m5Meta('m5-artifact-doc-empty', 'T617', 'An old document with no page', 'Artifacts, Old memo (a document whose tabs were removed, as one made before every document had a first page)', 'The document’s notice that it is empty', ['tools/document', 'artifacts']), async () => {
       await openArtifact('memo');
+      await noticeDrawn('memo', tab('memo').getByText(byM5(M5_WORDS.docEmpty)), 'the empty document’s notice');
     }, {
       check: () => inView(tab('memo').getByText(byM5(M5_WORDS.docEmpty)), 'the empty document’s notice'),
     });
     await shot(page, m5Meta('m5-artifact-legacy-dashboard', 'T629, N191', 'A dashboard of the old format', 'Artifacts, Old weekly board (files and no tab)', 'The held dashboard: its notice, its two files; master’s header reads Read-only, M5’s draws no saved state', ['tools/dashboard', 'src/artifacts/dashboard', 'panel']), async () => {
       await openArtifact('legacy');
+      await noticeDrawn('legacy', tab('legacy').getByText(byM5(M5_WORDS.legacy), { exact: true }), 'the held dashboard’s notice');
     }, {
       check: async () => {
         await inView(tab('legacy').getByText(byM5(M5_WORDS.legacy), { exact: true }), 'the held dashboard’s notice');
@@ -6202,7 +6217,7 @@ test('the word cut’s M5: the library’s Spaces, opened artifacts, the documen
       },
     });
     const sheet = () => tab('sales').locator('aside.dash-sheet').first();
-    await shot(page, m5Meta('m5-dash-sheet', 'G608, G609, G612, G613', 'A dashboard’s source sheet opened from a view', 'Weekly sales, click the bar’s source line', 'The sheet: its close, the dataset picker by title, the two toggles of rows shown and the count with Copy', ['tools/dashboard', 'src/artifacts/dashboard']), async () => {
+    await shot(page, m5Meta('m5-dash-sheet', 'G608, G612, G613', 'A dashboard’s source sheet opened from a view', 'Weekly sales, click the bar’s source line', 'The sheet on the bar’s dataset: its close, the two toggles of rows shown and the count with Copy', ['tools/dashboard', 'src/artifacts/dashboard']), async () => {
       await salesReady();
       await closeOverlays(page);
       await views().first().locator('button.dash-source-label').click();
@@ -6210,11 +6225,25 @@ test('the word cut’s M5: the library’s Spaces, opened artifacts, the documen
     }, {
       check: async () => {
         await inView(sheet().getByRole('button', { name: M5_WORDS.closeSheet, exact: true }), 'its close');
-        await expect(sheet().locator('select[aria-label="Dataset"] option:checked'), 'the picker by title').toHaveText(m5Cut() ? 'Sales' : 'Sales (sales)', { timeout: 3_000 });
         const shown = sheet().getByRole('group', { name: 'Rows shown', exact: true });
         await inView(shown.locator('button').filter({ hasText: byM5(M5_WORDS.thisView) }), 'This view');
         await inView(shown.locator('button').filter({ hasText: byM5(M5_WORDS.allRows) }), 'All rows');
         await inView(sheet().locator('.dash-sheet-actions').getByRole('button', { name: 'Copy rows', exact: true }).filter({ hasText: new RegExp(`^${literal(byM5(M5_WORDS.copyRows))}$`) }), 'Copy');
+      },
+      after: () => closeOverlays(page),
+    });
+    // the sheet on every dataset (the header's Datasets): its picker, M5's options by title alone (G609)
+    const picker = () => sheet().locator('select[aria-label="Dataset"]').first();
+    await shot(page, m5Meta('m5-dash-sheet-picker', 'G609', 'A dashboard’s source sheet on both its datasets', 'Weekly sales, its header’s Datasets', 'The sheet’s dataset picker: the select alone, its options by title (master: “Dataset” beside it, each option with its id)', ['tools/dashboard', 'src/artifacts/dashboard']), async () => {
+      await salesReady();
+      await closeOverlays(page);
+      await header().locator('[data-editor-action="datasets"]').first().click();
+      await expect(picker(), 'the dataset picker').toBeVisible({ timeout: 10_000 });
+    }, {
+      check: async () => {
+        await inView(picker(), 'the dataset picker');
+        for (const [title, id] of [['Sales', 'sales'], ['Visits', 'visits']])
+          await expect(picker().locator('option').filter({ hasText: new RegExp(`^${literal(m5Cut() ? title : `${title} (${id})`)}$`) }), `the ${title} option`).toHaveCount(1, { timeout: 3_000 });
       },
       after: () => closeOverlays(page),
     });
