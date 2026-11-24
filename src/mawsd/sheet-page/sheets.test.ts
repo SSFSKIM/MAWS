@@ -4,14 +4,15 @@
 // holds can be watched step by step. The real service behind the real spine, and every refusal it meets, are
 // src/mawsd/process-sheet-page-sheets.test.ts's.
 import { mkdtempSync, rmSync } from 'node:fs';
+import { createConnection } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { SheetService } from '../../services/sheet/service';
 import type { DoorState } from '@shared/ipc/schema/sheet';
 import type { SheetSummary } from '@shared/sheet/model';
-import { HOST, JSON_BODY, ORIGIN, Tab, jsonOf, nonce, pairedTab, request } from '../../../test/support/sheet-page-client';
-import { createSheetPage, type SheetPage, type SheetPageOptions } from './serve';
+import { HOST, JSON_BODY, ORIGIN, Tab, exchangeBytes, jsonOf, nonce, pairedTab, request } from '../../../test/support/sheet-page-client';
+import { createSheetPage, loadSheetPageChunk, type SheetPage, type SheetPageOptions } from './serve';
 import { SheetsUnavailable, type SheetAccess } from './sheets';
 
 const FIXTURE = resolve(__dirname, '../../../test/fixtures/sheet-page/bundle');
@@ -42,7 +43,7 @@ const service = (): SheetService => ({
   read: async (session) => (steps.push(`read ${session}`), null),
   put: async () => ({ ok: true, results: [] }),
   body: async () => ({ kind: 'gone' }),
-  upload: async () => ({ ok: false, why: 'stand-in' }),
+  upload: async () => (steps.push('upload'), { ok: false, why: 'stand-in' }),
   onChange: () => () => {},
   door: () => DOOR,
   stop: () => {},
@@ -55,6 +56,31 @@ const sheets: SheetAccess = {
   },
 };
 
+const options = (over: Partial<SheetPageOptions> = {}): SheetPageOptions => ({
+  kind: 'private',
+  profileDir: scratch,
+  dir: scratch,
+  defaultProfile: false,
+  env: { MAWS_SHEET_PAGE: '1', MAWS_SHEET_PORT: '0', SMINOS_HOME: join(scratch, 'no-home') },
+  shell: async () => ({}),
+  bundleDir: FIXTURE,
+  sheets,
+  discovery: async () => void steps.push('discovery'),
+  onEvent: (listener) => {
+    steps.push('subscribe');
+    listeners.add(listener);
+    return () => void listeners.delete(listener);
+  },
+  hold: (reason, standing = false) => {
+    steps.push(standing ? 'standing hold' : 'hold');
+    const hold = { reason, standing, released: false };
+    holds.push(hold);
+    return () => void (hold.released = true);
+  },
+  log: () => {},
+  ...over,
+});
+
 beforeEach(() => {
   scratch = mkdtempSync(join(tmpdir(), 'maws-sheet-live-'));
   steps = [];
@@ -64,29 +90,7 @@ beforeEach(() => {
   listGate = null;
   unavailable = null;
   tabs = [];
-  page = createSheetPage({
-    kind: 'private',
-    profileDir: scratch,
-    dir: scratch,
-    defaultProfile: false,
-    env: { MAWS_SHEET_PAGE: '1', MAWS_SHEET_PORT: '0', SMINOS_HOME: join(scratch, 'no-home') },
-    shell: async () => ({}),
-    bundleDir: FIXTURE,
-    sheets,
-    discovery: async () => void steps.push('discovery'),
-    onEvent: (listener) => {
-      steps.push('subscribe');
-      listeners.add(listener);
-      return () => void listeners.delete(listener);
-    },
-    hold: (reason, standing = false) => {
-      steps.push(standing ? 'standing hold' : 'hold');
-      const hold = { reason, standing, released: false };
-      holds.push(hold);
-      return () => void (hold.released = true);
-    },
-    log: () => {},
-  });
+  page = createSheetPage(options());
   page.start();
 });
 afterEach(async () => {
@@ -123,6 +127,8 @@ async function tab(port: number, browser: { id: string; credential: string }): P
   return opened;
 }
 const frames = (opened: Tab) => opened.frames.slice(2); // after proof and paired
+const pause = (ms: number) => new Promise((done) => setTimeout(done, ms));
+const unreleased = () => holds.filter((hold) => !hold.released).length;
 
 describe('the snapshot at paired (§N; T14, T15, T29)', () => {
   it('takes the connection’s standing hold, loads the spine, brings discovery up to date, subscribes, and only then lists', async () => {
@@ -199,6 +205,33 @@ describe('the snapshot at paired (§N; T14, T15, T29)', () => {
     expect(opened.closed).toBeNull();
   });
 
+  // Fix round 1: a yield releases the root under the page's hold, and the old service's list does not reject at its stop
+  it('sends nothing of a snapshot the spine was lost under, nor any change, until a fresh `ready`', async () => {
+    const port = await listening();
+    page.spineState('loaded');
+    let open!: () => void;
+    listGate = new Promise((done) => (open = done));
+    const opened = await tab(port, await paired(port));
+    await until(() => steps.includes('list'), 'the list asked');
+    emit(A, summary(A, 4)); // held for that snapshot
+    page.spineState('yielded');
+    expect(await opened.next(2)).toEqual({ t: 'unavailable', why: 'yielded' });
+    listGate = null;
+    open(); // the old root's list answers after the loss
+    emit(A, summary(A, 5));
+    await pause(150);
+    expect(frames(opened), 'no stale ready, no held or later change').toHaveLength(1);
+
+    page.spineState('loaded');
+    await pause(1_050);
+    opened.send({ t: 'list' });
+    expect(await opened.next(3)).toMatchObject({ t: 'ready', sessions });
+    emit(A, summary(A, 6));
+    expect(await opened.next(4)).toEqual({ t: 'changed', session: A, summary: summary(A, 6) });
+    await pause(100);
+    expect(frames(opened)).toHaveLength(3);
+  });
+
   it('says `unavailable` on a connection when the spine leaves `loaded`, and keeps it', async () => {
     const port = await listening();
     const opened = await tab(port, await paired(port));
@@ -236,6 +269,18 @@ describe('a request for data (§N; T15)', () => {
     expect(holds[0]!.released).toBe(true);
   });
 
+  it('refuses with 413 an upload streamed past its bound with no declared length, and asks nothing of the service', async () => {
+    const port = await listening();
+    const browser = await paired(port);
+    const chunk = Buffer.alloc(64 * 1024, 0x41);
+    const chunks = Array.from({ length: 81 }, () => Buffer.concat([Buffer.from(`${chunk.length.toString(16)}\r\n`), chunk, Buffer.from('\r\n')])); // 5.06 MiB
+    const head = [`POST /api/sheets/${A}/uploads HTTP/1.1`, `Host: sheet.localhost:${port}`, `Origin: http://sheet.localhost:${port}`, `Authorization: Bearer ${browser.credential}`, 'Content-Type: image/png', 'Transfer-Encoding: chunked', 'Connection: close'].join('\r\n');
+    const answer = await exchangeBytes(port, Buffer.concat([Buffer.from(`${head}\r\n\r\n`), ...chunks, Buffer.from('0\r\n\r\n')]));
+    expect(answer.status).toBe(413);
+    expect(steps).not.toContain('upload');
+    await until(() => unreleased() === 0, 'the hold released');
+  });
+
   it('asks nothing of the sheets for a credential the page server does not know', async () => {
     const port = await listening();
     await paired(port);
@@ -243,5 +288,31 @@ describe('a request for data (§N; T15)', () => {
     expect(answer.status).toBe(401);
     expect(steps).toEqual([]);
     expect(holds).toEqual([]);
+  });
+});
+
+describe('a request whose client left while the handler loaded (fix round 1)', () => {
+  it('takes no hold it cannot release: the count returns to zero', async () => {
+    const browser = await paired(await listening());
+    await page.stop(); // the pairing stands in the browsers' file; a fresh page has no handler loaded
+    let loadAsked = false;
+    let release!: () => void;
+    const gate = new Promise<void>((done) => (release = done));
+    page = createSheetPage(options({ load: async () => ((loadAsked = true), await gate, loadSheetPageChunk()) }));
+    page.start();
+    const port = await listening();
+
+    const socket = createConnection({ host: '127.0.0.1', port });
+    socket.on('error', () => {});
+    await new Promise<void>((done) => socket.once('connect', () => done()));
+    const head = [`POST /api/sheets/${A}/put HTTP/1.1`, `Host: sheet.localhost:${port}`, `Origin: http://sheet.localhost:${port}`, `Authorization: Bearer ${browser.credential}`, 'Content-Type: application/json', 'Content-Length: 100'].join('\r\n');
+    socket.write(`${head}\r\n\r\n{"lines":`); // a part of its body
+    await until(() => loadAsked, 'the handler’s load asked');
+    socket.destroy(); // it leaves while the handler loads
+    await pause(100);
+    release();
+    await pause(200);
+    expect(unreleased(), 'every hold taken was released').toBe(0);
+    expect(steps).not.toContain('service');
   });
 });

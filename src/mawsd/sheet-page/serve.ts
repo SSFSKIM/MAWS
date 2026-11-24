@@ -333,6 +333,7 @@ export function createSheetPage(options: SheetPageOptions): SheetPage {
     } catch {
       return answer(res, refusal(503));
     }
+    if (req.destroyed) return; // it left while the handler loaded: nothing to answer
     served.request(req, res);
   }
 

@@ -30,8 +30,10 @@ export const DISCOVERY_FRESH_MS = 30_000;
 export const DISCOVERY_WAKE_GIVE_UP_MS = 60_000;
 
 export interface DiscoverySignal {
+  generation(): number; // the index's, moved by each engine-host transition: both signals of one pass are told in one
   onApplied(listener: () => void): () => void; // SpineRoot.discovery: a pass's discoveries are in the index
-  onHoldersFolded(listener: () => void): () => void; // and its registry's holders, after them (C4 M3, T29)
+  // and its registry's holders, after them (C4 M3, T29); `ok` false when the registry's read failed
+  onHoldersFolded(listener: (ok: boolean) => void): () => void;
 }
 
 export interface DiscoveryWakeOptions {
@@ -55,24 +57,30 @@ export function discoveryWake(options: DiscoveryWakeOptions): (name: string, app
     const started = Date.now();
     return new Promise<void>((resolve) => {
       let offs: (() => void)[] = [];
-      const done = (heard: boolean) => {
+      // 'heard' alone makes a read within DISCOVERY_FRESH_MS wake nothing; each end asks the park
+      const done = (end: 'heard' | 'unread' | 'given-up') => {
         for (const off of offs) off();
         clearTimeout(giveUp);
         inFlight = null;
-        if (heard) {
+        if (end === 'heard') {
           heardAt = Date.now();
           log(`[spine] discovery: the pass is heard ${heardAt - started} ms after the wake`);
-        } else log(`[spine] discovery: no pass heard within ${DISCOVERY_WAKE_GIVE_UP_MS / 1000} s of the wake: the engine host is asked to park, and a read after it parked wakes it again`);
+        } else if (end === 'unread') log('[spine] discovery: the registry could not be read in the pass: the reads answer what the index holds, the engine host is asked to park, and a read after it parked wakes it again');
+        else log(`[spine] discovery: no pass heard within ${DISCOVERY_WAKE_GIVE_UP_MS / 1000} s of the wake: the engine host is asked to park, and a read after it parked wakes it again`);
         options.parkNow();
         resolve();
       };
-      const giveUp = setTimeout(() => done(false), DISCOVERY_WAKE_GIVE_UP_MS);
+      const giveUp = setTimeout(() => done('given-up'), DISCOVERY_WAKE_GIVE_UP_MS);
       giveUp.unref?.();
-      let applied = false;
-      let folded = false;
+      // a pass is both signals in one generation: a fold of the host before a transition does not end a later scan's
+      let appliedIn: number | null = null;
+      let folded: { generation: number; ok: boolean } | null = null;
+      const settle = () => {
+        if (appliedIn !== null && folded !== null && appliedIn === folded.generation) done(folded.ok ? 'heard' : 'unread');
+      };
       offs = [
-        discovery.onApplied(() => void ((applied = true), folded && done(true))),
-        discovery.onHoldersFolded(() => void ((folded = true), applied && done(true))),
+        discovery.onApplied(() => void ((appliedIn = discovery.generation()), settle())),
+        discovery.onHoldersFolded((ok) => void ((folded = { generation: discovery.generation(), ok }), settle())),
       ];
       options.waking();
       options.wake();

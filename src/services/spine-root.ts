@@ -184,7 +184,7 @@ export interface SpineRoot {
   // P5 O3-D M6 (fix round 1; mawsd's discovery wake): whether the index holds the engine host's latest scan, its
   // discoveries applied (IndexSessionSource.discoveryApplied), and each time it comes to; and, later in the same pass, the
   // registry's holders folded (C4 M3, T29), which only that wake awaits. Optional for a stand-in root.
-  discovery?: { applied(): boolean; onApplied(listener: () => void): () => void; onHoldersFolded(listener: () => void): () => void };
+  discovery?: { generation(): number; applied(): boolean; onApplied(listener: () => void): () => void; onHoldersFolded(listener: (ok: boolean) => void): () => void };
   // P5 O8 M7b (docs/doperpowers/plans/2026-10-28-p5-o8-org-interface.md, Interfaces §O): the project channel's journal, to
   // which the endpoint's seam hands lane A's host messages (`EndpointServices.channel`); absent in a run refused the spine.
   channel?: ChannelRecorder;
@@ -698,7 +698,7 @@ export function startSpine(deps: SpineDeps): SpineRoot {
     settled: () => root.settled(),
     busy: () => root.busy(),
     stop: () => stopParts('spine', parts),
-    discovery: { applied: () => indexSource.discoveryApplied(), onApplied: (listener) => indexSource.onDiscoveryApplied(listener), onHoldersFolded: (listener) => indexSource.onHoldersFolded(listener) },
+    discovery: { generation: () => indexSource.discoveryGeneration(), applied: () => indexSource.discoveryApplied(), onApplied: (listener) => indexSource.onDiscoveryApplied(listener), onHoldersFolded: (listener) => indexSource.onHoldersFolded(listener) },
     ...(channel === undefined ? {} : { channel }), // P5 O8 M7b
     projects: () => index.projectsSource(), // the project registry: asked by mawsd alone
     ...(sheet === undefined ? {} : { sheet }), // the question sheet's C3 M2

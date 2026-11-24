@@ -1249,8 +1249,9 @@ describe('IndexSessionSource folds the host\'s events into the index and feeds t
       const stateRead = new Promise<void>((done) => (release = done));
       dispatch.mockImplementation(async (...args: Parameters<SourceHost['dispatch']>) => (args[1] === 'fs.state' ? (await stateRead, answer(...args)) : answer(...args)));
       source = new IndexSessionSource(index, fake.host, { emit, tickMs: 5 });
-      const applied = vi.fn();
-      const folded = vi.fn();
+      const generations: [string, number][] = [];
+      const applied = vi.fn(() => void generations.push(['applied', source!.discoveryGeneration()]));
+      const folded = vi.fn((ok: boolean) => void generations.push([`folded ${ok}`, source!.discoveryGeneration()]));
       source.onDiscoveryApplied(applied);
       source.onHoldersFolded(folded);
       stop = source.start(recordingWriter().writer);
@@ -1269,12 +1270,15 @@ describe('IndexSessionSource folds the host\'s events into the index and feeds t
       fake.stream(); // the same host's second sync folds again, and tells nothing more
       await settle();
       expect([applied.mock.calls.length, folded.mock.calls.length]).toEqual([2, 1]);
+      const [[, generation]] = generations;
+      expect(generations, 'both told in one generation').toEqual([['applied', generation], ['folded true', generation], ['applied', generation]]);
 
       fake.setState('crashed');
       expect(source.holdersFolded()).toBe(false);
+      expect(source.discoveryGeneration(), 'a transition moves it').toBeGreaterThan(generation!);
     });
 
-    it('tells the holders folded when the registry’s read fails, so the wake waits for no fold that will not come', async () => {
+    it('tells a registry read that fails as not folded, at each read until one folds, so a waiter waits for no fold that will not come', async () => {
       const fake = scriptedHost('starting');
       const dispatch = fake.host.dispatch as ReturnType<typeof vi.fn>;
       const answer = dispatch.getMockImplementation() as SourceHost['dispatch'];
@@ -1288,7 +1292,14 @@ describe('IndexSessionSource folds the host\'s events into the index and feeds t
       fake.setState('ready');
       fake.stream();
       await settle();
-      expect([folded.mock.calls.length, source.holdersFolded()]).toEqual([1, true]);
+      expect([folded.mock.calls, source.holdersFolded()]).toEqual([[[false]], false]);
+      fake.stream(); // the same host's next sync: its read fails again
+      await settle();
+      expect(folded.mock.calls).toEqual([[false], [false]]);
+      dispatch.mockImplementation(answer);
+      fake.stream();
+      await settle();
+      expect([folded.mock.calls.at(-1), source.holdersFolded()]).toEqual([[true], true]);
       stop!();
       stop = null;
       expect(source.holdersFolded()).toBe(false);

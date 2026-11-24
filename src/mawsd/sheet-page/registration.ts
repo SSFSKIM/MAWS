@@ -1,16 +1,18 @@
 // The page's registration (docs/doperpowers/plans/2026-11-24-question-sheet-c4-local-page.md, §O; T18; the composite's
 // §7 and X4): `<sminos home>/sheet/surfaces/<name>.json`, the file by which a terminal session's tool learns that a
-// surface can show its sheet, and where. On the daemon's run path: Node builtins and nothing else, so the heartbeat
-// needs nothing loaded.
+// surface can show its sheet, and where. On the daemon's run path: Node builtins and the shared writer (itself
+// builtins alone), so the heartbeat needs nothing loaded.
 //
-// It is written by replace, at mode 0600, so a reader in a loop never sees a part of it. Where the sminos home does not
-// exist nothing is written and nothing made, so a machine without sminos gets no directory from MAWS; `sheet/` and
-// `surfaces/` are made at mode 0700 when absent, and one that is a link or not a directory is refused, as C3's
-// Confinement refuses one. At a clean stop the file is removed if it still names this process; after a death it stays,
-// and its pid and its age make it not alive to a reader.
+// It is written by replace (the shared writer: a temporary file created exclusively, following no link, at mode 0600,
+// then renamed over it), so a reader in a loop never sees a part of it. Where the sminos home does not exist nothing is
+// written and nothing made, so a machine without sminos gets no directory from MAWS; `sheet/` and `surfaces/` are made
+// at mode 0700 when absent, and one that is a link or not a directory is refused, as C3's Confinement refuses one. At a
+// clean stop the file is removed, under the same confinement and making nothing, if it is a regular file that still
+// names this process; after a death it stays, and its pid and its age make it not alive to a reader.
 import { createHash } from 'node:crypto';
-import { lstatSync, mkdirSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
+import { closeSync, constants, fstatSync, lstatSync, mkdirSync, openSync, readFileSync, statSync, unlinkSync } from 'node:fs';
 import { join } from 'node:path';
+import { atomicWriteFileSync } from '@shared/fs/atomic-write';
 
 export interface Registration {
   v: 1;
@@ -66,30 +68,25 @@ const homeExists = (home: string): boolean => {
 export function writeRegistration(home: string, registration: Registration): RegistrationWrite {
   if (!homeExists(home)) return 'no-home';
   if (!confined(join(home, 'sheet')) || !confined(surfacesDir(home))) return 'refused';
-  const file = join(surfacesDir(home), `${registration.name}.json`);
-  const temporary = `${file}.${process.pid}.tmp`; // beside it, a name no reader takes for a registration
-  try {
-    writeFileSync(temporary, `${JSON.stringify(registration)}\n`, { mode: 0o600 });
-    renameSync(temporary, file);
-  } catch (error) {
-    try {
-      unlinkSync(temporary);
-    } catch {
-      // never made, or already renamed
-    }
-    throw error;
-  }
+  atomicWriteFileSync(join(surfacesDir(home), `${registration.name}.json`), `${JSON.stringify(registration)}\n`); // its temporary name, `.<uuid>.tmp`, no reader takes for a registration
   return 'written';
 }
 
 /** Removes the registration `name` only while it still names `pid`: another process's file is left as it stands. */
 export function removeRegistration(home: string, name: string, pid: number): void {
+  if (!homeExists(home) || kindOf(join(home, 'sheet')) !== 'directory' || kindOf(surfacesDir(home)) !== 'directory') return; // the write's confinement, making nothing
   const file = join(surfacesDir(home), `${name}.json`);
   let named: unknown;
   try {
-    named = (JSON.parse(readFileSync(file, 'utf8')) as { pid?: unknown }).pid;
+    const fd = openSync(file, constants.O_RDONLY | constants.O_NOFOLLOW);
+    try {
+      if (!fstatSync(fd).isFile()) return;
+      named = (JSON.parse(readFileSync(fd, 'utf8')) as { pid?: unknown }).pid;
+    } finally {
+      closeSync(fd);
+    }
   } catch {
-    return; // gone, or not a registration: nothing of ours
+    return; // gone, a link, or not a registration: nothing of ours
   }
   if (named !== pid) return;
   try {

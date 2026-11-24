@@ -88,8 +88,9 @@ interface Live {
   listed: number; // when it last asked for a snapshot
   release: (() => void) | null; // its standing hold, taken at its first snapshot
   unsubscribe: (() => void) | null; // its subscription to `sheet.changed`, made once
-  ready: boolean; // a snapshot was sent: a change goes out as it comes
+  ready: boolean; // a snapshot was sent since the spine was last lost: a change goes out as it comes
   held: object[] | null; // the changes heard while a list is out, sent after its snapshot
+  generation: number; // moved on when the spine is lost: a snapshot begun before then sends nothing
 }
 
 export async function createSheetPageHandler(deps: HandlerDeps): Promise<SheetPageHandler> {
@@ -132,8 +133,10 @@ export async function createSheetPageHandler(deps: HandlerDeps): Promise<SheetPa
   }
 
   // The body, refused as soon as it is known to pass `max`; 'aborted' when the request ended before its body did, after
-  // which nothing changes and nothing is answered
+  // which nothing changes and nothing is answered. A request already gone (it left while the handler loaded, its abort
+  // heard before anyone listened) is 'aborted' at once: its events will not come again.
   function readBody(req: IncomingMessage, max: number): Promise<Buffer | 'too-large' | 'aborted'> {
+    if (req.destroyed) return Promise.resolve('aborted');
     if (Number(req.headers['content-length'] ?? 0) > max) return Promise.resolve('too-large');
     return new Promise((resolve) => {
       const chunks: Buffer[] = [];
@@ -196,30 +199,43 @@ export async function createSheetPageHandler(deps: HandlerDeps): Promise<SheetPa
     if (connection.held) connection.held.push(message);
     else if (connection.ready) send(connection, message);
   };
-  // A snapshot, in §N's order: the hold, the service, discovery, the subscription, then the list
+  // A snapshot, in §N's order: the hold, the service, discovery, the subscription, then the list. One begun before the
+  // spine was lost reads a root that is gone (a yield releases it under the connection's
+  // hold, and its service's list does not reject at its stop): it sends nothing, and leaves the connection to the next.
   async function snapshot(connection: Live): Promise<void> {
     if (connection.held || !live.has(connection)) return; // one is out: its answer is the snapshot asked for
+    const { generation } = connection;
+    const current = () => live.has(connection) && connection.generation === generation;
     connection.held = [];
     try {
       connection.release ??= deps.hold('the sheet page: a live connection', true);
       const service = await deps.sheets.service();
       await deps.discovery();
-      if (!live.has(connection)) return;
+      if (!current()) return;
       connection.unsubscribe ??= deps.onEvent((owner, message) => {
         if (owner === 'machine' && message.name === 'sheet.changed') changed(connection, message.payload);
       });
       const sessions = await service.list();
       const door = service.door();
+      if (!current()) return;
       const held = connection.held;
       connection.held = null;
       connection.ready = true;
       send(connection, { t: 'ready', v: 1, sessions, door });
       for (const message of held) send(connection, message);
     } catch (error) {
+      if (!current()) return;
       connection.held = null; // what it heard is in the next snapshot
       send(connection, { t: 'unavailable', why: unavailableWhy(error) });
     }
   }
+  // The spine lost: what is out is stale, and no change goes out before the next snapshot
+  const lost = (connection: Live, why: string) => {
+    connection.generation += 1;
+    connection.held = null;
+    connection.ready = false;
+    send(connection, { t: 'unavailable', why });
+  };
   const ended = (connection: Live) => {
     live.delete(connection);
     connection.unsubscribe?.();
@@ -228,7 +244,7 @@ export async function createSheetPageHandler(deps: HandlerDeps): Promise<SheetPa
   };
 
   function open(ws: WebSocket): void {
-    const connection: Live = { ws, step: 'hello', browser: null, heard: Date.now(), listed: 0, release: null, unsubscribe: null, ready: false, held: null };
+    const connection: Live = { ws, step: 'hello', browser: null, heard: Date.now(), listed: 0, release: null, unsubscribe: null, ready: false, held: null, generation: 0 };
     live.add(connection);
     const late = () => closeWith(ws, CLOSE.refused, 'too late');
     let deadline = setTimeout(late, timing.helloMs);
@@ -338,7 +354,7 @@ export async function createSheetPageHandler(deps: HandlerDeps): Promise<SheetPa
       // (it is the tab's proof); the tab asks for the snapshot again
       if (state !== 'refused' && state !== 'yielded' && !(was === 'loaded' && state !== 'loaded')) return;
       const why = state === 'refused' || state === 'yielded' ? state : 'no-service';
-      for (const connection of live) if (connection.step === 'paired') send(connection, { t: 'unavailable', why });
+      for (const connection of live) if (connection.step === 'paired') lost(connection, why);
     },
     tick: () => void pairing.retry(),
     close() {

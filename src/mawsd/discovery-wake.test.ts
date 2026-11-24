@@ -9,7 +9,8 @@ import { REQUEST_TIMEOUT_MS as CLI_REQUEST_TIMEOUT_MS } from './machine-client';
 
 let parked: boolean;
 let listeners: Set<() => void>;
-let folds: Set<() => void>;
+let folds: Set<(ok: boolean) => void>;
+let generation: number; // the index's: a host transition moves it
 let wakes: number;
 let parks: number;
 let waking: number;
@@ -19,13 +20,14 @@ let before: ReturnType<typeof discoveryWake>;
 const applied = () => {
   for (const listener of [...listeners]) listener();
 };
-const folded = () => {
-  for (const listener of [...folds]) listener();
+const folded = (ok = true) => {
+  for (const listener of [...folds]) listener(ok);
 };
 const pass = () => (applied(), folded()); // the scan's discoveries applied, then the registry's holders folded
 const signal = () => ({
+  generation: () => generation,
   onApplied: (listener: () => void) => (listeners.add(listener), () => void listeners.delete(listener)),
-  onHoldersFolded: (listener: () => void) => (folds.add(listener), () => void folds.delete(listener)),
+  onHoldersFolded: (listener: (ok: boolean) => void) => (folds.add(listener), () => void folds.delete(listener)),
 });
 
 beforeEach(() => {
@@ -33,6 +35,7 @@ beforeEach(() => {
   parked = true;
   listeners = new Set();
   folds = new Set();
+  generation = 1;
   wakes = 0;
   parks = 0;
   waking = 0;
@@ -110,6 +113,34 @@ describe('the discovery wake', () => {
     applied();
     await vi.advanceTimersByTimeAsync(0);
     expect([answered, parks]).toEqual([2, 2]);
+  });
+
+  // Fix round 1: a fold of the host before a transition, with a scan of the host after it, is no pass: the new registry
+  // is not read yet
+  it('hears the pass only when both signals come in one generation of the index', async () => {
+    let answered = 0;
+    void before('session.list', false, Date.now()).then(() => void (answered += 1));
+    folded(); // the host before its transition
+    generation += 1;
+    applied();
+    await vi.advanceTimersByTimeAsync(0);
+    expect([answered, parks], 'an old fold and a new scan').toEqual([0, 0]);
+    folded();
+    await vi.advanceTimersByTimeAsync(0);
+    expect([answered, parks]).toEqual([1, 1]);
+  });
+
+  it('a failed registry read ends the wait, but no pass is heard: the host is asked to park, and the next read wakes it again', async () => {
+    let answered = 0;
+    void before('session.list', false, Date.now()).then(() => void (answered += 1));
+    applied();
+    folded(false);
+    await vi.advanceTimersByTimeAsync(0);
+    expect([answered, parks, listeners.size, folds.size]).toEqual([1, 1, 0, 0]);
+    expect(lines.at(-1)).toContain('the registry could not be read');
+    parked = true;
+    void before('session.list', false, Date.now()); // within DISCOVERY_FRESH_MS of it
+    expect(wakes, 'a failed pass is not a fresh one').toBe(2);
   });
 
   it('a fold that never comes holds no read past its bound, and the wake gives up as for a scan', async () => {
