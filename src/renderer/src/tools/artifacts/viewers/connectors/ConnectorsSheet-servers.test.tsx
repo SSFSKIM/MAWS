@@ -5,7 +5,7 @@
 // dependency the section is absent (H's sheet, ./ConnectorsSheet.test.tsx).
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { accessibleDescription, accessibleText } from '../../../../test-support/accessible-text';
+import { accessibleDescription } from '../../../../test-support/accessible-text';
 import type { ConnectorServerRow, ConnectorServers } from '@shared/ipc/schema/connectors';
 import type { ConnectorsOwner } from '../../../../artifacts/connector-owner';
 import { ConnectorsSheet } from './ConnectorsSheet';
@@ -75,11 +75,18 @@ describe('the Connectors sheet’s Servers section', () => {
     expect(server('files').textContent).toContain('MAWS hasn’t listed its tools yet');
     expect(server('wiki').textContent).toContain('This server needs a sign-in');
     expect(server('wiki').textContent).toContain('Connect didn’t finish: the sign-in was declined');
-    // T600: "Session only" at rest; why waits on the word, which takes the keyboard
+    // T600: "Session only" at rest; why in the row's note, owned by the word, which takes the keyboard
+    const why = 'No session has reported this server since MAWS started. Start the artifact’s session once and MAWS can reach it directly afterwards.';
     const only = within(server('mail')).getByText('Session only');
-    expect(accessibleText(server('mail').querySelector('[data-connector-server-state]')!), 'the reason is not drawn at rest').toBe('Session only');
+    expect(server('mail').querySelector('[data-connector-server-state]')!.textContent, 'the reason is outside the line').toBe('Session only');
     expect(only.tabIndex).toBe(0);
-    expect(accessibleDescription(only)).toBe('No session has reported this server since MAWS started. Start the artifact’s session once and MAWS can reach it directly afterwards.');
+    expect(accessibleDescription(only)).toBe(why);
+    const note = server('mail').querySelector<HTMLElement>('[data-row-note]')!;
+    expect(note.hidden, 'the note is closed at rest').toBe(true);
+    act(() => only.focus());
+    expect(note.hidden, 'the keyboard opens it at once').toBe(false);
+    expect(note.textContent).toBe(why);
+    act(() => only.blur());
     expect(buttons(server('mail'))).toEqual([]);
     expect(buttons(server('notes', 'saved'))).toEqual(['Disconnect']);
     expect(server('notes', 'saved').textContent).toContain('Project-local config · /Users/me/old/.claude.json');

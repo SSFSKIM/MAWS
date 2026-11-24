@@ -12,7 +12,7 @@ import { resetExportFormats } from '../library/export';
 import { useNotices } from '../stores/notices';
 import { deferred, fail, installFakeMain, ok } from '../test-support/code';
 import { createClient } from '../ipc/client';
-import { accessibleDescription, accessibleText } from '../test-support/accessible-text';
+import { accessibleDescription } from '../test-support/accessible-text';
 import { CONNECT_FAILURE, GWS_INSTALL, MAYBE_SENT, SEND_TO_COPY as C, sendFailure } from './copy';
 import { useSendToAction } from './header';
 import { SendToHost } from './SendToSheet';
@@ -56,6 +56,8 @@ const openSheet = async (target?: 'notion' | 'drive', of: SendToSubject = subjec
 };
 const sendButton = () => screen.getByRole('button', { name: /^Send/ });
 const connection = () => document.querySelector<HTMLElement>('[data-send-to-connection]')!;
+// The connection's line as text: a tip's description sits outside it, so this is the line's words alone.
+const lineText = () => connection().querySelector('[data-send-to-line]')?.textContent;
 
 // T131 to T140: the sheet says what it sends through in a word and leaves the mechanism unsaid; its waits and receipts
 // are short, the age of the last send kept
@@ -65,7 +67,7 @@ describe('the Send to sheet’s words', () => {
     const sheet = screen.getByRole('dialog');
     expect(sheet.textContent).not.toContain('MAWS sends it itself');
     expect(sheet.textContent).not.toContain('As a Notion page');
-    expect(accessibleText(connection())).toBe('Connected');
+    expect(lineText()).toBe('Connected');
     const word = within(connection()).getByText('Connected');
     expect(word.tabIndex, 'the word takes the keyboard, so its source is reachable').toBe(0);
     expect(accessibleDescription(word)).toBe('Connected through MAWS: “notion” in your user settings.');
@@ -73,12 +75,13 @@ describe('the Send to sheet’s words', () => {
 
   it('names Drive by its Google account, or “Connected” when gws names none', async () => {
     await openSheet('drive');
-    await waitFor(() => expect(accessibleText(connection())).toBe('me@example.com'));
+    await waitFor(() => expect(lineText()).toBe('me@example.com'));
+    expect(accessibleDescription(within(connection()).getByText('me@example.com'))).toBe('Signed in to Google as me@example.com through gws.');
     cleanup();
     resetDelivery();
     status.drive = { target: 'drive', state: 'ready' };
     await openSheet('drive');
-    await waitFor(() => expect(accessibleText(connection())).toBe('Connected'));
+    await waitFor(() => expect(lineText()).toBe('Connected'));
   });
 
   it('reads “Checking…” while it checks, for either service', async () => {
@@ -91,7 +94,7 @@ describe('the Send to sheet’s words', () => {
     });
     render(<SendToHost />);
     act(() => openSendTo(subject, 'drive'));
-    await waitFor(() => expect(accessibleText(connection())).toBe('Checking…'));
+    await waitFor(() => expect(lineText()).toBe('Checking…'));
   });
 
   it('reads “Sending…” while it sends, “Sent as …” after, and “Sent <age>” for an earlier send', async () => {
@@ -112,7 +115,7 @@ describe('the Send to sheet: Notion', () => {
   it('names MAWS’s own connection and sends the shown artifact with no session, ending on the receipt', async () => {
     extra = (name) => (name === 'delivery.send' ? ok({ ok: true, receipt: RECEIPT }) : fail('unscripted'));
     await openSheet();
-    expect(accessibleText(connection())).toBe('Connected');
+    expect(lineText()).toBe('Connected');
     fireEvent.click(sendButton());
     await waitFor(() => expect(screen.getByText(C.sent('Plan'))).toBeTruthy());
     const [sent] = main.callsOf('delivery.send');
@@ -230,7 +233,7 @@ describe('the Send to sheet: Notion', () => {
     expect(screen.getByRole('status').textContent).toBe(C.checkFailed.notion);
     status.notion = NOTION_READY;
     fireEvent.click(screen.getByRole('button', { name: C.checkAgain }));
-    await waitFor(() => expect(accessibleText(connection())).toBe('Connected'));
+    await waitFor(() => expect(lineText()).toBe('Connected'));
   });
 });
 

@@ -10,7 +10,7 @@
 // P5 O7 M5c (docs/doperpowers/plans/2026-10-28-p5-o7-remote-lane-b.md, "Consent and the client port"): another machine's
 // artifact is exported and sent there, through that machine's connections, so what it needs first is done there: its
 // Connect, sign-in and gws Terminal actions stay, greyed with "Connect <service> on <machine>".
-import { useState, type ReactNode } from 'react';
+import { useId, useState, type ReactNode } from 'react';
 import { useStore } from 'zustand';
 import { destinationIdOf, type DeliveryDestination, type DeliveryTarget } from '@shared/delivery/destination';
 import type { AppSessionId } from '@shared/graph/ids';
@@ -184,9 +184,15 @@ function Connection({ target, phase, run, terminal }: { target: DeliveryTarget; 
   // P5 O7 M5c: what is done first on another machine is done there (its sign-in, its gws), so it is offered greyed
   const there = run.elsewhere === null ? null : REMOTE_SURFACE_WORDS.connectOn(target === 'drive' ? 'Drive' : 'Notion', run.elsewhere);
   let greyed = false; // a greyed action is in this line: it says why
-  const line = (text: ReactNode, actions?: ReactNode, code?: string) => (
+  const sourceId = useId();
+  const line = (text: ReactNode, actions?: ReactNode, code?: string, described?: ReactNode) => (
     <div data-send-to-connection={status?.state ?? phase.phase} className="flex flex-col gap-2 rounded-sm border border-border p-2.5">
-      {text !== null && <p className="m-0 text-ui text-fg">{text}</p>}
+      {text !== null && (
+        <p data-send-to-line="" className="m-0 text-ui text-fg">
+          {text}
+        </p>
+      )}
+      {described}
       {code && <code className="block rounded-sm bg-bg-raised px-2 py-1 font-mono text-ui-sm text-fg">{code}</code>}
       {actions && <div className="flex flex-wrap gap-2">{actions}</div>}
       {greyed && there !== null && (
@@ -212,6 +218,22 @@ function Connection({ target, phase, run, terminal }: { target: DeliveryTarget; 
     );
   };
   const again = button(C.checkAgain, () => void run.check());
+  // A ready connection in one word (the word cut, T134), the sentence naming what it goes through on that word, which
+  // takes the keyboard so the sentence is reachable. The sentence is the word's description from outside the line, so
+  // the line's text is the word alone.
+  const ready = (word: string, source: string) =>
+    line(
+      <Tip content={source}>
+        <span tabIndex={0} aria-describedby={sourceId} className="rounded-sm outline-accent focus-visible:outline-2">
+          {word}
+        </span>
+      </Tip>,
+      undefined,
+      undefined,
+      <span id={sourceId} hidden>
+        {source}
+      </span>,
+    );
   if (phase.phase === 'checking') return line(C.checking);
   if (phase.phase === 'connecting') return line(target === 'notion' ? C.connecting : C.signingIn);
   if (status === null) return line(null, again); // the state unread: the status line says why, once
@@ -219,7 +241,7 @@ function Connection({ target, phase, run, terminal }: { target: DeliveryTarget; 
     const { source } = status;
     switch (status.state) {
       case 'ready':
-        return source && status.connection ? line(<Ready word={C.connected} source={C.notionReady(source, status.connection)} />) : line(C.notionUnavailable, again);
+        return source && status.connection ? ready(C.connected, C.notionReady(source, status.connection)) : line(C.notionUnavailable, again);
       case 'signIn':
         return line(C.notionSignIn(source?.server ?? 'Notion'), here(C.connect, () => void run.connect()));
       case 'reconnect':
@@ -234,7 +256,7 @@ function Connection({ target, phase, run, terminal }: { target: DeliveryTarget; 
   }
   switch (status.state) {
     case 'ready':
-      return line(<Ready word={status.user ?? C.connected} source={C.driveReady(status.user)} />);
+      return ready(status.user ?? C.connected, C.driveReady(status.user));
     case 'absent':
       return line(C.driveAbsent, <>{here(C.installInTerminal, () => terminal(GWS_INSTALL))}{again}</>, GWS_INSTALL);
     case 'needsSetup':
@@ -248,16 +270,4 @@ function Connection({ target, phase, run, terminal }: { target: DeliveryTarget; 
     default:
       return line(C.driveFailed(status.message), again);
   }
-}
-
-// A ready connection in one word (the word cut, T134), the sentence naming what it goes through on that word, which takes
-// the keyboard so the sentence is reachable.
-function Ready({ word, source }: { word: string; source: string }) {
-  return (
-    <Tip content={source} description={source}>
-      <span tabIndex={0} className="rounded-sm outline-accent focus-visible:outline-2">
-        {word}
-      </span>
-    </Tip>
-  );
 }

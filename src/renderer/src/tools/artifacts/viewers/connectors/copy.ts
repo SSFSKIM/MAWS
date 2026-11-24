@@ -120,7 +120,7 @@ export const SERVERS_COPY = {
   withdrawnUnattributed: 'A saved connection couldn’t be read and was forgotten. Connect to sign in again, or relaunch MAWS.', // the word cut (T605)
   transport: (transport: 'stdio' | 'http') => (transport === 'http' ? 'HTTP' : 'local command'),
   origin: (scope: 'user' | 'local' | 'app', path: string) => `${scope === 'app' ? 'MAWS' : scope === 'user' ? 'User' : 'Project-local'} config · ${path}`,
-  // the word cut (T600): "Session only" at rest; why, on that word
+  // the word cut (T600): "Session only" at rest; why, in the row's note
   engineOnly: 'Session only',
   engineOnlyWhy: (why: Extract<ConnectorServerRow, { kind: 'engineOnly' }>['why']) => ENGINE_ONLY[why],
   // `unattributed`: the answer's withdrawnUnattributed (a withdrawn row may be paused by it rather than Disconnected)
