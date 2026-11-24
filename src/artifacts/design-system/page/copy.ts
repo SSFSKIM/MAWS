@@ -3,7 +3,8 @@
 // named `…Name` or `…Tip`. The page's other words are still written where they are drawn.
 
 export const PAGE_COPY = {
-  empty: 'This design system is empty', // G562: a synced replica that holds no system
+  empty: 'This design system is empty', // G562: a synced replica that holds no system, then what to do
+  emptyNext: 'Ask Claude to publish a design system here.', // its first publish sets the system up (model.ts publishSystem)
   // G565: the count at rest, opening to each path and its message
   unresolved: (n: number) => `${n} ${n === 1 ? 'token doesn’t' : 'tokens don’t'} resolve`,
   // G568: a contrast pair's verdict, its tooltip and description; a failing pair's mark
