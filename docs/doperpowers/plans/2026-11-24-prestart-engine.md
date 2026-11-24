@@ -726,4 +726,19 @@ Each milestone is built test-first, and gets one `doperpowers:reviewer-medium` r
 
 ## Outcomes & Retrospective
 
-(At the end.)
+**2026-11-24, at the gate (head `df8b69bce`, class 1a green, run 45392578584).** Ticket 851's "Done when", line by line:
+
+- **Typing starts the engine with the launch spec as it stands (A1): built.** The spine builds the prestart's spec and key through Send's own functions (M3), and the host launches it as a hidden row (M2). Proved by the spine's `prestart.test.ts` and the host's prestart tests. The e2e scene (`e2e/prestart.spec.ts`, default group) has not run yet.
+- **Send reuses the running engine (A2): built.** `session.launch` with `adopt` promotes the hidden row after the native host's acknowledged promotion (M1, M2), and Send writes the adopted id to progress (M3). Proved by unit tests at each layer. The e2e count of one engine start per Send (default and measured groups) has not run yet.
+- **A change before Send relaunches (A3): built, by relaunch only (D6).** No control-protocol path. The key carries the route's resolution and a fingerprint of the gateway values (Decision Log 13), so a rotated token also relaunches. Proved by unit tests per field. The held Tools pick and a model pick are e2e scenes, not run yet.
+- **An abandoned draft's engine is reaped (A4): built.** A discard, a withdraw, the owner's release, a connection drop or a host restart each end it, leaving no file (M2, M3). The idle release is the session's own. The endpoint keeps no trace of its member (M4). Proved by unit and harness tests. The blank-close scene has not run yet.
+- **The spare pool stays deferred (A5): held.** `claim_session` is unused.
+- **The measure before and after on the same Mac (A6): built, not yet read.** `prestart-latency` (the stub, a bound of 1.5 s) and `prestart-engine` (the pinned engine, reported) each run both arms in one command. They are queued on the Mac mini.
+
+**What went differently from the plan.**
+- Each milestone's medium review found real defects in its range: M1 found 8, M2 12, M3 10, M4 8 and M5 9. Most were races in bookkeeping that the plan's rules named but did not structure. M3's six spine races closed under one structure (a fence per intent, serial host calls, link-scoped generations) rather than six patches. That is the lesson for the next plan of this shape: name the structure, not only the rules.
+- The window's commands carry a token the window mints itself (Decision Logs 12 and 13), not the host's generation. Without it, a withdraw could not reach an answer that never arrived.
+- The endpoint's hold needs the host's adoption state (`holder.adopting`) to settle pins after a restart (Decision Log 15). Its residue is Known limit 11.
+- The whole unit suite found two registration guards (the renderer's command guard and the link's event partition) that no milestone's focused run reached. Those guards belong in each milestone's proof whenever a command or event is added.
+
+**Open at the gate:** the Mac e2e runs and the measure's reading; Known limits 10 to 12 (11 and 10 each with a tracker row); the architect's whole-branch review.
