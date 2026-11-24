@@ -28,12 +28,12 @@ A new chat today launches its engine at Send. The person then waits for the engi
 | W3 | A new session writes no transcript before its first message. Entries wait in memory until a user, assistant or system message creates the file. | bundle 2.1.322 `insertMessageChain` / `pendingEntries`; `findings-p4-w2a-rewind.txt` 7–11; `findings-p4-r8-mcp-servers.txt` 49–50 |
 | W4 | Before the first message the engine makes one `HEAD /api/hello` and no `/v1/messages` request. The first request follows the user frame by 17 ms. | `pass3/launch-env-unset.jsonl` seq 116–118 (and `-fork`, `-todo`, `-state-events*`); `findings-pass3-p2-a-u1.txt` 62–84 (0 requests in 55 s after ready) |
 | W5 | `set_permission_mode` sent before the first message holds: the first turn's `system/init` carries the new mode. | `uxwave/u1-plan-acceptEdits-seeded-1.jsonl` seq 12–19 (and `u1-plan-{auto,default,none}-seeded-1`); `pass3/plan-outcomes.jsonl` seq 9–17 |
-| W6 | `set_model` and `apply_flag_settings {effortLevel}` exist (`session.setModel`, `session.setEffort`), but no fixture sends either before a first message. | `pass2/auto-routed.jsonl` 151–185 and `uxwave/u11-user-defaults-b-maws-set-model.jsonl` 42 (both after turns); `findings-p4-a2p-profile.txt` 57–58 (init carries no effort) |
+| W6 | `set_model` and `apply_flag_settings {effortLevel}` sent before the first message hold for the first turn: the first turn's requests carry the new model, `system/init` names it, and the main request's `output_config.effort` is the one set, as when the launch set it. Neither moves the permission mode. (M0, engine 2.1.331.) | `findings-uxwave-851-prestart.txt` Q3; `uxwave/uxwave-851-set-model`, `-effort-live`, `-effort-launch`, `-effort-none` |
 | W7 | There is no live control for additional directories. `set_cwd` exists, but a folder decides the trust key, the project settings, `.mcp.json`, CLAUDE.md and the hooks the engine has already run. | bundle 2.1.322 control subtypes; `src/engine-host/launch.ts` (`--add-dir`) |
 | W8 | An idle engine uses 270–420 MB (tree RSS) and starts its stdio MCP servers before `initialize` is answered. | `real-settings-idle-1.jsonl` seq 11–13; `findings-p5-o16-veto-mcp.txt` 41–43 |
 | W9 | A launch's host work after `initialize` (surface attach, the gateway's `get_status`, the fallback mode) takes 40–55 ms. The rest of the ticket's "first-prompt hold" is the boot and hooks inside `initialize` (W1). No MAWS timer delays the first prompt. | `pass3/p1-maws-send-file.jsonl`, `p2-no-prompt-resume-setup.jsonl`, `steer-now.jsonl`; `src/engine-host/session.ts` `handshake` |
 
-W6 is open. M0 answers it (D6).
+M0 re-checked W2–W5 on engine 2.1.331 with a scratch config home: a new session held 60 s after `initialize` made only `HEAD /api/hello`, wrote no file and emitted no `system/init`; a SessionStart hook's `additionalContext` wrote no file before a message (`findings-uxwave-851-prestart.txt` Q1, Q2).
 
 ## Design
 
@@ -59,9 +59,9 @@ W6 is open. M0 answers it (D6).
 
 **D5 · The launch key is the spec less what the control protocol can set.** The key is every field of `LaunchSpec` (after `ownerChannelLaunch`) except `sessionId` (the pin, D4) and the fields D6 admits. So a change of folder, additional directories, route, launch profile, MCP servers, tool set, question tool (with its supplement), owner-channel decision, cua socket or subagent model relaunches. These are fixed when the engine boots (W7; for the tool set, the tool-choice plan's D1).
 
-**D6 · Permission mode goes through the control protocol. Model and effort do too if M0 shows they hold before the first message; otherwise they relaunch.**
-- **Mode:** a change between two modes neither of which is `auto` is set at Send with `session.setPermissionMode` (W5). A change to or from `auto` relaunches, because the auto fallback (W3 of C10, `permissionFallback`) runs only in the launch's handshake.
-- **Model and effort:** `session.setModel` and `session.setEffort` are used once M0 shows that a `set_model` or `apply_flag_settings {effortLevel}` sent before the first message reaches the first request and `system/init`, and leaves the mode alone. Otherwise both are in the launch key.
+**D6 · Permission mode, model and effort go through the control protocol** (W5, W6; M0 answered for model and effort).
+- **Mode:** a change between two modes neither of which is `auto` is set at Send with `session.setPermissionMode`. A change to or from `auto` relaunches, because the auto fallback (W3 of C10, `permissionFallback`) runs only in the launch's handshake.
+- **Model and effort:** set at Send with `session.setModel` and `session.setEffort`. One exception: a model change while the mode Send asks for is `auto` relaunches, since whether auto is available depends on the model and the fallback runs only at launch (M0 ran in default mode and did not observe that case).
 
 **D7 · Relaunch happens while the person types, not at Send.** After an `intent.patch` that changes a launch-relevant field of an intent with a prestart, the spine re-reads the verdict (D2).
 - **No longer eligible:** the prestart is stopped and forgotten.
@@ -94,7 +94,7 @@ A draft that is emptied does not end the prestart. Emptying and retyping is the 
 
 **D11 · Cost, hooks and sminos.** A prestart spends no tokens through the engine before Send: its only request is `HEAD /api/hello` (W4), and M0 re-checks this on the current engine for an idle new session held 60 s. A prestart runs the person's SessionStart hooks at the keystroke, and again at each relaunch. A hook does what it would do when a terminal session opens, and anything it spends is its own; MAWS cannot see inside a hook. A prestart costs one idle engine's memory and its MCP servers (W8).
 
-A prestart carries `SMNS_MEMBER` like every launch, so sminos takes it as a member at its SessionStart, as it takes a terminal session that has just opened. Leaving the variable out would cost the session its membership for good, because the mark cannot be added after launch. So the plan keeps it, and keeps the desk's listings out until Send (D8). Of everything in this plan, this is the one effect a person can see before Send, through sminos's own `list`. It is a decision for the architect.
+A prestart carries `SMNS_MEMBER` like every launch, so sminos takes it as a member at its SessionStart, as it takes a terminal session that has just opened. Leaving the variable out would cost the session its membership for good, because the mark cannot be added after launch. So the plan keeps it, and keeps the desk's listings out until Send (D8). Of everything in this plan, this is the one effect a person can see before Send, through sminos's own `list`. Accepted by the architect (Decision Log 2).
 
 **D12 · The spare pool stays deferred.** A prestart is one engine for one draft with its exact spec, and it is never claimed by another chat. `claim_session` stays unused (`controls.ts` defines it; nothing calls it).
 
@@ -109,7 +109,7 @@ A prestart carries `SMNS_MEMBER` like every launch, so sminos takes it as a memb
 - **early** (`MAWS_E2E_PRESTART=1`): Send 200 ms after the first keystroke, so Send joins a prestart that is still booting.
 
 Each Send is timed to the user row drawn and to the first assistant row drawn, using `local-latency.spec.ts`'s marker (a MutationObserver, then rAF, then the arrival of a MessageChannel message). The spec writes `test-results/prestart-latency.json` and one summary line. Its bound: the median "after" time to the assistant row is at least 1.5 s below the median "before" time, written in one of the forms the gate's bound guard admits.
-The "before" arm runs on this branch because its code path is exactly today's (D13). A run of the same spec on master would need the stub's new delay ported back, and would measure the same path. A live arm on the real engine with the owner's hooks would be the owner's own diagnosis; it spends a message per Send, so it waits for the owner's word.
+The "before" arm is the flag-off path on this branch, not a master build: with `MAWS_E2E_PRESTART` unset the spine never prestarts, so Send takes exactly today's code path (D13). A run on master would need the stub's new delay ported back, and would measure the same path. Accepted by the architect (Decision Log 2). A live arm on the real engine with the owner's hooks would be the owner's own diagnosis; it spends a message per Send, so it waits for the owner's word.
 
 ## Acceptance (ticket 851's "Done when")
 
@@ -137,7 +137,7 @@ An older spine refuses the unknown command. The renderer reads any refusal as `s
 
 ## Milestones
 
-### M0 · The probe (before product code)
+### M0 · The probe (done, before product code)
 - **Scenario:** `spikes/protocol-probe/scenarios/pass3/uxwave-851-prestart.mjs`, against the scripted Messages API stand-in, so nothing is spent.
 - **Arms:**
   - (a) a new session held idle 60 s after `initialize`: every request made, and whether a transcript is written;
@@ -145,7 +145,7 @@ An older spine refuses the unknown command. The renderer reads any refusal as `s
   - (c) `apply_flag_settings {effortLevel}` before the first message: the first request's effort;
   - (d) a SessionStart hook that returns `additionalContext`, with the session stopped before any message: whether a file is written.
 - **Outputs:** fixtures under `fixtures/uxwave/uxwave-851-*`, a findings file, and tests in `fixtures.test.mjs`.
-- **Where it runs:** this Mac starts no engine, so the architect runs it on the Mac mini.
+- **Where it ran:** on the MacBook, as the architect ruled: a scratch `CLAUDE_CONFIG_DIR` per arm holding the hook, engine 2.1.331 named by its version path, the API base at the stand-in with a stand-in token, every sminos variable unset (the environment rebuilt from the base keys), no app window. Arms (e) `set_permission_mode` and the effort references (at launch, none) were added beside (a)–(d).
 - **What it decides:** D6's model and effort row; D11's spend statement.
 
 ### M1 · The prestart in the spine
@@ -185,7 +185,7 @@ An older spine refuses the unknown command. The renderer reads any refusal as `s
 ## Known limits
 
 1. A prestart runs the person's SessionStart hooks at the keystroke, and again at each relaunch and for drafts that are never sent (D11).
-2. sminos sees a prestart as a member from its start (D11).
+2. sminos sees a prestart as a member from its start (D11). A draft that is abandoned leaves a sminos member that ended without doing any work.
 3. A prestart in an existing worktree counts as that folder's holder. A worktree cleanup while a draft there has a running engine meets a holder with no record. This is rare, and the right fix is that cleanup stops a prestart; it is logged, not built.
 4. A prestart takes one idle engine's memory. Under budget pressure it can be the reason another idle session is released.
 5. Settings changed outside the intent (the launch profile, the app's MCP servers) are found only at Send, and that Send then pays for a boot.
@@ -193,7 +193,7 @@ An older spine refuses the unknown command. The renderer reads any refusal as `s
 
 ## Progress
 
-- [ ] M0 · The probe.
+- [x] M0 · The probe. (2026-11-24; `findings-uxwave-851-prestart.txt`, four tests in `fixtures.test.mjs`.) Model and effort hold through the control protocol before the first message (D6); an idle new session makes no Messages API request and writes no file.
 - [ ] M1 · The prestart in the spine.
 - [ ] M2 · The command, the trigger and the readers.
 - [ ] M3 · The measure and the scene.
@@ -202,6 +202,9 @@ An older spine refuses the unknown command. The renderer reads any refusal as `s
 ## Decision Log
 
 1. 2026-11-24. The plan's thirteen decisions (D1–D13) and its measure (D14), written before any product code and sent to the architect for review. Open for the architect: D11 (sminos sees a prestart from its start), D13 with D14 (the measure's "before" arm runs on this branch with the prestart off, rather than on a master build), and M0's run on the Mac mini.
+
+2. 2026-11-24. The architect's answers. D11 accepted: a prestart joins sminos at SessionStart; Known limits 2 says what an abandoned draft leaves there. D13 and D14 accepted: the "before" arm is the flag-off path on this branch. M0 to run on the MacBook, isolated (the conditions are in M0). The plan itself is in an adversarial review; no product code before its findings.
+3. 2026-11-24. M0's answer moves D6: model and effort are set through the control protocol at Send, like the mode (W6), with one relaunch case kept, a model change under a requested `auto`, since the auto fallback runs only at launch and M0 did not observe it.
 
 ## Outcomes & Retrospective
 
