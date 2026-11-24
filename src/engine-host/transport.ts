@@ -57,7 +57,12 @@ export interface EngineTransport {
   // or touching its engine, so the next start adopts both again; the stream ends here. P5 O16 M3b: the handover's
   // (`ack`) acknowledges the frontier first and ends the connection gracefully
   detach?(opts?: { ack?: boolean }): void;
+  // Ticket 851, M1 (holder/transport.ts): a prestart's promotion, the host's answer once its roster entry is written
+  // without the mark, or a refusal (its reason, no answer within the bound, no connection); never rejects
+  promote?(opts?: { withinMs?: number }): Promise<Promotion>;
 }
+
+export type Promotion = { ok: true } | { ok: false; message: string };
 
 export class TransportClosed extends Error {
   constructor(detail: string) {

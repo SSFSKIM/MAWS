@@ -8,6 +8,12 @@
 // or is about to, so it is held and adopted as one, never released as empty. An adoption is counted by its outcome, not
 // by what the entry said at the start: one that ends in the host's accepted release (`null`) is no failure, and every
 // other end that adopts nothing is counted, so no host is left running unaccounted.
+// Ticket 851, M1 (docs/doperpowers/plans/2026-11-24-prestart-engine.md, R4-1 and R4-2): an entry marked `prestart` is a
+// prestart whose promotion was never acknowledged, so its engine belongs to no session yet. It is never adopted: it is
+// recorded unattached at the start (a launch, a forget or a stop all of its session stops it first), its host ended
+// through its own shutdown, and that launch's staged files (its journal and host map, base and rotations) removed.
+import { readdirSync, rmSync } from 'node:fs';
+import { join } from 'node:path';
 import type { AppSessionId } from '@shared/graph/ids';
 import { SESSION_HOST_PROTOCOL } from './protocol';
 import type { RosterEntry } from './roster';
@@ -22,17 +28,23 @@ export function holdsEngine(entry: RosterEntry): boolean {
 export interface AdoptionOutcome {
   adopted: AppSessionId[];
   failed: { entry: RosterEntry; reason: string }[];
+  ended: RosterEntry[]; // ticket 851: the prestarts never promoted, ended rather than adopted
 }
 
-// The entries an adoption takes, and the rest with the reason they are left: the rows `holdForAdoption` holds are the
-// taken ones that name a session.
-export function adoptable(entries: readonly RosterEntry[]): { take: RosterEntry[]; leave: AdoptionOutcome['failed'] } {
+// The entries an adoption takes, the prestarts it ends, and the rest with the reason they are left: the rows
+// `holdForAdoption` holds are the taken ones that name a session.
+export function adoptable(entries: readonly RosterEntry[]): { take: RosterEntry[]; leave: AdoptionOutcome['failed']; end: RosterEntry[] } {
   const leave: AdoptionOutcome['failed'] = [];
   const newest = new Map<string, RosterEntry>();
   const take: RosterEntry[] = [];
+  const end: RosterEntry[] = [];
   for (const entry of entries) {
     if (entry.protocol !== SESSION_HOST_PROTOCOL) {
       leave.push({ entry, reason: `it speaks session host protocol ${entry.protocol}, not ${SESSION_HOST_PROTOCOL}; left running` });
+      continue;
+    }
+    if (entry.prestart === true) {
+      end.push(entry);
       continue;
     }
     if (!holdsEngine(entry) || entry.appSessionId === null) {
@@ -45,15 +57,27 @@ export function adoptable(entries: readonly RosterEntry[]): { take: RosterEntry[
       newest.set(entry.appSessionId, entry);
     } else leave.push({ entry, reason: `a newer session host (${other.holderId}) holds its session; left running` });
   }
-  return { take: [...take, ...newest.values()], leave };
+  return { take: [...take, ...newest.values()], leave, end };
 }
 
-// `adopt` answers the session adopted, or null for a host that held no engine and accepted its release.
-export async function adoptAll(entries: readonly RosterEntry[], deps: { adopt(entry: RosterEntry): Promise<AppSessionId | null>; log(line: string): void }): Promise<AdoptionOutcome> {
-  const { take, leave } = adoptable(entries);
+// `adopt` answers the session adopted, or null for a host that held no engine and accepted its release; `end` ends a
+// prestart never promoted (endPrestart). An end that fails is logged, not counted: the start recorded the host
+// unattached (recordStart), and that record guards its engine until it is gone.
+export async function adoptAll(
+  entries: readonly RosterEntry[],
+  deps: { adopt(entry: RosterEntry): Promise<AppSessionId | null>; end(entry: RosterEntry): Promise<HeldStopOutcome>; log(line: string): void },
+): Promise<AdoptionOutcome> {
+  const { take, leave, end } = adoptable(entries);
   for (const { entry, reason } of leave) deps.log(`session host ${entry.holderId} (pid ${entry.pid}) not adopted: ${reason}`);
-  const outcome: AdoptionOutcome = { adopted: [], failed: [...leave] };
-  await Promise.all(take.map(async (entry) => {
+  const outcome: AdoptionOutcome = { adopted: [], failed: [...leave], ended: [...end] };
+  const ending = end.map(async (entry) => {
+    try {
+      await deps.end(entry);
+    } catch (error) {
+      deps.log(`session host ${entry.holderId} (pid ${entry.pid}) holds a prestart never promoted; its end failed: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  });
+  await Promise.all([...ending, ...take.map(async (entry) => {
     try {
       const adopted = await deps.adopt(entry);
       if (adopted !== null) outcome.adopted.push(adopted); // null: released, nothing was there to adopt
@@ -62,8 +86,40 @@ export async function adoptAll(entries: readonly RosterEntry[], deps: { adopt(en
       deps.log(`session host ${entry.holderId} (pid ${entry.pid}) not adopted: ${reason}`);
       outcome.failed.push({ entry, reason });
     }
-  }));
+  })]);
   return outcome;
+}
+
+// Ticket 851, M1: a prestart never promoted, ended through its host's own shutdown (`stop`, stop-held.ts
+// `stopHeldHost`), then its launch's staged files removed from its session's journal directory (`stagedDir`, null for an
+// entry that names no session). Answers the stop's outcome.
+export async function endPrestart(entry: RosterEntry, deps: { stop(entry: RosterEntry): Promise<HeldStopOutcome>; stagedDir(entry: RosterEntry): string | null; log(line: string): void }): Promise<HeldStopOutcome> {
+  const outcome = await deps.stop(entry);
+  const dir = deps.stagedDir(entry);
+  const removed = dir === null ? 0 : removeStagedFiles(dir, entry.holderId);
+  deps.log(`session host ${entry.holderId} (pid ${entry.pid}) holds a prestart never promoted: not adopted; ended (${outcome}), ${removed} staged file(s) removed`);
+  return outcome;
+}
+
+const STAGED_FILE = /^([A-Za-z0-9_-]+?)(?:\.\d+)?\.(?:jsonl|hseq)$/;
+
+// The launch's journal files and host map files in a session's journal directory, base and rotations
+// (`<launchId>.jsonl`, `<launchId>.<n>.jsonl`, `<launchId>.hseq`, `<launchId>.<n>.hseq`; journal.ts, checkpoint.ts),
+// removed; nothing else. Answers how many went; a directory that does not exist has none.
+export function removeStagedFiles(dir: string, launchId: string): number {
+  let names: string[];
+  try {
+    names = readdirSync(dir);
+  } catch {
+    return 0;
+  }
+  let removed = 0;
+  for (const name of names) {
+    if (STAGED_FILE.exec(name)?.[1] !== launchId) continue;
+    rmSync(join(dir, name), { force: true });
+    removed += 1;
+  }
+  return removed;
 }
 
 // The start's records in the process table (index.ts `adoptAtStart`). `recordStart` runs synchronously in `listening`,
@@ -89,10 +145,11 @@ function unattachEntry(table: StartTable, entry: RosterEntry, held: HeldHosts): 
 // Wave 1 verification: a host left to a newer host of its session (D59(10)) is known from the roster alone, so it is
 // unattached here, before any adoption runs; a stop-all during the adoptions then stops it beside the holds.
 export function recordStart(table: StartTable, live: readonly RosterEntry[], held: HeldHosts): AppSessionId[] {
-  const { take, leave } = adoptable(live);
+  const { take, leave, end } = adoptable(live);
   const holding = new Map(take.filter(holdsEngine).map((entry) => [entry.appSessionId as AppSessionId, entry]));
   table.holdForAdoption([...holding.keys()], (id) => held.stop(holding.get(id)!));
   for (const { entry } of leave) if (unattachable(entry)) unattachEntry(table, entry, held);
+  for (const entry of end) if (unattachable(entry)) unattachEntry(table, entry, held); // ticket 851: ended, never held
   return [...holding.keys()];
 }
 

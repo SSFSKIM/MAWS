@@ -27,11 +27,11 @@ import type { StdinFrame } from '@shared/wire/frames';
 import type { LaunchPlan } from '../launch';
 import { signalOrphan, SWEEP_GRACE_MS } from '../live-ledger';
 import { isAlive, procStartOf } from '../supervisor-files';
-import { AsyncQueue, cleanLine, parseStdoutLine, TransportClosed, type EngineTransport, type StderrItem, type TransportItem } from '../transport';
+import { AsyncQueue, cleanLine, parseStdoutLine, TransportClosed, type EngineTransport, type Promotion, type StderrItem, type TransportItem } from '../transport';
 import { Frontier } from './checkpoint';
 import { HostConnection, type HostEvent } from './client';
 import { sessionHostPaths, type SessionHostPaths } from './files';
-import { stdinRecord, type Hello, type HostMessage } from './protocol';
+import { stdinRecord, type ClientMessage, type Hello, type HostMessage } from './protocol';
 
 export const HOST_START_MS = 5_000; // a session host's time to answer `hello` after its spawn, and a reconnect's
 const BUSY_RETRY_MS = 100;
@@ -63,8 +63,9 @@ export interface StartedHost {
   readonly binary: string; // what was spawned (the spawn row's `holder.binary`)
   readonly paths: SessionHostPaths;
   readonly hello: Hello;
-  // The launch's transport: `launch` with the plan's argv, cwd and environment, then `commit`. Once.
-  transport(plan: LaunchPlan, opts: { appSessionId: string; maxLineChars: number }): EngineTransport;
+  // The launch's transport: `launch` with the plan's argv, cwd and environment, then `commit`. Once. Ticket 851, M1:
+  // `prestart` marks the launch, its roster entry marked until the transport's `promote` is acknowledged.
+  transport(plan: LaunchPlan, opts: { appSessionId: string; maxLineChars: number; prestart?: boolean }): EngineTransport;
   // A host that will launch nothing (the launch was refused or stopped first): released, so it removes its files.
   abandon(): void;
 }
@@ -117,7 +118,7 @@ export async function startSessionHost(launchId: string, deps: SessionHostDeps):
     transport(plan, opts) {
       if (used) throw new Error('a session host launches once');
       used = true;
-      return new HostedTransport(connection, { plan, appSessionId: opts.appSessionId, token, paths, holderId: hello.holderId, hostPid: hello.pid, hostProcStart: hello.procStart, hostGone: () => hostGone, deps, maxLineChars: opts.maxLineChars }).transport;
+      return new HostedTransport(connection, { plan, appSessionId: opts.appSessionId, prestart: opts.prestart === true, token, paths, holderId: hello.holderId, hostPid: hello.pid, hostProcStart: hello.procStart, hostGone: () => hostGone, deps, maxLineChars: opts.maxLineChars }).transport;
     },
     abandon() {
       if (used) return;
@@ -245,11 +246,15 @@ class HostedTransport {
   private resolveExited!: (exit: Exit) => void;
   private readonly skip = new Set<number>(); // P5 O16 M3: records an adoption found journaled above the frontier
   private catchingUp = false; // P5 O16 M3: an adoption's first read, until its `caughtUp`
+  // Ticket 851, M1: the promotions sent and not yet answered, in order (the host answers in order), each with the
+  // connection it went on; one that gave up at its bound stays until its answer comes, so a late answer is never taken
+  // for a later promotion's; a connection's close refuses its own
+  private readonly promotions: { connection: HostConnection; settle(answer: Promotion): void }[] = [];
 
   constructor(
     connection: HostConnection,
     private readonly o: {
-      plan: LaunchPlan | null; appSessionId: string; token: string; paths: Pick<SessionHostPaths, 'socket'>; holderId: string; hostPid: number; hostProcStart: string; hostGone: () => string | null; deps: SessionHostDeps; maxLineChars: number;
+      plan: LaunchPlan | null; appSessionId: string; prestart?: boolean; token: string; paths: Pick<SessionHostPaths, 'socket'>; holderId: string; hostPid: number; hostProcStart: string; hostGone: () => string | null; deps: SessionHostDeps; maxLineChars: number;
       // P5 O16 M3: an adoption of a running host (adoptHosted), attached at `fence`: its checkpoint, its child and offsets
       adopt?: { fence: number; frontier: number; above: readonly number[]; child: { pid: number; procStart: string }; stdinAccepted: number; exit: Exit | null };
     },
@@ -295,6 +300,7 @@ class HostedTransport {
       },
       journaled: (seq) => this.journaled(seq),
       detach: (opts) => this.detach(opts),
+      promote: (opts) => this.promote(opts),
     };
     this.replaying = true; // before the listener: an exit kept since the hello waits for the replay
     this.catchingUp = adopt !== undefined;
@@ -304,16 +310,47 @@ class HostedTransport {
       connection.send({ t: 'read', fromSeq: adopt.frontier + 1 });
       return;
     }
-    const plan = o.plan!;
     connection.send({ t: 'read', fromSeq: 1 });
-    connection.send({ t: 'launch', appSessionId: o.appSessionId, engineSessionId: plan.sessionId, argv: [plan.bin, ...plan.args], cwd: plan.cwd, env: plan.env });
+    connection.send(this.launchLine(o.plan!));
     connection.send({ t: 'commit' });
+  }
+
+  private launchLine(plan: LaunchPlan): ClientMessage {
+    return { t: 'launch', appSessionId: this.o.appSessionId, engineSessionId: plan.sessionId, argv: [plan.bin, ...plan.args], cwd: plan.cwd, env: plan.env, ...(this.o.prestart === true && { prestart: true as const }) };
   }
 
   private attachListeners(connection: HostConnection): void {
     connection.listen((event) => this.onEvent(event));
     connection.onClose((why) => {
+      for (const waiter of this.promotions.filter((w) => w.connection === connection)) {
+        this.promotions.splice(this.promotions.indexOf(waiter), 1);
+        waiter.settle({ ok: false, message: `the connection to the session host closed before its answer (${why})` });
+      }
       if (this.connection === connection) void this.lost(why);
+    });
+  }
+
+  // ---- the prestart's promotion (ticket 851, M1) -------------------------------------------------------------------
+
+  // `promote` on the writer's connection, settled by the host's `promoted`, by that connection's close or at the bound
+  // (`withinMs`, else the host start's), whichever comes first. A session whose engine has exited, or with no writer
+  // connection (a reconnect under way), is refused at once: the caller launches afresh rather than wait.
+  private promote(opts: { withinMs?: number } = {}): Promise<Promotion> {
+    if (this.ended) return Promise.resolve({ ok: false, message: 'the engine has exited' });
+    const connection = this.connection;
+    if (connection === null || this.reconnecting) return Promise.resolve({ ok: false, message: 'the session host has no writer connection' });
+    const ms = opts.withinMs ?? this.o.deps.startMs ?? HOST_START_MS;
+    return new Promise<Promotion>((resolve) => {
+      let settled = false;
+      const settle = (answer: Promotion) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        resolve(answer);
+      };
+      const timer = setTimeout(() => settle({ ok: false, message: `no answer to promote from the session host within ${ms} ms` }), ms);
+      this.promotions.push({ connection, settle });
+      connection.send({ t: 'promote' });
     });
   }
 
@@ -411,6 +448,9 @@ class HostedTransport {
         return;
       case 'error':
         this.o.deps.log(`session host ${this.o.holderId}: ${message.message}`);
+        return;
+      case 'promoted':
+        this.promotions.shift()?.settle(message.ok ? { ok: true } : { ok: false, message: message.message ?? 'the session host refused the promotion' });
         return;
       default:
         return; // hello, attached, refused: a handshake's
@@ -667,7 +707,7 @@ class HostedTransport {
       }
       if (hello.state === 'ready' && this.o.plan !== null) {
         const { plan } = this.o;
-        if (hello.appSessionId === null) connection.send({ t: 'launch', appSessionId: this.o.appSessionId, engineSessionId: plan.sessionId, argv: [plan.bin, ...plan.args], cwd: plan.cwd, env: plan.env });
+        if (hello.appSessionId === null) connection.send(this.launchLine(plan));
         connection.send({ t: 'commit' });
         return;
       }

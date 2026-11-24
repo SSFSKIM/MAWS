@@ -5,6 +5,10 @@
 // no byte. The protocol grows additively within its major (`hello.protocol`): unknown fields are ignored, an unknown
 // `t` is answered `error`, and a client never adopts a host of another major. The constants mirror
 // native/session-host/host/limits.go.
+// Ticket 851, M1 (docs/doperpowers/plans/2026-11-24-prestart-engine.md, R4-1): `launch` may be marked `prestart`, which
+// the host's roster entry carries until the writer's `promote` is answered `promoted {ok: true}`, only once the entry
+// without the mark is written; `ok: false` carries the reason and the mark stays. A marked host whose writer is lost
+// ends its child and exits.
 import * as z from 'zod';
 
 export const SESSION_HOST_PROTOCOL = 1;
@@ -25,7 +29,8 @@ export type ClientMessage =
   | { t: 'auth'; token: string }
   | { t: 'attach'; role: 'writer'; fence: number }
   | { t: 'attach'; role: 'observer' }
-  | { t: 'launch'; appSessionId: string; engineSessionId: string; argv: string[]; cwd: string; env: Record<string, string> }
+  | { t: 'launch'; appSessionId: string; engineSessionId: string; argv: string[]; cwd: string; env: Record<string, string>; prestart?: true }
+  | { t: 'promote' }
   | { t: 'commit' }
   | { t: 'read'; fromSeq: number }
   | { t: 'ack'; seq: number }
@@ -73,6 +78,7 @@ export const HostMessageSchema = z.discriminatedUnion('t', [
   // `line_budget` carries `length` and `stream`; `roster` (an entry write that failed, retried at the next state change) a `message`
   z.looseObject({ t: z.literal('problem'), kind: z.string(), length: z.number().int().optional(), stream: z.enum(['out', 'err']).optional(), message: z.string().optional() }),
   z.looseObject({ t: z.literal('error'), message: z.string() }),
+  z.looseObject({ t: z.literal('promoted'), ok: z.boolean(), message: z.string().optional() }), // ticket 851
 ]);
 export type HostMessage = z.infer<typeof HostMessageSchema>;
 export type Hello = Extract<HostMessage, { t: 'hello' }>;
