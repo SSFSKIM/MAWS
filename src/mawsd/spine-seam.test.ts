@@ -563,6 +563,33 @@ describe('the release', () => {
     expect(root.seen).toEqual(['live batch s1 40', 'live batch s1 41', 'live batch s1 42', 'stopped']);
   });
 
+  // Ticket 851 (docs/doperpowers/plans/2026-11-24-prestart-engine.md, R4-7): a prestart is owned by the spine root that
+  // asked for it, so the seam names each root's owner at its load and releases that owner's prestarts as it disposes of it
+  it('gives each root a fresh prestart owner and releases its prestarts on the link once its parts stop', async () => {
+    const spine = seam();
+    link.answers.set('session.prestart.release', () => undefined);
+    const first = (await spine.ensure('command')) as FakeRoot;
+    const owner = first.deps.prestartOwner;
+    expect(owner).toEqual(expect.any(String));
+    first.stop.mockImplementation(() => void first.seen.push('stopped'));
+    spine.quiet(true);
+    await vi.waitFor(() => expect(spine.state()).toBe('cold'));
+    const released = link.calls.filter((call) => call.name === 'session.prestart.release');
+    expect(released).toEqual([{ name: 'session.prestart.release', input: { owner } }]);
+    expect(first.seen.at(-1)).toBe('stopped');
+    const second = (await spine.ensure('command')) as FakeRoot;
+    expect(second.deps.prestartOwner).toEqual(expect.any(String));
+    expect(second.deps.prestartOwner).not.toBe(owner);
+  });
+
+  it('sends no release to an engine host that is not ready (its prestarts ended with the connection)', async () => {
+    const spine = seam();
+    await spine.ensure('command');
+    link.leave();
+    await spine.stop();
+    expect(link.calls.map((call) => call.name)).not.toContain('session.prestart.release');
+  });
+
   it('stop at the daemon’s exit releases without re-executing', async () => {
     const spine = seam({ reexecute: true });
     const root = (await spine.ensure('command')) as FakeRoot;

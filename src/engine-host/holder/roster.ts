@@ -24,6 +24,9 @@ export const RosterEntrySchema = z.looseObject({
   child: ChildSchema.nullable(),
   fence: z.number().int(),
   exit: z.looseObject({ code: z.number().int().nullable(), signal: z.string().nullable(), at: z.string() }).nullable(),
+  // ticket 851 (docs/doperpowers/plans/2026-11-24-prestart-engine.md, R4-1): a prestart whose promotion was never
+  // acknowledged, which a successor ends and never adopts (adopt.ts); absent on every other entry
+  prestart: z.boolean().optional(),
 });
 export type RosterEntry = z.infer<typeof RosterEntrySchema>;
 

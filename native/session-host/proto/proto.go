@@ -36,6 +36,7 @@ type ClientMsg struct {
 	Len             int64             `json:"len"`
 	Name            string            `json:"name"`
 	Group           bool              `json:"group"`
+	Prestart        bool              `json:"prestart"` // `launch`: an engine started before the person's first Send, unmarked by `promote`
 }
 
 // ReadLine reads one line of at most max bytes, without its newline.
@@ -216,6 +217,22 @@ type Problem struct {
 	Length  int    `json:"length,omitempty"`
 	Stream  string `json:"stream,omitempty"`
 	Message string `json:"message,omitempty"`
+}
+
+// Promoted answers `promote`: `ok` once the roster entry without the `prestart` mark is on disk, else the reason, and
+// the entry stays marked.
+type Promoted struct {
+	T       string `json:"t"`
+	OK      bool   `json:"ok"`
+	Message string `json:"message,omitempty"`
+}
+
+// Discarded answers a successor's `discard`: `marked` when the launch was still an unpromoted prestart, which the host
+// then ends (promotion closed, the child ended, the host exited, its entry kept); false when it was not, and nothing
+// was done.
+type Discarded struct {
+	T      string `json:"t"`
+	Marked bool   `json:"marked"`
 }
 
 type Error struct {

@@ -286,6 +286,7 @@ export const HOST_EVENTS = [
   'connectors.operation', 'connectors.grantChanged', // P3-H H3b: an operation's end (its id alone) and a committed grant change
   'connectors.directOperation', // P3-HD: a direct operation's end, its id alone
   'host.browserIdle', // P5 O17 (D20): to mawsd's permanent link alone, which drops the session's headless tabs
+  'engine.prestart', // ticket 851, M2 (R4-6): a prestart's hidden row, committed or ended; the endpoint's
 ] as const satisfies readonly EventName[];
 // E10 end
 // P5 O2 M4 (docs/doperpowers/plans/2026-10-27-p5-o2-mawsd.md): the events the pty host emits. Under the daemon shape

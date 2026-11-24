@@ -9,7 +9,7 @@ import { ModelCatalogueSchema } from '../../sessions/models';
 // C10 end
 import { HostPingSchema, HostStateSchema, type CommandSpec } from './common';
 // C12 start
-import { AppSessionIdSchema } from '../../graph/ids';
+import { AppSessionIdSchema, SessionIdSchema } from '../../graph/ids';
 import { HardReasonSchema } from '../../engine/status';
 // C12 end
 // C11 start
@@ -108,6 +108,17 @@ const o10Commands = {
 } as const;
 export const O10_ENGINE_COMMANDS = Object.keys(o10Commands) as (keyof typeof o10Commands)[];
 // P5 O10 end
+// Ticket 851, M2 (docs/doperpowers/plans/2026-11-24-prestart-engine.md, R4-6): a prestart's hidden row by its engine
+// session, told as it becomes hidden, is committed (adopted) or ends; a client's welcome (the connect burst) restates the
+// hidden set, which `engine.prestarts` also answers. Internal: the endpoint's (M4), never a window.
+export const PrestartHiddenSchema = z.strictObject({ appSessionId: AppSessionIdSchema, engineSessionId: SessionIdSchema.nullable() });
+export const EnginePrestartSchema = z.strictObject({ appSessionId: AppSessionIdSchema, engineSessionId: SessionIdSchema.nullable(), state: z.enum(['hidden', 'committed', 'ended']) });
+// The xhigh panel (scalpel-3, finding 5): `engine.relayHealth.cached`, the relay's last check while it is fresh, never a
+// probe (null: none fresh), which the spine's prestart reads while its person types. Internal: the spine's.
+const prestartCommands = {
+  'engine.prestarts': { input: z.void(), output: z.strictObject({ hidden: z.array(PrestartHiddenSchema).max(1) }), owner: 'engine-host' },
+  'engine.relayHealth.cached': { input: z.void(), output: RelayHealthSchema.nullable(), owner: 'engine-host' },
+} as const;
 
 export const commands = {
   'engine.ping': { input: z.void(), output: HostPingSchema, owner: 'engine-host' },
@@ -119,9 +130,11 @@ export const commands = {
   ...c12Commands, // C12
   ...p2aCommands, // P2-A
   ...o10Commands, // P5 O10
+  ...prestartCommands, // ticket 851, M2
 } as const satisfies Record<`engine.${string}`, CommandSpec<z.ZodType, z.ZodType>>;
 
 export const events = {
   'engine.hostState': HostStateSchema,
   'engine.budget': BudgetStateSchema, // C12
+  'engine.prestart': EnginePrestartSchema, // ticket 851, M2
 } as const satisfies Record<`engine.${string}`, z.ZodType>;

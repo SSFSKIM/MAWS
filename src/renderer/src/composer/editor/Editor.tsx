@@ -46,6 +46,7 @@ export interface EditorProps {
   onSubmit?(s: Serialized, when?: 'after'): Promise<boolean>; // UX wave U4a: `when` names ⌘Enter's keep-for-after
   onPrefill?(prefill: Prefill): void; // a prefill the editor took (the Composer keeps its `editing`)
   onDocChange?(doc: ComposerDoc): void;
+  onEdit?(doc: ComposerDoc): void; // ticket 851, M3: a change the person made, never a load, a restore or a clear
   onEscape?(): boolean;
   onRestore?(doc: ComposerDoc): void; // a stored draft was restored
   onTakeBack?(): boolean; // UX wave U4a M3: ↑ in an empty box, not recalling; true when the composer took it
@@ -107,6 +108,7 @@ export function Editor(props: EditorProps) {
     onSubmit: props.onSubmit,
     onPrefill: props.onPrefill,
     onDocChange: props.onDocChange,
+    onEdit: props.onEdit, // ticket 851, M3
     onEscape: props.onEscape,
     onRestore: props.onRestore,
     onTakeBack: props.onTakeBack, // UX wave U4a M3

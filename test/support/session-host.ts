@@ -74,6 +74,25 @@ export class FakeEngineHost {
   unavailable = false; // E10: every command answers host_unavailable (a supervisor main cannot reach)
   onCall: ((name: string) => void) | null = null; // E10: runs as each command arrives, before it is answered
   ptyHost: ((name: string, input: unknown) => unknown) | null = null; // P4 W2-A: answers the pty host's commands (a pane take-over's)
+  // Ticket 851, M3: the host's prestarts as the spine sees them (the host's own rules are M2's, src/engine-host): at most
+  // one hidden row, a newer prestart replacing it, `running` for the same launch, `adopt` taking it at a launch whose spec
+  // (but for `sessionId`) and key match, any other launch, forget or withdraw of its generation ending it. `starts` counts
+  // every engine start, a prestart's and a fresh launch's (an adoption starts none).
+  // The xhigh panel (scalpel-2, finding 4): each admission keeps the spine's `request`, which a `running` answer moves to
+  // the newer request, and a withdraw names by it (beside the generation, when the spine learned one).
+  readonly prestarts = new Map<string, { generation: number; spec: LaunchSpec; key: string; owner: string; engineSessionId: SessionId; request?: string }>();
+  readonly adoptions: LaunchSpec[] = [];
+  readonly released: string[] = [];
+  starts = 0;
+  prestartGate: Promise<void> | null = null; // set: `session.prestart` is answered once it settles
+  prestartReplyLost = false; // set: the next `session.prestart` is handled (admitted) but its reply never reaches the spine
+  relayCached = true; // false: `engine.relayHealth.cached` finds no fresh check (a miss, answered null)
+  // M3's fix wave: the connection the spine reaches this host on (its welcome, as the spine root reads it): null while
+  // unreachable; `replaceProcess()` is a successor host process on a new connection, whose generations count from 1
+  connection: object = {};
+  link = (): object | null => (this.unavailable ? null : this.connection);
+  private answerHold: Promise<void> | null = null;
+  private generation = 0;
   private readonly readyListeners = new Set<() => void>(); // E10: the session service's, told at becomeReady()
   private readonly listeners = new Map<string, Set<(payload: unknown) => void>>();
   private hostState: HostState = { state: 'starting', pid: null, restarts: 0, revision: 0 };
@@ -103,6 +122,21 @@ export class FakeEngineHost {
   becomeReady(opts: { reachable?: boolean } = {}): void {
     this.unavailable = opts.reachable === false;
     for (const listener of [...this.readyListeners]) listener();
+  }
+
+  // M3's fix wave: the next `session.prestart` is admitted at once and its answer held until the returned release
+  holdNextPrestartAnswer(): () => void {
+    let release!: () => void;
+    this.answerHold = new Promise<void>((resolve) => (release = resolve));
+    return release;
+  }
+
+  // M3's fix wave: the engine host process is replaced (a restart, a handover): its prestarts died with the old
+  // connection, and the successor's generations count from 1 again
+  replaceProcess(): void {
+    this.connection = {};
+    this.generation = 0;
+    this.prestarts.clear();
   }
 
   calledWith(name: string): unknown[] {
@@ -192,6 +226,9 @@ export class FakeEngineHost {
       case 'engine.relayHealth':
         if (this.relayError !== null) throw new Error(this.relayError);
         return this.relay;
+      case 'engine.relayHealth.cached': // ticket 851: the last check while fresh, never a probe
+        if (this.relayError !== null) throw new Error(this.relayError);
+        return this.relayCached ? this.relay : null;
       case 'fs.holders': {
         if (this.registryError !== null) throw new Error(this.registryError);
         const q = input as unknown as FsHoldersQuery;
@@ -211,7 +248,41 @@ export class FakeEngineHost {
       case 'fs.unbind':
         return undefined;
       case 'session.launch':
-        return this.launch((input as { spec: LaunchSpec }).spec);
+        return this.launch((input as { spec: LaunchSpec }).spec, (input as { adopt?: { key: string } }).adopt);
+      case 'session.prestart': {
+        await this.prestartGate;
+        const { spec, key, owner, request } = input as unknown as { spec: LaunchSpec; key: string; owner: string; request?: string };
+        if (this.released.includes(owner)) return { status: 'refused', generation: 0, reason: 'released owner' };
+        const lost = this.prestartReplyLost;
+        this.prestartReplyLost = false;
+        const answered = (answer: { status: 'started' | 'running'; generation: number }) => {
+          if (lost) throw new Error('the reply timed out'); // handled here, its reply dropped on the way back
+          return answer;
+        };
+        const live = this.prestarts.get(spec.appSessionId);
+        if (live && live.key === key && live.owner === owner && sameLaunch(live.spec, spec)) {
+          live.request = request;
+          return answered({ status: 'running', generation: live.generation });
+        }
+        this.prestarts.clear(); // one hidden row per host: the latest typing wins
+        const generation = ++this.generation;
+        this.starts += 1;
+        this.prestarts.set(spec.appSessionId, { generation, spec, key, owner, engineSessionId: randomUUID() as SessionId, request });
+        const held = this.answerHold;
+        this.answerHold = null;
+        await held; // admitted; the answer in transit
+        return answered({ status: 'started', generation });
+      }
+      case 'session.prestart.withdraw': {
+        const live = this.prestarts.get(id);
+        const named = input.generation !== undefined || input.request !== undefined;
+        if (live && named && (input.generation === undefined || live.generation === input.generation) && (input.request === undefined || live.request === input.request)) this.prestarts.delete(id);
+        return undefined;
+      }
+      case 'session.prestart.release':
+        this.released.push(input.owner as string);
+        for (const [key, p] of this.prestarts) if (p.owner === input.owner) this.prestarts.delete(key);
+        return undefined;
       case 'session.status': {
         const s = this.table.get(id);
         if (!s) throw new Error(`unknown session ${id}`);
@@ -255,6 +326,7 @@ export class FakeEngineHost {
         throw new Error(`unknown session ${id}`);
       }
       case 'session.forget': {
+        this.prestarts.delete(id); // ticket 851: a forget ends the id's prestart
         const s = this.table.get(id);
         if (s && s.process !== 'exited') throw new Error(`already_live: process is ${s.process}`);
         this.table.delete(id);
@@ -275,9 +347,14 @@ export class FakeEngineHost {
     }
   }
 
-  private async launch(spec: LaunchSpec): Promise<LaunchResult> {
+  private async launch(spec: LaunchSpec, adopt?: { key: string }): Promise<LaunchResult> {
     if (this.launchHangs === true || (typeof this.launchHangs === 'function' && this.launchHangs(spec))) return new Promise(() => {});
     this.launches.push(spec);
+    // ticket 851: an adoption takes the hidden row's engine; any other launch of the id ends it and starts afresh
+    const prestart = this.prestarts.get(spec.appSessionId);
+    this.prestarts.delete(spec.appSessionId);
+    const adopted = adopt !== undefined && prestart !== undefined && prestart.key === adopt.key && sameLaunch(prestart.spec, spec) ? prestart : null;
+    if (adopted) this.adoptions.push(spec);
     const script = this.script(spec);
     const answer = script.answer ?? 'launching';
     if (answer !== 'launching') {
@@ -286,7 +363,8 @@ export class FakeEngineHost {
     }
     const existing = this.table.get(spec.appSessionId);
     if (existing && existing.process !== 'exited') return { status: 'refused', reason: 'already_live', message: `process is ${existing.process}` };
-    const engineSessionId = (spec.sessionId ?? (spec.resume && !spec.resume.fork ? spec.resume.sessionId : randomUUID())) as SessionId;
+    const engineSessionId = adopted?.engineSessionId ?? ((spec.sessionId ?? (spec.resume && !spec.resume.fork ? spec.resume.sessionId : randomUUID())) as SessionId);
+    if (!adopted) this.starts += 1;
     const launchId = randomUUID();
     const base: EngineSessionStatus = {
       ...statusOf(spec.appSessionId),
@@ -322,6 +400,13 @@ export class FakeEngineHost {
     const recorded = script.recorded !== undefined ? script.recorded : spec.trust !== null ? true : null;
     this.setStatus({ ...base, process: 'ready', engineState: 'idle', trust: { attested: spec.trust !== null, recorded } });
   }
+}
+
+// Ticket 851: two launches are the same one when their specs are equal but for `sessionId` (the pin the guards mint).
+function sameLaunch(a: LaunchSpec, b: LaunchSpec): boolean {
+  const canonicalJson = (value: unknown): string =>
+    Array.isArray(value) ? `[${value.map(canonicalJson).join(',')}]` : value !== null && typeof value === 'object' ? `{${Object.keys(value).sort().map((k) => `${JSON.stringify(k)}:${canonicalJson((value as Record<string, unknown>)[k])}`).join(',')}}` : JSON.stringify(value);
+  return canonicalJson({ ...a, sessionId: null }) === canonicalJson({ ...b, sessionId: null });
 }
 
 async function canonical(path: string): Promise<string> {

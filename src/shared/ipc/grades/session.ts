@@ -98,6 +98,8 @@ export const grades = {
   'session.intent.release': 'spawn',
   'session.intent.discard': 'spawn',
   'session.intent.resolveWorktree': 'spawn',
+  'session.intent.prestart': 'spawn', // ticket 851, M3: it starts an engine, as the start it prepares does
+  'session.intent.prestart.withdraw': 'spawn',
   'session.start': 'spawn',
   'session.fork': 'spawn',
   'session.archiveOlder': 'manage',
@@ -141,4 +143,7 @@ export const grades = {
   'session.follow': 'internal', // P5 O3-D: a local client's streams on the services front; a remote device's are plane B's
   'session.visible': 'internal', // P5 O3-D: the mirror's snapshot
   'session.engineStatuses': 'internal', // P5 O3-D M5b fix round 6: the mirror's snapshot of a scenario's statuses
+  'session.prestart': 'internal', // ticket 851, M2: the spine's, through its engine-host link
+  'session.prestart.withdraw': 'internal',
+  'session.prestart.release': 'internal',
 } as const satisfies CommandGrades<'session'>;

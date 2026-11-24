@@ -78,3 +78,14 @@ describe('a dead host\'s files and the logs', () => {
     expect(['named001.log', 'orphan01.log', 'recent01.log', 'other.txt'].map((n) => existsSync(join(dir, n)))).toEqual([true, false, true, true]);
   });
 });
+
+// Ticket 851, M1 (docs/doperpowers/plans/2026-11-24-prestart-engine.md, R4-1): the `prestart` mark is read when present;
+// an entry without it (every host before it, and every promoted one) reads as it did.
+describe('the prestart mark', () => {
+  it('is read when present and absent otherwise', () => {
+    write({ ...entry('aaaaaaaa'), prestart: true });
+    write(entry('bbbbbbbb'));
+    const read = readRoster(dir, () => {}).sort((a, b) => a.holderId.localeCompare(b.holderId));
+    expect(read.map((e) => [e.holderId, e.prestart])).toEqual([['aaaaaaaa', true], ['bbbbbbbb', undefined]]);
+  });
+});

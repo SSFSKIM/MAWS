@@ -71,6 +71,9 @@ import type { CommandInput, CommandOutput } from '@shared/ipc/schema'; // P5 O3-
 import { RewindNotes, type ConversationAct } from './rewind-note'; // P5 O3-D M4
 import { SpawnerProofs } from './spawner-proof'; // P5 O12 M11
 import { untilLaunching } from './until-launching'; // U9 (M2)
+import { ENGINE_PRESTART_CAPABILITY } from '@shared/host/socket-protocol'; // ticket 851, M3
+import { PrestartRequests, prestartLaunch, prestartShapeRefusal, skipped, type PrestartAnswer } from './prestart'; // ticket 851, M3
+import type { LaunchSpec } from '@shared/engine/launch-spec'; // ticket 851, M3's review
 
 // A refusal of an intent command, mapped to X2 by the registration: `invalid` is `invalid_input` naming the field;
 // `starting`, `retained_worktree` and the rest are `internal` with this message.
@@ -141,6 +144,7 @@ export class SessionService {
   private readonly setupListeners = new Set<(event: SetupEvent) => void>(); // U9 (M2): a fork from another machine waits for its `launching`
   private readonly now: () => string;
   private readonly log: (message: string) => void;
+  private readonly prestarts = new PrestartRequests(); // ticket 851, M3: this root's prestart requests (prestart.ts)
 
   constructor(private readonly deps: SessionServiceDeps) {
     this.manifests = new DeletionManifests(join(deps.userData, 'sessions', 'deletions'));
@@ -172,6 +176,7 @@ export class SessionService {
   // spine.lock another process's).
   dispose(): void {
     this.disposed = true;
+    this.prestarts.stop(); // ticket 851, M3's review (finding 4): no request of the stopped root dispatches
     this.offReady?.();
     this.offReady = null;
     this.offStatus?.(); // P5 O3-D M4
@@ -556,6 +561,11 @@ export class SessionService {
       }
       next = await this.bindTrust(next, patch.location !== undefined, patch.trust);
       return this.putIntent(next);
+    }).then((written) => {
+      // ticket 851 (D10): a launch-relevant change of an intent with a live prestart request asks again (keeping its
+      // token), or withdraws once the intent is no longer eligible; the patch has answered by then, and never waits for it
+      if (Object.keys(requested).some((key) => key !== 'draft')) this.represtart(appSessionId);
+      return written;
     });
   }
 
@@ -599,14 +609,31 @@ export class SessionService {
   // and could not remove is named, left for the cleanup dialog.
   async discard(appSessionId: AppSessionId): Promise<{ leftover: { worktree: { path: string; branch: string | null } } | null }> {
     this.refuseWhileStarting(appSessionId);
+    // ticket 851 (R4-4; M3's review, finding 2): fenced until the draft is gone, so no request of it begins or dispatches
+    // meanwhile; the forget below ends the host's prestart, and what the spine knew of it goes at the end
+    // M4's review, finding 6: the window's tombstones go only once the draft is gone; a removal that failed keeps them
+    const gone = { intent: false };
+    const unfence = this.prestarts.fence(appSessionId);
+    try {
+      return await this.discardFenced(appSessionId, gone);
+    } finally {
+      this.endFence(appSessionId, unfence, false, gone.intent);
+    }
+  }
+
+  private discardFenced(appSessionId: AppSessionId, gone: { intent: boolean }): Promise<{ leftover: { worktree: { path: string; branch: string | null } } | null }> {
     return this.serial(appSessionId, async () => {
       await this.ready();
       const intent = this.deps.intents.get(appSessionId);
-      if (intent === null) return { leftover: null };
+      if (intent === null) {
+        gone.intent = true;
+        return { leftover: null };
+      }
       this.refuseWhileStarting(appSessionId);
       if (intent.progress.bootstrap !== null) await this.forgetQuietly(intent.progress.bootstrap.appSessionId);
       if (this.deps.index.sessions.get(appSessionId) === null) await this.forgetQuietly(appSessionId);
       await this.deps.intents.remove(appSessionId);
+      gone.intent = true;
       this.reconcileFailures.delete(appSessionId);
       this.deps.emit('session.intent.changed', { appSessionId, intent: null });
       const w = intent.progress.worktree;
@@ -760,6 +787,9 @@ export class SessionService {
       throw error;
     }
     this.starting.add(appSessionId);
+    // ticket 851 (R4-4; M3's review, finding 8): fenced through the guards and the setup, so no prestart request of the id
+    // begins or dispatches; at the end what the spine knew of the prestart goes, withdrawn unless the start is ready
+    const unfence = this.prestarts.fence(appSessionId);
     if (this.unrecovered !== null) this.startedSince.add(appSessionId); // E10: a deferred recovery's re-run leaves it
     const registration = early ?? this.inflight.open(appSessionId, this.deps.intents.get(appSessionId) !== null ? 'setup' : 'record-start', args.options); // P2-A
     const captured = capturingSetup(this.s, appSessionId, registration.tagged); // W2-A: tagged once an acquisition joins a record's start
@@ -798,6 +828,7 @@ export class SessionService {
         this.endStart(appSessionId, claim);
         held();
         const ended = acquireOutcomeOf(appSessionId, captured.outcome());
+        this.endFence(appSessionId, unfence, ended.status === 'ready'); // ticket 851
         // F-AB: a start that reached ready is MAWS's last start of the session, so an earlier acquisition's answer no
         // longer describes it once this process exits (published by the end below)
         if (ended.status === 'ready') this.lastAttempt.delete(appSessionId);
@@ -810,6 +841,7 @@ export class SessionService {
     } finally {
       if (!handedOff) {
         this.endStart(appSessionId, claim);
+        this.endFence(appSessionId, unfence, false); // ticket 851 (M3's review, finding 8): a card or a refusal launched nothing
         release?.();
         if (answered !== null) registration.end({ outcome: acquireOutcomeOfGuard(answered) }); // P2-A
       }
@@ -865,7 +897,117 @@ export class SessionService {
     rejectIntent: (appSessionId, outcome) => this.rejectIntent(appSessionId, outcome),
     bindTrust: (intent, locationChanged, decision) => this.bindTrust(intent, locationChanged, decision),
     forgetQuietly: (appSessionId) => this.forgetQuietly(appSessionId),
+    adopting: (appSessionId) => this.prestarts.takeRequested(appSessionId), // ticket 851 (D4)
   };
+
+  // ---- the prestart (ticket 851, M3; prestart.ts; its review's rules, Decision Log 13) ---------------------------------
+
+  // `session.intent.prestart`: the window's request, under the token it minted. Its epoch is set before the first await
+  // (R4-4); every answer that is not a dispatch is `skipped`, writing nothing; a failure is logged and skipped as well.
+  prestart(appSessionId: AppSessionId, token: string): Promise<PrestartAnswer> {
+    if (this.deps.prestart === undefined) return Promise.resolve(skipped('off: this spine prestarts nothing'));
+    const epoch = this.prestarts.begin(appSessionId, token);
+    if (epoch === null) return Promise.resolve(skipped('ended: a discard or a Send of the intent is under way, the window withdrew this token, or the spine stopped'));
+    return this.requestPrestart(appSessionId, token, epoch, this.deps.prestart);
+  }
+
+  // `session.intent.prestart.withdraw`: the prestart serving the token's request goes, unless the token is no longer
+  // current or a Send has started (whose launch adopts or ends it); otherwise nothing. The window may withdraw before its
+  // request was answered (its caller's deadline passed, or it moved first): what that request is admitted is withdrawn.
+  // With the prestart switched off nothing is kept (M4's review, finding 7): no request can begin to need a tombstone.
+  async withdrawPrestart(appSessionId: AppSessionId, token: string): Promise<void> {
+    if (this.deps.prestart === undefined) return;
+    if (this.prestarts.end(appSessionId, token)) await this.withdrawKnown(appSessionId);
+  }
+
+  private represtart(appSessionId: AppSessionId): void {
+    const token = this.prestarts.tokenOf(appSessionId);
+    if (token === null || this.deps.prestart === undefined) return;
+    const epoch = this.prestarts.begin(appSessionId, token);
+    if (epoch !== null) void this.work.track(this.requestPrestart(appSessionId, token, epoch, this.deps.prestart));
+  }
+
+  private async requestPrestart(appSessionId: AppSessionId, token: string, epoch: number, prestart: NonNullable<SessionServiceDeps['prestart']>): Promise<PrestartAnswer> {
+    let reason: string;
+    try {
+      const s = await this.ready();
+      const built = await this.prestartOf(s, appSessionId, prestart);
+      if ('skip' in built) reason = built.skip;
+      else {
+        const host = await this.prestarts.serial(appSessionId, () => this.dispatchPrestart(appSessionId, epoch, built, prestart));
+        if (host === 'ended') return skipped('ended: a discard, a Send, a withdraw, a newer request or the spine’s stop came first');
+        if (host === 'unlinked') reason = 'host: the engine host is not connected';
+        else if (host === 'overtaken') reason = 'overtaken: a newer draft’s request holds the engine host’s one prestart';
+        else if (host.status !== 'refused') return this.prestarts.tokenOf(appSessionId) === token ? { status: host.status, token } : skipped('ended: the request was withdrawn or replaced');
+        else reason = `refused: ${host.reason ?? 'the engine host refused it'}`;
+      }
+    } catch (error) {
+      reason = `error: ${error instanceof Error ? error.message : String(error)}`;
+      this.log(`the prestart of ${appSessionId} was not made: ${reason}`);
+    }
+    // a request that is still the current one and cannot be served ends its line: what an earlier request of it started
+    // no longer fits the intent
+    if (this.prestarts.current(appSessionId, epoch) && this.prestarts.end(appSessionId)) await this.withdrawKnown(appSessionId);
+    return skipped(reason);
+  }
+
+  // In the id's serial host calls: the request is sent only while it is current and the engine host is ready, bound to
+  // that connection (the link would hold a request for a host not ready and hand it to a successor: finding 4), and only
+  // while no other draft's newer request holds the host's slot (the xhigh panel, scalpel-2 finding 5). It is named, and
+  // known by that name from before it is sent (scalpel-2, finding 4).
+  private async dispatchPrestart(appSessionId: AppSessionId, epoch: number, built: { spec: LaunchSpec; key: string }, prestart: NonNullable<SessionServiceDeps['prestart']>): Promise<CommandOutput<'session.prestart'> | 'ended' | 'unlinked' | 'overtaken'> {
+    if (!this.prestarts.current(appSessionId, epoch)) return 'ended';
+    const link = prestart.link();
+    if (link === null) return 'unlinked';
+    if (this.prestarts.overtaken(appSessionId, epoch, link)) return 'overtaken';
+    const request = randomUUID();
+    this.prestarts.dispatching(appSessionId, request, link);
+    const host = await hostCall(this.deps.host.dispatch, 'session.prestart', { spec: built.spec, key: built.key, owner: prestart.owner, request });
+    this.prestarts.admitted(appSessionId, request, host.generation);
+    return host;
+  }
+
+  private async prestartOf(s: Setup, appSessionId: AppSessionId, prestart: NonNullable<SessionServiceDeps['prestart']>): ReturnType<typeof prestartLaunch> {
+    if (s.replay !== null) return { skip: 'replay: each launch takes the next fixture' };
+    const intent = this.deps.intents.get(appSessionId);
+    const shape = prestartShapeRefusal(intent);
+    if (shape !== null) return { skip: shape };
+    if (this.starting.has(appSessionId)) return { skip: 'starting: a start is in flight' };
+    if (!(await this.hostLists(ENGINE_PRESTART_CAPABILITY))) return { skip: 'host: the engine host serves no prestart' };
+    return prestartLaunch(s, await this.bindTrust(intent!, true, undefined), (id) => prestart.browserSocketPath(id)); // the decision bound as Send's guards bind it
+  }
+
+  // Queued behind every host call of the id: the request sent last is withdrawn, by its name and the generation the host
+  // gave it (when its answer came), on the connection it was sent on only (a successor host never hears an old one's).
+  private withdrawKnown(appSessionId: AppSessionId): Promise<void> {
+    const prestart = this.deps.prestart;
+    if (prestart === undefined) return Promise.resolve();
+    return this.prestarts.serial(appSessionId, async () => {
+      const link = prestart.link();
+      const known = this.prestarts.takeKnown(appSessionId, link);
+      if (known === null) return;
+      try {
+        await hostCall(this.deps.host.dispatch, 'session.prestart.withdraw', { appSessionId, request: known.request, ...(known.generation !== null && { generation: known.generation }) });
+      } catch (error) {
+        this.log(`the prestart of ${appSessionId} (generation ${known.generation ?? 'unanswered'}) was not withdrawn: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    });
+  }
+
+  // A discard's or a Send's fence ends (M3's review, findings 2 and 8): a ready start's launch adopted or ended the
+  // prestart, so what the spine knew of it is dropped; any other end withdraws it (a card or a refusal launched nothing,
+  // a failed setup may not have reached its launch, a discard's forget already ended it), queued behind a dispatch still
+  // on its way. Counted in the service's work.
+  // With no prestart (the switches off) nothing here runs: the flag-off path is today's.
+  private endFence(appSessionId: AppSessionId, unfence: () => void, launched: boolean, intentGone = false): void {
+    if (this.deps.prestart !== undefined) {
+      this.prestarts.takeRequested(appSessionId); // a later start offers no adoption unless a request reaches the host again
+      if (launched || intentGone) this.prestarts.clearWithdrawn(appSessionId); // M4 (Decision Log 14): the intent is gone
+      if (launched) void this.prestarts.serial(appSessionId, async () => void this.prestarts.takeKnown(appSessionId, null));
+      else void this.work.track(this.withdrawKnown(appSessionId));
+    }
+    unfence();
+  }
 
   // P5 O16 M3b (D58, D58a): an adopted engine whose re-initialize after the handover failed was ended through the ladder
   // only because of the handover, so its session is resumed at once, as resume.ts retries `no_output` once: one resume
