@@ -108,12 +108,13 @@ const workflowList = (name) => {
   const [, value, folded] = new RegExp(`^ {2}${name}: (.*)\\n((?: {4}\\S.*\\n)*)`, 'm').exec(workflow);
   return (value === '>-' ? folded : value).replace(/^''$/, '').trim().split(/\s+/).filter(Boolean);
 };
-// Only the waiter count follows admissions. Keep static, unit shards, desk-web and guest build variants pinned;
-// the extra cpus-2 box is probes, not a waiter.
-const wholeMacPoolDemand = `16x1 8x4 4x3 2x${1 + workflowList('HOSTED_MAC_E2E').length}`;
+// Only the waiter count follows admissions. Keep static, unit shards, the POOL_E2E groups (desk-web, sheet-page) and guest
+// build variants pinned; the extra cpus-2 box is probes, not a waiter.
+const wholeMacPoolDemand = `16x1 8x4 4x4 2x${1 + workflowList('HOSTED_MAC_E2E').length}`;
 // Pin the default set's exclusions rather than reproducing the planner's eligibility predicate: default selects
-// the rest of the run, desk-web runs on the pool, connectors-oauth needs secrets, discover needs secrets and home.
-const hostedLaneExcluded = new Set(['default', 'desk-web', 'connectors-oauth', 'discover']);
+// the rest of the run, desk-web and sheet-page run on the pool, connectors-oauth needs secrets, discover needs secrets
+// and home.
+const hostedLaneExcluded = new Set(['default', 'desk-web', 'sheet-page', 'connectors-oauth', 'discover']);
 const hostedLaneWaiters = workflowList('CLASS1_E2E').filter((group) => !hostedLaneExcluded.has(group)).length;
 
 const scenarios = [
@@ -128,7 +129,7 @@ const scenarios = [
   ['hosted jobs and a hosted POOL_E2E group ask for no boxes', 'Gates: static,unit,probes,e2e:desk-web\nClass1a: linux\nRunner: linux', 'none'],
   // ci-kit's hosted-Mac spec: a hosted group's job is a waiter on one cpus-2 box, the code's own count of e2e entries.
   ['each group on a hosted Mac is one cpus-2 waiter box', 'Gates: e2e:document-app,e2e:transcript\nClass1a: linux\nRunner: macos\nLane: hosted', '2x2'],
-  ['the whole macOS matrix under Lane: hosted: a waiter per eligible group, beside the pool jobs it had', 'Runner: macos\nLane: hosted', `16x1 8x4 4x2 2x${1 + hostedLaneWaiters}`],
+  ['the whole macOS matrix under Lane: hosted: a waiter per eligible group, beside the pool jobs it had', 'Runner: macos\nLane: hosted', `16x1 8x4 4x3 2x${1 + hostedLaneWaiters}`],
 ];
 for (const [name, trailers, expected] of scenarios) {
   test(name, () => fixture(({ tree, sha, dir }) => {

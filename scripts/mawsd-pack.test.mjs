@@ -32,6 +32,8 @@ beforeEach(() => {
   write(join(root, 'out/main/index.js'), '// main\n');
   write(join(root, 'out/main/chunks/a.js'), '// a chunk\n');
   write(join(root, 'out/preload/index.js'), '// not mawsd’s\n');
+  write(join(root, 'out/sheet-page/index.html'), '<!doctype html><title>Sheet</title>\n'); // the question sheet's C4: the page's bundle
+  write(join(root, 'out/sheet-page/assets/index-a1.js'), '// the page\n');
   pkg('node_modules/zod', { name: 'zod', version: '4.6.5' });
   write(join(root, 'node_modules/zod/index.js'), 'module.exports = {};\n');
   // the SDK: a dependency hoisted, one nested under it (another version), an optional peer missing, a required peer present
@@ -84,6 +86,9 @@ test('the pack holds out/main, the closure and a package.json naming its release
   assert.equal(readFileSync(join(at, 'out/main/mawsd.js'), 'utf8'), 'require("zod");\n');
   assert.ok(existsSync(join(at, 'out/main/chunks/a.js')));
   assert.ok(!existsSync(join(at, 'out/preload')));
+  // the question sheet's C4 (T23): the page's bundle where mawsd looks for it, one directory above its own entry
+  assert.equal(readFileSync(join(at, 'out/main', '..', 'sheet-page', 'index.html'), 'utf8'), '<!doctype html><title>Sheet</title>\n');
+  assert.equal(readFileSync(join(at, 'out/sheet-page/assets/index-a1.js'), 'utf8'), '// the page\n');
   assert.ok(existsSync(join(at, 'node_modules/node-pty/build/Release/pty.node')));
   assert.equal(JSON.parse(readFileSync(join(at, 'node_modules/ajv/node_modules/fast-deep-equal/package.json'), 'utf8')).version, '3.0.0');
   assert.equal(readFileSync(join(at, 'bin/maws-session-host'), 'utf8'), hostScript('darwin host')); // P5 O16 M1
@@ -107,6 +112,38 @@ test('the release is named by its content: the same tree packs to the same name,
   const rebuilt = basename(await pack({ ...options, out: join(dir, 'three') }));
   assert.match(rebuilt, /^1\.2\.3-a1b2c3d4-[0-9a-f]{8}$/);
   assert.notEqual(rebuilt, first);
+});
+
+// The question sheet's C4 (T23): a pack is strict about the page, with one stated exception
+test('a tree with no page is refused, naming out/sheet-page/index.html, and no pack is left', async () => {
+  rmSync(join(root, 'out/sheet-page'), { recursive: true });
+  const out = join(dir, 'dist');
+  await assert.rejects(pack({ root, out, platform: 'darwin', arch: 'arm64', commit: 'a1b2c3d4', build: false, ...quiet }), /out\/sheet-page\/index\.html is not built.*--no-page/);
+  assert.deepEqual(existsSync(out) ? readdirSync(out) : [], []);
+});
+
+test('under page: false (--no-page) the tree is packed without the page, whether or not one is there', async () => {
+  const options = { root, platform: 'darwin', arch: 'arm64', commit: 'a1b2c3d4', build: false, page: false, ...quiet };
+  const left = await pack({ ...options, out: join(dir, 'left') }); // a bundle an earlier build left is not packed
+  assert.ok(existsSync(join(left, 'out/main/mawsd.js')));
+  assert.ok(!existsSync(join(left, 'out/sheet-page')));
+  rmSync(join(root, 'out/sheet-page'), { recursive: true });
+  const none = await pack({ ...options, out: join(dir, 'none') });
+  assert.ok(!existsSync(join(none, 'out/sheet-page')));
+  assert.equal(basename(none), basename(left));
+});
+
+test('the release’s name moves when a file of the page does', async () => {
+  const options = { root, platform: 'darwin', arch: 'arm64', commit: 'a1b2c3d4', build: false, ...quiet };
+  const first = basename(await pack({ ...options, out: join(dir, 'one') }));
+  write(join(root, 'out/sheet-page/assets/index-a1.js'), '// the page, rebuilt\n');
+  assert.notEqual(basename(await pack({ ...options, out: join(dir, 'two') })), first);
+});
+
+test('--no-page is a flag of the command', () => {
+  const ran = spawnSync(process.execPath, [new URL('./mawsd-pack.mjs', import.meta.url).pathname, '--no-build', '--no-page', '--frobnicate'], { encoding: 'utf8' });
+  assert.equal(ran.status, 1);
+  assert.match(ran.stderr, /does not take --frobnicate; usage: mawsd-pack\.mjs \[--out <dir>\] \[--no-build\] \[--no-page\] \[--render\]/);
 });
 
 test('the content id covers each entry’s path, kind and bytes', () => {

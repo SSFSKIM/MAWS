@@ -572,11 +572,13 @@ describe('the live bench’s runner (P5 O7 M7)', () => {
     writeFileSync(join(repo, 'spikes/protocol-probe/fixtures/pass2/auto-unrouted.jsonl'), '{}\n');
     writeFileSync(join(repo, 'node_modules/electron/package.json'), JSON.stringify({ version: '44.4.5' }));
     let dirty = false;
+    const packs: string[][] = [];
     const runner: CommandRunner = {
       async run(argv) {
         if (argv[0] === 'git' && argv[3] === 'rev-parse') return { code: 0, stdout: `${COMMIT}\n`, stderr: '' };
         if (argv[0] === 'git') return { code: dirty ? 1 : 0, stdout: '', stderr: '' };
         if (argv[0] === 'pnpm') {
+          packs.push([...argv]);
           const pack = join(argv[argv.length - 1]!, '0.0.0-aaaaaaaa-12345678');
           mkdirSync(join(pack, 'out/main'), { recursive: true });
           writeFileSync(join(pack, 'out/main/mawsd.js'), '// main');
@@ -592,6 +594,7 @@ describe('the live bench’s runner (P5 O7 M7)', () => {
     expect(stubFixtures(readFileSync(join(repo, 'test/support/latency-engine-stub.mjs'), 'utf8'))).toEqual(['init.jsonl', 'pass2/auto-unrouted.jsonl']);
     const bundle = await buildHeadBundle(repo, join(root, 'out'), runner, COMMIT);
     expect(bundle).toMatchObject({ tar: join(root, 'out', 'head.tar'), electron: '44.4.5', commit: COMMIT });
+    expect(packs[0]).toEqual(expect.arrayContaining(['mawsd:pack', '--no-build', '--no-page'])); // the question sheet's C4 (T23): an e2e build makes no page
     const entries = spawnSync('tar', ['-tf', bundle.tar], { encoding: 'utf8' }).stdout.split('\n').filter(Boolean).map((entry) => entry.replace(/^\.\//, '')).filter(Boolean).sort();
     expect(entries).toEqual(['bench-head.json', 'out/', 'out/main/', 'out/main/mawsd.js', 'spikes/', 'spikes/protocol-probe/', 'spikes/protocol-probe/fixtures/', 'spikes/protocol-probe/fixtures/init.jsonl', 'spikes/protocol-probe/fixtures/pass2/', 'spikes/protocol-probe/fixtures/pass2/auto-unrouted.jsonl', 'test/', 'test/support/', 'test/support/latency-engine-stub.mjs']);
     expect(bundle.unpackedBytes).toBeGreaterThan(0);

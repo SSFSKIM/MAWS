@@ -314,7 +314,7 @@ export function planOf(env, scripts, now, { docsOnly = false } = {}) {
   }));
   // The groups that need what only the mini's exclusive instance has (ClaudeUsage's relay): the home Mac on a macOS lane.
   const home = new Set(words(env.MAC_HOME_E2E));
-  // desk-web, the one POOL_E2E group, is one Playwright worker; a cpus-4 box is a c3d-highcpu-4 with 8 GB, where cpus-2's
+  // desk-web and sheet-page, the POOL_E2E groups, are one Playwright worker each; a cpus-4 box is a c3d-highcpu-4 with 8 GB, where cpus-2's
   // e2-highcpu-2 has 2 GB for the build, two browsers and the hub double, at about the same price (Decision Log 68).
   const offMac = new Set(words(env.POOL_E2E));
   // MAC_SHARED_E2E less what never shares the desktop (the spec's "What it must not be"): a measured group, whose bounds
