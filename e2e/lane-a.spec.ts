@@ -1789,7 +1789,7 @@ test.describe('lane A: a terminal session driven through its bridge', () => {
     await sheet.getByRole('button', { name: SHEET_WORDS.send(3), exact: true }).click();
     await expect.poll(() => inboxLines(c).length, { timeout: 15_000 }).toBe(3);
     const lines = inboxLines(c);
-    expect(lines.map((l) => [l.kind, l.id, l.by, l.picks, l.text ?? ''])).toEqual([
+    expect(lines.map((l) => [l.kind, l.id, l.by, l.picks ?? [], l.text ?? ''])).toEqual([ // a line carries only what was given
       ['answer', 'q1', 'maws', ['Passkeys'], ''],
       ['answer', 'q2', 'maws', ['Yes'], ''],
       ['answer', 'q3', 'maws', [], 'Nothing here yet.'],
