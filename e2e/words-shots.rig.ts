@@ -944,10 +944,10 @@ const M5_WORDS = {
 const M5_CARRIED = new Set([
   'artifacts-library', 'artifacts-library-hover', 'm0-library-more', 'artifact-document', 'm0-send-to', 'r2-deck', 'r2-doc-versions', 'm0-doc-version-preview',
   'm0-doc-save-version', 'm0-dashboard-states', 'm0-dashboard-source-sheet',
-  // task 7: the slides editor, the design workbench and the design system page
+  // the slides editor's, the design workbench's and the design system page's
   'r2-deck-element', 'm0-deck-check', 'm0-deck-theme', 'm0-presenter', 'r2-design', 'm0-design-held', 'm0-design-comments', 'r2-design-system', 'm0-ds-check',
 ]);
-// The words the slides editor's, the design workbench's and the design system page's scenes read, per build (task 7), with
+// The words the slides editor's, the design workbench's and the design system page's scenes read, per build, with
 // their source: M5's in src/artifacts/{slides,design,design-system} and renderer/src/artifacts/design-system, master's the
 // same files at f2b32d6c9. Neither build's editor copy is in the e2e project's list.
 const M5_EDITOR_WORDS = {
@@ -1009,6 +1009,7 @@ const M5_EDITOR_WORDS = {
   nameField: 'Version name',
   namePlaceholder: { m5: 'Version name', master: 'Name, e.g. Before the review' }, // G492
   nextChange: 'Next change',
+  noNotes: 'No speaker notes.', // a version's slide with no notes (G495), both builds
   stepped: { m5: /^1 \/ \d+$/, master: /^1 of \d+ changes$/ }, // G489
   // design/editor/copy.ts DESIGN_COPY
   boardsToggle: 'Boards',
@@ -5743,7 +5744,7 @@ const DRAFTER = 'words-drafter'; // the agent's session, as the dashboard seam n
 const STATUS_PAGE = (line: string, script = '') => `<!doctype html><meta charset="utf-8"><title>Status</title><h1>Status</h1><p>${line}</p>${script}`;
 const SALES_CSV = 'region,revenue\nNorth,120\nSouth,98\nEast,n/a\nWest,40\nCentre,77\nCoast,n/a\nHills,64\nPlains,51\n';
 const VISITS_CSV = `channel,visits\n${['Search', 'Direct', 'Email', 'Social', 'Partners', 'Ads', 'Events', 'Print', 'Radio', 'Podcasts', 'Referrals', 'Other sites'].map((name, i) => `${name},${(12 - i) * 37}`).join('\n')}\n`;
-// Task 7's decks. Field talk: a title, a body and an ellipse that casts a shadow (G450: drawn from its outline, so no
+// The slides editor's decks. Field talk: a title, a body and an ellipse that casts a shadow (G450: drawn from its outline, so no
 // spread), its threads written through the design seam (the deck's own thread model, slides/threads.ts). Each deck file's
 // colours are literals no design system names, so the Check finds issues on both builds (literal-color).
 const DECK_AT = '2026-10-14T09:00:00Z';
@@ -5769,7 +5770,7 @@ function fullDeckFiles(): Record<string, string> {
   ids.forEach((id, i) => (files[`project/slides/${id}.html`] = `<section id="${id}" style="background:#ffffff; padding:128px"><h2 id="h${id}" style="font-size:72px">Week ${i + 1}</h2></section>`));
   return files;
 }
-// Task 7's design systems, made by an agent's artifact_create from the bundled MAWS system's files (read from this
+// The design system page's systems, made by an agent's artifact_create from the bundled MAWS system's files (read from this
 // checkout, the same files on both builds): one whose canon breaks a rule and whose law has a tag MAWS cannot run, one
 // whose token file has an alias to nothing, and one with tokens alone (no law, no canon).
 const MAWS_SYSTEM_DIR = join(REPO_ROOT, 'src/artifacts/types/design_system/defaults/maws');
@@ -5876,7 +5877,7 @@ test('the word cut’s M5: the library’s Spaces, opened artifacts, the documen
         return make('document', 'Survey plan', { spaceId: space.id });
       },
       draft: async () => (await agent.ok<{ artifactId: string }>(DRAFTER, 'artifact_create', { kind: 'document', title: 'Draft plan', handle: 'draft-plan', content: '# Draft plan\n\nAn agent wrote this.' })).artifactId,
-      // ---- task 7: the slides editor, the design workbench and the design system page
+      // ---- the slides editor's, the design workbench's and the design system page's
       // Field talk with three threads: two open, one on an element no slide has (an orphan, G481)
       talk: async () => {
         const id = await seedDeck('Field talk', TALK_FILES);
@@ -6623,7 +6624,7 @@ test('the word cut’s M5: the library’s Spaces, opened artifacts, the documen
       after: () => closeOverlays(page),
     });
     const layouts = () => page.locator('.deck-layouts [data-layout]');
-    await shot(page, m5Meta('m5-slides-layouts', 'the menu G421 changes, settled on the system’s layouts', 'A deck, From layout’s menu', 'Field talk, From layout under the slides', 'From layout’s menu open on the governing system’s layouts (the bundled MAWS system’s; G421’s wait and its two other settled lines are not drawn here)', ['tools/presentation', 'src/artifacts/slides/editor/menus']), async () => {
+    await shot(page, m5Meta('m5-slides-layouts', 'G421', 'A deck, From layout’s menu', 'Field talk, From layout under the slides', 'From layout’s menu open on the governing system’s layouts (the bundled MAWS system’s; G421’s wait and its two other settled lines are not drawn here)', ['tools/presentation', 'src/artifacts/slides/editor/menus']), async () => {
       await deckAtRest('talk');
       await deckButton('talk', E.fromLayout).click();
       await expect(layouts().first(), 'the layouts').toBeVisible({ timeout: 10_000 });
@@ -6780,7 +6781,7 @@ test('the word cut’s M5: the library’s Spaces, opened artifacts, the documen
       await expect(versionBar('versions'), 'the version bar').toBeVisible({ timeout: 10_000 });
     };
     const doneButton = () => versionBar('versions').getByRole('button', { name: byM5(E.done), exact: true }).first();
-    await shot(page, m5Meta('m5-slides-version', 'G489, G490', 'A deck showing a version, stepped to its first change', 'Artifacts, Site visit, Version history, the version “Draft”, then ↓', 'The version bar: “1 / N” (master: “1 of N changes”), Restore, Make a copy, Name and Done (master: the full words)', ['tools/presentation', 'src/artifacts/slides/editor/history']), async () => {
+    await shot(page, m5Meta('m5-slides-version', 'G489, G490, G495', 'A deck showing a version, stepped to its first change', 'Artifacts, Site visit, Version history, the version “Draft”, then ↓', 'The version bar: “1 / N” (master: “1 of N changes”), Restore, Make a copy, Name and Done (master: the full words); under the slide the version’s notes, “No speaker notes.”', ['tools/presentation', 'src/artifacts/slides/editor/history']), async () => {
       await toVersion();
       await versionBar('versions').getByRole('button', { name: E.nextChange, exact: true }).click();
     }, {
@@ -6789,6 +6790,7 @@ test('the word cut’s M5: the library’s Spaces, opened artifacts, the documen
         await expect(versionBar('versions').locator('.deck-history-count'), 'the step').toHaveText(byM5(E.stepped), { timeout: 5_000 });
         await expect(versionBar('versions').getByRole('button', { name: E.restore, exact: true }), 'Restore').toHaveText(m5Cut() ? E.restoreWords : E.restore);
         await expect(doneButton(), 'Done').toHaveText(byM5(E.doneWords));
+        await inView(tab('versions').locator('[data-history-notes]').getByText(E.noNotes, { exact: true }), 'the version’s notes');
       },
     });
     await shot(page, m5Meta('m5-slides-version-done-tip', 'G490', 'A deck showing a version, Done’s tooltip', 'Site visit, the version “Draft”, the keyboard on Done', 'Done’s tooltip “Back to presentation” (master: the button’s own words)', ['tools/presentation', 'src/artifacts/slides/editor/history']), async () => {
