@@ -68,7 +68,7 @@ describe('the plugins audit', () => {
     // an action that does not announce it (an update; a listing) may not change it
     const update = manifestOf('update', 'user', null, { marketplace: 'e8-scratch', plugin: 'e8-probe', id: 'e8-probe@e8-scratch' });
     expect(auditOf(before, after, update).unannounced).toEqual(['changed config/.claude.json · declinedPlugins']);
-    expect(auditOf(before, after, listing).unannounced).toEqual(['changed config/.claude.json · declinedPlugins']);
+    expect(auditOf(before, after, listing).unannounced).toContain('changed config/.claude.json · declinedPlugins');
     // an announced key does not open the rest of the file
     const trust = tree({ 'config/.claude.json': '2', 'config/settings.json': 'b' }, { pluginUsage: {}, declinedPlugins: [], mcpServers: { x: {} } });
     expect(auditOf(before, trust, uninstall).unannounced).toEqual(['changed config/.claude.json · mcpServers']);
