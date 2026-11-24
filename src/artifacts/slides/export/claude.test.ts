@@ -10,6 +10,7 @@ import { builtinView } from '../../design-system/view';
 import { DECK_PATH, parseDeckJson, slidePath } from '../deck';
 import { deckTokenValues } from '../mirror';
 import { loadSlide } from '../parse';
+import { slideOrder } from '../model';
 import { BENCH_SLIDES, CLAUDE_SLIDES, LAYOUT_SLIDES } from '../fixtures/corpus';
 import { claudeAssetPath, claudeDeckFiles } from './claude';
 import { FIXTURE_FILES, fixtureDoc, measuredAt } from './deck.test-support';
@@ -63,7 +64,8 @@ describe('the For Claude export', () => {
 
 // fix wave 1 (finding 5): a held slide has no Claude-readable form; the export is refused, naming it and its reasons
 describe('the For Claude export of a deck with held slides', () => {
-  it('refuses, naming each held slide and its reasons', () => {
+  // the word cut (G508): in a person's words, the slide by its filmstrip number, and the way out
+  it('refuses, naming each held slide by its number', () => {
     const doc = newDoc();
     publishDeck(doc, {}, { ...FIXTURE_FILES, [slidePath('broken')]: '<section id="broken"><h2 id="b">Broken</h2><blink>x</blink></section>' }, false);
     const held = heldSlides(doc);
@@ -74,8 +76,8 @@ describe('the For Claude export of a deck with held slides', () => {
     } catch (error) {
       message = (error as Error).message;
     }
-    expect(message).toContain('slide broken is held');
-    expect(message).toContain(held[0]!.reasons[0]!);
+    const number = slideOrder(doc).indexOf('broken') + 1;
+    expect(message).toBe(`Can’t export: slide ${number} does not load. Fix or remove it first.`);
   });
 });
 

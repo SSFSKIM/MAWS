@@ -46,3 +46,48 @@ describe('a design system’s layout thumbnail (final fix wave B5)', () => {
     expect(onPick).toHaveBeenCalledWith({ slide: expect.objectContaining({ id: 'branded' }), system: 'sys-1' });
   });
 });
+
+// The word cut (docs/doperpowers/specs/2026-11-16-word-cut-design.md, M5 task 3; G421): the menu's wait is the quiet
+// spinner, and every read settles: "No layouts" for a system without any or none at all, "Layouts could not be read"
+// with the reason for a failed one. At the deck's limit the trigger is greyed with the limit as its reason (G423).
+describe('the From layout menu’s states (G421)', () => {
+  const open = async () => {
+    await act(async () => {
+      fireEvent.pointerDown(screen.getByRole('button', { name: 'From layout' }), { button: 0, ctrlKey: false, pointerType: 'mouse' });
+    });
+  };
+  const withHost = (host: ArtifactHost, system: { id: string } | null) =>
+    render(
+      <DesignSystemHostContext.Provider value={host}>
+        <LayoutsMenu system={system} disabled={false} scope={(children) => children} onPick={() => {}} />
+      </DesignSystemHostContext.Provider>,
+    );
+
+  it('waits with the quiet spinner, no words', async () => {
+    withHost({ open: () => new Promise(() => {}), assetUrl: () => null } as unknown as ArtifactHost, { id: 'slow' });
+    await open();
+    expect(screen.getByRole('menu').textContent).toBe('');
+    await act(() => new Promise<void>((resolve) => setTimeout(resolve, 600)));
+    expect(screen.getByRole('progressbar', { name: 'Loading…' })).toBeTruthy();
+  });
+
+  it('a failed read says so with its reason; no system at all reads No layouts', async () => {
+    withHost({ open: async () => Promise.reject(new Error('gone')), assetUrl: () => null } as unknown as ArtifactHost, { id: 'broken' });
+    await open();
+    await vi.waitFor(() => expect(screen.getByRole('menu').textContent).toBe('Layouts could not be read: gone'));
+    cleanup();
+    withHost({ open: () => new Promise(() => {}), assetUrl: () => null } as unknown as ArtifactHost, null);
+    await open();
+    expect(screen.getByRole('menu').textContent).toBe('No layouts');
+  });
+
+  it('at the deck’s limit the trigger is greyed, still focusable, the limit its reason', () => {
+    render(<LayoutsMenu system={null} disabled={false} unavailable="A deck holds at most 500 slides: delete one to add another." scope={(children) => children} onPick={() => {}} />);
+    const trigger = screen.getByRole('button', { name: 'From layout' });
+    expect(trigger.getAttribute('aria-disabled')).toBe('true');
+    expect((trigger as HTMLButtonElement).disabled).toBe(false);
+    expect(trigger.getAttribute('aria-describedby')).toBeTruthy();
+    fireEvent.click(trigger);
+    expect(screen.queryByRole('menu')).toBeNull();
+  });
+});

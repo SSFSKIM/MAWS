@@ -41,3 +41,21 @@ export const SendIcon = () => (
     <path d="M8 13V3M4 7l4-4 4 4" />
   </Glyph>
 );
+export const EyeOffIcon = () => (
+  <Glyph>
+    <path d="M2 8s2.25-4 6-4 6 4 6 4-2.25 4-6 4-6-4-6-4z" />
+    <circle cx="8" cy="8" r="1.75" />
+    <path d="m2.5 13.5 11-11" />
+  </Glyph>
+);
+export const PencilIcon = () => (
+  <Glyph>
+    <path d="M10.5 3 13 5.5 6 12.5H3.5V10z" />
+  </Glyph>
+);
+export const SidePanelIcon = () => (
+  <Glyph>
+    <rect x="2.5" y="3" width="11" height="10" rx="1.5" />
+    <path d="M9.5 3v10" />
+  </Glyph>
+);

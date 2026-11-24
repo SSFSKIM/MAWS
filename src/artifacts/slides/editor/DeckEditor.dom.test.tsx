@@ -15,6 +15,7 @@ import { importSlide, readSlide, setNotes, slideOrder, writeDeckKeys } from '../
 import { DECK_LIMITS } from '../deck';
 import { loadSlide } from '../parse';
 import { addThread } from '../threads';
+import { accessibleDescription } from '../../../renderer/src/test-support/accessible-text';
 import { DeckEditor } from './DeckEditor';
 import chromeCss from './chrome.css?raw';
 import type { DeckReveal } from './reveal';
@@ -140,7 +141,7 @@ describe('the deck editor', () => {
     mount();
     expect(screen.queryByRole('complementary', { name: 'Inspector' })).toBeNull();
     const inspector = within(screen.getByRole('toolbar', { name: 'Deck' })).getByRole('button', { name: 'Inspector' });
-    expect(inspector.textContent).toBe('Inspector');
+    expect(inspector.textContent).toBe(''); // the word cut (G401): a glyph named Inspector
     fireEvent.click(inspector);
     expect(screen.getByRole('complementary', { name: 'Inspector' })).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: 'Close inspector' }));
@@ -367,8 +368,14 @@ describe('the notes under a composition and the dialect’s limits (findings 1 a
       }
     });
     mount(doc);
-    expect((screen.getByRole('button', { name: 'New slide' }) as HTMLButtonElement).disabled).toBe(true);
-    expect(screen.getByText(/at most 500 slides/)).toBeTruthy();
+    // the word cut (G423): New slide is greyed and keeps the keyboard, the limit its reason, with no line under it
+    const add = screen.getByRole('button', { name: 'New slide' }) as HTMLButtonElement;
+    expect(add.disabled).toBe(false);
+    expect(add.getAttribute('aria-disabled')).toBe('true');
+    expect(accessibleDescription(add)).toBe('A deck holds at most 500 slides: delete one to add another.');
+    expect(screen.queryByText(/at most 500 slides/)).toBeNull();
+    fireEvent.click(add);
+    expect(slideOrder(doc)).toHaveLength(DECK_LIMITS.slides);
   });
 });
 
@@ -405,7 +412,7 @@ describe('final fix wave B4: an awaited edit writes only while the deck takes wr
     rerender(ui(true));
     await act(async () => upload.resolve('assets/b.png'));
     expect(pictures(doc)).toEqual([]);
-    expect(screen.getByText(/uploaded but not placed/)).toBeTruthy();
+    expect(screen.getByText('Not placed: the deck became read-only')).toBeTruthy(); // the word cut (G416)
   });
 
   it('an image whose upload finishes after the tab closed writes nothing into the disposed session', async () => {
