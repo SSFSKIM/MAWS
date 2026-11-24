@@ -9,8 +9,12 @@
 // editor's reply drafts, the pin popover's too, so a reply typed in either is there in the other. Show opens the
 // thread's pin popover (the controller's, V11) and the rail stays open.
 // WR 49: conversations whose targets were deleted stay out of both sections until explicitly revealed.
+// The word cut (docs/doperpowers/specs/2026-11-16-word-cut-design.md, M5 task 3): the toggle reads Show deleted, its name
+// the longer words (G479); an orphan says Element deleted (G481); Reply is a send glyph, greyed while empty (G482).
 import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
 import { actorDisplay } from '@shared/artifacts/actor';
+import { NamedGlyph } from '../../../../renderer/src/ui/glyph';
+import { SendIcon } from '../../../ui/icons';
 import { newThreadId, reopen, reply, resolve, type DeckThreadState } from '../../threads';
 import { useDeckView } from '../deck-view';
 import { COMMENTS_ORIGIN, type DeckCommentsApi } from './controller';
@@ -71,8 +75,8 @@ export function CommentsRail({ api, onClose, labels }: { api: DeckCommentsApi; o
       </header>
       <div className="deck-comments-body">
         {threads.some((thread) => !thread.live) && (
-          <button type="button" className="deck-comments-section" aria-pressed={showDeleted} onClick={() => setShowDeleted(!showDeleted)}>
-            {showDeleted ? 'Hide deleted-target comments' : 'Show deleted-target comments'}
+          <button type="button" className="deck-comments-section" aria-label={showDeleted ? C.hideDeletedName : C.showDeletedName} aria-pressed={showDeleted} onClick={() => setShowDeleted(!showDeleted)}>
+            {showDeleted ? C.hideDeleted : C.showDeleted}
           </button>
         )}
         {open.length === 0 ? <p className="deck-comments-empty">{labels?.empty ?? C.empty /* P3-E */}</p> : open.map(item)}
@@ -182,9 +186,9 @@ function ReplyField({ text, setText, onReply }: { text: string; setText(text: st
       }}
     >
       <textarea className="deck-thread-reply-field" aria-label={C.reply} placeholder={C.replyPlaceholder} rows={1} value={text} onChange={(event) => setText(event.target.value)} onKeyDown={onKeyDown} />
-      <button type="submit" className="deck-button" disabled={body === ''}>
-        {C.reply}
-      </button>
+      <NamedGlyph type="submit" label={C.reply} unavailable={body === '' ? C.replyUnavailable : null} className="deck-button deck-glyph">
+        <SendIcon />
+      </NamedGlyph>
     </form>
   );
 }

@@ -5,7 +5,11 @@
 // dialect's closed lists, so they are the loader's by construction; a crop is checked against its range first.
 // Final fix wave (B4): Replace's upload is the session's awaited edit (`later`): the tab's close waits for it, and the
 // picture is replaced only if the deck still takes writes when the upload is done.
+// The word cut (docs/doperpowers/specs/2026-11-16-word-cut-design.md, M5 task 3): Replace's word stays while it uploads,
+// the quiet spinner beside it (G453); its failures are said shortly (G455, G416); captions drop their section's word
+// (G442).
 import { useRef, useState } from 'react';
+import { WaitingWords } from '../../../../renderer/src/ui/spinner';
 import { isAssetRef } from '../../css';
 import { px } from '../../geometry';
 import { connectorHeads } from '../../glyphs';
@@ -58,7 +62,7 @@ export function ImageSection() {
     setBusy(true);
     try {
       const placed = await session.later(uploadAsset(chosen), (ref) => {
-        if (!isAssetRef(ref) || !ref.startsWith('assets/')) return refuse([C.notAnAsset(ref)]);
+        if (!isAssetRef(ref) || !ref.startsWith('assets/')) return refuse([C.notAnAsset]);
         refuse([]);
         // a new picture drops the crop made for the old one (Claude: keep data-crop unless src changes)
         attrs(() => ({ src: ref, 'data-crop': null }), 'edit');
@@ -73,7 +77,7 @@ export function ImageSection() {
   };
   return (
     <Section title={C.image}>
-      <Row caption={C.imageFit}>
+      <Row caption={C.fitCaption}>
         <SelectField
           label={C.imageFit}
           value={fit.value ?? ''}
@@ -100,8 +104,8 @@ export function ImageSection() {
               disabled={readOnly || busy}
               onChange={(event) => void replace(event.target.files?.[0])}
             />
-            <Button label={C.replace} disabled={busy} onClick={() => file.current?.click()}>
-              {busy ? C.uploading : C.replace}
+            <Button label={C.replaceName} busy={busy} onClick={() => file.current?.click()}>
+              <WaitingWords words={C.replace} wait={busy ? C.uploading : null} />
             </Button>
           </>
         )}
@@ -197,7 +201,7 @@ export function ConnectorSection() {
       <div className="deck-inspector-pair">
         <NumberField
           label={C.lineWidth}
-          caption={C.lineWidth}
+          caption={C.widthCaption}
           unit="px"
           value={pxOf(width.value)}
           mixed={width.mixed}
@@ -205,7 +209,7 @@ export function ConnectorSection() {
           onCommit={(n, how) => style(() => ({ 'border-width': n === null ? null : px(n) }), how)}
         />
         <label className="deck-inspector-number">
-          <span className="deck-inspector-mini">{C.lineStyle}</span>
+          <span className="deck-inspector-mini">{C.styleCaption}</span>
           <SelectField
             label={C.lineStyle}
             value={line.value ?? 'solid'}

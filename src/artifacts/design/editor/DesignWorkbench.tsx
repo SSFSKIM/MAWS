@@ -38,6 +38,7 @@ import { historyAssets } from '../../slides/editor/history/HistoryPreview';
 import { useDeckHistoryController, useDeckHistorySnapshot, type DeckHistorySource } from '../../slides/editor/history/use-deck-history';
 import { Inspector } from '../../slides/editor/Inspector';
 import { TextStyleMenu } from '../../slides/editor/menus/TextStyle';
+import { ToolbarNotice, useToolbarNotice } from '../../slides/editor/notice';
 import { ThemePanel, type DeckThemeChoice } from '../../slides/editor/menus/Theme';
 import { useCanvasCss, useDeckFaces } from '../../slides/editor/page-styles';
 import { useDeckReveal, type DeckRevealProps } from '../../slides/editor/reveal'; // P4-B4
@@ -111,7 +112,6 @@ export interface DesignWorkbenchProps extends DeckRevealProps /* P4-B4 */ {
   provisional?: ProvisionalLayers | null;
 }
 
-const NOTICE_MS = 6_000;
 const TEXT_KINDS: readonly NewKind[] = ['text', 'heading', 'bullets', 'numbers'];
 
 /** The boards, followed through the replica's updates (the same object while nothing they show changed). */
@@ -230,12 +230,10 @@ export function DesignWorkbench(props: DesignWorkbenchProps) {
   );
   const tokens = useDesignSystem(system).view?.tokens ?? null;
 
-  const [notice, setNotice] = useState('');
-  useEffect(() => {
-    if (!notice) return;
-    const timer = setTimeout(() => setNotice(''), NOTICE_MS);
-    return () => clearTimeout(timer);
-  }, [notice]);
+  // the deck's toolbar notice (slides/editor/notice.tsx): a short refusal from the shared parts keeps the model's reason
+  // on the notice (the word cut, G413); a board's own refusal is still its writer's words (G518 is the design's row)
+  const notice = useToolbarNotice();
+  const setNotice = notice.show;
   const [inspectorOpen, setInspectorOpen] = useState(!compact);
   const [boardsOpen, setBoardsOpen] = useState(!compact);
 
@@ -492,9 +490,7 @@ export function DesignWorkbench(props: DesignWorkbenchProps) {
           )}
         </WithZoom>
         <DesignCommentButtons api={commentsApi} view={view} railOpen={state.rail === 'comments'} onToggleRail={() => session.toggleRail('comments')} />
-        <span role="status" className="deck-notice" data-deck-notice>
-          {notice}
-        </span>
+        <ToolbarNotice notice={notice} />
         <span className="deck-toolbar-spacer" />
         <ZoomControls view={view} onFitAll={fitAll} onFitSelection={fitSelection} />
       </div>

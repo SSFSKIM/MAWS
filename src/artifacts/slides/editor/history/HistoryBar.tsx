@@ -2,7 +2,12 @@
 // editor's toolbar while a version shows, B's preview bar for a deck: what is shown, Show changes (on by default),
 // "N changes" of the whole comparison with ↑ ↓ (the stage moves to each change's slide), Restore this version
 // (confirmed first), Make a copy, Name this version, and Back to presentation.
+// The word cut (docs/doperpowers/specs/2026-11-16-word-cut-design.md, M5 task 3): stepping through changes reads "2 / 5",
+// named in words (G489); the buttons read Restore, Make a copy, Name and Done, each keeping its full name, which its
+// tooltip shows (G490); the name field's placeholder is "Version name" (G492).
 import { useState, type FormEvent, type ReactNode } from 'react';
+import { BareCount } from '../../../../renderer/src/ui/count';
+import { Tip } from '../../../../renderer/src/ui/tip';
 import type { DeckHistoryController, DeckPreview } from './controller';
 import { HISTORY_COPY as C } from './copy';
 
@@ -22,7 +27,7 @@ export function HistoryBar({ preview, controller, onBack, toolbarEnd }: { previe
         {preview.showChanges && (
           <>
             <span className="deck-history-count" aria-live="polite" data-history-count={count}>
-              {preview.focus === null ? C.count(count) : `${preview.focus + 1} of ${preview.stops.length} changes`}
+              {preview.focus === null ? C.count(count) : <BareCount count={C.step(preview.focus + 1, preview.stops.length)} meaning={C.stepName(preview.focus + 1, preview.stops.length)} />}
             </span>
             <Button label={C.previous} disabled={count === 0} onClick={() => controller.step(-1)}>
               ↑
@@ -35,21 +40,21 @@ export function HistoryBar({ preview, controller, onBack, toolbarEnd }: { previe
         <span className="deck-toolbar-spacer" />
         {preview.versionId !== null && (
           <>
-            <Button label={C.restore} onClick={() => setConfirming(true)}>
-              {C.restore}
+            <Button label={C.restore} tip onClick={() => setConfirming(true)}>
+              {C.restoreWord}
             </Button>
             <Button label={C.copy} onClick={() => void controller.duplicate()}>
               {C.copy}
             </Button>
             {controller.canName && (
-              <Button label={C.name} onClick={() => setNaming(true)}>
-                {C.name}
+              <Button label={C.name} tip onClick={() => setNaming(true)}>
+                {C.nameWord}
               </Button>
             )}
           </>
         )}
-        <Button label={C.back} onClick={onBack}>
-          {C.back}
+        <Button label={C.back} tip onClick={onBack}>
+          {C.backWord}
         </Button>
         {toolbarEnd}
       </div>
@@ -77,12 +82,15 @@ export function HistoryBar({ preview, controller, onBack, toolbarEnd }: { previe
   );
 }
 
-function Button({ label, disabled, onClick, children }: { label: string; disabled?: boolean; onClick(): void; children: ReactNode }) {
-  return (
-    <button type="button" className="deck-button" aria-label={label} title={label} disabled={disabled} onClick={onClick}>
+// `tip`: its words are shorter than its name, so the name is its tooltip (G490); a button whose words are its name has
+// none, and the arrows keep their system `title` as on master (board ticket 815).
+function Button({ label, disabled, tip = false, onClick, children }: { label: string; disabled?: boolean; tip?: boolean; onClick(): void; children: ReactNode }) {
+  const button = (
+    <button type="button" className="deck-button" aria-label={label} title={tip ? undefined : label} disabled={disabled} onClick={onClick}>
       {children}
     </button>
   );
+  return tip ? <Tip content={label}>{button}</Tip> : button;
 }
 
 function NameForm({ onName, onDone }: { onName(label: string): Promise<boolean>; onDone(): void }) {

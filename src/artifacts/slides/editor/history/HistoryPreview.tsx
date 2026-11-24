@@ -17,7 +17,7 @@ import { measure } from '../transform/measure';
 import { slideOrderOf, type DeckHistoryController, type DeckPreview } from './controller';
 import { aliasFaces, aliasOverrides, type FaceAliases, type PreviewFaces } from './faces';
 import type { Doc } from '../../../yjs';
-import { HISTORY_COPY as C, keyLabel } from './copy';
+import { changedWords, HISTORY_COPY as C } from './copy';
 import './history.css';
 
 const STAGE_GUTTER = 48; // the editor's: px of app chrome around the fitted slide
@@ -205,7 +205,7 @@ function HistoryStage({ controller, preview, change, focus, assets, faces, zoom,
         const m = source ? measure(source, e.id, scale) : null;
         if (!m) continue;
         const author = e.by ? controller.author(e.by) : null;
-        const what = e.kind === 'changed' ? e.keys.map((k) => keyLabel(k.key)).join(', ') : e.kind === 'added' ? C.newBadge : C.deletedBadge;
+        const what = e.kind === 'changed' ? changedWords(e.keys.map((k) => k.key)) : e.kind === 'added' ? C.newBadge : C.deletedBadge; // the word cut (G494)
         next.push({ id: e.id, kind: e.kind, box: m.bounds, color: author?.color ?? null, title: author ? `${what} — ${C.by(author.name, author.when(e.at))}` : what });
       }
       setMarks((shown) => (sameMarks(shown, next) ? shown : next));

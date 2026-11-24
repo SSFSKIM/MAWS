@@ -10,6 +10,9 @@
 // P4-B2 (docs/doperpowers/plans/2026-10-21-p4-b2-slides-boards.md, D13; tracker row 280): it reads the selection at the
 // settled version (an update or a layout pass outside a drag, and every gesture's end), so it shows where a move or a
 // resize left the element, not its frames, and X, Y, W and H in whole pixels (the model keeps its fractions).
+// The word cut (docs/doperpowers/specs/2026-11-16-word-cut-design.md, M5 task 3; G439): where the inspector is a card of
+// its own (the deck's, `onClose`), the card is headed by what it edits ("Heading 1", "Slide", "3 selected") with its ×;
+// the word Inspector stays the panel's name only.
 import { useMemo, useSyncExternalStore } from 'react';
 import type { Doc } from '../../yjs';
 import type { SlideCanvas } from '../canvas';
@@ -40,6 +43,8 @@ export interface InspectorProps {
   canvas?: SlideCanvas | null;
   /** The deck shell overlays this panel at narrow widths; the design shell owns its inspector's layout instead. */
   overlayRail?: boolean;
+  /** G439: the panel is a card of its own, headed by what it edits with this close beside it. */
+  onClose?: () => void;
 }
 
 /**
@@ -58,7 +63,7 @@ function measureAt(measure: InspectorProps['measure'], version: number): Inspect
   return measure && ((id) => measure(id));
 }
 
-export function Inspector({ session, slideId, readOnly, faces, uploadAsset, measure: measureNow, canvas = null, overlayRail = false }: InspectorProps) {
+export function Inspector({ session, slideId, readOnly, faces, uploadAsset, measure: measureNow, canvas = null, overlayRail = false, onClose }: InspectorProps) {
   const doc = session.doc;
   const state = useSyncExternalStore(session.subscribe, session.snapshot);
   const version = useSettledVersion(session, canvas);
@@ -109,11 +114,19 @@ export function Inspector({ session, slideId, readOnly, faces, uploadAsset, meas
   const title = picked.length === 0 ? '' : slide ? C.slide : picked.length > 1 ? C.selected(picked.length) : elementName(picked[0]!);
   return (
     <aside aria-label={C.panel} className="deck-inspector" data-deck-inspector data-deck-rail={overlayRail ? 'inspector' : undefined}>
+      {onClose && (
+        <div className="deck-tool-card-header deck-inspector-header">
+          <h2 className="deck-inspector-title">{title}</h2>
+          <button type="button" className="deck-button" aria-label={C.close} onClick={onClose}>
+            ×
+          </button>
+        </div>
+      )}
       {picked.length > 0 && (
         <InspectorContext.Provider value={api}>
           {/* keyed by what is edited, so a field's unsaved text never carries to another element */}
           <div key={`${slideId}:${picked.map((p) => p.id).join(',')}`} className="deck-inspector-body">
-            <h2 className="deck-inspector-title">{title}</h2>
+            {!onClose && <h2 className="deck-inspector-title">{title}</h2>}
             {slide ? (
               <Fill />
             ) : (

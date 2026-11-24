@@ -26,6 +26,20 @@
   font-weight: 600;
   color: var(--fg);
 }
+/* G439: the deck's card head names what the inspector edits; it stays in view while the sections scroll under it */
+.deck-inspector-header {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--bg-raised);
+}
+.deck-inspector-header .deck-inspector-title {
+  min-width: 0;
+  padding: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 
 /* sections */
 .deck-inspector-section {
@@ -110,7 +124,8 @@
 .deck-inspector-input-wrap:has([aria-invalid='true']) {
   border-color: var(--danger);
 }
-.deck-inspector-input:disabled {
+.deck-inspector-input:disabled,
+.deck-inspector-input[aria-disabled='true'] {
   color: var(--fg-faint);
 }
 .deck-inspector-text {
@@ -246,6 +261,13 @@
 .deck-inspector-check input {
   margin: 0;
   accent-color: var(--accent);
+}
+/* G450: Inset greyed with its reason keeps the keyboard; it reads as greyed as a disabled one does */
+.deck-inspector-check:has(input[aria-disabled='true']) {
+  color: var(--fg-faint);
+}
+.deck-inspector-check input[aria-disabled='true'] {
+  opacity: 0.5;
 }
 
 /* gradient */

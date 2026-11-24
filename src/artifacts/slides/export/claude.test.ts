@@ -77,7 +77,7 @@ describe('the For Claude export of a deck with held slides', () => {
       message = (error as Error).message;
     }
     const number = slideOrder(doc).indexOf('broken') + 1;
-    expect(message).toBe(`Can’t export: slide ${number} does not load. Fix or remove it first.`);
+    expect(message).toBe(`slide ${number} does not load. Fix or remove it first.`); // the toast prefixes “Couldn’t export:”
   });
 });
 

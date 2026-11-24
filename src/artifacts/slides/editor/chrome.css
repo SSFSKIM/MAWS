@@ -184,7 +184,7 @@
   font: inherit;
   cursor: default;
 }
-.deck-button:hover:not(:disabled),
+.deck-button:hover:not(:disabled):not([aria-disabled='true']),
 .deck-icon-button:hover {
   background: var(--bg-hover);
   color: var(--fg);
@@ -194,8 +194,17 @@
   background: var(--bg-active);
   color: var(--fg);
 }
-.deck-button:disabled {
+.deck-button:disabled,
+.deck-button[aria-disabled='true'] {
   color: var(--fg-faint);
+}
+/* the word cut (G401 to G404, G482): a glyph button keeps the square of a word button, its count beside the glyph */
+.deck-glyph {
+  gap: var(--space);
+  padding: 0 5px;
+}
+.deck-glyph-count {
+  font-variant-numeric: tabular-nums;
 }
 .deck-button:focus-visible,
 .deck-icon-button:focus-visible,
@@ -297,6 +306,11 @@
   background: var(--bg-overlay);
   color: var(--fg-muted);
 }
+/* G424: a hidden slide's eye-with-a-slash in the badge's corner */
+.deck-thumb-hidden {
+  display: inline-flex;
+  padding: 2px;
+}
 .deck-thumb-menu {
   position: absolute;
   top: 4px;
@@ -336,10 +350,14 @@
 .deck-section[data-empty] .deck-section-title {
   font-style: italic;
 }
+.deck-section-actions {
+  display: inline-flex;
+  flex-shrink: 0;
+}
 .deck-section-actions .deck-icon-button {
   height: 20px;
   min-width: 20px;
-  padding: 0 4px;
+  padding: 0 2px;
   font-size: var(--text-ui-sm);
 }
 .deck-section-input {
@@ -596,6 +614,11 @@
 .deck-notice:not(:empty) {
   min-width: min(12rem, 100%);
 }
+/* G413: a notice with a reason takes Tab, its reason the tooltip */
+.deck-notice:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
 .deck-icon-grid {
   display: grid;
   grid-template-columns: repeat(6, 32px);
@@ -613,10 +636,22 @@
   color: var(--danger);
   font-size: var(--text-ui-sm);
 }
-.deck-held-banner ul {
+/* G432: the loader's reasons behind the banner's Details */
+.deck-held-details {
+  margin-top: 4px;
+  color: var(--fg-muted);
+}
+.deck-held-details > summary {
+  width: fit-content;
+  cursor: default;
+}
+.deck-held-details > summary:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+.deck-held-details ul {
   margin: 4px 0 0;
   padding-left: 18px;
-  color: var(--fg-muted);
 }
 .deck-notes {
   flex-shrink: 0;
@@ -666,8 +701,7 @@
   outline: 2px solid var(--accent);
   outline-offset: -2px;
 }
-.deck-notes-refused,
-.deck-filmstrip-note {
+.deck-notes-refused {
   margin: 0;
   padding: 4px 12px 8px;
   color: var(--danger);

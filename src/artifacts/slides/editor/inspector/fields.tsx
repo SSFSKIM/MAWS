@@ -6,12 +6,17 @@
 // P4-B2 (docs/doperpowers/plans/2026-10-21-p4-b2-slides-boards.md, D13; tracker row 280): a number field may show its
 // value as a whole number (position and size), while the model keeps the fraction: Enter on a field nobody typed in
 // writes nothing (so a rounded display is never written back), and an arrow steps from the model's value.
+// The word cut (docs/doperpowers/specs/2026-11-16-word-cut-design.md, M5 task 3): a number field greyed for a reason
+// (`unavailable`: a token transform's Rotation, an outline shadow's Spread) keeps the keyboard, guards its own edits and
+// carries the reason as its tooltip and description (G449, G450); a hover names a token by its friendly name alone (G447,
+// G448).
 import { createContext, useContext, useId, useState, type ReactNode } from 'react';
+import { Tip } from '../../../../renderer/src/ui/tip';
 import type { DeckFace } from '../../deck';
 import type { DeckSession } from '../session';
 import { INSPECTOR_COPY as C } from './copy';
 import type { Picked, Props } from './selection';
-import { COLOUR_TOKENS, fmt, readColour, round2, showColour, tokenLabel, tokenTitle, tokenValue } from './values';
+import { COLOUR_TOKENS, fmt, readColour, round2, showColour, tokenLabel, tokenValue } from './values';
 
 /** How a change is written: one gesture (its own undo step), or into the typing step of one field. */
 export type Write = 'edit' | { typing: string };
@@ -86,12 +91,15 @@ export interface NumberFieldProps {
   onCommit: (n: number | null, how: Write) => readonly string[];
   /** Held off for what the selection cannot show (fix wave 1). */
   disabled?: boolean;
+  /** Greyed for this reason: focusable, its edits refused, the reason its tooltip and description (the word cut). */
+  unavailable?: string | null;
   /** P4-B2 (D13): shown as a whole number (position and size in px); the model keeps its fraction. */
   whole?: boolean;
 }
 
-export function NumberField({ label, caption, value, mixed = false, hint = '', unit, step = 1, onCommit, disabled = false, whole = false }: NumberFieldProps) {
+export function NumberField({ label, caption, value, mixed = false, hint = '', unit, step = 1, onCommit, disabled = false, whole = false, unavailable = null }: NumberFieldProps) {
   const readOnly = useInspector().readOnly || disabled;
+  const greyed = !readOnly && unavailable !== null && unavailable !== '';
   const id = useId();
   const [draft, setDraft] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -113,25 +121,31 @@ export function NumberField({ label, caption, value, mixed = false, hint = '', u
   };
 
   return (
+    <>
     <label className="deck-inspector-number">
       {caption !== undefined && <span className="deck-inspector-mini">{caption}</span>}
       <span className="deck-inspector-input-wrap">
+        <Tip content={greyed ? unavailable : null}>
         <input
           type="text"
           inputMode="decimal"
           className="deck-inspector-input"
           aria-label={label}
           aria-invalid={error !== null || undefined}
-          aria-describedby={error !== null ? `${id}-error` : undefined}
+          aria-describedby={[error !== null ? `${id}-error` : '', greyed ? `${id}-why` : ''].filter(Boolean).join(' ') || undefined}
+          aria-disabled={greyed || undefined}
           disabled={readOnly}
+          readOnly={greyed || undefined}
           value={shown}
           placeholder={mixed ? C.mixed : token !== null ? tokenLabel(token) : hint}
-          title={!mixed && token !== null ? tokenTitle(token) : undefined}
+          title={!mixed && token !== null ? tokenLabel(token) : undefined}
           onChange={(event) => {
+            if (greyed) return;
             setDraft(event.target.value);
             setError(null);
           }}
           onKeyDown={(event) => {
+            if (greyed) return; // a greyed field's arrows step nothing
             if (event.key === 'Enter') {
               event.preventDefault();
               if (draft !== null) commit(draft, true); // P4-B2 (D13): a field nobody typed in writes nothing
@@ -147,13 +161,21 @@ export function NumberField({ label, caption, value, mixed = false, hint = '', u
             }
           }}
           onBlur={() => {
-            if (draft !== null) commit(draft, false);
+            if (draft !== null && !greyed) commit(draft, false);
           }}
         />
+        </Tip>
         {unit && <span className="deck-inspector-unit">{unit}</span>}
       </span>
       <Refusal id={`${id}-error`} reason={error} />
     </label>
+    {/* the reason's node outside the field's label, so the label's text stays its caption */}
+    {greyed && (
+      <span id={`${id}-why`} hidden>
+        {unavailable}
+      </span>
+    )}
+    </>
   );
 }
 
@@ -228,7 +250,7 @@ export function ColourField({ label, value, mixed = false, placeholder = C.none,
             type="button"
             className="deck-inspector-swatch"
             aria-label={t.label}
-            title={`${t.label} (${t.name})`}
+            title={t.label}
             aria-pressed={!mixed && value === tokenValue(t)}
             disabled={readOnly}
             style={{ background: tokenValue(t) }}
@@ -300,10 +322,11 @@ export function Toggles({ label, value, choices, onChange }: { label: string; va
   );
 }
 
-export function Button({ label, children, disabled = false, onClick }: { label: string; children?: ReactNode; disabled?: boolean; onClick: () => void }) {
+/** `busy`: its action waits (an upload): it says so (`aria-busy`) and takes no second press, keeping the keyboard. */
+export function Button({ label, children, disabled = false, busy = false, onClick }: { label: string; children?: ReactNode; disabled?: boolean; busy?: boolean; onClick: () => void }) {
   const { readOnly } = useInspector();
   return (
-    <button type="button" className="deck-inspector-button" aria-label={label} disabled={readOnly || disabled} onClick={onClick}>
+    <button type="button" className="deck-inspector-button" aria-label={label} aria-busy={busy || undefined} disabled={readOnly || disabled} onClick={() => !busy && onClick()}>
       {children ?? label}
     </button>
   );

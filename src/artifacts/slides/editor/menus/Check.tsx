@@ -3,7 +3,12 @@
 // `checkHardDonts` on `unitsOfDeck`, ../../check.ts) and lists each violation under its slide; a click shows the slide
 // and selects the element. It runs again a moment after the deck or the system changes, while the panel is open (a drag
 // never waits on it). The don'ts no rule checks are listed for the owner to judge, as D's own page lists them.
+// The word cut (docs/doperpowers/specs/2026-11-16-word-cut-design.md, M5 task 3): titled Check (G471), its summary the
+// issues or "No issues" with the rules counted (G472), an issue row its message and its rule's words (G473), the manual
+// sections in a person's words (G475), and its wait the quiet spinner (G476). Every wait settles: a system the check
+// cannot read says so, and none, or one with no tagged don'ts, is nothing to check.
 import { useCallback, useMemo, useRef, useSyncExternalStore } from 'react';
+import { QuietSpinner } from '../../../../renderer/src/ui/spinner';
 import { useDesignSystem, type DesignSystemRef } from '../../../design-system/apply';
 import { onUpdate } from '../../../yjs';
 import { checkDeck, elementOfLocator, type DeckCheck } from '../../check';
@@ -50,7 +55,7 @@ function useDeckCheck(session: DeckSession, law: string | null, tokens: Paramete
 }
 
 export function CheckPanel({ session, system }: CheckPanelProps) {
-  const { view } = useDesignSystem(system);
+  const { view, status } = useDesignSystem(system);
   const check = useDeckCheck(session, view?.law ?? null, view?.tokens ?? null);
   const order = check ? slideOrder(session.doc) : [];
   const words = (index: number) => check?.donts.find((d) => d.index === index)?.text ?? '';
@@ -61,16 +66,21 @@ export function CheckPanel({ session, system }: CheckPanelProps) {
   };
 
   let body;
-  if (!view || !check) body = <p className="deck-check-note">{C.loading}</p>;
-  else if (check.donts.length === 0) body = <p className="deck-check-note">{C.noDonts(view.name)}</p>;
+  if (system === null || check?.donts.length === 0) body = <p className="deck-check-note">{C.noDonts}</p>;
+  else if (status === 'missing') body = <p className="deck-check-note">{C.unread}</p>;
+  else if (!view || !check)
+    body = (
+      <p className="deck-check-note deck-check-wait">
+        <QuietSpinner label={C.loading} />
+      </p>
+    );
   else {
     const { report } = check;
     const bySlide = order.map((slideId, i) => ({ slideId, n: i + 1, violations: report.violations.filter((v) => v.unit === slideId) })).filter((s) => s.violations.length > 0);
-    const broken = report.checks.filter((c) => c.violations > 0).length;
     body = (
       <>
         <p className="deck-check-summary" role="status">
-          {report.violations.length ? C.summary(report.violations.length, broken) : C.clean(report.checks.length)}
+          {report.violations.length ? C.summary(report.violations.length) : C.clean(report.checks.length)}
         </p>
         {bySlide.map(({ slideId, n, violations }) => (
           <section key={slideId} className="deck-inspector-section" aria-label={C.slide(n)}>
@@ -80,10 +90,7 @@ export function CheckPanel({ session, system }: CheckPanelProps) {
                 <li key={i}>
                   <button type="button" className="deck-check-violation" data-violation={v.rule} data-element={elementOfLocator(v.element) ?? ''} aria-label={`${C.select(v.element)}: ${v.message}`} onClick={() => select(slideId, v.element)}>
                     <span className="deck-check-message">{v.message}</span>
-                    <span className="deck-check-where">{v.element.split(' > ').slice(1).join(' › ') || v.element}</span>
-                    <span className="deck-check-rule">
-                      {words(v.dont)} [check: {v.rule}]
-                    </span>
+                    {words(v.dont) && <span className="deck-check-rule">{words(v.dont)}</span>}
                   </button>
                 </li>
               ))}
@@ -116,7 +123,7 @@ export function CheckPanel({ session, system }: CheckPanelProps) {
     );
   }
   return (
-    <aside className="deck-inspector deck-check" aria-label={C.panel} data-deck-rail="check">
+    <aside className="deck-inspector deck-check" aria-label={C.panelName} data-deck-rail="check">
       <h2 className="deck-inspector-title">{C.panel}</h2>
       <div className="deck-check-body">{body}</div>
     </aside>

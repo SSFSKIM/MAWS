@@ -17,6 +17,8 @@
 // The tab remembers its disclosure choice. Saved notes have a collapsed preview; an unsaved draft stays visible.
 // WR #39: retained text autosaves once its rebased value fits, including on return to the field.
 // Read-only keeps the draft intact until editing becomes available; over-limit text remains refused.
+// The word cut (docs/doperpowers/specs/2026-11-16-word-cut-design.md, M5 task 3): the opened field has no placeholder,
+// the disclosure above it already names it (G436); a refusal says the numbers or the state alone (G437, G438).
 import { useEffect, useId, useRef, useState, useSyncExternalStore } from 'react';
 import * as Y from '../../yjs/slides';
 import { mapCaret, rebaseText } from '../caret';
@@ -99,7 +101,6 @@ export function Notes({ session, slideId, token, readOnly }: { session: DeckSess
           className="deck-notes-field"
           aria-label={C.notes}
           aria-invalid={refused || undefined}
-          placeholder={C.notesPlaceholder}
           readOnly={readOnly}
           spellCheck
           onInput={(event) => {

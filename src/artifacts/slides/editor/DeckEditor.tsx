@@ -16,8 +16,15 @@
 // regions (a11y.ts), keeping the selection, so a middle element's selection reaches the inspector by keyboard.
 // P4-A2 G2.3 (X35; G-R3 to G-R5 of docs/doperpowers/plans/2026-10-19-p4-a2-agent-experience.md): an agent's publish drawn
 // as it streams, from the tab's provisional layers: on the shown slide beneath the human's states, and in the filmstrip.
+// The word cut (docs/doperpowers/specs/2026-11-16-word-cut-design.md, M5 task 3): History is a named glyph (G402), the
+// zoom reads the bare percentage while Fit is chosen and Fit is its tooltip (G400), a refusal is the shared notice's short
+// words with the model's reason on it (G413), the inspector card is headed by what it edits (G439), and the pill's ↻
+// says what it does (G498).
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react';
 import { DesignSystemScope, useDesignSystem, type DesignSystemRef } from '../../design-system/apply';
+import { NamedGlyph } from '../../../renderer/src/ui/glyph';
+import { Tip } from '../../../renderer/src/ui/tip';
+import { HistoryIcon } from '../ui/icons';
 import type { AssetUrl, SlideCanvas } from '../canvas';
 import { DECK_LIMITS } from '../deck';
 import { insertElements, newElement, type NewKind } from '../writers-elements';
@@ -48,6 +55,7 @@ import { insertLayoutSlide, LayoutsMenu } from './menus/Layouts';
 import { TextStyleMenu } from './menus/TextStyle';
 import { ThemePanel, type DeckThemeChoice } from './menus/Theme';
 import { Notes } from './Notes';
+import { ToolbarNotice, useToolbarNotice } from './notice';
 import { ZOOM_STEPS, type DeckSession, type Zoom } from './session';
 import { SLIDE_H, SLIDE_W } from './SlideView';
 import { Stage } from './Stage';
@@ -103,7 +111,6 @@ export interface DeckEditorProps extends DeckRevealProps /* P4-B4: a place asked
   provisional?: ProvisionalLayers | null;
 }
 
-const NOTICE_MS = 6_000;
 const TEXT_KINDS: readonly NewKind[] = ['text', 'heading', 'bullets', 'numbers'];
 
 const STAGE_GUTTER = 48; // px of app chrome around the fitted slide
@@ -293,13 +300,9 @@ export function DeckEditor({ session, assetUrl, system, readOnly, compact = fals
 
   useEditClaim(registerEditClaimant, root, session, readOnly || preview !== null); // P4-B2 K6
 
-  // M5: what the slide's limits refused, an upload in progress: shown in the toolbar for a while
-  const [notice, setNotice] = useState('');
-  useEffect(() => {
-    if (!notice) return;
-    const timer = setTimeout(() => setNotice(''), NOTICE_MS);
-    return () => clearTimeout(timer);
-  }, [notice]);
+  // M5: what the slide's limits refused, an upload in progress: shown in the toolbar for a while (notice.tsx)
+  const notice = useToolbarNotice();
+  const setNotice = notice.show;
   const [inspectorOpen, setInspectorOpen] = useState(false);
   const editable = !readOnly && slide !== null && slide.held === null;
   const insert = useCallback(
@@ -309,7 +312,7 @@ export function DeckEditor({ session, assetUrl, system, readOnly, compact = fals
       try {
         session.edit((origin) => (ids = insertElements(doc, slide.id, [newElement(kind, { x: SLIDE_W / 2, y: SLIDE_H / 2 })], {}, origin)));
       } catch (e) {
-        setNotice(e instanceof Error ? e.message : String(e));
+        setNotice(C.refused.insert, e instanceof Error ? e.message : String(e));
         return;
       }
       viewport.current?.focus({ preventScroll: true });
@@ -350,7 +353,15 @@ export function DeckEditor({ session, assetUrl, system, readOnly, compact = fals
               readOnly={readOnly}
               onDrawn={onThumbnailsDrawn}
               provisional={written}
-              fromLayout={<LayoutsMenu system={system} disabled={readOnly || view.slides.length >= DECK_LIMITS.slides} scope={scope} onPick={(layout) => void insertLayoutSlide(session, layout, slide?.id ?? order.at(-1) ?? null, importAsset).then((r) => 'reason' in r && setNotice(r.reason))} />}
+              fromLayout={
+                <LayoutsMenu
+                  system={system}
+                  disabled={readOnly}
+                  unavailable={view.slides.length >= DECK_LIMITS.slides ? C.deckFull(DECK_LIMITS.slides) : null}
+                  scope={scope}
+                  onPick={(layout) => void insertLayoutSlide(session, layout, slide?.id ?? order.at(-1) ?? null, importAsset).then((r) => 'refused' in r && setNotice(r.refused, r.why))}
+                />
+              }
             />,
           )}
           {historySnapshot?.pill && (
@@ -366,9 +377,9 @@ export function DeckEditor({ session, assetUrl, system, readOnly, compact = fals
                 {HISTORY_COPY.pill(historySnapshot.pill.count)}
               </button>
               {historySnapshot.pill.failed !== null && (
-                <button type="button" className="deck-button" aria-label={HISTORY_COPY.pillRetry} title={historySnapshot.pill.failed} onClick={() => void history?.recount()}>
-                  ↻
-                </button>
+                <NamedGlyph label={HISTORY_COPY.pillRetry} className="deck-button" onClick={() => void history?.recount()}>
+                  <span aria-hidden>↻</span>
+                </NamedGlyph>
               )}
               <button type="button" className="deck-button" aria-label={HISTORY_COPY.pillDismiss} onClick={() => history?.dismissPill()}>
                 ×
@@ -431,11 +442,13 @@ export function DeckEditor({ session, assetUrl, system, readOnly, compact = fals
             >
               <TextStyleMenu session={session} slideId={slide?.id ?? null} tokens={tokens} readOnly={!editable} onNotice={setNotice} />
             </ElementBar>
-            {history && <button type="button" className="deck-button" aria-label="Version history" aria-pressed={historyOpen} onClick={() => session.toggleRail('history')}>History</button>}
+            {history && (
+              <NamedGlyph label={C.historyName} pressed={historyOpen} className="deck-button deck-glyph" onClick={() => session.toggleRail('history')}>
+                <HistoryIcon />
+              </NamedGlyph>
+            )}
             <CommentButtons api={commentsApi} railOpen={state.rail === 'comments'} onToggleRail={() => session.toggleRail('comments')} />
-            <span role="status" className="deck-notice" data-deck-notice>
-              {notice}
-            </span>
+            <ToolbarNotice notice={notice} />
           </Toolbar>
       )}
       <div className="deck-editor-body" data-filmstrip={below ? 'horizontal' : 'vertical'} style={{ '--deck-card-reserve': `${cardReserve}px` } as CSSProperties}>
@@ -444,8 +457,7 @@ export function DeckEditor({ session, assetUrl, system, readOnly, compact = fals
           <div ref={cards} className="deck-tool-cards">
             {!preview && inspectorOpen && slide && (
               <div className="deck-tool-card">
-                <div className="deck-tool-card-header"><span>Inspector</span><button type="button" className="deck-button" aria-label="Close inspector" onClick={() => setInspectorOpen(false)}>×</button></div>
-                {scope(<Inspector session={session} slideId={slide.id} readOnly={!editable} faces={view.faces} uploadAsset={uploadAsset} measure={(id) => measureInHost(stageCanvas, id, scale)} canvas={stageCanvas?.slideId === slide.id ? stageCanvas : null} overlayRail />)}
+                {scope(<Inspector session={session} slideId={slide.id} readOnly={!editable} faces={view.faces} uploadAsset={uploadAsset} measure={(id) => measureInHost(stageCanvas, id, scale)} canvas={stageCanvas?.slideId === slide.id ? stageCanvas : null} overlayRail onClose={() => setInspectorOpen(false)} />)}
               </div>
             )}
             {historyRail && <div className="deck-tool-card">{historyRail}</div>}
@@ -481,20 +493,23 @@ function Toolbar({ session, zoom, scale, fit, canUndo, canRedo, children, metada
         <button type="button" className="deck-button" aria-label={C.zoomOut} disabled={scale <= ZOOM_STEPS[0] + 0.001} onClick={() => step(-1)}>
           −
         </button>
-        <select
-          className="deck-zoom"
-          aria-label={C.zoom}
-          value={zoom === 'fit' ? 'fit' : String(zoom)}
-          onChange={(event) => session.setZoom(event.target.value === 'fit' ? 'fit' : Number(event.target.value))}
-        >
-          {/* the percentage beside Fit whether it is chosen or not: what it draws at, and a label that never changes with the choice */}
-          <option value="fit">{`${C.fit} (${C.percent(fit)})`}</option>
-          {ZOOM_STEPS.map((s) => (
-            <option key={s} value={String(s)}>
-              {C.percent(s)}
-            </option>
-          ))}
-        </select>
+        {/* G400: while Fit is chosen the select reads what it draws at, and Fit is its tooltip (a native select's open
+            list draws the chosen option's own words); once another zoom is chosen the first option reads Fit */}
+        <Tip content={zoom === 'fit' ? C.fit : null} description={zoom === 'fit' ? C.fit : null}>
+          <select
+            className="deck-zoom"
+            aria-label={C.zoom}
+            value={zoom === 'fit' ? 'fit' : String(zoom)}
+            onChange={(event) => session.setZoom(event.target.value === 'fit' ? 'fit' : Number(event.target.value))}
+          >
+            <option value="fit">{zoom === 'fit' ? C.percent(fit) : C.fit}</option>
+            {ZOOM_STEPS.map((s) => (
+              <option key={s} value={String(s)}>
+                {C.percent(s)}
+              </option>
+            ))}
+          </select>
+        </Tip>
         <button type="button" className="deck-button" aria-label={C.zoomIn} disabled={scale >= ZOOM_STEPS[ZOOM_STEPS.length - 1] - 0.001} onClick={() => step(1)}>
           +
         </button>

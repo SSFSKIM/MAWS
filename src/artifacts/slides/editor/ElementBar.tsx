@@ -2,12 +2,17 @@
 // and Inspector. Arrange uses the stage keys' own selection commands (transform/commands.ts), with one undo gesture
 // per action. Hints reflect working stage bindings: native tab-strip chords take precedence over the legacy
 // front/back handlers' ⌥⌘ brackets, so those actions advertise no shortcut. Detach has no key binding.
+// The word cut (docs/doperpowers/specs/2026-11-16-word-cut-design.md, M5 task 3): Inspector is a named glyph (G401), and
+// a refused group, ungroup, detach or duplicate is told shortly, the model's reason its tooltip (G413).
 import { DropdownMenu } from 'radix-ui';
 import { useSyncExternalStore, type ReactNode } from 'react';
+import { NamedGlyph } from '../../../renderer/src/ui/glyph';
+import { SidePanelIcon } from '../../ui/icons';
 import type { SlideCanvas } from '../canvas';
 import type { NewKind } from '../writers-elements';
 import { DECK_COPY as C } from './copy';
 import { InsertMenu } from './menus/Insert';
+import type { ShowNotice } from './notice';
 import type { DeckSession } from './session';
 import { selectionCommands } from './transform/commands';
 import { useDocVersion } from './transform/use-doc-version';
@@ -20,7 +25,7 @@ export interface ElementBarProps {
   readOnly: boolean;
   onInsert: (kind: NewKind) => void;
   uploadAsset?: (file: File) => Promise<string>;
-  onNotice: (text: string) => void;
+  onNotice: ShowNotice;
   inspectorOpen: boolean;
   onToggleInspector: () => void;
   /** Text style belongs between Insert and Arrange in both editors. */
@@ -31,7 +36,7 @@ export function ElementBar({ session, slideId, canvas, scale, readOnly, onInsert
   const state = useSyncExternalStore(session.subscribe, session.snapshot);
   useDocVersion(session);
   const cmds = slideId && canvas?.slideId === slideId ? selectionCommands({ session, slideId, canvas, scale }, state.selection, readOnly) : null;
-  const notice = (reason: string | null) => reason && onNotice(reason);
+  const notice = (refused: string, reason: string | null) => reason && onNotice(refused, reason);
   const item = (label: string, enabled: boolean, run: () => void, shortcut?: string) => (
     <DropdownMenu.Item className="deck-menu-item" aria-label={label} disabled={!enabled} onSelect={run}>
       {label}
@@ -53,18 +58,18 @@ export function ElementBar({ session, slideId, canvas, scale, readOnly, onInsert
             {item(C.sendBackward, cmds?.canZ ?? false, () => cmds?.z('backward'), '⌘[')}
             {item(C.sendToBack, cmds?.canZ ?? false, () => cmds?.z('back'))}
             <DropdownMenu.Separator className="deck-menu-separator" />
-            {item(C.group, cmds?.canGroup ?? false, () => notice(cmds?.group() ?? null), '⌘G')}
-            {item(C.ungroup, cmds?.canUngroup ?? false, () => notice(cmds?.ungroup() ?? null), '⇧⌘G')}
-            {item(C.detach, cmds?.canDetach ?? false, () => notice(cmds?.detach() ?? null))}
+            {item(C.group, cmds?.canGroup ?? false, () => notice(C.refused.group, cmds?.group() ?? null), '⌘G')}
+            {item(C.ungroup, cmds?.canUngroup ?? false, () => notice(C.refused.ungroup, cmds?.ungroup() ?? null), '⇧⌘G')}
+            {item(C.detach, cmds?.canDetach ?? false, () => notice(C.refused.detach, cmds?.detach() ?? null))}
             <DropdownMenu.Separator className="deck-menu-separator" />
-            {item(C.duplicateElements, cmds?.canEdit ?? false, () => notice(cmds?.duplicate() ?? null), '⌘D')}
+            {item(C.duplicateElements, cmds?.canEdit ?? false, () => notice(C.refused.duplicate, cmds?.duplicate() ?? null), '⌘D')}
             {item(C.deleteElements, cmds?.canEdit ?? false, () => cmds?.remove(), '⌫')}
           </DropdownMenu.Content>
         </DropdownMenu.Portal>
       </DropdownMenu.Root>
-      <button type="button" className="deck-button" aria-label={C.inspector} aria-pressed={inspectorOpen} title={C.inspector} onClick={onToggleInspector}>
-        {C.inspector}
-      </button>
+      <NamedGlyph label={C.inspector} pressed={inspectorOpen} className="deck-button deck-glyph" onClick={onToggleInspector}>
+        <SidePanelIcon />
+      </NamedGlyph>
     </div>
   );
 }
