@@ -44,6 +44,8 @@ beforeEach(() => {
   sent = [];
   noContentMs = undefined;
   versions = [];
+  placedIn = SPACE;
+  openHeld = false;
   memory = new MemoryDocumentHost();
   memory.write((doc) => createDocument(doc, { title: 'Launch plan' })); // the host's first tab (kinds/document.ts)
 });
@@ -67,16 +69,19 @@ const until = async (check: () => boolean, what: string) => {
 let sent: string[] = [];
 let noContentMs: number | undefined;
 let versions: unknown[] = []; // what `artifacts.versions` answers
+let placedIn: string | undefined = SPACE; // the artifact's Space, as `artifacts.get` answers it (undefined: in no Space)
+let openHeld = false; // the replica never opens
 
 function deps(): DocumentTabDeps {
   const ipc: Pick<MawsBridge, 'invoke' | 'on'> = {
-    invoke: (async (name: CommandName) => (sent.push(name), { ok: true, value: name === 'artifacts.get' ? { artifact: { id: A, kind: 'document', title: 'Launch plan', lastViewedAt: null, spaceId: SPACE, revision: 1 } } : name === 'artifacts.versions' ? { versions } : undefined })) as unknown as MawsBridge['invoke'],
+    invoke: (async (name: CommandName) => (sent.push(name), { ok: true, value: name === 'artifacts.get' ? { artifact: { id: A, kind: 'document', title: 'Launch plan', lastViewedAt: null, ...(placedIn !== undefined && { spaceId: placedIn }), revision: 1 } } : name === 'artifacts.versions' ? { versions } : undefined })) as unknown as MawsBridge['invoke'],
     on: (() => () => {}) as MawsBridge['on'],
   };
   const editor = memoryEditorHost({ actor: { kind: 'human' }, name: 'Owner', color: '--author-2' });
   const host = {
     ...editor,
     open: async () => {
+      if (openHeld) await new Promise(() => {});
       const handle = openMemoryHandle(memory, { log: () => {} });
       await whenSynced(handle);
       return handle;
@@ -145,7 +150,7 @@ describe('the document editor in L’s registry', () => {
 
   it('shows the document and says so once it is on screen', async () => {
     const { onShown } = mount();
-    expect(screen.getByRole('status').textContent).toContain('Opening the document');
+    expect(screen.getByRole('status').textContent, 'T615: no words while it opens').toBe('');
     await shown();
     await until(() => onShown.mock.calls.length > 0, 'onShown');
     await act(() => new Promise((resolve) => setTimeout(resolve, 30)));
@@ -223,11 +228,37 @@ describe('the document editor in L’s registry', () => {
     memory.destroy();
     memory = new MemoryDocumentHost();
     mount();
-    await until(() => screen.queryByText(/This document has no content yet/) !== null, 'the notice');
-    expect(screen.getByRole('status').textContent).toContain('it was created before MAWS gave every new document its first page');
+    await until(() => screen.queryByText('This document is empty.') !== null, 'the notice'); // T617
+    expect(screen.getByRole('status').textContent).toBe('This document is empty.');
     act(() => memory.write((doc) => createDocument(doc, { title: 'Launch plan' })));
     await shown();
-    expect(screen.queryByText(/This document has no content yet/)).toBeNull();
+    expect(screen.queryByText('This document is empty.')).toBeNull();
+  });
+
+  // T615: the open is a quiet spinner where the editor will be
+  it('opens on nothing for half a second, then a quiet spinner named by the wait', async () => {
+    openHeld = true;
+    mount();
+    expect(screen.getByRole('status').textContent).toBe('');
+    expect(await screen.findByRole('progressbar', { name: 'Opening the document…' })).toBeTruthy();
+  });
+
+  // T608, T610: the breadcrumb names a Space only when the document is in one and its name is known
+  it('names no “General” for a document in no Space, and no “Loading Space…” while the Spaces are read', async () => {
+    mount(); // its Space, whose name `library.spaces` never answers here
+    await shown();
+    await until(() => editorHostOf(scope)?.saved === 'saved', 'the header');
+    expect(editorHostOf(scope)?.breadcrumb).toEqual([]);
+    cleanup();
+    releaseArtifactEditorState(scope);
+    off();
+    placedIn = undefined;
+    window.maws = fakeClient({ 'session.intent.get': null, 'library.spaces': { spaces: [] } }).client as unknown as PreloadBridge;
+    mount();
+    await shown();
+    await until(() => editorHostOf(scope)?.saved === 'saved', 'the header');
+    await act(() => new Promise((resolve) => setTimeout(resolve, 30)));
+    expect(editorHostOf(scope)?.breadcrumb).toEqual([]);
   });
 
   it('names the document’s home and governing system without a manual inspection step', async () => {

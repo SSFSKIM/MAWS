@@ -72,7 +72,7 @@ describe('an export from the menu', () => {
     expect(asked).toEqual([
       {
         title: 'Export “Poster” at 91.02%?',
-        body: '“Poster” is 1080 × 9000 px. A PNG can be at most 8192 px on a side, so MAWS exports the whole board at 91.02% (983 × 8192 px); nothing is cropped.',
+        body: 'Too large for a PNG at full size.', // T632: the numbers stay in the title and the button
         confirmLabel: 'Export at 91.02%',
         destructive: false,
       },

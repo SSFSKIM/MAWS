@@ -158,6 +158,16 @@ describe('the HTML viewer', () => {
     expect(main.callsOf('library.content')).toContainEqual({ artifactId: ID, revision: 4 });
   });
 
+  // T573: the read is a quiet spinner where the body will be, no words
+  it('shows nothing for the first half second of the read, then a quiet spinner named by the wait, never “Loading…”', async () => {
+    versionsAnswer = () => new Promise(() => {}); // the versions never answer
+    mount('html');
+    const body = document.querySelector<HTMLElement>('[data-artifact-viewer]')!;
+    expect(body.textContent).toBe('');
+    expect(await screen.findByRole('progressbar', { name: 'Loading…' })).toBeTruthy();
+    expect(body.textContent).not.toContain('Loading');
+  });
+
   it('has no picker for one version', async () => {
     versions = [version(1, 9)];
     mount('html');
@@ -166,14 +176,15 @@ describe('the HTML viewer', () => {
   });
 
   // UX wave U10b (l6-artifacts-18, H9): an html page's Export menu ends in Save a copy…, never an HTML row beside it
-  it('registers its header: the title, read-only, Comment and the actions, and the Export menu of the kind’s formats and Save a copy…', async () => {
+  it('registers its header: the title with no saved state (a page is always read-only: T567), Comment and the actions, and the Export menu of the kind’s formats and Save a copy…', async () => {
     mount('html');
     await waitFor(() => expect(header().exports?.map((e) => e.label)).toEqual(['PDF', 'PNG', 'Save a copy…']));
     await waitFor(() => expect(header().exports?.at(-1)?.disabled).toBe(false));
     act(() => header().exports!.at(-1)!.onSelect());
     await waitFor(() => expect(main.callsOf('library.saveAs')).toEqual([{ artifactId: ID, source: { content: { revision: 9 } } }]));
     await waitFor(() => expect(actionLabels()).toEqual(['Comment', 'Reload', 'Open externally', 'Reveal in Finder', 'Send to…' /* P4-B5 */]));
-    expect(header()).toMatchObject({ title: 'Dashboard', saved: 'readonly' });
+    expect(header().title).toBe('Dashboard');
+    expect(header().saved ?? null).toBeNull();
   });
 
   it('says it is shown once the page loaded, not before', async () => {
@@ -503,7 +514,7 @@ describe('Comment on an HTML page', () => {
     await waitFor(() => expect(frame('html')).not.toBeNull());
     act(() => action('Comment').onSelect());
     expect(action('Comment').pressed).toBe(true);
-    expect(screen.getByRole('status').textContent).toBe('Click an element to comment on it · Esc cancels');
+    expect(screen.getByRole('status').textContent).toBe('Click an element · Esc cancels'); // T575
     post(picked, frame('html')!.contentWindow);
     expect(opened).toHaveLength(1);
     expect(opened[0]!.anchor).toEqual({ kind: 'artifact-element', locator: '#hero', label: 'Dashboard v2 › h1#hero “Sales overview”', pageUrl: artifactUrl(ID, 9, 'index.html') });

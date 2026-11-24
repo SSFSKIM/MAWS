@@ -7,13 +7,13 @@ const live = { phase: 'live', synced: true, unsaved: 0, readOnly: false } as unk
 const state = (patch: Partial<DeckHeaderState> = {}): DeckHeaderState => ({ title: 'Deck', document: live, saving: false, closeGuard: async () => true, rail: null, canPresent: true, ...patch });
 
 describe('the deck header’s actions (M6)', () => {
-  it('offers Present, Theme and Check against the design system, in that order', () => {
+  it('offers Present, Theme and Check design (T636), in that order', () => {
     const calls: string[] = [];
     const header = deckHeader(state(), { present: () => calls.push('present'), toggleRail: (rail) => calls.push(rail) });
     expect(header.actions?.map((a) => [a.id, a.label])).toEqual([
       ['present', 'Present'],
       ['theme', 'Theme'],
-      ['check', 'Check against the design system'],
+      ['check', 'Check design'],
     ]);
     for (const action of header.actions ?? []) action.onSelect();
     expect(calls).toEqual(['present', 'theme', 'check']);

@@ -285,6 +285,8 @@ describe('a comment from a document with no chat beside it', () => {
     comment();
     await act(async () => {});
     expect(notice()!.dataset.commentContext).toBe('starting');
+    expect(notice()!.textContent, 'T621: the placeholder says what starts, short').toContain('Starting a session…');
+    expect(notice()!.textContent).not.toContain('for this comment');
     expect(fake.invoked('session.create')).toEqual([{ projectId: bare(P1), location: { kind: 'directory', path: '/work/p1' } }]);
     await act(() => fake.reply('session.create', { appSessionId: bare(STARTED), intent: intent(STARTED) }));
     expect(fake.invoked('session.start')).toEqual([{ appSessionId: bare(STARTED), message: null, options: { requireEmptyMessage: true } }]);

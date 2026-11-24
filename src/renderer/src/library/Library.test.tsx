@@ -210,6 +210,23 @@ describe('the views and the groups', () => {
     await waitFor(() => expect(screen.getAllByRole('heading', { level: 2 }).map((h) => h.textContent)).toEqual(['Home', 'Work', 'General']));
   });
 
+  // G283: the page names itself in the sidebar; its heading stays for assistive technology
+  it('keeps the page’s heading for assistive technology only; New Space stays a worded button (G289 not built)', async () => {
+    render(<Library />);
+    await screen.findByRole('article', { name: 'Launch plan' });
+    const heading = screen.getByRole('heading', { level: 1, name: 'Artifacts' });
+    expect(heading.className).toContain('sr-only');
+    expect(screen.getByRole('button', { name: 'New Space' }).textContent).toBe('New Space');
+  });
+
+  // N190: the first read of the library is a quiet spinner, no words
+  it('reads the library behind a quiet spinner named by the wait, never “Reading the library…”', async () => {
+    answers['library.list'] = () => new Promise(() => {});
+    render(<Library />);
+    expect(await screen.findByRole('progressbar', { name: 'Reading the library…' })).toBeTruthy();
+    expect(screen.queryByText('Reading the library…')).toBeNull();
+  });
+
   it('says what puts artifacts here when a view is empty', async () => {
     rows = [];
     spaces = [];
@@ -262,7 +279,24 @@ describe('search and the type filter', () => {
     await user.click(await screen.findByRole('menuitemradio', { name: /Presentations/ }));
     await waitFor(() => expect(libraryCalls()).toContainEqual({ kind: 'presentation', query: 'pla' }));
     await screen.findByText('No artifacts match “pla”.');
-    expect(screen.getByRole('button', { name: /Filter by type/ }).textContent).toContain('Presentations');
+    // G287: the funnel is a glyph named by its word; the chosen kind stands beside the search as a chip that clears it
+    const funnel = screen.getByRole('button', { name: 'Filter by type' });
+    expect(funnel.textContent, 'no word at rest').toBe('');
+    expect(funnel.getAttribute('aria-pressed')).toBe('true');
+    const chip = screen.getByRole('button', { name: 'Clear filter: Presentations' });
+    expect(chip.textContent).toBe('Presentations');
+    await user.click(chip);
+    await waitFor(() => expect(libraryCalls().at(-1)).toEqual({ query: 'pla' }));
+    expect(screen.queryByRole('button', { name: /^Clear filter/ })).toBeNull();
+    expect(screen.getByRole('button', { name: 'Filter by type' }).getAttribute('aria-pressed')).toBe('false');
+  });
+
+  it('draws no “All types” at rest: the funnel glyph alone, its word its name', async () => {
+    render(<Library />);
+    await screen.findByRole('article', { name: 'Launch plan' });
+    const header = document.querySelector<HTMLElement>('[data-library-header]')!;
+    expect(header.textContent).not.toContain('All types');
+    expect(within(header).getByRole('button', { name: 'Filter by type' }).textContent).toBe('');
   });
 
   it('shows the matched passage of a row’s text under a search', async () => {
@@ -580,6 +614,20 @@ describe('the row actions', () => {
     expect(screen.queryByRole('dialog')).toBeNull();
   });
 
+  // N194: the in-use sheet finds the artifacts' titles behind a quiet spinner
+  it('the in-use sheet finds what uses the system behind a quiet spinner, never “Finding them…”', async () => {
+    rows = [row(1, { title: 'House style', kind: 'design_system' })];
+    answers['artifacts.delete'] = () => ({ ok: false, error: { code: 'invalid_input', message: 'the design system is in use', issues: { reason: 'designSystemInUse', data: { artifactIds: [id(2)] } } } });
+    const user = userEvent.setup();
+    render(<Library />);
+    await user.click(within(await openMenu(user, 'House style')).getByRole('menuitem', { name: 'Delete…' }));
+    answers['library.get'] = () => new Promise(() => {});
+    await user.click(within(await screen.findByRole('dialog', { name: 'Delete “House style”?' })).getByRole('button', { name: 'Delete' }));
+    const sheet = await screen.findByRole('dialog', { name: 'This design system is in use' });
+    expect(sheet.textContent).not.toContain('Finding them');
+    expect(await within(sheet).findByRole('progressbar', { name: 'Finding them…' })).toBeTruthy();
+  });
+
   it('a refused write is said in a toast', async () => {
     answers['artifacts.duplicate'] = () => ({ ok: false, error: { code: 'internal', message: 'the store is read-only' } });
     const { useNotices } = await import('../stores/notices');
@@ -758,6 +806,9 @@ describe('Make something new', () => {
     render(<Library />);
     const made = await section();
     await waitFor(() => expect(answerSpaces).not.toBeNull());
+    // N193: the heading's place is a quiet spinner while the Spaces are read, never “Loading Space…”
+    expect(made.textContent).not.toContain('Loading Space');
+    expect(await within(made).findByRole('progressbar', { name: 'Loading Space…' })).toBeTruthy();
     for (const label of ['Document', 'Presentation', 'Dashboard', 'Design']) {
       expect((card(made, label) as HTMLButtonElement).disabled, label).toBe(true);
       expect((blank(made, label) as HTMLButtonElement).disabled, label).toBe(true);

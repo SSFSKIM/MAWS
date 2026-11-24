@@ -87,7 +87,8 @@ describe('the panel header', () => {
     ], exports: [{ id: 'pdf', label: 'PDF', onSelect: () => calls.push('pdf') }] }} controls={<button onClick={() => calls.push('expand')}>Expand pane</button>} />);
     expect(document.querySelector('[data-editor-header]')).toBeNull();
     expect(within(target).getByText('Deck', { exact: true })).toBeTruthy(); // the panel has no main tab naming its record
-    expect(within(target).getByText('Saved').getAttribute('title')).toBe('All changes saved');
+    expect(within(target).getByText('All changes saved'), 'the deck’s toolbar says the editors’ one saved wording (T607)').toBeTruthy();
+    expect(within(target).queryByText('Saved', { exact: true })).toBeNull();
     await user.click(within(target).getByRole('button', { name: 'Present' }));
     await user.click(within(target).getByRole('button', { name: 'Expand pane' }));
     expect(within(target).queryByRole('button', { name: 'Theme' })).toBeNull();
@@ -108,7 +109,7 @@ describe('the panel header', () => {
     offs.push(() => target.remove());
     render(<EditorHeader title="Presentation" scope={{ surface: 'main', tabId: 'main-deck' }} registration={{ title: 'Q3 review', saved: 'saved', toolbarHost: { element: target, menuLabel: 'Deck actions' } }} />);
     expect(within(target).queryByText('Q3 review', { exact: true })).toBeNull();
-    expect(within(target).getByText('Saved')).toBeTruthy();
+    expect(within(target).getByText('All changes saved')).toBeTruthy();
     expect(document.querySelector('[data-editor-header]')).toBeNull();
   });
 
@@ -200,7 +201,9 @@ describe('the panel header', () => {
 
     expect(title().textContent).toBe('Q3 brief');
     expect(header().textContent).toContain('Docs/Planning/Q3 brief');
-    expect(header().textContent).toContain('Saving…');
+    // P23: a save in flight is a quiet spinner, not words
+    expect(header().querySelector('[data-header-saved]')?.getAttribute('data-saved-state')).toBe('saving');
+    expect(header().textContent).not.toContain('Saving…');
     // The count stands for the `comments` action, which is not repeated among the actions.
     expect(buttons()).toEqual(['3 open comments', 'Version history', 'Export']);
     await user.click(within(header()).getByRole('button', { name: '3 open comments' }));
@@ -293,31 +296,45 @@ describe('the panel header', () => {
     let handle!: ReturnType<typeof registerEditorHost>;
     act(() => void (handle = registerEditorHost({ surface: 'panel', tabId: id }, { title: 'Registered', saved: 'unsaved' })));
     expect(title().textContent).toBe('Registered');
-    expect(header().textContent).toContain('Unsaved changes');
+    expect(within(header()).getByRole('img', { name: 'Unsaved changes' })).toBeTruthy();
     act(() => handle.dispose());
     expect(header()).toBeNull(); // the strip's tab names it
     expect(within(strip()).getByRole('tab', { name: 'Plain' })).toBeTruthy();
   });
 
-  it('copies each saved state, and shows none for null', () => {
+  // T607, P23, P24: the editors' one saved wording, a save in flight as the quiet spinner, unsaved edits as a dot
+  it('draws each saved state: its words at rest, a quiet spinner while saving, a dot whose words wait for the pointer or focus while unsaved; none for null', async () => {
     offs.push(registerPanelTool(probeTool('t').tool));
     mount();
     const id = add('t');
     const handle = registerEditorHost({ surface: 'panel', tabId: id }, { title: 'Doc' });
-    const copy: [SavedState, string][] = [
+    expect(Object.entries(SAVED_COPY)).toEqual([
       ['saved', 'All changes saved'],
       ['saving', 'Saving…'],
       ['unsaved', 'Unsaved changes'],
       ['reconnecting', 'Reconnecting…'],
       ['readonly', 'Read-only'],
-    ];
-    expect(Object.entries(SAVED_COPY)).toEqual(copy);
-    for (const [saved, text] of copy) {
-      act(() => handle.update({ saved }));
-      expect(header().querySelector('[data-header-saved]')?.textContent).toBe(text);
+    ]);
+    const saved = () => header().querySelector<HTMLElement>('[data-header-saved]');
+    for (const [state, text] of [['saved', 'All changes saved'], ['reconnecting', 'Reconnecting…'], ['readonly', 'Read-only']] as const) {
+      act(() => handle.update({ saved: state }));
+      expect(saved()?.textContent).toBe(text);
+      expect(saved()?.getAttribute('data-saved-state')).toBe(state);
     }
+
+    act(() => handle.update({ saved: 'saving' }));
+    expect(saved()?.textContent, 'nothing for the first half second').toBe('');
+    expect(await within(header()).findByRole('progressbar', { name: 'Saving…' })).toBeTruthy();
+
+    act(() => handle.update({ saved: 'unsaved' }));
+    const dot = within(header()).getByRole('img', { name: 'Unsaved changes' });
+    expect(saved()?.textContent, 'the dot draws no words at rest').toBe('');
+    expect(dot.tabIndex, 'the dot takes the keyboard, so its words are reachable').toBe(0);
+    act(() => dot.focus());
+    expect((await screen.findByRole('tooltip')).textContent).toBe('Unsaved changes');
+
     act(() => handle.update({ saved: null }));
-    expect(header().querySelector('[data-header-saved]')).toBeNull();
+    expect(saved()).toBeNull();
   });
 
   it('labels the count in the singular and plural, inert without a comments action, absent at zero', () => {

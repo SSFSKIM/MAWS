@@ -107,6 +107,23 @@ describe('the Connectors sheet', () => {
     expect(screen.getByRole('button', { name: 'Open session' })).toBeTruthy();
   });
 
+  // T589, T591: the no-session box says the fact and the reassurance short; Start's status reads Starting…, then Ready
+  it('says shortly that no live session has the tools, and words the start “Starting…” for both phases, then “Ready”', async () => {
+    const { tab, port } = setup({ callAnswer: { ok: false, state: 'paused', reason: 'noRoute' } });
+    port.send({ id: 1, op: 'declare', tools: [READ] });
+    port.send({ id: 2, op: 'call', request: READ });
+    await flush();
+    const context = { kind: 'directory' as const, path: '/work/app', projectId: null, machine: TEST_MACHINE };
+    render(<ConnectorsSheet tab={tab} context={context} />);
+    const box = document.querySelector<HTMLElement>('[data-connectors-start]')!;
+    expect(box.querySelector('p')!.textContent).toBe('No live session has these tools. Starting one sends no message.');
+    const status = () => within(box).getByRole('status').textContent;
+    for (const [start, words] of [[{ phase: 'asking' }, 'Starting…'], [{ phase: 'starting', appSessionId: SESSION }, 'Starting…'], [{ phase: 'ready', appSessionId: SESSION }, 'Ready']] as const) {
+      act(() => tab.view.setState({ start }));
+      expect(status()).toBe(words);
+    }
+  });
+
   it('sends the owner to a session whose waiting prompt refused the Start, and lets them start again', async () => {
     const words = 'A prompt is waiting in this session · open it to send or discard the prompt first';
     const { tab, port, startSession } = setup({ callAnswer: { ok: false, state: 'paused', reason: 'noRoute' }, startAnswer: { status: 'refused', appSessionId: SESSION, words } });

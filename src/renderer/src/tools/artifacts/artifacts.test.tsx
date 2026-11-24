@@ -574,7 +574,7 @@ describe('the record view', () => {
   it('a gone artifact says so, with Back', async () => {
     testEditor();
     await mount({ target: id(99) });
-    expect(await screen.findByText('This artifact was deleted, or it is not in the library.')).toBeTruthy();
+    expect(await screen.findByText('This artifact was deleted.')).toBeTruthy();
     fireEvent.click(button('Back to list')!);
     await settle();
     expect(listed()).toHaveLength(5);

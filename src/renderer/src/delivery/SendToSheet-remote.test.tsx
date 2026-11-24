@@ -60,7 +60,7 @@ describe('Send to for another machine’s artifact', () => {
     install({ 'delivery.status': NOTION_READY, 'delivery.send': { ok: true, receipt: receipt(ART, 'notion', 1) } });
     await openSheet();
     fireEvent.click(screen.getByRole('button', { name: /^Send/ }));
-    await waitFor(() => expect(screen.getByText(C.sent('notion', 'Plan'))).toBeTruthy());
+    await waitFor(() => expect(screen.getByText(C.sent('Plan'))).toBeTruthy());
     expect(fake.machines('delivery.status')).toEqual([OTHER_MACHINE]);
     expect(fake.machines('delivery.send')).toEqual([OTHER_MACHINE]);
     expect(latestReceipt(useDelivery.getState(), ART, OTHER_MACHINE)).toMatchObject({ artifactId: ART, target: 'notion' });
