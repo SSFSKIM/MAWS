@@ -221,7 +221,7 @@ describe('no tool call draws a box', () => {
 });
 
 // The turn line's "N denied" lands on the denied call itself, which takes focus.
-it('the denied call is still the jump target, and takes focus', async () => {
+it('the denied call is still the jump target, and takes focus; a run of one opens to its call', async () => {
   const offsetHeight = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'offsetHeight')!;
   Object.defineProperty(HTMLElement.prototype, 'offsetHeight', {
     configurable: true,
@@ -235,6 +235,11 @@ it('the denied call is still the jump target, and takes focus', async () => {
     act(() => useTranscriptStore.getState().jumpTo(source.key!, target));
     await waitFor(() => expect(document.activeElement?.getAttribute('data-cell-id')).toBe(target));
     expect(document.activeElement?.hasAttribute('data-standalone')).toBe(true);
+    // and a jump to a run of one's call opens its run, as a jump into a run does, and lands on the call's line
+    const lone = cellId.tool(tool('one'));
+    act(() => useTranscriptStore.getState().jumpTo(source.key!, lone));
+    await waitFor(() => expect(document.activeElement?.closest('[data-cell-id]')?.getAttribute('data-cell-id')).toBe(lone));
+    expect(document.querySelector(`[data-row-id="${lone}"] .transcript-run-line`)?.getAttribute('aria-expanded')).toBe('true');
   } finally {
     Object.defineProperty(HTMLElement.prototype, 'offsetHeight', offsetHeight);
   }
