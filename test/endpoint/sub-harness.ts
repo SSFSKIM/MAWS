@@ -357,6 +357,7 @@ export class FakeEngineHost {
     const { appSessionId, afterSeq, limit, requestId } = (input ?? {}) as { appSessionId?: string; afterSeq?: number | null; limit?: number | null; requestId?: string };
     const s = appSessionId === undefined ? undefined : this.sessions.get(appSessionId);
     if (name === 'engine.sessions') return ok([...this.sessions.values()].map((x) => this.status(x)));
+    if (name === 'engine.prestarts') return ok({ hidden: [] }); // ticket 851: no prestart held hidden, unless a suite says (`reads`)
     if (name === 'engine.pendingItems') return ok({ sessions: [...this.sessions.values()].flatMap((x) => (waitingCount(x.items) > 0 ? [{ appSessionId: x.appSessionId, waiting: waitingCount(x.items) }] : [])) });
     if (s === undefined) return no('internal');
     switch (name) {

@@ -7,6 +7,7 @@ import { emit, emitFrom, emitTo, onEmitted } from './events';
 import { hostEventToWindows } from '../hosts/window-events';
 import { SETTINGS_DEFAULTS_V21 } from '@shared/settings/defaults';
 import type { MachineRef } from '@shared/machine/ref';
+import type { AppSessionId, SessionId } from '@shared/graph/ids';
 import { bindLocalMachine } from '../machine/local';
 
 const LOCAL = 'LocalMachineRef0000000' as MachineRef;
@@ -83,7 +84,7 @@ describe('main event emitter', () => {
   it('sends engine.prestart to no window from any path', () => {
     const [w, page] = [window(), { send: vi.fn(), isDestroyed: () => false }];
     electron.windows = [w];
-    const word = { appSessionId: 'b4d1e2f3-0a1b-4c2d-9e3f-4a5b6c7d8e9f', engineSessionId: 'e0ad139c-18bc-45bd-9489-be8653145f80', state: 'hidden' as const };
+    const word = { appSessionId: 'b4d1e2f3-0a1b-4c2d-9e3f-4a5b6c7d8e9f' as AppSessionId, engineSessionId: 'e0ad139c-18bc-45bd-9489-be8653145f80' as SessionId, state: 'hidden' as const };
     expect(hostEventToWindows(emit)('engine.prestart', word)).toBe(true);
     expect(emitFrom(OTHER, 'engine.prestart', word)).toBe(true);
     expect(emitTo(page, 'engine.prestart', word)).toBe(true);

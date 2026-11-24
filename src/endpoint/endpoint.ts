@@ -749,7 +749,10 @@ export class Endpoint implements EndpointModule {
       // the project registry: the index's declared rows moved (a row, a statement, the index loaded)
       this.#options.projectsSource?.onChange(() => this.registry.own.kick()) ?? (() => {}),
       services.onUpstream((link) => {
-        if (!link.connected) return this.assetHolds.upstreamLost(); // P5 O7 M5c round 3: the host released its connection's holds
+        if (!link.connected) {
+          this.rl10.members.hostLinkLost(); // ticket 851 (the prestart panel, scalpel-5#1): a settlement begun on it decides nothing more
+          return this.assetHolds.upstreamLost(); // P5 O7 M5c round 3: the host released its connection's holds
+        }
 
         this.laneB.restate();
         this.rl10.members.restatePrestarts().catch((error: unknown) => log(`endpoint: the hidden prestarts were not restated: ${(error as Error).message}`)); // ticket 851 (R4-6): the hidden set, whole, at each link

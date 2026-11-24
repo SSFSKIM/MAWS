@@ -6,9 +6,9 @@
 // held, and the hidden set read whole at a link with an event heard while the read is out. D11's re-join: an unjoined
 // lane B member is joined when the spine says a record names its engine session. An ordinary unjoined member keeps
 // today's marks.
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { SessionReport } from '../../../src/endpoint/listings';
-import { Members, type Marks } from '../../../src/endpoint/rl10/members';
+import { EARLY_HOLD_MS, Members, type Marks } from '../../../src/endpoint/rl10/members';
 
 const P = '7d2b9c40-1f3e-4a6b-8c5d-9e0f1a2b3c4d';
 /** The prestart's pin: the engine session the host holds hidden. */
@@ -59,10 +59,17 @@ function machine({ heldTurns = false }: { heldTurns?: boolean } = {}) {
   // the engine host's start: its adoptions under way (`holder.adopting`); `away`, the reads it cannot answer
   let adopting = false;
   const away = new Set<string>();
+  // reads the engine host answers before it is away (the prestart panel, scalpel-5#2): a read past its count throws
+  const answering = new Map<string, number>();
   const members = new Members({
     dispatch: async (_owner, name) => {
       reads.push(name);
       if (away.has(name)) throw new Error('the engine host is away');
+      const left = answering.get(name);
+      if (left !== undefined) {
+        if (left === 0) throw new Error('the engine host is away');
+        answering.set(name, left - 1);
+      }
       if (name === 'host.supervisorStatus') return { t: 'res', id: '0', ok: true, value: { holder: { adopting } } };
       if (name === 'engine.sessions') return { t: 'res', id: '0', ok: true, value: [...live].map(([engineSessionId, appSessionId]) => ({ engineSessionId, appSessionId })) };
       if (name === 'engine.prestarts') {
@@ -107,6 +114,7 @@ function machine({ heldTurns = false }: { heldTurns?: boolean } = {}) {
     holdGone: (until: Promise<void> | null) => void (goneHeld = until),
     setAdopting: (now: boolean) => void (adopting = now),
     away,
+    answering,
     marks: () => marks,
     writes,
     listed,
@@ -500,5 +508,150 @@ describe('M4’s review', () => {
     n.live.set(DRAFT_ENGINE, APP2);
     await n.members.recordChanged({ appId: APP, engineSessionId: DRAFT_ENGINE, archived: false, title: { text: 'x', source: 'none' } });
     expect(n.members.appSessionId(DRAFT_ENGINE)).toBeNull();
+  });
+});
+
+/** `done` settled, the held turns run as they come (a turn can be queued after an await). */
+async function driven(m: ReturnType<typeof machine>, done: Promise<unknown>): Promise<void> {
+  let settled = false;
+  void done.then(
+    () => (settled = true),
+    () => (settled = true),
+  );
+  while (!settled) {
+    await m.runTurns();
+    await new Promise((resolve) => setImmediate(resolve));
+  }
+  await done;
+}
+
+describe('the prestart panel (ticket 851, the xhigh round)', () => {
+  afterEach(() => void vi.useRealTimers());
+
+  it('scalpel-4#6: a first member the host holds hidden, its word still on the way, is held: no mark kept, no record, never arrived', async () => {
+    const m = machine();
+    m.setHidden([{ appSessionId: APP, engineSessionId: DRAFT_ENGINE }]); // the host holds it hidden; its `hidden` is late
+    await m.members.member(memberFrame(DRAFT_ENGINE));
+    expect(traces(m, DRAFT_ENGINE)).toEqual(NONE); // its sight's mark taken back, as at a word
+    expect(m.members.prestartPin(DRAFT_ENGINE)).toBe(true);
+    expect(m.moved).toEqual([[DRAFT_ENGINE, 'held']]);
+    await m.members.prestart(told(DRAFT_ENGINE, 'hidden')); // the word, late
+    expect(traces(m, DRAFT_ENGINE)).toEqual(NONE);
+    expect(m.moved).toEqual([[DRAFT_ENGINE, 'held']]);
+    m.live.set(DRAFT_ENGINE, APP);
+    await m.members.prestart(told(DRAFT_ENGINE, 'committed'));
+    expect(m.members.listingId(DRAFT_ENGINE)).toBe(APP);
+    expect(m.moved).toEqual([[DRAFT_ENGINE, 'held'], [DRAFT_ENGINE, 'arrived']]);
+  });
+
+  it('scalpel-4#6: a first member the host names live is public: processed at once, its join on the rows already read', async () => {
+    const m = machine();
+    m.live.set(DRAFT_ENGINE, APP);
+    await m.members.member(memberFrame(DRAFT_ENGINE));
+    expect(m.members.listingId(DRAFT_ENGINE)).toBe(APP);
+    expect(m.reads.filter((read) => read === 'engine.sessions')).toHaveLength(1);
+    expect(m.reads).not.toContain('engine.prestarts');
+  });
+
+  it('scalpel-4#6: one the host cannot place is held, closed by its sight, until its word, a whole-set read that answers, or the bound', async () => {
+    const closed = (m: ReturnType<typeof machine>) => m.members.handedOff({ lane: 'B', session: DRAFT_ENGINE, appSessionId: '' });
+    const unprocessed = (m: ReturnType<typeof machine>) => ({ held: m.members.sessions().includes(DRAFT_ENGINE), record: m.members.recordOf(DRAFT_ENGINE), listed: m.listed.has(APP) });
+    const UNPROCESSED = { held: false, record: null, listed: false };
+    // its word: hidden after all, its sight's mark is taken back and it stays held; ended, nothing is left
+    const m = machine();
+    m.away.add('engine.prestarts');
+    await m.members.member(memberFrame(DRAFT_ENGINE));
+    expect(unprocessed(m)).toEqual(UNPROCESSED);
+    expect(m.marks().engineSessionIds).toEqual([DRAFT_ENGINE]); // P5 O12 M11: the sight on disk while it waits
+    expect(closed(m)).toBe(true);
+    expect(m.moved).toEqual([]);
+    await m.members.prestart(told(DRAFT_ENGINE, 'hidden'));
+    expect(traces(m, DRAFT_ENGINE)).toEqual(NONE);
+    await m.members.prestart(told(DRAFT_ENGINE, 'ended'));
+    expect(traces(m, DRAFT_ENGINE)).toEqual(NONE);
+    expect(m.moved.filter(([, how]) => how === 'arrived')).toEqual([]);
+
+    // the next link's whole set answers without it: an ordinary member, processed as one just arrived
+    const n = machine();
+    n.away.add('engine.prestarts');
+    await n.members.member(memberFrame(DRAFT_ENGINE));
+    expect(unprocessed(n)).toEqual(UNPROCESSED);
+    n.away.delete('engine.prestarts');
+    await n.members.restatePrestarts();
+    expect(n.members.sessions()).toEqual([DRAFT_ENGINE]);
+    expect(n.marks().engineSessionIds).toEqual([DRAFT_ENGINE]);
+    expect(n.moved).toEqual([[DRAFT_ENGINE, 'arrived']]);
+
+    // the bound: no word and no read, an ordinary member once it has passed, never before
+    vi.useFakeTimers();
+    const o = machine();
+    o.away.add('engine.prestarts');
+    await o.members.member(memberFrame(DRAFT_ENGINE));
+    await vi.advanceTimersByTimeAsync(EARLY_HOLD_MS - 1);
+    expect(unprocessed(o)).toEqual(UNPROCESSED);
+    expect(closed(o)).toBe(true);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(o.members.sessions()).toEqual([DRAFT_ENGINE]);
+    expect(o.marks().engineSessionIds).toEqual([DRAFT_ENGINE]);
+    expect(o.moved).toEqual([[DRAFT_ENGINE, 'arrived']]);
+    // and sminos's departure while it is held leaves nothing for the bound to process
+    const q = machine();
+    q.away.add('engine.prestarts');
+    await q.members.member(memberFrame(DRAFT_ENGINE));
+    await q.members.member({ t: 'member', session: DRAFT_ENGINE, gone: true });
+    await vi.advanceTimersByTimeAsync(EARLY_HOLD_MS);
+    expect(unprocessed(q)).toEqual(UNPROCESSED);
+    expect(q.moved).toEqual([]);
+    // its sight stays, as an unjoined member's that left does, until a word of its engine session takes it back
+    await q.members.prestart(told(DRAFT_ENGINE, 'ended'));
+    expect(traces(q, DRAFT_ENGINE)).toEqual(NONE);
+  });
+
+  it('scalpel-5#1: a settlement queued behind RL10’s turn when its link is replaced reads nothing of the successor', async () => {
+    const m = machine({ heldTurns: true });
+    await m.members.prestart(told(DRAFT_ENGINE, 'hidden'));
+    await m.members.member(memberFrame(DRAFT_ENGINE));
+    // the first link: the pin committed (a live row names it) and its word lost; the host's adoptions ended
+    m.setHidden([]);
+    m.live.set(DRAFT_ENGINE, APP);
+    const first = m.members.restatePrestarts(); // its settlement waits behind RL10's turn
+    await new Promise((resolve) => setImmediate(resolve));
+    // that link drops; its successor names no live row yet: it is still adopting the promoted engine
+    m.live.delete(DRAFT_ENGINE);
+    m.setAdopting(true);
+    await driven(m, Promise.all([first, m.members.restatePrestarts()]));
+    expect(traces(m, DRAFT_ENGINE)).toEqual(NONE); // held still, not ended
+    // the successor's adoption ends within its bounds, and it says so
+    m.live.set(DRAFT_ENGINE, APP);
+    m.setAdopting(false);
+    await driven(m, m.members.hostStatus({ holder: { adopting: false } }));
+    expect(m.members.listingId(DRAFT_ENGINE)).toBe(APP);
+    expect(m.listed.has(APP)).toBe(true);
+  });
+
+  it('scalpel-5#1: a settlement whose link drops while it waits reads nothing, whoever would answer it', async () => {
+    const m = machine({ heldTurns: true });
+    await m.members.prestart(told(DRAFT_ENGINE, 'hidden'));
+    await m.members.member(memberFrame(DRAFT_ENGINE));
+    m.setHidden([]); // the link's whole set leaves it out, and the host's adoptions have ended
+    const first = m.members.restatePrestarts(); // its settlement waits behind RL10's turn
+    await new Promise((resolve) => setImmediate(resolve));
+    m.members.hostLinkLost();
+    await driven(m, first);
+    expect(traces(m, DRAFT_ENGINE)).toEqual(NONE);
+    expect(m.reads.filter((read) => read === 'engine.sessions')).toEqual([]);
+  });
+
+  it('scalpel-5#2: a committed member replayed at a reconnect is joined on the live row that settled it, with no second read', async () => {
+    const m = machine();
+    await m.members.prestart(told(DRAFT_ENGINE, 'hidden'));
+    await m.members.member(memberFrame(DRAFT_ENGINE));
+    m.setHidden([]);
+    m.live.set(DRAFT_ENGINE, APP); // committed while the link was down
+    m.answering.set('engine.sessions', 1); // the settlement's read is answered; a second would fail
+    await m.members.restatePrestarts();
+    expect(m.members.appSessionId(DRAFT_ENGINE)).toBe(APP);
+    expect(m.listed.has(APP)).toBe(true);
+    expect(m.marks()).toEqual({ appSessionIds: [APP], engineSessionIds: [] });
   });
 });

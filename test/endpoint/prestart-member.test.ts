@@ -11,11 +11,29 @@
 // and sminos the scripted peer on the real RL10 socket.
 import * as fs from 'node:fs';
 import { join } from 'node:path';
-import { afterEach, beforeAll, describe, expect, it } from 'vitest';
+import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import type { Listing, Signed } from 'org-protocol';
 import type { ListingsFile, ProjectsKeptFile } from '../../src/endpoint/state/store';
 import type { ProjectsSource } from '../../src/shared/machine/registry';
 import { laneAMember, makeOrg, openRemote, PROJECT, sminos, startEndpoint, stopAll, until, waitFor, type Fixture, type Msg, type Org, type Remote } from './sub-harness';
+
+// The coordinator's item (the prestart panel): RL10's resolution of a local member's owners, held while armed for the
+// calls that name `owner` (audiences.ts reads it through this module; listings.ts's own calls are its own binding)
+const owners = vi.hoisted(() => ({ holding: null as { owner: string; until: Promise<void> } | null, held: 0 }));
+vi.mock('../../src/endpoint/listings', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../src/endpoint/listings')>();
+  return {
+    ...actual,
+    resolveOwners: async (...args: Parameters<typeof actual.resolveOwners>) => {
+      const holding = owners.holding;
+      if (holding !== null && args[0].includes(holding.owner)) {
+        owners.held += 1;
+        await holding.until;
+      }
+      return actual.resolveOwners(...args);
+    },
+  };
+});
 
 let org: Org;
 const started: Fixture[] = [];
@@ -43,6 +61,16 @@ async function settled(f: Fixture): Promise<void> {
   const session = `sync-${++syncs}`;
   f.sminos!.send({ t: 'member', ...laneAMember({ session }) });
   await until(() => f.endpoint.rl10.members.get(session) !== null, 'the frames before taken');
+}
+
+/** The `audience` frames RL10 sent sminos for `session`. */
+const audiences = (f: Fixture, session: string) => f.sminos!.received.filter((frame) => frame.t === 'audience' && frame.session === session);
+
+/** Every frame sminos sent before this one taken, and every audience RL10 sent for them received (with `audience` on). */
+async function heard(f: Fixture): Promise<void> {
+  const session = `sync-${++syncs}`;
+  f.sminos!.send({ t: 'member', ...laneAMember({ session }) });
+  await until(() => audiences(f, session).length > 0, 'the audiences before received');
 }
 
 /** The `known` projects of the machine's record as last signed into projects.json, once what is queued is built; null for none signed. */
@@ -90,10 +118,10 @@ function hubListing(f: Fixture, app: string): Signed<Listing> | null {
 const loadedIndex = (): ProjectsSource => ({ snapshot: () => ({ indexId: 'index-1', rows: [], statements: [] }), restore: () => {}, onChange: () => () => {} });
 
 /** The machine with sminos on RL10, the project of each test open on the log plane so its sessions qualify. */
-async function machine(project: string): Promise<{ f: Fixture; b: Remote }> {
+async function machine(project: string, capabilities: string[] = []): Promise<{ f: Fixture; b: Remote }> {
   const f = await startEndpoint(org, started, { projectsSource: loadedIndex() });
   f.records.set({ lane: 'B', session: DRAFT_ENGINE, owners: ['@machine'], shares: [{ member: org.B, grade: 'view' }] }, INTENT);
-  const s = await sminos(f, []);
+  const s = await sminos(f, [], capabilities);
   s.send({ t: 'hello', project, name: 'scratch', have: {} });
   const b = await openRemote(f, org.b1, org.B);
   return { f, b };
@@ -171,5 +199,46 @@ describe('a prestart’s member at the endpoint', () => {
     f.host.emitMachine('session.changed', { record: { appId: INTENT, engineSessionId: DRAFT_ENGINE, archived: false, title: { text: 'Hello there', source: 'none' } } });
     await until(() => hubListing(f, INTENT) !== null, 'the session listed for the hub');
     expect((await channelListing(b, INTENT))?.body.fields.title).toBe('a new chat');
+  });
+
+  it('the prestart panel, scalpel-4#6: a member whose hidden word is still on its way gets no audience and leaves nothing', async () => {
+    const { f } = await machine(NEW_PROJECT, ['audience']);
+    // the engine host holds the pin hidden; its `hidden` word is late on the link
+    f.host.reads.set('engine.prestarts', () => ({ hidden: [{ appSessionId: INTENT, engineSessionId: DRAFT_ENGINE }] }));
+    // the control: an ordinary member's audience goes down to sminos
+    f.sminos!.send({ t: 'member', ...laneAMember({ session: 'ordinary-1', access: 'private', policyRev: 1 }) });
+    f.sminos!.send({ t: 'member', ...pinMember({ project: NEW_PROJECT, access: 'private', policyRev: 1 }) });
+    await heard(f);
+    expect(audiences(f, 'ordinary-1')).toHaveLength(1);
+    expect(audiences(f, DRAFT_ENGINE)).toEqual([]);
+    expect(await traces(f)).toEqual(NONE);
+    // the word arrives, and the draft is abandoned
+    prestart(f, 'hidden');
+    prestart(f, 'ended');
+    await heard(f);
+    expect(audiences(f, DRAFT_ENGINE)).toEqual([]);
+    expect(await traces(f)).toEqual(NONE);
+  });
+
+  it('the coordinator’s item: a member pulled back while RL10 resolves its owners keeps no audience', async () => {
+    const { f } = await machine(PROJECT, ['audience']);
+    const owner = 'pin-owner-held';
+    let release!: () => void;
+    owners.held = 0;
+    owners.holding = { owner, until: new Promise<void>((resolve) => (release = resolve)) };
+    try {
+      // the host says the pin is not hidden, so the member is processed, and RL10 resolves its owners for its audience
+      f.sminos!.send({ t: 'member', ...pinMember({ project: PROJECT, access: 'private', policyRev: 1, owners: ['@machine', owner] }) });
+      await until(() => owners.held > 0, 'the member’s owners being resolved');
+      prestart(f, 'hidden'); // its word: the member is pulled back
+      await until(() => f.endpoint.rl10.members.get(DRAFT_ENGINE) === null, 'the member pulled back');
+    } finally {
+      owners.holding = null;
+      release();
+    }
+    await heard(f);
+    expect(audiences(f, DRAFT_ENGINE)).toEqual([]);
+    expect(f.endpoint.rl10.cache.before(DRAFT_ENGINE, Number.MAX_SAFE_INTEGER)).toBeUndefined();
+    expect((await traces(f)).policyCache).toBe(false);
   });
 });
