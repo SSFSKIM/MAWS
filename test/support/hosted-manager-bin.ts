@@ -43,6 +43,7 @@ export interface HostedManager {
   handover(graceMs: number): Promise<{ state: 'detaching' } | { state: 'deferred'; inFlight: number }>; // P5 O16 M3b
   readonly exited: Promise<void>; // P5 O16 M3b
   emitted(name: string): unknown[]; // P5 O16 M3b: every payload of an event it emitted
+  stage(appSessionId: string): Promise<string>; // ticket 851, M2: a prestart's stage written, its promotion not asked; its launch id
 }
 
 export function startHostedManager(bundle: string, config: HostedManagerConfig): HostedManager {
@@ -77,6 +78,7 @@ export function startHostedManager(bundle: string, config: HostedManagerConfig):
       child.kill(signal);
       await exited;
     },
+    stage: (appSessionId) => ask({ stage: appSessionId }) as Promise<string>, // ticket 851, M2
     handover: (graceMs) => ask({ handover: graceMs }) as Promise<{ state: 'detaching' } | { state: 'deferred'; inFlight: number }>,
     exited,
     emitted: (name) => emitted.filter((e) => e.emit === name).map((e) => e.payload),

@@ -89,6 +89,9 @@ import type { ArtifactStore } from './documents/store'; // P3-A (M6)
 import type { DatasetRefreshRequests } from './connectors/dataset-requests'; // E3
 // P2-A end
 import { rendererMcpStatus } from './mcp-status'; // P3-H
+import { PrestartHost } from './prestart-host'; // ticket 851, M2
+import type { Stage } from './prestart'; // ticket 851, M2
+import { eventUtf8Bytes } from '@shared/graph/history-window'; // ticket 851, M2: the kept events count toward the stage
 import { readCustomizationInventory, registerCustomizationInventory } from './customization/inventory'; // UX2-K; UX wave U11g: the name check's read
 
 export type DeadlineShape = 'immediate' | 'bounded' | 'operation';
@@ -313,6 +316,68 @@ export function registerEngineIpc(hostOn: HostOn, emit: HostEmit, deps: EngineIp
   // P2-A (X17): the observed facts, written by each launch's recorder and recovered from the journal on a read
   const observed = new ObservedFactsService({ store: deps.observedStore ?? new FileObservedFactsStore(deps.userData), journalRoot: join(deps.userData, 'engine-host', 'journal'), log });
 
+  // Ticket 851, M2 (docs/doperpowers/plans/2026-11-24-prestart-engine.md, R4-3): a prestart's hidden row has no stream,
+  // spec or model key here until its adopt reveals it: its events are kept (within its stage's ceiling; a toast and a
+  // surface ask dropped, D2), the latest model list kept, and every other per-row emission read from the session at the
+  // reveal (`publishHidden`), which opens its stream and publishes that snapshot once.
+  interface HiddenWire { plan: LaunchPlan; spec: LaunchSpec; stage: Stage; kept: SessionEvent[]; models: unknown[] | null; stream: SessionStream | null }
+  const hiddenWires = new Map<EngineSession, HiddenWire>();
+  const openStream = (session: EngineSession, plan: LaunchPlan, spec: LaunchSpec, historyThrough?: number): SessionStream => {
+    specs.set(spec.appSessionId, spec);
+    streams.get(spec.appSessionId)?.dispose(); // the previous launch's stream: its events are that launch's
+    const stream = new SessionStream({
+      appSessionId: spec.appSessionId, launchId: plan.launchId, sessionId: plan.sessionId, journalPath: session.status().journalPath,
+      emit, ringSize: deps.ringSize, batchMs: deps.batchMs, log, hasClient: deps.hasClient, // E10: the burst's tail_gap; a refused batch told from a client gone
+      retired: (requestId) => session.requestRetired(requestId), // E11
+      historyThrough, // P5 O16 M3c
+      restored: (requestId) => session.restoredRequest(requestId), // P5 O16 M3c fix wave 1
+    });
+    streams.set(spec.appSessionId, stream);
+    modelKeys.set(spec.appSessionId, catalogueKey(plan.engineVersion, plan.gateway, { env: plan.env, cwd: plan.cwd, flagEnv: plan.flagSettings.env })); // C10; never rejects
+    return stream;
+  };
+  const wireHidden = (session: EngineSession, plan: LaunchPlan, spec: LaunchSpec, stage: Stage) => {
+    const id = spec.appSessionId;
+    const wire: HiddenWire = { plan, spec, stage, kept: [], models: null, stream: null };
+    hiddenWires.set(session, wire);
+    session.on('events', (events) => {
+      if (wire.stream) return wire.stream.events(events);
+      for (const event of events) {
+        if (event.kind === 'plugin.toast' || event.kind === 'plugin.ask') continue; // D2: dropped, never shown late
+        wire.kept.push(event);
+        stage.add(eventUtf8Bytes(event));
+      }
+    });
+    session.on('status', (status) => wire.stream?.status(status));
+    session.on('queue', (queue) => wire.stream?.queue(queue));
+    session.on('brokerItems', (items) => wire.stream?.brokerItems(items));
+    session.on('catalog', (catalog) => wire.stream?.catalog(catalog));
+    session.on('models', (list) => (wire.stream ? updateModels(id, list) : void (wire.models = list)));
+    session.on('paneShow', (request) => void (wire.stream && emit('maws.pane.show', request)));
+    session.on('artifactCapture', (request) => void (wire.stream && emit('maws.artifact.capture', request)));
+    session.on('artifactExport', (request) => void (wire.stream && emit('maws.artifact.export', request)));
+  };
+  // R4-3's step 4: the revealed row's stream, then its kept events, current status, queue, broker items, catalogue and
+  // model list, each once
+  const publishHidden = (session: EngineSession) => {
+    const wire = hiddenWires.get(session);
+    if (!wire) return;
+    hiddenWires.delete(session);
+    const id = wire.spec.appSessionId;
+    const stream = openStream(session, wire.plan, wire.spec);
+    session.on('checkpoint', (checkpoint) => stream.checkpoint(checkpoint)); // P5 O15 M2b (§L)
+    wire.stream = stream;
+    if (wire.kept.length > 0) stream.events(wire.kept);
+    wire.kept = [];
+    stream.status(session.status());
+    if (session.queue.recovered) stream.queue(session.queue.state);
+    stream.brokerItems(session.brokerItems());
+    const catalog = session.catalog();
+    if (catalog.revision > 0) stream.catalog(catalog);
+    const models = wire.models ?? session.initializeModels;
+    if (models !== null) updateModels(id, models);
+  };
+
   const launcherDeps: LauncherDeps = {
     userData: deps.userData,
     replayEnabled: deps.replayEnabled,
@@ -333,24 +398,15 @@ export function registerEngineIpc(hostOn: HostOn, emit: HostEmit, deps: EngineIp
     artifacts: deps.artifacts, // P3-A (M6)
     datasetRefresh: deps.datasetRefresh, // E3
     holder: deps.holder, // P5 O16 M2
-    wire: (session, plan, spec, historyThrough) => {
-      specs.set(spec.appSessionId, spec);
-      streams.get(spec.appSessionId)?.dispose(); // the previous launch's stream: its events are that launch's
-      const stream = new SessionStream({
-        appSessionId: spec.appSessionId, launchId: plan.launchId, sessionId: plan.sessionId, journalPath: session.status().journalPath,
-        emit, ringSize: deps.ringSize, batchMs: deps.batchMs, log, hasClient: deps.hasClient, // E10: the burst's tail_gap; a refused batch told from a client gone
-        retired: (requestId) => session.requestRetired(requestId), // E11
-        historyThrough, // P5 O16 M3c
-        restored: (requestId) => session.restoredRequest(requestId), // P5 O16 M3c fix wave 1
-      });
-      streams.set(spec.appSessionId, stream);
+    wire: (session, plan, spec, historyThrough, stage) => {
+      if (stage) return wireHidden(session, plan, spec, stage); // ticket 851, M2
+      const stream = openStream(session, plan, spec, historyThrough);
       session.on('events', (events) => stream.events(events));
       session.on('status', (status) => stream.status(status));
       session.on('queue', (queue) => stream.queue(queue));
       session.on('brokerItems', (items) => stream.brokerItems(items));
       session.on('catalog', (catalog) => stream.catalog(catalog)); // C7: session.catalogChanged
       session.on('checkpoint', (checkpoint) => stream.checkpoint(checkpoint)); // P5 O15 M2b (§L)
-      modelKeys.set(spec.appSessionId, catalogueKey(plan.engineVersion, plan.gateway, { env: plan.env, cwd: plan.cwd, flagEnv: plan.flagSettings.env })); // C10; never rejects
       session.on('models', (list) => updateModels(spec.appSessionId, list)); // C10
       session.on('paneShow', (request) => emit('maws.pane.show', request)); // E1: relayed to every window
       session.on('artifactCapture', (request) => emit('maws.artifact.capture', request)); // E2: the capture requests main answers
@@ -359,6 +415,11 @@ export function registerEngineIpc(hostOn: HostOn, emit: HostEmit, deps: EngineIp
   };
   const launch = createLauncher(launcherDeps);
   const adopt = createAdopter(launcherDeps); // P5 O16 M3: the same wiring for an adopted row
+  // Ticket 851, M2: the host's prestarts (prestart-host.ts), over the same launcher
+  const prestarts = new PrestartHost({
+    table, launch, emit, log, binaryProbe, publish: publishHidden, drop: (session) => void hiddenWires.delete(session),
+    journalDir: (id) => journalDir(deps.userData, id), endHost: deps.holder?.endPrestart,
+  });
 
   // Registration with the input's appSessionId narrowed to the branded id the host's maps use.
   const handle = <N extends C3Command & CommandName>(name: N, handler: (input: CommandInput<N>) => Promise<CommandOutput<N>>) => on(name, handler);
@@ -424,7 +485,15 @@ export function registerEngineIpc(hostOn: HostOn, emit: HostEmit, deps: EngineIp
   // C11 end
 
   // -- lifecycle and state -------------------------------------------------------------------------------------------
-  handle('session.launch', async ({ spec, artifactScope }) => launch(spec as Parameters<typeof launch>[0], artifactScope as Parameters<typeof launch>[1])); // P2-E1: artifactScope
+  // P2-E1: artifactScope; ticket 851, M2: `adopt`, a prestart's hidden row taken when it is the same launch, and every
+  // launch of an id a prestart holds or is admitting under the id's serialization (prestart-host.ts)
+  handle('session.launch', async ({ spec, artifactScope, adopt: adoption }) => prestarts.launch(spec as LaunchSpec, artifactScope as AppSessionId[] | undefined, adoption));
+  // Ticket 851, M2 (docs/doperpowers/plans/2026-11-24-prestart-engine.md, D1, D8, R4-6, R4-7): the spine's prestarts.
+  // Immediate: the admission is registered in the handler and the launch runs behind the answer.
+  on('session.prestart', async ({ spec, key, owner }, ctx) => prestarts.prestart({ spec: spec as LaunchSpec, key, owner }, ctx.client));
+  on('session.prestart.withdraw', async ({ appSessionId, generation }) => prestarts.withdraw(appSessionId as AppSessionId, generation));
+  on('session.prestart.release', async ({ owner }) => prestarts.release(owner));
+  on('engine.prestarts', async () => ({ hidden: prestarts.hidden() }));
   handle('session.status', async ({ appSessionId }) => (await adopted(appSessionId), sessionOf(appSessionId).status()));
   // UX wave, ticket 777: the stream is one launch's, and the session's history from before it is in the transcript. An
   // answer that starts at the launch's first row carries the cursor whose pages are the transcript's rows before the
@@ -483,6 +552,7 @@ export function registerEngineIpc(hostOn: HostOn, emit: HostEmit, deps: EngineIp
   });
   handle('session.stop', async ({ appSessionId, reason, ifIdle }) => {
     if (reason === 'archive') assertSafeAppSessionId(appSessionId); // archive deletes a directory named after it (M5 review)
+    await prestarts.endFor(appSessionId as AppSessionId, `session.stop (${reason ?? 'stop'})`); // ticket 851, M2: then as for no row
     const session = sessionOf(appSessionId);
     // W7: the yield's stop, decided against the process as it is now, with no await between the check and the stop
     if (ifIdle === true && !canYield(session.status())) return { exited: false, code: null, signal: null, skipped: true as const };
@@ -789,6 +859,7 @@ export function registerEngineIpc(hostOn: HostOn, emit: HostEmit, deps: EngineIp
   handleC10('session.forget', async ({ appSessionId }) => {
     assertSafeAppSessionId(appSessionId); // it deletes a file and a directory named after it
     const id = appSessionId as AppSessionId;
+    await prestarts.endFor(id, 'session.forget'); // ticket 851, M2: an intent's discard ends its prestart, then as for no row
     const session = table.get(id);
     const state = session?.status().process;
     if (session && state !== 'exited') throw new HostCommandError({ code: 'internal', message: `already_live: process is ${state}` });
@@ -1052,6 +1123,7 @@ export function registerEngineIpc(hostOn: HostOn, emit: HostEmit, deps: EngineIp
         log(`the connect burst skipped ${id}: ${error instanceof Error ? error.message : String(error)}`);
       }
     }
+    for (const hidden of prestarts.hidden()) emit('engine.prestart', { ...hidden, state: 'hidden' }); // ticket 851, M2 (R4-6): the welcome's hidden set
     emit('engine.budget', table.budgetState());
     emit('plugins.changed', {});
     for (const event of plugins.running()) emit('plugins.operation', event);

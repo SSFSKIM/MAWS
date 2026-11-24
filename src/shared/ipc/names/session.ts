@@ -43,7 +43,8 @@ export const commands = [
 
 // P4-AGG M4: the engine's own MCP sign-in, main's sign-in operation alone (src/services/connectors/sign-in.ts)
 // P5 O3-D: a client's session streams on mawsd's services front and the mirror's visible set, main's and mawsd's clients'
-export const mainOnlyCommands = ['session.mcpAuthenticate', 'session.mcpOAuthCallback', 'session.follow', 'session.visible', 'session.engineStatuses' /* M5b fix round 6 */] as const;
+// Ticket 851, M2: the spine's prestarts, from its engine-host link alone
+export const mainOnlyCommands = ['session.mcpAuthenticate', 'session.mcpOAuthCallback', 'session.follow', 'session.visible', 'session.engineStatuses' /* M5b fix round 6 */, 'session.prestart', 'session.prestart.withdraw', 'session.prestart.release'] as const;
 
 export const events = [
   'session.eventBatch', 'session.status', 'session.queue', 'session.brokerItems', 'session.operation',

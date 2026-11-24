@@ -140,4 +140,7 @@ export const grades = {
   'session.follow': 'internal', // P5 O3-D: a local client's streams on the services front; a remote device's are plane B's
   'session.visible': 'internal', // P5 O3-D: the mirror's snapshot
   'session.engineStatuses': 'internal', // P5 O3-D M5b fix round 6: the mirror's snapshot of a scenario's statuses
+  'session.prestart': 'internal', // ticket 851, M2: the spine's, through its engine-host link
+  'session.prestart.withdraw': 'internal',
+  'session.prestart.release': 'internal',
 } as const satisfies CommandGrades<'session'>;

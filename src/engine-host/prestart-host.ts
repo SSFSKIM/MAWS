@@ -1,0 +1,296 @@
+// Ticket 851, M2 (docs/doperpowers/plans/2026-11-24-prestart-engine.md, D1 to D4 as amended, R4-1 to R4-9): the engine
+// host's prestarts. At most one per host: a launch admitted for a spine root (`owner`) over one connection, run hidden
+// (process-table.ts, launcher.ts `HiddenLaunch`, prestart.ts), and either adopted by `session.launch { adopt }` or ended.
+//
+// The admission is registered in the handler before its first await, with a generation the host assigns. A newer
+// prestart (for any id), a launch of the id, a withdraw of that generation, a forget or stop of the id, the end of the
+// connection that asked and the release of its owner each cancel it (the launcher reads it after its probes and in the
+// step that reserves the row, so a cancelled admission never spawns) or end its row. Ending ("kill") stops the engine
+// through the ladder and drops the row at once (no released id, no exited row); once the process has exited, the
+// launch's staged files (which an adopt that failed after writing them leaves) are removed, then its session host's
+// roster entry, which a marked host keeps at its exit (M1's rule: the files before the entry).
+//
+// Every launch of an id a prestart holds or is admitting runs under the id's serialization. Adopt takes the hidden row
+// when it is claimable (R4-9) and its spec (but for `sessionId`), key and engine binary are the ones asked: the stage and
+// the held writes are written (R4-1's step 2, still hidden), the session host promotes the launch (step 3), then the row
+// is revealed, its snapshot published and the answer given, the surface attaching afterwards (step 4, R4-5). Anything
+// else, or a failure in steps 2 and 3, ends the prestart and launches the spec as any launch.
+import { assertSafeAppSessionId } from '@shared/engine/app-session-id';
+import type { LaunchSpec } from '@shared/engine/launch-spec';
+import type { AppSessionId, SessionId } from '@shared/graph/ids';
+import type { HostEmit } from '@shared/host/runtime';
+import type { ClientRef } from '@shared/ipc/client';
+import type { LaunchResult } from '@shared/ipc/schema/session';
+import type { BinaryCheck } from './binary-info';
+import { removeStagedFiles } from './holder/adopt';
+import type { HiddenLaunch, Launcher } from './launcher';
+import { PRESTART_STAGE_MAX_BYTES, sameLaunchSpec, Stage } from './prestart';
+import type { HiddenDue, ProcessTable } from './process-table';
+import type { EngineSession } from './session';
+
+export type PrestartState = 'hidden' | 'committed' | 'ended';
+export interface PrestartAnswer { status: 'started' | 'running' | 'refused'; generation: number; reason?: string }
+
+export interface PrestartHostDeps {
+  table: ProcessTable;
+  launch: Launcher;
+  emit: HostEmit;
+  log: (line: string) => void;
+  binaryProbe: () => Promise<BinaryCheck>;
+  publish: (session: EngineSession) => void; // the revealed row's stream opened and its snapshot published (ipc.ts)
+  drop: (session: EngineSession) => void; // what the host kept for an ended hidden row let go (ipc.ts)
+  journalDir: (appSessionId: AppSessionId) => string;
+  // the session host's roster entry removed once the host has exited (index.ts); absent: a direct spawn, or the next
+  // engine host's start clears it
+  endHost?: (host: { holderId: string; pid: number }) => Promise<void>;
+  promoteMs?: number;
+  stageMaxBytes?: number;
+}
+
+interface Prestart {
+  id: AppSessionId;
+  generation: number;
+  owner: string;
+  client: ClientRef;
+  spec: LaunchSpec;
+  key: string;
+  stage: Stage;
+  session: EngineSession | null;
+  state: 'admitted' | 'hidden' | 'committing' | 'committed' | 'ended';
+  announced: boolean; // `engine.prestart { hidden }` went out
+  unwatch: () => void;
+}
+
+const CLAIMABLE = new Set(['starting', 'initializing', 'ready']);
+
+export class PrestartHost {
+  private current: Prestart | null = null;
+  private generation = 0;
+  private readonly released = new Set<string>(); // owners released (R4-7)
+  private readonly chains = new Map<AppSessionId, Promise<unknown>>();
+  private readonly rows = new Map<EngineSession, Prestart>(); // each hidden row's prestart, until it is ended or committed
+
+  constructor(private readonly deps: PrestartHostDeps) {
+    if (typeof deps.table.onHiddenDue === 'function') deps.table.onHiddenDue((session, why) => this.due(session, why)); // a test's stand-in table may have none
+  }
+
+  // `session.prestart`: the admission, synchronously; the launch runs behind the answer.
+  prestart(input: { spec: LaunchSpec; key: string; owner: string }, client: ClientRef): PrestartAnswer {
+    const { spec, key, owner } = input;
+    const id = spec.appSessionId;
+    assertSafeAppSessionId(id);
+    const refused = (reason: string): PrestartAnswer => ({ status: 'refused', generation: 0, reason });
+    if (spec.replay !== null) return refused('a replay launch never prestarts');
+    if (this.released.has(owner)) return refused('its owner was released');
+    const cur = this.current;
+    if (cur !== null && cur.id === id && cur.owner === owner && cur.client.id === client.id && cur.key === key && sameLaunchSpec(cur.spec, spec)) return { status: 'running', generation: cur.generation };
+    if (cur !== null) this.end(cur, 'a newer prestart replaced it');
+    const live = this.deps.table.get(id);
+    if ((live !== undefined && live.lifecycle !== 'exited') || this.deps.table.isAdopting(id)) return refused('the session has a live process');
+    const h: Prestart = {
+      id, generation: ++this.generation, owner, client, spec, key, session: null, state: 'admitted', announced: false, unwatch: () => {},
+      stage: new Stage({ maxBytes: this.deps.stageMaxBytes ?? PRESTART_STAGE_MAX_BYTES, overflow: () => this.end(h, `its stage passed ${this.deps.stageMaxBytes ?? PRESTART_STAGE_MAX_BYTES} bytes`) }),
+    };
+    this.current = h;
+    h.unwatch = client.onGone(() => this.end(h, 'the connection that asked for it ended')); // at once when gone already
+    if (h.state === 'ended') return refused('the connection that asked for it ended');
+    void this.serial(id, () => this.launchHidden(h)).catch((error: unknown) => this.deps.log(`${id}: prestart not launched: ${messageOf(error)}`));
+    return { status: 'started', generation: h.generation };
+  }
+
+  // `session.prestart.withdraw`: that generation, only while it is not committing or committed.
+  withdraw(appSessionId: AppSessionId, generation: number): void {
+    const h = this.current;
+    if (h !== null && h.id === appSessionId && h.generation === generation) this.end(h, 'withdrawn');
+  }
+
+  // `session.prestart.release` (R4-7): the owner's prestarts end, and it admits none from now on.
+  release(owner: string): void {
+    this.released.add(owner);
+    const h = this.current;
+    if (h !== null && h.owner === owner) this.end(h, 'its owner was released');
+  }
+
+  // A forget or a stop of the id: its prestart ends (a commit under way is waited for, and then the row is the
+  // session's). Answers once the id holds no hidden row.
+  async endFor(appSessionId: AppSessionId, why: string): Promise<void> {
+    const h = this.current;
+    if (h !== null && h.id === appSessionId) this.end(h, why);
+    await this.chains.get(appSessionId);
+  }
+
+  // `session.launch`: with `adopt`, the hidden row when it is claimable and the same launch, else a fresh launch; with
+  // none, a prestart of the id ends first. A launch of an id no prestart touches runs at once, as before.
+  launch(spec: LaunchSpec, artifactScope: readonly AppSessionId[] | undefined, adopt: { key: string } | undefined): Promise<LaunchResult> {
+    const id = spec.appSessionId;
+    const fresh = () => this.deps.launch(spec, artifactScope);
+    const cur = this.current;
+    if (adopt === undefined) {
+      if (cur !== null && cur.id === id) this.end(cur, 'a launch of its id');
+      return this.chains.has(id) ? this.serial(id, fresh) : fresh();
+    }
+    if ((cur === null || cur.id !== id) && !this.chains.has(id)) return fresh();
+    return this.serial(id, () => this.adopt(spec, adopt.key, fresh));
+  }
+
+  // The hidden rows now, for a client's welcome and the internal query (R4-6).
+  hidden(): { appSessionId: AppSessionId; engineSessionId: SessionId | null }[] {
+    const h = this.current;
+    if (h === null || h.session === null || !h.announced || h.state !== 'hidden') return [];
+    return [{ appSessionId: h.id, engineSessionId: h.session.status().engineSessionId }];
+  }
+
+  // ---------------------------------------------------------------------------------------------------------------------
+
+  private async launchHidden(h: Prestart): Promise<void> {
+    if (h.state === 'ended') return;
+    const hidden: HiddenLaunch = { admitted: () => h.state === 'admitted', stage: h.stage };
+    let result: Awaited<ReturnType<Launcher>>;
+    try {
+      result = await this.deps.launch(h.spec, [], hidden);
+    } catch (error) {
+      this.deps.log(`${h.id}: prestart generation ${h.generation} not launched: ${messageOf(error)}`);
+      this.end(h, 'its launch failed');
+      return;
+    }
+    if (result.status === 'cancelled') return; // ended before it spawned
+    if (result.status !== 'launching') {
+      this.deps.log(`${h.id}: prestart generation ${h.generation} not launched: ${result.status === 'refused' ? result.message : 'its relay is unreachable'}`);
+      this.end(h, 'its launch was refused');
+      return;
+    }
+    const session = this.deps.table.getAny(h.id);
+    if (session === undefined || !this.deps.table.isHidden(h.id)) {
+      this.end(h, 'its row was not reserved hidden');
+      return;
+    }
+    h.session = session;
+    this.rows.set(session, h);
+    if (h.state !== 'admitted') { // ended between its reservation and this turn: the row goes now
+      this.kill(h, session, 'ended while it reserved its row');
+      return;
+    }
+    h.state = 'hidden';
+    h.announced = true;
+    this.announce(h, 'hidden');
+    this.deps.log(`${h.id}: prestart generation ${h.generation} launched hidden (launch ${session.status().launchId})`);
+  }
+
+  private async adopt(spec: LaunchSpec, key: string, fresh: () => Promise<LaunchResult>): Promise<LaunchResult> {
+    const h = this.current?.id === spec.appSessionId ? this.current : null;
+    if (h === null) return fresh();
+    const miss = this.unclaimable(h) ?? (!sameLaunchSpec(h.spec, spec) ? 'its spec differs' : h.key !== key ? 'its key differs' : await this.otherBinary(h)) ?? this.unclaimable(h);
+    if (miss !== null) {
+      this.end(h, `not adopted: ${miss}`);
+      return fresh();
+    }
+    const session = h.session!;
+    h.state = 'committing'; // no longer the current prestart: a newer one, a withdraw or the connection's end leave it be
+    h.unwatch();
+    this.current = null;
+    try {
+      await session.commitStage(); // R4-1 step 2, the row still hidden
+      const promoted = await session.promote(this.deps.promoteMs); // step 3
+      if (!promoted.ok) throw new Error(`the session host did not promote it: ${promoted.message}`);
+      if (!CLAIMABLE.has(session.lifecycle) || this.deps.table.getAny(h.id) !== session) throw new Error(`its engine is ${session.lifecycle}`);
+    } catch (error) {
+      h.state = 'hidden';
+      this.end(h, `not adopted: ${messageOf(error)}`);
+      return fresh();
+    }
+    // step 4 (R4-3, R4-5): revealed, published, answered; the surface attaches behind the answer
+    h.state = 'committed';
+    this.rows.delete(session);
+    this.deps.table.reveal(h.id);
+    this.deps.publish(session);
+    session.reveal();
+    this.announce(h, 'committed');
+    this.deps.log(`${h.id}: prestart generation ${h.generation} adopted (launch ${session.status().launchId})`);
+    return { status: 'launching', session: session.status() };
+  }
+
+  // R4-9: why the row cannot be adopted, or null
+  private unclaimable(h: Prestart): string | null {
+    if (h.state !== 'hidden') return h.state === 'admitted' ? 'it has not launched' : `it is ${h.state}`;
+    const session = h.session;
+    if (session === null || this.deps.table.getAny(h.id) !== session || !this.deps.table.isHidden(h.id)) return 'its row is gone';
+    if (!CLAIMABLE.has(session.lifecycle) || session.ending) return `its engine is ${session.lifecycle}`;
+    if (session.initializeFailedSeen) return 'its initialize failed';
+    if (this.released.has(h.owner)) return 'its owner was released';
+    if (h.stage.over) return 'its stage is full';
+    return null;
+  }
+
+  // D4 (finding R2-7): the engine binary the row was spawned with against the one configured now
+  private async otherBinary(h: Prestart): Promise<string | null> {
+    let probe: BinaryCheck;
+    try {
+      probe = await this.deps.binaryProbe();
+    } catch (error) {
+      return `the engine binary could not be probed: ${messageOf(error)}`;
+    }
+    const spawned = h.session!.spawnedBinary;
+    if (!probe.ok || probe.path !== spawned.bin || probe.version !== spawned.engineVersion) return `its engine binary (${spawned.bin} ${spawned.engineVersion}) is not the configured one (${probe.path} ${probe.version ?? 'no version'})`;
+    return null;
+  }
+
+  private due(session: EngineSession, why: HiddenDue): void {
+    const h = this.rows.get(session);
+    if (h === undefined) {
+      // a hidden row with no prestart of its own (never: every hidden row is one's) is ended as one
+      if (this.deps.table.detachHidden(session.status().appSessionId) !== null) void session.stop('stop');
+      return;
+    }
+    if (h.state === 'committing') return; // the commit decides: its promotion or its checks fail on an engine gone
+    this.end(h, why === 'exited' ? 'its engine exited' : `the ${why === 'handover' ? 'handover' : why === 'idle' ? 'idle release' : 'memory budget'} ended it`);
+  }
+
+  // Ends a prestart: its admission cancelled, or its row killed.
+  private end(h: Prestart, why: string): void {
+    if (h.state === 'ended' || h.state === 'committed' || h.state === 'committing') return;
+    h.state = 'ended';
+    h.unwatch();
+    if (this.current === h) this.current = null;
+    if (h.session !== null) this.kill(h, h.session, why);
+    else this.deps.log(`${h.id}: prestart generation ${h.generation} withdrawn before its row (${why})`);
+  }
+
+  private kill(h: Prestart, session: EngineSession, why: string): void {
+    h.state = 'ended';
+    this.rows.delete(session);
+    if (this.deps.table.getAny(h.id) === session) this.deps.table.detachHidden(h.id);
+    this.deps.drop(session);
+    if (h.announced) this.announce(h, 'ended');
+    const status = session.status();
+    this.deps.log(`${h.id}: prestart generation ${h.generation} ended (${why}); launch ${status.launchId} stopped`);
+    const holder = status.holder;
+    void (async () => {
+      await session.stop('stop').catch((error: unknown) => this.deps.log(`${h.id}: prestart not stopped: ${messageOf(error)}`));
+      await session.exited;
+      // M1's order: the launch's staged files, then its session host's entry
+      try {
+        removeStagedFiles(this.deps.journalDir(h.id), status.launchId);
+      } catch (error) {
+        this.deps.log(`${h.id}: the staged files of launch ${status.launchId} not removed (${messageOf(error)}); the next start removes them with its entry`);
+        return;
+      }
+      if (holder && this.deps.endHost) await this.deps.endHost({ holderId: holder.holderId, pid: holder.pid }).catch((error: unknown) => this.deps.log(`${h.id}: the session host entry of launch ${status.launchId} not removed: ${messageOf(error)}`));
+    })();
+  }
+
+  private announce(h: Prestart, state: PrestartState): void {
+    this.deps.emit('engine.prestart', { appSessionId: h.id, engineSessionId: h.session?.status().engineSessionId ?? null, state });
+  }
+
+  private serial<T>(id: AppSessionId, run: () => Promise<T>): Promise<T> {
+    const next = (this.chains.get(id) ?? Promise.resolve()).then(run, run);
+    const tail = next.then(() => {}, () => {});
+    this.chains.set(id, tail);
+    void tail.then(() => {
+      if (this.chains.get(id) === tail) this.chains.delete(id);
+    });
+    return next;
+  }
+}
+
+const messageOf = (error: unknown): string => (error instanceof Error ? error.message : String(error));

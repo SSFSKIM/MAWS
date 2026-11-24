@@ -31,7 +31,7 @@ import { signalOrphan, type LiveRow } from './live-ledger'; // P5 O16 M2; M3: Li
 import { gateSocketPath, hostsDirOf, sessionHostBinary, sessionHostPaths } from './holder/files'; // P5 O16 M2; M3: sessionHostPaths
 import { adoptHosted, discardHost, releaseHost, startSessionHost } from './holder/transport'; // P5 O16 M2; M3: adoptHosted, releaseHost; ticket 851: discardHost
 import { liveHosts, pruneHostLogs, readRoster, removeHostFiles, type RosterEntry } from './holder/roster'; // P5 O16 M3
-import { adoptAll, clearDeadHost, endPrestart, recordFailed, recordStart } from './holder/adopt'; // P5 O16 M3; wave 1 verification: the start's records; ticket 851: a prestart's end
+import { adoptAll, clearDeadHost, clearEndedPrestart, endPrestart, recordFailed, recordStart } from './holder/adopt'; // P5 O16 M3; wave 1 verification: the start's records; ticket 851: a prestart's end
 import { journalDir } from './launcher'; // ticket 851: a prestart's staged files
 import type { AppSessionId } from '@shared/graph/ids'; // ticket 851
 import { heldChild, stopHeldHost } from './holder/stop-held'; // P5 O16 panel fix wave 1; re-verification: heldChild
@@ -151,9 +151,10 @@ const register: HostRegister = (untimedOn, untrackedEmit, untrackedClient) => {
   on('engine.ping', async () => hostPing(HOST_VERSION));
   // C4 start: the filesystem state service (fs.*) over the engine's store, read-only; C3's `session.events` answers an
   // app session with no process here from it (`diskEvents` below).
-  // W7: a registry record of one of the process table's live pids is MAWS's own, never a holder
+  // W7: a registry record of one of the process table's live pids is MAWS's own, never a holder; ticket 851 (R4-3): a
+  // prestart's hidden row's among them (the table's internal view)
   let table: ProcessTable | null = null;
-  const fs = registerFs(on, emit, process.env, { activity: () => idle.activity(), ownPids: () => new Set(table?.list().flatMap((s) => (s.pid !== null && s.lifecycle !== 'exited' ? [s.pid] : [])) ?? []) });
+  const fs = registerFs(on, emit, process.env, { activity: () => idle.activity(), ownPids: () => new Set(table?.all().flatMap((s) => (s.pid !== null && s.lifecycle !== 'exited' ? [s.pid] : [])) ?? []) });
   // C4 end
   // P3-A: the artifact store and its document service, closed at the end of engine.shutdown's body, which both modes run
   // on the way out (utility: main's quit; detached: the exit order and host.stopAll). M4: `artifacts.*`, `spaces.*` and
@@ -235,6 +236,9 @@ const register: HostRegister = (untimedOn, untrackedEmit, untrackedClient) => {
               return { transport, fence };
             },
             release: (entry, startMs) => releaseHost(entry, { log: (line) => console.log(`[session-host] ${line}`), startMs, token: tokenOf(supervisorDir, entry.holderId) }),
+            // ticket 851, M2: a prestart's host keeps its marked entry at its exit; once the host is gone (its ladder's
+            // bound) the entry goes too, while it is still marked; a host still running keeps it for the next start
+            endPrestart: async (host) => void (await clearEndedPrestart(hostsDirOf(supervisorDir), host, { isAlive })),
           },
   });
   ({ table } = ipc);
@@ -257,7 +261,7 @@ const register: HostRegister = (untimedOn, untrackedEmit, untrackedClient) => {
   const rows = table;
   startJournalPruning = (alsoKeep) => {
     scheduleJournalPruning(join(userData, 'engine-host', 'journal'), {
-      keep: () => new Set([...rows.list().map((session) => session.status().launchId), ...alsoKeep()]),
+      keep: () => new Set([...rows.all().map((session) => session.status().launchId), ...alsoKeep()]), // ticket 851: a prestart's too
       log: (line) => console.warn(`[engine-host] ${line}`),
     });
   };

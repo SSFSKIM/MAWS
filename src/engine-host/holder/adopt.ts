@@ -17,8 +17,8 @@
 import { readdirSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import type { AppSessionId } from '@shared/graph/ids';
-import { SESSION_HOST_PROTOCOL } from './protocol';
-import type { RosterEntry } from './roster';
+import { HOST_EXIT_GRACE_MS, SESSION_HOST_PROTOCOL } from './protocol';
+import { readRoster, removeHostFiles, type RosterEntry } from './roster';
 import type { ProcessTable } from '../process-table'; // P5 O16 wave 1 verification
 import type { HeldStopOutcome, ProcStartKey } from './stop-held'; // P5 O16 wave 1 verification; re-verification: ProcStartKey
 
@@ -148,6 +148,19 @@ export function clearDeadHost(entry: RosterEntry, deps: PrestartFiles): void {
     deps.log(`session host ${entry.holderId} held a prestart never promoted: ${removed} staged file(s) removed`);
   }
   removeEntry(entry, deps);
+}
+
+// Ticket 851, M2: the end of a prestart this engine host ended itself (prestart-host.ts), its staged files already removed:
+// the session host keeps its marked entry at its exit, so once the host has exited (within `exitMs`, its ladder's bound)
+// the entry goes too, while it still says `prestart`; a host still running keeps it for the next start's discard.
+export async function clearEndedPrestart(hostsDir: string, host: { holderId: string; pid: number }, deps: { isAlive(pid: number): boolean; exitMs?: number }): Promise<'removed' | 'kept'> {
+  const until = Date.now() + (deps.exitMs ?? 2 * HOST_EXIT_GRACE_MS + 2_000);
+  while (deps.isAlive(host.pid) && Date.now() < until) await new Promise((resolve) => setTimeout(resolve, 50));
+  if (deps.isAlive(host.pid)) return 'kept';
+  const entry = readRoster(hostsDir, () => {}).find((candidate) => candidate.holderId === host.holderId);
+  if (entry?.prestart !== true) return 'kept';
+  removeHostFiles(hostsDir, entry);
+  return 'removed';
 }
 
 const STAGED_FILE = /^([A-Za-z0-9_-]+?)(?:\.\d+)?\.(?:jsonl|hseq)$/;
