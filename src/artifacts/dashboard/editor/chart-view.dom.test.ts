@@ -227,6 +227,17 @@ describe('the chart view', () => {
     expect([mark.textContent, mark.getAttribute('role'), mark.tabIndex]).toEqual(['⚠', 'img', 0]);
     expect(mark.getAttribute('aria-label')).toBe('1 of 3 values in sales are not number');
     expect(mark.dataset.note).toBe('1 of 3 values in sales are not number');
+    // the whole-branch review's fix wave: the note is placed as the mark is pointed at or focused (hover.ts's placeNote),
+    // inside what can be seen of the editor; at rest under the touch rule it stays in the line
+    expect(mark.style.getPropertyValue('--dash-note-max')).toBe('');
+    mark.dispatchEvent(new PointerEvent('pointerenter'));
+    expect(mark.style.getPropertyValue('--dash-note-max')).toBe('320px');
+    mark.style.removeProperty('--dash-note-max');
+    mark.dispatchEvent(new FocusEvent('focus'));
+    expect(mark.style.getPropertyValue('--dash-note-max')).toBe('320px');
+    const css = sheetCss.replace(/\s+/g, ' ');
+    expect(css).toContain("max-width: var(--dash-note-max, 320px);");
+    expect(css).toContain(".ds-doc .dash-warning[data-note-side='end']::after { right: 0; left: auto; }");
     removeDataset(doc, 'sales');
     await settle();
     expect(into.querySelector('svg')?.textContent).toContain('no dataset "sales"');

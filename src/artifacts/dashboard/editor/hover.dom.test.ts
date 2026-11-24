@@ -3,7 +3,7 @@
 // the frame's visible box (flipped to the pointer's other side at a right or bottom edge, clamped inside it) and written
 // in the frame's scrolled content coordinates, so a tip at a revealed right-edge point is whole and readable.
 import { afterEach, describe, expect, it } from 'vitest';
-import { attachHover } from './hover';
+import { attachHover, NOTE_INSET_PX, NOTE_MAX_PX, placeNote } from './hover';
 
 const rect = (left: number, top: number, width: number, height: number) => ({ left, top, width, height, right: left + width, bottom: top + height, x: left, y: top, toJSON: () => ({}) }) as DOMRect;
 
@@ -112,5 +112,36 @@ describe('the hover tip', () => {
     at(150, 100);
     expect(measured).toEqual(['', '']);
     expect(tip.style.width).toBe('200px');
+  });
+});
+
+// The word cut (G598), the whole-branch review's fix wave: a ⚠ mark's note (sheet.css's `::after`) opens from the mark's
+// start rightward while it fits in what can be seen around the mark (the editor's scroller, the window); otherwise from
+// the mark's end leftward where there is more room that way; and its width is capped to the room on the side it opens
+// to, so no part of it is clipped, as the shared Tip flips and shifts.
+describe('a mark’s note', () => {
+  /** A mark `width` wide at `left` in a scroller that shows `seen` (its left and width) of the page. */
+  function markIn(seen: [number, number], left: number, width = 14) {
+    const scroller = document.body.appendChild(document.createElement('div'));
+    scroller.style.overflow = 'auto';
+    scroller.getBoundingClientRect = () => rect(seen[0], 0, seen[1], 600);
+    Object.defineProperties(scroller, { clientWidth: { value: seen[1] }, clientHeight: { value: 600 }, clientLeft: { value: 0 }, clientTop: { value: 0 } });
+    const mark = scroller.appendChild(document.createElement('span'));
+    mark.getBoundingClientRect = () => rect(left, 100, width, 16);
+    placeNote(mark);
+    return { side: mark.dataset.noteSide ?? 'start', max: mark.style.getPropertyValue('--dash-note-max') };
+  }
+
+  it('opens rightward from the mark at its full width where that fits', () => {
+    expect(markIn([0, 800], 100)).toEqual({ side: 'start', max: `${NOTE_MAX_PX}px` });
+  });
+
+  it('opens leftward from the mark’s end near the scroller’s right edge', () => {
+    expect(markIn([0, 800], 700)).toEqual({ side: 'end', max: `${NOTE_MAX_PX}px` });
+  });
+
+  it('caps its width to the room on the side with more of it, so neither edge clips it', () => {
+    expect(markIn([0, 420], 300)).toEqual({ side: 'end', max: `${300 + 14 - NOTE_INSET_PX}px` });
+    expect(markIn([100, 300], 150)).toEqual({ side: 'start', max: `${400 - 150 - NOTE_INSET_PX}px` });
   });
 });

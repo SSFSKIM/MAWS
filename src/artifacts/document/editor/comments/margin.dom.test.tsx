@@ -990,6 +990,70 @@ describe('resolve, orphans, the panel (Z1 to Z3, Z5) and the rail state (D5)', (
     expect(m.rails.slice(told)).toEqual([]); // the panel not closed
   });
 
+  // the word cut (G385), the whole-branch review's fix wave: the reply field is the active card's only, and a deleted
+  // passage's thread has no passage to activate, so choosing its panel card makes that card the active one (the editor's
+  // active thread with no selection): a click or R brings its reply field, which takes the keyboard, and the reply posts
+  it('a click or R on an orphan’s panel card makes it the active card, its reply field taking the keyboard (G385)', async () => {
+    const m = await mount(content());
+    comment(m, 't1', 'ships quarterly', 140);
+    comment(m, 't2', 'track the budget', 300);
+    await settle();
+    for (const needle of ['ships quarterly', 'track the budget']) {
+      const from = findPos(m.editor(), needle);
+      act(() => m.editor().view.dispatch(m.editor().state.tr.delete(from, from + needle.length)));
+    }
+    await settle();
+    m.rerender({ rail: 'comments' });
+    await settle();
+    const panel = screen.getByRole('complementary', { name: 'Comments' });
+    fireEvent.click(within(panel).getByRole('button', { name: /^Deleted \(/ }));
+    const card = (id: string) => panel.querySelector<HTMLElement>(`[data-thread="${id}"]`)!;
+    expect(within(card('t1')).queryByRole('textbox', { name: 'Reply' })).toBeNull();
+    act(() => fireEvent.click(card('t1')));
+    await settle();
+    expect(activeThread(m.editor().state)).toBe('t1');
+    expect(card('t1').getAttribute('aria-current')).toBe('true');
+    const field = within(card('t1')).getByRole('textbox', { name: 'Reply' });
+    expect(document.activeElement).toBe(field);
+    act(() => fireEvent.change(field, { target: { value: 'Was this cut on purpose?' } }));
+    act(() => void fireEvent.keyDown(within(card('t1')).getByRole('textbox', { name: 'Reply' }), { key: 'Enter' }));
+    expect(getThread(m.handle.doc, 't1')!.messages.map((message) => message.body)).toContain('Was this cut on purpose?');
+    expect(screen.getByRole('complementary', { name: 'Comments' })).toBe(panel); // the panel stays: the margin cannot draw it
+
+    act(() => card('t2').focus());
+    act(() => void fireEvent.keyDown(card('t2'), { key: 'r' }));
+    await settle();
+    expect(activeThread(m.editor().state)).toBe('t2');
+    expect(within(card('t1')).queryByRole('textbox', { name: 'Reply' })).toBeNull();
+    expect(document.activeElement).toBe(within(card('t2')).getByRole('textbox', { name: 'Reply' }));
+  });
+
+  // the word cut (G385), the whole-branch review's fix wave: a resolved thread shown from the wide panel goes to the margin,
+  // which draws no resolved card, so no reply is asked of it; reopened later from another replica while still active, its
+  // card draws its reply field and leaves the keyboard where the person has it
+  it('showing a resolved thread from the wide panel asks no reply: reopened by another replica, its card takes no keyboard (G385)', async () => {
+    const m = await mount(content());
+    comment(m, 't1', 'ships quarterly', 140);
+    await settle();
+    act(() => resolve(m.handle.doc, 't1', ownerActor, now(), 'test'));
+    await settle();
+    m.rerender({ rail: 'comments' });
+    await settle();
+    const panel = screen.getByRole('complementary', { name: 'Comments' });
+    act(() => fireEvent.click(within(panel.querySelector<HTMLElement>('[data-thread="t1"]')!).getByRole('button', { name: /^Show/ })));
+    await settle();
+    expect(screen.queryByRole('complementary', { name: 'Comments' })).toBeNull();
+    expect(activeThread(m.editor().state)).toBe('t1');
+    const elsewhere = document.body.appendChild(document.createElement('input'));
+    act(() => elsewhere.focus());
+    act(() => reopen(m.agent.doc, 't1', agentActor, now(), 'agent'));
+    await settle();
+    expect(getThread(m.handle.doc, 't1')?.status).toBe('open');
+    expect(within(entry('t1')!).getByRole('textbox', { name: 'Reply' })).toBeDefined(); // the active card, its field drawn
+    expect(document.activeElement).toBe(elsewhere);
+    elsewhere.remove();
+  });
+
   // P4-B1 (review finding 2, with finding 3): the panel decides from its own layout whether the margin would host (the
   // margin is not drawn while the panel is), so a body narrowed under the panel keeps it open on a choice, as the drawer
   it('choosing an item in a panel narrowed to the drawer keeps it open (D5, N3)', async () => {

@@ -81,6 +81,20 @@ describe('the From layout menu’s states (G421)', () => {
     expect(screen.getByRole('menu').textContent).toBe('No layouts');
   });
 
+  // the whole-branch review's fix wave: a deck whose placement is not read yet is not a deck with no system: the menu
+  // waits with the quiet spinner, and a read that failed says so with its reason, never a false No layouts
+  it('waits while the deck’s placement is read, and says a failed read with its reason', async () => {
+    render(<LayoutsMenu system={null} systemUnread="reading" disabled={false} scope={(children) => children} onPick={() => {}} />);
+    await open();
+    expect(screen.getByRole('menu').textContent).toBe('');
+    await act(() => new Promise<void>((resolve) => setTimeout(resolve, 600)));
+    expect(screen.getByRole('progressbar', { name: 'Loading…' })).toBeTruthy();
+    cleanup();
+    render(<LayoutsMenu system={null} systemUnread={{ failed: 'offline' }} disabled={false} scope={(children) => children} onPick={() => {}} />);
+    await open();
+    expect(screen.getByRole('menu').textContent).toBe('Layouts could not be read: offline');
+  });
+
   it('at the deck’s limit the trigger is greyed, still focusable, the limit its reason', () => {
     render(<LayoutsMenu system={null} disabled={false} unavailable="A deck holds at most 500 slides: delete one to add another." scope={(children) => children} onPick={() => {}} />);
     const trigger = screen.getByRole('button', { name: 'From layout' });

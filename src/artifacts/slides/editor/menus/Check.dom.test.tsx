@@ -4,6 +4,10 @@
 // wait is the quiet spinner (G476), and a system it cannot read or that has nothing to check settles in words.
 import { act, cleanup, render, screen, within } from '@testing-library/react';
 import { afterEach, describe, expect, it } from 'vitest';
+import { DesignSystemHostContext } from '../../../design-system/apply';
+import { writeSystem } from '../../../design-system/model';
+import type { ArtifactHost, DocumentHandle } from '../../../host';
+import { defaultSystem, HOUSE_KEY } from '../../../types/design_system/defaults';
 import { newDoc, transact, type Doc } from '../../../yjs';
 import { importSlide, writeDeckKeys } from '../../model';
 import { loadSlide } from '../../parse';
@@ -59,5 +63,45 @@ describe('the Check panel', () => {
     cleanup();
     render(<CheckPanel session={new DeckSession(deckOf(CLEAN))} system={null} />);
     expect(screen.getByRole('complementary', { name: 'Check design' }).textContent).toContain('Nothing to check');
+  });
+
+  // the whole-branch review's fix wave: a deck whose placement is not read yet has no system to check with, which is not
+  // "no system": the panel waits with the quiet spinner, and a read that failed settles in words, never a false empty
+  it('waits while the deck’s placement is read and settles in words when that read fails; neither reads Nothing to check', async () => {
+    render(<CheckPanel session={new DeckSession(deckOf(CLEAN))} system={null} systemUnread="reading" />);
+    const panel = () => screen.getByRole('complementary', { name: 'Check design' });
+    expect(panel().textContent).not.toContain('Nothing to check');
+    await act(() => new Promise<void>((resolve) => setTimeout(resolve, 600)));
+    expect(screen.getByRole('progressbar', { name: 'Checking…' })).toBeTruthy();
+    cleanup();
+    render(<CheckPanel session={new DeckSession(deckOf(CLEAN))} system={null} systemUnread={{ failed: 'the library could not be read' }} />);
+    expect(panel().textContent).toContain('Couldn’t read the design system');
+    expect(panel().textContent).not.toContain('Nothing to check');
+    await act(() => new Promise<void>((resolve) => setTimeout(resolve, 600)));
+    expect(screen.queryByRole('progressbar')).toBeNull();
+  });
+
+  // the whole-branch review's fix wave (G472): a law whose don'ts no check runs (untagged, or tagged with checks MAWS does
+  // not have) has nothing to check, so it says so, never "No issues · 0 rules"; its don'ts are still listed to judge
+  it('a law with no check to run reads Nothing to check, its don’ts still listed', async () => {
+    const house = defaultSystem(HOUSE_KEY)!.files;
+    const law = house['DESIGN.md']!;
+    for (const [name, donts] of [['Untagged', law.replace(/ \[check: [^\]]+\]/g, '')], ['Unknown', law.replace(/\[check: [^\]]+\]/g, '[check: wobble]')]] as const) {
+      const doc = newDoc();
+      writeSystem(doc, { ...house, 'DESIGN.md': donts }, { route: 'derived', at: Date.UTC(2026, 10, 24) }, { name });
+      const handle = { doc, state: () => ({ phase: 'live', synced: true, unsaved: 0, revision: 1, readOnly: false }), subscribe: () => () => {}, close: () => {} } as unknown as DocumentHandle;
+      const host = { open: async () => handle, assetUrl: () => null } as unknown as ArtifactHost;
+      render(
+        <DesignSystemHostContext.Provider value={host}>
+          <CheckPanel session={new DeckSession(deckOf(PLANTED))} system={{ id: name }} />
+        </DesignSystemHostContext.Provider>,
+      );
+      await settle();
+      const panel = screen.getByRole('complementary', { name: 'Check design' });
+      expect(within(panel).getByRole('status').textContent, name).toBe('Nothing to check');
+      expect(panel.querySelector('[data-violation]'), name).toBeNull();
+      expect(within(panel).getAllByRole('heading', { level: 3 }).length, name).toBeGreaterThan(0); // Check by hand, or Unknown checks
+      cleanup();
+    }
   });
 });

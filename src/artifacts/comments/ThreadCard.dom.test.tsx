@@ -178,6 +178,25 @@ describe('the card’s forms', () => {
     expect(children.at(-1)!.matches('.thread-card-actions')).toBe(true);
   });
 
+  // the whole-branch review's fix wave: with no quote the first row is the list of messages, and only its first message
+  // sits beside the action; the replies under it take the card's whole width (the list a subgrid of the card's columns)
+  it('keeps only the first message beside Resolve where the card draws no quote; the replies take the whole width', () => {
+    const rule = (selector: string) => {
+      const css = commentsCss.replace(/\/\*[\s\S]*?\*\//g, '');
+      const found = [...css.matchAll(/([^{}]+)\{([^{}]*)\}/g)].find(([, head]) => head!.trim() === selector);
+      if (!found) throw new Error(`no rule ${selector}`);
+      return found[2]!.replace(/\s+/g, ' ');
+    };
+    const list = rule('.thread-card > .thread-card-messages:first-child');
+    for (const declaration of ['grid-column: 1 / -1;', 'grid-row: 1;', 'display: grid;', 'grid-template-columns: subgrid;']) expect(list).toContain(declaration);
+    expect(rule('.thread-card > .thread-card-messages:first-child > .thread-card-message')).toContain('grid-column: 1 / -1;');
+    expect(rule('.thread-card > .thread-card-messages:first-child > .thread-card-message:first-child')).toContain('grid-column: 1;');
+    const { card } = show({ active: true, thread: thread({ messages: [message(0, HUMAN), message(1), message(2)] }) });
+    const first = card().firstElementChild!;
+    expect(first.matches('.thread-card-messages')).toBe(true); // no quote: the list is the first row
+    expect(first.querySelectorAll(':scope > .thread-card-message')).toHaveLength(3);
+  });
+
   it('offers Resolve on an open thread, Reopen and no reply field on a resolved one', () => {
     const { card, on, view } = show({ active: true });
     act(() => fireEvent.click(within(card()).getByRole('button', { name: 'Resolve' })));
@@ -338,6 +357,22 @@ describe('the keys on a focused card', () => {
     expect(press(card, 'r')).toBe(true);
     expect(card.getAttribute('aria-current')).toBe('true');
     expect(document.activeElement).toBe(within(card).getByRole('textbox', { name: 'Reply' }));
+  });
+
+  // the word cut (G385), the whole-branch review's fix wave: a reply asked of a card is answered once it is active; an
+  // active card that cannot reply (resolved, read-only) drops it, so no later reopen hands the keyboard to its field
+  it('a reply asked of an active card that cannot reply is dropped, the keyboard left where it was; an inactive card keeps it', () => {
+    const elsewhere = document.body.appendChild(document.createElement('input'));
+    elsewhere.focus();
+    const onReplyTaken = vi.fn();
+    const { on, view } = show({ thread: thread({ status: 'resolved' }), active: false, replyAsked: 1, onReplyTaken });
+    expect(onReplyTaken).not.toHaveBeenCalled();
+    view.rerender(<ThreadCard thread={thread({ status: 'resolved' })} active compact draft="" replyAsked={1} onReplyTaken={onReplyTaken} {...on} />);
+    expect(onReplyTaken).toHaveBeenCalledOnce();
+    view.rerender(<ThreadCard thread={thread()} active compact readOnly draft="" replyAsked={2} onReplyTaken={onReplyTaken} {...on} />);
+    expect(onReplyTaken).toHaveBeenCalledTimes(2);
+    expect(document.activeElement).toBe(elsewhere);
+    elsewhere.remove();
   });
 
   it('R activates nothing on a resolved or read-only card', () => {

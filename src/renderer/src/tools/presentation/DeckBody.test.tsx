@@ -107,6 +107,24 @@ describe('the deck body', () => {
     expect(takeOpenRequest(asked)).toBe(false);
   });
 
+  // the word cut's whole-branch review, its fix wave: the deck's library row names its design system, so until that row is
+  // read the Check panel waits with the quiet spinner, and a read that failed with nothing read before settles in words;
+  // neither is a deck with no system ("Nothing to check")
+  it('the Check panel waits on the deck’s unread row, then says the failed read, never Nothing to check', async () => {
+    const fake = fakeClient();
+    window.maws = fake.client as unknown as PreloadBridge;
+    const { state } = await mount(deckOf(['a']));
+    act(() => state.snapshot().session!.toggleRail('check'));
+    const panel = () => document.querySelector<HTMLElement>('[data-deck-rail="check"]')!;
+    await waitFor(() => expect(panel()).not.toBeNull());
+    expect(panel().textContent).not.toContain('Nothing to check');
+    await waitFor(() => expect(panel().querySelector('[role="progressbar"]')).not.toBeNull());
+    await act(() => fake.fail('library.get', 'offline'));
+    await waitFor(() => expect(panel().textContent).toContain('Couldn’t read the design system'));
+    expect(panel().textContent).not.toContain('Nothing to check');
+    expect(panel().querySelector('[role="progressbar"]')).toBeNull();
+  });
+
   // scalpel-2#2: the empty deck's stage draws no slide canvas, so it never reported drawn and whenShown never resolved
   it('records the owner’s view of a deck with no slide once its stage shows', async () => {
     const { state, onShown } = await mount(deckOf([]));

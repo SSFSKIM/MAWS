@@ -166,6 +166,34 @@ describe('commenting a block (P3-E)', () => {
     await quiet();
     expect(item().dataset.orphan).toBeUndefined(); // the block is back: live again
   });
+
+  // the word cut (G385), the whole-branch review's fix wave: the reply field is the active card's only, and a deleted
+  // chart's thread has no block to select, so choosing its card in the panel makes it the active card (the editor's
+  // active thread with no selection), whose reply field takes the keyboard
+  it('a deleted block’s thread, revealed under Deleted, becomes the active card on a click and takes a reply (G385)', async () => {
+    const { editor, opened, handle, overlay } = await mount();
+    selectBlock(editor(), 'c1');
+    act(() => fireEvent.click(commentButton()));
+    const id = opened[0]!.threadId;
+    act(() => overlay().record(id, 'Why the dip?'));
+    selectBlock(editor(), 'c1');
+    act(() => void editor().commands.deleteSelection());
+    await quiet();
+    act(() => fireEvent.click(within(toolbar()).getByRole('button', { name: /^Comments/ })));
+    await quiet();
+    act(() => fireEvent.click(within(rail()).getByRole('button', { name: /^Deleted \(\d+\)$/ })));
+    const card = () => within(rail()).getByRole('group');
+    expect(card().dataset.orphan).toBe('');
+    expect(within(card()).queryByRole('textbox', { name: 'Reply' })).toBeNull();
+    act(() => fireEvent.click(card()));
+    await quiet();
+    expect(card().getAttribute('aria-current')).toBe('true');
+    const field = within(card()).getByRole('textbox', { name: 'Reply' });
+    expect(document.activeElement).toBe(field);
+    act(() => fireEvent.change(field, { target: { value: 'Was this chart moved?' } }));
+    act(() => void fireEvent.keyDown(within(card()).getByRole('textbox', { name: 'Reply' }), { key: 'Enter' }));
+    expect(getThread(handle.doc, id)!.messages.map((message) => message.body)).toEqual(['Why the dip?', 'Was this chart moved?']);
+  });
 });
 
 // P3-E (E2 M4; E's Decision Log 34): a view block cut and pasted within its artifact keeps its id, so its thread stays
