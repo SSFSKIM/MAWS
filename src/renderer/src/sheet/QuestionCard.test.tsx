@@ -13,7 +13,7 @@ const SESSION = '5eed0000-0000-4000-8000-0000000000aa';
 const draft = (revision: number, extra: Partial<QuestionDraft> = {}): QuestionDraft => ({ revision, picks: [], text: '', images: [], ...extra });
 
 function card(question: SheetQuestion, props: Partial<QuestionCardProps> = {}) {
-  const handlers = { onDraft: vi.fn(), onDismiss: vi.fn(), onRetract: vi.fn() };
+  const handlers = { onDraft: vi.fn(), onDismiss: vi.fn(), onRetract: vi.fn(), onAttach: vi.fn() };
   const view = render(<QuestionCard session={SESSION} question={question} draft={undefined} mark="none" busy={false} host={fixtureHost()} {...handlers} {...props} />);
   return { ...handlers, ...view };
 }
@@ -129,20 +129,21 @@ describe('QuestionCard', () => {
     const plain = card(SEASON);
     fireEvent.paste(screen.getByRole('textbox'), { clipboardData: { files: [image], types: ['Files'] } });
     await Promise.resolve();
-    expect(plain.onDraft).not.toHaveBeenCalled();
+    expect(plain.onAttach).not.toHaveBeenCalled();
     cleanup();
     const host = fixtureHost({ saveImage: true });
     const saving = card(SEASON, { host });
     fireEvent.paste(screen.getByRole('textbox'), { clipboardData: { files: [image], types: ['Files'] } });
-    await waitFor(() => expect(saving.onDraft).toHaveBeenLastCalledWith(draft(1, { images: ['uploads/maws-fixture-1.png'] })));
+    await waitFor(() => expect(saving.onAttach).toHaveBeenLastCalledWith('uploads/maws-fixture-1.png'));
+    expect(saving.onDraft).not.toHaveBeenCalled(); // the image joins the draft as it is when saved: the consumer's to do
     expect(host.images.map((saved) => saved.mediaType)).toEqual(['image/png']);
   });
 
   it('keeps every image of one paste', async () => {
     const shot = (name: string) => new File([new Uint8Array([137, 80, 78, 71])], name, { type: 'image/png' });
-    const { onDraft } = card(SEASON, { host: fixtureHost({ saveImage: true }) });
+    const { onAttach } = card(SEASON, { host: fixtureHost({ saveImage: true }) });
     fireEvent.paste(screen.getByRole('textbox'), { clipboardData: { files: [shot('a.png'), shot('b.png')], types: ['Files'] } });
-    await waitFor(() => expect(onDraft).toHaveBeenLastCalledWith(draft(1, { images: ['uploads/maws-fixture-1.png', 'uploads/maws-fixture-2.png'] })));
+    await waitFor(() => expect(onAttach.mock.calls).toEqual([['uploads/maws-fixture-1.png'], ['uploads/maws-fixture-2.png']]));
   });
 
   it('takes nothing while an act on it is in flight', () => {
@@ -151,6 +152,27 @@ describe('QuestionCard', () => {
     expect(onDraft).not.toHaveBeenCalled();
     expect((screen.getByRole('textbox') as HTMLTextAreaElement).disabled).toBe(true);
     expect((screen.getByRole('button', { name: 'Dismiss' }) as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it('keeps two references that share a hash apart, each opened on its own', () => {
+    const twin = { ...SEASON.references[0], path: 'src/auth-copy.ts', abs: '/work/harbour/src/auth-copy.ts' };
+    card({ ...SEASON, references: [SEASON.references[0], twin] });
+    fireEvent.click(screen.getByRole('button', { name: /src\/auth-copy\.ts/ }));
+    expect(screen.getByRole('button', { name: /src\/auth-copy\.ts/ }).getAttribute('aria-expanded')).toBe('true');
+    expect(screen.getByRole('button', { name: /src\/auth\.ts/ }).getAttribute('aria-expanded')).toBe('false');
+  });
+
+  it('turns its chevron in compact form: the chevron is the fold button’s own child', () => {
+    card(FIXTURE, { density: 'compact' });
+    const line = screen.getByRole('button', { name: /q7/ });
+    expect(line.querySelector(':scope > .transcript-chevron')).not.toBeNull();
+  });
+
+  it("measures the preview's breakpoint on the card's own width: its container has no padding or border of its own", () => {
+    const { container } = card(CLASH);
+    const root = container.firstElementChild as HTMLElement;
+    expect(root.className.split(' ')).toContain('@container');
+    expect(root.className).not.toMatch(/(^|\s)(p|px|py|border)(-|\s|$)/);
   });
 
   it('is folded to its row line in compact form until chosen', () => {

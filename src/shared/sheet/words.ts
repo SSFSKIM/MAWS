@@ -1,7 +1,7 @@
 // A question's words as a line shows them, a receipt as the record writes it, and the draft and the Send every surface
 // builds its answers with (§B `words.ts`; the composite's §4.1, §4.2 and §8). Pure.
 import type { SheetBy, SheetLine, SheetQuestion } from './model';
-import { cut } from './text';
+import { codePoints, cut } from './text';
 
 // A sentence ends at a run of `.`, `?` or `!` (closing quotes and brackets after it kept) that ends a word.
 const SENTENCE_END = /[.?!]+["'”’)\]]*(?=\s|$)/g;
@@ -60,11 +60,25 @@ export function confirmDraft(draft: QuestionDraft, question: SheetQuestion): Que
   return { ...draft, revision: question.revision, picks: question.multiSelect ? picks : picks.slice(0, 1) };
 }
 
+/** An inbox line's text is at most this many code points (the line schema's bound). */
+export const TEXT_MAX = 20000;
+
+/** A text the line schema would refuse: the draft is kept and edited, and stays out of Send until it is short enough. */
+export const isTooLong = (draft: QuestionDraft): boolean => draft.text.length > TEXT_MAX && codePoints(draft.text) > TEXT_MAX;
+
+/**
+ * Whether the answer the card shows is no longer the one the draft was written against: another surface queued an
+ * answer on the question while this draft was written (it replaces nothing), or the queued answer it edits is no longer
+ * the one standing. Such a draft is kept, and is out of Send until the person chooses.
+ */
+export const draftConflict = (draft: QuestionDraft, question: SheetQuestion): boolean => draft.replaces !== question.queued?.key;
+
 /** One call of the door takes at most fifty inbox lines (I3), and one Send is one call. */
 export const SEND_MAX_LINES = 50;
 
 /**
- * One Send: the inbox lines of the confirmed drafts with an answer, the open questions taken in their order. A draft
+ * One Send: the inbox lines of the confirmed drafts with an answer, the open questions taken in their order, but for a
+ * draft in conflict with the answer its card shows and one whose text is too long. A draft
  * that edits a queued answer gives a retract of that answer's key and then its answer, never parted. It stops before
  * the draft whose lines would pass `SEND_MAX_LINES`: `ids` are the questions it answers, `left` the confirmed drafts
  * with an answer it did not take, which stay drafts for the next Send.
@@ -80,7 +94,7 @@ export function sendOf(
   let left = 0;
   for (const question of open) {
     const draft = drafts.get(question.id);
-    if (draft === undefined || !hasAnswer(draft) || !isConfirmed(draft, question)) continue;
+    if (draft === undefined || !hasAnswer(draft) || !isConfirmed(draft, question) || draftConflict(draft, question) || isTooLong(draft)) continue;
     const size = draft.replaces === undefined ? 1 : 2;
     if (left > 0 || lines.length + size > SEND_MAX_LINES) {
       left += 1;

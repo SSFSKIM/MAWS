@@ -40,6 +40,8 @@ const SHEET_PATTERNS = [
   { regex: '^(\\.\\./)+(ipc|stores|panel|session|lane-a|lane-b|tools)(/|$)', message: SHEET },
 ];
 const SHEET_DYNAMIC = { selector: `ImportExpression[source.value=/${PORTABLE_DYNAMIC.source}/]`, message: SHEET };
+// The app's own paths, as SHEET_PATTERNS's regex refuses them, for `import()` (`\W` stands for the slash, as above).
+const SHEET_APP_DYNAMIC = { selector: 'ImportExpression[source.value=/^(?:\\.\\.\\W)+(?:ipc|stores|panel|session|lane-a|lane-b|tools)(?:\\W|$)/]', message: SHEET };
 // Question sheet C3 end
 // P5 O1 M3 start (docs/doperpowers/plans/2026-10-27-p5-o1-seams.md, M3): the machine-bound services, the ones P5 moves
 // to mawsd (survey §2 items 1-7 and 12), import no Electron (value, type or dynamic) and not main's open-external (an
@@ -237,7 +239,7 @@ module.exports = defineConfig(
     files: ['src/renderer/src/sheet/**/*.{ts,tsx}'],
     rules: {
       'no-restricted-imports': ['error', { paths: SHEET_PATHS, patterns: [...SHEET_PATTERNS, ...YJS_PATTERNS, ...ENDPOINT_PATTERNS, SERVICE_COMPOSITION] }],
-      'no-restricted-syntax': ['error', SHEET_DYNAMIC, COMPILED_POSTFIX, YJS_DYNAMIC],
+      'no-restricted-syntax': ['error', SHEET_DYNAMIC, SHEET_APP_DYNAMIC, COMPILED_POSTFIX, YJS_DYNAMIC],
       'no-restricted-properties': [
         'error',
         { object: 'window', property: 'maws', message: SHEET },

@@ -51,30 +51,23 @@ export const SheetOptionSchema = z.looseObject({
 export type SheetOption = z.infer<typeof SheetOptionSchema>;
 
 // A captured file: a text with Read's own line facts, or an image with its media type. The record stores it; the model
-// adds `changed` (C2's I4 step 5).
-const reference = <S extends z.core.$ZodLooseShape>(extra: S) => {
-  const base = {
-    path: z.string().min(1),
-    abs: z.string().min(1),
-    sha256: z.string().regex(SHA256),
-    bytes: Int0,
-    size: Int0,
-    mtimeMs: Int0,
-    lines: z.tuple([Int1, Int1]).optional(),
-    mediaType: z.string().optional(),
-    startLine: Int1.optional(),
-    numLines: Int0.optional(),
-    totalLines: Int0.optional(),
-    ...extra,
-  };
-  return z.discriminatedUnion('kind', [
-    z.looseObject({ ...base, kind: z.literal('text'), startLine: Int1, numLines: Int0, totalLines: Int0 }),
-    z.looseObject({ ...base, kind: z.literal('image'), mediaType: z.string() }),
-  ]);
+// adds `changed` (C2's I4 step 5). Each variant's shape is written out whole, so narrowing on `kind` gives a text its
+// line facts as numbers and an image its media type as a string (a shape spread from a generic one typed them as absent).
+const referenceBase = {
+  path: z.string().min(1),
+  abs: z.string().min(1),
+  sha256: z.string().regex(SHA256),
+  bytes: Int0,
+  size: Int0,
+  mtimeMs: Int0,
+  lines: z.tuple([Int1, Int1]).optional(),
 };
-export const StoredReferenceSchema = reference({});
+const textReference = { ...referenceBase, kind: z.literal('text'), startLine: Int1, numLines: Int0, totalLines: Int0, mediaType: z.string().optional() };
+const imageReference = { ...referenceBase, kind: z.literal('image'), mediaType: z.string(), startLine: Int1.optional(), numLines: Int0.optional(), totalLines: Int0.optional() };
+const changed = { changed: z.boolean().nullable() };
+export const StoredReferenceSchema = z.discriminatedUnion('kind', [z.looseObject(textReference), z.looseObject(imageReference)]);
 export type StoredReference = z.infer<typeof StoredReferenceSchema>;
-export const SheetReferenceSchema = reference({ changed: z.boolean().nullable() });
+export const SheetReferenceSchema = z.discriminatedUnion('kind', [z.looseObject({ ...textReference, ...changed }), z.looseObject({ ...imageReference, ...changed })]);
 export type SheetReference = z.infer<typeof SheetReferenceSchema>;
 
 const question = {

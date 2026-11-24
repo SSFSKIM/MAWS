@@ -76,6 +76,22 @@ describe('SheetMarkdown', () => {
     nothingOfTheApp();
   });
 
+  it('gives a refused link no destination a middle click, a menu or a drag could follow; an allowed one keeps its own', () => {
+    render(<SheetMarkdown markdown={'[site](https://example.com/a) [ref](src/auth.ts) [other](src/other.ts) [mail](mailto:someone@example.com) [deck](maws-artifact:5f0c7a52-0000-4000-8000-000000000001) ![shot](https://example.com/x.png)'} references={REFERENCES} host={fixtureHost()} onReference={() => {}} />);
+    expect([...document.querySelectorAll('[href]')].map((element) => element.getAttribute('href'))).toEqual(['https://example.com/a']);
+    for (const name of ['other', 'mail', 'deck']) expect(screen.getByText(name).closest('[href]')).toBeNull();
+  });
+
+  it("decodes a path once, the same way for the policy and the drawn link", () => {
+    const spaced = { ...TEXT_REFERENCE, path: 'docs/my notes.md', abs: '/work/harbour/docs/my notes.md' };
+    const percent = { ...TEXT_REFERENCE, path: 'docs/100%25.md', abs: '/work/harbour/docs/100%25.md' };
+    expect(sheetLinkAction('docs/my%20notes.md', [spaced])).toEqual({ kind: 'reference', reference: spaced });
+    const onReference = vi.fn();
+    render(<SheetMarkdown markdown={'[mine](docs/100%2525.md)'} references={[percent]} host={fixtureHost()} onReference={onReference} />);
+    fireEvent.click(screen.getByText('mine'));
+    expect(onReference).toHaveBeenCalledWith(percent); // `%2525` decoded once names the file `100%25.md`
+  });
+
   it('draws the Markdown without raw HTML', () => {
     const { container } = render(<SheetMarkdown markdown={'<b>bold</b> and **strong**'} references={[]} host={fixtureHost()} onReference={() => {}} />);
     expect(container.querySelector('b')).toBeNull();

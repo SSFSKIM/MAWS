@@ -2,8 +2,9 @@
 import { describe, expect, it } from 'vitest';
 import type { SheetModel, SheetQuestion } from '@shared/sheet/model';
 import type { QuestionDraft } from '@shared/sheet/words';
-import { EMPTY_MEMORY, closeNote, editDraft, reconcile, sendAnswered, startSend, type SheetMemory } from './memory';
+import { EMPTY_MEMORY, attach, closeNote, editDraft, reconcile, settle, startSend, type SheetMemory } from './memory';
 import { pinModel } from './test-support/pin';
+import { CLASH, CLASH_REVISED, sheetOf } from './test-support/questions';
 
 const model = (name: string, side: 'before' | 'after'): SheetModel => pinModel(name, side)!;
 const question = (m: SheetModel, id: string): SheetQuestion => m.open.find((q) => q.id === id)!;
@@ -95,29 +96,96 @@ describe('the acts', () => {
     expect(editDraft(next, q1, null).drafts.has('q1')).toBe(false);
   });
 
-  it('holds the exact lines of a Send from the press until the door answers, and records an act per line', () => {
-    const lines = [{ v: 1 as const, key: 'maws-k-0001', kind: 'answer' as const, id: 'q1', revision: 2, picks: ['OAuth'], by: 'maws' as const }];
+  const line = { v: 1 as const, key: 'maws-k-0001', kind: 'answer' as const, id: 'q1', revision: 2, picks: ['OAuth'], by: 'maws' as const };
+  const lines = [line];
+
+  it('holds the exact lines of a Send from the press until the door answers, under its attempt, and records an act per line', () => {
     const typed = draft(2, { picks: ['OAuth'] });
-    const held = startSend(withDrafts([['q1', typed]]), lines, 5);
-    expect(held.sending).toEqual({ lines, state: 'sending', note: null });
+    const held = startSend(withDrafts([['q1', typed]]), lines, 5, 'attempt-1');
+    expect(held.sending).toEqual({ attempt: 'attempt-1', lines, state: 'sending', note: null });
     expect(held.acts).toEqual([{ key: 'maws-k-0001', kind: 'answer', id: 'q1', draft: typed, sentAt: 5, state: 'sending', note: null }]);
 
-    const failed = sendAnswered(held, lines, { ok: false, why: 'failed', message: 'timed out' });
-    expect(failed.sending).toEqual({ lines, state: 'failed', note: 'timed out' });
+    const failed = settle(held, 'attempt-1', { ok: false, why: 'failed', message: 'timed out' });
+    expect(failed.sending).toEqual({ attempt: 'attempt-1', lines, state: 'failed', note: 'timed out' });
     expect(failed.drafts.get('q1')).toBe(typed);
     expect(failed.acts[0].state).toBe('failed');
 
-    const again = startSend(failed, failed.sending!.lines, 9);
+    const again = startSend(failed, failed.sending!.lines, 9, 'attempt-2');
     expect(again.acts).toHaveLength(1);
     expect(again.acts[0]).toMatchObject({ key: 'maws-k-0001', state: 'sending', sentAt: 9 });
 
-    const done = sendAnswered(again, lines, { ok: true, results: [{ key: 'maws-k-0001', state: 'queued' }] });
+    const done = settle(again, 'attempt-2', { ok: true, results: [{ key: 'maws-k-0001', state: 'queued' }] });
     expect(done.sending).toBeNull();
     expect(done.drafts.get('q1')).toBe(typed); // until the model knows the act
   });
 
-  it("names a retract's question, so a note can say which answer could not be taken back", () => {
-    const lines = [{ v: 1 as const, key: 'maws-k-0002', kind: 'retract' as const, target: 'page-1601a001', by: 'maws' as const }];
-    expect(startSend(EMPTY_MEMORY, lines, 0, { 'page-1601a001': 'q1' }).acts[0]).toMatchObject({ kind: 'retract', id: 'q1', draft: null });
+  it('settles only the attempt it answers: a late answer of an earlier attempt changes nothing', () => {
+    const held = startSend(withDrafts([['q1', draft(2, { picks: ['OAuth'] })]]), lines, 0, 'attempt-2');
+    expect(settle(held, 'attempt-1', { ok: true, results: [] })).toBe(held);
+    expect(settle(held, 'attempt-1', { ok: false, why: 'failed', message: 'late' })).toBe(held);
+    expect(settle(EMPTY_MEMORY, 'attempt-1', { ok: true, results: [] })).toBe(EMPTY_MEMORY);
+  });
+
+  it.each(['refused', 'no-sheet', 'unavailable'] as const)('releases a Send the door answered %s, keeps every draft and says why', (why) => {
+    const typed = draft(2, { picks: ['OAuth'] });
+    const released = settle(startSend(withDrafts([['q1', typed]]), lines, 0, 'attempt-1'), 'attempt-1', { ok: false, why, message: 'The door said no.' });
+    expect(released.sending).toBeNull();
+    expect(released.drafts.get('q1')).toBe(typed);
+    expect(released.acts.map((act) => [act.state, act.note])).toEqual([['failed', 'Not sent: The door said no.']]);
+  });
+
+  it("names the question of every act of a Send, a retract's by the answer it travels with or the key it targets", () => {
+    const edit = [
+      { v: 1 as const, key: 'maws-k-0002', kind: 'retract' as const, target: 'page-1601a001', by: 'maws' as const },
+      { v: 1 as const, key: 'maws-k-0003', kind: 'answer' as const, id: 'q1', revision: 1, picks: ['B'], by: 'maws' as const },
+    ];
+    expect(startSend(EMPTY_MEMORY, edit, 0, 'a').acts.map((act) => [act.kind, act.id])).toEqual([['retract', 'q1'], ['answer', 'q1']]);
+    const takeBack = [{ v: 1 as const, key: 'maws-k-0004', kind: 'retract' as const, target: 'page-1601d002', by: 'maws' as const }];
+    expect(startSend(EMPTY_MEMORY, takeBack, 0, 'b', { 'page-1601d002': 'q2' }).acts[0]).toMatchObject({ kind: 'retract', id: 'q2', draft: null });
+  });
+});
+
+describe("the hidden line's header", () => {
+  it('is kept from the card the surface drew, while its question is listed or hidden, and dropped after', () => {
+    const drawn = reconcile(EMPTY_MEMORY, sheetOf([CLASH]));
+    expect(drawn.headers.get('q4')).toBe('Clash rule');
+    const hidden = reconcile(drawn, sheetOf([], { hidden: [{ id: 'q4', key: 'maws-k-0009' }] }));
+    expect(hidden.headers.get('q4')).toBe('Clash rule');
+    expect(reconcile(hidden, sheetOf([])).headers.has('q4')).toBe(false);
+  });
+});
+
+describe('a late image', () => {
+  const path = 'uploads/maws-late.png';
+
+  it('joins the draft as it is now, at the revision it was typed against, without confirming it', () => {
+    const carried = draft(1, { text: 'typed against revision 1' });
+    const next = attach(withDrafts([['q4', carried]], { marked: new Set(['q4']) }), CLASH_REVISED, path);
+    expect(next.drafts.get('q4')).toEqual({ ...carried, images: [path] });
+    expect(next.marked.has('q4')).toBe(true);
+  });
+
+  it('starts a draft of its own when the card has none, and never holds more than eight', () => {
+    expect(attach(EMPTY_MEMORY, CLASH, path).drafts.get('q4')).toEqual(draft(1, { images: [path] }));
+    const full = draft(1, { text: 'x', images: Array.from({ length: 8 }, (_, i) => `uploads/maws-${i}.png`) });
+    const memory = withDrafts([['q4', full]]);
+    expect(attach(memory, CLASH, path)).toBe(memory);
+  });
+
+  it('waits in a draft of its own when the draft it was pasted into was already sent, and joins it again if that comes back', () => {
+    const sent = draft(1, { text: 'sent words' });
+    const held = startSend(withDrafts([['q4', sent]]), [{ v: 1, key: 'maws-k-0005', kind: 'answer', id: 'q4', revision: 1, text: 'sent words', by: 'maws' }], 0, 'a');
+    const late = attach(held, CLASH, path);
+    expect(late.drafts.get('q4')).toEqual(draft(1, { images: [path] }));
+    expect(late.acts[0].draft).toBe(sent);
+    const refused = settle(late, 'a', { ok: false, why: 'refused', message: 'no' });
+    expect(refused.drafts.get('q4')).toEqual({ ...sent, images: [path] });
+  });
+
+  it('joins the draft itself once the door released the Send that carried it', () => {
+    const kept = draft(1, { text: 'kept words' });
+    const held = startSend(withDrafts([['q4', kept]]), [{ v: 1, key: 'maws-k-0006', kind: 'answer', id: 'q4', revision: 1, text: 'kept words', by: 'maws' }], 0, 'a');
+    const released = settle(held, 'a', { ok: false, why: 'no-sheet', message: 'no' });
+    expect(attach(released, CLASH, path).drafts.get('q4')).toEqual({ ...kept, images: [path] });
   });
 });

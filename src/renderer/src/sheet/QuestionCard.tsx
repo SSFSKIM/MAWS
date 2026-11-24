@@ -2,13 +2,17 @@
 // states which of frame 2's states it is in from its inputs alone: `question.queued` reads the queued answer back with
 // Take back and Edit (Edit opens a draft that replaces it); `mark` draws "Updated", and a card refused as stale says why
 // as well; a draft typed against an earlier revision is drawn as carried (its text in the field, its picks marked and not
-// picked) and counts for nothing in Send until the person keeps it or edits the card, which confirms it. Its own state is
-// what rightly dies with it: which option has the pointer or the focus, which reference is open, a compact card's fold.
-// Its root carries `data-sheet-question`, by which C4's page finds a card to scroll to.
+// picked) and counts for nothing in Send until the person keeps it or edits the card, which confirms it. A draft whose
+// card now shows another answer than the one it was written against (another surface queued one, or the queued answer it
+// edits is gone) is drawn as a conflict, and one whose text passes the inbox line's bound is marked; both stay editable
+// and out of Send until the person resolves them. A pasted image is handed to `onAttach` once saved, to join the draft
+// as it is then. Its own state is what rightly dies with it: which option has the pointer or the focus, which reference
+// is open, a compact card's fold. Its root carries `data-sheet-question`, by which C4's page finds a card to scroll to,
+// and is the preview's size container, with no padding or border of its own, so its breakpoint is the card's width.
 import { Checkbox, RadioGroup } from 'radix-ui';
 import { useEffect, useRef, useState, type ClipboardEvent, type ReactNode } from 'react';
 import type { SheetBody, SheetImageType, SheetOption, SheetQuestion, SheetReference } from '@shared/sheet/model';
-import { confirmDraft, isConfirmed, questionSentence, type QuestionDraft } from '@shared/sheet/words';
+import { confirmDraft, draftConflict, isConfirmed, isTooLong, questionSentence, type QuestionDraft } from '@shared/sheet/words';
 import { CardButton } from '../request-card/controls';
 import { NamedGlyph } from '../ui/glyph';
 import { SHEET_WORDS } from './copy';
@@ -28,6 +32,7 @@ export interface QuestionCardProps {
   onDraft(next: QuestionDraft | null): void;
   onDismiss(): void;
   onRetract(key: string): void; // take back the queued answer that stands on the question
+  onAttach(path: string): void; // a pasted image, saved: it joins the draft as it is when it lands, confirming nothing
 }
 
 const IMAGE_TYPES: readonly string[] = ['image/png', 'image/jpeg', 'image/gif', 'image/webp'] satisfies SheetImageType[];
@@ -111,36 +116,45 @@ function Note({ tone, children }: { tone: 'warning' | 'neutral'; children: React
   );
 }
 
-export function QuestionCard({ session, question, draft, mark, busy, host, density = 'full', onDraft, onDismiss, onRetract }: QuestionCardProps) {
+export function QuestionCard({ session, question, draft, mark, busy, host, density = 'full', onDraft, onDismiss, onRetract, onAttach }: QuestionCardProps) {
   const [pointed, setPointed] = useState<string | null>(null);
   const [focused, setFocused] = useState<string | null>(null);
-  const [opened, setOpened] = useState<ReadonlySet<string>>(new Set()); // references open, by hash
+  const [opened, setOpened] = useState<ReadonlySet<number>>(new Set()); // references open, by their place in the list (two may share a hash)
   const [folded, setFolded] = useState(true); // compact only
   const [pasteNote, setPasteNote] = useState<string | null>(null);
-  const latest = useRef(draft); // what a pasted image's late answer adds to
+  const attachLatest = useRef(onAttach); // a pasted image lands after the draft, the question, or the card itself moved on
   useEffect(() => {
-    latest.current = draft;
+    attachLatest.current = onAttach;
   });
 
   const queued = question.queued;
+  const conflict = draft !== undefined && draftConflict(draft, question);
   const editing = queued !== undefined && draft?.replaces === queued.key;
+  const tooLong = draft !== undefined && isTooLong(draft);
   const carried = draft !== undefined && !isConfirmed(draft, question);
   const picks = draft !== undefined && !carried ? draft.picks : [];
   const carriedPicks = carried ? draft.picks.filter((pick) => question.options.some((option) => option.label === pick)) : [];
 
   // Every edit starts from the draft as the person sees it: none, the confirmed one, or the carried one confirmed (§G).
   const startOf = (from: QuestionDraft | undefined): QuestionDraft => (from === undefined ? { revision: question.revision, picks: [], text: '', images: [] } : isConfirmed(from, question) ? from : confirmDraft(from, question));
-  const edit = (change: (from: QuestionDraft) => QuestionDraft, from = draft): QuestionDraft | undefined => {
-    if (busy) return from;
-    const next = change(startOf(from));
+  const edit = (change: (from: QuestionDraft) => QuestionDraft) => {
+    if (busy) return;
+    const next = change(startOf(draft));
     onDraft(isEmpty(next) ? null : next);
-    return isEmpty(next) ? undefined : next;
   };
   const pick = (label: string) => edit((from) => ({ ...from, picks: [label] }));
   const toggle = (label: string, on: boolean) => edit((from) => ({ ...from, picks: on ? [...from.picks.filter((p) => p !== label), label] : from.picks.filter((p) => p !== label) }));
   const type = (text: string) => edit((from) => ({ ...from, text }));
   const keep = () => !busy && draft !== undefined && onDraft(confirmDraft(draft, question));
   const removeImage = (path: string) => edit((from) => ({ ...from, images: from.images.filter((image) => image !== path) }));
+  // A conflict's two ways out: keep the draft against the answer the card shows now (an edit of the queued answer that
+  // stands, or a new answer where none stands), or drop it.
+  const keepMine = () => {
+    if (busy || draft === undefined) return;
+    const mine: QuestionDraft = { revision: draft.revision, picks: draft.picks, text: draft.text, images: draft.images };
+    onDraft(queued === undefined ? mine : { ...mine, replaces: queued.key });
+  };
+  const discardMine = () => !busy && onDraft(null);
 
   const paste = (event: ClipboardEvent<HTMLTextAreaElement>) => {
     const files = [...(event.clipboardData?.files ?? [])].filter((file) => IMAGE_TYPES.includes(file.type));
@@ -149,25 +163,28 @@ export function QuestionCard({ session, question, draft, mark, busy, host, densi
     const room = MAX_IMAGES - (draft?.images.length ?? 0);
     setPasteNote(files.length > room ? SHEET_WORDS.imagesFull : null);
     const save = host.saveImage;
-    // One at a time, each added to the draft the last one left, so two pasted together both stay.
+    // One at a time, in the order pasted; each joins the draft as it is when it is saved.
     void (async () => {
       for (const file of files.slice(0, Math.max(room, 0))) {
-        const saved = await save(session, { mediaType: file.type as SheetImageType, bytes: new Uint8Array(await file.arrayBuffer()) });
-        if (!saved.ok) {
-          setPasteNote(saved.why);
-          continue;
-        }
-        latest.current = edit((from) => (from.images.length >= MAX_IMAGES ? from : { ...from, images: [...from.images, saved.path] }), latest.current);
+        const saved = await file
+          .arrayBuffer()
+          .then((bytes) => save(session, { mediaType: file.type as SheetImageType, bytes: new Uint8Array(bytes) }))
+          .catch(() => ({ ok: false as const, why: SHEET_WORDS.pasteFailed }));
+        if (saved.ok) attachLatest.current(saved.path);
+        else setPasteNote(saved.why);
       }
     })();
   };
 
-  const openReference = (reference: SheetReference) => setOpened((was) => new Set(was).add(reference.sha256));
-  const setReference = (reference: SheetReference, open: boolean) =>
+  const openReference = (reference: SheetReference) => {
+    const at = question.references.indexOf(reference);
+    if (at >= 0) setOpened((was) => new Set(was).add(at));
+  };
+  const setReference = (at: number, open: boolean) =>
     setOpened((was) => {
       const next = new Set(was);
-      if (open) next.add(reference.sha256);
-      else next.delete(reference.sha256);
+      if (open) next.add(at);
+      else next.delete(at);
       return next;
     });
 
@@ -215,12 +232,12 @@ export function QuestionCard({ session, question, draft, mark, busy, host, densi
       {question.context !== undefined && question.context !== '' && <SheetMarkdown markdown={question.context} references={question.references} host={host} onReference={openReference} />}
       {question.references.length > 0 && (
         <div className="flex min-w-0 flex-col gap-0.5">
-          {question.references.map((reference) => (
-            <ReferenceView key={reference.sha256} session={session} reference={reference} host={host} open={opened.has(reference.sha256)} onOpenChange={(open) => setReference(reference, open)} />
+          {question.references.map((reference, at) => (
+            <ReferenceView key={`${at}:${reference.path}`} session={session} reference={reference} host={host} open={opened.has(at)} onOpenChange={(open) => setReference(at, open)} />
           ))}
         </div>
       )}
-      {queued !== undefined && !editing ? (
+      {queued !== undefined && !editing && !conflict ? (
         <>
           <QueuedAnswer picks={queued.picks} text={queued.text} />
           <div className="flex flex-wrap items-center justify-end gap-2">
@@ -235,6 +252,20 @@ export function QuestionCard({ session, question, draft, mark, busy, host, densi
         </>
       ) : (
         <>
+          {conflict && (
+            <>
+              {queued !== undefined && <QueuedAnswer picks={queued.picks} text={queued.text} />}
+              <Note tone="warning">
+                <span className="min-w-0 flex-1">{queued !== undefined ? SHEET_WORDS.conflictQueued : SHEET_WORDS.conflictGone}</span>
+                <CardButton disabled={busy} onClick={keepMine}>
+                  {SHEET_WORDS.keepMine}
+                </CardButton>
+                <CardButton disabled={busy} onClick={discardMine}>
+                  {SHEET_WORDS.discardMine}
+                </CardButton>
+              </Note>
+            </>
+          )}
           {mark === 'stale' ? (
             <Note tone="warning">
               <span className="min-w-0 flex-1">{SHEET_WORDS.stale}</span>
@@ -273,6 +304,7 @@ export function QuestionCard({ session, question, draft, mark, busy, host, densi
             value={draft?.text ?? ''}
             rows={2}
             disabled={busy}
+            aria-invalid={tooLong || undefined}
             onChange={(event) => type(event.target.value)}
             onPaste={paste}
             className="w-full resize-y rounded-sm border border-border-strong bg-bg px-2 py-1.5 text-fg outline-accent placeholder:text-fg-faint focus-visible:outline-2"
@@ -284,6 +316,7 @@ export function QuestionCard({ session, question, draft, mark, busy, host, densi
               ))}
             </div>
           )}
+          {tooLong && <p className="m-0 text-ui-sm text-warning">{SHEET_WORDS.tooLong}</p>}
           {pasteNote !== null && <p className="m-0 text-ui-sm text-fg-muted">{pasteNote}</p>}
           <button type="button" disabled={busy} onClick={onDismiss} className={QUIET}>
             {SHEET_WORDS.dismiss}
@@ -297,9 +330,7 @@ export function QuestionCard({ session, question, draft, mark, busy, host, densi
     return (
       <article data-sheet-question={question.id} tabIndex={-1} onFocus={(event) => event.target === event.currentTarget && setFolded(false)} className="@container flex min-w-0 flex-col outline-none [&+&]:border-t [&+&]:border-border">
         <button type="button" aria-expanded={!folded} onClick={() => setFolded(!folded)} className="flex w-full min-w-0 items-baseline gap-1.5 rounded-sm py-1.5 text-left text-fg-muted outline-accent focus-visible:outline-2">
-          <span className="self-center">
-            <Chevron />
-          </span>
+          <Chevron className="self-center" />
           <span className="shrink-0 text-fg-faint tabular-nums">{question.id}</span>
           {question.header && <span className="max-w-[40%] shrink-0 truncate font-medium text-fg">{question.header}</span>}
           {from !== null && <span className="shrink-0">· {SHEET_WORDS.from(from)}</span>}
@@ -316,12 +347,14 @@ export function QuestionCard({ session, question, draft, mark, busy, host, densi
     );
   }
   return (
-    <article data-sheet-question={question.id} tabIndex={-1} className="@container flex min-w-0 flex-col gap-3 rounded-md border border-border bg-bg-raised p-3 text-ui text-fg outline-accent focus-visible:outline-2">
-      <div className="flex min-w-0 flex-col gap-1">
-        {head}
-        <p className="m-0 font-medium whitespace-pre-wrap [overflow-wrap:anywhere]">{question.question}</p>
+    <article data-sheet-question={question.id} tabIndex={-1} className="@container min-w-0 rounded-md outline-accent focus-visible:outline-2">
+      <div className="flex min-w-0 flex-col gap-3 rounded-md border border-border bg-bg-raised p-3 text-ui text-fg">
+        <div className="flex min-w-0 flex-col gap-1">
+          {head}
+          <p className="m-0 font-medium whitespace-pre-wrap [overflow-wrap:anywhere]">{question.question}</p>
+        </div>
+        {body}
       </div>
-      {body}
     </article>
   );
 }

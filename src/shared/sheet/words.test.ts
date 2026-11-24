@@ -3,7 +3,7 @@
 import { describe, expect, it } from 'vitest';
 import type { SheetQuestion } from './model';
 import { lineError } from './read';
-import { SEND_MAX_LINES, confirmDraft, hasAnswer, isConfirmed, questionSentence, receiptOf, sendOf, type QuestionDraft } from './words';
+import { SEND_MAX_LINES, TEXT_MAX, confirmDraft, draftConflict, hasAnswer, isConfirmed, isTooLong, questionSentence, receiptOf, sendOf, type QuestionDraft } from './words';
 
 function question(id: string, options: string[] = ['Yes', 'No'], fields: Partial<SheetQuestion> = {}): SheetQuestion {
   return {
@@ -123,6 +123,7 @@ describe('sendOf', () => {
   it('stops before the draft whose lines would pass fifty, and never parts a retract from its answer', () => {
     expect(SEND_MAX_LINES).toBe(50);
     const open = Array.from({ length: 51 }, (_, n) => question(`q${n + 1}`));
+    open[49] = question('q50', ['Yes', 'No'], { queued: { key: 'cli-00000001', kind: 'answer', picks: ['Yes'], text: '', images: [], revision: 1, by: 'cli' } });
     const drafts = new Map(open.slice(0, 49).map((q) => [q.id, draft({ picks: ['Yes'] })]));
     drafts.set('q50', draft({ picks: ['No'], replaces: 'cli-00000001' }));
     const send = sendOf(open, drafts, 'maws', keys());
@@ -133,5 +134,39 @@ describe('sendOf', () => {
     // A one-line draft after it waits too: one Send takes the questions in order and stops.
     drafts.set('q51', draft({ picks: ['No'] }));
     expect(sendOf(open, drafts, 'maws', keys())).toMatchObject({ ids: send.ids, left: 2 });
+  });
+});
+
+describe('what Send may take', () => {
+  const queued = (key: string) => ({ key, kind: 'answer' as const, picks: ['Yes'], text: '', images: [], revision: 1, by: 'cli' as const });
+
+  it('holds a draft in conflict when the answer its card shows is not the one it was written against', () => {
+    expect(draftConflict(draft({ picks: ['No'] }), question('q1'))).toBe(false);
+    expect(draftConflict(draft({ picks: ['No'], replaces: 'cli-1901a001' }), question('q1', ['Yes', 'No'], { queued: queued('cli-1901a001') }))).toBe(false);
+    // another surface queued an answer while this draft was written
+    expect(draftConflict(draft({ picks: ['No'] }), question('q1', ['Yes', 'No'], { queued: queued('cli-1901a001') }))).toBe(true);
+    // the queued answer it edits was taken back, or replaced by another
+    expect(draftConflict(draft({ picks: ['No'], replaces: 'cli-1901a001' }), question('q1'))).toBe(true);
+    expect(draftConflict(draft({ picks: ['No'], replaces: 'cli-1901a001' }), question('q1', ['Yes', 'No'], { queued: queued('cli-1901a002') }))).toBe(true);
+  });
+
+  it('counts a text past 20,000 code points as too long, in code points', () => {
+    expect(TEXT_MAX).toBe(20000);
+    expect(isTooLong(draft({ text: 'a'.repeat(20000) }))).toBe(false);
+    expect(isTooLong(draft({ text: 'a'.repeat(20001) }))).toBe(true);
+    expect(isTooLong(draft({ text: '😀'.repeat(20000) }))).toBe(false); // 40,000 UTF-16 units
+  });
+
+  it('takes neither a draft in conflict nor one too long, and leaves both out of its count and its rest', () => {
+    const open = [question('q1', ['Yes', 'No'], { queued: queued('cli-1901a001') }), question('q2'), question('q3')];
+    const drafts = new Map<string, QuestionDraft>([
+      ['q1', draft({ picks: ['No'] })],
+      ['q2', draft({ text: 'x'.repeat(20001) })],
+      ['q3', draft({ picks: ['Yes'] })],
+    ]);
+    const send = sendOf(open, drafts, 'maws', keys());
+    expect(send.ids).toEqual(['q3']);
+    expect(send.left).toBe(0);
+    for (const line of send.lines) expect(lineError(line)).toBeNull();
   });
 });

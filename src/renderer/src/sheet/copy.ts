@@ -12,7 +12,8 @@ export const SHEET_WORDS = {
   send: (n: number) => (n === 0 ? 'Send' : `Send ${plural(n, 'answer', 'answers')}`),
   rest: (n: number) => `${n} more after this`, // Send's rest: confirmed drafts past one Send's fifty inbox lines
   sendAgain: 'Send again', // a Send that failed, or whose answer never came: the same inbox lines again
-  notSent: 'Not sent.', // beside Send again; the door's reason is its tooltip
+  notSent: 'Not sent.', // beside Send again, the door's reason under it
+  notSentNote: (reason: string) => `Not sent: ${reason}`, // a Send the door refused: its hold released, its drafts kept
   placeholder: 'Type your own answer',
   answerName: (id: string) => `Your answer to ${id}`, // the text field's accessible name
   recommended: 'Recommended',
@@ -44,6 +45,13 @@ export const SHEET_WORDS = {
   image: (n: number) => `Image ${n}`,
   removeImage: (n: number) => `Remove image ${n}`,
   imagesFull: 'An answer holds at most 8 images',
+  pasteFailed: 'The image could not be saved.', // a paste the host could not save
+  tooLong: 'An answer holds at most 20,000 characters.', // the inbox line's bound, beside a text past it
+  // A draft whose card now shows another answer than the one it was written against, out of Send until the person chooses
+  conflictQueued: 'Another answer was queued here while you wrote yours.',
+  conflictGone: 'The queued answer you were editing is no longer there.',
+  keepMine: 'Keep mine',
+  discardMine: 'Discard mine',
   // The overview of a machine's sheets (C4's `/`)
   overview: {
     running: 'Running',

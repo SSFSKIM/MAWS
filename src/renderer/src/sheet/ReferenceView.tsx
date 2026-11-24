@@ -44,7 +44,7 @@ function Body({ body, reference }: { body: SheetBody | null; reference: SheetRef
   if (body.kind === 'image') {
     return <img alt={reference.path} src={`data:${body.mediaType};base64,${body.data}`} data-reference-body="image" className="block h-auto max-w-full rounded-sm border border-border" />;
   }
-  return <TextBody text={body.text} startLine={reference.startLine ?? 1} />;
+  return <TextBody text={body.text} startLine={reference.kind === 'text' ? reference.startLine : 1} />;
 }
 
 export function ReferenceView({ session, reference, host, open: controlled, onOpenChange }: ReferenceViewProps) {
@@ -69,7 +69,7 @@ export function ReferenceView({ session, reference, host, open: controlled, onOp
     onOpenChange?.(!open);
   };
   const range = rangeOf(reference);
-  const startLine = reference.startLine ?? null;
+  const startLine = reference.kind === 'text' ? reference.startLine : null;
   return (
     <div className="flex min-w-0 flex-col gap-0.5" data-sheet-reference={reference.sha256}>
       <div className="flex min-h-6 min-w-0 items-center gap-1.5 text-ui-sm text-fg-muted">
@@ -87,7 +87,7 @@ export function ReferenceView({ session, reference, host, open: controlled, onOp
           )}
         </button>
         {host.openFile && (
-          <NamedGlyph label={SHEET_WORDS.openFile} className="inline-flex size-5 shrink-0 items-center justify-center rounded-sm text-fg-muted outline-accent hover:bg-bg-hover hover:text-fg focus-visible:outline-2" onClick={() => host.openFile?.(reference.abs, startLine ?? reference.lines?.[0] ?? null)}>
+          <NamedGlyph label={SHEET_WORDS.openFile} className="inline-flex size-5 shrink-0 items-center justify-center rounded-sm text-fg-muted outline-accent hover:bg-bg-hover hover:text-fg focus-visible:outline-2" onClick={() => host.openFile?.(reference.abs, startLine)}>
             <OpenIcon />
           </NamedGlyph>
         )}

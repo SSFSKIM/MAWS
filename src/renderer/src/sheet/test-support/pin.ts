@@ -61,7 +61,7 @@ export async function pinBody(name: string, side: PinSide, of: SheetBodyRequest)
   if ('ref' in of) {
     const reference = model.open.flatMap((question) => question.references).find((entry) => entry.sha256 === of.ref);
     if (!reference) return { kind: 'gone' };
-    if (reference.kind === 'image') return image(`refs/${of.ref}`, reference.mediaType ?? '');
+    if (reference.kind === 'image') return image(`refs/${of.ref}`, reference.mediaType);
     const text = find(TEXTS, `refs/${of.ref}`);
     return text ? { kind: 'text', text: await text() } : { kind: 'gone' };
   }

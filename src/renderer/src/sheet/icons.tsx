@@ -1,8 +1,8 @@
 // The sheet's glyphs, drawn in the line's colour.
-export function Chevron() {
-  // transcript.css turns it when its button is expanded
+export function Chevron({ className }: { className?: string }) {
+  // transcript.css turns it when it is its expanded button's own child
   return (
-    <svg className="transcript-chevron" viewBox="0 0 12 12" aria-hidden="true">
+    <svg className={className ? `transcript-chevron ${className}` : 'transcript-chevron'} viewBox="0 0 12 12" aria-hidden="true">
       <path d="m4 2 4 4-4 4" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
     </svg>
   );
