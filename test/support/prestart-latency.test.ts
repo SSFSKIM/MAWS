@@ -1,7 +1,11 @@
 // The prestart measure's numbers (ticket 851, M5; docs/doperpowers/plans/2026-11-24-prestart-engine.md, D14), proved
 // before any Mac run: the arms' order, which runs count, what makes a run invalid, the medians and the bound.
+import { execFileSync } from 'node:child_process';
+import { existsSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { armsOfPair, judgePrestartRuns, median, PRESTART_BENCH, prestartLine, publicText, startsAroundSend, type PrestartRun } from './prestart-latency';
+import { armsOfPair, judgePrestartRuns, markerHookCommand, median, PRESTART_BENCH, prestartLine, publicText, startsAroundSend, type PrestartRun } from './prestart-latency';
 
 // A run as the arm's own path makes it: flag-on's one engine started while typing, flag-off's at Send
 const run = (arm: PrestartRun['arm'], pair: number, sendToPaintMs: number | null, over: Partial<PrestartRun> = {}): PrestartRun => ({
@@ -130,5 +134,22 @@ describe('the prestart measure', () => {
       'a log of /Users/<user>/x; Authorization: Bearer [REDACTED], key sk-ant-[REDACTED], mail owner@redacted.invalid',
       'a value of the runner: [REDACTED]',
     ].join('\n'));
+  });
+});
+
+// The prestart panel (sweep#8): the acceptance's hooks run through /bin/sh, and a scratch path is whatever the temporary
+// directory's real path is
+describe('the acceptance’s SessionStart hook', () => {
+  it('writes its marker under a path holding an apostrophe, a space and a dollar sign, as one word', () => {
+    const root = mkdtempSync(join(tmpdir(), 'prestart-hook-'));
+    try {
+      const dir = join(root, "it's a $HOME `x`");
+      mkdirSync(dir);
+      const marker = join(dir, 'session-start-hook-1.done');
+      execFileSync('/bin/sh', ['-c', markerHookCommand(marker)]);
+      expect(existsSync(marker)).toBe(true);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 });

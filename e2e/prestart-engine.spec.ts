@@ -23,6 +23,7 @@ import { expect, test } from '@playwright/test';
 import { launchMaws } from './support/launch';
 import { startModelStub, type ModelStub } from './support/model-stub';
 import { measurePrestart } from './support/prestart-measure';
+import { markerHookCommand } from '../test/support/prestart-latency';
 import { realEngine } from './support/real-engine';
 
 test.skip(process.env.MAWS_PRESTART_ENGINE_PERF !== '1', 'the prestart acceptance runs under pnpm e2e:prestart-engine (MAWS_PRESTART_ENGINE_PERF=1)');
@@ -32,7 +33,7 @@ test.describe.configure({ timeout: 40 * 60_000 });
 // failed or never ran writes none); their commands differ, so the engine runs each (it runs one copy of a repeated one)
 const HOOK_NUMBERS = [1, 2, 3];
 const hookMarker = (dir: string, n: number) => join(dir, `session-start-hook-${n}.done`);
-const hooksIn = (dir: string) => HOOK_NUMBERS.map((n) => ({ type: 'command', command: `sleep 0.2 && : > '${hookMarker(dir, n)}'` }));
+const hooksIn = (dir: string) => HOOK_NUMBERS.map((n) => ({ type: 'command', command: markerHookCommand(hookMarker(dir, n)) }));
 const REPLY = '⟦t1:1⟧ The prestart acceptance reply.'; // a marker of test/support/latency-engine.ts's pattern, which the page finds
 const MESSAGE_START_ESTIMATE_MS = [600, 1_400]; // the live model's own time to message_start, measured 2026-11-23
 
