@@ -231,7 +231,33 @@ it('a tool line’s text starts at the prose edge, its glyph slot hung in the 16
   const ring = sheetRules().find((rule) => rule.selectorText.includes('.transcript-run-line[data-line="running"]::before') && rule.style.marginLeft !== '')!;
   expect(px(ring.style.marginLeft) + 9).toBe(left + width); // the 9 px ring at the slot's right edge
   const block = sheetRules().find((rule) => rule.selectorText === '.transcript-tool-block .transcript-cell-line')!;
-  expect(px(block.style.paddingLeft)).toBe(16); // an opened run's rows hang theirs in their own padding
+  expect(px(block.style.paddingLeft) + left).toBe(8); // an opened run's rows hang theirs in their own padding, 8 px clear of the frame's border
+});
+
+// The third pair review: the denied jump's focus ring takes in the hung mark, with the clearance it had round the text.
+it('a lone call’s box takes in its glyph’s gutter, so its focus ring rings the mark', async () => {
+  const left = px(slotRule().style.marginLeft);
+  const store = await opened(everyCase());
+  const cell = renderRow(cellRow(store.rows(), 'deny'), { storeKey: store.key }).container.querySelector<HTMLElement>('[data-cell-id]')!;
+  const s = getComputedStyle(cell);
+  expect([px(s.marginLeft), px(s.paddingLeft)]).toEqual([left, -left]); // the box starts where the slot does; the text stays at the prose edge
+  const ring = sheetRules().find((rule) => rule.selectorText.includes('.transcript-cell:focus'))!;
+  expect([ring.style.outlineOffset, cell.tabIndex]).toEqual(['4px', -1]); // drawn 4 px outside that box
+});
+
+// The third pair review: whatever opens under a line hangs 19 px in from its text: an opened run's blocks as a call's
+// detail, a thumbnail and the browser steps do.
+it('an opened run’s blocks hang 19 px in from its line’s text, as every opened detail does', async () => {
+  const store = await opened(everyCase());
+  useTranscriptStore.getState().toggleGroup(store.key, rowOf(store.rows(), 'group').id);
+  const run = renderRow(rowOf(store.rows(), 'group'), { storeKey: store.key });
+  const body = run.container.querySelector<HTMLElement>('.transcript-run-body')!;
+  expect(body.querySelector('.transcript-tool-block')).not.toBeNull();
+  const image = renderRow(cellRow(store.rows(), 'shot'), { storeKey: store.key }).container.querySelector('.transcript-cell-thumb')!;
+  const indent = (element: Element) => getComputedStyle(element).marginLeft;
+  expect([indent(body), indent(image)]).toEqual(['19px', '19px']);
+  const one = renderRow(cellRow(store.rows(), 'one'), { storeKey: store.key });
+  expect(one.container.querySelector('.transcript-run-body')).toBeNull(); // a run of one's body is its call's detail, which hangs so itself
 });
 
 // The whole transcript and the report view: no tool call draws a box at rest. (An opened run keeps its block of calls,

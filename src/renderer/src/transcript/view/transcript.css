@@ -370,7 +370,8 @@ button.transcript-chip:hover { background: var(--bg-hover); }
 .transcript-tool-block { border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; }
 .transcript-tool-block:empty { display: none; }
 .transcript-tool-block > * + * { border-top: 1px solid var(--border); }
-.transcript-tool-block .transcript-cell-line { padding: 8px 12px 8px 16px; min-height: 36px; font-size: var(--text-ui); } /* board ticket 852: 16 px on the left, the glyph's gutter */
+.transcript-tool-block .transcript-cell-line { padding: 8px 12px 8px 24px; min-height: 36px; font-size: var(--text-ui); } /* board ticket 852: 24 px on the left, the glyph's 16 px gutter 8 px clear of the frame's border */
+.transcript-run-body { margin-left: 19px; } /* board ticket 852: a run's blocks hang 19 px in from its line's text */
 .transcript-tool-block .transcript-cell-detail { margin: 0 12px 12px; }
 .transcript-tool-block .transcript-chevron { opacity: 1; }
 .transcript-cell-line:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; border-radius: var(--radius-sm); }
@@ -458,7 +459,7 @@ button.transcript-chip:hover { background: var(--bg-hover); }
    rhythm; what it shows at rest (an image's thumbnail, a blocked call's control) and its opened detail sit under it,
    indented 19 px from its text. A run of one is a run (`.transcript-group`). */
 .transcript-standalone { display: flow-root; }
-.transcript-cell[data-standalone] { margin: 1px 0 6px; }
+.transcript-cell[data-standalone] { margin: 1px 0 6px -16px; padding-left: 16px; } /* board ticket 852: the box takes in the hung glyph's gutter, so a focus ring (the denied jump's target) rings the mark too */
 .transcript-cell[data-standalone] > .transcript-cell-line { display: flex; width: fit-content; gap: 6px; max-width: 100%; min-width: 0; min-height: 24px; font-size: var(--text-ui); line-height: 24px; }
 .transcript-cell[data-standalone] > .transcript-cell-line > .transcript-chevron { margin-left: 0; }
 .transcript-cell-thumb { display: block; max-width: min(240px, calc(100% - 19px)); max-height: 96px; margin: 2px 0 2px 19px; border: 1px solid var(--border); border-radius: var(--radius-sm); object-fit: contain; }

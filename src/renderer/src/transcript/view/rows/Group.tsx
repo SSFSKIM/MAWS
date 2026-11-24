@@ -61,7 +61,9 @@ export function GroupRow({ row, renderCell, renderBody }: { row: GroupRowData; r
           {line.kind === 'caption' && <LineCounts added={row.counts.added} removed={row.counts.removed} apart={(row.fold ?? 0) > 0} />}
           <Chevron />
         </button>
-        <DisclosureBody open={row.expanded} id={bodyId} closed={live?.kind === 'thought' && <Thought segment={live} row={row} />}>
+        {/* board ticket 852: a run's blocks of calls hang 19 px in from its line's text, as everything opened under a line
+            does; a run of one's body is its call's detail, which hangs so itself */}
+        <DisclosureBody open={row.expanded} id={bodyId} className={renderBody ? undefined : 'transcript-run-body'} closed={live?.kind === 'thought' && <Thought segment={live} row={row} />}>
           {renderBody ? renderBody() : <RunBody row={row} draw={draw} />}
         </DisclosureBody>
       </div>

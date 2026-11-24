@@ -5615,17 +5615,30 @@ test('the tool card retired: lone calls failed, denied, a js call, an image, a r
     };
     // The check that `target` is in sight: the point near its start shows the target itself, so it is inside the window
     // and nothing is drawn over it (the message box, a notice); a row the message box covers is still in the viewport
-    // (a miss reads back the target's box and what the point hit, so `_run.json` says why)
-    const seen = (target: Locator, what: string) => () =>
-      expect.poll(() => target.evaluate((el) => {
-        const r = el.getBoundingClientRect();
-        const box = `box ${Math.round(r.left)},${Math.round(r.top)} ${Math.round(r.width)}x${Math.round(r.height)}`;
-        if (r.width === 0 || r.height === 0) return `no size: ${box}`;
-        const hit = document.elementFromPoint(r.left + Math.min(48, r.width / 2), r.top + Math.min(10, r.height / 2));
-        if (hit !== null && el.contains(hit)) return 'in sight';
-        const name = hit === null ? 'nothing' : `${hit.tagName.toLowerCase()}${hit.className && typeof hit.className === 'string' ? `.${hit.className.trim().split(/\s+/).join('.')}` : ''}`;
-        return `${box}; the point hit ${name}`;
-      }), { message: `${what} in sight, nothing over it`, timeout: 3_000 }).toBe('in sight');
+    // A miss throws with what it saw, so `_run.json` says why: the target's box and what the point hit, or that it is not
+    // drawn at all (a virtualised row, a stretch still folded), with the list's scroll, the message box's rect and the
+    // rows the list has mounted.
+    const seen = (target: Locator, what: string) => async () => {
+      let last = '';
+      for (const until = Date.now() + 3_000; Date.now() < until; await page.waitForTimeout(200)) {
+        last = (await target.count()) === 0 ? 'not drawn' : await target.evaluate((el) => {
+          const r = el.getBoundingClientRect();
+          const box = `box ${Math.round(r.left)},${Math.round(r.top)} ${Math.round(r.width)}x${Math.round(r.height)}`;
+          if (r.width === 0 || r.height === 0) return `no size: ${box}`;
+          const hit = document.elementFromPoint(r.left + Math.min(48, r.width / 2), r.top + Math.min(10, r.height / 2));
+          if (hit !== null && el.contains(hit)) return 'in sight';
+          const name = hit === null ? 'nothing' : `${hit.tagName.toLowerCase()}${hit.className && typeof hit.className === 'string' ? `.${hit.className.trim().split(/\s+/).join('.')}` : ''}`;
+          return `${box}; the point hit ${name}`;
+        });
+        if (last === 'in sight') return;
+      }
+      const scene = await scroller(page).evaluate((list) => {
+        const frame = document.querySelector('[data-region="main"] [data-pane="0"] [data-composer-frame]')?.getBoundingClientRect();
+        const rows = Array.from(list.querySelectorAll('[data-row-id]'), (row) => row.getAttribute('data-row-id'));
+        return `scrollTop ${Math.round(list.scrollTop)} of ${Math.round(list.scrollHeight)} (client ${list.clientHeight}); message box ${frame ? `${Math.round(frame.top)}..${Math.round(frame.bottom)}` : 'none'}; rows mounted ${rows.join(' ')}`;
+      }).catch((error: unknown) => `the list not read: ${String(error)}`);
+      throw new Error(`${what} in sight, nothing over it: ${last}; ${scene}`);
+    };
     // A run's line (or, on master's build, a lone call's card line, the first disclosure of its row) pointed at, and the
     // check that its chevron is drawn: lines and runs show it only on pointing, focus or open (a card always did)
     const pointAt = async (line: Locator) => {
@@ -5762,6 +5775,10 @@ test('the tool card retired: lone calls failed, denied, a js call, an image, a r
     await shot(page, meta('tc-rv-open-js', 'The to-human view opened at the js call', 'The session “report” (invented), each record line pressed, scrolled so the js call’s row is near the top', 'The js call with its browser activity, then the lone command before the last message', rvFolders), async () => {
       await opened('report');
       await openStretchesAll();
+      await place(rowOf(`cell:${rvJs}`));
+      // the stretches below the first screen were not mounted while the first ones opened: open what the js call's
+      // screen shows still closed (the lone command's), then place the js call again
+      await unfold(page, closedLines(), 'a closed record line below', 4);
       await place(rowOf(`cell:${rvJs}`));
     }, { check: checks(seen(cellOf(rvJs), 'the js call'), seen(activityOf(rvJs).last(), 'its browser activity, to the last row'), seen(rowOf(`cell:${tcTool('report', 'Branch')}`).locator('.transcript-run-line, .transcript-cell-line').first(), 'the lone command’s line after it')) }); // its line as drawn: a run of one's run line, master's card line
     // The report draws a finished turn's line only while one of its stretches is open (owner/view/mirror.ts), so the
