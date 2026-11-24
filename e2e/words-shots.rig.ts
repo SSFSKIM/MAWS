@@ -1046,6 +1046,7 @@ const M5_EDITOR_WORDS = {
   historyBoards: { m5: 'Boards', master: 'Boards in this version' }, // G549
   // design-system: renderer/src/artifacts/design-system/copy.ts and src/artifacts/design-system/page
   dsCheck: 'Check against law',
+  documentCaption: { m5: 'components/document.css', master: 'components/document.css on a sample handout' }, // G577
   accentHex: '--ds-color-accent hex', // the palette's accent field (page/Palette.tsx), both builds
   dsSetDefault: 'Set as my default',
   dsDelete: 'Delete design system…',
@@ -5757,9 +5758,9 @@ const M5_LAUNCH = [
   'm5-slides-thumb-menu', 'm5-slides-held', 'm5-slides-section-tip', 'm5-slides-check', 'm5-slides-theme', 'm5-slides-comments', 'm5-slides-comments-deleted',
   'm5-slides-comments-empty', 'm5-slides-version', 'm5-slides-version-done-tip', 'm5-slides-version-name', 'm5-slides-notes', 'm5-slides-notes-long', 'm5-slides-saved',
   'm5-slides-empty', 'm5-design-rest', 'm5-design-board', 'm5-design-board-tip', 'm5-design-board-menu', 'm5-design-row-size', 'm5-design-held', 'm5-design-oversize',
-  'm5-design-missing', 'm5-design-empty', 'm5-design-comments', 'm5-design-comments-deleted', 'm5-design-comments-empty', 'm5-design-version', 'm5-design-saved', 'm5-ds-rest',
+  'm5-design-missing', 'm5-design-empty', 'm5-design-comments', 'm5-design-comments-deleted', 'm5-design-comments-empty', 'm5-design-version', 'm5-design-saved', 'm5-design-held-title', 'm5-ds-rest',
   'm5-ds-header-tip', 'm5-ds-default-tip', 'm5-ds-badge-tip', 'm5-ds-check', 'm5-ds-check-tip', 'm5-ds-violations', 'm5-ds-violation-tip', 'm5-ds-unresolved',
-  'm5-ds-lawless', 'm5-ds-empty', 'm5-ds-saved', 'm5-ds-in-use', 'm5-slides-full',
+  'm5-ds-lawless', 'm5-ds-empty', 'm5-ds-saved', 'm5-ds-canon', 'm5-ds-in-use', 'm5-slides-full',
   'm5-artifact-deleted',
 ];
 const SPACE = 'Field research';
@@ -6106,7 +6107,10 @@ test('the word cut’s M5: the library’s Spaces, opened artifacts, the documen
         await expect(tooLarge(), 'the too-large sheet').toBeVisible({ timeout: 3_000 });
         await inView(tooLarge().getByText(byM5(M5_WORDS.tooLarge), { exact: m5Cut() }), 'the sheet’s sentence');
         // G556: the scale a whole-number percentage on M5 (master: to the hundredth), in the title and the button
-        await expect(tooLarge().getByRole('button', { name: m5Cut() ? /^Export at \d+%$/ : /^Export at \d+(\.\d+)?%$/ }), 'the scale on the button').toHaveCount(1);
+        // the poster is 1080 × 9000 px: the scale that fits is 0.9102, a whole 91% on M5, master's 91.02%
+        const scale = m5Cut() ? '91%' : '91.02%';
+        await expect(tooLarge(), 'the scale in the title').toHaveAccessibleName(`Export “Poster” at ${scale}?`);
+        await expect(tooLarge().getByRole('button', { name: `Export at ${scale}`, exact: true }), 'the scale on the button').toHaveCount(1);
       },
       after: () => closeOverlays(page),
     });
@@ -6221,7 +6225,7 @@ test('the word cut’s M5: the library’s Spaces, opened artifacts, the documen
       check: () => tipShown(page, historyButton('notes'), 'Version history', historyButton('notes'), m5Cut)(),
     });
     const tableMenu = () => page.getByRole('menu', { name: M5_WORDS.table, exact: true });
-    await shot(page, m5Meta('m5-doc-table-menu', 'G331, G337', 'A document, the caret in a table, its Table menu', 'Field notes, click a table cell, then Table ▾', 'The Table menu’s eight commands (master: eight worded buttons in the toolbar)', ['tools/document', 'src/artifacts/document/editor']), async () => {
+    await shot(page, m5Meta('m5-doc-table-menu', 'G331, G337', 'A document, the caret in a table, its Table menu', 'Field notes, click a table cell, then Table ▾', 'The Table menu’s eight commands (master: its worded commands in the toolbar’s scrolling strip, scrolled to them: the first in view, all eight drawn in the row)', ['tools/document', 'src/artifacts/document/editor']), async () => {
       await docAtRest('notes');
       await editorOf('notes').locator('td').first().click();
       await page.waitForTimeout(400);
@@ -6642,10 +6646,15 @@ test('the word cut’s M5: the library’s Spaces, opened artifacts, the documen
     const selectOnStage = async (key: Fixture, slide: string, element: string) => {
       const box = (await tab(key).locator(`[data-stage-slide="${slide}"] [data-eid="${element}"]`).first().boundingBox())!;
       await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
-      await expect(tab(key).locator('[data-overlay] [data-selected]').first(), `${element} selected`).toBeVisible({ timeout: 10_000 });
+      await expect(tab(key).locator(`[data-overlay] [data-selected="${element}"]`), `${element} selected`).toBeVisible({ timeout: 10_000 });
       const close = tab(key).getByRole('button', { name: E.closeInspector, exact: true });
       if (!(await close.isVisible())) await deckButton(key, E.inspector).click();
       await expect(close, 'the inspector').toBeVisible({ timeout: 10_000 });
+    };
+    // at the capture, the one element selected is `element` (the overlay's mark names it, transform/Overlay.tsx)
+    const selectedOnly = (key: Fixture, element: string) => async () => {
+      await expect(tab(key).locator('[data-overlay] [data-selected]'), 'one element selected').toHaveCount(1, { timeout: 3_000 });
+      await expect(tab(key).locator(`[data-overlay] [data-selected="${element}"]`), `${element} selected`).toBeVisible({ timeout: 3_000 });
     };
     const textCaption = (which: 'size' | 'weight') =>
       inspectorCard('talk').locator('.deck-inspector-mini').filter({ hasText: new RegExp(`^${literal(byM5(which === 'size' ? E.sizeCaption : E.weightCaption))}$`) }).first();
@@ -6733,6 +6742,7 @@ test('the word cut’s M5: the library’s Spaces, opened artifacts, the documen
       await letGo(page);
     }, {
       check: async () => {
+        await selectedOnly('talk', 'title')();
         await inView(inspectorCard('talk'), 'the inspector card');
         // G442: under the section's heading a caption drops the section's word; the field keeps the full name
         await inView(textCaption('size'), `the caption ${byM5(E.sizeCaption)}`);
@@ -6753,6 +6763,7 @@ test('the word cut’s M5: the library’s Spaces, opened artifacts, the documen
       await keyTip(spread, outlineNote);
     }, {
       check: checks(
+        selectedOnly('talk', 'dot'),
         tipHolds(spread, 'Spread', [E.outlineShadow], async () => {
           await inView(outlineNote(), 'master’s note under the section');
           await expect(spread(), 'master’s Spread disabled').toBeDisabled({ timeout: 3_000 });
@@ -7034,7 +7045,7 @@ test('the word cut’s M5: the library’s Spaces, opened artifacts, the documen
       await expect(designOf(key).locator(`[data-board-inspector="${board}"]`), `the ${board} board’s inspector`).toBeVisible({ timeout: 10_000 });
     };
     const designComment = () => designOf('screens').getByRole('button', { name: E.addComment, exact: true }).first();
-    await shot(page, m5Meta('m5-design-rest', 'G510, G511, G512, G522, G528, G529', 'A design at rest', 'Artifacts, Site screens (five boards, one held)', 'The workbench at rest: the boards toggle titled Boards, Add comment a glyph and no Comments of the toolbar’s own, each board’s name alone in the rail and over the canvas, no Held over the held board (master: “Show boards”, the worded pair, the sizes, the badge)', ['tools/design', 'src/artifacts/design/editor']), async () => {
+    await shot(page, m5Meta('m5-design-rest', 'G510, G511, G512, G522, G528', 'A design at rest', 'Artifacts, Site screens (five boards, one held)', 'The workbench at rest: the boards toggle titled Boards, Add comment a glyph and no Comments of the toolbar’s own, each board’s name alone in the rail and over the canvas, no Held over the held board (master: “Show boards”, the worded pair, the sizes, the badge)', ['tools/design', 'src/artifacts/design/editor']), async () => {
       await designAtRest('screens');
     }, {
       check: async () => {
@@ -7047,12 +7058,24 @@ test('the word cut’s M5: the library’s Spaces, opened artifacts, the documen
           await expect(designComment(), 'a glyph').toHaveText(/^$/);
           await expect(designOf('screens').locator('[data-comments-toggle]'), 'no Comments in the toolbar').toHaveCount(0);
           await expect(size, 'the row’s size waits for the pointer').toHaveCSS('opacity', '0');
-          await expect(boardTitle('screens', 'broken').locator('.design-board-badge'), 'no Held over the canvas').toHaveCount(0);
         } else {
-          // master's Held over a board's title is drawn only while the title has room (World.tsx, `full`): not checked
           await inView(designOf('screens').locator('[data-comments-toggle]'), 'master’s Comments');
           await inView(size, 'master’s size at rest');
         }
+      },
+    });
+    // G529, at a zoom where master's title has room for its Held (World.tsx draws it only then): the held board zoomed to
+    await shot(page, m5Meta('m5-design-held-title', 'G529', 'A design, the held board’s title', 'Site screens, the Broken row’s Zoom to board', 'The held board’s title over the canvas: its name and size alone, the dashed outline kept (master: a Held badge beside them)', ['tools/design', 'src/artifacts/design/editor']), async () => {
+      await designAtRest('screens');
+      await zoomToBoard('screens', 'broken');
+    }, {
+      check: async () => {
+        const title = boardTitle('screens', 'broken');
+        await inView(title.locator('.design-board-title-name'), 'the held board’s title');
+        // the title has room for what master draws beside the name: its size is mounted on both builds
+        await expect(title.locator('.design-board-title-size'), 'the title’s size, mounted at this zoom').toHaveCount(1);
+        if (m5Cut()) await expect(title.locator('.design-board-badge'), 'no Held over the canvas').toHaveCount(0);
+        else await inView(title.locator('.design-board-badge').filter({ hasText: /^Held$/ }), 'master’s Held');
       },
     });
     await shot(page, m5Meta('m5-design-board', 'G528, G536, G538', 'A design, a board selected', 'Site screens, the Tablet row’s Zoom to board, then the board’s title', 'The board framed, its title’s size drawn while it is selected (on M5 hidden at rest, master’s always), the inspector headed Tablet with Board and Board name, the size select captioned Size (master: Board size)', ['tools/design', 'src/artifacts/design/editor']), async () => {
@@ -7316,6 +7339,18 @@ test('the word cut’s M5: the library’s Spaces, opened artifacts, the documen
         await inView(badge(), 'master’s badge');
         await expect(badge().locator('.dsp-muted'), 'master’s verdict').toHaveText(E.dsVerdict.master);
       }),
+    });
+    // G577: the canon's document styles, below Palette, Type and Measures: their caption scrolled to
+    const documentCaption = () => dsSection('house', 'canon').locator('figure.dsp-canon-item:has(iframe.dsp-document-frame) figcaption').first();
+    await shot(page, m5Meta('m5-ds-canon', 'G577', 'A design system page, its canon’s document styles', 'The MAWS design system, scrolled to the end of Canon', 'The document styles preview captioned by its file alone, “components/document.css” (master: “… on a sample handout”)', ['src/artifacts/design-system/page']), async () => {
+      await dsAtRest('house', 'canon');
+      await documentCaption().evaluate((el) => el.scrollIntoView({ block: 'end' }));
+      await letGo(page);
+    }, {
+      check: async () => {
+        await inView(documentCaption(), 'the document styles’ caption');
+        await expect(documentCaption(), 'its words').toHaveText(byM5(E.documentCaption));
+      },
     });
     const passed = () => dsSection('house', 'check').locator('.dsp-summary').first();
     const passedCount = () => passed().getByRole('img').first();
