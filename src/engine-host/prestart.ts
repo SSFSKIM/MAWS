@@ -6,6 +6,7 @@
 // writer resumed after its last row, then the held writes land; until then nothing of the launch is on disk. The stage,
 // with the events the host keeps for the row, has a byte ceiling; passing it ends the prestart.
 import { closeSync, fchmodSync, openSync, writeSync } from 'node:fs';
+import { backupStagedState, dropStagedBackup, restoreStagedState } from './holder/adopt'; // M2's review, finding 2
 import { dirname, join } from 'node:path';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { LaunchSpec } from '@shared/engine/launch-spec';
@@ -20,10 +21,13 @@ export const PRESTART_STAGE_MAX_BYTES = 1024 * 1024;
 
 // The bytes a prestart holds in memory, and its map lines. `add` past the ceiling tells `overflow` once, on a later
 // turn of the event loop (never inside the write that passed it).
+// M2's review, finding 9: the ceiling counts until the row is revealed or dropped (`close`), past the stage's release
+// (its rows and map lines then on disk, the kept events still in memory)
 export class Stage implements MapStage {
   private size = 0;
   private overflowed = false;
   private held = true;
+  private closed = false;
   readonly mapLines: string[] = [];
 
   constructor(private readonly opts: { maxBytes?: number; overflow: () => void }) {}
@@ -41,7 +45,7 @@ export class Stage implements MapStage {
   }
 
   add(bytes: number): void {
-    if (!this.held) return;
+    if (this.closed) return;
     this.size += bytes;
     if (this.overflowed || this.size <= (this.opts.maxBytes ?? PRESTART_STAGE_MAX_BYTES)) return;
     this.overflowed = true;
@@ -53,9 +57,14 @@ export class Stage implements MapStage {
     this.add(Buffer.byteLength(text));
   }
 
-  // The stage is written: nothing more is held or counted.
+  // The stage is written: its rows and map lines go to disk from now on; what the host keeps still counts.
   release(): void {
     this.held = false;
+  }
+
+  // The row is revealed or dropped: nothing more counts.
+  close(): void {
+    this.closed = true;
   }
 }
 
@@ -123,11 +132,22 @@ export class StagedJournal implements SessionJournal {
   }
 }
 
+// M2's review, finding 4: the write a test can make short
+export const prestartIo: { writeSync: (fd: number, buffer: Buffer, offset: number, length: number) => number } = {
+  writeSync: (fd, buffer, offset, length) => writeSync(fd, buffer, offset, length),
+};
+
+// The whole text or a throw: a write that makes no progress fails it (the adopt then fails, R4-1's step 5).
 function writeWhole(path: string, text: string): void {
+  const buffer = Buffer.from(text, 'utf8');
   const fd = openSync(path, 'w', JOURNAL_FILE_MODE);
   try {
     fchmodSync(fd, JOURNAL_FILE_MODE);
-    if (text.length > 0) writeSync(fd, text);
+    for (let offset = 0; offset < buffer.length; ) {
+      const written = prestartIo.writeSync(fd, buffer, offset, buffer.length - offset);
+      if (!(written > 0)) throw new Error(`${path}: a write stopped at ${offset} of ${buffer.length} bytes`);
+      offset += written;
+    }
   } finally {
     closeSync(fd);
   }
@@ -138,20 +158,45 @@ type Kind = 'queue' | 'grants' | 'spec' | 'keep' | 'owed' | 'lineage' | 'cron' |
 // The session's store while it is staged: every save of the id is held (the last of each kind, in the order each kind
 // was first saved) and read back by the loads; `commit` writes them, in that order, to the store beneath. A save after
 // the commit waits for the commit's writes, so no held value lands after a newer one.
+// M2's review, finding 2: `state`, the state files' directory and the launch: before the commit writes, the state there
+// is backed up (holder/adopt.ts); `discard` drops every later write, waits for those under way and restores it; `settle`
+// (the promotion) drops the backup.
 export class StagingStore implements SessionStateStore {
   private readonly held = new Map<Kind, unknown>();
   private committed: Promise<void> | null = null;
+  private dropped = false;
+  private readonly inFlight = new Set<Promise<void>>();
 
-  constructor(private readonly store: SessionStateStore) {}
+  constructor(private readonly store: SessionStateStore, private readonly state: { dir: string; launchId: string } | null = null) {}
 
   async commit(id: AppSessionId): Promise<void> {
     if (this.committed) return this.committed;
+    if (this.dropped) throw new Error('the prestart’s state was discarded');
     const writes = [...this.held];
     this.held.clear();
     this.committed = (async () => {
+      if (this.state) backupStagedState(this.state.dir, id, this.state.launchId);
       for (const [kind, value] of writes) await this.write(kind, id, value);
     })();
     return this.committed;
+  }
+
+  // Every write the commit made or that followed it, settled (the state file durable before the promotion)
+  async flushed(): Promise<void> {
+    await this.committed;
+    while (this.inFlight.size > 0) await Promise.allSettled([...this.inFlight]);
+  }
+
+  async discard(id: AppSessionId): Promise<void> {
+    this.dropped = true;
+    this.held.clear();
+    await this.committed?.catch(() => {});
+    while (this.inFlight.size > 0) await Promise.allSettled([...this.inFlight]);
+    if (this.state) restoreStagedState(this.state.dir, id, this.state.launchId);
+  }
+
+  settle(id: AppSessionId): void {
+    if (this.state) dropStagedBackup(this.state.dir, id, this.state.launchId);
   }
 
   private write(kind: Kind, id: AppSessionId, value: unknown): Promise<void> {
@@ -168,13 +213,20 @@ export class StagingStore implements SessionStateStore {
     }
   }
 
-  private async save(kind: Kind, id: AppSessionId, value: unknown): Promise<void> {
+  private save(kind: Kind, id: AppSessionId, value: unknown): Promise<void> {
+    if (this.dropped) return Promise.resolve();
     if (this.committed === null) {
       this.held.set(kind, structuredClone(value)); // a kind keeps its first save's place, with its newest value
-      return;
+      return Promise.resolve();
     }
-    await this.committed.catch(() => {});
-    return this.write(kind, id, value);
+    const committed = this.committed;
+    const write = (async () => {
+      await committed.catch(() => {});
+      if (!this.dropped) await this.write(kind, id, value);
+    })();
+    this.inFlight.add(write);
+    void write.catch(() => {}).finally(() => this.inFlight.delete(write));
+    return write;
   }
 
   private load<T>(kind: Kind, read: () => Promise<T>): Promise<T> {

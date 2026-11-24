@@ -342,6 +342,7 @@ export function registerEngineIpc(hostOn: HostOn, emit: HostEmit, deps: EngineIp
     hiddenWires.set(session, wire);
     session.on('events', (events) => {
       if (wire.stream) return wire.stream.events(events);
+      if (stage.over) return; // M2's review, finding 9: past the ceiling nothing more is kept (the prestart ends)
       for (const event of events) {
         if (event.kind === 'plugin.toast' || event.kind === 'plugin.ask') continue; // D2: dropped, never shown late
         wire.kept.push(event);
@@ -424,6 +425,12 @@ export function registerEngineIpc(hostOn: HostOn, emit: HostEmit, deps: EngineIp
   // Registration with the input's appSessionId narrowed to the branded id the host's maps use.
   const handle = <N extends C3Command & CommandName>(name: N, handler: (input: CommandInput<N>) => Promise<CommandOutput<N>>) => on(name, handler);
   const sessionOf = (id: string): EngineSession => table.get(id as AppSessionId) ?? throwing(unknownSession(id));
+  // M2's review, finding 3: an id whose row is hidden (a prestart, or one being adopted) has no disk either: every
+  // fallback to the store, the journal, the observed facts or the transcript answers as for an unknown session, and
+  // writes nothing
+  const notHidden = (id: string): void => {
+    if (table.isHidden?.(id as AppSessionId) === true) throw unknownSession(id);
+  };
   const streamOf = (id: string): SessionStream => streams.get(id as AppSessionId) ?? throwing(unknownSession(id));
   // P5 O16 M4: a stream's reads of a session held for adoption are answered once its row is reserved or its adoption
   // ended (ADOPTION_READ_WAIT_MS above); any other session's as before, with nothing to wait for
@@ -450,6 +457,7 @@ export function registerEngineIpc(hostOn: HostOn, emit: HostEmit, deps: EngineIp
   // bound late); the caller's bound (socket-host's SHUTDOWN_BOUND_MS) leaves a run that outlasts it open
   const ops: { settled?: () => Promise<void> } = {};
   const shutdown = async (graceMs: number, mode: 'stop' | 'detach' = 'stop') => {
+    await prestarts.settled(); // M2's review, finding 8: a promotion out is answered before any row is stopped
     const [result] = await Promise.all([table.shutdown({ graceMs, mode }), plugins.stop(SHUTDOWN_KILL_GRACE_MS), deps.duringShutdown?.() /* P3-HD M2 */, ops.settled?.()]);
     deps.afterShutdown?.(); // P3-A: the artifact store, once the sessions writing to it are gone
     return result;
@@ -524,6 +532,7 @@ export function registerEngineIpc(hostOn: HostOn, emit: HostEmit, deps: EngineIp
   };
   handle('session.events', async ({ appSessionId, afterSeq, limit, before, agentId, seek, maxBytes }) => {
     await adopted(appSessionId); // P5 O16 M4
+    notHidden(appSessionId); // ticket 851, M2's review
     const id = appSessionId as AppSessionId;
     // C4 start: no stream here (not launched in this run, or archived and released): the transcript's history, whose
     // events carry no seq, so `afterSeq` selects nothing and `lastSeq` is 0. Each answer is a window of it
@@ -595,6 +604,7 @@ export function registerEngineIpc(hostOn: HostOn, emit: HostEmit, deps: EngineIp
   handle('session.queue.list', async ({ appSessionId }) => {
     assertSafeAppSessionId(appSessionId); // it may read a state file named after it
     await adopted(appSessionId); // P5 O16 M4: the adopted row's recovered queue, not the store's
+    notHidden(appSessionId); // ticket 851, M2's review
     const session = table.get(appSessionId as AppSessionId);
     if (session?.queue.recovered) return session.queue.state;
     // no queue loaded in this host (no reservation, or a launch that never became ready): the store's, verbatim, with
@@ -610,8 +620,10 @@ export function registerEngineIpc(hostOn: HostOn, emit: HostEmit, deps: EngineIp
   // concurrent edits/removals cannot restore one another's old snapshots; do not run recovery merely to edit.
   function editQueue<T>(appSessionId: string, live: (session: EngineSession) => Promise<T>, saved: (queue: QueueState) => T): Promise<T> {
     assertSafeAppSessionId(appSessionId);
+    notHidden(appSessionId); // ticket 851, M2's review
     return queueTransaction(store, appSessionId as AppSessionId, async () => {
       const id = appSessionId as AppSessionId;
+      notHidden(id); // ticket 851, M2's review: hidden meanwhile
       const session = table.get(id);
       if (session?.queue.recovered) return live(session);
       if (!(await store.exists(id))) throw unknownSession(appSessionId);
@@ -648,6 +660,7 @@ export function registerEngineIpc(hostOn: HostOn, emit: HostEmit, deps: EngineIp
   on('session.steer.sendNow', async ({ appSessionId, messageUuid }) => bounded(() => sessionOf(appSessionId).sendNow(messageUuid as MessageUuid))); // UX wave U4a
   on('session.promptHistory', async ({ appSessionId, since }) => {
     assertSafeAppSessionId(appSessionId); // it names a directory
+    notHidden(appSessionId); // ticket 851, M2's review
     const live = table.get(appSessionId as AppSessionId);
     return promptHistory(journalDir(deps.userData, appSessionId as AppSessionId), appSessionId as AppSessionId, since, { live: live && live.lifecycle !== 'exited' ? live.status().launchId : null });
   });
@@ -896,6 +909,7 @@ export function registerEngineIpc(hostOn: HostOn, emit: HostEmit, deps: EngineIp
   // row the host holds for the session, live or exited, whose status reports it. A session the host has neither a row
   // nor a state file for is unknown.
   on('session.setKeep', async ({ appSessionId, keep }) => {
+    notHidden(appSessionId); // ticket 851, M2's review
     const id = appSessionId as AppSessionId;
     const session = table.get(id);
     if (!session && !(await store.exists(id))) throw unknownSession(appSessionId);
@@ -911,6 +925,7 @@ export function registerEngineIpc(hostOn: HostOn, emit: HostEmit, deps: EngineIp
   on('engine.observedFacts', async ({ appSessionId }) => {
     assertSafeAppSessionId(appSessionId);
     const id = appSessionId as AppSessionId;
+    if (table.isHidden?.(id) === true) return null; // ticket 851, M2's review: no recovery, nothing persisted
     return (await table.get(id)?.observedFacts()) ?? observed.read(id);
   });
   // P2-A end ------------------------------------------------------------------------------------------------------------

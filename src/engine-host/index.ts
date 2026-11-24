@@ -347,7 +347,7 @@ function adoptAtStart(dir: string): { liveHolders: ReadonlySet<string>; deadHost
       return null; // an id no journal directory could have
     }
   };
-  const prestartFiles = { stagedDir, removeEntry: (entry: RosterEntry) => removeHostFiles(hostsDir, entry), log };
+  const prestartFiles = { stagedDir, removeEntry: (entry: RosterEntry) => removeHostFiles(hostsDir, entry), log, stateDir: join(userData!, 'engine-host', 'state') /* M2's review, finding 2 */ };
   const deadHostChildren: LiveRow[] = dead.flatMap((entry) => (entry.child !== null && entry.exit === null ? [{ appSessionId: entry.appSessionId ?? '', pid: entry.child.pid, procStart: entry.child.procStart, launchId: entry.holderId, holderId: entry.holderId }] : []));
   for (const entry of dead) {
     log(`session host ${entry.holderId} (pid ${entry.pid}) is gone: its files removed`);

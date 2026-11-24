@@ -319,6 +319,8 @@ export class EngineSession {
   private initCapabilities: readonly string[] | undefined = undefined;
   private initModels: unknown[] | null = null;
   private settleSpawn: () => void = () => {};
+  private settleState: () => void = () => {};
+  private readonly stateLoaded = new Promise<void>((resolve) => (this.settleState = resolve)); // M2's review, finding 1: loadState's writes submitted
   private readonly spawnSettled = new Promise<void>((resolve) => (this.settleSpawn = resolve)); // the transport set, or the exit
   private inheritedGrants = false;
   // C10 end
@@ -1104,7 +1106,11 @@ export class EngineSession {
     // session's from the start, so a stop meanwhile runs the ladder against it
     const adopted = this.opts.adopted;
     if (adopted) this.transport = this.opts.spawn(this.plan);
-    await this.loadState();
+    try {
+      await this.loadState();
+    } finally {
+      this.settleState(); // M2's review, finding 1
+    }
     // The launch's first status (`starting`) goes out before its first row (a resume's `reconnect`, the spawn row, a
     // spawn failure's exit), so a consumer folding events only under a live status never sees a launch's events
     // against no status or the previous launch's `exited` (C5's second re-check). Emitted after the state load's await,
@@ -1115,6 +1121,9 @@ export class EngineSession {
       this.handleExit({ code: null, signal: null }); // stopped while the state loaded: never spawn (idempotent)
       return;
     }
+    // M2's review, finding 11: the hidden period opens here and closes at the reveal's row, so a rebuild from the journal
+    // drops what the live one dropped (normalizer.ts)
+    if (this.hidden) this.record('meta', { event: 'prestart', phase: 'hidden' });
     if (this.reconnect) this.record('meta', { event: 'reconnect', phase: 'attempting', ...this.attempt, trigger: this.reconnectTrigger, reason: this.spec.retry?.reason ?? null });
     if (this.spec.retry) this.notice('launch:retry', `${this.spec.retry.reason} Trying once more (attempt ${this.spec.retry.attempt} of ${this.spec.retry.maxAttempts}).`); // C3 corrective
     this.record('meta', spawnMeta(this.plan, { appVersion: this.opts.appVersion ?? 'unknown', holder: this.opts.holder }));
@@ -1435,11 +1444,27 @@ export class EngineSession {
 
   // R4-1's step 2, the row still hidden: the stage written whole (R4-2), then the held store writes. Throws when a write
   // fails; the caller then ends the prestart and launches afresh.
+  // M2's review, finding 1: after the state load has submitted its writes (the stored spec among them), and with every
+  // write under way settled, so the state file is durable before the promotion.
   async commitStage(): Promise<void> {
     const prestart = this.opts.prestart;
     if (!prestart) return;
+    await this.stateLoaded;
     prestart.journal.commit();
     await prestart.store.commit(this.spec.appSessionId);
+    await prestart.store.flushed();
+    while (this.storeWrites.size > 0) await Promise.allSettled([...this.storeWrites]);
+  }
+
+  // M2's review, finding 2: a staged commit that will not be promoted: no write lands from now on, and the state it wrote
+  // is restored (or removed) before the caller launches afresh
+  async discardStage(): Promise<void> {
+    await this.opts.prestart?.store.discard(this.spec.appSessionId);
+  }
+
+  // The promotion was acknowledged: the state's backup goes
+  settleStage(): void {
+    this.opts.prestart?.store.settle(this.spec.appSessionId);
   }
 
   // R4-1's step 3: the session host's acknowledged promotion (never rejects); a direct spawn has no roster to promote.
@@ -1455,6 +1480,11 @@ export class EngineSession {
   reveal(): void {
     if (!this.hidden) return;
     this.hidden = false;
+    try {
+      this.record('meta', { event: 'prestart', phase: 'revealed' }); // M2's review, finding 11
+    } catch (error) {
+      this.log(`the prestart's reveal not journaled: ${messageOf(error)}`);
+    }
     if (this.observed) {
       this.observed.hold(false);
       this.storeWrite(this.observed.flush(false), 'observed facts');

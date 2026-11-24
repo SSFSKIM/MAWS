@@ -3,7 +3,7 @@
 // host: `holder`, `promote`). What a hidden row emits, lists and writes; what cancels an admission before it spawns;
 // adopt and its refusals; the kill and its files. The session host's own promotion and a successor's reading of a
 // promoted launch are holder/prestart-hosted.test.ts's.
-import { existsSync, mkdtempSync, readdirSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -21,6 +21,13 @@ import { TESTED_ENGINE_VERSION } from './engine-compat';
 import { registerEngineIpc, type EngineIpcDeps } from './ipc';
 import { RELAY_URL } from './launch';
 import type { Promotion } from './transport';
+import { Normalizer } from './normalizer'; // M2's review, finding 11
+import { launchRows } from './holder/restore';
+import { prestartIo } from './prestart'; // M2's review, finding 4
+import { FileSessionStateStore } from './store/file-session-state-store';
+import { MemorySessionStateStore } from './store/memory-session-state-store';
+import type { SessionStateStore } from '@shared/engine/session-state-store';
+import { parseJournalRow } from '@shared/wire/journal';
 
 const OK_RELAY = { url: RELAY_URL, ok: true, status: 200, latencyMs: 2, checkedAt: '2026-11-24T10:00:00.000Z', error: null };
 const BIN = '/opt/engine/claude';
@@ -494,5 +501,217 @@ describe('adopt', () => {
     expect(withBurst.named('engine.prestart').slice(before).map((e) => e.payload)).toEqual([{ appSessionId: 'app-p', engineSessionId: expect.any(String), state: 'hidden' }]);
     expect(await withBurst.call('engine.prestarts', undefined)).toEqual({ hidden: [{ appSessionId: 'app-p', engineSessionId: expect.any(String) }] });
     expect(await host.call('engine.prestarts', undefined)).toEqual({ hidden: [] });
+  });
+});
+
+// M2's medium review (range ef3d845b7..d2ada3e07): one test per finding, each written before its fix
+describe('the review’s findings', () => {
+  // A promotion the test answers
+  function heldPromotion() {
+    let answer!: (promotion: Promotion) => void;
+    const promotion = new Promise<Promotion>((resolve) => (answer = resolve));
+    return { promote: () => promotion, answer };
+  }
+  const assistant = (i: number, text: string) => ({ type: 'assistant', message: { id: `msg_${i}`, role: 'assistant', model: 'm', content: [{ type: 'text', text }] }, session_id: 's', parent_tool_use_id: null, uuid: `a-${i}` });
+
+  it('1: the state file is on disk before the promotion, also when adopt takes a starting row', async () => {
+    let releaseKeep!: () => void;
+    const keepHeld = new Promise<void>((resolve) => (releaseKeep = resolve));
+    const memory = new MemorySessionStateStore();
+    const store: SessionStateStore = Object.assign(Object.create(memory) as SessionStateStore, {
+      loadKeep: async (id: AppSessionId) => (await keepHeld, memory.loadKeep(id)),
+      saveLaunchSpec: async (id: AppSessionId, saved: LaunchSpec) => (await sleep(80), memory.saveLaunchSpec(id, saved)),
+    });
+    let specAtPromotion: LaunchSpec | null | undefined;
+    const host = engineHost({ hosted: true, promote: async () => ((specAtPromotion = await memory.loadLaunchSpec('app-p' as AppSessionId)), { ok: true }), deps: { store } });
+    await host.prestart('app-p');
+    await until(() => host.ipc.table.getAny('app-p' as AppSessionId)?.lifecycle === 'starting', 'the hidden row starting');
+    const adopting = host.call('session.launch', { spec: spec('app-p'), adopt: { key: 'key-1' } });
+    await sleep(20);
+    releaseKeep();
+    expect(await adopting).toMatchObject({ status: 'launching' });
+    expect(specAtPromotion).toMatchObject({ appSessionId: 'app-p' });
+  });
+
+  it('2: a refused promotion leaves no state behind: the earlier state file restored, and the fallback reads no discarded lineage', async () => {
+    const store = new FileSessionStateStore(userData);
+    await store.saveEngineSessionIds('app-p' as AppSessionId, ['engine-before']);
+    const host = engineHost({ hosted: true, promote: async () => ({ ok: false, message: 'refused' }), deps: { store } });
+    await host.prestart('app-p');
+    await hiddenReady(host, 'app-p');
+    const hidden = host.ipc.table.getAny('app-p' as AppSessionId)!.status().engineSessionId!;
+    const answer = await host.call('session.launch', { spec: spec('app-p'), adopt: { key: 'key-1' } });
+    expect(answer).toMatchObject({ status: 'launching' });
+    await until(() => host.ipc.table.get('app-p' as AppSessionId)?.lifecycle === 'ready', 'the fallback ready');
+    await sleep(50);
+    const lineage = await store.loadEngineSessionIds('app-p' as AppSessionId);
+    expect(lineage).toContain('engine-before');
+    expect(lineage).not.toContain(hidden);
+    expect(stateFiles().filter((name) => name.includes('.prestart-'))).toEqual([]); // no backup left
+  });
+
+  it('2: a refused promotion of an id with no earlier state removes the state file it wrote, before the fallback starts', async () => {
+    let releaseFallback!: () => void;
+    const fallbackHeld = new Promise<void>((resolve) => (releaseFallback = resolve));
+    let probes = 0;
+    // the probes: the prestart's, the adopt's binary check, then the fallback's, held
+    const host = engineHost({ hosted: true, promote: async () => ({ ok: false, message: 'refused' }), binaryProbe: async () => (++probes === 3 ? (await fallbackHeld, OK_BINARY) : OK_BINARY) });
+    await host.prestart('app-p');
+    await hiddenReady(host, 'app-p');
+    const answer = host.call('session.launch', { spec: spec('app-p'), adopt: { key: 'key-1' } });
+    await until(() => probes === 3, 'the fallback in its probes');
+    await sleep(30);
+    expect(stateFiles()).toEqual([]);
+    releaseFallback();
+    expect(await answer).toMatchObject({ status: 'launching' });
+  });
+
+  it('3: while an id is hidden or committing, no disk fallback answers or writes for it', async () => {
+    const promotion = heldPromotion();
+    let diskReads = 0;
+    const host = engineHost({ hosted: true, promote: promotion.promote, deps: { diskEvents: async () => ((diskReads += 1), { events: [], complete: true, lastSeq: 0 } as never) } });
+    await host.prestart('app-p');
+    await hiddenReady(host, 'app-p');
+    const id = 'app-p' as AppSessionId;
+    await expect(host.call('session.events', { appSessionId: id, afterSeq: null, limit: null })).rejects.toThrow(/unknown session/);
+    expect(diskReads).toBe(0);
+    const adopting = host.call('session.launch', { spec: spec('app-p'), adopt: { key: 'key-1' } });
+    await until(() => journalFiles('app-p').length > 0, 'the stage written');
+    await expect(host.call('session.queue.list', { appSessionId: id })).rejects.toThrow(/unknown session/);
+    await expect(host.call('session.setKeep', { appSessionId: id, keep: true })).rejects.toThrow(/unknown session/);
+    await expect(host.call('session.promptHistory', { appSessionId: id, since: null } as never)).rejects.toThrow(/unknown session/);
+    expect(await host.call('engine.observedFacts', { appSessionId: id })).toBeNull();
+    expect(existsSync(join(userData, 'engine-host', 'state', 'app-p.facts.json')) || stateFiles().some((name) => name.includes('fact'))).toBe(false);
+    expect(diskReads).toBe(0);
+    promotion.answer({ ok: true });
+    await adopting;
+  });
+
+  it('4: a short write of the stage fails the adopt: the prestart ends, its files go, and the launch is fresh', async () => {
+    const host = engineHost({ hosted: true });
+    await host.prestart('app-p');
+    await hiddenReady(host, 'app-p');
+    const launchId = host.ipc.table.getAny('app-p' as AppSessionId)!.status().launchId;
+    const write = prestartIo.writeSync;
+    let first = true; // half of the first write lands, then nothing more does
+    prestartIo.writeSync = ((fd: number, buffer: Buffer, offset: number, length: number) => (first ? ((first = false), write(fd, buffer, offset, Math.max(1, Math.floor(length / 2)))) : 0)) as typeof prestartIo.writeSync;
+    try {
+      const answer = await host.call('session.launch', { spec: spec('app-p'), adopt: { key: 'key-1' } });
+      expect(answer.status === 'launching' && answer.session.launchId).not.toBe(launchId);
+    } finally {
+      prestartIo.writeSync = write;
+    }
+    expect(host.promotions).toEqual([]);
+    await until(() => !journalFiles('app-p').some((name) => name.startsWith(launchId)), 'the staged files removed');
+  });
+
+  it('5: an adopt cancels an admission still in its probes and launches fresh at once', async () => {
+    const held = heldProbe();
+    const host = engineHost({ binaryProbe: held.probe });
+    await host.prestart('app-p');
+    const answer = await Promise.race([host.call('session.launch', { spec: spec('app-p'), adopt: { key: 'key-1' } }), sleep(2_000).then(() => 'waited' as const)]);
+    expect(answer).toMatchObject({ status: 'launching' });
+    held.release();
+    await sleep(30);
+    expect(host.hiddenReserved).toEqual([]);
+  });
+
+  it('6: a launch fences the id’s prestarts from the start of its preparation', async () => {
+    const held = heldProbe();
+    const host = engineHost({ binaryProbe: held.probe });
+    const launching = host.call('session.launch', { spec: spec('app-p') });
+    await sleep(10);
+    expect(await host.prestart('app-p')).toMatchObject({ status: 'refused' });
+    held.release();
+    expect(await launching).toMatchObject({ status: 'launching' });
+    expect(host.hiddenReserved).toEqual([]);
+    expect(await host.prestart('app-q')).toMatchObject({ status: 'started' }); // another id is not fenced
+  });
+
+  it('7: a committing row keeps the hidden slot and stays in engine.prestarts until its committed event', async () => {
+    const promotion = heldPromotion();
+    const host = engineHost({ hosted: true, promote: promotion.promote });
+    await host.prestart('app-p');
+    await hiddenReady(host, 'app-p');
+    const adopting = host.call('session.launch', { spec: spec('app-p'), adopt: { key: 'key-1' } });
+    await until(() => host.promotions.length === 1, 'the promotion asked');
+    expect((await host.call('engine.prestarts', undefined)).hidden.map((h) => h.appSessionId)).toEqual(['app-p']);
+    expect(await host.prestart('app-q')).toMatchObject({ status: 'refused' });
+    promotion.answer({ ok: true });
+    await adopting;
+    expect(await host.call('engine.prestarts', undefined)).toEqual({ hidden: [] });
+    expect(await host.prestart('app-q')).toMatchObject({ status: 'started' });
+  });
+
+  it('8: a handover while a promotion is out never reveals the row after the freeze; it ends once the answer comes', async () => {
+    const promotion = heldPromotion();
+    const host = engineHost({ hosted: true, promote: promotion.promote });
+    await host.prestart('app-p');
+    await hiddenReady(host, 'app-p');
+    const adopting = host.call('session.launch', { spec: spec('app-p'), adopt: { key: 'key-1' } }).catch((error: unknown) => error);
+    await until(() => host.promotions.length === 1, 'the promotion asked');
+    const row = host.ipc.table.getAny('app-p' as AppSessionId)!;
+    host.ipc.table.freezeForHandover();
+    await sleep(20);
+    expect(row.lifecycle).not.toBe('exited'); // not stopped as hidden while the promotion is out
+    promotion.answer({ ok: true });
+    await adopting;
+    expect(host.ipc.table.get('app-p' as AppSessionId)).toBeUndefined();
+    await until(() => row.lifecycle === 'exited', 'the row ended');
+    expect(host.named('engine.prestart').map((e) => (e.payload as { state: string }).state)).toEqual(['hidden', 'ended']);
+  });
+
+  it('9: the stage’s ceiling holds while the promotion is out; reaching it fails the adopt', async () => {
+    const promotion = heldPromotion();
+    const host = engineHost({ hosted: true, promote: promotion.promote });
+    await host.prestart('app-p');
+    await hiddenReady(host, 'app-p');
+    const launchId = host.ipc.table.getAny('app-p' as AppSessionId)!.status().launchId;
+    const adopting = host.call('session.launch', { spec: spec('app-p'), adopt: { key: 'key-1' } });
+    await until(() => host.promotions.length === 1, 'the promotion asked');
+    for (let i = 0; i < 300; i += 1) host.transports[0]!.push(assistant(i, 'y'.repeat(4_000)), 100 + i);
+    await sleep(100);
+    promotion.answer({ ok: true });
+    const answer = await adopting;
+    expect(answer.status === 'launching' && answer.session.launchId).not.toBe(launchId);
+  });
+
+  it('10: a hidden row is told to browser work only at its reveal', async () => {
+    const host = engineHost({ hosted: true });
+    const told: { id: string; hidden: boolean }[] = [];
+    host.ipc.table.onReserved((session) => void told.push({ id: session.status().appSessionId, hidden: host.ipc.table.isHidden(session.status().appSessionId) }));
+    await host.prestart('app-p');
+    await hiddenReady(host, 'app-p');
+    expect(told).toEqual([]);
+    await host.call('session.launch', { spec: spec('app-p'), adopt: { key: 'key-1' } });
+    expect(told).toEqual([{ id: 'app-p', hidden: false }]);
+  });
+
+  it('11: a toast and a surface ask of the hidden period stay out of a rebuild from the journal; one after the reveal is kept', async () => {
+    const host = engineHost({ hosted: true });
+    await host.prestart('app-p');
+    await hiddenReady(host, 'app-p');
+    const t = host.transports[0]!;
+    t.push({ type: 'system', subtype: 'ui_toast', plugin: 'p', text: 'hidden toast', session_id: 's' }, 50);
+    t.push({ type: 'control_request', request_id: 'c1', request: { subtype: 'ui_copy', text: 'x', surface: 'desktop', client_id: 'maws-desktop' } }, 51);
+    await sleep(30);
+    const answer = await host.call('session.launch', { spec: spec('app-p'), adopt: { key: 'key-1' } });
+    t.push({ type: 'system', subtype: 'ui_toast', plugin: 'p', text: 'shown toast', session_id: 's' }, 52);
+    await sleep(30);
+    const launchId = answer.status === 'launching' ? answer.session.launchId : '';
+    const normalizer = new Normalizer({ appSessionId: 'app-p' as AppSessionId, launchId, sessionId: null });
+    const rebuilt = [...launchRows(join(userData, 'engine-host', 'journal', 'app-p'), launchId)].flatMap((row) => normalizer.push(parseJournalRow(JSON.parse(JSON.stringify(row)))));
+    const kinds = rebuilt.filter((e) => e.kind === 'plugin.toast' || e.kind === 'plugin.ask').map((e) => (e.kind === 'plugin.toast' ? e.text : e.kind));
+    expect(kinds).toEqual(['shown toast']);
+    expect(readFileSync(join(userData, 'engine-host', 'journal', 'app-p', `${launchId}.jsonl`), 'utf8')).toContain('hidden toast'); // the rows themselves stay
+  });
+
+  it('12: a stop-all stops a hidden row and counts it in neither total', async () => {
+    const host = engineHost();
+    await host.prestart('app-p');
+    await hiddenReady(host, 'app-p');
+    const row = host.ipc.table.getAny('app-p' as AppSessionId)!;
+    expect(await host.ipc.shutdown(500)).toEqual({ stopped: 0, forced: 0 });
+    expect(row.lifecycle).toBe('exited');
   });
 });

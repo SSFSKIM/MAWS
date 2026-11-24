@@ -207,7 +207,10 @@ export class ProcessTable {
     this.idle = new IdleRelease({
       current: (session) => this.currentStatus(session), stateful: () => this.stateful, log: (line) => this.log(line), interestChanged: () => this.holdChanged(),
       release: (session) => (this.isHiddenRow(session) ? this.hiddenDue(session, 'idle') : this.reapOf(session)?.due('idle')) /* O16 M5; ticket 851: a hidden row is ended, not released */,
-      browserIdleDue: (appSessionId) => { for (const listener of this.browserIdleListeners) this.safely('browser idle', () => listener(appSessionId)); }, // P5 O17 M7
+      browserIdleDue: (appSessionId) => {
+        if (this.hiddenIds.has(appSessionId)) return; // M2's review, finding 10: never a hidden id
+        for (const listener of this.browserIdleListeners) this.safely('browser idle', () => listener(appSessionId));
+      }, // P5 O17 M7
       browserCheck: () => this.browserCheck(), // P5 O17 M7 landing fix wave
     }); // P5 O2 M2
   }
@@ -283,7 +286,8 @@ export class ProcessTable {
     this.adopting.delete(appSessionId); // P5 O16 M3: the hold becomes the row
     this.wakeAdoptionReads(appSessionId); // P5 O16 M4: its reads read the row
     this.attachReap(session); // O16 M5
-    for (const listener of this.reservedListeners) this.safely('reserved', () => listener(session)); // P5 O17 M7: before its start
+    // P5 O17 M7: before its start; M2's review (finding 10): a hidden row is told at its reveal, so it never holds a browser
+    if (opts.hidden !== true) for (const listener of this.reservedListeners) this.safely('reserved', () => listener(session));
     session.on('status', (status) => {
       if (status.process === 'exited' && this.endingHidden.delete(session)) this.writeLiveLedger(); // ticket 851, M2
       if (status.process === 'exited' && this.isHiddenRow(session)) this.hiddenDue(session, 'exited'); // ticket 851, M2: its owner ends it
@@ -324,6 +328,8 @@ export class ProcessTable {
   // The hidden row is revealed: every view has it from now on.
   reveal(appSessionId: AppSessionId): void {
     if (!this.hiddenIds.delete(appSessionId)) return;
+    const session = this.rows.get(appSessionId);
+    if (session) for (const listener of this.reservedListeners) this.safely('reserved', () => listener(session)); // M2's review, finding 10
     this.rowsChanged();
   }
 
@@ -990,6 +996,7 @@ export class ProcessTable {
     let stopped = 0;
     let forced = 0;
     for (const { session } of results) {
+      if (session.prestartHidden) continue; // M2's review, finding 12: a prestart is stopped and counted in neither
       if (session.forcedKill) forced += 1;
       else stopped += 1;
     }

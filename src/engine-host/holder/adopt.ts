@@ -14,7 +14,7 @@
 // decides atomically against a promotion in flight: discarded, that launch's staged files (its journal and host map,
 // base and rotations) are removed, then its entry, which the host kept for that; promoted meanwhile, it is adopted as
 // any host. A discard that fails is a failed adoption, its host then guarded as unattached.
-import { readdirSync, rmSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { AppSessionId } from '@shared/graph/ids';
 import { HOST_EXIT_GRACE_MS, SESSION_HOST_PROTOCOL } from './protocol';
@@ -99,13 +99,18 @@ export interface PrestartFiles {
   stagedDir(entry: RosterEntry): string | null; // its session's journal directory; null for an entry that names none
   removeEntry(entry: RosterEntry): void; // its roster entry, token and socket (roster.ts `removeHostFiles`)
   log(line: string): void;
+  // M2's review, finding 2: the state files' directory (`<userData>/engine-host/state`); absent, the state is left
+  stateDir?: string;
 }
 
 // The launch's staged files removed, or null when one could not be (logged: the entry then stays for the next start).
 function removeStaged(entry: RosterEntry, deps: PrestartFiles): number | null {
   try {
     const dir = deps.stagedDir(entry);
-    return dir === null ? 0 : removeStagedFiles(dir, entry.holderId);
+    const removed = dir === null ? 0 : removeStagedFiles(dir, entry.holderId);
+    // M2's review, finding 2: the state a staged commit wrote, restored from its backup (or removed), before the entry
+    if (deps.stateDir !== undefined && entry.appSessionId !== null) restoreStagedState(deps.stateDir, entry.appSessionId, entry.holderId);
+    return removed;
   } catch (error) {
     deps.log(`session host ${entry.holderId} (pid ${entry.pid}) held a prestart never promoted: its staged files could not all be removed (${error instanceof Error ? error.message : String(error)}); its entry stays for the next start`);
     return null;
@@ -161,6 +166,45 @@ export async function clearEndedPrestart(hostsDir: string, host: { holderId: str
   if (entry?.prestart !== true) return 'kept';
   removeHostFiles(hostsDir, entry);
   return 'removed';
+}
+
+// M2's review, finding 2 (docs/doperpowers/plans/2026-11-24-prestart-engine.md, Decision Log 11): a staged commit
+// writes the session's state files (`<id>.json`, `<id>.cron.json`) before its promotion. Before it does, the state there
+// is kept: each existing file copied to `<file>.prestart-<launchId>`, and a marker `<id>.prestart-<launchId>` naming
+// which files existed. A discard (a kill, a refused promotion, a successor's discard of a marked host) restores them:
+// each copy back over its file, each file that did not exist removed; then the marker. With no marker, the commit never
+// wrote, and nothing is touched. A promotion drops the copies and the marker. None of these names ends in `.json`.
+const stateFilesOf = (appSessionId: string): string[] => [`${appSessionId}.json`, `${appSessionId}.cron.json`];
+const markerOf = (stateDir: string, appSessionId: string, launchId: string): string => join(stateDir, `${appSessionId}.prestart-${launchId}`);
+
+export function backupStagedState(stateDir: string, appSessionId: string, launchId: string): void {
+  const marker = markerOf(stateDir, appSessionId, launchId);
+  if (existsSync(marker)) return;
+  mkdirSync(stateDir, { recursive: true, mode: 0o700 });
+  const files: Record<string, boolean> = {};
+  for (const name of stateFilesOf(appSessionId)) {
+    const path = join(stateDir, name);
+    files[name] = existsSync(path);
+    if (files[name]) copyFileSync(path, `${path}.prestart-${launchId}`);
+  }
+  writeFileSync(marker, JSON.stringify({ files }), { mode: 0o600 });
+}
+
+export function restoreStagedState(stateDir: string, appSessionId: string, launchId: string): void {
+  const marker = markerOf(stateDir, appSessionId, launchId);
+  if (!existsSync(marker)) return;
+  const { files } = JSON.parse(readFileSync(marker, 'utf8')) as { files: Record<string, boolean> };
+  for (const name of stateFilesOf(appSessionId)) {
+    const path = join(stateDir, name);
+    if (files[name] !== true) rmSync(path, { force: true });
+    else if (existsSync(`${path}.prestart-${launchId}`)) renameSync(`${path}.prestart-${launchId}`, path);
+  }
+  rmSync(marker, { force: true });
+}
+
+export function dropStagedBackup(stateDir: string, appSessionId: string, launchId: string): void {
+  for (const name of stateFilesOf(appSessionId)) rmSync(join(stateDir, `${name}.prestart-${launchId}`), { force: true });
+  rmSync(markerOf(stateDir, appSessionId, launchId), { force: true });
 }
 
 const STAGED_FILE = /^([A-Za-z0-9_-]+?)(?:\.\d+)?\.(?:jsonl|hseq)$/;

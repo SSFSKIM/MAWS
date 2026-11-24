@@ -208,7 +208,7 @@ export function createLauncher(deps: LauncherDeps): Launcher {
       return CANCELLED;
     }
     // ticket 851, M2: a prestart's journal and store staged on its stage
-    const staged = hidden ? { stage: hidden.stage, journal: new StagedJournal(journalDir(deps.userData, spec.appSessionId), plan.launchId, hidden.stage), store: new StagingStore(deps.store) } : null;
+    const staged = hidden ? { stage: hidden.stage, journal: new StagedJournal(journalDir(deps.userData, spec.appSessionId), plan.launchId, hidden.stage), store: new StagingStore(deps.store, { dir: join(deps.userData, 'engine-host', 'state'), launchId: plan.launchId }) } : null;
     try {
       outcome = deps.table.reserve(spec.appSessionId, () => {
         const released = staged ? false : deps.table.takeReleased(spec.appSessionId); // C12; P5 O2 M2: also what the work state starts from; ticket 851: a prestart takes none

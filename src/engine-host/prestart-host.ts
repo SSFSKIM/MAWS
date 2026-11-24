@@ -59,6 +59,7 @@ interface Prestart {
   state: 'admitted' | 'hidden' | 'committing' | 'committed' | 'ended';
   announced: boolean; // `engine.prestart { hidden }` went out
   unwatch: () => void;
+  handedOver: boolean; // M2's review, finding 8: a handover froze the host while its promotion was out
 }
 
 const CLAIMABLE = new Set(['starting', 'initializing', 'ready']);
@@ -69,6 +70,8 @@ export class PrestartHost {
   private readonly released = new Set<string>(); // owners released (R4-7)
   private readonly chains = new Map<AppSessionId, Promise<unknown>>();
   private readonly rows = new Map<EngineSession, Prestart>(); // each hidden row's prestart, until it is ended or committed
+  private readonly fenced = new Map<AppSessionId, number>(); // M2's review, finding 6: the launches of each id under way
+  private commits = new Set<Promise<unknown>>(); // M2's review, finding 8: the adopts in their commit
 
   constructor(private readonly deps: PrestartHostDeps) {
     if (typeof deps.table.onHiddenDue === 'function') deps.table.onHiddenDue((session, why) => this.due(session, why)); // a test's stand-in table may have none
@@ -82,13 +85,15 @@ export class PrestartHost {
     const refused = (reason: string): PrestartAnswer => ({ status: 'refused', generation: 0, reason });
     if (spec.replay !== null) return refused('a replay launch never prestarts');
     if (this.released.has(owner)) return refused('its owner was released');
+    if (this.fenced.has(id)) return refused('a launch of the session is under way'); // M2's review, finding 6
     const cur = this.current;
+    if (cur?.state === 'committing') return refused('a prestart is being adopted'); // M2's review, finding 7: it holds the slot
     if (cur !== null && cur.id === id && cur.owner === owner && cur.client.id === client.id && cur.key === key && sameLaunchSpec(cur.spec, spec)) return { status: 'running', generation: cur.generation };
     if (cur !== null) this.end(cur, 'a newer prestart replaced it');
     const live = this.deps.table.get(id);
     if ((live !== undefined && live.lifecycle !== 'exited') || this.deps.table.isAdopting(id)) return refused('the session has a live process');
     const h: Prestart = {
-      id, generation: ++this.generation, owner, client, spec, key, session: null, state: 'admitted', announced: false, unwatch: () => {},
+      id, generation: ++this.generation, owner, client, spec, key, session: null, state: 'admitted', announced: false, unwatch: () => {}, handedOver: false,
       stage: new Stage({ maxBytes: this.deps.stageMaxBytes ?? PRESTART_STAGE_MAX_BYTES, overflow: () => this.end(h, `its stage passed ${this.deps.stageMaxBytes ?? PRESTART_STAGE_MAX_BYTES} bytes`) }),
     };
     this.current = h;
@@ -121,22 +126,36 @@ export class PrestartHost {
 
   // `session.launch`: with `adopt`, the hidden row when it is claimable and the same launch, else a fresh launch; with
   // none, a prestart of the id ends first. A launch of an id no prestart touches runs at once, as before.
-  launch(spec: LaunchSpec, artifactScope: readonly AppSessionId[] | undefined, adopt: { key: string } | undefined): Promise<LaunchResult> {
+  // M2's review: the launch fences the id's prestarts from its entry to its answer (finding 6); an admission still in its
+  // probes is cancelled and the launch goes on at once (finding 5), as a row ended now leaves the id free at once.
+  async launch(spec: LaunchSpec, artifactScope: readonly AppSessionId[] | undefined, adopt: { key: string } | undefined): Promise<LaunchResult> {
     const id = spec.appSessionId;
-    const fresh = () => this.deps.launch(spec, artifactScope);
-    const cur = this.current;
-    if (adopt === undefined) {
-      if (cur !== null && cur.id === id) this.end(cur, 'a launch of its id');
-      return this.chains.has(id) ? this.serial(id, fresh) : fresh();
+    this.fenced.set(id, (this.fenced.get(id) ?? 0) + 1);
+    try {
+      const fresh = () => this.deps.launch(spec, artifactScope);
+      const cur = this.current;
+      if (cur === null || cur.id !== id) return await fresh();
+      if (adopt === undefined || cur.state === 'admitted') {
+        this.end(cur, adopt === undefined ? 'a launch of its id' : 'adopted before it launched: a fresh launch');
+        return await fresh();
+      }
+      return await this.adopt(cur, spec, adopt.key, fresh);
+    } finally {
+      const left = (this.fenced.get(id) ?? 1) - 1;
+      if (left > 0) this.fenced.set(id, left);
+      else this.fenced.delete(id);
     }
-    if ((cur === null || cur.id !== id) && !this.chains.has(id)) return fresh();
-    return this.serial(id, () => this.adopt(spec, adopt.key, fresh));
+  }
+
+  // M2's review, finding 8: every commit under way settled (each bounded by its promotion's), before a stop-all's
+  async settled(): Promise<void> {
+    while (this.commits.size > 0) await Promise.allSettled([...this.commits]);
   }
 
   // The hidden rows now, for a client's welcome and the internal query (R4-6).
   hidden(): { appSessionId: AppSessionId; engineSessionId: SessionId | null }[] {
     const h = this.current;
-    if (h === null || h.session === null || !h.announced || h.state !== 'hidden') return [];
+    if (h === null || h.session === null || !h.announced || (h.state !== 'hidden' && h.state !== 'committing')) return []; // M2's review, finding 7
     return [{ appSessionId: h.id, engineSessionId: h.session.status().engineSessionId }];
   }
 
@@ -164,43 +183,62 @@ export class PrestartHost {
       this.end(h, 'its row was not reserved hidden');
       return;
     }
-    h.session = session;
-    this.rows.set(session, h);
-    if (h.state !== 'admitted') { // ended between its reservation and this turn: the row goes now
-      this.kill(h, session, 'ended while it reserved its row');
+    if (h.state !== 'admitted') { // ended between its reservation and this turn: the row goes now, unless its end took it
+      if (h.session === null) this.kill(h, session, 'ended while it reserved its row');
       return;
     }
+    h.session = session;
+    this.rows.set(session, h);
     h.state = 'hidden';
     h.announced = true;
     this.announce(h, 'hidden');
     this.deps.log(`${h.id}: prestart generation ${h.generation} launched hidden (launch ${session.status().launchId})`);
   }
 
-  private async adopt(spec: LaunchSpec, key: string, fresh: () => Promise<LaunchResult>): Promise<LaunchResult> {
-    const h = this.current?.id === spec.appSessionId ? this.current : null;
-    if (h === null) return fresh();
+  private async adopt(h: Prestart, spec: LaunchSpec, key: string, fresh: () => Promise<LaunchResult>): Promise<LaunchResult> {
     const miss = this.unclaimable(h) ?? (!sameLaunchSpec(h.spec, spec) ? 'its spec differs' : h.key !== key ? 'its key differs' : await this.otherBinary(h)) ?? this.unclaimable(h);
     if (miss !== null) {
       this.end(h, `not adopted: ${miss}`);
       return fresh();
     }
     const session = h.session!;
-    h.state = 'committing'; // no longer the current prestart: a newer one, a withdraw or the connection's end leave it be
+    h.state = 'committing'; // immune to a newer prestart, a withdraw or the connection's end; it keeps the slot (finding 7)
     h.unwatch();
-    this.current = null;
+    const committing = (async (): Promise<string | null> => {
+      try {
+        await session.commitStage(); // R4-1 step 2, the row still hidden; the state file durable (finding 1)
+        if (h.handedOver || h.stage.over) return h.handedOver ? 'a handover began' : 'its stage is full';
+        const promoted = await session.promote(this.deps.promoteMs); // step 3
+        if (!promoted.ok) return `the session host did not promote it: ${promoted.message}`;
+        if (h.handedOver) return 'a handover began while its promotion was out'; // finding 8: never revealed after the freeze
+        if (h.stage.over) return 'its stage is full'; // finding 9
+        if (!CLAIMABLE.has(session.lifecycle) || this.deps.table.getAny(h.id) !== session) return `its engine is ${session.lifecycle}`;
+        return null;
+      } catch (error) {
+        return messageOf(error);
+      }
+    })();
+    this.commits.add(committing);
+    let failed: string | null;
     try {
-      await session.commitStage(); // R4-1 step 2, the row still hidden
-      const promoted = await session.promote(this.deps.promoteMs); // step 3
-      if (!promoted.ok) throw new Error(`the session host did not promote it: ${promoted.message}`);
-      if (!CLAIMABLE.has(session.lifecycle) || this.deps.table.getAny(h.id) !== session) throw new Error(`its engine is ${session.lifecycle}`);
-    } catch (error) {
+      failed = await committing;
+    } finally {
+      this.commits.delete(committing);
+    }
+    if (failed !== null) {
+      // step 5: no write of the staged commit lands from now on and its state is restored before the fresh launch reads
+      // any (finding 2); the engine ends, then its journal files and its host's entry go
+      await session.discardStage().catch((error: unknown) => this.deps.log(`${h.id}: the state of the prestart not restored: ${messageOf(error)}`));
       h.state = 'hidden';
-      this.end(h, `not adopted: ${messageOf(error)}`);
+      this.end(h, `not adopted: ${failed}`);
       return fresh();
     }
     // step 4 (R4-3, R4-5): revealed, published, answered; the surface attaches behind the answer
     h.state = 'committed';
+    if (this.current === h) this.current = null;
     this.rows.delete(session);
+    h.stage.close();
+    session.settleStage();
     this.deps.table.reveal(h.id);
     this.deps.publish(session);
     session.reveal();
@@ -241,7 +279,10 @@ export class PrestartHost {
       if (this.deps.table.detachHidden(session.status().appSessionId) !== null) void session.stop('stop');
       return;
     }
-    if (h.state === 'committing') return; // the commit decides: its promotion or its checks fail on an engine gone
+    if (h.state === 'committing') { // the commit decides: its promotion or its checks fail on an engine gone
+      if (why === 'handover') h.handedOver = true; // M2's review, finding 8: settled once the promotion answers
+      return;
+    }
     this.end(h, why === 'exited' ? 'its engine exited' : `the ${why === 'handover' ? 'handover' : why === 'idle' ? 'idle release' : 'memory budget'} ended it`);
   }
 
@@ -251,12 +292,16 @@ export class PrestartHost {
     h.state = 'ended';
     h.unwatch();
     if (this.current === h) this.current = null;
-    if (h.session !== null) this.kill(h, h.session, why);
+    // M2's review, finding 5: a row reserved and not yet taken up by its launch (the one hidden row there is) is its
+    const reserved = h.session ?? (this.deps.table.isHidden(h.id) ? (this.deps.table.getAny(h.id) ?? null) : null);
+    if (reserved !== null) this.kill(h, reserved, why);
     else this.deps.log(`${h.id}: prestart generation ${h.generation} withdrawn before its row (${why})`);
   }
 
   private kill(h: Prestart, session: EngineSession, why: string): void {
     h.state = 'ended';
+    h.session = session;
+    h.stage.close();
     this.rows.delete(session);
     if (this.deps.table.getAny(h.id) === session) this.deps.table.detachHidden(h.id);
     this.deps.drop(session);

@@ -144,7 +144,7 @@ function successor(stub: string) {
     checkRelay: async () => ({ url: RELAY_URL, ok: true, status: 200, latencyMs: 2, checkedAt: '2026-11-24T10:00:00.000Z', error: null }),
     captureEnv: async () => ({ PATH: '/usr/bin:/bin' }),
   });
-  const files: PrestartFiles = { stagedDir: (entry) => (entry.appSessionId === null ? null : journalDir(entry.appSessionId)), removeEntry: (entry) => removeHostFiles(hostsDir(), entry), log: () => {} };
+  const files: PrestartFiles = { stagedDir: (entry) => (entry.appSessionId === null ? null : journalDir(entry.appSessionId)), removeEntry: (entry) => removeHostFiles(hostsDir(), entry), log: () => {}, stateDir: join(userData, 'engine-host', 'state') };
   const start = async () => {
     const { live, dead } = liveHosts(readRoster(hostsDir(), () => {}), { isAlive, procStartOf });
     for (const entry of dead) clearDeadHost(entry, files);
@@ -223,6 +223,7 @@ describe.skipIf(!existsSync(BINARY))('a prestart under a session host', () => {
     const status = (await old.status(id))!;
     const launchId = await old.stage(id);
     expect(filesOf(journalDir(id)).sort()).toEqual([`${launchId}.hseq`, `${launchId}.jsonl`]);
+    expect(filesOf(join(userData, 'engine-host', 'state'))).toContain(`${id}.json`); // the held writes landed (M2's review, finding 2)
     expect(entryOf(status.holder!.holderId)).toMatchObject({ prestart: true });
     await old.kill('SIGKILL');
     // its writer lost, the marked host ends its engine and exits, keeping its entry (M1); the staged files stay with it
@@ -235,6 +236,7 @@ describe.skipIf(!existsSync(BINARY))('a prestart under a session host', () => {
     expect(dead.map((entry) => entry.holderId)).toEqual([status.holder!.holderId]);
     expect(outcome).toEqual({ adopted: [], failed: [], ended: [] });
     expect(filesOf(journalDir(id))).toEqual([]); // the staged files, then the entry
+    expect(filesOf(join(userData, 'engine-host', 'state'))).toEqual([]); // M2's review, finding 2: no earlier state, so none left
     expect(entryOf(status.holder!.holderId)).toBeUndefined();
     expect(next.ipc.table.getAny(id as AppSessionId)).toBeUndefined();
   });
