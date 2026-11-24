@@ -193,6 +193,8 @@
 "commands.session.intent.list.output":[".intents[].appSessionId AppSessionId",".intents[].lineage.parentAppSessionId AppSessionId",".intents[].progress.bootstrap.appSessionId AppSessionId",".intents[].projectId ProjectId",".intents[].source.appSessionId AppSessionId"],
 "commands.session.intent.patch.input":[".appSessionId AppSessionId",".patch.projectId ProjectId"],
 "commands.session.intent.patch.output":[".appSessionId AppSessionId",".lineage.parentAppSessionId AppSessionId",".progress.bootstrap.appSessionId AppSessionId",".projectId ProjectId",".source.appSessionId AppSessionId"],
+"commands.session.intent.prestart.input":[".appSessionId AppSessionId"],
+"commands.session.intent.prestart.withdraw.input":[".appSessionId AppSessionId"],
 "commands.session.intent.release.input":[".appSessionId AppSessionId"],
 "commands.session.intent.release.output":[".appSessionId AppSessionId",".lineage.parentAppSessionId AppSessionId",".progress.bootstrap.appSessionId AppSessionId",".projectId ProjectId",".source.appSessionId AppSessionId"],
 "commands.session.intent.resolveWorktree.input":[".appSessionId AppSessionId"],

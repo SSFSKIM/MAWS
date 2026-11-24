@@ -32,6 +32,14 @@ describe('the session service’s commands, answered on the services bus', () =>
     expect(await invoke('session.trust.check', { directory: h.work })).toMatchObject({ ok: true, value: { trustKey: h.work, trusted: false } });
   });
 
+  // Ticket 851, M3: the window's prestart and its withdraw reach the service (with no prestart owner it prestarts nothing)
+  it('answers session.intent.prestart and its withdraw', async () => {
+    const created = await invoke('session.create', { projectId: null, location: { kind: 'directory', path: h.work } });
+    const id = (created.value as { appSessionId: string }).appSessionId;
+    expect(await invoke('session.intent.prestart', { appSessionId: id })).toEqual({ ok: true, value: { status: 'skipped', token: null, reason: expect.stringContaining('off') } });
+    expect(await invoke('session.intent.prestart.withdraw', { appSessionId: id, token: 'not-a-token' })).toMatchObject({ ok: true });
+  });
+
   // The UX wave (U9, R9): a rename made under a reader (another machine's member, through the endpoint) answers the record
   // as `session.get` answers that reader, read after the rename: a member is never answered the owners' reading.
   it('answers a rename under a reader with the record as that reader reads it', async () => {

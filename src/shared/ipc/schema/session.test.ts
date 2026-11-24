@@ -145,3 +145,21 @@ describe('P5 O2 M2: session.setKeep', () => {
     expect(validateCommandOutput('session.setKeep', { kept: false, extra: 1 }).ok).toBe(false);
   });
 });
+
+// Ticket 851, M3 (docs/doperpowers/plans/2026-11-24-prestart-engine.md, D10, R4-4): the window's prestart commands
+describe('ticket 851, M3: session.intent.prestart and its withdraw', () => {
+  const ID = '0b6a2d3e-8f1c-4a57-9b2e-1d3c4e5f6a7b';
+  it('are the machine’s, take the intent’s id (and the token to withdraw), and answer a status with a token or none', () => {
+    expect(commands['session.intent.prestart'].owner).toBe('machine');
+    expect(commands['session.intent.prestart.withdraw'].owner).toBe('machine');
+    expect(validateCommandInput('session.intent.prestart', { appSessionId: ID }).ok).toBe(true);
+    expect(validateCommandInput('session.intent.prestart', { appSessionId: ID, spec: {} }).ok).toBe(false);
+    expect(validateCommandInput('session.intent.prestart.withdraw', { appSessionId: ID, token: 't1' }).ok).toBe(true);
+    expect(validateCommandInput('session.intent.prestart.withdraw', { appSessionId: ID }).ok).toBe(false);
+    expect(validateCommandInput('session.intent.prestart.withdraw', { appSessionId: ID, generation: 1 }).ok).toBe(false);
+    expect(validateCommandOutput('session.intent.prestart', { status: 'started', token: 't1' }).ok).toBe(true);
+    expect(validateCommandOutput('session.intent.prestart', { status: 'skipped', token: null, reason: 'needs_trust' }).ok).toBe(true);
+    expect(validateCommandOutput('session.intent.prestart', { status: 'refused', token: null }).ok).toBe(false);
+    expect(validateCommandOutput('session.intent.prestart.withdraw', undefined).ok).toBe(true);
+  });
+});

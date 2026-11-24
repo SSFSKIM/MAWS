@@ -471,6 +471,18 @@ describe('ownerChannelLaunch over a scratch config home', () => {
       expect(index.ownerChannel.session(record)).toMatchObject({ launchId: 'l1', advertised: { launchId: 'l1', number: 9, plugin: true } });
     });
 
+    // Ticket 851 (docs/doperpowers/plans/2026-11-24-prestart-engine.md, D7): a prestart's decision, made with nothing written
+    it('reserve: false decides what a reserving launch would advertise and writes nothing, even where a reservation would fail', async () => {
+      const store = index.ownerChannel;
+      const failing = new Proxy(store, { get: (target, key) => (key === 'reserveLaunch' ? () => { throw new Error('the index is read-only'); } : Reflect.get(target, key, target)) });
+      launchesWith({ modRoute: true, store: failing as typeof store });
+      installToHumanPlugin(configHome, { declares: true });
+      const { spec: decided, record: decision } = await ownerChannelLaunch(s, spec(), { kind: 'new', transcriptOf: null }, { reserve: false });
+      expect(envOf(decided)[NATIVE_TO_HUMAN_ENV]).toBe('9');
+      expect(decision).toMatchObject({ advertised: 9, reserved: false });
+      expect(index.ownerChannel.session(record)?.advertised ?? null).toBeNull();
+    });
+
     it('the reservation of a 9 cannot be written: the launch’s settings env carries 8, and the decision records 8', async () => {
       const store = index.ownerChannel;
       const failing = new Proxy(store, { get: (target, key) => (key === 'reserveLaunch' ? () => { throw new Error('the index is read-only'); } : Reflect.get(target, key, target)) });

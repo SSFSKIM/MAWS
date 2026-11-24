@@ -152,11 +152,12 @@ class IntentRun {
 export interface IntentAttempt {
   route: Route; // the intent's (P5 O7 M9: `route` before the legacy field), or `direct` for this attempt when the relay was down and settings say so
   directFallback: boolean;
+  adopt?: true; // ticket 851 (D4): this spine asked a prestart for the intent; the launch offers the host its engine
 }
 
 // P5 O7 M9: an attempt's route as a launch's fields; a machine route keeps the intent's legacy field, which the launch
 // rewrites from the resolved base URL (machine-route.ts)
-const attemptRoute = (intent: SetupIntent, attempt: IntentAttempt): { route: Route; gateway: 'gateway' | 'direct' } => ({ route: attempt.route, gateway: attempt.route === 'machine' ? intent.gateway : attempt.route });
+export const attemptRoute = (intent: SetupIntent, attempt: IntentAttempt): { route: Route; gateway: 'gateway' | 'direct' } => ({ route: attempt.route, gateway: attempt.route === 'machine' ? intent.gateway : attempt.route });
 
 export async function runIntentSetup(s: Setup, appSessionId: AppSessionId, attempt: IntentAttempt): Promise<void> {
   const run = new IntentRun(s, appSessionId);
@@ -194,10 +195,7 @@ export async function runIntentSetup(s: Setup, appSessionId: AppSessionId, attem
       cwd = w.path;
       worktree = { path: w.path, branch: w.branch };
     } else if (location.kind === 'existingWorktree') {
-      const listed = await s.worktrees.list(location.repoRoot);
-      const path = await canonicalPath(location.path);
-      const entry = listed.worktrees.find((w) => w.path === path);
-      if (!entry) throw new SetupFailure('worktree', `not a worktree of ${listed.repoRoot}: ${location.path}`);
+      const entry = await existingWorktreeOf(s, location);
       await run.progress({ worktree: { path: entry.path, branch: entry.branch, head: entry.head, createdHere: false } });
       cwd = entry.path;
       worktree = { path: entry.path, branch: entry.branch };
@@ -248,18 +246,18 @@ export async function runIntentSetup(s: Setup, appSessionId: AppSessionId, attem
     const fixture = takeReplay(s, 'launching');
     if (fixture) await run.progress({ engineSessionId: fixture.sessionId });
     // P2-C start (2026-10-09): the owner channel's decision for this launch (the contract, the flag, the advertisement)
-    const decided = await ownerChannelLaunch(
-      s,
-      intentLaunchSpec({ ...run.intent, permissionMode: mode, ...attemptRoute(run.intent, attempt) }, { cwd, trust: mapping.attestation, replay: fixture?.path ?? null, browserBackend: s.browserBackend(appSessionId), proofFile: s.spawnerProofs.pathOf(appSessionId) /* P5 O12 M11 */, mawsTools /* board ticket 421 */ }, s.settings()),
-      { kind: parent !== null ? 'fork' : 'new', transcriptOf: parent },
-    );
+    const decided = await ownerChannelLaunch(s, intentSpecOf(s, run.intent, attempt, { cwd, mode, attestation: mapping.attestation, replay: fixture?.path ?? null, mawsTools }), { kind: parent !== null ? 'fork' : 'new', transcriptOf: parent });
     const spec = decided.spec;
     // P2-C end
     await writeSpawnerProof(s, appSessionId, run.intent.launchedBy); // P5 O12 M11: before the launch that names it
     watch = new LaunchWatch(s, appSessionId);
-    const answer = await launchOnHost(s, 'launching', { spec, ...launchScopeOf(s.sessions, intent.lineage ?? null) /* P2-E1: a side thread's ancestors' artifacts */ });
+    const answer = await launchOnHost(s, 'launching', { spec, ...launchScopeOf(s.sessions, intent.lineage ?? null) /* P2-E1: a side thread's ancestors' artifacts */ }, attempt.adopt === true);
     if (answer.status === 'relay_unreachable') throw new RelayFailure(answer.health);
     if (answer.status === 'refused') throw new SetupFailure('launching', `${answer.reason}: ${answer.message}`);
+    // ticket 851 (D4): an adopted engine runs under its own id, not the guards' pin: written at once, so recovery and the
+    // rollback look for the transcript where that engine writes it
+    const adopted = answer.session.engineSessionId;
+    if (attempt.adopt && adopted !== null && adopted !== run.intent.progress.engineSessionId) await run.progress({ engineSessionId: adopted });
     ownerChannelLaunched(s, decided.record, { launchId: answer.session.launchId, at: s.now(), launchedAt: answer.session.launchedAt /* U2b */ }); // P2-C (2026-10-09): before any event of the launch
     await run.progress({ launch: { launchId: answer.session.launchId, at: s.now() } });
     if (attempt.directFallback) directFallbackNotice(s, appSessionId, run.intent.progress.engineSessionId);
@@ -287,10 +285,31 @@ export async function runIntentSetup(s: Setup, appSessionId: AppSessionId, attem
   }
 }
 
+// The spec an intent's launch is decided from, before the owner channel's decision and the host's route (ticket 851, D5:
+// the prestart builds it here too, so both send the same).
+export function intentSpecOf(s: Setup, intent: SetupIntent, attempt: IntentAttempt, ctx: { cwd: string; mode: NonNullable<SetupIntent['permissionMode']>; attestation: ReturnType<typeof trustMapping>['attestation']; replay: string | null; mawsTools: WantedSet['set'] }) {
+  const { appSessionId } = intent;
+  return intentLaunchSpec(
+    { ...intent, permissionMode: ctx.mode, ...attemptRoute(intent, attempt) },
+    { cwd: ctx.cwd, trust: ctx.attestation, replay: ctx.replay, browserBackend: s.browserBackend(appSessionId), proofFile: s.spawnerProofs.pathOf(appSessionId) /* P5 O12 M11 */, mawsTools: ctx.mawsTools /* board ticket 421 */ },
+    s.settings(),
+  );
+}
+
+// An existing worktree location's entry in its repository's list, read where it stands now (ticket 851: the prestart's
+// launch directory is read the same way).
+export async function existingWorktreeOf(s: Pick<Setup, 'worktrees'>, location: Extract<NonNullable<SetupIntent['location']>, { kind: 'existingWorktree' }>) {
+  const listed = await s.worktrees.list(location.repoRoot);
+  const path = await canonicalPath(location.path);
+  const entry = listed.worktrees.find((w) => w.path === path);
+  if (!entry) throw new SetupFailure('worktree', `not a worktree of ${listed.repoRoot}: ${location.path}`);
+  return entry;
+}
+
 // Board ticket 421 (D1, D5): what an intent's launch wants: a create intent its own set (seeded from the machine's
 // default, patched by the composer); a fork and a side thread the set of the conversation they resume, their source
 // record's. Each absent is the full set.
-function wantedSet(s: Setup, intent: SetupIntent): WantedSet {
+export function wantedSet(s: Pick<Setup, 'sessions'>, intent: SetupIntent): WantedSet {
   if (intent.kind === 'create') return { kind: 'new', set: intent.mawsTools ?? FULL_MAWS_TOOL_SET };
   const source = intent.source === null ? null : s.sessions.get(intent.source.appSessionId);
   return { kind: 'kept', set: source?.mawsTools ?? FULL_MAWS_TOOL_SET };

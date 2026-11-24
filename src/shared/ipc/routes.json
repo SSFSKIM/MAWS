@@ -255,6 +255,8 @@
   "session.intent.discard",
   "session.intent.get",
   "session.intent.patch",
+  "session.intent.prestart",
+  "session.intent.prestart.withdraw",
   "session.intent.release",
   "session.intent.resolveWorktree",
   "session.interrupt",

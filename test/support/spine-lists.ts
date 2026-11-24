@@ -36,7 +36,7 @@ export const SPINE_COMMANDS = [
   'session.deletions.keep', 'session.deletions.list', 'session.deletions.preview', 'session.digests', 'session.drafts.get', 'session.drafts.set',
   'session.engineStatuses', // P5 O3-D M5b fix round 6: a scenario's statuses, for main's mirror
   'session.fork', 'session.get', 'session.history.append', 'session.history.list',
-  'session.intent.discard', 'session.intent.get', 'session.intent.list', 'session.intent.patch', 'session.intent.release', 'session.intent.resolveWorktree',
+  'session.intent.discard', 'session.intent.get', 'session.intent.list', 'session.intent.patch', 'session.intent.prestart', 'session.intent.prestart.withdraw' /* ticket 851, M3 */, 'session.intent.release', 'session.intent.resolveWorktree',
   'session.launchMode', 'session.list', 'session.observedFacts',
   'session.projects.add', 'session.projects.addFolder', 'session.projects.link' /* the project registry */, 'session.projects.list', 'session.projects.relocate', 'session.projects.remove', 'session.projects.resolve', 'session.projects.update',
   'session.reader.update' /* P5 O8 M6a: a reader's own pinned, lastSeen and unread */, 'session.recentTurns', 'session.rename', 'session.replay.fixtures', 'session.replay.start', 'session.revealPath', 'session.search',

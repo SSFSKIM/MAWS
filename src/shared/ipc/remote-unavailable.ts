@@ -44,6 +44,8 @@ export const REMOTE_UNAVAILABLE: Readonly<Partial<Record<CommandName, string>>> 
   'session.intent.release': notYet('setting up a new session; use + Session'),
   'session.intent.discard': notYet('setting up a new session; use + Session'),
   'session.intent.resolveWorktree': notYet('setting up a new session; use + Session'),
+  'session.intent.prestart': notYet('setting up a new session; use + Session'), // ticket 851, M3
+  'session.intent.prestart.withdraw': notYet('setting up a new session; use + Session'),
   'session.replay.launch': notYet('replays'),
   'session.replay.control': notYet('replays'),
   // the composer's extras

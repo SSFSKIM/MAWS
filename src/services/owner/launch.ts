@@ -187,10 +187,14 @@ export class OwnerChannelLaunches {
   }
 }
 
+// Ticket 851 (docs/doperpowers/plans/2026-11-24-prestart-engine.md, D7): `reserve: false`, a prestart's decision: what this
+// launch would advertise, decided and written nowhere (no reservation, which its Send makes before the commit; a refused
+// one there turns 9 into 8, and the spec then differs from the prestart's).
 export async function ownerChannelLaunch(
   s: OwnerLaunchSetup,
   spec: LaunchSpec,
   ctx: { kind: 'new' | 'fork' | 'resume'; transcriptOf: AppSessionId | null },
+  opts: { reserve?: boolean } = {},
 ): Promise<{ spec: LaunchSpec; record: LaunchDecision | null }> {
   const owner = s.owner;
   if (owner === null) return { spec, record: null };
@@ -232,13 +236,15 @@ export async function ownerChannelLaunch(
   const plugin = resolved.toHuman.paths.length > 0 && resolved.toHuman.hooksLoad;
   let advertised = advertisementFor(desired !== 'off', installations, owner.deps.modRoute ?? TO_HUMAN_MOD_ROUTE);
   // the decision's last act: the reservation, before the send (R2). A 9 that cannot be reserved is never sent
-  let reserved = true;
-  try {
-    owner.deps.store.reserveLaunch(appSessionId, { launchId: null, number: advertised, plugin, at: (owner.deps.now ?? nowIso)() });
-  } catch (error) {
-    reserved = false;
-    s.log(`the owner channel could not reserve ${appSessionId}'s launch${advertised === 9 ? '; it advertises 8' : ''}: ${messageOf(error)}`);
-    if (advertised === 9) advertised = 8;
+  let reserved = opts.reserve !== false;
+  if (reserved) {
+    try {
+      owner.deps.store.reserveLaunch(appSessionId, { launchId: null, number: advertised, plugin, at: (owner.deps.now ?? nowIso)() });
+    } catch (error) {
+      reserved = false;
+      s.log(`the owner channel could not reserve ${appSessionId}'s launch${advertised === 9 ? '; it advertises 8' : ''}: ${messageOf(error)}`);
+      if (advertised === 9) advertised = 8;
+    }
   }
   const record: LaunchDecision = {
     appSessionId, kind: ctx.kind, laneOn: on, override, desired, recorded, appended: flags.append !== null, snapshotOff: flags.off,

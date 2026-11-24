@@ -69,6 +69,9 @@ export interface SessionServiceDeps {
   // the UX wave (U9, M2): whether the machine's ceiling refuses a session started from another machine in `mode`, read
   // where a fork from another machine is allocated (mawsd: its endpoint's policy); absent, every such fork is refused
   aboveCeiling?: (mode: string) => boolean;
+  // Ticket 851 (docs/doperpowers/plans/2026-11-24-prestart-engine.md, D9, R4-7): the spine root's owner id, under which its
+  // prestarts are asked of the engine host; absent, the spine prestarts nothing (the switches off, or no root's owner)
+  prestart?: { owner: string };
 }
 
 export const WATCHDOG_MS = 150_000; // a launch with no status for this long fails (C3's own initialize deadline is 120 s, and 30 s for an engine that writes nothing at all)

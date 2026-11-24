@@ -71,6 +71,8 @@ import type { CommandInput, CommandOutput } from '@shared/ipc/schema'; // P5 O3-
 import { RewindNotes, type ConversationAct } from './rewind-note'; // P5 O3-D M4
 import { SpawnerProofs } from './spawner-proof'; // P5 O12 M11
 import { untilLaunching } from './until-launching'; // U9 (M2)
+import { ENGINE_PRESTART_CAPABILITY } from '@shared/host/socket-protocol'; // ticket 851, M3
+import { PrestartRequests, prestartLaunch, prestartShapeRefusal, skipped, type PrestartAnswer } from './prestart'; // ticket 851, M3
 
 // A refusal of an intent command, mapped to X2 by the registration: `invalid` is `invalid_input` naming the field;
 // `starting`, `retained_worktree` and the rest are `internal` with this message.
@@ -141,6 +143,7 @@ export class SessionService {
   private readonly setupListeners = new Set<(event: SetupEvent) => void>(); // U9 (M2): a fork from another machine waits for its `launching`
   private readonly now: () => string;
   private readonly log: (message: string) => void;
+  private readonly prestarts = new PrestartRequests(); // ticket 851, M3: this root's prestart requests (prestart.ts)
 
   constructor(private readonly deps: SessionServiceDeps) {
     this.manifests = new DeletionManifests(join(deps.userData, 'sessions', 'deletions'));
@@ -556,6 +559,11 @@ export class SessionService {
       }
       next = await this.bindTrust(next, patch.location !== undefined, patch.trust);
       return this.putIntent(next);
+    }).then((written) => {
+      // ticket 851 (D10): a launch-relevant change of an intent with a live prestart request asks again (keeping its
+      // token), or withdraws once the intent is no longer eligible; the patch has answered by then, and never waits for it
+      if (Object.keys(requested).some((key) => key !== 'draft')) this.represtart(appSessionId);
+      return written;
     });
   }
 
@@ -599,6 +607,7 @@ export class SessionService {
   // and could not remove is named, left for the cleanup dialog.
   async discard(appSessionId: AppSessionId): Promise<{ leftover: { worktree: { path: string; branch: string | null } } | null }> {
     this.refuseWhileStarting(appSessionId);
+    this.prestarts.discarded(appSessionId); // ticket 851 (R4-4): a request on its way dispatches nothing; the forget below ends the host's
     return this.serial(appSessionId, async () => {
       await this.ready();
       const intent = this.deps.intents.get(appSessionId);
@@ -760,6 +769,7 @@ export class SessionService {
       throw error;
     }
     this.starting.add(appSessionId);
+    this.prestarts.sendStarted(appSessionId); // ticket 851 (R4-4): a prestart request on its way dispatches nothing now
     if (this.unrecovered !== null) this.startedSince.add(appSessionId); // E10: a deferred recovery's re-run leaves it
     const registration = early ?? this.inflight.open(appSessionId, this.deps.intents.get(appSessionId) !== null ? 'setup' : 'record-start', args.options); // P2-A
     const captured = capturingSetup(this.s, appSessionId, registration.tagged); // W2-A: tagged once an acquisition joins a record's start
@@ -865,7 +875,78 @@ export class SessionService {
     rejectIntent: (appSessionId, outcome) => this.rejectIntent(appSessionId, outcome),
     bindTrust: (intent, locationChanged, decision) => this.bindTrust(intent, locationChanged, decision),
     forgetQuietly: (appSessionId) => this.forgetQuietly(appSessionId),
+    adopting: (appSessionId) => this.prestarts.takeRequested(appSessionId), // ticket 851 (D4)
   };
+
+  // ---- the prestart (ticket 851, M3; prestart.ts) ----------------------------------------------------------------
+
+  // `session.intent.prestart`: the request's epoch is set before the first await (R4-4), and every answer that is not a
+  // dispatch is `skipped`, writing nothing; a failure is logged and skipped as well.
+  prestart(appSessionId: AppSessionId): Promise<PrestartAnswer> {
+    if (this.deps.prestart === undefined) return Promise.resolve(skipped('off: this spine prestarts nothing'));
+    const { token, epoch } = this.prestarts.begin(appSessionId);
+    return this.requestPrestart(appSessionId, token, epoch, this.deps.prestart.owner);
+  }
+
+  // `session.intent.prestart.withdraw`: the prestart serving the token's request goes, unless the token is no longer
+  // current or a Send has started (whose launch adopts or ends it); otherwise nothing.
+  async withdrawPrestart(appSessionId: AppSessionId, token: string): Promise<void> {
+    await this.withdrawGeneration(appSessionId, this.prestarts.withdraw(appSessionId, token));
+  }
+
+  private represtart(appSessionId: AppSessionId): void {
+    const token = this.prestarts.tokenOf(appSessionId);
+    if (token === null || this.deps.prestart === undefined) return;
+    const { epoch } = this.prestarts.begin(appSessionId, token);
+    void this.work.track(this.requestPrestart(appSessionId, token, epoch, this.deps.prestart.owner));
+  }
+
+  private async requestPrestart(appSessionId: AppSessionId, token: string, epoch: number, owner: string): Promise<PrestartAnswer> {
+    let reason: string;
+    let dispatched = false;
+    try {
+      const s = await this.ready();
+      const built = await this.prestartOf(s, appSessionId);
+      if ('skip' in built) reason = built.skip;
+      else if (!this.prestarts.current(appSessionId, epoch)) return skipped('ended: a discard, a Send, a withdraw or a newer request came first');
+      else {
+        this.prestarts.dispatching(appSessionId, epoch);
+        dispatched = true;
+        const host = await hostCall(this.deps.host.dispatch, 'session.prestart', { spec: built.spec, key: built.key, owner });
+        dispatched = false;
+        if (this.prestarts.answered(appSessionId, epoch, host.generation)) await this.withdrawGeneration(appSessionId, host.generation);
+        if (host.status !== 'refused') return this.prestarts.tokenOf(appSessionId) === token ? { status: host.status, token } : skipped('ended: the request was withdrawn or replaced');
+        reason = `refused: ${host.reason ?? 'the engine host refused it'}`;
+      }
+    } catch (error) {
+      if (dispatched) this.prestarts.answered(appSessionId, epoch, 0);
+      reason = `error: ${error instanceof Error ? error.message : String(error)}`;
+      this.log(`the prestart of ${appSessionId} was not made: ${reason}`);
+    }
+    // a request that is still the current one and cannot be served ends its line: what an earlier request of it started
+    // no longer fits the intent
+    if (this.prestarts.current(appSessionId, epoch)) await this.withdrawGeneration(appSessionId, this.prestarts.withdraw(appSessionId));
+    return skipped(reason);
+  }
+
+  private async prestartOf(s: Setup, appSessionId: AppSessionId): ReturnType<typeof prestartLaunch> {
+    if (s.replay !== null) return { skip: 'replay: each launch takes the next fixture' };
+    const intent = this.deps.intents.get(appSessionId);
+    const shape = prestartShapeRefusal(intent);
+    if (shape !== null) return { skip: shape };
+    if (this.starting.has(appSessionId)) return { skip: 'starting: a start is in flight' };
+    if (!(await this.hostLists(ENGINE_PRESTART_CAPABILITY))) return { skip: 'host: the engine host serves no prestart' };
+    return prestartLaunch(s, await this.bindTrust(intent!, true, undefined)); // the decision bound as Send's guards bind it
+  }
+
+  private async withdrawGeneration(appSessionId: AppSessionId, generation: number | null): Promise<void> {
+    if (generation === null) return;
+    try {
+      await hostCall(this.deps.host.dispatch, 'session.prestart.withdraw', { appSessionId, generation });
+    } catch (error) {
+      this.log(`the prestart of ${appSessionId} (generation ${generation}) was not withdrawn: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
 
   // P5 O16 M3b (D58, D58a): an adopted engine whose re-initialize after the handover failed was ended through the ladder
   // only because of the handover, so its session is resumed at once, as resume.ts retries `no_output` once: one resume

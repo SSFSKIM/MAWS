@@ -39,6 +39,7 @@ export const commands = [
   'session.spawn', // P5 O7 M4: a lane B session started here at another machine's request
   'session.operations', // P5 O7 M8: the outcomes the engine host keeps by opId
   'session.steer.sendNow', // UX wave U4a: a message that waits at the next step, sent now through the engine's own request
+  'session.intent.prestart', 'session.intent.prestart.withdraw', // ticket 851, M3: the window's prestart of a New chat's engine
 ] as const;
 
 // P4-AGG M4: the engine's own MCP sign-in, main's sign-in operation alone (src/services/connectors/sign-in.ts)

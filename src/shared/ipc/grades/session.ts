@@ -98,6 +98,8 @@ export const grades = {
   'session.intent.release': 'spawn',
   'session.intent.discard': 'spawn',
   'session.intent.resolveWorktree': 'spawn',
+  'session.intent.prestart': 'spawn', // ticket 851, M3: it starts an engine, as the start it prepares does
+  'session.intent.prestart.withdraw': 'spawn',
   'session.start': 'spawn',
   'session.fork': 'spawn',
   'session.archiveOlder': 'manage',

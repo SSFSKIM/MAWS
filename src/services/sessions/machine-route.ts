@@ -87,14 +87,15 @@ const legacyEquivalent = (resolution: BaseUrlResolution): boolean => resolution.
 // model the launch would not reach ClaudeUsage with), the relay sheet, or nothing.
 export type MachineGuard = { refused: { field: 'route' | 'model'; message: string } } | { relay: RelayHealth } | null;
 
-export async function guardMachineRoute(s: Setup, args: { site: SettingsSite; model: string | null; flagEnv?: unknown; startAnyway: boolean }): Promise<MachineGuard> {
+// Ticket 851 (D8): `relay: 'cached'`, the prestart's read of the relay's last health (it never forces a probe).
+export async function guardMachineRoute(s: Setup, args: { site: SettingsSite; model: string | null; flagEnv?: unknown; startAnyway: boolean; relay?: 'probe' | 'cached' }): Promise<MachineGuard> {
   const resolution = await machineBaseUrl(s, args.site, args.flagEnv);
   const lists = await s.hostLists(ENGINE_ROUTE_MACHINE_CAPABILITY);
   if (!lists && !legacyEquivalent(resolution)) return { refused: { field: 'route', message: ROUTE_UNSUPPORTED } };
   const relay = resolution.kind === 'resolved' && resolution.baseUrl === RELAY_URL;
   if (args.model !== null && isGatewayModel(args.model) && resolution.kind === 'resolved' && !relay) return { refused: { field: 'model', message: machineRouteRefusal(args.model) } };
   if (!relay || (args.startAnyway && lists)) return null;
-  const health = await hostCall(s.dispatch, 'engine.relayHealth', { force: true });
+  const health = await hostCall(s.dispatch, 'engine.relayHealth', { force: args.relay !== 'cached' });
   if (health.ok) return null;
   // an older host refuses the legacy gateway launch at a dead relay, so no sheet offers to start past it
   return lists ? { relay: health } : { refused: { field: 'route', message: ROUTE_RELAY_UNSUPPORTED } };
@@ -106,26 +107,42 @@ export async function guardMachineRoute(s: Setup, args: { site: SettingsSite; mo
 // Board ticket 421 (D8): a spec carries a set of MAWS's tools only when the attempt's one answer (served-set.ts) found a
 // host that lists `engine.mawsTools`, so nothing is taken off here; a host replaced by an older one since is refused, as
 // that answer would have refused it, rather than serving the session another list.
-export async function specForHost(s: Setup, spec: LaunchSpec): Promise<{ spec: LaunchSpec } | { refused: string }> {
+// Ticket 851 (docs/doperpowers/plans/2026-11-24-prestart-engine.md, D5): and beside that spec the prestart key, from the
+// same resolution of the base URL: what decides the launch beyond that spec, the machine route's resolved
+// base URL with the gateway keys it found (two base URLs that the legacy field maps alike are told apart here). The key is
+// null where no prestart may be adopted: a machine route whose resolution is uncertain, or a host that cannot serve the
+// machine route (the spec it is sent then says less than the launch it makes).
+export async function hostLaunchOf(s: Setup, spec: LaunchSpec): Promise<{ spec: LaunchSpec; key: string | null } | { refused: string }> {
   if (spec.mawsTools !== undefined && !(await s.hostLists(ENGINE_MAWS_TOOLS_CAPABILITY))) return { refused: MAWS_TOOLS_UNSUPPORTED };
   const { route: _route, ...legacy } = spec;
   void _route;
   const chosen: Route = readRoute(spec);
-  if (chosen !== 'machine') return { spec: { ...legacy, gateway: chosen } };
+  if (chosen !== 'machine') return { spec: { ...legacy, gateway: chosen }, key: prestartKey({ route: chosen }) };
   const resolution = await machineBaseUrl(s, { cwd: spec.cwd }, spec.extraSettings?.env);
   const gateway = legacyOfResolution(resolution, spec.gateway);
-  if (await s.hostLists(ENGINE_ROUTE_MACHINE_CAPABILITY)) return { spec: { ...legacy, gateway, route: 'machine' } };
-  return legacyEquivalent(resolution) ? { spec: { ...legacy, gateway } } : { refused: ROUTE_UNSUPPORTED };
+  if (await s.hostLists(ENGINE_ROUTE_MACHINE_CAPABILITY)) {
+    const key = resolution.kind === 'resolved' ? prestartKey({ route: 'machine', baseUrl: resolution.baseUrl, gatewayKeys: [...resolution.gatewayKeys].sort() }) : null;
+    return { spec: { ...legacy, gateway, route: 'machine' }, key };
+  }
+  return legacyEquivalent(resolution) ? { spec: { ...legacy, gateway }, key: null } : { refused: ROUTE_UNSUPPORTED };
 }
 
-// `session.launch` with the spec this engine host is sent (specForHost): a launch an older host would serve on another
+const PRESTART_KEY_MAX = 4096; // session.prestart's bound on the key
+const prestartKey = (facts: object): string | null => {
+  const key = JSON.stringify({ v: 1, ...facts });
+  return key.length <= PRESTART_KEY_MAX ? key : null;
+};
+
+// `session.launch` with the spec this engine host is sent (hostLaunchOf): a launch an older host would serve on another
 // inference fails the setup with `route-unsupported`'s words, nothing launched (the guards refused it first, unless the
 // host or the settings changed since). A launch the host takes records the route chosen for it on the session's record
 // (none for a bootstrap's id), which an older host's status, carrying no route, leaves standing.
-export async function launchOnHost(s: Setup, phase: SetupPhase, input: Omit<CommandInput<'session.launch'>, 'spec'> & { spec: LaunchSpec }): Promise<CommandOutput<'session.launch'>> {
-  const sent = await specForHost(s, input.spec);
+// Ticket 851 (D4): `adopt`, an intent's launch after its prestart was asked: the key is sent beside the spec (computed
+// as the prestart's was), and the host adopts the prestart when both match; no key, no adoption.
+export async function launchOnHost(s: Setup, phase: SetupPhase, input: Omit<CommandInput<'session.launch'>, 'spec' | 'adopt'> & { spec: LaunchSpec }, adopt = false): Promise<CommandOutput<'session.launch'>> {
+  const sent = await hostLaunchOf(s, input.spec);
   if ('refused' in sent) throw new SetupFailure(phase, sent.refused);
-  const answer = await hostCall(s.dispatch, 'session.launch', { ...input, spec: sent.spec });
+  const answer = await hostCall(s.dispatch, 'session.launch', { ...input, spec: sent.spec, ...(adopt && sent.key !== null && { adopt: { key: sent.key } }) });
   if (answer.status === 'launching') s.sessions.setRoute(input.spec.appSessionId, readRoute(input.spec));
   return answer;
 }
