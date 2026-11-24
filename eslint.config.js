@@ -28,6 +28,19 @@ const YJS_PATTERNS = [
 const YJS_DYNAMIC = { selector: 'ImportExpression[source.value=/^@y.(?:y|prosemirror)(?:\\W.*)?$/]', message: YJS_PATTERNS[0].message };
 const PORTABLE_DYNAMIC_SYNTAX = { selector: `ImportExpression[source.value=/${PORTABLE_DYNAMIC.source}/]`, message: PORTABLE };
 // P3-A end
+// Question sheet C3 start (docs/doperpowers/plans/2026-11-23-question-sheet-c3-maws-app.md, §G): the sheet's components are
+// the renderer half of the composite's X5, which C4's page and desk-web import as they stand, so they reach no Electron,
+// no Node, no `window.maws`, and none of the app's IPC, stores, panel, sessions, lanes or tools: a consumer supplies all
+// of that through a SheetHost (src/renderer/src/sheet/host.ts). Its files' one block of each rule, so it restates the
+// renderer's Yjs, endpoint, composition and compiled-postfix rules.
+const SHEET = 'src/renderer/src/sheet/ is the question sheet\'s portable half (C3 §G): no Electron, no Node, no window.maws, none of the app\'s IPC, stores, panel, session, lanes or tools; reach the app through SheetHost (src/renderer/src/sheet/host.ts).';
+const SHEET_PATHS = ['electron', ...NODE_MODULES].map((name) => ({ name, message: SHEET }));
+const SHEET_PATTERNS = [
+  { group: ['node:*'], message: SHEET },
+  { regex: '^(\\.\\./)+(ipc|stores|panel|session|lane-a|lane-b|tools)(/|$)', message: SHEET },
+];
+const SHEET_DYNAMIC = { selector: `ImportExpression[source.value=/${PORTABLE_DYNAMIC.source}/]`, message: SHEET };
+// Question sheet C3 end
 // P5 O1 M3 start (docs/doperpowers/plans/2026-10-27-p5-o1-seams.md, M3): the machine-bound services, the ones P5 moves
 // to mawsd (survey §2 items 1-7 and 12), import no Electron (value, type or dynamic) and not main's open-external (an
 // Electron effect): every client-only effect goes through the injected client port (OX4). P5 O3-C moved the spine and
@@ -218,6 +231,19 @@ module.exports = defineConfig(
     files: ['src/preload/**/*.{ts,tsx}', 'src/renderer/**/*.{ts,tsx}'],
     ignores: ['src/**/*.test.{ts,tsx}'],
     rules: { 'no-restricted-imports': ['error', { patterns: [...YJS_PATTERNS, ...ENDPOINT_PATTERNS, SERVICE_COMPOSITION] }] },
+  },
+  // Question sheet C3: the sheet's boundary (SHEET, above), its suites and test support included, which desk-web imports too
+  {
+    files: ['src/renderer/src/sheet/**/*.{ts,tsx}'],
+    rules: {
+      'no-restricted-imports': ['error', { paths: SHEET_PATHS, patterns: [...SHEET_PATTERNS, ...YJS_PATTERNS, ...ENDPOINT_PATTERNS, SERVICE_COMPOSITION] }],
+      'no-restricted-syntax': ['error', SHEET_DYNAMIC, COMPILED_POSTFIX, YJS_DYNAMIC],
+      'no-restricted-properties': [
+        'error',
+        { object: 'window', property: 'maws', message: SHEET },
+        { object: 'globalThis', property: 'maws', message: SHEET },
+      ],
+    },
   },
   {
     files: ['src/artifacts/**/*.{ts,tsx}'],
