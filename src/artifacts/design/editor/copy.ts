@@ -97,6 +97,7 @@ export const DESIGN_COPY = {
     full: (act: string, max: number) => `Can’t ${act} a board: ${max} boards is the most`,
     gone: 'That board was deleted',
     other: (act: string) => `Can’t ${act} this board`,
+    copyLimit: (limits: string) => `Can’t duplicate this board: ${limits.charAt(0).toLowerCase()}${limits.slice(1)}`, // its frame passes a limit
     moveHeld: 'Can’t move elements to a board that doesn’t load',
     moveMissing: 'Can’t move elements to a board whose file hasn’t arrived',
     moveOther: 'Can’t move these elements there',

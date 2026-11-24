@@ -4,10 +4,11 @@
 // so the page holds nothing unsaved; the previews follow the replica in the same frame. Portable (§4.10): the page
 // takes the system's open handle and the host, and draws its chrome in the app's tokens, the system only inside its
 // previews' scopes. The app's header registration (X32) and Mark-up are the renderer body's that mounts this page.
-// The word cut (docs/doperpowers/specs/2026-11-16-word-cut-design.md, M5 task 4): the wait for a system is a quiet
-// spinner (G562); tokens that do not resolve are one line with their count that opens to each (G565).
+// The word cut (docs/doperpowers/specs/2026-11-16-word-cut-design.md, M5 task 4): the page mounts on a replica past its
+// first sync (the tab's open waits for it, under its own quiet spinner), so a replica that holds no system is no wait:
+// the page says it is empty, settled, and draws the system as soon as one is written (G562; M5 task 4's review). Tokens
+// that do not resolve are one line with their count that opens to each (G565).
 import { useLayoutEffect, useRef } from 'react';
-import { QuietSpinner } from '../../../renderer/src/ui/spinner';
 import type { ArtifactHost, DocumentHandle } from '../../host';
 import type { HtmlParser } from '../canon';
 import type { SystemOrigin } from '../model';
@@ -60,7 +61,7 @@ export function DesignSystemPage(props: DesignSystemPageProps) {
   if (!system.meta) {
     return (
       <div className="dsp-page" data-ds-page={artifactId}>
-        <QuietSpinner label={PAGE_COPY.loadingName} />
+        <p className="dsp-muted">{PAGE_COPY.empty}</p>
       </div>
     );
   }

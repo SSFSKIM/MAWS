@@ -15,7 +15,10 @@ import { allTabs } from '../stores/layout-model';
 export type SavedState = 'saved' | 'saving' | 'unsaved' | 'reconnecting' | 'readonly';
 // P4-B5: `pinned`, drawn in the row beside the first three rather than counted among them (the header's Send to); folded
 // into "More actions" only under the narrow header, as every action is.
-export interface EditorHostAction { id: string; label: string; icon?: ComponentType<{ className?: string }>; onSelect(): void; disabled?: boolean; pressed?: boolean; pinned?: boolean }
+// The word cut (M5's G558): `unavailable`, why the action cannot act now; the header draws it greyed and still in the
+// keyboard's reach, its reason the tooltip and the description, and its press does nothing. `disabled` takes the control
+// out of the Tab order and says nothing; prefer a reason.
+export interface EditorHostAction { id: string; label: string; icon?: ComponentType<{ className?: string }>; onSelect(): void; disabled?: boolean; unavailable?: string | null; pressed?: boolean; pinned?: boolean }
 // UX wave U10b (§B.5 of docs/doperpowers/plans/2026-11-15-ux-wave-U10b-artifacts.md): `checked`, an entry drawn as a
 // checkbox item (a document's page: Letter, A4, Compact) after the menu's other rows and a separator.
 export interface EditorHostExport { id: string; label: string; onSelect(): void; disabled?: boolean; children?: readonly EditorHostExport[]; description?: string; checked?: boolean }

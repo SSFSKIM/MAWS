@@ -3,7 +3,7 @@
 // named `…Name` or `…Tip`. The page's other words are still written where they are drawn.
 
 export const PAGE_COPY = {
-  loadingName: 'Loading the design system…', // G562: the quiet spinner's name while the replica holds no system yet
+  empty: 'This design system is empty', // G562: a synced replica that holds no system
   // G565: the count at rest, opening to each path and its message
   unresolved: (n: number) => `${n} ${n === 1 ? 'token doesn’t' : 'tokens don’t'} resolve`,
   // G568: a contrast pair's verdict, its tooltip and description; a failing pair's mark

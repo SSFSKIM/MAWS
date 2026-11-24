@@ -351,12 +351,12 @@ export function DesignWorkbench(props: DesignWorkbenchProps) {
   );
 
   // ---- board commands (each one gesture, one undo step)
-  const tryEdit = (act: BoardAct, write: (origin: object) => void, frame?: Parameters<typeof boardRefusal>[3]): boolean => {
+  const tryEdit = (act: BoardAct, write: (origin: object) => void): boolean => {
     try {
       session.edit(write);
       return true;
     } catch (error) {
-      const refused = boardRefusal(doc, error, act, frame); // G518: in a person's words, the model's kept where none fit
+      const refused = boardRefusal(error, act); // G518: in a person's words, the model's kept where none fit
       setNotice(refused.text, refused.why);
       return false;
     }
@@ -369,7 +369,7 @@ export function DesignWorkbench(props: DesignWorkbenchProps) {
   const addBoard = (preset: BoardPreset) => {
     const id = mintSlideId(doc);
     const frame = { ...placementAfter(doc), w: preset.w, h: preset.h };
-    if (!tryEdit('add', (origin) => insertBoard(doc, { id, frame, title: preset.label }, order.at(-1) ?? null, origin), frame)) return;
+    if (!tryEdit('add', (origin) => insertBoard(doc, { id, frame, title: preset.label }, order.at(-1) ?? null, origin))) return;
     selectBoard(id);
     view.fitTo(frame, BOARD_FIT_MAX);
   };
@@ -504,7 +504,7 @@ export function DesignWorkbench(props: DesignWorkbenchProps) {
       )}
       {!preview && active?.held && (
         <div role="status" className="deck-held-banner" data-held-banner>
-          <details className="design-held-details">
+          <details key={active.id} className="design-held-details">
             <summary>
               <strong>{C.heldBanner}</strong>
             </summary>

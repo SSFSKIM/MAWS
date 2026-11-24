@@ -22,6 +22,9 @@ import { cardHost, cardSession, FLOAT_COPY, useFloatingCard } from '../shell/flo
 import { ShowChat } from '../shell/ShowChat'; // UX wave U10b (O-43): Show chat, before the float control
 import { MARKUP_COPY, startMarkup, useMarkup } from '../markup/session'; // P3-G
 import { useMarkupSurface } from '../markup/surface'; // P3-G
+import { NamedGlyph } from '../ui/glyph'; // the word cut (M5's G558): an icon action's word, tipped on focus
+import { RefusedMenuItem } from '../ui/refused-menu-item';
+import { UNAVAILABLE_LOOK, UnavailableButton } from '../ui/tip';
 import { useEditorHeaderFocus, useEditorHostRegistration, type EditorHostAction, type EditorHostExport, type EditorHostRegistration, type EditorHostScope } from './editor-host';
 import { COPY } from './copy';
 import { SavedStatus } from './SavedStatus';
@@ -255,25 +258,36 @@ function CommentCount({ count, action }: { count: number; action: EditorHostActi
   );
 }
 
+// The word cut (M5's G558): an icon action is a named glyph, its word a tooltip the keyboard reaches; one `unavailable`
+// stays focusable, greyed, its reason in the tooltip and the description, its press swallowed. A `disabled` one (no
+// reason given) is out of the Tab order, so it keeps the system's tooltip for the pointer.
 function ActionButton({ action, text = false }: { action: EditorHostAction; text?: boolean }) {
   const ActionIcon = text ? undefined : action.icon;
-  if (ActionIcon) {
+  if (ActionIcon && action.disabled) {
     return (
-      <IconButton label={action.label} pressed={action.pressed} disabled={action.disabled} onClick={() => action.onSelect()} data-editor-action={action.id}>
+      <IconButton label={action.label} pressed={action.pressed} disabled onClick={() => action.onSelect()} data-editor-action={action.id}>
         <ActionIcon className="size-4" />
       </IconButton>
     );
   }
+  if (ActionIcon) {
+    return (
+      <NamedGlyph label={action.label} unavailable={action.unavailable} pressed={action.pressed} onClick={() => action.onSelect()} data-editor-action={action.id}>
+        <ActionIcon className="size-4" />
+      </NamedGlyph>
+    );
+  }
   // An action with no icon is drawn by its label.
-  return (
-    <button type="button" aria-pressed={action.pressed} disabled={action.disabled} onClick={() => action.onSelect()} data-editor-action={action.id} className={`${GHOST} px-2 text-ui`}>
+  const button = (
+    <button type="button" aria-pressed={action.pressed} disabled={action.disabled} onClick={() => action.onSelect()} data-editor-action={action.id} className={`${GHOST} px-2 text-ui ${UNAVAILABLE_LOOK}`}>
       {action.label}
     </button>
   );
+  return action.unavailable ? <UnavailableButton reason={action.unavailable}>{button}</UnavailableButton> : button;
 }
 
 const MENU = 'z-50 min-w-44 rounded-md border border-border-strong bg-bg-overlay p-1 text-ui text-fg';
-const ITEM = 'flex h-7 cursor-default items-center gap-2 rounded-sm px-2 outline-none select-none data-disabled:text-fg-faint data-highlighted:bg-bg-hover';
+const ITEM = 'flex h-7 cursor-default items-center gap-2 rounded-sm px-2 outline-none select-none data-disabled:text-fg-faint aria-disabled:text-fg-faint data-highlighted:bg-bg-hover';
 
 // The overflow: the actions past the inline ones, and under a narrow header every action and the exports (under their
 // own heading). A pressed action is a checkbox item with its check drawn; while any is, every item keeps the check's
@@ -283,7 +297,9 @@ function MoreMenu({ actions, exports, label = HEADER_COPY.more, text = false }: 
   return (
     <HeaderMenu label={label} icon={<MoreIcon />} more text={text}>
       {actions.map((action) =>
-        action.pressed === undefined ? (
+        action.unavailable ? (
+          <RefusedMenuItem key={action.id} kit={DropdownMenu} label={action.label} reason={action.unavailable} lead={checks && <CheckRoom />} className={ITEM} />
+        ) : action.pressed === undefined ? (
           <DropdownMenu.Item key={action.id} disabled={action.disabled} onSelect={() => action.onSelect()} className={ITEM}>
             {checks && <span aria-hidden className="size-3.5 shrink-0" />}
             {action.label}

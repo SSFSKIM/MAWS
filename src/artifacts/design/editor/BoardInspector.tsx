@@ -51,7 +51,7 @@ export function BoardInspector({ session, board, readOnly }: BoardInspectorProps
       setRefused(null);
       return [];
     } catch (error) {
-      if (error instanceof BoardError) return [boardRefusal(session.doc, error, 'resize', { ...board.frame, ...frame }).text];
+      if (error instanceof BoardError) return [boardRefusal(error, 'resize').text];
       throw error;
     }
   };

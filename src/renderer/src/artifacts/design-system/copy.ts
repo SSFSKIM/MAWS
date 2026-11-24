@@ -10,6 +10,7 @@ export const DESIGN_SYSTEM_COPY = {
   untitled: 'Design system',
   check: 'Check against law',
   setDefault: 'Set as my default',
+  alreadyDefault: 'Already your default', // G558: why the star does nothing on the default system
   exportClaude: 'Export for Claude',
   exported: (path: string) => `Exported for Claude to ${path}`,
   exportFailed: (reason: string) => `Could not export for Claude: ${reason}`,

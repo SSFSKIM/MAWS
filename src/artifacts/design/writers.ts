@@ -1,9 +1,10 @@
 // P3-E1 M1 (docs/doperpowers/plans/2026-10-16-p3-e1-design-workbench.md, "Execution constraints"; the parent's §1
 // "Identity", XE4): the workbench's board writers beside C's element writers, one gesture one transaction with the
 // caller's origin (C's undo scope tracks it, so a board move and an element restyle undo as one stack). A frame is checked
-// by the manifest's one rule (`frameProblems`) and refused naming the board, nothing written; never clamped. C's
-// `duplicateSlide` keeps element ids and drops the geometry (Decision Log 10), so the duplicate here mints a new board id
-// and new element ids, keeps the notes, size and title, and copies no conversation.
+// by the manifest's one rule (`frameFaults`) and refused naming the board, nothing written; never clamped. A refusal
+// carries why, structured (`BoardFault`), beside its words. C's `duplicateSlide` keeps element ids and drops the geometry
+// (Decision Log 10), so the duplicate here mints a new board id and new element ids, keeps the notes, size and title, and
+// copies no conversation.
 import type { SlideIR } from '../slides/ir';
 import { cellMinter, deleteSlide, elementMinter, insertSlide, readFlat, ROOT, toScalars } from '../slides/model';
 import { CELL_TAGS } from '../slides/ir';
@@ -11,14 +12,23 @@ import { ID_RE, loadSlide } from '../slides/parse';
 import { mintSlideId } from '../slides/writers';
 import { transact, type Doc } from '../yjs';
 import * as Y from '../yjs/slides';
-import { CANVAS_LIMITS, FRAME_KEYS, frameProblems, type BoardFrame } from './canvas';
+import { CANVAS_LIMITS, FRAME_KEYS, frameFaultMessage, frameFaults, type BoardFrame, type FrameFault } from './canvas';
 import { boardEntry, boardFrame, isMissingSource, PLACEMENT_GAP, writeBoardEntry } from './model';
 
-/** A board write the model refuses: the board and every reason, each naming the board. */
+/**
+ * Why the model refuses a board write, for a reader that words it itself (the workbench, M5 task 4's review): the board
+ * is gone, held or missing its file; the design is full; a frame breaks the manifest's rule (each `FrameFault`). `other`
+ * is a refusal the workbench never asks for (a bad or taken id, content of another board, a move's own faults), whose
+ * words are the problems.
+ */
+export type BoardFault = { kind: 'gone' } | { kind: 'held' } | { kind: 'missing' } | { kind: 'full'; limit: number } | { kind: 'frame'; faults: readonly FrameFault[] } | { kind: 'other' };
+
+/** A board write the model refuses: the board, every reason (each naming the board) and why, structured. */
 export class BoardError extends Error {
   constructor(
     readonly board: string,
     readonly problems: string[],
+    readonly fault: BoardFault,
   ) {
     super(problems.join('; '));
     this.name = 'BoardError';
@@ -26,17 +36,18 @@ export class BoardError extends Error {
 }
 
 const exists = (doc: Doc, id: string) => {
-  if (!Y.hasSlide(doc, id)) throw new BoardError(id, [`board ${id}: no such board`]);
+  if (!Y.hasSlide(doc, id)) throw new BoardError(id, [`board ${id}: no such board`], { kind: 'gone' });
 };
-const refuseIf = (board: string, problems: string[]) => {
-  if (problems.length > 0) throw new BoardError(board, problems);
+const refuseFrame = (board: string, frame: Partial<Record<keyof BoardFrame, unknown>>) => {
+  const faults = frameFaults(frame);
+  if (faults.length > 0) throw new BoardError(board, faults.map((fault) => frameFaultMessage(board, fault)), { kind: 'frame', faults });
 };
 function needRoom(doc: Doc, board: string): void {
-  if (Y.slideIds(doc).length >= CANVAS_LIMITS.boards) throw new BoardError(board, [`a design holds at most ${CANVAS_LIMITS.boards} boards`]);
+  if (Y.slideIds(doc).length >= CANVAS_LIMITS.boards) throw new BoardError(board, [`a design holds at most ${CANVAS_LIMITS.boards} boards`], { kind: 'full', limit: CANVAS_LIMITS.boards });
 }
 function newId(doc: Doc, id: string): void {
-  if (!ID_RE.test(id)) throw new BoardError(id, [`board id "${id}" is not [A-Za-z0-9_-]{1,64}`]);
-  if (Y.hasSlide(doc, id)) throw new BoardError(id, [`board ${id}: the design already holds it`]);
+  if (!ID_RE.test(id)) throw new BoardError(id, [`board id "${id}" is not [A-Za-z0-9_-]{1,64}`], { kind: 'other' });
+  if (Y.hasSlide(doc, id)) throw new BoardError(id, [`board ${id}: the design already holds it`], { kind: 'other' });
 }
 
 /** Moves or resizes a board: the keys given, the whole frame checked as it would stand; nothing written when unchanged. */
@@ -45,7 +56,7 @@ export function setBoardFrame(doc: Doc, boardId: string, frame: Partial<BoardFra
   const s = Y.slideScalars(doc, boardId);
   const next: Record<string, unknown> = {};
   for (const k of FRAME_KEYS) next[k] = k in frame ? frame[k] : s[k];
-  refuseIf(boardId, frameProblems(boardId, next));
+  refuseFrame(boardId, next);
   const changed = FRAME_KEYS.filter((k) => k in frame && s[k] !== frame[k]);
   if (changed.length === 0) return;
   transact(doc, () => changed.forEach((k) => Y.setSlideKey(doc, boardId, k, frame[k]!)), origin);
@@ -70,8 +81,9 @@ export interface NewBoard {
 export function insertBoard(doc: Doc, board: NewBoard, afterId: string | null, origin?: unknown): void {
   newId(doc, board.id);
   const missing = FRAME_KEYS.filter((k) => !(k in board.frame));
-  refuseIf(board.id, missing.length ? [`board ${board.id}: a frame has x, y, w and h`] : frameProblems(board.id, board.frame));
-  if (board.slide && board.slide.id !== board.id) throw new BoardError(board.id, [`board ${board.id}: its content is board ${board.slide.id}’s`]);
+  if (missing.length) throw new BoardError(board.id, [`board ${board.id}: a frame has x, y, w and h`], { kind: 'other' });
+  refuseFrame(board.id, board.frame);
+  if (board.slide && board.slide.id !== board.id) throw new BoardError(board.id, [`board ${board.id}: its content is board ${board.slide.id}’s`], { kind: 'other' });
   needRoom(doc, board.id);
   transact(
     doc,
@@ -92,15 +104,15 @@ export function insertBoard(doc: Doc, board: NewBoard, afterId: string | null, o
 export function duplicateBoard(doc: Doc, boardId: string, options: { id?: string; at?: { x: number; y: number } } = {}, origin?: unknown): { id: string; elements: Map<string, string> } {
   exists(doc, boardId);
   const s = Y.slideScalars(doc, boardId);
-  if (s.held) throw new BoardError(boardId, [`board ${boardId}: its file does not load (held), so there is nothing to copy`]);
-  if (isMissingSource(doc, boardId)) throw new BoardError(boardId, [`board ${boardId}: its file never arrived, so there is nothing to copy`]);
+  if (s.held) throw new BoardError(boardId, [`board ${boardId}: its file does not load (held), so there is nothing to copy`], { kind: 'held' });
+  if (isMissingSource(doc, boardId)) throw new BoardError(boardId, [`board ${boardId}: its file never arrived, so there is nothing to copy`], { kind: 'missing' });
   const id = options.id ?? mintSlideId(doc);
   newId(doc, id);
   needRoom(doc, id);
   const frame = boardFrame(doc, boardId);
   const at = options.at ?? (frame ? { x: frame.x + frame.w + PLACEMENT_GAP, y: frame.y } : undefined);
   const entry = { ...boardEntry(doc, boardId), ...at };
-  refuseIf(id, frameProblems(id, entry));
+  refuseFrame(id, entry);
 
   const els = readFlat(doc, boardId, true);
   const taken = els.map((e) => e.id);

@@ -108,7 +108,7 @@ export function DesignSystemBody(props: DesignSystemBodyProps) {
     pendingEdits: replica === 'saving',
     actions: [
       { id: 'design-system.check', label: DESIGN_SYSTEM_COPY.check, icon: CheckLawIcon, onSelect: () => requestCheck(key) },
-      { id: 'design-system.set-default', label: DESIGN_SYSTEM_COPY.setDefault, icon: DefaultStarIcon, onSelect: () => onSetDefault?.(), disabled: !onSetDefault || isDefault },
+      { id: 'design-system.set-default', label: DESIGN_SYSTEM_COPY.setDefault, icon: DefaultStarIcon, onSelect: () => onSetDefault?.(), disabled: !onSetDefault, unavailable: isDefault ? DESIGN_SYSTEM_COPY.alreadyDefault : null }, // G558: the default's star keeps the keyboard and says why
       ...(onDelete ? [{ id: 'design-system.delete', label: DESIGN_SYSTEM_COPY.deleteAction, icon: DeleteBinIcon, onSelect: () => onDelete() }] : []),
     ],
     exports: [{ id: 'design-system.export-claude', label: DESIGN_SYSTEM_COPY.exportClaude, onSelect: () => exportForClaude(host, artifactId) }],

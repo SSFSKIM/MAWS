@@ -36,7 +36,7 @@ import { Overlay } from '../../slides/editor/transform/Overlay';
 import { pick, slideTree } from '../../slides/editor/transform/selection';
 import * as Y from '../../yjs/slides';
 import { heldOf } from '../../slides/model';
-import type { BoardFrame } from '../canvas';
+import type { BoardFrame, FrameFault } from '../canvas';
 import { boardFrame, boardOrder, isMissingSource } from '../model';
 import { setBoardFrame } from '../writers';
 import { HOVER_SCOPE, ON_HOVER } from '../../../renderer/src/ui/hover-scope';
@@ -218,7 +218,7 @@ export function World(props: WorldProps) {
       try {
         setBoardFrame(session.doc, d.id, moved, session.origin);
       } catch (error) {
-        const refused = boardRefusal(session.doc, error, 'resize', { ...now, ...moved });
+        const refused = boardRefusal(error, 'resize');
         latest.current.onNotice(refused.text, refused.why);
       }
     };
@@ -300,9 +300,9 @@ export function World(props: WorldProps) {
       const snap = !(e.metaKey || e.ctrlKey);
       const base = { ...now, ...keysFrom(d.start, d.keys) }; // the gesture's keys from its start, the rest as they are now
       const siblings = siblingsOf(d.id);
-      const next = d.handle === null ? { ...movedFrame(base, world, siblings, zoom, snap), problems: [] as string[] } : resizedFrame(d.id, base, d.handle, world, siblings, zoom, snap);
+      const next = d.handle === null ? { ...movedFrame(base, world, siblings, zoom, snap), faults: [] as FrameFault[] } : resizedFrame(base, d.handle, world, siblings, zoom, snap);
       setGuides(next.guides);
-      if (next.problems.length > 0) return latest.current.onNotice(frameRefusals(next.frame).join('; ')); // shown, never adjusted (G518: in a person's words)
+      if (next.faults.length > 0) return latest.current.onNotice(frameRefusals(next.faults).join('; ')); // shown, never adjusted (G518: in a person's words)
       const owned = keysFrom(next.frame, d.keys);
       const key = JSON.stringify(owned);
       if (key === d.last) return;
@@ -311,7 +311,7 @@ export function World(props: WorldProps) {
         setBoardFrame(session.doc, d.id, owned, session.origin);
         d.owned = owned;
       } catch (error) {
-        const refused = boardRefusal(session.doc, error, 'resize', { ...now, ...owned });
+        const refused = boardRefusal(error, 'resize');
         latest.current.onNotice(refused.text, refused.why);
       }
     };

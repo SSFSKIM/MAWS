@@ -103,7 +103,7 @@ export function MoveToBoard({ session, boards, active, selection, canvas, zoom, 
       const ids = moveSelectionToBoard(session, active.id, to.id, now.selection, canvas, zoom);
       if (ids) onMoved(to, ids);
     } catch (error) {
-      const refused = boardRefusal(session.doc, error, 'move'); // the word cut (G518): in a person's words
+      const refused = boardRefusal(error, 'move'); // the word cut (G518): in a person's words
       onNotice(refused.text, refused.why);
     }
   };

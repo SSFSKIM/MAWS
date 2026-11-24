@@ -169,14 +169,16 @@ describe('the header’s app actions', () => {
     return mounted;
   }
 
-  it('Set as my default writes settings 14, and is disabled once it is the default', async () => {
+  it('Set as my default writes settings 14, and once it is the default is unavailable, saying why (G558)', async () => {
     const main = installFakeMain((name, input) => (name === 'settings.set' ? ok({ settings: { ...SETTINGS_DEFAULTS_V21, artifacts: { defaultDesignSystem: (input as { artifacts: { defaultDesignSystem: string } }).artifacts.defaultDesignSystem, spaceDesignSystems: {}, commentsView: 'expand' /* P4-B1 */ } }, resolvedTheme: 'light' }) : listed(input)));
     await opened();
     expect(action('Set as my default').disabled).toBe(false);
+    expect(action('Set as my default').unavailable).toBeNull();
     await act(async () => action('Set as my default').onSelect());
     expect(main.callsOf('settings.set')).toEqual([{ artifacts: { defaultDesignSystem: DS } }]);
     act(() => useSettings.setState({ state: { settings: { ...SETTINGS_DEFAULTS_V21, artifacts: { defaultDesignSystem: DS, spaceDesignSystems: {}, commentsView: 'expand' /* P4-B1 */ } }, resolvedTheme: 'light' } }));
-    expect(action('Set as my default').disabled).toBe(true);
+    expect(action('Set as my default').unavailable).toBe('Already your default');
+    expect(action('Set as my default').disabled, 'still in the keyboard’s reach').toBe(false);
   });
 
   it('Delete asks first; refused while an artifact uses the system, it lists it and moves it before deleting', async () => {
