@@ -300,7 +300,7 @@ All surfaces draw the same components (a question card, a session's sheet, an ov
 
 The owner's ruling of 2026-11-23, which replaces the placement U1 gave a question's form (l4-approvals-08): **nothing opens by itself, the transcript row is the entry, and the side sheet is where a question is answered.**
 
-- The row of a call that added or revised questions shows one compact line per question (id, header, the question's first sentence) and Open. Open shows the session's sheet in the side column, at that question.
+- The row of a call that added or revised questions shows one compact line per question (id, header, and the question's first sentence that ends in a question mark, or its first sentence when none does, so a question that opens with a statement is not shown as its preamble) and Open. Open shows the session's sheet in the side column, at that question.
 - After the outcome the line is the receipt, filled on the question's own line as O-21 rules for today's rows: `q7 Auth method → OAuth`, "Dismissed", "Withdrawn". A revised question's line moves to the row of the revising call, and the earlier row reads "Revised below".
 - The side sheet never opens, activates or closes by itself (O-17, kept).
 - The "Waiting for you" card has one line per open question, "from <agent>" when a subagent asked; choosing a line opens the sheet at that question.
