@@ -272,17 +272,18 @@ Paths are from the repository's root. `R/` is `src/renderer/src/`. A name given 
     export function createSheetPage(options: SheetPageOptions): SheetPage
 
     export interface SheetPageTiming { heartbeatMs: number; portRetryMs: number; codeTtlMs: number; helloMs: number; pingMs: number; silentMs: number; lastSeenGrainMs: number; credentialIdleMs: number;
-                                       headersMs: number; requestMs: number; keepAliveMs: number }
-    // 10_000 (X4), 30_000, 300_000, 5_000, 20_000, 45_000, 3_600_000, 90 days; 10_000, 30_000, 5_000
+                                       headersMs: number; requestMs: number; keepAliveMs: number; checkMs: number }
+    // 10_000 (X4), 30_000, 300_000, 5_000, 20_000, 45_000, 3_600_000, 90 days; 10_000, 30_000, 5_000, 1_000
 
 **The start.** `start()` decides in this order and stops at the first that holds: not this daemon's to serve (T2: read from its own environment and the constant, and, only when those say yes, from the login shell's), `off`; no `index.html` in `bundleDir`, `no-bundle`; a bind refused as in use, `port-taken`, tried again every `portRetryMs`; else `listening`. A bind is `127.0.0.1` first, then `::1` on the port the first got (with port 0 the pair is tried again, a few times, if the second is taken), each `exclusive`, the second `ipv6Only`; T3 says when one address is enough. Each change of state is one log line.
 
 **The two HTTP servers** (T1). One `http.Server` for each address, made by `serve.ts` with the same listeners, each listening itself, so that Node's own deadlines run: an HTTP server starts the check of its header and request deadlines when it listens, and one handed sockets it did not accept never does. Their settings, which are the page server's limits, since it is a listener any program on the machine can reach:
 
-    headersTimeout 10 s    requestTimeout 30 s    keepAliveTimeout 5 s    maxHeaderSize 16 KiB    requireHostHeader false
+    headersTimeout 10 s    requestTimeout 30 s    keepAliveTimeout 5 s    connectionsCheckingInterval 1 s    maxHeaderSize 16 KiB    requireHostHeader false
     HEADERS_MAX = 64, with server.maxHeadersCount = HEADERS_MAX + 1
     CONNECTIONS_MAX = 128, counted across both servers at 'connection'; one past it is destroyed
 
+- **The deadlines are checked every second.** Node checks the header and request deadlines of its incomplete requests only on a timer whose default is 30 seconds (`connectionsCheckingInterval`), so a header deadline of 10 seconds is enforced somewhere between 10 and 40 seconds unless the interval is set; the page server sets it to one second, and `timing` shortens it with the deadlines it shortens (seen at the controller's pre-flight, 2026-11-24, on Node 22: a stalled request under a 300 ms `headersTimeout` was answered 408 at 305 ms with a 100 ms interval, at 1004 ms with 1 s and at 5004 ms with 5 s, so at the first check after the deadline).
 - **A request with more than 64 headers is refused, 431, before anything reads a header.** Node's parser stops collecting header pairs at `maxHeadersCount` and says nothing, so a list of exactly that length may be a cut one, and a check that looks for a second `Host` or for an `Origin` in a cut list finds neither. So the parser is told one more than the bound, and a request or an upgrade that arrives with more than `HEADERS_MAX` pairs in `rawHeaders` is refused whole. The three checks then only ever read a list that is complete.
 - **No answer leaves without the standing headers.** `requireHostHeader` is off so that a request with no `Host` reaches the Host check and gets its 421, not the parser's own 400. `clientError` (a malformed request, headers past their size, a deadline passed) is answered by `headers.ts`'s refusal and the socket ended. `checkContinue` and `checkExpectation` are answered 417 the same way: the page server takes no `Expect`. A request that arrives while the chunk cannot load is answered 503 the same way, and the next request loads again.
 - A request or an upgrade that arrives while the chunk is loading waits for it; the deadlines above still run, since the servers own their sockets.
