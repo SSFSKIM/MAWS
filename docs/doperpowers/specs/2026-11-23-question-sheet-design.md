@@ -26,7 +26,7 @@
 - [x] (2026-11-23) Spec written and committed as approved (this commit is the baseline).
 - [x] (2026-11-23) The cut into children added (Children, Cross-Child Contracts, Ordering, Tracking Map).
 - [x] (2026-11-23) Buildability review of the roadmap: thirteen findings, all taken.
-- [ ] Independent spec review.
+- [x] (2026-11-23) Independent spec review: fifteen findings, fourteen taken, one answered in §2.2.
 - [ ] The owner's gate on the cut.
 - [ ] Children: see the Tracking Map.
 
@@ -37,7 +37,7 @@
 - **Sheet**: the open questions of one session, with the answers accepted for them and not yet delivered.
 - **Question**: one item on a sheet, with an id and a revision.
 - **Asker**: the main conversation, or the subagent (agent id and name) whose call added the question.
-- **Surface**: a place where the human reads and answers a sheet: the MAWS app, the local page, desk-web's cards, the `sminos` command line.
+- **Surface**: a place where the human reads and answers a sheet: the MAWS app, the local page, desk-web's cards, the `sminos sheet` command.
 - **The page**: the local web page `mawsd` serves (§8.2). `mawsd` is MAWS's per-machine daemon (`src/mawsd/`).
 - **The bridge**: the sminos plugin's per-session endpoint other local processes reach a terminal session through (`sminos/skills/sminos/scripts/sminos_bridge.py`, HTTP over `$SMINOS_HOME/bridge/<session>.sock`).
 - **Today's tool**: the tool as it is before this design: the engine's AskUserQuestion input plus `async`, answered in the engine's own dialog (`docs/doperpowers/specs/2026-10-13-ask-async-design.md` in doperpowers).
@@ -89,6 +89,8 @@ The tool keeps the name `mcp__sminos__AskUserQuestion`. Agent definitions that w
       "references":  [ { "path": "src/auth.ts", "lines": [40, 80] } ]
     }
 
+While the sheet's schema is registered, the engine's built-in AskUserQuestion is withdrawn from the model the way today's tool withdraws it (`WITHDRAWN` in `sminos/hooks/mods/ask.tsx`), with a text that names no `async`; left in, the model would have two question tools again.
+
 There is no `async` and no blocking mode: the call always returns at once. A revise replaces the whole question (its fields are the entry's) and raises the revision.
 
 Who may change what: an entry with an `id` must name an open question the caller itself asked; `withdraw` takes the caller's own questions, and the main conversation may withdraw any open question of the session.
@@ -102,13 +104,13 @@ The result names only what the call touched:
     Added q7, q8. Revised q3 (revision 2). Withdrew q2.
     Not done: q5 is not open (answered at 14:05). The reference src/x.ts of your second new question could not be read: permission denied.
 
-Its first line has a fixed grammar (contract X7): the sentences `Added …`, `Revised …`, `Withdrew …`, each present only when it names something, ids in the order of the call's entries. When any entry of the call was refused, every added id carries the place of its entry, `Added q7 (entry 1), q8 (entry 3).`, so an id is never attached to the wrong entry. A transcript row is drawn from it, also long after the sheet's directory is gone, so no reader needs the file to know which id an entry got.
+Its first line has a fixed grammar (contract X7): the sentences `Added …`, `Revised …`, `Withdrew …`, each present only when it names something, ids in the order of the call's entries. When any entry of the call was refused, every added id carries the place of its entry, `Added q7 (entry 1), q8 (entry 3).`, so an id is never attached to the wrong entry. A fixed grammar is used and not a structured block as §5.3 has, because this text is read by the agent on every call and the block would be spent context; everything a row needs (which entry got which id, what was revised, what was withdrawn) is in the grammar and the call's own input. A transcript row is drawn from it, also long after the sheet's directory is gone, so no reader needs the file to know which id an entry got.
 
 It does not list the rest of the sheet: the agent's context is spent on its work, and the full open list is supplied only when the agent has lost it (§5.5). When no surface can show the questions at this moment (§7), one sentence says so.
 
 #### 2.3 References
 
-A reference is captured when the call is made, so the human sees the file the question was about even after the agent edits it; a surface marks "changed since asked" when the file's current hash differs.
+A reference is captured when the call is made, so the human sees the file the question was about even after the agent edits it. What is kept is what Read returned for the range (for a reference with no range, what Read returns by default, with a note when that was cut), stored under the hash of that body, with the file's size and modification time at capture. "Changed since asked" is computed by a reader on the session's machine, from the file's current size and modification time, and travels to remote surfaces as a flag.
 
 Capture goes through the engine's own Read tool, not the plugin's file access: first `$.tool.check` for a Read of the path (it opens no dialog), and only on *allow* a `$.tool.call` of Read. The plugin's own `$.fs.read` runs with no permission check and outside the other plugins' secret guards, and a referenced `.env` would then be copied raw into the sheet and toward other machines. Bodies are kept in the session's sheet directory (§3) and served on demand; they are never pushed to the hub. Probe P3 decides the details of capture (§12).
 
@@ -128,7 +130,7 @@ One directory per session on the session's machine:
       refs/<sha256>  captured reference bodies
       uploads/       images pasted into an answer
 
-`state.json` holds the open questions with every field of §1, the accepted outcomes not yet delivered (`pending`), the next id, how far the inbox has been read, and a verdict per recent inbox key (§4.3). It is written before the tool call returns.
+`state.json` holds the open questions with every field of §1, the accepted outcomes not yet delivered (`pending`), the next id, how far the inbox has been read, and the verdict of every inbox key (§4.3), kept for the directory's life: a verdict that aged out would turn a resent line into the false refusal the key exists to prevent. It is written before the tool call returns.
 
 **One writer.** Only the tool writes `state.json`. Every surface, on every route, changes the sheet by appending a line to the inbox, through one code path in sminos (`sminos sheet put`, under a lock; contract X2), and the tool applies it. Two writers on one file lose an answer when a resuming session loads and rewrites the file while a surface writes into it.
 
@@ -136,9 +138,11 @@ One directory per session on the session's machine:
 
 **Why a file and not the transcript.** Today's tool rebuilds its open asks from the transcript at resume. That rebuild returns nothing once the transcript passes 4 MiB and the search's output is cut (`sminos/hooks/mods/ask.tsx`), a subagent's calls are not in the main transcript, and captured references and undelivered answers are in no transcript. The plugin's `$.store` is one 4 MiB file for every session on the machine.
 
-**The tool drains the inbox** at session start, whenever its bridge comes up, when a surface that appended tells the bridge so, and at every hook dispatch of its own (a tool call, a submitted prompt).
+**The tool drains the inbox** at session start, whenever its bridge comes up, when a surface that appended tells the bridge so, and at every hook dispatch of its own (a tool call, a submitted prompt). A call of the tool drains before it applies its own entries, so a revise never overtakes an answer already in the inbox.
 
-**Lifetime.** `/clear` closes the sheet of the session id it leaves (its questions withdrawn) and removes the directory. A fork or a copy has a new session id and an empty sheet, and is told so (§5.5). A stopped session's directory stays until its transcript is removed or the human dismisses the whole sheet from a surface.
+**Lifetime.** `/clear` closes the sheet of the session id it leaves (its questions withdrawn) and removes the directory. A fork or a copy has a new session id and an empty sheet, and is told so (§5.5). A sheet that starts empty in a conversation that already used ids (a fork, or a directory that was lost) starts its ids past the highest it can find, in the parent's directory for a fork and otherwise in the transcript's stored calls (X7), so an id in the model's context never names a different question.
+
+A stopped session's questions can be dismissed from a surface like any others; the lines wait in the inbox and a question with a queued dismissal is no longer listed. The directory of a stopped session is removed by the sminos daemon's sweep once its transcript is gone, or by `sminos sheet remove`; no surface deletes files.
 
 ### 4. Answers
 
@@ -148,12 +152,12 @@ An answer to one question is the picked option labels (none, one, or several whe
 
 An inbox line:
 
-    { "v": 1, "key": "<unique per act, made by the surface>", "kind": "answer" | "dismiss" | "retract",
+    { "v": 1, "key": "<unique per act, made by the surface>", "kind": "answer" | "dismiss" | "retract" | "delivered",
       "id": "q7", "revision": 2, "picks": ["OAuth"], "text": "…", "images": ["uploads/….png"],
       "target": "<the key of the line a retract cancels>", "batch": "<one id for the lines of one Send>",
       "by": "page" | "maws" | "desk" | "cli", "at": "<time>" }
 
-The lines of one Send are appended together under one lock and share a `batch`; the tool applies a batch whole and delivers its outcomes in one envelope, so the three answers of one Send never reach the agent as one and then two. Each line keeps its own key and verdict. Editing a queued answer is a retract and a new answer.
+The lines of one Send are appended together under one lock and share a `batch`; the tool applies a batch whole and delivers its outcomes in one envelope, so the three answers of one Send never reach the agent as one and then two. Each line keeps its own key and verdict. Editing a queued answer is a retract and a new answer. A `delivered` line names, in `keys`, outcomes whose delivery the appender made (§5.4).
 
 #### 4.2 Applying a line
 
@@ -165,6 +169,7 @@ The lines of one Send are appended together under one lock and share a `batch`; 
 | dismiss | question open | question dismissed; a pending outcome is recorded | `applied` |
 | retract with target K | K is among the lines not yet applied | K is not applied | `retracted`, for K and for the retract |
 | retract with target K | K was already applied or refused | nothing changes | `too-late` |
+| delivered, keys K… | each K is pending | each K leaves `pending` | `applied` |
 | any | a line with this key was already applied or refused | nothing changes | the first verdict again |
 
 A drain reads every line not yet applied before it applies any, so a retract that follows its target in the inbox still cancels it.
@@ -189,7 +194,7 @@ The tool delivers by today's three routes (`sminos/hooks/mods/ask.tsx`): a promp
 
 A dismissal never starts a turn: it waits for the next envelope or the next of the other two routes. This is today's rule (sminos 1.47.0), kept.
 
-An answer that was queued while the session was stopped is applied at the session's start and never starts a turn by itself: it rides the human's first prompt as context, and its lines say when the question was asked and answered and that the session was stopped meanwhile, so the model can weigh its age. The terminal says, at the resume, how many answers will go with the next message.
+Whatever is owed at a session's start, an answer queued while the session was stopped or an outcome accepted before a turn died, never starts a turn by itself: it is applied at the start and rides the human's first prompt as context, and its lines say when the question was asked and answered and that the session was stopped meanwhile, so the model can weigh its age. The terminal says, at the resume, how many answers will go with the next message.
 
 #### 5.3 The envelope
 
@@ -205,17 +210,17 @@ It lists what was answered and dismissed and nothing else; it does not repeat wh
 
 #### 5.4 MAWS-run sessions
 
-MAWS appends the inbox line like any surface, and delivers with the journaled `next` steer its `ask` uses today (`src/engine-host/session-maws.ts`). An open question no longer keeps a process alive: `src/engine-host/budget.ts` stops counting a session's open questions as a reason against release.
+MAWS appends the inbox line like any surface, and delivers with the journaled `next` steer its `ask` uses today (`src/engine-host/session-maws.ts`). An open question no longer keeps a process alive: the count of what a process exit would lose (`SessionMaws.pending` in `src/engine-host/session-maws.ts`, which `src/engine-host/budget.ts` reads) does not include open sheet questions.
 
-MAWS steers only outcomes the tool has applied, read from `pending`; it never steers from a line it appended, which may lose to an earlier answer or to a retract. For a session whose engine process is released, the sequence is: append the line (it reads queued); acquire a ready launch without sending anything; the tool drains at its start and applies; MAWS reads `pending` and steers the applied outcomes. A line from any surface, the page included, starts this sequence for a released MAWS-run session.
+MAWS steers only outcomes the tool has applied, read from `pending`; it never steers from a line it appended, which may lose to an earlier answer or to a retract. In a live session MAWS appends and waits for the outcome to appear in `pending`. For a session whose engine process is released, the sequence is: append the line (it reads queued); bring the session up without sending anything (the queue's `steer()` refuses a session that is not ready, `src/engine-host/queue.ts`); the tool drains at its start and applies; MAWS reads `pending` and steers the applied outcomes. A line from any surface, the page included, starts this sequence for a released MAWS-run session.
 
 The steer is a user-role message, so board ticket 711's rule binds it (`src/shared/maws/ask.ts`): it holds no text the model wrote. Its lines name a question by id and a picked option by its place (`option 2`), carry the human's typed text as a JSON string, and carry the same `<sheet-delivery>` block with places in the stead of labels. The model usually holds its questions in its own calls. Where it may not (after a compaction, or the main conversation receiving the answer to an ended subagent's question), the question's text and its option labels in order reach it from the tool, as trusted context and never in the steer: at a session start through §5.5, and for the main conversation receiving a subagent's answer as hook context on that prompt. The second needs P1's "can add context"; if P1 refuses it, this paragraph returns to this document's writer before C5 starts.
 
-The tool, inside the session, sees the steer in its `prompt.submit` hook (the bridge mod already reads host prompts there), drains the inbox first, and marks the outcomes whose keys the steer names as delivered. Nothing in the steer's text changes state: state changes only through the inbox, so a prompt that imitates an envelope does nothing.
+When the steer's write has settled, MAWS appends a `delivered` line naming the keys it carried, and the tool takes them out of `pending`. Nothing in any prompt's text changes state: state changes only through the inbox, so a prompt that imitates an envelope, with real keys read from the sheet's files, does nothing. MAWS never computes a verdict itself either; §4.2's table has one implementation, the tool's.
 
 A dismissal in a MAWS-run session is appended to the inbox and sent with MAWS's next steer or human message to that session, as a line of its own; it starts no turn.
 
-Whether the tool's own delivery routes and its added context work in a session run over the wire is probe P1 (§12). The design does not depend on them: seeing the prompt is enough, and seeing is shipped.
+Whether the tool's own delivery routes and its added context work in a session run over the wire is probe P1 (§12). Delivery of answers and dismissals does not depend on it; only the two cases named above and §6's direct send do.
 
 #### 5.5 When the agent has lost its sheet
 
@@ -229,24 +234,26 @@ An answer to a subagent's question goes to that subagent directly as a message, 
 
 When a subagent ends with questions still open, the main conversation is told which, at the result of the Agent call or its next tool result, since it cannot withdraw what it never saw.
 
-In a MAWS-run session the same send is made by the tool inside the session if probe P2 shows it works there; MAWS then appends the inbox line and sends no steer for that outcome. If it does not, MAWS delivers to the main conversation naming the asker.
+In a MAWS-run session the same send is made by the tool inside the session if probe P2 shows it works there; MAWS then appends the inbox line and sends no steer for that outcome. If it does not, MAWS delivers to the main conversation, naming the asker by its agent id (a name a model gave does not go into a user-role steer), with the question reaching the main conversation as §5.4 says.
 
 ### 7. Where no surface can answer
 
 A session offers the sheet only where the human can reach it. A surface registers itself:
 
     $SMINOS_HOME/sheet/surfaces/<name>.json
-    { "v": 1, "name": "mawsd", "pid": 1234, "url": "http://sheet.localhost:47831", "reach": "local" | "remote", "heartbeatAt": "<time>" }
+    { "v": 1, "name": "mawsd", "pid": 1234, "url": "http://sheet.localhost:47590", "reach": "local" | "remote", "heartbeatAt": "<time>" }
 
 The surface rewrites the file every 10 seconds; a registration whose `heartbeatAt` is older than 30 seconds, or whose process is gone, is not alive. `reach` is `remote` when the machine's endpoint is enrolled and carries sheets to the phone and to other machines (§8.4), which C6 turns on; until then it is `local`.
 
 At session start the tool offers the sheet's schema when the setting `SMINOS_QUESTION_SHEET` is on and a registered surface is alive and its reach suits the session. The setting is off by default until the last child turns the default on (§9), so that through every earlier step a terminal session takes the sheet only where someone opted in. On reach: under `SSH_CONNECTION` a `remote` surface is required, because a local page answers and the human cannot open it. Otherwise the tool offers today's tool, with the engine's dialog in the terminal. Today's tool, not the bare built-in, is the fallback: a machine without `mawsd` keeps the asynchronous asks its phone cards answer today. Today's tool therefore stays in the plugin until every machine the owner uses has a surface.
 
+A session that starts with open questions or owed outcomes in its sheet's directory takes the sheet's schema whatever the setting and the surfaces say: with today's tool its sheet would never be drained.
+
 The choice is made once per process and kept in `$.state`: the engine runs `session.start` again when a module reloads, and a plugin update must not change a running session's schema.
 
 In a MAWS-run session the tool registers the sheet's schema when MAWS set `MAWS_QUESTION_SHEET=1` at launch and the process is the one MAWS's engine host launched, checked the way the bridge checks its lane's parent (`sminos/skills/sminos/scripts/sminos_bridge.py`); MAWS itself is the surface. Neither weaker condition is enough: a `claude` started by a tool inside a MAWS session inherits the variable (`src/engine-host/launch.ts` documents the inheritance), and "non-interactive" also describes a one-shot `claude -p`, whose process ends before any answer.
 
-If the surface disappears during a session, questions still go to the file; the tool's result says no surface can show them now, and the terminal's line says the page is unreachable and names `sminos answer` (§8.3).
+If the surface disappears during a session, questions still go to the file; the tool's result says no surface can show them now, and the terminal's line says the page is unreachable and names `sminos sheet` (§8.3).
 
 ### 8. Surfaces
 
@@ -261,7 +268,7 @@ All surfaces draw the same components (a question card, a session's sheet, an ov
 The owner's ruling of 2026-11-23, which replaces the placement U1 gave a question's form (l4-approvals-08): **nothing opens by itself, the transcript row is the entry, and the side sheet is where a question is answered.**
 
 - The row of a call that added or revised questions shows one compact line per question (id, header, the question's first sentence) and Open. Open shows the session's sheet in the side column, at that question.
-- After the outcome the line is the receipt: `q7 Auth method → OAuth`, "Dismissed", "Withdrawn". A revised question's line moves to the row of the revising call, and the earlier row reads "Revised below".
+- After the outcome the line is the receipt, filled on the question's own line as O-21 rules for today's rows: `q7 Auth method → OAuth`, "Dismissed", "Withdrawn". A revised question's line moves to the row of the revising call, and the earlier row reads "Revised below".
 - The side sheet never opens, activates or closes by itself (O-17, kept).
 - The "Waiting for you" card has one line per open question, "from <agent>" when a subagent asked; choosing a line opens the sheet at that question.
 - Every open question is a calm "Question waiting" item (`async_input`, O-22's kind and tone, kept). No question marks a session as stopped on the human (the owner's ruling: calm state only). A notification fires once per call, not once per question.
@@ -272,21 +279,24 @@ U1's placement stands unchanged for what is not a sheet question: a permission p
 
 #### 8.2 The local page
 
-`mawsd` serves it on loopback only, under the host name `sheet.localhost` and port 47831 (configurable; 47830 is the endpoint's). `/` is the overview: every session on the machine with open questions, terminal and MAWS-run, stopped sessions grouped apart. `/s/<session>` is one sheet. It updates live.
+`mawsd` serves it on loopback only, under the host name `sheet.localhost` and port 47590 (configurable; the 478xx ports are the endpoint's and its test scenes'). `/` is the overview: every session on the machine with open questions, terminal and MAWS-run, stopped sessions grouped apart. `/s/<session>` is one sheet. It updates live.
 
-A browser is paired once: an unpaired browser is shown how to get a one-time code (`mawsd sheet pair`), and exchanges it for a cookie. The link printed in terminals carries no secret, since a lasting secret in a link drawn in every terminal ends in browser history.
+A browser is paired once: an unpaired browser is shown how to get a one-time code (`mawsd sheet pair`), and exchanges it for a credential. The link printed in terminals carries no secret, since a lasting secret in a link drawn in every terminal ends in browser history.
 
-- The cookie is HttpOnly, SameSite=Strict and host-only on `sheet.localhost`. A cookie on `127.0.0.1` is not scoped by port, so any development server an agent starts on the machine would receive it.
-- Every request is refused unless its Host is the page's. A browser's navigation to the link carries no Origin, so the page's shell and the pairing screen are served on the Host check alone and hold no session's data. Everything that reads or changes a sheet requires the cookie and proof that the page's own script made the request: an exact Origin on the live connection and on every write, and on reads a header only same-origin script can set.
-- The page sends `Referrer-Policy: no-referrer` and a content policy that loads nothing from outside itself; agent-written Markdown is rendered without raw HTML and without remote images.
+What the page defends against is web content and other hosts: a page open in any browser, a development server an agent started, another machine on the network. It does not defend against a process running as the same user, which can already append to a sheet's inbox with `sminos sheet`; that is today's trust, unchanged.
 
-The page has authority over every session on the machine and renders text agents wrote, which is why these four bind.
+- The credential is kept in the page's origin-scoped storage and sent in a header on every request for data, and as the first message of the live connection. It is not a cookie: a cookie is not scoped by port, on `127.0.0.1` or on `sheet.localhost`, so a development server an agent starts on the machine and gets opened in the same browser would receive it.
+- Every request is refused unless its Host is the page's. A browser's navigation to the link carries no Origin, so the page's shell and the pairing screen are served on the Host check alone and hold no session's data. Everything that reads or changes a sheet requires the credential, and the live connection and every write also an Origin that is exactly the page's.
+- Every response carries `Referrer-Policy: no-referrer`, `X-Content-Type-Options: nosniff` and a content policy that loads nothing from outside the page; agent-written Markdown is rendered without raw HTML and without remote images, and its links are limited to `http`, `https` and the sheet's own references.
+- A reference's or an upload's body is bytes an agent chose, served from the page's origin: it is sent as plain text or as a raster image type, never as HTML or SVG.
+
+The page has authority over every session on the machine and renders text agents wrote, which is why these four rules bind.
 
 #### 8.3 The terminal
 
-One line above the prompt while the session has open questions: the count and the page's link to this session's sheet (`3 open questions · http://sheet.localhost:47831/s/<session>`). There is no in-terminal form. The call's row lists its questions and, after the outcome, their receipts, as §8.1's lines.
+One line above the prompt while the session has open questions: the count and the page's link to this session's sheet (`3 open questions · http://sheet.localhost:47590/s/<session>`). There is no in-terminal form. The call's row lists its questions and, after the outcome, their receipts, as §8.1's lines.
 
-`sminos answer` is the command-line surface: it prints a session's open questions and appends an answer or a dismissal by id. It is what remains when the page is unreachable.
+`sminos sheet` is the command-line surface: `show` prints a session's open questions, `answer` and `dismiss` append a line by id, `put` is the writer's door of X2, and `remove` deletes a stopped session's sheet. It is what remains when the page is unreachable. Today's `sminos answer <member> <request> <answers…>` (`sminos/skills/sminos/scripts/sminos_control.py`) answers a raised dialog of today's tool and is left as it is.
 
 #### 8.4 The phone and other machines
 
@@ -296,8 +306,8 @@ A terminal session's default changes to the sheet only after this works (the own
 
 ### 9. What is retired
 
-- **MAWS's `ask`** (`src/shared/maws/tools.ts`, `src/engine-host/tool-server/ask.ts`), with its four answer kinds the sheet does not have (file, folder, repository, design system; the owner's ruling). Until the flip (C7) it stays beside the sheet: a session whose question tool is "Default" takes the sheet, one set to `maws` keeps `ask`, and MAWS's factory default stays `maws`. At the flip it stops being offered to new launches. The host keeps serving it to every launch that started with it until that launch ends, a launch adopted across a host handover with an ask outstanding included: what a running launch is served is read from the launch, never from the new default. Journals that hold `ask` rows are still drawn.
-- **The `maws` value of the question-tool switch** (`src/shared/maws/tool-set.ts`). From the flip on, the stored value is kept and read as the default for new launches; nothing is migrated (the tool choice's D6 stands). "Default" then means the sheet where the tool runs, the engine's built-in otherwise.
+- **MAWS's `ask`** (`src/shared/maws/tools.ts`, `src/engine-host/tool-server/ask.ts`), with its four answer kinds the sheet does not have (file, folder, repository, design system; the owner's ruling). Until the flip (C7) it stays beside the sheet: a session whose question tool is "Default" (the stored value `engine`) is launched with `MAWS_QUESTION_SHEET=1` and takes the sheet where the sminos tool runs, one set to `maws` keeps `ask`, and MAWS's factory default stays `maws`. This amends the tool choice's D6, under which `engine` meant MAWS does nothing to the engine's question tools: it now sets that one variable, and still passes neither tool flag. At the flip it stops being offered to new launches. The host keeps serving it to every launch that started with it until that launch ends, a launch adopted across a host handover with an ask outstanding included: what a running launch is served is read from the launch, never from the new default. Journals that hold `ask` rows are still drawn.
+- **The `maws` value of the question-tool switch** (`src/shared/maws/tool-set.ts`). From the flip on, the stored value is kept and read as the default for new launches, nothing is migrated, and the Tools submenu loses its question choice, which has one meaning left. "Default" then means the sheet where the tool runs, the engine's built-in otherwise.
 - **U1's two question forms** (the stepper and the one-page form with Skip and "Decide for me") for sheet questions: one card.
 - **Today's sminos tool**, later and outside this unit: it stays in the plugin as §7's fallback until every machine the owner uses has a surface. What this unit does is change the default (C7). Whenever a session with open asks of today's tool first starts under the sheet's schema, by a setting before the flip or by the default after it, those asks are imported once as sheet questions and the SessionStart context says so. The import is recorded as done only after a definite read of the transcript: today's rebuild returns the same empty list for "none open" and for a search that failed or was cut (`sminos/hooks/mods/ask.tsx`), and an import recorded on that result would lose the asks for good.
 
@@ -317,7 +327,7 @@ Three consumers read today's asks and must read the sheet's: the `AskSnapshot` t
 
 | id | question | what decides |
 |---|---|---|
-| P1 | In a MAWS-run session: does the tool's `prompt.submit` hook see the host's steer; can it add context to it; does context on a tool result reach the model; does `$.prompt.submit` start a turn? | Seeing is required (§5.4). The rest only decides whether a dismissal and a subagent's answer can be delivered by the tool there. |
+| P1 | In a MAWS-run session: does the tool's `prompt.submit` hook see the host's steer; can it add context to it; does context on a tool result reach the model; does `$.prompt.submit` start a turn? | Nothing in the delivery of answers and dismissals depends on it. It decides whether the tool can add the question and its labels as context for a main conversation receiving a subagent's answer (§5.4), and whether §6's direct send has a fallback to stand on. |
 | P2 | `$.session.send` to a running subagent, in a terminal session and in a MAWS-run one; and to an ended one. | §6's route in each kind of session. |
 | P3 | Capture: `$.tool.check` then `$.tool.call` of Read from the tool. Does it run the other plugins' guards; does Read's `file_unchanged` result return a stub after the model read the file; does the plugin's Read change what the model is taken to have read; how an image returns. | §2.3's capture, or a refusal to capture where it cannot be made safe. |
 | P4 | Is the tool's atomic replace of `state.json` atomic to a reader in another process; does the inbox's locked append hold under two concurrent writers? | §3. |
@@ -332,7 +342,7 @@ P1 to P5 are spikes: their deliverable is a verdict written into the section tha
 The observable state that closes the unit as a whole; each item is observed in the running system. Children carry their own gates in their sections.
 
 1. **Many questions, one call.** A terminal session's agent adds eight questions in one call, one with a file reference. The terminal shows `8 open questions` and a link; the page shows eight cards and the reference as captured. The tool's result names eight ids and nothing else.
-2. **A subset.** The human answers three and presses Send. The agent quotes the three at its next tool result; five cards remain.
+2. **A subset.** The human answers three and presses Send. The agent quotes the three together, at its next tool result while a turn runs or at once when idle; five cards remain.
 3. **Revise.** The agent revises one open question. Its card reads "Updated" and keeps a draft typed before. An answer sent against the earlier revision is not applied, and the card shows the new version.
 4. **A note on an option.** The human picks an option and types a comment in the same card; the agent receives both.
 5. **Dismiss.** Dismissing a question starts no turn; the agent is told with its next delivery.
@@ -341,10 +351,15 @@ The observable state that closes the unit as a whole; each item is observed in t
 8. **A subagent.** A subagent's question shows "from <agent>". Answered while it runs, the subagent receives it; answered after it ended, the main agent receives it with the asker named.
 9. **No surface.** On a machine without a registered surface, a new terminal session has today's tool and its dialog.
 10. **The phone and another machine.** A sheet question is answered from desk-web, and from the MAWS app for a session on another machine.
-11. **The page refuses strangers.** A request without the cookie, with another Origin, or with another Host is refused; the page loads nothing from outside itself.
+11. **The page refuses strangers.** A request for a sheet's data without the credential, a write or a live connection from another Origin, and any request with another Host are refused; an unpaired browser still gets the pairing screen; a referenced HTML or SVG file is shown as text; the page loads nothing from outside itself.
 12. **`ask` is gone for new sessions.** After the flip a new MAWS-run session lists no `ask`; an old transcript's `ask` rows are drawn; a launch that started with `ask` and has one outstanding is adopted by a new host and still gets its answer.
 13. **The flip.** A terminal session's default is the sheet; open asks of today's tool appear on it once.
-14. **Behaviour.** E1 and E2 pass at the thresholds their spike sets with the owner.
+14. **Behaviour.** E1 and E2 pass at the thresholds C1 proposes and the owner sets.
+15. **A reference that may not be read.** A question that references a file the session's permissions do not allow (a `.env`) is refused with the reason, and nothing of the file is in the sheet's directory.
+16. **Withdraw.** The agent withdraws a question it asked; its card disappears and its row reads "Withdrawn". A subagent cannot revise or withdraw the main agent's question.
+17. **After a compaction and in a fork.** After a compaction the agent can still name its open questions and their options; a fork starts with an empty sheet, is told so, and its first new id is past the parent's.
+18. **A subagent that ends.** When a subagent ends with a question open, the main agent is told which.
+19. **Two surfaces, and none.** Two surfaces answer the same question: the first is applied, the second reads that it was already answered. With the surface stopped mid-session, the tool's result says nobody can see the questions now, and they show when it returns.
 
 ## Execution
 
@@ -384,7 +399,7 @@ The observable state that closes the unit as a whole; each item is observed in t
 - **Purpose:** The tool's new form and the sheet's record: the schema of §2 behind the start choice of §7, the directory, the inbox and the apply table of §3 and §4, delivery in terminal sessions (§5.2, §5.3, §5.5), subagents in terminal sessions (§6), the command-line surface, and the terminal's own drawing (§8.3). It lands beside today's tool and changes no default.
 - **Acceptance:**
   - *G1, the contracts published:* in `sminos/types/sheet/`, a JSON Schema for `state.json`, the inbox line, the surface registration and the `<sheet-delivery>` block; an example of the envelope in its terminal form and in its steer form; the grammar of X7's first line; and fixture directories covering every row of §4.2's table, a batch, a retract before and after its target was applied, and a stored call that partly succeeded. `sminos sheet put` and `sminos sheet show --json` work against a directory with no session running. The set is published at one revision that MAWS's tests pin.
-  - *G2, a terminal session:* with `SMINOS_QUESTION_SHEET` on and a live surface registration, Acceptance 1 to 6 hold with `sminos answer` standing in for the page, and Acceptance 8 holds; with the setting off, or no live registration, or `SSH_CONNECTION` with a local one only, the session has today's tool unchanged (Acceptance 9). A session with open asks of today's tool that first starts under the sheet has them on the sheet once, also after two resumes, and keeps them when the transcript read was incomplete (§9). A `claude -p` started inside a MAWS-run session does not get the sheet (§7).
+  - *G2, a terminal session:* with `SMINOS_QUESTION_SHEET` on and a live surface registration, Acceptance 1 to 6 and 15 to 19 hold with `sminos sheet answer` standing in for the page, and Acceptance 8 holds; with the setting off, or no live registration, or `SSH_CONNECTION` with a local one only, the session has today's tool unchanged (Acceptance 9). A session with open asks of today's tool that first starts under the sheet has them on the sheet once, also after two resumes, and keeps them when the transcript read was incomplete (§9). A `claude -p` started inside a MAWS-run session does not get the sheet (§7).
   - *G3, the other readers:* the `AskSnapshot` in `$.state` and the project log carry sheet questions, and stop, resume, answer leaves one question with its real answer in the log (§11); the shipped description passes C1's thresholds, with capture built if the owner ruled for it.
 - **Edges:** blocked-by: C0 (P2 in a terminal, P3, P4, P5) for G2; C1 for G3; G1 is not blocked. blocks: C3, C4, C5, C6.
 - **Contracts:** owner of X1, X2, X3's schema and terminal form, X4's schema, X6, X7.
@@ -407,7 +422,7 @@ The observable state that closes the unit as a whole; each item is observed in t
 ### C4: The local page — plan
 
 - **Purpose:** `mawsd` serves the sheet to a browser beside the terminal (§8.2) and registers itself as a surface (§7), so that a terminal session with the sheet on has a place to be answered.
-- **Acceptance:** In a real browser: the link from the terminal, opened unpaired, shows the pairing screen; after pairing, `http://sheet.localhost:47831/` shows the overview of this machine's sessions, stopped ones apart, and `/s/<session>` updates live. Acceptance 1 to 6 hold end to end with the page as the surface. Acceptance 11 holds, each refusal shown by a request that is refused, and the unpaired link still loads its shell. The registration file exists with `reach: local` while `mawsd` runs and is not alive 30 seconds after it stops. The terminal's line shows the link.
+- **Acceptance:** In a real browser: the link from the terminal, opened unpaired, shows the pairing screen; after pairing, `http://sheet.localhost:47590/` shows the overview of this machine's sessions, stopped ones apart, and `/s/<session>` updates live. Acceptance 1 to 6 hold end to end with the page as the surface. Acceptance 11 holds, each refusal shown by a request that is refused, and the unpaired link still loads its shell. The registration file exists with `reach: local` while `mawsd` runs and is not alive 30 seconds after it stops. The terminal's line shows the link.
 - **Edges:** blocked-by: C2.G2, C3.G1. blocks: C7.
 - **Contracts:** writer of X4; consumer of X1, X2, X5.
 - **Design inheritance:** §7, §8.2 (its four rules binding; the port, the pairing command and the bundle's build are advisory). This is `mawsd`'s first HTTP door: everything else it serves is a token-authenticated socket or a sealed channel (`src/shared/daemon/files.ts`), so the page's serving code is new and is reviewed at the *high* rung.
