@@ -184,9 +184,9 @@ describe('the threads rail', () => {
     expect(within(rail()).getAllByRole('group').map((item) => item.dataset.thread)).toEqual([first]);
     const before = listThreads(handle.doc);
     const reveal = within(rail()).getByRole('button', { name: 'Deleted (2)' }); // the word cut (G395)
-    expect(reveal.getAttribute('aria-pressed')).toBe('false');
+    expect(reveal.getAttribute('aria-expanded')).toBe('false');
     act(() => fireEvent.click(reveal));
-    expect(reveal.getAttribute('aria-pressed')).toBe('true');
+    expect(reveal.getAttribute('aria-expanded')).toBe('true');
     expect(listThreads(handle.doc)).toEqual(before);
     const items = within(rail()).getAllByRole('group');
     expect(items.map((item) => item.dataset.thread)).toEqual([first, second, 'zz000001']);
@@ -511,10 +511,68 @@ describe('the word cut in the comments panel', () => {
     act(() => fireEvent.click(within(toolbar()).getByRole('button', { name: /^Comments/ })));
     await quiet();
     const toggle = within(rail()).getByRole('button', { name: 'Deleted (1)' });
-    expect(toggle.getAttribute('aria-pressed')).toBe('false');
+    expect(toggle.getAttribute('aria-expanded')).toBe('false');
     expect(accessibleDescription(toggle)).toBe('Comments on deleted text');
     act(() => fireEvent.click(toggle));
-    expect(toggle.getAttribute('aria-pressed')).toBe('true');
+    expect(toggle.getAttribute('aria-expanded')).toBe('true');
     expect(within(rail()).getAllByRole('group').map((card) => card.dataset.thread)).toEqual(['zz000001']);
+  });
+
+  // The pair review's fix wave (G395, G390): "Deleted (N)" is a disclosure, never a heading over cards not its own. It
+  // follows the open threads and comes before Resolved; opened, it lists the deleted threads under it, in the panel's
+  // keyboard order; its chevron turns with its expanded state, as Resolved's does.
+  it('draws Deleted (N) as a disclosure after the open threads and before Resolved, its own cards under it', async () => {
+    const { editor, handle } = await mount(content());
+    act(() => void select(editor(), 'ships quarterly'));
+    act(() => fireEvent.click(commentButton()));
+    act(() => void select(editor(), 'Owners'));
+    act(() => fireEvent.click(commentButton()));
+    const [open, settled] = listThreads(handle.doc);
+    reply(handle.doc, open!.id, { id: 'r1', by: SESSION, at: 2, body: 'Monthly?' });
+    reply(handle.doc, settled!.id, { id: 'r2', by: SESSION, at: 3, body: 'Done.' });
+    act(() => void resolve(handle.doc, settled!.id, { kind: 'human' }, Date.now()));
+    addThread(handle.doc, { threadId: 'zz000001', tabId: TAB, blockId: 'p1', quote: 'Gone', anchor: { start: null, end: null, block: null }, by: SESSION, at: Date.now() });
+    act(() => fireEvent.click(within(toolbar()).getByRole('button', { name: /^Comments/ })));
+    await quiet();
+    const toggle = within(rail()).getByRole('button', { name: 'Deleted (1)' });
+    const resolvedToggle = within(rail()).getByRole('button', { name: 'Resolved (1)' });
+    const cardOf = (id: string) => rail().querySelector<HTMLElement>(`[data-thread="${id}"]`);
+    const follows = (a: Node, b: Node) => Boolean(a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING);
+    expect(follows(cardOf(open!.id)!, toggle)).toBe(true); // after the open card, not a heading over it
+    expect(follows(toggle, resolvedToggle)).toBe(true);
+    for (const disclosure of [toggle, resolvedToggle]) expect(disclosure.querySelector(':scope > svg[aria-hidden="true"]')).not.toBeNull();
+    expect(cardOf('zz000001')).toBeNull();
+
+    act(() => fireEvent.click(toggle));
+    expect(toggle.getAttribute('aria-expanded')).toBe('true');
+    const deleted = cardOf('zz000001')!;
+    expect(follows(toggle, deleted) && follows(deleted, resolvedToggle)).toBe(true); // under its own toggle
+    expect(toggle.closest('section')?.contains(deleted)).toBe(true);
+    expect(within(rail()).getAllByRole('group').map((card) => [card.dataset.thread, card.getAttribute('aria-label')!.replace(/^.*\((\d+ of \d+)\)$/, '$1')])).toEqual([
+      [open!.id, '1 of 3'],
+      ['zz000001', '2 of 3'],
+      [settled!.id, '3 of 3'],
+    ]);
+  });
+
+  it('counts in Deleted (N) the deleted threads the status filter and the search let through, and hides it at none', async () => {
+    const { editor, handle } = await mount(content());
+    act(() => void select(editor(), 'ships quarterly'));
+    act(() => fireEvent.click(commentButton()));
+    const [live] = listThreads(handle.doc);
+    reply(handle.doc, live!.id, { id: 'r1', by: SESSION, at: 2, body: 'Monthly?' });
+    addThread(handle.doc, { threadId: 'zz000001', tabId: TAB, blockId: 'p1', quote: 'Gone', anchor: { start: null, end: null, block: null }, by: SESSION, at: Date.now() });
+    addThread(handle.doc, { threadId: 'zz000002', tabId: TAB, blockId: 'p1', quote: 'Also gone', anchor: { start: null, end: null, block: null }, by: SESSION, at: Date.now() + 1 });
+    act(() => void resolve(handle.doc, 'zz000002', { kind: 'human' }, Date.now()));
+    act(() => fireEvent.click(within(toolbar()).getByRole('button', { name: /^Comments/ })));
+    await quiet();
+    expect(within(rail()).getByRole('button', { name: 'Deleted (2)' })).toBeTruthy();
+    act(() => fireEvent.click(within(rail()).getByRole('radio', { name: 'Open' })));
+    act(() => fireEvent.click(within(rail()).getByRole('button', { name: 'Deleted (1)' })));
+    expect(within(rail()).getAllByRole('group').map((card) => card.dataset.thread)).toEqual([live!.id, 'zz000001']);
+    act(() => fireEvent.click(within(rail()).getByRole('radio', { name: 'Resolved' })));
+    expect(within(rail()).getAllByRole('group').map((card) => card.dataset.thread)).toEqual(['zz000002']);
+    act(() => fireEvent.change(within(rail()).getByRole('searchbox', { name: 'Search comments' }), { target: { value: 'nothing like it' } }));
+    expect(within(rail()).queryByRole('button', { name: /^Deleted/ })).toBeNull();
   });
 });

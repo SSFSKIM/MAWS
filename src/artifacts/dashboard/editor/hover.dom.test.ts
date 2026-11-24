@@ -2,8 +2,8 @@
 // also the frame's horizontal scroller (a figure wider than its column scrolls rather than shrinks). The tip is placed in
 // the frame's visible box (flipped to the pointer's other side at a right or bottom edge, clamped inside it) and written
 // in the frame's scrolled content coordinates, so a tip at a revealed right-edge point is whole and readable.
-import { afterEach, describe, expect, it } from 'vitest';
-import { attachHover, NOTE_INSET_PX, NOTE_MAX_PX, placeNote } from './hover';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { attachHover, NOTE_GAP_PX, NOTE_INSET_PX, NOTE_MAX_PX, placeNote } from './hover';
 
 const rect = (left: number, top: number, width: number, height: number) => ({ left, top, width, height, right: left + width, bottom: top + height, x: left, y: top, toJSON: () => ({}) }) as DOMRect;
 
@@ -143,5 +143,81 @@ describe('a mark’s note', () => {
   it('caps its width to the room on the side with more of it, so neither edge clips it', () => {
     expect(markIn([0, 420], 300)).toEqual({ side: 'end', max: `${300 + 14 - NOTE_INSET_PX}px` });
     expect(markIn([100, 300], 150)).toEqual({ side: 'start', max: `${400 - 150 - NOTE_INSET_PX}px` });
+  });
+});
+
+// The pair review's fix wave (G603): the note opens under the mark while its height fits below it in what can be seen;
+// a mark near the bottom of the editor's scroller or of the window opens it above, where there is more room that way.
+// Its height is read as the note will be drawn, at the width its side allows.
+describe('a mark’s note, upward near the bottom edge', () => {
+  /** The note's drawn height, as the stylesheet lays it out at `--dash-note-max` (happy-dom lays out no `::after`). */
+  function noteHeight(height: (max: string) => number) {
+    const own = window.getComputedStyle.bind(window);
+    vi.spyOn(window, 'getComputedStyle').mockImplementation((el: Element, pseudo?: string | null) =>
+      pseudo === '::after' ? ({ height: `${height((el as HTMLElement).style.getPropertyValue('--dash-note-max'))}px` } as CSSStyleDeclaration) : own(el, pseudo),
+    );
+  }
+  afterEach(() => vi.restoreAllMocks());
+
+  /** A mark 16 px tall at `top` in a scroller that clips its height to `seen` (its top and height) of the page. */
+  function markAt(top: number, seen: [number, number] = [0, 600], left = 100) {
+    const scroller = document.body.appendChild(document.createElement('div'));
+    scroller.style.overflowY = 'auto';
+    scroller.getBoundingClientRect = () => rect(0, seen[0], 800, seen[1]);
+    Object.defineProperties(scroller, { clientWidth: { value: 800 }, clientHeight: { value: seen[1] }, clientLeft: { value: 0 }, clientTop: { value: 0 } });
+    const mark = scroller.appendChild(document.createElement('span'));
+    mark.getBoundingClientRect = () => rect(left, top, 14, 16);
+    placeNote(mark);
+    return { above: mark.hasAttribute('data-note-above'), mark };
+  }
+
+  it('opens under the mark where its height fits below it', () => {
+    noteHeight(() => 40);
+    expect(markAt(100).above).toBe(false);
+    // just enough room: the note, its gap and the inset end at the scroller's bottom edge
+    expect(markAt(600 - NOTE_INSET_PX - NOTE_GAP_PX - 40 - 16).above).toBe(false);
+  });
+
+  it('opens above the mark near the scroller’s bottom edge', () => {
+    noteHeight(() => 40);
+    expect(markAt(570).above).toBe(true);
+    expect(markAt(600 - NOTE_INSET_PX - NOTE_GAP_PX - 40 - 16 + 1).above).toBe(true);
+  });
+
+  it('opens above the mark near the window’s bottom edge, where no scroller clips it', () => {
+    noteHeight(() => 40);
+    const { above } = markAt(window.innerHeight - 20, [0, window.innerHeight + 400]);
+    expect(above).toBe(true);
+  });
+
+  it('stays under the mark when there is even less room above it', () => {
+    noteHeight(() => 80);
+    expect(markAt(40, [0, 100]).above).toBe(false);
+  });
+
+  it('measures the note at the width its side allows, which can make it too tall to fit below', () => {
+    // at its full width the note is one line; narrowed to the room left of a mark near the right edge, it wraps
+    noteHeight((max) => (max === `${NOTE_MAX_PX}px` ? 24 : 120));
+    expect(markAt(500, [0, 600], 100).above).toBe(false);
+    expect(markAt(500, [0, 600], 700).above).toBe(false); // leftward at full width: still one line
+    const scroller = document.body.appendChild(document.createElement('div'));
+    scroller.style.overflowX = 'auto';
+    scroller.style.overflowY = 'auto';
+    scroller.getBoundingClientRect = () => rect(0, 0, 300, 600);
+    Object.defineProperties(scroller, { clientWidth: { value: 300 }, clientHeight: { value: 600 }, clientLeft: { value: 0 }, clientTop: { value: 0 } });
+    const mark = scroller.appendChild(document.createElement('span'));
+    mark.getBoundingClientRect = () => rect(150, 500, 14, 16);
+    placeNote(mark);
+    expect(mark.style.getPropertyValue('--dash-note-max')).not.toBe(`${NOTE_MAX_PX}px`); // narrowed
+    expect(mark.hasAttribute('data-note-above')).toBe(true); // 120 px tall at that width: no room below
+  });
+
+  it('drops the upward side when the mark is placed again with room below', () => {
+    noteHeight(() => 40);
+    const { mark } = markAt(570);
+    expect(mark.hasAttribute('data-note-above')).toBe(true);
+    mark.getBoundingClientRect = () => rect(100, 100, 14, 16);
+    placeNote(mark);
+    expect(mark.hasAttribute('data-note-above')).toBe(false);
   });
 });

@@ -156,45 +156,41 @@ describe('the card’s forms', () => {
     expect(within(actions()).getByRole('button', { name: 'Reopen' })).toBeTruthy();
   });
 
-  // happy-dom lays nothing out, so the slot is pinned by the stylesheet: the action has its own column in the first row
-  // beside the quote (or the first message), always laid out, never positioned over the card's text
-  it('gives Resolve its own slot beside the first row, laid out at rest, so it covers no text and moves none as it shows', () => {
+  // The pair review's fix wave (G384, G385, G388): happy-dom lays nothing out, so the placement is pinned by the
+  // stylesheet. The card is one column, so the quote and every message take its whole width; Resolve or Reopen is
+  // positioned over the right end of the first message's author line (anchored to it, each card its own), so it takes no
+  // space at rest and moves no text as it shows. It stays last in the card, so the Tab order is as it was.
+  it('draws Resolve over the right end of the first author line, the quote and the messages taking the card’s whole width', () => {
     const rule = (selector: string) => {
       const css = commentsCss.replace(/\/\*[\s\S]*?\*\//g, '');
       const found = [...css.matchAll(/([^{}]+)\{([^{}]*)\}/g)].find(([, head]) => head!.trim() === selector);
       if (!found) throw new Error(`no rule ${selector}`);
       return found[2]!.replace(/\s+/g, ' ');
     };
-    expect(rule('.thread-card')).toContain('display: grid;');
-    expect(rule('.thread-card')).toContain('grid-template-columns: minmax(0, 1fr) auto;');
-    expect(rule('.thread-card > *')).toContain('grid-column: 1 / -1;');
-    expect(rule('.thread-card > :first-child')).toContain('grid-column: 1;');
-    expect(rule('.thread-card > .thread-card-actions')).toContain('grid-column: 2;');
-    expect(rule('.thread-card > .thread-card-actions')).toContain('grid-row: 1;');
-    expect(commentsCss).not.toMatch(/\.thread-card-actions[^{]*\{[^}]*position:/);
-    const { card } = show({ showQuote: true });
-    const children = [...card().children].filter((child) => !(child as HTMLElement).hidden);
-    expect(children[0]!.matches('.thread-card-quote')).toBe(true); // the first row's text, beside the action
-    expect(children.at(-1)!.matches('.thread-card-actions')).toBe(true);
-  });
+    const card = rule('.thread-card');
+    expect(card).not.toContain('grid-template-columns');
+    for (const declaration of ['position: relative;', 'anchor-scope: --thread-head;']) expect(card).toContain(declaration);
+    expect(commentsCss).not.toMatch(/subgrid|grid-column|grid-row/);
+    expect(rule('.thread-card > .thread-card-messages:first-of-type > .thread-card-message:first-child > .thread-card-author')).toContain('anchor-name: --thread-head;');
+    const actions = rule('.thread-card > .thread-card-actions');
+    for (const declaration of ['position: absolute;', 'position-anchor: --thread-head;', 'background: inherit;']) expect(actions).toContain(declaration);
+    expect(actions).toMatch(/top: calc\(anchor\(center/);
+    expect(actions).toMatch(/right: anchor\(right/);
 
-  // the whole-branch review's fix wave: with no quote the first row is the list of messages, and only its first message
-  // sits beside the action; the replies under it take the card's whole width (the list a subgrid of the card's columns)
-  it('keeps only the first message beside Resolve where the card draws no quote; the replies take the whole width', () => {
-    const rule = (selector: string) => {
-      const css = commentsCss.replace(/\/\*[\s\S]*?\*\//g, '');
-      const found = [...css.matchAll(/([^{}]+)\{([^{}]*)\}/g)].find(([, head]) => head!.trim() === selector);
-      if (!found) throw new Error(`no rule ${selector}`);
-      return found[2]!.replace(/\s+/g, ' ');
-    };
-    const list = rule('.thread-card > .thread-card-messages:first-child');
-    for (const declaration of ['grid-column: 1 / -1;', 'grid-row: 1;', 'display: grid;', 'grid-template-columns: subgrid;']) expect(list).toContain(declaration);
-    expect(rule('.thread-card > .thread-card-messages:first-child > .thread-card-message')).toContain('grid-column: 1 / -1;');
-    expect(rule('.thread-card > .thread-card-messages:first-child > .thread-card-message:first-child')).toContain('grid-column: 1;');
-    const { card } = show({ active: true, thread: thread({ messages: [message(0, HUMAN), message(1), message(2)] }) });
-    const first = card().firstElementChild!;
-    expect(first.matches('.thread-card-messages')).toBe(true); // no quote: the list is the first row
-    expect(first.querySelectorAll(':scope > .thread-card-message')).toHaveLength(3);
+    // the anchor is the first author line whatever comes before it: the quote, the Removed tag, or nothing
+    const firstAuthor = (el: HTMLElement) => el.querySelector(':scope > ol.thread-card-messages:first-of-type > .thread-card-message:first-child > .thread-card-author');
+    const { card: quoted, view } = show({ showQuote: true, active: true });
+    expect(quoted().firstElementChild!.matches('.thread-card-quote')).toBe(true);
+    expect(firstAuthor(quoted())?.textContent).toBe(actorDisplay(HUMAN).name);
+    expect(quoted().lastElementChild!.matches('.thread-card-actions')).toBe(true); // after the reply field
+    expect(quoted().querySelector('.thread-card-reply')).not.toBeNull();
+    view.rerender(<ThreadCard thread={thread({ orphan: true })} active={false} compact draft="" {...handlers()} />);
+    expect(quoted().firstElementChild!.matches('.thread-card-removed')).toBe(true);
+    expect(firstAuthor(quoted())?.textContent).toBe(actorDisplay(HUMAN).name);
+    // compacted, the replies' second list comes after the first: the first of type is still the first message's
+    view.rerender(<ThreadCard thread={thread({ messages: [message(0, SESSION), message(1, HUMAN), message(2, HUMAN), message(3, HUMAN), message(4, HUMAN)] })} active={false} compact draft="" {...handlers()} />);
+    expect(quoted().querySelectorAll(':scope > ol.thread-card-messages')).toHaveLength(2);
+    expect(firstAuthor(quoted())?.textContent).toBe(actorDisplay(SESSION).name);
   });
 
   it('offers Resolve on an open thread, Reopen and no reply field on a resolved one', () => {

@@ -27,6 +27,7 @@ import type { DocumentHandle } from '../host-types';
 import { MemoryDocumentHost, memoryEditorHost, openMemoryHandle, whenSynced } from '../memory-host';
 import { endOf, until } from '../test-world';
 import { MemoryHistory } from './memory-history';
+import chromeCss from '../chrome.css?raw';
 
 const SESSION = '00000000-0000-4000-8000-0000000000a1' as AppSessionId;
 const AGENT: Actor = { kind: 'session', appSessionId: SESSION };
@@ -571,6 +572,27 @@ describe('the owner’s actions', () => {
     await previewing();
     await userEvent.click(within(bar()).getByRole('button', { name: 'Actions for this version' }));
     expect(screen.getAllByRole('menuitem').map((item) => item.textContent)).toEqual(['Make a copy']);
+  });
+
+  // The pair review's fix wave (G379): the "…" is a drawn glyph in the ×'s own box, centred as the × is rather than a
+  // text ellipsis on the baseline, and it shows its pressed state while its menu is open (the app's open-menu trigger).
+  it('draws the version’s actions as a glyph in the ×’s box, pressed while its menu is open', async () => {
+    await setup(async ({ history: hist }) => void hist.version('auto', HUMAN));
+    await openHistory();
+    click(within(rail()).getAllByRole('button', { name: /^Version / })[0]);
+    await previewing();
+    const actions = within(bar()).getByRole('button', { name: 'Actions for this version' });
+    const back = bar().querySelector('[data-history-back]')!;
+    expect(actions.textContent).toBe('');
+    expect(actions.querySelector(':scope > svg[aria-hidden="true"]')).not.toBeNull();
+    expect([...actions.classList].filter((name) => name.startsWith('doc-tool'))).toEqual([...back.classList].filter((name) => name.startsWith('doc-tool')));
+    expect(actions.getAttribute('data-state')).toBe('closed');
+    await userEvent.click(actions);
+    expect(actions.getAttribute('data-state')).toBe('open');
+    expect(actions.getAttribute('aria-expanded')).toBe('true');
+    const css = chromeCss.replace(/\/\*[\s\S]*?\*\//g, '');
+    const pressed = [...css.matchAll(/([^{}]+)\{([^{}]*)\}/g)].find(([head]) => head!.split(',').some((selector) => selector.trim() === ".doc-tool[data-state='open']"));
+    expect(pressed?.[2]).toContain('background: var(--bg-active);');
   });
 
   it('offers See N new changes after an agent changed the document since the last view, and opens that comparison', async () => {
