@@ -13,8 +13,11 @@ export const events = [
   // C12 start
   'engine.budget',
   // C12 end
-  'engine.prestart', // ticket 851, M2
 ] as const;
+
+// Ticket 851, M2 (R4-6): `engine.prestart`, a prestart's word, names an uncommitted app and engine session; it is mawsd's
+// endpoint's, which no window hears by any path (the prestart panel, scalpel-4#1)
+export const mainOnlyEvents = ['engine.prestart'] as const;
 
 // Only main's settings coordinator may update host configuration or policy.
 // P2-A (2026-10-09): main alone reads the observed facts from the host, relaying them as `session.observedFacts`.
