@@ -160,6 +160,19 @@ describe('writesOf', () => {
     expect(writesOf('marketplace-remove', 'user', 'github').others).toEqual(['known_marketplaces.json', 'marketplaces/<name>/']);
   });
 
+  it('names the .claude.json key holding the plugins the person declined wherever the engine may change it', () => {
+    // 2.1.331: an uninstall (at user scope, or at a narrower one with no user installation left) and a user-scope disable
+    // of a plugin another enabled one lists as optional add it to `declinedPlugins`, as does a marketplace removal for its
+    // plugins turned off in a settings file; a user-scope install or enable takes it out. A plugin listed there is not
+    // installed again as another plugin's optional dependency.
+    for (const scope of PLUGINS_SCOPES) {
+      expect(writesOf('uninstall', scope, null).globalConfig, scope).toEqual(['declinedPlugins']);
+      expect(writesOf('marketplace-remove', scope, 'directory').globalConfig, scope).toEqual(['declinedPlugins']);
+      for (const action of ['install', 'enable', 'disable'] as const) expect(writesOf(action, scope, null).globalConfig, `${action} ${scope}`).toEqual(scope === 'user' ? ['declinedPlugins'] : []);
+      for (const action of ['update', 'marketplace-add', 'marketplace-update'] as const) expect(writesOf(action, scope, null).globalConfig, `${action} ${scope}`).toEqual([]);
+    }
+  });
+
   it('covers every file G0’s probe saw each action change, and a failed action changed nothing', () => {
     const snapshots = probeSnapshots();
     const at = (step: string) => {
@@ -210,7 +223,7 @@ describe('writesOf', () => {
     expect(writesOf('marketplace-remove', 'user', 'directory', installed.slice(1, 2), '/w/app').scopeSettings).toHaveLength(3);
     expect(writesOf('marketplace-remove', 'user', 'github', installed.slice(0, 1)).others).toEqual(['known_marketplaces.json', 'marketplaces/<name>/', 'installed_plugins.json', 'cache/<name>/', 'data/a@m/']);
     // with nothing installed from it, the removal writes only the catalogue's records; no other action names other scopes
-    expect(writesOf('marketplace-remove', 'user', 'directory', [])).toEqual({ settings: 'settings.json', others: ['known_marketplaces.json'], scopeSettings: [] });
+    expect(writesOf('marketplace-remove', 'user', 'directory', [])).toEqual({ settings: 'settings.json', others: ['known_marketplaces.json'], scopeSettings: [], globalConfig: ['declinedPlugins'] });
     expect(writesOf('marketplace-remove', 'user', 'directory', [], '/w/session').scopeSettings).toEqual([]);
     for (const action of PLUGINS_ACTIONS.filter((a) => a !== 'marketplace-remove')) expect(writesOf(action, 'user', null, installed, '/w/session').scopeSettings, action).toEqual([]);
   });

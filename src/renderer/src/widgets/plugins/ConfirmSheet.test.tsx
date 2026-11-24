@@ -49,8 +49,11 @@ describe('the confirm sheet', () => {
     expect(argvShown()).toEqual(commandLine(action, input as never));
     expect(argvShown()).not.toContain('-y');
     const writes = within(screen.getByRole('list', { name: "The engine's CLI writes:" })).getAllByRole('listitem');
-    expect(writes).toHaveLength(1 + writesOf(action, scope, request.source).others.length);
+    const manifest = writesOf(action, scope, request.source);
+    expect(writes).toHaveLength(1 + manifest.others.length + manifest.globalConfig.length);
     expect(writes[0].textContent).toBe(scope === 'user' ? '/tmp/home/settings.json' : `/work/app/${writesOf(action, scope, null).settings}`);
+    // a .claude.json key the person's choice lands in is named with the engine's global config file
+    expect(writes.slice(writes.length - manifest.globalConfig.length).map((item) => item.textContent)).toEqual(manifest.globalConfig.map((key) => `/Users/me/.claude.json › ${key}`));
   });
 
   it('opens with the commands and the files behind a closed Details, what installs and the scope in view; Details shows both steps and the files', () => {

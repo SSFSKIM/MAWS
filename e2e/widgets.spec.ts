@@ -1395,7 +1395,7 @@ test.describe('plugin management (E8)', () => {
     expect(argv).toEqual(['plugin', 'install', 'e8-probe@e8-scratch', '--scope', 'user', '--json']);
     await expect(sheet.locator('[data-plugins-argv]')).toHaveText('claude plugin install e8-probe@e8-scratch --scope user --json');
     const home = configHome(backend);
-    await expect(sheet.getByRole('list', { name: "The engine's CLI writes:" }).getByRole('listitem')).toHaveText([`${home}/settings.json`, `${home}/plugins/installed_plugins.json`, `${home}/plugins/cache/e8-scratch/e8-probe/<version>/`, `${home}/plugins/cache/<any-marketplace>/<dependency>/`]);
+    await expect(sheet.getByRole('list', { name: "The engine's CLI writes:" }).getByRole('listitem')).toHaveText([`${home}/settings.json`, `${home}/plugins/installed_plugins.json`, `${home}/plugins/cache/e8-scratch/e8-probe/<version>/`, `${home}/plugins/cache/<any-marketplace>/<dependency>/`, `${home}/.claude.json › declinedPlugins`]);
     await expect(sheet).toContainText(`and keeps its own records in ${home}/.claude.json`);
     // the word cut (P720): the sheet never says that nothing will reload; "Reloads plugins in N running sessions" stays
     // where one will (the open session's, whose process this backend runs, on the Mac lane)
@@ -1505,7 +1505,7 @@ test.describe('plugin management (E8)', () => {
     await expect(toggle).toHaveAttribute('aria-checked', 'true');
     await toggle.click();
     await openDetails(sheetOf(page, 'disable'));
-    await expect(sheetOf(page, 'disable').getByRole('list', { name: "The engine's CLI writes:" }).getByRole('listitem')).toHaveText([`${configHome(backend)}/settings.json`]);
+    await expect(sheetOf(page, 'disable').getByRole('list', { name: "The engine's CLI writes:" }).getByRole('listitem')).toHaveText([`${configHome(backend)}/settings.json`, `${configHome(backend)}/.claude.json › declinedPlugins`]);
     await confirm('disable', 'Disable', ['plugin', 'disable', id, '--scope', 'user', '--json']);
     await expect(opLineOf(detail)).toHaveText('Successfully disabled plugin: e8-tools (scope: user)');
     await expect(toggle).toHaveAttribute('aria-checked', 'false'); // the read-back
@@ -1671,7 +1671,7 @@ test.describe('plugin management (E8)', () => {
     await addOn(cardOf(w, 'e8-deps@e8-scratch'));
     const install = sheetOf(page, 'install');
     await openDetails(install);
-    await expect(install.getByRole('list', { name: "The engine's CLI writes:" }).getByRole('listitem')).toHaveText([`${home}/settings.json`, `${home}/plugins/installed_plugins.json`, `${home}/plugins/cache/e8-scratch/e8-deps/<version>/`, `${home}/plugins/cache/<any-marketplace>/<dependency>/`]);
+    await expect(install.getByRole('list', { name: "The engine's CLI writes:" }).getByRole('listitem')).toHaveText([`${home}/settings.json`, `${home}/plugins/installed_plugins.json`, `${home}/plugins/cache/e8-scratch/e8-deps/<version>/`, `${home}/plugins/cache/<any-marketplace>/<dependency>/`, `${home}/.claude.json › declinedPlugins`]);
     await expect(install).toContainText('and the cache directories of any dependencies the marketplace declares, from this or an allowlisted marketplace, each enabled in the settings file above');
     const shown = [await argvOf(install)];
     await install.getByRole('button', { name: 'Install', exact: true }).click();
@@ -1691,7 +1691,7 @@ test.describe('plugin management (E8)', () => {
     await expect(remove).toContainText(/Also uninstalls 3 plugins: /);
     for (const id of ['e8-tools@e8-scratch (user)', 'e8-deps@e8-scratch (user)', 'e8-probe@e8-scratch (user)']) await expect(remove).toContainText(id);
     const writes = remove.getByRole('list', { name: "The engine's CLI writes:" }).getByRole('listitem');
-    await expect(writes).toHaveCount(9);
+    await expect(writes).toHaveCount(10);
     expect((await writes.allInnerTexts()).sort()).toEqual(
       [
         `${home}/settings.json`,
@@ -1703,6 +1703,7 @@ test.describe('plugin management (E8)', () => {
         `${home}/plugins/data/e8-probe@e8-scratch/`,
         `${backend.project}/.claude/settings.json`, // where an enable or disable override for them may sit
         `${backend.project}/.claude/settings.local.json`,
+        `${home}/.claude.json › declinedPlugins`, // the plugins turned off there, which no optional dependency brings back
       ].sort(),
     );
     await expect(remove).toContainText('and any enable or disable override for them in these settings files');

@@ -34,7 +34,7 @@ import { pluginsLiveSkipReason, pluginsScratch, trackPluginReads, type PluginRea
 import { a15Line, a15Reading, type A15Reading } from './support/p1-live';
 import { compareA15 } from '../test/support/owner-file';
 import { newChatIn } from './support/sidebar';
-import { backToTabs, unfoldSessionCard } from './support/shell';
+import { backToTabs, pageRegion, unfoldSessionCard } from './support/shell';
 import { customizePage, openDiscoverFromPlugins, pluginRowSwitch } from './support/customize';
 
 test.skip(process.env.MAWS_E8_LIVE !== '1', 'the E8 live run runs only under MAWS_E8_LIVE=1');
@@ -544,7 +544,8 @@ test('E8 live: marketplaces and plugins managed from /plugins and the panel thro
     });
 
     await step('remove-folder', 'Remove… e8-scratch with e8-probe installed: the sheet names the uninstall; the marketplace and the plugin leave; its result stays', async () => {
-      const w = page.locator('[data-widget="plugins"]');
+      // a reinstall that failed before its way back leaves Discover's page in front: this step starts from the session
+      const w = (await pageRegion(page).count()) > 0 ? await backToSession(page) : page.locator('[data-widget="plugins"]');
       const manage = await openDialog(w, 'Manage marketplaces');
       const row = marketplaceRow(manage, 'e8-scratch');
       const uninstalls = [{ id: PLUGIN, scope: 'user', projectPath: null }];
