@@ -24,7 +24,7 @@ import { RELAY_URL } from '../launch';
 import { signalOrphan } from '../live-ledger';
 import { MAX_LINE_CHARS } from '../transport';
 import { isAlive, procStartOf } from '../supervisor-files';
-import { adoptAll, clearDeadHost, clearEndedPrestart, endPrestart, type PrestartFiles } from './adopt';
+import { adoptAll, clearDeadHost, clearEndedPrestart, endPrestart, exitedEntry, type PrestartFiles } from './adopt';
 import { mapFileOf, readCheckpoint } from './checkpoint';
 import { hostsDirOf, sessionHostBinary, sessionHostPaths } from './files';
 import { launchRows } from './restore';
@@ -107,7 +107,7 @@ function engineHost(stub: string) {
       started.push(host);
       return host;
     },
-    endPrestart: async (host) => void (await clearEndedPrestart(hostsDir(), host, { isAlive })),
+    endPrestart: (host, rollback) => clearEndedPrestart(hostsDir(), host, { isAlive }, rollback),
   };
   const ipc = registerEngineIpc(on, emit, {
     userData, replayEnabled: false, log: () => {}, holder,
@@ -151,7 +151,7 @@ function successor(stub: string) {
     ipc.table.holdForAdoption(live.flatMap((entry) => (entry.appSessionId ? [entry.appSessionId as AppSessionId] : [])));
     const outcome = await adoptAll(live, {
       adopt: (entry) => ipc.adopt(entry),
-      end: (entry) => endPrestart(entry, { ...files, discard: (e) => discardHost(e, { log: () => {}, token: tokenOf(e.holderId) }) }),
+      end: (entry) => endPrestart(entry, { ...files, discard: (e) => discardHost(e, { log: () => {}, token: tokenOf(e.holderId) }), exited: (e) => exitedEntry(hostsDir(), e, { isAlive }) }),
       log: () => {},
     });
     for (const entry of live) if (entry.appSessionId) ipc.table.adoptionEnded(entry.appSessionId as AppSessionId);

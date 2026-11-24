@@ -345,7 +345,7 @@ export function registerEngineIpc(hostOn: HostOn, emit: HostEmit, deps: EngineIp
     hiddenWires.set(session, wire);
     session.on('events', (events) => {
       if (wire.stream) return wire.stream.events(events);
-      if (stage.over) return; // M2's review, finding 9: past the ceiling nothing more is kept (the prestart ends)
+      if (!stage.keeping) return; // M2's review, finding 9: past the ceiling nothing more is kept (the prestart ends); the panel's scalpel-2#7: nor once dropped
       for (const event of events) {
         if (event.kind === 'plugin.toast' || event.kind === 'plugin.ask') continue; // D2: dropped, never shown late
         wire.kept.push(event);

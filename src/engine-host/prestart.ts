@@ -23,6 +23,8 @@ export const PRESTART_STAGE_MAX_BYTES = 1024 * 1024;
 // turn of the event loop (never inside the write that passed it).
 // M2's review, finding 9: the ceiling counts until the row is revealed or dropped (`close`), past the stage's release
 // (its rows and map lines then on disk, the kept events still in memory)
+// The panel's scalpel-2#7: past the ceiling, or once closed, it keeps nothing more (`keeping`): its journal and map drop
+// what comes, so an engine that writes on through its stop ladder grows nothing; a stage past its ceiling never commits.
 export class Stage implements MapStage {
   private size = 0;
   private overflowed = false;
@@ -44,15 +46,20 @@ export class Stage implements MapStage {
     return this.overflowed;
   }
 
+  get keeping(): boolean {
+    return !this.closed && !this.overflowed;
+  }
+
   add(bytes: number): void {
-    if (this.closed) return;
+    if (!this.keeping) return;
     this.size += bytes;
-    if (this.overflowed || this.size <= (this.opts.maxBytes ?? PRESTART_STAGE_MAX_BYTES)) return;
+    if (this.size <= (this.opts.maxBytes ?? PRESTART_STAGE_MAX_BYTES)) return;
     this.overflowed = true;
     setImmediate(this.opts.overflow);
   }
 
   mapLine(text: string): void {
+    if (!this.keeping) return;
     this.mapLines.push(text);
     this.add(Buffer.byteLength(text));
   }
@@ -70,8 +77,8 @@ export class Stage implements MapStage {
 
 // The launch's journal while it is staged: rows numbered and stamped as JournalWriter numbers them, kept as their lines;
 // `commit` writes them whole as the launch's first file (and the stage's map lines first, as its map file), then every
-// later row goes to a JournalWriter resumed after the last one. A row past the stage's ceiling is still kept (the
-// prestart is ended for it on the next turn).
+// later row goes to a JournalWriter resumed after the last one. The row that passes the stage's ceiling is kept, and
+// none after it, or after the stage closed: each is still numbered (the prestart is ended for it on the next turn).
 export class StagedJournal implements SessionJournal {
   readonly path: string;
   private seq = 0;
@@ -91,9 +98,10 @@ export class StagedJournal implements SessionJournal {
     if (this.writer) return this.writer.row(direction, frame);
     if (this.closed) throw new Error(`journal ${this.path} is closed`);
     const row: JournalRow = { seq: this.seq + 1, direction, at: new Date().toISOString(), frame };
+    this.seq = row.seq;
+    if (!this.stage.keeping) return row; // the panel's scalpel-2#7
     const line = JSON.stringify(row) + '\n';
     this.lines.push(line);
-    this.seq = row.seq;
     this.stage.add(Buffer.byteLength(line));
     return row;
   }
@@ -121,6 +129,7 @@ export class StagedJournal implements SessionJournal {
   commit(): void {
     if (this.writer) return;
     if (this.closed) throw new Error('the prestart’s journal is closed: its process has exited');
+    if (this.stage.over) throw new Error('the prestart’s stage passed its ceiling: rows past it were not kept'); // the panel's scalpel-2#7
     ownerOnlyJournalDirectory(dirname(this.dir));
     ownerOnlyJournalDirectory(this.dir);
     if (this.stage.mapLines.length > 0) writeWhole(mapFileOf(this.path), this.stage.mapLines.join('')); // a direct spawn has no map

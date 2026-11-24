@@ -86,9 +86,10 @@ export interface LauncherDeps {
     // `startMs`; and one holding no engine, released (releaseHost)
     adopt?: (entry: RosterEntry, checkpoint: { frontier: number; above: readonly number[] }, startMs: number) => Promise<{ transport: EngineTransport; fence: number }>;
     release?: (entry: RosterEntry, startMs: number) => Promise<void>;
-    // Ticket 851, M2: a prestart's session host, its launch ended and its staged files removed: its roster entry (which a
-    // marked host keeps at its exit) removed once the host has exited
-    endPrestart?: (host: { holderId: string; pid: number }) => Promise<void>;
+    // Ticket 851, M2: a prestart's session host, its engine ended: once the host has exited (holder/adopt.ts
+    // `clearEndedPrestart`), `rollback` (the panel's rule: nothing of the launch rolled back before), then its roster
+    // entry (which a marked host keeps at its exit) removed; answers whether the host was gone
+    endPrestart?: (host: { holderId: string; pid: number }, rollback: () => Promise<void>) => Promise<boolean>;
   };
 }
 
