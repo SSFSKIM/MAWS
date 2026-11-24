@@ -27,6 +27,7 @@ import { newChatIn, openProject, sidebarRow } from './support/sidebar';
 import { unfoldInfoGroup } from './support/session-info';
 import { pageRegion, unfoldSessionCard } from './support/shell';
 import { customizePage } from './support/customize';
+import { trackPluginReads } from './support/plugins-live';
 import { expectNewChatInFront } from './support/screen-reader-only';
 
 // A packaged app is built without the harness (`pnpm build:app`), whatever `out/` holds now.
@@ -1395,7 +1396,7 @@ test.describe('plugin management (E8)', () => {
     expect(argv).toEqual(['plugin', 'install', 'e8-probe@e8-scratch', '--scope', 'user', '--json']);
     await expect(sheet.locator('[data-plugins-argv]')).toHaveText('claude plugin install e8-probe@e8-scratch --scope user --json');
     const home = configHome(backend);
-    await expect(sheet.getByRole('list', { name: "The engine's CLI writes:" }).getByRole('listitem')).toHaveText([`${home}/settings.json`, `${home}/plugins/installed_plugins.json`, `${home}/plugins/cache/e8-scratch/e8-probe/<version>/`, `${home}/plugins/cache/<any-marketplace>/<dependency>/`]);
+    await expect(sheet.getByRole('list', { name: "The engine's CLI writes:" }).getByRole('listitem')).toHaveText([`${home}/settings.json`, `${home}/plugins/installed_plugins.json`, `${home}/plugins/cache/e8-scratch/e8-probe/<version>/`, `${home}/plugins/cache/<any-marketplace>/<dependency>/`, `${home}/.claude.json › declinedPlugins`]);
     await expect(sheet).toContainText(`and keeps its own records in ${home}/.claude.json`);
     // the word cut (P720): the sheet never says that nothing will reload; "Reloads plugins in N running sessions" stays
     // where one will (the open session's, whose process this backend runs, on the Mac lane)
@@ -1505,7 +1506,7 @@ test.describe('plugin management (E8)', () => {
     await expect(toggle).toHaveAttribute('aria-checked', 'true');
     await toggle.click();
     await openDetails(sheetOf(page, 'disable'));
-    await expect(sheetOf(page, 'disable').getByRole('list', { name: "The engine's CLI writes:" }).getByRole('listitem')).toHaveText([`${configHome(backend)}/settings.json`]);
+    await expect(sheetOf(page, 'disable').getByRole('list', { name: "The engine's CLI writes:" }).getByRole('listitem')).toHaveText([`${configHome(backend)}/settings.json`, `${configHome(backend)}/.claude.json › declinedPlugins`]);
     await confirm('disable', 'Disable', ['plugin', 'disable', id, '--scope', 'user', '--json']);
     await expect(opLineOf(detail)).toHaveText('Successfully disabled plugin: e8-tools (scope: user)');
     await expect(toggle).toHaveAttribute('aria-checked', 'false'); // the read-back
@@ -1663,6 +1664,36 @@ test.describe('plugin management (E8)', () => {
     expect(backend.consoleErrors()).toEqual([]);
   });
 
+  // plugins-live's audit holds every CLI read in main from a confirm to the operation's end (e2e/support/plugins-live.ts).
+  // Its first paid run at 9cc91e7e7 waited under the hold for a removed marketplace's result line, which is drawn only once
+  // the held list refetch drops the row, and timed out with the Manage marketplaces dialog left open. The hold now ends on
+  // the operation's `done` event, which this case shows arrives with the reads still held.
+  test('the live audit’s read hold: a removal’s done event arrives while every CLI read waits, and the removed row’s result line only after the release', async ({ backend }) => {
+    const { page } = backend;
+    const w = await openPlugins(backend);
+    const manage = await openAdd(w, 'Manage marketplaces');
+    const reads = await trackPluginReads(backend.app);
+    const gone = manage.locator(`[data-marketplace-result="${MARKET}"]`);
+    await marketplaceAction(marketplaceRow(manage, MARKET), 'Remove…');
+    const sheet = sheetOf(page, 'marketplace-remove');
+    await sheet.getByRole('checkbox', { name: 'I understand' }).check();
+    const doneBefore = await reads.done();
+    await reads.hold();
+    let waited: string[];
+    try {
+      await sheet.getByRole('button', { name: 'Remove', exact: true }).click();
+      await expect.poll(() => reads.done(), { timeout: 60_000, intervals: [250] }).toBeGreaterThan(doneBefore);
+      await expect(lineOf(marketplaceRow(manage, MARKET))).toContainText('Successfully removed marketplace: e8-scratch'); // the row's own line, drawn without a read
+      await expect(gone).toHaveCount(0); // what the paid run waited on: it needs the held refetch
+    } finally {
+      waited = await reads.release();
+    }
+    expect(waited).toContain('marketplaces.list');
+    await expect(gone).toContainText('Successfully removed marketplace: e8-scratch');
+    await expect(marketplaceRow(manage, MARKET)).toHaveCount(0);
+    expect(backend.consoleErrors()).toEqual([]);
+  });
+
   test('a plugin that declares a dependency installs with it from its card, the sheet announcing the dependency caches; removing the marketplace names the plugins it uninstalls and uninstalls them', async ({ appBackend: backend }) => {
     const { page } = backend;
     const home = configHome(backend);
@@ -1671,7 +1702,7 @@ test.describe('plugin management (E8)', () => {
     await addOn(cardOf(w, 'e8-deps@e8-scratch'));
     const install = sheetOf(page, 'install');
     await openDetails(install);
-    await expect(install.getByRole('list', { name: "The engine's CLI writes:" }).getByRole('listitem')).toHaveText([`${home}/settings.json`, `${home}/plugins/installed_plugins.json`, `${home}/plugins/cache/e8-scratch/e8-deps/<version>/`, `${home}/plugins/cache/<any-marketplace>/<dependency>/`]);
+    await expect(install.getByRole('list', { name: "The engine's CLI writes:" }).getByRole('listitem')).toHaveText([`${home}/settings.json`, `${home}/plugins/installed_plugins.json`, `${home}/plugins/cache/e8-scratch/e8-deps/<version>/`, `${home}/plugins/cache/<any-marketplace>/<dependency>/`, `${home}/.claude.json › declinedPlugins`]);
     await expect(install).toContainText('and the cache directories of any dependencies the marketplace declares, from this or an allowlisted marketplace, each enabled in the settings file above');
     const shown = [await argvOf(install)];
     await install.getByRole('button', { name: 'Install', exact: true }).click();
@@ -1691,7 +1722,7 @@ test.describe('plugin management (E8)', () => {
     await expect(remove).toContainText(/Also uninstalls 3 plugins: /);
     for (const id of ['e8-tools@e8-scratch (user)', 'e8-deps@e8-scratch (user)', 'e8-probe@e8-scratch (user)']) await expect(remove).toContainText(id);
     const writes = remove.getByRole('list', { name: "The engine's CLI writes:" }).getByRole('listitem');
-    await expect(writes).toHaveCount(9);
+    await expect(writes).toHaveCount(10);
     expect((await writes.allInnerTexts()).sort()).toEqual(
       [
         `${home}/settings.json`,
@@ -1703,6 +1734,7 @@ test.describe('plugin management (E8)', () => {
         `${home}/plugins/data/e8-probe@e8-scratch/`,
         `${backend.project}/.claude/settings.json`, // where an enable or disable override for them may sit
         `${backend.project}/.claude/settings.local.json`,
+        `${home}/.claude.json › declinedPlugins`, // the plugins turned off there, which no optional dependency brings back
       ].sort(),
     );
     await expect(remove).toContainText('and any enable or disable override for them in these settings files');

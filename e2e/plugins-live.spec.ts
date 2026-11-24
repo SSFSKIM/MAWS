@@ -29,12 +29,12 @@ import { invoke, value } from './support/c7-replay';
 import { launchMaws } from './support/launch';
 import { expectNewChatInFront } from './support/screen-reader-only';
 import { cappedEngine, capWords } from './support/live-budget';
-import { auditOf, manifestOf, untilQuiet, type Manifest, type Tree } from '../test/support/plugins-audit';
+import { actionAuditOf, auditOf, manifestOf, untilQuiet, type Audit, type Manifest, type Tree } from '../test/support/plugins-audit';
 import { pluginsLiveSkipReason, pluginsScratch, trackPluginReads, type PluginReads, type PluginsScratch } from './support/plugins-live';
 import { a15Line, a15Reading, type A15Reading } from './support/p1-live';
 import { compareA15 } from '../test/support/owner-file';
 import { newChatIn } from './support/sidebar';
-import { backToTabs, unfoldSessionCard } from './support/shell';
+import { backToTabs, pageRegion, unfoldSessionCard } from './support/shell';
 import { customizePage, openDiscoverFromPlugins, pluginRowSwitch } from './support/customize';
 
 test.skip(process.env.MAWS_E8_LIVE !== '1', 'the E8 live run runs only under MAWS_E8_LIVE=1');
@@ -106,26 +106,50 @@ async function openWidget(page: Page, name: string): Promise<Locator> {
 }
 // ---- the G4 audit (test/support/plugins-audit.ts) ----------------------------------------------------------------
 
-// The trees around one CLI action set side by side: every changed path with its verdict in live-run.txt; a configuration
-// write outside the manifest (any, for a listing) or a path nobody recognises fails the step. The window closes only once
-// no CLI read is in flight and none settled for QUIET_MS (a refetch behind cached data, or the rereads a
-// `plugins.changed` triggers, has finished); the reads that settled inside it are logged.
-async function audited(before: Tree, startedAt: number, manifest: Manifest | null, what: string): Promise<void> {
-  await untilQuiet(reads, { quietMs: QUIET_MS, timeoutMs: 180_000 });
-  const settled = await reads.settledSince(startedAt);
-  scratch.log(`CLI reads settled in this window: ${settled.length === 0 ? 'none' : settled.map((r) => `${r.name} ${r.ms} ms${r.outcome === 'answered' ? '' : ` (${r.outcome})`}`).join(' · ')}`);
-  const audit = auditOf(before, scratch.tree(), manifest);
-  scratch.log(manifest ? `manifest: ${manifest.paths.join(' · ')}` : `${what}: a listing (D-12: the catalogue caches and .claude.json bookkeeping only)`);
-  scratch.log(audit.lines.length > 0 ? `delta:\n${audit.lines.join('\n')}` : 'delta: none');
-  const verdict =
-    audit.unannounced.length === 0 && audit.unclassified.length === 0
+// One audit's lines in live-run.txt: the delta with every changed path's verdict, then the verdict; `manifest` null for
+// a listing, which may write no configuration.
+function logged(audit: Audit, manifest: Manifest | null, title = 'delta'): { failed: boolean } {
+  scratch.log(audit.lines.length > 0 ? `${title}:\n${audit.lines.join('\n')}` : `${title}: none`);
+  const failed = audit.unannounced.length > 0 || audit.unclassified.length > 0;
+  scratch.log(
+    !failed
       ? manifest
         ? 'verdict: every configuration write inside the manifest'
         : 'verdict: no configuration write'
-      : `verdict: FAILED${audit.unannounced.length > 0 ? ` · unannounced: ${audit.unannounced.join(', ')}` : ''}${audit.unclassified.length > 0 ? ` · unclassified: ${audit.unclassified.join(', ')}` : ''}`;
-  scratch.log(verdict);
+      : `verdict: FAILED${audit.unannounced.length > 0 ? ` · unannounced: ${audit.unannounced.join(', ')}` : ''}${audit.unclassified.length > 0 ? ` · unclassified: ${audit.unclassified.join(', ')}` : ''}`,
+  );
+  return { failed };
+}
+// The reads that settled since `startedAt`, once no CLI read is in flight and none settled for QUIET_MS (a refetch behind
+// cached data, or the rereads a `plugins.changed` triggers, has finished).
+async function quietAndLogged(startedAt: number): Promise<void> {
+  await untilQuiet(reads, { quietMs: QUIET_MS, timeoutMs: 180_000 });
+  const settled = await reads.settledSince(startedAt);
+  scratch.log(`CLI reads settled in this window: ${settled.length === 0 ? 'none' : settled.map((r) => `${r.name} ${r.ms} ms${r.outcome === 'answered' ? '' : ` (${r.outcome})`}`).join(' · ')}`);
+}
+// A listing's trees set side by side: any configuration write, or a path nobody recognises, fails the step.
+async function audited(before: Tree, startedAt: number, what: string): Promise<void> {
+  await quietAndLogged(startedAt);
+  const audit = auditOf(before, scratch.tree(), null);
+  scratch.log(`${what}: a listing (D-12: the catalogue caches and .claude.json bookkeeping only)`);
+  logged(audit, null);
   expect(audit.unannounced, `${what}: configuration writes the sheet did not announce`).toEqual([]);
   expect(audit.unclassified, `${what}: paths the audit could not classify`).toEqual([]);
+}
+// A mutation's two windows (`actionAuditOf`): up to its end (`ended`, read while every CLI read was held back), judged
+// against its manifest; then the reads it set off, released, judged as listings, so a key the manifest announces never
+// excuses a listing's write of it.
+async function auditedAction(before: Tree, ended: Tree, startedAt: number, waited: string[], manifest: Manifest, what: string): Promise<void> {
+  await quietAndLogged(startedAt);
+  scratch.log(`reads held until the mutation ended: ${waited.length === 0 ? 'none' : waited.join(' · ')}`);
+  const audit = actionAuditOf(before, ended, scratch.tree(), manifest);
+  scratch.log(`manifest: ${manifest.paths.join(' · ')}`);
+  logged(audit.mutation, manifest);
+  logged(audit.reads, null, 'the reads after it (listings), delta');
+  expect(audit.mutation.unannounced, `${what}: configuration writes the sheet did not announce`).toEqual([]);
+  expect(audit.mutation.unclassified, `${what}: paths the audit could not classify`).toEqual([]);
+  expect(audit.reads.unannounced, `${what}: configuration writes by the reads after it`).toEqual([]);
+  expect(audit.reads.unclassified, `${what}: paths the audit could not classify after it`).toEqual([]);
 }
 // A listing the widget runs (its opening reads, Discover's first showing), audited as one.
 async function listing<T>(what: string, run: () => Promise<T>): Promise<T> {
@@ -134,7 +158,7 @@ async function listing<T>(what: string, run: () => Promise<T>): Promise<T> {
   const startedAt = Date.now();
   const before = scratch.tree();
   const result = await run();
-  await audited(before, startedAt, null, what);
+  await audited(before, startedAt, what);
   return result;
 }
 
@@ -256,6 +280,19 @@ async function backToSession(page: Page): Promise<Locator> {
   return openPlugins(page);
 }
 
+// After a failed step: whatever it left in front (a confirm sheet, a marketplaces dialog, the widget, Customize's page)
+// closed, then the session's `/plugins` opened on My items, where a passing step leaves the run, so the steps after it
+// run (a failure at step 04 left the Manage marketplaces dialog over the session and every later step timed out).
+async function backOnSession(page: Page): Promise<void> {
+  for (let i = 0; i < 6 && (await page.locator('[role="dialog"]:visible').count()) > 0; i += 1) {
+    await page.keyboard.press('Escape');
+    await page.waitForTimeout(250);
+  }
+  await expect(page.locator('[role="dialog"]:visible')).toHaveCount(0);
+  if ((await pageRegion(page).count()) > 0) await backToTabs(page);
+  await openPlugins(page);
+}
+
 // ---- the run ---------------------------------------------------------------------------------------------------
 
 test('E8 live: marketplaces and plugins managed from /plugins and the panel through the engine’s CLI, reflected in the running session', async () => {
@@ -284,6 +321,9 @@ test('E8 live: marketplaces and plugins managed from /plugins and the panel thro
         failures.push(`${label}: ${message}`);
         scratch.log(`FAILED: ${message}`);
         scratch.observe(`${label}.failed`, message);
+        await shot(label);
+        await backOnSession(page).catch((recovery: unknown) => scratch.log(`could not return to the session: ${recovery instanceof Error ? recovery.message.split('\n')[0] : String(recovery)}`));
+        return;
       }
       await shot(label);
     });
@@ -310,19 +350,33 @@ test('E8 live: marketplaces and plugins managed from /plugins and the panel thro
     scratch.log(`sheet then: ${then}`);
     await page.screenshot({ path: join(scratch.root, `live-${String(n).padStart(2, '0')}-${spec.name}-sheet.png`) });
     if (spec.acknowledge) await sheet.getByRole('checkbox', { name: 'I understand' }).check();
-    await sheet.getByRole('button', { name: spec.submit, exact: true }).click();
-    await expect(sheet).toBeHidden();
+    // the sheet's own reads have landed; from the confirm to the operation's `done` (its CLI, the settle and the reload)
+    // no CLI read starts (`hold`), so the tree read there is the mutation's alone. The hold ends on that event, not on the
+    // row's words, which may need a held refetch (a removed row's line is drawn once the list has dropped the row).
+    await untilQuiet(reads, { quietMs: QUIET_MS, timeoutMs: 180_000 });
+    const doneBefore = await reads.done();
+    await reads.hold();
+    let endedTree: Tree;
+    let waited: string[];
+    try {
+      await sheet.getByRole('button', { name: spec.submit, exact: true }).click();
+      await expect(sheet).toBeHidden();
+      await expect.poll(() => reads.done(), { message: `${spec.name}: the operation's done event`, timeout: spec.timeout ?? DONE_TIMEOUT, intervals: [250] }).toBeGreaterThan(doneBefore);
+      endedTree = scratch.tree();
+    } finally {
+      waited = await reads.release();
+    }
     const result = await ended(spec.line(), spec.timeout);
     scratch.log(`row: ${result.text.replaceAll('\n', ' ⏎ ')}${result.failed ? '   [drawn as a failure]' : ''}`);
     scratch.observe(spec.name, { argv, writes, then, uninstalls, row: result });
     scratch.log(`(writesOf ${spec.action}, ${spec.scope}, ${spec.source ?? 'null'}${spec.uninstalls ? `, uninstalling ${spec.uninstalls.map((u) => u.id).join(', ')}` : ''})`);
-    await audited(before, startedAt, manifestOf(spec.action, spec.scope, spec.source, spec.fill, spec.uninstalls ?? [], scratch.repo), spec.name);
+    await auditedAction(before, endedTree, startedAt, waited, manifestOf(spec.action, spec.scope, spec.source, spec.fill, spec.uninstalls ?? [], scratch.repo), spec.name);
     return { ...result, uninstalls };
   };
 
   try {
     scratch.log(`E8 live run · ${new Date().toISOString()} · engine ${ENGINE_VERSION} · CLAUDE_CONFIG_DIR=${scratch.config} · marketplace ${scratch.market} · repository ${scratch.repo}`);
-    scratch.log('Every CLI run is audited (test/support/plugins-audit.ts): each mutation (the sheet\'s command and writes, the row\'s words once it ended) and each listing (the widget\'s opening reads, Discover\'s catalog reads). The delta covers the config home (config/…) and the project\'s .claude/ (project/…); a file\'s fingerprint is its size, mtime and content hash, so a same-content rewrite shows. Each path is marked [manifest] when writesOf covers it, else [records (D-12)] (a .claude.json bookkeeping key or a .claude.json backup), [catalogue cache (D-12)], [session files] (by name), [unannounced] (a configuration write outside the manifest, any for a listing: fails) or [unclassified] (fails); .claude.json is judged per changed top-level key.');
+    scratch.log('Every CLI run is audited (test/support/plugins-audit.ts): each mutation (the sheet\'s command and writes, the row\'s words once it ended; its delta read at its end with every CLI read held back, then the reads it set off judged on their own as listings) and each listing (the widget\'s opening reads, Discover\'s catalog reads). The delta covers the config home (config/…) and the project\'s .claude/ (project/…); a file\'s fingerprint is its size, mtime and content hash, so a same-content rewrite shows. Each path is marked [manifest] when writesOf covers it (a .claude.json key it announces too), else [records (D-12)] (a .claude.json bookkeeping key or a .claude.json backup), [catalogue cache (D-12)], [session files] (by name), [unannounced] (a configuration write outside the manifest, any for a listing: fails) or [unclassified] (fails); .claude.json is judged per changed top-level key.');
     await expect(page.locator('[data-region="main"]')).toBeVisible();
     let id = '';
     let builtin = 0; // the plugins the engine loads with an empty home (its own `@builtin` ones)
