@@ -1,6 +1,7 @@
 // The Design System page's body in the app (M4, Decision Log 16 and 17): its X32 header (title, saved state, the three
 // actions and the export, read from the tab's state) and its Mark-up surface, over a real replica.
-import { act, cleanup, render } from '@testing-library/react';
+import { act, cleanup, render, screen, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ArtifactHost, DocumentHandle, DocumentState } from '@artifacts/host';
 import { PortProvider } from '@artifacts/provider/port';
@@ -10,6 +11,7 @@ import { setLaw, setToken, writeSystem } from '@artifacts/design-system/model';
 import { parseTokens, serializeTokens } from '@artifacts/design-system/tokens';
 import { markupSurfaceOf, resetMarkupSurfaces } from '../../markup/surface';
 import { askEditorHostClose, editorHostOf, EditorHostScopeContext, resetEditorHosts, type EditorHostScope } from '../../panel/editor-host';
+import { EditorHeader } from '../../panel/PanelHeader';
 import { closeDialog, useDialogs } from '../../sessions/dialogs';
 import { useNotices } from '../../stores/notices';
 import type { TabRef } from '@shared/ipc/schema/layout';
@@ -126,6 +128,29 @@ describe('the Design System body (X32, Mark-up)', () => {
     host.export.mockRejectedValueOnce(new Error('exporting an artifact is not available yet'));
     await act(async () => registration.exports![0]!.onSelect());
     expect(useNotices.getState().notices.at(-1)).toMatchObject({ level: 'danger', text: 'Could not export for Claude: exporting an artifact is not available yet' });
+  });
+
+  // The word cut (G558): drawn in the header, each icon's word shows on keyboard focus; the star of the default system
+  // stays in the Tab order, greyed, saying why, and does nothing
+  it('draws its three icons in the header, each word shown on Tab, the default’s star focusable with its reason', async () => {
+    const user = userEvent.setup();
+    const onSetDefault = vi.fn();
+    const onDelete = vi.fn();
+    mount({ onSetDefault, isDefault: true, onDelete });
+    const header = render(<EditorHeader title="Harbor" scope={SCOPE} registration={editorHostOf(SCOPE)} />).container;
+    const tooltip = () => screen.getByRole('tooltip').textContent;
+    act(() => within(header).getByRole('button', { name: 'Check against law' }).focus());
+    expect(tooltip()).toBe('Check against law');
+    await user.tab();
+    const star = within(header).getByRole('button', { name: 'Set as my default', description: 'Already your default' });
+    expect(document.activeElement).toBe(star);
+    expect(star.getAttribute('aria-disabled')).toBe('true');
+    expect(tooltip()).toContain('Already your default');
+    await user.keyboard('{Enter}');
+    expect(onSetDefault).not.toHaveBeenCalled();
+    await user.tab();
+    expect(document.activeElement).toBe(within(header).getByRole('button', { name: 'Delete design system…' }));
+    expect(tooltip()).toBe('Delete design system…');
   });
 
   it('registers its Mark-up surface and calls onShown once the system is on screen', () => {

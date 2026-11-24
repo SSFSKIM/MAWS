@@ -156,6 +156,22 @@ describe('the banners', () => {
     expect(fold.querySelector('li')!.textContent).toBe('an unknown tag <blink>');
   });
 
+  // M5 task 4's review: the fold is the board's, so moving straight from one held board to another starts it closed
+  it('G534: a fold opened on one held board is closed on the next', () => {
+    const doc = design(BOARDS);
+    transact(doc, () => {
+      Y.setSlideKey(doc, 'b2', 'held', { source: '<section id="b2"><blink>x</blink></section>', reasons: ['an unknown tag <blink>'] });
+      Y.setSlideKey(doc, 'b1', 'held', { source: '<section id="b1"><marquee>x</marquee></section>', reasons: ['an unknown tag <marquee>'] });
+    });
+    const { container, session } = mount({ doc });
+    act(() => session.show('b2'));
+    const fold = () => container.querySelector<HTMLDetailsElement>('[data-held-banner] details')!;
+    fold().open = true;
+    act(() => session.show('b1'));
+    expect(fold().querySelector('li')!.textContent).toBe('an unknown tag <marquee>');
+    expect(fold().open).toBe(false);
+  });
+
   it('G535: a board whose file never arrived reads that it has not arrived yet', () => {
     const doc = design(BOARDS);
     transact(doc, () => Y.setSlideKey(doc, 'b2', MISSING_SOURCE_KEY, true));

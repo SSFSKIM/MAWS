@@ -415,6 +415,51 @@ describe('the panel header', () => {
     expect(focusEditorHostAction({ surface: 'panel', tabId: 'another' }, 'a1'), 'no header over that scope').toBe(false);
   });
 
+  // The word cut (M5's G558): an icon action's word is a tooltip the keyboard reaches, not the system's title; an action
+  // unavailable with a reason stays in the Tab order, greyed, its reason in the tooltip and the description, and its
+  // press does nothing; folded into "More actions", it stays in the menu's keyboard with its reason
+  it('shows an icon action’s word on keyboard focus, and keeps an unavailable one focusable with its reason', async () => {
+    const user = userEvent.setup();
+    const calls: string[] = [];
+    const icon = () => <svg />;
+    offs.push(registerPanelTool(probeTool('t').tool));
+    mount();
+    const id = add('t');
+    const scope = { surface: 'panel', tabId: id } as const;
+    const check: EditorHostAction = { id: 'check', label: 'Check against law', icon, onSelect: () => calls.push('check') };
+    const star: EditorHostAction = { id: 'star', label: 'Set as my default', icon, unavailable: 'Already your default', onSelect: () => calls.push('star') };
+    const bin: EditorHostAction = { id: 'bin', label: 'Delete design system…', icon, onSelect: () => calls.push('bin') };
+    act(() => void registerEditorHost(scope, { title: 'System', actions: [check, star, bin] }));
+    expect(within(header()).getAllByRole('button').filter((b) => b.hasAttribute('title')), 'no system tooltip').toEqual([]);
+    act(() => within(header()).getByRole('button', { name: 'Check against law' }).focus());
+    expect(screen.getByRole('tooltip').textContent).toBe('Check against law');
+    await user.tab();
+    const starButton = within(header()).getByRole('button', { name: 'Set as my default', description: 'Already your default' });
+    expect(document.activeElement, 'Tab reaches the unavailable star').toBe(starButton);
+    expect(starButton.getAttribute('aria-disabled')).toBe('true');
+    expect(screen.getByRole('tooltip').textContent).toContain('Already your default');
+    await user.keyboard('{Enter}');
+    await user.click(starButton);
+    await user.tab();
+    expect(document.activeElement).toBe(within(header()).getByRole('button', { name: 'Delete design system…' }));
+    expect(screen.getByRole('tooltip').textContent).toBe('Delete design system…');
+    await user.keyboard('{Enter}');
+    expect(calls, 'the star acts on neither Enter nor a click').toEqual(['bin']);
+    act(() => expect(focusEditorHostAction(scope, 'star'), 'an unavailable control keeps its focus').toBe(true));
+    expect(document.activeElement).toBe(starButton);
+
+    resetEditorHosts();
+    act(() => void registerEditorHost(scope, { title: 'System', actions: [check, bin, { id: 'other', label: 'Another', onSelect: () => {} }, star] }));
+    await user.click(within(header()).getByRole('button', { name: 'More actions' }));
+    const folded = within(await screen.findByRole('menu')).getByRole('menuitem', { name: 'Set as my default', description: 'Already your default' });
+    expect(folded.getAttribute('aria-disabled')).toBe('true');
+    await user.keyboard('{ArrowDown}{ArrowDown}');
+    expect(document.activeElement, 'the menu’s keyboard reaches it').toBe(folded);
+    await user.keyboard('{Enter}');
+    expect(screen.queryByRole('menu'), 'selecting it keeps the menu open').not.toBeNull();
+    expect(calls).toEqual(['bin']);
+  });
+
   it('marks a pressed action in "More actions" with a visible check, and an unpressed one without', async () => {
     const user = userEvent.setup();
     offs.push(registerPanelTool(probeTool('t').tool));

@@ -37,14 +37,18 @@ const section = (container: HTMLElement, name: string) => container.querySelecto
 
 afterEach(cleanup);
 
-describe('the page’s wait (G562)', () => {
-  it('a system not read yet is a quiet spinner named by the wait, with no words', async () => {
-    const { container } = page(newDoc());
-    expect(container.textContent).toBe('');
-    expect(screen.queryByRole('progressbar')).toBeNull();
+describe('a replica with no system (G562)', () => {
+  // M5 task 4's review: the page mounts after the replica's first sync, so a system it does not hold yet is no wait to
+  // spin for; the page says so at once, settled, and shows the system as soon as one is written
+  it('says the design system is empty, with no spinner, and draws the system once it arrives', async () => {
+    const doc = newDoc();
+    const { container } = page(doc);
+    expect(container.textContent).toBe('This design system is empty');
     await act(async () => new Promise((r) => setTimeout(r, 550)));
-    expect(screen.getByRole('progressbar', { name: 'Loading the design system…' })).toBeTruthy();
-    expect(container.textContent).toBe('');
+    expect(screen.queryByRole('progressbar'), 'no spinner, however long').toBeNull();
+    act(() => writeSystem(doc, { 'tokens.tokens.json': TOKENS, 'DESIGN.md': law('- Nothing louder than the title.') }, { route: 'derived', at: AT }, { name: 'Harbor' }));
+    expect(container.querySelector('.dsp-title')!.textContent).toBe('Harbor');
+    expect(screen.queryByText('This design system is empty')).toBeNull();
   });
 });
 
