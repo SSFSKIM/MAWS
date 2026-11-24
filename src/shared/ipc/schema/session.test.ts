@@ -152,8 +152,9 @@ describe('ticket 851, M3: session.intent.prestart and its withdraw', () => {
   it('are the machine’s, take the intent’s id (and the token to withdraw), and answer a status with a token or none', () => {
     expect(commands['session.intent.prestart'].owner).toBe('machine');
     expect(commands['session.intent.prestart.withdraw'].owner).toBe('machine');
-    expect(validateCommandInput('session.intent.prestart', { appSessionId: ID }).ok).toBe(true);
-    expect(validateCommandInput('session.intent.prestart', { appSessionId: ID, spec: {} }).ok).toBe(false);
+    expect(validateCommandInput('session.intent.prestart', { appSessionId: ID, token: 't1' }).ok).toBe(true);
+    expect(validateCommandInput('session.intent.prestart', { appSessionId: ID }).ok).toBe(false); // M3's review: the window's token
+    expect(validateCommandInput('session.intent.prestart', { appSessionId: ID, token: 't1', spec: {} }).ok).toBe(false);
     expect(validateCommandInput('session.intent.prestart.withdraw', { appSessionId: ID, token: 't1' }).ok).toBe(true);
     expect(validateCommandInput('session.intent.prestart.withdraw', { appSessionId: ID }).ok).toBe(false);
     expect(validateCommandInput('session.intent.prestart.withdraw', { appSessionId: ID, generation: 1 }).ok).toBe(false);

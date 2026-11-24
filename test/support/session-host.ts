@@ -83,6 +83,11 @@ export class FakeEngineHost {
   readonly released: string[] = [];
   starts = 0;
   prestartGate: Promise<void> | null = null; // set: `session.prestart` is answered once it settles
+  // M3's fix wave: the connection the spine reaches this host on (its welcome, as the spine root reads it): null while
+  // unreachable; `replaceProcess()` is a successor host process on a new connection, whose generations count from 1
+  connection: object = {};
+  link = (): object | null => (this.unavailable ? null : this.connection);
+  private answerHold: Promise<void> | null = null;
   private generation = 0;
   private readonly readyListeners = new Set<() => void>(); // E10: the session service's, told at becomeReady()
   private readonly listeners = new Map<string, Set<(payload: unknown) => void>>();
@@ -113,6 +118,21 @@ export class FakeEngineHost {
   becomeReady(opts: { reachable?: boolean } = {}): void {
     this.unavailable = opts.reachable === false;
     for (const listener of [...this.readyListeners]) listener();
+  }
+
+  // M3's fix wave: the next `session.prestart` is admitted at once and its answer held until the returned release
+  holdNextPrestartAnswer(): () => void {
+    let release!: () => void;
+    this.answerHold = new Promise<void>((resolve) => (release = resolve));
+    return release;
+  }
+
+  // M3's fix wave: the engine host process is replaced (a restart, a handover): its prestarts died with the old
+  // connection, and the successor's generations count from 1 again
+  replaceProcess(): void {
+    this.connection = {};
+    this.generation = 0;
+    this.prestarts.clear();
   }
 
   calledWith(name: string): unknown[] {
@@ -232,6 +252,9 @@ export class FakeEngineHost {
         const generation = ++this.generation;
         this.starts += 1;
         this.prestarts.set(spec.appSessionId, { generation, spec, key, owner, engineSessionId: randomUUID() as SessionId });
+        const held = this.answerHold;
+        this.answerHold = null;
+        await held; // admitted; the answer in transit
         return { status: 'started', generation };
       }
       case 'session.prestart.withdraw':

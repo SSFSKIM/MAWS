@@ -3,6 +3,7 @@
 // writing nothing; its request is fenced by an epoch (a discard, a Send, a withdraw or a newer request ends it); a
 // launch-relevant patch asks again after it has answered; Send passes `adopt` with the key and writes the adopted
 // engine's id to the intent's progress.
+import { randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -12,7 +13,7 @@ import type { SetupIntent } from '@shared/sessions/intent';
 import { ENGINE_PRESTART_CAPABILITY, ENGINE_ROUTE_MACHINE_CAPABILITY, PEER_CAPABILITIES } from '@shared/host/socket-protocol';
 import { NATIVE_TO_HUMAN_ENV } from '@shared/owner/contract';
 import { SessionHarness, type HarnessOptions } from '../../../test/support/session-harness';
-import { DOWN_RELAY } from '../../../test/support/session-host';
+import { DOWN_RELAY, OK_RELAY } from '../../../test/support/session-host';
 import { installToHumanPlugin } from '../../../test/support/to-human-plugin';
 import { ScratchRepo } from '../../../test/support/scratch-repo';
 import { OwnerChannelLaunches } from '../owner/launch';
@@ -39,6 +40,8 @@ async function harness(opts: HarnessOptions = {}): Promise<SessionHarness> {
   return h;
 }
 
+// the window's ask, with the token it mints for the request (M3's fix wave: the window knows it before any answer)
+const ask = (id: AppSessionId, token: string = randomUUID()) => h.service.prestart(id, token);
 const create = async (path = h.work) => (await h.service.create({ projectId: null, location: { kind: 'directory', path } })).appSessionId;
 const intentFile = (id: string): SetupIntent | null => {
   const path = join(h.userData, 'sessions', 'intents', `${id}.json`);
@@ -57,13 +60,34 @@ const gate = () => {
   return { opened, open };
 };
 
+// the owner channel's style read held at its first declaration read (or at the first after `arm()`, unarmed until then)
+const heldStyleRead = (armed = true) => {
+  const held = gate();
+  let reached = false;
+  let holds = armed;
+  const opts: HarnessOptions = {
+    ownerChannel: (index) => new OwnerChannelLaunches({
+      store: index.ownerChannel, appEnabled: () => true, systemRoot: join(h?.root ?? '/', 'no-system-root'), log: () => {}, modRoute: true,
+      readDeclaration: async () => {
+        if (holds) {
+          holds = false;
+          reached = true;
+          await held.opened;
+        }
+        return true;
+      },
+    }),
+  };
+  return { opts, reached: () => reached, release: held.open, arm: () => void (holds = true) };
+};
+
 describe('session.intent.prestart: the spec Send builds, nothing written', () => {
   it('dispatches the spine root’s prestart and answers its token; the intent, the index and the owner channel are untouched', async () => {
     await harness();
     const id = await create();
     const before = intentFile(id);
     const events = h.events.length;
-    const answer = await h.service.prestart(id);
+    const answer = await ask(id);
     expect(answer).toEqual({ status: 'started', token: expect.any(String) });
     expect(prestartCalls()).toHaveLength(1);
     expect(prestartCalls()[0]).toMatchObject({ owner: OWNER, spec: { appSessionId: id, cwd: h.work } });
@@ -76,7 +100,7 @@ describe('session.intent.prestart: the spec Send builds, nothing written', () =>
   it('Send adopts it: one engine start, its spec the prestart’s but for the pin, and the engine’s id written to progress before progress.launch', async () => {
     await harness();
     const id = await create();
-    await h.service.prestart(id);
+    await ask(id);
     const prestarted = prestartCalls()[0]!;
     const engineId = h.host.prestarts.get(id)!.engineSessionId;
     expect(await h.service.startSession(id, { message: MESSAGE, options: {} })).toEqual({ status: 'starting', appSessionId: id });
@@ -97,7 +121,7 @@ describe('session.intent.prestart: the spec Send builds, nothing written', () =>
     await harness({ settings: machineSettings });
     const id = await create();
     expect(intentFile(id)!.route).toBe('machine');
-    expect(await h.service.prestart(id)).toMatchObject({ status: 'started' });
+    expect(await ask(id)).toMatchObject({ status: 'started' });
     const prestarted = prestartCalls()[0]!;
     expect(prestarted.spec).toMatchObject({ route: 'machine', gateway: 'direct' });
     await h.service.startSession(id, { message: MESSAGE, options: {} });
@@ -110,9 +134,9 @@ describe('session.intent.prestart: the spec Send builds, nothing written', () =>
     await harness({ settings: machineSettings });
     userSettings({ env: { ANTHROPIC_BASE_URL: 'https://one.example' } });
     const id = await create();
-    await h.service.prestart(id);
+    await ask(id);
     userSettings({ env: { ANTHROPIC_BASE_URL: 'https://two.example' } });
-    expect(await h.service.prestart(id)).toMatchObject({ status: 'started' });
+    expect(await ask(id)).toMatchObject({ status: 'started' });
     const [first, second] = prestartCalls();
     expect(butPin(second!.spec)).toEqual(butPin(first!.spec));
     expect(second!.key).not.toBe(first!.key);
@@ -145,7 +169,7 @@ describe('the owner channel: decided without writing at the prestart, reserved a
     await harness(owned((index) => index.ownerChannel));
     installToHumanPlugin(h.trust.configHome, { declares: true });
     const id = await create();
-    await h.service.prestart(id);
+    await ask(id);
     expect((prestartCalls()[0]!.spec.extraSettings?.env as Record<string, string>)[NATIVE_TO_HUMAN_ENV]).toBe('9');
     expect(h.index.ownerChannel.session(id)?.advertised ?? null).toBeNull();
     await h.service.startSession(id, { message: MESSAGE, options: {} });
@@ -158,7 +182,7 @@ describe('the owner channel: decided without writing at the prestart, reserved a
     await harness(owned((index) => new Proxy(index.ownerChannel, { get: (target, key) => (key === 'reserveLaunch' ? () => { throw new Error('the index is read-only'); } : Reflect.get(target, key, target)) })));
     installToHumanPlugin(h.trust.configHome, { declares: true });
     const id = await create();
-    await h.service.prestart(id);
+    await ask(id);
     expect((prestartCalls()[0]!.spec.extraSettings?.env as Record<string, string>)[NATIVE_TO_HUMAN_ENV]).toBe('9');
     await h.service.startSession(id, { message: MESSAGE, options: {} });
     expect(await h.settled(id)).toMatchObject({ phase: 'ready' });
@@ -226,7 +250,7 @@ describe('eligibility: the guards Send uses, each rule skipping with nothing dis
       const id = await make();
       const before = intentFile(id);
       const events = h.events.length;
-      const answer = await h.service.prestart(id);
+      const answer = await ask(id);
       expect(answer).toMatchObject({ status: 'skipped', token: null, reason: expect.any(String) });
       expect(prestartCalls()).toEqual([]);
       expect(intentFile(id)).toEqual(before);
@@ -241,14 +265,14 @@ describe('eligibility: the guards Send uses, each rule skipping with nothing dis
     h.host.launchHangs = true;
     expect(await h.service.startSession(id, { message: null, options: {} })).toMatchObject({ status: 'starting' });
     expect(intentFile(id)!.message).toBeNull();
-    expect(await h.service.prestart(id)).toMatchObject({ status: 'skipped', token: null });
+    expect(await ask(id)).toMatchObject({ status: 'skipped', token: null });
     expect(prestartCalls()).toEqual([]);
   });
 
   it('reads the relay’s cached health on the gateway route, never forcing a probe', async () => {
     await harness();
     const id = await create();
-    await h.service.prestart(id);
+    await ask(id);
     expect(h.host.calledWith('engine.relayHealth')).toEqual([{ force: false }]);
   });
 
@@ -256,13 +280,13 @@ describe('eligibility: the guards Send uses, each rule skipping with nothing dis
     await harness();
     const declined = await create(h.dir('declined'));
     await h.service.patch(declined, { trust: 'declined' });
-    expect(await h.service.prestart(declined)).toMatchObject({ status: 'started' });
+    expect(await ask(declined)).toMatchObject({ status: 'started' });
     const repo = await ScratchRepo.create({ sentinels: false });
     try {
       const worktree = await repo.addManagedWorktree('existing');
       h.trustDirectory(repo.root);
       const existing = (await h.service.create({ projectId: null, location: { kind: 'existingWorktree', repoRoot: repo.root, path: worktree } })).appSessionId;
-      expect(await h.service.prestart(existing)).toMatchObject({ status: 'started' });
+      expect(await ask(existing)).toMatchObject({ status: 'started' });
       expect(prestartCalls().at(-1)!.spec.cwd).toBe(worktree);
     } finally {
       repo.dispose();
@@ -271,33 +295,13 @@ describe('eligibility: the guards Send uses, each rule skipping with nothing dis
 });
 
 describe('the epoch (R4-4): what ends a request, and withdraw by token', () => {
-  // the owner channel's style read held at its first declaration read
-  const heldStyleRead = () => {
-    const held = gate();
-    let reached = false;
-    let first = true;
-    const opts: HarnessOptions = {
-      ownerChannel: (index) => new OwnerChannelLaunches({
-        store: index.ownerChannel, appEnabled: () => true, systemRoot: join(h?.root ?? '/', 'no-system-root'), log: () => {}, modRoute: true,
-        readDeclaration: async () => {
-          if (first) {
-            first = false;
-            reached = true;
-            await held.opened;
-          }
-          return true;
-        },
-      }),
-    };
-    return { opts, reached: () => reached, release: held.open };
-  };
 
   it('a request held in the owner style read while a discard completes, then released: nothing dispatched', async () => {
     const style = heldStyleRead();
     await harness(style.opts);
     installToHumanPlugin(h.trust.configHome, { declares: true });
     const id = await create();
-    const asked = h.service.prestart(id);
+    const asked = ask(id);
     await h.until(style.reached);
     await h.service.discard(id);
     style.release();
@@ -310,7 +314,7 @@ describe('the epoch (R4-4): what ends a request, and withdraw by token', () => {
     await harness(style.opts);
     installToHumanPlugin(h.trust.configHome, { declares: true });
     const id = await create();
-    const asked = h.service.prestart(id);
+    const asked = ask(id);
     await h.until(style.reached);
     await h.service.startSession(id, { message: MESSAGE, options: {} });
     style.release();
@@ -323,8 +327,8 @@ describe('the epoch (R4-4): what ends a request, and withdraw by token', () => {
   it('a newer request ends the older one: the older token withdraws nothing, the newer one withdraws what serves it', async () => {
     await harness();
     const id = await create();
-    const first = await h.service.prestart(id);
-    const second = await h.service.prestart(id);
+    const first = await ask(id);
+    const second = await ask(id);
     expect(second).toMatchObject({ status: 'running' }); // the same launch, already the host's
     expect(second.token).not.toBe(first.token);
     await h.service.withdrawPrestart(id, first.token!);
@@ -334,26 +338,26 @@ describe('the epoch (R4-4): what ends a request, and withdraw by token', () => {
     expect(h.host.prestarts.size).toBe(0);
   });
 
-  it('a withdraw while a patch’s request is on its way withdraws the generation that request is answered', async () => {
+  it('a withdraw while a patch’s request is on its way waits for that request’s answer and withdraws the generation it was given', async () => {
     await harness();
     const id = await create();
-    const { token } = await h.service.prestart(id);
+    const { token } = await ask(id);
     const held = gate();
     h.host.prestartGate = held.opened;
     await h.service.patch(id, { effort: 'high' });
     await h.until(() => prestartCalls().length === 2); // the replacement, held at the host
-    await h.service.withdrawPrestart(id, token!);
-    expect(withdrawCalls()).toEqual([{ appSessionId: id, generation: 1 }]);
+    const withdrawn = h.service.withdrawPrestart(id, token!);
+    expect(withdrawCalls()).toEqual([]); // queued behind the request on its way (M3's review, finding 9)
     held.open();
-    await h.until(() => withdrawCalls().length === 2);
-    expect(withdrawCalls()[1]).toEqual({ appSessionId: id, generation: 2 });
+    await withdrawn;
+    expect(withdrawCalls()).toEqual([{ appSessionId: id, generation: 2 }]);
     expect(h.host.prestarts.size).toBe(0);
   });
 
   it('a patch replacing the generation, then a withdraw by the first token: the replacement is withdrawn; the patch never waits for it', async () => {
     await harness();
     const id = await create();
-    const { token } = await h.service.prestart(id);
+    const { token } = await ask(id);
     const held = gate();
     h.host.prestartGate = held.opened;
     const patched = await h.service.patch(id, { model: 'sonnet' }); // answers while the new prestart is held at the host
@@ -370,7 +374,7 @@ describe('the epoch (R4-4): what ends a request, and withdraw by token', () => {
     await harness();
     const id = await create(h.dir('declined'));
     await h.service.patch(id, { trust: 'declined' });
-    await h.service.prestart(id);
+    await ask(id);
     await h.service.patch(id, { draft: { doc: { type: 'doc' }, attachments: [], updatedAt: '2026-11-24T00:00:00.000Z' } });
     await h.service.work.settled(); // a request a patch asks is counted in the service's work
     expect(prestartCalls()).toHaveLength(1);
@@ -383,7 +387,7 @@ describe('the epoch (R4-4): what ends a request, and withdraw by token', () => {
   it('two windows: a withdraw arriving after the other window’s Send does nothing, and Send adopts', async () => {
     await harness();
     const id = await create();
-    const { token } = await h.service.prestart(id); // window A
+    const { token } = await ask(id); // window A
     expect(await h.service.startSession(id, { message: MESSAGE, options: {} })).toMatchObject({ status: 'starting' }); // window B
     await h.service.withdrawPrestart(id, token!); // window A picks another machine
     expect(await h.settled(id)).toMatchObject({ phase: 'ready' });
@@ -394,12 +398,15 @@ describe('the epoch (R4-4): what ends a request, and withdraw by token', () => {
   it('a discard ends the request: the host forgets the id, and the token withdraws nothing after', async () => {
     await harness();
     const id = await create();
-    const { token } = await h.service.prestart(id);
+    const { token } = await ask(id);
     await h.service.discard(id);
     expect(h.host.forgotten).toContain(id);
     expect(h.host.prestarts.size).toBe(0);
+    await h.service.work.settled(); // the discard's end withdraws what it knew too (a no-op after the forget)
+    const sent = withdrawCalls().length;
+    expect(sent).toBeLessThanOrEqual(1);
     await h.service.withdrawPrestart(id, token!);
-    expect(withdrawCalls()).toEqual([]);
+    expect(withdrawCalls()).toHaveLength(sent);
   });
 });
 
@@ -411,7 +418,7 @@ describe('a crash at each step of today’s order, with an adopted launch: what 
   async function crashAt(step: 'sent' | 'pin' | 'launch' | 'send' | 'remove', adopted: boolean) {
     await harness();
     const id = await create();
-    if (adopted) await h.service.prestart(id);
+    if (adopted) await ask(id);
     let engineId: string | null = null;
     // the engine writes its transcript under its own id once the first message reaches it (never before, W3)
     h.host.onCall = (name) => {
@@ -478,6 +485,235 @@ describe('a crash at each step of today’s order, with an adopted launch: what 
     const adopted = await crashAt('remove', true);
     expect(today).toMatchObject({ intent: null, record: { boundToTheEngine: true } });
     expect(adopted).toEqual(today);
+  });
+});
+
+// M3's medium review (2 P1, 7 P2, 1 P3), the spine's findings: each test stages its finding's scenario (Decision Log 13).
+describe('M3’s review: the spine’s findings', () => {
+  const intents = () => (h.service as unknown as { deps: { intents: IntentStore } }).deps.intents;
+  const settledFlag = (promise: Promise<unknown>) => {
+    let settled = false;
+    void promise.then(() => (settled = true), () => (settled = true));
+    return () => settled;
+  };
+
+  it('1. the prestart looks the cua socket up without registering it; Send registers it and adopts', async () => {
+    const registered: string[] = [];
+    const socketOf = (id: AppSessionId) => join('/tmp/cua-test', `${id}.sock`);
+    await harness({ browserBackend: (id) => (registered.push(id), socketOf(id)), prestart: { owner: OWNER, browserSocketPath: socketOf } });
+    const id = await create();
+    expect(await ask(id)).toMatchObject({ status: 'started' });
+    expect(JSON.stringify(prestartCalls()[0]!.spec)).toContain(socketOf(id));
+    expect(registered).toEqual([]); // no socket listens and no capability is tracked for a draft
+    await h.service.discard(id);
+    expect(registered).toEqual([]);
+    const sent = await create();
+    await ask(sent);
+    await h.service.startSession(sent, { message: MESSAGE, options: {} });
+    expect(await h.settled(sent)).toMatchObject({ phase: 'ready' });
+    expect(registered).toEqual([sent]); // the real launch's own
+    expect(h.host.adoptions).toHaveLength(1);
+  });
+
+  it('2. a request that begins while a discard removes the draft, held in its guards past the removal, dispatches nothing', async () => {
+    const style = heldStyleRead();
+    await harness(style.opts);
+    installToHumanPlugin(h.trust.configHome, { declares: true });
+    const id = await create();
+    const store = intents();
+    const remove = store.remove.bind(store);
+    const removal = gate();
+    let removing = false;
+    store.remove = async (rid) => {
+      removing = true;
+      await removal.opened;
+      return remove(rid);
+    };
+    const discarded = h.service.discard(id);
+    await h.until(() => removing); // the host's forget sent, the draft's removal under way
+    expect(h.host.forgotten).toContain(id);
+    const asked = ask(id);
+    const answered = settledFlag(asked);
+    await h.until(() => style.reached() || answered());
+    removal.open();
+    await discarded;
+    style.release();
+    expect(await asked).toMatchObject({ status: 'skipped', token: null });
+    expect(prestartCalls()).toEqual([]);
+  });
+
+  it('3. a rotated gateway value at the same base URL with the same key names gives another key, never in clear; Send launches fresh', async () => {
+    await harness({ settings: machineSettings });
+    userSettings({ env: { ANTHROPIC_BASE_URL: 'https://one.example', ANTHROPIC_AUTH_TOKEN: 'first-made-up-value' } });
+    const id = await create();
+    expect(await ask(id)).toMatchObject({ status: 'started' });
+    const first = prestartCalls()[0]!;
+    expect(first.key).not.toContain('first-made-up-value');
+    userSettings({ env: { ANTHROPIC_BASE_URL: 'https://one.example', ANTHROPIC_AUTH_TOKEN: 'second-made-up-value' } });
+    await h.service.startSession(id, { message: MESSAGE, options: {} });
+    expect(await h.settled(id)).toMatchObject({ phase: 'ready' });
+    expect(butPin(launchCalls()[0]!.spec)).toEqual(butPin(first.spec)); // the spec alone cannot tell them apart
+    expect(launchCalls()[0]!.adopt!.key).not.toBe(first.key);
+    expect(launchCalls()[0]!.adopt!.key).not.toContain('second-made-up-value');
+    expect(h.host.adoptions).toEqual([]);
+    expect(h.host.starts).toBe(2);
+  });
+
+  it('4. the root stopped while a request is held in its guards, its host replaced meanwhile: nothing dispatched to the successor', async () => {
+    const style = heldStyleRead();
+    await harness(style.opts);
+    installToHumanPlugin(h.trust.configHome, { declares: true });
+    const id = await create();
+    const asked = ask(id);
+    await h.until(style.reached);
+    h.service.dispose(); // the root's stop
+    h.host.replaceProcess();
+    style.release();
+    expect(await asked).toMatchObject({ status: 'skipped', token: null });
+    expect(prestartCalls()).toEqual([]);
+  });
+
+  it('4. a request whose engine host link is not ready at its dispatch sends nothing (no request held for a successor)', async () => {
+    const style = heldStyleRead();
+    await harness(style.opts);
+    installToHumanPlugin(h.trust.configHome, { declares: true });
+    const id = await create();
+    const asked = ask(id);
+    await h.until(style.reached);
+    h.host.unavailable = true; // the link leaves ready
+    style.release();
+    expect(await asked).toMatchObject({ status: 'skipped', token: null });
+    expect(prestartCalls()).toEqual([]);
+  });
+
+  it('5. a withdraw after the engine host was replaced names nothing to the successor', async () => {
+    await harness();
+    const id = await create();
+    const { token } = await ask(id);
+    h.host.replaceProcess();
+    await h.service.withdrawPrestart(id, token!);
+    expect(withdrawCalls()).toEqual([]);
+  });
+
+  it('5. the successor counts its generations from 1: the withdraw names the successor’s, never the old host’s higher one', async () => {
+    await harness();
+    const id = await create();
+    await ask(id);
+    await h.service.patch(id, { effort: 'high' });
+    await h.until(() => h.host.prestarts.get(id)?.generation === 2);
+    await h.service.work.settled();
+    h.host.replaceProcess();
+    expect(await ask(id, 'window-token-2')).toMatchObject({ status: 'started' });
+    expect(h.host.prestarts.get(id)?.generation).toBe(1);
+    await h.service.withdrawPrestart(id, 'window-token-2');
+    expect(withdrawCalls().at(-1)).toEqual({ appSessionId: id, generation: 1 });
+    expect(h.host.prestarts.size).toBe(0);
+  });
+
+  it('7. the window withdraws by its own token before any answer: held in its guards, nothing dispatched; its answer in transit, withdrawn', async () => {
+    const style = heldStyleRead();
+    await harness(style.opts);
+    installToHumanPlugin(h.trust.configHome, { declares: true });
+    const id = await create();
+    const asked = ask(id, 'window-token-1');
+    await h.until(style.reached);
+    await h.service.withdrawPrestart(id, 'window-token-1'); // the window moved; its caller's deadline may have passed
+    style.release();
+    expect(await asked).toMatchObject({ status: 'skipped' });
+    expect(prestartCalls()).toEqual([]);
+    const release = h.host.holdNextPrestartAnswer();
+    const again = ask(id, 'window-token-2');
+    await h.until(() => prestartCalls().length === 1);
+    const withdrawn = h.service.withdrawPrestart(id, 'window-token-2');
+    release();
+    await Promise.all([again, withdrawn]);
+    expect(h.host.prestarts.size).toBe(0);
+  });
+
+  it('8. a Send that answers a card launches nothing and ends the prestart, the one admitted while it ran included', async () => {
+    await harness();
+    const id = await create();
+    await ask(id, 'window-token-1');
+    h.host.relay = DOWN_RELAY;
+    expect(await h.service.startSession(id, { message: MESSAGE, options: {} })).toMatchObject({ status: 'relay_unreachable' });
+    await h.service.work.settled();
+    expect(h.host.prestarts.size).toBe(0);
+    await h.service.withdrawPrestart(id, 'window-token-1'); // the window's move after it: nothing left
+    expect(launchCalls()).toEqual([]);
+    // an admission whose answer is in transit when Send starts, and Send answers a card
+    await h.service.release(id);
+    h.host.relay = OK_RELAY;
+    const release = h.host.holdNextPrestartAnswer();
+    const asked = ask(id, 'window-token-2');
+    await h.until(() => prestartCalls().length === 2);
+    h.host.relay = DOWN_RELAY;
+    expect(await h.service.startSession(id, { message: MESSAGE, options: {} })).toMatchObject({ status: 'relay_unreachable' });
+    release();
+    await asked;
+    await h.service.work.settled();
+    expect(h.host.prestarts.size).toBe(0);
+  });
+
+  it('8. a request asked while Send’s guards run is refused and withdraws nothing: Send adopts', async () => {
+    await harness();
+    const id = await create();
+    await ask(id);
+    const store = intents();
+    const put = store.put.bind(store);
+    const guards = gate();
+    let held = false;
+    store.put = async (intent) => {
+      if (intent.message !== null && !held) {
+        held = true; // Send's guards write the message first, and are held there
+        await guards.opened;
+      }
+      return put(intent);
+    };
+    const started = h.service.startSession(id, { message: MESSAGE, options: {} });
+    await h.until(() => held);
+    expect(await ask(id)).toMatchObject({ status: 'skipped', token: null });
+    guards.open();
+    expect(await started).toMatchObject({ status: 'starting' });
+    expect(await h.settled(id)).toMatchObject({ phase: 'ready' });
+    expect(withdrawCalls()).toEqual([]);
+    expect(h.host.adoptions).toHaveLength(1);
+  });
+
+  it('8. a request asked while Send’s setup runs is refused and withdraws nothing: Send adopts', async () => {
+    const style = heldStyleRead(false);
+    await harness(style.opts);
+    installToHumanPlugin(h.trust.configHome, { declares: true });
+    const id = await create();
+    await ask(id);
+    style.arm();
+    await h.service.startSession(id, { message: MESSAGE, options: {} });
+    await h.until(style.reached); // the setup in its owner channel read, before its launch
+    expect(await ask(id)).toMatchObject({ status: 'skipped', token: null });
+    style.release();
+    expect(await h.settled(id)).toMatchObject({ phase: 'ready' });
+    expect(withdrawCalls()).toEqual([]);
+    expect(h.host.adoptions).toHaveLength(1);
+  });
+
+  it('9. a patch’s admission in transit, a move away and an edit back: the late cleanup never ends the newer request’s engine', async () => {
+    await harness();
+    const id = await create();
+    const { token } = await ask(id); // generation 1
+    const release = h.host.holdNextPrestartAnswer();
+    await h.service.patch(id, { effort: 'high' }); // generation 2 admitted, its answer in transit
+    await h.until(() => prestartCalls().length === 2);
+    const moved = h.service.withdrawPrestart(id, token!); // the move away
+    const back = ask(id, 'window-token-2'); // back here, an edit
+    const answered = settledFlag(back);
+    // the edit's request has reached its dispatch: sent (answered at once), or queued behind the two host calls before it
+    const queued = () => (h.service as unknown as { prestarts: { ids: Map<string, { pending: number }> } }).prestarts.ids?.get(id)?.pending === 3;
+    await h.until(() => answered() || prestartCalls().length === 3 || queued());
+    release();
+    await Promise.all([moved, back]);
+    await h.service.work.settled();
+    expect(h.host.prestarts.size).toBe(1); // the newer request's engine runs
+    const live = h.host.prestarts.get(id)!;
+    expect(withdrawCalls().map((w) => w.generation)).not.toContain(live.generation);
   });
 });
 

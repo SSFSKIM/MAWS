@@ -167,6 +167,9 @@ export interface SpineDeps {
   // Ticket 851 (docs/doperpowers/plans/2026-11-24-prestart-engine.md, R4-7): this root's owner of its prestarts, which
   // `mawsd`'s seam names at the load and releases as it disposes of the root; absent, the root prestarts nothing
   prestartOwner?: string;
+  // Ticket 851, M3's review (finding 1): the path `browserSocket` names for a session, looked up with nothing set up (no
+  // socket listens, no launch is marked, no capability tracked), for a prestart's spec; absent, a prestart names none
+  browserSocketPath?(appSessionId: AppSessionId): string | null;
 }
 
 export interface SpineRoot {
@@ -437,7 +440,14 @@ export function startSpine(deps: SpineDeps): SpineRoot {
       acquisitions: sessions.model, // P2-A (X16): the digest's availability follows each acquisition
       systemRoot: data.systemRoot, // P5 O7 M9: the machine route's managed settings (the tests' seam)
       ...(deps.aboveCeiling === undefined ? {} : { aboveCeiling: deps.aboveCeiling }), // the UX wave (U9, M2)
-      ...(deps.prestartOwner !== undefined && prestartSwitchedOn(deps.env, sessions.mode) && { prestart: { owner: deps.prestartOwner } }), // ticket 851, M3 (D9, R4-7)
+      // ticket 851, M3 (D9, R4-7); its review (Decision Log 13): the engine host's connection is its welcome while ready
+      ...(deps.prestartOwner !== undefined && prestartSwitchedOn(deps.env, sessions.mode) && {
+        prestart: {
+          owner: deps.prestartOwner,
+          link: () => (hosts.snapshot('engine-host').state === 'ready' ? (hosts.peer?.('engine-host') ?? null) : null),
+          browserSocketPath: (appSessionId: AppSessionId) => deps.browserSocketPath?.(appSessionId) ?? null,
+        },
+      }),
     });
     const unintercept = registerSessionServiceHandlers(service, bus, sessions.mode, intentPatchHoldFor(deps.env)); // P5 O3-D M4: the rewind repair's intercepts in launch mode index only; board ticket 854: the e2e's hold on a Tools choice's write
     registerSpawn(bus, { sessions: service, projects: () => index.projects.list({ includeHidden: true }) }); // P5 O7 M4: a spawn from another device

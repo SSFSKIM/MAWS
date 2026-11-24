@@ -911,13 +911,15 @@ export const PRESTART_SESSION_COMMANDS = Object.keys(prestartCommands) as (keyof
 // Ticket 851, M2 end ----------------------------------------------------------------------------------------------------
 // Ticket 851, M3 start (docs/doperpowers/plans/2026-11-24-prestart-engine.md, D10, R4-4) ----------------------------------
 // The window's asks of the spine, owner machine. `session.intent.prestart` asks the spine to prestart an unstarted New
-// chat's engine with the launch spec Send would build now: `started` or `running` with the request's token, `skipped`
-// (token null) with the reason when the intent is not eligible or the host serves no prestart. `withdraw` ends the
-// prestart serving the token's request, unless that token is no longer current or a Send has started; else nothing.
+// chat's engine with the launch spec Send would build now, under a token the window mints for the request (M3's review,
+// Decision Log 13: the window knows it before any answer, so a move withdraws it even when the answer is late or never
+// comes): `started` or `running` with that token, `skipped` (token null) with the reason when the intent is not eligible
+// or the host serves no prestart. `withdraw` ends the prestart serving the token's request, unless that token is no
+// longer current or a Send has started; else nothing.
 export const PrestartTokenSchema = z.string().min(1).max(64);
 const intentPrestartCommands = {
   'session.intent.prestart': {
-    input: z.strictObject({ appSessionId: AppSessionIdSchema }),
+    input: z.strictObject({ appSessionId: AppSessionIdSchema, token: PrestartTokenSchema }),
     output: z.strictObject({ status: z.enum(['started', 'running', 'skipped']), token: PrestartTokenSchema.nullable(), reason: z.string().max(1024).optional() }),
     owner: 'machine',
   },

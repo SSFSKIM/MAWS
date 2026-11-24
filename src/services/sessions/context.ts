@@ -70,8 +70,12 @@ export interface SessionServiceDeps {
   // where a fork from another machine is allocated (mawsd: its endpoint's policy); absent, every such fork is refused
   aboveCeiling?: (mode: string) => boolean;
   // Ticket 851 (docs/doperpowers/plans/2026-11-24-prestart-engine.md, D9, R4-7): the spine root's owner id, under which its
-  // prestarts are asked of the engine host; absent, the spine prestarts nothing (the switches off, or no root's owner)
-  prestart?: { owner: string };
+  // prestarts are asked of the engine host; absent, the spine prestarts nothing (the switches off, or no root's owner).
+  // M3's review (Decision Log 13): `link`, the engine host connection a prestart is sent on now (its welcome), null while
+  // it is not ready: a generation is withdrawn only on the connection that gave it, and nothing is sent while none is
+  // ready (the link would hold it for a successor); `browserSocketPath`, the session's cua socket path, looked up with
+  // nothing set up (the launch's own `browserBackend` sets it up)
+  prestart?: { owner: string; link(): object | null; browserSocketPath(appSessionId: AppSessionId): string | null };
 }
 
 export const WATCHDOG_MS = 150_000; // a launch with no status for this long fails (C3's own initialize deadline is 120 s, and 30 s for an engine that writes nothing at all)

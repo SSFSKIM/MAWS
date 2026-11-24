@@ -36,7 +36,7 @@ describe('the session service’s commands, answered on the services bus', () =>
   it('answers session.intent.prestart and its withdraw', async () => {
     const created = await invoke('session.create', { projectId: null, location: { kind: 'directory', path: h.work } });
     const id = (created.value as { appSessionId: string }).appSessionId;
-    expect(await invoke('session.intent.prestart', { appSessionId: id })).toEqual({ ok: true, value: { status: 'skipped', token: null, reason: expect.stringContaining('off') } });
+    expect(await invoke('session.intent.prestart', { appSessionId: id, token: 't1' })).toEqual({ ok: true, value: { status: 'skipped', token: null, reason: expect.stringContaining('off') } });
     expect(await invoke('session.intent.prestart.withdraw', { appSessionId: id, token: 'not-a-token' })).toMatchObject({ ok: true });
   });
 

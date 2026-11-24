@@ -109,7 +109,9 @@ export async function guardMachineRoute(s: Setup, args: { site: SettingsSite; mo
 // that answer would have refused it, rather than serving the session another list.
 // Ticket 851 (docs/doperpowers/plans/2026-11-24-prestart-engine.md, D5): and beside that spec the prestart key, from the
 // same resolution of the base URL: what decides the launch beyond that spec, the machine route's resolved
-// base URL with the gateway keys it found (two base URLs that the legacy field maps alike are told apart here). The key is
+// base URL with the gateway keys it found and a digest of their values (two base URLs that the legacy field maps alike are
+// told apart here, and so is a token rotated in settings; the key stays in memory, never in a status, an event or a log
+// line, and holds no value in clear). The key is
 // null where no prestart may be adopted: a machine route whose resolution is uncertain, or a host that cannot serve the
 // machine route (the spec it is sent then says less than the launch it makes).
 export async function hostLaunchOf(s: Setup, spec: LaunchSpec): Promise<{ spec: LaunchSpec; key: string | null } | { refused: string }> {
@@ -121,7 +123,8 @@ export async function hostLaunchOf(s: Setup, spec: LaunchSpec): Promise<{ spec: 
   const resolution = await machineBaseUrl(s, { cwd: spec.cwd }, spec.extraSettings?.env);
   const gateway = legacyOfResolution(resolution, spec.gateway);
   if (await s.hostLists(ENGINE_ROUTE_MACHINE_CAPABILITY)) {
-    const key = resolution.kind === 'resolved' ? prestartKey({ route: 'machine', baseUrl: resolution.baseUrl, gatewayKeys: [...resolution.gatewayKeys].sort() }) : null;
+    // M3's review (finding 3): and the digest of the gateway keys' values, so a value changed at the same names relaunches
+    const key = resolution.kind === 'resolved' ? prestartKey({ route: 'machine', baseUrl: resolution.baseUrl, gatewayKeys: [...resolution.gatewayKeys].sort(), gatewayValues: resolution.gatewayFingerprint }) : null;
     return { spec: { ...legacy, gateway, route: 'machine' }, key };
   }
   return legacyEquivalent(resolution) ? { spec: { ...legacy, gateway }, key: null } : { refused: ROUTE_UNSUPPORTED };

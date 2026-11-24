@@ -1,7 +1,7 @@
 // Ticket 851, M3 (docs/doperpowers/plans/2026-11-24-prestart-engine.md, D8, D10): the composer's prestart trigger. The
 // leading edge of the first edit that leaves the document non-empty asks at once; after that at most once every 10 s
-// while it stays non-empty. A tab that moves to another machine withdraws by the token it was given, whichever way the
-// answer and the move cross; an older spine's refusal reads as skipped, with nothing shown.
+// while it stays non-empty. Each request carries a token the window minted; a tab that moves to another machine withdraws
+// the last one it sent, whatever its answer did; an older spine's refusal reads as skipped, with nothing shown.
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
 import { fakeClient, type FakeClient } from '../../../../test/support/fake-client';
@@ -26,7 +26,7 @@ describe('the trigger', () => {
     edit(true);
     expect(fake.invoked('session.intent.prestart')).toEqual([]);
     edit();
-    expect(fake.invoked('session.intent.prestart')).toEqual([{ appSessionId: TAB }]);
+    expect(fake.invoked('session.intent.prestart')).toEqual([{ appSessionId: TAB, token: expect.any(String) }]);
   });
 
   it('asks at most once every 10 s while the document stays non-empty, and again once 10 s have passed', async () => {
@@ -50,34 +50,64 @@ describe('the trigger', () => {
     edit();
     expect(fake.invoked('session.intent.prestart')).toHaveLength(1);
     leftThisMachine(TAB, fake.client);
-    expect(fake.invoked('session.intent.prestart.withdraw')).toEqual([]);
+    await fake.fail('session.intent.prestart.withdraw', 'unknown command session.intent.prestart.withdraw'); // refused as well, nothing thrown
   });
 });
 
 describe('a spawn target on another machine, both orders', () => {
-  it('the answer first: picking another machine withdraws by its token, and the next edit back here asks at once', async () => {
+  const sent = (nth = 0) => (fake.invoked('session.intent.prestart')[nth] as { token: string }).token;
+
+  it('the answer first: picking another machine withdraws by the request’s token, and the next edit back here asks at once', async () => {
     edit();
-    await fake.reply('session.intent.prestart', { status: 'started', token: 't1' });
+    await fake.reply('session.intent.prestart', { status: 'started', token: sent() });
     leftThisMachine(TAB, fake.client);
-    expect(fake.invoked('session.intent.prestart.withdraw')).toEqual([{ appSessionId: TAB, token: 't1' }]);
+    expect(fake.invoked('session.intent.prestart.withdraw')).toEqual([{ appSessionId: TAB, token: sent() }]);
     now += 1_000;
     edit(); // back on this machine
     expect(fake.invoked('session.intent.prestart')).toHaveLength(2);
+    expect(sent(1)).not.toBe(sent(0));
   });
 
-  it('the move first: an answer that arrives after it is withdrawn by its token at once', async () => {
+  it('the move first: the withdraw goes at once, and the answer that lands after it asks for nothing more', async () => {
     edit();
     leftThisMachine(TAB, fake.client);
-    expect(fake.invoked('session.intent.prestart.withdraw')).toEqual([]);
-    await fake.reply('session.intent.prestart', { status: 'running', token: 't2' });
+    expect(fake.invoked('session.intent.prestart.withdraw')).toEqual([{ appSessionId: TAB, token: sent() }]);
+    await fake.reply('session.intent.prestart', { status: 'running', token: sent() });
     await settle();
-    expect(fake.invoked('session.intent.prestart.withdraw')).toEqual([{ appSessionId: TAB, token: 't2' }]);
+    expect(fake.invoked('session.intent.prestart.withdraw')).toHaveLength(1);
   });
 
-  it('a skipped answer leaves nothing to withdraw', async () => {
+  it('a second move with no request since withdraws nothing more', async () => {
     edit();
     await fake.reply('session.intent.prestart', { status: 'skipped', token: null, reason: 'needs_trust' });
     leftThisMachine(TAB, fake.client);
-    expect(fake.invoked('session.intent.prestart.withdraw')).toEqual([]);
+    leftThisMachine(TAB, fake.client);
+    expect(fake.invoked('session.intent.prestart.withdraw')).toHaveLength(1);
+  });
+});
+
+// M3's medium review (Decision Log 13): the window's own findings. The window mints each request's token before it asks,
+// so what a move withdraws never waits for, nor is changed by, an answer.
+describe('M3’s review: the window’s findings', () => {
+  const sentTokens = () => (fake.invoked('session.intent.prestart') as { token?: string }[]).map((input) => input.token);
+
+  it('6. two requests answered in reverse: the older one’s late skip never hides the newer one’s token from a move', async () => {
+    edit(); // request 1
+    now += PRESTART_EVERY_MS;
+    edit(); // request 2
+    expect(fake.invoked('session.intent.prestart')).toHaveLength(2);
+    await fake.reply('session.intent.prestart', { status: 'started', token: sentTokens()[1] }, 1);
+    await fake.reply('session.intent.prestart', { status: 'skipped', token: null, reason: 'ended: a newer request came first' });
+    leftThisMachine(TAB, fake.client);
+    expect(fake.invoked('session.intent.prestart.withdraw')).toEqual([{ appSessionId: TAB, token: sentTokens()[1] }]);
+  });
+
+  it('7. a move while the request is unanswered (its caller’s deadline passed, or still on its way) withdraws by the token it carried', async () => {
+    edit();
+    const [token] = sentTokens();
+    expect(token).toEqual(expect.any(String));
+    await fake.fail('session.intent.prestart', 'the request timed out', 'timeout' as never);
+    leftThisMachine(TAB, fake.client);
+    expect(fake.invoked('session.intent.prestart.withdraw')).toEqual([{ appSessionId: TAB, token }]);
   });
 });

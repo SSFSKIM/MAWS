@@ -5,9 +5,9 @@
 // still match, and launches fresh otherwise.
 //
 // What the spine keeps is in memory and dies with the root (the host ends a root's prestarts when it is released or its
-// connection ends): per intent, the live request's token and epoch, the newest generation the host gave it, and whether
-// a request reached the host (which Send's launch reads once).
-import { randomUUID } from 'node:crypto';
+// connection ends): per intent, the live request's token and epoch, its fences, its host calls in order, the last
+// generation the host gave it with the connection that gave it, and whether a request reached the host (which Send's
+// launch reads once); `PrestartRequests` below.
 import type { AppSessionId } from '@shared/graph/ids';
 import type { LaunchSpec } from '@shared/engine/launch-spec';
 import type { SetupIntent } from '@shared/sessions/intent';
@@ -49,8 +49,9 @@ export function prestartShapeRefusal(intent: SetupIntent | null): string | null 
 // The spec and the key a Send of `intent` would launch with now, built as Send builds them (the served set, the launch
 // directory, the trust mapping, the owner channel's decision without its reservation, the spec the host is sent), after
 // the start guards with the relay's cached health; or why it is not prestarted. `intent` is as Send's guards would write
-// it (its trust decision bound to the key the location answers to now); nothing here writes.
-export async function prestartLaunch(s: Setup, intent: SetupIntent): Promise<{ spec: LaunchSpec; key: string } | { skip: string }> {
+// it (its trust decision bound to the key the location answers to now); nothing here writes, and the session's cua socket
+// is named by `browserSocketPath`, which sets nothing up (M3's review, finding 1).
+export async function prestartLaunch(s: Setup, intent: SetupIntent, browserSocketPath: (appSessionId: AppSessionId) => string | null): Promise<{ spec: LaunchSpec; key: string } | { skip: string }> {
   const verdict = await judgeIntent(s, intent, { startAnyway: false, relay: 'cached' });
   if (verdict.kind === 'rejected') return { skip: `${verdict.outcome.status}: a start would be refused` };
   if (verdict.kind === 'card') return { skip: `${verdict.outcome.status}: a start would show its card` };
@@ -65,7 +66,7 @@ export async function prestartLaunch(s: Setup, intent: SetupIntent): Promise<{ s
   const mapping = trustMapping({ decision: intent.trust, decisionKey: intent.trustKey, trustRecorded: intent.progress.trustRecorded }, trust);
   if (mapping.bootstrap) return { skip: 'trust_bootstrap: a start would record trust first' };
   const mode = intent.permissionMode ?? seedPermissionMode(await s.userDefaults());
-  const spec = intentSpecOf(s, intent, { route: verdict.route, directFallback: false }, { cwd, mode, attestation: mapping.attestation, replay: null, mawsTools: served.set });
+  const spec = intentSpecOf(s, intent, { route: verdict.route, directFallback: false }, { cwd, mode, attestation: mapping.attestation, replay: null, browserBackend: browserSocketPath(intent.appSessionId), mawsTools: served.set });
   const decided = await ownerChannelLaunch(s, spec, { kind: 'new', transcriptOf: null }, { reserve: false });
   const sent = await hostLaunchOf(s, decided.spec);
   if ('refused' in sent) return { skip: `route: ${sent.refused}` };
@@ -73,73 +74,132 @@ export async function prestartLaunch(s: Setup, intent: SetupIntent): Promise<{ s
   return { spec: sent.spec, key: sent.key };
 }
 
-// The requests' bookkeeping (R4-4). A request's epoch is set before its first await and checked just before it dispatches
-// `session.prestart`; a discard, a Send, a withdraw and a newer request end it. A patch's request keeps the token, so the
-// window that asked can withdraw whatever generation now serves it. A withdraw (or a request that finds the intent no
-// longer eligible) ends the line and withdraws the newest generation known; a request of the line still on its way then
-// has its generation withdrawn when it is answered.
+// The requests' bookkeeping (R4-4, and M3's review: Decision Log 13), per intent:
+// - the line: the window's token and the epoch of its newest request. A request's epoch is set before its first await
+//   and checked just before it dispatches `session.prestart`; a newer request, a withdraw, a fence and the root's stop
+//   end it. A patch's request keeps the token, so the window that asked can withdraw whatever generation now serves it.
+// - the fences: a discard and a Send each hold one from their entry to their end; while any is held no request of the id
+//   begins or dispatches.
+// - the id's host calls, one at a time in order (`serial`): a dispatch with its answer, and each withdraw. A withdraw
+//   queued behind a dispatch on its way therefore names that dispatch's generation, and a newer request dispatches only
+//   after every withdraw queued before it was sent, so a late cleanup never meets a generation a newer request was told.
+// - the generation the host gave last, with the engine host connection it was given on: it is withdrawn only on that
+//   connection (a successor host counts its own from 1, and the old one's prestarts died with its connection).
+// - whether a request reached the host, which Send's launch reads once to offer the host its engine.
+export type PrestartLink = object; // an engine host connection (its welcome), compared by identity
+
+interface PrestartId {
+  line: { token: string; epoch: number } | null;
+  fences: number;
+  calls: Promise<unknown>;
+  pending: number; // host calls queued or under way
+  known: { generation: number; link: PrestartLink } | null;
+  requested: boolean;
+}
+
 export class PrestartRequests {
   private seq = 0;
-  private readonly lines = new Map<AppSessionId, { token: string; epoch: number }>();
-  private readonly generations = new Map<AppSessionId, number>();
-  private readonly inflight = new Map<number, AppSessionId>();
-  private readonly orphaned = new Set<number>();
-  private readonly requested = new Set<AppSessionId>();
+  private stopped = false;
+  private readonly ids = new Map<AppSessionId, PrestartId>();
 
-  begin(appSessionId: AppSessionId, token: string = randomUUID()): { token: string; epoch: number } {
-    const epoch = ++this.seq;
-    this.lines.set(appSessionId, { token, epoch });
-    return { token, epoch };
+  // A request begins (the window's, or a patch's under the same token): its epoch, or null while the id is fenced or the
+  // root has stopped.
+  begin(appSessionId: AppSessionId, token: string): number | null {
+    if (this.stopped) return null;
+    const id = this.of(appSessionId);
+    if (id.fences > 0) return null;
+    id.line = { token, epoch: ++this.seq };
+    return id.line.epoch;
   }
 
   current(appSessionId: AppSessionId, epoch: number): boolean {
-    return this.lines.get(appSessionId)?.epoch === epoch;
+    const id = this.ids.get(appSessionId);
+    return !this.stopped && id !== undefined && id.fences === 0 && id.line?.epoch === epoch;
   }
 
   tokenOf(appSessionId: AppSessionId): string | null {
-    return this.lines.get(appSessionId)?.token ?? null;
+    return this.ids.get(appSessionId)?.line?.token ?? null;
   }
 
-  // the request is sent to the host now: Send's launch of the intent offers to adopt from here on
-  dispatching(appSessionId: AppSessionId, epoch: number): void {
-    this.inflight.set(epoch, appSessionId);
-    this.requested.add(appSessionId);
+  // Ends the line (with `token`, only that token's): whether one ended.
+  end(appSessionId: AppSessionId, token?: string): boolean {
+    const id = this.ids.get(appSessionId);
+    if (id?.line == null || (token !== undefined && id.line.token !== token)) return false;
+    id.line = null;
+    return true;
   }
 
-  // the host answered (generation 0: refused, or no answer); whether that generation must be withdrawn now
-  answered(appSessionId: AppSessionId, epoch: number, generation: number): boolean {
-    this.inflight.delete(epoch);
-    if (generation > 0) this.generations.set(appSessionId, Math.max(generation, this.generations.get(appSessionId) ?? 0));
-    return this.orphaned.delete(epoch) && generation > 0;
+  // A discard or a Send: the line ends with nothing withdrawn, and no request of the id begins or dispatches until the
+  // returned release (called once).
+  fence(appSessionId: AppSessionId): () => void {
+    const id = this.of(appSessionId);
+    id.fences += 1;
+    id.line = null;
+    let held = true;
+    return () => {
+      if (!held) return;
+      held = false;
+      id.fences -= 1;
+      this.prune(appSessionId, id);
+    };
   }
 
-  // The line ends and its prestart goes: the newest generation known to withdraw now (null: none), and every request of
-  // the id still on its way withdrawn when answered. With `token`, only that token's line (else nothing, null).
-  withdraw(appSessionId: AppSessionId, token?: string): number | null {
-    const line = this.lines.get(appSessionId);
-    if (line === undefined || (token !== undefined && line.token !== token)) return null;
-    this.lines.delete(appSessionId);
-    for (const [epoch, id] of this.inflight) if (id === appSessionId) this.orphaned.add(epoch);
-    const generation = this.generations.get(appSessionId) ?? null;
-    this.generations.delete(appSessionId);
-    return generation;
+  // The root stopped: every line ends, and nothing begins or dispatches from now on.
+  stop(): void {
+    this.stopped = true;
+    for (const id of this.ids.values()) id.line = null;
   }
 
-  // A Send marks the start: the line ends with nothing withdrawn (the launch adopts the prestart or ends it).
-  sendStarted(appSessionId: AppSessionId): void {
-    this.lines.delete(appSessionId);
+  // The id's host calls, run one at a time in the order they were queued.
+  serial<T>(appSessionId: AppSessionId, call: () => Promise<T>): Promise<T> {
+    const id = this.of(appSessionId);
+    id.pending += 1;
+    const run = id.calls.then(call, call);
+    id.calls = run.then(
+      () => undefined,
+      () => undefined,
+    );
+    void id.calls.then(() => {
+      id.pending -= 1;
+      this.prune(appSessionId, id);
+    });
+    return run;
   }
 
-  // A discard: the line ends and the id is forgotten here (the host's `session.forget` ends its prestart).
-  discarded(appSessionId: AppSessionId): void {
-    this.lines.delete(appSessionId);
-    this.generations.delete(appSessionId);
-    this.requested.delete(appSessionId);
+  // In a dispatch's call: the request is sent now (Send's launch of the intent offers to adopt from here on), and what
+  // the host answered on `link` (generation 0: refused).
+  dispatching(appSessionId: AppSessionId): void {
+    this.of(appSessionId).requested = true;
+  }
+  admitted(appSessionId: AppSessionId, generation: number, link: PrestartLink): void {
+    if (generation > 0) this.of(appSessionId).known = { generation, link };
+  }
+
+  // In a withdraw's call: the generation to withdraw on `link` (null: none, or one another connection gave); the id's
+  // generation is forgotten either way.
+  takeKnown(appSessionId: AppSessionId, link: PrestartLink | null): number | null {
+    const id = this.ids.get(appSessionId);
+    const known = id?.known ?? null;
+    if (id !== undefined) id.known = null;
+    return known !== null && known.link === link ? known.generation : null;
   }
 
   // Whether a request of this id reached the host, asked once by the start whose guards passed.
   takeRequested(appSessionId: AppSessionId): boolean {
-    this.generations.delete(appSessionId);
-    return this.requested.delete(appSessionId);
+    const id = this.ids.get(appSessionId);
+    if (id === undefined) return false;
+    const requested = id.requested;
+    id.requested = false;
+    return requested;
+  }
+
+  private of(appSessionId: AppSessionId): PrestartId {
+    let id = this.ids.get(appSessionId);
+    if (id === undefined) this.ids.set(appSessionId, (id = { line: null, fences: 0, calls: Promise.resolve(), pending: 0, known: null, requested: false }));
+    return id;
+  }
+
+  private prune(appSessionId: AppSessionId, id: PrestartId): void {
+    if (id.line === null && id.fences === 0 && id.pending === 0 && id.known === null && !id.requested && this.ids.get(appSessionId) === id) this.ids.delete(appSessionId);
   }
 }

@@ -1509,7 +1509,7 @@ describe('the prestart of an unstarted New chat', () => {
     await waitFor(() => expect(editorOf().editor.getText()).toBe('kept from before'));
     expect(invoked('session.intent.prestart')).toEqual([]);
     await type(' and more');
-    expect(invoked('session.intent.prestart')).toEqual([{ appSessionId: A_ID }]);
+    expect(invoked('session.intent.prestart')).toEqual([{ appSessionId: A_ID, token: expect.any(String) }]);
     await type(' still typing');
     expect(invoked('session.intent.prestart')).toHaveLength(1);
   });
@@ -1522,13 +1522,14 @@ describe('the prestart of an unstarted New chat', () => {
     expect(invoked('session.intent.prestart')).toEqual([]);
   });
 
-  it('picking another machine after typing withdraws by the token and keeps the draft', async () => {
+  it('picking another machine after typing withdraws by the token its request carried and keeps the draft', async () => {
     stubIntent({}, {}, chosen);
     mount([{ index: 0, id: A }]);
     await type('build it');
-    await act(() => fake.reply('session.intent.prestart', { status: 'started', token: 'tok-1' }));
+    const { token } = invoked('session.intent.prestart')[0] as { token: string };
+    await act(() => fake.reply('session.intent.prestart', { status: 'started', token }));
     act(() => useRemoteSpawn.getState().choose(A, { machine: OTHER_MACHINE, name: 'mini', checkout: '/srv/app', key: KEY }));
-    await waitFor(() => expect(invoked('session.intent.prestart.withdraw')).toEqual([{ appSessionId: A_ID, token: 'tok-1' }]));
+    await waitFor(() => expect(invoked('session.intent.prestart.withdraw')).toEqual([{ appSessionId: A_ID, token }]));
     expect(editorOf().editor.getText()).toBe('build it');
   });
 });

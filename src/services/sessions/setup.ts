@@ -246,7 +246,7 @@ export async function runIntentSetup(s: Setup, appSessionId: AppSessionId, attem
     const fixture = takeReplay(s, 'launching');
     if (fixture) await run.progress({ engineSessionId: fixture.sessionId });
     // P2-C start (2026-10-09): the owner channel's decision for this launch (the contract, the flag, the advertisement)
-    const decided = await ownerChannelLaunch(s, intentSpecOf(s, run.intent, attempt, { cwd, mode, attestation: mapping.attestation, replay: fixture?.path ?? null, mawsTools }), { kind: parent !== null ? 'fork' : 'new', transcriptOf: parent });
+    const decided = await ownerChannelLaunch(s, intentSpecOf(s, run.intent, attempt, { cwd, mode, attestation: mapping.attestation, replay: fixture?.path ?? null, browserBackend: s.browserBackend(appSessionId), mawsTools }), { kind: parent !== null ? 'fork' : 'new', transcriptOf: parent });
     const spec = decided.spec;
     // P2-C end
     await writeSpawnerProof(s, appSessionId, run.intent.launchedBy); // P5 O12 M11: before the launch that names it
@@ -286,12 +286,13 @@ export async function runIntentSetup(s: Setup, appSessionId: AppSessionId, attem
 }
 
 // The spec an intent's launch is decided from, before the owner channel's decision and the host's route (ticket 851, D5:
-// the prestart builds it here too, so both send the same).
-export function intentSpecOf(s: Setup, intent: SetupIntent, attempt: IntentAttempt, ctx: { cwd: string; mode: NonNullable<SetupIntent['permissionMode']>; attestation: ReturnType<typeof trustMapping>['attestation']; replay: string | null; mawsTools: WantedSet['set'] }) {
+// the prestart builds it here too, so both send the same). `browserBackend` is the session's cua socket: the launch's
+// own lookup, which sets the socket up; the prestart's names the same path and sets up nothing (M3's review, finding 1).
+export function intentSpecOf(s: Setup, intent: SetupIntent, attempt: IntentAttempt, ctx: { cwd: string; mode: NonNullable<SetupIntent['permissionMode']>; attestation: ReturnType<typeof trustMapping>['attestation']; replay: string | null; browserBackend: string | null; mawsTools: WantedSet['set'] }) {
   const { appSessionId } = intent;
   return intentLaunchSpec(
     { ...intent, permissionMode: ctx.mode, ...attemptRoute(intent, attempt) },
-    { cwd: ctx.cwd, trust: ctx.attestation, replay: ctx.replay, browserBackend: s.browserBackend(appSessionId), proofFile: s.spawnerProofs.pathOf(appSessionId) /* P5 O12 M11 */, mawsTools: ctx.mawsTools /* board ticket 421 */ },
+    { cwd: ctx.cwd, trust: ctx.attestation, replay: ctx.replay, browserBackend: ctx.browserBackend, proofFile: s.spawnerProofs.pathOf(appSessionId) /* P5 O12 M11 */, mawsTools: ctx.mawsTools /* board ticket 421 */ },
     s.settings(),
   );
 }
