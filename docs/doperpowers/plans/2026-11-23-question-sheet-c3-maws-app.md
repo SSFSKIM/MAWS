@@ -17,9 +17,9 @@ How to see each of these is Concrete Steps. What closes the child is its two gat
 - [x] (2026-11-24) The look: a drawn example of six frames put to the owner, and the owner's four answers recorded, each the recommended one ("The look"). The drawing milestones are no longer blocked by it. Parent pin moved to `80645243b`.
 - [x] (2026-11-24) doperpowers pull request #628 merged: the pin is doperpowers `2594002af`, sminos 1.57.0, set version 1, digest `594200ae4e539c0688c67b511968861d8ebf03c87d1c45b512903a538326e277`. Between `9f4860205`, which §B to §D were written to, and the merge, the set changed in its README and `schema/show.schema.json` only: a queued `sent` entry is discriminated by kind (an answer or a dismissal carries `id`, a retract `target`, a `delivered` line neither), `show`'s schema states the reader's cuts, a lone surrogate is printed as U+FFFD, and an upload's name is bounded by its stem. §B to §D are corrected to the pin (2026-11-24, in a commit of their own, from the set's diff `9f4860205..2594002af`): the queued `sent` entry's kinds and the lone surrogate in §B, the unlocked reader's glimpse of a rolled-back write in §C; the cuts, the handle and the upload's stem needed no change.
 - [x] (2026-11-24 10:05Z) M1 — The pin and the model. Commits `11cc1259f`, fixes `07c389961` and `d5b09d5c7`; task review clean after two fix rounds (the review's rulings are in §B and §C); class 1a green on `d5b09d5c7` (run 45369925862). The pin's merge commit and C2's `show` were found to disagree on a queued line's extra fields; carried to the composite's writer for C2.
-- [x] (2026-11-24 13:20Z) M2 — The service: live reading, and the writer's call. Commits `75c86a570`, `550c267f7` (after a merge of master `dc864b948`, `WIRE_MINOR` 63); fixes `da0255b93`, `245423f9c` (built on a side branch while M3 ran, cherry-picked); task review clean after two fix rounds, its rulings in §C to §F; gates green on the fix head (run 45390151242). The real door at the pin printed what Concrete Steps says.
-- [ ] M3 — The components (the composite's X5), on fixtures. Blocked by: M1.
-- [ ] Landing C3a (M1 to M3): G1 but for the row's drawing. Its merge unblocks C4.
+- [x] (2026-11-24 13:20Z) M2 — The service: live reading, and the writer's call. Commits `75c86a570`, `550c267f7` (after a merge of master `dc864b948`; `WIRE_MINOR` 64 since the merge of master `5fc0bb8aa`, whose tail-first took 63); fixes `da0255b93`, `245423f9c` (built on a side branch while M3 ran, cherry-picked); task review clean after two fix rounds, its rulings in §C to §F; gates green on the fix head (run 45390151242). The real door at the pin printed what Concrete Steps says.
+- [x] (2026-11-24 14:20Z) M3 — The components (the composite's X5), on fixtures. Commits `55b0cb7b7`, `b535695a1`; three fix rounds (`68726b745`, `c496b78cb`; `1607745d7`; `e28ea1b6e`); task review clean, its rulings in §G (a refused Send releases its hold, refused links carry no destination, every memory change an update through `onMemory`, late pastes owned by their session, the hidden line's header from memory); gates green on `e28ea1b6e` (run 45409302136). Not seen by eye in Electron: the machine could not carry it; the built look is M6's. The pictures the composite's writer asked for if cheap were skipped: desk-web's app mounts no `R/sheet`, and the harness would need a new Mac-lane e2e case.
+- [x] (2026-11-24) Landing C3a (M1 to M3): G1 but for the row's drawing. Master `5fc0bb8aa` merged in (`6521b436c`). Pull request opened for the composite's writer's branch review; its merge unblocks C4.
 - [ ] M4 — The side sheet, the waiting card, the attention items. Blocked by: M2, M3.
 - [ ] M5 — The row's lines and receipts. Blocked by: M4; board ticket #852 on master.
 - [ ] M6 — Live on a Mac, the built look, the record of what changed (G2). Blocked by: M5; C2.G2 merged in doperpowers.
@@ -759,7 +759,14 @@ The first prints `{"session": "5eed0000-…", "results": [{"key": "maws-demo-000
 
 ## Outcomes & Retrospective
 
-Pending — written at finish.
+**C3a (M1 to M3), 2026-11-24.** The pin, the model, the service, the wire and the components (the composite's X5) are on the branch, each task-reviewed clean; G1.a, G1.b, G1.c and G1.d at the model are proven by tests that walk the pin. What went as planned: M1's port matched sminos's own `show` on every fixture at the first run, so §B was the right grain for a port. What did not:
+
+- The set changed after §B to §D were written; the diff `9f4860205..2594002af` was small enough to read whole, and two corrections came from it before M1 and one from M1's own reading (the door's results are not `SheetSent`s). Reading a pinned artifact's diff, not its prose, was the cheap way to correct a plan written against a moving set.
+- The task reviews found more than the plan foresaw, most of all in M3, which took three fix rounds. The plan named the memory's rules (S13 to S15) but not who owns a write when two mounts share one memory and a door's answer or a paste lands late; the answer, an update applied at commit (`onMemory`), is now X5 and changes C4's consumer. A plan for shared UI state should state its write discipline, not only its rules.
+- M2's service met two timing promises only after review (the first record within a second; a read never held by a probe), and its door's bound only after a child that ignores SIGTERM was tried. Promises with a number in them deserve a test at production timing from the start.
+- Master moved `WIRE_MINOR` under the branch twice (62, then tail-first's 63); the sheet's namespace is 64.
+
+Left for C3b: M4 to M6 as planned; M5's blocker, #852, is now on master. The pictures of the built components wait for M6's built look.
 
 ## For the composite's writer
 
@@ -777,11 +784,15 @@ State, like Progress. Three lists: the sentences of the composite, as it stands 
 8. C4's Design inheritance. One limit of the components C4 should know before its Acceptance 11: a link the sheet's policy refuses does nothing, but is still drawn as the transcript's Markdown draws a link. Drawing it as plain text needs a new seam in `Markdown`, which this child does not add. Proposed addition: "A link the sheet's Markdown refuses is inert and still drawn as a link; if the page must draw it as text, that is a small change to MAWS's `Markdown` this child carries."
 9. C3's Status, "(branch `question-sheet-c3`, `9e7946a7d` …)". The plan has moved past that commit with the look's settlement; the branch's head is the commit this revision's report names.
 
+10. X5 as built differs from the composite where C4 consumes it (each in §G): `SessionSheetProps.onMemory` takes an update (`(current) => next`) applied to the session's memory at commit and callable after unmount; `SheetMemory` gains `headers` and `sending.attempt`; `QuestionCard` gains a required `onAttach`; `SheetOverviewProps.hrefOf`, `sheetLinkAction` and the cards' `data-sheet-question` are built as the writer ruled; a refused Markdown link is drawn as an `<a>` with no `href`, through an optional `link` component of `Markdown`. Proposed: the composite's X5 names the updater, since a consumer that replaces whole memories loses writes.
+11. X2 as read at the pin: `sheet put`'s results are `{ key, state: 'queued' }` or the bridge's verdict under its own name (`applied`), not `SheetSent`s; MAWS reads an act's fate from the model's `sent` only. And sminos's `show` at `2594002af` copies `id` and `target` from any queued inbox line that has them, which the show schema's closed queued variants refuse; MAWS projects by kind (reported for C2).
+12. For C6: `sheet.list` is refused remotely as `no-target`, before its by-effect row is read; a remote list needs a per-session placement as well as a rule.
+
 **For the owner, through you.**
 
 1. **The calm row's reach**: settled by the composite's writer from the owner's standing "calm state only" ruling; nothing is asked.
 2. **The carried draft's card** (entry 2), which no frame shows: seen at M6 in the built look, unless a frame is drawn first.
-3. **The built look**, at M6: the pictures of the built surfaces, those two first.
+3. **The built look**, at M6: the pictures of the built surfaces, those two first. M3 added words of its own (§I's "Strings no frame shows") and the carried picks' dashed edge, which the owner sees there too.
 
 **For the `ux-wave` session, through you.** Its answers of 2026-11-24 are in this document (the facts of #852 under Constraints, and §I). What is still owed either way:
 
