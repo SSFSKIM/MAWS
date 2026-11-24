@@ -6,7 +6,8 @@
 // It is also what C4's page server calls, in process (`SpineRoot.sheet`), so every rule holds at this boundary and not
 // only at the wire's: a session is taken only in the engine's id form (`isSheetSession`) before any path is made from
 // it; every file is confined to the record (./files.ts); the door is located, and anything executed, only when there is
-// a record to answer (`read` of a record with something open on it, or `put`); and an upload's bytes are checked here.
+// a record to answer (`read` of a record with something open on it, or `put` to a session with a `state.json`); and an
+// upload's bytes are checked here.
 import { join } from 'node:path';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { DoorState } from '@shared/ipc/schema/sheet';
@@ -18,10 +19,10 @@ import { SEND_MAX_LINES } from '@shared/sheet/words';
 import { watchTree, type WatchTreeHandle } from '@shared/fs/watch-tree';
 import { stat } from 'node:fs/promises';
 import { DOOR_NOT_STARTED, putLines } from './door';
-import { GONE, imageTypeOfName, readBody, writeUpload } from './files';
+import { GONE, imageTypeOfName, isRecord, readBody, writeUpload } from './files';
 import { locateSminos, type LocateDeps, type Located, type ProofCache } from './locate';
 import { UNREADABLE, listRecords, readRecord, recordIo, sheetRoot, type RecordIo } from './reader';
-import { SHEET_TIMING } from './timing';
+import { SHEET_TIMING, type SheetTiming } from './timing';
 
 export type { DoorState } from '@shared/ipc/schema/sheet';
 
@@ -36,7 +37,7 @@ export interface SheetServiceDeps {
   sessionOf(engineSessionId: string): { appSessionId: AppSessionId; title: string | null; live: boolean } | null; // from the index
   onSessionsChanged(listener: () => void): () => void; // the index's sessions moved: one was added, changed its holder or title, or was removed
   emit(name: 'sheet.changed', payload: EventPayload<'sheet.changed'>): void;
-  timing?: { pollMs: number; debounceMs: number; putMs: number }; // SHEET_TIMING: 2000, 50, 25000
+  timing?: Partial<SheetTiming>; // over SHEET_TIMING
   io?: RecordIo; // the tests' seam: every touch of a record's state and inbox (./reader.ts)
   locate?: Pick<LocateDeps, 'underTest' | 'systemRoot'>; // the tests' seam: the locator's own
 }
@@ -66,11 +67,13 @@ interface Entry {
 const NO_FACTS: Facts = { appSessionId: null, title: null, live: null };
 const sameFacts = (a: Facts, b: Facts): boolean => a.appSessionId === b.appSessionId && a.title === b.title && a.live === b.live;
 const refused = (message: string): SheetPutResult => ({ ok: false, why: 'refused', message });
+const NO_SHEET: SheetPutResult = { ok: false, why: 'no-sheet', message: 'This session has no question sheet on this Mac.' };
+const OUT_OF_TIME: SheetPutResult = { ok: false, why: 'failed', message: 'The sminos command did not answer in time; send again.' };
 // Something a person could act on: an open question, or a dismissal they could take back.
 const answerable = (model: SheetModel): boolean => model.open.length > 0 || model.hidden.length > 0;
 
 export function createSheetService(deps: SheetServiceDeps): SheetService {
-  const timing = deps.timing ?? SHEET_TIMING;
+  const timing: SheetTiming = { ...SHEET_TIMING, ...deps.timing };
   const io = deps.io ?? recordIo;
   const entries = new Map<string, Entry>();
   const listeners = new Set<SheetListener>();
@@ -81,6 +84,7 @@ export function createSheetService(deps: SheetServiceDeps): SheetService {
   let stopped = false;
   let watcher: WatchTreeHandle | null = null;
   let poll: NodeJS.Timeout | null = null;
+  let rootPoll: NodeJS.Timeout | null = null; // while the root does not exist (or its watch failed)
   let scanning = false;
   let doorState: DoorState = { known: false };
   let locating: Promise<Located> | null = null;
@@ -190,11 +194,28 @@ export function createSheetService(deps: SheetServiceDeps): SheetService {
       });
       watcher.on('error', () => {
         watcher?.close();
-        watcher = null; // the poll goes on, and arms again
+        watcher = null;
+        lookForRoot();
       });
     } catch {
-      watcher = null; // no root yet: the poll arms it once it exists
+      watcher = null; // no root yet
+      lookForRoot();
     }
+  }
+
+  // While the root is not watched, it is looked for every `rootPollMs`, so the first record under a home that had no
+  // sheet/ shows within a second and not at the next poll; once it is watched, it is scanned at once.
+  function lookForRoot(): void {
+    if (rootPoll !== null || stopped) return;
+    rootPoll = setInterval(() => {
+      if (stopped || home === null) return;
+      arm();
+      if (watcher === null) return;
+      clearInterval(rootPoll!);
+      rootPoll = null;
+      void scan();
+    }, timing.rootPollMs);
+    rootPoll.unref();
   }
 
   const ready: Promise<void> = deps.home.then(
@@ -203,6 +224,7 @@ export function createSheetService(deps: SheetServiceDeps): SheetService {
       home = resolved;
       arm();
       await scan();
+      if (stopped) return;
       poll = setInterval(() => {
         arm();
         void scan();
@@ -229,16 +251,33 @@ export function createSheetService(deps: SheetServiceDeps): SheetService {
     });
   });
 
-  // The door's state, located again only while it is not known to be available, or at a put.
-  function locate(): Promise<Located> {
+  // The door's state, located again only while it is not known to be available, or at a put; one location at a time,
+  // its probe bounded by `probeMs` (less when a put has less left).
+  function locate(probeMs = timing.probeMs): Promise<Located> {
     locating ??= (async () => {
-      const located = await locateSminos({ env: deps.env, shell: await deps.shell, configHome: await deps.configHome, home: home!, proofs, ...deps.locate });
+      const located = await locateSminos({ env: deps.env, shell: await deps.shell, configHome: await deps.configHome, home: home!, proofs, probeMs, ...deps.locate });
       doorState = located.ok ? { known: true, available: true } : { known: true, available: false, reason: located.detail };
       return located;
     })().finally(() => {
       locating = null;
     });
     return locating;
+  }
+
+  // A location within what is left of a put's budget: null when the budget ran out first (a location already under way,
+  // a read's, is not waited on past it).
+  async function locateWithin(deadline: number): Promise<Located | null> {
+    const left = deadline - Date.now();
+    if (left <= 0) return null;
+    let timer: NodeJS.Timeout | undefined;
+    const outOfTime = new Promise<null>((resolve) => {
+      timer = setTimeout(() => resolve(null), left);
+    });
+    try {
+      return await Promise.race([locate(Math.min(timing.probeMs, left)), outOfTime]);
+    } finally {
+      clearTimeout(timer);
+    }
   }
 
   async function modelOf(session: string): Promise<SheetModel | null> {
@@ -258,7 +297,9 @@ export function createSheetService(deps: SheetServiceDeps): SheetService {
       if (home === null) return null;
       await refresh(session);
       const model = entries.get(session)?.model ?? null;
-      if (model !== null && answerable(model) && !(doorState.known && doorState.available)) await locate();
+      // Located behind the answer: the read answers within the host's deadline whatever the probe does, the door's
+      // state as it stands until the probe ends.
+      if (model !== null && answerable(model) && !(doorState.known && doorState.available)) void locate().catch(() => {});
       return model;
     },
 
@@ -270,18 +311,26 @@ export function createSheetService(deps: SheetServiceDeps): SheetService {
         const why = lineError(line);
         if (why !== null) return refused(`Line ${i + 1} is not an inbox line: ${why}.`);
       }
+      // One budget for the probe and the door, inside the wire's: the door gets what the location left of it.
+      const deadline = Date.now() + timing.putMs;
       await ready;
       if (home === null) return { ok: false, why: 'unavailable', message: 'This Mac has no sminos home to answer in.' };
-      let located = await locate();
-      if (!located.ok) return { ok: false, why: 'unavailable', message: located.detail };
-      let result = await putLines(located.cli, session, lines, timing.putMs);
+      // Nothing is located or run for a session with no record (X2). A removal racing this check is the door's to
+      // settle: it answers 3, read as no-sheet.
+      if (!(await isRecord(join(sheetRoot(home), session)))) return NO_SHEET;
+      const send = async (): Promise<SheetPutResult> => {
+        const located = await locateWithin(deadline);
+        if (located === null) return OUT_OF_TIME;
+        if (!located.ok) return { ok: false, why: 'unavailable', message: located.detail };
+        const left = deadline - Date.now();
+        return left <= 0 ? OUT_OF_TIME : putLines(located.cli, session, lines, left);
+      };
+      let result = await send();
       if (!result.ok && result.message === DOOR_NOT_STARTED) {
         // A plugin update removed the old version's directory: the command is found and proven again, and the lines,
         // which nothing appended, sent once more.
         proofs.clear();
-        located = await locate();
-        if (!located.ok) return { ok: false, why: 'unavailable', message: located.detail };
-        result = await putLines(located.cli, session, lines, timing.putMs);
+        result = await send();
       }
       void refresh(session);
       return result;
@@ -293,6 +342,7 @@ export function createSheetService(deps: SheetServiceDeps): SheetService {
       if (home === null) return GONE;
       const record = join(sheetRoot(home), session);
       if ('upload' in of) {
+        if (!(await isRecord(record))) return GONE; // an upload is served only from a record, as it is taken only into one
         const name = of.upload.slice('uploads/'.length);
         return readBody(record, 'uploads', name, imageTypeOfName(name) ?? '');
       }
@@ -328,6 +378,7 @@ export function createSheetService(deps: SheetServiceDeps): SheetService {
       watcher?.close();
       watcher = null;
       if (poll !== null) clearInterval(poll);
+      if (rootPoll !== null) clearInterval(rootPoll);
       for (const timer of debounces.values()) clearTimeout(timer);
       debounces.clear();
       listeners.clear();

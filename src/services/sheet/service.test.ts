@@ -38,7 +38,8 @@ const APP = 'app-1' as AppSessionId;
 type Facts = { appSessionId: AppSessionId; title: string | null; live: boolean } | null;
 
 // A service over a scratch home, MAWS_SMINOS_CLI naming the stand-in, the index a table the test moves.
-function start(options: { named?: string | null; io?: RecordIo; locate?: SheetServiceDeps['locate']; configHome?: string } = {}) {
+// `timing`: the tests' fast timing unless the test names its own, or 'production' for the service's own.
+function start(options: { named?: string | null; io?: RecordIo; locate?: SheetServiceDeps['locate']; configHome?: string; timing?: SheetServiceDeps['timing'] | 'production' } = {}) {
   const home = tempDir();
   const ran = join(tempDir(), 'ran');
   const sessions = new Map<string, Facts>();
@@ -56,7 +57,7 @@ function start(options: { named?: string | null; io?: RecordIo; locate?: SheetSe
       return () => indexListeners.delete(listener);
     },
     emit: (_name, payload) => void emitted.push(payload),
-    timing: { pollMs: 40, debounceMs: 10, putMs: 10_000 },
+    ...(options.timing === 'production' ? {} : { timing: { pollMs: 40, debounceMs: 10, putMs: 10_000, ...options.timing } }),
     ...(options.io === undefined ? {} : { io: options.io }),
     ...(options.locate === undefined ? {} : { locate: options.locate }),
   });
@@ -73,6 +74,16 @@ function start(options: { named?: string | null; io?: RecordIo; locate?: SheetSe
 }
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+// The stand-in behind a shell that holds its probe (`sheet show`) or its put this many seconds first; 'hang' holds the
+// probe until it is killed. The wait holds no pipe of the command's, so a kill at the timeout is answered at once.
+function slowDoor(hold: { show?: number | 'hang'; put?: number }): string {
+  const cli = join(tempDir(), 'sminos');
+  const wait = (seconds: number | 'hang' | undefined) => (seconds === undefined ? ':' : seconds === 'hang' ? 'exec sleep 30' : `sleep ${seconds} </dev/null >/dev/null 2>&1`);
+  writeFileSync(cli, `#!/bin/sh\ncase "$2" in\n  show) ${wait(hold.show)} ;;\n  put) ${wait(hold.put)} ;;\nesac\nexec "${FAKE_SMINOS}" "$@"\n`);
+  chmodSync(cli, 0o755);
+  return cli;
+}
 const of = (emitted: { session: string; summary: SheetSummary | null }[], session: string) => emitted.filter((e) => e.session === session);
 const answer = (key: string, picks: string[], by: SheetLine['by'] = 'maws'): SheetLine => ({ v: 1, key, kind: 'answer', id: 'q1', revision: 1, picks, by });
 
@@ -95,6 +106,16 @@ describe('following records', () => {
     await sleep(200); // several polls: nothing more
     expect(of(t.emitted, TWO)).toHaveLength(3);
     expect(await t.service.list()).toEqual([]);
+  });
+
+  it('notices the sheet root’s creation within a second, at the service’s own timing', async () => {
+    const t = start({ timing: 'production' });
+    expect(await t.service.list()).toEqual([]); // the home has no sheet/ yet
+    await sleep(300);
+    const seeded = Date.now();
+    seedRecord(t.home, 'two-surfaces');
+    await vi.waitFor(() => expect(of(t.emitted, TWO)).toHaveLength(1), { timeout: 3000, interval: 10 });
+    expect(Date.now() - seeded).toBeLessThan(1000);
   });
 
   it('announces an inbox that shrinks, a door’s rollback, like one that grows', async () => {
@@ -194,8 +215,8 @@ describe('when the door is found', () => {
     expect(t.ran()).toEqual([]);
     expect(t.service.door()).toEqual({ known: false });
     expect(await t.service.read(TWO)).toMatchObject({ session: TWO, open: [expect.objectContaining({ id: 'q1' })] });
+    await vi.waitFor(() => expect(t.service.door()).toEqual({ known: true, available: true }));
     expect(t.ran()).toEqual([FAKE_SMINOS]); // the probe
-    expect(t.service.door()).toEqual({ known: true, available: true });
     await t.service.read(TWO);
     expect(t.ran()).toHaveLength(1);
   });
@@ -224,15 +245,51 @@ describe('when the door is found', () => {
     await handlers.invoke('sheet.list', {});
     expect(t.ran()).toEqual([]);
     seedRecord(t.home, 'two-surfaces');
-    expect(await handlers.invoke('sheet.read', { session: TWO })).toMatchObject({ door: { known: true, available: true } });
+    expect(await handlers.invoke('sheet.read', { session: TWO })).toMatchObject({ model: { session: TWO } });
+    await vi.waitFor(() => expect(t.service.door()).toEqual({ known: true, available: true }));
     expect(t.ran()).toEqual([install]);
+  });
+
+  it('answers a read at once while the probe hangs, the door as it stood, and lets the probe end behind it', async () => {
+    const t = start({ named: slowDoor({ show: 'hang' }), timing: { probeMs: 500 } });
+    seedRecord(t.home, 'two-surfaces');
+    const asked = Date.now();
+    expect(await wire(t.service).invoke('sheet.read', { session: TWO })).toMatchObject({ model: { session: TWO }, door: { known: false } });
+    expect(Date.now() - asked).toBeLessThan(300);
+    await vi.waitFor(() => expect(t.service.door()).toMatchObject({ known: true, available: false }), { timeout: 2000 });
+  });
+
+  it('answers a put within its one budget while the probe hangs', async () => {
+    const t = start({ named: slowDoor({ show: 'hang' }), timing: { putMs: 800 } });
+    seedRecord(t.home, 'two-surfaces');
+    const asked = Date.now();
+    expect(await t.service.put(TWO, [answer('maws-00000001', ['Yes'])])).toMatchObject({ ok: false });
+    expect(Date.now() - asked).toBeLessThan(1300);
+  });
+
+  it('answers a put within its one budget when a read’s probe is already out and hangs', async () => {
+    const t = start({ named: slowDoor({ show: 'hang' }), timing: { putMs: 800 } }); // the read's probe has its own 10 s
+    seedRecord(t.home, 'two-surfaces');
+    await t.service.read(TWO);
+    const asked = Date.now();
+    expect(await t.service.put(TWO, [answer('maws-00000001', ['Yes'])])).toMatchObject({ ok: false, why: 'failed' });
+    expect(Date.now() - asked).toBeLessThan(1300);
+  });
+
+  it('gives the door what the probe left of the put’s budget', async () => {
+    const t = start({ named: slowDoor({ show: 0.3, put: 1 }), timing: { putMs: 1200 } }); // the door alone would fit, not after the probe
+    seedRecord(t.home, 'two-surfaces');
+    const asked = Date.now();
+    expect(await t.service.put(TWO, [answer('maws-00000001', ['Yes'])])).toMatchObject({ ok: false, why: 'failed' });
+    expect(Date.now() - asked).toBeLessThan(1700);
+    expect(t.service.door()).toEqual({ known: true, available: true }); // the probe itself answered
   });
 
   it('says the door is unavailable, and why, when no command is found; reading still works', async () => {
     const t = start({ named: null });
     seedRecord(t.home, 'two-surfaces');
     expect(await t.service.read(TWO)).not.toBeNull();
-    expect(t.service.door()).toMatchObject({ known: true, available: false, reason: expect.any(String) });
+    await vi.waitFor(() => expect(t.service.door()).toMatchObject({ known: true, available: false, reason: expect.any(String) }));
     expect(await t.service.put(TWO, [answer('maws-00000001', ['Yes'])])).toMatchObject({ ok: false, why: 'unavailable' });
   });
 });
@@ -256,6 +313,18 @@ describe('put', () => {
     expect(t.ran()).toEqual([]);
   });
 
+  it('answers no-sheet for a session with no record, with nothing located or run', async () => {
+    const t = start();
+    await t.service.list();
+    expect(await t.service.put(OTHER, [answer('maws-00000001', ['Yes'])])).toMatchObject({ ok: false, why: 'no-sheet' });
+    mkdirSync(t.record(OTHER), { recursive: true }); // a directory with no state.json is no record either
+    writeFileSync(join(t.record(OTHER), 'inbox.jsonl'), '');
+    expect(await t.service.put(OTHER, [answer('maws-00000001', ['Yes'])])).toMatchObject({ ok: false, why: 'no-sheet' });
+    expect(t.ran()).toEqual([]);
+    expect(t.service.door()).toEqual({ known: false });
+    expect(readFileSync(join(t.record(OTHER), 'inbox.jsonl'), 'utf8')).toBe('');
+  });
+
   it('proves the command again when a spawn fails', async () => {
     const dir = tempDir();
     const cli = join(dir, 'sminos');
@@ -264,6 +333,7 @@ describe('put', () => {
     const t = start({ named: cli });
     seedRecord(t.home, 'two-surfaces');
     await t.service.read(TWO);
+    await vi.waitFor(() => expect(t.service.door()).toEqual({ known: true, available: true }));
     expect(t.ran()).toEqual([cli]);
     chmodSync(cli, 0o644); // the proof's path and time stand, and it no longer starts
     expect(await t.service.put(TWO, [answer('maws-00000001', ['Yes'])])).toMatchObject({ ok: false, why: 'unavailable' });
@@ -311,7 +381,9 @@ describe('the wire', () => {
     seedRecord(t.home, 'two-surfaces');
     await vi.waitFor(async () => expect(((await wire(t.service).invoke('sheet.list', {})) as { sessions: unknown[] }).sessions).toHaveLength(1));
     expect(await wire(t.service).invoke('sheet.list', {})).toMatchObject({ door: { known: false } });
-    expect(await wire(t.service).invoke('sheet.read', { session: TWO })).toMatchObject({ model: { session: TWO }, door: { known: true, available: true } });
+    expect(await wire(t.service).invoke('sheet.read', { session: TWO })).toMatchObject({ model: { session: TWO }, door: { known: false } }); // as it stands: the probe goes on
+    await vi.waitFor(() => expect(t.service.door()).toEqual({ known: true, available: true }));
+    expect(await wire(t.service).invoke('sheet.read', { session: TWO })).toMatchObject({ door: { known: true, available: true } });
   });
 });
 
@@ -379,7 +451,15 @@ describe('bodies and uploads, confined to the record', () => {
     expect(readFileSync(join(t.record(TWO), uploaded.path))).toEqual(PNG);
     expect(await t.service.body(TWO, { upload: uploaded.path })).toEqual({ kind: 'image', mediaType: 'image/png', data: PNG.toString('base64') });
     const second = await t.service.upload(TWO, { mediaType: 'image/png', data: PNG.toString('base64') });
+    expect(second.ok).toBe(true);
     expect(second.ok && second.path).not.toBe(uploaded.path);
+  });
+
+  it('is gone for an upload under a session that has no record', async () => {
+    const t = start();
+    mkdirSync(join(t.record(OTHER), 'uploads'), { recursive: true });
+    writeFileSync(join(t.record(OTHER), 'uploads', 'sketch.png'), PNG);
+    expect(await t.service.body(OTHER, { upload: 'uploads/sketch.png' })).toEqual({ kind: 'gone' });
   });
 
   it('is gone for a file under uploads/ whose bytes are not its name’s raster type', async () => {

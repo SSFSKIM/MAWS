@@ -8,17 +8,17 @@
 // unless given another.
 //
 // The connection follows lane A's order (`stores/lane-a.ts`): subscribe to `sheet.changed` first, hold what arrives while
-// `sheet.list` is out, apply the list and then what was held, and list again when the machine's host was unavailable.
-// A record that appears between a snapshot and a subscription made after it would otherwise never show, since the
-// service speaks only on change. Each read of a session carries a count that only grows, and an answer is applied only
-// when no later read of that session was: `seq` cannot stand for it, since an inbox line changes a model without moving
-// it.
+// `sheet.list` is out, apply the list and then what was held. Unlike lane A it lists again at every new connection to
+// the machine's host, not only until one list is answered, and then reads every watched session again: a `mawsd` that
+// restarted knows nothing of what went while it was down. A record that appears between a snapshot and a subscription
+// made after it would otherwise never show, since the service speaks only on change. Each read of a session carries a
+// count that only grows, and an answer is applied only when no later read of that session was: `seq` cannot stand for
+// it, since an inbox line changes a model without moving it.
 import { create } from 'zustand';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { CommandResult, MawsBridge } from '@shared/ipc/schema';
 import type { DoorState } from '@shared/ipc/schema/sheet';
 import type { SheetModel, SheetSummary } from '@shared/sheet/model';
-import { askUntilAnswered } from '../ipc/until-answered';
 
 export interface SheetsState {
   summaries: ReadonlyMap<string, SheetSummary>; // by the engine's session id
@@ -58,32 +58,45 @@ function read(client: MawsBridge, session: string): void {
 
 export function connectSheets(client: MawsBridge): () => void {
   connected = client;
-  let held: [string, SheetSummary | null][] | null = []; // what arrived while a list is out
+  let held: [string, SheetSummary | null][] | null = null; // what arrived while a list is out
   let live = true;
+  let listing = false;
+  let heard = false; // the host was heard while a list was out, whose answer may be older than its return
   const off = client.on('sheet.changed', ({ session, summary }) => {
     if (!live) return;
     if (held !== null) held.push([session, summary]);
     else applySummary(session, summary);
     if (watchers.has(session)) read(client, session);
   });
-  const settle = (result: CommandResult<'sheet.list'>) => {
+  const settle = (result: CommandResult<'sheet.list'> | null) => {
     const raced = held ?? [];
     held = null;
+    listing = false;
     if (!live) return;
-    if (result.ok) useSheets.setState({ summaries: new Map(result.value.sessions.map((summary) => [summary.session, summary])), door: result.value.door });
-    else console.warn('[sheet] sheet.list unavailable; starting empty', result.error.message);
+    if (result?.ok) useSheets.setState({ summaries: new Map(result.value.sessions.map((summary) => [summary.session, summary])), door: result.value.door });
+    else console.warn('[sheet] sheet.list unavailable; keeping what the store holds', result?.error.message ?? 'rejected');
     for (const [session, summary] of raced) applySummary(session, summary);
+    if (result?.ok) for (const session of watchers.keys()) read(client, session);
+    if (heard) list();
   };
-  const stopListing = askUntilAnswered(client, async () => {
-    held ??= [];
-    const result = await client.invoke('sheet.list', {});
-    settle(result);
-    return result.ok;
+  const list = () => {
+    listing = true;
+    heard = false;
+    held = [];
+    void client.invoke('sheet.list', {}).then(settle, () => settle(null));
+  };
+  // Main emits `host.status` at each ready of the machine's host and each change of the spine's availability: a `mawsd`
+  // that restarted knows nothing of what went while it was down, so every one lists again.
+  const offHost = client.on('host.status', (_status, { machine }) => {
+    if (!live || machine !== client.localMachine) return;
+    if (listing) heard = true;
+    else list();
   });
+  list();
   return () => {
     live = false;
-    stopListing();
     off();
+    offHost();
     if (connected === client) connected = null;
   };
 }

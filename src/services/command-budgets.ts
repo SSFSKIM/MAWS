@@ -150,7 +150,7 @@ export const COMMAND_BUDGETS_MS: Readonly<Partial<Record<CommandName, number>>> 
   'laneA.model': 2 * BRIDGE_MS + MARGIN_MS, // the status read, then the change (one change at a time per session)
   // the status read, the uploads' git exclude, and the post with its retries
   'laneA.media': BRIDGE_MS + GIT_TIMEOUT_MS + 3 * BRIDGE_MS + LANE_A_TIMING.lane.retryDelaysMs.reduce((sum, ms) => sum + ms, 0) + MARGIN_MS,
-  // the question sheet's C3 M2: one call of `sminos sheet put`, which can wait on the record's lock and on the session's
-  // bridge, ten seconds each
+  // the question sheet's C3 M2: one put, the locator's probe and one call of `sminos sheet put` under one bound; the door
+  // can wait on the record's lock and on the session's bridge, ten seconds each
   'sheet.put': SHEET_PUT_BUDGET_MS,
 };

@@ -5,7 +5,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { SheetModel, SheetSummary } from '@shared/sheet/model';
 import { fakeClient } from '../../../../test/support/fake-client';
-import { at } from '../../../../test/support/machine';
+import { at, OTHER_MACHINE } from '../../../../test/support/machine';
 import { hostStatus } from '../test-support/host-status';
 import { connectSheets, resetSheetStore, selectSheetModel, selectSheetSession, useSheets, watchSheet } from './sheet';
 
@@ -47,6 +47,44 @@ describe('connectSheets', () => {
     expect(useSheets.getState().summaries.has(A)).toBe(true);
     off();
     warn.mockRestore();
+  });
+
+  it('lists again at every new connection to the machine’s host, so a record that went while it was down goes, and reads every watched session again', async () => {
+    const fake = fakeClient();
+    const off = connectSheets(fake.client);
+    await fake.reply('sheet.list', { sessions: [summary(A), summary(B)], door: { known: false } });
+    const unwatch = watchSheet(A);
+    await fake.reply('sheet.read', { model: model(A, 1), door: KNOWN });
+    fake.event('host.status', hostStatus(), OTHER_MACHINE); // another machine's host: not this store's
+    expect(fake.invoked('sheet.list')).toHaveLength(1);
+    fake.event('host.status', hostStatus()); // mawsd restarted; B's record was removed while it was down
+    expect(fake.invoked('sheet.list')).toHaveLength(2);
+    fake.event('sheet.changed', { session: A, summary: summary(A, { seq: 3 }) }); // raced the list: held, applied after it
+    await fake.reply('sheet.read', { model: model(A, 3), door: KNOWN }); // the change's own read
+    await fake.reply('sheet.list', { sessions: [summary(A, { seq: 2 })], door: KNOWN });
+    expect([...useSheets.getState().summaries.keys()]).toEqual([A]);
+    expect(useSheets.getState().summaries.get(A)?.seq).toBe(3);
+    expect(fake.invoked('sheet.read')).toHaveLength(3); // and the watched session is read again after the list
+    await fake.reply('sheet.read', { model: model(A, 3), door: KNOWN });
+    expect(selectSheetModel(useSheets.getState(), A)?.seq).toBe(3);
+    unwatch();
+    off();
+  });
+
+  it('lists once more when the host is heard while a list is out, whose answer may be older than the host’s return', async () => {
+    const fake = fakeClient();
+    const off = connectSheets(fake.client);
+    fake.event('host.status', hostStatus());
+    fake.event('host.status', hostStatus());
+    expect(fake.invoked('sheet.list')).toHaveLength(1);
+    await fake.reply('sheet.list', { sessions: [summary(A)], door: { known: false } });
+    expect(fake.invoked('sheet.list')).toHaveLength(2);
+    await fake.reply('sheet.list', { sessions: [], door: { known: false } });
+    expect(useSheets.getState().summaries.size).toBe(0);
+    expect(fake.invoked('sheet.list')).toHaveLength(2);
+    off();
+    fake.event('host.status', hostStatus()); // disconnected: no list
+    expect(fake.invoked('sheet.list')).toHaveLength(2);
   });
 
   it('finds an app session’s record by its summary', async () => {

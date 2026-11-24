@@ -52,7 +52,7 @@ export async function putLines(cli: SminosCli, session: string, lines: readonly 
   if (run.timedOut) return { ok: false, why: 'failed', message: 'The sminos command did not answer in time; send again.' };
   switch (run.code) {
     case 0:
-      return resultsOf(run.stdout);
+      return resultsOf(run.stdout, session, lines);
     case 2:
       return { ok: false, why: 'refused', message: firstLine(run.stderr) || 'The sminos command refused the lines; nothing was appended.' };
     case 3:
@@ -64,8 +64,9 @@ export async function putLines(cli: SminosCli, session: string, lines: readonly 
   }
 }
 
-// Exit 0's standard output: `{ session, results }`, one result a line taken.
-function resultsOf(stdout: string): SheetPutResult {
+// Exit 0's standard output: `{ session, results }`, one result a line taken. Taken only when it names the session asked
+// for and holds one result for each line sent, matched by key: anything else is not an answer to this call.
+function resultsOf(stdout: string, session: string, lines: readonly SheetLine[]): SheetPutResult {
   const unreadable: SheetPutResult = { ok: false, why: 'failed', message: 'The sminos command answered in a form MAWS does not read; send again.' };
   let printed: unknown;
   try {
@@ -73,9 +74,12 @@ function resultsOf(stdout: string): SheetPutResult {
   } catch {
     return unreadable;
   }
-  const results = (printed as { results?: unknown } | null)?.results;
-  if (!Array.isArray(results)) return unreadable;
+  const { session: named, results } = (printed ?? {}) as { session?: unknown; results?: unknown };
+  if (named !== session || !Array.isArray(results)) return unreadable;
   const parsed = results.map((entry) => SheetPutEntrySchema.safeParse(entry));
   if (!parsed.every((entry) => entry.success)) return unreadable;
-  return { ok: true, results: parsed.map((entry) => entry.data!) };
+  const entries = parsed.map((entry) => entry.data!);
+  const keys = (keyed: readonly { key: string }[]) => keyed.map(({ key }) => key).sort().join('\n');
+  if (keys(entries) !== keys(lines)) return unreadable;
+  return { ok: true, results: entries };
 }

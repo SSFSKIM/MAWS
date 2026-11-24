@@ -15,6 +15,7 @@ import { readFile, stat } from 'node:fs/promises';
 import { isAbsolute, join } from 'node:path';
 import { managedSettings, managedSettingsDir } from '../../engine-host/session-start-hooks';
 import { runSminos, type SminosCli } from './door';
+import { SHEET_TIMING } from './timing';
 
 export type { SminosCli } from './door';
 
@@ -37,7 +38,6 @@ export interface LocateDeps {
 }
 
 export const PROBE_SESSION = '00000000-0000-4000-8000-000000000000';
-export const PROBE_MS = 10_000;
 const PLUGIN = 'sminos';
 const PYTHON_COMPLAINT = 'sminos needs Python';
 
@@ -98,7 +98,7 @@ async function prove(cli: SminosCli, deps: LocateDeps): Promise<Located> {
   const st = await stat(cli.path, { bigint: true }).catch(() => null);
   const key = st === null ? null : `${cli.path}\0${st.mtimeNs}`;
   if (key !== null && deps.proofs?.has(key)) return { ok: true, cli };
-  const located = await probe(cli, deps.probeMs ?? PROBE_MS);
+  const located = await probe(cli, deps.probeMs ?? SHEET_TIMING.probeMs);
   if (key !== null && located.ok) deps.proofs?.add(key); // a failure is not kept: a newer Python on the PATH mends it
   return located;
 }

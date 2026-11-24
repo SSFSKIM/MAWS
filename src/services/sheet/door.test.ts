@@ -44,12 +44,36 @@ describe('putLines', () => {
   });
 
   it('passes a verdict through as the door printed it, `applied` included', async () => {
-    const results = { session: 'x', results: [{ key: 'maws-0000000001', state: 'applied', kind: 'answer', id: 'q1', at: '2026-11-23T10:00:00.000Z', verdict: 'applied' }] };
     const file = join(tempDir(), 'results.json');
-    writeFileSync(file, JSON.stringify(results));
     const { home, cli } = door({ FAKE_SMINOS_RESULTS: file });
     const session = seedRecord(home, 'two-surfaces');
-    expect(await putLines(cli, session, [answer('maws-0000000001', ['Yes'])], 10_000)).toEqual({ ok: true, results: results.results });
+    const results = [{ key: 'maws-0000000001', state: 'applied', kind: 'answer', id: 'q1', at: '2026-11-23T10:00:00.000Z', verdict: 'applied' }];
+    writeFileSync(file, JSON.stringify({ session, results }));
+    expect(await putLines(cli, session, [answer('maws-0000000001', ['Yes'])], 10_000)).toEqual({ ok: true, results });
+  });
+
+  it('takes exit 0 only when the object names the session asked for and holds one result for each line sent, by key', async () => {
+    const lines = [answer('maws-0000000001', ['Yes']), answer('maws-0000000002', ['No'], 'q2')];
+    const queued = (key: string) => ({ key, state: 'queued' });
+    const cases: [string, (session: string) => unknown][] = [
+      ['another session', () => ({ session: '5eed0000-0000-4000-8000-0000000000ff', results: [queued('maws-0000000001'), queued('maws-0000000002')] })],
+      ['no session', () => ({ results: [queued('maws-0000000001'), queued('maws-0000000002')] })],
+      ['a result missing', (session) => ({ session, results: [queued('maws-0000000001')] })],
+      ['a result too many', (session) => ({ session, results: [queued('maws-0000000001'), queued('maws-0000000002'), queued('maws-0000000002')] })],
+      ['a key not sent', (session) => ({ session, results: [queued('maws-0000000001'), queued('maws-0000000009')] })],
+    ];
+    for (const [label, printed] of cases) {
+      const file = join(tempDir(), 'results.json');
+      const { home, cli } = door({ FAKE_SMINOS_RESULTS: file });
+      const session = seedRecord(home, 'two-surfaces');
+      writeFileSync(file, JSON.stringify(printed(session)));
+      expect(await putLines(cli, session, lines, 10_000), label).toMatchObject({ ok: false, why: 'failed' });
+    }
+    const file = join(tempDir(), 'results.json');
+    const { home, cli } = door({ FAKE_SMINOS_RESULTS: file });
+    const session = seedRecord(home, 'two-surfaces');
+    writeFileSync(file, JSON.stringify({ session, results: [queued('maws-0000000002'), queued('maws-0000000001')] })); // by key, not by place
+    expect(await putLines(cli, session, lines, 10_000)).toMatchObject({ ok: true });
   });
 
   it('reads exit 2 as refused with the first line of standard error, 3 as no sheet, 75 as busy, and 1 or any other as failed', async () => {
