@@ -104,6 +104,19 @@ describe('NamedGlyph', () => {
     expect(screen.getByRole('button', { name: 'New slide', description: both })).toBe(document.activeElement);
   });
 
+  // the word cut, M5 task 4 (G514): what the press acts on now (the board a comment goes on) is a line of the tooltip
+  // under the word, and part of the description; the name stays the word
+  it('adds what it acts on now under its word, in the tooltip and the description', async () => {
+    render(
+      <NamedGlyph label="Add comment" shortcut="⌘⌥M" detail="On Hero">
+        <Plus />
+      </NamedGlyph>,
+    );
+    expect(screen.getByRole('button', { name: 'Add comment', description: 'On Hero · ⌘⌥M' })).toBeTruthy();
+    await user().tab();
+    expect(tooltip()).toBe('Add comment · ⌘⌥MOn Hero');
+  });
+
   it('says whether it is pressed', () => {
     render(
       <NamedGlyph label="Bold" pressed>

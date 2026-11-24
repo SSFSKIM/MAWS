@@ -75,6 +75,8 @@ describe('the Design System body (X32, Mark-up)', () => {
       ['Set as my default', true],
     ]);
     expect(registration.exports!.map((e) => e.label)).toEqual(['Export for Claude']);
+    // the word cut (G558): the header's actions are icons, each named and tipped by its label
+    expect(registration.actions!.every((a) => a.icon !== undefined)).toBe(true);
     // P23: the ring waits the quiet half second; the edits do not: a tab whose edits wait is never replaced (replacing
     // skips the closeGuard), the ring drawn or not
     const tab = { id: SCOPE.tabId, kind: 'artifact', artifactId: 'ds1', machine: TEST_MACHINE } as TabRef;
