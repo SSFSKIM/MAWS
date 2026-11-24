@@ -78,11 +78,15 @@ export class FakeEngineHost {
   // one hidden row, a newer prestart replacing it, `running` for the same launch, `adopt` taking it at a launch whose spec
   // (but for `sessionId`) and key match, any other launch, forget or withdraw of its generation ending it. `starts` counts
   // every engine start, a prestart's and a fresh launch's (an adoption starts none).
-  readonly prestarts = new Map<string, { generation: number; spec: LaunchSpec; key: string; owner: string; engineSessionId: SessionId }>();
+  // The xhigh panel (scalpel-2, finding 4): each admission keeps the spine's `request`, which a `running` answer moves to
+  // the newer request, and a withdraw names by it (beside the generation, when the spine learned one).
+  readonly prestarts = new Map<string, { generation: number; spec: LaunchSpec; key: string; owner: string; engineSessionId: SessionId; request?: string }>();
   readonly adoptions: LaunchSpec[] = [];
   readonly released: string[] = [];
   starts = 0;
   prestartGate: Promise<void> | null = null; // set: `session.prestart` is answered once it settles
+  prestartReplyLost = false; // set: the next `session.prestart` is handled (admitted) but its reply never reaches the spine
+  relayCached = true; // false: `engine.relayHealth.cached` finds no fresh check (a miss, answered null)
   // M3's fix wave: the connection the spine reaches this host on (its welcome, as the spine root reads it): null while
   // unreachable; `replaceProcess()` is a successor host process on a new connection, whose generations count from 1
   connection: object = {};
@@ -222,6 +226,9 @@ export class FakeEngineHost {
       case 'engine.relayHealth':
         if (this.relayError !== null) throw new Error(this.relayError);
         return this.relay;
+      case 'engine.relayHealth.cached': // ticket 851: the last check while fresh, never a probe
+        if (this.relayError !== null) throw new Error(this.relayError);
+        return this.relayCached ? this.relay : null;
       case 'fs.holders': {
         if (this.registryError !== null) throw new Error(this.registryError);
         const q = input as unknown as FsHoldersQuery;
@@ -244,22 +251,34 @@ export class FakeEngineHost {
         return this.launch((input as { spec: LaunchSpec }).spec, (input as { adopt?: { key: string } }).adopt);
       case 'session.prestart': {
         await this.prestartGate;
-        const { spec, key, owner } = input as unknown as { spec: LaunchSpec; key: string; owner: string };
+        const { spec, key, owner, request } = input as unknown as { spec: LaunchSpec; key: string; owner: string; request?: string };
         if (this.released.includes(owner)) return { status: 'refused', generation: 0, reason: 'released owner' };
+        const lost = this.prestartReplyLost;
+        this.prestartReplyLost = false;
+        const answered = (answer: { status: 'started' | 'running'; generation: number }) => {
+          if (lost) throw new Error('the reply timed out'); // handled here, its reply dropped on the way back
+          return answer;
+        };
         const live = this.prestarts.get(spec.appSessionId);
-        if (live && live.key === key && live.owner === owner && sameLaunch(live.spec, spec)) return { status: 'running', generation: live.generation };
+        if (live && live.key === key && live.owner === owner && sameLaunch(live.spec, spec)) {
+          live.request = request;
+          return answered({ status: 'running', generation: live.generation });
+        }
         this.prestarts.clear(); // one hidden row per host: the latest typing wins
         const generation = ++this.generation;
         this.starts += 1;
-        this.prestarts.set(spec.appSessionId, { generation, spec, key, owner, engineSessionId: randomUUID() as SessionId });
+        this.prestarts.set(spec.appSessionId, { generation, spec, key, owner, engineSessionId: randomUUID() as SessionId, request });
         const held = this.answerHold;
         this.answerHold = null;
         await held; // admitted; the answer in transit
-        return { status: 'started', generation };
+        return answered({ status: 'started', generation });
       }
-      case 'session.prestart.withdraw':
-        if (this.prestarts.get(id)?.generation === input.generation) this.prestarts.delete(id);
+      case 'session.prestart.withdraw': {
+        const live = this.prestarts.get(id);
+        const named = input.generation !== undefined || input.request !== undefined;
+        if (live && named && (input.generation === undefined || live.generation === input.generation) && (input.request === undefined || live.request === input.request)) this.prestarts.delete(id);
         return undefined;
+      }
       case 'session.prestart.release':
         this.released.push(input.owner as string);
         for (const [key, p] of this.prestarts) if (p.owner === input.owner) this.prestarts.delete(key);

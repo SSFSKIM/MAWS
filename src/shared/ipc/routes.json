@@ -508,6 +508,7 @@
   "engine.policy.set",
   "engine.prestarts",
   "engine.relayHealth",
+  "engine.relayHealth.cached",
   "engine.sessions",
   "engine.shutdown",
   "fs.state",

@@ -15,7 +15,7 @@ import type { LaunchMode } from '@shared/sessions/select-source';
 import { ownerChannelLaunch } from '../owner/launch';
 import { realOrSelf } from './context';
 import { seedPermissionMode, trustMapping } from './launch-mapping';
-import { hostLaunchOf } from './machine-route';
+import { guardResolution, hostLaunchOf } from './machine-route';
 import { servedSet } from './served-set';
 import { existingWorktreeOf, intentSpecOf, wantedSet, type Setup } from './setup';
 import { judgeIntent } from './start-guards';
@@ -63,6 +63,10 @@ export async function prestartLaunch(s: Setup, intent: SetupIntent, browserSocke
   if (location.kind === 'newWorktree') return { skip: 'new_worktree: its checkout is made at Send' };
   const cwd = location.kind === 'existingWorktree' ? (await existingWorktreeOf(s, location)).path : await realOrSelf(location.path);
   const trust = await trustStateOf(cwd, { git: s.git, env: s.env });
+  // the xhigh panel (scalpel-3, finding 3): the trust card's rule on this read, the one the spec is built from (trust can
+  // be revoked after the guards' read); a decision answers only the key it was given for, as Send's guards bind it
+  const decision = intent.trustKey === trust.trustKey ? intent.trust : 'unanswered';
+  if (!trust.trusted && decision === 'unanswered') return { skip: 'needs_trust: a start would show its trust card' };
   const mapping = trustMapping({ decision: intent.trust, decisionKey: intent.trustKey, trustRecorded: intent.progress.trustRecorded }, trust);
   if (mapping.bootstrap) return { skip: 'trust_bootstrap: a start would record trust first' };
   const mode = intent.permissionMode ?? seedPermissionMode(await s.userDefaults());
@@ -71,6 +75,10 @@ export async function prestartLaunch(s: Setup, intent: SetupIntent, browserSocke
   const sent = await hostLaunchOf(s, decided.spec);
   if ('refused' in sent) return { skip: `route: ${sent.refused}` };
   if (sent.key === null) return { skip: 'route: the machine route’s base URL is not known for certain here' };
+  // the xhigh panel (scalpel-3, finding 4): the machine route's guards on the resolution the spec was built from, which
+  // settings may have moved since the guards' own (a hidden machine-route launch has no relay check of its own)
+  const machine = sent.resolution === null ? null : await guardResolution(s, sent.resolution, { model: intent.model, startAnyway: false, relay: 'cached' });
+  if (machine !== null) return { skip: 'refused' in machine ? `route: ${machine.refused.message}` : 'relay_unreachable: a start would show the relay’s sheet' };
   return { spec: sent.spec, key: sent.key };
 }
 
@@ -83,8 +91,14 @@ export async function prestartLaunch(s: Setup, intent: SetupIntent, browserSocke
 // - the id's host calls, one at a time in order (`serial`): a dispatch with its answer, and each withdraw. A withdraw
 //   queued behind a dispatch on its way therefore names that dispatch's generation, and a newer request dispatches only
 //   after every withdraw queued before it was sent, so a late cleanup never meets a generation a newer request was told.
-// - the generation the host gave last, with the engine host connection it was given on: it is withdrawn only on that
-//   connection (a successor host counts its own from 1, and the old one's prestarts died with its connection).
+// - the request sent last, by the name the spine gave it, with the engine host connection it was sent on and the
+//   generation the host answered (null until then): it is withdrawn only on that connection (a successor host counts its
+//   own from 1, and the old one's prestarts died with its connection), by its name and, once known, its generation. The
+//   xhigh panel (scalpel-2, finding 4): it is kept from the moment it is sent, so an admission whose reply timed out (the
+//   host handled it all the same) is still withdrawn; a refusal forgets it.
+// - D1's latest typing across intents (the xhigh panel, scalpel-2 finding 5): a request does not dispatch while another
+//   intent's newer request has reached this connection and is still live, so an older draft's request, delayed in its
+//   guards, never evicts a newer draft's engine (`overtaken`).
 // - whether a request reached the host, which Send's launch reads once to offer the host its engine.
 // - the tokens withdrawn that ended no line (M4, Decision Log 14): nothing orders the window's withdraw behind the request
 //   carrying its token, so a withdraw that arrives first leaves a tombstone and that request is answered `skipped`,
@@ -96,7 +110,7 @@ interface PrestartId {
   fences: number;
   calls: Promise<unknown>;
   pending: number; // host calls queued or under way
-  known: { generation: number; link: PrestartLink } | null;
+  known: { request: string; generation: number | null; link: PrestartLink } | null;
   requested: boolean;
   withdrawn: string[]; // tombstones, oldest first
 }
@@ -188,22 +202,35 @@ export class PrestartRequests {
     return run;
   }
 
-  // In a dispatch's call: the request is sent now (Send's launch of the intent offers to adopt from here on), and what
-  // the host answered on `link` (generation 0: refused).
-  dispatching(appSessionId: AppSessionId): void {
-    this.of(appSessionId).requested = true;
+  // In a dispatch's call: the request `request` is sent on `link` now (Send's launch of the intent offers to adopt from
+  // here on, and a withdraw names it whether or not its answer comes), and what the host answered (generation 0: refused).
+  dispatching(appSessionId: AppSessionId, request: string, link: PrestartLink): void {
+    const id = this.of(appSessionId);
+    id.requested = true;
+    id.known = { request, generation: null, link };
   }
-  admitted(appSessionId: AppSessionId, generation: number, link: PrestartLink): void {
-    if (generation > 0) this.of(appSessionId).known = { generation, link };
+  admitted(appSessionId: AppSessionId, request: string, generation: number): void {
+    const id = this.ids.get(appSessionId);
+    if (id?.known?.request !== request) return;
+    id.known = generation > 0 ? { ...id.known, generation } : null;
   }
 
-  // In a withdraw's call: the generation to withdraw on `link` (null: none, or one another connection gave); the id's
-  // generation is forgotten either way.
-  takeKnown(appSessionId: AppSessionId, link: PrestartLink | null): number | null {
+  // Whether another intent's request, newer than `epoch` and still its live line, has reached `link`: the latest typing
+  // keeps the host's one slot (D1).
+  overtaken(appSessionId: AppSessionId, epoch: number, link: PrestartLink): boolean {
+    for (const [other, id] of this.ids) {
+      if (other !== appSessionId && id.line !== null && id.line.epoch > epoch && id.known?.link === link) return true;
+    }
+    return false;
+  }
+
+  // In a withdraw's call: the request to withdraw on `link`, by its name and the generation known (null: none, or one sent
+  // on another connection); the id's request is forgotten either way.
+  takeKnown(appSessionId: AppSessionId, link: PrestartLink | null): { request: string; generation: number | null } | null {
     const id = this.ids.get(appSessionId);
     const known = id?.known ?? null;
     if (id !== undefined) id.known = null;
-    return known !== null && known.link === link ? known.generation : null;
+    return known !== null && known.link === link ? { request: known.request, generation: known.generation } : null;
   }
 
   // Whether a request of this id reached the host, asked once by the start whose guards passed.

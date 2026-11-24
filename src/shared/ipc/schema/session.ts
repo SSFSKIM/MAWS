@@ -113,6 +113,9 @@ const MessageUuidOutput = z.strictObject({ messageUuid: MessageUuidSchema });
 // Ticket 851, M2: a prestart's key (what decides its launch beyond the spec, the spine's) and its owner (a spine root)
 export const PrestartKeySchema = z.string().max(4096);
 export const PrestartOwnerSchema = z.string().min(1).max(256);
+// The xhigh panel (scalpel-2, finding 4): the spine's name for one `session.prestart` it sent, which a withdraw can name
+// when the host's reply (its generation) never came back
+export const PrestartRequestSchema = z.string().min(1).max(64);
 
 const c3Commands = {
   // lifecycle and state
@@ -921,9 +924,12 @@ export const TELL_SESSION_COMMANDS = Object.keys(tellCommands) as (keyof typeof 
 // the spec, compared at adopt); `running` when the same launch is already admitted or hidden, `refused` with the reason
 // (generation 0) when it cannot be. `withdraw` ends that generation while it is hidden; `release` ends every prestart of
 // the owner and admits none for it again.
+// The xhigh panel (scalpel-2, finding 4): `request`, the spine's name for the request, kept with the admission (a
+// `running` answer moves it to the newer request); a withdraw names the request, the generation, or both, and ends the
+// prestart only when every name it gives matches, so an admission whose reply timed out is still withdrawn.
 const prestartCommands = {
-  'session.prestart': { input: z.strictObject({ spec: LaunchSpecSchema, key: PrestartKeySchema, owner: PrestartOwnerSchema }), output: z.strictObject({ status: z.enum(['started', 'running', 'refused']), generation: z.number().int().nonnegative(), reason: z.string().optional() }), owner: 'engine-host' },
-  'session.prestart.withdraw': host(input({ generation: z.number().int().positive() }), z.void()),
+  'session.prestart': { input: z.strictObject({ spec: LaunchSpecSchema, key: PrestartKeySchema, owner: PrestartOwnerSchema, request: PrestartRequestSchema.optional() }), output: z.strictObject({ status: z.enum(['started', 'running', 'refused']), generation: z.number().int().nonnegative(), reason: z.string().optional() }), owner: 'engine-host' },
+  'session.prestart.withdraw': host(input({ generation: z.number().int().positive().optional(), request: PrestartRequestSchema.optional() }), z.void()),
   'session.prestart.release': { input: z.strictObject({ owner: PrestartOwnerSchema }), output: z.void(), owner: 'engine-host' },
 } as const satisfies Record<`session.${string}`, CommandSpec<z.ZodType, z.ZodType>>;
 export const PRESTART_SESSION_COMMANDS = Object.keys(prestartCommands) as (keyof typeof prestartCommands)[];

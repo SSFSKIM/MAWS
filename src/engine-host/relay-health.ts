@@ -43,6 +43,19 @@ function probe(url: string, timeoutMs: number): Promise<RelayHealth> {
   });
 }
 
+// Ticket 851 (the xhigh panel, scalpel-3 finding 5): the last check of `url` while it is fresh, never a probe; null when
+// there is none (engine.relayHealth.cached, the prestart's read while its person types, and a hidden launch's).
+export function cachedRelay(url: string = RELAY_URL): RelayHealth | null {
+  const hit = cache.get(url);
+  return hit !== undefined && hit.expiresAt > Date.now() ? hit.health : null;
+}
+
+// What a cache-only read stands on when it finds no fresh check: a relay not known to answer, so the prestart is skipped
+// (never shown: a prestart's card is a skip, and a hidden launch's refusal ends it unseen).
+export function relayNotChecked(url: string = RELAY_URL): RelayHealth {
+  return { url, ok: false, status: null, latencyMs: null, checkedAt: new Date().toISOString(), error: 'no fresh check of the relay (a prestart never probes)' };
+}
+
 // Results are cached 5 s per url; `force` bypasses the cache (engine.relayHealth { force: true }, M5).
 export async function checkRelay(url: string = RELAY_URL, timeoutMs: number = RELAY_HEALTH_TIMEOUT_MS, opts: { force?: boolean } = {}): Promise<RelayHealth> {
   const now = Date.now();
