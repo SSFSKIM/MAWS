@@ -613,6 +613,28 @@ describe('the owner’s actions', () => {
     await until(() => editor().view.dom.contains(document.activeElement), 'the keyboard in the document');
   });
 
+  // The second medium review: a restore that lands after the person moved the keyboard elsewhere leaves it there.
+  it('leaves the keyboard where the person moved it while the restore ran', async () => {
+    const { history: h } = await setup(async ({ history: hist }) => {
+      hist.version('named', HUMAN, { label: 'Clean draft' });
+    });
+    await openHistory();
+    click(row('Clean draft'));
+    await previewing();
+    const working = h.restore.bind(h);
+    let land = () => {};
+    h.restore = (...args: Parameters<typeof working>) => new Promise((resolve) => { land = () => resolve(working(...args)); });
+    await userEvent.click(within(bar()).getByRole('button', { name: 'Restore this version' }));
+    await userEvent.click(within(screen.getByRole('alertdialog', { name: 'Restore this version?' })).getByRole('button', { name: 'Restore' }));
+    const elsewhere = document.body.appendChild(document.createElement('button'));
+    elsewhere.textContent = 'Elsewhere';
+    elsewhere.focus();
+    land();
+    await until(() => screen.queryByRole('toolbar', { name: 'Version preview' }) === null, 'history left');
+    expect(document.activeElement).toBe(elsewhere);
+    elsewhere.remove();
+  });
+
   it('makes a copy of the selected version', async () => {
     const { history: h } = await setup(async ({ history: hist, agentWrites }) => {
       hist.version('named', HUMAN, { label: 'Keep this' });

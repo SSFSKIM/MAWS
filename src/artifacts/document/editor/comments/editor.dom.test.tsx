@@ -588,6 +588,25 @@ describe('the word cut in the comments panel', () => {
     expect(rail().querySelector('.doc-rail-empty')).toBeNull();
   });
 
+  // The second medium review: under All, Deleted (N) counts the resolved threads on deleted text, which Resolved lists;
+  // opening it opens Resolved too, so what it counts is shown even where Resolved had been folded.
+  it('opens Resolved with Deleted when the deleted threads it counts are resolved ones', async () => {
+    const { editor, handle } = await mount(content());
+    act(() => void select(editor(), 'ships quarterly'));
+    act(() => fireEvent.click(commentButton()));
+    const [live] = listThreads(handle.doc);
+    reply(handle.doc, live!.id, { id: 'r1', by: SESSION, at: 2, body: 'Monthly?' });
+    addThread(handle.doc, { threadId: 'zz000002', tabId: TAB, blockId: 'p1', quote: 'Also gone', anchor: { start: null, end: null, block: null }, by: SESSION, at: Date.now() + 1 });
+    act(() => void resolve(handle.doc, live!.id, { kind: 'human' }, Date.now()));
+    act(() => void resolve(handle.doc, 'zz000002', { kind: 'human' }, Date.now()));
+    act(() => fireEvent.click(within(toolbar()).getByRole('button', { name: /^Comments/ })));
+    await quiet();
+    act(() => fireEvent.click(within(rail()).getByRole('button', { name: 'Resolved (1)' })));
+    act(() => fireEvent.change(within(rail()).getByRole('searchbox', { name: 'Search comments' }), { target: { value: 'Also gone' } }));
+    act(() => fireEvent.click(within(rail()).getByRole('button', { name: 'Deleted (1)' })));
+    expect(within(rail()).getAllByRole('group').map((card) => card.dataset.thread)).toEqual(['zz000002']);
+  });
+
   it('counts in Deleted (N) the deleted threads the status filter and the search let through, and hides it at none', async () => {
     const { editor, handle } = await mount(content());
     act(() => void select(editor(), 'ships quarterly'));
