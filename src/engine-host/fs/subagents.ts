@@ -40,6 +40,32 @@ export class SubagentReader {
 
   // Every agent transcript under `<sessionDir>/subagents/`, ordered by path; an empty list when there is none.
   async list(sessionDir: string): Promise<SubagentEntry[]> {
+    const found = await this.files(sessionDir);
+    const agents = await Promise.all(
+      found.map(async (file): Promise<SubagentEntry | null> => {
+        const info = await statOrNull(join(file.dir, file.name));
+        return info === null ? null : this.entry(file, info); // null: gone between listing and stat
+      }),
+    );
+    return agents.filter((agent) => agent !== null);
+  }
+
+  // 2026-11-24, tail-first: the agents whose transcript was written at or after `sinceMs`, read as `list` reads them; the
+  // rest are only stat'ed. A tail of the session's transcript names only agents it started, whose transcripts were
+  // written since, so their metas are read without the head of every older agent's transcript that `list` reads.
+  async recent(sessionDir: string, sinceMs: number): Promise<SubagentEntry[]> {
+    const found = await this.files(sessionDir);
+    const agents = await Promise.all(
+      found.map(async (file): Promise<SubagentEntry | null> => {
+        const info = await statOrNull(join(file.dir, file.name));
+        return info === null || info.mtimeMs < sinceMs ? null : this.entry(file, info);
+      }),
+    );
+    return agents.filter((agent) => agent !== null);
+  }
+
+  // The agent transcripts under `<sessionDir>/subagents/`, in the walk's order.
+  private async files(sessionDir: string): Promise<AgentFile[]> {
     const found: AgentFile[] = [];
     const walk = async (dir: string, rel: string, depth: number): Promise<void> => {
       let entries;
@@ -59,15 +85,7 @@ export class SubagentReader {
       }
     };
     await walk(join(sessionDir, 'subagents'), '', 0);
-    found.sort(byPlace);
-
-    const agents = await Promise.all(
-      found.map(async (file): Promise<SubagentEntry | null> => {
-        const info = await statOrNull(join(file.dir, file.name));
-        return info === null ? null : this.entry(file, info); // null: gone between listing and stat
-      }),
-    );
-    return agents.filter((agent) => agent !== null);
+    return found.sort(byPlace);
   }
 
   // The listing `list` would answer now, read from the agent files named changed alone: `listing` is what `list` (or
