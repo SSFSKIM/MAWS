@@ -213,7 +213,7 @@ For the tool a delivery is known when it sees, stored in the main conversation, 
 
 A dismissal never starts a turn: it waits for the next envelope or the next of the other two routes. This is today's rule (sminos 1.47.0), kept.
 
-Whatever is owed at a session's start, an answer queued while the session was stopped or an outcome accepted before a turn died, never starts a turn by itself: it is applied at the start and rides the first prompt that enters (the human's, a peer session's message, a schedule's) as context, and its lines say when the question was asked and answered and that the session was stopped meanwhile, so the model can weigh its age. The terminal says, at the resume, how many answers will go with the next message.
+Whatever is owed at a session's start, an answer queued while the session was stopped or an outcome accepted before a turn died, never starts a turn by itself: it is applied at the start and leaves with whichever route opens first, usually the first prompt that enters (the human's, a peer session's message, a schedule's) and otherwise the turn a fresh answer starts, and its lines say when the question was asked and answered and that the session was stopped meanwhile, so the model can weigh its age. The terminal says, at the resume, how many answers will go with the next message.
 
 #### 5.3 The envelope
 
