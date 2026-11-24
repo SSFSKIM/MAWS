@@ -611,23 +611,29 @@ export class SessionService {
     this.refuseWhileStarting(appSessionId);
     // ticket 851 (R4-4; M3's review, finding 2): fenced until the draft is gone, so no request of it begins or dispatches
     // meanwhile; the forget below ends the host's prestart, and what the spine knew of it goes at the end
+    // M4's review, finding 6: the window's tombstones go only once the draft is gone; a removal that failed keeps them
+    const gone = { intent: false };
     const unfence = this.prestarts.fence(appSessionId);
     try {
-      return await this.discardFenced(appSessionId);
+      return await this.discardFenced(appSessionId, gone);
     } finally {
-      this.endFence(appSessionId, unfence, false, true);
+      this.endFence(appSessionId, unfence, false, gone.intent);
     }
   }
 
-  private discardFenced(appSessionId: AppSessionId): Promise<{ leftover: { worktree: { path: string; branch: string | null } } | null }> {
+  private discardFenced(appSessionId: AppSessionId, gone: { intent: boolean }): Promise<{ leftover: { worktree: { path: string; branch: string | null } } | null }> {
     return this.serial(appSessionId, async () => {
       await this.ready();
       const intent = this.deps.intents.get(appSessionId);
-      if (intent === null) return { leftover: null };
+      if (intent === null) {
+        gone.intent = true;
+        return { leftover: null };
+      }
       this.refuseWhileStarting(appSessionId);
       if (intent.progress.bootstrap !== null) await this.forgetQuietly(intent.progress.bootstrap.appSessionId);
       if (this.deps.index.sessions.get(appSessionId) === null) await this.forgetQuietly(appSessionId);
       await this.deps.intents.remove(appSessionId);
+      gone.intent = true;
       this.reconcileFailures.delete(appSessionId);
       this.deps.emit('session.intent.changed', { appSessionId, intent: null });
       const w = intent.progress.worktree;
@@ -908,7 +914,9 @@ export class SessionService {
   // `session.intent.prestart.withdraw`: the prestart serving the token's request goes, unless the token is no longer
   // current or a Send has started (whose launch adopts or ends it); otherwise nothing. The window may withdraw before its
   // request was answered (its caller's deadline passed, or it moved first): what that request is admitted is withdrawn.
+  // With the prestart switched off nothing is kept (M4's review, finding 7): no request can begin to need a tombstone.
   async withdrawPrestart(appSessionId: AppSessionId, token: string): Promise<void> {
+    if (this.deps.prestart === undefined) return;
     if (this.prestarts.end(appSessionId, token)) await this.withdrawKnown(appSessionId);
   }
 
@@ -986,10 +994,10 @@ export class SessionService {
   // a failed setup may not have reached its launch, a discard's forget already ended it), queued behind a dispatch still
   // on its way. Counted in the service's work.
   // With no prestart (the switches off) nothing here runs: the flag-off path is today's.
-  private endFence(appSessionId: AppSessionId, unfence: () => void, launched: boolean, discarded = false): void {
+  private endFence(appSessionId: AppSessionId, unfence: () => void, launched: boolean, intentGone = false): void {
     if (this.deps.prestart !== undefined) {
       this.prestarts.takeRequested(appSessionId); // a later start offers no adoption unless a request reaches the host again
-      if (launched || discarded) this.prestarts.clearWithdrawn(appSessionId); // M4 (Decision Log 14): the intent is gone
+      if (launched || intentGone) this.prestarts.clearWithdrawn(appSessionId); // M4 (Decision Log 14): the intent is gone
       if (launched) void this.prestarts.serial(appSessionId, async () => void this.prestarts.takeKnown(appSessionId, null));
       else void this.work.track(this.withdrawKnown(appSessionId));
     }

@@ -742,6 +742,31 @@ describe('the window’s withdraw ahead of its own request (M4, Decision Log 14)
   });
 });
 
+describe('M4’s review: the tombstones', () => {
+  const kept = (id: AppSessionId) => (h.service as unknown as { prestarts: { ids: Map<string, { withdrawn: string[] }> } }).prestarts.ids.get(id)?.withdrawn ?? [];
+
+  it('6. a discard whose removal of the draft fails keeps its tombstones: a late request under a withdrawn token dispatches nothing', async () => {
+    await harness();
+    const id = await create();
+    await h.service.withdrawPrestart(id, 'withdrawn-early');
+    const store = (h.service as unknown as { deps: { intents: IntentStore } }).deps.intents;
+    store.remove = async () => {
+      throw new Error('the draft could not be removed');
+    };
+    await expect(h.service.discard(id)).rejects.toThrow('the draft could not be removed');
+    expect(intentFile(id)).not.toBeNull(); // the draft stays
+    expect(await ask(id, 'withdrawn-early')).toMatchObject({ status: 'skipped', token: null });
+    expect(prestartCalls()).toEqual([]);
+  });
+
+  it('7. a spine with the prestart switched off keeps no tombstone for a withdraw', async () => {
+    await harness({ prestart: undefined });
+    const id = await create();
+    await h.service.withdrawPrestart(id, 'withdrawn-early');
+    expect(kept(id)).toEqual([]);
+  });
+});
+
 describe('the switches (D9)', () => {
   it('prestarts in launch mode index; under MAWS_E2E=1 only with MAWS_E2E_PRESTART=1; never in launch mode scenario (the stub source)', () => {
     expect(prestartSwitchedOn({}, 'index')).toBe(true);
