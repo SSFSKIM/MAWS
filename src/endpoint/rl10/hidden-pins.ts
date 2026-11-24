@@ -48,13 +48,25 @@ export class HiddenPins {
     this.#hidden.set(session, ++this.#stamp);
   }
 
-  /** `session` was committed: no longer hidden; its held frame, taken out, or null. */
-  reveal(session: string): Record<string, unknown> | null {
+  /**
+   * `session` was committed: no longer hidden. Its held frame stays held until the replay takes it in its turn (`take`),
+   * so a departure heard before that turn still drops it (M4's review, finding 3).
+   */
+  reveal(session: string): void {
     this.#since?.add(session);
     this.#hidden.delete(session);
+  }
+
+  /** The frame held for `session`, taken out; null with none. */
+  take(session: string): Record<string, unknown> | null {
     const frame = this.#held.get(session) ?? null;
     this.#held.delete(session);
     return frame;
+  }
+
+  /** Whether a frame is held for `session`. */
+  isHeld(session: string): boolean {
+    return this.#held.has(session);
   }
 
   /** `session`'s prestart ended: forgotten, its held frame dropped, a frame of it from now on dropped. */

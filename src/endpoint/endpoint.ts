@@ -735,6 +735,8 @@ export class Endpoint implements EndpointModule {
         if (owner === 'machine' && message.name === 'session.changed') void this.rl10.members.recordChanged((message.payload as { record?: unknown } | null)?.record);
         // ticket 851 (R4-6): a prestart's pin hidden, committed or ended: its sminos member held, processed or dropped
         if (owner === 'engine-host' && message.name === 'engine.prestart') this.rl10.members.prestart(message.payload).catch((error: unknown) => log(`endpoint: a prestart's word was not taken: ${(error as Error).message}`));
+        // ticket 851 (M4's review, finding 1): the engine host's start-up adoptions ended: the pins its hidden set left out settle
+        if (owner === 'engine-host' && message.name === 'host.supervisorStatus') this.rl10.members.hostStatus(message.payload).catch((error: unknown) => log(`endpoint: the prestart pins left out were not settled: ${(error as Error).message}`));
         this.sessionSafe?.event(owner, message); // P5 O7 M5a2: a record moved under an artifact answer being told
         this.laneB.event(owner, message);
         this.streams.event(owner, message);

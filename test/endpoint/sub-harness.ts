@@ -685,6 +685,8 @@ export type StartOptions = {
   amend?: (state: OrgState) => void;
   /** P5 O8 M6b: another offer table (`EndpointOptions.authorization.offers`: a build without the record acts). */
   offers?: Offers;
+  /** Ticket 851 (M4's review, finding 8): the index the project registry reads (`EndpointOptions.projectsSource`); none, no record is signed. */
+  projectsSource?: EndpointOptions['projectsSource'];
 };
 
 export async function startEndpoint(org: Org, started: Fixture[], options: StartOptions = {}): Promise<Fixture> {
@@ -740,6 +742,7 @@ export async function startEndpoint(org: Org, started: Fixture[], options: Start
     },
     subscriptions: options.subscriptions,
     ...(options.acquireWithinMs === undefined ? {} : { acquireWithinMs: options.acquireWithinMs }),
+    ...(options.projectsSource === undefined ? {} : { projectsSource: options.projectsSource }),
   });
   records.bindLaneA(endpoint.rl10.members);
   await endpoint.start(services);

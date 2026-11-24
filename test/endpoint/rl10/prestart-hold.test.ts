@@ -55,9 +55,15 @@ function machine({ heldTurns = false }: { heldTurns?: boolean } = {}) {
   const reads: string[] = [];
   const turns: Turn[] = [];
   let prestartsHeld: Promise<void> | null = null;
+  let goneHeld: Promise<void> | null = null;
+  // the engine host's start: its adoptions under way (`holder.adopting`); `away`, the reads it cannot answer
+  let adopting = false;
+  const away = new Set<string>();
   const members = new Members({
     dispatch: async (_owner, name) => {
       reads.push(name);
+      if (away.has(name)) throw new Error('the engine host is away');
+      if (name === 'host.supervisorStatus') return { t: 'res', id: '0', ok: true, value: { holder: { adopting } } };
       if (name === 'engine.sessions') return { t: 'res', id: '0', ok: true, value: [...live].map(([engineSessionId, appSessionId]) => ({ engineSessionId, appSessionId })) };
       if (name === 'engine.prestarts') {
         const answer = { hidden: [...hidden] };
@@ -72,6 +78,7 @@ function machine({ heldTurns = false }: { heldTurns?: boolean } = {}) {
         listed.set(report.session, report);
       },
       gone: async (session) => {
+        await goneHeld;
         if (listed.delete(session)) withdrawn.push(session);
       },
     },
@@ -97,6 +104,9 @@ function machine({ heldTurns = false }: { heldTurns?: boolean } = {}) {
     live,
     setHidden: (next: Array<{ appSessionId: string; engineSessionId: string }>) => void (hidden = next),
     holdPrestarts: (until: Promise<void>) => void (prestartsHeld = until),
+    holdGone: (until: Promise<void> | null) => void (goneHeld = until),
+    setAdopting: (now: boolean) => void (adopting = now),
+    away,
     marks: () => marks,
     writes,
     listed,
@@ -387,5 +397,108 @@ describe('D11: the re-join when the spine says a record changed', () => {
     await m.members.recordChanged(record());
     await m.members.recordChanged(record({ engineSessionId: null }));
     expect(m.reads.slice(before)).toEqual([]);
+  });
+});
+
+describe('M4’s review', () => {
+  it('1. a pin the successor host no longer names while its adoptions run is not ended: committed once they have ended', async () => {
+    const m = machine();
+    await m.members.prestart(told(DRAFT_ENGINE, 'hidden'));
+    await m.members.member(memberFrame(DRAFT_ENGINE));
+    // the engine host died after the native promotion, before `committed` was heard: its successor names no hidden pin,
+    // and lists the promoted engine only once its start has adopted it
+    m.setHidden([]);
+    m.setAdopting(true);
+    await m.members.restatePrestarts();
+    expect(traces(m, DRAFT_ENGINE)).toEqual(NONE);
+    m.live.set(DRAFT_ENGINE, APP);
+    m.setAdopting(false);
+    await m.members.hostStatus({ holder: { adopting: false } });
+    expect(m.members.listingId(DRAFT_ENGINE)).toBe(APP);
+    expect(m.listed.has(APP)).toBe(true);
+  });
+
+  it('1. a read the engine host cannot answer ends no pin: the next link settles it', async () => {
+    for (const read of ['host.supervisorStatus', 'engine.sessions']) {
+      const m = machine();
+      await m.members.prestart(told(DRAFT_ENGINE, 'hidden'));
+      await m.members.member(memberFrame(DRAFT_ENGINE));
+      m.setHidden([]);
+      m.away.add(read);
+      await m.members.restatePrestarts();
+      expect(traces(m, DRAFT_ENGINE), read).toEqual(NONE);
+      m.away.delete(read);
+      m.live.set(DRAFT_ENGINE, APP);
+      await m.members.restatePrestarts();
+      expect(m.members.listingId(DRAFT_ENGINE), read).toBe(APP);
+    }
+  });
+
+  it('3. a held member left out of a restatement still under way when its commit is heard is not processed by the replay', async () => {
+    const m = machine({ heldTurns: true });
+    await m.members.member(memberFrame(OTHER, { lane: 'A' })); // listed under its session: its withdrawal awaits the hub
+    await m.members.prestart(told(DRAFT_ENGINE, 'hidden'));
+    await m.members.member(memberFrame(DRAFT_ENGINE));
+    m.members.welcome();
+    let release!: () => void;
+    m.holdGone(new Promise<void>((resolve) => (release = resolve)));
+    const restating = m.members.restated(); // RL10's turn: the other member's withdrawal first, then the pin's departure
+    m.live.set(DRAFT_ENGINE, APP);
+    const committed = m.members.prestart(told(DRAFT_ENGINE, 'committed')); // its replay waits for the next turn
+    release();
+    await restating;
+    await m.runTurns();
+    await committed;
+    expect(traces(m, DRAFT_ENGINE)).toEqual(NONE);
+    expect(m.moved).toEqual([]);
+  });
+
+  it('4. a member processed before its hidden word and gone before it is heard leaves no trace once it is', async () => {
+    for (const word of ['hidden', 'ended'] as const) {
+      for (const leaves of ['gone', 'left out of a restatement'] as const) {
+        const m = machine();
+        await m.members.member(memberFrame(DRAFT_ENGINE)); // no word heard yet: unjoined, marked by its engine session
+        expect(m.marks().engineSessionIds).toEqual([DRAFT_ENGINE]);
+        if (leaves === 'gone') await m.members.member({ t: 'member', session: DRAFT_ENGINE, gone: true });
+        else {
+          m.members.welcome();
+          await m.members.restated();
+        }
+        await m.members.prestart(told(DRAFT_ENGINE, word));
+        expect(m.marks().engineSessionIds, `${word}, ${leaves}`).toEqual([]);
+        expect(m.moved, `${word}, ${leaves}`).toEqual([[DRAFT_ENGINE, 'held']]); // RL10 drops its audience history
+      }
+    }
+  });
+
+  it('4. a joined member that left keeps its marks at a word of its engine session', async () => {
+    const m = machine();
+    m.live.set(DRAFT_ENGINE, APP);
+    await m.members.member(memberFrame(DRAFT_ENGINE));
+    await m.members.member({ t: 'member', session: DRAFT_ENGINE, gone: true });
+    const before = m.marks();
+    await m.members.prestart(told(DRAFT_ENGINE, 'ended'));
+    expect(m.marks()).toEqual(before);
+    expect(m.marks().appSessionIds).toEqual([APP]);
+    expect(m.moved).toEqual([]);
+  });
+
+  it('5. the re-join at a record’s change joins only the member that record names, under that record’s app session', async () => {
+    const m = machine();
+    await m.members.member(memberFrame(DRAFT_ENGINE));
+    await m.members.member(memberFrame(OTHER));
+    m.live.set(DRAFT_ENGINE, APP);
+    m.live.set(OTHER, APP2); // eligible too, but no record of it changed
+    await m.members.recordChanged({ appId: APP, engineSessionId: DRAFT_ENGINE, archived: false, title: { text: 'the first message', source: 'none' } });
+    expect(m.members.appSessionId(DRAFT_ENGINE)).toBe(APP);
+    expect(m.members.appSessionId(OTHER)).toBeNull();
+    expect(m.marks().appSessionIds).toEqual([APP]);
+    expect(m.marks().engineSessionIds).toEqual([OTHER]);
+    // a record naming an engine session the live rows put under another app session joins nothing
+    const n = machine();
+    await n.members.member(memberFrame(DRAFT_ENGINE));
+    n.live.set(DRAFT_ENGINE, APP2);
+    await n.members.recordChanged({ appId: APP, engineSessionId: DRAFT_ENGINE, archived: false, title: { text: 'x', source: 'none' } });
+    expect(n.members.appSessionId(DRAFT_ENGINE)).toBeNull();
   });
 });
