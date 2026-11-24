@@ -523,16 +523,18 @@ The observable state that closes the unit as a whole; each item is observed in t
 
 Approved design: commit `2fe16c685` (the design, 2026-11-23). Approved cut: commit `d845b4973` (the roadmap after its three reviews), by the owner on 2026-11-23, with the instruction to start what nothing blocks.
 
+Tickets are on MAWS's board, children of #600.
+
 | child | artifact | status |
 |---|---|---|
-| C0 engine probes | findings in §12's sections; fixtures under `spikes/protocol-probe/` and the probe plugin's transcripts | not-dispatched |
-| C1 behaviour baseline | ledger in doperpowers `docs/doperpowers/ledgers/`; the evals under `tests/output-styles/` | not-dispatched |
-| C2 the sheet in sminos | execution document in doperpowers `docs/doperpowers/plans/` | not-dispatched |
-| C3 the sheet in the MAWS app | execution document in `docs/doperpowers/plans/` | not-dispatched |
-| C4 the local page | execution document in `docs/doperpowers/plans/` | not-dispatched |
-| C5 MAWS-run sessions (ticket 600) | execution document in `docs/doperpowers/plans/` | not-dispatched |
-| C6 the phone and other machines | its own cut at dispatch | not-dispatched (deliberately late) |
-| C7 the flip | ledgers in both repositories' `docs/doperpowers/ledgers/` | not-dispatched (deliberately late) |
+| C0 engine probes (#865) | findings in §12's sections; fixtures under `spikes/protocol-probe/` and the probe plugin's transcripts | not-dispatched |
+| C1 behaviour baseline (#866) | ledger in doperpowers `docs/doperpowers/ledgers/`; the evals under `tests/output-styles/` | not-dispatched |
+| C2 the sheet in sminos (#867) | execution document in doperpowers `docs/doperpowers/plans/` | not-dispatched |
+| C3 the sheet in the MAWS app (#868) | execution document in `docs/doperpowers/plans/` | not-dispatched |
+| C4 the local page (#869) | execution document in `docs/doperpowers/plans/` | not-dispatched |
+| C5 MAWS-run sessions (#870) | execution document in `docs/doperpowers/plans/` | not-dispatched |
+| C6 the phone and other machines (#871) | its own cut at dispatch | not-dispatched (deliberately late) |
+| C7 the flip (#872) | ledgers in both repositories' `docs/doperpowers/ledgers/` | not-dispatched (deliberately late) |
 
 ## Outcomes & Retrospective
 
