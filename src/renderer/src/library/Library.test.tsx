@@ -851,9 +851,26 @@ describe('Make something new', () => {
     expect(within(made).queryByRole('progressbar')).toBeNull();
     expect((card(made, 'Document') as HTMLButtonElement).disabled, 'nothing is made outside the narrowed Space').toBe(true);
     expect((blank(made, 'Document') as HTMLButtonElement).disabled).toBe(true);
-    delete answers['library.spaces'];
-    await user.click(within(made).getByRole('button', { name: 'Try again' }));
+    // from the keyboard: Try again stays the focused control through its read and through a read that fails again
+    let answerSpaces: ((answer: unknown) => void) | null = null;
+    answers['library.spaces'] = () => new Promise((resolve) => (answerSpaces = resolve));
+    const retry = within(made).getByRole('button', { name: 'Try again' });
+    act(() => retry.focus());
+    await user.keyboard('{Enter}');
+    await waitFor(() => expect(answerSpaces).not.toBeNull());
+    expect(retry.isConnected && document.activeElement === retry, 'kept, focused, through the read').toBe(true);
+    expect(retry.getAttribute('aria-busy')).toBe('true');
+    await act(async () => answerSpaces!({ ok: false, error: { code: 'internal', message: 'the index is unavailable' } }));
+    await waitFor(() => expect(retry.getAttribute('aria-busy')).toBe('false'));
+    expect(document.activeElement, 'a read that fails again keeps focus where it was').toBe(retry);
+    // a read that succeeds takes Try again away, and its focus goes to the strip's heading
+    answerSpaces = null;
+    await user.keyboard('{Enter}');
+    await waitFor(() => expect(answerSpaces).not.toBeNull());
+    await act(async () => answerSpaces!(ok({ spaces })));
     await within(made).findByText('· Home');
+    expect(retry.isConnected).toBe(false);
+    expect(document.activeElement).toBe(within(made).getByRole('heading', { name: 'Make something new' }));
     await waitFor(() => expect((card(made, 'Document') as HTMLButtonElement).disabled).toBe(false));
   });
 
