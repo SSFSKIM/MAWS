@@ -524,6 +524,46 @@ describe('the owner’s actions', () => {
     expect(banner.textContent).toContain('Restored from Clean draft');
   });
 
+  // The pair review's fix wave (the e2e:document case at document-editor.spec.ts:554, G379): a menu item chosen gives the
+  // keyboard back to the "…", whose tooltip then shows while it holds focus; the bar's buttons keep the focus where it
+  // is (they guard the editor's selection), so that tooltip stayed open over the confirm opened next. The confirm is an
+  // alertdialog and takes the keyboard (its Cancel, as the transcript's restore dialog does), which closes the tooltip,
+  // and its Restore takes a click; Cancel gives the keyboard back to Restore this version. Name this version, chosen in
+  // the menu, puts the keyboard in its field.
+  it('opens Restore’s confirm with the keyboard in it after a menu action, the “…” tooltip closed, and restores on its click', async () => {
+    const { history: h } = await setup(async ({ history: hist, agentWrites }) => {
+      hist.version('named', HUMAN, { label: 'Clean draft' });
+      await agentWrites(agentAppends(' Later.'));
+      hist.version('named', HUMAN, { label: 'Later one' });
+    });
+    await openHistory();
+    click(row('Clean draft'));
+    await previewing();
+    await versionAction('Make a copy');
+    await until(() => h.copies.length === 1, 'the copy');
+    const restore = within(bar()).getByRole('button', { name: 'Restore this version' });
+    await userEvent.click(restore);
+    const confirm = screen.getByRole('alertdialog', { name: 'Restore this version?' });
+    expect(document.activeElement).toBe(within(confirm).getByRole('button', { name: 'Cancel' }));
+    await until(() => screen.queryByRole('tooltip') === null, 'no tooltip left over the confirm');
+    await userEvent.click(within(confirm).getByRole('button', { name: 'Cancel' }));
+    expect(screen.queryByRole('alertdialog')).toBeNull();
+    expect(document.activeElement).toBe(restore);
+    await userEvent.click(restore);
+    await userEvent.click(within(screen.getByRole('alertdialog', { name: 'Restore this version?' })).getByRole('button', { name: 'Restore', exact: true }));
+    await until(() => screen.queryByRole('status', { name: 'Restored' }) !== null, 'the restore');
+    expect(screen.getByRole('status', { name: 'Restored' }).textContent).toContain('Restored from Clean draft');
+  });
+
+  it('puts the keyboard in the version’s name field when Name this version is chosen from the menu', async () => {
+    await setup(async ({ history: hist }) => void hist.version('auto', HUMAN));
+    await openHistory();
+    click(within(rail()).getAllByRole('button', { name: /^Version / })[0]);
+    await previewing();
+    await versionAction('Name this version');
+    await until(() => document.activeElement === screen.queryByRole('textbox', { name: 'Version name' }), 'the field focused');
+  });
+
   it('makes a copy of the selected version', async () => {
     const { history: h } = await setup(async ({ history: hist, agentWrites }) => {
       hist.version('named', HUMAN, { label: 'Keep this' });

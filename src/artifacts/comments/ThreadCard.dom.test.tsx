@@ -193,6 +193,18 @@ describe('the card’s forms', () => {
     expect(firstAuthor(quoted())?.textContent).toBe(actorDisplay(SESSION).name);
   });
 
+  // A thread with no message yet (its first comment never written, then reopened) has no author line to anchor on: its
+  // action keeps a row of its own at the card's foot, under the reply field, rather than over the field's send.
+  it('keeps the action in a row of its own on a card with no message', () => {
+    const css = commentsCss.replace(/\/\*[\s\S]*?\*\//g, '');
+    const found = [...css.matchAll(/([^{}]+)\{([^{}]*)\}/g)].find(([, head]) => head!.trim() === '.thread-card:not(:has(> .thread-card-messages)) > .thread-card-actions');
+    expect(found?.[2]).toContain('position: static;');
+    expect(found?.[2]).toContain('justify-self: end;');
+    const { card } = show({ thread: thread({ messages: [] }), active: true });
+    expect(card().querySelector(':scope > .thread-card-messages')).toBeNull();
+    expect([...card().children].map((child) => child.className)).toEqual(['thread-card-reply', 'thread-card-actions']);
+  });
+
   it('offers Resolve on an open thread, Reopen and no reply field on a resolved one', () => {
     const { card, on, view } = show({ active: true });
     act(() => fireEvent.click(within(card()).getByRole('button', { name: 'Resolve' })));
