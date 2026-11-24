@@ -58,7 +58,7 @@ Each is in the section it belongs to, and "For the composite's writer" items 10 
   - A record's identity and its unreadable reasons are fixed sentences.
   - A Send records the very drafts its lines were built from.
 - **For C6:** `sheet.list` is refused remotely as `no-target`, not `no-rule`.
-- **The wire:** `WIRE_MINOR` is 64, since tail-first took 63 on master.
+- **The wire:** `WIRE_MINOR` is 65: tail-first took 63 and prestart 64 on master.
 
 ## Tests
 
@@ -76,6 +76,22 @@ Each is in the section it belongs to, and "For the composite's writer" items 10 
 - **No whole-branch review was run.** The brief leaves it to the composite's writer.
 - **M4 to M6 were not started**, as the brief says.
 
+## The branch review's wave (after the first return)
+
+The composite's writer's branch review of #879 (medium) returned seven findings; all were fixed in one wave by M3's executor (`e53946b44`; then `c88e62ee7` for three findings of the wave's own task review, by a fresh reviewer, clean after that round):
+
+1. `put` refuses an existing `inbox.jsonl` that is a link or not a regular file (`refused`), and only `ENOENT` reads as absent.
+2. One Send at a time is decided by the shared memory: a press prepares its call, and the host is called once the memory holds that attempt.
+3. A stale verdict keeps a newer answer.
+4. Field edits are updates. This is an X5 change: `QuestionCardProps.onDraft(update)`. A card behind a rewrite never rewrites a newer draft.
+5. A first observed `retracted` retires the sent draft.
+6. `put` holds lines to `SheetLineSchema` and writes the parsed snapshot.
+7. `targetsOf` is a `Map`.
+
+Shipped with, from the wave's review: a reservation that a deferred consumer commits after the session's last sheet unmounted waits until a sheet of that session is shown again.
+
+Master `bfe82b411` (prestart, #880) was merged in afterwards; `WIRE_MINOR` 65.
+
 ## Unresolved review findings
 
 These are carried into the pull request's section of that name:
@@ -83,7 +99,8 @@ These are carried into the pull request's section of that name:
 - confinement by path with no `openat`;
 - a recreated root falls back to the 2 s poll;
 - the door's pipes are not destroyed at its deadline;
-- `QuestionCardProps.busy`'s stale comment.
+- `QuestionCardProps.busy`'s stale comment;
+- a reservation committed after the session's last sheet unmounted waits until the sheet is shown again (the branch review wave's own review).
 
 ## Environmental friction
 
