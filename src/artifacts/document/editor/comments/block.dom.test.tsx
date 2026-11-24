@@ -178,6 +178,7 @@ describe('commenting a block (P3-E)', () => {
     act(() => overlay().record(id, 'Why the dip?'));
     selectBlock(editor(), 'c1');
     act(() => void editor().commands.deleteSelection());
+    act(() => void editor().chain().setTextSelection(2).setActiveThread(null).run()); // the caret in the text: no thread active
     await quiet();
     act(() => fireEvent.click(within(toolbar()).getByRole('button', { name: /^Comments/ })));
     await quiet();
