@@ -1,8 +1,9 @@
 // A surface's memory of one session's sheet (S13 to S15; the C3 plan's §G): the drafts, the revision of each question
 // the person last saw, the questions marked updated, the header of each question it drew, the acts this surface sent,
 // and a Send in flight. A consumer keeps it per session, outside the components, so it survives a tab's unmount; it may
-// be shown by two mounts at once, so a Send in flight is named by its attempt and settled only against that attempt.
-// `reconcile` is the one place a new model changes it; the acts below are the person's.
+// be shown by two mounts at once, or by none, so every change below is a function of the memory as it is when applied,
+// and a Send in flight is named by its attempt and settled only against that attempt. `reconcile` is the one place a new
+// model changes it; the acts below are the person's.
 import type { SheetLine, SheetModel, SheetPutResult, SheetQuestion, SheetSent, SheetSentState } from '@shared/sheet/model';
 import { hasAnswer, type QuestionDraft } from '@shared/sheet/words';
 import { SHEET_WORDS } from './copy';
@@ -94,7 +95,10 @@ export function reconcile(memory: SheetMemory, model: SheetModel): SheetMemory {
   for (const id of [...marked]) if (!listed.has(id)) marked.delete(id);
   const hidden = new Set(model.hidden.map((entry) => entry.id));
   for (const id of [...headers.keys()]) if (!listed.has(id) && !hidden.has(id)) headers.delete(id);
-  for (const question of model.open) if (question.header !== undefined && question.header !== '') headers.set(question.id, question.header);
+  for (const question of model.open) {
+    if (question.header !== undefined && question.header !== '') headers.set(question.id, question.header);
+    else headers.delete(question.id); // a revision without a header
+  }
   for (const question of model.open) {
     const was = seen.get(question.id);
     if (was === undefined) seen.set(question.id, question.revision);
@@ -159,15 +163,16 @@ export function startSend(memory: SheetMemory, lines: readonly SheetLine[], now:
 const RELEASED: readonly string[] = ['refused', 'no-sheet', 'unavailable'];
 
 /**
- * The door's answer to one attempt, settled against the memory as it is now: an answer to an attempt that no longer
- * holds the lines (a late answer, after another attempt or none) changes nothing. Sent: nothing is held, and what became
- * of each act is the model's to say (S15). Refused, no sheet, or no door: nothing was appended and the same lines would
- * be refused again, so the hold is released, every draft kept (one a late image waits beside joins it again), and the
- * reason stands as a note. Busy, failed: the same lines are held to be sent again, keys and all.
+ * The door's answer to one attempt, settled once, against the memory as it is now: an answer to an attempt that no
+ * longer holds the lines (a late answer, after another attempt or none), or to one already settled, changes nothing.
+ * Sent: nothing is held, and what became of each act is the model's to say (S15). Refused, no sheet, or no door:
+ * nothing was appended and the same lines would be refused again, so the hold is released, every draft kept (one a late
+ * image waits beside joins it again), and the reason stands as a note. Busy, failed: the same lines are held to be sent
+ * again, keys and all.
  */
 export function settle(memory: SheetMemory, attempt: string, result: SheetPutResult): SheetMemory {
   const held = memory.sending;
-  if (held === null || held.attempt !== attempt) return memory;
+  if (held === null || held.attempt !== attempt || held.state !== 'sending') return memory;
   if (result.ok) return { ...memory, sending: null };
   const keys = new Set(held.lines.map((line) => line.key));
   if (!RELEASED.includes(result.why)) {

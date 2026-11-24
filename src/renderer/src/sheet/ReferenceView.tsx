@@ -50,15 +50,17 @@ function Body({ body, reference }: { body: SheetBody | null; reference: SheetRef
 export function ReferenceView({ session, reference, host, open: controlled, onOpenChange }: ReferenceViewProps) {
   const [own, setOwn] = useState(false);
   const open = controlled ?? own;
-  const [body, setBody] = useState<SheetBody | null>(null);
+  const [loaded, setLoaded] = useState<{ sha256: string; body: SheetBody } | null>(null);
+  const body = loaded?.sha256 === reference.sha256 ? loaded.body : null; // a body is its capture's alone
   const [asked, setAsked] = useState(false);
   if (open && !asked) setAsked(true); // asked once, when first opened
   useEffect(() => {
     if (!asked) return;
     let live = true;
-    host.body(session, { ref: reference.sha256 }).then(
-      (answer) => live && setBody(answer),
-      () => live && setBody({ kind: 'gone' }),
+    const sha256 = reference.sha256;
+    host.body(session, { ref: sha256 }).then(
+      (answer) => live && setLoaded({ sha256, body: answer }),
+      () => live && setLoaded({ sha256, body: { kind: 'gone' } }),
     );
     return () => {
       live = false;

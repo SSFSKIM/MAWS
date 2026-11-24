@@ -109,6 +109,7 @@ describe('the acts', () => {
     expect(failed.sending).toEqual({ attempt: 'attempt-1', lines, state: 'failed', note: 'timed out' });
     expect(failed.drafts.get('q1')).toBe(typed);
     expect(failed.acts[0].state).toBe('failed');
+    expect(settle(failed, 'attempt-1', { ok: true, results: [] })).toBe(failed); // settled once: a failed hold waits for Send again
 
     const again = startSend(failed, failed.sending!.lines, 9, 'attempt-2');
     expect(again.acts).toHaveLength(1);
@@ -152,6 +153,11 @@ describe("the hidden line's header", () => {
     const hidden = reconcile(drawn, sheetOf([], { hidden: [{ id: 'q4', key: 'maws-k-0009' }] }));
     expect(hidden.headers.get('q4')).toBe('Clash rule');
     expect(reconcile(hidden, sheetOf([])).headers.has('q4')).toBe(false);
+  });
+
+  it('is forgotten when a revision of its question has no header', () => {
+    const drawn = reconcile(EMPTY_MEMORY, sheetOf([CLASH]));
+    expect(reconcile(drawn, sheetOf([{ ...CLASH_REVISED, header: undefined }])).headers.has('q4')).toBe(false);
   });
 });
 

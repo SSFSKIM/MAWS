@@ -1,6 +1,6 @@
 // One open question (the composite's §8, "The card"; the C3 plan's §G): its states from its inputs alone, the person's
 // edits handed back as a draft, and a carried draft that counts for nothing until kept or edited.
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { SheetQuestion } from '@shared/sheet/model';
 import type { QuestionDraft } from '@shared/sheet/words';
@@ -160,6 +160,21 @@ describe('QuestionCard', () => {
     fireEvent.click(screen.getByRole('button', { name: /src\/auth-copy\.ts/ }));
     expect(screen.getByRole('button', { name: /src\/auth-copy\.ts/ }).getAttribute('aria-expanded')).toBe('true');
     expect(screen.getByRole('button', { name: /src\/auth\.ts/ }).getAttribute('aria-expanded')).toBe('false');
+  });
+
+  it('never shows an earlier capture’s body for a rewrite that captured the same path again', async () => {
+    const bodies = new Map<string, (text: string) => void>();
+    const host = fixtureHost({ body: (_session, of) => new Promise((resolve) => bodies.set('ref' in of ? of.ref : '', (text) => resolve({ kind: 'text', text }))) });
+    const view = card(SEASON, { host });
+    fireEvent.click(screen.getByRole('button', { name: /src\/auth\.ts/ }));
+    await waitFor(() => expect(bodies.size).toBe(1));
+    await act(async () => bodies.get(SEASON.references[0].sha256)!('the earlier capture\n'));
+    expect(screen.getByText('the earlier capture')).toBeTruthy();
+    const recaptured = { ...SEASON, revision: 2, references: [{ ...SEASON.references[0], sha256: 'd'.repeat(64) }] };
+    view.rerender(<QuestionCard session={SESSION} question={recaptured} draft={undefined} mark="none" busy={false} host={host} onDraft={vi.fn()} onDismiss={vi.fn()} onRetract={vi.fn()} onAttach={vi.fn()} />);
+    expect(screen.queryByText('the earlier capture')).toBeNull();
+    expect(screen.getByText('Loading…')).toBeTruthy();
+    await waitFor(() => expect(bodies.has('d'.repeat(64))).toBe(true));
   });
 
   it('turns its chevron in compact form: the chevron is the fold button’s own child', () => {

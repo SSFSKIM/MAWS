@@ -1,13 +1,13 @@
 // One session's sheet (the composite's §8, "The sheet", and §4.3; the C3 plan's §G and "The look", M3; frames 1, 5 and
 // 6): the notes of S15 at its head, its open cards oldest first, the accepted outcomes, a line for each question a
-// queued dismissal hides, and one Send. The memory is the consumer's: every change is handed back whole through
-// `onMemory`, and each new model meets it in `reconcile`. One Send is one call of the host with `sendOf`'s lines, named
-// by its attempt; those lines are held from the press until the host answers, and the answer is settled against the
-// memory as it is then, by whichever mount shows a memory still holding that attempt (two may show one memory). A Send
-// that failed, or whose call this window no longer knows (a reload), is offered again as the same lines; one a sibling
-// mount's call still carries is waited for. While lines are held no other act is built, so every card waits. A mount
-// that is gone hands back nothing.
-import { useEffect, useRef, useSyncExternalStore } from 'react';
+// queued dismissal hides, and one Send. The memory is the consumer's, and may be shown by two mounts at once or by none:
+// every change is handed to `onMemory` as an update of the memory as it is when applied, and each new model meets it in
+// `reconcile`. One Send is one call of the host with `sendOf`'s lines, named by its attempt; those lines are held from
+// the press until the host answers, and the answer lands, once, through the update the Send was made with, in that
+// session's memory, whether or not a mount still shows it. A late image does the same. A Send that failed, or whose call
+// this window no longer has in the air (a reload), is offered again as the same lines; one in the air is waited for,
+// whichever mount made it. While lines are held no other act is built, so every card waits.
+import { useEffect, useRef } from 'react';
 import type { SheetLine, SheetModel, SheetQuestion } from '@shared/sheet/model';
 import { sendOf, type QuestionDraft } from '@shared/sheet/words';
 import { CardButton } from '../request-card/controls';
@@ -16,14 +16,14 @@ import { SHEET_WORDS } from './copy';
 import type { SheetHost } from './host';
 import { CloseIcon } from './icons';
 import { attach, closeNote, editDraft, reconcile, settle, startSend, type SheetMemory } from './memory';
-import { attemptOf, attemptsVersion, launch, newAttempt, subscribeAttempts } from './attempts';
+import { isFlying, launch, newAttempt } from './attempts';
 import { OutcomeCard } from './OutcomeCard';
 import { QuestionCard } from './QuestionCard';
 
 export interface SessionSheetProps {
   model: SheetModel;
   memory: SheetMemory;
-  onMemory(next: SheetMemory): void;
+  onMemory(update: (current: SheetMemory) => SheetMemory): void; // applied to this session's memory as it is at commit; may be called after unmount
   host: SheetHost;
   focus?: { id: string; request: number } | null; // bring this question's card into view and put the keyboard on it; `request` grows with each ask
   density?: 'full' | 'compact';
@@ -36,45 +36,9 @@ const QUIET = 'shrink-0 rounded-sm text-ui-sm text-fg-muted outline-accent hover
 
 export function SessionSheet({ model, memory, onMemory, host, focus = null, density = 'full', unavailable = null }: SessionSheetProps) {
   const root = useRef<HTMLElement>(null);
-  const latest = useRef(memory); // the memory as this mount last handed it back, until the consumer's arrives
-  const latestModel = useRef(model); // the model a late image meets
-  const mounted = useRef(false);
   useEffect(() => {
-    latest.current = memory;
-  }, [memory]);
-  useEffect(() => {
-    latestModel.current = model;
-  }, [model]);
-  useEffect(() => {
-    mounted.current = true;
-    return () => {
-      mounted.current = false;
-    };
-  }, []);
-  const commit = (next: SheetMemory) => {
-    if (!mounted.current || next === latest.current) return;
-    latest.current = next;
-    onMemory(next);
-  };
-  useEffect(() => {
-    const next = reconcile(memory, model);
-    if (next === memory) return;
-    latest.current = next;
-    onMemory(next);
+    if (reconcile(memory, model) !== memory) onMemory((current) => reconcile(current, model));
   }, [memory, model, onMemory]);
-
-  // The answer to the attempt the memory holds, once this window has it, settled against the memory as it is now.
-  const attempts = useSyncExternalStore(subscribeAttempts, attemptsVersion);
-  const heldAttempt = memory.sending?.attempt ?? null;
-  useEffect(() => {
-    if (heldAttempt === null) return;
-    const known = attemptOf(heldAttempt);
-    if (known?.state !== 'answered') return;
-    const next = settle(latest.current, heldAttempt, known.result);
-    if (next === latest.current) return;
-    latest.current = next;
-    onMemory(next);
-  }, [heldAttempt, attempts, onMemory]);
 
   // A request to show a card is used once, when its question is in the model.
   const focusId = focus?.id ?? null;
@@ -92,25 +56,27 @@ export function SessionSheet({ model, memory, onMemory, host, focus = null, dens
   }, [focusId, focusRequest, focusListed]);
 
   const held = memory.sending;
-  const lost = held?.state === 'sending' && attemptOf(held.attempt) === undefined; // a call this window does not know: its answer will not come
+  const lost = held?.state === 'sending' && !isFlying(held.attempt); // a call this window does not have in the air: its answer will not come
   const awaiting = new Set(memory.acts.filter((act) => act.state === 'sending').map((act) => act.id));
   const sendable = new Map([...memory.drafts].filter(([id]) => !awaiting.has(id)));
   const plan = sendOf(model.open, sendable, host.by, COUNTING);
 
   const run = (lines: readonly SheetLine[]) => {
     const attempt = newAttempt();
-    commit(startSend(latest.current, lines, clock(), attempt, targetsOf(model)));
-    launch(attempt, () => host.send(model.session, [...lines]));
+    const land = onMemory; // this session's memory, wherever the answer finds this mount
+    land((current) => startSend(current, lines, clock(), attempt, targetsOf(model)));
+    launch(attempt, () => host.send(model.session, [...lines]), (result) => land((current) => settle(current, attempt, result)));
   };
   const free = held === null;
   const send = () => free && plan.ids.length > 0 && run(sendOf(model.open, sendable, host.by, () => host.newKey()).lines);
   const sendAgain = () => held !== null && (held.state === 'failed' || lost) && run(held.lines);
   const dismiss = (question: SheetQuestion) => free && run([{ v: 1, key: host.newKey(), kind: 'dismiss', id: question.id, by: host.by }]);
   const retract = (target: string) => free && run([{ v: 1, key: host.newKey(), kind: 'retract', target, by: host.by }]);
-  const draft = (question: SheetQuestion, next: QuestionDraft | null) => free && commit(editDraft(latest.current, question, next));
-  const image = (id: string, path: string) => {
-    const question = latestModel.current.open.find((open) => open.id === id);
-    if (question) commit(attach(latest.current, question, path));
+  const draft = (question: SheetQuestion, next: QuestionDraft | null) => free && onMemory((current) => (current.sending === null ? editDraft(current, question, next) : current));
+  // A pasted image, saved: it joins the draft of the question it was pasted on, in this session's memory, as that is when it lands.
+  const attachTo = (question: SheetQuestion) => {
+    const land = onMemory;
+    return (path: string) => land((current) => attach(current, question, path));
   };
 
   const markOf = (question: SheetQuestion) =>
@@ -151,7 +117,7 @@ export function SessionSheet({ model, memory, onMemory, host, focus = null, dens
           {notes.map((act) => (
             <div key={act.key} role="status" data-sheet-note={act.key} className="flex items-center gap-2 rounded-sm border border-border-strong bg-bg-raised py-1 pr-1 pl-2.5 text-fg">
               <span className="min-w-0 flex-1">{act.note}</span>
-              <NamedGlyph label={SHEET_WORDS.closeNote} onClick={() => commit(closeNote(latest.current, act.key))} className="inline-flex size-5 shrink-0 items-center justify-center rounded-sm text-fg-muted outline-accent hover:bg-bg-hover hover:text-fg focus-visible:outline-2">
+              <NamedGlyph label={SHEET_WORDS.closeNote} onClick={() => onMemory((current) => closeNote(current, act.key))} className="inline-flex size-5 shrink-0 items-center justify-center rounded-sm text-fg-muted outline-accent hover:bg-bg-hover hover:text-fg focus-visible:outline-2">
                 <CloseIcon />
               </NamedGlyph>
             </div>
@@ -175,7 +141,7 @@ export function SessionSheet({ model, memory, onMemory, host, focus = null, dens
               onDraft={(next) => draft(question, next)}
               onDismiss={() => dismiss(question)}
               onRetract={retract}
-              onAttach={(path) => image(question.id, path)}
+              onAttach={attachTo(question)}
             />
           ))}
           {model.pending.map((outcome) => (

@@ -5,12 +5,12 @@
 // picked) and counts for nothing in Send until the person keeps it or edits the card, which confirms it. A draft whose
 // card now shows another answer than the one it was written against (another surface queued one, or the queued answer it
 // edits is gone) is drawn as a conflict, and one whose text passes the inbox line's bound is marked; both stay editable
-// and out of Send until the person resolves them. A pasted image is handed to `onAttach` once saved, to join the draft
-// as it is then. Its own state is what rightly dies with it: which option has the pointer or the focus, which reference
+// and out of Send until the person resolves them. A pasted image is handed, once saved, to the `onAttach` the card had
+// when it was pasted, which carries the session and question it was pasted on. Its own state is what rightly dies with it: which option has the pointer or the focus, which reference
 // is open, a compact card's fold. Its root carries `data-sheet-question`, by which C4's page finds a card to scroll to,
 // and is the preview's size container, with no padding or border of its own, so its breakpoint is the card's width.
 import { Checkbox, RadioGroup } from 'radix-ui';
-import { useEffect, useRef, useState, type ClipboardEvent, type ReactNode } from 'react';
+import { useEffect, useState, type ClipboardEvent, type ReactNode } from 'react';
 import type { SheetBody, SheetImageType, SheetOption, SheetQuestion, SheetReference } from '@shared/sheet/model';
 import { confirmDraft, draftConflict, isConfirmed, isTooLong, questionSentence, type QuestionDraft } from '@shared/sheet/words';
 import { CardButton } from '../request-card/controls';
@@ -32,7 +32,7 @@ export interface QuestionCardProps {
   onDraft(next: QuestionDraft | null): void;
   onDismiss(): void;
   onRetract(key: string): void; // take back the queued answer that stands on the question
-  onAttach(path: string): void; // a pasted image, saved: it joins the draft as it is when it lands, confirming nothing
+  onAttach(path: string): void; // a pasted image, saved: the handler as it was at the paste is the one called, and joins the draft as it is when it lands, confirming nothing
 }
 
 const IMAGE_TYPES: readonly string[] = ['image/png', 'image/jpeg', 'image/gif', 'image/webp'] satisfies SheetImageType[];
@@ -122,10 +122,6 @@ export function QuestionCard({ session, question, draft, mark, busy, host, densi
   const [opened, setOpened] = useState<ReadonlySet<number>>(new Set()); // references open, by their place in the list (two may share a hash)
   const [folded, setFolded] = useState(true); // compact only
   const [pasteNote, setPasteNote] = useState<string | null>(null);
-  const attachLatest = useRef(onAttach); // a pasted image lands after the draft, the question, or the card itself moved on
-  useEffect(() => {
-    attachLatest.current = onAttach;
-  });
 
   const queued = question.queued;
   const conflict = draft !== undefined && draftConflict(draft, question);
@@ -163,6 +159,7 @@ export function QuestionCard({ session, question, draft, mark, busy, host, densi
     const room = MAX_IMAGES - (draft?.images.length ?? 0);
     setPasteNote(files.length > room ? SHEET_WORDS.imagesFull : null);
     const save = host.saveImage;
+    const land = onAttach; // the session and question pasted on, whatever this card shows when the image is saved
     // One at a time, in the order pasted; each joins the draft as it is when it is saved.
     void (async () => {
       for (const file of files.slice(0, Math.max(room, 0))) {
@@ -170,7 +167,7 @@ export function QuestionCard({ session, question, draft, mark, busy, host, densi
           .arrayBuffer()
           .then((bytes) => save(session, { mediaType: file.type as SheetImageType, bytes: new Uint8Array(bytes) }))
           .catch(() => ({ ok: false as const, why: SHEET_WORDS.pasteFailed }));
-        if (saved.ok) attachLatest.current(saved.path);
+        if (saved.ok) land(saved.path);
         else setPasteNote(saved.why);
       }
     })();
@@ -233,7 +230,7 @@ export function QuestionCard({ session, question, draft, mark, busy, host, densi
       {question.references.length > 0 && (
         <div className="flex min-w-0 flex-col gap-0.5">
           {question.references.map((reference, at) => (
-            <ReferenceView key={`${at}:${reference.path}`} session={session} reference={reference} host={host} open={opened.has(at)} onOpenChange={(open) => setReference(at, open)} />
+            <ReferenceView key={`${at}:${reference.sha256}`} session={session} reference={reference} host={host} open={opened.has(at)} onOpenChange={(open) => setReference(at, open)} />
           ))}
         </div>
       )}

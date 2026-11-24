@@ -1,44 +1,41 @@
-// The calls of a host this window has made for the sheet's Sends, each by its attempt (the C3 plan's §G, "Shared
-// memory"). The memory is the consumer's and may be shown by two mounts at once, so a call is not a mount's: its answer
-// waits here until a mount showing a memory that still holds that attempt settles it against that memory as it is then.
-// A mount that is gone settles nothing. An attempt this window never made, or forgot (a reload), is a Send whose answer
-// will not come, and is offered again; one still in the air is a sibling's, and is left to it.
+// The Sends of this window still in the air, each by its attempt (the C3 plan's §G, "Shared memory"). A memory may be
+// shown by two mounts, or by none, while its Send is in the air, so the call is not a mount's: its answer lands through
+// the update the Send was made with, in that session's memory as it is then, and the attempt is forgotten. A held Send
+// whose attempt this window does not have in the air (it never made it, or a reload forgot it) is one whose answer will
+// not come, and is offered again; one in the air is waited for, whichever mount made it.
 import type { SheetPutResult } from '@shared/sheet/model';
 
-type Attempt = { state: 'flying' } | { state: 'answered'; result: SheetPutResult };
-const attempts = new Map<string, Attempt>();
-const listeners = new Set<() => void>();
-let version = 0;
+const flying = new Set<string>();
 let made = 0;
 const WINDOW = Math.random().toString(36).slice(2, 10); // attempts of another window, or of this one before a reload, are not these
 
 /** A new attempt's name, to hold in the memory before its call is made. */
 export const newAttempt = (): string => `${WINDOW}-${(made += 1)}`;
 
-/** Makes the call for an attempt; its answer, or its failure as `failed`, is kept for whichever mount settles it. */
-export function launch(attempt: string, call: () => Promise<SheetPutResult>): void {
-  attempts.set(attempt, { state: 'flying' });
-  call()
+/**
+ * Makes the call for an attempt and lands its answer once: a call that throws, before returning or after, is a failed
+ * Send, to be offered again.
+ */
+export function launch(attempt: string, call: () => Promise<SheetPutResult>, land: (result: SheetPutResult) => void): void {
+  flying.add(attempt);
+  let answer: Promise<SheetPutResult>;
+  try {
+    answer = call();
+  } catch (error) {
+    answer = Promise.reject(error);
+  }
+  void answer
     .catch((error: unknown): SheetPutResult => ({ ok: false, why: 'failed', message: error instanceof Error ? error.message : String(error) }))
     .then((result) => {
-      attempts.set(attempt, { state: 'answered', result });
-      version += 1;
-      for (const listener of listeners) listener();
+      flying.delete(attempt);
+      land(result);
     });
 }
 
-/** What this window knows of an attempt: in the air, answered, or nothing (never made here, or forgotten). */
-export const attemptOf = (attempt: string): Attempt | undefined => attempts.get(attempt);
+/** Whether this window's call for an attempt is still in the air. */
+export const isFlying = (attempt: string): boolean => flying.has(attempt);
 
-export function subscribeAttempts(listener: () => void): () => void {
-  listeners.add(listener);
-  return () => listeners.delete(listener);
-}
-export const attemptsVersion = (): number => version;
-
-/** Tests: the window that made every call so far is gone. */
+/** Tests: the window that made every call so far is gone (a reload). */
 export function forgetAttempts(): void {
-  attempts.clear();
-  version += 1;
-  for (const listener of listeners) listener();
+  flying.clear();
 }

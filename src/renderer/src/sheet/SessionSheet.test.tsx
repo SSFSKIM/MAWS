@@ -4,7 +4,7 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { useEffect, useState } from 'react';
 import { afterEach, describe, expect, it } from 'vitest';
-import { forgetAttempts } from './attempts';
+import { forgetAttempts, isFlying } from './attempts';
 import type { SheetModel, SheetPutResult, SheetQuestion } from '@shared/sheet/model';
 import type { QuestionDraft } from '@shared/sheet/words';
 import { EMPTY_MEMORY, type SheetMemory } from './memory';
@@ -245,27 +245,27 @@ function heldHost() {
 }
 const OK: SheetPutResult = { ok: true, results: [] };
 
-describe('shared memory', () => {
-  // One memory shown by two mounts at once, as the side sheet and an Overview card show one session's.
-  function Two({ model, host, both }: { model: SheetModel; host: RecordingHost; both: boolean }) {
-    const [memory, setMemory] = useState(EMPTY_MEMORY);
-    useEffect(() => {
-      kept = memory;
-    });
-    return (
-      <>
-        {both && (
-          <div data-mount="first">
-            <SessionSheet model={model} memory={memory} onMemory={setMemory} host={host} />
-          </div>
-        )}
-        <div data-mount="second">
-          <SessionSheet model={model} memory={memory} onMemory={setMemory} host={host} density="compact" />
+// One memory shown by two mounts at once, as the side sheet and an Overview card show one session's.
+function Two({ model, host, both }: { model: SheetModel; host: RecordingHost; both: boolean }) {
+  const [memory, setMemory] = useState(EMPTY_MEMORY);
+  useEffect(() => {
+    kept = memory;
+  });
+  return (
+    <>
+      {both && (
+        <div data-mount="first">
+          <SessionSheet model={model} memory={memory} onMemory={setMemory} host={host} />
         </div>
-      </>
-    );
-  }
+      )}
+      <div data-mount="second">
+        <SessionSheet model={model} memory={memory} onMemory={setMemory} host={host} density="compact" />
+      </div>
+    </>
+  );
+}
 
+describe('shared memory', () => {
   it("does not take a live sibling's Send for a lost one, and settles it in the mount still shown", async () => {
     const { host, calls } = heldHost();
     const view = render(<Two model={sheetOf([SEASON])} host={host} both />);
@@ -423,5 +423,104 @@ describe('what Send may take', () => {
     expect(within(cardOf('q4')).getByText('An answer holds at most 20,000 characters.')).toBeTruthy();
     expect(within(cardOf('q4')).getByRole('textbox').getAttribute('aria-invalid')).toBe('true');
     expect(send().textContent).toBe('Send 1 answer');
+  });
+});
+
+// A consumer as a store is: each session's memory kept by session, every update applied to that session's memory as it
+// stands when applied, through a callback made anew on each render; the sheet shown or not.
+let renders = 0;
+let memories: ReadonlyMap<string, SheetMemory> = new Map();
+function Sessions({ model, host, shown = true }: { model: SheetModel; host: RecordingHost; shown?: boolean }) {
+  const [all, setAll] = useState<ReadonlyMap<string, SheetMemory>>(new Map());
+  useEffect(() => {
+    memories = all;
+    renders += 1; // each commit
+  });
+  const session = model.session;
+  if (!shown) return null;
+  return <SessionSheet model={model} memory={all.get(session) ?? EMPTY_MEMORY} host={host} onMemory={(update) => setAll((was) => new Map(was).set(session, update(was.get(session) ?? EMPTY_MEMORY)))} />;
+}
+const OTHER = '5eed0000-0000-4000-8000-0000000000bb';
+const image = new File([new Uint8Array([137, 80, 78, 71])], 'shot.png', { type: 'image/png' });
+const pasteInto = (card: HTMLElement) => fireEvent.paste(within(card).getByRole('textbox'), { clipboardData: { files: [image], types: ['Files'] } });
+function slowImages(host: RecordingHost) {
+  const saves: ((path: string) => void)[] = [];
+  host.saveImage = () => new Promise((resolve) => saves.push((path) => resolve({ ok: true, path })));
+  return saves;
+}
+
+describe('every change through an update', () => {
+  it('settles a busy answer once: the retry offered stays as it is, with a consumer whose callback is new on every render', async () => {
+    const { host, calls } = heldHost();
+    render(<Sessions model={sheetOf([CLASH])} host={host} />);
+    typeIn('q4', 'Earlier.');
+    fireEvent.click(send());
+    await waitFor(() => expect(calls).toHaveLength(1));
+    const attempt = memories.get(sheetOf([]).session)!.sending!.attempt;
+    await calls[0].answer({ ok: false, why: 'busy', message: 'The record is busy.' });
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Send again' })).toBeTruthy());
+    const settled = memories.get(sheetOf([]).session);
+    const count = renders;
+    await act(async () => new Promise((resolve) => setTimeout(resolve, 30)));
+    expect(renders).toBe(count);
+    expect(memories.get(sheetOf([]).session)).toBe(settled);
+    expect(settled!.sending).toMatchObject({ attempt, state: 'failed', note: 'The record is busy.' });
+    expect(isFlying(attempt)).toBe(false); // nothing of it is kept once settled
+  });
+
+  it('keeps both of two completions that land from two mounts before the consumer draws again', async () => {
+    const host = fixtureHost({ saveImage: true });
+    const saves = slowImages(host);
+    render(<Two model={sheetOf([CLASH, SEASON])} host={host} both />);
+    const first = document.querySelector<HTMLElement>('[data-mount="first"]')!;
+    const second = document.querySelector<HTMLElement>('[data-mount="second"]')!;
+    pasteInto(first.querySelector<HTMLElement>('[data-sheet-question="q4"]')!);
+    fireEvent.click(within(second).getByRole('button', { name: /q6/ })); // unfold the compact card
+    pasteInto(second.querySelector<HTMLElement>('[data-sheet-question="q6"]')!);
+    await waitFor(() => expect(saves).toHaveLength(2));
+    await act(async () => {
+      saves[0]('uploads/maws-first.png');
+      saves[1]('uploads/maws-second.png');
+    });
+    await waitFor(() => expect(kept.drafts.get('q4')?.images).toEqual(['uploads/maws-first.png']));
+    expect(kept.drafts.get('q6')?.images).toEqual(['uploads/maws-second.png']);
+  });
+
+  it("lands a late image in its session's memory after the sheet is gone, and shows it when the sheet is back", async () => {
+    const host = fixtureHost({ saveImage: true });
+    const saves = slowImages(host);
+    const view = render(<Sessions model={sheetOf([CLASH])} host={host} />);
+    typeIn('q4', 'Earlier.');
+    pasteInto(cardOf('q4'));
+    await waitFor(() => expect(saves).toHaveLength(1));
+    view.rerender(<Sessions model={sheetOf([CLASH])} host={host} shown={false} />);
+    await act(async () => saves[0]('uploads/maws-late.png'));
+    expect(memories.get(sheetOf([]).session)?.drafts.get('q4')).toEqual(draft(1, { text: 'Earlier.', images: ['uploads/maws-late.png'] }));
+    view.rerender(<Sessions model={sheetOf([CLASH])} host={host} />);
+    expect(document.querySelector('[data-sheet-upload="uploads/maws-late.png"]')).not.toBeNull();
+  });
+
+  it('lands a late image in the session it was pasted in, never in the next session the same mount shows', async () => {
+    const host = fixtureHost({ saveImage: true });
+    const saves = slowImages(host);
+    const view = render(<Sessions model={sheetOf([CLASH])} host={host} />);
+    pasteInto(cardOf('q4'));
+    await waitFor(() => expect(saves).toHaveLength(1));
+    view.rerender(<Sessions model={sheetOf([CLASH], { session: OTHER })} host={host} />);
+    await act(async () => saves[0]('uploads/maws-late.png'));
+    expect(memories.get(sheetOf([]).session)?.drafts.get('q4')?.images).toEqual(['uploads/maws-late.png']);
+    expect(memories.get(OTHER)?.drafts.has('q4') ?? false).toBe(false);
+  });
+
+  it('takes a host whose send throws before returning for a failed Send, and offers it again', async () => {
+    const host = fixtureHost();
+    host.send = () => {
+      throw new Error('no door');
+    };
+    sheet(sheetOf([CLASH]), { host });
+    typeIn('q4', 'Earlier.');
+    fireEvent.click(send());
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Send again' })).toBeTruthy());
+    expect(kept.sending).toMatchObject({ state: 'failed', note: 'no door' });
   });
 });
