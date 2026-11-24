@@ -32,6 +32,14 @@
 // exit) is handed to the writer as `{appSessionId, pid, procStart, launchId}`, so a successor of a supervisor that died
 // can stop the engines it left. Each process's start time is read once (`ps`), at its first entry.
 //
+// Ticket 851, M2 (docs/doperpowers/plans/2026-11-24-prestart-engine.md, R4-3): a prestart's row is hidden until its adopt
+// reveals it. The table keeps two views: `get` and `list` (every per-row emitter, listing and count a client sees) leave
+// a hidden row out, so a command naming its id answers as for an id with no row; `getAny` and `all` keep it, for the
+// internal readers (the memory sample, the orphan ledger, the filesystem monitor's own pids). A hidden row is never
+// released or frozen: the idle release, the budget (which takes a hidden row before any other) and the handover tell
+// `onHiddenDue`, as does its own exit, and the prestart's owner ends it (`detachHidden`): the row leaves the table at
+// once, its process kept among the ending until its exit, and nothing of it stays (no released id, no exited row).
+//
 // O16 M5 (docs/doperpowers/plans/2026-10-31-p5-o16-holder.md, M5 and Interfaces §F): both releases, the idle clock's and
 // the budget's, end a process through its row's reap (holder/reap.ts), one per row from the reservation, over the row's
 // channel on the engine host's gate (holder/gate.ts; none in a harness: every observer absent). The reap signals only once
@@ -115,6 +123,9 @@ export interface UnattachedHost {
   stop(): Promise<HeldStopOutcome>;
 }
 
+// Ticket 851, M2: why a hidden row is due to end
+export type HiddenDue = 'idle' | 'budget' | 'handover' | 'exited';
+
 export class ProcessTable {
   private readonly rows = new Map<AppSessionId, EngineSession>();
   private readonly listeners = new Set<(status: EngineSessionStatus) => void>();
@@ -171,6 +182,11 @@ export class ProcessTable {
   private reads = 0; // each tree read numbered at its start, so a late one cannot undo a newer one's bindings (D52)
   private readonly budgetReleases = new WeakMap<EngineSession, { limitKiB: number; totalKiB: number }>();
   // O16 M5 end
+  // Ticket 851, M2: the hidden rows' ids, the processes of hidden rows ended and not yet exited, and who is told when one
+  // is due to end (its owner, the prestarts)
+  private readonly hiddenIds = new Set<AppSessionId>();
+  private readonly endingHidden = new Set<EngineSession>();
+  private readonly hiddenDueListeners = new Set<(session: EngineSession, why: HiddenDue) => void>();
 
   // O16 M5: `gate`, the engine host's (absent: no observer, ever); `psSync`, the reap's step's tree read (by default `ps`
   // itself, or, when a test injects the sampler's `ps`, that sampler's last output: the test's process world)
@@ -189,8 +205,12 @@ export class ProcessTable {
     this.exitedRowsMax = opts.exitedRowsMax ?? EXITED_ROWS_MAX;
     // C12 end
     this.idle = new IdleRelease({
-      current: (session) => this.currentStatus(session), stateful: () => this.stateful, log: (line) => this.log(line), interestChanged: () => this.holdChanged(), release: (session) => this.reapOf(session)?.due('idle') /* O16 M5 */,
-      browserIdleDue: (appSessionId) => { for (const listener of this.browserIdleListeners) this.safely('browser idle', () => listener(appSessionId)); }, // P5 O17 M7
+      current: (session) => this.currentStatus(session), stateful: () => this.stateful, log: (line) => this.log(line), interestChanged: () => this.holdChanged(),
+      release: (session) => (this.isHiddenRow(session) ? this.hiddenDue(session, 'idle') : this.reapOf(session)?.due('idle')) /* O16 M5; ticket 851: a hidden row is ended, not released */,
+      browserIdleDue: (appSessionId) => {
+        if (this.hiddenIds.has(appSessionId)) return; // M2's review, finding 10: never a hidden id
+        for (const listener of this.browserIdleListeners) this.safely('browser idle', () => listener(appSessionId));
+      }, // P5 O17 M7
       browserCheck: () => this.browserCheck(), // P5 O17 M7 landing fix wave
     }); // P5 O2 M2
   }
@@ -247,7 +267,8 @@ export class ProcessTable {
 
   // Creates and starts a session unless the id holds one that has not exited. `create` runs only when accepted.
   // P5 O16 M3: an id held for an adoption is live: only the adoption itself (`adoption`) reserves it.
-  reserve(appSessionId: AppSessionId, create: () => EngineSession, opts: { adoption?: boolean } = {}): ReserveOutcome {
+  // Ticket 851, M2: `hidden`, a prestart's row (see the header).
+  reserve(appSessionId: AppSessionId, create: () => EngineSession, opts: { adoption?: boolean; hidden?: boolean } = {}): ReserveOutcome {
     if (this.handingOver) throw new Error(HANDING_OVER); // P5 O16 M3b (D9): the existing `internal` refusal, its own words
     if (this.shuttingDown) throw new Error('engine host is shutting down');
     if (this.adopting.has(appSessionId) && opts.adoption !== true) return { status: 'refused', reason: 'already_live', message: 'process is being adopted' };
@@ -261,12 +282,16 @@ export class ProcessTable {
     if (opts.adoption !== true && this.unattachedHosts(appSessionId).length > 0) return { status: 'refused', reason: 'already_live', message: 'process is unattached: its session host still runs it' };
     const session = create();
     this.rows.set(appSessionId, session);
+    if (opts.hidden === true) this.hiddenIds.add(appSessionId); // ticket 851, M2
     this.adopting.delete(appSessionId); // P5 O16 M3: the hold becomes the row
     this.wakeAdoptionReads(appSessionId); // P5 O16 M4: its reads read the row
     this.attachReap(session); // O16 M5
-    for (const listener of this.reservedListeners) this.safely('reserved', () => listener(session)); // P5 O17 M7: before its start
+    // P5 O17 M7: before its start; M2's review (finding 10): a hidden row is told at its reveal, so it never holds a browser
+    if (opts.hidden !== true) for (const listener of this.reservedListeners) this.safely('reserved', () => listener(session));
     session.on('status', (status) => {
-      if (status.process === 'exited') this.exitedRow(session, status); // C12
+      if (status.process === 'exited' && this.endingHidden.delete(session)) this.writeLiveLedger(); // ticket 851, M2
+      if (status.process === 'exited' && this.isHiddenRow(session)) this.hiddenDue(session, 'exited'); // ticket 851, M2: its owner ends it
+      else if (status.process === 'exited') this.exitedRow(session, status); // C12
       if (status.process === 'exited') this.detachReap(session); // O16 M5
       this.idle.track(session, this.rows.get(status.appSessionId) === session ? status : null); // E10; P5 O2 M2
       this.trackLive(session, status); // E10
@@ -282,13 +307,56 @@ export class ProcessTable {
   // a row whose process has not exited stays, since it is still the reservation. True when a row was dropped.
   // C12: a dropped row takes its released id with it (an archived or forgotten session's next launch is a fresh one).
   release(appSessionId: AppSessionId): boolean {
-    const row = this.rows.get(appSessionId);
+    const row = this.get(appSessionId); // ticket 851: a hidden row is its owner's to end
     if (!row || row.status().process !== 'exited') return false;
     this.released.delete(appSessionId); // C12
     this.rows.delete(appSessionId);
     this.rowsChanged(); // E10
     return true;
   }
+
+  // Ticket 851, M2 start -------------------------------------------------------------------------------------------
+  isHidden(appSessionId: AppSessionId): boolean {
+    return this.hiddenIds.has(appSessionId);
+  }
+
+  private isHiddenRow(session: EngineSession): boolean {
+    const id = session.status().appSessionId;
+    return this.hiddenIds.has(id) && this.rows.get(id) === session;
+  }
+
+  // The hidden row is revealed: every view has it from now on.
+  reveal(appSessionId: AppSessionId): void {
+    if (!this.hiddenIds.delete(appSessionId)) return;
+    const session = this.rows.get(appSessionId);
+    if (session) for (const listener of this.reservedListeners) this.safely('reserved', () => listener(session)); // M2's review, finding 10
+    this.rowsChanged();
+  }
+
+  // The hidden row leaves the table now (its id free for a launch); its process, unless exited already, is kept among
+  // the ending (the orphan ledger, the own-pid set, a stop-all) until its exit. Its owner stops it. Null when the id
+  // holds no hidden row.
+  detachHidden(appSessionId: AppSessionId): EngineSession | null {
+    const session = this.rows.get(appSessionId);
+    if (!session || !this.hiddenIds.delete(appSessionId)) return null;
+    this.rows.delete(appSessionId);
+    if (session.lifecycle !== 'exited') this.endingHidden.add(session);
+    this.idle.track(session, null);
+    if (this.releasing === session) this.releasing = null;
+    this.rowsChanged();
+    this.writeLiveLedger();
+    return session;
+  }
+
+  onHiddenDue(listener: (session: EngineSession, why: HiddenDue) => void): () => void {
+    this.hiddenDueListeners.add(listener);
+    return () => this.hiddenDueListeners.delete(listener);
+  }
+
+  private hiddenDue(session: EngineSession, why: HiddenDue): void {
+    for (const listener of this.hiddenDueListeners) this.safely(`hidden row due (${why})`, () => listener(session, why));
+  }
+  // Ticket 851, M2 end ---------------------------------------------------------------------------------------------
 
   // E10 start ---------------------------------------------------------------------------------------------------------
   // Told whenever a row enters or leaves the table (a launch, an archive's or a forget's release, the exited-row cap),
@@ -337,7 +405,7 @@ export class ProcessTable {
   private writeLiveLedger(): void {
     if (this.liveLedger === null) return;
     const rows: LiveRow[] = [];
-    for (const session of this.rows.values()) {
+    for (const session of this.all()) { // ticket 851: hidden rows and the ending ones too
       const status = session.status();
       if (status.process === 'exited' || status.pid === null) continue;
       let procStart = this.procStarts.get(session);
@@ -656,7 +724,7 @@ export class ProcessTable {
   // rows by their observer's state.
   gateCounts(): { armed: number; observed: number; unhealthy: number; absent: number } {
     const counts = { armed: 0, observed: 0, unhealthy: 0, absent: 0 };
-    for (const session of this.rows.values()) {
+    for (const session of this.list()) { // ticket 851: what a client sees
       const reap = this.reapOf(session);
       if (!reap || session.lifecycle === 'exited') continue;
       if (reap.state === 'arming' || reap.state === 'armed' || reap.state === 'signalled') counts.armed += reap.observer === 'absent' ? 0 : 1;
@@ -672,12 +740,22 @@ export class ProcessTable {
   }
   // E10 end -----------------------------------------------------------------------------------------------------------
 
+  // Ticket 851, M2: the public view, with no hidden row (the header)
   get(appSessionId: AppSessionId): EngineSession | undefined {
-    return this.rows.get(appSessionId);
+    return this.hiddenIds.has(appSessionId) ? undefined : this.rows.get(appSessionId);
   }
 
   list(): EngineSession[] {
-    return [...this.rows.values()];
+    return this.hiddenIds.size === 0 ? [...this.rows.values()] : [...this.rows.values()].filter((session) => !this.isHiddenRow(session));
+  }
+
+  // Ticket 851, M2: the internal view: every row, hidden ones included, and the hidden rows ended and not yet exited
+  getAny(appSessionId: AppSessionId): EngineSession | undefined {
+    return this.rows.get(appSessionId);
+  }
+
+  all(): EngineSession[] {
+    return [...this.rows.values(), ...this.endingHidden];
   }
 
   onChange(listener: (status: EngineSessionStatus) => void): () => void {
@@ -701,7 +779,7 @@ export class ProcessTable {
   // still evaluates, so the state follows the last exit); a failed `ps` evaluates nothing.
   async sampleMemory(): Promise<void> {
     if (this.sampling) return;
-    const live = this.list().filter((s) => s.pid !== null && s.status().process !== 'exited');
+    const live = [...this.rows.values()].filter((s) => s.pid !== null && s.status().process !== 'exited'); // ticket 851: hidden rows too
     this.sampling = true;
     try {
       const read = ++this.reads; // O16 M5: numbered before its ps, which a step's read may overtake
@@ -734,7 +812,7 @@ export class ProcessTable {
   configure(policy: BudgetPolicy): BudgetState {
     this.policy = { enabled: policy.enabled /* W7 */, limitKiB: policy.limitKiB, statefulMcpServers: [...policy.statefulMcpServers] };
     this.stateful = new Set(policy.statefulMcpServers);
-    for (const session of this.list()) session.policyChanged();
+    for (const session of this.rows.values()) session.policyChanged(); // ticket 851: hidden rows too
     this.evaluateBudget(false);
     return this.budgetState();
   }
@@ -766,7 +844,7 @@ export class ProcessTable {
   // `result`, say, with the engine's own follow-up `init` still to come), which has not been quiet for a period.
   private evaluateBudget(sample: boolean): void {
     this.browserCheck(); // P5 O17 M7 landing fix wave: a dead producer's holds settled before the rows are read
-    const sessions = this.list();
+    const sessions = [...this.rows.values()]; // ticket 851: hidden rows too (their memory counts; the verdict takes one first)
     const statuses = sessions.map((session) => session.status());
     const quiet = new Set<AppSessionId>();
     sessions.forEach((session, i) => {
@@ -779,9 +857,11 @@ export class ProcessTable {
         else this.sampledQuiet.delete(session);
       }
     });
-    const verdict = evaluate({ rows: statuses, policy: this.policy, quiet, releasing: this.releasing?.status().appSessionId ?? null, previousOverWithoutCandidate: this.previousOverWithoutCandidate });
+    const verdict = evaluate({ rows: statuses, policy: this.policy, quiet, releasing: this.releasing?.status().appSessionId ?? null, previousOverWithoutCandidate: this.previousOverWithoutCandidate, hidden: this.hiddenIds });
     if (sample) this.previousOverWithoutCandidate = verdict.over && verdict.candidates === 0;
-    if (verdict.release !== null) {
+    const hidden = verdict.release === null ? undefined : sessions.find((session) => session.status().appSessionId === verdict.release && this.isHiddenRow(session));
+    if (hidden !== undefined) this.hiddenDue(hidden, 'budget'); // ticket 851: ended by its owner, before any other
+    else if (verdict.release !== null) {
       const session = sessions[statuses.findIndex((s) => s.appSessionId === verdict.release)]!;
       // O16 M5: through the row's reap, which signals (and records `lastRelease`) only once verified empty and armed. The
       // row is marked releasing only when the reap took this request: one held at once, or a reap of its own under way
@@ -872,6 +952,8 @@ export class ProcessTable {
     this.handingOver = true;
     this.wakeAdoptionReads(); // P5 O16 M4: no reservation comes now
     this.idle.close();
+    // ticket 851, M2: a hidden row is ended, never handed over (its successor would discard it)
+    for (const session of [...this.rows.values()].filter((row) => this.isHiddenRow(row))) this.hiddenDue(session, 'handover');
     const hosted = this.list().filter((session) => session.lifecycle !== 'exited' && session.hosted && !session.ending);
     for (const session of hosted) {
       session.freeze();
@@ -896,9 +978,10 @@ export class ProcessTable {
     this.shuttingDown = true; // close admission synchronously, before any stop yields
     this.wakeAdoptionReads(); // P5 O16 M4: no reservation comes now
     this.idle.close(); // E10: clears the idle clock; the ladder below stops every row as `quit`
-    const live = this.list().filter((s) => s.status().process !== 'exited');
+    const live = this.all().filter((s) => s.status().process !== 'exited'); // ticket 851: hidden and ending ones too
     // fix wave 1: a row ending (a stop or release in its ladder, one taken back from the handover included) is stopped
-    const detaching = opts.mode === 'detach' ? live.filter((session) => session.hosted && !session.ending) : [];
+    // ticket 851, M2: a hidden row (or one ending) is stopped, never detached
+    const detaching = opts.mode === 'detach' ? live.filter((session) => session.hosted && !session.ending && !session.prestartHidden) : [];
     const stopping = live.filter((session) => !detaching.includes(session));
     // P5 O16 panel fix wave 1: the holds' stops; follow-up: the unattached hosts' too
     const held: Promise<HeldStopOutcome[]>[] = opts.mode === 'detach' ? [] : [
@@ -913,6 +996,7 @@ export class ProcessTable {
     let stopped = 0;
     let forced = 0;
     for (const { session } of results) {
+      if (session.prestartHidden) continue; // M2's review, finding 12: a prestart is stopped and counted in neither
       if (session.forcedKill) forced += 1;
       else stopped += 1;
     }

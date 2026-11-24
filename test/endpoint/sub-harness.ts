@@ -357,6 +357,7 @@ export class FakeEngineHost {
     const { appSessionId, afterSeq, limit, requestId } = (input ?? {}) as { appSessionId?: string; afterSeq?: number | null; limit?: number | null; requestId?: string };
     const s = appSessionId === undefined ? undefined : this.sessions.get(appSessionId);
     if (name === 'engine.sessions') return ok([...this.sessions.values()].map((x) => this.status(x)));
+    if (name === 'engine.prestarts') return ok({ hidden: [] }); // ticket 851: no prestart held hidden, unless a suite says (`reads`)
     if (name === 'engine.pendingItems') return ok({ sessions: [...this.sessions.values()].flatMap((x) => (waitingCount(x.items) > 0 ? [{ appSessionId: x.appSessionId, waiting: waitingCount(x.items) }] : [])) });
     if (s === undefined) return no('internal');
     switch (name) {
@@ -685,6 +686,8 @@ export type StartOptions = {
   amend?: (state: OrgState) => void;
   /** P5 O8 M6b: another offer table (`EndpointOptions.authorization.offers`: a build without the record acts). */
   offers?: Offers;
+  /** Ticket 851 (M4's review, finding 8): the index the project registry reads (`EndpointOptions.projectsSource`); none, no record is signed. */
+  projectsSource?: EndpointOptions['projectsSource'];
 };
 
 export async function startEndpoint(org: Org, started: Fixture[], options: StartOptions = {}): Promise<Fixture> {
@@ -740,6 +743,7 @@ export async function startEndpoint(org: Org, started: Fixture[], options: Start
     },
     subscriptions: options.subscriptions,
     ...(options.acquireWithinMs === undefined ? {} : { acquireWithinMs: options.acquireWithinMs }),
+    ...(options.projectsSource === undefined ? {} : { projectsSource: options.projectsSource }),
   });
   records.bindLaneA(endpoint.rl10.members);
   await endpoint.start(services);

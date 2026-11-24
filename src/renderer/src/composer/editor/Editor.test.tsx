@@ -435,6 +435,24 @@ describe('the editor mounts over its draft, takes prefills and submits through t
     act(() => handle.current?.clear());
     expect(handle.current?.serialize()).toMatchObject({ display: '', empty: true });
   });
+
+  // Ticket 851, M3's review (finding 10): the edit signal (the prestart's trigger) is never told for a clear, whose
+  // replacement takes two transactions (the content, then the attachments): the first left a non-empty document
+  it('tells no edit for clearing a restored draft with an attachment, and one edit with the whole replacement for a fill', async () => {
+    const shot = { id: 'a1', kind: 'image' as const, name: 'shot.png', mediaType: 'image/png', bytes: 4, data: 'iVBO', persisted: true };
+    const { port } = drafts({ doc: docOf([paragraph(textNode('look'))], [shot]), attachments: [], updatedAt: '2026-09-29T00:00:00.000Z' });
+    const handle = createRef<EditorHandle>();
+    const onEdit = vi.fn();
+    render(<Editor appSessionId={APP} cwd="/repo" sessionId={null} drafts={port} client={client} handle={handle} onEdit={onEdit} />);
+    await waitFor(() => expect(handle.current?.serialize().display).toBe('look [Image #1]'));
+    expect(onEdit).not.toHaveBeenCalled(); // a restore
+    act(() => handle.current?.clear());
+    expect(handle.current?.serialize()).toMatchObject({ display: '', empty: true });
+    expect(onEdit).not.toHaveBeenCalled();
+    act(() => void handle.current?.fill('new words', 'replace'));
+    expect(onEdit).toHaveBeenCalledTimes(1);
+    expect(attachmentsOf(onEdit.mock.calls[0]![0])).toEqual([]);
+  });
 });
 
 // C11 start: the widget seam C11 added to the editor (C11 execution document, the Arguments rule; Decision (M2) item 11):

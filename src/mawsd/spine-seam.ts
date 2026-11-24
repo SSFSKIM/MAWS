@@ -23,6 +23,7 @@
 // listing machine.spine lifts it and resumes the load, which replays the coalesced parts, resyncs and drains the hold;
 // a hello without machine.spine, the app gone or no hello within the relay's hello hold (`provisionalYieldMs`) confirms
 // it, and the hold is discarded as any yield's.
+import { randomUUID } from 'node:crypto';
 import type { SpineData, SpineDeps, SpineRoot } from '../services/spine-root';
 import type { SpineLock } from '../services/settings/spine-lock';
 import type { EngineSessionStatus } from '@shared/engine/status';
@@ -125,6 +126,7 @@ interface Loaded {
   root: SpineRoot;
   adapter: SpineHostsAdapter;
   offs: (() => void)[];
+  prestartOwner: string; // ticket 851 (R4-7): the root's owner of its prestarts, released with it
 }
 
 export function createLazySpine(options: LazySpineOptions): LazySpine {
@@ -223,6 +225,7 @@ export function createLazySpine(options: LazySpineOptions): LazySpine {
     log(`[spine] loading (${reason})`);
     let adapter: SpineHostsAdapter | null = null;
     let root: SpineRoot | null = null;
+    const prestartOwner = randomUUID(); // ticket 851 (R4-7): a fresh owner for each root, released as it is disposed of
     try {
       entry ??= await options.load();
       throwIfExiting();
@@ -239,13 +242,13 @@ export function createLazySpine(options: LazySpineOptions): LazySpine {
       const data = await entry.openSpineData(options.profileDir, { build: options.build, lock });
       throwIfExiting(); // no composition once the exit began
       adapter = new SpineHostsAdapter({ link: options.hosts, events, intercept: options.intercept, wanted: () => wanted, need: () => options.needEngine?.(), log });
-      root = entry.startSpine({ ...options.deps(), data, hosts: adapter });
+      root = entry.startSpine({ ...options.deps(), data, hosts: adapter, prestartOwner });
       await adapter.load();
       throwIfYielded();
     } catch (error) {
       if (root) {
         if (yieldTo) await settle(root, null); // the yield's deadline ends the process if it never does
-        await stopRoot(root, adapter!);
+        await stopRoot(root, adapter!, prestartOwner);
       } else adapter?.close();
       if (yieldTo) {
         events.discard('the spine yielded while it loaded', 'off');
@@ -259,7 +262,7 @@ export function createLazySpine(options: LazySpineOptions): LazySpine {
       throw error;
     }
     refusal = null;
-    loaded = { root, adapter, offs: [root.view.on('engine', () => evaluate())] };
+    loaded = { root, adapter, offs: [root.view.on('engine', () => evaluate())], prestartOwner };
     loadedAt = new Date().toISOString();
     const ms = now() - started;
     set('loaded', `in ${ms} ms`);
@@ -334,7 +337,7 @@ export function createLazySpine(options: LazySpineOptions): LazySpine {
           return;
         }
       }
-      await stopRoot(current.root, current.adapter, current.offs);
+      await stopRoot(current.root, current.adapter, current.prestartOwner, current.offs);
       loaded = null;
       loadedAt = null;
       if (why === 'yield') {
@@ -370,7 +373,9 @@ export function createLazySpine(options: LazySpineOptions): LazySpine {
     }
   }
 
-  async function stopRoot(root: SpineRoot, adapter: SpineHostsAdapter, offs: (() => void)[] = []): Promise<void> {
+  // Ticket 851 (R4-7): once the parts stopped, the engine host ends the root's prestarts (`session.prestart.release`),
+  // sent only to a host that is ready: one that is not has lost the connection that carried them, and ended them with it.
+  async function stopRoot(root: SpineRoot, adapter: SpineHostsAdapter, prestartOwner: string, offs: (() => void)[] = []): Promise<void> {
     for (const off of offs.splice(0)) off();
     try {
       root.stop();
@@ -378,6 +383,9 @@ export function createLazySpine(options: LazySpineOptions): LazySpine {
       log(`[spine] a part's stop failed: ${messageOf(error)}`);
     }
     adapter.close();
+    if (options.hosts.snapshot('engine-host').state !== 'ready') return;
+    const released = await options.hosts.dispatch('engine-host', 'session.prestart.release', { owner: prestartOwner }).catch((error: unknown) => ({ ok: false as const, error: { message: messageOf(error) } }));
+    if (!released.ok) log(`[spine] the root's prestarts were not released: ${released.error.message}`);
   }
 
   function giveLockUp(): void {

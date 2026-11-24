@@ -1,0 +1,49 @@
+Board ticket 851: an engine started before its first message
+(docs/doperpowers/plans/2026-11-24-prestart-engine.md, M0; 2026-11-24)
+
+Questions (D-1). The prestart plan keeps an engine waiting for its first message and changes picks on it before Send.
+Q1. While it waits, does the engine make any Messages API request, write a transcript, or emit system/init?
+Q2. Does a SessionStart hook's additionalContext make the engine write a file before any message?
+Q3. Do set_model and apply_flag_settings {effortLevel}, sent before the first message, hold for the first turn (the
+    request's model and effort, system/init's model), and leave the permission mode alone? (set_permission_mode was
+    already shown to hold, fixtures/uxwave/u1-plan-*; recorded again here on this engine.)
+
+Method. scenarios/pass3/uxwave-851-prestart.mjs: MAWS's launch line and initialize (p1-common), the scripted Messages
+API stand-in (stub-api.mjs) as ANTHROPIC_BASE_URL with a stand-in token, so nothing was spent and every request was
+recorded. Isolated: a scratch CLAUDE_CONFIG_DIR per arm (none of the person's settings, hooks or plugins; the engine
+loaded only its built-in plugins and no MCP server), an environment rebuilt from the base keys (no sminos variable, no
+credential), no app window. The hook of Q2 is a command in the scratch config's settings.json that prints
+`{"hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":"PROBE-851-CONTEXT: ..."}}`. Engine 2.1.331,
+named by its version path (PROBE_ENGINE), not the moving launcher. Fixtures fixtures/uxwave/uxwave-851-*.jsonl; tests in
+fixtures.test.mjs ("ticket 851").
+
+Q1: none of the three. (uxwave-851-idle)
+- The session (pinned id) was initialized 0.3 s after spawn and held 60 s. The one request was HEAD /api/hello, made
+  before initialize answered; the count stayed at 1 at every 10 s mark. No transcript and no file under the project's
+  directory at any mark, nor after end_session. No system/init.
+- Every arm that sent a message wrote the transcript only then (files_before_exit), and its first POST /v1/messages
+  came after the user frame: a side request (tools [], the title's json_schema output) and then the main loop's.
+
+Q2: no file before a message. (uxwave-851-hook-idle, uxwave-851-hook-turn)
+- The hook ran inside initialize (hook_started, hook_response before the initialize response). Held 5 s and stopped
+  with no message: no file, no Messages API request.
+- With one message the hook's context is in the first main request (it did run and was kept in memory), and the
+  transcript appears with the message.
+
+Q3: both hold; neither moves the mode.
+- set_model sonnet on a haiku launch answers {model: "claude-sonnet-5-5"}; both requests of the first turn (the side
+  request and the main one) carry claude-sonnet-5-5, and system/init says claude-sonnet-5-5 with permissionMode
+  default, the launch's. (uxwave-851-set-model)
+- apply_flag_settings {settings: {effortLevel: "low"}} on an opus launch answers success, and the first main request's
+  output_config.effort is "low", as with effortLevel "low" in the launch's --settings (uxwave-851-effort-launch); with
+  neither it is "medium" (uxwave-851-effort-none). The side request keeps "medium" in all three. system/init carries no
+  effort; its mode stays default. (uxwave-851-effort-live)
+- set_permission_mode acceptEdits answers {mode: "acceptEdits"}; system/status and system/init say acceptEdits, the
+  model unchanged. (uxwave-851-set-mode)
+
+What it decides (the plan): D6's model and effort row: both are set at Send through the control protocol
+(session.setModel, session.setEffort), like the mode, rather than relaunching. D11's spend statement: the engine itself
+makes no Messages API request while it waits; a hook the person installed runs at the prestart and is not observed here.
+
+Not observed: traffic to hosts other than the stand-in (telemetry, feature flags, MCP OAuth); a hook that itself calls a
+model; the auto mode's fallback after set_model (the launches here ran in default mode).

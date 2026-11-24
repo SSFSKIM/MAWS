@@ -86,6 +86,9 @@ import { AgentSeam } from './support/dashboards';
 import { BOARD, drawsRows, labelOf, liveBlock, liveViews, NOT_FETCHED, openSheet, rows, tableRows, writeBoard } from './support/live-data';
 import { installedEngine } from './support/p1-live';
 import { isAlive, tcpListeners } from './support/processes';
+import { engineRunning, startedEngines, tapPrestartRequests } from './support/prestart'; // ticket 851, M5
+import { PRESTART_EVERY_MS } from '../src/renderer/src/sessions/prestart'; // ticket 851, M5's review: the composer's pace
+import { writeLatencyEngine } from '../test/support/latency-engine'; // ticket 851, M5: A's engine, its starts counted
 import { DATASET_STATES } from '../src/artifacts/dashboard/states';
 import { applicationOf, launchMaws, REPO_ROOT, type MawsLaunch } from './support/launch';
 import { menu } from './support/menu';
@@ -330,8 +333,8 @@ async function dropTextFile(page: Page, file: { name: string; content: string })
 const uploadMention = (written: unknown, app: string): string | null => new RegExp(`@(\\.claude/desk-uploads/${app}/[^\\s"\\\\]+)`).exec(JSON.stringify(written))?.[1] ?? null;
 // A New chat tab's machine menu, B chosen in it (sessions/remote-spawn.ts: the up RL2 machines with a checkout of the
 // tab's org project); the chip names B (the word cut, C67, took the line under the row that said it again).
-async function chooseMachine(page: Page, name: string): Promise<void> {
-  const trigger = page.getByRole('button', { name: 'Machine This Mac', exact: true });
+async function chooseMachine(page: Page, name: string, from = 'This Mac'): Promise<void> {
+  const trigger = page.getByRole('button', { name: `Machine ${from}`, exact: true });
   await expect(trigger, 'the machine menu, once the project’s org project is known').toBeEnabled({ timeout: 30_000 });
   await trigger.click();
   await page.getByRole('dialog', { name: 'Choose a machine' }).getByRole('menuitemradio', { name, exact: true }).click({ timeout: 30_000 });
@@ -2438,6 +2441,97 @@ test('M8: a session spawned on B leads a full project past its cap and stays amo
     await scene?.stop();
     rmSync(aUserData, { recursive: true, force: true });
     rmSync(a2UserData, { recursive: true, force: true });
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+// Ticket 851, M5 (docs/doperpowers/plans/2026-11-24-prestart-engine.md, D8; Decision Logs 12, 13 and 17): a New chat on
+// A prestarts its engine as the person types, only while the tab starts on A; choosing B in its machine menu withdraws
+// the prestart, and the draft stays as it is; an edit while B is chosen asks A for nothing; back on This Mac the next
+// edit asks at once, the move having reset the composer's 10 s pace, and starts A's engine again. A runs the prestart
+// (MAWS_E2E_PRESTART=1) on the latency stub, a real engine process whose starts file counts each start
+// (test/support/latency-engine-stub.mjs), in its own checkout of the org project, trusted on A, on the direct route; B is
+// up and runs nothing. The composer's requests and withdraws are counted where A's main receives them. The prestart's
+// own scenes, which need no second machine, are e2e/prestart.spec.ts's.
+test('ticket 851: a New chat prestarts its engine on A as the person types; choosing B in its machine menu ends that engine, keeps the draft and asks nothing while B is chosen; back on This Mac the next edit prestarts again', async () => {
+  const root = realpathSync(mkdtempSync(join(tmpdir(), 'maws-remote-851-')));
+  const aUserData = mkdtempSync(join(tmpdir(), 'maws-ra-851-'));
+  const hooks = join(root, 'no-hooks');
+  const aCheckout = join(root, A_PROJECT);
+  for (const dir of [hooks, aCheckout]) mkdirSync(dir);
+  checkoutRepository(aCheckout, hooks);
+  const startsFile = join(root, 'starts.jsonl');
+  const engineBin = writeLatencyEngine(join(root, 'latency-engine'), join(root, 'samples.jsonl'), { startsFile });
+  const typed = 'Start this on A, or maybe on B.';
+  let scene: RemoteScene | null = null;
+  let a: MawsLaunch | null = null;
+  try {
+    scene = await startRemoteScene({ scratch: join(root, 'scene'), aUserData });
+    const { b } = scene;
+    a = await launchMaws({
+      userData: aUserData,
+      syntheticEngineBin: engineBin,
+      defaultRoute: 'direct', // the stub's get_status answers a direct launch's
+      env: { MAWS_DEV_ORG: scene.devOrgDir(false), MAWS_MACHINE_NAME: 'A', MAWS_E2E_PRESTART: '1', MAWS_E2E_ENGINE_BIN: engineBin },
+      // A's checkout trusted and the user's default mode `default`, so the New chat's start guards pass with no card
+      prepare: ({ claudeConfigDir }) => {
+        writeFileSync(join(claudeConfigDir, '.claude.json'), JSON.stringify({ projects: { [aCheckout]: { hasTrustDialogAccepted: true } } }));
+        writeFileSync(join(claudeConfigDir, 'settings.json'), JSON.stringify({ permissions: { defaultMode: 'default' } }));
+      },
+    });
+    keepMainLines(a);
+    const { page } = a;
+    const tap = tapPrestartRequests(a.app);
+    await tap.armed;
+    await expect.poll(async () => (await machineOf(page, b.ref))?.state ?? null, { timeout: 60_000, message: `A's link to B comes up over the relay\n${mainSaid(page)}` }).toBe('up');
+    type Projects = { projects: { directory: string; org?: { key: string } }[] };
+    await invoke(page, 'session.projects.add', { directory: aCheckout });
+    await expect
+      .poll(async () => (await invoke<Projects>(page, 'session.projects.list', undefined)).projects.find((p) => p.directory === aCheckout)?.org?.key ?? null, { timeout: 30_000 })
+      .toBe(`smns:${PROJECT}`);
+    const tab = await newChat(page, A_PROJECT);
+    const asked = async () => (await tap.calls(tab)).requests;
+    const edit = async (text: string) => {
+      await composerOf(page).click();
+      await page.keyboard.press('End');
+      await page.keyboard.type(text);
+    };
+    await composerOf(page).click();
+    await page.keyboard.type(typed);
+    await expect.poll(() => startedEngines(startsFile).length, { timeout: 30_000, message: `typing in the New chat on A starts its engine there\n${mainSaid(page)}` }).toBe(1);
+    const [engine] = startedEngines(startsFile);
+    expect(engine!.cwd, 'in A’s checkout').toBe(aCheckout);
+    expect(await asked(), 'one request for the typing').toHaveLength(1);
+    await chooseMachine(page, B_NAME);
+    await expect.poll(() => engineRunning(engine!.pid), { timeout: 30_000, message: `the pick of B withdraws A's prestart: its engine ends\n${mainSaid(page)}` }).toBe(false);
+    await expect(composerOf(page), 'the draft stays as it was').toHaveText(typed);
+    expect((await tap.calls(tab)).withdraws, 'the pick of B withdrew it').toHaveLength(1);
+    // an edit while B is chosen: once its draft is written (the save follows the edit by 750 ms, the request would have
+    // gone at once), A has been asked for nothing and has started nothing
+    await edit(' Then this, while B is chosen.');
+    await expect
+      .poll(async () => JSON.stringify((await invoke<{ draft?: unknown } | null>(page, 'session.intent.get', { appSessionId: tab }))?.draft ?? null), { timeout: 30_000, message: 'the edit on B written to the draft' })
+      .toContain('while B is chosen');
+    expect(await asked(), 'no prestart asked while B is chosen').toHaveLength(1);
+    expect(startedEngines(startsFile), 'no engine started on A while B is chosen').toHaveLength(1);
+    // back on This Mac, the next edit asks at once and starts A's engine again. The move reset the composer's 10 s pace,
+    // which only shows when that edit comes within 10 s of the request before it: a slower round is tried again from its
+    // own request, and the case skips when none lands in time (a window that stages the premise, not a bound).
+    for (let round = 1; ; round += 1) {
+      await chooseMachine(page, 'This Mac', B_NAME);
+      await edit(` Back on A, round ${round}.`);
+      await expect.poll(async () => (await asked()).length, { timeout: 30_000, message: `back on This Mac, the edit asks for the prestart at once\n${mainSaid(page)}` }).toBe(round + 1);
+      await expect.poll(() => startedEngines(startsFile).length, { timeout: 30_000, message: `the edit back on This Mac starts A's engine again\n${mainSaid(page)}` }).toBe(round + 1);
+      expect(startedEngines(startsFile).at(-1)!.cwd, 'in A’s checkout').toBe(aCheckout);
+      const [before, after] = (await asked()).slice(-2);
+      if (after! - before! < PRESTART_EVERY_MS) break;
+      if (round === 3) test.skip(true, `the move's reset of the composer's ${PRESTART_EVERY_MS} ms pace was not shown: no edit back on This Mac came within it of the request before`);
+      await chooseMachine(page, B_NAME);
+    }
+  } finally {
+    await a?.cleanup();
+    await scene?.stop();
+    rmSync(aUserData, { recursive: true, force: true });
     rmSync(root, { recursive: true, force: true });
   }
 });

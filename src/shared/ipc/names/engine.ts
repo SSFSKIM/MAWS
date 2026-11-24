@@ -15,7 +15,13 @@ export const events = [
   // C12 end
 ] as const;
 
+// Ticket 851, M2 (R4-6): `engine.prestart`, a prestart's word, names an uncommitted app and engine session; it is mawsd's
+// endpoint's, which no window hears by any path (the prestart panel, scalpel-4#1)
+export const mainOnlyEvents = ['engine.prestart'] as const;
+
 // Only main's settings coordinator may update host configuration or policy.
 // P2-A (2026-10-09): main alone reads the observed facts from the host, relaying them as `session.observedFacts`.
 // P5 O10: `engine.pendingItems` is the endpoint's (lane B's pending counts for `notify`), sent from `mawsd`, never a window.
-export const mainOnlyCommands = ['engine.configure', 'engine.policy.set', 'engine.observedFacts' /* P2-A */, 'engine.pendingItems'] as const;
+// Ticket 851, M2: `engine.prestarts`, the hidden set, the endpoint's from `mawsd` (M4); the xhigh panel: `engine.relayHealth.cached`,
+// the prestart's cache-only read of the relay, the spine's
+export const mainOnlyCommands = ['engine.configure', 'engine.policy.set', 'engine.observedFacts' /* P2-A */, 'engine.pendingItems', 'engine.prestarts', 'engine.relayHealth.cached'] as const;

@@ -135,7 +135,7 @@ import { engineRequests } from './engine-requests';
 import { createArtifactsEndpoint, loadEndpointChunk } from './artifacts-endpoint'; // P5 O5 M2
 import { ENDPOINT_CHANNEL_BASE, ENDPOINT_STOP_MS, loadEndpointModule, NO_ENDPOINT_MODULE, spineChannel, type CheckoutSource, type DaemonServices, type EndpointModule } from './endpoint-seam';
 import { spineProjects } from './projects-seam'; // the project registry
-import { createServicesFront, spineTakes } from './front';
+import { createServicesFront, ENDPOINT_EVENTS, spineTakes } from './front';
 import { tellEngineHandover } from './engine-handover-event'; // P5 O16 M3c fix wave 2
 import { runE2eBrowserView, runE2eRender, runE2eSeam } from './e2e-seam'; // M5b fix round 2; P5 O5 M4
 import { createRenderHandle, loadRenderChunk, type RenderChunk } from './render-handle'; // P5 O5 M4
@@ -419,6 +419,8 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
       // P5 O5 M5: the daemon's own socket for the session, stable for its life, listening while a tab engine is attached
       // (the app's machine.client) and relayed to it; P5 O3-D M5b told the app's own, absent while no app was attached
       browserSocket: (appSessionId) => browserSocketFor(appSessionId),
+      // ticket 851, M3's review (finding 1): a prestart's spec names the same path, with nothing set up for a draft
+      browserSocketPath: (appSessionId) => (cua === null ? null : daemonCuaSocketPath(cuaDir, appSessionId)),
       appBundles: () => front.appBundles(), // UX wave U6e: MAWS's own folders, as the apps told them (decision 8)
       trash: (path) => trashPath(path, { platform, home: homedir(), env }), // D10: mawsd's own move into the user's trash
       engineEnv: captureShellEnvironment({ cache: false }), // one capture per load
@@ -935,7 +937,7 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
     if (render.event(message.name, message.payload)) return; // P5 O5 M4: the render seam answers it, no client hears it
     if (message.name === 'host.browserIdle') return browserIdle(message.payload); // P5 O17 M3, M5: mawsd's own, no app hears it
     if (message.name === 'session.status') engineSeen(message.payload); // P5 O5 M5: the cua socket's peer check
-    engineRelay.deliver(message);
+    if (!ENDPOINT_EVENTS.has(message.name)) engineRelay.deliver(message); // ticket 851 (scalpel-4#1): the endpoint's alone
     each(eventListeners, 'engine-host', message);
   });
   hosts.onState('pty-host', (state) => {

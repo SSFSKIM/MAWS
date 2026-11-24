@@ -110,11 +110,20 @@ const EngineRefused = z.strictObject({ ok: z.literal(false), message: z.string()
 const MemoryTargetSchema = z.strictObject({ kind: z.enum(['user', 'project', 'path']), path: z.string().nullable() });
 const MessageUuidOutput = z.strictObject({ messageUuid: MessageUuidSchema });
 
+// Ticket 851, M2: a prestart's key (what decides its launch beyond the spec, the spine's) and its owner (a spine root)
+export const PrestartKeySchema = z.string().max(4096);
+export const PrestartOwnerSchema = z.string().min(1).max(256);
+// The xhigh panel (scalpel-2, finding 4): the spine's name for one `session.prestart` it sent, which a withdraw can name
+// when the host's reply (its generation) never came back
+export const PrestartRequestSchema = z.string().min(1).max(64);
+
 const c3Commands = {
   // lifecycle and state
   // P2-E1 start (2026-10-09): `artifactScope`, a side thread's ancestors nearest first (D10), a sibling of the spec so the
   // host never stores it (the stored spec's strict reader in an older build would move the state file aside)
-  'session.launch': host(z.strictObject({ spec: LaunchSpecSchema, artifactScope: z.array(AppSessionIdSchema).max(16).optional() }), LaunchResultSchema),
+  // Ticket 851, M2: `adopt`, a prestart's hidden row taken when its spec (but for `sessionId`), key and engine binary are
+  // the ones asked (D4); otherwise a fresh launch. The answer's shape is a launch's, its status naming the engine session
+  'session.launch': host(z.strictObject({ spec: LaunchSpecSchema, artifactScope: z.array(AppSessionIdSchema).max(16).optional(), adopt: z.strictObject({ key: PrestartKeySchema }).optional() }), LaunchResultSchema),
   // P2-E1 end
   'session.status': host(input({}), EngineSessionStatusSchema),
   // A session with no live stream here answers from its transcript, one bounded window at a time: `limit` null the
@@ -909,6 +918,39 @@ const tellCommands = {
 } as const;
 export const TELL_SESSION_COMMANDS = Object.keys(tellCommands) as (keyof typeof tellCommands)[];
 // The direct tell end ----------------------------------------------------------------------------------------------------
+// Ticket 851, M2 start (docs/doperpowers/plans/2026-11-24-prestart-engine.md, Interfaces; D1, D8, R4-7) -------------------
+// The spine's prestarts, main-only (the spine root's, through its engine-host link), owner engine-host, immediate.
+// `session.prestart` admits a hidden launch of `spec` for the spine root `owner` (`key`: what decides the launch beyond
+// the spec, compared at adopt); `running` when the same launch is already admitted or hidden, `refused` with the reason
+// (generation 0) when it cannot be. `withdraw` ends that generation while it is hidden; `release` ends every prestart of
+// the owner and admits none for it again.
+// The xhigh panel (scalpel-2, finding 4): `request`, the spine's name for the request, kept with the admission (a
+// `running` answer moves it to the newer request); a withdraw names the request, the generation, or both, and ends the
+// prestart only when every name it gives matches, so an admission whose reply timed out is still withdrawn.
+const prestartCommands = {
+  'session.prestart': { input: z.strictObject({ spec: LaunchSpecSchema, key: PrestartKeySchema, owner: PrestartOwnerSchema, request: PrestartRequestSchema.optional() }), output: z.strictObject({ status: z.enum(['started', 'running', 'refused']), generation: z.number().int().nonnegative(), reason: z.string().optional() }), owner: 'engine-host' },
+  'session.prestart.withdraw': host(input({ generation: z.number().int().positive().optional(), request: PrestartRequestSchema.optional() }), z.void()),
+  'session.prestart.release': { input: z.strictObject({ owner: PrestartOwnerSchema }), output: z.void(), owner: 'engine-host' },
+} as const satisfies Record<`session.${string}`, CommandSpec<z.ZodType, z.ZodType>>;
+export const PRESTART_SESSION_COMMANDS = Object.keys(prestartCommands) as (keyof typeof prestartCommands)[];
+// Ticket 851, M2 end ----------------------------------------------------------------------------------------------------
+// Ticket 851, M3 start (docs/doperpowers/plans/2026-11-24-prestart-engine.md, D10, R4-4) ----------------------------------
+// The window's asks of the spine, owner machine. `session.intent.prestart` asks the spine to prestart an unstarted New
+// chat's engine with the launch spec Send would build now, under a token the window mints for the request (M3's review,
+// Decision Log 13: the window knows it before any answer, so a move withdraws it even when the answer is late or never
+// comes): `started` or `running` with that token, `skipped` (token null) with the reason when the intent is not eligible
+// or the host serves no prestart. `withdraw` ends the prestart serving the token's request, unless that token is no
+// longer current or a Send has started; else nothing.
+export const PrestartTokenSchema = z.string().min(1).max(64);
+const intentPrestartCommands = {
+  'session.intent.prestart': {
+    input: z.strictObject({ appSessionId: AppSessionIdSchema, token: PrestartTokenSchema }),
+    output: z.strictObject({ status: z.enum(['started', 'running', 'skipped']), token: PrestartTokenSchema.nullable(), reason: z.string().max(1024).optional() }),
+    owner: 'machine',
+  },
+  'session.intent.prestart.withdraw': { input: z.strictObject({ appSessionId: AppSessionIdSchema, token: PrestartTokenSchema }), output: z.void(), owner: 'machine' },
+} as const satisfies Record<`session.${string}`, CommandSpec<z.ZodType, z.ZodType>>;
+// Ticket 851, M3 end ----------------------------------------------------------------------------------------------------
 
 export const commands = {
   ...c3Commands, // C3
@@ -930,6 +972,8 @@ export const commands = {
   ...o7m8Commands, // P5 O7 M8
   ...u4aCommands, // UX wave U4a
   ...tellCommands, // the direct tell
+  ...prestartCommands, // ticket 851, M2
+  ...intentPrestartCommands, // ticket 851, M3
 } as const satisfies Record<`session.${string}`, CommandSpec<z.ZodType, z.ZodType>>;
 
 export const events = {

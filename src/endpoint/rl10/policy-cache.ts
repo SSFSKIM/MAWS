@@ -131,6 +131,15 @@ export class PolicyCache {
     return earlier === undefined ? undefined : { policyRev: earlier, audience: revs.get(earlier) ?? null };
   }
 
+  /**
+   * Ticket 851 (R4-6): a local session's history dropped, kept for a member the endpoint processed before it heard the
+   * session was a prestart's hidden pin, which keeps no audience until its commit.
+   */
+  forgetLocal(session: string): void {
+    this.#load();
+    if (this.#local.delete(session)) this.#save();
+  }
+
   /** Drops what was read: the state directory's records were moved aside, and the file is read anew. */
   forget(): void {
     this.#loaded = false;

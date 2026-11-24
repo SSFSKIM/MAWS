@@ -654,6 +654,21 @@ describe('browser work through the front', () => {
     expect(spine.events()).toEqual([]);
     expect(tapped).toEqual([{ appSessionId: 's1' }]);
   });
+
+  // Ticket 851 (the prestart panel, scalpel-4#1): a prestart's word names an uncommitted app and engine session; it is
+  // mawsd's endpoint's (the daemon's own listeners), never a machine.sock client's
+  it('posts the engine host’s engine.prestart to no client, the app’s included; the taps hear it', () => {
+    const { served, client, raw } = front();
+    const spine = client([MACHINE_SPINE_CAPABILITY]);
+    spine.ready();
+    const tapped: unknown[] = [];
+    served.bus.onEmitted('engine.prestart' as never, (payload) => void tapped.push(payload));
+    const word = { appSessionId: 's1', engineSessionId: 'e0ad139c-18bc-45bd-9489-be8653145f80', state: 'hidden' };
+    raw('engine.prestart', word);
+    raw('plugins.changed', {});
+    expect(spine.events()).toEqual(['plugins.changed']);
+    expect(tapped).toEqual([word]);
+  });
 });
 
 // P5 Decision Log 273: a client's request is work from its receipt until its answer settles, the connection gone or not

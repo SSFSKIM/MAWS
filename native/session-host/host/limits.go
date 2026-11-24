@@ -17,6 +17,7 @@ const (
 	ExitDrain     = time.Second      // after the child's exit, how long its output pipes get to reach end of file
 	authLineCap   = 4 << 10          // the auth line holds a 64-hex token
 	ctlQueueCap   = 1 << 14          // control lines queued for a client that does not read; past it the connection closes
+	finishFlush   = time.Second      // at the host's exit, how long its connections get to take their queued control lines
 )
 
 // Limits are the constants a Host runs with; the binary's test flags override some of them.

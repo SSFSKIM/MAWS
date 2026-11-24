@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { HostStreamDecoder, HostStreamError, controlLine, stdinRecord, type HostItem } from './protocol';
+import { HostMessageSchema, HostStreamDecoder, HostStreamError, controlLine, stdinRecord, type HostItem } from './protocol';
 
 const bytes = (s: string) => Buffer.from(s, 'utf8');
 
@@ -58,5 +58,25 @@ describe('the session host stream', () => {
     expect(controlLine({ t: 'attach', role: 'writer', fence: 2 }).toString()).toBe('{"t":"attach","role":"writer","fence":2}\n');
     const record = stdinRecord(10, bytes('{"type":"user"}\n'));
     expect(record.toString()).toBe('{"t":"stdin","offset":10,"len":16}\n{"type":"user"}\n');
+  });
+});
+
+// Ticket 851, M1 (docs/doperpowers/plans/2026-11-24-prestart-engine.md, R4-1): the prestart's launch and its promotion.
+describe('the prestart lines', () => {
+  it('writes a marked launch and a promote, and reads the promotion\'s answer with or without a reason', () => {
+    expect(controlLine({ t: 'launch', appSessionId: 'a', engineSessionId: 'e', argv: ['x'], cwd: '/', env: {}, prestart: true }).toString()).toContain('"prestart":true');
+    expect(controlLine({ t: 'promote' }).toString()).toBe('{"t":"promote"}\n');
+    expect(HostMessageSchema.parse({ t: 'promoted', ok: true })).toEqual({ t: 'promoted', ok: true });
+    expect(HostMessageSchema.parse({ t: 'promoted', ok: false, message: 'disk full' })).toEqual({ t: 'promoted', ok: false, message: 'disk full' });
+    expect(HostMessageSchema.safeParse({ t: 'promoted' }).success).toBe(false);
+  });
+});
+
+// Ticket 851, M1's review: a successor's discard, decided by the host against a promotion in flight.
+describe('the discard lines', () => {
+  it('writes a discard and reads its answer', () => {
+    expect(controlLine({ t: 'discard' }).toString()).toBe('{"t":"discard"}\n');
+    expect(HostMessageSchema.parse({ t: 'discarded', marked: true })).toEqual({ t: 'discarded', marked: true });
+    expect(HostMessageSchema.safeParse({ t: 'discarded' }).success).toBe(false);
   });
 });

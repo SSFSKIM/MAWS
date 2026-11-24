@@ -2,7 +2,8 @@
 // tests): a host started and attached, the launch's records handed on with their sequences, writes settled by the host's
 // answers, the frontier's acks trimming the ring, the release after the exit, a reconnect while the host lives (D45),
 // and a host that dies (`host_lost`, its child ended). Runs wherever a prebuild matches the platform.
-import { existsSync, mkdtempSync, readFileSync, renameSync, rmSync, statSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { chmodSync, existsSync, mkdtempSync, readFileSync, renameSync, rmSync, statSync } from 'node:fs';
 import { createServer, type Socket } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -14,7 +15,18 @@ import { isAlive, procStartOf } from '../supervisor-files';
 import type { EngineTransport, StderrItem, TransportItem } from '../transport';
 import { HostConnection } from './client';
 import { hostsDirOf, sessionHostBinary } from './files';
-import { adoptHosted, HostStartFailed, startSessionHost, type SessionHostDeps, type StartedHost } from './transport';
+import { adoptHosted, discardHost, HostStartFailed, startSessionHost, type SessionHostDeps, type StartedHost } from './transport';
+
+// SIGSTOP is delivered asynchronously: a host running on another core can still read and answer a line written right
+// after kill() returns. Wait until the kernel reports it stopped (ps state T) before writing what it must not answer.
+async function stopped(pid: number): Promise<void> {
+  process.kill(pid, 'SIGSTOP');
+  for (let i = 0; i < 200; i++) {
+    if (execFileSync('ps', ['-o', 'stat=', '-p', String(pid)], { encoding: 'utf8' }).trim().startsWith('T')) return;
+    await new Promise((r) => setTimeout(r, 5));
+  }
+  throw new Error(`session host ${pid} never reported stopped`);
+}
 
 const BINARY = sessionHostBinary(resolve(__dirname, '..', '..', '..', 'out', 'main', 'index.js'));
 const LONG = 30_000;
@@ -467,6 +479,152 @@ describe.skipIf(!existsSync(BINARY))('the host transport', () => {
     await expectGone(host.pid);
     expect(existsSync(host.paths.roster)).toBe(false);
     expect(existsSync(host.paths.socket)).toBe(false);
+  });
+});
+
+// Ticket 851, M1 (docs/doperpowers/plans/2026-11-24-prestart-engine.md, R4-1): a launch marked `prestart` keeps its
+// roster entry marked until the transport's `promote` is acknowledged; `promote` resolves with the host's answer, or
+// with a refusal once its bound passes, and never rejects.
+describe.skipIf(!existsSync(BINARY))('a prestart\'s promotion', () => {
+  const entryOf = (host: StartedHost) => JSON.parse(readFileSync(host.paths.roster, 'utf8')) as Record<string, unknown>;
+
+  it('a prestart launch is marked until its promotion is acknowledged; a second promotion is acknowledged again', { timeout: LONG }, async () => {
+    const { deps } = profile();
+    const host = await start(deps);
+    const t = host.transport(plan(['/bin/cat']), { appSessionId: 'app-1', maxLineChars: 1024, prestart: true });
+    await t.write({ type: 'keep_alive' } as never); // the spawn has settled
+    expect(entryOf(host)).toMatchObject({ prestart: true, state: 'running', appSessionId: 'app-1' });
+    expect(await t.promote!()).toEqual({ ok: true });
+    expect(entryOf(host).prestart).toBeUndefined();
+    expect(await t.promote!()).toEqual({ ok: true });
+    t.endInput();
+    expect(await t.exited).toEqual({ code: 0, signal: null });
+  });
+
+  it('a launch with no mark writes none, and its promotion is acknowledged', { timeout: LONG }, async () => {
+    const { deps } = profile();
+    const host = await start(deps);
+    const t = host.transport(plan(['/bin/cat']), { appSessionId: 'app-1', maxLineChars: 1024 });
+    await t.write({ type: 'keep_alive' } as never);
+    expect(entryOf(host).prestart).toBeUndefined();
+    expect(await t.promote!()).toEqual({ ok: true });
+    t.endInput();
+    await t.exited;
+  });
+
+  it.skipIf(process.getuid?.() === 0)('a promotion whose roster write fails is refused with the host\'s reason, and the entry stays marked', { timeout: LONG }, async () => {
+    const { deps } = profile();
+    const host = await start(deps);
+    const t = host.transport(plan(['/bin/cat']), { appSessionId: 'app-1', maxLineChars: 1024, prestart: true });
+    await t.write({ type: 'keep_alive' } as never);
+    chmodSync(deps.hostsDir, 0o500); // the entry's temp file cannot be created
+    try {
+      const refused = await t.promote!();
+      expect(refused).toEqual({ ok: false, message: expect.stringContaining('roster entry could not be written') });
+    } finally {
+      chmodSync(deps.hostsDir, 0o700);
+    }
+    expect(entryOf(host).prestart).toBe(true);
+    expect(await t.promote!()).toEqual({ ok: true });
+    t.endInput();
+    await t.exited;
+  });
+
+  it('a promotion after the engine\'s exit is refused at once', { timeout: LONG }, async () => {
+    const { deps } = profile();
+    const host = await start(deps);
+    const t = host.transport(plan(['/bin/sh', '-c', 'exit 0']), { appSessionId: 'app-1', maxLineChars: 1024, prestart: true });
+    await t.exited;
+    expect(await t.promote!()).toEqual({ ok: false, message: expect.stringContaining('exited') });
+  });
+
+  it('a promotion the host does not answer within its bound resolves refused', { timeout: LONG }, async () => {
+    const { deps } = profile();
+    const host = await start(deps);
+    const t = host.transport(plan(['/bin/cat']), { appSessionId: 'app-1', maxLineChars: 1024, prestart: true });
+    await t.write({ type: 'keep_alive' } as never);
+    await stopped(host.pid);
+    try {
+      const began = Date.now();
+      expect(await t.promote!({ withinMs: 300 })).toEqual({ ok: false, message: expect.stringContaining('no answer') });
+      expect(Date.now() - began).toBeLessThan(3_000);
+      expect(entryOf(host).prestart).toBe(true); // the host never wrote it: the answer came from the bound
+    } finally {
+      process.kill(host.pid, 'SIGCONT');
+    }
+    // the late answer is skipped as owed to the promotion that gave up, and a later one is answered
+    expect(await t.promote!()).toEqual({ ok: true });
+    t.endInput();
+    await t.exited;
+  });
+
+  it('a promotion under way when the connection closes resolves refused', { timeout: LONG }, async () => {
+    const { deps } = profile();
+    let first: HostConnection | null = null;
+    const host = await start({ ...deps, onConnection: (c) => (first ??= c) });
+    const t = host.transport(plan(['/bin/cat']), { appSessionId: 'app-1', maxLineChars: 1024 });
+    await t.write({ type: 'keep_alive' } as never);
+    await stopped(host.pid); // the promote is written and not answered
+    let answer;
+    try {
+      const promotion = t.promote!();
+      await sleep(50);
+      first!.close();
+      answer = await promotion;
+    } finally {
+      process.kill(host.pid, 'SIGCONT');
+    }
+    expect(answer).toEqual({ ok: false, message: expect.stringContaining('closed') });
+    t.kill('SIGKILL');
+    await t.exited;
+  });
+});
+
+// Ticket 851, M1's review: a successor's discard of a marked host, decided by the host against a promotion in flight,
+// and the promotion's bound, which a caller may shorten and never lengthen.
+describe.skipIf(!existsSync(BINARY))('a successor\'s discard', () => {
+  const entryOf = (host: StartedHost) => JSON.parse(readFileSync(host.paths.roster, 'utf8')) as Record<string, unknown>;
+  const target = (host: StartedHost) => ({ holderId: host.holderId, pid: host.pid, procStart: host.hello.procStart, socket: host.paths.socket });
+
+  it('discards a marked host: its engine ends, the host exits and keeps its entry, exited and marked', { timeout: LONG }, async () => {
+    const { deps } = profile();
+    const host = await start(deps);
+    const t = host.transport(plan(['/bin/cat']), { appSessionId: 'app-1', maxLineChars: 1024, prestart: true });
+    await t.write({ type: 'keep_alive' } as never);
+    const token = readFileSync(host.paths.token, 'utf8');
+    expect(await discardHost(target(host), { log: () => {}, token })).toBe('discarded');
+    await expectGone(host.pid);
+    expect(await t.exited).toBeDefined();
+    expect(entryOf(host)).toMatchObject({ prestart: true, state: 'exited' });
+  });
+
+  it('answers promoted for a host whose promotion reached disk, and leaves it running', { timeout: LONG }, async () => {
+    const { deps } = profile();
+    const host = await start(deps);
+    const t = host.transport(plan(['/bin/cat']), { appSessionId: 'app-1', maxLineChars: 1024, prestart: true });
+    await t.write({ type: 'keep_alive' } as never);
+    expect(await t.promote!()).toEqual({ ok: true });
+    const token = readFileSync(host.paths.token, 'utf8');
+    expect(await discardHost(target(host), { log: () => {}, token })).toBe('promoted');
+    await sleep(300);
+    expect(isAliveNow(host.pid)).toBe(true);
+    expect((await helloOf(host)).state).toBe('running');
+  });
+
+  it('a promotion\'s bound is never lengthened past the host start\'s', { timeout: LONG }, async () => {
+    const { deps } = profile();
+    const host = await start({ ...deps, startMs: 1_500 });
+    const t = host.transport(plan(['/bin/cat']), { appSessionId: 'app-1', maxLineChars: 1024, prestart: true });
+    await t.write({ type: 'keep_alive' } as never);
+    await stopped(host.pid);
+    try {
+      const answer = await Promise.race([t.promote!({ withinMs: 60_000 }), sleep(4_000).then(() => 'pending' as const)]);
+      expect(answer).toEqual({ ok: false, message: expect.stringContaining('within 1500 ms') });
+    } finally {
+      process.kill(host.pid, 'SIGCONT');
+    }
+    t.endInput();
+    await t.exited;
   });
 });
 

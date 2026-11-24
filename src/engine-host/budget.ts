@@ -20,6 +20,9 @@ export interface BudgetInput {
   quiet: ReadonlySet<AppSessionId>; // rows whose lastEventSeq is unchanged since the previous sample
   releasing: AppSessionId | null; // a budget ladder still in flight
   previousOverWithoutCandidate: boolean; // the previous sample's `over && candidates === 0`
+  // Ticket 851, M2 (docs/doperpowers/plans/2026-11-24-prestart-engine.md, D2, R4-3): prestarts' hidden rows. Their memory
+  // counts; they are in no list and no count, and one is released before any other row (its owner ends it)
+  hidden?: ReadonlySet<AppSessionId>;
 }
 
 export interface BudgetVerdict {
@@ -102,10 +105,15 @@ export function evaluate(input: BudgetInput): BudgetVerdict {
   const blocked: BudgetVerdict['blocked'] = [];
   const candidates: EngineSessionStatus[] = [];
   let settling = 0;
+  let hidden: AppSessionId | null = null; // ticket 851, M2
   for (const s of live) {
     const tree = s.memory.treeRssKiB;
     if (tree === null) unmeasured += 1;
     else totalKiB += tree;
+    if (input.hidden?.has(s.appSessionId)) {
+      hidden ??= s.appSessionId;
+      continue;
+    }
     const reasons = hardReasons(s, stateful);
     if (reasons.length > 0) blocked.push({ appSessionId: s.appSessionId, reasons });
     else if (s.process === 'ready' && !ENGINE_ACTIVE.has(s.engineState) && tree !== null && input.quiet.has(s.appSessionId)) candidates.push(s);
@@ -115,8 +123,8 @@ export function evaluate(input: BudgetInput): BudgetVerdict {
   const lru = candidates.reduce<EngineSessionStatus | null>((best, s) => (best === null || s.lastUsedAt < best.lastUsedAt || (s.lastUsedAt === best.lastUsedAt && s.appSessionId < best.appSessionId) ? s : best), null);
   return {
     totalKiB, limitKiB: input.policy.limitKiB, over, unmeasured,
-    release: over && input.releasing === null && lru !== null ? lru.appSessionId : null,
+    release: over && hidden !== null ? hidden : over && input.releasing === null && lru !== null ? lru.appSessionId : null, // ticket 851: a hidden row first
     blocked, settling, candidates: candidates.length,
-    overWithoutCandidate: over && candidates.length === 0 && input.previousOverWithoutCandidate,
+    overWithoutCandidate: over && hidden === null && candidates.length === 0 && input.previousOverWithoutCandidate,
   };
 }

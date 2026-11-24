@@ -21,6 +21,7 @@ type conn struct {
 	h    *Host
 	nc   net.Conn
 	wake chan struct{}
+	done chan struct{} // closed when sendLoop returns
 
 	role        string // "", "observer", "pending" (a writer waiting on the queue it supersedes) or "writer"
 	fenced      bool   // a superseded writer: its writer-only commands are answered `fenced`
@@ -103,6 +104,7 @@ func (c *conn) next() (bufs net.Buffers, done bool) {
 
 // sendLoop writes each record as it is read, no batching: header and bytes in one writev.
 func (c *conn) sendLoop() {
+	defer close(c.done)
 	h := c.h
 	for {
 		h.mu.Lock()

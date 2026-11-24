@@ -3,7 +3,8 @@
 // records what it sends the model without reaching Anthropic or spending anything. It answers the relay's health check
 // (GET /api/hello), count_tokens with a fixed count, and every POST /v1/messages with one short text turn, streamed when
 // asked; each Messages request's body is kept. Any other path answers 404. The shape follows
-// spikes/protocol-probe/stub-api.mjs (P4-B4), reduced to the one fixed answer.
+// spikes/protocol-probe/stub-api.mjs (P4-B4), reduced to the one fixed answer. Ticket 851, M5: `sideText` answers the
+// engine's side requests (a title, anything that sends no tool list) instead, so a reply the page looks for is the turn's.
 import { createServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
 
@@ -34,7 +35,7 @@ function sse(id: string, model: unknown, text: string): string {
   ].join('');
 }
 
-export async function startModelStub(text = 'ok'): Promise<ModelStub> {
+export async function startModelStub(text = 'ok', opts: { sideText?: string } = {}): Promise<ModelStub> {
   const requests: ModelRequest[] = [];
   const server = createServer((req, res) => {
     const chunks: Buffer[] = [];
@@ -56,13 +57,15 @@ export async function startModelStub(text = 'ok'): Promise<ModelStub> {
         return json(400, { type: 'error', error: { type: 'invalid_request_error', message: 'not JSON' } });
       }
       const tools = Array.isArray(body.tools) ? (body.tools as { name?: unknown }[]) : [];
-      requests.push({ body, raw, main: tools.some((t) => t?.name === 'Bash' || t?.name === 'Read') });
+      const main = tools.some((t) => t?.name === 'Bash' || t?.name === 'Read');
+      requests.push({ body, raw, main });
       const id = `msg_stub_${requests.length}`;
+      const answer = main ? text : (opts.sideText ?? text);
       if (body.stream === true) {
         res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-cache' });
-        return res.end(sse(id, body.model, text));
+        return res.end(sse(id, body.model, answer));
       }
-      return json(200, { id, type: 'message', role: 'assistant', model: body.model, content: [{ type: 'text', text }], stop_reason: 'end_turn', stop_sequence: null, usage: { input_tokens: 1, output_tokens: 1 } });
+      return json(200, { id, type: 'message', role: 'assistant', model: body.model, content: [{ type: 'text', text: answer }], stop_reason: 'end_turn', stop_sequence: null, usage: { input_tokens: 1, output_tokens: 1 } });
     });
   });
   await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
