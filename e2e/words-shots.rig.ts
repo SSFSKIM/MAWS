@@ -5954,7 +5954,6 @@ test('the word cut’s M5: the library’s Spaces, opened artifacts, the documen
       },
       after: () => closeOverlays(page),
     });
-    const card = (key: Fixture, thread: string) => tab(key).locator(`article[data-thread="${thread}"]`);
     await shot(page, m5Meta('m5-doc-comments', 'G390, G393, G394, G395, G385', 'A document’s comments panel', 'Field notes, Comments in the toolbar', 'The panel: its filters (no tab scope with one tab on M5), the search, the toggle for comments on deleted text, the open cards at rest and the resolved one', ['tools/document', 'src/artifacts/document/editor/comments']), async () => {
       await openComments('notes');
     }, {
