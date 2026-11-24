@@ -41,7 +41,7 @@ import { memoryAppend, MemoryAppendBudgetSpent } from './memory-append';
 import { OperationTable } from './operations';
 import { ProcessTable } from './process-table';
 import { QueueEntryError } from './queue';
-import { checkRelay as checkRelayHealth, RELAY_HEALTH_TIMEOUT_MS } from './relay-health';
+import { cachedRelay as cachedRelayHealth, checkRelay as checkRelayHealth, RELAY_HEALTH_TIMEOUT_MS } from './relay-health';
 import { rewind, rewindFiles } from './rewind';
 import { ControlError, ControlTimeout, type ControlClient } from './rpc';
 import type { EngineSession } from './session';
@@ -184,6 +184,7 @@ export interface EngineIpcDeps {
   appVersion?: string;
   binaryProbe?: () => Promise<BinaryCheck>;
   checkRelay?: (force: boolean) => Promise<RelayHealth>;
+  cachedRelay?: () => RelayHealth | null; // ticket 851 (the xhigh panel): the relay's last check while fresh, never a probe
   captureEnv?: () => Promise<Record<string, string>>;
   systemRoot?: string; // P5 O7 M9: the managed settings' root for the machine route's resolution (tests' seam; absent, `/`)
   spawn?: (plan: LaunchPlan) => EngineTransport;
@@ -277,6 +278,7 @@ export function registerEngineIpc(hostOn: HostOn, emit: HostEmit, deps: EngineIp
     emit('session.operation', event);
   });
   const relayCheck = deps.checkRelay ?? ((force: boolean) => checkRelayHealth(RELAY_URL, undefined, { force }));
+  const relayCached = deps.cachedRelay ?? (() => cachedRelayHealth(RELAY_URL)); // ticket 851 (the xhigh panel, scalpel-3 finding 5)
   const captureEnv = deps.captureEnv ?? (() => captureShellEnvironment());
   const binaryProbe = deps.binaryProbe ?? createBinaryProbe({ captureEnv }); // W13: the installed binary, per call
   // E8 start: the engine's plugin CLI, run by the binary a launch would run under the captured environment; after a
@@ -392,6 +394,7 @@ export function registerEngineIpc(hostOn: HostOn, emit: HostEmit, deps: EngineIp
     store,
     binaryProbe,
     checkRelay: relayCheck,
+    cachedRelay: relayCached, // ticket 851: a hidden launch's relay read
     captureEnv,
     spawn: deps.spawn ?? ((plan) => spawnEngine(plan, { maxLineChars: MAX_LINE_CHARS })),
     appVersion: deps.appVersion ?? 'unknown',
@@ -501,10 +504,11 @@ export function registerEngineIpc(hostOn: HostOn, emit: HostEmit, deps: EngineIp
   handle('session.launch', async ({ spec, artifactScope, adopt: adoption }) => prestarts.launch(spec as LaunchSpec, artifactScope as AppSessionId[] | undefined, adoption));
   // Ticket 851, M2 (docs/doperpowers/plans/2026-11-24-prestart-engine.md, D1, D8, R4-6, R4-7): the spine's prestarts.
   // Immediate: the admission is registered in the handler and the launch runs behind the answer.
-  on('session.prestart', async ({ spec, key, owner }, ctx) => prestarts.prestart({ spec: spec as LaunchSpec, key, owner }, ctx.client));
-  on('session.prestart.withdraw', async ({ appSessionId, generation }) => prestarts.withdraw(appSessionId as AppSessionId, generation));
+  on('session.prestart', async ({ spec, key, owner, request }, ctx) => prestarts.prestart({ spec: spec as LaunchSpec, key, owner, request }, ctx.client));
+  on('session.prestart.withdraw', async ({ appSessionId, generation, request }) => prestarts.withdraw(appSessionId as AppSessionId, { generation, request }));
   on('session.prestart.release', async ({ owner }) => prestarts.release(owner));
   on('engine.prestarts', async () => ({ hidden: prestarts.hidden() }));
+  on('engine.relayHealth.cached', async () => relayCached()); // the xhigh panel (scalpel-3, finding 5): never a probe
   handle('session.status', async ({ appSessionId }) => (await adopted(appSessionId), sessionOf(appSessionId).status()));
   // UX wave, ticket 777: the stream is one launch's, and the session's history from before it is in the transcript. An
   // answer that starts at the launch's first row carries the cursor whose pages are the transcript's rows before the

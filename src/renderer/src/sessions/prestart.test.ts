@@ -111,3 +111,28 @@ describe('M3’s review: the window’s findings', () => {
     expect(fake.invoked('session.intent.prestart.withdraw')).toEqual([{ appSessionId: TAB, token }]);
   });
 });
+
+// The xhigh panel on ticket 851 (scalpel-3, finding 6): a refresh the window sent may not have reached the spine when the
+// tab moves, so the token before it may still be the spine's line; the move withdraws both, the older first.
+describe('the xhigh panel: a refresh overtaken by a move', () => {
+  const sentTokens = () => (fake.invoked('session.intent.prestart') as { token: string }[]).map((input) => input.token);
+
+  it('scalpel-3 6. withdraws the earlier token too while the refresh is unanswered, the older first', async () => {
+    edit(); // request 1
+    await fake.reply('session.intent.prestart', { status: 'started', token: sentTokens()[0] });
+    now += PRESTART_EVERY_MS;
+    edit(); // request 2, the refresh, not yet at the spine
+    leftThisMachine(TAB, fake.client);
+    expect(fake.invoked('session.intent.prestart.withdraw')).toEqual([{ appSessionId: TAB, token: sentTokens()[0] }, { appSessionId: TAB, token: sentTokens()[1] }]);
+  });
+
+  it('scalpel-3 6. once the refresh is answered, only its token is withdrawn', async () => {
+    edit();
+    await fake.reply('session.intent.prestart', { status: 'started', token: sentTokens()[0] });
+    now += PRESTART_EVERY_MS;
+    edit();
+    await fake.reply('session.intent.prestart', { status: 'running', token: sentTokens()[1] });
+    leftThisMachine(TAB, fake.client);
+    expect(fake.invoked('session.intent.prestart.withdraw')).toEqual([{ appSessionId: TAB, token: sentTokens()[1] }]);
+  });
+});

@@ -21,10 +21,11 @@ import { legacyRouteOf, readRoute, type LegacyRoute, type Route } from '@shared/
 import type { Location } from '@shared/sessions/intent';
 import type { LaunchSpec } from '@shared/engine/launch-spec';
 import type { RelayHealth } from '@shared/engine/relay-health';
-import { ENGINE_MAWS_TOOLS_CAPABILITY, ENGINE_ROUTE_MACHINE_CAPABILITY } from '@shared/host/socket-protocol';
+import { ENGINE_MAWS_TOOLS_CAPABILITY, ENGINE_PRESTART_CAPABILITY, ENGINE_ROUTE_MACHINE_CAPABILITY } from '@shared/host/socket-protocol';
 import { isGatewayModel } from '@shared/sessions/models';
 import { RELAY_URL } from '../../engine-host/launch';
 import { effectiveBaseUrl, type BaseUrlResolution } from '../../engine-host/models-cache';
+import { relayNotChecked } from '../../engine-host/relay-health'; // ticket 851 (the xhigh panel)
 import type { CommandInput, CommandOutput } from '@shared/ipc/schema';
 import type { SetupPhase } from '@shared/sessions/setup';
 import { hostCall } from './context';
@@ -89,16 +90,30 @@ export type MachineGuard = { refused: { field: 'route' | 'model'; message: strin
 
 // Ticket 851 (D8): `relay: 'cached'`, the prestart's read of the relay's last health (it never forces a probe).
 export async function guardMachineRoute(s: Setup, args: { site: SettingsSite; model: string | null; flagEnv?: unknown; startAnyway: boolean; relay?: 'probe' | 'cached' }): Promise<MachineGuard> {
-  const resolution = await machineBaseUrl(s, args.site, args.flagEnv);
+  return guardResolution(s, await machineBaseUrl(s, args.site, args.flagEnv), args);
+}
+
+// The guard of one resolution of the base URL. Ticket 851 (the xhigh panel, scalpel-3 finding 4): the prestart guards
+// again the resolution its spec was built from (hostLaunchOf), so settings that moved after its guards (to a relay that
+// is down) never launch hidden: a machine-route launch has no relay check of its own.
+export async function guardResolution(s: Setup, resolution: BaseUrlResolution, args: { model: string | null; startAnyway: boolean; relay?: 'probe' | 'cached' }): Promise<MachineGuard> {
   const lists = await s.hostLists(ENGINE_ROUTE_MACHINE_CAPABILITY);
   if (!lists && !legacyEquivalent(resolution)) return { refused: { field: 'route', message: ROUTE_UNSUPPORTED } };
   const relay = resolution.kind === 'resolved' && resolution.baseUrl === RELAY_URL;
   if (args.model !== null && isGatewayModel(args.model) && resolution.kind === 'resolved' && !relay) return { refused: { field: 'model', message: machineRouteRefusal(args.model) } };
   if (!relay || (args.startAnyway && lists)) return null;
-  const health = await hostCall(s.dispatch, 'engine.relayHealth', { force: args.relay !== 'cached' });
+  const health = await relayHealthOf(s, args.relay ?? 'probe');
   if (health.ok) return null;
   // an older host refuses the legacy gateway launch at a dead relay, so no sheet offers to start past it
   return lists ? { relay: health } : { refused: { field: 'route', message: ROUTE_RELAY_UNSUPPORTED } };
+}
+
+// The relay's health for a start's guard: a fresh probe. Ticket 851 (D8; the xhigh panel, scalpel-3 finding 5): the
+// prestart's (`cached`) is the host's last check while it is fresh, never a probe, and a miss reads as a relay not known
+// to answer, which skips the prestart.
+export async function relayHealthOf(s: Pick<Setup, 'dispatch'>, relay: 'probe' | 'cached'): Promise<RelayHealth> {
+  if (relay === 'probe') return hostCall(s.dispatch, 'engine.relayHealth', { force: true });
+  return (await hostCall(s.dispatch, 'engine.relayHealth.cached', undefined)) ?? relayNotChecked(RELAY_URL);
 }
 
 // The spec a launch sends this engine host: `route` only for the machine route on a host that lists it (the legacy field
@@ -114,20 +129,22 @@ export async function guardMachineRoute(s: Setup, args: { site: SettingsSite; mo
 // line, and holds no value in clear). The key is
 // null where no prestart may be adopted: a machine route whose resolution is uncertain, or a host that cannot serve the
 // machine route (the spec it is sent then says less than the launch it makes).
-export async function hostLaunchOf(s: Setup, spec: LaunchSpec): Promise<{ spec: LaunchSpec; key: string | null } | { refused: string }> {
+// The xhigh panel (scalpel-3, finding 4): beside them, the machine route's resolution they were built from (null on any
+// other route), which the prestart guards again.
+export async function hostLaunchOf(s: Setup, spec: LaunchSpec): Promise<{ spec: LaunchSpec; key: string | null; resolution: BaseUrlResolution | null } | { refused: string }> {
   if (spec.mawsTools !== undefined && !(await s.hostLists(ENGINE_MAWS_TOOLS_CAPABILITY))) return { refused: MAWS_TOOLS_UNSUPPORTED };
   const { route: _route, ...legacy } = spec;
   void _route;
   const chosen: Route = readRoute(spec);
-  if (chosen !== 'machine') return { spec: { ...legacy, gateway: chosen }, key: prestartKey({ route: chosen }) };
+  if (chosen !== 'machine') return { spec: { ...legacy, gateway: chosen }, key: prestartKey({ route: chosen }), resolution: null };
   const resolution = await machineBaseUrl(s, { cwd: spec.cwd }, spec.extraSettings?.env);
   const gateway = legacyOfResolution(resolution, spec.gateway);
   if (await s.hostLists(ENGINE_ROUTE_MACHINE_CAPABILITY)) {
     // M3's review (finding 3): and the digest of the gateway keys' values, so a value changed at the same names relaunches
     const key = resolution.kind === 'resolved' ? prestartKey({ route: 'machine', baseUrl: resolution.baseUrl, gatewayKeys: [...resolution.gatewayKeys].sort(), gatewayValues: resolution.gatewayFingerprint }) : null;
-    return { spec: { ...legacy, gateway, route: 'machine' }, key };
+    return { spec: { ...legacy, gateway, route: 'machine' }, key, resolution };
   }
-  return legacyEquivalent(resolution) ? { spec: { ...legacy, gateway }, key: null } : { refused: ROUTE_UNSUPPORTED };
+  return legacyEquivalent(resolution) ? { spec: { ...legacy, gateway }, key: null, resolution } : { refused: ROUTE_UNSUPPORTED };
 }
 
 const PRESTART_KEY_MAX = 4096; // session.prestart's bound on the key
@@ -141,11 +158,14 @@ const prestartKey = (facts: object): string | null => {
 // host or the settings changed since). A launch the host takes records the route chosen for it on the session's record
 // (none for a bootstrap's id), which an older host's status, carrying no route, leaves standing.
 // Ticket 851 (D4): `adopt`, an intent's launch after its prestart was asked: the key is sent beside the spec (computed
-// as the prestart's was), and the host adopts the prestart when both match; no key, no adoption.
+// as the prestart's was), and the host adopts the prestart when both match; no key, no adoption. The xhigh panel (sweep,
+// finding 4): nor to a host whose welcome does not list `engine.prestart` now (one replaced since the prestart by an
+// older build, whose strict `session.launch` would refuse the field rather than launch fresh).
 export async function launchOnHost(s: Setup, phase: SetupPhase, input: Omit<CommandInput<'session.launch'>, 'spec' | 'adopt'> & { spec: LaunchSpec }, adopt = false): Promise<CommandOutput<'session.launch'>> {
   const sent = await hostLaunchOf(s, input.spec);
   if ('refused' in sent) throw new SetupFailure(phase, sent.refused);
-  const answer = await hostCall(s.dispatch, 'session.launch', { ...input, spec: sent.spec, ...(adopt && sent.key !== null && { adopt: { key: sent.key } }) });
+  const adoption = adopt && sent.key !== null && (await s.hostLists(ENGINE_PRESTART_CAPABILITY)) ? { adopt: { key: sent.key } } : {};
+  const answer = await hostCall(s.dispatch, 'session.launch', { ...input, spec: sent.spec, ...adoption });
   if (answer.status === 'launching') s.sessions.setRoute(input.spec.appSessionId, readRoute(input.spec));
   return answer;
 }

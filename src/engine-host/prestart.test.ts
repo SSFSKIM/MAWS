@@ -490,6 +490,46 @@ describe('adopt', () => {
     expect(host.transports).toHaveLength(2); // the two prestarts; the commit spawned none
   });
 
+  // The xhigh panel on ticket 851 (scalpel-2, finding 4): the spine names each request, so an admission whose reply
+  // timed out on the spine's side can still be withdrawn
+  it('a withdraw by the spine’s request ends the admission it names, and after a running answer, only the newer request’s', async () => {
+    const host = engineHost();
+    const asked = (request: string) => host.call('session.prestart', { spec: spec('app-p'), key: 'key-1', owner: OWNER, request });
+    const withdraw = (by: { request?: string; generation?: number }) => host.call('session.prestart.withdraw', { appSessionId: 'app-p' as AppSessionId, ...by });
+    const ended = () => host.named('engine.prestart').some((e) => (e.payload as { state: string }).state === 'ended');
+    const first = await asked('request-1');
+    await hiddenReady(host, 'app-p');
+    await withdraw({ request: 'request-0' });
+    await withdraw({ request: 'request-1', generation: first.generation + 1 }); // every name given must match
+    expect(await asked('request-2')).toEqual({ status: 'running', generation: first.generation });
+    await withdraw({ request: 'request-1' });
+    await withdraw({});
+    expect(ended()).toBe(false);
+    expect(host.ipc.table.isHidden('app-p' as AppSessionId)).toBe(true);
+    await withdraw({ request: 'request-2' });
+    expect(ended()).toBe(true);
+  });
+
+  // The xhigh panel (scalpel-3, finding 5): a hidden launch reads the relay's last check while fresh, never a probe
+  it('a hidden launch on the gateway route reads the relay cache-only: a miss ends the prestart unspawned, a fresh check launches it', async () => {
+    const probes: boolean[] = [];
+    const logs: string[] = [];
+    let cached: typeof OK_RELAY | null = null;
+    const host = engineHost({ deps: { checkRelay: async (force) => (probes.push(force), OK_RELAY), cachedRelay: () => cached, log: (line) => void logs.push(line) } });
+    await host.prestart('app-p', { spec: { gateway: 'gateway' } });
+    await until(() => logs.some((line) => line.includes('its relay is unreachable')), 'the prestart refused');
+    expect(host.transports).toHaveLength(0);
+    expect(host.hiddenReserved).toEqual([]);
+    cached = OK_RELAY;
+    await host.prestart('app-p', { spec: { gateway: 'gateway' }, key: 'key-2' });
+    await hiddenReady(host, 'app-p');
+    expect(probes).toEqual([]);
+    expect(await host.call('engine.relayHealth.cached', undefined)).toEqual(OK_RELAY);
+    cached = null;
+    expect(await host.call('engine.relayHealth.cached', undefined)).toBeNull();
+    expect(probes).toEqual([]);
+  });
+
   it('the welcome restates the hidden set, as the internal query does', async () => {
     const host = engineHost();
     let burst: (() => void) | null = null;

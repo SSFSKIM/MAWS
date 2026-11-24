@@ -937,6 +937,7 @@ export class SessionService {
         const host = await this.prestarts.serial(appSessionId, () => this.dispatchPrestart(appSessionId, epoch, built, prestart));
         if (host === 'ended') return skipped('ended: a discard, a Send, a withdraw, a newer request or the spine’s stop came first');
         if (host === 'unlinked') reason = 'host: the engine host is not connected';
+        else if (host === 'overtaken') reason = 'overtaken: a newer draft’s request holds the engine host’s one prestart';
         else if (host.status !== 'refused') return this.prestarts.tokenOf(appSessionId) === token ? { status: host.status, token } : skipped('ended: the request was withdrawn or replaced');
         else reason = `refused: ${host.reason ?? 'the engine host refused it'}`;
       }
@@ -951,14 +952,18 @@ export class SessionService {
   }
 
   // In the id's serial host calls: the request is sent only while it is current and the engine host is ready, bound to
-  // that connection (the link would hold a request for a host not ready and hand it to a successor: finding 4).
-  private async dispatchPrestart(appSessionId: AppSessionId, epoch: number, built: { spec: LaunchSpec; key: string }, prestart: NonNullable<SessionServiceDeps['prestart']>): Promise<CommandOutput<'session.prestart'> | 'ended' | 'unlinked'> {
+  // that connection (the link would hold a request for a host not ready and hand it to a successor: finding 4), and only
+  // while no other draft's newer request holds the host's slot (the xhigh panel, scalpel-2 finding 5). It is named, and
+  // known by that name from before it is sent (scalpel-2, finding 4).
+  private async dispatchPrestart(appSessionId: AppSessionId, epoch: number, built: { spec: LaunchSpec; key: string }, prestart: NonNullable<SessionServiceDeps['prestart']>): Promise<CommandOutput<'session.prestart'> | 'ended' | 'unlinked' | 'overtaken'> {
     if (!this.prestarts.current(appSessionId, epoch)) return 'ended';
     const link = prestart.link();
     if (link === null) return 'unlinked';
-    this.prestarts.dispatching(appSessionId);
-    const host = await hostCall(this.deps.host.dispatch, 'session.prestart', { spec: built.spec, key: built.key, owner: prestart.owner });
-    this.prestarts.admitted(appSessionId, host.generation, link);
+    if (this.prestarts.overtaken(appSessionId, epoch, link)) return 'overtaken';
+    const request = randomUUID();
+    this.prestarts.dispatching(appSessionId, request, link);
+    const host = await hostCall(this.deps.host.dispatch, 'session.prestart', { spec: built.spec, key: built.key, owner: prestart.owner, request });
+    this.prestarts.admitted(appSessionId, request, host.generation);
     return host;
   }
 
@@ -972,19 +977,19 @@ export class SessionService {
     return prestartLaunch(s, await this.bindTrust(intent!, true, undefined), (id) => prestart.browserSocketPath(id)); // the decision bound as Send's guards bind it
   }
 
-  // Queued behind every host call of the id: the generation the host gave last is withdrawn, on the connection that gave
-  // it only (a successor host never hears an old one's).
+  // Queued behind every host call of the id: the request sent last is withdrawn, by its name and the generation the host
+  // gave it (when its answer came), on the connection it was sent on only (a successor host never hears an old one's).
   private withdrawKnown(appSessionId: AppSessionId): Promise<void> {
     const prestart = this.deps.prestart;
     if (prestart === undefined) return Promise.resolve();
     return this.prestarts.serial(appSessionId, async () => {
       const link = prestart.link();
-      const generation = this.prestarts.takeKnown(appSessionId, link);
-      if (generation === null) return;
+      const known = this.prestarts.takeKnown(appSessionId, link);
+      if (known === null) return;
       try {
-        await hostCall(this.deps.host.dispatch, 'session.prestart.withdraw', { appSessionId, generation });
+        await hostCall(this.deps.host.dispatch, 'session.prestart.withdraw', { appSessionId, request: known.request, ...(known.generation !== null && { generation: known.generation }) });
       } catch (error) {
-        this.log(`the prestart of ${appSessionId} (generation ${generation}) was not withdrawn: ${error instanceof Error ? error.message : String(error)}`);
+        this.log(`the prestart of ${appSessionId} (generation ${known.generation ?? 'unanswered'}) was not withdrawn: ${error instanceof Error ? error.message : String(error)}`);
       }
     });
   }

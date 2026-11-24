@@ -113,8 +113,11 @@ export const O10_ENGINE_COMMANDS = Object.keys(o10Commands) as (keyof typeof o10
 // hidden set, which `engine.prestarts` also answers. Internal: the endpoint's (M4), never a window.
 export const PrestartHiddenSchema = z.strictObject({ appSessionId: AppSessionIdSchema, engineSessionId: SessionIdSchema.nullable() });
 export const EnginePrestartSchema = z.strictObject({ appSessionId: AppSessionIdSchema, engineSessionId: SessionIdSchema.nullable(), state: z.enum(['hidden', 'committed', 'ended']) });
+// The xhigh panel (scalpel-3, finding 5): `engine.relayHealth.cached`, the relay's last check while it is fresh, never a
+// probe (null: none fresh), which the spine's prestart reads while its person types. Internal: the spine's.
 const prestartCommands = {
   'engine.prestarts': { input: z.void(), output: z.strictObject({ hidden: z.array(PrestartHiddenSchema).max(1) }), owner: 'engine-host' },
+  'engine.relayHealth.cached': { input: z.void(), output: RelayHealthSchema.nullable(), owner: 'engine-host' },
 } as const;
 
 export const commands = {

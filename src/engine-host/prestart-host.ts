@@ -51,6 +51,7 @@ interface Prestart {
   id: AppSessionId;
   generation: number;
   owner: string;
+  request: string | undefined; // the spine's name for the request that admitted it, or the newer one a `running` answered
   client: ClientRef;
   spec: LaunchSpec;
   key: string;
@@ -78,8 +79,8 @@ export class PrestartHost {
   }
 
   // `session.prestart`: the admission, synchronously; the launch runs behind the answer.
-  prestart(input: { spec: LaunchSpec; key: string; owner: string }, client: ClientRef): PrestartAnswer {
-    const { spec, key, owner } = input;
+  prestart(input: { spec: LaunchSpec; key: string; owner: string; request?: string | undefined }, client: ClientRef): PrestartAnswer {
+    const { spec, key, owner, request } = input;
     const id = spec.appSessionId;
     assertSafeAppSessionId(id);
     const refused = (reason: string): PrestartAnswer => ({ status: 'refused', generation: 0, reason });
@@ -88,12 +89,15 @@ export class PrestartHost {
     if (this.fenced.has(id)) return refused('a launch of the session is under way'); // M2's review, finding 6
     const cur = this.current;
     if (cur?.state === 'committing') return refused('a prestart is being adopted'); // M2's review, finding 7: it holds the slot
-    if (cur !== null && cur.id === id && cur.owner === owner && cur.client.id === client.id && cur.key === key && sameLaunchSpec(cur.spec, spec)) return { status: 'running', generation: cur.generation };
+    if (cur !== null && cur.id === id && cur.owner === owner && cur.client.id === client.id && cur.key === key && sameLaunchSpec(cur.spec, spec)) {
+      cur.request = request; // the xhigh panel (scalpel-2, finding 4): the newer request now names it
+      return { status: 'running', generation: cur.generation };
+    }
     if (cur !== null) this.end(cur, 'a newer prestart replaced it');
     const live = this.deps.table.get(id);
     if ((live !== undefined && live.lifecycle !== 'exited') || this.deps.table.isAdopting(id)) return refused('the session has a live process');
     const h: Prestart = {
-      id, generation: ++this.generation, owner, client, spec, key, session: null, state: 'admitted', announced: false, unwatch: () => {}, handedOver: false,
+      id, generation: ++this.generation, owner, request, client, spec, key, session: null, state: 'admitted', announced: false, unwatch: () => {}, handedOver: false,
       stage: new Stage({ maxBytes: this.deps.stageMaxBytes ?? PRESTART_STAGE_MAX_BYTES, overflow: () => this.end(h, `its stage passed ${this.deps.stageMaxBytes ?? PRESTART_STAGE_MAX_BYTES} bytes`) }),
     };
     this.current = h;
@@ -103,10 +107,12 @@ export class PrestartHost {
     return { status: 'started', generation: h.generation };
   }
 
-  // `session.prestart.withdraw`: that generation, only while it is not committing or committed.
-  withdraw(appSessionId: AppSessionId, generation: number): void {
+  // `session.prestart.withdraw`: the prestart every given name matches (its generation, the spine's request: the xhigh
+  // panel, scalpel-2 finding 4), only while it is not committing or committed; a withdraw that names neither does nothing.
+  withdraw(appSessionId: AppSessionId, by: { generation?: number | undefined; request?: string | undefined }): void {
     const h = this.current;
-    if (h !== null && h.id === appSessionId && h.generation === generation) this.end(h, 'withdrawn');
+    if (h === null || h.id !== appSessionId || (by.generation === undefined && by.request === undefined)) return;
+    if ((by.generation === undefined || h.generation === by.generation) && (by.request === undefined || h.request === by.request)) this.end(h, 'withdrawn');
   }
 
   // `session.prestart.release` (R4-7): the owner's prestarts end, and it admits none from now on.

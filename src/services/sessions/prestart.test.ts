@@ -50,7 +50,8 @@ const intentFile = (id: string): SetupIntent | null => {
 // the intent as the service holds it, set directly (a shape no command makes on a create intent: a fork's, a failure's)
 const putIntent = (intent: SetupIntent) => (h.service as unknown as { deps: { intents: IntentStore } }).deps.intents.put(intent);
 const prestartCalls = () => h.host.calledWith('session.prestart') as { spec: LaunchSpec; key: string; owner: string }[];
-const withdrawCalls = () => h.host.calledWith('session.prestart.withdraw') as { appSessionId: string; generation: number }[];
+// the withdraws by the generation they name (each also names the spine's request: the xhigh panel, scalpel-2 finding 4)
+const withdrawCalls = () => (h.host.calledWith('session.prestart.withdraw') as { appSessionId: string; generation?: number }[]).map(({ appSessionId, generation }) => ({ appSessionId, generation }));
 const launchCalls = () => h.host.calledWith('session.launch') as { spec: LaunchSpec; adopt?: { key: string } }[];
 const butPin = ({ sessionId: _pin, ...rest }: LaunchSpec) => (void _pin, rest);
 const userSettings = (value: object) => writeFileSync(join(h.trust.configHome, 'settings.json'), JSON.stringify(value));
@@ -273,7 +274,8 @@ describe('eligibility: the guards Send uses, each rule skipping with nothing dis
     await harness();
     const id = await create();
     await ask(id);
-    expect(h.host.calledWith('engine.relayHealth')).toEqual([{ force: false }]);
+    expect(h.host.calledWith('engine.relayHealth')).toEqual([]); // the xhigh panel, scalpel-3 finding 5: never a probe
+    expect(h.host.calledWith('engine.relayHealth.cached')).toHaveLength(1);
   });
 
   it('prestarts trust declined, an existing worktree, and the machine route at a reachable base URL', async () => {
@@ -764,6 +766,113 @@ describe('M4’s review: the tombstones', () => {
     const id = await create();
     await h.service.withdrawPrestart(id, 'withdrawn-early');
     expect(kept(id)).toEqual([]);
+  });
+});
+
+// The xhigh panel on ticket 851, group B (the spine's fences and guards): each test stages its finding's scenario.
+describe('the xhigh panel: the spine’s fences and guards', () => {
+  it('sweep 4. a Send that reaches a host no longer listing engine.prestart offers no adopt, and launches as today', async () => {
+    await harness();
+    const id = await create();
+    expect(await ask(id)).toMatchObject({ status: 'started' });
+    h.host.capabilities = PEER_CAPABILITIES.engineHost.filter((c) => c !== ENGINE_PRESTART_CAPABILITY); // a pre-feature replacement host, otherwise compatible
+    await h.service.startSession(id, { message: MESSAGE, options: {} });
+    expect(await h.settled(id)).toMatchObject({ phase: 'ready' });
+    expect(launchCalls()).toHaveLength(1);
+    expect(launchCalls()[0]).not.toHaveProperty('adopt');
+  });
+
+  it('scalpel-2 4. an admission whose reply was lost (its caller timed out) is still withdrawn, by the request the spine named', async () => {
+    await harness();
+    const id = await create();
+    h.host.prestartReplyLost = true;
+    expect(await ask(id)).toMatchObject({ status: 'skipped', token: null });
+    await h.service.work.settled();
+    expect(h.host.prestarts.size).toBe(0);
+  });
+
+  it('scalpel-2 4. the window’s withdraw while its request is on its way, whose reply is then lost: the admission is withdrawn', async () => {
+    await harness();
+    const id = await create();
+    const held = gate();
+    h.host.prestartGate = held.opened;
+    h.host.prestartReplyLost = true;
+    const asked = ask(id, 'window-token-1');
+    await h.until(() => prestartCalls().length === 1);
+    const withdrawn = h.service.withdrawPrestart(id, 'window-token-1');
+    held.open();
+    await Promise.all([asked, withdrawn]);
+    expect(h.host.prestarts.size).toBe(0);
+  });
+
+  it('scalpel-2 5. an older draft’s request held in its guards past a newer draft’s warm engine dispatches nothing: the latest typing keeps the slot', async () => {
+    const style = heldStyleRead();
+    await harness(style.opts);
+    installToHumanPlugin(h.trust.configHome, { declares: true });
+    const older = await create();
+    const newer = await create();
+    const asked = ask(older);
+    await h.until(style.reached);
+    expect(await ask(newer)).toMatchObject({ status: 'started' });
+    style.release();
+    expect(await asked).toMatchObject({ status: 'skipped', token: null });
+    expect(prestartCalls().map((c) => c.spec.appSessionId)).toEqual([newer]);
+    expect([...h.host.prestarts.keys()]).toEqual([newer]);
+  });
+
+  it('scalpel-2 5. once the newer draft’s request has ended (its window withdrew it), the older draft’s request dispatches', async () => {
+    const style = heldStyleRead();
+    await harness(style.opts);
+    installToHumanPlugin(h.trust.configHome, { declares: true });
+    const older = await create();
+    const newer = await create();
+    const asked = ask(older);
+    await h.until(style.reached);
+    expect(await ask(newer, 'newer-token')).toMatchObject({ status: 'started' });
+    await h.service.withdrawPrestart(newer, 'newer-token');
+    style.release();
+    expect(await asked).toMatchObject({ status: 'started' });
+    expect([...h.host.prestarts.keys()]).toEqual([older]);
+  });
+
+  it('scalpel-3 3. trust revoked after the guards passed, before the launch directory is read: skipped, as a fresh Send would show its card', async () => {
+    await harness({ launchGate: async () => (h.trust.write({}), null) });
+    const id = await create();
+    expect(intentFile(id)!.trust).toBe('unanswered');
+    expect(await ask(id)).toMatchObject({ status: 'skipped', token: null });
+    expect(prestartCalls()).toEqual([]);
+  });
+
+  it('scalpel-3 4. the machine route’s base URL moving to a relay that is down after the guards: the final resolution is guarded, and skipped', async () => {
+    const moved = async () => {
+      userSettings({ env: { ANTHROPIC_BASE_URL: RELAY_URL } });
+      h.host.relay = DOWN_RELAY;
+      return null;
+    };
+    await harness({ settings: machineSettings, launchGate: moved });
+    userSettings({ env: { ANTHROPIC_BASE_URL: 'https://elsewhere.example' } });
+    const id = await create();
+    expect(await ask(id)).toMatchObject({ status: 'skipped', token: null });
+    expect(prestartCalls()).toEqual([]);
+  });
+
+  it('scalpel-3 5. a relay with no fresh check: the gateway route skips, asking no probe', async () => {
+    await harness();
+    h.host.relayCached = false;
+    const id = await create();
+    expect(await ask(id)).toMatchObject({ status: 'skipped', token: null });
+    expect(h.host.calledWith('engine.relayHealth')).toEqual([]);
+    expect(prestartCalls()).toEqual([]);
+  });
+
+  it('scalpel-3 5. the same on the machine route at the relay’s base URL', async () => {
+    await harness({ settings: machineSettings });
+    userSettings({ env: { ANTHROPIC_BASE_URL: RELAY_URL } });
+    h.host.relayCached = false;
+    const id = await create();
+    expect(await ask(id)).toMatchObject({ status: 'skipped', token: null });
+    expect(h.host.calledWith('engine.relayHealth')).toEqual([]);
+    expect(prestartCalls()).toEqual([]);
   });
 });
 
