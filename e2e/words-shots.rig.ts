@@ -6822,7 +6822,7 @@ test('the word cut’s M5: the library’s Spaces, opened artifacts, the documen
           await expect(docDeletedToggle(rail), 'the disclosure closed').toHaveAttribute('aria-expanded', 'false');
           const below = await rail.evaluate((el, id) => {
             const card = el.querySelector(`article[data-thread="${id}"]`);
-            const toggle = [...el.querySelectorAll('button.doc-rail-section')].find((button) => /^Deleted \(\d+\)$/.test(button.textContent ?? ''));
+            const toggle = Array.from(el.querySelectorAll('button.doc-rail-section')).find((button) => /^Deleted \(\d+\)$/.test(button.textContent ?? ''));
             return Boolean(card && toggle && card.compareDocumentPosition(toggle) & Node.DOCUMENT_POSITION_FOLLOWING);
           }, WORDS_THREADS.second);
           expect(below, 'the toggle after the open cards').toBe(true);
