@@ -40,6 +40,7 @@ How to see it working: open the build beside today's build on the same fixtures 
 - [x] (2026-11-24 07:00Z) M5 task 2: the document editor and the dashboard editor, reviewed clean (one rare finding logged under the stop rule).
 - [x] (2026-11-24 09:40Z) M5 task 3: the slides editor, reviewed clean (one rare finding logged under the stop rule).
 - [x] (2026-11-24 09:40Z) M5 task 4: the design workbench and the design system page, reviewed clean (one rare finding logged under the stop rule).
+- [x] (2026-11-24 10:40Z) M5 task 5: the e2e moves, reviewed clean.
 - [x] (2026-11-24 08:20Z) M5 task 6: the rig's scenes for the library, an opened artifact, the document and the dashboard, reviewed clean and merged.
 - [ ] M5: the cut built area by area, each with pictures and the owner's call.
 - [ ] Retrospective.
@@ -567,6 +568,11 @@ Kept by the session that wrote this document (sminos alias `design-experiment`, 
   - **The comments toolbar.** G512 removes the toolbar's Comments toggle; the header's Comments action opens the rail. G513 and G514 take `NamedGlyph`'s form, and `NamedGlyph`'s optional `detail` carries "On Hero". A greyed Add comment keeps Tab, with the reason "Select one element or a board to comment on".
   - **Sizes and badges.** G522 and G528 reveal sizes through the shared hover scope. G556 rounds the percentage down, so a board just over the cap never reads "100%". G568's badge takes Tab, with its verdict as the tooltip.
   - **The design system page's waits and lists.** G562's page mounts after the first sync. With no system it reads "This design system is empty" and "Ask Claude to publish a design system here.", in place of a spinner that could stand forever. G586 and G587 make one "By hand" list in the law's order; the deck's Check panel still says "Check by hand", which is for the owner's picture review.
+- 2026-11-24. **M5 task 5: the e2e moves.** Twenty-four Electron specs and five support helpers now read what M5's surfaces draw. None was deleted and no spec was added, so the groups are unchanged. No desk spec and no harness probe read a changed control.
+  - **What the moved reads check.** A moved fact is read where it now lives: in the owner's description, and drawn once the owner holds focus. A reveal is checked as undrawn, then focus, then drawn, and the dashboard's mark honours the touch rule. A word whose description moved outside its line, such as "Connected" or the newer-rows clock, is checked with `expectDrawn` and read as rendered text. A held banner's reason is read after its Details opens, never from the closed disclosure.
+  - **Shared helpers.** One activate-and-reply helper (`e2e/support/comment-reply.ts`) follows the active card in either layout, for the document and the dashboards (G385). `toggleComments` (`e2e/support/design.ts`) reaches the design's rail through the header (G512). `design-comments` gains the header's count after a board is deleted ("1 open comment") and after it is restored ("2 open comments").
+  - **Waits.** Waits on cut words became waits on the answer, as for Show editors. The connector and live-data start helpers accept "Ready".
+  - **Groups for the Mac.** The gated groups are dashboard, dashboard-live-data, deliverables, delivery, connectors-direct, design, document, document-app, library, panel, presentations, remote and layout. Connectors and connectors-oauth run through the changed start helper, and tools through task 1's `maws-tools` read. The opt-in groups are dashboard-scale and connectors-soak.
 
 ## Outcomes & Retrospective
 
