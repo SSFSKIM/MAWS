@@ -42,6 +42,7 @@ How to see it working: open the build beside today's build on the same fixtures 
 - [x] (2026-11-24 09:40Z) M5 task 4: the design workbench and the design system page, reviewed clean (one rare finding logged under the stop rule).
 - [x] (2026-11-24 10:40Z) M5 task 5: the e2e moves, reviewed clean.
 - [x] (2026-11-24 08:20Z) M5 task 6: the rig's scenes for the library, an opened artifact, the document and the dashboard, reviewed clean and merged.
+- [x] (2026-11-24 12:10Z) M5 task 7: the rig's scenes for the slides editor, the design workbench and the design system page, reviewed clean and merged.
 - [ ] M5: the cut built area by area, each with pictures and the owner's call.
 - [ ] Retrospective.
 
@@ -321,6 +322,9 @@ Kept by the session that wrote this document (sminos alias `design-experiment`, 
 - **A wait on a cut word passes at once.** Several e2e waits watched for "Reading…" or "Starting…" to go; once the words became a wordless spinner, those waits found nothing and returned immediately, so they read the answer now.
 - **The rig's scenario sessions are not in the index.** Index-backed writes, a mod's session override among them, fail there ("unknown app session"), so M4's mod scenes run in a launch of their own on the engine's store.
 - **The editors were never separate bundles.** The spec's M5 section took them for bundles that would need a twin of the shared parts; the renderer's build and typecheck compile `src/artifacts/` with the renderer, and the portability lint bars only Electron, Node and `window.maws`, so the editors import the parts as they are.
+- **A guard outside every task's folders caught what the tasks' proofs missed.** `test/react-compiler.test.ts` compiles a list of renderer files with the React Compiler, and three M5 files had come to bail out: a ternary inside `||`, and a dependency list missing a setter that had become a function. No task ran `test/`, so only the whole suite found it. A milestone that edits a listed file runs that guard with its own tests.
+- **The rig's guesses about a control's form fail on both builds alike.** The library's View switch is a Radix toggle group, which draws a `radiogroup`, not buttons, and the host puts an empty tab back after a seed deletes a document's last one. Each cost a Mac shakedown, and each would have shown in master's own e2e or source. A scene's locator is taken from an e2e spec that already reaches the control, where one exists.
+- **Notices skip a level.** A worker's background run ended without the worker hearing of it, more than once, and the worker sat idle. The controller watched the VM lock and told the worker to read its own log.
 
 ## Decision Log
 
@@ -573,6 +577,15 @@ Kept by the session that wrote this document (sminos alias `design-experiment`, 
   - **Shared helpers.** One activate-and-reply helper (`e2e/support/comment-reply.ts`) follows the active card in either layout, for the document and the dashboards (G385). `toggleComments` (`e2e/support/design.ts`) reaches the design's rail through the header (G512). `design-comments` gains the header's count after a board is deleted ("1 open comment") and after it is restored ("2 open comments").
   - **Waits.** Waits on cut words became waits on the answer, as for Show editors. The connector and live-data start helpers accept "Ready".
   - **Groups for the Mac.** The gated groups are dashboard, dashboard-live-data, deliverables, delivery, connectors-direct, design, document, document-app, library, panel, presentations, remote and layout. Connectors and connectors-oauth run through the changed start helper, and tools through task 1's `maws-tools` read. The opt-in groups are dashboard-scale and connectors-soak.
+- 2026-11-24. **M5 task 7: the rig's scenes for the slides editor, the design workbench and the design system page.** The rig gains 53 more `m5-` scenes, all in launch 15, which makes 95 `m5-` scenes and 402 in all. Task 6's fixtures are unchanged; each state another scene would disturb gets an artifact of its own.
+  - **Proving each state.** Twenty existing scenes that show M5 surfaces check the build before capture (`M5_CARRIED`). A tooltip scene requires keyboard focus on its owner at capture, that owner's tip open, and each build's own words, the chord included. A selection scene requires the exact element or board it asked for.
+  - **Paired cases.** Several scenes take a paired view that each build can draw: G529's held badge at a zoom where master draws it, G577's canon caption scrolled into view, and G556's exact "91%" on M5 against "91.02%" on master.
+  - **Saves.** The deck, the design workbench and the design system page each save on a fixture of their own, and each save shows "All changes saved" after a revision advance.
+  - **Fixture premises.** The default star sets the house system as the owner's default and restores it afterwards. The broken alias is written raw, since publication refuses it. The in-use sheet is reached through Delete's confirmation. The version scene saves a baseline, edits, then saves Draft.
+  - **Setup order.** Every locator is built inside its scene's check, so a fixture that failed or was filtered out costs only its own scenes.
+  - **Unreached rows.** G518 is unreached: the workbench greys every board edit the model would refuse, and the canvas resize that could still raise it is not staged. G421 is unreached too, because every system in the fixtures has layouts.
+  - **The Mac shakedowns.** The coordinator ran three after-only shakedowns on the Mac, and three rig faults came out of them. The library's View switch is a radiogroup on both builds. G512 removed the design toolbar's Comments toggle, so the design rail now opens through the header's count. And the host's `ensureTab` restores an empty tab unless a document's files root holds something, so the empty-document and legacy-dashboard fixtures write their files before removing the tabs.
+  - **Rows reached.** Of M5's 182 changing rows, 112 have a scene; the other 70 are listed with the state each needs in `scenes.md`'s "M5's states with no scene" (board ticket 816).
 
 ## Outcomes & Retrospective
 
