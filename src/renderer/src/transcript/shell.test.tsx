@@ -82,7 +82,7 @@ describe('the transcript slot', () => {
     useSessions.setState({ records: new Map([[APP, record(APP)]]) });
     render(<SessionPane appSessionId={APP} paneIndex={0} />);
     await waitFor(() => expect(screen.getByRole('region', { name: 'Your message' })).toBeTruthy());
-    expect(fake.invoked('session.events')).toEqual([{ appSessionId: bareOf(APP), afterSeq: null, limit: null }]);
+    expect(fake.invoked('session.events')).toEqual([{ appSessionId: bareOf(APP), afterSeq: null, limit: null, provisional: true }]); // tail-first: a session on this machine
     expect(document.querySelector('[data-kind="assistant_text"]')?.textContent).toContain('See the file');
     expect(screen.queryByText('Transcript unavailable')).toBeNull();
   });
