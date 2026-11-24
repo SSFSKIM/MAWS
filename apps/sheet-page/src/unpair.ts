@@ -1,8 +1,9 @@
 // The person's own Unpair (§P; T10, T19). mawsd is told only over a proven connection; then the connection ends and
 // every key under the page's prefix is forgotten, whatever mawsd answered. What became of the pairing is kept apart,
 // since each asks something different of the person: `revoked`, mawsd refused it and saved that; `not-saved`, mawsd
-// refuses it now but could not save the change, so a restart before a save pairs the browser again; `local`, this
-// browser forgot it and mawsd was never told (no proven connection, or no answer), so mawsd still lists it.
+// refuses it now but could not save the change, so a restart before a save may accept the old pairing again; `local`,
+// this browser forgot it and mawsd did not confirm the removal (no proven connection, no answer, or a refusal), which
+// can also mean it was already gone, so mawsd may or may not still list it.
 import type { Done } from './api';
 
 // `refused`: the connection's opening was refused, or another tab of this browser unpaired it

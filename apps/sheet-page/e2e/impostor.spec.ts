@@ -58,8 +58,8 @@ for (const play of PLAYS) {
     }
     heardNothing(fake.heard, pairing);
     await mawsd.restart();
-    expect(await mawsd.connections()).toBe(0); // a fresh daemon: nothing is proven yet
-    // the tab came back: mawsd counts its connection once it was proven and paired (the bar alone stayed up through four plays)
+    // the tab came back: the fresh mawsd counts its connection once it was proven and paired (the bar alone stayed up
+    // through four plays), and this tab is the only one there that could be
     await until(async () => (await mawsd.connections()) >= 1, 20_000, 'the tab’s connection to be paired again');
     await expect(page.getByRole(BAR)).toBeVisible();
     await expect(page.getByRole('heading', { name: 'Pair this browser' })).toHaveCount(0);

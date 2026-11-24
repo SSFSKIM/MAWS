@@ -16,9 +16,10 @@ export const PAGE = {
 export const PAIRING = {
   notPaired: 'This browser is not paired.', // this child's own: above the heading, after an unpairing or a refusal
   // this child's own: after the person's Unpair, when mawsd refused the browser but could not save the change (T10)
-  unpairNotSaved: 'MAWS could not save the change, so this browser is paired again if mawsd restarts before a save succeeds.',
-  // this child's own: after the person's Unpair, when mawsd could not be told (no proven connection, or no answer)
-  unpairLocal: 'MAWS could not be told, so it still lists this browser until it is unpaired there: mawsd sheet unpair.',
+  unpairNotSaved: 'MAWS could not save the change, so the old pairing may be accepted again if mawsd restarts before a save succeeds.',
+  // this child's own: after the person's Unpair, when mawsd did not confirm it (no proven connection, no answer, or a
+  // refusal), which can also mean the pairing was already gone, so the line does not say it is still listed
+  unpairLocal: 'This browser forgot its pairing, and MAWS did not confirm the removal. Run mawsd sheet browsers, and if the old entry still appears, mawsd sheet unpair <id>.',
   heading: 'Pair this browser',
   what: 'This page shows the open questions of the sessions on this Mac. A browser has to be paired once before it can read and answer them.',
   run: 'Run this in a terminal on this Mac:',
