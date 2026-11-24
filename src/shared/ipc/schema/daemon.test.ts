@@ -38,9 +38,9 @@ function fieldsOf(schema: z.ZodType, path: string[] = []): { path: string; name:
 describe('the daemon namespace', () => {
   it('is machine-owned and main-only, bridging nothing', () => {
     const daemon = Object.entries(commands).filter(([name]) => name.startsWith('daemon.'));
-    expect(Object.fromEntries(daemon.map(([name, spec]) => [name, spec.owner]))).toEqual({ 'daemon.status': 'machine', 'daemon.restart': 'machine', 'daemon.restartEngineHost': 'machine' /* P5 O16 M3b */, 'daemon.endpoint': 'machine', 'daemon.e2eSeam': 'machine', 'daemon.e2eRender': 'machine' /* P5 O5 M4 */, 'daemon.e2eBrowserView': 'machine' /* P5 O17 M9b */ });
+    expect(Object.fromEntries(daemon.map(([name, spec]) => [name, spec.owner]))).toEqual({ 'daemon.status': 'machine', 'daemon.restart': 'machine', 'daemon.restartEngineHost': 'machine' /* P5 O16 M3b */, 'daemon.endpoint': 'machine', 'daemon.e2eSeam': 'machine', 'daemon.e2eRender': 'machine' /* P5 O5 M4 */, 'daemon.e2eBrowserView': 'machine' /* P5 O17 M9b */, 'daemon.sheetPair': 'machine', 'daemon.sheetBrowsers': 'machine', 'daemon.sheetUnpair': 'machine' /* the question sheet's C4 */ });
     expect(NAMES.daemon.commands).toEqual([]);
-    expect(MAIN_ONLY_COMMANDS).toEqual(expect.arrayContaining(['daemon.status', 'daemon.restart', 'daemon.restartEngineHost', 'daemon.endpoint', 'daemon.e2eSeam', 'daemon.e2eRender', 'daemon.e2eBrowserView']));
+    expect(MAIN_ONLY_COMMANDS).toEqual(expect.arrayContaining(['daemon.status', 'daemon.restart', 'daemon.restartEngineHost', 'daemon.endpoint', 'daemon.e2eSeam', 'daemon.e2eRender', 'daemon.e2eBrowserView', 'daemon.sheetPair', 'daemon.sheetBrowsers', 'daemon.sheetUnpair']));
   });
 
   it('carries the enrollment secret only as an optional field of daemon.endpoint, never in args', () => {
@@ -73,7 +73,7 @@ describe('daemon.status for a remote caller', () => {
     const holdsPath = (name: string) => /Path$/.test(name) || name === 'profile' || name === 'dir';
     for (const field of fields.filter(({ name }) => holdsPath(name))) expect(isLocalOnly(field.schema), `${field.path} holds a path and is not marked local-only`).toBe(true);
     for (const field of fields.filter(({ schema }) => isLocalOnly(schema))) expect(field.schema instanceof z.ZodOptional, `${field.path} is marked local-only and is not optional`).toBe(true);
-    expect(fields.filter(({ schema }) => isLocalOnly(schema)).map(({ path }) => path).sort()).toEqual(['logPath', 'profile']);
+    expect(fields.filter(({ schema }) => isLocalOnly(schema)).map(({ path }) => path).sort()).toEqual(['logPath', 'profile', 'sheetPage.url']); // the question sheet's C4: the page's address, this machine's own
   });
 
   it('would catch a path field added without the mark', () => {

@@ -14,4 +14,8 @@ export const grades = {
   'daemon.e2eSeam': 'internal', // M5b fix round 2: the e2e's seams, never a remote caller's
   'daemon.e2eRender': 'internal', // P5 O5 M4: the render seam's e2e capture, likewise
   'daemon.e2eBrowserView': 'internal', // P5 O17 M9b: a viewer of mawsd's browser feed for the e2e, likewise
+  // the question sheet's C4 (T11): no caller through the endpoint mints a pairing code, lists or unpairs a browser
+  'daemon.sheetPair': 'internal',
+  'daemon.sheetBrowsers': 'internal',
+  'daemon.sheetUnpair': 'internal',
 } as const satisfies CommandGrades<'daemon'>;

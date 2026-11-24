@@ -16,6 +16,11 @@
 // that take a `<file|->` (`endpoint revoke` and `grant`, P5 O10 M10) are the daemon's to read but the caller's to name:
 // `-` is read from stdin here and travels as the same `secret`, and a relative path is made absolute against the
 // caller's working directory, since the daemon's is its own.
+//
+// The question sheet's C4 (docs/doperpowers/plans/2026-11-24-question-sheet-c4-local-page.md, §K): `sheet pair` prints
+// the page's one-time code alone on its first line, so a script reads it there; `sheet browsers` lists the paired
+// browsers; `sheet unpair` revokes one or all, and exits 1 when the change could not be saved, the browser then refused
+// only until mawsd restarts. `status` prints the page's line.
 import { closeSync, fstatSync, openSync, readFileSync, readSync, statSync } from 'node:fs';
 import { hostname } from 'node:os';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
@@ -71,6 +76,9 @@ export const USAGE = `usage: mawsd <command> [--profile <dir>] [--label <label>]
   uninstall
   render install|uninstall|status [--json]
                                    the render runtime on Linux: the pinned Electron, its sandbox helper set with sudo -n
+  sheet pair                       a one-time code that pairs a browser with the sheet page
+  sheet browsers [--json]          the browsers paired with the sheet page
+  sheet unpair <id>|--all          a paired browser, or every one, unpaired
   ${RUN_USAGE.replace(/^usage: mawsd /, '')}
 exit codes: 0 done, 1 failed, 2 not available here, 3 not running, 4 enrolled with the hub but not yet listed in the org state`;
 
@@ -136,6 +144,8 @@ export async function runCli(argv: readonly string[], deps: CliDeps): Promise<nu
         return await uninstall(context);
       case 'render':
         return await render(context, args);
+      case 'sheet':
+        return await sheet(context, args);
       default:
         throw new Usage(`mawsd has no command ${command}`);
     }
@@ -275,6 +285,7 @@ function statusText(status: DaemonStatus, wire: string, label: string | null, no
     `clients      ${clients.length > 0 ? clients.join(' · ') : 'none'}`,
     `endpoint     ${JSON.stringify(status.endpoint.detail)}`,
     ...(status.render ? [`render       ${renderText(status.render)}`] : []), // P5 O5 M6
+    ...(status.sheetPage ? [sheetPageLine(status.sheetPage)] : []), // the question sheet's C4
     '',
   ].join('\n');
 }
@@ -283,6 +294,16 @@ function statusText(status: DaemonStatus, wire: string, label: string | null, no
 export function sessionHostsLine(hosts: NonNullable<DaemonStatus['sessionHosts']>): string {
   return `session hosts  ${hosts.hosts} (adopted ${hosts.adopted}, failed ${hosts.failed})`;
 }
+
+// The question sheet's C4 (§J): the page's address with its browsers and open connections (unknown until its handler
+// loaded), or why it is not served
+export function sheetPageLine(page: NonNullable<DaemonStatus['sheetPage']>): string {
+  if (page.state !== 'listening') return `sheet page: not served (${page.detail ?? page.state})`;
+  const counts = page.browsers === null ? '' : ` (${plural(page.browsers, 'browser')} paired, ${page.connections ?? 0} open)`;
+  return `sheet page: ${page.url ?? '(its address is not shown)'}${counts}`;
+}
+
+const plural = (count: number, noun: string) => `${count} ${noun}${count === 1 ? '' : 's'}`;
 
 // The render seam's state: `off` while no render host runs
 function renderText(render: NonNullable<DaemonStatus['render']>): string {
@@ -558,6 +579,61 @@ function answered(deps: CliDeps, answer: HostResponse): number {
   if (code === EXIT.done || code === EXIT.notListed) deps.out(text);
   else deps.err(text);
   return code;
+}
+
+// --- sheet (the question sheet's C4, §K) --------------------------------------------------------------------------------
+
+async function sheet(context: Context, args: readonly string[]): Promise<number> {
+  const [verb, ...rest] = args;
+  const { deps } = context;
+  switch (verb) {
+    case 'pair':
+      flags(rest, []);
+      return withDaemon(context, async (link) => {
+        const answer = await link.request('daemon.sheetPair', undefined);
+        if (!answer.ok) return failed(deps, `daemon.sheetPair failed: ${answer.error.message}`);
+        const paired = answer.value as CommandOutput<'daemon.sheetPair'>;
+        if (!paired.ok) {
+          deps.err(`${paired.why}\n`);
+          return EXIT.unavailable;
+        }
+        const minutes = Math.max(1, Math.round((Date.parse(paired.expiresAt) - deps.now()) / 60_000));
+        deps.out(`${paired.code}\nType this code into the page at ${paired.url}/ within ${plural(minutes, 'minute')}. It works once.\n`);
+        return EXIT.done;
+      });
+    case 'browsers': {
+      const json = flags(rest, ['--json']).has('--json');
+      return withDaemon(context, async (link) => {
+        const answer = await link.request('daemon.sheetBrowsers', undefined);
+        if (!answer.ok) return failed(deps, `daemon.sheetBrowsers failed: ${answer.error.message}`);
+        const { served, browsers } = answer.value as CommandOutput<'daemon.sheetBrowsers'>;
+        if (json) deps.out(`${JSON.stringify({ served, browsers })}\n`);
+        else {
+          if (!served) deps.err('this mawsd does not serve the sheet page now\n');
+          for (const browser of browsers) deps.out(`${browser.id}  ${browser.label} · paired ${browser.pairedAt} · last seen ${browser.lastSeenAt}\n`);
+        }
+        return EXIT.done;
+      });
+    }
+    case 'unpair': {
+      if (rest.length !== 1) throw new Usage('sheet unpair needs a browser’s id or --all');
+      const id = rest[0] === '--all' ? null : rest[0]!;
+      if (id !== null && !/^[0-9a-f]{8}$/.test(id)) throw new Usage(`${id} is not a browser’s id (8 hex, as sheet browsers lists it)`);
+      return withDaemon(context, async (link) => {
+        const answer = await link.request('daemon.sheetUnpair', { id });
+        if (!answer.ok) return failed(deps, `daemon.sheetUnpair failed: ${answer.error.message}`);
+        const { removed, saved, why } = answer.value as CommandOutput<'daemon.sheetUnpair'>;
+        if (saved) {
+          deps.out(`unpaired ${plural(removed, 'browser')}\n`);
+          return EXIT.done;
+        }
+        deps.err(`unpaired ${plural(removed, 'browser')} for now: the change could not be saved (${why ?? 'unknown'}). ${removed === 1 ? 'It is' : 'They are'} paired again if mawsd restarts before a save succeeds.\n`);
+        return EXIT.failed;
+      });
+    }
+    default:
+      throw new Usage(verb === undefined ? 'sheet needs pair, browsers or unpair' : `sheet has no command ${verb}`);
+  }
 }
 
 // --- install and uninstall ---------------------------------------------------------------------------------------------

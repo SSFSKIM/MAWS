@@ -86,12 +86,22 @@
 // (its engine live, or exited), `session.removed`, `host.browserIdle` and the render host's end. With no app, a live
 // session's cua socket listens cold (the broker), promotes through the render seam's `ensureBrowser` and is relayed to
 // the render host while it serves the session; the browser capability reads the same inputs.
+//
+// The question sheet's C4 M1 (docs/doperpowers/plans/2026-11-24-question-sheet-c4-local-page.md, §J, §K): the page
+// server (sheet-page/serve.ts), the first entrance of `mawsd` a browser can reach: two HTTP listeners on loopback (both
+// addresses or neither) that the default daemon opens once the page is turned on, and any other only under
+// MAWS_SHEET_PAGE=1. It is made with the daemon's other parts and started after `clocks.served()`, in the background,
+// so nothing of it can stop or delay the start; the spine's states are told to it; its stop runs first in the exit
+// order, right after the sockets stop accepting; `daemon.status.sheetPage` is its status; `daemon.sheetPair`,
+// `daemon.sheetBrowsers` and `daemon.sheetUnpair` are `mawsd sheet pair|browsers|unpair`. Its answering code is a chunk
+// loaded at the first request or pairing command.
 import { execFileSync } from 'node:child_process';
 import * as fs from 'node:fs';
 import { createServer, type Server } from 'node:net';
 import { homedir, hostname, tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { daemonPaths, DAEMON_FILES, DAEMON_LOCK_BREAKER, type DaemonPaths } from '@shared/daemon/files';
+import { defaultProfileDir } from '@shared/daemon/profile';
 import { createHostSupervisor, ENGINE_HOST_BUDGETS_MS, type HostSupervisor } from '@shared/host/host-supervisor';
 import { supervisorEnv, type DetachedTransportOptions } from '@shared/host/detached-transport';
 import type { RelayPort } from '@shared/host/doc-relay';
@@ -154,6 +164,7 @@ import { createBrowserWork } from './browser-work'; // P5 O17 M3
 import { createBrowserRoute } from './browser-route'; // P5 O17 M5
 import type { BrowserFeedService } from './browser-feed'; // P5 O17 M6: types alone, the feed is a deferred chunk
 import { loadPeerAddon, peerAddonPath, type PeerAddon } from '../main/browser/cua/peer'; // P5 O5 M5: the app's policy, loaded here too
+import { createSheetPage, loadSheetPageChunk, NO_SHEETS, type SheetPage, type SheetPageOptions } from './sheet-page/serve'; // the question sheet's C4
 
 export const EXIT_RESTART = 75; // a requested restart: the units restart on it
 // P5 O3-D D38 (the owner's ruling on D5): re-executing a unit daemon after its spine's release is built and off; a later
@@ -221,6 +232,9 @@ export interface DaemonOptions {
   // P5 O7 M9: the machine route's resolution for engine.models to an older engine host: the engine's environment (the
   // login-shell capture unless a test brings one) and the managed settings' root (a test's; else `/`)
   routeResolution?: { env?(): Promise<Record<string, string>>; systemRoot?: string };
+  // the question sheet's C4 (sheet-page/serve.ts): the bundle's directory (a test's fixture; else beside this build), the
+  // login shell's capture, the chunk's load, the clock, the binds, the browsers' file's replace and the timings
+  sheetPage?: Partial<Pick<SheetPageOptions, 'bundleDir' | 'shell' | 'load' | 'now' | 'listen' | 'write' | 'timing'>>;
 }
 
 export interface RunningDaemon {
@@ -235,6 +249,7 @@ export interface RunningDaemon {
   // P5 O17 M8: the browser's idle facts for the e2e resource report (index.ts, SIGUSR2 under MAWS_E2E=1), read only then:
   // the cold broker's connections (null before its chunk loaded), each session's socket, the sessions held for browser work
   e2eBrowser(): { broker: CuaBrokerInspection | null; sockets: Record<string, CuaSocketInspection>; holds: AppSessionId[] };
+  sheetPage: SheetPage; // the question sheet's C4: the page server, as daemon.status and the sheet commands reach it
 }
 
 type FrameListener = Parameters<DaemonServices['onFrame']>[0];
@@ -399,6 +414,25 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
     },
   });
 
+  // --- the sheet's local page (the question sheet's C4; sheet-page/serve.ts): started after the start, in the background --
+  const sameDirectory = (a: string, b: string) => realpathOr(a) === realpathOr(b);
+  const sheetPage = createSheetPage({
+    kind,
+    profileDir,
+    dir,
+    defaultProfile: sameDirectory(profileDir, defaultProfileDir(platform, env, homedir())),
+    env,
+    shell: () => captureShellEnvironment(), // one capture, kept (the default cache), and only once the page is going to serve
+    bundleDir: join(dirname(entryOnDisk), '..', 'sheet-page'), // the real path, so a release flipped under it is never half-served
+    sheets: NO_SHEETS, // until M3
+    load: () => {
+      const refused = deferredLoadRefused(); // P5 O2 (the bundle swap, above)
+      return refused === null ? loadSheetPageChunk() : Promise.reject(new Error(refused));
+    },
+    log: (line) => log(`[sheet page] ${line}`),
+    ...options.sheetPage,
+  });
+
   // --- the spine (P5 O3-D M2; spine-seam.ts): cold at start, loaded from the services chunk at the first trigger ---------
   const spineQuietMs = positiveInteger(env.MAWS_SPINE_QUIET_MS); // the measured scene's quiet period (D6)
   const spine = createLazySpine({
@@ -457,6 +491,7 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
     onState: (state) => {
       if (state !== 'loading' && state !== 'loaded' && state !== 'releasing') front.unbind(); // the parts stopped: the next load registers afresh
       projectsSource.spineState(state); // the project registry: the loaded index's declared rows, read by the endpoint
+      sheetPage.spineState(state); // the question sheet's C4 (T15)
     },
     log,
     // a provisional yield waits as long as a hello may wait for its upstream (the relay's hold)
@@ -987,6 +1022,7 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
       ...(holder && { sessionHosts: { hosts: holder.hosts, adopted: holder.adopted, failed: holder.failed } }), // P5 O16 M2
       artifacts: artifacts.status(), // P5 O5 M2
       render: { ...render.status(), ...(render.loaded() && route.counts()) }, // P5 O5 M4; P5 O17 M5: its browser sessions and tabs
+      sheetPage: sheetPage.status(), // the question sheet's C4
     };
   }
   // P5 O16 M3b (docs/doperpowers/plans/2026-10-31-p5-o16-holder.md, M3; D9, D40): `mawsd restart --engine-host`. The
@@ -1061,6 +1097,13 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
         return runE2eRender(input as CommandInput<'daemon.e2eRender'>, e2eSeamsAllowed, (request) => render.captureForE2e(request)); // P5 O5 M4
       case 'daemon.e2eBrowserView':
         return runE2eBrowserView(input as CommandInput<'daemon.e2eBrowserView'>, e2eSeamsAllowed, browserFeed); // P5 O17 M9b
+      // the question sheet's C4 (§K): `mawsd sheet pair|browsers|unpair`
+      case 'daemon.sheetPair':
+        return sheetPage.pair();
+      case 'daemon.sheetBrowsers':
+        return { served: sheetPage.status().state === 'listening', browsers: await sheetPage.browsers() };
+      case 'daemon.sheetUnpair':
+        return sheetPage.unpair((input as CommandInput<'daemon.sheetUnpair'>).id);
       case 'daemon.endpoint': {
         const { command, args, secret } = input as { command: string; args: string[]; secret?: string };
         if (!endpoint) return { code: 2, out: NO_ENDPOINT_MODULE };
@@ -1677,6 +1720,7 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
     stopping ??= (async () => {
       log(`exiting (${reason})`);
       for (const server of servers) server.close(); // no new client
+      await sheetPage.stop(); // the question sheet's C4: its listeners and connections, bounded (STOP_MS), before the endpoint's
       clocks.stop();
       idle.stop(); // nothing collects through the bounded exit, an entry the last evaluation queued included
       if (endpoint) {
@@ -1716,10 +1760,12 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
   const [engineAdopted, ptyAdopted] = await Promise.all([hosts.adopt('engine-host'), hosts.adopt('pty-host')]);
   log(`serving; engine host ${engineAdopted ? 'adopted' : 'parked'}, pty host ${ptyAdopted ? 'adopted' : 'parked'}`);
   clocks.served(); // its quiet is told from here: no client yet is its first entry, with the start's garbage behind it
+  sheetPage.start(); // the question sheet's C4: in the background, so nothing of it delays the start (T6)
 
   return {
     paths, ref, hosts, services, projects, status, stop, render: { exportForLibrary: (input) => render.exportForLibrary(input) },
     e2eBrowser: () => ({ broker: cua?.broker() ?? null, sockets: cua?.inspect() ?? {}, holds: browserWork.held() }),
+    sheetPage,
   };
 }
 

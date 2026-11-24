@@ -106,7 +106,7 @@ import type { EngineIntercept } from './spine-hosts';
 // The front's own `machine` names, answered without the spine: the daemon's, the identity, and a client's own.
 // P5 O5 M4: the render seam's (artifacts.export, render.answer) and its e2e capture (daemon.e2eRender).
 // P5 O5 M5: a session's capabilities (session.capabilities). P5 O17 M3: a tab engine's browser work (browserEngine.work).
-export const FRONT_COMMANDS = ['artifacts.export', 'browserEngine.answer', 'browserEngine.ended', 'browserEngine.frame', 'browserEngine.state', 'browserEngine.work', 'clientPort.answer', 'daemon.e2eBrowserView' /* P5 O17 M9b */, 'daemon.e2eRender', 'daemon.e2eSeam', 'daemon.endpoint', 'daemon.restart', 'daemon.restartEngineHost' /* P5 O16 M3b */, 'daemon.status', 'endpoint.local.act', 'endpoint.local.call' /* P5 O8 M6b */, 'endpoint.local.grants' /* P5 O8 M4b */, 'machine.client', 'machine.identity', 'projects.act.answer', 'projects.forward', 'projects.registry' /* the project registry's M12 */, 'render.answer', 'session.capabilities', 'session.follow'] as const;
+export const FRONT_COMMANDS = ['artifacts.export', 'browserEngine.answer', 'browserEngine.ended', 'browserEngine.frame', 'browserEngine.state', 'browserEngine.work', 'clientPort.answer', 'daemon.e2eBrowserView' /* P5 O17 M9b */, 'daemon.e2eRender', 'daemon.e2eSeam', 'daemon.endpoint', 'daemon.restart', 'daemon.restartEngineHost' /* P5 O16 M3b */, 'daemon.sheetBrowsers', 'daemon.sheetPair', 'daemon.sheetUnpair' /* the question sheet's C4 */, 'daemon.status', 'endpoint.local.act', 'endpoint.local.call' /* P5 O8 M6b */, 'endpoint.local.grants' /* P5 O8 M4b */, 'machine.client', 'machine.identity', 'projects.act.answer', 'projects.forward', 'projects.registry' /* the project registry's M12 */, 'render.answer', 'session.capabilities', 'session.follow'] as const;
 // The names a machine.sock client asks of the front for itself, never the endpoint. P5 O8 M6b: the local door is this
 // machine's own clients' way to the endpoint, never the endpoint's own way back to itself.
 const CLIENT_COMMANDS: ReadonlySet<string> = new Set(['browserEngine.answer', 'browserEngine.ended', 'browserEngine.frame', 'browserEngine.state', 'browserEngine.work', 'clientPort.answer', 'endpoint.local.act', 'endpoint.local.call', 'endpoint.local.grants', 'machine.client', 'projects.act.answer', 'projects.forward', 'projects.registry', 'render.answer', 'session.follow']);
@@ -356,6 +356,10 @@ export function createServicesFront(options: FrontOptions): ServicesFront {
     'daemon.restart': async () => void (await options.daemon('daemon.restart', undefined)),
     'daemon.restartEngineHost': () => options.daemon('daemon.restartEngineHost', undefined), // P5 O16 M3b
     'daemon.status': () => options.daemon('daemon.status', undefined),
+    // the question sheet's C4 (§K): the page server's pairing, in mawsd
+    'daemon.sheetPair': () => options.daemon('daemon.sheetPair', undefined),
+    'daemon.sheetBrowsers': () => options.daemon('daemon.sheetBrowsers', undefined),
+    'daemon.sheetUnpair': (input) => options.daemon('daemon.sheetUnpair', input),
     'endpoint.local.act': (input) => options.daemon('endpoint.local.act', input), // P5 O8 M6b: the local door
     'endpoint.local.call': (input) => options.daemon('endpoint.local.call', input),
     'endpoint.local.grants': () => options.daemon('endpoint.local.grants', undefined), // P5 O8 M4b
