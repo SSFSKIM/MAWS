@@ -47,6 +47,15 @@ const kindOf = async (path: string): Promise<'directory' | 'file' | 'other' | nu
 export const isRecord = async (record: string): Promise<boolean> => (await kindOf(record)) === 'directory' && (await kindOf(join(record, 'state.json'))) === 'file';
 
 /**
+ * Whether the record's `inbox.jsonl` may be appended to: absent (the door makes it) or a regular file; never a link or
+ * a special file, as the reader refuses to read one. Checked by MAWS before the door runs, whatever the writer checks.
+ */
+export const isInboxConfined = async (record: string): Promise<boolean> => {
+  const kind = await kindOf(join(record, 'inbox.jsonl'));
+  return kind === null || kind === 'file';
+};
+
+/**
  * A body of the record, `<record>/<dir>/<name>`: as text, or as the image type `as` names when its bytes are that
  * type's; `gone` for anything missing, linked, special, too large or of another type.
  */

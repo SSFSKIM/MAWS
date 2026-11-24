@@ -1,12 +1,13 @@
 // One session's sheet (the composite's §8, "The sheet", and §4.3; the C3 plan's §G and "The look", M3; frames 1, 5 and
 // 6): the notes of S15 at its head, its open cards oldest first, the accepted outcomes, a line for each question a
-// queued dismissal hides, and one Send. The memory is the consumer's, and may be shown by two mounts at once or by none:
-// every change is handed to `onMemory` as an update of the memory as it is when applied, and each new model meets it in
-// `reconcile`. One Send is one call of the host with `sendOf`'s lines, named by its attempt; those lines are held from
-// the press until the host answers, and the answer lands, once, through the update the Send was made with, in that
-// session's memory, whether or not a mount still shows it. A late image does the same. A Send that failed, or whose call
-// this window no longer has in the air (a reload), is offered again as the same lines; one in the air is waited for,
-// whichever mount made it. While lines are held no other act is built, so every card waits.
+// queued dismissal hides, and one Send. The memory is the consumer's, and may be shown by two mounts at once or by
+// none: every change is handed to `onMemory` as an update of the memory as it is when applied, and each new model meets
+// it in `reconcile`. One Send is one call of the host with `sendOf`'s lines, named by its attempt; those lines are held
+// from the press until the host answers (a press takes the slot through its update, and its call is made once the
+// memory holds it, so two presses make one call), and the answer lands, once, through the update the Send was made
+// with, in that session's memory, whether or not a mount still shows it. A late image does the same. A Send that
+// failed, or whose call this window no longer has in the air (a reload), is offered again as the same lines; one in the
+// air is waited for, whichever mount made it. While lines are held no other act is built, so every card waits.
 import { useEffect, useRef } from 'react';
 import type { SheetLine, SheetModel, SheetQuestion } from '@shared/sheet/model';
 import { sendOf, type QuestionDraft } from '@shared/sheet/words';
@@ -16,7 +17,7 @@ import { SHEET_WORDS } from './copy';
 import type { SheetHost } from './host';
 import { CloseIcon } from './icons';
 import { attach, closeNote, editDraft, reconcile, settle, startSend, type SheetMemory } from './memory';
-import { isFlying, launch, newAttempt } from './attempts';
+import { isKnown, launchHeld, newAttempt, prepare } from './attempts';
 import { OutcomeCard } from './OutcomeCard';
 import { QuestionCard } from './QuestionCard';
 
@@ -56,24 +57,38 @@ export function SessionSheet({ model, memory, onMemory, host, focus = null, dens
   }, [focusId, focusRequest, focusListed]);
 
   const held = memory.sending;
-  const lost = held?.state === 'sending' && !isFlying(held.attempt); // a call this window does not have in the air: its answer will not come
+  const lost = held?.state === 'sending' && !isKnown(held.attempt); // a call this window will not make or hear: its answer will not come
+  // The call of the Send the memory holds, made once, by the first mount to show the hold.
+  const heldAttempt = held?.state === 'sending' ? held.attempt : null;
+  useEffect(() => {
+    if (heldAttempt !== null) launchHeld(heldAttempt);
+  }, [heldAttempt]);
   const awaiting = new Set(memory.acts.filter((act) => act.state === 'sending').map((act) => act.id));
   const sendable = new Map([...memory.drafts].filter(([id]) => !awaiting.has(id)));
   const plan = sendOf(model.open, sendable, host.by, COUNTING);
 
-  const run = (lines: readonly SheetLine[]) => {
+  // A Send takes the slot through the update (`startSend`), against the memory as it is when applied: a new one only
+  // where none is held, one sent again only over the hold it was drawn for (`over`) while that hold failed or will get
+  // no answer. Its call is prepared here and made once the memory holds it, so a press that lost the slot calls
+  // nothing.
+  const run = (lines: readonly SheetLine[], over: string | null = null) => {
     const attempt = newAttempt();
     const land = onMemory; // this session's memory, wherever the answer finds this mount
     const drafts = memory.drafts; // the drafts these lines were built from: what each act records as sent
-    land((current) => startSend(current, lines, clock(), attempt, { drafts, targets: targetsOf(model) }));
-    launch(attempt, () => host.send(model.session, [...lines]), (result) => land((current) => settle(current, attempt, result)));
+    const targets = targetsOf(model);
+    const now = clock();
+    prepare(attempt, model.session, () => host.send(model.session, [...lines]), (result) => land((current) => settle(current, attempt, result)));
+    land((current) => (over !== null && current.sending?.state === 'sending' && isKnown(over) ? current : startSend(current, lines, now, attempt, { drafts, over, targets })));
   };
   const free = held === null;
   const send = () => free && plan.ids.length > 0 && run(sendOf(model.open, sendable, host.by, () => host.newKey()).lines);
-  const sendAgain = () => held !== null && (held.state === 'failed' || lost) && run(held.lines);
+  const sendAgain = () => held !== null && (held.state === 'failed' || lost) && run(held.lines, held.attempt);
   const dismiss = (question: SheetQuestion) => free && run([{ v: 1, key: host.newKey(), kind: 'dismiss', id: question.id, by: host.by }]);
   const retract = (target: string) => free && run([{ v: 1, key: host.newKey(), kind: 'retract', target, by: host.by }]);
-  const draft = (question: SheetQuestion, next: QuestionDraft | null) => free && onMemory((current) => (current.sending === null ? editDraft(current, question, next) : current));
+  // The person's act on a card, applied to the draft as it stands when applied, so an image or a sibling's edit applied
+  // first stays; none while a Send holds the memory.
+  const draft = (question: SheetQuestion, update: (current: QuestionDraft | undefined) => QuestionDraft | null) =>
+    free && onMemory((current) => (current.sending === null ? editDraft(current, question, update(current.drafts.get(question.id))) : current));
   // A pasted image, saved: it joins the draft of the question it was pasted on, in this session's memory, as that is when it lands.
   const attachTo = (question: SheetQuestion) => {
     const land = onMemory;
@@ -139,7 +154,7 @@ export function SessionSheet({ model, memory, onMemory, host, focus = null, dens
               busy={!free || awaiting.has(question.id)}
               host={host}
               density={density}
-              onDraft={(next) => draft(question, next)}
+              onDraft={(update) => draft(question, update)}
               onDismiss={() => dismiss(question)}
               onRetract={retract}
               onAttach={attachTo(question)}
@@ -184,9 +199,10 @@ export function SessionSheet({ model, memory, onMemory, host, focus = null, dens
 }
 
 // The question each key a retract may name stands on: a queued answer's, a queued dismissal's.
-function targetsOf(model: SheetModel): Record<string, string> {
-  const targets: Record<string, string> = {};
-  for (const question of model.open) if (question.queued) targets[question.queued.key] = question.id;
-  for (const hidden of model.hidden) targets[hidden.key] = hidden.id;
+// A Map: a key named `__proto__` is a valid inbox key, kept as its own.
+function targetsOf(model: SheetModel): Map<string, string> {
+  const targets = new Map<string, string>();
+  for (const question of model.open) if (question.queued) targets.set(question.queued.key, question.id);
+  for (const hidden of model.hidden) targets.set(hidden.key, hidden.id);
   return targets;
 }

@@ -354,6 +354,34 @@ describe('put', () => {
     expect(readFileSync(join(t.record(OTHER), 'inbox.jsonl'), 'utf8')).toBe('');
   });
 
+  it('refuses, before any process starts, a record whose inbox is a link or not a regular file, and takes one with none', async () => {
+    const t = start();
+    seedRecord(t.home, 'two-surfaces');
+    const inbox = join(t.record(TWO), 'inbox.jsonl');
+    const elsewhere = join(tempDir(), 'inbox.jsonl');
+    writeFileSync(elsewhere, '');
+    rmSync(inbox, { force: true });
+    symlinkSync(elsewhere, inbox);
+    expect(await t.service.put(TWO, [answer('maws-00000001', ['Yes'])])).toMatchObject({ ok: false, why: 'refused' });
+    rmSync(inbox);
+    mkdirSync(inbox);
+    expect(await t.service.put(TWO, [answer('maws-00000002', ['Yes'])])).toMatchObject({ ok: false, why: 'refused' });
+    expect(t.ran()).toEqual([]);
+    expect(readFileSync(elsewhere, 'utf8')).toBe('');
+    rmSync(inbox, { recursive: true });
+    expect(await t.service.put(TWO, [answer('maws-00000003', ['Yes'])])).toMatchObject({ ok: true });
+  });
+
+  it('refuses, before any process starts, a line no surface writes: a delivered line from a caller in the process', async () => {
+    const t = start();
+    seedRecord(t.home, 'two-surfaces');
+    const delivered = { v: 1, key: 'maws-00000001', kind: 'delivered', by: 'maws' } as unknown as SheetLine;
+    expect(await t.service.put(TWO, [delivered])).toMatchObject({ ok: false, why: 'refused' });
+    const extra = { ...answer('maws-00000002', ['Yes']), at: '2026-11-24T00:00:00.000Z' } as SheetLine; // the door's own field
+    expect(await t.service.put(TWO, [extra])).toMatchObject({ ok: false, why: 'refused' });
+    expect(t.ran()).toEqual([]);
+  });
+
   it('proves the command again when a spawn fails', async () => {
     const dir = tempDir();
     const cli = join(dir, 'sminos');

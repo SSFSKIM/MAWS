@@ -13,13 +13,13 @@ import type { AppSessionId } from '@shared/graph/ids';
 import type { DoorState } from '@shared/ipc/schema/sheet';
 import type { ServiceHandler } from '@shared/spine/bus';
 import type { EventPayload } from '@shared/ipc/schema';
-import { SheetBodyRequestSchema, isSheetSession, type SheetBody, type SheetBodyRequest, type SheetImageType, type SheetLine, type SheetModel, type SheetPutResult, type SheetSummary } from '@shared/sheet/model';
+import { SheetBodyRequestSchema, SheetLineSchema, isSheetSession, type SheetBody, type SheetBodyRequest, type SheetImageType, type SheetLine, type SheetModel, type SheetPutResult, type SheetSummary } from '@shared/sheet/model';
 import { lineError, summaryOf } from '@shared/sheet/read';
 import { SEND_MAX_LINES } from '@shared/sheet/words';
 import { watchTree, type WatchTreeHandle } from '@shared/fs/watch-tree';
 import { stat } from 'node:fs/promises';
 import { DOOR_NOT_STARTED, putLines } from './door';
-import { GONE, imageTypeOfName, isRecord, readBody, writeUpload } from './files';
+import { GONE, imageTypeOfName, isInboxConfined, isRecord, readBody, writeUpload } from './files';
 import { locateSminos, type LocateDeps, type Located, type ProofCache } from './locate';
 import { UNREADABLE, listRecords, readRecord, recordIo, sheetRoot, type RecordIo } from './reader';
 import { SHEET_TIMING, type SheetTiming } from './timing';
@@ -319,6 +319,9 @@ export function createSheetService(deps: SheetServiceDeps): SheetService {
       if (lines.length === 0) return refused('A put carries at least one inbox line.');
       if (lines.length > SEND_MAX_LINES) return refused(`A put carries at most ${SEND_MAX_LINES} inbox lines.`);
       for (const [i, line] of lines.entries()) {
+        // A surface's line, as the wire holds it (no `delivered`, no field the door fills), for a caller in the process
+        // too (C4's page through `SpineRoot.sheet`); then the rules across its fields.
+        if (!SheetLineSchema.safeParse(line).success) return refused(`Line ${i + 1} is not a surface’s inbox line.`);
         const why = lineError(line);
         if (why !== null) return refused(`Line ${i + 1} is not an inbox line: ${why}.`);
       }
@@ -328,7 +331,11 @@ export function createSheetService(deps: SheetServiceDeps): SheetService {
       if (home === null) return { ok: false, why: 'unavailable', message: 'This Mac has no sminos home to answer in.' };
       // Nothing is located or run for a session with no record (X2). A removal racing this check is the door's to
       // settle: it answers 3, read as no-sheet.
-      if (!(await isRecord(join(sheetRoot(home), session)))) return NO_SHEET;
+      const record = join(sheetRoot(home), session);
+      if (!(await isRecord(record))) return NO_SHEET;
+      // Confinement (§C): an inbox that is a link or not a regular file is refused before anything runs, as the reader
+      // refuses to read it; the writer's own check is not relied on.
+      if (!(await isInboxConfined(record))) return refused('The sheet’s inbox is a link or not a regular file.');
       const send = async (): Promise<SheetPutResult> => {
         const located = await locateWithin(deadline);
         if (located === null) return OUT_OF_TIME;

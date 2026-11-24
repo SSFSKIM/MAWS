@@ -111,7 +111,9 @@ describe('the acts', () => {
     expect(failed.acts[0].state).toBe('failed');
     expect(settle(failed, 'attempt-1', { ok: true, results: [] })).toBe(failed); // settled once: a failed hold waits for Send again
 
-    const again = startSend(failed, failed.sending!.lines, 9, 'attempt-2', { drafts: failed.drafts });
+    expect(startSend(failed, lines, 9, 'attempt-3', { drafts: failed.drafts })).toBe(failed); // a new Send while one is held takes nothing
+    expect(startSend(failed, lines, 9, 'attempt-3', { drafts: failed.drafts, over: 'attempt-0' })).toBe(failed); // sent again over a hold that is gone
+    const again = startSend(failed, failed.sending!.lines, 9, 'attempt-2', { drafts: failed.drafts, over: 'attempt-1' });
     expect(again.acts).toHaveLength(1);
     expect(again.acts[0]).toMatchObject({ key: 'maws-k-0001', state: 'sending', sentAt: 9 });
 
@@ -143,7 +145,29 @@ describe('the acts', () => {
     ];
     expect(startSend(EMPTY_MEMORY, edit, 0, 'a', { drafts: new Map() }).acts.map((act) => [act.kind, act.id])).toEqual([['retract', 'q1'], ['answer', 'q1']]);
     const takeBack = [{ v: 1 as const, key: 'maws-k-0004', kind: 'retract' as const, target: 'page-1601d002', by: 'maws' as const }];
-    expect(startSend(EMPTY_MEMORY, takeBack, 0, 'b', { drafts: new Map(), targets: { 'page-1601d002': 'q2' } }).acts[0]).toMatchObject({ kind: 'retract', id: 'q2', draft: null });
+    expect(startSend(EMPTY_MEMORY, takeBack, 0, 'b', { drafts: new Map(), targets: new Map([['page-1601d002', 'q2']]) }).acts[0]).toMatchObject({ kind: 'retract', id: 'q2', draft: null });
+  });
+});
+
+describe('a verdict on an answer this surface sent', () => {
+  const sent = draft(1, { text: 'Earlier.' });
+  const line = { v: 1 as const, key: 'maws-k-0008', kind: 'answer' as const, id: 'q4', revision: 1, text: 'Earlier.', by: 'maws' as const };
+  const held = settle(startSend(withDrafts([['q4', sent]]), [line], 0, 'a', { drafts: new Map([['q4', sent]]) }), 'a', { ok: true, results: [] });
+  const verdict = (state: 'stale' | 'retracted', open = [CLASH]) =>
+    sheetOf(open, { sent: [state === 'stale' ? { key: line.key, state, verdict: state, kind: 'answer', at: '2026-11-24T00:00:00.000Z', id: 'q4', current: 2 } : { key: line.key, state, verdict: state, kind: 'answer', at: '2026-11-24T00:00:00.000Z', id: 'q4' }] });
+
+  it('stale: keeps a newer draft the person wrote meanwhile, and still marks the card', () => {
+    const newer = draft(1, { text: 'Later, and better.' });
+    const next = reconcile(editDraft(held, CLASH, newer), verdict('stale'));
+    expect(next.drafts.get('q4')).toBe(newer);
+    expect(next.marked.has('q4')).toBe(true);
+    expect(next.acts[0].state).toBe('stale');
+  });
+
+  it('retracted, the first verdict seen: retires the draft it sent, but not a newer one', () => {
+    expect(reconcile(held, verdict('retracted')).drafts.has('q4')).toBe(false);
+    const newer = draft(1, { text: 'Later, and better.' });
+    expect(reconcile(editDraft(held, CLASH, newer), verdict('retracted')).drafts.get('q4')).toBe(newer);
   });
 });
 

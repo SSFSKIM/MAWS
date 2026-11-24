@@ -72,14 +72,19 @@ export function reconcile(memory: SheetMemory, model: SheetModel): SheetMemory {
       acts.push(act);
       continue;
     }
+    // The first verdict seen retires the draft the act sent, if the person wrote nothing since: whatever the verdict,
+    // a retracted one included, that draft was sent and is no longer theirs to send.
+    const awaiting = act.state === 'sending' || act.state === 'failed';
+    if (awaiting && act.id !== null && act.draft !== null && drafts.get(act.id) === act.draft) drafts.delete(act.id);
     if (entry.state === 'delivered' || entry.state === 'retracted') {
       actsChanged = true;
       continue;
     }
-    const awaiting = act.state === 'sending' || act.state === 'failed';
-    if (awaiting && act.id !== null && act.draft !== null && drafts.get(act.id) === act.draft) drafts.delete(act.id);
     if (entry.state === 'stale' && act.state !== 'stale' && act.id !== null) {
-      if (act.draft !== null) drafts.set(act.id, withImages(act.draft, drafts.get(act.id)?.images ?? [])); // with any image pasted since
+      // The sent draft comes back unless the person wrote a newer answer meanwhile, which stands; any image pasted
+      // since joins the one that comes back.
+      const now = drafts.get(act.id);
+      if (act.draft !== null && !hasAnswer(now)) drafts.set(act.id, withImages(act.draft, now?.images ?? []));
       marked.add(act.id);
     }
     const note = act.note ?? noteOf(act, entry);
@@ -143,15 +148,18 @@ export function editDraft(memory: SheetMemory, question: SheetQuestion, next: Qu
  * or a dismissal's own, a retract's by the answer it travels with (an edit) or by `targets`, the question each queued
  * key stands on (a take back). Each answer's act records the draft its line was built from (`drafts`, the drafts the
  * person saw when they pressed Send), not the draft as it is when the Send is applied: a draft changed in between (an
- * image landed) is not the one sent, and stays a draft when the model shows the answer.
+ * image landed) is not the one sent, and stays a draft when the model shows the answer. One Send holds the memory at a
+ * time: a new Send is applied only where none is held, and a Send sent again only over the very hold it was drawn for
+ * (`over`, its attempt); otherwise the memory is answered unchanged, and the caller makes no call.
  */
 export function startSend(
   memory: SheetMemory,
   lines: readonly SheetLine[],
   now: number,
   attempt: string,
-  { drafts, targets = {} }: { drafts: ReadonlyMap<string, QuestionDraft>; targets?: Readonly<Record<string, string>> },
+  { drafts, over = null, targets = new Map() }: { drafts: ReadonlyMap<string, QuestionDraft>; over?: string | null; targets?: ReadonlyMap<string, string> },
 ): SheetMemory {
+  if ((memory.sending?.attempt ?? null) !== over) return memory; // another Send holds the slot, or the one drawn for is gone
   const acts = [...memory.acts];
   lines.forEach((line, i) => {
     const at = acts.findIndex((act) => act.key === line.key);
@@ -161,7 +169,7 @@ export function startSend(
     }
     const next = lines[i + 1];
     const travelsWith = next?.kind === 'answer' ? (next.id ?? null) : null;
-    const id = line.kind === 'retract' ? (travelsWith ?? targets[line.target ?? ''] ?? null) : (line.id ?? null);
+    const id = line.kind === 'retract' ? (travelsWith ?? targets.get(line.target ?? '') ?? null) : (line.id ?? null);
     const draft = line.kind === 'answer' && id !== null ? (drafts.get(id) ?? null) : null;
     acts.push({ key: line.key, kind: line.kind, id, draft, sentAt: now, state: 'sending', note: null });
   });

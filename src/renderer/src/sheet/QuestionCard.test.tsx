@@ -12,8 +12,10 @@ afterEach(cleanup);
 const SESSION = '5eed0000-0000-4000-8000-0000000000aa';
 const draft = (revision: number, extra: Partial<QuestionDraft> = {}): QuestionDraft => ({ revision, picks: [], text: '', images: [], ...extra });
 
+// `onDraft` is handed an update of the draft as it stands when applied: here, the card's own `draft`, whose result each
+// call returns.
 function card(question: SheetQuestion, props: Partial<QuestionCardProps> = {}) {
-  const handlers = { onDraft: vi.fn(), onDismiss: vi.fn(), onRetract: vi.fn(), onAttach: vi.fn() };
+  const handlers = { onDraft: vi.fn((update: (current: QuestionDraft | undefined) => QuestionDraft | null) => update(props.draft)), onDismiss: vi.fn(), onRetract: vi.fn(), onAttach: vi.fn() };
   const view = render(<QuestionCard session={SESSION} question={question} draft={undefined} mark="none" busy={false} host={fixtureHost()} {...handlers} {...props} />);
   return { ...handlers, ...view };
 }
@@ -41,17 +43,17 @@ describe('QuestionCard', () => {
   it('hands back each edit as a draft at the question’s revision: a pick, a multi-select toggle, typed text', () => {
     const { onDraft } = card(CLASH);
     fireEvent.click(option('Keep the longer route'));
-    expect(onDraft).toHaveBeenLastCalledWith(draft(1, { picks: ['Keep the longer route'] }));
+    expect(onDraft).toHaveLastReturnedWith(draft(1, { picks: ['Keep the longer route'] }));
     cleanup();
     const multi = card(NOTICES, { draft: draft(1, { picks: ['Tidal restrictions'] }) });
     fireEvent.click(screen.getByRole('checkbox', { name: /Vehicle deck limits/ }));
-    expect(multi.onDraft).toHaveBeenLastCalledWith(draft(1, { picks: ['Tidal restrictions', 'Vehicle deck limits'] }));
+    expect(multi.onDraft).toHaveLastReturnedWith(draft(1, { picks: ['Tidal restrictions', 'Vehicle deck limits'] }));
     fireEvent.click(screen.getByRole('checkbox', { name: /Tidal restrictions/ }));
-    expect(multi.onDraft).toHaveBeenLastCalledWith(null);
+    expect(multi.onDraft).toHaveLastReturnedWith(null);
     cleanup();
     const text = card(SEASON);
     fireEvent.change(screen.getByRole('textbox'), { target: { value: 'From 1 November.' } });
-    expect(text.onDraft).toHaveBeenLastCalledWith(draft(1, { text: 'From 1 November.' }));
+    expect(text.onDraft).toHaveLastReturnedWith(draft(1, { text: 'From 1 November.' }));
   });
 
   it('dismisses through its handler', () => {
@@ -79,13 +81,13 @@ describe('QuestionCard', () => {
     expect(option('Keep the earlier sailing').hasAttribute('data-carried')).toBe(true);
     expect((screen.getByRole('textbox') as HTMLTextAreaElement).value).toBe(carried.text);
     fireEvent.click(screen.getByRole('button', { name: 'Keep my answer' }));
-    expect(onDraft).toHaveBeenLastCalledWith({ ...carried, revision: 2 });
+    expect(onDraft).toHaveLastReturnedWith({ ...carried, revision: 2 });
   });
 
   it('confirms a carried draft with any edit of the card', () => {
     const { onDraft } = card(CLASH_REVISED, { draft: draft(1, { picks: ['Keep the earlier sailing'], text: 'x' }) });
     fireEvent.change(screen.getByRole('textbox'), { target: { value: 'xy' } });
-    expect(onDraft).toHaveBeenLastCalledWith(draft(2, { picks: ['Keep the earlier sailing'], text: 'xy' }));
+    expect(onDraft).toHaveLastReturnedWith(draft(2, { picks: ['Keep the earlier sailing'], text: 'xy' }));
   });
 
   it('reads back a queued answer with Take back and Edit; Edit opens a draft that replaces it', () => {
@@ -97,7 +99,7 @@ describe('QuestionCard', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Take back' }));
     expect(onRetract).toHaveBeenCalledWith('page-1601a001');
     fireEvent.click(screen.getByRole('button', { name: 'Edit' }));
-    expect(onDraft).toHaveBeenLastCalledWith({ revision: 1, picks: queued.picks, text: queued.text, images: [], replaces: 'page-1601a001' });
+    expect(onDraft).toHaveLastReturnedWith({ revision: 1, picks: queued.picks, text: queued.text, images: [], replaces: 'page-1601a001' });
     cleanup();
     card({ ...CLASH, queued }, { draft: { ...draft(1, { picks: ['Keep the longer route'] }), replaces: 'page-1601a001' } });
     expect(option('Keep the longer route').getAttribute('aria-checked')).toBe('true');
@@ -144,6 +146,13 @@ describe('QuestionCard', () => {
     const { onAttach } = card(SEASON, { host: fixtureHost({ saveImage: true }) });
     fireEvent.paste(screen.getByRole('textbox'), { clipboardData: { files: [shot('a.png'), shot('b.png')], types: ['Files'] } });
     await waitFor(() => expect(onAttach.mock.calls).toEqual([['uploads/maws-fixture-1.png'], ['uploads/maws-fixture-2.png']]));
+  });
+
+  it('hands back each edit as an update of the draft as it stands, so an image that landed since stays', () => {
+    const { onDraft } = card(SEASON, { draft: draft(1, { text: 'From 1' }) });
+    fireEvent.change(screen.getByRole('textbox'), { target: { value: 'From 1 November.' } });
+    const update = onDraft.mock.calls.at(-1)![0];
+    expect(update(draft(1, { text: 'From 1', images: ['uploads/maws-late.png'] }))).toEqual(draft(1, { text: 'From 1 November.', images: ['uploads/maws-late.png'] }));
   });
 
   it('takes nothing while an act on it is in flight', () => {

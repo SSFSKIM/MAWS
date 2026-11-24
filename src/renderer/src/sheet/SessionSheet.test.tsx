@@ -4,7 +4,7 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { useEffect, useState } from 'react';
 import { afterEach, describe, expect, it } from 'vitest';
-import { forgetAttempts, isFlying } from './attempts';
+import { forgetAttempts, isKnown } from './attempts';
 import type { SheetModel, SheetPutResult, SheetQuestion } from '@shared/sheet/model';
 import type { QuestionDraft } from '@shared/sheet/words';
 import { EMPTY_MEMORY, type SheetMemory } from './memory';
@@ -465,7 +465,7 @@ describe('every change through an update', () => {
     expect(renders).toBe(count);
     expect(memories.get(sheetOf([]).session)).toBe(settled);
     expect(settled!.sending).toMatchObject({ attempt, state: 'failed', note: 'The record is busy.' });
-    expect(isFlying(attempt)).toBe(false); // nothing of it is kept once settled
+    expect(isKnown(attempt)).toBe(false); // nothing of it is kept once settled
   });
 
   it('keeps both of two completions that land from two mounts before the consumer draws again', async () => {
@@ -564,5 +564,51 @@ describe('what a Send reserves', () => {
     view.rerender(<Batched model={sheetOf([{ ...CLASH, queued: { key: line.key, kind: 'answer', picks: [], text: 'Earlier.', images: [], revision: 1, by: 'maws' } }], { sent: [{ key: line.key, state: 'queued', kind: 'answer', id: 'q4' }] })} host={host} />);
     await flush();
     expect(kept.drafts.get('q4')?.images).toEqual(['uploads/maws-late.png']);
+  });
+
+  it('starts one host call for two presses of Send before either is applied, and one for two presses of Send again', async () => {
+    pending = [];
+    const { host, calls } = heldHost();
+    render(<Batched model={sheetOf([CLASH])} host={host} />);
+    await flush();
+    typeIn('q4', 'Earlier.');
+    await flush();
+    fireEvent.click(send());
+    fireEvent.click(send()); // drawn from the same render: the first press is not applied yet
+    await flush();
+    expect(calls).toHaveLength(1);
+    await calls[0].answer({ ok: false, why: 'busy', message: 'The record is busy.' });
+    await flush();
+    const again = screen.getByRole('button', { name: 'Send again' });
+    fireEvent.click(again);
+    fireEvent.click(again);
+    await flush();
+    expect(calls).toHaveLength(2);
+    expect(calls[1].lines).toEqual(calls[0].lines);
+  });
+
+  it('applies a typed edit to the draft as it stands, so an image whose update came first stays', async () => {
+    pending = [];
+    const host = fixtureHost({ saveImage: true });
+    const saves = slowImages(host);
+    render(<Batched model={sheetOf([CLASH])} host={host} />);
+    await flush();
+    typeIn('q4', 'Earlier');
+    await flush();
+    pasteInto(cardOf('q4'));
+    await waitFor(() => expect(saves).toHaveLength(1));
+    await act(async () => saves[0]('uploads/maws-late.png'));
+    typeIn('q4', 'Earlier.'); // typed against the render before the image's update was applied
+    expect(pending).toHaveLength(2);
+    await flush();
+    expect(kept.drafts.get('q4')).toEqual(draft(1, { text: 'Earlier.', images: ['uploads/maws-late.png'] }));
+  });
+});
+
+describe('a take back', () => {
+  it('names its question for a queued key that is `__proto__`', () => {
+    sheet(sheetOf([], { hidden: [{ id: 'q4', key: '__proto__' }] }));
+    fireEvent.click(screen.getByRole('button', { name: 'Take back' }));
+    expect(kept.acts.map((act) => [act.kind, act.id])).toEqual([['retract', 'q4']]);
   });
 });
