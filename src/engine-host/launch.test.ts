@@ -17,6 +17,7 @@ import {
   RELAY_URL,
   setBinaryConfig,
   spawnMeta,
+  tellModDir,
 } from './launch';
 
 // W13: the binary probe's answer for a launch (launcher.ts passes it): a real path and its `--version`
@@ -135,6 +136,21 @@ describe('launch contract builds the X6 command line and environment', () => {
     expect(plan.args.at(-2)).toBe(SETTINGS_FLAG);
     expect(settingsOf(plan.args)).toEqual({ dialogExpiry: 'never' });
     expect(plan.flagSettings).toEqual({ dialogExpiry: 'never' });
+  });
+
+  // the direct tell (the charter's Decision Log, 2026-11-24): the built-in mod's folder, beside the build
+  it('passes the built-in tell mod with --plugin-dir when the launcher found it, and nothing when it did not', () => {
+    const plan = buildLaunch(spec(), CAPTURED, { ...OPTS, tellMod: '/Applications/MAWS.app/Contents/Resources/mods/maws-tell' });
+    const at = plan.args.indexOf('--plugin-dir');
+    expect(plan.args.slice(at, at + 2)).toEqual(['--plugin-dir', '/Applications/MAWS.app/Contents/Resources/mods/maws-tell']);
+    expect(plan.args.slice(0, ENGINE_FLAGS.length)).toEqual(ENGINE_FLAGS);
+    expect(buildLaunch(spec(), CAPTURED, OPTS).args).not.toContain('--plugin-dir');
+    expect(buildLaunch(spec(), CAPTURED, { ...OPTS, tellMod: null }).args).not.toContain('--plugin-dir');
+  });
+
+  it('finds the tell mod beside a packaged app\'s archive, or under a checkout\'s root', () => {
+    expect(tellModDir('/Applications/MAWS.app/Contents/Resources/app.asar/out/main/engine-host.js')).toBe('/Applications/MAWS.app/Contents/Resources/mods/maws-tell');
+    expect(tellModDir('/work/maws/out/main/engine-host.js')).toBe('/work/maws/mods/maws-tell');
   });
 
   it('places the optional flags in the stated order after the fixed set', () => {
