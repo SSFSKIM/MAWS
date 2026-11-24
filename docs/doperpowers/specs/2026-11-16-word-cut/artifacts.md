@@ -4,7 +4,7 @@
 
 62 items: 33 cut, 1 reworded, 28 stay. Of the 34 that change, the owner saw 4 in a picture or ruled on them; 30 follow the pattern and were not seen.
 
-Against master (M0): 60 unchanged, 2 rewritten by the wave; none waits on the owner; 1 put to the owner (new rows included) and since ruled. M0 added 6 rows for the UX wave's new text (0 cut, 1 reworded, 5 stay), listed at the end.
+Against master (M0): 60 unchanged, 2 rewritten by the wave; none waits on the owner; 1 put to the owner (new rows included) and since ruled. M0 added 11 rows for the UX wave's new text (5 cut, 1 reworded, 5 stay), listed at the end.
 
 Columns: **Id** is the item's id in `items.json`. **Where** is the place on the surface. **Today** is the text at the pin `2c7044231` (an example value where the text is built from data). **Decision** is `cut` (the text leaves the resting surface), `reword` (it changes) or `stays` (today's text is kept; the row is here so that nobody proposes it again). **After** says what the surface shows afterwards, as it was built on the scratch branch and shown in the pictures. **Basis** is how firm the decision is, in the words of the root document's "How firm each decision is". **Source** is the file and line at the pin. **M0** is what the re-reading against master found (see the root document's "M0's record"): `unchanged`, `moved`, `rewritten by the wave`, `gone` or `moot`, with the file and line on master, and for a rewritten row the text master shows and the row decided again by the five rules. **Build** is the milestone that builds the row and the scene whose before and after pictures show it.
 
@@ -119,7 +119,7 @@ Columns: **Id** is the item's id in `items.json`. **Where** is the place on the 
 | G284 | a button after the title, shown when other machines are known; its menu lists them | This Mac ▾ | stays | Stays. which machine the library shows (the owner brought back "This Mac", P29), and a way in | pattern | `src/renderer/src/library/copy.ts:95` | unchanged `src/renderer/src/library/copy.ts:103` | M5 · no scene: needs a session on another machine (wanted: the Artifacts library with a second machine known (the machine button after the title)) |
 | G285 | a four-part switch in the head | All · General · Pinned · By Space | stays | Stays. brought back on artifacts-library | brought back | `src/renderer/src/library/copy.ts:87` | unchanged `src/renderer/src/library/copy.ts:95` | M5 · `artifacts-library` |
 | G287 | a button after the search; its menu lists the seven kinds with counts | All types ▾ | cut | 'All types' is gone from the head; the kinds (with counts) are the second group of the funnel menu, and a chosen kind stands beside the search as a chip with its glyph that clears it. | seen | `src/renderer/src/library/copy.ts:91` | unchanged `src/renderer/src/library/copy.ts:99` | M5 · `artifacts-library` |
-| G289 | a bordered button at the right end of the head | + New Space | cut | '+ New Space' is gone from the head; 'New Space…' is the last row of the + menu (and still in a row's Move to Space menu). | seen | `src/renderer/src/library/copy.ts:92` | unchanged `src/renderer/src/library/copy.ts:100` | M5 · `artifacts-library` |
+| G289 | a bordered button at the right end of the head | + New Space | cut | '+ New Space' is gone from the head; 'New Space…' is the last row of the + menu (and still in a row's Move to Space menu). | seen | `src/renderer/src/library/copy.ts:92` | unchanged `src/renderer/src/library/copy.ts:100` **Not built: not built (M5 task 1, 2026-11-23): its After puts "New Space…" in a "+ menu" master's library head does not have, and a bare "+" is against rule 4. The one menu that already makes things in the library, the "Make something new" strip's More, is drawn only under All, General and a narrowed Space with no search, while the head's New Space is drawn under Pinned, By Space and a search too; moving it there would remove the named way in from those views (rule 3), so the worded button stays.** | M5 · `artifacts-library` |
 
 ### Artifacts, "Make something new" strip
 
@@ -167,6 +167,18 @@ Rows added by M0 for text the UX wave added after the pin. **Today** here is the
 | N95 | three checked rows after the four formats in the header's Export menu, below a rule | Letter / A4 / Compact | stays | Stays. rule 3: structure; the page size and density the export prints on, shown as checks. No rule cuts them. Doubt for the owner: "Compact" alone does not say what it compacts out of context (rule 4), and the rule line is not a heading. | pattern | `src/renderer/src/tools/document/header.ts:80` | new `src/renderer/src/tools/document/header.ts:80` | M5 · no scene: needs a document or artifact fixture in that state (wanted: The document's Export menu open) |
 | N96 | the header's failure line when an export starts before the last change is acknowledged | The last change is not saved yet. Try again in a moment. | stays | Stays. rule 5: an error keeps its cause and its way out in one sentence. | pattern | `src/renderer/src/tools/document/header.ts:61` | new `src/renderer/src/tools/document/header.ts:61` | M5 · no scene: needs the host to hold back its acknowledgement for the export's 5 s wait |
 
+#### Dashboard artifact, opened (header)
+
+| Id | Where | Today | Decision | After | Basis | Source | M0 | Build |
+|---|---|---|---|---|---|---|---|---|
+| N191 | beside the title of a dashboard made in the old format (state: legacy dashboard) | Read-only | cut | A legacy dashboard's header draws no saved state; its notice says it is kept read-only. | pattern | `src/renderer/src/tools/dashboard/DashboardPanel.tsx:80` | new `src/renderer/src/tools/dashboard/DashboardPanel.tsx:80` | M5 · no scene: needs a legacy dashboard fixture (wanted: a dashboard of the old format opened, as T629) |
+
+#### Dashboard artifact, opened
+
+| Id | Where | Today | Decision | After | Basis | Source | M0 | Build |
+|---|---|---|---|---|---|---|---|---|
+| N192 | Reread, in the strip above the dashboard, while a changed source is read again | Rereading… | cut | Reread keeps its word, with the quiet spinner named "Rereading…" beside it (`WaitingWords`), and says it is busy. | pattern | `src/renderer/src/tools/dashboard/FileSources.tsx:66` | new `src/renderer/src/tools/dashboard/FileSources.tsx:66` | M5 · no scene: a transient wait no fixture holds (wanted: a dashboard whose CSV changed on disk, Reread pressed with the reread held) |
+
 ### Artifacts library
 
 #### Artifacts, "Make something new" strip
@@ -174,6 +186,7 @@ Rows added by M0 for text the UX wave added after the pin. **Today** here is the
 | Id | Where | Today | Decision | After | Basis | Source | M0 | Build |
 |---|---|---|---|---|---|---|---|---|
 | N150 | the design system chooser at the right of the strip's heading, and its first menu choice | MAWS · default | stays | Stays. rule 2: it says which design system will govern what is made (orients); "· default" looks like the default-state word rule 1 cuts, but without it the choice is just a name and the person cannot tell it from a picked system | pattern | `src/renderer/src/library/copy.ts:113` | new `src/renderer/src/library/copy.ts:113` | M5 · no scene: needs a document or artifact fixture in that state (wanted: Artifacts library with a design system picked besides the default; its chooser open) |
+| N193 | after the strip's heading, in a narrowed Space, while the Spaces are read | · Loading Space… | cut | The quiet spinner, named "Loading Space…", stands where the Space's name will be; "· <Space>" once the Spaces are read ("· General" outside a Space, as G290). | pattern | `src/renderer/src/library/MakeSomethingNew.tsx:280` | new `src/renderer/src/library/MakeSomethingNew.tsx:280` | M5 · no scene: a transient wait no fixture holds (wanted: By Space narrowed to a Space with `library.spaces` held) |
 
 #### Space instructions sheet
 
@@ -187,3 +200,15 @@ Rows added by M0 for text the UX wave added after the pin. **Today** here is the
 |---|---|---|---|---|---|---|---|---|
 | N152 | the notice over an editor open on an artifact an agent deleted (with Undo at its right) | An agent deleted this artifact. It takes no edits until it is restored. | reword | The notice reads "An agent deleted this artifact." with Undo; the editor shows read-only as it already does. | pattern | `src/renderer/src/library/copy.ts:35` | new `src/renderer/src/library/copy.ts:35` | M5 · no scene: a transient wait no fixture holds (wanted: an artifact tab open on an artifact an agent has just deleted (Undo offered)) |
 | N153 | the same notice while the editor holds an edit the host never took | An agent deleted this artifact. Your last edit is not saved; restoring the artifact saves it. | stays | Stays. rule 5: a state the person must act on keeps its reason; the second sentence says the edit is not saved and what saves it (data at stake) | pattern | `src/renderer/src/library/copy.ts:36` | new `src/renderer/src/library/copy.ts:36` | M5 · no scene: needs a document or artifact fixture in that state (wanted: an artifact tab open on a deleted artifact after the person typed an edit) |
+
+#### Artifacts, empty and failed states
+
+| Id | Where | Today | Decision | After | Basis | Source | M0 | Build |
+|---|---|---|---|---|---|---|---|---|
+| N190 | the list while the library is first read (no earlier answer to keep on screen) | Reading the library… | cut | The quiet spinner, named "Reading the library…", stands in the note's place with the note's height; a failed read keeps its words and Try again. | pattern | `src/renderer/src/library/copy.ts:115` | new `src/renderer/src/library/copy.ts:115` | M5 · no scene: a transient wait no fixture holds (wanted: the Artifacts page opened with `library.list` held) |
+
+#### Design system in use sheet
+
+| Id | Where | Today | Decision | After | Basis | Source | M0 | Build |
+|---|---|---|---|---|---|---|---|---|
+| N194 | under the sheet's sentence while the titles of the artifacts that use the system are read | Finding them… | cut | The quiet spinner, named "Finding them…", stands where the list will be. | pattern | `src/renderer/src/library/copy.ts:159` | new `src/renderer/src/library/copy.ts:159` | M5 · no scene: a transient wait no fixture holds (wanted: Delete… on a design system in use, with `library.get` held) |
