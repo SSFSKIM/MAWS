@@ -43,6 +43,7 @@ export const SPINE_COMMANDS = [
   'session.setVisible', 'session.spawn', 'session.start', 'session.takeOver', 'session.takeOverPane', 'session.trust.check', 'session.update',
   'session.visible', // P5 O3-D M5b: the visible set, for main's mirror
   'settings.engineApplied', 'settings.userEngineDefaults',
+  'sheet.body', 'sheet.list', 'sheet.put', 'sheet.read', 'sheet.upload', // the question sheet's C3 M2: composed beside lane A, only while the run holds spine.lock
   'side.screenshot.preview', 'side.sendToMain', 'side.thread.open',
 ];
 

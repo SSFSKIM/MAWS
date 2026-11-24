@@ -39,6 +39,8 @@ describe('the table', () => {
 
   it('says `no-rule` for the commands whose effect nobody has read for remote use yet', () => {
     for (const name of ['session.ui.press', 'session.ui.input', 'session.ui.select', 'session.applyFlagSettings']) expect(BY_EFFECT[name], name).toBe(NO_RULE);
+    // the question sheet's C3 M2: a window on the machine alone, until C6
+    for (const name of ['sheet.list', 'sheet.read', 'sheet.body', 'sheet.put', 'sheet.upload']) expect(BY_EFFECT[name], name).toBe(NO_RULE);
   });
 
   // The UX wave (U9, M1): `session.update` is offered as an unarchive alone (its row's `accepts`); its rule never grades a

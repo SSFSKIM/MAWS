@@ -33,7 +33,8 @@ const CLIENT_RULES = {
   // through the services front, whose hellos it never holds, as host.supervisorStatus is the app's own
   // UX wave U2b (panel finding 3): `mods.foldSummariesChanged` is the machine's own switch said to its own app's mods lists;
   // no list of another machine's mods is drawn here (`mods.list` is not offered over a link, remote-unavailable.ts)
-  names: ['attention.navigate', 'attention.notified', 'engine.budget', 'host.status', 'host.supervisorStatus', 'clientPort.request', 'daemon.engineHandover', 'host.browserIdle', 'projects.act.request', 'projects.act.withdrawn' /* the project registry's M12: mawsd's request to its own app and its withdrawal, never a link's */, 'mods.foldSummariesChanged'],
+  names: ['attention.navigate', 'attention.notified', 'engine.budget', 'host.status', 'host.supervisorStatus', 'clientPort.request', 'daemon.engineHandover', 'host.browserIdle', 'projects.act.request', 'projects.act.withdrawn' /* the project registry's M12: mawsd's request to its own app and its withdrawal, never a link's */, 'mods.foldSummariesChanged',
+    'sheet.changed' /* the question sheet's C3 M2: this machine's sheets to its own app; no remote caller reads a sheet until C6 */],
 };
 
 const placedBy = (rules: { namespaces: string[]; names: string[] }) => (name: string) => rules.names.includes(name) || rules.namespaces.includes(name.slice(0, name.indexOf('.')));
