@@ -5708,8 +5708,14 @@ test('the tool card retired: lone calls failed, denied, a js call, an image, a r
       await openStretchesAll();
       await seek(page, cellOf(rvJs));
     }, { check: checks(() => inView(cellOf(rvJs), 'the js call'), () => inView(activityOf(rvJs), 'its browser activity')) });
-    await shot(page, meta('tc-rv-denied-jump', 'The to-human view, the denied count pressed', 'The session “report” (invented), opened, then its turn line’s “1 denied” pressed', 'The stretch holding the denied command open, the command holding the keyboard', rvFolders), async () => {
+    // The report draws a finished turn's line only while one of its stretches is open (owner/view/mirror.ts), so the
+    // first record line, the failed command's, is opened first: the denied command's stretch stays folded for the jump
+    await shot(page, meta('tc-rv-denied-jump', 'The to-human view, the denied count pressed', 'The session “report” (invented), opened, its first record line pressed (the failed command’s), then its turn line’s “1 denied” pressed', 'The stretch holding the denied command open, the command holding the keyboard', rvFolders), async () => {
       await opened('report');
+      await toTop(page);
+      await press(page, closedLines().first(), 'the first record line');
+      await expect(cellOf(rvFail), 'the failed command’s stretch open').toBeAttached({ timeout: 5_000 });
+      await expect(cellOf(rvDeny), 'the denied command’s stretch still folded').toHaveCount(0);
       await jumpTo(rvDeny);
     }, { check: checks(() => inView(cellOf(rvDeny), 'the denied call'), focused(rvDeny)) });
 
