@@ -59,3 +59,9 @@ export const SidePanelIcon = () => (
     <path d="M9.5 3v10" />
   </Glyph>
 );
+/** A menu of further actions: three dots on the glyph's centre line (a text "…" sits on the baseline). */
+export const MoreIcon = () => (
+  <Glyph>
+    <path d="M3.75 8h.01M8 8h.01M12.25 8h.01" strokeWidth={2.25} />
+  </Glyph>
+);

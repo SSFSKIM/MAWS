@@ -11,7 +11,8 @@
 // to the text (the prior art's K3); Escape in the reply field exits too and keeps a written draft (X36's draft rule).
 // Each key acts only when the host gave its handler. App chrome: comments.css, app tokens only.
 // The word cut (docs/doperpowers/specs/2026-11-16-word-cut-design.md, M5; G384, G385, G388): Resolve or Reopen shows over
-// the card's top right on the card pointed at, holding the keyboard or active (the shared hover scope); the reply field
+// the right end of the first author line on the card pointed at, holding the keyboard or active (the shared hover scope;
+// placed by comments.css, it takes no space, so the quote and the messages keep the card's whole width); the reply field
 // is the active card's only, the panel's cards included, and its send a glyph named Reply; a card whose passage is gone
 // strikes its quote where it draws one, or carries a Removed tag, the sentence each one's tooltip.
 import { useEffect, useRef, type KeyboardEvent, type MouseEvent, type Ref } from 'react';
@@ -196,7 +197,8 @@ export function ThreadCard({ thread, active, compact, onActivate, onReply, onRes
         </>
       )}
       {replying && <ReplyField ref={replyField} draft={draft} onDraftChange={onDraftChange} onReply={onReply} onExit={onExit} />}
-      {/* the word cut (G384): over the card's top right, drawn on the card pointed at, focused or active */}
+      {/* the word cut (G384): over the first author line's right end, drawn on the card pointed at, focused or active;
+          last in the card, so the Tab order reaches it after the reply field */}
       <div className="thread-card-actions" {...(active ? {} : ON_HOVER)}>
         {open ? (
           <button type="button" className="thread-card-button" disabled={readOnly} onClick={onResolve}>

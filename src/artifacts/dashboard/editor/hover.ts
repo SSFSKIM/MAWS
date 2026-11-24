@@ -70,13 +70,16 @@ function seenWithin(el: Element, box: Box): Box {
 export const NOTE_MAX_PX = 320;
 /** The room a mark's note leaves between itself and the edge of what can be seen. */
 export const NOTE_INSET_PX = 8;
+/** The note's distance from its mark (sheet.css's `var(--space)` between them). */
+export const NOTE_GAP_PX = 4;
 
 /**
- * Where a ⚠ mark's note opens (the word cut, G598; sheet.css draws it): from the mark's start rightward, as at rest, while
- * its widest fits in what can be seen around the mark (the editor's scroller, the window); otherwise from the mark's end
- * leftward when that side has more room; its width capped to the room on the side it opens to, so no part of it is
- * clipped (the shared Tip's flip and shift, for a note drawn by CSS). Called as the mark is pointed at or focused, before
- * the note shows.
+ * Where a ⚠ mark's note opens (the word cut, G598, G603; sheet.css draws it): from the mark's start rightward, as at rest,
+ * while its widest fits in what can be seen around the mark (the editor's scroller, the window); otherwise from the
+ * mark's end leftward when that side has more room; its width capped to the room on the side it opens to. Under the
+ * mark while its height (read as drawn at that width) fits below it; otherwise above it when that side has more room. So
+ * no part of it is clipped (the shared Tip's flip and shift, for a note drawn by CSS). Called as the mark is pointed at
+ * or focused, before the note shows.
  */
 export function placeNote(mark: HTMLElement): void {
   const seen = seenWithin(mark, { left: -Infinity, top: -Infinity, right: Infinity, bottom: Infinity });
@@ -87,6 +90,12 @@ export function placeNote(mark: HTMLElement): void {
   if (leftward) mark.dataset.noteSide = 'end';
   else delete mark.dataset.noteSide;
   mark.style.setProperty('--dash-note-max', `${Math.max(0, Math.floor(Math.min(NOTE_MAX_PX, leftward ? before : after)))}px`);
+  // the note is laid out at rest (hidden, not undrawn), so its height at the width just set can be read
+  const height = Number.parseFloat(mark.ownerDocument.defaultView?.getComputedStyle(mark, '::after').height ?? '');
+  const below = seen.bottom - box.bottom - NOTE_INSET_PX;
+  const above = box.top - seen.top - NOTE_INSET_PX;
+  if (Number.isFinite(height) && below < height + NOTE_GAP_PX && above > below) mark.dataset.noteAbove = '';
+  else delete mark.dataset.noteAbove;
 }
 
 /** Where a tip `extent` long starts on one axis: `OFFSET` after the pointer, else before it where that would cross `hi`,

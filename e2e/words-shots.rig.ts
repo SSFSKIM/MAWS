@@ -6808,14 +6808,26 @@ test('the word cut’s M5: the library’s Spaces, opened artifacts, the documen
       },
       after: () => closeOverlays(page),
     });
-    await shot(page, m5Meta('m5-doc-comments', 'G390, G393, G394, G395, G385', 'A document’s comments panel', 'Field notes, Comments in the toolbar', 'The panel: its filters (no tab scope with one tab on M5), the search, the toggle for comments on deleted text, the open cards at rest and the resolved one', ['tools/document', 'src/artifacts/document/editor/comments']), async () => {
+    // the document panel's toggle for comments on deleted text, by its words in each build
+    const docDeletedToggle = (rail: Locator) => rail.locator('button.doc-rail-section').filter({ hasText: byM5(M5_WORDS.deletedToggle) });
+    await shot(page, m5Meta('m5-doc-comments', 'G390, G393, G394, G395, G385', 'A document’s comments panel', 'Field notes, Comments in the toolbar', 'The panel: its filters (no tab scope with one tab on M5), the search, the open cards at rest, the toggle for comments on deleted text (on M5 the closed disclosure “Deleted (1)” after the open cards; master’s line above them) and the resolved one', ['tools/document', 'src/artifacts/document/editor/comments']), async () => {
       await openComments('notes');
     }, {
       check: async () => {
         const rail = commentsRail('notes');
         await inView(rail.locator('input.doc-rail-search'), 'the search');
         await expect(rail.locator('input.doc-rail-search'), 'its placeholder').toHaveAttribute('placeholder', byM5(M5_WORDS.search), { timeout: 3_000 });
-        await expect(rail.locator('button.doc-rail-section[aria-pressed]'), 'the deleted-text toggle').toHaveText(byM5(M5_WORDS.deletedToggle), { timeout: 3_000 });
+        await expect(docDeletedToggle(rail), 'the deleted-text toggle').toHaveText(byM5(M5_WORDS.deletedToggle), { timeout: 3_000 });
+        // the pair review's fix wave (G395): on M5 a disclosure after the open cards, never a heading over them
+        if (m5Cut()) {
+          await expect(docDeletedToggle(rail), 'the disclosure closed').toHaveAttribute('aria-expanded', 'false');
+          const below = await rail.evaluate((el, id) => {
+            const card = el.querySelector(`article[data-thread="${id}"]`);
+            const toggle = Array.from(el.querySelectorAll('button.doc-rail-section')).find((button) => /^Deleted \(\d+\)$/.test(button.textContent ?? ''));
+            return Boolean(card && toggle && card.compareDocumentPosition(toggle) & Node.DOCUMENT_POSITION_FOLLOWING);
+          }, WORDS_THREADS.second);
+          expect(below, 'the toggle after the open cards').toBe(true);
+        }
         if (m5Cut()) await expect(rail.getByRole('radiogroup', { name: 'Scope', exact: true }), 'no scope with one tab').toHaveCount(0);
         else await inView(rail.getByRole('radiogroup', { name: 'Scope', exact: true }), 'master’s scope');
         const resting = rail.locator(`article[data-thread="${WORDS_THREADS.second}"]`);
@@ -6825,20 +6837,21 @@ test('the word cut’s M5: the library’s Spaces, opened artifacts, the documen
         else await inView(resting.locator('textarea[aria-label="Reply"]'), 'master’s reply field at rest');
       },
     });
-    await shot(page, m5Meta('m5-doc-comments-deleted', 'G395, G388', 'A document’s comments panel showing comments on deleted text', 'Field notes, Comments, the deleted-text toggle pressed', 'The card whose passage was removed: its quote struck through on M5, master’s line under it', ['tools/document', 'src/artifacts/document/editor/comments']), async () => {
+    await shot(page, m5Meta('m5-doc-comments-deleted', 'G395, G388', 'A document’s comments panel showing comments on deleted text', 'Field notes, Comments, the deleted-text toggle pressed', 'The card whose passage was removed: on M5 under the opened “Deleted (1)”, its quote struck through and spanning the card; master’s line under it', ['tools/document', 'src/artifacts/document/editor/comments']), async () => {
       await openComments('notes');
-      await commentsRail('notes').locator('button.doc-rail-section[aria-pressed]').click();
+      await docDeletedToggle(commentsRail('notes')).click();
     }, {
       check: async () => {
         const rail = commentsRail('notes');
-        await expect(rail.locator('button.doc-rail-section[aria-pressed]'), 'the toggle on').toHaveAttribute('aria-pressed', 'true', { timeout: 3_000 });
+        // M5's toggle is a disclosure (the pair review's fix wave), master's a pressed button
+        await expect(docDeletedToggle(rail), 'the toggle on').toHaveAttribute(m5Cut() ? 'aria-expanded' : 'aria-pressed', 'true', { timeout: 3_000 });
         const orphan = rail.locator(`article[data-thread="${WORDS_THREADS.gone}"]`);
         await inView(orphan, 'the card on deleted text');
         if (m5Cut()) await inView(orphan.locator('s[data-removed]'), 'its quote struck through');
         else await inView(orphan.getByText(M5_WORDS.removed, { exact: true }), 'master’s line');
       },
     });
-    await shot(page, m5Meta('m5-doc-margin-active', 'G384, G385', 'A document, a comment made active from its passage', 'Field notes, panels closed, click a marked passage', 'The margin’s cards beside the page: the active one with Resolve, its reply field and send; on M5 the other card its messages alone (its Resolve waits for the pointer, no reply field)', ['tools/document', 'src/artifacts/document/editor/comments']), async () => {
+    await shot(page, m5Meta('m5-doc-margin-active', 'G384, G385', 'A document, a comment made active from its passage', 'Field notes, panels closed, click a marked passage', 'The margin’s cards beside the page: the active one with Resolve on its author line’s right end, its reply field and send; on M5 the other card its messages alone across the card’s width (its Resolve waits for the pointer, no reply field)', ['tools/document', 'src/artifacts/document/editor/comments']), async () => {
       await docAtRest('notes');
       await editorOf('notes').locator(`span[data-thread="${WORDS_THREADS.open}"]`).first().click();
       await page.waitForTimeout(800);
@@ -6885,7 +6898,7 @@ test('the word cut’s M5: the library’s Spaces, opened artifacts, the documen
       await expect(tab('notes').locator('[data-editor="preview"]').first(), 'the version previewed').toBeVisible({ timeout: 10_000 });
     };
     const versionActions = () => page.getByRole('menu', { name: M5_WORDS.versionActions, exact: true });
-    await shot(page, m5Meta('m5-doc-version-actions', 'G379', 'A document showing a version, its actions', 'Field notes, Version history, the version “Draft”, then the bar’s “…”', 'The preview bar: Restore, the version’s actions menu (Make a copy) and the × back to the document (master: four worded buttons)', ['tools/document', 'src/artifacts/document/editor/history']), async () => {
+    await shot(page, m5Meta('m5-doc-version-actions', 'G379', 'A document showing a version, its actions', 'Field notes, Version history, the version “Draft”, then the bar’s “…”', 'The preview bar: Restore, the version’s actions menu (Make a copy) under its “…” drawn pressed, the “…” and the × alike in size and centre, and the × back to the document (master: four worded buttons)', ['tools/document', 'src/artifacts/document/editor/history']), async () => {
       await toDraft();
       if (m5Cut()) await previewBar('notes').locator('[data-history-actions]').click();
     }, {
@@ -6894,6 +6907,7 @@ test('the word cut’s M5: the library’s Spaces, opened artifacts, the documen
         if (m5Cut()) {
           await expect(versionActions(), 'the version’s actions').toBeVisible({ timeout: 3_000 });
           await inView(versionActions().getByRole('menuitem', { name: M5_WORDS.makeCopy, exact: true }), 'Make a copy');
+          await expect(previewBar('notes').locator('[data-history-actions]'), 'its “…” pressed while the menu is open').toHaveAttribute('data-state', 'open');
         } else {
           await inView(previewBar('notes').getByRole('button', { name: M5_WORDS.makeCopy, exact: true }), 'master’s Make a copy');
           await inView(previewBar('notes').getByRole('button', { name: M5_WORDS.backToDocument, exact: true }), 'master’s Back to document');
@@ -6991,12 +7005,14 @@ test('the word cut’s M5: the library’s Spaces, opened artifacts, the documen
       }
       await expect(views().locator('.dash-source-label'), 'the three views’ sources').toHaveCount(3, { timeout: 20_000 });
     };
-    await shot(page, m5Meta('m5-dash-tiles', 'G594, G596, G597', 'A dashboard’s views with their notes', 'Artifacts, Weekly sales (a bar over a column with two values not numbers and an unknown spec key, a pie of twelve slices)', 'Each view’s source line; on M5 the bar’s ⚠ mark and no spec warning; master’s notes at rest under the bar, its spec warning among them', ['tools/dashboard', 'src/artifacts/dashboard']), async () => {
+    await shot(page, m5Meta('m5-dash-tiles', 'G594, G596, G597', 'A dashboard’s views with their notes', 'Artifacts, Weekly sales (a bar over a column with two values not numbers and an unknown spec key, a pie of twelve slices)', 'Each view’s source line, the bar’s and the pie’s; on M5 the bar’s ⚠ mark and no spec warning; master’s notes at rest under the bar, its spec warning among them', ['tools/dashboard', 'src/artifacts/dashboard']), async () => {
       await salesReady();
-      await views().first().scrollIntoViewIfNeeded();
+      // the pie's end at the editor's bottom edge, so its source line is in the picture with the bar's (the pair review)
+      await views().nth(1).evaluate((el) => el.scrollIntoView({ block: 'end' }));
     }, {
       check: async () => {
         await inView(views().first().locator('.dash-source-label'), 'the bar’s source line');
+        await inView(views().nth(1).locator('.dash-source-label'), 'the pie’s source line');
         if (m5Cut()) {
           await inView(views().first().locator('.dash-warning'), 'the bar’s ⚠');
           await expect(tab('sales').getByText(/unknown key/), 'no spec warning on the tile').toHaveCount(0);
@@ -7024,9 +7040,10 @@ test('the word cut’s M5: the library’s Spaces, opened artifacts, the documen
     });
     // The folded pie's note in each build's form, in frame: on M5 in the pie's ⚠, pointed at; master's at rest under it
     const pieMark = () => views().nth(1).locator('.dash-warning').first();
-    await shot(page, m5Meta('m5-dash-pie-note', 'G603', 'A pie of twelve slices, its note', 'Weekly sales, the pointer on the pie’s ⚠ (master: the pie in view)', 'The folded pie’s note: “Top 5 of 12 slices; the rest as “other”” over the pie on M5; master’s sentence at rest under it', ['tools/dashboard', 'src/artifacts/dashboard'], true), async () => {
+    await shot(page, m5Meta('m5-dash-pie-note', 'G603', 'A pie of twelve slices, its note', 'Weekly sales, the pointer on the pie’s ⚠ (master: the pie in view)', 'The folded pie’s note: “Top 5 of 12 slices; the rest as “other”” on M5, opened upward over the pie from its ⚠ at the editor’s bottom edge; master’s sentence at rest under it', ['tools/dashboard', 'src/artifacts/dashboard'], true), async () => {
       await salesReady();
-      await views().nth(1).scrollIntoViewIfNeeded();
+      // the pie's end at the editor's bottom edge: its ⚠ there, the note opens upward (the pair review's fix wave, G603)
+      await views().nth(1).evaluate((el) => el.scrollIntoView({ block: 'end' }));
       await page.waitForTimeout(400);
       if (m5Cut()) await pieMark().hover();
       await page.waitForTimeout(900);
@@ -7036,6 +7053,7 @@ test('the word cut’s M5: the library’s Spaces, opened artifacts, the documen
         if (!m5Cut()) return inView(views().nth(1).locator('.dash-notes').filter({ hasText: M5_WORDS.piesFolded.master }), 'master’s note at rest');
         await pointedAt(pieMark(), 'the pie’s ⚠')();
         await expect(pieMark(), 'its note').toHaveAttribute('data-note', M5_WORDS.piesFolded.m5, { timeout: 3_000 });
+        await expect(pieMark(), 'its note opened upward at the bottom edge').toHaveAttribute('data-note-above', '', { timeout: 3_000 });
         await expect.poll(() => pieMark().evaluate((el) => getComputedStyle(el, '::after').visibility), { message: 'the note shown', timeout: 3_000 }).toBe('visible');
       },
     });
@@ -7070,11 +7088,17 @@ test('the word cut’s M5: the library’s Spaces, opened artifacts, the documen
     });
     // the sheet on every dataset (the header's Datasets): its picker, M5's options by title alone (G609)
     const picker = () => sheet().locator('select[aria-label="Dataset"]').first();
-    await shot(page, m5Meta('m5-dash-sheet-picker', 'G609', 'A dashboard’s source sheet on both its datasets', 'Weekly sales, its header’s Datasets', 'The sheet’s dataset picker: the select alone, its options by title (master: “Dataset” beside it, each option with its id)', ['tools/dashboard', 'src/artifacts/dashboard']), async () => {
+    await shot(page, m5Meta('m5-dash-sheet-picker', 'G609', 'A dashboard’s source sheet on both its datasets', 'Weekly sales, its header’s Datasets', 'The sheet’s dataset picker: the select alone, its options by title, drawn as an open list (master: “Dataset” beside it, each option with its id)', ['tools/dashboard', 'src/artifacts/dashboard']), async () => {
       await salesReady();
       await closeOverlays(page);
       await header().locator('[data-editor-action="datasets"]').first().click();
       await expect(picker(), 'the dataset picker').toBeVisible({ timeout: 10_000 });
+      // A native select's popup is the system's menu, outside the page, so no screenshot holds it: the rig draws the
+      // select as a list as tall as its options (its `size`), each option's words in the picture. The sheet closes after.
+      await picker().evaluate((el) => {
+        const select = el as HTMLSelectElement;
+        select.size = select.options.length;
+      });
     }, {
       check: async () => {
         await inView(picker(), 'the dataset picker');

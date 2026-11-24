@@ -1048,7 +1048,7 @@ test('restore brings back a deleted tab and the earlier text while a later reply
   // struck, the sentence its description
   const showDeleted = rail.getByRole('button', { name: /^Deleted \(\d+\)$/ });
   await expect(showDeleted).toHaveAccessibleDescription('Comments on deleted text');
-  await expect(showDeleted).toHaveAttribute('aria-pressed', 'false');
+  await expect(showDeleted).toHaveAttribute('aria-expanded', 'false'); // a disclosure (the pair review's fix wave)
   await expect(newerItem, 'the thread whose passage is gone is hidden by default').toHaveCount(0);
   await showDeleted.click();
   await expect(newerItem, 'the thread made after the version stays, its passage gone').toHaveAttribute('data-orphan', '');
