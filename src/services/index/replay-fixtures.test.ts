@@ -48,7 +48,9 @@ describe('replay fixtures in the index', () => {
       ...(['p4', 'p5'] as const).flatMap((dir) => readdirSync(join(FIXTURE_DIR, dir)).filter((name) => name.endsWith('.jsonl') && name !== 'p5-o16-gate.jsonl').map((name) => join(FIXTURE_DIR, dir, name))),
       // The UX wave's probes (2026-11-12): MAWS-launch journals under pass3/uxwave/ and uxwave/, the VM launcher's under
       // vm/; U3's engine transcripts and U5 P2's renderer measurements beside them in uxwave/ are not journals
-      ...(['pass3/uxwave', 'uxwave', 'vm'] as const).flatMap((dir) => readdirSync(join(FIXTURE_DIR, dir)).filter((name) => name.endsWith('.jsonl') && !name.endsWith('.transcript.jsonl') && name !== 'u5-p2-diffview.jsonl').map((name) => join(FIXTURE_DIR, dir, name))),
+      ...(['pass3/uxwave', 'uxwave', 'vm', 'qsheet'] as const).flatMap((dir) => readdirSync(join(FIXTURE_DIR, dir)).filter((name) => name.endsWith('.jsonl') && !name.endsWith('.transcript.jsonl') && name !== 'u5-p2-diffview.jsonl').map((name) => join(FIXTURE_DIR, dir, name))),
+      // The question sheet's engine probes (C0, 2026-11-23): MAWS-run journals under qsheet/; the terminal sessions' records
+      // and P4's no-engine record there are .ndjson, not journals
     ];
     expect(listJournals('pass3').length).toBeGreaterThan(0);
     expect(journals.map((f) => f.path).sort()).toEqual(expected.sort());

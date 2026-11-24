@@ -1,0 +1,233 @@
+Question sheet, child C0: the engine probes P1 to P5
+(composite spec docs/doperpowers/specs/2026-11-23-question-sheet-design.md, §12 and "C0: Engine probes"; child C0;
+parent pin ad4427f93; board ticket #865; 2026-11-23/24)
+
+Engine. Claude Code 2.1.331, the installed engine on the owner's Mac (~/.local/bin/claude's realpath), the one the owner's
+terminal sessions and MAWS's launches run today. Not the probe VM's 2.1.322.
+
+Method. Every live probe runs against the scripted Messages API stand-in (stub-api.mjs), so nothing was spent and each
+request the engine sent the model is recorded whole, with every probe marker it carries. Each launch has a scratch
+CLAUDE_CONFIG_DIR (none of the owner's settings, plugins or hooks), the owner's feature-gate cache seeded
+(PROBE_FEATURE_CACHE; tengu_plugin_hooks_modules is on in it), CLAUDE_CODE_ENABLE_FUNCTION_HOOKS=1, and the probe mods
+loaded with --plugin-dir from scenarios/pass3/qsheet-c0-mods/:
+  - qsprobe registers mcp__qsprobe__ask {op, ...}; adds `QSP-TOOLCTX` context to the main model's tool results,
+    `QSP-PROMPTCTX` to every prompt.submit, `QSP-SSCTX source=<s> sid=<id>` at every classic.SessionStart; logs what each
+    hook saw; and runs a command file dropped in its folder from a $.clock.every timer, outside any hook dispatch (as a
+    drain the bridge triggers would run).
+  - qsguard stands in for another plugin's secrets guard: a tool.check that denies a Read of any `.env`, and an
+    unmatched tool.call hook (the shape of devcloud's secrets guard) that replaces a marker in a Read's result.
+Two halves:
+  - MAWS-run sessions: scenarios/pass3/qsheet-c0.mjs, MAWS's launch line and initialize (p1-common.mjs), stream-json.
+  - Terminal sessions: scenarios/pass3/qsheet-c0-terminal.mjs, an interactive engine under tmux, same mods and stand-in,
+    `--permission-mode default`, the pane captured into the fixture.
+Run: node run-pass3.mjs qsheet-c0 (QSHEET_ONLY=<prefix> picks), node run-pass3.mjs qsheet-c0-terminal.
+Fixtures: fixtures/qsheet/*.jsonl (MAWS-run engine journals) and *.ndjson (the terminal sessions' records and P4's
+no-engine record: not journals, so not .jsonl, which the fixture readers take every file of under fixtures/ for one). Each holds the frames (MAWS-run) or pane captures (terminal), the stand-in's
+requests (`stub_requests`), the mods' own log (`qsp_logs`), and the step notes the verdicts below cite.
+
+================================================================================================================
+P1. In a MAWS-run session: prompt.submit sees the host's steer, can add context to it; tool-result context reaches
+the model; $.prompt.submit starts a turn, except from inside a tool.call hook.
+Fixture: fixtures/qsheet/qsheet-p1-hooks.jsonl (`p1_step` notes A to E; `qsp_logs`).
+
+  A. A host prompt while idle. The mod's prompt.submit hook saw it (origin {kind:"composer"}). The context it added is in
+     the next request as a user text block:
+       "<system-reminder>\nprompt.submit hook additional context: QSP-PROMPTCTX for \"QSP-A: run the echo.\"\n</system-reminder>\n"
+     The context the mod's tool.call hook added to a Bash result is in the request after it, beside the tool_result:
+       "tool.call hook additional context: QSP-TOOLCTX after Bash toolu_qa"
+  B. A `priority: "next"` steer sent while a Bash call ran (the frame MAWS's queue.steer writes). The hook saw it; the
+     request after the tool carried the tool_result, then the hook's context, then
+       "The user sent a new message while you were working:\nQSP-STEER-MID: … \n\nThis is how Claude Code surfaces
+        messages the user sends mid-turn …"
+  C. A `priority: "next"` steer while idle (how MAWS steers an ask's answer today): seen, context added, as in A.
+  D. $.prompt.submit called inside the mod's own tool.call dispatch: refused at once,
+       "HooksError: qsprobe: prompt.submit: called from a tool.call hook, it would wait on the turn this hook is
+        holding; submit from a later event (turn.complete) (host check)"
+  D2. The same text queued and submitted from the mod's turn.complete hook: a new turn started after the first ended.
+     The wire shows a user replay with origin {kind:"plugin",name:"qsprobe"} reading
+       "The qsprobe plugin sent a message:\nQSP-SUBMITTED-D2: …\n\nThis is how Claude Code surfaces a prompt a plugin
+        submits between turns — it starts this turn in the user's place. Address the message above."
+     and a result with the same origin. The mod's own prompt.submit hook saw this submit and added its context.
+  E. $.prompt.submit from a $.clock timer while idle: a turn started, framed as in D2. The mod's own prompt.submit
+     hook did NOT see it: raised outside any dispatch, the engine leaves the whole plugin out (re-entry), as the ask
+     design found for $.ui.ask.
+
+Design reading. §5.4's last paragraph (the question text and labels as hook context on the steer that carries a
+subagent's answer to the main conversation) has what it needs: the hook sees MAWS's steer, idle and mid-turn, and its
+context reaches the model with it. A plugin-submitted turn in a MAWS-run session is a turn MAWS did not send (its replay
+and result carry origin kind "plugin"); the design has MAWS deliver there, so the tool should not submit in a MAWS-run
+session.
+
+Not verified: a `priority: "now"` or `"later"` steer; a real model reading the contexts (only the request bytes).
+
+================================================================================================================
+P2. $.session.send to a subagent from a plugin's own hook works in both kinds of session: a running subagent reads it
+at its next request after its current tool round; an ended one is resumed with it, which also starts a turn in the
+main conversation; no dialog opens, plan mode included. The subagent reads it as its coordinator's.
+Fixtures: fixtures/qsheet/qsheet-p2-send.jsonl (MAWS-run), fixtures/qsheet/qsheet-t-p2.ndjson (terminal).
+Prior evidence (cited, not repeated): the unmerged branch ux-wave/subagent-tell,
+spikes/protocol-probe/findings-uxwave-tell-direct.txt, proved the same send from a host-called mod's tool.run over the
+wire (running background child, waited child, finished child resumed, stopped child refused). These probes cover what
+it left open: a plugin's own send (not a host mcp_call), from inside the tool's dispatch and from a timer, in a
+terminal session, and plan mode on this path.
+
+  Running background child (it sleeps 6 s in a Bash call, then runs a second Bash, then answers DONE):
+    - sent from inside the mod's tool dispatch (the parent model's call): {isDelivered: true};
+    - sent from a timer 2.5 s into the child's sleep: {isDelivered: true}.
+    Both were in the child's next request, the one after the sleep's result, as
+      "The coordinator sent a message while you were working:\nQSP-TOLD-1: sent from inside the tool dispatch\n\n
+       Address this before completing your current task."
+    $.agent.list() read the child `running` before and after.
+  Ended child: $.agent.list() read `completed`; the send answered {isDelivered: true} and the list read `running`
+    right after; a second task_started for the same agent id; the child's request carried the text; on its end a new
+    task_notification, and the main conversation ran a turn for it (MAWS-run: a `result` with origin
+    {kind:"task-notification"}; terminal: a second "Agent "p2 child" finished" and the parent's reply on screen).
+  Plan mode (set_permission_mode plan, MAWS-run): the same send to the ended child was delivered and the child resumed.
+    (The tell branch's plan-mode refusal was the host's mcp_call of an MCP tool, not the send.)
+  Terminal: no dialog on screen at any send (pane captures in qsheet-t-p2.ndjson).
+
+Design reading. §6's route stands in both kinds of session; P2's MAWS-run half allows the tool to send directly. Two
+things the design states differently:
+  - The subagent is told the message came from "the coordinator" (2.1.331's envelope for any plugin's send). The text
+    the tool sends must say it is the human's answer to the subagent's own question, as the bridge's tell does
+    (TELL_LINE in sminos/hooks/mods/bridge-agent-ops.tsx).
+  - Resuming an ended subagent is not free: each resume is a new run of the subagent and a new hand-back that starts
+    a turn in the main conversation.
+
+Not verified: a send landing while the child's last request is in flight (it ends with no further tool round); a
+stopped child (the tell branch shows "was stopped and was not resumed"); plan mode in a terminal session.
+
+================================================================================================================
+P3. $.tool.check then $.tool.call of Read from the tool works and runs the other plugins' guards; but a plugin's Read
+is not invisible to the model: at the next compaction the engine re-attaches every file the plugin read to the
+model's context, as if the model had read it.
+Fixtures: fixtures/qsheet/qsheet-p3-capture.jsonl (default mode), qsheet-p3-auto.jsonl (auto mode),
+qsheet-p3-compact.jsonl (the compaction), qsheet-t-p5.ndjson (terminal: a capture from a timer, then /compact).
+
+  Guards. $.tool.check({tool:"Read", input}) ran qsguard's tool.check hook (origin {plugin:"qsprobe",tier:"user"}):
+    `.env` -> {decision:"deny", reason:"QSGUARD: a secrets file"}. A settings deny rule Read(**/denied.txt) ->
+    {decision:"deny", reason:"Permission to read denied.txt has been denied.", rule:"Read(**/denied.txt)"}.
+    $.tool.call({tool:"Read", ...}) ran qsguard's tool.check again (with a tool_use_id "toolu_plugin_…") and its
+    tool.call hook, whose scrub reached the caller: "the value is [scrubbed-by-qsguard]". A settings PreToolUse command
+    hook on Read ran for every $.tool.call (ids "toolu_plugin_…"), never for $.tool.check.
+  Outside the project: check answers {decision:"ask", reason:"Claude requested permissions to read from <path>, but you
+    haven't granted it yet."}, in default mode and after set_permission_mode auto alike (the classifier is not asked);
+    so under §2.3's "only on allow" a reference outside the working directories is always refused. In a terminal
+    session the same check opened no dialog (pane in qsheet-t-p5.ndjson).
+  Result shapes. Text: {result:{type:"text", file:{filePath, content, numLines, startLine, totalLines}}, text} where
+    `text` is the cat -n rendering. Image (an 8x8 PNG): {result:{type:"image", file:{base64, type:"image/png",
+    originalSize, dimensions}}, text:""}. A missing file: {isError:true, text:"File does not exist. …"}.
+    No range: a 2,500-line, 63 KB file came back whole (numLines 2501, no cut, no note); a 1.4 MB file came back as an
+    error, "File content (1.4MB) exceeds maximum allowed size (256KB). Use offset and limit parameters …". A ranged
+    read (offset 100, limit 20) returned exactly those lines.
+  file_unchanged. A capture of a file the model had just read returned its full content, not a stub. But in this
+    configuration the model's own second Read of an unchanged file also returned full content (control r4/r5), so
+    the stub did not fire for anyone here; whether a capture gets a stub where it does fire is not shown.
+  What the model is taken to have read.
+    - The plugin's reads leave no row in the transcript, and the model's own later Read of a plugin-read file returned
+      full content.
+    - After /compact the engine restores recently read files into the conversation as
+        "<system-reminder>\nCalled the Read tool with the following input: {\"file_path\":\"…/plugin-timer.txt\"}…"
+        "<system-reminder>\nResult of calling the Read tool:\n1\tPLUGIN-TIMER-CONTENT…"
+      and it did so for files only the plugin read, from a timer (plugin-timer.txt, and a `.env` with no guard loaded,
+      its value whole) and from inside the tool's dispatch (plugin-tool.txt), beside the file the model read
+      (qsheet-p3-compact.jsonl, `p3c_after_compact`, the request after the compaction). The terminal session did the
+      same (qsheet-t-p5.ndjson: the screen after /compact reads "⎿ Read .env (1 line)" and "⎿ Read one.txt (1 line)",
+      files only the plugin had read; the transcript keeps them as `file` attachments).
+    - Read-before-edit could not be tested: 2.1.331 let the model Edit a file nobody had read (control e2).
+    - A file the model read that changed on disk produced no notice at the next request either (control), so that
+      test says nothing.
+
+Design reading. This forces a design change in §2.3, for the writer to decide: capture through $.tool.call of Read puts
+every referenced file (at its captured range) into the model's context at the next compaction, a cost the agent did not
+choose and, for a file only a guard's tool.call scrub keeps safe, a copy re-read at compaction time that only a guard
+hooked on attachments (devcloud's prompt.attachment hook is one) would scrub. The design's other route, $.fs.read after
+a $.tool.check allow, keeps the permission rules and the guards' tool.check refusals but not their tool.call scrubbing.
+Also: "with a note when that was cut" has nothing to describe on 2.1.331 (no default cut; a refusal above 256 KB).
+
+Not verified: the owner's real guard (devcloud's secrets mod) in place of qsguard; a PDF or notebook reference.
+
+================================================================================================================
+P4. A hook's $.fs.write is not atomic to another process; the record must be replaced by a process. As C2 builds it
+(a Python step that replaces state.json by os.replace of an fsynced file, appends under fcntl.flock on a lock file
+beside the record), it holds: no torn or missing state.json, no overlapping locked sections, every appended line
+applied exactly once, and no lock-free reader saw part of one write().
+Fixtures: fixtures/qsheet/qsheet-p4-files.jsonl (inside an engine session), fixtures/qsheet/qsheet-p4-sheet.ndjson (C2's
+shape, no engine). Filesystem: APFS, /System/Volumes/Data, under ~/.local/share.
+
+  The mod's own writes (qsheet-p4-files.jsonl, `p4_state_replace`): $.fs has read, write, list, exists, stat and no
+    rename, append, lock or delete.
+    - $.fs.write in place, 60 writes alternating 1.5 MB and 2 KB against a Python reader in another process: the inode
+      never changed, and 3 of the reader's 225,781 reads were torn files (an earlier run: 10 of 436,666; the samples
+      show a 2 KB write's head over the 1.5 MB body's tail).
+    - $.fs.write of a temporary file then /bin/mv through $.process.run: 0 torn and 0 missing of 186,199 reads, 61
+      inodes for 60 replaces; 684 ms for the 60 (fs.write plus a process each).
+  C2's shape (qsheet-p4-sheet.ndjson, `p4_sheet`; two runs: lines up to 40 KB, and up to 400 KB with a reader that never
+    sleeps):
+    (a) os.replace of an fsynced temporary state.json (up to 1.5 MB) against a lock-free Python reader: 0 torn and
+        0 missing of 10,702 reads (and of 16,041 in the second run).
+    (b) fcntl.flock on sess.lock held by two appenders (batches of 1 to 4 lines, one os.write each) and a step
+        (read state, read the inbox past its offset, apply, replace state) at once: of 1,801 locked sections (701 in
+        the second run) none overlapped another (monotonic enter/exit stamps), the step applied exactly the 3,512
+        lines appended (751), and its offset ended at the inbox's size (70,919,214 bytes).
+    (c) A lock-free Node reader (MAWS's would be Node) tailing inbox.jsonl from its offset, and a sampler taking the
+        file's size by fstat (5,534,314 and 6,850,000 samples): no read ended mid-line (509 and 144 reads), none ended
+        at a line boundary inside a batch, and no sampled size fell between two write() ends.
+  Two cautions for readers. (c) is an observation on APFS, not a guarantee POSIX makes: a lock-free reader still takes
+    only what ends in a newline and reads the rest next time. And a hook reading the inbox with $.fs.read gets at
+    most 4 MiB a call; reading [offset, size) whole cuts lines at that cap (the cause of the mid-line reads in
+    qsheet-p4-files.jsonl's `inbox-reads`, which are not partial writes).
+  Without the lock (control, buffered appends of lines up to 200 KB): all 3,000 lines stayed whole, but 173 batches
+    were split by the other writer's lines; the lock is what keeps a Send's batch contiguous.
+
+Not verified: other filesystems (a network home, an external volume); a crash between the temporary file's fsync and
+the replace.
+
+================================================================================================================
+P5. SessionStart context from a function hook (classic.SessionStart answering additionalContext) reaches the model at
+every start: startup, /compact, --resume, a fork (--resume --fork-session over the wire, /branch in a terminal) and
+/clear, in both kinds of session. Text already in the conversation is not added a second time.
+Fixtures: fixtures/qsheet/qsheet-p5-*.jsonl (MAWS-run), fixtures/qsheet/qsheet-t-p5.ndjson (terminal);
+qsheet-p5-block*.jsonl and qsheet-t-block.ndjson for the escaping question.
+
+  Where it lands. A system-role message (startup, resume, fork, clear) or the post-compaction environment message:
+    "SessionStart hook additional context: QSP-SSCTX source=compact sid=<id>"
+  Each start, MAWS-run:
+    startup  - the first request carries `source=startup`.
+    /compact - the summary request carries the startup copy (it is summarised); the first request after it carries
+               `source=compact` and no older copy.
+    --resume - `source=resume`, beside the compact copy the history holds.
+    fork     - `source=fork`; e.session_id is the NEW session's id, transcript_path the new file.
+    /clear   - `source=clear`, with the new session's id.
+  Same text at every start (QSP_SSFIXED, qsheet-p5-e-*): at a --resume the engine added no second copy of text
+    already in the history; after a compaction it was there again (re-added).
+  What the hook can read at that moment, MAWS-run: at a launch's first start (startup, resume, --fork-session)
+    $.session.messages() rejects ("not available in this mode: no session is bound in this process …"), and a
+    --fork-session's transcript file does not exist yet. At the mod's session.start hook (after next) and at the first
+    prompt the history is readable (the fork's: its copied conversation). At /compact and /clear it is readable.
+    Terminal: at /branch's start the transcript exists and the history is readable.
+  No parent id at a fork: neither the SessionStart input nor the fork's transcript rows (rewritten with the new
+    sessionId) name the session it was forked from.
+
+  The coordinator's addition: a literal `<sheet-delivery>{…}</sheet-delivery>` block appended to the SessionStart
+  context, a prompt's context and a tool result's context, its JSON string holding `a <b> & \"c\" </sheet-delivery> x`:
+  the model received it byte for byte, in both kinds of session, and a session.append hook saw the same bytes in the
+  stored row, which reads
+    "<system-reminder>\n<event> hook additional context: …\n<sheet-delivery>{…}</sheet-delivery>\n</system-reminder>"
+  With `</system-reminder> <system-reminder>` in the JSON string instead (qsheet-p5-block-reminder.jsonl,
+  qsheet-t-block.ndjson), the model and the hook both saw `&lt;/system-reminder> &lt;system-reminder>`: the engine
+  escapes `<` only where it opens a system-reminder tag; `<sheet-delivery>`, `<b>` and `&` pass unchanged.
+
+Design reading. §5.5 stands: the context reaches the model after a compaction, a resume and a fork, in both kinds of
+session. Three things the design states differently:
+  - §3's fork rule ("starts its ids past the highest it can find, in the parent's directory for a fork and otherwise in
+    the transcript's stored calls") cannot find the parent's directory: the engine names no parent. The transcript
+    route works, read from $.session.messages() at session.start or later (not at SessionStart over the wire).
+  - /clear: SessionStart names only the new session; the id the clear leaves must come from the module's memory of
+    the previous start or a SessionEnd hook (sminos's smns-cleared.sh already keeps it).
+  - X3's block: a human's text holding "</sheet-delivery>" arrives verbatim inside the block's JSON string, and one
+    holding "<system-reminder>" arrives as "&lt;system-reminder>". Writing the block's JSON with `<` escaped as <
+    avoids both.
+
+Not verified: an automatic compaction (only /compact); a real model's reading of the context (P4-R7y showed one, on
+2.1.304, for a settings hook's context).
