@@ -296,15 +296,18 @@ export class HistoryController {
     }
   }
 
-  /** Restores the previewed version (a new `restore` version) and leaves history; the banner follows the restore. */
-  async restore(): Promise<void> {
+  /** Restores the previewed version (a new `restore` version) and leaves history; the banner follows the restore.
+   * Answers whether it was restored. */
+  async restore(): Promise<boolean> {
     const versionId = this.loaded?.preview.versionId;
-    if (versionId == null) return;
+    if (versionId == null) return false;
     try {
       await this.api.restore(versionId);
       this.close();
+      return true;
     } catch (error) {
       this.set({ error: message(error) });
+      return false;
     }
   }
 

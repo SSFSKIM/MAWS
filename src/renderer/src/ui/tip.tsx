@@ -30,8 +30,8 @@
 // stands above it (a field's caption, a section's heading, the message a rule's words follow, the window's toolbar over
 // a panel's head) names `side="bottom"`, so its tip does not cover what it explains. Radix flips it to the other side
 // where the window has no room and shifts it along the edge it would cross, `collisionPadding` from the window's edges;
-// inside a `TipBoundary` it keeps to that container too (a page in a panel, so a tip on a word near the page's edge
-// does not run onto the sidebar).
+// inside a `TipBoundary` it keeps to what can be seen of that container too (a page in a panel, so a tip on a word near
+// the page's edge does not run onto the sidebar, nor past its scroller's lower edge onto the group under it).
 //
 // `UnavailableButton` is a greyed click-activated control's enabled owner ("Every hidden fact has an owner that takes
 // keyboard focus"): a button, a link, a checkbox or a radio drawn `aria-disabled`, still in the Tab order, its reason
@@ -42,7 +42,7 @@
 // acts on pointerdown (a Radix menu trigger) guards itself too. The control must not be `disabled`, which takes it out
 // of the Tab order and out of the pointer's reach.
 import { Tooltip } from 'radix-ui';
-import { cloneElement, createContext, useCallback, useContext, useEffect, useId, useLayoutEffect, useRef, useState, type MouseEvent, type ReactElement, type ReactNode, type RefObject, type SyntheticEvent } from 'react';
+import { cloneElement, createContext, useCallback, useContext, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type MouseEvent, type ReactElement, type ReactNode, type RefObject, type SyntheticEvent } from 'react';
 import { POINTING_DELAY_MS } from './pointing';
 
 const TIP = 'z-50 max-w-[20rem] rounded-sm border border-border-strong bg-bg-overlay px-2 py-1 text-ui-sm leading-normal text-fg shadow-float [overflow-wrap:anywhere]';
@@ -52,10 +52,22 @@ type Owner = ReactElement<{ 'aria-describedby'?: string }>;
 
 export type TipSide = 'top' | 'bottom' | 'left' | 'right';
 
-// The container the tips inside it keep to, besides the window's edges; none by default.
-const Boundary = createContext<Element | null>(null);
+// The container the tips inside it keep to, besides the window's edges; none by default. What can be seen of it: the
+// element cut by its nearest scrolling ancestor (the medium review: a page in a side panel's upper group ends, for a
+// tip, at the group's lower edge, not the page's).
+const Boundary = createContext<Element[] | null>(null);
+const CLIPS = new Set(['auto', 'scroll', 'hidden', 'clip']);
+export function tipBoundaryOf(element: Element | null): Element[] {
+  if (!element) return [];
+  const view = element.ownerDocument.defaultView;
+  for (let ancestor = element.parentElement; ancestor && view; ancestor = ancestor.parentElement) {
+    if (CLIPS.has(view.getComputedStyle(ancestor).overflowY)) return [ancestor, element];
+  }
+  return [element];
+}
 export function TipBoundary({ element, children }: { element: Element | null; children: ReactNode }) {
-  return <Boundary value={element}>{children}</Boundary>;
+  const boundary = useMemo(() => tipBoundaryOf(element), [element]);
+  return <Boundary value={boundary}>{children}</Boundary>;
 }
 
 // The tip that shows, closed when another opens (Radix's own signal for that fires only for the openings it makes).

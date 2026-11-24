@@ -6,6 +6,7 @@
   position: relative;
   anchor-scope: --thread-head;
   display: grid;
+  grid-template-columns: minmax(0, 1fr); /* never wider than its host, whatever a long unbroken passage asks */
   gap: var(--space);
   padding: calc(var(--space) * 2);
   border: 1px solid var(--border);

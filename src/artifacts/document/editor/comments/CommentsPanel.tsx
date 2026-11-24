@@ -85,14 +85,17 @@ export function CommentsPanel({ doc, tabs, activeTab, activeThread, author, read
   const inScope = scoped ? scope : 'all';
   const inView = (thread: ThreadState) => (status === 'all' || thread.status === status) && (inScope === 'all' || thread.tabId === activeTab) && matches(thread, needle);
   // WR 49: a resolved thread can also have a missing target, so filter by liveness, not just `orphan`. The pair review's
-  // fix wave (G395): the deleted threads, open or resolved, are the Deleted disclosure's own, listed under it
+  // fix wave (G395): Deleted (N) counts the deleted threads in view; opened, it lists them under it, but for the resolved
+  // ones under All, which the Resolved section lists among the others (as before the cut)
   const deleted = threads.filter((thread) => !thread.live && inView(thread));
   const live = threads.filter((thread) => thread.live && inView(thread));
   const open = live.filter((thread) => thread.status === 'open');
   const resolved = live.filter((thread) => thread.status === 'resolved');
   // the cards before the disclosures: the open threads, or the resolved ones where Resolved is the filter
   const main = status === 'resolved' ? resolved : open;
-  const listed = [...main, ...(showDeleted ? deleted : []), ...(status === 'all' && showResolved ? resolved : [])];
+  const folded = status === 'all' ? deleted.filter((thread) => thread.status === 'open') : deleted;
+  const resolvedSection = status === 'all' ? threads.filter((thread) => thread.status === 'resolved' && (thread.live || showDeleted) && inView(thread)) : [];
+  const listed = [...main, ...(showDeleted ? folded : []), ...(showResolved ? resolvedSection : [])];
 
   // the editor's active thread, scrolled into view when it changes (and when the panel opens on one)
   useEffect(() => {
@@ -127,9 +130,10 @@ export function CommentsPanel({ doc, tabs, activeTab, activeThread, author, read
       />
     );
   };
-  // nothing to list: under All, a search that only resolved threads match lists those without a note
-  // (the pair review's fix wave: a fold that lists a match under the filter or the search is something listed too)
-  const empty = status === 'resolved' ? resolved.length === 0 && deleted.length === 0 : open.length === 0 && (needle === '' || resolved.length + deleted.length === 0);
+  // nothing to list: under All, a search that only resolved threads match lists those without a note. The pair review's
+  // fix wave and its medium review: the Deleted fold's cards count while it is open, and a search's matches in it at all
+  const shownFirst = main.length + (showDeleted ? folded.length : 0);
+  const empty = shownFirst === 0 && (needle === '' || resolvedSection.length + deleted.length === 0);
   const emptyText = needle !== '' ? W.noMatches : status === 'resolved' ? W.noResolved : W.noOpen;
 
   return (
@@ -147,26 +151,30 @@ export function CommentsPanel({ doc, tabs, activeTab, activeThread, author, read
       </div>
       <div ref={body} className="doc-rail-body">
         {empty && <p className="doc-rail-empty">{emptyText}</p>}
-        {main.map(card)}
-        {/* the pair review's fix wave (G395, G390): a disclosure after the cards it does not hold, its own under it */}
-        {deleted.length > 0 && (
-          <section className="doc-rail-fold" aria-label={W.deleted(deleted.length)}>
-            <Tip content={W.deletedTip} description={W.deletedTip}>
-              <button type="button" className="doc-rail-section" aria-expanded={showDeleted} onClick={() => setShowDeleted(!showDeleted)}>
-                {W.deleted(deleted.length)}
-                <Chevron />
-              </button>
-            </Tip>
-            {showDeleted && deleted.map(card)}
-          </section>
-        )}
-        {status === 'all' && resolved.length > 0 && (
-          <section className="doc-rail-fold" aria-label={`Resolved (${resolved.length})`}>
+        {/* the pair review's fix wave (G395, G390): a disclosure after the cards it does not hold, its own under it. One
+            keyed list with the open cards (the medium review), so a card whose passage someone else deletes or restores
+            moves in place, mounted, its keyboard kept */}
+        {[
+          ...main.map(card),
+          ...(deleted.length > 0
+            ? [
+                <Tip key="deleted-toggle" content={W.deletedTip} description={W.deletedTip}>
+                  <button type="button" className="doc-rail-section" aria-expanded={showDeleted} onClick={() => setShowDeleted(!showDeleted)}>
+                    {W.deleted(deleted.length)}
+                    <Chevron />
+                  </button>
+                </Tip>,
+              ]
+            : []),
+          ...(showDeleted ? folded.map(card) : []),
+        ]}
+        {resolvedSection.length > 0 && (
+          <section className="doc-rail-fold" aria-label={`Resolved (${resolvedSection.length})`}>
             <button type="button" className="doc-rail-section" aria-expanded={showResolved} onClick={() => setShowResolved(!showResolved)}>
-              Resolved ({resolved.length})
+              Resolved ({resolvedSection.length})
               <Chevron />
             </button>
-            {showResolved && resolved.map(card)}
+            {showResolved && resolvedSection.map(card)}
           </section>
         )}
       </div>

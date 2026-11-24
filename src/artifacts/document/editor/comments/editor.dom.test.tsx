@@ -225,6 +225,26 @@ describe('the threads rail', () => {
     await until(() => screen.getByRole('tab', { name: 'Appendix' }).getAttribute('aria-selected') === 'true', 'the other tab');
   });
 
+  // The medium review: a passage deleted (or restored) by someone else moves its thread between the open threads and the
+  // Deleted fold; the card moves in place, one list, so it is not remounted and keeps the keyboard.
+  it('keeps a card mounted, with the keyboard, when its passage is deleted while Deleted is open', async () => {
+    const { editor, first } = await seeded();
+    act(() => fireEvent.click(within(toolbar()).getByRole('button', { name: /^Comments/ })));
+    await quiet();
+    act(() => fireEvent.click(within(rail()).getByRole('button', { name: /^Deleted \(/ })));
+    const card = rail().querySelector<HTMLElement>(`[data-thread="${first}"]`)!;
+    expect(card.dataset.orphan).toBeUndefined();
+    act(() => card.focus());
+    act(() => {
+      const at = findPos(editor(), 'ships quarterly');
+      editor().view.dispatch(editor().state.tr.delete(at, at + 'ships quarterly'.length));
+    });
+    await quiet();
+    expect(rail().querySelector(`[data-thread="${first}"]`)).toBe(card);
+    expect(card.dataset.orphan).toBe('');
+    expect(document.activeElement).toBe(card);
+  });
+
   // P4-B1 (D9, the prior art's Z4): the rail is the All comments panel, its cards X36's; it filters by status, by tab and
   // by a search over the messages, the quotes and the authors' names, and each card's reply draft is the panel's, so a
   // card a filter hides keeps it.
@@ -555,26 +575,6 @@ describe('the word cut in the comments panel', () => {
       ['zz000001', '2 of 3'],
       [settled!.id, '3 of 3'],
     ]);
-  });
-
-  // The medium review: a passage deleted (or restored) by someone else moves its thread between the open threads and the
-  // Deleted fold; the card moves in place, one list, so it is not remounted and keeps the keyboard.
-  it('keeps a card mounted, with the keyboard, when its passage is deleted while Deleted is open', async () => {
-    const { editor, first } = await seeded();
-    act(() => fireEvent.click(within(toolbar()).getByRole('button', { name: /^Comments/ })));
-    await quiet();
-    act(() => fireEvent.click(within(rail()).getByRole('button', { name: /^Deleted \(/ })));
-    const card = rail().querySelector<HTMLElement>(`[data-thread="${first}"]`)!;
-    expect(card.dataset.orphan).toBeUndefined();
-    act(() => card.focus());
-    act(() => {
-      const at = findPos(editor(), 'ships quarterly');
-      editor().view.dispatch(editor().state.tr.delete(at, at + 'ships quarterly'.length));
-    });
-    await quiet();
-    expect(rail().querySelector(`[data-thread="${first}"]`)).toBe(card);
-    expect(card.dataset.orphan).toBe('');
-    expect(document.activeElement).toBe(card);
   });
 
   // The medium review: "No open comments" only where no open thread is listed, the open Deleted fold's included.

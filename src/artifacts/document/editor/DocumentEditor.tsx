@@ -546,6 +546,16 @@ function TabEditor({ tabId, tabTitle, newSection, artifactId, handle, host, rend
   // the preview's own editor while a version shows (null until it exists); the live one is never put on a version
   const [previewEditor, setPreviewEditor] = useState<Editor | null>(null);
   const shown = preview && previewEditor ? previewEditor : editor;
+  // the medium review: a restore that landed gives the keyboard to the live editor, drawn again once the preview goes
+  // (the frame after the history's close), rather than leaving it on the gone confirm
+  const liveEditor = useRef(editor);
+  useLayoutEffect(() => {
+    liveEditor.current = editor;
+  }, [editor]);
+  const focusAfterRestore = () =>
+    requestAnimationFrame(() => {
+      if (!liveEditor.current.isDestroyed) liveEditor.current.commands.focus();
+    });
   // the editor showed something else: every other preview's docs can go, once a closed preview's editor is gone too
   useEffect(() => {
     if (preview) return;
@@ -701,7 +711,7 @@ function TabEditor({ tabId, tabTitle, newSection, artifactId, handle, host, rend
         />
       )}
       {preview && historyController ? (
-        <HistoryBar editor={shown} preview={preview} controller={historyController} onBack={() => historyController.close()} />
+        <HistoryBar editor={shown} preview={preview} controller={historyController} onBack={() => historyController.close()} onRestored={focusAfterRestore} />
       ) : (
         <Toolbar
           highlightScope={pageScope}

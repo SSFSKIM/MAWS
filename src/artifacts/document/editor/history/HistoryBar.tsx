@@ -65,7 +65,7 @@ function step(editor: Editor, preview: Preview, controller: HistoryController, d
   }
 }
 
-export function HistoryBar({ editor, preview, controller, onBack }: { editor: Editor; preview: Preview; controller: HistoryController; onBack(): void }) {
+export function HistoryBar({ editor, preview, controller, onBack, onRestored }: { editor: Editor; preview: Preview; controller: HistoryController; onBack(): void; /** The restore landed and the bar is going: the host gives the keyboard to the document. */ onRestored?(): void }) {
   const [confirming, setConfirming] = useState(false);
   const [naming, setNaming] = useState(false);
   // The pair review's fix wave: the restore's confirm is an alertdialog and takes the keyboard on its Cancel (as the
@@ -75,6 +75,15 @@ export function HistoryBar({ editor, preview, controller, onBack }: { editor: Ed
   const restoreButton = useRef<HTMLButtonElement>(null);
   const cancelButton = useRef<HTMLButtonElement>(null);
   const namingChosen = useRef(false);
+  const actionsTrigger = useRef<HTMLButtonElement>(null);
+  const nameForm = useRef<HTMLFormElement>(null);
+  // the medium review: the name form closing takes the field (or its Save) that held the keyboard; it goes back to the
+  // version's actions, where the form was opened from
+  const closeNaming = () => {
+    const held = nameForm.current?.contains(document.activeElement) === true;
+    setNaming(false);
+    if (held) actionsTrigger.current?.focus();
+  };
   useEffect(() => {
     if (confirming) cancelButton.current?.focus();
   }, [confirming]);
@@ -136,7 +145,7 @@ export function HistoryBar({ editor, preview, controller, onBack }: { editor: Ed
             </Button>
             <DropdownMenu.Root modal={false}>
               <DropdownMenu.Trigger asChild>
-                <NamedGlyph label={W.actionsName} className="doc-tool doc-tool-glyph" data-history-actions="">
+                <NamedGlyph ref={actionsTrigger} label={W.actionsName} className="doc-tool doc-tool-glyph" data-history-actions="">
                   <MoreIcon />
                 </NamedGlyph>
               </DropdownMenu.Trigger>
@@ -176,7 +185,7 @@ export function HistoryBar({ editor, preview, controller, onBack }: { editor: Ed
           ×
         </NamedGlyph>
       </div>
-      {naming && <NameForm onName={(label) => controller.name(label)} onDone={() => setNaming(false)} />}
+      {naming && <NameForm ref={nameForm} onName={(label) => controller.name(label)} onDone={closeNaming} />}
       {confirming && (
         <div className="doc-history-confirm" role="alertdialog" aria-label="Restore this version?">
           <p>Restore this version? The document goes back to it as a new version; everything since stays in history, and comment conversations are kept.</p>
@@ -196,8 +205,11 @@ export function HistoryBar({ editor, preview, controller, onBack }: { editor: Ed
               label="Restore"
               worded
               onClick={() => {
+                // the medium review: the keyboard on Restore while the restore runs (its confirm, Cancel with it, goes),
+                // then the document's once it lands; a failed restore leaves it on Restore
                 setConfirming(false);
-                void controller.restore();
+                restoreButton.current?.focus();
+                void controller.restore().then((restored) => restored && onRestored?.());
               }}
             >
               Restore
@@ -229,7 +241,7 @@ function Button({ ref, label, worded = false, disabled, onClick, children }: { r
 }
 
 // Name this version: the label only (the version keeps its note).
-function NameForm({ onName, onDone }: { onName(label: string): Promise<boolean>; onDone(): void }) {
+function NameForm({ ref, onName, onDone }: { ref?: Ref<HTMLFormElement>; onName(label: string): Promise<boolean>; onDone(): void }) {
   const [label, setLabel] = useState('');
   const submit = (event: FormEvent) => {
     event.preventDefault();
@@ -238,7 +250,7 @@ function NameForm({ onName, onDone }: { onName(label: string): Promise<boolean>;
     void onName(name).then((named) => named && onDone());
   };
   return (
-    <form className="doc-history-save" aria-label="Name this version" onSubmit={submit}>
+    <form ref={ref} className="doc-history-save" aria-label="Name this version" onSubmit={submit}>
       <input autoFocus aria-label="Version name" placeholder={W.namePlaceholder} maxLength={200} value={label} onChange={(event) => setLabel(event.target.value)} />
       <div className="doc-history-save-actions">
         <Button label="Cancel" worded onClick={onDone}>
