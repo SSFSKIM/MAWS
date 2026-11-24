@@ -206,10 +206,17 @@ export function HistoryBar({ editor, preview, controller, onBack, onRestored }: 
               worded
               onClick={() => {
                 // the medium review: the keyboard on Restore while the restore runs (its confirm, Cancel with it, goes),
-                // then the document's once it lands; a failed restore leaves it on Restore
+                // then the document's once it lands; a failed restore leaves it on Restore. The second medium review: only
+                // while the restore still holds it (on Restore, or fallen to the body as the bar went), not where the
+                // person moved it meanwhile
                 setConfirming(false);
-                restoreButton.current?.focus();
-                void controller.restore().then((restored) => restored && onRestored?.());
+                const restore = restoreButton.current;
+                restore?.focus();
+                const held = () => {
+                  const at = document.activeElement;
+                  return at === null || at === document.body || at === restore || !at.isConnected;
+                };
+                void controller.restore().then((restored) => restored && held() && onRestored?.());
               }}
             >
               Restore

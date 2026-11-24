@@ -96,6 +96,12 @@ export function CommentsPanel({ doc, tabs, activeTab, activeThread, author, read
   const folded = status === 'all' ? deleted.filter((thread) => thread.status === 'open') : deleted;
   const resolvedSection = status === 'all' ? threads.filter((thread) => thread.status === 'resolved' && (thread.live || showDeleted) && inView(thread)) : [];
   const listed = [...main, ...(showDeleted ? folded : []), ...(showResolved ? resolvedSection : [])];
+  // the second medium review: under All, Deleted (N) also counts resolved threads on deleted text, which Resolved lists;
+  // opening it opens Resolved with it, so whatever it counts is shown
+  const openDeleted = () => {
+    if (!showDeleted && deleted.length > folded.length) setShowResolved(true);
+    setShowDeleted(!showDeleted);
+  };
 
   // the editor's active thread, scrolled into view when it changes (and when the panel opens on one)
   useEffect(() => {
@@ -159,7 +165,7 @@ export function CommentsPanel({ doc, tabs, activeTab, activeThread, author, read
           ...(deleted.length > 0
             ? [
                 <Tip key="deleted-toggle" content={W.deletedTip} description={W.deletedTip}>
-                  <button type="button" className="doc-rail-section" aria-expanded={showDeleted} onClick={() => setShowDeleted(!showDeleted)}>
+                  <button type="button" className="doc-rail-section" aria-expanded={showDeleted} onClick={openDeleted}>
                     {W.deleted(deleted.length)}
                     <Chevron />
                   </button>
