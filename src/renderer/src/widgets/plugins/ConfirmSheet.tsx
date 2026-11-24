@@ -75,7 +75,7 @@ export function ConfirmSheet({ request, declared, env, onConfirm, onClose }: { r
   const then = thenWords(request.action, env.readySessions);
   const catalog = declared === null && request.action === 'install' ? (request.catalog ?? null) : null;
   const addStep = catalog ? addStepOf(asked) : null;
-  const writes = (paths: { configHome: string; cwd: string }) => [...new Set([...(addStep ? writesWords(addStep, paths) : []), ...writesWords(asked, paths)])];
+  const writes = (paths: { configHome: string; cwd: string; globalConfig: string }) => [...new Set([...(addStep ? writesWords(addStep, paths) : []), ...writesWords(asked, paths)])];
   // The exact commands (the add step first) and the files they write: behind Details, except on the second sheet, where
   // the command is the decision.
   const commands = engine && (
@@ -94,7 +94,7 @@ export function ConfirmSheet({ request, declared, env, onConfirm, onClose }: { r
     <div className="flex flex-col gap-0.5 text-ui-sm text-fg-muted">
       <p className="m-0">{W.writes}</p>
       <ul aria-label={W.writes} className="m-0 list-none p-0 font-mono break-all text-fg">
-        {writes({ configHome: engine.configHome, cwd }).map((path) => (
+        {writes({ configHome: engine.configHome, cwd, globalConfig: engine.globalConfig }).map((path) => (
           <li key={path}>{path}</li>
         ))}
       </ul>

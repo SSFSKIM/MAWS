@@ -1,9 +1,11 @@
 // The E8 live run's G4 audit (E8 execution document, M3 "The live run"; parent G4; D-12): the config home's and the
 // project's `.claude/` file trees read around each CLI action, their delta, and the verdict on every changed path.
-// - A mutation may write its `writesOf` manifest (the confirm sheet's "Writes" list); a listing writes no configuration.
+// - A mutation may write its `writesOf` manifest (the confirm sheet's "Writes" list); a listing writes no configuration,
+//   the reads a mutation sets off included, which are judged after it in a window of their own (`actionAuditOf`).
 // - Any action may refresh the engine's catalogue caches and its `.claude.json` bookkeeping (D-12): `.claude.json` is
-//   read structured and judged by top-level key, so `pluginUsage` or a migration flag passes and `projects`,
-//   `mcpServers` or any other configuration key fails.
+//   read structured and judged by top-level key, so `pluginUsage` or a migration flag passes, a key the manifest
+//   announces (`declinedPlugins` for an uninstall) passes for that action, and `projects`, `mcpServers` or any other
+//   configuration key fails.
 // - The running session's own files are recognised by name; a path nobody recognises is `unclassified`, reported as a
 //   failure to classify, never exempted.
 // - A file's fingerprint is its size, mtime and content hash, so a same-content rewrite shows.
@@ -104,7 +106,8 @@ export function deltaOf(before: Files, after: Files): Delta {
 }
 
 export interface Manifest {
-  paths: string[];
+  paths: string[]; // the files' patterns, then each announced `.claude.json` key as `config/.claude.json · <key>`
+  keys: string[]; // the `.claude.json` keys the action may change (`writesOf`'s `globalConfig`)
   covers(path: string): boolean;
 }
 
@@ -122,7 +125,8 @@ export function manifestOf(action: PluginsAction, scope: PluginsScope, source: s
     const escaped = path.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/<[a-z-]+>/g, '[^/]+');
     return new RegExp(path.endsWith('/') ? `^${escaped}` : `^${escaped}$`);
   });
-  return { paths, covers: (path) => patterns.some((re) => re.test(path)) };
+  const keys = writes.globalConfig;
+  return { paths: [...paths, ...keys.map((key) => `config/.claude.json · ${key}`)], keys, covers: (path) => patterns.some((re) => re.test(path)) };
 }
 
 export type Verdict = 'manifest' | 'records (D-12)' | 'catalogue cache (D-12)' | 'session files' | 'unannounced' | 'unclassified';
@@ -134,8 +138,9 @@ const BOOKKEEPING_PATTERNS = [/MigrationComplete$/, /^hasReset[A-Z]/];
 const isBookkeeping = (key: string) => BOOKKEEPING_KEYS.has(key) || BOOKKEEPING_PATTERNS.some((re) => re.test(key));
 
 // The judged changes between two reads of `.claude.json`: per top-level key when both are objects (an absent file reads
-// as no keys), `unclassified` when either side could not be read, `unannounced` when the file was removed.
-export function claudeJsonChanges(before: ClaudeJson, after: ClaudeJson): { key: string; kind: 'records (D-12)' | 'unannounced' | 'unclassified' }[] {
+// as no keys), `manifest` for a key the action announced, `unclassified` when either side could not be read,
+// `unannounced` when the file was removed.
+export function claudeJsonChanges(before: ClaudeJson, after: ClaudeJson, announced: readonly string[] = []): { key: string; kind: 'manifest' | 'records (D-12)' | 'unannounced' | 'unclassified' }[] {
   for (const [side, read] of [['before', before], ['after', after]] as const) {
     if (read.state === 'unreadable') return [{ key: `its contents ${side} could not be read (${read.reason})`, kind: 'unclassified' }];
   }
@@ -145,7 +150,7 @@ export function claudeJsonChanges(before: ClaudeJson, after: ClaudeJson): { key:
   return [...new Set([...Object.keys(b), ...Object.keys(a)])]
     .sort()
     .filter((key) => JSON.stringify(b[key]) !== JSON.stringify(a[key]))
-    .map((key) => ({ key, kind: isBookkeeping(key) ? 'records (D-12)' : 'unannounced' }));
+    .map((key) => ({ key, kind: announced.includes(key) ? 'manifest' : isBookkeeping(key) ? 'records (D-12)' : 'unannounced' }));
 }
 
 // The running session's own files and the engine's caches outside `plugins/`, by name.
@@ -175,7 +180,7 @@ export function auditOf(before: Tree, after: Tree, manifest: Manifest | null): A
     for (const path of paths) {
       const label = `${kind} ${path}`;
       if (path === 'config/.claude.json') {
-        const keys = claudeJsonChanges(before.claudeJson, after.claudeJson);
+        const keys = claudeJsonChanges(before.claudeJson, after.claudeJson, manifest?.keys ?? []);
         if (keys.length === 0) out.lines.push(`  ${kind.padEnd(7)} ${path}   [records (D-12): rewritten, no key changed]`);
         for (const { key, kind: verdict } of keys) {
           out.lines.push(`  ${kind.padEnd(7)} ${path} · ${key}   [${verdict}]`);
@@ -191,6 +196,14 @@ export function auditOf(before: Tree, after: Tree, manifest: Manifest | null): A
     }
   }
   return out;
+}
+
+// One mutation's two windows: from before the sheet to the mutation's end (its CLI, the settle and the reload, with every
+// CLI read held back) judged against its manifest, and from there to the reads it set off (a `plugins.changed`
+// refetch, each one an engine CLI run of its own) judged as listings. One window over both would let an announced key
+// (`declinedPlugins` for an uninstall) excuse a listing that wrote it.
+export function actionAuditOf(before: Tree, ended: Tree, after: Tree, manifest: Manifest): { mutation: Audit; reads: Audit } {
+  return { mutation: auditOf(before, ended, manifest), reads: auditOf(ended, after, null) };
 }
 
 // ---- when a window closes ---------------------------------------------------------------------------------------
