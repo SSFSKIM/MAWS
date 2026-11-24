@@ -188,8 +188,9 @@ Paths are from the repository's root. `R/` is `src/renderer/src/`. A name given 
     SheetBy         'maws' | 'page' | 'desk' | 'cli'
     SheetSummary    { session, appSessionId: AppSessionId | null, title: string | null, live: boolean | null, seq, open, queued, pending, hidden,
                       oldestAskedAt: string | null, unreadable: boolean }
-    SheetPutResult  { ok: true, results: SheetSent[] } | { ok: false, why: 'unavailable' | 'no-sheet' | 'refused' | 'busy' | 'failed', message: string }
-    SheetBodyRequest { ref: string /* a reference's sha256 */ } | { upload: string /* a name under uploads/ */ } | { text: string /* a text file's sha256 */ }
+    SheetPutEntry   what the door prints for one line: { key, state: 'queued' } | { key, state: 'applied' | 'stale' | 'closed' | 'retracted' | 'too-late', kind, at, … } (loose; the verdict's own fields)
+    SheetPutResult  { ok: true, results: SheetPutEntry[] } | { ok: false, why: 'unavailable' | 'no-sheet' | 'refused' | 'busy' | 'failed', message: string }
+    SheetBodyRequest { ref: string /* a reference's sha256 */ } | { upload: string /* `uploads/<name>`, as a line names it */ } | { text: string /* a text file's sha256 */ }
     SheetBody       { kind: 'text', text: string } | { kind: 'image', mediaType: SheetImageType, data: string /* base64 */ } | { kind: 'gone' }
     SheetImageType  'image/png' | 'image/jpeg' | 'image/gif' | 'image/webp'
 
@@ -223,7 +224,9 @@ The pattern is the pin's `grammar/result.md`, matched whole against the result's
                                      dismissed: string[]; more?: true }
     export function parseSheetDeliveries(text: string): SheetDelivery[]   // every <sheet-delivery>…</sheet-delivery> of a text, each held to the pin's delivery schema; none for a text without one
 
-A reader reads the block and nothing above it (C2's I7).
+A reader reads the block and nothing above it (C2's I7). The block is held to every bound the pin's delivery schema states, and, like every record-sourced shape (S5), takes a field it does not know.
+
+`text.ts` holds strings as the sheet counts them, for every module here: `codePoints`, `cut`, `hasLoneSurrogate`, `wellFormed`.
 
 `words.ts`:
 
@@ -238,7 +241,7 @@ A reader reads the block and nothing above it (C2's I7).
 
 A draft holds what the person typed and **the revision they typed it against**. `picks` are labels, `images` are `uploads/<name>`, and `replaces` is the key of a queued answer this draft edits. A draft is never moved onto another revision by code: the revision check exists so that nobody answers wording they did not read (composite §4.2; the writer's ruling of 2026-11-24), so a draft whose revision is not the question's is kept, is shown on the rewritten card, and is neither counted nor sent until the person confirms it or edits it there, which is the only caller of `confirmDraft`.
 
-`sendOf` is one Send (the writer's ruling of 2026-11-24: one Send is one call of the door and at most fifty inbox lines; no chunking). It takes the open questions oldest first, and for each whose draft has an answer and is confirmed it adds that draft's inbox lines: one `answer`, or, where the draft has `replaces`, a `retract` of that key and then the `answer`, the two never parted. It stops before the draft whose lines would pass `SEND_MAX_LINES`. `ids` are the questions it answers, `left` the count of confirmed drafts with an answer that it did not take; they stay drafts for the next Send.
+`sendOf` is one Send (the writer's ruling of 2026-11-24: one Send is one call of the door and at most fifty inbox lines; no chunking). It takes the open questions oldest first, and for each whose draft has an answer and is confirmed it adds that draft's inbox lines: one `answer`, or, where the draft has `replaces`, a `retract` of that key and then the `answer`, the two never parted. It stops before the draft whose lines would pass `SEND_MAX_LINES`, and takes nothing after it: a later one-line draft is not slipped in ahead. An answer's `picks`, `text` and `images` are written only when not empty, and `text` only when not blank. `ids` are the questions it answers, `left` the count of confirmed drafts with an answer that it did not take; they stay drafts for the next Send.
 
 ### §C · Reading records (M1), and the service (M2)
 
@@ -248,10 +251,10 @@ A draft holds what the person typed and **the revision they typed it against**. 
 
     export const sheetRoot = (home: string): string                      // <home>/sheet
     export async function listRecords(home: string): Promise<string[]>   // the session ids with a record: every directory of the root that holds a state.json
-    export interface RecordIo { readState(path: string): Promise<unknown>; readTail(path: string, offset: number): Promise<Uint8Array>; stat(path: string): Promise<{ size: number; mtimeMs: number } | null> }
+    export interface RecordIo { entry(path: string): Promise<'directory' | 'file' | 'other' | null> /* lstat */; readState(path: string): Promise<unknown>; readTail(path: string, offset: number): Promise<Uint8Array>; stat(path: string): Promise<{ size: number; mtimeMs: number } | null> }
     export async function readRecord(home: string, session: string, io?: RecordIo): Promise<{ model: SheetModel } | { unreadable: string } | { busy: true } | null>
 
-`listRecords` skips `surfaces`, `.staging`, the `*.lock` files (C2's I1), any name `isSheetSession` does not hold for, and any entry that is not a real directory. `readRecord` refuses a session `isSheetSession` does not hold for, and is I4's step 1 around `modelOf`: `state.json`, the inbox from its offset, `state.json` again, over while `seq` moved, at most four times; if `seq` moved every time it answers `busy` and **returns no pair it did not verify** (the set's README, "A reader that cannot pair"; the command's own exit 75). Null when there is no record. `io` exists so that a test can move `seq` under the loop; it defaults to the file system. `changedOf` compares the file at a reference's `abs` with the record's `size` and `mtimeMs`, the modification time floored to a millisecond from nanoseconds (`fs.stat` with `bigint: true`: the float `mtimeMs` rounds the other way on some values), and reads a missing file as changed. A reader takes no lock and writes nothing.
+`listRecords` skips `surfaces`, `.staging`, the `*.lock` files (C2's I1), any name `isSheetSession` does not hold for, and any entry that is not a real directory. `readRecord` refuses a session `isSheetSession` does not hold for, and is I4's step 1 around `modelOf`: `state.json`, the inbox from its offset, `state.json` again, over while `seq` moved, at most four times; if `seq` moved every time it answers `busy` and **returns no pair it did not verify** (the set's README, "A reader that cannot pair"; the command's own exit 75). Null when there is no record, and when the record's directory is a link or not a directory (it is then not listed either); a `state.json` or inbox that is a link or not a regular file reads `unreadable`, as does a `state.json` whose `v` is not 1, that does not parse, or that fails the loose `SheetStateSchema` (the pin's `state.schema.json` for what the model is computed from). An `unreadable` reason names no path. `io` exists so that a test can move `seq` under the loop, and every touch of the file system goes through it; it defaults to the file system, exported as `recordIo`. `changedOf` compares the file at a reference's `abs` with the record's `size` and `mtimeMs`, the modification time floored to a millisecond from nanoseconds (`fs.stat` with `bigint: true`: the float `mtimeMs` rounds the other way on some values), and reads a missing file as changed. A reader takes no lock and writes nothing.
 
 **Confinement.** A record is `<root>/<session>` and nothing else. Before a file under it is read or written, the record's directory, and `refs/`, `uploads/` or `texts/` where one is entered, are checked with `lstat` to be real directories, and a body to be a regular file; a symbolic link or a special file at any of them is refused, as the door refuses a linked `uploads/` and a file that is not regular. A name a caller gives (an upload's) is held to the line schema's pattern and so has no separator.
 
@@ -321,7 +324,7 @@ S2 is its contract. `env` of the result is the login shell's environment with `S
 
     export function putLines(cli: SminosCli, session: string, lines: readonly SheetLine[], timeoutMs: number): Promise<SheetPutResult>
 
-It runs `[cli.path, 'sheet', 'put', '--session', session]` with `execFile`, no shell, the inbox lines as compact JSON on standard input, one a line. Exits, as C2's I3 and the set's README give them: 0, the object on standard output is `{ session, results }` and each result is a `SheetSent` with state `queued` or a verdict; 2 is `refused` with the first line of standard error (a line the door would not take: nothing was appended); 3 is `no-sheet`; 75 is `busy`; 1 (the inbox could not be written, and nothing was appended), any other exit, a timeout and output that is not the object are `failed`. After `busy` or `failed` a surface sends **the same inbox lines again, under the same keys**: after a timeout nobody knows whether the lines were appended, and the key is what makes a resend the same act (composite §4.2).
+It runs `[cli.path, 'sheet', 'put', '--session', session]` with `execFile`, no shell, the inbox lines as compact JSON on standard input, one a line. Exits, as C2's I3 and the set's README give them: 0, the object on standard output is `{ session, results }` and each result is a `SheetPutEntry`: `{ key, state: 'queued' }` for a line with no verdict yet, or the verdict the session's bridge gave, its `state` the verdict's name (`applied`, not a `SheetSentState`, for an applied line); a surface reads what became of an act from the model's `sent` (S15), never from this; 2 is `refused` with the first line of standard error (a line the door would not take: nothing was appended); 3 is `no-sheet`; 75 is `busy`; 1 (the inbox could not be written, and nothing was appended), any other exit, a timeout and output that is not the object are `failed`. After `busy` or `failed` a surface sends **the same inbox lines again, under the same keys**: after a timeout nobody knows whether the lines were appended, and the key is what makes a resend the same act (composite §4.2).
 
 `test/support/fake-sminos-cli.mjs`, the stand-in door, is an executable Node script that unit tests and e2e launches name in `MAWS_SMINOS_CLI`. It answers the probe with exit 3. For `sheet put` it validates nothing, appends the inbox lines to `<SMINOS_HOME>/sheet/<session>/inbox.jsonl` with `at` and one `batch`, and prints `queued` for each. Its knobs:
 
