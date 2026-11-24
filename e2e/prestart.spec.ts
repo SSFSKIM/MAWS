@@ -11,7 +11,8 @@
 //   2. A model picked before Send relaunches the prestart with it; Send takes the relaunched engine, the one left running
 //      (A3, D6).
 //   3. A chat emptied and closed: its engine ends and leaves no file (A4, D9).
-//   4. A draft restored by a relaunch starts nothing until the person edits it (D10).
+//   4. A draft restored by a relaunch, and again by a reload, asks for no prestart and starts nothing until the person
+//      edits it (D10); the composer's requests are counted where main receives them.
 //   5. The held Tools pick of e2e/sessions.spec.ts with the prestart on: the choice still being written when Send is
 //      pressed is the launch's, the prestart made before it is not taken, and one engine runs (A3).
 // The machine menu's pick of another machine, which withdraws the prestart (D8), needs a second machine: it is
@@ -22,9 +23,9 @@ import { join } from 'node:path';
 import { expect, test, type Page } from '@playwright/test';
 import { writeLatencyEngine } from '../test/support/latency-engine';
 import { invoke, value } from './support/c7-replay';
-import { launchMaws, type MawsLaunch } from './support/launch';
+import { launchMaws, onLaunched, type MawsLaunch } from './support/launch';
 import { killScratchProcesses } from './support/processes';
-import { adoptedPrestart, composer, engineRunning, journalFiles, newChatTab, runningEngines, spawnRowOf, startedEngines } from './support/prestart';
+import { adoptedPrestart, composer, engineRunning, journalFiles, newChatTab, runningEngines, spawnRowOf, startedEngines, tapPrestartRequests, type PrestartTap } from './support/prestart';
 import { expectNewChatInFront } from './support/screen-reader-only';
 
 test.describe.configure({ timeout: 180_000 });
@@ -183,21 +184,30 @@ test('a draft a relaunch restores starts nothing until the person edits it; the 
   await expect.poll(async () => JSON.stringify(value(await invoke(first.page, 'session.intent.get', { appSessionId: id as never }))!.draft), { message: 'the draft written' }).toContain('half a thought');
   await prestarted(s);
   // the app quit and every process of the profile ended (its mawsd holds the spine, and the prestart dies with the
-  // connection that asked for it), then the app launched again over the profile
+  // connection that asked for it), then the app launched again over the profile, the composer's prestart requests
+  // counted from the launch on
   await first.cleanup();
   launches.splice(launches.indexOf(first), 1);
   await expect.poll(() => runningEngines(s.startsFile), { timeout: END_MS, message: 'nothing of the first launch runs' }).toEqual([]);
-  const second = await launch(s);
+  const taps: PrestartTap[] = [];
+  const second = await onLaunched((app) => void taps.push(tapPrestartRequests(app)), () => launch(s));
+  const requests = async () => (await taps[0]!.calls(id)).requests.length;
   const page = second.page;
   await expectNewChatInFront(page, project, { message: 'the chat with its draft is back in front' });
   await expect(composer(page), 'its draft is back in the composer').toHaveText('half a thought');
-  // a window for a start the restore might make (none may): the restored composer has loaded and told its spine
-  // whatever it tells at a load
-  await page.waitForTimeout(3_000);
+  // the restored composer has told main all it tells at its load once a later invoke of the page is answered
+  value(await invoke(page, 'session.intent.get', { appSessionId: id as never }));
+  expect(await requests(), 'the restore asked for no prestart').toBe(0);
+  // the page reloaded with the tap certainly armed: the composer restores the draft again and still asks for none
+  await page.reload();
+  await expect(composer(page), 'its draft is back after the reload').toHaveText('half a thought', { timeout: 30_000 });
+  value(await invoke(page, 'session.intent.get', { appSessionId: id as never }));
+  expect(await requests(), 'the reloaded restore asked for no prestart').toBe(0);
   expect(startedEngines(s.startsFile), 'the restored draft started nothing').toHaveLength(1);
   await composer(page).click();
   await page.keyboard.press('End');
   await page.keyboard.type(', then the rest');
+  await expect.poll(requests, { message: 'the edit asks for the prestart' }).toBe(1);
   await prestarted(s, 2);
   expect(second.consoleErrors()).toEqual([]);
 });

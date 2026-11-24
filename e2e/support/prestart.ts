@@ -2,10 +2,10 @@
 // D14 and A1 to A4): a New chat tab of a project opened from its row's "+", its composer, the engine processes the
 // latency stub counted (test/support/latency-engine-stub.mjs's starts file) and whether each still runs, and whether a
 // session's journal says Send took a prestarted engine (the host journals `meta {event: 'prestart', phase: 'revealed'}`
-// at the commit, src/engine-host/session.ts).
+// at the commit, src/engine-host/session.ts), and the composer's prestart requests as main receives them.
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { type Locator, type Page } from '@playwright/test';
+import { type ElectronApplication, type Locator, type Page } from '@playwright/test';
 import { startsOf, type LatencyEngineStart } from '../../test/support/latency-engine';
 import { invoke, value } from './c7-replay';
 import { isAlive, ps } from './processes';
@@ -62,3 +62,53 @@ export function spawnRowOf(userData: string, appSessionId: string, launchId: str
   const row = journalRows(userData, appSessionId).find((r) => r.direction === 'meta' && r.frame.event === 'spawn' && r.frame.launchId === launchId);
   return (row?.frame as { args?: string[]; mawsTools?: unknown } | undefined) ?? null;
 }
+
+// The composer's prestart requests (`session.intent.prestart`) and withdraws (`session.intent.prestart.withdraw`), each
+// as main receives it, by intent and in order, with main's clock at its arrival. The page cannot count them, its bridge
+// being frozen under contextIsolation, so main's invoke handlers for the two commands are wrapped where Electron keeps
+// them (`ipcMain._invokeHandlers`), as e2e/support/plugins-live.ts's read tracker wraps its own; a handler the router
+// registers after the tap is armed is wrapped too, so a tap armed as the app launches (`onLaunched`) is in place before
+// the window's page loads. Main receives one page's invokes in the order they were sent, so once an invoke the page makes
+// later is answered, every request it made before has been counted.
+export interface PrestartTap {
+  armed: Promise<void>;
+  calls(appSessionId: string): Promise<{ requests: number[]; withdraws: number[] }>; // arrivals, main's clock, ms
+}
+type TapCall = { kind: 'request' | 'withdraw'; appSessionId: string | null; at: number };
+const TAPPED = { 'maws:cmd:session.intent.prestart': 'request', 'maws:cmd:session.intent.prestart.withdraw': 'withdraw' } as const;
+
+export function tapPrestartRequests(app: ElectronApplication): PrestartTap {
+  const armed = app.evaluate(({ ipcMain }, channels) => {
+    type Handler = ((event: unknown, ...args: unknown[]) => unknown) & { prestartTap?: true };
+    const handlers = (ipcMain as unknown as { _invokeHandlers?: Map<string, Handler> })._invokeHandlers;
+    if (!handlers) throw new Error('ipcMain keeps no _invokeHandlers map: the prestart tap cannot wrap main’s handlers');
+    const calls: TapCall[] = [];
+    (globalThis as unknown as { __prestartTap: TapCall[] }).__prestartTap = calls;
+    const wrap = (channel: keyof typeof channels, handler: Handler): Handler => {
+      if (handler.prestartTap) return handler;
+      const tapped: Handler = (event, ...args) => {
+        const input = args[0] as { appSessionId?: unknown } | undefined;
+        calls.push({ kind: channels[channel], appSessionId: typeof input?.appSessionId === 'string' ? input.appSessionId : null, at: Date.now() });
+        return handler(event, ...args);
+      };
+      tapped.prestartTap = true;
+      return tapped;
+    };
+    const set = handlers.set.bind(handlers);
+    handlers.set = (channel, handler) => set(channel, channel in channels ? wrap(channel as keyof typeof channels, handler) : handler);
+    for (const channel of Object.keys(channels)) {
+      const handler = handlers.get(channel);
+      if (handler) handlers.set(channel, handler);
+    }
+  }, TAPPED);
+  void armed.catch(() => undefined); // its failure is the reader's to throw, not an unhandled rejection meanwhile
+  return {
+    armed,
+    calls: async (appSessionId) => {
+      await armed;
+      const calls = (await app.evaluate(() => (globalThis as unknown as { __prestartTap: TapCall[] }).__prestartTap)).filter((call) => call.appSessionId === appSessionId);
+      return { requests: calls.filter((call) => call.kind === 'request').map((call) => call.at), withdraws: calls.filter((call) => call.kind === 'withdraw').map((call) => call.at) };
+    },
+  };
+}
+
