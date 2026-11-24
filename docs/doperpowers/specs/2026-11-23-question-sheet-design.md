@@ -446,9 +446,9 @@ The observable state that closes the unit as a whole; each item is observed in t
   - *G2, live:* for a terminal session on this machine with the sheet on, Acceptance 7's drawing holds in the app (nothing opens by itself; the row's lines; Open shows the side sheet at the question; the receipt), an answer sent in the app reaches the agent, three answers of one Send arrive together, and a stopped session's questions show; a withdrawn question's card disappears and its row reads "Withdrawn" (Acceptance 16); of two windows answering the same question, the second reads that it was already answered (Acceptance 19).
 - **Edges:** blocked-by: C2.G1 for G1; C2.G2 for G2. blocks: C4, C5, C6.
 - **Contracts:** owner of X5; consumer of X1, X2, X3, X7.
-- **Design inheritance:** §3 (readers read the file), §4.3, §8 (the card, the sheet), §8.1 [binding], U1's sections named in the header. Advisory: the row's compact lines are drawn within the row model of pull request #852 (`ux-wave/retire-tool-card`: a standalone tool call is a quiet line with a chevron, no bordered card), not merged at this pin, so the child builds on it once it lands; where the reader runs (`mawsd`'s spine, beside the terminal-session driver in `src/services/lane-a/`), and whether MAWS reaches the writer through the `sminos` command or the sminos daemon's socket (`src/endpoint/rl10/`): C2 and C3 settle it between them and record it under X2.
+- **Design inheritance:** §3 (readers read the file), §4.3, §8 (the card, the sheet), §8.1 [binding], U1's sections named in the header. Advisory: the row's compact lines are drawn within the row model of board ticket #852 (`ux-wave/retire-tool-card`: a standalone tool call is a quiet line with a chevron, no bordered card), not merged at this pin, so the child builds on it once it lands; where the reader runs (`mawsd`'s spine, beside the terminal-session driver in `src/services/lane-a/`), and whether MAWS reaches the writer through the `sminos` command or the sminos daemon's socket (`src/endpoint/rl10/`): C2 and C3 settle it between them and record it under X2.
 - **Required:** required.
-- **Status:** not-dispatched (blocked-by C2.G1).
+- **Status:** in-flight: its execution document is being written against C2.G1's set as published in doperpowers pull request #628 (branch `question-sheet-c3`); its build waits on that pull request's merge.
 
 ### C4: The local page — plan
 
@@ -547,8 +547,8 @@ Tickets are on MAWS's board, children of #600.
 |---|---|---|
 | C0 engine probes (#865) | verdicts in §12 and the sections it names; `spikes/protocol-probe/findings-qsheet-c0.txt` and `fixtures/qsheet/`, pull request #874 | landed: master `90ce5c017`; ticket closed with the findings |
 | C1 behaviour baseline (#866) | ledger in doperpowers `docs/doperpowers/ledgers/`; the evals under `tests/output-styles/` | in-flight |
-| C2 the sheet in sminos (#867) | execution document in doperpowers `docs/doperpowers/plans/2026-11-23-question-sheet-c2-sminos.md` (branch `question-sheet-c2`, reviewed twice, at `198dff493`) | in-flight: M1 (G1) dispatched |
-| C3 the sheet in the MAWS app (#868) | execution document in `docs/doperpowers/plans/` | not-dispatched |
+| C2 the sheet in sminos (#867) | execution document in doperpowers `docs/doperpowers/plans/2026-11-23-question-sheet-c2-sminos.md` (branch `question-sheet-c2`, reviewed twice, at `198dff493`) | in-flight: M1 (G1) built, doperpowers pull request #628 under its high-rung review |
+| C3 the sheet in the MAWS app (#868) | execution document `docs/doperpowers/plans/2026-11-23-question-sheet-c3-maws-app.md` (branch `question-sheet-c3`) | in-flight: the document being written |
 | C4 the local page (#869) | execution document in `docs/doperpowers/plans/` | not-dispatched |
 | C5 MAWS-run sessions (#870) | execution document in `docs/doperpowers/plans/` | not-dispatched |
 | C6 the phone and other machines (#871) | its own cut at dispatch | not-dispatched (deliberately late) |
