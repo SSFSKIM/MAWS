@@ -38,6 +38,7 @@ How to see it working: open the build beside today's build on the same fixtures 
 - [x] (2026-11-23) M4's reviews and the owner's call: an xhigh panel on the range (18 findings, 12 fixed, 1 logged, 5 dismissed); a pair review of the before/after pictures, whose six layout defects were fixed and photographed again; a medium review of those fixes (3 findings, fixed). The owner approved the pictures on 2026-11-23. M4's rig launch became launch 14 when the report view repair (board ticket 850) landed its own launch 13 first.
 - [x] (2026-11-24 07:40Z) M5 task 1: the library and an opened artifact, with the one saved wording, reviewed clean.
 - [x] (2026-11-24 07:00Z) M5 task 2: the document editor and the dashboard editor, reviewed clean (one rare finding logged under the stop rule).
+- [x] (2026-11-24 08:20Z) M5 task 6: the rig's scenes for the library, an opened artifact, the document and the dashboard, reviewed clean and merged.
 - [ ] M5: the cut built area by area, each with pictures and the owner's call.
 - [ ] Retrospective.
 
@@ -538,6 +539,13 @@ Kept by the session that wrote this document (sminos alias `design-experiment`, 
   - The source sheet takes focus when it opens, and its wait line holds its height from the start.
   - Rows that only reword a tooltip (G364, G368, G391) keep the system `title`, as on master (board ticket 815).
   - The live block's pause sentences (`LIVE_COPY.detail`) are long help sentences no row covers. They are left as they are.
+- 2026-11-24. **M5 task 6: the rig's scenes for the library, an opened artifact, the document and the dashboard.** The rig gains 42 `m5-` scenes, 349 in all.
+  - Placement. Six scenes join launch 2, among them `m5-library-head-more` (G289's More menu with the library head) and `m5-library-kind` (G287's funnel with a kind chosen). The other 36 are in a new launch 15 on a fresh profile.
+  - Fixtures. Launch 15 makes each fixture the first time a scene needs it, so a failed setup leaves only that fixture's scenes unreached, each carrying "setting up <fixture> failed: …". The fixtures are: a seeded document with a table, a callout and four comment threads (`e2e/support/words-doc.ts`, with fixed ids, times and clients, through `PerfSeam.seed`); a blank document; a document and a dashboard in the old formats; a dashboard over two CSV sources; an empty dashboard; an HTML page in two versions; the bench deck and the design; a linked Space; and an agent's draft. The two saves type into fixtures of their own, so no other scene's page holds what they typed.
+  - Proof of build. `m5Build` reads the build from the library head's funnel or from an editor's saved state, so launches 2, 4 and 15 open the library first. Eleven existing scenes that show M5 surfaces now check the build before capture.
+  - Version and edit times are wall-clock and differ between runs. For a picture pair that is incidental, and no clock seam is added.
+  - Coverage. 70 of the 134 rows in these areas have a scene. The other 64 are listed in `scenes.md`'s "M5's states with no scene" with the state each needs (board ticket 816).
+  - Placement on a branch. The task ran on the side branch `ux-wave/word-cut-m5-rig` and was merged at `52ad311ce`.
 
 ## Outcomes & Retrospective
 
