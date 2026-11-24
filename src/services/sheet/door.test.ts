@@ -5,7 +5,7 @@
 import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { SheetLine } from '@shared/sheet/model';
 import { FAKE_SMINOS, seedRecord, stageOutcome } from '../../../test/support/sheet-records';
 import { DOOR_NOT_STARTED, putLines } from './door';
@@ -92,6 +92,29 @@ describe('putLines', () => {
     const { home, cli } = door({ FAKE_SMINOS_BARRIER: join(tempDir(), 'never') });
     const session = seedRecord(home, 'two-surfaces');
     expect(await putLines(cli, session, [answer('maws-0000000001', ['Yes'])], 400)).toMatchObject({ ok: false, why: 'failed' });
+  });
+
+  it('answers failed at its bound when the command ignores SIGTERM, and kills it after a short grace', async () => {
+    const { home, cli } = door();
+    const session = seedRecord(home, 'two-surfaces');
+    const pidFile = join(tempDir(), 'pid');
+    const stubborn = join(tempDir(), 'sminos');
+    writeFileSync(stubborn, `#!/bin/sh\ntrap '' TERM\necho $$ > "${pidFile}"\nexec sleep 30\n`); // the pid written once TERM is ignored
+    chmodSync(stubborn, 0o755);
+    const asked = Date.now();
+    expect(await putLines({ ...cli, path: stubborn }, session, [answer('maws-0000000001', ['Yes'])], 1000)).toMatchObject({ ok: false, why: 'failed' });
+    expect(Date.now() - asked).toBeLessThan(1400);
+    const pid = Number(readFileSync(pidFile, 'utf8'));
+    const alive = () => {
+      try {
+        process.kill(pid, 0);
+        return true;
+      } catch {
+        return false;
+      }
+    };
+    await vi.waitFor(() => expect(alive()).toBe(false), { timeout: 3000, interval: 50 });
+    expect(inboxOf(home, session)).toEqual([]);
   });
 
   it('reads output that is not the door’s object as failed', async () => {

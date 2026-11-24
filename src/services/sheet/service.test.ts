@@ -144,15 +144,16 @@ describe('following records', () => {
     seedRecord(t.home, 'two-surfaces');
     await vi.waitFor(() => expect(of(t.emitted, TWO)).toHaveLength(1));
     const model = await t.service.read(TWO);
+    await vi.waitFor(() => expect(of(t.emitted, TWO)).toHaveLength(2)); // the read's probe found the door: announced
     moving = true;
     appendFileSync(join(t.record(TWO), 'inbox.jsonl'), `${JSON.stringify({ ...answer('cli-00000001', ['Yes'], 'cli'), at: '2026-11-23T10:00:00.000Z' })}\n`);
     const before = reads;
     await vi.waitFor(() => expect(reads).toBeGreaterThanOrEqual(before + 16)); // two busy reads of eight
-    expect(of(t.emitted, TWO)).toHaveLength(1);
+    expect(of(t.emitted, TWO)).toHaveLength(2);
     expect(await t.service.read(TWO)).toEqual(model); // busy again: the last verified model
     moving = false;
-    await vi.waitFor(() => expect(of(t.emitted, TWO)).toHaveLength(2)); // read again at a later tick, with no file event
-    expect(of(t.emitted, TWO)[1]!.summary).toMatchObject({ queued: 1 });
+    await vi.waitFor(() => expect(of(t.emitted, TWO)).toHaveLength(3)); // read again at a later tick, with no file event
+    expect(of(t.emitted, TWO)[2]!.summary).toMatchObject({ queued: 1 });
   });
 
   it('summarises a record this build cannot read as unreadable, and reads no model of it', async () => {
@@ -248,6 +249,34 @@ describe('when the door is found', () => {
     expect(await handlers.invoke('sheet.read', { session: TWO })).toMatchObject({ model: { session: TWO } });
     await vi.waitFor(() => expect(t.service.door()).toEqual({ known: true, available: true }));
     expect(t.ran()).toEqual([install]);
+  });
+
+  it('tells the windows when the probe behind a read moves the door, with no file changed and no read asked', async () => {
+    const dir = tempDir();
+    const cli = join(dir, 'sminos');
+    cpSync(FAKE_SMINOS, cli);
+    chmodSync(cli, 0o644); // found, and it does not start: unavailable
+    const t = start({ named: cli });
+    seedRecord(t.home, 'two-surfaces');
+    await vi.waitFor(() => expect(of(t.emitted, TWO)).toHaveLength(1));
+    const summary = of(t.emitted, TWO)[0]!.summary;
+    const handlers = wire(t.service);
+    let heard = 0;
+    t.service.onChange(() => void (heard += 1));
+    expect(await handlers.invoke('sheet.read', { session: TWO })).toMatchObject({ door: { known: false } });
+    await vi.waitFor(() => expect(of(t.emitted, TWO)).toHaveLength(2)); // the probe ended: the record announced again, as it was
+    expect(of(t.emitted, TWO)[1]!.summary).toEqual(summary);
+    expect(heard).toBe(0); // to the windows only: no record changed
+    expect(await handlers.invoke('sheet.list', {})).toMatchObject({ door: { known: true, available: false } });
+    chmodSync(cli, 0o755);
+    expect(await t.service.put(TWO, [answer('maws-00000001', ['Yes'])])).toMatchObject({ ok: true }); // a later probe succeeds
+    expect(of(t.emitted, TWO)[2]!.summary).toEqual(summary); // the door's move, announced before the put's line
+    await vi.waitFor(() => expect(of(t.emitted, TWO).at(-1)?.summary).toMatchObject({ queued: 1 }));
+    expect(await handlers.invoke('sheet.list', {})).toMatchObject({ door: { known: true, available: true } });
+    const before = t.emitted.length;
+    await t.service.read(TWO); // known available: nothing located, nothing announced
+    await sleep(100);
+    expect(t.emitted.slice(before)).toEqual([]);
   });
 
   it('answers a read at once while the probe hangs, the door as it stood, and lets the probe end behind it', async () => {

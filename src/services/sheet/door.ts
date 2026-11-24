@@ -23,17 +23,36 @@ export type SminosRun =
 
 const OUTPUT_MAX = 4 * 1024 * 1024; // the door prints one result per line it took, at most fifty
 
-/** Runs the command once, with `input` on standard input, killed at `timeoutMs`. Never rejects. */
+const KILL_GRACE_MS = 500; // after the bound's SIGTERM, how long the command has before SIGKILL
+
+/**
+ * Runs the command once, with `input` on standard input. At `timeoutMs` it answers timed out whatever the command does,
+ * sends it SIGTERM, and SIGKILL after a short grace: a launcher that ignores SIGTERM, or a child of it that holds the
+ * pipes open, does not hold the caller past its bound. Never rejects.
+ */
 export function runSminos(cli: Pick<SminosCli, 'path' | 'env'>, args: readonly string[], input: string, timeoutMs: number): Promise<SminosRun> {
   return new Promise((resolve) => {
-    const child = execFile(cli.path, args, { env: cli.env, timeout: timeoutMs, maxBuffer: OUTPUT_MAX, encoding: 'utf8', windowsHide: true }, (error, stdout, stderr) => {
-      if (error === null) return resolve({ started: true, code: 0, timedOut: false, stdout, stderr });
+    let settled = false; // `settle` runs only from callbacks, after `bound` is set
+    const settle = (run: SminosRun) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(bound);
+      resolve(run);
+    };
+    const child = execFile(cli.path, args, { env: cli.env, maxBuffer: OUTPUT_MAX, encoding: 'utf8', windowsHide: true }, (error, stdout, stderr) => {
+      if (error === null) return settle({ started: true, code: 0, timedOut: false, stdout, stderr });
       const code = (error as NodeJS.ErrnoException & { code?: unknown }).code;
       // A spawn failure carries the system's code (`ENOENT`, `EACCES`); an exit, its number.
-      if (typeof code === 'string' && child.pid === undefined) return resolve({ started: false });
-      const timedOut = (error as { killed?: boolean }).killed === true && child.exitCode === null;
-      resolve({ started: true, code: typeof code === 'number' ? code : null, timedOut, stdout, stderr });
+      if (typeof code === 'string' && child.pid === undefined) return settle({ started: false });
+      settle({ started: true, code: typeof code === 'number' ? code : null, timedOut: false, stdout, stderr });
     });
+    const bound = setTimeout(() => {
+      settle({ started: true, code: null, timedOut: true, stdout: '', stderr: '' });
+      child.kill('SIGTERM');
+      setTimeout(() => {
+        if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL');
+      }, KILL_GRACE_MS).unref();
+    }, timeoutMs);
     child.stdin?.on('error', () => {}); // a command that exits before reading its input closes the pipe: its exit says why
     child.stdin?.end(input);
   });

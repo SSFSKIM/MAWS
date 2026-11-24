@@ -122,6 +122,20 @@ describe('watchSheet', () => {
     off();
   });
 
+  it('takes the door’s move from the read an unchanged summary’s announcement starts', async () => {
+    const fake = fakeClient();
+    const off = connectSheets(fake.client);
+    await fake.reply('sheet.list', { sessions: [summary(A)], door: { known: false } });
+    const unwatch = watchSheet(A);
+    await fake.reply('sheet.read', { model: model(A, 1), door: { known: false } });
+    fake.event('sheet.changed', { session: A, summary: summary(A) }); // the service's probe ended: the record as it was
+    expect(useSheets.getState().summaries.get(A)).toEqual(summary(A));
+    await fake.reply('sheet.read', { model: model(A, 1), door: { known: true, available: false, reason: 'No sminos is installed.' } });
+    expect(useSheets.getState().door).toEqual({ known: true, available: false, reason: 'No sminos is installed.' });
+    unwatch();
+    off();
+  });
+
   it('keeps the later read’s model when two reads of one session finish in the other order', async () => {
     const fake = fakeClient();
     const off = connectSheets(fake.client);

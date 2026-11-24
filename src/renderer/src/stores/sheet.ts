@@ -23,7 +23,7 @@ import type { SheetModel, SheetSummary } from '@shared/sheet/model';
 export interface SheetsState {
   summaries: ReadonlyMap<string, SheetSummary>; // by the engine's session id
   models: ReadonlyMap<string, SheetModel | null>; // the sessions watched; null: read, and no record (or not one this build reads)
-  door: DoorState;
+  door: DoorState; // from the last list or read; the service announces every record it holds when the door moves, so a watched one is read again
 }
 
 const empty = (): SheetsState => ({ summaries: new Map(), models: new Map(), door: { known: false } });

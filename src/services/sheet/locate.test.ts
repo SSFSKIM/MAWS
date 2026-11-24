@@ -178,6 +178,18 @@ describe('locateSminos: the probe', () => {
     expect(await locateSminos(m.deps({ env: { MAWS_SMINOS_CLI: 'relative/sminos' } }))).toMatchObject({ ok: false, reason: 'not-runnable' });
   });
 
+  it('answers a probe that ignores SIGTERM as not runnable at its bound, so the locator is not held past it', async () => {
+    const m = machine();
+    const stubborn = join(m.root, 'f', 'sminos');
+    mkdirSync(join(stubborn, '..'));
+    writeFileSync(stubborn, "#!/bin/sh\ntrap '' TERM\necho \"$0\" >> \"$FAKE_SMINOS_RAN\"\nexec sleep 30\n");
+    chmodSync(stubborn, 0o755);
+    const asked = Date.now();
+    expect(await locateSminos(m.deps({ env: { MAWS_SMINOS_CLI: stubborn }, probeMs: 1000 }))).toMatchObject({ ok: false, reason: 'not-runnable' });
+    expect(Date.now() - asked).toBeLessThan(1400);
+    expect(m.ran()).toEqual([stubborn]); // it did start, and ignored the TERM
+  });
+
   it('proves a command once by its path and modification time, and again when the time moves or the proof is dropped', async () => {
     const m = machine();
     const path = stub(join(m.root, 'own', 'sminos'), 3);

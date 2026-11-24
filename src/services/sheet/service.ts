@@ -69,6 +69,7 @@ const sameFacts = (a: Facts, b: Facts): boolean => a.appSessionId === b.appSessi
 const refused = (message: string): SheetPutResult => ({ ok: false, why: 'refused', message });
 const NO_SHEET: SheetPutResult = { ok: false, why: 'no-sheet', message: 'This session has no question sheet on this Mac.' };
 const OUT_OF_TIME: SheetPutResult = { ok: false, why: 'failed', message: 'The sminos command did not answer in time; send again.' };
+const sameDoor = (a: DoorState, b: DoorState): boolean => JSON.stringify(a) === JSON.stringify(b); // each built here, keys in one order
 // Something a person could act on: an open question, or a dismissal they could take back.
 const answerable = (model: SheetModel): boolean => model.open.length > 0 || model.hidden.length > 0;
 
@@ -251,12 +252,22 @@ export function createSheetService(deps: SheetServiceDeps): SheetService {
     });
   });
 
+  // A move of the door's state reaches the windows as an announcement of every record held, its summary as it was: a
+  // window re-reads what it watches and takes the door from that read, and the next list carries it. Only the windows
+  // hear it; nothing of a record changed, so the service's own listeners (§H) do not.
+  const announceDoor = () => {
+    if (stopped) return;
+    for (const [session, entry] of entries) deps.emit('sheet.changed', { session, summary: entry.summary });
+  };
+
   // The door's state, located again only while it is not known to be available, or at a put; one location at a time,
   // its probe bounded by `probeMs` (less when a put has less left).
   function locate(probeMs = timing.probeMs): Promise<Located> {
     locating ??= (async () => {
       const located = await locateSminos({ env: deps.env, shell: await deps.shell, configHome: await deps.configHome, home: home!, proofs, probeMs, ...deps.locate });
+      const was = doorState;
       doorState = located.ok ? { known: true, available: true } : { known: true, available: false, reason: located.detail };
+      if (!sameDoor(was, doorState)) announceDoor();
       return located;
     })().finally(() => {
       locating = null;
