@@ -157,7 +157,7 @@ export interface IntentAttempt {
 
 // P5 O7 M9: an attempt's route as a launch's fields; a machine route keeps the intent's legacy field, which the launch
 // rewrites from the resolved base URL (machine-route.ts)
-export const attemptRoute = (intent: SetupIntent, attempt: IntentAttempt): { route: Route; gateway: 'gateway' | 'direct' } => ({ route: attempt.route, gateway: attempt.route === 'machine' ? intent.gateway : attempt.route });
+const attemptRoute = (intent: SetupIntent, attempt: IntentAttempt): { route: Route; gateway: 'gateway' | 'direct' } => ({ route: attempt.route, gateway: attempt.route === 'machine' ? intent.gateway : attempt.route });
 
 export async function runIntentSetup(s: Setup, appSessionId: AppSessionId, attempt: IntentAttempt): Promise<void> {
   const run = new IntentRun(s, appSessionId);
