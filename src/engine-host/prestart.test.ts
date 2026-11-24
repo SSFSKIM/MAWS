@@ -3,7 +3,7 @@
 // host: `holder`, `promote`). What a hidden row emits, lists and writes; what cancels an admission before it spawns;
 // adopt and its refusals; the kill and its files. The session host's own promotion and a successor's reading of a
 // promoted launch are holder/prestart-hosted.test.ts's.
-import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs';
+import { chmodSync, existsSync, mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -23,7 +23,7 @@ import { RELAY_URL } from './launch';
 import type { Promotion } from './transport';
 import { Normalizer } from './normalizer'; // M2's review, finding 11
 import { launchRows } from './holder/restore';
-import { prestartIo } from './prestart'; // M2's review, finding 4
+import { prestartIo, Stage, StagedJournal } from './prestart'; // M2's review, finding 4; the panel's scalpel-2#7
 import { FileSessionStateStore } from './store/file-session-state-store';
 import { MemorySessionStateStore } from './store/memory-session-state-store';
 import type { SessionStateStore } from '@shared/engine/session-state-store';
@@ -91,9 +91,15 @@ function engineHost(opts: HostOpts = {}) {
   };
   const transports: ScriptedTransport[] = [];
   const promotions: number[] = [];
+  const exitHeld = new Set<ScriptedTransport>(); // engines whose exit the test holds (`holdExit`)
+  const respond = autoResponder(opts.responder ?? handshakeResponder({ initialize: () => ({ response: { ...INIT_RESPONSE, models: MODELS } }) }));
   const spawn = () => {
     const t = scriptedTransport({
-      onWrite: autoResponder(opts.responder ?? handshakeResponder({ initialize: () => ({ response: { ...INIT_RESPONSE, models: MODELS } }) })),
+      onWrite: (frame, transport) => {
+        respond(frame, transport);
+        // the engine exits on end_session, as the real one does (pass3/end-session-archive)
+        if (frame.type === 'control_request' && frame.request.subtype === 'end_session' && !exitHeld.has(transport)) queueMicrotask(() => transport.exit(0));
+      },
       pid: 5000 + transports.length,
       ...(opts.hosted && { holder: { pid: 6000 + transports.length, holderId: `holder-${transports.length}`, fence: 1 } }),
     });
@@ -107,10 +113,19 @@ function engineHost(opts: HostOpts = {}) {
     const kill = t.kill.bind(t);
     t.kill = (signal) => {
       kill(signal);
-      t.exit(null, signal);
+      if (!exitHeld.has(t)) t.exit(null, signal);
     };
     transports.push(t);
     return t;
+  };
+  // The engine at `index` ignores end_session and the ladder's signals until the release, which exits it
+  const holdExit = (index: number): (() => void) => {
+    const t = transports[index]!;
+    exitHeld.add(t);
+    return () => {
+      exitHeld.delete(t);
+      t.exit(null, 'SIGTERM');
+    };
   };
   const ipc = registerEngineIpc(on, emit, {
     userData, replayEnabled: false, log: () => {}, spawn, captureEnv: async () => ({ PATH: '/usr/bin:/bin' }), checkRelay: async () => OK_RELAY,
@@ -130,7 +145,7 @@ function engineHost(opts: HostOpts = {}) {
   const events = (id: string): SessionEvent[] => of(id).filter((e) => e.name === 'session.eventBatch').flatMap((e) => (e.payload as { events: SessionEvent[] }).events);
   const prestart = (id: string, over: { spec?: Partial<LaunchSpec>; key?: string; owner?: string } = {}, ctx?: HandlerContext) =>
     call('session.prestart', { spec: spec(id, over.spec), key: over.key ?? 'key-1', owner: over.owner ?? OWNER }, ctx);
-  return { ipc, call, emitted, named, of, events, transports, promotions, conn, prestart, handlers, hiddenReserved };
+  return { ipc, call, emitted, named, of, events, transports, promotions, conn, prestart, handlers, hiddenReserved, holdExit };
 }
 
 async function until(check: () => boolean, what: string, ms = 10_000): Promise<void> {
@@ -456,13 +471,12 @@ describe('adopt', () => {
     await host.prestart('app-p');
     await hiddenReady(host, 'app-p');
     const row = host.ipc.table.getAny('app-p' as AppSessionId)!;
-    const t = host.transports[0]!;
-    t.kill = (signal) => void t.calls.push(`kill:${signal}`); // the ladder waits: no exit comes
+    const release = host.holdExit(0); // the ladder waits: no exit comes
     void row.stop('stop', { graceMs: 2_000 });
     await until(() => row.lifecycle === 'exiting', 'in its ladder');
     expect(await host.call('session.launch', { spec: spec('app-p'), adopt: { key: 'key-1' } })).toMatchObject({ status: 'launching' });
     await until(() => host.transports.length === 2, 'a fresh engine');
-    t.exit(null, 'SIGTERM');
+    release();
   });
 
   it('a refused promotion ends the prestart, removes the files it wrote and launches fresh', async () => {
@@ -505,13 +519,14 @@ describe('adopt', () => {
 });
 
 // M2's medium review (range ef3d845b7..d2ada3e07): one test per finding, each written before its fix
+// A promotion the test answers
+function heldPromotion() {
+  let answer!: (promotion: Promotion) => void;
+  const promotion = new Promise<Promotion>((resolve) => (answer = resolve));
+  return { promote: () => promotion, answer };
+}
+
 describe('the review’s findings', () => {
-  // A promotion the test answers
-  function heldPromotion() {
-    let answer!: (promotion: Promotion) => void;
-    const promotion = new Promise<Promotion>((resolve) => (answer = resolve));
-    return { promote: () => promotion, answer };
-  }
   const assistant = (i: number, text: string) => ({ type: 'assistant', message: { id: `msg_${i}`, role: 'assistant', model: 'm', content: [{ type: 'text', text }] }, session_id: 's', parent_tool_use_id: null, uuid: `a-${i}` });
 
   it('1: the state file is on disk before the promotion, also when adopt takes a starting row', async () => {
@@ -713,5 +728,160 @@ describe('the review’s findings', () => {
     const row = host.ipc.table.getAny('app-p' as AppSessionId)!;
     expect(await host.ipc.shutdown(500)).toEqual({ stopped: 0, forced: 0 });
     expect(row.lifecycle).toBe('exited');
+  });
+});
+
+// Ticket 851's xhigh panel, group A (promotion and rollback). The rule its four P1s share: a launch whose outcome is
+// unknown stays recoverable by its successor, so nothing of a commit that is not revealed (its stored spec, journal,
+// state backup or roster entry) is restored or deleted until its holder is confirmed gone.
+describe('the panel’s findings: promotion and rollback', () => {
+  const id = 'app-p' as AppSessionId;
+  const stored = () => existsSync(join(userData, 'engine-host', 'state', 'app-p.json'));
+  const staged = (launchId: string) => journalFiles('app-p').filter((name) => name.startsWith(launchId));
+  const backups = () => stateFiles().filter((name) => name.includes('.prestart-'));
+  const stopAsked = (host: ReturnType<typeof engineHost>) => until(() => host.transports[0]!.requestsOf('end_session').length > 0, 'the engine asked to stop');
+
+  it('scalpel-1#1: a promotion whose answer was lost rolls nothing back, and launches nothing beside it, until its engine has exited', async () => {
+    const host = engineHost({ hosted: true, promote: async () => ({ ok: false, message: 'the connection to the session host closed before its answer (writer lost)' }) });
+    await host.prestart('app-p');
+    await hiddenReady(host, 'app-p');
+    const launchId = host.ipc.table.getAny(id)!.status().launchId;
+    const release = host.holdExit(0);
+    const answer = host.call('session.launch', { spec: spec('app-p'), adopt: { key: 'key-1' } });
+    await stopAsked(host);
+    await sleep(30);
+    // the holder may have been promoted: its stored spec, journal and backup stay for a successor while it runs
+    expect({ stored: stored(), staged: staged(launchId).length > 0, backup: backups().length > 0, engines: host.transports.length }).toEqual({ stored: true, staged: true, backup: true, engines: 1 });
+    release();
+    const fresh = await answer;
+    expect(fresh.status === 'launching' && fresh.session.launchId).not.toBe(launchId);
+    expect(staged(launchId)).toEqual([]);
+    expect(backups()).toEqual([]);
+  });
+
+  it('scalpel-2#1: a promotion acknowledged and then declined (a handover) keeps the promoted state until its engine has exited', async () => {
+    const promotion = heldPromotion();
+    const host = engineHost({ hosted: true, promote: promotion.promote });
+    await host.prestart('app-p');
+    await hiddenReady(host, 'app-p');
+    const launchId = host.ipc.table.getAny(id)!.status().launchId;
+    const adopting = host.call('session.launch', { spec: spec('app-p'), adopt: { key: 'key-1' } }).catch((error: unknown) => error);
+    await until(() => host.promotions.length === 1, 'the promotion asked');
+    const release = host.holdExit(0);
+    host.ipc.table.freezeForHandover();
+    promotion.answer({ ok: true });
+    await stopAsked(host);
+    await sleep(30);
+    expect({ stored: stored(), staged: staged(launchId).length > 0, backup: backups().length > 0 }).toEqual({ stored: true, staged: true, backup: true });
+    release();
+    await adopting;
+    await until(() => staged(launchId).length === 0, 'rolled back once its engine is gone');
+    expect(stateFiles()).toEqual([]); // no earlier state: the commit's is removed, and its backup
+  });
+
+  it('scalpel-1#3: a forget while the promotion is out waits for its outcome; promoted, the session is live and keeps its files', async () => {
+    const promotion = heldPromotion();
+    const host = engineHost({ hosted: true, promote: promotion.promote });
+    await host.prestart('app-p');
+    await hiddenReady(host, 'app-p');
+    const launchId = host.ipc.table.getAny(id)!.status().launchId;
+    const adopting = host.call('session.launch', { spec: spec('app-p'), adopt: { key: 'key-1' } });
+    await until(() => host.promotions.length === 1, 'the promotion asked');
+    let settled = false;
+    const forgetting = host.call('session.forget', { appSessionId: id }).then(() => 'forgotten', (error: unknown) => String(error)).finally(() => void (settled = true));
+    await sleep(50);
+    expect(settled).toBe(false);
+    promotion.answer({ ok: true });
+    expect(await adopting).toMatchObject({ status: 'launching' });
+    expect(await forgetting).toMatch(/already_live/);
+    expect({ stored: stored(), staged: staged(launchId).length > 0 }).toEqual({ stored: true, staged: true });
+  });
+
+  it('scalpel-1#3: a stop while the promotion is out waits for its outcome, then stops the session it made', async () => {
+    const promotion = heldPromotion();
+    const host = engineHost({ hosted: true, promote: promotion.promote });
+    await host.prestart('app-p');
+    await hiddenReady(host, 'app-p');
+    const adopting = host.call('session.launch', { spec: spec('app-p'), adopt: { key: 'key-1' } });
+    await until(() => host.promotions.length === 1, 'the promotion asked');
+    let settled = false;
+    const stopping = host.call('session.stop', { appSessionId: id, reason: 'stop' }).finally(() => void (settled = true));
+    await sleep(50);
+    expect(settled).toBe(false);
+    promotion.answer({ ok: true });
+    expect(await adopting).toMatchObject({ status: 'launching' });
+    expect(await stopping).toMatchObject({ exited: true });
+    expect(host.ipc.table.get(id)?.lifecycle).toBe('exited');
+  });
+
+  it('scalpel-4#3: a failed commit stays hidden until its engine has exited and its journal is gone; the fallback starts only then', async () => {
+    let probes = 0;
+    let launchId = '';
+    let stagedAtFallback: string[] | null = null;
+    // the probes: the prestart's, the adopt's binary check, then the fallback's
+    const host = engineHost({ hosted: true, promote: async () => ({ ok: false, message: 'refused' }), binaryProbe: async () => ((++probes === 3 && (stagedAtFallback = staged(launchId))), OK_BINARY) });
+    await host.prestart('app-p');
+    await hiddenReady(host, 'app-p');
+    launchId = host.ipc.table.getAny(id)!.status().launchId;
+    const release = host.holdExit(0);
+    const answer = host.call('session.launch', { spec: spec('app-p'), adopt: { key: 'key-1' } });
+    await stopAsked(host);
+    await sleep(30);
+    expect({ hidden: host.ipc.table.isHidden(id), facts: await host.call('engine.observedFacts', { appSessionId: id }) }).toEqual({ hidden: true, facts: null });
+    release();
+    expect(await answer).toMatchObject({ status: 'launching' });
+    expect(stagedAtFallback).toEqual([]);
+  });
+
+  it('scalpel-1#6: a backup that cannot be removed does not keep a committed launch from its reveal', async () => {
+    const stateDir = join(userData, 'engine-host', 'state');
+    const host = engineHost({ hosted: true, promote: async () => (chmodSync(stateDir, 0o500), { ok: true }) }); // removals there now fail
+    await host.prestart('app-p');
+    await hiddenReady(host, 'app-p');
+    try {
+      expect(await host.call('session.launch', { spec: spec('app-p'), adopt: { key: 'key-1' } })).toMatchObject({ status: 'launching' });
+      expect(host.ipc.table.get(id)?.lifecycle).toBe('ready');
+      expect(host.ipc.table.isHidden(id)).toBe(false);
+    } finally {
+      chmodSync(stateDir, 0o700);
+    }
+  });
+
+  it('scalpel-2#8: a replaced prestart’s engine has exited before the next one spawns', async () => {
+    const host = engineHost();
+    await host.prestart('app-a');
+    await hiddenReady(host, 'app-a');
+    const release = host.holdExit(0);
+    expect(await host.prestart('app-b')).toMatchObject({ status: 'started' });
+    await sleep(50);
+    expect(host.transports).toHaveLength(1);
+    release();
+    await hiddenReady(host, 'app-b');
+    expect(host.transports).toHaveLength(2);
+  });
+
+  it('scalpel-2#7: the stage keeps nothing more past its ceiling, or once closed; one past its ceiling cannot be committed', () => {
+    const dir = join(userData, 'engine-host', 'journal', 'app-s');
+    const stage = new Stage({ maxBytes: 2_000, overflow: () => {} });
+    const journal = new StagedJournal(dir, 'Lstage01', stage);
+    for (let i = 0; i < 200; i += 1) {
+      journal.row('in', { type: 'system', subtype: 'status', pad: 'x'.repeat(100) });
+      stage.mapLine(`${i + 1} ${i + 1}\n`);
+    }
+    expect(stage.over).toBe(true);
+    expect(journal.lastSeq).toBe(200); // numbered still
+    expect(stage.bytes).toBeLessThan(2_000 + 200); // what it retains: the ceiling and the line that crossed it
+    expect(stage.mapLines.length).toBeLessThan(40);
+    expect(() => journal.commit()).toThrow(/ceiling/);
+    expect(filesOf(dir)).toEqual([]);
+
+    const closed = new Stage({ overflow: () => {} });
+    const dropped = new StagedJournal(dir, 'Lstage02', closed);
+    closed.close();
+    for (let i = 0; i < 10; i += 1) {
+      dropped.row('in', { type: 'system', subtype: 'status' });
+      closed.mapLine(`${i + 1} ${i + 1}\n`);
+    }
+    expect({ bytes: closed.bytes, mapLines: closed.mapLines.length }).toEqual({ bytes: 0, mapLines: 0 });
   });
 });

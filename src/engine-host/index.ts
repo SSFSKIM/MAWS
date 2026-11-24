@@ -31,7 +31,7 @@ import { signalOrphan, type LiveRow } from './live-ledger'; // P5 O16 M2; M3: Li
 import { gateSocketPath, hostsDirOf, sessionHostBinary, sessionHostPaths } from './holder/files'; // P5 O16 M2; M3: sessionHostPaths
 import { adoptHosted, discardHost, releaseHost, startSessionHost } from './holder/transport'; // P5 O16 M2; M3: adoptHosted, releaseHost; ticket 851: discardHost
 import { liveHosts, pruneHostLogs, readRoster, removeHostFiles, type RosterEntry } from './holder/roster'; // P5 O16 M3
-import { adoptAll, clearDeadHost, clearEndedPrestart, endPrestart, recordFailed, recordStart } from './holder/adopt'; // P5 O16 M3; wave 1 verification: the start's records; ticket 851: a prestart's end
+import { adoptAll, clearDeadHost, clearEndedPrestart, endPrestart, exitedEntry, recordFailed, recordStart } from './holder/adopt'; // P5 O16 M3; wave 1 verification: the start's records; ticket 851: a prestart's end
 import { journalDir } from './launcher'; // ticket 851: a prestart's staged files
 import type { AppSessionId } from '@shared/graph/ids'; // ticket 851
 import { heldChild, stopHeldHost } from './holder/stop-held'; // P5 O16 panel fix wave 1; re-verification: heldChild
@@ -237,8 +237,9 @@ const register: HostRegister = (untimedOn, untrackedEmit, untrackedClient) => {
             },
             release: (entry, startMs) => releaseHost(entry, { log: (line) => console.log(`[session-host] ${line}`), startMs, token: tokenOf(supervisorDir, entry.holderId) }),
             // ticket 851, M2: a prestart's host keeps its marked entry at its exit; once the host is gone (its ladder's
-            // bound) the entry goes too, while it is still marked; a host still running keeps it for the next start
-            endPrestart: async (host) => void (await clearEndedPrestart(hostsDirOf(supervisorDir), host, { isAlive })),
+            // bound) its launch is rolled back and the entry goes too, while it is still marked; a host still running
+            // keeps all of it for the next start (the panel's rule)
+            endPrestart: (host, rollback) => clearEndedPrestart(hostsDirOf(supervisorDir), host, { isAlive }, rollback),
           },
   });
   ({ table } = ipc);
@@ -372,7 +373,9 @@ function adoptAtStart(dir: string): { liveHolders: ReadonlySet<string>; deadHost
   // P5 O17 M8's scene 6: the e2e's hold on the adoptions, armed only under MAWS_E2E=1 with its own variable; unarmed,
   // the adoptions run as before
   const e2eHold = e2eHoldFor(process.env, 'MAWS_E2E_ADOPTION_HOLD');
-  const adoptDeps = { adopt: (entry: RosterEntry) => engine.adopt(entry), end: (entry: RosterEntry) => endPrestart(entry, { ...prestartFiles, discard: (e) => discardHost(e, { log, token: tokenOf(dir, e.holderId) }) }), log };
+  // the panel's scalpel-1#2: a marked host that cannot be asked is decided by its entry once it has exited
+  const endDeps = { ...prestartFiles, discard: (e: RosterEntry) => discardHost(e, { log, token: tokenOf(dir, e.holderId) }), exited: (e: RosterEntry) => exitedEntry(hostsDir, e, { isAlive }) };
+  const adoptDeps = { adopt: (entry: RosterEntry) => engine.adopt(entry), end: (entry: RosterEntry) => endPrestart(entry, endDeps), log };
   if (e2eHold === undefined) void adoptAll(live, adoptDeps).then(ended);
   else void e2eHold().then(() => adoptAll(live, adoptDeps).then(ended));
   return { liveHolders: new Set(live.map((entry) => entry.holderId)), deadHostChildren };

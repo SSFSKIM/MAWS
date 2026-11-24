@@ -5,12 +5,12 @@
 // P5 O16 panel fix wave 1 (sweep#3): a host whose launch committed with no child yet (its predecessor lost mid-spawn) holds
 // an engine, or is about to: held and adopted like one, never released as empty; and only a release the host accepted
 // goes uncounted, so no failure is left out by what the roster said at the start.
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
-import { adoptable, adoptAll, clearDeadHost, endPrestart, holdsEngine, recordFailed, recordStart, removeStagedFiles } from './adopt';
+import { adoptable, adoptAll, backupStagedState, clearDeadHost, endPrestart, holdsEngine, recordFailed, recordStart, removeStagedFiles, restoreStagedState } from './adopt';
 import { ProcessTable } from '../process-table'; // P5 O16 wave 1 verification
 import type { HeldStopOutcome } from './stop-held'; // P5 O16 wave 1 verification
 import type { RosterEntry } from './roster';
@@ -201,6 +201,7 @@ describe('a prestart never promoted', () => {
       const lines: string[] = [];
       const outcome = await endPrestart(marked('Lpre0001'), {
         discard: async () => (order.push(`discard with ${readdirSync(dir).length} files`), answer),
+        exited: async () => 'alive',
         stagedDir: () => dir,
         removeEntry: () => void order.push(`entry with ${readdirSync(dir).length} files`),
         log: (line) => void lines.push(line),
@@ -240,6 +241,47 @@ describe('a prestart never promoted', () => {
       expect(lines.join('\n')).toContain('its staged files could not all be removed');
     });
 
+    // The panel's scalpel-1#2: a marked host that refuses the successor's connection is one already ending its prestart
+    // (its writer lost). Once it has exited, its entry as the roster has it now decides, as a dead host's at the start:
+    // still marked, its rollback is finished before the start lets its session go, so no later launch's files are taken
+    // for its own at the next start.
+    describe('a host that cannot be asked (scalpel-1#2)', () => {
+      let stateDir: string;
+      beforeEach(() => {
+        stateDir = mkdtempSync(join(tmpdir(), 'maws-staged-state-'));
+      });
+      afterEach(() => rmSync(stateDir, { recursive: true, force: true }));
+      const refused = async (): Promise<never> => {
+        throw new Error('the session host refused the connection');
+      };
+
+      it('and has exited still marked: its staged files and the state it wrote go, then its entry', async () => {
+        backupStagedState(stateDir, 'app-Lpre0001', 'Lpre0001'); // no earlier state
+        writeFileSync(join(stateDir, 'app-Lpre0001.json'), '{"staged":true}'); // the staged commit's
+        const removed: string[] = [];
+        const outcome = await endPrestart(marked('Lpre0001'), { discard: refused, exited: async (e) => e, stagedDir: () => dir, removeEntry: (e) => void removed.push(e.holderId), log: () => {}, stateDir });
+        expect(outcome).toBe('ended');
+        expect(readdirSync(dir).sort()).toEqual(left);
+        expect(readdirSync(stateDir)).toEqual([]);
+        expect(removed).toEqual(['Lpre0001']);
+      });
+
+      it('and has exited promoted: its files stay, its entry alone goes', async () => {
+        const removed: string[] = [];
+        const outcome = await endPrestart(marked('Lpre0001'), { discard: refused, exited: async (e) => ({ ...e, prestart: undefined }), stagedDir: () => dir, removeEntry: (e) => void removed.push(e.holderId), log: () => {} });
+        expect(outcome).toBe('ended');
+        expect(readdirSync(dir).length).toBe(names.length);
+        expect(removed).toEqual(['Lpre0001']);
+      });
+
+      it('and lives on past its exit bound: a failed adoption, nothing removed', async () => {
+        const removed: string[] = [];
+        await expect(endPrestart(marked('Lpre0001'), { discard: refused, exited: async () => 'alive', stagedDir: () => dir, removeEntry: (e) => void removed.push(e.holderId), log: () => {} })).rejects.toThrow(/refused the connection/);
+        expect(readdirSync(dir).length).toBe(names.length);
+        expect(removed).toEqual([]);
+      });
+    });
+
     it('a dead host\'s: staged files then entry; a failure keeps the entry; an unmarked one\'s entry alone; nothing throws', () => {
       const removed: string[] = [];
       const lines: string[] = [];
@@ -261,5 +303,36 @@ describe('a prestart never promoted', () => {
   it('removeStagedFiles: a directory that does not exist has none', () => {
     expect(removeStagedFiles(join(tmpdir(), 'maws-staged-missing-dir'), 'Lpre0001')).toBe(0);
     expect(existsSync(join(tmpdir(), 'maws-staged-missing-dir'))).toBe(false);
+  });
+});
+
+// The panel's scalpel-1#8: the state backup of a staged commit. Its marker is published whole (a temporary renamed into
+// place), after the copies; a crash before the marker leaves copies (and maybe a torn temporary) the restore removes,
+// the state itself untouched, since the commit writes nothing before its marker.
+describe('the state backup of a staged commit (scalpel-1#8)', () => {
+  let stateDir: string;
+  beforeEach(() => {
+    stateDir = mkdtempSync(join(tmpdir(), 'maws-state-backup-'));
+  });
+  afterEach(() => rmSync(stateDir, { recursive: true, force: true }));
+
+  it('a crash after the copies and before the marker: the restore removes the copies and the torn temporary, and keeps the state', () => {
+    writeFileSync(join(stateDir, 'app-x.json'), 'before');
+    writeFileSync(join(stateDir, 'app-x.json.prestart-L1'), 'before');
+    writeFileSync(join(stateDir, 'app-x.prestart-L1.tmp'), '{"files":{"app-x.js'); // never published
+    restoreStagedState(stateDir, 'app-x', 'L1');
+    expect(readdirSync(stateDir)).toEqual(['app-x.json']);
+    expect(readFileSync(join(stateDir, 'app-x.json'), 'utf8')).toBe('before');
+  });
+
+  it('publishes its marker whole, and a restore puts back what existed and removes what did not', () => {
+    writeFileSync(join(stateDir, 'app-x.json'), 'before');
+    backupStagedState(stateDir, 'app-x', 'L1');
+    expect(readdirSync(stateDir).sort()).toEqual(['app-x.json', 'app-x.json.prestart-L1', 'app-x.prestart-L1']);
+    writeFileSync(join(stateDir, 'app-x.json'), 'after');
+    writeFileSync(join(stateDir, 'app-x.cron.json'), 'after');
+    restoreStagedState(stateDir, 'app-x', 'L1');
+    expect(readdirSync(stateDir)).toEqual(['app-x.json']);
+    expect(readFileSync(join(stateDir, 'app-x.json'), 'utf8')).toBe('before');
   });
 });

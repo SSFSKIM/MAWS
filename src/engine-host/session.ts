@@ -1562,6 +1562,10 @@ export class EngineSession {
     this.sideQuestions.adopted(new Date().toISOString());
     this.emit('brokerItems', this.brokerItems()); // the fold told nothing: the restored list, once
     this.publishCatalog();
+    // ticket 851's panel (scalpel-1#5): a launch adopted is a promoted one (a marked one is discarded, never adopted), so a
+    // prestart's hidden period its predecessor left open (it died between the promotion and its reveal's row) closes here,
+    // for the live normaliser and every rebuild alike
+    if (this.normalizer.state.prestartHidden === true) this.record('meta', { event: 'prestart', phase: 'revealed' });
     this.record('meta', { event: 'reconnect', phase: 'attempting', ...this.attempt, trigger: this.reconnectTrigger, reason: null });
     this.connect(transport, adopted.fence);
     if (this.stopReason !== null) void this.terminate(true); // stopped while the journal was folded

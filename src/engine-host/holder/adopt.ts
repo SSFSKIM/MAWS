@@ -14,6 +14,11 @@
 // decides atomically against a promotion in flight: discarded, that launch's staged files (its journal and host map,
 // base and rotations) are removed, then its entry, which the host kept for that; promoted meanwhile, it is adopted as
 // any host. A discard that fails is a failed adoption, its host then guarded as unattached.
+// Ticket 851's xhigh panel, group A: a launch whose promotion is unknown stays recoverable by its successor, so nothing of
+// it is restored or removed until its host is confirmed never promoted (a `discarded` answer, an entry still marked once
+// the host has exited) or gone. A host that cannot be asked and then exits is decided by its entry as it is then
+// (scalpel-1#2); the state backup's marker is published whole (scalpel-1#8); an engine host's own ended prestart is
+// rolled back only once its host has exited (`clearEndedPrestart`).
 import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { AppSessionId } from '@shared/graph/ids';
@@ -129,10 +134,26 @@ function removeEntry(entry: RosterEntry, deps: PrestartFiles): boolean {
 
 // Ticket 851, M1: a live prestart never promoted, discarded by its host (`discard`, transport.ts `discardHost`); then
 // its launch's staged files removed, then its entry once its host has exited. Answers `promoted` for one its host found
-// promoted meanwhile, and removes nothing of it. Throws only when the discard does.
-export async function endPrestart(entry: RosterEntry, deps: PrestartFiles & { discard(entry: RosterEntry): Promise<'discarded' | 'discarding' | 'promoted'> }): Promise<'ended' | 'promoted'> {
-  const answer = await deps.discard(entry);
+// promoted meanwhile, and removes nothing of it.
+// The panel's scalpel-1#2: a host that cannot be asked (one ending its prestart refuses the connection) is waited for
+// (`exited`, within its exit ladder's bound); once gone, its entry as the roster has it then is cleared as a dead host's
+// (still marked: its staged files and state first), so its rollback is done before the start lets its session go. Throws,
+// a failed adoption guarded as before, only for one that lives on.
+export async function endPrestart(
+  entry: RosterEntry,
+  deps: PrestartFiles & { discard(entry: RosterEntry): Promise<'discarded' | 'discarding' | 'promoted'>; exited(entry: RosterEntry): Promise<RosterEntry | null | 'alive'> },
+): Promise<'ended' | 'promoted'> {
   const name = `session host ${entry.holderId} (pid ${entry.pid})`;
+  let answer: 'discarded' | 'discarding' | 'promoted';
+  try {
+    answer = await deps.discard(entry);
+  } catch (error) {
+    const now = await deps.exited(entry);
+    if (now === 'alive') throw error;
+    deps.log(`${name} could not be asked (${error instanceof Error ? error.message : String(error)}) and has exited, ${now === null ? 'its entry gone' : now.prestart === true ? 'still marked: its rollback finished as a dead host\'s' : 'promoted: its entry alone goes'}`);
+    if (now !== null) clearDeadHost(now, deps);
+    return 'ended';
+  }
   if (answer === 'promoted') {
     deps.log(`${name} was marked prestart and its host says it was promoted: adopted as any host`);
     return 'promoted';
@@ -155,17 +176,35 @@ export function clearDeadHost(entry: RosterEntry, deps: PrestartFiles): void {
   removeEntry(entry, deps);
 }
 
-// Ticket 851, M2: the end of a prestart this engine host ended itself (prestart-host.ts), its staged files already removed:
-// the session host keeps its marked entry at its exit, so once the host has exited (within `exitMs`, its ladder's bound)
-// the entry goes too, while it still says `prestart`; a host still running keeps it for the next start's discard.
-export async function clearEndedPrestart(hostsDir: string, host: { holderId: string; pid: number }, deps: { isAlive(pid: number): boolean; exitMs?: number }): Promise<'removed' | 'kept'> {
+// Whether the host has exited, waiting through its exit ladder's bound (`exitMs`)
+async function hostExited(pid: number, deps: { isAlive(pid: number): boolean; exitMs?: number }): Promise<boolean> {
   const until = Date.now() + (deps.exitMs ?? 2 * HOST_EXIT_GRACE_MS + 2_000);
-  while (deps.isAlive(host.pid) && Date.now() < until) await new Promise((resolve) => setTimeout(resolve, 50));
-  if (deps.isAlive(host.pid)) return 'kept';
+  while (deps.isAlive(pid) && Date.now() < until) await new Promise((resolve) => setTimeout(resolve, 50));
+  return !deps.isAlive(pid);
+}
+
+// The panel's scalpel-1#2: once the host has exited, its roster entry as it is now (null: the host removed it); `alive`
+// while it lives on past its exit ladder's bound
+export async function exitedEntry(hostsDir: string, host: { holderId: string; pid: number }, deps: { isAlive(pid: number): boolean; exitMs?: number }): Promise<RosterEntry | null | 'alive'> {
+  if (!(await hostExited(host.pid, deps))) return 'alive';
+  return readRoster(hostsDir, () => {}).find((candidate) => candidate.holderId === host.holderId) ?? null;
+}
+
+// Ticket 851, M2: the end of a prestart this engine host ended itself (prestart-host.ts). The panel's rule: only once its
+// session host has exited (within `exitMs`, its ladder's bound) is its launch rolled back (`rollback`: the state its
+// commit wrote restored, its staged files removed), and then its entry, which a marked host keeps at its exit, while it
+// still says `prestart`. A host still running keeps all of it for the next start. Answers whether the host was gone; a
+// rollback that throws keeps the entry, the only record naming what is left.
+export async function clearEndedPrestart(hostsDir: string, host: { holderId: string; pid: number }, deps: { isAlive(pid: number): boolean; exitMs?: number }, rollback: () => void | Promise<void> = () => {}): Promise<boolean> {
+  if (!(await hostExited(host.pid, deps))) return false;
+  try {
+    await rollback();
+  } catch {
+    return true;
+  }
   const entry = readRoster(hostsDir, () => {}).find((candidate) => candidate.holderId === host.holderId);
-  if (entry?.prestart !== true) return 'kept';
-  removeHostFiles(hostsDir, entry);
-  return 'removed';
+  if (entry?.prestart === true) removeHostFiles(hostsDir, entry);
+  return true;
 }
 
 // M2's review, finding 2 (docs/doperpowers/plans/2026-11-24-prestart-engine.md, Decision Log 11): a staged commit
@@ -174,6 +213,9 @@ export async function clearEndedPrestart(hostsDir: string, host: { holderId: str
 // which files existed. A discard (a kill, a refused promotion, a successor's discard of a marked host) restores them:
 // each copy back over its file, each file that did not exist removed; then the marker. With no marker, the commit never
 // wrote, and nothing is touched. A promotion drops the copies and the marker. None of these names ends in `.json`.
+// The panel's scalpel-1#8: the marker is published whole, written beside itself (`.tmp`) and renamed into place after the
+// copies, so a marker that exists always reads; with none, any copies (and a torn temporary) are a backup a crash cut
+// short, before the commit wrote anything, and the restore removes them, the state untouched.
 const stateFilesOf = (appSessionId: string): string[] => [`${appSessionId}.json`, `${appSessionId}.cron.json`];
 const markerOf = (stateDir: string, appSessionId: string, launchId: string): string => join(stateDir, `${appSessionId}.prestart-${launchId}`);
 
@@ -187,12 +229,16 @@ export function backupStagedState(stateDir: string, appSessionId: string, launch
     files[name] = existsSync(path);
     if (files[name]) copyFileSync(path, `${path}.prestart-${launchId}`);
   }
-  writeFileSync(marker, JSON.stringify({ files }), { mode: 0o600 });
+  writeFileSync(`${marker}.tmp`, JSON.stringify({ files }), { mode: 0o600 });
+  renameSync(`${marker}.tmp`, marker);
 }
 
 export function restoreStagedState(stateDir: string, appSessionId: string, launchId: string): void {
   const marker = markerOf(stateDir, appSessionId, launchId);
-  if (!existsSync(marker)) return;
+  if (!existsSync(marker)) {
+    dropStagedBackup(stateDir, appSessionId, launchId);
+    return;
+  }
   const { files } = JSON.parse(readFileSync(marker, 'utf8')) as { files: Record<string, boolean> };
   for (const name of stateFilesOf(appSessionId)) {
     const path = join(stateDir, name);
@@ -204,6 +250,7 @@ export function restoreStagedState(stateDir: string, appSessionId: string, launc
 
 export function dropStagedBackup(stateDir: string, appSessionId: string, launchId: string): void {
   for (const name of stateFilesOf(appSessionId)) rmSync(join(stateDir, `${name}.prestart-${launchId}`), { force: true });
+  rmSync(`${markerOf(stateDir, appSessionId, launchId)}.tmp`, { force: true });
   rmSync(markerOf(stateDir, appSessionId, launchId), { force: true });
 }
 
