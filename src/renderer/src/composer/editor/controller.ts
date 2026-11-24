@@ -227,6 +227,7 @@ export class EditorController {
   private editor: TiptapEditor | null = null;
   private readonly writer: DraftWriter;
   private silent = false;
+  private replacing = false; // ticket 851, M3's review (finding 10): a setDoc's two transactions tell no edit of their own
   private busy = false;
   private loaded = false;
   private restoring: Promise<void> = Promise.resolve(); // P3-G: this mount's draft restoration
@@ -373,7 +374,7 @@ export class EditorController {
     if (this.silent || !transaction.docChanged) return;
     this.revision += 1;
     this.writer.change(doc);
-    this.inputs.onEdit?.(doc); // ticket 851, M3: the edits the draft's save follows, told at once
+    if (!this.replacing) this.inputs.onEdit?.(doc); // ticket 851, M3: the edits the draft's save follows, told at once
   }
 
   keyDown(view: EditorView, event: KeyboardEvent): boolean {
@@ -404,7 +405,7 @@ export class EditorController {
     if (event.key === 'Enter' && event.altKey && !event.shiftKey && !event.metaKey && !event.ctrlKey) return editor.commands.setHardBreak();
     // R2: Tab takes a plugin's suggestion into the empty box
     if (event.key === 'Tab' && plain && !this.busy && !submissions.has(this.inputs.appSessionId) && this.inputs.disabled === null && this.inputs.suggestion && isEmptyDoc(editor.getJSON())) {
-      this.setDoc(textDoc(this.inputs.suggestion), { silently: false, caret: 'end' });
+      this.setDoc(textDoc(this.inputs.suggestion), { silently: false, caret: 'end', edit: true });
       this.inputs.onSuggestionTaken?.();
       return true;
     }
@@ -470,7 +471,7 @@ export class EditorController {
     if (!taken) return;
     this.nav = { index: null, draft: null };
     this.search = null;
-    this.setDoc(prefillToDoc(taken), { silently: false, caret: 'end' });
+    this.setDoc(prefillToDoc(taken), { silently: false, caret: 'end', edit: true });
     this.inputs.onPrefill?.(taken);
   }
 
@@ -632,18 +633,25 @@ export class EditorController {
   // frame, so a key pressed in that frame would land outside the editor, and then takes the focus from wherever it went
   // meanwhile (on the hosted Macs that frame came 223 ms later, after a transcript row's Copy had taken the focus); it
   // is kept for an editor the focus did not reach at once (one not on the page yet).
-  private setDoc(doc: ComposerDoc, options: { silently: boolean; caret: 'start' | 'end' | null }): void {
+  // Ticket 851, M3's review (finding 10): `edit`, a replacement the person made (a fill, a prefill, a suggestion taken),
+  // is told as one edit once the whole document is in; a clear and every silent set tell none. The two transactions
+  // below (the content, then the attachments) tell nothing themselves: between them the document is neither the old one
+  // nor the new one.
+  private setDoc(doc: ComposerDoc, options: { silently: boolean; caret: 'start' | 'end' | null; edit?: boolean }): void {
     const editor = this.editor;
     if (!editor) return;
     this.endDictation('keep'); // E9: the document is replaced; the range goes with it
     this.silent = options.silently;
+    this.replacing = true;
     try {
       editor.commands.setContent(doc, { emitUpdate: true });
       // `setContent` replaces the content and keeps the document node's own attributes: the strip goes with it here
       editor.view.dispatch(editor.state.tr.setDocAttribute('attachments', attachmentsOf(doc)));
     } finally {
       this.silent = false;
+      this.replacing = false;
     }
+    if (!options.silently && options.edit === true) this.inputs.onEdit?.(editor.getJSON());
     if (options.caret === null) {
       if (!editor.isFocused) this.caretLeft = false; // a document set behind the human's back has no caret of theirs
       return;
@@ -1164,7 +1172,7 @@ export class EditorController {
         // UX wave U6e (ticket 675): nor while a Send waits for a drop's conversion, whose serialise would carry the fill
         if (this.busy || this.submitAfterConverting || submissions.has(this.inputs.appSessionId) || this.inputs.disabled !== null) return false;
         this.revision += 1; // even replacing an empty box with empty text supersedes a pending draft restore
-        if (mode === 'replace') this.setDoc(textDoc(text), { silently: false, caret: 'end' });
+        if (mode === 'replace') this.setDoc(textDoc(text), { silently: false, caret: 'end', edit: true });
         else if (mode === 'append') editor().chain().focus('end').insertContent(inlineContent(text)).run();
         else editor().chain().focus().insertContent(inlineContent(text)).run();
         return true;
