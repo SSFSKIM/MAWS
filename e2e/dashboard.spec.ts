@@ -676,7 +676,9 @@ test('every dataset state draws in place from a fixture: a missing column, an un
   // beside it once it holds the keyboard
   const mismatch = views.nth(2).getByRole('img', { name: /1 of 3 values in total are not number/ });
   await expect(mismatch).toHaveText('⚠', { timeout: 15_000 });
-  await mismatch.focus();
+  await label(2).focus(); // the label before it, then Tab: the keyboard's focus, which :focus-visible answers
+  await page.keyboard.press('Tab');
+  await expect(mismatch).toBeFocused();
   await expect.poll(() => mismatch.evaluate((el) => getComputedStyle(el, '::after').visibility)).toBe('visible');
   expect(await mismatch.evaluate((el) => getComputedStyle(el, '::after').content)).toContain('1 of 3 values in total are not number');
   await mismatch.blur();
