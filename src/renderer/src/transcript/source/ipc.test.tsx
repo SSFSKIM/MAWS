@@ -125,7 +125,7 @@ describe('ipcSource', () => {
 
     // Subscribed first; the snapshot is one `session.events` call.
     expect(subscriptions(fake)).toBe(1);
-    expect(fake.calls.map((call) => [call.name, call.input])).toEqual([['session.events', { appSessionId: APP, afterSeq: null, limit: null }]]);
+    expect(fake.calls.map((call) => [call.name, call.input])).toEqual([['session.events', { appSessionId: APP, afterSeq: null, limit: null, provisional: true }]]); // tail-first: a session on this machine
 
     fake.emit('session.eventBatch', batch(all.slice(2, 4))); // before the snapshot: buffered; the snapshot carries both
     fake.emit('session.eventBatch', batch([...all.slice(4, 6), ...all.slice(6, 8)])); // half overlaps the snapshot's seq-null tail
@@ -2275,7 +2275,7 @@ describe('ipcSource over a long transcript\'s window', () => {
     expect(fake.calls).toHaveLength(1);
     fake.emit('session.changed', changed); // a terminal wrote to it
     await vi.waitFor(() => expect(fake.calls).toHaveLength(2));
-    expect(fake.calls[1].input).toEqual({ appSessionId: APP, afterSeq: null, limit: null });
+    expect(fake.calls[1].input).toEqual({ appSessionId: APP, afterSeq: null, limit: null, provisional: true }); // tail-first
     fake.calls[1].answer(page(turns(1, 3)));
     await vi.waitFor(() => expect(seen()).toEqual(ids(turns(1, 3))));
     expect(useTranscriptStore.getState().entries[APP]!.state.ui.expandedTurns.has(opened)).toBe(true);

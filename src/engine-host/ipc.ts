@@ -456,7 +456,7 @@ export function registerEngineIpc(hostOn: HostOn, emit: HostEmit, deps: EngineIp
     const answer = { ...page, earlier };
     return maxBytes === null || utf8Length(JSON.stringify(answer)) <= maxBytes ? answer : page;
   };
-  handle('session.events', async ({ appSessionId, afterSeq, limit, before, agentId, seek, maxBytes }) => {
+  handle('session.events', async ({ appSessionId, afterSeq, limit, before, agentId, seek, maxBytes, provisional }) => {
     await adopted(appSessionId); // P5 O16 M4
     const id = appSessionId as AppSessionId;
     // C4 start: no stream here (not launched in this run, or archived and released): the transcript's history, whose
@@ -466,7 +466,8 @@ export function registerEngineIpc(hostOn: HostOn, emit: HostEmit, deps: EngineIp
     // live session's older pages come from a quiet follow of its transcript. `seek`: the page says where it stands to that
     // message (a jump into history).
     // P5 O7 M4: `maxBytes`, the answer's UTF-8 JSON bound for a reader behind a bounded channel (acceptance 12)
-    const request: HistoryRequest = { before: (before ?? null) as EventId | null, limit, agentId: (agentId ?? null) as AgentId | null, ...(seek !== undefined && { seek: seek as MessageUuid }), ...(maxBytes !== undefined && { maxBytes }) };
+    // 2026-11-24, tail-first: `provisional`, a newest window from the transcript's end while the follow reads it (fs service)
+    const request: HistoryRequest = { before: (before ?? null) as EventId | null, limit, agentId: (agentId ?? null) as AgentId | null, ...(seek !== undefined && { seek: seek as MessageUuid }), ...(maxBytes !== undefined && { maxBytes }), ...(provisional === true && { provisional }) };
     if (deps.diskEvents && request.before !== null) return { ...(await deps.diskEvents(id, request, streams.has(id))), lastSeq: 0 };
     if (deps.diskEvents && !streams.has(id)) return { ...(await deps.diskEvents(id, request, false)), lastSeq: 0 };
     // C4 end

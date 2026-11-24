@@ -123,7 +123,7 @@ describe('TranscriptSlot', () => {
     render(<TranscriptSlot appSessionId={APP} className="slot" />);
     await settle();
     expect(screen.getByRole('region', { name: 'Your message' })).toBeTruthy();
-    expect(invoke).toHaveBeenCalledWith('session.events', { appSessionId: bareOf(APP), afterSeq: null, limit: null }, TEST_MACHINE);
+    expect(invoke).toHaveBeenCalledWith('session.events', { appSessionId: bareOf(APP), afterSeq: null, limit: null, provisional: true }, TEST_MACHINE); // tail-first: a session on this machine
     expect(document.querySelector('[data-kind="assistant_text"]')?.textContent).toContain('See the file');
 
     const editAndResubmit = vi.fn();
