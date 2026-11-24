@@ -11,7 +11,7 @@
 // but the replica keeps it durably only once the host acknowledges it, so the closeGuard (./close-guard.ts) reads the
 // tab's handle and keeps a showing whose edits are unacknowledged until they save or the owner discards them
 // (whole-branch review F-I1). Hidden (`visible` false), the body reports nothing shown and offers no Mark-up surface.
-import { useEffect, useRef, useSyncExternalStore } from 'react';
+import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { create } from 'zustand';
 import type { ArtifactHost, DocumentHandle, DocumentState } from '@artifacts/host';
 import { DesignSystemPage } from '@artifacts/design-system/page/DesignSystemPage';
@@ -20,6 +20,7 @@ import { usePageState } from '@artifacts/design-system/page/use-system';
 import { useRegionMarkupSurface } from '../../markup/surface';
 import { useEditorHost, useEditorHostScope, type EditorHostScope, type SavedState } from '../../panel/editor-host';
 import { toast } from '../../stores/notices';
+import { QUIET_MS } from '../../ui/spinner';
 import { allowSystemClose } from './close-guard';
 import { DESIGN_SYSTEM_COPY } from './copy';
 
@@ -35,6 +36,22 @@ export function savedStateOf(state: DocumentState): SavedState {
   if (state.readOnly) return 'readonly';
   if (state.phase !== 'live') return 'reconnecting';
   return state.unsaved > 0 ? 'saving' : 'saved';
+}
+
+// The header draws "Saving…" at once (panel/SavedStatus.tsx), so the body holds it back as the document's and the
+// deck's tab-states do: edits acknowledged within the half second leave the header at "All changes saved".
+function useHeldSaving(saved: SavedState): SavedState {
+  const waiting = saved === 'saving';
+  const [late, setLate] = useState(false);
+  useEffect(() => {
+    if (!waiting) return;
+    const timer = setTimeout(() => setLate(true), QUIET_MS);
+    return () => {
+      clearTimeout(timer);
+      setLate(false);
+    };
+  }, [waiting]);
+  return waiting && !late ? 'saved' : saved;
 }
 
 function exportForClaude(host: Pick<ArtifactHost, 'export'>, artifactId: string): void {
@@ -73,10 +90,10 @@ export function DesignSystemBody(props: DesignSystemBodyProps) {
   const scope = useEditorHostScope();
   const key = keyOf(scope, artifactId);
   const reveal = useCheckRequests((s) => s.serials[key] ?? 0);
-  const saved = useSyncExternalStore(
+  const saved = useHeldSaving(useSyncExternalStore(
     (listener) => handle.subscribe(listener),
     () => savedStateOf(handle.state()),
-  );
+  ));
   const name = usePageState(handle.doc).system.meta?.name ?? null;
   const shownTitle = title ?? name ?? DESIGN_SYSTEM_COPY.untitled;
 

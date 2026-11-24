@@ -302,8 +302,9 @@ describe('the panel header', () => {
     expect(within(strip()).getByRole('tab', { name: 'Plain' })).toBeTruthy();
   });
 
-  // T607, P23, P24: the editors' one saved wording, a save in flight as the quiet spinner, unsaved edits as a dot
-  it('draws each saved state: its words at rest, a quiet spinner while saving, a dot whose words wait for the pointer or focus while unsaved; none for null', async () => {
+  // T607, P23, P24: the editors' one saved wording and unsaved edits as a dot. A save in flight is tested from a held
+  // acknowledgement where the editor holds it back (tools/document/DocumentPanel.test.tsx).
+  it('draws each saved state: its words at rest, a dot whose words wait for the pointer or focus while unsaved; none for null', async () => {
     offs.push(registerPanelTool(probeTool('t').tool));
     mount();
     const id = add('t');
@@ -321,10 +322,6 @@ describe('the panel header', () => {
       expect(saved()?.textContent).toBe(text);
       expect(saved()?.getAttribute('data-saved-state')).toBe(state);
     }
-
-    act(() => handle.update({ saved: 'saving' }));
-    expect(saved()?.textContent, 'nothing for the first half second').toBe('');
-    expect(await within(header()).findByRole('progressbar', { name: 'Saving…' })).toBeTruthy();
 
     act(() => handle.update({ saved: 'unsaved' }));
     const dot = within(header()).getByRole('img', { name: 'Unsaved changes' });

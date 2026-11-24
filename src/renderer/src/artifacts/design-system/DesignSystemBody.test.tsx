@@ -62,7 +62,7 @@ function mount(props: Partial<Parameters<typeof DesignSystemBody>[0]> = {}) {
 }
 
 describe('the Design System body (X32, Mark-up)', () => {
-  it('registers the header: the system’s name, the saved state, Check against law, Set as my default (disabled without a handler), Export for Claude', () => {
+  it('registers the header: the system’s name, the saved state, Check against law, Set as my default (disabled without a handler), Export for Claude', async () => {
     const { doc, set } = mount();
     const registration = editorHostOf(SCOPE)!;
     expect(registration.title).toBe('Harbor');
@@ -73,7 +73,11 @@ describe('the Design System body (X32, Mark-up)', () => {
     ]);
     expect(registration.exports!.map((e) => e.label)).toEqual(['Export for Claude']);
     act(() => set({ unsaved: 2 }));
+    expect(editorHostOf(SCOPE)!.saved, 'held back: the header draws saving at once').toBe('saved');
+    await act(() => new Promise((resolve) => setTimeout(resolve, 550)));
     expect(editorHostOf(SCOPE)!.saved).toBe('saving');
+    act(() => set({ unsaved: 0 }));
+    expect(editorHostOf(SCOPE)!.saved).toBe('saved');
     act(() => setLaw(doc, '# Harbor Press\n'));
     expect(editorHostOf(SCOPE)!.title).toBe('Harbor Press');
   });

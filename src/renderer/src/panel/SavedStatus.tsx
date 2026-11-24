@@ -1,9 +1,11 @@
 // An editor's saved state in its header (X32's `saved`), the same in the header row and in an editor-owned toolbar
 // (the word cut: T607, P23, P24). One wording across the editors: "All changes saved" after a save, never a shorter
-// "Saved". A save in flight is the quiet spinner named "Saving…"; edits not yet saved are the editor's conventional
-// dot, its words its name and its tip, taking the keyboard so the tip is reachable. Reconnecting and read-only keep
-// their words: each says something could have failed or cannot be done here.
-import { QuietSpinner } from '../ui/spinner';
+// "Saved". A save in flight is the app's small ring named "Saving…", drawn at once: each editor already holds
+// `saving` back until its edits have waited past the half second (the document's and the deck's tab-states, the design
+// system's body), so a second delay here would hide a save that is slow but not very slow. Edits not yet saved are the
+// editor's conventional dot, its words its name and its tip, taking the keyboard so the tip is reachable. Reconnecting
+// and read-only keep their words: each says something could have failed or cannot be done here.
+import { SPINNER } from '../ui/spinner';
 import { Tip } from '../ui/tip';
 import { SAVED_COPY, type SavedState } from './editor-host';
 
@@ -15,7 +17,7 @@ export function SavedStatus({ state, className = '' }: { state: SavedState; clas
     return (
       <span data-header-saved data-saved-state={state} className="flex size-4 shrink-0 items-center justify-center">
         {state === 'saving' ? (
-          <QuietSpinner label={words} />
+          <span role="progressbar" aria-label={words} className={SPINNER} />
         ) : (
           <Tip content={words}>
             <span role="img" aria-label={words} tabIndex={0} className="size-2 rounded-full bg-fg-muted outline-accent focus-visible:outline-2" />

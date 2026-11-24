@@ -17,7 +17,8 @@ import { fakeClient } from '../../../../../test/support/fake-client';
 import { TEST_MACHINE, at } from '../../../../../test/support/machine';
 import { artifactEditorFor, holdArtifactEditorState, releaseArtifactEditorState, resetArtifactEditors } from '../../artifacts/registry';
 import { markupSurfaceOf, resetMarkupSurfaces } from '../../markup/surface';
-import { editorHostOf, EditorHostScopeContext, resetEditorHosts, type EditorHostScope } from '../../panel/editor-host';
+import { editorHostOf, EditorHostScopeContext, resetEditorHosts, useEditorHostRegistration, type EditorHostScope } from '../../panel/editor-host';
+import { SavedStatus } from '../../panel/SavedStatus';
 import { resetLibrary } from '../../library/store';
 import { useLayout } from '../../stores/layout';
 import { resetShellStores } from '../../test-support/shell-stores';
@@ -295,6 +296,29 @@ describe('the document editor in L’s registry', () => {
     // an export's failure is said in the header's own action
     act(() => editorHostOf(scope)!.exports!.find((e) => e.id === 'pdf')!.onSelect());
     await until(() => editorHostOf(scope)!.actions!.some((a) => a.id === 'export' && /PDF export failed/.test(a.label)), 'the export’s failure');
+  });
+
+  // P23 (the word cut): one delay. The tab holds `saving` back until an edit has waited past its half second, and the
+  // header then draws the ring at once, so a save acknowledged at 750 ms shows progress from 500 ms until it lands.
+  it('draws the saving ring the moment the tab says saving, for an edit whose acknowledgement the host holds', async () => {
+    const { state } = mount();
+    function Saved() {
+      const saved = useEditorHostRegistration(scope)?.saved;
+      return saved ? <SavedStatus state={saved} /> : null;
+    }
+    render(<Saved />);
+    await shown();
+    await until(() => editorHostOf(scope)?.saved === 'saved', 'saved');
+    const ring = () => screen.queryByRole('progressbar', { name: 'Saving…' });
+    memory.holdAcks(true);
+    act(() => setDocPage(state.snapshot().handle!.doc, { size: 'a4' }));
+    await until(() => state.snapshot().handle!.state().unsaved > 0, 'the edit sent and unacknowledged');
+    expect(ring(), 'an edit inside the hold shows nothing').toBeNull();
+    await until(() => state.snapshot().saving, 'the tab to say saving');
+    expect(ring(), 'drawn with no second delay').not.toBeNull();
+    memory.holdAcks(false);
+    await until(() => ring() === null, 'the acknowledgement');
+    expect(document.querySelector('[data-header-saved]')?.textContent).toBe('All changes saved');
   });
 
   // UX wave U10b (§B.5, M3 decision 1 of docs/doperpowers/plans/2026-11-15-ux-wave-U10b-artifacts.md; the owner's
