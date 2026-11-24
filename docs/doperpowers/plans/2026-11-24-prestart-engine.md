@@ -2,355 +2,389 @@
 
 > **Ticket:** board ticket 851. Its "Done when" is the contract; "Acceptance" restates it line by line.
 >
-> **Root:** `docs/charter.md`. D-1 binds: the engine is driven over its wire, never patched. Nothing here changes X1 (the session record), X6 (the launch spec) or the host. X2 gains two commands (M2). §4.4 is read in D10. The prewarmed spare pool (§P1, `claim_session`) stays deferred (D14).
+> **Root:** `docs/charter.md`. D-1 binds: the engine is driven over its wire, never patched. This plan changes no part of X1 (the session record), no stored file and no launch spec field. X2 gains three commands and one optional field of `session.launch` (Interfaces). §4.4 is read in D9. The prewarmed spare pool (§P1, `claim_session`) stays deferred (D13).
 >
 > **Parent pin:** master `f2b32d6c9`. Every statement about the code below was checked against that commit.
 >
 > **Branch:** `ux-wave/prestart-engine`.
 >
-> **Revision 2 (2026-11-24).** The adversarial review of revision 1 (`258d98442`) came back "needs-attention" with eight P1 and three P2 findings. Each was checked in the code it cites and found real; "Review of revision 1" says what each one moved. In short:
-> - The prestart now has one positive identity, a durable note that names its generation. The prestart sweep, recovery, the desk filter and the host-restart rule read that note and nothing else.
-> - The session record is the commit point. It is written only after the claimed generation has been checked.
-> - The owner channel's reservation lives in the note until commit.
-> - Each intent has at most one generation, registered before any await.
-> - Everything that faces the person or a plugin is gated on the record.
-> - Route equivalence is decided on the spec the host actually receives.
-> - Scope is narrowed: every difference relaunches. Nothing is applied through the control protocol (D6).
-> - The measure is rebuilt: paired runs with a fixed key-to-Send interval, plus an acceptance run on the pinned engine.
+> **Revision 3 (2026-11-24): the structure changes.** The second adversarial review (of `b3ec9b017`) returned four P1s and four P2s. Every P1 had the same root: revision 2 made a prestart durable (its note) and left it half visible across stores that commit separately (the record, the owner binding, the route, a lane B member, a plugin surface). Patching each store would not have converged. Revision 3 makes the prestart ephemeral and puts it in the host:
+> - **The host owns it.** It lives only while the spine connection that asked for it lives, and the host kills it when that connection drops or the host restarts.
+> - **Nothing durable is written.** No note, no record, no reservation, no journal, no state file.
+> - **It stays invisible until commit.** A host-side "uncommitted" flag hides the row from everything outside the host.
+> - **Commit is one host operation:** `session.launch` with an `adopt` field. Around it, the spine's Send runs today's launch path unchanged, in today's order.
+>
+> Recovery therefore never meets a prestart. After any crash the engine is gone and Send launches as today. The first two reviews' nineteen findings are accounted for under "The findings of both reviews", and the stop rule is answered in "Does the structure close it?".
 
 ## Purpose
 
-A new chat today launches its engine at Send. The person waits for the engine to boot, run its SessionStart hooks and answer `initialize` before the first prompt is even written: about 2.2 s of the 4–5 s from Send to the first drawn row, measured on the owner's Mac on 2026-11-23.
+Today a new chat launches its engine at Send. The person then waits for the engine to boot, run its SessionStart hooks and answer `initialize` before the first prompt is even written: about 2.2 s of the 4–5 s from Send to the first drawn row, measured on the owner's Mac on 2026-11-23.
 
-After this plan, a New chat's engine starts on the first keystroke, with the launch spec as it stands at that moment. Send hands the first prompt to an engine that is already initialized. A pick changed before Send relaunches the engine while the person is still typing, so the session at Send is the one the composer shows.
+After this plan, a New chat's engine starts at the first keystroke, from the launch spec as it stands at that moment. At Send the host hands that already-initialized engine over to the session, provided its spec still matches. Otherwise Send launches as today.
 
-Until Send, the engine is a draft's engine, not a session. It has no record, and it reaches no surface, no plugin's view of the composer, no listing and no other machine (sminos aside, Known limits 2). A draft that is never sent leaves nothing behind in MAWS.
+Until Send, the engine belongs to the draft, not to any session. Nothing outside the host can see it, and the host never writes it to disk, so a draft that is never sent leaves nothing behind. The one exception is the sminos membership it takes at SessionStart (Known limits 2).
 
-## Words used in this document
+## How the reference apps do it
 
-- **Prestart:** an engine launched for an unstarted New chat before its first Send. It runs under the intent's own `appSessionId` and has no session record.
-- **Generation:** one launch attempt of a prestart. Each has its own number, launch and pin.
-- **Note:** the prestart's durable identity (D2).
-- **Commit:** the moment Send makes a prestart the session's own launch by writing its record (D5).
-- **Spine:** the session service (`src/services/sessions/`, run by `mawsd`).
-- **Host:** the engine host.
+**Claude Desktop** (`readable/app-5.1231.2`, read through `research/SOURCES.md`).
+
+*What starts a prewarm*
+- **The trigger is typing**, not opening the pane:
+  - the composer calls `noteTyping` on every non-empty text change (`web/app/v1/cc43287c9-CQ79M14o.js:85839`, `:88218-88221`);
+  - only for a new local draft (`:88142`, `:26575-26577`);
+  - the first keystroke fires at once; later changes to the draft's settings are debounced 800 ms (`:26578`, `:26853-26866`).
+- **Two kinds, at most one at a time** (`main-process/index.chunk-BjORVu2_.js:102295`; `index.chunk-BAt7rHkB.js:4674`):
+  - a draft with a folder gets an Agent SDK spare: `prewarm()` parks it with `--await-claim`, and at send `claim_session` supplies the folder, trust, mode and environment (`index.chunk-BY2YbbTr.js:19840-20094`, `:17138-17186`). This kind is behind a GrowthBook gate (`BjORVu2_.js:102200`).
+  - a draft with no folder gets a full session started hidden, `prewarmHidden` (`BjORVu2_.js:102141-102172`).
+
+*How it stays hidden*
+- It lives only in in-memory maps of the main process, never in `sessions` (`:102300`, `:102332`).
+- `saveSession` writes no row for it (`:68020-68026`).
+- Its events are swallowed; some are buffered and replayed at claim (`:91827-91845`, `:102814-102817`).
+- Every IPC method that names its id answers "Session not found" (`BAt7rHkB.js:7864-7884`).
+- Title generation and the restart checks skip it (`BjORVu2_.js:68064`, `:97059`).
+
+*Claim, miss and lifetime*
+- **Claim at send:** the draft's key must still match. Any miss (`key_mismatch`, `spare_exited`, `host_options_changed:*`, `cli_version`, `claim_timeout`, and others) disposes the prewarm and cold-starts (`BjORVu2_.js:103114-103158`, `:102488-102631`, `:104061-104082`).
+- **Lifetime:**
+  - a 10-minute TTL, with a claim refused past 8 minutes (`:102419-102422`; `cc43287c9-CQ79M14o.js:26872-26886`);
+  - memory pressure and the process cap reclaim it first (`BjORVu2_.js:94479-94490`, `:102704`);
+  - app quit disposes it (`:94547-94553`).
+- **Ownership:** the prewarm is a child of the main process and dies with it. A crash can leave a stray park directory (`~/.claude/spares/spare-*`, `BY2YbbTr.js:19847-19879`), which nothing sweeps.
+- **Telemetry:** `desktop_ccd_spare` and `desktop_ccd_session_start_timing`, with fields such as `prewarm_lead_ms` and `spare_miss_reason` (`index.chunk-BcuLdHaI.js:525-535`).
+
+**Codex desktop** (`~/codex-app-src/readable/chatgpt-26.1111.21308`, still on disk despite SOURCES.md; the installed app is a newer build, 26.1117).
+- **How it prewarms:** the app keeps at most one prewarmed thread per working folder (`main-process/early-bootstrap-226-2f6bd181558008cf.js:77556-77680`, `prewarmedThreadByCwd`). It starts the thread ahead with the app server's `thread/start` (`:102873`).
+- **Claim:** `consumePrewarmedThread` uses the thread at start only when the folder, roots, service name and history mode all match. Otherwise it discards it with `thread/unsubscribe` (`:77632-77660`, `:70600-70611`; the discard sends `thread/unsubscribe`, `:82570`).
+- **Lifetime:** it is tied to the app-server connection. The app clears every prewarmed thread when the connection reconnects, when feature enablement changes and when it disposes (`:102583`, `:254618`, `:81488`).
+- What triggers the prewarm in the renderer was not traced.
+
+**What MAWS takes from them**
+- **Taken:**
+  - the trigger is typing;
+  - at most one prewarm per machine;
+  - the prewarm lives in memory, owned by the process that holds the connection, and is cleared when that connection ends;
+  - it is hidden by refusing its id outright, not by filtering each reader;
+  - a key mismatch at send means a cold start, never an error.
+- **Differs:**
+  - MAWS owns the prewarm in the engine host, not in the window, because sessions outlive the window here (D-16 as amended);
+  - MAWS relaunches on every change rather than applying model and mode at claim (D6);
+  - MAWS reaps by the idle release rather than a fixed 10-minute TTL (D9).
 
 ## What the wire says (evidence)
 
 | | Fact | Evidence |
 |---|---|---|
-| W1 | SessionStart hooks run inside `initialize`, before its response. With `--await-initialize` they wait for it. Nothing in this sequence waits for a user message. | `fixtures/p4/p4-r7y-stub-command.jsonl` seq 4–7; `pass2/real-settings-idle-1.jsonl` seq 4–10; `p5/p5-o16-holder-await-resume.jsonl` seq 4–10; `uxwave/uxwave-851-hook-idle` |
-| W2 | `system/init` arrives only with the first user message. | `p4-r7y-stub-command-plain.jsonl`; `real-settings-idle-1.jsonl`; `uxwave/uxwave-851-idle` |
-| W3 | A new session writes no transcript before its first message, including when a SessionStart hook returned `additionalContext`. | bundle 2.1.322 `insertMessageChain`; `findings-p4-w2a-rewind.txt` 7–11; `findings-uxwave-851-prestart.txt` Q1, Q2 |
-| W4 | While it waits, the engine makes one `HEAD /api/hello` and no `/v1/messages` request: 60 s held on 2.1.331. | `uxwave/uxwave-851-idle`; `pass3/launch-env-unset.jsonl` seq 116–118 |
-| W5 | `set_permission_mode`, `set_model` and `apply_flag_settings {effortLevel}` sent before the first message hold for the first turn. Revision 2 does not use them (D6); they are recorded for a follow-up. | `uxwave/u1-plan-*-seeded-1`; `uxwave/uxwave-851-set-model`, `-set-mode`, `-effort-live` |
-| W6 | Additional directories have no live control. A folder decides the trust key, the project settings, `.mcp.json`, CLAUDE.md and the hooks the engine has already run. | bundle 2.1.322 control subtypes; `src/engine-host/launch.ts` |
-| W7 | An idle engine uses 215–420 MB of tree RSS and starts its stdio MCP servers before `initialize` is answered. | `real-settings-idle-1.jsonl`; `uxwave/uxwave-851-idle` exit row; `findings-p5-o16-veto-mcp.txt` 41–43 |
-| W8 | The host's work after `initialize` takes 40–55 ms. The ticket's "first-prompt hold" is the boot and the hooks inside `initialize`. | `pass3/p1-maws-send-file.jsonl`, `p2-no-prompt-resume-setup.jsonl`, `steer-now.jsonl` |
+| W1 | SessionStart hooks run inside `initialize`, before its response. | `fixtures/p4/p4-r7y-stub-command.jsonl` seq 4–7; `uxwave/uxwave-851-hook-idle` |
+| W2 | `system/init` arrives only with the first user message. | `p4-r7y-stub-command-plain.jsonl`; `uxwave/uxwave-851-idle` |
+| W3 | A new session writes no transcript before its first message, even when a hook returned `additionalContext`. | `findings-uxwave-851-prestart.txt` Q1, Q2 |
+| W4 | While it waits, the engine makes one `HEAD /api/hello` and no `/v1/messages` request. Measured over 60 s on 2.1.331. | `uxwave/uxwave-851-idle` |
+| W5 | Mode, model and effort hold when set before the first message. Not used here (D6). | `uxwave/uxwave-851-set-model`, `-set-mode`, `-effort-live` |
+| W6 | Additional directories have no live control. A folder decides the trust key, the project settings, `.mcp.json` and the hooks that have already run. | bundle 2.1.322; `src/engine-host/launch.ts` |
+| W7 | An idle engine uses 215–420 MB and starts its stdio MCP servers before `initialize` is answered. | `real-settings-idle-1.jsonl`; `findings-p5-o16-veto-mcp.txt` 41–43 |
 
 ## Design
 
-**D1 · A prestart is an ordinary launch under the intent's own id, with no record until commit.** The spec is built exactly as `runIntentSetup` builds it at its `launching` step: the served tool set, `intentLaunchSpec`, the owner channel's decision (D7) and `specForHost` (D8), with a fresh pin. The intent file is never written by a prestart, so neither its schema nor an older build's reading of it changes.
-*Why the intent's id:* Send can commit without the host having to rename a row, and the open tab's interest holds the row (D10).
-*Beaten:* a separate id, which the host cannot rename and which would be reaped 10 minutes after going idle even with its tab open.
+**D1 · The host owns a prestart, as an uncommitted row.** `session.prestart { spec, key }` asks the engine host to launch `spec` for `spec.appSessionId` and mark the row uncommitted. `key` (D5) is an opaque string from the spine.
+- **The admission.** The host registers the admission synchronously, in the handler, before its first await. The admission names the asking connection (its `ClientRef`) and carries a generation number the host assigns. Every later event for that id cancels an admission whose launch has not started yet: a newer prestart, `session.launch`, `withdraw`, `forget`, `stop`, or the connection ending. The launcher re-checks the admission after its probes and before it spawns (`launcher.ts`), so a cancelled admission never spawns.
+- **At most one uncommitted row per host,** as in both reference apps. A prestart for another intent kills the older one: the latest typing wins.
 
-**D2 · One positive identity: the note.** `<userData>/sessions/prestarts/<appSessionId>.json`, in the style of the bootstrap notes (`BootstrapNotes`, `intents.ts`). It holds:
+**D2 · An uncommitted row is visible to nothing outside the host.** Revision 2 had a filter per reader; revision 3 has a single gate in the host. Until commit:
+- **No events and no listing.** The host emits no `session.status` or `session.eventBatch` for the row. `engine.sessions` leaves it out, so no listing of the spine, the renderer, the budget or the connectors sees it, and RL10 has no app id to join it to (D11). `session.status` and every other command naming the id answer as for an id with no row. The exceptions are the ones D3, D4 and D10 define.
+- **No surface.** The handshake skips `ui_attach` and `ui_panes` (`surface.ts`), so no plugin pane, roster, focus request or prompt ask can reach a window. The engine may still send surface requests before attach. The host answers them itself and forwards nothing: `ui_copy` with `copied: false` (the clipboard untouched), `ui_prompt_read` with an empty box, `ui_prompt_fill` with `filled: false`, `ui_prompt_suggest` with `shown: false`. A decoded `plugin.toast` is dropped.
+- **In the budget.** The budget sheets' lists leave the row out. Under memory pressure, the budget releases it before any idle session.
+- **Interest and idle release** treat it as a row (D9).
 
-    { appSessionId, generation, pin, launchId | null, hostStartedAt, keyDigest, owner: { number, plugin, at } | null, state }
-    // state: 'launching' | 'ready' | 'retiring' | 'claimed'
+**D3 · Nothing durable, and it dies with its owner.**
+- **On disk.** The journal rows of an uncommitted row (spawn, initialize, hook frames) are kept in memory. The state file, the stored spec and the observed facts are not written. All of them are flushed at commit.
+- **The session host's roster entry** carries `prestart: true` until commit. It is the one on-disk trace, and its only reader is a successor host. A successor stops such a host rather than adopting it (`holder/adopt.ts`), and so does a handover's drain.
+- **Killing.** "Kill" means stop the engine and drop the row: no released set entry, no files left.
+- **What kills it:**
+  - the owning connection ends (a spine or `mawsd` restart);
+  - the host restarts;
+  - `session.forget` or `session.stop` on the id (an intent's discard, D9);
+  - a mismatched or plain `session.launch` (D4);
+  - `withdraw` for its generation (D8);
+  - the idle release and the budget (D9).
 
-- **Write order.** The note is written before `session.launch` is sent. It is updated with the launch's answer, and removed only after the row has been both stopped and forgotten (D11), or once commit has completed (D5).
-- **Who reads it.** Every "is this a prestart" question asks the note, and only the note: the recovery sweep (D11), the desk filter (D13), the host-restart rule (D12) and the spine's own registry after a restart.
-- **What is never taken for a prestart.** A row or a store file with no note. A failed ordinary attempt keeps its store file and journal as evidence until discard, as today (`setup.ts` rollback step 4). A prestart never runs on an intent that holds such evidence (D3).
+The spine keeps no state that outlives it (D10). Its recovery never meets a prestart: once the host restarts or the connection ends, the engine is gone.
 
-**D3 · Which composers prestart: a New chat on this machine, when Send would launch without a card.** Eligibility:
-- the intent is of kind `create`, with no `lineage` and no `launchedBy`;
-- its location is a `directory` or an `existingWorktree`;
-- `progress.lastFailure` and `progress.bootstrap` are both null;
-- no start is in flight;
-- every one of Send's guards would pass with no card and no bootstrap: the location and directory rules, the direct-route model rule, the machine route with neither a refusal nor a relay sheet, a trust key already trusted (or declined), a healthy relay on the gateway route (the cached read), the launch gate, and a served tool set. The guard code is shared with `guardIntentStart`, and nothing is written.
-- the composer's spawn target is this machine (D9).
+**D4 · Commit is one host operation: `session.launch` with `adopt`.** At Send, `runIntentSetup` runs exactly as today. The only difference is that `launchOnHost` sends `adopt: { key }` beside the spec. The host handles it under the id's serialization:
+- **Adopt** when all of these hold:
+  - an uncommitted row exists for the id;
+  - its spec equals the given spec, ignoring `sessionId` (the pin the guards minted);
+  - its key equals the given key;
+  - the engine binary it was spawned with is the one the host is configured with now (finding R2-7);
+  - it has not exited.
 
-Every other case answers `skipped` with its reason, and Send works as today.
-- **The floating chat:** in. It draws the active tab's own `Composer` for the same intent.
-- **A new-worktree location:** out. Its checkout doesn't exist until Send.
-- **A key that needs the trust card or the trust bootstrap:** out. The card is the person's decision, and the bootstrap is a launch of its own.
-- **A spawn to another machine:** out (D9).
-- **A fork, a side thread, a blank start:** out. None of them has an unstarted composer stage.
+  The host then clears the flag. It flushes the buffered journal, writes the state file and the stored spec, rewrites the roster entry without `prestart`, attaches the surface (now, or in the handshake if that is still running), and emits the row's current status. It answers `launching` with the row's `launchId`, `launchedAt` and engine session id, the same shape as a fresh launch.
+- **Otherwise** it kills any uncommitted row for the id and launches the spec as it does today.
 
-**D4 · One generation at a time per intent, owned by a registry entry made before any await.** `Prestarts` holds per intent:
+Either way the answer is today's `session.launch` answer, and the spine does the rest in today's order:
+1. `createForLaunch`;
+2. the owner channel's decision and reservation;
+3. the spawner proof;
+4. `launchOnHost`;
+5. `setRoute`;
+6. `ownerChannelLaunched`;
+7. `progress.launch`;
+8. the watch;
+9. the binding and the send.
 
-    { generation: number; pending: Promise<void>; owner: 'prestart' | 'send' | 'discard'; launchId: string | null }
+The one addition: when the answer's engine session id differs from the guards' pin (an adoption), the spine writes it into `progress.engineSessionId` right after the answer.
 
-The entry is registered synchronously, in the same tick as the command or patch that causes it. Generations never overlap at the host: a relaunch first retires the old generation fully (it joins the old one's pending launch answer, stops the row, waits for the exit, forgets), then launches the new one. Only the entry's current owner acts on replies, and each reply is checked against the generation it was sent for.
-- **The watch.** A generation's `LaunchWatch` is given the previous generation's `launchId` (the C3 corrective's `previousLaunchId`). The previous generation's late exit can then never fail the new one's watch.
-- **Send claims the entry.** The owner becomes `send` and the entry stops reacting to patches. Send then waits for `pending`, bounded by the watchdog.
-- **Discard cancels and joins.** The owner becomes `discard`. A launch the host hasn't acknowledged yet is waited for and then retired, so a late launch is never missed. (The launcher awaits its binary, relay and environment probes before it reserves a row: `launcher.ts`.)
-- **Ticket 854 keeps its barrier.** `session.intent.patch` answers once the intent is written. The relaunch it triggers runs on the entry's chain, after the answer, so a chip's acknowledgement never waits for a boot, and Send still waits for every write it started (`intentWritesSettled`).
+What a crash at any point leaves is what today's launch leaves at the same point. A crash before the commit is a crash before the launch: the provisional record goes, and the intent keeps its message for Retry. A crash after it is a launched session, and recovery hands it off as today. Nothing is written between the host's check and its answer, and the spine sets nothing on the engine between the answer and `session.send` (D6).
 
-**D5 · Commit: the record is written only after the claimed generation has been checked.** Send runs, in order:
-1. Claim the entry, then wait for it (D4).
-2. Build the spec Send would launch, through `specForHost` (D8).
-3. Compare that spec with the generation's. Read the host's row and check it: its `launchId` is the generation's, it is `ready`, no turn is open, and its `hostStartedAt` is the note's.
-4. **If anything differs or is in doubt:** retire the generation (stop, exit, forget, remove the note) and run the ordinary launch, with the prompt still unsent. A prestart's own failure is never shown.
-5. **If all agree:**
-   - write the note's state `claimed`;
-   - write the intent's `progress.engineSessionId` (the generation's pin) and `progress.launch` (its launch);
-   - **commit:** `createForLaunch`, then the owner channel's reservation and launch (D7), then `setRoute` with the route the host was sent (D8);
-   - remove the note;
-   - go on to `binding` and `session.send` as today.
+**D5 · The key is the spec the host receives, plus what the spec does not carry.**
+- **The spec.** The spine builds the prestart's spec through the same path Send uses: the served tool set, `intentLaunchSpec`, the owner channel's decision (computed without writing, D7) and `specForHost`.
+- **The key.** It holds what decides the launch but isn't in the spec: the machine route's resolved base URL (`machineBaseUrl`). Without it, two different base URLs that map to the same legacy field would compare equal (round 1, finding 7).
+- **No adoption** when the resolution is `unresolved`, or when the machine route goes to a host that doesn't list `engine.route-machine`.
+- **The binary identity** is the host's to compare (D4).
 
-Recovery meets either side of the commit and is correct on both:
-- **Before commit:** there is no record, so `reconcileIntent` answers `none`. `markInterrupted` gives the intent, with its message, a Retry card. The sweep (D11) retires the noted generation.
-- **After commit:** a record and a ready row whose spec equals the intent's. `sendUnsent` sends the retained prompt to an engine that is exactly what the record says, the same case today's recovery already handles.
-- **The `claimed` note:** if the record exists, the note is stale and is removed. If it doesn't, the generation is retired.
+**D6 · Every difference relaunches; nothing goes through the control protocol.**
+- **What counts as a change:** a different folder, additional directories, route, model, effort, mode, profile, MCP servers, tool set, question tool, owner decision or cua socket changes the spec.
+- **While the person types,** the spine asks for a new prestart, and the host replaces the old one (D1).
+- **At Send,** any remaining difference means a fresh launch.
 
-Nothing is set on the engine between the check and `session.send` (D6), so the two sides of the commit leave no third state.
+M0 showed that mode, model and effort hold when set live (W5). But their answers can carry refusals, a different effective mode, or `ok: false` inside a normal answer (`ipc.ts`), and setting anything on the engine between the check and the send would add a state that recovery does not know. Since the relaunch already happens while the person is typing, all a control path would save is a pick made in the last ~2 s before Send. Claude Desktop does apply model and mode at claim; MAWS gives that up for a recovery with no third state.
 
-**D6 · Every difference relaunches; nothing goes through the control protocol (scope narrowed in revision 2).** The launch key is the whole spec the host receives (D8) less the pin. A change to the folder, additional directories, route, model, effort, permission mode, launch profile, MCP servers, tool set, question tool, owner decision or cua socket gives a different key.
-- **A change while the person types** relaunches at once (D4).
-- **A difference found at Send** (a pick in the last moment, or a setting changed outside the intent) takes the ordinary launch.
+**D7 · The owner channel: decided without writing at prestart, reserved at Send before the commit.**
+- **At prestart:** `ownerChannelLaunch` runs with `reserve: false`, which decides and writes nothing, so the spec carries the advertisement this launch would get.
+- **At Send:** it runs as today. The record exists by then, so the reservation is written before `session.launch`.
+- **Does reserving at commit keep R2 ("a 9 that cannot be reserved is never sent")?** Yes:
+  - The reservation exists so that MAWS knows what a running launch was told (`src/shared/owner/draws.ts`, header), because the host cannot report it.
+  - Before commit nothing reads that. The row is invisible, and the engine has drawn nothing: no turn, no Messages request (W4), and the to-human mod draws only through turns.
+  - The reservation is written before the commit, the first moment anything can read the advertisement.
+  - If the reservation fails, today's rule turns the advertisement into 8. The spec then differs from the prestart's, and the host launches fresh with 8.
+- **Test:** a real owner store with a mod that declares 9.
 
-*Why:* M0 shows mode, model and effort could be set live (W5). But each answer can carry a refusal, a different effective mode, or `ok: false` inside a normal answer (`ipc.ts` `session.setPermissionMode`, `setModel`). A reset to the default is unproven. And setting anything between the check and the commit opens a third state for recovery. Since a relaunch while typing is already hidden, the control path buys only a pick made in the last ~2 s before Send.
-*Beaten:* revision 1's D6. It can return as a follow-up if the measure shows late picks are common.
+**D8 · Which composers prestart, and the spawn target.**
+- **Eligible:**
+  - an intent of kind `create`, with no `lineage` and no `launchedBy`;
+  - a location of kind `directory` or `existingWorktree`;
+  - no `lastFailure` and no pending bootstrap;
+  - no start in flight;
+  - every Send guard passing with no card and no bootstrap. That means the location and directory rules, the direct-route model rule, the machine route with neither a refusal nor a sheet, trust already recorded or declined, a healthy relay (cached) on the gateway route, the launch gate, and the served set. The guards are shared with `guardIntentStart` and write nothing.
+- **Covered:** a New chat on this machine; the floating chat, which draws the same `Composer`.
+- **Not covered:**
+  - a new-worktree location, because its checkout does not exist until Send;
+  - a trust card or bootstrap;
+  - a spawn to another machine;
+  - a fork, a side thread or a blank start.
+- **The spawn target is a renderer pick** (`useRemoteSpawn`). The composer asks for a prestart only while `spawnTargetOf(tab)` is this machine.
+- **Picking another machine** sends `session.intent.prestart.withdraw { appSessionId, generation }` with the generation the composer was given, and leaves the draft alone.
+- **The host acts only on that exact generation while it is uncommitted.** A withdraw after a Send has committed it, or after a newer generation has replaced it, does nothing. So no window can withdraw an engine another window has claimed (round 2, finding 6).
 
-**D7 · The owner channel: the decision at prestart, the reservation held in the note, moved into the owner store at commit.** `ownerChannelLaunch` today reserves the advertisement in the owner store before the launch is sent (rule R2: "a 9 that cannot be reserved is never sent"). `reserveLaunch` refuses a session with no record (`store.ts`, `known`), so a prestart would fall from 9 to 8.
-- **The split.** `ownerChannelLaunch` gains a `reserve` seam. An ordinary launch reserves in the store as today. A prestart's reservation is written into its note, durably, before the launch is sent, so R2 still holds: a 9 never reaches an engine unless it is reserved somewhere durable.
-- **At commit,** after `createForLaunch`: `reserveLaunch` with the note's reservation, then `launched` with the generation's launch answer. The first `system/init` that `launched` waits for comes with the first prompt (W2).
-- **If the store refuses at commit,** the engine was told 9 with no reservation behind it. The record is removed, the generation retired, and the ordinary launch runs (its own decision may answer 8).
-- **Why not skip prestarts that would advertise 9:** with the built-in to-human mod on by default (D-21) and its plugin installed, that is every such session, so a skip would leave out nearly all of the owner's new chats.
-- **Test:** a real owner store, with a mod that declares 9.
+**D9 · Reaping, ending and switches.**
+- **The idle release.** The row runs under the intent's id. While the New chat's tab is open, the window's interest keeps it. When interest ends (the tab closed, the tab set aside to ⌘⇧T, the window closed or the app quit), the host's `IdleRelease` kills the row after the idle time: `supervisor.idleExitMinutes`, 10 min by default, or 24 h on a server. Memory pressure can kill it sooner.
+- **Why no timer of its own:** §4.4 rules out a fixed timer while an app holds a session. Claude Desktop's 10-minute TTL would be the alternative.
+- **Discard** (closing a blank or confirmed draft, New chat closing other empty chats, the relaunch sweep) already calls `session.forget` for an id with no record, and that kills the row.
+- **Emptying the draft** does not end the prestart.
+- **Switches:**
+  - with `MAWS_E2E=1`, a prestart happens only under `MAWS_E2E_PRESTART=1`;
+  - never under the replay seam or the stub session source, where each launch takes the next fixture.
 
-**D8 · Route equivalence is decided on what the host receives, and the route is written at commit.**
-- The key includes `specForHost`'s output. On the machine route, that output carries the legacy field derived from the layered base URL, which `machineBaseUrl` reads after `ownerChannelLaunch`. The key also includes that resolution itself.
-- A resolution that is `unresolved`, or a machine route on a host that doesn't list `engine.route-machine`, means equivalence can't be established, so no adoption.
-- A settings change that moves the base URL with the composer untouched gives a different key, and the ordinary launch.
-- `launchOnHost`'s `setRoute` is a no-op without a record (`index/sessions.ts`), so the commit writes the route the host was sent once the record exists. A later resume then reads the right route.
-- **Test:** a settings change with the same composer fields, then a resume.
+**D10 · The spine and the trigger.**
+- **The trigger.** The composer calls `session.intent.prestart { appSessionId }` on the leading edge of the first change that leaves the document non-empty. After that it calls at most once every 10 s while the draft stays non-empty, so a prestart that was killed comes back with the next keystroke.
+  - *Beaten:* the draft save, whose 750 ms trailing debounce waits for a pause in typing.
+- **The spine:**
+  - for an eligible intent, it builds the spec and the key and sends `session.prestart`;
+  - for an ineligible one, it answers `skipped` with the reason;
+  - it returns the generation either way.
+- **What the spine keeps.** It keeps only an in-memory set of the ids it asked for. After an `intent.patch` that changes a launch-relevant field of one of them, it asks again, or withdraws if the intent is no longer eligible. The patch answers once the intent is written, and the request follows. A chip's acknowledgement never waits for a boot, and ticket 854's barrier (Send waits for every write it started) is unchanged.
+- **Losing the set** (a spine restart) loses nothing: the host killed those rows when the connection ended.
 
-**D9 · The spawn target gates the prestart.** The machine a chat will start on is a renderer pick (`useRemoteSpawn`, `remote-spawn.ts`), not an intent field. The composer asks for a prestart only while `spawnTargetOf(tab)` is this machine. Picking another machine withdraws the prestart through `session.intent.prestart.withdraw` (retire, as D11 does) and leaves the draft alone. Picking this machine again lets the next keystroke start one. Both orders are tested: pick then type, and type then pick.
+**D11 · The desk and sminos (step 3 of the coordinator's brief).**
+- **The desk cannot show an uncommitted engine as a session.** A sminos member on lane B is listed under its app id, once joined (`rl10/members.ts`, `listingId`). A join comes from one of two sources:
+  - `engine.sessions` (`#join`), which leaves out the row (D2);
+  - a spawn proof (`#bySpawn`), which a local New chat does not have.
 
-**D10 · Reaping is the idle release, as for any idle session.** The row is under the intent's id, so the window's interest (`main.tabs` and the sessions on screen) holds it while the New chat's tab is open. Once interest ends, the host's `IdleRelease` releases it after the idle time (`supervisor.idleExitMinutes`, 10 min by default; 24 h on a server). The memory budget may release it sooner.
+  So both the hub's reports (`#report`) and a direct desk read (`#listings`, `calls.ts`) skip it, because its `listingId` is null. This needs nothing beyond the host flag.
+- **One change: re-join at commit.** Today a join is tried when a member is reported, which for a prestart happens before commit, while the row is hidden. Without a retry, a committed session would be listed only at its first Stop. So when the spine reports a new record (`recordChanged`), the endpoint retries the join of any lane B member not yet joined, and the session is listed from Send on.
+- **What remains visible:**
+  - sminos's own record of the member (alias, membership) and anything sminos itself writes to the project's log at SessionStart. Accepted (Decision Log 2; Known limits 2). Hiding it would take a change in sminos, outside MAWS.
+  - Claude Code's own registry of running processes. It is visible only to engine-level tools, and in the same class.
 
-Interest ends when:
-- the tab closes;
-- the tab is set aside to ⌘⇧T ("Draft kept");
-- the window closes or the app quits (mawsd and the engine outlive the window).
+**D12 · Cost and hooks.**
+- **Tokens:** none before Send (W4).
+- **Hooks:** a prestart runs the person's SessionStart hooks at the keystroke and again at each relaunch. Whatever a hook spends is its own.
+- **Memory:** one idle engine and its MCP servers per machine at most (D1, W7).
 
-When the spine sees a noted generation exit, it forgets the row and removes the note. Other ends:
-- **Discard** (the tab closed on a blank or confirmed draft, New chat closing other empty chats, the relaunch sweep) retires before the intent goes (D11).
-- **A launch-key change** relaunches (D4, D6).
-- **Send** commits (D5).
-- **Emptying the draft** does not end the prestart. Emptying and retyping is the common case, and the idle release covers a draft that is really abandoned.
+**D13 · The spare pool stays deferred.** `claim_session` stays unused. A prestart is one engine with one draft's exact spec. Claude Desktop's spare, by contrast, takes the folder at claim and is gated.
 
-*Why no timer of its own:* §4.4 rules out a fixed timer while an app holds a session, and the owner's words are "reaped like any idle session".
-
-**D11 · Retiring a generation, and what a crash leaves.** To retire a generation:
-1. Join its pending launch.
-2. `session.stop`, then wait for the exit.
-3. `session.forget`, then remove the note.
-The note stays until both stop and forget have succeeded, so a failure leaves the cleanup key for the next try.
-
-`discard` retires first and drops the intent only after that. Today's discard drops the intent even when `forgetQuietly` fails. With a prestart, that failure leaves the note: the intent goes, and the note's retirement is retried at the next recovery. A discard with no note behaves exactly as today.
-
-What each crash leaves:
-- **A window quit or crash:** mawsd, the spine and the engine keep running, and D10's release applies.
-- **A restart of mawsd or the spine:** the recovery retires every noted generation that is not `claimed` with a record (D5), whatever its row's state, and touches nothing it holds no note for.
-- **On disk:** only the host's row files for a noted id, which retirement forgets. No transcript is written (W3), and neither the record nor the intent changes.
-
-**D12 · A host restart retires unclaimed prestarts.** An adopted engine's crons are seeded `unknown` when its state file holds no cron record (`work-state.ts`, `adoptedWith`). A prestart has never reached a Stop, so it holds no record. Unknown work blocks the idle release (`budget.ts`, `holdsWork`), so an adopted prestart would never be reaped.
-- The note keeps the `startedAt` from the host's welcome at its launch.
-- At a welcome with another `startedAt`, or a status with `holder.adopted`, every generation that is not `claimed` is retired. The next keystroke starts a new one (D15).
-- **Test:** a host restart with a prestart live.
-
-**D13 · Nothing of a prestart reaches a surface, a plugin or the desk before commit.** The record, written only at commit (D5), is the gate.
-- **Already gated on the record:** the read model, the index source, the project channel, the attention store, the notifier, the browser and the spine mirror.
-- **Readers that take any live row get the bootstrap's rule, "a row with no record is not a session":**
-  - in the renderer: `PluginsWidget`'s ready count, Customize's choice of a ready process, the connectors list, the relay monitor, and the budget sheets' rows and their Stop (`BudgetSheets.tsx`);
-  - in the spine: connector routing (`engine-route.ts`), the owner-delivery pass and connector sign-in.
-- **Plugins** (`engine-surface/asks.ts`, `app/plugin-toasts.ts`). A surface ask for an id with no record gets a safe negative: `prompt_read` answers `{ text: '', cursor: 0 }`, `prompt_fill` answers `filled: false`, `prompt_suggest` answers `shown: false`. A plugin toast for such an id is not shown. `copy` is unchanged: it doesn't read the draft. Without this, a plugin in the draft's engine could read or fill the composer, because the asks follow the active tab's id, which is the intent's.
-- **The intent's own `Composer`** still reads the session as unstarted: `useSetupIntent` needs a record as well as a status. A test pins this.
-- **Holder authority** keeps counting the row: an engine does run in that folder (Known limits 3).
-- **The desk** (finding 6). RL10 joins an engine pin to its app id through `engine.sessions` (`rl10/members.ts` `#join`), whether or not a record exists. Both the hub's listings (`#report`) and a direct desk read (`endpoint.listings`, `calls.ts` `#listings`) read the joined members. The filter goes where the two paths share their source: a lane B member whose joined app id has a note that isn't `claimed` is left out of `members()`. It is keyed by app id and launch id, so a later generation is matched as well.
-  - It holds across restarts: the note is on disk, so an endpoint or spine restart still sees it.
-  - At commit (or retirement) the spine tells the endpoint, which re-evaluates the member, and the session is listed from then on.
-  - **Tests:** both hub publication and a direct desk read.
-
-**D14 · Cost, hooks, sminos; the spare pool stays deferred.**
-- **Tokens:** the engine spends none before Send (W4).
-- **Hooks:** a prestart runs the person's SessionStart hooks at the keystroke and at each relaunch. Whatever a hook spends is its own.
-- **Memory:** a prestart costs an idle engine's memory and its MCP servers (W7).
-- **sminos:** a prestart carries `SMNS_MEMBER`, so sminos takes it as a member at its SessionStart (accepted, Decision Log 2; Known limits 2).
-- **The spare pool:** `claim_session` stays unused. A prestart is one engine for one draft with its exact spec.
-
-**D15 · The trigger, and its switches.**
-- **The trigger.** The first composer change that leaves the document non-empty calls `session.intent.prestart` on the leading edge. After that it calls again at most once every 10 s while the draft stays non-empty, so a retired or reaped prestart comes back with the next keystroke. The spine is idempotent.
-  - *Beaten:* the draft save, whose 750 ms trailing debounce (`DRAFT_DELAY_MS`) delays the first save until typing pauses.
-- **The switches.** With `MAWS_E2E=1` the spine prestarts only under `MAWS_E2E_PRESTART=1`. It never prestarts under the replay seam or the stub session source, because each launch there takes the next fixture.
-
-**D16 · The measure.**
-- **The flag.** The "before" arm is the flag-off path on this branch, not a master build: with `MAWS_E2E_PRESTART` unset the spine never prestarts, so Send takes exactly today's code path (accepted, Decision Log 2).
-- **(a) Regression bound,** group `prestart-latency`, measured.
+**D14 · The measure.**
+- **The "before" arm.** It is the flag-off path on this branch, not a master build: with `MAWS_E2E_PRESTART` unset, Send takes exactly today's code path (accepted, Decision Log 2).
+- **(a) The regression bound,** group `prestart-latency`, measured.
   - **Setup:** the latency stub engine with a new `LATENCY_STUB_INIT_MS=2000`.
-  - **Runs:** paired flag-off and flag-on Sends, with the same fixed interval from the first real key press to Send (1.5 s, about a short prompt's typing time), in alternating order.
-  - **Timing:** each run stamps the first key press (Playwright's `keyboard.press`, read in the page as the `keydown` event's time) and the first assistant row drawn (the paint marker of `local-latency.spec.ts`).
-  - **Engine starts:** counted outside the journal, which `forget` erases. The stub appends one line per process start to `LATENCY_STUB_STARTS_FILE`.
-  - **The bound:** flag-on's median key-to-row time is at least 1.5 s below flag-off's at the same interval. A flag-on run also counts exactly one engine start per Send with no pick changed.
-  - The revision 1 arm that waited for ready stays only as a regression case inside the functional scene (M3). It no longer bounds the gain, since waiting removed the delay by construction.
-- **(b) Acceptance,** group `prestart-engine`, measured; it runs on one Mac and spends nothing.
-  - **Setup:** the pinned engine (`MAWS_E2E_ENGINE_BIN` set to a version path, recorded in the result) with the API at the scripted Messages stand-in (`MAWS_RELAY_URL` pointed at it on the gateway route; the stand-in answers `GET /api/hello` 200). The config is a scratch one holding three representative SessionStart hooks that sleep 200 ms each, about the 0.5–0.7 s the ticket measured.
-  - **Runs and output:** the same paired runs and timestamps as (a). It reports flag-off and flag-on medians and their difference.
-  - What the live model adds (its `message_start` time, 0.6–1.4 s on 2026-11-23) is the same in both arms, and is reported only as that estimate, apart from the measured difference.
-  - A live run with the owner's own hooks spends a message per Send, so it waits for the owner's word.
+  - **Runs:** paired flag-off and flag-on runs, in alternating order. Each run has 3 s of typing (longer than the 2 s boot), from the first real key press to Send.
+  - **Stamps:** in the page, the first `keydown`, the Send press, and the first assistant row painted (the paint marker of `local-latency.spec.ts`). A run whose key-to-Send interval is outside 3 s ± 100 ms is reported and not counted.
+  - **The bound:** flag-on's median Send-to-paint is at least 1.5 s below flag-off's.
+  - **Engine starts:** counted outside the journal by the stub, one line per process start in `LATENCY_STUB_STARTS_FILE`. Flag-on counts exactly one start per Send.
+- **(b) Acceptance,** group `prestart-engine`, measured. It spends nothing.
+  - **Setup:** the pinned engine, `MAWS_E2E_ENGINE_BIN` set to a version path that is recorded. The API is the scripted Messages stand-in: `MAWS_RELAY_URL` points at it on the gateway route, and it answers `GET /api/hello` with 200. A scratch config holds three representative SessionStart hooks of 200 ms each.
+  - **Runs:** the same paired runs and stamps as (a).
+  - **Reported:** both medians and their difference. The live model's own `message_start` time (0.6–1.4 s on 2026-11-23) is the same in both arms, and is reported only as that estimate.
+- **A live run** with the owner's hooks spends a message per Send, so it waits for the owner's word.
+
+## The findings of both reviews
+
+Round 1 reviewed `258d98442`; round 2 reviewed `b3ec9b017`. Each row says whether the finding is closed by the structure (S), closed by a specific change (C), or still open (O).
+
+| # | Finding | | How |
+|---|---|---|---|
+| 1·1 | The record was created before the wait and the controls, so recovery would send the prompt to a mismatched engine. | S | Commit is the launch, in today's order. The host checks before it answers, and nothing is set before the send (D4, D6). |
+| 1·2 | `reserveLaunch` refuses a session with no record, so 9 falls to 8. | S | The reservation is written at Send, after `createForLaunch` and before the commit, as today (D7). |
+| 1·3 | No owner for a launch in flight. The host awaits before it reserves a row, and the watch was keyed by app id. | S + C | The host registers the admission before any await, and the launcher re-checks it before spawning. The id is serialized in the host, and the watch sees the row only once it is committed (D1, D4). |
+| 1·4 | The sweep of intents with no record would erase a failed attempt's evidence. Discard drops the intent even when `forget` fails. | S | There is no sweep and nothing durable. A failed ordinary attempt is never touched (D3, D8). |
+| 1·5 | Surface asks and toasts follow the intent's id. The budget sheets list rows with no record. | S | The host does not attach the surface, answers surface requests with negatives, drops toasts, and keeps the row out of the budget's lists (D2). |
+| 1·6 | RL10 joins the pin to the app id with no record. | S + C | The row is not in `engine.sessions`, so there is no join. The endpoint re-joins at commit (D11). |
+| 1·7 | The key was computed before the route was resolved, and `setRoute` does nothing without a record. | S + C | The key holds the host's spec plus the resolution, and `setRoute` runs in today's order (D4, D5). |
+| 1·8 | The control answers carry refusals and `ok: false`. | S | No control path (D6). |
+| 1·9 | An adopted prestart's crons seed `unknown`, which blocks the idle release. | S | A successor stops a host whose roster entry says `prestart`; nothing is adopted (D3). |
+| 1·10 | The spawn target is a renderer pick. | C | The composer gates on `spawnTargetOf`, and a change withdraws the prestart (D8). |
+| 1·11 | Waiting for ready removed the delay by construction, and the journal cannot count starts. | C | Paired runs with a fixed typing interval, the real key and paint stamps, starts counted in a file, and an acceptance group (D14). |
+| 2·1 | The record can commit without the owner reservation or route. `launched` swallows write errors. | S | The record, reservation, launch, route and binding run in today's order around today's launch. A failure at any point does what it does for a launch today. That `launched` swallows its write error is today's behaviour for every launch (`owner/launch.ts`); it is outside this change and goes to the tracker (Known limits 6). |
+| 2·2 | A lost launch reply cannot be retired by joining a promise. A new spine cannot tell "never dispatched" from "still starting". | S | The admission belongs to the connection, and the host cancels or kills it when that connection ends. A new spine has nothing to retire. The host never releases the id while an admission of the old connection is live, and an ordinary launch on the id kills it first (D1, D3). |
+| 2·3 | The desk filter missed publication and expired too soon. | S | There is no filter to expire. A pin is listed only once the host commits it, because only then can it be joined (D11). |
+| 2·4 | Plugin panes and clipboard writes still reached the unsent chat. | S | No surface attach before commit. `ui_copy` is answered `copied: false` without touching the clipboard. The panes are fetched at commit (D2, D4). |
+| 2·5 | `holder.adopted` is not a one-shot event, so it would retire unrelated drafts. | S | There is no sweep by status. A host restart kills its own uncommitted rows (D3). |
+| 2·6 | One window can withdraw another window's claimed engine. | C | Withdraw names a generation. The host acts only on that uncommitted generation, so a withdraw after commit or after a replacement does nothing (D8). |
+| 2·7 | The launch key misses the engine binary. | C | The host compares the binary the row was spawned with against the one it is configured with now (D4). |
+| 2·8 | The latency bound demanded the whole typing interval as the gain. | C | 3 s of typing against the 2 s stub, a 1.5 s bound, and the real key, Send and paint times recorded (D14). |
+
+No finding is left open. One trace remains on purpose and is new in revision 3: the session host's roster entry, marked `prestart` (D3). Its only reader is the successor that stops it.
+
+## Does the structure close it? (the stop rule)
+
+Yes, for everything MAWS owns.
+- **Nothing durable.** A prestart leaves nothing on disk except the roster mark, whose meaning is "stop this host". No reader outside the host sees it. Without it, a host crash could not stop the engine.
+- **Nothing visible before commit.** The single host gate (D2) replaces revision 2's seven reader filters and its endpoint filter, and the desk needs no filter at all (D11).
+- **What remains visible** is outside MAWS and is a known limit: sminos's membership, and the engine's own process registry. The person's hooks run at the keystroke.
+
+Both reference apps confirm the shape: an in-memory prewarm owned by the process holding the connection, hidden by refusing its id, claimed on a key match, and a cold start on any miss.
+
+**Recommendation: build.** The work is now mostly in the host:
+- the admission, the gate, the deferred journal, the adopt branch of `session.launch`, the roster mark and its successor rule;
+- in the spine, one field on `launchOnHost`, a stateless prestart command and a patch hook;
+- a trigger in the renderer;
+- one re-join in the endpoint;
+- the measure.
+
+That is smaller than revision 2, and every recovery path is today's.
 
 ## Acceptance (ticket 851's "Done when")
 
-- **A1.** Typing into a fresh New chat composer starts its engine with the launch spec as it stands then: the folder, model, effort, mode, profile, route and tool set.
-  *Proof:* a unit test (the generation's spec equals the one Send builds); e2e `prestart.spec.ts`.
-- **A2.** Sending reuses the running engine: one engine start (counted outside the journal), and the record's pin is the generation's.
-  *Proof:* a unit test; e2e.
-- **A3.** A change to the launch spec before Send relaunches it (D6), and a difference found at Send takes the ordinary launch.
-  *Proof:* unit tests for each field, a settings-only change on the machine route, and the held Tools pick with prestart on.
-- **A4.** An abandoned draft's engine is reaped like an idle session (D10). Discard, recovery, an exit and a host restart retire it without touching a failed attempt's evidence (D11, D12).
-  *Proof:* unit tests for each case separately.
-- **A5.** The spare pool stays deferred (D14).
-- **A6.** The first-row time is measured flag-off and flag-on on the same machine (D16), on the Mac lane.
+- **A1.** Typing in a fresh New chat composer starts its engine with the launch spec as it stands then: folder, model, effort, mode, profile, route and tool set.
+  - *Proof:* host and spine unit tests (the prestart's spec equals the one Send builds); e2e `prestart.spec.ts`.
+- **A2.** Sending reuses the running engine: one engine start, counted outside the journal, and the record's pin is the engine's.
+  - *Proof:* unit tests; e2e.
+- **A3.** A change to the launch spec before Send relaunches the engine, and a difference at Send means a fresh launch (D6).
+  - *Proof:* unit tests per field; a settings-only change on the machine route; two binaries; the held Tools pick of `e2e/sessions.spec.ts` with prestart on.
+- **A4.** An abandoned draft's engine is reaped like an idle session (D9). A connection drop, a host restart, a discard and a withdraw each kill it and leave no file.
+  - *Proof:* host unit tests per case; e2e for the blank-tab close.
+- **A5.** The spare pool stays deferred (D13).
+- **A6.** The first-row time is measured with the flag off and on, on the same Mac (D14).
 
 ## Interfaces
 
     // X2, additive (WIRE_MINOR +1)
-    'session.intent.prestart':          { appSessionId } -> { status: 'started' | 'running' | 'skipped'; reason?: string }
-    'session.intent.prestart.withdraw': { appSessionId } -> void
+    'session.intent.prestart':          { appSessionId } -> { status: 'started' | 'running' | 'skipped'; generation: number | null; reason?: string }   // window -> spine
+    'session.intent.prestart.withdraw': { appSessionId, generation } -> void                                                                          // window -> spine -> host
+    'session.prestart':                 { spec: LaunchSpec, key: string } -> { status: 'started' | 'running' | 'refused'; generation: number; reason?: string }   // spine -> host
+    'session.prestart.withdraw':        { appSessionId, generation } -> void                                                                          // spine -> host
+    'session.launch' input:             + adopt?: { key: string }      // D4; its answer is unchanged in shape and carries the engine session id
 
-    // src/services/sessions/prestart.ts (new)
-    PrestartNotes                      // <userData>/sessions/prestarts/<id>.json (D2)
-    Prestarts                          // the registry (D4): request(id), onPatch(id), claim(id) -> Claimed | null, cancel(id), retire(id), onStatus(status), onHostWelcome(startedAt)
-    prestartVerdict(s, intent)         // D3: the guards, shared with guardIntentStart, nothing written
-    launchKey(sent: LaunchSpec, resolution)  // D6, D8
+    // host: the uncommitted flag on the row (D2), its admission (D1), the buffered journal (D3), the roster's `prestart` mark (D3)
+    // spine: prestartVerdict(s, intent) and prestartSpec(s, intent) -> { spec, key }, the guards and spec path shared with Send (D5, D8)
+    // owner: ownerChannelLaunch(..., { reserve: false }) decides without writing (D7)
+    // endpoint: recordChanged retries the join of an unjoined lane B member (D11)
 
-    // src/services/owner/launch.ts
-    ownerChannelLaunch(s, spec, ctx, reserve?: (reservation) => Promise<void>)  // D7: an ordinary launch reserves in the store; a prestart in its note
-
-    // src/endpoint/rl10/members.ts
-    members() leaves out a lane B member whose app id is noted unclaimed; `prestartChanged(appSessionId)` re-evaluates it (D13)
-
-An older spine refuses the unknown commands, and the renderer reads a refusal as `skipped`. An older window never calls them. The intent, the record and the host are unchanged.
+An older host refuses `session.prestart` and ignores `adopt`, so the spine skips the prestart (the capability `engine.prestart` on the welcome says which). An older spine refuses the window's commands, which the window reads as `skipped`.
 
 ## Milestones
 
 ### M0 · The probe (done)
-- **Scenario:** `spikes/protocol-probe/scenarios/pass3/uxwave-851-prestart.mjs`.
-- **Results:** `findings-uxwave-851-prestart.txt`, with four tests in `fixtures.test.mjs`.
-- **How it ran:** on the MacBook, as the architect ruled: a scratch `CLAUDE_CONFIG_DIR` per arm holding the probe's hook, engine 2.1.331 named by its version path, the API at the stand-in with a stand-in token, every sminos variable unset, no app window.
+`findings-uxwave-851-prestart.txt`; four tests in `fixtures.test.mjs`. Run on the MacBook, isolated as the architect ruled.
 
-### M1 · The prestart in the spine
-- **What:** the note, the registry, the commit order, retirement, the recovery sweep and the host-restart rule (D2, D4, D5, D7, D8, D11, D12).
-- **Tests first,** each case separately:
-  - eligibility, including a failed attempt's evidence and a pending bootstrap (D3);
-  - the generation's spec equals Send's, machine route included;
-  - commit with one launch, the pin carried and the route written;
-  - every field's difference relaunching while typing;
-  - a difference at Send taking the ordinary launch with the prompt unsent;
-  - a Send while a generation is retiring;
-  - a Send while it is still booting;
-  - a discard before the launch is acknowledged;
-  - a late exit of an old generation, which must not fail the new watch;
-  - a crash before the commit (`none`, Retry card, note retired) and after it (`sendUnsent` to an equal engine);
-  - recovery retiring a noted generation and leaving a failed attempt's store and journal;
-  - `forget` failing, so the note stays;
-  - a host restart retiring an unclaimed generation;
-  - the owner reservation: in the note, moved at commit, a store refusal at commit falling back. This runs against a real owner store with a mod that declares 9.
-- **Proof:** `tsc -p tsconfig.node.json`; eslint on the changed files; vitest over `src/services/sessions` and `src/services/owner`.
+### M1 · The host
+- **What:** the admission and generation; the uncommitted flag and its gate (events, `engine.sessions`, budget lists, surface skipped and its requests answered); the buffered journal and deferred state file; `adopt` in `session.launch`; the kills (connection end, `forget`/`stop`, mismatched launch, withdraw, idle release, budget first); the roster mark, the successor rule and the handover drain; at most one uncommitted row; the capability.
+- **Tests first,** each case on its own:
+  - the admission cancelled before spawn by each canceller;
+  - the connection ending while the launch is held before row reservation;
+  - nothing emitted or listed before commit;
+  - surface requests answered and the clipboard untouched;
+  - adopt with an equal spec;
+  - adopt refused for a different spec, a different key, a different binary, or an exited row;
+  - commit while the handshake is still running;
+  - the journal whole after commit;
+  - no file left after a kill;
+  - a successor stopping a marked host;
+  - a second intent's prestart killing the first;
+  - withdraw of a committed and of a replaced generation doing nothing.
+- **Proof:** `tsc -p tsconfig.node.json`; eslint; vitest over `src/engine-host`.
 
-### M2 · The commands, the trigger and the gates
-- **What:** the two commands; the trigger with its spawn-target gate and withdraw (D9, D15); the readers, surface asks, toasts and budget sheets (D13); the endpoint's member filter (D13).
+### M2 · The spine and the window
+- **What:** the prestart verdict and spec through Send's own functions; `reserve: false`; `adopt` on `launchOnHost`, with the engine session id written to progress; the patch hook; the window's two commands; the trigger with its spawn-target gate and withdraw.
 - **Tests:**
-  - the trigger's leading edge;
+  - the spec equal to Send's, machine route included;
+  - the settings-only base URL change;
+  - Send adopting, and Send falling back;
+  - a crash at each step of today's order with an adopted launch (each injected after its write);
+  - the owner reservation at Send with a mod that declares 9, and a refused reservation giving 8 and a fresh launch;
   - both orders of a spawn-target change;
-  - `useSetupIntent` still reads unstarted with a ready status;
-  - each reader leaving out a row with no record;
-  - the asks' negatives and the toast held back;
-  - the member filter on hub publication and on a direct desk read, across an endpoint restart, and re-evaluated at commit.
-- **Proof:** both typechecks, eslint, vitest over the touched directories and the tokens guard. For each touched renderer file, find its importers in `apps/desk-web`; if a file changes shape, add desk-web's typecheck, build and tests. Run `src/shared/machine` if the commands reach the machine router.
+  - the trigger's leading edge.
+- **Proof:** both typechecks, eslint, vitest over the touched directories, the tokens guard, `src/shared/machine`, and the desk-web importer check.
 
-### M3 · The measure and the scenes
-- **Stub changes:** the stub's `LATENCY_STUB_INIT_MS` and `LATENCY_STUB_STARTS_FILE`, with its unit test.
+### M3 · The endpoint and the measure
+- **Endpoint:** the re-join at commit, tested on hub publication and on a direct desk read.
+- **Stub:** `LATENCY_STUB_INIT_MS` and `LATENCY_STUB_STARTS_FILE`.
 - **Specs:**
-  - `e2e/prestart-latency.spec.ts` (group `prestart-latency`, measured);
-  - `e2e/prestart-engine.spec.ts` (group `prestart-engine`, measured: the pinned engine against the stand-in with the three hooks);
-  - `e2e/prestart.spec.ts`, in the default group, with the stub engine and `MAWS_E2E_PRESTART=1`. Its scenes: type, wait, Send, one engine start, a reply; a blank-tab close leaving no host row; the held Tools pick of `e2e/sessions.spec.ts` with prestart on; a pick changed while typing, relaunching.
-- **Registration:** both measured groups go into `gate.yml`'s `MEASURED_E2E` and the group lists.
-- **Proof:** the gate's script tests. The e2e runs go to the architect's Mac queue.
+  - `e2e/prestart-latency.spec.ts` (`prestart-latency`, measured);
+  - `e2e/prestart-engine.spec.ts` (`prestart-engine`, measured);
+  - `e2e/prestart.spec.ts` (default group): type, wait, Send, one start, a reply; a blank-tab close leaving no row; the held Tools pick; a pick changed while typing.
+- **Registration:** both measured groups go into `MEASURED_E2E` and the group lists.
+- **Proof:** the gate's script tests. The e2e runs go through the architect's Mac queue.
 
 ### M4 · The gate
-- One high review of the range. Fix what this change introduced; log the rest in `docs/tech-debt-tracker.md` and in Known limits.
-- Then: the typecheck of the touched projects, eslint, vitest over the touched directories, `src/shared/machine` if a schema moved, and class 1a once.
-
-## Review of revision 1 (2026-11-24): what each finding moved
-
-| # | Finding (checked in the code) | Revision 2 |
-|---|---|---|
-| 1 | D4 made the record before the wait and the controls. `reconcileIntent` reads a record plus a live row as "send the retained prompt" (`recovery.ts` `sendUnsent`). | The record is the commit point, written after the generation has been checked. Nothing is set between the check and the send (D5, D6). Tested with a crash on each side. |
-| 2 | `ownerChannelLaunch` reserves before launch. `reserveLaunch` refuses an unknown session (`store.ts` `known`), so 9 falls to 8. | The decision and the reservation are split. The prestart's reservation is held durably in its note and moved into the store at commit; a refusal there falls back. Skipping such sessions would leave out nearly all of them (D7). |
-| 3 | `adopt` could not tell "no launch" from "retiring, replacement not yet answered". The host awaits before reserving a row (`launcher.ts`), and the watch was keyed on the app id alone. | A per-intent generation is registered before any await. Send claims it and discard cancels and joins it. Watches take the previous launch's id. 854's barrier is kept (D4). |
-| 4 | Rows with no record are not only prestarts: rollback keeps a failed attempt's store and journal. Discard drops the intent even when forget fails. | The note is the positive identity. Recovery retires only noted generations, and the note stays until stop and forget both succeed (D2, D11). |
-| 5 | Surface asks and plugin toasts follow the active tab's id, which is the intent's, and the budget sheets list rows with no record. | Asks for an id with no record get safe negatives, toasts are held back, and the budget rows and Stop are filtered (D13). |
-| 6 | RL10 joins the pin to the app id with no record. `endpoint.listings` builds listings on its own. | The filter is at `members()`, the source both paths share, keyed by app id and launch id. It is held by the durable note and re-evaluated at commit (D13). |
-| 7 | On the machine route, `specForHost` reads the layered base URL after the owner decision, and `setRoute` is a no-op without a record. | The key is the spec the host receives plus the resolution. No adoption when equivalence can't be established. The route is written at commit (D8). |
-| 8 | The control answers carry refusals, other effective modes and `ok: false`. A reset to default is unproven. | No control path. Every difference relaunches while typing, or takes the ordinary launch at Send (D6). |
-| 9 | An adopted prestart's crons seed `unknown`, which blocks the idle release. | A host restart retires every unclaimed generation (D12). |
-| 10 | The spawn target is a renderer pick, not an intent field. | The trigger is gated on `spawnTargetOf`, and a change of target withdraws the prestart without touching the draft (D9). |
-| 11 | Waiting for ready removed the delay by construction. The journal can't count starts after `forget`. | Paired runs with a fixed key-to-Send interval, the real key press and the first assistant row stamped, starts counted in a file. A second measured group runs the pinned engine against the stand-in with representative hooks (D16). |
-
-## Is it proportionate?
-
-Revision 2 roughly doubles revision 1's build: a note store and registry, a reordered commit, an owner-reservation seam, an endpoint filter and seven renderer and spine gates, besides the measure. The gain is about 2 s off every new chat's first reply, the most frequent wait the owner sits through in MAWS.
-
-The note is what keeps the growth in check. One positive identity answers findings 1, 4, 6, 9 and part of 2. Gating the surfaces on the record, which the commit writes last, answers 5. Dropping the control path takes 8 out entirely.
-
-The narrowest scope that keeps the gain is this plan. A narrower one would have to drop the machine route or the owner channel's 9, and either would leave out nearly every new chat, since both are the defaults (D-19 as amended 2026-11-04; D-21).
-
-What could still be cut, at a known cost:
-- **D9's withdraw:** if dropped, a remote pick would simply never prestart, and a prestart already running would be reaped by the idle release after the tab closes.
-- **The second measured group** (b): if dropped, acceptance would rest on the synthetic stub alone.
-
-I'd keep both.
+One high review. Then the typechecks, eslint, vitest over the touched directories, `src/shared/machine`, and class 1a once.
 
 ## Known limits
 
-1. A prestart runs the person's SessionStart hooks at the keystroke, again at each relaunch, and for drafts that are never sent (D14).
-2. sminos sees a prestart as a member from its start (D14). An abandoned draft leaves a sminos member that ended without doing any work.
-3. A prestart in an existing worktree counts as that folder's holder. A worktree cleanup while a draft there has a running engine meets a holder with no record. This is rare; the fix is for cleanup to retire a noted prestart, and it is logged, not built.
-4. A prestart takes an idle engine's memory. Under budget pressure, it can be the reason another idle session is released.
-5. A pick made in the last moments before Send, or a setting changed outside the intent, costs that Send a boot (D6).
-6. A spawn to another machine does not prestart (D3, D9).
+1. The person's SessionStart hooks run at the keystroke, again at each relaunch, and for drafts that are never sent (D12).
+2. sminos takes a prestart as a member at SessionStart. An abandoned draft leaves a sminos member that ended without doing any work (D11).
+3. A hidden row is not counted as the holder of its folder. A worktree cleanup could therefore remove the folder under a prestart; the next Send then meets the location rule, as today. This is rare and benign.
+4. One prestart per machine: drafting in two New chats at once prewarms only the latest (D1).
+5. A pick made in the last moments before Send, or a settings change outside the intent, costs that Send a boot (D6).
+6. `ownerChannelLaunched` swallows its write error for every launch (today's behaviour, round 2 finding 1). It is logged to the tracker and not changed here.
+7. A spawn to another machine does not prestart (D8).
 
 ## Progress
 
-- [x] M0 · The probe. (2026-11-24; `findings-uxwave-851-prestart.txt`, four tests in `fixtures.test.mjs`.)
-- [ ] M1 · The prestart in the spine.
-- [ ] M2 · The commands, the trigger and the gates.
-- [ ] M3 · The measure and the scenes.
+- [x] M0 · The probe. (2026-11-24.)
+- [ ] M1 · The host.
+- [ ] M2 · The spine and the window.
+- [ ] M3 · The endpoint and the measure.
 - [ ] M4 · The gate.
 
 ## Decision Log
 
-1. **2026-11-24.** Revision 1: thirteen decisions and the measure, written before any product code and sent to the architect.
+1. **2026-11-24.** Revision 1, sent to the architect.
 2. **2026-11-24.** The architect's answers:
-   - D11 of revision 1 (now D14) accepted: a prestart joins sminos at SessionStart, and Known limits 2 says what an abandoned draft leaves there.
-   - The measure's "before" arm is the flag-off path on this branch, not a master build.
+   - a prestart joins sminos at SessionStart (a known limit);
+   - the measure's "before" arm is the flag-off path on this branch;
    - M0 runs on the MacBook, isolated.
-3. **2026-11-24.** M0 answered: mode, model and effort hold when set before the first message (W5).
-4. **2026-11-24.** Revision 2, after the adversarial review of revision 1 (eight P1, three P2, all real; the table above). The decisions that moved:
-   - one durable identity for a prestart (D2);
-   - the record as the commit point (D5);
-   - no control path, every difference relaunching (D6), which supersedes the use of entry 3;
-   - the owner reservation held in the note (D7);
-   - route equivalence on the host's spec (D8);
-   - the spawn-target gate (D9);
-   - host-restart retirement (D12);
-   - surfaces, plugins and the desk gated on the record or the note (D13);
-   - a paired measure and an acceptance group on the pinned engine (D16).
+3. **2026-11-24.** M0: mode, model and effort hold when set before the first message.
+4. **2026-11-24.** Revision 2, after round 1's eleven findings: a durable note, the record as the commit point, no control path.
+5. **2026-11-24.** Revision 3, after round 2's eight findings and the architect's structural direction:
+   - the prestart is ephemeral and host-owned (D1–D3);
+   - commit is `session.launch` with `adopt`, inside today's launch path (D4);
+   - the key carries the route resolution and the host compares the binary (D4, D5);
+   - the reservation is made at Send (D7);
+   - withdraw is scoped to a generation (D8);
+   - the desk needs only a re-join (D11);
+   - the measure uses 3 s of typing (D14).
+
+   Taken from Claude Desktop and Codex: typing as the trigger, at most one prewarm, hidden by refusing its id, a cold start on any miss. Revision 2's note, its seven reader filters and its endpoint filter are gone.
 
 ## Outcomes & Retrospective
 
