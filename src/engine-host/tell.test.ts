@@ -8,7 +8,7 @@ import { join, resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import type { JournalRow } from '@shared/wire/journal';
 import type { StdinFrame } from '@shared/wire/frames';
-import { TELL_LINE, TELL_MOD, TELL_TOOL, tellPresent } from '@shared/maws/tell';
+import { CHECKED_CALL_CAPABILITY, TELL_LINE, TELL_MOD, TELL_TOOL, tellPresent } from '@shared/maws/tell';
 import { LaunchSpecSchema } from '@shared/engine/launch-spec';
 import { SessionStatusTracker } from './session-status';
 import { ControlClient, ControlError } from './rpc';
@@ -110,6 +110,21 @@ describe('the direct tell, as the shipped mod answered it', () => {
   });
 });
 
+describe('what the host vouches for', () => {
+  it('sends nothing to a string that is not an agent\'s id, which the engine\'s send would read as a name or an address', async () => {
+    const { client, writes } = engine({ subtype: 'success', request_id: '' , response: { content: 'delivered' } });
+    expect(await tellAgent(client, 'worker', 'hi')).toEqual({ delivered: false, reason: 'worker is not the id of an agent of this session' });
+    expect(await tellAgent(client, 'session_01abc', 'hi')).toMatchObject({ delivered: false });
+    expect(writes).toEqual([]);
+    expect(await tellAgent(client, 'ascout-bcbb17e39be8c1bd', 'hi')).toEqual({ delivered: true }); // a named agent's id
+  });
+
+  it('reads a plain success only as the mod\'s own word for a delivery', async () => {
+    expect(await tellAgent(engine({ subtype: 'success', request_id: '', response: { content: [{ type: 'text', text: 'delivered' }] } }).client, 'a0123456789abcdef', 'hi')).toEqual({ delivered: true });
+    await expect(tellAgent(engine({ subtype: 'success', request_id: '', response: { content: 'something else' } }).client, 'a0123456789abcdef', 'hi')).rejects.toThrow("the tell's answer was not the mod's");
+  });
+});
+
 describe('whether a session took the mod', () => {
   const spec = LaunchSpecSchema.parse({
     appSessionId: 'app-tell', cwd: '/tmp/r', additionalDirectories: [], model: null, effort: null, permissionMode: null, gateway: 'gateway', subagentModel: null,
@@ -137,6 +152,12 @@ describe('whether a session took the mod', () => {
     expect(tellPresent(without)).toBe(false);
     const tracker = new SessionStatusTracker(spec, () => {});
     tracker.applyMcpStatus({ mcpServers: [{ name: TELL_MOD, status: 'connected', source: 'plugin' }] }, tracker.askMcp());
+    expect(tracker.snapshot().tell).toBeUndefined(); // no checked mcp_call offered yet: an engine can serve mods with it off
+    tracker.observe({ type: 'system', subtype: 'init', capabilities: [CHECKED_CALL_CAPABILITY] }, '2026-11-24T00:00:00.000Z');
+    expect(tracker.snapshot().tell).toBe(true);
+    tracker.observe({ type: 'system', subtype: 'init', capabilities: ['ui_surface_v1'], mcp_servers: [{ name: TELL_MOD, status: 'connected', source: 'plugin' }] }, '2026-11-24T00:00:01.000Z');
+    expect(tracker.snapshot().tell).toBeUndefined();
+    tracker.observe({ type: 'system', subtype: 'init', capabilities: [CHECKED_CALL_CAPABILITY], mcp_servers: [{ name: TELL_MOD, status: 'connected', source: 'plugin' }] }, '2026-11-24T00:00:02.000Z');
     expect(tracker.snapshot().tell).toBe(true);
     expect(tracker.applyMcpStatus({ mcpServers: [{ name: TELL_MOD, status: 'failed', source: 'plugin' }] }, tracker.askMcp())).toBe(true);
     expect(tracker.snapshot().tell).toBeUndefined();

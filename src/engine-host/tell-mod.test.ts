@@ -5,7 +5,7 @@ import { readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { describe, expect, it, vi } from 'vitest';
-import { TELL_MOD, TELL_REFUSED, TELL_TOOL } from '@shared/maws/tell';
+import { TELL_AGENT_ID, TELL_MOD, TELL_REFUSED, TELL_TOOL } from '@shared/maws/tell';
 import { tellModDir } from './launch';
 
 const MOD = resolve(__dirname, '../../mods/maws-tell');
@@ -22,8 +22,14 @@ async function hooks(): Promise<Registered[]> {
 }
 const hookOf = (all: Registered[], event: string) => all.find((h) => h.event === event)!;
 const HOST_ID = 'toolu_mcp_call_0123456789abcdef';
+const GOOD = 'a0123456789abcdef';
+const GONE = 'afedcba9876543210';
 
 describe('the maws-tell mod', () => {
+  it('checks an agent id by the shape the app checks it by', () => {
+    expect(readFileSync(join(MOD, 'hooks/register.mjs'), 'utf8')).toContain(`const AGENT_ID = ${TELL_AGENT_ID.toString()};`);
+  });
+
   it('is the plugin the app names, its hooks module declared', () => {
     expect(JSON.parse(readFileSync(join(MOD, '.claude-plugin/plugin.json'), 'utf8')).name).toBe(TELL_MOD);
     expect(JSON.parse(readFileSync(join(MOD, 'hooks/hooks.json'), 'utf8'))).toEqual({ modules: ['./register.mjs'] });
@@ -55,13 +61,14 @@ describe('the maws-tell mod', () => {
 
   it('sends the host\'s call with the engine\'s send, refuses another\'s, and marks a refusal', async () => {
     const run = hookOf(await hooks(), 'tool.run');
-    const send = vi.fn(async ({ to }: { to: { agentId: string } }) => (to.agentId === 'agood' ? { isDelivered: true } : { isDelivered: false, reason: 'was stopped' }));
+    const send = vi.fn(async ({ to }: { to: { agentId: string } }) => (to.agentId === GOOD ? { isDelivered: true } : { isDelivered: false, reason: 'was stopped' }));
     const $ = { session: { send } };
-    expect(await run.hook($, { tool: TELL_TOOL, tool_use_id: HOST_ID, agent: 'agood', text: 'hello' })).toEqual({ result: 'delivered' });
-    expect(send).toHaveBeenCalledWith({ to: { agentId: 'agood' }, text: 'hello' });
-    expect(await run.hook($, { tool: TELL_TOOL, tool_use_id: HOST_ID, agent: 'agone', text: 'hello' })).toEqual({ deny: `${TELL_REFUSED}was stopped` });
-    expect(await run.hook($, { tool: TELL_TOOL, tool_use_id: 'toolu_01model', agent: 'agood', text: 'hello' })).toEqual({ deny: expect.stringMatching(/^TELL_NOT_HOST /) });
+    expect(await run.hook($, { tool: TELL_TOOL, tool_use_id: HOST_ID, agent: GOOD, text: 'hello' })).toEqual({ result: 'delivered' });
+    expect(send).toHaveBeenCalledWith({ to: { agentId: GOOD }, text: 'hello' });
+    expect(await run.hook($, { tool: TELL_TOOL, tool_use_id: HOST_ID, agent: GONE, text: 'hello' })).toEqual({ deny: `${TELL_REFUSED}was stopped` });
+    expect(await run.hook($, { tool: TELL_TOOL, tool_use_id: 'toolu_01model', agent: GOOD, text: 'hello' })).toEqual({ deny: expect.stringMatching(/^TELL_NOT_HOST /) });
     expect(await run.hook($, { tool: TELL_TOOL, tool_use_id: HOST_ID, agent: '', text: 'hello' })).toEqual({ deny: expect.stringMatching(/^TELL_REFUSED /) });
+    expect(await run.hook($, { tool: TELL_TOOL, tool_use_id: HOST_ID, agent: 'worker', text: 'hello' })).toEqual({ deny: expect.stringMatching(/^TELL_REFUSED /) }); // a name, which the send could resolve to another session
     expect(send).toHaveBeenCalledTimes(2);
   });
 });

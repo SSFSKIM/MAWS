@@ -3,18 +3,24 @@
 // call with an error whatever the hook answered, so the answer is read by its words (`readTellAnswer`); an answer that
 // is neither the delivery nor the mod's refusal (the session's mode refuses the call, the mod is not loaded) is thrown
 // as the engine gave it. The mod allows the host's own call at `tool.check`, so no permission request comes of it.
-import { readTellAnswer, TELL_TOOL, tellText, type TellAnswer } from '@shared/maws/tell';
+import { readTellAnswer, TELL_AGENT_ID, TELL_TOOL, tellText, type TellAnswer } from '@shared/maws/tell';
 import { mcpCall } from './controls';
 import { ControlCancelled, ControlError, ControlTimeout, type ControlClient } from './rpc';
 
 export async function tellAgent(client: ControlClient, agentId: string, text: string, opts: { signal?: AbortSignal; timeoutMs?: number } = {}): Promise<TellAnswer> {
+  if (!TELL_AGENT_ID.test(agentId)) return { delivered: false, reason: `${agentId} is not the id of an agent of this session` };
+  let answer: Awaited<ReturnType<typeof mcpCall>>;
   try {
-    await mcpCall(client, { tool: TELL_TOOL, arguments: { agent: agentId, text: tellText(text) }, check_permissions: true }, opts);
+    answer = await mcpCall(client, { tool: TELL_TOOL, arguments: { agent: agentId, text: tellText(text) }, check_permissions: true }, opts);
   } catch (error) {
     if (!(error instanceof ControlError) || error instanceof ControlTimeout || error instanceof ControlCancelled) throw error;
-    const answer = readTellAnswer(error.message);
-    if (answer === null) throw error;
-    return answer;
+    const read = readTellAnswer(error.message);
+    if (read === null) throw error;
+    return read;
   }
-  return { delivered: true }; // an engine that hands the hook's own result back: the mod answers only a delivery so
+  // an engine that hands the hook's own result back: the mod's word for a delivery, else nothing this call can vouch for
+  const content = answer.content;
+  const said = typeof content === 'string' ? content : content.map((block) => (block as { text?: unknown }).text).filter((t) => typeof t === 'string').join('');
+  if (said === 'delivered') return { delivered: true };
+  throw new Error(`the tell's answer was not the mod's: ${said.slice(0, 200)}`);
 }

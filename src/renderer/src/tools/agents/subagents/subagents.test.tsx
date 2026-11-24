@@ -1213,7 +1213,7 @@ describe('relay composer, the direct tell', () => {
       invoke: async (name: string, input: unknown) => {
         invoked.push([name, input]);
         if (name === 'session.events') return { ok: true, value: { events: [], lastSeq: 0, complete: true } };
-        if (name === 'session.tellAgent') return { ok: true, value: told };
+        if (name === 'session.tellAgent') return { ok: true, value: await told };
         return { ok: false, error: { code: 'internal', message: `unexpected ${name}` } };
       },
       on: () => () => {},
@@ -1254,6 +1254,17 @@ describe('relay composer, the direct tell', () => {
     await mount({ status: withMod(), events: [started('a1', 1), finished('a1', 2, { status: 'stopped' })], params: { agentId: 'a1' as AgentId } });
     expect(tellBox().disabled).toBe(true);
     expect(tellBox().placeholder).toBe('This agent was stopped');
+  });
+
+  it('holds the box while a tell is out, so no edit is cleared by its answer', async () => {
+    let answer: (value: unknown) => void = () => {};
+    told = new Promise((resolve) => (answer = resolve));
+    await mount({ status: withMod(), events: [started('a1', 1)], params: { agentId: 'a1' as AgentId } });
+    await send('first');
+    expect(tellBox().disabled).toBe(true);
+    await act(async () => answer({ delivered: true }));
+    await waitFor(() => expect(line()).toBe('Sent'));
+    expect(tellBox().disabled).toBe(false);
   });
 
   it('says the engine\'s refusal when one comes, and keeps the draft', async () => {

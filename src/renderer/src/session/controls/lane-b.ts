@@ -141,7 +141,7 @@ export function laneBControls(record: SessionRecord | null, { appSessionId, clie
   const ownCapability = (key: ControlKey): Capability => {
     const elsewhere = ELSEWHERE[key];
     if (elsewhere !== undefined) return { available: false, reason: elsewhere };
-    if (key === 'tell') return unavailable(tellRefusal());
+    if (key === 'tell') return unavailable(remote ? TELL_WORDS.elsewhere : tellRefusal()); // a remote session before main's first word too
     if (ALWAYS.has(key)) return AVAILABLE;
     return unavailable(NEEDS_PROCESS.has(key) ? processRefusal() : writeRefusal());
   };

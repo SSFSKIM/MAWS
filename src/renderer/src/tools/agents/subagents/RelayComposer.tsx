@@ -128,7 +128,7 @@ function TellComposer({ agentId, node, draft, onDraft, onSent, controls, resumes
           id={id}
           rows={2}
           value={draft}
-          disabled={reason !== null}
+          disabled={reason !== null || sending /* an edit made while a tell is out would be cleared with its answer */}
           placeholder={reason ?? RELAY_COPY.placeholder(title)}
           onChange={(e) => {
             onDraft(e.target.value);

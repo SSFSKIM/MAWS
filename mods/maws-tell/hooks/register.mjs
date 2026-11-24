@@ -10,6 +10,8 @@ const TOOL = 'mcp__maws-tell__tell';
 const HOST_CALL = 'toolu_mcp_call_';
 const REFUSED = 'TELL_REFUSED ';
 const NOT_HOST = 'TELL_NOT_HOST ';
+// an id the engine mints for an agent: any other string the engine's send would read as a name or another session's address
+const AGENT_ID = /^a(?:[a-z0-9]+-)?[0-9a-f]{16}$/;
 
 const fromHost = (id) => typeof id === 'string' && id.startsWith(HOST_CALL);
 
@@ -31,7 +33,7 @@ export const register = (on) => {
   on('tool.check', { tool: TOOL }, ($, e, next) => (fromHost(e.tool_use_id) ? { decision: 'allow', reason: 'MAWS tells an agent what the person wrote' } : next(e)));
   on('tool.run', { tool: TOOL }, async ($, e) => {
     if (!fromHost(e.tool_use_id)) return { deny: `${NOT_HOST}only MAWS calls this tool` };
-    if (typeof e.agent !== 'string' || e.agent === '' || typeof e.text !== 'string' || e.text.trim() === '') return { deny: `${REFUSED}an agent id and the text are needed` };
+    if (typeof e.agent !== 'string' || !AGENT_ID.test(e.agent) || typeof e.text !== 'string' || e.text.trim() === '') return { deny: `${REFUSED}an agent's id and the text are needed` };
     const sent = await $.session.send({ to: { agentId: e.agent }, text: e.text });
     return sent.isDelivered ? { result: 'delivered' } : { deny: `${REFUSED}${sent.reason}` };
   });

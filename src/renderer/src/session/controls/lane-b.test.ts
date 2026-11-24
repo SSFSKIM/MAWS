@@ -311,6 +311,12 @@ describe('lane B tells an agent through the built-in mod', () => {
     expect(laneBControls(withRecord(), { appSessionId: APP, client: fake.client }).capability('tell')).toMatchObject({ available: false });
     expect(fake.invoked('session.tellAgent')).toEqual([]);
   });
+
+  it('offers no tell for a session on another machine, before main\'s first word on it too', () => {
+    readyWith(withMod());
+    const remote = laneBControls(null, { appSessionId: APP, client: fakeClient().client, remote: { state: null } });
+    expect(remote.capability('tell')).toEqual({ available: false, reason: TELL_WORDS.elsewhere });
+  });
 });
 
 // P5 O7 M2: a lane B session on another machine, driven over main's remote lane B adapter. The port is lane B's own, with

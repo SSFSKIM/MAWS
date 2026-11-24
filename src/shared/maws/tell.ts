@@ -24,6 +24,15 @@ const NOT_RUN = 'The tool did not run: ';
 export const TELL_LINE = 'From the person supervising this session, not from your coordinator:';
 export const tellText = (text: string): string => `${TELL_LINE}\n${text}`;
 
+/**
+ * The shape of an agent id the engine mints (`a` and 16 hex digits, or a named agent's `a<name>-` before them), the one
+ * destination a tell takes: the engine's send resolves any other string as a name or an address, which could reach
+ * another session. The mod checks it again (mods/maws-tell/hooks/register.mjs).
+ */
+export const TELL_AGENT_ID = /^a(?:[a-z0-9]+-)?[0-9a-f]{16}$/;
+/** The engine's word that it runs a checked mcp_call (its initialize answer's and system/init's `capabilities`). */
+export const CHECKED_CALL_CAPABILITY = 'mcp_call_check_permissions_v1';
+
 /** The longest text a tell carries (the command's bound). */
 export const TELL_TEXT_MAX = 100_000;
 
@@ -46,8 +55,8 @@ export const isTellServer = (server: { name: string; source?: string | null }): 
 export const isTellPlugin = (plugin: { name: string; source: string | null }): boolean => plugin.name === TELL_MOD && plugin.source === `${TELL_MOD}@inline`;
 
 /**
- * Whether the session's engine took the mod: its tool's server listed connected, which the engine host says as the
- * status's `tell`. Not so where the engine runs no mods (a rollout that serves function hooks off), on a host of an
+ * Whether the session's engine took the mod: its tool's server listed connected and a checked mcp_call offered (an
+ * engine can serve mods with that call turned off), which the engine host says as the status's `tell`. Not so where the engine runs no mods (a rollout that serves function hooks off), on a host of an
  * earlier build, or before the session's servers were first read.
  */
 export const tellPresent = (status: Pick<EngineSessionStatus, 'tell'> | null): boolean => status?.tell === true;
