@@ -252,7 +252,7 @@ describe('the chart view', () => {
     expect(mark.dataset.note).toBe('Top 5 of 8 slices; the rest as “other”');
     const atRest = into.querySelector('.dash-notes')?.textContent ?? '';
     expect(atRest).not.toContain('slices; the rest');
-    expect(atRest).toContain('1 row has no sales; not drawn'); // another limit of the view, at rest (G596)
+    expect(atRest).toBe('1 slice has no positive sales; not drawn'); // another limit of the view, at rest (G596)
     delete SNAPSHOTS['assets/eight.csv'];
   });
 

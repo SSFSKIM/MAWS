@@ -112,24 +112,26 @@ describe('the table’s commands (G331) and the worded buttons (G337)', () => {
   it('is a menu from the keyboard: Enter opens it on its first command, ↓ moves, Enter runs one in the page, Escape gives the focus back', async () => {
     const editor = await inTable();
     const selection = editor.state.selection.from;
-    const table = button('Table');
-    act(() => table.focus());
-    await userEvent.keyboard('{Enter}');
-    const menu = screen.getByRole('menu', { name: 'Table' });
-    await until(() => focused() === within(menu).getByRole('menuitem', { name: 'Add row above' }), 'the first command focused');
-    await userEvent.keyboard('{ArrowDown}');
-    expect(focused()).toBe(within(menu).getByRole('menuitem', { name: 'Add row below' }));
-    await userEvent.keyboard('{Enter}');
+    // a key as the browser hands it to the focused element
+    const press = (key: string) => act(() => void fireEvent.keyDown(focused()!, { key }));
+    const menu = () => screen.queryByRole('menu', { name: 'Table' });
+    const item = (name: string) => within(menu()!).getByRole('menuitem', { name });
+    act(() => button('Table').focus());
+    press('Enter');
+    await until(() => menu() !== null && focused() === item('Add row above'), 'the menu open on its first command');
+    press('ArrowDown');
+    await until(() => focused() === item('Add row below'), 'the next command focused');
+    press('Enter');
+    await until(() => menu() === null, 'the menu closed by the command');
     expect(editor.state.doc.firstChild!.childCount).toBe(3);
-    expect(screen.queryByRole('menu', { name: 'Table' })).toBeNull();
     expect(editor.view.dom.contains(focused()), 'the command runs in the page, which keeps the focus').toBe(true);
     expect(editor.state.selection.from).toBe(selection); // the caret where it was: the row went below it
 
     act(() => button('Table').focus());
-    await userEvent.keyboard('{ArrowDown}');
-    await until(() => screen.queryByRole('menu', { name: 'Table' }) !== null && screen.getByRole('menu', { name: 'Table' }).contains(focused()), 'the menu open on a command');
-    await userEvent.keyboard('{Escape}');
-    await until(() => screen.queryByRole('menu', { name: 'Table' }) === null, 'the menu closed');
+    press('ArrowDown');
+    await until(() => menu() !== null && menu()!.contains(focused()), 'the menu open on a command');
+    press('Escape');
+    await until(() => menu() === null, 'the menu closed');
     expect(focused()).toBe(button('Table'));
     expect(editor.state.doc.firstChild!.childCount).toBe(3);
   });
