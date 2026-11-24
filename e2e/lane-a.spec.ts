@@ -1585,11 +1585,12 @@ test.describe('lane A: a terminal session driven through its bridge', () => {
     await expect(row.getByRole('button', { name: APPROVE })).toHaveCount(0);
     await expect(main(page).locator('.transcript-consent')).toHaveText(`You approved ${BLOCKED_MARKER}`);
   }
-  // After the retry's turn has ended: the retry, in the newest turn (folded when it ended), ran. It is the last call of
-  // the transcript and the one call of its run (board ticket 852: a run of one, its call mounted once its line opens).
+  // After the retry's turn has ended: the retry, in the newest turn (folded when it ended), ran. It is the one call of
+  // its run (board ticket 852: a run of one, its call mounted once its line opens), found by its own row: an earlier run
+  // of one (the running case's 30 s call) stands last until the retry's rows land.
   async function retried(page: Page, retry: string): Promise<void> {
     const cell = main(page).locator(`[data-cell-id="cell:${retry}"]`);
-    const run = main(page).locator('.transcript-group[data-cell-count="1"]').last().locator('.transcript-run-line');
+    const run = main(page).locator(`[data-row-id="cell:${retry}"] .transcript-run-line`);
     await expect(async () => {
       const line = main(page).locator('.transcript-divider .transcript-disclosure').last();
       if ((await line.getAttribute('aria-expanded')) === 'false') await line.click();
