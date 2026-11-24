@@ -277,13 +277,15 @@ function ActionButton({ action, text = false }: { action: EditorHostAction; text
       </NamedGlyph>
     );
   }
-  // An action with no icon is drawn by its label.
-  const button = (
-    <button type="button" aria-pressed={action.pressed} disabled={action.disabled} onClick={() => action.onSelect()} data-editor-action={action.id} className={`${GHOST} px-2 text-ui ${UNAVAILABLE_LOOK}`}>
-      {action.label}
-    </button>
+  // An action with no icon is drawn by its label; always under its owner's tip, so a reason that comes or goes keeps the
+  // button (and its focus) where it is.
+  return (
+    <UnavailableButton reason={action.unavailable ?? null}>
+      <button type="button" aria-pressed={action.pressed} disabled={action.disabled} onClick={() => action.onSelect()} data-editor-action={action.id} className={`${GHOST} px-2 text-ui ${UNAVAILABLE_LOOK}`}>
+        {action.label}
+      </button>
+    </UnavailableButton>
   );
-  return action.unavailable ? <UnavailableButton reason={action.unavailable}>{button}</UnavailableButton> : button;
 }
 
 const MENU = 'z-50 min-w-44 rounded-md border border-border-strong bg-bg-overlay p-1 text-ui text-fg';

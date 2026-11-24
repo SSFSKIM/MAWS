@@ -458,6 +458,20 @@ describe('the panel header', () => {
     await user.keyboard('{Enter}');
     expect(screen.queryByRole('menu'), 'selecting it keeps the menu open').not.toBeNull();
     expect(calls).toEqual(['bin']);
+    await user.keyboard('{Escape}');
+
+    // a word action that becomes unavailable while focused keeps its button and the focus
+    resetEditorHosts();
+    const word: EditorHostAction = { id: 'word', label: 'Publish', onSelect: () => calls.push('word') };
+    let handle!: ReturnType<typeof registerEditorHost>;
+    act(() => void (handle = registerEditorHost(scope, { title: 'System', actions: [word] })));
+    const publish = within(header()).getByRole('button', { name: 'Publish' });
+    act(() => publish.focus());
+    act(() => handle.update({ actions: [{ ...word, unavailable: 'Nothing to publish' }] }));
+    expect(document.activeElement).toBe(publish);
+    expect(within(header()).getByRole('button', { name: 'Publish', description: 'Nothing to publish' }).getAttribute('aria-disabled')).toBe('true');
+    await user.keyboard('{Enter}');
+    expect(calls).toEqual(['bin']);
   });
 
   it('marks a pressed action in "More actions" with a visible check, and an unpressed one without', async () => {
