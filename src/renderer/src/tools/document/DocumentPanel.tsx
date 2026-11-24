@@ -32,6 +32,7 @@ import { setCommentsView } from './comments-view'; // P4-B1
 import { useSettings } from '../../stores/settings'; // P4-B1
 import type { CommentsView } from '@artifacts/comments/view'; // P4-B1
 import { QuietSpinner } from '../../ui/spinner';
+import { DOCUMENT_COPY } from './copy';
 import type { DocumentTabState } from './tab-state';
 import { captureDocumentView, keepUndoManager, liveBody, restoreDocumentViewWhenDrawn, type DocumentView } from './view-carry'; // P4-B3 M5
 
@@ -179,8 +180,8 @@ export function DocumentBody({ artifactId, machine, state, scope, visible, onSho
   }, [placed, reveal]);
 
   if (snapshot.failed !== null) return <Notice>{`This document could not be opened: ${snapshot.failed}`}</Notice>;
-  if (!snapshot.ready || !snapshot.handle) return <Notice><QuietSpinner label="Opening the document…" /></Notice>; // the word cut (T615)
-  if (snapshot.noContent) return <Notice>This document is empty.</Notice>; // the word cut (T617)
+  if (!snapshot.ready || !snapshot.handle) return <Notice><QuietSpinner label={DOCUMENT_COPY.openingName} /></Notice>; // the word cut (T615)
+  if (snapshot.noContent) return <Notice>{DOCUMENT_COPY.empty}</Notice>; // the word cut (T617)
   return (
     <SystemScope machine={machine} placement={snapshot.placement} handle={snapshot.handle}>
       <DocumentEditor

@@ -18,6 +18,7 @@ import { applyV2, newDoc } from '@artifacts/yjs';
 import { ipc } from '../../ipc/client';
 import { toastFailure } from '../../library/dialogs';
 import type { EditorHostExport } from '../../panel/editor-host';
+import { DESIGN_COPY } from './copy';
 import { confirm, type ConfirmRequest } from '../../sessions/dialogs';
 import { toast } from '../../stores/notices';
 import { VIEWERS_COPY } from '../artifacts/viewers/copy';
@@ -107,7 +108,7 @@ function fittingSheet(name: string, format: 'png' | 'pdf', maxScale: number): Co
   // the word cut (T632): the fact in one line; the scale stays in the title and the button
   return {
     title: `Export “${name}” at ${percent(maxScale)}?`,
-    body: `Too large for a ${format === 'png' ? 'PNG' : 'PDF'} at full size.`,
+    body: DESIGN_COPY.tooLarge(format),
     confirmLabel: `Export at ${percent(maxScale)}`,
     destructive: false,
   };

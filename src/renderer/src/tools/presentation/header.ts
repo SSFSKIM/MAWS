@@ -10,6 +10,7 @@
 import type { DocumentState } from '@artifacts/host';
 import type { DeckRail } from '@artifacts/slides/editor/session';
 import type { EditorHostAction, EditorHostExport, EditorHostRegistration, SavedState } from '../../panel/editor-host';
+import { DECK_COPY } from './copy';
 import { CheckIcon, PresentIcon, ThemeIcon } from './icons';
 
 export function savedOf(document: DocumentState | null, saving: boolean): SavedState | null {
@@ -41,7 +42,7 @@ function deckActions(state: DeckHeaderState, commands: DeckHeaderCommands): Edit
   return [
     { id: 'present', label: 'Present', icon: PresentIcon, disabled: !state.canPresent, onSelect: () => commands.present() },
     { id: 'theme', label: 'Theme', icon: ThemeIcon, pressed: state.rail === 'theme', onSelect: () => commands.toggleRail('theme') },
-    { id: 'check', label: 'Check design' /* the word cut (T636) */, icon: CheckIcon, pressed: state.rail === 'check', onSelect: () => commands.toggleRail('check') },
+    { id: 'check', label: DECK_COPY.checkDesign, icon: CheckIcon, pressed: state.rail === 'check', onSelect: () => commands.toggleRail('check') },
   ];
 }
 

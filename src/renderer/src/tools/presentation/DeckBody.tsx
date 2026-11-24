@@ -36,6 +36,7 @@ import { useDeckSystem } from './governing';
 import { deckHeader, type DeckHeaderCommands } from './header';
 import type { DeckTabState } from './tab-state';
 import { QuietSpinner } from '../../ui/spinner';
+import { DECK_COPY } from './copy';
 
 export type DeckEditorBodyProps = ArtifactEditorProps<DeckTabState>;
 
@@ -145,7 +146,7 @@ function DeckBody({ artifactId, machine, state, scope, visible, onShown, compact
   const reveal = useOpenRequest(artifactId, machine, scope.surface); // P4-B4: an open's place (a link's slide or version)
 
   if (snapshot.failed !== null) return <Notice>{`This presentation could not be opened: ${snapshot.failed}`}</Notice>;
-  if (!snapshot.handle || !session) return <Notice><QuietSpinner label="Opening the presentation…" /></Notice>; // the word cut (T615)
+  if (!snapshot.handle || !session) return <Notice><QuietSpinner label={DECK_COPY.openingName} /></Notice>; // the word cut (T615)
   return (
     <div className="h-full" data-deck-artifact={artifactId} data-deck-surface={scope.surface}>
       <DeckEditor

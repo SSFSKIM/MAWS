@@ -31,6 +31,7 @@ import { designExports, designVersionExports, runDesignExport } from './exports'
 import { designHeader, type DesignHeaderCommands } from './header';
 import type { DesignTabState } from './tab-state';
 import { QuietSpinner } from '../../ui/spinner';
+import { DESIGN_COPY } from './copy';
 
 export type DesignEditorBodyProps = ArtifactEditorProps<DesignTabState>;
 
@@ -114,7 +115,7 @@ function DesignBody({ artifactId, machine, state, scope, visible, onShown, compa
   const reveal = useOpenRequest(artifactId, machine, scope.surface); // P4-B4: an open's place (a link's board or version)
 
   if (snapshot.failed !== null) return <Notice>{`This design could not be opened: ${snapshot.failed}`}</Notice>;
-  if (!snapshot.handle || !session) return <Notice><QuietSpinner label="Opening the design…" /></Notice>; // the word cut (T615, G557)
+  if (!snapshot.handle || !session) return <Notice><QuietSpinner label={DESIGN_COPY.openingName} /></Notice>; // the word cut (T615, G557)
   return (
     <div className="h-full" data-design-artifact={artifactId} data-design-surface={scope.surface}>
       <DesignWorkbench
