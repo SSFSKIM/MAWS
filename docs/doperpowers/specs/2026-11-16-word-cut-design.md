@@ -38,6 +38,8 @@ How to see it working: open the build beside today's build on the same fixtures 
 - [x] (2026-11-23) M4's reviews and the owner's call: an xhigh panel on the range (18 findings, 12 fixed, 1 logged, 5 dismissed); a pair review of the before/after pictures, whose six layout defects were fixed and photographed again; a medium review of those fixes (3 findings, fixed). The owner approved the pictures on 2026-11-23. M4's rig launch became launch 14 when the report view repair (board ticket 850) landed its own launch 13 first.
 - [x] (2026-11-24 07:40Z) M5 task 1: the library and an opened artifact, with the one saved wording, reviewed clean.
 - [x] (2026-11-24 07:00Z) M5 task 2: the document editor and the dashboard editor, reviewed clean (one rare finding logged under the stop rule).
+- [x] (2026-11-24 09:40Z) M5 task 3: the slides editor, reviewed clean (one rare finding logged under the stop rule).
+- [x] (2026-11-24 09:40Z) M5 task 4: the design workbench and the design system page, reviewed clean (one rare finding logged under the stop rule).
 - [x] (2026-11-24 08:20Z) M5 task 6: the rig's scenes for the library, an opened artifact, the document and the dashboard, reviewed clean and merged.
 - [ ] M5: the cut built area by area, each with pictures and the owner's call.
 - [ ] Retrospective.
@@ -546,6 +548,25 @@ Kept by the session that wrote this document (sminos alias `design-experiment`, 
   - Version and edit times are wall-clock and differ between runs. For a picture pair that is incidental, and no clock seam is added.
   - Coverage. 70 of the 134 rows in these areas have a scene. The other 64 are listed in `scenes.md`'s "M5's states with no scene" with the state each needs (board ticket 816).
   - Placement on a branch. The task ran on the side branch `ux-wave/word-cut-m5-rig` and was merged at `52ad311ce`.
+- 2026-11-24. **M5 task 3: the slides editor.** Its 58 rows are built; G425, G460, G495 and G506 stay as on master, and G478 already read as its After there. Three rows are new:
+  - N201: the deck's new-changes pill reads "3 new changes", as G347 does.
+  - N202: Replace keeps its word, with a quiet spinner beside it.
+  - N203: the Check panel's two waits that never ended now settle in words.
+
+  How the rows are built:
+  - **G403 and G404 are built as the owner saw them** ("Which text wins"), not in the document's form. Add comment is named "Add comment", and its tooltip and description read "Comment on the selected element · ⌘⌥M". `NamedGlyph` gains an optional `tip`: tooltip words other than the name, which join the description unless the name already says them. Comments' open count is a small corner badge (none at zero), with "Comments" on hover.
+  - **G413's refusals go to one shared toolbar notice** (`slides/editor/notice.tsx`), which the design workbench uses too. It shows a short refusal, and the model's reason is its tooltip and description. Its expiry lives with the notice's state, so a version preview neither stops it nor replays it. G415's "Uploading…" is a status that only the end of its own operation clears.
+  - **G423:** at 500 slides, New slide and From layout are greyed, focusable, with the limit as their reason.
+  - **G449 and G450:** in a read-only deck, Rotation, Shadow spread and Inset stay focusable with their reasons, and still accept no edit.
+  - **G490:** the version bar's "Done" is named "Done, back to presentation" (label in name), with "Back to presentation" as its tooltip. G494 reads "Transform" for any transform change.
+  - **G421 and G476:** the quiet spinner settles. A deck with no design system ends on "No layouts" or "Nothing to check".
+  - **G439 and G471:** the inspector's card is headed by what it edits, with ×. The Check panel is titled "Check", and its landmark is named "Check design".
+- 2026-11-24. **M5 task 4: the design workbench and the design system page.** Its 46 rows are built, with the `stays` rows as on master and G558's three header icons as the owner saw them. One row is new: N204, the design pill's ↻, a named glyph like the deck's G498.
+  - **G558's icons take keyboard tips, and the change reaches every editor's header.** X32's `EditorHostAction` gains an optional `unavailable` reason. The header draws icon actions as `NamedGlyph`; an unavailable one stays in the Tab order with its reason (the star: "Already your default") and is a `RefusedMenuItem` in More. An action that is `disabled` with no reason keeps the old icon button and its system `title`: Zoom to fit while previewing, Present, and Reveal on another machine. Giving those reasons is their editors' work.
+  - **A refused board edit (G518, G539) carries a structured reason**, `BoardError.fault` from the frame check and the writers, instead of a reason re-derived from the design's state. `frameProblems` keeps its strings for agents. A copy refused for its frame reads "Can’t duplicate this board: at most …".
+  - **The comments toolbar.** G512 removes the toolbar's Comments toggle; the header's Comments action opens the rail. G513 and G514 take `NamedGlyph`'s form, and `NamedGlyph`'s optional `detail` carries "On Hero". A greyed Add comment keeps Tab, with the reason "Select one element or a board to comment on".
+  - **Sizes and badges.** G522 and G528 reveal sizes through the shared hover scope. G556 rounds the percentage down, so a board just over the cap never reads "100%". G568's badge takes Tab, with its verdict as the tooltip.
+  - **The design system page's waits and lists.** G562's page mounts after the first sync. With no system it reads "This design system is empty" and "Ask Claude to publish a design system here.", in place of a spinner that could stand forever. G586 and G587 make one "By hand" list in the law's order; the deck's Check panel still says "Check by hand", which is for the owner's picture review.
 
 ## Outcomes & Retrospective
 

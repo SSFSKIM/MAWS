@@ -126,7 +126,7 @@ export async function closeSheet(sheet: Locator): Promise<void> {
 export async function startFromSheet(scene: ConnectorScene, page: Page, block: Locator): Promise<LiveEngine> {
   const before = new Set((await scene.live(page)).map((session) => session.appSessionId));
   await block.getByRole('button', { name: 'Start session', exact: true }).click();
-  const passing = new Set(['', 'Starting…', 'Starting the session…', 'The session is ready']);
+  const passing = new Set(['', 'Starting…', 'Ready']); // the start's own words (the word cut, T591 and N198)
   let started: LiveEngine | undefined;
   for (const deadline = Date.now() + 90_000; started === undefined; await wait(500)) {
     const words = (await block.getByRole('status').textContent({ timeout: 250 }).catch(() => null))?.trim() ?? '';

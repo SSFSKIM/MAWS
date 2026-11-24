@@ -97,6 +97,14 @@ import { sidebarRow } from './support/sidebar';
 test.skip(process.env.MAWS_DASHBOARD_LIVE_DATA !== '1', 'the live dataset acceptance runs under pnpm e2e:dashboard-live-data (MAWS_DASHBOARD_LIVE_DATA=1)');
 
 const PROOF = 'test-results/dashboard-live-data';
+
+// The word cut (G621): a newer fetch reads "Newer rows at" and the fetch's UTC clock, which takes the keyboard and holds
+// the full time as its description.
+async function expectNewerRows(block: Locator): Promise<void> {
+  const line = block.locator('[data-live-newer]');
+  await expect(line).toContainText(/^Newer rows at \d{2}:\d{2}/);
+  await expect(line.locator('[data-live-newer-at]')).toHaveAccessibleDescription(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2} UTC$/);
+}
 const SOAK_MS = 10 * 60_000;
 const SAMPLE_MS = 30_000;
 // The host's recorded refresh errors (src/engine-host/dashboards/refresh.ts `refused`, query-result.ts's closed problems)
@@ -225,7 +233,7 @@ test('granted live dataset: the owner’s grant, Start and controls, the agent�
         await block.getByRole('button', { name: `Refresh ${TITLE}` }).click();
         await nextCall(scene, before);
         await drawsRows(views, OWNERS, 'the owner’s refresh');
-        await expect(block).toContainText('Newer rows were fetched at');
+        await expectNewerRows(block);
         await expect(captured, 'the sheet keeps the rows it captured').toHaveAttribute('aria-rowcount', String(FIRST.length + 1));
         await block.getByRole('button', { name: 'Show latest' }).click();
         await expect(sheet.getByRole('table', { name: 'Rows' })).toHaveAttribute('aria-rowcount', String(OWNERS.length + 1));
@@ -306,7 +314,7 @@ test('granted live dataset: the owner’s grant, Start and controls, the agent�
         const before = Date.now();
         const replaced = await agentDataset(page, agent, engine.appSessionId, id, { title: TITLE, source: { ...SOURCE, args: { series: 'trials' } } });
         expect(replaced.isError, replaced.text).toBe(false);
-        await expect(liveBlock(sheet)).toContainText('This query was replaced or removed after the source opened');
+        await expect(liveBlock(sheet)).toContainText('Query changed since opening'); // the word cut (G622)
         const call = await nextCall(scene, before);
         expect(call.arguments, 'the new query’s own arguments').toEqual({ series: 'trials' });
         await drawsRows(views, TRIALS, 'the replaced query');
@@ -569,7 +577,7 @@ test('route D: with no engine holding the server, the same dashboard refreshes o
     await liveBlock(sheet).getByRole('button', { name: `Refresh ${TITLE}` }).click();
     await nextCall(scene, before);
     await drawsRows(views, AGENTS, 'the owner direct refresh');
-    await expect(liveBlock(sheet)).toContainText('Newer rows were fetched at');
+    await expectNewerRows(liveBlock(sheet));
     await liveBlock(sheet).getByRole('button', { name: 'Show latest' }).click();
     read = await readDataset(agent, AUTHOR, id);
     expect(read.updated).toEqual({ at: expect.any(String), by: 'user' });

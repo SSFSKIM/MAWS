@@ -71,7 +71,7 @@ test('a chart’s comment follows it through a cut and a paste into another tab,
     const rail = await railOf(record);
     await rail.locator(`article[data-thread="${threadId}"]`).getByRole('button', { name: 'Reopen' }).click();
     await expect(chartBlock).toHaveClass(new RegExp(`\\bcomment-${threadId}\\b`));
-    await reply(rail, threadId, 'Why does the west dip?');
+    await reply(record, threadId, 'Why does the west dip?');
     await expect(rail.locator(`article[data-thread="${threadId}"]`).getByRole('listitem')).toHaveText(['YouWhy does the west dip?']);
     await expect(rail.locator(`article[data-thread="${threadId}"] .doc-thread-quote-text`)).toHaveText(QUOTE);
   });
@@ -85,14 +85,15 @@ test('a chart’s comment follows it through a cut and a paste into another tab,
     await expect(figures(record)).toHaveCount(0);
     const rail = await railOf(record);
     const item = rail.locator(`article[data-thread="${threadId}"]`);
-    const showDeleted = rail.getByRole('button', { name: 'Show deleted-target comments', exact: true });
+    const showDeleted = rail.getByRole('button', { name: /^Deleted \(\d+\)$/ }); // the word cut (G395): one toggle, pressed while shown
     await expect(showDeleted).toHaveAttribute('aria-pressed', 'false');
     await expect(item).toHaveCount(0);
     await showDeleted.click();
     await expect(item).toHaveAttribute('data-orphan', '');
     await expect(item.locator('.doc-thread-quote-text')).toHaveText(QUOTE);
     // Back to the default filter: pasting the target must show its thread without revealing deleted targets.
-    await rail.getByRole('button', { name: 'Hide deleted-target comments', exact: true }).click();
+    await showDeleted.click();
+    await expect(showDeleted).toHaveAttribute('aria-pressed', 'false');
     await expect(item).toHaveCount(0);
 
     await addDocumentSection(record);
@@ -122,7 +123,7 @@ test('a chart’s comment follows it through a cut and a paste into another tab,
     await expect(figures(record)).toHaveCount(0);
     const rail = await railOf(record);
     const item = rail.locator(`article[data-thread="${threadId}"]`);
-    const showDeleted = rail.getByRole('button', { name: 'Show deleted-target comments', exact: true });
+    const showDeleted = rail.getByRole('button', { name: /^Deleted \(\d+\)$/ }); // the word cut (G395): one toggle, pressed while shown
     await expect(showDeleted).toHaveAttribute('aria-pressed', 'false');
     await expect(item).toHaveCount(0);
     await showDeleted.click();
@@ -133,7 +134,7 @@ test('a chart’s comment follows it through a cut and a paste into another tab,
     await expect(resolved.locator(`article[data-thread="${threadId}"]`)).toHaveAttribute('data-status', 'resolved');
     await resolved.locator(`article[data-thread="${threadId}"]`).getByRole('button', { name: 'Reopen' }).click();
     await expect(rail.locator(`article[data-thread="${threadId}"]`)).toHaveAttribute('data-status', 'open');
-    await reply(rail, threadId, 'Posted after the deletion.');
+    await reply(record, threadId, 'Posted after the deletion.');
     await expect(rail.locator(`article[data-thread="${threadId}"]`).getByRole('listitem')).toHaveText(['YouWhy does the west dip?', 'YouPosted after the deletion.']);
   });
 

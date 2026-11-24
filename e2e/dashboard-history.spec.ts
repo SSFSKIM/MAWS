@@ -84,16 +84,16 @@ test('a replacement-only agent change counts, marks and steps after a host resta
     await expect.poll(async () => (await sessions()).length, { timeout: AUTO_IDLE_MS - (Date.now() - ownersLastWrite) + 60_000, intervals: [5_000], message: 'the scheduler’s auto version, credited to the session' }).toBe(1);
   });
 
-  await test.step('after a host restart the reopened dashboard draws the new data and offers See 3 new changes', async () => {
+  await test.step('after a host restart the reopened dashboard draws the new data and offers its 3 new changes', async () => {
     await restartHost(page);
     main = await openInMain(page, id);
     await showsNew(live(main));
-    await expect(main.getByRole('button', { name: 'See 3 new changes' })).toBeVisible({ timeout: 20_000 });
+    await expect(main.getByRole('button', { name: '3 new changes', exact: true })).toBeVisible({ timeout: 20_000 }); // the word cut (G347)
     await main.screenshot({ path: `${PROOF}/history-pill.png` });
   });
 
   await test.step('the comparison counts 3, marks both views, and ↑ ↓ reach the chart, the table and the unbound entry', async () => {
-    await main.getByRole('button', { name: 'See 3 new changes' }).click();
+    await main.getByRole('button', { name: '3 new changes', exact: true }).click();
     const bar = main.getByRole('toolbar', { name: 'Version preview' });
     await expect(bar.getByText('Changes since you last looked')).toBeVisible({ timeout: 15_000 });
     await expect(bar.getByText('3 changes')).toBeVisible();
@@ -137,7 +137,7 @@ test('a replacement-only agent change counts, marks and steps after a host resta
       await toggleDatasets(page.locator('[data-region="main"] [data-editor-header]'));
       const sheet = page.getByRole('dialog').filter({ has: page.getByRole('combobox', { name: 'Dataset' }) });
       await expect(sheet).toBeVisible();
-      await sheet.getByRole('combobox', { name: 'Dataset' }).selectOption({ label: 'Sales (sales)' });
+      await sheet.getByRole('combobox', { name: 'Dataset' }).selectOption('sales'); // by its id: the word cut (G609) names options by title
       const rows = sheet.getByRole('table', { name: 'Rows' });
       await expect(rows).toHaveAttribute('aria-rowcount', '3');
       const text = (await rows.textContent()) ?? '';
@@ -149,7 +149,9 @@ test('a replacement-only agent change counts, marks and steps after a host resta
     expect(versionRows).toContain('10');
     expect(versionRows).not.toContain('30');
 
-    await bar.getByRole('button', { name: 'Make a copy' }).click();
+    // the word cut (G379): Make a copy is an item of the bar's "Actions for this version" menu
+    await bar.getByRole('button', { name: 'Actions for this version' }).click();
+    await page.getByRole('menu', { name: 'Actions for this version' }).getByRole('menuitem', { name: 'Make a copy' }).click();
     await expect.poll(async () => (await ok<{ artifacts: { id: string; kind: string }[] }>(page, 'artifacts.list', {})).artifacts.filter((row) => row.kind === 'dashboard' && row.id !== id).length, { timeout: 15_000 }).toBe(1);
     await bar.getByRole('button', { name: 'Back to document' }).click();
     await showsNew(live(main));
@@ -213,7 +215,7 @@ test('carried dashboard: bind, owner prose and conversation, agent replacement, 
   await card.getByRole('button', { name: 'Resolve' }).click();
   let rail = await railOf(record);
   await rail.locator(`article[data-thread="${threadId}"]`).getByRole('button', { name: 'Reopen' }).click();
-  await reply(rail, threadId, 'Keep the regional comparison.');
+  await reply(record, threadId, 'Keep the regional comparison.');
   await durable(record);
   const { versionId } = await ok<{ versionId: number }>(page, 'artifacts.saveVersion', { artifactId: id, label: 'Carried baseline' });
   await agent.ok('A', 'artifact_reply', { artifact: id, threadId, body: 'The comparison stays.' });

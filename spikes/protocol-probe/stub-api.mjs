@@ -37,7 +37,9 @@ export const jsonOf=(turn,{id='msg_stub',model='claude-stub'}={})=>({id,type:'me
 // them apart for the script; a side request is answered `side(body)` (a short text by default).
 const isMainLoop=body=>Array.isArray(body.tools)&&body.tools.some(t=>t?.name==='Bash'||t?.name==='Read'||String(t?.name).startsWith('mcp__'));
 
-export async function startStubApi({script=[],record=body=>body,side=()=>textTurn('ok')}={}){
+// `respond(body, {main})`, when given, answers a main-loop request in place of the script whenever it returns a turn (a
+// scenario that scripts a subagent beside its parent tells their requests apart by what they carry).
+export async function startStubApi({script=[],record=body=>body,side=()=>textTurn('ok'),respond=()=>undefined}={}){
  const requests=[];let main=0;
  const server=createServer((req,res)=>{
   const chunks=[];req.on('data',c=>chunks.push(c));
@@ -46,7 +48,7 @@ export async function startStubApi({script=[],record=body=>body,side=()=>textTur
    if(req.method==='POST'&&path==='/v1/messages/count_tokens'){requests.push({n:requests.length+1,path});res.writeHead(200,{'content-type':'application/json'});return res.end(JSON.stringify({input_tokens:1000}));}
    if(req.method!=='POST'||path!=='/v1/messages'){requests.push({n:requests.length+1,method:req.method,path,status:404});res.writeHead(404,{'content-type':'application/json'});return res.end(JSON.stringify({type:'error',error:{type:'not_found_error',message:'stub'}}));}
    let body;try{body=JSON.parse(raw);}catch{res.writeHead(400);return res.end();}
-   const isMain=isMainLoop(body);const turn=isMain?(script[main++]??textTurn('(the stub has no more turns)')):side(body);
+   const isMain=isMainLoop(body);const turn=isMain?(respond(body,{main:isMain})??script[main++]??textTurn('(the stub has no more turns)')):side(body);
    requests.push({n:requests.length+1,path,main:isMain,mainIndex:isMain?main:null,stream:body.stream===true,...record(body,{main:isMain})});
    const id=`msg_stub_${requests.length}`;
    if(body.stream===true){res.writeHead(200,{'content-type':'text/event-stream','cache-control':'no-cache'});return res.end(sseOf(turn,{id,model:body.model}));}

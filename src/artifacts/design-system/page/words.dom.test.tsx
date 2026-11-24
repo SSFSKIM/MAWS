@@ -40,10 +40,11 @@ afterEach(cleanup);
 describe('a replica with no system (G562)', () => {
   // M5 task 4's review: the page mounts after the replica's first sync, so a system it does not hold yet is no wait to
   // spin for; the page says so at once, settled, and shows the system as soon as one is written
-  it('says the design system is empty, with no spinner, and draws the system once it arrives', async () => {
+  it('says the design system is empty and what to do, with no spinner, and draws the system once it arrives', async () => {
     const doc = newDoc();
     const { container } = page(doc);
-    expect(container.textContent).toBe('This design system is empty');
+    expect([...container.querySelectorAll('p')].map((p) => p.textContent)).toEqual(['This design system is empty', 'Ask Claude to publish a design system here.']);
+    expect(container.querySelector('button'), 'no new control').toBeNull();
     await act(async () => new Promise((r) => setTimeout(r, 550)));
     expect(screen.queryByRole('progressbar'), 'no spinner, however long').toBeNull();
     act(() => writeSystem(doc, { 'tokens.tokens.json': TOKENS, 'DESIGN.md': law('- Nothing louder than the title.') }, { route: 'derived', at: AT }, { name: 'Harbor' }));

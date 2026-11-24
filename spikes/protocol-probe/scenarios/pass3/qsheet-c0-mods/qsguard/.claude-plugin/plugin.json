@@ -1,0 +1,1 @@
+{"name":"qsguard","version":"0.1.0","description":"Question sheet C0 probe: a second plugin standing in for a secrets guard (tool.check deny of .env, tool.call scrub of a marker in Read results)"}

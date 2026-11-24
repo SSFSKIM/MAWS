@@ -104,14 +104,16 @@ async function durable(scope: Locator): Promise<void> {
   await expect.poll(unsaved, { timeout: 10_000, message: 'every edit acknowledged by the host' }).toBe(0);
 }
 
-// Every text the header's saved word showed since this call, in order.
+// Every state the header's saved slot showed since this call, in order, each by its words: the drawn words, or (the
+// word cut, P23 and P24) the name of the ring or the dot drawn in their place, so a save in flight reads "Saving…".
 async function watchSaved(page: Page, header: Locator): Promise<() => Promise<string[]>> {
   const handle = await header.elementHandle();
   await page.evaluate((row) => {
     const seen: string[] = [];
     (window as unknown as { __saved: string[] }).__saved = seen;
     const read = () => {
-      const text = row!.querySelector('[data-header-saved]')?.textContent ?? '';
+      const slot = row!.querySelector('[data-header-saved]');
+      const text = slot?.textContent || slot?.querySelector('[role="progressbar"], [role="img"]')?.getAttribute('aria-label') || '';
       if (seen.at(-1) !== text) seen.push(text);
     };
     read();
@@ -884,6 +886,18 @@ async function commentOn(page: Page, record: Locator, text: Locator, index: numb
   return threadId;
 }
 
+// The word cut (G385): only the active card has a reply field. A card chosen in the panel becomes the active one there
+// (the drawer) or hands its thread to the margin's card and closes the panel (beside the page, from 720 px), so the
+// field is the active card's, wherever it stands. Answers that card.
+async function replyTo(record: Locator, rail: Locator, threadId: string, words: string): Promise<Locator> {
+  await rail.locator(`article[data-thread="${threadId}"]`).click();
+  const card = record.locator(`article[data-thread="${threadId}"][aria-current="true"]`);
+  const field = card.getByRole('textbox', { name: 'Reply' });
+  await field.fill(words);
+  await field.press('Enter');
+  return card;
+}
+
 // The Comments rail open, its thread articles (open, then resolved).
 async function railOf(record: Locator): Promise<Locator> {
   const rail = record.getByRole('complementary', { name: 'Comments' });
@@ -1020,11 +1034,9 @@ test('restore brings back a deleted tab and the earlier text while a later reply
   await expect(tabs).toHaveCount(0);
   await expect(text.locator('p')).toHaveText(['The budget review is on Friday.']);
   let rail = await railOf(record);
-  const reply = rail.locator(`article[data-thread="${older}"]`).getByRole('textbox', { name: 'Reply' });
-  await reply.fill('Posted after the version.');
-  await reply.press('Enter');
-  await expect(rail.locator(`article[data-thread="${older}"]`).getByRole('listitem')).toHaveText(['YouPosted after the version.']);
-  await record.getByRole('toolbar', { name: 'Formatting' }).getByRole('button', { name: /^Comments/ }).click();
+  const replied = await replyTo(record, rail, older, 'Posted after the version.');
+  await expect(replied.getByRole('listitem')).toHaveText(['YouPosted after the version.']);
+  if (await rail.isVisible()) await record.getByRole('toolbar', { name: 'Formatting' }).getByRole('button', { name: /^Comments/ }).click();
   await caretAtEndOf(page, text, 0);
   await page.keyboard.press('Enter');
   await page.keyboard.type('A later sentence for the board.');
@@ -1043,12 +1055,16 @@ test('restore brings back a deleted tab and the earlier text while a later reply
   await expect(olderItem.getByRole('listitem'), 'the reply posted after the version stays').toHaveText(['YouPosted after the version.']);
   await expect(olderItem).not.toHaveAttribute('data-orphan');
   const newerItem = rail.locator(`article[data-thread="${newer}"]`);
-  const showDeleted = rail.getByRole('button', { name: 'Show deleted-target comments', exact: true });
+  // the word cut (G395, G388): the toggle reads "Deleted (N)", what it holds its description; a gone passage's quote is
+  // struck, the sentence its description
+  const showDeleted = rail.getByRole('button', { name: /^Deleted \(\d+\)$/ });
+  await expect(showDeleted).toHaveAccessibleDescription('Comments on deleted text');
   await expect(showDeleted).toHaveAttribute('aria-pressed', 'false');
   await expect(newerItem, 'the thread whose passage is gone is hidden by default').toHaveCount(0);
   await showDeleted.click();
   await expect(newerItem, 'the thread made after the version stays, its passage gone').toHaveAttribute('data-orphan', '');
-  await expect(newerItem).toContainText('The commented passage was removed.');
+  await expect(newerItem.locator('.doc-thread-quote-text[data-removed]')).toHaveText('later sentence');
+  await expect(newerItem.getByRole('button', { name: /^Show passage: / })).toHaveAccessibleDescription('The commented passage was removed.');
   await tabs.getByRole('tab', { name: 'Tab 2' }).click();
   await expect(text).toHaveText('Appendix figures for October.', { timeout: 10_000 });
   const listed = await ok<{ versions: { id: number; kind: string; label?: string }[] }>(page, 'artifacts.versions', { artifactId: id });

@@ -2098,7 +2098,8 @@ test.describe('the panel header and X32 (P3-G)', () => {
       await expect(title).toHaveText('Q3 brief');
       await expect(header.locator('[data-header-breadcrumb]')).toHaveText('Docs/Planning/');
       await expect(header.locator('[data-header-breadcrumb]')).toBeVisible();
-      await expect(header.getByText('Saving…')).toBeVisible();
+      // the word cut (P23): a save in flight is the header's ring, named Saving…
+      await expect(header.getByRole('progressbar', { name: 'Saving…' })).toBeVisible();
       await header.getByRole('button', { name: '3 open comments' }).click();
       await header.getByRole('button', { name: 'Version history' }).click();
       await header.getByRole('button', { name: 'Open in tab' }).click();
