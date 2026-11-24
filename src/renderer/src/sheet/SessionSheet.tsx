@@ -64,7 +64,8 @@ export function SessionSheet({ model, memory, onMemory, host, focus = null, dens
   const run = (lines: readonly SheetLine[]) => {
     const attempt = newAttempt();
     const land = onMemory; // this session's memory, wherever the answer finds this mount
-    land((current) => startSend(current, lines, clock(), attempt, targetsOf(model)));
+    const drafts = memory.drafts; // the drafts these lines were built from: what each act records as sent
+    land((current) => startSend(current, lines, clock(), attempt, { drafts, targets: targetsOf(model) }));
     launch(attempt, () => host.send(model.session, [...lines]), (result) => land((current) => settle(current, attempt, result)));
   };
   const free = held === null;

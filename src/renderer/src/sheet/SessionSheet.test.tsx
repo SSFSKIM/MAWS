@@ -9,7 +9,7 @@ import type { SheetModel, SheetPutResult, SheetQuestion } from '@shared/sheet/mo
 import type { QuestionDraft } from '@shared/sheet/words';
 import { EMPTY_MEMORY, type SheetMemory } from './memory';
 import { SessionSheet, type SessionSheetProps } from './SessionSheet';
-import { fixtureHost, type RecordingHost } from './test-support/fixture-host';
+import { fixtureHost, queuedResult, type RecordingHost } from './test-support/fixture-host';
 import { pinModel } from './test-support/pin';
 import { CLASH, CLASH_REVISED, FIXTURE, NOTICES, SEASON, sheetOf } from './test-support/questions';
 
@@ -522,5 +522,47 @@ describe('every change through an update', () => {
     fireEvent.click(send());
     await waitFor(() => expect(screen.getByRole('button', { name: 'Send again' })).toBeTruthy());
     expect(kept.sending).toMatchObject({ state: 'failed', note: 'no door' });
+  });
+});
+
+describe('what a Send reserves', () => {
+  // A consumer that holds every update until the test applies it, in the order the test chooses.
+  let pending: ((current: SheetMemory) => SheetMemory)[] = [];
+  let apply: (updates: ((current: SheetMemory) => SheetMemory)[]) => void = () => {};
+  function Batched({ model, host }: { model: SheetModel; host: RecordingHost }) {
+    const [memory, setMemory] = useState(EMPTY_MEMORY);
+    useEffect(() => {
+      kept = memory;
+      apply = (updates) => setMemory((was) => updates.reduce((current, update) => update(current), was));
+    });
+    return <SessionSheet model={model} memory={memory} host={host} onMemory={(update) => pending.push(update)} />;
+  }
+  const flush = async () => {
+    while (pending.length > 0) {
+      const updates = pending;
+      pending = [];
+      await act(async () => apply(updates));
+    }
+  };
+
+  it('keeps an image whose update was applied before the Send that did not carry it, after the answer is queued', async () => {
+    pending = [];
+    const host = fixtureHost({ saveImage: true, send: (_session, lines) => Promise.resolve(queuedResult(lines)) });
+    const saves = slowImages(host);
+    const view = render(<Batched model={sheetOf([CLASH])} host={host} />);
+    await flush();
+    typeIn('q4', 'Earlier.');
+    await flush();
+    pasteInto(cardOf('q4'));
+    await waitFor(() => expect(saves).toHaveLength(1));
+    await act(async () => saves[0]('uploads/maws-late.png'));
+    fireEvent.click(send()); // drawn before the image's update was applied: its lines carry no image
+    expect(pending).toHaveLength(2); // the image's update, then the Send's, neither applied yet
+    await flush();
+    const line = host.sent[0].lines[0];
+    expect(line.images).toBeUndefined();
+    view.rerender(<Batched model={sheetOf([{ ...CLASH, queued: { key: line.key, kind: 'answer', picks: [], text: 'Earlier.', images: [], revision: 1, by: 'maws' } }], { sent: [{ key: line.key, state: 'queued', kind: 'answer', id: 'q4' }] })} host={host} />);
+    await flush();
+    expect(kept.drafts.get('q4')?.images).toEqual(['uploads/maws-late.png']);
   });
 });

@@ -141,9 +141,17 @@ export function editDraft(memory: SheetMemory, question: SheetQuestion, next: Qu
  * A Send pressed, or sent again: its exact lines held under the attempt that carries them, and an act per line, an act
  * already recorded under the key (a Send sent again) taken back to `sending`. Every act names its question: an answer's
  * or a dismissal's own, a retract's by the answer it travels with (an edit) or by `targets`, the question each queued
- * key stands on (a take back).
+ * key stands on (a take back). Each answer's act records the draft its line was built from (`drafts`, the drafts the
+ * person saw when they pressed Send), not the draft as it is when the Send is applied: a draft changed in between (an
+ * image landed) is not the one sent, and stays a draft when the model shows the answer.
  */
-export function startSend(memory: SheetMemory, lines: readonly SheetLine[], now: number, attempt: string, targets: Readonly<Record<string, string>> = {}): SheetMemory {
+export function startSend(
+  memory: SheetMemory,
+  lines: readonly SheetLine[],
+  now: number,
+  attempt: string,
+  { drafts, targets = {} }: { drafts: ReadonlyMap<string, QuestionDraft>; targets?: Readonly<Record<string, string>> },
+): SheetMemory {
   const acts = [...memory.acts];
   lines.forEach((line, i) => {
     const at = acts.findIndex((act) => act.key === line.key);
@@ -154,7 +162,7 @@ export function startSend(memory: SheetMemory, lines: readonly SheetLine[], now:
     const next = lines[i + 1];
     const travelsWith = next?.kind === 'answer' ? (next.id ?? null) : null;
     const id = line.kind === 'retract' ? (travelsWith ?? targets[line.target ?? ''] ?? null) : (line.id ?? null);
-    const draft = line.kind === 'answer' && id !== null ? (memory.drafts.get(id) ?? null) : null;
+    const draft = line.kind === 'answer' && id !== null ? (drafts.get(id) ?? null) : null;
     acts.push({ key: line.key, kind: line.kind, id, draft, sentAt: now, state: 'sending', note: null });
   });
   return { ...memory, acts, sending: { attempt, lines, state: 'sending', note: null } };
