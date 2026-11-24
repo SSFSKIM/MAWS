@@ -272,6 +272,7 @@
 "commands.session.stopTask.input":[".appSessionId AppSessionId"],
 "commands.session.takeOver.input":[".appSessionId AppSessionId",".paneId PtyId"],
 "commands.session.takeOverPane.output":[".ptyId PtyId"],
+"commands.session.tellAgent.input":[".appSessionId AppSessionId"],
 "commands.session.ui.answer.input":[".appSessionId AppSessionId"],
 "commands.session.ui.close.input":[".appSessionId AppSessionId"],
 "commands.session.ui.focus.input":[".appSessionId AppSessionId"],

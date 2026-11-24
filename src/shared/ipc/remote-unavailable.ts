@@ -53,6 +53,7 @@ export const REMOTE_UNAVAILABLE: Readonly<Partial<Record<CommandName, string>>> 
   'session.setCwd': notYet('changing the working directory'),
   'session.history.append': notYet('adding to the prompt history'),
   'session.reloadSkills': notYet('reloading skills'),
+  'session.tellAgent': notYet('messaging a subagent directly; it is messaged through its parent'), // the direct tell (ticket 862)
   // per window (P5 O8 M6a: a member's drafts are offered, kept per member on the machine)
   'session.setVisible': notYet('the machine’s own windows'),
   'session.ui.render': notYet('mod surfaces'),

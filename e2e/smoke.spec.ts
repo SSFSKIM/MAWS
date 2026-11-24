@@ -2,7 +2,7 @@
 // MAWS_E2E_EXECUTABLE). Processes are identified by pid, never by name: the host pids come from `window.maws`, the
 // shell pid from the echo test, and `app.getAppMetrics()` (evaluated in main by Playwright) ties each host pid to the
 // `serviceName` it was forked with on the utility shape (P5 O3-B: on the daemon shape the hosts are `mawsd`'s).
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { expect, type ElectronApplication, type Page } from '@playwright/test';
 import { collectConsoleErrors, REPO_ROOT, test } from './support/launch';
@@ -31,6 +31,10 @@ test('MAWS opens light, hosts answer, pty echoes, survives reload and window clo
   // Acceptance 6): Resources/peer-auth/peer-auth.node when packaged, the committed prebuild otherwise.
   const peerModule = await app.evaluate(() => (globalThis as { __maws_browser?: { cua?: { inspect(): { peerModule: string } } } }).__maws_browser?.cua?.inspect().peerModule);
   expect(peerModule, 'without the addon every cua connection is refused (run scripts/build-peer-auth.sh)').toBe('loaded');
+  // The direct tell (docs/charter.md, Decision Log 2026-11-24): the built-in mod the engine host passes to every session,
+  // Resources/mods/maws-tell in the package (electron-builder.yml's extraResources), mods/maws-tell in a checkout.
+  const tellMod = await app.evaluate(({ app }) => (app.isPackaged ? `${process.resourcesPath}/mods/maws-tell/.claude-plugin/plugin.json` : null));
+  expect(existsSync(tellMod ?? join(REPO_ROOT, 'mods/maws-tell/.claude-plugin/plugin.json')), `the tell mod is shipped (${tellMod ?? 'the checkout'})`).toBe(true);
 
   // Item 1, UX2 optional-surfaces ruling: one window titled MAWS, sidebar beside main, no empty panel reservation.
   const regions = ['sidebar', 'main'].map((name) => page.locator(`[data-region="${name}"]`));

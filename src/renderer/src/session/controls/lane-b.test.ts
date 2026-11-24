@@ -22,7 +22,7 @@ import { useHosts } from '../../stores/hosts';
 import { useSessions } from '../../stores/sessions';
 import { hostStatus, supervisorStatus } from '../../test-support/host-status';
 import { useSetup } from '../../sessions/store';
-import { laneBControls, PLAN_MODE_WORDS } from './lane-b';
+import { laneBControls, PLAN_MODE_WORDS, TELL_WORDS } from './lane-b';
 import { HOST_UPDATING } from '../../composer/queue/host-wire';
 import type { ControlKey } from './types';
 
@@ -268,6 +268,54 @@ describe('lane B’s capabilities are today’s gates', () => {
     expect(controls.capability('send')).toEqual({ available: false, reason: ARCHIVED });
     expect(controls.capability('model')).toEqual({ available: false, reason: ARCHIVED });
     expect(controls.capability('answer')).toEqual({ available: true });
+  });
+});
+
+// The direct tell (the charter's Decision Log, 2026-11-24): a session whose engine took the built-in mod tells an agent
+// itself through `session.tellAgent`; one without the mod (a rollout that serves mods off, a session from before its
+// first turn), one in plan mode (which refuses the host's call: uxwave-tell-builtin-plan) and one on another machine
+// offer no tell, and the drill-in keeps the relay through the parent.
+describe('lane B tells an agent through the built-in mod', () => {
+  const withMod = (over: Parameters<typeof status>[1] = {}) => ({ ...status(APP, over), tell: true as const });
+  const readyWith = (s: ReturnType<typeof withMod>) => useSessions.getState().applyStatus({ appSessionId: APP, status: s }, TEST_MACHINE);
+  it('offers the tell once the session took the mod, and sends the text as the person typed it, read for a grant', async () => {
+    readyWith(withMod());
+    const fake = fakeClient({ 'session.tellAgent': { delivered: true } });
+    const controls = laneBControls(null, { appSessionId: APP, client: fake.client });
+    expect(controls.capability('tell')).toEqual({ available: true });
+    expect(await controls.tell('a1', 'also check the tests')).toEqual({ state: 'done' });
+    expect(fake.invoked('session.tellAgent')).toEqual([{ appSessionId: APP, agentId: 'a1', text: 'also check the tests' }]);
+    await controls.tell('a1', TYPED_CONSENT);
+    expectNoGrantSent((fake.invoked('session.tellAgent')[1] as { text: string }).text);
+  });
+
+  it('answers the engine\'s refusal in its words, and a failed call with the failure', async () => {
+    readyWith(withMod());
+    const refused = fakeClient({ 'session.tellAgent': { delivered: false, reason: 'Agent "a1" was stopped and was not resumed.' } });
+    expect(await laneBControls(null, { appSessionId: APP, client: refused.client }).tell('a1', 'hi')).toEqual({ state: 'refused', code: 'refused', message: 'Agent "a1" was stopped and was not resumed.' });
+    const failed = fakeClient();
+    const told = laneBControls(null, { appSessionId: APP, client: failed.client }).tell('a1', 'hi');
+    await failed.fail('session.tellAgent', 'mcp_call unanswered after 8 s', 'timeout');
+    expect(await told).toEqual({ state: 'refused', code: 'timeout', message: 'mcp_call unanswered after 8 s' });
+  });
+
+  it('offers no tell without the mod, in plan mode, or with no ready process, and sends nothing then', async () => {
+    ready();
+    const fake = fakeClient({ 'session.tellAgent': { delivered: true } });
+    expect(laneBControls(null, { appSessionId: APP, client: fake.client }).capability('tell')).toEqual({ available: false, reason: TELL_WORDS.absent });
+    readyWith({ ...withMod(), permissionMode: { requested: 'plan', effective: 'plan', refusal: null } });
+    const plan = laneBControls(null, { appSessionId: APP, client: fake.client });
+    expect(plan.capability('tell')).toEqual({ available: false, reason: TELL_WORDS.plan });
+    expect(await plan.tell('a1', 'hi')).toEqual({ state: 'refused', code: 'unsupported', message: TELL_WORDS.plan });
+    readyWith(withMod({ process: 'exited' }));
+    expect(laneBControls(withRecord(), { appSessionId: APP, client: fake.client }).capability('tell')).toMatchObject({ available: false });
+    expect(fake.invoked('session.tellAgent')).toEqual([]);
+  });
+
+  it('offers no tell for a session on another machine, before main\'s first word on it too', () => {
+    readyWith(withMod());
+    const remote = laneBControls(null, { appSessionId: APP, client: fakeClient().client, remote: { state: null } });
+    expect(remote.capability('tell')).toEqual({ available: false, reason: TELL_WORDS.elsewhere });
   });
 });
 
