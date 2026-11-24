@@ -155,28 +155,14 @@ describe.skipIf(!existsSync(MAWSD))('running and stopped without the app (T29)',
   }
   const liveOf = (sessions: { session: string; live: boolean | null }[]) => Object.fromEntries(sessions.map((summary) => [summary.session, summary.live]));
 
-  it('wakes the parked engine host for one pass before the first snapshot, which knows both sessions and reads the unheld one stopped; the held one reads live by the next change at the latest; the host parks again', async () => {
+  it('wakes the parked engine host for one pass before the first snapshot, which reads the held session running and the unheld one stopped; the host parks again', async () => {
     const { tab, ready } = await firstSnapshot();
-    expect(ready.t).toBe('ready');
-    expect(liveOf(ready.sessions)[NOBODY]).toBe(false); // without the wake the index would not hold it: null, listed as running
+    expect(liveOf(ready.sessions)).toEqual({ [HELD]: true, [NOBODY]: false }); // without the wake the index would not hold them: null, listed as running
     expect(logs.filter((line) => line.includes('wakes the parked engine host')), 'one wake').toHaveLength(1);
-    const held = liveOf(ready.sessions)[HELD] === true || (await until(() => tab.frames.slice(3).some((frame) => frame.t === 'changed' && frame.session === HELD && (frame.summary as { live?: unknown } | null)?.live === true), 'the held session read live', 10_000));
-    expect(held).toBe(true);
 
     const host = Number(/spawned a supervisor, pid (\d+)/.exec(logs.find((line) => line.includes('spawned a supervisor, pid ')) ?? '')?.[1]);
     expect(host, 'the woken host’s pid').toBeGreaterThan(0);
     await until(() => !isAlive(host), 'the woken engine host parked again', 30_000);
-    tab.ws.close();
-  });
-
-  // M3's Proves (T29) asks that the first snapshot already read the held session live. As built it does not: the index
-  // tells the discovery wake that its pass is applied once the scan's summaries are in (src/services/index/source.ts,
-  // `tellApplied` after `fs.scan` or at the drain's end), before the same sync's `fs.state` folds the registry's holders,
-  // so the snapshot taken at that signal reads the held session stopped and the next `changed` corrects it. Skipped
-  // until that is settled (task 3's report, phase 2).
-  it.skip('reads the held session live in the first snapshot itself', async () => {
-    const { tab, ready } = await firstSnapshot();
-    expect(liveOf(ready.sessions)).toEqual({ [HELD]: true, [NOBODY]: false });
     tab.ws.close();
   });
 });

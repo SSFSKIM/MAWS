@@ -1,6 +1,7 @@
 // The discovery wake (P5 O3-D M6 fix rounds 1 and 2, the architect's ruling (a) on discovery): a read whose answer
 // depends on the index's discovery, from a client that is not the app (the CLI, another machine's link, the endpoint),
-// on a parked engine host, wakes it and waits for its first discovery pass (the scan, its discoveries applied) before
+// on a parked engine host, wakes it and waits for its first discovery pass (the scan, its discoveries applied, and the
+// registry's holders folded: C4 M3, T29) before
 // answering, at most until DISCOVERY_WAKE_BOUND_MS after the read's arrival. Reads meanwhile join that wake, and no
 // park of the host is asked until it ends (fix round 3). The host the wake woke is asked to park again
 // (DaemonClocks.parkNow: only with no app attached or being admitted and no interest) once the pass is heard, and
@@ -30,6 +31,7 @@ export const DISCOVERY_WAKE_GIVE_UP_MS = 60_000;
 
 export interface DiscoverySignal {
   onApplied(listener: () => void): () => void; // SpineRoot.discovery: a pass's discoveries are in the index
+  onHoldersFolded(listener: () => void): () => void; // and its registry's holders, after them (C4 M3, T29)
 }
 
 export interface DiscoveryWakeOptions {
@@ -52,9 +54,9 @@ export function discoveryWake(options: DiscoveryWakeOptions): (name: string, app
     log(`[spine] discovery: ${name} wakes the parked engine host for its discovery pass`);
     const started = Date.now();
     return new Promise<void>((resolve) => {
-      let off = () => {};
+      let offs: (() => void)[] = [];
       const done = (heard: boolean) => {
-        off();
+        for (const off of offs) off();
         clearTimeout(giveUp);
         inFlight = null;
         if (heard) {
@@ -66,7 +68,12 @@ export function discoveryWake(options: DiscoveryWakeOptions): (name: string, app
       };
       const giveUp = setTimeout(() => done(false), DISCOVERY_WAKE_GIVE_UP_MS);
       giveUp.unref?.();
-      off = discovery.onApplied(() => done(true));
+      let applied = false;
+      let folded = false;
+      offs = [
+        discovery.onApplied(() => void ((applied = true), folded && done(true))),
+        discovery.onHoldersFolded(() => void ((folded = true), applied && done(true))),
+      ];
       options.waking();
       options.wake();
     });

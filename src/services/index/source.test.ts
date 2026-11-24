@@ -1235,6 +1235,65 @@ describe('IndexSessionSource folds the host\'s events into the index and feeds t
       await expect(archiver.run(7, null)).rejects.toBeInstanceOf(DiscoveryPendingError);
     });
 
+    // C4 M3 (T29; docs/doperpowers/plans/2026-11-24-question-sheet-c4-local-page.md): `applied` keeps its moment, the
+    // scan's answer with its discoveries in; the registry's holders folded is a second signal after it, once a generation,
+    // which only mawsd's discovery wake awaits besides, so its reads see a held session as held.
+    it('tells `applied` before the holders are folded, and the fold once a generation after it', async () => {
+      const held = summary();
+      const record = index.sessions.upsertFromSummary(held).record;
+      const fake = scriptedHost('starting');
+      fake.answers.set('fs.state', () => withHolders([{ sessionId: held.sessionId, holder: { kind: 'terminal', pid: 7 } }]));
+      const dispatch = fake.host.dispatch as ReturnType<typeof vi.fn>;
+      const answer = dispatch.getMockImplementation() as SourceHost['dispatch'];
+      let release!: () => void;
+      const stateRead = new Promise<void>((done) => (release = done));
+      dispatch.mockImplementation(async (...args: Parameters<SourceHost['dispatch']>) => (args[1] === 'fs.state' ? (await stateRead, answer(...args)) : answer(...args)));
+      source = new IndexSessionSource(index, fake.host, { emit, tickMs: 5 });
+      const applied = vi.fn();
+      const folded = vi.fn();
+      source.onDiscoveryApplied(applied);
+      source.onHoldersFolded(folded);
+      stop = source.start(recordingWriter().writer);
+      fake.setState('ready');
+      fake.stream();
+      await settle();
+      expect(applied, 'at the scan’s answer, the registry not yet read').toHaveBeenCalledOnce();
+      expect(source.discoveryApplied()).toBe(true);
+      expect([folded.mock.calls.length, source.holdersFolded()]).toEqual([0, false]);
+      expect(index.sessions.get(record.appId)?.holder).toEqual({ kind: 'none' });
+
+      release();
+      await settle();
+      expect([folded.mock.calls.length, source.holdersFolded()]).toEqual([1, true]);
+      expect(index.sessions.get(record.appId)?.holder, 'folded when it is told').toEqual({ kind: 'terminal', pid: 7 });
+      fake.stream(); // the same host's second sync folds again, and tells nothing more
+      await settle();
+      expect([applied.mock.calls.length, folded.mock.calls.length]).toEqual([2, 1]);
+
+      fake.setState('crashed');
+      expect(source.holdersFolded()).toBe(false);
+    });
+
+    it('tells the holders folded when the registry’s read fails, so the wake waits for no fold that will not come', async () => {
+      const fake = scriptedHost('starting');
+      const dispatch = fake.host.dispatch as ReturnType<typeof vi.fn>;
+      const answer = dispatch.getMockImplementation() as SourceHost['dispatch'];
+      dispatch.mockImplementation(async (...args: Parameters<SourceHost['dispatch']>) =>
+        args[1] === 'fs.state' ? { ok: false, error: ipcError('timeout', 'engine-host did not answer fs.state within 10 s') } : answer(...args));
+      vi.spyOn(console, 'error').mockImplementation(() => {});
+      source = new IndexSessionSource(index, fake.host, { emit, tickMs: 5 });
+      const folded = vi.fn();
+      source.onHoldersFolded(folded);
+      stop = source.start(recordingWriter().writer);
+      fake.setState('ready');
+      fake.stream();
+      await settle();
+      expect([folded.mock.calls.length, source.holdersFolded()]).toEqual([1, true]);
+      stop!();
+      stop = null;
+      expect(source.holdersFolded()).toBe(false);
+    });
+
     it('a scan that fails leaves the index not current, and a stopped source is never current', async () => {
       const fake = scriptedHost('starting');
       const dispatch = fake.host.dispatch as ReturnType<typeof vi.fn>;

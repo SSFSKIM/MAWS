@@ -9,26 +9,36 @@ import { REQUEST_TIMEOUT_MS as CLI_REQUEST_TIMEOUT_MS } from './machine-client';
 
 let parked: boolean;
 let listeners: Set<() => void>;
+let folds: Set<() => void>;
 let wakes: number;
 let parks: number;
 let waking: number;
 let lines: string[];
 let before: ReturnType<typeof discoveryWake>;
 
-const pass = () => {
+const applied = () => {
   for (const listener of [...listeners]) listener();
 };
+const folded = () => {
+  for (const listener of [...folds]) listener();
+};
+const pass = () => (applied(), folded()); // the scan's discoveries applied, then the registry's holders folded
+const signal = () => ({
+  onApplied: (listener: () => void) => (listeners.add(listener), () => void listeners.delete(listener)),
+  onHoldersFolded: (listener: () => void) => (folds.add(listener), () => void folds.delete(listener)),
+});
 
 beforeEach(() => {
   vi.useFakeTimers({ now: new Date('2026-10-30T08:00:00.000Z') });
   parked = true;
   listeners = new Set();
+  folds = new Set();
   wakes = 0;
   parks = 0;
   waking = 0;
   lines = [];
   before = discoveryWake({
-    discovery: () => ({ onApplied: (listener) => (listeners.add(listener), () => void listeners.delete(listener)) }),
+    discovery: signal,
     parked: () => parked,
     wake: () => void ((wakes += 1), (parked = false)),
     waking: () => void (waking += 1),
@@ -59,7 +69,7 @@ describe('the discovery wake', () => {
     // The park is an ask the clocks send: a read that waited on it would hold every cold read for the host's exit
     let asked = 0;
     const read = discoveryWake({
-      discovery: () => ({ onApplied: (listener) => (listeners.add(listener), () => void listeners.delete(listener)) }),
+      discovery: signal,
       parked: () => parked,
       wake: () => void (parked = false),
       waking: () => {},
@@ -75,6 +85,42 @@ describe('the discovery wake', () => {
     pass();
     await vi.advanceTimersByTimeAsync(0); // microtasks only: far inside DISCOVERY_WAKE_BOUND_MS
     expect([asked, settled], 'the park asked, and the read answered at the pass').toEqual([1, true]);
+  });
+
+  // C4 M3 (T29): `applied` comes at the scan's answer, before the registry's holders are folded; a read the wake answers
+  // at its pass sees a session a terminal holds as held, so the pass is both, in either order.
+  it('hears the pass only once the discoveries are applied and the holders folded, in either order', async () => {
+    let answered = 0;
+    void before('session.list', false, Date.now()).then(() => void (answered += 1));
+    await vi.advanceTimersByTimeAsync(100);
+    applied();
+    await vi.advanceTimersByTimeAsync(0);
+    expect([answered, parks], 'applied, the holders not yet folded').toEqual([0, 0]);
+    folded();
+    await vi.advanceTimersByTimeAsync(0);
+    expect([answered, parks, listeners.size, folds.size]).toEqual([1, 1, 0, 0]);
+
+    parked = true;
+    await vi.advanceTimersByTimeAsync(DISCOVERY_FRESH_MS);
+    void before('session.list', false, Date.now()).then(() => void (answered += 1));
+    expect(wakes).toBe(2);
+    folded();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(answered, 'folded, the discoveries still draining').toBe(1);
+    applied();
+    await vi.advanceTimersByTimeAsync(0);
+    expect([answered, parks]).toEqual([2, 2]);
+  });
+
+  it('a fold that never comes holds no read past its bound, and the wake gives up as for a scan', async () => {
+    let settled = false;
+    void before('session.list', false, Date.now()).then(() => (settled = true));
+    applied();
+    await vi.advanceTimersByTimeAsync(DISCOVERY_WAKE_BOUND_MS);
+    expect(settled, 'answered at its bound').toBe(true);
+    expect(parks).toBe(0);
+    await vi.advanceTimersByTimeAsync(DISCOVERY_WAKE_GIVE_UP_MS - DISCOVERY_WAKE_BOUND_MS);
+    expect([parks, listeners.size, folds.size]).toEqual([1, 0, 0]);
   });
 
   it('the app, and reads that need no discovery, never wait', async () => {
