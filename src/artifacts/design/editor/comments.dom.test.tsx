@@ -206,7 +206,9 @@ describe('the rail’s words for a design (Decision Log 29)', () => {
     await act(async () => new Promise((r) => setTimeout(r, 80)));
     const board = rail.querySelector<HTMLElement>('article[data-thread="tb"]')!;
     const element = rail.querySelector<HTMLElement>('article[data-thread="te"]')!;
-    expect(board.querySelector('.deck-thread-slide')!.textContent).toBe('Desktop'); // the word cut (G543)
+    // the word cut (G543) and the pair review: a board's own thread names its board once, by its quote
+    expect(board.querySelector('.deck-thread-slide')).toBeNull();
+    expect(board.querySelector('.deck-thread-quote')!.textContent).toBe('Desktop');
     expect(element.querySelector('.deck-thread-slide')!.textContent).toBe('Phone');
     expect(within(board).getByRole('button', { name: 'Show board: Desktop' })).toBeTruthy();
     expect(within(element).getByRole('button', { name: 'Show element: Ship the first week.' })).toBeTruthy();

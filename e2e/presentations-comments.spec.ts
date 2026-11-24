@@ -5,7 +5,7 @@
 // card with B's artifact target and anchor; Resolve on the card keeps the thread, the rail reopens it; its pin sits at
 // the element's top-right and follows it through a drag, a resize from another replica, a re-order of slides and an
 // agent's republish that rewrites its text (the quote following); deleting the element shows the thread orphaned with
-// that last text; Resolve and Reopen in the rail; the header counts the open threads. Decision Log 31's narrow-panel
+// that last text; Resolve and Reopen in the rail; the toolbar Comments badge counts the open threads. Decision Log 31's narrow-panel
 // ruling: at the panel's default width (under 720 px of editor) a rail overlays the stage as a sheet from the right, so
 // the stage keeps its width. The agent's three tools are the
 // host's unit tests (src/engine-host/presentations/threads.test.ts), through the real tool server.
@@ -178,12 +178,15 @@ test('comments on a deck’s elements: the card, the pin through a move, a resiz
   await thread.getByRole('button', { name: 'Reopen' }).click();
   await expect(thread).toHaveAttribute('data-status', 'open');
   // UX wave U5a (A3; docs/doperpowers/plans/2026-11-12-ux-wave-U5a-comment-card.md, M7's rule): a thread nothing was said
-  // in is no comment; once a comment is posted in it, the header counts it
-  await expect(panel.getByTitle(/^\d+ open comments?$/), 'a thread nothing was said in counts as none').toHaveCount(0);
+  // in is no comment; once a comment is posted in it, the toolbar counts it
+  // the word cut (G404): the open count is the toolbar Comments toggle's badge, the header drawing none of its own
+  const count = toolbar.locator('[data-comments-count]');
+  await expect(count, 'a thread nothing was said in counts as none').toHaveCount(0);
   await thread.getByRole('textbox', { name: 'Reply' }).fill(POSTED);
   await thread.getByRole('textbox', { name: 'Reply' }).press('Enter');
   await expect(thread.locator('.deck-thread-body')).toHaveText([POSTED]);
-  await expect(panel.getByTitle('1 open comment', { exact: true })).toBeVisible(); // the header's count
+  await expect(count).toHaveText('1'); // the toolbar's count
+  await expect(panel.getByTitle(/^\d+ open comments?$/), 'no second count in the header').toHaveCount(0);
 
   // the pin at the element's top-right
   await expect.poll(() => pinOffset(deck, 'body'), { message: 'the pin on the element’s corner' }).toBeLessThan(4);
@@ -207,7 +210,7 @@ test('comments on a deck’s elements: the card, the pin through a move, a resiz
   await expect.poll(() => pinOffset(deck, 'body')).toBeLessThan(4);
 
   // the element deleted (the sheet closed so the stage takes the click, then opened again): the thread orphaned with the
-  // element's last text, stored by the host from the text just before the deletion; no pin or live-target header count
+  // element's last text, stored by the host from the text just before the deletion; no pin or live-target count
   await toolbar.getByRole('button', { name: /^Comments/ }).click();
   await expect(rail).toHaveCount(0);
   // the drag left the body selected, and a click on the element selected alone edits it at the click (P4-B2's T3), so the
@@ -233,20 +236,20 @@ test('comments on a deck’s elements: the card, the pin through a move, a resiz
   await expect(thread.locator('.deck-thread-note')).toHaveText('Element deleted');
   await expect(thread.locator('.deck-thread-quote-text')).toHaveText('Two paths');
   await expect(deck.locator('[data-comment-pin]')).toHaveCount(0);
-  await expect(panel.getByTitle(/^\d+ open comments?$/)).toHaveCount(0);
+  await expect(count).toHaveCount(0);
 
-  // Resolve and Reopen in the rail; a revealed orphan still never contributes to the live-target header count
+  // Resolve and Reopen in the rail; a revealed orphan still never contributes to the live-target count
   await thread.getByRole('button', { name: 'Resolve' }).click();
   await expect(thread).toHaveAttribute('data-status', 'resolved');
-  await expect(panel.getByTitle(/^\d+ open comments?$/)).toHaveCount(0);
+  await expect(count).toHaveCount(0);
   await thread.getByRole('button', { name: 'Reopen' }).click();
   await expect(thread).toHaveAttribute('data-orphan', '');
-  await expect(panel.getByTitle(/^\d+ open comments?$/)).toHaveCount(0);
-  // an undo brings the element back: the thread is no orphan any more, its pin and header count are back
+  await expect(count).toHaveCount(0);
+  // an undo brings the element back: the thread is no orphan any more, its pin and count are back
   await deck.getByRole('button', { name: 'Undo' }).click();
   await expect(thread).not.toHaveAttribute('data-orphan', '');
   await expect.poll(() => pinOffset(deck, 'body')).toBeLessThan(4);
-  await expect(panel.getByTitle('1 open comment', { exact: true })).toBeVisible();
+  await expect(count).toHaveText('1');
 
   expect(launch!.consoleErrors()).toEqual([]);
 });

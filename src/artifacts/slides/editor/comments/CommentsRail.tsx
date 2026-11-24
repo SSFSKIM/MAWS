@@ -28,11 +28,12 @@ import './comments.css';
  * P3-E (E1 M4; the P3-E spec's Decision Log 29): the rail's words for an artifact whose threads are not on slides (a
  * design's boards): the empty text, and per thread where it is, its Show button's name and its orphan note (`index`: the
  * thread's slide's place, 1-based, null when it is gone); a null note draws none (the word cut, G545: a design says a
- * deleted board once, in the location). Absent, C's own words.
+ * deleted board once, in the location); a null location draws no location line (a design's board, which its quote names
+ * already). Absent, C's own words.
  */
 export interface CommentsRailLabels {
   empty: string;
-  target(thread: DeckThreadState, index: number | null): { location: string; show: string; orphan: string | null };
+  target(thread: DeckThreadState, index: number | null): { location: string | null; show: string; orphan: string | null };
 }
 
 export function CommentsRail({ api, onClose, labels }: { api: DeckCommentsApi; onClose(): void; labels?: CommentsRailLabels /* P3-E */ }) {
@@ -99,7 +100,7 @@ interface ItemProps {
   thread: DeckThreadState;
   slide: number | null;
   /** P3-E: the thread's words from the rail's labels, else C's. */
-  copy?: { location: string; show: string; orphan: string | null };
+  copy?: { location: string | null; show: string; orphan: string | null };
   selected: boolean;
   readOnly: boolean;
   /** P4-B2: the thread's reply draft, the editor's. */
@@ -128,7 +129,7 @@ function ThreadItem({ thread, slide, copy, number, selected, readOnly, draft, on
       data-element={thread.elementId}
     >
       <button type="button" className="deck-thread-quote" aria-label={copy?.show ?? C.show(thread.quote) /* P3-E */} onClick={onShow}>
-        <span className="deck-thread-slide">{copy?.location ?? C.slide(slide) /* P3-E */}</span>
+        {copy?.location !== null && <span className="deck-thread-slide">{copy ? copy.location : C.slide(slide) /* P3-E */}</span>}
         <span className="deck-thread-quote-text">{thread.quote}{number === undefined ? '' : ` · Element ${number}`}</span>
       </button>
       {thread.orphan && (copy ? copy.orphan : C.orphan) !== null && <p className="deck-thread-note">{copy ? copy.orphan : C.orphan /* P3-E */}</p>}

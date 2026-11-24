@@ -3,7 +3,8 @@
 // per action. Hints reflect working stage bindings: native tab-strip chords take precedence over the legacy
 // front/back handlers' ⌥⌘ brackets, so those actions advertise no shortcut. Detach has no key binding.
 // The word cut (docs/doperpowers/specs/2026-11-16-word-cut-design.md, M5 task 3): Inspector is a named glyph (G401), and
-// a refused group, ungroup, detach or duplicate is told shortly, the model's reason its tooltip (G413).
+// a refused group, ungroup, detach or duplicate is told shortly, the model's reason its tooltip (G413). G401 is the
+// deck's row: the design workbench, which no row cuts here, keeps the word (`inspectorWord`).
 import { DropdownMenu } from 'radix-ui';
 import { useSyncExternalStore, type ReactNode } from 'react';
 import { NamedGlyph } from '../../../renderer/src/ui/glyph';
@@ -30,11 +31,13 @@ export interface ElementBarProps {
   onStatus: StartStatus;
   inspectorOpen: boolean;
   onToggleInspector: () => void;
+  /** The Inspector toggle as its word, not the glyph (the design workbench: G401 cuts only the deck's). */
+  inspectorWord?: boolean;
   /** Text style belongs between Insert and Arrange in both editors. */
   children?: ReactNode;
 }
 
-export function ElementBar({ session, slideId, canvas, scale, readOnly, onInsert, uploadAsset, onNotice, onStatus, inspectorOpen, onToggleInspector, children }: ElementBarProps) {
+export function ElementBar({ session, slideId, canvas, scale, readOnly, onInsert, uploadAsset, onNotice, onStatus, inspectorOpen, onToggleInspector, inspectorWord = false, children }: ElementBarProps) {
   const state = useSyncExternalStore(session.subscribe, session.snapshot);
   useDocVersion(session);
   const cmds = slideId && canvas?.slideId === slideId ? selectionCommands({ session, slideId, canvas, scale }, state.selection, readOnly) : null;
@@ -69,9 +72,15 @@ export function ElementBar({ session, slideId, canvas, scale, readOnly, onInsert
           </DropdownMenu.Content>
         </DropdownMenu.Portal>
       </DropdownMenu.Root>
-      <NamedGlyph label={C.inspector} pressed={inspectorOpen} className="deck-button deck-glyph" onClick={onToggleInspector}>
-        <SidePanelIcon />
-      </NamedGlyph>
+      {inspectorWord ? (
+        <button type="button" className="deck-button" aria-label={C.inspector} aria-pressed={inspectorOpen} title={C.inspector} onClick={onToggleInspector}>
+          {C.inspector}
+        </button>
+      ) : (
+        <NamedGlyph label={C.inspector} pressed={inspectorOpen} className="deck-button deck-glyph" onClick={onToggleInspector}>
+          <SidePanelIcon />
+        </NamedGlyph>
+      )}
     </div>
   );
 }

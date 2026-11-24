@@ -8,6 +8,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ArtifactHost, DocumentHandle, DocumentState } from '@artifacts/host';
 import { importSlide, writeDeckKeys } from '@artifacts/slides/model';
 import { loadSlide } from '@artifacts/slides/parse';
+import { addThread } from '@artifacts/slides/threads';
 import { newDoc, transact, type Doc } from '@artifacts/yjs';
 import * as Y from '@artifacts/yjs/slides';
 import type { PreloadBridge } from '@shared/ipc/schema';
@@ -74,6 +75,16 @@ describe('the deck body', () => {
     expect(host.toolbarHost?.element.closest('[role="toolbar"]')?.getAttribute('aria-label')).toBe('Deck');
     expect(host.closeGuard).toBe(state.closeGuard);
     expect(host.actions?.map((action) => action.id)).toEqual(['present', 'theme', 'check']);
+  });
+
+  // the word cut (M5's pair review): the open count is drawn once, as the toolbar's Comments badge (G404); the header
+  // carries no count of its own beside Deck actions, as the design's toolbar and header no longer both count (G512)
+  it('gives the header no comment count while the deck holds an open thread', async () => {
+    const doc = deckOf(['a']);
+    addThread(doc, { threadId: 't1', slideId: 'a', elementId: 'p0', quote: 'Slide a', by: { kind: 'human' }, at: 1, body: 'Shorter?' });
+    const { state } = await mount(doc);
+    expect(state.snapshot().session).not.toBeNull();
+    expect(editorHostOf(scope)?.unresolved).toBeUndefined();
   });
 
   // scalpel-2#1: header.ts's contract, "the deck has a slide to show"

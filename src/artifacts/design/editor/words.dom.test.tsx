@@ -87,6 +87,18 @@ describe('the toolbar', () => {
     expect(within(toolbar()).queryByRole('button', { name: /^Comments/ })).toBeNull();
     expect(toolbar().querySelector('[data-comments-toggle]')).toBeNull();
   });
+
+  // the pair review: the deck's Inspector became a glyph (G401) through the toolbar both editors share; no design row cuts
+  // the design's, so the design keeps its word, as on master
+  it('keeps the Inspector toggle a word on the design', () => {
+    mount();
+    const inspector = within(toolbar()).getByRole('button', { name: 'Inspector' });
+    expect(inspector.textContent).toBe('Inspector');
+    expect(inspector.querySelector('svg')).toBeNull();
+    expect(inspector.getAttribute('aria-pressed')).toBe('true');
+    fireEvent.click(inspector);
+    expect(inspector.getAttribute('aria-pressed')).toBe('false');
+  });
 });
 
 describe('the boards rail', () => {
@@ -228,8 +240,10 @@ describe('the comments rail’s words (G542, G543, G545)', () => {
     expect(labels.empty).toBe('No open comments. Select a board or an element and choose Add comment.');
   });
 
-  it('locates a board’s own thread by the board’s name alone, as an element’s', () => {
-    expect(labels.target(thread('b1', ROOT), null).location).toBe('Phone');
+  // the pair review: a board's own thread is quoted by its board's name, so a location line naming the board again would
+  // read it twice ("Tablet" over "Tablet"); an element's thread keeps its board above its own quote, as the deck's slide
+  it('names a board once: its own thread has no location line, its quote the board’s name; an element’s thread is located by its board', () => {
+    expect(labels.target(thread('b1', ROOT), null).location).toBeNull();
     expect(labels.target(thread('b1', 'lede'), null).location).toBe('Phone');
   });
 
