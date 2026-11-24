@@ -149,7 +149,8 @@ export const selectSheetMemory = (state: Pick<SheetsState, 'memories'>, session:
 /**
  * Whether an app session's sheet holds something the person acted on, which a compact sheet keeps showing once its
  * questions no longer wait (M4's review): a queued answer or a queued dismissal (neither is an attention item), or an
- * act of this window still sending or carrying a note. It waits on nobody: nothing counts it.
+ * act of this window still sending, accepted and not yet delivered (the model's `pending` holds its outcome), or carrying
+ * a note. It waits on nobody: nothing counts it.
  */
 export function selectSheetHeld(state: Pick<SheetsState, 'summaries' | 'memories'>, appSessionId: AppSessionId): boolean {
   const session = selectSheetSession(state, appSessionId);
@@ -157,7 +158,7 @@ export function selectSheetHeld(state: Pick<SheetsState, 'summaries' | 'memories
   const summary = state.summaries.get(session)!;
   if (summary.queued > 0 || summary.hidden > 0) return true;
   const memory = state.memories.get(session);
-  return memory !== undefined && (memory.sending !== null || memory.acts.some((act) => act.state === 'sending' || act.note !== null));
+  return memory !== undefined && (memory.sending !== null || memory.acts.some((act) => act.state === 'sending' || act.state === 'accepted' || act.note !== null));
 }
 
 /** Applies an update to a session's memory as it stands now (X5's `onMemory`); callable after the sheet that asked is gone. */

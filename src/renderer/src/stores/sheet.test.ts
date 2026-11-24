@@ -204,14 +204,15 @@ describe('a sheet that holds what the person did', () => {
     useSheets.setState({ summaries: new Map([[A, summary(A, { appSessionId, open: 0, ...extra })]]), memories: new Map([[A, memory]]) });
     return selectSheetHeld(useSheets.getState(), appSessionId);
   };
-  const act = (state: 'sending' | 'queued' | 'closed', note: string | null) => ({ key: 'maws-1', kind: 'answer' as const, id: 'q1', draft: null, sentAt: 0, state, note });
+  const act = (state: 'sending' | 'queued' | 'accepted' | 'delivered' | 'closed', note: string | null) => ({ key: 'maws-1', kind: 'answer' as const, id: 'q1', draft: null, sentAt: 0, state, note });
 
-  it('holds a queued answer, a queued dismissal, a Send in flight, an act sending and an act with a note; nothing else', () => {
+  it('holds a queued answer, a queued dismissal, a Send in flight, an act sending, one accepted not yet delivered and one with a note; nothing else', () => {
     expect(held({ queued: 1 })).toBe(true);
     expect(held({ hidden: 1 })).toBe(true);
     expect(held({}, { ...EMPTY_MEMORY, sending: { attempt: 'a1', lines: [], state: 'sending', note: null } })).toBe(true);
     expect(held({}, { ...EMPTY_MEMORY, acts: [act('sending', null)] })).toBe(true);
     expect(held({}, { ...EMPTY_MEMORY, acts: [act('closed', 'q1 was already answered')] })).toBe(true);
+    expect(held({}, { ...EMPTY_MEMORY, acts: [act('accepted', null)] }), 'its outcome pending, not delivered').toBe(true);
     expect(held({}, { ...EMPTY_MEMORY, acts: [act('queued', null)] })).toBe(false);
     expect(held({ open: 2 })).toBe(false); // waiting questions are attention's, not this
     expect(selectSheetHeld(useSheets.getState(), at('app-none' as AppSessionId)), 'a session with no record').toBe(false);

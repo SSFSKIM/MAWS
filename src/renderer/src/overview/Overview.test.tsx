@@ -311,6 +311,42 @@ describe('a session whose sheet questions wait', () => {
     expect(fix.querySelectorAll('[data-request-card]')).toHaveLength(0);
   });
 
+  // M4's re-review: a running session accepts the last answer sent from its card; nothing of it waits, and the card keeps
+  // its sheet, which reads the outcome accepted until it is delivered
+  it('keeps a running session’s compact sheet once the last answer sent from it is accepted, its outcome in view', async () => {
+    const id = idOf('Fix sidebar drag');
+    let model = sheetOf([FIXTURE]);
+    const summary = (accepted: boolean) => ({ session: model.session, appSessionId: bareOf(id), title: null, live: true, seq: accepted ? 2 : 1, open: accepted ? 0 : 1, queued: 0, pending: accepted ? 1 : 0, hidden: 0, oldestAskedAt: null, unreadable: false });
+    const door = { known: true, available: true };
+    const fake = fakeClient({
+      'sheet.list': { sessions: [summary(false)], door },
+      'sheet.read': () => ({ model, door }),
+      'sheet.put': ({ lines }: { lines: SheetLine[] }) => ({ ok: true, results: lines.map((line) => ({ key: line.key, state: 'queued' })) }),
+    });
+    window.maws = preloadOf(fake);
+    act(() => useAttention.getState().applyChanged({ appSessionId: id, items: [asked(id, 'q7', 1)] }, TEST_MACHINE));
+    offs.push(connectSheets(ipc));
+    render(<Overview paneIndex={0} />);
+    const fix = () => card('Fix sidebar drag');
+    await waitFor(() => expect(fix().querySelector('[data-sheet-question="q7"]')).not.toBeNull());
+    fireEvent.click(within(fix()).getByRole('button', { name: /q7/ }));
+    fireEvent.click(within(fix()).getByRole('radio', { name: 'Replace it' }));
+    fireEvent.click(within(fix()).getByRole('button', { name: SHEET_WORDS.send(1) }));
+    await waitFor(() => expect(fake.invoked('sheet.put')).toHaveLength(1));
+    const [answer] = (fake.invoked('sheet.put') as { lines: SheetLine[] }[])[0]!.lines;
+    // the session's next step applies it: the question closes, its outcome pending delivery
+    const outcome = { key: answer!.key, kind: 'answer', id: 'q7', by: 'maws', at: '2026-11-23T10:00:00.000Z', acceptedAt: '2026-11-23T10:00:01.000Z', acrossStop: false, recipient: 'main', revision: 1, taken: false, picks: ['Replace it'], text: '', images: [], places: [1],
+      question: { askedAt: FIXTURE.askedAt, asker: FIXTURE.asker, header: FIXTURE.header, multiSelect: false, options: FIXTURE.options.map((option) => option.label), question: FIXTURE.question } };
+    model = sheetOf([], { seq: 2, pending: [outcome as never], sent: [{ key: answer!.key, state: 'accepted', verdict: 'applied', kind: 'answer', id: 'q7', at: '2026-11-23T10:00:01.000Z' }] });
+    act(() => {
+      useAttention.getState().applyChanged({ appSessionId: id, items: [] }, TEST_MACHINE);
+      fake.event('sheet.changed', { session: model.session, summary: summary(true) });
+    });
+    await waitFor(() => expect(fix().querySelector('[data-sheet-outcome="q7"]')?.textContent).toContain(SHEET_WORDS.accepted));
+    expect(fix().querySelectorAll('[data-sheet-in-place]'), 'the sheet stays where the answer was sent').toHaveLength(1);
+    expect(fix().querySelector('[data-sheet-question]'), 'nothing of it open').toBeNull();
+  });
+
   // M4's review: a stopped session's one question answered from its card is queued and waits no more; the card keeps its
   // sheet, which reads the answer queued with Take back; taken back, the question is open and waits again
   it('keeps a stopped session’s compact sheet once its one question is answered from it: queued with Take back, which opens it again', async () => {

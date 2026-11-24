@@ -27,7 +27,7 @@ import { ChannelView } from './ChannelView';
 import { useChannelTitle } from './title';
 import { ipc } from '../ipc/client'; // the question sheet's C3 M4
 import { CLASH, FIXTURE, sheetOf } from '../sheet/test-support/questions';
-import { connectSheets, resetSheetStore } from '../stores/sheet';
+import { connectSheets, resetSheetStore, updateSheetMemory } from '../stores/sheet';
 
 const SMNS = '1f0e2d3c-4b5a-4968-8776-a5b4c3d2e1f0';
 const KEY = `smns:${SMNS}` as OrgKey;
@@ -416,13 +416,14 @@ describe('Waiting on you', () => {
   });
 
   // M4's review: a session whose only question was answered here, queued, waits no more and keeps its card, so the answer
-  // reads queued with its Take back where it was sent
+  // reads queued with its Take back where it was sent (its card open: the act that queued it is this window's)
   it('keeps a session’s compact sheet while it holds a queued answer, with nothing of it waiting', async () => {
     const queued = { ...FIXTURE, queued: { key: 'maws-0001', kind: 'answer' as const, picks: ['Replace it'], text: '', images: [], revision: 1, by: 'maws' as const } };
     const SHEET = sheetOf([queued], { sent: [{ key: 'maws-0001', state: 'queued', kind: 'answer', id: 'q7' }] });
     const summary = { session: SHEET.session, appSessionId: mine.appId, title: null, live: false, seq: 1, open: 0, queued: 1, pending: 0, hidden: 0, oldestAskedAt: null, unreadable: false };
     install({ 'maws.asks.list': { asks: [] }, 'sheet.list': { sessions: [summary], door: { known: false } }, 'sheet.read': { model: SHEET, door: { known: false } } });
     const off = connectSheets(ipc);
+    updateSheetMemory(SHEET.session, (memory) => ({ ...memory, acts: [{ key: 'maws-0001', kind: 'answer', id: 'q7', draft: null, sentAt: 0, state: 'queued', note: null }] })); // sent from here
     try {
       render(<ChannelView project={SMNS} />);
       await act(() => fake.reply('org.channel.open', opened()));

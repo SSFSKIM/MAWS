@@ -16,7 +16,7 @@ import { Icon } from '../../app/IconButton';
 import { ipc } from '../../ipc/client';
 import { panelHost, setTitle, usePanelHost } from '../../panel/host';
 import type { PanelTool, PanelToolContext, PanelToolInit } from '../../panel/tool';
-import { sideGroups } from '../../panel/surface-model';
+import { sideGroups, surfaceSession } from '../../panel/surface-model';
 import { useLayout } from '../../stores/layout';
 import { SessionSheet, SHEET_WORDS } from '../../sheet';
 import { selectSheetSession, useSheets } from '../../stores/sheet';
@@ -74,9 +74,12 @@ function Centered({ words }: { words: string }) {
   return <p className="m-0 flex flex-1 items-center justify-center p-6 text-center text-fg-muted">{words}</p>;
 }
 
-// Whether the tab is in view in the session's side column now: the shown tab of one of its groups.
+// Whether the tab is in view now: the side column shows this session (the scope the panel region draws, which another
+// session's in front changes while this one's groups stay saved) and the tab is the shown tab of one of its groups.
 function tabInView(appSessionId: AppSessionId, tabId: string): boolean {
-  const groups = sideGroups(useLayout.getState(), appSessionId);
+  const layout = useLayout.getState();
+  if (surfaceSession(layout) !== appSessionId) return false;
+  const groups = sideGroups(layout, appSessionId);
   return !groups.hidden && (groups.upper.shown?.id === tabId || groups.lower?.shown?.id === tabId);
 }
 

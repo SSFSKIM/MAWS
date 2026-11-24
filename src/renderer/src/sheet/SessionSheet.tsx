@@ -160,6 +160,7 @@ export function SessionSheet({ model, memory, onMemory, host, focus = null, dens
               busy={!free || awaiting.has(question.id)}
               host={host}
               density={density}
+              queuedHere={question.queued !== undefined && memory.acts.some((act) => act.key === question.queued?.key)}
               onDraft={(update) => draft(question, update)}
               onDismiss={() => dismiss(question)}
               onRetract={retract}

@@ -225,6 +225,19 @@ describe('the sheet', () => {
     expect(within(cardOf('q4')).queryByRole('radio')).toBeNull();
   });
 
+  // C3 M4's review: a compact card mounted over an answer this surface queued starts open, its answer and Take back in
+  // view; one whose queued answer another surface sent stays folded to its line until chosen
+  it('starts a compact card open over an answer this surface queued, and folded over one queued elsewhere', () => {
+    const queued = (key: string) => ({ key, kind: 'answer' as const, picks: ['Keep the earlier sailing'], text: '', images: [], revision: 1, by: 'maws' as const });
+    const model = sheetOf([{ ...CLASH, queued: queued('maws-mine') }, { ...FIXTURE, queued: queued('cli-theirs') }]);
+    const mine = { key: 'maws-mine', kind: 'answer' as const, id: 'q4', draft: null, sentAt: 0, state: 'queued' as const, note: null };
+    sheet(model, { density: 'compact', memory: { ...EMPTY_MEMORY, acts: [mine] } });
+    expect(within(cardOf('q4')).getByRole('button', { name: /q4/ }).getAttribute('aria-expanded')).toBe('true');
+    expect(within(cardOf('q4')).getByRole('button', { name: 'Take back' })).toBeTruthy();
+    expect(within(cardOf('q7')).getByRole('button', { name: /q7/ }).getAttribute('aria-expanded')).toBe('false');
+    expect(within(cardOf('q7')).queryByRole('button', { name: 'Take back' })).toBeNull();
+  });
+
   it('takes nothing while a Send is held', async () => {
     let release: (result: SheetPutResult) => void = () => {};
     const host = fixtureHost({ send: () => new Promise((resolve) => (release = resolve)) });

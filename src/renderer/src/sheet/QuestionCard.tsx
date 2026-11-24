@@ -29,6 +29,7 @@ export interface QuestionCardProps {
   busy: boolean; // an act of this surface on this question is in flight
   host: SheetHost;
   density?: 'full' | 'compact'; // compact: folded to its row line until chosen
+  queuedHere?: boolean; // the queued answer on the question is one this surface sent: a compact card mounted over it starts open
   // The person's act, as an update of the draft as it stands when applied (undefined: none; null: none after it): a
   // field's edit changes that field of it, so an image or another edit applied first stays.
   onDraft(update: (current: QuestionDraft | undefined) => QuestionDraft | null): void;
@@ -118,13 +119,14 @@ function Note({ tone, children }: { tone: 'warning' | 'neutral'; children: React
   );
 }
 
-export function QuestionCard({ session, question, draft, mark, busy, host, density = 'full', onDraft, onDismiss, onRetract, onAttach }: QuestionCardProps) {
+export function QuestionCard({ session, question, draft, mark, busy, host, density = 'full', queuedHere = false, onDraft, onDismiss, onRetract, onAttach }: QuestionCardProps) {
   const [pointed, setPointed] = useState<string | null>(null);
   const [focused, setFocused] = useState<string | null>(null);
   const [opened, setOpened] = useState<ReadonlySet<number>>(new Set()); // references open, by their place in the list (two may share a hash)
-  // compact only. A card mounted over a queued answer starts open (C3 M4's review): the Overview's card moves to another
-  // group once its last question no longer waits, and its sheet mounts again there with the answer and Take back in view.
-  const [folded, setFolded] = useState(() => question.queued === undefined);
+  // compact only. A card mounted over an answer this surface queued starts open (C3 M4's review): the Overview's card
+  // moves to another group once its last question no longer waits, and its sheet mounts again there with the person's
+  // answer and Take back in view. Every other card is folded to its line until chosen.
+  const [folded, setFolded] = useState(() => !queuedHere);
   const [pasteNote, setPasteNote] = useState<string | null>(null);
 
   const queued = question.queued;

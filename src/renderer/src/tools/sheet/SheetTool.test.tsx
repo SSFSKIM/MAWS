@@ -15,7 +15,7 @@ import { surfaceTabs } from '../../panel/surface-model';
 import { CLASH, FIXTURE, NOTICES, sheetOf } from '../../sheet/test-support/questions';
 import { useLayout } from '../../stores/layout';
 import { connectSheets, resetSheetStore, updateSheetMemory, watchSheet } from '../../stores/sheet';
-import { A as SHOWN, resetPanelStores } from '../../test-support/panel';
+import { A as SHOWN, B, mainShowing, resetPanelStores } from '../../test-support/panel';
 import { appSheetHost } from './host';
 import { openSheet, SHEET_TOOL_ID, sheetTool, type SheetToolParams } from './SheetTool';
 
@@ -156,6 +156,31 @@ describe('the side sheet', () => {
     render(<Body state={state} ctx={at} />);
     await act(() => fake.reply('sheet.read', { model: MODEL, door: { known: false } }));
     expect(document.activeElement?.getAttribute('data-sheet-question')).toBe('q5');
+  });
+
+  // M4's re-review: the side column follows the session in front; A's sheet goes when B is shown, while A's groups stay
+  // saved, and comes back with A: the ask was used, so the keyboard stays where the person left it
+  it('uses an ask when another session is shown: A at q5, then B, then A again moves nothing', async () => {
+    registerPanelTool(sheetTool);
+    await listed(summary());
+    act(() => openSheet(SHOWN, 'q5'));
+    const tab = surfaceTabs(useLayout.getState(), SHOWN).find((ref) => ref.toolId === SHEET_TOOL_ID)!;
+    const state = sheetTool.createState({ appSessionId: SHOWN, session: record(SHOWN), instanceId: tab.id, params: { at: 'q5' } });
+    const Body = sheetTool.render;
+    const at = ctx({ editorHost: { surface: 'panel', tabId: tab.id } });
+    const first = render(<Body state={state} ctx={at} />);
+    await act(() => fake.reply('sheet.read', { model: MODEL, door: { known: false } }));
+    expect(document.activeElement?.getAttribute('data-sheet-question')).toBe('q5');
+    act(() => useLayout.setState({ main: mainShowing(SHOWN, B) })); // session B in front: the column shows B's
+    first.unmount();
+    const elsewhere = document.body.appendChild(document.createElement('button'));
+    elsewhere.focus();
+    act(() => useLayout.setState({ main: mainShowing(B, SHOWN) })); // and A again
+    render(<Body state={state} ctx={at} />);
+    await act(() => fake.reply('sheet.read', { model: MODEL, door: { known: false } }));
+    expect(document.querySelector('[data-sheet-question="q5"]')).not.toBeNull();
+    expect(document.activeElement, 'the keyboard stays where the person left it').toBe(elsewhere);
+    elsewhere.remove();
   });
 
   it('keeps an ask made while the column is not on screen until it is, then puts the keyboard on its card', async () => {
