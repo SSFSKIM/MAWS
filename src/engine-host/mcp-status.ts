@@ -5,6 +5,7 @@
 // McpWidget.tsx), so its answer keeps the four fields that line is made of and drops every other config field, a field
 // the engine adds later included. The engine's own answer stays whole for main-only consumers in the host.
 import type { McpStatusResponse } from '@shared/wire/control';
+import { isTellServer } from '@shared/maws/tell'; // the direct tell
 
 const RENDERER_CONFIG_FIELDS = ['type', 'command', 'args', 'url'] as const;
 
@@ -18,7 +19,7 @@ function rendererConfig(config: unknown): Record<string, unknown> | undefined {
 export function rendererMcpStatus(answer: McpStatusResponse): McpStatusResponse {
   return {
     ...answer,
-    mcpServers: answer.mcpServers.map(({ config, ...server }) => {
+    mcpServers: answer.mcpServers.filter((server) => !isTellServer({ name: server.name, source: server.source ?? null })).map(({ config, ...server }) => { // the direct tell: the host's own channel, never the person's server
       const kept = rendererConfig(config);
       return kept === undefined ? server : { ...server, config: kept };
     }),

@@ -118,6 +118,10 @@ export const EngineSessionStatusSchema = z.strictObject({
   // `holderId` the launch id; `adopted` once a successor engine host re-attached to it, M3); null on a replay or
   // embedded launch; absent from an older host.
   holder: z.strictObject({ pid: z.number().int(), holderId: z.string(), adopted: z.boolean() }).nullable().optional(),
+  // The direct tell (the charter's Decision Log, 2026-11-24; src/shared/maws/tell.ts): true while the engine lists the
+  // built-in mod's tool server connected, which `plugins` and `mcpServers` leave out (the host's own channel, never the
+  // person's plugin or connector); absent from an older host and where the engine took no mod.
+  tell: z.literal(true).optional(),
 });
 export type EngineSessionStatus = z.infer<typeof EngineSessionStatusSchema>;
 

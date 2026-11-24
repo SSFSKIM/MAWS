@@ -20,9 +20,12 @@
 // sentence and invokes nothing (that host does not know the command). A session on another machine is never gated here:
 // its host is that machine's, and main's adapter sends the act only to a machine whose handshake lists `rl2.send-now`
 // (UX wave U4b).
+// The direct tell (the charter's Decision Log, 2026-11-24; src/shared/maws/tell.ts): a session on this Mac whose engine took
+// the built-in mod `maws-tell` tells an agent itself (`session.tellAgent`); without the mod, in plan mode (which refuses the
+// host's own call) and on another machine there is no tell, and the drill-in relays through the parent.
 import type { RequestAnswer } from '@shared/engine/answers';
 import type { EngineSessionStatus } from '@shared/engine/status';
-import type { AppSessionId, TaskId } from '@shared/graph/ids';
+import type { AgentId, AppSessionId, TaskId } from '@shared/graph/ids';
 import type { SessionRecord } from '@shared/graph/session';
 import type { CommandName, CommandResult, MawsBridge } from '@shared/ipc/schema';
 import { ipcError } from '@shared/ipc/errors';
@@ -40,6 +43,7 @@ import { useHosts } from '../../stores/hosts';
 import { hostHasThisWire } from '@shared/sessions/host-wire';
 import { HOST_UPDATING } from '../../composer/queue/host-wire';
 import { neutraliseGrant } from '@shared/engine/grant'; // UX wave U1c
+import { tellPresent } from '@shared/maws/tell'; // the direct tell
 import { useSessions } from '../../stores/sessions';
 import type { Capability, ControlKey, ControlResult, SessionControls } from './types';
 
@@ -62,9 +66,16 @@ export interface LaneBInputs {
 const ELSEWHERE: Partial<Record<ControlKey, string>> = {
   command: 'A slash command is sent as a message in this session',
   'stop-agent': 'A subagent is stopped through its task in this session',
-  tell: 'A subagent is messaged through its parent in this session',
   'take-over': 'MAWS already holds this session',
 };
+// The direct tell: why a session has none, so the drill-in relays through the parent.
+export const TELL_WORDS = {
+  absent: 'A subagent is messaged through its parent in this session',
+  plan: 'In plan mode a subagent is messaged through its parent',
+  elsewhere: 'A subagent of a session on another machine is messaged through its parent',
+} as const;
+// A session on another machine reaches its agents through the parent too (main's adapter carries no tell).
+const REMOTE_ELSEWHERE: Partial<Record<ControlKey, string>> = { ...ELSEWHERE, tell: TELL_WORDS.elsewhere };
 // What the request's own host decides, or what only reads: never gated on the session's process.
 const ALWAYS = new Set<ControlKey>(['answer', 'decide', 'decide.scope', 'decide.interrupt', 'decide.addDirectory', 'elicitation.answer', 'subagent-rows']);
 // What only a ready process takes: an interrupt or a stop never starts a session.
@@ -120,9 +131,17 @@ export function laneBControls(record: SessionRecord | null, { appSessionId, clie
     return process === 'ready' ? null : reattaching(status ?? null) ? REATTACHING /* P5 O16 M3b */ : process === 'starting' || process === 'initializing' ? STARTING : ENDED;
   };
   const refusedHere = (key: ControlKey): Promise<ControlResult> => Promise.resolve({ state: 'refused', code: 'unsupported', message: ELSEWHERE[key]! });
+  // the direct tell: a ready process whose engine took the mod, out of plan mode
+  const tellRefusal = (): string | null => {
+    const status = now().status;
+    if (status?.process !== 'ready') return processRefusal();
+    if (!tellPresent(status)) return TELL_WORDS.absent;
+    return status.permissionMode.effective === 'plan' ? TELL_WORDS.plan : null;
+  };
   const ownCapability = (key: ControlKey): Capability => {
     const elsewhere = ELSEWHERE[key];
     if (elsewhere !== undefined) return { available: false, reason: elsewhere };
+    if (key === 'tell') return unavailable(remote ? TELL_WORDS.elsewhere : tellRefusal()); // a remote session before main's first word too
     if (ALWAYS.has(key)) return AVAILABLE;
     return unavailable(NEEDS_PROCESS.has(key) ? processRefusal() : writeRefusal());
   };
@@ -131,7 +150,7 @@ export function laneBControls(record: SessionRecord | null, { appSessionId, clie
   // forgets a departed machine's) gates nothing; one it holds still says a process is starting or gone, for an act that
   // never starts a session. Lane B's own words for what it reaches another way, and before main's first word.
   const remoteCapability = (key: ControlKey, state: RemoteSession): Capability => {
-    const elsewhere = ELSEWHERE[key];
+    const elsewhere = REMOTE_ELSEWHERE[key];
     if (elsewhere !== undefined) return { available: false, reason: elsewhere };
     const overlaid = state.controls[key];
     if (!overlaid.available) return overlaid;
@@ -213,7 +232,14 @@ export function laneBControls(record: SessionRecord | null, { appSessionId, clie
     // UX wave U1c: the one-writer rule (shared/engine/grant.ts `neutraliseGrant`), its last step on what goes out
     compact: async (instructions) => controlResultOf(await client.invoke('session.send', { appSessionId, content: instructions ? neutraliseGrant(`/compact ${instructions}`) : '/compact' })),
     stopAgent: () => refusedHere('stop-agent'),
-    tell: () => refusedHere('tell'),
+    tell: async (agentId, text) => {
+      const tellable = capability('tell');
+      if (!tellable.available) return { state: 'refused', code: 'unsupported', message: tellable.reason };
+      // UX wave U1c: the one-writer rule (shared/engine/grant.ts `neutraliseGrant`), its last step on what goes out
+      const result = await client.invoke('session.tellAgent', { appSessionId, agentId: agentId as AgentId, text: neutraliseGrant(text) });
+      if (!result.ok) return { state: 'refused', code: result.error.code, message: result.error.message };
+      return result.value.delivered ? { state: 'done' } : { state: 'refused', code: 'refused', message: result.value.reason };
+    },
     stopTask: async (taskId) => controlResultOf(await client.invoke('session.stopTask', { appSessionId, taskId: taskId as TaskId })),
     turn: () => null, // C3's status is the session's own
     slash: (catalog, widgets) => ({ catalog, widgets }), // the engine's catalogue, every registered widget

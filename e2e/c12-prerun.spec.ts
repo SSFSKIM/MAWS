@@ -749,7 +749,10 @@ test('§10.4 one deep session: a relay to a running background child, Review wit
     const stop = join(scratch.root, `relay-stop-${Date.now().toString(36)}`);
     const inbox = join(scratch.root, 'relay-inbox.txt');
     let agentId = '';
-    await step('the relay to a running background child', async () => {
+    // The direct tell (docs/charter.md, Decision Log 2026-11-24): where the engine runs mods, MAWS's built-in mod is loaded
+    // and the drill-in's box tells the child itself (its line reads Sent, the parent sends nothing); else the relay
+    // through the parent, as before.
+    await step('a message to a running background child (direct where the mod is loaded, else the relay)', async () => {
       const from = log.seq;
       await send(page, `Dispatch one general-purpose agent in the background, model haiku, with this task: repeat rounds of Read README.md then "sleep 3" with Bash until the file ${stop} exists; whenever you receive a message from the user, append it to the file ${inbox} with Bash. Then reply DISPATCHED.`);
       const started = await log.until('the background child’s start', (ev) => ev.find((e) => e.seq !== null && e.seq > from && e.kind === 'subagent.started' && e.isBackground === true));
@@ -763,7 +766,24 @@ test('§10.4 one deep session: a relay to a running background child, Review wit
       await box.fill(text);
       const sentFrom = log.seq;
       const sentAt = Date.now();
+      const direct = (await statusOf(page, id!)).tell === true;
       await panel(page).locator('[data-view="agent"]').getByRole('button', { name: 'Send', exact: true }).click();
+      if (direct) {
+        await expect.poll(() => panel(page).locator('[data-view="agent"] [data-part="relay-line"]').textContent(), { timeout: 15_000 }).toBe('Sent');
+        let inboxAt: number | null = null;
+        for (const until = Date.now() + 180_000; inboxAt === null && Date.now() < until; await page.waitForTimeout(1_000)) {
+          if (existsSync(inbox) && readFileSync(inbox, 'utf8').includes(text)) inboxAt = Date.now();
+        }
+        await log.pull();
+        const parentSends = log.events.filter((e) => e.seq !== null && e.seq > sentFrom && e.kind === 'tool.use' && e.agentId === null && e.toolName === 'SendMessage');
+        out.relay = { direct: true, agentId, text, inboxAfterMs: inboxAt === null ? null : inboxAt - sentAt, parentSends: parentSends.length, screenshots: await shoot(page, '10.4-tell') };
+        writeFileSync(stop, '');
+        await log.until('the child finished', () => log.events.find((e) => (e.kind === 'subagent.finished' || e.kind === 'task.notification') && e.taskId === agentId)?.at ?? null, 240_000);
+        await log.idle(240_000);
+        expect(inboxAt, 'the child received the message (its inbox)').not.toBeNull();
+        expect(parentSends, 'no relay through the parent').toEqual([]);
+        return;
+      }
       const sendMessage = await log.until('the parent’s SendMessage', (ev) => ev.find((e) => e.seq !== null && e.seq > sentFrom && e.kind === 'tool.use' && e.agentId === null && e.toolName === 'SendMessage'), 240_000);
       const lines = () => page.evaluate(() => (window as unknown as { __relay: { t: number; v: string }[] }).__relay);
       const childEndedAt = () => log.events.find((e) => (e.kind === 'subagent.finished' || e.kind === 'task.notification') && e.taskId === agentId)?.at ?? null;

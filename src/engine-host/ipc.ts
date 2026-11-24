@@ -20,11 +20,12 @@ import type { CommandInput, CommandName, CommandOutput } from '@shared/ipc/schem
 import type { C3_ENGINE_COMMANDS, O10_ENGINE_COMMANDS /* P5 O10 */ } from '@shared/ipc/schema/engine';
 import type { SessionEvent } from '@shared/graph/events'; // UX wave, ticket 777
 import { utf8Length } from '@shared/graph/history-window'; // UX wave, ticket 777
-import type { C3_SESSION_COMMANDS, E8_SESSION_COMMANDS, O10_SESSION_COMMANDS /* P5 O10 M8 */, O7M8_SESSION_COMMANDS /* P5 O7 M8 */, P2C_SESSION_COMMANDS /* P2-C */, P5O2_SESSION_COMMANDS /* P5 O2 M2 */, R2_SESSION_COMMANDS, U4A_SESSION_COMMANDS /* UX wave U4a */, EventsSnapshot } from '@shared/ipc/schema/session';
+import type { C3_SESSION_COMMANDS, E8_SESSION_COMMANDS, O10_SESSION_COMMANDS /* P5 O10 M8 */, O7M8_SESSION_COMMANDS /* P5 O7 M8 */, P2C_SESSION_COMMANDS /* P2-C */, P5O2_SESSION_COMMANDS /* P5 O2 M2 */, R2_SESSION_COMMANDS, TELL_SESSION_COMMANDS /* the direct tell */, U4A_SESSION_COMMANDS /* UX wave U4a */, EventsSnapshot } from '@shared/ipc/schema/session';
 import { SURFACE_CLIENT_ID } from '@shared/engine/surface'; // R2
 import { binaryInfoOf, createBinaryProbe, PROBE_BOUND_MS, type BinaryCheck } from './binary-info';
 import { TESTED_ENGINE_VERSION } from './engine-compat'; // W13
 import * as controls from './controls';
+import { tellAgent } from './tell'; // the direct tell
 import { createAdopter, createLauncher, type LauncherDeps } from './launcher';
 import type { RosterEntry } from './holder/roster'; // P5 O16 M3
 import type { Gate } from './holder/gate'; // O16 M5
@@ -138,6 +139,8 @@ export const E8_DEADLINE_SHAPES: Record<(typeof E8_SESSION_COMMANDS)[number], De
 export const P2C_DEADLINE_SHAPES: Record<(typeof P2C_SESSION_COMMANDS)[number], DeadlineShape> = { 'session.steer.cancel': 'bounded', 'session.promptHistory': 'immediate' };
 // UX wave U4a: Send now is one `interrupt { send_now }` round trip, bounded as the steer cancel is
 export const U4A_DEADLINE_SHAPES: Record<(typeof U4A_SESSION_COMMANDS)[number], DeadlineShape> = { 'session.steer.sendNow': 'bounded' };
+// The direct tell: one checked mcp_call of the built-in mod's tool, bounded as a control round trip is
+export const TELL_DEADLINE_SHAPES: Record<(typeof TELL_SESSION_COMMANDS)[number], DeadlineShape> = { 'session.tellAgent': 'bounded' };
 // P5 O2 M2: the keep mark, one state-file write
 export const P5O2_DEADLINE_SHAPES: Record<(typeof P5O2_SESSION_COMMANDS)[number], DeadlineShape> = { 'session.setKeep': 'immediate' };
 // P5 O10 M8: the broker's items, answered from the session's own list; every session's at once, from each session's
@@ -658,6 +661,7 @@ export function registerEngineIpc(hostOn: HostOn, emit: HostEmit, deps: EngineIp
   // back from the session's retained journals, whether or not this host holds the session now
   on('session.steer.cancel', async ({ appSessionId, messageUuid }) => bounded(() => sessionOf(appSessionId).queue.cancelSteer(messageUuid as MessageUuid)));
   on('session.steer.sendNow', async ({ appSessionId, messageUuid }) => bounded(() => sessionOf(appSessionId).sendNow(messageUuid as MessageUuid))); // UX wave U4a
+  on('session.tellAgent', async ({ appSessionId, agentId, text }) => bounded(() => tellAgent(ready(appSessionId).client, agentId, text, { timeoutMs: BOUNDED_BUDGET_S * 1000 }))); // the direct tell
   on('session.promptHistory', async ({ appSessionId, since }) => {
     assertSafeAppSessionId(appSessionId); // it names a directory
     notHidden(appSessionId); // ticket 851, M2's review

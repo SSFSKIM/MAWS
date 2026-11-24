@@ -6,7 +6,7 @@ import { mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from 'node:
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { auditOf, bridgeTimedOut, claudeJsonChanges, manifestOf, pathKind, readTree, untilQuiet, type ClaudeJson, type SettledInvoke, type Tree } from './plugins-audit';
+import { actionAuditOf, auditOf, bridgeTimedOut, claudeJsonChanges, manifestOf, pathKind, readTree, untilQuiet, type ClaudeJson, type SettledInvoke, type Tree } from './plugins-audit';
 
 const obj = (value: Record<string, unknown>): ClaudeJson => ({ state: 'object', value });
 const tree = (files: Record<string, string>, claudeJson: Record<string, unknown> | ClaudeJson | null = null): Tree => ({
@@ -56,6 +56,39 @@ describe('the plugins audit', () => {
     expect(auditOf(before, stray, manifest).unannounced).toEqual(['added config/plugins/known_marketplaces.json']);
   });
 
+  it('lets an action write the .claude.json keys its manifest announces, and only those', () => {
+    // 2.1.331's uninstall adds the plugin to `declinedPlugins` (the live run's 12-uninstall and 15-reinstall)
+    const uninstall = manifestOf('uninstall', 'user', null, { marketplace: 'e8-scratch', plugin: 'e8-probe', id: 'e8-probe@e8-scratch' });
+    expect(uninstall.paths).toContain('config/.claude.json · declinedPlugins');
+    const before = tree({ 'config/.claude.json': '1', 'config/settings.json': 'a' }, { pluginUsage: {} });
+    const after = tree({ 'config/.claude.json': '2', 'config/settings.json': 'b' }, { pluginUsage: { 'e8-probe@e8-scratch': { usageCount: 1 } }, declinedPlugins: ['e8-probe@e8-scratch'] });
+    const accepted = auditOf(before, after, uninstall);
+    expect(accepted).toMatchObject({ unannounced: [], unclassified: [] });
+    expect(accepted.lines).toContain('  changed config/.claude.json · declinedPlugins   [manifest]');
+    // an action that does not announce it (an update; a listing) may not change it
+    const update = manifestOf('update', 'user', null, { marketplace: 'e8-scratch', plugin: 'e8-probe', id: 'e8-probe@e8-scratch' });
+    expect(auditOf(before, after, update).unannounced).toEqual(['changed config/.claude.json · declinedPlugins']);
+    expect(auditOf(before, after, listing).unannounced).toContain('changed config/.claude.json · declinedPlugins');
+    // an announced key does not open the rest of the file
+    const trust = tree({ 'config/.claude.json': '2', 'config/settings.json': 'b' }, { pluginUsage: {}, declinedPlugins: [], mcpServers: { x: {} } });
+    expect(auditOf(before, trust, uninstall).unannounced).toEqual(['changed config/.claude.json · mcpServers']);
+  });
+
+  it('judges the reads after a mutation on their own: a listing that writes declinedPlugins fails even right after an uninstall', () => {
+    // 2.1.331's `plugin list --json` can move an opt-out for a plugin its marketplace removed into `declinedPlugins`
+    const uninstall = manifestOf('uninstall', 'user', null, { marketplace: 'e8-scratch', plugin: 'e8-probe', id: 'e8-probe@e8-scratch' });
+    const before = tree({ 'config/.claude.json': '1', 'config/settings.json': 'a' }, { pluginUsage: {} });
+    const uninstalled = tree({ 'config/.claude.json': '2', 'config/settings.json': 'b' }, { pluginUsage: {}, declinedPlugins: ['e8-probe@e8-scratch'] });
+    const refetched = tree({ 'config/.claude.json': '3', 'config/settings.json': 'b' }, { pluginUsage: {}, declinedPlugins: ['e8-probe@e8-scratch', 'gone@elsewhere'] });
+    const audit = actionAuditOf(before, uninstalled, refetched, uninstall);
+    expect(audit.mutation).toMatchObject({ unannounced: [], unclassified: [] });
+    expect(audit.reads.unannounced).toEqual(['changed config/.claude.json · declinedPlugins']);
+    // judged as one window, the uninstall's manifest would have let the listing's write through
+    expect(auditOf(before, refetched, uninstall).unannounced).toEqual([]);
+    // reads that wrote nothing pass
+    expect(actionAuditOf(before, uninstalled, uninstalled, uninstall).reads).toMatchObject({ lines: [], unannounced: [], unclassified: [] });
+  });
+
   it('lets an install write the cache of a dependency the marketplace declares, in it or in an allowlisted marketplace', () => {
     const manifest = manifestOf('install', 'user', null, { marketplace: 'e8-scratch', plugin: 'e8-probe', id: 'e8-probe@e8-scratch' });
     const before = tree({ 'config/settings.json': 'a' });
@@ -84,6 +117,7 @@ describe('the plugins audit', () => {
       'config/plugins/data/e8-tools@e8-scratch/',
       'project/.claude/settings.json',
       'project/.claude/settings.local.json',
+      'config/.claude.json · declinedPlugins',
     ]);
     // a user-scoped plugin disabled with --scope local in the audited project: the removal clears that override too
     const localOverride = manifestOf('marketplace-remove', 'user', 'directory', { name: 'e8-scratch' }, uninstalls.slice(0, 1), '/tmp/repo');

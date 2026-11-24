@@ -62,6 +62,7 @@ import { PromptHistoryEventSchema } from '../../graph/events';
 import { SessionCapabilitiesSchema } from './session-capabilities'; // P5 O5 M5
 // P2-C end
 import { ObservedFactsAnswerSchema } from '../../engine/observed-facts'; // P2-A
+import { TELL_TEXT_MAX } from '../../maws/tell'; // the direct tell
 // R2 start
 import { PaneRosterSchema, RenderAnswerSchema, ScrollSiteSchema, SURFACE_SITES, SurfaceAnswerSchema, SurfaceElementSchema, SurfaceViewportSchema } from '../../engine/surface';
 // R2 end
@@ -896,6 +897,19 @@ const u4aCommands = {
 } as const;
 export const U4A_SESSION_COMMANDS = Object.keys(u4aCommands) as (keyof typeof u4aCommands)[];
 // UX wave U4a end -------------------------------------------------------------------------------------------------------
+// The direct tell start (the charter's Decision Log, 2026-11-24; src/shared/maws/tell.ts) ---------------------------------
+// Owner engine-host. `session.tellAgent` sends the person's text to one of the session's agents through the built-in mod
+// `maws-tell` (a checked mcp_call of its tool): `delivered` when it reached the agent's queue (a finished agent is resumed
+// with it), else the engine's reason. Fails as the engine answered where the call itself is refused (plan mode, the mod
+// not loaded). One round trip, bounded.
+const tellCommands = {
+  'session.tellAgent': host(
+    input({ agentId: AgentIdSchema, text: z.string().min(1).max(TELL_TEXT_MAX) }),
+    z.discriminatedUnion('delivered', [z.strictObject({ delivered: z.literal(true) }), z.strictObject({ delivered: z.literal(false), reason: z.string() })]),
+  ),
+} as const;
+export const TELL_SESSION_COMMANDS = Object.keys(tellCommands) as (keyof typeof tellCommands)[];
+// The direct tell end ----------------------------------------------------------------------------------------------------
 // Ticket 851, M2 start (docs/doperpowers/plans/2026-11-24-prestart-engine.md, Interfaces; D1, D8, R4-7) -------------------
 // The spine's prestarts, main-only (the spine root's, through its engine-host link), owner engine-host, immediate.
 // `session.prestart` admits a hidden launch of `spec` for the spine root `owner` (`key`: what decides the launch beyond
@@ -946,6 +960,7 @@ export const commands = {
   ...o7Commands, // P5 O7 M4
   ...o7m8Commands, // P5 O7 M8
   ...u4aCommands, // UX wave U4a
+  ...tellCommands, // the direct tell
   ...prestartCommands, // ticket 851, M2
   ...intentPrestartCommands, // ticket 851, M3
 } as const satisfies Record<`session.${string}`, CommandSpec<z.ZodType, z.ZodType>>;
