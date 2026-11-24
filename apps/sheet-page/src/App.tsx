@@ -7,11 +7,12 @@
 // that place shows once paired. The page reads its path alone (T20).
 import { useEffect, useState } from 'react';
 import { createApi } from './api';
-import { forgetEverything, readPairing, writePairing, type StoredPairing } from './credential';
+import { CREDENTIAL_KEY, forgetEverything, readPairing, writePairing, type StoredPairing } from './credential';
 import { Frame } from './frame/Frame';
 import { connect, type Live } from './live';
 import { PairingScreen } from './pairing/PairingScreen';
 import { pathOf, placeOf, type Place } from './route';
+import { unpairThisBrowser, type Unpaired } from './unpair';
 
 type Screen = 'waiting' | 'pairing' | 'frame';
 
@@ -19,18 +20,33 @@ const liveUrl = () => `ws://${location.host}/live`;
 
 // The page's one live connection, which every request that carries the credential asks first (api.ts)
 const current: { live: Live | null } = { live: null };
-const api = createApi({ proven: () => current.live?.proven() ?? false, pairing: readPairing });
+const api = createApi({ proven: () => current.live?.proven() ?? null });
 
 export function App() {
   const [place, setPlace] = useState<Place>(() => placeOf(location.pathname));
   const [pairing, setPairing] = useState<StoredPairing | null>(() => readPairing());
   const [screen, setScreen] = useState<Screen>(() => (pairing === null ? 'pairing' : 'waiting'));
-  const [notPaired, setNotPaired] = useState(false);
+  const [unpaired, setUnpaired] = useState<Unpaired | null>(null);
 
   useEffect(() => {
     const moved = () => setPlace(placeOf(location.pathname));
     addEventListener('popstate', moved);
     return () => removeEventListener('popstate', moved);
+  }, []);
+
+  // Another tab of this browser paired anew or unpaired: this one follows what is stored (the connection it holds proves
+  // only the pairing it opened with, live.ts), and a pairing no longer stored shows the pairing screen
+  useEffect(() => {
+    const stored = (event: StorageEvent) => {
+      if (event.key !== CREDENTIAL_KEY && event.key !== null) return;
+      const now = readPairing();
+      setPairing(now);
+      if (now !== null) return;
+      setUnpaired('refused'); // the plain line: what became of it is the other tab's to say
+      setScreen('pairing');
+    };
+    addEventListener('storage', stored);
+    return () => removeEventListener('storage', stored);
   }, []);
 
   useEffect(() => {
@@ -39,12 +55,12 @@ export function App() {
       url: liveUrl(),
       pairing: readPairing, // read as each socket opens: what is stored now
       onPaired: () => {
-        setNotPaired(false);
+        setUnpaired(null);
         setScreen('frame');
       },
       onState: (state) => {
         if (state !== 'unpaired') return;
-        setNotPaired(true);
+        setUnpaired('refused');
         setScreen('pairing');
       },
     });
@@ -60,20 +76,19 @@ export function App() {
     setPlace(next);
   };
 
-  // The person's own Unpair: told to mawsd only over a proven connection, then forgotten here whatever the answer (§P)
+  // The person's own Unpair (unpair.ts): told to mawsd only over a proven connection, forgotten here whatever the answer,
+  // and the pairing screen says which of the three it was
   const unpair = async () => {
-    await api.unpair();
-    current.live?.close();
-    forgetEverything();
+    const outcome = await unpairThisBrowser({ unpair: api.unpair, close: () => current.live?.close(), forget: forgetEverything });
     setPairing(null);
-    setNotPaired(true);
+    setUnpaired(outcome);
     setScreen('pairing');
   };
 
   if (screen === 'pairing')
     return (
       <PairingScreen
-        notPaired={notPaired}
+        unpaired={unpaired}
         pair={api.pair}
         onPaired={(paired) => {
           writePairing(paired);

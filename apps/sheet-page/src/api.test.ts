@@ -5,15 +5,17 @@ import { createApi } from './api';
 
 const CREDENTIAL = Buffer.alloc(32, 7).toString('base64url');
 
+const PAIRING = { id: '0a1b2c3d', credential: CREDENTIAL };
+
 function harness(answer: () => Promise<Response> = async () => new Response(null, { status: 204 })) {
-  let proven = false;
+  let proven: typeof PAIRING | null = null;
   const calls: { url: string; init: RequestInit }[] = [];
   const fetch = vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
     calls.push({ url: String(url), init: init ?? {} });
     return answer();
   });
-  const api = createApi({ proven: () => proven, pairing: () => ({ id: '0a1b2c3d', credential: CREDENTIAL }), fetch });
-  return { api, calls, prove: (value: boolean) => void (proven = value) };
+  const api = createApi({ proven: () => proven, fetch });
+  return { api, calls, prove: (value: typeof PAIRING | null) => void (proven = value) };
 }
 
 const json = (status: number, value: unknown) => async () => new Response(JSON.stringify(value), { status, headers: { 'Content-Type': 'application/json' } });
@@ -57,7 +59,7 @@ describe('unpair', () => {
 
   it('posts to /api/unpair with the credential as a Bearer header once proven', async () => {
     const { api, calls, prove } = harness();
-    prove(true);
+    prove(PAIRING);
     expect(await api.unpair()).toEqual({ ok: true });
     expect(calls).toHaveLength(1);
     expect(calls[0]!.url).toBe('/api/unpair');
@@ -66,11 +68,19 @@ describe('unpair', () => {
     expect(calls[0]!.init.credentials).toBe('omit'); // never a cookie
   });
 
+  it('sends the credential of the pairing the connection proved, and no other', async () => {
+    const { api, calls, prove } = harness();
+    const other = { id: 'ffffffff', credential: Buffer.alloc(32, 3).toString('base64url') };
+    prove(other);
+    await api.unpair();
+    expect(headersOf(calls[0]!.init).get('authorization')).toBe(`Bearer ${other.credential}`);
+  });
+
   it('asks at the moment of the request, not before', async () => {
     const { api, calls, prove } = harness();
-    prove(true);
+    prove(PAIRING);
     await api.unpair();
-    prove(false);
+    prove(null);
     expect(await api.unpair()).toEqual({ ok: false, why: 'unproven' });
     expect(calls).toHaveLength(1);
   });
@@ -78,7 +88,7 @@ describe('unpair', () => {
   it('answers a refusal or a failure as not done', async () => {
     const proven = (answer: () => Promise<Response>) => {
       const made = harness(answer);
-      made.prove(true);
+      made.prove(PAIRING);
       return made.api;
     };
     expect(await proven(json(500, { why: 'not-saved' })).unpair()).toEqual({ ok: false, why: 'not-saved' });

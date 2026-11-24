@@ -14,6 +14,8 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import type { Page } from '@playwright/test';
 import WebSocket, { WebSocketServer } from 'ws';
+// the page's origin and Host come from the server's own module (it imports nothing), so a change there reaches this suite
+import { pageOrigin, SHEET_HOST } from '../../../src/mawsd/sheet-page/headers';
 import { closeAll, listenLoopback } from './second-origin.mjs';
 
 export { secondOrigin } from './second-origin.mjs';
@@ -30,6 +32,7 @@ export interface Mawsd {
   cli(...args: string[]): Promise<{ code: number; out: string }>;
   pair(page: Page): Promise<void>; // `mawsd sheet pair`, its code typed into the page's pairing screen, and the frame shown
   browsers(): Promise<{ id: string; label: string }[]>; // `mawsd sheet browsers --json`
+  connections(): Promise<number>; // the live connections paired on the connection, as `mawsd status --json` counts them
   proofFor(id: string): Promise<string>; // a proof the daemon makes now, for that browser and a nonce of the rig's (the impostor's `replay`)
   stop(): Promise<void>;
   kill(): void;
@@ -50,6 +53,7 @@ export async function startMawsd(options: { env?: Record<string, string> } = {})
   for (const dir of Object.values(dirs)) mkdirSync(dir, { recursive: true });
   const base: Record<string, string> = {
     PATH: process.env.PATH ?? '/usr/bin:/bin',
+    ...options.env, // a test's own, which can name none of what follows: the scratch homes and the switches are enforced
     HOME: dirs.home,
     MAWS_USER_DATA: dirs.profile,
     CLAUDE_CONFIG_DIR: dirs.config,
@@ -57,7 +61,6 @@ export async function startMawsd(options: { env?: Record<string, string> } = {})
     MAWS_SHEET_PAGE: '1',
     MAWS_E2E: '1', // under which sminosHome refuses the real home
     MAWS_ENGINE_REPLAY: '1', // no engine runs
-    ...options.env,
   };
   let port = 0;
   let child: ChildProcess | null = null;
@@ -74,10 +77,10 @@ export async function startMawsd(options: { env?: Record<string, string> } = {})
     new Promise<{ code: number; out: string }>((done) => {
       execFile(process.execPath, [MAWSD, ...args], { env: base, timeout: 20_000 }, (error, stdout) => done({ code: error ? Number((error as { code?: unknown }).code ?? 1) : 0, out: stdout }));
     });
-  const status = async (): Promise<{ state?: string; url?: string | null } | null> => {
+  const status = async (): Promise<{ state?: string; url?: string | null; connections?: number | null } | null> => {
     const { code, out } = await cli('status', '--json');
     if (code !== 0) return null;
-    return (JSON.parse(out) as { sheetPage?: { state: string; url: string | null } }).sheetPage ?? null;
+    return (JSON.parse(out) as { sheetPage?: { state: string; url: string | null; connections: number | null } }).sheetPage ?? null;
   };
 
   async function start(): Promise<void> {
@@ -111,10 +114,16 @@ export async function startMawsd(options: { env?: Record<string, string> } = {})
     clearTimeout(late);
   }
 
-  await start();
+  try {
+    await start();
+  } catch (error) {
+    await stop(); // a daemon that never came to listen
+    rmSync(scratch, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+    throw error;
+  }
   return {
     get url() {
-      return `http://sheet.localhost:${port}`;
+      return pageOrigin(port);
     },
     get port() {
       return port;
@@ -134,8 +143,11 @@ export async function startMawsd(options: { env?: Record<string, string> } = {})
       if (code !== 0) throw new Error(`mawsd sheet browsers exited ${code}`);
       return (JSON.parse(out) as { browsers: { id: string; label: string }[] }).browsers;
     },
+    async connections() {
+      return (await status())?.connections ?? 0;
+    },
     async proofFor(id) {
-      const socket = new WebSocket(`ws://127.0.0.1:${port}/live`, { headers: { Host: `sheet.localhost:${port}`, Origin: `http://sheet.localhost:${port}` } });
+      const socket = new WebSocket(`ws://127.0.0.1:${port}/live`, { headers: { Host: `${SHEET_HOST}:${port}`, Origin: pageOrigin(port) } });
       await new Promise((done, failed) => socket.once('open', done).once('error', failed));
       socket.send(JSON.stringify({ t: 'hello', v: 1, id, nonce: randomBytes(32).toString('base64url') }));
       const answer = await new Promise<string>((done) => socket.once('message', (data: Buffer) => done(data.toString())));
@@ -192,7 +204,7 @@ export async function impostor(port: number, plays: ImpostorPlay, recorded?: str
       else if (plays === 'paired-unproven') {
         socket.send(JSON.stringify({ t: 'paired' }));
         socket.send(JSON.stringify({ t: 'ready', v: 1, sessions: [], door: { state: 'available' } }));
-      } else if (plays === 'refuses') socket.close(4401, 'refused');
+      } else if (plays === 'refuses') socket.close(4401, 'refused'); // §L's close for a browser not known (handler.ts, CLOSE.refused)
     });
   });
   const make = () => {

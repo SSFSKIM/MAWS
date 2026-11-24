@@ -83,6 +83,28 @@ test('discovery derives default from other groups and workspace configs without 
   assert.equal(notes.length, 1); assert.match(notes[0], /e2e:unknown/);
 });
 
+// The question sheet's C4: a workspace app's e2e script that builds in several steps before Playwright (the page's own
+// build after the root's main-only build) is read as the Playwright run it ends in.
+test('a workspace e2e script with several leading build steps is read past them', (t) => {
+  const { dir, put } = fixture(t);
+  put('package.json', { name: 'root', scripts: { e2e: 'playwright test', 'e2e:page': 'pnpm --filter page e2e' } });
+  put('apps/page/package.json', { name: 'page', scripts: { e2e: 'pnpm -w run build:main-preload && vite build && playwright test' } });
+  put('apps/page/playwright.config.ts', "export default defineConfig({ testDir: 'e2e' });");
+  put('apps/page/e2e/shell.spec.ts', "import './rig';"); put('apps/page/e2e/rig.ts', "import '../../../src/server';"); put('src/server.ts', '');
+  const { groups, notes } = discoverGroups(dir, ts);
+  assert.deepEqual(notes, []);
+  assert.deepEqual(groups.get('e2e:page'), ['apps/page/e2e/shell.spec.ts']);
+  assert.deepEqual(checkCoverage({ root: dir, ts, gates: 'static', changed: ['src/server.ts'] }).missing, [{ group: 'e2e:page', paths: ['src/server.ts'] }]);
+});
+
+test('this tree: e2e:sheet-page is read, and a change to the page server’s headers reaches it', () => {
+  const changed = ['src/mawsd/sheet-page/headers.ts'];
+  const { groups, notes } = discoverGroups(root, ts);
+  assert.ok(!notes.some((note) => note.includes('e2e:sheet-page')), notes.join('\n'));
+  assert.ok(groups.get('e2e:sheet-page')?.includes('apps/sheet-page/e2e/impostor.spec.ts'));
+  assert.deepEqual(checkCoverage({ root, ts, gates: 'static', changed }).missing.find(({ group }) => group === 'e2e:sheet-page'), { group: 'e2e:sheet-page', paths: changed });
+});
+
 test('coverage warns once per omitted group with reaching paths and does not change the requested gates', (t) => {
   const { dir, put } = fixture(t);
   put('e2e/one.spec.ts', "import '../src/endpoint';"); put('src/endpoint.ts', '');

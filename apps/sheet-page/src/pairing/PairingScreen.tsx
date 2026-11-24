@@ -5,6 +5,7 @@
 import { useState, type FormEvent } from 'react';
 import type { PairAnswer } from '../api';
 import { PAIRING } from '../copy';
+import type { Unpaired } from '../unpair';
 
 const CODE_LENGTH = 8;
 
@@ -34,13 +35,20 @@ export function refusalOf(answer: Exclude<PairAnswer, { ok: true }>): string {
   }
 }
 
+// The line above the heading: what became of a pairing this browser had
+function unpairedLine(unpaired: Unpaired): string {
+  if (unpaired === 'not-saved') return `${PAIRING.notPaired} ${PAIRING.unpairNotSaved}`;
+  if (unpaired === 'local') return `${PAIRING.notPaired} ${PAIRING.unpairLocal}`;
+  return PAIRING.notPaired;
+}
+
 export interface PairingScreenProps {
-  notPaired: boolean; // the browser was paired and is not now: unpaired, or refused
+  unpaired: Unpaired | null; // the browser was paired and is not now, and how; null on a first visit
   pair(code: string): Promise<PairAnswer>;
   onPaired(pairing: { id: string; credential: string }): void;
 }
 
-export function PairingScreen({ notPaired, pair, onPaired }: PairingScreenProps) {
+export function PairingScreen({ unpaired, pair, onPaired }: PairingScreenProps) {
   const [code, setCode] = useState('');
   const [refusal, setRefusal] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
@@ -60,7 +68,11 @@ export function PairingScreen({ notPaired, pair, onPaired }: PairingScreenProps)
     <main className="h-full overflow-auto bg-bg text-ui text-fg">
       <div className="flex min-h-full flex-col items-center justify-center gap-3.5 p-6">
         <form onSubmit={submit} className="flex w-full max-w-[420px] flex-col gap-4 rounded-lg border border-border bg-bg-raised p-6" aria-labelledby="pair-heading">
-          {notPaired && <p className="-mb-2 text-ui-sm text-fg-muted">{PAIRING.notPaired}</p>}
+          {unpaired !== null && (
+            <p data-testid="unpaired" role="status" className="-mb-2 text-ui-sm text-fg-muted">
+              {unpairedLine(unpaired)}
+            </p>
+          )}
           <h1 id="pair-heading" className="text-[17px] leading-[1.3] font-semibold">
             {PAIRING.heading}
           </h1>

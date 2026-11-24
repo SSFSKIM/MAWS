@@ -3,8 +3,11 @@
 // browser was paired with can make; the tab makes the same MAC from its credential and compares, and only when they are
 // equal does it send the credential. A wrong MAC, a missing one, one that comes late, a `paired` before it, or any frame
 // this opening does not have: the tab closes, sends nothing more, and tries again later. The tab holds the connection
-// proven from that comparison until the socket closes, and `proven()` reads the socket's own state when asked, so a
-// request that carries the credential (api.ts) is never made on a socket that is going.
+// proven from that comparison until the socket closes. `proven()` answers the pairing that socket proved, and nothing
+// else: it reads the socket's own state when asked, so a request that carries the credential (api.ts) is never made on
+// a socket that is going, and it answers nothing once storage holds another pairing (another tab paired anew, or
+// unpaired), which closes the connection so that it opens again and proves what is stored now: an old proof never
+// authorizes a new credential.
 //
 // After a close it tries again after 1, 2, 5 and then every 10 seconds, a new nonce each time; the waits start again
 // once a connection was paired. 4401 and 4403 read `unpaired`, which shows the pairing screen and deletes nothing (T19):
@@ -18,7 +21,7 @@ export type Connection = 'connecting' | 'connected' | 'lost' | 'unavailable' | '
 
 export interface Live {
   state(): Connection;
-  proven(): boolean;
+  proven(): StoredPairing | null; // the pairing this connection proved, while it is open and still the one stored
   ask(): void; // { t: 'list' }: a snapshot again
   close(): void; // the socket ended, and nothing tried again
 }
@@ -51,7 +54,7 @@ export function connect(deps: LiveDeps): Live {
   const open = deps.open ?? ((url: string) => new WebSocket(url) as unknown as LiveSocket);
   let state: Connection = 'connecting';
   let socket: LiveSocket | null = null;
-  let proven = false;
+  let proven: StoredPairing | null = null; // the pairing the open socket proved
   let tries = 0; // closes since the last paired connection
   let wait: ReturnType<typeof setTimeout> | null = null; // the opening's step, or the next try
   let closed = false;
@@ -87,7 +90,7 @@ export function connect(deps: LiveDeps): Live {
       if (message === null) return giveUp();
       if (step === 'proof') {
         if (message.t !== 'proof' || typeof message.mac !== 'string' || !macsEqual(message.mac, macOf(key, pairing.id, nonce))) return giveUp();
-        proven = true;
+        proven = pairing;
         step = 'paired';
         here.send(JSON.stringify({ t: 'credential', credential: pairing.credential }));
         clear();
@@ -107,7 +110,7 @@ export function connect(deps: LiveDeps): Live {
     here.onclose = ({ code }) => {
       if (socket !== here) return;
       socket = null;
-      proven = false;
+      proven = null;
       clear();
       if (closed) return;
       become(REFUSED.has(code) ? 'unpaired' : 'lost');
@@ -119,7 +122,13 @@ export function connect(deps: LiveDeps): Live {
   start();
   return {
     state: () => state,
-    proven: () => proven && socket !== null && socket.readyState === OPEN,
+    proven() {
+      if (proven === null || socket === null || socket.readyState !== OPEN) return null;
+      const stored = deps.pairing();
+      if (stored?.id === proven.id && stored.credential === proven.credential) return proven;
+      socket.close(); // what is stored is not what this socket proved: it goes, and the next one proves what is stored
+      return null;
+    },
     ask() {
       if (state === 'connected' && socket?.readyState === OPEN) socket.send(JSON.stringify({ t: 'list' }));
     },
@@ -128,7 +137,7 @@ export function connect(deps: LiveDeps): Live {
       clear();
       const ending = socket;
       socket = null;
-      proven = false;
+      proven = null;
       ending?.close();
     },
   };

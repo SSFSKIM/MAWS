@@ -12,7 +12,7 @@ test('a browser that never paired is shown the pairing screen at the link, and m
   await page.goto(`${mawsd.url}/s/${SESSION}`);
   await expect(page.getByRole('heading', { name: 'Pair this browser' })).toBeVisible();
   await expect(page.getByText('mawsd sheet pair', { exact: true })).toBeVisible();
-  await expect(page.getByText('This browser is not paired.')).toHaveCount(0); // a first visit
+  await expect(page.getByTestId('unpaired')).toHaveCount(0); // a first visit
   await expect(page.getByRole('button', { name: 'Pair', exact: true })).toBeDisabled();
   await expect(page.getByLabel('Then type the code it prints:')).toBeFocused();
   await page.waitForTimeout(1_500); // a connection would have been tried by now
@@ -73,7 +73,7 @@ test('“Unpair this browser” clears every key under maws.sheet., shows the pa
   await page.getByRole(BAR).getByRole('button', { name: 'Menu' }).click();
   await page.getByRole('menuitem', { name: 'Unpair this browser' }).click();
   await expect(page.getByRole('heading', { name: 'Pair this browser' })).toBeVisible();
-  await expect(page.getByText('This browser is not paired.')).toBeVisible();
+  await expect(page.getByTestId('unpaired')).toHaveText('This browser is not paired.'); // revoked, and saved
   expect(await storedKeys(page)).toEqual([]);
   expect(await mawsd.browsers()).toEqual([]);
   await page.reload();

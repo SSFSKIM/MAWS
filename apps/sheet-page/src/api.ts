@@ -1,6 +1,7 @@
 // The page's requests (§P). The exchange of a code carries no credential and is not gated. Every request that carries
-// the credential asks the live connection first, at that moment, whether it is proven (T28): where it is not, the
-// request is not made and the caller is told so, as it is told of a network failure. The credential goes in an
+// the credential asks the live connection first, at that moment, which pairing it proved (T28), and sends that pairing's
+// credential and no other: where none is proven, the request is not made and the caller is told so, as it is told of a
+// network failure. The credential goes in an
 // `Authorization: Bearer` header, never a cookie (`credentials: 'omit'`) and never in the address. The sheet's reads and
 // writes join in M4.
 import { isPairing, type StoredPairing } from './credential';
@@ -18,8 +19,7 @@ export interface Api {
 }
 
 export interface ApiDeps {
-  proven(): boolean; // the live connection's, read at each request
-  pairing(): StoredPairing | null;
+  proven(): StoredPairing | null; // the pairing the live connection proved, read at each request
   fetch?: typeof fetch;
 }
 
@@ -38,8 +38,8 @@ export function createApi(deps: ApiDeps): Api {
 
   // A request that carries the credential, made only on a proven connection
   async function authorized(url: string, init: RequestInit): Promise<Response | 'unproven'> {
-    const pairing = deps.pairing();
-    if (pairing === null || !deps.proven()) return 'unproven';
+    const pairing = deps.proven();
+    if (pairing === null) return 'unproven';
     return send(url, { ...init, headers: { ...init.headers, Authorization: `Bearer ${pairing.credential}` } });
   }
 

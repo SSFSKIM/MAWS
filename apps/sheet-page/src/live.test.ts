@@ -121,7 +121,7 @@ describe('the opening', () => {
     expect(last().credentialSent()).toBe(false);
     expect(last().sent).toHaveLength(1); // the hello alone
     expect(last().closedBy).toBe('tab');
-    expect(connection.proven()).toBe(false);
+    expect(connection.proven()).toBeNull();
     expect(paired).toBe(0);
   });
 
@@ -146,15 +146,15 @@ describe('the opening', () => {
 describe('proven()', () => {
   it('is false before the comparison, true from it until that socket closes', () => {
     const connection = live();
-    expect(connection.proven()).toBe(false);
+    expect(connection.proven()).toBeNull();
     last().open();
-    expect(connection.proven()).toBe(false);
+    expect(connection.proven()).toBeNull();
     last().say(proofFor(last()));
-    expect(connection.proven()).toBe(true);
+    expect(connection.proven()).toEqual({ id: ID, credential: CREDENTIAL });
     last().say({ t: 'paired' });
-    expect(connection.proven()).toBe(true);
+    expect(connection.proven()).toEqual({ id: ID, credential: CREDENTIAL });
     last().end(1001);
-    expect(connection.proven()).toBe(false);
+    expect(connection.proven()).toBeNull();
   });
 
   it('reads the socket’s own state when asked, before any close event', () => {
@@ -163,7 +163,7 @@ describe('proven()', () => {
     last().say(proofFor(last()));
     last().say({ t: 'paired' });
     last().readyState = 2; // closing: the event has not come yet
-    expect(connection.proven()).toBe(false);
+    expect(connection.proven()).toBeNull();
   });
 
   it('is false again on the next socket until that socket’s own proof', () => {
@@ -175,7 +175,33 @@ describe('proven()', () => {
     vi.advanceTimersByTime(RETRY_MS[0]!);
     expect(sockets).toHaveLength(2);
     last().open();
-    expect(connection.proven()).toBe(false);
+    expect(connection.proven()).toBeNull();
+  });
+});
+
+describe('the pairing it proved', () => {
+  it('is the one proven() answers, and no other: a pairing stored since is not authorized by the old proof', () => {
+    const connection = live();
+    last().open();
+    last().say(proofFor(last()));
+    last().say({ t: 'paired' });
+    expect(connection.proven()).toEqual({ id: ID, credential: CREDENTIAL });
+    stored = { id: 'ffffffff', credential: Buffer.alloc(32, 3).toString('base64url') }; // another tab paired anew
+    expect(connection.proven()).toBeNull();
+    expect(last().closedBy).toBe('tab'); // the connection goes, and comes back to prove the new one
+    vi.advanceTimersByTime(RETRY_MS[0]!);
+    last().open();
+    expect(last().hello().id).toBe('ffffffff');
+    expect(connection.proven()).toBeNull();
+  });
+
+  it('is gone once no pairing is stored', () => {
+    const connection = live();
+    last().open();
+    last().say(proofFor(last()));
+    last().say({ t: 'paired' });
+    stored = null;
+    expect(connection.proven()).toBeNull();
   });
 });
 

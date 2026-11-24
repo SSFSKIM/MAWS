@@ -4,6 +4,7 @@
 // to the frame by itself, with no reload and no new pairing. Unpair pressed under an impostor tells it nothing.
 import type { Page } from '@playwright/test';
 import { BAR, expect, SESSION, storedKeys, test } from './fixtures';
+import { PAIRING } from '../src/copy';
 import { impostor, until, type Heard, type ImpostorPlay, type Mawsd } from './rig';
 
 const PLAYS: ImpostorPlay[] = ['silent', 'wrong-mac', 'replay', 'paired-unproven', 'refuses'];
@@ -36,6 +37,10 @@ async function pairedTab(page: Page, mawsd: Mawsd) {
 for (const play of PLAYS) {
   test(`an impostor on the port that plays ${play} hears hellos and nothing else, and the tab returns once mawsd does`, async ({ page, mawsd }) => {
     const pairing = await pairedTab(page, mawsd);
+    expect(await mawsd.connections()).toBe(1);
+    // what M4's memory keeps beside the credential: a refusal deletes neither (T19)
+    const draft = `maws.sheet.draft.${SESSION}.q1`;
+    await page.evaluate((key) => localStorage.setItem(key, JSON.stringify({ v: 1, touchedAt: 1, text: 'kept' })), draft);
     const recorded = play === 'replay' ? await mawsd.proofFor(pairing.id) : undefined;
     await mawsd.stop();
     const fake = await impostor(mawsd.port, play, recorded);
@@ -44,18 +49,23 @@ for (const play of PLAYS) {
       heardNothing(fake.heard, pairing);
       if (play === 'refuses') {
         await expect(page.getByRole('heading', { name: 'Pair this browser' })).toBeVisible();
-        await expect(page.getByText('This browser is not paired.')).toBeVisible();
+        await expect(page.getByTestId('unpaired')).toHaveText(PAIRING.notPaired);
       } else await expect(page.getByRole(BAR)).toBeVisible();
       expect(await stored(page)).toEqual(pairing); // a refusal, or anything else it says, deletes nothing
+      expect(await storedKeys(page)).toEqual(expect.arrayContaining(['maws.sheet.credential', draft]));
     } finally {
       await fake.close();
     }
     heardNothing(fake.heard, pairing);
     await mawsd.restart();
-    await expect(page.getByRole(BAR)).toBeVisible({ timeout: 20_000 });
+    expect(await mawsd.connections()).toBe(0); // a fresh daemon: nothing is proven yet
+    // the tab came back: mawsd counts its connection once it was proven and paired (the bar alone stayed up through four plays)
+    await until(async () => (await mawsd.connections()) >= 1, 20_000, 'the tab’s connection to be paired again');
+    await expect(page.getByRole(BAR)).toBeVisible();
     await expect(page.getByRole('heading', { name: 'Pair this browser' })).toHaveCount(0);
     expect(await page.evaluate(() => (globalThis as { __loaded?: number }).__loaded)).toBe(1); // no reload
     expect(await stored(page)).toEqual(pairing); // and no new pairing
+    expect(await page.evaluate((key) => localStorage.getItem(key), draft)).not.toBeNull();
     expect((await mawsd.browsers()).map((browser) => browser.id)).toEqual([pairing.id]);
   });
 }
@@ -69,6 +79,7 @@ test('Unpair pressed under an impostor clears the keys and sends it nothing; maw
     await page.getByRole(BAR).getByRole('button', { name: 'Menu' }).click();
     await page.getByRole('menuitem', { name: 'Unpair this browser' }).click();
     await expect(page.getByRole('heading', { name: 'Pair this browser' })).toBeVisible();
+    await expect(page.getByTestId('unpaired')).toHaveText(`${PAIRING.notPaired} ${PAIRING.unpairLocal}`); // forgotten here alone
     expect(await storedKeys(page)).toEqual([]);
     await page.waitForTimeout(1_500);
   } finally {
