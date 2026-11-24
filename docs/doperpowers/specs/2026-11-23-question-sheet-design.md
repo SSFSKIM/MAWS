@@ -426,7 +426,7 @@ The observable state that closes the unit as a whole; each item is observed in t
 - **Contracts:** consumer of X7 (§2.1's input shape, as this document states it).
 - **Design inheritance:** §2.4, §10, §12.
 - **Required:** required.
-- **Status:** in-flight.
+- **Status:** landed (2026-11-23): doperpowers `ddab337fb` (pull request #629). The evals: `python3 tests/output-styles/question-sheet-revise-eval.py` and `python3 tests/output-styles/question-sheet-card-eval.py` (after `--calibrate`), each printing pass or fail against Acceptance 14; the shipped wording is `tests/output-styles/question-sheet/description-v3.md`. Its retrospective is the ledger's outcome section.
 
 ### C2: The sheet in sminos — plan (doperpowers repository)
 
@@ -549,7 +549,7 @@ Tickets are on MAWS's board, children of #600.
 | child | artifact | status |
 |---|---|---|
 | C0 engine probes (#865) | verdicts in §12 and the sections it names; `spikes/protocol-probe/findings-qsheet-c0.txt` and `fixtures/qsheet/`, pull request #874 | landed: master `90ce5c017`; ticket closed with the findings |
-| C1 behaviour baseline (#866) | ledger in doperpowers `docs/doperpowers/ledgers/2026-11-23-question-sheet-c1.md`; the evals under `tests/output-styles/` (branch `question-sheet-c1`) | baseline run; thresholds set and capture dropped by the owner; the evals' pull request to follow |
+| C1 behaviour baseline (#866) | ledger in doperpowers `docs/doperpowers/ledgers/2026-11-23-question-sheet-c1.md`; the evals under `tests/output-styles/` | landed: doperpowers `ddab337fb` (#629); baseline 207 sessions, re-measured unchanged after its review's 11 fixes; ticket closed |
 | C2 the sheet in sminos (#867) | execution document in doperpowers `docs/doperpowers/plans/2026-11-23-question-sheet-c2-sminos.md` (branch `question-sheet-c2`, reviewed twice, at `198dff493`) | in-flight: M1 (G1) built, doperpowers pull request #628 under its high-rung review |
 | C3 the sheet in the MAWS app (#868) | execution document `docs/doperpowers/plans/2026-11-23-question-sheet-c3-maws-app.md` (branch `question-sheet-c3`) | in-flight: the document being written |
 | C4 the local page (#869) | execution document in `docs/doperpowers/plans/` | not-dispatched |
