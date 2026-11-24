@@ -1,0 +1,8 @@
+/* The page's styles (§P; F3): MAWS's tokens and Tailwind theme as they stand, light only (the page has no settings of its
+   own and does not follow the system's dark mode), and the renderer directories it draws from named for Tailwind, which
+   scans only this app's own directory unless told. C3's R/sheet and the Markdown's stylesheets join with the sheet's
+   view (M4): R/sheet is not on this branch yet. */
+@import "../../../../src/renderer/src/styles/app.css";
+
+@source "../";
+@source "../../../../src/renderer/src/ui";
