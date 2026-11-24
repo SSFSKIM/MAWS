@@ -88,6 +88,7 @@ import { ReplaySeam } from './sessions/replay-seam';
 import { readRestoredCost } from './sessions/restored-cost';
 import { SessionService } from './sessions/service';
 import { engineHostSettled, registerSessionServiceHandlers } from './sessions/service-register';
+import { intentPatchHoldFor } from './sessions/e2e-patch-hold'; // board ticket 854's e2e
 import { registerSpawn } from './sessions/spawn'; // P5 O7 M4
 import { createSpineView } from './sessions/spine-view';
 import { stopParts, type Part } from './stop-parts';
@@ -424,7 +425,7 @@ export function startSpine(deps: SpineDeps): SpineRoot {
       trash: trashFor(deps.env, deps.trash), // the e2e seam (MAWS_E2E_TRASH_DIR) or the OS trash
       port: deps.clientPort, // session.revealPath
       replay: ReplaySeam.fromEnv(deps.env, deps.devRoot), // the e2e seam (MAWS_E2E_REPLAY_FIXTURES)
-      settings: () => sessionSettingsOf(machineSettings.state(), machineSettings.defaultRoute()), // C11: the route, the relay policy and the subagent model; P5 O7 M9: the machine's default route
+      settings: () => sessionSettingsOf(machineSettings.state(), machineSettings.defaultRoute(), machineSettings.mawsTools()), // C11: the route, the relay policy and the subagent model; P5 O7 M9: the machine's default route; board ticket 421: its default set of MAWS's tools
       userDefaults, // W3: the user's defaultMode seeds a new intent's mode (read only)
       launchGate: () => engineConfigure!.launchGate(), // C12: a launch waits for the host to hold the binary settings name
       browserBackend: deps.browserSocket, // E13
@@ -433,7 +434,7 @@ export function startSpine(deps: SpineDeps): SpineRoot {
       systemRoot: data.systemRoot, // P5 O7 M9: the machine route's managed settings (the tests' seam)
       ...(deps.aboveCeiling === undefined ? {} : { aboveCeiling: deps.aboveCeiling }), // the UX wave (U9, M2)
     });
-    const unintercept = registerSessionServiceHandlers(service, bus, sessions.mode); // P5 O3-D M4: the rewind repair's intercepts in launch mode index only
+    const unintercept = registerSessionServiceHandlers(service, bus, sessions.mode, intentPatchHoldFor(deps.env)); // P5 O3-D M4: the rewind repair's intercepts in launch mode index only; board ticket 854: the e2e's hold on a Tools choice's write
     registerSpawn(bus, { sessions: service, projects: () => index.projects.list({ includeHidden: true }) }); // P5 O7 M4: a spawn from another device
     registerSetupTrust(bus.register, service, setupGuard); // P5 O7 M9: a remote setup's trust read, guarded
     sessionService = service;
@@ -500,17 +501,21 @@ export function startSpine(deps: SpineDeps): SpineRoot {
   // listener was told (refused, with nothing changed, in a run that may not write the file), and each change emitted
   // P5 O7 M9: each answer and change with the resolved default route; a set's `defaultRoute` chosen after its patch (a
   // set of the default alone writes no patch, so it is told once)
+  // Board ticket 421 (docs/doperpowers/plans/2026-11-23-tool-choice.md, Interfaces §G): and with the machine's default set
+  // of MAWS's tools; a set's `mawsTools` written last, on the same terms
   let machineRevision = 0;
+  const defaults = () => ({ defaultRoute: machineSettings.defaultRoute(), mawsTools: machineSettings.mawsTools() });
   const offMachineChanged = machineSettings.onChange((settings) => {
     machineRevision += 1;
-    bus.emit('machineSettings.changed', { settings, defaultRoute: machineSettings.defaultRoute() });
+    bus.emit('machineSettings.changed', { settings, ...defaults() });
   });
   parts.push(['machine settings', offMachineChanged]);
-  bus.register('machineSettings.get', () => ({ settings: machineSettings.state(), version: machineRevision, defaultRoute: machineSettings.defaultRoute() }));
-  bus.register('machineSettings.set', async ({ patch, defaultRoute }) => {
-    if (defaultRoute === undefined || Object.keys(patch).length > 0) await machineSettings.update(patch);
+  bus.register('machineSettings.get', () => ({ settings: machineSettings.state(), version: machineRevision, ...defaults() }));
+  bus.register('machineSettings.set', async ({ patch, defaultRoute, mawsTools }) => {
+    if ((defaultRoute === undefined && mawsTools === undefined) || Object.keys(patch).length > 0) await machineSettings.update(patch);
     if (defaultRoute !== undefined) await machineSettings.setDefaultRoute(defaultRoute);
-    return { settings: machineSettings.state(), defaultRoute: machineSettings.defaultRoute() };
+    if (mawsTools !== undefined) await machineSettings.setMawsTools(mawsTools);
+    return { settings: machineSettings.state(), ...defaults() };
   });
   // C12: the Settings tab's read of the configuration the spine holds for it (P5 O3-A: rejects when refused); W3
   bus.register('settings.engineApplied', () => (engineConfigure ? engineConfigure.applied() : Promise.reject(new Error(`the engine settings are not applied this run: ${data.refused}`))));

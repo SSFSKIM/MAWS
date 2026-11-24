@@ -4,7 +4,9 @@
 // e2e/maws-tools-live.spec.ts runs it), through ClaudeUsage's relay, in default permission mode, every permission given
 // through the request card at the transcript’s end (UX wave U1b). One session, asked in its composer:
 //   1. creates a document from markdown with `artifact_create`, reads it with ids (`artifact_read`) and makes one small
-//      warm-up edit (so the card's "Allow for this session" covers `artifact_edit` before the measured batch);
+//      warm-up edit (so the card's "Allow for this session" covers `artifact_edit` before the measured batch); since
+//      board ticket 420 `artifact_edit` is deferred, so this first edit is made after a ToolSearch loaded it (the
+//      tool-choice plan's M6, A12);
 //   2. in ONE `artifact_edit` batch replaces a sentence, inserts a section after a heading and sets a table cell, while
 //      the test composes Korean in another paragraph of the open editor (the panel's Artifacts tool, a second replica
 //      of the host doc) from the moment the read's answer is in the journal until the batch's answer is;
@@ -46,6 +48,7 @@ import { liveSpend } from './support/live-lifecycle'; // P3-F (editor-proof scal
 import { eventsOf, mcpCalls, mcpResultOf, ofKind, recordEvents, resultText, seedTranscripts, type McpResult } from './support/maws-tools';
 import { sidebarRow } from './support/sidebar';
 import { allowForTheSession } from './support/request-keys';
+import { throughToolSearch } from './support/tool-search'; // the tool-choice plan's M6 (A12)
 
 test.skip(process.env.MAWS_LIVE_DOCUMENT !== '1', 'the document live run runs only under MAWS_LIVE_DOCUMENT=1');
 test.describe.configure({ timeout: 1_200_000 });
@@ -480,6 +483,10 @@ test('the live run: the agent creates, reads and edits a document in one batch w
     const warm = first.filter((c) => c.name === 'artifact_edit');
     expect(warm.length, 'one warm-up edit').toBeGreaterThanOrEqual(1);
     expect(warm.at(-1)!.result?.isError).toBeUndefined();
+    // A12 (board ticket 420): the first edit, deferred, went through tool search and landed
+    const firstEdit = throughToolSearch(s.rows(), 'artifact_edit');
+    note(`A12: the session's first artifact_edit call at seq ${firstEdit.callSeq}, its definition loaded by ToolSearch at seq ${firstEdit.loadSeq ?? 'none'}; the warm-up edit landed`);
+    expect(firstEdit.loadSeq, 'artifact_edit is deferred: a ToolSearch loaded it before its first call').not.toBeNull();
 
     // the document in the panel's Artifacts tool (its record view): a second replica of the host doc
     await openArtifactInPanel(page, artifactId);

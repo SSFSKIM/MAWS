@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { LaunchPlan } from './launch';
+import { FULL_MAWS_TOOL_SET } from '@shared/maws/tool-set'; // board ticket 421
 import { INIT_RESPONSE, ROUTED_STATUS, scriptedSession } from './conformance/session-harness';
 import { ControlTimeout } from './rpc';
 import { LineBudgetExceeded, LineSplitter, MAX_LINE_CHARS, spawnEngine, type EngineTransport, type TransportItem } from './transport';
@@ -16,6 +17,7 @@ function fakeEngine(script: string): LaunchPlan {
     sessionId: 'sess' as LaunchPlan['sessionId'],
     gateway: 'direct',
     engineVersion: 'fake',
+    mawsTools: FULL_MAWS_TOOL_SET, // board ticket 421
   };
 }
 

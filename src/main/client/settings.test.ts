@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { clientSettingsDefaults, machineSettingsDefaults, SETTINGS_DEFAULTS_V21 } from '@shared/settings/defaults';
 import type { MachineSettingsService } from '@shared/spine/machine-settings';
+import { FULL_MAWS_TOOL_SET } from '@shared/maws/tool-set'; // board ticket 421
 import { startMachineSettings } from '../../services/settings/machine'; // P5 O3-A
 import { settingsPaths } from '@shared/settings/paths';
 import { splitSettingsFiles } from '../../services/settings/split'; // P5 O3-A
@@ -281,6 +282,8 @@ describe('settings.set over a machine half that answers later (the daemon shapeâ
       },
       defaultRoute: () => 'machine', // P5 O7 M9: not read by these cases
       setDefaultRoute: async (route) => route,
+      mawsTools: () => FULL_MAWS_TOOL_SET, // board ticket 421: not read by these cases
+      setMawsTools: async (set) => set,
     };
     return { service, pending };
   };

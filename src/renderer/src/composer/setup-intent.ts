@@ -10,6 +10,7 @@ import type { ContentBlock } from '@shared/graph/events';
 import type { PermissionMode } from '@shared/graph/enums';
 import type { AppSessionId, ProjectId } from '@shared/graph/ids';
 import type { ListModelsResponse } from '@shared/wire/control';
+import type { MawsToolSet } from '@shared/maws/tool-set';
 
 // Where an unstarted session will run (C10's `LocationSchema`).
 export type BranchChoice = { kind: 'new'; name: string; base: string } | { kind: 'existing'; name: string };
@@ -31,6 +32,8 @@ export interface FirstMessage {
 }
 
 export interface SetupIntent {
+  kind: 'create' | 'fork'; // board ticket 421: only a `create` intent offers the choice of MAWS's tools; a fork takes its source's
+  mawsTools?: MawsToolSet; // board ticket 421: a `create` intent's set of MAWS's tools; absent, the full set
   location: Location | null; // New chat: null while no project is chosen; Send waits for one
   additionalDirectories: string[];
   model: string | null;
@@ -40,7 +43,7 @@ export interface SetupIntent {
   draft: Draft | null; // the composer's draft while unstarted (C4's drafts table has no row for an unstarted session)
 }
 
-export type SetupIntentPatch = Partial<Pick<SetupIntent, 'additionalDirectories' | 'model' | 'effort' | 'permissionMode' | 'draft'>> & { location?: Location };
+export type SetupIntentPatch = Partial<Pick<SetupIntent, 'additionalDirectories' | 'model' | 'effort' | 'permissionMode' | 'draft' | 'mawsTools'>> & { location?: Location };
 export type HookResult = { ok: true } | { ok: false; error: string };
 
 export interface SetupIntentHook {

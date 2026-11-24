@@ -5,6 +5,7 @@ import * as z from 'zod';
 import { PermissionModeSchema } from '../graph/enums';
 import { AppSessionIdSchema, SessionIdSchema } from '../graph/ids';
 import { RouteSchema } from './route';
+import { MawsToolSetSchema } from '../maws/tool-set'; // board ticket 421
 
 export const EffortSchema = z.enum(['low', 'medium', 'high', 'xhigh', 'max']);
 export type Effort = z.infer<typeof EffortSchema>;
@@ -61,5 +62,10 @@ export const LaunchSpecSchema = z.strictObject({
   // first SessionStart. Absent for a session without one, a fork (its own record has none) and the trust bootstrap. Not
   // saved with the host's stored spec, as P2-C's keys are not: each launch takes it from the record.
   launchedBy: LaunchedBySpecSchema.optional(),
+  // Board ticket 421 (docs/doperpowers/plans/2026-11-23-tool-choice.md, Interfaces §C; additive X6): the session's set of
+  // MAWS's tools, which the host lists, instructs and launches by; absent, the full set, so a default launch's spec is
+  // what it was. The spine sends it only when it is not the full set, and only to a host whose hello lists
+  // `engine.mawsTools`. Not saved with the host's stored spec, as `route` is not: an adopter takes it from the spawn row.
+  mawsTools: MawsToolSetSchema.optional(),
 });
 export type LaunchSpec = z.infer<typeof LaunchSpecSchema>;

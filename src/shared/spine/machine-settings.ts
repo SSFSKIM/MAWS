@@ -5,6 +5,7 @@
 // whose write crosses a socket, so `update` is asynchronous in every backing.
 import type { Route } from '../engine/route';
 import type { MachineSettings, SettingsPatch } from '../ipc/schema/settings';
+import type { MawsToolSet } from '../maws/tool-set'; // board ticket 421
 
 export interface MachineSettingsService {
   state(): MachineSettings;
@@ -19,4 +20,10 @@ export interface MachineSettingsService {
   // `gateway.defaultRoute` (an older client's choice) chooses that route too.
   defaultRoute(): Route;
   setDefaultRoute(route: Route): Promise<Route>;
+  // Board ticket 421 (docs/doperpowers/plans/2026-11-23-tool-choice.md, Interfaces §G): the machine's default set of
+  // MAWS's tools for a new session (`machine-session-defaults.json`'s, else the full set), and its set, which writes that
+  // file alone (the full set included: the file then says the person chose it); it resolves once the file persisted and
+  // every `onChange` listener was told, and rejects as `update` does
+  mawsTools(): MawsToolSet;
+  setMawsTools(set: MawsToolSet): Promise<MawsToolSet>;
 }

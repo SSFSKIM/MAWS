@@ -18,7 +18,10 @@ import { answerText } from '@shared/owner/answer';
 import { markIdOf } from '@shared/owner/marks';
 import type { OwnerChannelState, OwnerMark } from '@shared/owner/state';
 import { validateEventPayload } from '@shared/ipc/validate';
+import type { JournalRow } from '@shared/wire/journal';
+import { loadJournal, loadUxwaveJournal } from '../../../test/support/fixtures';
 import { summary, tempDir } from '../../../test/support/index-fixture';
+import { Normalizer } from '../../engine-host/normalizer';
 import { Index } from '../index/index';
 import { CHANNEL_BOUNDS, CUT_MARKER } from './journal';
 import { startChannel, type ProjectChannel } from './register';
@@ -125,6 +128,12 @@ const askOpened = (engine: SessionId, at: string, askId: string, questions: unkn
   ev(engine, at, { kind: 'maws.ask.opened', askId, toolUseId: askId, requestId: `req-${askId}`, blocking: true, title: 'Before I build', context: null, questions, ...over });
 const askAnswered = (engine: SessionId, at: string, askId: string, answers: unknown[], over: Record<string, unknown> = {}) =>
   ev(engine, at, { kind: 'maws.ask.answered', askId, toolUseId: askId, answers, delivery: 'result', ...over });
+
+// board ticket 421 (D13): the engine's own question tool, raised and answered through MAWS's question path
+const questionRequested = (engine: SessionId, at: string, requestId: string, questions: unknown[], over: Record<string, unknown> = {}) =>
+  ev(engine, at, { kind: 'question.requested', requestId, toolUseId: `toolu-${requestId}`, questions, ...over });
+const questionAnswered = (engine: SessionId, at: string, requestId: string, answers: Record<string, string>, over: Record<string, unknown> = {}) =>
+  ev(engine, at, { kind: 'question.answered', requestId, toolUseId: `toolu-${requestId}`, answers, ...over });
 
 const laneA = (over: Partial<NewHostEntry> = {}): NewHostEntry => ({
   project: 'proj-a', appSessionId: null, engineSessionId: '11111111-1111-4111-8111-111111111111' as SessionId, lane: 'A', kind: 'message', text: 'From the terminal.',
@@ -261,6 +270,122 @@ describe('the project channel journal', () => {
         { kind: 'question', text: 'Which backend should the board use?', choices: ['Postgres', 'SQLite'], at: asked, src: `${prefix}/q1` },
       ]);
       expect(h.emitted).toHaveLength(6);
+    });
+
+    // Board ticket 421 (docs/doperpowers/plans/2026-11-23-tool-choice.md, D13): a session whose question tool is the
+    // engine's answers its questions in MAWS through the request path; they reach the channel as a MAWS ask's do
+    it('records each question of the engine’s own question tool with its options, and each answer, each once across a replay; a subagent’s too', () => {
+      const { appSessionId, engineSessionId: e } = h.session('proj-1');
+      const asked = iso(NOW - 60_000);
+      const option = (label: string) => ({ label, description: null, preview: null });
+      const questions = [
+        { question: 'Which backend should the board use?', header: 'Backend', options: [option('Postgres'), option('SQLite')], multiSelect: false },
+        { question: 'Which folders?', header: 'Folders', options: [option('src'), option('test')], multiSelect: true },
+      ];
+      const requested = questionRequested(e, asked, 'req-1', questions);
+      h.batch(appSessionId, [requested]);
+      h.batch(appSessionId, [requested]); // a replay
+      const answeredAt = iso(NOW - 30_000);
+      const answered = questionAnswered(e, answeredAt, 'req-1', { 'Which backend should the board use?': 'SQLite', 'Which folders?': 'src, test' });
+      h.batch(appSessionId, [answered, answered]);
+      const prefix = `proj-1/lane-b/${appSessionId}/question/req-1/`;
+      const { entries } = h.history({ project: 'proj-1' });
+      expect(entries.map(({ kind, text, choices, at }) => ({ kind, text, choices, at }))).toEqual([
+        { kind: 'answered', text: 'src, test', choices: undefined, at: answeredAt },
+        { kind: 'answered', text: 'SQLite', choices: undefined, at: answeredAt },
+        { kind: 'question', text: 'Which folders?', choices: ['src', 'test'], at: asked },
+        { kind: 'question', text: 'Which backend should the board use?', choices: ['Postgres', 'SQLite'], at: asked },
+      ]);
+      // each question keyed by the request and a digest of its text, its answer under it
+      const [folders, backend] = entries.slice(2).map((entry) => entry.src);
+      expect(folders).toMatch(new RegExp(`^${prefix}[\\w-]+$`));
+      expect(backend).toMatch(new RegExp(`^${prefix}[\\w-]+$`));
+      expect(folders).not.toBe(backend);
+      expect(entries.slice(0, 2).map((entry) => entry.src)).toEqual([`${folders}/answered`, `${backend}/answered`]);
+      expect(h.emitted).toHaveLength(4);
+      // a subagent's question, which the person answers alike; an answer to a request never heard asked records nothing
+      h.batch(appSessionId, [
+        questionRequested(e, iso(NOW - 9_000), 'req-sub', [{ question: 'Ship it?', header: 'Ship', options: [], multiSelect: false }], { parentToolUseId: 'toolu_agent' }),
+        questionAnswered(e, iso(NOW - 8_000), 'req-sub', { 'Ship it?': 'Yes' }, { parentToolUseId: 'toolu_agent' }),
+        questionAnswered(e, iso(NOW - 7_000), 'req-unheard', { 'Earlier?': 'No' }),
+      ]);
+      expect(h.history({ project: 'proj-1' }).entries.slice(0, 2).map((entry) => `${entry.kind}: ${entry.text}`)).toEqual(['answered: Yes', 'question: Ship it?']);
+      expect(h.emitted).toHaveLength(6);
+    });
+
+    // The tool-choice branch review: an entry's text is cut to CHANNEL_BOUNDS.textBytes, its `src` never is, so the
+    // question's identity holds a digest of its text, the same size whatever the text, on the question and its answer.
+    it('keys an engine question of any length by a digest of the same size, and still matches its answer', () => {
+      const { appSessionId, engineSessionId: e } = h.session('proj-1');
+      const long = `Which of these should ship first? ${'Every detail of the plan, spelled out. '.repeat(8_000)}`;
+      h.batch(appSessionId, [
+        questionRequested(e, iso(NOW - 9_000), 'req-long', [{ question: long, header: 'Ship', options: [], multiSelect: false }, { question: 'Ship it?', header: 'Ship', options: [], multiSelect: false }]),
+        questionAnswered(e, iso(NOW - 8_000), 'req-long', { [long]: 'The first.', 'Ship it?': 'Yes' }),
+      ]);
+      const { entries } = h.history({ project: 'proj-1' });
+      expect(entries.map((entry) => `${entry.kind}: ${entry.text.slice(0, 16)}`)).toEqual(['answered: Yes', 'answered: The first.', 'question: Ship it?', 'question: Which of these s']);
+      const [short, longSrc] = entries.slice(2).map((entry) => entry.src);
+      expect(longSrc!.length).toBe(short!.length);
+      expect(entries.slice(0, 2).map((entry) => entry.src)).toEqual([`${short}/answered`, `${longSrc}/answered`]);
+    });
+
+    // The tool-choice branch review: since board ticket 420 the host refuses a live ask that leaves `blocking` out (a
+    // session following the ask's description from before), after the normaliser has opened it as a record is read. Its
+    // question waits for the ask's fate and is never recorded when the call's result is the refusal; an ask recorded
+    // before the ticket, which waited with no `blocking`, is recorded as it was, its question at the time it was asked.
+    it('keeps an ask the host refused for leaving out `blocking` out of the channel; one that waited without it is recorded as before', () => {
+      const { appSessionId, engineSessionId: e } = h.session('proj-1');
+      const question = { id: 'q1', question: 'Which colour should the chart use?', modality: 'choice', options: [{ label: 'Teal' }, { label: 'Amber' }] };
+      const unstated = { questions: [{ question: question.question, options: question.options }] };
+      const asked = iso(NOW - 60_000);
+      // the refused call, then the agent's corrected retry
+      h.batch(appSessionId, [toolUse(e, asked, 'toolu_bare', 'mcp__maws__ask', unstated), askOpened(e, asked, 'toolu_bare', [question])]);
+      h.batch(appSessionId, [toolResult(e, iso(NOW - 59_000), 'toolu_bare', true)]);
+      const retried = iso(NOW - 58_000);
+      h.batch(appSessionId, [toolUse(e, retried, 'toolu_async', 'mcp__maws__ask', { ...unstated, blocking: false }), askOpened(e, retried, 'toolu_async', [question], { blocking: false })]);
+      const prefix = `proj-1/lane-b/${appSessionId}/ask`;
+      expect(h.history({ project: 'proj-1' }).entries.map(({ kind, at, src }) => ({ kind, at, src }))).toEqual([{ kind: 'question', at: retried, src: `${prefix}/toolu_async/q1` }]);
+      // an ask written before the ticket: no `blocking`, admitted, answered later (and its batches replayed)
+      const legacy = [toolUse(e, asked, 'toolu_legacy', 'mcp__maws__ask', unstated), askOpened(e, asked, 'toolu_legacy', [question])];
+      const answeredAt = iso(NOW - 30_000);
+      const answered = askAnswered(e, answeredAt, 'toolu_legacy', [{ id: 'q1', question: question.question, status: 'answered', value: ['Teal'] }]);
+      h.batch(appSessionId, legacy);
+      h.batch(appSessionId, [answered]);
+      h.batch(appSessionId, [...legacy, answered]);
+      // one cancelled when its process ended still put its question
+      h.batch(appSessionId, [toolUse(e, asked, 'toolu_exit', 'mcp__maws__ask', unstated), askOpened(e, asked, 'toolu_exit', [question])]);
+      h.batch(appSessionId, [ev(e, iso(NOW - 20_000), { kind: 'maws.ask.cancelled', askId: 'toolu_exit', toolUseId: 'toolu_exit', reason: 'exit' })]);
+      expect(h.history({ project: 'proj-1' }).entries.map(({ kind, text, at, src }) => ({ kind, text, at, src }))).toEqual([
+        { kind: 'answered', text: 'Teal', at: answeredAt, src: `${prefix}/toolu_legacy/q1/answered` },
+        { kind: 'question', text: question.question, at: retried, src: `${prefix}/toolu_async/q1` },
+        { kind: 'question', text: question.question, at: asked, src: `${prefix}/toolu_exit/q1` },
+        { kind: 'question', text: question.question, at: asked, src: `${prefix}/toolu_legacy/q1` },
+      ]);
+      expect(h.emitted).toHaveLength(4);
+    });
+
+    // The same, from the wire as recorded, through the engine host's normaliser: the ask probe of pass 3 (written before
+    // board ticket 420, its call with no `blocking`, waited for and answered) and ticket 421's refused ask and its retry.
+    it('replays the recorded asks: one that waited with no `blocking` puts its questions and answers; a refused one none', () => {
+      let clock = NOW;
+      const replay = (appSessionId: AppSessionId, rows: JournalRow[]) => {
+        const after = Date.parse(rows.at(-1)!.at) + 60_000; // read a minute after it was written, inside the channel's 30 days
+        h.tick(after - clock);
+        clock = after;
+        const normalizer = new Normalizer({ appSessionId, launchId: 'journal', sessionId: null });
+        h.batch(appSessionId, rows.flatMap((row) => normalizer.push(row)));
+      };
+      const legacy = h.session('proj-legacy');
+      replay(legacy.appSessionId, loadJournal('pass3', 'p1-maws-ask-blocking'));
+      const entries = h.history({ project: 'proj-legacy' }).entries;
+      const asked = ['Which colour?', 'Which days?', 'What should the title be?', 'Which folder holds the assets?', 'Which repository is this for?'];
+      expect(entries.filter((entry) => entry.kind === 'question').map((entry) => entry.text).sort()).toEqual([...asked].sort());
+      expect(entries.filter((entry) => entry.kind === 'answered')).toHaveLength(asked.length);
+      const refused = h.session('proj-refused');
+      replay(refused.appSessionId, loadUxwaveJournal('uxwave-421-ask-refused'));
+      expect(h.history({ project: 'proj-refused' }).entries.map(({ kind, text, src }) => ({ kind, text, src }))).toEqual([
+        { kind: 'question', text: 'Which colour should the chart use?', src: `proj-refused/lane-b/${refused.appSessionId}/ask/toolu_stub_async/q1` },
+      ]);
     });
 
     it('keeps every identity apart whatever its ids hold: a question named like another’s answer, ids with separators', () => {

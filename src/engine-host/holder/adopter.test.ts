@@ -10,6 +10,8 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { openDocuments, type Documents } from '../documents'; // P5 O16 M3b fix wave 1
 import type { AppSessionId } from '@shared/graph/ids';
+import { MAWS_TOOL_NAMES } from '@shared/maws/tools'; // board ticket 421
+import { FULL_MAWS_TOOL_SET, type MawsToolSet } from '@shared/maws/tool-set'; // board ticket 421
 import { autoResponder, scriptedTransport, type Responder, type ScriptedTransport } from '../conformance/scripted-transport';
 import { handshakeResponder, launchSpec } from '../conformance/session-harness';
 import { JournalWriter } from '../journal';
@@ -40,10 +42,11 @@ beforeEach(() => {
 afterEach(() => rmSync(userData, { recursive: true, force: true }));
 
 // The launch as the old manager made it, under the environment it captured then; its journal's spawn row names the keys
-function launched(spec = SPEC): { launchId: string; entry: RosterEntry } {
+// board ticket 421: `row` edits the spawn row as written (an older build's, which records no set)
+function launched(spec = SPEC, row: (meta: ReturnType<typeof spawnMeta>) => Record<string, unknown> = (meta) => meta): { launchId: string; entry: RosterEntry } {
   const plan = buildLaunch(spec, { PATH: '/opt/then/bin', HOME: '/Users/x', CLAUDE_CONFIG_DIR: '/Users/x/.claude-then' }, { relayUrl: RELAY_URL, bin: '/x/claude', engineVersion: '2.1.283', spawnerPid: 4100, holder: { gateSocket: '/x/gate.sock' } });
   const writer = new JournalWriter(journalDir(userData, ID), plan.launchId, { maxBytes: 1_000_000 });
-  writer.row('meta', spawnMeta(plan, { appVersion: 'test', holder: { pid: 4100, holderId: plan.launchId, binary: '/x/maws-session-host' } }));
+  writer.row('meta', row(spawnMeta(plan, { appVersion: 'test', holder: { pid: 4100, holderId: plan.launchId, binary: '/x/maws-session-host' } })));
   writer.row('out', { type: 'control_request', request_id: `${plan.launchId}-1`, request: { subtype: 'initialize', hooks: {} } });
   writer.row('in', { type: 'control_response', response: { subtype: 'success', request_id: `${plan.launchId}-1`, response: { commands: [], models: [], account: {}, current_permission_mode: 'default' } } });
   void writer.close();
@@ -125,6 +128,42 @@ describe('the launcher’s adoption', () => {
     expect(a.table.get(ID)!.status().gateway).toMatchObject({ route: 'machine' });
     a.transports[0]!.exit(0);
     await a.table.get(ID)!.exited;
+  });
+
+  // Board ticket 421 (Interfaces §D): the stored spec carries no set, so the adopter takes the launch's from its spawn
+  // row, and the adopted session's `maws` server lists that set; a row an older build wrote, with none, is the full set
+  describe('the set of MAWS’s tools (board ticket 421)', () => {
+    const CHOSEN: MawsToolSet = { artifacts: false, documents: false, dashboards: false, auxiliary: true, question: 'engine' };
+    const adoptedList = async (row: Parameters<typeof launched>[1]) => {
+      const { entry } = launched({ ...SPEC, mawsTools: CHOSEN }, row);
+      let wired: { plan: Parameters<LauncherDeps['wire']>[1]; spec: Parameters<LauncherDeps['wire']>[2] } | undefined;
+      const a = await adopter({ spec: SPEC, deps: { wire: (_session, plan, spec) => void (wired = { plan, spec }) } });
+      const adopting = a.adopt(entry);
+      await until(() => a.transports.length === 1 && a.table.get(ID) !== undefined, 'the reservation');
+      caughtUp(a.transports[0]!);
+      await adopting;
+      const t = a.transports[0]!;
+      t.push({ type: 'control_request', request_id: 'mcp-list', request: { subtype: 'mcp_message', server_name: 'maws', message: { jsonrpc: '2.0', id: 1, method: 'tools/list' } } });
+      const answer = () => t.writes.find((w) => w.type === 'control_response' && (w as { response: { request_id: string } }).response.request_id === 'mcp-list') as { response: { response: { mcp_response: { result: { tools: { name: string }[] } } } } } | undefined;
+      await until(() => answer() !== undefined, 'the tools/list answer');
+      t.exit(0);
+      await a.table.get(ID)!.exited;
+      return { names: answer()!.response.response.mcp_response.result.tools.map((tool) => tool.name), ...wired! };
+    };
+
+    it('adopts a launch with a set from its spawn row: its plan, its spec and its list', async () => {
+      const { names, plan, spec } = await adoptedList((meta) => meta);
+      expect(plan.mawsTools).toEqual(CHOSEN);
+      expect(spec.mawsTools).toEqual(CHOSEN);
+      expect(names).toEqual(['show_pane']);
+    });
+
+    it('adopts a launch whose row records no set at the full set', async () => {
+      const { names, plan, spec } = await adoptedList(({ mawsTools: _set, ...meta }) => (void _set, meta));
+      expect(plan.mawsTools).toEqual(FULL_MAWS_TOOL_SET);
+      expect(spec).not.toHaveProperty('mawsTools');
+      expect(names).toEqual([...MAWS_TOOL_NAMES]);
+    });
   });
 
   // P5 O16 M3c: the stream begins at the adoption; what the launch journaled before it is the journal's to answer

@@ -250,6 +250,15 @@ describe('the owner channel’s launch-spec keys are not stored (P2-C)', () => {
     expect(file.launchSpec).toEqual(JSON.parse(JSON.stringify({ ...spec, gateway: 'direct' })));
     expect(await new FileSessionStateStore(userData).loadLaunchSpec(ID)).not.toHaveProperty('route');
   });
+
+  // board ticket 421: nor the set of MAWS's tools, which an adopter takes from the launch's spawn row, as the route
+  it('saveLaunchSpec writes no mawsTools either', async () => {
+    const store = new FileSessionStateStore(userData);
+    await store.saveLaunchSpec(ID, { ...spec, mawsTools: { artifacts: false, documents: false, dashboards: false, auxiliary: true, question: 'engine' } });
+    const file = JSON.parse(await readFile(join(userData, 'engine-host', 'state', `${ID}.json`), 'utf8')) as { launchSpec: Record<string, unknown> };
+    expect(file.launchSpec).toEqual(JSON.parse(JSON.stringify(spec)));
+    expect(await new FileSessionStateStore(userData).loadLaunchSpec(ID)).not.toHaveProperty('mawsTools');
+  });
 });
 // P2-C end
 

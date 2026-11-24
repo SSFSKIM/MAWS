@@ -100,13 +100,15 @@ export class FileSessionStateStore implements SessionStateStore {
   // stored spec back, and a key an older build's strict reader does not know would move its whole state file aside.
   // P5 O12 M11: and the spawner, likewise, which each launch takes from the session's record. P5 O7 M9: and the route
   // (its legacy field is kept): an adopter takes a machine-route launch's from the launch's spawn row (launcher.ts).
+  // Board ticket 421: and the set of MAWS's tools, which an adopter takes from the spawn row likewise.
   saveLaunchSpec(id: AppSessionId, spec: LaunchSpec): Promise<void> {
     return this.update(id, (file) => {
-      const { appendSystemPrompt: _append, systemPromptSnapshot: _snapshot, launchedBy: _launchedBy, route: _route, ...stored } = LaunchSpecSchema.parse(spec); // P2-C; P5 O12 M11; P5 O7 M9
+      const { appendSystemPrompt: _append, systemPromptSnapshot: _snapshot, launchedBy: _launchedBy, route: _route, mawsTools: _mawsTools, ...stored } = LaunchSpecSchema.parse(spec); // P2-C; P5 O12 M11; P5 O7 M9; board ticket 421
       void _append;
       void _snapshot;
       void _launchedBy;
       void _route;
+      void _mawsTools;
       return { ...file, launchSpec: stored };
     });
   }

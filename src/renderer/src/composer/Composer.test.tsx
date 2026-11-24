@@ -12,6 +12,8 @@ import type { OrgKey } from '@shared/machine/org-key'; // P5 O7 M4
 import type { SessionRecord } from '@shared/graph/session';
 import type { AttentionItem } from '@shared/graph/attention';
 import type { PreloadBridge } from '@shared/ipc/schema';
+import { FULL_MAWS_TOOL_SET } from '@shared/maws/tool-set';
+import { machineSettingsDefaults } from '@shared/settings/defaults';
 import type { MachineState } from '@shared/ipc/schema/machines'; // the UX wave, U9 (M3)
 import { REGISTRY } from '@shared/ipc/registry';
 import { addressingOf, bareOf } from '@shared/machine/address';
@@ -203,6 +205,8 @@ const type = (text: string, index: 0 | 1 = 0) => act(() => void editorOf(index).
 const key = (target: HTMLElement, init: KeyboardEventInit) => act(async () => void target.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, cancelable: true, ...init })));
 const primary = (index: 0 | 1 = 0) => composerOf(index).querySelector<HTMLButtonElement>('[data-submit-state]')!;
 const invoked = (name: Parameters<FakeClient['invoked']>[0]) => fake.invoked(name);
+// Board ticket 421: the machine's spine's answer, with its default set when it knows the choice
+const machineAnswer = (mawsTools?: typeof FULL_MAWS_TOOL_SET) => ({ settings: machineSettingsDefaults(), version: 1, ...(mawsTools && { mawsTools }) });
 const plusOf = (index: 0 | 1 = 0) => within(composerOf(index)).getByRole('button', { name: 'Add files, photos or commands' });
 // W10 (C9): the "+" menu's Add directory…, its disabled reason (null when enabled), the menu closed again
 async function addDirectoryState(user = userEvent.setup()): Promise<string | null> {
@@ -879,6 +883,46 @@ describe("composer DOM under C5's dispatcher", () => {
     await waitFor(() => expect(stub.patch).toHaveBeenCalledWith({ additionalDirectories: ['/work/other', '/work/picked'] }));
     expect(invoked('session.applyFlagSettings')).toEqual([]);
   });
+
+  // Board ticket 421 (docs/doperpowers/plans/2026-11-23-tool-choice.md, D11 and §H): a new chat's "+" menu offers Tools
+  // once its machine's spine has answered a set, and writes the choice through the intent; a fork offers none and asks
+  // nothing, and a spine that answers without a set (one that predates the choice) draws none.
+  describe('the Tools submenu of an unstarted tab', () => {
+    const toolsItem = () => screen.queryByRole('menuitem', { name: 'Tools' });
+
+    it('is offered for a new chat whose spine knows the choice, and patches the intent', async () => {
+      const stub = stubIntent();
+      mount([{ index: 0, id: A }]);
+      await waitFor(() => expect(fake.pending('machineSettings.get')).toBe(1));
+      expect(fake.machines('machineSettings.get')).toEqual([TEST_MACHINE]);
+      await act(() => fake.reply('machineSettings.get', machineAnswer(FULL_MAWS_TOOL_SET)));
+      const user = userEvent.setup();
+      await user.click(plusOf());
+      act(() => screen.getByRole('menuitem', { name: 'Tools' }).focus());
+      await user.keyboard('{ArrowRight}');
+      await user.click(await screen.findByRole('menuitemcheckbox', { name: 'Auxiliary' }));
+      await waitFor(() => expect(stub.patch).toHaveBeenCalledWith({ mawsTools: { ...FULL_MAWS_TOOL_SET, auxiliary: false } }));
+    });
+
+    it('is not offered on a spine that predates the choice', async () => {
+      stubIntent();
+      mount([{ index: 0, id: A }]);
+      await waitFor(() => expect(fake.pending('machineSettings.get')).toBe(1));
+      await act(() => fake.reply('machineSettings.get', machineAnswer()));
+      await userEvent.setup().click(plusOf());
+      await screen.findByRole('menuitem', { name: /^Plugins/ });
+      expect(toolsItem()).toBeNull();
+    });
+
+    it('is not offered for a fork, which asks its spine nothing', async () => {
+      stubIntent({ kind: 'fork' });
+      mount([{ index: 0, id: A }]);
+      await userEvent.setup().click(plusOf());
+      await screen.findByRole('menuitem', { name: /^Plugins/ });
+      expect(toolsItem()).toBeNull();
+      expect(invoked('machineSettings.get')).toEqual([]);
+    });
+  });
 });
 
 // UX wave U4a (l3-input-08, l3-input-03): Enter always sends, ⌘Enter keeps a message for after the running turn, and
@@ -1414,7 +1458,7 @@ describe('the composer as the float’s bar (UX wave U10b)', () => {
 function stubIntent(over: Partial<SetupIntentHook['intent']> = {}, options: Partial<SetupIntentHook['options']> = {}, project?: SetupIntentHook['project']) {
   let resolveStart: ((r: HookResult) => void) | null = null;
   const state = {
-    intent: { location: { kind: 'directory' as const, path: '/repo' }, additionalDirectories: [], model: null, effort: null, permissionMode: null, message: null, draft: null, ...over } as SetupIntentHook['intent'],
+    intent: { kind: 'create' as const, location: { kind: 'directory' as const, path: '/repo' }, additionalDirectories: [], model: null, effort: null, permissionMode: null, message: null, draft: null, ...over } as SetupIntentHook['intent'],
     listeners: new Set<() => void>(),
     phase: null as string | null,
   };
@@ -1454,6 +1498,23 @@ describe('a New chat tab started on another machine', () => {
     resetRemoteSpawn();
     useSessions.setState({ projects: new Map(useSessions.getState().projects).set(P, project(P, 0, { name: 'app', directory: '/repo', org: { key: KEY, name: 'app', source: 'remote', smnsId: null } })) });
     useMachines.getState().applyRoster([{ ref: OTHER_MACHINE, name: 'mini', local: false, state: 'up', since: '2026-10-31T10:00:00.000Z', generation: 1, carrier: 'relay' }]);
+  });
+
+  // Board ticket 421 (D11): `session.spawn` carries no set, so a chat that will start on another machine offers no Tools
+  it('offers no Tools submenu while another machine is chosen, and offers it again once this one is', async () => {
+    stubIntent({}, {}, chosen);
+    useRemoteSpawn.getState().choose(A, { machine: OTHER_MACHINE, name: 'mini', checkout: '/srv/app', key: KEY });
+    mount([{ index: 0, id: A }]);
+    await waitFor(() => expect(fake.pending('machineSettings.get')).toBe(1));
+    await act(() => fake.reply('machineSettings.get', machineAnswer(FULL_MAWS_TOOL_SET)));
+    const user = userEvent.setup();
+    await user.click(plusOf());
+    await screen.findByRole('menuitem', { name: /^Plugins/ });
+    expect(screen.queryByRole('menuitem', { name: 'Tools' })).toBeNull();
+    await user.keyboard('{Escape}');
+    act(() => useRemoteSpawn.setState({ chosen: new Map() }));
+    await user.click(plusOf());
+    expect(await screen.findByRole('menuitem', { name: 'Tools' })).toBeTruthy();
   });
 
   it('spawns on the chosen machine with the composer’s mode, says so while it runs, and keeps the text on a refusal', async () => {

@@ -9,6 +9,7 @@ import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { PreloadBridge, Settings } from '@shared/ipc/schema';
 import { machineSettingsDefaults, SETTINGS_DEFAULTS_V21 } from '@shared/settings/defaults';
+import { FULL_MAWS_TOOL_SET } from '@shared/maws/tool-set'; // board ticket 421
 import { useGateway } from '../gateway/store';
 import { useAttention } from '../stores/attention';
 import { useHosts } from '../stores/hosts';
@@ -22,7 +23,7 @@ import { importBridge, RECORD } from '../test-support/browser-import';
 import { connectBrowserImport, resetBrowserImport } from '../tools/browser/import/store';
 import { SettingsView } from './SettingsView';
 
-const ANSWERED = { 'machineSettings.get': () => ({ settings: machineSettingsDefaults(), version: 1 }) };
+const ANSWERED = { 'machineSettings.get': () => ({ settings: machineSettingsDefaults(), version: 1, mawsTools: FULL_MAWS_TOOL_SET }) }; // board ticket 421: a spine that knows the choice
 
 let disconnect = () => {};
 function renderView(answers: Record<string, (input: unknown) => unknown> = {}, initial: Settings = SETTINGS_DEFAULTS_V21) {
@@ -91,6 +92,22 @@ describe('a row’s note opens in the row, for the pointer and the keyboard (G13
     expect(screen.getByRole('group', { name: 'Hooks in sessions', description: /^Hooks come from your settings and your plugins\./ })).toBe(hooks);
   });
 
+  // board ticket 421 (docs/doperpowers/plans/2026-11-23-tool-choice.md, §H): the two rows of the machine's default set of
+  // MAWS's tools, each its label and its controls at rest, its note on focus and in its description at all times
+  // `first` is the row's first control in the page, `focused` the one Tab lands on (a radio group's checked radio)
+  it.each([
+    ['MAWS tools', 'switch', 'Artifacts', 'Artifacts', 'What a new session starts with. A session keeps its own.'],
+    ['Question tool', 'radio', 'Default', 'MAWS', "Default is Claude Code's own and waits for your answer. With MAWS's the session can go on working while you answer. A session keeps its own."],
+  ] as const)('%s keeps its note out of the resting text, opens it on its control’s focus and is described by it', async (label, role, first, focused, words) => {
+    renderView();
+    const tools = await screen.findByRole('group', { name: label });
+    expect(accessibleText(tools)).not.toContain(words);
+    expect(screen.getByRole('group', { name: label, description: words })).toBe(tools);
+    await tabTo(stopBefore(within(tools).getByRole(role, { name: first })), within(tools).getByRole(role, { name: focused }));
+    expect(noteOpen(tools)).toBe(true);
+    expect(accessibleText(tools)).toContain(words);
+  });
+
   it('Messages to you holds both its sentences in its note, its switch alone at rest (G26, G27)', () => {
     renderView();
     const mod = row('Messages to you');
@@ -149,6 +166,23 @@ describe('a fact sent to a tooltip has an owner the keyboard reaches', () => {
     await tabTo(within(notify).getByRole('switch'), chip);
     expect(tooltip()).toBe('MAWS falls back to a dock bounce and a toast');
     expect(accessibleText(notify)).not.toContain('dock bounce');
+  });
+
+  // board ticket 421 (§H): each group's word beside its switch carries its fact as its tooltip and description, and the
+  // keyboard reaches it from the switch
+  it.each([
+    ['Artifacts', 'Create, read and publish artifacts'],
+    ['Documents', 'Edit documents and dashboard blocks. Answer comments on any artifact.'],
+    ['Dashboards', "Bind a dashboard's data"],
+    ['Auxiliary', 'Open panes for you'],
+  ])('MAWS tools: the word %s carries its fact', async (name, fact) => {
+    renderView();
+    const tools = await screen.findByRole('group', { name: 'MAWS tools' });
+    const word = within(tools).getByText(name, { exact: true });
+    expect(accessibleText(tools)).not.toContain(fact);
+    expect(document.getElementById(word.getAttribute('aria-describedby')!)!.textContent).toBe(fact);
+    await tabTo(within(tools).getByRole('switch', { name }), word);
+    expect(tooltip()).toBe(fact);
   });
 
   it('approvals carries its caption as its tooltip and its description (G33)', async () => {

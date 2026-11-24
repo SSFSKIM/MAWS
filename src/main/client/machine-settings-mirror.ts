@@ -9,13 +9,17 @@
 // too, from `machine-route.json` and the rule until `mawsd` answers, then from its answers' `defaultRoute`; a `mawsd`
 // whose answers carry none predates M9 and acts on `gateway.defaultRoute`, which is then the default, set through the
 // legacy field (`machine` refused, since that `mawsd` cannot launch it).
+// Board ticket 421 (docs/doperpowers/plans/2026-11-23-tool-choice.md, Interfaces §G): the machine's default set of MAWS's
+// tools on the same terms, from `machine-session-defaults.json` until `mawsd` answers, then from its answers' `mawsTools`;
+// a `mawsd` whose answers carry none predates the choice, its launches are the full set, and a set is not written to it.
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import type { LegacyRoute, Route } from '@shared/engine/route';
 import type { HostSupervisor } from '@shared/host/host-supervisor';
-import type { CommandOutput } from '@shared/ipc/schema';
-import type { MachineRoute, MachineSettings, MachineSettingsPatch } from '@shared/ipc/schema/settings';
-import { machineSettingsDefaults, migrateMachineRoute, migrateMachineSettings, resolveDefaultRoute } from '@shared/settings/defaults';
+import type { CommandInput, CommandOutput } from '@shared/ipc/schema';
+import type { MachineRoute, MachineSessionDefaults, MachineSettings, MachineSettingsPatch } from '@shared/ipc/schema/settings';
+import { FULL_MAWS_TOOL_SET, type MawsToolSet } from '@shared/maws/tool-set'; // board ticket 421
+import { machineSettingsDefaults, migrateMachineRoute, migrateMachineSessionDefaults, migrateMachineSettings, resolveDefaultRoute, resolveMawsTools } from '@shared/settings/defaults';
 import { SETTINGS_FILES } from '@shared/settings/paths';
 import type { MachineSettingsService } from '@shared/spine/machine-settings';
 
@@ -36,13 +40,22 @@ export function createMachineSettingsMirror({ file, hosts, log }: MachineSetting
   let current = readOnly(file, log);
   let route = resolveDefaultRoute(readOnlyRoute(join(dirname(file), SETTINGS_FILES.route)), current.gateway.defaultRoute);
   let routeKnown: boolean | null = null; // whether mawsd's last answer carried `defaultRoute`; null before any
+  let tools = resolveMawsTools(readOnlySessionDefaults(join(dirname(file), SETTINGS_FILES.sessionDefaults))); // board ticket 421
+  let toolsKnown: boolean | null = null; // whether mawsd's last answer carried `mawsTools`; null before any
   const listeners = new Set<(state: MachineSettings) => void>();
-  const take = (next: MachineSettings, nextRoute: Route | undefined) => {
+  const take = ({ settings: next, defaultRoute: nextRoute, mawsTools: nextTools }: Answered) => {
     routeKnown = nextRoute !== undefined;
+    // board ticket 421: a mawsd replaced by one that knows the choice, or by one that does not, is a change even where
+    // both serve the full set: the window offers the choice on the first alone (the first answer is the state it started from)
+    const toolsWereKnown = toolsKnown;
+    toolsKnown = nextTools !== undefined;
+    const replaced = toolsWereKnown !== null && toolsWereKnown !== toolsKnown;
     const resolved = nextRoute ?? next.gateway.defaultRoute;
-    if (JSON.stringify(next) === JSON.stringify(current) && resolved === route) return;
+    const served = nextTools ?? FULL_MAWS_TOOL_SET; // what a mawsd that predates the choice launches
+    if (!replaced && JSON.stringify(next) === JSON.stringify(current) && resolved === route && JSON.stringify(served) === JSON.stringify(tools)) return;
     current = next;
     route = resolved;
+    tools = served;
     for (const listener of [...listeners]) listener(current);
   };
 
@@ -55,31 +68,30 @@ export function createMachineSettingsMirror({ file, hosts, log }: MachineSetting
     const answer = await hosts.dispatch('machine', 'machineSettings.get', undefined);
     if (!answer.ok) throw new Error(`machineSettings.get: ${answer.error.code} ${answer.error.message}`);
     markAnswered();
-    const { settings, defaultRoute } = answer.value as CommandOutput<'machineSettings.get'>;
-    if (heard === before) take(settings, defaultRoute);
+    if (heard === before) take(answer.value as CommandOutput<'machineSettings.get'>);
   };
   const refresh = () => void read().catch((error: unknown) => log(`[settings] ${error instanceof Error ? error.message : String(error)}`));
   const offs = [
-    hosts.onEvent('machineSettings.changed', ({ settings, defaultRoute }) => {
+    hosts.onEvent('machineSettings.changed', (changed) => {
       heard += 1;
       markAnswered();
-      take(settings, defaultRoute);
+      take(changed);
     }),
     hosts.onStreaming('machine', refresh),
   ];
   if (hosts.streaming('machine')) refresh();
 
-  const set = async (input: { patch: MachineSettingsPatch; defaultRoute?: Route }): Promise<{ defaultRoute?: Route }> => {
+  const set = async (input: CommandInput<'machineSettings.set'>): Promise<Omit<Answered, 'settings'>> => {
     const before = heard;
     const answer = await hosts.dispatch('machine', 'machineSettings.set', input);
     if (!answer.ok) throw new Error(answer.error.message);
     markAnswered();
     // as a read: a change heard while the set was out is newer than its answer (mawsd tells every client of a change,
     // this set's own included, before it answers), so it stands
-    const { settings, defaultRoute } = answer.value as CommandOutput<'machineSettings.set'>;
-    if (heard === before) take(settings, defaultRoute);
+    const answered = answer.value as CommandOutput<'machineSettings.set'>;
+    if (heard === before) take(answered);
     heard += 1;
-    return { defaultRoute };
+    return { defaultRoute: answered.defaultRoute, mawsTools: answered.mawsTools };
   };
 
   return {
@@ -100,6 +112,15 @@ export function createMachineSettingsMirror({ file, hosts, log }: MachineSetting
       else await set({ patch: { gateway: { defaultRoute: next satisfies LegacyRoute } } });
       return route;
     },
+    mawsTools: () => tools,
+    // As the route: whether mawsd carries the set is learned first, and a write whose answer carries none was dropped
+    async setMawsTools(next) {
+      if (toolsKnown === null) await read();
+      if (toolsKnown !== true) throw new Error(TOOLS_PREDATE);
+      const { mawsTools } = await set({ patch: {}, mawsTools: next });
+      if (mawsTools === undefined) throw new Error(TOOLS_PREDATE);
+      return mawsTools;
+    },
     onChange(listener) {
       listeners.add(listener);
       return () => void listeners.delete(listener);
@@ -110,6 +131,9 @@ export function createMachineSettingsMirror({ file, hosts, log }: MachineSetting
 }
 
 const PREDATES = 'This machine’s mawsd predates the machine route; choose gateway or direct until it runs this build.';
+const TOOLS_PREDATE = 'This machine’s mawsd predates the choice of MAWS’s tools; its sessions get every tool until it runs this build.'; // board ticket 421
+
+type Answered = { settings: MachineSettings; defaultRoute?: Route; mawsTools?: MawsToolSet };
 
 // The file as it is, never migrated in place nor written: the defaults when it is absent or this build cannot read it
 function readOnly(file: string, log: (line: string) => void): MachineSettings {
@@ -132,6 +156,16 @@ function readOnly(file: string, log: (line: string) => void): MachineSettings {
 function readOnlyRoute(file: string): MachineRoute | null {
   try {
     return migrateMachineRoute(JSON.parse(readFileSync(file, 'utf8')));
+  } catch {
+    return null;
+  }
+}
+
+// Board ticket 421: `machine-session-defaults.json` as it is, never written: null when it is absent or this build cannot
+// read it (the full set then stands, as mawsd's own store reads it)
+function readOnlySessionDefaults(file: string): MachineSessionDefaults | null {
+  try {
+    return migrateMachineSessionDefaults(JSON.parse(readFileSync(file, 'utf8')));
   } catch {
     return null;
   }

@@ -42,7 +42,7 @@ import { StoreFixture } from '../../test/support/store-fixture'; // UX wave, tic
 import { MemorySessionStateStore } from './store/memory-session-state-store';
 // E1 start
 import * as mawsSchema from '@shared/ipc/schema/maws';
-import { TOOL_ERRORS } from '@shared/maws/tools'; // E10
+import { MAWS_TOOL_NAMES, TOOL_ERRORS } from '@shared/maws/tools'; // E10; board ticket 421: MAWS_TOOL_NAMES
 import { MAWS_DEADLINE_SHAPES } from './ipc';
 // E1 end
 // E3 start
@@ -1257,7 +1257,7 @@ describe('maws.* commands (E1 M1)', () => {
     await host.call('session.launch', { spec: spec() });
     await until(() => host.statuses(id).some((s) => s.process === 'ready'), 'ready');
     const question = { id: 'q1', question: 'Proceed?', modality: 'choice', options: [{ label: 'Yes' }, { label: 'No' }] };
-    transport.push({ type: 'control_request', request_id: 'mcp-ask', request: { subtype: 'mcp_message', server_name: 'maws', message: { jsonrpc: '2.0', id: 5, method: 'tools/call', params: { name: 'ask', arguments: { questions: [question] }, _meta: { 'claudecode/toolUseId': 'toolu_ask' } } } } });
+    transport.push({ type: 'control_request', request_id: 'mcp-ask', request: { subtype: 'mcp_message', server_name: 'maws', message: { jsonrpc: '2.0', id: 5, method: 'tools/call', params: { name: 'ask', arguments: { blocking: true, questions: [question] }, _meta: { 'claudecode/toolUseId': 'toolu_ask' } } } } });
     const listed = { askId: 'toolu_ask', toolUseId: 'toolu_ask', requestId: 'mcp-ask', blocking: true, title: null, context: null, questions: [question], openedAt: expect.any(String) };
     await until(() => host.ipc.table.get(id)!.asks().length === 1, 'the pending ask');
     expect(await host.call('maws.asks.list', { appSessionId: id })).toEqual({ asks: [listed] });
@@ -1506,7 +1506,7 @@ describe('the removed browser bridge over IPC (E4c)', () => {
     const answered = () =>
       (transport.writes.find((w) => w.type === 'control_response' && (w as { response: { request_id: string } }).response.request_id === 'mcp-act') as { response: { response: { mcp_response: { result: unknown } } } } | undefined)?.response.response.mcp_response.result;
     await until(() => answered() !== undefined, 'the answer');
-    expect(answered()).toEqual({ content: [{ type: 'text', text: TOOL_ERRORS.unknownTool('browser_act') }], isError: true });
+    expect(answered()).toEqual({ content: [{ type: 'text', text: TOOL_ERRORS.unknownTool('browser_act', MAWS_TOOL_NAMES) }], isError: true });
     expect(host.emitted.filter((e) => (e.name as string).startsWith('maws.browser.'))).toEqual([]);
     transport.exit(0);
     await host.ipc.table.get(id)!.exited;

@@ -139,10 +139,11 @@ describe('session info renders the six sections', () => {
     for (const title of ['Engine', 'Model', 'Gateway', 'Permissions', 'Usage', 'Hooks and MCP']) expect(screen.getByRole('region', { name: title })).toBeTruthy();
     const labels = screen.getAllByRole('term').map((t) => t.textContent);
     // the word cut: no Browser tabs row while no page is loaded (T540), no Context and Usage rows (P176)
-    expect(labels).toEqual(['Version', 'Binary', 'Session id', 'Held by' /* W7 */, 'Process tree', 'Memory budget' /* C12 */, 'Main', 'Subagents', 'Route', 'Account', 'Tool search', 'Mode', 'Auto-mode lane', 'Rules', 'Cost', 'Hooks', 'MCP']);
+    expect(labels).toEqual(['Version', 'Binary', 'MAWS tools', 'Question tool' /* board ticket 421 */, 'Session id', 'Held by' /* W7 */, 'Process tree', 'Memory budget' /* C12 */, 'Main', 'Subagents', 'Route', 'Account', 'Tool search', 'Mode', 'Auto-mode lane', 'Rules', 'Cost', 'Hooks', 'MCP']);
     expect(valueOf('Version')).toBe('2.1.283'); // W13: the session's own, no pin note
     expect(valueOf('Binary')).toBe('~/.local/share/claude/versions/2.1.283'); // W13: the file it was spawned from, not today's setting
     expect(valueOf('Session id')).toBe(record.engineSessionId);
+    expect([valueOf('MAWS tools'), valueOf('Question tool')]).toEqual(['Artifacts, Documents, Dashboards, Auxiliary', 'MAWS']); // board ticket 421: no set recorded, the full set
     // UX wave U4a (decision 19): before any selector has listed the engine's models, the chip's name from the route's
     // catalogue (`engine.models`), as the chip reads it; the raw id as its title
     await waitFor(() => expect(valueOf('Main')).toBe('Sonnet 5'));

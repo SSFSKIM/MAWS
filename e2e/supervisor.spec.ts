@@ -788,6 +788,38 @@ test('(f) P5 O16 M3: an update with a session live: the engine host hands it ove
   });
 });
 
+// The tool-choice plan's M2 (board ticket 420): MAWS's blocking ask waiting across an update. The handover does not
+// wait for it (an ask waits on a person and is carried across by its re-raise); the successor raises it again from its
+// journaled call, read as the predecessor admitted it, so it waits there too, and the person's answer settles the
+// engine's own call, once, and the turn ends.
+test('(f) board ticket 420: an update with a blocking ask waiting: the successor raises it again, and its answer settles the engine’s call', async () => {
+  await withScratch('updated-ask', async (s) => {
+    s.useStub();
+    const question = { id: 'q1', question: 'Ship the release notes today?', modality: 'choice', options: [{ label: 'Yes' }, { label: 'Not yet' }] };
+    const fixture = toolCallJournal(s.root, 'ask-call', 'ask', { blocking: true, questions: [question] });
+    const asksOf = async (page: Page, at: AppSessionId) => value(await invoke(page, 'maws.asks.list', { appSessionId: at })).asks;
+    const asked = async (page: Page, at: AppSessionId) => void (await expect.poll(async () => (await asksOf(page, at)).map((ask) => ask.blocking), { timeout: 30_000, message: 'the ask waits on the first host' }).toEqual([true]));
+    const { pid, id, engine } = await keptMidTurn(s, { fixture, prompt: 'turn 1', midTurn: asked });
+    const run = await s.launch({ MAWS_E2E_BUILD_ID: 'stale' });
+    await successorOfOwnBuild(s, run.page, pid);
+    await expect.poll(() => isAlive(pid), { timeout: 10_000, message: 'the old engine host is gone' }).toBe(false);
+    expect(s.log(), 'host.log: the old host drained at once, the ask not counted').toContain('handover armed: 1 hosted rows frozen, 0 calls in flight');
+    await expect.poll(() => adoptedOf(run.page, id), { timeout: 30_000, message: 'the session adopted' }).toBe(true);
+    expect((await statusOf(run.page, id)).pid, 'the same engine process').toBe(engine);
+    let pending: Awaited<ReturnType<typeof asksOf>> = [];
+    await expect.poll(async () => (pending = await asksOf(run.page, id)).map((ask) => [ask.blocking, ask.questions.map((q) => q.id)]), { timeout: 30_000, message: 'the successor raised the ask again, still waiting' }).toEqual([[true, ['q1']]]);
+    expect(s.journal(id).filter(isToolAnswer), 'nothing answered the call yet').toHaveLength(0);
+    const answers = [{ id: 'q1', question: question.question, status: 'answered' as const, value: ['Yes'] }];
+    expect(value(await invoke(run.page, 'maws.ask.answer', { appSessionId: id, askId: pending[0]!.askId, answers })).outcome).toBe('delivered');
+    await expect.poll(async () => (await statusOf(run.page, id)).turn === null && (await eventsOf(run.page, id)).some((e) => e.kind === 'turn.ended'), { timeout: 60_000, message: 'the answer settles the call and the turn ends' }).toBe(true);
+    const answered = s.journal(id).filter(isToolAnswer);
+    expect(answered, 'the call answered once, by the successor').toHaveLength(1);
+    const result = (answered[0]!.frame as { response: { response: { mcp_response: { result: { content: { text: string }[] } } } } }).response.response.mcp_response.result;
+    expect(JSON.parse(result.content[0]!.text)).toMatchObject({ status: 'answered', askId: pending[0]!.askId, answers });
+    await noCrashTold(s, run);
+  });
+});
+
 // P5 O16 M3c: a `maws` tool call's rows in a journal: the engine's call (`in`) and the host's answer (`out`)
 const isToolCall = (r: JournalRow) => r.direction === 'in' && r.frame.type === 'control_request' && JSON.stringify(r.frame).includes('"tools/call"');
 const isToolAnswer = (r: JournalRow) => r.direction === 'out' && r.frame.type === 'control_response' && JSON.stringify(r.frame).includes('"mcp_response"');

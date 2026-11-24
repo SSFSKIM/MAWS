@@ -13,6 +13,8 @@ export type HarnessPane = { appSessionId: string; placement: HarnessPlacement } 
 
 // M4: the stub of C10's setup intent the page registers (the fields the composer reads).
 export interface HarnessIntent {
+  kind?: 'create' | 'fork'; // board ticket 421: absent, a new chat's (`create`)
+  mawsTools?: { artifacts: boolean; documents: boolean; dashboards: boolean; auxiliary: boolean; question: 'engine' | 'maws' };
   location: { kind: 'directory'; path: string };
   additionalDirectories: string[];
   model: string | null;

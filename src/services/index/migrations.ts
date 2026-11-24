@@ -331,6 +331,10 @@ export const ADDED_COLUMNS: readonly AddedColumn[] = [
   // last reserved launch advertisement (JSON `{launchId, number, plugin, at}`), written before the launch is sent and
   // bound to its id after. Build F and the installed build read the row by column name and never write this column
   { table: 'owner_channel_sessions', column: 'advertised', definition: 'TEXT' },
+  // Board ticket 421 (docs/doperpowers/plans/2026-11-23-tool-choice.md, Interfaces §E): the set of MAWS's tools a session's
+  // first launch served (JSON), written once and only when it is not the full set; null for every other session, which
+  // resumes and forks at the full set. A build from before reads the row by column name and never writes this column
+  { table: 'sessions', column: 'maws_tools', definition: 'TEXT' },
 ];
 
 // A table added without moving `user_version` (P5 O8 M7b; the spec's Decision Log, the architect's rulings on M7b Task

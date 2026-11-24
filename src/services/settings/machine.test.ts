@@ -9,6 +9,7 @@ import { machineSettingsDefaults, SETTINGS_DEFAULTS_V21 } from '@shared/settings
 import { settingsPaths, SETTINGS_FILES } from '@shared/settings/paths';
 import { startMachineSettings } from './machine';
 import { splitSettingsFiles } from './split';
+import { FULL_MAWS_TOOL_SET, type MawsToolSet } from '@shared/maws/tool-set'; // board ticket 421
 import { migrateMachineSettings as masterMigrateMachineSettings } from '../../../test/fixtures/settings/master-828114952/migrate-machine-settings.mjs';
 
 // An older build's reader: master's own `migrateMachineSettings` (src/shared/settings/defaults.ts at 828114952, the base
@@ -160,5 +161,78 @@ describe("the machine's default route on disk (P5 O7 M9)", () => {
     const machine = open();
     await expect(machine.setDefaultRoute('direct')).rejects.toThrow();
     expect(existsSync(routeFile())).toBe(false);
+  });
+});
+
+// Board ticket 421 (docs/doperpowers/plans/2026-11-23-tool-choice.md, D4, Interfaces §G and "The settings migration"): the
+// machine's default set of MAWS's tools, in `machine-session-defaults.json` beside an unchanged `machine-settings.json`,
+// read loosely, under the machine file's writer and refusal
+describe("the machine's default set of MAWS's tools on disk (board ticket 421)", () => {
+  const PARTIAL: MawsToolSet = { artifacts: false, documents: false, dashboards: false, auxiliary: true, question: 'engine' };
+  const defaultsFile = () => join(profile, SETTINGS_FILES.sessionDefaults);
+
+  it('is the full set with no file, writing nothing', () => {
+    machineFileWith('gateway');
+    const before = bytes(paths.machine);
+    expect(open().mawsTools()).toEqual(FULL_MAWS_TOOL_SET);
+    expect(existsSync(defaultsFile())).toBe(false);
+    expect(bytes(paths.machine)).toBe(before);
+  });
+
+  it('writes a set to machine-session-defaults.json alone, tells the listeners, and a reopen reads it; the full set is written too', async () => {
+    machineFileWith('gateway');
+    const before = bytes(paths.machine);
+    const machine = open();
+    const told: MawsToolSet[] = [];
+    machine.onChange(() => void told.push(machine.mawsTools()));
+    expect(await machine.setMawsTools(PARTIAL)).toEqual(PARTIAL);
+    expect(told).toEqual([PARTIAL]);
+    expect(JSON.parse(bytes(defaultsFile()))).toEqual({ version: 1, mawsTools: PARTIAL });
+    expect(bytes(paths.machine)).toBe(before); // the machine file gains nothing
+    expect(open().mawsTools()).toEqual(PARTIAL);
+    expect(await machine.setMawsTools(FULL_MAWS_TOOL_SET)).toEqual(FULL_MAWS_TOOL_SET);
+    expect(JSON.parse(bytes(defaultsFile()))).toEqual({ version: 1, mawsTools: FULL_MAWS_TOOL_SET }); // the person chose it
+  });
+
+  it('keeps a key a later build wrote across its own write', async () => {
+    writeFileSync(defaultsFile(), JSON.stringify({ version: 1, mawsTools: PARTIAL, laterDefault: { on: true } }));
+    const machine = open();
+    expect(machine.mawsTools()).toEqual(PARTIAL);
+    await machine.setMawsTools({ ...PARTIAL, question: 'maws' });
+    expect(JSON.parse(bytes(defaultsFile()))).toEqual({ version: 1, mawsTools: { ...PARTIAL, question: 'maws' }, laterDefault: { on: true } });
+  });
+
+  it.each([
+    ['unreadable', '{"version":1,'],
+    ['of a version this build does not know', JSON.stringify({ version: 2, mawsTools: { artifacts: false, documents: false, dashboards: false, auxiliary: false, question: 'engine' } })],
+    ['holding a set this build refuses', JSON.stringify({ version: 1, mawsTools: { artifacts: false, documents: true, dashboards: false, auxiliary: true, question: 'maws' } })],
+  ])('reads a file %s as the full set and refuses a write over it, leaving it as it was', async (_, text) => {
+    writeFileSync(defaultsFile(), text);
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const machine = open();
+    const told = vi.fn();
+    machine.onChange(told);
+    expect(machine.mawsTools()).toEqual(FULL_MAWS_TOOL_SET);
+    await expect(machine.setMawsTools(PARTIAL)).rejects.toThrow();
+    expect(bytes(defaultsFile())).toBe(text);
+    expect(machine.mawsTools()).toEqual(FULL_MAWS_TOOL_SET);
+    expect(told).not.toHaveBeenCalled();
+    expect(warn).toHaveBeenCalledOnce();
+  });
+
+  it('refuses a write in a run that may not write the machine’s files, writing nothing', async () => {
+    const machine = open({ refused: 'spine.lock is held by pid 4242' });
+    const told = vi.fn();
+    machine.onChange(told);
+    await expect(machine.setMawsTools(PARTIAL)).rejects.toThrow('spine.lock is held by pid 4242');
+    expect(readdirSync(profile)).toEqual([]);
+    expect(machine.mawsTools()).toEqual(FULL_MAWS_TOOL_SET);
+    expect(told).not.toHaveBeenCalled();
+  });
+
+  it('refuses a set the schema refuses, writing nothing', async () => {
+    const machine = open();
+    await expect(machine.setMawsTools({ ...PARTIAL, documents: true })).rejects.toThrow();
+    expect(existsSync(defaultsFile())).toBe(false);
   });
 });

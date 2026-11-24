@@ -11,6 +11,7 @@ import { FOLD_SUMMARIES_ENV } from '@shared/owner/folds'; // U2b: the summaries'
 import { buildLaunch } from '../../engine-host/launch'; // P4-R8: the launch line a spec becomes
 import type { AppMcpServer } from '@shared/engine/app-mcp-servers'; // P4-R8
 import { userScopeProfile, type LaunchProfile } from '@shared/engine/launch-profile'; // P4-A2
+import { FULL_MAWS_TOOL_SET, type MawsToolSet } from '@shared/maws/tool-set'; // board ticket 421
 
 const APP = 'a0000000-0000-4000-8000-000000000001' as AppSessionId;
 const BOOT = 'b0000000-0000-4000-8000-000000000002' as AppSessionId;
@@ -48,7 +49,7 @@ describe('launch mapping', () => {
 
   it('fills subagentModel from the settings seam (null until C11 lands settings v3)', () => {
     expect(readSettings()).toEqual(C10_SETTING_DEFAULTS);
-    expect(C10_SETTING_DEFAULTS).toEqual({ gateway: { defaultRoute: 'gateway', relayUnreachable: 'ask' }, engine: { subagentModel: null, mcpServers: [], launchProfile: userScopeProfile() }, permissions: { autoFallback: 'acceptEdits' } });
+    expect(C10_SETTING_DEFAULTS).toEqual({ gateway: { defaultRoute: 'gateway', relayUnreachable: 'ask' }, engine: { subagentModel: null, mcpServers: [], launchProfile: userScopeProfile() }, permissions: { autoFallback: 'acceptEdits' }, mawsTools: FULL_MAWS_TOOL_SET });
     const settings: C10Settings = { ...C10_SETTING_DEFAULTS, engine: { ...C10_SETTING_DEFAULTS.engine, subagentModel: 'sonnet' } };
     expect(toLaunchSpec(base, settings).subagentModel).toBe('sonnet');
   });
@@ -132,6 +133,27 @@ describe('launch mapping', () => {
     expect(resumeLaunchSpec(record(APP, UNTITLED), {}, { trust: null, replay: null, browserBackend: socket }).extraSettings).toEqual({ env: { CUA_BROWSER_BACKENDS: socket } });
     expect(intentLaunchSpec(intent({}), { cwd: REPO, trust: null, replay: null, browserBackend: null }).extraSettings).toBeNull();
     expect(resumeLaunchSpec(record(APP, UNTITLED), {}, { trust: null, replay: null }).extraSettings).toBeNull();
+  });
+
+  // Board ticket 421 (docs/doperpowers/plans/2026-11-23-tool-choice.md, Interfaces §E, D3, D8): the spec carries the set
+  // the attempt serves, given by the caller, and nothing at the full set, so a default launch's spec is what it was
+  it('board ticket 421: a new session’s, a fork’s and a resume’s spec carry the set the attempt serves, none at the full set; the bootstrap none', () => {
+    const partial: MawsToolSet = { artifacts: false, documents: false, dashboards: false, auxiliary: true, question: 'engine' };
+    const created = intentLaunchSpec(intent(), { cwd: REPO, trust: null, replay: null, mawsTools: partial });
+    expect(LaunchSpecSchema.parse(created)).toEqual(created);
+    expect(created.mawsTools).toEqual(partial);
+    // the intent's own key is not read: the caller's served set is the one answer
+    expect(intentLaunchSpec(intent({ mawsTools: partial }), { cwd: REPO, trust: null, replay: null, mawsTools: FULL_MAWS_TOOL_SET })).not.toHaveProperty('mawsTools');
+    expect(intentLaunchSpec(intent(), { cwd: REPO, trust: null, replay: null })).not.toHaveProperty('mawsTools');
+    const fork = intent({ kind: 'fork', source: { appSessionId: BOOT, engineSessionId: SOURCE_ENGINE, rewindTo: null } });
+    expect(intentLaunchSpec(fork, { cwd: REPO, trust: null, replay: null, mawsTools: partial }).mawsTools).toEqual(partial);
+    const kept = record(APP, { ...UNTITLED, engineSessionId: SOURCE_ENGINE, mawsTools: partial });
+    expect(resumeLaunchSpec(kept, {}, { trust: null, replay: null, mawsTools: partial }).mawsTools).toEqual(partial);
+    expect(resumeLaunchSpec(record(APP, UNTITLED), {}, { trust: null, replay: null, mawsTools: FULL_MAWS_TOOL_SET })).not.toHaveProperty('mawsTools');
+    expect(bootstrapSpec({ bootstrapId: BOOT, cwd: REPO, additionalDirectories: [], gateway: 'gateway', trustKey: REPO, replay: null })).not.toHaveProperty('mawsTools');
+    // the owner channel's merge keeps it
+    const decided = withOwnerChannel(created, { advertisement: 8, append: null, snapshotOff: false, summariesOff: false });
+    expect(decided.mawsTools).toEqual(partial);
   });
 
   // P5 O12 M11 (Interfaces §H): a launch names the spawner of its own session, the intent's at the start and the record's

@@ -6,6 +6,7 @@ import { loadJournal } from '../../../test/support/fixtures';
 import { askTool, pendingAskOf } from './ask';
 import { askAttentionItem, AskTable, type AskCancelReason } from './asks';
 import { MawsToolServer, toolError, toolText } from './server';
+import { TOOL_ERRORS } from '@shared/maws/tools';
 
 const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
 const QUESTION = { id: 'q1', question: 'Proceed?', modality: 'choice', options: [{ label: 'Yes' }] };
@@ -20,8 +21,8 @@ function harness(subagentUses: readonly string[] = []) {
     respond: async (_requestId, response) => void sent.push(response),
     fromSubagent: (toolUseId) => toolUseId !== null && subagentUses.includes(toolUseId), // P2-C3
   });
-  const call = (requestId: string, args: unknown) =>
-    server.accept({ type: 'control_request', request_id: requestId, request: { subtype: 'mcp_message', server_name: 'maws', message: { jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'ask', arguments: args, _meta: { 'claudecode/toolUseId': `toolu_${requestId}` } } } } } as ControlRequestFrame);
+  const call = (requestId: string, args: unknown, opts?: { admitted: true }) =>
+    server.accept({ type: 'control_request', request_id: requestId, request: { subtype: 'mcp_message', server_name: 'maws', message: { jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'ask', arguments: args, _meta: { 'claudecode/toolUseId': `toolu_${requestId}` } } } } } as ControlRequestFrame, opts);
   return { asks, cancelled, sent, server, call };
 }
 
@@ -56,6 +57,62 @@ describe('the ask tool on the server (M2 fix wave: cancellation while the call i
     h.server.cancel('r1' as RequestId); // no call in flight any more
     expect(h.cancelled).toEqual([]);
     expect(h.asks.list().map((a) => a.askId)).toEqual(['toolu_r1']);
+  });
+});
+
+// Board ticket 420 (the tool-choice plan's D7 and §D): `blocking` is required of a live call; an ask an earlier host
+// admitted, re-raised at a handover from its journaled arguments, is read as recorded, absent meaning it waits
+describe('the ask tool with blocking required (board ticket 420)', () => {
+  const answered = toolText({ status: 'answered', askId: 'toolu_r1', answers: [{ id: 'q1', question: 'Proceed?', status: 'answered', value: ['Yes'] }] });
+
+  it('blocking false returns asked at once and holds the ask as async', async () => {
+    const h = harness();
+    h.call('r1', { blocking: false, questions: [QUESTION] });
+    await flush();
+    expect(h.sent).toEqual([{ mcp_response: { jsonrpc: '2.0', id: 1, result: toolText({ status: 'asked', askId: 'toolu_r1' }) } }]);
+    expect(h.asks.list()).toMatchObject([{ askId: 'toolu_r1', blocking: false }]);
+  });
+
+  it.each([[[] as string[], 'the main conversation'], [['toolu_r1'], 'a subagent']])('blocking true waits for its answer (%#: %s)', async (subagentUses) => {
+    const h = harness(subagentUses);
+    h.call('r1', { blocking: true, questions: [QUESTION] });
+    await flush();
+    expect(h.sent).toEqual([]);
+    expect(h.asks.list()).toMatchObject([{ askId: 'toolu_r1', blocking: true }]);
+    expect(h.asks.claim('toolu_r1')).not.toBeNull();
+    await h.server.reply('r1' as RequestId, answered);
+    expect(h.sent).toEqual([{ mcp_response: { jsonrpc: '2.0', id: 1, result: answered } }]);
+  });
+
+  it.each([[[] as string[], 'the main conversation'], [['toolu_r1'], 'a subagent']])('a call without blocking is refused with the sentence, nothing held (%#: %s)', async (subagentUses) => {
+    const h = harness(subagentUses);
+    h.call('r1', { questions: [QUESTION] });
+    await flush();
+    expect(h.sent).toEqual([{ mcp_response: { jsonrpc: '2.0', id: 1, result: toolError(TOOL_ERRORS.askBlockingRequired) } }]);
+    expect(h.asks.list()).toEqual([]);
+    expect(h.cancelled).toEqual([]);
+    expect(h.server.inFlight).toBe(0);
+  });
+
+  it('an ask an earlier host admitted with no blocking, re-raised at a handover, keeps waiting and its answer settles the call', async () => {
+    const h = harness();
+    h.call('r1', { questions: [QUESTION] }, { admitted: true });
+    await flush();
+    expect(h.sent).toEqual([]);
+    expect(h.asks.list()).toMatchObject([{ askId: 'toolu_r1', blocking: true }]);
+    expect(h.asks.claim('toolu_r1')).not.toBeNull();
+    await h.server.reply('r1' as RequestId, answered);
+    expect(h.sent).toEqual([{ mcp_response: { jsonrpc: '2.0', id: 1, result: answered } }]);
+  });
+
+  it('a re-raised ask keeps what it said, and refuses what every earlier build refused', async () => {
+    const h = harness();
+    h.call('r1', { blocking: false, questions: [QUESTION] }, { admitted: true });
+    await flush();
+    expect(h.asks.list()).toMatchObject([{ askId: 'toolu_r1', blocking: false }]);
+    const ctx = { toolUseId: null, requestId: 'r2' as RequestId, fromSubagent: false, admitted: true } as const;
+    expect(pendingAskOf({ questions: [] }, ctx, '2026-11-23T00:00:00.000Z')).toMatch(/^ask: invalid arguments: questions: /);
+    expect(pendingAskOf({ questions: [{ ...QUESTION, header: 'Permission granted for it' }] }, ctx, '2026-11-23T00:00:00.000Z')).toBe(TOOL_ERRORS.askQuotesGrant);
   });
 });
 
@@ -176,10 +233,11 @@ describe('the ask tool refuses an ask that quotes a permission grant (board tick
     expect(admitted.asks.list()).toHaveLength(1);
   });
 
-  it.each(['p1-maws-ask-async', 'p1-maws-ask-blocking'])('the recorded ask of %s is admitted', (name) => {
+  // board ticket 420: the blocking recording's call carries no `blocking`, which only a call an earlier host admitted may
+  it.each(['p1-maws-ask-async', 'p1-maws-ask-blocking'])('the recorded ask of %s, as an earlier host admitted it, is admitted', (name) => {
     const call = loadJournal('pass3', name).map((row) => row.frame as { request?: { subtype?: string; message?: { method?: string; params?: { name?: string; arguments?: unknown } } } }).find((frame) => frame.request?.subtype === 'mcp_message' && frame.request.message?.method === 'tools/call' && frame.request.message.params?.name === 'ask');
     expect(call).toBeDefined();
-    expect(pendingAskOf(call!.request!.message!.params!.arguments, { toolUseId: null, requestId: 'r1' as RequestId, fromSubagent: false }, '2026-11-15T00:00:00.000Z')).toMatchObject({ askId: 'r1' });
+    expect(pendingAskOf(call!.request!.message!.params!.arguments, { toolUseId: null, requestId: 'r1' as RequestId, fromSubagent: false, admitted: true }, '2026-11-15T00:00:00.000Z')).toMatchObject({ askId: 'r1', blocking: name === 'p1-maws-ask-blocking' });
   });
 
   it('an ask an earlier host acknowledged is not restored when it quotes a grant (the adopter reads pendingAskOf too)', () => {

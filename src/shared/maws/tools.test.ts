@@ -1,3 +1,5 @@
+import { readFileSync, writeFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import * as z from 'zod';
 import { AGENT_PANE_NAMES } from './panes';
@@ -29,6 +31,7 @@ import {
   DESIGN_SYSTEM_KINDS, // UX wave U10b
   AskAnswerSchema,
   AskInputSchema,
+  AskRecordedInputSchema, // board ticket 420
   AskResultSchema,
   MAWS_SERVER_NAME,
   MAWS_TOOL_ANNOTATIONS,
@@ -72,7 +75,7 @@ describe('X9: the maws server and its twelve tools', () => {
   it('opens every description with its fallback sentence, word for word', () => {
     for (const name of MAWS_TOOL_NAMES) expect(MAWS_TOOLS[name].description, name).toMatch(/^[^.]*without this tool/);
     expect(MAWS_TOOLS.ask.description).toBe(
-      'Ask the user one or several questions at once through a MAWS sheet; without this tool, use AskUserQuestion. Each question has a modality: "choice" (options, single or multi, with an Other row), "text" (free text), "file" or "folder" (a native picker returning absolute paths), "repository" (one of the user\'s MAWS projects), or "design_system" (one of the user\'s design systems, answered with its designSystemId and name; unless allowCreate is false, the user may answer create: true instead, asking you to build a new one with them). The user may answer any question with "decide for me" or skip it. With blocking true (the default) the call waits for the answers and returns them; with blocking false it returns {status: "asked", askId} at once and the answers arrive later as a user message that names the askId, so you can keep working meanwhile. In a subagent the call always waits and returns the answers, as with blocking true.',
+      'Ask the user one or several questions at once through a MAWS sheet; without this tool, use AskUserQuestion. Each question has a modality: "choice" (options, single or multi, with an Other row), "text" (free text), "file" or "folder" (a native picker returning absolute paths), "repository" (one of the user\'s MAWS projects), or "design_system" (one of the user\'s design systems, answered with its designSystemId and name; unless allowCreate is false, the user may answer create: true instead, asking you to build a new one with them). The user may answer any question with "decide for me" or skip it. blocking is required. With blocking false the call returns {status: "asked", askId} at once and the answers arrive later as a user message that names the askId, so you can keep working meanwhile; with blocking true it waits for the answers and returns them. Pass false unless you need the answers before your next step. In a subagent the call always waits and returns the answers, as with blocking true.',
     );
     expect(MAWS_TOOLS.show_pane.description).toBe(
       'Open a MAWS pane for the user: "diff", "file", "terminal", "tasks", "browser" or "source-control"; without this tool, describe where the user should look. target names what to open: a file path for diff or file (line optional), a URL for browser (a page already open is reloaded, unless the user is using that tab). Returns what was opened, or an error for an unknown pane or a pane this build of MAWS does not have.',
@@ -94,11 +97,10 @@ describe('X9: the maws server and its twelve tools', () => {
       expect(tool.inputSchema).toMatchObject({ type: 'object', additionalProperties: false });
     }
     // Always loaded, whatever tool search defers (P4-B4's probe: the engine honours the key for an SDK server's tool):
-    // the tools an edit of an artifact the session is handed needs (P4-A3), read, the kind's guide, a document's edit and
-    // the file kinds' publish, since a deferred one costs a ToolSearch request before the first edit; every other tool
-    // defers until a session asks for it
+    // board ticket 420, the ask alone, the session's line to its human; the tools an edit needs (P4-A3 until then) are
+    // found through tool search, about 7 s on a session's first edit for the tokens of every session's first request
     const alwaysLoaded = list.filter((t) => t._meta !== undefined);
-    expect(alwaysLoaded.map((t) => t.name)).toEqual(['artifact_describe_type', 'artifact_read', 'artifact_publish', 'artifact_edit']);
+    expect(alwaysLoaded.map((t) => t.name)).toEqual(['ask']);
     for (const tool of alwaysLoaded) expect(tool._meta, tool.name).toEqual({ 'anthropic/alwaysLoad': true });
     // E2 (Decision Log 4): the two writers are not read-only, so the engine never batches them nor runs them in plan mode
     expect(list.map((t) => [t.name, t.annotations])).toEqual([
@@ -144,8 +146,8 @@ describe('send_file, retired (board ticket 848)', () => {
     expect(MAWS_TOOL_NAMES as readonly string[]).not.toContain('send_file');
     expect(mawsToolList().map((tool) => tool.name)).not.toContain('send_file');
     for (const tool of mawsToolList()) expect(tool.description, tool.name).not.toMatch(/send_file/);
-    expect(mawsServerInstructions({ inAppBrowser: true })).not.toMatch(/send_file/);
-    expect(TOOL_ERRORS.unknownTool('echo')).not.toMatch(/send_file/);
+    expect(mawsServerInstructions({ inAppBrowser: true, artifacts: true })).not.toMatch(/send_file/);
+    expect(TOOL_ERRORS.unknownTool('echo', MAWS_TOOL_NAMES)).not.toMatch(/send_file/);
     expect(Object.keys(TOOL_ERRORS)).not.toContain('notAFile');
     expect(Object.keys(TOOL_ERRORS)).not.toContain('deliveryUnavailable');
   });
@@ -176,7 +178,7 @@ describe('X9 inputs: strict, bounded, never defaulted', () => {
   });
 
   it('ask: each modality takes only its own fields; choice needs options; ids are unique', () => {
-    const ok = (question: Record<string, unknown>) => AskInputSchema.safeParse({ questions: [{ question: 'Q?', ...question }] }).success;
+    const ok = (question: Record<string, unknown>) => AskInputSchema.safeParse({ blocking: true, questions: [{ question: 'Q?', ...question }] }).success;
     expect(ok({ modality: 'choice', options: [{ label: 'Red' }, { label: 'Blue', description: 'cool' }], multi: true, allowOther: false })).toBe(true);
     expect(ok({ modality: 'choice' })).toBe(false); // options required
     expect(ok({ modality: 'choice', options: [] })).toBe(false);
@@ -192,16 +194,16 @@ describe('X9 inputs: strict, bounded, never defaulted', () => {
     expect(ok({ modality: 'repository', header: 'x'.repeat(61) })).toBe(false);
     expect(ok({ modality: 'telepathy' })).toBe(false);
     expect(AskInputSchema.safeParse({ title: 'Setup', context: 'why', blocking: false, questions: [{ id: 'a', question: 'Q?', modality: 'text' }, { id: 'b', question: 'R?', modality: 'repository' }] }).success).toBe(true);
-    expect(AskInputSchema.safeParse({ questions: [{ id: 'a', question: 'Q?', modality: 'text' }, { id: 'a', question: 'R?', modality: 'text' }] }).success).toBe(false);
-    expect(AskInputSchema.safeParse({ questions: [] }).success).toBe(false);
-    expect(AskInputSchema.safeParse({ questions: [{ question: '', modality: 'text' }] }).success).toBe(false);
+    expect(AskInputSchema.safeParse({ blocking: true, questions: [{ id: 'a', question: 'Q?', modality: 'text' }, { id: 'a', question: 'R?', modality: 'text' }] }).success).toBe(false);
+    expect(AskInputSchema.safeParse({ blocking: true, questions: [] }).success).toBe(false);
+    expect(AskInputSchema.safeParse({ blocking: true, questions: [{ question: '', modality: 'text' }] }).success).toBe(false);
     // validators never default: what was not sent stays absent
-    expect(AskInputSchema.parse({ questions: [{ question: 'Q?', modality: 'choice', options: [{ label: 'a' }] }] })).toEqual({ questions: [{ question: 'Q?', modality: 'choice', options: [{ label: 'a' }] }] });
+    expect(AskInputSchema.parse({ blocking: false, questions: [{ question: 'Q?', modality: 'choice', options: [{ label: 'a' }] }] })).toEqual({ blocking: false, questions: [{ question: 'Q?', modality: 'choice', options: [{ label: 'a' }] }] });
   });
 
   // P2-C3 (Decision Log 34)
   it('ask: an option carries a markdown preview up to ASK_PREVIEW_MAX characters, on a single-select question only', () => {
-    const parse = (options: Record<string, unknown>[], extra: Record<string, unknown> = {}) => parseToolArguments('ask', { questions: [{ question: 'Q?', modality: 'choice', options, ...extra }] });
+    const parse = (options: Record<string, unknown>[], extra: Record<string, unknown> = {}) => parseToolArguments('ask', { blocking: false, questions: [{ question: 'Q?', modality: 'choice', options, ...extra }] });
     expect(parse([{ label: 'A', preview: '```\n+--+\n|A |\n+--+\n```' }, { label: 'B' }]).ok).toBe(true);
     expect(parse([{ label: 'A', preview: 'x'.repeat(ASK_PREVIEW_MAX) }]).ok).toBe(true);
     expect(parse([{ label: 'A', preview: 'x'.repeat(ASK_PREVIEW_MAX + 1) }]).ok).toBe(false);
@@ -269,7 +271,7 @@ describe('X9 refusals: one text per offender', () => {
     expect(at.ok === false && at.error).toMatch(/^show_pane: invalid arguments: .*"at"/);
     const missing = parseToolArguments('show_pane', {});
     expect(missing.ok === false && missing.error).toMatch(/^show_pane: invalid arguments: pane: /);
-    const ask = parseToolArguments('ask', { questions: [{ question: 'Q?', modality: 'choice' }] });
+    const ask = parseToolArguments('ask', { blocking: true, questions: [{ question: 'Q?', modality: 'choice' }] });
     expect(ask.ok === false && ask.error).toMatch(/^ask: invalid arguments: questions\.0\.options: /);
     expect(parseToolArguments('show_pane', { pane: 'terminal' })).toEqual({ ok: true, data: { pane: 'terminal' } });
     expect(parseToolArguments('show_pane', null).ok).toBe(false);
@@ -297,6 +299,59 @@ describe('X9 refusals: one text per offender', () => {
   });
 });
 
+// Board ticket 420 (the UX wave's U1d, as ruled on 2026-11-23): the ask is listed with `blocking` required, its
+// description steering it to false; a call that leaves it out is answered one sentence naming it
+describe('X9 ask: blocking required (board ticket 420)', () => {
+  const question = { question: 'Q?', modality: 'choice', options: [{ label: 'Yes' }] };
+
+  it('lists blocking among the required arguments, and the recorded schema does not', () => {
+    const listed = mawsToolList().find((tool) => tool.name === 'ask')!;
+    expect(listed.inputSchema).toMatchObject({ required: ['blocking', 'questions'], properties: { blocking: { type: 'boolean' } } });
+    expect(z.toJSONSchema(AskRecordedInputSchema)).toMatchObject({ required: ['questions'], properties: { blocking: { type: 'boolean' } } });
+    expect(listed._meta).toEqual({ 'anthropic/alwaysLoad': true });
+  });
+
+  it('answers a call whose only fault is a missing blocking with the sentence alone', () => {
+    expect(TOOL_ERRORS.askBlockingRequired).toBe('ask: pass blocking: false to keep working while the user answers, or blocking: true to wait for the answers.');
+    expect(parseToolArguments('ask', { questions: [question] })).toEqual({ ok: false, error: TOOL_ERRORS.askBlockingRequired });
+    expect(parseToolArguments('ask', { title: 'Setup', questions: [question, { id: 'q2', question: 'R?', modality: 'text' }] })).toEqual({ ok: false, error: TOOL_ERRORS.askBlockingRequired });
+    for (const blocking of [false, true]) expect(parseToolArguments('ask', { blocking, questions: [question] })).toEqual({ ok: true, data: { blocking, questions: [question] } });
+  });
+
+  it('answers a call with other faults by its issues, blocking among them', () => {
+    const both = parseToolArguments('ask', { questions: [{ question: 'Q?', modality: 'choice' }] });
+    expect(both.ok === false && both.error).toMatch(/^ask: invalid arguments: blocking: .*; questions\.0\.options: /);
+    const wrong = parseToolArguments('ask', { blocking: 'false', questions: [question] });
+    expect(wrong.ok === false && wrong.error).toMatch(/^ask: invalid arguments: blocking: /);
+    const empty = parseToolArguments('ask', {});
+    expect(empty.ok === false && empty.error).toMatch(/^ask: invalid arguments: /);
+    expect(empty.ok === false && empty.error).not.toBe(TOOL_ERRORS.askBlockingRequired);
+    expect(parseToolArguments('ask', null).ok).toBe(false);
+  });
+});
+
+// Board ticket 420 (the tool-choice plan's M2): the probe that records what the engine sends for MAWS's own list
+// (spikes/protocol-probe/scenarios/pass3/uxwave-421-tool-choice.mjs, P1) serves this snapshot as the `maws` server's
+// initialize instructions and `tools/list`: a full-set session's, as the host answers them. After a change to the tools
+// or the paragraph, regenerate it and record P1 again:
+//   MAWS_WRITE_421_TOOLS=1 pnpm vitest run src/shared/maws/tools.test.ts
+const PROBE_421 = fileURLToPath(new URL('../../../spikes/protocol-probe/scenarios/pass3/uxwave-421-maws-tools.json', import.meta.url));
+describe('the ticket 421/420 probe’s snapshot of the maws server', () => {
+  it('is the full set’s paragraph and tools/list as the source has them', () => {
+    const source = `${JSON.stringify({ instructions: mawsServerInstructions({ inAppBrowser: false, artifacts: true }), tools: mawsToolList() }, null, 2)}\n`;
+    if (process.env.MAWS_WRITE_421_TOOLS === '1') writeFileSync(PROBE_421, source);
+    expect(readFileSync(PROBE_421, 'utf8')).toBe(source);
+  });
+
+  // the probe's server refuses an ask without `blocking` with a literal of its own; the recording holds it to the host's
+  it('refused the recorded ask without blocking with the host’s own sentence', () => {
+    const fixture = fileURLToPath(new URL('../../../spikes/protocol-probe/fixtures/uxwave/uxwave-421-ask-refused.jsonl', import.meta.url));
+    const rows = readFileSync(fixture, 'utf8').trim().split('\n').map((line) => JSON.parse(line) as { direction: string; frame: { event?: string; results?: { is_error: boolean; content: unknown }[] } });
+    const [refusal] = rows.find((row) => row.direction === 'meta' && row.frame.event === 'answer_refused')!.frame.results!;
+    expect(refusal).toMatchObject({ is_error: true, content: TOOL_ERRORS.askBlockingRequired });
+  });
+});
+
 // U6d (Interfaces §B): records are read with the schema they were written under; only show_pane's differs
 describe('X9 records: parseRecordedToolArguments', () => {
   const target = '7d1c2b3a-4e5f-4a6b-8c7d-9e0f1a2b3c4d';
@@ -316,11 +371,20 @@ describe('X9 records: parseRecordedToolArguments', () => {
 
   it('is parseToolArguments for every other tool', () => {
     const calls: [Parameters<typeof parseToolArguments>[0], unknown][] = [
-      ['ask', { questions: [{ question: 'Q?', modality: 'choice', options: [{ label: 'Yes' }] }] }], ['ask', { questions: [] }],
       ['artifact_create', { kind: 'document', title: 'Notes', content: '# Notes' }], ['artifact_read', { id: 'dash' }], ['artifact_read', { id: 3 }],
       ['artifact_search', { query: 'launch plan' }], ['artifact_list', {}], ['artifact_screenshot', { id: 'dash', width: 10 }],
     ];
     for (const [name, args] of calls) expect(parseRecordedToolArguments(name, args), `${name} ${JSON.stringify(args)}`).toEqual(parseToolArguments(name, args));
+  });
+
+  // board ticket 420 (U1d, as ruled): records keep the schema they were written under, `blocking` optional
+  it('reads a recorded ask with no blocking, as every earlier build admitted it, and refuses what they refused', () => {
+    const question = { question: 'Q?', modality: 'choice', options: [{ label: 'Yes' }] };
+    expect(parseRecordedToolArguments('ask', { questions: [question] })).toEqual({ ok: true, data: { questions: [question] } });
+    expect(parseRecordedToolArguments('ask', { blocking: false, questions: [question] })).toEqual(parseToolArguments('ask', { blocking: false, questions: [question] }));
+    const refused = parseRecordedToolArguments('ask', { questions: [] });
+    expect(refused.ok === false && refused.error).toMatch(/^ask: invalid arguments: questions: /);
+    expect(parseRecordedToolArguments('ask', { blocking: 'yes', questions: [question] }).ok).toBe(false);
   });
 
   // UX wave U6b-1 (Decision 10): the window had not read its layout when its wait ran out; the agent may call again
@@ -564,7 +628,10 @@ describe('X9 artifact tools (E2)', () => {
     // U6d: P3-L M6b's artifactNotFound and artifactUnreadable left with the window's lookup of the retired pane
     expect(Object.keys(TOOL_ERRORS)).not.toContain('artifactNotFound');
     expect(Object.keys(TOOL_ERRORS)).not.toContain('artifactUnreadable');
-    expect(TOOL_ERRORS.unknownTool('echo')).toMatch(/^unknown tool "echo"; the maws server has ask, show_pane, artifact_create, artifact_list, artifact_screenshot, /); // E4c: thirteen; P1 A-54: seven; P3-A: twelve; board ticket 848: send_file left
+    expect(TOOL_ERRORS.unknownTool('echo', MAWS_TOOL_NAMES)).toMatch(/^unknown tool "echo"; the maws server has ask, show_pane, artifact_create, artifact_list, artifact_screenshot, /); // E4c: thirteen; P1 A-54: seven; P3-A: twelve; board ticket 848: send_file left
+    // board ticket 421: the refusal names the tools the session was listed, not the server's whole list
+    expect(TOOL_ERRORS.unknownTool('artifact_edit', ['ask', 'show_pane'])).toBe('unknown tool "artifact_edit"; the maws server has ask, show_pane');
+    expect(TOOL_ERRORS.unknownTool('ask', [])).toBe('unknown tool "ask"; the maws server has no tools in this session');
   });
 });
 // E2 end
@@ -601,7 +668,7 @@ describe('U12a: the browser answer’s page and note, and the refusal for an ope
 // U12a end
 // P3-D start: the `design_system` modality (docs/doperpowers/plans/2026-10-12-p3-d-design-systems.md D13; ledger X25)
 describe('P3-D: the design_system ask', () => {
-  const ok = (question: Record<string, unknown>) => AskInputSchema.safeParse({ questions: [{ question: 'Q?', ...question }] }).success;
+  const ok = (question: Record<string, unknown>) => AskInputSchema.safeParse({ blocking: true, questions: [{ question: 'Q?', ...question }] }).success;
 
   it('is a modality, and allowCreate is its own field', () => {
     expect(ASK_MODALITIES).toContain('design_system');
@@ -611,7 +678,7 @@ describe('P3-D: the design_system ask', () => {
     expect(ok({ modality: 'design_system', allowCreate: 'yes' })).toBe(false);
     expect(ok({ modality: 'choice', options: [{ label: 'a' }], allowCreate: true })).toBe(false);
     // validators never default: allowCreate stays absent when not sent
-    expect(AskInputSchema.parse({ questions: [{ question: 'Q?', modality: 'design_system' }] })).toEqual({ questions: [{ question: 'Q?', modality: 'design_system' }] });
+    expect(AskInputSchema.parse({ blocking: true, questions: [{ question: 'Q?', modality: 'design_system' }] })).toEqual({ blocking: true, questions: [{ question: 'Q?', modality: 'design_system' }] });
     const listed = mawsToolList().find((tool) => tool.name === 'ask')!.inputSchema as { properties: { questions: { items: { properties: { modality: { enum: string[] }; allowCreate: unknown } } } } };
     expect(listed.properties.questions.items.properties.modality.enum).toContain('design_system');
     expect(listed.properties.questions.items.properties.allowCreate).toEqual({ type: 'boolean' });

@@ -11,6 +11,7 @@ import { sessionIdFor, summary } from '../../../test/support/index-fixture'; // 
 import { T0 } from '../../../test/support/builders'; // P4-A2
 import { userScopeProfile, type LaunchProfile } from '@shared/engine/launch-profile'; // P4-A2
 import { sessionSettingsOf } from './session-settings';
+import { FULL_MAWS_TOOL_SET, type MawsToolSet } from '@shared/maws/tool-set'; // board ticket 421
 import { machineSettingsDefaults } from '@shared/settings/defaults'; // P5 O7 M9
 import { openSettingsFiles } from '../../../test/support/settings-files'; // P5 O3-A: the two files
 
@@ -49,6 +50,28 @@ describe('the session service reads the settings store', () => {
     const state = machineSettingsDefaults();
     expect(sessionSettingsOf(state, 'machine').gateway).toEqual({ defaultRoute: 'gateway', relayUnreachable: 'ask', route: 'machine' });
     expect(sessionSettingsOf(state).gateway).toEqual({ defaultRoute: 'gateway', relayUnreachable: 'ask' });
+  });
+
+  // Board ticket 421 (docs/doperpowers/plans/2026-11-23-tool-choice.md, D5 and Interfaces §G): the machine's default set of
+  // MAWS's tools seeds a new intent's set, read at each create, so a change reaches the next one and the one before keeps
+  // its own; at the full set the intent carries no key
+  it("the machine's default set of MAWS's tools reaches the next session.create, and the intent before keeps its own", async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'maws-c11-session-settings-'));
+    const store = openSettingsFiles(dir);
+    let mawsTools: MawsToolSet = FULL_MAWS_TOOL_SET;
+    const h = await new SessionHarness({ settings: () => sessionSettingsOf(store.settings, undefined, mawsTools) }).start();
+    cleanups.push(() => {
+      h.dispose();
+      rmSync(dir, { recursive: true, force: true });
+    });
+    h.trustDirectory(h.work);
+    const create = async () => (await h.service.create({ projectId: null, location: { kind: 'directory', path: h.work } })).intent;
+    const before = await create();
+    expect(before).not.toHaveProperty('mawsTools');
+    mawsTools = { artifacts: false, documents: false, dashboards: false, auxiliary: true, question: 'engine' };
+    expect((await create()).mawsTools).toEqual(mawsTools);
+    expect(await h.service.getIntent(before.appSessionId)).not.toHaveProperty('mawsTools');
+    expect(sessionSettingsOf(store.settings, undefined, mawsTools).mawsTools).toEqual(mawsTools);
   });
 
   it("a subagent-model change reaches the next launch's subagentModel", async () => {
@@ -99,6 +122,6 @@ describe('the session service reads the settings store', () => {
     expect(sessionSettingsOf(store.settings).engine.launchProfile).toEqual(userScopeProfile()); // P4-A2: the default
     const launchProfile: LaunchProfile = { plugins: { off: ['cua@cua'] }, hooks: 'none' };
     store.update({ gateway: { relayUnreachable: 'wait', offerDirect: false }, engine: { subagentModel: 'haiku', memoryBudgetMiB: 4096, mcpServers: [{ name: 'notion', type: 'http', url: 'https://mcp.notion.com/mcp' }], launchProfile } });
-    expect(sessionSettingsOf(store.settings)).toEqual({ gateway: { defaultRoute: 'gateway', relayUnreachable: 'wait' }, engine: { subagentModel: 'haiku', mcpServers: [{ name: 'notion', type: 'http', url: 'https://mcp.notion.com/mcp' }], launchProfile }, permissions: { autoFallback: 'acceptEdits' } });
+    expect(sessionSettingsOf(store.settings)).toEqual({ gateway: { defaultRoute: 'gateway', relayUnreachable: 'wait' }, engine: { subagentModel: 'haiku', mcpServers: [{ name: 'notion', type: 'http', url: 'https://mcp.notion.com/mcp' }], launchProfile }, permissions: { autoFallback: 'acceptEdits' }, mawsTools: FULL_MAWS_TOOL_SET });
   });
 });

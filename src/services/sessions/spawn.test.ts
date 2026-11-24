@@ -35,6 +35,8 @@ import { openSpineData, startSpine, type SpineData, type SpineRoot } from '../sp
 import { buildEnvironment } from '../../engine-host/launch';
 import { transcriptPathOf } from './context';
 import { ROUTE_UNSUPPORTED } from './machine-route'; // P5 O7 M9
+import { ENGINE_MAWS_TOOLS_CAPABILITY } from '@shared/host/socket-protocol'; // board ticket 421
+import type { MawsToolSet } from '@shared/maws/tool-set'; // board ticket 421
 
 const MACHINE = 'TestMachineRef00000000' as MachineRef;
 const BUILD = '0.0.0+spawn-test';
@@ -75,7 +77,9 @@ describe('session.spawn on the spine', () => {
   // launch with the session ready, and a first message as sent. `parked`: the host is not up until a command's need
   // wakes it (mawsd's parked engine host; #411), and `need` counts those wakes.
   // P5 O7 M9: `machineRoute`, the machine route as the default instead (its managed settings beneath a scratch root)
-  const composed = async ({ parked = false, seed, machineRoute = false, aboveCeiling }: { parked?: boolean; seed?: (index: Index) => void; machineRoute?: boolean; aboveCeiling?: (mode: string) => boolean } = {}) => {
+  // Board ticket 421: `mawsTools`, the machine's default set of MAWS's tools, written before the spawn, and `capabilities`,
+  // what the engine host's welcome lists (this fake lists nothing unless given)
+  const composed = async ({ parked = false, seed, machineRoute = false, aboveCeiling, mawsTools, capabilities }: { parked?: boolean; seed?: (index: Index) => void; machineRoute?: boolean; aboveCeiling?: (mode: string) => boolean; mawsTools?: MawsToolSet; capabilities?: string[] } = {}) => {
     const seeded = new Index(join(profile, 'index.sqlite'));
     seeded.projects.add(checkout);
     seed?.(seeded);
@@ -115,6 +119,7 @@ describe('session.spawn on the spine', () => {
       void host.ready();
     });
     if (parked) Object.assign(host, { need });
+    if (capabilities !== undefined) Object.assign(host, { peer: () => ({ build: BUILD, major: 3, minor: 0, capabilities }) }); // board ticket 421
     const bus = fakeBus();
     const spine = startSpine({
       profile, machine: MACHINE, data, hosts: host, bus, clientPort: noClientPort, interest: () => new Set(), browserSocket: () => null,
@@ -124,6 +129,7 @@ describe('session.spawn on the spine', () => {
     });
     held.push({ data, spine });
     if (machineRoute) await data.machineSettings.setDefaultRoute('machine');
+    if (mawsTools !== undefined) await data.machineSettings.setMawsTools(mawsTools); // board ticket 421
     if (!parked) await host.ready();
     return { bus, host, launched, proofs, sent, need };
   };
@@ -144,6 +150,35 @@ describe('session.spawn on the spine', () => {
     expect(await record(bus, appSessionId)).toMatchObject({ appId: appSessionId, directory: checkout });
     expect((await record(bus, appSessionId))?.launchedBy).toBeUndefined(); // a local client's own command claims nothing
     await expect.poll(() => sent).toEqual(['look at the tests']); // the brief, once the engine is ready
+    // board ticket 421 (A5): the machine's default set of MAWS's tools, through `create` as the composer's own; at the
+    // full set neither the spec nor the record carries one
+    expect(launched[0]).not.toHaveProperty('mawsTools');
+    expect(await record(bus, appSessionId)).not.toHaveProperty('mawsTools');
+  });
+
+  // Board ticket 421 (docs/doperpowers/plans/2026-11-23-tool-choice.md, A5 and D5): a session started by `session.spawn`
+  // takes the default of the machine it runs on, seeded into its intent by `create` as a composer's is: its launch spec
+  // and its record hold the set, on an engine host that lists engine.mawsTools; on one that does not it is served the
+  // full set, and its record says so by holding none (D8)
+  it('takes the machine’s default set of MAWS’s tools: on its launch spec and its record, or the full set through an older host', async () => {
+    trust(checkout);
+    const tools: MawsToolSet = { artifacts: false, documents: false, dashboards: false, auxiliary: true, question: 'engine' };
+    const { bus, launched } = await composed({ mawsTools: tools, capabilities: [ENGINE_MAWS_TOOLS_CAPABILITY] });
+    const spawned = await bus.invoke('session.spawn', { checkout, permission_mode: 'default' });
+    const appSessionId = (spawned as { value: { appSessionId: AppSessionId } }).value.appSessionId;
+    await expect.poll(() => launched.length).toBe(1);
+    expect(launched[0]).toMatchObject({ appSessionId, mawsTools: tools });
+    expect((await record(bus, appSessionId))?.mawsTools).toEqual(tools);
+  });
+
+  it('serves the full set through an engine host that does not list engine.mawsTools, whatever the machine’s default', async () => {
+    trust(checkout);
+    const { bus, launched } = await composed({ mawsTools: { artifacts: false, documents: false, dashboards: false, auxiliary: false, question: 'maws' } });
+    const spawned = await bus.invoke('session.spawn', { checkout, permission_mode: 'default' });
+    const appSessionId = (spawned as { value: { appSessionId: AppSessionId } }).value.appSessionId;
+    await expect.poll(() => launched.length).toBe(1);
+    expect(launched[0]).not.toHaveProperty('mawsTools');
+    expect(await record(bus, appSessionId)).not.toHaveProperty('mawsTools');
   });
 
   // UX wave U1c, the review round's R3 (b): a spawned session's display text, and so its title, holds no joiner; the

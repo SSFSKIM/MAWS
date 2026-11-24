@@ -15,9 +15,10 @@ import { PANE_ANSWER_MS } from '@shared/maws/panes';
 import { askSteerText } from '@shared/maws/ask';
 import {
   ArtifactCreateResultSchema, ArtifactDescribeTypeResultSchema, ArtifactReadResultSchema, // UX wave U10b (M10)
-  MAWS_TOOL_ANNOTATIONS, mawsToolList, SHOW_PANE_NOTES /* U12a */, TOOL_ERRORS, type AskAnswer,
+  MAWS_TOOL_ANNOTATIONS, MAWS_TOOL_NAMES /* board ticket 421 */, mawsToolList, SHOW_PANE_NOTES /* U12a */, TOOL_ERRORS, type AskAnswer,
 } from '@shared/maws/tools';
-import { MAWS_SERVER_INSTRUCTIONS, mawsServerInstructions } from '@shared/maws/instructions'; // P4-B4; U12a: the join
+import { MAWS_FILE_INSTRUCTIONS /* board ticket 421 */, MAWS_SERVER_INSTRUCTIONS, mawsServerInstructions } from '@shared/maws/instructions'; // P4-B4; U12a: the join
+import { FULL_MAWS_TOOL_SET, withArtifacts, type MawsToolSet } from '@shared/maws/tool-set'; // board ticket 421
 import type { StdinFrame } from '@shared/wire/frames';
 import type { JournalRow } from '@shared/wire/journal';
 import type { LaunchSpec } from '@shared/engine/launch-spec'; // U12a
@@ -110,10 +111,8 @@ describe('the maws server on an EngineSession (scripted)', () => {
       ['artifact_search', { ...MAWS_TOOL_ANNOTATIONS, title: 'Search artifacts' }], // P4-B4: after B's; P4-R7z took P4-R7's message out after it
       ['artifact_delete', { readOnlyHint: false, destructiveHint: true, openWorldHint: false, title: 'Delete artifact' }], // UX wave U10b (M4): last
     ]);
-    // P4-A3's tools an edit needs are listed always loaded
-    expect((list.result!.tools as { name: string; _meta?: unknown }[]).filter((t) => t._meta !== undefined)).toMatchObject(
-      ['artifact_describe_type', 'artifact_read', 'artifact_publish', 'artifact_edit'].map((name) => ({ name, _meta: { 'anthropic/alwaysLoad': true } })),
-    );
+    // board ticket 420: the ask alone is listed always loaded (P4-A3's tools an edit needs were, until then)
+    expect((list.result!.tools as { name: string; _meta?: unknown }[]).filter((t) => t._meta !== undefined)).toEqual([expect.objectContaining({ name: 'ask', _meta: { 'anthropic/alwaysLoad': true } })]);
     expect((await run.answered(run.mcp({ id: 2, method: 'resources/list' }))).error).toEqual({ code: -32601, message: 'Method not found: resources/list' });
     expect((await run.answered(run.mcp({ id: 0, method: 'initialize' }, 'maws2'))).error!.code).toBe(-32601);
     // handshake traffic is protocol, never an unknown frame or an event of its own
@@ -153,7 +152,7 @@ describe('the maws server on an EngineSession (scripted)', () => {
     };
 
     it('is given both paragraphs at initialize; a session without one, an empty one or other settings is given the first alone', async () => {
-      expect(await instructionsOf(BACKEND)).toBe(mawsServerInstructions({ inAppBrowser: true }));
+      expect(await instructionsOf(BACKEND)).toBe(mawsServerInstructions({ inAppBrowser: true, artifacts: true }));
       expect(await instructionsOf({})).toBe(MAWS_SERVER_INSTRUCTIONS);
       expect(await instructionsOf({ extraSettings: { env: { CUA_BROWSER_BACKENDS: '' } } })).toBe(MAWS_SERVER_INSTRUCTIONS);
       expect(await instructionsOf({ extraSettings: { env: { OTHER: 'x' }, permissions: { allow: [] } } })).toBe(MAWS_SERVER_INSTRUCTIONS);
@@ -272,6 +271,86 @@ describe('the maws server on an EngineSession (scripted)', () => {
   });
 });
 
+// Board ticket 421 (docs/doperpowers/plans/2026-11-23-tool-choice.md, M1; A1 and A2's host half): the launch spec's set
+// decides what the session's `maws` server lists and the instructions it answers at initialize; a call of a tool the set
+// leaves out is an unknown tool naming what the session has; the read MAWS attaches to a message that links an artifact
+// is made with Artifacts off too (D10). Each tool listed is described as in every session (D9).
+describe('a session’s set of MAWS’s tools (board ticket 421)', () => {
+  const INIT = { id: 0, method: 'initialize', params: { protocolVersion: '2025-11-25', capabilities: {}, clientInfo: { name: 'claude-code', version: '2.1.290' } } };
+  const set = (over: Partial<MawsToolSet>): MawsToolSet => ({ ...FULL_MAWS_TOOL_SET, ...over });
+  const ARTIFACTS_OFF = withArtifacts(FULL_MAWS_TOOL_SET, false);
+  const served = async (mawsTools: MawsToolSet | undefined) => {
+    const run = await mawsSession({}, {}, mawsTools === undefined ? {} : { mawsTools });
+    const instructions = ((await run.answered(run.mcp(INIT))).result as { instructions: string }).instructions;
+    const tools = (await run.answered(run.mcp({ id: 1, method: 'tools/list' }))).result!.tools as { name: string }[];
+    run.transport.exit(0);
+    await run.session.exited;
+    return { instructions, tools, names: tools.map((tool) => tool.name) };
+  };
+
+  it('a spec with no set, or the full set, lists every tool with the whole paragraph', async () => {
+    for (const mawsTools of [undefined, FULL_MAWS_TOOL_SET]) expect(await served(mawsTools)).toEqual({ instructions: MAWS_SERVER_INSTRUCTIONS, tools: mawsToolList(), names: [...MAWS_TOOL_NAMES] });
+  });
+
+  it('each switch off alone removes exactly its group, each tool left listed as in every session', async () => {
+    const cases: [MawsToolSet, string[]][] = [
+      [set({ documents: false }), ['artifact_edit', 'artifact_comments', 'artifact_reply', 'artifact_resolve']],
+      [set({ dashboards: false }), ['artifact_dataset']],
+      [set({ auxiliary: false }), ['show_pane']],
+      [set({ question: 'engine' }), ['ask']],
+    ];
+    for (const [mawsTools, gone] of cases) {
+      const { instructions, tools, names } = await served(mawsTools);
+      expect(names, JSON.stringify(mawsTools)).toEqual(MAWS_TOOL_NAMES.filter((name) => !gone.includes(name)));
+      expect(tools).toEqual(mawsToolList().filter((tool) => names.includes(tool.name)));
+      expect(instructions).toBe(MAWS_SERVER_INSTRUCTIONS);
+    }
+  });
+
+  it('Artifacts off lists no artifact tool and gives no sentence about artifacts; the file sentences stay', async () => {
+    const { instructions, names } = await served(ARTIFACTS_OFF);
+    expect(names).toEqual(['ask', 'show_pane']);
+    expect(instructions).toBe(MAWS_FILE_INSTRUCTIONS);
+    expect(instructions).not.toMatch(/artifact/i);
+  });
+
+  it('Dashboards on with Documents off binds data and edits no blocks; everything off lists nothing', async () => {
+    const bindOnly = await served(set({ documents: false }));
+    expect(bindOnly.names).toContain('artifact_dataset');
+    expect(bindOnly.names).not.toContain('artifact_edit');
+    const none = await served({ ...ARTIFACTS_OFF, auxiliary: false, question: 'engine' });
+    expect(none).toEqual({ instructions: MAWS_FILE_INSTRUCTIONS, tools: [], names: [] });
+  });
+
+  it('a call of a tool the set leaves out is an unknown tool naming the tools the session has', async () => {
+    const run = await mawsSession({}, {}, { mawsTools: { ...ARTIFACTS_OFF, question: 'engine' } });
+    for (const name of ['artifact_create', 'ask']) {
+      const refused = await run.answered(run.call(name, name === 'ask' ? { questions: [{ question: 'Which?', modality: 'text' }] } : { title: 'Tide table', content: '<p>x</p>' }));
+      expect(refused.result, name).toEqual({ content: [{ type: 'text', text: TOOL_ERRORS.unknownTool(name, ['show_pane']) }], isError: true });
+    }
+    expect(TOOL_ERRORS.unknownTool('ask', ['show_pane'])).toBe('unknown tool "ask"; the maws server has show_pane');
+    run.transport.exit(0);
+    await run.session.exited;
+  });
+
+  it('a message that links an artifact still carries its read with Artifacts off (D10)', async () => {
+    const documents = openDocuments(userData, () => {})!;
+    try {
+      const page = await documents.store.create({ kind: 'html', title: 'Tide table', content: { bytes: Buffer.from('<p>Low tide at 06:10.</p>'), name: 'index.html' } }, { kind: 'human' });
+      const run = await mawsSession({}, { artifacts: () => documents.store }, { mawsTools: ARTIFACTS_OFF });
+      await run.session.send(`Check [the tide table](maws-artifact:${page.id}).`);
+      const users = () => run.transport.writes.filter((f): f is Extract<StdinFrame, { type: 'user' }> => f.type === 'user');
+      await until(() => users().length === 1, 'the message with its linked read');
+      const blocks = users()[0]!.message.content as unknown as { text: string }[];
+      expect(linkedReadOf(blocks[1]!.text)).toMatchObject({ artifactId: page.id, title: 'Tide table' });
+      run.transport.exit(0);
+      await run.session.exited;
+    } finally {
+      documents.close();
+    }
+  });
+});
+
 // E1 M2: the ask lifecycle (residue 12's claim, write, commit; G6's table in host memory)
 describe('ask on an EngineSession (scripted)', () => {
   const QUESTIONS = [
@@ -290,7 +369,7 @@ describe('ask on an EngineSession (scripted)', () => {
 
   it('a blocking ask holds its call until answered, then answers the AskResult (a skip has no value) and yields opened, answered', async () => {
     const run = await mawsSession();
-    const id = run.call('ask', { title: 'Setup', questions: QUESTIONS }, 'toolu_ask');
+    const id = run.call('ask', { blocking: true, title: 'Setup', questions: QUESTIONS }, 'toolu_ask');
     await until(() => run.session.asks().length === 1, 'the pending ask');
     expect(run.session.asks()).toEqual([{ askId: 'toolu_ask', toolUseId: 'toolu_ask', requestId: id, blocking: true, title: 'Setup', context: null, questions: HELD, openedAt: expect.any(String) }]);
     expect(run.session.status().pendingRequests).toBe(1); // the call in flight, counted once
@@ -377,7 +456,7 @@ describe('ask on an EngineSession (scripted)', () => {
 
   it('refuses answers that do not fit the questions before any claim, writing nothing', async () => {
     const run = await mawsSession();
-    run.call('ask', { questions: QUESTIONS }, 'toolu_bad');
+    run.call('ask', { blocking: true, questions: QUESTIONS }, 'toolu_bad');
     await until(() => run.session.asks().length === 1, 'the pending ask');
     await expect(run.session.answerAsk('toolu_bad', ANSWERS.slice(1))).rejects.toThrow(AskAnswerMismatch);
     await expect(run.session.answerAsk('toolu_bad', ANSWERS.slice(1))).rejects.toThrow('ask toolu_bad: no answer for question q1');
@@ -392,7 +471,7 @@ describe('ask on an EngineSession (scripted)', () => {
     const held = new Promise<void>((resolve) => (release = resolve));
     let holding: RequestId | null = null;
     const run = await mawsSession({ holdWrite: (frame) => (holding !== null && isAnswerTo(holding)(frame) ? held : null) });
-    holding = run.call('ask', { questions: QUESTIONS }, 'toolu_twice');
+    holding = run.call('ask', { blocking: true, questions: QUESTIONS }, 'toolu_twice');
     await until(() => run.session.asks().length === 1, 'the pending ask');
     const first = run.session.answerAsk('toolu_twice', ANSWERS);
     expect(await run.session.answerAsk('toolu_twice', ANSWERS)).toBe('not_pending');
@@ -448,7 +527,7 @@ describe('ask on an EngineSession (scripted)', () => {
     let holding: RequestId | null = null;
     let reached = false;
     const run = await mawsSession({ holdWrite: (frame) => (holding !== null && isAnswerTo(holding)(frame) ? ((reached = true), new Promise<void>(() => {})) : null) });
-    holding = run.call('ask', { questions: QUESTIONS }, 'toolu_exit');
+    holding = run.call('ask', { blocking: true, questions: QUESTIONS }, 'toolu_exit');
     run.call('ask', { blocking: false, questions: QUESTIONS }, 'toolu_later');
     await until(() => run.session.asks().length === 2, 'both asks');
     const answering = run.session.answerAsk('toolu_exit', ANSWERS);
@@ -472,7 +551,7 @@ describe('ask on an EngineSession (scripted)', () => {
 
   it('an ask the engine withdrew is cancelled (withdrawn) and answered with nothing', async () => {
     const run = await mawsSession();
-    const id = run.call('ask', { questions: QUESTIONS }, 'toolu_gone');
+    const id = run.call('ask', { blocking: true, questions: QUESTIONS }, 'toolu_gone');
     await until(() => run.session.asks().length === 1, 'the pending ask');
     run.transport.push({ type: 'control_cancel_request', request_id: id });
     await until(() => run.session.asks().length === 0, 'the withdrawal');
@@ -488,7 +567,7 @@ describe('ask on an EngineSession (scripted)', () => {
 
   it('a refused ask call answers an error, holds nothing and yields no maws event; without _meta the askId is the request id', async () => {
     const run = await mawsSession();
-    const refused = await run.answered(run.call('ask', { questions: [{ question: 'Q?', modality: 'choice' }] }));
+    const refused = await run.answered(run.call('ask', { blocking: true, questions: [{ question: 'Q?', modality: 'choice' }] }));
     expect(refused.result!.isError).toBe(true);
     expect(refused.result!.content![0]!.text).toMatch(/^ask: invalid arguments: /);
     expect(run.session.asks()).toEqual([]);
@@ -496,6 +575,31 @@ describe('ask on an EngineSession (scripted)', () => {
     const bare = run.mcp({ id: 99, method: 'tools/call', params: { name: 'ask', arguments: { blocking: false, questions: [QUESTIONS[1]] } } });
     expect(JSON.parse((await run.answered(bare)).result!.content![0]!.text)).toEqual({ status: 'asked', askId: bare });
     expect(run.maws()).toMatchObject([{ kind: 'maws.ask.opened', askId: bare, toolUseId: null }]);
+    run.transport.exit(0);
+    await run.session.exited;
+    expect(run.rebuilt()).toEqual(run.events);
+  });
+});
+
+// Board ticket 420 (the tool-choice plan's A10): a live call without `blocking` is refused with the one sentence that
+// names it; the normaliser, reading the call as records are read, opens its ask and the refusal closes it, so the row reads
+// as the call's error; asked again with `blocking: false`, the call returns at once and the ask waits for its answer
+describe('ask with blocking required on an EngineSession (scripted, board ticket 420)', () => {
+  const QUESTIONS = [{ question: 'Which colour?', modality: 'choice', options: [{ label: 'Red' }, { label: 'Blue' }] }];
+
+  it('a call without blocking is refused with the sentence and holds nothing; asked again with false it is acknowledged and waits', async () => {
+    const run = await mawsSession();
+    const refused = await run.answered(run.call('ask', { questions: QUESTIONS }, 'toolu_bare'));
+    expect(refused.result).toEqual({ content: [{ type: 'text', text: TOOL_ERRORS.askBlockingRequired }], isError: true });
+    expect(run.session.asks()).toEqual([]);
+    expect(run.session.brokerItems()).toEqual([]);
+    const again = await run.answered(run.call('ask', { blocking: false, questions: QUESTIONS }, 'toolu_again'));
+    expect(JSON.parse(again.result!.content![0]!.text)).toEqual({ status: 'asked', askId: 'toolu_again' });
+    expect(run.session.asks()).toMatchObject([{ askId: 'toolu_again', blocking: false }]);
+    expect(run.maws().map((e) => [e.kind, (e as { askId?: string }).askId, (e as { blocking?: boolean }).blocking])).toEqual([
+      ['maws.ask.opened', 'toolu_bare', true], // as a record without it reads; its refusal closes it
+      ['maws.ask.opened', 'toolu_again', false],
+    ]);
     run.transport.exit(0);
     await run.session.exited;
     expect(run.rebuilt()).toEqual(run.events);
@@ -525,7 +629,7 @@ describe('a blocking ask as a question attention item (scripted)', () => {
 
   it('is pending while the ask waits, with its summary and request, and retires once answered', async () => {
     const run = await attended();
-    const id = run.call('ask', { title: 'Setup', questions: QUESTIONS }, 'toolu_att');
+    const id = run.call('ask', { blocking: true, title: 'Setup', questions: QUESTIONS }, 'toolu_att');
     await until(() => run.session.asks().length === 1, 'the pending ask');
     const { appSessionId } = run.session.status();
     const openedAt = run.session.asks()[0]!.openedAt;
@@ -573,8 +677,8 @@ describe('a blocking ask as a question attention item (scripted)', () => {
 
   it('summarises an untitled ask by its first question, and retires when the engine withdraws it or the process ends', async () => {
     const run = await attended();
-    const gone = run.call('ask', { questions: QUESTIONS }, 'toolu_gone');
-    run.call('ask', { questions: QUESTIONS }, 'toolu_exit');
+    const gone = run.call('ask', { blocking: true, questions: QUESTIONS }, 'toolu_gone');
+    run.call('ask', { blocking: true, questions: QUESTIONS }, 'toolu_exit');
     await until(() => run.session.asks().length === 2, 'both asks');
     expect(run.last().map((i) => [i.request.toolUseId, i.summary, i.state])).toEqual([['toolu_gone', 'Which colour?', 'pending'], ['toolu_exit', 'Which colour?', 'pending']]);
     run.transport.push({ type: 'control_cancel_request', request_id: gone });
@@ -592,7 +696,7 @@ describe('a blocking ask as a question attention item (scripted)', () => {
   // a withdrawn control request withdraws it, so nobody can answer it and no one sees an answer the model never got.
   it('a blocking ask abandoned by notifications/cancelled is cancelled (withdrawn): item gone, nothing written, rebuild equal', async () => {
     const run = await attended();
-    const id = run.mcp({ id: 7, method: 'tools/call', params: { name: 'ask', arguments: { title: 'Setup', questions: QUESTIONS }, _meta: { 'claudecode/toolUseId': 'toolu_int', progressToken: 7 } } });
+    const id = run.mcp({ id: 7, method: 'tools/call', params: { name: 'ask', arguments: { blocking: true, title: 'Setup', questions: QUESTIONS }, _meta: { 'claudecode/toolUseId': 'toolu_int', progressToken: 7 } } });
     await until(() => run.session.asks().length === 1, 'the pending ask');
     expect(run.last().map((i) => [i.kind, i.request.toolUseId])).toEqual([['question', 'toolu_int']]);
     expect(run.session.status().pendingRequests).toBe(1);
@@ -625,7 +729,7 @@ describe('a blocking ask as a question attention item (scripted)', () => {
     run.transport.push({ type: 'control_request', request_id: 'perm-1', request: { subtype: 'can_use_tool', tool_name: 'mcp__maws__ask', input: { questions: QUESTIONS }, tool_use_id: 'toolu_lost' } });
     await until(() => run.last().length === 1, 'the permission');
     expect(await run.session.answer('perm-1' as RequestId, { kind: 'permission', decision: 'allow', scope: 'once' })).toBe('delivered');
-    run.call('ask', { questions: QUESTIONS }, 'toolu_lost');
+    run.call('ask', { blocking: true, questions: QUESTIONS }, 'toolu_lost');
     run.call('ask', { blocking: false, questions: QUESTIONS }, 'toolu_async');
     await until(() => run.session.asks().length === 2, 'both asks');
     expect(run.last().map((i) => [i.kind, i.state])).toEqual([['permission', 'confirmed'], ['question', 'pending'], ['async_input', 'pending']]); // P2-C2: the async ask's item
@@ -1077,7 +1181,7 @@ describe('an app replay of pass3/p1-sdk-mcp-roundtrip (E0a Q1)', () => {
     expect(answerTo(5)).toEqual({ jsonrpc: '2.0', id: 0, result: { protocolVersion: '2025-11-25', capabilities: { tools: { listChanged: true } }, serverInfo: { name: 'maws', version: 'unknown' }, instructions: MAWS_SERVER_INSTRUCTIONS } });
     expect(answerTo(10)).toEqual({ jsonrpc: '2.0', result: {}, id: 0 });
     expect(answerTo(13)).toEqual({ jsonrpc: '2.0', id: 1, result: { tools: mawsToolList() } });
-    expect(answerTo(71)).toEqual({ jsonrpc: '2.0', id: 2, result: { content: [{ type: 'text', text: TOOL_ERRORS.unknownTool('echo_file') }], isError: true } });
+    expect(answerTo(71)).toEqual({ jsonrpc: '2.0', id: 2, result: { content: [{ type: 'text', text: TOOL_ERRORS.unknownTool('echo_file', MAWS_TOOL_NAMES) }], isError: true } });
     // the engine's init, as recorded: its own tool and the sdk server; no mcp_message frame is unknown any more
     const init = events.find((e): e is Extract<SessionEvent, { kind: 'session.init' }> => e.kind === 'session.init')!;
     expect(init.tools).toContain('mcp__maws__echo_file');
@@ -1097,7 +1201,7 @@ describe('the removed browser tools on an EngineSession (scripted)', () => {
     const listed = await run.answered(run.mcp({ id: 1, method: 'tools/list' }));
     expect((listed.result!.tools as { name: string }[]).filter((tool) => tool.name.startsWith('browser_'))).toEqual([]);
     const act = await run.answered(run.call('browser_act', { tabId: 'b_0123456789ab', action: 'click', target: 'e12' }, 'toolu_click'));
-    expect(act.result).toEqual({ content: [{ type: 'text', text: TOOL_ERRORS.unknownTool('browser_act') }], isError: true });
+    expect(act.result).toEqual({ content: [{ type: 'text', text: TOOL_ERRORS.unknownTool('browser_act', MAWS_TOOL_NAMES) }], isError: true });
     expect(run.shows).toEqual([]);
     expect(run.captures).toEqual([]);
     run.transport.exit(0);

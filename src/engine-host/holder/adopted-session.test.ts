@@ -394,7 +394,7 @@ describe('an adopted session, fix wave 1', () => {
     await a.session.start();
     a.caughtUp();
     await until(() => a.transport.requestsOf('initialize').length === 1, 'the re-initialize');
-    a.transport.push(call('e-new', 3, 'ask', { questions: [question] }, 'toolu_new'), 1);
+    a.transport.push(call('e-new', 3, 'ask', { blocking: true, questions: [question] }, 'toolu_new'), 1);
     a.transport.push({ type: 'control_request', request_id: 'e-hook', request: { subtype: 'hook_callback', callback_id: 'maws_Stop_1', input: { hook_event_name: 'Stop', session_crons: [], background_tasks: [] } } }, 2);
     a.transport.push(mcp('e-list', { id: 4, method: 'tools/list' }), 3);
     await until(() => a.transport.journaledSeqs.length === 3, 'the frames journaled');
@@ -642,9 +642,9 @@ describe('an adopted session, fix wave 1', () => {
       await a.session.start();
       a.caughtUp();
       await until(() => a.transport.requestsOf('initialize').length === 1, 'the re-initialize');
-      a.transport.push(call('e-ask', 3, 'ask', { questions: [question] }, 'toolu_ask'), 1);
+      a.transport.push(call('e-ask', 3, 'ask', { blocking: true, questions: [question] }, 'toolu_ask'), 1);
       a.transport.push(call('e-publish', 4, 'artifact_publish', { artifactId: 'x' }, 'toolu_publish'), 2);
-      a.transport.push(call('e-keep', 5, 'ask', { questions: [question] }, 'toolu_keep'), 3);
+      a.transport.push(call('e-keep', 5, 'ask', { blocking: true, questions: [question] }, 'toolu_keep'), 3);
       a.transport.push(mcp('e-cancel-ask', { method: 'notifications/cancelled', params: { requestId: 3 } }), 4);
       a.transport.push({ type: 'control_cancel_request', request_id: 'e-publish' }, 5);
       a.transport.push(mcp('e-cancel-other', { method: 'notifications/cancelled', params: { requestId: '5' } }), 6); // "5" is not 5

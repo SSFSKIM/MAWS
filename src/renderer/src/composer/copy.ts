@@ -12,6 +12,15 @@ export const PLUS_MENU = {
   manage: 'Manage…',
 };
 
+// Board ticket 421 (docs/doperpowers/plans/2026-11-23-tool-choice.md, §H's table): the "+" menu's Tools submenu. The group
+// words, their facts and "Needs Artifacts" are Settings › Sessions' (`MAWS_TOOLS`, settings-tab/copy.ts), shared; the
+// question tool's facts here are the submenu's own, each a row note.
+export const TOOLS_MENU = {
+  label: 'Tools',
+  question: 'Question',
+  questionFacts: { engine: "Claude Code's own question", maws: "MAWS's question" },
+} as const;
+
 // The location popover's copy glyph, its name and its tooltip (C24)
 export const LOCATION_COPY = { copy: 'Copy', copied: 'Copied' };
 

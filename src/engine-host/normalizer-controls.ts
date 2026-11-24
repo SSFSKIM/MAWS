@@ -228,8 +228,8 @@ export function mapOutboundResponse(inbound: InboundTable, frame: ControlRespons
 // refused and yields nothing), `maws.pane.shown` for a `show_pane` (what opened, or the error text
 // of a pane this build lacks, a window that never answered or, since U6d, the retired `artifact` pane),
 // `maws.ask.answered` for a blocking ask answered with its AskResult (an async ask's `asked` acknowledgement yields
-// nothing: its answers come with the `maws_ask_answered` meta row). Anything else (another tool, a result that parses as
-// neither) is visible as the call's `tool.result` alone.
+// nothing: its answers come with the `maws_ask_answered` meta row; an ask's error answer yields nothing and closes it).
+// Anything else (another tool, a result that parses as neither) is visible as the call's `tool.result` alone.
 function mapMawsAnswer(requestId: RequestId, call: McpCall, rpc: unknown, out: EventSink, attribution: Attribution, openAsks: OpenAsks): void {
   if (!call.admitted) return;
   const result = (rpc as { result?: { content?: unknown; isError?: unknown } } | null | undefined)?.result;
@@ -277,6 +277,12 @@ function mapMawsAnswer(requestId: RequestId, call: McpCall, rpc: unknown, out: E
   }
   // E4c end
   if (call.tool === 'ask' && call.askId !== null && openAsks.has(call.askId)) {
+    // board ticket 420: an ask the host refused (no `blocking`, or one quoting a grant) leaves the open set, so nothing
+    // later is matched to it; its row reads as the call's error
+    if (isError) {
+      openAsks.delete(call.askId);
+      return;
+    }
     const parsed = AskResultSchema.safeParse(json);
     if (!parsed.success || parsed.data.status !== 'answered') return;
     openAsks.delete(call.askId);

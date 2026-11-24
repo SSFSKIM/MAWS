@@ -6,7 +6,9 @@ import { mkdirSync, mkdtempSync, realpathSync, renameSync, rmSync, writeFileSync
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { expect, test } from '@playwright/test';
-import { CONTRACT_HEADER, NATIVE_TO_HUMAN_ENV, TO_HUMAN_MIRROR_VERSION, TO_HUMAN_SUPPLEMENT } from '../src/shared/owner/contract';
+import { CONTRACT_HEADER, NATIVE_TO_HUMAN_ENV, TO_HUMAN_MIRROR_VERSION, TO_HUMAN_SUPPLEMENT, TO_HUMAN_SUPPLEMENT_ENGINE } from '../src/shared/owner/contract';
+import { FULL_MAWS_TOOL_SET } from '../src/shared/maws/tool-set'; // board ticket 421
+import { fixtureIdentity } from '../test/support/fixture-session-id'; // board ticket 421: the recorded first prompt
 import { addressed } from './support/address';
 import { invoke, value } from './support/c7-replay';
 import { traceForeground } from './support/foreground-trace';
@@ -256,6 +258,46 @@ test('a style declaring the plugin’s message tool (6): the supplement once and
   }
 });
 // P2-C2 end
+
+// Board ticket 421 (docs/doperpowers/plans/2026-11-23-tool-choice.md, A2's launch half, A11 and D12): beside the case above,
+// which holds MAWS's ask flags, a new chat whose question tool is the engine's own (Question "Default") launches with
+// neither flag and, under the plugin's style, appends supplement 4 in place of 3.
+test('Question Default: a new chat under the plugin’s style launches with neither ask flag, supplement 4 appended in place of 3', async () => {
+  test.setTimeout(120_000);
+  const FIXTURE = 'spikes/protocol-probe/fixtures/pass2/auto-routed.jsonl'; // a new session's first turn, as sessions.spec.ts starts one
+  const root = realpathSync(mkdtempSync(join(tmpdir(), 'maws-421-engine-ask-')));
+  const repo = join(root, 'repo');
+  const config = join(root, 'claude-config');
+  mkdirSync(repo);
+  mkdirSync(config, { recursive: true });
+  writeFileSync(join(config, '.claude.json'), `${JSON.stringify({ projects: { [repo]: { hasTrustDialogAccepted: true } } }, null, 2)}\n`);
+  writeFileSync(join(config, 'settings.json'), `${JSON.stringify({ permissions: { defaultMode: 'default' } })}\n`); // the replay records no mode change
+  installToHumanPlugin(config);
+  const maws = await launchMaws({ env: { MAWS_HARNESS: '0', MAWS_ENGINE_REPLAY: '1', MAWS_E2E_REPLAY_FIXTURES: FIXTURE, CLAUDE_CONFIG_DIR: config } });
+  try {
+    const { page } = maws;
+    value(await invoke(page, 'settings.set', { gateway: { defaultRoute: 'direct' } })); // no relay in the run
+    const id = value(await invoke(page, 'session.create', { projectId: null, location: { kind: 'directory', path: repo } })).appSessionId;
+    const tools = { ...FULL_MAWS_TOOL_SET, question: 'engine' as const };
+    value(await invoke(page, 'session.intent.patch', { appSessionId: id, patch: { gateway: 'direct', mawsTools: tools } }));
+    const prompt = fixtureIdentity(FIXTURE).firstPrompt!;
+    expect(value(await invoke(page, 'session.start', { appSessionId: id, message: { content: prompt.content as string, display: prompt.display }, options: {} }))).toMatchObject({ status: 'starting' });
+    const spawns = () => sessionJournal(maws.userData, id).filter((r) => r.direction === 'meta' && (r.frame as { event?: string }).event === 'spawn');
+    await expect.poll(() => spawns().length, { timeout: 20_000 }).toBe(1);
+    const spawn = spawns()[0]!.frame as { args: string[]; mawsTools?: unknown };
+    const { args } = spawn;
+    expect(args, 'no --disallowedTools AskUserQuestion: the native ask stays').not.toContain('--disallowedTools');
+    expect(args, 'no --allowedTools mcp__maws__ask: no MAWS ask is listed').not.toContain('--allowedTools');
+    expect(args.flatMap((arg, k) => (arg === '--append-system-prompt' ? [args[k + 1]] : []))).toEqual([TO_HUMAN_SUPPLEMENT_ENGINE]);
+    expect(spawn.mawsTools, 'the spawn row records the set').toEqual(tools);
+    const settings = JSON.parse(args[args.indexOf('--settings') + 1]!) as { env?: Record<string, string> };
+    expect(settings.env?.[NATIVE_TO_HUMAN_ENV], 'the lane advertised as for MAWS’s ask').toBe(String(TO_HUMAN_MIRROR_VERSION));
+    expect(maws.consoleErrors()).toEqual([]);
+  } finally {
+    await maws.cleanup();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
 
 // UX wave U2b (M6; docs/doperpowers/plans/2026-11-15-ux-wave-U2b-to-human-view.md, §M): where MAWS draws the view (the
 // launch carries 8; since board ticket 850 every launch does, a declaring installation's included), a record line

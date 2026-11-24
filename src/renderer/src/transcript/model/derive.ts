@@ -9,7 +9,7 @@ import type { SessionEvent } from '@shared/graph/events';
 import type { AgentId, AppSessionId, MessageUuid, RequestId, TaskId, ToolUseId } from '@shared/graph/ids';
 import { askAnswersFromSteer /* board ticket 711 */, withQuestionIds, type AskCancelReason } from '@shared/maws/ask'; // E1
 import { answerEnvelopeOf } from '@shared/engine/persons-message'; // ticket 704: a steer read as the split reads it
-import { AskInputSchema, AskResultSchema, type AskAnswer, type AskInput } from '@shared/maws/tools'; // E1
+import { AskRecordedInputSchema, AskResultSchema, type AskAnswer, type AskRecordedInput } from '@shared/maws/tools'; // E1; board ticket 420: read as recorded
 import { SendFileInputSchema, SendFileResultSchema, type DeliveredFile, type SendFileInput } from '@shared/maws/send-file'; // board ticket 848: retired, its records drawn as before
 import { ArtifactDeleteResultSchema, ArtifactDeliverySchema } from '@shared/maws/tools'; // E2; P3-A; UX wave U10b: the delete's answer
 import { MCP_TOOL, presentationOf, tableRowOf } from './classify';
@@ -338,7 +338,7 @@ interface Pending { kind: 'question' | 'plan'; use: Event<'tool.use'>; answers: 
 // has neither events nor meta rows, still has the call, its result and the steer (residue 13).
 interface AskRecord {
   use: Event<'tool.use'>;
-  input: AskInput | null; // null: arguments the host refused (its result is the error)
+  input: AskRecordedInput | null; // null: arguments the host refused (its result is the error); `blocking` absent: it waited
   opened: Event<'maws.ask.opened'> | null;
   askId: string | null; // the result's, when it named one
   answers: AskAnswer[] | null; // from `maws.ask.answered`, else an answered result
@@ -653,7 +653,7 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): TurnDerivat
           sentCalls.set(rowId.agentMessage(event.id), event); // UX wave U2: the call its caption step reads
           items.push({ kind: 'later', row: () => sendMessageRow(event, results.get(event.toolUseId), turn.id, known(), agentOf, context) }); // E7: `to` classified against what the transcript knows; the result refines it
         } else if (presentation === 'ask') { // E1
-          const input = AskInputSchema.safeParse(event.input);
+          const input = AskRecordedInputSchema.safeParse(event.input);
           asks.set(event.toolUseId, { use: event, input: input.success ? input.data : null, opened: null, askId: null, answers: null, asked: false, cancelled: null, stopped: false, resulted: false, error: null });
           items.push({ kind: 'ask', toolUseId: event.toolUseId });
         } else if (presentation === 'delivery') { // E1

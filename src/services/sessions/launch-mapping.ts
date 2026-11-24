@@ -1,6 +1,8 @@
 // Intent or record → LaunchSpec (C10 execution document, Interfaces "Trust" (attestation mapping, trust bootstrap) and
 // "Session service" (Resume)): the exact X6 spec a session, its resume or its trust bootstrap launches with. C10 never
 // spawns the engine; everything here ends in C3's `session.launch`.
+// Board ticket 421 (docs/doperpowers/plans/2026-11-23-tool-choice.md, Interfaces §E): a spec carries the set of MAWS's
+// tools it is given (the set the attempt serves, served-set.ts), and none at the full set.
 import type { AppSessionId, SessionId } from '@shared/graph/ids';
 import type { PermissionMode } from '@shared/graph/enums';
 import type { LaunchedBy, SessionRecord } from '@shared/graph/session';
@@ -10,8 +12,9 @@ import type { SetupIntent, TrustDecision } from '@shared/sessions/intent';
 import type { TrustState } from '@shared/sessions/trust';
 import { appMcpConfig, type AppMcpServer } from '@shared/engine/app-mcp-servers'; // P4-R8
 import { profileSettings, userScopeProfile, type LaunchProfile } from '@shared/engine/launch-profile'; // P4-A2
-import { NATIVE_TO_HUMAN_ENV, TO_HUMAN_SUPPLEMENT } from '@shared/owner/contract'; // P2-C (2026-10-09)
+import { NATIVE_TO_HUMAN_ENV, TO_HUMAN_SUPPLEMENT, TO_HUMAN_SUPPLEMENT_ENGINE } from '@shared/owner/contract'; // P2-C (2026-10-09); board ticket 421: supplement 4
 import type { Advertisement } from '@shared/owner/draws'; // UX wave U2b
+import { FULL_MAWS_TOOL_SET, isFullSet, type MawsToolSet } from '@shared/maws/tool-set'; // board ticket 421
 import { FOLD_SUMMARIES_ENV, FOLD_SUMMARIES_OFF } from '@shared/owner/folds'; // UX wave U2b
 
 export type Attestation = { accepted: true; directory: string };
@@ -26,11 +29,15 @@ export interface C10Settings {
   // P4-R8: the app's MCP servers (settings v16); P4-A2: the launch profile every launch runs under (settings v17)
   engine: { subagentModel: string | null; mcpServers: readonly AppMcpServer[]; launchProfile: LaunchProfile };
   permissions: { autoFallback: PermissionMode }; // W3: settings v6, the mode a refused auto falls back to
+  // Board ticket 421 (docs/doperpowers/plans/2026-11-23-tool-choice.md, Interfaces §E, D5): the machine's default set of
+  // MAWS's tools, which seeds a new intent's
+  mawsTools: MawsToolSet;
 }
 export const C10_SETTING_DEFAULTS: C10Settings = Object.freeze({
   gateway: Object.freeze({ defaultRoute: 'gateway', relayUnreachable: 'ask' }),
   engine: Object.freeze({ subagentModel: null, mcpServers: Object.freeze([]), launchProfile: Object.freeze(userScopeProfile()) }),
   permissions: Object.freeze({ autoFallback: 'acceptEdits' }),
+  mawsTools: FULL_MAWS_TOOL_SET,
 }) as C10Settings;
 
 // W3 (charter D-18 and §5.1 as amended 2026-10-01): a session's permission mode when nothing chose one, the user's own
@@ -45,6 +52,10 @@ export function readSettings(): C10Settings {
 // of a session never verified), and the default route itself, `route` read before the legacy field
 export const routeOfSettings = (settings: C10Settings): { route?: Route } => (settings.gateway.route === undefined ? {} : { route: settings.gateway.route });
 export const defaultRouteOf = (settings: C10Settings): Route => settings.gateway.route ?? settings.gateway.defaultRoute;
+
+// Board ticket 421 (D3): a set as a carrier's `mawsTools` (an intent's, a record's, a spec's), only when it is not the full
+// set, so a default session's files and wire are what they were before the choice existed
+export const mawsToolsOf = (set: MawsToolSet): { mawsTools?: MawsToolSet } => (isFullSet(set) ? {} : { mawsTools: set });
 
 // ---- the base mapping ---------------------------------------------------------------------------------------------
 export interface LaunchInput {
@@ -70,6 +81,9 @@ export interface LaunchInput {
   // P5 O12 M11 (Interfaces §H): the launched session's own spawner, with the file its proof is written to; null for every
   // session a remote member did not spawn, a fork and the trust bootstrap
   launchedBy?: LaunchedBySpec | null;
+  // Board ticket 421 (Interfaces §E, D8): the set this attempt serves, resolved once before the launch (served-set.ts);
+  // absent, the full set. The spec carries it only when it is not the full set (D3)
+  mawsTools?: MawsToolSet;
 }
 
 export function toLaunchSpec(input: LaunchInput, settings: C10Settings = readSettings()): LaunchSpec {
@@ -93,6 +107,7 @@ export function toLaunchSpec(input: LaunchInput, settings: C10Settings = readSet
     replay: input.replay,
     inheritGrantsFrom: input.inheritGrantsFrom,
     ...(input.launchedBy ? { launchedBy: input.launchedBy } : {}), // P5 O12 M11
+    ...mawsToolsOf(input.mawsTools ?? FULL_MAWS_TOOL_SET), // board ticket 421
   };
 }
 
@@ -134,8 +149,9 @@ function cursorLabelOf(title: SessionRecord['title']): string | null {
 // (docs/doperpowers/plans/2026-11-15-ux-wave-U2b-to-human-view.md, §A and §M): the variable carries the decided
 // advertisement, 9 where the mod draws the view and 8 where MAWS does, and TO_HUMAN_FOLD_SUMMARIES=off joins it in every
 // launch decided while the summaries' switch is off, whatever the lane; a caller's value of either name is replaced.
-export type AppendedText = 'supplement';
-const APPENDED: Record<AppendedText, string> = { supplement: TO_HUMAN_SUPPLEMENT };
+// Board ticket 421 (Interfaces §F): `supplement-engine`, supplement 4, for a session asking with the engine's question tool
+export type AppendedText = 'supplement' | 'supplement-engine';
+const APPENDED: Record<AppendedText, string> = { supplement: TO_HUMAN_SUPPLEMENT, 'supplement-engine': TO_HUMAN_SUPPLEMENT_ENGINE };
 
 export interface OwnerChannelFlags {
   advertisement: Advertisement; // MAWS_NATIVE_TO_HUMAN's value; null: none (the lane off)
@@ -181,7 +197,9 @@ export function trustMapping(
 // An intent's real launch: its chips, the id pinned at its first attempt, and for a fork the source it resumes with
 // `--fork-session` (pinned too: C3's buildLaunch emits `--session-id` beside a fork's resume) and the grants it inherits.
 // P5 O12 M11: `ctx.proofFile`, where the spine writes the session's proof; the spec names its spawner only with it.
-export function intentLaunchSpec(intent: SetupIntent, ctx: { cwd: string; trust: Attestation | null; replay: string | null; browserBackend?: string | null; proofFile?: string | null }, settings: C10Settings = readSettings()): LaunchSpec {
+// Board ticket 421: `ctx.mawsTools`, the set the attempt serves (the intent's, a fork's source's, or the full set on an
+// older host: served-set.ts), never read from the intent here, so the record, the supplement and the line share it.
+export function intentLaunchSpec(intent: SetupIntent, ctx: { cwd: string; trust: Attestation | null; replay: string | null; browserBackend?: string | null; proofFile?: string | null; mawsTools?: MawsToolSet }, settings: C10Settings = readSettings()): LaunchSpec {
   const fork = intent.kind === 'fork' ? intent.source : null;
   return toLaunchSpec(
     {
@@ -200,6 +218,7 @@ export function intentLaunchSpec(intent: SetupIntent, ctx: { cwd: string; trust:
       replay: ctx.replay,
       browserBackend: ctx.browserBackend ?? null,
       launchedBy: spawnerOf(intent.appSessionId, intent.launchedBy, ctx.proofFile), // P5 O12 M11: a fork's intent carries none
+      ...(ctx.mawsTools !== undefined && { mawsTools: ctx.mawsTools }), // board ticket 421
     },
     settings,
   );
@@ -222,8 +241,9 @@ export function resumeRouteOf(record: Pick<SessionRecord, 'gateway'>, options: P
 // are re-passed. The route is the record's last one unless the caller says otherwise, and a record whose route was
 // never verified (every discovered session) takes D-19's default rather than reading null as a routing fact. `model`
 // and `effort` are C11's route-switch overrides for this launch; C3 re-applies the session's own grants by app id.
-// P5 O12 M11: the record's spawner, as at its start, with `ctx.proofFile`.
-export function resumeLaunchSpec(record: SessionRecord, options: ResumeOptions, ctx: { trust: Attestation | null; replay: string | null; browserBackend?: string | null; proofFile?: string | null }, settings: C10Settings = readSettings()): LaunchSpec {
+// P5 O12 M11: the record's spawner, as at its start, with `ctx.proofFile`. Board ticket 421: `ctx.mawsTools`, the set
+// the attempt serves, which is the record's own (D1; served-set.ts refuses rather than serve another).
+export function resumeLaunchSpec(record: SessionRecord, options: ResumeOptions, ctx: { trust: Attestation | null; replay: string | null; browserBackend?: string | null; proofFile?: string | null; mawsTools?: MawsToolSet }, settings: C10Settings = readSettings()): LaunchSpec {
   const route = resumeRouteOf(record, options, settings); // P5 O7 M9
   const recordEffort = EffortSchema.safeParse(record.effort);
   return toLaunchSpec(
@@ -243,6 +263,7 @@ export function resumeLaunchSpec(record: SessionRecord, options: ResumeOptions, 
       browserBackend: ctx.browserBackend ?? null,
       cursorLabel: cursorLabelOf(record.title), // UX wave U12a
       launchedBy: spawnerOf(record.appId, record.launchedBy, ctx.proofFile),
+      ...(ctx.mawsTools !== undefined && { mawsTools: ctx.mawsTools }), // board ticket 421
     },
     settings,
   );
