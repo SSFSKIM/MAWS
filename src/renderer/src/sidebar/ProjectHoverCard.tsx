@@ -5,7 +5,9 @@
 // path home-abbreviated, how many sessions it holds with how many wait and work, when it last moved, and its worktrees
 // with their branches, read from git when the card opens (`git.worktree.list`), never while it is closed. The project
 // registry (docs/doperpowers/plans/2026-11-10-project-registry.md, Interfaces §J.3): a registry project's card lists its
-// locations in place of the one path, each with its machine, state and actions (`ProjectLocations.tsx`).
+// locations in place of the one path, each with its machine, state and actions (`ProjectLocations.tsx`). The word cut
+// (W78, W79, N174): the counts line leaves out a part at zero and is not drawn when every part is; the activity line is
+// the age alone ("Active now" under a minute), not drawn before any activity; the worktrees' read is a quiet spinner.
 import { useEffect, useState, type ReactNode } from 'react';
 import type { ProjectRecord } from '@shared/ipc/schema';
 import type { WorktreeInfo } from '@shared/sessions/worktree';
@@ -16,6 +18,7 @@ import { ipc } from '../ipc/client';
 import { branchLabel } from '../sessions/branch-label';
 import type { ProjectEntry } from './derive';
 import { SidebarHoverCard } from './HoverCard';
+import { QuietSpinner } from '../ui/spinner';
 import { ProjectLocations } from './ProjectLocations'; // the project registry
 import { useLocationView } from './location-view'; // the project registry
 import { machineOf } from '@shared/machine/address';
@@ -44,7 +47,8 @@ function Body({ entry }: { entry: ProjectEntry & { project: ProjectRecord } }) {
   const now = useNow();
   const view = useLocationView();
   const elapsed = lastActivity === null ? null : Math.max(0, now - lastActivity);
-  const counts = [plural(sessions.length + listed.length, 'session', 'sessions') /* P5 O8 M2: listed rows too */, `${rollup.waiting} waiting`, `${rollup.working} working`].join(' · ');
+  const total = sessions.length + listed.length; // P5 O8 M2: listed rows too
+  const counts = [total > 0 ? plural(total, 'session', 'sessions') : null, rollup.waiting > 0 ? `${rollup.waiting} waiting` : null, rollup.working > 0 ? `${rollup.working} working` : null].filter(Boolean).join(' · ');
 
   return (
     <div className="flex flex-col gap-2 text-ui-sm text-fg">
@@ -54,12 +58,16 @@ function Body({ entry }: { entry: ProjectEntry & { project: ProjectRecord } }) {
           {formatCwd(project.directory)}
         </p>
       )}
-      <p data-testid="project-counts" className="m-0 text-fg-muted tabular-nums">
-        {counts}
-      </p>
-      <p data-testid="project-activity" className="m-0 text-fg-muted tabular-nums">
-        {elapsed === null ? 'No activity yet' : elapsed < 60_000 ? 'Active now' : `Last active ${formatAgo(elapsed, { narrow: true })}`}
-      </p>
+      {counts !== '' && (
+        <p data-testid="project-counts" className="m-0 text-fg-muted tabular-nums">
+          {counts}
+        </p>
+      )}
+      {elapsed !== null && (
+        <p data-testid="project-activity" className="m-0 text-fg-muted tabular-nums">
+          {elapsed < 60_000 ? 'Active now' : formatAgo(elapsed, { narrow: true })}
+        </p>
+      )}
       {registry !== null && <ProjectLocations project={registry} view={view} />}
       <Worktrees machine={machineOf(project.id)} directory={project.directory} />
     </div>
@@ -87,7 +95,7 @@ function Worktrees({ machine, directory }: { machine: MachineRef; directory: str
     <div className="mt-1 border-t border-border pt-2">
       <h4 className="m-0 mb-1 text-ui-sm font-medium text-fg-muted">Worktrees</h4>
       {read.state === 'reading' ? (
-        <p className="m-0 text-fg-faint">Reading…</p>
+        <QuietSpinner label="Reading worktrees" />
       ) : (
         <ul aria-label="Worktrees" className="m-0 flex max-h-40 list-none flex-col gap-0.5 overflow-y-auto p-0 [scrollbar-width:thin]">
           {read.worktrees.map((w) => (

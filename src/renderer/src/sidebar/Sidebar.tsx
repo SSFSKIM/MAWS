@@ -53,6 +53,7 @@ import { NeedsYou, RECONNECTING } from './NeedsYou';
 import { SectionHeading } from './SectionHeading';
 import { HubNotice } from './HubNotice'; // P5 O7 M2
 import { hiddenNodeId, moreNodeId, projectNodeId, sessionNodeId, treeCommand, TreeContext, type TreeNode } from './tree';
+import { SEARCH_IN_CONVERSATIONS } from './copy';
 
 export function Sidebar() {
   const sessionsLoaded = useSessions((s) => s.loaded);
@@ -463,7 +464,7 @@ function SidebarBody() {
   return (
     <TreeContext.Provider value={tree}>
       <SidebarInteractionContext.Provider value={releaseRemoved}>
-      <div className="flex min-h-0 flex-1 flex-col"
+      <div className="group/sidebar flex min-h-0 flex-1 flex-col"
         onPointerEnter={(event) => ownPointer(event.target, event.currentTarget)}
         onPointerOverCapture={(event) => ownPointer(event.target, event.currentTarget)}
         onPointerLeave={() => { pointerOwner.current = null; setPointerWithin(false); }}
@@ -480,7 +481,7 @@ function SidebarBody() {
             }} />
             {searching && <button type="button" onClick={() => openConversationSearch(query.trim())}
               className="mb-1 w-full rounded-sm px-[9px] py-1.5 text-left text-ui-sm text-fg-muted outline-accent hover:bg-bg-hover focus-visible:outline-2">
-              Search in conversations for ‘{query.trim()}’
+              {SEARCH_IN_CONVERSATIONS}
             </button>}
           </div>
         </SidebarDestinations>
@@ -526,11 +527,12 @@ function SidebarBody() {
                   Hidden projects…
                 </button>
               )}
+              {/* the word cut (W59): drawn while the pointer or the keyboard is in the sidebar; it keeps its place at rest */}
               {!searching && (
                 <button
                   type="button"
                   onClick={() => openDialog({ kind: 'archived', projectId: null })}
-                  className="mt-1 flex h-(--row-h) w-full cursor-default items-center rounded-sm pr-[9px] pl-[30px] text-left text-ui-sm text-fg-muted outline-accent select-none hover:bg-bg-hover hover:text-fg focus-visible:outline-2"
+                  className="mt-1 flex h-(--row-h) w-full cursor-default items-center rounded-sm pr-[9px] pl-[30px] text-left text-ui-sm text-fg-muted opacity-0 outline-accent select-none group-focus-within/sidebar:opacity-100 group-hover/sidebar:opacity-100 hover:bg-bg-hover hover:text-fg focus-visible:outline-2"
                 >
                   Archived sessions…
                 </button>
@@ -568,7 +570,6 @@ function SortMenu({ sort }: { sort: SidebarSort }) {
       </DropdownMenu.Trigger>
       <DropdownMenu.Portal>
         <DropdownMenu.Content align="end" sideOffset={4} className="z-50 min-w-36 rounded-md border border-border-strong bg-bg-overlay p-1 text-ui text-fg">
-          <DropdownMenu.Label className="px-2 py-1 text-ui-sm text-fg-muted">Sort sessions by</DropdownMenu.Label>
           <DropdownMenu.RadioGroup value={sort} onValueChange={(value) => useLayout.getState().setSidebar({ sort: value as SidebarSort })}>
             {SORTS.map(({ value, label }) => (
               <DropdownMenu.RadioItem

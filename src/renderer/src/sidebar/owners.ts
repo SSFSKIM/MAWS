@@ -2,7 +2,7 @@
 // label"; Q2). `me` is the signed-in member the rows came with (`OrgRows.member`), `members` main's names for every owner
 // the rows name (`OrgRows.members`). A session you own alone says nothing, so your own rows look as they did; otherwise
 // "you" first when you are an owner, then the others in the listing's order, two shown in all and "+N" past them
-// ("you, Ana", "Ana, Ben +3"). The hover card lists every owner with its email (`ownerEntries`). P5 O15 M2b: a peer
+// ("you, Ana", "Ana, Ben +3"). The hover card lists every owner by name (`ownerEntries`; the word cut, W71, took the emails there). P5 O15 M2b: a peer
 // message's sender is labelled by the same rule, from the names its sminos frame wrote (`ownerIdsOf`); a name main
 // can't place is drawn as the caller says (`unknown`): a former member on a session's row, as written on a peer message.
 import { FORMER_MEMBER, type OrgMember } from '@shared/ipc/schema/org';

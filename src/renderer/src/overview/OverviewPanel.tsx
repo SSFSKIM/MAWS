@@ -13,6 +13,7 @@ import { focusPaneElement } from '../main/pane-dom';
 import { useLayout } from '../stores/layout';
 import { currentSet } from '../stores/layout-model';
 import { Overview } from './Overview';
+import { HiddenHeading } from '../ui/hidden-heading';
 
 const MIN = { width: 360, height: 240 };
 // The first place: under the tab strip (40px) with a 12px gap, 16px clear of the sides and the bottom.
@@ -216,7 +217,7 @@ function OverviewPanel({ bounds }: { bounds: { width: number; height: number } }
         onPointerCancel={end}
         className="flex h-9 shrink-0 cursor-grab items-center gap-2 border-b border-border bg-bg-raised pr-1.5 pl-4 select-none active:cursor-grabbing"
       >
-        <h2 className="m-0 text-ui font-semibold text-fg">Overview</h2>
+        <HiddenHeading level={2}>Overview</HiddenHeading>{/* the word cut (W102): the strip is the layer's handle and its × */}
         <button
           type="button"
           aria-label="Close Overview"

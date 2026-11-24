@@ -8,7 +8,8 @@
 // on a session that can take a question now, the widget is not drawn at all: it closes before the dialog paints and the
 // session's side questions open with their field focused where a typed question would answer (the session's `/btw` card,
 // or under a side thread hosted in its parent's pane); with a question, it is asked there, as a typed `/btw <question>`
-// is. The dialog stays for a session that cannot take one yet, which it starts or says why.
+// is. The dialog stays for a session that cannot take one yet, which it starts or says why. The word cut (P415, N185):
+// the field is named without a label drawn over it, and a start under way is the quiet spinner in the note's place.
 import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent } from 'react';
 import type { AppSessionId } from '@shared/graph/ids';
 import { STARTS } from '../composer/submit/submit-state';
@@ -19,6 +20,7 @@ import { WidgetFrame } from '../widgets/WidgetFrame';
 import { askSideQuestion, canAskSide, openSideQuestions, sideBlock, startForSide, useDrivenAsk } from './btw';
 import { STARTING_SESSION } from '../sessions/acquire'; // P2-A
 import { SIDE_COPY } from './copy';
+import { QuietSpinner } from '../ui/spinner';
 
 const COPY = SIDE_COPY.btw;
 
@@ -60,7 +62,8 @@ export function BtwWidget({ appSessionId, args, close }: { appSessionId: AppSess
     askSideQuestion(appSessionId, asked);
     if (mounted.current) close();
   };
-  const note = blocked ?? (starting || availability === 'starting' ? STARTING_SESSION : ready ? null : STARTS);
+  const startingNow = blocked === null && (starting || availability === 'starting');
+  const note = blocked ?? (startingNow || ready ? null : STARTS);
   const onKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
     if (event.key !== 'Enter' || event.shiftKey || event.nativeEvent.isComposing) return;
     event.preventDefault();
@@ -75,6 +78,7 @@ export function BtwWidget({ appSessionId, args, close }: { appSessionId: AppSess
             {note}
           </p>
         )}
+        {startingNow && <QuietSpinner label={STARTING_SESSION} />}
         {start.kind === 'refused' && (
           <p role="alert" className="m-0 text-ui-sm break-words text-danger">
             {start.words}
@@ -82,8 +86,8 @@ export function BtwWidget({ appSessionId, args, close }: { appSessionId: AppSess
         )}
         <div className="flex items-end gap-2">
           <label className="flex min-w-0 flex-1 flex-col gap-1 text-ui-sm">
-            <span className="text-fg-muted">{COPY.field}</span>
             <textarea
+              aria-label={COPY.field}
               rows={2}
               autoFocus
               value={question}

@@ -13,10 +13,11 @@
 //   WORDS_OUT=$HOME/maws-words/before pnpm shots:words
 //
 // which builds out/ (the harness variant: Settings › Org reads its seeded org through the harness build's main; every
-// window here is the product's, MAWS_HARNESS=0) and runs the twelve launches, about 40 minutes (M1 added launches 6
+// window here is the product's, MAWS_HARNESS=0) and runs the fourteen launches, about 45 minutes (M1 added launches 6
 // to 9 and the `m1-` scenes: the Settings and Org states the word cut's M1 changes; M2 added launch 10 and the `m2-`
 // scenes: the conversation's and the message box's states its cut changes; M3 added launches 11 and 12 and the `m3-` scenes:
-// the panels beside the conversation, and the project Channel's folds). The pictures are
+// the panels beside the conversation, and the project Channel's folds; M4 added launch 14 and the `m4-` scenes: the
+// window, the typed dialogs and Customize). The pictures are
 // <WORDS_OUT>/<scene id>.png, with <WORDS_OUT>/_run.json listing each scene's meta and whether it was reached (and why
 // not), and each run's build (its commit and a digest of out/). WORDS_ONLY=<id>,<prefix>* narrows the run to some scenes (a launch with none wanted still starts). The "after"
 // pictures are the same command on the build's branch into another folder. A folder holds one build's pictures: a run of
@@ -31,11 +32,11 @@
 //
 // and on master, as below for the m scenes, into another folder (rv-before).
 //
-// The `m1-`, `m2-` and `m3-` scenes are each their milestone's, so their "before" is this rig run against master's build: in a
+// The `m1-` to `m4-` scenes are each their milestone's, so their "before" is this rig run against master's build: in a
 // clean checkout of master, `git checkout <this branch> -- e2e/words-shots.rig.ts e2e/support`, then the command above.
-// Every launch's state is set from this file and e2e/support (fixtures, seams master's main already has). Each m1 and m2
+// Every launch's state is set from this file and e2e/support (fixtures, seams master's main already has). Each m1 to m4
 // scene checks its named state right before its capture, on master's build in master's terms (`cutBuild` for M1's
-// parts, `m2Build` for M2's, `m3Build` for M3's), and is not reached when it cannot.
+// parts, `m2Build` for M2's, `m3Build` for M3's, `m4Build` for M4's), and is not reached when it cannot.
 //
 // Locators avoid the app's words (data attributes, menu ids, IPC, positions), because the words are what the other
 // build changes; where only a word reaches a target it comes from the app's own copy module, or is marked. A step that
@@ -58,11 +59,11 @@ import { ACTIONS } from '../src/shared/keymap/actions';
 import { benchDeckFiles } from '../src/artifacts/slides/fixtures/bench';
 import { isolatedGitEnv } from '../test/support/git-env';
 import { installToHumanPlugin } from '../test/support/to-human-plugin'; // board ticket 850's launch
-import { ownerShapedState, writePluginCliStub } from '../test/support/plugin-cli-stub';
+import { ownerShapedState, writePluginCliStub, type StubState } from '../test/support/plugin-cli-stub';
 import { addressed } from './support/address';
 import { invoke, launchReady, recordedBlockJournal, steerStopJournal, turnsJournal, value } from './support/c7-replay';
 import { bindCsv, chart, insertBlocks } from './support/dashboards';
-import { createDesign, DESIGN_FILES, editDesign } from './support/design';
+import { createDesign, DESIGN_FILES, editDesign, threadsOf } from './support/design';
 import { closedPort, startBrowserServer } from './support/browser-server';
 import { closeSettings, closeSheet, importThrough, openImportSheet, profilesFile, sheetOf } from './support/browser-import-scene';
 import { buildChromeUserData } from '../test/support/chrome-profile';
@@ -84,8 +85,9 @@ test.skip(!OUT, 'WORDS_OUT names the folder the captures go to');
 // ---- _run.json: what each capture shows, for a person and for matching a table row to it -----------------------------
 // round: 1 and 2 are the owner's rounds at the pin; 'm0' a scene the word cut's M0 added on master; 'm1' one its M1
 // added for the Settings and Org states the cut changes; 'm2' one its M2 added for the conversation's and the message
-// box's; 'm3' one its M3 added for the panels beside the conversation. A folder is under src/renderer/src, or from the repository's root when it starts with src/.
-type Meta = { id: string; title: string; how: string; state: string; folders: string[]; hover?: boolean; round?: 2 | 'm0' | 'm1' | 'm2' | 'm3' | 'rv' };
+// box's; 'm3' one its M3 added for the panels beside the conversation; 'm4' one its M4 added for the window, the typed
+// dialogs and Customize. A folder is under src/renderer/src, or from the repository's root when it starts with src/.
+type Meta = { id: string; title: string; how: string; state: string; folders: string[]; hover?: boolean; round?: 2 | 'm0' | 'm1' | 'm2' | 'm3' | 'm4' | 'rv' };
 const META: Meta[] = [];
 const results: { id: string; ok: boolean; error?: string; notes?: string[] }[] = [];
 const wanted = (id: string) => !ONLY || ONLY.has(id) || [...ONLY].some((o) => o.endsWith('*') && id.startsWith(o.slice(0, -1)));
@@ -94,6 +96,7 @@ const m0 = (meta: Omit<Meta, 'round'>): Meta => ({ ...meta, round: 'm0' });
 const m1 = (meta: Omit<Meta, 'round'>): Meta => ({ ...meta, round: 'm1' });
 const m2 = (meta: Omit<Meta, 'round'>): Meta => ({ ...meta, round: 'm2' });
 const m3 = (meta: Omit<Meta, 'round'>): Meta => ({ ...meta, round: 'm3' });
+const m4 = (meta: Omit<Meta, 'round'>): Meta => ({ ...meta, round: 'm4' });
 const rv = (meta: Omit<Meta, 'round'>): Meta => ({ ...meta, round: 'rv' }); // board ticket 850, the report view repair
 
 // ---- scratch fixtures ------------------------------------------------------------------------------------------------
@@ -349,6 +352,8 @@ async function shot(page: Page, meta: Meta, prepare: () => Promise<void>, { of, 
     });
     // M3's evidence, its own scenes and the carried ones, only from the checkout's own build (m3Build refuses another's)
     if (meta.round === 'm3' || M3_CARRIED.has(meta.id)) await m3Build(page);
+    // M4's likewise (m4Build)
+    if (meta.round === 'm4' || M4_CARRIED.has(meta.id)) await m4Build(page);
     const target = of?.() ?? page;
     await settle(target, meta.hover === true);
     if (meta.round === 'm1') await expect(page.locator('[data-settings-dialog]'), 'Settings open').toBeVisible({ timeout: 3_000 });
@@ -528,10 +533,9 @@ function m2Cut(): boolean {
 }
 // Master's last line under a new chat's model list (master's widgets/copy.ts, MODEL.unstarted), which P555 cut
 const MASTER_MODEL_UNSTARTED = 'Applies when the session starts';
-// widgets/copy.ts's words the checks read (that module loads the renderer's statusline), each build's own: the agents
-// dialog's empty line (AGENTS.none, the same on both), and the + menu's Connectors line for a session not running and
-// for a running one reporting none (CONNECTOR_MENU.notRunning, .noneReported; P579, P578)
-const AGENTS_NONE = 'No agents in the catalogue';
+// widgets/copy.ts's words the checks read (that module loads the renderer's statusline), each build's own: the + menu's
+// Connectors line for a session not running and for a running one reporting none (CONNECTOR_MENU.notRunning,
+// .noneReported; P579, P578). The agents dialog's empty line, which M4 cut, is M4_WORDS.agentsNone.
 const CONNECTORS_LINE = {
   notRunning: { m2: 'Session not running', master: 'Live details are unavailable until this session is running' },
   noneReported: { m2: 'No connectors', master: 'No connectors reported by this session' },
@@ -704,6 +708,98 @@ const M3_CARRIED = new Set([
   'r2-palette', 'r2-shortcuts',
 ]);
 
+// ---- the word cut's M4: the window, the typed dialogs and Customize --------------------------------------------------
+// The m4 scenes' before is this rig, with its e2e support files, run against master's build, as the m1 to m3 scenes' is
+// (scenes.md). Each proves its named state on either build before its capture: on M4's build the reveal (a row's note
+// open, a row opened by itself, a card opened by the keyboard) and the state it is named for; on master's, the same state
+// in master's terms, what master draws there at rest, in view.
+//
+// Whether the build has M4's cut, read once, the first time a scene asks (m4Build), from the window every launch draws:
+// M4 made the sidebar's search field a hover scope (W40: its ⌘K chord is drawn only while the field is pointed at or
+// holds the keyboard), so the field's label carries `data-hover-scope` on M4's build and nothing on master's. The
+// checkout says which side it is by a module M4 added (sessions/copy.ts, absent from master's tree), and a build that
+// draws the other side is refused (the m2 check's rule), every m4 scene then not reached with why.
+let cut4: boolean | null = null;
+let cut4Refused: string | null = null;
+const M4_SOURCE = 'src/renderer/src/sessions/copy.ts';
+const SIDEBAR_SEARCH = '[data-region="sidebar"] nav label:has(> input[type="search"])';
+async function m4Build(page: Page): Promise<boolean> {
+  if (cut4 === null && cut4Refused === null) {
+    await expect(page.locator(SIDEBAR_SEARCH).first(), 'the sidebar’s search field').toBeAttached({ timeout: 10_000 });
+    const drawn = (await page.locator(`${SIDEBAR_SEARCH}[data-hover-scope]`).count()) > 0;
+    const source = existsSync(join(REPO_ROOT, M4_SOURCE));
+    const head = headCommit();
+    if (CACHE_KEY !== null && !head.startsWith(CACHE_KEY)) cut4Refused = `out/ came from the build cache under key ${CACHE_KEY}, not this checkout's commit ${head}`;
+    else if (drawn === source) cut4 = drawn;
+    else cut4Refused = `out/ is not this checkout's build: its sidebar search ${drawn ? 'is' : 'is not'} a hover scope, and the checkout ${source ? 'has' : 'lacks'} ${M4_SOURCE}`;
+    console.log(`[words] ${cut4Refused ?? `this build ${drawn ? 'draws' : 'does not draw'} the word cut's M4 (the sidebar search ${drawn ? 'a' : 'no'} hover scope)`}`);
+  }
+  if (cut4Refused !== null) throw new Error(cut4Refused);
+  return cut4!;
+}
+function m4Cut(): boolean {
+  if (cut4 === null) throw new Error('the build is not known yet: no m4 scene has read it in this run');
+  return cut4;
+}
+const byM4 = (words: { m4: string; master: string }) => (m4Cut() ? words.m4 : words.master);
+// Words of renderer modules the e2e project does not list (tsconfig.e2e.json), written here with their source, each as
+// its build has it
+const M4_WORDS = {
+  // projects/ProjectsView.tsx: master's sentence at the list's top, which M4 removed (W129)
+  projectsSentence: 'Choose projects to keep in your sidebar. Hiding a project does not delete its sessions.',
+  // sidebar/project-groups.ts: the head of the projects the sidebar lists, on the Projects page and in Add project (W130)
+  inSidebar: { m4: 'In sidebar', master: 'Sidebar projects' },
+  hideFromSidebar: 'Hide from sidebar', // projects/ProjectsView.tsx, a row's button, the same on both builds (W132)
+  // sidebar/AddProject.tsx: the dialog's description, drawn on master and kept for assistive technology alone on M4 (W135)
+  addProjectSentence: 'Your sidebar projects come first. Add a hidden or discovered project, or choose a folder.',
+  addProject: 'Add project', // sidebar/AddProject.tsx, the + button's name, both builds
+  // widgets/copy.ts LIBRARY.by, a plugin row's byline (G216); master joins the description to it with " · "
+  by: (author: string) => `by ${author}`,
+  disabled: 'Disabled', // master's widgets/copy.ts LIBRARY.disabled, the badge of a plugin that is off, which M4's switch replaced (G215)
+  skills: (n: number) => `${n} skill${n === 1 ? '' : 's'}`, // widgets/copy.ts LIBRARY.skills, a plugin with no description (P683), both builds
+  filter: 'Filter', // widgets/copy.ts LIBRARY.show, the Filter menu's name, both builds (P659)
+  allPlugins: 'All plugins', // widgets/copy.ts LIBRARY.filter.all, both builds
+  sortSessions: 'Sort sessions', // sidebar/Sidebar.tsx, the sort button's name, both builds
+  sortBy: 'Sort sessions by', // master's sidebar/Sidebar.tsx label at the sort menu's top, which M4 removed (W49)
+  // keymap/copy.ts SHORTCUTS (W125, W127); master's keymap/KeyboardShortcuts.tsx literals
+  shortcutsDescription: { m4: 'Change in Settings', master: 'Your current bindings. Change them in Settings → Keyboard.' },
+  shortcutsNothing: { m4: 'Nothing matches', master: 'No shortcuts match your search.' },
+  // widgets/copy.ts PERMISSIONS.source.flagSettings, a hook's source in the startup settings (N184); master draws the
+  // engine's own label (pass2/hooks seq 46's sourceLabel)
+  hookSource: { m4: 'startup', master: 'Startup settings (--settings option)' },
+  archive: 'Archive', // app/session-actions.ts SESSION_ACTIONS.archive, the session menu's item, both builds
+  // sessions/copy.ts ARCHIVE_WORDS.body(null) (W146); master's sessions/ArchiveDialog.tsx sentence begins so
+  archiveBody: { m4: 'Stops it and hides it. Find it again under Archived sessions.', master: 'Ends its engine process' },
+  worktreesItem: 'Worktrees…', // sidebar/project-actions.ts, the project menu's item, both builds
+  noSession: 'No session', // master's sessions/WorktreesDialog.tsx line on a worktree no session uses, which M4 removed (W155)
+  sessionsLabel: 'Sessions', // sessions/WorktreesDialog.tsx, the label over a worktree's sessions, both builds
+  refresh: 'Refresh', // widgets/copy.ts FRAME.refresh, Session info's gesture, both builds
+  starting: 'Starting…', // sessions/acquire.ts STARTING_SESSION (FRAME.starting): master's status words, M4's spinner's name (P523)
+  updated: (when: string) => `updated ${when}`, // widgets/copy.ts LIBRARY.updated, the date in a plugin row's note on M4 (G218)
+  discoverPlugins: 'Discover plugins', // widgets/copy.ts LIBRARY.discoverPlugins, the Add menu's first row on M4 (P655)
+  featured: { m4: 'Featured', master: 'Featured · From Anthropic' }, // customize/discover/copy.ts DISCOVER.featured / featuredFrom (G272)
+  skillGone: { m4: "This skill's file is no longer here.", master: "This skill's file is no longer here. Refresh, then try again." }, // customize/copy.ts SKILL_ACTIONS.missing (N189)
+  retry: 'Retry', // customize/copy.ts SKILL_ACTIONS.retry, M4 only (N189)
+  chooseProject: 'Choose a project', // composer/frame/ProjectRow.tsx, the project menu's name, both builds
+  noProject: { m4: 'No project', master: "Don't work in a project" }, // composer/frame/ProjectRow.tsx NO_PROJECT (C70)
+  installed: 'Installed', // customize/discover/copy.ts DISCOVER.installed: master's word beside the check, M4's mark's name (G278)
+  add: 'Add', // widgets/copy.ts LIBRARY.add, the plugin list's Add menu's name, both builds (P655)
+  agentsNone: { m4: 'No agents', master: 'No agents in the catalogue' }, // widgets/copy.ts AGENTS.none, the agents dialog's empty line (P627)
+  // master's widgets/copy.ts RENAME.renamed, the line a typed title's rename leaves in its dialog, which M4 removed with
+  // the dialog itself: M4's closes once the rename took (P637)
+  renamed: (title: string) => `Renamed · ${title}`,
+};
+// The scenes that existed before M4 and show its surfaces (scenes.md, "Existing scenes that show M4's surfaces"): M4's
+// evidence as much as its own `m4-` scenes, so each is refused on a build that is not the checkout's, as an m4 scene is
+const M4_CARRIED = new Set([
+  'm0-empty-main', 'm0-new-chat-unplaced', 'overview', 'overview-scrolled', 'session-approval', 'sidebar-hover', 'sidebar-hover-project', 'm0-sidebar-search', 'new-chat',
+  'projects', 'm0-customize-all', 'm0-customize-all-hover', 'customize-plugins', 'customize-plugins-hover', 'customize-skills', 'customize-connectors',
+  'm0-customize-custom-connector', 'r2-plugin-detail', 'm0-discover', 'm0-discover-detail', 'settings-keyboard', 'r2-dialog-mcp', 'r2-dialog-permissions',
+  'r2-dialog-config', 'r2-dialog-context', 'r2-dialog-agents', 'r2-dialog-memory', 'r2-dialog-sandbox', 'r2-dialog-diff', 'r2-dialog-hooks', 'm0-dialog-mcp-signin',
+  'm0-dialog-config-defaults', 'm0-dialog-sandbox-details', 'm0-dialog-export', 'm0-dialog-compact', 'm0-dialog-agents-none', 'm0-palette-typed', 'shell-tools',
+  'shell-tools-open', 'permissions-dialog', 'm0-dialog-rewind', 'm0-dialog-rename-index', 'r2-usage-popover', 'r2-palette', 'r2-shortcuts', 'r2-project-menu',
+]);
+
 // Escape only while an overlay is open. Since the UX wave's U1b, Escape on a waiting request's row (or on nothing while
 // its pane holds the keyboard) denies the request (request-card/prompt-guard.ts), so a bare Escape could answer one.
 // The pointer is moved aside first: what it holds open (a sidebar row's hover card, a tooltip) closes on its own once it
@@ -821,6 +917,12 @@ async function customizeAt(page: Page, view: (typeof VIEWS)[number], show: (type
   await expect(custom(page)).toHaveAttribute('data-customize-show', show);
   await page.waitForTimeout(1500);
 }
+// An item of Customize (a plugin's or a skill's row, a catalog card) opened as a pointer opens it: a click on the item
+// itself, whose own handler opens it wherever the click lands off its own controls. Its whole-item target
+// (`[data-row-open]`, `[data-card-open]`) is an absolute button drawn under the item's positioned content, on both
+// builds (widgets/plugins/PluginRow.tsx, widgets/skills/SkillsLibrary.tsx, customize/discover/CatalogCard.tsx), so a
+// click aimed at that button finds the content on top of its centre and waits until it times out.
+const openItem = (item: Locator) => item.first().click();
 // A typed command: the palette's highlighted row is the command (its name, not the app's copy) before Enter, so a
 // ranking difference cannot open another widget. `rest` is typed after the command (its arguments).
 async function typed(page: Page, command: string, rest = '') {
@@ -879,7 +981,7 @@ test.afterAll(() => {
   }
   const kept = [...untaken.filter((old) => old.build === build), ...fresh];
   const screens = [...all.screens.filter((o) => !META.some((f) => f.id === o.id)), ...META].filter((screen) => kept.some((result) => result.id === screen.id));
-  const run: Run = { at: new Date().toISOString(), ...identity, m1: cut, m2: cut2, m3: cut3, scenes: results.map((result) => result.id) };
+  const run: Run = { at: new Date().toISOString(), ...identity, m1: cut, m2: cut2, m3: cut3, m4: cut4, scenes: results.map((result) => result.id) };
   writeFileSync(join(OUT, '_run.json'), JSON.stringify({ results: kept, screens, runs: [...(all.runs ?? []), run], stale: [...(all.stale ?? []), ...stale] }, null, 2));
 });
 // What each run into the folder photographed (fix wave, scalpel-5#3), so a before and an after taken from one out/ (a
@@ -887,7 +989,7 @@ test.afterAll(() => {
 // it changed (the before's rig and e2e/support, taken from the branch), a digest of out/'s files, the cache key out/
 // came under, and which cut each build check read (null where no scene read it). An m2 scene refuses a cached out/
 // whose key is not the checkout's commit (m2Build).
-type Run = { at: string; commit: string; changed: string[]; out: string; cacheKey: string | null; m1: boolean | null; m2: boolean | null; m3: boolean | null; scenes: string[] };
+type Run = { at: string; commit: string; changed: string[]; out: string; cacheKey: string | null; m1: boolean | null; m2: boolean | null; m3: boolean | null; m4: boolean | null; scenes: string[] };
 // The key out/ was restored or stored under when scripts/e2e-build.sh's cache was on (the commit that built it), else
 // null: out/ was built from this checkout
 const CACHE_KEY = process.env.MAWS_E2E_BUILD_CACHE && process.env.MAWS_E2E_BUILD_KEY ? process.env.MAWS_E2E_BUILD_KEY : null;
@@ -938,6 +1040,7 @@ test('scenario: sidebar, Overview, waiting sessions, pages, Customize, Settings,
     await expect(sidebar(page).locator('[data-kind="project"]').first()).toBeVisible({ timeout: 30_000 });
     await page.waitForTimeout(1500);
     await dismissToasts(page);
+    await m4Build(page).catch((error: unknown) => setupFailed('reading the build (M4)', error)); // the sidebar's search, drawn from the start
 
     // `unopened`: a session with an engine status the rig never opens before m0-dialog-agents-none (nine-sessions.json's
     // `engine` holds ready statuses for seven sessions only; the widget backend answers for those alone)
@@ -1096,7 +1199,7 @@ test('scenario: sidebar, Overview, waiting sessions, pages, Customize, Settings,
     await closeOverlays(page);
     await shot(page, r2({ id: 'r2-plugin-detail', title: 'Customize, a plugin’s own page', how: 'Click a plugin row in Customize (My items)', state: 'The first user plugin’s page, from the plugin CLI stub', folders: ['customize', 'widgets/plugins'] }), async () => {
       await customizeAt(page, 'mine', 'plugins');
-      await custom(page).locator('[data-plugin-row]:visible [data-row-open]').first().click();
+      await openItem(custom(page).locator('[data-plugin-row]:visible'));
       await expect(custom(page).locator('[data-plugin-detail]').first()).toBeVisible({ timeout: 15_000 });
       await page.waitForTimeout(1500);
     });
@@ -1105,9 +1208,10 @@ test('scenario: sidebar, Overview, waiting sessions, pages, Customize, Settings,
       await customizeAt(page, 'discover', 'all');
       await soft(custom(page).locator('[data-catalog-card], [data-featured]'), 'a catalog card', 20_000);
     });
-    await shot(page, m0({ id: 'm0-discover-detail', title: 'Customize, Discover, a card opened', how: 'Click the first card in Discover', state: 'A catalog entry’s detail', folders: ['customize/discover'] }), async () => {
+    // the first card not installed here: one installed here opens its row's detail in My items (CatalogCard.tsx)
+    await shot(page, m0({ id: 'm0-discover-detail', title: 'Customize, Discover, a card opened', how: 'Click the first card in Discover not installed here', state: 'A catalog entry’s detail', folders: ['customize/discover'] }), async () => {
       if ((await custom(page).locator('[data-catalog-card]').count()) === 0) await customizeAt(page, 'discover', 'all');
-      await custom(page).locator('[data-catalog-card] [data-card-open]').first().click();
+      await openItem(custom(page).locator('[data-catalog-card]:not([data-installed="here"])'));
       await expect(page.locator('[data-catalog-detail]').first()).toBeVisible({ timeout: 15_000 });
     });
     await closeOverlays(page);
@@ -1186,10 +1290,6 @@ test('scenario: sidebar, Overview, waiting sessions, pages, Customize, Settings,
       await open('compact', 'focus on tests');
     });
     await reset(page);
-    await shot(page, m0({ id: 'm0-dialog-rename', title: 'Rename (/rename) in a scenario session', how: 'Type /rename New title and press Enter', state: 'The widget’s own title field, renamed (a scenario launch registers no session actions)', folders: ['widgets', 'composer'] }), async () => {
-      await open('rename', 'New title');
-    });
-    await reset(page);
     // The catalogue's read is made as a session's message box attaches it (stores/catalog.ts, attachCatalog), so the session
     // is one the rig has not opened, and one the widget backend answers for: the backend holds the scenario's `engine`
     // statuses only (src/main/widgets/fixture-backend.ts), and a read for any other session fails with "unknown app
@@ -1208,7 +1308,7 @@ test('scenario: sidebar, Overview, waiting sessions, pages, Customize, Settings,
       // parts.tsx, Rows); a failed read or Load now draws other words in a `p` and is not this state
       check: async () => {
         await expect(agentsDialog().locator('ul'), 'no list of agents').toHaveCount(0);
-        await inView(agentsDialog().getByText(AGENTS_NONE, { exact: true }), 'the empty list’s line');
+        await inView(agentsDialog().getByText(byM4(M4_WORDS.agentsNone), { exact: true }), 'the empty list’s line');
       },
       after: () => unscriptReads(app),
     });
@@ -1236,6 +1336,8 @@ test('scenario: sidebar, Overview, waiting sessions, pages, Customize, Settings,
       await expect(page.locator('[role="menu"]').first()).toBeVisible({ timeout: 5_000 });
     });
     await reset(page);
+    await m4Scenario(app, page, SID, open);
+    await reset(page);
 
     // last, since it changes the scenario: the timeline played to the point where the approval's session exits
     await shot(page, m0({ id: 'm0-session-interrupted', title: 'A session interrupted with its approval lost', how: 'The scenario’s timeline played to 12 s, then the session opened', state: 'The session that waited on an approval exited: interrupted, one approval lost', folders: ['session', 'attention', 'sidebar', 'request-card'] }), async () => {
@@ -1248,6 +1350,339 @@ test('scenario: sidebar, Overview, waiting sessions, pages, Customize, Settings,
     await maws.cleanup();
   }
 });
+
+// The word cut's M4 in launch 1 (docs/doperpowers/specs/2026-11-16-word-cut-design.md, M4; the rows of
+// 2026-11-16-word-cut/window.md, typed.md and customize.md): the states of the window, the typed dialogs and Customize
+// that the scenario already holds, each reached as a person reaches it (a page, a menu, the keyboard, the pointer) or,
+// for a dialog's other answer, through the widget backend's recorded read, put back after its capture. Every scene sets
+// up what it depends on, so WORDS_ONLY on any one reaches its state.
+// The check that `target`'s words are drawn: a box larger than the 1-pixel box of what is kept for assistive technology
+// alone (`sr-only`), not clipped away, not hidden
+const drawnText = (target: Locator, what: string) =>
+  expect
+    .poll(
+      () =>
+        target.first().evaluate((el) => {
+          const box = el.getBoundingClientRect();
+          const style = getComputedStyle(el);
+          return box.width > 4 && box.height > 4 && style.visibility !== 'hidden' && style.opacity !== '0' && style.clip === 'auto' && style.clipPath === 'none';
+        }),
+      { message: `${what} drawn`, timeout: 3_000 },
+    )
+    .toBe(true);
+// Words painted, not only present: a text node under `target` that holds them laid out at a readable size inside the
+// viewport, with nothing from it up to `target` hiding or clipping it to a screen reader's box (the word cut's fix wave for
+// M4: a box's descendant text can be an `sr-only` label's, or Radix's clipped mirror of a tooltip, under a box that is
+// itself drawn).
+const paintedWords = (target: Locator, words: string, what: string) =>
+  expect
+    .poll(
+      () =>
+        target.first().evaluate((root, words) => {
+          const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+          for (let node = walker.nextNode(); node !== null; node = walker.nextNode()) {
+            if (!(node.textContent ?? '').includes(words)) continue;
+            const range = document.createRange();
+            range.selectNodeContents(node);
+            const box = range.getBoundingClientRect();
+            if (box.width < 4 || box.height < 4 || box.left < 0 || box.top < 0 || box.right > innerWidth || box.bottom > innerHeight) continue;
+            let clear = true;
+            for (let at: Element | null = node.parentElement; at !== null && clear; at = at === root ? null : at.parentElement) {
+              const style = getComputedStyle(at);
+              const frame = at.getBoundingClientRect();
+              clear = style.visibility !== 'hidden' && style.opacity !== '0' && style.clip === 'auto' && style.clipPath === 'none' && (style.overflow === 'visible' || (frame.width > 4 && frame.height > 4));
+            }
+            if (clear) return true;
+          }
+          return false;
+        }, words),
+      { message: `${what}: its words painted`, timeout: 3_000 },
+    )
+    .toBe(true);
+const literal = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+const m4Meta = (id: string, rows: string, title: string, how: string, state: string, folders: string[], hover = false): Meta => m4({ id, title, how, state: `${state} (${rows})`, folders, ...(hover ? { hover } : {}) });
+async function m4Scenario(app: ElectronApplication, page: Page, SID: Record<'running' | 'idle', string>, open: (command: string, rest?: string, session?: string) => Promise<void>) {
+  const meta = m4Meta;
+
+  // ---- Acceptance 1's Projects page: its title, each project's folder path under its name, Hide from sidebar, and no
+  // sentence at its top (W6, W129 to W132)
+  const projectsPage = () => page.locator('[data-region="page"]');
+  await shot(page, meta('m4-projects', 'W6, W129, W130, W131, W132', 'Projects (Acceptance 1)', 'Projects in the sidebar', 'The page’s title in the title bar, the projects the sidebar lists under their head (“In sidebar” on M4, master “Sidebar projects”), each with its folder path under its name and Hide from sidebar; no sentence at the list’s top on M4', ['projects', 'sidebar', 'app']), async () => {
+    await reset(page);
+    await destination(page, 'projects');
+  }, {
+    check: async () => {
+      // the title drawn (both builds draw the Projects page's name; Customize's and Artifacts' stay hidden on M4)
+      const title = page.locator('[data-toolbar] [data-page-title] h1');
+      await expect(title, 'the page’s title in the title bar').toHaveText('Projects', { timeout: 3_000 });
+      await expect(title, 'the title drawn, not kept for assistive technology').not.toHaveClass(/\bsr-only\b/);
+      await drawnText(title, 'the page’s title');
+      const listed = projectsPage().locator(`ul[aria-label="${byM4(M4_WORDS.inSidebar)}"]`);
+      await inView(listed, 'the projects the sidebar lists, under their head');
+      const first = listed.locator(':scope > li').first();
+      // the folder path drawn under the name: the line whose title is the folder shows the folder itself
+      const path = first.locator('div[title^="/"]').first();
+      await inView(path, 'the first project’s folder path under its name');
+      await expect(path, 'the folder path’s words').toHaveText((await path.getAttribute('title'))!, { timeout: 3_000 });
+      await drawnText(path, 'the folder path');
+      const hide = first.getByRole('button', { name: new RegExp(`^${literal(M4_WORDS.hideFromSidebar)}: `) });
+      await inView(hide, 'its Hide from sidebar');
+      await expect(hide, 'Hide from sidebar in words on the button').toHaveText(M4_WORDS.hideFromSidebar, { timeout: 3_000 });
+      await drawnText(hide, 'Hide from sidebar');
+      await paintedWords(hide, M4_WORDS.hideFromSidebar, 'Hide from sidebar'); // the label itself, not the button's box alone
+      const sentence = projectsPage().getByText(M4_WORDS.projectsSentence, { exact: true });
+      if (m4Cut()) await expect(sentence, 'no sentence at the list’s top').toHaveCount(0);
+      else await inView(sentence, 'master’s sentence at the list’s top');
+    },
+  });
+  await reset(page);
+
+  // ---- Add project, the + by the sidebar's projects (W135, W136, W130): its groups; master's description at its top
+  await shot(page, meta('m4-add-project', 'W135, W136, W130', 'Add project', 'The + by PROJECTS in the sidebar', 'The dialog’s groups, the projects the sidebar lists greyed under their head (“In sidebar” on M4, with no tag on each row); master’s description at the top, undrawn on M4', ['sidebar']), async () => {
+    await closeOverlays(page);
+    await sidebar(page).getByRole('button', { name: M4_WORDS.addProject, exact: true }).first().click();
+    await expect(page.getByRole('dialog').first()).toBeVisible({ timeout: 10_000 });
+  }, {
+    check: async () => {
+      const dialog = page.getByRole('dialog').first();
+      const group = dialog.locator(`[role="group"][aria-label="${byM4(M4_WORDS.inSidebar)}"]`);
+      await inView(group, 'the projects the sidebar lists, under their head');
+      // W136: a project already in the sidebar, greyed under the head; its own "In sidebar" tag on master only
+      const listedRow = group.locator('button:disabled').first();
+      await inView(listedRow, 'a project already in the sidebar, greyed');
+      const tag = listedRow.getByText(M4_WORDS.inSidebar.m4, { exact: true });
+      if (m4Cut()) await expect(tag, 'no In sidebar tag on the row').toHaveCount(0);
+      else await inView(tag, 'master’s In sidebar tag on the row');
+      const sentence = dialog.getByText(M4_WORDS.addProjectSentence, { exact: true });
+      if (m4Cut()) await expect(sentence, 'the description kept for assistive technology, undrawn').toHaveClass(/\bsr-only\b/, { timeout: 3_000 });
+      else await inView(sentence, 'master’s description at the top');
+    },
+    after: () => closeOverlays(page),
+  });
+
+  // ---- Acceptance 1's plugin row: name, "by <author>" and the version at rest; the description, with the date, in the
+  // row's note on focus (G215, G216, G218). The plugin CLI stub's designer@designer (user scope, by Owner, Design work).
+  const designer = () => custom(page).locator('[data-plugin-row="designer@designer"]').first();
+  const toDesigner = async () => {
+    await customizeAt(page, 'mine', 'plugins');
+    await designer().scrollIntoViewIfNeeded({ timeout: 10_000 });
+    await letGo(page);
+  };
+  await shot(page, meta('m4-customize-plugin-row', 'G215, G216, G218, N186', 'Customize, a plugin row at rest (Acceptance 1)', 'Customize, Show: Plugins (user configuration); nothing pointed at or focused', 'Designer’s row: its name, “by Owner” and its version at rest, and on M4 its switch; its description waits in the row’s note (master: “by Owner · Design work” at rest, the version with its date)', ['customize', 'widgets/plugins']), toDesigner, {
+    check: async () => {
+      await inView(designer(), 'Designer’s row');
+      await inView(pluginByline(designer(), 'Owner', 'Design work'), 'its byline');
+      const version = designer().locator('[data-plugin-version]');
+      await inView(version, 'its version at the row’s end');
+      if (m4Cut()) {
+        await expect(version, 'the version alone at rest, its date in the note').toHaveText('2.6.0', { timeout: 3_000 });
+        await expect(designer().locator('[data-row-note]'), 'its note waits').toBeHidden({ timeout: 3_000 });
+        await inView(designer().getByRole('switch'), 'its switch');
+      } else {
+        await expect(version, 'master’s version, then its date').toContainText('2.6.0', { timeout: 3_000 });
+        await inView(version.locator('time'), 'master’s date beside the version');
+      }
+    },
+  });
+  await shot(page, meta('m4-customize-plugin-row-focus', 'G216, G218', 'Customize, a plugin row holding the keyboard (Acceptance 1)', 'Customize, Show: Plugins (user configuration); keyboard focus on Designer’s row', 'Designer’s row with the keyboard inside it: on M4 its note open in the row, “Design work · updated …”; master: its description and date at rest', ['customize', 'widgets/plugins', 'ui']), async () => {
+    await toDesigner();
+    await designer().locator('[data-row-open]').first().focus();
+    await page.waitForTimeout(400);
+  }, {
+    check: async () => {
+      await focusIn(designer(), 'Designer’s row')();
+      if (m4Cut()) {
+        const note = designer().locator('[data-row-note][data-open]');
+        await inView(note, 'the row’s note open');
+        await expect(note, 'its description, then its date').toHaveText(new RegExp(`^Design work · ${literal(M4_WORDS.updated(''))}\\S`), { timeout: 3_000 });
+      } else {
+        await inView(pluginByline(designer(), 'Owner', 'Design work'), 'master’s byline with the description');
+        await inView(designer().locator('[data-plugin-version] time'), 'master’s date beside the version');
+      }
+    },
+    after: () => letGo(page),
+  });
+
+  // ---- Customize's Filter menu (P659): on M4 straight onto its choices; master's first line repeats "Filter"
+  await shot(page, meta('m4-customize-filter-menu', 'P659', 'Customize, the plugins’ Filter menu open', 'Customize, Show: Plugins (user configuration), the Filter button', 'The Filter menu’s choices, All plugins chosen; master’s first line “Filter” above them', ['widgets/plugins', 'customize']), async () => {
+    await customizeAt(page, 'mine', 'plugins');
+    await letGo(page);
+    await custom(page).getByRole('button', { name: M4_WORDS.filter, exact: true }).first().click();
+    await expect(page.getByRole('menu').first()).toBeVisible({ timeout: 5_000 });
+  }, {
+    check: async () => {
+      const opened = page.getByRole('menu').first();
+      await inView(opened.getByRole('menuitemradio', { name: M4_WORDS.allPlugins, exact: true }), 'the first choice');
+      const label = opened.getByText(M4_WORDS.filter, { exact: true });
+      if (m4Cut()) await expect(label, 'no first line repeating Filter').toHaveCount(0);
+      else await inView(label, 'master’s first line');
+    },
+    after: () => closeOverlays(page),
+  });
+  await reset(page);
+
+  // ---- Discover: an installed card's mark (G278), the check alone on M4 with "Installed" its name and tooltip (the
+  // mark holding the keyboard), master's check and word; and the Skills catalog with no note at its top (G280)
+  const installed = () => custom(page).locator('[data-catalog-installed]').first();
+  await shot(page, meta('m4-discover-installed', 'G278', 'Customize, Discover, an installed card’s mark holding the keyboard', 'Customize, Discover, Show: Plugins; keyboard focus on the first installed card’s mark (on master, the mark in view)', 'The first card the plugin CLI stub has installed: on M4 its check alone, Installed its tooltip; master’s check and “Installed”', ['customize/discover', 'ui']), async () => {
+    await customizeAt(page, 'discover', 'plugins');
+    await letGo(page);
+    await installed().scrollIntoViewIfNeeded({ timeout: 20_000 });
+    await page.waitForTimeout(400);
+    if (m4Cut()) await installed().focus();
+  }, {
+    check: async () => {
+      await inView(installed(), 'the installed card’s mark');
+      if (m4Cut()) {
+        await expect(installed(), 'the mark named Installed').toHaveAttribute('aria-label', M4_WORDS.installed, { timeout: 3_000 });
+        await expect(installed(), 'no word beside the check').toHaveText('', { timeout: 3_000 });
+        await tipShown(page, installed(), 'the installed mark', installed(), m4Cut)();
+        // the painted tooltip, not Radix's clipped mirror of it: its own words, in frame
+        const tip = page.locator('[data-radix-popper-content-wrapper]').filter({ has: page.getByRole('tooltip') }).first();
+        await expect(page.getByRole('tooltip').first(), 'the tooltip reads Installed').toHaveText(M4_WORDS.installed, { timeout: 3_000 });
+        await paintedWords(tip, M4_WORDS.installed, 'the Installed tooltip');
+      } else await expect(installed(), 'master’s word beside the check').toContainText(M4_WORDS.installed, { timeout: 3_000 });
+    },
+    after: () => letGo(page),
+  });
+  // Discover's home (G267, G272): no Refresh in the toolbar on M4 (the Sources popover keeps its own), and the featured
+  // item's caption "Featured"; master's Refresh and "Featured · From Anthropic"
+  const featured = () => custom(page).locator('section[data-featured]').first();
+  await shot(page, meta('m4-discover-home', 'G267, G272', 'Customize, Discover’s home', 'Customize, Discover, Show: All', 'Discover’s toolbar and the featured item at the top: on M4 no Refresh in the toolbar and the caption “Featured”; master’s Refresh and “Featured · From Anthropic”', ['customize/discover']), async () => {
+    await customizeAt(page, 'discover', 'all');
+    await letGo(page);
+    await expect(featured(), 'the featured item').toBeVisible({ timeout: 20_000 });
+  }, {
+    check: async () => {
+      await inView(featured(), 'the featured item');
+      await inView(featured().getByText(byM4(M4_WORDS.featured), { exact: true }), 'its caption');
+      const refresh = custom(page).locator('[data-catalog-refresh]');
+      if (m4Cut()) await expect(refresh, 'no Refresh in the toolbar').toHaveCount(0);
+      else await inView(refresh, 'master’s Refresh in the toolbar');
+    },
+  });
+  // the top of Discover, Skills: its featured item or a shelf's card, in the frame the scene captures (the grid of every
+  // item sits below the shelves, out of it)
+  const skillCards = () => custom(page).locator('[data-featured], [data-shelf] [data-catalog-card]');
+  await shot(page, meta('m4-discover-skills', 'G280', 'Customize, Discover, Show: Skills', 'Customize, Discover, Show: Skills', 'The Skills catalog’s top with no note on M4; master’s note that items whose contents are not known before install are under Plugins', ['customize/discover']), async () => {
+    await customizeAt(page, 'discover', 'skills');
+    await letGo(page);
+    await soft(skillCards().first(), 'a Skills catalog card', 20_000);
+  }, {
+    check: async () => {
+      await expect(custom(page), 'Discover, Skills').toHaveAttribute('data-customize-show', 'skills', { timeout: 3_000 });
+      // the catalog's content drawn, not its wait or its error (the word cut's fix wave for M4)
+      await inView(skillCards(), 'the Skills catalog’s featured item or first shelf card');
+      await drawnText(skillCards(), 'the Skills catalog’s featured item or first shelf card');
+      const note = custom(page).locator('[data-skills-note]');
+      if (m4Cut()) await expect(note, 'no note at the top').toHaveCount(0);
+      else await inView(note, 'master’s note at the top');
+    },
+  });
+  await reset(page);
+
+  // ---- the sidebar's sort menu (W49): on M4 straight onto its two orders; master's first line "Sort sessions by"
+  await shot(page, meta('m4-sidebar-sort-menu', 'W49', 'Sidebar, the sort menu open', 'The sort button by PROJECTS in the sidebar', 'The menu’s two orders, Priority and Recency; master’s first line “Sort sessions by” above them', ['sidebar']), async () => {
+    await closeOverlays(page);
+    await sidebar(page).getByRole('button', { name: M4_WORDS.sortSessions, exact: true }).first().click();
+    await expect(page.getByRole('menu').first()).toBeVisible({ timeout: 5_000 });
+  }, {
+    check: async () => {
+      const opened = page.getByRole('menu').first();
+      await expect(opened.getByRole('menuitemradio'), 'the two orders').toHaveCount(2, { timeout: 3_000 });
+      await inView(opened.getByRole('menuitemradio').first(), 'the first order');
+      const label = opened.getByText(M4_WORDS.sortBy, { exact: true });
+      if (m4Cut()) await expect(label, 'no first line').toHaveCount(0);
+      else await inView(label, 'master’s first line');
+    },
+    after: () => closeOverlays(page),
+  });
+
+  // ---- the shortcuts window with a search that finds nothing (W127), its description at the top (W125)
+  await shot(page, meta('m4-shortcuts-nomatch', 'W125, W127', 'The shortcuts window, a search that finds nothing', 'Help › Keyboard shortcuts (⌘/), “zzqx” typed in its search', 'The empty search’s line (“Nothing matches” on M4, master “No shortcuts match your search.”) under the window’s description', ['keymap']), async () => {
+    await closeOverlays(page);
+    await menu(app, 'shortcuts.open');
+    const dialog = page.getByRole('dialog').first();
+    await expect(dialog).toBeVisible({ timeout: 10_000 });
+    await dialog.locator('input').first().fill('zzqx');
+    await page.waitForTimeout(600);
+  }, {
+    check: async () => {
+      const dialog = page.getByRole('dialog').first();
+      await expect(dialog.locator('p[role="status"]'), 'the empty search’s line').toHaveText(byM4(M4_WORDS.shortcutsNothing), { timeout: 3_000 });
+      await inView(dialog.getByText(byM4(M4_WORDS.shortcutsDescription), { exact: true }), 'the window’s description');
+    },
+    after: () => closeOverlays(page),
+  });
+
+  // ---- a sidebar row's hover card opened by the keyboard (W69's keyboard form, M4 task 1's fix round): the running
+  // session's row reached with the arrow keys, so its focus is the keyboard's; nothing pointed at. A card opened so draws
+  // the state word at the head of its second line on M4, as master draws it on every card; the pointer's card (sidebar-
+  // hover) leaves the word to the glyph's tooltip on M4. The capture keeps the pointer aside (a `hover` scene: no toast's
+  // press takes the keyboard from the row).
+  let running: Locator | null = null;
+  const card = () => page.locator('[data-hover-card]').first();
+  await shot(page, meta('m4-sidebar-hover-keyboard', 'W69', 'Sidebar, a session row’s hover card opened by the keyboard', 'The running session’s row in the sidebar, reached with ↑ then ↓ from it; the pointer aside', 'The row holding the keyboard, its hover card open: the state word at the head of its second line (M4’s keyboard form; master draws it on every card)', ['sidebar', 'sessions', 'attention'], true), async () => {
+    await closeOverlays(page);
+    await page.mouse.move(W - 2, H - 2);
+    running = await sidebarRow(page, { appSessionId: SID.running });
+    await running.scrollIntoViewIfNeeded({ timeout: 10_000 });
+    await running.focus();
+    await page.keyboard.press('ArrowUp');
+    await page.keyboard.press('ArrowDown');
+    await expect(card(), 'the row’s hover card').toBeVisible({ timeout: 5_000 });
+    await page.waitForTimeout(600);
+  }, {
+    check: async () => {
+      await expect.poll(() => running!.evaluate((el) => el === document.activeElement && el.matches(':focus-visible')), { message: 'the running session’s row holds the keyboard', timeout: 3_000 }).toBe(true);
+      await inView(card(), 'the row’s hover card');
+      const word = await card().locator('[role="img"]').first().getAttribute('aria-label', { timeout: 3_000 });
+      expect(word, 'the state glyph’s word').toBeTruthy();
+      await expect(card().locator('[data-testid="hover-meta"]'), 'the state word at rest at the head of the second line').toHaveText(new RegExp(`^${literal(word!)}( · |$)`), { timeout: 3_000 });
+    },
+    after: async () => {
+      await letGo(page);
+      await closeOverlays(page);
+    },
+  });
+
+  // ---- /mcp with a connector's row pointed at (N148): on M4 what the switch reaches is the row's note; master says it
+  // once, in the dialog's head
+  const mcp = () => dialogOf(page, 'mcp');
+  const server = () => mcp().locator('[data-mcp-server]').first();
+  await shot(page, meta('m4-dialog-mcp-row-pointed', 'N148', 'Connectors dialog (/mcp), a connector’s row pointed at', 'Type /mcp in the idle session and press Enter, then point at the first connector’s row', 'The first row under the pointer: on M4 its note, what a switch here reaches and where the engine records it; master’s head line saying it at rest', ['widgets', 'composer', 'ui'], true), async () => {
+    await closeOverlays(page);
+    await open('mcp', '', SID.idle);
+    await server().hover({ position: { x: 24, y: 10 } });
+    await page.waitForTimeout(1200);
+  }, {
+    check: checks(pointedAt(server(), 'the first connector’s row'), async () => {
+      if (m4Cut()) await expect(server().locator('[data-row-note][data-open]'), 'the row’s note open').toBeVisible({ timeout: 3_000 });
+      else await inView(mcp().locator('[data-widget-note]'), 'master’s head line');
+    }),
+    after: () => closeOverlays(page),
+  });
+
+  // ---- /hooks with a hook from the startup settings (N184): its source "startup", master's "Startup settings (--settings
+  // option)"; the read is pass2/hooks seq 46's, put back after
+  await shot(page, meta('m4-dialog-hooks-source', 'N184', 'Hooks dialog (/hooks), a hook from the startup settings', 'Type /hooks in the idle session and press Enter (the hooks read answered from pass2/hooks seq 46)', 'One PostToolUse hook on Bash, its source “startup” (master “Startup settings (--settings option)”)', ['widgets', 'composer']), async () => {
+    await closeOverlays(page);
+    await scriptRead(app, 'session.getHooksListing', recorded('spikes/protocol-probe/fixtures/pass2/hooks.jsonl', 46));
+    await open('hooks', '', SID.idle);
+  }, {
+    check: async () => {
+      const hooks = dialogOf(page, 'hooks');
+      if (m4Cut()) await inView(hooks.locator('[data-rule-source]').filter({ hasText: new RegExp(`^${literal(M4_WORDS.hookSource.m4)}$`) }), 'the hook’s source');
+      else await inView(hooks.getByText(M4_WORDS.hookSource.master, { exact: true }), 'master’s source label');
+    },
+    after: async () => {
+      await unscriptReads(app);
+      await closeOverlays(page);
+    },
+  });
+}
+// A plugin row's byline: "by <author>" on M4 (G216), master's with the description after it
+const pluginByline = (row: Locator, author: string, description: string) => row.getByText(m4Cut() ? M4_WORDS.by(author) : `${M4_WORDS.by(author)} · ${description}`, { exact: true });
 
 // The word cut's M1 in launch 1 (docs/doperpowers/specs/2026-11-16-word-cut-design.md, M1; the rows of
 // 2026-11-16-word-cut/settings.md): the Settings states a cut row changes that no other scene draws, each reached the way
@@ -1604,6 +2039,7 @@ const PLAYED = [
 // pass3/stop-task: a background shell, a background agent and a workflow, each stopped by the person after its prompt
 const STOPPED = { fixture: 'spikes/protocol-probe/fixtures/pass3/stop-task.jsonl', engineId: '0a1b2c3d-0000-4000-8000-000000000005', title: 'Stop the background work', stops: ['ba3cr5gnx', 'ac2bd8a00d8e492f4', 'wkmzd07jp'] };
 const IDLE = ['Usage reset countdown', 'SDK wire inventory', 'Terminal workflow notes', 'Workstation north star'];
+const IDLE_ENGINE_ID = (i: number) => `0a1b2c3d-0000-4000-8000-0000000001${String(i).padStart(2, '0')}`;
 
 // The turn's line ends its turn, under the answer (board ticket 789); opening it shows the work as runs of calls, one
 // line each, which open in turn (U2a: transcript/view/rows/Divider.tsx, Group.tsx).
@@ -1670,7 +2106,7 @@ test('replay: transcripts, the right column, the Artifacts library and an editor
   const config = join(SCRATCH, 'claude-config');
   rmSync(config, { recursive: true, force: true });
   [...PLAYED, STOPPED].forEach((p, i) => seedSession(config, repo, p.engineId, p.title, `2026-09-29T10:${String(10 + i).padStart(2, '0')}:00.000Z`));
-  IDLE.forEach((title, i) => seedSession(config, i % 2 ? other : repo, `0a1b2c3d-0000-4000-8000-0000000001${String(i).padStart(2, '0')}`, title, `2026-09-29T10:0${i}:00.000Z`));
+  IDLE.forEach((title, i) => seedSession(config, i % 2 ? other : repo, IDLE_ENGINE_ID(i), title, `2026-09-29T10:0${i}:00.000Z`));
   const usage = usageFixture();
   trust(config);
   // a file outside every session's folder, which File › Open picks through the e2e pick seam (src/main/client/e2e-pick.ts).
@@ -1947,6 +2383,35 @@ test('replay: transcripts, the right column, the Artifacts library and an editor
       await openSession(page, ids.agents!);
       await typed(page, 'rename');
       await expect(page.getByRole('dialog').first()).toBeVisible({ timeout: 15_000 });
+    });
+    await reset(page);
+    // A typed title renames at once on both builds (widgets/RenameWidget.tsx). Master's widget then stays open with its
+    // line; M4's closes once the rename took, the new title showing where the session is named (P637). So the build is
+    // read before the dialog is waited on, and the check holds the title on the session's sidebar row on both. The
+    // session is an indexed one never started here, so the rename is the index's override and the record's change reaches
+    // the sidebar as any rename's does (a scenario's widget backend answers a rename without publishing it); its seeded
+    // title comes back after the shot.
+    const RENAMED = 'New title';
+    const renameDialog = () => dialogOf(page, 'rename');
+    const idle = (value(await invoke(page, 'session.list', {})).sessions.find((s) => s.engineSessionId === IDLE_ENGINE_ID(0))?.appId ?? '') as string;
+    const renamedRow = async () => (await sidebarRow(page, { appSessionId: idle as never })).locator('[data-session-title]').filter({ hasText: new RegExp(`^${literal(RENAMED)}$`) });
+    await shot(page, m0({ id: 'm0-dialog-rename', title: 'Rename (/rename) in a session', how: `Type /rename New title in the “${IDLE[0]}” session, never started, and press Enter`, state: 'The session renamed “New title” on its sidebar row; on M4 (P637) no dialog left open, master’s widget open with its line “Renamed · New title”', folders: ['widgets', 'composer', 'sidebar'] }), async () => {
+      if (!idle) throw new Error(`the “${IDLE[0]}” session was not listed by the index`);
+      const m4 = await m4Build(page);
+      await openSession(page, idle);
+      await typed(page, 'rename', RENAMED);
+      if (m4) await expect(await renamedRow(), 'the session renamed').toBeVisible({ timeout: 15_000 });
+      else await expect(renameDialog()).toBeVisible({ timeout: 15_000 });
+    }, {
+      check: async () => {
+        await inView(await renamedRow(), 'the new title on the session’s row');
+        if (m4Cut()) await expect(renameDialog(), 'no rename dialog left open').toHaveCount(0);
+        else await inView(renameDialog().locator('[role="status"]').filter({ hasText: M4_WORDS.renamed(RENAMED) }), 'master’s line in the widget');
+      },
+      after: async () => {
+        await closeOverlays(page);
+        if (idle) value(await invoke(page, 'session.rename', { appSessionId: idle as never, title: IDLE[0]! }));
+      },
     });
     await reset(page);
 
@@ -2792,14 +3257,24 @@ test('round 2: running agents and shells, the queue, a blocked command, Source c
       await tab(created.design!).locator('[data-board-title="broken"]').first().click();
       await soft(tab(created.design!).locator('[data-board-inspector]'), 'the board inspector');
     });
-    await shot(page, m0({ id: 'm0-design-comments', title: 'Design workbench, the comments rail', how: 'The design with two comments, its header’s Comments', state: 'Two threads on the desktop board in the comments rail', folders: ['tools/design', 'src/artifacts/design/editor'] }), async () => {
+    const commentsRail = () => tab(created.design!).locator('[data-deck-rail="comments"]').first();
+    await shot(page, m0({ id: 'm0-design-comments', title: 'Design workbench, the comments rail', how: 'The design with two comments, Comments in its toolbar', state: 'Two threads on the desktop board in the comments rail', folders: ['tools/design', 'src/artifacts/design/editor'] }), async () => {
       if (!(await tab(created.design!).isVisible().catch(() => false))) await openArtifact(created.design!);
-      if ((await tab(created.design!).locator('[data-thread-id], [data-comment-thread]').count()) === 0) {
-        await editDesign(page, created.design!, { op: 'addThread', threadId: 'on-a', boardId: 'desktop', elementId: 'a', body: 'Can the headline sit higher?' });
-        await editDesign(page, created.design!, { op: 'addThread', threadId: 'on-b', boardId: 'desktop', elementId: 'b', body: 'The button reads small here.' });
-      }
-      await page.locator('[data-region="main"] [data-editor-action="comments"]').first().click();
-      await page.waitForTimeout(1200);
+      // the threads as the design's seam reads them, so a retry adds none twice
+      const have = new Set((await threadsOf(page, created.design!)).map((thread) => thread.id));
+      if (!have.has('on-a')) await editDesign(page, created.design!, { op: 'addThread', threadId: 'on-a', boardId: 'desktop', elementId: 'a', body: 'Can the headline sit higher?' });
+      if (!have.has('on-b')) await editDesign(page, created.design!, { op: 'addThread', threadId: 'on-b', boardId: 'desktop', elementId: 'b', body: 'The button reads small here.' });
+      // The workbench's own Comments in its toolbar (design/editor/comments.tsx, DesignCommentButtons), pressed while the
+      // rail is open. Not the header's action: while a thread is open the header draws the comments action as its count
+      // instead, a button with no `data-editor-action` (panel/PanelHeader.tsx, CommentCount), on both builds.
+      const toggle = tab(created.design!).locator('[data-comments-toggle]').first();
+      if ((await toggle.getAttribute('aria-pressed', { timeout: 10_000 })) !== 'true') await toggle.click();
+      await expect(commentsRail(), 'the comments rail').toBeVisible({ timeout: 10_000 });
+    }, {
+      check: async () => {
+        await inView(commentsRail(), 'the comments rail');
+        for (const id of ['on-a', 'on-b']) await inView(commentsRail().locator(`[data-thread="${id}"]`), `the thread ${id} in the rail`);
+      },
     });
     await reset(page);
     await shot(page, r2({ id: 'r2-design-system', title: 'A design system page', how: 'Click the MAWS design system in the Artifacts library', state: 'The built-in MAWS design system: its type samples and components', folders: ['src/artifacts/design-system/page', 'artifacts/design-system', 'library'] }), async () => {
@@ -4517,6 +4992,358 @@ test('the report view repair: the to-human view of recorded sessions, one starte
       await expect(pane(page).locator('.transcript-row[data-kind]').first()).toBeVisible({ timeout: 20_000 });
       await toEnd(page);
     }, { after: async () => void (await invoke(page, 'session.stop', { appSessionId: sid.steer as never, reason: 'stop' })) });
+  } finally {
+    await maws.cleanup();
+  }
+});
+
+// ======================================================================================================================
+// Launch 14: the word cut's M4, on fixtures of its own, so every earlier launch's pictures stay as they were. Four
+// sessions the engine store lists and nothing starts, on a scratch repository (`mods`) with one linked worktree no
+// session uses; the plugin CLI stub with a registry of its own (`m4PluginState`) answering the engine binary's plugin
+// commands; a user skill and a user connector in the engine store; and, for any other invocation of the engine binary (a
+// session's launch), a process that writes nothing until the host gives up on it (session.ts FIRST_OUTPUT_MS, 30 s), so a
+// start stays under way long enough to photograph. The route is set direct, as e2e/sessions-available.spec.ts sets it,
+// so a start reaches the engine binary. The index lists the sessions, so a session's override of a mod can be written
+// (`mods.setSessionOverride`), which the scenario's read-model sessions cannot take (e2e/widgets.spec.ts, P2-C).
+// ======================================================================================================================
+// Three user plugins of one marketplace, each a state M4's plugin row changes: one at rest (atlas), one turned off
+// (quill: G215's switch in the place of "Disabled"), one with no description (bare: P683, its one skill counted in its
+// note). Fixed dates: a row's date reads "Sep 12" past a week, so a before and an after taken on different days draw the
+// same words.
+function m4PluginState(): StubState {
+  const plugins = [
+    { name: 'atlas', version: '1.4.0', description: 'Maps a repository before a change', author: 'Words Rig' },
+    { name: 'quill', version: '0.9.2', description: 'Drafts commit messages from a diff', author: 'Words Rig' },
+    { name: 'bare', version: '2.0.0', description: null, author: 'Words Rig' },
+  ];
+  const at = (name: string, enabled: boolean, lastUpdated: string) => ({ id: `${name}@words-market`, version: plugins.find((p) => p.name === name)!.version, scope: 'user' as const, enabled, projectPath: null, installedAt: '2026-08-01T10:00:00.000Z', lastUpdated });
+  return {
+    marketplaces: [{ name: 'words-market', source: 'github', repo: 'words-rig/words-market', plugins }],
+    installed: [at('atlas', true, '2026-09-12T10:00:00.000Z'), at('quill', false, '2026-09-10T10:00:00.000Z'), at('bare', true, '2026-09-08T10:00:00.000Z')],
+    fail: {},
+  };
+}
+const M4_LAUNCH = ['m4-plugins-mod-override', 'm4-plugins-mod-default', 'm4-plugins-add-menu', 'm4-new-chat-project-menu', 'm4-customize-plugin-off', 'm4-customize-plugin-no-description', 'm4-customize-all-kinds', 'm4-customize-skill-pointed', 'm4-skill-file-gone', 'm4-archive-sheet', 'm4-worktrees-orphan', 'm4-session-info-starting'];
+test('the word cut’s M4: the mods’ rows, Customize’s plugin and skill rows, the archive sheet, worktrees and a start under way', async () => {
+  test.setTimeout(900_000);
+  if (!M4_LAUNCH.some(wanted)) return;
+  const repo = makeRepo('mods');
+  const orphan = join(SCRATCH, 'worktrees', 'mods-spike');
+  mkdirSync(join(SCRATCH, 'worktrees'), { recursive: true });
+  if (!existsSync(orphan)) git(repo, 'worktree', 'add', '--quiet', '-b', 'spike', orphan);
+  const config = join(SCRATCH, 'claude-config-m4');
+  rmSync(config, { recursive: true, force: true });
+  const engineIds = { on: '0f6a7b8c-0000-4000-8000-000000000601', plain: '0f6a7b8c-0000-4000-8000-000000000602', archive: '0f6a7b8c-0000-4000-8000-000000000603', start: '0f6a7b8c-0000-4000-8000-000000000604' } as const;
+  seedSession(config, repo, engineIds.on, 'Mark what matters', '2026-09-30T12:00:00.000Z');
+  seedSession(config, repo, engineIds.plain, 'Plain notes', '2026-09-30T12:01:00.000Z');
+  seedSession(config, repo, engineIds.archive, 'An old spike', '2026-09-30T12:02:00.000Z');
+  seedSession(config, repo, engineIds.start, 'Start me later', '2026-09-30T12:03:00.000Z');
+  trust(config);
+  // a user connector beside the trust (the engine's global config, `$CLAUDE_CONFIG_DIR/.claude.json`) and a user skill
+  const globalConfig = JSON.parse(readFileSync(join(config, '.claude.json'), 'utf8')) as Record<string, unknown>;
+  writeFileSync(join(config, '.claude.json'), `${JSON.stringify({ ...globalConfig, mcpServers: { 'notes-index': { type: 'stdio', command: 'node', args: ['server.js'] } } }, null, 2)}\n`);
+  mkdirSync(join(config, 'skills', 'release-notes'), { recursive: true });
+  writeFileSync(join(config, 'skills', 'release-notes', 'SKILL.md'), '---\nname: release-notes\ndescription: Drafts release notes from the merged pull requests\n---\nWrite the notes.\n');
+  // a second user skill, the one whose file N189's scene removes and puts back
+  const draft = join(config, 'skills', 'old-draft');
+  const writeDraft = () => {
+    mkdirSync(draft, { recursive: true });
+    writeFileSync(join(draft, 'SKILL.md'), '---\nname: old-draft\ndescription: An early draft of the release checklist\n---\nDraft the checklist.\n');
+  };
+  writeDraft();
+  const usage = usageFixture();
+  const userData = join(SCRATCH, 'profile-m4');
+  mkdirSync(userData, { recursive: true });
+  const cli = writePluginCliStub(userData, m4PluginState());
+  const engine = join(userData, 'm4-engine');
+  writeFileSync(engine, `#!/bin/sh\n# the plugin commands and the version probe: the plugin CLI stub\nif [ "$1" = "plugin" ] || { [ "$#" = 1 ] && [ "$1" = "--version" ]; }; then exec '${cli.bin}' "$@"; fi\n# a session's launch: held, writing nothing, until the host gives up on it\nexec sleep 90\n`, { mode: 0o755 });
+  const maws = await launchMaws({
+    userData,
+    prepare: noGh,
+    env: BASE_ENV({ MAWS_ENGINE_REPLAY: '1', CLAUDE_CONFIG_DIR: config, MAWS_CLAUDE_USAGE_DIR: usage, PATH: NO_GH_PATH, MAWS_E2E_ENGINE_BIN: engine }),
+  });
+  const { app, page } = maws;
+  try {
+    await size(maws);
+    await light(page);
+    await m4Build(page).catch((error: unknown) => setupFailed('reading the build (M4)', error));
+    try {
+      value(await invoke(page, 'settings.set', { gateway: { defaultRoute: 'direct' } } as never));
+    } catch (error) {
+      setupFailed('the direct route', error);
+    }
+    const ids: Partial<Record<keyof typeof engineIds, string>> = {};
+    await expect.poll(async () => {
+      const { sessions } = value(await invoke(page, 'session.list', {}));
+      for (const key of Object.keys(engineIds) as (keyof typeof engineIds)[]) ids[key] = sessions.find((s) => s.engineSessionId === engineIds[key])?.appId ?? '';
+      return Object.values(ids).every(Boolean);
+    }, { timeout: 30_000 }).toBe(true).catch((error: unknown) => setupFailed('the four sessions’ index', error));
+    await dismissToasts(page);
+    const idOf = (key: keyof typeof engineIds): string => {
+      if (!ids[key]) throw new Error(`the ${key} session was not listed by the index`);
+      return ids[key]!;
+    };
+    const opened = async (key: keyof typeof engineIds) => {
+      await openSession(page, idOf(key));
+      await m4Build(page);
+    };
+
+    // ---- the mods' rows in /plugins (G225): a session's override opens its row by itself; with none the row stays closed
+    // (master draws the override's choices at rest on every row). The override is the index's, written before the
+    // dialog opens, so the row reads it as it mounts.
+    const MOD = 'maws.to-human';
+    const modRow = () => dialogOf(page, 'plugins').locator(`[data-mod-row="${MOD}"]`).first();
+    const toMods = async (key: 'on' | 'plain', override: 'on' | 'inherit') => {
+      await closeOverlays(page);
+      value(await invoke(page, 'mods.setSessionOverride', { appSessionId: idOf(key), id: MOD, value: override } as never));
+      await opened(key);
+      await typed(page, 'plugins');
+      await expect(dialogOf(page, 'plugins')).toBeVisible({ timeout: 15_000 });
+      await modRow().scrollIntoViewIfNeeded({ timeout: 15_000 });
+      await letGo(page);
+    };
+    await shot(page, m4Meta('m4-plugins-mod-override', 'G225', '/plugins, a mod’s row with this session’s override set', 'The session whose To-human override is On (mods.setSessionOverride), /plugins typed in its message box, scrolled to Built in', 'The To-human row opened by itself, its override’s choices with On chosen (master: the choices at rest on the row)', ['widgets/plugins', 'widgets']), () => toMods('on', 'on'), {
+      check: async () => {
+        await inView(modRow(), 'the To-human row');
+        await expect(modRow().locator('input[type="radio"][value="on"]'), 'this session’s override, On').toBeChecked({ timeout: 3_000 });
+        await inView(modRow().getByRole('radiogroup'), 'the override’s choices');
+        if (m4Cut()) await expect(modRow().locator('[data-row-open]'), 'the row open by itself').toHaveAttribute('aria-expanded', 'true', { timeout: 3_000 });
+      },
+      after: async () => {
+        await closeOverlays(page);
+        await invoke(page, 'mods.setSessionOverride', { appSessionId: idOf('on'), id: MOD, value: 'inherit' } as never);
+      },
+    });
+    await shot(page, m4Meta('m4-plugins-mod-default', 'G225', '/plugins, a mod’s row with no override', 'A session with no override, /plugins typed in its message box, scrolled to Built in', 'The To-human row closed at rest, no override’s choices on M4 (master: the choices at rest, Default chosen)', ['widgets/plugins', 'widgets']), () => toMods('plain', 'inherit'), {
+      check: async () => {
+        await inView(modRow(), 'the To-human row');
+        if (m4Cut()) {
+          await expect(modRow().locator('[data-row-open]'), 'the row closed').toHaveAttribute('aria-expanded', 'false', { timeout: 3_000 });
+          await expect(modRow().getByRole('radiogroup'), 'no override’s choices').toHaveCount(0);
+        } else {
+          await inView(modRow().getByRole('radiogroup'), 'master’s override’s choices at rest');
+          await expect(modRow().locator('input[type="radio"][value="inherit"]'), 'Default chosen').toBeChecked({ timeout: 3_000 });
+        }
+      },
+      after: () => closeOverlays(page),
+    });
+    // ---- /plugins' Add menu open (P655): Discover plugins its first row on M4, the head with no button of its own;
+    // master's head keeps its Open Discover button, its menu the two marketplace rows
+    const addMenu = () => page.getByRole('menu').first();
+    await shot(page, m4Meta('m4-plugins-add-menu', 'P655', '/plugins, the Add menu open', 'A session’s /plugins typed in its message box, the head’s Add button pressed', 'The Add menu open: Discover plugins, Add marketplace, Manage marketplaces on M4 and no Open Discover in the head; master’s Open Discover button in the head, the menu’s two marketplace rows', ['widgets/plugins', 'widgets']), async () => {
+      await closeOverlays(page);
+      await opened('plain');
+      await typed(page, 'plugins');
+      await expect(dialogOf(page, 'plugins')).toBeVisible({ timeout: 15_000 });
+      await letGo(page);
+      await dialogOf(page, 'plugins').getByRole('button', { name: M4_WORDS.add, exact: true }).first().click();
+    }, {
+      check: async () => {
+        await inView(addMenu(), 'the Add menu');
+        const head = dialogOf(page, 'plugins').locator('button[data-open-discover]');
+        if (m4Cut()) {
+          const first = addMenu().getByRole('menuitem').first();
+          await expect(first, 'Discover plugins first').toHaveAttribute('data-open-discover', { timeout: 3_000 });
+          await expect(first, 'Discover plugins first').toHaveAccessibleName(M4_WORDS.discoverPlugins, { timeout: 3_000 });
+          await expect(head, 'no Open Discover in the head').toHaveCount(0);
+        } else await inView(head, 'master’s Open Discover in the head');
+      },
+      after: () => closeOverlays(page),
+    });
+    await reset(page);
+
+    // ---- Customize, user configuration, over this launch's registry
+    const plugin = (name: string) => custom(page).locator(`[data-plugin-row="${name}@words-market"]`).first();
+    const toPlugin = async (name: string) => {
+      await customizeAt(page, 'mine', 'plugins');
+      await plugin(name).scrollIntoViewIfNeeded({ timeout: 10_000 });
+      await letGo(page);
+    };
+    await shot(page, m4Meta('m4-customize-plugin-off', 'G215, N186', 'Customize, a plugin turned off', 'Customize, Show: Plugins (user configuration); nothing pointed at or focused', 'Quill’s row, turned off: on M4 its switch off at the row’s end; master’s “Disabled” badge after its name', ['customize', 'widgets/plugins']), () => toPlugin('quill'), {
+      check: async () => {
+        await inView(plugin('quill'), 'Quill’s row');
+        const badge = plugin('quill').getByText(M4_WORDS.disabled, { exact: true });
+        if (m4Cut()) {
+          await expect(plugin('quill').getByRole('switch'), 'its switch off').toHaveAttribute('aria-checked', 'false', { timeout: 3_000 });
+          await expect(badge, 'no Disabled badge').toHaveCount(0);
+        } else await inView(badge, 'master’s Disabled badge');
+      },
+    });
+    await shot(page, m4Meta('m4-customize-plugin-no-description', 'P683, G216, G218', 'Customize, a plugin with no description, holding the keyboard', 'Customize, Show: Plugins (user configuration); keyboard focus on Bare’s row', 'Bare’s row (its manifest has no description) with the keyboard inside it: on M4 its note open, its skills counted, “1 skill · updated …”; master: “by Words Rig · 1 skill” at rest', ['customize', 'widgets/plugins', 'ui']), async () => {
+      await toPlugin('bare');
+      await plugin('bare').locator('[data-row-open]').first().focus();
+      await page.waitForTimeout(400);
+    }, {
+      check: async () => {
+        await focusIn(plugin('bare'), 'Bare’s row')();
+        if (m4Cut()) {
+          const note = plugin('bare').locator('[data-row-note][data-open]');
+          await expect(note, 'the row’s note open').toBeVisible({ timeout: 3_000 });
+          await expect(note, 'its skills counted').toContainText(M4_WORDS.skills(1));
+        } else await inView(plugin('bare').getByText(`${M4_WORDS.by('Words Rig')} · ${M4_WORDS.skills(1)}`, { exact: true }), 'master’s byline with the skills counted');
+      },
+      after: () => letGo(page),
+    });
+    await shot(page, m4Meta('m4-customize-all-kinds', 'G215, G216, G218, G225, G248', 'Customize, My items (All), its plugins, mods and skills', 'Customize in the sidebar, Show: All (user configuration)', 'The plugins, the mods and the skills each in its row form at rest, each row’s kind word in one column (on M4 a plugin’s switch after it); the connector below them, out of frame', ['customize', 'widgets/plugins', 'widgets/skills', 'customize/connectors']), async () => {
+      await customizeAt(page, 'mine', 'all');
+      await letGo(page);
+    }, {
+      check: async () => {
+        for (const kind of ['plugin', 'mod', 'skill'] as const) await inView(custom(page).locator(`[data-kind-word="${kind}"]`), `a ${kind}’s row`);
+      },
+    });
+    const skill = () => custom(page).locator('[data-skill-row="release-notes"]').first();
+    await shot(page, m4Meta('m4-customize-skill-pointed', 'G248', 'Customize, a skill row pointed at', 'Customize, Show: Skills (user configuration); the pointer on the release-notes skill’s row', 'The user skill’s row under the pointer: on M4 its note open in the row, its description; master: the description at rest', ['customize', 'widgets/skills', 'ui'], true), async () => {
+      await customizeAt(page, 'mine', 'skills');
+      await skill().scrollIntoViewIfNeeded({ timeout: 10_000 });
+      await letGo(page);
+      await skill().hover({ position: { x: 80, y: 12 } });
+      await page.waitForTimeout(1200);
+    }, {
+      check: checks(pointedAt(skill(), 'the skill’s row'), async () => {
+        const description = 'Drafts release notes from the merged pull requests';
+        if (m4Cut()) {
+          const note = skill().locator('[data-row-note][data-open]');
+          await expect(note, 'the row’s note open').toBeVisible({ timeout: 3_000 });
+          await expect(note, 'its description').toHaveText(description);
+        } else await inView(skill().getByText(description, { exact: true }), 'master’s description at rest');
+      }),
+      after: () => letGo(page),
+    });
+
+    // ---- a skill's file gone (N189): its detail open, its folder removed, then Open in › Finder. Main reads the place's
+    // inventory again and the file before it calls any app (main/customization/skill-file.ts `admitSkillFile`), so a file
+    // no longer there opens nothing and answers `missing`, on both builds. M4's line is short with Retry beside it;
+    // master's says to refresh. The skill is written back after the capture.
+    const gone = () => custom(page).locator('[data-skill-detail="old-draft"]').first();
+    const refusal = () => gone().locator('[data-skill-refusal]').first();
+    await shot(page, m4Meta('m4-skill-file-gone', 'N189', 'Customize, a skill’s detail after Open in found its file gone', 'Customize, Show: Skills (user configuration), the old-draft skill’s detail; its folder removed, then Open in › Finder (nothing opens: main finds the file gone)', 'The detail’s line in the danger tone: on M4 “This skill’s file is no longer here.” with Retry beside it; master’s sentence asking to refresh', ['customize', 'widgets/skills', 'open-in']), async () => {
+      await closeOverlays(page);
+      writeDraft();
+      await customizeAt(page, 'mine', 'skills');
+      const row = custom(page).locator('[data-skill-row="old-draft"]').first();
+      await row.scrollIntoViewIfNeeded({ timeout: 10_000 });
+      await openItem(row);
+      await expect(gone(), 'the skill’s detail').toBeVisible({ timeout: 10_000 });
+      rmSync(draft, { recursive: true, force: true });
+      await gone().locator('[data-open-in-trigger]').first().click();
+      const finder = page.locator('[role="menu"] [data-open-in="finder"]').first();
+      await expect(finder, 'Open in’s Finder row').toBeVisible({ timeout: 10_000 });
+      await finder.click();
+      await expect(refusal(), 'the refusal under the head').toBeVisible({ timeout: 10_000 });
+      await pointerAside(page);
+    }, {
+      check: async () => {
+        // the alert is the refusal itself on master (one paragraph with both) and a paragraph inside it on M4
+        const said = gone().locator('[data-skill-refusal][role="alert"], [data-skill-refusal] [role="alert"]').first();
+        await inView(said, 'the refusal');
+        await expect(said, 'the refusal’s words').toHaveText(byM4(M4_WORDS.skillGone), { timeout: 3_000 });
+        const retry = refusal().getByRole('button', { name: M4_WORDS.retry, exact: true });
+        if (m4Cut()) await inView(retry, 'Retry beside the line');
+        else await expect(retry, 'no Retry on master').toHaveCount(0);
+      },
+      after: async () => {
+        writeDraft();
+        await closeOverlays(page);
+      },
+    });
+    await reset(page);
+
+    // ---- the archive sheet (W146) of a session on this Mac: what archiving does in its shortest words on M4
+    await shot(page, m4Meta('m4-archive-sheet', 'W146', 'The archive sheet', 'Right-click a session in the sidebar, Archive', 'The sheet’s paragraph: on M4 “Stops it and hides it. Find it again under Archived sessions.”; master’s sentence on the engine process, the project, the transcript and the worktree', ['sessions', 'sidebar']), async () => {
+      await closeOverlays(page);
+      const row = await sidebarRow(page, { appSessionId: idOf('archive') });
+      await row.click({ button: 'right' });
+      await page.getByRole('menuitem', { name: M4_WORDS.archive, exact: true }).click();
+      await expect(page.getByRole('dialog').first()).toBeVisible({ timeout: 10_000 });
+      await pointerAside(page);
+    }, {
+      check: async () => {
+        const sheet = page.getByRole('dialog').first();
+        if (m4Cut()) await inView(sheet.getByText(M4_WORDS.archiveBody.m4, { exact: true }), 'the sheet’s paragraph');
+        else await inView(sheet.getByText(new RegExp(`^${literal(M4_WORDS.archiveBody.master)}`)), 'master’s paragraph');
+      },
+      after: () => closeOverlays(page),
+    });
+
+    // ---- the worktrees window (W155): a linked worktree no session uses, with nothing under it on M4
+    const worktrees = () => page.getByRole('dialog').first().locator('ul[aria-label="Worktrees"]');
+    const spare = () => worktrees().locator(':scope > li').filter({ hasText: orphan }).first();
+    await shot(page, m4Meta('m4-worktrees-orphan', 'W155', 'The worktrees window, a worktree no session uses', 'Right-click the project in the sidebar, Worktrees…', 'The main checkout with its sessions, and the linked worktree mods-spike with no session: nothing under it on M4 (master: Sessions, then “No session”)', ['sessions', 'sidebar']), async () => {
+      await closeOverlays(page);
+      await sidebar(page).locator('[data-kind="project"] [data-project-line]').first().click({ button: 'right' });
+      await page.getByRole('menuitem', { name: M4_WORDS.worktreesItem, exact: true }).click();
+      await expect(spare(), 'the linked worktree’s row').toBeVisible({ timeout: 15_000 });
+      await pointerAside(page);
+    }, {
+      check: async () => {
+        await inView(spare(), 'the linked worktree’s row');
+        const none = spare().getByText(M4_WORDS.noSession, { exact: true });
+        if (m4Cut()) {
+          await expect(none, 'no “No session” line').toHaveCount(0);
+          await expect(spare().getByText(M4_WORDS.sessionsLabel, { exact: true }), 'no Sessions label').toHaveCount(0);
+        } else await inView(none, 'master’s No session');
+      },
+      after: () => closeOverlays(page),
+    });
+    await reset(page);
+
+    // ---- New chat's project menu (C70): its last action in the chip's words on M4, "No project"; master's sentence. Here,
+    // on the index, whose New chat writes a setup intent (sessions/connect.ts); launch 1's scenario mints an id with none
+    // (app/scenario-session-creator.ts) and draws no project row. The new chat is the one intent New chat added, opened
+    // over the plain session, so its project is chosen and the action is offered; only that chat's tab is closed after.
+    const intents = async () => value(await invoke(page, 'session.intent.list', undefined)).intents.map((intent) => intent.appSessionId as string);
+    let before: Set<string> | null = null; // read once, by the first attempt: a retry's New chat reuses its empty chat (U13a)
+    let chat: string | null = null;
+    const newChat = () => pane(page).locator(`[data-composer="${chat}"]`);
+    const chooser = () => page.getByRole('dialog', { name: M4_WORDS.chooseProject, exact: true });
+    await shot(page, m4Meta('m4-new-chat-project-menu', 'C70', 'New chat, the project menu open', 'A session in front, File › New chat (⌘N), then the new chat’s project chip pressed', 'The project menu over the new chat: the projects, this launch’s project ticked, then New project and the last action (“No project” on M4, master “Don\'t work in a project”)', ['composer', 'composer/frame']), async () => {
+      await closeOverlays(page);
+      await opened('plain');
+      const known = (before ??= new Set(await intents()));
+      await menu(app, 'session.new');
+      await expect.poll(async () => {
+        const made = (await intents()).find((id) => !known.has(id));
+        chat = made === undefined ? null : await addressed(page, made);
+        return chat;
+      }, { message: 'New chat’s setup intent', timeout: 10_000 }).not.toBeNull();
+      await expect(newChat(), 'the new chat’s tab shown').toBeVisible({ timeout: 10_000 });
+      const row = pane(page).locator('[data-project-row]').first();
+      await expect(row, 'the new chat’s project row').toBeVisible({ timeout: 10_000 });
+      await page.waitForTimeout(800);
+      await row.locator('button[aria-haspopup="dialog"]').first().click();
+    }, {
+      check: async () => {
+        await inView(chooser(), 'the project menu');
+        await inView(chooser().getByRole('option', { name: byM4(M4_WORDS.noProject), exact: true }), 'the menu’s last action');
+      },
+      after: async () => {
+        await closeOverlays(page);
+        // only the chat this scene made, and only while it is the tab in front
+        if (chat !== null && (await newChat().isVisible())) await menu(app, 'tab.close');
+        await page.waitForTimeout(500);
+      },
+    });
+    await reset(page);
+
+    // ---- a start under way (P523), in Session info's Refresh line, one of the M3 surfaces the dialogs' spinner reaches:
+    // Refresh pressed on a session nothing runs, its launch held by the engine binary that writes nothing. Last, since the
+    // start ends refused once the host gives up on it.
+    const gesture = () => surface(page, 'session-info').locator('[data-dormant-gesture]').first();
+    await shot(page, m4Meta('m4-session-info-starting', 'P523', 'Session info while a start runs', 'A session nothing runs, View › More surfaces › Session info, Refresh pressed (its launch held: the engine binary writes nothing)', 'The Refresh line while the start runs: on M4 the quiet spinner named Starting… in the button’s place; master’s words “Starting…”', ['tools/session-info', 'widgets', 'panel']), async () => {
+      await closeOverlays(page);
+      await opened('start');
+      await sideSurface(app, page, 'session-info');
+      await gesture().getByRole('button', { name: M4_WORDS.refresh, exact: true }).click();
+      await page.waitForTimeout(800);
+    }, {
+      check: async () => {
+        await expect(gesture().getByRole('button', { name: M4_WORDS.refresh, exact: true }), 'no Refresh while the start runs').toHaveCount(0);
+        if (m4Cut()) await inView(gesture().getByRole('progressbar', { name: M4_WORDS.starting, exact: true }), 'the quiet spinner');
+        else await inView(gesture().locator('[role="status"]').filter({ hasText: new RegExp(`^${literal(M4_WORDS.starting)}$`) }), 'master’s Starting…');
+      },
+    });
   } finally {
     await maws.cleanup();
   }

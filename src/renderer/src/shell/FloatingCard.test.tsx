@@ -378,6 +378,7 @@ describe('the floating card in the Shell', () => {
     const height = Number.parseInt(shown.style.height);
     expect([width, height]).toEqual([420, 420]); // 420 × 60 % of 700
     expect([...shown.querySelectorAll<HTMLElement>('[data-card-resize]')].map((handle) => handle.dataset.cardResize)).toEqual(['top', 'left', 'top-left']);
+    expect([...shown.querySelectorAll<HTMLElement>('[data-card-resize]')].some((handle) => handle.hasAttribute('title')), 'the word cut (W174): no tooltip on the edges').toBe(false);
     const corner = shown.querySelector<HTMLElement>('[data-card-resize="top-left"]')!;
     act(() => void fireEvent.pointerDown(corner, { pointerId: 1, button: 0, clientX: 500, clientY: 500 }));
     act(() => void fireEvent.pointerMove(corner, { pointerId: 1, clientX: 460, clientY: 470 }));

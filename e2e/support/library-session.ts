@@ -14,6 +14,7 @@ import { StoreFixture } from '../../test/support/store-fixture';
 import { launchMaws, type MawsLaunch } from './launch';
 import { SideJournal } from './side-replay';
 import { newChatIn, openProject } from './sidebar';
+import { expectNewChatInFront } from './screen-reader-only';
 
 export const PARENT = 'e3e50000-0000-4000-8000-0000000000b1';
 export const CHILD = 'e3e50000-0000-4000-8000-0000000000b2';
@@ -78,7 +79,7 @@ export async function startSessionCase(build: (cwd: string) => SideJournal[], en
     const project = value(await invoke(page, 'session.projects.add', { directory: repo.root }));
     await openProject(page, project.name);
     await newChatIn(page, project.name);
-    await expect(page.getByRole('heading', { name: `New chat in ${project.name}` })).toBeVisible();
+    await expectNewChatInFront(page, project.name); // the word cut (W86): a screen reader's heading
     const parent = value(await invoke(page, 'session.intent.list', undefined)).intents.at(-1)!.appSessionId;
     value(await invoke(page, 'session.intent.patch', { appSessionId: parent, patch: { gateway: 'direct' } }));
     value(await invoke(page, 'session.start', { appSessionId: parent, message: { content: FIRST_PROMPT, display: FIRST_PROMPT }, options: {} }));
@@ -139,7 +140,7 @@ export async function openDraftCase(): Promise<DraftCase> {
     const project = value(await invoke(page, 'session.projects.add', { directory: repo.root }));
     await openProject(page, project.name);
     await newChatIn(page, project.name);
-    await expect(page.getByRole('heading', { name: `New chat in ${project.name}` })).toBeVisible();
+    await expectNewChatInFront(page, project.name); // the word cut (W86): a screen reader's heading
     const parent = value(await invoke(page, 'session.intent.list', undefined)).intents.at(-1)!.appSessionId;
     value(await invoke(page, 'session.intent.patch', { appSessionId: parent, patch: { gateway: 'direct' } }));
     const start = async (journal: SideJournal, prompt: string) => {

@@ -9,7 +9,7 @@
 // journal of its own (e2e/support/side-replay.ts's builder), started over B's machine.sock as an app's composer starts
 // one (`session.create`, `.intent.patch`, `.start`), and listed through sminos. A is launched twice over one profile:
 //   1. through the hub: the dev session's map sends B's advertised address to a closed port, so the link comes `up` over
-//      the relay; B's listed row reaches A's org rows and sidebar, its hover reads "via the hub", and a click opens it in
+//      the relay; B's listed row reaches A's org rows and sidebar, machines.list says the relay carrier and its hover names B, and a click opens it in
 //      A's pane (M2's opener) with B's history; then A drives it: a send that B's transcript records and whose reply
 //      streams to A as deltas, a permission card A answers, a pasted image B's transcript records;
 //      then (M4) a text file dropped into the composer goes up to B's desk-uploads and the message names its path there;
@@ -25,8 +25,8 @@
 //      ⌃C.
 //      A runs this launch with no harness confirmation, so the owner's terminal and forward ask nothing: a step-up
 //      would stop the act at a sheet nobody answers;
-//   2. directly: the map sends it to B's listener, so the link comes `up` over the direct carrier; the hover reads
-//      "direct (tailnet)" and the pane shows B's history again; then (M5a) at A's ask B's session makes two artifacts
+//   2. directly: the map sends it to B's listener, so the link comes `up` over the direct carrier (machines.list
+//      says it; the word cut, W70, took the carrier from the hover) and the pane shows B's history again; then (M5a) at A's ask B's session makes two artifacts
 //      through its `maws` tools (a text file of B's checkout as a File artifact, and an HTML page), linked to it on B:
 //      the session's Artifacts tool in A lists them and reads the text; a rename in A's Library on B shows in B's own
 //      library (read over B's machine.sock); Export › PDF of the page renders on B and Save As lands it in A's folder
@@ -288,7 +288,8 @@ async function expandRegistryProject(page: Page, id: string): Promise<void> {
   await expandSidebarRow(page, sidebarOf(page).locator(`[data-kind="project"][data-tree-id="p:${(await keyOf())!}"]`));
 }
 const sessionRow = (page: Page, address: string) => sidebarOf(page).locator(`[role="treeitem"][data-tree-id="s:${address}"]`);
-// The hover card's machine line for a row (P5 O7 M2, A2): the machine's name and its carrier.
+// The hover card's machine line for a row (P5 O7 M2, A2): the machine's name (the word cut, W70, took the carrier from
+// it; the scene reads the carrier from `machines.list`).
 async function hoverMachineLine(page: Page, row: ReturnType<typeof sessionRow>, expected: string): Promise<void> {
   const card = page.locator('[data-hover-card]');
   await expect(async () => {
@@ -327,14 +328,14 @@ async function dropTextFile(page: Page, file: { name: string; content: string })
 // The machine's path of an upload a written message mentions (`@<path relative to the working directory>`), or null.
 const uploadMention = (written: unknown, app: string): string | null => new RegExp(`@(\\.claude/desk-uploads/${app}/[^\\s"\\\\]+)`).exec(JSON.stringify(written))?.[1] ?? null;
 // A New chat tab's machine menu, B chosen in it (sessions/remote-spawn.ts: the up RL2 machines with a checkout of the
-// tab's org project), and the line naming B's lane B under the row.
+// tab's org project); the chip names B (the word cut, C67, took the line under the row that said it again).
 async function chooseMachine(page: Page, name: string): Promise<void> {
   const trigger = page.getByRole('button', { name: 'Machine This Mac', exact: true });
   await expect(trigger, 'the machine menu, once the project’s org project is known').toBeEnabled({ timeout: 30_000 });
   await trigger.click();
   await page.getByRole('dialog', { name: 'Choose a machine' }).getByRole('menuitemradio', { name, exact: true }).click({ timeout: 30_000 });
   await expect(page.getByRole('button', { name: `Machine ${name}`, exact: true })).toBeVisible();
-  await expect(main(page).getByText(`Lane B on ${name} · ${name}’s inference route`)).toBeVisible();
+  await expect(main(page).getByText(/^Lane B on /), 'C67: no line under the row names the machine again').toHaveCount(0);
 }
 // "+ Session" in a project: its New chat tab, and the intent the tab holds (A's own), in the mode B's journals and
 // B's ceiling take (`default`; the composer's mode is what a spawn sends).
@@ -625,12 +626,12 @@ test('A reaches B’s mawsd over RL2, through the hub and then directly, and dri
 
     // The row in A's sidebar, under its project's row: B's checkout is declared on B and its `.smns` names PROJECT, so
     // B's projects record lists the project and A has a row of it (the project registry, Interfaces §J.1); its hover
-    // names B's carrier; a click opens it in A's pane, which reads B's history over the link.
+    // names B; a click opens it in A's pane, which reads B's history over the link.
     await keepBatches(page);
     await expandRegistryProject(page, PROJECT);
     const row = sessionRow(page, address);
     await expect(row, `B's row in A's sidebar\n${mainSaid(page)}`).toBeVisible({ timeout: 30_000 });
-    await hoverMachineLine(page, row, `${B_NAME} · via the hub`);
+    await hoverMachineLine(page, row, B_NAME); // W70: the name alone; the relay carrier is machines.list's, read above
     // UX wave U7a (O-38 with #559, O-16; docs/doperpowers/plans/2026-11-12-ux-wave-U7-sidebar-title-bar-destinations.md,
     // M4; A2, A3): the row, only listed here, opens as a local row does. Its menu begins Open, Open in new tab, Hide (then
     // Share and Add owner where the row has them); ⌘-click opens it through lane B's opener in a tab of its own, which
@@ -1099,7 +1100,7 @@ test('A reaches B’s mawsd over RL2, through the hub and then directly, and dri
     await expandRegistryProject(again, PROJECT); // under its project's row, as in the first launch
     const rowAgain = sessionRow(again, address);
     await expect(rowAgain).toBeVisible({ timeout: 30_000 });
-    await hoverMachineLine(again, rowAgain, `${B_NAME} · direct (tailnet)`);
+    await hoverMachineLine(again, rowAgain, B_NAME); // W70: the name alone; the direct carrier is machines.list's, read above
     await rowAgain.click();
     await expect(main(again).getByText(IMAGE_REPLY).first(), `B's history over the direct carrier\n${mainSaid(again)}`).toBeVisible({ timeout: 60_000 });
 
@@ -1706,7 +1707,7 @@ test('A reaches B’s mawsd over RL2, through the hub and then directly, and dri
       );
       const field = sidebarOf(again).getByRole('searchbox', { name: 'Search projects and sessions' });
       await field.fill(SEARCHED);
-      await sidebarOf(again).getByRole('button', { name: `Search in conversations for ‘${SEARCHED}’`, exact: true }).click();
+      await sidebarOf(again).getByRole('button', { name: 'Search inside conversations', exact: true }).click(); // W41: the query is the field's
       const palette = again.getByRole('dialog', { name: 'Command palette' });
       await expect(palette).toBeVisible();
       // B's hits are a group headed by B's name once a machine other than this Mac has any; its wrapper names B's ref
@@ -2525,8 +2526,9 @@ test('M9: "+ Session" on B with no registered checkout sets its folder up there:
       await expect(placesMenu(page).getByPlaceholder('Search projects')).toBeVisible();
       await placeItem(page, 'New project').click();
       await quoting(expect(sheet, 'B’s folder sheet').toBeVisible({ timeout: 30_000 }), async () => `the dialogs: ${(await page.getByRole('dialog').allInnerTexts().catch(() => [])).join(' | ') || 'none'}\n${mainSaid(page)}`);
-      await expect(sheet, 'the privacy warning first').toContainText('Private folders macOS protects');
       const folders = sheet.getByRole('list', { name: `Folders on ${B_NAME}` });
+      await expect(folders, 'the folders first: the word cut (W166) took the privacy paragraph before them').toBeVisible();
+      await expect(sheet).not.toContainText('Private folders macOS protects');
       await expect(folders.getByRole('button').filter({ hasText: 'Documents' }), 'a protected folder, listed and marked').toContainText('private');
       const use = sheet.getByRole('button', { name: 'Use this folder', exact: true });
       await expect(use, 'not at the home').toBeDisabled();
@@ -2544,8 +2546,7 @@ test('M9: "+ Session" on B with no registered checkout sets its folder up there:
       await quoting(expect(page.getByRole('dialog', { name: /^(New project|Trust this folder) on / }), 'the sheet closes once B registered the folder').toHaveCount(0, { timeout: 60_000 }), async () => `${mainSaid(page)}\n${await bSaid()}`);
       await expect.poll(bProjects, { timeout: 30_000, message: 'B registered the folder' }).toContain(bCheckout);
       await expect(projectChip(page, A_PROJECT), 'the chip names B’s project of the folder').toBeVisible({ timeout: 30_000 });
-      await expect(page.getByRole('button', { name: `Machine ${B_NAME}`, exact: true })).toBeVisible();
-      await expect(main(page).getByText(`Lane B on ${B_NAME} · ${B_NAME}’s inference route`)).toBeVisible();
+      await expect(page.getByRole('button', { name: `Machine ${B_NAME}`, exact: true }), 'the chip names B (C67: no line under the row says it again)').toBeVisible();
     });
 
     let spawnedApp = '';
@@ -2620,7 +2621,7 @@ const MF_HOME_REPLY = 'Started on B in its home.';
 // sminos's projects and titles for the two sessions' listings: no `.smns` names either folder, and no project of A's joins
 const MF_FOLDER_LISTED = { project: 'e2e-remote-loose', title: 'B’s session in a folder with no git' };
 const MF_HOME_LISTED = { project: 'e2e-remote-home', title: 'B’s session in its home' };
-const DONT_WORK_IN_A_PROJECT = "Don't work in a project";
+const NO_PROJECT = 'No project'; // the project menu's last action (the word cut, C70: "Don't work in a project" before it)
 const HOME_TRUST = 'Claude Code never saves trust for your home folder'; // a home's trust card (TrustCard.tsx, HOME_TRUST_COPY)
 
 // The sidebar's New chat with no project of A's to start in (sessions.spec.ts's "New chat from the project list"): its
@@ -2637,7 +2638,7 @@ async function newChatInNoProject(page: Page): Promise<void> {
   await expect(projectChip(page, null), 'its project chip, no place chosen').toBeVisible({ timeout: 30_000 });
 }
 // A New chat tab's machine chip, enabled with no project chosen, and `name` chosen in its menu, where each machine is a
-// choice of its own whatever it holds; the chip and the line under the row then name it (`chooseMachine`'s checks).
+// choice of its own whatever it holds; the chip then names it (`chooseMachine`'s checks).
 async function chooseMachineFirst(page: Page, name: string): Promise<void> {
   const trigger = page.getByRole('button', { name: 'Machine This Mac', exact: true });
   await quoting(expect(trigger, 'the machine chip, with no project chosen').toBeEnabled({ timeout: 30_000 }), async () => `the chip's title: ${(await trigger.getAttribute('title', { timeout: 1_000 }).catch(() => null)) ?? 'no chip'}\n${mainSaid(page)}`);
@@ -2645,7 +2646,7 @@ async function chooseMachineFirst(page: Page, name: string): Promise<void> {
   const menu = page.getByRole('dialog', { name: 'Choose a machine' });
   await quoting(menu.getByRole('menuitemradio', { name, exact: true }).click({ timeout: 30_000 }), async () => `the menu: ${await menu.innerText({ timeout: 1_000 }).catch(() => 'gone')}\n${mainSaid(page)}`);
   await expect(page.getByRole('button', { name: `Machine ${name}`, exact: true })).toBeVisible();
-  await expect(main(page).getByText(`Lane B on ${name} · ${name}’s inference route`)).toBeVisible();
+  await expect(main(page).getByText(/^Lane B on /), 'C67: no line under the row names the machine again').toHaveCount(0);
 }
 
 test('machine first: a New chat tab with no project starts on B, in a folder with no git that New project registers there, and with Don’t work in a project in B’s home once its trust is reviewed', async () => {
@@ -2730,11 +2731,12 @@ test('machine first: a New chat tab with no project starts on B, in a folder wit
     await test.step('New project on B: B’s folder sheet walked to a folder in B’s home that no git repository holds, trusted on B and registered there; the chip names B’s new project, and Send starts the session in it on B, after B’s trust bootstrap', async () => {
       await projectChip(page, null).click();
       await expect(placesMenu(page).getByPlaceholder('Search projects'), 'the menu this Mac’s project chip has').toBeVisible();
-      await expect(placeItem(page, DONT_WORK_IN_A_PROJECT)).toBeVisible();
+      await expect(placeItem(page, NO_PROJECT)).toBeVisible();
       await placeItem(page, 'New project').click();
       await quoting(expect(sheet, 'B’s folder sheet').toBeVisible({ timeout: 30_000 }), async () => `the dialogs: ${(await page.getByRole('dialog').allInnerTexts().catch(() => [])).join(' | ') || 'none'}\n${mainSaid(page)}\n${await bSaid()}`);
-      await expect(sheet, 'the privacy warning first').toContainText('Private folders macOS protects');
       const folders = sheet.getByRole('list', { name: `Folders on ${B_NAME}` });
+      await expect(folders, 'the folders first: the word cut (W166) took the privacy paragraph before them').toBeVisible();
+      await expect(sheet).not.toContainText('Private folders macOS protects');
       for (const name of MF_FOLDER) await folders.getByRole('button', { name, exact: true }).click();
       await expect(sheet.getByText(`~/${MF_FOLDER.join('/')}`, { exact: true }), 'the folder shown').toBeVisible();
       await sheet.getByRole('button', { name: 'Use this folder', exact: true }).click();
@@ -2767,7 +2769,7 @@ test('machine first: a New chat tab with no project starts on B, in a folder wit
       await chooseMachineFirst(page, B_NAME);
       await projectChip(page, null).click();
       await expect(placeItem(page, folderName), 'B’s own projects, the folder registered there among them').toBeVisible({ timeout: 30_000 });
-      await placeItem(page, DONT_WORK_IN_A_PROJECT).click();
+      await placeItem(page, NO_PROJECT).click();
       await expect(projectChip(page, 'No project'), 'the chip says so').toBeVisible({ timeout: 30_000 });
       await expect(page.getByRole('button', { name: `Machine ${B_NAME}`, exact: true }), 'still on B').toBeVisible();
 
@@ -3546,7 +3548,7 @@ test('U9 A8, A9, A10: from A, Rename… on B’s listed row renames it on B; For
       await (await menuItemOfRow(page, row, 'Archive')).click();
       // its tab open, A holds B's record, whose title the sheet says (B's own: the replay above keeps its first one)
       const sheet = page.getByRole('dialog', { name: `Archive “${(await onB(app))!.title.text}”?` });
-      await expect(sheet).toContainText(`Ends its engine process on ${B_NAME} and hides it`);
+      await expect(sheet, 'W146: what archiving does, on the machine that stops it').toContainText(`Stops it on ${B_NAME} and hides it. Find it again under Archived sessions.`);
       await sheet.getByRole('button', { name: 'Archive' }).click();
       await expect(sheet).toBeHidden({ timeout: 60_000 });
       await expect(row, 'the row leaves at once').toHaveCount(0, { timeout: 5_000 });

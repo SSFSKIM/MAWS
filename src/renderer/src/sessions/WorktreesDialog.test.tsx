@@ -72,7 +72,7 @@ const open = async () => {
 const rowNamed = async (dialog: HTMLElement, name: string) => within(dialog).findByRole('listitem', { name });
 
 describe('Worktrees… dialog', () => {
-  it('lists the main checkout and every linked worktree with its state, the bound session from occupancy, and the orphan as No session', async () => {
+  it('lists the main checkout and every linked worktree with its state, the bound session from occupancy, and the orphan with no session line', async () => {
     const dialog = await open();
     const rows = within(within(dialog).getByRole('list', { name: 'Worktrees' })).getAllByRole('listitem', { name: /./ });
     expect(rows.map((r) => [r.getAttribute('aria-label'), r.dataset.state])).toEqual([
@@ -84,7 +84,10 @@ describe('Worktrees… dialog', () => {
     expect(within(rows[0]!).queryByRole('button', { name: 'Remove…' })).toBeNull();
     expect(within(rows[1]!).getByRole('button', { name: 'Bound work' })).toBeTruthy();
     expect(within(rows[2]!).getByText('dirty · 3 changes')).toBeTruthy();
-    expect(within(rows[2]!).getByText('No session')).toBeTruthy();
+    expect(within(rows[1]!).getByText('Sessions')).toBeTruthy();
+    // the word cut (W155): a worktree with no session has no Sessions label and no "No session" line
+    expect(within(rows[2]!).queryByText('No session')).toBeNull();
+    expect(within(rows[2]!).queryByText('Sessions')).toBeNull();
     expect(within(rows[3]!).getByRole('button', { name: 'New chat here' }).hasAttribute('disabled')).toBe(true);
     expect(fake.invoked('git.worktree.list')).toEqual([{ repoRoot: REPO }]);
   });
@@ -127,6 +130,23 @@ describe('Worktrees… dialog', () => {
     act(() => openDialog({ kind: 'worktrees', projectId: P }));
     await fake.fail('git.worktree.list', 'not a git repository');
     expect(await screen.findByText('Not a git repository')).toBeTruthy();
+  });
+
+  // the word cut (N173, W154): the read is a quiet spinner; the empty state reads "No worktrees yet" alone
+  it('reads under a quiet spinner, and with no linked worktree says No worktrees yet and nothing more', async () => {
+    fake = fakeClient({});
+    window.maws = fake.client as unknown as PreloadBridge;
+    render(<SessionDialogs />);
+    act(() => openDialog({ kind: 'worktrees', projectId: P }));
+    const dialog = await screen.findByRole('dialog', { name: 'Worktrees · repo' });
+    expect(within(dialog).queryByRole('progressbar')).toBeNull();
+    expect(await within(dialog).findByRole('progressbar', { name: 'Reading worktrees' }, { timeout: 2000 })).toBeTruthy();
+    expect(dialog.textContent).not.toContain('Reading worktrees');
+    await act(() => fake.reply('git.worktree.list', { repoRoot: REPO, commonDir: `${REPO}/.git`, worktrees: [MAIN] }));
+    await act(() => fake.reply('git.worktree.status', statusOf(REPO)));
+    expect(await within(dialog).findByText('No worktrees yet')).toBeTruthy();
+    expect(dialog.textContent).not.toContain('appear here');
+    expect(within(dialog).queryByRole('progressbar')).toBeNull();
   });
 
   it('a cleanup opened elsewhere closes to nothing', () => {

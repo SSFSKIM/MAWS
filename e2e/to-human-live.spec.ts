@@ -83,6 +83,7 @@ import { promptsEnded, sessionJournal, writtenPrompts } from './support/live-tur
 import { a15Line, a15Reading, installedEngine } from './support/p1-live';
 import { mountedTabs, sideColumn } from './support/shell';
 import { newChatIn, sidebarRow } from './support/sidebar';
+import { expectNewChatInFront } from './support/screen-reader-only';
 
 const TRIAL = process.env.MAWS_U2B_TRIAL === '1';
 const CHECKOUT = process.env.MAWS_U2B_MOD_CHECKOUT ? resolve(process.env.MAWS_U2B_MOD_CHECKOUT) : '';
@@ -269,7 +270,7 @@ async function send(page: Page, text: string): Promise<void> {
 // A new chat in the scratch repository on Haiku; its first Send is the launch.
 async function newSession(page: Page): Promise<string> {
   await newChatIn(page, REPO_NAME);
-  await expect(page.getByRole('heading', { name: `New chat in ${REPO_NAME}` })).toBeVisible();
+  await expectNewChatInFront(page, REPO_NAME); // the word cut (W86): a screen reader's heading
   const id = value(await invoke(page, 'session.intent.list', undefined)).intents.at(-1)!.appSessionId;
   await closeWidgets(page);
   await composer(page).click();

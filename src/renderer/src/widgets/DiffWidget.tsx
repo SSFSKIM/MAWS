@@ -1,17 +1,20 @@
 // `/diff` (C11 execution document, the widget table): `get_workspace_diff`'s stats and one row per file with its
 // `+n −n`, with the skipped-large and restricted counts. "Open in Review" hands the session to C8c's Review tool
 // through C8a's panel host once that tool is registered, on the scope the read compared, and a file's row opens it at
-// that file; until then the per-file rows are the whole view.
+// that file; until then the per-file rows are the whole view. The word cut (P643, P647): the first line is the line
+// counts, "· against <branch>" only for a branch comparison; "No diff" keeps its reasons on a word the keyboard reaches.
 import type { AppSessionId } from '@shared/graph/ids';
 import type { GetWorkspaceDiffResponse } from '@shared/wire/control';
 import { panelHost, usePanelHost } from '../panel/host';
 import { DIFF, WIDGET_TITLE } from './copy';
 import { Mono, num, Row, Rows, TextButton } from './parts';
+import { Tip } from '../ui/tip';
 import { useEngineRead } from './read';
 import { WidgetFrame } from './WidgetFrame';
 
 export interface DiffView {
   line: string;
+  why: string | null; // why there is no diff, for the pointer and the keyboard
   files: { path: string; stat: string; note: string | null }[];
   skippedLarge: number;
   restricted: number;
@@ -19,10 +22,11 @@ export interface DiffView {
 }
 
 export function present({ diff }: GetWorkspaceDiffResponse): DiffView {
-  if (diff === null) return { line: DIFF.none, files: [], skippedLarge: 0, restricted: 0, scope: 'uncommitted' };
-  const where = diff.source.kind === 'branch' ? DIFF.against(String(diff.source.baseBranch)) : DIFF.workingTree;
+  if (diff === null) return { line: DIFF.none, why: DIFF.noneWhy, files: [], skippedLarge: 0, restricted: 0, scope: 'uncommitted' };
+  const counts = `+${num(diff.stats.linesAdded)} −${num(diff.stats.linesRemoved)}`;
   return {
-    line: `${DIFF.files(num(diff.stats.filesCount), diff.stats.filesCount === 1)} · +${num(diff.stats.linesAdded)} −${num(diff.stats.linesRemoved)} · ${where}`,
+    line: diff.source.kind === 'branch' ? `${counts} · ${DIFF.against(String(diff.source.baseBranch))}` : counts,
+    why: null,
     files: diff.perFileStats.map((f) => {
       const marks = [f.isBinary ? DIFF.binary : null, f.isUntracked ? DIFF.untracked : null].filter((m) => m !== null);
       return { path: f.path, stat: f.isBinary ? '' : `+${num(f.added)} −${num(f.removed)}`, note: marks.length > 0 ? marks.join(' · ') : null };
@@ -43,7 +47,17 @@ export function DiffBody({ view, appSessionId, close }: { view: DiffView; appSes
   return (
     <div className="flex flex-col gap-2">
       <div className="flex items-baseline gap-2">
-        <p className="m-0 flex-1">{view.line}</p>
+        <p className="m-0 flex-1">
+          {view.why === null ? (
+            view.line
+          ) : (
+            <Tip content={view.why} description={view.why}>
+              <span tabIndex={0} className="rounded-sm outline-accent focus-visible:outline-2">
+                {view.line}
+              </span>
+            </Tip>
+          )}
+        </p>
         <TextButton onClick={() => open()} disabled={!review} title={review ? undefined : DIFF.reviewUnavailable}>
           {DIFF.openInReview}
         </TextButton>

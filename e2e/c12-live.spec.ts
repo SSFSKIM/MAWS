@@ -32,6 +32,7 @@ import { launchMaws, REPO_ROOT, type MawsLaunch } from './support/launch';
 import { newChatIn, sidebarRow } from './support/sidebar';
 import { CLOCK } from './support/clock'; // L129
 import { allowForTheSession } from './support/request-keys';
+import { expectNewChatInFront } from './support/screen-reader-only';
 
 const skip = c12LiveSkipReason();
 test.skip(skip !== null, skip ?? '');
@@ -207,7 +208,7 @@ async function plus(page: Page, repo: string, first: string): Promise<string> {
   if (spent >= MAX_USD) throw new Error(`spend limit: the journals show US$${spent} of US$${MAX_USD}`);
   const known = new Set(value(await invoke(page, 'session.intent.list', undefined)).intents.map((i) => i.appSessionId));
   await newChatIn(page, name); // W11: the "+" on the project's row, on hover
-  await expect(page.getByRole('heading', { name: `New chat in ${name}` })).toBeVisible();
+  await expectNewChatInFront(page, name); // the word cut (W86): a screen reader's heading
   let id: AppSessionId | undefined;
   await expect.poll(async () => (id = value(await invoke(page, 'session.intent.list', undefined)).intents.find((i) => !known.has(i.appSessionId))?.appSessionId)).toBeDefined();
   value(await invoke(page, 'session.intent.patch', { appSessionId: id!, patch: { model: 'sonnet', permissionMode: 'default' } }));

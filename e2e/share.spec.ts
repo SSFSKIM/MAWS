@@ -222,7 +222,8 @@ async function openShare(page: Page, row: Locator): Promise<Locator> {
   await page.getByRole('menuitem', { name: SHARE.menuItem, exact: true }).click();
   const sheet = page.locator('[data-share-sheet]');
   await expect(sheet).toBeVisible();
-  await expect(sheet.locator('[data-share-said]').filter({ hasText: SHARE.reading })).toHaveCount(0);
+  // the word cut (N177): the read of its reach is a quiet spinner in its own block, gone once the read answers
+  await expect(sheet.locator('[data-share-reading]')).toHaveCount(0);
   return sheet;
 }
 

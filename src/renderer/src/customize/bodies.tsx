@@ -11,7 +11,7 @@
 // under Discover's All, per card, `KindLines`).
 import { Fragment, useEffect, useLayoutEffect, useMemo, useState } from 'react';
 import type { AppSessionId } from '@shared/graph/ids';
-import { McpBody, present } from '../widgets/McpWidget';
+import { McpBody, MOVES_MCP, present, useConnectingEnds } from '../widgets/McpWidget';
 import { useLibraryStore } from '../widgets/plugins/library-store';
 import { usePluginsEnv } from '../widgets/plugins/read';
 import { PluginsList, useLibrarySelection, usePluginsLibrary } from '../widgets/PluginsWidget';
@@ -142,7 +142,7 @@ function SkillsMine({ onDetail, toList }: { onDetail(open: boolean): void; toLis
   useLayoutEffect(() => () => onDetail(false), [onDetail]);
   return (
     <div data-customize-body="skills" className="flex min-h-0 flex-1 flex-col p-3">
-      <InventoryState error={inventory.error} pending={inventory.isPending} warnings={inventory.data?.warnings} pluginServers={inventory.data?.pluginServers} refresh={() => void inventory.refetch()} />
+      <InventoryState error={inventory.error} pending={inventory.isPending} warnings={inventory.data?.warnings} refresh={() => void inventory.refetch()} />
       {inventory.data && <DiskSkills inventory={inventory.data} onDetail={onDetail} toList={toList} />}
     </div>
   );
@@ -180,7 +180,7 @@ function ConnectorsBody() {
           inventory={inventory.data}
           pluginList={pluginList}
           readAt={inventory.dataUpdatedAt}
-          inventoryState={<InventoryState error={inventory.error} pending={inventory.isPending} warnings={inventory.data?.warnings} pluginServers={inventory.data?.pluginServers} refresh={() => void inventory.refetch()} />}
+          inventoryState={<InventoryState error={inventory.error} pending={inventory.isPending} warnings={inventory.data?.warnings} refresh={() => void inventory.refetch()} />}
           attached={attached}
           askIn={askIn}
           search={search}
@@ -201,12 +201,16 @@ function LiveConnectors({ appSessionId }: { appSessionId: AppSessionId }) {
   );
 }
 
+// The word cut (P565): read again as the session's MCP table moves, as the dialog reads, so a connecting connector's
+// quiet spinner ends with the connection; while nothing can end that wait (`useConnectingEnds`) it is the last answer's
+// words.
 function LiveConnectorStatus({ appSessionId }: { appSessionId: AppSessionId }) {
-  const read = useEngineRead('session.mcpStatus', { appSessionId });
+  const read = useEngineRead('session.mcpStatus', { appSessionId }, { refreshOn: MOVES_MCP });
+  const live = useConnectingEnds(appSessionId, read.reading);
   return (
     <>
       <InventoryState error={read.error ? new Error(read.error) : null} pending={read.state === 'loading'} refresh={read.refetch} />
-      {read.data && <McpBody view={{ servers: present(read.data).servers.map((server) => ({ ...server, transport: null, command: null })) }} />}
+      {read.data && <McpBody view={{ servers: present(read.data).servers.map((server) => ({ ...server, transport: null, command: null })) }} live={live} />}
     </>
   );
 }

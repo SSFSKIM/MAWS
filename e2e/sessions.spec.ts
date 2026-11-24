@@ -32,6 +32,7 @@ import { created } from './support/nothing-created'; // UX wave U6b-2: B8
 import { processesNaming } from './support/processes'; // the UX wave, U9: A6's scene signals only its own engine host
 import { assistantRecord, backgroundAgentRecords, backgroundAgentSidecars, turnEndRecords, userRecord } from './support/lane-a'; // UX wave U6b-4c: assistantRecord, a subagent's answer
 import { newChatIn, openProject, projectLine, projectRow, showProjectList, sidebarRow } from './support/sidebar';
+import { expectNewChatInFront, expectScreenReaderOnly } from './support/screen-reader-only'; // the word cut (W86): New chat's heading is a screen reader's
 import { unfoldInfoGroup } from './support/session-info'; // board ticket 421's M5: Session info's Engine group
 
 const FIXTURES = 'spikes/protocol-probe/fixtures';
@@ -115,7 +116,7 @@ async function addProject(page: Page, directory: string): Promise<{ id: string; 
 async function plus(page: Page, name: string): Promise<string> {
   await openProject(page, name);
   await newChatIn(page, name);
-  await expect(page.getByRole('heading', { name: `New chat in ${name}` })).toBeVisible();
+  await expectNewChatInFront(page, name);
   const intents = value(await invoke(page, 'session.intent.list', undefined)).intents;
   return intents.at(-1)!.appSessionId;
 }
@@ -596,7 +597,7 @@ test.describe('sessions', () => {
     await expect(card.getByText(`Worktree ${name} removed`)).toBeVisible();
     await expect(card.getByText(`Branch worktree-${name} deleted`)).toBeVisible();
     await expect(card.getByText('Record removed')).toBeVisible();
-    await expect(page.getByRole('heading', { name: `New chat in ${project.name}` }), 'the tab stayed').toBeVisible();
+    await expectNewChatInFront(page, project.name, { message: 'the tab stayed' });
     expect(await runGit(repo.root, ['worktree', 'list', '--porcelain'])).not.toContain(name);
     expect(await runGit(repo.root, ['branch', '--list', `worktree-${name}`])).toBe('');
     expect(value(await invoke(page, 'session.intent.get', { appSessionId: id }))).toMatchObject({ progress: { lastFailure: { phase: 'launching' } } });
@@ -873,6 +874,7 @@ test.describe('sessions', () => {
     await showProjectList(page);
     await page.locator('[data-region="sidebar"]').getByRole('button', { name: 'New chat', exact: true }).click();
     await expect(page.getByRole('heading', { name: 'New chat', exact: true })).toBeVisible();
+    await expectScreenReaderOnly(page.getByRole('heading', { name: 'New chat', exact: true }), 'W86: the page’s heading is a screen reader’s, drawn nowhere');
     const id = value(await invoke(page, 'session.intent.list', undefined)).intents.at(-1)!.appSessionId;
     expect(value(await invoke(page, 'session.intent.get', { appSessionId: id }))).toMatchObject({ projectId: null, location: null });
     const row = page.locator('[data-region="main"] [data-project-row]');
@@ -889,14 +891,14 @@ test.describe('sessions', () => {
     await expect(control).toHaveAttribute('title', 'Choose a project first');
     await page.screenshot({ path: test.info().outputPath('new-chat-choose-a-project.png') });
 
-    // the chip's menu: search, the projects most recently active first, New project, Don't work in a project
+    // the chip's menu: search, the projects most recently active first, New project, No project (C70)
     await chip.click();
     const menu = page.getByRole('dialog', { name: 'Choose a project' });
     await expect(menu.getByPlaceholder('Search projects')).toBeVisible();
-    await expect(menu.getByRole('option')).toHaveText([alpha.name, 'New project', "Don't work in a project"]);
+    await expect(menu.getByRole('option')).toHaveText([alpha.name, 'New project', 'No project']);
     await page.screenshot({ path: test.info().outputPath('new-chat-project-menu.png') });
     await menu.getByRole('option', { name: alpha.name }).click();
-    await expect(page.getByRole('heading', { name: `New chat in ${alpha.name}` })).toBeVisible();
+    await expectNewChatInFront(page, alpha.name);
     await expect(page.getByRole('tab', { name: 'New chat', exact: true }), 'UX2: the current project is not repeated in its tab label').toBeVisible();
     expect(value(await invoke(page, 'session.intent.get', { appSessionId: id }))).toMatchObject({ projectId: alpha.id, location: { kind: 'directory', path: first.root } });
     await expect(row.getByRole('button', { name: `Project ${alpha.name}` })).toBeVisible();
@@ -921,12 +923,12 @@ test.describe('sessions', () => {
     const addedOf = async () => value(await invoke(page, 'session.projects.list', undefined)).projects.find((p) => p.directory === second.root);
     await expect.poll(async () => (await addedOf())?.directory).toBe(second.root);
     const added = (await addedOf())!;
-    await expect(page.getByRole('heading', { name: `New chat in ${added.name}` })).toBeVisible();
+    await expectNewChatInFront(page, added.name);
     expect(value(await invoke(page, 'session.intent.get', { appSessionId: id }))).toMatchObject({ projectId: added.id, location: { kind: 'directory', path: second.root } });
 
-    // Don't work in a project: the home directory, the chip says so, no checkbox, and Send goes
+    // No project (C70: "Don't work in a project" before the word cut): the home directory, the chip says so, no checkbox, and Send goes
     await row.getByRole('button', { name: `Project ${added.name}` }).click();
-    await menu.getByRole('option', { name: "Don't work in a project" }).click();
+    await menu.getByRole('option', { name: 'No project', exact: true }).click();
     await expect(row.getByRole('button', { name: 'Project No project' })).toBeVisible();
     await expect(page.getByRole('heading', { name: 'New chat', exact: true })).toBeVisible();
     expect(value(await invoke(page, 'session.intent.get', { appSessionId: id }))).toMatchObject({ projectId: null, location: { kind: 'directory', path: realpathSync(homedir()) } });
@@ -1029,7 +1031,7 @@ test.describe('sessions', () => {
       const added = now.find((id) => !three.includes(id))!;
       expect(now, `${control}: right after the tab in front, the three kept`).toEqual([three[0], three[1], added, three[2]]);
       await expect(activeMainTab(page), `${control}: the new chat in front`).toHaveAttribute('data-tab-id', added);
-      await expect(page.getByRole('heading', { name: `New chat in ${project.name}` }), `${control}: in the project of the session in front`).toBeVisible();
+      await expectNewChatInFront(page, project.name, { message: `${control}: in the project of the session in front` });
       await appMenu(maws, 'tab.close');
       await expect.poll(() => tabIdsOf(page), { message: `${control}: the empty chat closed again` }).toEqual(three);
     }
@@ -1038,7 +1040,7 @@ test.describe('sessions', () => {
 
   test('Overview New chat on an empty board closes the panel and hands typing to the new composer', async () => {
     const { page, maws } = await begin({ fixtures: [] });
-    await page.getByRole('button', { name: 'Overview', exact: true }).click();
+    await page.locator('[data-toolbar]').getByRole('button', { name: 'Overview', exact: true }).click(); // the title bar's (the empty pane's reads Overview too, W23)
     const overview = page.getByRole('dialog', { name: 'Overview' });
     await expect(overview.getByText('Nothing live or unread', { exact: true })).toBeVisible();
     await overview.getByRole('button', { name: 'New chat', exact: true }).click();
@@ -1056,7 +1058,7 @@ test.describe('sessions', () => {
   test('the slash palette opens above an unstarted New chat’s centred composer and moves nothing', async () => {
     const { page, maws } = await begin({ fixtures: [] });
     await maws.app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setBounds({ x: 72, y: 48, width: 1200, height: 640 }));
-    await page.getByRole('button', { name: 'Overview', exact: true }).click();
+    await page.locator('[data-toolbar]').getByRole('button', { name: 'Overview', exact: true }).click(); // the title bar's (the empty pane's reads Overview too, W23)
     const overview = page.getByRole('dialog', { name: 'Overview' });
     await overview.getByRole('button', { name: 'New chat', exact: true }).click();
     await expect(overview).toHaveCount(0);
@@ -1085,7 +1087,7 @@ test.describe('sessions', () => {
       return item?.label ?? null;
     });
     expect(label, 'File › New chat').toBe('New chat');
-    await expect(page.getByRole('heading', { name: `New chat in ${project.name}` })).toBeVisible();
+    await expectNewChatInFront(page, project.name);
     await expect(editor(page), 'W9 (H3): ⌘N hands the keyboard to the new tab').toBeFocused();
     const created = value(await invoke(page, 'session.intent.list', undefined)).intents.at(-1)!;
     expect(created).toMatchObject({ projectId: project.id, location: { kind: 'directory', path: repo.root } });
@@ -1177,7 +1179,7 @@ test.describe('sessions', () => {
     const second = await launchCase({ fixtures: [], trusted: [repo.root], store, userData: first.maws.userData });
     current = { ...second, repos: [repo], dispose: async () => (await second.maws.cleanup(), await first.maws.cleanup()) };
     const again = second.page;
-    await expect(again.getByRole('heading', { name: `New chat in ${project.name}` }), 'hydration kept the chat with a draft').toBeVisible();
+    await expectNewChatInFront(again, project.name, { message: 'hydration kept the chat with a draft' });
     await expect.poll(() => tabIdsOf(again, 'Left pane tabs'), { message: 'the order and the split back, the empty chat gone' }).toEqual([t1, chat]);
     expect(await tabIdsOf(again, 'Right pane tabs')).toEqual([t2]);
     await expect(mainTabById(again, t1).getByRole('img', { name: 'Pinned' }), 'the pin is back').toBeVisible();
@@ -2079,7 +2081,9 @@ test.describe('sessions', () => {
         await todo2.locator('[data-move-to-main]').click();
         const machine = await localRef(p2);
         await expect(mainTabById(p2, `file:${machine}:${chosen}`), 'moved to the main area, in front').toHaveAttribute('aria-selected', 'true', { timeout: 20_000 });
-        await expect(mainTabById(p2, `file:${machine}:${chosen}`), 'its tooltip the full path').toHaveAttribute('title', chosen);
+        // its tooltip the full path, a Tip the keyboard reaches and the tab's description (the word cut's fix wave for M4)
+        await expect(mainTabById(p2, `file:${machine}:${chosen}`), 'its tooltip the full path').toHaveAccessibleDescription(chosen);
+        await expect(mainTabById(p2, `file:${machine}:${chosen}`), 'no system tooltip').not.toHaveAttribute('title');
         const inMain = p2.locator('[data-region="main"]').locator(`[data-file-viewer][data-path="${chosen}"]`);
         await expect(inMain).toHaveAttribute('data-dirty', 'true', { timeout: 20_000 });
         await saveButton(inMain).click();

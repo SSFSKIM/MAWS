@@ -21,7 +21,7 @@ import { SECONDARY } from '../../sessions/ui';
 import { OperationLine, useManage } from '../../widgets/plugins/manage';
 import { TextButton } from '../../widgets/parts';
 import { ItemImage } from '../image/ItemImage';
-import { KindWord, NoLastControl } from '../KindWord';
+import { KindWord, NoLastControl, NoMenu } from '../KindWord';
 import { openMine } from '../open';
 import { CONNECTORS as C } from './copy';
 import type { AskIn } from './manage';
@@ -174,6 +174,7 @@ export function ConnectorRow({ row, askIn, shadow, cwd, place, session, live, li
         <>
           <KindWord kind="connector" />
           <NoLastControl />
+          <NoMenu />
         </>
       )}
     </li>

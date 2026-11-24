@@ -11,7 +11,7 @@ import type { MachineRef } from '@shared/machine/ref';
 import { at, OTHER_MACHINE, TEST_MACHINE } from '../../../../test/support/machine';
 import { needsYou } from '../attention/derive';
 import { pageScenario } from '../test-support/shell-stores';
-import { cardActivity, cardFooter, orderProjects, overviewCards, overviewGroups, priorityRank, sortSessions } from './derive';
+import { cardActivity, cardFacts, orderProjects, overviewCards, overviewGroups, priorityRank, sortSessions } from './derive';
 
 const scenario = pageScenario(loadScenario(join(TEST_FIXTURE_DIR, 'shell/nine-sessions.json'))); // P5 O6 M2: the page's ids
 const records = new Map(scenario.sessions.map((r) => [r.appId, r]));
@@ -189,26 +189,26 @@ describe('overview card lines', () => {
     return cardActivity(r, digests.get(r.appId) ?? null, pendingOf(r.appId));
   };
 
-  it('reads the activity while working, the wait in words while waiting, and the state otherwise', () => {
+  it('reads the activity while working, the wait in words while waiting, and the state otherwise, none when idle', () => {
     expect(activity('Charter + research')).toBe('Running bun test');
     expect(activity('Fix sidebar drag')).toBe('Waiting for approval');
     expect(activity('Sidebar interaction pass')).toBe('Question');
     expect(activity('Quota reset recovery')).toBe('Plan review');
-    expect(activity('Settings idle probe')).toBe('Idle');
+    expect(activity('Settings idle probe'), 'the word cut (W107): no line for an idle session').toBeNull();
     expect(activity('Trace stream reconnects')).toBe('Done');
-    expect(activity('Somersault terminal run')).toBe('Terminal · pid 7135');
+    expect(activity('Somersault terminal run'), 'the word cut (W75): who runs it, no pid').toBe('Running in Terminal');
   });
 
   it('a working session with no activity yet reads Working; a failed one Failed', () => {
     expect(cardActivity(record('w'), digest('w', { phase: 'working' }), [])).toBe('Working');
     expect(cardActivity(record('f'), digest('f', { phase: 'failed' }), [])).toBe('Failed');
-    expect(cardActivity(record('n'), null, [])).toBe('Idle');
+    expect(cardActivity(record('n'), null, [])).toBeNull();
   });
 
   // P5 O7 M10: another machine's lane B record, with no digest, says its listing's word as its glyph does
   it('a remote lane B record with no digest reads its listing’s state, its open items first', () => {
     const lane = (state: string): ListedSession => ({ ...remoteRow(OTHER_MACHINE, 'b', { state }), appId: 'b' as AppSessionId });
-    expect(['busy', 'waiting', 'failed', 'stopped', 'idle'].map((state) => cardActivity(record('b'), null, [], lane(state)))).toEqual(['Working', 'Needs you', 'Failed', 'Stopped', 'Idle']); // "Stopped": the owner's decision of 2026-11-19, as the glyph reads
+    expect(['busy', 'waiting', 'failed', 'stopped', 'idle'].map((state) => cardActivity(record('b'), null, [], lane(state)))).toEqual(['Working', 'Needs you', 'Failed', 'Stopped', null]); // "Stopped": the owner's decision of 2026-11-19, as the glyph reads
     expect(cardActivity(record('b'), null, [item('b', 'permission', '2026-10-28T10:00:00Z')], lane('busy'))).toBe('Waiting for approval');
     expect(cardActivity(record('b'), null, [item('b', 'question', '2026-10-28T10:00:00Z')], lane('busy'))).toBe('Question');
   });
@@ -216,17 +216,20 @@ describe('overview card lines', () => {
   // P5 O9 M6 (Q1): a terminal session MAWS drives through its bridge reads as any session; one with no live bridge, its holder
   it('reads a bridged terminal session as any session, and its holder without a live bridge', () => {
     const held = record('t', { holder: { kind: 'terminal', pid: 7 } });
-    expect(cardActivity(held, digest('t', { phase: 'foreign' }), [])).toBe('Terminal · pid 7');
+    expect(cardActivity(held, digest('t', { phase: 'foreign' }), [])).toBe('Running in Terminal');
+    const job = (over: { pid: number | null; jobId: string | null }) => record('j', { holder: { kind: 'background_job', ...over } });
+    expect(cardActivity(job({ pid: 9, jobId: 'a1b2' }), digest('j', { phase: 'foreign' }), [])).toBe('bg · a1b2');
+    expect(cardActivity(job({ pid: 9, jobId: null }), digest('j', { phase: 'foreign' }), []), 'no id: no pid either').toBe('Background job');
     expect(cardActivity(held, digest('t', { phase: 'working', activity: 'Running ls' }), [])).toBe('Running ls');
     expect(cardActivity(held, digest('t', { phase: 'waiting' }), [item('t', 'permission', '2026-10-28T10:00:00Z')])).toBe('Waiting for approval');
   });
 
-  it('the footer carries context, cost since seen and active child agents, each only when known', () => {
+  it('the card’s facts are context, cost since seen and active child agents, each only when known', () => {
     const r = byTitle('Charter + research');
-    expect(cardFooter(digests.get(r.appId)!)).toEqual(['ctx 41%', '$0.00 since seen', '2 agents']);
-    expect(cardFooter(digest('x', { childAgents: { active: 1, done: 3 } }))).toEqual(['1 agent']);
-    expect(cardFooter(digest('x', { cost: { totalUsd: 1.5, sinceSeenUsd: 0.237 } }))).toEqual(['$0.24 since seen']);
-    expect(cardFooter(null)).toEqual([]);
+    expect(cardFacts(digests.get(r.appId)!)).toEqual(['ctx 41%', '$0.00 since seen', '2 agents']);
+    expect(cardFacts(digest('x', { childAgents: { active: 1, done: 3 } }))).toEqual(['1 agent']);
+    expect(cardFacts(digest('x', { cost: { totalUsd: 1.5, sinceSeenUsd: 0.237 } }))).toEqual(['$0.24 since seen']);
+    expect(cardFacts(null)).toEqual([]);
   });
 });
 

@@ -3,7 +3,7 @@
 // C10 registers it; `/resume` is P2-D's chooser.
 import { join } from 'node:path';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId, ProjectId } from '@shared/graph/ids';
 import type { OrgKey } from '@shared/machine/org-key';
@@ -55,15 +55,36 @@ const mount = (Widget: typeof RenameWidget, appSessionId: AppSessionId, args = '
 };
 
 describe('rename widget', () => {
-  it("`/rename <title>` renames through C10's session.rename at once and says so", async () => {
-    mount(RenameWidget, READY, 'Live C11');
-    await waitFor(() => expect(screen.getByRole('status').textContent).toBe('Renamed · Live C11'));
+  // the word cut (P637): no "Renamed · <title>" line; the new title shows where the session is named, and the dialog
+  // closes once the rename took
+  it("`/rename <title>` renames through C10's session.rename at once and closes", async () => {
+    const close = mount(RenameWidget, READY, 'Live C11');
+    await waitFor(() => expect(close).toHaveBeenCalledTimes(1));
+    expect(screen.queryByRole('status')).toBeNull();
     expect(backend.calls.filter((c) => c.command === 'session.rename').map((c) => c.input)).toEqual([{ appSessionId: READY_ID, title: 'Live C11' }]);
   });
 
   it('renames a session without a process too (C10 names it through its record)', async () => {
-    mount(RenameWidget, at('app-bdb23713' as AppSessionId), 'Later');
-    await waitFor(() => expect(screen.getByRole('status').textContent).toBe('Renamed · Later'));
+    const close = mount(RenameWidget, at('app-bdb23713' as AppSessionId), 'Later');
+    await waitFor(() => expect(close).toHaveBeenCalledTimes(1));
+    expect(backend.calls.filter((c) => c.command === 'session.rename').map((c) => c.input)).toEqual([{ appSessionId: 'app-bdb23713', title: 'Later' }]);
+  });
+
+  // the host's close puts away whichever widget is open by then, so a rename that lands after its dialog was put away
+  // closes nothing
+  it('closes nothing when its rename lands after the dialog was put away, and shows the quiet spinner while it is out', async () => {
+    let answer: (value: unknown) => void = () => {};
+    backend.script('session.rename', () => new Promise((resolve) => (answer = resolve)));
+    const close = vi.fn();
+    render(
+      <QueryClientProvider client={new QueryClient()}>
+        <RenameWidget appSessionId={READY} args="Later" close={close} />
+      </QueryClientProvider>,
+    );
+    expect(await screen.findByRole('progressbar', { name: 'Renaming' })).toBeTruthy();
+    cleanup();
+    await act(async () => answer({ record: record(READY_ID), via: 'override' }));
+    expect(close).not.toHaveBeenCalled();
   });
 
   it('says a refused rename in its words', async () => {
@@ -83,13 +104,16 @@ describe('rename widget', () => {
     off();
   });
 
+  // the word cut (P635): the field keeps "New title" as its name, with no label drawn over it
   it('without a title and no dialog registered, offers the title to edit', async () => {
-    mount(RenameWidget, READY);
+    const close = mount(RenameWidget, READY);
     const field = screen.getByRole('textbox', { name: 'New title' }) as HTMLInputElement;
+    expect(screen.queryByText('New title')).toBeNull();
     expect(field.value).toBe('Settings idle probe');
     fireEvent.change(field, { target: { value: 'Settings probe, renamed' } });
     fireEvent.click(screen.getByRole('button', { name: 'Rename' }));
-    await waitFor(() => expect(screen.getByRole('status').textContent).toBe('Renamed · Settings probe, renamed'));
+    await waitFor(() => expect(close).toHaveBeenCalledTimes(1));
+    expect(backend.calls.filter((c) => c.command === 'session.rename').map((c) => c.input)).toEqual([{ appSessionId: READY_ID, title: 'Settings probe, renamed' }]);
   });
 
   // P5 O7 M8 declared `session.rename` not offered on another machine; the UX wave, U9 (M1, M4) offers it behind

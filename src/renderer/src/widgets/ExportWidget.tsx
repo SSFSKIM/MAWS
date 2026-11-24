@@ -1,42 +1,55 @@
 // `/export` (C11 execution document, the widget table): `export_conversation`'s plain text under the engine's default
 // filename, copied through the clipboard or saved through `layout.saveTextFile` (main's save dialog, a temp file then
-// a rename). The text is written as the engine produced it; the JSONL stays where it is.
-import { useState } from 'react';
+// a rename). The text is written as the engine produced it; the JSONL stays where it is. The word cut (P638, P640): the
+// preview line has no line count, and Copy shows a check for a moment over its word, which stays unseen so the button
+// keeps its width and Save as… stays put; "Copied" is said to a screen reader alone, by a live region mounted empty.
+import { useEffect, useState } from 'react';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { ExportConversationResponse } from '@shared/wire/control';
 import { ipc } from '../ipc/client';
 import { toast } from '../stores/notices';
 import { EXPORT, WIDGET_TITLE } from './copy';
-import { Mono, num, TextButton } from './parts';
+import { Mono, TextButton } from './parts';
 import { useEngineRead } from './read';
 import { WidgetFrame } from './WidgetFrame';
 
 export interface ExportView {
   filename: string;
   firstLine: string; // the text's first non-empty line, as a preview
-  lines: number;
   text: string;
 }
 
 export function present(answer: ExportConversationResponse): ExportView {
   const lines = answer.text.split('\n');
-  return { filename: answer.default_filename, firstLine: lines.find((l) => l.trim() !== '') ?? '', lines: lines.length, text: answer.text };
+  return { filename: answer.default_filename, firstLine: lines.find((l) => l.trim() !== '') ?? '', text: answer.text };
 }
+
+const CHECK_MS = 1500; // how long Copy shows its check
 
 export function ExportBody({ view }: { view: ExportView }) {
   const [done, setDone] = useState<string | null>(null);
+  const [copied, setCopied] = useState(0); // the copy whose check is shown; 0: none
+  useEffect(() => {
+    if (copied === 0) return;
+    const timer = setTimeout(() => setCopied(0), CHECK_MS);
+    return () => clearTimeout(timer);
+  }, [copied]);
   const copy = async () => {
     try {
       await navigator.clipboard.writeText(view.text);
     } catch (error) {
       return void toast({ level: 'warning', text: EXPORT.notCopied(error instanceof Error ? error.message : String(error)), actions: [], dismissible: true });
     }
-    setDone(EXPORT.copied);
+    setDone(null);
+    setCopied((n) => n + 1);
   };
   const save = async () => {
     const result = await ipc.invoke('layout.saveTextFile', { defaultName: view.filename, text: view.text });
     if (!result.ok) return void toast({ level: 'warning', text: EXPORT.notSaved(result.error.message), actions: [], dismissible: true });
-    if (result.value.saved) setDone(EXPORT.saved(result.value.path));
+    if (result.value.saved) {
+      setCopied(0);
+      setDone(EXPORT.saved(result.value.path));
+    }
   };
   return (
     <div className="flex flex-col gap-2">
@@ -44,10 +57,22 @@ export function ExportBody({ view }: { view: ExportView }) {
         <Mono>{view.filename}</Mono>
       </p>
       <p className="m-0 truncate text-ui-sm text-fg-muted" title={view.firstLine}>
-        {view.firstLine} <span className="text-fg-faint">· {EXPORT.lines(num(view.lines))}</span>
+        {view.firstLine}
       </p>
       <div className="flex items-baseline gap-2">
-        <TextButton onClick={() => void copy()}>{EXPORT.copy}</TextButton>
+        <TextButton onClick={() => void copy()} aria-label={EXPORT.copy}>
+          <span className="inline-grid">
+            <span className={`[grid-area:1/1] ${copied === 0 ? '' : 'invisible'}`}>{EXPORT.copy}</span>
+            {copied !== 0 && (
+              <span aria-hidden className="[grid-area:1/1] text-center">
+                ✓
+              </span>
+            )}
+          </span>
+        </TextButton>
+        <span role="status" className="sr-only">
+          {copied === 0 ? '' : EXPORT.copied}
+        </span>
         <TextButton onClick={() => void save()}>{EXPORT.saveAs}</TextButton>
         {done && (
           <span role="status" className="min-w-0 truncate text-ui-sm text-fg-muted">

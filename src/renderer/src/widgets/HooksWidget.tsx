@@ -1,11 +1,14 @@
 // `/hooks` (C11 execution document, the widget table): `get_hooks_listing` as the terminal lists it: the events that
 // have hooks with their counts, each hook with its event, matcher, source label and display text, and the policy line.
-// MAWS's own callback hooks are not in the engine's listing.
+// MAWS's own callback hooks are not in the engine's listing. The word cut (N184): a hook's source is the permission
+// rules' one word with its file under the pointer, the engine's own label only for a source those words do not name
+// (a plugin's hooks); "Startup settings (--settings option)" was the developer's words for a source the dialogs call
+// "startup".
 import * as z from 'zod';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { GetHooksListingResponse } from '@shared/wire/control';
-import { HOOKS, WIDGET_TITLE } from './copy';
-import { Group, Mono, parseEach, Row, Rows } from './parts';
+import { HOOKS, PERMISSIONS, WIDGET_TITLE } from './copy';
+import { Group, Mono, parseEach, Row, Rows, SourceWord, sourceWords } from './parts';
 import { useEngineRead } from './read';
 import { WidgetFrame } from './WidgetFrame';
 
@@ -23,7 +26,7 @@ const PolicySchema = z.looseObject({ disabledByPolicy: z.boolean().optional(), m
 
 export interface HooksView {
   events: { name: string; summary: string; count: number }[];
-  hooks: { event: string; matcher: string | null; source: string; text: string; type: string | null }[];
+  hooks: { event: string; matcher: string | null; source: string; file: string | null; text: string; type: string | null }[];
   policy: string | null;
 }
 
@@ -36,13 +39,22 @@ function policyLine(raw: unknown): string | null {
   return null;
 }
 
+// A source the permission rules name, in their word; any other in the engine's label (or its key, with no label).
+function sourceOf(source: string | undefined, label: string | undefined): { source: string; file: string | null } {
+  if (source !== undefined && PERMISSIONS.source[source] !== undefined) {
+    const { word, file } = sourceWords(source);
+    return { source: word, file };
+  }
+  return { source: label ?? source ?? '', file: null };
+}
+
 export function present(listing: GetHooksListingResponse): HooksView {
   return {
     events: parseEach(EventSchema, listing.events).map((e) => ({ name: e.name, summary: e.summary ?? '', count: e.hookCount ?? 0 })),
     hooks: parseEach(HookSchema, listing.hooks).map((h) => ({
       event: h.event,
       matcher: h.matcher || null,
-      source: h.sourceLabel ?? h.source ?? '',
+      ...sourceOf(h.source, h.sourceLabel),
       text: h.displayText ?? h.commandText ?? '',
       type: h.type ?? null,
     })),
@@ -62,7 +74,7 @@ export function HooksBody({ view }: { view: HooksView }) {
             {event.summary && <p className="m-0 mb-1 text-ui-sm text-fg-muted">{event.summary}</p>}
             <Rows label={HOOKS.list(event.name)}>
               {hooks.map((h, i) => (
-                <Row key={i} main={<Mono>{h.text}</Mono>} note={h.source} detail={h.matcher ? HOOKS.matcher(h.matcher) : null} />
+                <Row key={i} main={<Mono>{h.text}</Mono>} note={<SourceWord word={h.source} file={h.file} />} detail={h.matcher ? HOOKS.matcher(h.matcher) : null} />
               ))}
             </Rows>
           </Group>

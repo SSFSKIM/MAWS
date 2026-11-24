@@ -5,10 +5,14 @@
 // CLI's effective state here, its position always the last read's), Update ("Update to <version>"; "On latest version"
 // only on an equal pair) and the overflow's Uninstall…; each change through E8's confirm sheet at the selected chip's
 // scope, passed explicitly (E8 D-16: a project's plugin changed at user scope fails `not_installed`). Then the scope
-// chips, and the Overview: the description, two facts that never merge ("Enabled for this project", from the CLI;
-// "Loaded in this session", from the session's loaded list, with its freshness), the last init's problems for this
-// plugin, and What's inside; a tab per non-empty kind lists it. A chip that is not here or the user's offers no change
-// and says where the plugin is managed.
+// chips, and the Overview: the description, two facts that never merge ("Not enabled for this project", from the CLI,
+// drawn only when it is so (word cut G235); "Loaded in this session", from the session's loaded list, with its
+// freshness), the last init's problems for this plugin, and What's inside; a tab per non-empty kind lists it. A chip
+// that is not here or the user's offers no change: its switch and Update stay in the Tab order, greyed, and say where
+// the plugin is managed as their tooltip and description, with no line under the chips repeating it (word cut P703).
+// A plugin no installation of which this session can change draws them so too, without the overflow; Update's native
+// "On latest version" is only a changeable installation's, so it never takes a read-only one's reason out of reach.
+// A version not reported is a blank in the byline (P698).
 import { DropdownMenu } from 'radix-ui';
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
 import type { AppSessionId } from '@shared/graph/ids';
@@ -21,8 +25,9 @@ import { FRESHNESS } from '../../sessions/observed';
 import { ItemImage } from '../../customize/image/ItemImage';
 import { pluginSeedOf } from '../../customize/image/tile';
 import { usePluginIcons } from '../../customize/discover/read';
-import { LIBRARY as L, PLUGIN_MANAGEMENT as W } from '../copy';
+import { LIBRARY as L, RELOAD } from '../copy';
 import { TextButton } from '../parts';
+import { UnavailableButton } from '../../ui/tip';
 import { chipLabel, chipManagedWords, chipsOf, loadedFactOf, OTHER_PROJECTS, projectCount, unreadNotice, updateOffer } from './detail';
 import { MoreIcon } from './icons';
 import { basename, dateWords, displayNameOf, installationRef, manifestKeyOf, updatedOf, versionWords, type PluginIdentity } from './library';
@@ -53,8 +58,8 @@ export interface PluginDetailProps {
 }
 
 const ACTION = 'inline-flex h-7 shrink-0 items-center rounded-md px-2.5 text-ui outline-accent focus-visible:outline-2 disabled:cursor-default';
-const SECONDARY = `${ACTION} border border-border text-fg hover:bg-bg-hover disabled:text-fg-faint disabled:hover:bg-transparent`;
-const PRIMARY = `${ACTION} bg-accent text-bg hover:opacity-90 disabled:bg-bg-active disabled:text-fg-faint`;
+const SECONDARY = `${ACTION} border border-border text-fg hover:bg-bg-hover disabled:text-fg-faint disabled:hover:bg-transparent aria-disabled:cursor-default aria-disabled:text-fg-faint aria-disabled:hover:bg-transparent`;
+const PRIMARY = `${ACTION} bg-accent text-bg hover:opacity-90 disabled:bg-bg-active disabled:text-fg-faint aria-disabled:cursor-default aria-disabled:bg-bg-active aria-disabled:text-fg-faint aria-disabled:hover:opacity-100`;
 const ITEM = 'flex h-7 cursor-default items-center rounded-sm px-2 outline-none select-none data-disabled:text-fg-faint data-highlighted:bg-bg-hover';
 
 type Change = Extract<PluginsAction, 'update' | 'uninstall' | 'enable' | 'disable'>;
@@ -89,12 +94,12 @@ export function PluginDetail({ appSessionId, availability, identity, loaded, loa
   const version = versionWords(installation.version);
   const updated = chip ? (installation.lastUpdated ?? installation.installedAt) : updatedOf(identity);
   const date = dateWords(updated, now);
-  const byline = [view?.author ? L.by(view.author) : null, version ?? L.versionNotReported, identity.marketplace].filter((part): part is string => part !== null);
+  const byline = [view?.author ? L.by(view.author) : null, version, identity.marketplace].filter((part): part is string => part !== null);
 
-  const offered = identity.actionable.length > 0; // a switch, Update and Uninstall… only where this session can change it
+  const offered = identity.actionable.length > 0; // the overflow's Uninstall… only where this session can change it
   const actionable = chip?.actionable ?? false;
   const busy = chip !== null && ops.entries.get(chip.key)?.state.phase === 'working';
-  const managed = chip === null ? (projectCount(others) === 1 ? L.managedIn(basename(others[0].projectPath ?? '')) : L.managedInMany(projectCount(others))) : chipManagedWords(chip);
+  const managed = chip === null ? L.whereManaged(projectCount(others) === 1 ? L.managedIn(basename(others[0].projectPath ?? '')) : L.managedInMany(projectCount(others))) : chipManagedWords(chip);
   const update = updateOffer(installation.version, view?.marketplaceVersion ?? null);
   const change = (action: Change) => chip && ask(chip.key, requestFor(action, { plugin: identity.id, scope: chip.installation.scope as PluginsScope }, null));
 
@@ -136,22 +141,24 @@ export function PluginDetail({ appSessionId, availability, identity, loaded, loa
               )}
             </p>
           </div>
-          {offered ? (
-            <div className="flex shrink-0 items-center gap-2">
-              <span className="inline-flex" title={managed ?? (identity.enabledHere ? L.turnOff : L.turnOn)}>
-                <Switch checked={identity.enabledHere} label={L.enablePlugin} disabled={!actionable || busy} onClick={() => change(identity.enabledHere ? 'disable' : 'enable')} />
-              </span>
-              <span className="inline-flex" title={managed ?? update.title}>
-                <button type="button" className={update.available ? PRIMARY : SECONDARY} disabled={!actionable || busy || update.latest} onClick={() => change('update')}>
+          <div className="flex shrink-0 items-center gap-2">
+            <span className="inline-flex" title={managed === null ? (identity.enabledHere ? L.turnOff : L.turnOn) : undefined}>
+              <Switch checked={identity.enabledHere} label={L.enablePlugin} disabled={busy} unavailable={managed} onClick={() => change(identity.enabledHere ? 'disable' : 'enable')} />
+            </span>
+            <span className="inline-flex" title={managed === null ? update.title : undefined}>
+              <UnavailableButton reason={managed}>
+                <button type="button" className={update.available ? PRIMARY : SECONDARY} disabled={busy || (managed === null && update.latest)} onClick={() => change('update')}>
                   {L.update}
                 </button>
-              </span>
+              </UnavailableButton>
+            </span>
+            {offered && (
               <DropdownMenu.Root modal={false}>
                 <DropdownMenu.Trigger asChild>
                   <button
                     type="button"
                     aria-label={L.moreActions(name)}
-                    title={L.moreActions(name)}
+                    title={L.more}
                     className="inline-flex size-7 shrink-0 items-center justify-center rounded-sm text-fg-muted outline-accent hover:bg-bg-hover hover:text-fg focus-visible:outline-2 data-[state=open]:bg-bg-active"
                   >
                     <MoreIcon />
@@ -165,13 +172,10 @@ export function PluginDetail({ appSessionId, availability, identity, loaded, loa
                   </DropdownMenu.Content>
                 </DropdownMenu.Portal>
               </DropdownMenu.Root>
-            </div>
-          ) : null}
+            )}
+          </div>
         </div>
-        <div className="flex min-w-0 flex-col gap-1.5">
-          <ScopeChips chips={chips} others={others} value={selected} onChange={setChosen} />
-          {managed !== null && <p className="m-0 text-ui-sm text-fg-muted">{managed}</p>}
-        </div>
+        <ScopeChips chips={chips} others={others} value={selected} onChange={setChosen} />
         {chips.map((c) => (
           <div key={c.key} data-plugin-op={c.installation.scope} className="text-ui-sm empty:hidden">
             <OperationLine opKey={c.key} label={chips.length > 1 ? chipLabel(c) : undefined} />
@@ -245,9 +249,9 @@ const goneName = (key: string): string => {
   return `${id} (${scope})`;
 };
 
-// The two facts, never merged: "Enabled for this project" from the CLI, and "Loaded in this session" from the
-// session's loaded list (A's observed facts) with its freshness ("Loaded now", "Loaded last time, <relative>"); a known
-// list without it reads "Not loaded in this session" and, when the plugin is enabled here, offers Reload plugins (ready)
+// The two facts, never merged: "Not enabled for this project" from the CLI (nothing when it is), and "Loaded in this
+// session" from the session's loaded list (A's observed facts) with its freshness ("Loaded now", "as of <relative>"); a
+// known list without it reads "Not loaded yet" and, when the plugin is enabled here, offers Reload (ready)
 // or the loaded line's Refresh, with A's line for a session that cannot start; no list reads "Not observed yet". The
 // last init's problems for this plugin beneath.
 type FactsProps = Omit<PluginDetailProps, 'onBack' | 'listManifests' | 'marketplaces' | 'backTo'> & { now: number };
@@ -255,9 +259,11 @@ type FactsProps = Omit<PluginDetailProps, 'onBack' | 'listManifests' | 'marketpl
 function Facts(props: FactsProps) {
   return (
     <div className="flex flex-col gap-1 text-ui">
-      <p data-plugin-fact="enabled" className="m-0 text-fg">
-        {props.identity.enabledHere ? L.enabledHere : L.notEnabledHere}
-      </p>
+      {!props.identity.enabledHere && (
+        <p data-plugin-fact="enabled" className="m-0 text-fg">
+          {L.notEnabledHere}
+        </p>
+      )}
       {props.loaded !== null && props.appSessionId !== null
         ? <SessionFacts {...props} appSessionId={props.appSessionId} loaded={props.loaded} />
         : <p data-plugin-fact="loaded" className="m-0 text-fg-muted">{SESSION_UNAVAILABLE}</p>}
@@ -273,12 +279,12 @@ function SessionFacts({ appSessionId, availability, identity, loaded, loadedIds,
   if (fact.kind === 'unknown') loadedWords = FRESHNESS.unknown; // the word cut (P174)
   else if (fact.kind === 'absent') loadedWords = L.notLoadedHere;
   else if (fact.freshness.kind === 'now') loadedWords = `${L.loadedHere} · ${FRESHNESS.loadedNow}`;
-  else if (fact.freshness.kind === 'last') loadedWords = `${L.loadedHere} · ${FRESHNESS.loadedLast(fact.freshness.at, now)}`;
+  else if (fact.freshness.kind === 'last') loadedWords = `${L.loadedHere} · ${FRESHNESS.asOf(fact.freshness.at, now)}`;
   else loadedWords = L.loadedHere;
   const offerReload = fact.kind === 'absent' && identity.enabledHere;
   const reloadButton = reloads && (
     <TextButton onClick={reloads.reloadMods} disabled={reloads.busy}>
-      {W.reloadMods}
+      {RELOAD.reload}
     </TextButton>
   );
   return (

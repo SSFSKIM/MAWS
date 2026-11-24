@@ -56,10 +56,10 @@ describe('the supervisor row while an update waits for tool calls', () => {
   it('says what it waits for, served or deferred', () => {
     const served = hostStatus({ matches: 'build', supervisor: supervisorStatus({ liveSessions: 1 }), handover: { inFlight: 2, tool: 'show_pane' } });
     expect(describeSupervisor(served)).toBe(
-      'supervisor · daemon · pid 48213 · build differs · Waiting for show_pane to finish before updating the engine host (2 calls running). · 1 session held · idle exit 10 min · orphans killed 0 · socket /u/supervisor/host.sock · no unexpected exit',
+      'supervisor · daemon · pid 48213 · build differs · Updating after 2 running calls · 1 session held · idle exit 10 min · orphans killed 0 · socket /u/supervisor/host.sock · no unexpected exit',
     );
     expect(describeSupervisor(hostStatus({ state: 'restarting', supervisor: null, matches: null, handover: { inFlight: 1, tool: 'artifact_list' } }))).toBe(
-      'supervisor · daemon · Waiting for artifact_list to finish before updating the engine host (1 call running). · no unexpected exit',
+      'supervisor · daemon · Updating after 1 running call · no unexpected exit',
     );
   });
 });

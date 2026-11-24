@@ -30,8 +30,8 @@ export function ScopeChips({ chips, others, value, onChange }: { chips: readonly
 }
 
 // The installations of other projects, read-only, one row each: the project by its folder's name (its parent's too when
-// two share it; never a path, in the words or a tooltip), "only you" for a local one, the version, and where it is
-// managed.
+// two share it; never a path, in the words or a tooltip), "only you" for a local one, and the version; where it is
+// managed is the greyed switch's reason, not each row's (word cut P704).
 export function OtherProjects({ installations }: { installations: readonly InstalledPlugin[] }) {
   const labels = projectLabels(installations.map((p) => p.projectPath ?? p.scope));
   return (
@@ -43,7 +43,6 @@ export function OtherProjects({ installations }: { installations: readonly Insta
             <span className="min-w-0 truncate font-medium text-fg">{labels.get(p.projectPath ?? p.scope)}</span>
             {p.scope === 'local' && <span className="shrink-0 text-fg-muted">{L.onlyYou}</span>}
             {version !== null && <span className="shrink-0 text-fg-muted tabular-nums">{version}</span>}
-            <span className="ml-auto shrink-0 text-fg-muted">{L.manageThere}</span>
           </li>
         );
       })}

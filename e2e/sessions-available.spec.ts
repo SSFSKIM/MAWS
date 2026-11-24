@@ -59,7 +59,7 @@ test.afterEach(async () => {
 
 // A scratch repository holding one discovered session (a transcript the engine left), a config home trusting it, the
 // session's replay journal, and the product launched over them with the route direct.
-async function launchWith(sessionId: string, build: (journal: SideJournal) => void): Promise<{ maws: MawsLaunch; page: Page; appId: string }> {
+async function launchWith(sessionId: string, build: (journal: SideJournal) => void, rowMs = '60'): Promise<{ maws: MawsLaunch; page: Page; appId: string }> {
   const repo = await ScratchRepo.create({ sentinels: false });
   const store = await StoreFixture.create();
   const journals = realpathSync(mkdtempSync(join(tmpdir(), 'maws-p2a-journals-')));
@@ -78,8 +78,8 @@ async function launchWith(sessionId: string, build: (journal: SideJournal) => vo
   const gate = join(store.configHome, 'version-only-engine');
   writeFileSync(gate, '#!/bin/sh\nif [ "$1" = "--version" ]; then echo "2.1.283 (Claude Code)"; exit 0; fi\nexit 99\n');
   chmodSync(gate, 0o755);
-  // the replay paced, so "Starting…" is on screen long enough to read
-  const maws = await launchMaws({ env: { MAWS_ENGINE_REPLAY: '1', MAWS_E2E_REPLAY_FIXTURES: fixture, MAWS_E2E_REPLAY_ROW_MS: '60', MAWS_E2E_ENGINE_BIN: gate, CLAUDE_CONFIG_DIR: store.configHome } });
+  // the replay paced (each of the engine's rows `rowMs` late), so a start's wait is on screen long enough to read
+  const maws = await launchMaws({ env: { MAWS_ENGINE_REPLAY: '1', MAWS_E2E_REPLAY_FIXTURES: fixture, MAWS_E2E_REPLAY_ROW_MS: rowMs, MAWS_E2E_ENGINE_BIN: gate, CLAUDE_CONFIG_DIR: store.configHome } });
   cleanups.push(() => maws.cleanup());
   const page = maws.page;
   await expect(page.locator('[data-region="main"]')).toBeVisible();
@@ -102,9 +102,12 @@ async function sessionInfo(page: Page) {
 const valueOf = (info: Awaited<ReturnType<typeof sessionInfo>>, label: string) => info.getByRole('term').filter({ hasText: new RegExp(`^${label}$`) }).locator('xpath=following-sibling::dd[1]');
 
 test.describe('sessions available on demand (P2-A)', () => {
-  test('opening a discovered session starts nothing; /skills offers Load now, which says Starting… and then shows the skills', async () => {
+  // The word cut (P523): the start's wait is a quiet spinner, drawn only once it has lasted half a second. At the replay's
+  // usual pace (60 ms a row) a start may end inside that half second, so the case reads the skills alone; at 700 ms a row
+  // the engine's first answer alone is later than the spinner's quiet, so the case requires the spinner.
+  for (const { pace, slow } of [{ pace: '60', slow: false }, { pace: '700', slow: true }]) test(`opening a discovered session starts nothing; /skills offers Load now, which ${slow ? 'shows the start’s quiet spinner' : 'starts it'} and then shows the skills (rows ${pace} ms apart)`, async () => {
     test.setTimeout(120_000);
-    const { maws, page, appId } = await launchWith(SKILLS_SESSION, (journal) => journal.read({ subtype: 'get_skills_dialog' }, { skills: [SKILL] }));
+    const { maws, page, appId } = await launchWith(SKILLS_SESSION, (journal) => journal.read({ subtype: 'get_skills_dialog' }, { skills: [SKILL] }), pace);
     await open(page, appId);
     const info = await sessionInfo(page);
     await unfoldInfoGroup(info, 'Model'); // the word cut: only Permissions and Usage start open
@@ -117,11 +120,23 @@ test.describe('sessions available on demand (P2-A)', () => {
     await page.keyboard.type('/skills');
     await page.keyboard.press('Enter');
     const frame = page.locator('[data-widget="skills"]');
-    await expect(frame.getByText('Not read yet.')).toBeVisible();
+    // the word cut (P519): a dormant dialog with no earlier answer draws Load now alone, with no "Not read yet."
+    await expect(frame.locator('[data-dormant-gesture]')).toHaveText('Load now');
     expect(existsSync(journalDir(maws, appId)), 'nothing launched on opening the widget').toBe(false);
+    const gesture = frame.locator('[data-dormant-gesture]');
+    const lineHeight = () => gesture.evaluate((line) => line.getBoundingClientRect().height);
+    const atRest = await lineHeight();
     await frame.getByRole('button', { name: 'Load now' }).click();
-    await expect(frame.getByText('Starting…')).toBeVisible();
-    await expect(frame.locator('[data-skill-row="e8-probe:e8-hello"]')).toBeVisible({ timeout: 20_000 }); // P2-B's skills library row
+    // P523: the start's wait is the quiet spinner in Load now's place, never words
+    const row = frame.locator('[data-skill-row="e8-probe:e8-hello"]'); // P2-B's skills library row
+    await expect(frame.getByRole('button', { name: 'Load now' })).toHaveCount(0);
+    if (slow) {
+      await expect(frame.getByRole('progressbar', { name: 'Starting…' })).toBeVisible();
+      // the M4 picture review: the wait keeps the line's height, so nothing below it moves while the start runs
+      expect(await lineHeight(), 'the line while the start runs').toBe(atRest);
+    }
+    await expect(frame.getByText('Starting…')).toHaveCount(0);
+    await expect(row).toBeVisible({ timeout: 20_000 });
     expect(spawns(maws, appId), 'one launch').toHaveLength(1);
     expect(spawns(maws, appId)[0]!.frame.args).toEqual(expect.arrayContaining(['--resume', SKILLS_SESSION]));
     expect(writtenUsers(maws, appId), 'no prompt sent to populate the widget').toEqual([]);

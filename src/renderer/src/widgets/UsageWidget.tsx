@@ -1,8 +1,9 @@
 // `/usage` (C11 execution document, the widget table; D-17, §5.5): the account's windows as the status line shows them
 // (C7's usage store: the pinned account's, else the routing account's, from ClaudeUsage's files), then the engine's own
-// accounting for this session from `get_usage` (cost, time, lines, tokens per model). Behind the relay the engine
-// reports no windows (`rate_limits_available: false`), and the widget says so; a direct session's windows are the
-// engine's `rate_limits` from the same read.
+// accounting for this session from `get_usage` (cost, time, lines, tokens per model); a direct session's windows are the
+// engine's `rate_limits` from the same read. The word cut (P596 to P599): the session's cost stays in view and its times,
+// lines and tokens per model fold under Details; the line on what the engine reports about windows is gone; the account
+// line is a quiet spinner while ClaudeUsage has not answered.
 import type { EngineSessionStatus } from '@shared/engine/status';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { SessionRecord } from '@shared/graph/session';
@@ -16,7 +17,8 @@ import { throughClaudeUsage } from '../gateway/observed-route'; // P5 O7 M9
 import { useSessions } from '../stores/sessions';
 import { useSessionWindows, useUsage, type Windows } from '../stores/usage';
 import { USAGE, WIDGET_TITLE } from './copy';
-import { Group, KeyValues, Mono, num } from './parts';
+import { Group, KeyValues, num } from './parts';
+import { QuietSpinner } from '../ui/spinner';
 import { useEngineRead } from './read';
 import { WidgetFrame } from './WidgetFrame';
 
@@ -31,18 +33,18 @@ const seconds = (ms: number) => (ms < 60_000 ? `${(ms / 1000).toFixed(1)} s` : `
 const dollars = (usd: number) => `$${usd < 1 ? usd.toFixed(4) : usd.toFixed(2)}`;
 const count = (value: unknown) => (typeof value === 'number' ? num(value) : '0');
 
+type Reading = { label: string; value: string };
 export interface UsageView {
-  rows: { label: string; value: string }[];
+  cost: Reading; // in view
+  readings: Reading[]; // behind Details, with the models
   models: { model: string; line: string }[];
-  engineWindows: { fact: string | null; sentence: string }; // what the engine said about windows, and what it means
 }
 
-// `route`: a direct session's missing windows are its login's (C11 M6, live), not the relay's.
-export function present(answer: GetUsageResponse, route: 'gateway' | 'direct' = 'gateway'): UsageView {
+export function present(answer: GetUsageResponse): UsageView {
   const s = answer.session;
   return {
-    rows: [
-      { label: USAGE.cost, value: dollars(s.total_cost_usd) },
+    cost: { label: USAGE.cost, value: dollars(s.total_cost_usd) },
+    readings: [
       { label: USAGE.apiTime, value: seconds(s.total_api_duration_ms) },
       { label: USAGE.wallTime, value: seconds(s.total_duration_ms) },
       { label: USAGE.lines, value: `+${count(s.total_lines_added)} −${count(s.total_lines_removed)}` },
@@ -52,10 +54,6 @@ export function present(answer: GetUsageResponse, route: 'gateway' | 'direct' = 
       if (!u.success) return [];
       return [{ model, line: USAGE.model(num(u.data.inputTokens), num(u.data.outputTokens), num(u.data.cacheReadInputTokens), num(u.data.cacheCreationInputTokens)) }];
     }),
-    engineWindows:
-      answer.rate_limits_available && answer.rate_limits !== null
-        ? { fact: null, sentence: USAGE.engineDirect }
-        : { fact: `rate_limits_available: ${String(answer.rate_limits_available)}`, sentence: route === 'direct' ? USAGE.engineNoneDirect : USAGE.engineNone },
   };
 }
 
@@ -85,9 +83,20 @@ function HeldDirectWindows({ windows }: { windows: Windows | null }) {
 function AccountWindows({ record, status, answer }: { record: SessionRecord; status: EngineSessionStatus | null; answer: GetUsageResponse }) {
   const shown = useSessionWindows(record, status);
   const snapshot = useUsage((s) => s.snapshot);
+  const readError = useUsage((s) => s.readError);
   const now = useNow(POPOVER_TICK_MS);
   if (shown.source === 'direct') return <DirectWindows windows={windowsFromGetUsage(answer, new Date(now).toISOString())} now={now} />;
-  const who = shown.account ? [shown.account.email, shown.account.planLabel].filter(Boolean).join(' · ') : snapshot?.available === false ? USAGE.unavailable : USAGE.readingClaudeUsage;
+  // until ClaudeUsage answers, a wait its answer ends; a failed read is said (a later snapshot replaces it); once it has
+  // answered, what it said
+  const who = shown.account
+    ? [shown.account.email, shown.account.planLabel].filter(Boolean).join(' · ')
+    : snapshot === null
+      ? readError === null
+        ? <QuietSpinner label={USAGE.readingClaudeUsage} />
+        : USAGE.readFailed
+      : snapshot.available
+        ? USAGE.noAccount
+        : USAGE.unavailable;
   return (
     <Group label={shown.source === 'pinned' ? USAGE.pinned : USAGE.routing}>
       <p className="m-0 mb-1 text-ui-sm">{who}</p>
@@ -103,29 +112,25 @@ export function UsageBody({ view, answer, appSessionId }: { view: UsageView; ans
     <div className="flex flex-col">
       {record ? <AccountWindows record={record} status={status} answer={answer} /> : <p className="m-0 text-ui-sm text-fg-muted">{USAGE.noRecord}</p>}
       <Group label={USAGE.session}>
-        <KeyValues rows={view.rows} label={USAGE.accounting} />
+        <KeyValues rows={[view.cost]} label={USAGE.accounting} />
       </Group>
-      {view.models.length > 0 && (
-        <Group label={USAGE.models}>
-          <KeyValues rows={view.models.map((m) => ({ label: m.model, value: m.line }))} label={USAGE.byModel} />
-        </Group>
-      )}
-      <p className="m-0 mt-2 text-ui-sm text-fg-muted">
-        {view.engineWindows.fact && (
-          <>
-            <Mono>{view.engineWindows.fact}</Mono>
-            {' · '}
-          </>
-        )}
-        {view.engineWindows.sentence}
-      </p>
+      <details className="mt-2">
+        <summary className="cursor-default text-ui-sm text-fg-muted">{USAGE.details}</summary>
+        <div className="mt-1">
+          <KeyValues rows={view.readings} />
+          {view.models.length > 0 && (
+            <Group label={USAGE.models}>
+              <KeyValues rows={view.models.map((m) => ({ label: m.model, value: m.line }))} label={USAGE.byModel} />
+            </Group>
+          )}
+        </div>
+      </details>
     </div>
   );
 }
 
 export function UsageWidget({ appSessionId, close }: { appSessionId: AppSessionId; args: string; close(): void }) {
   const read = useEngineRead('session.getUsage', { appSessionId });
-  const route = useSessions((s) => (throughClaudeUsage(s.engine.get(appSessionId) ?? null, null) === false ? 'direct' : 'gateway')); // P5 O7 M9: what it was observed reaching
   // A direct session whose process exited before this widget read: the windows Session info's poll last read, dated as
   // a cached answer is (the word cut took them out of Session info, and the title bar's ring reads relay accounts)
   const direct = useSessions((s) => throughClaudeUsage(s.engine.get(appSessionId) ?? null, s.records.get(appSessionId) ?? null) === false);
@@ -133,7 +138,7 @@ export function UsageWidget({ appSessionId, close }: { appSessionId: AppSessionI
   const held = read.data === undefined && direct ? reading : null;
   return (
     <WidgetFrame appSessionId={appSessionId} title={WIDGET_TITLE.usage} command="usage" state={read.state} error={read.error} readAt={held ? Date.parse(held.readAt) : read.readAt} close={close}>
-      {read.data && <UsageBody view={present(read.data, route)} answer={read.data} appSessionId={appSessionId} />}
+      {read.data && <UsageBody view={present(read.data)} answer={read.data} appSessionId={appSessionId} />}
       {held && <HeldDirectWindows windows={held.windows} />}
     </WidgetFrame>
   );

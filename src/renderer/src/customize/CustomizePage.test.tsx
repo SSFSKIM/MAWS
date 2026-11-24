@@ -20,6 +20,7 @@ import { SETTINGS_DEFAULTS_V21 } from '@shared/settings/defaults';
 import { useLayout } from '../stores/layout';
 import { useSessions } from '../stores/sessions';
 import { mountCustomize } from '../test-support/customize-page';
+import { accessibleDescription } from '../test-support/accessible-text';
 import { useLibraryStore } from '../widgets/plugins/library-store';
 import { CustomizeView } from './CustomizeView';
 import { forgetKeptOperations } from '../widgets/plugins/operation';
@@ -53,6 +54,7 @@ let servers: { name: string; scope: string; path: string; transport: string }[];
 let opSeq: number;
 let extraSkills: object[]; // UX wave U11's skill actions
 let skillFileAnswer: unknown;
+let inventoryGate: Promise<void> | null = null; // a held inventory read, answered when the promise settles
 let envAnswer: Promise<unknown> | null; // plugins.env's answer, when a test holds it
 
 const deliver = (name: EventName, payload: unknown) => listeners.get(name)?.forEach((listener) => listener(payload));
@@ -78,8 +80,10 @@ function answer(name: CommandName, input: unknown): unknown {
       return { manifests: [] };
     case 'mods.list':
       return [];
-    case 'customization.inventory':
-      return { skills: [{ name: 'tide-tables', description: 'Reads the tides', source: 'project', path: `${QUAY}/.claude/skills/tide-tables/SKILL.md`, plugin: null }, ...extraSkills], servers, warnings: [], serversRead: true };
+    case 'customization.inventory': {
+      const answer = { skills: [{ name: 'tide-tables', description: 'Reads the tides', source: 'project', path: `${QUAY}/.claude/skills/tide-tables/SKILL.md`, plugin: null }, ...extraSkills], servers, warnings: [], serversRead: true };
+      return inventoryGate === null ? answer : inventoryGate.then(() => answer);
+    }
     case 'layout.openInApps': // UX wave U11's skill actions: the rows this Mac has
       return { apps: [{ id: 'zed', name: 'Zed' }, { id: 'terminal', name: 'Terminal' }, { id: 'finder', name: 'Finder' }] };
     case 'customization.skillFile':
@@ -134,6 +138,7 @@ beforeEach(() => {
   opSeq = 0;
   extraSkills = [];
   skillFileAnswer = { status: 'opened' };
+  inventoryGate = null;
   envAnswer = null;
   shelf = [ledger, berth];
   const bridge: PreloadBridge = {
@@ -210,6 +215,7 @@ describe('the head', () => {
     expect(rows).toHaveLength(2);
     expect(within(rows[0]!).getByRole('radiogroup', { name: 'Library' })).toBeTruthy();
     expect(within(rows[0]!).getByRole('combobox', { name: 'Project' })).toHaveProperty('value', A);
+    expect(rows[0]!.textContent).not.toContain('Showing'); // the word cut (G199): the select is named Project
     expect(rows[1]!.textContent).toMatch(/^Show:/);
     const choices = within(rows[1]!).getAllByRole('radio');
     expect(choices.map((choice) => choice.textContent)).toEqual(['All', 'Plugins', 'Skills', 'Connectors']);
@@ -235,12 +241,13 @@ describe('the head', () => {
     const table: [view: 'mine' | 'discover', show: 'all' | 'plugins' | 'skills' | 'connectors', search: string, present: string[], absent: string[]][] = [
       ['mine', 'all', 'Search my items', ['New skill…', 'Add custom connector…', 'Refresh'], ['Filter', 'Sort by', 'Add', 'Sources']],
       ['mine', 'plugins', 'Search plugins', ['Filter', 'Sort by', 'Add'], ['New skill…', 'Add custom connector…', 'Refresh', 'Sources']],
-      ['mine', 'skills', 'Search skills', ['New skill…', 'Refresh'], ['Filter', 'Add', 'Add custom connector…', 'Sources']],
+      ['mine', 'skills', 'Search skills', ['New skill…'], ['Filter', 'Add', 'Add custom connector…', 'Sources', 'Refresh']], // the word cut (G247)
       ['mine', 'connectors', 'Search connectors', ['Add custom connector…', 'Refresh'], ['New skill…', 'Filter', 'Sort by', 'Add', 'Sources']],
-      ['discover', 'plugins', 'Search all sources', ['Refresh', 'Sources', 'Add'], ['New skill…', 'Filter', 'Add custom connector…']],
-      ['discover', 'skills', 'Search all sources', ['Refresh', 'Sources'], ['New skill…', 'Add', 'Add custom connector…']],
-      ['discover', 'connectors', 'Search all sources', ['Refresh', 'Sources'], ['New skill…', 'Add', 'Add custom connector…']],
-      ['discover', 'all', 'Search all sources', ['Refresh', 'Sources'], ['New skill…', 'Add', 'Add custom connector…', 'Filter']],
+      // the word cut (G267): Discover's Refresh is the Sources popover's alone
+      ['discover', 'plugins', 'Search all sources', ['Sources', 'Add'], ['New skill…', 'Filter', 'Add custom connector…', 'Refresh']],
+      ['discover', 'skills', 'Search all sources', ['Sources'], ['New skill…', 'Add', 'Add custom connector…', 'Refresh']],
+      ['discover', 'connectors', 'Search all sources', ['Sources'], ['New skill…', 'Add', 'Add custom connector…', 'Refresh']],
+      ['discover', 'all', 'Search all sources', ['Sources'], ['New skill…', 'Add', 'Add custom connector…', 'Filter', 'Refresh']],
     ];
     mountCustomize({ view: 'mine', show: 'all' });
     for (const [view, show, search, present, absent] of table) {
@@ -346,12 +353,15 @@ describe('the head', () => {
     }
   });
 
-  it('a plugin’s row gives up its version and date under the page’s narrow width only', async () => {
-    mountCustomize({ view: 'mine', show: 'plugins' });
-    const facts = (await pluginRow('buoy-log@harbour-market')).querySelector<HTMLElement>('[data-plugin-version]')!;
-    expect(facts.textContent).toContain('1.0.0');
-    expect(facts.classList.contains('@max-sm/customize:hidden')).toBe(true); // the page's container, not /plugins' dialog
-  });
+  // the word cut (G218, ruled): the version stays on the row at rest, in Plugins and under All, at every width
+  for (const show of ['plugins', 'all'] as const) {
+    it(`a plugin’s row keeps its version under the page’s narrow width (Show: ${show})`, async () => {
+      mountCustomize({ view: 'mine', show });
+      const version = (await pluginRow('buoy-log@harbour-market')).querySelector<HTMLElement>('[data-plugin-version]')!;
+      expect(version.textContent).toBe('1.0.0');
+      expect([...version.classList].filter((name) => name.startsWith('@max-'))).toEqual([]); // no container width hides it
+    });
+  }
 });
 
 // C2: what a person started is held by the page for its place, whichever view and Show value are drawn after.
@@ -701,7 +711,7 @@ describe('a skill’s actions', () => {
     skillFileAnswer = { status: 'refused', reason: 'missing', message: null };
     const detail = await openDetail('all');
     await choose(detail, 'Finder');
-    expect((await screen.findByRole('alert')).textContent).toBe("This skill's file is no longer here. Refresh, then try again.");
+    expect((await screen.findByRole('alert')).textContent).toBe("This skill's file is no longer here."); // the word cut (G247): no pointer to a Refresh
     expect(invoked('customization.skillFile')).toEqual([{ cwd: QUAY, path: SKILL, app: 'finder' }]);
     fireEvent.click(within(detail).getByRole('button', { name: /^Back/ }));
     fireEvent.click(await screen.findByRole('button', { name: 'View tide-tables' }));
@@ -713,7 +723,10 @@ describe('a skill’s actions', () => {
     envAnswer = new Promise(() => {});
     mountCustomize({ view: 'mine', show: 'skills' });
     fireEvent.keyDown(await within(tools()!).findByRole('button', { name: 'New skill…' }), { key: 'Enter' });
-    expect((await screen.findByRole('menuitem', { name: 'Created by you' })).getAttribute('aria-disabled')).toBe('true');
+    const yours = await screen.findByRole('menuitem', { name: 'Created by you' });
+    expect(yours.getAttribute('aria-disabled')).toBe('true');
+    expect(accessibleDescription(yours)).toBe('Configuration folder not known yet.'); // the word cut (N133, G247)
+    expect(within(tools()!).queryByRole('button', { name: 'Retry' })).toBeNull(); // still reading: nothing failed yet
     fireEvent.click(screen.getByRole('menuitem', { name: 'In this project' }));
     await waitFor(() => expect(prefill(1)).toBe("Let's create a new skill in .claude/skills/ of this project. First ask me what it should do."));
   });
@@ -776,19 +789,86 @@ describe('a skill’s actions', () => {
     act(() => useSettings.setState({ state: null }));
   });
 
-  it('when the configuration home’s first read fails, New skill… says why it waits, and Refresh reads it again', async () => {
+  // the word cut (N133, G247): the greyed button keeps the keyboard and says why as its tooltip and description; Skills
+  // has no Refresh, so the failed read's own Retry stands beside the button it holds back
+  it('when the configuration home’s first read fails, New skill… says why it waits, and its Retry reads it again, from Skills', async () => {
     useCustomizeProject.setState({ projectId: null }, true);
     envAnswer = rejected('engine unavailable');
     mountCustomize({ view: 'mine', show: 'skills' });
+    expect(within(tools()!).queryByRole('button', { name: 'Refresh' })).toBeNull();
     await waitFor(() => expect(invoked('plugins.env')).not.toEqual([]));
     const newSkill = () => within(tools()!).getByRole('button', { name: 'New skill…' });
-    await waitFor(() => expect(newSkill().hasAttribute('disabled')).toBe(true));
-    expect(newSkill().getAttribute('title')).toBe('Your Claude configuration folder is not known yet. Refresh to try again.');
+    await waitFor(() => expect(newSkill().getAttribute('aria-disabled')).toBe('true'));
+    expect(newSkill().hasAttribute('disabled')).toBe(false);
+    expect(newSkill().hasAttribute('title')).toBe(false);
+    expect(accessibleDescription(newSkill())).toBe('Configuration folder not known yet.');
+    fireEvent.click(newSkill());
+    expect(prefill(1)).toBeUndefined(); // greyed: a press starts nothing
     envAnswer = null;
-    fireEvent.click(within(tools()!).getByRole('button', { name: 'Refresh' }));
-    await waitFor(() => expect(newSkill().hasAttribute('disabled')).toBe(false));
+    const reads = invoked('plugins.env').length;
+    fireEvent.click(await within(tools()!).findByRole('button', { name: 'Retry' }));
+    await waitFor(() => expect(invoked('plugins.env').length).toBeGreaterThan(reads));
+    await waitFor(() => expect(newSkill().hasAttribute('aria-disabled')).toBe(false));
+    expect(within(tools()!).queryByRole('button', { name: 'Retry' })).toBeNull();
     fireEvent.click(newSkill());
     await waitFor(() => expect(prefill(1)).toBe(PLAIN));
+  });
+
+  // the word cut (G247): a skill's file gone is said with its own way out, Retry, which reads the skills again in place
+  it('from Skills, a skill’s file no longer there offers Retry, which reads the skills again and clears the line', async () => {
+    skillFileAnswer = { status: 'refused', reason: 'missing', message: null };
+    const detail = await openDetail('skills');
+    await choose(detail, 'Finder');
+    const refusal = await found('[data-skill-refusal]');
+    expect(within(refusal).getByRole('alert').textContent).toBe("This skill's file is no longer here.");
+    const reads = invoked('customization.inventory').length;
+    fireEvent.click(within(refusal).getByRole('button', { name: 'Retry' }));
+    await waitFor(() => expect(invoked('customization.inventory').length).toBeGreaterThan(reads));
+    await waitFor(() => expect(document.querySelector('[data-skill-refusal]')).toBeNull());
+  });
+
+  // the word cut's fix wave for M4: Retry goes from under the keyboard, which stays on the detail's heading while the
+  // detail stays, and lands on the list when the read finds the skill gone
+  const MISSING = { status: 'refused', reason: 'missing', message: null };
+  const pressRetry = async (detail: HTMLElement) => {
+    await choose(detail, 'Finder');
+    const retry = within(await found('[data-skill-refusal]')).getByRole('button', { name: 'Retry' });
+    act(() => retry.focus());
+    fireEvent.click(retry);
+  };
+  it('Retry keeps the keyboard on the detail’s heading while the detail stays', async () => {
+    skillFileAnswer = MISSING;
+    const detail = await openDetail('skills');
+    const reads = invoked('customization.inventory').length;
+    await pressRetry(detail);
+    await waitFor(() => expect(invoked('customization.inventory').length).toBeGreaterThan(reads));
+    await waitFor(() => expect(document.querySelector('[data-skill-refusal]')).toBeNull());
+    expect(document.activeElement).toBe(within(detail).getByRole('heading', { name: 'tide-tables' }));
+  });
+
+  it('Retry that finds the skill gone puts the keyboard on the list', async () => {
+    extraSkills = [{ name: 'harbour-notes', description: 'Notes on the harbour', source: 'user', path: `${HOME}/.claude/skills/harbour-notes/SKILL.md`, plugin: null }];
+    skillFileAnswer = MISSING;
+    const detail = await openDetail('skills', 'harbour-notes');
+    extraSkills = [];
+    await pressRetry(detail);
+    await waitFor(() => expect(document.querySelector('[data-skill-detail]')).toBeNull());
+    expect(document.activeElement?.closest('[data-skills-list]')).not.toBeNull();
+  });
+
+  it('a read that finds the skill gone leaves the keyboard where the person has since taken it', async () => {
+    extraSkills = [{ name: 'harbour-notes', description: 'Notes on the harbour', source: 'user', path: `${HOME}/.claude/skills/harbour-notes/SKILL.md`, plugin: null }];
+    skillFileAnswer = MISSING;
+    const detail = await openDetail('skills', 'harbour-notes');
+    extraSkills = [];
+    let answer = () => {};
+    inventoryGate = new Promise<void>((resolve) => (answer = resolve));
+    await pressRetry(detail);
+    const elsewhere = within(header()).getAllByRole('radio')[0]!;
+    act(() => elsewhere.focus());
+    await act(async () => answer());
+    await waitFor(() => expect(document.querySelector('[data-skill-detail]')).toBeNull());
+    expect(document.activeElement).toBe(elsewhere);
   });
 
   it('a plugin’s skill’s detail says its plugin’s updates replace the file', async () => {

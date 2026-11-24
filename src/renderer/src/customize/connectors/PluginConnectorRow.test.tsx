@@ -37,7 +37,7 @@ const NAME = `plugin:${MANIFEST}:tides-http`;
 const TIDES_URL = 'https://tides.example.com/mcp';
 const TIDES: ScenePlugin = { key: KEY, manifest: MANIFEST, servers: { 'tides-http': { type: 'http', url: TIDES_URL } } };
 const SIGN_IN = 'Sign in to tides-http';
-const COLLISION = (names: string) => `More than one plugin supplies a connector with this name (${names}). Claude Code keeps only one. Turn the others off to sign in.`;
+const COLLISION = (names: string) => `Supplied by more than one plugin (${names}). Turn the others off to sign in.`; // the word cut (N137)
 
 // A plugin as `plugins.list` answers it (the CLI's listing from the page's folder): its key is its id
 const listed = (key: string, over: Record<string, unknown> = {}) => {
@@ -174,11 +174,11 @@ describe('a plugin’s connector in My items (UX wave U11h)', () => {
     pluginList = () => ({ plugins: ['nameless@harbour-market', 'echo@harbour-market', 'long@harbour-market', 'later@harbour-market'].map((key) => listed(key)).concat([listed('dim@harbour-market', { enabled: false })]) });
     mount();
     const lines: [string, string, string][] = [
-      ['tides-http', 'nameless@harbour-market', 'Its plugin’s name can’t be read, so it can’t be matched to a session.'],
+      ['tides-http', 'nameless@harbour-market', 'Plugin name can’t be read'],
       ['echo', 'echo@harbour-market', 'Not loaded: same address as anchor'],
       ['dim', 'dim@harbour-market', 'Plugin turned off'],
       [`srv-${'s'.repeat(40)}`, 'long@harbour-market', 'Its name is too long to sign in from MAWS.'],
-      ['later', 'later@harbour-market', 'Its address is set when a chat starts. Sign in from that chat’s Connectors dialog.'],
+      ['later', 'later@harbour-market', 'Sign in from a chat’s Connectors dialog.'],
     ];
     for (const [server, plugin, text] of lines) {
       const row = await rowOf(server, plugin);
@@ -631,7 +631,7 @@ describe('a plugin’s connector in My items (UX wave U11h)', () => {
       fireEvent.click(within(row).getByRole('button', { name: 'Cancel' }));
       await waitFor(() => expect(asked('connectors.signInCancel')).toEqual([{ opId: 'op-1' }]));
       changed('cancelled');
-      await reads(row, 'Its plugin’s name can’t be read, so it can’t be matched to a session.');
+      await reads(row, 'Plugin name can’t be read');
       expect(within(row).queryByRole('button', { name: 'Cancel' })).toBeNull();
       expect(signIn(row)).toBeNull();
     });
@@ -671,7 +671,7 @@ describe('a plugin’s connector in My items (UX wave U11h)', () => {
 
     it('it ends while no row is drawn and another sign-in of the name runs: the returning row, its name unread, shows neither its step nor Cancel', async () => {
       const row = await endedAwayThenAnother({ manifest: null });
-      await reads(row, 'Its plugin’s name can’t be read, so it can’t be matched to a session.');
+      await reads(row, 'Plugin name can’t be read');
       expect(within(row).queryByRole('button', { name: 'Cancel' })).toBeNull();
     });
 
@@ -774,18 +774,20 @@ describe('a plugin’s connector in My items (UX wave U11h)', () => {
     }
   });
 
-  it('the coverage note reads the item’s words with pluginServers and today’s without, and neither is listed as a failure', async () => {
+  // The word cut (G205, N135): the coverage is drawn by no note, with pluginServers or without, and never as a failure.
+  it('the coverage draws no note with pluginServers or without, and is never listed as a failure', async () => {
     await sceneOf([TIDES]);
     mount();
-    fireEvent.click(await screen.findByText('Inventory coverage'));
-    expect(screen.getByText('Skills that a marketplace declares but no folder holds, and connectors that a plugin ships as a bundle or in another form MAWS does not read, are not listed; see Plugins.')).toBeTruthy();
-    expect(screen.queryByText(CUSTOMIZATION_INVENTORY_COVERAGE)).toBeNull();
+    await rowOf('tides-http');
+    expect(screen.queryByText('Inventory coverage')).toBeNull();
+    expect(screen.queryByText(/are not listed; see Plugins/)).toBeNull();
     expect(screen.queryByText('Some configuration could not be read')).toBeNull();
     cleanup();
     answered = { ...answered!, inventory: { skills: [], servers: [], warnings: [CUSTOMIZATION_INVENTORY_COVERAGE], serversRead: true } }; // an engine host of an earlier build
     mount();
-    fireEvent.click(await screen.findByText('Inventory coverage'));
-    expect(screen.getByText(CUSTOMIZATION_INVENTORY_COVERAGE)).toBeTruthy();
+    await screen.findByText(/^No connectors/);
+    expect(screen.queryByText('Inventory coverage')).toBeNull();
+    expect(screen.queryByText(CUSTOMIZATION_INVENTORY_COVERAGE)).toBeNull();
     expect(screen.queryByText('Some configuration could not be read')).toBeNull();
   });
 });

@@ -5,11 +5,16 @@
 // name or the engine's source word as a neutral badge, the description on a second line, "Use in chat" at the trailing
 // edge), and a small detail in place of the list (Back and ⌘[ return to it with its search and scroll). The badge is plain
 // text: in MAWS it would open another widget. "Use in chat" closes the dialog and puts `/<name> ` at the composer's caret,
-// sending nothing (§5.10; Desktop's local Code library has no such action, §11).
+// sending nothing (§5.10; Desktop's local Code library has no such action, §11). The word cut (G248, P746; the owner's
+// ruling of 2026-11-20 for the Skills list and All alike): a row rests as its name and its badge; its description is its
+// row note, shown on pointing or focus and the row's description at all times; "Use in chat" is drawn on pointing or
+// focus within the row (and always where nothing can point), the detail keeping its button at rest.
 import { useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { SortIcon } from '../../app/IconButton';
 import { ItemImage } from '../../customize/image/ItemImage';
-import { KindWord, NoLastControl } from '../../customize/KindWord';
+import { KindWord, NoLastControl, NoMenu } from '../../customize/KindWord';
+import { HOVER_SCOPE, ON_HOVER } from '../../ui/hover-scope';
+import { RowNote, useRowNote } from '../../ui/row-note';
 import { LIBRARY as L, PLUGIN_MANAGEMENT, SKILLS_LIBRARY as S } from '../copy';
 import { BackButton, backOnChord } from '../plugins/PluginDetail';
 import { Choice, SearchField } from '../plugins/LibraryHeader';
@@ -63,16 +68,22 @@ export function SkillItem({ row, onOpen, onUse, kindWord = false }: { row: Skill
   const label = labelOf(row);
   const badge = badgeOf(row);
   const invocation = invocationOf(row);
+  const rowNote = useRowNote();
+  const noted = row.description !== '';
+  const describedBy = noted ? rowNote.id : undefined;
   return (
     <li
       data-skill-row={row.name}
       data-skill-key={skillRowKey(row)}
+      {...HOVER_SCOPE}
+      {...rowNote.rowProps}
+      aria-describedby={describedBy}
       className="relative flex items-center gap-3 border-b border-border px-2 py-2 last:border-b-0 hover:bg-bg-hover"
       onClick={(event) => {
         if (!ownControl(event.target)) onOpen(row);
       }}
     >
-      <button type="button" data-row-open aria-label={L.view(label)} className="absolute inset-0 rounded-sm outline-accent -outline-offset-2 focus-visible:outline-2" />
+      <button type="button" data-row-open aria-label={L.view(label)} aria-describedby={describedBy} className="absolute inset-0 rounded-sm outline-accent -outline-offset-2 focus-visible:outline-2" />
       <ItemImage kind="skill" seed={label} iconUrl={null} size="row" />
       <div className="relative flex min-w-0 flex-1 flex-col gap-0.5">
         <span className="flex min-w-0 items-center gap-2">
@@ -85,15 +96,20 @@ export function SkillItem({ row, onOpen, onUse, kindWord = false }: { row: Skill
             </span>
           )}
         </span>
-        {row.description !== '' && <span className="truncate text-ui-sm text-fg-muted">{row.description}</span>}
       </div>
-      {onUse && invocation !== null && <button type="button" className={`relative ${SECONDARY}`} disabled={row.unavailable != null} title={row.unavailable ?? undefined} onClick={() => onUse(invocation)}>
+      {noted && (
+        <RowNote note={rowNote} className="pl-14">
+          {row.description}
+        </RowNote>
+      )}
+      {onUse && invocation !== null && <button type="button" {...ON_HOVER} className={`relative ${SECONDARY}`} disabled={row.unavailable != null} title={row.unavailable ?? undefined} onClick={() => onUse(invocation)}>
         {S.useInChat}
       </button>}
       {kindWord && (
         <>
           <KindWord kind="skill" />
           <NoLastControl />
+          <NoMenu />
         </>
       )}
     </li>
@@ -124,7 +140,9 @@ export function SkillDetail({ row, onBack, onUse, backTo = S.list, extras = {} }
       <div className="flex items-center gap-3">
         <ItemImage kind="skill" seed={labelOf(row)} iconUrl={null} size="head" />
         <div className="flex min-w-0 flex-1 flex-col gap-0.5">
-          <h3 className="m-0 truncate text-prose font-semibold text-fg">{labelOf(row)}</h3>
+          <h3 tabIndex={-1} data-skill-heading className="m-0 truncate rounded-sm text-prose font-semibold text-fg outline-accent focus-visible:outline-2">
+            {labelOf(row)}
+          </h3>
         </div>
         {onUse && invocation !== null && <button type="button" className={PRIMARY} disabled={row.unavailable != null} title={row.unavailable ?? undefined} onClick={() => onUse(invocation)}>
           {S.useInChat}
@@ -176,7 +194,11 @@ export function SkillsLibrary({ groups, shown, onUse, onDetail, onReset, toList,
     if (selectedKey !== null || from === null || pane.current === null) return;
     left.current = null;
     pane.current.scrollTop = from.scrollTop;
-    pane.current.querySelector<HTMLElement>(`[data-skill-key="${CSS.escape(from.key)}"] [data-row-open]`)?.focus(); // a name two scopes can share
+    // its row (a name two scopes can share); a row a new answer no longer lists, the list's first row, else the list, but
+    // only when the keyboard went with the closing detail (not where the person has since taken it)
+    const row = pane.current.querySelector<HTMLElement>(`[data-skill-key="${CSS.escape(from.key)}"] [data-row-open]`);
+    if (row !== null) row.focus();
+    else if (document.activeElement === null || document.activeElement === document.body) (pane.current.querySelector<HTMLElement>('[data-row-open]') ?? pane.current).focus();
   }, [selectedKey]);
 
   const total = groups.reduce((n, g) => n + g.rows.length, 0);
@@ -212,7 +234,7 @@ export function SkillsLibrary({ groups, shown, onUse, onDetail, onReset, toList,
   return (
     <>
       {selected !== null && <SkillDetail row={selected} onBack={back} onUse={onUse} extras={extrasOf?.(selected)} />}
-      <div ref={pane} data-skills-list className={`min-h-0 flex-1 overflow-y-auto px-1 pb-2 ${selected !== null ? 'hidden' : ''}`}>
+      <div ref={pane} tabIndex={-1} data-skills-list className={`min-h-0 flex-1 overflow-y-auto px-1 pb-2 outline-none ${selected !== null ? 'hidden' : ''}`}>
         {body}
       </div>
     </>

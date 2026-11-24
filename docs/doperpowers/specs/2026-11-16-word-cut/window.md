@@ -4,7 +4,7 @@
 
 105 items: 70 cut, 1 reworded, 34 stay. Of the 71 that change, the owner saw 20 in a picture or ruled on them; 51 follow the pattern and were not seen.
 
-Against master (M0): 104 unchanged, 1 moot; none waits on the owner; 3 put to the owner (new rows included) and since ruled. M0 added 6 rows for the UX wave's new text (2 cut, 1 reworded, 3 stay), listed at the end.
+Against master (M0): 104 unchanged, 1 moot; none waits on the owner; 3 put to the owner (new rows included) and since ruled. M0 added 19 rows for the UX wave's new text (14 cut, 2 reworded, 3 stay), listed at the end.
 
 Columns: **Id** is the item's id in `items.json`. **Where** is the place on the surface. **Today** is the text at the pin `2c7044231` (an example value where the text is built from data). **Decision** is `cut` (the text leaves the resting surface), `reword` (it changes) or `stays` (today's text is kept; the row is here so that nobody proposes it again). **After** says what the surface shows afterwards, as it was built on the scratch branch and shown in the pictures. **Basis** is how firm the decision is, in the words of the root document's "How firm each decision is". **Source** is the file and line at the pin. **M0** is what the re-reading against master found (see the root document's "M0's record"): `unchanged`, `moved`, `rewritten by the wave`, `gone` or `moot`, with the file and line on master, and for a rewritten row the text master shows and the row decided again by the five rules. **Build** is the milestone that builds the row and the scene whose before and after pictures show it.
 
@@ -22,7 +22,7 @@ Columns: **Id** is the item's id in `items.json`. **Where** is the place on the 
 
 | Id | Where | Today | Decision | After | Basis | Source | M0 | Build |
 |---|---|---|---|---|---|---|---|---|
-| C70 | last action under the list | Don't work in a project | cut | The project menu's last action reads "No project". | pattern | `src/renderer/src/composer/frame/ProjectRow.tsx:46` | unchanged `src/renderer/src/composer/frame/ProjectRow.tsx:46` | M4 · no scene: needs that window, sidebar or banner state (wanted: New chat, the project menu open) |
+| C70 | last action under the list | Don't work in a project | cut | The project menu's last action reads "No project". | pattern | `src/renderer/src/composer/frame/ProjectRow.tsx:46` | unchanged `src/renderer/src/composer/frame/ProjectRow.tsx:46` | M4 · `m4-new-chat-project-menu` |
 
 ### New chat, machine menu
 
@@ -125,7 +125,7 @@ Columns: **Id** is the item's id in `items.json`. **Where** is the place on the 
 | Id | Where | Today | Decision | After | Basis | Source | M0 | Build |
 |---|---|---|---|---|---|---|---|---|
 | W45 | small capitals above the project list, with three icons at its right | PROJECTS | stays | Stays. brought back on shell-tools, shell-tools-open, shell-tools-transcript-view | brought back | `src/renderer/src/sidebar/Sidebar.tsx:499` | unchanged `src/renderer/src/sidebar/Sidebar.tsx:501` | M4 · `shell-tools` |
-| W49 | grey label at the top of the sort menu | Sort sessions by | cut | The sort menu holds just Priority and Recency, with no "Sort sessions by" label. | pattern | `src/renderer/src/sidebar/Sidebar.tsx:569` | unchanged `src/renderer/src/sidebar/Sidebar.tsx:571` | M4 · no scene: needs that window, sidebar or banner state (wanted: Sidebar sort menu open) |
+| W49 | grey label at the top of the sort menu | Sort sessions by | cut | The sort menu holds just Priority and Recency, with no "Sort sessions by" label. | pattern | `src/renderer/src/sidebar/Sidebar.tsx:569` | unchanged `src/renderer/src/sidebar/Sidebar.tsx:571` | M4 · `m4-sidebar-sort-menu` |
 | W52 | grey text at the right of a project row whose folders are on other machines | mini · studio offline | stays | Stays. which machine, and that one is offline (machine names came back with "This Mac", P29; an exception keeps its word) | pattern | `src/renderer/src/sidebar/ProjectRow.tsx:99` | unchanged `src/renderer/src/sidebar/ProjectRow.tsx:99` | M4 · no scene: needs a session on another machine (wanted: Sidebar project whose folders are on other machines (one offline)) |
 | W53 | grey text at the right of a project row when teammates' sessions are not shown | +4 others | stays | Stays. a count turned into a dimmed mark, like the Overview count the owner brought back (W3) | pattern | `src/renderer/src/sidebar/ProjectRow.tsx:212` | unchanged `src/renderer/src/sidebar/ProjectRow.tsx:212` | M4 · no scene: needs that window, sidebar or banner state (wanted: Sidebar project row with teammates' sessions not shown (+N others)) |
 | W58 | grey link at the very end of the list, when any project is hidden | Hidden projects… | stays | Stays. a way in (to hidden projects), like the Projects row and the Customize link the owner brought back (W37, G5) | pattern | `src/renderer/src/sidebar/Sidebar.tsx:524` | unchanged `src/renderer/src/sidebar/Sidebar.tsx:526` | M4 · no scene: needs that window, sidebar or banner state (wanted: Sidebar with a hidden project (the Hidden projects link)) |
@@ -201,7 +201,7 @@ Columns: **Id** is the item's id in `items.json`. **Where** is the place on the 
 |---|---|---|---|---|---|---|---|---|
 | W125 | under the title | Your current bindings. Change them in Settings → Keyboard. | cut | Under the Keyboard shortcuts title: "Change in Settings" (plain text, not a link). | seen | `src/renderer/src/keymap/KeyboardShortcuts.tsx:32` | unchanged `src/renderer/src/keymap/KeyboardShortcuts.tsx:39` | M4 · `r2-shortcuts` |
 | W126 | the search field | Search actions or shortcuts | cut | The Keyboard shortcuts search field's placeholder reads "Search"; its accessible name is unchanged. | seen | `src/renderer/src/keymap/KeyboardShortcuts.tsx:53` | unchanged `src/renderer/src/keymap/KeyboardShortcuts.tsx:60` | M4 · `r2-shortcuts` |
-| W127 | when the search finds nothing | No shortcuts match your search. | cut | A search with no match says "Nothing matches". | pattern | `src/renderer/src/keymap/KeyboardShortcuts.tsx:66` | unchanged `src/renderer/src/keymap/KeyboardShortcuts.tsx:73` | M4 · no scene: needs that window, sidebar or banner state (wanted: Shortcuts window with a search that finds nothing) |
+| W127 | when the search finds nothing | No shortcuts match your search. | cut | A search with no match says "Nothing matches". | pattern | `src/renderer/src/keymap/KeyboardShortcuts.tsx:66` | unchanged `src/renderer/src/keymap/KeyboardShortcuts.tsx:73` | M4 · `m4-shortcuts-nomatch` |
 
 ### Menu bar
 
@@ -226,8 +226,8 @@ Columns: **Id** is the item's id in `items.json`. **Where** is the place on the 
 
 | Id | Where | Today | Decision | After | Basis | Source | M0 | Build |
 |---|---|---|---|---|---|---|---|---|
-| W135 | under the title | Your sidebar projects come first. Add a hidden or discovered project, or choose a folder. | cut | The Add project window shows no sentence under its title (kept as the dialog's description for assistive tech). | pattern | `src/renderer/src/sidebar/AddProject.tsx:49` | unchanged `src/renderer/src/sidebar/AddProject.tsx:49` | M4 · no scene: needs that window, sidebar or banner state (wanted: Add project window open (the + on the project list)) |
-| W136 | grey tag on rows already in the sidebar | In sidebar | cut | Rows already in the sidebar carry no "In sidebar" tag; they stand greyed under the In sidebar head. | pattern | `src/renderer/src/sidebar/AddProject.tsx:56` | unchanged `src/renderer/src/sidebar/AddProject.tsx:56` | M4 · no scene: needs that window, sidebar or banner state (wanted: Add project window open (the + on the project list)) |
+| W135 | under the title | Your sidebar projects come first. Add a hidden or discovered project, or choose a folder. | cut | The Add project window shows no sentence under its title (kept as the dialog's description for assistive tech). | pattern | `src/renderer/src/sidebar/AddProject.tsx:49` | unchanged `src/renderer/src/sidebar/AddProject.tsx:49` | M4 · `m4-add-project` |
+| W136 | grey tag on rows already in the sidebar | In sidebar | cut | Rows already in the sidebar carry no "In sidebar" tag; they stand greyed under the In sidebar head. | pattern | `src/renderer/src/sidebar/AddProject.tsx:56` | unchanged `src/renderer/src/sidebar/AddProject.tsx:56` | M4 · `m4-add-project` |
 
 ### Locate folder sheet
 
@@ -246,7 +246,7 @@ Columns: **Id** is the item's id in `items.json`. **Where** is the place on the 
 | Id | Where | Today | Decision | After | Basis | Source | M0 | Build |
 |---|---|---|---|---|---|---|---|---|
 | W154 | second line of the empty state | Worktrees MAWS or Claude Code create in this repository appear here | cut | The Worktrees window's empty state reads "No worktrees yet" alone. | pattern | `src/renderer/src/sessions/WorktreesDialog.tsx:109` | unchanged `src/renderer/src/sessions/WorktreesDialog.tsx:109` | M4 · no scene: needs that window, sidebar or banner state (wanted: Worktrees window open (one worktree with no session, and the empty state)) |
-| W155 | a grey label and a grey line on every worktree that has no session | Sessions No session | cut | A worktree with no session shows no Sessions label and no "No session" line. | pattern | `src/renderer/src/sessions/WorktreesDialog.tsx:167` | unchanged `src/renderer/src/sessions/WorktreesDialog.tsx:167` | M4 · no scene: needs that window, sidebar or banner state (wanted: Worktrees window open (one worktree with no session, and the empty state)) |
+| W155 | a grey label and a grey line on every worktree that has no session | Sessions No session | cut | A worktree with no session shows no Sessions label and no "No session" line. | pattern | `src/renderer/src/sessions/WorktreesDialog.tsx:167` | unchanged `src/renderer/src/sessions/WorktreesDialog.tsx:167` | M4 · `m4-worktrees-orphan` |
 
 ### New project on another machine sheet
 
@@ -260,14 +260,14 @@ Columns: **Id** is the item's id in `items.json`. **Where** is the place on the 
 
 | Id | Where | Today | Decision | After | Basis | Source | M0 | Build |
 |---|---|---|---|---|---|---|---|---|
-| W143 | grey line under the title field | Generated by the engine from the first prompt | cut | The Rename sheet no longer says where the current name came from; Regenerate stays (for a live session). | pattern | `src/renderer/src/sessions/RenameDialog.tsx:24` | unchanged `src/renderer/src/sessions/RenameDialog.tsx:26` | M4 · no scene: needs that sheet opened (wanted: Rename sheet open) |
-| W144 | second grey line | Kept in MAWS until the session runs again; a /rename in the terminal replaces it. | cut | The Rename sheet has no second grey line (neither "The engine records the new title." nor the terminal /rename warning). | pattern | `src/renderer/src/sessions/RenameDialog.tsx:100` | unchanged `src/renderer/src/sessions/RenameDialog.tsx:110` | M4 · no scene: needs that sheet opened (wanted: Rename sheet open) |
+| W143 | grey line under the title field | Generated by the engine from the first prompt | cut | The Rename sheet no longer says where the current name came from; Regenerate stays (for a live session). | pattern | `src/renderer/src/sessions/RenameDialog.tsx:24` | unchanged `src/renderer/src/sessions/RenameDialog.tsx:26` | M4 · `m0-dialog-rename-index` |
+| W144 | second grey line | Kept in MAWS until the session runs again; a /rename in the terminal replaces it. | cut | The Rename sheet has no second grey line (neither "The engine records the new title." nor the terminal /rename warning). | pattern | `src/renderer/src/sessions/RenameDialog.tsx:100` | unchanged `src/renderer/src/sessions/RenameDialog.tsx:110` | M4 · `m0-dialog-rename-index` |
 
 ### Archive sheet
 
 | Id | Where | Today | Decision | After | Basis | Source | M0 | Build |
 |---|---|---|---|---|---|---|---|---|
-| W146 | the paragraph under "Archive “<title>”?" | Ends its engine process on mini and hides it from app. The transcript stays where Claude Code keeps it; resume it from Archived sessions or with claude --resume in the terminal. The worktree is not touched. | cut | The Archive sheet's paragraph reads "Stops it and hides it. Find it again under Archived sessions." | pattern | `src/renderer/src/sessions/ArchiveDialog.tsx:65` | unchanged `src/renderer/src/sessions/ArchiveDialog.tsx:65` | M4 · no scene: needs that sheet opened (wanted: Archive sheet open) |
+| W146 | the paragraph under "Archive “<title>”?" | Ends its engine process on mini and hides it from app. The transcript stays where Claude Code keeps it; resume it from Archived sessions or with claude --resume in the terminal. The worktree is not touched. | cut | The Archive sheet's paragraph reads "Stops it and hides it. Find it again under Archived sessions." | pattern | `src/renderer/src/sessions/ArchiveDialog.tsx:65` | unchanged `src/renderer/src/sessions/ArchiveDialog.tsx:65` | M4 · `m4-archive-sheet` |
 
 ### Share sheet
 
@@ -356,3 +356,84 @@ Rows added by M0 for text the UX wave added after the pin. **Today** here is the
 | Id | Where | Today | Decision | After | Basis | Source | M0 | Build |
 |---|---|---|---|---|---|---|---|---|
 | N155 | the status word in the first line of the hover card of a session another machine keeps as stopped (process ended, reopenable) | Stopped · updated 3m ago | stays | Stays. rule 2: orients with a non-default state; it replaced "Done" on the owner's decision of 2026-11-19. "Stopped" is not the default-state word rule 1 cuts | pattern | `src/renderer/src/attention/glyph.ts:90` | new `src/renderer/src/attention/glyph.ts:90` | M4 · no scene: needs a session on another machine (wanted: sidebar hover card on a listed session from another machine in the stopped state) |
+
+#### Sidebar, project hover card
+
+| Id | Where | Today | Decision | After | Basis | Source | M0 | Build |
+|---|---|---|---|---|---|---|---|---|
+| N174 | under the card's Worktrees heading while git lists the project's worktrees | Reading… | cut | Nothing for the first half second, then a quiet spinner under the Worktrees heading, "Reading worktrees" its accessible name; outside a repository the section goes once git answers. | pattern | `src/renderer/src/sidebar/ProjectHoverCard.tsx:90` | new `src/renderer/src/sidebar/ProjectHoverCard.tsx:90` | M4 · no scene: a transient wait no fixture holds (wanted: project hover card the instant it opens, before git answers) |
+
+### Projects, worktrees and archive
+
+#### Projects page
+
+| Id | Where | Today | Decision | After | Basis | Source | M0 | Build |
+|---|---|---|---|---|---|---|---|---|
+| N171 | where the list will be, while the projects are first read | Loading projects… | cut | Nothing for the first half second, then a quiet spinner where the list will be, "Loading projects" its accessible name; an empty workspace keeps "No projects yet". | pattern | `src/renderer/src/projects/ProjectsView.tsx:57` | new `src/renderer/src/projects/ProjectsView.tsx:57` | M4 · no scene: a transient wait no fixture holds (wanted: the Projects page before the first project list arrives) |
+
+#### Archived sessions window
+
+| Id | Where | Today | Decision | After | Basis | Source | M0 | Build |
+|---|---|---|---|---|---|---|---|---|
+| N172 | where the list will be (and, in the footer's sheet, under each machine's name) while the archived sessions are read | Loading… | cut | Nothing for the first half second, then a quiet spinner, "Loading archived sessions" its accessible name; a failed read keeps its error in the spinner's place. | pattern | `src/renderer/src/sessions/ArchivedSessionsDialog.tsx:111` | new `src/renderer/src/sessions/ArchivedSessionsDialog.tsx:111` | M4 · no scene: a transient wait no fixture holds (wanted: Archived sessions window while a machine's read is out) |
+
+#### Worktrees window
+
+| Id | Where | Today | Decision | After | Basis | Source | M0 | Build |
+|---|---|---|---|---|---|---|---|---|
+| N173 | the window's body while git lists the worktrees and reads each one's status | Reading worktrees… | cut | Nothing for the first half second, then a quiet spinner, "Reading worktrees" its accessible name. | pattern | `src/renderer/src/sessions/WorktreesDialog.tsx:71` | new `src/renderer/src/sessions/WorktreesDialog.tsx:71` | M4 · no scene: a transient wait no fixture holds (wanted: Worktrees window while git is read) |
+
+#### New project on another machine sheet
+
+| Id | Where | Today | Decision | After | Basis | Source | M0 | Build |
+|---|---|---|---|---|---|---|---|---|
+| N175 | in the folder list's header (and the Add project sheet's folder field for another machine) while a read of that machine's folders is out | Reading the folders… | cut | Nothing for the first half second, then a quiet spinner beside the folder shown, "Reading the folders" its accessible name, the page shown staying until the answer replaces it; the Add project field's first read shows it in the empty list. An answer or a refused read takes it down, the refusal showing its words. | pattern | `src/renderer/src/sessions/remote-setup.ts:72` | new `src/renderer/src/sessions/RemoteSetupSheet.tsx:194` | M4 · no scene: needs a session on another machine (wanted: New project on another machine sheet while the folders are read) |
+| N182 | under the folder list after Use this folder, and in the trust sheet a refused Send opens, while the folder's trust is read on that machine | Reading its trust on mini… | cut | Nothing for the first half second, then a quiet spinner, "Reading its trust on <machine>" its accessible name; the trust card, or a refused read's words, replace it. Registering's line, which asks for Touch ID, stays as it reads. | pattern | `src/renderer/src/sessions/remote-setup.ts:77` | new `src/renderer/src/sessions/RemoteSetupSheet.tsx:73` | M4 · no scene: needs a session on another machine (wanted: New project on another machine sheet while the folder's trust is read) |
+
+### Sheets (rename, share, archive, delete)
+
+#### Rename sheet
+
+| Id | Where | Today | Decision | After | Basis | Source | M0 | Build |
+|---|---|---|---|---|---|---|---|---|
+| N176 | Regenerate, for a live session, while the engine names the session | Regenerating… | cut | Regenerate keeps its word while the engine names the session, greyed and busy, with a quiet spinner beside it named "Regenerating the title". | pattern | `src/renderer/src/sessions/RenameDialog.tsx:105` | new `src/renderer/src/sessions/RenameDialog.tsx:90` | M4 · no scene: a transient wait no fixture holds (wanted: Rename sheet of a live session while Regenerate is out) |
+
+#### Share sheet and Add owner sheet
+
+| Id | Where | Today | Decision | After | Basis | Source | M0 | Build |
+|---|---|---|---|---|---|---|---|---|
+| N177 | in place of the policy, while the session's reach is read | Reading its reach… | cut | Nothing for the first half second, then a quiet spinner where the policy will be, "Reading its reach" its accessible name. | pattern | `src/renderer/src/sessions/share/copy.ts:81` | new `src/renderer/src/sessions/share/ShareSheet.tsx:232` | M4 · no scene: a transient wait no fixture holds (wanted: Share sheet before the session's reach is read) |
+
+#### Share sheet
+
+| Id | Where | Today | Decision | After | Basis | Source | M0 | Build |
+|---|---|---|---|---|---|---|---|---|
+| N178 | Save, while the change goes | Saving… | cut | Save keeps its word while the change goes, greyed and busy, with a quiet spinner beside it named "Saving" (SheetForm's submitWait). | pattern | `src/renderer/src/sessions/share/copy.ts:77` | new `src/renderer/src/sessions/share/ShareSheet.tsx:197` | M4 · no scene: a transient wait no fixture holds (wanted: Share sheet with a save in flight) |
+
+#### Add owner sheet
+
+| Id | Where | Today | Decision | After | Basis | Source | M0 | Build |
+|---|---|---|---|---|---|---|---|---|
+| N179 | Add owner, while the add goes | Adding… | cut | Add owner keeps its words while the add goes, greyed and busy, with a quiet spinner beside them named "Adding the owner" (SheetForm's submitWait). | pattern | `src/renderer/src/sessions/share/copy.ts:150` | new `src/renderer/src/sessions/share/AddOwnerSheet.tsx:114` | M4 · no scene: a transient wait no fixture holds (wanted: Add owner sheet with an add in flight) |
+
+#### Delete sheet
+
+| Id | Where | Today | Decision | After | Basis | Source | M0 | Build |
+|---|---|---|---|---|---|---|---|---|
+| N180 | in place of what would move to the Trash, while it is read | Reading what would move… | cut | Nothing for the first half second, then a quiet spinner where the sentence will be, "Reading what would move" its accessible name; a failed read shows its error and no spinner. The sentence itself, a destructive step's text, stays as it reads. | pattern | `src/renderer/src/sessions/DeleteDialog.tsx:67` | new `src/renderer/src/sessions/DeleteDialog.tsx:69` | M4 · no scene: a transient wait no fixture holds (wanted: Delete sheet before what would move is read) |
+
+### New chat
+
+#### New chat, project menu
+
+| Id | Where | Today | Decision | After | Basis | Source | M0 | Build |
+|---|---|---|---|---|---|---|---|---|
+| N181 | on another machine, the menu's first row while that machine's projects are read | Reading mini’s projects… | cut | Nothing for the first half second, then a quiet spinner where the projects will be, "Reading <machine>’s projects" its accessible name; the projects, or a failed read's words, replace it. | pattern | `src/renderer/src/sessions/remote-setup.ts:88` | new `src/renderer/src/composer/frame/ProjectRow.tsx:149` | M4 · no scene: needs a session on another machine (wanted: New chat project menu for another machine before its projects answer) |
+
+### Usage ring and its popover
+
+#### Usage dialog (/usage)
+
+| Id | Where | Today | Decision | After | Basis | Source | M0 | Build |
+|---|---|---|---|---|---|---|---|---|
+| N183 | the account line of a routed session once ClaudeUsage has answered with no account for it, or its read has failed with no snapshot held | Reading ClaudeUsage… | reword | "Account not found" once ClaudeUsage answered and names no account for the session; "Couldn't read ClaudeUsage" once its read failed and no snapshot is held (a later snapshot replaces either). The quiet spinner (P596) stands only while no answer has come. | pattern | `src/renderer/src/widgets/copy.ts:100` | new `src/renderer/src/widgets/UsageWidget.tsx:98` | M4 · no scene: needs a ClaudeUsage that answers with no account for the session, or a failed read (wanted: /usage on a routed session with no matching account, and after a failed settings.usage) |

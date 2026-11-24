@@ -93,20 +93,19 @@ describe('the custom connector sheet', () => {
     expect((onConfirm.mock.calls[0][0] as PluginsRequest).input).toEqual({ name: 'files-probe', scope: 'local', entry: { type: 'stdio', command: '/opt/probe/bin/files-probe', args: ['--root', '/tmp/my files', '-v'], env: [{ name: 'MODE', value: 'value-one' }] } });
   });
 
-  it('a row with neither a name nor a value is not sent, and while there is one the sheet says so', () => {
+  // The word cut (N142, N143): the sheet says nothing of an empty row or of where the values are saved.
+  it('a row with neither a name nor a value is not sent, and the sheet says nothing of it', () => {
     const { sheet, onConfirm } = open();
     name(sheet, 'files-probe');
     type(field(sheet, '[data-connector-url-field]'), 'https://files.example.test/mcp');
     fireEvent.click(within(sheet).getByRole('button', { name: 'Add header' }));
-    expect(sheet.textContent).toContain('An empty row is not added.');
-    expect(sheet.textContent).toContain('Saved in Claude Code’s configuration file as written.'); // a row, filled or not
+    expect(sheet.textContent).not.toContain('An empty row is not added.');
+    expect(sheet.textContent).not.toContain('Saved in Claude Code’s configuration file as written.');
     fireEvent.click(add(sheet));
     expect((onConfirm.mock.calls[0][0] as PluginsRequest).input).toEqual({ name: 'files-probe', scope: 'user', entry: { type: 'http', url: 'https://files.example.test/mcp', headers: [] } });
     type(rowsOf(sheet)[0].querySelector('[data-connector-row-name]')!, 'X-Probe');
-    expect(sheet.textContent).not.toContain('An empty row is not added.');
     fireEvent.click(within(rowsOf(sheet)[0]).getByRole('button', { name: 'Remove X-Probe' }));
     expect(rowsOf(sheet)).toEqual([]);
-    expect(sheet.textContent).not.toContain('Saved in Claude Code’s configuration file as written.');
   });
 
   it('a row’s Remove is named by its name, or its number', () => {
@@ -262,7 +261,7 @@ describe('the custom connector sheet', () => {
     choose(sheet, 'Local command');
     const args = within(sheet).getByRole('textbox', { name: 'Arguments' });
     expect(args.parentElement!.nextElementSibling!.textContent).toBe('Arguments are shown and saved as typed and are hidden nowhere. Put a secret in Environment.');
-    expect(sheet.querySelector('[data-connector-args]')!.textContent).toBe('No arguments');
+    expect(sheet.querySelector('[data-connector-args]')!.textContent).toBe(''); // the word cut (N145): nothing to count, nothing said
     type(args as HTMLInputElement, '--root "/tmp/my files" -v');
     expect([...sheet.querySelectorAll('[data-connector-arg]')].map((box) => box.textContent)).toEqual(['--root', '/tmp/my files', '-v']);
     expect(sheet.querySelector('[data-connector-args] p')!.textContent).toBe('3 arguments');

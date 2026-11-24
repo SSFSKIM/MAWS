@@ -300,7 +300,7 @@ test('usage: without ClaudeUsage data the ring is a muted empty track and the po
     // The palette's Usage (the retired Accounts entry's id) opens it too, and it stays open past the palette's close.
     const palette = maws.page.getByRole('dialog', { name: 'Command palette' });
     await menu(maws.app, 'palette.open');
-    await expect(palette.getByPlaceholder('Search sessions, projects and actions')).toBeFocused();
+    await expect(palette.getByPlaceholder('Search', { exact: true })).toBeFocused(); // the word cut (W113): the placeholder
     await maws.page.keyboard.type('Usage');
     const actions = palette.getByRole('group', { name: 'Actions' });
     await expect(actions.getByRole('option', { name: /^Usage/ })).toBeVisible();

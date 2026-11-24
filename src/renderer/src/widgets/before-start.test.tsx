@@ -110,7 +110,7 @@ describe('the Connectors dialog before the first message', () => {
   it('lists one row per configured name with its scope in Customize’s words, and no switch, Reconnect or Sign in', async () => {
     mount(McpWidget);
     const list = await screen.findByRole('list', { name: 'Connectors' });
-    expect(lead()).toBe('Configured for Atlas. Connection state shows once the chat starts.');
+    expect(lead()).toBe('Configured for Atlas');
     const rows = within(list).getAllByRole('listitem');
     expect(rows.map((row) => row.querySelector('[data-connector-name]')?.textContent)).toEqual(['notion', 'files']);
     expect(rows.map((row) => row.querySelector('[data-connector-state]')?.textContent)).toEqual(['user scope', 'local scope']);
@@ -136,7 +136,7 @@ describe('the Connectors dialog before the first message', () => {
     putIntent(intent({ appSessionId: ID, projectId: null, location: { kind: 'directory', path: '/Users/someone/scratch' } }));
     mount(McpWidget);
     expect(await screen.findByText('No connectors')).toBeTruthy();
-    expect(lead()).toBe('Configured for ~/scratch. Connection state shows once the chat starts.');
+    expect(lead()).toBe('Configured for ~/scratch');
   });
 
   it('shows a failed read in its words with Retry in the list’s place', async () => {
@@ -192,7 +192,7 @@ describe('a plugin’s connectors before the first message (UX wave U11h)', () =
     profileOff(['dim@harbour-market']);
     mount(McpWidget);
     const list = await screen.findByRole('list', { name: 'Connectors' });
-    expect(lead()).toBe('Configured for Atlas. Connection state shows once the chat starts.');
+    expect(lead()).toBe('Configured for Atlas');
     await waitFor(() => expect(within(list).getAllByRole('listitem').map((row) => row.querySelector('[data-connector-name]')?.textContent)).toEqual(['notion', 'files', 'tides-http']));
     const rows = within(list).getAllByRole('listitem');
     expect(rows.map((row) => row.querySelector('[data-connector-state]')?.textContent)).toEqual(['user scope', 'local scope', 'from tide-tables']);
@@ -214,7 +214,7 @@ describe('the Skills dialog before the first message', () => {
   it('lists the skills on disk in Customize’s three groups under its line, with no Reload', async () => {
     mount(SkillsWidget);
     await screen.findByRole('region', { name: 'In this project' });
-    expect(lead()).toBe('On disk for Atlas. The chat may load more once it starts.');
+    expect(lead()).toBe('On disk for Atlas'); // the word cut (P744)
     const rowsOf = (name: string) => within(screen.getByRole('region', { name })).getAllByRole('listitem').map((li) => li.getAttribute('data-skill-row'));
     expect(rowsOf('In this project')).toEqual(['review']);
     expect(rowsOf('Created by you')).toEqual(['translate']);
@@ -327,12 +327,14 @@ describe('the Plugins dialog before the first message', () => {
     await waitFor(() => expect(invoked('plugins.list')).toContainEqual({ cwd: CONFIG_HOME }));
   });
 
-  it('opens Customize for the user configuration from Open Discover when no folder is chosen', async () => {
+  it('opens Customize for the user configuration from Discover plugins when no folder is chosen', async () => {
     resetSetupStore();
     putIntent(intent({ appSessionId: ID, projectId: null, location: null }));
     const close = vi.fn();
     mount(PluginsWidget, close);
-    fireEvent.click(await screen.findByRole('button', { name: 'Open Discover' }));
+    await screen.findByRole('button', { name: 'Add' });
+    fireEvent.keyDown(screen.getByRole('button', { name: 'Add' }), { key: 'Enter' });
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Discover plugins' })); // the word cut (P655)
     expect(close).toHaveBeenCalled();
     expect(useCustomizeProject.getState()).toEqual({ projectId: null });
     expect(useLayout.getState().destination).toEqual({ kind: 'customize', view: 'discover', show: 'plugins' });
@@ -372,26 +374,26 @@ describe('held open', () => {
     await screen.findByRole('list', { name: 'Connectors' });
     act(() => putIntent(intent({ appSessionId: ID, projectId: null, location: { kind: 'directory', path: '/work/other' } })));
     await waitFor(() => expect(screen.queryByRole('list', { name: 'Connectors' })).toBeNull());
-    expect(screen.getByText('Reading configuration…')).toBeTruthy();
+    expect(await screen.findByRole('progressbar', { name: 'Reading configuration…' })).toBeTruthy(); // the word cut (G203)
     expect(document.body.textContent).not.toContain('notion');
     await act(async () => answer({ ...ATLAS_INVENTORY, servers: [{ name: 'linear', scope: 'project', path: '/work/other/.mcp.json', transport: 'http' }] }));
     const list = await screen.findByRole('list', { name: 'Connectors' });
     expect(within(list).getAllByRole('listitem').map((row) => row.querySelector('[data-connector-name]')?.textContent)).toEqual(['linear']);
   });
 
-  it('draws a started chat’s dialog when the chat starts while it is open: the rows, then Starting…, then the live rows', async () => {
+  it('draws a started chat’s dialog when the chat starts while it is open: the rows, then the start’s spinner, then the live rows', async () => {
     backend.script('session.mcpStatus', () => ({ mcpServers: [{ name: 'notion', status: 'connected', tools: [{ name: 'search' }] }] }));
     mount(McpWidget);
     await screen.findByRole('list', { name: 'Connectors' });
     act(() => useSessions.setState({ records: new Map([[ID, { ...record(BARE), appId: ID }]]), engine: new Map([[ID, startedStatus('starting')]]) }));
-    await waitFor(() => expect(document.body.textContent).toContain('Starting…'));
+    expect(await screen.findByRole('progressbar', { name: 'Starting…' })).toBeTruthy(); // the word cut (P523)
     expect(screen.queryByRole('list', { name: 'Connectors' })).toBeNull();
     expect(lead()).toBeNull();
     act(() => useSessions.setState({ engine: new Map([[ID, startedStatus('ready')]]) }));
     const list = await screen.findByRole('list', { name: 'Connectors' });
     expect(within(list).getByRole('switch')).toBeTruthy();
     expect(within(list).getByText('Connected')).toBeTruthy();
-    expect(document.body.textContent).not.toContain('Starting…');
+    expect(screen.queryByRole('progressbar', { name: 'Starting…' })).toBeNull();
   });
 
   it('closes a dialog open when its tab leaves for another machine', async () => {

@@ -1,10 +1,13 @@
 // The widgets' shared pieces, in the popover density of mockup 06 vignette 05 (D-20): an uppercase group label, a
-// key/value list, a row with a quiet trailing note, a text button, and Reveal in Finder.
+// key/value list, a row with a quiet trailing note, a text button, Reveal in Finder, and a settings source's word.
 import { useState, type ReactNode } from 'react';
 import type * as z from 'zod';
 import { ipc } from '../ipc/client';
-import { SHARED } from './copy';
+import { Tip } from '../ui/tip';
+import { PERMISSIONS, SHARED } from './copy';
 import type { MachineRef } from '@shared/machine/ref';
+
+type DataAttributes = { [attribute: `data-${string}`]: string };
 
 export const num = (n: number): string => n.toLocaleString('en-US');
 
@@ -69,13 +72,16 @@ export function Rows({ label, children }: { label?: string; children: ReactNode 
   );
 }
 
-export function TextButton({ children, onClick, disabled, title }: { children: ReactNode; onClick(): void; disabled?: boolean; title?: string }) {
+export function TextButton({ children, onClick, disabled, title, busy, 'aria-label': name, ...data }: { children: ReactNode; onClick(): void; disabled?: boolean; title?: string; busy?: boolean; 'aria-label'?: string } & DataAttributes) {
   return (
     <button
+      {...data}
       type="button"
       onClick={onClick}
       disabled={disabled}
       title={title}
+      aria-label={name}
+      aria-busy={busy || undefined}
       className="shrink-0 rounded-sm px-1 text-ui-sm text-accent outline-accent hover:bg-bg-hover focus-visible:outline-2 disabled:text-fg-faint disabled:hover:bg-transparent"
     >
       {children}
@@ -88,7 +94,7 @@ export const Mono = ({ children }: { children: ReactNode }) => <code className="
 // Shows a file or folder in Finder through `settings.reveal`, which main admits only under the engine's config home and
 // the session's directories (ruled 2026-09-29); a refusal is said beside the button, the path stays on screen to copy.
 // P5 O6 M4: `machine` is the machine whose answer named the path (the session's), which reveals it in its own Finder.
-export function RevealButton({ path, machine, children }: { path: string; machine: MachineRef; children: ReactNode }) {
+export function RevealButton({ path, machine, children, ...data }: { path: string; machine: MachineRef; children: ReactNode } & DataAttributes) {
   const [refused, setRefused] = useState(false);
   const reveal = async () => {
     const result = await ipc.invoke('settings.reveal', { path }, { machine });
@@ -97,9 +103,31 @@ export function RevealButton({ path, machine, children }: { path: string; machin
   return (
     <>
       {refused && <span className="text-fg-faint">{SHARED.revealRefused}</span>}
-      <TextButton onClick={() => void reveal()} title={path}>
+      <TextButton {...data} onClick={() => void reveal()} title={path}>
         {children}
       </TextButton>
     </>
+  );
+}
+
+// A settings source in one word (the word cut, P586: the permission rules, Config's Sources and the hooks' list say
+// it alike), an unknown source verbatim. Where the source is a file the renderer can name, the word takes the keyboard
+// and the file is its tooltip and description, which also says that rules are edited there (P582).
+export const sourceWords = (source: string): { word: string; file: string | null } => ({ word: PERMISSIONS.source[source] ?? source, file: PERMISSIONS.sourceFile[source] ?? null });
+
+export function SourceWord({ word, file, className = '' }: { word: string; file: string | null; className?: string }) {
+  if (file === null)
+    return (
+      <span data-rule-source="" className={className}>
+        {word}
+      </span>
+    );
+  const said = PERMISSIONS.editedIn(file);
+  return (
+    <Tip content={said} description={said}>
+      <span data-rule-source="" tabIndex={0} className={`rounded-sm outline-accent focus-visible:outline-2 ${className}`}>
+        {word}
+      </span>
+    </Tip>
   );
 }

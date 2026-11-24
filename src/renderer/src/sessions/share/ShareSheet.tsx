@@ -27,6 +27,7 @@ import { useHubAccess } from '../../stores/hub-access';
 import { useSessions, type ListedSession } from '../../stores/sessions';
 import { closeDialog } from '../dialogs';
 import { Sheet, SheetForm } from '../Sheet';
+import { QuietSpinner } from '../../ui/spinner';
 import { displayTitle, listedTitle } from '../title';
 import { CHOICE, PRIMARY, QUIET, SECONDARY } from '../ui';
 import { ACCESS_ORDER, GRADE_ORDER, lineWords, outcomeWords, refusalWords, SHARE, subtitleTooltip, type ShareAccess, type ShareGrade } from './copy';
@@ -40,6 +41,13 @@ type Policy = Extract<RecordPolicyEntry, { policyRev: number }>;
  * gives them (null for one to remove). The list's order is the order Save sends their changes.
  */
 export type Person = { member: string; was: ShareGrade | null; grade: ShareGrade | null };
+/** The word cut (N177): the read of a session's reach is a quiet spinner named by its words, never a line of them. */
+export const ShareReading = () => (
+  <div data-share-reading>
+    <QuietSpinner label={SHARE.reading} />
+  </div>
+);
+
 export type Read = { state: 'reading' } | { state: 'refused'; reason: string } | { state: 'unsupported' } | { state: 'unavailable' } | { state: 'ready'; policy: Policy };
 type Saved = Extract<OrgPolicySetResult, { ok: true }>;
 
@@ -186,7 +194,7 @@ function ReaderSheet({ address, me }: { address: AppSessionId; me: string | null
 
   return (
     <Sheet title={SHARE.title} width="w-[min(480px,90vw)]" data-share-sheet={address}>
-      <SheetForm canSubmit={change !== null && !saving} onSubmit={() => void save()} submitLabel={ready === null ? undefined : saving ? SHARE.saving : SHARE.save} submitClass={PRIMARY} cancelLabel={ready === null || saved !== null ? SHARE.close : undefined}>
+      <SheetForm canSubmit={change !== null && !saving} onSubmit={() => void save()} submitLabel={ready === null ? undefined : SHARE.save} submitWait={saving ? SHARE.saving : null} submitClass={PRIMARY} cancelLabel={ready === null || saved !== null ? SHARE.close : undefined}>
         <div data-share-session className="flex min-w-0 text-ui-sm text-fg-muted" title={subtitleTooltip(title, machine)}>
           <span className="min-w-0 truncate">{title}</span>
           <span className="max-w-[50%] shrink-0 truncate whitespace-pre"> · {machine}</span>
@@ -221,7 +229,7 @@ function ReaderSheet({ address, me }: { address: AppSessionId; me: string | null
               {refusal === 'changed-elsewhere' && reloadButton}
             </div>
           )}
-          {read.state === 'reading' && said(SHARE.reading)}
+          {read.state === 'reading' && <ShareReading />}
           {read.state === 'unsupported' && said(SHARE.unsupported(machine))}
           {/* a save stopped by an unknown outcome offers its Reload in its results, the one Reload the sheet shows */}
           {read.state === 'unavailable' && unknown === undefined && said(SHARE.unavailable, true)}

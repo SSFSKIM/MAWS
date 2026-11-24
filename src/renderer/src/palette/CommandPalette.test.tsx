@@ -470,7 +470,7 @@ it('bounds mounted results for 3,279 sessions while searching the entire index',
   useSessions.setState({ records: new Map(records.map((r) => [r.appId, r])) });
   const user = await openAndType('Indexed'); // UX wave U6b-5a M4: with nothing typed there is no Sessions group, only Recent
   expect(within(group('Sessions')!).getAllByRole('option').length).toBeLessThanOrEqual(50);
-  expect(within(dialog()).getByText(/Showing the first 50 matches per group/)).toBeTruthy();
+  expect(within(dialog()).getByText('First 50 shown')).toBeTruthy(); // the word cut (W119)
   await user.clear(within(dialog()).getByRole('combobox'));
   await user.keyboard('Indexed session 3278');
   expect(options('Sessions')).toEqual([expect.stringContaining('Indexed session 3278')]);
@@ -558,6 +558,34 @@ describe('with no row drawn', () => {
   });
 });
 
+// The word cut (W113, W116, W117): the input reads "Search" ("Search in conversations" in that scope); a search under way
+// is a quiet spinner at the input's right, not a line; an index still building says "Indexing…" above the results it has.
+it('words the input, the search and the indexing as the cut has them', async () => {
+  vi.useFakeTimers();
+  const id = idOf('Quota reset recovery');
+  let answer: (value: unknown) => void = () => {};
+  const invoke = vi.spyOn(ipc, 'invoke').mockImplementation(() => new Promise((resolve) => (answer = resolve)) as never);
+  try {
+    render(<CommandPalette />);
+    act(() => runAction('palette.open'));
+    expect(within(dialog()).getByRole('combobox').getAttribute('placeholder')).toBe('Search');
+    act(() => openConversationSearch('needle'));
+    expect(within(dialog()).getByRole('combobox').getAttribute('placeholder')).toBe('Search in conversations');
+    await act(() => vi.advanceTimersByTimeAsync(150));
+    expect(within(dialog()).queryByText(/Searching/), 'no line while it searches').toBeNull();
+    await act(() => vi.advanceTimersByTimeAsync(500));
+    expect(within(dialog()).getByRole('progressbar', { name: 'Searching conversations' })).toBeTruthy();
+    expect(within(dialog()).queryByText('Nothing matches'), 'no empty word beside the spinner while the query is out').toBeNull();
+    await act(async () => answer({ ok: true, value: { hits: [{ appSessionId: id, snippet: 'Available conversation text' }], indexing: true, incomplete: false } }));
+    expect(within(dialog()).queryByRole('progressbar')).toBeNull();
+    expect(within(dialog()).getByRole('status').textContent).toBe('Indexing…');
+    expect(screen.getByText('Available conversation text')).toBeTruthy();
+    await act(() => vi.advanceTimersByTimeAsync(1000)); // the indexing retry asks again
+    await act(async () => answer({ ok: true, value: { hits: [], indexing: false, incomplete: false } }));
+    expect(within(dialog()).getByText('Nothing matches'), 'a settled empty answer says so').toBeTruthy();
+  } finally { invoke.mockRestore(); vi.useRealTimers(); }
+});
+
 it('shows terminal incomplete indexing without polling forever or hiding available results', async () => {
   vi.useFakeTimers();
   const id = idOf('Quota reset recovery');
@@ -566,7 +594,7 @@ it('shows terminal incomplete indexing without polling forever or hiding availab
     render(<CommandPalette />);
     act(() => openConversationSearch('needle'));
     await act(() => vi.advanceTimersByTimeAsync(150));
-    expect(screen.getByRole('alert').textContent).toContain('Some conversations could not be indexed');
+    expect(screen.getByRole('alert').textContent).toBe('Some conversations are not indexed; results may be incomplete.'); // the word cut (W118)
     expect(screen.getByText('Available conversation text')).toBeTruthy();
     await act(() => vi.advanceTimersByTimeAsync(5000));
     expect(invoke).toHaveBeenCalledTimes(1);
@@ -642,7 +670,7 @@ describe('Recent', () => {
     expect(fake.invoked('library.get')).toEqual([{ artifactId: notes.id }, { artifactId: artifactId(2) }]);
     expect(fake.machines('library.get')).toEqual([TEST_MACHINE, TEST_MACHINE]);
     expect(group('Sessions')).toBeNull();
-    expect(within(dialog()).queryByText(/Showing the first/)).toBeNull();
+    expect(within(dialog()).queryByText('First 50 shown')).toBeNull();
     expect(within(dialog()).queryByText(/Search the Library/)).toBeNull();
     const before = (a: string, b: string) => Boolean(group(a)!.compareDocumentPosition(group(b)!) & Node.DOCUMENT_POSITION_FOLLOWING);
     expect(before('Recent', 'Projects')).toBe(true);

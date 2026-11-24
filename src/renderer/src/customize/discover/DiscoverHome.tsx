@@ -39,7 +39,7 @@ function Featured({ item, tab, onOpen }: { item: CatalogItem; tab: CatalogKindTa
     >
       <button type="button" data-card-open aria-label={D.view(item.name)} className="absolute inset-0 rounded-lg outline-accent focus-visible:outline-2" />
       <div className="relative flex min-w-0 flex-1 flex-col gap-1.5">
-        <span className="text-ui-sm text-fg-muted">{D.featuredFrom}</span>
+        <span className="text-ui-sm text-fg-muted">{D.featured}</span>
         <h3 className="m-0 truncate text-[1.375rem] leading-tight font-semibold text-fg">{item.name}</h3>
         <p className="m-0 line-clamp-2 max-w-[60ch] text-ui text-fg-muted">{item.description ?? ''}</p>
         <div className="mt-1 flex min-w-0 flex-wrap items-center gap-2 text-ui-sm text-fg-muted">

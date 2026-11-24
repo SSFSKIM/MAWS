@@ -297,7 +297,7 @@ export function unstartedReplaceVerdict(appSessionId: AppSessionId): ReplaceVerd
   if (isStarting(setup, appSessionId)) return { keep: 'The new chat is starting' };
   const liveDoc = liveDraftDoc(appSessionId);
   const blank = (liveDoc === undefined ? isEmptyDraft(intent.draft) : isEmptyDoc(liveDoc)) && intent.message === null;
-  return blank ? null : { aside: 'The new chat’s draft is kept; ⌘⇧T or Reopen brings it back' };
+  return blank ? null : { aside: 'Draft kept' }; // the word cut (W34): the toast's Reopen is the way back
 }
 
 // C5's close guard for a session tab: a session with a record closes as usual; an unstarted one with nothing typed is

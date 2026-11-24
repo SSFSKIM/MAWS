@@ -36,7 +36,7 @@ describe('phaseOf: O-39’s table in roster terms', () => {
     expect(phaseWords('up', 'Studio')).toBeNull();
     expect(phaseWords('connecting', 'Studio')).toBe('Connecting to Studio…');
     expect(phaseWords('reconnecting', 'Studio')).toBe('Reconnecting to Studio…');
-    expect(phaseWords('offline', 'Studio')).toBe('Studio is offline · this session reconnects when it’s back');
+    expect(phaseWords('offline', 'Studio')).toBe('Studio is offline');
     expect(phaseWords('removed', 'Studio')).toBe('This Mac is no longer allowed on Studio');
   });
 });

@@ -15,7 +15,10 @@
 // one under each other machine's name, each asked as the sheet opens or worded by the rules above. No machine waits for
 // another: each section shows its rows, its line or that it is loading; a machine with nothing archived there shows
 // none, and this Mac's keeps "No archived sessions.". With no other machine in the roster the sheet is as before.
-import { useEffect, useMemo, useState, type ReactNode } from 'react';
+// The word cut (W151, N172): a row shows Unarchive and a "…" menu holding Remove worktree… and Delete… (a refused Delete
+// greyed there with its reason, still in the menu's keyboard); a read still out is a quiet spinner.
+import { DropdownMenu } from 'radix-ui';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import type { AppSessionId, ProjectId } from '@shared/graph/ids';
 import type { SessionRecord } from '@shared/graph/session';
 import { machineOf } from '@shared/machine/address';
@@ -35,8 +38,13 @@ import { cleanupTargetOf } from './CleanupDialog';
 import { openDialog } from './dialogs';
 import { onAnotherMachine } from './record-ops';
 import { Sheet } from './Sheet';
-import { QUIET, SECONDARY } from './ui';
+import { SECONDARY } from './ui';
+import { MoreIcon } from '../tools/browser/icons';
+import { RefusedMenuItem } from '../ui/refused-menu-item';
+import { QuietSpinner } from '../ui/spinner';
+import { Tip } from '../ui/tip';
 import { displayTitle } from './title';
+import { ARCHIVED_WORDS } from './copy';
 
 export function ArchivedSessionsDialog({ projectId, machine: named }: { projectId: ProjectId | null; machine?: MachineRef }) {
   const local = ipc.localMachine;
@@ -108,7 +116,7 @@ function RowSheet({ projectId, named }: { projectId: ProjectId | null; named: Ma
   return (
     <Sheet title={`Archived sessions${title ? ` · ${title}` : ''}`} width="w-[min(560px,92vw)]">
       {rows === null ? (
-        (error !== null || readOn !== '') && <p className="m-0 text-fg-muted">{error ?? 'Loading…'}</p>
+        (error !== null || readOn !== '') && <Reading error={error} />
       ) : rows.length === 0 ? (
         <NoneArchived saidElsewhere={lines.length > 0} />
       ) : (
@@ -145,7 +153,7 @@ function MachineSection({ machine, name, plan }: { machine: MachineRef; name: st
   if (plan === null) return null;
   let body: ReactNode;
   if (plan !== 'ask') body = <MachineLines lines={[plan.line]} />;
-  else if (rows === null) body = <p className="m-0 text-fg-muted">{error ?? 'Loading…'}</p>;
+  else if (rows === null) body = <Reading error={error} />;
   else if (rows.length === 0 && !here && error === null) return null;
   else
     body = (
@@ -181,33 +189,80 @@ function MachineLines({ lines }: { lines: readonly string[] }) {
   ));
 }
 
+// A read still out (N172: a quiet spinner, its words its name), or the error it ended in
+function Reading({ error }: { error: string | null }) {
+  return error !== null ? <p className="m-0 text-fg-muted">{error}</p> : <QuietSpinner label={ARCHIVED_WORDS.reading} />;
+}
+
 // "No archived sessions." unless a machine's line says why it wasn't asked.
 const NoneArchived = ({ saidElsewhere }: { saidElsewhere: boolean }) => (saidElsewhere ? null : <p className="m-0 text-fg-muted">No archived sessions.</p>);
 
 // P5 O7 M8: deleting a session of a machine reached over RL2 is declared not offered there (lane-b/remote-unavailable.ts):
-// the button stays, greyed with the declared words. The UX wave, U9: Unarchive is offered there, behind the capability.
+// the item stays, greyed with the declared words. The UX wave, U9: Unarchive is offered there, behind the capability.
+// The word cut (W151): Remove worktree… and Delete… are the row's "…" menu, Unarchive its one button.
 function ArchivedRow({ record: r, onUnarchive }: { record: SessionRecord; onUnarchive(): void }) {
   const unarchiveUnavailable = useRemoteUnavailable(r.appId, 'session.update');
   const deleteUnavailable = useRemoteUnavailable(r.appId, 'session.delete');
   const elsewhere = useIsOverRl2(r.appId); // the UX wave, U9: removing a worktree on another machine is not offered
+  const title = displayTitle(r);
+  const removable = !elsewhere && r.worktree !== null && isManagedWorktree(r.worktree.path);
   return (
-    <li aria-label={displayTitle(r)} className="flex items-center gap-2 border-b border-border py-1.5 last:border-b-0">
+    <li aria-label={title} className="flex items-center gap-2 border-b border-border py-1.5 last:border-b-0">
       <div className="flex min-w-0 flex-1 flex-col">
-        <span className="truncate text-fg">{displayTitle(r)}</span>
+        <span className="truncate text-fg">{title}</span>
         <span className="truncate font-mono text-ui-sm text-fg-muted">{r.worktree?.path ?? r.directory}</span>
       </div>
       <button type="button" onClick={onUnarchive} disabled={unarchiveUnavailable !== null} title={unarchiveUnavailable ?? undefined} className={SECONDARY}>
         Unarchive
       </button>
-      {!elsewhere && r.worktree !== null && isManagedWorktree(r.worktree.path) && (
-        <button type="button" onClick={() => openDialog({ kind: 'cleanup', target: cleanupTargetOf(r)! })} className={QUIET}>
-          Remove worktree…
-        </button>
-      )}
-      <button type="button" onClick={() => openDialog({ kind: 'delete', appSessionId: r.appId })} disabled={deleteUnavailable !== null} title={deleteUnavailable ?? undefined} className={QUIET}>
-        Delete…
-      </button>
+      <ArchivedRowMenu
+        label={ARCHIVED_WORDS.actions(title)}
+        removeWorktree={removable ? () => openDialog({ kind: 'cleanup', target: cleanupTargetOf(r)! }) : null}
+        remove={() => openDialog({ kind: 'delete', appSessionId: r.appId })}
+        refused={deleteUnavailable}
+      />
     </li>
+  );
+}
+
+const ROW_GLYPH = 'inline-flex size-6 shrink-0 items-center justify-center rounded-sm text-fg-muted outline-accent hover:bg-bg-hover hover:text-fg focus-visible:outline-2 data-[state=open]:bg-bg-active data-[state=open]:text-fg';
+const MENU = 'z-50 min-w-44 rounded-md border border-border-strong bg-bg-overlay p-1 text-ui text-fg shadow-float';
+const MENU_ITEM = 'flex h-7 cursor-default items-center rounded-sm px-2 outline-none select-none data-highlighted:bg-bg-hover';
+
+// The row's "…" menu, its trigger named and tipped by the session it acts on (Settings' row menus' form). Choosing an
+// item hands the keyboard back to the trigger before the sheet opens, so the sheet returns it there.
+function ArchivedRowMenu({ label, removeWorktree, remove, refused }: { label: string; removeWorktree: (() => void) | null; remove(): void; refused: string | null }) {
+  const trigger = useRef<HTMLButtonElement>(null);
+  const run = (action: () => void) => {
+    trigger.current?.focus({ preventScroll: true });
+    action();
+  };
+  return (
+    <DropdownMenu.Root modal={false}>
+      <Tip content={label}>
+        <DropdownMenu.Trigger asChild>
+          <button ref={trigger} type="button" aria-label={label} className={ROW_GLYPH}>
+            <MoreIcon />
+          </button>
+        </DropdownMenu.Trigger>
+      </Tip>
+      <DropdownMenu.Portal>
+        <DropdownMenu.Content align="end" sideOffset={4} className={MENU}>
+          {removeWorktree !== null && (
+            <DropdownMenu.Item className={MENU_ITEM} onSelect={() => run(removeWorktree)}>
+              {ARCHIVED_WORDS.removeWorktree}
+            </DropdownMenu.Item>
+          )}
+          {refused !== null ? (
+            <RefusedMenuItem kit={DropdownMenu} label={ARCHIVED_WORDS.delete} reason={refused} className={`${MENU_ITEM} text-fg-faint`} />
+          ) : (
+            <DropdownMenu.Item className={`${MENU_ITEM} text-danger`} onSelect={() => run(remove)}>
+              {ARCHIVED_WORDS.delete}
+            </DropdownMenu.Item>
+          )}
+        </DropdownMenu.Content>
+      </DropdownMenu.Portal>
+    </DropdownMenu.Root>
   );
 }
 

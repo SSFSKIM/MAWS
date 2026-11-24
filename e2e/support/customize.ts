@@ -23,3 +23,14 @@ export async function chooseCustomize(page: Page, where: { view?: CustomizeView;
   if (where.view) await expect(customizePage(page)).toHaveAttribute('data-customize-view', VIEW_KEY[where.view]);
   if (where.show) await expect(customizePage(page)).toHaveAttribute('data-customize-show', SHOW_KEY[where.show]);
 }
+
+// The word cut (M4): `/plugins`' head keeps no Open Discover button; "Discover plugins" is the first item of its Add menu
+// (P655), which closes the dialog and opens Customize › Discover with Show: Plugins.
+export async function openDiscoverFromPlugins(plugins: Locator): Promise<void> {
+  await plugins.getByRole('button', { name: 'Add', exact: true }).click();
+  await plugins.page().getByRole('menuitem', { name: 'Discover plugins', exact: true }).click();
+}
+
+// The word cut (G215): a plugin row ends in its own switch, "Enable <name>", where "Disabled" and the menu's Turn on or
+// off stood; `aria-checked` says whether it is on here, `aria-disabled` that this session cannot change it.
+export const pluginRowSwitch = (row: Locator): Locator => row.getByRole('switch', { name: /^Enable / });

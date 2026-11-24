@@ -13,7 +13,9 @@ import { closeDialog, useDialogs } from './dialogs';
 import { health, ID as BARE_ID, intent as mainIntent, MESSAGE, putIntent, REPO, resetSetupStore, resources, trustState } from '../test-support/setup-intents';
 import { FAILURE_CARD_TITLE, FailureCard } from './FailureCard';
 import { NewSessionEmptyState } from './NewSessionEmptyState';
+import { RELAY_WORDS } from './copy';
 import { RELAY_CARD_TITLE, RelayCard } from './RelayCard';
+import { accessibleDescription } from '../test-support/accessible-text';
 import { connectSetupDock } from './SetupCard';
 import { connectKeys } from '../keymap/dispatcher';
 import { resetDockedCards, useDockedCards } from '../composer/docked/registry';
@@ -234,7 +236,7 @@ describe('relay card', () => {
     putIntent(intent({ message: MESSAGE }));
     render(<Docked />);
     await act(() => startIntent(ID, MESSAGE));
-    expect(await screen.findByText(/relay is not answering/)).toBeTruthy();
+    expect(await screen.findByRole('group', { name: RELAY_CARD_TITLE })).toBeTruthy();
     await userEvent.click(screen.getByRole('button', { name: 'Run direct' }));
     expect(fake.invoked('session.start').at(-1)).toEqual({ appSessionId: BARE_ID, message: null, options: { gateway: 'direct' } });
   });
@@ -266,7 +268,7 @@ describe('relay card', () => {
       putIntent(intent({ message: MESSAGE, gateway: 'gateway', route: 'machine' }));
       render(<Docked />);
       await act(() => startIntent(ID, MESSAGE));
-      expect(await screen.findByText(/this machine’s own settings send it there/)).toBeTruthy();
+      expect(await screen.findByRole('button', { name: 'Start anyway', description: RELAY_WORDS.anyway })).toBeTruthy(); // the word cut (W98): the sentence is its description
       await userEvent.click(screen.getByRole('button', { name: 'Start anyway' }));
       expect(fake.invoked('session.start').at(-1)).toEqual({ appSessionId: BARE_ID, message: null, options: { startAnyway: true } });
       await screen.findByRole('button', { name: 'Start anyway' }); // answered relay_unreachable again: docked again
@@ -293,7 +295,7 @@ describe('relay card', () => {
       useSessions.setState({ records: new Map([[ID, { ...discovered, gateway: { ...discovered.gateway, routed: null } }]]) });
       render(<Docked />);
       expect(await act(() => resumeSession(ID))).toBe(true);
-      expect(await screen.findByText(/this machine’s own settings send it there/)).toBeTruthy();
+      expect(await screen.findByRole('button', { name: 'Start anyway', description: RELAY_WORDS.anyway })).toBeTruthy(); // the word cut (W98): the sentence is its description
       expect(screen.getByRole('button', { name: 'Start anyway' })).toBeTruthy();
       up = true;
       await act(() => vi.advanceTimersByTimeAsync(5_000));
@@ -348,14 +350,41 @@ describe('relay card', () => {
     }
   });
 
-  it("under the 'wait' policy the primary is 'Open ClaudeUsage, then start'; Run direct waits for a Claude model on a gateway model", () => {
-    const { rerender } = render(<RelayCard health={health()} policy="wait" now={Date.parse('2026-09-29T10:00:04.000Z')} gatewayModel={false} openClaudeUsage={null} onAccept={vi.fn()} onDecline={vi.fn()} onRecheck={vi.fn()} />);
+  it("under the 'wait' policy the primary is 'Open ClaudeUsage, then start'; Run direct waits for a Claude model on a gateway model", async () => {
+    const onAccept = vi.fn();
+    const { container, rerender } = render(<RelayCard health={health()} policy="wait" now={Date.parse('2026-09-29T10:00:04.000Z')} gatewayModel={false} openClaudeUsage={null} onAccept={onAccept} onDecline={vi.fn()} onRecheck={vi.fn()} />);
     expect(screen.getAllByRole('button')[0]!.textContent).toBe('Open ClaudeUsage, then start');
-    expect(screen.getByText(new RegExp(`Waiting for the relay · checked ${REL.now}`))).toBeTruthy();
-    rerender(<RelayCard health={health()} policy="ask" now={Date.parse('2026-09-29T10:00:04.000Z')} gatewayModel openClaudeUsage={null} onAccept={vi.fn()} onDecline={vi.fn()} onRecheck={vi.fn()} />);
+    // the word cut (W96, W97): no line repeats the title; the grey line is when it was checked, the address its tooltip
+    expect(container.textContent).not.toContain('relay is not answering');
+    const checked = screen.getByText(`Checked ${REL.now}`);
+    expect(checked.getAttribute('tabindex')).toBe('0');
+    expect(accessibleDescription(checked)).toBe('http://127.0.0.1:8641/api/hello · connect ECONNREFUSED');
+    const shown = container.cloneNode(true) as HTMLElement; // what is drawn: the tips' descriptions are hidden spans
+    shown.querySelectorAll('[hidden]').forEach((hidden) => hidden.remove());
+    expect(shown.textContent).not.toContain('/api/hello');
+    // W98: no explaining lines; each sentence is its button's description
+    expect(container.querySelector('ul')).toBeNull();
+    expect(accessibleDescription(screen.getByRole('button', { name: 'Run direct' }))).toBe(RELAY_WORDS.direct);
+    expect(accessibleDescription(screen.getByRole('button', { name: 'Open ClaudeUsage, then start' }))).toBe(RELAY_WORDS.open(false));
+    // Fix round 1 (W98): until C11 registers its hand-off, the button is greyed and still the keyboard's, its focus showing
+    // what it would do, its click doing nothing
+    const handOff = screen.getByRole('button', { name: 'Open ClaudeUsage, then start' });
+    expect(handOff.hasAttribute('disabled')).toBe(false);
+    expect(handOff.getAttribute('aria-disabled')).toBe('true');
+    act(() => handOff.focus());
+    expect(document.activeElement).toBe(handOff);
+    expect((await screen.findByRole('tooltip')).textContent).toBe(RELAY_WORDS.open(false));
+    act(() => handOff.blur());
+    rerender(<RelayCard health={health()} policy="ask" now={Date.parse('2026-09-29T10:00:04.000Z')} gatewayModel openClaudeUsage={null} onAccept={onAccept} onDecline={vi.fn()} onRecheck={vi.fn()} />);
     const direct = screen.getByRole('button', { name: 'Run direct' });
-    expect(direct.hasAttribute('disabled')).toBe(true);
-    expect(direct.getAttribute('title')).toBe('Pick a Claude model first');
+    // greyed with its reason and still in the keyboard's reach
+    expect(direct.hasAttribute('disabled')).toBe(false);
+    expect(direct.getAttribute('aria-disabled')).toBe('true');
+    expect(accessibleDescription(direct)).toBe('Pick a Claude model first');
+    await userEvent.click(direct);
+    expect(onAccept).not.toHaveBeenCalled();
+    act(() => direct.focus());
+    expect(document.activeElement).toBe(direct);
   });
 });
 
@@ -406,7 +435,8 @@ describe('relay card, with C11', () => {
     const card = await docked();
     const [primary] = card.getAllByRole('button');
     expect(primary!.textContent).toBe('Open ClaudeUsage, then start');
-    expect(card.getByText(/Waiting for the relay/)).toBeTruthy();
+    expect(card.getByText(/^Checked /)).toBeTruthy(); // the word cut (W97): when it was checked, with no "Waiting for the relay"
+    expect(card.queryByText(/Waiting for the relay/)).toBeNull();
     await userEvent.click(primary!);
     expect(handOff).toHaveBeenCalledTimes(1);
     off();
@@ -1100,7 +1130,7 @@ describe('a retained worktree with its card dismissed', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Back to editing' }));
     await waitFor(() => expect(screen.queryByRole('button', { name: 'Retry' })).toBeNull());
     const shown = note()!;
-    expect(shown.textContent).toContain('Worktree accept-fail from the failed attempt is still this session’s: Send reuses it, and the location cannot change until you keep or discard it.');
+    expect(shown.textContent).toContain('Worktree accept-fail is left from the failed start. Keep it or discard it.'); // the word cut (W89)
     expect(within(shown).getByRole('button', { name: 'Keep the worktree' })).toBeTruthy();
     const discard = within(shown).getByRole('button', { name: 'Discard changes and remove' });
     expect(discard.hasAttribute('disabled')).toBe(true);

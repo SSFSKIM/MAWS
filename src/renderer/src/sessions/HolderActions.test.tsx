@@ -24,6 +24,7 @@ import type { TerminalInfo } from '../terminal/registry';
 import { resetPanelStores } from '../test-support/panel';
 import { resetSetupStore } from '../test-support/setup-intents';
 import { preloadOf } from '../test-support/preload-of';
+import { accessibleDescription, accessibleText } from '../test-support/accessible-text';
 import { REMOTE_UNAVAILABLE } from '@shared/ipc/remote-unavailable';
 import { leaveRl2, overRl2 } from '../test-support/code-disk'; // ticket 627
 
@@ -371,13 +372,16 @@ describe('held outcomes and the attach command', () => {
     expect(screen.getByRole('button', { name: 'Fork a copy' })).toBeTruthy();
   });
 
-  it('names the version the job runs when it is not the installed one, which attach runs', async () => {
+  // The word cut (W101): the version line leaves the notice for Attach's tooltip and description, which focus reaches
+  it('names the version the job runs, when it is not the installed one, on Attach rather than beside it', async () => {
     const { unmount } = renderNotice(held(JOB, { engineVersion: '2.1.284' }));
-    expect(await screen.findByText('Job on 2.1.284; attach runs the installed 2.1.283')).toBeTruthy();
+    const attach = screen.getByRole('button', { name: 'Attach in a terminal tab' });
+    await waitFor(() => expect(accessibleDescription(attach)).toBe('Job on 2.1.284; attach runs the installed 2.1.283'));
+    expect(accessibleText(document.body), 'no version line at rest').not.toMatch(/Job on/);
     unmount();
     renderNotice(held(JOB));
     await waitFor(() => expect(fake.invoked('engine.binaryInfo').length).toBeGreaterThan(0));
-    expect(screen.queryByText(/^Job on/)).toBeNull();
+    expect(accessibleDescription(screen.getByRole('button', { name: 'Attach in a terminal tab' }))).toBe('');
   });
 
   it('the row menu offers Open and Attach for a job holder with an id, and Attach attaches', async () => {
@@ -423,7 +427,7 @@ describe('held outcomes and the attach command', () => {
     answerWith({ 'session.acquire': { status: 'held', appSessionId: BARE_A, holder: JOB, attach: { jobId: 'e6dcd828', command: COMMAND } } }); // P2-A: Resume acquires
     await act(() => resumeSession(A));
     const [toast] = toasts();
-    expect(toast).toMatchObject({ level: 'warning', text: 'Held by bg · e6dcd828' });
+    expect(toast).toMatchObject({ level: 'warning', text: 'Running as a background job' });
     expect(toast!.actions.map((a) => a.label)).toEqual(['Attach']);
     act(() => toast!.actions[0]!.run());
     await waitFor(() => expect(opened()).toMatchObject([{ cwd: '/work/repo/.claude/worktrees/job', command: COMMAND }]));
@@ -434,7 +438,7 @@ describe('held outcomes and the attach command', () => {
     held({ kind: 'none' });
     answerWith({ 'session.acquire': { status: 'held', appSessionId: BARE_A, holder: { kind: 'terminal', pid: 7 }, attach: null } }); // P2-A
     await act(() => resumeSession(A));
-    expect(toasts()).toMatchObject([{ text: 'Held by terminal · 7', actions: [] }]);
+    expect(toasts()).toMatchObject([{ text: 'Running in Terminal', actions: [] }]);
   });
 
   it("the engine's own refusal of a resume (a setup failed held) toasts the holder with Attach, before the registry has the job", async () => {
@@ -446,7 +450,7 @@ describe('held outcomes and the attach command', () => {
       fake.event('session.setup', { appSessionId: BARE_A, phase: 'failed', detail: null, outcome: { kind: 'held', holder: { kind: 'background_job', pid: null, jobId: 'e6dcd828' }, attach: { jobId: 'e6dcd828', command: COMMAND } } }),
     );
     const [toast] = toasts();
-    expect(toast).toMatchObject({ level: 'warning', text: 'Held by bg · e6dcd828' });
+    expect(toast).toMatchObject({ level: 'warning', text: 'Running as a background job' });
     act(() => toast!.actions.find((a) => a.label === 'Attach')!.run());
     await waitFor(() => expect(opened()).toMatchObject([{ cwd: '/work/repo', command: COMMAND }]));
     disconnect();

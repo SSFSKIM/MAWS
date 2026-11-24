@@ -1,5 +1,5 @@
-// `/skills` over the fixture-backed widget backend: E8's Reload (`reload_skills` as an operation, `Reloaded · N
-// skills`, the dialog read again on its completion), and P2-B's skills library (§5.10): the skills in My items' groups
+// `/skills` over the fixture-backed widget backend: E8's Reload (`reload_skills` as an operation, `Reloaded` (the word
+// cut, P672), the dialog read again on its completion), and P2-B's skills library (§5.10): the skills in My items' groups
 // with their plugin's badge, Search and Sort, "Use in chat" putting `/<skill> ` at the composer's caret and sending
 // nothing, a row's detail, the catalogue's skills when the engine answers the dialog empty, and Desktop's failed state.
 import { join } from 'node:path';
@@ -10,6 +10,7 @@ import type { AppSessionId } from '@shared/graph/ids';
 import type { EngineSessionStatus } from '@shared/engine/status';
 import type { InstalledPlugin } from '@shared/ipc/schema/plugins';
 import { digest, record } from '../../../../test/support/builders';
+import { accessibleDescription, accessibleText } from '../test-support/accessible-text';
 import { loadScenario } from '../../../../test/support/scenario';
 import { createWidgetBackend, WidgetBackendError, type WidgetBackend } from '../../../../test/support/widget-backend';
 import { at, TEST_MACHINE } from '../../../../test/support/machine';
@@ -98,7 +99,7 @@ describe('skills widget: Reload', () => {
     const reads = () => backend.calls.filter((c) => c.subtype === 'get_skills_dialog').length;
     const before = reads();
     fireEvent.click(screen.getByRole('button', { name: 'Reload skills' }));
-    await waitFor(() => expect(screen.getByRole('status').textContent).toBe('Reloaded · 1 skill'));
+    await waitFor(() => expect(screen.getByRole('status').textContent).toBe('Reloaded'));
     expect(backend.calls.filter((c) => c.command === 'session.reloadSkills').map((c) => c.input)).toEqual([{ appSessionId: BARE }]);
     await waitFor(() => expect(reads()).toBe(before + 1));
   });
@@ -142,6 +143,25 @@ describe('skills widget: the library', () => {
     const images = [...document.querySelectorAll('[data-skill-row]')].map((r) => r.querySelector('[data-item-image]'));
     expect(images.every((image) => image?.getAttribute('data-item-image') === 'tile' && image.getAttribute('data-item-kind') === 'skill')).toBe(true);
     expect(design.querySelector('[data-item-image]')!.textContent).toBe('F');
+  });
+
+  // The word cut (G248, P746): a row rests as its name and its plugin's badge; its description is its row note, the
+  // row's description at all times; Use in chat is drawn on pointing or focus within the row (the stylesheet's hover
+  // scope), and stays in the keyboard.
+  it('a row rests as its name and badge, its description its note; Use in chat waits for pointing or focus', async () => {
+    await opened();
+    const design = document.querySelector<HTMLElement>('[data-skill-row="frontend-design:frontend-design"]')!;
+    expect(accessibleText(design)).toContain('frontend-design');
+    expect(accessibleText(design)).toContain('Frontend design');
+    expect(accessibleText(design)).not.toContain('Guidance for distinctive');
+    const open = within(design).getByRole('button', { name: 'View frontend-design' });
+    expect(accessibleDescription(open)).toBe('Guidance for distinctive, intentional visual design. Long enough to be cut on the row and whole in the detail.');
+    const note = design.querySelector<HTMLElement>('[data-row-note]')!;
+    expect(note.hidden).toBe(true);
+    act(() => open.focus());
+    expect(note.hidden).toBe(false);
+    expect(design.hasAttribute('data-hover-scope')).toBe(true);
+    expect(within(design).getByRole('button', { name: 'Use in chat' }).hasAttribute('data-on-hover')).toBe(true);
   });
 
   it('Use in chat closes the dialog and puts /<skill> at the composer’s caret, sending nothing', async () => {
@@ -246,7 +266,7 @@ describe('skills widget: states', () => {
   });
 
   // P2-A's dormant state (§5.10; A §5.6) through the frame: opening reads and starts nothing; Load now acquires for a read
-  it('an exited session shows Not read yet with Load now and starts nothing until it is clicked; then the skills are read', async () => {
+  it('an exited session shows Load now and starts nothing until it is clicked; then the skills are read', async () => {
     useSessions.setState({ engine: new Map([[ID, { ...lifted(backend.status(BARE)), process: 'exited' }]]), records: new Map([[ID, record(ID, { directory: cwd })]]), digests: new Map([[ID, digest(ID, { availability: 'resumable' })]]) });
     backend.script('session.getSkillsDialog', () => DIALOG);
     backend.script('session.acquire', () => {
@@ -254,15 +274,14 @@ describe('skills widget: states', () => {
       return { status: 'ready', appSessionId: BARE, launched: true, joined: false };
     });
     mount();
-    await waitFor(() => expect(screen.getByText('Not read yet.')).toBeTruthy());
-    expect(screen.getByRole('button', { name: 'Load now' })).toBeTruthy();
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Load now' })).toBeTruthy()); // the word cut (P519): Load now alone
     expect(backend.calls.filter((c) => c.command === 'session.getSkillsDialog')).toEqual([]);
     expect(backend.calls.filter((c) => /^session\.(acquire|start|resume|launch|reloadSkills)/.test(c.command))).toEqual([]);
     expect(screen.getByRole('button', { name: 'Reload skills' })).toHaveProperty('disabled', true);
     fireEvent.click(screen.getByRole('button', { name: 'Load now' }));
     await waitFor(() => expect(screen.getByRole('region', { name: 'In this project' })).toBeTruthy());
     expect(backend.calls.filter((c) => c.command === 'session.acquire').map((c) => c.input)).toEqual([{ appSessionId: BARE, reason: 'read' }]);
-    expect(screen.queryByText('Not read yet.')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Load now' })).toBeNull();
   });
 
 });

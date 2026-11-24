@@ -14,12 +14,13 @@ import { useSessions } from '../stores/sessions';
 import { useRemoteUnavailable } from '../lane-b/remote-unavailable';
 import { attachOrSay } from './attach';
 import { canTakeOver, forkInPlace, takeOverSession } from './record-ops';
+import { Tip } from '../ui/tip';
 
 type ForeignHolder = Extract<SessionRecord['holder'], { kind: 'terminal' | 'background_job' }>;
 
 const BUTTON = 'rounded-sm border border-border px-2 py-0.5 whitespace-nowrap hover:bg-bg-hover disabled:text-fg-faint';
 
-// The installed binary's version (W13: what attach runs), for the note beside Attach when the job runs another: the
+// The installed binary's version (W13: what attach runs), for Attach's note when the job runs another: the
 // session's machine's, where the attach runs (P5 O6).
 function useInstalledVersion(wanted: boolean, machine: MachineRef): string | null {
   const [version, setVersion] = useState<string | null>(null);
@@ -44,6 +45,7 @@ export function HolderActions({ appSessionId, holder }: { appSessionId: AppSessi
   const [attaching, setAttaching] = useState(false);
   const [takingOver, setTakingOver] = useState(false); // W7
   const takeOverUnavailable = useRemoteUnavailable(appSessionId, 'session.takeOver');
+  const versionNote = attachable && installed !== null && jobVersion !== null && jobVersion !== installed ? `Job on ${jobVersion}; attach runs the installed ${installed}` : null;
 
   const attach = () => {
     setAttaching(true);
@@ -52,15 +54,13 @@ export function HolderActions({ appSessionId, holder }: { appSessionId: AppSessi
 
   return (
     <>
-      {attachable && installed !== null && jobVersion !== null && jobVersion !== installed && (
-        <span className="whitespace-nowrap text-fg-faint">
-          Job on {jobVersion}; attach runs the installed {installed}
-        </span>
-      )}
+      {/* the word cut (W101): a version mismatch is Attach's tooltip and description, not a line before it */}
       {attachable && (
-        <button type="button" className={BUTTON} disabled={attaching} onClick={attach}>
-          Attach in a terminal tab
-        </button>
+        <Tip content={versionNote} description={versionNote}>
+          <button type="button" className={BUTTON} disabled={attaching} onClick={attach}>
+            Attach in a terminal tab
+          </button>
+        </Tip>
       )}
       {/* W7: end the holder after a confirm, then resume here (D-12 as amended 2026-10-01) */}
       {canTakeOver(holder) && (

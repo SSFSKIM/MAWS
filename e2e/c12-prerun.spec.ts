@@ -36,6 +36,7 @@ import { invoke, value } from './support/c7-replay';
 import { collectConsoleErrors, E2E_APP_ARGS, launchMaws, REPO_ROOT, type MawsLaunch } from './support/launch';
 import { taskEnded, type TaskEventLike } from './support/c12-task-end';
 import { newChatIn, openProject, projectRow, showProjectList, sidebarRow } from './support/sidebar';
+import { expectNewChatInFront } from './support/screen-reader-only';
 import {
   captureLoginShell, EVIDENCE, journalSpend, lsPin, ownerFileCheck, prerunScratch, prerunSkipReason, printRun, ptyEngine, recorder, scratchRepo, shoot, stateOf,
   terminalEnv, transcriptFile, transcriptUsdEstimate, trustInScratch, git,
@@ -211,15 +212,15 @@ test('§10.1 terminal-started sessions show under their projects, the live one f
     await expect(liveRow.getByRole('img', { name: 'Live in terminal' })).toBeVisible({ timeout: 20_000 });
     // W5: the holder line left the one-line row for its hover card.
     const liveCard = await hoverCardOf(page, ids.northLive!);
-    await expect(liveCard.getByTestId('hover-activity')).toHaveText(`Terminal · pid ${term.pid}`);
+    await expect(liveCard.getByTestId('hover-activity')).toHaveText('Running in Terminal'); // the word cut (W75): who runs it, no pid
     await main(page).hover({ position: { x: 400, y: 300 } });
     await expect(liveCard).toHaveCount(0);
     await expect.poll(async () => (await digestOf(page, ids.northLive!))?.phase, { timeout: 20_000 }).toBe('foreign');
     const phases = Object.fromEntries(await Promise.all(Object.entries(ids).map(async ([k, id]) => [k, (await digestOf(page, id))?.phase ?? null] as const)));
     const board = (await openOverview(page)).getByRole('list', { name: 'Overview' });
-    await expect(board.locator(`[data-card="${await addressed(page, ids.northLive)}"]`).getByTestId('card-activity')).toHaveText(`Terminal · pid ${term.pid}`);
+    await expect(board.locator(`[data-card="${await addressed(page, ids.northLive)}"]`).getByTestId('card-activity')).toHaveText('Running in Terminal'); // W75
     rec.note('10.1', {
-      projects: { north: northRows.length, south: southRows.length }, phases, liveRowLine: `Terminal · pid ${term.pid}`, overviewCard: 'foreign card with the holder line',
+      projects: { north: northRows.length, south: southRows.length }, phases, liveRowLine: 'Running in Terminal', overviewCard: 'foreign card with the holder line',
       screenshots: await shoot(page, '10.1-overview'),
       consoleErrors: maws.consoleErrors(),
     });
@@ -351,7 +352,7 @@ async function plus(page: Page, repo: string, first: string, o: { mode?: string;
   const name = repo.split('/').at(-1)!;
   const known = new Set(value(await invoke(page, 'session.intent.list', undefined)).intents.map((i) => i.appSessionId));
   await newChatIn(page, name); // W11: the "+" on the project's row, on hover
-  await expect(page.getByRole('heading', { name: `New chat in ${name}` })).toBeVisible();
+  await expectNewChatInFront(page, name); // the word cut (W86): a screen reader's heading
   let id: AppSessionId | undefined;
   await expect.poll(async () => (id = value(await invoke(page, 'session.intent.list', undefined)).intents.find((i) => !known.has(i.appSessionId))?.appSessionId)).toBeDefined();
   value(await invoke(page, 'session.intent.patch', { appSessionId: id!, patch: { model: 'sonnet', permissionMode: (o.mode ?? 'default') as 'default' } }));
@@ -1285,6 +1286,34 @@ const WIDGET_READS: Record<string, string | null> = {
   plugins: null, mcp: 'mcp_status', sandbox: 'get_sandbox_dialog', hooks: 'get_hooks_listing', memory: 'get_memory_dialog', skills: 'get_skills_dialog',
 };
 
+// The control requests of `subtype` on the wire, each with whether the engine answered it with a success.
+function readsOf(path: string, subtype: string): { requestId: string; succeeded: boolean }[] {
+  const rows = readJournal(path);
+  const succeeded = new Set(
+    rows
+      .filter((r) => r.direction === 'in' && r.frame.type === 'control_response')
+      .map((r) => (r.frame as { response?: { subtype?: string; request_id?: string } }).response)
+      .filter((response) => response?.subtype === 'success')
+      .map((response) => response!.request_id),
+  );
+  return rows
+    .filter((r) => r.direction === 'out' && r.frame.type === 'control_request' && (r.frame as { request?: { subtype?: string } }).request?.subtype === subtype)
+    .map((r) => (r.frame as { request_id?: string }).request_id)
+    .filter((requestId): requestId is string => typeof requestId === 'string')
+    .map((requestId) => ({ requestId, succeeded: succeeded.has(requestId) }));
+}
+
+// A widget's own read answered (the word cut's fix wave for M4: a widget can draw words before its reply, such as
+// /permissions' mode, so its wait is for the engine's reply to the request its opening sent, `before` naming the
+// requests of the subtype already on the wire). /model and /effort may be served from the cache (/effort's after
+// /model's) and send nothing more: for them, none of the subtype's still out and one answered.
+function readAnswered(path: string, subtype: string, before: ReadonlySet<string>, cached: boolean): boolean {
+  const reads = readsOf(path, subtype);
+  const mine = reads.filter((read) => !before.has(read.requestId));
+  if (mine.length > 0) return mine.every((read) => read.succeeded);
+  return cached && reads.length > 0 && reads.every((read) => read.succeeded);
+}
+
 async function closeWidgets(page: Page): Promise<void> {
   for (const w of await page.locator('[data-widget]').all()) await w.getByRole('button', { name: /^Close / }).first().click().catch(() => undefined);
 }
@@ -1332,11 +1361,33 @@ test('§10.8 every palette widget opens backed by its read; ! and # work; a live
         const chosen = page.getByRole('listbox', { name: 'Commands' }).locator('[role="option"][aria-selected="true"]');
         await expect(chosen).toContainText(`/${name}`);
         await expect(chosen).not.toHaveAttribute('aria-disabled', 'true');
+        const sub = WIDGET_READS[name];
+        const journal = (await statusOf(page, id)).journalPath;
+        const before = new Set(sub === null ? [] : readsOf(journal, sub).map((read) => read.requestId));
         await page.keyboard.press('Enter');
         const w = page.locator(`[data-widget="${name}"]`);
         await expect(w).toBeVisible();
         await expect(w.locator('footer')).toHaveCount(0); // E11 §2.2: no provenance foot
-        await expect(w).not.toContainText('Reading', { timeout: 20_000 });
+        // the word cut (P518): the read is a quiet spinner named "Reading…", drawn after 500 ms and no text, so the wait is
+        // for the answer: the engine's reply on the wire first, then what draws it. A framed widget: its body's words or its
+        // alert, the frame's spinner gone. /model and /effort are
+        // the selector, with no frame and no body: its own control drawn (the models menu, the effort slider) and no wait
+        // spinner, on two samples further apart than the spinner's quiet half second, so a read still out has shown it.
+        if (sub !== null) {
+          const cached = name === 'model' || name === 'effort';
+          await expect.poll(() => readAnswered(journal, sub, before, cached), { timeout: 20_000, message: `/${name}'s own ${sub} answered on the wire` }).toBe(true);
+        }
+        if (name === 'model' || name === 'effort') {
+          const control = name === 'model' ? w.getByRole('menu') : w.getByRole('slider');
+          const settled = async () => (await control.count()) > 0 && (await w.getByRole('progressbar').count()) === 0;
+          await expect
+            .poll(async () => (await settled()) && (await new Promise((r) => setTimeout(r, 600))) === undefined && (await settled()), { timeout: 20_000, message: `/${name} answered its read` })
+            .toBe(true);
+        } else {
+          await expect
+            .poll(() => w.locator('[data-widget-body]').evaluate((body) => (body.textContent ?? '').trim() !== '' && body.querySelector(':scope > [role="progressbar"]') === null), { timeout: 20_000, message: `/${name} answered its read` })
+            .toBe(true);
+        }
         const error = await w.getByRole('alert').count();
         if (name === 'context' || name === 'mcp') opened[`${name}.screenshots`] = await shoot(page, `10.8-widget-${name}`);
         opened[name] = { error };

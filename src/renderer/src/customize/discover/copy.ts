@@ -27,7 +27,6 @@ export const DISCOVER = {
   anyCategory: 'Any category',
   notInstalled: 'Not installed',
   featured: 'Featured',
-  featuredFrom: 'Featured · From Anthropic',
   seeAll: 'See all',
   seeAllOf: (shelf: string) => `See all of ${shelf}`,
   all: 'All',
@@ -43,14 +42,12 @@ export const DISCOVER = {
   nothing: 'Nothing matches these filters.',
   clearFilters: 'Clear filters',
   removeFilter: (name: string) => `Remove filter ${name}`,
-  restarted: 'The catalog changed, so the list started again from the top.',
-  skillsNote: 'Items whose contents are not known before install are under Plugins.',
   // a card
   add: 'Add',
   addName: (name: string) => `Add ${name}`,
   view: (name: string) => `View ${name}`,
   installed: 'Installed',
-  installedElsewhere: 'Installed in another project',
+  installedElsewhere: 'In another project', // the word cut (G278)
   by: (publisher: string) => `by ${publisher}`,
   installs: (n: string) => `${n} installs`,
   rank: (n: number) => `#${n} most popular`,

@@ -92,6 +92,16 @@ function foreignLine(holder: ForeignHolder): string {
   return holder.pid === null ? 'Background job' : `bg · pid ${holder.pid}`;
 }
 
+// The word cut (W75): who runs a foreign-live session, as the sidebar's hover card and the Overview's card say it, with no
+// pid: "Running in Terminal", a background job by the short id `claude --bg` printed, else "Background job"; null for any
+// other holder. Session info keeps the pid (`holderLine`).
+export function heldLine(record: SessionRecord): string | null {
+  const { holder } = record;
+  if (holder.kind === 'terminal') return BRIDGED_LINE(null);
+  if (holder.kind !== 'background_job') return null;
+  return holder.jobId !== null ? `bg · ${holder.jobId}` : 'Background job';
+}
+
 // W7 (charter §4.3 as amended 2026-10-01): who else holds a session MAWS runs (the contested state), as the glyph, the
 // tab and Session info name it; null when MAWS alone holds it, or does not hold it.
 export function contestLine(record: SessionRecord): string | null {

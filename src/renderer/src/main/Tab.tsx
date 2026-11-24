@@ -1,16 +1,18 @@
-// One tab of a pane's strip (§5.2; mockup 01 `.tab`; residue *Tab strip*): the status glyph of a session, the title,
+// One tab of a pane's strip (§5.2; mockup 01 `.tab`; residue *Tab strip*): the status glyph of a session (a file's
+// glyph on a file tab, where the blue extension was before the word cut's W13), the title,
 // its place as `small` in a strip that mixes places (UX wave U13a, `tab-place.ts`), and a close control revealed on
 // hover and focus. It is a `div role="tab"` rather than a button because it holds that inner button and native drag
 // attributes. A middle-click closes it; its context menu pins it, moves it to the other pane (an artifact's also into
 // the panel, P3-F wave S) and closes it, the others or those to its right. (The Overview is no tab since W5: it floats
 // over the main area.)
 import { ContextMenu } from 'radix-ui';
-import { useEffect, type KeyboardEvent, type MouseEvent } from 'react';
+import { useEffect, useRef, type KeyboardEvent, type MouseEvent } from 'react';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { Strip, TabRef } from '@shared/ipc/schema/layout';
-import { PinIcon, useChordHint } from '../app/IconButton';
-import { BRIDGED_LINE, holderLine } from '../attention/derive'; // P5 O9
+import { FileIcon, PinIcon, useChordHint } from '../app/IconButton';
+import { BRIDGED_LINE, heldLine } from '../attention/derive'; // P5 O9
 import { GlyphMark } from '../attention/GlyphMark';
+import { Tip } from '../ui/tip';
 import { useSessionControls } from '../session/controls/controls-for'; // P5 O9
 import { glyphFor, type Glyph } from '../attention/glyph';
 import { requestCloseTab, useUnstartedTitle } from '../keymap/actions-runtime';
@@ -49,15 +51,10 @@ export interface TabLabel {
   title: string;
   secondary: string | null;
   glyph: Glyph | null;
-  fileType: string | null; // a file tab's extension, as the mockup marks it
+  file: boolean; // a file tab, marked by the file glyph (the word cut, W13: its extension is in its name)
 }
 
 const basename = (path: string) => path.split('/').filter(Boolean).at(-1) ?? path;
-const extension = (path: string) => {
-  const name = basename(path);
-  const dot = name.lastIndexOf('.');
-  return dot > 0 ? name.slice(dot + 1).toUpperCase() : null;
-};
 
 // A session tab's label: the record's title and glyph; with no record, its listed row's title (P5 O9 M9: another
 // machine's terminal session, which has its row alone), the title the tab last knew (P5 O6 M2: a
@@ -70,8 +67,8 @@ function useSessionLabel(appSessionId: AppSessionId, lastKnown?: string): TabLab
   const listing = useSessions((s) => s.listed.get(appSessionId)); // P5 O7 M10: a remote lane B record's state (`listedStateOf`)
   const pending = useAttention((s) => selectPendingOf(s, appSessionId));
   const unstarted = useUnstartedTitle(appSessionId);
-  if (!record) return { title: listedTitle ?? lastKnown ?? unstarted.title, secondary: null, glyph: null, fileType: null };
-  return { title: displayTitle(record), secondary: null, glyph: glyphFor(record, digest ?? null, pending, listing), fileType: null };
+  if (!record) return { title: listedTitle ?? lastKnown ?? unstarted.title, secondary: null, glyph: null, file: false };
+  return { title: displayTitle(record), secondary: null, glyph: glyphFor(record, digest ?? null, pending, listing), file: false };
 }
 
 export function useTabLabel(tab: TabRef): TabLabel {
@@ -84,32 +81,34 @@ export function useTabLabel(tab: TabRef): TabLabel {
     case 'session':
       return session;
     case 'agent':
-      return { title: session.title, secondary: 'agent', glyph: null, fileType: null };
+      return { title: session.title, secondary: 'agent', glyph: null, file: false };
     case 'file':
-      return { title: basename(tab.path), secondary: null, glyph: null, fileType: extension(tab.path) };
+      return { title: basename(tab.path), secondary: null, glyph: null, file: true };
     case 'diff':
-      return { title: `Diff · ${tab.ref}`, secondary: null, glyph: null, fileType: null };
+      return { title: `Diff · ${tab.ref}`, secondary: null, glyph: null, file: false };
     case 'diagnostics':
-      return { title: 'Diagnostics', secondary: null, glyph: null, fileType: null };
+      return { title: 'Diagnostics', secondary: null, glyph: null, file: false };
     case 'artifact': // P3-L
-      return { title: artifactTitle ?? LIBRARY_COPY.fallbackTitle, secondary: null, glyph: null, fileType: null };
+      return { title: artifactTitle ?? LIBRARY_COPY.fallbackTitle, secondary: null, glyph: null, file: false };
     case 'browser': // E4a
-      return { title: browserTitle ?? BROWSER_COPY.title, secondary: null, glyph: null, fileType: null };
+      return { title: browserTitle ?? BROWSER_COPY.title, secondary: null, glyph: null, file: false };
     case 'channel': // P5 O8 M7a: "<project> · channel"
-      return { title: channelTitle, secondary: null, glyph: null, fileType: null };
+      return { title: channelTitle, secondary: null, glyph: null, file: false };
   }
 }
 
 // P5 O9 (the owner's Q1): a session a terminal or a `--bg` job holds reads like any MAWS session while MAWS drives it
-// through its bridge (its controls port is lane A: `turn()` non-null), with a small mark of where it runs, titled with
-// the hover card's line, in the tab's own `small` style. Null for every other tab.
+// through its bridge (its controls port is lane A: `turn()` non-null), with a small mark of where it runs. The word cut
+// (W10): the mark is the ⌁ the status glyph draws for a session live elsewhere, in its tone, the word ("Terminal",
+// "Background job") its accessible name; the hover card's line (`title`) is the tab's tip and description. Null for every
+// other tab.
 function useHolderMark(tab: TabRef): { text: string; title: string } | null {
   const appSessionId = tab.kind === 'session' ? tab.appSessionId : null;
   const record = useSessions((s) => (appSessionId === null ? null : (s.records.get(appSessionId) ?? null)));
   const controls = useSessionControls(appSessionId ?? ('' as AppSessionId));
   if (record === null || controls === null || controls.turn() === null) return null;
   const terminal = record.holder.kind === 'terminal';
-  return { text: terminal ? 'Terminal' : 'Background job', title: BRIDGED_LINE(terminal ? null : holderLine(record)) };
+  return { text: terminal ? 'Terminal' : 'Background job', title: BRIDGED_LINE(terminal ? null : heldLine(record)) };
 }
 
 function useSessionOffline(tab: TabRef): boolean {
@@ -124,6 +123,27 @@ export const tabName = (label: TabLabel, place: string | null): string => {
   const after = place ?? label.secondary;
   return after ? `${label.title} · ${after}` : label.title;
 };
+
+// A file's name split before its extension, which stays drawn when the name clips (the word cut's fix wave for M4: two
+// long names that differ only in it stay told apart). A leading dot opens a name, not an extension; a "suffix" longer
+// than an extension is part of the name.
+export function fileNameParts(name: string): { stem: string; suffix: string } {
+  const dot = name.lastIndexOf('.');
+  if (dot <= 0 || name.length - dot > 12) return { stem: name, suffix: '' };
+  return { stem: name.slice(0, dot), suffix: name.slice(dot) };
+}
+
+// The title of a file's tab: the stem clips first, down to two characters, so a compact tab still shows where its name
+// starts; the extension clips only in a title too narrow for both.
+function FileTitle({ name, className }: { name: string; className: string }) {
+  const { stem, suffix } = fileNameParts(name);
+  return (
+    <span className={`flex max-w-full min-w-0 shrink-0 truncate ${className}`}>
+      <span className={`${suffix ? 'min-w-[2ch]' : 'min-w-0'} truncate`}>{stem}</span>
+      {suffix && <span data-tab-suffix className="max-w-[calc(100%-2ch)] shrink-0 truncate">{suffix}</span>}
+    </span>
+  );
+}
 
 // E11 F2b (plan 2.5; owner decision 2): opening a session replaces the shown tab unless it is pinned.
 export const PINNED_HINT = 'Pinned: stays open when you open another session';
@@ -145,9 +165,13 @@ export function Tab({ tab, pane, domId, active, place = null, stop, onKeyDown }:
   const closeChord = useChordHint('tab.close');
   const dirty = useFileTabDirty(tab); // E5
   const holderMark = useHolderMark(tab); // P5 O9
+  // W10: pointing at the mark shows the tab's tip. The region is always mounted (`contents`: no box, so no gap while
+  // empty), since the tip reads it once and the mark comes and goes with the bridge.
+  const holderRegion = useRef<HTMLElement>(null);
+  const tip = holderMark?.title ?? (tab.kind === 'file' ? tab.path : null);
   // Keep plain tabs compact, but reserve each nonshrinking mark plus its gap before truncating the title. The place
   // reserves nothing: it gives way first (U13a).
-  const minWidth = Math.max(active ? 24 : 16, 16 + (label.glyph ? 4 : 0) + (label.fileType ? 8 : 0) + (tab.pinned ? 4 : 0) + (dirty ? 4 : 0) + (label.secondary ? 20 : 0) + (holderMark ? 16 : 0));
+  const minWidth = Math.max(active ? 24 : 16, 16 + (label.glyph ? 4 : 0) + (label.file ? 4 : 0) + (tab.pinned ? 4 : 0) + (dirty ? 4 : 0) + (label.secondary ? 20 : 0) + (holderMark ? 16 : 0));
 
   const onAuxClick = (event: MouseEvent) => {
     if (event.button === 1) void requestCloseTab(tab.id);
@@ -161,7 +185,9 @@ export function Tab({ tab, pane, domId, active, place = null, stop, onKeyDown }:
       id={domId}
       aria-selected={active}
       aria-label={name}
-      title={tab.kind === 'file' ? tab.path : name} // UX wave U6e (decision 11; U13's): a file's tab has its full path as its tooltip
+      // UX wave U6e (decision 11; U13's): a file's tab has its full path as its tooltip, a `Tip` the keyboard reaches (the
+      // word cut's fix wave for M4); any other tab its name, the system's
+      title={tab.kind === 'file' ? undefined : name}
       tabIndex={stop ? 0 : -1}
       data-tab-id={tab.id}
       data-dirty={dirty ? 'true' : undefined} // E5
@@ -181,7 +207,7 @@ export function Tab({ tab, pane, domId, active, place = null, stop, onKeyDown }:
       }`}
     >
       {label.glyph && <GlyphMark glyph={label.glyph} className="shrink-0" />}
-      {label.fileType && <span className="max-w-8 shrink-0 truncate font-mono text-info">{label.fileType}</span>}
+      {label.file && <FileIcon className="size-[12px] shrink-0 text-fg-muted" /> /* W13: the extension is in the name beside it */}
       {/* E11 F2b (plan 2.5): a pin you can see, saying what it does */}
       {tab.pinned && (
         <span aria-label="Pinned" role="img" title={PINNED_HINT} className="inline-flex shrink-0 text-fg-muted">
@@ -194,14 +220,20 @@ export function Tab({ tab, pane, domId, active, place = null, stop, onKeyDown }:
           5em, whichever is less (four characters and an ellipsis are never wider), and grows to its whole text from there;
           a line with less room wraps it out of sight, with its gap, and the title takes the room. */}
       <span className="flex h-[1lh] min-w-0 flex-wrap items-baseline gap-x-1.5 overflow-hidden">
-        <span className={`max-w-full shrink-0 truncate ${offline ? 'text-fg-faint' : ''}`}>{label.title}</span>
+        {tab.kind === 'file' ? (
+          <FileTitle name={label.title} className={offline ? 'text-fg-faint' : ''} />
+        ) : (
+          <span className={`max-w-full shrink-0 truncate ${offline ? 'text-fg-faint' : ''}`}>{label.title}</span>
+        )}
         {place && <small data-tab-place className="max-w-max min-w-0 grow basis-[5em] truncate text-fg-muted">{place}</small>}
       </span>
-      {holderMark && ( // P5 O9 (Q1)
-        <small data-holder-marker title={holderMark.title} className="shrink-0 text-fg-muted">
-          {holderMark.text}
-        </small>
-      )}
+      <span ref={holderRegion} className="contents">
+        {holderMark && ( // P5 O9 (Q1); the word cut (W10): the glyph, its word its name, the holder's line the tab's tip
+          <small data-holder-marker role="img" aria-label={holderMark.text} className="shrink-0 text-info">
+            ⌁
+          </small>
+        )}
+      </span>
       {label.secondary && <small className="max-w-16 shrink-0 truncate text-fg-muted">{label.secondary}</small>}
       <button
         type="button"
@@ -223,7 +255,11 @@ export function Tab({ tab, pane, domId, active, place = null, stop, onKeyDown }:
 
   return (
     <ContextMenu.Root modal={false}>
-      <ContextMenu.Trigger asChild>{element}</ContextMenu.Trigger>
+      {/* W10 (fix round 1): the holder's line is the tab's tip and description, shown at once on the tab's own focus stop
+          and after the delay on pointing at the mark. A file's tab: its full path, on pointing at the tab or its focus */}
+      <Tip content={tip} description={tip} pointedWithin={holderMark ? holderRegion : undefined}>
+        <ContextMenu.Trigger asChild>{element}</ContextMenu.Trigger>
+      </Tip>
       <ContextMenu.Portal>
         <ContextMenu.Content data-tab-focus-owner={tab.id} className="z-50 min-w-44 rounded-md border border-border-strong bg-bg-overlay p-1 text-ui text-fg">
           <TabMenuItem onSelect={() => useLayout.getState().togglePinned(tab.id)}>{tab.pinned ? 'Unpin tab' : 'Pin tab'}</TabMenuItem>

@@ -49,7 +49,7 @@ function describe(status: HostStatus | null): { text: string; facts: string[]; r
     return { text: status.reason === 'held_lock' ? SUPERVISOR.heldLock : SUPERVISOR.notRunning, facts: daemon, restart: true, note };
   }
   // P5 O16 M3c fix wave 2 (D63): an update that waits for MAWS tool calls, served or deferred, says what it waits for
-  if (status.handover) return { text: ENGINE_HOST_UPDATE.waiting(status.handover.inFlight, status.handover.tool), facts: daemon, restart: false, note };
+  if (status.handover) return { text: ENGINE_HOST_UPDATE.waiting(status.handover.inFlight), facts: daemon, restart: false, note };
   if (status.state === 'restarting') return { text: SUPERVISOR.restarting, facts: daemon, restart: false, note };
   const s = status.supervisor;
   if (status.state === 'starting' || s === null) return { text: SUPERVISOR.starting, facts: daemon, restart: false, note };

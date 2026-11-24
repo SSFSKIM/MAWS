@@ -3,7 +3,8 @@
 // is still the intent's (`progress.worktree.createdHere`), main refuses every location change (`retained_worktree`),
 // so its two resolutions, "Keep the worktree" and "Discard changes and remove", stay offered here with the failure
 // card's own rules. A note rather than an undismissable card: the card takes the composer's place, and "Back to
-// editing" exists to give the composer back (Send reuses the checkout).
+// editing" exists to give the composer back (Send reuses the checkout). The word cut (W89): the note says what is left
+// and what to do, without the mechanism.
 import { useState } from 'react';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { SetupIntent } from '@shared/sessions/intent';
@@ -46,7 +47,7 @@ export function RetainedWorktreeNote({ appSessionId }: { appSessionId: AppSessio
   return (
     <div role="note" aria-label="Worktree from the failed attempt" className="flex flex-col gap-2 rounded-lg border border-l-2 border-border border-l-warning bg-bg-raised px-3 py-2.5 text-ui-sm">
       <p className="m-0 text-fg">
-        {`Worktree ${basename(resource.path)} from the failed attempt is still this session’s: Send reuses it, and the location cannot change until you keep or discard it.`}
+        {`Worktree ${basename(resource.path)} is left from the failed start. Keep it or discard it.`}
       </p>
       {outcome.length > 0 && <p className="m-0 text-danger">{outcome.join('; ')}</p>}
       {discard && <DiscardAcknowledgement changes={changes} checked={acknowledged} onChange={setAcknowledged} />}

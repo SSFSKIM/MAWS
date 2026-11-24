@@ -467,8 +467,10 @@ test('(c) G3: kill -9 of the engine host mid-turn with a session nothing can ado
 
     process.kill(old, 'SIGKILL');
     const killedAt = new Date().toISOString();
-    const toast = run.page.getByText(/^The session supervisor stopped unexpectedly/);
-    await expect(toast).toHaveText('The session supervisor stopped unexpectedly; 1 session was interrupted. Their transcripts are on disk; open one to resume.', { timeout: 60_000 });
+    // the word cut (W32): the toast says what became of the sessions, without the supervisor or the exit's cause, which
+    // Diagnostics' row keeps (below)
+    const toast = run.page.getByText(/^1 session was interrupted/);
+    await expect(toast).toHaveText('1 session was interrupted. Open it to resume.', { timeout: 60_000 });
     await toast.hover(); // a hovered toast stays
     const restarted = await s.ready(run.page, (st) => st.supervisor!.pid !== old);
     const fresh = restarted.supervisor!.pid;
@@ -558,8 +560,8 @@ test('(c′) P5 O16 M3: kill -9 of the engine host mid-turn: the successor adopt
     process.kill(old, 'SIGKILL');
     // `mawsd` started the engine host, so main reads no signal; the toast waits for the successor's adoptions (main holds
     // the exit until they end) and counts the session re-adopted
-    const toast = run.page.getByText(/^The engine host stopped unexpectedly/);
-    await expect(toast).toHaveText('The engine host stopped unexpectedly; its 1 session was re-adopted.', { timeout: 60_000 });
+    const toast = run.page.getByText(/^The process that runs sessions stopped unexpectedly/); // the word cut (W32): "kept running" for re-adopted
+    await expect(toast).toHaveText('The process that runs sessions stopped unexpectedly; its 1 session kept running.', { timeout: 60_000 });
     await toast.hover(); // a hovered toast stays
     const restarted = await s.ready(run.page, (st) => st.supervisor!.pid !== old);
     expect(restarted.lastExit).toMatchObject({ code: null, signal: null, interrupted: 0, adopted: 1 });
@@ -754,8 +756,8 @@ test('(f) an update that changed no wire shape, met by an engine host without ho
     const run = await s.launch({ MAWS_E2E_BUILD_ID: 'stale' });
     // served, with its exit armed for when its sessions go idle (§Design 6)
     expect(await s.ready(run.page, (st) => st.supervisor!.exitWhenIdle)).toMatchObject({ matches: 'build', supervisor: { pid, liveSessions: 1, exitWhenIdle: true } });
-    const notice = banner(run.page, 'MAWS was updated.');
-    await expect(notice).toContainText("MAWS was updated. 1 session is still running on the previous version's supervisor; MAWS moves to the new one when they become idle.");
+    const notice = banner(run.page, 'Updated. Finishes when');
+    await expect(notice).toContainText('Updated. Finishes when 1 session goes idle.'); // the word cut (W27)
     await shots(run.maws, 'notice-updated', () => null);
     await notice.getByRole('button', { name: 'Restart now' }).click();
     const fresh = (await s.ready(run.page, (st) => st.supervisor!.pid !== pid)).supervisor!.pid;
@@ -782,7 +784,7 @@ test('(f) P5 O16 M3: an update with a session live: the engine host hands it ove
     expect(s.log(), 'host.log: the old host drained at once').toContain('handover armed: 1 hosted rows frozen, 0 calls in flight');
     expect(s.log(), 'host.log: and left by the handover').toContain('exiting (handover)');
     await adoptedThenCompleted(s, run.page, id, engine!, requestId!);
-    await expect(banner(run.page, 'MAWS was updated.'), 'no update banner: the old host hands over, it never waits for idle').toHaveCount(0);
+    await expect(banner(run.page, 'Updated. Finishes when'), 'no update banner: the old host hands over, it never waits for idle').toHaveCount(0);
     expect((await s.ready(run.page)).lastExit, 'no unexpected exit').toBeNull();
     expect(run.maws.consoleErrors()).toEqual([]);
   });
@@ -823,7 +825,11 @@ test('(f) board ticket 420: an update with a blocking ask waiting: the successor
 // P5 O16 M3c: a `maws` tool call's rows in a journal: the engine's call (`in`) and the host's answer (`out`)
 const isToolCall = (r: JournalRow) => r.direction === 'in' && r.frame.type === 'control_request' && JSON.stringify(r.frame).includes('"tools/call"');
 const isToolAnswer = (r: JournalRow) => r.direction === 'out' && r.frame.type === 'control_response' && JSON.stringify(r.frame).includes('"mcp_response"');
-const WAITING_FOR_LIST = 'Waiting for artifact_list to finish before updating the engine host (1 call running).'; // ENGINE_HOST_UPDATE.waiting(1, 'artifact_list')
+const WAITING_FOR_LIST = 'Updating after 1 running call'; // ENGINE_HOST_UPDATE.waiting(1): the word cut (W30) names no tool and no engine host
+
+// Every form of the crash toast (SUPERVISOR_NOTICES.crashed): since the word cut (W32) an interrupted-only toast no
+// longer says "stopped unexpectedly", so its absence is read on all of them
+const CRASH_TOAST = /stopped unexpectedly|(was|were) interrupted/;
 
 // After a deferred or waited handover: the successor adopted `id` with the same engine process, the held call was
 // answered once by the old host before it detached, the turn played on to its end, and nothing was told as a crash.
@@ -841,7 +847,7 @@ async function heldCallAdopted(s: Scratch, run: Run, id: AppSessionId, engine: n
 
 async function noCrashTold(s: Scratch, run: Run): Promise<void> {
   await new Promise((r) => setTimeout(r, 2_000)); // a crash notice would have been told by now
-  await expect(run.page.getByText(/stopped unexpectedly/), 'no crash toast: the handover’s exit was deliberate').toHaveCount(0);
+  await expect(run.page.locator('[data-toast-viewport]').getByText(CRASH_TOAST), 'no crash toast: the handover’s exit was deliberate').toHaveCount(0);
   expect((await s.ready(run.page)).lastExit, 'no unexpected exit').toBeNull();
   expect(run.maws.consoleErrors()).toEqual([]);
 }
@@ -875,7 +881,7 @@ test('(f) P5 O16 M3c: an update waits for a running tool call: the old build ser
     const waiting = await s.ready(run.page, (st) => st.supervisor!.pid === pid && st.handover !== undefined, 60_000);
     expect(waiting, 'served by the old build, nothing armed, what it waits for said').toMatchObject({ matches: 'build', supervisor: { exitWhenIdle: false }, handover: { inFlight: 1, tool: 'artifact_list' } });
     await expect(banner(run.page, WAITING_FOR_LIST), 'the waiting copy').toHaveCount(1);
-    await expect(banner(run.page, 'MAWS was updated.'), 'not E10’s wait for idle').toHaveCount(0);
+    await expect(banner(run.page, 'Updated. Finishes when'), 'not E10’s wait for idle').toHaveCount(0);
     value(await invoke(run.page, 'session.send', { appSessionId: b, content: 'turn 2' }));
     await expect.poll(async () => (await eventsOf(run.page, b)).filter((e) => e.kind === 'turn.ended').length, { timeout: 30_000, message: 'B’s turn is answered by the old build' }).toBe(2);
     expect(isAlive(pid), 'the old engine host serves on').toBe(true);
@@ -970,8 +976,8 @@ test('(g) an incompatible update, met by an engine host without host.holder: the
         return answer.ok ? { state: answer.value.state, reason: answer.value.reason, waiting: answer.value.waitingLiveSessions } : null;
       }, { timeout: 30_000 })
       .toEqual({ state: 'crashed', reason: 'incompatible', waiting: 1 });
-    const notice = banner(run.page, 'cannot talk to the previous supervisor');
-    await expect(notice).toContainText('MAWS was updated and cannot talk to the previous supervisor, which still runs 1 session.');
+    const notice = banner(run.page, 'Updated. New sessions start once');
+    await expect(notice).toContainText('Updated. New sessions start once the running one goes idle.'); // the word cut (W28)
     const refused = await invoke(run.page, 'session.launch', { spec: replaySpec(`e10-refused-${Date.now()}`, PERMISSION) });
     expect(refused.ok ? 'ok' : refused.error.code).toBe('host_unavailable');
     expect(isAlive(pid)).toBe(true);
@@ -997,7 +1003,7 @@ test('(g) P5 O16 M3: an incompatible update with a session live: the engine host
     expect(s.log(), 'host.log: the refused client’s exit, read as a handover').toContain('a refused client that adopts asked the exit when idle: handing over');
     expect(s.log()).toContain('exiting (handover)');
     await adoptedThenCompleted(s, run.page, id, engine!, requestId!);
-    await expect(banner(run.page, 'cannot talk to the previous supervisor'), 'the incompatible banner is gone with the old host').toHaveCount(0);
+    await expect(banner(run.page, 'Updated. New sessions start once'), 'the incompatible banner is gone with the old host').toHaveCount(0);
     expect(run.maws.consoleErrors()).toEqual([]);
   });
 });

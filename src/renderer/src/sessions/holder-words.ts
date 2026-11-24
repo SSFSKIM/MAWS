@@ -22,7 +22,14 @@ export function holderWords(holder: SessionRecord['holder']): string {
   }
 }
 
-// "Held by …", with the actions the caller offers (the job's Attach, from `sessions/attach.ts`).
+// The toast's words (the word cut, W33): where the session runs, with no pid or job id; "Held by …" for any other holder.
+function heldToastWords(holder: SessionRecord['holder']): string {
+  if (holder.kind === 'terminal') return 'Running in Terminal';
+  if (holder.kind === 'background_job') return 'Running as a background job';
+  return `Held by ${holderWords(holder)}`;
+}
+
+// Where a session someone else holds runs, with the actions the caller offers (the job's Attach, from `sessions/attach.ts`).
 export function toastHeld(holder: SessionRecord['holder'], actions: Notice['actions'] = [], id?: string /* P2-A: one notice per start */): void {
-  toast({ ...(id !== undefined && { id }), level: 'warning', text: `Held by ${holderWords(holder)}`, actions, dismissible: true });
+  toast({ ...(id !== undefined && { id }), level: 'warning', text: heldToastWords(holder), actions, dismissible: true });
 }

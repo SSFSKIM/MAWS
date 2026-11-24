@@ -23,6 +23,7 @@ import { archiveSession, onAnotherMachine } from './record-ops';
 import { Sheet, SheetForm } from './Sheet';
 import { PRIMARY } from './ui';
 import { displayTitle, listedTitle } from './title';
+import { ARCHIVE_WORDS } from './copy';
 
 export const isManagedWorktree = (path: string) => path.includes('/.claude/worktrees/');
 
@@ -38,7 +39,6 @@ export function lastOfWorktree(record: SessionRecord, records: Iterable<SessionR
 export function ArchiveDialog({ appSessionId }: { appSessionId: AppSessionId }) {
   const record = useSessions((s) => s.records.get(appSessionId) ?? null);
   const listing = useSessions((s) => (record === null ? (s.listed.get(appSessionId) ?? null) : null)); // the UX wave, U9
-  const project = useSessions((s) => (record?.projectId ? (s.projects.get(record.projectId)?.name ?? null) : null));
   const there = onAnotherMachine(appSessionId);
   const machine = useMachines((s) => (there ? machineName(s.machines, machineOf(appSessionId), ipc.localMachine) : null));
   const [error, setError] = useState<string | null>(null);
@@ -61,10 +61,7 @@ export function ArchiveDialog({ appSessionId }: { appSessionId: AppSessionId }) 
   return (
     <Sheet title={`Archive “${record !== null ? displayTitle(record) : listedTitle(listing!)}”?`}>
       <SheetForm focusSubmit canSubmit={!busy && unavailable === null} onSubmit={() => void submit()} submitLabel="Archive" submitClass={PRIMARY}>
-        <p className="m-0 text-fg-muted">
-          Ends its engine process{machine !== null ? ` on ${machine}` : ''} and hides it{project ? ` from ${project}` : ''}. The transcript stays where Claude Code keeps it; resume it from Archived sessions or with claude
-          --resume in the terminal. The worktree is not touched.
-        </p>
+        <p className="m-0 text-fg-muted">{ARCHIVE_WORDS.body(machine)}</p>
         <BackgroundWorkDisclosure appSessionId={appSessionId} />
         {unavailable !== null && <p className="m-0 text-ui-sm text-fg-muted">{unavailable}</p>}
         {error && <p className="m-0 text-ui-sm text-danger">{error}</p>}

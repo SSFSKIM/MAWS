@@ -116,8 +116,8 @@ export const SIDE_COPY = {
   // `/btw`: the widget, the session's card (UX wave U4a) and a thread's questions under its thread view (the composer's
   // refusals are its own copy, `editor/controller.ts`)
   btw: {
-    field: 'Ask a side question',
-    placeholder: 'Asked beside the running turn; nothing is added to the conversation',
+    field: 'Ask a side question', // the field's name, not drawn over it (the word cut, P415)
+    placeholder: 'Ask a quick question…', // the word cut (P416): the dialog's and a thread's question field, as the card's first ask
     ask: 'Ask',
     notRunning: 'Start the session to ask a side question',
     askedElsewhere: (parentTitle: string) => `Side question asked in the side chat of ${parentTitle}`, // UX wave U4a: its card, no longer its panel

@@ -51,6 +51,15 @@ it('opens from Cmd+/ and shows effective bindings for navigation and composer ke
   expect(document.activeElement).toBe(screen.getByRole('searchbox', { name: 'Search keyboard shortcuts' }));
 });
 
+// The word cut (W125, W126): one plain line under the title, and "Search" in the field, whose name is unchanged
+it('says where bindings change in three words, and its field reads Search', () => {
+  const dialog = openSheet();
+  expect(dialog.getAttribute('aria-describedby')).toBeTruthy();
+  expect(document.getElementById(dialog.getAttribute('aria-describedby')!)!.textContent).toBe('Change in Settings');
+  expect(within(dialog).queryByRole('link')).toBeNull();
+  expect(screen.getByRole('searchbox', { name: 'Search keyboard shortcuts' }).getAttribute('placeholder')).toBe('Search');
+});
+
 // UX wave U6b-3b (decision 11; B4): the sheet lists Go to file under Go with ⌘P
 it('lists Go to file under Go with ⌘P', () => {
   const dialog = openSheet();
@@ -71,7 +80,7 @@ it('searches action names and effective chords, updates when bindings change, an
   expect(within(dialog).getByRole('row').textContent).toContain('Next tab in strip');
   fireEvent.change(search, { target: { value: 'nothing matches this' } });
   expect(within(dialog).queryByRole('row')).toBeNull();
-  expect(within(dialog).getByRole('status').textContent).toBe('No shortcuts match your search.');
+  expect(within(dialog).getByRole('status').textContent).toBe('Nothing matches'); // the word cut (W127)
 });
 
 it('closes on Escape, restores the opener, and clears search when reopened', async () => {

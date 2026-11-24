@@ -8,7 +8,7 @@ import { createHandlerRegistry } from '../keymap/registry';
 
 export const PROJECT_ACTIONS = {
   archiveSessions: 'Archive sessions…',
-  archiveOlder: 'Archive sessions older than a week',
+  archiveOlder: 'Archive older than a week', // the word cut (W85)
   removeProject: 'Remove from sidebar…', // W11 (I5): also the archive icon on the project row
   revealInFinder: 'Reveal in Finder',
   // C10 start: a project's archived sessions, a dialog list (C5 hides archived rows and gains no section)

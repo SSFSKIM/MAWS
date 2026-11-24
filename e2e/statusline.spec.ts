@@ -152,7 +152,7 @@ test('usage: each session reads its own windows in /usage: the routed one the dr
 
     // a direct session: the engine's own reading, never an account's
     const widget = await usageWidget(page, CHARTER);
-    const direct = widget.getByRole('region', { name: 'Direct · the engine’s own login', exact: true });
+    const direct = widget.getByRole('region', { name: 'Direct', exact: true }); // the word cut (P592)
     await expect(direct).toHaveText(/The engine reported no plan limits$/);
     await expect(widget.getByRole('region', { name: /^(Routing|Pinned) account$/ })).toHaveCount(0);
     await expect(widget).not.toContainText(DRAIN);

@@ -30,13 +30,13 @@ export function describeSupervisor(status: HostStatus | null): string {
     else parts.push(status.reason === 'held_lock' ? ROW.heldLock : ROW.crashed);
   } else if (status.state === 'restarting' || status.state === 'starting' || s === null) {
     // P5 O16 M3c fix wave 2 (D63): a deferred update says what it waits for
-    if (status.handover) parts.push(ENGINE_HOST_UPDATE.waiting(status.handover.inFlight, status.handover.tool));
+    if (status.handover) parts.push(ENGINE_HOST_UPDATE.waiting(status.handover.inFlight));
     else parts.push(status.state === 'restarting' ? ROW.restarting : ROW.starting);
   } else {
     const idle = s.exitWhenIdle ? ROW.idleWithLast : s.idleExitMs === null ? ROW.idleNever : ROW.idleAfter(s.idleExitMs);
     parts.push(ROW.pid(s.pid));
     if (status.matches) parts.push(ROW.matches[status.matches]);
-    if (status.handover) parts.push(ENGINE_HOST_UPDATE.waiting(status.handover.inFlight, status.handover.tool)); // the old build serves meanwhile
+    if (status.handover) parts.push(ENGINE_HOST_UPDATE.waiting(status.handover.inFlight)); // the old build serves meanwhile
     parts.push(ROW.held(s.liveSessions), idle, ROW.orphans(s.orphansKilled));
     if (s.socketPath) parts.push(ROW.socket(s.socketPath));
   }

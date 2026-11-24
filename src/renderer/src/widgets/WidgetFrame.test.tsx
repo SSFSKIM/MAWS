@@ -26,6 +26,7 @@ const ID = at(BARE);
 
 describe('WidgetFrame', () => {
   // E11's sitting (owner-notes 00-consolidated-plan §2.2): no provenance foot; what a change writes is said in its sheet.
+  // the word cut (P517): no `/name` beside the close cross; the title names the dialog
   it('shows the head and the body when ready, and no foot', () => {
     render(
       <WidgetFrame appSessionId={ID} title="Hooks" command="hooks" state="ready" error={null} close={() => {}}>
@@ -34,41 +35,41 @@ describe('WidgetFrame', () => {
     );
     const frame = document.querySelector<HTMLElement>('[data-widget="hooks"]')!;
     expect(frame.querySelector('h3')?.textContent).toBe('Hooks');
-    expect(screen.getByText('/hooks')).toBeTruthy();
+    expect(frame.querySelector('header')!.textContent).not.toContain('/hooks');
     expect(screen.getByText('the body')).toBeTruthy();
     expect(frame.querySelector('footer')).toBeNull();
     expect(frame.textContent).not.toContain('Read with');
   });
 
-  // UX wave U11a (§C): the head may carry a muted subtitle after the title and one line of note with its tooltip; the
-  // dialog keeps the title alone as its name
-  it('draws a subtitle after the title and a note in the head, and neither when not given', () => {
+  // UX wave U11a (§C): the head may carry a muted subtitle after the title; the dialog keeps the title alone as its
+  // name. The word cut (N148): the head carries no note (the switch's reach is each connector row's note)
+  it('draws a subtitle after the title, and none when not given', () => {
     const { rerender } = render(
-      <WidgetFrame appSessionId={ID} title="Connectors" command="mcp" subtitle="MCP servers" note={{ text: 'A sentence about the switch.', tooltip: 'Where it is kept.' }} state="ready" error={null} close={() => {}}>
+      <WidgetFrame appSessionId={ID} title="Connectors" command="mcp" subtitle="MCP servers" state="ready" error={null} close={() => {}}>
         <p>the body</p>
       </WidgetFrame>,
     );
     const header = document.querySelector<HTMLElement>('[data-widget="mcp"] header')!;
     expect(header.querySelector('h3')?.textContent).toBe('Connectors');
     expect(header.querySelector('[data-widget-subtitle]')?.textContent).toBe('MCP servers');
-    const note = header.querySelector<HTMLElement>('[data-widget-note]')!;
-    expect(note.textContent).toBe('A sentence about the switch.');
-    expect(note.title).toBe('Where it is kept.');
     rerender(
       <WidgetFrame appSessionId={ID} title="Hooks" command="hooks" state="ready" error={null} close={() => {}}>
         <p>the body</p>
       </WidgetFrame>,
     );
-    expect(document.querySelector('[data-widget-subtitle], [data-widget-note]')).toBeNull();
+    expect(document.querySelector('[data-widget-subtitle]')).toBeNull();
   });
 
-  it('shows the loading line and the error in place of the body', () => {
+  // the word cut (P518): the wait is the quiet spinner, named by its words, not "Reading…"
+  it('shows the quiet spinner while reading and the error in place of the body', async () => {
     const { rerender } = render(
       <WidgetFrame appSessionId={ID} title="Hooks" command="hooks" state="loading" error={null} close={() => {}}>
         <p>the body</p>
       </WidgetFrame>,
     );
-    expect(screen.getByText('Reading…')).toBeTruthy();
+    expect(await screen.findByRole('progressbar', { name: 'Reading…' })).toBeTruthy();
+    expect(screen.queryByText('Reading…')).toBeNull();
+    expect(screen.queryByText('the body')).toBeNull();
     rerender(
       <WidgetFrame appSessionId={ID} title="Hooks" command="hooks" state="error" error="get_hooks_listing refused" close={() => {}}>
         <p>the body</p>
@@ -79,12 +80,12 @@ describe('WidgetFrame', () => {
 
   it('keeps the body of a ready read and says, in one line above it, that a later read failed', () => {
     render(
-      <WidgetFrame appSessionId={ID} title="Hooks" command="hooks" state="ready" error="The engine did not answer · showing the last value it reported" close={() => {}}>
+      <WidgetFrame appSessionId={ID} title="Hooks" command="hooks" state="ready" error="The engine did not answer · last reading shown" close={() => {}}>
         <p>the body</p>
       </WidgetFrame>,
     );
     expect(screen.getByText('the body')).toBeTruthy();
-    expect(screen.getByRole('status').textContent).toBe('The engine did not answer · showing the last value it reported');
+    expect(screen.getByRole('status').textContent).toBe('The engine did not answer · last reading shown');
     expect(screen.queryByRole('alert')).toBeNull();
   });
 
@@ -119,12 +120,14 @@ describe('WidgetFrame', () => {
     const setRecord = (over: Parameters<typeof record>[1] = {}, availability: Availability = 'resumable') =>
       useSessions.setState({ records: new Map([[ID, record(ID, over)]]), digests: new Map([[ID, digest(ID, { availability })]]) });
 
-    it('dormant with nothing read: "Not read yet." and Load now, which acquires for a read; mounting acquires nothing', async () => {
+    // the word cut (P519): Load now alone, with no "Not read yet." before it
+    it('dormant with nothing read: Load now alone, which acquires for a read; mounting acquires nothing', async () => {
       invoke.mockClear();
       window.maws = { localMachine: TEST_MACHINE, invoke, on: () => () => {}, pathForFile: () => '' } as unknown as PreloadBridge;
       setRecord();
       render(frame({ state: 'dormant', readAt: null }));
-      expect(screen.getByText('Not read yet.')).toBeTruthy();
+      expect(screen.queryByText('Not read yet.')).toBeNull();
+      expect(document.querySelector('[data-dormant-gesture]')!.textContent).toBe('Load now');
       expect(screen.queryByText('the body')).toBeNull();
       expect(screen.queryByText(NOT_RUNNING)).toBeNull();
       expect(acquires()).toHaveLength(0);
@@ -132,12 +135,16 @@ describe('WidgetFrame', () => {
       await vi.waitFor(() => expect(acquires()).toEqual([['session.acquire', { appSessionId: BARE, reason: 'read' }, TEST_MACHINE]]));
     });
 
-    it('dormant with a cached answer: the body under "Read <when>" and Refresh; without a date, Load now and no body', () => {
+    // the word cut (P521, P522): the age alone, "5 minutes ago", and Refresh as the circular arrow named by its word
+    it('dormant with a cached answer: the body under its age and the Refresh glyph; without a date, Load now and no body', () => {
       setRecord();
       const { rerender } = render(frame({ state: 'dormant', readAt: Date.now() - 5 * 60_000 }));
       expect(screen.getByText('the body')).toBeTruthy();
-      expect(screen.getByText(`Read ${REL.ago(5, 'minute')}`)).toBeTruthy();
-      expect(screen.getByRole('button', { name: 'Refresh' })).toBeTruthy();
+      expect(screen.getByText(REL.ago(5, 'minute'))).toBeTruthy();
+      expect(screen.queryByText(/^Read /)).toBeNull();
+      const refresh = screen.getByRole('button', { name: 'Refresh' });
+      expect(refresh.textContent).toBe('');
+      expect(refresh.querySelector('svg')).not.toBeNull();
       rerender(frame({ state: 'dormant' }));
       expect(screen.queryByText('the body')).toBeNull();
       expect(screen.getByRole('button', { name: 'Load now' })).toBeTruthy();
@@ -148,22 +155,39 @@ describe('WidgetFrame', () => {
       try {
         setRecord();
         render(frame({ state: 'dormant', readAt: Date.now() }));
-        expect(screen.getByText(`Read ${REL.now}`)).toBeTruthy();
+        expect(screen.getByText(REL.now)).toBeTruthy();
         act(() => vi.advanceTimersByTime(5 * 60_000));
-        expect(screen.getByText(`Read ${REL.ago(5, 'minute')}`)).toBeTruthy();
+        expect(screen.getByText(REL.ago(5, 'minute'))).toBeTruthy();
       } finally {
         vi.useRealTimers();
       }
     });
 
-    it('starting: "Starting…" above whatever body there is, and no button', () => {
+    // the word cut (P523): the quiet spinner in the pressed button's place, named by the start's words
+    it('starting: the quiet spinner above whatever body there is, and no button', async () => {
       setRecord();
       const { rerender } = render(frame({ state: 'starting', readAt: Date.now() }));
-      expect(screen.getByText('Starting…')).toBeTruthy();
+      expect(await screen.findByRole('progressbar', { name: 'Starting…' })).toBeTruthy();
+      expect(screen.queryByText('Starting…')).toBeNull();
       expect(screen.getByText('the body')).toBeTruthy();
       expect(screen.queryByRole('button', { name: /Load now|Refresh/ })).toBeNull();
       rerender(frame({ state: 'starting' }));
       expect(screen.queryByText('the body')).toBeNull();
+    });
+
+    // The M4 picture review: the line keeps the pressed button's height while the start runs, so what is below does not
+    // move; its box stands from the press, through the spinner's quiet half second (layout itself is the e2e's,
+    // sessions-available.spec.ts). The glyph's square for Refresh, one line of the line's text for Load now.
+    it('starting: the wait holds the pressed button’s box from the first moment', () => {
+      setRecord();
+      const { rerender } = render(frame({ state: 'dormant', readAt: Date.now() }));
+      const glyphBox = screen.getByRole('button', { name: 'Refresh' }).className.split(' ').find((name) => name.startsWith('size-'));
+      rerender(frame({ state: 'starting', readAt: Date.now() }));
+      const wait = document.querySelector<HTMLElement>('[data-dormant-gesture] [data-gesture-wait]')!;
+      expect(screen.queryByRole('progressbar')).toBeNull(); // the spinner's quiet
+      expect(wait.classList.contains(glyphBox!)).toBe(true);
+      rerender(frame({ state: 'starting' }));
+      expect(document.querySelector('[data-dormant-gesture] [data-gesture-wait]')!.classList.contains('h-[1lh]')).toBe(true);
     });
 
     it('unavailable: a terminal holding it offers the holder’s actions in place of Load now; an archive offers nothing; a refusal offers Load now again', () => {
@@ -224,12 +248,12 @@ describe('WidgetFrame: the library size', () => {
       </WidgetFrame>,
     );
 
-  it('draws the title once, the heading after it and the toolbar before the /name and the close button', () => {
+  it('draws the title once, the heading after it and the toolbar before the close button', () => {
     library(() => {});
     const frame = document.querySelector<HTMLElement>('[data-widget="plugins"]')!;
     expect(frame.querySelectorAll('h3')).toHaveLength(1);
     const head = frame.querySelector('header')!;
-    const order = ['Plugins', 'the switch', 'Search plugins', 'Show', '/plugins', 'Close Plugins'].map((text) => [...head.querySelectorAll('*')].findIndex((el) => el.textContent === text || el.getAttribute('aria-label') === text));
+    const order = ['Plugins', 'the switch', 'Search plugins', 'Show', 'Close Plugins'].map((text) => [...head.querySelectorAll('*')].findIndex((el) => el.textContent === text || el.getAttribute('aria-label') === text));
     expect(order.every((at) => at >= 0)).toBe(true);
     expect([...order].sort((a, b) => a - b)).toEqual(order);
     expect(frame.getAttribute('data-widget-size')).toBe('library');

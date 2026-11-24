@@ -19,7 +19,7 @@ import { useSessions } from '../../stores/sessions';
 import { resetShellStores } from '../../test-support/shell-stores';
 import type { HookResult } from '../setup-intent';
 import type { ProjectRowBinding } from './bindings';
-import { matchesProject, NO_PROJECT_LABEL, PLACE_WORDS, ProjectRow, recentProjects } from './ProjectRow';
+import { matchesProject, NO_PROJECT, NO_PROJECT_LABEL, PLACE_WORDS, ProjectRow, recentProjects } from './ProjectRow';
 
 // P5 O6 M2: the page holds addresses; the picker lists this machine's projects (M5)
 const ALPHA = at('alpha' as ProjectId);
@@ -67,7 +67,7 @@ describe('the project row', () => {
   it('reads "Choose a project" with a waiting dot and no branch or checkbox until one is chosen', () => {
     render(<ProjectRow binding={binding()} />);
     const chip = screen.getByRole('button', { name: 'Choose a project' });
-    expect(chip.title).toBe('Select a project to run your chat in');
+    expect(chip.title, 'the word cut (C65): no tooltip before a choice').toBe('');
     expect(chip.querySelector('.bg-fg-faint')).not.toBeNull();
     expect(screen.queryByRole('checkbox')).toBeNull();
     expect(screen.queryByLabelText(/^Branch /)).toBeNull();
@@ -75,7 +75,7 @@ describe('the project row', () => {
 
   // UX wave U4a M6 (l3-input-07; decision 24): two projects named alike each show, dimmed in the folder name's place, the
   // part of the path that tells them apart; every row's title is its whole path
-  it('lists the projects most recently active first, the folder beside a name it differs from, then New project and Don’t work in a project', async () => {
+  it('lists the projects most recently active first, the folder beside a name it differs from, then New project and No project', async () => {
     const delta = at('delta' as ProjectId);
     useSessions.setState({ projects: new Map([...useSessions.getState().projects, [delta, project(delta, 4, { name: 'Delta', directory: '/work/delta-app', createdAt: '2025-12-01T00:00:00.000Z' })]]) });
     const b = binding();
@@ -83,7 +83,7 @@ describe('the project row', () => {
     await userEvent.setup().click(screen.getByRole('button', { name: 'Choose a project' }));
     expect(within(menu()).getByPlaceholderText('Search projects')).toBeTruthy();
     // the two Alphas: the part of the path that tells them apart, in the folder's place
-    expect(rows()).toEqual(['beta', 'Alphawork', 'Alphaelsewhere', 'Deltadelta-app', 'New project', "Don't work in a project"]);
+    expect(rows()).toEqual(['beta', 'Alphawork', 'Alphaelsewhere', 'Deltadelta-app', 'New project', 'No project']); // the word cut (C70)
     const options = within(menu()).getAllByRole('option');
     expect(options.slice(0, 4).map((o) => o.title)).toEqual(['/work/beta', '/work/alpha', '/elsewhere/alpha-two', '/work/delta-app']);
     expect(within(options[1]!).getByText('work').className).toContain('text-fg-muted'); // dimmed
@@ -102,7 +102,7 @@ describe('the project row', () => {
     });
     render(<ProjectRow binding={binding()} />);
     await userEvent.setup().click(screen.getByRole('button', { name: 'Choose a project' }));
-    expect(rows()).toEqual(['repox', 'repoy', 'New project', "Don't work in a project"]);
+    expect(rows()).toEqual(['repox', 'repoy', 'New project', NO_PROJECT]);
   });
 
   // M6 re-review: with a third namesake whose parent part alone would read "x" too, every row of the name is told apart
@@ -119,7 +119,7 @@ describe('the project row', () => {
     });
     render(<ProjectRow binding={binding()} />);
     await userEvent.setup().click(screen.getByRole('button', { name: 'Choose a project' }));
-    expect(rows()).toEqual(['repox', 'repoy', 'reporepo', 'New project', "Don't work in a project"]);
+    expect(rows()).toEqual(['repox', 'repoy', 'reporepo', 'New project', NO_PROJECT]);
   });
 
   it('searches names and paths, says when nothing matches, and chooses a project, a new one or none', async () => {
@@ -128,7 +128,7 @@ describe('the project row', () => {
     const user = userEvent.setup();
     await user.click(screen.getByRole('button', { name: 'Choose a project' }));
     await user.type(within(menu()).getByPlaceholderText('Search projects'), 'elsewhere');
-    expect(rows()).toEqual(['Alphaelsewhere', 'New project', "Don't work in a project"]);
+    expect(rows()).toEqual(['Alphaelsewhere', 'New project', NO_PROJECT]);
     await user.clear(within(menu()).getByPlaceholderText('Search projects'));
     await user.type(within(menu()).getByPlaceholderText('Search projects'), 'zzz');
     expect(within(menu()).getByText('No projects found')).toBeTruthy();
@@ -140,7 +140,7 @@ describe('the project row', () => {
     await user.click(within(menu()).getByRole('option', { name: 'New project' }));
     expect(b.newProject).toHaveBeenCalledTimes(1);
     await user.click(screen.getByRole('button', { name: 'Choose a project' }));
-    await user.click(within(menu()).getByRole('option', { name: "Don't work in a project" }));
+    await user.click(within(menu()).getByRole('option', { name: NO_PROJECT }));
     expect(b.choose).toHaveBeenLastCalledWith(null);
   });
 
@@ -169,7 +169,7 @@ describe('the project row', () => {
 
   it.each([
     ['New project', '{End}{ArrowUp}'],
-    ["Don't work in a project", '{End}'],
+    [NO_PROJECT, '{End}'],
   ])('reaches %s with the keyboard and selects it with Enter', async (name, keys) => {
     const b = binding();
     render(<ProjectRow binding={b} />);
@@ -198,7 +198,7 @@ describe('the project row', () => {
     const b = binding({ projectId: ALPHA, label: 'Alpha', path: '/work/alpha', branch: 'main', worktree: false });
     render(<ProjectRow binding={b} />);
     const chip = screen.getByRole('button', { name: 'Project Alpha' });
-    expect(chip.title).toBe('/work/alpha · Change the project for this chat');
+    expect(chip.title, 'the word cut (C65): the chosen folder').toBe('/work/alpha');
     expect(chip.querySelector('.bg-success')).not.toBeNull();
     expect(screen.getByLabelText('Branch main').textContent).toBe('⎇ main');
     const user = userEvent.setup();
@@ -209,12 +209,12 @@ describe('the project row', () => {
     expect(current.map((o) => o.title || o.textContent)).toEqual(['/work/alpha']);
   });
 
-  it('hides Don’t work in a project once no project is the choice, and shows a refused write', async () => {
+  it('hides No project once no project is the choice, and shows a refused write', async () => {
     const b = binding({ label: 'No project', path: '/Users/someone', choose: vi.fn(async () => ({ ok: false as const, error: 'projectId: unknown project beta' })) });
     render(<ProjectRow binding={b} />);
     const user = userEvent.setup();
     await user.click(screen.getByRole('button', { name: 'Project No project' }));
-    expect(rows()).not.toContain("Don't work in a project");
+    expect(rows()).not.toContain(NO_PROJECT);
     await user.click(within(menu()).getByRole('option', { name: 'beta' }));
     expect(screen.getByRole('alert').textContent).toBe('projectId: unknown project beta');
     expect(menu()).toBeTruthy(); // stays open on a refusal
@@ -233,9 +233,9 @@ describe('the project row', () => {
   it('lists the additional directories read-only in the chip’s tooltip and its menu, and nothing when there are none', async () => {
     const b = binding({ projectId: ALPHA, label: 'Alpha', path: '/work/alpha' });
     const { rerender } = render(<ProjectRow binding={b} />);
-    expect(screen.getByRole('button', { name: 'Project Alpha' }).title).toBe('/work/alpha · Change the project for this chat');
+    expect(screen.getByRole('button', { name: 'Project Alpha' }).title).toBe('/work/alpha');
     rerender(<ProjectRow binding={b} directories={['/work/shared', '/Users/someone/notes']} />);
-    expect(screen.getByRole('button', { name: 'Project Alpha' }).title).toBe('/work/alpha · Change the project for this chat\n\nAdditional directories\n/work/shared\n~/notes');
+    expect(screen.getByRole('button', { name: 'Project Alpha' }).title).toBe('/work/alpha\n\nAdditional directories\n/work/shared\n~/notes');
     await userEvent.setup().click(screen.getByRole('button', { name: 'Project Alpha' }));
     const list = within(menu()).getByRole('list', { name: 'Additional directories' });
     expect(within(list).getAllByRole('listitem').map((li) => [li.textContent, li.title])).toEqual([
@@ -273,7 +273,7 @@ describe('the project row on another machine', () => {
 
   // The UX wave, U9 (O-39, A1; M5): the machine's projects show as they answer, the folder read holding nothing back;
   // the two choices that need it wait for it
-  it('lists the machine’s projects before its folders answer, New project and Don’t work in a project disabled until they do', async () => {
+  it('lists the machine’s projects before its folders answer, New project and No project disabled until they do', async () => {
     roster();
     let folders: (value: unknown) => void = () => {};
     vi.spyOn(ipc, 'invoke').mockImplementation((async (name: string) => {
@@ -285,10 +285,29 @@ describe('the project row on another machine', () => {
     render(<ProjectRow binding={binding()} appSessionId={TAB} />);
     const user = userEvent.setup();
     await user.click(screen.getByRole('button', { name: 'Choose a project' }));
-    await vi.waitFor(() => expect(rows()).toEqual(['notes', 'New project', "Don't work in a project"]));
+    await vi.waitFor(() => expect(rows()).toEqual(['notes', 'New project', NO_PROJECT]));
     expect(within(menu()).getAllByRole('option').slice(1).map((o) => o.getAttribute('aria-disabled'))).toEqual(['true', 'true']);
     await act(async () => folders({ ok: true, value: HOME_PAGE }));
     await vi.waitFor(() => expect(within(menu()).getAllByRole('option').slice(1).map((o) => o.getAttribute('aria-disabled'))).toEqual(['false', 'false']));
+  });
+
+  // Fix round 1 of the word cut's M4 task 1 (N181): while the machine's projects are read, a quiet spinner their words
+  // name, gone once they answer
+  it('reads the machine’s projects under a quiet spinner, gone once they answer', async () => {
+    roster();
+    let projects: (value: unknown) => void = () => {};
+    vi.spyOn(ipc, 'invoke').mockImplementation((async (name: string) => {
+      if (name === 'session.projects.list') return new Promise((resolve) => (projects = resolve));
+      if (name === 'machine.folders.list') return { ok: true, value: HOME_PAGE };
+      return { ok: false, error: { code: 'internal', message: `unexpected ${name}` } };
+    }) as never);
+    onMini();
+    render(<ProjectRow binding={binding()} appSessionId={TAB} />);
+    await userEvent.setup().click(screen.getByRole('button', { name: 'Choose a project' }));
+    expect(await within(menu()).findByRole('progressbar', { name: SETUP_WORDS.reading('mini') }, { timeout: 2000 })).toBeTruthy();
+    expect(menu().textContent).not.toContain(SETUP_WORDS.reading('mini'));
+    await act(async () => projects({ ok: true, value: { projects: [theirs('notes', 'notes', '/Users/mini/notes')], revision: 1 } }));
+    await vi.waitFor(() => expect(within(menu()).queryByRole('progressbar')).toBeNull());
   });
 
   it('reads Choose a project there, lists that machine’s projects newest first, and a choice is the place there, no branch or Worktree box', async () => {
@@ -297,17 +316,18 @@ describe('the project row on another machine', () => {
     onMini();
     render(<ProjectRow binding={binding({ projectId: ALPHA, label: 'Alpha', path: '/work/alpha', branch: 'main', worktree: false })} appSessionId={TAB} />);
     const chip = screen.getByRole('button', { name: 'Choose a project' });
-    expect(chip.title).toBe(PLACE_WORDS.choose('mini'));
+    expect(chip.title, 'C65: no tooltip before a place is chosen there').toBe('');
     expect(screen.queryByLabelText(/^Branch /)).toBeNull();
     expect(screen.queryByRole('checkbox')).toBeNull();
     const user = userEvent.setup();
     await user.click(chip);
-    await vi.waitFor(() => expect(rows()).toEqual(['app', 'notes', 'New project', "Don't work in a project"])); // app's sessions none here: by when each was added
+    await vi.waitFor(() => expect(rows()).toEqual(['app', 'notes', 'New project', NO_PROJECT])); // app's sessions none here: by when each was added
     expect(invoke).toHaveBeenCalledWith('session.projects.list', undefined, { machine: OTHER_MACHINE });
     expect(invoke).toHaveBeenCalledWith('machine.folders.list', {}, { machine: OTHER_MACHINE });
     await user.click(within(menu()).getByRole('option', { name: 'notes' }));
     expect(spawnTargetOf(TAB, null)).toEqual({ machine: OTHER_MACHINE, name: 'mini', checkout: '/Users/mini/notes', key: null, label: 'notes' });
-    expect(screen.getByRole('button', { name: 'Project notes' }).title).toBe(PLACE_WORDS.change('notes', 'mini'));
+    expect(screen.getByRole('button', { name: 'Project notes' }).title).toBe(PLACE_WORDS.chosen('notes', 'mini'));
+    expect(PLACE_WORDS.chosen('notes', 'mini')).toBe('notes on mini');
   });
 
   it('tells two of that machine’s projects of one name apart by the part of their path, and titles every row with its path', async () => {
@@ -320,7 +340,7 @@ describe('the project row on another machine', () => {
     onMini();
     render(<ProjectRow binding={binding()} appSessionId={TAB} />);
     await userEvent.setup().click(screen.getByRole('button', { name: 'Choose a project' }));
-    await vi.waitFor(() => expect(rows()).toEqual(['siteplay', 'sitework', 'notes', 'New project', "Don't work in a project"]));
+    await vi.waitFor(() => expect(rows()).toEqual(['siteplay', 'sitework', 'notes', 'New project', NO_PROJECT]));
     expect(within(menu()).getAllByRole('option').slice(0, 3).map((o) => o.title)).toEqual(['~/play/site', '~/work/site', '~/notes']);
   });
 
@@ -334,7 +354,7 @@ describe('the project row on another machine', () => {
     onMini();
     render(<ProjectRow binding={binding()} appSessionId={TAB} />);
     await userEvent.setup().click(screen.getByRole('button', { name: 'Choose a project' }));
-    await vi.waitFor(() => expect(rows()).toEqual(['repox', 'repoy', 'New project', "Don't work in a project"]));
+    await vi.waitFor(() => expect(rows()).toEqual(['repox', 'repoy', 'New project', NO_PROJECT]));
   });
 
   it('keeps every row of a shared name there distinct when some of their parent parts tie', async () => {
@@ -347,34 +367,34 @@ describe('the project row on another machine', () => {
     onMini();
     render(<ProjectRow binding={binding()} appSessionId={TAB} />);
     await userEvent.setup().click(screen.getByRole('button', { name: 'Choose a project' }));
-    await vi.waitFor(() => expect(rows()).toEqual(['repox', 'repoy', 'reporepo', 'New project', "Don't work in a project"]));
+    await vi.waitFor(() => expect(rows()).toEqual(['repox', 'repoy', 'reporepo', 'New project', NO_PROJECT]));
   });
 
-  it('takes the home for Don’t work in a project, and opens that machine’s folder sheet for New project', async () => {
+  it('takes the home for No project, and opens that machine’s folder sheet for New project', async () => {
     roster();
     answer();
     onMini();
     render(<ProjectRow binding={binding()} appSessionId={TAB} />);
     const user = userEvent.setup();
     await user.click(screen.getByRole('button', { name: 'Choose a project' }));
-    await vi.waitFor(() => expect(within(menu()).getByRole('option', { name: "Don't work in a project" }).getAttribute('aria-disabled')).toBe('false'));
-    await user.click(within(menu()).getByRole('option', { name: "Don't work in a project" }));
+    await vi.waitFor(() => expect(within(menu()).getByRole('option', { name: NO_PROJECT }).getAttribute('aria-disabled')).toBe('false'));
+    await user.click(within(menu()).getByRole('option', { name: NO_PROJECT }));
     expect(spawnTargetOf(TAB, null)).toEqual({ machine: OTHER_MACHINE, name: 'mini', checkout: HOME_CHECKOUT, key: null, label: NO_PROJECT_LABEL });
     await user.click(screen.getByRole('button', { name: `Project ${NO_PROJECT_LABEL}` }));
     await vi.waitFor(() => expect(within(menu()).getByRole('option', { name: 'New project' }).getAttribute('aria-disabled')).toBe('false'));
-    expect(rows()).not.toContain("Don't work in a project"); // the choice already
+    expect(rows()).not.toContain(NO_PROJECT); // the choice already
     await user.click(within(menu()).getByRole('option', { name: 'New project' }));
     expect(useDialogs.getState().open).toEqual({ kind: 'remoteSetup', request: { kind: 'folder', tab: TAB, machine: OTHER_MACHINE, name: 'mini', key: null, home: '/Users/mini', first: HOME_PAGE, suggestions: [] } });
   });
 
-  it('greys New project and Don’t work in a project with why: not its owner, or an endpoint that predates a chat in its home', async () => {
+  it('greys New project and No project with why: not its owner, or an endpoint that predates a chat in its home', async () => {
     roster();
     answer(false);
     onMini();
     const { unmount } = render(<ProjectRow binding={binding()} appSessionId={TAB} />);
     const user = userEvent.setup();
     await user.click(screen.getByRole('button', { name: 'Choose a project' }));
-    await vi.waitFor(() => expect(rows()).toEqual(['app', 'notes', `New project${SETUP_WORDS.notOwner('mini')}`, `Don't work in a project${SETUP_WORDS.homeNotOwner('mini')}`]));
+    await vi.waitFor(() => expect(rows()).toEqual(['app', 'notes', `New project${SETUP_WORDS.notOwner('mini')}`, `${NO_PROJECT}${SETUP_WORDS.homeNotOwner('mini')}`]));
     expect(within(menu()).getAllByRole('option').slice(2).map((o) => o.getAttribute('aria-disabled'))).toEqual(['true', 'true']);
     unmount();
     roster(['rl2.feeds']);
@@ -382,7 +402,7 @@ describe('the project row on another machine', () => {
     answer();
     render(<ProjectRow binding={binding()} appSessionId={TAB} />);
     await user.click(screen.getByRole('button', { name: 'Choose a project' }));
-    await vi.waitFor(() => expect(rows().at(-1)).toBe(`Don't work in a project${SPAWN_WORDS.noHome('mini')}`));
+    await vi.waitFor(() => expect(rows().at(-1)).toBe(`${NO_PROJECT}${SPAWN_WORDS.noHome('mini')}`));
     expect(within(menu()).getByRole('option', { name: 'New project' }).getAttribute('aria-disabled')).toBe('false');
   });
 
@@ -396,7 +416,7 @@ describe('the project row on another machine', () => {
     expect(screen.getByLabelText('Branch main')).toBeTruthy();
     expect(screen.getByRole('checkbox', { name: 'Worktree' })).toBeTruthy();
     await userEvent.setup().click(screen.getByRole('button', { name: 'Project Alpha' }));
-    await vi.waitFor(() => expect(rows()).toEqual(['app✓', 'notes', 'New project', "Don't work in a project"]));
+    await vi.waitFor(() => expect(rows()).toEqual(['app✓', 'notes', 'New project', NO_PROJECT]));
   });
 
   it('names the place there, and gives the local row and menu back once This Mac is chosen again', async () => {
@@ -409,7 +429,7 @@ describe('the project row on another machine', () => {
     expect(screen.getByRole('button', { name: 'Project Alpha' })).toBeTruthy();
     expect(screen.getByLabelText('Branch main')).toBeTruthy();
     await userEvent.setup().click(screen.getByRole('button', { name: 'Project Alpha' }));
-    expect(rows()).toEqual(['beta', 'Alphawork✓', 'Alphaelsewhere', 'New project', "Don't work in a project"]);
+    expect(rows()).toEqual(['beta', 'Alphawork✓', 'Alphaelsewhere', 'New project', NO_PROJECT]);
   });
 });
 

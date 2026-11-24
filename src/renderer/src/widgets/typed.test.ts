@@ -50,7 +50,7 @@ const setStatus = (patch: Partial<EngineSessionStatus>) => useSessions.setState(
 describe('model', () => {
   it('/model opus applies set_model and toasts the widget’s words', async () => {
     expect(await TYPED_APPLY.model!(READY, 'opus')).toBe(true);
-    await toastSoon().toEqual([['info', 'Model · Opus 5.5 (1M context) · set · the next init frame confirms it']]);
+    await toastSoon().toEqual([['info', 'Model · Opus 5.5 (1M context)']]);
     expect(controls('session.setModel')).toEqual([{ appSessionId: READY_ID, model: 'opus' }]);
   });
 
@@ -66,11 +66,11 @@ describe('model', () => {
   it('/model haiku in auto appends the widget’s Cannot hold auto mode caption to its toast', async () => {
     setStatus({ permissionMode: { requested: 'auto', effective: 'auto', refusal: null } });
     expect(await TYPED_APPLY.model!(READY, 'haiku')).toBe(true);
-    await toastSoon().toEqual([['info', 'Model · Haiku · set · the next init frame confirms it · Cannot hold auto mode']]);
+    await toastSoon().toEqual([['info', 'Model · Haiku · Cannot hold auto mode']]);
     useNotices.setState({ notices: [] });
     setStatus({ permissionMode: { requested: 'default', effective: 'default', refusal: null } });
     expect(await TYPED_APPLY.model!(READY, 'haiku')).toBe(true);
-    await toastSoon().toEqual([['info', 'Model · Haiku · set · the next init frame confirms it']]);
+    await toastSoon().toEqual([['info', 'Model · Haiku']]);
   });
 
   // M4 fix wave re-review, carried Minor: the editor stops waiting after a short bound and opens the widget, so a
@@ -99,8 +99,8 @@ describe('effort', () => {
     expect(await TYPED_APPLY.effort!(READY, 'high')).toBe(true);
     expect(await TYPED_APPLY.effort!(READY, 'auto')).toBe(true);
     await toastSoon().toEqual([
-      ['info', 'Effort · high · set · the next init frame confirms it'],
-      ['info', "Effort · the model's default · set · the next init frame confirms it"],
+      ['info', 'Effort · high'],
+      ['info', "Effort · the model's default"],
     ]);
     expect(controls('session.setEffort')).toEqual([{ appSessionId: READY_ID, effort: 'high' }, { appSessionId: READY_ID, effort: null }]);
   });
@@ -144,7 +144,7 @@ describe('fast', () => {
   it('/fast off on Opus applies apply_flag_settings { fastMode: false }', async () => {
     setStatus({ model: { requested: 'opus', resolved: 'claude-opus-5-5[1m]' } });
     expect(await TYPED_APPLY.fast!(READY, 'off')).toBe(true);
-    await toastSoon().toEqual([['info', 'Fast mode · off · set · the next init frame confirms it']]);
+    await toastSoon().toEqual([['info', 'Fast mode · off']]);
     expect(controls('session.applyFlagSettings')).toEqual([{ appSessionId: READY_ID, settings: { fastMode: false } }]);
   });
 

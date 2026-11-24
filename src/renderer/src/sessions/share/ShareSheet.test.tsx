@@ -120,7 +120,11 @@ describe('the sheet', () => {
         policyRev: 7,
       },
     ]);
-    expect(within(sheet).getByRole('button', { name: SHARE.saving })).toBeTruthy();
+    // the word cut (N178): Save keeps its word while the change goes, busy, with a quiet spinner named by the wait
+    const save = within(sheet).getByRole('button', { name: /^Save\b/ });
+    expect(save.getAttribute('aria-busy')).toBe('true');
+    expect(within(save).getByText(SHARE.save)).toBeTruthy();
+    expect(await within(save).findByRole('progressbar', { name: SHARE.saving })).toBeTruthy();
   });
 
   it('shows each pending line in the order it sends them, a removal kept in its place until saved', async () => {
@@ -284,6 +288,17 @@ describe("the sheet's reader", () => {
 });
 
 describe('what the sheet cannot offer', () => {
+  // the word cut (N177): the read is a quiet spinner named by its words, never a line of them
+  it('shows a quiet spinner while it reads its reach', async () => {
+    install({});
+    const sheet = await open();
+    expect(within(sheet).queryByText(SHARE.reading)).toBeNull();
+    expect(await within(sheet).findByRole('progressbar', { name: SHARE.reading })).toBeTruthy();
+    await fake.reply('org.policy.get', read([entry()]));
+    await within(sheet).findByText(SHARE.general);
+    expect(within(sheet).queryByRole('progressbar')).toBeNull();
+  });
+
   it("says the machine's sminos can't keep a session's reach yet and names the remedy (board 523), and offers nothing", async () => {
     install({ 'org.policy.get': { ok: true, machine: OTHER_MACHINE, supported: false } satisfies OrgPolicy });
     const sheet = await open();

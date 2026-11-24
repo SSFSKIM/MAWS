@@ -101,6 +101,11 @@ export const FolderIcon = ({ className }: { className?: string }) => (
     <path d="M2 4h5l1.5 2H14v7H2z" />
   </Icon>
 );
+export const FileIcon = ({ className }: { className?: string }) => (
+  <Icon className={className}>
+    <path d="M3.5 2h6l3 3v9h-9zM9.5 2v3h3" />
+  </Icon>
+);
 export const SearchIcon = ({ className }: { className?: string }) => (
   <Icon className={className}>
     <circle cx="7" cy="7" r="4.5" />

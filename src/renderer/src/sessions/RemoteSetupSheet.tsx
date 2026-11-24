@@ -1,7 +1,7 @@
 // The remote setup's sheet (P5 O7 M9, docs/doperpowers/plans/2026-10-28-p5-o7-remote-lane-b.md, "Remote setup";
 // remote-setup.ts for the reads and the act). For a project with no checkout on the chosen machine: which of its folders
-// holds it, warned first that a private folder may raise a privacy prompt there, the other checkouts' paths listed first,
-// then the machine's home a page at a time; the chosen folder's trust read there, its trust card shown when it isn't
+// holds it (the word cut, W166: no paragraph first; the privacy warning comes when a private folder is opened), the
+// other checkouts' paths listed first, then the machine's home a page at a time (N175: a quiet spinner while it is read); the chosen folder's trust read there, its trust card shown when it isn't
 // trusted (accepted, the spawn carries `trust: 'accepted'`), then the folder registered (Touch ID) and the New chat tab
 // pointed at it. For a registered checkout the machine refused untrusted at Send: its trust card alone, then the Send
 // again. Every step has a way back or out; a refusal is said in words and leaves the sheet where it was.
@@ -9,12 +9,13 @@
 // or not, becomes a project of its own and the tab's place there (its project's name on the chip); the other checkouts'
 // paths are suggested when the tab's local project has an org project. The trust card of the machine's home (a chat in no
 // project there, `~`) reads that home's trust by its name.
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { FolderEntry } from '@shared/ipc/schema/machine';
 import type { TrustState } from '@shared/sessions/trust';
 import { closeDialog, useDialogs } from './dialogs';
 import { useRemoteSpawn, type SpawnTarget } from './remote-spawn';
 import { checkTrust, listFolders, registerFolder, SETUP_WORDS, type FolderPage, type SetupRequest } from './remote-setup';
+import { QuietSpinner } from '../ui/spinner';
 import { Sheet } from './Sheet';
 import { TrustCard } from './TrustCard';
 import { PRIMARY, QUIET, SECONDARY } from './ui';
@@ -23,7 +24,7 @@ type FolderRequest = Extract<SetupRequest, { kind: 'folder' }>;
 type Step =
   | { kind: 'browse' }
   | { kind: 'confirmOpen'; entry: FolderEntry }
-  | { kind: 'busy'; words: string }
+  | { kind: 'busy'; words: string; quiet: boolean } // quiet: a read, under the quiet spinner its words name (N182); else the words stand (Touch ID's)
   | { kind: 'trust'; directory: string; trust: TrustState };
 
 const within = (path: string, root: string) => path === root || path.startsWith(`${root}/`);
@@ -69,7 +70,15 @@ function TrustSetup({ request }: { request: Extract<SetupRequest, { kind: 'trust
         <TrustCard trust={trust} busy={false} acceptLabel={SETUP_WORDS.trustAndStart} onAccept={accept} onDecline={closeDialog} />
       ) : (
         <div className="flex flex-col gap-3">
-          {error === null ? <p className="m-0 text-fg-muted">{SETUP_WORDS.checking(target.name)}</p> : <Alert words={error} />}
+          {error !== null ? (
+            <Alert words={error} />
+          ) : (
+            target.checkout !== null && ( // N182: the read's quiet spinner, standing only while the read is out
+              <div className="flex">
+                <QuietSpinner label={SETUP_WORDS.checking(target.name)} />
+              </div>
+            )
+          )}
           <div className="flex justify-end">
             <button type="button" className={SECONDARY} onClick={closeDialog}>
               {SETUP_WORDS.close}
@@ -84,7 +93,9 @@ function TrustSetup({ request }: { request: Extract<SetupRequest, { kind: 'trust
 function FolderSetup({ request }: { request: FolderRequest }) {
   const { machine, name, home } = request;
   const [path, setPath] = useState<string | null>(null); // the folder shown; null: the home
-  const [page, setPage] = useState<FolderPage | null>(request.first);
+  const [page, setPage] = useState<FolderPage>(request.first);
+  const reads = useRef(0); // the folder reads out: the page shown stays while one is, under the quiet spinner (N175)
+  const [reading, setReading] = useState(false);
   const [opened, setOpened] = useState<readonly string[]>([]); // the private folders the person opened
   const [step, setStep] = useState<Step>({ kind: 'browse' });
   const [error, setError] = useState<string | null>(null);
@@ -93,10 +104,14 @@ function FolderSetup({ request }: { request: FolderRequest }) {
   const show = async (next: string | null, open = opened, cursor?: string) => {
     setError(null);
     const inside = next !== null && open.some((root) => within(next, root));
+    reads.current += 1;
+    setReading(true);
     const read = await listFolders(machine, name, { path: next, ...(inside && { open: true }), ...(cursor !== undefined && { cursor }) });
+    reads.current -= 1;
+    if (reads.current === 0) setReading(false);
     if (!read.ok) return setError(read.words);
     setPath(next);
-    setPage((before) => (cursor !== undefined && before !== null ? { entries: [...before.entries, ...read.page.entries], cursor: read.page.cursor } : read.page));
+    setPage((before) => (cursor !== undefined ? { entries: [...before.entries, ...read.page.entries], cursor: read.page.cursor } : read.page));
   };
   const enter = (entry: FolderEntry) => {
     if (entry.protected && !opened.some((root) => within(entry.path, root))) setStep({ kind: 'confirmOpen', entry });
@@ -117,7 +132,7 @@ function FolderSetup({ request }: { request: FolderRequest }) {
   // the chosen folder: its trust read there, its card when it isn't trusted, then registered
   const use = async (directory: string) => {
     setError(null);
-    setStep({ kind: 'busy', words: SETUP_WORDS.checking(name) });
+    setStep({ kind: 'busy', words: SETUP_WORDS.checking(name), quiet: true });
     const read = await checkTrust(machine, name, directory);
     if (!showing(request)) return;
     if (!read.ok) return fail(read.words);
@@ -126,7 +141,7 @@ function FolderSetup({ request }: { request: FolderRequest }) {
   };
   const register = async (directory: string, accepted: boolean) => {
     if (!showing(request)) return;
-    setStep({ kind: 'busy', words: SETUP_WORDS.registering(name) });
+    setStep({ kind: 'busy', words: SETUP_WORDS.registering(name), quiet: false });
     const added = await registerFolder(machine, name, directory);
     if (!showing(request)) return;
     if (!added.ok) return fail(added.words);
@@ -150,7 +165,6 @@ function FolderSetup({ request }: { request: FolderRequest }) {
   return (
     <Sheet title={SETUP_WORDS.title(name)} width="w-[min(480px,90vw)]">
       <div className="flex flex-col gap-3">
-        <p className="m-0 text-ui-sm text-fg-muted">{SETUP_WORDS.privacy(name)}</p>
         {step.kind === 'confirmOpen' ? (
           <>
             <p className="m-0">{SETUP_WORDS.openPrivate(label(step.entry.path), name)}</p>
@@ -177,6 +191,7 @@ function FolderSetup({ request }: { request: FolderRequest }) {
             )}
             <div className="flex items-center gap-2">
               <span className="min-w-0 flex-1 truncate font-mono text-ui-sm">{path === null ? SETUP_WORDS.home : label(path)}</span>
+              {reading && error === null && <QuietSpinner label={SETUP_WORDS.loading} />}
               {path !== null && (
                 <button type="button" className={QUIET} disabled={step.kind === 'busy'} onClick={up}>
                   {SETUP_WORDS.up}
@@ -184,9 +199,7 @@ function FolderSetup({ request }: { request: FolderRequest }) {
               )}
             </div>
             <ul aria-label={`Folders on ${name}`} className="m-0 flex max-h-[min(280px,40vh)] list-none flex-col overflow-y-auto rounded-sm border border-border p-1">
-              {page === null ? (
-                <li className="px-2 py-1 text-ui-sm text-fg-muted">{SETUP_WORDS.loading}</li>
-              ) : page.entries.length === 0 ? (
+              {page.entries.length === 0 ? (
                 <li className="px-2 py-1 text-ui-sm text-fg-muted">{SETUP_WORDS.empty}</li>
               ) : (
                 page.entries.map((entry) => (
@@ -199,16 +212,21 @@ function FolderSetup({ request }: { request: FolderRequest }) {
                 ))
               )}
             </ul>
-            {page?.cursor != null && (
+            {page.cursor !== null && (
               <button type="button" className={`${QUIET} self-start`} onClick={() => void show(path, opened, page.cursor!)}>
                 {SETUP_WORDS.more}
               </button>
             )}
-            {step.kind === 'busy' && (
-              <p role="status" className="m-0 text-ui-sm text-fg-muted">
-                {step.words}
-              </p>
-            )}
+            {step.kind === 'busy' &&
+              (step.quiet ? (
+                <div className="flex">
+                  <QuietSpinner label={step.words} />
+                </div>
+              ) : (
+                <p role="status" className="m-0 text-ui-sm text-fg-muted">
+                  {step.words}
+                </p>
+              ))}
             {error !== null && <Alert words={error} />}
             <div className="flex items-center justify-end gap-2">
               <button type="button" className={SECONDARY} onClick={closeDialog}>

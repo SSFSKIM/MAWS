@@ -327,7 +327,7 @@ describe('Customize › Discover › All', () => {
 
   it('a card that reads Installed opens My items with its own kind chosen', async () => {
     mountCustomize({ view: 'discover', show: 'all' });
-    expect(within(await shelfCard(pilot)).getByText('Installed')).toBeTruthy();
+    expect(within(await shelfCard(pilot)).getByRole('img', { name: 'Installed' })).toBeTruthy(); // the word cut (G278)
     fireEvent.click(within(await shelfCard(pilot)).getByRole('button', { name: 'View pilot-notes' }));
     expect(where()).toEqual({ kind: 'customize', view: 'mine', show: 'plugins' });
     await found('[data-plugin-detail="pilot-notes@harbour-market"]');

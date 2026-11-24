@@ -51,6 +51,15 @@ describe('McpDriven', () => {
     expect(frame.textContent).not.toContain('A switch here');
   });
 
+  // P565: nothing reads this list again but a command of the dialog's own, so no spinner stands for a connecting server
+  it('says a connecting server’s status in words, since nothing here would end a spinner', async () => {
+    reads.readLaneA.mockResolvedValue({ ok: true, result: { exact: false, servers: [{ name: 'probe', status: 'pending', tools: 0 }] } });
+    render(<McpDriven appSessionId={ID} controls={controlsWith({}, vi.fn())} close={() => {}} />);
+    await waitFor(() => expect(document.querySelector('[data-mcp-server="probe"]')?.textContent).toContain('Connecting…'));
+    await new Promise((r) => setTimeout(r, 600)); // past the quiet spinner's delay
+    expect(screen.queryByRole('progressbar')).toBeNull();
+  });
+
   it('shows Disable disabled in place with its reason when the bridge cannot disable, and runs it when it can', async () => {
     const command = vi.fn(async (): Promise<ControlResult> => ({ state: 'done', result: { id: 'run-1' } }));
     render(<McpDriven appSessionId={ID} controls={controlsWith({ 'mcp.disable': DISABLE_GAP }, command)} close={() => {}} />);
@@ -62,6 +71,20 @@ describe('McpDriven', () => {
     render(<McpDriven appSessionId={ID} controls={controlsWith({}, command)} close={() => {}} />);
     fireEvent.click(await screen.findByRole('button', { name: 'Disable' }));
     await waitFor(() => expect(command).toHaveBeenCalledWith('mcp', 'disable probe'));
+  });
+
+  // the word cut (P576, P569): the list's partial reach in a few words, and the quiet spinner while a command runs
+  it('says the list is partial in a few words, and shows the quiet spinner, not "Working…", while a command runs', async () => {
+    let finish: (result: ControlResult) => void = () => {};
+    const command = vi.fn(() => new Promise<ControlResult>((resolve) => (finish = resolve)));
+    render(<McpDriven appSessionId={ID} controls={controlsWith({}, command)} close={() => {}} />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Reconnect' }));
+    expect(screen.getByText('Partial list · the terminal’s /mcp shows all')).toBeTruthy();
+    expect(await screen.findByRole('progressbar', { name: 'Working…' })).toBeTruthy();
+    expect(screen.queryByText('Working…')).toBeNull();
+    await act(async () => finish({ state: 'refused', code: 'x', message: 'no' }));
+    expect(screen.queryByRole('progressbar')).toBeNull();
+    expect(screen.getByRole('status').textContent).toBe('no');
   });
 
   it('sends one enable while one runs, Enter included', async () => {

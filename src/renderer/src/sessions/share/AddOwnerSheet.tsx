@@ -23,7 +23,7 @@ import { Sheet, SheetForm } from '../Sheet';
 import { displayTitle, listedTitle } from '../title';
 import { PRIMARY, SECONDARY } from '../ui';
 import { OWNER, ownerOutcomeWords, refusalWords, SHARE, subtitleTooltip } from './copy';
-import { readPolicy, SELECT, Words, type Read } from './ShareSheet';
+import { readPolicy, SELECT, ShareReading, Words, type Read } from './ShareSheet';
 
 const NO_OWNERS: readonly string[] = [];
 /** The person an owner line names (an owner add's one line is always one). */
@@ -110,7 +110,8 @@ function ReaderSheet({ address }: { address: AppSessionId }) {
       <SheetForm
         canSubmit={ready && chosen !== '' && !saving}
         onSubmit={() => void save()}
-        submitLabel={ready ? (saving ? OWNER.adding : OWNER.add) : undefined}
+        submitLabel={ready ? OWNER.add : undefined}
+        submitWait={saving ? OWNER.adding : null}
         submitClass={PRIMARY}
         cancelLabel={!ready || outcome !== null ? SHARE.close : undefined}
       >
@@ -118,7 +119,7 @@ function ReaderSheet({ address }: { address: AppSessionId }) {
           <span className="min-w-0 truncate">{title}</span>
           <span className="max-w-[50%] shrink-0 truncate whitespace-pre"> · {machine}</span>
         </div>
-        {read.state === 'reading' && said(SHARE.reading)}
+        {read.state === 'reading' && <ShareReading />}
         {read.state === 'unsupported' && said(SHARE.unsupported(machine))}
         {read.state === 'unavailable' && said(SHARE.unavailable, true)}
         {read.state === 'refused' && said(refusalWords(read.reason, machine), true)}
@@ -144,7 +145,6 @@ function ReaderSheet({ address }: { address: AppSessionId }) {
                 <Words {...ownerOutcomeWords(outcome, machine)} />
               </span>
             </p>
-            {outcome.state === 'done' && outcome.changed && <p className="m-0 text-fg-faint">{OWNER.relisted(machine)}</p>}
           </div>
         )}
         {refusal !== null && (

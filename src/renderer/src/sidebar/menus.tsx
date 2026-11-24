@@ -77,11 +77,12 @@ export function menuTargetOf(element: Element | null): MenuTarget | null {
 const ITEM =
   'flex h-7 cursor-default items-center rounded-sm px-2 outline-none select-none data-disabled:text-fg-faint data-highlighted:bg-bg-hover';
 
-// `why`: the sentence a disabled item is drawn with, in place of the unregistered words (the UX wave, U9).
+// `why`: the sentence a disabled item is drawn with (the UX wave, U9); the word cut (W68): an item with no reason of its
+// own says nothing, where it said "Not available here".
 function Item({ enabled, onSelect, children, dropdown = false, why = null }: { dropdown?: boolean; enabled: boolean; onSelect(): void; children: ReactNode; why?: string | null }) {
   const Component = dropdown ? DropdownMenu.Item : ContextMenu.Item;
   return (
-    <Component disabled={!enabled} onSelect={onSelect} title={enabled ? undefined : (why ?? 'Not available here')} className={ITEM}>
+    <Component disabled={!enabled} onSelect={onSelect} title={enabled ? undefined : (why ?? undefined)} className={ITEM}>
       {children}
     </Component>
   );

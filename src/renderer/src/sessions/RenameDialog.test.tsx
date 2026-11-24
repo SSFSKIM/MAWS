@@ -21,6 +21,7 @@ import { FIXTURE_DIR } from '../../../../test/support/fixtures';
 import { at } from '../../../../test/support/machine';
 import { recordedJoin } from '../../../../test/support/recorded-joins';
 import { useSessions } from '../stores/sessions';
+import { preloadOf } from '../test-support/preload-of';
 import { resetShellStores } from '../test-support/shell-stores';
 import { closeDialog, openDialog } from './dialogs';
 import { SessionDialogs } from './SessionDialogs';
@@ -59,6 +60,45 @@ afterEach(() => {
   act(() => closeDialog());
   cleanup();
   delete (window as { maws?: PreloadBridge }).maws;
+});
+
+// The word cut (N176): Regenerate keeps its word while the engine names the session, busy, with a quiet spinner in it
+it('Regenerate keeps its word while it waits, with a quiet spinner named by the wait', async () => {
+  await regenerateWith([withContent(firstPrompt('u704-end-env-first-1'), 'm1', 'Name this one')]);
+  const button = screen.getByRole('button', { name: /^Regenerate\b/ }) as HTMLButtonElement;
+  await waitFor(() => expect(button.getAttribute('aria-busy')).toBe('true'));
+  expect(button.disabled).toBe(true);
+  expect(within(button).getByText('Regenerate')).toBeTruthy();
+  expect(screen.queryByText('Regenerating…')).toBeNull();
+  expect(await within(button).findByRole('progressbar', { name: 'Regenerating the title' })).toBeTruthy();
+});
+
+// The review of task 2: busy from the press, through a slow transcript read and receipt, until the operation ends; idle
+// again on a refusal, with its words
+it('Regenerate is busy from its press through a delayed receipt until the operation ends, and idle again on a refusal', async () => {
+  fake = fakeClient({ 'session.events': { events: [withContent(firstPrompt('u704-end-env-first-1'), 'm1', 'Name this one')], lastSeq: 1, complete: true } });
+  window.maws = preloadOf(fake); // the operation's event goes through the page's real client
+  render(<SessionDialogs />);
+  act(() => openDialog({ kind: 'rename', appSessionId: LIVE }));
+  const dialog = await screen.findByRole('dialog', { name: 'Rename' });
+  const button = () => within(dialog).getByRole('button', { name: /^Regenerate\b/ }) as HTMLButtonElement;
+  await userEvent.click(button());
+  expect(button().getAttribute('aria-busy'), 'busy at the press').toBe('true');
+  expect(button().disabled).toBe(true);
+  await waitFor(() => expect(fake.pending('session.generateTitle')).toBe(1));
+  expect(button().disabled, 'still busy while the receipt is out').toBe(true);
+  await act(() => fake.reply('session.generateTitle', { opId: 'op-1' }));
+  expect(button().disabled, 'busy through the operation').toBe(true);
+  act(() => fake.event('session.operation', { appSessionId: BARE, opId: 'op-1', command: 'session.generateTitle', late: false, outcome: { ok: true, value: { title: 'A new name' } } }));
+  expect(button().disabled).toBe(false);
+  expect(button().getAttribute('aria-busy')).toBeNull();
+  expect((within(dialog).getByRole('textbox', { name: 'Title' }) as HTMLInputElement).value).toBe('A new name');
+
+  await userEvent.click(button());
+  await waitFor(() => expect(fake.pending('session.generateTitle')).toBe(1));
+  await act(() => fake.fail('session.generateTitle', 'no engine'));
+  expect(button().disabled, 'idle again after a refusal').toBe(false);
+  expect(within(dialog).getByText('no engine')).toBeTruthy();
 });
 
 describe('Regenerate’s description and an answer envelope (ticket 704)', () => {

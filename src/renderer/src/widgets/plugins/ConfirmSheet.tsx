@@ -1,9 +1,9 @@
 // The confirm sheet every plugin-management change opens before anything runs (E8 execution document, M2; parent G4):
 // the binary and the exact argument list (M1's `commandLine`, the one the runner spawns), the files the engine's CLI
 // writes (M1's `writesOf`, a superset) and that it keeps its own records in its global config file, what follows (the
-// reload of the running sessions), a scope for the five plugin verbs, and the acknowledgement before an uninstall or a
+// reload of the running sessions, said only when one will reload), a scope for the five plugin verbs, and the acknowledgement before an uninstall or a
 // marketplace removal. The binary and the paths are `plugins.env`'s: until it answers the default button stays disabled
-// (`Resolving the engine…`, or its refusal). Cancel runs nothing. The second sheet, for a marketplace-declared command the CLI refused to run unseen,
+// (a quiet spinner named `Resolving the engine…`, or its refusal). Cancel runs nothing. The second sheet, for a marketplace-declared command the CLI refused to run unseen,
 // shows that command and reruns the request with `--accept-command <sha256>` (never `-y`).
 // P4-AGG M3 (the Discover spec, Design "Adding"): an install asked from Discover also says what gets installed (from
 // Skills, the plugin and its skills), what comes with it, "Also listed by …", and the runs-code warning, or the softer
@@ -20,6 +20,7 @@ import { PLUGIN_MANAGEMENT as W } from '../copy';
 import { addStepOf, argvOf, commandWords, dependencyWords, DESTRUCTIVE, overridesWords, SCOPED, scopeOf, targetOf, thenWords, uninstallsWords, writesWords, type CatalogInstall, type PluginsRequest } from './present';
 import { CATALOG_INSTALL as D } from './catalog-words';
 import { SheetDetails } from './SheetDetails';
+import { QuietSpinner } from '../../ui/spinner';
 
 // A resolved `plugins.env` answer: the binary (the probe's real path; an answer without one is unresolved), the config
 // home the CLI writes and the engine's global config file (inside a `CLAUDE_CONFIG_DIR`, else `~/.claude.json` beside
@@ -71,6 +72,7 @@ export function ConfirmSheet({ request, declared, env, onConfirm, onClose }: { r
   const dependencies = dependencyWords(request.action);
   const overrides = overridesWords(request);
   const uninstalls = uninstallsWords(request);
+  const then = thenWords(request.action, env.readySessions);
   const catalog = declared === null && request.action === 'install' ? (request.catalog ?? null) : null;
   const addStep = catalog ? addStepOf(asked) : null;
   const writes = (paths: { configHome: string; cwd: string }) => [...new Set([...(addStep ? writesWords(addStep, paths) : []), ...writesWords(asked, paths)])];
@@ -126,9 +128,7 @@ export function ConfirmSheet({ request, declared, env, onConfirm, onClose }: { r
               {env.engine.error}
             </p>
           ) : env.engine.state === 'loading' ? (
-            <p role="status" className="m-0 text-ui-sm text-fg-muted">
-              {W.resolving}
-            </p>
+            <QuietSpinner label={W.resolving} />
           ) : null}
           {declared && commands}
           {scoped && (
@@ -148,7 +148,7 @@ export function ConfirmSheet({ request, declared, env, onConfirm, onClose }: { r
           {fixedScope && <FixedScope scope={fixedScope} />}
           {declared && files}
           {uninstalls && <p className="m-0 text-ui-sm text-fg">{uninstalls}</p>}
-          <p className="m-0 text-ui-sm text-fg-muted">{thenWords(request.action, env.readySessions)}</p>
+          {then !== null && <p className="m-0 text-ui-sm text-fg-muted">{then}</p>}
           {destructive && (
             <label className="flex items-center gap-2 text-ui-sm text-fg">
               <input type="checkbox" checked={acknowledged} onChange={(event) => setAcknowledged(event.target.checked)} className={CHOICE} />

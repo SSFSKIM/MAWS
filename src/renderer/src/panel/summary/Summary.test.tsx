@@ -363,7 +363,7 @@ describe('floating session cards', () => {
     expect([...live.children].map((child) => child.textContent)).toEqual(['1 plugin', 'Reload pluginsReload skills']);
     expect(textNodes(live)).toEqual([]);
     act(() => useSessions.setState({ engine: new Map([[A, { ...status(A, { process: 'exited' }), plugins, pluginsObservedAt: observedAt }]]) }));
-    await waitFor(() => expect(header().children[1]?.textContent).toMatch(/^Loaded last time, /));
+    await waitFor(() => expect(header().children[1]?.textContent).toMatch(/^as of /));
     const last = header();
     expect(last.children).toHaveLength(2);
     expect(last.children[0]!.textContent).toBe('1 plugin');

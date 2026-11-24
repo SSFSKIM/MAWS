@@ -25,7 +25,7 @@ export function openCustomize(section?: CustomizeSection, projectId: ProjectId |
   useLayout.getState().openDestination({ kind: 'customize', view: 'mine', show: section === undefined ? 'all' : SHOW[section] });
 }
 
-// P4-AGG Decision Log 10: the session `/plugins`' Open Discover. Discover, Plugins, for the session's exact directory: the
+// P4-AGG Decision Log 10: the session `/plugins`' Discover plugins. Discover, Plugins, for the session's exact directory: the
 // project whose directory it is, else the directory itself, never a parent project or the user configuration.
 // P5 O6 M4: `cwd` is this machine's (the session plugin widgets open it only for this machine's sessions), so it names
 // this machine's project of that directory, never another machine's of the same path (Customize is local until O4).

@@ -77,7 +77,7 @@ function SkillsOnDisk({ appSessionId, folder, place, close }: { appSessionId: Ap
       <p data-before-start className="m-0 px-2 pb-1 text-ui-sm text-fg-muted">
         {BEFORE_START.skills(place)}
       </p>
-      <InventoryState error={inventory.error} pending={inventory.isPending} warnings={inventory.data?.warnings} pluginServers={inventory.data?.pluginServers} refresh={() => void inventory.refetch()} />
+      <InventoryState error={inventory.error} pending={inventory.isPending} warnings={inventory.data?.warnings} refresh={() => void inventory.refetch()} />
       {groups !== null && shown !== null && <SkillsLibrary groups={groups} shown={shown} onUse={use} onDetail={setInDetail} />}
     </WidgetFrame>
   );

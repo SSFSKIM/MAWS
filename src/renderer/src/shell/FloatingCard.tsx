@@ -291,8 +291,7 @@ function Card({ host, appSessionId, area, bounds, column }: { host: CardHost; ap
         <button
           type="button"
           key={edge.name}
-          aria-label={`Resize session card ${edge.name}`}
-          title="Drag to resize; arrow keys to adjust"
+          aria-label={`Resize session card ${edge.name}`} // the word cut (W174): no tooltip; the cursor says it
           data-card-resize={edge.name}
           onPointerDown={(event) => begin(edge, event)}
           onPointerMove={move}

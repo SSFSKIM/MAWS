@@ -51,7 +51,7 @@ export const REGISTRY = {
   notOwner: (machine: string) => `Only ${machine}’s owners can change its projects`,
   machineGone: (machine: string) => `${machine} isn’t reachable now; choose another machine`,
   locateTitle: (folder: string, machine: string) => `Locate ${folder} on ${machine}`,
-  locateHint: (path: string) => `It was at ${path}. Choose where the folder is now.`,
+  locateHint: (path: string) => `Was at ${path}`, // the word cut (W142)
   locating: (machine: string) => `Pointing it at the folder on ${machine}…`,
   rename: 'Rename…',
   renameTitle: 'Rename project',

@@ -1,6 +1,6 @@
 // X17 in the renderer (P2-A execution document §5.5): what the engine last reported for a session, read through main's
 // `session.observedFacts`, and how fresh a fact is in the person's words. Precedence everywhere: live (a ready process,
-// and the fact reported in this launch) over observed ("Loaded last time, 2 days ago") over unknown ("Not observed
+// and the fact reported in this launch) over observed ("as of 2 days ago") over unknown ("Not observed
 // yet"); a record's requested or default values are never shown as observed. Reading the facts starts nothing.
 import { useQuery } from '@tanstack/react-query';
 import { useCallback, useMemo } from 'react';
@@ -27,9 +27,8 @@ export function freshness(fact: Fact<unknown>, live: boolean): Freshness {
 const ago = (at: string, now: number) => formatAgo(Math.max(0, now - Date.parse(at)));
 export const FRESHNESS = {
   loadedNow: 'Loaded now',
-  loadedLast: (at: string, now = Date.now()) => `Loaded last time, ${ago(at, now)}`,
   lastReading: (at: string, now = Date.now()) => `Last reading, ${ago(at, now)}`,
-  asOf: (at: string, now = Date.now()) => `as of ${ago(at, now)}`, // the word cut (P55): the session card's Context reading
+  asOf: (at: string, now = Date.now()) => `as of ${ago(at, now)}`, // the word cut (P55, P664): the Context reading, the last loaded plugins
   lastObserved: (at: string, now = Date.now()) => `Last observed ${ago(at, now)}`,
   notObserved: 'Not observed yet',
   unknown: '—', // the word cut (P174): a fact not observed yet, where a value stands (Session info, the cards, the widgets)

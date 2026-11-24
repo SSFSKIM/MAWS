@@ -146,7 +146,7 @@ function Arguments({ line, check, onChange }: { line: string; check: CustomCheck
       <p className={MUTED}>{C.argsAsTyped}</p>
       {args.ok ? (
         <div data-connector-args className="flex flex-col gap-1">
-          <p className={MUTED}>{C.argCount(args.words.length)}</p>
+          {args.words.length > 0 && <p className={MUTED}>{C.argCount(args.words.length)}</p>}
           {args.words.length > 0 && (
             <ol className="m-0 flex list-none flex-wrap gap-1 p-0">
               {args.words.map((word, index) => (
@@ -195,8 +195,6 @@ function Rows({ field, rows, check, onChange, onAdd }: { field: RowsField; rows:
         {field === 'headers' ? C.addHeader : C.addVariable}
       </button>
       <Problem id="custom-connector-rows-problem" text={check.rowsProblem} />
-      {check.emptyRow && <p className={MUTED}>{C.emptyRow}</p>}
-      {check.hasRows && <p className={MUTED}>{C.savedAsWritten}</p>}
     </fieldset>
   );
 }

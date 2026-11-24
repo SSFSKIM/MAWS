@@ -194,27 +194,30 @@ describe('My items, All', () => {
   it('lists the plugins, then the mods, the skills and the connectors, each part by name, each row ending in its kind word in one column; no heading, loaded line, live list or kind’s menu', async () => {
     mountCustomize({ view: 'mine', show: 'all' });
     await drawn();
-    // the kind word is the cell before each row's last control: a plugin's menu, the mod's switch, else an empty cell
-    // of that control's width, so the words stand in one column
+    // the kind word is the cell before each row's two last controls, the switch's and the menu's: a plugin's switch (the
+    // word cut, G215) and its menu, the mod's switch and an empty menu cell, else two empty cells of those controls'
+    // widths, so the words, and the versions before them, stand in one column (the M4 picture review)
     const words = [...list().querySelectorAll<HTMLElement>('[data-kind-word]')];
     expect(words).toHaveLength(8);
     for (const word of words) {
-      const row = word.closest('li')!;
-      expect(word.parentElement).toBe(row);
-      expect(word.nextElementSibling).toBe(row.lastElementChild);
+      expect(word.nextElementSibling!.nextElementSibling).toBe(word.parentElement!.lastElementChild);
       expect(word.className).toBe(words[0]!.className);
     }
-    expect(words[2]!.nextElementSibling!.getAttribute('role')).toBe('switch');
-    expect(words[3]!.nextElementSibling!.getAttribute('aria-hidden')).toBe('true');
-    expect(words[7]!.nextElementSibling!.getAttribute('aria-hidden')).toBe('true');
+    const after = (word: HTMLElement) => [word.nextElementSibling!, word.nextElementSibling!.nextElementSibling!];
+    const [pluginSwitch, pluginMenu] = after(words[0]!);
+    expect(pluginSwitch.getAttribute('role')).toBe('switch');
+    expect(pluginMenu.querySelector('button')!.getAttribute('aria-label')).toMatch(/^More actions for /);
+    expect(words[0]!.previousElementSibling!.hasAttribute('data-plugin-version')).toBe(true);
+    expect(after(words[2]!).map((cell) => cell.getAttribute('role') ?? cell.getAttribute('aria-hidden'))).toEqual(['switch', 'true']);
+    expect(words[2]!.previousElementSibling!.hasAttribute('data-mod-version')).toBe(true);
+    expect(after(words[3]!).map((cell) => cell.getAttribute('aria-hidden'))).toEqual(['true', 'true']);
+    expect(after(words[7]!).map((cell) => cell.getAttribute('aria-hidden'))).toEqual(['true', 'true']);
     expect(list().querySelector('h2, h3, h4, [data-plugins-group], [data-skills-group]')).toBeNull();
     expect(document.querySelector('[data-plugins-loaded], [data-plugins-session-unavailable]')).toBeNull();
     expect(screen.queryByRole('region', { name: 'Live connectors' })).toBeNull();
     expect(screen.queryByText(CONNECTORS.noLive)).toBeNull();
     for (const name of ['Filter', 'Sort by', 'Add']) expect(screen.queryByRole('button', { name })).toBeNull();
-    // the inventory's folded notes stand under the list
-    const coverage = screen.getByText('Inventory coverage');
-    expect(part('connectors').compareDocumentPosition(coverage) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(screen.queryByText('Inventory coverage')).toBeNull(); // the word cut (G205, N135)
   });
 
   it('a plugin’s menu opens its sheet from All and its line reads on the row, with Reload again; a connector’s line offers none', async () => {
@@ -223,7 +226,7 @@ describe('My items, All', () => {
     holdDone.add('connectors.remove');
     mountCustomize({ view: 'mine', show: 'all' });
     await drawn();
-    menu('buoy-log@harbour-market', 'Turn off');
+    fireEvent.click(within(document.querySelector<HTMLElement>('[data-plugin-row="buoy-log@harbour-market"]')!).getByRole('switch')); // the word cut (G215)
     await resolved();
     fireEvent.click(within(sheet()).getByRole('button', { name: 'Disable' }));
     await waitFor(() => expect(invoked('plugins.disable')).toEqual([{ cwd: QUAY, binary: BINARY, plugin: 'buoy-log@harbour-market', scope: 'user' }]));
@@ -348,7 +351,7 @@ describe('My items, All', () => {
     inventoryAnswer = new Promise((_, reject) => (fail = reject));
     mountCustomize({ view: 'mine', show: 'all' });
     await waitFor(() => expect(rows()).toEqual(['Plugin anchor-chart@harbour-market', 'Plugin buoy-log@harbour-market', 'Mod maws.to-human']));
-    expect(within(part('skills')).getByRole('status').textContent).toBe('Reading configuration…');
+    expect(await within(part('skills')).findByRole('progressbar', { name: 'Reading configuration…' })).toBeTruthy(); // the word cut (G203)
     await act(async () => fail(new Error('The configuration could not be read')));
     const alerts = await waitFor(() => {
       const shown = screen.getAllByRole('alert');

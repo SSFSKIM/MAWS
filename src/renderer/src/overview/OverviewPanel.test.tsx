@@ -107,6 +107,10 @@ describe('the floating Overview', () => {
     expect(button().getAttribute('aria-pressed')).toBe('true');
     expect(within(panel()).getByRole('list', { name: 'Overview' })).toBeTruthy(); // the board, unchanged
     expect(within(panel()).getByRole('listitem', { name: 'Needs you' })).toBeTruthy();
+    // the word cut (W102): the strip holds its × alone; the title is for assistive technology
+    const strip = panel().querySelector<HTMLElement>('[data-overview-header]')!;
+    expect(within(strip).getByRole('heading', { level: 2, name: 'Overview' }).classList.contains('sr-only')).toBe(true);
+    expect(within(strip).getAllByRole('button').map((b) => b.getAttribute('aria-label'))).toEqual(['Close Overview']);
     await user.click(button());
     expect(screen.queryByRole('dialog', { name: 'Overview' })).toBeNull();
   });

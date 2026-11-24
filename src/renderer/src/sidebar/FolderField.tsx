@@ -4,11 +4,12 @@
 // Browse… lists its folders a page at a time from its home (`machine.folders.list`, the owners' read), as the remote
 // setup's sheet does (RemoteSetupSheet.tsx, its words): a private folder macOS protects is never read inside until the
 // person opens it, since opening one may raise a privacy prompt on that machine.
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { FolderEntry } from '@shared/ipc/schema/machine';
 import type { MachineRef } from '@shared/machine/ref';
 import { ipc } from '../ipc/client';
 import { listFolders, SETUP_WORDS, type FolderPage } from '../sessions/remote-setup';
+import { QuietSpinner } from '../ui/spinner';
 import { FIELD, PRIMARY, QUIET, SECONDARY } from '../sessions/ui';
 import { REGISTRY } from './registry-copy';
 
@@ -72,12 +73,20 @@ function FolderBrowser({ machine, name, onUse }: { machine: MachineRef; name: st
   const [opened, setOpened] = useState<readonly string[]>([]); // the private folders the person opened
   const [confirming, setConfirming] = useState<FolderEntry | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // N175: the reads out after the first page (a folder entered, the way up, the next page), the quiet spinner beside the
+  // folder shown while any is and no error stands; the page shown stays under it
+  const reads = useRef(0);
+  const [reading, setReading] = useState(false);
   const label = (at: string) => (home !== null && within(at, home) ? `~${at.slice(home.length)}` : at);
 
   const show = async (next: string | null, open = opened, cursor?: string) => {
     setError(null);
     const inside = next !== null && open.some((root) => within(next, root));
+    reads.current += 1;
+    setReading(true);
     const read = await listFolders(machine, name, { path: next, ...(inside && { open: true }), ...(cursor !== undefined && { cursor }) });
+    reads.current -= 1;
+    if (reads.current === 0) setReading(false);
     if (!read.ok) return setError(read.words);
     if (next === null && read.page.entries.length > 0) setHome(parentOf(read.page.entries[0].path) || null);
     setPath(next);
@@ -132,9 +141,9 @@ function FolderBrowser({ machine, name, onUse }: { machine: MachineRef; name: st
   }
   return (
     <div className="flex flex-col gap-2 rounded-sm border border-border p-2">
-      <p className="m-0 text-ui-sm text-fg-muted">{SETUP_WORDS.privacy(name)}</p>
       <div className="flex items-center gap-2">
         <span className="min-w-0 flex-1 truncate font-mono text-ui-sm">{path === null ? SETUP_WORDS.home : label(path)}</span>
+        {reading && error === null && <QuietSpinner label={SETUP_WORDS.loading} />}
         {path !== null && (
           <button type="button" className={QUIET} onClick={up}>
             {SETUP_WORDS.up}
@@ -143,7 +152,11 @@ function FolderBrowser({ machine, name, onUse }: { machine: MachineRef; name: st
       </div>
       <ul aria-label={`Folders on ${name}`} className="m-0 flex max-h-[min(220px,32vh)] list-none flex-col overflow-y-auto p-0">
         {page === null ? (
-          <li className="px-2 py-1 text-ui-sm text-fg-muted">{SETUP_WORDS.loading}</li>
+          error === null && (
+            <li className="flex px-2 py-1">
+              <QuietSpinner label={SETUP_WORDS.loading} />
+            </li>
+          )
         ) : page.entries.length === 0 ? (
           <li className="px-2 py-1 text-ui-sm text-fg-muted">{SETUP_WORDS.empty}</li>
         ) : (

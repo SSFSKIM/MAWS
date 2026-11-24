@@ -2,9 +2,8 @@
 // name, whether it is this machine (whose rows look as they did before machines), and whether it is offline, with when
 // it entered that state. Read by the sidebar's session rows and hover cards and by the main area's session tabs.
 // P5 O7 M2 (A2, P5 Decision Log 108): how this app reaches it (`carrier`) and the verdict holding its link down
-// (`refusal`): a row's hover says "direct (tailnet)" or "via the hub" for an RL2 link, nothing for a socket or this
-// machine; a machine that removed this device greys its rows with "This Mac is no longer allowed on <name>" in place of
-// "machine offline". The chip itself shows no carrier.
+// (`refusal`): a machine that removed this device greys its rows with "This Mac is no longer allowed on <name>" in place
+// of "machine offline". Neither the chip nor a row's hover shows the carrier (the word cut, W70, took it from the hover).
 // The UX wave, U9 (O-39; docs/doperpowers/plans/2026-11-12-ux-wave-U9-other-machines.md, Interfaces §7): the link's phase,
 // derived here from the roster entry, keeps "is the link up" and "what do we say" apart. `offline` is the display answer
 // (the offline or removed phase), so every reader that greys or words by it reads a machine that connects, or reconnects
@@ -41,7 +40,7 @@ export function phaseWords(phase: LinkPhase, machine: string): string | null {
     case 'reconnecting':
       return `Reconnecting to ${machine}…`;
     case 'offline':
-      return `${machine} is offline · this session reconnects when it’s back`;
+      return `${machine} is offline`; // the word cut (W25): the fact, not how it comes back
     case 'removed':
       return removedWords(machine);
   }
@@ -130,9 +129,3 @@ export const MACHINE_OFFLINE = 'machine offline'; // P5 §8's words for a greyed
 export const removedWords = (name: string): string => `This Mac is no longer allowed on ${name}`;
 export const greyWords = (mark: Pick<MachineMark, 'name' | 'refusal'>): string => (mark.refusal === 'removed' ? removedWords(mark.name) : MACHINE_OFFLINE);
 
-// P5 O7 M2 (A2): the carrier an RL2 link is up over, as a row's hover says it; null for a socket, this machine, or a link
-// not up.
-export function carrierWords(mark: Pick<MachineMark, 'carrier' | 'offline'>): string | null {
-  if (mark.offline) return null;
-  return mark.carrier === 'direct' ? 'direct (tailnet)' : mark.carrier === 'relay' ? 'via the hub' : null;
-}

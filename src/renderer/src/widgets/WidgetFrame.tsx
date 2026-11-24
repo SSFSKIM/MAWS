@@ -1,42 +1,45 @@
 // C11's chrome inside every widget (C11 execution document, Terms "Widget frame"; mockup 06 vignette 05): a head with
-// the title and the `/name`, and a body that scrolls inside its cap (W3: the floating dialog's, up to 60% of the window).
+// the title, and a body that scrolls inside its cap (W3: the floating dialog's, up to 60% of the window). The word cut
+// (P517): the head no longer prints the `/name` beside the close cross; the title names the dialog.
 // E11's sitting (owner-notes 00-consolidated-plan §2.2) removed the provenance foot C11 and E8 D-12 required: what a
 // change writes, its scope and any lock are said beside its control or in its sheet. The body gives way to the loading
 // line or the error. C7 places it (W3: the app's floating dialog); the frame owns no position. It takes focus when it
 // opens, and Esc closes it and hands the keyboard back to the session's composer.
 // P2-A (2026-10-09; the execution document §5.6): on a session with a record and no ready process the frame owns three
-// states for every widget, from its `appSessionId`: dormant ("Not read yet." with Load now; or, when the consumer
-// passes when its cached answer was read, the body under "Read <relative>" with Refresh), starting ("Starting…" above
-// any body) and unavailable (the words; a terminal or a job holding the session offers the holder's actions in place of
-// the button). Load now and Refresh are the owner's gesture that starts the engine; opening the frame starts nothing.
+// states for every widget, from its `appSessionId`: dormant (Load now; or, when the consumer passes when its cached
+// answer was read, the body under its age with Refresh), starting (the quiet spinner above any body) and unavailable
+// (the words; a terminal or a job holding the session offers the holder's actions in place of the button). Load now
+// and Refresh are the owner's gesture that starts the engine; opening the frame starts nothing. The word cut (P518 to
+// P523): the reading and starting waits are the quiet spinner, Load now stands alone, a cached answer is dated by its
+// age alone ("5 minutes ago"), and its Refresh is the circular arrow named by the word.
 import { useEffect, useRef, type KeyboardEvent, type ReactNode } from 'react';
 import type { AppSessionId } from '@shared/graph/ids';
 import { formatAgo } from '@shared/app/date-format';
 import { useNow } from '../app/use-now';
 import type { WidgetSize } from '../composer/WidgetDialog'; // P2-B (2026-10-09)
 import { useComposerStore } from '../stores/composer';
+import { QuietSpinner } from '../ui/spinner';
 import { FRAME } from './copy';
 import { DormantGesture } from './DormantGesture';
 import type { ReadState } from './read';
 
 interface WidgetFrameBase {
   title: string;
-  command: string; // the palette name, shown as `/name` in a modal
+  command: string; // the palette name, the frame's `data-widget`
   error: string | null; // in place of the body when state is 'error'; above the kept body when 'ready' (a later read failed); unavailable: why
   readAt?: number | null; // P2-A: when the body's answer was read; a dormant frame shows that body, dated, only when given
   children?: ReactNode;
   // P2-B start (2026-10-09): X19 (the P2-B execution document §5.2). `library`: the frame fills the dialog's fixed box,
-  // its head carries `heading` after the title (My items | Browse) and `toolbar` before the `/name` (Search, Filter, Sort,
-  // Add or Reload), and its body takes the remaining height without scrolling itself (the list pane and the detail
-  // inside it scroll). `utility`, the default, is the frame as it was.
+  // its head carries `heading` after the title (My items | Browse) and `toolbar` before the close cross (Search, Filter,
+  // Sort, Add or Reload), and its body takes the remaining height without scrolling itself (the list pane and the
+  // detail inside it scroll). `utility`, the default, is the frame as it was.
   size?: WidgetSize;
   heading?: ReactNode;
   toolbar?: ReactNode;
   // P2-B end
-  // UX wave U11a (§C): a muted subtitle after the title, and one line of note under it with its tooltip (the Connectors
-  // dialog's "MCP servers" and the switch's reach). The dialog keeps the title alone as its name.
+  // UX wave U11a (§C): a muted subtitle after the title (the Connectors dialog's "MCP servers"). The dialog keeps the
+  // title alone as its name.
   subtitle?: string;
-  note?: { text: string; tooltip: string };
 }
 
 // UX wave U11c: Customize's page draws its own head, so a frame is always a dialog's (the embedded variant went).
@@ -62,15 +65,15 @@ export function focusSearch(event: KeyboardEvent<HTMLElement>): boolean {
 // session that exited stops every read); only this line re-renders on the tick.
 function ReadAgo({ readAt }: { readAt: number }) {
   const now = useNow();
-  return FRAME.readAgo(formatAgo(Math.max(0, now - readAt)));
+  return formatAgo(Math.max(0, now - readAt));
 }
 
 function dormantBody(appSessionId: AppSessionId, state: 'dormant' | 'starting' | 'unavailable', error: string | null, readAt: number | null | undefined, children: ReactNode): ReactNode {
   const cached = typeof readAt === 'number';
-  const lead = state !== 'dormant' ? null : cached ? <ReadAgo readAt={readAt} /> : FRAME.notRead;
+  const lead = state === 'dormant' && cached ? <ReadAgo readAt={readAt} /> : null;
   return (
     <>
-      <DormantGesture appSessionId={appSessionId} label={cached ? FRAME.refresh : FRAME.loadNow} lead={lead} words={state === 'unavailable' ? error : null} starting={state === 'starting'} />
+      <DormantGesture appSessionId={appSessionId} label={cached ? FRAME.refresh : FRAME.loadNow} glyph={cached} lead={lead} words={state === 'unavailable' ? error : null} starting={state === 'starting'} />
       {cached ? children : null}
     </>
   );
@@ -78,14 +81,14 @@ function dormantBody(appSessionId: AppSessionId, state: 'dormant' | 'starting' |
 // P2-A end
 
 export function WidgetFrame(props: WidgetFrameProps) {
-  const { title, command, state, error, readAt, children, size = 'utility', heading, toolbar, subtitle, note } = props;
+  const { title, command, state, error, readAt, children, size = 'utility', heading, toolbar, subtitle } = props;
   const root = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (!root.current?.contains(document.activeElement)) root.current?.focus();
   }, []);
   let body: ReactNode;
   if (state === 'dormant' || state === 'starting' || state === 'unavailable') body = dormantBody(props.appSessionId, state, error, readAt, children);
-  else if (state === 'loading') body = <p className="m-0 text-fg-muted">{FRAME.reading}</p>;
+  else if (state === 'loading') body = <QuietSpinner label={FRAME.reading} />;
   else if (state === 'error')
     body = (
       <p role="alert" className="m-0 text-danger">
@@ -127,7 +130,7 @@ export function WidgetFrame(props: WidgetFrameProps) {
       }}
     >
       {/* P2-B start (2026-10-09): the library's head: title and heading at the left, the toolbar at the right */}
-      <header className={size === 'library' ? 'flex min-h-9 items-center gap-3 border-b border-border px-2 pb-2' : `flex items-baseline justify-between gap-3 border-b border-border px-2 pb-2 ${note ? 'flex-wrap gap-y-1' : ''}`}>
+      <header className={size === 'library' ? 'flex min-h-9 items-center gap-3 border-b border-border px-2 pb-2' : 'flex items-baseline justify-between gap-3 border-b border-border px-2 pb-2'}>
         {subtitle ? (
           // U11a: the subtitle muted beside the title; the dialog's name stays the title (WidgetDialog's)
           <div className="flex min-w-0 items-baseline gap-2">
@@ -143,16 +146,10 @@ export function WidgetFrame(props: WidgetFrameProps) {
         <span className={size === 'library' ? 'ml-auto flex min-w-0 items-center gap-2' : 'flex items-baseline gap-2'}>
           {size === 'library' && toolbar}
           {/* P2-B end */}
-          <code className="font-mono text-ui-sm text-fg-muted">/{command}</code>
           <button type="button" aria-label={FRAME.close(title)} onClick={props.close} className="rounded-sm px-1 text-fg-muted outline-accent hover:bg-bg-hover focus-visible:outline-2">
             ×
           </button>
         </span>
-        {note && (
-          <p data-widget-note title={note.tooltip} className="m-0 w-full text-ui-sm text-fg-muted [overflow-wrap:anywhere]">
-            {note.text}
-          </p>
-        )}
       </header>
       {/* P2-B (2026-10-09): the library's body takes the remaining height; its panes scroll, and A's dormant line, drawn
           above them, keeps the head's inset (2026-10-10) */}

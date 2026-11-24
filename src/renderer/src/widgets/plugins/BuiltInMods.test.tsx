@@ -1,7 +1,8 @@
-// "MAWS mods · Built in" (X20; the P2-C document, §9 and G7), the last group of the plugin library's My items: a row per
-// built-in mod from `mods.list` with the session, its version, its source in words, the app's switch, the session's
-// override, the pending and mismatch lines; no overflow and no Uninstall; an unreadable registry says so; the library's
-// search filters; a change of the switch, the override or the session's channel reads the rows again.
+// "Built in" (X20; the P2-C document, §9 and G7), the last group of the plugin library's My items: a row per built-in
+// mod from `mods.list` with the session, its version, the app's switch, the session's override behind opening the row,
+// the pending and mismatch lines; no overflow and no Uninstall; an unreadable registry says so; the library's search
+// filters; a change of the switch, the override or the session's channel reads the rows again. The word cut (G223 to
+// G226, N149): the head reads "Built in", the description and the summaries' sentence are row notes, no source line.
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
@@ -12,6 +13,7 @@ import { OTHER_MACHINE } from '../../../../../test/support/machine';
 import { addressOf } from '@shared/machine/address';
 import { REMOTE_UNAVAILABLE } from '@shared/ipc/remote-unavailable';
 import { useSessions } from '../../stores/sessions';
+import { accessibleDescription, accessibleText } from '../../test-support/accessible-text';
 import { BuiltInMods } from './BuiltInMods';
 
 const hold = vi.hoisted(() => ({ client: null as ReturnType<typeof import('../../../../../test/support/fake-client').fakeClient>['client'] | null }));
@@ -26,15 +28,17 @@ beforeEach(() => {
 });
 afterEach(cleanup);
 
-const section = () => screen.getByRole('region', { name: 'MAWS mods · Built in' });
+const section = () => screen.getByRole('region', { name: 'Built in' });
+// The row opened: this session's override (the word cut, G225).
+const openRow = () => fireEvent.click(within(section()).getByRole('button', { name: 'To-human' }));
 
 describe('the built-in mods section', () => {
-  it('draws a row per mod as a library group, with its version, its source in words and the session’s override, and no Uninstall', async () => {
+  it('draws a row per mod as a library group, with its version and, opened, the session’s override, and no Uninstall', async () => {
     render(<BuiltInMods appSessionId={APP} search="" />);
     expect(fake.invoked('mods.list')).toEqual([{ appSessionId: APP }]);
     await act(() => fake.reply('mods.list', [ROW]));
     expect(section().getAttribute('data-plugins-group')).toBe('builtIn');
-    expect(within(section()).getByRole('heading').textContent).toBe('MAWS mods · Built in1');
+    expect(within(section()).getByRole('heading').textContent).toBe('Built in1');
     const row = within(section()).getByRole('listitem');
     expect(row.getAttribute('data-mod-row')).toBe('maws.to-human');
     // UX wave U11c M1: its image is the mod's letter tile, by its registry name
@@ -43,8 +47,11 @@ describe('the built-in mods section', () => {
     expect(row.textContent).toContain('To-human');
     expect(row.textContent).toContain('Built in');
     expect(row.textContent).toContain('Version 1');
-    expect(row.textContent).toContain('MAWS gives the agent its instructions');
+    expect(row.textContent).not.toContain('gives the agent its instructions');
     expect(within(row).getByRole('switch', { name: 'To-human in every session' }).getAttribute('aria-checked')).toBe('true');
+    expect(within(row).queryByRole('radiogroup')).toBeNull(); // the override waits behind opening the row
+    openRow();
+    expect(within(row).getByRole('button', { name: 'To-human' }).getAttribute('aria-expanded')).toBe('true');
     const override = within(row).getByRole('radiogroup', { name: 'To-human in this session' });
     expect(within(override).getAllByRole('radio').map((radio) => radio.closest('label')!.textContent)).toEqual(['Default (On)', 'On', 'Off']);
     expect((within(override).getByRole('radio', { name: 'Default (On)' }) as HTMLInputElement).checked).toBe(true);
@@ -52,9 +59,28 @@ describe('the built-in mods section', () => {
     expect(row.textContent).not.toContain('Uninstall');
   });
 
+  // G225 (the word cut's fix wave for M4): a row's opened state is its session's and its mod's together. Rows read for
+  // another session start from that session's own rule (open where it overrides the default), whatever the last
+  // session's row was; the last session's rows are not drawn as the next one's while its read is out
+  it('starts each session’s rows from that session’s own rule', async () => {
+    const OTHER = 'app-mods-other' as AppSessionId;
+    const expanded = () => within(section()).getByRole('button', { name: 'To-human' }).getAttribute('aria-expanded');
+    const { rerender } = render(<BuiltInMods appSessionId={APP} search="" />);
+    await act(() => fake.reply('mods.list', [ROW]));
+    expect(expanded()).toBe('false');
+    rerender(<BuiltInMods appSessionId={OTHER} search="" />);
+    expect(screen.queryByRole('region', { name: 'Built in' }), 'the last session’s rows are not the next one’s').toBeNull();
+    await act(() => fake.reply('mods.list', [{ ...ROW, perSession: 'on' }]));
+    expect(expanded()).toBe('true');
+    rerender(<BuiltInMods appSessionId={APP} search="" />);
+    await act(() => fake.reply('mods.list', [ROW]));
+    expect(expanded()).toBe('false');
+  });
+
   it('the override writes the session’s and reads again, showing what it waits for', async () => {
     render(<BuiltInMods appSessionId={APP} search="" />);
     await act(() => fake.reply('mods.list', [ROW]));
+    openRow();
     fireEvent.click(screen.getByRole('radio', { name: 'Off' }));
     expect(fake.invoked('mods.setSessionOverride')).toEqual([{ appSessionId: APP, id: 'maws.to-human', value: 'off' }]);
     await act(() => fake.reply('mods.setSessionOverride', undefined));
@@ -63,10 +89,26 @@ describe('the built-in mods section', () => {
     expect((screen.getByRole('radio', { name: 'Off' }) as HTMLInputElement).checked).toBe(true);
   });
 
+  // The M4 picture review: what the session's lane waits for is the caption of the override's choices, shown while they
+  // are, never orphaned under the name of a closed row.
+  it.each(['next-launch', 'next-compaction'] as const)('shows what the lane waits for (%s) only while the override’s choices show', async (pending) => {
+    render(<BuiltInMods appSessionId={APP} search="" />);
+    await act(() => fake.reply('mods.list', [{ ...ROW, pending }]));
+    const row = within(section()).getByRole('listitem');
+    expect(within(row).queryByRole('radiogroup')).toBeNull();
+    expect(row.querySelector('[data-mod-pending]')).toBeNull();
+    openRow();
+    expect(within(row).getByRole('radiogroup', { name: 'To-human in this session' })).toBeTruthy();
+    expect(row.querySelector('[data-mod-pending]')!.getAttribute('data-mod-pending')).toBe(pending);
+    openRow();
+    expect(within(row).queryByRole('radiogroup')).toBeNull();
+    expect(row.querySelector('[data-mod-pending]')).toBeNull();
+  });
+
   it('the app’s switch is the settings write; a settings or channel change reads the rows again', async () => {
     render(<BuiltInMods appSessionId={APP} search="" />);
     await act(() => fake.reply('mods.list', [{ ...ROW, source: 'external-compatible-style', pending: 'next-compaction', mismatch: { resolved: 'default', observed: 'doperpowers:to-human' } }]));
-    expect(section().textContent).toContain('The output style gives the agent its instructions');
+    openRow(); // what the session's lane waits for is the override's caption
     expect(section().textContent).toContain('Applies after this session’s next compaction');
     expect(within(section()).getByRole('note').textContent).toContain('“doperpowers:to-human”');
     await act(async () => fireEvent.click(screen.getByRole('switch', { name: 'To-human in every session' })));
@@ -81,12 +123,13 @@ describe('the built-in mods section', () => {
     act(() => fake.event('ownerChannel.changed', { appSessionId: APP, state: {} }));
     expect(fake.invoked('mods.list')).toHaveLength(4);
     await act(() => fake.reply('mods.list', [{ ...ROW, enabled: false }]));
-    expect(screen.getByRole('radio', { name: 'Default (Off)' })).toBeTruthy();
+    expect(screen.getByRole('radio', { name: 'Default (Off)' })).toBeTruthy(); // the row opened above stays open
   });
 
   it('a refused write says so in main’s words, and the rows read again show what holds', async () => {
     render(<BuiltInMods appSessionId={APP} search="" />);
     await act(() => fake.reply('mods.list', [ROW]));
+    openRow();
     fireEvent.click(screen.getByRole('radio', { name: 'Off' }));
     await act(() => fake.fail('mods.setSessionOverride', 'unknown session: app-mods'));
     await act(() => fake.reply('mods.list', [ROW]));
@@ -131,12 +174,18 @@ describe('the built-in mods section', () => {
     const WITH = { ...ROW, summaries: true };
     const summaries = () => screen.getByRole('switch', { name: 'Summaries on fold lines' });
 
-    it('draws the words, its sentence and its switch on a second line of the row; its accessible name is its words', async () => {
+    it('draws the words and its switch on a second line of the row, its sentence the line’s note; its accessible name is its words', async () => {
       render(<BuiltInMods appSessionId={APP} search="" />);
       await act(() => fake.reply('mods.list', [WITH]));
       const line = summaries().closest('label')!;
       expect(line.getAttribute('data-mod-summaries')).toBe('');
-      expect(line.textContent).toBe(`Summaries on fold lines${SENTENCE}`);
+      expect(line.textContent).toBe('Summaries on fold lines');
+      // the word cut (N149): the sentence is the line's note, its switch's description, shown on focus
+      expect(accessibleDescription(summaries())).toBe(SENTENCE);
+      const note = line.parentElement!.querySelector<HTMLElement>('[data-row-note]')!;
+      expect(note.hidden).toBe(true);
+      act(() => summaries().focus());
+      expect(note.hidden).toBe(false);
       expect(summaries().getAttribute('aria-checked')).toBe('true');
       expect(within(screen.getByRole('listitem')).getAllByRole('switch')).toHaveLength(2);
     });
@@ -188,6 +237,7 @@ describe('the built-in mods section', () => {
     it.each([undefined, 'next-launch', 'next-compaction'] as const)('draws no pending line for it whatever the row’s pending (%s)', async (pending) => {
       render(<BuiltInMods appSessionId={APP} search="" />);
       await act(() => fake.reply('mods.list', [{ ...WITH, ...(pending !== undefined && { pending }) }]));
+      openRow(); // the row's own pending line stands with the override
       const line = summaries().closest('label')!;
       expect(line.querySelector('[data-mod-pending]')).toBeNull();
       expect(screen.getByRole('listitem').querySelectorAll('[data-mod-pending]')).toHaveLength(pending === undefined ? 0 : 1);
@@ -222,5 +272,34 @@ describe('the built-in mods section', () => {
       expect(screen.queryByRole('switch', { name: 'Summaries on fold lines' })).toBeNull();
       expect(screen.getByRole('listitem').textContent).not.toContain('Summaries on fold lines');
     });
+  });
+});
+
+// The word cut (G225, G227, G229; Decision Log 2026-11-20, "The owner's answers on the 41 rows"): a mod row rests as its
+// name, its Built in mark, its version and its switch; its description is its row note, shown on pointing or focus and
+// its switch's description at all times; opening the row shows this session's override, open from the start where the
+// session overrides the default.
+describe('the word cut: a mod row', () => {
+  it('rests as its name, Built in, its version and its switch; its description is its note, shown on focus', async () => {
+    render(<BuiltInMods appSessionId={APP} search="" />);
+    await act(() => fake.reply('mods.list', [ROW]));
+    const row = within(section()).getByRole('listitem');
+    expect(accessibleText(row)).toBe('To-humanBuilt inVersion 1');
+    const own = within(row).getByRole('switch', { name: 'To-human in every session' });
+    expect(accessibleDescription(own)).toBe('Agents mark what is for you.');
+    const note = row.querySelector<HTMLElement>('[data-row-note]')!;
+    expect(note.hidden).toBe(true);
+    act(() => own.focus());
+    expect(note.hidden).toBe(false);
+  });
+
+  it('opens on its override where the session overrides the default, and has nothing to open without a session', async () => {
+    render(<BuiltInMods appSessionId={APP} search="" />);
+    await act(() => fake.reply('mods.list', [{ ...ROW, perSession: 'off' }]));
+    expect((screen.getByRole('radio', { name: 'Off' }) as HTMLInputElement).checked).toBe(true);
+    cleanup();
+    render(<BuiltInMods appSessionId={null} search="" />);
+    await act(() => fake.reply('mods.list', [{ ...ROW, perSession: undefined }]));
+    expect(within(section()).queryByRole('button', { name: 'To-human' })).toBeNull();
   });
 });

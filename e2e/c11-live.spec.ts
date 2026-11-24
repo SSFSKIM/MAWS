@@ -27,6 +27,7 @@ import { ENGINE_BIN } from '../test/support/engine-pin';
 import { launchMaws, type MawsLaunch } from './support/launch';
 import { newChatIn, sidebarRow } from './support/sidebar';
 import { allowForTheSession } from './support/request-keys';
+import { expectNewChatInFront } from './support/screen-reader-only';
 
 const skip = c11LiveSkipReason();
 test.skip(skip !== null, skip ?? '');
@@ -139,6 +140,23 @@ function journalRows(maws: MawsLaunch, id: string): JournalRow[] {
     .sort((a, b) => a.at.localeCompare(b.at) || a.seq - b.seq);
 }
 type Frame = Record<string, unknown> & { type?: string; subtype?: string; request?: { subtype?: string } };
+// The control requests of `subtype` the host sent the engine for `serverName`, oldest first, each with whether the engine
+// answered it with a success: a control's own receipt where the surface draws none (the word cut, P570)
+function controlRequests(maws: MawsLaunch, id: string, subtype: string, serverName: string): { requestId: string; succeeded: boolean }[] {
+  const rows = journalRows(maws, id);
+  const succeeded = new Set(
+    rows
+      .filter((r) => r.direction === 'in' && (r.frame as Frame).type === 'control_response')
+      .map((r) => (r.frame as { response?: { subtype?: string; request_id?: string } }).response)
+      .filter((response) => response?.subtype === 'success')
+      .map((response) => response!.request_id),
+  );
+  return rows
+    .filter((r) => r.direction === 'out' && (r.frame as Frame).type === 'control_request')
+    .map((r) => r.frame as { request_id?: string; request?: { subtype?: string; serverName?: string } })
+    .filter((frame) => frame.request?.subtype === subtype && frame.request.serverName === serverName && typeof frame.request_id === 'string')
+    .map((frame) => ({ requestId: frame.request_id!, succeeded: succeeded.has(frame.request_id!) }));
+}
 const inits = (maws: MawsLaunch, id: string) =>
   journalRows(maws, id)
     .filter((r) => r.direction === 'in' && (r.frame as Frame).type === 'system' && (r.frame as Frame).subtype === 'init')
@@ -154,7 +172,7 @@ async function plusSession(live: Live, repo: string, first: string, opts: { mode
   const projects = value(await invoke(page, 'session.projects.list', undefined)).projects;
   if (!projects.some((p) => p.directory === repo)) value(await invoke(page, 'session.projects.add', { directory: repo }));
   await newChatIn(page, name); // W11: the "+" on the project's row, on hover
-  await expect(page.getByRole('heading', { name: `New chat in ${name}` })).toBeVisible();
+  await expectNewChatInFront(page, name); // the word cut (W86): the page's heading for a screen reader alone
   const id = value(await invoke(page, 'session.intent.list', undefined)).intents.at(-1)!.appSessionId;
   const w = await openWidget(live, 'model'); // W3: the model selector, a pick applies at once
   await w.getByRole('menuitemradio', { name: SONNET }).click();
@@ -198,9 +216,24 @@ async function typedLine(page: Page, main: Locator, line: string): Promise<void>
   await expect(page.getByRole('listbox', { name: 'Commands' })).toBeHidden();
   await page.keyboard.press('Enter');
 }
-// The body once its read answered: no `Reading…`, no error line.
+// The body once its read answered. The word cut (P518, P535): a read's wait is a quiet spinner with no words, drawn only
+// once it has lasted half a second, so the wait is over when the body holds words of its own and no spinner, twice over
+// samples further apart than that half second.
 async function settled(w: Locator): Promise<string> {
-  await expect(w).not.toContainText('Reading', { timeout: 15_000 });
+  const body = w.locator('[data-widget-body]');
+  const scope = (await body.count()) > 0 ? body : w; // the model selector is a menu, with no frame
+  let quietBefore = false;
+  await expect
+    .poll(
+      async () => {
+        const quiet = (await scope.getByRole('progressbar').count()) === 0 && (await scope.innerText()).trim() !== '';
+        const held = quiet && quietBefore;
+        quietBefore = quiet;
+        return held;
+      },
+      { timeout: 15_000, intervals: [600], message: 'the read answered: words and no spinner' },
+    )
+    .toBe(true);
   return w.innerText();
 }
 
@@ -242,6 +275,7 @@ test('every widget opens with live engine data; controls take effect and are rea
 
     await step('the twenty names open from the palette with live data', async () => {
       const texts: Record<string, string> = {};
+      let sources: string[] = []; // the permission rules' source words (the word cut, P586), read while the widget is open
       for (const name of NAMES) {
         if (name === 'rename') {
           await closeWidgets(page);
@@ -257,6 +291,11 @@ test('every widget opens with live engine data; controls take effect and are rea
         }
         const w = await openWidget(live, name);
         texts[name] = await settled(w);
+        if (name === 'permissions') {
+          sources = await w.locator('[data-rule-source]').allInnerTexts();
+          // a source the renderer can name a file for keeps the file as its tip and description
+          await expect(w.locator('[data-rule-source]').filter({ hasText: /^project$/ }).first()).toHaveAccessibleDescription('Edited in .claude/settings.json');
+        }
       }
       observe('tour', texts);
       const gateway = texts.model!.split('GATEWAY')[1] ?? '';
@@ -269,7 +308,8 @@ test('every widget opens with live engine data; controls take effect and are rea
       expect(texts.config).toContain('C11_LIVE_FIXTURE');
       expect(texts.mcp).toContain('c11probe\nconnected');
       expect(texts.permissions).toMatch(/ALLOW2[\s\S]*ASK1[\s\S]*DENY1/);
-      expect(texts.permissions).toContain('.claude/settings.json · project');
+      expect(sources, 'a rule from the project settings, in one word (the word cut, P586)').toContain('project');
+      expect(texts.permissions).not.toContain('.claude/settings.json · project');
     });
 
     await step('Allow for this session adds a session grant row; /diff shows the file', async () => {
@@ -279,14 +319,16 @@ test('every widget opens with live engine data; controls take effect and are rea
       await allowForTheSession(frame); // U1a §D: the session scope, by its button or its menu entry
       await idle(page, id);
       const grantsWidget = await openWidget(live, 'permissions');
-      // a read cached before the grant shows until the refetch on mount lands
-      await expect(grantsWidget).toContainText(/Bash\(touch c11-live\.txt\)\s*this session · grant/, { timeout: 15_000 });
+      // a read cached before the grant shows until the refetch on mount lands; the word cut (P586): its source is "session"
+      const grant = grantsWidget.getByRole('list', { name: 'Allow rules' }).getByRole('listitem').filter({ hasText: 'Bash(touch c11-live.txt)' });
+      await expect(grant.locator('[data-rule-source]')).toHaveText('session', { timeout: 15_000 });
       const permissions = await grantsWidget.innerText();
       const diffWidget = await openWidget(live, 'diff');
       await expect(diffWidget).toContainText('c11-live.txt', { timeout: 15_000 }); // the read on open lands after the cached one shows
       const diff = await diffWidget.innerText();
       observe('grant', { permissions, diff, hookLog: existsSync(scratch.hookLog) ? readFileSync(scratch.hookLog, 'utf8') : null });
-      expect(permissions).toContain('Bash(touch c11-live.txt)\nthis session · grant');
+      expect(permissions).toContain('Bash(touch c11-live.txt)');
+      expect(permissions).not.toContain('this session · grant');
       expect(diff).toContain('c11-live.txt');
     });
 
@@ -299,11 +341,22 @@ test('every widget opens with live engine data; controls take effect and are rea
       const project = () => scratch.claudeJson().projects?.[repo] ?? {};
       const before = { disabled: project().disabledMcpServers ?? null };
       await row.locator('button[aria-expanded]').click();
-      await row.getByRole('button', { name: 'Reconnect' }).click();
-      await expect(w.getByRole('status')).toHaveText('Reconnected', { timeout: 30_000 });
+      const reconnect = row.getByRole('button', { name: /^Reconnect/ });
+      const earlier = controlRequests(maws, id, 'mcp_reconnect', 'c11probe').length;
+      await reconnect.click();
+      // the word cut (P569, P570): Reconnect is busy, with its spinner, while it works, and a confirmed success draws no
+      // line. Neither proves the press, so the wait is for this press's own mcp_reconnect, answered with a success.
+      await expect
+        .poll(() => controlRequests(maws, id, 'mcp_reconnect', 'c11probe').slice(earlier), { timeout: 30_000, message: 'a fresh mcp_reconnect of c11probe, answered' })
+        .toEqual([expect.objectContaining({ succeeded: true })]);
+      await expect.poll(async () => (await reconnect.getAttribute('aria-busy')) !== 'true', { timeout: 30_000 }).toBe(true);
+      await expect(row.getByRole('progressbar')).toHaveCount(0);
+      await expect(row.getByRole('status')).toHaveCount(0);
+      await expect(w).not.toContainText('Reconnected');
       const toggle = w.getByRole('switch', { name: 'Enabled: c11probe' });
-      await expect(w.locator('[data-widget-note]')).toHaveText(/^A switch here is for this chat, and every session started in .+ afterwards\.$/);
-      await expect(w.locator('[data-widget-note]')).toHaveAttribute('title', 'The engine records it in ~/.claude.json.');
+      // N148: what the switch reaches, and where the engine records it, is the row's note, its description at rest
+      await expect(w.locator('[data-widget-note]')).toHaveCount(0);
+      await expect(row).toHaveAccessibleDescription(/^A switch here is for this chat, and every session started in .+ afterwards\. The engine records it in ~\/\.claude\.json\.$/);
       await toggle.click();
       await expect(toggle).toHaveAttribute('aria-checked', 'false', { timeout: 30_000 });
       await expect(row.locator('button[aria-expanded]')).not.toContainText('Connected'); // disabled: the switch says it
@@ -335,14 +388,14 @@ test('every widget opens with live engine data; controls take effect and are rea
       await expect.poll(rev, { timeout: 30_000 }).toBeGreaterThan(r1);
       const second = await line.innerText();
       observe('plugins', { first, second, revisions: [r0, r1, await rev()] });
-      expect(first).toContain('0 errors');
+      expect(first, 'the word cut (P672): the receipt alone, errors counted only when there are some').toBe('Reloaded');
     });
 
-    await step('memory Reveal and config Open file reach Finder (recorded), paths under the guard', async () => {
+    await step('memory Reveal and config Reveal reach Finder (recorded), paths under the guard', async () => {
       const memory = await openWidget(live, 'memory');
       for (const button of await memory.getByRole('button', { name: 'Reveal' }).all()) await button.click();
       const config = await openWidget(live, 'config');
-      await config.getByRole('button', { name: 'Open file' }).first().click();
+      await config.getByRole('button', { name: 'Reveal' }).first().click(); // the word cut (P608)
       await page.waitForTimeout(500);
       const paths = await revealed(maws);
       observe('reveal', paths);
@@ -439,7 +492,7 @@ test('every widget opens with live engine data; controls take effect and are rea
 
     await step('/compact compacts and a compaction boundary follows', async () => {
       const w = await openWidget(live, 'compact');
-      await w.getByRole('button', { name: 'Compact now' }).click();
+      await w.getByRole('button', { name: 'Compact', exact: true }).click(); // the word cut (P631)
       await expect(w).toBeHidden();
       await expect.poll(() => kindsOf(page, id), { timeout: 180_000 }).toContain('boundary.compaction');
       await idle(page, id);

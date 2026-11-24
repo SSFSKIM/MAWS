@@ -63,8 +63,9 @@ export const ACTIONS = {
   'panel.toggle':         { title: 'Toggle session cards',          chord: 'Cmd+Shift+B',  sink: 'menu', menu: 'view', scope: 'app' },
   'panel.maximize':       { title: 'Expand surface',        chord: null,           sink: 'menu', menu: 'view', scope: 'app' },
   // P3-G (§D1.7): the panel's floating state, the third region state of the B family (⌘B the sidebar, ⇧⌘B the panel); a
-  // page in the browser passes every ⌥⌘ chord to the menu, so it works with a page focused
-  'panel.float':          { title: 'Float conversation over surface',    chord: 'Cmd+Alt+B',    sink: 'menu', menu: 'view', scope: 'app' },
+  // page in the browser passes every ⌥⌘ chord to the menu, so it works with a page focused. The word cut (W185): "Float
+  // chat" in the menu, the palette and the shortcuts; the panel header's control keeps its own name (P19)
+  'panel.float':          { title: 'Float chat',                  chord: 'Cmd+Alt+B',    sink: 'menu', menu: 'view', scope: 'app' },
   // U6a (l5-code-08): ⌘J, ⇧⌘D and ⇧⌘F show and hide Terminal, Review and Files, Claude Desktop's chords for the same acts;
   // the other surfaces stay unbound, the rarer ones in More surfaces ▸. Each row is titled by its surface's name.
   'surface.terminal': { title: 'Terminal', chord: 'Cmd+J', sink: 'menu', menu: 'view', scope: 'app' },

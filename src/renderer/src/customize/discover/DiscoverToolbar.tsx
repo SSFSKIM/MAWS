@@ -1,7 +1,7 @@
 // Discover's head controls (docs/doperpowers/specs/2026-10-24-plugin-aggregator-design.md, Design "The home" and
-// "Failure handling"): the search over every source and both names, Refresh (every source fetched again; main runs one
-// refresh at a time), the catalog's age, and the Sources popover with each source's state ("offline, from 2 days ago",
-// "unavailable", the records it could not read). Below them, the filter row: the class chips (Anthropic, Partner,
+// "Failure handling"): the search over every source and both names, the catalog's age, and the Sources popover with
+// each source's state ("offline, from 2 days ago", "unavailable", the records it could not read) and Refresh (every
+// source fetched again; main runs one refresh at a time), the popover's alone (word cut G267: no Refresh in the toolbar). Below them, the filter row: the class chips (Anthropic, Partner,
 // Community, Added by you: the trust label's class), the Category menu, Not installed, and a removable chip for a shelf's
 // See all. Under All (UX wave U11c M4, §F) no Category menu: the kinds' categories are not one list.
 import { Popover } from 'radix-ui';
@@ -56,9 +56,6 @@ export function DiscoverToolbar({ tab, add }: { tab: Tab; add?: React.ReactNode 
       search={{ label: D.search, value: text, onChange: (next) => setChoices(tab, { text: next }) }}
       actions={
         <>
-            <button type="button" data-catalog-refresh disabled={running} onClick={refresh} className={QUIET}>
-              {running ? D.refreshing : D.refresh}
-            </button>
             <Popover.Root>
               <Popover.Trigger asChild>
                 <button type="button" aria-label={D.sources} data-catalog-sources-trigger className={QUIET}>

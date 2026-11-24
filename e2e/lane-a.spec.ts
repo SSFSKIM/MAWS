@@ -218,10 +218,13 @@ test.describe('lane A: a terminal session driven through its bridge', () => {
     c.terminal = { bridge, pid: registryOnly.pid, close: async () => (await bridge.close(), await registryOnly.close()) };
     await expect(editor(page)).toBeVisible({ timeout: 15_000 });
     await expect(notice(page)).toHaveCount(0);
-    // the owner's Q1: its tab marks it Terminal, titled with the hover card's line
+    // the owner's Q1: its tab marks it Terminal, with the hover card's line. The word cut (W10): the mark is the ⌁ glyph,
+    // the word its accessible name; the line (C130: who holds it, not how) is the tab's tip and description, no `title`
     const marker = page.locator('[role="tab"][aria-selected="true"] [data-holder-marker]');
-    await expect(marker).toHaveText('Terminal');
-    await expect(marker).toHaveAttribute('title', 'Running in Terminal'); // the word cut (C130): who holds it, not how
+    await expect(marker).toHaveText('⌁');
+    await expect(marker).toHaveAccessibleName('Terminal');
+    await expect(marker).not.toHaveAttribute('title');
+    await expect(page.locator('[role="tab"][aria-selected="true"]')).toHaveAccessibleDescription('Running in Terminal');
     // acceptance 2: each gap in place with its reason, the bridge's words from the capability fixture
     const reasonOf = (key: string) => sentence(FULL_CAPABILITIES.controls![key]!.reason!);
     // the O9 sitting: no mode is reported, so the chip names none, only why
@@ -336,7 +339,7 @@ test.describe('lane A: a terminal session driven through its bridge', () => {
     const { page } = c;
     const terminal = await drive(c);
     const row = await sidebarRow(page, { appSessionId: c.appId });
-    await expect(page.locator('[role="tab"][aria-selected="true"] [data-holder-marker]')).toHaveText('Terminal');
+    await expect(page.locator('[role="tab"][aria-selected="true"] [data-holder-marker]')).toHaveAccessibleName('Terminal'); // the word cut (W10): ⌁, named by the word
     await terminal.close();
     c.terminal = null;
     await expect.poll(async () => value(await invoke(page, 'session.get', { appSessionId: c.appId }))?.holder.kind, { timeout: 10_000 }).toBe('none');
@@ -571,7 +574,7 @@ test.describe('lane A: a terminal session driven through its bridge', () => {
     await editor(page).click();
     await editor(page).pressSequentially('/compact keep the file list');
     await editor(page).press('Enter');
-    await page.getByRole('button', { name: 'Compact now' }).click();
+    await page.getByRole('button', { name: 'Compact', exact: true }).click(); // the word cut (P631): "Compact", not "Compact now"
     await expect.poll(() => bodies(bridge, 'compact')).toEqual([{ op: 'compact', instructions: 'keep the file list' }]);
 
     // MCP: the bridge's read lists a connected server; Reconnect and Enable run `/mcp <verb> <name>`

@@ -1,5 +1,7 @@
 // A session's status glyph as the sidebar, tabs and cards show it (§5.7: one derivation, `glyph.ts`): the character in
-// its token tone, labelled for assistive technology, pulsing while working unless reduced motion is asked for.
+// its token tone, labelled for assistive technology, pulsing while working unless reduced motion is asked for. A card
+// that gives its word as a tooltip (the word cut's W69) makes it the tooltip's owner: it takes the props a trigger sets.
+import type { ComponentPropsWithRef } from 'react';
 import type { Glyph } from './glyph';
 
 const TONE: Record<Glyph['tone'], string> = {
@@ -10,10 +12,10 @@ const TONE: Record<Glyph['tone'], string> = {
   faint: 'text-fg-faint',
 };
 
-export function GlyphMark({ glyph, className = '' }: { glyph: Glyph; className?: string }) {
+export function GlyphMark({ glyph, className = '', ...span }: { glyph: Glyph } & Omit<ComponentPropsWithRef<'span'>, 'role' | 'aria-label' | 'children'>) {
   const pulse = glyph.pulse ? 'animate-pulse motion-reduce:animate-none' : '';
   return (
-    <span role="img" aria-label={glyph.label} className={`inline-block text-center ${TONE[glyph.tone]} ${pulse} ${className}`}>
+    <span role="img" aria-label={glyph.label} {...span} className={`inline-block text-center ${TONE[glyph.tone]} ${pulse} ${className}`}>
       {glyph.char}
     </span>
   );

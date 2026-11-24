@@ -65,7 +65,7 @@ describe('every widget renders its fixture response', () => {
     plugins: '11 plugins loaded in this session', // P2-B: the library's loaded line
     mcp: 'openaiDeveloperDocs',
     sandbox: 'Sandbox off',
-    'reload-plugins': 'Reloaded · 52 commands · 5 agents · 11 plugins · 0 errors', // E11 §2.2: it reloads on opening
+    'reload-plugins': 'Reload plugins', // E11 §2.2: it reloads on opening; the word cut (P751): its title, as it says the rest in a toast
     hooks: 'echo MAWS_POSTHOOK',
     memory: 'Project instructions',
     skills: 'deep-research', // P2-B M6: the skills library's row names the skill
@@ -73,10 +73,10 @@ describe('every widget renders its fixture response', () => {
     status: 'http://127.0.0.1:8641',
     context: '30,433 of 200,000 · 15% · autocompact at 167,000',
     export: '2026-09-28-022217-reply-with-exactly-ok.txt',
-    diff: '0 files · +0 −0 · working tree',
+    diff: '+0 −0', // the word cut (P643)
     compact: '21,508 of 200,000 · 11% · autocompact at 167,000', // the summary corrected as C3 corrects its sample (debt wave 4)
     resume: 'Usage reset countdown',
-    rename: 'New title',
+    rename: 'Rename', // the word cut (P635): the field's name is no longer drawn; its button is
   };
 
   const SELECTOR = ['model', 'effort', 'fast'];

@@ -1,6 +1,7 @@
 // The toolbar, which is also the window's title bar (`titleBarStyle: 'hiddenInset'`, §3; mockup 01): a drag region
 // with the traffic lights' 78 px clearance and sidebar/Overview toggles across the sidebar's width,
-// the project chip and the focused pane's active tab as the title (with the branch chip on a session), the session
+// the focused pane's active tab as the title (with the branch chip on a session; the word cut, W4, took the project chip
+// left of the tabs, whose room the tabs and the surface icons take), the session
 // actions menu and the panel toggle, then, at the title bar's own right end, the usage slot (UX wave U7b, O-47: the ring,
 // after the surface icons and outside their overflow; on a page too, where it stands at the window's right edge).
 // Every control is `no-drag`, so clicks reach it rather than moving the window.
@@ -15,18 +16,15 @@ import { DropdownMenu } from 'radix-ui';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { SessionRecord } from '@shared/graph/session';
 import type { Destination, TabRef } from '@shared/ipc/schema/layout';
-import { runAction, useCurrentRow } from '../keymap/actions-runtime';
-import { revealRow, sidebarListsRow } from '../sidebar/reveal';
+import { runAction } from '../keymap/actions-runtime';
 import { selectNeedsYou, useAttention } from '../stores/attention';
 import { useLayout } from '../stores/layout';
 import { activeTab, currentSet } from '../stores/layout-model';
 import { branchLabel } from '../sessions/branch-label';
 import { workingBranch } from '@shared/sessions/working-folder'; // UX wave U8c-2
 import { useSessions, type ListedSession } from '../stores/sessions';
-import { machineName, rowName, selectOrgIndex } from '../stores/org-projects'; // P5 O6 M5
-import { useMachines } from '../stores/machines';
-import { ipc } from '../ipc/client';
-import { FolderIcon, Icon, IconButton, SidebarIcon } from './IconButton';
+import { Icon, IconButton, SidebarIcon } from './IconButton';
+import { HiddenHeading } from '../ui/hidden-heading';
 import { DESTINATION } from '../destination/copy';
 import { PAGE_TITLE_ID } from '../destination/DestinationPage';
 import { useShellGeometry, useShellView } from './shell-view';
@@ -118,8 +116,7 @@ export function Toolbar() {
   const zoom = useZoom((s) => s.factor); // UX wave U6b-5b
   const leading = Math.max(geometry.sidebar || 150, leadingFloor(zoom));
   const stripRoom = split ? 240 : 180;
-  const projectChip = geometry.chrome >= leading + stripRoom + 322;
-  const controlsRoom = geometry.chrome - leading - 16 - stripRoom - (projectChip ? 96 : 0);
+  const controlsRoom = geometry.chrome - leading - 16 - stripRoom;
   const surfaceIcons = Math.max(0, Math.floor((controlsRoom - 28 - USAGE_RING_ROOM) / 30));
   const Usage = useSlot('topBarEnd');
 
@@ -149,9 +146,7 @@ export function Toolbar() {
           </IconButton>
         </div>
       </div>
-      {/* UX wave U7, O-03: the wrapper owns the chip's 96 px and clips; the button fills it and truncates, its focus ring inset */}
       {destination !== null && <PageTitle destination={destination} />}
-      {projectChip && destination === null && <div className="max-w-24 min-w-0 shrink overflow-hidden"><ProjectChip /></div>}
       <div ref={mountChromeTabs} data-chrome-tabs inert={destination !== null} className={`flex h-full min-w-0 flex-1 items-stretch ${destination !== null ? 'invisible' : ''}`}>
         <div data-chrome-slot="0" className="contents" />
         <div data-chrome-slot="1" className="contents" />
@@ -167,41 +162,13 @@ export function Toolbar() {
   );
 }
 
-// P3-F wave S (F17, the owner's obs 8; W12's label, which named the set at the strip's left edge until the owner moved it
-// out of the crowded strip), left of the title. UX wave U13a (O-31): it names the current project's row (`useCurrentRow`:
-// the row of the session in front), a project's or a machine's own, and none with no session in front or for a chat with
-// no project. A click, Enter or Space reveals that row in the sidebar (`revealRow`, a hidden project's restored first);
-// it creates nothing, and has no menu.
-export const PROJECT_CHIP_COPY = {
-  reveal: (name: string) => `Reveal ${name} in sidebar`,
-  show: (name: string) => `Show ${name} in sidebar`, // a row the sidebar does not list: restored first
-} as const;
+// UX wave U7b: Back and the page's name; Back leaves the page (U6b's history takes it over when it lands). The word cut
+// (W6, the owner's ruling of 2026-11-20): the name is drawn on the Projects page alone; Customize and Artifacts keep it as
+// a hidden heading, which still labels the page's region.
+const NAMED_PAGES: ReadonlySet<Destination['kind']> = new Set(['projects']);
 
-function ProjectChip() {
-  const current = useCurrentRow(); // U13a: the current project's row
-  const local = ipc.localMachine;
-  const index = useSessions((s) => selectOrgIndex(s, local));
-  const machines = useMachines((s) => s.machines);
-  const name = current === null ? null : rowName(index, current, (m) => machineName(machines, m, local));
-  if (current === null || name === null) return null;
-  const label = sidebarListsRow(index, current) ? PROJECT_CHIP_COPY.reveal(name) : PROJECT_CHIP_COPY.show(name);
-  return (
-    <button
-      type="button"
-      data-toolbar-project={current}
-      aria-label={label}
-      title={label}
-      onClick={() => revealRow(current)}
-      className="flex h-6 max-w-full min-w-0 items-center gap-1.5 rounded-sm px-1.5 text-ui-sm text-fg-muted outline-accent [-webkit-app-region:no-drag] hover:bg-bg-hover hover:text-fg focus-visible:outline-2 focus-visible:-outline-offset-2"
-    >
-      <FolderIcon className="size-[12px] shrink-0" />
-      <span className="truncate">{name}</span>
-    </button>
-  );
-}
-
-// UX wave U7b: Back and the page's name; Back leaves the page (U6b's history takes it over when it lands).
 function PageTitle({ destination }: { destination: Destination }) {
+  const name = DESTINATION.names[destination.kind];
   return (
     <div data-page-title className="flex min-w-0 shrink items-center gap-1 pr-2">
       <button
@@ -213,7 +180,11 @@ function PageTitle({ destination }: { destination: Destination }) {
       >
         <Icon><path d="M10 3.5 5.5 8l4.5 4.5" /></Icon>
       </button>
-      <h1 id={PAGE_TITLE_ID} className="m-0 min-w-0 truncate text-ui font-semibold text-fg">{DESTINATION.names[destination.kind]}</h1>
+      {NAMED_PAGES.has(destination.kind) ? (
+        <h1 id={PAGE_TITLE_ID} className="m-0 min-w-0 truncate text-ui font-semibold text-fg">{name}</h1>
+      ) : (
+        <HiddenHeading level={1} id={PAGE_TITLE_ID}>{name}</HiddenHeading>
+      )}
     </div>
   );
 }

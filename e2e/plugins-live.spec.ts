@@ -3,7 +3,7 @@
 // /tmp whose config home the engine and its plugin CLI write (support/plugins-live.ts). A session is created through
 // "+" on a scratch repository and runs one turn so `system/init` reports its plugins; then, in `/plugins` (P2-B's
 // library: My items and the Add menu's Add marketplace and Manage marketplaces), Discover (P4-AGG Decision Log 10:
-// `/plugins`' Open Discover, Customize › Discover with Show: Plugins for the session's directory, where a plugin is found and +
+// `/plugins`' Add › Discover plugins, Customize › Discover with Show: Plugins for the session's directory, where a plugin is found and +
 // installs it through the same sheet) and the panel, every management
 // action runs through its confirm sheet: the scratch folder marketplace added, one repository-source
 // marketplace added from GitHub and removed (network-dependent: a refusal is recorded, the folder case stays the gate),
@@ -19,6 +19,7 @@
 // In the gate it is the live group e2e:plugins-live (`ci-gate.sh --live`), its cap and the installed engine in its script.
 // With MAWS_LIVE_MAX_USD set (at most 1), the engine is reached through support/live-budget.ts's forwarding script,
 // which adds `--max-budget-usd <that cap>` to every session process (P2-F's re-run cap); unset, the engine itself.
+import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { expect, test, type Locator, type Page } from '@playwright/test';
 import type { AppSessionId } from '@shared/graph/ids';
@@ -26,6 +27,7 @@ import type { PluginsAction, PluginsInstallation, PluginsScope } from '@shared/p
 import { ENGINE_BIN, ENGINE_VERSION } from '../test/support/engine-pin';
 import { invoke, value } from './support/c7-replay';
 import { launchMaws } from './support/launch';
+import { expectNewChatInFront } from './support/screen-reader-only';
 import { cappedEngine, capWords } from './support/live-budget';
 import { auditOf, manifestOf, untilQuiet, type Manifest, type Tree } from '../test/support/plugins-audit';
 import { pluginsLiveSkipReason, pluginsScratch, trackPluginReads, type PluginReads, type PluginsScratch } from './support/plugins-live';
@@ -33,7 +35,7 @@ import { a15Line, a15Reading, type A15Reading } from './support/p1-live';
 import { compareA15 } from '../test/support/owner-file';
 import { newChatIn } from './support/sidebar';
 import { backToTabs, unfoldSessionCard } from './support/shell';
-import { customizePage } from './support/customize';
+import { customizePage, openDiscoverFromPlugins, pluginRowSwitch } from './support/customize';
 
 test.skip(process.env.MAWS_E8_LIVE !== '1', 'the E8 live run runs only under MAWS_E8_LIVE=1');
 const skip = process.env.MAWS_E8_LIVE === '1' ? pluginsLiveSkipReason() : null;
@@ -62,6 +64,18 @@ test.beforeAll(() => {
 // ---- the page --------------------------------------------------------------------------------------------------
 
 const status = async (page: Page, id: string) => value(await invoke(page, 'session.status', { appSessionId: id as AppSessionId }));
+// The control requests of `subtype` in the session's journal (its current launch's), oldest first, each with whether the
+// engine answered it with a success: a reload's own receipt, since Reload plugins and Reload skills share one line and
+// its word (the word cut, P672)
+async function controlRequests(page: Page, id: string, subtype: string): Promise<{ requestId: string; succeeded: boolean }[]> {
+  type Row = { direction: string; frame: { type?: string; request_id?: string; request?: { subtype?: string }; response?: { subtype?: string; request_id?: string } } };
+  const rows = readFileSync((await status(page, id)).journalPath, 'utf8').split('\n').filter(Boolean).map((line) => JSON.parse(line) as Row);
+  const succeeded = new Set(rows.filter((r) => r.direction === 'in' && r.frame.type === 'control_response' && r.frame.response?.subtype === 'success').map((r) => r.frame.response!.request_id));
+  return rows
+    .filter((r) => r.direction === 'out' && r.frame.type === 'control_request' && r.frame.request?.subtype === subtype && typeof r.frame.request_id === 'string')
+    .map((r) => ({ requestId: r.frame.request_id!, succeeded: succeeded.has(r.frame.request_id!) }));
+}
+const pluginCount = (n: number) => `${n} ${n === 1 ? 'plugin' : 'plugins'}`; // panel/copy.ts's SUMMARY_COPY.pluginsLoaded (the word cut, P65)
 async function idle(page: Page, id: string): Promise<void> {
   await page.waitForTimeout(1_500);
   await expect.poll(async () => {
@@ -133,7 +147,7 @@ async function openPlugins(page: Page): Promise<Locator> {
     return w;
   });
 }
-// P2-B M3: My items draws one row per plugin ("Disabled" when the CLI lists it not enabled here); what the session
+// P2-B M3: My items draws one row per plugin (the word cut's G215: its switch off when the CLI lists it not enabled here); what the session
 // loaded is Show › "Loaded in this session" (installed plugins as their rows, the engine's own and a folder's as plain
 // rows), and the loaded line under the head counts them.
 const installedRow = (w: Locator, id = PLUGIN) => w.locator(`[data-plugins-section="my-items"] [data-plugin-row="${id}"]`);
@@ -161,7 +175,6 @@ async function toMyItems(w: Locator): Promise<void> {
   if ((await view.count()) > 0) await view.click();
   await expect(w.locator('[data-plugins-section="my-items"]')).toBeVisible();
 }
-const disabledBadge = (row: Locator) => row.getByText('Disabled', { exact: true });
 // P2-B M4: a row's click opens its detail in place of the list; its switch, Update and overflow (Uninstall…) act at the
 // chosen chip's scope, and a change's line sits under the chips (`data-plugin-op` per scope). Back returns to the list.
 const detailOf = (w: Locator) => w.locator('[data-plugin-detail]');
@@ -197,7 +210,7 @@ async function loadedIds(w: Locator): Promise<string[]> {
 }
 // P4-AGG Decision Log 10: Customize's library, Discover beside My items; a card's line is on its card, or at Discover's
 // head once the catalog no longer lists it (the marketplace withdrew it and nothing installed it). UX wave U7b (O-40):
-// Customize is a page beside the sidebar, not a main tab. UX wave U11c: Open Discover lands on Discover with Show: Plugins
+// Customize is a page beside the sidebar, not a main tab. UX wave U11c: Discover plugins lands on Discover with Show: Plugins
 // in the page's head, and the page holds the head's tools and the pane (support/customize.ts).
 const discoverLibrary = (page: Page) => customizePage(page);
 const discoverLine = (page: Page, id: string) => {
@@ -220,15 +233,15 @@ async function ended(scope: Locator, timeout = DONE_TIMEOUT): Promise<{ text: st
     .toBe(true);
   return { text: (await line.innerText()).trim(), failed: ((await line.getAttribute('class')) ?? '').includes('text-danger') };
 }
-// Discover shown (from `/plugins`' Open Discover; main's catalog reads, the engine's listings through the host among
+// Discover shown (from `/plugins`' Add › Discover plugins, the word cut's P655; main's catalog reads, the engine's listings through the host among
 // them, audited as one listing) and one card found by Discover's search, by the plugin's name and the marketplace its
 // route installs from.
 async function discoverCard(page: Page, id: string): Promise<Locator> {
   const d = discoverLibrary(page);
   if (!(await d.locator('[data-discover="plugins"]').isVisible())) {
     const w = await openPlugins(page);
-    await listing('opening Discover (Open Discover; the catalog reads plugin list --json --available among its sources)', async () => {
-      await w.getByRole('button', { name: 'Open Discover', exact: true }).click();
+    await listing('opening Discover (Add › Discover plugins; the catalog reads plugin list --json --available among its sources)', async () => {
+      await openDiscoverFromPlugins(w);
       await expect(d.locator('[data-discover="plugins"] [data-catalog-card]').first()).toBeVisible({ timeout: 120_000 });
     });
   }
@@ -288,7 +301,8 @@ test('E8 live: marketplaces and plugins managed from /plugins and the panel thro
     await expect(sheet.locator('[data-plugins-argv]')).toBeVisible();
     const argv = await sheet.locator('[data-plugins-argv]').innerText();
     const writes = await sheet.getByRole('list', { name: "The engine's CLI writes:" }).getByRole('listitem').allInnerTexts();
-    const then = /Reloads plugins in \d+ running sessions?|No running session to reload|Nothing to reload[^\n]*/.exec(await sheet.innerText())?.[0] ?? null;
+    // the word cut (P720): the sheet says nothing when no session will reload, or for an added marketplace
+    const then = /Reloads plugins in \d+ running sessions?/.exec(await sheet.innerText())?.[0] ?? null;
     const uninstalls = /Also uninstalls [^\n]*/.exec(await sheet.innerText())?.[0] ?? null;
     scratch.log(`sheet: ${argv}`);
     scratch.log(`sheet writes: ${writes.join(' · ')}`);
@@ -317,7 +331,7 @@ test('E8 live: marketplaces and plugins managed from /plugins and the panel thro
       const projects = value(await invoke(page, 'session.projects.list', undefined)).projects;
       if (!projects.some((p) => p.directory === scratch.repo)) value(await invoke(page, 'session.projects.add', { directory: scratch.repo }));
       await newChatIn(page, 'e8-repo');
-      await expect(page.getByRole('heading', { name: 'New chat in e8-repo' })).toBeVisible();
+      await expectNewChatInFront(page, 'e8-repo');
       id = value(await invoke(page, 'session.intent.list', undefined)).intents.at(-1)!.appSessionId;
       const model = await openWidget(page, 'model');
       await model.getByRole('menuitemradio', { name: HAIKU }).click();
@@ -389,29 +403,36 @@ test('E8 live: marketplaces and plugins managed from /plugins and the panel thro
     await step('install', `Install ${PLUGIN} from its Discover card at user scope: reflected, the Loaded list and the panel before any new turn`, async () => {
       const card = await discoverCard(page, PLUGIN);
       const result = await action({ name: 'install', action: 'install', scope: 'user', source: null, fill: { marketplace: 'e8-scratch', plugin: 'e8-probe', id: PLUGIN }, sheet: 'install', submit: 'Install', line: () => discoverLine(page, PLUGIN) }, () => card.locator('[data-catalog-add]').click());
-      expect(result.text).toBe('Successfully installed plugin: e8-probe@e8-scratch (scope: user) · Reloaded in 1 session · reflected');
+      expect(result.text).toBe('Successfully installed plugin: e8-probe@e8-scratch (scope: user)'); // the word cut (P731): a reload that reached every session says nothing
       await expect(card).toHaveAttribute('data-installed', 'here'); // the installed plugin's card keeps the result
       const w = await backToSession(page);
       await expect(installedRow(w)).toHaveAttribute('data-plugin-scope', 'user');
-      await expect(disabledBadge(installedRow(w))).toHaveCount(0);
+      await expect(pluginRowSwitch(installedRow(w))).toHaveAttribute('aria-checked', 'true');
       await expect.poll(() => loadedIds(w), { timeout: 30_000 }).toContain(PLUGIN);
       const s = await status(page, id);
       scratch.log(`status before any new turn: plugins ${JSON.stringify(s.plugins.map((p) => p.name))}`);
       expect(s.plugins.map((p) => p.name)).toContain('e8-probe');
     });
 
-    await step('panel-reload', 'the Connectors card: Plugins · N loaded (the built-in ones and e8-probe), Reload plugins, Reload skills', async () => {
+    await step('panel-reload', 'the Connectors card: N plugins (the built-in ones and e8-probe), Reload plugins, Reload skills', async () => {
       await closeWidgets(page);
       const panel = await unfoldSessionCard(page, 'Connectors');
-      await expect(panel).toContainText(`Plugins · ${builtin + 1} loaded`);
+      await expect(panel.getByText(pluginCount(builtin + 1), { exact: true })).toBeVisible(); // the word cut (P65): the count alone
       const mods = panel.getByRole('button', { name: 'Reload plugins' });
       const line = mods.locator('xpath=following-sibling::*[@role="status"]');
       await mods.click();
-      await expect(line).toHaveText(new RegExp(`^Reloaded · \\d+ commands · \\d+ agents · ${builtin + 1} plugins · 0 errors$`), { timeout: 60_000 });
+      await expect(line).toHaveText('Reloaded', { timeout: 60_000 }); // the word cut (P672): no errors, no counts; the card's count above holds the plugins
       scratch.log(`Reload plugins: ${await line.innerText()}`);
       await shot(`${String(n).padStart(2, '0')}-panel-reload-mods`);
+      const earlier = (await controlRequests(page, id, 'reload_skills')).length;
       await panel.getByRole('button', { name: 'Reload skills' }).click();
-      await expect(line).toHaveText(/^Reloaded · \d+ skills?$/, { timeout: 60_000 });
+      // the word cut (P672): the skills' receipt is the same word as the plugins' already on the line, so the press is
+      // proved by its own reload_skills, answered with a success, and only then is the line read
+      await expect
+        .poll(async () => (await controlRequests(page, id, 'reload_skills')).slice(earlier), { timeout: 60_000, message: 'a fresh reload_skills, answered' })
+        .toEqual([expect.objectContaining({ succeeded: true })]);
+      await expect(panel.getByRole('button', { name: 'Reload skills' })).toBeEnabled({ timeout: 60_000 });
+      await expect(line).toHaveText('Reloaded', { timeout: 60_000 });
       scratch.log(`Reload skills: ${await line.innerText()}`);
       scratch.observe('panel', await panel.innerText());
     });
@@ -434,7 +455,7 @@ test('E8 live: marketplaces and plugins managed from /plugins and the panel thro
       expect(result.text).toContain('0.1.0 → 0.2.0');
       await expect(detail.locator('h3 + p')).toContainText('0.2.0');
       await backToList(w);
-      await expect(installedRow(w)).toContainText('0.2.0');
+      await expect(installedRow(w).locator('[data-plugin-version]')).toHaveText('0.2.0'); // the version alone; the date is the row note's (G218)
       scratch.log(`loaded after the update's reload: ${(await loadedIds(w)).join(' · ')}`);
     });
 
@@ -457,10 +478,10 @@ test('E8 live: marketplaces and plugins managed from /plugins and the panel thro
       const w = await openPlugins(page);
       const detail = await openDetail(w);
       const result = await action({ name: 'disable', action: 'disable', scope: 'user', source: null, fill: {}, sheet: 'disable', submit: 'Disable', line: () => opLineOf(detail) }, () => enableSwitch(detail).click());
-      expect(result.text).toBe('Successfully disabled plugin: e8-probe (scope: user) · Reloaded in 1 session · reflected');
+      expect(result.text).toBe('Successfully disabled plugin: e8-probe (scope: user)'); // the word cut (P731): a reload that reached every session says nothing
       await expect(enableSwitch(detail)).toHaveAttribute('aria-checked', 'false');
       await backToList(w);
-      await expect(disabledBadge(installedRow(w))).toBeVisible();
+      await expect(pluginRowSwitch(installedRow(w))).toHaveAttribute('aria-checked', 'false');
       await expect.poll(() => loadedIds(w), { timeout: 30_000 }).not.toContain(PLUGIN);
     });
 
@@ -468,10 +489,10 @@ test('E8 live: marketplaces and plugins managed from /plugins and the panel thro
       const w = page.locator('[data-widget="plugins"]');
       const detail = await openDetail(w);
       const result = await action({ name: 'enable', action: 'enable', scope: 'user', source: null, fill: {}, sheet: 'enable', submit: 'Enable', line: () => opLineOf(detail) }, () => enableSwitch(detail).click());
-      expect(result.text).toBe('Successfully enabled plugin: e8-probe (scope: user) · Reloaded in 1 session · reflected');
+      expect(result.text).toBe('Successfully enabled plugin: e8-probe (scope: user)'); // the word cut (P731): a reload that reached every session says nothing
       await expect(enableSwitch(detail)).toHaveAttribute('aria-checked', 'true');
       await backToList(w);
-      await expect(disabledBadge(installedRow(w))).toHaveCount(0);
+      await expect(pluginRowSwitch(installedRow(w))).toHaveAttribute('aria-checked', 'true');
       await expect.poll(() => loadedIds(w), { timeout: 30_000 }).toContain(PLUGIN);
     });
 
@@ -482,7 +503,7 @@ test('E8 live: marketplaces and plugins managed from /plugins and the panel thro
         await detail.getByRole('button', { name: /^More actions for / }).click();
         await page.getByRole('menuitem', { name: 'Uninstall…', exact: true }).click();
       });
-      expect(result.text).toBe('Successfully uninstalled plugin: e8-probe (scope: user) · Reloaded in 1 session · reflected');
+      expect(result.text).toBe('Successfully uninstalled plugin: e8-probe (scope: user)'); // the word cut (P731): a reload that reached every session says nothing
       await expect(detail).toHaveCount(0);
       await expect(installedRow(w)).toHaveCount(0);
       await expect.poll(() => loadedIds(w), { timeout: 30_000 }).not.toContain(PLUGIN);
@@ -516,10 +537,10 @@ test('E8 live: marketplaces and plugins managed from /plugins and the panel thro
     await step('reinstall', `Install ${PLUGIN} again, so the marketplace is removed with a plugin still installed`, async () => {
       const card = await discoverCard(page, PLUGIN);
       const result = await action({ name: 'reinstall', action: 'install', scope: 'user', source: null, fill: { marketplace: 'e8-scratch', plugin: 'e8-probe', id: PLUGIN }, sheet: 'install', submit: 'Install', line: () => discoverLine(page, PLUGIN) }, () => card.locator('[data-catalog-add]').click());
-      expect(result.text).toBe('Successfully installed plugin: e8-probe@e8-scratch (scope: user) · Reloaded in 1 session · reflected');
+      expect(result.text).toBe('Successfully installed plugin: e8-probe@e8-scratch (scope: user)'); // the word cut (P731): a reload that reached every session says nothing
       const w = await backToSession(page);
       await expect(installedRow(w)).toHaveAttribute('data-plugin-scope', 'user');
-      await expect(disabledBadge(installedRow(w))).toHaveCount(0);
+      await expect(pluginRowSwitch(installedRow(w))).toHaveAttribute('aria-checked', 'true');
     });
 
     await step('remove-folder', 'Remove… e8-scratch with e8-probe installed: the sheet names the uninstall; the marketplace and the plugin leave; its result stays', async () => {
@@ -533,7 +554,7 @@ test('E8 live: marketplaces and plugins managed from /plugins and the panel thro
       expect(result.uninstalls).toBe(`Also uninstalls 1 plugin: ${PLUGIN} (user)`);
       expect(result.text).toContain('Successfully removed marketplace: e8-scratch');
       await expect(row).toHaveCount(0);
-      await expect(manage).toContainText('No marketplaces added yet.');
+      await expect(manage).toContainText('None yet.'); // the word cut (P739)
       await closeDialog(manage);
       await expect(installedRow(w)).toHaveCount(0); // the engine uninstalled it with its marketplace
       await expect.poll(() => loadedIds(w), { timeout: 30_000 }).not.toContain(PLUGIN); // and the reload after the removal dropped it

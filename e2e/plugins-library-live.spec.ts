@@ -6,10 +6,10 @@
 // refusal is recorded and the counts check is skipped with its words), code-review installed for the user,
 // frontend-design for the scratch repository, supabase for another project only; a user skill and a project skill
 // written. Then, through Playwright: one Haiku turn in the repository and the session stopped; `/plugins` at its library
-// size with Esc handing the keyboard back; My items' groups; frontend-design's detail ("Loaded last time"); the loaded
-// line on the exited session ("Loaded last time, <relative>" with Refresh) with no engine started; `/skills` on the
+// size with Esc handing the keyboard back; My items' groups; frontend-design's detail ("as of"); the loaded
+// line on the exited session ("as of <relative>" with Refresh) with no engine started; `/skills` on the
 // exited session in P2-A's dormant state, starting nothing until its Load now (which then reads the skills with no
-// turn), the session stopped again; the loaded line's Refresh ("Starting…", then "Loaded now"); Open Discover's counts
+// turn), the session stopped again; the loaded line's Refresh (its quiet spinner, then "Loaded now"); Discover plugins' counts
 // and the other-projects card installing here (P4-AGG Decision Log 10); Manage marketplaces; `/skills`' groups with Use in chat, and `/sandbox`. Light
 // and dark shots of each library. The owner's ~/.claude.json is only read: the A-15 reading before the run and after
 // the app closed (§6.3's check, once a wrapper's around the run, now here). Run on purpose only; it spends usage (one
@@ -35,7 +35,8 @@ import { pluginsLiveSkipReason, pluginsScratch, type PluginsScratch } from './su
 import { a15Line, a15Reading, type A15Reading } from './support/p1-live';
 import { compareA15 } from '../test/support/owner-file';
 import { backToTabs, pageRegion } from './support/shell';
-import { chooseCustomize, customizePage } from './support/customize';
+import { chooseCustomize, customizePage, openDiscoverFromPlugins } from './support/customize';
+import { expectNewChatInFront } from './support/screen-reader-only';
 import { newChatIn } from './support/sidebar';
 
 test.skip(process.env.MAWS_E8_LIVE !== '1', 'the P2-B acceptance runs only under MAWS_E8_LIVE=1');
@@ -139,7 +140,7 @@ async function send(page: Page, text: string): Promise<void> {
   await page.keyboard.insertText(text);
   await page.keyboard.press('Enter');
 }
-// Back to the session after Discover: Open Discover leaves Customize open, and the embedded library has no Close, so the
+// Back to the session after Discover: Discover plugins leaves Customize open, and the embedded library has no Close, so the
 // composer steps leave it first (none open: nothing to do). UX wave U7b (O-40): Customize is a page beside the sidebar,
 // left by its Back in the title bar; the session's tab, kept behind it, is shown again.
 async function backToSession(page: Page): Promise<void> {
@@ -248,7 +249,7 @@ test('P2-B acceptance: the plugin and skills libraries on the installed engine, 
       const projects = value(await invoke(page, 'session.projects.list', undefined)).projects;
       if (!projects.some((p) => p.directory === scratch.repo)) value(await invoke(page, 'session.projects.add', { directory: scratch.repo }));
       await newChatIn(page, 'e8-repo');
-      await expect(page.getByRole('heading', { name: 'New chat in e8-repo' })).toBeVisible();
+      await expectNewChatInFront(page, 'e8-repo');
       id = value(await invoke(page, 'session.intent.list', undefined)).intents.at(-1)!.appSessionId;
       const model = await openWidget(page, 'model');
       await model.getByRole('menuitemradio', { name: HAIKU }).click();
@@ -297,19 +298,22 @@ test('P2-B acceptance: the plugin and skills libraries on the installed engine, 
       await bothThemes('my-items');
     });
 
-    await step('detail', 'frontend-design’s detail: Enabled for this project, the loaded fact, What’s inside with its skill', async () => {
+    await step('detail', 'frontend-design’s detail: enabled for this project (no fact drawn), the loaded fact, What’s inside with its skill', async () => {
       if (!needsCatalogue()) return;
       const w = page.locator('[data-widget="plugins"]');
       await myItems(w).locator(`[data-plugin-row="${o('frontend-design')}"]`).click();
       const detail = w.locator('[data-plugin-detail]');
       await expect(detail).toHaveAttribute('data-plugin-detail', o('frontend-design'));
-      await expect(detail.locator('[data-plugin-fact="enabled"]')).toHaveText('Enabled for this project');
+      // the word cut (G235): enabled here draws no fact; its switch says it, and the fact stands only for "Not enabled"
+      await expect(detail.locator('[data-plugin-fact="enabled"]')).toHaveCount(0);
+      await expect(detail.getByRole('switch', { name: 'Enable plugin' })).toHaveAttribute('aria-checked', 'true');
       const loaded = await detail.locator('[data-plugin-fact="loaded"]').innerText();
       scratch.log(`loaded fact: ${loaded}`);
       scratch.observe('detail.loaded', loaded);
       // P2-A's observed facts: the stopped session's list, labelled with when it was loaded
-      expect(loaded).toMatch(/^Loaded in this session · Loaded last time, \S/);
-      const inside = detail.getByRole('region', { name: 'What’s inside' });
+      expect(loaded).toMatch(/^Loaded in this session · as of \S/); // the word cut (P664)
+      const inside = detail.getByRole('region', { name: 'What’s inside' }); // the word cut (P712): its name, no heading drawn
+      await expect(inside.getByRole('heading', { name: 'What’s inside' })).toHaveCount(0);
       await expect(inside).toContainText('Skills');
       await expect(inside).toContainText('frontend-design');
       scratch.log(`what's inside: ${(await inside.innerText()).replaceAll('\n', ' · ')}`);
@@ -317,30 +321,36 @@ test('P2-B acceptance: the plugin and skills libraries on the installed engine, 
       await w.getByRole('button', { name: /^Back to / }).click();
     });
 
-    await step('loaded-line', 'the loaded line on the stopped session: N plugins loaded · Loaded last time, with Refresh; no engine started by /plugins', async () => {
+    await step('loaded-line', 'the loaded line on the stopped session: N plugins loaded · as of, with Refresh; no engine started by /plugins', async () => {
       const plugins = await openWidget(page, 'plugins');
       const line = plugins.locator('[data-plugins-loaded]');
       await expect(line).toHaveAttribute('data-loaded-freshness', 'last');
       const text = (await line.textContent()) ?? '';
       scratch.log(`loaded line: ${text}`);
       scratch.observe('loadedLine', text);
-      expect(text).toMatch(/^[1-9]\d* plugins? loaded in this session·Loaded last time, \S/);
+      expect(text).toMatch(/^[1-9]\d* plugins? loaded in this session·as of \S/); // the word cut (P664)
+      // the word cut (P522): the line's Refresh is the circular arrow, the word its name
       await expect(line.getByRole('button', { name: 'Refresh' })).toBeVisible();
+      await expect(line.getByRole('button', { name: 'Refresh' })).toHaveText('');
       expect(await starts()).toBe(launched); // nothing since the stop: /plugins, the detail and the line started no engine
       expect((await status(page, id)).process).not.toBe('ready');
     });
 
-    await step('skills-dormant', '/skills on the stopped session: Not read yet. with Load now, nothing started until it is clicked; Load now reads the skills with no turn; stopped again', async () => {
+    await step('skills-dormant', '/skills on the stopped session: Load now alone, nothing started until it is clicked; Load now reads the skills with no turn; stopped again', async () => {
       const sent = await invokes(['session.send', 'session.steer']);
       const w = await openWidget(page, 'skills');
-      await expect(w.getByText('Not read yet.')).toBeVisible();
+      // the word cut (P519): a dormant dialog with no earlier answer draws Load now alone, no "Not read yet."
       await expect(w.getByRole('button', { name: 'Load now' })).toBeVisible();
+      await expect(w.locator('[data-dormant-gesture]')).toHaveText('Load now');
       await page.waitForTimeout(1_000);
       expect(await starts()).toBe(launched); // opening /skills started nothing
       await shot('skills-dormant');
       await w.getByRole('button', { name: 'Load now' }).click();
-      await expect(w.getByText('Starting…')).toBeVisible({ timeout: 10_000 });
-      await expect(w.locator('[data-skill-row="p2b-project"]')).toBeVisible({ timeout: 120_000 });
+      // the word cut (P523): the start's wait is the quiet spinner, drawn once the start outlasts its half second; a start
+      // quicker than that goes straight to its result, asserted next (the paced replay in sessions-available proves the spinner)
+      const skillRow = w.locator('[data-skill-row="p2b-project"]');
+      await expect.poll(async () => (await w.getByRole('progressbar', { name: 'Starting…' }).isVisible()) || (await skillRow.isVisible()), { timeout: 10_000, message: 'the start’s spinner, or its result' }).toBe(true);
+      await expect(skillRow).toBeVisible({ timeout: 120_000 });
       expect(await starts()).toBe(launched + 1); // one acquisition, the click's
       expect(await invokes(['session.send', 'session.steer'])).toBe(sent); // no prompt to read them
       scratch.log(`after Load now: ${(await status(page, id)).process}; skills rows ${await w.locator('[data-skill-row]').count()}`);
@@ -355,21 +365,22 @@ test('P2-B acceptance: the plugin and skills libraries on the installed engine, 
       scratch.log(`ready with no turn: pluginsObservedAt ${s.pluginsObservedAt ?? 'null'}, ${s.plugins.length} plugins in the status; loaded line: ${(await line.textContent()) ?? ''}`);
       await expect(line).toHaveAttribute('data-loaded-freshness', 'last');
       await expect(line).not.toContainText('Loaded now');
-      expect((await line.textContent()) ?? '').toMatch(/^[1-9]\d* plugins? loaded in this session·Loaded last time, \S/);
+      expect((await line.textContent()) ?? '').toMatch(/^[1-9]\d* plugins? loaded in this session·as of \S/); // the word cut (P664)
       await closeWidgets(page);
       value(await invoke(page, 'session.stop', { appSessionId: id as AppSessionId, reason: 'stop' }));
       await expect.poll(async () => (await status(page, id)).process, { timeout: 60_000 }).not.toBe('ready');
       launched = await starts();
     });
 
-    await step('refresh', 'the loaded line’s Refresh on the stopped session: Starting…, then Loaded now (acquire, then reload_plugins; no turn)', async () => {
+    await step('refresh', 'the loaded line’s Refresh on the stopped session: its quiet spinner, then Loaded now (acquire, then reload_plugins; no turn)', async () => {
       const sent = await invokes(['session.send', 'session.steer']);
       const plugins = await openWidget(page, 'plugins');
       const line = plugins.locator('[data-plugins-loaded]');
       await expect(line).toHaveAttribute('data-loaded-freshness', 'last');
       expect(await starts()).toBe(launched);
       await line.getByRole('button', { name: 'Refresh' }).click();
-      await expect(line).toContainText('Starting…', { timeout: 10_000 });
+      // the word cut (P523): the quiet spinner while the start outlasts its half second, else straight to the result below
+      await expect.poll(async () => (await line.getByRole('progressbar', { name: 'Starting…' }).isVisible()) || (await line.getAttribute('data-loaded-freshness')) === 'now', { timeout: 10_000, message: 'the start’s spinner, or its result' }).toBe(true);
       scratch.log(`after the click: ${(await line.textContent()) ?? ''}`);
       await expect(line).toHaveAttribute('data-loaded-freshness', 'now', { timeout: 120_000 });
       await expect(line).toContainText('Loaded now');
@@ -388,12 +399,12 @@ test('P2-B acceptance: the plugin and skills libraries on the installed engine, 
       await plugins.getByRole('button', { name: /^Back to / }).click();
     });
 
-    // P4-AGG Decision Log 10: new plugins are found in Discover; `/plugins`' Open Discover opens Customize › Plugins ›
+    // P4-AGG Decision Log 10: new plugins are found in Discover; `/plugins`' Add › Discover plugins (the word cut's P655) opens Customize › Plugins ›
     // Discover for the session's directory. Its counts are the catalog's (plugin-details for official plugins), so the
     // CLI's count is logged beside the card's rather than required equal.
-    await step('discover', 'Open Discover from /plugins: counts on official cards, none on a directory-only card; supabase Installed in another project, installed here', async () => {
+    await step('discover', 'Discover plugins from /plugins: counts on official cards, none on a directory-only card; supabase In another project, installed here', async () => {
       if (!needsCatalogue()) return;
-      await page.locator('[data-widget="plugins"]').getByRole('button', { name: 'Open Discover', exact: true }).click();
+      await openDiscoverFromPlugins(page.locator('[data-widget="plugins"]'));
       const w = customizePage(page); // Customize's page (UX wave U7b), on Discover with Show: Plugins (UX wave U11c)
       const discover = w.locator('[data-discover="plugins"]');
       await expect(discover.locator('[data-catalog-card]').first()).toBeVisible({ timeout: 120_000 });
@@ -418,7 +429,7 @@ test('P2-B acceptance: the plugin and skills libraries on the installed engine, 
       await search.fill('supabase');
       const supabase = named('supabase').and(discover.locator(`[data-install-marketplace="${OFFICIAL}"]`));
       await expect(supabase).toHaveAttribute('data-installed', 'elsewhere', { timeout: 60_000 });
-      await expect(supabase).toContainText('Installed in another project');
+      await expect(supabase).toContainText('In another project'); // the word cut (G278)
       await supabase.locator('[data-catalog-add]').click();
       const sheet = page.locator('[data-plugins-sheet="install"]');
       await sheet.getByRole('radio', { name: 'Project' }).check();
@@ -429,6 +440,7 @@ test('P2-B acceptance: the plugin and skills libraries on the installed engine, 
       scratch.log(`sheet: ${argv}`);
       await sheet.getByRole('button', { name: 'Install', exact: true }).click();
       await expect(supabase).toHaveAttribute('data-installed', 'here', { timeout: 120_000 });
+      await expect(supabase.getByRole('img', { name: 'Installed', exact: true })).toBeVisible(); // the word cut (G278): the check alone
       // the session is running since Refresh, so E8's reload of the running sessions follows the install before its result
       await expect(supabase.getByRole('status')).toContainText(`Successfully installed plugin: ${o('supabase')} (scope: project)`, { timeout: 120_000 });
       scratch.log(`result: ${await supabase.getByRole('status').innerText()}`);
@@ -468,6 +480,9 @@ test('P2-B acceptance: the plugin and skills libraries on the installed engine, 
       scratch.log(`frontend-design's skill: ${(await design.innerText()).replaceAll('\n', ' · ')}`);
       const sends = () => invokes(['session.send', 'session.steer', 'session.start', 'session.acquire']);
       const sentBefore = await sends();
+      // the word cut (P746): a row's Use in chat is drawn on pointing or focus within the row
+      await design.hover();
+      await expect(design.getByRole('button', { name: 'Use in chat' })).toHaveCSS('opacity', '1');
       await design.getByRole('button', { name: 'Use in chat' }).click();
       await expect(w).toBeHidden();
       await expect(composer(page)).toContainText('/frontend-design:frontend-design');

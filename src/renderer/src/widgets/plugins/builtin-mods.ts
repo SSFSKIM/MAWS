@@ -30,10 +30,14 @@ export interface BuiltInModsState {
   setFoldSummaries(on: boolean): Promise<void>; // UX wave U2b (M7): this machine's; a press while one is out does nothing
 }
 
+// The rows are the session's they were read for: while another session's read is out, the last one's are not drawn as
+// its own (the word cut's fix wave for M4: their overrides, and the rows' opened state, are that session's).
+const LOADING: ModRowsRead = { state: 'loading' };
+
 export function useBuiltInMods(appSessionId: AppSessionId | null, client: MawsBridge = ipc): BuiltInModsState {
-  const [fetched, setRead] = useState<ModRowsRead>({ state: 'loading' });
+  const [fetched, setRead] = useState<{ session: AppSessionId | null; read: ModRowsRead } | null>(null);
   const greyed = useRemoteUnavailable(appSessionId, 'mods.list');
-  const read: ModRowsRead = greyed !== null ? { state: 'unavailable', reason: greyed, elsewhere: true } : fetched;
+  const read: ModRowsRead = greyed !== null ? { state: 'unavailable', reason: greyed, elsewhere: true } : fetched !== null && fetched.session === appSessionId ? fetched.read : LOADING;
   const [asked, setAsked] = useState(0); // bumped to read again
   const [failure, setFailure] = useState<string | null>(null);
   const again = useCallback(() => setAsked((n) => n + 1), []);
@@ -43,7 +47,7 @@ export function useBuiltInMods(appSessionId: AppSessionId | null, client: MawsBr
     let live = true;
     void client.invoke('mods.list', appSessionId === null ? {} : { appSessionId }).then((result) => {
       if (!live) return;
-      setRead(result.ok ? { state: 'ready', rows: result.value } : { state: 'unavailable', reason: result.error.message });
+      setRead({ session: appSessionId, read: result.ok ? { state: 'ready', rows: result.value } : { state: 'unavailable', reason: result.error.message } });
     });
     return () => {
       live = false;

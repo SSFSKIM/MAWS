@@ -1,7 +1,7 @@
 // "+ Session"'s machine menu (P5 O7 M4, "The machine menu", A5): beside the project chip of a New chat tab, this Mac by
 // default, offering each up RL2 machine (2026-11-06: with or without a project, the local project's checkout there taken
-// when it holds one); another machine chosen, one line under the row names where the session runs and on whose inference
-// route. No RL2 machine up, no menu.
+// when it holds one); another machine chosen, the chip names it, and no line under the row says it again (the word cut,
+// C67). While the machines are asked, a quiet spinner (C71). No RL2 machine up, no menu.
 import { cleanup, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -19,7 +19,7 @@ import { SETUP_WORDS } from '../../sessions/remote-setup';
 import type { MachineRef } from '@shared/machine/ref';
 import { useMachines } from '../../stores/machines';
 import { useSessions } from '../../stores/sessions';
-import { MACHINE_WORDS, MachineLine, MachineMenu } from './MachineMenu';
+import { MACHINE_WORDS, MachineMenu } from './MachineMenu';
 
 const TAB = addressOf(TEST_MACHINE, 'new-1' as AppSessionId);
 const THIRD = 'ThirdMachineRef0000000' as MachineRef;
@@ -30,12 +30,7 @@ const theirs = (over: Partial<ProjectRecord> = {}): ProjectRecord => ({ ...proje
 const HERE = addressOf(TEST_MACHINE, 'here' as ProjectId);
 const view = (key: string | null = KEY) => {
   if (key !== null) useSessions.setState({ projects: new Map([[HERE, { ...project('here', 0), id: HERE, org: { key: key as OrgKey, name: 'app', source: 'remote', smnsId: null } }]]) });
-  return render(
-    <>
-      <MachineMenu appSessionId={TAB} projectId={key === null ? null : HERE} projectKey={key} disabled={null} />
-      <MachineLine appSessionId={TAB} projectKey={key} />
-    </>,
-  );
+  return render(<MachineMenu appSessionId={TAB} projectId={key === null ? null : HERE} projectKey={key} disabled={null} />);
 };
 
 beforeEach(() => {
@@ -50,12 +45,11 @@ afterEach(() => {
 });
 
 describe('the machine menu', () => {
-  it('reads This Mac, offers the machines with this project’s checkout, and once one is chosen says where it runs', async () => {
+  it('reads This Mac, offers the machines with this project’s checkout, and once one is chosen names it on the chip alone', async () => {
     const invoke = vi.spyOn(ipc, 'invoke').mockResolvedValue({ ok: true, value: { projects: [theirs()], revision: 1 } } as never);
     view();
     const user = userEvent.setup();
     const chip = screen.getByRole('button', { name: 'Machine This Mac' });
-    expect(screen.queryByText(/^Lane B on /)).toBeNull();
     await user.click(chip);
     const menu = screen.getByRole('dialog', { name: 'Choose a machine' });
     await waitFor(() => expect(within(menu).getAllByRole('menuitemradio').map((item) => [item.firstChild?.textContent, item.getAttribute('aria-checked')])).toEqual([['This Mac', 'true'], ['mini', 'false']]));
@@ -63,11 +57,10 @@ describe('the machine menu', () => {
     await user.click(within(menu).getByRole('menuitemradio', { name: 'mini' }));
     expect(spawnTargetOf(TAB, KEY)).toEqual({ machine: OTHER_MACHINE, name: 'mini', checkout: '/srv/app', key: KEY });
     expect(screen.getByRole('button', { name: 'Machine mini' })).toBeTruthy();
-    expect(screen.getByText('Lane B on mini · mini’s inference route')).toBeTruthy();
+    expect(document.body.textContent, 'C67: no line under the row').not.toMatch(/Lane B|inference route/);
     await user.click(screen.getByRole('button', { name: 'Machine mini' }));
     await user.click(within(screen.getByRole('dialog', { name: 'Choose a machine' })).getByRole('menuitemradio', { name: 'This Mac' }));
     expect(spawnTargetOf(TAB, KEY)).toBeNull();
-    expect(screen.queryByText(/^Lane B on /)).toBeNull();
   });
 
   // 2026-11-06 (the owner's ruling: the machine first): the chip opens with no project, and every up RL2 machine is a
@@ -82,12 +75,12 @@ describe('the machine menu', () => {
     await user.click(chip);
     const menu = screen.getByRole('dialog', { name: 'Choose a machine' });
     await waitFor(() => expect(within(menu).getAllByRole('menuitemradio').map((item) => item.firstChild?.textContent)).toEqual(['This Mac', 'mini', 'vm']));
-    expect(within(menu).queryByText(MACHINE_WORDS.looking)).toBeNull();
+    expect(within(menu).queryByRole('progressbar')).toBeNull();
     expect(invoke).not.toHaveBeenCalled();
     await user.click(within(menu).getByRole('menuitemradio', { name: 'vm' }));
     expect(spawnTargetOf(TAB, null)).toEqual({ machine: THIRD, name: 'vm', checkout: null, key: null });
     expect(spawnTargetOf(TAB, KEY), 'a place chosen on the machine stands whatever the local project').toEqual({ machine: THIRD, name: 'vm', checkout: null, key: null });
-    expect(screen.getByText('Lane B on vm · vm’s inference route')).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Machine vm' })).toBeTruthy();
   });
 
   it('falls back to no place on a machine with no checkout of the local project, and greys one where the member can’t start sessions, with why', async () => {
@@ -136,6 +129,21 @@ describe('the machine menu', () => {
     await user.click(await within(menu).findByRole('menuitemradio', { name: 'vm' }));
     expect(spawnTargetOf(TAB, null)).toEqual({ machine: THIRD, name: 'vm', checkout: '/srv/p-b', key: null, label: 'scrape', registry: P });
     expect(invoke).not.toHaveBeenCalledWith('session.projects.list', undefined, expect.anything());
+  });
+
+  // the word cut (C71): the wait for the other machines' answers is a quiet spinner named by its words, not the words
+  it('while the other machines are asked, shows a quiet spinner named by the wait, gone once they answer', async () => {
+    let answer: (value: unknown) => void = () => {};
+    vi.spyOn(ipc, 'invoke').mockImplementation((() => new Promise((resolve) => (answer = resolve))) as never);
+    view();
+    await userEvent.setup().click(screen.getByRole('button', { name: 'Machine This Mac' }));
+    const menu = screen.getByRole('dialog', { name: 'Choose a machine' });
+    expect(within(menu).queryByRole('progressbar'), 'nothing for the first half second').toBeNull();
+    expect(await within(menu).findByRole('progressbar', { name: MACHINE_WORDS.looking }, { timeout: 2000 })).toBeTruthy();
+    expect(menu.textContent).not.toContain(MACHINE_WORDS.looking);
+    answer({ ok: true, value: { projects: [theirs()], revision: 1 } });
+    await waitFor(() => expect(within(menu).queryByRole('progressbar')).toBeNull());
+    expect(within(menu).getByRole('menuitemradio', { name: 'mini' })).toBeTruthy();
   });
 
   it('is closed while the row is, and absent with no RL2 machine up', () => {

@@ -36,7 +36,7 @@ async function reveal(page: Page, app: ElectronApplication, project: string): Pr
   await menu(app, 'palette.open');
   await expect(palette).toBeVisible();
   // Under load the first keystrokes can land before the input takes focus; type only once it holds it.
-  await expect(palette.getByPlaceholder('Search sessions, projects and actions')).toBeFocused();
+  await expect(palette.getByPlaceholder('Search', { exact: true })).toBeFocused(); // the word cut (W113): the placeholder
   await page.keyboard.type(project);
   const row = palette.getByRole('group', { name: 'Projects' }).getByRole('option', { name: project });
   await expect(row).toBeVisible();
@@ -96,7 +96,7 @@ test('an artifact found by its title opens beside the chat', async () => {
 
     const palette = s.page.getByRole('dialog', { name: 'Command palette' });
     await menu(s.maws.app, 'palette.open');
-    await expect(palette.getByPlaceholder('Search sessions, projects and actions')).toBeFocused();
+    await expect(palette.getByPlaceholder('Search', { exact: true })).toBeFocused(); // the word cut (W113): the placeholder
     await s.page.keyboard.type('lighthouse');
     const row = palette.getByRole('group', { name: 'Artifacts' }).getByRole('option', { name: /Quarterly lighthouse notes/ });
     await expect(row, 'the artifact listed under Artifacts once this Mac answered').toBeVisible({ timeout: 15_000 });

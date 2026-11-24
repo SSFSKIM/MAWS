@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { GetWorkspaceDiffResponse } from '@shared/wire/control';
 import { panelHost, usePanelHost } from '../panel/host';
+import { accessibleDescription, accessibleText } from '../test-support/accessible-text';
 import { DiffBody, present } from './DiffWidget';
 
 const ID = 'app-1' as AppSessionId;
@@ -50,5 +51,24 @@ describe("diff widget's Open in Review", () => {
     render(<DiffBody view={present(answer('working-tree'))} appSessionId={ID} close={() => {}} />);
     fireEvent.click(screen.getByRole('button', { name: 'src/app.ts' }));
     expect(addTool).toHaveBeenLastCalledWith('review', { appSessionId: ID, params: { scope: 'uncommitted', path: 'src/app.ts' } });
+  });
+});
+
+// the word cut (P643, P647)
+describe("diff widget's first line", () => {
+  it('reads the line counts alone, "· against <branch>" only for a branch comparison', () => {
+    const { unmount } = render(<DiffBody view={present(answer('working-tree'))} appSessionId={ID} close={() => {}} />);
+    expect(screen.getByText('+2 −1', { selector: 'p' })).toBeTruthy();
+    unmount();
+    render(<DiffBody view={present(answer('branch'))} appSessionId={ID} close={() => {}} />);
+    expect(screen.getByText('+2 −1 · against main', { selector: 'p' })).toBeTruthy();
+  });
+
+  it('says No diff, with its two reasons on a word the keyboard reaches', () => {
+    render(<DiffBody view={present({ diff: null })} appSessionId={ID} close={() => {}} />);
+    const none = screen.getByText('No diff');
+    expect(none.tabIndex).toBe(0);
+    expect(accessibleDescription(none)).toBe('Not a git repository, or a merge, rebase or cherry-pick is in progress');
+    expect(accessibleText(document.body)).not.toContain('cherry-pick');
   });
 });

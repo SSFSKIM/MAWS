@@ -36,7 +36,7 @@ async function attachSidebarStates(maws: MawsLaunch, info: TestInfo, state: 'row
     await expect(page.locator('[data-hover-card]')).toHaveCount(0);
     if (state === 'search') {
       await expect(sidebarOf(page).locator('[data-kind="session"]')).toHaveCount(785);
-      await expect(sidebarOf(page).getByRole('button', { name: 'Search in conversations for ‘test’', exact: true })).toBeInViewport();
+      await expect(sidebarOf(page).getByRole('button', { name: 'Search inside conversations', exact: true })).toBeInViewport(); // the word cut (W41): no query in its words
     }
     const name = `ux1-sidebar-${state}-${width}x${height}.png`;
     const path = info.outputPath(name);
@@ -145,7 +145,7 @@ test('UX1: titles keep their width on hover and conversation search stays reacha
     await expect(sidebarOf(page).locator('[data-kind="session"]')).toHaveCount(785);
     await expect(projectRow(page, 'chosen').getByLabel('785 matching sessions')).toBeVisible();
     await attachSidebarStates(maws, info, 'search');
-    const search = sidebarOf(page).getByRole('button', { name: 'Search in conversations for ‘test’', exact: true });
+    const search = sidebarOf(page).getByRole('button', { name: 'Search inside conversations', exact: true }); // the word cut (W41): the query is carried, not repeated
     await expect(search).toBeInViewport();
     const before = await search.boundingBox();
     await sidebarOf(page).getByTestId('sidebar-tree').evaluate((node) => { node.scrollTop = node.scrollHeight; });

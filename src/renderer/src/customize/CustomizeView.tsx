@@ -36,7 +36,7 @@ export function CustomizeView({ view, show }: { view: PageView; show: CustomizeS
   const engine = useSessions((s) => s.engine);
   const current = useCurrentRow(); // U13a: the current project
   const chosen = useCustomizeProject((s) => s.projectId);
-  // a directory no project has as its own (Open Discover from a session there, Decision Log 10): the page is that directory
+  // a directory no project has as its own (Discover plugins from a session there, Decision Log 10): the page is that directory
   const directory = useCustomizeProject((s) => s.directory);
   // UX wave U7b: the one rule of Customize's place
   const { project, cwd } = customizePlace({ projectId: chosen, directory }, current, allProjects);
@@ -75,7 +75,6 @@ export function CustomizeView({ view, show }: { view: PageView; show: CustomizeS
 
   const projectSelect = (
     <label className="flex min-w-0 max-w-full items-center gap-2 text-ui-sm text-fg-muted @max-sm/customize:w-full">
-      <span className="shrink-0">Showing</span>
       <select aria-label="Project" value={directory !== undefined ? DIRECTORY_PAGE : (project?.id ?? '')} onChange={(event) => setProject(event.target.value)} className="max-w-64 min-w-0 rounded-sm border border-border bg-bg-raised px-2 py-1 text-ui text-fg outline-accent focus-visible:outline-2 @max-sm/customize:max-w-full @max-sm/customize:flex-1">
         <option value="">User configuration</option>
         {directory !== undefined && <option value={DIRECTORY_PAGE}>{homeAbbreviated(directory)}</option>}

@@ -266,8 +266,9 @@ describe('Customize › Discover, Show: Plugins', () => {
     const shown = () => all.querySelectorAll('[data-catalog-grid] [data-catalog-card]').length;
     await waitFor(() => expect(shown()).toBe(2));
     fireEvent.click(within(all).getByRole('button', { name: 'Show more' }));
-    expect(await within(all).findByText('The catalog changed, so the list started again from the top.')).toBeTruthy();
+    await waitFor(() => expect(restartOnCursor).toBe(false)); // main answered the cursor with its restart
     await waitFor(() => expect(shown()).toBe(2));
+    expect(within(all).queryByText(/catalog changed/)).toBeNull(); // the word cut (G281): the list restarts without a notice
     fireEvent.click(within(all).getByRole('button', { name: 'Show more' }));
     await waitFor(() => expect(shown()).toBe(4));
     expect(invoked('catalog.query').filter((input) => (input as CatalogQueryInput).cursor === null)).toHaveLength(2); // the first page, asked again
@@ -350,7 +351,12 @@ describe('Customize › Discover, Show: Plugins', () => {
     catalog = catalog.map((i) => (i.id === frontend.id ? { ...frontend, alsoListedBy: ['claude-community'] } : i));
     mountPlugins();
     await discover();
-    expect(card(installedHere.id).querySelector('[data-catalog-installed]')!.textContent).toBe('Installed');
+    // the word cut (G278): the check alone, "Installed" its name and its tooltip
+    const mark = card(installedHere.id).querySelector<HTMLElement>('[data-catalog-installed]')!;
+    expect(mark.textContent).toBe('');
+    expect(mark.getAttribute('role')).toBe('img');
+    expect(mark.getAttribute('aria-label')).toBe('Installed');
+    expect(mark.tabIndex).toBe(0);
     expect(within(card(installedHere.id)).queryByRole('button', { name: 'Add code-review' })).toBeNull();
     fireEvent.click(within(card(frontend.id)).getByRole('button', { name: 'View frontend-design' }));
     const detail = await found('[data-catalog-detail]');
@@ -416,7 +422,9 @@ describe('Customize › Discover, Show: Plugins', () => {
     await waitFor(() => expect(invoked('catalog.icon').length).toBeGreaterThan(0));
     expect(card(frontend.id).querySelector('[data-item-image]')!.getAttribute('data-item-image')).toBe('tile');
     up = true;
-    fireEvent.click(screen.getByRole('button', { name: 'Refresh' }));
+    expect(screen.queryByRole('button', { name: 'Refresh' })).toBeNull(); // the word cut (G267): the Sources popover keeps it
+    fireEvent.click(screen.getByRole('button', { name: 'Sources' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Refresh' }));
     await waitFor(() => expect(card(frontend.id).querySelector('[data-item-image]')!.getAttribute('data-item-image')).toBe('icon'));
   });
 
@@ -447,17 +455,46 @@ describe('Customize › Discover, Show: Plugins', () => {
     expect(card(frontend.id).querySelector('img')).toBeNull();
   });
 
-  // Panel taste (1512 wide): "by Anthr…" beside "Listed by Anthropic". The publisher keeps its line, the trust label
-  // wraps beneath it when the two do not fit, into the room under a two-line description (the card's height is fixed).
-  it('a card’s byline gives the publisher its line and wraps the trust label beneath it, the full byline as its title', async () => {
+  // Panel taste (1512 wide): "by Anthr…" beside "Listed by Anthropic". The publisher keeps its line and the trust label
+  // has its own beneath it on every card, so a shelf's descriptions start at one height (the M4 picture review; the
+  // card's height is fixed, and the line it takes is the room under a two-line description).
+  it('a card’s byline gives the publisher its line and the trust label its own beneath it, the full byline as its title', async () => {
     mountPlugins();
     await discover();
     const byline = card(hooked.id).querySelector<HTMLElement>('[data-catalog-byline]')!;
-    expect(byline.classList.contains('flex-wrap')).toBe(true);
+    expect(byline.classList.contains('flex-col')).toBe(true);
     const publisher = byline.querySelector<HTMLElement>('[data-catalog-publisher]')!;
     expect(publisher.textContent).toBe('by MAWS e2e hooks');
     expect(publisher.title).toBe('by MAWS e2e hooks');
-    expect(byline.lastElementChild!.hasAttribute('data-trust')).toBe(true); // after the publisher, so it is what wraps
+    expect(byline.lastElementChild!.hasAttribute('data-trust')).toBe(true); // after the publisher, the line beneath it
+  });
+
+  // The M4 picture review, round 2: a card with no publisher (an added listing with neither author nor owner) keeps the
+  // publisher's line empty, so its trust label and description stand where its neighbours' do.
+  it('a card with no publisher keeps the publisher’s line, empty, above its trust label', async () => {
+    catalog = catalog.map((i) => (i.id === skillsOnly.id ? { ...i, publisher: null } : i));
+    mountPlugins();
+    await discover();
+    const byline = card(skillsOnly.id).querySelector<HTMLElement>('[data-catalog-byline]')!;
+    expect(byline.querySelector('[data-catalog-publisher]')).toBeNull();
+    expect(byline.children).toHaveLength(2);
+    const held = byline.firstElementChild as HTMLElement;
+    expect([held.textContent, held.getAttribute('aria-hidden'), held.classList.contains('h-[1lh]')]).toEqual(['', 'true', true]);
+    expect(byline.lastElementChild!.hasAttribute('data-trust')).toBe(true);
+  });
+
+  // The M4 picture review, round 2: the card's height is fixed so a shelf aligns, but not while a change's line stands on
+  // it: then it grows to hold the line, rather than squeezing it into the description's room.
+  it('a card grows past its fixed height while a change’s line stands on it, and its neighbours keep theirs', async () => {
+    mountPlugins();
+    await discover();
+    expect(card(hooked.id).classList.contains('h-36')).toBe(true);
+    fireEvent.click(within(card(hooked.id)).getByRole('button', { name: 'Add hooked' }));
+    await resolved();
+    fireEvent.click(within(sheet()).getByRole('button', { name: 'Install' }));
+    await waitFor(() => expect(within(card(hooked.id)).getByRole('status').textContent).toBe('done'));
+    expect([card(hooked.id).classList.contains('h-36'), card(hooked.id).classList.contains('min-h-36')]).toEqual([false, true]);
+    expect(card(skillsOnly.id).classList.contains('h-36')).toBe(true);
   });
 
   it('the Sources popover says which source is unavailable and counts dropped records', async () => {
@@ -503,11 +540,11 @@ describe('Customize: an add-then-install outlives a change of the page’s proje
 });
 
 describe('Customize › Discover, Show: Skills', () => {
-  it('names the plugin that carries the skills, and notes that unknown contents are under Plugins', async () => {
+  it('names the plugin that carries the skills, with no note about Plugins (the word cut, G280)', async () => {
     mountAt('skills', 'discover');
-    expect((await screen.findByText('Items whose contents are not known before install are under Plugins.')).tagName).toBe('P');
-    expect(invoked('catalog.home')).toEqual([{ tab: 'skills', cwd: PROJECT }]);
     const shelf = await found(`[data-shelf] [data-catalog-card="${CSS.escape(skillsOnly.id)}"]`);
+    expect(screen.queryByText('Items whose contents are not known before install are under Plugins.')).toBeNull();
+    expect(invoked('catalog.home')).toEqual([{ tab: 'skills', cwd: PROJECT }]);
     fireEvent.click(within(shelf).getByRole('button', { name: 'Add skills-only' }));
     await resolved();
     expect(shelf.querySelector('[data-catalog-components]')!.textContent).toBe('greet, summarize-diff'); // a Skills card lists its skills by name

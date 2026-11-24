@@ -96,9 +96,9 @@ describe('the status line, from host.status', () => {
   // P5 O16 M3c fix wave 2 (D63): an update that waits for MAWS tool calls, in the update copy, served or deferred
   it('while an update waits for tool calls says what it waits for', async () => {
     await renderGroup(status({ matches: 'build', handover: { inFlight: 2, tool: 'show_pane' } }));
-    await statusLine('Waiting for show_pane to finish before updating the engine host (2 calls running).');
+    await statusLine('Updating after 2 running calls');
     event(status({ state: 'restarting', supervisor: null, matches: null, handover: { inFlight: 1 } }));
-    await statusLine('Waiting for MAWS tool calls to finish before updating the engine host (1 call running).');
+    await statusLine('Updating after 1 running call');
   });
 
   it('while waiting on an incompatible supervisor says so and offers Restart now, which stops its sessions', async () => {

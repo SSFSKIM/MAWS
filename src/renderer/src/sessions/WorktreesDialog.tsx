@@ -3,7 +3,9 @@
 // rows (the checkout, its conversations, "New chat in this worktree", Delete; Refresh; the empty and error states),
 // in C10's words and with C10's cleanup ladder behind Remove…. Renderer only: git's list and each checkout's status
 // (with main's occupancy) are read when the dialog opens, on Refresh, and again when a cleanup it opened closes (the
-// cleanup returns here, which mounts this afresh); the setup intents that claim a checkout are C10's live store.
+// cleanup returns here, which mounts this afresh); the setup intents that claim a checkout are C10's live store. The word
+// cut (W154, W155, N173): the empty state reads "No worktrees yet" alone; a worktree with no session has no Sessions
+// label and no "No session" line; the read is a quiet spinner.
 import { useEffect, useState } from 'react';
 import type { AppSessionId, ProjectId } from '@shared/graph/ids';
 import type { WorktreeInfo, WorktreeStatus } from '@shared/sessions/worktree';
@@ -17,6 +19,7 @@ import { patchIntent } from './setup-actions';
 import { Sheet } from './Sheet';
 import { isStarting, useSetup } from './store';
 import { QUIET, SECONDARY } from './ui';
+import { QuietSpinner } from '../ui/spinner';
 import { worktreeRows, type Claim, type WorktreeRow } from './worktree-rows';
 import { displayTitle } from './title';
 import { machineOf } from '@shared/machine/address';
@@ -68,7 +71,7 @@ export function WorktreesDialog({ projectId }: { projectId: ProjectId }) {
   return (
     <Sheet title={title} width="w-[min(640px,92vw)]" data-c12="worktrees">
       {loaded.kind === 'loading' ? (
-        <p className="m-0 text-fg-muted">Reading worktrees…</p>
+        <QuietSpinner label="Reading worktrees" />
       ) : loaded.kind === 'not_repository' ? (
         <p className="m-0 text-fg-muted">Not a git repository</p>
       ) : loaded.kind === 'error' ? (
@@ -104,10 +107,7 @@ function Rows({ projectId, repoRoot, rows, onRefresh }: { projectId: ProjectId; 
         ))}
       </ul>
       {linked === 0 && (
-        <div className="flex flex-col gap-0.5 px-1 text-ui-sm">
-          <span className="text-fg">No worktrees yet</span>
-          <span className="text-fg-muted">Worktrees MAWS or Claude Code create in this repository appear here</span>
-        </div>
+        <p className="m-0 px-1 text-ui-sm text-fg">No worktrees yet</p>
       )}
     </div>
   );
@@ -163,21 +163,17 @@ function Row({ projectId, repoRoot, row }: { projectId: ProjectId; repoRoot: str
           </div>
         )}
       </div>
-      <div className="flex flex-col gap-0.5 text-ui-sm">
-        <span className="text-fg-muted">Sessions</span>
-        {row.noSession ? (
-          <span className="text-fg-faint">No session</span>
-        ) : (
-          <>
-            {row.sessionIds.map((id) => (
-              <button key={id} type="button" onClick={() => openSession(id)} className={`${QUIET} truncate text-left`}>
-                {titleOf(id)}
-              </button>
-            ))}
-            {row.terminalSessions > 0 && <span className="px-2.5 text-fg-muted">{plural(row.terminalSessions, 'terminal session')}</span>}
-          </>
-        )}
-      </div>
+      {!row.noSession && (
+        <div className="flex flex-col gap-0.5 text-ui-sm">
+          <span className="text-fg-muted">Sessions</span>
+          {row.sessionIds.map((id) => (
+            <button key={id} type="button" onClick={() => openSession(id)} className={`${QUIET} truncate text-left`}>
+              {titleOf(id)}
+            </button>
+          ))}
+          {row.terminalSessions > 0 && <span className="px-2.5 text-fg-muted">{plural(row.terminalSessions, 'terminal session')}</span>}
+        </div>
+      )}
     </li>
   );
 }

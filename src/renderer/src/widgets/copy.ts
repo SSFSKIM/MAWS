@@ -6,7 +6,7 @@ import type { PermissionMode } from '@shared/graph/enums';
 import { PERMISSION_MODE_LABELS } from '@shared/sessions/permission-mode-labels';
 import type { WidgetCommandName } from '../composer';
 import { STARTING_SESSION } from '../statusline/mode-menu';
-import { LAST_VALUE, NO_ANSWER } from '../ipc/transport-words';
+import { NO_ANSWER } from '../ipc/transport-words';
 // P2-C start (2026-10-09)
 import type { ModRow } from '@shared/mods/registry';
 import type { LaneOverride } from '@shared/owner/state';
@@ -16,7 +16,7 @@ export const WIDGET_TITLE: Record<WidgetCommandName, string> = {
   model: 'Model & effort',
   effort: 'Effort',
   fast: 'Fast mode',
-  permissions: 'Permissions & rules',
+  permissions: 'Permissions', // the word cut (P516)
   usage: 'Usage',
   config: 'Config',
   plugins: 'Plugins',
@@ -39,17 +39,17 @@ export const WIDGET_TITLE: Record<WidgetCommandName, string> = {
   'reload-plugins': 'Reload plugins', // E11 §2.2: the engine's terminal-only command as MAWS's action
 };
 
-// The frame.
+// The frame. The word cut (P518, P523): `reading` and `starting` name the quiet spinner that stands for the wait; P519
+// and P521 cut "Not read yet." and the "Read" before a cached answer's age; P525 shortens the stale line's tail, which
+// the transport branch's own words (`transportWords`) keep long.
 export const FRAME = {
   reading: 'Reading…',
   noAnswer: NO_ANSWER,
-  lastValue: LAST_VALUE,
+  lastValue: 'last reading shown',
   close: (title: string) => `Close ${title}`,
   // P2-A start (2026-10-09; the execution document §5.6, §10 Q5): a session with a record and no ready process
-  notRead: 'Not read yet.',
   loadNow: 'Load now',
   refresh: 'Refresh',
-  readAgo: (ago: string) => `Read ${ago}`,
   starting: STARTING_SESSION,
   // P2-A end
 };
@@ -58,29 +58,32 @@ export const FRAME = {
 export const SHARED = { none: 'none', on: 'on', off: 'off', yes: 'yes', no: 'no', reveal: 'Reveal', revealRefused: 'Finder was not opened for this path' };
 
 // Permissions: a rule's source in words (an unknown source verbatim), the groups in the engine's order, the workspace.
+// The word cut (P586): a source is one word, the same in Config's Sources and the hooks' list (N184); the settings file
+// it names is the word's tooltip, which also says where rules are edited (P582). P587 leaves "in a settings file" off
+// a rule's second line, P588 the first folder's "original directory".
 export const PERMISSIONS = {
   source: {
-    session: 'this session · grant',
-    flagSettings: 'startup settings',
-    projectSettings: '.claude/settings.json · project',
-    userSettings: '~/.claude/settings.json · user',
-    localSettings: '.claude/settings.local.json',
+    session: 'session',
+    flagSettings: 'startup',
+    projectSettings: 'project',
+    userSettings: 'user',
+    localSettings: 'local',
     policySettings: 'managed',
     cliArg: 'command line',
   } as Record<string, string>,
+  sourceFile: { projectSettings: '.claude/settings.json', userSettings: '~/.claude/settings.json', localSettings: '.claude/settings.local.json' } as Record<string, string>,
+  editedIn: (file: string) => `Edited in ${file}`,
   group: { allow: 'Allow', ask: 'Ask', deny: 'Deny' },
-  editability: { session: 'this session', readonly: 'read-only here', persistent: 'in a settings file' } as Record<string, string>,
+  editability: { session: 'this session', readonly: 'read-only here' } as Record<string, string>,
   rules: (group: string) => `${group} rules`,
-  none: 'No rules · every tool asks as the mode decides',
-  effective: 'Effective',
-  fromInit: 'from the init frame',
+  none: 'No rules', // the word cut (P584)
   workspace: 'Workspace',
   workspaceList: 'Workspace directories',
-  original: 'original directory',
   added: 'added',
   managedOnly: 'Only managed rules apply',
   grants: (n: number) => `${n} session grant${n === 1 ? '' : 's'} · re-applied after a resume`,
-  modeScope: 'The mode applies to this session only; rules are edited in their settings files', // E11 §2.2: was the foot's
+  mode: 'Mode', // the group of the mode segment, which its note describes
+  modeScope: 'The mode applies to this session only', // the word cut (P582): the segment's note
 };
 
 // Usage.
@@ -90,25 +93,25 @@ export const USAGE = {
   wallTime: 'Wall time',
   lines: 'Lines',
   model: (input: string, output: string, cacheRead: string, cacheWrite: string) => `${input} in · ${output} out · ${cacheRead} cache read · ${cacheWrite} cache write`,
-  engineNone: 'the engine reports no windows through the relay',
-  engineNoneDirect: 'the engine reports no windows for this login',
-  engineDirect: "the engine's own windows (a direct session)",
-  direct: 'Direct · the engine’s own login',
+  direct: 'Direct', // the word cut (P592)
   noPlanLimits: 'The engine reported no plan limits',
   pinned: 'Pinned account',
   routing: 'Routing account',
-  readingClaudeUsage: 'Reading ClaudeUsage…',
+  readingClaudeUsage: 'Reading ClaudeUsage', // the word cut (P596): the quiet spinner's name in the account line's place
+  noAccount: 'Account not found', // N183: ClaudeUsage answered and names no account for this session, a settled state
+  readFailed: "Couldn't read ClaudeUsage", // N183: the read failed and no snapshot is held; a later one replaces it
   unavailable: 'ClaudeUsage is not installed or has no data', // W2: the status line's usage popover said it; its own words now
   fiveHour: '5h',
   weekly: 'Weekly',
   windows: 'Windows',
   noReading: 'no reading',
-  sinceReset: '0% · no reading since the window reset',
+  sinceReset: '0%', // the word cut (P594): the figure alone
   resetsIn: (percent: number, when: string) => `${percent}% · resets in ${when}`,
   session: 'This session',
   accounting: 'Session accounting',
   models: 'Models',
   byModel: 'Tokens by model',
+  details: 'Details', // the word cut (P597, P598): the session's times, lines and tokens per model fold under it
   noRecord: 'No record for this session',
 };
 
@@ -118,7 +121,7 @@ export const CONTEXT = {
   notInWindow: 'not in the window',
   bar: (names: string) => `Context: ${names}`,
   categories: 'Context categories',
-  costs: 'What loads with every request',
+  costs: 'Every request', // the word cut (P602)
   memoryFiles: 'Memory files',
   mcpTools: 'MCP tools',
   agents: 'Agents',
@@ -132,18 +135,14 @@ export const CONTEXT = {
 export const CONFIG = {
   effective: 'Effective',
   effectiveList: 'Effective settings',
-  noEffective: 'No settings in effect beyond the defaults',
+  noEffective: 'Defaults only', // the word cut (P606)
   sources: 'Sources',
   sourceList: 'Settings sources',
-  noKeys: 'no keys',
-  applied: 'Applied',
+  applied: 'Applied', // the word cut (P609): Model and Effort leave it, since the model chip carries both
   appliedList: 'Applied to this session',
-  model: 'Model',
-  effort: 'Effort',
   advisor: 'Advisor',
   ultracode: 'Ultracode',
   errors: 'Errors',
-  openFile: 'Open file',
   mawsSettings: 'MAWS settings',
 };
 
@@ -151,13 +150,14 @@ export const CONFIG = {
 export const PLUGINS = { none: 'The engine loaded no plugins', problems: 'Problems', problemList: 'Plugin problems', loaded: 'Loaded in this session', loadedList: 'Loaded plugins' };
 
 // MCP. UX wave U11a (§C): the Connectors dialog's head, its muted subtitle and the one sentence of what the switch
-// reaches; `failed` and `off` are the status words Customize's copy does not hold (connector-status.ts).
+// reaches, each switch row's note with where the engine records the switch after it (the word cut, N148); `failed` and `off` are the status words Customize's copy does not
+// hold (connector-status.ts).
 export const MCP = {
   none: 'No connectors',
   list: 'Connectors',
   subtitle: 'MCP servers',
   reach: (place: string) => `A switch here is for this chat, and every session started in ${place} afterwards.`,
-  reachTip: 'The engine records it in ~/.claude.json.',
+  recorded: 'The engine records it in ~/.claude.json.',
   failed: 'Failed',
   off: 'Off',
   scope: (scope: string) => `scope ${scope}`,
@@ -168,8 +168,8 @@ export const MCP = {
 // UX wave U11a (§D, l8-settings-03): an unstarted tab's Connectors and Skills dialogs, what the three dialogs and the
 // "+" › Connectors submenu say for a tab set to another machine, and the place named with no folder chosen.
 export const BEFORE_START = {
-  connectors: (place: string) => `Configured for ${place}. Connection state shows once the chat starts.`, // UX wave U11h: a plugin's connectors are listed now
-  skills: (place: string) => `On disk for ${place}. The chat may load more once it starts.`,
+  connectors: (place: string) => `Configured for ${place}`, // the word cut (P573, ruled 2026-11-20)
+  skills: (place: string) => `On disk for ${place}`, // the word cut (P744)
   remote: (machine: string) => `Shown once the chat starts on ${machine}`,
   userConfiguration: 'your user configuration',
 };
@@ -195,16 +195,11 @@ export const SANDBOX = {
   fallbackRefusedOthers: 'Other commands run only inside the sandbox', // under `outside`: the excluded ones are named first
   // the excluded commands, which run outside the sandbox whatever the fallback says: the first three, then a count
   outside: (commands: string[]) => `Runs outside it: ${commands.slice(0, 3).join(', ')}${commands.length > 3 ? ` and ${commands.length - 3} more` : ''}`,
-  locked: 'Set by your organization; it cannot be changed here',
-  details: 'Details',
-  inSettings: 'In your settings',
-  lockedRow: 'Set by policy',
+  locked: 'Set by your organization', // the word cut (P614)
+  details: 'Details', // the word cut (P617): no longer repeats the first read's settings, policy lock or fallback
   autoAllow: 'Auto-allow',
   available: 'available',
   notAvailable: 'not available',
-  fallback: 'Unsandboxed fallback',
-  allowed: 'allowed',
-  refused: 'not allowed',
   network: 'Network',
   managed: 'managed',
   settings: 'Sandbox settings',
@@ -234,17 +229,17 @@ export const HOOKS = {
 };
 
 // Memory.
-export const MEMORY = { missing: 'does not exist yet', files: 'Files', fileList: 'Memory files', folders: 'Folders', folderList: 'Memory folders', autoMemory: (status: string) => `Auto memory · ${status}`, addNote: 'Add a note' };
+export const MEMORY = { missing: 'not created', files: 'Files', fileList: 'Memory files', folders: 'Folders', folderList: 'Memory folders', autoMemory: (status: string) => `Auto memory · ${status}`, addNote: 'Add a note' };
 
 // Skills and agents.
-export const AGENTS = { mention: 'Mention', none: 'No agents in the catalogue', list: 'Agents' };
+export const AGENTS = { mention: 'Mention', none: 'No agents', list: 'Agents' }; // the word cut (P627; P628 draws Mention on pointing)
 
-// Diff.
+// Diff. The word cut (P643, P647): the first line is the line counts, with what a branch comparison compares against;
+// "No diff" keeps its reasons for the pointer.
 export const DIFF = {
-  none: 'No diff · not a git repository, or a merge, rebase or cherry-pick is in progress',
-  workingTree: 'working tree',
+  none: 'No diff',
+  noneWhy: 'Not a git repository, or a merge, rebase or cherry-pick is in progress',
   against: (branch: string) => `against ${branch}`,
-  files: (n: string, one: boolean) => `${n} file${one ? '' : 's'}`,
   binary: 'binary',
   untracked: 'untracked',
   skipped: (n: string, one: boolean) => `${n} large file${one ? '' : 's'} skipped`,
@@ -254,7 +249,8 @@ export const DIFF = {
   reviewUnavailable: 'Review is not available',
 };
 
-// Export.
+// Export. The word cut (P640, P638): `copied` is said to a screen reader while Copy shows its check; the preview line
+// has no line count.
 export const EXPORT = {
   copy: 'Copy',
   copied: 'Copied',
@@ -262,7 +258,6 @@ export const EXPORT = {
   saveAs: 'Save as…',
   saved: (path: string) => `Saved to ${path}`,
   notSaved: (why: string) => `The export was not saved · ${why}`,
-  lines: (n: string) => `${n} lines`,
 };
 
 // ---- M3: the mutating widgets ---------------------------------------------------------------------------------------
@@ -335,10 +330,10 @@ export const MODEL = {
 // W3 (B7): the rewind picker's words (the terminal's Esc Esc picker).
 export const REWIND = {
   messages: 'Your messages',
-  none: 'No message of yours to rewind to yet',
+  none: 'Nothing to rewind to', // the word cut (P648)
   what: 'What to rewind',
   option: { conversation: 'Conversation', files: 'Files', both: 'Both' } as const,
-  noCheckpoints: 'File checkpointing is off for this session, so its files cannot be rewound',
+  noCheckpoints: 'File checkpointing is off for this session, so its files cannot be rewound', // the word cut (P650): the greyed Files' and Both's reason alone
   busy: 'Wait for the turn to end, or stop it first',
   rewind: 'Rewind to before it',
   refused: (reason: string) => `The rewind was refused · ${reason}`,
@@ -376,30 +371,32 @@ export const SELECTOR = {
 };
 
 // A typed `/<widget> <args>` applied at Enter (the architect's correction of 2026-09-29): the toast after the control
-// answered, in the widget's words; a refusal or the transport branch toasts the widget's error words instead. Its
-// pending words are its own: the word cut's P558 (M4) rewords this toast, the model menu's (C39) changed first.
-const TYPED_PENDING = 'set · the next init frame confirms it';
+// answered, in the widget's words; a refusal or the transport branch toasts the widget's error words instead. The word
+// cut (P558): the name and the new value, with no pending tail; a model that cannot hold auto mode still says so.
 export const TYPED = {
-  model: (name: string, cannotHoldAuto = false) => `Model · ${name} · ${TYPED_PENDING}${cannotHoldAuto ? ` · ${MODEL.cannotHoldAuto}` : ''}`,
-  effort: (level: string | null) => `Effort · ${level ?? "the model's default"} · ${TYPED_PENDING}`,
-  fastOff: `Fast mode · off · ${TYPED_PENDING}`,
+  model: (name: string, cannotHoldAuto = false) => `Model · ${name}${cannotHoldAuto ? ` · ${MODEL.cannotHoldAuto}` : ''}`,
+  effort: (level: string | null) => `Effort · ${level ?? "the model's default"}`,
+  fastOff: 'Fast mode · off',
   mode: (mode: PermissionMode) => `Permission mode · ${PERMISSION_MODE_LABELS[mode]}`,
   // the permissions widget opened with an argument it did not apply
   modeAsks: (mode: PermissionMode) => `${PERMISSION_MODE_LABELS[mode]} asks first · choose it below`,
   modeUnknown: (arg: string) => `No permission mode named ${arg}`,
 };
 
-// Plugins' Reload.
+// Plugins' Reload. The word cut (P672): the receipt is "Reloaded", with the errors counted when there are some; P751:
+// `/reload-plugins` says it in a toast and closes, its quiet spinner named `reloading` while it runs.
+const errorCount = (n: number) => `${n} error${n === 1 ? '' : 's'}`;
 export const RELOAD = {
   reload: 'Reload',
   done: 'Reloaded',
-  reloaded: (commands: number, agents: number, plugins: number, errors: number) => `Reloaded · ${commands} commands · ${agents} agents · ${plugins} plugins · ${errors} error${errors === 1 ? '' : 's'}`,
-  skills: (n: number) => `Reloaded · ${n} skill${n === 1 ? '' : 's'}`, // E8: `reload_skills`
+  reloaded: (errors: number) => (errors === 0 ? 'Reloaded' : `Reloaded · ${errorCount(errors)}`),
+  skills: 'Reloaded', // E8: `reload_skills`
+  reloading: 'Reloading plugins…',
+  pluginsReloaded: (errors: number) => (errors === 0 ? 'Plugins reloaded' : `Plugins reloaded · ${errorCount(errors)}`),
 };
 
 // E8: plugin management in `/plugins` (E8 execution document, M2): the sections, the confirm sheet and a row's
 // operation line. The engine's own `message` and `failureCode` are shown as it printed them, never paraphrased.
-const sessionCount = (n: number) => `${n} session${n === 1 ? '' : 's'}`;
 export const PLUGIN_MANAGEMENT = {
   otherMachine: 'This session runs on another machine; its plugins can’t be managed here yet.', // P5 O6 M4: until O4 spans machines
   reloadMods: 'Reload plugins', // E11 §2.2: one name for `reload_plugins` here, in the panel and as `/reload-plugins`
@@ -431,19 +428,15 @@ export const PLUGIN_MANAGEMENT = {
   dependencies: 'and the cache directories of any dependencies the marketplace declares, from this or an allowlisted marketplace, each enabled in the settings file above',
   overrides: 'and any enable or disable override for them in these settings files',
   alsoUninstalls: (plugins: string[]) => `Also uninstalls ${plugins.length} plugin${plugins.length === 1 ? '' : 's'}: ${plugins.join(', ')}`,
-  resolving: 'Resolving the engine…',
+  resolving: 'Resolving the engine…', // the word cut (P724): the quiet spinner's name
   unresolved: 'The engine could not be resolved; choose a binary in Settings › Engine', // a refusal that came with no words
   reloadsIn: (n: number) => `Reloads plugins in ${n} running ${n === 1 ? 'session' : 'sessions'}`,
-  noSessionToReload: 'No running session to reload',
-  nothingToReload: 'Nothing to reload: an added marketplace loads no plugin',
   understand: 'I understand',
   declaredTitle: (target: string) => `Run the command ${target} declares?`,
   declared: "The marketplace declares this command; the engine's CLI runs it only once you accept it:",
   runIt: 'Run it',
   // a row's operation line
   reloading: 'Reloading running sessions…',
-  reloadedIn: (n: number) => `Reloaded in ${sessionCount(n)}`,
-  reflected: 'reflected',
   notReflectedIn: (title: string) => `not reflected in ${title}`,
   mayOverride: 'a project setting may override it',
   failedIn: (title: string, error: string) => `failed in ${title} · ${error}`,
@@ -453,10 +446,12 @@ export const PLUGIN_MANAGEMENT = {
   reloadAgain: 'Reload again',
 };
 
-// MCP's Reconnect and the persistent enable switch (what it reaches is said once, in the head: `MCP.reach`).
+// MCP's Reconnect and the persistent enable switch (what it reaches is each switch row's note: `MCP.reach`). The word
+// cut (P569, P570): a quiet spinner named `working` on the knob or beside Reconnect while it works, and nothing under the
+// row after a success; `done` stays only inside a doubt ("Unconfirmed · Done").
 export const MCP_ACTIONS = {
   reconnect: 'Reconnect',
-  reconnected: 'Reconnected',
+  working: 'Working…',
   enabled: (name: string) => `Enabled: ${name}`,
   done: 'Done',
   notConnected: (error: string) => `On · not connected · ${error}`,
@@ -464,11 +459,11 @@ export const MCP_ACTIONS = {
   readAgain: 'Read again',
 };
 
-// Compact.
+// Compact. The word cut (P629, P631): `instructions` is the field's name, not drawn; the button reads Compact.
 export const COMPACT = {
   instructions: 'Instructions',
   placeholder: 'What the summary should keep (optional)',
-  now: 'Compact now',
+  now: 'Compact',
   waitTurn: 'Wait for the turn',
   queuedFirst: 'Queued messages go first',
   unanswered: `${NO_ANSWER} · the command may still run; check the transcript before sending again`, // a send is no read: nothing to show "the last value" of
@@ -476,11 +471,12 @@ export const COMPACT = {
   consequence: 'Summarises the conversation for the turns after it; the transcript on disk keeps everything', // E11 §2.2: was the foot's
 };
 
-// Rename.
+// Rename. The word cut (P635, P637): `title` is the field's name, not drawn, and a rename that took closes the dialog
+// with no line of its own (the new title shows where the session is named).
 export const RENAME = {
   title: 'New title',
   rename: 'Rename',
-  renamed: (title: string) => `Renamed · ${title}`,
+  renaming: 'Renaming', // the quiet spinner while a typed title's rename is out
 };
 
 // Resume: P2-D's chooser has its words in resume/copy.ts.
@@ -500,7 +496,7 @@ export const LIBRARY = {
     anthropic: 'From Anthropic & Partners',
     added: 'From marketplaces you added',
     otherProjects: 'Other projects',
-    builtIn: 'MAWS mods · Built in',
+    builtIn: 'Built in', // the word cut (G223)
   } as const,
   list: 'Plugins',
   noneHere: 'No plugins installed for this project yet.',
@@ -508,24 +504,30 @@ export const LIBRARY = {
   firstBody: 'Give Claude role-level expertise with plugins. Find them in Discover.',
   noMatch: 'Nothing matches these filters.',
   resetFilters: 'Reset filters',
-  loadedUnknown: 'What this session loaded is not observed yet.', // Show › Loaded in this session with nothing observed
-  showAll: 'Show all plugins',
+  // Filter › Loaded in this session with nothing observed, or with no session (the word cut, P678)
+  loadedUnknown: 'Not known yet',
+  noSession: 'No running session',
+  showAll: 'Show all',
   failed: "Couldn't load your plugins.",
   retry: 'Retry',
   manifestsFailed: "Couldn't read your plugins' details.", // `plugins.manifest` refused: the rows stay, by name
-  // a row
+  // a row. The word cut (G215, G216, G218, G217, P683, P685): its switch in place of "Disabled" and the menu's Turn on or
+  // off; its description (or its skills counted) and its date in its row note; where it is managed in a few words, the
+  // switch's reason saying the rest; the three dots' tooltip "More", its name the longer words
   isNew: 'New',
   newTooltip: 'Added or updated in the last 14 days',
-  disabled: 'Disabled',
   by: (author: string) => `by ${author}`,
   skills: (n: number) => `${n} skill${n === 1 ? '' : 's'}`,
+  enable: (name: string) => `Enable ${name}`,
+  more: 'More',
   moreActions: (name: string) => `More actions for ${name}`,
   turnOn: 'Turn on',
   turnOff: 'Turn off',
   update: 'Update',
   uninstall: 'Uninstall…',
-  managedIn: (project: string) => `In ${project} · manage it from a session there`,
-  managedInMany: (n: number) => `In ${n} other projects · manage it from a session there`,
+  managedIn: (project: string) => `In ${project}`,
+  managedInMany: (n: number) => `In ${n} other projects`,
+  whereManaged: (where: string) => `${where} · manage it from a session there`, // a greyed switch's and Update's reason
   // the loaded line
   loadedCount: (n: number) => `${n} plugin${n === 1 ? '' : 's'} loaded in this session`,
   problems: (n: number) => `${n} problem${n === 1 ? '' : 's'}`,
@@ -538,6 +540,7 @@ export const LIBRARY = {
   // P2-C start (2026-10-09): the section's words (the P2-C document, §9 and its M6 Decision Log), in place of P2-B's interim words
   mod: {
     version: (n: number) => `Version ${n}`,
+    // the word cut (G225, G226, N149): the description and the summaries' sentence are row notes; the source line is gone
     unavailable: (reason: string) => `MAWS mods can’t be read right now: ${reason}`,
     refused: (reason: string) => `Not saved: ${reason}`,
     appSwitch: (name: string) => `${name} in every session`,
@@ -548,12 +551,6 @@ export const LIBRARY = {
       { value: 'on', label: 'On' },
       { value: 'off', label: 'Off' },
     ],
-    source: {
-      'maws-contract': 'MAWS gives the agent its instructions',
-      'external-compatible-style': 'The output style gives the agent its instructions',
-      'external-style-plus-supplement': 'Compatible style with MAWS’s supplement', // P2-C2 (the architect's words, Decision Log 31)
-      off: 'Off: the agent is not asked to mark anything',
-    } satisfies Record<ModRow['source'], string>,
     pending: {
       'next-launch': 'Applies the next time this session starts',
       'next-compaction': 'Applies after this session’s next compaction',
@@ -569,7 +566,6 @@ export const LIBRARY = {
   view: (name: string) => `View ${name}`,
   myItems: 'My items',
   backTo: (library: string) => `Back to ${library}`,
-  versionNotReported: 'Version not reported',
   updated: (when: string) => `updated ${when}`,
   enablePlugin: 'Enable plugin',
   updateTo: (version: string) => `Update to ${version}`,
@@ -578,27 +574,17 @@ export const LIBRARY = {
   chip: { local: 'This project · only you', project: 'This project', user: 'User', yours: 'Created by you', synced: 'Synced' } as const,
   onlyYou: 'only you',
   otherProjects: (n: number) => `${n} other project${n === 1 ? '' : 's'}`,
-  manageThere: 'manage it from a session there',
   syncedThere: 'Synced from claude.ai · change it there',
   yoursThere: 'From your own folder · change it there',
-  enabledHere: 'Enabled for this project',
+  // the word cut (G235, P710, P712, P713, G239, G240, P706): "Not enabled" alone, "Not loaded yet" with Reload, no
+  // heading over What's inside (its region's name), no sentence under its kinds or atop the Skills tab; "Connectors"
   notEnabledHere: 'Not enabled for this project',
   loadedHere: 'Loaded in this session',
-  notLoadedHere: 'Not loaded in this session',
+  notLoadedHere: 'Not loaded yet',
   overview: 'Overview',
   whatsInside: 'What’s inside',
-  more: (n: number) => `and ${n} more`,
-  kind: { mcpServers: 'MCP servers', agents: 'Agents', hooks: 'Hooks', monitors: 'Monitors', lspServers: 'Language servers', commands: 'Commands', skills: 'Skills' } as const,
-  kindLine: {
-    mcpServers: 'Services and tools Claude can reach.',
-    agents: 'Helpers Claude can hand a longer job to.',
-    hooks: 'Run on their own during a session.',
-    monitors: 'Keep watch in the background during a session.',
-    lspServers: 'Help Claude read and check code in a language.',
-    commands: 'Shortcuts you type with a slash.',
-    skills: 'Things Claude can do when you ask.',
-  } as const,
-  skillsHelper: 'Invoke by typing / in chat, or let Claude use them automatically for relevant tasks.',
+  andMore: (n: number) => `and ${n} more`,
+  kind: { mcpServers: 'Connectors', agents: 'Agents', hooks: 'Hooks', monitors: 'Monitors', lspServers: 'Language servers', commands: 'Commands', skills: 'Skills' } as const,
   bundles: (n: number) => `${n} MCP bundle${n === 1 ? '' : 's'}`,
   hookModules: (n: number) => `${n} hooks module${n === 1 ? '' : 's'}`,
   partial: 'Some of this plugin’s files could not be read, so what’s inside may not all be listed.',
@@ -608,11 +594,12 @@ export const LIBRARY = {
   // the switch and the Add menu (M5; §5.8, §5.9; Desktop's words where it has them)
   library: 'Library',
   add: 'Add',
+  discoverPlugins: 'Discover plugins', // the word cut (P655): the /plugins Add menu's first row
   addMarketplace: 'Add marketplace',
   manageMarketplaces: 'Manage marketplaces',
   manageLine: 'Marketplaces added with Claude Code on this computer. Removing one also uninstalls its plugins.',
-  noMarketplaces: 'No marketplaces added yet.',
-  pluginsInstalled: (n: number) => `${n} plugin${n === 1 ? '' : 's'} installed`,
+  noMarketplaces: 'None yet.', // the word cut (P739, P740)
+  pluginsInstalled: (n: number) => `${n} plugin${n === 1 ? '' : 's'}`,
   checkForUpdates: 'Check for updates',
   remove: 'Remove…',
   done: 'Done',
@@ -627,7 +614,7 @@ export const SKILLS_LIBRARY = {
   list: 'Skills',
   search: 'Search skills',
   sort: { name: 'Name', plugin: 'Plugin name' } as const,
-  useInChat: 'Use in chat',
+  useInChat: 'Use in chat', // the word cut (P746): on a row, drawn on pointing or focus
   // U11a (the branch panel's finding 1): why Use in chat is greyed for a skill of a plugin the launch profile turns off
   pluginOff: 'Off in the sessions MAWS runs: Settings › Sessions › Plugins in sessions',
   pluginsUnread: 'Reading Settings › Sessions › Plugins in sessions…',

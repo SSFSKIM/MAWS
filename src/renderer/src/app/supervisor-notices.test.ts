@@ -52,15 +52,15 @@ describe('the update banner while an update waits for tool calls', () => {
   const waitingFor = (inFlight: number, tool: string | undefined, state: HostStatus['state'] = 'ready') =>
     hostStatus({ state, matches: state === 'ready' ? 'build' : null, supervisor: state === 'ready' ? supervisorStatus({ buildId: 'old', liveSessions: 2, exitWhenIdle: false }) : null, handover: { inFlight, ...(tool !== undefined && { tool }) } });
 
-  it('names the tool and the calls running, served or deferred, and goes when the wait ends', async () => {
+  it('counts the calls running, served or deferred, and goes when the wait ends', async () => {
     const t = await setup();
     t.status(waitingFor(1, 'artifact_list'));
     const notice = t.one(SUPERVISOR_NOTICE_IDS.updated)!;
-    expect(notice).toMatchObject({ kind: 'banner', level: 'info', text: ENGINE_HOST_UPDATE.waiting(1, 'artifact_list') });
-    expect(notice.text).toBe('Waiting for artifact_list to finish before updating the engine host (1 call running).');
+    expect(notice).toMatchObject({ kind: 'banner', level: 'info', text: ENGINE_HOST_UPDATE.waiting(1) });
+    expect(notice.text, 'the word cut (W30): the calls counted, no tool or engine host named').toBe('Updating after 1 running call');
     expect(notice.actions.map((a) => a.label)).toEqual(['Restart now']); // served: the old way to move now stays
     t.status(waitingFor(3, undefined, 'restarting')); // a deferred handover: nothing to restart meanwhile
-    expect(t.one(SUPERVISOR_NOTICE_IDS.updated)).toMatchObject({ text: 'Waiting for MAWS tool calls to finish before updating the engine host (3 calls running).', actions: [] });
+    expect(t.one(SUPERVISOR_NOTICE_IDS.updated)).toMatchObject({ text: 'Updating after 3 running calls', actions: [] });
     t.status(hostStatus()); // the successor adopted the sessions
     expect(t.shown()).toEqual([]);
   });
@@ -80,7 +80,7 @@ describe('the update banner (supervisor.updated)', () => {
     const notice = t.one(SUPERVISOR_NOTICE_IDS.updated)!;
     expect(notice).toMatchObject({ kind: 'banner', level: 'info', text: SUPERVISOR_NOTICES.updated(2) });
     expect(notice.text).toBe(
-      "MAWS was updated. 2 sessions are still running on the previous version's supervisor; MAWS moves to the new one when they become idle. Sessions started meanwhile run on it too.",
+      'Updated. Finishes when 2 sessions go idle.', // the word cut (W27)
     );
     expect(notice.actions.map((a) => a.label)).toEqual(['Restart now']);
     notice.actions[0]!.run();
@@ -123,7 +123,7 @@ describe('the incompatibility banner (supervisor.incompatible)', () => {
     const notice = t.one(SUPERVISOR_NOTICE_IDS.incompatible)!;
     expect(notice).toMatchObject({ kind: 'banner', level: 'warning', dismissible: false });
     expect(notice.text).toBe(
-      'MAWS was updated and cannot talk to the previous supervisor, which still runs 2 sessions. No session can start until it exits, which it does by itself once they go idle.',
+      'Updated. New sessions start once 2 running ones go idle.', // the word cut (W28)
     );
     expect(notice.actions.map((a) => a.label)).toEqual(['Restart now', 'Wait']);
     notice.actions[0]!.run();
@@ -171,36 +171,36 @@ describe('the crash toast (supervisor.crashed)', () => {
   const crashed = (at: string, code: number | null, signal: string | null, interrupted: number) =>
     hostStatus({ state: 'restarting', supervisor: null, matches: null, lastExit: { code, signal, at, interrupted } });
 
-  it('toasts each new unexpected exit once, naming the interrupted sessions and the exit code when known', async () => {
+  it('toasts each new unexpected exit once, naming the interrupted sessions', async () => {
     const t = await setup();
     t.status(crashed(AT, 1, null, 2));
     expect(t.one(SUPERVISOR_NOTICE_IDS.crashed)).toMatchObject({ kind: 'toast', level: 'warning', dismissible: true });
     expect(t.one(SUPERVISOR_NOTICE_IDS.crashed)?.text).toBe(
-      'The session supervisor stopped unexpectedly (exit 1); 2 sessions were interrupted. Their transcripts are on disk; open one to resume.',
+      '2 sessions were interrupted. Open one to resume.', // the word cut (W32): no supervisor, no exit code
     );
     t.notices.getState().dismiss(SUPERVISOR_NOTICE_IDS.crashed);
     t.status(hostStatus({ lastExit: { code: 1, signal: null, at: AT, interrupted: 2 }, supervisor: supervisorStatus({ pid: 9 }) })); // the successor, same exit
     expect(t.shown()).toEqual([]);
     t.status(crashed(LATER, null, 'SIGKILL', 1));
     expect(t.one(SUPERVISOR_NOTICE_IDS.crashed)?.text).toBe(
-      'The session supervisor stopped unexpectedly (SIGKILL); 1 session was interrupted. Their transcripts are on disk; open one to resume.',
+      '1 session was interrupted. Open it to resume.',
     );
   });
 
-  it('omits the parenthesis when the cause is unknown and says when nothing was interrupted', async () => {
+  it('says when nothing was interrupted', async () => {
     const t = await setup();
     t.status(crashed(AT, null, null, 0));
-    expect(t.one(SUPERVISOR_NOTICE_IDS.crashed)?.text).toBe('The session supervisor stopped unexpectedly; no session was interrupted.');
+    expect(t.one(SUPERVISOR_NOTICE_IDS.crashed)?.text).toBe('The process that runs sessions stopped unexpectedly; none was interrupted.');
   });
 
   // P5 O16 M3b (D21): a successor that adopted the sessions; the toast keeps its id, its copy names the engine host
   it('names the sessions the successor re-adopted, and those it did not', async () => {
     const t = await setup();
     t.status(hostStatus({ state: 'ready', matches: null, lastExit: { code: 137, signal: null, at: AT, interrupted: 0, adopted: 2 } }));
-    expect(t.one(SUPERVISOR_NOTICE_IDS.crashed)?.text).toBe('The engine host stopped unexpectedly (exit 137); its 2 sessions were re-adopted.');
+    expect(t.one(SUPERVISOR_NOTICE_IDS.crashed)?.text).toBe('The process that runs sessions stopped unexpectedly; its 2 sessions kept running.');
     t.status(hostStatus({ state: 'ready', matches: null, lastExit: { code: null, signal: 'SIGKILL', at: LATER, interrupted: 1, adopted: 1 } }));
     expect(t.one(SUPERVISOR_NOTICE_IDS.crashed)?.text).toBe(
-      'The engine host stopped unexpectedly (SIGKILL); 1 session was re-adopted, 1 was interrupted. Their transcripts are on disk; open one to resume.',
+      '1 session was interrupted; 1 kept running. Open it to resume.',
     );
   });
 

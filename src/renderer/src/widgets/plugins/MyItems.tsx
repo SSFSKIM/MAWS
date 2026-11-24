@@ -25,7 +25,6 @@ import { LoadedBody, loadedKey, LoadedRow, present } from './LoadedView';
 import { Gone, useManage } from './manage';
 import { GroupHeading, INSTALLED_PREFIX, installationOf, installedKey, PluginRow } from './PluginRow';
 import type { PluginsReadResult } from './read';
-import { SESSION_UNAVAILABLE } from './session';
 
 export interface MyItemsProps {
   appSessionId: AppSessionId | null;
@@ -105,7 +104,7 @@ export function MyItems({ appSessionId, installed, identities, marketplaces, loa
   } else if (loadedView && loadedIds === null) {
     body = (
       <Centered role="status">
-        <p className="m-0 text-ui text-fg-muted">{loaded === null ? SESSION_UNAVAILABLE : L.loadedUnknown}</p>
+        <p className="m-0 text-ui text-fg-muted">{loaded === null ? L.noSession : L.loadedUnknown}</p>
         <button type="button" className={SECONDARY} onClick={showAll}>
           {L.showAll}
         </button>

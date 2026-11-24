@@ -63,6 +63,7 @@ export interface EngineRead<T> {
   data: T | undefined; // while dormant, the cache's last answer
   error: string | null; // the refusal in words; a timeout reads as the engine's silence; with data, that it is the last value; unavailable: why
   readAt: number | null; // when `data` was read (P2-A: a dormant body is labelled with it)
+  reading: boolean; // a read is out now, whose answer can still change what is drawn
   refetch(): void;
   refresh(): Promise<{ data: T | undefined; failed: IpcCommandError | null }>; // a read now, answering what it read or why it failed
   load(): Promise<AcquireOutcome>; // P2-A: the owner's Load now: acquires the session; the read follows at ready
@@ -207,6 +208,7 @@ export function useEngineRead<N extends SessionRead>(command: N, input: CommandI
     data: query.data,
     error,
     readAt: query.data !== undefined ? query.dataUpdatedAt : null,
+    reading: active && query.isFetching,
     // P2-A: nothing is read without a ready process (TanStack's refetch would ignore `enabled`)
     refetch: () => {
       if ((ready || !active) && greyed === null) void refetch();

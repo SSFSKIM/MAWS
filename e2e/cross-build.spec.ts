@@ -215,6 +215,7 @@ import type { MachineRef } from '../src/shared/machine/ref'; // UX wave U6f
 import { OUTSIDE_ACTS, OUTSIDE_FILES_CAPABILITY } from '../src/shared/files/outside'; // UX wave U6f: the four acts and their capability
 import { exchangeJournal } from './support/to-human-replay'; // UX wave U2b: the live launch's turn (the cross-build scenes' fix)
 import { zoomOfPage, zoomTo } from './support/zoom'; // UX wave U6b-5b: the window's zoom
+import { expectNewChatInFront } from './support/screen-reader-only';
 // Ticket 733a (its document, Design 3): the ids of the pasted segments a text holds, in order. A form composed for the
 // main conversation, and a read the host attaches, carry the session's own (`pastedTagId` of its engine id); a thread's
 // first message, composed before its session exists, a random one, so a scene reads that id from what was sent.
@@ -313,7 +314,12 @@ async function launchOn(build: Build, page: Page, id: string, replay: string, s:
 }
 const turnEnded = (page: Page, id: AppSessionId, timeout = 60_000) =>
   expect.poll(async () => (await statusOf(page, id)).turn === null && (await eventsOf(page, id)).some((e) => e.kind === 'turn.ended'), { timeout, message: 'the turn has ended' }).toBe(true);
-const banner = (page: Page, text: string) => page.locator('[data-banner-host]').getByRole('status').filter({ hasText: text });
+const banner = (page: Page, text: string | RegExp) => page.locator('[data-banner-host]').getByRole('status').filter({ hasText: text });
+// The update banner while a kept supervisor of the other build serves (app/copy.ts, ENGINE_HOST_UPDATE.updated), in either
+// build's words: this build's "Updated. Finishes when 1 session goes idle." (the word cut, W27) or a peer's from before
+// it, "MAWS was updated. 1 session is still running on the previous version's supervisor; …"
+const updatedBanner = (page: Page) => banner(page, /MAWS was updated\. |Updated\. Finishes when /);
+const ONE_STILL_RUNNING = /1 session (is still running|goes idle)/;
 
 // What a receiver logs when it refuses what the other build sent (src/main/hosts/supervisor.ts; src/shared/host/runtime.ts
 // and socket-server.ts). A key or an event a build lacks is dropped and logged as such (DROPPED), which is no refusal.
@@ -455,7 +461,7 @@ async function crossing(s: Scratch, keeper: Build, attacher: Build, gap: { newer
   expect(served, `${attacher.label} served by ${keeper.label}'s supervisor`).toMatchObject({ matches: 'build', supervisor: { pid: kept.pid, buildId: kept.buildId, liveSessions: 1, exitWhenIdle: true } });
   const build = served.appBuildId;
   expect(build, 'two builds').not.toBe(kept.buildId);
-  await expect(banner(second.page, 'MAWS was updated.')).toContainText('1 session is still running');
+  await expect(updatedBanner(second.page)).toContainText(ONE_STILL_RUNNING);
   // UX wave U1a (§F): the signal that keeps a plan's mode away under an engine host of another build, as the window
   // holds it: attached, the engine host's wire fingerprint is the kept build's and not this app's, wherever the two
   // builds' registries differ; once the app has moved to a supervisor of its own build, the two are equal (below)
@@ -566,7 +572,7 @@ async function crossing(s: Scratch, keeper: Build, attacher: Build, gap: { newer
   expect(s.lock(), 'the lock names the new supervisor').toMatchObject({ pid: moved.supervisor!.pid, buildId: build });
   expect(s.log(), 'the kept supervisor exited by itself once idle').toContain('exiting (exitWhenIdle)');
   expect(second.output()).toContain(`connected to supervisor pid ${moved.supervisor!.pid} build ${build} wire ${wireOf(attacher)} capabilities [`);
-  await expect(banner(second.page, 'MAWS was updated.')).toHaveCount(0);
+  await expect(updatedBanner(second.page)).toHaveCount(0);
   const afterMove = `xb-after-${Date.now()}` as AppSessionId;
   await launchOn(attacher, second.page, afterMove, join(REPO_ROOT, PERMISSION), s);
   said.push(`  moved: supervisor pid ${kept.pid} (build ${kept.buildId}) exited when idle; pid ${moved.supervisor!.pid} (build ${build}) serves a launch`);
@@ -658,7 +664,7 @@ async function handedOverCrossing(s: Scratch, keeper: Build, attacher: Build, sh
   if (sameWire(keeper, attacher)) skipWireSkew(keeper, "the hello to the kept host across the minor, at the attacher's wire (host.log)");
   else expect(s.log(), `host.log: the attaching ${attacherDaemon === null ? 'app' : 'app’s mawsd'}'s hello to the kept host, at its own minor`).toContain(hello);
   expect(s.log(), 'host.log: the kept host handed over').toContain('exiting (handover)');
-  await expect(banner(second.page, 'MAWS was updated.'), 'no banner: the kept host hands over, never waits for idle (P5 O16 M3c fix wave 2: served at most until its first quiet status)').toHaveCount(0);
+  await expect(updatedBanner(second.page), 'no banner: the kept host hands over, never waits for idle (P5 O16 M3c fix wave 2: served at most until its first quiet status)').toHaveCount(0);
   if (keeperDaemon !== null) {
     await expect.poll(() => isAlive(keeperDaemon), { timeout: 15_000, message: 'the keeper’s mawsd exits once the engine host is taken' }).toBe(false);
     if (shapes.attacher === 'daemon') expect(second.output(), `${attacher.label}'s main asks the keeper's mawsd, of another build, to restart`).toMatch(restartAsked(keeperDaemon)); // P5 O15 M1
@@ -4921,7 +4927,7 @@ async function startCommentParent(page: Page, repo: string): Promise<AppSessionI
   const project = value(await invoke(page, 'session.projects.add', { directory: repo }));
   await openProject(page, project.name);
   await newChatIn(page, project.name);
-  await expect(page.getByRole('heading', { name: `New chat in ${project.name}` })).toBeVisible({ timeout: 20_000 });
+  await expectNewChatInFront(page, project.name, { timeout: 20_000 }); // the word cut (W86): a screen reader's heading
   const id = value(await invoke(page, 'session.intent.list', undefined)).intents.at(-1)!.appSessionId;
   value(await invoke(page, 'session.intent.patch', { appSessionId: id, patch: { gateway: 'direct' } }));
   value(await invoke(page, 'session.start', { appSessionId: id, message: { content: U5B_FIRST_PROMPT, display: U5B_FIRST_PROMPT }, options: {} }));
