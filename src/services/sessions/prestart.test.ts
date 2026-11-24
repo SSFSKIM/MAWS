@@ -408,7 +408,7 @@ describe('a crash at each step of today’s order, with an adopted launch: what 
   // the guards' pin): whether the intent stands and how, whether the record stands, and whether it is bound to the engine.
   let adoptedPin: string | null = null;
   let adoptedEngine: string | null = null;
-  async function crashAt(step: 'pin' | 'launch' | 'send' | 'remove', adopted: boolean) {
+  async function crashAt(step: 'sent' | 'pin' | 'launch' | 'send' | 'remove', adopted: boolean) {
     await harness();
     const id = await create();
     if (adopted) await h.service.prestart(id);
@@ -420,6 +420,7 @@ describe('a crash at each step of today’s order, with an adopted launch: what 
       h.writeTranscript(h.work, engineId!);
     };
     if (step === 'remove') h.hangRemove = true;
+    else if (step === 'sent') h.host.launchHangs = true; // the record, the reservation and the proof written; no answer
     else {
       h.hangPut = (intent) =>
         step === 'pin' ? intent.progress.launch === null && intent.progress.engineSessionId === h.host.table.get(id)?.engineSessionId && (!adopted || h.host.adoptions.length === 1)
@@ -427,9 +428,10 @@ describe('a crash at each step of today’s order, with an adopted launch: what 
         : intent.progress.send !== null;
     }
     await h.service.startSession(id, { message: MESSAGE, options: {} });
-    await h.until(() => h.gateReached);
-    const running = h.host.table.get(id)!.engineSessionId;
-    expect(h.host.adoptions).toHaveLength(adopted ? 1 : 0);
+    if (step === 'sent') await h.until(() => h.host.calledWith('session.launch').length === 1);
+    else await h.until(() => h.gateReached);
+    const running = h.host.table.get(id)?.engineSessionId ?? null;
+    expect(h.host.adoptions).toHaveLength(adopted && step !== 'sent' ? 1 : 0);
     await h.restart();
     expect(h.host.launches).toEqual([]);
     expect(h.host.calledWith('session.send')).toEqual([]);
@@ -442,6 +444,13 @@ describe('a crash at each step of today’s order, with an adopted launch: what 
       engineWrote: engineId !== null,
     };
   }
+
+  it('with the launch sent and not answered (the record, the reservation and the proof written before it)', async () => {
+    const today = await crashAt('sent', false);
+    const adopted = await crashAt('sent', true);
+    expect(today).toMatchObject({ intent: { failure: 'MAWS quit before the session started', launched: false }, record: null });
+    expect(adopted).toEqual(today);
+  });
 
   it('right after the answer, at the adopted id’s write (today: the answer given, progress.launch not yet written)', async () => {
     const today = await crashAt('launch', false);
