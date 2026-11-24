@@ -215,10 +215,13 @@ export const SheetModelSchema = z.looseObject({
 export type SheetModel = z.infer<typeof SheetModelSchema>;
 
 // A map keyed by inbox keys, every own key kept: `__proto__` is a valid key, and `z.record` would drop it (its output is
-// built by assignment, which sets a prototype for that name). `Object.fromEntries` defines each key as its own.
+// built by assignment, which sets a prototype for that name). Only a plain object is a map: anything else, a list of
+// pairs included, reaches the entries' schema as null and is refused. `Object.fromEntries` defines each key as its own.
+const isPlainObject = (raw: unknown): raw is object =>
+  typeof raw === 'object' && raw !== null && !Array.isArray(raw) && [Object.prototype, null].includes(Object.getPrototypeOf(raw));
 const ownRecord = <V extends z.ZodType>(value: V) =>
   z
-    .preprocess((raw) => (typeof raw === 'object' && raw !== null && !Array.isArray(raw) ? Object.entries(raw) : raw), z.array(z.tuple([z.string(), value])))
+    .preprocess((raw) => (isPlainObject(raw) ? Object.entries(raw) : null), z.array(z.tuple([z.string(), value])))
     .transform((entries): Record<string, z.infer<V>> => Object.fromEntries(entries));
 
 /**

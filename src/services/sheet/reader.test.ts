@@ -107,6 +107,11 @@ describe('readRecord', () => {
       [`{"v": 1, "session": "${secret}`, UNREADABLE.json],
       [`${secret} {`, UNREADABLE.json],
       [JSON.stringify({ ...state, questions: secret }), UNREADABLE.schema],
+      // verdicts is a map: neither a list nor a list of key and verdict pairs reads as one
+      [JSON.stringify({ ...state, verdicts: [] }), UNREADABLE.schema],
+      [JSON.stringify({ ...state, verdicts: [['page-00000001', { verdict: 'applied', kind: 'dismiss', at: '2026-11-23T10:00:00.000Z', id: 'q1' }]] }), UNREADABLE.schema],
+      [JSON.stringify({ ...state, verdicts: secret }), UNREADABLE.schema],
+      [JSON.stringify({ ...state, verdicts: null }), UNREADABLE.schema],
       [JSON.stringify({ ...state, session: '5eed0000-0000-4000-8000-0000000000ff' }), UNREADABLE.session],
       [JSON.stringify({ ...state, session: secret }), UNREADABLE.session],
       // invalid bytes inside a JSON string: the pinned Python reader refuses them, so does this one
