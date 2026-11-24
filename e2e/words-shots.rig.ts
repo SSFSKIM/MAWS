@@ -6001,7 +6001,7 @@ test('the word cut’s M5: the library’s Spaces, opened artifacts, the documen
     // ---- Blank notes: a save's state (Acceptance 1's saved-status scene: T607), the empty comments panel (G397, G398)
     // and the empty history of named versions (G373)
     let before: number | null = null;
-    await shot(page, m5Meta('m5-doc-saved', 'T607, P23', 'A document just saved', 'Artifacts, Blank notes, a sentence typed, its save landed', 'The header’s saved state after the save: “All changes saved” (M5: one status, its state saved)', ['tools/document', 'panel']), async () => {
+    await shot(page, m5Meta('m5-doc-saved', 'T607', 'A document just saved', 'Artifacts, Blank notes, a sentence typed, its save landed', 'The header’s saved state after the save: “All changes saved” (M5: one status, its state saved)', ['tools/document', 'panel']), async () => {
       await docAtRest('blank');
       if (!(await editorOf('blank').innerText()).includes('meets on Monday')) {
         before = await revisionOf(page, idOf('blank'));
