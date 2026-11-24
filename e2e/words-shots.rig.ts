@@ -7420,22 +7420,21 @@ test('the word cut’s M5: the library’s Spaces, opened artifacts, the documen
         },
       ),
     });
-    await shot(page, m5Meta('m5-slides-check', 'G471, G472, G473, G475', 'A deck, the Check rail on a deck that breaks rules', 'Planning deck (one slide’s heading in a colour no system has), Deck actions › Check', 'The Check rail settled and its body scrolled only as far as Check by hand, its title and summary still in the picture, the last issues above it: on M5 titled Check, its issues counted, each issue its message and its rule’s words; master’s title, its summary, the element path and “[check: …]” on each issue, To judge by hand', ['tools/presentation', 'src/artifacts/slides/editor/menus']), async () => {
+    await shot(page, m5Meta('m5-slides-check', 'G471, G472, G473, G475', 'A deck, the Check rail on a deck that breaks rules', 'Planning deck (one slide’s heading in a colour no system has), Deck actions › Check', 'The Check rail settled and its body scrolled to Check by hand, the last issues above it: on M5 titled Check, its issues counted, each issue its message and its rule’s words; master’s title, its summary, the element path and “[check: …]” on each issue, To judge by hand', ['tools/presentation', 'src/artifacts/slides/editor/menus']), async () => {
       await deckAtRest('planning');
       await toggleDeckRail('planning', 'check');
       await expect(deckRail('planning', 'check'), 'the Check rail').toBeVisible({ timeout: 10_000 });
-      // settled, then the rail's body scrolled only as far as the don'ts to judge by hand (G475), below the issues
-      // ('nearest', so no outer scroller moves the rail's title and summary out of the window)
+      // settled, then the rail's body scrolled to the don'ts to judge by hand (G475), below the issues: the last issues
+      // stay above it. The title and summary scroll with the body, and the window is too short to hold them and the
+      // don'ts together, so they are out of this picture
       await expect(deckRail('planning', 'check').locator('.deck-check-summary'), 'its summary').toHaveText(byM5(E.checkSummary), { timeout: 10_000 });
-      await deckRail('planning', 'check').getByRole('heading', { name: byM5(E.byHand), exact: true }).evaluate((el) => el.scrollIntoView({ block: 'nearest' }));
+      await deckRail('planning', 'check').getByRole('heading', { name: byM5(E.byHand), exact: true }).evaluate((el) => el.scrollIntoView({ block: 'center' }));
     }, {
       check: async () => {
         const rail = deckRail('planning', 'check');
         await expect(rail.locator('h2.deck-inspector-title'), 'its title').toHaveText(byM5(E.checkTitle), { timeout: 3_000 });
-        await inView(rail.locator('h2.deck-inspector-title'), 'its title');
-        // settled: the summary in the build's words, never the wait, and in the picture
+        // settled: the summary in the build's words, never the wait
         await expect(rail.locator('.deck-check-summary'), 'its summary').toHaveText(byM5(E.checkSummary), { timeout: 10_000 });
-        await inView(rail.locator('.deck-check-summary'), 'its summary');
         const issue = rail.locator('.deck-check-violation').last();
         await inView(issue, 'an issue');
         if (m5Cut()) {
@@ -7445,18 +7444,17 @@ test('the word cut’s M5: the library’s Spaces, opened artifacts, the documen
         await inView(rail.getByRole('heading', { name: byM5(E.byHand), exact: true }), 'the don’ts to judge by hand');
       },
     });
-    await shot(page, m5Meta('m5-slides-theme', 'G463, G468', 'A deck, the Theme rail', 'Planning deck (a border colour of its own over its system’s), Deck actions › Theme', 'The Theme rail scrolled only as far as its reset, its title still in the picture: the Faces rows captioned Display and Body, the reset “Reset all” under them (master: “Display face”, “Use the system’s colours and faces”)', ['tools/presentation', 'src/artifacts/slides/editor/menus']), async () => {
+    await shot(page, m5Meta('m5-slides-theme', 'G463, G468', 'A deck, the Theme rail', 'Planning deck (a border colour of its own over its system’s), Deck actions › Theme', 'The Theme rail scrolled to its reset: the Faces rows captioned Display and Body, the reset “Reset all” under them (master: “Display face”, “Use the system’s colours and faces”)', ['tools/presentation', 'src/artifacts/slides/editor/menus']), async () => {
       await deckAtRest('planning');
       await toggleDeckRail('planning', 'theme');
       await expect(deckRail('planning', 'theme'), 'the Theme rail').toBeVisible({ timeout: 10_000 });
-      // the reset sits under Faces, below the rail's fold: the rail scrolled only as far as it ('nearest'), Faces kept
-      // above it and the rail's title in the window
-      await deckRail('planning', 'theme').getByRole('button', { name: byM5(E.resetAll), exact: true }).evaluate((el) => el.scrollIntoView({ block: 'nearest' }));
+      // the reset sits under Faces, below the rail's fold: the rail scrolled to it, Faces kept above it. The title
+      // scrolls with the body and the window can't hold both, so the title is out of this picture
+      await deckRail('planning', 'theme').getByRole('button', { name: byM5(E.resetAll), exact: true }).evaluate((el) => el.scrollIntoView({ block: 'end' }));
     }, {
       check: async () => {
         const rail = deckRail('planning', 'theme');
         await inView(rail, 'the Theme rail');
-        await inView(rail.locator('h2.deck-inspector-title').first(), 'its title');
         await inView(rail.getByRole('button', { name: byM5(E.resetAll), exact: true }), 'the reset');
         await inView(rail.locator('.deck-inspector-caption').filter({ hasText: new RegExp(`^${literal(byM5(E.displayCaption))}$`) }), 'the display face’s caption');
       },
