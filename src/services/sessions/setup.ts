@@ -7,6 +7,10 @@
 // `launching`, `progress.send` at the handoff), so a crash leaves `progress` truthful for the start-time
 // reconciliation; `session.launch` answering `launching` is the linearisation point after which the process is C3's to
 // report; rollback is per resource, never forced, and never a transcript.
+//
+// Board ticket 421 (docs/doperpowers/plans/2026-11-23-tool-choice.md, D8): the set of MAWS's tools an attempt serves is
+// answered once (`servedSet`), after the launch gate and before the record, the supplement and the spec are made from
+// it, so a refusal leaves nothing to roll back.
 import { randomUUID } from 'node:crypto';
 import type { AppSessionId, MessageUuid, SessionId } from '@shared/graph/ids';
 import type { Lineage, SessionRecord } from '@shared/graph/session';
@@ -17,7 +21,7 @@ import { hostCall, pathExists, realOrSelf, transcriptPathOf } from './context';
 import { canonicalPath } from './holders';
 import { newWorktreeTarget, reconcileWorktree } from './intent-rules';
 import { LaunchWatch } from './launch-watch';
-import { bootstrapSpec, intentLaunchSpec, seedPermissionMode, trustMapping } from './launch-mapping';
+import { bootstrapSpec, intentLaunchSpec, mawsToolsOf, seedPermissionMode, trustMapping } from './launch-mapping'; // board ticket 421: mawsToolsOf
 import {
   directFallbackNotice,
   exitFailure,
@@ -39,6 +43,8 @@ import { inheritOwnerOverride, ownerChannelLaunch, ownerChannelLaunched } from '
 import { launchScopeOf } from './artifact-scope'; // P2-E1
 import { launchOnHost } from './machine-route'; // P5 O7 M9
 import type { Route } from '@shared/engine/route'; // P5 O7 M9
+import { FULL_MAWS_TOOL_SET } from '@shared/maws/tool-set'; // board ticket 421
+import { servedSet, type WantedSet } from './served-set'; // board ticket 421
 
 export { SetupFailure, type Setup } from './setup-steps';
 
@@ -158,6 +164,11 @@ export async function runIntentSetup(s: Setup, appSessionId: AppSessionId, attem
   let watch: LaunchWatch | null = null;
   try {
     await passLaunchGate(s); // C12: the gate refuses before anything this setup would have to undo
+    // board ticket 421 (D8): the set this attempt serves, answered once, before anything is made from it; a refusal (a
+    // fork of a set an older host cannot serve) comes before anything it would have to undo
+    const served = await servedSet(s, wantedSet(s, run.intent));
+    if ('refused' in served) throw new SetupFailure('launching', served.refused);
+    const mawsTools = served.set;
     // worktree
     const location = run.intent.location!; // the start guards refused an intent with no location (New chat, 2026-10-01)
     let worktree: SessionRecord['worktree'] = null;
@@ -226,6 +237,7 @@ export async function runIntentSetup(s: Setup, appSessionId: AppSessionId, attem
       firstPrompt: intent.lineage?.kind === 'side-thread' ? sideThreadTitle(intent.lineage, intent.message?.display ?? null) : (intent.message?.display ?? null),
       lineage: intent.lineage ?? null, // E3 (X11): the record carries it before the engine runs
       ...(intent.launchedBy && { launchedBy: intent.launchedBy }), // P5 O7 M4: a remote spawn's requester, for O12's observer
+      ...mawsToolsOf(mawsTools), // board ticket 421 (D3): written once, only when it is not the full set
     });
     if (!created.ok) s.log(`a record already exists under ${appSessionId}; the launch reuses it`);
     // P2-C start (2026-10-09): a fork and a side thread take their parent's to-human override with their record
@@ -238,7 +250,7 @@ export async function runIntentSetup(s: Setup, appSessionId: AppSessionId, attem
     // P2-C start (2026-10-09): the owner channel's decision for this launch (the contract, the flag, the advertisement)
     const decided = await ownerChannelLaunch(
       s,
-      intentLaunchSpec({ ...run.intent, permissionMode: mode, ...attemptRoute(run.intent, attempt) }, { cwd, trust: mapping.attestation, replay: fixture?.path ?? null, browserBackend: s.browserBackend(appSessionId), proofFile: s.spawnerProofs.pathOf(appSessionId) /* P5 O12 M11 */ }, s.settings()),
+      intentLaunchSpec({ ...run.intent, permissionMode: mode, ...attemptRoute(run.intent, attempt) }, { cwd, trust: mapping.attestation, replay: fixture?.path ?? null, browserBackend: s.browserBackend(appSessionId), proofFile: s.spawnerProofs.pathOf(appSessionId) /* P5 O12 M11 */, mawsTools /* board ticket 421 */ }, s.settings()),
       { kind: parent !== null ? 'fork' : 'new', transcriptOf: parent },
     );
     const spec = decided.spec;
@@ -273,6 +285,15 @@ export async function runIntentSetup(s: Setup, appSessionId: AppSessionId, attem
   } finally {
     watch?.dispose();
   }
+}
+
+// Board ticket 421 (D1, D5): what an intent's launch wants: a create intent its own set (seeded from the machine's
+// default, patched by the composer); a fork and a side thread the set of the conversation they resume, their source
+// record's. Each absent is the full set.
+function wantedSet(s: Setup, intent: SetupIntent): WantedSet {
+  if (intent.kind === 'create') return { kind: 'new', set: intent.mawsTools ?? FULL_MAWS_TOOL_SET };
+  const source = intent.source === null ? null : s.sessions.get(intent.source.appSessionId);
+  return { kind: 'kept', set: source?.mawsTools ?? FULL_MAWS_TOOL_SET };
 }
 
 // P5 O12 M11 (Interfaces §H): the proof of a remote spawn (`launchedBy`, the session's own) written whole before each launch

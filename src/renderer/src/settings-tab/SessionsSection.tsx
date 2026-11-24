@@ -1,7 +1,8 @@
 // U11a M9 (l8-settings-06): Settings › Sessions, everything that shapes a session MAWS runs, out of Engine: the launch
 // profile (P4-A2: its plugins and hooks, settings version 17), MAWS's own MCP servers (P4-R8: settings version 16), the
 // subagent model new sessions launch with, (W3) the mode a session takes when the engine refuses auto, and the archive
-// rule, the old one-row Sessions section. The line under its heading says once that terminal sessions and the person's
+// rule, the old one-row Sessions section. Board ticket 421: after the launch profile, the machine's default set of MAWS's
+// tools for a new session (MawsToolsSettings.tsx). The line under its heading says once that terminal sessions and the person's
 // Claude Code settings files are not changed.
 import { useId } from 'react';
 import { PERMISSION_MODE_LABELS } from '@shared/sessions/permission-mode-labels';
@@ -14,6 +15,7 @@ import { ipc } from '../ipc/client';
 import { useCommand } from '../ipc/query';
 import { SESSIONS } from './copy';
 import { LaunchProfileSettings } from './LaunchProfileSettings'; // P4-A2
+import { MawsToolsSettings } from './MawsToolsSettings'; // board ticket 421
 import { McpServers } from './McpServersSettings'; // P4-R8
 import { INPUT, Setting, useCommittedDraft, writeSettings } from './parts';
 
@@ -21,6 +23,7 @@ export function SessionsSection({ settings }: { settings: Settings }) {
   return (
     <>
       <LaunchProfileSettings settings={settings} />
+      <MawsToolsSettings settings={settings} />
       <McpServers settings={settings} />
       <SubagentModel settings={settings} />
       <AutoFallback settings={settings} />

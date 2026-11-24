@@ -85,6 +85,7 @@ import { cancelInlineEdit, sendInlineEdit } from './resubmit-seam'; // W3 (B6)
 import { routeOf, useListModels, useModelCatalogue, type Route } from './list-models';
 import { heldModel, useModelRequests } from '../widgets/model'; // P2-F S chip (review)
 import { locationPath, useSetupIntent, type SetupIntentHook } from './setup-intent';
+import { useMachineMawsTools } from '../settings-tab/maws-tools-default'; // board ticket 421
 import { isBusy, PLACEHOLDER_BOTH, PLACEHOLDER_ENTER, submitState } from './submit/submit-state';
 import { SubmitControl } from './submit/SubmitControl';
 import { ViewSwitch } from '../owner/view/Switch'; // UX wave U2b
@@ -253,7 +254,15 @@ export function Composer({ appSessionId, paneIndex, client = ipc }: ComposerProp
   // P5 O9 M4: a started session's chips and controls are its port's (lane B: today's live bindings over this frame); a
   // session no port drives is read-only, its chips refused with who holds it
   const controls = useSessionControls(appSessionId, { client, frame: { status, reads, availability } });
-  const bindings: FrameBindings = setup ? intentBindings(setup, { starting }, userDefaults) : controls ? controls.bindings() : endedBindings(heldWords(appSessionId));
+  // P5 O7 M4: a New chat tab whose machine menu chose another machine spawns there on Send (sessions/remote-spawn.ts)
+  const setupProject = setup?.project?.projectId ?? null;
+  const projectKey = useSessions((s) => (setupProject === null ? null : (s.projects.get(setupProject)?.org?.key ?? null)));
+  const spawnTarget = useSpawnTarget(appSessionId, projectKey);
+  // Board ticket 421 (D11, §H): the Tools submenu only where its choice is honoured: a new chat's intent, on a spine that
+  // knows the choice (read once, for such an intent alone), starting on this machine and not spawned on another
+  const toolsDefault = useMachineMawsTools(setup?.intent.kind === 'create' ? machineOf(appSessionId) : null, client);
+  const tools = { honoured: toolsDefault != null, elsewhere: spawnTarget !== null };
+  const bindings: FrameBindings = setup ? intentBindings(setup, { starting }, userDefaults, tools) : controls ? controls.bindings() : endedBindings(heldWords(appSessionId));
   // P5 O9 M5: a session another process runs and the port drives (lane A): its turn is that process's, and Send and Stop
   // go by the port's capabilities
   const elsewhere = setup ? null : (controls?.turn() ?? null);
@@ -274,9 +283,6 @@ export function Composer({ appSessionId, paneIndex, client = ipc }: ComposerProp
   // P5 O7 M4: a lane B session on another machine takes its files as uploads to that machine (remote-uploads.ts), and so
   // does a New chat tab whose machine menu chose another machine (sessions/remote-spawn.ts), where Send spawns it
   const remoteB = useIsRemoteLaneB(appSessionId);
-  const setupProject = setup?.project?.projectId ?? null;
-  const projectKey = useSessions((s) => (setupProject === null ? null : (s.projects.get(setupProject)?.org?.key ?? null)));
-  const spawnTarget = useSpawnTarget(appSessionId, projectKey);
   const spawnAt = setup ? spawnTarget : null;
   const spawning = useSpawning(appSessionId);
   const uploadsTo = setup ? (spawnAt?.name ?? null) : remoteB ? machineName : null;

@@ -282,6 +282,16 @@ describe('graph schemas accept and reject', () => {
       expect(SessionRecordSchema.safeParse({ ...record(), lineage: { ...sideThread, source: 'disk' } }).success).toBe(false); // lineage_source is index-only
     });
 
+    // board ticket 421 (X1, additive): the session's set of MAWS's tools, written only when it is not the full set, so a
+    // record without one (every record written before, and every default session's) is at the full set
+    it('carries mawsTools only when written: a record without it parses, and a set that refuses itself is refused', () => {
+      expect(record()).not.toHaveProperty('mawsTools');
+      const set = { artifacts: false, documents: false, dashboards: false, auxiliary: true, question: 'engine' };
+      expect(SessionRecordSchema.parse({ ...record(), mawsTools: set }).mawsTools).toEqual(set);
+      expect(SessionRecordSchema.safeParse({ ...record(), mawsTools: { ...set, dashboards: true } }).success).toBe(false);
+      expect(SessionRecordSchema.safeParse({ ...record(), mawsTools: { ...set, question: 'sminos' } }).success).toBe(false);
+    });
+
     it('rejects an unknown refusal code, an unknown mode and an unknown holder', () => {
       expect(SessionRecordSchema.safeParse({ ...record(), permissionMode: { requested: 'auto', effective: 'default', refusal: 'auto_mode_weather' } }).success).toBe(false);
       expect(SessionRecordSchema.safeParse({ ...record(), permissionMode: { requested: 'yolo', effective: 'yolo', refusal: null } }).success).toBe(false);

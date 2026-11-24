@@ -347,6 +347,7 @@ export function laneAControls(state: LaneAState, record: SessionRecord | null, {
         set: refusedWith(LANE_A_WORDS.mode),
       },
       directories: { value: [...(record?.additionalDirectories ?? [])], options: [], disabled: LANE_A_WORDS.directories, set: refusedWith(LANE_A_WORDS.directories) },
+      tools: null, // board ticket 421: a session another process runs has no MAWS tools to choose
     };
   };
 

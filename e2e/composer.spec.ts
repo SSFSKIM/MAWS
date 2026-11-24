@@ -698,6 +698,68 @@ test('an unstarted session binds the frame to the intent, holds a starting state
   expect(editor.consoleErrors()).toEqual([]);
 });
 
+// Board ticket 421 (docs/doperpowers/plans/2026-11-23-tool-choice.md, D11 and §H): a new chat's "+" menu offers Tools, the
+// set of MAWS's tools it starts with, once the machine's spine has answered that it knows the choice; driven by the
+// keyboard alone, a checkbox item toggles without closing the menu, Documents is refused while Artifacts is off and its
+// note says why on focus, and the question tool is a radio item, each choice a patch of the intent. A started tab offers
+// no Tools: its set is fixed (D1).
+test('an unstarted chat chooses its tools in the "+" menu by keyboard alone; a started tab offers none', async ({ editor }) => {
+  const { page } = editor;
+  const id = 'c7-tools';
+  const intent: HarnessIntent = { kind: 'create', location: { kind: 'directory', path: repo }, additionalDirectories: [], model: null, effort: null, permissionMode: null, message: null, draft: null };
+  await openComposerPage(page);
+  await cards(page, 'intent', id, intent);
+  await showPanes(page, [{ composer: id }, null]);
+  const p = pane(page, 0);
+  const plus = p.getByRole('button', { name: 'Add files, photos or commands' });
+  await plus.focus();
+  await page.keyboard.press('Enter');
+  const tools = page.getByRole('menuitem', { name: 'Tools' });
+  await expect(tools).toBeVisible();
+  await page.keyboard.press('End'); // the last item of the menu
+  await expect(tools).toBeFocused();
+  await page.keyboard.press('ArrowRight');
+  const artifacts = page.getByRole('menuitemcheckbox', { name: 'Artifacts' });
+  await expect(artifacts).toBeFocused();
+  await expect(artifacts).toHaveAttribute('aria-checked', 'true');
+  await page.keyboard.press('Enter');
+  const off = { artifacts: false, documents: false, dashboards: false, auxiliary: true, question: 'maws' };
+  await expect.poll(async () => (await cards(page, 'patches')).filter((x) => 'mawsTools' in x.patch)).toEqual([{ appSessionId: id, patch: { mawsTools: off } }]);
+  await expect(artifacts).toHaveAttribute('aria-checked', 'false'); // the menu stayed open over the intent's new set
+  await page.keyboard.press('ArrowDown');
+  const documents = page.getByRole('menuitem', { name: 'Documents' });
+  await expect(documents).toBeFocused();
+  await expect(documents).toHaveAttribute('aria-disabled', 'true');
+  await expect(documents).toHaveAccessibleDescription('Needs Artifacts');
+  await expect(documents.locator('[data-row-note]')).toBeVisible(); // its note, open at once on keyboard focus
+  const engine = page.getByRole('menuitemradio', { name: 'Default' });
+  // each press lands before the next is made, and one that lands elsewhere says where: Dashboards (refused, yet reached),
+  // Auxiliary, then Default past the question's label
+  const focusedRow = () => page.evaluate(() => document.activeElement?.getAttribute('aria-label') ?? `${document.activeElement?.tagName ?? 'nothing'} (no row)`);
+  for (const row of ['Dashboards', 'Auxiliary', 'Default']) {
+    await page.keyboard.press('ArrowDown');
+    await expect.poll(focusedRow, { message: `ArrowDown lands on ${row}` }).toBe(row);
+  }
+  await expect(engine).toBeFocused();
+  await expect(engine).toHaveAccessibleDescription("Claude Code's own question");
+  await page.keyboard.press('Enter');
+  await expect.poll(async () => (await cards(page, 'patches')).filter((x) => 'mawsTools' in x.patch).at(-1)).toEqual({ appSessionId: id, patch: { mawsTools: { ...off, question: 'engine' } } });
+  await expect(engine).toHaveAttribute('aria-checked', 'true');
+  await page.keyboard.press('Escape');
+  await page.keyboard.press('Escape');
+  await expect(tools).toHaveCount(0);
+
+  // a started tab: its "+" menu has no Tools
+  const started = 'c7-tools-started';
+  await launchReady(page, started, steerStopJournal(scratch, started));
+  await showPanes(page, [{ composer: started }, null]);
+  await pane(page, 0).getByRole('button', { name: 'Add files, photos or commands' }).click();
+  await expect(page.getByRole('menuitem', { name: /^Plugins/ })).toBeVisible();
+  await expect(page.getByRole('menuitem', { name: 'Tools' })).toHaveCount(0);
+  await page.keyboard.press('Escape');
+  expect(editor.consoleErrors()).toEqual([]);
+});
+
 // UX wave U6b-5a (docs/doperpowers/plans/2026-11-17-ux-wave-U6b-5-rest-of-keyboard.md, §I; B9): ⇧Tab in the box changes
 // the permission mode and the composer's live region says the mode that resulted, "Permission mode: <the chip's label>".
 // An unstarted session over the page's stub intent, whose chip writes through the intent as the scene above shows. The

@@ -33,7 +33,10 @@
 // (`ShowPaneRecordedInputSchema`, `parseRecordedToolArguments`). Board ticket 848 (the X9 amendment of 2026-11-23, the
 // P1 spec's Decision Log) retires `send_file`: a file reaches the user as a Markdown link to its path in the agent's
 // message, a call is answered `sendFileRetired`, and `./send-file` keeps its name and schemas for the records written
-// before.
+// before. Board ticket 420 (docs/doperpowers/plans/2026-11-23-tool-choice.md, §B; the X9 amendment of 2026-11-23) lists
+// `ask` alone with `_meta` (always loaded) and gives the four tools an edit needs back to tool search; the ask's
+// `blocking` is required (`AskInputSchema`), its description steering it to false, a call without it is answered
+// `askBlockingRequired`, and records are read with the schema they were written under (`AskRecordedInputSchema`).
 import * as z from 'zod';
 import { ArtifactKindSchema } from '../artifacts/entity'; // P3-A
 import { ArtifactLocationSchema } from '../artifacts/link'; // P4-B4
@@ -44,7 +47,7 @@ import { AGENT_PANE_NAMES, AgentPaneSchema, CAPTURE_ANSWER_MS, PANE_ANSWER_MS, P
 import { DOCUMENT_TOOL_NAMES, DOCUMENT_TOOLS } from './document-tools'; // P3-B (M7)
 import { DASHBOARD_TOOL_NAMES, DASHBOARD_TOOLS } from './dashboard-tools'; // P3-E (E2 M2)
 import { SEARCH_TOOL_NAMES, SEARCH_TOOLS } from './search-tools'; // P4-B4
-import { ALWAYS_LOAD } from './always-load'; // P4-A3
+import { ALWAYS_LOAD } from './always-load'; // P4-A3; board ticket 420: the ask alone
 import { BrowserOpenPageSchema } from '../browser/tab'; // U12a
 
 export { ARTIFACT_ID } from './artifact-id';
@@ -85,8 +88,8 @@ export const ARTIFACT_SCREENSHOT_DEFAULT = { width: 1280, height: 800 } as const
 export const ARTIFACT_SCREENSHOT_MAX_BYTES = 3.5 * 1024 * 1024; // A-34: its base64 stays under the API's 5 MB per image
 
 // ---------------------------------------------------------------------------------------------------------------------
-// Inputs (strict; validators never default: `blocking`, `multi`, `allowOther`, `multiple` and a question's `id` take
-// their defaults where they are read)
+// Inputs (strict; validators never default: a recorded ask's `blocking` (board ticket 420: a live call must give it),
+// `multi`, `allowOther`, `multiple` and a question's `id` take their defaults where they are read)
 
 export const ASK_MODALITIES = ['choice', 'text', 'file', 'folder', 'repository', 'design_system' /* P3-D */] as const;
 export type AskModality = (typeof ASK_MODALITIES)[number];
@@ -141,22 +144,28 @@ export const AskQuestionSchema = z
   });
 export type AskQuestion = z.infer<typeof AskQuestionSchema>;
 
-export const AskInputSchema = z
-  .strictObject({
-    title: z.string().max(120).optional(),
-    context: z.string().max(2000).optional(),
-    blocking: z.boolean().optional(), // default true
-    questions: z.array(AskQuestionSchema).min(1).max(12),
-  })
-  .superRefine((input, ctx) => {
-    const seen = new Set<string>();
-    input.questions.forEach((question, index) => {
-      const id = askQuestionId(question, index);
-      if (seen.has(id)) ctx.addIssue({ code: 'custom', path: ['questions', index, 'id'], message: `the id "${id}" is used twice` });
-      seen.add(id);
+// Board ticket 420: the two forms differ in `blocking` alone. What `tools/list` lists and the host admits requires it;
+// the form every earlier build carried out, kept to read records only, leaves it optional, absent meaning the call waited.
+const askInputOf = <B extends z.ZodType>(blocking: B) =>
+  z
+    .strictObject({
+      title: z.string().max(120).optional(),
+      context: z.string().max(2000).optional(),
+      blocking,
+      questions: z.array(AskQuestionSchema).min(1).max(12),
+    })
+    .superRefine((input, ctx) => {
+      const seen = new Set<string>();
+      input.questions.forEach((question, index) => {
+        const id = askQuestionId(question, index);
+        if (seen.has(id)) ctx.addIssue({ code: 'custom', path: ['questions', index, 'id'], message: `the id "${id}" is used twice` });
+        seen.add(id);
+      });
     });
-  });
+export const AskInputSchema = askInputOf(z.boolean());
 export type AskInput = z.infer<typeof AskInputSchema>;
+export const AskRecordedInputSchema = askInputOf(z.boolean().optional()); // absent: the call waited
+export type AskRecordedInput = z.infer<typeof AskRecordedInputSchema>;
 
 // A question's id: its own, else `q<n>` by its 1-based position.
 export function askQuestionId(question: Pick<AskQuestion, 'id'>, index: number): string {
@@ -505,9 +514,10 @@ export const MAWS_TOOLS = {
   ask: {
     title: 'Ask questions',
     description:
-      'Ask the user one or several questions at once through a MAWS sheet; without this tool, use AskUserQuestion. Each question has a modality: "choice" (options, single or multi, with an Other row), "text" (free text), "file" or "folder" (a native picker returning absolute paths), "repository" (one of the user\'s MAWS projects), or "design_system" (one of the user\'s design systems, answered with its designSystemId and name; unless allowCreate is false, the user may answer create: true instead, asking you to build a new one with them). The user may answer any question with "decide for me" or skip it. With blocking true (the default) the call waits for the answers and returns them; with blocking false it returns {status: "asked", askId} at once and the answers arrive later as a user message that names the askId, so you can keep working meanwhile. In a subagent the call always waits and returns the answers, as with blocking true.',
+      'Ask the user one or several questions at once through a MAWS sheet; without this tool, use AskUserQuestion. Each question has a modality: "choice" (options, single or multi, with an Other row), "text" (free text), "file" or "folder" (a native picker returning absolute paths), "repository" (one of the user\'s MAWS projects), or "design_system" (one of the user\'s design systems, answered with its designSystemId and name; unless allowCreate is false, the user may answer create: true instead, asking you to build a new one with them). The user may answer any question with "decide for me" or skip it. blocking is required. With blocking false the call returns {status: "asked", askId} at once and the answers arrive later as a user message that names the askId, so you can keep working meanwhile; with blocking true it waits for the answers and returns them. Pass false unless you need the answers before your next step. In a subagent the call always waits and returns the answers, as with blocking true.',
     input: AskInputSchema,
     annotations: MAWS_TOOL_ANNOTATIONS,
+    meta: ALWAYS_LOAD, // board ticket 420: the session's line to its human, loaded up front
   },
   show_pane: {
     title: 'Show pane',
@@ -546,7 +556,6 @@ export const MAWS_TOOLS = {
       "Return a MAWS artifact kind's guide (when to use it, how to create, read and edit it) and its format reference; without this tool, use the guide artifact_create returned. Kinds: document, presentation, design, design_system, dashboard, html, file. For a document, presentation or design it also returns the governing design system's DESIGN.md when one governs. Pass artifact (id or handle) to inspect that existing artifact's actual system and home, including its Space and explicit assignment; without artifact this describes the default for a new artifact. Pass space (a Space's id or its name) to describe a new artifact in that Space. For an existing design_system it also runs the canon and tagged law checks, reporting violations and checks requiring visual judgment. When the artifact's Space has instructions from the user, the answer carries them as spaceInstructions, the first time and again after they change: follow them for work in that Space.",
     input: ArtifactDescribeTypeInputSchema,
     annotations: MAWS_TOOL_ANNOTATIONS,
-    meta: ALWAYS_LOAD, // P4-A3: an edit needs it
   },
   artifact_read: {
     title: 'Read artifact',
@@ -554,7 +563,6 @@ export const MAWS_TOOLS = {
       "Read a MAWS artifact by id or handle; without this tool, ask the user what the artifact holds. Returns its live revision and content: an html page or a file kind's files (all, or the paths named), a document's structure (with its page setting), a file artifact's path and metadata (and its text when under 1 MiB). version reads one of the retained versions listed in the answer, read-only; revision reads an html page as an earlier write left it; for a document, tab, from, count and sinceRevision read one tab, count blocks from a block id, or the changes since a revision (other kinds ignore them). Read before you publish: artifact_publish takes the revision this read returned. When the artifact's Space has instructions from the user, the answer carries them as spaceInstructions, the first time and again after they change: follow them for work in that Space.",
     input: ArtifactReadInputSchema,
     annotations: MAWS_TOOL_ANNOTATIONS,
-    meta: ALWAYS_LOAD, // P4-A3: an edit needs it
   },
   artifact_publish: {
     title: 'Publish artifact',
@@ -562,7 +570,6 @@ export const MAWS_TOOLS = {
       "Write files of a MAWS artifact as one change, an html page or a file kind's files; without this tool, write the files to disk and tell the user. files maps each path to its whole new text, null removing it (an html page is its one file, index.html); for an html page, path (the .html file you wrote, absolute or relative to the working directory) publishes that file's bytes in place of files; baseRevision is the revision your last artifact_read (or create or publish) of it returned. A publish from an older revision is refused naming the live one: read again. Files nobody changed since your read merge over the live artifact and the others are kept; a file someone else changed since your read refuses the publish naming it (read, apply your change to what you read, publish again; force: true overwrites them as a last resort). All of it lands or none. Returns the new revision and the files changed, kept and removed. mode: \"suggest\" proposes the files instead: the user accepts or rejects them and the artifact stays as it is until then (an artifact the user set to take agent edits as suggestions takes every publish so; an html page takes none).",
     input: ArtifactPublishInputSchema,
     annotations: ARTIFACT_WRITER_ANNOTATIONS,
-    meta: ALWAYS_LOAD, // P4-A3: an edit needs it
   },
   artifact_upload_asset: {
     title: 'Upload artifact asset',
@@ -627,11 +634,15 @@ const MIB = 1024 * 1024;
 
 export const TOOL_ERRORS = {
   invalidArguments: (tool: MawsToolName, issues: string) => `${tool}: invalid arguments: ${issues}`,
-  unknownTool: (name: string) => `unknown tool "${name}"; the maws server has ${MAWS_TOOL_NAMES.join(', ')}`,
+  // board ticket 421: `listed`, the tools the session was listed (its set's, `./tool-set`), not the server's every tool
+  unknownTool: (name: string, listed: readonly string[]) => `unknown tool "${name}"; the maws server has ${listed.length > 0 ? listed.join(', ') : 'no tools in this session'}`,
   // Board ticket 848: a call of the retired `send_file`, whatever it holds; the agent is told to write the path link
   sendFileRetired: 'send_file: MAWS no longer delivers files. Link the file in your message as a Markdown link to its absolute path, [its name](/absolute/path): a click opens it beside the chat, and ⌘-click opens it in the main area. Keep the file inside this session\'s folders, where everyone who sees the session can open it.',
   sessionEnded: 'ask: the session ended before the user answered',
   askQuotesGrant: 'An ask may not quote a permission grant. Ask the question in your own words.', // board ticket 711
+  // board ticket 420: a call that leaves out the required `blocking`; a session started before it reads a description
+  // that called it optional (the tool-choice plan's P4), and this sentence says what to pass
+  askBlockingRequired: 'ask: pass blocking: false to keep working while the user answers, or blocking: true to wait for the answers.',
   unknownPane: (pane: string) => `show_pane: unknown pane "${pane}"; known panes: ${AGENT_PANE_NAMES.join(', ')}`,
   // UX wave U6d (O-44): a call for the retired `artifact` pane, whatever else it holds; the agent is told to write the link
   artifactPaneRetired: 'show_pane: MAWS no longer opens an artifact for the user. Name it in your message as a Markdown link, [its title](maws-artifact:<artifactId>), and the user opens it with a click.',
@@ -699,11 +710,13 @@ type ToolInput<N extends MawsToolName> = z.infer<(typeof MAWS_TOOLS)[N]['input']
 // named with the known ones, every other refusal by its issues). U6d (decision 17): a `show_pane` that names the retired
 // `artifact` pane is answered `artifactPaneRetired` before the schema is consulted, so the agent always reads the sentence
 // that teaches the link, never a list of issues. UX wave U10b (§A.2): a publish the schema refused for naming both or
-// neither of path and files is answered `publishPathOrFiles` alone, the sentence that says what to send.
+// neither of path and files is answered `publishPathOrFiles` alone, the sentence that says what to send. Board ticket 420:
+// an ask whose only fault is a missing `blocking` (it reads as a record would) is answered `askBlockingRequired` alone.
 export function parseToolArguments<N extends MawsToolName>(name: N, args: unknown): { ok: true; data: ToolInput<N> } | { ok: false; error: string } {
   if (name === 'show_pane' && (args as { pane?: unknown } | null | undefined)?.pane === 'artifact') return { ok: false, error: TOOL_ERRORS.artifactPaneRetired };
   const parsed = MAWS_TOOLS[name].input.safeParse(args);
   if (parsed.success) return { ok: true, data: parsed.data as ToolInput<N> };
+  if (name === 'ask' && AskRecordedInputSchema.safeParse(args).success) return { ok: false, error: TOOL_ERRORS.askBlockingRequired };
   if (name === 'artifact_publish' && parsed.error.issues.some((issue) => issue.message === TOOL_ERRORS.publishPathOrFiles)) return { ok: false, error: TOOL_ERRORS.publishPathOrFiles };
   const pane = (args as { pane?: unknown } | null | undefined)?.pane;
   if (name === 'show_pane' && pane !== undefined && parsed.error.issues.some((issue) => issue.path.length === 1 && issue.path[0] === 'pane')) return { ok: false, error: TOOL_ERRORS.unknownPane(String(pane)) };
@@ -712,12 +725,15 @@ export function parseToolArguments<N extends MawsToolName>(name: N, args: unknow
 
 // U6d (Interfaces §B; decision 18): a record's arguments, read with the schema they were written under, so a journal of
 // any build yields the events it always did. For `show_pane` the recorded schema decides (every pane a record can name,
-// and `at`; its refusal's text is read by nobody); every other tool is `parseToolArguments`. The normaliser's one parser
-// of a `maws` call; the host's tools keep `parseToolArguments`.
-type RecordedToolInput<N extends MawsToolName> = N extends 'show_pane' ? ShowPaneRecordedInput : ToolInput<N>;
+// and `at`; its refusal's text is read by nobody), and for `ask` since board ticket 420 (`blocking` optional, absent
+// meaning the call waited); every other tool is `parseToolArguments`. The normaliser's one parser of a `maws` call; the
+// host's tools keep `parseToolArguments`.
+type RecordedToolInput<N extends MawsToolName> = N extends 'show_pane' ? ShowPaneRecordedInput : N extends 'ask' ? AskRecordedInput : ToolInput<N>;
+const RECORDED_INPUT_SCHEMAS: Partial<Record<MawsToolName, z.ZodType>> = { show_pane: ShowPaneRecordedInputSchema, ask: AskRecordedInputSchema };
 export function parseRecordedToolArguments<N extends MawsToolName>(name: N, args: unknown): { ok: true; data: RecordedToolInput<N> } | { ok: false; error: string } {
-  if (name !== 'show_pane') return parseToolArguments(name, args) as { ok: true; data: RecordedToolInput<N> } | { ok: false; error: string };
-  const parsed = ShowPaneRecordedInputSchema.safeParse(args);
+  const recorded = RECORDED_INPUT_SCHEMAS[name];
+  if (recorded === undefined) return parseToolArguments(name, args) as { ok: true; data: RecordedToolInput<N> } | { ok: false; error: string };
+  const parsed = recorded.safeParse(args);
   if (parsed.success) return { ok: true, data: parsed.data as RecordedToolInput<N> };
   return { ok: false, error: TOOL_ERRORS.invalidArguments(name, issuesText(parsed.error)) };
 }

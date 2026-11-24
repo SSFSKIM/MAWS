@@ -12,6 +12,7 @@ import type { PreloadBridge, Settings } from '@shared/ipc/schema';
 import { ARTIFACT_KINDS } from '@shared/artifacts/entity';
 import type { LibraryRow } from '@shared/ipc/schema/library';
 import { machineSettingsDefaults, SETTINGS_DEFAULTS_V21 } from '@shared/settings/defaults';
+import { FULL_MAWS_TOOL_SET } from '@shared/maws/tool-set'; // board ticket 421
 import { resetLibrary } from '../library/store';
 import { useHosts } from '../stores/hosts';
 import { useNotices } from '../stores/notices';
@@ -33,8 +34,9 @@ const counts = Object.fromEntries(ARTIFACT_KINDS.map((kind) => [kind, kind === '
 let disconnect = () => {};
 async function renderPage(initial: Settings, populated: boolean) {
   const b = importBridge(initial);
-  // the machine's own route on a daemon that knows it, or the two legacy routes on one before it
-  b.answers['machineSettings.get'] = () => ({ settings: machineSettingsDefaults(), version: 1, ...(populated && { defaultRoute: 'machine' as const }) });
+  // the machine's own route on a daemon that knows it, or the two legacy routes on one before it; board ticket 421: the
+  // machine's default set of MAWS's tools on one that knows it, and no row for it on one before it
+  b.answers['machineSettings.get'] = () => ({ settings: machineSettingsDefaults(), version: 1, ...(populated && { defaultRoute: 'machine' as const, mawsTools: FULL_MAWS_TOOL_SET }) });
   if (populated) {
     b.answers['browser.import.list'] = () => ({ profiles: [RECORD], fileBroken: false, running: null });
     b.answers['library.list'] = () => ({ rows: [SYSTEM], counts });
@@ -55,6 +57,7 @@ async function renderPage(initial: Settings, populated: boolean) {
 }
 
 type Drawn = { id: string; state: string; section: string };
+const PREDATES_THE_CHOICE = ['sessions.tools', 'sessions.question']; // board ticket 421: a spine whose answer carries no set
 function drawnRows(): Drawn[] {
   return [...document.querySelectorAll<HTMLElement>('[data-settings-row]')].map((el) => ({
     id: el.dataset.settingsRow!,
@@ -63,7 +66,8 @@ function drawnRows(): Drawn[] {
   }));
 }
 
-function expectEveryRowDeclaredAndEveryDeclarationDrawn(): Drawn[] {
+// `absent`: rows the page draws only for a machine that has them (board ticket 421: the default set of MAWS's tools)
+function expectEveryRowDeclaredAndEveryDeclarationDrawn(absent: readonly string[] = []): Drawn[] {
   const drawn = drawnRows();
   for (const row of drawn) {
     const declared = SETTINGS_ROWS.find((r) => r.id === row.id);
@@ -72,7 +76,7 @@ function expectEveryRowDeclaredAndEveryDeclarationDrawn(): Drawn[] {
     expect(Object.keys(declared!.states), row.id).toContain(row.state);
   }
   const ids = new Set(drawn.map((row) => row.id));
-  for (const declared of SETTINGS_ROWS) expect(ids.has(declared.id) || [declared.revealedBy, declared.landsOn].some((at) => at !== undefined && ids.has(at)), declared.id).toBe(true); // a control drawn on another row (landsOn) is in the page as that row
+  for (const declared of SETTINGS_ROWS.filter((row) => !absent.includes(row.id))) expect(ids.has(declared.id) || [declared.revealedBy, declared.landsOn].some((at) => at !== undefined && ids.has(at)), declared.id).toBe(true); // a control drawn on another row (landsOn) is in the page as that row
   // nothing in the body outside the Org page is drawn outside the table
   const org = document.querySelector('section[aria-labelledby="settings-org"]')!;
   for (const group of document.querySelectorAll('[data-settings-body] [role="group"][aria-labelledby]')) if (!org.contains(group)) expect(group.hasAttribute('data-settings-row'), group.textContent ?? '').toBe(true);
@@ -133,6 +137,7 @@ describe('every row drawn from the table', () => {
       expect(shows('voice.helper', 'build')).not.toBeNull();
       expect(shows('voice.recognition', 'default')).not.toBeNull();
       expect(shows('supervisor.daemon', 'default')).not.toBeNull();
+      expect(shows('sessions.tools', 'default')).not.toBeNull(); // board ticket 421
     });
     const drawn = expectEveryRowDeclaredAndEveryDeclarationDrawn();
     for (const declared of SETTINGS_ROWS) if (declared.id !== 'engine.configHome' && declared.landsOn === undefined) expect(drawn.map((row) => row.id), declared.id).toContain(declared.id);
@@ -151,8 +156,8 @@ describe('every row drawn from the table', () => {
     await renderPage({ ...SETTINGS_DEFAULTS_V21, engine: { ...SETTINGS_DEFAULTS_V21.engine, memoryBudget: { enabled: false } } }, false);
     // read once the probes have answered: the Helper and Recognition rows stand while `voice.status` is read (G58)
     await vi.waitFor(() => {
-      const ids = expectEveryRowDeclaredAndEveryDeclarationDrawn().map((row) => row.id);
-      for (const hidden of ['supervisor.limit', 'supervisor.stateful', 'browser.importedProfile', 'browser.extension', 'keyboard.reset', 'voice.helper', 'voice.recognition', 'supervisor.daemon', 'engine.configHome']) expect(ids, hidden).not.toContain(hidden);
+      const ids = expectEveryRowDeclaredAndEveryDeclarationDrawn(PREDATES_THE_CHOICE).map((row) => row.id);
+      for (const hidden of ['supervisor.limit', 'supervisor.stateful', 'browser.importedProfile', 'browser.extension', 'keyboard.reset', 'voice.helper', 'voice.recognition', 'supervisor.daemon', 'engine.configHome', ...PREDATES_THE_CHOICE]) expect(ids, hidden).not.toContain(hidden);
     });
   });
 });

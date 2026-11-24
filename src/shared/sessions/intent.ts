@@ -13,6 +13,7 @@ import { AppSessionIdSchema, MessageUuidSchema, ProjectIdSchema, SessionIdSchema
 import { LaunchedBySchema, LineageSchema } from '../graph/session'; // E3; P5 O7 M4: LaunchedBySchema
 import { EffortSchema } from '../engine/launch-spec';
 import { RouteSchema } from '../engine/route';
+import { MawsToolSetSchema } from '../maws/tool-set'; // board ticket 421
 import { SETUP_PHASES, SetupResourcesSchema } from './setup';
 
 export const SetupDraftSchema = z.strictObject({
@@ -77,6 +78,11 @@ export const SetupIntentSchema = z.strictObject({
   // P5 O7 M4: a remote spawn's requester and its signed action (`session.spawn`), which the launched record carries;
   // optional for the same reason as `lineage`, and never patched from the renderer
   launchedBy: LaunchedBySchema.optional(),
+  // Board ticket 421 (docs/doperpowers/plans/2026-11-23-tool-choice.md, Interfaces §E): a create intent's set of MAWS's
+  // tools, seeded from the machine's default and patched by the composer; absent, the full set, and written only when it
+  // is not, so a default draft stays readable to a build that predates it. A fork's intent has none (its source's record
+  // holds it).
+  mawsTools: MawsToolSetSchema.optional(),
 });
 export type SetupIntent = z.infer<typeof SetupIntentSchema>;
 
@@ -92,6 +98,7 @@ export const SetupIntentPatchSchema = SetupIntentSchema.pick({
   gateway: true,
   route: true, // P5 O7 M9
   trust: true,
+  mawsTools: true, // board ticket 421
   draft: true,
 })
   .extend({ location: LocationSchema, projectId: ProjectIdSchema.nullable() })

@@ -10,6 +10,10 @@
 // act wins in either direction. Projection: override, else custom title (`user`), else AI title (`generated`), else first
 // prompt (`none`) less the engine's slash-command wrappers (`promptTitle`) and cut to six words (`cutPrompt`), else an
 // empty title.
+//
+// Board ticket 421 (docs/doperpowers/plans/2026-11-23-tool-choice.md, Interfaces §E): a record's set of MAWS's tools
+// (`maws_tools`) is written once, when its first launch's record is made, and only when it is not the full set; nothing
+// updates it after, but a `/clear`, whose record for the old transcript takes the same set.
 import { randomUUID } from 'node:crypto';
 import { homedir } from 'node:os';
 import type { AppSessionId, MessageUuid, ProjectId, SessionId } from '@shared/graph/ids';
@@ -26,6 +30,7 @@ import { pastedPlaceholder, replacePasted } from '@shared/composer/pasted-conten
 import { planPromptOpened } from '@shared/engine/host-prompts'; // ticket 733a
 import { locate, type ProjectStore } from './projects';
 import { FolderReads, factsOf, folderColumns } from './folder-facts'; // UX wave U8c-2
+import { MawsToolSetSchema, type MawsToolSet } from '@shared/maws/tool-set'; // board ticket 421
 
 const FOLDERLESS_RESCAN_KEY = 'folderlessRescan'; // rescanFolderlessOnce
 
@@ -88,6 +93,7 @@ interface SessionRow {
   // the same write stored (src/services/index/folder-facts.ts); absent before the opener adds them
   launch_folder?: string | null;
   agent_folder?: string | null;
+  maws_tools?: string | null; // board ticket 421 (an added column): the set of MAWS's tools its launch served, JSON; null at the full set
 }
 
 export interface LaunchInit {
@@ -106,6 +112,9 @@ export interface LaunchInit {
   lineage?: Lineage | null;
   // P5 O7 M4: who asked for a remote spawn, from its intent (`session.spawn`); absent for every other launch
   launchedBy?: LaunchedBy;
+  // Board ticket 421 (docs/doperpowers/plans/2026-11-23-tool-choice.md, Interfaces §E): the set of MAWS's tools the launch
+  // serves, given only when it is not the full set; written once, here, and never updated
+  mawsTools?: MawsToolSet;
 }
 
 // What the engine host needs to know of a record's engine id: bound (fs.scan's `known` when a transcript is on disk).
@@ -223,10 +232,23 @@ function toRecord(row: SessionRow): SessionRecord {
     },
     lineage: row.lineage === null ? null : (JSON.parse(row.lineage) as Lineage), // E3 (X11)
     ...(typeof row.launched_by === 'string' && { launchedBy: JSON.parse(row.launched_by) as LaunchedBy }), // P5 O7 M4
+    ...mawsToolsOfRow(row), // board ticket 421
     ...factsOf(row), // UX wave U8c-2: each fact only while its stamp is the row's size and mtime
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
+}
+
+// Board ticket 421: a row's set of MAWS's tools; a value that is no set (written by no build) reads as none, the full set,
+// rather than making the record unreadable
+function mawsToolsOfRow(row: SessionRow): { mawsTools?: MawsToolSet } {
+  if (typeof row.maws_tools !== 'string') return {};
+  try {
+    const set = MawsToolSetSchema.safeParse(JSON.parse(row.maws_tools));
+    return set.success ? { mawsTools: set.data } : {};
+  } catch {
+    return {};
+  }
 }
 
 // P5 O8 M6a (Interfaces §P): a member's reader state, their `reader_state` row (ADDED_TABLES); none reads unpinned, read
@@ -490,6 +512,7 @@ export class SessionStore {
         first_prompt: init.firstPrompt ?? null,
         ...(init.lineage ? { lineage: JSON.stringify(init.lineage), lineage_source: 'intent' } : {}), // E3 (X11)
         ...(init.launchedBy ? { launched_by: JSON.stringify(init.launchedBy) } : {}), // P5 O7 M4
+        ...(init.mawsTools ? { maws_tools: JSON.stringify(init.mawsTools) } : {}), // board ticket 421
         created_at: now,
         updated_at: now,
       });
@@ -755,7 +778,11 @@ export class SessionStore {
     this.changed(existing.app_id as AppSessionId, cause);
     this.bindingChanged(existing.app_id as AppSessionId);
     if (rebinding && family !== null) this.refoldFamily(family); // E3: the old transcript left its family
-    if (previous !== null) this.upsertFromSummary(previous);
+    if (previous !== null) {
+      const history = this.upsertFromSummary(previous);
+      // board ticket 421 (Interfaces §E): the old conversation resumes and forks under the set it was held under
+      if (history.created && typeof existing.maws_tools === 'string') this.db.update('sessions', 'app_id', history.record.appId, { maws_tools: existing.maws_tools });
+    }
     if (other?.summary) this.upsertFromSummary(JSON.parse(other.summary) as TranscriptSummary);
   }
 

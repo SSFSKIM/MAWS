@@ -15,6 +15,7 @@ import type { AppSessionId } from '@shared/graph/ids';
 import { assertSafeAppSessionId } from '@shared/engine/app-session-id';
 import type { LaunchSpec } from '@shared/engine/launch-spec';
 import { readRoute } from '@shared/engine/route'; // P5 O7 M9
+import { isFullSet } from '@shared/maws/tool-set'; // board ticket 421
 import type { RelayHealth } from '@shared/engine/relay-health';
 import { HostCommandError } from '@shared/host/runtime'; // P5 O16 M2
 import type { SessionStateStore } from '@shared/engine/session-state-store';
@@ -266,8 +267,14 @@ export function createAdopter(deps: LauncherDeps, adoptMs = ADOPT_MS): (entry: R
     if (stored === null) throw new HostAdoptFailed('the session has no stored launch spec');
     const spawned = spawnRowOf(launchRows(dir, launchId));
     if (spawned === null) throw new HostAdoptFailed(`launch ${launchId} has no spawn row`);
-    // P5 O7 M9: the stored spec keeps no `route` (an older strict reader's file); the launch's spawn row names it
-    const spec: LaunchSpec = spawned.route === 'machine' ? { ...stored, route: 'machine' } : stored;
+    // P5 O7 M9: the stored spec keeps no `route` (an older strict reader's file); the launch's spawn row names it.
+    // Board ticket 421: nor the set of MAWS's tools, which the row records too; a row with none served the full set,
+    // and a full set stays off the spec (absent means the full set)
+    const spec: LaunchSpec = {
+      ...stored,
+      ...(spawned.route === 'machine' && { route: 'machine' as const }),
+      ...(spawned.mawsTools && !isFullSet(spawned.mawsTools) && { mawsTools: spawned.mawsTools }),
+    };
     const [captured, owedInterrupt, observerLaunch, infrastructure] = await Promise.all([
       deps.captureEnv(),
       deps.store.loadOwedInterrupt(appSessionId).catch(() => false),

@@ -33,6 +33,7 @@ import { processesNaming } from './support/processes'; // the UX wave, U9: A6's 
 import { assistantRecord, backgroundAgentRecords, backgroundAgentSidecars, turnEndRecords, userRecord } from './support/lane-a'; // UX wave U6b-4c: assistantRecord, a subagent's answer
 import { newChatIn, openProject, projectLine, projectRow, showProjectList, sidebarRow } from './support/sidebar';
 import { expectNewChatInFront, expectScreenReaderOnly } from './support/screen-reader-only'; // the word cut (W86): New chat's heading is a screen reader's
+import { unfoldInfoGroup } from './support/session-info'; // board ticket 421's M5: Session info's Engine group
 
 const FIXTURES = 'spikes/protocol-probe/fixtures';
 const AUTO_ROUTED = `${FIXTURES}/pass2/auto-routed.jsonl`;
@@ -72,6 +73,8 @@ function journal(maws: MawsLaunch, appSessionId: string): Row[] {
     .flatMap((file) => readFileSync(join(dir, file), 'utf8').split('\n').filter(Boolean).map((line) => JSON.parse(line) as Row));
 }
 const spawnRow = (maws: MawsLaunch, id: string) => journal(maws, id).find((r) => r.direction === 'meta' && r.frame.event === 'spawn')!.frame;
+// board ticket 421: the spawn row of one launch of a session, told apart by its launch id (a resume writes another)
+const spawnRowOf = (maws: MawsLaunch, id: string, launchId: string) => journal(maws, id).find((r) => r.direction === 'meta' && r.frame.event === 'spawn' && r.frame.launchId === launchId)!.frame;
 const initializeRequest = (maws: MawsLaunch, id: string) => journal(maws, id).find((r) => r.direction === 'out' && r.frame.request?.subtype === 'initialize')!.frame.request!;
 
 interface Case {
@@ -431,6 +434,125 @@ test.describe('sessions', () => {
     expect(records.map((r) => r.engineSessionId).sort()).toEqual([sourceId, forkId].sort());
     expect(records.map((r) => r.gateway.routed)).toEqual([false, false]);
     await expect(page.getByRole('tab')).toHaveCount(2); // the source, the fork (W5: the Overview is no tab)
+  });
+
+  // Board ticket 421 (docs/doperpowers/plans/2026-11-23-tool-choice.md, D1 and D8; its M3): a new chat whose intent holds a
+  // set of MAWS's tools that is not the full set launches with it, and its fork and its resume keep it, whatever the
+  // machine's default. Each launch's own spawn row says so: the host's line has neither ask flag (the engine's question
+  // tool) and the row records the set. The list itself is the unit proof's: these recordings hold no `tools/list`.
+  // Its M4 (D5): the machine's default is set to another set after the fork; the resume keeps the session's own, and a
+  // new chat made after it starts from the default, its first launch's spawn row holding it (MAWS's ask: both flags).
+  test('the set of MAWS’s tools kept with the session: a new chat at Artifacts off and Question Default launches with no ask flag and the set in its spawn row; its fork and its resume, each by its own launch, say the same; a new chat takes the machine’s default', async () => {
+    const tools = { artifacts: false, documents: false, dashboards: false, auxiliary: true, question: 'engine' } as const;
+    const { page, maws, trustedRepos } = await begin({ fixtures: [FORK_START, FORK_FORK, FORK_START, AUTO_ROUTED] });
+    const project = await addProject(page, trustedRepos[0]!.root);
+    const source = await plus(page, project.name);
+    await collectTurns(page);
+    const prompt = fixtureIdentity(FORK_START).firstPrompt!;
+    await startDirect(page, source, { mawsTools: tools }, { content: prompt.content as string, display: prompt.display });
+    await untilPhase(page, source, 'ready');
+    await turnEnded(page, source);
+    const launchOf = async (id: string) => value(await invoke(page, 'session.status', { appSessionId: id as never })).launchId;
+    const expectServed = (row: Row['frame'], what: string) => {
+      expect(row.args, `${what}: no --disallowedTools AskUserQuestion`).not.toContain('--disallowedTools');
+      expect(row.args, `${what}: no --allowedTools mcp__maws__ask`).not.toContain('--allowedTools');
+      expect(row.mawsTools, `${what}: the set in its spawn row`).toEqual(tools);
+    };
+    const firstLaunch = await launchOf(source);
+    expectServed(spawnRowOf(maws, source, firstLaunch), 'the first launch');
+    expect(value(await invoke(page, 'session.get', { appSessionId: source as never }))!.mawsTools, 'the record holds the set').toEqual(tools);
+
+    await menu(page, source, 'Fork');
+    const fork = await forkOf(page, source);
+    await untilPhase(page, fork, 'ready');
+    expectServed(spawnRowOf(maws, fork, await launchOf(fork)), 'the fork');
+    expect(value(await invoke(page, 'session.get', { appSessionId: fork as never }))!.mawsTools, 'the fork’s record holds its source’s set').toEqual(tools);
+
+    // M4: the machine's default, set as Settings › Sessions sets it (this machine's spine, machine-session-defaults.json)
+    const machineDefault = { artifacts: false, documents: false, dashboards: false, auxiliary: true, question: 'maws' } as const;
+    const machine = await localRef(page);
+    const chosen = await page.evaluate(([set, ref]) => window.maws.invoke('machineSettings.set', { patch: {}, mawsTools: set }, { machine: ref }), [machineDefault, machine] as const);
+    expect(value(chosen).mawsTools, 'the spine answers the default it wrote').toEqual(machineDefault);
+
+    // resumed: stopped, then started again; its second spawn row is the resume's, its own set whatever the default
+    value(await invoke(page, 'session.stop', { appSessionId: source as never, reason: 'stop' }));
+    await expect.poll(async () => value(await invoke(page, 'session.status', { appSessionId: source as never })).process, { timeout: 15_000 }).toBe('exited');
+    expect(value(await invoke(page, 'session.start', { appSessionId: source, message: null, options: {} }))).toMatchObject({ status: 'starting' });
+    await expect.poll(async () => (await setupOf(page, source)).filter((e) => e.phase === 'ready').length, { timeout: 20_000 }).toBe(2);
+    const resumed = await launchOf(source);
+    expect(resumed, 'the resume is a launch of its own').not.toBe(firstLaunch);
+    expectServed(spawnRowOf(maws, source, resumed), 'the resume');
+    // M5 (A4): Session info reads the set the running session keeps, from its record, whatever the machine's default
+    await mainTabById(page, `session:${await addressed(page, source)}`).click();
+    await openSurface(page, 'Session info');
+    const info = page.locator(`[data-session-info="${await addressed(page, source)}"]`);
+    const engine = await unfoldInfoGroup(info, 'Engine'); // the word cut: the Engine group starts folded
+    const infoValue = (label: string) => engine.getByRole('term').filter({ hasText: new RegExp(`^${label}$`) }).locator('xpath=following-sibling::dd[1]');
+    await expect(infoValue('MAWS tools')).toHaveText('Auxiliary');
+    await expect(infoValue('Question tool')).toHaveText('Default');
+
+    // M4: a new chat starts from the machine's default: its intent holds it, and its first launch serves it
+    const fresh = await plus(page, project.name);
+    expect(value(await invoke(page, 'session.intent.get', { appSessionId: fresh }))!.mawsTools, 'the new intent starts from the default').toEqual(machineDefault);
+    const freshPrompt = fixtureIdentity(AUTO_ROUTED).firstPrompt!;
+    await startDirect(page, fresh, {}, { content: freshPrompt.content as string, display: freshPrompt.display });
+    await untilPhase(page, fresh, 'ready');
+    const freshRow = spawnRowOf(maws, fresh, await launchOf(fresh));
+    expect(freshRow.mawsTools, 'the default in its spawn row').toEqual(machineDefault);
+    expect(freshRow.args!.flatMap((arg, k) => (arg === '--disallowedTools' ? [freshRow.args![k + 1]] : [])), 'MAWS’s ask: the built-in disallowed').toEqual(['AskUserQuestion']);
+    expect(value(await invoke(page, 'session.get', { appSessionId: fresh as never }))!.mawsTools, 'its record holds the default').toEqual(machineDefault);
+    expect(maws.consoleErrors()).toEqual([]);
+  });
+
+  // Board ticket 854 (docs/doperpowers/plans/2026-11-23-tool-choice.md, Decision Log 10): a Tools choice made in the "+"
+  // menu and still being written when Send is pressed is the launch's. The spine holds the write while the hold file
+  // exists (MAWS_E2E_INTENT_PATCH_HOLD, src/services/sessions/e2e-patch-hold.ts): Send waits for it, starting nothing,
+  // and once the hold lifts the first launch's own spawn row holds the choice. Before the ticket the start went out at
+  // once, the spine then refused the write, and the launch had every tool.
+  test('a Tools choice still being written when Send is pressed is in that launch’s spawn row', async () => {
+    const repo = await ScratchRepo.create();
+    const store = await StoreFixture.create();
+    const hold = join(store.configHome, 'e2e-intent-patch-hold');
+    const launched = await launchCase({ fixtures: [AUTO_ROUTED], trusted: [repo.root], store, env: { MAWS_E2E_INTENT_PATCH_HOLD: hold } });
+    current = { ...launched, repos: [repo] };
+    const { page, maws } = launched;
+    const project = await addProject(page, repo.root);
+    const id = await plus(page, project.name);
+    await routeDirect(page, id);
+    const prompt = fixtureIdentity(AUTO_ROUTED).firstPrompt!;
+    await editor(page).click();
+    await page.keyboard.type(prompt.display);
+    await expect(editor(page)).toHaveText(prompt.display);
+    // the choice, by keyboard in the "+" menu, its write held at the spine
+    writeFileSync(hold, '');
+    await page.locator('[data-region="main"]').getByRole('button', { name: 'Add files, photos or commands' }).focus();
+    await page.keyboard.press('Enter');
+    const tools = page.getByRole('menuitem', { name: 'Tools' });
+    await expect(tools).toBeVisible();
+    await page.keyboard.press('End');
+    await expect(tools).toBeFocused();
+    await page.keyboard.press('ArrowRight');
+    const artifacts = page.getByRole('menuitemcheckbox', { name: 'Artifacts' });
+    await expect(artifacts).toBeFocused();
+    await page.keyboard.press('Enter');
+    await expect(artifacts, 'the menu shows the choice being written').toHaveAttribute('aria-checked', 'false');
+    await page.keyboard.press('Escape');
+    await page.keyboard.press('Escape');
+    await expect(tools).toHaveCount(0);
+    expect(value(await invoke(page, 'session.intent.get', { appSessionId: id }))!.mawsTools, 'the write is held: the intent has no set yet').toBeUndefined();
+    const control = page.locator('[data-region="main"] [data-submit-state]');
+    await expect(control).toHaveText('Send');
+    await control.click();
+    // Send waits for the write: no setup phase while it is held (a window that only stages the premise, not a bound)
+    await page.waitForTimeout(1_000);
+    expect(await setupOf(page, id), 'nothing starts while the choice is being written').toEqual([]);
+    rmSync(hold);
+    await untilPhase(page, id, 'ready');
+    const off = { artifacts: false, documents: false, dashboards: false, auxiliary: true, question: 'maws' };
+    expect(value(await invoke(page, 'session.get', { appSessionId: id as never }))!.mawsTools, 'the record holds the choice').toEqual(off);
+    const launchId = value(await invoke(page, 'session.status', { appSessionId: id as never })).launchId;
+    expect(spawnRowOf(maws, id, launchId).mawsTools, 'the choice in the launch’s own spawn row').toEqual(off);
+    expect(maws.consoleErrors()).toEqual([]);
   });
 
   // U1a §J (A13): a folder with nothing to load says so in one line, in place of the list of what trust would turn on

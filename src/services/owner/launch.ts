@@ -24,11 +24,16 @@
 // decision's last act reserves it in the index before the launch is sent; a 9 that cannot be reserved goes as 8. The
 // record at `launching` binds the reservation to the host's launch id. The summaries' switch is read once here, and a
 // launch decided while it is off carries TO_HUMAN_FOLD_SUMMARIES=off.
+//
+// Board ticket 421 (docs/doperpowers/plans/2026-11-23-tool-choice.md, Interfaces §F, D12): the supplement names the
+// session's question tool, supplement 3 for MAWS's ask and 4 for the engine's own, read off the set the launch serves
+// (`spec.mawsTools`); a session's question tool never changes, so the recorded state never differs on that alone.
 import { homedir } from 'node:os';
 import type { LaunchSpec } from '@shared/engine/launch-spec';
 import type { SessionEvent } from '@shared/graph/events';
 import type { AppSessionId } from '@shared/graph/ids';
-import { TO_HUMAN_MOD_ROUTE, TO_HUMAN_SUPPLEMENT_VERSION } from '@shared/owner/contract';
+import { TO_HUMAN_MOD_ROUTE, TO_HUMAN_SUPPLEMENT_ENGINE_VERSION, TO_HUMAN_SUPPLEMENT_VERSION } from '@shared/owner/contract';
+import type { MawsToolSet } from '@shared/maws/tool-set'; // board ticket 421
 import { advertisementFor, type Advertisement } from '@shared/owner/draws';
 import type { ContractSource, LaneOverride } from '@shared/owner/state';
 import { claudeConfigDir } from '@shared/engine/config-dir';
@@ -70,14 +75,21 @@ export const desiredSource = (on: boolean, style: { messageTool: boolean }): Con
   on && style.messageTool ? 'external-style-plus-supplement' : 'off';
 
 // The text a desired state appends and the recorded state it leaves in a snapshot; a state without one records none.
-const APPENDS: Partial<Record<ContractSource, { text: AppendedText; records: RecordedState }>> = {
-  'external-style-plus-supplement': { text: 'supplement', records: `supplement:${TO_HUMAN_SUPPLEMENT_VERSION}` }, // P2-C2
+// Board ticket 421 (Interfaces §F, D12): the supplement names the session's question tool, MAWS's ask (3) or the engine's
+// own (4); a session's question tool never changes, so the table has no row for one recorded under the other's.
+type Question = MawsToolSet['question'];
+const APPENDS: Partial<Record<ContractSource, Record<Question, { text: AppendedText; records: RecordedState }>>> = {
+  'external-style-plus-supplement': {
+    maws: { text: 'supplement', records: `supplement:${TO_HUMAN_SUPPLEMENT_VERSION}` }, // P2-C2
+    engine: { text: 'supplement-engine', records: `supplement:${TO_HUMAN_SUPPLEMENT_ENGINE_VERSION}` }, // board ticket 421
+  },
 };
 
 // The decision table (Design §2; P2-C2 adds the supplement's row and column). P4-R7z: a recorded state no desired state
 // records now (an earlier contract or supplement, P4-R7y's `alias`) differs from every one, so its prompt renders anew.
-export function decideFlags(desired: ContractSource, recorded: RecordedState, declares: boolean): { append: AppendedText | null; off: boolean; offUnavailable: boolean; applied: ContractSource } {
-  const appends = APPENDS[desired] ?? null;
+// Board ticket 421: `question`, the question tool of the set the launch serves (absent from the spec: MAWS's).
+export function decideFlags(desired: ContractSource, recorded: RecordedState, declares: boolean, question: Question = 'maws'): { append: AppendedText | null; off: boolean; offUnavailable: boolean; applied: ContractSource } {
+  const appends = APPENDS[desired]?.[question] ?? null;
   const wanted = recorded !== 'unrecorded' && recorded !== (appends?.records ?? 'none');
   const off = wanted && declares;
   // what the snapshot keeps when it is reused: a recorded text stays in force (the contract, or the supplement beside its
@@ -210,8 +222,9 @@ export async function ownerChannelLaunch(
   const style: ResolvedStyle = row?.styleMismatch && row.observedStyle !== null ? await lookupStyle(row.observedStyle, styleContext) : resolved;
   const desired = desiredSource(on, style);
   const recorded = await recordedOf(s, spec, ctx);
-  let flags = decideFlags(desired, recorded, true);
-  if (flags.off) flags = decideFlags(desired, recorded, await declaresSnapshotFlag(s)); // the binary is asked only when "off" is wanted
+  const question = spec.mawsTools?.question ?? 'maws'; // board ticket 421: the set this attempt serves (D8), absent the full set
+  let flags = decideFlags(desired, recorded, true, question);
+  if (flags.off) flags = decideFlags(desired, recorded, await declaresSnapshotFlag(s), question); // the binary is asked only when "off" is wanted
   if (on && style.unresolved !== null) s.log(`${appSessionId}: ${style.unresolved}; the to-human lane is off`);
   // U2b: who will draw. P4-R7z: the advertisement goes only where the lane carries the plugin's tool; under any other
   // style the lane is off. The installations are the settings' (the resolver's own reading, whatever a mismatch decided)

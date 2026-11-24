@@ -1445,3 +1445,89 @@ test('U2b second round: in a terminal, before and after, the record line reads t
   const lines=d.captures.map(c=>(/^\s*› (.+)$/m.exec(c.pane)??[])[1]).filter(Boolean);
   assert.ok(lines.length>=2,w);assert.equal(lines.at(-1).trim(),runs.at(-1)[2],w);assert.ok(lines.some(l=>/^(Read|Search|Tool search|List)/.test(l)),w);}
 });
+// Board tickets 421 and 420 (findings-uxwave-421-tool-choice.txt; scenarios/pass3/uxwave-421-tool-choice.mjs; the plan
+// docs/doperpowers/plans/2026-11-23-tool-choice.md, "Probes"): what the engine does with the `maws` server's list when
+// one tool is always loaded, when the list changes mid-session or at a resume, and with the built-in ask left in.
+// Recorded against the scripted Messages API stand-in (stub-api.mjs, nothing spent).
+const load421=n=>readFileSync(new URL('./fixtures/uxwave/uxwave-421-'+n+'.jsonl',import.meta.url),'utf8').trim().split('\n').map(JSON.parse);
+const meta421=(rows,event)=>rows.filter(r=>r.direction==='meta'&&r.frame.event===event).map(r=>r.frame);
+const main421=rows=>meta421(rows,'stub_requests')[0].requests.filter(r=>r.main);
+const maws421=request=>request.tools.filter(t=>t.name.startsWith('mcp__maws__')).map(t=>t.name);
+const said421=request=>request.messages.flatMap(m=>m.blocks.flatMap(b=>b.mentions??[]));
+// P1 was recorded again by the plan's M2 with MAWS's own list and paragraph, a full set's (scenarios/pass3/
+// uxwave-421-maws-tools.json, which src/shared/maws/tools.test.ts pins to the source): the tool-choice plan's A7 and A8.
+const own421=JSON.parse(readFileSync(new URL('./scenarios/pass3/uxwave-421-maws-tools.json',import.meta.url),'utf8'));
+test('tickets 421/420 P1 (A7): with MAWS\'s own list, under tool search, the always-loaded ask is the one maws tool in the request, whole, and every other is named as deferred',()=>{
+ assert.deepEqual(own421.tools.filter(t=>t._meta?.['anthropic/alwaysLoad']===true).map(t=>t.name),['ask']);
+ for(const n of ['ask-upfront','ask-upfront-unset']){
+  const rows=load421(n);const [first]=main421(rows);
+  const prov=meta421(rows,'provenance')[0];assert.equal(prov.served,'uxwave-421-maws-tools.json',n);assert.match(prov.engineVersion,/^2\.1\.\d+$/,n);
+  assert.ok(rows.find(r=>r.direction==='out'&&r.frame.response?.response?.mcp_response?.result?.tools)?.frame.response.response.mcp_response.result.tools.length===own421.tools.length,n); // served whole
+  assert.deepEqual(first.tools.filter(t=>t.name.startsWith('mcp__maws__')),[{name:'mcp__maws__ask',defer_loading:null}],n);
+  assert.ok(first.tools.some(t=>t.name==='ToolSearch'),n);assert.ok(!first.tools.some(t=>t.name==='AskUserQuestion'),n);
+  const deferred=said421(first).find(t=>t.startsWith('The following deferred tools are now available')).split('\n');
+  assert.deepEqual(own421.tools.map(t=>'mcp__maws__'+t.name).filter(name=>deferred.includes(name)),own421.tools.filter(t=>t.name!=='ask').map(t=>'mcp__maws__'+t.name),n);
+  assert.ok(!deferred.includes('mcp__maws__ask'),n);
+  // A8: the paragraph the model is given names the two artifact tools it points to
+  const paragraph=said421(first).find(t=>t.startsWith('## maws\n'));
+  assert.ok(paragraph.startsWith('## maws\n'+own421.instructions.slice(0,600)),n);
+  for(const name of ['mcp__maws__artifact_search','mcp__maws__artifact_read'])assert.ok(paragraph.includes(name),n+name);
+  assert.deepEqual(meta421(rows,'server_calls')[0].calls.map(c=>[c.name,c.arguments.blocking]),[['ask',false]],n); // called with no ToolSearch first
+ }
+});
+// Ticket 420's required `blocking` on MAWS's own list (scenarios/pass3/uxwave-421-tool-choice.mjs, uxwave-421-ask-refused):
+// the server refuses as MAWS's host does, the engine hands the model the refusal as the call's error, and the call asked
+// again with `blocking: false` is acknowledged at once and the turn writes on. e2e/maws-tools.spec.ts replays it.
+test('tickets 421/420: an ask without blocking reaches the model as its refusal; asked again with false it is acknowledged and the turn writes on',()=>{
+ const rows=load421('ask-refused');
+ assert.equal(meta421(rows,'provenance')[0].served,'uxwave-421-maws-tools.json');
+ const answer=meta421(rows,'answer_refused')[0];
+ assert.deepEqual(answer.calls.map(c=>c.arguments.blocking),[undefined,false]);
+ assert.deepEqual(answer.results.map(r=>[r.tool_use_id,r.is_error]),[['toolu_stub_bare',true],['toolu_stub_async',false]]);
+ assert.equal(answer.results[0].content,'ask: pass blocking: false to keep working while the user answers, or blocking: true to wait for the answers.');
+ assert.deepEqual(JSON.parse(answer.results[1].content[0].text),{status:'asked',askId:'toolu_stub_async'});
+ assert.ok(rows.some(r=>r.direction==='in'&&r.frame.type==='result'&&r.frame.subtype==='success'),'the turn ended with no answer given');
+ assert.ok(meta421(rows,'spend')[0].result.total_cost_usd<0.0001); // the stand-in API: nothing spent
+});
+test('tickets 421/420 P2: a list_changed from the host is honoured (the engine lists again, a new tool arrives, a deferred one is withdrawn), but an always-loaded tool that left stays in the request',()=>{
+ const rows=load421('list-changed');const main=main421(rows);const sent=meta421(rows,'list_changed_sent')[0];
+ assert.equal(sent.answer.subtype,'success');assert.equal(sent.listsAfter,sent.listsBefore+1);
+ const inits=rows.filter(r=>r.direction==='in'&&r.frame.type==='system'&&r.frame.subtype==='init').map(r=>r.frame.tools.filter(t=>t.startsWith('mcp__maws__')));
+ assert.ok(inits[0].includes('mcp__maws__ask')&&!inits[0].includes('mcp__maws__artifact_edit'));
+ assert.ok(!inits.at(-1).includes('mcp__maws__ask')&&!inits.at(-1).includes('mcp__maws__artifact_dataset')&&inits.at(-1).includes('mcp__maws__artifact_edit')); // the engine's own registry follows the list
+ const said=said421(main.at(-1));
+ assert.ok(said.some(t=>t.startsWith('The following deferred tools are now available')&&t.endsWith('mcp__maws__artifact_edit')));
+ assert.ok(said.some(t=>t.startsWith('The following deferred tools are no longer available')&&t.includes('mcp__maws__artifact_dataset')));
+ assert.deepEqual(maws421(main.at(-1)),['mcp__maws__ask']); // the residue: the ask the server no longer lists
+ const flat=main421(load421('list-changed-flat'));
+ assert.ok(!maws421(flat[0]).includes('mcp__maws__artifact_edit')&&maws421(flat.at(-1)).includes('mcp__maws__artifact_edit'));
+ for(const gone of ['mcp__maws__ask','mcp__maws__artifact_dataset'])assert.ok(maws421(flat.at(-1)).includes(gone),gone); // without tool search nothing that left is taken out
+});
+test('tickets 421/420 P2 at a relaunch: a resumed session keeps the paragraph it was first given and the always-loaded tool that left; the deferred names follow the new list',()=>{
+ const first=meta421(load421('resume-first'),'answer_resume')[0];assert.deepEqual(first.paragraphs,{first:true,changed:false});
+ const rows=load421('resume-changed');const resumed=meta421(rows,'answer_resume')[0];
+ assert.deepEqual(resumed.paragraphs,{first:true,changed:false});
+ assert.deepEqual(resumed.maws,[{name:'mcp__maws__ask',defer_loading:null}]);
+ assert.ok(!meta421(rows,'init_tools')[0].maws.includes('mcp__maws__ask'));
+ assert.ok(resumed.mentions.some(m=>m.text.startsWith('The following deferred tools are no longer available')&&m.text.includes('mcp__maws__artifact_dataset')));
+});
+test('tickets 421/420 P3: with the built-in ask left in and no maws ask, AskUserQuestion is in the request up front, raises can_use_tool, and the host\'s answers are its result',()=>{
+ const rows=load421('native-ask');const main=main421(rows);
+ assert.deepEqual(main[0].tools.find(t=>t.name==='AskUserQuestion'),{name:'AskUserQuestion',defer_loading:null});assert.deepEqual(maws421(main[0]),[]);
+ const asked=rows.filter(r=>r.direction==='in'&&r.frame.type==='control_request'&&r.frame.request.subtype==='can_use_tool').map(r=>r.frame.request);
+ assert.equal(asked.length,1);assert.equal(asked[0].tool_name,'AskUserQuestion');assert.equal(asked[0].requires_user_interaction,true);
+ const answer=meta421(rows,'answer_p3')[0];
+ assert.equal(answer.results.length,1);assert.equal(answer.results[0].is_error,false);assert.match(answer.results[0].content,/"Which colour do you want\?"="Blue"/);
+});
+test('tickets 421/420, a session from before resumed under the new list: the engine keeps the ask\'s old description and artifact_read whole, whatever the server lists now',()=>{
+ const first=meta421(load421('upgrade-first'),'answer_upgrade')[0].requests;
+ assert.deepEqual(first[0].maws,[{name:'mcp__maws__artifact_read',defer_loading:null}]); // the old list: the ask deferred, artifact_read loaded
+ assert.match(first.at(-1).descriptions['mcp__maws__ask'],/^PROBE-421-OLD-ASK/); // loaded through ToolSearch, then called
+ const rows=load421('upgrade-resumed');const resumed=meta421(rows,'answer_upgrade')[0].requests;
+ assert.ok(meta421(rows,'provenance')[0].extraFlags.includes('--resume'));
+ for(const request of resumed){
+  assert.match(request.descriptions['mcp__maws__ask'],/^PROBE-421-OLD-ASK/); // the new list's description never reaches the model
+  assert.deepEqual(request.maws,[{name:'mcp__maws__artifact_read',defer_loading:null},{name:'mcp__maws__ask',defer_loading:true}]); // neither moved with its `_meta`
+ }
+ assert.deepEqual(meta421(rows,'server_calls')[0].calls.map(c=>c.name),['ask']); // and the call still reaches the new server
+});

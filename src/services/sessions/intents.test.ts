@@ -5,6 +5,7 @@ import type { AppSessionId } from '@shared/graph/ids';
 import { tempDir } from '../../../test/support/index-fixture';
 import { intentFor } from '../../../test/support/session-host';
 import { BootstrapNotes, FileIntentStore } from './intents';
+import { SetupIntentPatchSchema } from '@shared/sessions/intent'; // board ticket 421
 
 const A = '11111111-1111-4111-8111-111111111111' as AppSessionId;
 const B = '22222222-2222-4222-8222-222222222222' as AppSessionId;
@@ -61,6 +62,21 @@ describe('intents', () => {
     expect(store.list()).toEqual([]);
     expect(warn).toHaveBeenCalledTimes(3);
     expect(readdirSync(intents).sort()).toEqual([`.${A}.abc.tmp`, `${A}.json`, `${B}.json`, 'x.json'].sort()); // kept for a person
+  });
+
+  // board ticket 421: a create intent's set of MAWS's tools, written only when it is not the full set; an intent without
+  // one (every intent written before, and a default one) still loads, and a patch may carry a set
+  it('keeps an intent’s set across a fresh load, loads one without a set, and refuses a set that refuses itself', async () => {
+    const store = new FileIntentStore(join(dir.path, 'intents'));
+    const set = { artifacts: false, documents: false, dashboards: false, auxiliary: true, question: 'engine' } as const;
+    await store.put(intentFor(A, { mawsTools: set }));
+    await store.put(intentFor(B));
+    const again = new FileIntentStore(join(dir.path, 'intents'));
+    await again.load();
+    expect(again.get(A)!.mawsTools).toEqual(set);
+    expect(again.get(B)).not.toHaveProperty('mawsTools');
+    await expect(store.put(intentFor(B, { mawsTools: { ...set, documents: true } }))).rejects.toThrow(/documents and dashboards need artifacts/);
+    expect(SetupIntentPatchSchema.parse({ mawsTools: set })).toEqual({ mawsTools: set });
   });
 
   it('refuses an id that is not one plain path component', async () => {

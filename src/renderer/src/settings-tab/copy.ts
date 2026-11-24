@@ -7,6 +7,9 @@
 // and the keyboard in the row and is its accessible description; a `line` stands at rest (a condition the person must
 // act on, `state`, or a line the owner kept: a consent). Words cut from view but kept as a control's name, a tooltip or
 // a search keyword are named for that here.
+// Amended 2026-11-23, board ticket 421 (docs/doperpowers/plans/2026-11-23-tool-choice.md, §H): Settings › Sessions' two
+// rows of the machine's default set of MAWS's tools (`MAWS_TOOLS`), whose words the composer's Tools submenu and
+// Session info share.
 import { MAX_IDLE_MINUTES } from '@shared/ipc/schema/settings'; // E10
 import { MAX_APP_MCP_SERVERS } from '@shared/engine/app-mcp-servers'; // P4-R8
 
@@ -94,6 +97,26 @@ export const LAUNCH_PROFILE = {
   hooksNone: 'None',
 };
 // P4-A2 end
+
+// Board ticket 421 (docs/doperpowers/plans/2026-11-23-tool-choice.md, §H's text table, under the word cut's rules):
+// Settings › Sessions, the machine's default set of MAWS's tools for a new session. A group's word carries its fact as
+// its tooltip and description; "Default" is the engine's own question tool, "MAWS" MAWS's ask.
+export const MAWS_TOOLS = {
+  tools: 'MAWS tools',
+  toolsNotes: { default: { note: 'What a new session starts with. A session keeps its own.' } },
+  groups: {
+    artifacts: { word: 'Artifacts', fact: 'Create, read and publish artifacts' },
+    documents: { word: 'Documents', fact: 'Edit documents and dashboard blocks. Answer comments on any artifact.' },
+    dashboards: { word: 'Dashboards', fact: "Bind a dashboard's data" },
+    auxiliary: { word: 'Auxiliary', fact: 'Open panes for you' },
+  },
+  needsArtifacts: 'Needs Artifacts',
+  question: 'Question tool',
+  questionNotes: { default: { note: "Default is Claude Code's own and waits for your answer. With MAWS's the session can go on working while you answer. A session keeps its own." } },
+  questionTools: { engine: 'Default', maws: 'MAWS' },
+  questionWords: ['ask', 'AskUserQuestion'], // search keywords
+  dropped: 'This machine’s mawsd predates the choice of MAWS’s tools; its sessions get every tool until it runs this build.',
+} as const;
 
 // P4-R8 start: Settings › Sessions › MCP servers (settings version 16; Engine's until U11a M9)
 export const MCP_SERVERS = {

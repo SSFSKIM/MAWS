@@ -23,6 +23,8 @@
 // the owner takes agent edits as suggestions, the layer is the suggestion doc's; a `mode: 'suggest'` read late moves it
 // there, dropped on the main doc (R7). Nothing here writes a doc, a row or a version (rule 1), and nothing here throws
 // into a tool: a failure is logged and the layer is left to the call's ending.
+// Board ticket 421 (docs/doperpowers/plans/2026-11-23-tool-choice.md, Interfaces §D): a call is previewed only for a
+// tool the session lists (`lists`); the engine refuses a call of any other itself.
 import { datasetIdFromSource } from '@artifacts/dashboard/datasets';
 import { chartSpecs } from '@artifacts/dashboard/views';
 import { DocIndex } from '@artifacts/document/block-index';
@@ -72,6 +74,9 @@ export interface ProvisionalEmitterDeps {
   artifactScope?: readonly AppSessionId[]; // P2-E1: a side thread's ancestors, which `artifact` also resolves over
   log?: (line: string) => void;
   onFrame?: (frame: ArtifactProvisional) => void; // every frame as sent (the perf seam counts them)
+  // board ticket 421: whether the session lists the tool (its set's); a call of one it does not is never previewed,
+  // since the engine refuses it itself. Absent: every tool
+  lists?: (tool: ProvisionalTool) => boolean;
 }
 
 interface Call {
@@ -120,7 +125,7 @@ export class ProvisionalEmitter {
 
   // One piece of a call's input as the engine streamed it; `toolName` is the `maws` tool's own name.
   delta(toolUseId: ToolUseId, toolName: string, partialJson: string): void {
-    if (!isProvisionalTool(toolName) || this.ended.has(toolUseId)) return;
+    if (!isProvisionalTool(toolName) || this.ended.has(toolUseId) || this.deps.lists?.(toolName) === false) return;
     let call = this.calls.get(toolUseId);
     if (!call) {
       call = { toolUseId, tool: toolName, buffer: '', timer: null, started: false, inert: false, target: null, key: null, drawn: false, sent: '[]', ops: [], files: new Map(), presence: null, quotes: new Map(), bound: null };

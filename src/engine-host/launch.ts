@@ -3,6 +3,9 @@
 // charter describes: the binary by its real path (resolved per launch by binary-info.ts, W13), the fixed flag set in
 // order, a constructed environment (allowlist, exclusions, the gateway variables) and the `--settings` JSON with the
 // host's protected keys applied last. Nothing here spawns; `transport.ts` runs the plan.
+// Board ticket 421 (docs/doperpowers/plans/2026-11-23-tool-choice.md, Interfaces §C): the plan carries the set of
+// MAWS's tools the launch serves (the spec's, else the full set); MAWS's two ask flags are passed only when its
+// question tool is `maws`, and the spawn row records the set, from which an adopter takes it.
 import { randomBytes, randomUUID } from 'node:crypto';
 import { isAbsolute } from 'node:path';
 import { canonicalize } from 'org-protocol';
@@ -10,6 +13,7 @@ import { appInitialize } from '@shared/engine/initialize';
 import type { LaunchSpec } from '@shared/engine/launch-spec';
 import { GATEWAY_KEYS, readRoute, type LegacyRoute, type Route } from '@shared/engine/route'; // P5 O7 M9
 import type { SessionId } from '@shared/graph/ids';
+import { FULL_MAWS_TOOL_SET, type MawsToolSet } from '@shared/maws/tool-set'; // board ticket 421
 
 // C11: the relay's URL and its dev-only override live in relay-url.ts (P5 O7 M9: off launch.ts, so mawsd reads it
 // without this module's graph); re-exported for this module's readers.
@@ -71,6 +75,9 @@ export interface LaunchPlan {
   // P5 O16 M3a fix wave 1 (D58): an adopter's plan, whose `env` was rebuilt as this build would build it now (the spawn
   // row names only its keys): never the engine's real environment, so nothing attests or resolves against it
   environmentRebuilt?: true;
+  // Board ticket 421 (Interfaces §C): the set of MAWS's tools this launch serves (the spec's, else the full set); the
+  // spawn row records it, from which an adopter takes it
+  mawsTools: MawsToolSet;
 }
 
 // An `extraSettings` (or spec field) that would displace something X6 guarantees. `session.launch` answers
@@ -286,7 +293,10 @@ export function buildLaunch(
   // question (P4 acceptance defects 1/8). This exact tool alone is allowed, not the MAWS server. P4-R7z: the message
   // tool left the server; the to-human plugin's `mcp__to-human__message` needs no entry, since the plugin answers its
   // calls itself and the engine raises no permission request for them (doperpowers #415's live MAWS check).
-  if ((opts.sdkMcpServers ?? appInitialize().sdkMcpServers ?? []).includes(MAWS_SERVER)) args.push('--disallowedTools', NATIVE_ASK_TOOL, '--allowedTools', MAWS_ASK_TOOL);
+  // Board ticket 421 (D6): a set whose question tool is the engine's lists no `ask` and leaves the engine's own question
+  // tools as the engine offers them, so neither flag is passed.
+  const mawsTools = spec.mawsTools ?? FULL_MAWS_TOOL_SET;
+  if ((opts.sdkMcpServers ?? appInitialize().sdkMcpServers ?? []).includes(MAWS_SERVER) && mawsTools.question === 'maws') args.push('--disallowedTools', NATIVE_ASK_TOOL, '--allowedTools', MAWS_ASK_TOOL);
   args.push('--settings', JSON.stringify(flagSettings));
 
   return {
@@ -300,6 +310,7 @@ export function buildLaunch(
     gateway: legacyOf(spec),
     ...(readRoute(spec) === 'machine' && { route: 'machine' as const }), // P5 O7 M9
     engineVersion: opts.engineVersion,
+    mawsTools,
   };
 }
 
@@ -320,6 +331,7 @@ export function spawnMeta(plan: LaunchPlan, opts: { appVersion: string; holder?:
   launchId: string;
   sessionId: string;
   holder?: { pid: number; holderId: string; binary: string };
+  mawsTools: MawsToolSet; // board ticket 421: every launch's, the full set included; an older adopter ignores it
 } {
   return {
     event: 'spawn',
@@ -335,5 +347,6 @@ export function spawnMeta(plan: LaunchPlan, opts: { appVersion: string; holder?:
     launchId: plan.launchId,
     sessionId: plan.sessionId,
     ...(opts.holder && { holder: { ...opts.holder } }),
+    mawsTools: { ...plan.mawsTools },
   };
 }

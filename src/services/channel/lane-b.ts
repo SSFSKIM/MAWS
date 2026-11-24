@@ -12,7 +12,15 @@
 // - each question of a MAWS ask (`mcp__maws__ask`, a subagent's too: the person answers it alike) is a `question` from
 //   the ask's own record as the engine host journals it (`maws.ask.opened`: the question and its options), and each
 //   answer an `answered` (`maws.ask.answered`), keyed by the ask's id; the host's ask table is its one store, held in its
-//   memory (src/engine-host/tool-server/asks.ts), and these events are what it tells of it.
+//   memory (src/engine-host/tool-server/asks.ts), and these events are what it tells of it. An ask whose call (its
+//   `tool.use`) left `blocking` out waits for its fate before its questions are recorded: the host refuses such a call
+//   made live since board ticket 420 (an error result: nothing is recorded), and one recorded before held it (answered,
+//   cancelled, or a result that is no error: recorded as it was asked);
+// - board ticket 421 (docs/doperpowers/plans/2026-11-23-tool-choice.md, D13): each question the engine's own question
+//   tool puts through MAWS's question path (`question.requested`, a subagent's too), for a session whose question tool is
+//   the engine's, is a `question` with its options' labels, and each answer (`question.answered`, keyed by the question's
+//   text, as the engine takes it) an `answered`, keyed by the request and a digest of the question's text (`digestOf`) as
+//   an ask's are by its id.
 // Only what a MAWS process said is read (an event with its journal row, `seq`): history read back from disk is no entry
 // (M7b, "Back-fill": none), and nor is a transcript followed while a terminal or a job holds the session, whose words are
 // lane A's, sminos's to tell.
@@ -22,6 +30,7 @@
 // sminos id) records nothing. One whose project's org id is not derived yet (the start's refresh, which waits on git) is
 // held, CHANNEL_BOUNDS.held at most across sessions, and recorded in the order it was said once the id is
 // (`placesChanged`), so nothing said early in a run is lost to the join.
+import { createHash } from 'node:crypto';
 import type { SessionEvent } from '@shared/graph/events';
 import type { AppSessionId, SessionId } from '@shared/graph/ids';
 import type { NewHostEntry } from '@shared/ipc/schema/channel';
@@ -32,7 +41,12 @@ import { finishedTextOf, messageOfCall, toHumanOfText } from '@shared/owner/to-h
 import { CHANNEL_BOUNDS } from './journal';
 
 type ToolUse = Extract<SessionEvent, { kind: 'tool.use' }>;
+type AskOpened = Extract<SessionEvent, { kind: 'maws.ask.opened' }>;
 type Said = Pick<NewHostEntry, 'kind' | 'text' | 'at' | 'choices'>;
+
+// A MAWS ask's call, and whether its input states `blocking` (board ticket 420 made it required).
+const MAWS_ASK = 'mcp__maws__ask';
+const hasBlocking = (input: unknown): boolean => typeof input === 'object' && input !== null && Object.hasOwn(input, 'blocking');
 
 // The message calls of a session waiting for their results. A call whose result never comes (its session gone mid-call)
 // is let go, oldest first, past this many.
@@ -43,6 +57,10 @@ const UNMATCHED_MAX = 256;
 // A `src` or an anchor from its parts, each encoded (`encodeURIComponent`), so no id holding a `/` can make one entry's
 // identity another's: a question `q`'s answer (`…/q/answered`) and a question `q/answered` (`…/q%2Fanswered`) stay apart.
 const pathOf = (...parts: readonly (string | number)[]): string => parts.map((part) => encodeURIComponent(String(part))).join('/');
+
+// An engine question's identity within its request is its text, which has no bound (an entry's text is cut to
+// CHANNEL_BOUNDS.textBytes, its `src` never is): its SHA-256, 43 characters of base64url, on the question and its answer.
+const digestOf = (text: string): string => createHash('sha256').update(text).digest('base64url');
 
 export interface LaneBPlace {
   project: string; // sminos's project id of the session's checkout (OX3's smnsId)
@@ -68,6 +86,8 @@ interface Held {
 
 export class LaneBSource {
   private readonly pending = new Map<AppSessionId, Map<string, ToolUse>>();
+  private readonly unstated = new Map<string, true>(); // `<appSessionId>/<toolUseId>`: an ask call with no `blocking`
+  private readonly fates = new Map<string, { appSessionId: AppSessionId; event: AskOpened }>(); // the asks waiting for their fate, by the same key
   private held: Held[] = [];
   private readonly heldKeys = new Set<string>(); // `<appSessionId>/<anchor>`: a replay or a state stated again holds nothing more
   private readonly unmatched = new Map<string, Map<string, Held>>(); // by its question's src: the answers waiting for it, by their src
@@ -80,18 +100,37 @@ export class LaneBSource {
     for (const event of events) {
       if (event.seq === null) continue; // read back from disk (no journal row): history, or a transcript another process holds
       if (event.kind === 'maws.ask.opened') {
-        event.questions.forEach((question, index) => {
-          const choices = question.options?.map((option) => option.label) ?? [];
-          this.add(appSessionId, event.sessionId, { kind: 'question', text: question.question, at: event.at, ...(choices.length > 0 ? { choices } : {}) }, pathOf('ask', event.askId, askQuestionId(question, index)));
-        });
+        const unstated = event.toolUseId !== null && this.unstated.delete(pathOf(appSessionId, event.toolUseId));
+        if (unstated) this.awaitFate(appSessionId, event);
+        else this.asked(appSessionId, event);
+        continue;
+      }
+      if (event.kind === 'maws.ask.cancelled') {
+        this.settleFate(appSessionId, event.toolUseId, true); // an ask the host had held: its question was put
         continue;
       }
       if (event.kind === 'maws.ask.answered') {
+        this.settleFate(appSessionId, event.toolUseId, true);
         for (const answer of event.answers) {
           this.add(appSessionId, event.sessionId, { kind: 'answered', text: askAnswerOf(answer), at: event.at }, pathOf('ask', event.askId, answer.id, 'answered'), pathOf('ask', event.askId, answer.id));
         }
         continue;
       }
+      if (event.kind === 'question.requested') {
+        for (const question of event.questions) {
+          const choices = question.options.map((option) => option.label);
+          this.add(appSessionId, event.sessionId, { kind: 'question', text: question.question, at: event.at, ...(choices.length > 0 ? { choices } : {}) }, pathOf('question', event.requestId, digestOf(question.question)));
+        }
+        continue;
+      }
+      if (event.kind === 'question.answered') {
+        for (const [question, answer] of Object.entries(event.answers)) {
+          this.add(appSessionId, event.sessionId, { kind: 'answered', text: answer, at: event.at }, pathOf('question', event.requestId, digestOf(question), 'answered'), pathOf('question', event.requestId, digestOf(question)));
+        }
+        continue;
+      }
+      if (event.kind === 'tool.use' && event.toolName === MAWS_ASK && !hasBlocking(event.input)) this.noteUnstated(appSessionId, event.toolUseId);
+      if (event.kind === 'tool.result') this.settleFate(appSessionId, event.toolUseId, !event.isError);
       if (event.parentToolUseId !== null) continue; // a subagent's words: drawn in its own transcript, not its parent's
       if (event.kind === 'tool.use') this.called(appSessionId, event);
       else if (event.kind === 'tool.result') {
@@ -137,6 +176,41 @@ export class LaneBSource {
       this.deps.log(`${this.letGo} held entries were let go past ${CHANNEL_BOUNDS.held}`);
       this.letGo = 0;
     }
+  }
+
+  // Each question of an ask, as it was asked.
+  private asked(appSessionId: AppSessionId, event: AskOpened): void {
+    event.questions.forEach((question, index) => {
+      const choices = question.options?.map((option) => option.label) ?? [];
+      this.add(appSessionId, event.sessionId, { kind: 'question', text: question.question, at: event.at, ...(choices.length > 0 ? { choices } : {}) }, pathOf('ask', event.askId, askQuestionId(question, index)));
+    });
+  }
+
+  // An ask call that left `blocking` out, by its tool use, until its ask opens.
+  private noteUnstated(appSessionId: AppSessionId, toolUseId: string): void {
+    this.unstated.set(pathOf(appSessionId, toolUseId), true);
+    if (this.unstated.size > PENDING_MAX) this.unstated.delete(this.unstated.keys().next().value!);
+  }
+
+  // An ask whose call left `blocking` out waits for its fate: an ask recorded before board ticket 420 waited for its
+  // answer, and the host since refuses one made live. Past the bound the oldest is recorded, as every ask was before.
+  private awaitFate(appSessionId: AppSessionId, event: AskOpened): void {
+    this.fates.set(pathOf(appSessionId, event.toolUseId!), { appSessionId, event });
+    if (this.fates.size <= PENDING_MAX) return;
+    const [key, oldest] = this.fates.entries().next().value!;
+    this.fates.delete(key);
+    this.asked(oldest.appSessionId, oldest.event);
+  }
+
+  // The fate of an ask that waits for it: held by the host (answered, cancelled, a result that is no error), its
+  // questions are recorded; refused (an error result), nothing is.
+  private settleFate(appSessionId: AppSessionId, toolUseId: string | null, held: boolean): void {
+    if (toolUseId === null) return;
+    const key = pathOf(appSessionId, toolUseId);
+    const waiting = this.fates.get(key);
+    if (waiting === undefined) return;
+    this.fates.delete(key);
+    if (held) this.asked(waiting.appSessionId, waiting.event);
   }
 
   private called(appSessionId: AppSessionId, use: ToolUse): void {

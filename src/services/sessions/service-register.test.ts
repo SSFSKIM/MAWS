@@ -119,3 +119,39 @@ describe('the session service’s commands, answered on the services bus', () =>
     expect(await invoke('session.delete', { appSessionId: '00000000-0000-4000-8000-000000000000', stopIfLive: false })).toMatchObject({ ok: false, error: { code: 'internal', message: expect.stringContaining('unknown app session') } });
   });
 });
+
+// Board ticket 854's e2e seam (./e2e-patch-hold.ts) on the patch path: with no hold (every run outside MAWS_E2E) a patch
+// reaches the service on the schedule it always had, in the tick it was asked, so an operation on the same intent asked
+// after it (a discard) never takes the intent's lock first; with a hold, a Tools choice waits for it.
+describe('the intent patch, with and without the e2e hold', () => {
+  const ID = '11111111-1111-4111-8111-111111111111';
+  const stub = (calls: string[]) =>
+    ({
+      patch: (appSessionId: string) => (calls.push(`patch ${appSessionId}`), new Promise(() => {})),
+      discard: (appSessionId: string) => (calls.push(`discard ${appSessionId}`), new Promise(() => {})),
+    }) as unknown as Parameters<typeof registerSessionServiceHandlers>[0];
+
+  it('reaches the service in the tick it was asked when no hold is set, before a discard asked after it', () => {
+    const calls: string[] = [];
+    const bus = fakeBus();
+    registerSessionServiceHandlers(stub(calls), bus, 'scenario');
+    void bus.invoke('session.intent.patch', { appSessionId: ID, patch: { model: 'haiku' } });
+    void bus.invoke('session.intent.discard', { appSessionId: ID });
+    expect(calls).toEqual([`patch ${ID}`, `discard ${ID}`]);
+  });
+
+  it('holds a patch while the hold has not settled, and sends it on once it has', async () => {
+    const calls: string[] = [];
+    const bus = fakeBus();
+    let lift!: () => void;
+    const held = new Promise<void>((resolve) => (lift = resolve));
+    registerSessionServiceHandlers(stub(calls), bus, 'scenario', () => held);
+    void bus.invoke('session.intent.patch', { appSessionId: ID, patch: { model: 'haiku' } });
+    await Promise.resolve();
+    expect(calls).toEqual([]);
+    lift();
+    await held;
+    await Promise.resolve();
+    expect(calls).toEqual([`patch ${ID}`]);
+  });
+});

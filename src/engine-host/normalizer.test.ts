@@ -891,6 +891,36 @@ describe('maws tools/call admission follows the server envelope (E1)', () => {
     expect(events.filter((e) => e.kind.startsWith('maws.'))).toEqual([]);
   });
 
+  // Board ticket 420 (the tool-choice plan's §D): the normaliser admits a call as records are read, `blocking` optional, so
+  // a live call that leaves it out opens its ask (waiting, as a record without it did) and the host refuses it. An error
+  // answer takes an open ask out of the open set, as one refused for quoting a grant (board ticket 711) is: nothing later
+  // is matched to it. An answer that is no error leaves it open, as before.
+  it('opens an ask with no blocking as one that waits, and takes a refused ask out of the open set', () => {
+    const n = make();
+    const refusal = (text: string) => ({ content: [{ type: 'text', text }], isError: true });
+    const later = (askId: string) => [
+      metaRow({ event: 'maws_ask_answered', askId, toolUseId: askId, answers: [{ id: 'q1', question: 'Proceed?', status: 'answered', value: ['Yes'] }] }),
+      metaRow({ event: 'maws_ask_cancelled', askId, toolUseId: askId, reason: 'exit' }),
+    ];
+    const events = feed(n, [
+      call('r1', { jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'ask', arguments: ASK, _meta: { 'claudecode/toolUseId': 'toolu_none' } } }),
+      answer('r1', 1, refusal('ask: pass blocking: false to keep working while the user answers, or blocking: true to wait for the answers.')),
+      ...later('toolu_none'),
+      call('r2', { jsonrpc: '2.0', id: 2, method: 'tools/call', params: { name: 'ask', arguments: { ...ASK, blocking: false }, _meta: { 'claudecode/toolUseId': 'toolu_grant' } } }),
+      answer('r2', 2, refusal('An ask may not quote a permission grant. Ask the question in your own words.')),
+      ...later('toolu_grant'),
+      call('r3', { jsonrpc: '2.0', id: 3, method: 'tools/call', params: { name: 'ask', arguments: { ...ASK, blocking: false }, _meta: { 'claudecode/toolUseId': 'toolu_async' } } }),
+      answer('r3', 3, { content: [{ type: 'text', text: JSON.stringify({ status: 'asked', askId: 'toolu_async' }) }] }),
+      ...later('toolu_async'),
+    ]);
+    expect(events.filter((e) => e.kind.startsWith('maws.')).map((e) => [e.kind, (e as { askId?: string }).askId, (e as { blocking?: boolean }).blocking])).toEqual([
+      ['maws.ask.opened', 'toolu_none', true],
+      ['maws.ask.opened', 'toolu_grant', false],
+      ['maws.ask.opened', 'toolu_async', false],
+      ['maws.ask.answered', 'toolu_async', undefined],
+    ]);
+  });
+
   it('records no delivery and no pane for a send_file or show_pane outside the envelope, even when an answer follows', () => {
     const delivered = { content: [{ type: 'text', text: JSON.stringify({ status: 'delivered', deliverables: [{ id: 'd1', path: '/w/a.txt', name: 'a.txt' }] }) }] };
     const shown = { content: [{ type: 'text', text: JSON.stringify({ status: 'shown', pane: 'terminal', opened: { kind: 'panel-tool', toolId: 'terminal', tabId: 't', title: 'Terminal' } }) }] };

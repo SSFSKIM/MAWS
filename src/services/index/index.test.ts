@@ -61,6 +61,7 @@ describe('the index opens, migrates and refuses what it cannot own', () => {
       expect(columns).toContainEqual(['launched_by', 'TEXT', 0]); // P5 O7 M4's added column (ADDED_COLUMNS): null for every session but a remote spawn
       expect(columns).toContainEqual(['gateway_route', 'TEXT', 0]); // P5 O7 M9's (ADDED_COLUMNS): null but on the machine route
       expect(columns).toContainEqual(['gateway_observed', 'TEXT', 0]);
+      expect(columns).toContainEqual(['maws_tools', 'TEXT', 0]); // board ticket 421's (ADDED_COLUMNS): null at the full set
     } finally {
       db.close();
     }
@@ -209,7 +210,7 @@ describe('the index opens, migrates and refuses what it cannot own', () => {
     });
     const db = new DatabaseSync(path, { readOnly: true });
     try {
-      expect(columnsOf(db)).toEqual([...v1Columns, 'lineage', 'lineage_source', 'root_uuid', 'transcript_birthtime_ms', 'launched_by', 'gateway_route', 'gateway_observed', 'launch_folder', 'agent_folder'].sort()); // v4 adds four; P5 O7 M4 adds launched_by at any version (ADDED_COLUMNS), P5 O7 M9 the gateway's route and observed, UX wave U8c-2 the record's two facts
+      expect(columnsOf(db)).toEqual([...v1Columns, 'lineage', 'lineage_source', 'root_uuid', 'transcript_birthtime_ms', 'launched_by', 'gateway_route', 'gateway_observed', 'launch_folder', 'agent_folder', 'maws_tools'].sort()); // v4 adds four; P5 O7 M4 adds launched_by at any version (ADDED_COLUMNS), P5 O7 M9 the gateway's route and observed, UX wave U8c-2 the record's two facts, board ticket 421 the set of MAWS's tools
       const indexes = (db.prepare("SELECT name FROM sqlite_master WHERE type = 'index' AND tbl_name = 'sessions'").all() as { name: string }[]).map((i) => i.name);
       expect(indexes).toContain('sessions_project');
     } finally {

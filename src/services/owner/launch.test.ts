@@ -12,8 +12,9 @@ import type { SessionEvent } from '@shared/graph/events';
 import { LaunchSpecSchema, type LaunchSpec } from '@shared/engine/launch-spec';
 import {
   CONTRACT_HEADER, LEGACY_CONTRACT_1, LEGACY_CONTRACT_5, LEGACY_CONTRACT_7, LEGACY_MESSAGE_TOOL_ALIAS, LEGACY_SUPPLEMENT_1, LEGACY_SUPPLEMENT_2, NATIVE_TO_HUMAN_ENV, SUPPLEMENT_HEADER,
-  TO_HUMAN_MIRROR_VERSION, TO_HUMAN_SUPPLEMENT, TO_HUMAN_SUPPLEMENT_VERSION,
+  TO_HUMAN_MIRROR_VERSION, TO_HUMAN_SUPPLEMENT, TO_HUMAN_SUPPLEMENT_ENGINE, TO_HUMAN_SUPPLEMENT_VERSION,
 } from '@shared/owner/contract';
+import { FULL_MAWS_TOOL_SET } from '@shared/maws/tool-set'; // board ticket 421
 import { advertisementOf, drawnBy } from '@shared/owner/draws';
 import { FOLD_SUMMARIES_ENV } from '@shared/owner/folds';
 import { slugOf } from '../../engine-host/fs/paths';
@@ -59,6 +60,23 @@ describe('decideFlags: the decision table (Design §2; P2-C2 adds the supplement
     ['off', 'alias', OFF],
   ] as const)('desired %s, recorded %s', (desired, recorded, expected) => {
     expect(cell(desired, recorded)).toEqual(expected);
+  });
+});
+
+// Board ticket 421 (D12): a session whose question tool is the engine's appends supplement 4 in place of 3 and records it;
+// its question tool never changes, so what its prompt recorded is what the decision wants, and the table has no new row
+describe('decideFlags for the engine’s question tool (board ticket 421, D12)', () => {
+  it.each([
+    ['unrecorded', { append: 'supplement-engine', off: false, applied: 'external-style-plus-supplement' }],
+    ['supplement:4', { append: 'supplement-engine', off: false, applied: 'external-style-plus-supplement' }],
+    ['supplement:3', { append: 'supplement-engine', off: true, applied: 'external-style-plus-supplement' }],
+    ['none', { append: 'supplement-engine', off: true, applied: 'external-style-plus-supplement' }],
+  ] as const)('desired the supplement, recorded %s', (recorded, expected) => {
+    const { append, off, applied } = decideFlags('external-style-plus-supplement', recorded, true, 'engine');
+    expect({ append, off, applied }).toEqual(expected);
+  });
+  it('the lane off appends nothing whatever the question tool', () => {
+    expect(decideFlags('off', 'supplement:4', true, 'engine')).toEqual({ append: null, off: true, offUnavailable: false, applied: 'off' });
   });
 });
 
@@ -272,6 +290,21 @@ describe('ownerChannelLaunch over a scratch config home', () => {
       launches.launched(decision!, { launchId: 'l1', at: AT });
       expect(index.ownerChannel.session(record)).toMatchObject({ snapshotOff: false, offUnavailable: true, applied: 'external-compatible-style' });
     }
+  });
+
+  // Board ticket 421 (Interfaces §F): the supplement follows the set the spec serves; a spec with no set is the full set's
+  it('a launch whose set asks with the engine’s question tool appends supplement 4 and records it; MAWS’s ask, supplement 3', async () => {
+    style(configHome);
+    const engineSet = { ...FULL_MAWS_TOOL_SET, question: 'engine' as const };
+    const { spec: decided, record: decision } = await ownerChannelLaunch(s, spec({ mawsTools: engineSet }), { kind: 'new', transcriptOf: null });
+    expect(decided).toMatchObject({ appendSystemPrompt: TO_HUMAN_SUPPLEMENT_ENGINE, mawsTools: engineSet, extraSettings: { env: { [NATIVE_TO_HUMAN_ENV]: ADVERTISED } } });
+    expect(decision).toMatchObject({ desired: 'external-style-plus-supplement', recorded: 'unrecorded', appended: true, snapshotOff: false, applied: 'external-style-plus-supplement' });
+    // resumed over what that launch recorded: nothing to render anew
+    transcript(configHome, TO_HUMAN_SUPPLEMENT_ENGINE);
+    expect((await ownerChannelLaunch(s, resumeSpec({ mawsTools: engineSet }), { kind: 'resume', transcriptOf: record })).record).toMatchObject({ recorded: 'supplement:4', appended: true, snapshotOff: false });
+    // MAWS's ask, the set not full otherwise: supplement 3, as with no set at all
+    const mawsAsk = { ...FULL_MAWS_TOOL_SET, artifacts: false, documents: false, dashboards: false };
+    expect((await ownerChannelLaunch(s, spec({ mawsTools: mawsAsk }), { kind: 'new', transcriptOf: null })).spec.appendSystemPrompt).toBe(TO_HUMAN_SUPPLEMENT);
   });
 
   it('a fork reads its parent’s transcript', async () => {

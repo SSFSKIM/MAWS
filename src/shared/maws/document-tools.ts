@@ -3,10 +3,10 @@
 // `artifact_edit`, `artifact_comments`, `artifact_reply` and `artifact_resolve`, the fields a document's
 // `artifact_read` adds, and a document's `artifact_create`, with their descriptions, the limits the tools enforce and
 // the refusals an agent can act on. `./tools` appends these names and entries after A's (its P3-B blocks); this file
-// imports only the leaves `./artifact-id` and `./always-load`, so the two never import each other. The read and create fields live in `./tools`.
+// imports only the leaf `./artifact-id`, so the two never import each other. The read and create fields live in `./tools`.
+// Board ticket 420: `artifact_edit`, always loaded since P4-A3, is found through tool search again.
 import * as z from 'zod';
 import { ARTIFACT_ID } from './artifact-id';
-import { ALWAYS_LOAD } from './always-load'; // P4-A3: the edit tool is always loaded
 import type { DashboardDatasetSummary, DashboardViewWarning } from './dashboard-tools'; // P3-E
 import type { SpaceInstructionsAnswer } from './tools'; // UX wave U10b (M10)
 
@@ -196,7 +196,6 @@ export const DOCUMENT_TOOLS = {
       'Edit a MAWS document with one atomic batch of block operations; without this tool, tell the user what to change. Read it first (artifact_read): blocks carry ids (^id) and baseRevision is the revision that read returned. ops: replace_text {block?, old, new, all?} (old must match exactly once in the block, or in the whole document when block is absent; it is checked against the live text, so the user typing elsewhere does not refuse it), replace_block {id, markdown}, insert {after | before, markdown}, delete {id}, move {id, after} (after: null moves to the start), set_cell {table, row, col, markdown}. set_page {size: letter | a4 | system, density: standard | compact} sets the page a document\'s exports print on (give at least one; a document only). A replace_block, delete or set_cell whose target changed since baseRevision is refused naming the block and its current text. Either every op lands or none does. answering: a comment thread id posts the result into that thread (not on a suggested batch: reply with artifact_reply after it). With answering, give reply: one or two sentences in your own words saying what you changed; it is posted as your reply in the thread. Returns the new revision, one line per op with the ids of the blocks it made, and the comment threads left without text.',
     input: ArtifactEditInputSchema,
     annotations: WRITER,
-    meta: ALWAYS_LOAD, // P4-A3: an edit needs it
   },
   artifact_comments: {
     title: 'List document comments',

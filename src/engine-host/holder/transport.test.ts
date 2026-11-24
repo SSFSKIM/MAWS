@@ -8,6 +8,7 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { LaunchPlan } from '../launch';
+import { FULL_MAWS_TOOL_SET } from '@shared/maws/tool-set'; // board ticket 421
 import { signalOrphan } from '../live-ledger';
 import { isAlive, procStartOf } from '../supervisor-files';
 import type { EngineTransport, StderrItem, TransportItem } from '../transport';
@@ -49,7 +50,7 @@ function profile(): { userData: string; deps: SessionHostDeps; logs: string[] } 
 }
 
 const plan = (argv: string[], over: Partial<LaunchPlan> = {}): LaunchPlan => ({
-  bin: argv[0]!, args: argv.slice(1), env: { PATH: '/usr/bin:/bin' }, cwd: '/', flagSettings: {}, launchId: 'unused', sessionId: 'eng-1' as LaunchPlan['sessionId'], gateway: 'direct', engineVersion: 'test', ...over,
+  bin: argv[0]!, args: argv.slice(1), env: { PATH: '/usr/bin:/bin' }, cwd: '/', flagSettings: {}, launchId: 'unused', sessionId: 'eng-1' as LaunchPlan['sessionId'], gateway: 'direct', engineVersion: 'test', mawsTools: FULL_MAWS_TOOL_SET /* board ticket 421 */, ...over,
 });
 
 async function start(deps: SessionHostDeps, launchId = `L${Math.random().toString(36).slice(2, 9)}`): Promise<StartedHost> {

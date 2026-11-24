@@ -14,6 +14,7 @@ import { readAnchor } from './anchor';
 import { Index } from './index';
 import { locate } from './projects';
 import { cutPrompt, promptTitle } from './sessions';
+import type { MawsToolSet } from '@shared/maws/tool-set'; // board ticket 421
 
 const LAUNCH = {
   directory: '/nowhere/launch',
@@ -519,6 +520,38 @@ describe('session records in the index', () => {
     expect(() => index.sessions.bindEngineId(other.appId, sessionIdFor(82))).toThrow(`already bound to app session ${appId}`);
     expect(index.sessions.get(appId)?.launchedBy).toEqual(launchedBy);
     expect(other.launchedBy).toBeUndefined();
+  });
+
+  // Board ticket 421 (docs/doperpowers/plans/2026-11-23-tool-choice.md, Interfaces §E, D1, D3): the set a launch served is
+  // written once, at its insert, and only when it is not the full set; nothing after changes it. At a `/clear` the record
+  // made for the old transcript takes it, so the old conversation resumes and forks under the set it was held under.
+  it('keeps the set of MAWS’s tools its launch inserted through updates, discovery and a rebind; the old transcript’s record takes it at a /clear', () => {
+    const set: MawsToolSet = { artifacts: false, documents: false, dashboards: false, auxiliary: true, question: 'engine' };
+    const { record } = index.sessions.createForLaunch({ ...LAUNCH, mawsTools: set });
+    const appId = record.appId;
+    expect(record.mawsTools).toEqual(set);
+    expect(SessionRecordSchema.parse(record)).toEqual(record);
+    expect(index.sessions.createForLaunch({ ...LAUNCH, appSessionId: appId }).record.mawsTools).toEqual(set); // a launch reusing the row writes nothing
+    index.sessions.update(appId, { title: { text: 'Named', source: 'user' }, archived: true, branch: 'feature' });
+    const a = summary({ sessionId: sessionIdFor(83), customTitle: 'Before clear' });
+    index.sessions.bindEngineId(appId, a.sessionId);
+    index.sessions.upsertFromSummary(a); // discovery's merge
+    expect(index.sessions.get(appId)?.mawsTools).toEqual(set);
+    index.sessions.bindEngineId(appId, sessionIdFor(84)); // a rebind (`/clear`)
+    expect(index.sessions.get(appId)?.mawsTools).toEqual(set);
+    const history = index.sessions.getByEngineId(a.sessionId)!;
+    expect(history.appId).not.toBe(appId);
+    expect(history.mawsTools).toEqual(set);
+    // a launch at the full set writes nothing, and its old transcript's record carries nothing at a /clear
+    const plain = index.sessions.createForLaunch(LAUNCH).record;
+    expect(plain).not.toHaveProperty('mawsTools');
+    const b = summary({ sessionId: sessionIdFor(85) });
+    index.sessions.bindEngineId(plain.appId, b.sessionId);
+    index.sessions.upsertFromSummary(b);
+    index.sessions.bindEngineId(plain.appId, sessionIdFor(86));
+    expect(index.sessions.getByEngineId(b.sessionId)).not.toHaveProperty('mawsTools');
+    // discovery's own records carry none
+    expect(index.sessions.upsertFromSummary(summary({ sessionId: sessionIdFor(87) })).record).not.toHaveProperty('mawsTools');
   });
 
   it('bindEngineId then unbindEngineId leaves engineSessionId null and pin, title and directory as they were', () => {

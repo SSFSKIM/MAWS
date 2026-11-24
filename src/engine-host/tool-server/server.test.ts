@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { AppSessionId, RequestId } from '@shared/graph/ids';
-import { mawsToolList, TOOL_ERRORS } from '@shared/maws/tools';
+import { MAWS_TOOL_NAMES, mawsToolList, TOOL_ERRORS } from '@shared/maws/tools';
 import { MAWS_SERVER_INSTRUCTIONS, mawsServerInstructions } from '@shared/maws/instructions';
 import type { ControlRequestFrame } from '@shared/wire/frames';
 import { defineMawsTool, MawsToolServer, toolText, type McpToolContext, type McpToolDefinition, type McpToolResult } from './server';
@@ -36,10 +36,10 @@ describe('the maws server speaks MCP over mcp_message (E0a Q1)', () => {
 
   // U12a (M1; Interfaces §A): the session's instructions are the server's dependency, chosen from the launch spec
   it('answers initialize with the instructions it was given, the in-app browser’s paragraph included (U12a)', async () => {
-    const { send, rpcOf } = harness([], mawsServerInstructions({ inAppBrowser: true }));
+    const { send, rpcOf } = harness([], mawsServerInstructions({ inAppBrowser: true, artifacts: true }));
     const id = send({ method: 'initialize', params: { protocolVersion: '2025-11-25', capabilities: {}, clientInfo: { name: 'claude-code', version: '2.1.290' } }, jsonrpc: '2.0', id: 0 });
     await flush();
-    expect((rpcOf(id) as { result: { instructions: string } }).result.instructions).toBe(mawsServerInstructions({ inAppBrowser: true }));
+    expect((rpcOf(id) as { result: { instructions: string } }).result.instructions).toBe(mawsServerInstructions({ inAppBrowser: true, artifacts: true }));
   });
 
   it("answers a notification as the official SDK does, and ping with an empty result", async () => {
@@ -80,8 +80,8 @@ describe('the maws server speaks MCP over mcp_message (E0a Q1)', () => {
     const unknown = send({ method: 'tools/call', params: { name: 'echo_file', arguments: { path: 'probe.txt' } }, jsonrpc: '2.0', id: 2 });
     const thrown = send({ method: 'tools/call', params: { name: 'show_pane', arguments: { pane: 'terminal' } }, jsonrpc: '2.0', id: 3 });
     await flush();
-    expect(rpcOf(unknown)).toEqual({ jsonrpc: '2.0', id: 2, result: { content: [{ type: 'text', text: TOOL_ERRORS.unknownTool('echo_file') }], isError: true } });
-    expect(TOOL_ERRORS.unknownTool('echo_file')).toBe(
+    expect(rpcOf(unknown)).toEqual({ jsonrpc: '2.0', id: 2, result: { content: [{ type: 'text', text: TOOL_ERRORS.unknownTool('echo_file', ['show_pane']) }], isError: true } }); // board ticket 421: the tools it serves
+    expect(TOOL_ERRORS.unknownTool('echo_file', MAWS_TOOL_NAMES)).toBe(
       'unknown tool "echo_file"; the maws server has ask, show_pane, artifact_create, artifact_list, artifact_screenshot, artifact_describe_type, artifact_read, artifact_publish, artifact_upload_asset, artifact_list_assets, artifact_export, artifact_dataset, artifact_edit, artifact_comments, artifact_reply, artifact_resolve, artifact_search, artifact_delete',
     ); // E2: seven; E4c: thirteen; P1 A-54 (2026-10-08): seven again; P3-A (M6): twelve, artifact_update retired; P3-B (M7): sixteen; P4-B4: eighteen; UX wave U10b (M4): nineteen; board ticket 848: eighteen, send_file retired
     expect(rpcOf(thrown)).toEqual({ jsonrpc: '2.0', id: 3, result: { content: [{ type: 'text', text: 'show_pane: disk on fire' }], isError: true } });

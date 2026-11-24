@@ -18,10 +18,11 @@ export const stubLog = {
   pending: [] as ((result: HookResult) => void)[],
 };
 
-export function setStubIntent(appSessionId: string, intent: SetupIntent | null): void {
+// An intent given without a kind is a new chat's (`create`), as every intent was before board ticket 421 told them apart.
+export function setStubIntent(appSessionId: string, intent: (Omit<SetupIntent, 'kind'> & Partial<Pick<SetupIntent, 'kind'>>) | null): void {
   useStubIntents.setState((s) => {
     const intents = new Map(s.intents);
-    if (intent) intents.set(appSessionId, intent);
+    if (intent) intents.set(appSessionId, { kind: 'create', ...intent });
     else intents.delete(appSessionId);
     return { intents };
   });

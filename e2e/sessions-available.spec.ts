@@ -22,6 +22,7 @@ import { seedTranscript, SideJournal, transcript } from './support/side-replay';
 import { sidebarRow } from './support/sidebar';
 import { NATIVE_TO_HUMAN_ENV } from '../src/shared/owner/contract'; // P4-R7z
 import { FOLD_SUMMARIES_ENV, FOLD_SUMMARIES_OFF } from '../src/shared/owner/folds'; // UX wave U2b
+import { FULL_MAWS_TOOL_SET } from '../src/shared/maws/tool-set'; // board ticket 421
 
 const SKILLS_SESSION = 'a2a20000-0000-4000-8000-00000000000a';
 const SEND_SESSION = 'a2a20000-0000-4000-8000-00000000000b';
@@ -180,6 +181,12 @@ test.describe('sessions available on demand (P2-A)', () => {
     // UX wave U2b: the summaries' value beside where the advertisement would stand, with the lane off as here
     expect((flags.env as Record<string, unknown> | undefined)?.[FOLD_SUMMARIES_ENV], 'the launch made with the summaries’ switch off').toBe(FOLD_SUMMARIES_OFF);
     expect(writtenUsers(maws, appId).map((r) => (r.frame as { message?: { content?: unknown } }).message?.content), 'sent once').toEqual(['Reply with OK']);
+    // board ticket 421 (A3): a discovered session holds no set of MAWS's tools, so it resumes at the full set, its line
+    // unchanged: MAWS's ask allowed and the native one withdrawn
+    expect(resumed.flatMap((arg, k) => (arg === '--disallowedTools' ? [resumed[k + 1]] : [])), 'the full set’s line').toEqual(['AskUserQuestion']);
+    expect(resumed.flatMap((arg, k) => (arg === '--allowedTools' ? [resumed[k + 1]] : []))).toEqual(['mcp__maws__ask']);
+    expect(spawns(maws, appId)[0]!.frame.mawsTools, 'the spawn row records the full set').toEqual(FULL_MAWS_TOOL_SET);
+    expect(value(await invoke(page, 'session.get', { appSessionId: appId as never })), 'the record holds none').not.toHaveProperty('mawsTools');
 
     // stopped: what the engine reported is kept, labelled with when
     await expect.poll(async () => value(await invoke(page, 'session.status', { appSessionId: appId as never })).turn, { timeout: 10_000 }).toBeNull();
