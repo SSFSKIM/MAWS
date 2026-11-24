@@ -69,14 +69,26 @@ describe('Tip', () => {
   });
 });
 
-// Where the tip opens (jsdom lays nothing out, so no collision moves it): below its owner, since what explains an owner
-// (a caption, a heading, a message, the window's toolbar) stands above it.
+// Where the tip opens (jsdom lays nothing out, so no collision moves it): above its owner, the app's side, unless the
+// owner names another (an owner whose explanation stands above it, a caption or a heading, names below).
 describe('Tip placement', () => {
-  it('opens below its owner', async () => {
+  const side = () => document.querySelector('[data-radix-popper-content-wrapper] [data-side]')?.getAttribute('data-side');
+  it('opens above its owner by default', async () => {
     render(<Chip />);
     await user().tab();
     expect(tooltip()).toBe(FACT);
-    expect(document.querySelector('[data-radix-popper-content-wrapper] [data-side]')?.getAttribute('data-side')).toBe('bottom');
+    expect(side()).toBe('top');
+  });
+
+  it('opens on the side its owner names', async () => {
+    render(
+      <Tip content={FACT} side="bottom">
+        <span tabIndex={0}>Blocked in macOS</span>
+      </Tip>,
+    );
+    await user().tab();
+    expect(tooltip()).toBe(FACT);
+    expect(side()).toBe('bottom');
   });
 });
 

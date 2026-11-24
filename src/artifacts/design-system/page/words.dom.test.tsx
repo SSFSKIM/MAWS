@@ -124,6 +124,19 @@ describe('the check (G584 to G587)', () => {
     expect(violation.textContent).not.toContain('[check:');
   });
 
+  it('the ✓ count’s and a violation’s tooltips open below their owners, off the heading and the message above them', () => {
+    const side = () => document.querySelector('[data-radix-popper-content-wrapper] [data-side]')?.getAttribute('data-side');
+    const passing = page(systemDoc({ 'DESIGN.md': law('- No colour that is not a token. [check: literal-color]'), 'components/chip.html': CHIP_GOOD }));
+    act(() => within(section(passing.container, 'check')).getByRole('img', { name: 'The canon keeps every checked rule (1).' }).focus());
+    expect(screen.getByRole('tooltip').textContent).toBe('The canon keeps every checked rule (1).');
+    expect(side()).toBe('bottom');
+    cleanup();
+    const failing = page(systemDoc({ 'DESIGN.md': law('- No colour that is not a token. [check: literal-color]'), 'components/chip.html': CHIP_BAD }));
+    act(() => section(failing.container, 'check').querySelector<HTMLElement>('[data-dont-words]')!.focus());
+    expect(screen.getByRole('tooltip').textContent).toBe('[check: literal-color]');
+    expect(side()).toBe('bottom');
+  });
+
   it('one “By hand” list holds the don’ts no rule checks and those whose tag MAWS cannot run, by their words alone', () => {
     const donts = ['- Nothing louder than the title.', '- No sparkle. [check: sparkle]', '- No colour that is not a token. [check: literal-color] [check: shimmer]'].join('\n');
     const { container } = page(systemDoc({ 'DESIGN.md': law(donts), 'components/chip.html': CHIP_GOOD }));
