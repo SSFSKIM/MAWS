@@ -51,6 +51,7 @@ export interface SheetService {
   body(session: string, of: SheetBodyRequest): Promise<SheetBody>;
   upload(session: string, image: { mediaType: SheetImageType; data: string }): Promise<{ ok: true; path: string } | { ok: false; why: string }>;
   onChange(listener: SheetListener): () => void; // what §H's items are made from
+  verified(session: string): SheetModel | null; // the model last verified, as the last announcement stood: no read, nothing located (§H's items)
   door(): DoorState; // what is known now; it starts nothing
   stop(): void;
 }
@@ -391,6 +392,8 @@ export function createSheetService(deps: SheetServiceDeps): SheetService {
       listeners.add(listener);
       return () => listeners.delete(listener);
     },
+
+    verified: (session) => entries.get(session)?.model ?? null,
 
     door: () => doorState,
 

@@ -35,6 +35,13 @@ const notice = entry('notice', 'error', 0, { requestId: null });
 const leftThere = entry('left-there', 'async_input', 0, { requestId: null }); // a question left in the to-human view
 const ALL = [prompt, question, plan, asked, dialog, form, childPrompt, childQuestion, otherAgent, noCall, answered, notice, leftThere];
 
+// The question sheet's C3 M4 (§H, S10): a sheet question's item, bare as the spine holds it and lifted as a window holds
+// it; each names its question's call and, for a subagent's question, its agent.
+const SHEET_SESSION = '5eed0000-0000-4000-8000-000000000042';
+const sheetBare = entry(`sheet:${SHEET_SESSION}:q1`, 'async_input', 11, { call: 'toolu_sheet', requestId: 'q1' });
+const sheetLifted = entry(`machine-ref-0000000001/sheet:${SHEET_SESSION}:q2`, 'async_input', 12, { call: 'toolu_sheet', agent: 'agent-a', requestId: 'q2' });
+const WITH_SHEET = [...ALL, sheetBare, sheetLifted];
+
 describe('waitingRequests', () => {
   it('is the items for which waitsOnAnswer holds, oldest first: no answered request, no notice, nothing that names no request', () => {
     expect(ids(waitingRequests(ALL))).toEqual(['dialog', 'question', 'plan', 'asked', 'prompt', 'form', 'child-prompt', 'child-question', 'other-agent', 'no-call']);
@@ -42,6 +49,23 @@ describe('waitingRequests', () => {
 
   it('orders two of one time by id', () => {
     expect(ids(waitingRequests([entry('b', 'permission', 1), entry('a', 'permission', 1)]))).toEqual(['a', 'b']);
+  });
+});
+
+describe('a sheet question', () => {
+  it('is listed among the waiting requests, bare and lifted', () => {
+    expect(ids(waitingRequests(WITH_SHEET)).slice(-2)).toEqual([sheetBare.id, sheetLifted.id]);
+  });
+
+  it('marks no call as a waiting row', () => {
+    expect(calls(waitingForms(WITH_SHEET))).toEqual(calls(waitingForms(ALL)));
+  });
+
+  it('is placed nowhere in a transcript: not at its row, not at the end, in the session’s and in its agent’s transcript', () => {
+    const placedIds = (agent: string | null) => placeWaiting(WITH_SHEET, new Set(['toolu_sheet'] as ToolUseId[]), agent).map(({ item }) => item.id);
+    expect(placedIds(null)).not.toContain(sheetBare.id);
+    expect(placedIds(null)).not.toContain(sheetLifted.id);
+    expect(placedIds('agent-a')).toEqual(['child-prompt', 'child-question']);
   });
 });
 

@@ -525,6 +525,47 @@ describe('a terminal session’s requests', () => {
   });
 });
 
+// The question sheet's C3 M4 (docs/doperpowers/plans/2026-11-23-question-sheet-c3-maws-app.md §H, S11): a sheet
+// question's item is told in-app only, as a terminal's prompts are, and once per call: the questions of one call make
+// one notice, a revise none.
+describe('a session’s sheet questions', () => {
+  const TERMINAL = 'app-terminal' as AppSessionId;
+  const SESSION = '5eed0000-0000-4000-8000-000000000042';
+  const held = (v: FakeSpineView) => v.putRecord(record(TERMINAL, { title: { text: 'In the terminal', source: 'user' }, holder: { kind: 'terminal', pid: 4242 } }));
+  const asked = (question: string, call: string) =>
+    item(TERMINAL, 'async_input', T, { id: `sheet:${SESSION}:${question}` as AttentionItem['id'], request: { requestId: question as never, toolUseId: call as never, taskId: null, agentId: null } });
+  const call = (from: number, to: number, id: string) => Array.from({ length: to - from + 1 }, (_, i) => asked(`q${from + i}`, id));
+
+  it('a call of eight questions makes one in-app notice; a revise, a question back after its answer was taken back, none; the next call one', () => {
+    const h = harness({ focused: true, before: held });
+    h.set(TERMINAL, call(1, 8, 'toolu_call_1'));
+    expect(emitted(h.emit, 'attention.notified')).toHaveLength(1);
+    h.set(TERMINAL, [...call(1, 7, 'toolu_call_1'), asked('q8', 'toolu_call_2')]); // q8 revised by a second call
+    h.set(TERMINAL, call(1, 7, 'toolu_call_1')); // q8 answered (queued)
+    h.set(TERMINAL, [...call(1, 7, 'toolu_call_1'), asked('q8', 'toolu_call_2')]); // and taken back
+    expect(emitted(h.emit, 'attention.notified')).toHaveLength(1);
+    h.set(TERMINAL, [...call(1, 8, 'toolu_call_1'), ...call(9, 10, 'toolu_call_3')]);
+    expect(emitted(h.emit, 'attention.notified')).toHaveLength(2);
+  });
+
+  it('is never told to the system: no notification and no bounce while unfocused; counted in the badge', () => {
+    const h = harness({ before: held });
+    h.set(TERMINAL, call(1, 3, 'toolu_call_1'));
+    expect(posted()).toHaveLength(0);
+    expect(bounces()).toHaveLength(0);
+    expect(os.badge).toHaveBeenLastCalledWith(null, 1);
+    os.supported = false;
+    h.set(TERMINAL, call(1, 4, 'toolu_call_1'));
+    expect(bounces()).toHaveLength(0);
+  });
+
+  it('a question already open when the notifier started is not told, nor another of its call', () => {
+    const h = harness({ focused: true, before: (v) => (held(v), v.setAttention(TERMINAL, [asked('q1', 'toolu_call_1')], [])) });
+    h.set(TERMINAL, [asked('q1', 'toolu_call_1'), asked('q2', 'toolu_call_1')]);
+    expect(emitted(h.emit, 'attention.notified')).toHaveLength(0);
+  });
+});
+
 // P5 O7 M6 ("Counting without a record"): an item of a session on another machine is raised as a local one is, once per
 // item for the whole app (main raises it, not a window), keyed by its address; a greyed machine raises none and counts
 // in no badge; a click opens the session on its machine.

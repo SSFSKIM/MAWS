@@ -291,6 +291,27 @@ describe('the spine and the checkouts composed under plain Node', () => {
     expect(await spine.sheet?.read(session)).toMatchObject({ session, open: [expect.objectContaining({ id: 'q1' })] });
   });
 
+  // The question sheet's C3 M4 (§H): each open question is an item of the session's list, a terminal's; and no item of
+  // the sheet makes the session read as waiting on the person in its digest (the owner's ruling: calm state only)
+  it('lists a terminal session’s open sheet questions in attention, and leaves its digest not waiting', async () => {
+    const session = seedRecord(sminos, 'two-surfaces');
+    const seeded = new Index(join(profile, 'index.sqlite'));
+    const appSessionId = seeded.sessions.upsertFromSummary(summary({ sessionId: session as SessionId })).record.appId;
+    seeded.sessions.setHolder(session as SessionId, { kind: 'terminal', pid: 4242 });
+    seeded.close();
+    const bus = fakeBus();
+    compose(await openSpineData(profile, { build: BUILD }), new FakeSpineHost(), bus);
+    await expect.poll(async () => bus.invoke('attention.list', undefined), { timeout: 5000 }).toMatchObject({
+      ok: true, value: [expect.objectContaining({ id: `sheet:${session}:q1`, appSessionId, kind: 'async_input', state: 'pending' })],
+    });
+    expect(await bus.invoke('attention.request', { appSessionId, requestId: 'q1' })).toEqual({ ok: true, value: { event: null } });
+    const digests = await bus.invoke('session.digests', undefined);
+    if (!digests.ok) throw new Error(digests.error.message);
+    const digest = digests.value.digests.find((d) => d.appSessionId === appSessionId);
+    expect(digest?.phase).not.toBe('waiting');
+    expect(digest?.pendingRequests ?? 0).toBe(0);
+  });
+
   it('drives a terminal session the index holds through its bridge: laneA.state, its request in attention, its digest', async () => {
     const engineSessionId = '0e5b1c0d-0000-4000-8000-0000000000a1';
     const seeded = new Index(join(profile, 'index.sqlite'));

@@ -54,6 +54,17 @@ describe('waitingByCall', () => {
     expect([...map.keys()]).toEqual(['toolu_1']);
     expect(map.get('toolu_1' as ToolUseId)?.id).toBe('older');
   });
+
+  // The question sheet's C3 M4 (§H, S10): a sheet question waits on the person but marks no call, bare or lifted.
+  it('skips a sheet question’s item, by its bare id and by the address a window holds', () => {
+    const sheet = 'sheet:5eed0000-0000-4000-8000-000000000042:q1';
+    const map = waitingByCall([
+      entry(sheet, { call: 'toolu_sheet', kind: 'async_input' }),
+      entry(`machine-ref-0000000001/${sheet}`, { call: 'toolu_sheet_lifted', kind: 'async_input' }),
+      entry('asked', { call: 'toolu_async', kind: 'async_input' }),
+    ]);
+    expect([...map.keys()]).toEqual(['toolu_async']);
+  });
 });
 
 describe('waitingAgents', () => {

@@ -22,6 +22,10 @@
 // src/services/lane-a/attention.ts), each with the request view `attention.request` answers for it; a live projection like
 // the owner channel's, never restored (the bridge re-raises what is still pending), and untouched by the engine host,
 // which holds none of them.
+// The question sheet's C3 M4 (docs/doperpowers/plans/2026-11-23-question-sheet-c3-maws-app.md §H): a fifth list, each
+// open sheet question of the session's record (`setSheetItems`, src/services/sheet/attention.ts), a live projection as
+// lane A's is: never restored (the sheet service re-projects its records at start), retired by no turn, and with no
+// request view (`attention.request` answers none for one: a sheet question is answered on the sheet).
 import type { AttentionItem } from '@shared/graph/attention';
 import { waits } from '@shared/attention/kinds';
 import type { SessionEvent } from '@shared/graph/events';
@@ -119,6 +123,8 @@ export interface AttentionService {
   setOwnerItems(appSessionId: AppSessionId, items: AttentionItem[], silent: readonly AttentionId[]): void;
   // P5 O9 M6: the session's lane A items whole (replacing the last), each with its request view.
   setLaneAItems(appSessionId: AppSessionId, entries: readonly { item: AttentionItem; request: SessionEvent }[]): void;
+  // The question sheet's C3 M4: the session's sheet items whole (replacing the last).
+  setSheetItems(appSessionId: AppSessionId, items: AttentionItem[]): void;
   // The session was seen up to `at` (ms; its last-seen mark moved): its errors raised at or before then retire for good.
   seen(appSessionId: AppSessionId, at: number): void;
   settled(): Promise<void>; // every change so far has reached the store
@@ -134,6 +140,7 @@ interface SessionState {
   derived: Map<string, AttentionItem>;
   owner: AttentionItem[]; // P2-C: the owner channel's projection
   laneA: { item: AttentionItem; request: SessionEvent }[]; // P5 O9 M6
+  sheet: AttentionItem[]; // the question sheet's C3 M4
   signature: string;
   // retired live since this run started, per kind: the moment (ms) before which a persisted item of the kind stays retired
   retiredBefore: Map<AttentionItem['kind'], number>;
@@ -152,10 +159,10 @@ export function startAttentionService(deps: AttentionServiceDeps): AttentionServ
 
   const stateOf = (id: AppSessionId): SessionState => {
     let state = sessions.get(id);
-    if (!state) sessions.set(id, (state = { broker: [], derived: new Map(), owner: [], laneA: [], signature: '[]', retiredBefore: new Map(), apiError: null }));
+    if (!state) sessions.set(id, (state = { broker: [], derived: new Map(), owner: [], laneA: [], sheet: [], signature: '[]', retiredBefore: new Map(), apiError: null }));
     return state;
   };
-  const merged = (state: SessionState): AttentionItem[] => [...state.broker, ...state.derived.values(), ...state.owner, ...state.laneA.map((e) => e.item)];
+  const merged = (state: SessionState): AttentionItem[] => [...state.broker, ...state.derived.values(), ...state.owner, ...state.laneA.map((e) => e.item), ...state.sheet];
 
   // Persistence (M5 review): the sessions whose stored list is behind the in-memory one, written in order; a failed
   // write stays owed, is retried with the next change and after PERSIST_RETRY_MS, and makes settled() reject until a
@@ -447,12 +454,20 @@ export function startAttentionService(deps: AttentionServiceDeps): AttentionServ
     changed(id, state);
   };
 
+  // The question sheet's C3 M4: a live projection, as lane A's
+  const setSheetItems = (id: AppSessionId, items: AttentionItem[]) => {
+    const state = stateOf(id);
+    state.sheet = [...items];
+    changed(id, state);
+  };
+
   return {
     ready,
     restoredIds,
     list,
     setOwnerItems, // P2-C
     setLaneAItems, // P5 O9 M6
+    setSheetItems, // the question sheet's C3 M4
     seen,
     settled: async () => {
       await attempt;
