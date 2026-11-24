@@ -79,6 +79,7 @@
     "kind": "cell",
     "label": "Ran `sleep 20; echo SLEPT_OK` in 21s",
     "paths": [],
+    "runExpanded": true,
     "startedAt": "2026-10-06T11:03:53.318Z",
     "status": "done",
     "toolName": "Bash",
@@ -152,6 +153,7 @@
     "paths": [
       "/private/tmp/maws-e0a-side-thread-wDcmUb/repo-G4yVD7/probe.txt"
     ],
+    "runExpanded": true,
     "startedAt": "2026-10-06T11:04:17.203Z",
     "status": "done",
     "toolName": "Read",

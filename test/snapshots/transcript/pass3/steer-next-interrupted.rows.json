@@ -59,6 +59,7 @@
     "kind": "cell",
     "label": "Stopped a command",
     "paths": [],
+    "runExpanded": true,
     "startedAt": "2026-10-01T09:18:38.874Z",
     "status": "stopped",
     "toolName": "Bash",

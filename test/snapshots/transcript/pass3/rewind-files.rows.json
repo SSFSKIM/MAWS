@@ -60,6 +60,7 @@
     "paths": [
       "/private/var/folders/c1/l4z5k02n2779byvnymzxsvth0000gn/T/maws-live-scratch-AqsCfi/notes.txt"
     ],
+    "runExpanded": true,
     "startedAt": "2026-09-29T01:26:31.361Z",
     "status": "done",
     "toolName": "Write",
@@ -209,6 +210,7 @@
     "paths": [
       "/private/var/folders/c1/l4z5k02n2779byvnymzxsvth0000gn/T/maws-live-scratch-AqsCfi/notes.txt"
     ],
+    "runExpanded": true,
     "startedAt": "2026-09-29T01:26:37.630Z",
     "status": "done",
     "toolName": "Edit",

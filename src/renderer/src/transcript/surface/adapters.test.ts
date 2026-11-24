@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { parseTranscriptProps } from '@shared/engine/surface-rows';
 import { renderRow } from '../view/rows/test-support';
 import { rowsOf, turnRows, withAllExpanded } from '../model/derive';
+import { drawsAsRun, runOfOne } from '../model/groups';
 import { applyEvents, createState, withReaderState } from '../model/reduce';
 import type { Row } from '../model/rows';
 import { BASH_RESULT, builder, api, tool, uuid } from '../model/test-events';
@@ -23,6 +24,9 @@ const setup = (b: ReturnType<typeof builder>) => {
   const rows = rowsOf(state);
   return { state, rows, turn: [...state.turns.values()][0] };
 };
+// A call's own line and its opened detail: a run of one opens straight to its call's detail (board ticket 852), so a call
+// that draws as one is read where its line is drawn, in its run opened.
+const callRow = (cell: Extract<Row, { kind: 'cell' }>): Row => (drawsAsRun(cell) ? { ...runOfOne(cell), expanded: true } : cell);
 const find = <K extends Row['kind']>(rows: Row[], kind: K) => rows.find((r): r is Extract<Row, { kind: K }> => r.kind === kind)!;
 
 describe('transcript surface adapters', () => {
@@ -119,7 +123,7 @@ describe('transcript surface adapters', () => {
     expect(rewritten.detail).toMatchObject({ command: 'pwd', stdout: '/rewritten' });
     expect(rewritten.summary).toBeUndefined();
     const row = find(rows, 'cell');
-    const { container } = renderRow({ ...row, ...rewritten, id: row.id, expanded: true });
+    const { container } = renderRow(callRow({ ...row, ...rewritten, id: row.id, expanded: true }));
     expect(container.querySelector('.transcript-cell-label')?.textContent).toBe('Ran pwd');
     expect(container.querySelector('pre')?.textContent).toBe('/rewritten');
     expect(container.textContent).not.toContain('Checked the working directory');
@@ -193,7 +197,7 @@ describe('transcript surface adapters', () => {
     expect(props).not.toBeNull();
     const drawn = withToolProps(input, props);
     expect(drawn).toMatchObject({ status: flags.status, detail: { command: 'make shown', stdout: 'old', exitCode: flags.exitCode } });
-    const { container } = renderRow({ ...row, ...drawn, id: row.id, expanded: true });
+    const { container } = renderRow(callRow({ ...row, ...drawn, id: row.id, expanded: true }));
     expect(container.querySelector('[data-cell-id]')?.getAttribute('data-status')).toBe(flags.status);
     expect(container.querySelector('.transcript-cell-label')?.textContent).toBe(flags.label);
     expect(drawn.classification).toBe(row.classification);
@@ -207,7 +211,7 @@ describe('transcript surface adapters', () => {
     const props = parseTranscriptProps('ToolUse', { ...input.props, output }, input.props)!;
     expect(props).not.toBeNull();
     const drawn = withToolProps(input, props);
-    const { container } = renderRow({ ...row, ...drawn, id: row.id, expanded: true });
+    const { container } = renderRow(callRow({ ...row, ...drawn, id: row.id, expanded: true }));
     expect(container.textContent).not.toContain('HISTORICAL SECRET');
     expect(drawn.detail).toMatchObject({ spill: null });
     const text = container.querySelector('pre')?.textContent ?? '';
@@ -234,7 +238,7 @@ describe('transcript surface adapters', () => {
     expect(denied.status).toBe('denied');
     expect(denied.label).toBe('Denied: `shown` · new reason');
     expect(denied.detail).toMatchObject({ stdout: 'new reason' });
-    const { container } = renderRow({ ...row, ...denied, id: row.id, expanded: true });
+    const { container } = renderRow(callRow({ ...row, ...denied, id: row.id, expanded: true }));
     expect(container.querySelector('.transcript-cell-detail')?.textContent).toContain('new reason');
     expect(container.textContent).not.toContain('old reason');
     expect(denied.classification).toBe(row.classification);
@@ -252,7 +256,7 @@ describe('transcript surface adapters', () => {
     const props = JSON.parse(JSON.stringify({ ...input.props, input: { file_path: '/shown' } }));
     const drawn = withToolProps(input, props);
     expect(drawn.detail).toMatchObject({ kind: 'read', files: [{ path: '/shown' }], preview: 'file text' });
-    const { container } = renderRow({ ...row, ...drawn, id: row.id, expanded: true });
+    const { container } = renderRow(callRow({ ...row, ...drawn, id: row.id, expanded: true }));
     expect(container.querySelector('pre')?.textContent).toBe('file text');
   });
 
@@ -262,7 +266,7 @@ describe('transcript surface adapters', () => {
     const before = structuredClone(b.events);
     const drawn = withToolProps(input, { ...input.props, tool: 'Read', input: { file_path: '/shown', offset: 2, limit: 3 }, output: 'new file text' });
     expect(drawn).toMatchObject({ toolName: 'Read', paths: ['/shown'], detail: { kind: 'read', files: [{ path: '/shown', range: [2, 4] }], preview: 'new file text' } });
-    const { container } = renderRow({ ...row, ...drawn, id: row.id, expanded: true });
+    const { container } = renderRow(callRow({ ...row, ...drawn, id: row.id, expanded: true }));
     expect(container.querySelector('.transcript-cell-label')?.textContent).toBe('Read shown');
     expect(container.querySelector('pre')?.textContent).toBe('new file text');
     expect(drawn.classification).toBe(row.classification);
@@ -273,7 +277,7 @@ describe('transcript surface adapters', () => {
     const b = builder(); b.turn('u'); b.toolUse('t', 'OtherTool', { value: 'old' }); b.end(['u']);
     const { rows, turn } = setup(b); const row = find(rows, 'cell'); const input = toolInputs(row, turn)[0];
     const drawn = withToolProps(input, { ...input.props, input: { value: 'shown' }, isRunning: false, isInterrupted: false, isErrored: true, output: [{ type: 'text', text: 'new error' }] });
-    const { container } = renderRow({ ...row, ...drawn, id: row.id, expanded: true });
+    const { container } = renderRow(callRow({ ...row, ...drawn, id: row.id, expanded: true }));
     expect(container.querySelector('[data-error]')?.textContent).toContain('new error');
     expect(container.querySelector('[data-error]')?.textContent).toContain('shown');
     expect(input.record.result).toBeNull();
@@ -291,7 +295,7 @@ describe('transcript surface adapters', () => {
       : rewrite === 'output' ? { ...wireProps, output: 'replacement' } : wireProps;
     const drawn = withToolProps(input, props);
     fakeTimeouts();
-    const { container, queryByRole } = renderRow({ ...row, ...drawn, id: row.id, expanded: true });
+    const { container, queryByRole } = renderRow(callRow({ ...row, ...drawn, id: row.id, expanded: true }));
     act(() => vi.advanceTimersByTime(QUIET_MS));
     expect(queryByRole('button', { name: /Load full result/ })).toBeNull();
     if (rewrite === 'output') {

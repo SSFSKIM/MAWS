@@ -80,6 +80,7 @@
     "kind": "cell",
     "label": "Stopped: `sleep 20`",
     "paths": [],
+    "runExpanded": true,
     "startedAt": "2026-09-28T10:04:40.755Z",
     "status": "stopped",
     "toolName": "Bash",

@@ -79,6 +79,7 @@
     "kind": "cell",
     "label": "Ran `date +%H:%M` in 0s",
     "paths": [],
+    "runExpanded": true,
     "startedAt": "2026-09-28T11:40:00.510Z",
     "status": "done",
     "toolName": "Bash",

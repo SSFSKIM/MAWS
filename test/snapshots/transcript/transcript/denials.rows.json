@@ -304,6 +304,7 @@
     "kind": "cell",
     "label": "Stopped: Count 1",
     "paths": [],
+    "runExpanded": true,
     "startedAt": "2026-09-28T10:40:03.891Z",
     "status": "stopped",
     "toolName": "Bash",

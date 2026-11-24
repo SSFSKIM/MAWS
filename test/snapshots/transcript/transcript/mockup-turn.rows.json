@@ -406,6 +406,7 @@
     "paths": [
       "/tmp/maws-synth-mockup-turn/src/layout/sidebar.css"
     ],
+    "runExpanded": true,
     "startedAt": "2026-09-28T11:20:02.415Z",
     "status": "done",
     "toolName": "Edit",

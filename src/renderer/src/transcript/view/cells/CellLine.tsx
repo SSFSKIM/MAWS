@@ -94,7 +94,17 @@ function useBlockedState(storeKey: string, cell: Cell): BlockedState | undefined
   });
 }
 
-export function CellLine({ cell: model, turnId, focusable = false, renderDetail, onToggle }: { cell: Cell; turnId: TurnId | null; focusable?: boolean; renderDetail?: (cell: Cell) => ReactNode; onToggle?: () => void }) {
+// Board ticket 852: what a standalone call's line shows under it at rest, indented, while the line is closed: an image
+// result's first image, as a thumbnail the line names (the opened detail draws the images whole)
+function RestThumbnail({ cell }: { cell: Cell }) {
+  const image = cell.detail.kind === 'image' ? cell.detail.images[0] : undefined;
+  return image === undefined ? null : <img className="transcript-cell-thumb" src={image.dataUrl} alt="" />;
+}
+
+// `standalone`: the call stands outside any run (board ticket 852: one quiet line like a run's, no box; `data-standalone`);
+// `runOfOne`, it is read as its run (`data-run-of-one`), in `label`'s words in place of its own; `held`, it is not running
+// though its status reads so (decision 21: `data-held`, no running ring)
+export function CellLine({ cell: model, turnId, focusable = false, standalone = false, runOfOne = false, held = false, label, renderDetail, onToggle }: { cell: Cell; turnId: TurnId | null; focusable?: boolean; standalone?: boolean; runOfOne?: boolean; held?: boolean; label?: string; renderDetail?: (cell: Cell) => ReactNode; onToggle?: () => void }) {
   const { storeKey, variant, actions } = useTranscriptContext();
   const blocked = useBlockedState(storeKey, model);
   const cell = blocked === undefined ? model : { ...model, label: blockedLabel(model, blocked) }; // UX wave U1c: "again", "· approved"
@@ -105,7 +115,8 @@ export function CellLine({ cell: model, turnId, focusable = false, renderDetail,
   const offered = blocked !== undefined && !readsApproved(blocked) && variant === 'session' && actions.renderBlockedCall !== undefined ? blocked : null;
   const onLine = offered !== null && lineNamesWhole(model, offered.call);
   const opened = withoutRefusalText(model); // UX wave U1c (M2 fix 1): an opened blocked row draws no refusal text as output
-  const counts = !waiting && cell.detail.kind === 'edit' && !asLabelled(cell) ? EDIT_COUNTS.exec(cell.label) : null;
+  // a lone line counts only a finished edit, as a run's line counts its finished edits (U2a §B; board ticket 852)
+  const counts = !waiting && cell.detail.kind === 'edit' && !asLabelled(cell) && (!standalone || cell.status === 'done') ? EDIT_COUNTS.exec(cell.label) : null;
   return (
     <div
       className="transcript-cell"
@@ -114,16 +125,20 @@ export function CellLine({ cell: model, turnId, focusable = false, renderDetail,
       data-waiting={waiting ? '' : undefined}
       data-expanded={cell.expanded ? '' : undefined}
       data-names-whole={onLine ? '' : undefined}
+      data-standalone={standalone ? '' : undefined}
+      data-run-of-one={runOfOne ? '' : undefined}
+      data-held={held ? '' : undefined}
       tabIndex={focusable ? -1 : undefined}
     >
       <button type="button" className="transcript-cell-line" title={cell.paths.length > 0 ? cell.paths.join('\n') : undefined} aria-expanded={cell.expanded} onClick={onToggle ?? (() => useTranscriptStore.getState().toggleCell(storeKey, cell.id))}>
         <span className="transcript-cell-label">
-          {waiting ? <CodeText text={waitingLabel(cell)} /> : <CellLabel cell={cell} />}
+          {waiting ? <CodeText text={waitingLabel(cell)} /> : label !== undefined ? <CodeText text={label} /> : <CellLabel cell={cell} />}
           {cell.error !== undefined && <>{' '}<span className="transcript-cell-reason">{cell.error}</span></>}
         </span>
         {counts && <LineCounts added={Number(counts[1])} removed={Number(counts[2])} />}
         <Chevron />
       </button>
+      {standalone && !cell.expanded && <RestThumbnail cell={cell} />}
       {offered !== null && actions.renderBlockedCall!({ cell: model.id, call: offered.call, again: offered.again, grant: offered.grant as 'none' | 'waiting', onLine })}
       <DisclosureBody open={cell.expanded}>
         {renderDetail ? renderDetail(opened) : <CellDetailView cell={opened} turnId={turnId} />}

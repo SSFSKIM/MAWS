@@ -53,6 +53,7 @@
     "kind": "cell",
     "label": "Ran `git status --short` in 0s",
     "paths": [],
+    "runExpanded": true,
     "startedAt": "2026-10-09T07:13:26.150Z",
     "status": "done",
     "toolName": "Bash",

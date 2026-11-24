@@ -190,7 +190,8 @@ test('a style declaring the plugin’s message tool (6): the supplement once and
     // the plugin answered it `sent` inside the engine, so MAWS answered nothing for it
     const called = pane.locator(`[data-row-id="to-human:${SUPPLEMENT.toolMessageId}"]`);
     await expect(called.locator('.owner-message-ink')).toHaveText(new RegExp(SUPPLEMENT.toolMessage.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')), { timeout: 20_000 });
-    await expect(pane.locator(`[data-cell-id="cell:${SUPPLEMENT.toolMessageId}"]`)).toHaveCount(0);
+    // nor its row (board ticket 852: a lone finished call's row draws a run of one, whose cell mounts only once opened)
+    await expect(pane.locator(`[data-cell-id="cell:${SUPPLEMENT.toolMessageId}"], [data-row-id="cell:${SUPPLEMENT.toolMessageId}"]`)).toHaveCount(0);
     const order = await pane.locator('[data-row-id]').evaluateAll((drawn) => drawn.map((row) => row.getAttribute('data-row-id')!));
     const at = (prefix: string) => order.findIndex((rowId) => rowId.startsWith(prefix));
     expect(at('text:msg_01P2c2Message')).toBeGreaterThanOrEqual(0);
