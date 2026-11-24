@@ -72,7 +72,9 @@ export function discoveryWake(options: DiscoveryWakeOptions): (name: string, app
       };
       const giveUp = setTimeout(() => done('given-up'), DISCOVERY_WAKE_GIVE_UP_MS);
       giveUp.unref?.();
-      // a pass is both signals in one generation: a fold of the host before a transition does not end a later scan's
+      // a pass is both signals in one generation: a fold of the host before a transition does not end a later scan's.
+      // A failed registry read ends the wake unheard only once `applied` has come in its generation too; when the scan
+      // fails as well, the reads' bound and the give-up govern, as for a scan alone.
       let appliedIn: number | null = null;
       let folded: { generation: number; ok: boolean } | null = null;
       const settle = () => {

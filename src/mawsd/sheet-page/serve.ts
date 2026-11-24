@@ -404,11 +404,19 @@ export function createSheetPage(options: SheetPageOptions): SheetPage {
         if (state === 'listening' || state === 'port-taken') become('stopped', 'mawsd is stopping');
         if (retryTimer) clearTimeout(retryTimer);
         if (tickTimer) clearInterval(tickTimer);
-        // first, so no session is offered a page that is going; only a file that still names this process
-        if (wasListening && home) removeRegistration(home, name, process.pid);
+        const bound = new Promise((resolve) => setTimeout(resolve, STOP_MS).unref()); // STOP_MS covers the removal too
+        // first, so no session is offered a page that is going; only a file that still names this process. Best effort:
+        // a home that changed under mawsd is logged, and the stop goes on (T6)
+        if (wasListening && home) {
+          try {
+            removeRegistration(home, name, process.pid);
+          } catch (error) {
+            log(`the registration: not removed at the stop (${codeOf(error) ?? messageOf(error)})`);
+          }
+        }
         registered = false;
         handler?.close(); // the live connections told 1001
-        await Promise.race([Promise.all([...made].map(close)), new Promise((resolve) => setTimeout(resolve, STOP_MS).unref())]);
+        await Promise.race([Promise.all([...made].map(close)), bound]);
         for (const socket of sockets) socket.destroy(); // what is left: an upgraded socket, which its server no longer holds
       })();
       return stopping;

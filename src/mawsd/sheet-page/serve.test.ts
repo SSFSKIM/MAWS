@@ -2,13 +2,14 @@
 // to T6), with `createSheetPage` alone over the fixture bundle. What it answers, through a whole daemon, is
 // src/mawsd/process-sheet-page.test.ts's. No case here listens on the real port: a bind is port 0, a port this test
 // holds, or the `listen` seam, which records and refuses.
+import { execFileSync } from 'node:child_process';
 import type * as Http from 'node:http';
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { createConnection, createServer, type AddressInfo, type Server } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { createSheetPage, listenExclusive, SHEET_PORT, type SheetPage, type SheetPageOptions } from './serve';
+import { createSheetPage, listenExclusive, SHEET_PORT, STOP_MS, type SheetPage, type SheetPageOptions } from './serve';
 import { registrationName } from './registration';
 import { NO_SHEETS } from './sheets';
 
@@ -398,6 +399,34 @@ describe('the registration (T18, §O): the heartbeat, on the page server’s own
     await new Promise((done) => setTimeout(done, heartbeatMs * 4));
     expect(existsSync(join(home, 'sheet'))).toBe(false);
     expect(made.status().registered).toBe(false);
+  });
+
+  // Fix round 2 (T6): the removal is best effort, and STOP_MS bounds the stop with it in. A home whose permissions
+  // changed while mawsd ran, or an entry at the registration's name that is no regular file, never holds the stop.
+  it.each([
+    ['sheet/ unreadable', (home: string) => chmodSync(join(home, 'sheet'), 0o000)],
+    ['surfaces/ unreadable', (home: string) => chmodSync(join(home, 'sheet', 'surfaces'), 0o000)],
+    ['a FIFO in the registration’s place', (home: string, file: string) => (rmSync(file), execFileSync('mkfifo', [file]))],
+    ['a directory in the registration’s place', (home: string, file: string) => (rmSync(file), mkdirSync(file))],
+  ])('a stop with %s ends within its bound, its removal logged if it failed', async (_case, spoil) => {
+    const home = join(scratch, 'sminos');
+    mkdirSync(home);
+    const made = page({ env: { MAWS_SHEET_PAGE: '1', MAWS_SHEET_PORT: '0', SMINOS_HOME: home }, timing: { heartbeatMs: 60_000 } });
+    made.start();
+    const file = fileIn(home, registrationName(false, scratch));
+    await until(() => existsSync(file));
+    spoil(home, file);
+    try {
+      const began = Date.now();
+      await made.stop();
+      expect(Date.now() - began).toBeLessThan(STOP_MS + 250);
+      expect(made.status().state).toBe('stopped');
+    } finally {
+      chmodSync(join(home, 'sheet'), 0o700);
+      chmodSync(join(home, 'sheet', 'surfaces'), 0o700);
+    }
+    if (_case.includes('unreadable')) expect(logs).toContainEqual(expect.stringMatching(/^the registration: not removed at the stop \(EACCES\)$/));
+    expect(logs.filter((line) => line.includes(scratch))).toEqual([]); // a failure is logged with no path
   });
 
   it('logs no path and no change but a change of what the tick did', async () => {

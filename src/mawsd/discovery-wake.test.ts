@@ -143,6 +143,27 @@ describe('the discovery wake', () => {
     expect(wakes, 'a failed pass is not a fresh one').toBe(2);
   });
 
+  it('a failed registry read before `applied` waits for it in that generation; with no scan, the bound and the give-up govern', async () => {
+    let answered = 0;
+    void before('session.list', false, Date.now()).then(() => void (answered += 1));
+    folded(false);
+    await vi.advanceTimersByTimeAsync(0);
+    expect([answered, parks], 'the read failed, the scan not yet in').toEqual([0, 0]);
+    applied();
+    await vi.advanceTimersByTimeAsync(0);
+    expect([answered, parks]).toEqual([1, 1]);
+    expect(lines.at(-1)).toContain('the registry could not be read');
+
+    parked = true;
+    void before('session.list', false, Date.now()).then(() => void (answered += 1));
+    expect(wakes, 'a failed pass is not a fresh one').toBe(2);
+    folded(false); // and the scan never answers
+    await vi.advanceTimersByTimeAsync(DISCOVERY_WAKE_BOUND_MS);
+    expect([answered, parks], 'answered at its bound, the wake still out').toEqual([2, 1]);
+    await vi.advanceTimersByTimeAsync(DISCOVERY_WAKE_GIVE_UP_MS - DISCOVERY_WAKE_BOUND_MS);
+    expect(parks, 'given up').toBe(2);
+  });
+
   it('a fold that never comes holds no read past its bound, and the wake gives up as for a scan', async () => {
     let settled = false;
     void before('session.list', false, Date.now()).then(() => (settled = true));

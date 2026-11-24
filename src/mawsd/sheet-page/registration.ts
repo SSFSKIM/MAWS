@@ -72,26 +72,40 @@ export function writeRegistration(home: string, registration: Registration): Reg
   return 'written';
 }
 
-/** Removes the registration `name` only while it still names `pid`: another process's file is left as it stands. */
-export function removeRegistration(home: string, name: string, pid: number): void {
-  if (!homeExists(home) || kindOf(join(home, 'sheet')) !== 'directory' || kindOf(surfacesDir(home)) !== 'directory') return; // the write's confinement, making nothing
+/**
+ * Removes the registration `name` only while it is a regular file that still names `pid`: another process's file, a link,
+ * a FIFO (opened without blocking) or a directory at its name is left as it stands. 'left' for each of those and for a
+ * file already gone; it throws only for what the caller should log (a home whose permissions changed meanwhile).
+ */
+export function removeRegistration(home: string, name: string, pid: number): 'removed' | 'left' {
+  if (!homeExists(home) || kindOf(join(home, 'sheet')) !== 'directory' || kindOf(surfacesDir(home)) !== 'directory') return 'left'; // the write's confinement, making nothing
   const file = join(surfacesDir(home), `${name}.json`);
+  let fd: number;
+  try {
+    fd = openSync(file, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+  } catch (error) {
+    if (codeOf(error) === 'ENOENT' || codeOf(error) === 'ELOOP') return 'left'; // gone, or a link
+    throw error;
+  }
   let named: unknown;
   try {
-    const fd = openSync(file, constants.O_RDONLY | constants.O_NOFOLLOW);
+    if (!fstatSync(fd).isFile()) return 'left';
     try {
-      if (!fstatSync(fd).isFile()) return;
       named = (JSON.parse(readFileSync(fd, 'utf8')) as { pid?: unknown }).pid;
-    } finally {
-      closeSync(fd);
+    } catch {
+      return 'left'; // not a registration: nothing of ours
     }
-  } catch {
-    return; // gone, a link, or not a registration: nothing of ours
+  } finally {
+    closeSync(fd);
   }
-  if (named !== pid) return;
+  if (named !== pid) return 'left';
   try {
     unlinkSync(file);
-  } catch {
-    // gone meanwhile
+  } catch (error) {
+    if (codeOf(error) === 'ENOENT') return 'left'; // gone meanwhile
+    throw error;
   }
+  return 'removed';
 }
+
+const codeOf = (error: unknown): string | undefined => (error as NodeJS.ErrnoException | null)?.code;
