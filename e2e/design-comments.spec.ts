@@ -24,7 +24,7 @@ import { ScratchRepo } from '../test/support/scratch-repo';
 import { launchMaws, type MawsLaunch } from './support/launch';
 import { newChatIn, openProject } from './support/sidebar';
 import { AgentSeam, refusalOf } from './support/dashboards';
-import { openFromLibrary, plain } from './support/design';
+import { openFromLibrary, plain, toggleComments } from './support/design';
 import { AGENT_SESSION, asAgent, createDesign, derivedIdOf, DESIGN_FILES, editDesign, elementOf, filesOf, FRAMES, ok, pinOffset, seamInstalled, seed, threadsOf, viewOf } from './support/design';
 
 // UX wave U5a: the comment a scene posts in a thread so that it counts (M7's rule: a thread counts once it holds a message).
@@ -95,7 +95,7 @@ test('comments on a design’s boards and elements: the card, the pins through m
   const toolbar = ws.getByRole('toolbar', { name: 'Design' });
   const card = page.locator('[data-comment-card]');
   const rail = ws.getByRole('complementary', { name: 'Comments' });
-  const toggleRail = () => toolbar.getByRole('button', { name: /^Comments/ }).click();
+  const toggleRail = () => toggleComments(page, 'panel'); // the word cut (G512): the header's Comments action
   const zoomTo = async (label: string) => {
     await toolbar.getByRole('button', { name: 'Boards', exact: true }).click();
     await ws.getByRole('button', { name: `Board ${label} options` }).click();
@@ -273,11 +273,14 @@ test('comments on a design’s boards and elements: the card, the pins through m
     await asAgent(channel!, id, { op: 'reply', threadId: boardThread, body: 'Taller header?' }); // a conversation after the version
     await toolbar.getByRole('button', { name: 'Boards', exact: true }).click();
     await ws.getByRole('button', { name: 'Board Phone — sign in options' }).click();
-    await page.getByRole('menuitem', { name: 'Delete board' }).click();
+    await page.getByRole('menuitem', { name: 'Delete', exact: true }).click(); // the word cut (G525)
     await expect.poll(async () => await threadOf((t) => t.id === boardThread)).toMatchObject({ orphan: true, live: false, quote: 'Phone — sign in' });
     await expect(ws.locator('[data-board-pin="phone"]')).toHaveCount(0);
+    // the header's count follows: an orphaned thread never counts (the board's thread and the element's were open)
+    await expect(panel.getByRole('button', { name: '1 open comment', exact: true }), 'the deleted board’s thread no longer counts').toBeVisible();
     await ok(page, 'artifacts.restore', { artifactId: id, versionId: before.versionId });
     await expect.poll(async () => await threadOf((t) => t.id === boardThread), { timeout: 15_000 }).toMatchObject({ orphan: false, live: true, quote: 'Phone — sign in' });
+    await expect(panel.getByRole('button', { name: '2 open comments', exact: true }), 'restored, it counts again').toBeVisible();
     expect((await threadOf((t) => t.id === boardThread))!.messages.map((m) => m.body)).toContain('Taller header?');
     await expect.poll(() => pinOffset(ws.locator('[data-board-pin="phone"]'), ws.locator('[data-board-id="phone"]'))).toBeLessThan(4);
   });

@@ -221,7 +221,7 @@ export class ConnectorScene {
     const sheet = await this.openSheet(page);
     const start = sheet.locator('[data-connectors-start]');
     await start.getByRole('button', { name: 'Start session' }).click();
-    const passing = new Set(['', 'Starting…', 'Starting the session…', 'The session is ready']);
+    const passing = new Set(['', 'Starting…', 'Ready']); // the start's own words (the word cut, T591 and N198)
     let started: LiveEngine | undefined;
     for (const deadline = Date.now() + 90_000; started === undefined; await wait(500)) {
       const words = (await start.getByRole('status').textContent({ timeout: 250 }).catch(() => null))?.trim() ?? '';

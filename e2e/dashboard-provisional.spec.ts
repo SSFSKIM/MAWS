@@ -111,7 +111,7 @@ test('a dataset call labels every chart bound to it while it streams, the agent 
       const chart = labelled.nth(i);
       await expect(chart).toHaveAttribute('data-provisional', toolUseId);
       await expect(chart).toHaveAttribute('data-provisional-dataset', 'sales');
-      await expect(chart).toHaveAttribute('data-provisional-label', `${AGENT_NAME} is updating sales…`);
+      await expect(chart).toHaveAttribute('data-provisional-label', AGENT_NAME); // the word cut (G354): the agent's name alone
       expect(await chart.evaluate((n) => n.matches('figure.dash-view') || n.querySelector('figure.dash-view') !== null), 'the label rides a chart').toBe(true);
     }
     const costs = figures(tab).filter({ hasText: 'Costs by region' });

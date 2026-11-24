@@ -200,10 +200,18 @@ export async function railOf(record: Locator): Promise<Locator> {
   return rail;
 }
 
-export async function reply(rail: Locator, threadId: string, text: string): Promise<void> {
-  const field = rail.locator(`article[data-thread="${threadId}"]`).getByRole('textbox', { name: 'Reply' });
+// The word cut (G385): only the active card has a reply field. Chosen in the rail, a card becomes the active one there
+// (the drawer, or an orphan), or hands its thread to the margin's card and closes the rail (beside the page). The reply
+// goes to the active card wherever it stands, and the rail is open again afterwards, so the caller reads it as before.
+export async function reply(record: Locator, threadId: string, text: string): Promise<void> {
+  const rail = await railOf(record);
+  await rail.locator(`article[data-thread="${threadId}"]`).click();
+  const card = record.locator(`article[data-thread="${threadId}"][aria-current="true"]`);
+  const field = card.getByRole('textbox', { name: 'Reply' });
   await field.fill(text);
   await field.press('Enter');
+  await expect(card.getByRole('listitem').filter({ hasText: text }), 'the reply posted').toHaveCount(1);
+  await railOf(record);
 }
 
 // ---- P3-E2 M6: the agent's tools through the host's acceptance seam ---------------------------------------------------

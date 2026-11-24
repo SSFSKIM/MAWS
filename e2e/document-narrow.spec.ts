@@ -300,8 +300,8 @@ test('in a 600 px panel the comments card floats over the unchanged page; maximi
     expect(Math.abs(railBox.y - frameBox.y - CARD_INSET_PX), 'the card floats below the page-frame top').toBeLessThan(1);
     expect(await oneRow(toolbar)).toBe(true);
     expect(await wrappedLabels(toolbar), 'every label one line maximized').toEqual([]);
-    await text.locator('td p').first().click(); // the caret in the table: its controls in the row too
-    await expect(toolbar.getByRole('button', { name: 'Add row below', exact: true })).toBeVisible();
+    await text.locator('td p').first().click(); // the caret in the table: its control in the row too
+    await expect(toolbar.getByRole('button', { name: 'Table', exact: true })).toBeVisible(); // the word cut (G331): one Table menu
     expect(await oneRow(toolbar)).toBe(true);
     expect(await wrappedLabels(toolbar), 'every label one line maximized, with the table’s controls').toEqual([]);
     await test.info().attach('maximized-rail-beside', { body: await page.screenshot(), contentType: 'image/png' });

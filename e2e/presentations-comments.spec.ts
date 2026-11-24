@@ -223,12 +223,14 @@ test('comments on a deck’s elements: the card, the pin through a move, a resiz
   await page.keyboard.press('Delete');
   await toolbar.getByRole('button', { name: /^Comments/ }).click();
   // WR49: the conversation stays, but a deleted target is hidden until the owner explicitly reveals it.
+  // the word cut (G479, G481): the toggle draws "Show deleted", its name the longer words; an orphan says Element deleted
   const showDeleted = rail.getByRole('button', { name: 'Show deleted-target comments', exact: true });
+  await expect(showDeleted).toHaveText('Show deleted');
   await expect(showDeleted).toHaveAttribute('aria-pressed', 'false');
   await expect(thread).toHaveCount(0);
   await showDeleted.click();
   await expect(thread).toHaveAttribute('data-orphan', '');
-  await expect(thread).toContainText('The commented element was deleted.');
+  await expect(thread.locator('.deck-thread-note')).toHaveText('Element deleted');
   await expect(thread.locator('.deck-thread-quote-text')).toHaveText('Two paths');
   await expect(deck.locator('[data-comment-pin]')).toHaveCount(0);
   await expect(panel.getByTitle(/^\d+ open comments?$/)).toHaveCount(0);
