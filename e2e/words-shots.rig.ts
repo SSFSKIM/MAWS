@@ -951,10 +951,12 @@ const m5Meta = (id: string, rows: string, title: string, how: string, state: str
 const libraryHead = (page: Page) => page.locator('[data-library-header]').first();
 const typeFilter = (page: Page) => libraryHead(page).locator(`button[aria-label^="${M5_WORDS.typeFilter}"]`).first();
 const kindMenu = (page: Page) => page.getByRole('menu').filter({ has: page.getByRole('menuitemradio', { name: new RegExp(`^${literal(M5_WORDS.allTypes)}`) }) }).first();
+// The view switch, the same on both builds (library/LibraryHeader.tsx, ViewSwitch): Radix's single ToggleGroup, which
+// draws a radiogroup named View and each view a radio, checked while shown (e2e/library.spec.ts reaches it so).
 async function libraryView(page: Page, view: keyof typeof M5_WORDS.views) {
-  const item = libraryHead(page).getByRole('group', { name: M5_WORDS.viewLabel, exact: true }).locator('button').filter({ hasText: new RegExp(`^${literal(M5_WORDS.views[view])}$`) }).first();
-  if ((await item.getAttribute('data-state', { timeout: 10_000 })) !== 'on') await item.click();
-  await expect(item, `the ${M5_WORDS.views[view]} view`).toHaveAttribute('data-state', 'on', { timeout: 5_000 });
+  const item = libraryHead(page).getByRole('radiogroup', { name: M5_WORDS.viewLabel, exact: true }).getByRole('radio', { name: M5_WORDS.views[view], exact: true });
+  if ((await item.getAttribute('aria-checked', { timeout: 10_000 })) !== 'true') await item.click();
+  await expect(item, `the ${M5_WORDS.views[view]} view`).toHaveAttribute('aria-checked', 'true', { timeout: 5_000 });
 }
 async function libraryKind(page: Page, kind: string | null) {
   await typeFilter(page).click();
