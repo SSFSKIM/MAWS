@@ -17,7 +17,8 @@
 // WR 49: deleted-target conversations are hidden in every status filter until explicitly revealed.
 // The word cut (docs/doperpowers/specs/2026-11-16-word-cut-design.md, M5; G391 to G398): the ×'s tooltip is Close; This
 // tab / All tabs only where the document has two tabs or more; the search's placeholder Search; the deleted-text toggle
-// "Deleted (N)", what it holds its tooltip; the empty lists in few words.
+// "Deleted (N)", what it holds its tooltip; the empty lists in few words. The pair review's fix wave: Deleted (N) is a
+// disclosure after the open threads, holding the deleted ones, and Resolved's toggle takes the same chevron.
 import { useEffect, useId, useRef, useState } from 'react';
 import { actorDisplay } from '@shared/artifacts/actor';
 import { Tip } from '../../../../renderer/src/ui/tip';
@@ -82,12 +83,16 @@ export function CommentsPanel({ doc, tabs, activeTab, activeThread, author, read
   // the word cut (G393): one tab has no scope to choose, so it is All tabs
   const scoped = tabs.length > 1;
   const inScope = scoped ? scope : 'all';
-  // WR 49: a resolved thread can also have a missing target, so filter by liveness, not just `orphan`.
-  const deleted = threads.filter((thread) => !thread.live).length;
-  const shown = threads.filter((thread) => (showDeleted || thread.live) && (inScope === 'all' || thread.tabId === activeTab) && matches(thread, needle));
-  const open = status === 'resolved' ? [] : shown.filter((thread) => thread.status === 'open');
-  const resolved = status === 'open' ? [] : shown.filter((thread) => thread.status === 'resolved');
-  const listed = [...open, ...(status === 'all' && !showResolved ? [] : resolved)];
+  const inView = (thread: ThreadState) => (status === 'all' || thread.status === status) && (inScope === 'all' || thread.tabId === activeTab) && matches(thread, needle);
+  // WR 49: a resolved thread can also have a missing target, so filter by liveness, not just `orphan`. The pair review's
+  // fix wave (G395): the deleted threads, open or resolved, are the Deleted disclosure's own, listed under it
+  const deleted = threads.filter((thread) => !thread.live && inView(thread));
+  const live = threads.filter((thread) => thread.live && inView(thread));
+  const open = live.filter((thread) => thread.status === 'open');
+  const resolved = live.filter((thread) => thread.status === 'resolved');
+  // the cards before the disclosures: the open threads, or the resolved ones where Resolved is the filter
+  const main = status === 'resolved' ? resolved : open;
+  const listed = [...main, ...(showDeleted ? deleted : []), ...(status === 'all' && showResolved ? resolved : [])];
 
   // the editor's active thread, scrolled into view when it changes (and when the panel opens on one)
   useEffect(() => {
@@ -140,26 +145,41 @@ export function CommentsPanel({ doc, tabs, activeTab, activeThread, author, read
         <input type="search" className="doc-rail-search" aria-label="Search comments" placeholder={W.searchPlaceholder} value={query} onChange={(event) => setQuery(event.target.value)} />
       </div>
       <div ref={body} className="doc-rail-body">
-        {deleted > 0 && (
-          <Tip content={W.deletedTip} description={W.deletedTip}>
-            <button type="button" className="doc-rail-section" aria-pressed={showDeleted} onClick={() => setShowDeleted(!showDeleted)}>
-              {W.deleted(deleted)}
-            </button>
-          </Tip>
-        )}
         {empty && <p className="doc-rail-empty">{emptyText}</p>}
-        {open.map(card)}
-        {status === 'resolved' && resolved.map(card)}
+        {main.map(card)}
+        {/* the pair review's fix wave (G395, G390): a disclosure after the cards it does not hold, its own under it */}
+        {deleted.length > 0 && (
+          <section className="doc-rail-fold" aria-label={W.deleted(deleted.length)}>
+            <Tip content={W.deletedTip} description={W.deletedTip}>
+              <button type="button" className="doc-rail-section" aria-expanded={showDeleted} onClick={() => setShowDeleted(!showDeleted)}>
+                {W.deleted(deleted.length)}
+                <Chevron />
+              </button>
+            </Tip>
+            {showDeleted && deleted.map(card)}
+          </section>
+        )}
         {status === 'all' && resolved.length > 0 && (
-          <section className="doc-rail-resolved" aria-label={`Resolved (${resolved.length})`}>
+          <section className="doc-rail-fold" aria-label={`Resolved (${resolved.length})`}>
             <button type="button" className="doc-rail-section" aria-expanded={showResolved} onClick={() => setShowResolved(!showResolved)}>
               Resolved ({resolved.length})
+              <Chevron />
             </button>
             {showResolved && resolved.map(card)}
           </section>
         )}
       </div>
     </aside>
+  );
+}
+
+// A disclosure's chevron, after its words (the app's counted fold, renderer/src/ui/counted-fold.tsx): it turns down while
+// its section is open (chrome.css).
+function Chevron() {
+  return (
+    <svg className="doc-rail-chevron" aria-hidden="true" viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round">
+      <path d="M6 3.5 10.5 8 6 12.5" />
+    </svg>
   );
 }
 

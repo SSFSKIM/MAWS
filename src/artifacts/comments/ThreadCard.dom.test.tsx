@@ -141,8 +141,8 @@ describe('the card’s forms', () => {
     expect(authors.map((a) => (a.querySelector('.thread-card-chip') as HTMLElement).style.background)).toEqual([`var(${actorDisplay(HUMAN).color})`, `var(${actorDisplay(SESSION).color})`]);
   });
 
-  // the word cut (G384): Resolve or Reopen shows on the card pointed at, holding the keyboard or active, over its top
-  // right; at rest an inactive card is its messages alone (the hover scope's rule in styles/app.css draws it)
+  // the word cut (G384): Resolve or Reopen shows on the card pointed at, holding the keyboard or active, over its first
+  // author line; at rest an inactive card is its messages alone (the hover scope's rule in styles/app.css draws it)
   it('draws Resolve and Reopen only on the card pointed at, focused or active', () => {
     const { card, view } = show();
     expect(card().hasAttribute('data-hover-scope')).toBe(true);

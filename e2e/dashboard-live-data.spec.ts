@@ -164,7 +164,9 @@ test('granted live dataset: the owner’s grant, Start and controls, the agent�
         await page.keyboard.press('Enter');
         const sheet = sheetOf(page);
         await expect(sheet).toBeVisible();
-        await expect(sheet.getByRole('button', { name: 'Close', exact: true })).toBeFocused();
+        // the word cut (M5's decision: the sheet takes the keyboard itself as it opens, so its ×'s tooltip waits for a Tab,
+        // as the app's popovers whose first control has a tooltip do, composer/frame/chip-style.ts's focusPopoverItself)
+        await expect(sheet, 'the sheet holds the keyboard as it opens').toBeFocused();
         const block = liveBlock(sheet);
         await expect(block.getByText(TOOL_NAME, { exact: true })).toBeVisible();
         await expect(block).toContainText('Not allowed');

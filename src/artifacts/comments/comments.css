@@ -1,11 +1,11 @@
 /* X36, the shared comment card (ThreadCard.tsx; P4-B1): app chrome wherever it is drawn (a document's margin and panel,
    a deck's or a design's pin popover), so it reads the app's tokens only. */
-/* a grid of one column, but for the first row, which keeps a second for the card's action (the word cut, G384): the
-   action's slot is always laid out, so it neither covers the quote or the first message nor moves them as it shows */
+/* one column: the quote and every message take the card's whole width. The card's action (Resolve or Reopen) is drawn over
+   the right end of its first author line (below), so nothing is laid out for it (the pair review's fix wave, G384) */
 .thread-card {
+  position: relative;
+  anchor-scope: --thread-head;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  align-items: start;
   gap: var(--space);
   padding: calc(var(--space) * 2);
   border: 1px solid var(--border);
@@ -100,37 +100,29 @@
   border-radius: var(--radius-sm);
   padding: var(--space) calc(var(--space) * 2);
 }
-.thread-card > * {
-  grid-column: 1 / -1;
+/* the word cut (G384), placed by the pair review's fix wave: Resolve or Reopen over the right end of the first message's
+   author line, which holds only a name, centred on it and masking what runs under it with the card's own ground; it
+   takes no space and moves no text as it shows. The hover scope's rule (styles/app.css) shows it on the card pointed at
+   or focused, the card shows it while active. Each card anchors its own (`anchor-scope`); a card with no message puts it
+   at its top right. It stays last in the card, after the reply field, so the Tab order is unchanged. */
+.thread-card > .thread-card-messages:first-of-type > .thread-card-message:first-child > .thread-card-author {
+  anchor-name: --thread-head;
 }
-.thread-card > :first-child {
-  grid-column: 1;
-}
-/* the word cut (G384): Resolve or Reopen in the first row's second column, beside the quote (or the first message); the
-   hover scope's rule (styles/app.css) shows it on the card pointed at or focused, the card shows it while active */
 .thread-card > .thread-card-actions {
-  grid-column: 2;
-  grid-row: 1;
+  position: absolute;
+  position-anchor: --thread-head;
+  top: calc(anchor(center, calc(var(--space) * 5)) - var(--space) * 3);
+  right: anchor(right, calc(var(--space) * 2));
   display: flex;
+  background: inherit;
+  border-radius: var(--radius-sm);
 }
-/* where the card draws no quote, its first row is the list of messages: only the first message sits beside the action,
-   and the replies under it take the card's whole width. The list spans the first row on the card's two columns (a
-   subgrid of them, over the action's cell, which holds no message) */
-.thread-card > .thread-card-messages:first-child {
-  grid-column: 1 / -1;
-  grid-row: 1;
-  display: grid;
-  grid-template-columns: subgrid;
-}
-.thread-card > .thread-card-messages:first-child > .thread-card-message {
-  grid-column: 1 / -1;
-}
-.thread-card > .thread-card-messages:first-child > .thread-card-message:first-child {
-  grid-column: 1;
+.thread-card > .thread-card-actions > .thread-card-button {
+  height: calc(var(--space) * 6);
 }
 /* the word cut (G388): a card whose passage is gone, where it draws no quote (a deck's or a design's pin popover) */
 .thread-card-removed {
-  align-self: flex-start;
+  justify-self: start;
   padding: 0 var(--space);
   font-size: var(--text-ui-sm);
   color: var(--fg-muted);

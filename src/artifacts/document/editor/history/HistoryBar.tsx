@@ -16,6 +16,7 @@ import { unboundExtras /* P3-E */, type DiffTab, type ExtraChange /* P3-E */, ty
 import type { HistoryController, Preview } from './controller';
 import { changesOf, goToChange } from './paint';
 import { HISTORY_COPY as W } from '../copy';
+import { MoreIcon } from '../../../ui/icons';
 
 interface Stop {
   tabId: string;
@@ -126,7 +127,7 @@ export function HistoryBar({ editor, preview, controller, onBack }: { editor: Ed
             <DropdownMenu.Root modal={false}>
               <DropdownMenu.Trigger asChild>
                 <NamedGlyph label={W.actionsName} className="doc-tool doc-tool-glyph" data-history-actions="">
-                  <span aria-hidden="true">…</span>
+                  <MoreIcon />
                 </NamedGlyph>
               </DropdownMenu.Trigger>
               <DropdownMenu.Portal>
