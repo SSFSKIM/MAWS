@@ -145,7 +145,8 @@ function NeedsYouItem({ row, labels, selected, tabStop, onFocus, onBlur, onKeyDo
           onAuxClick={(event) => event.button === 1 && open({ how: 'tab' })}
           className={`flex h-(--row-h) w-full cursor-default items-center gap-[7px] rounded-sm px-[9px] text-left outline-accent select-none hover:bg-bg-hover focus-visible:outline-2 focus-visible:-outline-offset-2 ${selected ? 'bg-bg-active' : ''}`}
         >
-          <span aria-hidden className={`shrink-0 ${greyed ? 'text-fg-faint' : 'text-warning'}`}>◐</span>
+          {/* the question sheet's C3 M4 (L5): a row whose waiting items are all sheet questions is calm, its mark in the info tone */}
+          <span aria-hidden data-tone={greyed ? 'greyed' : row.calm ? 'calm' : 'warning'} className={`shrink-0 ${greyed ? 'text-fg-faint' : row.calm ? 'text-info' : 'text-warning'}`}>◐</span>
           <span className={`min-w-0 flex-1 truncate text-ui ${greyed ? 'text-fg-muted' : machine.offline ? 'text-fg-faint' : 'text-fg'}`}>{title}</span>
           <MachineChip address={row.appSessionId} className="max-w-[25%]" />
           <span className="max-w-[30%] truncate text-ui-sm text-fg-muted">{project}</span>

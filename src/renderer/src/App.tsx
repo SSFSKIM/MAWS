@@ -90,6 +90,7 @@ import { EditorDialogs } from './tools/code';
 import { mawsTranscriptActions } from './tools/maws/actions';
 import { askSheetTool } from './tools/maws/ask/AskSheetTool';
 import { connectAsks } from './tools/maws/ask/connect';
+import { openSheet, sheetTool } from './tools/sheet/SheetTool'; // the question sheet's C3 M4
 import { connectPaneShows } from './tools/maws/panes/connect';
 import { registerTranscriptActions as registerMawsTranscriptActions } from './transcript';
 // E1 end
@@ -299,6 +300,12 @@ export function App() {
     registerPanelTool(askSheetTool);
   }, []);
   useEffect(() => connectAsks(), []);
+  // The question sheet's C3 M4: the side sheet beside it, registered once and never unregistered (C8a's rule above), and
+  // the one way a person's act shows it (a row's Open, a line of the "Waiting for you" card, a notice, Needs you)
+  useEffect(() => {
+    registerPanelTool(sheetTool);
+  }, []);
+  useEffect(() => registerMawsTranscriptActions({ openSheet }), []);
   // E1 end
   // E6 start: the Source control tool in the panel's "+" menu (and `show_pane`'s `source-control`), registered once and
   // never unregistered, as C8a's block does

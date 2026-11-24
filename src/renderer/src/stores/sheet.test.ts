@@ -7,7 +7,8 @@ import type { SheetModel, SheetSummary } from '@shared/sheet/model';
 import { fakeClient } from '../../../../test/support/fake-client';
 import { at, OTHER_MACHINE } from '../../../../test/support/machine';
 import { hostStatus } from '../test-support/host-status';
-import { connectSheets, resetSheetStore, selectSheetModel, selectSheetSession, useSheets, watchSheet } from './sheet';
+import { EMPTY_MEMORY } from '../sheet/memory';
+import { connectSheets, resetSheetStore, selectSheetMemory, selectSheetModel, selectSheetSession, updateSheetMemory, useSheets, watchSheet } from './sheet';
 
 const A = '5eed0000-0000-4000-8000-0000000000a1';
 const B = '5eed0000-0000-4000-8000-0000000000b2';
@@ -158,6 +159,40 @@ describe('watchSheet', () => {
     await fake.reply('sheet.read', { model: null, door: KNOWN });
     expect(selectSheetModel(useSheets.getState(), A)).toBeNull();
     unwatch();
+    off();
+  });
+});
+
+// M4 (§F, §G): each session's memory of its sheet, the components' through `onMemory`'s updates, which apply to the
+// memory as it stands at that moment; dropped with the session's record.
+describe('the memory', () => {
+  const draft = { revision: 1, picks: ['Earlier'], text: '', images: [] };
+
+  it('is empty for a session it never saw, and holds an update applied to the memory as it stands', () => {
+    expect(selectSheetMemory(useSheets.getState(), A)).toBe(EMPTY_MEMORY);
+    updateSheetMemory(A, (current) => ({ ...current, drafts: new Map([['q1', draft]]) }));
+    updateSheetMemory(A, (current) => ({ ...current, seen: new Map([['q1', 1]]) })); // a second update keeps the first's draft
+    const memory = selectSheetMemory(useSheets.getState(), A);
+    expect(memory.drafts.get('q1')).toEqual(draft);
+    expect(memory.seen.get('q1')).toBe(1);
+    expect(selectSheetMemory(useSheets.getState(), B)).toBe(EMPTY_MEMORY);
+  });
+
+  it('leaves the store as it was for an update that changes nothing', () => {
+    const before = useSheets.getState();
+    updateSheetMemory(A, (current) => current);
+    expect(useSheets.getState()).toBe(before);
+  });
+
+  it('is dropped when the session’s record goes, and kept while it changes', async () => {
+    const fake = fakeClient();
+    const off = connectSheets(fake.client);
+    await fake.reply('sheet.list', { sessions: [summary(A)], door: { known: false } });
+    updateSheetMemory(A, (current) => ({ ...current, drafts: new Map([['q1', draft]]) }));
+    fake.event('sheet.changed', { session: A, summary: summary(A, { seq: 2 }) });
+    expect(selectSheetMemory(useSheets.getState(), A).drafts.size).toBe(1);
+    fake.event('sheet.changed', { session: A, summary: null });
+    expect(selectSheetMemory(useSheets.getState(), A)).toBe(EMPTY_MEMORY);
     off();
   });
 });

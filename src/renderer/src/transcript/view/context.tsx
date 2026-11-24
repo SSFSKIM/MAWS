@@ -43,6 +43,11 @@ export interface TranscriptActions {
   openDelivered(appSessionId: AppSessionId, path: string): Promise<string | null>; // files.openExternal; what to show inline when it was refused, null when opened
   revealDelivered(appSessionId: AppSessionId, path: string): Promise<string | null>; // files.reveal; the same
   // E1 end
+  // The question sheet's C3 M4 (docs/doperpowers/plans/2026-11-23-question-sheet-c3-maws-app.md §H): the side column's
+  // sheet of the session, at that question (null: at none), shown because the person asked (a row's Open, a line of the
+  // "Waiting for you" card, a notice's button, Needs you). The app's opens R/tools/sheet's tool; nothing else does (O-17).
+  // A no-op in NO_ACTIONS: a mount with no side column (the desk) draws no Open.
+  openSheet(appSessionId: AppSessionId, questionId: string | null): void;
   openSideThread(parentAppSessionId: AppSessionId, childAppSessionId: AppSessionId): void; // E3: the Side pane on that thread (side/actions.ts, registered from App.tsx's E3 block)
   // E7 start: the Reply under a message from another session and the Message on a listing row (tools/agents/actions.ts,
   // registered with C8b's callbacks): one steer asking the session to SendMessage the text, and the walk of that ask
@@ -143,6 +148,7 @@ export const NO_ACTIONS: TranscriptActions = {
   loadSpill: () => Promise.reject(new Error('loadSpill: no adapter supplied')),
   openAsk: noop, openDelivered: () => Promise.resolve(null), revealDelivered: () => Promise.resolve(null), // E1
   openSideThread: noop, // E3
+  openSheet: noop, // the question sheet's C3 M4
   replyToPeer: () => Promise.resolve(), peerReplies: NO_PEER_REPLIES, // E7
   openArtifact: noop, // E2; P3-L M6b
   // E4d start

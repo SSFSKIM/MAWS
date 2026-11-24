@@ -5,6 +5,7 @@ import type { AttentionItem } from '@shared/graph/attention';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { ForeignHolder, SessionRecord } from '@shared/graph/session';
 import { isActionable, waits } from '@shared/attention/kinds';
+import { isSheetItem } from '@shared/attention/sheet-item';
 import { displayTitle, listedTitle } from '../sessions/title';
 
 // The kinds and the one predicate of waiting are shared with main's notifier and dock badge (`@shared/attention/kinds`,
@@ -13,7 +14,10 @@ export { ACTIONABLE_KINDS, isActionable } from '@shared/attention/kinds';
 
 // P5 O7 M6: `greyed`, a row of a machine whose attention main holds greyed (its link went down, and no snapshot has come
 // since): drawn, never counted.
-export interface NeedsYouRow { appSessionId: AppSessionId; oldest: AttentionItem; count: number; tier: 1 | 2; greyed?: true }
+// The question sheet's C3 M4 (the look's L5): `calm`, a row whose waiting items are all sheet questions, running or
+// stopped (the composite's §8.1: no sheet question marks a session as stopped on the human): its mark is drawn in the
+// calm tone. Counted as any row is.
+export interface NeedsYouRow { appSessionId: AppSessionId; oldest: AttentionItem; count: number; tier: 1 | 2; greyed?: true; calm?: true }
 
 // P5 O7 M6 (docs/doperpowers/plans/2026-10-28-p5-o7-remote-lane-b.md, M6 "Counting without a record"): what stands in for
 // a record (another machine's listed rows, by address) and the sessions whose items are greyed.
@@ -51,7 +55,8 @@ export function needsYou(
     const record = records.get(appSessionId);
     if (record ? record.archived : !listed.has(appSessionId)) continue;
     const waiting = waitingItem(items);
-    if (waiting) rows.push({ appSessionId, ...waiting, ...(greyed.has(appSessionId) && { greyed: true as const }) });
+    const calm = items.every((item) => !waits(item) || isSheetItem(item.id));
+    if (waiting) rows.push({ appSessionId, ...waiting, ...(greyed.has(appSessionId) && { greyed: true as const }), ...(calm && { calm: true as const }) });
   }
   const title = (id: AppSessionId) => {
     const record = records.get(id);

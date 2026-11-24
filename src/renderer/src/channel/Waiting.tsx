@@ -3,8 +3,12 @@
 // feeds), each the request card attention shows, under its session's title and machine chip. Answering goes through the
 // card's own path, so a card answered here is answered everywhere; a MAWS ask answers in place too, through the Question
 // sheet's body (`askInPlace`), not by opening its sheet.
+// The question sheet's C3 M4 (docs/doperpowers/plans/2026-11-23-question-sheet-c3-maws-app.md §H): a session's sheet
+// questions together are one card, the session's sheet in place, compact, where its first one stands; a session whose
+// sheet this window cannot read keeps a card per question, as today.
 import type { AttentionItem } from '@shared/graph/attention';
 import type { AppSessionId } from '@shared/graph/ids';
+import { isSheetItem } from '@shared/attention/sheet-item';
 import { MachineChip } from '../app/MachineChip';
 import { ipc } from '../ipc/client';
 import { RequestCard } from '../request-card';
@@ -12,6 +16,7 @@ import { displayTitle, listedTitle } from '../sessions/title';
 import { useAttention } from '../stores/attention';
 import { selectOrgIndex } from '../stores/org-projects';
 import { useSessions } from '../stores/sessions';
+import { SheetInPlace } from '../tools/sheet/SheetInPlace';
 import { CHANNEL } from './copy';
 import { waitingFor } from './project';
 
@@ -27,9 +32,11 @@ export function Waiting({ project }: { project: string }) {
   return (
     <section data-channel-waiting aria-label={CHANNEL.waiting} className="flex flex-col gap-3 border-t border-border pt-4">
       <h2 className="m-0 text-ui-sm font-medium text-fg-muted">{CHANNEL.waiting}</h2>
-      {items.map((item) => (
-        <WaitingCard key={item.id} item={item} />
-      ))}
+      {items.map((item, at) => {
+        if (!isSheetItem(item.id)) return <WaitingCard key={item.id} item={item} />;
+        const first = items.findIndex((other) => other.appSessionId === item.appSessionId && isSheetItem(other.id)) === at;
+        return first ? <SheetCard key={`sheet:${item.appSessionId}`} appSessionId={item.appSessionId} items={items.filter((other) => other.appSessionId === item.appSessionId && isSheetItem(other.id))} /> : null;
+      })}
     </section>
   );
 }
@@ -44,6 +51,24 @@ function WaitingCard({ item }: { item: AttentionItem }) {
       </div>
       <RequestCard item={item} request={null} placement="inline" paneIndex={null} askInPlace />
     </div>
+  );
+}
+
+// One session's sheet questions: its sheet in place under the session's title, else a card per question.
+function SheetCard({ appSessionId, items }: { appSessionId: AppSessionId; items: AttentionItem[] }) {
+  const title = useSessionTitle(appSessionId);
+  return (
+    <SheetInPlace
+      appSessionId={appSessionId}
+      className="flex min-w-0 flex-col gap-1.5"
+      head={
+        <div className="flex min-w-0 items-baseline gap-1.5 text-ui-sm">
+          <span className="truncate font-medium text-fg">{title}</span>
+          <MachineChip address={appSessionId} />
+        </div>
+      }
+      fallback={items.map((item) => <WaitingCard key={item.id} item={item} />)}
+    />
   );
 }
 

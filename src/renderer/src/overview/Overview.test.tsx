@@ -1,4 +1,4 @@
-import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { SessionEvent } from '@shared/graph/events';
@@ -14,13 +14,18 @@ import { accessibleDescription } from '../test-support/accessible-text';
 import { TEST_MACHINE } from '../../../../test/support/machine';
 import { formatClock } from '@shared/app/date-format'; // L129
 import type { AppSessionId } from '@shared/graph/ids'; // P5 O7 M6
-import { addressOf } from '@shared/machine/address';
+import { addressOf, bareOf } from '@shared/machine/address';
 import { item, record, remoteRow } from '../../../../test/support/builders';
 import { OTHER_MACHINE } from '../../../../test/support/machine';
 import { Toolbar } from '../app/Toolbar';
 import { registerRemoteOpener } from '../sessions/remote-openers';
 import { useAttention } from '../stores/attention';
 import { useMachines } from '../stores/machines';
+import { ipc } from '../ipc/client'; // the question sheet's C3 M4
+import { CLASH, FIXTURE, sheetOf } from '../sheet/test-support/questions';
+import { connectSheets, resetSheetStore } from '../stores/sheet';
+import { vi } from 'vitest';
+vi.mock('../transcript/view/markdown/Markdown', () => ({ Markdown: ({ markdown }: { markdown: string }) => <div data-markdown="">{markdown}</div> }));
 
 const nine = scenarioFile('nine-sessions');
 const idOf = (title: string) => pageScenario(nine).sessions.find((r) => r.title.text === title)!.appId; // P5 O6 M2: the page's id
@@ -33,6 +38,7 @@ const card = (title: string) => screen.getByRole('article', { name: title });
 
 beforeEach(() => {
   resetShellStores();
+  resetSheetStore();
   fillStores(nine);
   window.maws = fakeClient({ 'attention.request': ({ requestId }: { requestId: string }) => ({ event: requests[requestId] ?? null }) }).client as unknown as PreloadBridge;
 });
@@ -274,3 +280,31 @@ describe('a released session’s card', () => {
   });
 });
 // C12 end
+
+// The question sheet's C3 M4 (§H; frame 5): where the card would mount a request card for a sheet question, the session's
+// sheet questions together mount one compact sheet, a stopped session's too; the transcript's Markdown as text.
+describe('a session whose sheet questions wait', () => {
+  const SHEET = sheetOf([CLASH, FIXTURE]);
+  const asked = (appSessionId: AppSessionId, question: string, minute: number) =>
+    item(appSessionId, 'async_input', `2026-09-28T07:0${minute}:00.000Z`, { id: addressOf(TEST_MACHINE, `sheet:${SHEET.session}:${question}`) as never, request: { requestId: question as never, toolUseId: 'toolu_sheet' as never, taskId: null, agentId: null } });
+
+  function scene(holder: 'none' | 'self') {
+    const id = idOf('Fix sidebar drag');
+    const summary = { session: SHEET.session, appSessionId: bareOf(id), title: null, live: holder !== 'none', seq: 1, open: 2, queued: 0, pending: 0, hidden: 0, oldestAskedAt: null, unreadable: false };
+    window.maws = fakeClient({ 'sheet.list': { sessions: [summary], door: { known: false } }, 'sheet.read': { model: SHEET, door: { known: false } } }).client as unknown as PreloadBridge;
+    if (holder === 'none') act(() => useSessions.setState((s) => ({ records: new Map(s.records).set(id, { ...s.records.get(id)!, holder: { kind: 'none' } }) })));
+    act(() => useAttention.getState().applyChanged({ appSessionId: id, items: [asked(id, 'q4', 1), asked(id, 'q7', 2)] }, TEST_MACHINE));
+    offs.push(connectSheets(ipc));
+    return id;
+  }
+
+  it.each(['self', 'none'] as const)('mounts one compact sheet a session, its questions folded to their lines (holder %s)', async (holder) => {
+    scene(holder);
+    render(<Overview paneIndex={0} />);
+    const fix = card('Fix sidebar drag');
+    await waitFor(() => expect(fix.querySelectorAll('[data-sheet-in-place]')).toHaveLength(1));
+    expect(fix.querySelectorAll('[data-sheet-session][data-density="compact"]')).toHaveLength(1);
+    expect([...fix.querySelectorAll('[data-sheet-question]')].map((q) => q.getAttribute('data-sheet-question'))).toEqual(['q4', 'q7']);
+    expect(fix.querySelectorAll('[data-request-card]')).toHaveLength(0);
+  });
+});

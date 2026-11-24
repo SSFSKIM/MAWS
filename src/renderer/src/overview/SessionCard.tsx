@@ -8,6 +8,9 @@
 // P5 O7 M6 (M6c fix wave 1): another machine's session with no record (no tab was opened) waiting in Needs you is carded
 // from what the page has, its listing and its item: the glyph, the title, its machine in the project's place, what it
 // waits for and the item's summary; no branch, digest or footer. A click opens it through its lane's opener (M2's pane).
+// The question sheet's C3 M4 (docs/doperpowers/plans/2026-11-23-question-sheet-c3-maws-app.md §H; frame 5): where the
+// request the card would mount is a sheet question, the session's sheet stands there instead, compact, once: a stopped
+// session's too, since a sheet is answered without its process (an answer is queued).
 import { useEffect, type KeyboardEvent, type MouseEvent } from 'react';
 import { Tip } from '../ui/tip';
 import type { AttentionItem } from '@shared/graph/attention';
@@ -30,6 +33,8 @@ import { previewLine } from '@shared/owner/preview'; // P5 O7 M6
 import { isActionable } from '@shared/attention/kinds'; // P5 O7 M6
 import { useMachineMark } from '../app/machine-mark'; // P5 O7 M6
 import { openListed } from '../sessions/remote-openers'; // P5 O7 M6
+import { isSheetItem } from '@shared/attention/sheet-item'; // the question sheet's C3 M4
+import { SheetInPlace } from '../tools/sheet/SheetInPlace';
 
 type PaneIndex = 0 | 1;
 
@@ -56,7 +61,8 @@ export function SessionCard({ appSessionId, paneIndex, showProject, stop, onFocu
   if (!record) return listed ? <ListedCard listed={listed} showProject={showProject} stop={stop} onFocus={onFocus} onKeyDown={onKeyDown} /> : null;
 
   const waiting = waitingItem(pending);
-  const request = controlled && waiting?.tier === 1 ? waiting.oldest : null;
+  const asked = waiting?.tier === 1 && isSheetItem(waiting.oldest.id) ? waiting.oldest : null; // C3 M4: a sheet question first
+  const request = controlled && waiting?.tier === 1 && asked === null ? waiting.oldest : null;
   const title = displayTitle(record);
   const branch = branchLabel(workingBranch(record)); // W9 (H2); UX wave U8c-2: the working folder's
   const facts = cardFacts(digest).join(' · ');
@@ -95,6 +101,7 @@ export function SessionCard({ appSessionId, paneIndex, showProject, stop, onFocu
           </p>
         )}
         {request && <CardRequest item={request} paneIndex={paneIndex} />}
+        {asked && <SheetInPlace appSessionId={appSessionId} className={REQUEST_FRAME} fallback={controlled && <CardRequest item={asked} paneIndex={paneIndex} />} />}
       </article>
     </Tip>
   );
@@ -141,12 +148,14 @@ function ListedCard({ listed, showProject, stop, onFocus, onKeyDown }: Omit<Sess
   );
 }
 
+const REQUEST_FRAME = 'mt-1 rounded-sm border border-border bg-bg p-2.5';
+
 function CardRequest({ item, paneIndex }: { item: AttentionItem; paneIndex: PaneIndex }) {
   const Card = useSlot('requestCard');
   const request = useAttention((s) => s.requests.get(item.id) ?? null);
   useEffect(() => void useAttention.getState().loadRequest(ipc, item), [item]);
   return (
-    <div className="mt-1 rounded-sm border border-border bg-bg p-2.5">
+    <div className={REQUEST_FRAME}>
       {/* eslint-disable-next-line react-hooks/static-components -- registered once at composition, not created in render */}
       <Card item={item} request={request} placement="card" paneIndex={paneIndex} />
     </div>

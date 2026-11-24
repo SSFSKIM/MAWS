@@ -25,6 +25,9 @@ import { fillStores, resetShellStores } from '../test-support/shell-stores';
 import { resetAskSheets } from '../tools/maws/ask/store';
 import { ChannelView } from './ChannelView';
 import { useChannelTitle } from './title';
+import { ipc } from '../ipc/client'; // the question sheet's C3 M4
+import { CLASH, FIXTURE, sheetOf } from '../sheet/test-support/questions';
+import { connectSheets, resetSheetStore } from '../stores/sheet';
 
 const SMNS = '1f0e2d3c-4b5a-4968-8776-a5b4c3d2e1f0';
 const KEY = `smns:${SMNS}` as OrgKey;
@@ -387,6 +390,29 @@ describe('Waiting on you', () => {
       ],
     }]));
     expect(fake.invoked('session.answer')).toEqual([]);
+  });
+
+  // The question sheet's C3 M4 (§H): a session's sheet questions together are one card, its sheet in place, compact
+  it('holds one compact sheet for a session’s sheet questions, beside the other cards', async () => {
+    const SHEET = sheetOf([CLASH, FIXTURE]);
+    const asked = (question: string) =>
+      ({ ...askItemFor(askOpened({ requestId: question as never }), at(mine.appId)), id: at(`sheet:${SHEET.session}:${question}`) as never, kind: 'async_input' as const, request: { requestId: question as never, toolUseId: 'toolu_sheet' as never, taskId: null, agentId: null } });
+    useAttention.getState().applyChanged({ appSessionId: at(mine.appId), items: [askItemFor(event, at(mine.appId)), asked('q4'), asked('q7')] }, TEST_MACHINE);
+    const summary = { session: SHEET.session, appSessionId: mine.appId, title: null, live: true, seq: 1, open: 2, queued: 0, pending: 0, hidden: 0, oldestAskedAt: null, unreadable: false };
+    install({ 'attention.request': { event }, 'maws.asks.list': { asks: [] }, 'sheet.list': { sessions: [summary], door: { known: false } }, 'sheet.read': { model: SHEET, door: { known: false } } });
+    const off = connectSheets(ipc);
+    try {
+      render(<ChannelView project={SMNS} />);
+      await act(() => fake.reply('org.channel.open', opened()));
+      const waiting = stream().querySelector<HTMLElement>('[data-channel-waiting]')!;
+      await waitFor(() => expect(waiting.querySelectorAll('[data-sheet-in-place]')).toHaveLength(1));
+      expect(waiting.querySelectorAll('[data-channel-card]')).toHaveLength(1); // the ask's
+      expect([...waiting.querySelectorAll('[data-sheet-question]')].map((q) => q.getAttribute('data-sheet-question'))).toEqual(['q4', 'q7']);
+      expect(within(waiting.querySelector<HTMLElement>('[data-sheet-in-place]')!).getByText('Release notes')).toBeTruthy();
+    } finally {
+      off();
+      resetSheetStore();
+    }
   });
 });
 

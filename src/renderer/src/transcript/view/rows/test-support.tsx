@@ -38,6 +38,7 @@ export function spyActions(): TranscriptActions {
     loadSpill: NO_ACTIONS.loadSpill,
     openAsk: vi.fn(), openDelivered: vi.fn(async () => null), revealDelivered: vi.fn(async () => null), // E1
     openSideThread: vi.fn(), // E3
+    openSheet: vi.fn(), // the question sheet's C3 M4
     replyToPeer: vi.fn(async () => {}), peerReplies: NO_ACTIONS.peerReplies, // E7
     openArtifact: vi.fn(), // E2; P3-L M6b
     // E4d start

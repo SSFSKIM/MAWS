@@ -6,13 +6,18 @@
 // A session whose transcript is not mounted yet (or still reads its history) has the request remembered, and shown by the
 // first transcript of the session to become ready, where `show` checks it again. The remembered request belongs to the
 // navigation that asked for it: the person moving to another session lets it go, and so does any later call.
+// The question sheet's C3 M4 (docs/doperpowers/plans/2026-11-23-question-sheet-c3-maws-app.md §H): a sheet question is
+// in no transcript; its way is the session's sheet, at the question (the transcript actions' `openSheet`), which every
+// caller reaches by the person's act once it has shown the session.
 import type { AppSessionId, AttentionId } from '@shared/graph/ids';
+import { questionOfItem } from '@shared/attention/sheet-item';
 import { openCardSession, useFloatingCard } from '../shell/floating';
 import { selectWaitingRequests, useAttention } from '../stores/attention';
 import { panelInMain } from '../app/regions';
 import { pageOpen, useLayout } from '../stores/layout';
 import { currentSet, floatingPane } from '../stores/layout-model';
 import { useNotices } from '../stores/notices';
+import { registeredActions } from '../transcript/view/registry';
 import { waitingViewsOf, whenWaitingViewMounts } from '../transcript/view/waiting-view';
 
 const GONE_COPY = 'That request is no longer waiting';
@@ -51,6 +56,8 @@ export function showWaiting(appSessionId: AppSessionId, attentionId: AttentionId
   forget(); // any later call replaces what an earlier one left remembered, whatever it finds
   const id = attentionId ?? selectWaitingRequests(useAttention.getState(), appSessionId)[0]?.id ?? null;
   if (id === null) return; // nothing waits: nothing to show, and nothing was named that could be gone
+  const question = questionOfItem(id);
+  if (question !== null) return registeredActions().openSheet(appSessionId, question.questionId);
   const views = waitingViewsOf(appSessionId);
   if (views.length > 0) {
     // Every mounted transcript of the session shows it (two views of one session are rare: a split showing it twice);

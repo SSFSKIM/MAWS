@@ -29,6 +29,32 @@ describe('a terminal session’s asynchronous question', () => {
   });
 });
 
+// The question sheet's C3 M4 (the look's L5; the composite's §8.1): a row whose waiting items are all sheet questions is
+// calm, its session running or stopped (no sheet question marks a session as stopped on the human); any other item
+// waiting keeps today's tone. Counted as any row is.
+describe('a session whose waiting items are sheet questions', () => {
+  const SHEET = '5eed0000-0000-4000-8000-000000000042';
+  const asked = (id: string, question: string, at = '2026-11-24T10:00:00Z') => item(id, 'async_input', at, { id: `sheet:${SHEET}:${question}` as AttentionItem['id'] });
+  const rowOf = (items: AttentionItem[], holder: SessionRecord['holder']) => needsYou(new Map([['s' as AppSessionId, items]]), new Map([['s' as AppSessionId, record('s', { holder })]]))[0];
+  const STOPPED: SessionRecord['holder'] = { kind: 'none' };
+  const RUNNING: SessionRecord['holder'] = { kind: 'terminal', pid: 7 };
+
+  it('is calm stopped and running, and counts every question', () => {
+    for (const holder of [STOPPED, RUNNING]) {
+      expect(rowOf([asked('s', 'q1'), asked('s', 'q2')], holder), holder.kind).toMatchObject({ calm: true, count: 2, tier: 1 });
+    }
+  });
+
+  it('keeps today’s tone with any other item waiting, stopped or running; an item that no longer waits does not count against it', () => {
+    for (const holder of [STOPPED, RUNNING]) {
+      expect(rowOf([asked('s', 'q1'), item('s', 'permission', '2026-11-24T11:00:00Z')], holder)?.calm, holder.kind).toBeUndefined();
+      expect(rowOf([asked('s', 'q1'), item('s', 'held_peer_message', '2026-11-24T11:00:00Z')], holder)?.calm, holder.kind).toBeUndefined();
+      expect(rowOf([item('s', 'async_input', '2026-11-24T11:00:00Z')], holder)?.calm, `a terminal's own async question, ${holder.kind}`).toBeUndefined();
+    }
+    expect(rowOf([asked('s', 'q1'), item('s', 'permission', '2026-11-24T11:00:00Z', { state: 'delivered' })], STOPPED)?.calm).toBe(true);
+  });
+});
+
 describe('needs-you ordering', () => {
   it('lists one row per waiting session, longest wait first', () => {
     expect(needsYou(atLoad(), records).map((row) => titleOf(row.appSessionId))).toEqual([
