@@ -1,0 +1,5 @@
+{
+ "name": "maws-tell",
+ "version": "1.0.0",
+ "description": "MAWS's own channel to a session's agents: the app tells one of them what the person wrote, with the engine's own send. Loaded by MAWS into the sessions it runs; no model is offered its tool."
+}

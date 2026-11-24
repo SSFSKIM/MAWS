@@ -6,8 +6,9 @@
 // and released through `panel.transcript('A').release(n)` with counts the fixture measures, never guessed. Every case
 // that loads a fixture does it through `load` (C8a's `loadTranscript`, then `agents.feed`); `releaseTo` is C8a's, the
 // seq of the first event held back.
-import { existsSync, mkdirSync, readFileSync } from 'node:fs';
-import { homedir } from 'node:os';
+import { randomUUID } from 'node:crypto';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { expect, type Locator, type Page } from '@playwright/test';
 import type { EngineSessionStatus } from '../src/shared/engine/status';
@@ -20,7 +21,10 @@ import { nextCronMatch, parseCron } from '../src/shared/engine/cron'; // E7
 import { formatIn } from '../src/renderer/src/tools/agents/model/elapsed'; // E7
 import { PANEL_CHILD_TAIL } from '../test/support/panel-child-tail';
 import { addressed } from './support/address';
-import { REPO_ROOT, test, type MawsLaunch } from './support/launch';
+import { launchMaws, REPO_ROOT, test, type MawsLaunch } from './support/launch';
+import { invoke, value } from './support/c7-replay';
+import { sidebarRow } from './support/sidebar';
+import { stubLaunchReady, writeStubEngine } from './support/stub-engine';
 import { latencyBudgets } from './support/latency';
 import { otherThemeColours } from './support/panel-support';
 import { hideSurfaces, openSurface, sessionCard, sessionCards, showSessionCards, sideColumn, surface } from './support/shell';
@@ -1258,3 +1262,52 @@ test.describe('E7: the orchestration views', () => {
   });
 });
 // E7 end
+
+// The direct tell (docs/charter.md, Decision Log 2026-11-24): a live launch on the stub engine replaying the shipped mod's
+// probe of a running background child, derived for a replay (spikes/protocol-probe/uxwave-tell-replay.mjs; the engine
+// host's own run of it is src/engine-host/tell-replay.test.ts). The session's status says `tell` once system/init lists
+// the mod's server; the drill-in's box names no parent, its Send writes the host's call the replay holds for, and its
+// line reads Sent.
+const TELL_REPLAY = 'spikes/protocol-probe/fixtures/uxwave/uxwave-tell-builtin-replay.jsonl';
+const TELL_PROMPT = 'Start the child.'; // the recorded first message (the replay plays on at the host's user frame)
+const TELL_TYPED = 'Also list the folder'; // the text the replay's host call carries after the tell's line
+test('the direct tell: a running background child of a stub-engine session takes a message from its box, which reads Sent', async () => {
+  const root = realpathSync(mkdtempSync(join(tmpdir(), 'maws-tell-')));
+  const userData = join(root, 'ud');
+  const repo = join(root, 'repo');
+  mkdirSync(repo, { recursive: true });
+  mkdirSync(userData, { recursive: true });
+  // a session C4 files from a transcript in the engine store, so the launch has a record (as e2e/daemon-idle.spec.ts does)
+  const engineId = randomUUID();
+  const project = join(userData, 'claude-config', 'projects', repo.replace(/[^a-zA-Z0-9]/g, '-'));
+  mkdirSync(project, { recursive: true });
+  const seeded = { parentUuid: null, isSidechain: false, type: 'user', message: { role: 'user', content: 'direct tell' }, uuid: randomUUID(), timestamp: '2026-11-24T10:00:00.000Z', cwd: repo, sessionId: engineId, version: '2.1.331', userType: 'external' };
+  writeFileSync(join(project, `${engineId}.jsonl`), `${JSON.stringify(seeded)}\n`);
+  const stub = writeStubEngine(root);
+  const agent = readFileSync(join(REPO_ROOT, TELL_REPLAY), 'utf8').split('\n').filter(Boolean).map((line) => JSON.parse(line) as { frame: { subtype?: string; task_id?: string } }).find((row) => row.frame.subtype === 'task_started')!.frame.task_id!;
+  // the app's own window, not the harness page the group's MAWS_HARNESS=1 loads (whose sidebar lists no real project)
+  const maws = await launchMaws({ userData, keepConfigHome: true, syntheticEngineBin: stub.bin, env: { MAWS_E2E_ENGINE_BIN: stub.bin, MAWS_HARNESS: '0' } });
+  try {
+    const { page } = maws;
+    let id = '';
+    await expect.poll(async () => (id = value(await invoke(page, 'session.list', {})).sessions.find((s) => s.engineSessionId === engineId)?.appId ?? ''), { timeout: 20_000, message: 'the seeded session has a record' }).not.toBe('');
+    await stubLaunchReady(page, stub, id, TELL_REPLAY, { cwd: repo });
+    value(await invoke(page, 'session.send', { appSessionId: id as never, content: TELL_PROMPT }));
+    await expect.poll(async () => value(await invoke(page, 'session.status', { appSessionId: id as never })).tell === true, { timeout: 20_000, message: 'the status says the mod is there' }).toBe(true);
+    await (await sidebarRow(page, { appSessionId: id })).click();
+    await openSurface(page, 'Agents');
+    const panel = page.locator('[data-region="panel"]');
+    await panel.locator(`[data-agent-row="${agent}"]`).click();
+    const drill = panel.locator('[data-view="agent"]');
+    const box = drill.locator('textarea');
+    await expect(box).toBeEnabled({ timeout: 15_000 });
+    await expect(drill.locator('[data-key-sink="composer"] label')).toHaveText(/^Message /); // no parent named: not `Relay via …`
+    await box.fill(TELL_TYPED);
+    await drill.getByRole('button', { name: 'Send', exact: true }).click();
+    await expect(drill.locator('[data-part="relay-line"]')).toHaveText('Sent', { timeout: 15_000 });
+    await expect(box).toHaveValue('');
+  } finally {
+    await maws.cleanup();
+    rmSync(root, { recursive: true, force: true });
+  }
+});

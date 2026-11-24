@@ -1531,3 +1531,56 @@ test('tickets 421/420, a session from before resumed under the new list: the eng
  }
  assert.deepEqual(meta421(rows,'server_calls')[0].calls.map(c=>c.name),['ask']); // and the call still reaches the new server
 });
+// The direct subagent tell (findings-uxwave-tell-direct.txt; scenarios/pass3/uxwave-tell-direct.mjs): a mod loaded with
+// --plugin-dir registers a tool whose tool.run hook calls $.session.send({ to: { agentId } }), and the host calls it
+// through mcp_call, against the scripted Messages API stand-in (stub-api.mjs, nothing spent) under a scratch config home.
+const loadTell=n=>readFileSync(new URL('./fixtures/uxwave/uxwave-tell-'+n+'.jsonl',import.meta.url),'utf8').trim().split('\n').map(JSON.parse);
+const metaTell=(rows,event)=>rows.filter(r=>r.direction==='meta'&&r.frame.event===event).map(r=>r.frame);
+const tellAnswers=rows=>metaTell(rows,'tell_answer').map(f=>f.answer.error??f.answer.response);
+const toldTell=rows=>metaTell(rows,'stub_requests')[0].requests.some(r=>r.child&&r.told);
+const DELIVERED='The tool did not run: The result went to the host that asked for this call.';
+const askedTell=rows=>metaTell(rows,'permission_asked').length;
+test('the direct tell: a plain mcp_call never runs the mod\'s tool.run hook; a checked one does, after asking the host',()=>{
+ for(const n of ['register','register-open'])assert.match(tellAnswers(loadTell(n))[0],/^maws-tell-probe registered the tool tell but no hook answered this call/);
+ const open=loadTell('register-open');
+ assert.match(tellAnswers(open)[1],/^The tool did not run: TELL_REFUSED Agent "a0000000000000000" could not be resumed/);
+ assert.equal(askedTell(open),1);
+ assert.equal(tellAnswers(loadTell('register'))[1],'The tool did not run: Permission to use mcp__maws-tell-probe__tell has been denied.'); // a deny rule refuses the host's call too
+ for(const n of ['register','register-open'])assert.deepEqual(metaTell(loadTell(n),'ui_message')[0].answer.response,{handled:false});
+});
+test('the direct tell: tool.offer keeps the tool from the model, the hook refuses a call that is not the host\'s, and the host\'s call still runs',()=>{
+ const hidden=loadTell('hidden');
+ assert.equal(metaTell(hidden,'named_in_requests')[0].named[0],false);
+ assert.match(metaTell(hidden,'model_call_result')[0].results[0].content,/No such tool available: mcp__maws-tell-probe__tell/);
+ assert.match(tellAnswers(hidden)[0],/^The tool did not run: TELL_REFUSED /);
+ const guard=loadTell('guard');
+ assert.equal(metaTell(guard,'named_in_requests')[0].named[0],true);
+ assert.equal(metaTell(guard,'model_call_result')[0].results[0].content,'TELL_NOT_HOST toolu_tell_model');
+ assert.match(tellAnswers(guard)[0],/^The tool did not run: TELL_REFUSED /);
+});
+test('the direct tell reaches a running background child, a waited foreground child and a finished one; a stopped one refuses',()=>{
+ for(const n of ['live-bg','live-fg','live-fg-waited','ended']){const rows=loadTell(n);assert.deepEqual(tellAnswers(rows),[DELIVERED]);assert.equal(toldTell(rows),true,n);}
+ const started=n=>loadTell(n).filter(r=>r.frame.subtype==='task_started').map(r=>r.frame.is_backgrounded);
+ assert.deepEqual(started('live-fg'),[true]); // run_in_background false is launched in the background on this engine
+ assert.deepEqual(started('live-fg-waited'),[false]);
+ assert.equal(started('ended').length,2); // the resume starts the agent again
+ const stopped=loadTell('stopped');
+ assert.match(tellAnswers(stopped)[0],/^The tool did not run: TELL_REFUSED Agent "\w+" was stopped and was not resumed/);
+ assert.equal(toldTell(stopped),false);
+});
+test('the direct tell in plan and dontAsk mode: refused unless the mod allows the host\'s own call at tool.check, which also spares the ask',()=>{
+ for(const n of ['mode-plan','mode-plan-check']){const rows=loadTell(n);assert.match(tellAnswers(rows)[0],/requires interactive approval, and permission prompts are not available/);assert.equal(toldTell(rows),false);}
+ const dontAsk=loadTell('mode-dontask');assert.match(tellAnswers(dontAsk)[0],/denied because Claude Code is running in don't ask mode/);assert.equal(toldTell(dontAsk),false);
+ for(const n of ['mode-dontask-check','check-default']){const rows=loadTell(n);assert.deepEqual(tellAnswers(rows),[DELIVERED]);assert.equal(toldTell(rows),true);assert.equal(askedTell(rows),0);}
+});
+test('the direct tell, the mod the app ships (mods/maws-tell): every case without asking the host, plan mode refused, the model never offered it',()=>{
+ const builtin=n=>loadTell('builtin-'+n);
+ for(const n of ['live-bg','waited','ended','dontask']){const rows=builtin(n);assert.deepEqual(tellAnswers(rows),[DELIVERED],n);assert.equal(toldTell(rows),true,n);assert.equal(askedTell(rows),0,n);}
+ assert.deepEqual(metaTell(builtin('live-bg'),'builtin_listed')[0].server,{name:'maws-tell',status:'connected',source:'plugin',tools:['tell']});
+ assert.match(tellAnswers(builtin('stopped'))[0],/^The tool did not run: TELL_REFUSED Agent "\w+" was stopped and was not resumed/);
+ assert.match(tellAnswers(builtin('plan'))[0],/requires interactive approval, and permission prompts are not available/);
+ assert.equal(toldTell(builtin('plan')),false);
+ const model=builtin('model');
+ assert.deepEqual(metaTell(model,'named_in_requests')[0].named,[false,false]);
+ assert.match(metaTell(model,'model_call_result')[0].results[0].content,/No such tool available: mcp__maws-tell__tell/);
+});
