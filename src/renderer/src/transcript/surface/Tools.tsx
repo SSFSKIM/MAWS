@@ -63,8 +63,10 @@ function RunOfOne({ cell, turnId, focusable, inputs }: { cell: Extract<Row, { ki
   const id = runOfOneId(cell);
   const expand = useCallback((props: TranscriptProps['ToolGroup']) => {
     if (!run || !props.isExpanded) return;
-    if (cell.runExpanded !== true) useTranscriptStore.getState().toggleGroup(storeKey, id);
-  }, [run, storeKey, id, cell.runExpanded]);
+    // read now, not from the render: two mounts of one transcript answered alike must not open it and close it again
+    const open = useTranscriptStore.getState().entries[storeKey]?.state.ui.expandedGroups.has(id) ?? false;
+    if (!open) useTranscriptStore.getState().toggleGroup(storeKey, id);
+  }, [run, storeKey, id]);
   const line = (concealed: boolean, standalone: boolean) => <CellLine cell={cell} turnId={turnId} focusable={focusable && !concealed} standalone={standalone} renderDetail={inputs.length === 1 ? (drawn) => <ToolResult input={{ ...inputs[0], cell: drawn }} turnId={turnId} enabled={!concealed} /> : undefined} />;
   return <SurfaceRow appSessionId={appSessionId} component="ToolGroup" instanceId={input?.instanceId ?? cell.id} props={input?.props ?? NO_GROUP} enabled={input !== null} onRewrite={expand} placeholder={<span className="text-fg-faint">…</span>}>
     {(_props, { concealed }) => run

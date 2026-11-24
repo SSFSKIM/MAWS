@@ -232,3 +232,29 @@ describe('the ask’s kind is the tool’s own table row: a result never moves i
     await waitFor(() => expect(callAsks(ONE_CALL)).toEqual([`ToolUse ${ONE_CALL}`]));
   });
 });
+
+// Board ticket 852: a run of one is drawn as its run, its open state its run's, which a mod's rewrite opens as a run's
+// does; two mounts of one transcript that hear the same answer open it once, and it stays open.
+describe('a run of one opened by a mod’s rewrite', () => {
+  it('opens once, though two mounts hear the answer while it is folded', async () => {
+    answer = (ask) => (ask.component === 'ToolGroup' ? ENGINE({ ...ask.props, isExpanded: true }) : ENGINE(ask.props));
+    const b = builder();
+    b.turn('u1', 'List the notes');
+    b.toolUse('t1', 'Bash', { command: 'ls notes' });
+    b.result('t1', 'alpha.txt');
+    b.text('m1', 0, 'Listed.');
+    b.end(['u1']);
+    const store = await storeWith([...b.events]);
+    const id = store.key as AppSessionId;
+    useSessions.setState({ engine: new Map([[id, { ...status(id), uiSurface: { clientId: 'maws-main' } }]]) });
+    act(() => useTranscriptStore.getState().setToHumanView(store.key, { lane: false, tailMessage: false, modDraws: true }));
+    if (!store.rows().some((row) => row.kind === 'cell')) act(() => useTranscriptStore.getState().toggleTurn(store.key, useTranscriptStore.getState().entries[store.key].state.order[0]));
+    expect(store.rows().find((row) => row.kind === 'cell')).toMatchObject({ runExpanded: false });
+    const value = (idPrefix: string) => ({ storeKey: store.key, variant: 'session' as const, actions: spyActions(), rewind: null, renderRequest: null, disclosures: new Disclosures(), idPrefix });
+    render(<><TranscriptProvider value={value('t')}><Rows storeKey={store.key} /></TranscriptProvider><TranscriptProvider value={value('u')}><Rows storeKey={store.key} /></TranscriptProvider></>); // two mounts at once
+    const open = () => useTranscriptStore.getState().entries[store.key].state.ui.expandedGroups.has('group:cell:t1' as never);
+    await waitFor(() => expect(open()).toBe(true));
+    await act(() => new Promise((resolve) => setTimeout(resolve, 100)));
+    expect(open()).toBe(true);
+  });
+});
