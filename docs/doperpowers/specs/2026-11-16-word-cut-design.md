@@ -264,7 +264,7 @@ Build the row note, the pointed-row line, the named glyph, the bare count, the q
 
 ### M5 — Artifacts and the editors
 
-`artifacts.md`, `editors.md`. The editors are separate bundles under `src/artifacts/`; the named glyph and the spinner must be usable there or have a twin. 121 of 136 editor changes are unseen. Proof: the saved-status scene; picture pairs.
+`artifacts.md`, `editors.md`. The editors live under `src/artifacts/` but are compiled with the renderer and mounted by the shell, so they import the shared parts from `src/renderer/src/ui/` (Decision Log, 2026-11-23). 121 of 136 editor changes are unseen. Proof: the saved-status scene; picture pairs.
 
 ## Constraints for the build
 
@@ -314,6 +314,7 @@ Kept by the session that wrote this document (sminos alias `design-experiment`, 
 - **Tailwind 4's `sr-only` is not the one the e2e geometry knew.** It clips with `clip-path: inset(50%)`, which the older visually-hidden predicate in `e2e/support/design-geometry.ts` reads as drawn, and Playwright can count the clipped box visible. A heading cut from view is checked by its role and a drawn-box check of its own.
 - **A wait on a cut word passes at once.** Several e2e waits watched for "Reading…" or "Starting…" to go; once the words became a wordless spinner, those waits found nothing and returned immediately, so they read the answer now.
 - **The rig's scenario sessions are not in the index.** Index-backed writes, a mod's session override among them, fail there ("unknown app session"), so M4's mod scenes run in a launch of their own on the engine's store.
+- **The editors were never separate bundles.** The spec's M5 section took them for bundles that would need a twin of the shared parts; the renderer's build and typecheck compile `src/artifacts/` with the renderer, and the portability lint bars only Electron, Node and `window.maws`, so the editors import the parts as they are.
 
 ## Decision Log
 
