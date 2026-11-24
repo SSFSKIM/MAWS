@@ -841,6 +841,7 @@ describe('Make something new', () => {
   // N193: a Spaces read that fails before it ever answered settles, with a new read on offer, and makes nothing elsewhere
   it('says the narrowed Space did not load, keeps its cards disabled, and loads it on Try again', async () => {
     editors(...CARD_KINDS);
+    offs.push(registerSessionCreator(vi.fn(async () => at(S(9))))); // a card asks only with a session creator
     answers['library.spaces'] = () => ({ ok: false, error: { code: 'internal', message: 'the index is unavailable' } });
     const user = userEvent.setup();
     act(() => setLibraryView({ view: 'bySpace', spaceId: HOME }));
