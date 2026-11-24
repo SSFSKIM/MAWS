@@ -7152,6 +7152,15 @@ test('the word cut’s M5: the library’s Spaces, opened artifacts, the documen
       await page.mouse.move(W - 2, H - 2);
       await focusTip(page, owner(), rest(), m5Cut);
     };
+    // The same, the owner then reached as Tab reaches it: a step to the stop beside it and back, so the owner holds the
+    // keyboard's focus and draws its ring (:focus-visible), which a script's focus after a scene's pointer action does
+    // not. The step goes to the neighbour in the owner's own bar or list (`via`), so it scrolls nothing.
+    const tabTip = async (owner: () => Locator, rest: () => Locator, via: 'next' | 'previous' = 'next') => {
+      await keyTip(owner, rest);
+      if (!m5Cut()) return;
+      await page.keyboard.press(via === 'next' ? 'Tab' : 'Shift+Tab');
+      await page.keyboard.press(via === 'next' ? 'Shift+Tab' : 'Tab');
+    };
     const tipHolds = (owner: () => Locator, what: string, words: readonly (string | RegExp)[], master: () => Promise<unknown>) => async (): Promise<void> => {
       if (!m5Cut()) {
         await master();
@@ -7253,9 +7262,9 @@ test('the word cut’s M5: the library’s Spaces, opened artifacts, the documen
       ),
     });
     const deckComment = () => deckButton('talk', E.addComment);
-    await shot(page, m5Meta('m5-slides-comment-tip', 'G403', 'A deck, Add comment’s tooltip with nothing selected', 'Field talk, nothing selected, the keyboard on Add comment', 'Add comment greyed, its tooltip with the chord and its reason, “Select one element to comment on” (master: the greyed worded button)', ['tools/presentation', 'src/artifacts/slides/editor/comments']), async () => {
+    await shot(page, m5Meta('m5-slides-comment-tip', 'G403', 'A deck, Add comment’s tooltip with nothing selected', 'Field talk, nothing selected, Add comment reached by Tab', 'Add comment greyed, its tooltip with the chord and its reason, “Select one element to comment on” (master: the greyed worded button)', ['tools/presentation', 'src/artifacts/slides/editor/comments']), async () => {
       await deckAtRest('talk');
-      await keyTip(deckComment, deckComment);
+      await tabTip(deckComment, deckComment);
     }, {
       check: checks(
         tipHolds(deckComment, 'Add comment', [`${E.commentTip} · ${COMMENT_CHORD}`, E.commentUnavailable], async () => {
@@ -7367,9 +7376,9 @@ test('the word cut’s M5: the library’s Spaces, opened artifacts, the documen
       },
     });
     const renameSection = () => tab('planning').getByRole('button', { name: E.renameSection('Opening'), exact: true }).first();
-    await shot(page, m5Meta('m5-slides-section-tip', 'G429', 'A deck, a section’s rename by the keyboard', 'Planning deck, the keyboard on the first section’s rename', 'The section’s pencil and × drawn while it holds the keyboard, the pencil’s tooltip “Rename section Opening” (master: the worded Rename and × at rest)', ['tools/presentation', 'src/artifacts/slides/editor']), async () => {
+    await shot(page, m5Meta('m5-slides-section-tip', 'G429', 'A deck, a section’s rename by the keyboard', 'Planning deck, the first section’s rename reached by Tab', 'The section’s pencil and × drawn while it holds the keyboard, the pencil’s tooltip “Rename section Opening” (master: the worded Rename and × at rest)', ['tools/presentation', 'src/artifacts/slides/editor']), async () => {
       await deckAtRest('planning');
-      await keyTip(renameSection, renameSection);
+      await tabTip(renameSection, renameSection);
     }, {
       check: checks(
         tipHolds(renameSection, 'the section’s rename', [E.renameSection('Opening')], async () => {
@@ -7477,9 +7486,9 @@ test('the word cut’s M5: the library’s Spaces, opened artifacts, the documen
         await inView(tab('versions').locator('[data-history-notes]').getByText(E.noNotes, { exact: true }), 'the version’s notes');
       },
     });
-    await shot(page, m5Meta('m5-slides-version-done-tip', 'G490', 'A deck showing a version, Done’s tooltip', 'Site visit, the version “Draft”, the keyboard on Done', 'Done’s tooltip “Back to presentation” (master: the button’s own words)', ['tools/presentation', 'src/artifacts/slides/editor/history']), async () => {
+    await shot(page, m5Meta('m5-slides-version-done-tip', 'G490', 'A deck showing a version, Done’s tooltip', 'Site visit, the version “Draft”, Done reached by Tab', 'Done’s tooltip “Back to presentation” (master: the button’s own words)', ['tools/presentation', 'src/artifacts/slides/editor/history']), async () => {
       await toVersion();
-      await keyTip(doneButton, doneButton);
+      await tabTip(doneButton, doneButton, 'previous'); // Done may be its bar's last stop
     }, {
       check: checks(
         tipHolds(doneButton, 'Done', [E.doneTip], () => inView(doneButton(), 'master’s Back to presentation')),
@@ -7855,9 +7864,9 @@ test('the word cut’s M5: the library’s Spaces, opened artifacts, the documen
         else await expect(badge.locator('.dsp-muted'), 'master’s verdict').toHaveText(E.dsVerdict.master);
       },
     });
-    await shot(page, m5Meta('m5-ds-header-tip', 'G558', 'A design system page, Check against law’s tooltip', 'The MAWS design system, the keyboard on its head’s first icon', 'The icon’s tooltip “Check against law” (master: the worded button)', ['src/artifacts/design-system/page', 'artifacts/design-system', 'panel']), async () => {
+    await shot(page, m5Meta('m5-ds-header-tip', 'G558', 'A design system page, Check against law’s tooltip', 'The MAWS design system, its head’s first icon reached by Tab', 'The icon’s tooltip “Check against law” (master: the worded button)', ['src/artifacts/design-system/page', 'artifacts/design-system', 'panel']), async () => {
       await dsAtRest('house');
-      await keyTip(() => dsAction('check'), () => dsAction('check'));
+      await tabTip(() => dsAction('check'), () => dsAction('check'));
     }, {
       check: tipHolds(() => dsAction('check'), 'Check against law', [E.dsCheck], async () => {
         await inView(dsAction('check'), 'master’s Check against law');
@@ -7961,9 +7970,9 @@ test('the word cut’s M5: the library’s Spaces, opened artifacts, the documen
       },
     });
     const dontWords = () => violation().locator('[data-dont-words]').first();
-    await shot(page, m5Meta('m5-ds-violation-tip', 'G585', 'A design system page, a violation’s tag by the keyboard', 'Field rules, Check against law, the keyboard on the violation’s law words', 'The law’s words with their tag as the tooltip, “[check: literal-color]” (master: the tag after the words)', ['src/artifacts/design-system/page']), async () => {
+    await shot(page, m5Meta('m5-ds-violation-tip', 'G585', 'A design system page, a violation’s tag by the keyboard', 'Field rules, Check against law, the violation’s law words reached by Tab', 'The law’s words with their tag as the tooltip, “[check: literal-color]” (master: the tag after the words)', ['src/artifacts/design-system/page']), async () => {
       await dsAtRest('rules', 'check');
-      await keyTip(dontWords, violation);
+      await tabTip(dontWords, violation);
     }, {
       check: checks(
         tipHolds(dontWords, 'the law’s words', [E.dsTag], async () => {
@@ -8054,10 +8063,10 @@ test('the word cut’s M5: the library’s Spaces, opened artifacts, the documen
     // the deck at its limit (G423), after the others: its 500 slides stay open in the window
     const newSlide = () => deckButton('full', E.newSlide);
     const fullNote = () => deckOf('full').locator('.deck-filmstrip-note').filter({ hasText: E.deckFull });
-    await shot(page, m5Meta('m5-slides-full', 'G423', 'A deck at its limit, New slide’s reason by the keyboard', 'Artifacts, Every week (500 slides), the keyboard on New slide', 'New slide greyed and still focusable, its reason as its tooltip, no red line (master: New slide disabled and the red line under it)', ['tools/presentation', 'src/artifacts/slides/editor']), async () => {
+    await shot(page, m5Meta('m5-slides-full', 'G423', 'A deck at its limit, New slide’s reason by the keyboard', 'Artifacts, Every week (500 slides), New slide reached by Tab', 'New slide greyed and still focusable, its reason as its tooltip, no red line (master: New slide disabled and the red line under it)', ['tools/presentation', 'src/artifacts/slides/editor']), async () => {
       await openArtifact('full');
       await expect(newSlide(), 'New slide').toBeAttached({ timeout: 60_000 });
-      await keyTip(newSlide, fullNote);
+      await tabTip(newSlide, fullNote);
     }, {
       check: checks(
         tipHolds(newSlide, 'New slide', [E.deckFull], async () => {

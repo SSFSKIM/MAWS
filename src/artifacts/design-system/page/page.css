@@ -14,6 +14,11 @@
   font-family: var(--font-ui);
   font-size: var(--text-ui);
 }
+/* the empty page (G562): the app's empty state (Customize's, Plugins', Skills'): its title, the hint right under it */
+.dsp-empty { display: flex; flex-direction: column; align-items: center; gap: calc(var(--space) * 2); padding: calc(var(--space) * 16) calc(var(--space) * 6); text-align: center; }
+.dsp-empty p { margin: 0; }
+.dsp-empty-title { font-size: var(--text-ui); font-weight: 500; color: var(--fg); }
+.dsp-empty-hint { max-width: 24rem; font-size: var(--text-ui-sm); }
 .dsp-intro { display: flex; flex-direction: column; gap: var(--space); }
 .dsp-title { margin: 0; font-size: 1.5em; font-weight: 600; }
 .dsp-problems { margin: 0; color: var(--danger); }

@@ -26,6 +26,12 @@
 // owner does; a close Radix asks for while the pointer is still within the region (its leave of the owner) is not taken,
 // and a leave of the region into the tip keeps it open, as a leave of the owner into it does.
 //
+// Where it opens: below its owner, since what explains an owner (a field's caption, a section's heading, the message a
+// rule's words follow, the window's toolbar above a panel's head) stands above it in reading order, and what lies below
+// is what comes next. Radix flips it above where the window has no room below and shifts it along the edge it would
+// cross, `collisionPadding` from the window's edges; inside a `TipBoundary` it keeps to that container too (a page in a
+// panel, so a tip on a word near the page's edge does not run onto the sidebar).
+//
 // `UnavailableButton` is a greyed click-activated control's enabled owner ("Every hidden fact has an owner that takes
 // keyboard focus"): a button, a link, a checkbox or a radio drawn `aria-disabled`, still in the Tab order, its reason
 // the tooltip and the description, and its click (by pointer, Enter or Space) swallowed before the control's own
@@ -35,7 +41,7 @@
 // acts on pointerdown (a Radix menu trigger) guards itself too. The control must not be `disabled`, which takes it out
 // of the Tab order and out of the pointer's reach.
 import { Tooltip } from 'radix-ui';
-import { cloneElement, useCallback, useEffect, useId, useLayoutEffect, useRef, useState, type MouseEvent, type ReactElement, type ReactNode, type RefObject, type SyntheticEvent } from 'react';
+import { cloneElement, createContext, useCallback, useContext, useEffect, useId, useLayoutEffect, useRef, useState, type MouseEvent, type ReactElement, type ReactNode, type RefObject, type SyntheticEvent } from 'react';
 import { POINTING_DELAY_MS } from './pointing';
 
 const TIP = 'z-50 max-w-[20rem] rounded-sm border border-border-strong bg-bg-overlay px-2 py-1 text-ui-sm leading-normal text-fg shadow-float [overflow-wrap:anywhere]';
@@ -43,11 +49,18 @@ const TIP = 'z-50 max-w-[20rem] rounded-sm border border-border-strong bg-bg-ove
 type ClickGuard = { 'aria-disabled'?: true; onClickCapture?(event: MouseEvent): void };
 type Owner = ReactElement<{ 'aria-describedby'?: string }>;
 
+// The container the tips inside it keep to, besides the window's edges; none by default.
+const Boundary = createContext<Element | null>(null);
+export function TipBoundary({ element, children }: { element: Element | null; children: ReactNode }) {
+  return <Boundary value={element}>{children}</Boundary>;
+}
+
 // The tip that shows, closed when another opens (Radix's own signal for that fires only for the openings it makes).
 let showing: { close(): void } | null = null;
 
 export function Tip({ content, description, pointedWithin, children, ...guard }: { content: ReactNode; description?: string | null; pointedWithin?: RefObject<HTMLElement | null>; children: Owner } & ClickGuard) {
   const descriptionId = useId();
+  const boundary = useContext(Boundary);
   const shows = content !== null && content !== undefined && content !== '';
   const [open, setOpen] = useState(false);
   if (open && !shows) setOpen(false); // the content went away: the tip is closed, not merely undrawn
@@ -178,9 +191,10 @@ export function Tip({ content, description, pointedWithin, children, ...guard }:
           <Tooltip.Portal>
             <Tooltip.Content
               ref={tip}
-              side="top"
+              side="bottom"
               sideOffset={4}
               collisionPadding={8}
+              collisionBoundary={boundary ?? []}
               className={TIP}
               onEscapeKeyDown={() => {
                 stopPointing(); // a dismissed tip is not reopened by a pointing still in its delay

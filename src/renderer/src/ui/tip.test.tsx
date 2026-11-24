@@ -69,6 +69,17 @@ describe('Tip', () => {
   });
 });
 
+// Where the tip opens (jsdom lays nothing out, so no collision moves it): below its owner, since what explains an owner
+// (a caption, a heading, a message, the window's toolbar) stands above it.
+describe('Tip placement', () => {
+  it('opens below its owner', async () => {
+    render(<Chip />);
+    await user().tab();
+    expect(tooltip()).toBe(FACT);
+    expect(document.querySelector('[data-radix-popper-content-wrapper] [data-side]')?.getAttribute('data-side')).toBe('bottom');
+  });
+});
+
 describe('Tip under the keyboard', () => {
   it('stays open through the scroll its owner’s focus causes', async () => {
     render(
