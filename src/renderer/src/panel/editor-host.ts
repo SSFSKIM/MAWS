@@ -11,6 +11,7 @@ import { createContext, useContext, useLayoutEffect, useRef, type ComponentType 
 import { create } from 'zustand';
 import { useLayout } from '../stores/layout';
 import { allTabs } from '../stores/layout-model';
+import type { TipSide } from '../ui/tip';
 
 export type SavedState = 'saved' | 'saving' | 'unsaved' | 'reconnecting' | 'readonly';
 // P4-B5: `pinned`, drawn in the row beside the first three rather than counted among them (the header's Send to); folded
@@ -18,7 +19,8 @@ export type SavedState = 'saved' | 'saving' | 'unsaved' | 'reconnecting' | 'read
 // The word cut (M5's G558): `unavailable`, why the action cannot act now; the header draws it greyed and still in the
 // keyboard's reach, its reason the tooltip and the description, and its press does nothing. `disabled` takes the control
 // out of the Tab order and says nothing; prefer a reason.
-export interface EditorHostAction { id: string; label: string; icon?: ComponentType<{ className?: string }>; onSelect(): void; disabled?: boolean; unavailable?: string | null; pressed?: boolean; pinned?: boolean }
+// `tipSide`: where its tooltip opens, when not above (Tip's rule; the design system's Check against law, G558).
+export interface EditorHostAction { id: string; label: string; icon?: ComponentType<{ className?: string }>; onSelect(): void; disabled?: boolean; unavailable?: string | null; pressed?: boolean; pinned?: boolean; tipSide?: TipSide }
 // UX wave U10b (§B.5 of docs/doperpowers/plans/2026-11-15-ux-wave-U10b-artifacts.md): `checked`, an entry drawn as a
 // checkbox item (a document's page: Letter, A4, Compact) after the menu's other rows and a separator.
 export interface EditorHostExport { id: string; label: string; onSelect(): void; disabled?: boolean; children?: readonly EditorHostExport[]; description?: string; checked?: boolean }

@@ -5,7 +5,8 @@
 // The word cut (docs/doperpowers/specs/2026-11-16-word-cut-design.md, M5 task 4): a canon that keeps every rule reads a
 // muted ✓ and the count, the sentence its name and tooltip (G584); a violation ends with the law's words, its tag their
 // tooltip and description (G585); the don'ts no rule checks and those whose tag MAWS cannot run are one list, "By hand",
-// by their words (G586, G587). A description node stands outside the text it describes.
+// by their words (G586, G587). A description node stands outside the text it describes. The count's and the law's words'
+// tooltips open below, off the heading and the message above them (the pair review).
 import { useId, type Ref } from 'react';
 import { BareCount } from '../../../renderer/src/ui/count';
 import { Tip } from '../../../renderer/src/ui/tip';
@@ -54,7 +55,7 @@ export function Check(props: { law: string; tokens: TokenSet; files: Readonly<Re
         <p className="dsp-summary">{failures}</p>
       ) : report.checks.length > 0 ? (
         <p className="dsp-summary">
-          <BareCount count={PAGE_COPY.passed(report.checks.length)} meaning={PAGE_COPY.passedName(report.checks.length)} />
+          <BareCount count={PAGE_COPY.passed(report.checks.length)} meaning={PAGE_COPY.passedName(report.checks.length)} side="bottom" />
         </p>
       ) : null}
       {problems.length ? (
@@ -78,7 +79,7 @@ export function Check(props: { law: string; tokens: TokenSet; files: Readonly<Re
                     <code className="dsp-name">{v.unit}</code> <code className="dsp-muted">{v.element}</code>
                     <div>{v.message}</div>
                     <div className="dsp-muted">
-                      <Tip content={PAGE_COPY.checkTagTip(v.rule)}>
+                      <Tip content={PAGE_COPY.checkTagTip(v.rule)} side="bottom">
                         <span className="dsp-dont-words" tabIndex={0} aria-describedby={`${tagId}-${i}`} data-dont-words>
                           {words(v.dont)}
                         </span>

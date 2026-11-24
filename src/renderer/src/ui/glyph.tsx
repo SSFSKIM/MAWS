@@ -9,7 +9,7 @@
 // saw keeps a longer tooltip than the name (the deck's Add comment, G403), the shortcut still after it; its words are
 // part of the description too, unless the name already says them ("Comments" on "Comments (3 open)").
 import type { ComponentPropsWithRef, ReactNode } from 'react';
-import { Tip, UNAVAILABLE_LOOK, unavailableClickProps } from './tip';
+import { Tip, UNAVAILABLE_LOOK, unavailableClickProps, type TipSide } from './tip';
 
 // The square icon button's look, which IconButton (app/IconButton.tsx) shares.
 export const GLYPH_BUTTON =
@@ -22,10 +22,11 @@ export interface NamedGlyphProps extends Omit<ComponentPropsWithRef<'button'>, '
   detail?: string | null; // what the press acts on now
   tip?: string; // the tooltip's words, when they are not the name's
   pressed?: boolean;
+  side?: TipSide; // where the tooltip opens, when not above (Tip's rule)
   children: ReactNode; // the icon, aria-hidden
 }
 
-export function NamedGlyph({ label, shortcut, unavailable, detail, tip = label, pressed, className = GLYPH_BUTTON, children, ref, ...button }: NamedGlyphProps) {
+export function NamedGlyph({ label, shortcut, unavailable, detail, tip = label, pressed, side, className = GLYPH_BUTTON, children, ref, ...button }: NamedGlyphProps) {
   const named = shortcut ? `${tip} · ${shortcut}` : tip;
   const told = tip.toLowerCase() !== label.toLowerCase() && !label.toLowerCase().includes(tip.toLowerCase()) ? tip : null; // the name says the rest
   const description = [unavailable, told, detail, shortcut].filter((part) => part).join(' · ');
@@ -43,6 +44,7 @@ export function NamedGlyph({ label, shortcut, unavailable, detail, tip = label, 
         )
       }
       description={description}
+      side={side}
       {...unavailableClickProps(unavailable)}
     >
       <button ref={ref} type="button" aria-label={label} aria-pressed={pressed} className={`${className} ${UNAVAILABLE_LOOK}`} {...button}>

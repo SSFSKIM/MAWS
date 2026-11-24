@@ -279,8 +279,9 @@ export function ShadowSection() {
   const outline = picked.some((p) => p.tag === 'x-shape' && p.attrs.kind !== 'rect');
   // Spread's and Inset's reason; each stays focusable with it in a read-only deck too, its edits refused
   const outlineReason = outline ? C.outlineShadow : null;
+  // Spread's reason opens below it, off its caption and the X, Y and Blur row above (G450, the pair review)
   const len = (label: string, key: 'x' | 'y' | 'blur' | 'spread', unavailable: string | null = null) => (
-    <NumberField label={label} caption={C.shadowCaptions[key]} unit="px" value={first?.[key] ?? null} mixed={value.mixed} unavailable={unavailable} onCommit={(n, how) => (n === null && key !== 'spread' ? [] : write({ [key]: n }, how))} />
+    <NumberField label={label} caption={C.shadowCaptions[key]} unit="px" value={first?.[key] ?? null} mixed={value.mixed} unavailable={unavailable} tipSide={key === 'spread' ? 'bottom' : undefined} onCommit={(n, how) => (n === null && key !== 'spread' ? [] : write({ [key]: n }, how))} />
   );
   return (
     <Section title={C.shadow}>

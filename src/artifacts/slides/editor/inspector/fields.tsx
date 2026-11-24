@@ -11,7 +11,7 @@
 // carries the reason as its tooltip and description (G449, G450); a hover names a token by its friendly name alone (G447,
 // G448).
 import { createContext, useContext, useId, useState, type ComponentPropsWithRef, type ReactNode } from 'react';
-import { Tip } from '../../../../renderer/src/ui/tip';
+import { Tip, type TipSide } from '../../../../renderer/src/ui/tip';
 import type { DeckFace } from '../../deck';
 import type { DeckSession } from '../session';
 import { INSPECTOR_COPY as C } from './copy';
@@ -93,11 +93,13 @@ export interface NumberFieldProps {
   disabled?: boolean;
   /** Greyed for this reason: focusable, its edits refused, the reason its tooltip and description (the word cut). */
   unavailable?: string | null;
+  /** Where the reason's tooltip opens, when not above (Tip's rule): below, off the caption and the row above it. */
+  tipSide?: TipSide;
   /** P4-B2 (D13): shown as a whole number (position and size in px); the model keeps its fraction. */
   whole?: boolean;
 }
 
-export function NumberField({ label, caption, value, mixed = false, hint = '', unit, step = 1, onCommit, disabled = false, whole = false, unavailable = null }: NumberFieldProps) {
+export function NumberField({ label, caption, value, mixed = false, hint = '', unit, step = 1, onCommit, disabled = false, whole = false, unavailable = null, tipSide }: NumberFieldProps) {
   const readOnly = useInspector().readOnly || disabled;
   // a reason keeps its field focusable in a read-only deck too (the reason's owner), edits refused either way
   const greyed = unavailable !== null && unavailable !== '';
@@ -131,7 +133,7 @@ export function NumberField({ label, caption, value, mixed = false, hint = '', u
     <label className="deck-inspector-number">
       {caption !== undefined && <span className="deck-inspector-mini">{caption}</span>}
       <span className="deck-inspector-input-wrap">
-        <Tip content={greyed ? unavailable : null}>
+        <Tip content={greyed ? unavailable : null} side={tipSide}>
         <input
           type="text"
           inputMode="decimal"

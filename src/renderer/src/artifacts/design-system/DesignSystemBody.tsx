@@ -107,9 +107,10 @@ export function DesignSystemBody(props: DesignSystemBodyProps) {
     saved,
     pendingEdits: replica === 'saving',
     actions: [
-      { id: 'design-system.check', label: DESIGN_SYSTEM_COPY.check, icon: CheckLawIcon, onSelect: () => requestCheck(key) },
-      { id: 'design-system.set-default', label: DESIGN_SYSTEM_COPY.setDefault, icon: DefaultStarIcon, onSelect: () => onSetDefault?.(), disabled: !onSetDefault, unavailable: isDefault ? DESIGN_SYSTEM_COPY.alreadyDefault : null }, // G558: the default's star keeps the keyboard and says why
-      ...(onDelete ? [{ id: 'design-system.delete', label: DESIGN_SYSTEM_COPY.deleteAction, icon: DeleteBinIcon, onSelect: () => onDelete() }] : []),
+      // G558: the head's icons' tooltips open below, off the window's toolbar above the head (the pair review)
+      { id: 'design-system.check', label: DESIGN_SYSTEM_COPY.check, icon: CheckLawIcon, onSelect: () => requestCheck(key), tipSide: 'bottom' },
+      { id: 'design-system.set-default', label: DESIGN_SYSTEM_COPY.setDefault, icon: DefaultStarIcon, onSelect: () => onSetDefault?.(), disabled: !onSetDefault, unavailable: isDefault ? DESIGN_SYSTEM_COPY.alreadyDefault : null, tipSide: 'bottom' }, // G558: the default's star keeps the keyboard and says why
+      ...(onDelete ? [{ id: 'design-system.delete', label: DESIGN_SYSTEM_COPY.deleteAction, icon: DeleteBinIcon, onSelect: () => onDelete(), tipSide: 'bottom' as const }] : []),
     ],
     exports: [{ id: 'design-system.export-claude', label: DESIGN_SYSTEM_COPY.exportClaude, onSelect: () => exportForClaude(host, artifactId) }],
     closeGuard: () => allowSystemClose(handle, shownTitle, ended), // the tab's handle and showing (L's createState), never this body's state
