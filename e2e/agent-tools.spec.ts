@@ -201,7 +201,8 @@ test.describe('the #panel harness: the agent tools', () => {
     await expect(body.getByText('ONE', { exact: true }), 'its answer').toBeVisible();
     // The child's finished turn folds its work, as C6's transcript does anywhere: opened, its Read cell.
     await body.getByRole('button', { name: FINISHED_TURN_LINE }).click(); // the word cut (T1): the turn's line reads its duration first
-    await expect(body.locator('.transcript-cell-line').filter({ hasText: 'one.txt' }).first(), 'the child’s Read cell').toBeVisible();
+    await body.getByRole('button', { name: 'Read one.txt', exact: true }).click(); // board ticket 852: its one call, a run of one, opened onto its detail
+    await expect(body.locator('.transcript-cell[data-run-of-one] .transcript-cell-detail').first(), 'the child’s Read cell').toBeVisible();
     await expect.poll(async () => (await h.agents('childTranscript', FIRST.agentId)).keys, 'one store key for the child').toHaveLength(1);
     h.expectQuietConsole();
   });

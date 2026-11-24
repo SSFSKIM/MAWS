@@ -58,6 +58,7 @@
     "kind": "cell",
     "label": "Ran `cat build.log` in 1s",
     "paths": [],
+    "runExpanded": true,
     "startedAt": "2026-09-28T12:00:01.010Z",
     "status": "done",
     "toolName": "Bash",

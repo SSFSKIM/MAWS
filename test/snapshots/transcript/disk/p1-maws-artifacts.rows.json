@@ -90,6 +90,7 @@
     "kind": "cell",
     "label": "Loaded 4 tools",
     "paths": [],
+    "runExpanded": true,
     "startedAt": "2026-10-06T12:53:08.030Z",
     "status": "done",
     "toolName": "ToolSearch",
@@ -157,6 +158,7 @@
     "paths": [
       "/private/tmp/maws-e2-repo-5uEyLu/dashboard.html"
     ],
+    "runExpanded": true,
     "startedAt": "2026-10-06T12:53:11.922Z",
     "status": "done",
     "toolName": "Write",
@@ -457,6 +459,7 @@
     "kind": "cell",
     "label": "Listed 1 artifact",
     "paths": [],
+    "runExpanded": true,
     "startedAt": "2026-10-06T12:53:23.662Z",
     "status": "done",
     "toolName": "mcp__maws__artifact_list",

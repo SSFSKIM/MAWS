@@ -53,6 +53,7 @@
     "kind": "cell",
     "label": "Ran `touch c12-state.txt` in 1s",
     "paths": [],
+    "runExpanded": true,
     "startedAt": "2026-09-30T09:17:22.898Z",
     "status": "done",
     "toolName": "Bash",

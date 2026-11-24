@@ -22,6 +22,10 @@ import { FakeMachineReplay } from './fake-machine';
 import { expect, seedKey, test } from './fixtures';
 import { PROJECT, stageProject } from './scene';
 
+// The recording's Bash call, a run of one at rest (board ticket 852): its row, so a fold is read by the row and not by the
+// call's own line, which shows only once the run is opened
+const BASH_ROW = '[data-row-id="cell:toolu_01Xbf4x8J3oTQ2QUW2EbihFp"]';
+
 const MACHINE = 'fake';
 const ALIAS = 'fakerec';
 const ANSWER = 'You chose blue';
@@ -132,7 +136,7 @@ test("G1: the report over the session's rows — each stretch of work between th
   // The marked answer's turn: its work folded (its Bash call) behind a record line, its questions in view.
   await scrollUntil(view, view.getByText('Color→blue'), -1);
   await expect(records(view).first()).toHaveText('› working record');
-  await expect(view).not.toContainText("Wrote 'blue' to recorded.txt in the current directory");
+  await expect(view.locator(BASH_ROW)).toHaveCount(0);
   await scrollUntil(view, view.locator(`[data-row-id^="question:${ASK_CALL}"]`), -1); // the ask mod's async question, a question row
   // Older turns: a marked one (part 23) is its message after one closed record line, its Read call behind it; an
   // unmarked one (part 24) is one closed record line after its prompt, its Read call and its answer behind it.
@@ -204,7 +208,7 @@ test("G1: a marked answer streams per block as its message, the work before it f
   await expect(view).toContainText('Color→blue');
   // UX wave U2b: the session already holds the older turns' messages, so the running turn's work is folded before its
   // answer starts, its Bash call too
-  await expect(view).not.toContainText("Wrote 'blue' to recorded.txt in the current directory");
+  await expect(view.locator(BASH_ROW)).toHaveCount(0);
 
   for (let i = 0; i < 40 && !(await streamingRows(view).allTextContents()).join('').includes(ANSWER); i++) {
     fm.step(1);
@@ -214,7 +218,7 @@ test("G1: a marked answer streams per block as its message, the work before it f
   await expect(streamingRows(view).last()).not.toContainText('<message>');
   await expect(streamingRows(view).last().locator('.owner-message-ink')).toContainText(ANSWER);
   await expect(streamingRows(view).last().locator('.owner-message-label')).toHaveText('● message …');
-  await expect(view).not.toContainText("Wrote 'blue' to recorded.txt in the current directory");
+  await expect(view.locator(BASH_ROW)).toHaveCount(0);
   await expect(workingLine(view)).toHaveCount(1);
   const answerBlock = recording.steps.find((s) => s.k === 'block-row' && s.body.uuid === uuid)!;
   if (answerBlock.k !== 'block-row') throw new Error('no block-row');
@@ -223,7 +227,7 @@ test("G1: a marked answer streams per block as its message, the work before it f
   const live = streamingRows(view).last();
   await expect(live.locator('.owner-message-ink')).toContainText(ANSWER);
   await expect(live).not.toContainText('<message>');
-  await expect(view).not.toContainText("Wrote 'blue' to recorded.txt in the current directory"); // folded into its record while the mark streams
+  await expect(view.locator(BASH_ROW)).toHaveCount(0); // folded into its record while the mark streams
   await expect(workingLine(view)).toHaveCount(1); // the running turn's line says it works
   expect(fm.depth.rows.get('main')!.some((row) => row.uuid === uuid)).toBe(false); // and its row is not written yet
 
