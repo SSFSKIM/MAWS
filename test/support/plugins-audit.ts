@@ -1,6 +1,7 @@
 // The E8 live run's G4 audit (E8 execution document, M3 "The live run"; parent G4; D-12): the config home's and the
 // project's `.claude/` file trees read around each CLI action, their delta, and the verdict on every changed path.
-// - A mutation may write its `writesOf` manifest (the confirm sheet's "Writes" list); a listing writes no configuration.
+// - A mutation may write its `writesOf` manifest (the confirm sheet's "Writes" list); a listing writes no configuration,
+//   the reads a mutation sets off included, which are judged after it in a window of their own (`actionAuditOf`).
 // - Any action may refresh the engine's catalogue caches and its `.claude.json` bookkeeping (D-12): `.claude.json` is
 //   read structured and judged by top-level key, so `pluginUsage` or a migration flag passes, a key the manifest
 //   announces (`declinedPlugins` for an uninstall) passes for that action, and `projects`, `mcpServers` or any other
@@ -195,6 +196,14 @@ export function auditOf(before: Tree, after: Tree, manifest: Manifest | null): A
     }
   }
   return out;
+}
+
+// One mutation's two windows: from before the sheet to the mutation's end (its CLI, the settle and the reload, with every
+// CLI read held back) judged against its manifest, and from there to the reads it set off (a `plugins.changed`
+// refetch, each one an engine CLI run of its own) judged as listings. One window over both would let an announced key
+// (`declinedPlugins` for an uninstall) excuse a listing that wrote it.
+export function actionAuditOf(before: Tree, ended: Tree, after: Tree, manifest: Manifest): { mutation: Audit; reads: Audit } {
+  return { mutation: auditOf(before, ended, manifest), reads: auditOf(ended, after, null) };
 }
 
 // ---- when a window closes ---------------------------------------------------------------------------------------

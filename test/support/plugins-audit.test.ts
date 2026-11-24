@@ -6,7 +6,7 @@ import { mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from 'node:
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { auditOf, bridgeTimedOut, claudeJsonChanges, manifestOf, pathKind, readTree, untilQuiet, type ClaudeJson, type SettledInvoke, type Tree } from './plugins-audit';
+import { actionAuditOf, auditOf, bridgeTimedOut, claudeJsonChanges, manifestOf, pathKind, readTree, untilQuiet, type ClaudeJson, type SettledInvoke, type Tree } from './plugins-audit';
 
 const obj = (value: Record<string, unknown>): ClaudeJson => ({ state: 'object', value });
 const tree = (files: Record<string, string>, claudeJson: Record<string, unknown> | ClaudeJson | null = null): Tree => ({
@@ -72,6 +72,21 @@ describe('the plugins audit', () => {
     // an announced key does not open the rest of the file
     const trust = tree({ 'config/.claude.json': '2', 'config/settings.json': 'b' }, { pluginUsage: {}, declinedPlugins: [], mcpServers: { x: {} } });
     expect(auditOf(before, trust, uninstall).unannounced).toEqual(['changed config/.claude.json · mcpServers']);
+  });
+
+  it('judges the reads after a mutation on their own: a listing that writes declinedPlugins fails even right after an uninstall', () => {
+    // 2.1.331's `plugin list --json` can move an opt-out for a plugin its marketplace removed into `declinedPlugins`
+    const uninstall = manifestOf('uninstall', 'user', null, { marketplace: 'e8-scratch', plugin: 'e8-probe', id: 'e8-probe@e8-scratch' });
+    const before = tree({ 'config/.claude.json': '1', 'config/settings.json': 'a' }, { pluginUsage: {} });
+    const uninstalled = tree({ 'config/.claude.json': '2', 'config/settings.json': 'b' }, { pluginUsage: {}, declinedPlugins: ['e8-probe@e8-scratch'] });
+    const refetched = tree({ 'config/.claude.json': '3', 'config/settings.json': 'b' }, { pluginUsage: {}, declinedPlugins: ['e8-probe@e8-scratch', 'gone@elsewhere'] });
+    const audit = actionAuditOf(before, uninstalled, refetched, uninstall);
+    expect(audit.mutation).toMatchObject({ unannounced: [], unclassified: [] });
+    expect(audit.reads.unannounced).toEqual(['changed config/.claude.json · declinedPlugins']);
+    // judged as one window, the uninstall's manifest would have let the listing's write through
+    expect(auditOf(before, refetched, uninstall).unannounced).toEqual([]);
+    // reads that wrote nothing pass
+    expect(actionAuditOf(before, uninstalled, uninstalled, uninstall).reads).toMatchObject({ lines: [], unannounced: [], unclassified: [] });
   });
 
   it('lets an install write the cache of a dependency the marketplace declares, in it or in an allowlisted marketplace', () => {
