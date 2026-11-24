@@ -22,10 +22,19 @@ export function mapFileOf(journalFile: string): string {
   return journalFile.replace(/\.jsonl$/, '.hseq');
 }
 
+// Ticket 851, M2 (R4-2): a prestart's stage, which takes the map's lines while it holds (prestart.ts); the journal's
+// staged rows go to the launch's first file, and so do its staged map lines
+export interface MapStage {
+  readonly holding: boolean;
+  mapLine(text: string): void;
+}
+
 // The writing side, owned by the session: each line goes to the map file of the journal file the row goes to now.
 export class HostMap {
   private fd: number | null = null;
   private path: string | null = null;
+
+  constructor(private readonly stage: MapStage | null = null) {}
 
   line(hostSeq: number, journalSeq: number, journalFile: string): void {
     this.append(`${hostSeq} ${journalSeq}\n`, journalFile);
@@ -46,6 +55,7 @@ export class HostMap {
   }
 
   private append(text: string, journalFile: string): void {
+    if (this.stage?.holding) return this.stage.mapLine(text);
     const path = mapFileOf(journalFile);
     if (path !== this.path) {
       this.close();

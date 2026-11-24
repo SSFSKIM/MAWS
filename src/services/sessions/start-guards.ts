@@ -7,7 +7,7 @@ import { randomUUID } from 'node:crypto';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { SessionRecord } from '@shared/graph/session';
 import { isGatewayModel } from '@shared/sessions/models';
-import { readRoute } from '@shared/engine/route'; // P5 O7 M9
+import { readRoute, type Route } from '@shared/engine/route'; // P5 O7 M9
 import { profileSettings } from '@shared/engine/launch-profile'; // P5 O7 M9
 import type { FirstMessage, SetupIntent } from '@shared/sessions/intent';
 import type { StartOutcome } from '@shared/sessions/setup';
@@ -20,7 +20,7 @@ import { checkAdditionalDirectories, checkLocation, retainedMatches, sessionDire
 import { runResume } from './resume';
 import { runIntentSetup } from './setup';
 import { resumeRouteOf } from './launch-mapping'; // P5 O7 M9
-import { guardMachineRoute, newWorktreeSettings, type SettingsSite } from './machine-route'; // P5 O7 M9
+import { guardMachineRoute, newWorktreeSettings, relayHealthOf, type SettingsSite } from './machine-route'; // P5 O7 M9
 import type { Setup } from './setup-steps';
 import { trustStateOf } from './trust';
 
@@ -33,6 +33,7 @@ export interface GuardContext {
   rejectIntent<T extends StartOutcome | null>(appSessionId: AppSessionId, outcome: T): Promise<T>;
   bindTrust(intent: SetupIntent, locationChanged: boolean, decision: SetupIntent['trust'] | undefined): Promise<SetupIntent>;
   forgetQuietly(appSessionId: AppSessionId): Promise<boolean>;
+  adopting?(appSessionId: AppSessionId): boolean; // ticket 851: whether this spine asked a prestart for the intent (taken once)
 }
 
 export async function guardIntentStart(s: Setup, ctx: GuardContext, intentIn: SetupIntent, args: { message: FirstMessage | null; options: StartOptions }): Promise<Guarded> {
@@ -49,7 +50,31 @@ export async function guardIntentStart(s: Setup, ctx: GuardContext, intentIn: Se
   intent = await ctx.bindTrust(intent, true, args.options.trust);
   intent = await ctx.putIntent(intent);
 
-  const reject = async (outcome: Rejection): Promise<[StartOutcome, null]> => [await ctx.rejectIntent(appSessionId, outcome), null];
+  const verdict = await judgeIntent(s, intent, { startAnyway: args.options.startAnyway === true, relay: 'probe' });
+  if (verdict.kind === 'rejected') return [await ctx.rejectIntent(appSessionId, verdict.outcome), null];
+  if (verdict.kind === 'card') return [verdict.outcome, null];
+  const { route, directFallback } = verdict;
+
+  // guards passed: the pin is minted once and kept across retries; a bootstrap an interrupted attempt left goes
+  let progress = intent.progress.lastFailure === null ? intent.progress : { ...intent.progress, lastFailure: null }; // a new attempt
+  if (progress.engineSessionId === null) progress = { ...progress, engineSessionId: randomUUID() as NonNullable<typeof progress.engineSessionId> };
+  if (progress.bootstrap !== null && (await ctx.forgetQuietly(progress.bootstrap.appSessionId))) progress = { ...progress, bootstrap: null };
+  if (progress !== intent.progress) await ctx.putIntent({ ...intent, progress, updatedAt: s.now() });
+  // ticket 851 (D4): an intent whose prestart this spine asked offers the host its engine
+  const adopt = ctx.adopting?.(appSessionId) === true;
+  return [{ status: 'starting', appSessionId }, () => runIntentSetup(s, appSessionId, { route, directFallback, ...(adopt && { adopt }) })];
+}
+
+// What an intent's start guards answer of the intent as the start has written it, writing nothing: a rule's rejection
+// (the start hands the message back), a card (`needs_trust`, the relay's), or the route the attempt runs on.
+// Ticket 851 (docs/doperpowers/plans/2026-11-24-prestart-engine.md, D8): the prestart asks the same with `relay:
+// 'cached'`: the relay's last health is read, never a fresh probe; one known down is the relay's card, with no fallback
+// to the direct route, and a cold cache (no fresh check) judges nothing.
+export type IntentVerdict = { kind: 'rejected'; outcome: Rejection } | { kind: 'card'; outcome: StartOutcome } | { kind: 'passed'; route: Route; directFallback: boolean };
+
+export async function judgeIntent(s: Setup, intent: SetupIntent, opts: { startAnyway: boolean; relay: 'probe' | 'cached' }): Promise<IntentVerdict> {
+  const appSessionId = intent.appSessionId;
+  const reject = (outcome: Rejection): IntentVerdict => ({ kind: 'rejected', outcome });
   const verdict = await checkLocation(s, intent, { forStart: true });
   if (!verdict.ok) {
     return reject(verdict.kind === 'invalid' ? { status: 'invalid', appSessionId, field: verdict.field, message: verdict.message } : { status: 'missing_directory', appSessionId, directory: verdict.directory });
@@ -74,32 +99,26 @@ export async function guardIntentStart(s: Setup, ctx: GuardContext, intentIn: Se
   // kept (a retry checkLocation accepted), where it stands
   const projected = location.kind === 'newWorktree' && !(await retainedMatches(s, intent));
   const site: SettingsSite = projected ? await newWorktreeSettings(s, location) : { cwd: await sessionDirectoryOf(s, location) };
-  const machine = route === 'machine' ? await guardMachineRoute(s, { site, model: intent.model, flagEnv: launchProfileEnv(s), startAnyway: args.options.startAnyway === true }) : null;
+  const machine = route === 'machine' ? await guardMachineRoute(s, { site, model: intent.model, flagEnv: launchProfileEnv(s), startAnyway: opts.startAnyway, relay: opts.relay }) : null;
   if (machine !== null && 'refused' in machine) return reject({ status: 'invalid', appSessionId, ...machine.refused });
 
   // the card outcomes: the message stays with the intent until the card's continuation, a release or the handoff
   const trust = await trustStateOf(trustDirectoryOf(location), { git: s.git, env: s.env });
-  if (!trust.trusted && intent.trust === 'unanswered') return [{ status: 'needs_trust', appSessionId, trust }, null];
-  if (machine !== null) return [{ status: 'relay_unreachable', appSessionId, health: machine.relay }, null];
+  if (!trust.trusted && intent.trust === 'unanswered') return { kind: 'card', outcome: { status: 'needs_trust', appSessionId, trust } };
+  if (machine !== null) return { kind: 'card', outcome: { status: 'relay_unreachable', appSessionId, health: machine.relay } };
   let directFallback = false;
   if (route === 'gateway') {
-    const health = await hostCall(s.dispatch, 'engine.relayHealth', { force: true });
-    if (!health.ok) {
-      if (s.settings().gateway.relayUnreachable === 'direct' && !isGatewayModel(intent.model ?? '')) {
+    const health = await relayHealthOf(s, opts.relay); // ticket 851 (the xhigh panel, scalpel-3 finding 5): the prestart's never probes
+    if (health !== null && !health.ok) { // null: the prestart's cold cache, which judges nothing (Send's probe does)
+      if (opts.relay === 'probe' && s.settings().gateway.relayUnreachable === 'direct' && !isGatewayModel(intent.model ?? '')) {
         route = 'direct';
         directFallback = true;
       } else {
-        return [{ status: 'relay_unreachable', appSessionId, health }, null];
+        return { kind: 'card', outcome: { status: 'relay_unreachable', appSessionId, health } };
       }
     }
   }
-
-  // guards passed: the pin is minted once and kept across retries; a bootstrap an interrupted attempt left goes
-  let progress = intent.progress.lastFailure === null ? intent.progress : { ...intent.progress, lastFailure: null }; // a new attempt
-  if (progress.engineSessionId === null) progress = { ...progress, engineSessionId: randomUUID() as NonNullable<typeof progress.engineSessionId> };
-  if (progress.bootstrap !== null && (await ctx.forgetQuietly(progress.bootstrap.appSessionId))) progress = { ...progress, bootstrap: null };
-  if (progress !== intent.progress) await ctx.putIntent({ ...intent, progress, updatedAt: s.now() });
-  return [{ status: 'starting', appSessionId }, () => runIntentSetup(s, appSessionId, { route, directFallback })];
+  return { kind: 'passed', route, directFallback };
 }
 
 // P3-H (P3 Decision Log 88): a `requireEmptyMessage` start meeting a first message, in the request or retained (an

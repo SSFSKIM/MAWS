@@ -733,6 +733,10 @@ export class Endpoint implements EndpointModule {
         this.calls.event(owner, message); // P5 O7 M6: a record moved under an `each-session` call in flight
         // U9: a lane B session's listing follows its record (archived, its title)
         if (owner === 'machine' && message.name === 'session.changed') void this.rl10.members.recordChanged((message.payload as { record?: unknown } | null)?.record);
+        // ticket 851 (R4-6): a prestart's pin hidden, committed or ended: its sminos member held, processed or dropped
+        if (owner === 'engine-host' && message.name === 'engine.prestart') this.rl10.members.prestart(message.payload).catch((error: unknown) => log(`endpoint: a prestart's word was not taken: ${(error as Error).message}`));
+        // ticket 851 (M4's review, finding 1): the engine host's start-up adoptions ended: the pins its hidden set left out settle
+        if (owner === 'engine-host' && message.name === 'host.supervisorStatus') this.rl10.members.hostStatus(message.payload).catch((error: unknown) => log(`endpoint: the prestart pins left out were not settled: ${(error as Error).message}`));
         this.sessionSafe?.event(owner, message); // P5 O7 M5a2: a record moved under an artifact answer being told
         this.laneB.event(owner, message);
         this.streams.event(owner, message);
@@ -745,9 +749,13 @@ export class Endpoint implements EndpointModule {
       // the project registry: the index's declared rows moved (a row, a statement, the index loaded)
       this.#options.projectsSource?.onChange(() => this.registry.own.kick()) ?? (() => {}),
       services.onUpstream((link) => {
-        if (!link.connected) return this.assetHolds.upstreamLost(); // P5 O7 M5c round 3: the host released its connection's holds
+        if (!link.connected) {
+          this.rl10.members.hostLinkLost(); // ticket 851 (the prestart panel, scalpel-5#1): a settlement begun on it decides nothing more
+          return this.assetHolds.upstreamLost(); // P5 O7 M5c round 3: the host released its connection's holds
+        }
 
         this.laneB.restate();
+        this.rl10.members.restatePrestarts().catch((error: unknown) => log(`endpoint: the hidden prestarts were not restated: ${(error as Error).message}`)); // ticket 851 (R4-6): the hidden set, whole, at each link
         this.planeB.relinked(); // P5 O3-D D41: each streaming of the link, every subscription catches up from its cursor
       }),
     );

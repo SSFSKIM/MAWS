@@ -40,11 +40,13 @@ export const commands = [
   'session.operations', // P5 O7 M8: the outcomes the engine host keeps by opId
   'session.steer.sendNow', // UX wave U4a: a message that waits at the next step, sent now through the engine's own request
   'session.tellAgent', // the direct tell: the person's text to one of the session's agents, through the built-in mod
+  'session.intent.prestart', 'session.intent.prestart.withdraw', // ticket 851, M3: the window's prestart of a New chat's engine
 ] as const;
 
 // P4-AGG M4: the engine's own MCP sign-in, main's sign-in operation alone (src/services/connectors/sign-in.ts)
 // P5 O3-D: a client's session streams on mawsd's services front and the mirror's visible set, main's and mawsd's clients'
-export const mainOnlyCommands = ['session.mcpAuthenticate', 'session.mcpOAuthCallback', 'session.follow', 'session.visible', 'session.engineStatuses' /* M5b fix round 6 */] as const;
+// Ticket 851, M2: the spine's prestarts, from its engine-host link alone
+export const mainOnlyCommands = ['session.mcpAuthenticate', 'session.mcpOAuthCallback', 'session.follow', 'session.visible', 'session.engineStatuses' /* M5b fix round 6 */, 'session.prestart', 'session.prestart.withdraw', 'session.prestart.release'] as const;
 
 export const events = [
   'session.eventBatch', 'session.status', 'session.queue', 'session.brokerItems', 'session.operation',

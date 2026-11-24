@@ -112,6 +112,9 @@ export interface NormalizerState {
   // UX wave U4a (the U4a document, Interfaces B; decision 32): the messages sent now and whether a stop was asked since the
   // last end, and what tells the engine's replay of several waiting prompts from an echo (`normalizer-send-now.ts`)
   sendNow: SendNowState;
+  // Ticket 851, M2's review (finding 11): within a prestart's hidden period (the `meta prestart` rows), a toast and a
+  // surface ask are dropped, live and on every rebuild, as the host dropped them while the row was hidden
+  prestartHidden?: boolean;
 }
 
 // C10 start: the engine's trust line on stderr (fixture pass2/trust-no-attestation seq 5). It is printed at settings
@@ -181,6 +184,7 @@ export class Normalizer {
           break;
         }
       }
+      if (this.state.prestartHidden === true) return out.events.filter((event) => event.kind !== 'plugin.toast' && event.kind !== 'plugin.ask');
     } catch (error) {
       const message = error instanceof z.ZodError ? error.issues.map((i) => `${i.path.join('.') || '<root>'}: ${i.message}`).join('; ') : error instanceof Error ? error.message : String(error);
       out.emit({ kind: 'error.raised', scope: 'transport', message: `row ${row.seq} could not be normalised: ${message}`, code: 'invalid_frame', toolUseId: null, taskId: null, requestId: null }, null);
@@ -779,6 +783,9 @@ export class Normalizer {
         out.emit({ kind: 'notice.posted', level, text: stringOrNull(meta.text) ?? '', key: stringOrNull(meta.key) }, main);
         return;
       }
+      case 'prestart': // ticket 851
+        this.state.prestartHidden = meta.phase === 'hidden';
+        return;
       case 'answer_note':
         if (typeof meta.requestId === 'string' && typeof meta.note === 'string') this.state.answerNotes.set(meta.requestId as RequestId, meta.note);
         return;

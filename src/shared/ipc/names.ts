@@ -165,8 +165,8 @@ export const MAIN_ONLY_COMMANDS: readonly MainOnlyCommandName[] = [...engine.mai
 export type BridgedEventName = { [N in Namespace]: Names[N]['events'][number] }[Namespace];
 // P5 O8 M7b: an event main and the endpoint hear and no window does: the preload refuses its subscription, and main sends
 // it to no window, whichever path brings it (src/main/ipc/events.ts).
-export type MainOnlyEventName = (typeof channel.mainOnlyEvents)[number] | (typeof projects.mainOnlyEvents)[number]; // the project registry's M12: the act request, main's to show
-export const MAIN_ONLY_EVENTS: readonly MainOnlyEventName[] = [...channel.mainOnlyEvents, ...projects.mainOnlyEvents];
+export type MainOnlyEventName = (typeof channel.mainOnlyEvents)[number] | (typeof projects.mainOnlyEvents)[number] /* the project registry's M12: the act request, main's to show */ | (typeof engine.mainOnlyEvents)[number]; // ticket 851: a prestart's word, the endpoint's
+export const MAIN_ONLY_EVENTS: readonly MainOnlyEventName[] = [...channel.mainOnlyEvents, ...projects.mainOnlyEvents, ...engine.mainOnlyEvents];
 
 // Pure, so a bundle that takes only `NAMESPACES` or a channel (the renderer and main, through `./schema.ts`) drops
 // the lists; the renderer's and main's bundles are byte-identical to before the split.

@@ -54,7 +54,8 @@ async function endpoint() {
     listings: { report: async () => {}, gone: async () => {}, refresh: async () => {}, listedSessions: () => [] },
     notifier: { pendingSet: () => {}, requestMessage: () => {}, hostMessage: () => {}, forget: () => {} },
     machineOwners: async () => [],
-    dispatch: () => Promise.reject(new Error('none')),
+    // no host answers but its hidden set, which holds no prestart (ticket 851: a lane B member is held until it is known)
+    dispatch: async (_owner, name) => (name === 'engine.prestarts' ? { t: 'res', id: '0', ok: true, value: { hidden: [] } } : Promise.reject(new Error('none'))),
     now: Date.now,
     log: () => {},
   });

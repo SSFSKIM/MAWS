@@ -196,6 +196,8 @@ const REVIEWED_STRING_RECORDS: Readonly<Record<string, string>> = {
   'commands.session.history.list.output.entries[].pastedContents': PASTED,
   'commands.session.launch.input.spec.mcpConfig': ENGINE_JSON,
   'commands.session.launch.input.spec.extraSettings': ENGINE_JSON,
+  'commands.session.prestart.input.spec.mcpConfig': ENGINE_JSON, // ticket 851, M2: the launch spec a prestart launches
+  'commands.session.prestart.input.spec.extraSettings': ENGINE_JSON,
   'commands.session.launch.output<status=launching>.session.modelOverrides': MODEL_OVERRIDES,
   'commands.session.pendingRequest.output.event<kind=question.answered>.answers': ANSWERS,
   'commands.session.pendingRequest.output.event<kind=usage.sample>.modelUsage': MODEL_USAGE,

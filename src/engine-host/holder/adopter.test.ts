@@ -268,7 +268,7 @@ describe('the launcher’s adoption', () => {
   it('a failure after the reservation is the adoption’s, counted by adoptAll', async () => {
     const { entry } = launched();
     const a = await adopter({ responder: { initialize: () => ({ error: 'no session to resume' }) } });
-    const counting = adoptAll([entry], { adopt: (e) => a.adopt(e), log: () => {} });
+    const counting = adoptAll([entry], { adopt: (e) => a.adopt(e), end: async () => 'ended' as const, log: () => {} });
     await until(() => a.transports.length === 1, 'the attach');
     caughtUp(a.transports[0]!);
     const outcome = await counting;
@@ -283,7 +283,7 @@ describe('the launcher’s adoption', () => {
   it('past its bound an adoption is counted failed and left running, never killed', async () => {
     const { entry } = launched();
     const a = await adopter({ adoptMs: 300 });
-    const counting = adoptAll([entry], { adopt: (e) => a.adopt(e), log: () => {} });
+    const counting = adoptAll([entry], { adopt: (e) => a.adopt(e), end: async () => 'ended' as const, log: () => {} });
     const outcome = await counting;
     expect(outcome.failed.map((f) => f.reason)).toEqual([expect.stringMatching(/not ready within 0\.3 s/)]);
     const session = a.table.get(ID)!;

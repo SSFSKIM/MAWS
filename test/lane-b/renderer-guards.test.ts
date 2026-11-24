@@ -34,6 +34,10 @@ const GUARDED_ELSEWHERE: Readonly<Record<string, Entries>> = {
     commands: ['session.start', 'session.intent.patch', 'session.intent.release', 'session.intent.resolveWorktree', 'session.intent.discard'],
     guard: 'acts on intents of useSetup, which come from session.create and session.intent.list, both this Mac’s',
   },
+  'sessions/prestart.ts': {
+    commands: ['session.intent.prestart', 'session.intent.prestart.withdraw'],
+    guard: 'the composer asks only for an unstarted New chat of useSetup (a create intent, this Mac’s) with no spawn target, and withdraws when the tab takes one (ticket 851)',
+  },
   'sessions/connect.ts': {
     commands: ['session.intent.discard'],
     guard: 'a relaunch’s sweep of empty New chats: its candidates are useSetup’s intents as session.intent.list (this Mac’s) answered them, before any chat of this run exists, and no RL2 machine answers session.create (UX wave U13a)',
