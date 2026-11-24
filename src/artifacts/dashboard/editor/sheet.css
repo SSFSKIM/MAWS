@@ -262,13 +262,15 @@
 .dash-sheet-status,
 .dash-sheet-empty,
 .dash-sheet-loading {
-  /* the line the rows' wait stands in holds its height from the start, so the quiet spinner moves nothing as it shows */
-  display: flex;
-  align-items: center;
-  min-height: 1lh;
   margin: 0;
   overflow-wrap: anywhere;
   word-break: keep-all;
+}
+/* the line the rows' wait stands in holds its height from the start, so the quiet spinner moves nothing as it shows */
+.dash-sheet-loading {
+  display: flex;
+  align-items: center;
+  min-height: 1lh;
 }
 .dash-sheet-label,
 .dash-sheet-status,

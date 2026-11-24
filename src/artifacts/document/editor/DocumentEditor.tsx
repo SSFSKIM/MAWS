@@ -496,6 +496,7 @@ function TabEditor({ tabId, tabTitle, newSection, artifactId, handle, host, rend
   const [findOpen, setFindOpen] = useState(false);
   // the word cut (G385): a shown thread whose margin card takes the keyboard to its reply field (Showing's `reply`)
   const [replyAsked, setReplyAsked] = useState<ReplyAsked | null>(null);
+  const replyTaken = useCallback(() => setReplyAsked(null), []); // consumed once the field has the keyboard: asked once
   const preview = historySnapshot?.preview ?? null;
   const openCount = useOpenThreadCount(handle.doc);
   // What Comment reads when it runs (a keystroke or a click after any render), kept current after each render.
@@ -595,7 +596,7 @@ function TabEditor({ tabId, tabTitle, newSection, artifactId, handle, host, rend
       const block = range ? -1 : blockPos(editor, handle.doc, showing.threadId);
       if (!range && block < 0) return false;
       (range ? editor.chain().setTextSelection(range) : editor.chain().setNodeSelection(block)).setActiveThread(showing.threadId).scrollIntoView().run();
-      if (showing.reply) setReplyAsked({ threadId: showing.threadId, serial: showing.serial });
+      setReplyAsked(showing.reply ? { threadId: showing.threadId, serial: showing.serial } : null);
       onShown();
       return true;
     };
@@ -704,6 +705,7 @@ function TabEditor({ tabId, tabTitle, newSection, artifactId, handle, host, rend
       {findOpen && <FindBar ref={findField} editor={shown} onClose={() => setFindOpen(false)} />}
       <PageFrame
         replyAsked={replyAsked}
+        onReplyTaken={replyTaken}
         editor={shown}
         live={editor}
         previewEditor={preview ? previewEditor : null}
@@ -740,6 +742,7 @@ function TabEditor({ tabId, tabTitle, newSection, artifactId, handle, host, rend
 interface PageFrameProps {
   /** The word cut (G385): the margin card that takes the keyboard to its reply field once active. */
   replyAsked: ReplyAsked | null;
+  onReplyTaken(): void;
   /** The editor on screen: the preview's while a version shows, else the live one. */
   editor: Editor;
   live: Editor;
@@ -768,7 +771,7 @@ interface PageFrameProps {
   onNewChanges(): void;
 }
 
-function PageFrame({ replyAsked, editor, live, previewEditor, handle, author, comments, tabId, preview, history, pill, pageScope: Scope, onPage, marginView, onMarginTier, drafts, onDraftChange /* P4-B1 */, readOnly, onComment, enterRef, growRef /* P4-A2 */, onNewChanges }: PageFrameProps) {
+function PageFrame({ replyAsked, onReplyTaken, editor, live, previewEditor, handle, author, comments, tabId, preview, history, pill, pageScope: Scope, onPage, marginView, onMarginTier, drafts, onDraftChange /* P4-B1 */, readOnly, onComment, enterRef, growRef /* P4-A2 */, onNewChanges }: PageFrameProps) {
   const editors = useShowEditors(live, history, tabId, preview === null);
   const frame = useRef<HTMLDivElement>(null);
   const [layout, setLayout] = useState(0);
@@ -924,6 +927,7 @@ function PageFrame({ replyAsked, editor, live, previewEditor, handle, author, co
           drafts={drafts} // P4-B1
           onDraftChange={onDraftChange} // P4-B1
           replyAsked={replyAsked} // the word cut (G385)
+          onReplyTaken={onReplyTaken}
         />
       )}
     </div>

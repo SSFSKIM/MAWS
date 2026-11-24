@@ -312,7 +312,12 @@ describe('the word cut in the source sheet', () => {
     expect(within(line).queryByRole('progressbar')).toBeNull();
     await act(() => new Promise((resolve) => setTimeout(resolve, 600)));
     expect(within(line).getByRole('progressbar', { name: 'Reading the rows…' })).toBeTruthy();
-    expect(sheetCss.replace(/\s+/g, ' ')).toMatch(/\.dash-sheet-loading \{[^}]*min-height: 1lh;/); // the line's height held from the start
+    // the line's height held from the start, on the wait's line alone: the sheet's other lines keep their flow (their
+    // words, a clock and a button spaced as text) and an empty one takes no height
+    const css = sheetCss.replace(/\/\*[\s\S]*?\*\//g, '');
+    const rules = [...css.matchAll(/([^{}]+)\{([^{}]*)\}/g)].map(([, head, body]) => ({ selectors: head!.split(',').map((part) => part.trim()), body: body!.replace(/\s+/g, ' ') }));
+    expect(rules.filter((rule) => /min-height: 1lh|display: flex/.test(rule.body) && rule.selectors.some((selector) => selector.startsWith('.dash-sheet-') && /note|label|status|empty|description/.test(selector)))).toEqual([]);
+    expect(rules.some((rule) => rule.selectors.length === 1 && rule.selectors[0] === '.dash-sheet-loading' && rule.body.includes('min-height: 1lh;'))).toBe(true);
     act(() => answer(page('assets/sales.tsv')));
     await until(() => bodyRows().length > 0, 'the rows');
   });

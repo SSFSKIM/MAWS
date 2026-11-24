@@ -59,6 +59,8 @@ export interface ThreadCardProps {
   /** A request (its serial) to take the keyboard to the reply field once the card is active: the word cut (G385) put
    * the field on the active card only, and the card that asked may have closed before this one became active. */
   replyAsked?: number;
+  /** The field took the keyboard for `replyAsked`: the request's owner drops it, so it is answered once. */
+  onReplyTaken?(): void;
 }
 
 
@@ -83,7 +85,7 @@ const isTextField = (target: EventTarget): boolean =>
   (target instanceof HTMLTextAreaElement || target instanceof HTMLInputElement || target instanceof HTMLSelectElement || (target instanceof HTMLElement && target.isContentEditable)) &&
   !(target instanceof HTMLInputElement && ['checkbox', 'radio', 'button', 'submit', 'reset'].includes(target.type));
 
-export function ThreadCard({ thread, active, compact, onActivate, onReply, onResolve, onReopen, draft, onDraftChange, onNext, onPrevious, onExit, position, showQuote = false, tabTitle = null, readOnly = false, replyAsked }: ThreadCardProps) {
+export function ThreadCard({ thread, active, compact, onActivate, onReply, onResolve, onReopen, draft, onDraftChange, onNext, onPrevious, onExit, position, showQuote = false, tabTitle = null, readOnly = false, replyAsked, onReplyTaken }: ThreadCardProps) {
   const replyField = useRef<HTMLTextAreaElement>(null);
   // set by the card's own click, so the activation that click causes moves the keyboard to the reply field; cleared
   // once the activation lands or the focus leaves the card
@@ -97,13 +99,12 @@ export function ThreadCard({ thread, active, compact, onActivate, onReply, onRes
   const whole = active || !compact;
   const replying = active && open && !readOnly; // the word cut (G385): the active card's only
   // the word cut (G385): a reply asked of this card from elsewhere (the panel's card that asked closed with the panel)
-  // takes the keyboard to the field once the card is active, once per request
-  const answered = useRef<number | undefined>(undefined);
+  // takes the keyboard to the field once the card is active; the asker then drops the request, so it is answered once
   useEffect(() => {
-    if (replyAsked === undefined || replyAsked === answered.current || !replying) return;
-    answered.current = replyAsked;
+    if (replyAsked === undefined || !replying) return;
     replyField.current?.focus();
-  }, [replyAsked, replying]);
+    onReplyTaken?.();
+  }, [replyAsked, replying, onReplyTaken]);
   const { messages } = thread;
   const hidden = whole ? 0 : Math.max(0, messages.length - 1 - COMPACT_LATEST);
   const head = hidden > 0 ? messages.slice(0, 1) : messages;

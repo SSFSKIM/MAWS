@@ -958,11 +958,16 @@ describe('resolve, orphans, the panel (Z1 to Z3, Z5) and the rail state (D5)', (
     expect(screen.queryByRole('complementary', { name: 'Comments' })).toBeNull();
     expect(activeThread(m.editor().state)).toBe('t1');
     await until(() => document.activeElement === within(entry('t1')!).queryByRole('textbox', { name: 'Reply' }), 'the margin card’s reply field focused');
-    // asked once: the field does not take the keyboard back after it leaves
+    // asked once: the editor drops the request once the field has the keyboard, so a card drawn again (the icon tier
+    // unmounts an inactive card) opens with no new gesture and takes nothing
     act(() => (document.activeElement as HTMLElement).blur());
-    m.rerender({ rail: null });
+    act(() => void m.editor().commands.setActiveThread(null));
     await settle();
-    expect(document.activeElement).not.toBe(within(entry('t1')!).queryByRole('textbox', { name: 'Reply' }));
+    expect(entry('t1')!.querySelector('[data-thread]'), 'the card unmounted with its activation').toBeNull();
+    act(() => void m.editor().commands.setActiveThread('t1'));
+    await settle();
+    const field = within(entry('t1')!).getByRole('textbox', { name: 'Reply' });
+    expect(document.activeElement).not.toBe(field);
   });
 
   // P4-B1 (review finding 2): an orphan has no passage for the margin to draw it beside, so choosing it keeps the panel

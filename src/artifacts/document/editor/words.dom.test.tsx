@@ -85,7 +85,9 @@ describe('the toolbar’s glyphs (G332, G333, G335, G336)', () => {
 describe('the table’s commands (G331) and the worded buttons (G337)', () => {
   const inTable = async () => {
     const editor = await mount({ type: 'doc', content: [{ ...tableJSON(2, 2), attrs: { id: 'tb1' } }, { type: 'paragraph', attrs: { id: 'p1' }, content: [{ type: 'text', text: 'After.' }] }] });
-    act(() => void editor.chain().focus().setTextSelection(4).run());
+    // the caret in the table without the focus command, whose focus lands a frame later and would take the keyboard
+    // back from an open menu (a focus outside it closes it)
+    act(() => void editor.commands.setTextSelection(4));
     await until(() => within(toolbar()).queryByRole('button', { name: 'Table' }) !== null, 'the Table menu’s button');
     return editor;
   };
@@ -124,7 +126,7 @@ describe('the table’s commands (G331) and the worded buttons (G337)', () => {
     press('Enter');
     await until(() => menu() === null, 'the menu closed by the command');
     expect(editor.state.doc.firstChild!.childCount).toBe(3);
-    expect(editor.view.dom.contains(focused()), 'the command runs in the page, which keeps the focus').toBe(true);
+    await until(() => editor.view.dom.contains(focused()), 'the focus in the page, where the command ran');
     expect(editor.state.selection.from).toBe(selection); // the caret where it was: the row went below it
 
     act(() => button('Table').focus());
