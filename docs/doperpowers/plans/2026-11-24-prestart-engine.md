@@ -14,7 +14,20 @@
 > - **It stays invisible until commit.** A host-side "uncommitted" flag hides the row from everything outside the host.
 > - **Commit is one host operation:** `session.launch` with an `adopt` field. Around it, the spine's Send runs today's launch path unchanged, in today's order.
 >
-> Recovery therefore never meets a prestart. After any crash the engine is gone and Send launches as today. The first two reviews' nineteen findings are accounted for under "The findings of both reviews", and the stop rule is answered in "Does the structure close it?".
+> Recovery therefore never meets a prestart. After any crash the engine is gone and Send launches as today. The first two reviews' nineteen findings are accounted for under "The findings of all three reviews", and the stop rule is answered in "Does the structure close it?".
+>
+> **Revision 4 (2026-11-24): the third review folded in.** The third review (of `0b3277679`) kept the ephemeral host design and found five P1s and four P2s. The architect and I recommended parking; the owner chose to fold them in and build. "Revision 4: the third review's rules" gives each finding its rule and its test, R4-1 to R4-9; where a rule amends D1–D11, that decision says so. In short:
+> - **The durable commit point** is a promotion the native session host writes and acknowledges.
+> - **Staging.** The hosted sequence map is staged with the journal.
+> - **One gate.** The host keeps a public and an internal view of its rows, and publishes a snapshot at commit.
+> - **The spine** fences its own request with an epoch.
+> - **Send's reply** never waits for the surface.
+> - **The endpoint** holds an uncommitted pin's member.
+> - **Ownership.** A prestart is owned by the spine root that asked for it, not the daemon's link.
+> - **The buffer** has a byte ceiling.
+> - **Adoption** takes only a row in a claimable state.
+>
+> The native holder's work comes first, as its own milestone (M1).
 
 ## Purpose
 
@@ -89,13 +102,13 @@ Until Send, the engine belongs to the draft, not to any session. Nothing outside
 - **The admission.** The host registers the admission synchronously, in the handler, before its first await. The admission names the asking connection (its `ClientRef`) and carries a generation number the host assigns. Every later event for that id cancels an admission whose launch has not started yet: a newer prestart, `session.launch`, `withdraw`, `forget`, `stop`, or the connection ending. The launcher re-checks the admission after its probes and before it spawns (`launcher.ts`), so a cancelled admission never spawns.
 - **At most one uncommitted row per host,** as in both reference apps. A prestart for another intent kills the older one: the latest typing wins.
 
-**D2 · An uncommitted row is visible to nothing outside the host.** Revision 2 had a filter per reader; revision 3 has a single gate in the host. Until commit:
+**D2 · An uncommitted row is visible to nothing outside the host** (the gate is widened to every public projection by R4-3, and to the endpoint by R4-6). Revision 2 had a filter per reader; revision 3 has a single gate in the host. Until commit:
 - **No events and no listing.** The host emits no `session.status` or `session.eventBatch` for the row. `engine.sessions` leaves it out, so no listing of the spine, the renderer, the budget or the connectors sees it, and RL10 has no app id to join it to (D11). `session.status` and every other command naming the id answer as for an id with no row. The exceptions are the ones D3, D4 and D10 define.
 - **No surface.** The handshake skips `ui_attach` and `ui_panes` (`surface.ts`), so no plugin pane, roster, focus request or prompt ask can reach a window. The engine may still send surface requests before attach. The host answers them itself and forwards nothing: `ui_copy` with `copied: false` (the clipboard untouched), `ui_prompt_read` with an empty box, `ui_prompt_fill` with `filled: false`, `ui_prompt_suggest` with `shown: false`. A decoded `plugin.toast` is dropped.
 - **In the budget.** The budget sheets' lists leave the row out. Under memory pressure, the budget releases it before any idle session.
 - **Interest and idle release** treat it as a row (D9).
 
-**D3 · Nothing durable, and it dies with its owner.**
+**D3 · Nothing durable, and it dies with its owner** (the roster mark and its end are the native host's, R4-1; the sequence map is staged with the journal, R4-2; the owner is the spine root, R4-7; the buffer is capped, R4-8).
 - **On disk.** The journal rows of an uncommitted row (spawn, initialize, hook frames) are kept in memory. The state file, the stored spec and the observed facts are not written. All of them are flushed at commit.
 - **The session host's roster entry** carries `prestart: true` until commit. It is the one on-disk trace, and its only reader is a successor host. A successor stops such a host rather than adopting it (`holder/adopt.ts`), and so does a handover's drain.
 - **Killing.** "Kill" means stop the engine and drop the row: no released set entry, no files left.
@@ -109,7 +122,7 @@ Until Send, the engine belongs to the draft, not to any session. Nothing outside
 
 The spine keeps no state that outlives it (D10). Its recovery never meets a prestart: once the host restarts or the connection ends, the engine is gone.
 
-**D4 · Commit is one host operation: `session.launch` with `adopt`.** At Send, `runIntentSetup` runs exactly as today. The only difference is that `launchOnHost` sends `adopt: { key }` beside the spec. The host handles it under the id's serialization:
+**D4 · Commit is one host operation: `session.launch` with `adopt`** (its order is set by R4-1, R4-3 and R4-5, its precondition by R4-9). At Send, `runIntentSetup` runs exactly as today. The only difference is that `launchOnHost` sends `adopt: { key }` beside the spec. The host handles it under the id's serialization:
 - **Adopt** when all of these hold:
   - an uncommitted row exists for the id;
   - its spec equals the given spec, ignoring `sessionId` (the pin the guards minted);
@@ -184,7 +197,7 @@ M0 showed that mode, model and effort hold when set live (W5). But their answers
   - with `MAWS_E2E=1`, a prestart happens only under `MAWS_E2E_PRESTART=1`;
   - never under the replay seam or the stub session source, where each launch takes the next fixture.
 
-**D10 · The spine and the trigger.**
+**D10 · The spine and the trigger** (the spine fences its own request, R4-4).
 - **The trigger.** The composer calls `session.intent.prestart { appSessionId }` on the leading edge of the first change that leaves the document non-empty. After that it calls at most once every 10 s while the draft stays non-empty, so a prestart that was killed comes back with the next keystroke.
   - *Beaten:* the draft save, whose 750 ms trailing debounce waits for a pause in typing.
 - **The spine:**
@@ -194,7 +207,7 @@ M0 showed that mode, model and effort hold when set live (W5). But their answers
 - **What the spine keeps.** It keeps only an in-memory set of the ids it asked for. After an `intent.patch` that changes a launch-relevant field of one of them, it asks again, or withdraws if the intent is no longer eligible. The patch answers once the intent is written, and the request follows. A chip's acknowledgement never waits for a boot, and ticket 854's barrier (Send waits for every write it started) is unchanged.
 - **Losing the set** (a spine restart) loses nothing: the host killed those rows when the connection ended.
 
-**D11 · The desk and sminos (step 3 of the coordinator's brief).**
+**D11 · The desk and sminos (step 3 of the coordinator's brief)** (the endpoint's other marks are held, R4-6).
 - **The desk cannot show an uncommitted engine as a session.** A sminos member on lane B is listed under its app id, once joined (`rl10/members.ts`, `listingId`). A join comes from one of two sources:
   - `engine.sessions` (`#join`), which leaves out the row (D2);
   - a spawn proof (`#bySpawn`), which a local New chat does not have.
@@ -226,9 +239,164 @@ M0 showed that mode, model and effort hold when set live (W5). But their answers
   - **Reported:** both medians and their difference. The live model's own `message_start` time (0.6–1.4 s on 2026-11-23) is the same in both arms, and is reported only as that estimate.
 - **A live run** with the owner's hooks spends a message per Send, so it waits for the owner's word.
 
-## The findings of both reviews
+## Revision 4: the third review's rules
 
-Round 1 reviewed `258d98442`; round 2 reviewed `b3ec9b017`. Each row says whether the finding is closed by the structure (S), closed by a specific change (C), or still open (O).
+Each rule answers one finding of the third review (`reports/prestart-review-3.md`). Each was checked in the code it cites before it was written. Each rule names its test.
+
+**R4-1 · The durable commit point is the native host's promotion (P1).**
+The roster entry is written by the native session host, not by the engine host (`native/session-host/host/host.go` `writeRoster`, `persist`). Today the native protocol has no promotion and no acknowledgement of one (`holder/protocol.ts`).
+
+*Native protocol*
+- **Launch.** `launch` gains `prestart: true`. The host writes its roster entry with `prestart: true` from the start.
+- **Promote.** A new client message, `{ t: 'promote' }`, makes the host rewrite the entry without the mark. It answers `{ t: 'promoted', ok: true }` only once that write succeeded.
+  - A failed write answers `ok: false` with the message, and the entry stays marked. Unlike `persist`, which only warns, a failed promotion is reported back.
+  - A second `promote` answers `ok: true` again.
+  - A `promote` after the child has exited answers `ok: false`.
+- **Writer lost.** A marked host whose writer goes away (connection lost, or no writer at all) ends its child through the stop ladder, then exits. Today a writer's loss arms the no-child exit only when there is no child (`host.go` `reviewNoChild`).
+- **Successor.** An engine host reads the marked entry tolerantly and never adopts it. It ends the host (`end`, or the signals) and removes that launch's staged files (R4-2).
+
+*The engine host's adopt (D4), in order*
+1. Check the row is claimable (R4-9).
+2. Write the staged files (R4-2) and the state file, with the row still hidden.
+3. Send `promote` and wait for its answer.
+4. On `ok: true`, clear the hidden flag, publish (R4-3) and answer (R4-5).
+5. On `ok: false`, or no answer within its bound, end the engine. Remove the staged files, as for a marked successor, and launch fresh.
+
+*What a crash leaves*
+- **Before step 3:** a marked holder. Its successor ends it and removes the staged files.
+- **After the acknowledgement:** an ordinary, complete launch, which the successor adopts as today. The record already exists, because Send created it before `session.launch`.
+
+*Tests*
+- Native, Go, with fault injection through the roster's write seam (`rosterWrite`):
+  - a failed promotion write answers `ok: false` and the entry stays marked;
+  - a marked host loses its writer: the child ends and the host exits;
+  - an unmarked host keeps today's linger;
+  - `promote` twice;
+  - `promote` after the child's exit.
+- TypeScript:
+  - the successor ends a marked host and removes its files;
+  - an engine host killed between staging and promotion, and right after promotion.
+- The prebuilds are rebuilt and `scripts/check-session-host.sh` passes.
+
+**R4-2 · The hosted sequence map is staged with the journal (P1).**
+`recordHosted` (`engine-host/session.ts`) appends a `.hseq` line before each hosted row. A successor derives its replay frontier from those lines (`holder/checkpoint.ts`, `readCheckpoint`).
+
+*While hidden*
+- The rows and their map lines go to an in-memory stage, with their sequence numbers, timestamps and any retraction.
+- The native ring is acknowledged as rows enter the stage. A hidden holder is never replayed, because its successor ends it (R4-1).
+
+*At adopt, step 2*
+- The journal file and its map file are written whole: the map line before its row, in the original order, with the original sequence numbers and timestamps.
+- The frontier on disk then covers everything acknowledged before the holder becomes adoptable.
+- A stage that cannot be written fails the adopt, which goes through R4-1's step 5.
+
+*Tests*, through the native transport (the `hosted-launch` and `adopted-session` suites' harness):
+- no `.jsonl` and no `.hseq` exist before Send;
+- after promotion, `readCheckpoint` reads a frontier equal to the last acknowledged sequence;
+- an engine host killed right after promotion is adopted, and its replay has no gap and no duplicate.
+
+**R4-3 · Every public projection is gated, and a snapshot is published at commit (P1).**
+Revision 3's gate covered status, events and `engine.sessions`. The handshake also publishes:
+- the command catalogue, once per revision (`session.ts` `publishCatalog`);
+- the model list, which feeds a shared cache kept on disk (`session.ts` `emit('models')`);
+- the streams' `queue`, `brokerItems` and `checkpoint` (`ipc.ts`).
+
+The host's own counts also read every row (`supervision.ts`).
+
+*Two views of the table*
+- `public()` leaves hidden rows out. Every per-row emitter, every stream, every listing and every count clients see reads it: `engine.sessions`, `engine.pendingItems`, the supervisor status and its counts, and the budget's lists.
+- `all()` keeps them. The internal readers read it: the idle release, the budget's choice of what to release first, the handover's drain, the orphan ledger, and the filesystem monitor's own-PID set (`engine-host/index.ts`), so the prestart's own registry entry never reads as a foreign holder.
+
+*While hidden*
+- The latest catalogue and the latest model list are kept, not emitted.
+- Events, queue and broker items are kept within the stage's ceiling (R4-8).
+
+*At commit, step 4*
+- Publish the row's current status, queue, broker items, its catalogue (by revision), its model list (so the cache is written once, now) and its kept events.
+- Then emit nothing twice.
+
+*Tests*
+- During a real handshake, through the scripted engine transport, record every emitted name and every count. None is emitted for the hidden row.
+- At commit, each is emitted exactly once.
+
+**R4-4 · The spine fences its own request with an epoch (P1).**
+A host admission exists only after the spine's verdict and spec, and those await (the owner channel's style read, `owner/launch.ts`). A discard, a Send or a change of target can complete in between (`sessions/service.ts` `discard`).
+
+*The epoch*
+- `session.intent.prestart` sets the intent's epoch before its first await, and returns it as a token.
+- These end the current epoch: a discard; a Send (`startSession` marks `starting`); a withdraw; a target change; a newer request for the id.
+- Just before dispatching `session.prestart`, the spine checks the epoch is still current. A stale one dispatches nothing.
+
+*Withdraw*
+- `session.intent.prestart.withdraw` names the token, not the host's generation.
+- Replacements made by a patch keep the token, so the composer that asked can withdraw whatever generation now serves it.
+- A withdraw whose token is not current, or that arrives once Send has started, does nothing, so no window cancels another window's claim.
+
+*Tests*
+- A request held in the style read while a discard completes, then released: nothing is admitted.
+- The same with a Send.
+- A patch replacing a generation, then a withdraw by the first token.
+- Two windows, with a withdraw arriving after the other window's Send.
+
+**R4-5 · Send's reply never waits for the surface (P1).**
+`Surface.attach` awaits `ui_attach` and then `ui_panes` (`surface.ts`), each a bounded control of up to 8 s (`controls.ts`). `session.launch` has 10 s (`REQUEST_TIMEOUT_MS`). A fresh launch already answers before its handshake.
+
+The adopt answers `launching` right after step 4 of R4-1. The surface attaches afterwards, without being awaited. An attach that fails is logged, as today. The setup's watch, installed before dispatch (`setup.ts`), sees the snapshot's single ready status.
+
+*Tests*
+- With `ui_attach` and `ui_panes` held for 7 s each, the answer arrives at once.
+- One ready notification reaches the watch.
+- An attach that fails leaves the session running.
+
+**R4-6 · The endpoint holds a member whose pin is uncommitted (P2).**
+RL10 records a member's marks before it is joined:
+- the handed-off mark (`rl10/members.ts`, the `#changed` before `#join`);
+- the persisted audience (`rl10/policy-cache.ts`);
+- the project's presence through `sessionProjects()` (`rl10/link.ts`), which can register a project as known on this machine (`endpoint/registry.ts`).
+
+*The rule*
+- The engine host pushes an internal event, `engine.prestart { engineSessionId, state: 'hidden' | 'committed' | 'ended' }`, to its clients. A reconnecting client gets the current hidden set on its welcome.
+- The endpoint holds a lane B member whose engine session id is hidden. A held member gets no marks, no audience, no project presence and no listing.
+- At `committed`, the endpoint processes it as a member that has just arrived. At `ended`, it drops it with no trace.
+- An ordinary unjoined member keeps today's fail-closed marks.
+
+*Tests*
+- An abandoned first member of a new project: nothing written to `handed-off.json`, the policy cache or the project registry.
+- A committed member: processed, joined and listed. Checked on both the hub's publication and a direct desk read.
+
+**R4-7 · A prestart is owned by the spine root that asked for it (P2).**
+`mawsd` can release the spine root (yield, quiet release without re-exec) and keep its link to the engine host (`mawsd/spine-seam.ts`). `hostCall` names no client (`sessions/context.ts`).
+
+*The rule*
+- `session.prestart` carries `owner`, the spine root's id, made when the root loads.
+- The host ends every hidden row of an owner in two cases: when told `session.prestart.release { owner }`, which `mawsd` sends as it disposes of the root; and when the connection that carried the owner ends.
+
+*Test:* a spine root replaced on the same socket ends its prestarts, and the new root's request is admitted.
+
+**R4-8 · The stage has a byte ceiling (P2).**
+Every stderr line is journaled (`session.ts`). The memory budget samples engine process trees, not the host's heap.
+
+*The rule:* the stage (journal rows, map lines, kept events) is capped at 1 MiB. Reaching the cap ends the prestart, and the next Send launches fresh.
+
+*Test:* an engine that writes more stderr than the cap before Send is ended, and Send launches fresh.
+
+**R4-9 · Adopt takes only a claimable row (P2).**
+A failed initialize starts the stop at once (`session.ts` `initializeFailed`), and the ladder marks the row exiting before it waits (`session-ladder.ts`).
+
+*The rule:* claimable means all of these:
+- the row's lifecycle is starting, initializing or ready;
+- it is not exiting, and no ladder, retirement or withdraw is under way;
+- no initialize failure has been seen;
+- it is hidden;
+- its owner (R4-7) is still current.
+
+Anything else launches fresh.
+
+*Test:* a child held in its exit ladder is not adopted, and Send launches fresh.
+
+## The findings of all three reviews
+
+Round 1 reviewed `258d98442`, round 2 `b3ec9b017`, round 3 `0b3277679`. Each row says whether the finding is closed by the structure (S), closed by a specific change (C), or still open (O).
 
 | # | Finding | | How |
 |---|---|---|---|
@@ -251,8 +419,17 @@ Round 1 reviewed `258d98442`; round 2 reviewed `b3ec9b017`. Each row says whethe
 | 2·6 | One window can withdraw another window's claimed engine. | C | Withdraw names a generation. The host acts only on that uncommitted generation, so a withdraw after commit or after a replacement does nothing (D8). |
 | 2·7 | The launch key misses the engine binary. | C | The host compares the binary the row was spawned with against the one it is configured with now (D4). |
 | 2·8 | The latency bound demanded the whole typing interval as the gain. | C | 3 s of typing against the 2 s stub, a 1.5 s bound, and the real key, Send and paint times recorded (D14). |
+| 3·1 | The native child owns the roster, which has no promotion and no acknowledgement; a writer's loss doesn't end a marked holder. | C | Promotion written and acknowledged by the native host is the commit point; a marked holder ends on writer loss; the successor ends it (R4-1). |
+| 3·2 | The hosted `.hseq` map is written before each row; buffering only the journal breaks the frontier. | C | Both sequences staged, written whole before promotion (R4-2). |
+| 3·3 | The catalogue, the models cache, the streams and the supervision counts project every row. | C | Public and internal views of the table; the kept catalogue, models and events published once at commit (R4-3). |
+| 3·4 | The spine's request awaits before admission, so a stale request can admit after a discard. | C | A spine epoch set before the first await and checked before dispatch; withdraw by token (R4-4). |
+| 3·5 | The surface attach could time out Send's reply after the commit. | C | The answer comes after promotion; the attach is not awaited (R4-5). |
+| 3·6 | RL10 marks, persists the audience and counts the project before a join. | C | The endpoint holds a hidden pin's member until it is committed or ends (R4-6). |
+| 3·7 | `mawsd` can release the spine without ending its link. | C | Owner refs per spine root, released at disposal (R4-7). |
+| 3·8 | The buffered journal has no ceiling of its own. | C | A 1 MiB stage cap that ends the prestart (R4-8). |
+| 3·9 | Adopt took a row that was already terminating. | C | An allow-list of claimable states (R4-9). |
 
-No finding is left open. One trace remains on purpose and is new in revision 3: the session host's roster entry, marked `prestart` (D3). Its only reader is the successor that stops it.
+No finding is left open. One trace remains on purpose: the session host's roster entry, marked `prestart` until its promotion is acknowledged (R4-1). Its only reader is the successor that ends it.
 
 ## Does the structure close it? (the stop rule)
 
@@ -303,50 +480,73 @@ An older host refuses `session.prestart` and ignores `adopt`, so the spine skips
 
 ## Milestones
 
+Each milestone is built test-first, and gets one `doperpowers:reviewer-medium` round of its range. What that round finds that the milestone introduced is fixed; the rest goes to the tracker and Known limits.
+
 ### M0 · The probe (done)
-`findings-uxwave-851-prestart.txt`; four tests in `fixtures.test.mjs`. Run on the MacBook, isolated as the architect ruled.
+- `findings-uxwave-851-prestart.txt`, with four tests in `fixtures.test.mjs`.
 
-### M1 · The host
-- **What:** the admission and generation; the uncommitted flag and its gate (events, `engine.sessions`, budget lists, surface skipped and its requests answered); the buffered journal and deferred state file; `adopt` in `session.launch`; the kills (connection end, `forget`/`stop`, mismatched launch, withdraw, idle release, budget first); the roster mark, the successor rule and the handover drain; at most one uncommitted row; the capability.
-- **Tests first,** each case on its own:
-  - the admission cancelled before spawn by each canceller;
-  - the connection ending while the launch is held before row reservation;
-  - nothing emitted or listed before commit;
-  - surface requests answered and the clipboard untouched;
-  - adopt with an equal spec;
-  - adopt refused for a different spec, a different key, a different binary, or an exited row;
-  - commit while the handshake is still running;
-  - the journal whole after commit;
-  - no file left after a kill;
-  - a successor stopping a marked host;
-  - a second intent's prestart killing the first;
-  - withdraw of a committed and of a replaced generation doing nothing.
-- **Proof:** `tsc -p tsconfig.node.json`; eslint; vitest over `src/engine-host`.
+### M1 · The native holder
+- **Go** (`native/session-host`):
+  - `launch` takes `prestart`; the roster entry carries `prestart: true`;
+  - `promote` is answered with `promoted { ok }` after the write;
+  - a marked host ends its child when its writer is lost;
+  - fault injection through `rosterWrite`;
+  - the tests of R4-1 in `host_test.go` and `proto_test.go`.
+- **TypeScript:**
+  - the protocol mirror (`holder/protocol.ts`), the roster schema (`holder/roster.ts`) and the transport's `promote`;
+  - the successor's rule for a marked entry (`holder/adopt.ts`): end it, remove its staged files.
+- **Prebuilds:** rebuilt with the Go of `go.version` (`pnpm build:session-host`) and committed, with the Go version named. `scripts/check-session-host.sh` must pass.
+- **Proof:**
+  - `go vet ./... && go test -race ./...`;
+  - the check script;
+  - vitest over `src/engine-host/holder`;
+  - `tsc -p tsconfig.node.json`.
 
-### M2 · The spine and the window
-- **What:** the prestart verdict and spec through Send's own functions; `reserve: false`; `adopt` on `launchOnHost`, with the engine session id written to progress; the patch hook; the window's two commands; the trigger with its spawn-target gate and withdraw.
-- **Tests:**
-  - the spec equal to Send's, machine route included;
-  - the settings-only base URL change;
-  - Send adopting, and Send falling back;
-  - a crash at each step of today's order with an adopted launch (each injected after its write);
-  - the owner reservation at Send with a mod that declares 9, and a refused reservation giving 8 and a fresh launch;
-  - both orders of a spawn-target change;
-  - the trigger's leading edge.
-- **Proof:** both typechecks, eslint, vitest over the touched directories, the tokens guard, `src/shared/machine`, and the desk-web importer check.
+### M2 · The host
+- **What:** D1–D4 as amended:
+  - the admission with owner refs (R4-7);
+  - the hidden flag, with public and internal views (R4-3);
+  - the stage, with its map and its cap (R4-2, R4-8);
+  - `adopt` in `session.launch`, in R4-1's order, with the claimable check (R4-9) and the answer before the attach (R4-5);
+  - the kills, and at most one hidden row;
+  - the budget releasing a prestart first;
+  - surface requests answered while hidden;
+  - the internal `engine.prestart` event (R4-6);
+  - the capability `engine.prestart`.
+- **Tests first:** D1–D4's list from revision 3, plus the tests of R4-2, R4-3, R4-5, R4-7, R4-8 and R4-9.
+- **Proof:** the typecheck; eslint; vitest over `src/engine-host`.
 
-### M3 · The endpoint and the measure
-- **Endpoint:** the re-join at commit, tested on hub publication and on a direct desk read.
-- **Stub:** `LATENCY_STUB_INIT_MS` and `LATENCY_STUB_STARTS_FILE`.
-- **Specs:**
-  - `e2e/prestart-latency.spec.ts` (`prestart-latency`, measured);
-  - `e2e/prestart-engine.spec.ts` (`prestart-engine`, measured);
-  - `e2e/prestart.spec.ts` (default group): type, wait, Send, one start, a reply; a blank-tab close leaving no row; the held Tools pick; a pick changed while typing.
-- **Registration:** both measured groups go into `MEASURED_E2E` and the group lists.
-- **Proof:** the gate's script tests. The e2e runs go through the architect's Mac queue.
+### M3 · The spine and the window
+- **What:**
+  - the verdict and spec through Send's own functions, with the epoch (R4-4);
+  - `reserve: false`;
+  - `adopt` on `launchOnHost`, with the engine session id written to progress;
+  - the owner ref and its release in `mawsd`;
+  - the patch hook;
+  - the window's two commands;
+  - the trigger, with its spawn-target gate and withdraw by token.
+- **Tests:** revision 3's M2 list, plus R4-4's orderings.
+- **Proof:**
+  - both typechecks, eslint and vitest over the touched directories;
+  - the tokens guard;
+  - `src/shared/machine`;
+  - the desk-web importer check.
 
-### M4 · The gate
-One high review. Then the typechecks, eslint, vitest over the touched directories, `src/shared/machine`, and class 1a once.
+### M4 · The endpoint
+- **What:** the hold of a hidden pin's member (R4-6), and the re-join at commit (D11).
+- **Tests:** R4-6's tests; the re-join on both the hub's publication and a direct read.
+
+### M5 · The measure and the scenes
+- **What:** the stub's `LATENCY_STUB_INIT_MS` and `LATENCY_STUB_STARTS_FILE`, and three e2e specs:
+  - `prestart-latency` (measured);
+  - `prestart-engine` (measured);
+  - `prestart.spec.ts`, in the default group, covering D14 and the scenes of revision 3's M3.
+- **Registration:** the groups go into `MEASURED_E2E` and the group lists.
+- **Proof:** the gate's script tests. The e2e runs go through the architect.
+
+### M6 · The gate
+- The checks of the brief, the native suite and its prebuild check, then class 1a once (label `pse`).
+- The final branch review is the architect's.
 
 ## Known limits
 
@@ -357,14 +557,18 @@ One high review. Then the typechecks, eslint, vitest over the touched directorie
 5. A pick made in the last moments before Send, or a settings change outside the intent, costs that Send a boot (D6).
 6. `ownerChannelLaunched` swallows its write error for every launch (today's behaviour, round 2 finding 1). It is logged to the tracker and not changed here.
 7. A spawn to another machine does not prestart (D8).
+8. A prestart writing more than 1 MiB to its stage before Send is ended, and that Send launches fresh (R4-8).
+9. A marked holder whose engine host dies between staging and promotion is ended by the successor, which removes the staged files. A successor of an older build ignores the mark and adopts it as a session with no record, so the uncommitted engine is not ended (Known limit, rare: it needs a downgrade across a crash).
 
 ## Progress
 
 - [x] M0 · The probe. (2026-11-24.)
-- [ ] M1 · The host.
-- [ ] M2 · The spine and the window.
-- [ ] M3 · The endpoint and the measure.
-- [ ] M4 · The gate.
+- [ ] M1 · The native holder.
+- [ ] M2 · The host.
+- [ ] M3 · The spine and the window.
+- [ ] M4 · The endpoint.
+- [ ] M5 · The measure and the scenes.
+- [ ] M6 · The gate.
 
 ## Decision Log
 
@@ -385,6 +589,11 @@ One high review. Then the typechecks, eslint, vitest over the touched directorie
    - the measure uses 3 s of typing (D14).
 
    Taken from Claude Desktop and Codex: typing as the trigger, at most one prewarm, hidden by refusing its id, a cold start on any miss. Revision 2's note, its seven reader filters and its endpoint filter are gone.
+6. **2026-11-24.** The third review (of `0b3277679`): five P1s and four P2s, all checked in the code and all real. The architect and I recommended parking. **The owner chose to fold them in and build.** Revision 4's rules R4-1 to R4-9 answer them. The native holder's work is milestone M1. There is no fourth plan review; each milestone gets one medium review of its range.
+7. **2026-11-24. The strongest alternative, recorded:** the engine's own spare, `--await-claim` plus `claim_session`, as Claude Desktop ships it behind a gate (`main-process/index.chunk-BY2YbbTr.js:19840-20094`, `index.chunk-BjORVu2_.js:102488-102631`).
+   - *Why it is strong:* a parked spare has no session, no folder and no identity until it is claimed, so nothing would have to be hidden. That removes the cause of every visibility finding.
+   - *Why it lost:* the charter defers the spare pool (§P1, ticket 851's "Done when"), and the owner chose this route on 2026-11-24.
+   - *Unknowns, if it comes back:* whether SessionStart hooks run at boot or at claim, and how a spare would sit under the native holder; a probe would have to answer both.
 
 ## Outcomes & Retrospective
 
