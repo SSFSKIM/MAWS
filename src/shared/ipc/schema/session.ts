@@ -62,6 +62,7 @@ import { PromptHistoryEventSchema } from '../../graph/events';
 import { SessionCapabilitiesSchema } from './session-capabilities'; // P5 O5 M5
 // P2-C end
 import { ObservedFactsAnswerSchema } from '../../engine/observed-facts'; // P2-A
+import { TELL_TEXT_MAX } from '../../maws/tell'; // the direct tell
 // R2 start
 import { PaneRosterSchema, RenderAnswerSchema, ScrollSiteSchema, SURFACE_SITES, SurfaceAnswerSchema, SurfaceElementSchema, SurfaceViewportSchema } from '../../engine/surface';
 // R2 end
@@ -94,7 +95,7 @@ export type LaunchResult = z.infer<typeof LaunchResultSchema>;
 // out (`earlier` for a window, `lastSeq` for a live page), so the next page goes on beyond it.
 export const EVENTS_MIN_BYTES = 4096; // the least `maxBytes`: an answer's envelope and cursor always fit
 export const EventsOmittedSchema = z.strictObject({ events: z.number().int().positive(), bytes: z.number().int().positive(), seq: z.number().int().nullable() });
-// 2026-11-24, tail-first (minor 62): `provisional`, a newest window the engine host read from the transcript's end while
+// 2026-11-24, tail-first (minor 63): `provisional`, a newest window the engine host read from the transcript's end while
 // its read from the start runs, answered only to a read that asked for one; that read's `fs.followState` `following`
 // says the window it then answers is there.
 export const EventsSnapshotSchema = z.strictObject({ events: z.array(SessionEventSchema), lastSeq: z.number().int(), complete: z.boolean(), historyUnavailable: z.literal(true).optional(), earlier: EventIdSchema.optional(), sought: HistorySoughtSchema.optional(), cronHistory: z.array(SessionEventSchema).optional(), omitted: EventsOmittedSchema.optional(), provisional: z.literal(true).optional() });
@@ -124,7 +125,7 @@ const c3Commands = {
   // P5 O7 M4 (acceptance 12): `maxBytes` bounds the answer's UTF-8 JSON: a window's whole turns end where the next would
   // pass it (a turn alone past it is cut, never kept whole), a live page's whole rows likewise, and `earlier` or `lastSeq`
   // reaches what it left out, so a reader behind a bounded channel pages every window within it.
-  // 2026-11-24, tail-first (minor 62): `provisional`, a newest window read from the transcript's end will do while the
+  // 2026-11-24, tail-first (minor 63): `provisional`, a newest window read from the transcript's end will do while the
   // engine host reads it from the start (a disk-backed session's newest, unbounded window; ignored otherwise)
   'session.events': host(input({ afterSeq: z.number().int().nullable(), limit: z.number().int().positive().nullable(), before: EventIdSchema.optional(), agentId: AgentIdSchema.optional(), seek: MessageUuidSchema.optional(), maxBytes: z.number().int().min(EVENTS_MIN_BYTES).optional(), provisional: z.literal(true).optional() }), EventsSnapshotSchema),
   // W7: `ifIdle` stops only while the process could end without losing work (`canYield`, decided in the host in the same
@@ -895,6 +896,19 @@ const u4aCommands = {
 } as const;
 export const U4A_SESSION_COMMANDS = Object.keys(u4aCommands) as (keyof typeof u4aCommands)[];
 // UX wave U4a end -------------------------------------------------------------------------------------------------------
+// The direct tell start (the charter's Decision Log, 2026-11-24; src/shared/maws/tell.ts) ---------------------------------
+// Owner engine-host. `session.tellAgent` sends the person's text to one of the session's agents through the built-in mod
+// `maws-tell` (a checked mcp_call of its tool): `delivered` when it reached the agent's queue (a finished agent is resumed
+// with it), else the engine's reason. Fails as the engine answered where the call itself is refused (plan mode, the mod
+// not loaded). One round trip, bounded.
+const tellCommands = {
+  'session.tellAgent': host(
+    input({ agentId: AgentIdSchema, text: z.string().min(1).max(TELL_TEXT_MAX) }),
+    z.discriminatedUnion('delivered', [z.strictObject({ delivered: z.literal(true) }), z.strictObject({ delivered: z.literal(false), reason: z.string() })]),
+  ),
+} as const;
+export const TELL_SESSION_COMMANDS = Object.keys(tellCommands) as (keyof typeof tellCommands)[];
+// The direct tell end ----------------------------------------------------------------------------------------------------
 
 export const commands = {
   ...c3Commands, // C3
@@ -915,6 +929,7 @@ export const commands = {
   ...o7Commands, // P5 O7 M4
   ...o7m8Commands, // P5 O7 M8
   ...u4aCommands, // UX wave U4a
+  ...tellCommands, // the direct tell
 } as const satisfies Record<`session.${string}`, CommandSpec<z.ZodType, z.ZodType>>;
 
 export const events = {

@@ -56,3 +56,7 @@ extraResources:
     to: session-host
     filter:
       - maws-session-host
+  # The direct tell (docs/charter.md, Decision Log 2026-11-24): the built-in mod the engine host passes with --plugin-dir
+  # to every session it runs, found at Resources/mods/maws-tell (src/engine-host/launch.ts `tellModDir`).
+  - from: mods/maws-tell
+    to: mods/maws-tell

@@ -57,6 +57,8 @@ const GUARDED_ELSEWHERE: Readonly<Record<string, Entries>> = {
   // the composer's extras, behind the composer's own reads of the helper
   'composer/modes/bash.ts': { commands: ['session.bash'], guard: 'only through composer/editor/submit.ts’ dispatchByMode, behind composer/Composer.tsx’s read of the helper (button and Enter)' },
   'composer/modes/memory.ts': { commands: ['session.memoryAppend'], guard: 'as composer/modes/bash.ts' },
+  // the direct tell (ticket 862): lane B's port closes `tell` for any session on another machine, before main's first word too
+  'session/controls/lane-b.ts': { commands: ['session.tellAgent'], guard: 'the tell capability is closed for a remote session (TELL_WORDS.elsewhere), and tell() refuses before invoking while it is closed' },
   'composer/frame/bindings.ts': { commands: ['session.applyFlagSettings'], guard: 'liveBindings serve this Mac’s sessions; a session on another machine takes remoteBindings or lane A’s controls, which refuse the added directories (session/controls/lane-b.ts, lane-a.ts)' },
   'customize/connectors/sign-in.ts': {
     commands: ['connectors.signInDynamicServer'],

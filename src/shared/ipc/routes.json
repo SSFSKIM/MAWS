@@ -309,6 +309,7 @@
   "session.stop",
   "session.stopTask",
   "session.takeOver",
+  "session.tellAgent",
   "session.ui.answer",
   "session.ui.close",
   "session.ui.focus",

@@ -258,7 +258,7 @@ On the 625 MB transcript:
   636 MiB transcript took about 3 s to its first row: the engine host listed the session's 1,530 agents (0.3 s), then
   read and mapped the whole file (2.6 to 2.8 s) before it could answer a window that needs the last 1% of it.
   - *The read.* A `session.events` read that carries the new `provisional: true` (the newest, unbounded window of a
-    session with no stream; minor 62) on a follow not yet read through is answered by a tail-first read
+    session with no stream; minor 63) on a follow not yet read through is answered by a tail-first read
     (`src/engine-host/fs/tail-first.ts`), when that answers within the usual `SNAPSHOT_WAIT_MS` before the follow does.
     The tail is a quiet `Follow` started at the first line past `size - rung` (the follower's new `startAt`, so every
     offset and every id is the file's own), on rungs of 8, 32 and 128 MiB, the file's size frozen at the tail's stat. A
