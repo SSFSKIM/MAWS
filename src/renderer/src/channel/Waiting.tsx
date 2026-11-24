@@ -5,7 +5,9 @@
 // sheet's body (`askInPlace`), not by opening its sheet.
 // The question sheet's C3 M4 (docs/doperpowers/plans/2026-11-23-question-sheet-c3-maws-app.md §H): a session's sheet
 // questions together are one card, the session's sheet in place, compact, where its first one stands; a session whose
-// sheet this window cannot read keeps a card per question, as today.
+// sheet this window cannot read keeps a card per question, as today. M4's review: a session whose sheet holds something
+// the person acted on (a queued answer, a queued dismissal, an act sending or with a note) keeps its card once its
+// questions no longer wait, so what was sent here reads here, and Take back stays at hand; after the waiting ones.
 import type { AttentionItem } from '@shared/graph/attention';
 import type { AppSessionId } from '@shared/graph/ids';
 import { isSheetItem } from '@shared/attention/sheet-item';
@@ -16,9 +18,10 @@ import { displayTitle, listedTitle } from '../sessions/title';
 import { useAttention } from '../stores/attention';
 import { selectOrgIndex } from '../stores/org-projects';
 import { useSessions } from '../stores/sessions';
+import { selectSheetHeld, useSheets } from '../stores/sheet';
 import { SheetInPlace } from '../tools/sheet/SheetInPlace';
 import { CHANNEL } from './copy';
-import { waitingFor } from './project';
+import { inProject, waitingFor } from './project';
 
 export function Waiting({ project }: { project: string }) {
   const bySession = useAttention((s) => s.bySession);
@@ -27,8 +30,16 @@ export function Waiting({ project }: { project: string }) {
   const projects = useSessions((s) => s.projects);
   const listed = useSessions((s) => s.listed);
   const index = useSessions((s) => selectOrgIndex(s, ipc.localMachine));
+  const summaries = useSheets((s) => s.summaries);
+  const memories = useSheets((s) => s.memories);
   const items = waitingFor({ project, index, projects, records, listed, bySession, greyed });
-  if (items.length === 0) return null;
+  const holds = inProject({ project, index, projects, records, listed });
+  const asking = new Set(items.filter((item) => isSheetItem(item.id)).map((item) => item.appSessionId));
+  const held = [...summaries.values()].flatMap((summary) => {
+    const appSessionId = summary.appSessionId;
+    return appSessionId !== null && !asking.has(appSessionId) && !greyed.has(appSessionId) && holds(appSessionId) && selectSheetHeld({ summaries, memories }, appSessionId) ? [appSessionId] : [];
+  });
+  if (items.length === 0 && held.length === 0) return null;
   return (
     <section data-channel-waiting aria-label={CHANNEL.waiting} className="flex flex-col gap-3 border-t border-border pt-4">
       <h2 className="m-0 text-ui-sm font-medium text-fg-muted">{CHANNEL.waiting}</h2>
@@ -37,6 +48,9 @@ export function Waiting({ project }: { project: string }) {
         const first = items.findIndex((other) => other.appSessionId === item.appSessionId && isSheetItem(other.id)) === at;
         return first ? <SheetCard key={`sheet:${item.appSessionId}`} appSessionId={item.appSessionId} items={items.filter((other) => other.appSessionId === item.appSessionId && isSheetItem(other.id))} /> : null;
       })}
+      {held.map((appSessionId) => (
+        <SheetCard key={`sheet:${appSessionId}`} appSessionId={appSessionId} items={[]} />
+      ))}
     </section>
   );
 }

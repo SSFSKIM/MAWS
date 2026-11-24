@@ -7,6 +7,7 @@
 // O-17, kept: nothing but a person's act adds or activates it. `openSheet` is the one way in (a row's Open, a line of
 // the "Waiting for you" card, a notice's button, Needs you, all through the transcript actions' `openSheet`), and "+".
 // A record that appears, a question added and a `sheet.changed` leave the side column as it was.
+import { useEffect } from 'react';
 import { useStore } from 'zustand';
 import { createStore, type StoreApi } from 'zustand/vanilla';
 import type { AppSessionId } from '@shared/graph/ids';
@@ -25,11 +26,13 @@ export interface SheetToolParams {
   at?: string; // a question's id: the sheet shows its card and puts the keyboard on it
 }
 
-type Focus = { id: string; request: number } | null;
+// The last question asked for, how many asks so far, and whether the sheet has put the keyboard on it: an ask is used
+// once for the tab's lifetime, not once a mount, so the body mounting again (the tab shown again) moves nothing.
+type Focus = { id: string; request: number; used: boolean } | null;
 
 export interface SheetToolState {
   appSessionId: AppSessionId | null;
-  focus: StoreApi<Focus>; // the last question asked for, and how many asks so far: each is used once by the sheet
+  focus: StoreApi<Focus>; // the last question asked for, pending until its card exists, then used
   stop(): void;
 }
 
@@ -44,7 +47,7 @@ function SheetIcon({ className }: { className?: string }) {
 
 // `at` as an add gave it; a restored tab has no params (the tool persists none)
 const ask = (focus: StoreApi<Focus>, at: unknown) => {
-  if (typeof at === 'string') focus.setState({ id: at, request: (focus.getState()?.request ?? 0) + 1 }, true);
+  if (typeof at === 'string') focus.setState({ id: at, request: (focus.getState()?.request ?? 0) + 1, used: false }, true);
 };
 
 // The tab's suffix, the count of the session's open questions (none at zero), kept while the tab lives, shown or not.
@@ -72,8 +75,14 @@ function Centered({ words }: { words: string }) {
 function SheetBody({ appSessionId, state, visible }: { appSessionId: AppSessionId; state: SheetToolState; visible: boolean }) {
   const sheet = useSessionSheet(appSessionId, visible);
   const focus = useStore(state.focus);
+  const pending = focus !== null && !focus.used ? focus : null;
+  const landed = pending !== null && sheet.shown === 'sheet' && sheet.model.open.some((question) => question.id === pending.id);
+  // The sheet puts the keyboard on the card in its own effect, which runs before this one: the ask is then used.
+  useEffect(() => {
+    if (landed) state.focus.setState((now) => (now !== null && now.request === pending.request ? { ...now, used: true } : now), true);
+  }, [landed, pending, state.focus]);
   if (sheet.shown === 'sheet') {
-    return <SessionSheet model={sheet.model} memory={sheet.memory} onMemory={sheet.onMemory} host={sheet.host} focus={focus} unavailable={sheet.unavailable} />;
+    return <SessionSheet model={sheet.model} memory={sheet.memory} onMemory={sheet.onMemory} host={sheet.host} focus={pending} unavailable={sheet.unavailable} />;
   }
   if (sheet.shown === 'reading') return null;
   return <Centered words={sheet.shown === 'unreadable' ? SHEET_WORDS.unreadable : SHEET_WORDS.empty} />;

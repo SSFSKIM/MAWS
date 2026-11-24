@@ -250,28 +250,31 @@ export function channelProjectName(index: OrgIndex, project: string): string | n
   return [...index.orgs.values()].find((o) => o.smnsId === project)?.name ?? null;
 }
 
-export function waitingFor(input: {
+export interface ProjectSessions {
   project: string;
   index: OrgIndex;
   projects: ReadonlyMap<ProjectId, ProjectRecord>;
   records: ReadonlyMap<AppSessionId, SessionRecord>;
   listed: ReadonlyMap<AppSessionId, ListedSession>;
-  bySession: ReadonlyMap<AppSessionId, AttentionItem[]>;
-  greyed: ReadonlySet<AppSessionId>;
-}): AttentionItem[] {
+}
+
+/** Whether a session belongs to the project's channel: its record's row, or its listing's, is one of the project's. */
+export function inProject(input: ProjectSessions): (appSessionId: AppSessionId) => boolean {
   const rows = rowsOf(input.index, input.project);
-  if (rows.size === 0) return [];
-  const rowOf = (appSessionId: AppSessionId): RowKey | null => {
+  return (appSessionId) => {
+    if (rows.size === 0) return false;
     const record = input.records.get(appSessionId);
-    if (record !== undefined) return rowOfRecord(input.index, input.projects, record, input.listed);
-    const listing = input.listed.get(appSessionId);
-    return listing === undefined ? null : rowOfListed(input.index, listing);
+    const listing = record === undefined ? input.listed.get(appSessionId) : undefined;
+    const row = record !== undefined ? rowOfRecord(input.index, input.projects, record, input.listed) : listing === undefined ? null : rowOfListed(input.index, listing);
+    return row !== null && rows.has(row);
   };
+}
+
+export function waitingFor(input: ProjectSessions & { bySession: ReadonlyMap<AppSessionId, AttentionItem[]>; greyed: ReadonlySet<AppSessionId> }): AttentionItem[] {
+  const holds = inProject(input);
   const out: AttentionItem[] = [];
   for (const [appSessionId, items] of input.bySession) {
-    if (input.greyed.has(appSessionId)) continue;
-    const row = rowOf(appSessionId);
-    if (row === null || !rows.has(row)) continue;
+    if (input.greyed.has(appSessionId) || !holds(appSessionId)) continue;
     out.push(...items.filter(waitsOnAnswer));
   }
   return out.sort((a, b) => (a.createdAt < b.createdAt ? -1 : a.createdAt > b.createdAt ? 1 : 0));

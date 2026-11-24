@@ -110,6 +110,37 @@ describe('the side sheet', () => {
     expect(document.activeElement?.getAttribute('data-sheet-question')).toBe('q7');
   });
 
+  // M4's review: the body mounts again whenever its tab is shown again; an ask already used moves nothing then, and an
+  // ask made while the card was not listed waits for it
+  it('uses an ask once for the tab’s lifetime: shown again, it moves nothing; one whose card is not listed yet waits for it', async () => {
+    await listed(summary());
+    const { state, view } = mount({ at: 'q5' });
+    await act(() => fake.reply('sheet.read', { model: MODEL, door: { known: false } }));
+    expect(document.activeElement?.getAttribute('data-sheet-question')).toBe('q5');
+    view.unmount(); // another tab of the group is shown
+    const elsewhere = document.body.appendChild(document.createElement('button'));
+    elsewhere.focus();
+    const Body = sheetTool.render;
+    const again = render(<Body state={state} ctx={ctx()} />); // and the sheet's tab again
+    await act(() => fake.reply('sheet.read', { model: MODEL, door: { known: false } })); // watched again, read again
+    expect(document.querySelector('[data-sheet-question="q5"]')).not.toBeNull();
+    expect(document.activeElement, 'the keyboard stays where the person left it').toBe(elsewhere);
+
+    act(() => sheetTool.open!(state, { at: 'q9' })); // a question the model does not list yet
+    expect(document.activeElement).toBe(elsewhere);
+    const added = sheetOf([...MODEL.open, { ...CLASH, id: 'q9', handle: 'q9', header: 'Berth' }], { seq: 2 });
+    act(() => fake.event('sheet.changed', { session: SESSION, summary: summary({ seq: 2, open: 4 }) }));
+    await act(() => fake.reply('sheet.read', { model: added, door: { known: false } }));
+    expect(document.activeElement?.getAttribute('data-sheet-question')).toBe('q9');
+    again.unmount();
+    elsewhere.focus();
+    render(<Body state={state} ctx={ctx()} />);
+    await act(() => fake.reply('sheet.read', { model: added, door: { known: false } }));
+    expect(document.querySelector('[data-sheet-question="q9"]')).not.toBeNull();
+    expect(document.activeElement).toBe(elsewhere);
+    elsewhere.remove();
+  });
+
   it('keeps a draft in the window’s memory, which another mount of the session shows', async () => {
     await listed(summary());
     act(() => updateSheetMemory(SESSION, (current) => ({ ...current, drafts: new Map([['q5', { revision: 1, picks: [], text: 'Put the deck limits last.', images: [] }]]) })));

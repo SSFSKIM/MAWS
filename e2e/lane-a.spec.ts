@@ -1835,12 +1835,13 @@ test.describe('lane A: a terminal session driven through its bridge', () => {
     const [second] = await Promise.all([maws.app.waitForEvent('window'), maws.app.evaluate(() => (globalThis as unknown as { __maws_documents: { openWindow(): number } }).__maws_documents.openWindow())]);
     await second.waitForLoadState('domcontentloaded');
 
+    // the same pick in both: the stand-in replays the fixture's step, which takes the first line appended with its pick
     const sheets: Locator[] = [];
-    for (const [window, pick] of [[page, 'Yes'], [second, 'No']] as const) {
+    for (const window of [page, second]) {
       await (await needsYouRow(window, c)).click({ timeout: 30_000 });
       const card = sheetOf(window).locator('[data-sheet-question="q1"]');
       await expect(card).toBeVisible({ timeout: 10_000 });
-      await card.getByRole('radio', { name: pick, exact: true }).click();
+      await card.getByRole('radio', { name: 'Yes', exact: true }).click();
       sheets.push(sheetOf(window));
     }
     const started = doorStarts(c);
@@ -1848,12 +1849,19 @@ test.describe('lane A: a terminal session driven through its bridge', () => {
     await expect.poll(() => doorStarts(c), { timeout: 15_000, message: 'both Sends started the door' }).toBe(started + 2);
     expect(inboxLines(c), 'both held at the barrier').toEqual([]);
 
-    // released: the door appends both lines and replays the fixture's step, the first line applied and the second closed
+    // released: the door appends both lines and replays the fixture's step, the first line appended applied, the second closed
     writeFileSync(doorFile(c, 'barrier'), '');
-    const note = SHEET_WORDS.notes.answered('q1');
-    await expect.poll(async () => (await Promise.all(sheets.map((sheet) => sheet.getByText(note, { exact: true }).count()))).sort(), { timeout: 15_000, message: 'one window reads it' }).toEqual([0, 1]);
-    expect(inboxLines(c).map((l) => [l.kind, l.id, l.by])).toEqual([['answer', 'q1', 'maws'], ['answer', 'q1', 'maws']]);
-    for (const sheet of sheets) await expect(sheet.locator('[data-sheet-question="q1"]'), 'answered, its card goes in both').toHaveCount(0);
+    await expect.poll(() => inboxLines(c).length, { timeout: 15_000 }).toBe(2);
+    const [taken, late] = inboxLines(c);
+    expect([taken, late].map((l) => [l!.kind, l!.id, l!.by, l!.picks])).toEqual([['answer', 'q1', 'maws', ['Yes']], ['answer', 'q1', 'maws', ['Yes']]]);
+    await expect.poll(async () => value(await invoke(page, 'sheet.read', { session: c.sid })).model?.pending.map((o) => [o.key, o.picks]), { timeout: 15_000, message: 'the first appended is accepted' }).toEqual([[taken!.key, ['Yes']]]);
+    // the window whose line came second, and it alone, reads that q1 was already answered: its note carries its key
+    const notes = async () => Promise.all(sheets.map((sheet) => sheet.locator('[data-sheet-note]').evaluateAll((nodes) => nodes.map((node) => [node.getAttribute('data-sheet-note'), node.textContent]))));
+    await expect.poll(async () => (await notes()).flat(), { timeout: 15_000, message: 'one note, the second line’s' }).toEqual([[late!.key, expect.stringContaining(SHEET_WORDS.notes.answered('q1'))]]);
+    for (const sheet of sheets) {
+      await expect(sheet.locator('[data-sheet-question="q1"]'), 'answered, its card goes in both').toHaveCount(0);
+      await expect(sheet.locator('[data-sheet-outcome="q1"]'), 'the accepted answer, in both').toContainText(SHEET_WORDS.accepted);
+    }
     await expect.poll(() => sheetItems(page, c.sid)).toEqual([]);
     expect(c.maws.consoleErrors()).toEqual([]);
   });

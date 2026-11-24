@@ -24,6 +24,9 @@ import { useMachines } from '../stores/machines';
 import { ipc } from '../ipc/client'; // the question sheet's C3 M4
 import { CLASH, FIXTURE, sheetOf } from '../sheet/test-support/questions';
 import { connectSheets, resetSheetStore } from '../stores/sheet';
+import { SHEET_WORDS } from '../sheet';
+import { preloadOf } from '../test-support/preload-of';
+import type { SheetLine } from '@shared/sheet/model';
 import { vi } from 'vitest';
 vi.mock('../transcript/view/markdown/Markdown', () => ({ Markdown: ({ markdown }: { markdown: string }) => <div data-markdown="">{markdown}</div> }));
 
@@ -306,5 +309,54 @@ describe('a session whose sheet questions wait', () => {
     expect(fix.querySelectorAll('[data-sheet-session][data-density="compact"]')).toHaveLength(1);
     expect([...fix.querySelectorAll('[data-sheet-question]')].map((q) => q.getAttribute('data-sheet-question'))).toEqual(['q4', 'q7']);
     expect(fix.querySelectorAll('[data-request-card]')).toHaveLength(0);
+  });
+
+  // M4's review: a stopped session's one question answered from its card is queued and waits no more; the card keeps its
+  // sheet, which reads the answer queued with Take back; taken back, the question is open and waits again
+  it('keeps a stopped session’s compact sheet once its one question is answered from it: queued with Take back, which opens it again', async () => {
+    const id = idOf('Fix sidebar drag');
+    let model = sheetOf([FIXTURE]);
+    const summary = (queued: boolean) => ({ session: model.session, appSessionId: bareOf(id), title: null, live: false, seq: 1, open: queued ? 0 : 1, queued: queued ? 1 : 0, pending: 0, hidden: 0, oldestAskedAt: null, unreadable: false });
+    const door = { known: true, available: true };
+    const fake = fakeClient({
+      'sheet.list': { sessions: [summary(false)], door },
+      'sheet.read': () => ({ model, door }),
+      'sheet.put': ({ lines }: { lines: SheetLine[] }) => ({ ok: true, results: lines.map((line) => ({ key: line.key, state: 'queued' })) }),
+    });
+    window.maws = preloadOf(fake); // the fake under the real client, so its events reach the store lifted
+    act(() => useSessions.setState((s) => ({ records: new Map(s.records).set(id, { ...s.records.get(id)!, holder: { kind: 'none' } }) })));
+    const waiting = asked(id, 'q7', 1);
+    act(() => useAttention.getState().applyChanged({ appSessionId: id, items: [waiting] }, TEST_MACHINE));
+    offs.push(connectSheets(ipc));
+    render(<Overview paneIndex={0} />);
+    const fix = () => card('Fix sidebar drag'); // the card moves out of the Needs-you group once nothing of it waits
+    await waitFor(() => expect(fix().querySelector('[data-sheet-question="q7"]')).not.toBeNull());
+    const puts = () => fake.invoked('sheet.put') as { lines: SheetLine[] }[];
+    // what the service does with each line: the answer queued on the question, which no longer waits; the retract cancels it
+    const changed = (queued: boolean) =>
+      act(() => {
+        useAttention.getState().applyChanged({ appSessionId: id, items: queued ? [] : [waiting] }, TEST_MACHINE);
+        fake.event('sheet.changed', { session: model.session, summary: summary(queued) });
+      });
+
+    fireEvent.click(within(fix()).getByRole('button', { name: /q7/ })); // unfold the compact card
+    fireEvent.click(within(fix()).getByRole('radio', { name: 'Replace it' }));
+    fireEvent.click(within(fix()).getByRole('button', { name: SHEET_WORDS.send(1) }));
+    await waitFor(() => expect(puts()).toHaveLength(1));
+    const answer = puts()[0]!.lines[0]!;
+    model = sheetOf([{ ...FIXTURE, queued: { key: answer.key, kind: 'answer', picks: ['Replace it'], text: '', images: [], revision: 1, by: 'maws' } }], { sent: [{ key: answer.key, state: 'queued', kind: 'answer', id: 'q7' }] });
+    changed(true);
+    await waitFor(() => expect(within(fix()).getByText(SHEET_WORDS.queued)).toBeTruthy());
+    expect(fix().querySelectorAll('[data-sheet-in-place]'), 'the sheet stays where the answer was sent').toHaveLength(1);
+
+    fireEvent.click(within(fix()).getByRole('button', { name: SHEET_WORDS.takeBack }));
+    await waitFor(() => expect(puts()).toHaveLength(2));
+    const retract = puts()[1]!.lines[0]!;
+    expect(retract).toMatchObject({ kind: 'retract', target: answer.key });
+    model = sheetOf([FIXTURE], { sent: [{ key: answer.key, state: 'queued', kind: 'answer', id: 'q7', cancelled: true }, { key: retract.key, state: 'queued', kind: 'retract', target: answer.key }] });
+    changed(false);
+    await waitFor(() => expect(within(fix()).queryByText(SHEET_WORDS.queued)).toBeNull());
+    expect(fix().querySelectorAll('[data-sheet-in-place]')).toHaveLength(1);
+    expect(fix().querySelector('[data-sheet-question="q7"]'), 'open again, its line in the card').not.toBeNull();
   });
 });

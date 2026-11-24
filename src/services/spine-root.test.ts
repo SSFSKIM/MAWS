@@ -18,7 +18,7 @@ import { fakeBus, type FakeBus } from '../../test/support/fake-bus';
 import { startFakeBridge, type FakeBridge } from '../../test/support/fake-bridge';
 import { FakeSpineHost } from '../../test/support/fake-spine-host';
 import { CHECKOUTS_COMMANDS, CONNECTORS_COMMANDS, LIBRARY_CATALOG_COMMANDS, SPINE_COMMANDS } from '../../test/support/spine-lists';
-import { seedRecord } from '../../test/support/sheet-records';
+import { fixtureSession, seedRecord } from '../../test/support/sheet-records';
 import { FIXTURE_DIR } from '../../test/support/fixtures';
 import { item, status as engineStatus } from '../../test/support/builders';
 import { summary, tempDir } from '../../test/support/index-fixture';
@@ -292,24 +292,32 @@ describe('the spine and the checkouts composed under plain Node', () => {
   });
 
   // The question sheet's C3 M4 (§H): each open question is an item of the session's list, a terminal's; and no item of
-  // the sheet makes the session read as waiting on the person in its digest (the owner's ruling: calm state only)
-  it('lists a terminal session’s open sheet questions in attention, and leaves its digest not waiting', async () => {
-    const session = seedRecord(sminos, 'two-surfaces');
+  // the sheet changes the session's digest (the owner's ruling: calm state only). Its review: the digest is a running
+  // terminal's, through its bridge, before the question and after it.
+  it('lists a running terminal session’s open sheet questions in attention, and leaves its digest working with nothing pending', async () => {
+    const session = fixtureSession('two-surfaces');
     const seeded = new Index(join(profile, 'index.sqlite'));
     const appSessionId = seeded.sessions.upsertFromSummary(summary({ sessionId: session as SessionId })).record.appId;
     seeded.sessions.setHolder(session as SessionId, { kind: 'terminal', pid: 4242 });
     seeded.close();
+    const bridge = await startFakeBridge({ home: sminos, session });
+    bridges.push(bridge);
+    bridge.emit({ type: 'turn', phase: 'start', turnId: 'turn-1', agentId: null }); // mid-turn
     const bus = fakeBus();
     compose(await openSpineData(profile, { build: BUILD }), new FakeSpineHost(), bus);
+    const digestOf = async () => {
+      const digests = await bus.invoke('session.digests', undefined);
+      if (!digests.ok) throw new Error(digests.error.message);
+      return digests.value.digests.find((d) => d.appSessionId === appSessionId);
+    };
+    await expect.poll(digestOf, { timeout: 5000 }).toMatchObject({ phase: 'working', pendingRequests: 0 });
+
+    seedRecord(sminos, 'two-surfaces'); // the agent asks through the sheet
     await expect.poll(async () => bus.invoke('attention.list', undefined), { timeout: 5000 }).toMatchObject({
       ok: true, value: [expect.objectContaining({ id: `sheet:${session}:q1`, appSessionId, kind: 'async_input', state: 'pending' })],
     });
     expect(await bus.invoke('attention.request', { appSessionId, requestId: 'q1' })).toEqual({ ok: true, value: { event: null } });
-    const digests = await bus.invoke('session.digests', undefined);
-    if (!digests.ok) throw new Error(digests.error.message);
-    const digest = digests.value.digests.find((d) => d.appSessionId === appSessionId);
-    expect(digest?.phase).not.toBe('waiting');
-    expect(digest?.pendingRequests ?? 0).toBe(0);
+    expect(await digestOf()).toMatchObject({ phase: 'working', pendingRequests: 0 });
   });
 
   it('drives a terminal session the index holds through its bridge: laneA.state, its request in attention, its digest', async () => {

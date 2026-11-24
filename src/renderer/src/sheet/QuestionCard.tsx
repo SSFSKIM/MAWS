@@ -122,7 +122,9 @@ export function QuestionCard({ session, question, draft, mark, busy, host, densi
   const [pointed, setPointed] = useState<string | null>(null);
   const [focused, setFocused] = useState<string | null>(null);
   const [opened, setOpened] = useState<ReadonlySet<number>>(new Set()); // references open, by their place in the list (two may share a hash)
-  const [folded, setFolded] = useState(true); // compact only
+  // compact only. A card mounted over a queued answer starts open (C3 M4's review): the Overview's card moves to another
+  // group once its last question no longer waits, and its sheet mounts again there with the answer and Take back in view.
+  const [folded, setFolded] = useState(() => question.queued === undefined);
   const [pasteNote, setPasteNote] = useState<string | null>(null);
 
   const queued = question.queued;

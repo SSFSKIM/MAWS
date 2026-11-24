@@ -414,6 +414,26 @@ describe('Waiting on you', () => {
       resetSheetStore();
     }
   });
+
+  // M4's review: a session whose only question was answered here, queued, waits no more and keeps its card, so the answer
+  // reads queued with its Take back where it was sent
+  it('keeps a session’s compact sheet while it holds a queued answer, with nothing of it waiting', async () => {
+    const queued = { ...FIXTURE, queued: { key: 'maws-0001', kind: 'answer' as const, picks: ['Replace it'], text: '', images: [], revision: 1, by: 'maws' as const } };
+    const SHEET = sheetOf([queued], { sent: [{ key: 'maws-0001', state: 'queued', kind: 'answer', id: 'q7' }] });
+    const summary = { session: SHEET.session, appSessionId: mine.appId, title: null, live: false, seq: 1, open: 0, queued: 1, pending: 0, hidden: 0, oldestAskedAt: null, unreadable: false };
+    install({ 'maws.asks.list': { asks: [] }, 'sheet.list': { sessions: [summary], door: { known: false } }, 'sheet.read': { model: SHEET, door: { known: false } } });
+    const off = connectSheets(ipc);
+    try {
+      render(<ChannelView project={SMNS} />);
+      await act(() => fake.reply('org.channel.open', opened()));
+      await waitFor(() => expect(stream().querySelectorAll('[data-channel-waiting] [data-sheet-in-place]')).toHaveLength(1));
+      const sheet = stream().querySelector<HTMLElement>('[data-sheet-in-place]')!;
+      await waitFor(() => expect(within(sheet).getByRole('button', { name: 'Take back' })).toBeTruthy());
+    } finally {
+      off();
+      resetSheetStore();
+    }
+  });
 });
 
 describe('Channel in the project’s menu', () => {

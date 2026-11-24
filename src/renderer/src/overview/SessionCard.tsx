@@ -10,7 +10,9 @@
 // waits for and the item's summary; no branch, digest or footer. A click opens it through its lane's opener (M2's pane).
 // The question sheet's C3 M4 (docs/doperpowers/plans/2026-11-23-question-sheet-c3-maws-app.md §H; frame 5): where the
 // request the card would mount is a sheet question, the session's sheet stands there instead, compact, once: a stopped
-// session's too, since a sheet is answered without its process (an answer is queued).
+// session's too, since a sheet is answered without its process (an answer is queued). M4's review: it stays while the
+// sheet holds something the person acted on (`selectSheetHeld`), once no question of it waits, so a queued answer and
+// its Take back, or a note that another surface answered first, read where they were sent.
 import { useEffect, type KeyboardEvent, type MouseEvent } from 'react';
 import { Tip } from '../ui/tip';
 import type { AttentionItem } from '@shared/graph/attention';
@@ -35,6 +37,7 @@ import { useMachineMark } from '../app/machine-mark'; // P5 O7 M6
 import { openListed } from '../sessions/remote-openers'; // P5 O7 M6
 import { isSheetItem } from '@shared/attention/sheet-item'; // the question sheet's C3 M4
 import { SheetInPlace } from '../tools/sheet/SheetInPlace';
+import { selectSheetHeld, useSheets } from '../stores/sheet';
 
 type PaneIndex = 0 | 1;
 
@@ -58,6 +61,7 @@ export function SessionCard({ appSessionId, paneIndex, showProject, stop, onFocu
   const pending = useAttention((s) => selectPendingOf(s, appSessionId));
   const controlled = useSessionControls(appSessionId) !== null; // P5 O9 M6: none for a session held elsewhere with no live bridge
   const listed = useSessions((s) => s.listed.get(appSessionId)); // P5 O7 M6: a session with no record carded by it; P5 O7 M10: a remote lane B record's state
+  const held = useSheets((s) => selectSheetHeld(s, appSessionId)); // C3 M4's review
   if (!record) return listed ? <ListedCard listed={listed} showProject={showProject} stop={stop} onFocus={onFocus} onKeyDown={onKeyDown} /> : null;
 
   const waiting = waitingItem(pending);
@@ -101,7 +105,7 @@ export function SessionCard({ appSessionId, paneIndex, showProject, stop, onFocu
           </p>
         )}
         {request && <CardRequest item={request} paneIndex={paneIndex} />}
-        {asked && <SheetInPlace appSessionId={appSessionId} className={REQUEST_FRAME} fallback={controlled && <CardRequest item={asked} paneIndex={paneIndex} />} />}
+        {(asked !== null || held) && <SheetInPlace appSessionId={appSessionId} className={REQUEST_FRAME} fallback={asked !== null && controlled && <CardRequest item={asked} paneIndex={paneIndex} />} />}
       </article>
     </Tip>
   );
