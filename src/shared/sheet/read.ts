@@ -192,15 +192,18 @@ export function modelOf(state: SheetState, tail: Uint8Array, changedOf: (referen
       const st = pendingKeys.has(key) ? 'accepted' : verdict.verdict === 'applied' ? 'delivered' : verdict.verdict;
       return { key, state: st, ...verdict };
     });
+  // A queued entry by its kind, as the show schema separates them: an answer or a dismissal names its question (and
+  // reads cancelled where a queued retract names it), a retract its target, a `delivered` line neither, whatever other
+  // field the line carried.
   for (const line of queued) {
-    sent.push({
-      key: line.key,
-      kind: line.kind,
-      state: 'queued',
-      ...(has(line, 'id') ? { id: line.id } : {}),
-      ...(has(line, 'target') ? { target: line.target } : {}),
-      ...(cancelled.has(line.key as string) ? { cancelled: true } : {}),
-    });
+    const key = line.key as string;
+    if (line.kind === 'answer' || line.kind === 'dismiss') {
+      sent.push({ key, kind: line.kind, state: 'queued', id: line.id, ...(cancelled.has(key) ? { cancelled: true } : {}) });
+    } else if (line.kind === 'retract') {
+      sent.push({ key, kind: line.kind, state: 'queued', target: line.target });
+    } else {
+      sent.push({ key, kind: line.kind, state: 'queued' });
+    }
   }
 
   const hidden: { id: string; key: string }[] = [];

@@ -32,7 +32,7 @@ function digestOf(root: string): string {
 }
 
 describe('the pin of the question sheet’s set', () => {
-  const manifest = JSON.parse(readFileSync(join(SET, 'MANIFEST.json'), 'utf8')) as { digest: string; files: Record<string, string> };
+  const manifest = JSON.parse(readFileSync(join(SET, 'MANIFEST.json'), 'utf8')) as { version: number; digest: string; files: Record<string, string> };
   const digest = digestOf(SET);
 
   it('recomputes to the manifest’s digest', () => {
@@ -42,6 +42,12 @@ describe('the pin of the question sheet’s set', () => {
   it('is the copy its provenance names', () => {
     const named = readFileSync(join(SHEET, 'PROVENANCE.md'), 'utf8').match(/\b[0-9a-f]{64}\b/g) ?? [];
     expect({ computed: digest, provenance: named }).toEqual({ computed: digest, provenance: [digest] });
+  });
+
+  it('is of the set version its provenance names', () => {
+    // The provenance's row names the set's version in the cell before the digest's.
+    const row = /\|\s*(\d+)\s*\|\s*`[0-9a-f]{64}`\s*\|/.exec(readFileSync(join(SHEET, 'PROVENANCE.md'), 'utf8'));
+    expect(Number(row?.[1])).toBe(manifest.version);
   });
 
   it('holds exactly the files its manifest lists, each with its listed hash', () => {

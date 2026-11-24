@@ -94,8 +94,14 @@ describe('callEntries', () => {
       expect(read.notDone).toBeNull();
       expect(read.withdrew).toEqual([]);
     }
-    const revise = callEntries({ ask: [{ id: 'q3', question: 'Ship the migration today?' }] }, null);
-    expect(revise.entries[0]).toMatchObject({ id: 'q3', revision: null, outcome: 'unknown' });
+    // A revise draws no id either: the grammar's "a reader draws no ids for such a call".
+    const revise = { ask: [{ id: 'q3', question: 'Ship the migration today?' }, { question: 'Rename the settings page?' }] };
+    for (const text of [call.result, null]) {
+      expect(callEntries(revise, text).entries.map(({ id, revision, outcome }) => ({ id, revision, outcome }))).toEqual([
+        { id: null, revision: null, outcome: 'unknown' },
+        { id: null, revision: null, outcome: 'unknown' },
+      ]);
+    }
   });
 
   it('reads a withdrawal that was refused as nothing withdrawn', () => {

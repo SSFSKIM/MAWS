@@ -214,6 +214,13 @@ export const SheetModelSchema = z.looseObject({
 });
 export type SheetModel = z.infer<typeof SheetModelSchema>;
 
+// A map keyed by inbox keys, every own key kept: `__proto__` is a valid key, and `z.record` would drop it (its output is
+// built by assignment, which sets a prototype for that name). `Object.fromEntries` defines each key as its own.
+const ownRecord = <V extends z.ZodType>(value: V) =>
+  z
+    .preprocess((raw) => (typeof raw === 'object' && raw !== null && !Array.isArray(raw) ? Object.entries(raw) : raw), z.array(z.tuple([z.string(), value])))
+    .transform((entries): Record<string, z.infer<V>> => Object.fromEntries(entries));
+
 /**
  * A record's `state.json` (I2), as far as a reader reads it: what the model is computed from, with the structure the
  * set's state schema gives it and none of the tool input's bounds (an imported question keeps whatever it was asked
@@ -227,7 +234,7 @@ export const SheetStateSchema = z.looseObject({
   questions: z.array(StoredQuestionSchema),
   pending: z.array(StoredOutcomeSchema),
   closed: z.record(z.string(), SheetClosedSchema),
-  verdicts: z.record(z.string(), SheetVerdictSchema),
+  verdicts: ownRecord(SheetVerdictSchema),
 });
 export type SheetState = z.infer<typeof SheetStateSchema>;
 export type StoredQuestion = z.infer<typeof StoredQuestionSchema>;

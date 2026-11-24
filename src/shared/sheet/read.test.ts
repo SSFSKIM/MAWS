@@ -147,6 +147,34 @@ describe('modelOf, the pitfalls of a port', () => {
     expect(model.open.flatMap((question) => question.options.map((option) => codePoints(option.label)))).toContain(201);
   });
 
+  it('keeps a verdict under the key __proto__, which shadows a resent line of that key', () => {
+    const { state } = sideOf('answer-applied', 'after')!;
+    const text = JSON.stringify(state).replace('"page-0201a001":', '"__proto__":').replaceAll('"key":"page-0201a001"', '"key":"__proto__"');
+    const record = JSON.parse(text) as SheetState;
+    expect(Object.hasOwn(record.verdicts, '__proto__')).toBe(true);
+    const resent = bytes('{"v":1,"key":"__proto__","kind":"dismiss","id":"q2","by":"page"}\n');
+    const model = modelOfJson(record, resent);
+    expect(model.sent).toEqual([expect.objectContaining({ key: '__proto__', state: 'accepted', verdict: 'applied' })]);
+    expect(model.hidden).toEqual([]);
+  });
+
+  it('projects a queued line by its kind, whatever other field the line carried', () => {
+    const lines = [
+      '{"v":1,"key":"maws-00000001","kind":"answer","id":"q2","revision":1,"picks":["No"],"target":"maws-00000009","by":"maws"}',
+      '{"v":1,"key":"maws-00000002","kind":"dismiss","id":"q1","target":"maws-00000009","by":"maws"}',
+      '{"v":1,"key":"maws-00000003","kind":"retract","target":"maws-00000002","id":"q1","by":"maws"}',
+      '{"v":1,"key":"maws-00000004","kind":"delivered","keys":["maws-00000008"],"id":"q1","target":"maws-00000009","by":"maws"}',
+    ];
+    const model = modelOfJson(references().state, bytes(lines.join('\n') + '\n'));
+    expect(model.sent).toStrictEqual([
+      { key: 'maws-00000001', kind: 'answer', state: 'queued', id: 'q2' },
+      { key: 'maws-00000002', kind: 'dismiss', state: 'queued', id: 'q1', cancelled: true },
+      { key: 'maws-00000003', kind: 'retract', state: 'queued', target: 'maws-00000002' },
+      { key: 'maws-00000004', kind: 'delivered', state: 'queued' },
+    ]);
+    expect(SheetModelSchema.safeParse(model).success).toBe(true);
+  });
+
   it('asks changedOf for each reference of a listed question, and carries its answer', () => {
     const { state, tail } = references();
     const asked: string[] = [];
@@ -182,7 +210,29 @@ describe('the record’s schema', () => {
 describe('lineError', () => {
   const answer = { v: 1, key: 'maws-00000001', kind: 'answer', id: 'q1', revision: 1, picks: ['Yes'], by: 'maws' };
 
-  it('takes the lines of every fixture’s inbox that a drain would read', () => {
+  it('takes every inbox line of the pin that a drain gave a verdict', () => {
+    let read = 0;
+    for (const name of CASES) {
+      const record = join(FIXTURES, name, 'after', 'sheet', sessionOf(name));
+      if (!existsSync(join(record, 'inbox.jsonl'))) continue;
+      const verdicts = (readJson(join(record, 'state.json')) as { verdicts: Record<string, unknown> }).verdicts;
+      for (const text of readFileSync(join(record, 'inbox.jsonl'), 'utf8').split('\n')) {
+        let line: unknown;
+        try {
+          line = JSON.parse(text);
+        } catch {
+          continue;
+        }
+        const key = (line as { key?: unknown } | null)?.key;
+        if (typeof key !== 'string' || !Object.hasOwn(verdicts, key)) continue;
+        expect(lineError(line), `${name}: ${text}`).toBeNull();
+        read += 1;
+      }
+    }
+    expect(read).toBeGreaterThan(10);
+  });
+
+  it('takes a line of each kind a surface or a deliverer writes', () => {
     expect(lineError(answer)).toBeNull();
     expect(lineError({ v: 1, key: 'maws-00000002', kind: 'retract', target: 'maws-00000001', by: 'page' })).toBeNull();
     expect(lineError({ v: 1, key: 'maws-00000003', kind: 'delivered', keys: ['maws-00000001'], by: 'maws', at: '2026-11-23T10:00:00.000Z' })).toBeNull();

@@ -37,8 +37,8 @@ export function parseSheetResult(text: string): SheetResult | null {
 
 /**
  * One entry of a call's `ask`, and what became of it. `entry` is its place in `ask`, from 1. `id` is the question it
- * is on the sheet as: the added or revised one; the id a revise names while the outcome is not known; null for a
- * refused entry and for a new entry whose outcome is not known. `revision` is a revised entry's.
+ * is on the sheet as, the added or revised one; null for a refused entry and for every entry of a call whose outcome is
+ * not known, a revise's included (a reader draws no ids for such a call). `revision` is a revised entry's.
  */
 export interface CallEntry {
   entry: number;
@@ -83,7 +83,7 @@ function askedOf(input: unknown): AskedEntry[] {
  * carries `(entry n)` and by that number when any does; an entry in neither sentence was refused. `resultText` is the
  * result's text whole, since a refusal's reasons are on a later line (`notDone`, `Not done: …` whole); null when the
  * call has no result yet. With no result, a first line of form `unknown`, or one not of the grammar, no entry has an
- * outcome and no new entry an id.
+ * outcome or an id.
  */
 export function callEntries(
   input: unknown,
@@ -94,7 +94,7 @@ export function callEntries(
   const words = (asked: AskedEntry) => ({ header: asked.header, question: asked.question, options: asked.options, multiSelect: asked.multiSelect });
 
   if (result === null || result.form === 'unknown') {
-    const entries = asked.map((one, index): CallEntry => ({ entry: index + 1, id: one.named, revision: null, outcome: 'unknown', ...words(one) }));
+    const entries = asked.map((one, index): CallEntry => ({ entry: index + 1, id: null, revision: null, outcome: 'unknown', ...words(one) }));
     return { result, entries, withdrew: [], notDone: null };
   }
   const notDone = resultText!.split('\n').slice(1).find((line) => line.startsWith('Not done: ')) ?? null;

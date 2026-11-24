@@ -7,7 +7,7 @@ import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { modelOf } from '@shared/sheet/read';
 import { SheetStateSchema } from '@shared/sheet/model';
-import { listRecords, readRecord, recordIo, sheetRoot, type RecordIo } from './reader';
+import { UNREADABLE, listRecords, readRecord, recordIo, sheetRoot, type RecordIo } from './reader';
 
 const FIXTURES = join(__dirname, '../../../test/fixtures/sheet/set/fixtures');
 const CASES = readdirSync(FIXTURES).sort();
@@ -96,6 +96,44 @@ describe('readRecord', () => {
     expect(await readRecord(tempDir(), session)).toBeNull();
   });
 
+  it('says why in a fixed sentence that echoes nothing of the record and names no path', async () => {
+    const home = homeOf('references', 'before');
+    const session = sessionOf('references');
+    const path = join(sheetRoot(home), session, 'state.json');
+    const state = readJson(path) as Record<string, unknown>;
+    const secret = '/Users/me/work/proj/private-plan.md';
+    const cases: [string | Uint8Array, string][] = [
+      [JSON.stringify({ ...state, v: secret }), UNREADABLE.version],
+      [`{"v": 1, "session": "${secret}`, UNREADABLE.json],
+      [`${secret} {`, UNREADABLE.json],
+      [JSON.stringify({ ...state, questions: secret }), UNREADABLE.schema],
+      [JSON.stringify({ ...state, session: '5eed0000-0000-4000-8000-0000000000ff' }), UNREADABLE.session],
+      [JSON.stringify({ ...state, session: secret }), UNREADABLE.session],
+      // invalid bytes inside a JSON string: the pinned Python reader refuses them, so does this one
+      [new Uint8Array([...new TextEncoder().encode(`{"v": 1, "session": "${secret}`), 0xff, 0xfe, ...new TextEncoder().encode('"}')]), UNREADABLE.utf8],
+      [new Uint8Array([0xef, 0xbb, 0xbf, ...new TextEncoder().encode(JSON.stringify(state))]), UNREADABLE.json], // a byte order mark
+    ];
+    for (const [content, reason] of cases) {
+      writeFileSync(path, content);
+      const read = await readRecord(home, session);
+      expect(read, reason).toEqual({ unreadable: reason });
+      expect(JSON.stringify(read)).not.toContain('private-plan');
+    }
+    expect(Object.values(UNREADABLE).every((reason) => !reason.includes('/'))).toBe(true);
+  });
+
+  it('reads a record whose directory cannot be looked at as unreadable, never as gone', async () => {
+    const home = homeOf('references', 'before');
+    const session = sessionOf('references');
+    const denied = Object.assign(new Error('EACCES: permission denied, lstat'), { code: 'EACCES' });
+    const io: RecordIo = { ...recordIo, entry: async () => Promise.reject(denied) };
+    expect(await readRecord(home, session, io)).toEqual({ unreadable: UNREADABLE.record });
+    // Only a missing path is absence: nothing there, or a part of the path that is no directory.
+    expect(await recordIo.entry(join(home, 'missing'))).toBeNull();
+    writeFileSync(join(home, 'a-file'), '');
+    expect(await recordIo.entry(join(home, 'a-file', 'deeper'))).toBeNull();
+  });
+
   it('reads an inbox that is missing, or shorter than the offset, as no tail', async () => {
     const home = homeOf('references', 'before');
     const session = sessionOf('references');
@@ -124,7 +162,7 @@ describe('readRecord', () => {
     expect(touched).toEqual([]);
   });
 
-  it('reads no record through a link, nor a state that is not a regular file', async () => {
+  it('reads no record through a link, nor a state or an inbox that is a link', async () => {
     const home = tempDir();
     const elsewhere = homeOf('references', 'before');
     const session = sessionOf('references');
@@ -139,8 +177,16 @@ describe('readRecord', () => {
     rmSync(join(record, 'state.json'));
     symlinkSync(real, join(record, 'state.json'));
     const read = await readRecord(elsewhere, session);
-    expect(read).toEqual({ unreadable: expect.any(String) });
+    expect(read).toEqual({ unreadable: UNREADABLE.notFile });
     expect(JSON.stringify(read)).not.toContain(elsewhere); // a reason a window may show names no path
+
+    rmSync(join(record, 'state.json'));
+    cpSync(real, join(record, 'state.json'));
+    const inbox = join(elsewhere, 'inbox.jsonl');
+    cpSync(join(record, 'inbox.jsonl'), inbox);
+    rmSync(join(record, 'inbox.jsonl'));
+    symlinkSync(inbox, join(record, 'inbox.jsonl'));
+    expect(await readRecord(elsewhere, session)).toEqual({ unreadable: UNREADABLE.notFile });
   });
 
   it('marks a reference changed by its file’s size and modification time, to the millisecond', async () => {

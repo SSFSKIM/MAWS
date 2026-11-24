@@ -11,11 +11,31 @@ import { modelOf } from '@shared/sheet/read';
 export const sheetRoot = (home: string): string => join(home, 'sheet');
 
 const codeOf = (error: unknown): unknown => (error as NodeJS.ErrnoException | null)?.code;
-// Why a file of the record could not be read, naming no path: a system error by its code, any other by its message.
-const whyOf = (error: unknown): string => {
-  const code = codeOf(error);
-  return typeof code === 'string' ? code : (error as Error).message;
-};
+const isAbsence = (error: unknown): boolean => codeOf(error) === 'ENOENT' || codeOf(error) === 'ENOTDIR';
+
+/**
+ * Why a record reads `unreadable`: each a fixed sentence, which names no path and echoes nothing of the record, since
+ * a window may show it.
+ */
+export const UNREADABLE = {
+  record: 'The record’s directory could not be read.',
+  notFile: 'A file of the record is a link or not a regular file.',
+  state: 'The record’s state could not be read.',
+  utf8: 'The record’s state is not UTF-8.',
+  json: 'The record’s state is not JSON.',
+  version: 'The record’s state is of a version this build does not read.',
+  schema: 'The record’s state is not one this build reads.',
+  session: 'The record’s state names another session.',
+  inbox: 'The record’s inbox could not be read.',
+} as const;
+export type UnreadableReason = (typeof UNREADABLE)[keyof typeof UNREADABLE];
+
+/** What the file-system io throws for a file of the record it will not read, with the sentence that says why. */
+export class UnreadableFile extends Error {
+  constructor(readonly reason: UnreadableReason) {
+    super(reason);
+  }
+}
 
 /** The session ids with a record under a home: every real directory of the sheet's root, named by one, that holds a `state.json`. */
 export async function listRecords(home: string): Promise<string[]> {
@@ -31,16 +51,19 @@ export async function listRecords(home: string): Promise<string[]> {
   // `surfaces`, `.staging` and the `<session>.lock` files (I1) are no session id; a link is no real directory.
   for (const entry of entries) {
     if (!isSheetSession(entry.name) || !entry.isDirectory()) continue;
-    if ((await recordIo.entry(join(root, entry.name, 'state.json'))) !== null) out.push(entry.name);
+    // A state that cannot be looked at is listed: reading it then says the record is unreadable, not gone.
+    const state = await recordIo.entry(join(root, entry.name, 'state.json')).catch(() => 'other' as const);
+    if (state !== null) out.push(entry.name);
   }
   return out.sort();
 }
 
 /** The file system as a reader touches it; a test moves a record under the reader through it. */
 export interface RecordIo {
-  /** What `lstat` finds at a path, or null when nothing is there. */
+  /** What `lstat` finds at a path; null only when nothing is there (ENOENT, ENOTDIR), and it throws on any other failure. */
   entry(path: string): Promise<'directory' | 'file' | 'other' | null>;
-  /** A `state.json` parsed; throws ENOENT when there is none, and refuses a path that is not a regular file. */
+  /** A `state.json` decoded as UTF-8 and parsed; throws ENOENT when there is none, and `UnreadableFile` for a link, a
+   * file that is not regular, bytes that are not UTF-8 and text that is not JSON. */
   readState(path: string): Promise<unknown>;
   /** An inbox's bytes from `offset` to its end; none when there is no inbox or it ends before the offset. */
   readTail(path: string, offset: number): Promise<Uint8Array>;
@@ -50,14 +73,22 @@ export interface RecordIo {
 
 // A file of the record opened as itself: never through a link at its last component, never blocking on a special file.
 async function openRegular(path: string) {
-  const handle = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+  let handle;
+  try {
+    handle = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+  } catch (error) {
+    throw codeOf(error) === 'ELOOP' ? new UnreadableFile(UNREADABLE.notFile) : error;
+  }
   const st = await handle.stat();
   if (!st.isFile()) {
     await handle.close();
-    throw new Error('not a regular file');
+    throw new UnreadableFile(UNREADABLE.notFile);
   }
   return { handle, size: st.size };
 }
+
+// The record's text as sminos's reader decodes it: invalid bytes refused, a byte order mark kept (and so not JSON).
+const strictUtf8 = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true });
 
 // Nanoseconds floored to a millisecond: the float `mtimeMs` rounds the other way on some values.
 const floorMs = (ns: bigint): number => Number(ns / 1_000_000n - (ns < 0n && ns % 1_000_000n !== 0n ? 1n : 0n));
@@ -67,16 +98,25 @@ export const recordIo: RecordIo = {
     try {
       const st = await lstat(path);
       return st.isDirectory() ? 'directory' : st.isFile() ? 'file' : 'other';
-    } catch {
-      return null;
+    } catch (error) {
+      if (isAbsence(error)) return null;
+      throw error;
     }
   },
   async readState(path) {
     const { handle } = await openRegular(path);
+    let text: string;
     try {
-      return JSON.parse(await handle.readFile('utf8'));
+      text = strictUtf8.decode(await handle.readFile());
+    } catch (error) {
+      throw error instanceof TypeError ? new UnreadableFile(UNREADABLE.utf8) : error;
     } finally {
       await handle.close();
+    }
+    try {
+      return JSON.parse(text);
+    } catch {
+      throw new UnreadableFile(UNREADABLE.json);
     }
   },
   async readTail(path, offset) {
@@ -111,46 +151,57 @@ export const recordIo: RecordIo = {
   },
 };
 
-type Read = { state: SheetState } | { unreadable: string } | null;
+type Read = { state: SheetState } | { unreadable: UnreadableReason } | null;
 
-async function readState(io: RecordIo, path: string): Promise<Read> {
+const reasonOf = (error: unknown, otherwise: UnreadableReason): UnreadableReason => (error instanceof UnreadableFile ? error.reason : otherwise);
+
+// One read of a record's state: null when it is gone; unreadable when it is not a state of version 1 that this build
+// reads, or names another session than the directory's.
+async function readState(io: RecordIo, path: string, session: string): Promise<Read> {
   let raw: unknown;
   try {
     raw = await io.readState(path);
   } catch (error) {
     if (codeOf(error) === 'ENOENT') return null;
-    return { unreadable: `state.json could not be read: ${whyOf(error)}` };
+    return { unreadable: reasonOf(error, UNREADABLE.state) };
   }
-  const v = (raw as { v?: unknown } | null)?.v;
-  if (v !== 1) return { unreadable: `state.json is of version ${JSON.stringify(v)}, and this build reads version 1` };
+  if ((raw as { v?: unknown } | null)?.v !== 1) return { unreadable: UNREADABLE.version };
   const parsed = SheetStateSchema.safeParse(raw);
-  return parsed.success ? { state: parsed.data } : { unreadable: `state.json is not a record this build reads: ${parsed.error.issues[0]?.message ?? 'invalid'}` };
+  if (!parsed.success) return { unreadable: UNREADABLE.schema };
+  return parsed.data.session === session ? { state: parsed.data } : { unreadable: UNREADABLE.session };
 }
 
 /**
  * A record's model, read as C2's I4 step 1 reads it: `state.json`, the inbox from its offset, `state.json` again, over
  * while `seq` moved, at most four times; when it moved every time, `busy`, and no pair that was not verified. Null
- * when the session has no record here, and for a name that is not a session id, before any path is made from it.
+ * when the session has no record here, and for a name that is not a session id, before any path is made from it; a
+ * record that is there and cannot be read is `unreadable`, with one of `UNREADABLE`'s sentences, never gone.
  */
 export async function readRecord(
   home: string,
   session: string,
   io: RecordIo = recordIo,
-): Promise<{ model: SheetModel } | { unreadable: string } | { busy: true } | null> {
+): Promise<{ model: SheetModel } | { unreadable: UnreadableReason } | { busy: true } | null> {
   if (!isSheetSession(session)) return null;
   const record = join(sheetRoot(home), session);
-  if ((await io.entry(record)) !== 'directory') return null;
+  let kind;
+  try {
+    kind = await io.entry(record);
+  } catch {
+    return { unreadable: UNREADABLE.record };
+  }
+  if (kind !== 'directory') return null;
   const statePath = join(record, 'state.json');
   for (let attempt = 0; attempt < 4; attempt += 1) {
-    const first = await readState(io, statePath);
+    const first = await readState(io, statePath, session);
     if (first === null || 'unreadable' in first) return first;
     let tail: Uint8Array;
     try {
       tail = await io.readTail(join(record, 'inbox.jsonl'), first.state.inbox.offset);
     } catch (error) {
-      return { unreadable: `inbox.jsonl could not be read: ${whyOf(error)}` };
+      return { unreadable: reasonOf(error, UNREADABLE.inbox) };
     }
-    const second = await readState(io, statePath);
+    const second = await readState(io, statePath, session);
     if (second === null || 'unreadable' in second) return second;
     if (second.state.seq === first.state.seq) return { model: modelOf(second.state, tail, await changesOf(io, second.state)) };
   }
