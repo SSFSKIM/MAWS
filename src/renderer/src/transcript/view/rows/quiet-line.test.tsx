@@ -197,18 +197,41 @@ it('a standalone line takes a run’s space: its size, its line, its space above
   expect(getComputedStyle(line.querySelector('.transcript-chevron')!).marginLeft || '0px').toBe('0px'); // the chevron after the text, as a run's
 });
 
-// The pair review of 2026-11-24: a mark sits in a glyph slot every tool line has, a call's and a run's, marked or not, so
-// labels start at one x (a slot's 12 px and the line's 7 px gap: the 19 px a detail is indented by).
-// happy-dom computes no pseudo-element, so the slot is read from the stylesheet's rule and the gap from each line drawn.
-it('every tool line has a 12 px glyph slot and a 7 px gap, marked or not', async () => {
-  const rules = [...style.sheet!.cssRules].filter((rule): rule is CSSStyleRule => rule instanceof CSSStyleRule);
-  const slot = rules.find((rule) => rule.selectorText.replace(/\s+/g, ' ') === '.transcript-cell-line::before, .transcript-run-line::before')!;
-  expect([slot.style.content, slot.style.width, slot.style.flexGrow, slot.style.flexShrink]).toEqual(["''", '12px', '0', '0']); // every line, marked or not
-  const ring = rules.find((rule) => rule.selectorText.includes('.transcript-run-line[data-line="running"]::before') && rule.style.margin !== '')!;
-  expect(ring.style.margin).toBe('0px 1.5px'); // the 9 px ring centred in the slot
+// The pair reviews of 2026-11-24. happy-dom lays nothing out and computes no pseudo-element, so what places a line's text
+// and its mark is read from the stylesheet's rules and from each line's computed box.
+const px = (value: string) => (value === '' ? 0 : Number.parseFloat(value));
+const sheetRules = () => [...style.sheet!.cssRules].filter((rule): rule is CSSStyleRule => rule instanceof CSSStyleRule);
+const slotRule = () => sheetRules().find((rule) => rule.selectorText.replace(/\s+/g, ' ') === '.transcript-cell-line::before, .transcript-run-line::before')!;
+
+// (1) One height whether a mark is there or not: every tool line is a block-level flex box (no inline box whose baseline
+// a mark or its empty slot could move), of the same 24 px line, with no space above or below of its own.
+it('every tool line is one block-level line of one height, with a mark or without', async () => {
   const store = await opened(everyCase());
-  const gapOf = (row: Row) => getComputedStyle(renderRow(row, { storeKey: store.key }).container.querySelector('.transcript-cell-line, .transcript-run-line')!).gap;
-  expect([gapOf(cellRow(store.rows(), 'fail')), gapOf(cellRow(store.rows(), 'js')), gapOf(cellRow(store.rows(), 'one')), gapOf(rowOf(store.rows(), 'group'))]).toEqual(['7px', '7px', '7px', '7px']);
+  const lineOf = (row: Row) => renderRow(row, { storeKey: store.key }).container.querySelector<HTMLElement>('.transcript-cell-line, .transcript-run-line')!;
+  const box = (line: HTMLElement) => { const s = getComputedStyle(line); return [s.display, s.lineHeight, px(s.paddingTop), px(s.paddingBottom), px(s.marginTop), px(s.marginBottom)]; };
+  const lines = { failed: lineOf(cellRow(store.rows(), 'fail')), denied: lineOf(cellRow(store.rows(), 'deny')), unmarked: lineOf(cellRow(store.rows(), 'js')), image: lineOf(cellRow(store.rows(), 'shot')), runOfOne: lineOf(cellRow(store.rows(), 'one')), run: lineOf(rowOf(store.rows(), 'group')) };
+  for (const [name, line] of Object.entries(lines)) expect(box(line), name).toEqual(['flex', '24px', 0, 0, 0, 0]);
+});
+
+// (2) Every line's text starts at the prose edge and its mark hangs in the gutter: the line has no inset of its own, and
+// its 12 px slot sits wholly left of the text, inside the column's 16 px padding (--measure-pad), the mark right-aligned
+// 4 px from the text. In an opened run's block the slot hangs in the line's own 16 px left padding.
+it('a tool line’s text starts at the prose edge, its glyph slot hung in the 16 px gutter', async () => {
+  const slot = slotRule();
+  const [left, width, right] = [px(slot.style.marginLeft), px(slot.style.width), px(slot.style.marginRight)];
+  expect([left, width, slot.style.textAlign]).toEqual([-16, 12, 'right']);
+  const store = await opened(everyCase());
+  const lineOf = (row: Row) => renderRow(row, { storeKey: store.key }).container.querySelector<HTMLElement>('.transcript-cell-line, .transcript-run-line')!;
+  for (const line of [lineOf(cellRow(store.rows(), 'fail')), lineOf(cellRow(store.rows(), 'one')), lineOf(rowOf(store.rows(), 'group'))]) {
+    const s = getComputedStyle(line);
+    expect([px(s.marginLeft), px(s.paddingLeft)]).toEqual([0, 0]); // the line starts at the row's edge, the prose's
+    expect(left + width + right + px(s.gap)).toBe(0); // so its text starts there too, the slot all in the gutter
+    expect(right + px(s.gap)).toBe(4); // the slot's right edge 4 px from the text
+  }
+  const ring = sheetRules().find((rule) => rule.selectorText.includes('.transcript-run-line[data-line="running"]::before') && rule.style.marginLeft !== '')!;
+  expect(px(ring.style.marginLeft) + 9).toBe(left + width); // the 9 px ring at the slot's right edge
+  const block = sheetRules().find((rule) => rule.selectorText === '.transcript-tool-block .transcript-cell-line')!;
+  expect(px(block.style.paddingLeft)).toBe(16); // an opened run's rows hang theirs in their own padding
 });
 
 // The whole transcript and the report view: no tool call draws a box at rest. (An opened run keeps its block of calls,

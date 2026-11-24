@@ -5615,13 +5615,17 @@ test('the tool card retired: lone calls failed, denied, a js call, an image, a r
     };
     // The check that `target` is in sight: the point near its start shows the target itself, so it is inside the window
     // and nothing is drawn over it (the message box, a notice); a row the message box covers is still in the viewport
+    // (a miss reads back the target's box and what the point hit, so `_run.json` says why)
     const seen = (target: Locator, what: string) => () =>
       expect.poll(() => target.evaluate((el) => {
         const r = el.getBoundingClientRect();
-        if (r.width === 0 || r.height === 0) return false;
+        const box = `box ${Math.round(r.left)},${Math.round(r.top)} ${Math.round(r.width)}x${Math.round(r.height)}`;
+        if (r.width === 0 || r.height === 0) return `no size: ${box}`;
         const hit = document.elementFromPoint(r.left + Math.min(48, r.width / 2), r.top + Math.min(10, r.height / 2));
-        return hit !== null && el.contains(hit);
-      }), { message: `${what} in sight, nothing over it`, timeout: 3_000 }).toBe(true);
+        if (hit !== null && el.contains(hit)) return 'in sight';
+        const name = hit === null ? 'nothing' : `${hit.tagName.toLowerCase()}${hit.className && typeof hit.className === 'string' ? `.${hit.className.trim().split(/\s+/).join('.')}` : ''}`;
+        return `${box}; the point hit ${name}`;
+      }), { message: `${what} in sight, nothing over it`, timeout: 3_000 }).toBe('in sight');
     // A run's line (or, on master's build, a lone call's card line, the first disclosure of its row) pointed at, and the
     // check that its chevron is drawn: lines and runs show it only on pointing, focus or open (a card always did)
     const pointAt = async (line: Locator) => {
@@ -5759,7 +5763,7 @@ test('the tool card retired: lone calls failed, denied, a js call, an image, a r
       await opened('report');
       await openStretchesAll();
       await place(rowOf(`cell:${rvJs}`));
-    }, { check: checks(seen(cellOf(rvJs), 'the js call'), seen(activityOf(rvJs).last(), 'its browser activity, to the last row'), seen(rowOf(`cell:${tcTool('report', 'Branch')}`), 'the lone command after it')) });
+    }, { check: checks(seen(cellOf(rvJs), 'the js call'), seen(activityOf(rvJs).last(), 'its browser activity, to the last row'), seen(rowOf(`cell:${tcTool('report', 'Branch')}`).locator('.transcript-run-line, .transcript-cell-line').first(), 'the lone command’s line after it')) }); // its line as drawn: a run of one's run line, master's card line
     // The report draws a finished turn's line only while one of its stretches is open (owner/view/mirror.ts), so the
     // first record line, the failed command's, is opened first: the denied command's stretch stays folded for the jump
     await shot(page, meta('tc-rv-denied-jump', 'The to-human view, the denied count pressed', 'The session “report” (invented), opened, its first record line pressed (the failed command’s), then its turn line’s “1 denied” pressed', 'The stretch holding the denied command open, the command holding the keyboard', rvFolders), async () => {
