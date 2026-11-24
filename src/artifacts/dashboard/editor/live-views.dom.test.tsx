@@ -188,6 +188,10 @@ describe('the source sheet’s live query (E3 M3)', () => {
     expect(live.openSession).toHaveBeenCalledWith('a1111111-1111-4111-8111-111111111111');
     act(() => live.set({ start: { phase: 'starting', appSessionId: 'a1111111-1111-4111-8111-111111111111' } }));
     expect(within(block()).getByRole('button', { name: 'Start session' }).hasAttribute('disabled')).toBe(true);
+    // the word cut (N198, as the Connectors sheet's T591): "Starting…" while it asks and starts, then "Ready"
+    expect(within(block()).getByRole('status').textContent).toBe('Starting…');
+    act(() => live.set({ start: { phase: 'ready', appSessionId: 'a1111111-1111-4111-8111-111111111111' } }));
+    expect(within(block()).getByRole('status').textContent).toBe('Ready');
   });
 
   it('a grant refused for want of a session explains it beside Start; with no grant and no pause, says how to allow it', async () => {
