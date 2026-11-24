@@ -88,7 +88,13 @@ export function SessionSheet({ model, memory, onMemory, host, focus = null, dens
   // The person's act on a card, applied to the draft as it stands when applied, so an image or a sibling's edit applied
   // first stays; none while a Send holds the memory.
   const draft = (question: SheetQuestion, update: (current: QuestionDraft | undefined) => QuestionDraft | null) =>
-    free && onMemory((current) => (current.sending === null ? editDraft(current, question, update(current.drafts.get(question.id))) : current));
+    free &&
+    onMemory((current) => {
+      if (current.sending !== null) return current;
+      const was = current.drafts.get(question.id);
+      const next = update(was);
+      return next === was && was !== undefined ? current : editDraft(current, question, next); // a draft left untouched leaves the memory so
+    });
   // A pasted image, saved: it joins the draft of the question it was pasted on, in this session's memory, as that is when it lands.
   const attachTo = (question: SheetQuestion) => {
     const land = onMemory;

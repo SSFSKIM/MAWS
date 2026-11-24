@@ -47,12 +47,15 @@ const kindOf = async (path: string): Promise<'directory' | 'file' | 'other' | nu
 export const isRecord = async (record: string): Promise<boolean> => (await kindOf(record)) === 'directory' && (await kindOf(join(record, 'state.json'))) === 'file';
 
 /**
- * Whether the record's `inbox.jsonl` may be appended to: absent (the door makes it) or a regular file; never a link or
- * a special file, as the reader refuses to read one. Checked by MAWS before the door runs, whatever the writer checks.
+ * Whether the record's `inbox.jsonl` may be appended to: absent (the door makes it) or a regular file; never a link, a
+ * special file, or one `lstat` cannot look at, as the reader refuses to read one. Checked by MAWS before the door runs, whatever the writer checks.
  */
 export const isInboxConfined = async (record: string): Promise<boolean> => {
-  const kind = await kindOf(join(record, 'inbox.jsonl'));
-  return kind === null || kind === 'file';
+  try {
+    return (await lstat(join(record, 'inbox.jsonl'))).isFile();
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === 'ENOENT'; // only an inbox that is not there is absent
+  }
 };
 
 /**

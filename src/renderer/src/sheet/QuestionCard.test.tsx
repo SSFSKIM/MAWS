@@ -155,6 +155,13 @@ describe('QuestionCard', () => {
     expect(update(draft(1, { text: 'From 1', images: ['uploads/maws-late.png'] }))).toEqual(draft(1, { text: 'From 1 November.', images: ['uploads/maws-late.png'] }));
   });
 
+  it('leaves untouched a draft newer than its own question: an edit from a card behind a rewrite', () => {
+    const { onDraft } = card(CLASH);
+    fireEvent.change(screen.getByRole('textbox'), { target: { value: 'Typed on the older card.' } });
+    const newer = draft(2, { picks: ['Keep the shuttle on Sundays'] }); // a pick only revision 2 offers
+    expect(onDraft.mock.calls.at(-1)![0](newer)).toBe(newer);
+  });
+
   it('takes nothing while an act on it is in flight', () => {
     const { onDraft } = card(CLASH, { busy: true });
     fireEvent.click(option('Keep the longer route'));

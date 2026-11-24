@@ -612,3 +612,34 @@ describe('a take back', () => {
     expect(kept.acts.map((act) => [act.kind, act.id])).toEqual([['retract', 'q4']]);
   });
 });
+
+describe('two mounts at two revisions', () => {
+  const SUNDAYS = { ...CLASH_REVISED, options: [...CLASH_REVISED.options, { label: 'Keep the shuttle on Sundays' }] };
+  function Behind() {
+    const [memory, setMemory] = useState(EMPTY_MEMORY);
+    useEffect(() => {
+      kept = memory;
+    });
+    const host = fixtureHost();
+    return (
+      <>
+        <div data-mount="newer">
+          <SessionSheet model={sheetOf([SUNDAYS])} memory={memory} onMemory={setMemory} host={host} />
+        </div>
+        <div data-mount="older">
+          <SessionSheet model={sheetOf([CLASH])} memory={memory} onMemory={setMemory} host={host} />
+        </div>
+      </>
+    );
+  }
+
+  it('never moves a draft back to the revision of a card behind a rewrite', () => {
+    render(<Behind />);
+    const newer = document.querySelector<HTMLElement>('[data-mount="newer"]')!;
+    const older = document.querySelector<HTMLElement>('[data-mount="older"]')!;
+    fireEvent.click(within(newer).getByRole('radio', { name: /Keep the shuttle on Sundays/ }));
+    expect(kept.drafts.get('q4')).toEqual(draft(2, { picks: ['Keep the shuttle on Sundays'] }));
+    fireEvent.change(within(older).getByRole('textbox'), { target: { value: 'Typed on the older card.' } });
+    expect(kept.drafts.get('q4')).toEqual(draft(2, { picks: ['Keep the shuttle on Sundays'] }));
+  });
+});

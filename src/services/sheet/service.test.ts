@@ -11,6 +11,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { HandlerContext } from '@shared/ipc/client';
 import type { SheetLine, SheetSummary } from '@shared/sheet/model';
+import { lineError } from '@shared/sheet/read';
 import { FAKE_SMINOS, SHEET_FIXTURES, seedRecord } from '../../../test/support/sheet-records';
 import { COMMAND_BUDGETS_MS } from '../command-budgets';
 import { recordIo, type RecordIo } from './reader';
@@ -375,11 +376,27 @@ describe('put', () => {
   it('refuses, before any process starts, a line no surface writes: a delivered line from a caller in the process', async () => {
     const t = start();
     seedRecord(t.home, 'two-surfaces');
-    const delivered = { v: 1, key: 'maws-00000001', kind: 'delivered', by: 'maws' } as unknown as SheetLine;
+    const delivered = { v: 1, key: 'maws-00000001', kind: 'delivered', keys: ['maws-00000009'], by: 'maws' } as unknown as SheetLine;
+    expect(lineError(delivered)).toBeNull(); // an inbox line on disk: only the surface's schema refuses it
     expect(await t.service.put(TWO, [delivered])).toMatchObject({ ok: false, why: 'refused' });
     const extra = { ...answer('maws-00000002', ['Yes']), at: '2026-11-24T00:00:00.000Z' } as SheetLine; // the door's own field
     expect(await t.service.put(TWO, [extra])).toMatchObject({ ok: false, why: 'refused' });
     expect(t.ran()).toEqual([]);
+  });
+
+  it('writes the lines as they were when put was called, whatever the caller does to them after', async () => {
+    const t = start();
+    seedRecord(t.home, 'two-surfaces');
+    const lines = [answer('maws-00000001', ['Yes'])];
+    const first = lines[0]!;
+    const put = t.service.put(TWO, lines);
+    (first.picks as string[]).push('No');
+    lines.push(answer('maws-00000002', ['No']));
+    lines[0] = { v: 1, key: 'maws-00000003', kind: 'delivered', keys: ['maws-00000009'], by: 'maws' } as unknown as SheetLine;
+    expect(await put).toMatchObject({ ok: true });
+    const inbox = readFileSync(join(t.record(TWO), 'inbox.jsonl'), 'utf8').split('\n').filter(Boolean).map((line) => JSON.parse(line) as { key: string; picks?: string[] });
+    expect(inbox.slice(-1)).toMatchObject([{ key: 'maws-00000001', picks: ['Yes'] }]);
+    expect(inbox.some((line) => line.key !== 'maws-00000001' && line.key.startsWith('maws-0000000'))).toBe(false);
   });
 
   it('proves the command again when a spawn fails', async () => {

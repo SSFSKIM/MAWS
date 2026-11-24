@@ -318,12 +318,16 @@ export function createSheetService(deps: SheetServiceDeps): SheetService {
       if (!isSheetSession(session)) return refused('A sheet’s session is named by its engine session id.');
       if (lines.length === 0) return refused('A put carries at least one inbox line.');
       if (lines.length > SEND_MAX_LINES) return refused(`A put carries at most ${SEND_MAX_LINES} inbox lines.`);
+      // Each line a surface's, as the wire holds it (no `delivered`, no field the door fills), for a caller in the
+      // process too (C4's page through `SpineRoot.sheet`); then the rules across its fields. The parsed copies are what
+      // is written, and written again on a retry: the caller's array, still theirs, may change across the awaits below.
+      const parsed: SheetLine[] = [];
       for (const [i, line] of lines.entries()) {
-        // A surface's line, as the wire holds it (no `delivered`, no field the door fills), for a caller in the process
-        // too (C4's page through `SpineRoot.sheet`); then the rules across its fields.
-        if (!SheetLineSchema.safeParse(line).success) return refused(`Line ${i + 1} is not a surface’s inbox line.`);
-        const why = lineError(line);
+        const surface = SheetLineSchema.safeParse(line);
+        if (!surface.success) return refused(`Line ${i + 1} is not a surface’s inbox line.`);
+        const why = lineError(surface.data);
         if (why !== null) return refused(`Line ${i + 1} is not an inbox line: ${why}.`);
+        parsed.push(surface.data);
       }
       // One budget for the probe and the door, inside the wire's: the door gets what the location left of it.
       const deadline = Date.now() + timing.putMs;
@@ -341,7 +345,7 @@ export function createSheetService(deps: SheetServiceDeps): SheetService {
         if (located === null) return OUT_OF_TIME;
         if (!located.ok) return { ok: false, why: 'unavailable', message: located.detail };
         const left = deadline - Date.now();
-        return left <= 0 ? OUT_OF_TIME : putLines(located.cli, session, lines, left);
+        return left <= 0 ? OUT_OF_TIME : putLines(located.cli, session, parsed, left);
       };
       let result = await send();
       if (!result.ok && result.message === DOOR_NOT_STARTED) {

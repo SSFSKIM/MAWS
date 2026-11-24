@@ -133,11 +133,16 @@ export function QuestionCard({ session, question, draft, mark, busy, host, densi
   const picks = draft !== undefined && !carried ? draft.picks : [];
   const carriedPicks = carried ? draft.picks.filter((pick) => question.options.some((option) => option.label === pick)) : [];
 
+  // Every act of this card hands back an update, which leaves untouched a draft newer than this card's question (a
+  // sibling showing the rewrite wrote it): an act may confirm an older carried draft up to this revision, never move a
+  // newer one back to it.
+  const act = (update: (current: QuestionDraft | undefined) => QuestionDraft | null) =>
+    onDraft((current) => (current !== undefined && current.revision > question.revision ? current : update(current)));
   // Every edit starts from the draft as the person sees it: none, the confirmed one, or the carried one confirmed (§G).
   const startOf = (from: QuestionDraft | undefined): QuestionDraft => (from === undefined ? { revision: question.revision, picks: [], text: '', images: [] } : isConfirmed(from, question) ? from : confirmDraft(from, question));
   const edit = (change: (from: QuestionDraft) => QuestionDraft) => {
     if (busy) return;
-    onDraft((current) => {
+    act((current) => {
       const next = change(startOf(current));
       return isEmpty(next) ? null : next;
     });
@@ -145,19 +150,19 @@ export function QuestionCard({ session, question, draft, mark, busy, host, densi
   const pick = (label: string) => edit((from) => ({ ...from, picks: [label] }));
   const toggle = (label: string, on: boolean) => edit((from) => ({ ...from, picks: on ? [...from.picks.filter((p) => p !== label), label] : from.picks.filter((p) => p !== label) }));
   const type = (text: string) => edit((from) => ({ ...from, text }));
-  const keep = () => !busy && draft !== undefined && onDraft((current) => (current === undefined ? null : confirmDraft(current, question)));
+  const keep = () => !busy && draft !== undefined && act((current) => (current === undefined ? null : confirmDraft(current, question)));
   const removeImage = (path: string) => edit((from) => ({ ...from, images: from.images.filter((image) => image !== path) }));
   // A conflict's two ways out: keep the draft against the answer the card shows now (an edit of the queued answer that
   // stands, or a new answer where none stands), or drop it.
   const keepMine = () => {
     if (busy || draft === undefined) return;
-    onDraft((current) => {
+    act((current) => {
       if (current === undefined) return null;
       const mine: QuestionDraft = { revision: current.revision, picks: current.picks, text: current.text, images: current.images };
       return queued === undefined ? mine : { ...mine, replaces: queued.key };
     });
   };
-  const discardMine = () => !busy && onDraft(() => null);
+  const discardMine = () => !busy && act(() => null);
 
   const paste = (event: ClipboardEvent<HTMLTextAreaElement>) => {
     const files = [...(event.clipboardData?.files ?? [])].filter((file) => IMAGE_TYPES.includes(file.type));
@@ -249,7 +254,7 @@ export function QuestionCard({ session, question, draft, mark, busy, host, densi
             <CardButton disabled={busy} onClick={() => onRetract(queued.key)}>
               {SHEET_WORDS.takeBack}
             </CardButton>
-            <CardButton disabled={busy} onClick={() => onDraft(() => ({ revision: queued.revision, picks: [...queued.picks], text: queued.text, images: [...queued.images], replaces: queued.key }))}>
+            <CardButton disabled={busy} onClick={() => act(() => ({ revision: queued.revision, picks: [...queued.picks], text: queued.text, images: [...queued.images], replaces: queued.key }))}>
               {SHEET_WORDS.edit}
             </CardButton>
           </div>
