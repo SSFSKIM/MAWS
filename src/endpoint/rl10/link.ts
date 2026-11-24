@@ -243,6 +243,17 @@ export class Rl10 {
           state.setHandedOff(marks);
         },
       },
+      // Ticket 851 (R4-6): a prestart's held frame is processed in turn with sminos's frames, and what follows a member's
+      // move follows it as it follows a frame: its audience (or none kept, for one pulled back), the projects held
+      inTurn: (take) => this.#inTurn(take),
+      prestartMoved: async (session, how) => {
+        if (how === 'arrived') await this.#recordMoved(session);
+        else {
+          this.cache.forgetLocal(session);
+          this.#audienceSent.delete(session);
+        }
+        this.#tellProjects();
+      },
     });
     this.relay = new LogRelay({
       org: () => {
@@ -405,7 +416,8 @@ export class Rl10 {
     if (head === null || identity === null) return;
     const ctx: AudienceContext = { org: () => ({ head: head.state, certificates: head.certificates, ref: identity.ref }), members: this.members, cache: this.cache, now: this.#ctx.now };
     const policy = await localPolicy(ctx, session);
-    if (policy === null) return;
+    // ticket 851 (R4-6): a member pulled back as a prestart's pin while its owners were resolved keeps no audience
+    if (policy === null || this.members.prestartPin(session)) return;
     // What this rev's change withdrew, against the newest rev before it the cache holds (none held: nothing to name).
     const before = this.cache.before(session, policy.policyRev);
     const withdrawn = before === undefined ? [] : withdrawnBy(before.audience, policy.members, head.state.members.map((m) => m.id));

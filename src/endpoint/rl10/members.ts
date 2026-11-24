@@ -51,10 +51,22 @@
 // `session.changed` the spine says of it (`recordChanged`), so it holds alike for the listing the hub keeps and for the
 // one a channel's `endpoint.listings` signs afresh (`recordSays`). No listing field is added. Each read runs inside an
 // operation's hold, so the daemon does not collect over it.
+//
+// Ticket 851 (docs/doperpowers/plans/2026-11-24-prestart-engine.md, R4-6 and D11): a prestart's member. A New chat's engine
+// starts hidden in the engine host at the first keystroke and joins sminos at its SessionStart, before anything is sent.
+// A lane B member whose engine session the host holds hidden (`engine.prestart`, hidden-pins.ts) is held apart from the
+// members: no handed-off mark, no record, no audience, no project presence, no listing. At `committed` its latest frame is
+// processed as a member just arrived, in turn with sminos's frames; at `ended` it is dropped with no trace, and a frame of
+// it arriving later too. A member processed before its `hidden` was heard is pulled back (its engine session's mark
+// removed, its readers told); a joined one never is. At each link to the engine host the whole set is read
+// (`restatePrestarts`): a pin it no longer names and no event settled is committed when a live row names it, else ended.
+// D11: the spine's word that a record changed joins an unjoined lane B member the record names by its engine session
+// (the live rows read again), so a session the endpoint met unjoined is listed from Send on, not first at its next frame.
 import { isChannelId, LISTING_GONE } from 'org-protocol';
 import type { EndpointServices } from '../services';
 import type { SessionReport } from '../listings';
 import type { Access, CheckoutSource, RecordSource, SessionRecord, SessionTarget, Share } from '../sources';
+import { HiddenPins } from './hidden-pins';
 
 /** A `member` frame as RL10 carries it (Interfaces §D). */
 export type Member = {
@@ -154,7 +166,18 @@ export type MembersContext = {
    * is kept in memory only.
    */
   marks?: { read(): Marks | null; write(marks: Marks): void };
+  /** Ticket 851 (R4-6): `take` in turn with sminos's frames (RL10's order); absent (a suite's), at once. */
+  inTurn?(take: () => Promise<void>): Promise<void>;
+  /**
+   * Ticket 851 (R4-6): a prestart's member moved: `held`, a member processed before its `hidden` was heard pulled back (what
+   * RL10 kept of its audience goes); `arrived`, a held member processed as one just arrived (its audience follows).
+   */
+  prestartMoved?(session: string, how: 'held' | 'arrived'): Promise<void> | void;
 };
+
+/** Ticket 851 (R4-6): what the engine host says of a prestart's pin. */
+export type PrestartWord = 'hidden' | 'committed' | 'ended';
+const PRESTART_WORDS: ReadonlySet<string> = new Set(['hidden', 'committed', 'ended']);
 
 /**
  * U9: what a lane B session's spine record says of its listing. `title` null: the record names none (the report's stands),
@@ -197,6 +220,8 @@ export class Members implements RecordSource, CheckoutSource {
   /** P5 O12 M11: the handed-off mark as on disk, read on first use (null until then), and the marks not written yet. */
   #durable: MarkSets | null = null;
   readonly #pending: MarkSets = { apps: new Set(), engines: new Set() };
+  /** Ticket 851 (R4-6): the hidden pins and their held frames. */
+  readonly #pins = new HiddenPins();
 
   constructor(ctx: MembersContext) {
     this.#ctx = ctx;
@@ -206,7 +231,7 @@ export class Members implements RecordSource, CheckoutSource {
 
   /** A welcome: every session held now, and every session listed at the hub, is to be restated before `restated`. */
   welcome(): void {
-    this.#unrestated = new Set(this.#members.keys());
+    this.#unrestated = new Set([...this.#members.keys(), ...this.#pins.held()]);
     this.#unreported = new Set(this.#ctx.listed());
   }
 
@@ -228,13 +253,26 @@ export class Members implements RecordSource, CheckoutSource {
   }
 
   /** A `member` frame: the session's record as it stands. */
-  async member(frame: Record<string, unknown>): Promise<void> {
+  member(frame: Record<string, unknown>): Promise<void> {
+    return this.#take(frame, true);
+  }
+
+  /** A `member` frame taken; `restates`: it restates its session (sminos sent it), not a held frame processed at its commit. */
+  async #take(frame: Record<string, unknown>, restates: boolean): Promise<void> {
     if (frame.gone === true) {
-      if (isId(frame.session)) await this.gone(frame.session);
-      return;
+      if (!isId(frame.session)) return;
+      if (this.#pins.drop(frame.session)) return void this.#unrestated?.delete(frame.session); // R4-6: held, so no trace
+      return this.gone(frame.session);
     }
     const member = readMember(frame);
     if (member === null) return this.#ctx.log('endpoint: an RL10 member frame that is not one was ignored');
+    // Ticket 851 (R4-6): a hidden pin's lane B member is held, untouched, until its commit; one whose prestart ended is
+    // dropped. Before the channel rule, which would mark it.
+    if (member.lane === 'B' && (this.#pins.isHidden(member.session) || this.#pins.isEnded(member.session))) {
+      if (restates) this.#unrestated?.delete(member.session);
+      if (this.#pins.isHidden(member.session)) this.#pins.hold(member.session, frame);
+      return;
+    }
     // A session whose project is a declared channel's id is not held (Interfaces §D): a channel is no project, and its
     // frame is not kept, restates nothing and reports no listing. A lane B frame is still a sminos record seen (P5 O12
     // M11), handed off as the join hands one off (`#refusedSight`), so a spawner's bridge ends at it as at any first
@@ -248,7 +286,7 @@ export class Members implements RecordSource, CheckoutSource {
     // and the frame is then the session's first.
     const held = this.#members.get(member.session);
     if (held !== undefined && held.lane !== member.lane) await this.gone(member.session);
-    this.#unrestated?.delete(member.session);
+    if (restates) this.#unrestated?.delete(member.session);
     const before = this.#members.get(member.session);
     this.#members.set(member.session, member);
     // P5 O12 M11: told before the join, which awaits the engine host, so a subscription the spawner holds by the bridge
@@ -262,11 +300,14 @@ export class Members implements RecordSource, CheckoutSource {
     // The listing the frame reports is restated: lane A its session id, lane B its appSessionId once the join placed it.
     const listing = this.listingId(member.session);
     if (listing !== null) this.#unreported?.delete(listing);
+    // Ticket 851 (R4-6): pulled back while the join was out (its `hidden` heard meanwhile): nothing to report
+    if (this.#members.get(member.session) !== member) return;
     await this.#report(member);
   }
 
   /** A session that left (or wasn't restated): withdrawn, its record gone. */
   async gone(session: string): Promise<void> {
+    if (this.#pins.drop(session)) return; // ticket 851 (R4-6): a held member leaves no trace
     const member = this.#members.get(session);
     // A session held only as a listing (from before a restart) is gone by its listing's id; read before the member goes.
     const listing = member === undefined ? session : this.listingId(session);
@@ -290,6 +331,55 @@ export class Members implements RecordSource, CheckoutSource {
     }
   }
 
+  /**
+   * Ticket 851 (R4-6): the engine host's `engine.prestart` for a pin: `hidden` holds its member (one processed before it
+   * heard is pulled back, unless joined); `committed` processes the held frame as a member just arrived, in turn with
+   * sminos's frames; `ended` drops it with no trace. Settles once what it set going is done.
+   */
+  async prestart(payload: unknown): Promise<void> {
+    if (!isObject(payload) || !isId(payload.engineSessionId) || typeof payload.state !== 'string' || !PRESTART_WORDS.has(payload.state)) return;
+    const session = payload.engineSessionId;
+    const word = payload.state as PrestartWord;
+    if (word === 'hidden') {
+      this.#pins.hide(session);
+      return this.#pullBack(session);
+    }
+    if (word === 'ended') {
+      this.#pins.end(session);
+      await this.#pullBack(session); // one processed before any word of it was heard
+      this.#pins.drop(session);
+      return;
+    }
+    const frame = this.#pins.reveal(session);
+    if (frame !== null) await this.#arrive(session, frame);
+  }
+
+  /**
+   * Ticket 851 (R4-6): the engine host's hidden set read whole (`engine.prestarts`), at each link to it: a pin it names
+   * that no word told is hidden; a hidden pin it leaves out that no word settled meanwhile is committed when a live row
+   * names it, else ended. A read that fails keeps everything as it is.
+   */
+  async restatePrestarts(): Promise<void> {
+    const read = this.#pins.beginRead();
+    let hidden: string[] | null = null;
+    let why = 'an answer with no hidden set';
+    try {
+      const response = await this.#ctx.dispatch('engine-host', 'engine.prestarts', undefined);
+      const value = response.ok && isObject(response.value) && Array.isArray(response.value.hidden) ? response.value.hidden : null;
+      if (value !== null) hidden = value.flatMap((pin) => (isObject(pin) && isId(pin.engineSessionId) ? [pin.engineSessionId] : []));
+      else if (!response.ok) why = `${response.error.code}: ${response.error.message}`;
+    } catch (error) {
+      why = (error as Error).message;
+    }
+    const settled = this.#pins.settle(read, hidden);
+    if (settled === null) {
+      if (hidden === null && !this.#pins.empty) this.#ctx.log(`endpoint: the engine host's hidden prestarts could not be read (${why}); their members stay held until the next link`);
+      return;
+    }
+    for (const session of settled.added) await this.prestart({ engineSessionId: session, state: 'hidden' });
+    await Promise.all(settled.unsettled.map(([session, stamp]) => this.#turn(() => this.#settlePin(session, stamp))));
+  }
+
   /** A project's `machine` presence: its known checkouts here. */
   presence(project: string, body: unknown): void {
     const checkouts = presenceCheckouts(body);
@@ -298,6 +388,11 @@ export class Members implements RecordSource, CheckoutSource {
   }
 
   // ---- What the endpoint reads ------------------------------------------------------------------------------------
+
+  /** Ticket 851 (R4-6): whether `session` is a prestart's pin, hidden or ended, whose member is held apart or dropped. */
+  prestartPin(session: string): boolean {
+    return this.#pins.isHidden(session) || this.#pins.isEnded(session);
+  }
 
   /** The member frame held for a session (by its engine session id), or null. */
   get(session: string): Member | null {
@@ -336,17 +431,32 @@ export class Members implements RecordSource, CheckoutSource {
   async recordChanged(record: unknown): Promise<void> {
     if (!isObject(record) || !isId(record.appId)) return;
     const app = record.appId;
-    const reporting = this.sessions().filter((session) => this.#members.get(session)?.lane === 'B' && this.listingId(session) === app);
-    if (reporting.length === 0) return;
-    const now = recordSaysOf(record);
-    const before = this.#records.get(app);
-    this.#records.set(app, now);
-    if (before !== undefined && before.archived === now.archived && before.title === now.title) return;
+    // Ticket 851 (D11): an unjoined lane B member the record names by its engine session is joined again (the live rows
+    // read), so a session committed after its member arrived is listed from Send on
+    const engine = record.engineSessionId;
+    const joining = isId(engine) && this.#members.get(engine)?.lane === 'B' && !this.#apps.has(engine) ? engine : null;
+    const reporting = () => this.sessions().filter((session) => this.#members.get(session)?.lane === 'B' && this.listingId(session) === app);
+    if (joining === null && reporting().length === 0) return;
     const release = this.#ctx.hold?.('a listing following its record') ?? (() => {});
     try {
-      for (const session of reporting) {
+      let joined: string | null = null;
+      if (joining !== null) {
+        await this.#join(joining);
+        const member = this.#members.get(joining);
+        if (member !== undefined && this.#apps.has(joining)) {
+          this.#changed(member, undefined);
+          joined = joining;
+        }
+      }
+      const listed = reporting();
+      if (listed.length === 0) return;
+      const now = recordSaysOf(record);
+      const before = this.#records.get(app);
+      this.#records.set(app, now);
+      const moved = before === undefined || before.archived !== now.archived || before.title !== now.title;
+      for (const session of listed) {
         const member = this.#members.get(session);
-        if (member !== undefined) await this.#report(member);
+        if (member !== undefined && (moved || session === joined)) await this.#report(member);
       }
     } finally {
       release();
@@ -435,6 +545,59 @@ export class Members implements RecordSource, CheckoutSource {
   }
 
   // ---- Inside -----------------------------------------------------------------------------------------------------
+
+  /** Ticket 851 (R4-6): `take` in turn with sminos's frames. */
+  #turn(take: () => Promise<void>): Promise<void> {
+    return this.#ctx.inTurn?.(take) ?? take();
+  }
+
+  /**
+   * Ticket 851 (R4-6): a lane B member processed before its pin's word was heard, unjoined, is pulled back: held again,
+   * its engine session's handed-off mark removed (a fresh pin's, which nothing else marks), its readers told the record
+   * went, and RL10 told. A joined one names a public row, never a hidden pin's, and stays.
+   */
+  async #pullBack(session: string): Promise<void> {
+    const member = this.#members.get(session);
+    if (member === undefined || member.lane !== 'B') return;
+    if (this.#apps.has(session)) return this.#ctx.log(`endpoint: session ${session.slice(0, 8)} is joined to an app session; a prestart's word of it changes nothing`);
+    this.#members.delete(session);
+    this.#superseded.delete(session);
+    this.#pins.hold(session, member as unknown as Record<string, unknown>);
+    this.#pending.engines.delete(session);
+    const durable = this.#marks();
+    if (durable?.engines.has(session)) this.#persist(durable, { engines: [session] });
+    this.#tell({ lane: 'B', session, appSessionId: '' });
+    await this.#ctx.prestartMoved?.(session, 'held');
+  }
+
+  /**
+   * Ticket 851 (R4-6): a committed pin's held frame processed as a member just arrived, in its turn, unless a frame taken
+   * first already was (newer than the held one) or a word since holds or ends it again.
+   */
+  #arrive(session: string, frame: Record<string, unknown>): Promise<void> {
+    return this.#turn(async () => {
+      if (this.#members.has(session) || this.#pins.isHidden(session) || this.#pins.isEnded(session)) return;
+      await this.#arrived(session, frame);
+    });
+  }
+
+  /** Ticket 851 (R4-6): a held frame processed in this turn as a member just arrived, and RL10 told. */
+  async #arrived(session: string, frame: Record<string, unknown>): Promise<void> {
+    await this.#take(frame, false);
+    if (this.#members.has(session)) await this.#ctx.prestartMoved?.(session, 'arrived');
+  }
+
+  /** Ticket 851 (R4-6): a pin the whole set left out, unless a word settled it first: committed when a live row names it, else ended. */
+  async #settlePin(session: string, stamp: number): Promise<void> {
+    if (this.#pins.stamp(session) !== stamp) return;
+    const live = await this.#liveRows();
+    if (this.#pins.stamp(session) !== stamp) return;
+    const committed = live.some((row) => row.engineSessionId === session);
+    if (!committed) return this.prestart({ engineSessionId: session, state: 'ended' }); // a host that cannot answer reads as none: dropped, fail-closed
+    // in this turn already: the held frame is taken here, not in a turn of its own
+    const frame = this.#pins.reveal(session);
+    if (frame !== null && !this.#members.has(session)) await this.#arrived(session, frame);
+  }
 
   /** Whether a member held now is listed under `listing`. */
   #listedBy(listing: string): boolean {
