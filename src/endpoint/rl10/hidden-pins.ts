@@ -7,6 +7,10 @@
 // A read of the whole set is older than an event heard while it is out: an engine session told of meanwhile keeps what
 // the event said. A pin the read no longer names, and no event settled, is left to Members to settle by the host's live
 // rows; its stamp (the count of what was told of it) lets that deferred decision see a word that came first.
+//
+// The prestart panel (scalpel-4#6): a first lane B member whose engine session is not yet known as public is held
+// **early** while the endpoint asks the host about it, and, when the host cannot say, until a word, a whole-set read that
+// answers, or Members' bound. Its frame is held as a hidden pin's is; a word of it ends the early hold.
 
 /** The ended pins kept, newest last: a prestart's frames arrive within moments of its end, and at most one runs at once. */
 export const ENDED_KEPT = 64;
@@ -18,6 +22,8 @@ export class HiddenPins {
   readonly #held = new Map<string, Record<string, unknown>>();
   /** The engine sessions whose prestart ended, oldest first. */
   readonly #ended = new Set<string>();
+  /** The engine sessions whose first frame is held early (not yet known as public, nor as a hidden pin's), each with the count of whole-set reads begun before it was. */
+  readonly #early = new Map<string, number>();
   /** The engine sessions told of since the latest whole-set read began; null with none out. */
   #since: Set<string> | null = null;
   #reads = 0;
@@ -36,6 +42,16 @@ export class HiddenPins {
     return this.#hidden.get(session);
   }
 
+  /** Whether `session`'s first frame is held early (the prestart panel, scalpel-4#6). */
+  isEarly(session: string): boolean {
+    return this.#early.has(session);
+  }
+
+  /** The engine sessions whose first frame was held early before the whole-set read `read` began (`beginRead`'s number). */
+  earlyBefore(read: number): string[] {
+    return [...this.#early].flatMap(([session, reads]) => (reads < read ? [session] : []));
+  }
+
   /** Whether anything is hidden or held (a read that fails is worth a line only then). */
   get empty(): boolean {
     return this.#hidden.size === 0 && this.#held.size === 0;
@@ -45,6 +61,7 @@ export class HiddenPins {
   hide(session: string): void {
     this.#since?.add(session);
     this.#ended.delete(session);
+    this.#early.delete(session);
     this.#hidden.set(session, ++this.#stamp);
   }
 
@@ -55,12 +72,14 @@ export class HiddenPins {
   reveal(session: string): void {
     this.#since?.add(session);
     this.#hidden.delete(session);
+    this.#early.delete(session);
   }
 
-  /** The frame held for `session`, taken out; null with none. */
+  /** The frame held for `session`, taken out (an early hold ends with it); null with none. */
   take(session: string): Record<string, unknown> | null {
     const frame = this.#held.get(session) ?? null;
     this.#held.delete(session);
+    this.#early.delete(session);
     return frame;
   }
 
@@ -74,6 +93,7 @@ export class HiddenPins {
     this.#since?.add(session);
     this.#hidden.delete(session);
     this.#held.delete(session);
+    this.#early.delete(session);
     this.#ended.delete(session);
     this.#ended.add(session);
     for (const old of this.#ended) {
@@ -87,8 +107,15 @@ export class HiddenPins {
     this.#held.set(session, frame);
   }
 
+  /** `frame`, the first of `session`, held early (the prestart panel, scalpel-4#6). */
+  holdEarly(session: string, frame: Record<string, unknown>): void {
+    this.#held.set(session, frame);
+    this.#early.set(session, this.#reads);
+  }
+
   /** Whether a frame was held for `session`; it is dropped. */
   drop(session: string): boolean {
+    this.#early.delete(session);
     return this.#held.delete(session);
   }
 

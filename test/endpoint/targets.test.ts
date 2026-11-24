@@ -427,7 +427,9 @@ describe('the spawner as owner (P5 O12 M11)', () => {
     f.host.hold('engine.sessions');
     const from = b.inbox.length;
     sm.send({ t: 'member', ...laneBMember('eng-s', [org.C], { access: 'private' }) });
-    await until(() => f.endpoint.rl10.members.get('eng-s') !== null, 'the record');
+    // ticket 851 (the prestart panel, scalpel-4#6): held early while the host is asked whether it is a prestart's, its
+    // sight on disk (passed to its app session as the held subscription is decided again) and the session closed meanwhile
+    await until(() => marksOf(f).engineSessionIds.includes('eng-s') || handedOff(f).includes('app-s'), 'the record seen');
     f.host.row('app-s', 1);
     expect(await waitFor(b, (m) => m.sub === 'sb' && m.t === 'ended', 'the held subscription’s end', from)).toMatchObject({ reason: 'removed' });
     expect(evs(b, 'sb', from)).toEqual([]);
@@ -573,7 +575,9 @@ describe('the spawner as owner (P5 O12 M11)', () => {
       const f = await startEndpoint(org, started, withSminosRecords());
       spawned(f, 'app-h', org.B, { recorded: 'eng-h', live: 'eng-h' });
       f.host.hold('engine.sessions');
-      await sminos(f, [laneAMember(), laneBMember('eng-h', [org.C], { access: 'private' })]);
+      // ticket 851 (the prestart panel, scalpel-4#6): its first frame is held early on the held read, its sight on disk
+      const sm = await sminos(f, [laneAMember()]);
+      sm.send({ t: 'member', ...laneBMember('eng-h', [org.C], { access: 'private' }) });
       await until(() => marksOf(f).engineSessionIds.includes('eng-h'), 'the engine session marked before its join');
       f.sminos?.close();
       await f.endpoint.stop();
@@ -630,6 +634,9 @@ function membersOf(machine: { live(): Array<{ appSessionId: string; engineSessio
   return { members, reads, reports, changes };
 }
 const laneB = (session: string, appSessionId: string): SessionTarget => ({ lane: 'B', session, appSessionId });
+// Ticket 851 (the prestart panel, scalpel-4#6): a first lane B member no live row names is held while the engine host is
+// asked whether it holds it hidden (an older host's refusal holds none); the join then reads the live rows again
+const FIRST_SIGHT = ['engine.sessions', 'engine.prestarts'];
 
 describe('a record the join can’t place under its app session, placed by its spawn’s opId (P5 Decision Log 190, residue (b))', () => {
   it('after a `/clear` before the first record arrived: placed, the mark passed, the bridge closed on the new engine session', async () => {
@@ -796,7 +803,7 @@ describe('a record the join can’t place under its app session, placed by its s
     await alone.members.member(laneBMember('eng-1', [org.C], { access: 'private', ownersProof: [ownersAct] }));
     expect(alone.members.appSessionId('eng-1')).toBeNull();
     expect(alone.members.handedOff(laneB('eng-2', 'app-o'))).toBe(false);
-    expect(alone.reads).toEqual(['engine.sessions']);
+    expect(alone.reads).toEqual([...FIRST_SIGHT, 'engine.sessions']);
     const behind = membersOf(machine);
     await behind.members.member(laneBMember('eng-1', [org.C], { access: 'private', ownersProof: [{ ...ownersAct, opId: 'op-other' }, spawnProof('op-o')] }));
     expect(behind.members.appSessionId('eng-1')).toBe('app-o');
@@ -815,7 +822,7 @@ describe('a record the join can’t place under its app session, placed by its s
     await bare.members.member(laneBMember('eng-1', [org.C], { access: 'private' }));
     expect(bare.members.appSessionId('eng-1')).toBeNull();
     expect(bare.members.handedOff(laneB('eng-2', 'app-u'))).toBe(false);
-    expect(bare.reads).toEqual(['engine.sessions']);
+    expect(bare.reads).toEqual([...FIRST_SIGHT, 'engine.sessions']);
     // a proof whose opId no spine record's `launchedBy` names (and a proof that names none)
     for (const proof of [spawnProof('op-elsewhere'), { device: 'b1' }]) {
       const { members, reads } = membersOf(machine);
@@ -823,7 +830,7 @@ describe('a record the join can’t place under its app session, placed by its s
       expect(members.appSessionId('eng-1')).toBeNull();
       expect(members.handedOff(laneB('eng-2', 'app-u'))).toBe(false);
       expect(members.handedOff(laneB('eng-1', ''))).toBe(true); // its own engine session's mark, as before
-      expect(reads).toEqual('opId' in proof ? ['engine.sessions', 'session.list'] : ['engine.sessions']);
+      expect(reads).toEqual('opId' in proof ? [...FIRST_SIGHT, 'engine.sessions', 'session.list'] : [...FIRST_SIGHT, 'engine.sessions']);
     }
   });
 });

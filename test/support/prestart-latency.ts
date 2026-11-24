@@ -125,3 +125,10 @@ export function publicText(text: string, paths: { scratch: readonly string[]; ch
   for (const [path, role] of roles.filter(([path]) => path.length > 3).sort(([a], [b]) => b.length - a.length)) out = out.split(path).join(role);
   return createRedactor(env)(out.replace(/\/Users\/(?!<user>)[^/\s'"]+/g, '/Users/<user>'));
 }
+
+/**
+ * The acceptance's SessionStart hook (e2e/prestart-engine.spec.ts): a 200 ms sleep, then `marker` written, a hook that
+ * failed or never ran writing none. The engine runs it through /bin/sh, so the path is one single-quoted word, each of its
+ * own single quotes closed, escaped and reopened (the prestart panel, sweep#8: a scratch whose real path holds one).
+ */
+export const markerHookCommand = (marker: string): string => `sleep 0.2 && : > '${marker.replaceAll("'", "'\\''")}'`;

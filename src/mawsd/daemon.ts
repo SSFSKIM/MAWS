@@ -135,7 +135,7 @@ import { engineRequests } from './engine-requests';
 import { createArtifactsEndpoint, loadEndpointChunk } from './artifacts-endpoint'; // P5 O5 M2
 import { ENDPOINT_CHANNEL_BASE, ENDPOINT_STOP_MS, loadEndpointModule, NO_ENDPOINT_MODULE, spineChannel, type CheckoutSource, type DaemonServices, type EndpointModule } from './endpoint-seam';
 import { spineProjects } from './projects-seam'; // the project registry
-import { createServicesFront, spineTakes } from './front';
+import { createServicesFront, ENDPOINT_EVENTS, spineTakes } from './front';
 import { tellEngineHandover } from './engine-handover-event'; // P5 O16 M3c fix wave 2
 import { runE2eBrowserView, runE2eRender, runE2eSeam } from './e2e-seam'; // M5b fix round 2; P5 O5 M4
 import { createRenderHandle, loadRenderChunk, type RenderChunk } from './render-handle'; // P5 O5 M4
@@ -937,7 +937,7 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
     if (render.event(message.name, message.payload)) return; // P5 O5 M4: the render seam answers it, no client hears it
     if (message.name === 'host.browserIdle') return browserIdle(message.payload); // P5 O17 M3, M5: mawsd's own, no app hears it
     if (message.name === 'session.status') engineSeen(message.payload); // P5 O5 M5: the cua socket's peer check
-    engineRelay.deliver(message);
+    if (!ENDPOINT_EVENTS.has(message.name)) engineRelay.deliver(message); // ticket 851 (scalpel-4#1): the endpoint's alone
     each(eventListeners, 'engine-host', message);
   });
   hosts.onState('pty-host', (state) => {
