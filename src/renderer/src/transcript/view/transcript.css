@@ -447,6 +447,8 @@ button.transcript-chip:hover { background: var(--bg-hover); }
   animation: transcript-spin 1s linear infinite;
 }
 .transcript-cell[data-status="running"] > .transcript-cell-line::before, .transcript-run-line[data-line="running"]::before { margin: 0 -2px 0 -13px; } /* the 9 px ring at the slot's right edge */
+/* a held call (decision 21) is not running: an empty slot where its ring would be */
+.transcript-cell[data-held] > .transcript-cell-line::before { content: ''; border: 0; border-radius: 0; animation: none; width: 12px; height: auto; margin: 0 -2px 0 -16px; }
 .transcript-cell[data-status="error"] > .transcript-cell-line::before { content: '✕'; color: var(--danger); }
 .transcript-cell[data-status="denied"] > .transcript-cell-line::before { content: '⊘'; }
 .transcript-cell[data-status="stopped"] > .transcript-cell-line::before { content: '■'; font-size: 0.7em; }

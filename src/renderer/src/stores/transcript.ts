@@ -8,7 +8,7 @@ import type { SessionEvent } from '@shared/graph/events';
 import type { AgentId, MessageUuid, ToolUseId } from '@shared/graph/ids';
 import { turnActivity, type TurnActivity } from '../transcript/model/activity';
 import { expandedTurnRows, rowsOf, turnRows } from '../transcript/model/derive';
-import { aloneInRun, runOfOneId } from '../transcript/model/groups'; // board ticket 852
+import { aloneInRun, disclosureKeyOf, runOfOneId } from '../transcript/model/groups'; // board ticket 852
 import { marksOfText } from '../transcript/model/owner-marks';
 import { carriedKeys, holdsMessage, keysOfStretch, lostKey, liveMarkedRowIds, mirrorsView, movingKeysOfStretch, openKeysOf, stretchHolding } from '../owner/view/mirror'; // UX wave U2b
 import { applyEvents, createState, RECEIPT_APPLIED, withAgents, withReaderState, withUi, type AgentLookup, type ReceiptUndo, type SpillLoad, type TranscriptState, type TranscriptUi } from '../transcript/model/reduce';
@@ -447,7 +447,7 @@ export function createTranscriptStore() {
       ui.revealed = id; // UX wave U3
       for (const stretch of closed) ui.openStretches!.add(stretch); // UX wave U2b
       if (found.row.turnId !== null && !isExpanded(current.state, found.row.turnId)) expandTurn(ui, found.row.turnId);
-      if (found.group) ui.expandedGroups.add(found.group.id);
+      if (found.group) ui.expandedGroups.add(disclosureKeyOf(found.group) ?? found.group.id);
       put(key, { state: withUi(current.state, ui), jump: request(found.row.id) });
     };
     // The keys of the closed stretches whose records hold the row or cell out of sight, while the view is the report, is
@@ -635,7 +635,13 @@ export function createTranscriptStore() {
         });
       },
 
-      toggleGroup: (key, group) => changeUi(key, (current) => scoped(turnOfShown(current.rows, group)), (ui) => toggle(ui.expandedGroups, group)),
+      // board ticket 852: a run's line presses by its row's id (a run of one's, by its key); what opens is the run's one
+      // disclosure key of its turn's (`disclosureKeyOf`), the same before and after the run unwraps
+      toggleGroup: (key, group) => {
+        const shown = locate(entry(key)?.rows ?? [], group);
+        const disclosure = (shown && disclosureKeyOf(shown.row)) ?? group;
+        changeUi(key, () => scoped(shown?.row.turnId ?? null), (ui) => toggle(ui.expandedGroups, disclosure));
+      },
       toggleCell: (key, cell) => changeUi(key, (current) => scoped(turnOfShown(current.rows, cell)), (ui) => toggle(ui.expandedCells, cell)),
 
       setReceipt(key, receipt, patch) {
@@ -809,8 +815,8 @@ export function createTranscriptStore() {
         changeUi(key, () => 'all', (ui, state) => {
           for (const id of state.order) expandTurn(ui, id);
           for (const row of allExpandedRows(state)) {
-            if (row.kind === 'group') ui.expandedGroups.add(row.id);
-            if (row.kind === 'cell' && aloneInRun(row)) ui.expandedGroups.add(runOfOneId(row)); // board ticket 852: a call alone in its run opens as a run does
+            const disclosure = disclosureKeyOf(row); // board ticket 852: a run's, or a call alone in its run's
+            if (disclosure !== null) ui.expandedGroups.add(disclosure);
             if (!options.cells) continue;
             if (row.kind === 'group') for (const cell of row.cells) ui.expandedCells.add(cell.id);
             else if (row.kind === 'cell') ui.expandedCells.add(row.id);

@@ -24,7 +24,7 @@ import { hookNotice, type HookRecord } from './hooks';
 import { agentMessageCopy, baseName, boundaryCopy, BRANCH_HISTORY_DETAIL, PLUGIN, processExitCopy, reconnectCopy, retryCopy, subagentSentence } from './copy';
 import { HANDOVER_REINIT_COPY /* P5 O16 M3b */ } from './copy'; // C12
 import { glyphFor } from './glyphs';
-import { aloneInRun, collectCells, groupItems, runOfOneId, type WorkItem } from './groups';
+import { aloneInRun, collectCells, disclosureKeyOf, groupItems, runOfOneId, type WorkItem } from './groups';
 import { caption, captionParts, finishedLines, stepsOfTurn, turnOrder, type Caption, type SentOutcome } from './caption'; // UX wave U2
 import { cellId, rowId, turnId as turnIdOf } from './keys';
 import type { LiveBlock, TranscriptState, TranscriptUi, TurnState, TurnWork } from './reduce';
@@ -284,7 +284,7 @@ export function withAllExpanded(state: TranscriptState): TranscriptState {
   const first = rowsOf({ ...state, ui });
   for (const row of first) {
     if (row.kind === 'group') {
-      ui.expandedGroups.add(row.id);
+      ui.expandedGroups.add(disclosureKeyOf(row) ?? row.id); // board ticket 852: the run's disclosure key
       for (const cell of row.cells) ui.expandedCells.add(cell.id);
     } else if (row.kind === 'cell') {
       ui.expandedCells.add(row.id);

@@ -102,8 +102,9 @@ function RestThumbnail({ cell }: { cell: Cell }) {
 }
 
 // `standalone`: the call stands outside any run (board ticket 852: one quiet line like a run's, no box; `data-standalone`);
-// `runOfOne`, it is read as its run (`data-run-of-one`), in `label`'s words in place of its own
-export function CellLine({ cell: model, turnId, focusable = false, standalone = false, runOfOne = false, label, renderDetail, onToggle }: { cell: Cell; turnId: TurnId | null; focusable?: boolean; standalone?: boolean; runOfOne?: boolean; label?: string; renderDetail?: (cell: Cell) => ReactNode; onToggle?: () => void }) {
+// `runOfOne`, it is read as its run (`data-run-of-one`), in `label`'s words in place of its own; `held`, it is not running
+// though its status reads so (decision 21: `data-held`, no running ring)
+export function CellLine({ cell: model, turnId, focusable = false, standalone = false, runOfOne = false, held = false, label, renderDetail, onToggle }: { cell: Cell; turnId: TurnId | null; focusable?: boolean; standalone?: boolean; runOfOne?: boolean; held?: boolean; label?: string; renderDetail?: (cell: Cell) => ReactNode; onToggle?: () => void }) {
   const { storeKey, variant, actions } = useTranscriptContext();
   const blocked = useBlockedState(storeKey, model);
   const cell = blocked === undefined ? model : { ...model, label: blockedLabel(model, blocked) }; // UX wave U1c: "again", "· approved"
@@ -114,7 +115,8 @@ export function CellLine({ cell: model, turnId, focusable = false, standalone = 
   const offered = blocked !== undefined && !readsApproved(blocked) && variant === 'session' && actions.renderBlockedCall !== undefined ? blocked : null;
   const onLine = offered !== null && lineNamesWhole(model, offered.call);
   const opened = withoutRefusalText(model); // UX wave U1c (M2 fix 1): an opened blocked row draws no refusal text as output
-  const counts = !waiting && cell.detail.kind === 'edit' && !asLabelled(cell) ? EDIT_COUNTS.exec(cell.label) : null;
+  // a lone line counts only a finished edit, as a run's line counts its finished edits (U2a §B; board ticket 852)
+  const counts = !waiting && cell.detail.kind === 'edit' && !asLabelled(cell) && (!standalone || cell.status === 'done') ? EDIT_COUNTS.exec(cell.label) : null;
   return (
     <div
       className="transcript-cell"
@@ -125,6 +127,7 @@ export function CellLine({ cell: model, turnId, focusable = false, standalone = 
       data-names-whole={onLine ? '' : undefined}
       data-standalone={standalone ? '' : undefined}
       data-run-of-one={runOfOne ? '' : undefined}
+      data-held={held ? '' : undefined}
       tabIndex={focusable ? -1 : undefined}
     >
       <button type="button" className="transcript-cell-line" title={cell.paths.length > 0 ? cell.paths.join('\n') : undefined} aria-expanded={cell.expanded} onClick={onToggle ?? (() => useTranscriptStore.getState().toggleCell(storeKey, cell.id))}>

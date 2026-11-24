@@ -11,7 +11,10 @@ import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import type { SessionEvent } from '@shared/graph/events';
 import type { JournalRow } from '@shared/wire/journal';
 import { loadUxwaveJournal } from '../../../../../../test/support/fixtures';
+import { useAttention } from '../../../stores/attention';
 import { useTranscriptStore } from '../../../stores/transcript';
+import { item } from '../../../../../../test/support/builders';
+import { sessionOfStoreKey } from '../context';
 import { journalToEvents } from '../../dev/journal';
 import { browserActivityRow } from '../../model/browser-activity';
 import { cellId, turnId } from '../../model/keys';
@@ -409,5 +412,69 @@ describe('the fix wave', () => {
     expect(rules.some((rule) => rule.selectorText.includes('.transcript-cell[data-standalone] > .transcript-cell-line > .transcript-chevron') && rule.style.opacity === '1')).toBe(true);
     const pointer = sheetRules().find((rule) => rule.selectorText === '.transcript-cell-line > .transcript-chevron')!;
     expect(pointer.style.opacity).toBe('0'); // a pointer screen: hover-only
+  });
+});
+
+// The last fix round of 2026-11-24 (the medium review of the fix wave). Each case failed before its fix.
+describe('the last fix round', () => {
+  // (1) A run opened while it stands (one call, its turn still open) stays open once following text unwraps it into its
+  // call's one line: one disclosure key for both presentations.
+  it('a live one-call run opened stays open when following text unwraps it', async () => {
+    const b = builder('2026-11-20T10:00:00.000Z');
+    b.turn('u1', 'List the notes');
+    b.toolUse('ls', 'Bash', { command: 'ls notes', description: 'List the notes' }, 'm1', 0);
+    b.result('ls', 'alpha.txt', { structured: BASH_RESULT('alpha.txt') });
+    const store = await storeWith(b.events); // the turn still open: its work in sight, the call in its run
+    const run = rowOf(store.rows(), 'group');
+    act(() => useTranscriptStore.getState().toggleGroup(store.key, run.id));
+    expect(rowOf(store.rows(), 'group').expanded).toBe(true);
+    const sent = b.events.length;
+    b.text('m2', 0, 'Listed.');
+    act(() => store.push(b.events.slice(sent)));
+    expect(cellRow(store.rows(), 'ls').runExpanded).toBe(true);
+    const view = renderRow(cellRow(store.rows(), 'ls'), { storeKey: store.key });
+    expect(view.container.querySelector('[data-cell-id] > .transcript-cell-line')?.getAttribute('aria-expanded')).toBe('true');
+  });
+
+  // (2) Decision 21: a foreground call left alone while its turn runs, held by a permission request that names no call of
+  // the turn, is not running: its line reads its run's words with no running ring, as its run's line did. A call in the
+  // background (it has its result and still runs) is not held.
+  it('a lone call held by a permission for no call of its turn reads as held, not running', async () => {
+    const b = builder('2026-11-20T10:00:00.000Z');
+    b.turn('u1', 'Build, then look');
+    b.toolUse('mk', 'Bash', { command: 'make' }, 'm1', 0);
+    b.toolUse('js', JS, { code: "await page.goto('http://127.0.0.1:17391/')" }, 'm1', 1);
+    const store = await opened(b.events);
+    const session = sessionOfStoreKey(store.key)!;
+    const draw = () => renderRow(cellRow(store.rows(), 'mk'), { storeKey: store.key }).container.querySelector<HTMLElement>(`[data-cell-id="${cellId.tool(tool('mk'))}"]`)!;
+    const free = draw();
+    expect([free.dataset.status, free.hasAttribute('data-held'), free.querySelector('button')?.textContent]).toEqual(['running', false, 'Running make']);
+    cleanup();
+    const terminal = item(session, 'permission', '2026-11-20T10:00:09.000Z', { request: { requestId: 'req-term' as never, toolUseId: 'toolu_terminal' as never, taskId: null, agentId: null } });
+    act(() => useAttention.setState({ bySession: new Map([[session, [terminal]]]) }));
+    try {
+      const held = draw();
+      expect([held.hasAttribute('data-held'), held.querySelector('button')?.textContent]).toEqual([true, 'Ran a command']); // its run's words, as its run's line read them
+      expect(style.textContent).toContain('.transcript-cell[data-held] > .transcript-cell-line::before { content: \'\'; border: 0;'); // no ring in its slot
+    } finally {
+      act(() => useAttention.setState({ bySession: new Map() }));
+    }
+  });
+
+  // (3) U2a §B counts only a run's finished edits: a lone edit whose result is not in shows no line counts.
+  it('a lone edit shows its line counts only once its result is in', async () => {
+    const b = builder('2026-11-20T10:00:00.000Z');
+    b.turn('u1', 'Fix the typo');
+    b.toolUse('ed', 'Edit', { file_path: '/p/notes.md', old_string: 'teh', new_string: 'the' }, 'm1', 0);
+    b.toolUse('js', JS, { code: "await page.goto('http://127.0.0.1:17391/')" }, 'm1', 1);
+    const store = await opened(b.events);
+    const counts = () => renderRow(cellRow(store.rows(), 'ed'), { storeKey: store.key }).container.querySelector('[data-cell-id] .transcript-counts');
+    expect(cellRow(store.rows(), 'ed').status).toBe('running');
+    expect(counts()).toBeNull();
+    cleanup();
+    const sent = b.events.length;
+    b.result('ed', 'The file /p/notes.md has been updated.', { structured: { filePath: '/p/notes.md', structuredPatch: [{ oldStart: 1, oldLines: 1, newStart: 1, newLines: 1, lines: ['-teh', '+the'] }] } });
+    act(() => store.push(b.events.slice(sent)));
+    expect(counts()?.textContent).toBe('+1 −1');
   });
 });

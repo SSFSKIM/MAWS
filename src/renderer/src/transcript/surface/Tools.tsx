@@ -3,12 +3,15 @@ import type { TranscriptProps } from '@shared/engine/surface-rows';
 import { SurfaceRow } from '../../engine-surface/SurfaceRow';
 import { useSurfaceAttached, useSurfaceHooked } from '../../engine-surface/site';
 import { useTranscriptStore } from '../../stores/transcript';
-import { aloneInRun, drawsAsRun, runOfOneId, runOfOneLabel } from '../model/groups';
+import type { AttentionItem } from '@shared/graph/attention';
+import type { ToolUseId } from '@shared/graph/ids';
+import { selectWaitingByCall, useAttention } from '../../stores/attention';
+import { aloneInRun, drawsAsRun, heldByPermission, runOfOneCaption, runOfOneId, runOfOneLabel } from '../model/groups';
 import type { Cell, Row, TurnId } from '../model/rows';
 import { CellDetailView } from '../view/cells/CellDetail';
 import { CellLine } from '../view/cells/CellLine';
-import { useDisclosure } from '../view/context';
-import { asksAsRun, resultInput, standaloneRunInput, toolInputs, withToolProps, type ToolInput } from './adapters';
+import { useDisclosure, useRowSession, useTranscriptContext } from '../view/context';
+import { asksAsRun, callsOfTurn, resultInput, standaloneRunInput, toolInputs, withToolProps, type ToolInput } from './adapters';
 import { useTranscriptSurface } from './context';
 
 export function SurfaceCellLine({ cell, turnId, standalone = false, focusable = false }: { cell: Cell; turnId: TurnId | null; standalone?: boolean; focusable?: boolean }) {
@@ -69,8 +72,27 @@ function RunOfOne({ cell, turnId, focusable, inputs }: { cell: Extract<Row, { ki
   }, [storeKey, id]);
   const toggle = useCallback(() => useTranscriptStore.getState().toggleGroup(storeKey, id), [storeKey, id]);
   const alone = aloneInRun(cell); // else a call its result put apart (a refusal, an image): its own line and open state
+  // decision 21, as its run's line applied it: a foreground call running while its turn is held by a permission that names
+  // no call of the turn is not running; it reads its run's words, with no running ring
+  const held = useHeld(cell, turnId, storeKey);
   return <SurfaceRow appSessionId={appSessionId} component="ToolGroup" instanceId={input?.instanceId ?? cell.id} props={input?.props ?? NO_GROUP} enabled={input !== null} onRewrite={expand} placeholder={<span className="text-fg-faint">…</span>}>
-    {(_props, { concealed }) => <CellLine cell={alone ? { ...cell, expanded: cell.runExpanded === true } : cell} turnId={turnId} focusable={focusable && !concealed} standalone runOfOne={drawsAsRun(cell)} label={runOfOneLabel(cell) ?? undefined} onToggle={alone ? toggle : undefined}
+    {(_props, { concealed }) => <CellLine cell={alone ? { ...cell, expanded: cell.runExpanded === true } : cell} turnId={turnId} focusable={focusable && !concealed} standalone runOfOne={drawsAsRun(cell)} held={held}
+      label={held ? runOfOneCaption(cell) : runOfOneLabel(cell) ?? undefined} onToggle={alone ? toggle : undefined}
       renderDetail={inputs.length === 1 ? (drawn) => <ToolResult input={{ ...inputs[0], cell: drawn }} turnId={turnId} enabled={!concealed} /> : undefined} />}
   </SurfaceRow>;
 }
+
+// Whether a call alone in its run is held (decision 21): it runs in the foreground (not in the background, with its result)
+// in its session's own transcript, its turn still open, while a permission request that names no call of the turn waits.
+// Read as one boolean, so a batch re-renders it only when that changes.
+function useHeld(cell: Cell, turnId: TurnId | null, storeKey: string): boolean {
+  const { variant } = useTranscriptContext();
+  const session = useRowSession();
+  const waiting = useAttention((state) => (session === null ? NO_CALLS : selectWaitingByCall(state, session)));
+  return useTranscriptStore((state) => {
+    if (variant !== 'session' || turnId === null || waiting.size === 0 || cell.status !== 'running' || cell.background) return false;
+    const turn = state.entries[storeKey]?.state.turns.get(turnId);
+    return turn?.state === 'open' && heldByPermission(waiting, callsOfTurn(turn));
+  });
+}
+const NO_CALLS: ReadonlyMap<ToolUseId, AttentionItem> = new Map();

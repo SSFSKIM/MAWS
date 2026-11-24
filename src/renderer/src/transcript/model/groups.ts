@@ -58,7 +58,7 @@ export function groupItems(items: WorkItem[], turn: TurnState, ui: TranscriptUi 
       for (const cell of cells) rows.push(...(cell.toolName === 'thinking' ? thoughtRow(cell) : [runOfOneRow(standaloneRow(cell, turn.id), ui)]));
     } else {
       // decision 4: the run's id is its first call's, whatever thoughts lead it (a textless one travels on one host only)
-      rows.push(runRow(calls[0].id, turn.id, cells, active, ui?.expandedGroups.has(rowId.group(calls[0].id)) ?? false));
+      rows.push(runRow(calls[0].id, turn.id, cells, active, ui?.expandedGroups.has(runKey(calls[0].id, turn.id)) ?? false));
     }
     rows.push(...slots);
   };
@@ -122,7 +122,14 @@ function runRow(first: CellId, turnId: TurnId | null, cells: Cell[], active: boo
 // is unchanged; only how this one is drawn.
 export const aloneInRun = (row: RowOf<'cell'>): boolean => row.classification.groupable;
 export const drawsAsRun = (row: RowOf<'cell'>): boolean => aloneInRun(row) && row.status !== 'error';
-export const runOfOneId = (row: RowOf<'cell'>): RowId => `${rowId.group(row.id)}@${row.turnId ?? ''}` as RowId;
+// The one disclosure key of a run, kept in `expandedGroups`: its first call's run id in its turn, the same while the run
+// stands and once its one call stands alone (following text or the turn's end unwraps it), and apart from the row's id
+// and the engine site's (a later turn's run of the same call is another key)
+export const runKey = (first: CellId, turnId: TurnId | null): RowId => `${rowId.group(first)}@${turnId ?? ''}` as RowId;
+export const runOfOneId = (row: RowOf<'cell'>): RowId => runKey(row.id, row.turnId);
+// The disclosure key of a row that has one: a run's, or a call alone in its run's; null for any other row
+export const disclosureKeyOf = (row: Row): RowId | null =>
+  row.kind === 'group' ? runKey(row.cells.find((cell) => cell.toolName !== 'thinking')?.id ?? row.cells[0].id, row.turnId) : row.kind === 'cell' && aloneInRun(row) ? runOfOneId(row) : null;
 // What a run of one's line reads in place of its call's own words, null where it reads them: the owner's call of
 // 2026-11-24, its call's description ("Ran the linter"), inflected as its call's own line reads one; a moved call's moved
 // label (UX wave U4a, decision 33) and a running or stopped call's own words (U2a decision 23, R2: "Stopped a command")
@@ -132,11 +139,10 @@ export function runOfOneLabel(row: RowOf<'cell'>): string | null {
   const description = row.detail.kind === 'shell' ? row.detail.description?.trim().split(/\r?\n/, 1)[0] : undefined;
   if (description) return descriptionLabel(description, row.status);
   if (row.status === 'running' || row.status === 'stopped') return null;
-  return runRow(row.id, row.turnId, [row], false, false).summary;
+  return runOfOneCaption(row);
 }
-// The owner's call of 2026-11-24: a run of one reads its call's description ("Ran the linter"), inflected as its call's
-// own line reads one; the run's usual words only where the call has none. A call the engine moved to the background reads
-// its moved label first, as its own line does (UX wave U4a, decision 33).
+// A run of one's run's words, its caption (what its run's line read while it stood, a held call's too: decision 21)
+export const runOfOneCaption = (row: RowOf<'cell'>): string => runRow(row.id, row.turnId, [row], false, false).summary;
 // A run of one as a run's row: its call read where its own line is drawn, in its run opened (the tests' view of a call)
 export function runOfOne(row: RowOf<'cell'>): RowOf<'group'> {
   const run = runRow(row.id, row.turnId, [row], false, row.runExpanded === true);

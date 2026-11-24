@@ -4,6 +4,7 @@ import { parseTranscriptRecord } from '@shared/wire/transcript';
 import { createBackfillContext, recordToEvents } from '../../../../engine-host/fs/backfill'; // P5 O9: a delivery read from disk
 import { afterEach, describe, expect, it } from 'vitest';
 import { heldRow, restingRows, rowsOf, staysInView, turnDerivations, turnRows, turnSummary, withAllExpanded, withPlacedRows, withQueueTail } from './derive';
+import { disclosureKeyOf } from './groups';
 import { dividerCopy, HANDOVER_REINIT_COPY } from './copy';
 import { journalToEvents } from '../dev/journal'; // UX wave U2: a recording read up to a seq
 import { loadUxwaveJournal } from '../../../../../test/support/fixtures';
@@ -1407,7 +1408,7 @@ describe('the turn’s line (O-15; decision 9)', () => {
     const before = rowsOf(opened);
     const id = group(before).id;
     const derived = turnDerivations.count;
-    const toggled = withUi(opened, { ...opened.ui, expandedGroups: new Set([id]), stamps: new Map([[one, 2]]), version: opened.ui.version + 1 });
+    const toggled = withUi(opened, { ...opened.ui, expandedGroups: new Set([disclosureKeyOf(group(before))!]), stamps: new Map([[one, 2]]), version: opened.ui.version + 1 }); // the run's key (board ticket 852)
     const after = rowsOf(toggled);
     expect(turnDerivations.count - derived).toBe(1);
     expect(group(after)).toMatchObject({ id, expanded: true });
