@@ -85,6 +85,8 @@ import { AgentSeam } from './support/dashboards';
 import { BOARD, drawsRows, labelOf, liveBlock, liveViews, NOT_FETCHED, openSheet, rows, tableRows, writeBoard } from './support/live-data';
 import { installedEngine } from './support/p1-live';
 import { isAlive, tcpListeners } from './support/processes';
+import { engineRunning, startedEngines } from './support/prestart'; // ticket 851, M5
+import { writeLatencyEngine } from '../test/support/latency-engine'; // ticket 851, M5: A's engine, its starts counted
 import { DATASET_STATES } from '../src/artifacts/dashboard/states';
 import { applicationOf, launchMaws, REPO_ROOT, type MawsLaunch } from './support/launch';
 import { menu } from './support/menu';
@@ -2433,6 +2435,64 @@ test('M8: a session spawned on B leads a full project past its cap and stays amo
     await scene?.stop();
     rmSync(aUserData, { recursive: true, force: true });
     rmSync(a2UserData, { recursive: true, force: true });
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+// Ticket 851, M5 (docs/doperpowers/plans/2026-11-24-prestart-engine.md, D8; Decision Logs 12 and 13): a New chat on A
+// prestarts its engine as the person types, only while the tab starts on A; choosing B in its machine menu withdraws
+// the prestart, and the draft stays as it is. A runs the prestart (MAWS_E2E_PRESTART=1) on the latency stub, a real
+// engine process whose starts file counts each start (test/support/latency-engine-stub.mjs), in its own checkout of the
+// org project, trusted on A, on the direct route; B is up and runs nothing. The prestart's own scenes, which need no
+// second machine, are e2e/prestart.spec.ts's.
+test('ticket 851: a New chat prestarts its engine on A as the person types; choosing B in its machine menu ends that engine and keeps the draft', async () => {
+  const root = realpathSync(mkdtempSync(join(tmpdir(), 'maws-remote-851-')));
+  const aUserData = mkdtempSync(join(tmpdir(), 'maws-ra-851-'));
+  const hooks = join(root, 'no-hooks');
+  const aCheckout = join(root, A_PROJECT);
+  for (const dir of [hooks, aCheckout]) mkdirSync(dir);
+  checkoutRepository(aCheckout, hooks);
+  const startsFile = join(root, 'starts.jsonl');
+  const engineBin = writeLatencyEngine(join(root, 'latency-engine'), join(root, 'samples.jsonl'), { startsFile });
+  const typed = 'Start this on A, or maybe on B.';
+  let scene: RemoteScene | null = null;
+  let a: MawsLaunch | null = null;
+  try {
+    scene = await startRemoteScene({ scratch: join(root, 'scene'), aUserData });
+    const { b } = scene;
+    a = await launchMaws({
+      userData: aUserData,
+      syntheticEngineBin: engineBin,
+      defaultRoute: 'direct', // the stub's get_status answers a direct launch's
+      env: { MAWS_DEV_ORG: scene.devOrgDir(false), MAWS_MACHINE_NAME: 'A', MAWS_E2E_PRESTART: '1', MAWS_E2E_ENGINE_BIN: engineBin },
+      // A's checkout trusted and the user's default mode `default`, so the New chat's start guards pass with no card
+      prepare: ({ claudeConfigDir }) => {
+        writeFileSync(join(claudeConfigDir, '.claude.json'), JSON.stringify({ projects: { [aCheckout]: { hasTrustDialogAccepted: true } } }));
+        writeFileSync(join(claudeConfigDir, 'settings.json'), JSON.stringify({ permissions: { defaultMode: 'default' } }));
+      },
+    });
+    keepMainLines(a);
+    const { page } = a;
+    await expect.poll(async () => (await machineOf(page, b.ref))?.state ?? null, { timeout: 60_000, message: `A's link to B comes up over the relay\n${mainSaid(page)}` }).toBe('up');
+    type Projects = { projects: { directory: string; org?: { key: string } }[] };
+    await invoke(page, 'session.projects.add', { directory: aCheckout });
+    await expect
+      .poll(async () => (await invoke<Projects>(page, 'session.projects.list', undefined)).projects.find((p) => p.directory === aCheckout)?.org?.key ?? null, { timeout: 30_000 })
+      .toBe(`smns:${PROJECT}`);
+    await newChat(page, A_PROJECT);
+    await composerOf(page).click();
+    await page.keyboard.type(typed);
+    await expect.poll(() => startedEngines(startsFile).length, { timeout: 30_000, message: `typing in the New chat on A starts its engine there\n${mainSaid(page)}` }).toBe(1);
+    const [engine] = startedEngines(startsFile);
+    expect(engine!.cwd, 'in A’s checkout').toBe(aCheckout);
+    await chooseMachine(page, B_NAME);
+    await expect.poll(() => engineRunning(engine!.pid), { timeout: 30_000, message: `the pick of B withdraws A's prestart: its engine ends\n${mainSaid(page)}` }).toBe(false);
+    await expect(composerOf(page), 'the draft stays as it was').toHaveText(typed);
+    expect(startedEngines(startsFile), 'no engine started on A since').toHaveLength(1);
+  } finally {
+    await a?.cleanup();
+    await scene?.stop();
+    rmSync(aUserData, { recursive: true, force: true });
     rmSync(root, { recursive: true, force: true });
   }
 });
