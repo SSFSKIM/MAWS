@@ -8,6 +8,7 @@
 // New Space stays a worded button: the strip's More, the one menu that makes things here, is not drawn under Pinned,
 // By Space or a search, where the button is (G289 not built; rule 3).
 import { DropdownMenu, ToggleGroup } from 'radix-ui';
+import { useRef, type RefObject } from 'react';
 import { ARTIFACT_KINDS, type ArtifactKind } from '@shared/artifacts/entity';
 import type { LibraryCounts } from '@shared/ipc/schema/library';
 import { Icon, PlusIcon } from '../app/IconButton';
@@ -61,8 +62,9 @@ const XIcon = () => (
   </Icon>
 );
 
-// The chosen kind beside the search: its glyph and name, and a press clears it.
-function KindChip() {
+// The chosen kind beside the search: its glyph and name, and a press clears it. The chip goes with the kind, so the
+// press hands focus to the funnel, the control that chooses a kind.
+function KindChip({ funnel }: { funnel: RefObject<HTMLButtonElement | null> }) {
   const kind = useLibraryView((s) => s.kind);
   if (kind === null) return null;
   const name = KIND_PLURAL_LABELS[kind];
@@ -72,7 +74,10 @@ function KindChip() {
         type="button"
         data-library-kind-chip={kind}
         aria-label={P.clearKind(name)}
-        onClick={() => setLibraryView({ kind: null })}
+        onClick={() => {
+          funnel.current?.focus();
+          setLibraryView({ kind: null });
+        }}
         className="inline-flex h-7 shrink-0 items-center gap-1 rounded-md border border-border-strong bg-bg-active px-2 text-ui text-fg outline-accent hover:bg-bg-hover focus-visible:outline-2"
       >
         <KindIcon kind={kind} className="size-3.5" />
@@ -85,7 +90,7 @@ function KindChip() {
   );
 }
 
-function TypeFilter({ counts }: { counts: LibraryCounts | undefined }) {
+function TypeFilter({ counts, funnel }: { counts: LibraryCounts | undefined; funnel: RefObject<HTMLButtonElement | null> }) {
   const kind = useLibraryView((s) => s.kind);
   const total = counts ? ARTIFACT_KINDS.reduce((sum, k) => sum + counts[k], 0) : undefined;
   const choice = (value: string, text: string, count: number | undefined, icon?: ArtifactKind) => (
@@ -103,7 +108,7 @@ function TypeFilter({ counts }: { counts: LibraryCounts | undefined }) {
   return (
     <DropdownMenu.Root modal={false}>
       <DropdownMenu.Trigger asChild>
-        <NamedGlyph label={P.typeFilter} pressed={kind !== null} data-library-type-filter="" className={`${GLYPH_BUTTON} data-[state=open]:bg-bg-active`}>
+        <NamedGlyph ref={funnel} label={P.typeFilter} pressed={kind !== null} data-library-type-filter="" className={`${GLYPH_BUTTON} data-[state=open]:bg-bg-active`}>
           <FilterIcon className="size-3.5" />
         </NamedGlyph>
       </DropdownMenu.Trigger>
@@ -123,6 +128,7 @@ function TypeFilter({ counts }: { counts: LibraryCounts | undefined }) {
 export function LibraryHeader({ counts }: { counts: LibraryCounts | undefined }) {
   const query = useLibraryView((s) => s.query);
   const remote = useLibraryView((s) => s.machine !== null);
+  const funnel = useRef<HTMLButtonElement>(null);
   return (
     <div data-library-header className="shrink-0 border-b border-border">
       <div className="mx-auto flex max-w-(--measure-wide) flex-wrap items-center gap-x-3 gap-y-2 px-6 py-3">
@@ -130,9 +136,9 @@ export function LibraryHeader({ counts }: { counts: LibraryCounts | undefined })
         <LibraryMachineMenu />
         <ViewSwitch />
         <span className="ml-auto flex min-w-0 items-center gap-1.5">
-          <KindChip />
+          <KindChip funnel={funnel} />
           <SearchField label={P.search} value={query} onChange={(next) => setLibraryView({ query: next })} />
-          <TypeFilter counts={counts} />
+          <TypeFilter counts={counts} funnel={funnel} />
           {!remote && (
             <button type="button" onClick={() => openLibraryDialog({ kind: 'newSpace' })} className={`${SECONDARY} inline-flex h-7 items-center gap-1 text-ui`}>
               <PlusIcon className="size-3.5" />

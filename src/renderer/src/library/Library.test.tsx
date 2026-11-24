@@ -289,6 +289,13 @@ describe('search and the type filter', () => {
     await waitFor(() => expect(libraryCalls().at(-1)).toEqual({ query: 'pla' }));
     expect(screen.queryByRole('button', { name: /^Clear filter/ })).toBeNull();
     expect(screen.getByRole('button', { name: 'Filter by type' }).getAttribute('aria-pressed')).toBe('false');
+    // from the keyboard: the chip goes with the kind, and focus lands on the funnel, not on nothing
+    act(() => setLibraryView({ kind: 'document' }));
+    const again = await screen.findByRole('button', { name: 'Clear filter: Documents' });
+    act(() => again.focus());
+    await user.keyboard('{Enter}');
+    await waitFor(() => expect(screen.queryByRole('button', { name: /^Clear filter/ })).toBeNull());
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Filter by type' }));
   });
 
   it('draws no “All types” at rest: the funnel glyph alone, its word its name', async () => {
@@ -829,6 +836,24 @@ describe('Make something new', () => {
 
     act(() => setLibraryView({ spaceId: 'gone' })); // a Space the loaded list does not hold (deleted meanwhile): every Space
     await waitFor(() => expect(screen.queryByRole('region', { name: 'Make something new' })).toBeNull());
+  });
+
+  // N193: a Spaces read that fails before it ever answered settles, with a new read on offer, and makes nothing elsewhere
+  it('says the narrowed Space did not load, keeps its cards disabled, and loads it on Try again', async () => {
+    editors(...CARD_KINDS);
+    answers['library.spaces'] = () => ({ ok: false, error: { code: 'internal', message: 'the index is unavailable' } });
+    const user = userEvent.setup();
+    act(() => setLibraryView({ view: 'bySpace', spaceId: HOME }));
+    render(<Library />);
+    const made = await section();
+    await within(made).findByText('· Couldn’t load the Space');
+    expect(within(made).queryByRole('progressbar')).toBeNull();
+    expect((card(made, 'Document') as HTMLButtonElement).disabled, 'nothing is made outside the narrowed Space').toBe(true);
+    expect((blank(made, 'Document') as HTMLButtonElement).disabled).toBe(true);
+    delete answers['library.spaces'];
+    await user.click(within(made).getByRole('button', { name: 'Try again' }));
+    await within(made).findByText('· Home');
+    await waitFor(() => expect((card(made, 'Document') as HTMLButtonElement).disabled).toBe(false));
   });
 
   it('More holds Design system (Ask Claude, Blank), HTML page and Add a file…', async () => {

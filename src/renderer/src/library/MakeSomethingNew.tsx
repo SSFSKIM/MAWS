@@ -32,12 +32,12 @@ import { prefillComposer, type Prefill } from '../stores/composer';
 import { placeOf, useLayout } from '../stores/layout';
 import { useSettings } from '../stores/settings';
 import { createArtifact, openArtifactTab } from './actions';
-import { askClaudePrefill, KIND_BLURBS, KIND_LABELS, LIBRARY_PAGE as P, SPACE_COPY, untitledTitle } from './copy';
+import { askClaudePrefill, GROUP_COPY, KIND_BLURBS, KIND_LABELS, LIBRARY_PAGE as P, SPACE_COPY, untitledTitle } from './copy';
 import { toastFailure } from './dialogs';
 import { QuietSpinner } from '../ui/spinner';
 import { ChevronRightIcon, KindIcon, MoreIcon } from './icons';
 import { MENU, MENU_ITEM } from './LibraryHeader';
-import { useLibraryList, useLibrarySpaces, useSpaceInstructions } from './store';
+import { refreshLibrarySpaces, useLibraryList, useLibrarySpaces, useSpaceInstructions } from './store';
 
 const CARD_KINDS = ['document', 'presentation', 'dashboard', 'design'] as const satisfies readonly ArtifactKind[];
 const DEFAULT = 'default'; // the radio value of the default system (no system id is it)
@@ -266,7 +266,8 @@ function More({ spaceId, space, spaceKnown, instructions }: { spaceId: string | 
 }
 
 export function MakeSomethingNew({ spaceId }: { spaceId: string | null }) {
-  const spaces = useLibrarySpaces().value;
+  const spacesRead = useLibrarySpaces();
+  const spaces = spacesRead.value;
   const space = spaceId === null ? undefined : spaces?.find((s) => s.id === spaceId);
   const spaceKnown = spaceId === null || space !== undefined;
   const choice = useSystemChoice(spaceId);
@@ -279,7 +280,18 @@ export function MakeSomethingNew({ spaceId }: { spaceId: string | null }) {
           {P.makeNew}
         </h2>
         {spaceId === null || space !== undefined ? (
-          <span className="min-w-0 truncate">· {space?.name ?? 'General'}</span>
+          <span className="min-w-0 truncate">· {space?.name ?? GROUP_COPY.noSpace}</span>
+        ) : spacesRead.status === 'error' ? (
+          // N193: a read that failed before the Spaces were ever known says so and offers a new read; the cards stay
+          // disabled, so nothing is made outside the narrowed Space meanwhile
+          <>
+            <span data-library-space-failed="" className="min-w-0 truncate text-warning">
+              · {P.spaceFailed}
+            </span>
+            <button type="button" onClick={() => refreshLibrarySpaces()} className="shrink-0 rounded-sm px-1 text-ui-sm text-fg underline outline-accent hover:bg-bg-hover focus-visible:outline-2">
+              {P.retry}
+            </button>
+          </>
         ) : (
           // the word cut (N193): while the Spaces are read, the quiet spinner where the Space's name will be
           <QuietSpinner label={P.readingSpace} />

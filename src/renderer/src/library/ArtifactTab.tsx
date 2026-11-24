@@ -75,7 +75,7 @@ export function ArtifactView({ artifactId, machine, scope, visible }: { artifact
   const editor = useArtifactEditor(artifact?.kind ?? held?.kind ?? null);
   if (artifact && editor) return <MountedEditor machine={machine} artifactId={artifact.id} kind={artifact.kind} editor={editor} scope={scope} visible={visible} />;
   if (artifact) return <NoEditor artifact={artifact} scope={scope} />;
-  if (indexless && host.answer?.status === 'absent') return <Gone scope={scope} />;
+  if (indexless && host.answer?.status === 'absent') return <Gone scope={scope} deleted={host.answer.deleted} />;
   // UX wave U10b (§C.5): an agent's delete, which Undo can take back: the editor held stays, under the notice
   if (indexless && host.answer?.status === 'deleted') {
     const deleted = <DeletedNotice artifactId={artifactId} machine={machine} />;
@@ -112,8 +112,9 @@ export function ArtifactView({ artifactId, machine, scope, visible }: { artifact
   return <Quiet>{notice || <QuietSpinner label={LIBRARY_COPY.reading} /> /* the word cut (G317) */}</Quiet>;
 }
 
-// UX wave U10b: `deleted`, an agent's delete Undo can take back (any other deleted artifact is `absent`, as today).
-type HostAnswer = { status: 'present'; row: ArtifactRow } | { status: 'absent' } | { status: 'deleted'; title: string } | { status: 'refused'; error: string };
+// UX wave U10b: `deleted`, an agent's delete Undo can take back (any other deleted artifact is `absent`, as today). An
+// `absent` one says whether the host knows it was deleted, or only that it has no such artifact (the word cut, N200).
+type HostAnswer = { status: 'present'; row: ArtifactRow } | { status: 'absent'; deleted: boolean } | { status: 'deleted'; title: string } | { status: 'refused'; error: string };
 
 // While main's index answers no row, the host's word on the artifact: present (the index has not caught up: just
 // created, or the index unavailable), absent (confirmed gone), or refused (a timeout, a restarting host: no word at
@@ -137,7 +138,7 @@ function useHostAnswer(artifactId: string, machine: MachineRef, read: LibraryRea
           ? { status: 'present', row: result.value.artifact }
           : deleted?.undoable === true
             ? { status: 'deleted', title: deleted.title }
-            : { status: 'absent' };
+            : { status: 'absent', deleted: deleted !== undefined };
       setAnswer({ key, answer: next });
     });
     return () => {
@@ -233,11 +234,11 @@ function DeletedWithoutEditor({ scope, title, children }: { scope: EditorHostSco
   return <div className="flex h-full flex-col">{children}</div>;
 }
 
-function Gone({ scope }: { scope: EditorHostScope }) {
+function Gone({ scope, deleted }: { scope: EditorHostScope; deleted: boolean }) {
   useNoEditor(scope, LIBRARY_COPY.goneTitle);
   return (
     <Quiet>
-      <p className="m-0">{LIBRARY_COPY.gone}</p>
+      <p className="m-0">{deleted ? LIBRARY_COPY.gone : LIBRARY_COPY.absent}</p>
     </Quiet>
   );
 }

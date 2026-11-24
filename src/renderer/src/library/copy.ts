@@ -30,7 +30,10 @@ export const LIBRARY_COPY = {
   retry: 'Try again',
   hostUnreachable: (message: string) => `Couldn’t confirm this artifact with its host: ${message}`,
   goneTitle: 'Artifact not found',
-  gone: 'This artifact was deleted.', // the word cut (G319): the tab's title says "Artifact not found"
+  // the word cut: the tab's title says "Artifact not found"; the body says it was deleted only where the host says so
+  // (G319), and only that it is not there where the host confirms no more than its absence (N200)
+  gone: 'This artifact was deleted.',
+  absent: 'This artifact isn’t in the library.',
   // UX wave U10b (M5, §C.5): an editor open on an artifact an agent deleted, with the row's Undo
   deletedByAgent: 'An agent deleted this artifact.', // the word cut (N152): the editor already shows it takes no edit
   deletedUnsent: 'An agent deleted this artifact. Your last edit is not saved; restoring the artifact saves it.',
@@ -115,6 +118,7 @@ export const LIBRARY_PAGE = {
   floorSystem: 'MAWS', // the bundled floor's name, as the document's breadcrumb says it
   reading: 'Reading the library…', // the word cut (N190): the quiet spinner's name, never drawn
   readingSpace: 'Loading Space…', // the word cut (N193): the strip heading's spinner while the Spaces are read
+  spaceFailed: 'Couldn’t load the Space', // N193: the Spaces read failed before it ever answered (with Try again)
   readFailed: (message: string) => `Couldn’t read the library: ${message}`,
   retry: 'Try again',
   // empty states: what puts artifacts here

@@ -68,7 +68,9 @@ const offs: (() => void)[] = [];
 const mainRegion = () => document.querySelector<HTMLElement>('[data-region="main"]')!;
 const chromeTabs = () => document.querySelector<HTMLElement>('[data-chrome-tabs]')!;
 const headerTitle = () => mainRegion().querySelector('[data-editor-header] [data-header-title]')?.textContent ?? null;
-const LIBRARY_GONE = 'This artifact was deleted.'; // G319: the tab's title keeps “Artifact not found”
+// The tab's title keeps “Artifact not found”; its body says deleted where the host says so (G319), else not there (N200)
+const LIBRARY_DELETED = 'This artifact was deleted.';
+const LIBRARY_ABSENT = 'This artifact isn’t in the library.';
 const tabOpen = () => allTabs(useLayout.getState().main).some((t) => t.id === TAB);
 const changed = async () => {
   await act(async () => main.emit('library.changed', { revision: 9 }));
@@ -242,7 +244,7 @@ describe('an artifact in a main tab', () => {
     await screen.findByText(/main editor for/);
     current = null;
     await changed();
-    expect(await screen.findByText(LIBRARY_GONE)).toBeTruthy();
+    expect(await screen.findByText(LIBRARY_ABSENT)).toBeTruthy();
     expect(main.callsOf('artifacts.get'), 'the host confirms it is gone').toEqual([{ artifactId: A }]);
     expect(editor.dispose).toHaveBeenCalledTimes(1);
     expect(headerTitle(), 'the stale editor header is replaced').toBe('Artifact not found');
@@ -261,7 +263,7 @@ describe('an artifact in a main tab', () => {
     act(() => openArtifactTab(A));
     expect(await screen.findByText(/main editor for/)).toBeTruthy();
     expect(main.callsOf('artifacts.get')).toEqual([{ artifactId: A }]);
-    expect(screen.queryByText(LIBRARY_GONE)).toBeNull();
+    expect(screen.queryByText(LIBRARY_ABSENT)).toBeNull();
     current = row({ title: 'Untitled document' });
     await changed();
     expect(within(chromeTabs()).getByRole('tab', { name: 'Untitled document' })).toBeTruthy();
@@ -314,7 +316,7 @@ describe('an artifact in a main tab', () => {
 
     onHost = null;
     await act(async () => screen.getByRole('button', { name: 'Try again' }).click());
-    expect(await screen.findByText(LIBRARY_GONE)).toBeTruthy();
+    expect(await screen.findByText(LIBRARY_ABSENT)).toBeTruthy();
     expect(editor.dispose).toHaveBeenCalledTimes(1);
   });
 
@@ -326,7 +328,7 @@ describe('an artifact in a main tab', () => {
     render(<Shell />);
     act(() => openArtifactTab(A));
     expect(await screen.findByText('Couldn’t confirm this artifact with its host: the engine host is restarting')).toBeTruthy();
-    expect(screen.queryByText(LIBRARY_GONE)).toBeNull();
+    expect(screen.queryByText(LIBRARY_ABSENT)).toBeNull();
     expect(editor.createState).not.toHaveBeenCalled();
     onHost = hostRow();
     await changed();
@@ -441,7 +443,7 @@ describe('an artifact an agent deleted while it is open', () => {
     current = null;
     onHostDeleted = { title: 'Launch notes', kind: 'document', undoable: false };
     await changed();
-    expect(await screen.findByText(LIBRARY_GONE)).toBeTruthy();
+    expect(await screen.findByText(LIBRARY_DELETED)).toBeTruthy();
     expect(screen.queryByText(DELETED_BY_AGENT)).toBeNull();
     expect(editor.dispose).toHaveBeenCalledTimes(1);
   });
