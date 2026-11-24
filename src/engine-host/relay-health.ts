@@ -50,12 +50,6 @@ export function cachedRelay(url: string = RELAY_URL): RelayHealth | null {
   return hit !== undefined && hit.expiresAt > Date.now() ? hit.health : null;
 }
 
-// What a cache-only read stands on when it finds no fresh check: a relay not known to answer, so the prestart is skipped
-// (never shown: a prestart's card is a skip, and a hidden launch's refusal ends it unseen).
-export function relayNotChecked(url: string = RELAY_URL): RelayHealth {
-  return { url, ok: false, status: null, latencyMs: null, checkedAt: new Date().toISOString(), error: 'no fresh check of the relay (a prestart never probes)' };
-}
-
 // Results are cached 5 s per url; `force` bypasses the cache (engine.relayHealth { force: true }, M5).
 export async function checkRelay(url: string = RELAY_URL, timeoutMs: number = RELAY_HEALTH_TIMEOUT_MS, opts: { force?: boolean } = {}): Promise<RelayHealth> {
   const now = Date.now();

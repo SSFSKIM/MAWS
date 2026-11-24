@@ -525,17 +525,20 @@ describe('adopt', () => {
   });
 
   // The xhigh panel (scalpel-3, finding 5): a hidden launch reads the relay's last check while fresh, never a probe
-  it('a hidden launch on the gateway route reads the relay cache-only: a miss ends the prestart unspawned, a fresh check launches it', async () => {
+  it('a hidden launch on the gateway route reads the relay cache-only: a miss (a cold cache) launches it unprobed, a check known down ends it unspawned', async () => {
     const probes: boolean[] = [];
     const logs: string[] = [];
     let cached: typeof OK_RELAY | null = null;
     const host = engineHost({ deps: { checkRelay: async (force) => (probes.push(force), OK_RELAY), cachedRelay: () => cached, log: (line) => void logs.push(line) } });
     await host.prestart('app-p', { spec: { gateway: 'gateway' } });
-    await until(() => logs.some((line) => line.includes('its relay is unreachable')), 'the prestart refused');
-    expect(host.transports).toHaveLength(0);
-    expect(host.hiddenReserved).toEqual([]);
+    await hiddenReady(host, 'app-p');
+    expect(probes).toEqual([]);
+    cached = { ...OK_RELAY, ok: false, status: 503 };
+    await host.prestart('app-q', { spec: { gateway: 'gateway' }, key: 'key-2' });
+    await until(() => logs.some((line) => line.includes('app-q') && line.includes('its relay is unreachable')), 'the prestart refused');
+    expect(host.hiddenReserved).not.toContain('app-q');
     cached = OK_RELAY;
-    await host.prestart('app-p', { spec: { gateway: 'gateway' }, key: 'key-2' });
+    await host.prestart('app-p', { spec: { gateway: 'gateway' }, key: 'key-3' });
     await hiddenReady(host, 'app-p');
     expect(probes).toEqual([]);
     expect(await host.call('engine.relayHealth.cached', undefined)).toEqual(OK_RELAY);

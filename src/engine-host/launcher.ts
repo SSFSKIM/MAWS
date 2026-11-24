@@ -17,7 +17,6 @@ import type { LaunchSpec } from '@shared/engine/launch-spec';
 import { readRoute } from '@shared/engine/route'; // P5 O7 M9
 import { isFullSet } from '@shared/maws/tool-set'; // board ticket 421
 import type { RelayHealth } from '@shared/engine/relay-health';
-import { relayNotChecked } from './relay-health'; // ticket 851 (the xhigh panel)
 import { HostCommandError } from '@shared/host/runtime'; // P5 O16 M2
 import type { SessionStateStore } from '@shared/engine/session-state-store';
 import type { LaunchResult } from '@shared/ipc/schema/session';
@@ -62,7 +61,7 @@ export interface LauncherDeps {
   tellMod?: () => string | null; // the direct tell: the built-in mod's folder for a live launch (default: beside this build, when there)
   checkRelay: (force: boolean) => Promise<RelayHealth>;
   // Ticket 851 (the xhigh panel, scalpel-3 finding 5): a hidden launch's read of the relay, the last check while fresh and
-  // never a probe (a miss ends the prestart; Send's launch checks afresh). Absent (a test's launcher), `checkRelay(false)`.
+  // never a probe (a miss, a cold cache, launches unchecked; one known down ends the prestart; Send checks afresh). Absent (a test's launcher), `checkRelay(false)`.
   cachedRelay?: () => RelayHealth | null;
   captureEnv: () => Promise<Record<string, string>>;
   spawn: (plan: LaunchPlan) => EngineTransport;
@@ -152,7 +151,7 @@ export function createLauncher(deps: LauncherDeps): Launcher {
     } else {
       const [binary, relay, env, localKey] = await Promise.all([
         // P5 O7 M9: `route` before the legacy field; the machine route's relay check is the start guards' advisory one
-        deps.binaryProbe(), readRoute(spec) === 'gateway' ? (hidden && deps.cachedRelay ? Promise.resolve(deps.cachedRelay() ?? relayNotChecked()) : deps.checkRelay(false)) : Promise.resolve(null), deps.captureEnv(),
+        deps.binaryProbe(), readRoute(spec) === 'gateway' ? (hidden && deps.cachedRelay ? Promise.resolve(deps.cachedRelay()) : deps.checkRelay(false)) : Promise.resolve(null), deps.captureEnv(),
         (deps.captureLocalKey ?? captureLocalKey)(spec.cwd).catch((): ConnectorLocalKey => ({ kind: 'unidentified', why: 'unreadable' })), // P3-HD
       ]);
       // W13: a missing binary and one that printed no version refuse; a version other than the tested one never does

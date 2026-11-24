@@ -856,13 +856,15 @@ describe('the xhigh panel: the spine’s fences and guards', () => {
     expect(prestartCalls()).toEqual([]);
   });
 
-  it('scalpel-3 5. a relay with no fresh check: the gateway route skips, asking no probe', async () => {
+  // A cold relay cache (the app's first draft, or past the cache's 5 s) is not a relay known to be down: typing never
+  // probes, and the prestart starts; Send's own probe judges the relay, and a card there withdraws the prestart
+  it('scalpel-3 5. a relay with no fresh check (a cold cache): the gateway route prestarts, asking no probe', async () => {
     await harness();
     h.host.relayCached = false;
     const id = await create();
-    expect(await ask(id)).toMatchObject({ status: 'skipped', token: null });
+    expect(await ask(id)).toMatchObject({ status: 'started' });
     expect(h.host.calledWith('engine.relayHealth')).toEqual([]);
-    expect(prestartCalls()).toEqual([]);
+    expect(prestartCalls()).toHaveLength(1);
   });
 
   it('scalpel-3 5. the same on the machine route at the relay’s base URL', async () => {
@@ -870,9 +872,9 @@ describe('the xhigh panel: the spine’s fences and guards', () => {
     userSettings({ env: { ANTHROPIC_BASE_URL: RELAY_URL } });
     h.host.relayCached = false;
     const id = await create();
-    expect(await ask(id)).toMatchObject({ status: 'skipped', token: null });
+    expect(await ask(id)).toMatchObject({ status: 'started' });
     expect(h.host.calledWith('engine.relayHealth')).toEqual([]);
-    expect(prestartCalls()).toEqual([]);
+    expect(prestartCalls()).toHaveLength(1);
   });
 });
 

@@ -25,7 +25,6 @@ import { ENGINE_MAWS_TOOLS_CAPABILITY, ENGINE_PRESTART_CAPABILITY, ENGINE_ROUTE_
 import { isGatewayModel } from '@shared/sessions/models';
 import { RELAY_URL } from '../../engine-host/launch';
 import { effectiveBaseUrl, type BaseUrlResolution } from '../../engine-host/models-cache';
-import { relayNotChecked } from '../../engine-host/relay-health'; // ticket 851 (the xhigh panel)
 import type { CommandInput, CommandOutput } from '@shared/ipc/schema';
 import type { SetupPhase } from '@shared/sessions/setup';
 import { hostCall } from './context';
@@ -103,17 +102,17 @@ export async function guardResolution(s: Setup, resolution: BaseUrlResolution, a
   if (args.model !== null && isGatewayModel(args.model) && resolution.kind === 'resolved' && !relay) return { refused: { field: 'model', message: machineRouteRefusal(args.model) } };
   if (!relay || (args.startAnyway && lists)) return null;
   const health = await relayHealthOf(s, args.relay ?? 'probe');
-  if (health.ok) return null;
+  if (health === null || health.ok) return null; // a cold cache judges nothing: Send's probe does
   // an older host refuses the legacy gateway launch at a dead relay, so no sheet offers to start past it
   return lists ? { relay: health } : { refused: { field: 'route', message: ROUTE_RELAY_UNSUPPORTED } };
 }
 
 // The relay's health for a start's guard: a fresh probe. Ticket 851 (D8; the xhigh panel, scalpel-3 finding 5): the
-// prestart's (`cached`) is the host's last check while it is fresh, never a probe, and a miss reads as a relay not known
-// to answer, which skips the prestart.
-export async function relayHealthOf(s: Pick<Setup, 'dispatch'>, relay: 'probe' | 'cached'): Promise<RelayHealth> {
+// prestart's (`cached`) is the host's last check while it is fresh, never a probe; null on a miss (a cold cache), which
+// judges nothing: the prestart starts, and Send's own probe judges the relay (a card there withdraws the prestart).
+export async function relayHealthOf(s: Pick<Setup, 'dispatch'>, relay: 'probe' | 'cached'): Promise<RelayHealth | null> {
   if (relay === 'probe') return hostCall(s.dispatch, 'engine.relayHealth', { force: true });
-  return (await hostCall(s.dispatch, 'engine.relayHealth.cached', undefined)) ?? relayNotChecked(RELAY_URL);
+  return hostCall(s.dispatch, 'engine.relayHealth.cached', undefined);
 }
 
 // The spec a launch sends this engine host: `route` only for the machine route on a host that lists it (the legacy field

@@ -68,8 +68,8 @@ export async function guardIntentStart(s: Setup, ctx: GuardContext, intentIn: Se
 // What an intent's start guards answer of the intent as the start has written it, writing nothing: a rule's rejection
 // (the start hands the message back), a card (`needs_trust`, the relay's), or the route the attempt runs on.
 // Ticket 851 (docs/doperpowers/plans/2026-11-24-prestart-engine.md, D8): the prestart asks the same with `relay:
-// 'cached'`: the relay's last health is read, never a fresh probe, and one that is down (or has no fresh check) is the
-// relay's card, with no fallback to the direct route.
+// 'cached'`: the relay's last health is read, never a fresh probe; one known down is the relay's card, with no fallback
+// to the direct route, and a cold cache (no fresh check) judges nothing.
 export type IntentVerdict = { kind: 'rejected'; outcome: Rejection } | { kind: 'card'; outcome: StartOutcome } | { kind: 'passed'; route: Route; directFallback: boolean };
 
 export async function judgeIntent(s: Setup, intent: SetupIntent, opts: { startAnyway: boolean; relay: 'probe' | 'cached' }): Promise<IntentVerdict> {
@@ -109,7 +109,7 @@ export async function judgeIntent(s: Setup, intent: SetupIntent, opts: { startAn
   let directFallback = false;
   if (route === 'gateway') {
     const health = await relayHealthOf(s, opts.relay); // ticket 851 (the xhigh panel, scalpel-3 finding 5): the prestart's never probes
-    if (!health.ok) {
+    if (health !== null && !health.ok) { // null: the prestart's cold cache, which judges nothing (Send's probe does)
       if (opts.relay === 'probe' && s.settings().gateway.relayUnreachable === 'direct' && !isGatewayModel(intent.model ?? '')) {
         route = 'direct';
         directFallback = true;
