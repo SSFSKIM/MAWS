@@ -1,0 +1,4 @@
+# The question sheet's published set is a byte-for-byte copy whose digest a test recomputes
+# (test/fixtures/sheet/PROVENANCE.md): it holds a PNG, files without a final newline and an inbox that ends in a
+# torn line, so git converts nothing in it.
+test/fixtures/sheet/set/** -text

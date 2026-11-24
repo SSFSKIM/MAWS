@@ -130,4 +130,12 @@ export const BY_EFFECT: Readonly<Record<string, EffectRule | typeof NO_RULE>> = 
   // P5 O17 M9a: a screencast read open (the endpoint's stream row): one that controls the tab (naming its grant) acts on
   // the page as a person, `approve` (R2); one that only views it, at the floor.
   'browser.screencast': (input) => (input.control === undefined ? 'view' : 'approve'),
+  // The question sheet's C3 M2 (docs/doperpowers/plans/2026-11-23-question-sheet-c3-maws-app.md §D): a machine's sheets,
+  // read and answered by a window on that machine; refused to every caller the endpoint carries until C6 reads what each
+  // does for a remote one and replaces the rows it needs with rules.
+  'sheet.list': NO_RULE,
+  'sheet.read': NO_RULE,
+  'sheet.body': NO_RULE,
+  'sheet.put': NO_RULE,
+  'sheet.upload': NO_RULE,
 };

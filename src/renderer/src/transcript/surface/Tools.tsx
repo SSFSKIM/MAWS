@@ -1,10 +1,17 @@
+import { useCallback } from 'react';
+import type { TranscriptProps } from '@shared/engine/surface-rows';
 import { SurfaceRow } from '../../engine-surface/SurfaceRow';
 import { useSurfaceAttached, useSurfaceHooked } from '../../engine-surface/site';
+import { useTranscriptStore } from '../../stores/transcript';
+import type { AttentionItem } from '@shared/graph/attention';
+import type { ToolUseId } from '@shared/graph/ids';
+import { selectWaitingByCall, useAttention } from '../../stores/attention';
+import { aloneInRun, drawsAsRun, heldByPermission, runOfOneCaption, runOfOneId, runOfOneLabel } from '../model/groups';
 import type { Cell, Row, TurnId } from '../model/rows';
 import { CellDetailView } from '../view/cells/CellDetail';
 import { CellLine } from '../view/cells/CellLine';
-import { useDisclosure } from '../view/context';
-import { asksAsRun, resultInput, standaloneRunInput, toolInputs, withToolProps, type ToolInput } from './adapters';
+import { useDisclosure, useRowSession, useTranscriptContext } from '../view/context';
+import { asksAsRun, callsOfTurn, resultInput, standaloneRunInput, toolInputs, withToolProps, type ToolInput } from './adapters';
 import { useTranscriptSurface } from './context';
 
 export function SurfaceCellLine({ cell, turnId, standalone = false, focusable = false }: { cell: Cell; turnId: TurnId | null; standalone?: boolean; focusable?: boolean }) {
@@ -17,7 +24,7 @@ export function SurfaceCellLine({ cell, turnId, standalone = false, focusable = 
   if (standalone && asksAsRun(cell)) return <RunOfOne cell={cell as Extract<Row, { kind: 'cell' }>} turnId={turnId} focusable={focusable} inputs={inputs} />;
   // A merged read remains MAWS's one merged row unless a ToolUse hook owns the calls. When hook knowledge is not
   // available, ask each call but give only the first the merged native; a later hooked answer unfolds the calls.
-  if (!inputs.length || !attached || hooked === false) return <CellLine cell={cell} turnId={turnId} focusable={focusable} renderDetail={standalone && inputs.length === 1 ? (drawn) => <ToolResult input={{ ...inputs[0], cell: drawn }} turnId={turnId} /> : undefined} />;
+  if (!inputs.length || !attached || hooked === false) return <CellLine cell={cell} turnId={turnId} focusable={focusable} standalone={standalone} renderDetail={standalone && inputs.length === 1 ? (drawn) => <ToolResult input={{ ...inputs[0], cell: drawn }} turnId={turnId} /> : undefined} />;
   return <>{inputs.map((input, index) => <ToolCall key={input.instanceId} input={input} merged={inputs.length > 1 ? cell : null} first={index === 0} turnId={turnId} standalone={standalone} focusable={focusable} />)}</>;
 }
 
@@ -30,7 +37,7 @@ function ToolCall({ input, merged, first, turnId, standalone, focusable }: { inp
     {(props, { concealed }) => {
       if (merged !== null && !split && !first) return null;
       const native = merged !== null && !split ? merged : withToolProps(input, props);
-      return <CellLine cell={split ? { ...native, expanded: open } : native} turnId={turnId} focusable={focusable && !concealed} onToggle={split ? toggle : undefined}
+      return <CellLine cell={split ? { ...native, expanded: open } : native} turnId={turnId} focusable={focusable && !concealed} standalone={standalone} onToggle={split ? toggle : undefined}
         renderDetail={standalone ? (drawn) => <ToolResult input={{ ...input, cell: drawn }} drawnProps={props} turnId={turnId} enabled={!concealed} /> : undefined} />;
     }}
   </SurfaceRow>;
@@ -45,15 +52,47 @@ function ToolResult({ input, drawnProps = input.props, turnId, enabled = true }:
   </SurfaceRow>;
 }
 
-// A run of one drawn as its call's line: the `ToolGroup` site under the run's id, MAWS's own line in its engine slot (an
-// answer with none replaces it, as a run's does). Mounted while it asks nothing (a request waits on the call, the jump's
-// target), so the line keeps its element; a run's rewrite of its open state has no run to open here.
+// A call alone in its run: the `ToolGroup` site under the run's id, MAWS's own drawing in its engine slot (an answer with
+// none replaces it, as a run's does). Mounted while it asks nothing (a request waits on the call, the jump's target), so
+// the drawing keeps its element. Board ticket 852: one quiet line, its call's own `CellLine`, whatever its presentation:
+// read as its run (`runOfOneLabel`: its description, else the run's words) unless it failed, its status mark its call's
+// (a running ring, a stop), one press opening it straight onto its command and result. Its open state is one, its run's
+// key of its turn's (a run's rewrite of that state opens it, as a run's does), so a result that turns it into a failed
+// line keeps it open, and the line keeps its element and the keyboard.
 const NO_GROUP = { calls: [], isActive: false, isExpanded: false };
 function RunOfOne({ cell, turnId, focusable, inputs }: { cell: Extract<Row, { kind: 'cell' }>; turnId: TurnId | null; focusable: boolean; inputs: ToolInput[] }) {
-  const { appSessionId, state, turn } = useTranscriptSurface({ turnId });
+  const { appSessionId, state, turn, storeKey } = useTranscriptSurface({ turnId });
   const input = state ? standaloneRunInput(cell, turn, state, state.ui.revealed) : null;
-  return <SurfaceRow appSessionId={appSessionId} component="ToolGroup" instanceId={input?.instanceId ?? cell.id} props={input?.props ?? NO_GROUP} enabled={input !== null} placeholder={<span className="text-fg-faint">…</span>}>
-    {(_props, { concealed }) => <CellLine cell={cell} turnId={turnId} focusable={focusable && !concealed} renderDetail={inputs.length === 1 ? (drawn) => <ToolResult input={{ ...inputs[0], cell: drawn }} turnId={turnId} enabled={!concealed} /> : undefined} />}
+  const id = runOfOneId(cell);
+  const expand = useCallback((props: TranscriptProps['ToolGroup']) => {
+    if (!props.isExpanded) return;
+    // read now, not from the render: two mounts of one transcript answered alike must not open it and close it again
+    const open = useTranscriptStore.getState().entries[storeKey]?.state.ui.expandedGroups.has(id) ?? false;
+    if (!open) useTranscriptStore.getState().toggleGroup(storeKey, id);
+  }, [storeKey, id]);
+  const toggle = useCallback(() => useTranscriptStore.getState().toggleGroup(storeKey, id), [storeKey, id]);
+  const alone = aloneInRun(cell); // else a call its result put apart (a refusal, an image): its own line and open state
+  // decision 21, as its run's line applied it: a foreground call running while its turn is held by a permission that names
+  // no call of the turn is not running; it reads its run's words, with no running ring
+  const held = useHeld(cell, turnId, storeKey);
+  return <SurfaceRow appSessionId={appSessionId} component="ToolGroup" instanceId={input?.instanceId ?? cell.id} props={input?.props ?? NO_GROUP} enabled={input !== null} onRewrite={expand} placeholder={<span className="text-fg-faint">…</span>}>
+    {(_props, { concealed }) => <CellLine cell={alone ? { ...cell, expanded: cell.runExpanded === true } : cell} turnId={turnId} focusable={focusable && !concealed} standalone runOfOne={drawsAsRun(cell)} held={held}
+      label={held ? runOfOneCaption(cell) : runOfOneLabel(cell) ?? undefined} onToggle={alone ? toggle : undefined}
+      renderDetail={inputs.length === 1 ? (drawn) => <ToolResult input={{ ...inputs[0], cell: drawn }} turnId={turnId} enabled={!concealed} /> : undefined} />}
   </SurfaceRow>;
 }
 
+// Whether a call alone in its run is held (decision 21): it runs in the foreground (not in the background, with its result)
+// in its session's own transcript, its turn still open, while a permission request that names no call of the turn waits.
+// Read as one boolean, so a batch re-renders it only when that changes.
+function useHeld(cell: Cell, turnId: TurnId | null, storeKey: string): boolean {
+  const { variant } = useTranscriptContext();
+  const session = useRowSession();
+  const waiting = useAttention((state) => (session === null ? NO_CALLS : selectWaitingByCall(state, session)));
+  return useTranscriptStore((state) => {
+    if (variant !== 'session' || turnId === null || waiting.size === 0 || cell.status !== 'running' || cell.background) return false;
+    const turn = state.entries[storeKey]?.state.turns.get(turnId);
+    return turn?.state === 'open' && heldByPermission(waiting, callsOfTurn(turn));
+  });
+}
+const NO_CALLS: ReadonlyMap<ToolUseId, AttentionItem> = new Map();

@@ -29,9 +29,11 @@ import { readMachineRole } from './role'; // P5 O2 M2
 import { buildIdOf, isAlive, procStartOf } from './supervisor-files';
 import { signalOrphan, type LiveRow } from './live-ledger'; // P5 O16 M2; M3: LiveRow
 import { gateSocketPath, hostsDirOf, sessionHostBinary, sessionHostPaths } from './holder/files'; // P5 O16 M2; M3: sessionHostPaths
-import { adoptHosted, releaseHost, startSessionHost } from './holder/transport'; // P5 O16 M2; M3: adoptHosted, releaseHost
+import { adoptHosted, discardHost, releaseHost, startSessionHost } from './holder/transport'; // P5 O16 M2; M3: adoptHosted, releaseHost; ticket 851: discardHost
 import { liveHosts, pruneHostLogs, readRoster, removeHostFiles, type RosterEntry } from './holder/roster'; // P5 O16 M3
-import { adoptAll, recordFailed, recordStart } from './holder/adopt'; // P5 O16 M3; wave 1 verification: the start's records
+import { adoptAll, clearDeadHost, clearEndedPrestart, endPrestart, exitedEntry, recordFailed, recordStart } from './holder/adopt'; // P5 O16 M3; wave 1 verification: the start's records; ticket 851: a prestart's end
+import { journalDir } from './launcher'; // ticket 851: a prestart's staged files
+import type { AppSessionId } from '@shared/graph/ids'; // ticket 851
 import { heldChild, stopHeldHost } from './holder/stop-held'; // P5 O16 panel fix wave 1; re-verification: heldChild
 import { MAX_LINE_CHARS } from './transport'; // P5 O16 M3
 import { readFileSync } from 'node:fs'; // P5 O16 M3
@@ -149,9 +151,10 @@ const register: HostRegister = (untimedOn, untrackedEmit, untrackedClient) => {
   on('engine.ping', async () => hostPing(HOST_VERSION));
   // C4 start: the filesystem state service (fs.*) over the engine's store, read-only; C3's `session.events` answers an
   // app session with no process here from it (`diskEvents` below).
-  // W7: a registry record of one of the process table's live pids is MAWS's own, never a holder
+  // W7: a registry record of one of the process table's live pids is MAWS's own, never a holder; ticket 851 (R4-3): a
+  // prestart's hidden row's among them (the table's internal view)
   let table: ProcessTable | null = null;
-  const fs = registerFs(on, emit, process.env, { activity: () => idle.activity(), ownPids: () => new Set(table?.list().flatMap((s) => (s.pid !== null && s.lifecycle !== 'exited' ? [s.pid] : [])) ?? []) });
+  const fs = registerFs(on, emit, process.env, { activity: () => idle.activity(), ownPids: () => new Set(table?.all().flatMap((s) => (s.pid !== null && s.lifecycle !== 'exited' ? [s.pid] : [])) ?? []) });
   // C4 end
   // P3-A: the artifact store and its document service, closed at the end of engine.shutdown's body, which both modes run
   // on the way out (utility: main's quit; detached: the exit order and host.stopAll). M4: `artifacts.*`, `spaces.*` and
@@ -233,6 +236,10 @@ const register: HostRegister = (untimedOn, untrackedEmit, untrackedClient) => {
               return { transport, fence };
             },
             release: (entry, startMs) => releaseHost(entry, { log: (line) => console.log(`[session-host] ${line}`), startMs, token: tokenOf(supervisorDir, entry.holderId) }),
+            // ticket 851, M2: a prestart's host keeps its marked entry at its exit; once the host is gone (its ladder's
+            // bound) its launch is rolled back and the entry goes too, while it is still marked; a host still running
+            // keeps all of it for the next start (the panel's rule)
+            endPrestart: (host, rollback) => clearEndedPrestart(hostsDirOf(supervisorDir), host, { isAlive }, rollback),
           },
   });
   ({ table } = ipc);
@@ -255,7 +262,7 @@ const register: HostRegister = (untimedOn, untrackedEmit, untrackedClient) => {
   const rows = table;
   startJournalPruning = (alsoKeep) => {
     scheduleJournalPruning(join(userData, 'engine-host', 'journal'), {
-      keep: () => new Set([...rows.list().map((session) => session.status().launchId), ...alsoKeep()]),
+      keep: () => new Set([...rows.all().map((session) => session.status().launchId), ...alsoKeep()]), // ticket 851: a prestart's too
       log: (line) => console.warn(`[engine-host] ${line}`),
     });
   };
@@ -330,10 +337,22 @@ function adoptAtStart(dir: string): { liveHolders: ReadonlySet<string>; deadHost
   const prunedLogs = pruneHostLogs(hostsDir, new Set(roster.map((entry) => entry.holderId)), { maxAgeDays: JOURNAL_MAX_AGE_DAYS });
   if (prunedLogs > 0) log(`${prunedLogs} session host log(s) past ${JOURNAL_MAX_AGE_DAYS} days pruned`);
   const { live, dead } = liveHosts(roster, { isAlive, procStartOf });
+  // ticket 851 (docs/doperpowers/plans/2026-11-24-prestart-engine.md, R4-1, Decision Logs 8 and 9): a prestart never
+  // promoted is discarded, never adopted; its launch's staged files are removed before its entry, here for a host already
+  // gone, and a removal that fails keeps the entry for the next start
+  const stagedDir = (entry: RosterEntry): string | null => {
+    if (entry.appSessionId === null) return null;
+    try {
+      return journalDir(userData!, entry.appSessionId as AppSessionId);
+    } catch {
+      return null; // an id no journal directory could have
+    }
+  };
+  const prestartFiles = { stagedDir, removeEntry: (entry: RosterEntry) => removeHostFiles(hostsDir, entry), log, stateDir: join(userData!, 'engine-host', 'state') /* M2's review, finding 2 */ };
   const deadHostChildren: LiveRow[] = dead.flatMap((entry) => (entry.child !== null && entry.exit === null ? [{ appSessionId: entry.appSessionId ?? '', pid: entry.child.pid, procStart: entry.child.procStart, launchId: entry.holderId, holderId: entry.holderId }] : []));
   for (const entry of dead) {
     log(`session host ${entry.holderId} (pid ${entry.pid}) is gone: its files removed`);
-    removeHostFiles(hostsDir, entry);
+    clearDeadHost(entry, prestartFiles);
   }
   // P5 O16 panel fix wave 1: a committed spawn with no child yet is held too (sweep#3), and a stop-all before a hold's
   // adoption reserves its row stops it through its session host (scalpel-1#1)
@@ -347,15 +366,18 @@ function adoptAtStart(dir: string): { liveHolders: ReadonlySet<string>; deadHost
     // adoption whose row was reserved is that row's
     recordFailed(engine.table, outcome.failed, heldHosts);
     for (const id of held) engine.table.adoptionEnded(id); // the adopted ones reserved theirs already
-    if (live.length > 0) log(`adoption: ${outcome.adopted.length} of ${live.length} live session host(s) adopted, ${outcome.failed.length} not`);
+    if (live.length > 0) log(`adoption: ${outcome.adopted.length} of ${live.length} live session host(s) adopted, ${outcome.failed.length} not${outcome.ended.length > 0 ? `, ${outcome.ended.length} prestart(s) ended` : ''}`);
     life.adoptionsEnded(outcome.failed.length);
     startJournalPruning?.(() => readRoster(hostsDir, () => {}).map((entry) => entry.holderId));
   };
   // P5 O17 M8's scene 6: the e2e's hold on the adoptions, armed only under MAWS_E2E=1 with its own variable; unarmed,
   // the adoptions run as before
   const e2eHold = e2eHoldFor(process.env, 'MAWS_E2E_ADOPTION_HOLD');
-  if (e2eHold === undefined) void adoptAll(live, { adopt: (entry) => engine.adopt(entry), log }).then(ended);
-  else void e2eHold().then(() => adoptAll(live, { adopt: (entry) => engine.adopt(entry), log }).then(ended));
+  // the panel's scalpel-1#2: a marked host that cannot be asked is decided by its entry once it has exited
+  const endDeps = { ...prestartFiles, discard: (e: RosterEntry) => discardHost(e, { log, token: tokenOf(dir, e.holderId) }), exited: (e: RosterEntry) => exitedEntry(hostsDir, e, { isAlive }) };
+  const adoptDeps = { adopt: (entry: RosterEntry) => engine.adopt(entry), end: (entry: RosterEntry) => endPrestart(entry, endDeps), log };
+  if (e2eHold === undefined) void adoptAll(live, adoptDeps).then(ended);
+  else void e2eHold().then(() => adoptAll(live, adoptDeps).then(ended));
   return { liveHolders: new Set(live.map((entry) => entry.holderId)), deadHostChildren };
 }
 // E10 end

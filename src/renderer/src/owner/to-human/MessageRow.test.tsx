@@ -78,7 +78,7 @@ describe('a message tool’s call in a mounted transcript', () => {
   it('the to-human view draws the message in sight and the command after it under one record, never as an MCP row', async () => {
     await mounted(turn(), true);
     const cards = () => [...document.querySelectorAll('[data-kind="to_human"] .owner-message-ink')].map((element) => element.textContent);
-    const cells = () => [...document.querySelectorAll('[data-kind="cell"] [data-cell-id]')].map((element) => element.getAttribute('data-cell-id'));
+    const cells = () => [...document.querySelectorAll('[data-kind="cell"]')].map((element) => element.closest('[data-row-id]')?.getAttribute('data-row-id')); // board ticket 852: a run of one draws no call until it opens
     await waitFor(() => expect(cards()).toEqual(['● messageStage 1 is done.']));
     const record = screen.getByRole('button', { name: '› working record' }); // the call is the message, not one of the calls
     expect(record.getAttribute('aria-expanded')).toBe('false');

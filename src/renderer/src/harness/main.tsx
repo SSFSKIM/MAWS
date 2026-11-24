@@ -44,6 +44,11 @@ import { Probe } from './terminal/Probe';
 ROUTES.probe = () => <Probe />;
 // C9 block end
 
+// Question sheet C3 start: the sheet's components over the pinned set (harness/sheet/)
+import { SheetHarness } from './sheet/SheetHarness';
+ROUTES.sheet = () => <SheetHarness />;
+// Question sheet C3 end
+
 turnFileLinks(true); // UX wave U6b-4b (decision 17): the harness pages are the window's, and draw a `file:` link as App does
 
 const routeOf = () => location.hash.replace(/^#/, '') || 'transcript';

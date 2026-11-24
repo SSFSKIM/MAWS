@@ -20,11 +20,12 @@ import type { CommandInput, CommandName, CommandOutput } from '@shared/ipc/schem
 import type { C3_ENGINE_COMMANDS, O10_ENGINE_COMMANDS /* P5 O10 */ } from '@shared/ipc/schema/engine';
 import type { SessionEvent } from '@shared/graph/events'; // UX wave, ticket 777
 import { utf8Length } from '@shared/graph/history-window'; // UX wave, ticket 777
-import type { C3_SESSION_COMMANDS, E8_SESSION_COMMANDS, O10_SESSION_COMMANDS /* P5 O10 M8 */, O7M8_SESSION_COMMANDS /* P5 O7 M8 */, P2C_SESSION_COMMANDS /* P2-C */, P5O2_SESSION_COMMANDS /* P5 O2 M2 */, R2_SESSION_COMMANDS, U4A_SESSION_COMMANDS /* UX wave U4a */, EventsSnapshot } from '@shared/ipc/schema/session';
+import type { C3_SESSION_COMMANDS, E8_SESSION_COMMANDS, O10_SESSION_COMMANDS /* P5 O10 M8 */, O7M8_SESSION_COMMANDS /* P5 O7 M8 */, P2C_SESSION_COMMANDS /* P2-C */, P5O2_SESSION_COMMANDS /* P5 O2 M2 */, R2_SESSION_COMMANDS, TELL_SESSION_COMMANDS /* the direct tell */, U4A_SESSION_COMMANDS /* UX wave U4a */, EventsSnapshot } from '@shared/ipc/schema/session';
 import { SURFACE_CLIENT_ID } from '@shared/engine/surface'; // R2
 import { binaryInfoOf, createBinaryProbe, PROBE_BOUND_MS, type BinaryCheck } from './binary-info';
 import { TESTED_ENGINE_VERSION } from './engine-compat'; // W13
 import * as controls from './controls';
+import { tellAgent } from './tell'; // the direct tell
 import { createAdopter, createLauncher, type LauncherDeps } from './launcher';
 import type { RosterEntry } from './holder/roster'; // P5 O16 M3
 import type { Gate } from './holder/gate'; // O16 M5
@@ -40,7 +41,7 @@ import { memoryAppend, MemoryAppendBudgetSpent } from './memory-append';
 import { OperationTable } from './operations';
 import { ProcessTable } from './process-table';
 import { QueueEntryError } from './queue';
-import { checkRelay as checkRelayHealth, RELAY_HEALTH_TIMEOUT_MS } from './relay-health';
+import { cachedRelay as cachedRelayHealth, checkRelay as checkRelayHealth, RELAY_HEALTH_TIMEOUT_MS } from './relay-health';
 import { rewind, rewindFiles } from './rewind';
 import { ControlError, ControlTimeout, type ControlClient } from './rpc';
 import type { EngineSession } from './session';
@@ -89,6 +90,9 @@ import type { ArtifactStore } from './documents/store'; // P3-A (M6)
 import type { DatasetRefreshRequests } from './connectors/dataset-requests'; // E3
 // P2-A end
 import { rendererMcpStatus } from './mcp-status'; // P3-H
+import { PrestartHost } from './prestart-host'; // ticket 851, M2
+import type { Stage } from './prestart'; // ticket 851, M2
+import { eventUtf8Bytes } from '@shared/graph/history-window'; // ticket 851, M2: the kept events count toward the stage
 import { readCustomizationInventory, registerCustomizationInventory } from './customization/inventory'; // UX2-K; UX wave U11g: the name check's read
 
 export type DeadlineShape = 'immediate' | 'bounded' | 'operation';
@@ -135,6 +139,8 @@ export const E8_DEADLINE_SHAPES: Record<(typeof E8_SESSION_COMMANDS)[number], De
 export const P2C_DEADLINE_SHAPES: Record<(typeof P2C_SESSION_COMMANDS)[number], DeadlineShape> = { 'session.steer.cancel': 'bounded', 'session.promptHistory': 'immediate' };
 // UX wave U4a: Send now is one `interrupt { send_now }` round trip, bounded as the steer cancel is
 export const U4A_DEADLINE_SHAPES: Record<(typeof U4A_SESSION_COMMANDS)[number], DeadlineShape> = { 'session.steer.sendNow': 'bounded' };
+// The direct tell: one checked mcp_call of the built-in mod's tool, bounded as a control round trip is
+export const TELL_DEADLINE_SHAPES: Record<(typeof TELL_SESSION_COMMANDS)[number], DeadlineShape> = { 'session.tellAgent': 'bounded' };
 // P5 O2 M2: the keep mark, one state-file write
 export const P5O2_DEADLINE_SHAPES: Record<(typeof P5O2_SESSION_COMMANDS)[number], DeadlineShape> = { 'session.setKeep': 'immediate' };
 // P5 O10 M8: the broker's items, answered from the session's own list; every session's at once, from each session's
@@ -178,6 +184,7 @@ export interface EngineIpcDeps {
   appVersion?: string;
   binaryProbe?: () => Promise<BinaryCheck>;
   checkRelay?: (force: boolean) => Promise<RelayHealth>;
+  cachedRelay?: () => RelayHealth | null; // ticket 851 (the xhigh panel): the relay's last check while fresh, never a probe
   captureEnv?: () => Promise<Record<string, string>>;
   systemRoot?: string; // P5 O7 M9: the managed settings' root for the machine route's resolution (tests' seam; absent, `/`)
   spawn?: (plan: LaunchPlan) => EngineTransport;
@@ -271,6 +278,7 @@ export function registerEngineIpc(hostOn: HostOn, emit: HostEmit, deps: EngineIp
     emit('session.operation', event);
   });
   const relayCheck = deps.checkRelay ?? ((force: boolean) => checkRelayHealth(RELAY_URL, undefined, { force }));
+  const relayCached = deps.cachedRelay ?? (() => cachedRelayHealth(RELAY_URL)); // ticket 851 (the xhigh panel, scalpel-3 finding 5)
   const captureEnv = deps.captureEnv ?? (() => captureShellEnvironment());
   const binaryProbe = deps.binaryProbe ?? createBinaryProbe({ captureEnv }); // W13: the installed binary, per call
   // E8 start: the engine's plugin CLI, run by the binary a launch would run under the captured environment; after a
@@ -313,6 +321,69 @@ export function registerEngineIpc(hostOn: HostOn, emit: HostEmit, deps: EngineIp
   // P2-A (X17): the observed facts, written by each launch's recorder and recovered from the journal on a read
   const observed = new ObservedFactsService({ store: deps.observedStore ?? new FileObservedFactsStore(deps.userData), journalRoot: join(deps.userData, 'engine-host', 'journal'), log });
 
+  // Ticket 851, M2 (docs/doperpowers/plans/2026-11-24-prestart-engine.md, R4-3): a prestart's hidden row has no stream,
+  // spec or model key here until its adopt reveals it: its events are kept (within its stage's ceiling; a toast and a
+  // surface ask dropped, D2), the latest model list kept, and every other per-row emission read from the session at the
+  // reveal (`publishHidden`), which opens its stream and publishes that snapshot once.
+  interface HiddenWire { plan: LaunchPlan; spec: LaunchSpec; stage: Stage; kept: SessionEvent[]; models: unknown[] | null; stream: SessionStream | null }
+  const hiddenWires = new Map<EngineSession, HiddenWire>();
+  const openStream = (session: EngineSession, plan: LaunchPlan, spec: LaunchSpec, historyThrough?: number): SessionStream => {
+    specs.set(spec.appSessionId, spec);
+    streams.get(spec.appSessionId)?.dispose(); // the previous launch's stream: its events are that launch's
+    const stream = new SessionStream({
+      appSessionId: spec.appSessionId, launchId: plan.launchId, sessionId: plan.sessionId, journalPath: session.status().journalPath,
+      emit, ringSize: deps.ringSize, batchMs: deps.batchMs, log, hasClient: deps.hasClient, // E10: the burst's tail_gap; a refused batch told from a client gone
+      retired: (requestId) => session.requestRetired(requestId), // E11
+      historyThrough, // P5 O16 M3c
+      restored: (requestId) => session.restoredRequest(requestId), // P5 O16 M3c fix wave 1
+    });
+    streams.set(spec.appSessionId, stream);
+    modelKeys.set(spec.appSessionId, catalogueKey(plan.engineVersion, plan.gateway, { env: plan.env, cwd: plan.cwd, flagEnv: plan.flagSettings.env })); // C10; never rejects
+    return stream;
+  };
+  const wireHidden = (session: EngineSession, plan: LaunchPlan, spec: LaunchSpec, stage: Stage) => {
+    const id = spec.appSessionId;
+    const wire: HiddenWire = { plan, spec, stage, kept: [], models: null, stream: null };
+    hiddenWires.set(session, wire);
+    session.on('events', (events) => {
+      if (wire.stream) return wire.stream.events(events);
+      if (!stage.keeping) return; // M2's review, finding 9: past the ceiling nothing more is kept (the prestart ends); the panel's scalpel-2#7: nor once dropped
+      for (const event of events) {
+        if (event.kind === 'plugin.toast' || event.kind === 'plugin.ask') continue; // D2: dropped, never shown late
+        wire.kept.push(event);
+        stage.add(eventUtf8Bytes(event));
+      }
+    });
+    session.on('status', (status) => wire.stream?.status(status));
+    session.on('queue', (queue) => wire.stream?.queue(queue));
+    session.on('brokerItems', (items) => wire.stream?.brokerItems(items));
+    session.on('catalog', (catalog) => wire.stream?.catalog(catalog));
+    session.on('models', (list) => (wire.stream ? updateModels(id, list) : void (wire.models = list)));
+    session.on('paneShow', (request) => void (wire.stream && emit('maws.pane.show', request)));
+    session.on('artifactCapture', (request) => void (wire.stream && emit('maws.artifact.capture', request)));
+    session.on('artifactExport', (request) => void (wire.stream && emit('maws.artifact.export', request)));
+  };
+  // R4-3's step 4: the revealed row's stream, then its kept events, current status, queue, broker items, catalogue and
+  // model list, each once
+  const publishHidden = (session: EngineSession) => {
+    const wire = hiddenWires.get(session);
+    if (!wire) return;
+    hiddenWires.delete(session);
+    const id = wire.spec.appSessionId;
+    const stream = openStream(session, wire.plan, wire.spec);
+    session.on('checkpoint', (checkpoint) => stream.checkpoint(checkpoint)); // P5 O15 M2b (§L)
+    wire.stream = stream;
+    if (wire.kept.length > 0) stream.events(wire.kept);
+    wire.kept = [];
+    stream.status(session.status());
+    if (session.queue.recovered) stream.queue(session.queue.state);
+    stream.brokerItems(session.brokerItems());
+    const catalog = session.catalog();
+    if (catalog.revision > 0) stream.catalog(catalog);
+    const models = wire.models ?? session.initializeModels;
+    if (models !== null) updateModels(id, models);
+  };
+
   const launcherDeps: LauncherDeps = {
     userData: deps.userData,
     replayEnabled: deps.replayEnabled,
@@ -323,6 +394,7 @@ export function registerEngineIpc(hostOn: HostOn, emit: HostEmit, deps: EngineIp
     store,
     binaryProbe,
     checkRelay: relayCheck,
+    cachedRelay: relayCached, // ticket 851: a hidden launch's relay read
     captureEnv,
     spawn: deps.spawn ?? ((plan) => spawnEngine(plan, { maxLineChars: MAX_LINE_CHARS })),
     appVersion: deps.appVersion ?? 'unknown',
@@ -333,24 +405,15 @@ export function registerEngineIpc(hostOn: HostOn, emit: HostEmit, deps: EngineIp
     artifacts: deps.artifacts, // P3-A (M6)
     datasetRefresh: deps.datasetRefresh, // E3
     holder: deps.holder, // P5 O16 M2
-    wire: (session, plan, spec, historyThrough) => {
-      specs.set(spec.appSessionId, spec);
-      streams.get(spec.appSessionId)?.dispose(); // the previous launch's stream: its events are that launch's
-      const stream = new SessionStream({
-        appSessionId: spec.appSessionId, launchId: plan.launchId, sessionId: plan.sessionId, journalPath: session.status().journalPath,
-        emit, ringSize: deps.ringSize, batchMs: deps.batchMs, log, hasClient: deps.hasClient, // E10: the burst's tail_gap; a refused batch told from a client gone
-        retired: (requestId) => session.requestRetired(requestId), // E11
-        historyThrough, // P5 O16 M3c
-        restored: (requestId) => session.restoredRequest(requestId), // P5 O16 M3c fix wave 1
-      });
-      streams.set(spec.appSessionId, stream);
+    wire: (session, plan, spec, historyThrough, stage) => {
+      if (stage) return wireHidden(session, plan, spec, stage); // ticket 851, M2
+      const stream = openStream(session, plan, spec, historyThrough);
       session.on('events', (events) => stream.events(events));
       session.on('status', (status) => stream.status(status));
       session.on('queue', (queue) => stream.queue(queue));
       session.on('brokerItems', (items) => stream.brokerItems(items));
       session.on('catalog', (catalog) => stream.catalog(catalog)); // C7: session.catalogChanged
       session.on('checkpoint', (checkpoint) => stream.checkpoint(checkpoint)); // P5 O15 M2b (§L)
-      modelKeys.set(spec.appSessionId, catalogueKey(plan.engineVersion, plan.gateway, { env: plan.env, cwd: plan.cwd, flagEnv: plan.flagSettings.env })); // C10; never rejects
       session.on('models', (list) => updateModels(spec.appSessionId, list)); // C10
       session.on('paneShow', (request) => emit('maws.pane.show', request)); // E1: relayed to every window
       session.on('artifactCapture', (request) => emit('maws.artifact.capture', request)); // E2: the capture requests main answers
@@ -359,10 +422,21 @@ export function registerEngineIpc(hostOn: HostOn, emit: HostEmit, deps: EngineIp
   };
   const launch = createLauncher(launcherDeps);
   const adopt = createAdopter(launcherDeps); // P5 O16 M3: the same wiring for an adopted row
+  // Ticket 851, M2: the host's prestarts (prestart-host.ts), over the same launcher
+  const prestarts = new PrestartHost({
+    table, launch, emit, log, binaryProbe, publish: publishHidden, drop: (session) => void hiddenWires.delete(session),
+    journalDir: (id) => journalDir(deps.userData, id), endHost: deps.holder?.endPrestart,
+  });
 
   // Registration with the input's appSessionId narrowed to the branded id the host's maps use.
   const handle = <N extends C3Command & CommandName>(name: N, handler: (input: CommandInput<N>) => Promise<CommandOutput<N>>) => on(name, handler);
   const sessionOf = (id: string): EngineSession => table.get(id as AppSessionId) ?? throwing(unknownSession(id));
+  // M2's review, finding 3: an id whose row is hidden (a prestart, or one being adopted) has no disk either: every
+  // fallback to the store, the journal, the observed facts or the transcript answers as for an unknown session, and
+  // writes nothing
+  const notHidden = (id: string): void => {
+    if (table.isHidden?.(id as AppSessionId) === true) throw unknownSession(id);
+  };
   const streamOf = (id: string): SessionStream => streams.get(id as AppSessionId) ?? throwing(unknownSession(id));
   // P5 O16 M4: a stream's reads of a session held for adoption are answered once its row is reserved or its adoption
   // ended (ADOPTION_READ_WAIT_MS above); any other session's as before, with nothing to wait for
@@ -389,6 +463,7 @@ export function registerEngineIpc(hostOn: HostOn, emit: HostEmit, deps: EngineIp
   // bound late); the caller's bound (socket-host's SHUTDOWN_BOUND_MS) leaves a run that outlasts it open
   const ops: { settled?: () => Promise<void> } = {};
   const shutdown = async (graceMs: number, mode: 'stop' | 'detach' = 'stop') => {
+    await prestarts.settled(); // M2's review, finding 8: a promotion out is answered before any row is stopped
     const [result] = await Promise.all([table.shutdown({ graceMs, mode }), plugins.stop(SHUTDOWN_KILL_GRACE_MS), deps.duringShutdown?.() /* P3-HD M2 */, ops.settled?.()]);
     deps.afterShutdown?.(); // P3-A: the artifact store, once the sessions writing to it are gone
     return result;
@@ -424,7 +499,16 @@ export function registerEngineIpc(hostOn: HostOn, emit: HostEmit, deps: EngineIp
   // C11 end
 
   // -- lifecycle and state -------------------------------------------------------------------------------------------
-  handle('session.launch', async ({ spec, artifactScope }) => launch(spec as Parameters<typeof launch>[0], artifactScope as Parameters<typeof launch>[1])); // P2-E1: artifactScope
+  // P2-E1: artifactScope; ticket 851, M2: `adopt`, a prestart's hidden row taken when it is the same launch, and every
+  // launch of an id a prestart holds or is admitting under the id's serialization (prestart-host.ts)
+  handle('session.launch', async ({ spec, artifactScope, adopt: adoption }) => prestarts.launch(spec as LaunchSpec, artifactScope as AppSessionId[] | undefined, adoption));
+  // Ticket 851, M2 (docs/doperpowers/plans/2026-11-24-prestart-engine.md, D1, D8, R4-6, R4-7): the spine's prestarts.
+  // Immediate: the admission is registered in the handler and the launch runs behind the answer.
+  on('session.prestart', async ({ spec, key, owner, request }, ctx) => prestarts.prestart({ spec: spec as LaunchSpec, key, owner, request }, ctx.client));
+  on('session.prestart.withdraw', async ({ appSessionId, generation, request }) => prestarts.withdraw(appSessionId as AppSessionId, { generation, request }));
+  on('session.prestart.release', async ({ owner }) => prestarts.release(owner));
+  on('engine.prestarts', async () => ({ hidden: prestarts.hidden() }));
+  on('engine.relayHealth.cached', async () => relayCached()); // the xhigh panel (scalpel-3, finding 5): never a probe
   handle('session.status', async ({ appSessionId }) => (await adopted(appSessionId), sessionOf(appSessionId).status()));
   // UX wave, ticket 777: the stream is one launch's, and the session's history from before it is in the transcript. An
   // answer that starts at the launch's first row carries the cursor whose pages are the transcript's rows before the
@@ -453,8 +537,9 @@ export function registerEngineIpc(hostOn: HostOn, emit: HostEmit, deps: EngineIp
     const answer = { ...page, earlier };
     return maxBytes === null || utf8Length(JSON.stringify(answer)) <= maxBytes ? answer : page;
   };
-  handle('session.events', async ({ appSessionId, afterSeq, limit, before, agentId, seek, maxBytes }) => {
+  handle('session.events', async ({ appSessionId, afterSeq, limit, before, agentId, seek, maxBytes, provisional }) => {
     await adopted(appSessionId); // P5 O16 M4
+    notHidden(appSessionId); // ticket 851, M2's review
     const id = appSessionId as AppSessionId;
     // C4 start: no stream here (not launched in this run, or archived and released): the transcript's history, whose
     // events carry no seq, so `afterSeq` selects nothing and `lastSeq` is 0. Each answer is a window of it
@@ -463,7 +548,8 @@ export function registerEngineIpc(hostOn: HostOn, emit: HostEmit, deps: EngineIp
     // live session's older pages come from a quiet follow of its transcript. `seek`: the page says where it stands to that
     // message (a jump into history).
     // P5 O7 M4: `maxBytes`, the answer's UTF-8 JSON bound for a reader behind a bounded channel (acceptance 12)
-    const request: HistoryRequest = { before: (before ?? null) as EventId | null, limit, agentId: (agentId ?? null) as AgentId | null, ...(seek !== undefined && { seek: seek as MessageUuid }), ...(maxBytes !== undefined && { maxBytes }) };
+    // 2026-11-24, tail-first: `provisional`, a newest window from the transcript's end while the follow reads it (fs service)
+    const request: HistoryRequest = { before: (before ?? null) as EventId | null, limit, agentId: (agentId ?? null) as AgentId | null, ...(seek !== undefined && { seek: seek as MessageUuid }), ...(maxBytes !== undefined && { maxBytes }), ...(provisional === true && { provisional }) };
     if (deps.diskEvents && request.before !== null) return { ...(await deps.diskEvents(id, request, streams.has(id))), lastSeq: 0 };
     if (deps.diskEvents && !streams.has(id)) return { ...(await deps.diskEvents(id, request, false)), lastSeq: 0 };
     // C4 end
@@ -483,6 +569,7 @@ export function registerEngineIpc(hostOn: HostOn, emit: HostEmit, deps: EngineIp
   });
   handle('session.stop', async ({ appSessionId, reason, ifIdle }) => {
     if (reason === 'archive') assertSafeAppSessionId(appSessionId); // archive deletes a directory named after it (M5 review)
+    await prestarts.endFor(appSessionId as AppSessionId, `session.stop (${reason ?? 'stop'})`); // ticket 851, M2: then as for no row
     const session = sessionOf(appSessionId);
     // W7: the yield's stop, decided against the process as it is now, with no await between the check and the stop
     if (ifIdle === true && !canYield(session.status())) return { exited: false, code: null, signal: null, skipped: true as const };
@@ -525,6 +612,7 @@ export function registerEngineIpc(hostOn: HostOn, emit: HostEmit, deps: EngineIp
   handle('session.queue.list', async ({ appSessionId }) => {
     assertSafeAppSessionId(appSessionId); // it may read a state file named after it
     await adopted(appSessionId); // P5 O16 M4: the adopted row's recovered queue, not the store's
+    notHidden(appSessionId); // ticket 851, M2's review
     const session = table.get(appSessionId as AppSessionId);
     if (session?.queue.recovered) return session.queue.state;
     // no queue loaded in this host (no reservation, or a launch that never became ready): the store's, verbatim, with
@@ -540,8 +628,10 @@ export function registerEngineIpc(hostOn: HostOn, emit: HostEmit, deps: EngineIp
   // concurrent edits/removals cannot restore one another's old snapshots; do not run recovery merely to edit.
   function editQueue<T>(appSessionId: string, live: (session: EngineSession) => Promise<T>, saved: (queue: QueueState) => T): Promise<T> {
     assertSafeAppSessionId(appSessionId);
+    notHidden(appSessionId); // ticket 851, M2's review
     return queueTransaction(store, appSessionId as AppSessionId, async () => {
       const id = appSessionId as AppSessionId;
+      notHidden(id); // ticket 851, M2's review: hidden meanwhile
       const session = table.get(id);
       if (session?.queue.recovered) return live(session);
       if (!(await store.exists(id))) throw unknownSession(appSessionId);
@@ -576,8 +666,10 @@ export function registerEngineIpc(hostOn: HostOn, emit: HostEmit, deps: EngineIp
   // back from the session's retained journals, whether or not this host holds the session now
   on('session.steer.cancel', async ({ appSessionId, messageUuid }) => bounded(() => sessionOf(appSessionId).queue.cancelSteer(messageUuid as MessageUuid)));
   on('session.steer.sendNow', async ({ appSessionId, messageUuid }) => bounded(() => sessionOf(appSessionId).sendNow(messageUuid as MessageUuid))); // UX wave U4a
+  on('session.tellAgent', async ({ appSessionId, agentId, text }) => bounded(() => tellAgent(ready(appSessionId).client, agentId, text, { timeoutMs: BOUNDED_BUDGET_S * 1000 }))); // the direct tell
   on('session.promptHistory', async ({ appSessionId, since }) => {
     assertSafeAppSessionId(appSessionId); // it names a directory
+    notHidden(appSessionId); // ticket 851, M2's review
     const live = table.get(appSessionId as AppSessionId);
     return promptHistory(journalDir(deps.userData, appSessionId as AppSessionId), appSessionId as AppSessionId, since, { live: live && live.lifecycle !== 'exited' ? live.status().launchId : null });
   });
@@ -789,6 +881,7 @@ export function registerEngineIpc(hostOn: HostOn, emit: HostEmit, deps: EngineIp
   handleC10('session.forget', async ({ appSessionId }) => {
     assertSafeAppSessionId(appSessionId); // it deletes a file and a directory named after it
     const id = appSessionId as AppSessionId;
+    await prestarts.endFor(id, 'session.forget'); // ticket 851, M2: an intent's discard ends its prestart, then as for no row
     const session = table.get(id);
     const state = session?.status().process;
     if (session && state !== 'exited') throw new HostCommandError({ code: 'internal', message: `already_live: process is ${state}` });
@@ -825,6 +918,7 @@ export function registerEngineIpc(hostOn: HostOn, emit: HostEmit, deps: EngineIp
   // row the host holds for the session, live or exited, whose status reports it. A session the host has neither a row
   // nor a state file for is unknown.
   on('session.setKeep', async ({ appSessionId, keep }) => {
+    notHidden(appSessionId); // ticket 851, M2's review
     const id = appSessionId as AppSessionId;
     const session = table.get(id);
     if (!session && !(await store.exists(id))) throw unknownSession(appSessionId);
@@ -840,6 +934,7 @@ export function registerEngineIpc(hostOn: HostOn, emit: HostEmit, deps: EngineIp
   on('engine.observedFacts', async ({ appSessionId }) => {
     assertSafeAppSessionId(appSessionId);
     const id = appSessionId as AppSessionId;
+    if (table.isHidden?.(id) === true) return null; // ticket 851, M2's review: no recovery, nothing persisted
     return (await table.get(id)?.observedFacts()) ?? observed.read(id);
   });
   // P2-A end ------------------------------------------------------------------------------------------------------------
@@ -1052,6 +1147,7 @@ export function registerEngineIpc(hostOn: HostOn, emit: HostEmit, deps: EngineIp
         log(`the connect burst skipped ${id}: ${error instanceof Error ? error.message : String(error)}`);
       }
     }
+    for (const hidden of prestarts.hidden()) emit('engine.prestart', { ...hidden, state: 'hidden' }); // ticket 851, M2 (R4-6): the welcome's hidden set
     emit('engine.budget', table.budgetState());
     emit('plugins.changed', {});
     for (const event of plugins.running()) emit('plugins.operation', event);

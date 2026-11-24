@@ -70,6 +70,7 @@
     "paths": [
       "/private/tmp/maws-e0a-side-question-dwdn8i/config/projects/-private-tmp-maws-e0a-side-question-dwdn8i-repo-0mazFR/memory/code_word.md"
     ],
+    "runExpanded": true,
     "startedAt": "2026-10-06T03:29:45.401Z",
     "status": "done",
     "toolName": "Write",
@@ -198,6 +199,7 @@
     "kind": "cell",
     "label": "Ran `sleep 20; echo SLEPT_OK` in 21s",
     "paths": [],
+    "runExpanded": true,
     "startedAt": "2026-10-06T03:29:52.570Z",
     "status": "done",
     "toolName": "Bash",

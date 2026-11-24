@@ -110,6 +110,7 @@
     // the UX wave, U9: e2e:remote reads a listed row's acts over the link by their own labels and order, and the module's registry
     "src/renderer/src/app/session-actions.ts",
     "src/renderer/src/keymap/registry.ts",
+    "src/renderer/src/sessions/prestart.ts", // ticket 851, M5's review: e2e:remote reads the composer's prestart pace
     "src/renderer/src/composer/dev/resume-spec.ts",
     "src/renderer/src/harness/agents/api.ts",
     "src/renderer/src/harness/api.ts",
@@ -169,6 +170,7 @@
     "test/support/latency-budget.ts",
     "test/support/latency-engine.ts", // P5 O1 M1: the local-latency bench's engine wrapper and markers
     "test/support/local-latency.ts", // P5 O1 M1: the local-latency bench's statistics, baseline and budget
+    "test/support/prestart-latency.ts", // ticket 851, M5: the prestart measure's arms, counted runs, medians and bound
     "test/support/loopback-pipe.ts", // P5 O15 M2b: the remote scene's pipes, with the states a sleep leaves (§I)
     "test/support/main-log.ts", // P5 O15 M2b: the wake case's reading of main.log, mawsd.log and host.log
     "test/support/remote-latency.ts", // P5 O7 M7: the remote bench's bounds, validity and live clock

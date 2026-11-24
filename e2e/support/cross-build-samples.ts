@@ -99,6 +99,12 @@ export const INPUTS: Record<string, unknown> = {
   // UX wave U5b-2: a commit is a full hash (the pattern the sampler cannot meet); a folder that is no checkout, so git
   // is asked nothing it could change
   'git.commitDiff': { directory: '/nonexistent/cross-build-probe', commit: '0'.repeat(40) },
+  // The question sheet's C3 M2: a session in the engine's id form (the pattern the sampler cannot meet) with no record;
+  // a put of no line and an empty image are refused before anything is located, run or written
+  'sheet.read': { session: '00000000-0000-4000-8000-00000000c0b5' },
+  'sheet.body': { session: '00000000-0000-4000-8000-00000000c0b5', of: { ref: '0'.repeat(64) } },
+  'sheet.put': { session: '00000000-0000-4000-8000-00000000c0b5', lines: [] },
+  'sheet.upload': { session: '00000000-0000-4000-8000-00000000c0b5', mediaType: 'image/png', data: '' },
 };
 
 // A command whose own handler refuses an input that names no real file: `side.screenshot.preview` reads an image under

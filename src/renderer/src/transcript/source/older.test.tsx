@@ -210,7 +210,7 @@ describe('a jump to a message older than the window', () => {
     const host = fakeHost(events, notice, true);
     const source = ipcSourceOver(host.client, APP);
     await store.getState().attach(APP, source);
-    expect(host.asked).toEqual([{ appSessionId: APP, afterSeq: null, limit: null }]); // the open: the newest window, nothing more
+    expect(host.asked).toEqual([{ appSessionId: APP, afterSeq: null, limit: null, provisional: true }]); // the open: the newest window (one from the transcript's end will do: tail-first), nothing more
     const opened = store.getState().entries[APP]!;
     expect(opened.state.order).not.toContain(turnId.ofMessage(uuid('u2')));
     const revision = source.older!.state.getState().revision;
@@ -345,6 +345,118 @@ describe('the cron calls a newest window carries', () => {
     host.emit('session.changed', { record: { appId: APP, holder: { kind: 'terminal', pid: 7 } }, cause: 'live', revision: 1 } as never);
     await vi.waitFor(() => expect(store.getState().entries[APP]!.phase).toBe('failed'));
     expect(store.getState().entries[APP]!.cronHistory).toBe(carried);
+  });
+});
+
+// Tail-first (2026-11-24): a session on this machine asks for a provisional window; the host answers one read from the
+// transcript's end while its follow reads from the start. The rows drawn from it stay, the follow's own batches not drawn
+// over them, until the follow reports `following`; then the key rebuilds, staged, from the window the host answers then,
+// and the pager and the cron calls are that read's.
+describe('a provisional window from the transcript\u2019s end', () => {
+  const following = { appSessionId: APP, agentId: null, state: 'following', chainLength: 1, leafUuid: null, gap: null, skippedLines: 0, message: null } as const;
+  function host(options: { gate?: Promise<void> } = {}) {
+    const { events, notice } = history();
+    const start = historyWindowStart(events, events.length, (i) => eventBytes(events[i]!), BUDGET);
+    const window = events.slice(start);
+    // the tail's window lacks the read from the start's carry of older crons, and here one of its events, so the swap shows
+    const tail = window.filter((event) => event.kind !== 'turn.ended' || event.id !== window.findLast((e) => e.kind === 'turn.ended')!.id);
+    const listeners = new Map<string, Set<(payload: unknown, from: EventSource) => void>>();
+    const asked: Record<string, unknown>[] = [];
+    let read = false;
+    const client: MawsBridge = {
+      localMachine: TEST_MACHINE,
+      invoke: (async (name: CommandName, input: Record<string, unknown>) => {
+        if (name === 'session.appEvents') return { ok: true, value: { events: [notice] } };
+        asked.push(input);
+        if (input.before !== undefined) {
+          // an older page: none while the follow still reads, then the page before the cursor
+          if (!read) return { ok: true, value: { events: [], lastSeq: 0, complete: false, earlier: input.before } };
+          const end = events.findIndex((event) => event.id === input.before);
+          const from = historyWindowStart(events, end, (i) => eventBytes(events[i]!), BUDGET);
+          return { ok: true, value: { events: events.slice(from, end), lastSeq: 0, complete: true, ...(from > 0 && { earlier: events[from]!.id }) } };
+        }
+        if (!read) return { ok: true, value: { events: tail, lastSeq: 0, complete: false, earlier: tail[0]!.id, provisional: true } };
+        await options.gate;
+        return { ok: true, value: { events: window, lastSeq: 0, complete: true, earlier: window[0]!.id } };
+      }) as MawsBridge['invoke'],
+      on: ((name: EventName, listener: (payload: unknown, from: EventSource) => void) => {
+        const set = listeners.get(name) ?? new Set();
+        set.add(listener);
+        listeners.set(name, set);
+        return () => set.delete(listener);
+      }) as MawsBridge['on'],
+      pathForFile: () => '',
+    };
+    const emit = <N extends EventName>(name: N, payload: EventPayload<N>) => {
+      for (const listener of listeners.get(name) ?? []) listener(payload, { machine: TEST_MACHINE });
+    };
+    return { client, asked, emit, window, tail, readThrough: () => (read = true) };
+  }
+
+  it('draws the tail\u2019s window, keeps it through the follow\u2019s batches, and swaps the follow\u2019s in, staged, at its following', async () => {
+    let release!: () => void;
+    const fake = host({ gate: new Promise<void>((resolve) => (release = resolve)) });
+    const store = createTranscriptStore();
+    await store.getState().attach(APP, ipcSourceOver(fake.client, APP));
+    expect(fake.asked[0]).toMatchObject({ provisional: true });
+    const drawn = store.getState().entries[APP]!;
+    expect(drawn.phase).toBe('live');
+    expect([...drawn.state.seen]).toEqual(fake.tail.map((event) => event.id));
+    // the follow reads through: its window as a batch, not drawn over the tail's, then its state
+    fake.readThrough();
+    fake.emit('session.eventBatch', { appSessionId: APP, events: fake.window });
+    expect(store.getState().entries[APP]!.state).toBe(drawn.state);
+    fake.emit('fs.followState', following);
+    await vi.waitFor(() => expect(fake.asked).toHaveLength(2));
+    // staged: the rows drawn stay until the follow's window is whole
+    expect(store.getState().entries[APP]!.rows).toBe(drawn.rows);
+    release();
+    await vi.waitFor(() => expect([...store.getState().entries[APP]!.state.seen]).toEqual(fake.window.map((event) => event.id)));
+    expect(store.getState().entries[APP]!.phase).toBe('live');
+  });
+
+  it('swaps at once when the follow read through while the tail\u2019s answer was on its way', async () => {
+    const fake = host();
+    const store = createTranscriptStore();
+    const source = ipcSourceOver(fake.client, APP);
+    const invoke = fake.client.invoke;
+    fake.client.invoke = (async (name: CommandName, input: never) => {
+      const answer = await invoke(name, input);
+      if (name === 'session.events' && fake.asked.length === 1) {
+        fake.readThrough();
+        fake.emit('fs.followState', following); // heard before the provisional answer lands
+      }
+      return answer;
+    }) as MawsBridge['invoke'];
+    await store.getState().attach(APP, source);
+    await vi.waitFor(() => expect([...store.getState().entries[APP]!.state.seen]).toEqual(fake.window.map((event) => event.id)));
+    expect(fake.asked).toHaveLength(2);
+  });
+
+  it('lets an older page asked while the window was provisional finish, and keeps what it took in', async () => {
+    const fake = host();
+    const store = createTranscriptStore();
+    const source = ipcSourceOver(fake.client, APP);
+    await store.getState().attach(APP, source);
+    const pages = source.older!;
+    pages.loadOlder(); // the follow still reads: the pager asks again each second
+    await vi.waitFor(() => expect(fake.asked.filter((input) => input.before !== undefined).length).toBeGreaterThan(0));
+    fake.readThrough();
+    fake.emit('fs.followState', following);
+    await vi.waitFor(() => expect(pages.state.getState().revision).toBe(1), { timeout: 3_000 });
+    await vi.waitFor(() => expect(store.getState().entries[APP]!.phase).toBe('live'));
+    const seen = store.getState().entries[APP]!.state.seen;
+    for (const event of fake.tail) expect(seen.has(event.id)).toBe(true);
+    expect(seen.size).toBeGreaterThan(fake.tail.length); // the older page is in
+    expect(fake.asked.filter((input) => input.before === undefined)).toHaveLength(1); // no rebuild threw it away
+  });
+
+  it('asks another machine\u2019s session for no provisional window', async () => {
+    const fake = host();
+    fake.readThrough();
+    const other = { ...fake.client, localMachine: 'another-machine' as MawsBridge['localMachine'] };
+    await createTranscriptStore().getState().attach(APP, ipcSourceOver(other, APP));
+    expect(fake.asked[0]).not.toHaveProperty('provisional');
   });
 });
 

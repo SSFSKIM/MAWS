@@ -400,6 +400,27 @@ describe('requests and events pass raw', () => {
     await until(() => app.events().length === 1);
     expect(app.events()).toEqual([{ newer: 'field', n: 1 }]);
   });
+
+  // Ticket 851 (the prestart panel, scalpel-4#1): a prestart's word names an uncommitted app and engine session. The
+  // endpoint hears it (the daemon's own listeners); the app on the relay never does
+  it('engine.prestart reaches the endpoint and not the app the relay serves', async () => {
+    let services: DaemonServices | null = null;
+    const endpoint: EndpointModule = { start: async (started) => void (services = started), stop: async () => {}, status: () => null, enrollment: () => null, cli: async () => ({ code: 0, out: '' }) };
+    await scene.start({ endpoint });
+    const heard: string[] = [];
+    await until(() => services !== null, 3_000, 'the endpoint started');
+    services!.onEvent((owner, message) => void (owner === 'engine-host' && heard.push(message.name)));
+    const app = await scene.app();
+    app.ready();
+    const engine = scene.lastEngine();
+    await until(() => engine.emitRaw('probe.event', { n: 1 }), 3_000, 'a ready link');
+    expect(engine.emitRaw('engine.prestart', { appSessionId: 'app-1', engineSessionId: 'e0ad139c-18bc-45bd-9489-be8653145f80', state: 'hidden' })).toBe(true);
+    expect(engine.emitRaw('probe.event', { n: 2 })).toBe(true);
+    await until(() => app.events().length === 2);
+    expect(app.events()).toEqual([{ n: 1 }, { n: 2 }]);
+    expect(app.events('engine.prestart')).toEqual([]);
+    expect(heard).toEqual(['probe.event', 'engine.prestart', 'probe.event']);
+  });
 });
 
 describe('the interceptions', () => {

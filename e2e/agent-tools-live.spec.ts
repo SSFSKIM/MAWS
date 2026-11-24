@@ -14,6 +14,11 @@
 // per full run on a Sonnet parent, measured 2026-09-29):
 //   pnpm exec electron-vite build -c e2e/support/dev-surface.vite.config.mjs
 //   MAWS_C8B_LIVE=1 pnpm exec playwright test e2e/agent-tools-live.spec.ts
+// The direct tell (docs/charter.md, Decision Log 2026-11-24): where the engine runs mods, MAWS's built-in mod is loaded
+// and the drill-in's box tells the agent itself, so step vi sends directly and reads Sent, and asserts the relay through
+// the parent only in plan mode (where the box falls back to it); a finished or foreground agent's box is open there.
+// Where the engine runs no mods (its function-hooks rollout off), the session's status has no `tell` and the steps read
+// the relay as before.
 // MAWS_C8B_LIVE_STEPS=i,ii,… runs a subset (setup always runs); MAWS_C8B_LIVE_KEEP=1 keeps the scratch clone and home.
 // MAWS_C8B_LIVE_MAX_USD (default 3) is the run's cap: every launch carries what the run has left of it as its
 // `--max-budget-usd` (the seed at most US$0.5, the second launch at most US$1), so no session can spend past it unseen.
@@ -85,6 +90,7 @@ type Ev = { id: string; kind: string; seq: number | null; at: string; agentId: s
 type Status = {
   process: string; turn: { origin: string } | null; taskListId: string | null; journalPath: string; launchId: string; engineSessionId: string | null;
   backgroundTasks: { taskId: string; taskType: string }[]; permissionMode: { effective: string }; pendingRequests: number;
+  tell?: true; // the direct tell (docs/charter.md, Decision Log 2026-11-24): the engine took MAWS's built-in mod
 };
 type Invoke = (name: string, input: Record<string, unknown>) => Promise<unknown>;
 
@@ -742,9 +748,40 @@ test('live: the agent tools over a real session (acceptance item 4, steps i to x
       await s.idle();
     });
 
-    await step('vi', 'the relay: busy parent, then idle parent', async () => {
+    await step('vi', 'a message to a running agent: busy parent, then idle parent (direct where the mod is loaded, else the relay)', async () => {
       rmSync(TMP.stop, { force: true });
       await openSurface(page, 'Agents');
+      const direct = (await s.status()).tell === true;
+      // The delivery's evidence: the child appends the message to its inbox.
+      const inboxAfter = async (text: string) => {
+        const deadline = Date.now() + 120_000;
+        while (Date.now() < deadline) {
+          if (existsSync(TMP.inbox) && readFileSync(TMP.inbox, 'utf8').includes(text)) return Date.now();
+          await sleep(1_000);
+        }
+        return null;
+      };
+      // The direct tell: the box names no parent, its line reads Sent, and the parent sends nothing.
+      const tell = async (agentId: string, text: string, turnOpen: boolean) => {
+        const back = panel.getByRole('button', { name: '‹ Agents' });
+        if (await back.isVisible()) await back.click();
+        await panel.locator(`[data-agent-row="${agentId}"]`).click();
+        const box = panel.locator('[data-view="agent"] textarea');
+        await expect(box).toBeEnabled({ timeout: 10_000 });
+        const before = await probe(page, (p) => p.subagents().drillIn);
+        expect(before?.label ?? '').not.toMatch(/^Relay via /);
+        await box.fill(text);
+        const sentFrom = s.seq;
+        const sentAt = Date.now();
+        await panel.locator('[data-view="agent"]').getByRole('button', { name: 'Send', exact: true }).click();
+        await expect.poll(() => probe(page, (p) => p.subagents().drillIn?.line ?? ''), { timeout: 15_000 }).toBe('Sent');
+        const inboxAt = await inboxAfter(text);
+        expect(inboxAt, 'the agent read the message').not.toBeNull();
+        await s.pull();
+        const parentSends = s.events.filter((e) => e.seq !== null && e.seq > sentFrom && e.kind === 'tool.use' && e.agentId === null && e.toolName === 'SendMessage');
+        expect(parentSends, 'no relay through the parent').toEqual([]);
+        return { agentId, before, turnOpen, direct: true, sentAt: new Date(sentAt).toISOString(), inboxAfterSendMs: inboxAt === null ? null : inboxAt - sentAt };
+      };
       const relay = async (agentId: string, text: string, turnOpen: boolean) => {
         const back = panel.getByRole('button', { name: '‹ Agents' });
         if (await back.isVisible()) await back.click();
@@ -801,8 +838,8 @@ test('live: the agent tools over a real session (acceptance item 4, steps i to x
       ids.relayBusy = busyAgent.taskId as string;
       const sleepUse = await s.until('the parent’s 60-second job', (ev) => ev.find((e) => e.seq !== null && e.seq > busyFrom && e.kind === 'tool.use' && e.agentId === null && e.toolName === 'Bash' && JSON.stringify(e.input).includes('60000')), 120_000);
       const busyStatus = await s.status();
-      const busy = await relay(ids.relayBusy, `RELAY-${RUN}-BUSY`, true);
-      expect(busy.resting, 'O3: the line rests at forwarded after delivery').toBe(busy.forwarded);
+      const busy = direct ? await tell(ids.relayBusy, `RELAY-${RUN}-BUSY`, true) : await relay(ids.relayBusy, `RELAY-${RUN}-BUSY`, true);
+      if (!direct && 'resting' in busy) expect(busy.resting, 'O3: the line rests at forwarded after delivery').toBe(busy.forwarded);
       const sleepReturned = s.events.find((e) => e.kind === 'tool.result' && e.toolUseId === sleepUse.toolUseId);
       note('vi.busy', { ...busy, parentTurnAtSend: busyStatus.turn, parentSleep: { startedAt: sleepUse.at, returnedAt: sleepReturned?.at ?? null } });
       await s.idle(300_000);
@@ -812,9 +849,19 @@ test('live: the agent tools over a real session (acceptance item 4, steps i to x
       const idleAgent = await s.until('the second relay agent’s start', (ev) => ev.find((e) => e.seq !== null && e.seq > idleFrom && e.kind === 'subagent.started' && e.isBackground === true));
       ids.relayIdle = idleAgent.taskId as string;
       await s.idle(180_000, 3_000);
-      const idle = await relay(ids.relayIdle, `RELAY-${RUN}-IDLE`, false);
-      expect(idle.resting, 'O3: the line rests at forwarded after delivery').toBe(idle.forwarded);
+      const idle = direct ? await tell(ids.relayIdle, `RELAY-${RUN}-IDLE`, false) : await relay(ids.relayIdle, `RELAY-${RUN}-IDLE`, false);
+      if (!direct && 'resting' in idle) expect(idle.resting, 'O3: the line rests at forwarded after delivery').toBe(idle.forwarded);
       note('vi.idle', idle);
+      if (direct) {
+        // Plan mode refuses the host's own call, so the box falls back to the relay through the parent there.
+        await s.invoke('session.setPermissionMode', { appSessionId: s.appId, mode: 'plan' });
+        const back = panel.getByRole('button', { name: '‹ Agents' });
+        if (await back.isVisible()) await back.click();
+        await panel.locator(`[data-agent-row="${ids.relayIdle}"]`).click();
+        await expect.poll(() => probe(page, (p) => p.subagents().drillIn?.label ?? ''), { timeout: 10_000 }).toMatch(/^Relay via /);
+        note('vi.plan', await probe(page, (p) => p.subagents().drillIn));
+        await s.invoke('session.setPermissionMode', { appSessionId: s.appId, mode: 'default' });
+      }
       writeFileSync(TMP.stop, '');
       await s.until('both relay agents finished', (ev) => [ids.relayBusy, ids.relayIdle].every((id) => ev.some((e) => e.kind === 'subagent.finished' && e.taskId === id)), 240_000);
       note('vi.inbox', existsSync(TMP.inbox) ? readFileSync(TMP.inbox, 'utf8') : null);
@@ -837,7 +884,8 @@ test('live: the agent tools over a real session (acceptance item 4, steps i to x
       await expect.poll(() => probe(pg, (p) => p.subagents().drillIn?.label ?? null), { timeout: 10_000 }).not.toBeNull();
       await sleep(500);
       const drill = (await probe(pg, (p) => p.subagents().drillIn))!;
-      return { agentId: started.taskId as string, isBackground: started.isBackground as boolean, dispatchInput: dispatch?.input ?? null, drill, session: drill.label.replace(/^Relay via /, '') };
+      const direct = (await sess.status()).tell === true; // the direct tell: the box names no parent
+      return { agentId: started.taskId as string, isBackground: started.isBackground as boolean, dispatchInput: dispatch?.input ?? null, drill, direct, session: direct ? sess.title : drill.label.replace(/^Relay via /, '') };
     };
     const finishedReads = async (pg: Page, sess: Session, agentId: string) => {
       const pnl = pg.locator('[data-region="panel"]');
@@ -847,7 +895,11 @@ test('live: the agent tools over a real session (acceptance item 4, steps i to x
       if (await back.isVisible()) await back.click();
       await openDone(pg); // E7: a finished root is listed under Done, collapsed by default
       await pnl.locator(`[data-agent-row="${agentId}"]`).click();
-      await expect.poll(() => probe(pg, (p) => p.subagents().drillIn?.disabled ?? null), { timeout: 10_000 }).toBe('This agent has finished');
+      // the direct tell: a finished agent takes a message (the engine resumes it with it); the relay's box is closed
+      const direct = (await sess.status()).tell === true;
+      if (direct) await expect.poll(() => probe(pg, (p) => p.subagents().drillIn?.label ?? null), { timeout: 10_000 }).not.toBeNull();
+      if (direct) expect(await probe(pg, (p) => p.subagents().drillIn?.disabled ?? null)).toBeNull();
+      else await expect.poll(() => probe(pg, (p) => p.subagents().drillIn?.disabled ?? null), { timeout: 10_000 }).toBe('This agent has finished');
       const drill = await probe(pg, (p) => p.subagents().drillIn);
       await pnl.getByRole('button', { name: '‹ Agents' }).click();
       return drill;
@@ -857,11 +909,11 @@ test('live: the agent tools over a real session (acceptance item 4, steps i to x
       const fg = await foreground(page, s);
       ids.foreground = fg.agentId;
       note('vii.productLaunch', fg);
-      if (fg.isBackground) expect(fg.drill.disabled, 'a backgrounded child’s composer is enabled').toBeNull();
+      if (fg.isBackground || fg.direct) expect(fg.drill.disabled, 'a backgrounded child’s composer is enabled, and any child’s with the direct tell').toBeNull();
       else expect(fg.drill.disabled).toBe(`${fg.session} is waiting on this agent`); // the word cut (T195)
     });
 
-    await step('viii', 'a finished agent’s composer reads This agent has finished', async () => {
+    await step('viii', 'a finished agent’s composer: open to a direct message, else This agent has finished', async () => {
       const agentId = ids.foreground || ids.first[0];
       note('viii', { agentId, drillIn: await finishedReads(page, s, agentId) });
       await s.idle();
@@ -939,11 +991,12 @@ test('live: the agent tools over a real session (acceptance item 4, steps i to x
           await s2.idle();
         });
 
-        await step('vii', 'a genuine foreground child (fork gate off): the composer is disabled with the reason, then finished', async () => {
+        await step('vii', 'a genuine foreground child (fork gate off): the composer is open to a direct message, else disabled with the reason; then finished', async () => {
           const fg = await foreground(p2, s2);
           note('vii.forkGateOff', fg);
           expect(fg.isBackground).toBe(false);
-          expect(fg.drill.disabled).toBe(`${fg.session} is waiting on this agent`);
+          if (fg.direct) expect(fg.drill.disabled, 'the direct tell reaches a child its parent waits on').toBeNull();
+          else expect(fg.drill.disabled).toBe(`${fg.session} is waiting on this agent`);
           note('viii.forkGateOff', await finishedReads(p2, s2, fg.agentId));
           await s2.idle();
         });

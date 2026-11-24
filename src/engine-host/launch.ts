@@ -7,13 +7,15 @@
 // MAWS's tools the launch serves (the spec's, else the full set); MAWS's two ask flags are passed only when its
 // question tool is `maws`, and the spawn row records the set, from which an adopter takes it.
 import { randomBytes, randomUUID } from 'node:crypto';
-import { isAbsolute } from 'node:path';
+import { existsSync } from 'node:fs';
+import { dirname, isAbsolute, join, resolve } from 'node:path';
 import { canonicalize } from 'org-protocol';
 import { appInitialize } from '@shared/engine/initialize';
 import type { LaunchSpec } from '@shared/engine/launch-spec';
 import { GATEWAY_KEYS, readRoute, type LegacyRoute, type Route } from '@shared/engine/route'; // P5 O7 M9
 import type { SessionId } from '@shared/graph/ids';
 import { FULL_MAWS_TOOL_SET, type MawsToolSet } from '@shared/maws/tool-set'; // board ticket 421
+import { TELL_MOD } from '@shared/maws/tell'; // the direct tell
 
 // C11: the relay's URL and its dev-only override live in relay-url.ts (P5 O7 M9: off launch.ts, so mawsd reads it
 // without this module's graph); re-exported for this module's readers.
@@ -58,6 +60,20 @@ export const ENGINE_FLAGS: readonly string[] = Object.freeze([
 ]);
 
 export const AWAIT_INITIALIZE_FLAG = '--await-initialize'; // P5 O16 M2
+
+// The direct tell (the charter's Decision Log, 2026-11-24; src/shared/maws/tell.ts): the built-in mod's folder, beside the
+// build the engine host runs from, as the session host's binary is (holder/files.ts): a packaged app's
+// `Contents/Resources/mods/` (electron-builder's extraResources), else `<root>/mods/` of a checkout (entries are emitted
+// to <root>/out/main/). `installedTellMod` is that folder when it is there (a `mawsd` release ships none), else null.
+export function tellModDir(entryFile: string = process.argv[1] ?? ''): string {
+  const archive = /^(.*?)[/\\][^/\\]+\.asar(?:[/\\]|$)/.exec(entryFile);
+  if (archive) return join(archive[1]!, 'mods', TELL_MOD);
+  return join(resolve(dirname(entryFile), '..', '..'), 'mods', TELL_MOD);
+}
+export function installedTellMod(entryFile?: string): string | null {
+  const dir = tellModDir(entryFile);
+  return existsSync(join(dir, '.claude-plugin', 'plugin.json')) ? dir : null;
+}
 
 export interface LaunchPlan {
   bin: string;
@@ -257,7 +273,7 @@ export function mintLaunchId(): string {
 export function buildLaunch(
   spec: LaunchSpec,
   captured: Record<string, string>,
-  opts: { relayUrl: string; bin: string; engineVersion: string; spawnerPid: number; declaresSystemPromptSnapshot?: boolean; sdkMcpServers?: readonly string[]; declaresAwaitInitialize?: boolean; holder?: { gateSocket: string } },
+  opts: { relayUrl: string; bin: string; engineVersion: string; spawnerPid: number; declaresSystemPromptSnapshot?: boolean; sdkMcpServers?: readonly string[]; declaresAwaitInitialize?: boolean; holder?: { gateSocket: string }; tellMod?: string | null },
 ): LaunchPlan {
   if (spec.resume !== null && !spec.resume.fork && spec.sessionId !== null) {
     throw new LaunchSpecConflict('sessionId', '--session-id never co-occurs with a non-fork --resume; a resumed launch takes the resumed id');
@@ -271,6 +287,8 @@ export function buildLaunch(
   // P5 O16 M2 (D20, D48): the engine reads nothing and runs no resurrected cron until `initialize` is answered, so an
   // engine host's hooks are registered before any turn; a hidden option, passed only to a binary whose bytes declare it
   if (opts.declaresAwaitInitialize === true) args.push(AWAIT_INITIALIZE_FLAG);
+  // the direct tell: the built-in mod, for every session this host runs; its tool is offered to no model
+  if (opts.tellMod) args.push('--plugin-dir', opts.tellMod);
   if (spec.model !== null) args.push('--model', spec.model);
   if (spec.permissionMode !== null) args.push('--permission-mode', spec.permissionMode);
   for (const dir of spec.additionalDirectories) args.push('--add-dir', dir);

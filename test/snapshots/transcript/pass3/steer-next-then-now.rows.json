@@ -54,6 +54,7 @@
     "kind": "cell",
     "label": "Failed `sleep 6 && echo 1` in 1s",
     "paths": [],
+    "runExpanded": true,
     "startedAt": "2026-10-01T09:21:30.174Z",
     "status": "error",
     "toolName": "Bash",

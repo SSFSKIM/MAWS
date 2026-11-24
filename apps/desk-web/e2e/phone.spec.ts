@@ -17,6 +17,10 @@ import { expect, seedKey, test } from './fixtures';
 import { LONG_ANSWER, LONG_COMMAND, withLongInputs } from './long-inputs';
 import { PROJECT, S, stageProject, summary } from './scene';
 
+// The recording's Bash call, a run of one at rest (board ticket 852): its row, so a fold is read by the row and not by the
+// call's own line, which shows only once the run is opened
+const BASH_ROW = '[data-row-id="cell:toolu_01Xbf4x8J3oTQ2QUW2EbihFp"]';
+
 test.use({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, deviceScaleFactor: 3 });
 
 const center = (page: Page) => page.getByRole('region', { name: 'Channel' });
@@ -450,7 +454,7 @@ test("@layout the running turn streams on the phone: the answer draws as its mes
   await expect(streaming.last().locator('.owner-message-ink')).toContainText('You chose blue');
   await expect(streaming.last().locator('.owner-message-label')).toHaveText('● message …');
   await expect(workingLine).toHaveCount(1);
-  await expect(view).not.toContainText("Wrote 'blue' to recorded.txt in the current directory");
+  await expect(view.locator(BASH_ROW)).toHaveCount(0);
   const answerBlock = recording.steps.find((s) => s.k === 'block-row' && s.body.uuid === uuid)!;
   if (answerBlock.k !== 'block-row') throw new Error('no block-row');
   const lastText = recording.steps.findLastIndex((s) => s.k === 'chunk' && s.turnId === answerBlock.body.turnId && s.step === answerBlock.body.step && s.chunk.index === answerBlock.body.index && s.chunk.kind === 'text');

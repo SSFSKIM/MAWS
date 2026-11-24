@@ -396,6 +396,12 @@ export class ObservedFactsRecorder {
   private dirty = false;
   private ended = false; // the exit's write was issued: the launch is listed as folded from then on
   private baseFailed = false; // the earlier launches could not be read: the answer is not complete
+  private held = false; // ticket 851, M2: a prestart's, until its reveal: nothing is written
+
+  // Ticket 851, M2: while held, a flush writes nothing and keeps what it would have written for the next one
+  hold(held: boolean): void {
+    this.held = held;
+  }
 
   constructor(private readonly opts: RecorderOptions) {
     this.fold = new ObservedFactsFold(opts.launchId);
@@ -434,6 +440,7 @@ export class ObservedFactsRecorder {
   async flush(final: boolean): Promise<void> {
     if (this.timer) clearTimeout(this.timer);
     this.timer = null;
+    if (this.held) return; // ticket 851, M2
     if (!this.dirty && !final) return;
     this.dirty = false;
     if (final) this.ended = true;

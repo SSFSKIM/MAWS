@@ -1564,6 +1564,23 @@ describe('session.steer.sendNow (UX wave U4a)', () => {
   });
 });
 
+// The direct tell (the charter's Decision Log, 2026-11-24): one checked mcp_call of the built-in mod's tool, bounded,
+// owned by the engine host (what the engine answers is src/engine-host/tell.test.ts's)
+describe('session.tellAgent (the direct tell)', () => {
+  it('has a handler and one bounded deadline shape, owned by the engine host; for a session the host does not hold it fails', async () => {
+    const { TELL_SESSION_COMMANDS } = await import('@shared/ipc/schema/session');
+    const { TELL_DEADLINE_SHAPES } = await import('./ipc');
+    const host = engineHost();
+    expect(TELL_DEADLINE_SHAPES).toEqual({ 'session.tellAgent': 'bounded' });
+    expect(Object.keys(TELL_DEADLINE_SHAPES).sort()).toEqual([...TELL_SESSION_COMMANDS].sort());
+    for (const name of TELL_SESSION_COMMANDS) {
+      expect(host.handlers.has(name), name).toBe(true);
+      expect(commands[name].owner).toBe('engine-host');
+    }
+    await expect(host.call('session.tellAgent', { appSessionId: 'app-none' as AppSessionId, agentId: 'a1' as never, text: 'hello' })).rejects.toThrow('unknown session app-none');
+  });
+});
+
 // P5 O2 M2: the owner's Keep running mark (docs/doperpowers/plans/2026-10-27-p5-o2-mawsd.md, M2 "Keep")
 describe('session.setKeep (P5 O2 M2)', () => {
   it('has one immediate deadline shape and a handler', async () => {

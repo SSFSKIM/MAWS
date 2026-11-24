@@ -44,6 +44,8 @@ export const REMOTE_UNAVAILABLE: Readonly<Partial<Record<CommandName, string>>> 
   'session.intent.release': notYet('setting up a new session; use + Session'),
   'session.intent.discard': notYet('setting up a new session; use + Session'),
   'session.intent.resolveWorktree': notYet('setting up a new session; use + Session'),
+  'session.intent.prestart': notYet('setting up a new session; use + Session'), // ticket 851, M3
+  'session.intent.prestart.withdraw': notYet('setting up a new session; use + Session'),
   'session.replay.launch': notYet('replays'),
   'session.replay.control': notYet('replays'),
   // the composer's extras
@@ -53,6 +55,7 @@ export const REMOTE_UNAVAILABLE: Readonly<Partial<Record<CommandName, string>>> 
   'session.setCwd': notYet('changing the working directory'),
   'session.history.append': notYet('adding to the prompt history'),
   'session.reloadSkills': notYet('reloading skills'),
+  'session.tellAgent': notYet('messaging a subagent directly; it is messaged through its parent'), // the direct tell (ticket 862)
   // per window (P5 O8 M6a: a member's drafts are offered, kept per member on the machine)
   'session.setVisible': notYet('the machine’s own windows'),
   'session.ui.render': notYet('mod surfaces'),

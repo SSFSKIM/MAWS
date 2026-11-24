@@ -116,6 +116,30 @@ describe('the daemon-owned cua sockets (P5 O5 M5)', () => {
     expect(existsSync(path!), 'nothing listens while no app is attached').toBe(false);
   });
 
+  // Ticket 851, M3's review (finding 1): a prestart's spec names the session's socket by a lookup that registers nothing
+  // (no listening socket, no launch marked here, no capability tracked); the launch's own lookup registers it
+  it('a prestart’s lookup of the socket is the launch’s path and, with a tab engine attached, sets up nothing', async () => {
+    let deps: SpineDeps | null = null;
+    const load = async (): Promise<SpineEntry> => ({
+      takeSpineLock,
+      openSpineData: async (_profile, { lock }) => ({ lock: lock!, refused: lock!.refused, machineSettings: null as never, paths: { client: '', machine: '' } }),
+      startSpine: (started) => {
+        deps = started;
+        started.bus.register('session.launchMode', () => ({ mode: 'index' }));
+        return { view: { engineStatuses: () => [], on: () => () => {}, unavailable: () => null, records: () => [] } as never, settled: async () => {}, busy: () => false, stop: () => {} };
+      },
+    });
+    await scene.start({ spine: { load }, tmp: TMP });
+    const app = await attachApp();
+    expect(await app.machine.request('session.launchMode')).toMatchObject({ ok: true });
+    const path = deps!.browserSocketPath!(S as never);
+    expect(path).toBe(socketOf());
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    expect(existsSync(path!), 'no socket listens for a draft').toBe(false);
+    expect(deps!.browserSocket(S as never)).toBe(path);
+    await until(() => existsSync(path!), 1_000, 'the launch’s socket listening');
+  });
+
   it('listens while the attached app names its cua directory, relays there byte for byte, and stops at the app\'s departure', async () => {
     const daemon = await scene.start({ permanentClient: true, tmp: TMP });
     const engine = await awake(daemon);

@@ -14,6 +14,7 @@ import { GIT_TIMEOUT_MS } from './git/runner';
 import { GH_READ_TIMEOUT_MS } from './scm/pr-state';
 import { COMMIT_TIMEOUT_MS, LOCAL_TIMEOUT_MS, SCM_ADMIT_MS } from './scm/service';
 import { BRIDGE_SLACK_MS, LANE_A_TIMING } from './lane-a/driver';
+import { SHEET_PUT_BUDGET_MS } from './sheet/timing'; // the question sheet's C3 M2
 import { CONFIGURE_WAIT_MS } from './settings/engine-configure';
 import { EXIT_WAIT_MS, STOP_WAIT_MS, WATCHDOG_MS } from './sessions/context';
 import { CLEAR_WAIT_MS, PAUSE_WAIT_MS } from './sessions/pause-take-over';
@@ -149,4 +150,7 @@ export const COMMAND_BUDGETS_MS: Readonly<Partial<Record<CommandName, number>>> 
   'laneA.model': 2 * BRIDGE_MS + MARGIN_MS, // the status read, then the change (one change at a time per session)
   // the status read, the uploads' git exclude, and the post with its retries
   'laneA.media': BRIDGE_MS + GIT_TIMEOUT_MS + 3 * BRIDGE_MS + LANE_A_TIMING.lane.retryDelaysMs.reduce((sum, ms) => sum + ms, 0) + MARGIN_MS,
+  // the question sheet's C3 M2: one put, the locator's probe and one call of `sminos sheet put` under one bound; the door
+  // can wait on the record's lock and on the session's bridge, ten seconds each
+  'sheet.put': SHEET_PUT_BUDGET_MS,
 };

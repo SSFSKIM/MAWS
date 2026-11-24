@@ -35,6 +35,7 @@ import { readerRowsOf, resetReaderRows } from '../lane-b/reader-rows'; // P5 O8 
 import { READER } from '../sessions/share/copy'; // board 525
 import { resetReader } from '../sessions/share/reader'; // board 525
 import { firstSendPending, queueFirstSend, resetRemoteSpawn, restoreHeldAttempts, SPAWN_WORDS, takeFirstSend, useRemoteSpawn } from '../sessions/remote-spawn'; // P5 O7 M4
+import { resetPrestarts } from '../sessions/prestart'; // ticket 851, M3
 import { DRAFT_CLAIM, HOME_CHECKOUT } from '@shared/ipc/schema/session';
 import { useDialogs } from '../sessions/dialogs'; // P5 O7 M9
 import { connectKeys } from '../keymap/dispatcher';
@@ -1486,6 +1487,52 @@ function stubIntent(over: Partial<SetupIntentHook['intent']> = {}, options: Part
   };
   return { patch, start, set, setPhase, answer: (r: HookResult) => act(async () => resolveStart?.(r)) };
 }
+
+// Ticket 851, M3 (docs/doperpowers/plans/2026-11-24-prestart-engine.md, D8, D10): an unstarted New chat's composer asks
+// the spine to prestart its engine on the first edit that leaves the box non-empty, only while the tab starts on this
+// machine; picking another machine withdraws by the token it was given and leaves the draft alone.
+describe('the prestart of an unstarted New chat', () => {
+  const P = at('p-app' as ProjectId);
+  const KEY = 'repo:github.com/acme/app' as OrgKey;
+  const chosen = { projectId: P, label: 'app', path: '/repo', branch: null, worktree: null, choose: async () => ({ ok: true }) as const, newProject: async () => ({ ok: true }) as const, setWorktree: async () => ({ ok: true }) as const };
+  beforeEach(() => {
+    resetRemoteSpawn();
+    resetPrestarts();
+    useSessions.setState({ projects: new Map(useSessions.getState().projects).set(P, project(P, 0, { name: 'app', directory: '/repo', org: { key: KEY, name: 'app', source: 'remote', smnsId: null } })) });
+    useMachines.getState().applyRoster([{ ref: OTHER_MACHINE, name: 'mini', local: false, state: 'up', since: '2026-10-31T10:00:00.000Z', generation: 1, carrier: 'relay' }]);
+  });
+  afterEach(() => resetPrestarts());
+
+  it('asks once on the first edit, not for a restored draft, and not again within 10 s', async () => {
+    stubIntent({ draft: { doc: { type: 'doc', content: [{ type: 'paragraph', content: [{ type: 'text', text: 'kept from before' }] }] }, attachments: [], updatedAt: '2026-11-24T00:00:00.000Z' } }, {}, chosen);
+    mount([{ index: 0, id: A }]);
+    await waitFor(() => expect(editorOf().editor.getText()).toBe('kept from before'));
+    expect(invoked('session.intent.prestart')).toEqual([]);
+    await type(' and more');
+    expect(invoked('session.intent.prestart')).toEqual([{ appSessionId: A_ID, token: expect.any(String) }]);
+    await type(' still typing');
+    expect(invoked('session.intent.prestart')).toHaveLength(1);
+  });
+
+  it('asks nothing while another machine is chosen', async () => {
+    stubIntent({}, {}, chosen);
+    useRemoteSpawn.getState().choose(A, { machine: OTHER_MACHINE, name: 'mini', checkout: '/srv/app', key: KEY });
+    mount([{ index: 0, id: A }]);
+    await type('build it');
+    expect(invoked('session.intent.prestart')).toEqual([]);
+  });
+
+  it('picking another machine after typing withdraws by the token its request carried and keeps the draft', async () => {
+    stubIntent({}, {}, chosen);
+    mount([{ index: 0, id: A }]);
+    await type('build it');
+    const { token } = invoked('session.intent.prestart')[0] as { token: string };
+    await act(() => fake.reply('session.intent.prestart', { status: 'started', token }));
+    act(() => useRemoteSpawn.getState().choose(A, { machine: OTHER_MACHINE, name: 'mini', checkout: '/srv/app', key: KEY }));
+    await waitFor(() => expect(invoked('session.intent.prestart.withdraw')).toEqual([{ appSessionId: A_ID, token }]));
+    expect(editorOf().editor.getText()).toBe('build it');
+  });
+});
 
 // P5 O7 M4 ("The machine menu", "`session.spawn`"): a New chat tab whose machine menu chose another machine starts there:
 // Send makes one `session.spawn` on that machine with the composer's mode and the text as the brief, never C10's start;

@@ -1,0 +1,645 @@
+// One session's sheet (the composite's §8, "The sheet", and §4.3; the C3 plan's §G and M3's proofs): G1.b's card states
+// from the pin and a memory, and the Send: its count, one call of the host with exactly the confirmed drafts' lines, the
+// same lines again after a failure or a lost answer, and nothing for a draft the person has not confirmed.
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { useEffect, useState } from 'react';
+import { afterEach, describe, expect, it } from 'vitest';
+import { forgetAttempts, isKnown } from './attempts';
+import type { SheetModel, SheetPutResult, SheetQuestion } from '@shared/sheet/model';
+import type { QuestionDraft } from '@shared/sheet/words';
+import { EMPTY_MEMORY, type SheetMemory } from './memory';
+import { SessionSheet, type SessionSheetProps } from './SessionSheet';
+import { fixtureHost, queuedResult, type RecordingHost } from './test-support/fixture-host';
+import { pinModel } from './test-support/pin';
+import { CLASH, CLASH_REVISED, FIXTURE, NOTICES, SEASON, sheetOf } from './test-support/questions';
+
+afterEach(cleanup);
+const draft = (revision: number, extra: Partial<QuestionDraft> = {}): QuestionDraft => ({ revision, picks: [], text: '', images: [], ...extra });
+
+// A consumer: keeps the memory per session, as a store does, and shows the latest to the test.
+let kept: SheetMemory = EMPTY_MEMORY;
+function Consumer({ initial, ...props }: Omit<SessionSheetProps, 'memory' | 'onMemory'> & { initial: SheetMemory }) {
+  const [memory, setMemory] = useState(initial);
+  useEffect(() => {
+    kept = memory;
+  });
+  return <SessionSheet {...props} memory={memory} onMemory={setMemory} />;
+}
+function sheet(model: SheetModel, { host = fixtureHost(), memory = EMPTY_MEMORY, ...rest }: Partial<Omit<SessionSheetProps, 'host' | 'memory'>> & { host?: RecordingHost; memory?: SheetMemory } = {}) {
+  const view = render(<Consumer model={model} initial={memory} host={host} {...rest} />);
+  const redraw = (next: SheetModel) => view.rerender(<Consumer model={next} initial={memory} host={host} {...rest} />);
+  return { ...view, host, redraw };
+}
+const cardOf = (id: string) => document.querySelector<HTMLElement>(`[data-sheet-question="${id}"]`)!;
+const ids = () => [...document.querySelectorAll('[data-sheet-question]')].map((card) => card.getAttribute('data-sheet-question'));
+const send = () => screen.getByRole('button', { name: /^Send/ });
+const typeIn = (id: string, text: string) => fireEvent.change(within(cardOf(id)).getByRole('textbox'), { target: { value: text } });
+const pin = (name: string, side: 'before' | 'after') => pinModel(name, side)!;
+
+describe('the card states (G1.b)', () => {
+  it('open: answer-applied, before', () => {
+    sheet(pin('answer-applied', 'before'));
+    expect(ids()).toEqual(['q1', 'q2']);
+    expect(within(cardOf('q2')).getAllByRole('radio').length).toBeGreaterThan(0);
+    expect(within(cardOf('q2')).queryByText('Updated')).toBeNull();
+  });
+
+  it('updated since seen: the card reads "Updated" and the draft typed against the earlier wording stands', () => {
+    sheet(pin('answer-stale', 'after'), { memory: { ...EMPTY_MEMORY, seen: new Map([['q1', 1]]), drafts: new Map([['q1', draft(1, { text: 'Shuttle times matter.' })]]) } });
+    expect(within(cardOf('q1')).getByText('Updated')).toBeTruthy();
+    expect((within(cardOf('q1')).getByRole('textbox') as HTMLTextAreaElement).value).toBe('Shuttle times matter.');
+    expect(send().textContent).toBe('Send'); // carried: not counted
+  });
+
+  it('queued: stopped-queue, before, with its take back; the dismissal it hides, and the accepted outcome', () => {
+    sheet(pin('stopped-queue', 'before'));
+    expect(within(cardOf('q1')).getByText('Queued. The session is stopped and gets this when it resumes.')).toBeTruthy();
+    expect(within(cardOf('q1')).getByRole('button', { name: 'Take back' })).toBeTruthy();
+    const hidden = document.querySelector<HTMLElement>('[data-sheet-hidden="q2"]')!;
+    expect(hidden.textContent).toContain('Dismissed');
+    expect(hidden.textContent).toContain('queued');
+    expect(document.querySelector('[data-sheet-outcome="q4"]')?.textContent).toContain('Accepted. Not delivered yet.');
+  });
+
+  it('accepted: answer-applied, after', () => {
+    sheet(pin('answer-applied', 'after'));
+    expect(ids()).toEqual(['q2']);
+    const outcome = document.querySelector<HTMLElement>('[data-sheet-outcome="q1"]')!;
+    expect(outcome.textContent).toContain('Accepted. Not delivered yet.');
+  });
+
+  it('refused as stale: the card is marked and the draft is back', async () => {
+    const sent = draft(1, { picks: ['OAuth'], text: 'Shuttle times matter.' });
+    sheet(pin('answer-stale', 'after'), { memory: { ...EMPTY_MEMORY, seen: new Map([['q1', 2]]), acts: [{ key: 'page-0301a001', kind: 'answer', id: 'q1', draft: sent, sentAt: 0, state: 'sending', note: null }] } });
+    await waitFor(() => expect(within(cardOf('q1')).getByText('The question changed before your answer arrived. Your draft is kept.')).toBeTruthy());
+    expect(within(cardOf('q1')).getByText('Updated')).toBeTruthy();
+    expect((within(cardOf('q1')).getByRole('textbox') as HTMLTextAreaElement).value).toBe('Shuttle times matter.');
+  });
+});
+
+describe('Send', () => {
+  it('is labelled with the count of questions with a draft answer, and sends exactly those, once, at the revision shown', async () => {
+    const { host } = sheet(sheetOf([CLASH, NOTICES, SEASON]));
+    expect(send().textContent).toBe('Send');
+    expect((send() as HTMLButtonElement).disabled).toBe(true);
+    typeIn('q4', 'Earlier.');
+    expect(send().textContent).toBe('Send 1 answer');
+    typeIn('q6', 'From 1 November.');
+    expect(send().textContent).toBe('Send 2 answers');
+    fireEvent.click(send());
+    await waitFor(() => expect(kept.sending).toBeNull());
+    expect(host.sent).toHaveLength(1);
+    expect(host.sent[0].lines.map((line) => [line.kind, line.id, line.revision, line.text])).toEqual([
+      ['answer', 'q4', 1, 'Earlier.'],
+      ['answer', 'q6', 1, 'From 1 November.'],
+    ]);
+    expect(host.sent[0].lines.every((line) => line.by === 'maws')).toBe(true);
+  });
+
+  it('keeps every draft after a failed Send and sends the same lines again, keys and all', async () => {
+    let answer: SheetPutResult = { ok: false, why: 'failed', message: 'The door timed out.' };
+    const host = fixtureHost({ send: () => Promise.resolve(answer) });
+    sheet(sheetOf([CLASH, SEASON]), { host });
+    typeIn('q4', 'Earlier.');
+    fireEvent.click(send());
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Send again' })).toBeTruthy());
+    expect((within(cardOf('q4')).getByRole('textbox') as HTMLTextAreaElement).value).toBe('Earlier.');
+    answer = { ok: true, results: [] };
+    fireEvent.click(screen.getByRole('button', { name: 'Send again' }));
+    await waitFor(() => expect(kept.sending).toBeNull());
+    expect(host.sent).toHaveLength(2);
+    expect(host.sent[1].lines).toEqual(host.sent[0].lines);
+  });
+
+  it('sends a Send whose answer never came again, as the same lines', async () => {
+    const host: RecordingHost = fixtureHost({ send: () => new Promise(() => {}) });
+    const first = sheet(sheetOf([CLASH]), { host });
+    typeIn('q4', 'Earlier.');
+    fireEvent.click(send());
+    await waitFor(() => expect(kept.sending?.state).toBe('sending'));
+    const memory = kept;
+    first.unmount();
+    forgetAttempts(); // the window that made the call is gone: a reload
+    sheet(sheetOf([CLASH]), { host, memory });
+    fireEvent.click(screen.getByRole('button', { name: 'Send again' }));
+    expect(host.sent).toHaveLength(2);
+    expect(host.sent[1].lines).toEqual(host.sent[0].lines);
+  });
+
+  it('leaves out a question rewritten while the person edits another card, until its draft is kept', async () => {
+    const { host, redraw } = sheet(sheetOf([CLASH, NOTICES]));
+    fireEvent.click(within(cardOf('q4')).getByRole('radio', { name: /Keep the longer route/ }));
+    fireEvent.click(within(cardOf('q5')).getByRole('checkbox', { name: /Tidal restrictions/ }));
+    expect(send().textContent).toBe('Send 2 answers');
+    redraw(sheetOf([CLASH_REVISED, NOTICES]));
+    await waitFor(() => expect(within(cardOf('q4')).getByText('Updated')).toBeTruthy());
+    expect(within(cardOf('q4')).getByText('You wrote this before the question changed.')).toBeTruthy();
+    expect(send().textContent).toBe('Send 1 answer');
+    fireEvent.click(within(cardOf('q4')).getByRole('button', { name: 'Keep my answer' }));
+    expect(within(cardOf('q4')).queryByText('Updated')).toBeNull();
+    expect(send().textContent).toBe('Send 2 answers');
+    fireEvent.click(send());
+    await waitFor(() => expect(host.sent).toHaveLength(1));
+    expect(host.sent[0].lines.map((line) => [line.id, line.revision, line.picks])).toEqual([
+      ['q4', 2, ['Keep the longer route']],
+      ['q5', 1, ['Tidal restrictions']],
+    ]);
+  });
+
+  it('sends nothing for a carried draft', async () => {
+    const { host, redraw } = sheet(sheetOf([CLASH, NOTICES]));
+    typeIn('q4', 'Earlier.');
+    typeIn('q5', 'All four.');
+    redraw(sheetOf([CLASH_REVISED, NOTICES]));
+    await waitFor(() => expect(send().textContent).toBe('Send 1 answer'));
+    fireEvent.click(send());
+    await waitFor(() => expect(host.sent).toHaveLength(1));
+    expect(host.sent[0].lines.map((line) => line.id)).toEqual(['q5']);
+  });
+
+  it('sends an edit of a queued answer as a retract of its key and then the answer, in one call (stopped-queue)', async () => {
+    const { host } = sheet(pin('stopped-queue', 'before'));
+    fireEvent.click(within(cardOf('q1')).getByRole('button', { name: 'Edit' }));
+    typeIn('q1', 'On second thought.');
+    fireEvent.click(send());
+    await waitFor(() => expect(host.sent).toHaveLength(1));
+    expect(host.sent[0].lines.map((line) => [line.kind, line.target ?? line.id])).toEqual([
+      ['retract', 'page-1601a001'],
+      ['answer', 'q1'],
+    ]);
+  });
+
+  it('sends at most fifty inbox lines; the label is the count sent and the rest stay drafts', async () => {
+    const many: SheetQuestion[] = Array.from({ length: 52 }, (_, i) => ({ ...SEASON, id: `q${i + 1}`, handle: `q${i + 1}`, references: [], context: undefined }));
+    const drafts = new Map(many.map((question) => [question.id, draft(1, { text: `answer ${question.id}` })]));
+    const { host } = sheet(sheetOf(many), { memory: { ...EMPTY_MEMORY, drafts } });
+    expect(send().textContent).toBe('Send 50 answers');
+    expect(screen.getByText('2 more after this')).toBeTruthy();
+    fireEvent.click(send());
+    await waitFor(() => expect(kept.sending).toBeNull());
+    expect(host.sent).toHaveLength(1);
+    expect(host.sent[0].lines).toHaveLength(50);
+    expect([...kept.drafts.keys()].slice(-2)).toEqual(['q51', 'q52']);
+  });
+
+  it('sends a dismissal as one line, and a take back as a retract of the queued key', async () => {
+    const { host } = sheet(pin('stopped-queue', 'before'));
+    fireEvent.click(within(cardOf('q3')).getByRole('button', { name: 'Dismiss' }));
+    await waitFor(() => expect(kept.sending).toBeNull());
+    fireEvent.click(within(document.querySelector<HTMLElement>('[data-sheet-hidden="q2"]')!).getByRole('button', { name: 'Take back' }));
+    await waitFor(() => expect(host.sent).toHaveLength(2));
+    expect(host.sent.map((call) => call.lines.map((line) => [line.kind, line.id ?? line.target]))).toEqual([[['dismiss', 'q3']], [['retract', 'page-1601d002']]]);
+  });
+
+  it('draws the reason in place of Send when the surface cannot send', () => {
+    sheet(sheetOf([CLASH]), { unavailable: 'Answers cannot be sent from here: sminos was not found on this Mac.' });
+    expect(screen.queryByRole('button', { name: /^Send/ })).toBeNull();
+    expect(screen.getByText('Answers cannot be sent from here: sminos was not found on this Mac.')).toBeTruthy();
+  });
+});
+
+describe('the sheet', () => {
+  it('says an answer that came second at its head until the person closes the note (two-surfaces)', async () => {
+    sheet(pin('two-surfaces', 'after'), { memory: { ...EMPTY_MEMORY, acts: [{ key: 'cli-0401b002', kind: 'answer', id: 'q1', draft: null, sentAt: 0, state: 'sending', note: null }] } });
+    await waitFor(() => expect(screen.getByText('q1 was already answered')).toBeTruthy());
+    fireEvent.click(screen.getByRole('button', { name: 'Close' }));
+    expect(screen.queryByText('q1 was already answered')).toBeNull();
+  });
+
+  it('says it has no open questions when it has none', () => {
+    sheet(pin('empty', 'after') ?? sheetOf([]));
+    expect(screen.getByText('No open questions')).toBeTruthy();
+  });
+
+  it('brings the asked question into view and puts the keyboard on it, at each ask', async () => {
+    const { rerender, host } = sheet(sheetOf([CLASH, NOTICES, SEASON]), { focus: { id: 'q5', request: 1 } });
+    await waitFor(() => expect(document.activeElement?.getAttribute('data-sheet-question')).toBe('q5'));
+    rerender(<Consumer model={sheetOf([CLASH, NOTICES, SEASON])} initial={EMPTY_MEMORY} host={host} focus={{ id: 'q6', request: 2 }} />);
+    await waitFor(() => expect(document.activeElement?.getAttribute('data-sheet-question')).toBe('q6'));
+  });
+
+  it('folds each question to its line in compact form, with one Send, and opens the asked one', async () => {
+    sheet(sheetOf([CLASH, NOTICES]), { density: 'compact', focus: { id: 'q5', request: 1 } });
+    expect(screen.getAllByRole('button', { name: /^Send/ })).toHaveLength(1);
+    await waitFor(() => expect(within(cardOf('q5')).getAllByRole('checkbox')).toHaveLength(4));
+    expect(within(cardOf('q4')).queryByRole('radio')).toBeNull();
+  });
+
+  it('takes nothing while a Send is held', async () => {
+    let release: (result: SheetPutResult) => void = () => {};
+    const host = fixtureHost({ send: () => new Promise((resolve) => (release = resolve)) });
+    sheet(sheetOf([CLASH, SEASON]), { host });
+    typeIn('q4', 'Earlier.');
+    fireEvent.click(send());
+    await waitFor(() => expect((within(cardOf('q6')).getByRole('button', { name: 'Dismiss' }) as HTMLButtonElement).disabled).toBe(true));
+    await act(async () => release({ ok: true, results: [] }));
+    expect((within(cardOf('q6')).getByRole('button', { name: 'Dismiss' }) as HTMLButtonElement).disabled).toBe(false);
+  });
+});
+
+// A host whose answers the test gives, one call at a time.
+function heldHost() {
+  const calls: { lines: string[]; answer(result: SheetPutResult): Promise<void> }[] = [];
+  const host = fixtureHost({ send: (_session, lines) => new Promise((resolve) => calls.push({ lines: lines.map((line) => line.key), answer: (result) => act(async () => resolve(result)) })) });
+  return { host, calls };
+}
+const OK: SheetPutResult = { ok: true, results: [] };
+
+// One memory shown by two mounts at once, as the side sheet and an Overview card show one session's.
+function Two({ model, host, both }: { model: SheetModel; host: RecordingHost; both: boolean }) {
+  const [memory, setMemory] = useState(EMPTY_MEMORY);
+  useEffect(() => {
+    kept = memory;
+  });
+  return (
+    <>
+      {both && (
+        <div data-mount="first">
+          <SessionSheet model={model} memory={memory} onMemory={setMemory} host={host} />
+        </div>
+      )}
+      <div data-mount="second">
+        <SessionSheet model={model} memory={memory} onMemory={setMemory} host={host} density="compact" />
+      </div>
+    </>
+  );
+}
+
+describe('shared memory', () => {
+  it("does not take a live sibling's Send for a lost one, and settles it in the mount still shown", async () => {
+    const { host, calls } = heldHost();
+    const view = render(<Two model={sheetOf([SEASON])} host={host} both />);
+    const first = document.querySelector<HTMLElement>('[data-mount="first"]')!;
+    fireEvent.change(within(first).getByRole('textbox'), { target: { value: 'From 1 November.' } });
+    fireEvent.click(within(first).getByRole('button', { name: /^Send/ }));
+    await waitFor(() => expect(kept.sending?.state).toBe('sending'));
+    expect(screen.queryByRole('button', { name: 'Send again' })).toBeNull();
+    view.rerender(<Two model={sheetOf([SEASON])} host={host} both={false} />);
+    expect(screen.queryByRole('button', { name: 'Send again' })).toBeNull();
+    await calls[0].answer(OK);
+    await waitFor(() => expect(kept.sending).toBeNull());
+    expect(host.sent).toHaveLength(1);
+  });
+
+  it('lets a late answer of an earlier attempt change nothing after a newer Send', async () => {
+    const { host, calls } = heldHost();
+    const first = sheet(sheetOf([CLASH, SEASON]), { host });
+    typeIn('q4', 'Earlier.');
+    fireEvent.click(send());
+    await waitFor(() => expect(calls).toHaveLength(1));
+    const memory = kept;
+    first.unmount();
+    forgetAttempts(); // a reload: the first call's answer will come to no one
+    sheet(sheetOf([CLASH, SEASON]), { host, memory });
+    fireEvent.click(screen.getByRole('button', { name: 'Send again' }));
+    await calls[1].answer(OK);
+    await waitFor(() => expect(kept.sending).toBeNull());
+    typeIn('q6', 'From 1 November.');
+    fireEvent.click(send());
+    await waitFor(() => expect(calls).toHaveLength(3));
+    const held = kept.sending;
+    await calls[0].answer({ ok: false, why: 'failed', message: 'late' }); // the first attempt's answer, at last
+    expect(kept.sending).toBe(held);
+    expect(screen.queryByRole('button', { name: 'Send again' })).toBeNull();
+    await calls[2].answer({ ok: false, why: 'busy', message: 'The record is busy.' });
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Send again' })).toBeTruthy());
+  });
+
+  it('releases a Send the door refused: every draft kept, its reason as a note, and a new Send possible', async () => {
+    const { host, calls } = heldHost();
+    sheet(sheetOf([CLASH]), { host });
+    typeIn('q4', 'Earlier.');
+    fireEvent.click(send());
+    await waitFor(() => expect(calls).toHaveLength(1));
+    await calls[0].answer({ ok: false, why: 'no-sheet', message: 'The session has no sheet.' });
+    await waitFor(() => expect(kept.sending).toBeNull());
+    expect(screen.getByText('Not sent: The session has no sheet.')).toBeTruthy();
+    expect((within(cardOf('q4')).getByRole('textbox') as HTMLTextAreaElement).value).toBe('Earlier.');
+    expect(send().textContent).toBe('Send 1 answer');
+    expect(screen.queryByRole('button', { name: 'Send again' })).toBeNull();
+  });
+});
+
+describe('the hidden line', () => {
+  it("reads its question's header when the surface drew the card, and the bare id when it did not", async () => {
+    const { redraw } = sheet(sheetOf([CLASH]));
+    redraw(sheetOf([], { hidden: [{ id: 'q4', key: 'maws-k-0009' }] }));
+    await waitFor(() => expect(document.querySelector('[data-sheet-hidden="q4"]')?.textContent).toMatch(/^q4Clash rule→Dismissed/));
+    cleanup();
+    sheet(sheetOf([], { hidden: [{ id: 'q4', key: 'maws-k-0009' }] }));
+    expect(document.querySelector('[data-sheet-hidden="q4"]')?.textContent).toMatch(/^q4→Dismissed/);
+  });
+});
+
+describe('a focus request', () => {
+  it('waits for its question to be in the model, and is used once', async () => {
+    const { rerender, host } = sheet(sheetOf([CLASH]), { focus: { id: 'q5', request: 1 } });
+    rerender(<Consumer model={sheetOf([CLASH, NOTICES])} initial={EMPTY_MEMORY} host={host} focus={{ id: 'q5', request: 1 }} />);
+    await waitFor(() => expect(document.activeElement?.getAttribute('data-sheet-question')).toBe('q5'));
+    (document.activeElement as HTMLElement).blur();
+    rerender(<Consumer model={sheetOf([CLASH, NOTICES, SEASON])} initial={EMPTY_MEMORY} host={host} focus={{ id: 'q5', request: 1 }} />);
+    await act(async () => {});
+    expect(document.activeElement?.getAttribute('data-sheet-question')).toBeNull();
+  });
+});
+
+describe('a late image', () => {
+  const image = new File([new Uint8Array([137, 80, 78, 71])], 'shot.png', { type: 'image/png' });
+  function slowSaves() {
+    const saves: ((path: string) => Promise<void>)[] = [];
+    const host = fixtureHost({ saveImage: true });
+    host.saveImage = () => new Promise((resolve) => saves.push((path) => act(async () => resolve({ ok: true, path }))));
+    return { host, saves };
+  }
+  const paste = (id: string) => fireEvent.paste(within(cardOf(id)).getByRole('textbox'), { clipboardData: { files: [image], types: ['Files'] } });
+
+  it('joins the draft as it is after a rewrite, still carried at the revision it was typed against', async () => {
+    const { host, saves } = slowSaves();
+    const { redraw } = sheet(sheetOf([CLASH]), { host });
+    typeIn('q4', 'Earlier.');
+    paste('q4');
+    await waitFor(() => expect(saves).toHaveLength(1));
+    redraw(sheetOf([CLASH_REVISED]));
+    await waitFor(() => expect(within(cardOf('q4')).getByText('Updated')).toBeTruthy());
+    await saves[0]('uploads/maws-late.png');
+    await waitFor(() => expect(kept.drafts.get('q4')).toEqual(draft(1, { text: 'Earlier.', images: ['uploads/maws-late.png'] })));
+    expect(within(cardOf('q4')).getByText('You wrote this before the question changed.')).toBeTruthy();
+    expect(send().textContent).toBe('Send');
+  });
+
+  it('waits beside an answer already sent, in a draft of its own that counts for nothing', async () => {
+    const { host, saves } = slowSaves();
+    const { calls, host: sender } = heldHost();
+    host.send = sender.send;
+    sheet(sheetOf([CLASH]), { host });
+    typeIn('q4', 'Earlier.');
+    paste('q4');
+    await waitFor(() => expect(saves).toHaveLength(1));
+    fireEvent.click(send());
+    await waitFor(() => expect(calls).toHaveLength(1));
+    await saves[0]('uploads/maws-late.png');
+    await waitFor(() => expect(kept.drafts.get('q4')).toEqual(draft(1, { images: ['uploads/maws-late.png'] })));
+    expect(calls[0].lines).toHaveLength(1);
+    expect(kept.acts[0].draft).toEqual(draft(1, { text: 'Earlier.' }));
+  });
+
+  it('says on the card when the image could not be saved', async () => {
+    const host = fixtureHost({ saveImage: true });
+    host.saveImage = () => Promise.reject(new Error('disk full'));
+    sheet(sheetOf([CLASH]), { host });
+    paste('q4');
+    await waitFor(() => expect(within(cardOf('q4')).getByText('The image could not be saved.')).toBeTruthy());
+  });
+});
+
+describe('what Send may take', () => {
+  const queued = { key: 'cli-1901a001', kind: 'answer' as const, picks: ['Keep the earlier sailing'], text: '', images: [], revision: 1, by: 'cli' as const };
+
+  it('keeps a draft another surface answered over in view, out of the count, until the person chooses', async () => {
+    const { host } = sheet(sheetOf([{ ...CLASH, queued }, SEASON]), { memory: { ...EMPTY_MEMORY, drafts: new Map([['q4', draft(1, { text: 'Mine.' })]]) } });
+    expect(within(cardOf('q4')).getByText('Another answer was queued here while you wrote yours.')).toBeTruthy();
+    expect((within(cardOf('q4')).getByRole('textbox') as HTMLTextAreaElement).value).toBe('Mine.');
+    expect(send().textContent).toBe('Send');
+    fireEvent.click(within(cardOf('q4')).getByRole('button', { name: 'Keep mine' }));
+    expect(send().textContent).toBe('Send 1 answer');
+    fireEvent.click(send());
+    await waitFor(() => expect(host.sent).toHaveLength(1));
+    expect(host.sent[0].lines.map((line) => [line.kind, line.target ?? line.id])).toEqual([['retract', 'cli-1901a001'], ['answer', 'q4']]);
+    expect(kept.acts.map((act) => [act.kind, act.id])).toEqual([['retract', 'q4'], ['answer', 'q4']]);
+  });
+
+  it('holds an edit whose queued answer is gone the same way, and drops it when the person discards it', () => {
+    sheet(sheetOf([CLASH]), { memory: { ...EMPTY_MEMORY, drafts: new Map([['q4', { ...draft(1, { text: 'Mine.' }), replaces: 'cli-1901a001' }]]) } });
+    expect(within(cardOf('q4')).getByText('The queued answer you were editing is no longer there.')).toBeTruthy();
+    expect(send().textContent).toBe('Send');
+    fireEvent.click(within(cardOf('q4')).getByRole('button', { name: 'Discard mine' }));
+    expect(kept.drafts.has('q4')).toBe(false);
+  });
+
+  it('keeps a text past 20,000 characters editable, marked on its card, and out of the count', () => {
+    sheet(sheetOf([CLASH, FIXTURE]));
+    typeIn('q7', 'Yes.');
+    typeIn('q4', 'x'.repeat(20001));
+    expect(within(cardOf('q4')).getByText('An answer holds at most 20,000 characters.')).toBeTruthy();
+    expect(within(cardOf('q4')).getByRole('textbox').getAttribute('aria-invalid')).toBe('true');
+    expect(send().textContent).toBe('Send 1 answer');
+  });
+});
+
+// A consumer as a store is: each session's memory kept by session, every update applied to that session's memory as it
+// stands when applied, through a callback made anew on each render; the sheet shown or not.
+let renders = 0;
+let memories: ReadonlyMap<string, SheetMemory> = new Map();
+function Sessions({ model, host, shown = true }: { model: SheetModel; host: RecordingHost; shown?: boolean }) {
+  const [all, setAll] = useState<ReadonlyMap<string, SheetMemory>>(new Map());
+  useEffect(() => {
+    memories = all;
+    renders += 1; // each commit
+  });
+  const session = model.session;
+  if (!shown) return null;
+  return <SessionSheet model={model} memory={all.get(session) ?? EMPTY_MEMORY} host={host} onMemory={(update) => setAll((was) => new Map(was).set(session, update(was.get(session) ?? EMPTY_MEMORY)))} />;
+}
+const OTHER = '5eed0000-0000-4000-8000-0000000000bb';
+const image = new File([new Uint8Array([137, 80, 78, 71])], 'shot.png', { type: 'image/png' });
+const pasteInto = (card: HTMLElement) => fireEvent.paste(within(card).getByRole('textbox'), { clipboardData: { files: [image], types: ['Files'] } });
+function slowImages(host: RecordingHost) {
+  const saves: ((path: string) => void)[] = [];
+  host.saveImage = () => new Promise((resolve) => saves.push((path) => resolve({ ok: true, path })));
+  return saves;
+}
+
+describe('every change through an update', () => {
+  it('settles a busy answer once: the retry offered stays as it is, with a consumer whose callback is new on every render', async () => {
+    const { host, calls } = heldHost();
+    render(<Sessions model={sheetOf([CLASH])} host={host} />);
+    typeIn('q4', 'Earlier.');
+    fireEvent.click(send());
+    await waitFor(() => expect(calls).toHaveLength(1));
+    const attempt = memories.get(sheetOf([]).session)!.sending!.attempt;
+    await calls[0].answer({ ok: false, why: 'busy', message: 'The record is busy.' });
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Send again' })).toBeTruthy());
+    const settled = memories.get(sheetOf([]).session);
+    const count = renders;
+    await act(async () => new Promise((resolve) => setTimeout(resolve, 30)));
+    expect(renders).toBe(count);
+    expect(memories.get(sheetOf([]).session)).toBe(settled);
+    expect(settled!.sending).toMatchObject({ attempt, state: 'failed', note: 'The record is busy.' });
+    expect(isKnown(attempt)).toBe(false); // nothing of it is kept once settled
+  });
+
+  it('keeps both of two completions that land from two mounts before the consumer draws again', async () => {
+    const host = fixtureHost({ saveImage: true });
+    const saves = slowImages(host);
+    render(<Two model={sheetOf([CLASH, SEASON])} host={host} both />);
+    const first = document.querySelector<HTMLElement>('[data-mount="first"]')!;
+    const second = document.querySelector<HTMLElement>('[data-mount="second"]')!;
+    pasteInto(first.querySelector<HTMLElement>('[data-sheet-question="q4"]')!);
+    fireEvent.click(within(second).getByRole('button', { name: /q6/ })); // unfold the compact card
+    pasteInto(second.querySelector<HTMLElement>('[data-sheet-question="q6"]')!);
+    await waitFor(() => expect(saves).toHaveLength(2));
+    await act(async () => {
+      saves[0]('uploads/maws-first.png');
+      saves[1]('uploads/maws-second.png');
+    });
+    await waitFor(() => expect(kept.drafts.get('q4')?.images).toEqual(['uploads/maws-first.png']));
+    expect(kept.drafts.get('q6')?.images).toEqual(['uploads/maws-second.png']);
+  });
+
+  it("lands a late image in its session's memory after the sheet is gone, and shows it when the sheet is back", async () => {
+    const host = fixtureHost({ saveImage: true });
+    const saves = slowImages(host);
+    const view = render(<Sessions model={sheetOf([CLASH])} host={host} />);
+    typeIn('q4', 'Earlier.');
+    pasteInto(cardOf('q4'));
+    await waitFor(() => expect(saves).toHaveLength(1));
+    view.rerender(<Sessions model={sheetOf([CLASH])} host={host} shown={false} />);
+    await act(async () => saves[0]('uploads/maws-late.png'));
+    expect(memories.get(sheetOf([]).session)?.drafts.get('q4')).toEqual(draft(1, { text: 'Earlier.', images: ['uploads/maws-late.png'] }));
+    view.rerender(<Sessions model={sheetOf([CLASH])} host={host} />);
+    expect(document.querySelector('[data-sheet-upload="uploads/maws-late.png"]')).not.toBeNull();
+  });
+
+  it('lands a late image in the session it was pasted in, never in the next session the same mount shows', async () => {
+    const host = fixtureHost({ saveImage: true });
+    const saves = slowImages(host);
+    const view = render(<Sessions model={sheetOf([CLASH])} host={host} />);
+    pasteInto(cardOf('q4'));
+    await waitFor(() => expect(saves).toHaveLength(1));
+    view.rerender(<Sessions model={sheetOf([CLASH], { session: OTHER })} host={host} />);
+    await act(async () => saves[0]('uploads/maws-late.png'));
+    expect(memories.get(sheetOf([]).session)?.drafts.get('q4')?.images).toEqual(['uploads/maws-late.png']);
+    expect(memories.get(OTHER)?.drafts.has('q4') ?? false).toBe(false);
+  });
+
+  it('takes a host whose send throws before returning for a failed Send, and offers it again', async () => {
+    const host = fixtureHost();
+    host.send = () => {
+      throw new Error('no door');
+    };
+    sheet(sheetOf([CLASH]), { host });
+    typeIn('q4', 'Earlier.');
+    fireEvent.click(send());
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Send again' })).toBeTruthy());
+    expect(kept.sending).toMatchObject({ state: 'failed', note: 'no door' });
+  });
+});
+
+describe('what a Send reserves', () => {
+  // A consumer that holds every update until the test applies it, in the order the test chooses.
+  let pending: ((current: SheetMemory) => SheetMemory)[] = [];
+  let apply: (updates: ((current: SheetMemory) => SheetMemory)[]) => void = () => {};
+  function Batched({ model, host }: { model: SheetModel; host: RecordingHost }) {
+    const [memory, setMemory] = useState(EMPTY_MEMORY);
+    useEffect(() => {
+      kept = memory;
+      apply = (updates) => setMemory((was) => updates.reduce((current, update) => update(current), was));
+    });
+    return <SessionSheet model={model} memory={memory} host={host} onMemory={(update) => pending.push(update)} />;
+  }
+  const flush = async () => {
+    while (pending.length > 0) {
+      const updates = pending;
+      pending = [];
+      await act(async () => apply(updates));
+    }
+  };
+
+  it('keeps an image whose update was applied before the Send that did not carry it, after the answer is queued', async () => {
+    pending = [];
+    const host = fixtureHost({ saveImage: true, send: (_session, lines) => Promise.resolve(queuedResult(lines)) });
+    const saves = slowImages(host);
+    const view = render(<Batched model={sheetOf([CLASH])} host={host} />);
+    await flush();
+    typeIn('q4', 'Earlier.');
+    await flush();
+    pasteInto(cardOf('q4'));
+    await waitFor(() => expect(saves).toHaveLength(1));
+    await act(async () => saves[0]('uploads/maws-late.png'));
+    fireEvent.click(send()); // drawn before the image's update was applied: its lines carry no image
+    expect(pending).toHaveLength(2); // the image's update, then the Send's, neither applied yet
+    await flush();
+    const line = host.sent[0].lines[0];
+    expect(line.images).toBeUndefined();
+    view.rerender(<Batched model={sheetOf([{ ...CLASH, queued: { key: line.key, kind: 'answer', picks: [], text: 'Earlier.', images: [], revision: 1, by: 'maws' } }], { sent: [{ key: line.key, state: 'queued', kind: 'answer', id: 'q4' }] })} host={host} />);
+    await flush();
+    expect(kept.drafts.get('q4')?.images).toEqual(['uploads/maws-late.png']);
+  });
+
+  it('starts one host call for two presses of Send before either is applied, and one for two presses of Send again', async () => {
+    pending = [];
+    const { host, calls } = heldHost();
+    render(<Batched model={sheetOf([CLASH])} host={host} />);
+    await flush();
+    typeIn('q4', 'Earlier.');
+    await flush();
+    fireEvent.click(send());
+    fireEvent.click(send()); // drawn from the same render: the first press is not applied yet
+    await flush();
+    expect(calls).toHaveLength(1);
+    await calls[0].answer({ ok: false, why: 'busy', message: 'The record is busy.' });
+    await flush();
+    const again = screen.getByRole('button', { name: 'Send again' });
+    fireEvent.click(again);
+    fireEvent.click(again);
+    await flush();
+    expect(calls).toHaveLength(2);
+    expect(calls[1].lines).toEqual(calls[0].lines);
+  });
+
+  it('applies a typed edit to the draft as it stands, so an image whose update came first stays', async () => {
+    pending = [];
+    const host = fixtureHost({ saveImage: true });
+    const saves = slowImages(host);
+    render(<Batched model={sheetOf([CLASH])} host={host} />);
+    await flush();
+    typeIn('q4', 'Earlier');
+    await flush();
+    pasteInto(cardOf('q4'));
+    await waitFor(() => expect(saves).toHaveLength(1));
+    await act(async () => saves[0]('uploads/maws-late.png'));
+    typeIn('q4', 'Earlier.'); // typed against the render before the image's update was applied
+    expect(pending).toHaveLength(2);
+    await flush();
+    expect(kept.drafts.get('q4')).toEqual(draft(1, { text: 'Earlier.', images: ['uploads/maws-late.png'] }));
+  });
+});
+
+describe('a take back', () => {
+  it('names its question for a queued key that is `__proto__`', () => {
+    sheet(sheetOf([], { hidden: [{ id: 'q4', key: '__proto__' }] }));
+    fireEvent.click(screen.getByRole('button', { name: 'Take back' }));
+    expect(kept.acts.map((act) => [act.kind, act.id])).toEqual([['retract', 'q4']]);
+  });
+});
+
+describe('two mounts at two revisions', () => {
+  const SUNDAYS = { ...CLASH_REVISED, options: [...CLASH_REVISED.options, { label: 'Keep the shuttle on Sundays' }] };
+  function Behind() {
+    const [memory, setMemory] = useState(EMPTY_MEMORY);
+    useEffect(() => {
+      kept = memory;
+    });
+    const host = fixtureHost();
+    return (
+      <>
+        <div data-mount="newer">
+          <SessionSheet model={sheetOf([SUNDAYS])} memory={memory} onMemory={setMemory} host={host} />
+        </div>
+        <div data-mount="older">
+          <SessionSheet model={sheetOf([CLASH])} memory={memory} onMemory={setMemory} host={host} />
+        </div>
+      </>
+    );
+  }
+
+  it('never moves a draft back to the revision of a card behind a rewrite', () => {
+    render(<Behind />);
+    const newer = document.querySelector<HTMLElement>('[data-mount="newer"]')!;
+    const older = document.querySelector<HTMLElement>('[data-mount="older"]')!;
+    fireEvent.click(within(newer).getByRole('radio', { name: /Keep the shuttle on Sundays/ }));
+    expect(kept.drafts.get('q4')).toEqual(draft(2, { picks: ['Keep the shuttle on Sundays'] }));
+    fireEvent.change(within(older).getByRole('textbox'), { target: { value: 'Typed on the older card.' } });
+    expect(kept.drafts.get('q4')).toEqual(draft(2, { picks: ['Keep the shuttle on Sundays'] }));
+  });
+});

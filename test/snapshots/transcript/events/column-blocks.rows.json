@@ -65,6 +65,7 @@
     "kind": "cell",
     "label": "Ran `pnpm gauges:load` in 0s",
     "paths": [],
+    "runExpanded": true,
     "startedAt": "2026-11-15T10:00:01.600Z",
     "status": "done",
     "toolName": "Bash",

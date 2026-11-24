@@ -113,6 +113,9 @@ const CLIENT_COMMANDS: ReadonlySet<string> = new Set(['browserEngine.answer', 'b
 // P5 O5 M4: the engine host's render requests, which the render seam answers and no client hears; P5 O17 M3: and its
 // browser idle notice, which mawsd answers (M5)
 const DAEMON_EVENTS: ReadonlySet<string> = new Set(['maws.artifact.capture', 'maws.artifact.export', 'host.browserIdle']);
+// Ticket 851 (R4-6; the prestart panel, scalpel-4#1): the engine host's words to mawsd's endpoint alone, which name an
+// uncommitted app and engine session: no machine.sock client hears them, nor the app on the legacy relay (daemon.ts)
+export const ENDPOINT_EVENTS: ReadonlySet<string> = new Set(['engine.prestart']);
 // P5 O17 M3: `mawsd`'s own signals to the engine host, refused from any forwarded caller
 const DAEMON_SIGNALS: ReadonlySet<string> = new Set(['host.attachment', 'host.browserWork']);
 // P5 O3-D M5 (D44(3)): the engine host's names the spine's session service intercepts in launch mode `index`
@@ -390,7 +393,7 @@ export function createServicesFront(options: FrontOptions): ServicesFront {
 
   const offRaw = options.hosts.onRaw('engine-host', ({ name, payload }) => {
     tap(name, payload);
-    if (DAEMON_EVENTS.has(name)) return; // P5 O5 M4: the render seam's to answer; P5 O17 M3: and mawsd's browser idle
+    if (DAEMON_EVENTS.has(name) || ENDPOINT_EVENTS.has(name)) return; // P5 O5 M4: the render seam's to answer; P5 O17 M3: and mawsd's browser idle; ticket 851: the endpoint's
     if (STREAM_EVENTS.has(name) && !diskBatch(name, payload)) return streams.liveEvent(name, payload);
     const app = sessionOf(payload);
     post(name, payload, app === null ? readsHostEvents : (client) => readsHostEvents(client) || client.follower.carries(app));

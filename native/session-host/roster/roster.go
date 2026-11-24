@@ -29,6 +29,7 @@ type Entry struct {
 	Child           *proto.Child `json:"child"`
 	Fence           uint64       `json:"fence"`
 	Exit            *proto.Exit  `json:"exit"`
+	Prestart        bool         `json:"prestart,omitempty"` // a prestart not yet promoted: a successor ends its host, never adopts it
 }
 
 // Path is the entry's file.

@@ -24,7 +24,7 @@ import { parseJournalRow, type JournalRow } from '@shared/wire/journal';
 import type { BinaryCheck } from './binary-info';
 import { JOURNAL_MAX_BYTES, JournalWriter, ownerOnlyJournalDirectory } from './journal'; // P3-HD: ownerOnlyJournalDirectory
 import { TESTED_ENGINE_VERSION } from './engine-compat';
-import { buildLaunch, LaunchSpecConflict, RELAY_URL, type LaunchPlan } from './launch';
+import { buildLaunch, installedTellMod, LaunchSpecConflict, RELAY_URL, type LaunchPlan } from './launch';
 import type { ProcessTable } from './process-table';
 import { replayEngine } from './replay-transport';
 import { seedOnFirstUser } from './replay-transcript'; // P3-F L242
@@ -43,6 +43,7 @@ import type { ObservedFactsService } from './observed-facts'; // P2-A
 import type { ArtifactStore } from './documents/store'; // P3-A (M6)
 import type { DatasetRefreshRequests } from './connectors/dataset-requests'; // E3
 import { captureLocalKey, type ConnectorLocalKey } from './connectors/local-key'; // P3-HD
+import { StagedJournal, StagingStore, type Stage } from './prestart'; // ticket 851, M2
 
 export const REPLAY_PRELUDE = 'test/fixtures/engine/replay-handshake.jsonl'; // relative to the launcher's cwd
 
@@ -57,14 +58,19 @@ export interface LauncherDeps {
   table: ProcessTable;
   store: SessionStateStore;
   binaryProbe: () => Promise<BinaryCheck>;
+  tellMod?: () => string | null; // the direct tell: the built-in mod's folder for a live launch (default: beside this build, when there)
   checkRelay: (force: boolean) => Promise<RelayHealth>;
+  // Ticket 851 (the xhigh panel, scalpel-3 finding 5): a hidden launch's read of the relay, the last check while fresh and
+  // never a probe (a miss, a cold cache, launches unchecked; one known down ends the prestart; Send checks afresh). Absent (a test's launcher), `checkRelay(false)`.
+  cachedRelay?: () => RelayHealth | null;
   captureEnv: () => Promise<Record<string, string>>;
   spawn: (plan: LaunchPlan) => EngineTransport;
   appVersion: string;
   log: (message: string) => void;
   // attaches the session's listeners before it starts; P5 O16 M3c: `historyThrough`, an adopted launch's last journaled
-  // seq, which its stream answers from the journal
-  wire: (session: EngineSession, plan: LaunchPlan, spec: LaunchSpec, historyThrough?: number) => void;
+  // seq, which its stream answers from the journal; ticket 851, M2: `stage`, a prestart's (its row hidden, nothing
+  // published until its adopt reveals it)
+  wire: (session: EngineSession, plan: LaunchPlan, spec: LaunchSpec, historyThrough?: number, stage?: Stage) => void;
   appAttached?: () => boolean; // E10: handed to each session's bridges (P5 O3-D M3: the app's presence)
   rendersAnswered?: () => boolean; // P5 O5 M4: the capture and export bridges' gate (the attachment's answersRenders)
   observedFacts?: ObservedFactsService; // P2-A (X17): each launch records what the engine reports
@@ -83,6 +89,10 @@ export interface LauncherDeps {
     // `startMs`; and one holding no engine, released (releaseHost)
     adopt?: (entry: RosterEntry, checkpoint: { frontier: number; above: readonly number[] }, startMs: number) => Promise<{ transport: EngineTransport; fence: number }>;
     release?: (entry: RosterEntry, startMs: number) => Promise<void>;
+    // Ticket 851, M2: a prestart's session host, its engine ended: once the host has exited (holder/adopt.ts
+    // `clearEndedPrestart`), `rollback` (the panel's rule: nothing of the launch rolled back before), then its roster
+    // entry (which a marked host keeps at its exit) removed; answers whether the host was gone
+    endPrestart?: (host: { holderId: string; pid: number }, rollback: () => Promise<void>) => Promise<boolean>;
   };
 }
 
@@ -93,13 +103,27 @@ function readJournal(path: string): JournalRow[] {
     .map((line) => parseJournalRow(JSON.parse(line)));
 }
 
+// Ticket 851, M2 (docs/doperpowers/plans/2026-11-24-prestart-engine.md, D1, D3, R4-1, R4-2, R4-3): a prestart's launch
+// (prestart-host.ts). Its row is reserved hidden, its journal and store staged on `stage`, its session host's launch
+// marked `prestart`; no released id is taken. `admitted` is read after the probes, after the session host's start and
+// in the step that reserves the row, so an admission cancelled before then never spawns: the answer is `cancelled`.
+export interface HiddenLaunch {
+  admitted(): boolean;
+  stage: Stage;
+}
+export const CANCELLED = { status: 'cancelled' } as const;
+export interface Launcher {
+  (spec: LaunchSpec, artifactScope?: readonly AppSessionId[]): Promise<LaunchResult>;
+  (spec: LaunchSpec, artifactScope: readonly AppSessionId[], hidden: HiddenLaunch): Promise<LaunchResult | typeof CANCELLED>;
+}
+
 // `artifactScope` (P2-E1, D10): a side thread's ancestors, nearest first, whose artifacts its tools also resolve; handed
 // to the session for this launch only, never stored.
-export function createLauncher(deps: LauncherDeps): (spec: LaunchSpec, artifactScope?: readonly AppSessionId[]) => Promise<LaunchResult> {
+export function createLauncher(deps: LauncherDeps): Launcher {
   let prelude: JournalRow[] | null = null;
   const refused = (reason: Extract<LaunchResult, { status: 'refused' }>['reason'], message: string): LaunchResult => ({ status: 'refused', reason, message });
 
-  const launch = async (spec: LaunchSpec, artifactScope: readonly AppSessionId[] = []): Promise<LaunchResult> => {
+  const launch = async (spec: LaunchSpec, artifactScope: readonly AppSessionId[] = [], hidden?: HiddenLaunch): Promise<LaunchResult | typeof CANCELLED> => {
     assertSafeAppSessionId(spec.appSessionId); // before anything names a file after it (M5 review)
     if (spec.replay !== null && !deps.replayEnabled) return refused('replay_disabled', 'replay launches need MAWS_ENGINE_REPLAY=1');
     const liveNow = deps.table.get(spec.appSessionId);
@@ -118,7 +142,7 @@ export function createLauncher(deps: LauncherDeps): (spec: LaunchSpec, artifactS
     let journal: JournalRow[] | null = null;
     let relayHealth: RelayHealth | undefined;
     let connectorLocalKey: ConnectorLocalKey | undefined; // P3-HD: live launches only
-    let engine: { bin: string; engineVersion: string; declaresSystemPromptSnapshot?: boolean; declaresAwaitInitialize?: boolean }; // P2-C, P5 O16 M2: the flags' declarations
+    let engine: { bin: string; engineVersion: string; declaresSystemPromptSnapshot?: boolean; declaresAwaitInitialize?: boolean; tellMod?: string | null }; // P2-C, P5 O16 M2: the flags' declarations
     if (spec.replay !== null) {
       const fixture = resolve(deps.cwd, spec.replay);
       journal = readJournal(fixture); // throws on a missing or malformed fixture: the command fails `internal`
@@ -127,7 +151,7 @@ export function createLauncher(deps: LauncherDeps): (spec: LaunchSpec, artifactS
     } else {
       const [binary, relay, env, localKey] = await Promise.all([
         // P5 O7 M9: `route` before the legacy field; the machine route's relay check is the start guards' advisory one
-        deps.binaryProbe(), readRoute(spec) === 'gateway' ? deps.checkRelay(false) : Promise.resolve(null), deps.captureEnv(),
+        deps.binaryProbe(), readRoute(spec) === 'gateway' ? (hidden && deps.cachedRelay ? Promise.resolve(deps.cachedRelay()) : deps.checkRelay(false)) : Promise.resolve(null), deps.captureEnv(),
         (deps.captureLocalKey ?? captureLocalKey)(spec.cwd).catch((): ConnectorLocalKey => ({ kind: 'unidentified', why: 'unreadable' })), // P3-HD
       ]);
       // W13: a missing binary and one that printed no version refuse; a version other than the tested one never does
@@ -136,8 +160,9 @@ export function createLauncher(deps: LauncherDeps): (spec: LaunchSpec, artifactS
       captured = env;
       relayHealth = relay ?? undefined;
       connectorLocalKey = localKey; // P3-HD
-      engine = { bin: binary.path, engineVersion: binary.version, declaresSystemPromptSnapshot: binary.declaresSystemPromptSnapshot, declaresAwaitInitialize: binary.declaresAwaitInitialize }; // P2-C; P5 O16 M2 (D20, D48)
+      engine = { bin: binary.path, engineVersion: binary.version, declaresSystemPromptSnapshot: binary.declaresSystemPromptSnapshot, declaresAwaitInitialize: binary.declaresAwaitInitialize, tellMod: (deps.tellMod ?? installedTellMod)() }; // P2-C; P5 O16 M2 (D20, D48); the direct tell's mod
     }
+    if (hidden && !hidden.admitted()) return CANCELLED; // ticket 851, M2: after the probes
 
     spec = await withParentBudget(spec, artifactScope, deps); // P2-F wave S (S-budget)
 
@@ -163,6 +188,10 @@ export function createLauncher(deps: LauncherDeps): (spec: LaunchSpec, artifactS
         throw new HostCommandError({ code: 'host_unavailable', message: error.message });
       }
       plan = { ...plan, env: { ...plan.env, SMNS_MEMBER: String(host.pid) } };
+      if (hidden && !hidden.admitted()) { // ticket 851, M2: after the session host's start
+        host.abandon();
+        return CANCELLED;
+      }
     }
 
     const replay = journal;
@@ -176,15 +205,22 @@ export function createLauncher(deps: LauncherDeps): (spec: LaunchSpec, artifactS
       replay !== null
         ? () => replayEngine(appReplayHandshake(replay, spec.trust), { prelude: prelude!, surfaceReads: true /* R2 */, rowDelayMs: deps.replayRowMs /* E10 */, onFirstUser })
         : hosted !== null
-          ? (hostedPlan: LaunchPlan) => hosted.transport(hostedPlan, { appSessionId: spec.appSessionId, maxLineChars: MAX_LINE_CHARS }) // P5 O16 M2
+          ? (hostedPlan: LaunchPlan) => hosted.transport(hostedPlan, { appSessionId: spec.appSessionId, maxLineChars: MAX_LINE_CHARS, prestart: hidden !== undefined }) // P5 O16 M2; ticket 851: marked
           : deps.spawn;
     let outcome: ReturnType<ProcessTable['reserve']>;
+    if (hidden && !hidden.admitted()) { // ticket 851, M2: in the step that reserves
+      hosted?.abandon();
+      return CANCELLED;
+    }
+    // ticket 851, M2: a prestart's journal and store staged on its stage
+    const staged = hidden ? { stage: hidden.stage, journal: new StagedJournal(journalDir(deps.userData, spec.appSessionId), plan.launchId, hidden.stage), store: new StagingStore(deps.store, { dir: join(deps.userData, 'engine-host', 'state'), launchId: plan.launchId }) } : null;
     try {
       outcome = deps.table.reserve(spec.appSessionId, () => {
-        const released = deps.table.takeReleased(spec.appSessionId); // C12; P5 O2 M2: also what the work state starts from
+        const released = staged ? false : deps.table.takeReleased(spec.appSessionId); // C12; P5 O2 M2: also what the work state starts from; ticket 851: a prestart takes none
         const session = new EngineSession({
-          spec, plan, spawn, store: deps.store, appVersion: deps.appVersion, relayHealth, log: (message) => deps.log(`${spec.appSessionId}: ${message}`),
-          journal: openSessionJournal(deps.userData, spec.appSessionId, plan.launchId), // P3-HD
+          spec, plan, spawn, store: staged?.store ?? deps.store, appVersion: deps.appVersion, relayHealth, log: (message) => deps.log(`${spec.appSessionId}: ${message}`),
+          journal: staged?.journal ?? openSessionJournal(deps.userData, spec.appSessionId, plan.launchId), // P3-HD
+          ...(staged && { prestart: staged }), // ticket 851, M2
           // C12 start: the budget policy's stateful servers (keepAlive), and `process_exit` for the first launch after a release
           statefulMcpServers: () => deps.table.statefulMcpServers,
           reconnectTrigger: released ? 'process_exit' : 'user',
@@ -202,9 +238,9 @@ export function createLauncher(deps: LauncherDeps): (spec: LaunchSpec, artifactS
           // P5 O16 M2: the session host, named in the spawn row and the status; released if the session ends unspawned
           ...(hosted && { holder: { pid: hosted.pid, holderId: hosted.holderId, binary: hosted.binary }, unspawned: () => hosted.abandon() }),
         });
-        deps.wire(session, plan, spec);
+        deps.wire(session, plan, spec, undefined, staged?.stage);
         return session;
-      });
+      }, { hidden: staged !== null });
     } catch (error) {
       hosted?.abandon(); // P5 O16 M2: a host whose launch got no row launches nothing
       throw error;
@@ -216,7 +252,7 @@ export function createLauncher(deps: LauncherDeps): (spec: LaunchSpec, artifactS
     return { status: 'launching', session: outcome.session.status() };
   };
   // the table holds it from its entry (P5 Decision Log 124: no collection lands on its preparation, which has no row yet)
-  return (spec, artifactScope) => deps.table.preparing(() => launch(spec, artifactScope));
+  return ((spec: LaunchSpec, artifactScope?: readonly AppSessionId[], hidden?: HiddenLaunch) => deps.table.preparing(() => launch(spec, artifactScope, hidden))) as Launcher;
 }
 
 // P5 O16 M3 (docs/doperpowers/plans/2026-10-31-p5-o16-holder.md, M3 and Interfaces §D; D10, D23, D24): `adopt(entry)`
