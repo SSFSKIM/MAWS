@@ -116,8 +116,8 @@ export function Inspector({ session, slideId, readOnly, faces, uploadAsset, meas
     <aside aria-label={C.panel} className="deck-inspector" data-deck-inspector data-deck-rail={overlayRail ? 'inspector' : undefined}>
       {onClose && (
         <div className="deck-tool-card-header deck-inspector-header">
-          <h2 className="deck-inspector-title">{title}</h2>
-          <button type="button" className="deck-button" aria-label={C.close} onClick={onClose}>
+          {title && <h2 className="deck-inspector-title">{title}</h2>}
+          <button type="button" className="deck-button deck-inspector-close" aria-label={C.close} onClick={onClose}>
             ×
           </button>
         </div>

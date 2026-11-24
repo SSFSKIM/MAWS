@@ -33,6 +33,9 @@
   z-index: 1;
   background: var(--bg-raised);
 }
+.deck-inspector-close {
+  margin-left: auto; /* at the right with no title before it */
+}
 .deck-inspector-header .deck-inspector-title {
   min-width: 0;
   padding: 0;
