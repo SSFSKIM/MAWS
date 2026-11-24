@@ -29,12 +29,11 @@ describe('the deck header’s actions (M6)', () => {
     expect(deckHeader(state()).actions).toBeUndefined();
   });
 
-  it.each(['comments', 'history'] as const)('keeps the %s card toggle in the document toolbar, with only a comment-count badge in the title header', (rail) => {
+  it.each(['comments', 'history'] as const)('keeps the %s card toggle in the deck toolbar, and no comment count in the title header (G404)', (rail) => {
     const calls: string[] = [];
-    const header = deckHeader(state({ rail, history: true, unresolved: 3 }), { present: () => calls.push('present'), toggleRail: (value) => calls.push(value) });
+    const header = deckHeader(state({ rail, history: true }), { present: () => calls.push('present'), toggleRail: (value) => calls.push(value) });
     for (const action of header.actions ?? []) action.onSelect();
     expect(calls).toEqual(['present', 'theme', 'check']);
-    expect(header.unresolved).toBe(3);
-    expect(deckHeader(state({ unresolved: 0 })).unresolved).toBeUndefined();
+    expect(header.unresolved).toBeUndefined();
   });
 });

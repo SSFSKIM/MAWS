@@ -18,7 +18,9 @@
 // WR #39: retained text autosaves once its rebased value fits, including on return to the field.
 // Read-only keeps the draft intact until editing becomes available; over-limit text remains refused.
 // The word cut (docs/doperpowers/specs/2026-11-16-word-cut-design.md, M5 task 3): the opened field has no placeholder,
-// the disclosure above it already names it (G436); a refusal says the numbers or the state alone (G437, G438).
+// the disclosure above it already names it (G436); a refusal says the numbers or the state alone (G437, G438). With no
+// placeholder, opening must visibly open something (the pair review): the field is drawn framed, and opening it from the
+// disclosure puts the caret in it, after the notes it holds. A field already open when the editor mounts takes no focus.
 import { useEffect, useId, useRef, useState, useSyncExternalStore } from 'react';
 import * as Y from '../../yjs/slides';
 import { mapCaret, rebaseText } from '../caret';
@@ -37,6 +39,7 @@ export function Notes({ session, slideId, token, readOnly }: { session: DeckSess
   const notesOpen = useSyncExternalStore(session.subscribe, () => session.snapshot().notesOpen);
   const [preview, setPreview] = useState(() => session.unwrittenNotes(slideId) ?? Y.readNotes(doc, slideId));
   const bodyId = useId();
+  const focusOnOpen = useRef(false); // the owner opened the field from the disclosure: it takes the caret once shown
 
   // L203: the field's unwritten text is the tab's (its session), typed over the notes the field shows it from
   const keep = (text: string | null) => {
@@ -86,16 +89,28 @@ export function Notes({ session, slideId, token, readOnly }: { session: DeckSess
     return stop;
   }, [doc, slideId, token, session, readOnly]);
 
-  const refused = unwritten !== null && unwritten > SLIDE_LIMITS.notes;
   const expanded = notesOpen || unwritten !== null;
+  useEffect(() => {
+    if (!expanded || !focusOnOpen.current) return;
+    focusOnOpen.current = false;
+    const el = field.current!;
+    el.focus();
+    el.setSelectionRange(el.value.length, el.value.length);
+  }, [expanded]);
+
+  const refused = unwritten !== null && unwritten > SLIDE_LIMITS.notes;
   const snippet = preview.trim().replace(/\s+/g, ' ');
+  const toggle = () => {
+    focusOnOpen.current = !expanded;
+    session.setNotesOpen(!expanded);
+  };
   return (
     <div className="deck-notes">
-      <button type="button" data-notes-disclosure aria-label={C.notes} aria-expanded={expanded} aria-controls={bodyId} onClick={() => session.setNotesOpen(!expanded)} className="deck-notes-disclosure">
+      <button type="button" data-notes-disclosure aria-label={C.notes} aria-expanded={expanded} aria-controls={bodyId} onClick={toggle} className="deck-notes-disclosure">
         <span aria-hidden>{expanded ? '▾' : '▸'}</span><span>{C.notes}</span>
         {!expanded && snippet && <span className="deck-notes-preview" title={preview}>{snippet}</span>}
       </button>
-      <div id={bodyId} hidden={!expanded}>
+      <div id={bodyId} hidden={!expanded} className="deck-notes-body">
         <textarea
           ref={field}
           className="deck-notes-field"

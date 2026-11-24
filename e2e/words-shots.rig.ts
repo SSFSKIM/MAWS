@@ -1064,7 +1064,8 @@ const M5_EDITOR_WORDS = {
   fileNotReceived: 'File not received', // G524, both builds
   noBoards: 'This design has no boards yet.', // G526, both builds
   designEmpty: { m5: 'No open comments. Select a board or an element and choose Add comment.', master: 'No open comments. Select a board or an element and choose Comment.' }, // G542
-  boardThread: { m5: 'Tablet', master: 'Board Tablet' }, // G543
+  boardThread: { m5: null, master: 'Board Tablet' }, // G543; on M5 a board's own thread has no location line, its quote the board's name (the pair review)
+  boardThreadQuote: 'Tablet', // both builds
   deletedBoard: 'A deleted board',
   orphanBoard: 'The commented board was deleted.', // master's note on a deleted board's thread (G545)
   historyBoards: { m5: 'Boards', master: 'Boards in this version' }, // G549
@@ -7221,7 +7222,7 @@ test('the word cut’s M5: the library’s Spaces, opened artifacts, the documen
 
     // the toolbar at rest (G400 to G404), its tooltips by focus, Insert's table sizes (G411), From layout's menu
     const zoom = () => deckOf('talk').locator('select.deck-zoom').first();
-    await shot(page, m5Meta('m5-slides-rest', 'G400, G401, G402, G404', 'A deck at rest: its toolbar', 'Artifacts, Field talk (two slides, three threads, one on an element no slide has)', 'The toolbar at rest: on M5 History, Inspector and Comments as glyphs, Comments carrying its open count as a badge, the zoom reading its percentage; master’s words and “Fit (42%)”', ['tools/presentation', 'src/artifacts/slides/editor']), async () => {
+    await shot(page, m5Meta('m5-slides-rest', 'G400, G401, G402, G404', 'A deck at rest: its toolbar', 'Artifacts, Field talk (two slides, three threads, one on an element no slide has)', 'The toolbar at rest: on M5 History, Inspector and Comments as glyphs, Comments carrying its open count as a small corner badge and the only count (none beside Deck actions), the zoom reading its percentage; master’s words, “Fit (42%)” and the header’s second count', ['tools/presentation', 'src/artifacts/slides/editor']), async () => {
       await deckAtRest('talk');
     }, {
       check: async () => {
@@ -7236,6 +7237,7 @@ test('the word cut’s M5: the library’s Spaces, opened artifacts, the documen
           const open = E.commentsName.exec((await comments.getAttribute('aria-label')) ?? '')?.[1];
           if (open === undefined) throw new Error(`the Comments toggle’s name carries no open count: ${await comments.getAttribute('aria-label')}`);
           await expect(comments.locator('[data-comments-count]'), 'its badge').toHaveText(open, { timeout: 3_000 });
+          await expect(page.locator('[data-region="main"]').getByTitle(/^\d+ open comments?$/).filter({ visible: true }), 'no second count beside Deck actions').toHaveCount(0);
         } else {
           await expect(history, 'master’s History').toHaveText('History');
           await expect(inspector, 'master’s Inspector').toHaveText(E.inspector);
@@ -7381,35 +7383,41 @@ test('the word cut’s M5: the library’s Spaces, opened artifacts, the documen
         },
       ),
     });
-    await shot(page, m5Meta('m5-slides-check', 'G471, G472, G473, G475', 'A deck, the Check rail on a deck that breaks rules', 'Planning deck (one slide’s heading in a colour no system has), Deck actions › Check', 'The Check rail settled: on M5 titled Check, its issues counted, each issue its message and its rule’s words, and Check by hand; master’s title, its summary, the element path and “[check: …]” on each issue, To judge by hand', ['tools/presentation', 'src/artifacts/slides/editor/menus']), async () => {
+    await shot(page, m5Meta('m5-slides-check', 'G471, G472, G473, G475', 'A deck, the Check rail on a deck that breaks rules', 'Planning deck (one slide’s heading in a colour no system has), Deck actions › Check', 'The Check rail settled and its body scrolled to Check by hand, the last issues above it: on M5 titled Check, its issues counted, each issue its message and its rule’s words; master’s title, its summary, the element path and “[check: …]” on each issue, To judge by hand', ['tools/presentation', 'src/artifacts/slides/editor/menus']), async () => {
       await deckAtRest('planning');
       await toggleDeckRail('planning', 'check');
       await expect(deckRail('planning', 'check'), 'the Check rail').toBeVisible({ timeout: 10_000 });
+      // settled, then the rail's body scrolled to the don'ts to judge by hand (G475), below the issues: the last issues
+      // stay above it, the title and summary over the body
+      await expect(deckRail('planning', 'check').locator('.deck-check-summary'), 'its summary').toHaveText(byM5(E.checkSummary), { timeout: 10_000 });
+      await deckRail('planning', 'check').getByRole('heading', { name: byM5(E.byHand), exact: true }).evaluate((el) => el.scrollIntoView({ block: 'center' }));
     }, {
       check: async () => {
         const rail = deckRail('planning', 'check');
         await expect(rail.locator('h2.deck-inspector-title'), 'its title').toHaveText(byM5(E.checkTitle), { timeout: 3_000 });
         // settled: the summary in the build's words, never the wait
         await expect(rail.locator('.deck-check-summary'), 'its summary').toHaveText(byM5(E.checkSummary), { timeout: 10_000 });
-        const issue = rail.locator('.deck-check-violation').first();
+        const issue = rail.locator('.deck-check-violation').last();
         await inView(issue, 'an issue');
         if (m5Cut()) {
           await expect(rail.locator('.deck-check-where'), 'no element path').toHaveCount(0);
           await expect(rail, 'no tag').not.toContainText('[check:');
         } else await expect(issue, 'master’s tag on the issue').toContainText('[check:');
-        await expect(rail.getByRole('heading', { name: byM5(E.byHand), exact: true }), 'the don’ts to judge by hand').toHaveCount(1);
+        await inView(rail.getByRole('heading', { name: byM5(E.byHand), exact: true }), 'the don’ts to judge by hand');
       },
     });
-    await shot(page, m5Meta('m5-slides-theme', 'G463, G468', 'A deck, the Theme rail', 'Planning deck (a border colour of its own over its system’s), Deck actions › Theme', 'The Theme rail: the Faces rows captioned Display and Body, the reset “Reset all” (master: “Display face”, “Use the system’s colours and faces”)', ['tools/presentation', 'src/artifacts/slides/editor/menus']), async () => {
+    await shot(page, m5Meta('m5-slides-theme', 'G463, G468', 'A deck, the Theme rail', 'Planning deck (a border colour of its own over its system’s), Deck actions › Theme', 'The Theme rail scrolled to its reset: the Faces rows captioned Display and Body, the reset “Reset all” under them (master: “Display face”, “Use the system’s colours and faces”)', ['tools/presentation', 'src/artifacts/slides/editor/menus']), async () => {
       await deckAtRest('planning');
       await toggleDeckRail('planning', 'theme');
       await expect(deckRail('planning', 'theme'), 'the Theme rail').toBeVisible({ timeout: 10_000 });
+      // the reset sits under Faces, below the rail's fold: the rail scrolled to it, Faces kept above it
+      await deckRail('planning', 'theme').getByRole('button', { name: byM5(E.resetAll), exact: true }).evaluate((el) => el.scrollIntoView({ block: 'end' }));
     }, {
       check: async () => {
         const rail = deckRail('planning', 'theme');
         await inView(rail, 'the Theme rail');
-        await expect(rail.getByRole('button', { name: byM5(E.resetAll), exact: true }), 'the reset').toHaveCount(1, { timeout: 3_000 });
-        await expect(rail.locator('.deck-inspector-caption').filter({ hasText: new RegExp(`^${literal(byM5(E.displayCaption))}$`) }), 'the display face’s caption').toHaveCount(1);
+        await inView(rail.getByRole('button', { name: byM5(E.resetAll), exact: true }), 'the reset');
+        await inView(rail.locator('.deck-inspector-caption').filter({ hasText: new RegExp(`^${literal(byM5(E.displayCaption))}$`) }), 'the display face’s caption');
       },
     });
 
@@ -7504,17 +7512,22 @@ test('the word cut’s M5: the library’s Spaces, opened artifacts, the documen
     const openNotes = async () => {
       await deckAtRest('speaker');
       const disclosure = deckOf('speaker').locator('[data-notes-disclosure]').first();
-      if ((await disclosure.getAttribute('aria-expanded')) !== 'true') await disclosure.click();
+      // opened by the owner each time (closed first if a scene before left it open): on M5 the opening puts the caret in it
+      if ((await disclosure.getAttribute('aria-expanded')) === 'true') await disclosure.click();
+      await expect(disclosure, 'the notes closed').toHaveAttribute('aria-expanded', 'false', { timeout: 5_000 });
+      await disclosure.click();
       await expect(notesField(), 'the notes field').toBeVisible({ timeout: 5_000 });
     };
-    await shot(page, m5Meta('m5-slides-notes', 'G436', 'A deck, its speaker notes opened and empty', 'Speaker deck, Speaker notes under the stage', 'The opened notes field, empty, with no placeholder (master: “Speaker notes” in it)', ['tools/presentation', 'src/artifacts/slides/editor']), async () => {
+    await shot(page, m5Meta('m5-slides-notes', 'G436', 'A deck, its speaker notes opened and empty', 'Speaker deck, Speaker notes under the stage', 'The opened notes field, empty, with no placeholder: on M5 drawn framed and holding the caret (master: “Speaker notes” in it)', ['tools/presentation', 'src/artifacts/slides/editor']), async () => {
       await openNotes();
     }, {
       check: async () => {
         await inView(notesField(), 'the notes field');
         await expect(notesField(), 'empty').toHaveValue('');
-        if (m5Cut()) await expect(notesField(), 'no placeholder').not.toHaveAttribute('placeholder', /./);
-        else await expect(notesField(), 'master’s placeholder').toHaveAttribute('placeholder', E.notes);
+        if (m5Cut()) {
+          await expect(notesField(), 'no placeholder').not.toHaveAttribute('placeholder', /./);
+          await expect(notesField(), 'the caret in it').toBeFocused();
+        } else await expect(notesField(), 'master’s placeholder').toHaveAttribute('placeholder', E.notes);
       },
     });
     const refusedNotes = () => deckOf('speaker').locator('p.deck-notes-refused').first();
@@ -7604,7 +7617,7 @@ test('the word cut’s M5: the library’s Spaces, opened artifacts, the documen
       await expect(designOf(key).locator(`[data-board-inspector="${board}"]`), `the ${board} board’s inspector`).toBeVisible({ timeout: 10_000 });
     };
     const designComment = () => designOf('screens').getByRole('button', { name: E.addComment, exact: true }).first();
-    await shot(page, m5Meta('m5-design-rest', 'G510, G511, G512, G522, G528', 'A design at rest', 'Artifacts, Site screens (five boards, one held)', 'The workbench at rest: the boards toggle titled Boards, Add comment a glyph and no Comments of the toolbar’s own, each board’s name alone in the rail and over the canvas, no Held over the held board (master: “Show boards”, the worded pair, the sizes, the badge)', ['tools/design', 'src/artifacts/design/editor']), async () => {
+    await shot(page, m5Meta('m5-design-rest', 'G510, G511, G512, G522, G528', 'A design at rest', 'Artifacts, Site screens (five boards, one held)', 'The workbench at rest: the boards toggle titled Boards, Add comment a glyph and no Comments of the toolbar’s own, Inspector still its word (G401 is the deck’s), each board’s name alone in the rail and over the canvas, no Held over the held board (master: “Show boards”, the worded pair, the sizes, the badge)', ['tools/design', 'src/artifacts/design/editor']), async () => {
       await designAtRest('screens');
     }, {
       check: async () => {
@@ -7624,7 +7637,7 @@ test('the word cut’s M5: the library’s Spaces, opened artifacts, the documen
       },
     });
     // G529, at a zoom where master's title has room for its Held (World.tsx draws it only then): the held board zoomed to
-    await shot(page, m5Meta('m5-design-held-title', 'G529', 'A design, the held board’s title', 'Site screens, the Broken row’s Zoom to board', 'The held board’s title over the canvas: its name and size alone, the dashed outline kept (master: a Held badge beside them)', ['tools/design', 'src/artifacts/design/editor']), async () => {
+    await shot(page, m5Meta('m5-design-held-title', 'G529', 'A design, the held board’s title', 'Site screens, the Broken row’s Zoom to board', 'The held board’s title over the canvas: its name alone, the size waiting for the pointer (G528), no Held badge, the dashed outline kept (master: the size and a Held badge beside the name)', ['tools/design', 'src/artifacts/design/editor']), async () => {
       await designAtRest('screens');
       await zoomToBoard('screens', 'broken');
     }, {
@@ -7753,13 +7766,16 @@ test('the word cut’s M5: the library’s Spaces, opened artifacts, the documen
       await toggleComments(page);
       await expect(designRail('reviewed'), 'the comments rail').toBeVisible({ timeout: 10_000 });
     };
-    await shot(page, m5Meta('m5-design-comments', 'G512, G543', 'A design’s comments rail', 'Artifacts, Review screens, the header’s count of open comments', 'The rail on a board’s thread, located “Tablet” (master: “Board Tablet”), and an element’s', ['tools/design', 'src/artifacts/design/editor']), async () => {
+    await shot(page, m5Meta('m5-design-comments', 'G512, G543', 'A design’s comments rail', 'Artifacts, Review screens, the header’s count of open comments', 'The rail on a board’s thread, reading “Tablet” once, its quote (master: located “Board Tablet” above it), and an element’s, located by its board', ['tools/design', 'src/artifacts/design/editor']), async () => {
       await openDesignComments();
     }, {
       check: async () => {
         const board = designRail('reviewed').locator('[data-thread="d-board"]');
         await inView(board, 'the board’s thread');
-        await expect(board.locator('.deck-thread-slide'), 'where it is').toHaveText(byM5(E.boardThread), { timeout: 3_000 });
+        const where = byM5(E.boardThread);
+        if (where === null) await expect(board.locator('.deck-thread-slide'), 'no location line').toHaveCount(0);
+        else await expect(board.locator('.deck-thread-slide'), 'where it is').toHaveText(where, { timeout: 3_000 });
+        await expect(board.locator('.deck-thread-quote-text'), 'its quote, the board’s name').toHaveText(E.boardThreadQuote, { timeout: 3_000 });
         await inView(designRail('reviewed').locator('[data-thread="d-element"]'), 'the element’s thread');
       },
     });

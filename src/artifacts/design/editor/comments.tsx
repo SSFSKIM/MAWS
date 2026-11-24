@@ -20,8 +20,9 @@
 // The word cut (docs/doperpowers/specs/2026-11-16-word-cut-design.md, M5 task 4): Add comment is the deck's named glyph,
 // its tooltip the word and the chord, and the board the comment goes on when no element is selected (G511, G513, G514);
 // greyed with its reason, still focusable, while neither target is there. The toolbar has no Comments of its own: the
-// header's, with its count, opens the rail (G512). A thread is located by its board's name, a board's own thread too;
-// a deleted board's says so once, in its location (G543, G545). A merged pin's tooltip is its count (G532).
+// header's, with its count, opens the rail (G512). An element's thread is located by its board's name, a board's own
+// thread by its quote alone, the board's name; a deleted board's says so once, in its location (G543, G545). A merged
+// pin's tooltip is its count (G532).
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type FocusEvent, type KeyboardEvent, type ReactNode } from 'react';
 import { clusterPins } from '../../comments/pin-clusters';
 import type { CommentAuthor, CommentOverlayProps, DocumentComments, PassageRect } from '../../document/editor/comments/surface';
@@ -124,8 +125,9 @@ export function useDesignComments({ session, view, surface, author = HUMAN_AUTHO
 }
 
 /**
- * The rail's words for a design (C's rail's optional labels, the P3-E spec's Decision Log 29): where a thread is by its
- * board's name, a board's own thread too (G543), a deleted board said so there and nowhere else (G545); Show names a
+ * The rail's words for a design (C's rail's optional labels, the P3-E spec's Decision Log 29): an element's thread is
+ * located by its board's name (G543); a board's own thread has no location line, its quote being the board's name (the
+ * pair review: "Tablet" over "Tablet"); a deleted board is said so in the location and nowhere else (G545). Show names a
  * board or an element, and an element deleted from a board still there says "Element deleted", as the deck's.
  */
 export function designRailLabels(boards: readonly BoardView[]): CommentsRailLabels {
@@ -136,7 +138,7 @@ export function designRailLabels(boards: readonly BoardView[]): CommentsRailLabe
       const board = thread.elementId === ROOT;
       const name = names.get(thread.slideId);
       return {
-        location: name === undefined ? C.threadDeletedBoard : name,
+        location: name === undefined ? C.threadDeletedBoard : board ? null : name, // a board's own thread: its quote names it
         show: board ? C.showBoard(thread.quote) : C.showElement(thread.quote),
         orphan: name === undefined || board ? null : C.orphanElement,
       };

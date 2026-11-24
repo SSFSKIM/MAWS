@@ -491,6 +491,7 @@ export function DesignWorkbench(props: DesignWorkbenchProps) {
               onStatus={notice.begin}
               inspectorOpen={inspectorOpen}
               onToggleInspector={() => setInspectorOpen((open) => !open)}
+              inspectorWord // no design row cuts it: G401 is the deck's
             >
               <TextStyleMenu session={session} slideId={active?.id ?? null} tokens={tokens} readOnly={!editable} onNotice={setNotice} />
             </ElementBar>

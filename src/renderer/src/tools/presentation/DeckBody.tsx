@@ -92,7 +92,7 @@ function DeckBody({ artifactId, machine, state, scope, visible, onShown, compact
   );
   const [toolbarElement, setToolbarElement] = useState<HTMLDivElement | null>(null);
   const toolbarHost = useMemo(() => toolbarElement ? { element: toolbarElement, menuLabel: 'Deck actions' } : null, [toolbarElement]);
-  const header = deckHeader({ title, document: snapshot.document, saving: snapshot.saving, closeGuard: state.closeGuard, exports, rail, canPresent: (showable ?? 0) > 0, unresolved: snapshot.unresolved, history: state.history !== null }, commands);
+  const header = deckHeader({ title, document: snapshot.document, saving: snapshot.saving, closeGuard: state.closeGuard, exports, rail, canPresent: (showable ?? 0) > 0, history: state.history !== null }, commands);
   const sendTo = useSendToAction(sendToSubject(artifactId, machine, 'presentation', row?.title, shown)); // P4-B5
   useEditorHost(scope, { ...header, toolbarHost, ...(sendTo && { actions: [...(header.actions ?? []), sendTo] }) });
 

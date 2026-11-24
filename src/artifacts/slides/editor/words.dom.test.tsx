@@ -13,7 +13,7 @@ import { realTimeouts } from '../../../renderer/src/test-support/fake-timeouts';
 import type { DocumentComments } from '../../document/editor/comments/surface';
 import { newDoc, transact, type Doc } from '../../yjs';
 import * as Y from '../../yjs/slides';
-import { deleteElementTree, importSlide, writeDeckKeys } from '../model';
+import { deleteElementTree, importSlide, setNotes, writeDeckKeys } from '../model';
 import { loadSlide } from '../parse';
 import { addThread } from '../threads';
 import { DeckEditor } from './DeckEditor';
@@ -168,6 +168,26 @@ describe('the notes (G436 to G438)', () => {
     field.value = 'x'.repeat(4_312);
     fireEvent.input(field);
     expect(screen.getByRole('alert').textContent).toBe('Too long to save: 4,312 / 4,000');
+  });
+
+  // the pair review (G436): with no placeholder, opening must visibly open something; the field takes the caret, after
+  // the notes it holds
+  it('opening the notes puts the caret in the field, after its text; a field already open at mount takes no focus', () => {
+    const doc = deck(['a']);
+    setNotes(doc, 'a', 'Mention the Q3 numbers');
+    const { session } = mount(doc);
+    const disclosure = screen.getByRole('button', { name: 'Speaker notes' });
+    fireEvent.click(disclosure);
+    const field = screen.getByRole('textbox', { name: 'Speaker notes' }) as HTMLTextAreaElement;
+    expect(document.activeElement).toBe(field);
+    expect([field.selectionStart, field.selectionEnd]).toEqual([22, 22]);
+    fireEvent.click(disclosure);
+    expect(session.snapshot().notesOpen).toBe(false);
+    cleanup();
+    const reopened = new DeckSession(doc, 0);
+    reopened.setNotesOpen(true);
+    render(<DeckEditor session={reopened} assetUrl={() => null} system={null} readOnly={false} commentAuthor={{ actor: { kind: 'human' }, now: () => 1_000 }} />);
+    expect(document.activeElement).not.toBe(screen.getByRole('textbox', { name: 'Speaker notes' }));
   });
 });
 
