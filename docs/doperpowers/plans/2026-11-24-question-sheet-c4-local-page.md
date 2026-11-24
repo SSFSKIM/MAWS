@@ -176,7 +176,7 @@ The composite names whom the page defends against (§8.2: web content and other 
 
 The cards, the session's sheet and the overview are C3's components, whose look the owner settled on a drawn example (C3's "The look"); this child changes nothing of them and draws them as they stand. What is the page's own is the pairing screen, the frame around a sheet and around the overview, what stands where there is nothing, and what the page says when `mawsd` is not reachable.
 
-**The drawn example** is one static page of six frames at real size, in the app's light-theme tokens and today's shapes, with invented names, paths and text. It is kept outside the repository with its generator (the UX wave's UC-11), by the session that holds the composite, which hands it to each drawing milestone's executor with the milestone; nothing of it is copied in. Where this document's words and a frame differ on spacing, emphasis or what recedes, the frame holds; where a ruling or a correction below is later than the frames, it holds, and "What the frames do not show" lists each such place.
+**The drawn example** is one static page of frames at real size (six at first, a seventh for the outline once the owner had answered), in the app's light-theme tokens and today's shapes, with invented names, paths and text. It is kept outside the repository with its generator (the UX wave's UC-11), by the session that holds the composite, which hands it to each drawing milestone's executor with the milestone; nothing of it is copied in. Where this document's words and a frame differ on spacing, emphasis or what recedes, the frame holds; where a ruling or a correction below is later than the frames, it holds, and "What the frames do not show" lists each such place.
 
 1. The pairing screen: at rest, and after a wrong code.
 2. The overview in the page's frame: three running sessions and two stopped ones apart, at 1280 px of window; the overview with nothing on it, at 480 px; the bar's menu, open; the bar on a stopped session's sheet.
@@ -184,6 +184,9 @@ The cards, the session's sheet and the overview are C3's components, whose look 
 4. A sheet while `mawsd` is not reachable: the connection lost, and the band's other sentence.
 5a. How wide a sheet is: one column of 768 px, and two panes on a wide window. (One column was chosen, with the outline beside it, F9; the two panes are dropped.)
 5b. Where Send is: in a foot that stays at the bottom of the window, and at the end of the cards. (The foot was chosen.)
+6. The outline (F9), drawn after the owner's answers: open beside the column on a wide window, and as a drawer on a narrow one.
+
+Frames 5a and 5b show alternatives the owner declined and are not built. Where a frame and the app's tokens or C3's components differ, the tokens and the components win.
 
 **Settled by the composite's writer** (2026-11-24), each with the one place it lives:
 
@@ -223,6 +226,17 @@ What it is for: on a long sheet the cards do not fit a window, and the person wa
 - **Width of the window.** At 1120 px of window and above, the panel stands beside the column: the column keeps its 768 px and is centred in the space the panel leaves. Below 1120 px the panel opens over the column as a drawer from the left, with a scrim; choosing a line or pressing Escape closes it (and does not change what is remembered for wide windows).
 - **Not connected.** The outline stays as it was, like the cards.
 - **How it is built.** A component of the page, `SheetOutline`, in the page's own source (not one of C3's shared components, since the app's side column has no room for it): it takes the same model and surface memory `SessionSheet` takes and draws nothing but lines. It finds a card by the attribute C3's card root carries, `data-sheet-question="<id>"` (asked of C3 on 2026-11-24), for scrolling to it and for knowing which card is at the top; it reaches the keyboard through the focus the session's sheet already offers for "open at this question". Where F9 as written cannot be built on C3's components as they land, the executor reports what is in the way and does not reshape it: the owner sees it drawn.
+
+*F9, settled once drawn* (the composite's writer, 2026-11-24, on frame 6):
+
+- The count line reads "8 questions · 3 drafted"; "1 question"; and the count alone when nothing is drafted.
+- A draft with picks and typed text shows its picks only; with text alone, the text's start.
+- A drafted line's second row is in the text colour behind a faint arrow, so it is told apart from an undrafted question's sentence, which is muted.
+- The id is drawn as the card draws it (the same face and colour), so one question's id looks the same in both places.
+- A line's measures are the frame's: 6 px by 8 px padding, 18 px rows, the second row at 12 px, a 24 px id column, lines 2 px apart, 8 px in from the panel's edges. "Updated" sits at the first row's right end; when a row is too long the header is cut first.
+- The current line is the selected-row ground (`--bg-active`) with the small radius.
+- The drawer and its scrim stand between the bar and the foot, so the bar's button and Send stay in reach; pressing the scrim also closes it. The scrim is 24% of `--fg`; the drawer carries `--shadow-float`. Below 1120 px of window the outline is always the drawer.
+- Accepted as they are: the page's name starts further right on a sheet than on the overview (the button stands before it), and the column and Send move when the outline opens or closes.
 
 **What each drawing milestone builds to match.** Tokens and classes are the app's (`src/renderer/src/styles/tokens.css`); the executor has the frames before it and builds to them.
 
