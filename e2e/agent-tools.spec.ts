@@ -1284,7 +1284,8 @@ test('the direct tell: a running background child of a stub-engine session takes
   writeFileSync(join(project, `${engineId}.jsonl`), `${JSON.stringify(seeded)}\n`);
   const stub = writeStubEngine(root);
   const agent = readFileSync(join(REPO_ROOT, TELL_REPLAY), 'utf8').split('\n').filter(Boolean).map((line) => JSON.parse(line) as { frame: { subtype?: string; task_id?: string } }).find((row) => row.frame.subtype === 'task_started')!.frame.task_id!;
-  const maws = await launchMaws({ userData, keepConfigHome: true, syntheticEngineBin: stub.bin, env: { MAWS_E2E_ENGINE_BIN: stub.bin } });
+  // the app's own window, not the harness page the group's MAWS_HARNESS=1 loads (whose sidebar lists no real project)
+  const maws = await launchMaws({ userData, keepConfigHome: true, syntheticEngineBin: stub.bin, env: { MAWS_E2E_ENGINE_BIN: stub.bin, MAWS_HARNESS: '0' } });
   try {
     const { page } = maws;
     let id = '';
