@@ -19,7 +19,7 @@ import { admit } from './checks';
 import { isRefusal, refusal, refusalBytes, refusalHeaders, STANDING_HEADERS, type Refusal } from './headers';
 import { createPairing, type PairedBrowser } from './pairing';
 import type { SheetAccess } from './serve';
-import { readBundle, type BundleFile } from './static';
+import { readBundle, type BundleFile, type BundleTable } from './static';
 import type { SheetPageTiming } from './timing';
 
 export const LIVE_MAX = 32;
@@ -32,7 +32,7 @@ export const CLOSE_GRACE_MS = 1_000; // a connection the server closed is ended 
 export const CLOSE = { refused: 4401, unpaired: 4403, unexpected: 1008, stopping: 1001 } as const;
 
 export interface HandlerDeps {
-  port: number;
+  port(): number; // the page's port when it answers (a handler a command loaded may come before the bind)
   bundleDir: string;
   file: string; // <profile>/mawsd/sheet-page.json
   sheets: SheetAccess;
@@ -76,27 +76,33 @@ interface Live {
 }
 
 export async function createSheetPageHandler(deps: HandlerDeps): Promise<SheetPageHandler> {
-  const { port, timing, log } = deps;
-  const table = await readBundle(deps.bundleDir);
+  const { timing, log } = deps;
+  // the bundle's table, read at the first request that needs it: a command loads this chunk in any state, no-bundle too
+  let table: Promise<BundleTable> | null = null;
+  const bundle = (): Promise<BundleTable> =>
+    (table ??= readBundle(deps.bundleDir).catch((error: unknown) => {
+      table = null;
+      throw error;
+    }));
   const pairing = createPairing({ file: deps.file, ...(deps.write && { write: deps.write }), now: deps.now, random: randomBytes, log, timing });
   const live = new Set<Live>();
   let spine = deps.spine;
   const wss = new WebSocketServer({ noServer: true, maxPayload: FRAME_MAX, perMessageDeflate: false, clientTracking: false });
   wss.on('headers', (headers: string[]) => {
-    for (const [name, value] of Object.entries(STANDING_HEADERS(port))) headers.push(`${name}: ${value}`); // the 101 too
+    for (const [name, value] of Object.entries(STANDING_HEADERS(deps.port()))) headers.push(`${name}: ${value}`); // the 101 too
   });
   pairing.onRevoked((id) => {
     for (const connection of live) if (connection.browser === id && connection.step === 'paired') closeWith(connection.ws, CLOSE.unpaired, 'unpaired');
   });
 
-  const refuse = (res: ServerResponse, refused: Refusal) => void res.writeHead(refused.status, refusalHeaders(port, refused)).end(refused.body);
+  const refuse = (res: ServerResponse, refused: Refusal) => void res.writeHead(refused.status, refusalHeaders(deps.port(), refused)).end(refused.body);
   const json = (res: ServerResponse, status: number, value: unknown) => {
     const body = JSON.stringify(value);
-    res.writeHead(status, { ...STANDING_HEADERS(port), 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store', 'Content-Length': String(Buffer.byteLength(body)) }).end(body);
+    res.writeHead(status, { ...STANDING_HEADERS(deps.port()), 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store', 'Content-Length': String(Buffer.byteLength(body)) }).end(body);
   };
 
   async function sendFile(req: IncomingMessage, res: ServerResponse, file: BundleFile): Promise<void> {
-    const headers = { ...STANDING_HEADERS(port), 'Cache-Control': 'no-cache', ETag: file.etag };
+    const headers = { ...STANDING_HEADERS(deps.port()), 'Cache-Control': 'no-cache', ETag: file.etag };
     if (req.headers['if-none-match'] === file.etag) return void res.writeHead(304, headers).end();
     let bytes: Buffer;
     try {
@@ -107,8 +113,9 @@ export async function createSheetPageHandler(deps: HandlerDeps): Promise<SheetPa
     res.writeHead(200, { ...headers, 'Content-Type': file.type, 'Content-Length': String(bytes.length) }).end(bytes);
   }
 
-  // The body, refused as soon as it is known to pass `max`
-  function readBody(req: IncomingMessage, max: number): Promise<Buffer | 'too-large'> {
+  // The body, refused as soon as it is known to pass `max`; 'aborted' when the request ended before its body did, after
+  // which nothing changes and nothing is answered
+  function readBody(req: IncomingMessage, max: number): Promise<Buffer | 'too-large' | 'aborted'> {
     if (Number(req.headers['content-length'] ?? 0) > max) return Promise.resolve('too-large');
     return new Promise((resolve) => {
       const chunks: Buffer[] = [];
@@ -123,12 +130,16 @@ export async function createSheetPageHandler(deps: HandlerDeps): Promise<SheetPa
         chunks.push(chunk);
       });
       req.once('end', () => resolve(Buffer.concat(chunks)));
-      req.once('error', () => resolve(Buffer.alloc(0)));
+      req.once('error', () => resolve('aborted'));
+      req.once('close', () => {
+        if (!req.complete) resolve('aborted');
+      });
     });
   }
 
   async function exchange(req: IncomingMessage, res: ServerResponse): Promise<void> {
     const body = await readBody(req, CODE_BODY_MAX);
+    if (body === 'aborted') return;
     if (body === 'too-large') return refuse(res, refusal(413));
     let code: unknown;
     try {
@@ -147,9 +158,11 @@ export async function createSheetPageHandler(deps: HandlerDeps): Promise<SheetPa
   async function unpair(req: IncomingMessage, res: ServerResponse, credential: string): Promise<void> {
     const browser = pairing.check(credential);
     if (browser === null) return refuse(res, refusal(401));
-    if ((await readBody(req, CODE_BODY_MAX)) === 'too-large') return refuse(res, refusal(413));
+    const body = await readBody(req, CODE_BODY_MAX);
+    if (body === 'aborted') return;
+    if (body === 'too-large') return refuse(res, refusal(413));
     const { saved } = pairing.revoke(browser.id);
-    if (saved) return void res.writeHead(204, { ...STANDING_HEADERS(port), 'Cache-Control': 'no-store' }).end();
+    if (saved) return void res.writeHead(204, { ...STANDING_HEADERS(deps.port()), 'Cache-Control': 'no-store' }).end();
     json(res, 500, { why: 'not-saved' });
   }
 
@@ -173,6 +186,8 @@ export async function createSheetPageHandler(deps: HandlerDeps): Promise<SheetPa
     let deadline = setTimeout(late, timing.helloMs);
     const ping = setInterval(() => {
       if (Date.now() - connection.heard >= timing.silentMs) return void ws.terminate();
+      // a browser no longer paired (aged past its idle bound) leaves no socket paired; a live one's presence is its use
+      if (connection.step === 'paired' && !pairing.seen(connection.browser!)) return closeWith(ws, CLOSE.unpaired, 'unpaired');
       ws.ping();
     }, timing.pingMs);
     ws.on('pong', () => void (connection.heard = Date.now()));
@@ -217,7 +232,7 @@ export async function createSheetPageHandler(deps: HandlerDeps): Promise<SheetPa
 
   return {
     request(req, res) {
-      const verdict = admit({ method: req.method ?? '', target: req.url ?? '', rawHeaders: req.rawHeaders, upgrade: false }, port);
+      const verdict = admit({ method: req.method ?? '', target: req.url ?? '', rawHeaders: req.rawHeaders, upgrade: false }, deps.port());
       if (isRefusal(verdict)) return refuse(res, verdict);
       const { route, credential } = verdict;
       const failed = (error: unknown) => {
@@ -226,11 +241,14 @@ export async function createSheetPageHandler(deps: HandlerDeps): Promise<SheetPa
       };
       switch (route.kind) {
         case 'shell':
-          return void sendFile(req, res, table.shell).catch(failed);
-        case 'file': {
-          const file = table.get(route.path);
-          return file === null ? refuse(res, refusal(404)) : void sendFile(req, res, file).catch(failed);
-        }
+        case 'file':
+          return void bundle().then(
+            (read) => {
+              const file = route.kind === 'shell' ? read.shell : read.get(route.path);
+              return file === null ? refuse(res, refusal(404)) : sendFile(req, res, file);
+            },
+            () => refuse(res, refusal(503)),
+          ).catch(failed);
         case 'pair':
           return void exchange(req, res).catch(failed);
         case 'unpair':
@@ -242,8 +260,8 @@ export async function createSheetPageHandler(deps: HandlerDeps): Promise<SheetPa
 
     upgrade(req, socket, head) {
       socket.on('error', () => {});
-      const end = (refused: Refusal) => void socket.end(refusalBytes(port, refused), () => socket.destroy());
-      const verdict = admit({ method: req.method ?? '', target: req.url ?? '', rawHeaders: req.rawHeaders, upgrade: true }, port);
+      const end = (refused: Refusal) => void socket.end(refusalBytes(deps.port(), refused), () => socket.destroy());
+      const verdict = admit({ method: req.method ?? '', target: req.url ?? '', rawHeaders: req.rawHeaders, upgrade: true }, deps.port());
       if (isRefusal(verdict)) return end(verdict);
       // what `ws` would refuse with an answer of its own, refused here first, with the standing headers
       const { upgrade, 'sec-websocket-version': version, 'sec-websocket-key': key, 'sec-websocket-protocol': protocol } = req.headers;

@@ -37,10 +37,13 @@ export interface Pairing {
   exchange(typed: string, userAgent: string): Exchange;
   prove(id: string, nonce: string): string | null; // the MAC of §L for a browser it knows; null for one it does not
   check(credential: string): PairedBrowser | null; // constant time over the kept hashes; touches lastSeenAt by the grain
+  seen(id: string): boolean; // whether the browser is still paired (known and not idle 90 days); a live connection's use, touched by the grain
   list(): PairedBrowser[];
-  revoke(id: string | null): { ids: string[]; saved: boolean; why?: string }; // refused in memory at once; saved: the file's replace succeeded; why: the failure's code when it did not
+  // refused in memory at once; saved: the file's replace succeeded (a replace still owed is tried again, so a repeat never
+  // reads saved while the file holds a revoked credential); why: the failure's code when it did not
+  revoke(id: string | null): { ids: string[]; saved: boolean; why?: string };
   retry(): boolean; // a replace still owed is tried again; true once none is owed
-  onRevoked(listener: (id: string) => void): () => void; // the live connections' end
+  onRevoked(listener: (id: string) => void): () => void; // the live connections' end: a revocation, or a browser dropped for a newer one
 }
 
 export interface PairingDeps {
@@ -58,6 +61,7 @@ interface Kept extends PairedBrowser {
 }
 
 const CREDENTIAL = /^[A-Za-z0-9_-]{43}$/;
+const CODE = new RegExp(`^[${CODE_ALPHABET}]{8}$`); // a code as typed, read without its dash and case: ASCII, so its bytes are its characters
 const MINUTE_MS = 60_000;
 
 export function createPairing(deps: PairingDeps): Pairing {
@@ -86,6 +90,10 @@ export function createPairing(deps: PairingDeps): Pairing {
       log(`the browsers’ file could not be replaced: ${messageOf(error)}`);
       return false;
     }
+  };
+
+  const tellRevoked = (id: string) => {
+    for (const listener of [...revokedListeners]) listener(id);
   };
 
   const freshId = (): string => {
@@ -117,7 +125,7 @@ export function createPairing(deps: PairingDeps): Pairing {
         return { ok: false, why: 'expired' };
       }
       const read = typed.replace(/-/g, '').toUpperCase();
-      if (read.length !== code.value.length || !timingSafeEqual(Buffer.from(read), Buffer.from(code.value))) {
+      if (!CODE.test(read) || !timingSafeEqual(Buffer.from(read, 'latin1'), Buffer.from(code.value, 'latin1'))) {
         code.left -= 1;
         const left = code.left;
         if (left === 0) code = null;
@@ -129,16 +137,21 @@ export function createPairing(deps: PairingDeps): Pairing {
       const id = freshId();
       const added: Kept = { id, label: labelOf(userAgent), pairedAt: stamp, lastSeenAt: stamp, hash: sha256(bytes), proof: proofKey(bytes) };
       browsers = [...browsers.filter(alive), added];
+      let dropped: Kept | null = null;
       if (browsers.length > BROWSERS_MAX) {
-        const oldest = browsers.reduce((a, b) => (Date.parse(b.lastSeenAt) < Date.parse(a.lastSeenAt) ? b : a));
-        browsers = browsers.filter((browser) => browser !== oldest);
-        log(`browser ${oldest.id} dropped: ${BROWSERS_MAX} are kept, and it was seen longest ago`);
+        dropped = browsers.reduce((a, b) => (Date.parse(b.lastSeenAt) < Date.parse(a.lastSeenAt) ? b : a));
+        const gone = dropped;
+        browsers = browsers.filter((browser) => browser !== gone);
       }
       if (!save()) {
         browsers = before;
-        return { ok: false, why: 'not-saved' }; // no credential was handed out; the code stays live
+        return { ok: false, why: 'not-saved' }; // no credential was handed out, nothing dropped; the code stays live
       }
       code = null;
+      if (dropped !== null) {
+        log(`browser ${dropped.id} dropped: ${BROWSERS_MAX} are kept, and it was seen longest ago`);
+        tellRevoked(dropped.id);
+      }
       log(`browser ${id} paired (${added.label})`);
       return { ok: true, id, credential: bytes.toString('base64url') };
     },
@@ -163,13 +176,28 @@ export function createPairing(deps: PairingDeps): Pairing {
       return shown(found);
     },
 
+    seen(id) {
+      const browser = browsers.find((kept) => kept.id === id);
+      if (browser === undefined || !alive(browser)) return false;
+      const at = now();
+      if (at - Date.parse(browser.lastSeenAt) >= timing.lastSeenGrainMs) {
+        browser.lastSeenAt = new Date(at).toISOString();
+        if (!save()) log(`browser ${browser.id}’s last seen time was not written`);
+      }
+      return true;
+    },
+
     list: () => browsers.filter(alive).map(shown),
 
     revoke(id) {
       const gone = browsers.filter((browser) => id === null || browser.id === id);
-      if (gone.length === 0) return { ids: [], saved: true };
+      if (gone.length === 0) {
+        if (!owed) return { ids: [], saved: true };
+        const saved = save(); // an earlier revocation's replace, still owed: this one is not saved until that is
+        return { ids: [], saved, ...(!saved && { why: failure }) };
+      }
       browsers = browsers.filter((browser) => !gone.includes(browser));
-      for (const browser of gone) for (const listener of [...revokedListeners]) listener(browser.id);
+      for (const browser of gone) tellRevoked(browser.id);
       const saved = save();
       if (!saved) owed = true;
       log(`${gone.length === 1 ? `browser ${gone[0]!.id}` : `${gone.length} browsers`} unpaired${saved ? '' : ', not yet saved'}`);
@@ -215,8 +243,8 @@ function readKept(file: string, log: (line: string) => void): Kept[] {
       }
       return { id, label: LABELS.has(label) ? label : 'A browser', pairedAt, lastSeenAt, hash: Buffer.from(hash, 'hex'), proof: Buffer.from(proof, 'hex') };
     });
-  } catch (error) {
-    log(`the browsers’ file does not parse (${messageOf(error)}): read as no browsers`);
+  } catch {
+    log('the browsers’ file does not parse: read as no browsers'); // a fixed sentence: nothing of the file reaches the log
     return [];
   }
 }

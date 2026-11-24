@@ -223,6 +223,59 @@ describe('the binds (T3)', () => {
   });
 });
 
+describe('the bind decision (T3)', () => {
+  // A raw request on 127.0.0.1, its answer read to the close: '' when the connection was ended unanswered
+  const ask = (port: number) =>
+    new Promise<string>((done) => {
+      const socket = createConnection({ host: '127.0.0.1', port });
+      let text = '';
+      socket.on('data', (chunk) => void (text += chunk.toString('latin1')));
+      socket.on('error', () => {});
+      socket.on('close', () => done(text));
+      socket.on('connect', () => socket.write(`GET / HTTP/1.1\r\nHost: sheet.localhost:${port}\r\nConnection: close\r\n\r\n`));
+    });
+
+  it('serves neither address while the second bind is pending: a request on the first is not served', async () => {
+    let release!: () => void;
+    const pending = new Promise<void>((done) => (release = done));
+    let first = 0;
+    const load = vi.fn(async () => import('./handler'));
+    const listen = async (server: Http.Server, host: string, port: number) => {
+      if (host === '::1') await pending;
+      await listenExclusive(server, ipv6 || host !== '::1' ? host : '127.0.0.1', ipv6 || host !== '::1' ? port : 0);
+      if (host === '127.0.0.1') first = (server.address() as AddressInfo).port;
+    };
+    const made = page({ listen, load });
+    made.start();
+    await vi.waitFor(() => expect(first).not.toBe(0));
+    expect(await ask(first)).toBe(''); // ended, nothing served
+    expect(load).not.toHaveBeenCalled(); // no handler cached with port 0
+    release();
+    await vi.waitFor(() => expect(made.status().state).toBe('listening'));
+    expect(await ask(first)).toMatch(/^HTTP\/1\.1 200 /);
+  });
+
+  it('closes the provisional listener when stopped while the second bind is pending', async () => {
+    let release!: () => void;
+    const pending = new Promise<void>((done) => (release = done));
+    let first = 0;
+    const listen = async (server: Http.Server, host: string, port: number) => {
+      if (host === '::1') await pending;
+      await listenExclusive(server, ipv6 || host !== '::1' ? host : '127.0.0.1', ipv6 || host !== '::1' ? port : 0);
+      if (host === '127.0.0.1') first = (server.address() as AddressInfo).port;
+    };
+    const made = page({ listen });
+    made.start();
+    await vi.waitFor(() => expect(first).not.toBe(0));
+    await made.stop();
+    expect(await reaches('127.0.0.1', first)).toBe(false);
+    release();
+    await new Promise((done) => setTimeout(done, 100));
+    expect(await reaches('127.0.0.1', first)).toBe(false);
+    expect(made.status().state).not.toBe('listening');
+  });
+});
+
 describe('the chunk and the stop (T1, T6)', () => {
   it('loads nothing at a start with no request made, and stops within half a second', async () => {
     const load = vi.fn();

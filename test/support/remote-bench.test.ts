@@ -326,6 +326,9 @@ describe('the live bench’s runner (P5 O7 M7)', () => {
     const start = lines[at(/nohup/)]!;
     expect(start).toBe(startLine(VM(file), '"$(cat /home/dev/maws-bench/vm-bench/bench/pack-path)/runtime/bin/node" "$(cat /home/dev/maws-bench/vm-bench/bench/pack-path)/out/main/mawsd.js"'));
     for (const part of ['MAWS_USER_DATA=/home/dev/maws-bench/vm-bench', 'MAWS_MAWSD_LABEL=dev.maws.bench.vm', 'CLAUDE_CONFIG_DIR=/home/dev/maws-bench/vm-bench/claude-config', 'MAWS_E2E=1', 'MAWS_E2E_ENGINE_BIN=/home/dev/maws-bench/vm-bench/bench/latency-engine', 'MAWS_ENDPOINT_DIRECT=1', 'MAWS_ENDPOINT_PORT=47902', 'run --private --dir /home/dev/maws-bench/vm-bench/mawsd']) expect(start).toContain(part);
+    // the question sheet's C4 (T2): the scratch daemon serves no sheet page and takes no port of the remote shell's
+    expect(start).toContain('MAWS_SHEET_PAGE=0');
+    expect(start).toContain('-u MAWS_SHEET_PORT ');
     expect(at(/^ps -o args= -p /)).toBeGreaterThan(at(/mawsd\.js"? status/));
     expect(scratchEnd(calls, VM(file))).toEqual(SCRATCH_END);
     expect(lines.some((line) => line.includes('rm -rf /home/dev/maws-bench/vm-bench') && !line.includes('rm -rf /home/dev/maws-bench/vm-bench/head'))).toBe(false); // the profile is kept until the bench is done
@@ -675,7 +678,7 @@ describe('the live bench’s runner (P5 O7 M7)', () => {
       expect(programs.length).toBeGreaterThanOrEqual(m.stage === 'runner' ? 8 : 6);
       for (const command of programs) {
         for (const [name, value] of Object.entries(profileEnv(m))) expect(command).toContain(`${name}=${quote(value)}`);
-        for (const name of INHERITED_OVERRIDES.filter((n) => !/nohup/.test(command) || !['MAWS_USER_DATA', 'MAWS_MAWSD_LABEL', 'MAWS_ENDPOINT_DIRECT', 'MAWS_ENDPOINT_PORT', 'MAWS_MACHINE_NAME', 'MAWS_E2E', 'MAWS_E2E_ENGINE_BIN', 'MAWS_CLAUDE_USAGE_DIR', 'CLAUDE_CONFIG_DIR', 'SMINOS_HOME', 'ZDOTDIR', 'HISTFILE'].includes(n))) expect(command).toContain(`-u ${name} `);
+        for (const name of INHERITED_OVERRIDES.filter((n) => !/nohup/.test(command) || !['MAWS_USER_DATA', 'MAWS_MAWSD_LABEL', 'MAWS_ENDPOINT_DIRECT', 'MAWS_ENDPOINT_PORT', 'MAWS_MACHINE_NAME', 'MAWS_E2E', 'MAWS_E2E_ENGINE_BIN', 'MAWS_CLAUDE_USAGE_DIR', 'CLAUDE_CONFIG_DIR', 'SMINOS_HOME', 'ZDOTDIR', 'HISTFILE', 'MAWS_SHEET_PAGE'].includes(n))) expect(command).toContain(`-u ${name} `);
       }
       expect(programs.join('\n')).toContain('ELECTRON_SKIP_BINARY_DOWNLOAD=1');
       for (const call of calls) expect(call.timeoutMs, call.argv.at(-1)).toBeGreaterThan(0);

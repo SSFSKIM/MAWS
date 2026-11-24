@@ -108,6 +108,15 @@ describe('the code (T8)', () => {
     expect(pairing.exchange(again, CHROME_MAC)).toMatchObject({ ok: true });
   });
 
+  it('reads a code with characters outside its alphabet, or of another length, as a wrong try', () => {
+    const pairing = make();
+    pairing.mint();
+    expect(pairing.exchange('ÄÄÄÄ-ÄÄÄÄ', CHROME_MAC)).toEqual({ ok: false, why: 'wrong', left: 4 });
+    expect(pairing.exchange('ÄÄÄÄ', CHROME_MAC)).toEqual({ ok: false, why: 'wrong', left: 3 });
+    expect(pairing.exchange('IIII-LLLL', CHROME_MAC)).toEqual({ ok: false, why: 'wrong', left: 2 });
+    expect(pairing.exchange('\u0000'.repeat(8), CHROME_MAC)).toEqual({ ok: false, why: 'wrong', left: 1 });
+  });
+
   it('is written to no log line and no file', () => {
     const pairing = make();
     const { code } = pairing.mint();
@@ -187,15 +196,37 @@ describe('the credential and the browsers’ file (T9, T10)', () => {
     expect(pairing.list()).toEqual([]);
   });
 
-  it('keeps at most 16 browsers: a seventeenth drops the one seen longest ago', () => {
+  it('keeps at most 16 browsers: a seventeenth drops the one seen longest ago, and says so once the file was replaced', () => {
     const pairing = make();
+    const revoked: string[] = [];
+    pairing.onRevoked((id) => void revoked.push(id));
     const browsers = Array.from({ length: BROWSERS_MAX }, () => paired(pairing));
     clock += 2 * 60 * MINUTE;
     for (const browser of browsers.slice(1)) pairing.check(browser.credential); // all but the first seen again
-    paired(pairing);
+    failWrites = true;
+    const { code } = pairing.mint();
+    expect(pairing.exchange(code, CHROME_MAC)).toEqual({ ok: false, why: 'not-saved' });
+    expect(revoked).toEqual([]); // nothing dropped while the pairing is not saved
+    expect(pairing.check(browsers[0]!.credential)).not.toBeNull();
+    failWrites = false;
+    clock += MINUTE;
+    expect(pairing.exchange(code, CHROME_MAC)).toMatchObject({ ok: true });
+    expect(revoked).toEqual([browsers[0]!.id]);
     expect(pairing.list()).toHaveLength(BROWSERS_MAX);
     expect(pairing.check(browsers[0]!.credential)).toBeNull();
     expect(pairing.check(browsers[1]!.credential)).not.toBeNull();
+  });
+
+  it('tells whether a browser is still paired, and counts a live connection’s presence as use', () => {
+    const pairing = make();
+    const { id } = paired(pairing);
+    expect(pairing.seen(id)).toBe(true);
+    clock += 2 * 60 * MINUTE;
+    expect(pairing.seen(id)).toBe(true);
+    expect(pairing.list()[0]!.lastSeenAt).toBe(new Date(clock).toISOString());
+    clock += 90 * DAY;
+    expect(pairing.seen(id)).toBe(false);
+    expect(pairing.seen('0badc0de')).toBe(false);
   });
 
   it('reads a file that does not parse, or whose v is not 1, as no browsers', () => {
@@ -203,7 +234,8 @@ describe('the credential and the browsers’ file (T9, T10)', () => {
     expect(make().list()).toEqual([]);
     writeFileSync(file, JSON.stringify({ v: 2, browsers: [] }));
     expect(make().list()).toEqual([]);
-    expect(logs.filter((line) => /read as no browsers/.test(line))).toHaveLength(2);
+    expect(logs.filter((line) => line === 'the browsers’ file does not parse: read as no browsers')).toHaveLength(2);
+    expect(logs.join('\n')).not.toMatch(/JSON|token|position|version 2/i); // a fixed sentence, not the parser's words
   });
 
   it('labels a browser from a fixed set of words, so nothing a requester wrote reaches a terminal', () => {
@@ -237,6 +269,19 @@ describe('a revocation’s two moments (T10)', () => {
     expect(pairing.retry()).toBe(false);
     failWrites = false;
     expect(pairing.retry()).toBe(true);
+    expect(make().check(credential)).toBeNull();
+  });
+
+  it('never answers saved while a replace is owed: a repeat of the same id, or --all over an empty memory, tries it again', () => {
+    const pairing = make();
+    const { id, credential } = paired(pairing);
+    failWrites = true;
+    expect(pairing.revoke(id)).toEqual({ ids: [id], saved: false, why: 'ENOSPC' });
+    expect(pairing.revoke(id)).toEqual({ ids: [], saved: false, why: 'ENOSPC' });
+    expect(pairing.revoke(null)).toEqual({ ids: [], saved: false, why: 'ENOSPC' });
+    expect(make().check(credential)).not.toBeNull(); // the file still holds it
+    failWrites = false;
+    expect(pairing.revoke(id)).toEqual({ ids: [], saved: true });
     expect(make().check(credential)).toBeNull();
   });
 

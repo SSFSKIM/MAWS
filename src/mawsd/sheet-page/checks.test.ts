@@ -58,7 +58,9 @@ describe('originOf', () => {
   it('reads absent, the page’s, or another', () => {
     expect(originOf([], PORT)).toBe('absent');
     expect(originOf(['Origin', ORIGIN], PORT)).toBe('page');
-    expect(originOf(['origin', ORIGIN.toUpperCase()], PORT)).toBe('page');
+    expect(originOf(['origin', ORIGIN], PORT)).toBe('page'); // the header's name is case folded, its value is not
+    expect(originOf(['Origin', ORIGIN.toUpperCase()], PORT)).toBe('other');
+    expect(originOf(['Origin', `http://Sheet.localhost:${PORT}`], PORT)).toBe('other');
     for (const headers of FOREIGN_ORIGINS) expect(originOf(headers.flat(), PORT), JSON.stringify(headers)).toBe('other');
   });
 });

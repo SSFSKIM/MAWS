@@ -41,11 +41,12 @@ export function hostPasses(rawHeaders: readonly string[], port: number): boolean
   return hosts.length === 1 && hosts[0]!.toLowerCase() === `${SHEET_HOST}:${port}`;
 }
 
-// 'null' and a repeated header are 'other'.
+// Exactly the page's origin, as a browser serializes it (lower case); only the Host is case folded. 'null' and a repeated
+// header are 'other'.
 export function originOf(rawHeaders: readonly string[], port: number): 'absent' | 'page' | 'other' {
   const origins = valuesOf(rawHeaders, 'origin');
   if (origins.length === 0) return 'absent';
-  return origins.length === 1 && origins[0]!.toLowerCase() === pageOrigin(port) ? 'page' : 'other';
+  return origins.length === 1 && origins[0] === pageOrigin(port) ? 'page' : 'other';
 }
 
 const BEARER = /^bearer ([A-Za-z0-9_-]{43})$/i; // the credential: 32 bytes in base64url, unpadded (T9)

@@ -306,7 +306,7 @@ const scoped = (m: BenchMachine) => `--profile ${quote(m.profile)} --label ${quo
  * Variables a remote shell may carry in that would point a scratch process at another profile, store, endpoint or engine:
  * unset in every program the runner runs there, unless the program's own environment sets them.
  */
-export const INHERITED_OVERRIDES = ['MAWS_USER_DATA', 'MAWS_MAWSD_LABEL', 'MAWS_ENDPOINT_DIRECT', 'MAWS_ENDPOINT_PORT', 'MAWS_MACHINE_NAME', 'MAWS_DEV_ORG', 'MAWS_E2E', 'MAWS_E2E_ENGINE_BIN', 'MAWS_CLAUDE_USAGE_DIR', 'CLAUDE_CONFIG_DIR', 'SMINOS_RL10', 'SMINOS_HOME', 'DAEMON_HOME', 'ZDOTDIR', 'HISTFILE', 'NODE_OPTIONS', 'PNPM_HOME', 'npm_config_prefix', 'COREPACK_HOME'] as const;
+export const INHERITED_OVERRIDES = ['MAWS_USER_DATA', 'MAWS_MAWSD_LABEL', 'MAWS_ENDPOINT_DIRECT', 'MAWS_ENDPOINT_PORT', 'MAWS_MACHINE_NAME', 'MAWS_DEV_ORG', 'MAWS_E2E', 'MAWS_E2E_ENGINE_BIN', 'MAWS_CLAUDE_USAGE_DIR', 'CLAUDE_CONFIG_DIR', 'SMINOS_RL10', 'SMINOS_HOME', 'DAEMON_HOME', 'ZDOTDIR', 'HISTFILE', 'NODE_OPTIONS', 'PNPM_HOME', 'npm_config_prefix', 'COREPACK_HOME', 'MAWS_SHEET_PAGE', 'MAWS_SHEET_PORT'] as const;
 
 /**
  * Every remote program's environment: a home, temporary directory, XDG directories, pnpm store, npm and Electron caches
@@ -350,6 +350,7 @@ export function daemonEnv(m: BenchMachine): Record<string, string> {
     MAWS_ENDPOINT_DIRECT: '1',
     MAWS_ENDPOINT_PORT: String(m.port),
     MAWS_MACHINE_NAME: m.name,
+    MAWS_SHEET_PAGE: '0', // the question sheet's C4 (T2): a test's daemon serves no sheet page; MAWS_SHEET_PORT is unset with the overrides
   };
 }
 const envWords = (env: Record<string, string>) => Object.entries(env).map(([k, v]) => `${k}=${quote(v)}`).join(' ');

@@ -112,7 +112,9 @@ export function createSheetPage(options: SheetPageOptions): SheetPage {
   let detail: string | null = null;
   let port = SHEET_PORT;
   let http: typeof Http | null = null;
-  let servers: Http.Server[] = [];
+  let servers: Http.Server[] = []; // the committed pair
+  const made = new Set<Http.Server>(); // every server made, a provisional one included, until it is closed: stop() owns them all
+  let committed = false; // the bind decision is made and both addresses (or 127.0.0.1 alone) serve; before it none does
   const sockets = new Set<Socket>();
   let handler: SheetPageHandler | null = null;
   let loading: Promise<SheetPageHandler> | null = null;
@@ -155,32 +157,38 @@ export function createSheetPage(options: SheetPageOptions): SheetPage {
 
   // --- the two servers (T1, T3) ---------------------------------------------------------------------------------------
   function makeServer(): Http.Server {
-    const made = http!.createServer({ headersTimeout: timing.headersMs, requestTimeout: timing.requestMs, keepAliveTimeout: timing.keepAliveMs, connectionsCheckingInterval: timing.checkMs, maxHeaderSize: HEADER_BYTES_MAX, requireHostHeader: false });
-    made.maxHeadersCount = HEADERS_MAX + 1;
-    made.on('connection', (socket: Socket) => {
-      if (stopping || sockets.size >= CONNECTIONS_MAX) return void socket.destroy();
+    const server = http!.createServer({ headersTimeout: timing.headersMs, requestTimeout: timing.requestMs, keepAliveTimeout: timing.keepAliveMs, connectionsCheckingInterval: timing.checkMs, maxHeaderSize: HEADER_BYTES_MAX, requireHostHeader: false });
+    server.maxHeadersCount = HEADERS_MAX + 1;
+    made.add(server);
+    server.on('connection', (socket: Socket) => {
+      // nothing is served on a provisional listener (T3: both addresses or neither) or past the bound
+      if (stopping || !committed || sockets.size >= CONNECTIONS_MAX) return void socket.destroy();
       sockets.add(socket);
       socket.once('close', () => void sockets.delete(socket));
     });
-    made.on('request', (req: Http.IncomingMessage, res: Http.ServerResponse) => void serve(req, res));
-    made.on('upgrade', (req: Http.IncomingMessage, socket: Duplex, head: Buffer) => void upgrade(req, socket, head));
-    made.on('checkContinue', (_req: Http.IncomingMessage, res: Http.ServerResponse) => answer(res, refusal(417)));
-    made.on('checkExpectation', (_req: Http.IncomingMessage, res: Http.ServerResponse) => answer(res, refusal(417)));
-    made.on('clientError', (error: Error, socket: Duplex) => {
+    server.on('request', (req: Http.IncomingMessage, res: Http.ServerResponse) => void serve(req, res));
+    server.on('upgrade', (req: Http.IncomingMessage, socket: Duplex, head: Buffer) => void upgrade(req, socket, head));
+    server.on('checkContinue', (_req: Http.IncomingMessage, res: Http.ServerResponse) => answer(res, refusal(417)));
+    server.on('checkExpectation', (_req: Http.IncomingMessage, res: Http.ServerResponse) => answer(res, refusal(417)));
+    server.on('clientError', (error: Error, socket: Duplex) => {
       const code = codeOf(error);
-      if (code === 'ECONNRESET' || !socket.writable) return void socket.destroy();
+      // Node's own guard: nothing is written once a response's headers went out on this connection
+      const inFlight = (socket as Duplex & { _httpMessage?: { headersSent?: boolean } })._httpMessage?.headersSent === true;
+      if (code === 'ECONNRESET' || !socket.writable || inFlight) return void socket.destroy();
       const status = code === 'HPE_HEADER_OVERFLOW' ? 431 : code === 'ERR_HTTP_REQUEST_TIMEOUT' ? 408 : 400;
       socket.end(refusalBytes(port, refusal(status)), () => socket.destroy());
     });
-    made.on('error', (error: Error) => log(`a listener failed: ${messageOf(error)}`)); // an accept failure is not fatal
-    return made;
+    server.on('error', (error: Error) => log(`a listener failed: ${messageOf(error)}`)); // an accept failure is not fatal
+    return server;
   }
 
-  const close = (made: Http.Server): Promise<void> =>
+  // A server not listening yet stays owned, so a stop that came while its bind was out closes it once the bind returns
+  const close = (server: Http.Server): Promise<void> =>
     new Promise((resolve) => {
-      if (!made.listening) return resolve();
-      made.close(() => resolve());
-      made.closeAllConnections();
+      if (!server.listening) return resolve();
+      made.delete(server);
+      server.close(() => resolve());
+      server.closeAllConnections();
     });
 
   // One try at the pair: 'bound', 'again' (port 0's second address taken) or a sentence why not
@@ -189,6 +197,7 @@ export function createSheetPage(options: SheetPageOptions): SheetPage {
     try {
       await listen(v4, '127.0.0.1', port);
     } catch (error) {
+      made.delete(v4);
       return codeOf(error) === 'EADDRINUSE' ? `port ${port} is in use` : `port ${port} could not be bound (${codeOf(error) ?? messageOf(error)})`;
     }
     const got = (v4.address() as AddressInfo).port;
@@ -196,6 +205,7 @@ export function createSheetPage(options: SheetPageOptions): SheetPage {
     try {
       await listen(v6, '::1', got);
     } catch (error) {
+      made.delete(v6);
       if (NO_IPV6.has(codeOf(error) ?? '')) {
         servers = [v4];
         port = got;
@@ -215,8 +225,9 @@ export function createSheetPage(options: SheetPageOptions): SheetPage {
     retryTimer = null;
     let outcome: 'bound' | 'again' | string = 'again';
     for (let tries = 0; outcome === 'again' && tries < PORT_ZERO_TRIES; tries++) outcome = await bindPair();
-    if (stopping) return void (await Promise.all(servers.map(close)));
+    if (stopping) return void (await Promise.all([...made].map(close)));
     if (outcome === 'bound') {
+      committed = true;
       return become('listening', `served on ${servers.length === 2 ? '127.0.0.1 and ::1' : '127.0.0.1'}, port ${port}`);
     }
     become('port-taken', outcome === 'again' ? 'no port was free on both loopback addresses' : outcome);
@@ -230,7 +241,7 @@ export function createSheetPage(options: SheetPageOptions): SheetPage {
     loading ??= (options.load ?? loadSheetPageChunk)()
       .then((chunk) =>
         chunk.createSheetPageHandler({
-          port,
+          port: () => port, // read when it answers: a handler loaded for a command before the bind knows no port yet
           bundleDir: options.bundleDir,
           file: join(options.dir, 'sheet-page.json'),
           sheets: options.sheets,
@@ -242,16 +253,16 @@ export function createSheetPage(options: SheetPageOptions): SheetPage {
         }),
       )
       .then(
-        (made) => {
-          handler = made;
+        (loaded) => {
+          handler = loaded;
           log('its handler loaded at its first use');
-          if (stopping) made.close();
+          if (stopping) loaded.close();
           else {
             // the timer's tick: a replace of the browsers' file still owed, tried again until it succeeds (T10)
-            tickTimer = setInterval(() => made.tick(), timing.heartbeatMs);
+            tickTimer = setInterval(() => loaded.tick(), timing.heartbeatMs);
             tickTimer.unref();
           }
-          return made;
+          return loaded;
         },
         (error: unknown) => {
           loading = null; // the next request loads again
@@ -285,8 +296,9 @@ export function createSheetPage(options: SheetPageOptions): SheetPage {
     served.upgrade(req, socket, head);
   }
 
-  // The pairing commands load the chunk only while the page is served or waits for its port
-  const reachable = () => state === 'listening' || state === 'port-taken';
+  // `browsers` and `unpair` read and change the browsers' file in every state but `stopped` (a browser can be unpaired
+  // while the page is off or its port taken); `pair` alone needs `listening` (T8). Either loads the chunk for its command.
+  const stopped = () => stopping !== null;
 
   return {
     start() {
@@ -315,11 +327,11 @@ export function createSheetPage(options: SheetPageOptions): SheetPage {
     },
 
     async browsers() {
-      return reachable() ? (await ensure()).browsers() : [];
+      return stopped() ? [] : (await ensure()).browsers();
     },
 
     async unpair(id) {
-      return reachable() ? (await ensure()).unpair(id) : { removed: 0, saved: true };
+      return stopped() ? { removed: 0, saved: false, why: 'stopping' } : (await ensure()).unpair(id);
     },
 
     spineState(next) {
@@ -333,7 +345,7 @@ export function createSheetPage(options: SheetPageOptions): SheetPage {
         if (retryTimer) clearTimeout(retryTimer);
         if (tickTimer) clearInterval(tickTimer);
         handler?.close(); // the live connections told 1001
-        await Promise.race([Promise.all(servers.map(close)), new Promise((resolve) => setTimeout(resolve, STOP_MS).unref())]);
+        await Promise.race([Promise.all([...made].map(close)), new Promise((resolve) => setTimeout(resolve, STOP_MS).unref())]);
         for (const socket of sockets) socket.destroy(); // what is left: an upgraded socket, which its server no longer holds
       })();
       return stopping;

@@ -17,7 +17,6 @@ import { launchEnvironment } from '../../e2e/support/scratch-env';
 import { MawsdScene, until } from '../../test/support/mawsd-scene';
 import { runCli, sheetPageLine, type CliDeps } from './cli';
 import type { DaemonOptions, RunningDaemon } from './daemon';
-import { STANDING_HEADERS } from './sheet-page/headers';
 import { PROOF_KEY_LABEL, PROOF_MAC_LABEL } from './sheet-page/pairing';
 import type { SheetPageTiming } from './sheet-page/timing';
 
@@ -94,7 +93,11 @@ function exchangeBytes(port: number, bytes: string | Buffer, host = '127.0.0.1')
     const chunks: Buffer[] = [];
     socket.on('data', (chunk) => void chunks.push(chunk));
     socket.on('error', (error: NodeJS.ErrnoException) => (error.code === 'ECONNRESET' ? undefined : failed(error)));
-    socket.on('close', () => done(parse(Buffer.concat(chunks), Date.now() - began)));
+    socket.on('close', () => {
+      const answer = parse(Buffer.concat(chunks), Date.now() - began);
+      if (answer.status !== 0) standing(answer, port); // every answer, whatever its status
+      done(answer);
+    });
     socket.write(bytes);
   });
 }
@@ -122,9 +125,18 @@ function request(port: number, method: string, target: string, headers: Headers,
   return exchangeBytes(port, `${lines.join('\r\n')}\r\n\r\n${body}`);
 }
 
-// Every answer the suite receives carries the six headers of §M
+// The six headers of §M, written out here and not read from the code under test. Every answer the suite receives is held
+// to them by the helpers that receive it (exchangeBytes, and Tab for an upgrade's answer).
+const SIX = (port: number): Record<string, string> => ({
+  'referrer-policy': 'no-referrer',
+  'x-content-type-options': 'nosniff',
+  'content-security-policy': `default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self' ws://sheet.localhost:${port}; base-uri 'none'; form-action 'none'; frame-ancestors 'none'`,
+  'x-frame-options': 'DENY',
+  'cross-origin-opener-policy': 'same-origin',
+  'cross-origin-resource-policy': 'same-origin',
+});
 function standing(answer: { headers: Record<string, string[]> }, port: number): void {
-  for (const [name, value] of Object.entries(STANDING_HEADERS(port))) expect(answer.headers[name.toLowerCase()], name).toEqual([value]);
+  for (const [name, value] of Object.entries(SIX(port))) expect(answer.headers[name], name).toEqual([value]);
 }
 const jsonOf = (answer: Answer) => JSON.parse(answer.body.toString('utf8')) as Record<string, unknown>;
 
@@ -161,6 +173,14 @@ class Tab {
   private constructor(readonly ws: WebSocket) {}
 
   static open(port: number, headers: Record<string, string> = {}): Promise<Tab> {
+    return Tab.opened(port, headers).then((tab) => {
+      if (tab.refused) standing(tab.refused, port);
+      else if (tab.closed === null || Object.keys(tab.upgradeHeaders).length > 0) standing({ headers: tab.upgradeHeaders }, port); // the 101 too
+      return tab;
+    });
+  }
+
+  private static opened(port: number, headers: Record<string, string>): Promise<Tab> {
     const ws = new WebSocket(`ws://127.0.0.1:${port}/live`, { headers: { Host: `sheet.localhost:${port}`, Origin: `http://sheet.localhost:${port}`, ...headers } });
     const tab = new Tab(ws);
     return new Promise((done) => {
@@ -301,7 +321,6 @@ describe('another Host (Acceptance 11, “any request with another Host”; T7)'
       for (const [method, target, extra] of asks) {
         const answer = await request(port, method, target, [...host, ...extra]);
         expect(answer.status, `${method} ${target} ${JSON.stringify(host)}`).toBe(421);
-        standing(answer, port);
         expect(answer.body.includes(SHELL)).toBe(false);
         expect(answer.body.toString()).not.toMatch(/rebound|localhost|::1|127\.0/);
       }
@@ -320,15 +339,12 @@ describe('the shell on the Host alone (Acceptance 11, “an unpaired browser sti
       expect(answer.body.equals(SHELL)).toBe(true);
       expect(answer.headers['content-type']).toEqual(['text/html; charset=utf-8']);
       expect(answer.headers['cache-control']).toEqual(['no-cache']);
-      standing(answer, port);
     }
     const script = await request(port, 'GET', '/assets/page.js', [HOST(port)]);
     expect(script.status).toBe(200);
     expect(script.headers['content-type']).toEqual(['text/javascript; charset=utf-8']);
-    standing(script, port);
     const again = await request(port, 'GET', '/assets/page.js', [HOST(port), ['If-None-Match', script.headers.etag![0]!]]);
     expect(again.status).toBe(304);
-    standing(again, port);
   });
 });
 
@@ -341,13 +357,11 @@ describe('the exchange is a write (§8.2’s rule 2)', () => {
       const answer = await request(port, 'POST', '/api/pair', [HOST(port), ...(origin === null ? [] : [['Origin', origin] as [string, string]]), JSON_BODY], body);
       expect(answer.status, String(origin)).toBe(403);
       expect(answer.body.toString()).toBe('This request did not come from the sheet page.');
-      standing(answer, port);
     }
     const paired = await request(port, 'POST', '/api/pair', [HOST(port), ORIGIN(port), JSON_BODY], body);
     expect(paired.status).toBe(200);
     expect(jsonOf(paired)).toEqual({ id: expect.stringMatching(/^[0-9a-f]{8}$/), credential: expect.stringMatching(/^[A-Za-z0-9_-]{43}$/) });
     expect(paired.headers['cache-control']).toEqual(['no-store']);
-    standing(paired, port);
   });
 });
 
@@ -368,6 +382,16 @@ describe('the code (T8)', () => {
     expect(jsonOf(expired)).toEqual({ why: 'expired' });
   });
 
+  it('reads a malformed code as a wrong try, 403, never a 500', async () => {
+    const { daemon, port } = await served();
+    await code(daemon);
+    for (const [typed, left] of [['ÄÄÄÄ-ÄÄÄÄ', 4], ['\u{1F600}'.repeat(8), 3], ['IIII-LLLL', 2]] as const) {
+      const answer = await exchange(port, typed);
+      expect(answer.status, typed).toBe(403);
+      expect(jsonOf(answer)).toEqual({ why: 'wrong', left });
+    }
+  });
+
   it('is voided by the fifth wrong try; the eleventh exchange in a minute is 429', async () => {
     const { daemon, port } = await served();
     const live = await code(daemon);
@@ -377,7 +401,6 @@ describe('the code (T8)', () => {
     for (let i = 0; i < 4; i++) await exchange(port, wrong); // ten in this minute
     const busy = await exchange(port, await code(daemon));
     expect(busy.status).toBe(429);
-    standing(busy, port);
   });
 
   it('is made by `mawsd sheet pair` alone on its first line, and no log line and no file holds it or the credential', async () => {
@@ -431,13 +454,40 @@ describe('the credential (§8.2’s rule 1; T9)', () => {
       const answer = await request(port, 'POST', target, [HOST(port), ORIGIN(port), ...extra]);
       expect(answer.status, JSON.stringify(extra)).toBe(401);
       expect(answer.body.toString()).toBe('This browser is not paired.');
-      standing(answer, port);
     }
     expect(await daemon.sheetPage.browsers()).toHaveLength(1);
     const unpaired = await request(port, 'POST', '/api/unpair', [HOST(port), ORIGIN(port), ['Authorization', `Bearer ${credential}`]]);
     expect(unpaired.status).toBe(204);
-    standing(unpaired, port);
     expect(await daemon.sheetPage.browsers()).toEqual([]);
+  });
+
+  it('is not enough on unpair without exactly the page’s Origin: each foreign Origin and none are 403 and revoke nothing', async () => {
+    const { daemon, port } = await served();
+    const { credential } = await pairBrowser(daemon, port);
+    for (const origin of [`http://localhost:${port}`, `http://sheet.localhost:${port + 1}`, `https://sheet.localhost:${port}`, 'null', null]) {
+      const answer = await request(port, 'POST', '/api/unpair', [HOST(port), ...(origin === null ? [] : [['Origin', origin] as [string, string]]), ['Authorization', `Bearer ${credential}`]]);
+      expect(answer.status, String(origin)).toBe(403);
+    }
+    expect(await daemon.sheetPage.browsers()).toHaveLength(1);
+  });
+
+  it('revokes nothing when the unpair’s request is cut off before its body ends, and answers nothing', async () => {
+    const { daemon, port } = await served();
+    const { credential } = await pairBrowser(daemon, port);
+    const heard = await new Promise<string>((done) => {
+      const socket = createConnection({ host: '127.0.0.1', port });
+      let text = '';
+      socket.on('data', (chunk) => void (text += chunk.toString('latin1')));
+      socket.on('error', () => {});
+      socket.on('connect', () => {
+        socket.write(`POST /api/unpair HTTP/1.1\r\nHost: sheet.localhost:${port}\r\nOrigin: http://sheet.localhost:${port}\r\nAuthorization: Bearer ${credential}\r\nContent-Length: 50\r\n\r\n0123456789`);
+        setTimeout(() => (socket.destroy(), done(text)), 150);
+      });
+    });
+    expect(heard).toBe('');
+    await new Promise((done) => setTimeout(done, 200));
+    expect(await daemon.sheetPage.browsers()).toHaveLength(1);
+    expect(scene.logs.join('\n')).not.toMatch(/unpaired/);
   });
 
   it('is kept as its hash and the proof key, never itself, in a file of mode 0600; `mawsd sheet browsers` lists it', async () => {
@@ -465,7 +515,6 @@ describe('a revocation’s two moments (T10)', () => {
     const refused = await request(first.port, 'POST', '/api/unpair', [HOST(first.port), ORIGIN(first.port), ['Authorization', `Bearer ${browser.credential}`]]);
     expect(refused.status).toBe(500);
     expect(jsonOf(refused)).toEqual({ why: 'not-saved' });
-    standing(refused, first.port);
     expect(await tab.closedWith()).toBe(4403);
     expect((await request(first.port, 'POST', '/api/unpair', [HOST(first.port), ORIGIN(first.port), ['Authorization', `Bearer ${browser.credential}`]])).status).toBe(401);
     const ran = await cli(['sheet', 'unpair', other.id]);
@@ -506,12 +555,45 @@ describe('a revocation’s two moments (T10)', () => {
   });
 });
 
+describe('a browser dropped or aged out (T10)', () => {
+  const unpairWith = (port: number, credential: string) => request(port, 'POST', '/api/unpair', [HOST(port), ORIGIN(port), ['Authorization', `Bearer ${credential}`]]);
+  const helloOf = async (port: number, id: string) => {
+    const tab = await Tab.open(port);
+    tab.send({ t: 'hello', v: 1, id, nonce: nonce() });
+    return tab.next(0);
+  };
+
+  it('a seventeenth pairing drops the one seen longest ago: its paired socket is closed 4403, and it is refused over HTTP and on a new connection', async () => {
+    const { daemon, port } = await served();
+    const browsers = [];
+    for (let i = 0; i < 16; i++) browsers.push(await pairBrowser(daemon, port));
+    const oldest = browsers[0]!;
+    const tab = await pairedTab(port, oldest);
+    await pairBrowser(daemon, port);
+    expect(await tab.closedWith()).toBe(4403);
+    expect((await unpairWith(port, oldest.credential)).status).toBe(401);
+    expect(await helloOf(port, oldest.id)).toEqual({ closed: 4401 });
+    expect((await daemon.sheetPage.browsers()).map((browser) => browser.id)).not.toContain(oldest.id);
+  });
+
+  it('a credential unused for 90 days leaves no socket paired: closed 4403 at the next ping, and refused over HTTP and on a new connection', async () => {
+    const { daemon, port } = await served({}, { timing: { ...TIMING, pingMs: 150 } });
+    const browser = await pairBrowser(daemon, port);
+    const tab = await pairedTab(port, browser);
+    await new Promise((done) => setTimeout(done, 400));
+    expect(tab.closed).toBeNull(); // pinged and still paired
+    clock += 90 * 24 * 60 * MINUTE;
+    expect(await tab.closedWith()).toBe(4403);
+    expect((await unpairWith(port, browser.credential)).status).toBe(401);
+    expect(await helloOf(port, browser.id)).toEqual({ closed: 4401 });
+  });
+});
+
 describe('the server’s proof (T28) and the live connection (Acceptance 11, “a live connection from another Origin”)', () => {
   it('answers a known hello with the MAC the test computes, having sent nothing before it; then pairs on the credential', async () => {
     const { daemon, port } = await served();
     const browser = await pairBrowser(daemon, port);
     const tab = await Tab.open(port);
-    standing({ headers: tab.upgradeHeaders }, port); // the 101 too
     await new Promise((done) => setTimeout(done, 100));
     expect(tab.frames).toEqual([]);
     const once = nonce();
@@ -573,12 +655,10 @@ describe('the server’s proof (T28) and the live connection (Acceptance 11, “
         // ws's own client sends no Origin unless told: the bare handshake, by hand
         const answer = await request(port, 'GET', '/live', [HOST(port), ['Upgrade', 'websocket'], ['Connection', 'Upgrade'], ['Sec-WebSocket-Version', '13'], ['Sec-WebSocket-Key', randomBytes(16).toString('base64')]]);
         expect(answer.status).toBe(403);
-        standing(answer, port);
         tab.ws.terminate();
         continue;
       }
       expect(tab.refused?.status, origin).toBe(403);
-      standing(tab.refused!, port);
     }
   });
 
@@ -587,7 +667,6 @@ describe('the server’s proof (T28) and the live connection (Acceptance 11, “
     const tabs = await Promise.all(Array.from({ length: 8 }, () => Tab.open(port)));
     const ninth = await Tab.open(port);
     expect(ninth.refused?.status).toBe(503);
-    standing(ninth.refused!, port);
     for (const tab of tabs) expect(await tab.closedWith(3_000)).toBe(4401);
   });
 });
@@ -597,16 +676,12 @@ describe('the headers (§8.2’s rule 3; T12)', () => {
     const { port } = await served();
     const notHttp = await exchangeBytes(port, 'HELLO THERE\r\n\r\n');
     expect(notHttp.status).toBe(400);
-    standing(notHttp, port);
     const huge = await request(port, 'GET', '/', [HOST(port), ['X-Big', 'x'.repeat(17 * 1024)]]);
     expect(huge.status).toBe(431);
-    standing(huge, port);
     const expect100 = await request(port, 'POST', '/api/pair', [HOST(port), ORIGIN(port), ['Expect', '100-continue']], '{}');
     expect(expect100.status).toBe(417);
-    standing(expect100, port);
     const stalled = await exchangeBytes(port, `GET / HTTP/1.1\r\nHost: sheet.localhost:${port}\r\n`);
     expect(stalled.status).toBe(408);
-    standing(stalled, port);
   });
 
   it('carry a content policy that names no source but the page’s own', async () => {
@@ -635,7 +710,6 @@ describe('the count of headers (§J)', () => {
     expect((await request(port, 'GET', '/', [HOST(port), ...filler(62)])).status).toBe(200);
     const over = await request(port, 'GET', '/', [HOST(port), ...filler(63)]);
     expect(over.status).toBe(431);
-    standing(over, port);
     const upgrade = [HOST(port), ORIGIN(port), ...handshake()];
     // with Connection: close beside Connection: Upgrade, 65 and 64
     expect((await request(port, 'GET', '/live', [...upgrade, ...filler(64 - upgrade.length)])).status).toBe(431);
@@ -685,7 +759,6 @@ describe('the table (T13)', () => {
         const answer = await request(port, 'GET', target, [HOST(port)]);
         expect(answer.status, target).toBe(404);
         expect(answer.body.toString()).not.toContain('the secret');
-        standing(answer, port);
       }
     } finally {
       rmSync(scratch, { recursive: true, force: true });
@@ -698,13 +771,11 @@ describe('limits', () => {
     const { port } = await served();
     const big = await request(port, 'POST', '/api/pair', [HOST(port), ORIGIN(port), JSON_BODY], JSON.stringify({ code: 'x'.repeat(2048) }));
     expect(big.status).toBe(413);
-    standing(big, port);
     const chunked = await exchangeBytes(port, `POST /api/pair HTTP/1.1\r\nHost: sheet.localhost:${port}\r\nOrigin: http://sheet.localhost:${port}\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n800\r\n${'x'.repeat(2048)}\r\n0\r\n\r\n`);
     expect(chunked.status).toBe(413);
     const options = await request(port, 'OPTIONS', '/api/pair', [HOST(port), ORIGIN(port), ['Access-Control-Request-Method', 'POST']]);
     expect(options.status).toBe(405);
     expect(options.headers['access-control-allow-origin']).toBeUndefined();
-    standing(options, port);
     const echoed = await request(port, 'GET', '/%3Cscript%3E', [['Host', '<script>marker</script>']]);
     expect(echoed.body.toString()).not.toMatch(/script|marker/);
   });
@@ -749,6 +820,28 @@ describe('never in the way (T2, T5, T6)', () => {
     expect(daemon.sheetPage.status()).toMatchObject({ state: 'no-bundle', url: null });
   });
 
+  it('reads and changes the browsers’ file with the page off or without a bundle: `sheet browsers` lists, `sheet unpair` revokes', async () => {
+    const first = await served();
+    const a = await pairBrowser(first.daemon, first.port);
+    const b = await pairBrowser(first.daemon, first.port);
+    await first.daemon.stop('a restart');
+
+    const bare = await scene.start(options({}, { bundleDir: join(scene.root, 'no-such-bundle') }));
+    await decided(bare);
+    expect(JSON.parse((await cli(['sheet', 'browsers', '--json'])).out)).toMatchObject({ served: false, browsers: [{ id: a.id }, { id: b.id }] });
+    expect((await cli(['sheet', 'pair'])).code).toBe(2);
+    await bare.stop('a restart');
+
+    const off = await scene.start(options({ MAWS_SHEET_PAGE: '' }));
+    await decided(off);
+    const listed = await cli(['sheet', 'browsers']);
+    expect(listed).toMatchObject({ code: 0, err: 'this mawsd does not serve the sheet page now\n' });
+    expect(listed.out.split('\n').filter(Boolean)).toHaveLength(2);
+    expect(await cli(['sheet', 'unpair', a.id])).toEqual({ code: 0, out: 'unpaired 1 browser\n', err: '' });
+    expect(readFileSync(join(scene.paths.dir, 'sheet-page.json'), 'utf8')).not.toContain(a.id);
+    expect(await reaches('127.0.0.1', first.port)).toBe(false); // still no socket
+  });
+
   it('loads its chunk at the first request, not at the start; a chunk that cannot load answers 503 and the daemon serves the rest', async () => {
     let fail = true;
     const load = vi.fn(async () => {
@@ -760,7 +853,6 @@ describe('never in the way (T2, T5, T6)', () => {
     expect(daemon.sheetPage.status()).toMatchObject({ browsers: null, connections: null });
     const unavailable = await request(port, 'GET', '/', [HOST(port)]);
     expect(unavailable.status).toBe(503);
-    standing(unavailable, port);
     const app = await scene.app('machine');
     expect(await app.request('daemon.status')).toMatchObject({ ok: true, value: { sheetPage: { state: 'listening', browsers: null } } });
     fail = false;
