@@ -88,8 +88,9 @@ export const sourceKindOfTyped = (source: string): string | null => (/^[/~.]/.te
 // `writesOf`'s files as paths: the scope's settings file under the config home (user) or the project (`where.cwd`, the
 // session's directory, where the request runs), the others under `<config home>/plugins/` with the segments the request
 // already names filled in, then for a marketplace removal every settings file that may hold its uninstalled plugins or
-// an override for them, each once.
-export function writesWords(request: PluginsRequest, where: { configHome: string; cwd: string }): string[] {
+// an override for them, and last each `.claude.json` key that holds the person's choice, beside the engine's global config
+// file (`plugins.env`'s path), each once.
+export function writesWords(request: PluginsRequest, where: { configHome: string; cwd: string; globalConfig: string }): string[] {
   const scope = scopeOf(request);
   const manifest = writesOf(request.action as PluginsAction, scope, request.source, request.uninstalls ?? [], where.cwd);
   const input = request.input as { plugin?: string; name?: string };
@@ -106,6 +107,7 @@ export function writesWords(request: PluginsRequest, where: { configHome: string
     `${scope === 'user' ? where.configHome : where.cwd}/${manifest.settings}`,
     ...manifest.others.map((other) => `${where.configHome}/plugins/${fill(other)}`),
     ...manifest.scopeSettings.map(({ project, file }) => `${project ?? where.configHome}/${file}`),
+    ...manifest.globalConfig.map((key) => `${where.globalConfig} › ${key}`),
   ];
   return [...new Set(paths)];
 }

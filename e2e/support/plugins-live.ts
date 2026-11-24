@@ -93,26 +93,47 @@ export function pluginsScratch(): PluginsScratch {
 
 export interface PluginReads extends InvokeTracker {
   settledSince(at: number): Promise<{ name: string; ms: number; outcome: 'answered' | 'threw' | 'timed out at the bridge' | 'refused' }[]>; // the reads that settled since `at`
+  hold(): Promise<void>; // every invoke but a mutation's waits in main, before it reaches the host, until `release`
+  release(): Promise<string[]>; // lets the held invokes go; the names of those that waited
+  done(): Promise<number>; // how many `plugins.operation` `done` events main has sent the windows
 }
 
-type ReadLog = { inflight: number; lastSettledAt: number; settled: SettledInvoke[] };
+type ReadLog = { inflight: number; lastSettledAt: number; settled: SettledInvoke[]; held: boolean; waited: string[]; done: number };
 
 // Counts the `plugins.*` and `marketplaces.*` invokes main is answering. The page cannot do it: the preload's bridge is
 // frozen and read-only under contextIsolation (`window.maws` and its `invoke` are non-writable). So main's invoke
 // handlers for those channels (`maws:cmd:<name>`, one each, src/main/ipc/router.ts) are wrapped where Electron keeps
 // them (`ipcMain._invokeHandlers`, whose entry resolves once the reply is sent). Each settled invoke keeps its answer's
 // outcome (`ok` and the error's `code`, not its value), so a read the bridge answered `timeout` while the host's CLI ran
-// on fails the audit (`untilQuiet`) rather than closing a window. Call it before the page issues any.
+// on fails the audit (`untilQuiet`) rather than closing a window. While held (`hold`), every invoke but a mutation's
+// (and a cancel) waits before main's handler runs, so no CLI listing starts until `release`: a mutation's window ends
+// before the reads it sets off, which are judged on their own (`actionAuditOf`). A hold ends on the operation's `done`
+// event, counted where main sends it to the windows (`done`), never on anything the page draws: a result the page draws
+// only after a refetch (a removed row's line) would wait on the held read for ever. Call it before the page issues any.
 export async function trackPluginReads(app: ElectronApplication): Promise<PluginReads> {
-  const wrapped = await app.evaluate(({ ipcMain }) => {
+  const wrapped = await app.evaluate(({ ipcMain, BrowserWindow }) => {
     const handlers = (ipcMain as unknown as { _invokeHandlers?: Map<string, (event: unknown, ...args: unknown[]) => Promise<unknown>> })._invokeHandlers;
     if (!handlers) throw new Error('ipcMain keeps no _invokeHandlers map: the read tracker cannot wrap main’s handlers');
-    const log: ReadLog = { inflight: 0, lastSettledAt: 0, settled: [] };
+    const log: ReadLog = { inflight: 0, lastSettledAt: 0, settled: [], held: false, waited: [], done: 0 };
+    for (const win of BrowserWindow.getAllWindows()) {
+      const contents = win.webContents;
+      const send = contents.send.bind(contents);
+      contents.send = (channel: string, ...args: unknown[]) => {
+        if (channel === 'maws:evt:plugins.operation' && (args[0] as { phase?: unknown } | undefined)?.phase === 'done') log.done += 1;
+        send(channel, ...args);
+      };
+    }
+    const mutations = new Set(['plugins.install', 'plugins.uninstall', 'plugins.update', 'plugins.enable', 'plugins.disable', 'plugins.cancel', 'marketplaces.add', 'marketplaces.update', 'marketplaces.remove']);
     (globalThis as unknown as { __e8Reads: ReadLog }).__e8Reads = log;
     const channels = [...handlers.keys()].filter((key) => key.startsWith('maws:cmd:plugins.') || key.startsWith('maws:cmd:marketplaces.'));
     for (const channel of channels) {
       const handler = handlers.get(channel)!;
+      const name = channel.slice('maws:cmd:'.length);
       handlers.set(channel, async (event, ...args) => {
+        if (log.held && !mutations.has(name)) {
+          log.waited.push(name);
+          while (log.held) await new Promise((resolve) => setTimeout(resolve, 50));
+        }
         const started = Date.now();
         log.inflight += 1;
         let threw = true;
@@ -126,7 +147,7 @@ export async function trackPluginReads(app: ElectronApplication): Promise<Plugin
         } finally {
           log.inflight -= 1;
           log.lastSettledAt = Date.now();
-          log.settled.push({ name: channel.slice('maws:cmd:'.length), at: log.lastSettledAt, ms: log.lastSettledAt - started, threw, answer });
+          log.settled.push({ name, at: log.lastSettledAt, ms: log.lastSettledAt - started, threw, answer });
         }
       });
     }
@@ -135,6 +156,19 @@ export async function trackPluginReads(app: ElectronApplication): Promise<Plugin
   if (wrapped === 0) throw new Error('no plugins.* or marketplaces.* invoke handler to wrap');
   const read = () => app.evaluate(() => (globalThis as unknown as { __e8Reads: ReadLog }).__e8Reads);
   return {
+    hold: () =>
+      app.evaluate(() => {
+        const log = (globalThis as unknown as { __e8Reads: ReadLog }).__e8Reads;
+        log.held = true;
+        log.waited = [];
+      }),
+    done: async () => (await read()).done,
+    release: () =>
+      app.evaluate(() => {
+        const log = (globalThis as unknown as { __e8Reads: ReadLog }).__e8Reads;
+        log.held = false;
+        return log.waited;
+      }),
     inflight: async () => (await read()).inflight,
     lastSettledAt: async () => (await read()).lastSettledAt,
     settled: async () => (await read()).settled,

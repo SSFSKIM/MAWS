@@ -237,6 +237,10 @@ export interface PluginsWrites {
   // a marketplace removal only: every settings file that may hold one of the plugins it uninstalls or an enable or
   // disable override for one, relative to the config home (`project: null`) or to a project
   scopeSettings: { project: string | null; file: string }[];
+  // top-level keys of the engine's global config file (`.claude.json`) that hold a choice of the person's: a key there
+  // that changes what the engine does later is configuration, named here; its own records (usage counters, identifiers,
+  // migration flags) are not
+  globalConfig: string[];
 }
 
 // One installation as `claude plugin list --json` lists it (the scope may be a pseudo-scope such as `session`).
@@ -272,12 +276,16 @@ function settingsOfRemoval(installations: readonly PluginsInstallation[], cwd: s
 // (`uninstalls`, that marketplace's installations: the registry, the marketplace's cache, each one's data and every
 // settings file that may hold them or an override for them, `settingsOfRemoval` with the session's directory `cwd`). The
 // CLI's own `.claude.json` bookkeeping (usage counters, first-start identifiers) is not plugin configuration and is not
-// listed (D-12).
+// listed (D-12). The plugins the person uninstalled or turned off are configuration there (2.1.331, `declinedPlugins`:
+// a plugin listed in it is not installed again as another plugin's optional dependency): an uninstall at any scope, a
+// marketplace removal (its plugins turned off in a settings file) and a user-scope disable may add to it, a user-scope
+// install or enable takes the plugin out (E8 execution document, the Decision Log's entry of 2026-11-23).
 export function writesOf(action: PluginsAction, scope: PluginsScope, source: string | null, uninstalls: readonly PluginsInstallation[] = [], cwd: string | null = null): PluginsWrites {
   const settings = settingsOf(scope);
   const cloned = source === null || !READ_IN_PLACE.has(source);
   const cache = 'cache/<marketplace>/<plugin>/<version>/';
-  const writes = (others: string[], scopeSettings: PluginsWrites['scopeSettings'] = []): PluginsWrites => ({ settings, others, scopeSettings });
+  const declined = action === 'uninstall' || action === 'marketplace-remove' || (scope === 'user' && (action === 'install' || action === 'enable' || action === 'disable'));
+  const writes = (others: string[], scopeSettings: PluginsWrites['scopeSettings'] = []): PluginsWrites => ({ settings, others, scopeSettings, globalConfig: declined ? ['declinedPlugins'] : [] });
   switch (action) {
     case 'install':
     case 'update':
