@@ -1196,6 +1196,96 @@ describe('relay composer', () => {
   });
 });
 
+// The direct tell (the charter's Decision Log, 2026-11-24): a session on this Mac whose engine took the built-in mod tells
+// the agent itself, so the box needs no parent: a running child, one its parent waits on and a finished one (which the
+// engine resumes with the text, uxwave-tell-builtin-ended) all take a message; a stopped one does not (the engine refuses
+// it, uxwave-tell-builtin-stopped). In plan mode (which refuses the host's call) and without the mod, the relay stays.
+describe('relay composer, the direct tell', () => {
+  const withMod = (over: Partial<EngineSessionStatus> = {}) => live({ tell: true, ...over });
+  const invoked: [string, unknown][] = [];
+  let told: unknown;
+  const line = () => document.querySelector('[data-part="relay-line"]')?.textContent ?? null;
+  beforeEach(() => {
+    invoked.splice(0);
+    told = { delivered: true };
+    window.maws = {
+      localMachine: TEST_MACHINE,
+      invoke: async (name: string, input: unknown) => {
+        invoked.push([name, input]);
+        if (name === 'session.events') return { ok: true, value: { events: [], lastSeq: 0, complete: true } };
+        if (name === 'session.tellAgent') return { ok: true, value: await told };
+        return { ok: false, error: { code: 'internal', message: `unexpected ${name}` } };
+      },
+      on: () => () => {},
+    } as unknown as PreloadBridge;
+  });
+  const tellBox = (title = 'Agent a1') => screen.getByLabelText(`Message ${title}`) as HTMLTextAreaElement;
+  const send = async (text: string, title?: string) => {
+    fireEvent.change(tellBox(title), { target: { value: text } });
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+    await waitFor(() => expect(invoked.filter(([name]) => name === 'session.tellAgent').length).toBeGreaterThan(0));
+  };
+
+  it('tells a running background child itself: no parent in the box, the line after a send reading Sent', async () => {
+    await mount({ status: withMod(), events: [started('a1', 1)], params: { agentId: 'a1' as AgentId } });
+    expect(tellBox().placeholder).toBe('Message Agent a1…');
+    expect(screen.queryByLabelText(`Relay via ${TITLE}`)).toBeNull();
+    await send('Also check README');
+    await waitFor(() => expect(line()).toBe('Sent'));
+    expect(invoked.find(([name]) => name === 'session.tellAgent')?.[1]).toMatchObject({ agentId: 'a1', text: 'Also check README' });
+    expect(fake.inputs.steer).toEqual([]); // no relay
+  });
+
+  it('tells a child its parent waits on, which the relay could not reach', async () => {
+    await mount({ status: withMod(), events: [started('fg', 1, { isBackground: false })], params: { agentId: 'fg' as AgentId } });
+    expect(tellBox('Agent fg').disabled).toBe(false);
+    await send('Stop after the first file', 'Agent fg');
+    await waitFor(() => expect(line()).toBe('Sent'));
+  });
+
+  it('tells a finished agent, which the engine resumes with the message, and says so', async () => {
+    await mount({ status: withMod(), events: [started('a1', 1), finished('a1', 2)], params: { agentId: 'a1' as AgentId } });
+    expect(tellBox().disabled).toBe(false);
+    await send('One more thing');
+    await waitFor(() => expect(line()).toBe('Sent · Agent a1 resumes with it'));
+  });
+
+  it('keeps a stopped agent closed', async () => {
+    await mount({ status: withMod(), events: [started('a1', 1), finished('a1', 2, { status: 'stopped' })], params: { agentId: 'a1' as AgentId } });
+    expect(tellBox().disabled).toBe(true);
+    expect(tellBox().placeholder).toBe('This agent was stopped');
+  });
+
+  it('holds the box while a tell is out, so no edit is cleared by its answer', async () => {
+    let answer: (value: unknown) => void = () => {};
+    told = new Promise((resolve) => (answer = resolve));
+    await mount({ status: withMod(), events: [started('a1', 1)], params: { agentId: 'a1' as AgentId } });
+    await send('first');
+    expect(tellBox().disabled).toBe(true);
+    await act(async () => answer({ delivered: true }));
+    await waitFor(() => expect(line()).toBe('Sent'));
+    expect(tellBox().disabled).toBe(false);
+  });
+
+  it('says the engine\'s refusal when one comes, and keeps the draft', async () => {
+    told = { delivered: false, reason: 'Agent "a1" was stopped and was not resumed.' };
+    await mount({ status: withMod(), events: [started('a1', 1)], params: { agentId: 'a1' as AgentId } });
+    await send('hello');
+    await waitFor(() => expect(line()).toBe('Not sent: Agent "a1" was stopped and was not resumed.'));
+    expect(tellBox().value).toBe('hello');
+  });
+
+  it('relays through the parent in plan mode', async () => {
+    await mount({ status: withMod({ permissionMode: { requested: 'plan', effective: 'plan', refusal: null } }), events: [started('a1', 1)], params: { agentId: 'a1' as AgentId } });
+    expect(screen.getByLabelText(`Relay via ${TITLE}`)).toBeTruthy();
+  });
+
+  it('relays through the parent where the engine took no mod', async () => {
+    await mount({ status: live(), events: [started('a1', 1)], params: { agentId: 'a1' as AgentId } });
+    expect(screen.getByLabelText(`Relay via ${TITLE}`)).toBeTruthy();
+  });
+});
+
 describe('subagents tool', () => {
   it('createState with params { agentId } opens the drill-in at once; params undefined opens the lists', async () => {
     const { handle } = await mount({ events: [started('a1', 1)], params: { agentId: 'a1' as AgentId } });
