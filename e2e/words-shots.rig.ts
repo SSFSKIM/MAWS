@@ -13,7 +13,7 @@
 //   WORDS_OUT=$HOME/maws-words/before pnpm shots:words
 //
 // which builds out/ (the harness variant: Settings › Org reads its seeded org through the harness build's main; every
-// window here is the product's, MAWS_HARNESS=0) and runs the fourteen launches, about 45 minutes (M1 added launches 6
+// window here is the product's, MAWS_HARNESS=0) and runs the fifteen launches, about 50 minutes (M1 added launches 6
 // to 9 and the `m1-` scenes: the Settings and Org states the word cut's M1 changes; M2 added launch 10 and the `m2-`
 // scenes: the conversation's and the message box's states its cut changes; M3 added launches 11 and 12 and the `m3-` scenes:
 // the panels beside the conversation, and the project Channel's folds; M4 added launch 14 and the `m4-` scenes: the
@@ -31,6 +31,15 @@
 //   WORDS_OUT=$HOME/maws-words/rv-after pnpm shots:words -g "report view repair"
 //
 // and on master, as below for the m scenes, into another folder (rv-before).
+//
+// Board ticket 852 (the tool card retired) added launch 15 and the `tc-` scenes: a call that stands outside any run,
+// failed, denied, a cua_repl `js` call with its browser activity, an image result, a run of one, running, in the
+// transcript and in the to-human view, from recorded and invented transcripts and two sessions started on the replay
+// engine. One launch alone, from either build:
+//
+//   WORDS_OUT=$HOME/maws-words/tc-after pnpm shots:words -g "the tool card retired"
+//
+// and on master, as below for the m scenes, into another folder (tc-before).
 //
 // The `m1-` to `m4-` scenes are each their milestone's, so their "before" is this rig run against master's build: in a
 // clean checkout of master, `git checkout <this branch> -- e2e/words-shots.rig.ts e2e/support`, then the command above.
@@ -59,12 +68,14 @@ import { ACTIONS } from '../src/shared/keymap/actions';
 import { benchDeckFiles } from '../src/artifacts/slides/fixtures/bench';
 import { isolatedGitEnv } from '../test/support/git-env';
 import { installToHumanPlugin } from '../test/support/to-human-plugin'; // board ticket 850's launch
+import type { BrowserActivity } from '../src/shared/browser/activity'; // board ticket 852's launch
 import { ownerShapedState, writePluginCliStub, type StubState } from '../test/support/plugin-cli-stub';
 import { addressed } from './support/address';
 import { invoke, launchReady, recordedBlockJournal, steerStopJournal, turnsJournal, value } from './support/c7-replay';
 import { bindCsv, chart, insertBlocks } from './support/dashboards';
 import { createDesign, DESIGN_FILES, editDesign, threadsOf } from './support/design';
 import { closedPort, startBrowserServer } from './support/browser-server';
+import { ComputerUseJournal, CUA_JS } from './support/computer-use-replay'; // board ticket 852's launch
 import { closeSettings, closeSheet, importThrough, openImportSheet, profilesFile, sheetOf } from './support/browser-import-scene';
 import { buildChromeUserData } from '../test/support/chrome-profile';
 import { CHANNEL_FIXTURE_ENV, WORDS_CHANNEL_COUNTS, WORDS_CHANNEL_PROJECT, WORDS_CHANNEL_PROJECT_ID, wordsChannel, wordsChannelScenario } from './support/words-channel';
@@ -87,7 +98,7 @@ test.skip(!OUT, 'WORDS_OUT names the folder the captures go to');
 // added for the Settings and Org states the cut changes; 'm2' one its M2 added for the conversation's and the message
 // box's; 'm3' one its M3 added for the panels beside the conversation; 'm4' one its M4 added for the window, the typed
 // dialogs and Customize. A folder is under src/renderer/src, or from the repository's root when it starts with src/.
-type Meta = { id: string; title: string; how: string; state: string; folders: string[]; hover?: boolean; round?: 2 | 'm0' | 'm1' | 'm2' | 'm3' | 'm4' | 'rv' };
+type Meta = { id: string; title: string; how: string; state: string; folders: string[]; hover?: boolean; round?: 2 | 'm0' | 'm1' | 'm2' | 'm3' | 'm4' | 'rv' | 'tc' };
 const META: Meta[] = [];
 const results: { id: string; ok: boolean; error?: string; notes?: string[] }[] = [];
 const wanted = (id: string) => !ONLY || ONLY.has(id) || [...ONLY].some((o) => o.endsWith('*') && id.startsWith(o.slice(0, -1)));
@@ -98,6 +109,7 @@ const m2 = (meta: Omit<Meta, 'round'>): Meta => ({ ...meta, round: 'm2' });
 const m3 = (meta: Omit<Meta, 'round'>): Meta => ({ ...meta, round: 'm3' });
 const m4 = (meta: Omit<Meta, 'round'>): Meta => ({ ...meta, round: 'm4' });
 const rv = (meta: Omit<Meta, 'round'>): Meta => ({ ...meta, round: 'rv' }); // board ticket 850, the report view repair
+const tc = (meta: Omit<Meta, 'round'>): Meta => ({ ...meta, round: 'tc' }); // board ticket 852, the tool card retired
 
 // ---- scratch fixtures ------------------------------------------------------------------------------------------------
 const FIXED_DATE = '2026-09-20T09:00:00+00:00';
@@ -5344,6 +5356,486 @@ test('the word cut’s M4: the mods’ rows, Customize’s plugin and skill rows
         else await inView(gesture().locator('[role="status"]').filter({ hasText: new RegExp(`^${literal(M4_WORDS.starting)}$`) }), 'master’s Starting…');
       },
     });
+  } finally {
+    await maws.cleanup();
+  }
+});
+
+// ======================================================================================================================
+// Launch 15 (board ticket 852, the tool card retired): a call that stands outside any run, in each state the ticket
+// names, drawn by the build under test: master draws each as a bordered card, the ticket's build as one quiet line with
+// what it shows at rest under it. Two recorded sessions and four invented ones the engine store lists, two of the
+// invented ones started on the replay engine so a call is running. The scratch engine store holds the to-human plugin's
+// installation as launch 13's does, so the sessions whose work holds `mcp__to-human__message` calls draw the to-human
+// view (MAWS's mirror, on both builds); the others carry no message and draw the transcript. The sessions:
+//   failed      (invented) a lone command that failed, then a lone command that passed (a run of one on the ticket's build);
+//   rhythm      (invented) a run of two calls, then two calls that stand alone in a row: a command the person denied,
+//               and a Read whose result is an image (a repository picture, spikes/p3-design's deck render);
+//   js          (invented) a cua_repl `js` call, its browser activity sent to the window as main sends it (no browser
+//               runs here: main's own list stays empty, the window keeps what it heard);
+//   autodenied  (recorded: uxwave/u1c-t-idle-1) a Read alone, a command the auto mode classifier denied, the grant's turn;
+//   artifacts   (recorded: p1-maws-artifacts) an artifact's screenshot standing between two runs, one with a failed edit;
+//   stopped     (recorded: w1-steer-next-interrupted) a lone command with no description, its turn stopped mid-call;
+//   report      (invented) the cases above in one turn between the person's messages: the to-human view;
+//   run, rvrun  started here, each on a replay journal of e2e/support/computer-use-replay.ts held while its `js` call
+//               runs (rvrun after a finished to-human turn, so the to-human view is in force over the running call).
+// Each scene opens its session afresh and sets the lines it needs open or closed; the started sessions are last. Two
+// scenes point at a run's line (a run of one, a run of two): its chevron shows only on pointing, focus or open.
+// Every check finds the call by its row (`data-row-id`) or its cell (`data-cell-id`) and the state both builds share
+// (`data-status`, `aria-expanded`), never by what the ticket added, so each holds on master's build too.
+// ======================================================================================================================
+const TC = { failed: 0, rhythm: 1, js: 2, report: 3, run: 4, rvrun: 5, autodenied: 6, artifacts: 7, stopped: 8 } as const;
+type TcKey = keyof typeof TC;
+const tcDiskId = (key: TcKey) => `0f7a8b9c-0000-4000-8000-0000000008${String(TC[key]).padStart(2, '0')}`;
+const tcTool = (key: TcKey, name: string) => `toolu_01Tc${TC[key]}${name}`;
+// The recorded sessions and the calls the scenes find in them
+const TC_RECORDED = {
+  autodenied: { file: 'spikes/protocol-probe/fixtures/uxwave/u1c-t-idle-1.transcript.jsonl', read: 'toolu_01Mpxuxmngz99geTTNyNthTG', denied: 'toolu_01VDYnnq8V7AE4hW16wRC3Fe', again: 'toolu_01XuWvu9Gg5Hg9K7cyn78zVe' },
+  artifacts: { file: 'test/fixtures/transcripts/p1-maws-artifacts.jsonl', shot: 'toolu_017TH1WuYWAd1Gmq4QRn3DCV', edits: 'toolu_01Trfn7ugsMF9Yv4PnL5DaGr' },
+  // a lone `sleep 6 && echo 1` with no description, its turn stopped mid-call (the person's Esc: the rejected result, then
+  // the interrupt's marker): a standalone row, `stopped`, “Stopped a command” on both builds (the disk derivation's rows)
+  stopped: { file: 'test/fixtures/transcripts/w1-steer-next-interrupted.jsonl', call: 'toolu_018A2pQ8opsSUGLt6bscFJ4R' },
+} as const;
+const TC_COVER = 'spikes/p3-design/results/run-38887236196/f-deck.png'; // 390 × 844
+const TC_TAB = 'b_7c0de0852a01';
+const TC_CELL = "const tab = await cua.browser.open('http://127.0.0.1:4173/sign-in');\nawait tab.fill('#email', 'demo@example.test');\nawait tab.click({ text: 'Sign in' });\nreturn tab.title();";
+// What the agent did in the tab while its `js` call ran, as main reports it (src/shared/browser/activity.ts)
+const TC_ACTIVITY: BrowserActivity[] = [
+  { kind: 'tabOpened', url: 'http://127.0.0.1:4173/sign-in' },
+  { kind: 'navigated', url: 'http://127.0.0.1:4173/sign-in', title: 'Sign in' },
+  { kind: 'typed', chars: 17 },
+  { kind: 'clicked', x: 412, y: 318, label: 'button Sign in' },
+  { kind: 'navigated', url: 'http://127.0.0.1:4173/dashboard', title: 'Dashboard' },
+  { kind: 'screenshot' },
+];
+const TC_FAILED_OUTPUT = 'Exit code 1\n FAIL  src/quota.test.ts > resets after five hours\nAssertionError: expected 18000000 to be 18000001\n ❯ src/quota.test.ts:12:31\n\n Test Files  1 failed | 7 passed (8)\n      Tests  1 failed | 41 passed (42)';
+const TC_REFUSAL = 'Not now: the preview server still serves from dist.';
+type TcSpan = { start: number; end: number };
+// An invented session's transcript, as the engine writes one (launch 13's rvTranscript's shape), and the span of its
+// `js` call, which the window's activity must fall in to be drawn under the call.
+function tcTranscript(key: TcKey, repo: string): { rows: Record<string, unknown>[]; js: TcSpan | null } {
+  const i = TC[key];
+  const engineId = tcDiskId(key);
+  const rows: Record<string, unknown>[] = [];
+  let parent: string | null = null;
+  let n = 0;
+  let clock = Date.UTC(2026, 10, 21, 9, 0, 0) + i * 3_600_000;
+  let js: TcSpan | null = null;
+  const tool = (name: string) => tcTool(key, name);
+  const uuid = () => `c${i}000000-0000-4000-8000-${String(++n).padStart(12, '0')}`;
+  const base = (type: string, id: string) => ({ type, uuid: id, parentUuid: parent, isSidechain: false, cwd: repo, sessionId: engineId, version: '2.1.322', timestamp: new Date((clock += 4_000)).toISOString(), userType: 'external', entrypoint: 'sdk-ts' });
+  const add = (type: string, fields: Record<string, unknown>) => {
+    const id = uuid();
+    rows.push({ ...base(type, id), ...fields });
+    parent = id;
+    return id;
+  };
+  const prompt = (text: string) => add('user', { message: { role: 'user', content: text }, origin: { kind: 'human' }, promptSource: 'sdk', turnOrigin: 'human' });
+  const assistant = (content: unknown[], stop: string) => add('assistant', { message: { id: `msg_tc${i}${String(n).padStart(4, '0')}`, type: 'message', role: 'assistant', model: 'claude-haiku-4-5-20251001', content, stop_reason: stop, usage: { input_tokens: 1, output_tokens: 1 } } });
+  const note = (text: string) => assistant([{ type: 'text', text }], 'tool_use');
+  const answer = (text: string) => assistant([{ type: 'text', text }], 'end_turn');
+  // a call and its result; `error` marks a failed one, `denial` the engine's kind of a refusal (`toolDenialKind`)
+  const call = (id: string, name: string, input: Record<string, unknown>, result: { output: unknown; content: unknown; error?: true; denial?: string }) => {
+    assistant([{ type: 'tool_use', id, name, input }], 'tool_use');
+    add('user', { toolUseResult: result.output, ...(result.denial && { toolDenialKind: result.denial }), message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: id, content: result.content, is_error: result.error === true }] } });
+  };
+  const message = (name: string, text: string, final: boolean) => call(tool(name), 'mcp__to-human__message', { text, final }, { output: 'sent', content: 'sent' });
+  const end = () => add('system', { subtype: 'turn_duration', durationMs: 42_000 });
+  const bash = (stdout: string) => ({ stdout, stderr: '', interrupted: false, isImage: false, noOutputExpected: false });
+  const failedTests = () => call(tool('Test'), 'Bash', { command: 'pnpm test', description: 'Run the unit tests' }, { output: `Error: ${TC_FAILED_OUTPUT}`, content: TC_FAILED_OUTPUT, error: true });
+  // a run of two (a search, then a read), a command the person denied, a Read whose result is an image
+  const cleanAndCover = () => {
+    call(tool('Grep'), 'Grep', { pattern: 'rm -rf dist', path: repo, output_mode: 'files_with_matches' }, { output: { mode: 'files_with_matches', filenames: ['scripts/clean.sh'], numFiles: 1 }, content: 'Found 1 file\nscripts/clean.sh' });
+    const script = '#!/bin/sh\nrm -rf dist\n';
+    call(tool('Read'), 'Read', { file_path: `${repo}/scripts/clean.sh` }, { output: { type: 'text', file: { filePath: `${repo}/scripts/clean.sh`, content: script, numLines: 2, startLine: 1, totalLines: 2 } }, content: '1\t#!/bin/sh\n2\trm -rf dist' });
+    call(tool('Deny'), 'Bash', { command: 'rm -rf dist', description: 'Clear the build folder' }, { output: `Error: ${TC_REFUSAL}`, content: TC_REFUSAL, error: true, denial: 'permission-rule' });
+    const png = readFileSync(join(REPO_ROOT, TC_COVER));
+    const data = png.toString('base64');
+    call(tool('Cover'), 'Read', { file_path: `${repo}/docs/deck-cover.png` }, {
+      output: { type: 'image', file: { base64: data, type: 'image/png', originalSize: png.length, dimensions: { originalWidth: 390, originalHeight: 844, displayWidth: 390, displayHeight: 844 } } },
+      content: [{ type: 'image', source: { type: 'base64', media_type: 'image/png', data } }],
+    });
+  };
+  const signIn = () => {
+    const id = tool('Js');
+    assistant([{ type: 'tool_use', id, name: CUA_JS, input: { code: TC_CELL, timeout_ms: 30_000 } }], 'tool_use');
+    const start = clock;
+    const text = 'Signed in: the page now reads “Dashboard”.';
+    add('user', { toolUseResult: [{ type: 'text', text }], message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: id, content: [{ type: 'text', text }], is_error: false }] } });
+    js = { start, end: clock };
+  };
+  if (key === 'failed') {
+    prompt('Run the unit tests, then the linter, and tell me what needs fixing.');
+    note('Running the unit tests first.');
+    failedTests();
+    note('One test fails. Running the linter as well.');
+    call(tool('Lint'), 'Bash', { command: 'pnpm lint', description: 'Run the linter' }, { output: bash('No problems found.'), content: 'No problems found.' });
+    answer('One unit test fails: “resets after five hours” expects the reset a millisecond later than `resetAfterMs` gives. The linter finds nothing.');
+    end();
+  } else if (key === 'rhythm') {
+    prompt('Find where the build folder is cleaned, clear it, and show me the deck cover.');
+    note('Looking for the clean step.');
+    cleanAndCover();
+    answer('The clean step is `scripts/clean.sh`. I left `dist` as it is, as you asked; the deck cover is above.');
+    end();
+  } else if (key === 'js') {
+    prompt('Open the staging sign-in page in the browser and check that signing in works.');
+    note('Opening the sign-in page in the browser.');
+    signIn();
+    answer('Signing in works: the demo account lands on the dashboard.');
+    end();
+  } else if (key === 'report') {
+    prompt('Run the tests, clear the build folder, check that signing in works, and tell me how it went.');
+    message('Start', 'Running the tests first.', false);
+    failedTests();
+    message('Failed', 'One test fails (“resets after five hours”). Clearing the build folder next.', false);
+    cleanAndCover();
+    message('Cleaned', 'I left `dist` as it is, as you asked; the deck cover is above. Checking sign-in now.', false);
+    signIn();
+    message('Signed', 'Signing in works. Confirming the branch before I report.', false);
+    call(tool('Branch'), 'Bash', { command: 'git branch --show-current', description: 'Show the current branch' }, { output: bash('main'), content: 'main' });
+    message('Done', 'On `main`: one unit test fails, the build folder is untouched, and signing in works.', true);
+    end();
+  } else if (key === 'rvrun') {
+    prompt('Keep an eye on the sign-in page while I deploy.');
+    message('Wait', 'I will check the sign-in page once you say the deploy is out.', true);
+    end();
+  }
+  return { rows, js };
+}
+// The activity of the agent's tab, sent to the window as main sends it, spread over `span`.
+async function tcActivity(app: ElectronApplication, appSessionId: string, span: TcSpan) {
+  for (const [k, activity] of TC_ACTIVITY.entries()) {
+    const at = new Date(span.start + Math.round(((k + 1) * (span.end - span.start)) / (TC_ACTIVITY.length + 1))).toISOString();
+    await emitToWindow(app, 'browser.agent.activity', { appSessionId, tabId: TC_TAB, at, activity });
+  }
+}
+// The prompts the started sessions are given, and the journals' `js` calls (computer-use-replay.ts names each call)
+const TC_LIVE = {
+  run: { title: 'Check the staging sign-in', prompt: 'Open the staging sign-in page and sign in with the demo account.' },
+  rvrun: { title: 'Keep an eye on the sign-in page', prompt: 'The deploy is out: check the sign-in page now.' },
+} as const;
+
+const TC_IDS = ['tc-failed', 'tc-failed-open', 'tc-hover-run-of-one', 'tc-auto-denied', 'tc-run-of-one-open', 'tc-stopped-run-of-one', 'tc-rhythm', 'tc-hover-run', 'tc-denied-jump', 'tc-image-open', 'tc-image-recorded', 'tc-run-opened', 'tc-js-activity', 'tc-js-open', 'tc-rv-rest', 'tc-rv-open', 'tc-rv-open-js', 'tc-rv-denied-jump', 'tc-running-js', 'tc-rv-running'];
+test('the tool card retired: lone calls failed, denied, a js call, an image, a run of one, running, in the transcript and the report view', async () => {
+  test.setTimeout(900_000);
+  if (!TC_IDS.some(wanted)) return;
+  const repos = REPOS.map((name) => makeRepo(name, name === 'stages' ? 'scheduled' : undefined));
+  const repoOf = (key: TcKey) => repos[TC[key] % repos.length]!;
+  const config = join(SCRATCH, 'claude-config-tc');
+  rmSync(config, { recursive: true, force: true });
+  const spans: Partial<Record<TcKey, TcSpan>> = {};
+  for (const key of ['failed', 'rhythm', 'js', 'report', 'rvrun'] as const) {
+    const project = join(config, 'projects', repoOf(key).replace(/[^a-zA-Z0-9]/g, '-'));
+    mkdirSync(project, { recursive: true });
+    const { rows, js } = tcTranscript(key, repoOf(key));
+    writeFileSync(join(project, `${tcDiskId(key)}.jsonl`), `${rows.map((row) => JSON.stringify(row)).join('\n')}\n`);
+    if (js) spans[key] = js;
+  }
+  for (const key of ['autodenied', 'artifacts', 'stopped'] as const) writeDisk(config, TC_RECORDED[key].file, tcDiskId(key), repoOf(key));
+  seedSession(config, repoOf('run'), tcDiskId('run'), TC_LIVE.run.title, '2026-11-21T08:00:00.000Z');
+  trust(config);
+  installToHumanPlugin(config, { declares: true, version: '0.9.0' });
+  // The started sessions' journals, in the order their scenes start them (the seam gives each launch the next): the
+  // replay's handshake, the prompt MAWS writes, a `js` call, then held at a context read no one asks, so the call runs
+  // as long as the launch lasts. Each pins its disk session's engine id.
+  const journals = join(SCRATCH, 'journals');
+  mkdirSync(journals, { recursive: true });
+  const live: { key: 'run' | 'rvrun'; call: string; journal: string }[] = [];
+  for (const [key, scene] of [['run', 'tc-running-js'], ['rvrun', 'tc-rv-running']] as const) {
+    if (!wanted(scene)) continue;
+    const journal = new ComputerUseJournal(tcDiskId(key), repoOf(key));
+    const call = journal.js(journal.prompt(), TC_CELL, 30_000);
+    journal.holdAtContextUsage();
+    live.push({ key, call, journal: journal.write(journals, `tc-${key}`) });
+  }
+  const usage = usageFixture();
+  const userData = join(SCRATCH, 'profile-tc');
+  rmSync(userData, { recursive: true, force: true });
+  mkdirSync(userData, { recursive: true });
+  const maws = await launchMaws({ userData, prepare: noGh, env: BASE_ENV({ MAWS_ENGINE_REPLAY: '1', ...(live.length > 0 && { MAWS_E2E_REPLAY_FIXTURES: live.map((l) => l.journal).join(',') }), CLAUDE_CONFIG_DIR: config, MAWS_CLAUDE_USAGE_DIR: usage, PATH: NO_GH_PATH }) });
+  const { page, app } = maws;
+  try {
+    await size(maws);
+    await light(page);
+    value(await invoke(page, 'settings.set', { gateway: { defaultRoute: 'direct' } })); // no relay in the run
+    const keys = Object.keys(TC) as TcKey[];
+    const sid: Partial<Record<TcKey, string>> = {};
+    await expect.poll(async () => {
+      const { sessions } = value(await invoke(page, 'session.list', {}));
+      for (const key of keys) sid[key] = sessions.find((s) => s.engineSessionId === tcDiskId(key))?.appId ?? '';
+      return keys.every((key) => sid[key]);
+    }, { timeout: 30_000 }).toBe(true).catch((error: unknown) => setupFailed(`the tool card sessions’ index (${keys.filter((key) => !sid[key]).join(', ')} not listed)`, error));
+    await dismissToasts(page);
+    // the finished `js` calls' activity, which the window keeps for the launch's life
+    for (const key of ['js', 'report'] as const) if (sid[key] && spans[key]) await tcActivity(app, sid[key]!, spans[key]!);
+
+    const cellOf = (id: string) => pane(page).locator(`[data-cell-id="cell:${id}"]`).first();
+    const rowOf = (id: string) => pane(page).locator(`[data-row-id="${id}"]`).first();
+    const lineOf = (id: string) => cellOf(id).locator(':scope > button.transcript-cell-line');
+    const activityOf = (id: string) => pane(page).locator(`.transcript-browser-action[data-tool-use="${id}"]`);
+    const turnLines = (open: boolean) => pane(page).locator(`.transcript-row[data-kind="divider"] button.transcript-disclosure[aria-expanded="${open}"]`);
+    const closedLines = () => pane(page).locator('[data-row-id^="record-fold:closed:"] button');
+    const openStretches = () => pane(page).locator('[data-row-id^="record-fold:open:"] button');
+    // a session opened afresh: what an earlier scene opened (a call's line, a run, a stretch of the report) closed again
+    const opened = async (key: TcKey) => {
+      if (!sid[key]) throw new Error(`the ${key} session was not listed by the index`);
+      await openSession(page, sid[key]!);
+      await expect(pane(page).locator('.transcript-row[data-kind]').first()).toBeVisible({ timeout: 20_000 });
+      await unfold(page, openStretches(), 'an opened record line', 8);
+      await unfold(page, pane(page).locator('.transcript-cell-line[aria-expanded="true"], .transcript-run-line[aria-expanded="true"]'), 'an opened call’s or run’s line', 20);
+    };
+    // every turn's work shown, or every turn folded to its line
+    const turns = async (open: boolean) => {
+      await unfold(page, turnLines(!open), open ? 'a closed turn’s line' : 'an opened turn’s line', 6);
+      await page.waitForTimeout(600);
+      await toTop(page);
+    };
+    // a call's own line pressed open
+    const openLine = async (id: string) => {
+      if ((await lineOf(id).getAttribute('aria-expanded')) !== 'true') await press(page, lineOf(id), 'the call’s line');
+      await page.waitForTimeout(800);
+    };
+    const lineOpen = (id: string) => expect(lineOf(id), 'the call’s line open').toHaveAttribute('aria-expanded', 'true', { timeout: 3_000 });
+    const status = (id: string, state: string) => expect(cellOf(id), `the call ${state}`).toHaveAttribute('data-status', state, { timeout: 3_000 });
+    // the turn line's denied count pressed: the jump opens what holds the call and gives the call the keyboard
+    const jumpTo = async (id: string) => {
+      await toEnd(page);
+      await press(page, pane(page).locator(`a[href="#cell:${id}"]`).first(), 'the turn line’s denied count');
+      await page.waitForTimeout(1500);
+    };
+    // `target` brought near the list's top, as far as the list scrolls: seek stops where the target first shows (often at
+    // the bottom edge, under the message box), so what follows it would be left out of the picture
+    const place = async (target: Locator) => {
+      await seek(page, target);
+      const [at, list] = await Promise.all([target.boundingBox(), scroller(page).boundingBox()]);
+      if (at && list) {
+        await scroller(page).evaluate((el, dy) => {
+          el.scrollTop += dy;
+          el.dispatchEvent(new Event('scroll'));
+        }, at.y - list.y - 72);
+      }
+      await page.waitForTimeout(700);
+    };
+    // The check that `target` is in sight: the point near its start shows the target itself, so it is inside the window
+    // and nothing is drawn over it (the message box, a notice); a row the message box covers is still in the viewport
+    // A miss throws with what it saw, so `_run.json` says why: the target's box and what the point hit, or that it is not
+    // drawn at all (a virtualised row, a stretch still folded), with the list's scroll, the message box's rect and the
+    // rows the list has mounted.
+    const seen = (target: Locator, what: string) => async () => {
+      let last = '';
+      for (const until = Date.now() + 3_000; Date.now() < until; await page.waitForTimeout(200)) {
+        last = (await target.count()) === 0 ? 'not drawn' : await target.evaluate((el) => {
+          const r = el.getBoundingClientRect();
+          const box = `box ${Math.round(r.left)},${Math.round(r.top)} ${Math.round(r.width)}x${Math.round(r.height)}`;
+          if (r.width === 0 || r.height === 0) return `no size: ${box}`;
+          const hit = document.elementFromPoint(r.left + Math.min(48, r.width / 2), r.top + Math.min(10, r.height / 2));
+          if (hit !== null && el.contains(hit)) return 'in sight';
+          const name = hit === null ? 'nothing' : `${hit.tagName.toLowerCase()}${hit.className && typeof hit.className === 'string' ? `.${hit.className.trim().split(/\s+/).join('.')}` : ''}`;
+          return `${box}; the point hit ${name}`;
+        });
+        if (last === 'in sight') return;
+      }
+      const scene = await scroller(page).evaluate((list) => {
+        const frame = document.querySelector('[data-region="main"] [data-pane="0"] [data-composer-frame]')?.getBoundingClientRect();
+        const rows = Array.from(list.querySelectorAll('[data-row-id]'), (row) => row.getAttribute('data-row-id'));
+        return `scrollTop ${Math.round(list.scrollTop)} of ${Math.round(list.scrollHeight)} (client ${list.clientHeight}); message box ${frame ? `${Math.round(frame.top)}..${Math.round(frame.bottom)}` : 'none'}; rows mounted ${rows.join(' ')}`;
+      }).catch((error: unknown) => `the list not read: ${String(error)}`);
+      throw new Error(`${what} in sight, nothing over it: ${last}; ${scene}`);
+    };
+    // A line pointed at (a run's, a lone call's, or on master's build a lone call's card line: the first disclosure of its
+    // row), and the check that its chevron is drawn: lines and runs show it only on pointing, focus or open (a card always
+    // did)
+    const pointAt = async (line: Locator) => {
+      await letGo(page);
+      await line.hover();
+      await page.waitForTimeout(800);
+    };
+    const chevronShown = (line: Locator, what: string) => checks(pointedAt(line, what), () =>
+      expect.poll(() => line.locator('.transcript-chevron').first().evaluate((el) => getComputedStyle(el).opacity), { message: `the chevron of ${what} drawn`, timeout: 3_000 }).toBe('1'));
+    const focused = (id: string) => () => expect.poll(() => cellOf(id).evaluate((el) => el === document.activeElement), { message: 'the denied call holds the keyboard', timeout: 3_000 }).toBe(true);
+    const FOLDERS = ['transcript/view/cells', 'transcript/view/rows', 'transcript/surface', 'transcript/model'];
+    const meta = (id: string, title: string, how: string, state: string, folders = FOLDERS) => tc({ id, title, how: `${how} (launch 15)`, state, folders });
+    const hoverMeta = (id: string, title: string, how: string, state: string) => tc({ id, title, how: `${how} (launch 15)`, state, folders: FOLDERS, hover: true });
+
+    // ---- the transcript ---------------------------------------------------------------------------------------------
+    const fail = tcTool('failed', 'Test');
+    const lint = tcTool('failed', 'Lint'); // a run of one whose call has a description
+    await shot(page, meta('tc-failed', 'A lone command that failed, then a run of one', 'The session “failed” (invented), its turn opened', 'The failed command at rest: its mark and the error’s first line; under it the lone passing command (a run of one on the ticket’s build)'), async () => {
+      await opened('failed');
+      await turns(true);
+      await place(cellOf(fail));
+    }, { check: checks(seen(cellOf(fail), 'the failed call'), () => status(fail, 'error'), seen(rowOf(`cell:${lint}`), 'the passing call after it')) });
+    await shot(page, meta('tc-failed-open', 'A lone failed command, opened', 'The session “failed” (invented), its turn opened, then the failed command’s line pressed', 'The whole error under the command’s line'), async () => {
+      await opened('failed');
+      await turns(true);
+      await place(cellOf(fail));
+      await openLine(fail);
+    }, { check: checks(seen(cellOf(fail), 'the failed call'), () => lineOpen(fail)) });
+    // the passing command pointed at: on the ticket's build its call's one line (the call's description, the chevron
+    // after it); on master's, the call's card line
+    const lintLine = () => rowOf(`cell:${lint}`).locator('button[aria-expanded]').first();
+    await shot(page, hoverMeta('tc-hover-run-of-one', 'A run of one pointed at', 'The session “failed” (invented), its turn opened, the pointer on the lone passing command (`pnpm lint`, described “Run the linter”)', 'The lone call’s line (“Ran the linter”) under the pointer with its chevron drawn (master: the call’s card, its chevron always drawn)'), async () => {
+      await opened('failed');
+      await turns(true);
+      await place(rowOf(`cell:${lint}`));
+      await pointAt(lintLine());
+    }, { check: checks(seen(rowOf(`cell:${lint}`), 'the lone passing command'), chevronShown(lintLine(), 'the lone passing command’s line')) });
+
+    const auto = TC_RECORDED.autodenied;
+    await shot(page, meta('tc-auto-denied', 'A command the auto mode classifier denied', 'The session “autodenied” (recorded, uxwave/u1c-t-idle-1), both turns opened', 'A lone Read (a run of one on the ticket’s build), the denied command with its reason, and the grant’s turn with the command run again'), async () => {
+      await opened('autodenied');
+      await turns(true);
+      await place(rowOf(`cell:${auto.read}`));
+    }, { check: checks(seen(rowOf(`cell:${auto.read}`), 'the lone Read before it'), seen(cellOf(auto.denied), 'the denied call'), () => status(auto.denied, 'denied')) });
+    // the lone command of the grant's turn pressed: on the ticket's build its call's one line, opening its detail (its
+    // command and result) under it; on master's, the call's own card (the first disclosure of the call's row, on either
+    // build)
+    const again = () => rowOf(`cell:${auto.again}`).locator('button[aria-expanded]').first();
+    await shot(page, meta('tc-run-of-one-open', 'A run of one, opened', 'The session “autodenied” (recorded, uxwave/u1c-t-idle-1), both turns opened, then the second turn’s lone command pressed', 'On the ticket’s build the call’s line open, its command and result under it; on master the call’s card open'), async () => {
+      await opened('autodenied');
+      await turns(true);
+      await place(rowOf(`cell:${auto.again}`));
+      if ((await again().getAttribute('aria-expanded')) !== 'true') await press(page, again(), 'the lone command’s first line');
+      await page.waitForTimeout(800);
+    }, { check: checks(seen(rowOf(`cell:${auto.again}`), 'the lone command'), () => expect(again(), 'its line open').toHaveAttribute('aria-expanded', 'true', { timeout: 3_000 })) });
+    const stopped = TC_RECORDED.stopped.call;
+    await shot(page, meta('tc-stopped-run-of-one', 'A lone command the person stopped', 'The session “stopped” (recorded, w1-steer-next-interrupted), its turns opened', 'The lone `sleep 6 && echo 1`, no description, stopped mid-call: its stopped mark and “Stopped a command” (master: the same call’s card)'), async () => {
+      await opened('stopped');
+      await turns(true);
+      await place(cellOf(stopped));
+    }, { check: checks(seen(cellOf(stopped), 'the stopped call'), () => status(stopped, 'stopped')) });
+
+    const deny = tcTool('rhythm', 'Deny');
+    const cover = tcTool('rhythm', 'Cover');
+    const run = () => rowOf(`group:cell:${tcTool('rhythm', 'Grep')}`);
+    await shot(page, meta('tc-rhythm', 'A run, then two lone calls in a row', 'The session “rhythm” (invented), its turn opened', 'A run of two calls, then the denied command with its reason and the image Read with its thumbnail on the ticket’s build: the space between lines and runs'), async () => {
+      await opened('rhythm');
+      await turns(true);
+      await place(run());
+    }, { check: checks(seen(run(), 'the run before them'), seen(cellOf(deny), 'the denied call'), () => status(deny, 'denied'), seen(cellOf(cover), 'the image Read')) });
+    const runLine = () => run().locator('.transcript-run-line').first();
+    await shot(page, hoverMeta('tc-hover-run', 'A run of two pointed at', 'The session “rhythm” (invented), its turn opened, the pointer on the run of a search and a read', 'The run’s line under the pointer with its chevron drawn'), async () => {
+      await opened('rhythm');
+      await turns(true);
+      await place(run());
+      await pointAt(runLine());
+    }, { check: checks(seen(run(), 'the run'), chevronShown(runLine(), 'the run’s line')) });
+    await shot(page, meta('tc-denied-jump', 'The turn line’s denied count pressed', 'The session “rhythm” (invented), its turn folded, then its line’s “1 denied” pressed', 'The turn open, the denied command in view holding the keyboard'), async () => {
+      await opened('rhythm');
+      await turns(false);
+      await jumpTo(deny);
+    }, { check: checks(() => inView(cellOf(deny), 'the denied call'), focused(deny)) });
+    await shot(page, meta('tc-image-open', 'A lone image result, opened', 'The session “rhythm” (invented), its turn opened, then the image Read’s line pressed', 'The image whole under the line, no thumbnail'), async () => {
+      await opened('rhythm');
+      await turns(true);
+      await place(cellOf(cover));
+      await openLine(cover);
+    }, { check: checks(seen(cellOf(cover), 'the image Read'), () => lineOpen(cover), () => expect(cellOf(cover).locator('img.transcript-cell-thumb'), 'no thumbnail while open').toHaveCount(0)) });
+
+    const art = TC_RECORDED.artifacts;
+    const edits = () => rowOf(`group:cell:${art.edits}`);
+    await shot(page, meta('tc-image-recorded', 'An artifact’s screenshot between two runs', 'The session “artifacts” (recorded, p1-maws-artifacts), its turn opened', 'The screenshot call at rest (its thumbnail on the ticket’s build), the run of two edits after it closed'), async () => {
+      await opened('artifacts');
+      await turns(true);
+      await place(cellOf(art.shot));
+    }, { check: checks(seen(cellOf(art.shot), 'the screenshot call'), seen(edits(), 'the run after it')) });
+    // the coordinator's pair: an opened run (its bordered block kept for now) beside a call that stood alone
+    await shot(page, meta('tc-run-opened', 'An opened run beside a lone call', 'The session “artifacts” (recorded, p1-maws-artifacts), its turn opened, then the run after the screenshot pressed', 'The run of two edits open (one failed), its block under the screenshot call’s line'), async () => {
+      await opened('artifacts');
+      await turns(true);
+      await seek(page, edits());
+      const line = edits().locator('.transcript-run-line').first();
+      if ((await line.getAttribute('aria-expanded')) !== 'true') await press(page, line, 'the run’s line');
+      await page.waitForTimeout(800);
+      await place(cellOf(art.shot));
+    }, { check: checks(seen(cellOf(art.shot), 'the screenshot call'), seen(edits(), 'the run after it'), () => expect(edits().locator('.transcript-run-line').first(), 'the run open').toHaveAttribute('aria-expanded', 'true', { timeout: 3_000 })) });
+
+    const js = tcTool('js', 'Js');
+    await shot(page, meta('tc-js-activity', 'A finished js call with its browser activity', 'The session “js” (invented; its activity sent to the window), its turn opened', 'The js call’s line, the agent’s steps in the browser under it'), async () => {
+      await opened('js');
+      await turns(true);
+      await place(cellOf(js));
+    }, { check: checks(seen(cellOf(js), 'the js call'), seen(activityOf(js).last(), 'its browser activity, to the last row')) });
+    await shot(page, meta('tc-js-open', 'A finished js call, opened', 'The session “js” (invented), its turn opened, then the js call’s line pressed', 'The cell’s code and its result under the line, the activity after them'), async () => {
+      await opened('js');
+      await turns(true);
+      await place(cellOf(js));
+      await openLine(js);
+    }, { check: checks(seen(cellOf(js), 'the js call'), () => lineOpen(js)) });
+
+    // ---- the to-human view (MAWS's mirror) -----------------------------------------------------------------------------
+    const rvFolders = ['owner/view', ...FOLDERS];
+    const rvFail = tcTool('report', 'Test');
+    const rvJs = tcTool('report', 'Js');
+    const rvDeny = tcTool('report', 'Deny');
+    const openStretchesAll = async () => {
+      await unfold(page, closedLines(), 'a closed record line', 8);
+      await toTop(page);
+    };
+    await shot(page, meta('tc-rv-rest', 'The to-human view at rest', 'The session “report” (invented), opened', 'The person’s messages, a record line in place of each stretch of work between them', rvFolders), async () => {
+      await opened('report');
+      await toEnd(page);
+    }, { check: () => inView(closedLines(), 'a closed record line') });
+    await shot(page, meta('tc-rv-open', 'The to-human view, every record line opened', 'The session “report” (invented), each record line pressed', 'The failed command between two messages, then the run, the denied command and the image Read', rvFolders), async () => {
+      await opened('report');
+      await openStretchesAll();
+      await seek(page, cellOf(rvFail));
+    }, { check: checks(seen(cellOf(rvFail), 'the failed call'), () => status(rvFail, 'error')) });
+    // scrolled so the js call stands near the top: tc-rv-open's picture ends above it
+    await shot(page, meta('tc-rv-open-js', 'The to-human view opened at the js call', 'The session “report” (invented), each record line pressed, scrolled so the js call’s row is near the top', 'The js call with its browser activity, then the lone command before the last message', rvFolders), async () => {
+      await opened('report');
+      await openStretchesAll();
+      await place(rowOf(`cell:${rvJs}`));
+      // the stretches below the first screen were not mounted while the first ones opened: open what the js call's
+      // screen shows still closed (the lone command's), then place the js call again
+      await unfold(page, closedLines(), 'a closed record line below', 4);
+      await place(rowOf(`cell:${rvJs}`));
+    }, { check: checks(seen(cellOf(rvJs), 'the js call'), seen(activityOf(rvJs).last(), 'its browser activity, to the last row'), seen(rowOf(`cell:${tcTool('report', 'Branch')}`).locator('.transcript-run-line, .transcript-cell-line').first(), 'the lone command’s line after it')) }); // its line as drawn: a run of one's run line, master's card line
+    // The report draws a finished turn's line only while one of its stretches is open (owner/view/mirror.ts), so the
+    // first record line, the failed command's, is opened first: the denied command's stretch stays folded for the jump
+    await shot(page, meta('tc-rv-denied-jump', 'The to-human view, the denied count pressed', 'The session “report” (invented), opened, its first record line pressed (the failed command’s), then its turn line’s “1 denied” pressed', 'The stretch holding the denied command open, the command holding the keyboard', rvFolders), async () => {
+      await opened('report');
+      await toTop(page);
+      await press(page, closedLines().first(), 'the first record line');
+      await expect(cellOf(rvFail), 'the failed command’s stretch open').toBeAttached({ timeout: 5_000 });
+      await expect(cellOf(rvDeny), 'the denied command’s stretch still folded').toHaveCount(0);
+      await jumpTo(rvDeny);
+    }, { check: checks(() => inView(cellOf(rvDeny), 'the denied call'), focused(rvDeny)) });
+
+    // ---- running calls: each session started on its journal, last ------------------------------------------------------
+    // Started, its `js` call seen running, then its activity sent: the call is in flight, so all of it is the call's.
+    const start = async (entry: (typeof live)[number]) => {
+      try {
+        if (!sid[entry.key]) throw new Error(`the ${entry.key} session was not listed by the index`);
+        await openSession(page, sid[entry.key]!);
+        const prompt = TC_LIVE[entry.key].prompt;
+        value(await invoke(page, 'session.start', { appSessionId: sid[entry.key] as never, message: { content: prompt, display: prompt }, options: { gateway: 'direct', trust: 'accepted' } }));
+        // the call running: its cell, or the computer-use line over the pane (the report view may hold the cell folded)
+        await expect(pane(page).locator(`[data-cell-id="cell:${entry.call}"][data-status="running"], [data-computer-use-strip="running"]`).first()).toBeAttached({ timeout: 60_000 });
+        await tcActivity(app, sid[entry.key]!, { start: Date.now(), end: Date.now() + 1_400 });
+      } catch (error) {
+        setupFailed(`starting the ${entry.key} session`, error);
+      }
+    };
+    const stop = (key: TcKey) => async () => void (await invoke(page, 'session.stop', { appSessionId: sid[key] as never, reason: 'stop' }));
+    for (const entry of live) {
+      await start(entry);
+      const running = () => checks(seen(cellOf(entry.call), 'the running js call'), () => status(entry.call, 'running'), seen(activityOf(entry.call).last(), 'its browser activity, to the last row'));
+      if (entry.key === 'run') {
+        await shot(page, meta('tc-running-js', 'A js call running', `The session “${TC_LIVE.run.title}”, started with its prompt on a replay journal held while its js call runs; the activity sent to the window`, 'The running ring in the call’s mark’s place, the agent’s steps in the browser under it'), async () => {
+          await opened('run');
+          await toEnd(page);
+          await place(cellOf(entry.call));
+        }, { check: running(), after: stop('run') });
+      } else {
+        await shot(page, meta('tc-rv-running', 'The to-human view while a js call runs', 'The session “rvrun” (invented: a finished to-human turn), started with its prompt on a replay journal held while its js call runs; each record line pressed', 'The person’s prompt, the running js call with its ring and its browser activity under the earlier message', rvFolders), async () => {
+          await opened('rvrun');
+          await openStretchesAll();
+          await place(cellOf(entry.call));
+        }, { check: running(), after: stop('rvrun') });
+      }
+    }
   } finally {
     await maws.cleanup();
   }

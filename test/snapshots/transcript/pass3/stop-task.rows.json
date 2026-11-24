@@ -53,6 +53,7 @@
     "kind": "cell",
     "label": "Ran `sleep 120 && echo DONE > bg.txt` in 2s",
     "paths": [],
+    "runExpanded": true,
     "startedAt": "2026-09-29T15:33:47.595Z",
     "status": "done",
     "toolName": "Bash",

@@ -8,6 +8,7 @@ import type { ToolUseId } from '@shared/graph/ids';
 import { cellOf, turnContextOf, type ArtifactTitles, type ToolRecord, type TurnContext } from '../model/cells';
 import { tableRowOf } from '../model/classify'; // UX wave U2b (M5's fix wave 2)
 import { artifactTitlesIn, turnCommandLine, turnRows } from '../model/derive'; // UX wave U2; U3b; U2b
+import { aloneInRun, runOfOneId } from '../model/groups'; // board ticket 852
 import { rowId } from '../model/keys';
 import type { TranscriptState, TurnState } from '../model/reduce';
 import type { Cell, CellId, Row, RowId } from '../model/rows';
@@ -230,7 +231,8 @@ export const asksAsRun = (cell: Cell): boolean => tableRowOf(cell.toolName).grou
 export function standaloneRunInput(cell: RowOf<'cell'>, turn: TurnState | undefined, state: TranscriptState, revealed?: RowId | CellId): RowInput<'ToolGroup'> | null {
   if (!asksAsRun(cell)) return null;
   const id = rowId.group(cell.id);
-  return groupInput({ id, cells: [cell], expanded: state.ui.expandedGroups.has(id) }, turn, state.pending, revealed);
+  // board ticket 852: the site's id is the run's; a call alone in its run keeps its open state under its turn's key
+  return groupInput({ id, cells: [cell], expanded: state.ui.expandedGroups.has(aloneInRun(cell) ? runOfOneId(cell) : id) }, turn, state.pending, revealed);
 }
 
 // UX wave U3b (decision 5): the command is the run the output's event carries, else, for an output under its command's

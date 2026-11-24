@@ -89,6 +89,7 @@
     "kind": "cell",
     "label": "Loaded 4 tools",
     "paths": [],
+    "runExpanded": true,
     "startedAt": "2026-10-07T12:10:01.294Z",
     "status": "done",
     "toolName": "ToolSearch",

@@ -53,6 +53,7 @@
     "kind": "cell",
     "label": "Ran `gauge-check north` in 0s",
     "paths": [],
+    "runExpanded": true,
     "startedAt": "2026-11-15T11:00:01.200Z",
     "status": "done",
     "toolName": "Bash",

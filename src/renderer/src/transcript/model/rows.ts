@@ -108,7 +108,7 @@ export type Row = RowBase &
       }
     // UX wave U2 (O-29; Interfaces §B): `summary` is the run's caption (caption.ts), `counts` its finished edits' lines
     | { kind: 'group'; state: 'active' | 'completed'; cells: Cell[]; summary: string; fold?: number /* the word cut (T2): the count `summary` ends in, absent for none */; counts: ChangedLines; icon: ToolCategory; expanded: boolean }
-    | ({ kind: 'cell' } & Cell) // a standalone cell
+    | ({ kind: 'cell'; runExpanded?: boolean /* board ticket 852: present on a run of one (groups.ts `drawsAsRun`), its run's open state */ } & Cell) // a standalone cell
     | { kind: 'receipt'; files: ChangedFile[]; added: number; removed: number; state: 'applied' | 'undoing' | 'undone' | 'reapplying'; canUndo: boolean; canReapply: boolean }
     | { kind: 'subagent'; agents: SubagentRef[]; sentence: string; status: SubagentStatus; phases?: Record<string, string>; exited?: true; overflow: number } // overflow: agents beyond the four glyphs; phases (the word cut, T87): each working workflow's phase by its task id, for its glyph's or line's pointing; exited (UX wave U3b, decision 19): every agent it names ended with the session's process, the row stopped
     | {

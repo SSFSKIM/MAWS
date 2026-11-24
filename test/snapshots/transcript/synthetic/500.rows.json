@@ -825,6 +825,7 @@
     "kind": "cell",
     "label": "Fetched example.com",
     "paths": [],
+    "runExpanded": true,
     "startedAt": "2026-09-01T08:54:11.381Z",
     "status": "done",
     "toolName": "WebFetch",
@@ -984,6 +985,7 @@
     "paths": [
       "src/model/derive.ts"
     ],
+    "runExpanded": true,
     "startedAt": "2026-09-01T09:08:41.138Z",
     "status": "done",
     "toolName": "Edit",
@@ -1053,6 +1055,7 @@
     "paths": [
       "src/store.ts"
     ],
+    "runExpanded": true,
     "startedAt": "2026-09-01T09:08:41.427Z",
     "status": "done",
     "toolName": "Edit",
@@ -5195,6 +5198,7 @@
     "paths": [
       "package.json"
     ],
+    "runExpanded": true,
     "startedAt": "2026-09-01T20:43:31.860Z",
     "status": "done",
     "toolName": "Read",
@@ -5771,6 +5775,7 @@
     "paths": [
       "src/view/List.tsx"
     ],
+    "runExpanded": true,
     "startedAt": "2026-09-01T21:03:36.177Z",
     "status": "done",
     "toolName": "Read",
@@ -11999,6 +12004,7 @@
     "kind": "cell",
     "label": "Used docs · search",
     "paths": [],
+    "runExpanded": true,
     "startedAt": "2026-09-02T16:08:57.948Z",
     "status": "done",
     "toolName": "mcp__docs__search",
@@ -16065,6 +16071,7 @@
     "kind": "cell",
     "label": "Fetched example.com",
     "paths": [],
+    "runExpanded": true,
     "startedAt": "2026-09-02T17:36:27.280Z",
     "status": "done",
     "toolName": "WebFetch",
@@ -16318,6 +16325,7 @@
     "paths": [
       "src/view/List.tsx"
     ],
+    "runExpanded": true,
     "startedAt": "2026-09-02T17:43:09.582Z",
     "status": "done",
     "toolName": "Edit",
@@ -19298,6 +19306,7 @@
     "paths": [
       "README.md"
     ],
+    "runExpanded": true,
     "startedAt": "2026-09-02T18:27:58.695Z",
     "status": "done",
     "toolName": "Edit",
@@ -19344,6 +19353,7 @@
     "kind": "cell",
     "label": "Searched for `src/**/*.ts`",
     "paths": [],
+    "runExpanded": true,
     "startedAt": "2026-09-02T18:27:59.850Z",
     "status": "done",
     "toolName": "Glob",
@@ -20098,6 +20108,7 @@
     "paths": [
       "package.json"
     ],
+    "runExpanded": true,
     "startedAt": "2026-09-03T06:25:52.046Z",
     "status": "done",
     "toolName": "Write",
@@ -24862,6 +24873,7 @@
     "kind": "cell",
     "label": "Used docs · search",
     "paths": [],
+    "runExpanded": true,
     "startedAt": "2026-09-03T07:49:27.884Z",
     "status": "done",
     "toolName": "mcp__docs__search",
@@ -26576,6 +26588,7 @@
     "kind": "cell",
     "label": "Loaded 1 tool",
     "paths": [],
+    "runExpanded": true,
     "startedAt": "2026-09-03T08:29:01.179Z",
     "status": "done",
     "toolName": "ToolSearch",
@@ -27934,6 +27947,7 @@
     "kind": "cell",
     "label": "Searched the web for Budget below list measure.",
     "paths": [],
+    "runExpanded": true,
     "startedAt": "2026-09-03T20:44:40.703Z",
     "status": "done",
     "toolName": "WebSearch",
@@ -28958,6 +28972,7 @@
     "kind": "cell",
     "label": "Ran /test-driven-development",
     "paths": [],
+    "runExpanded": true,
     "startedAt": "2026-09-03T20:57:20.059Z",
     "status": "done",
     "toolName": "Skill",
@@ -29012,6 +29027,7 @@
     "kind": "cell",
     "label": "Used TodoWrite",
     "paths": [],
+    "runExpanded": true,
     "startedAt": "2026-09-03T20:57:20.415Z",
     "status": "done",
     "toolName": "TodoWrite",
@@ -29159,6 +29175,7 @@
     "kind": "cell",
     "label": "Used TodoWrite",
     "paths": [],
+    "runExpanded": true,
     "startedAt": "2026-09-03T21:01:35.851Z",
     "status": "done",
     "toolName": "TodoWrite",
@@ -29210,6 +29227,7 @@
     "kind": "cell",
     "label": "Ran `git status` in 2s",
     "paths": [],
+    "runExpanded": true,
     "startedAt": "2026-09-03T21:01:36.624Z",
     "status": "done",
     "toolName": "Bash",
@@ -29264,6 +29282,7 @@
     "kind": "cell",
     "label": "Used TodoWrite",
     "paths": [],
+    "runExpanded": true,
     "startedAt": "2026-09-03T21:01:38.830Z",
     "status": "done",
     "toolName": "TodoWrite",
@@ -29549,6 +29568,7 @@
     "kind": "cell",
     "label": "Ran `git status` in 1s",
     "paths": [],
+    "runExpanded": true,
     "startedAt": "2026-09-04T10:37:41.306Z",
     "status": "done",
     "toolName": "Bash",
@@ -30497,6 +30517,7 @@
     "paths": [
       "package.json"
     ],
+    "runExpanded": true,
     "startedAt": "2026-09-04T10:44:37.648Z",
     "status": "done",
     "toolName": "Edit",
@@ -30741,6 +30762,7 @@
     "kind": "cell",
     "label": "Used TodoWrite",
     "paths": [],
+    "runExpanded": true,
     "startedAt": "2026-09-04T11:01:01.569Z",
     "status": "done",
     "toolName": "TodoWrite",
@@ -31513,6 +31535,7 @@
     "paths": [
       "src/app.ts"
     ],
+    "runExpanded": true,
     "startedAt": "2026-09-04T11:20:21.186Z",
     "status": "done",
     "toolName": "Edit",
@@ -38039,6 +38062,7 @@
     "paths": [
       "src/app.ts"
     ],
+    "runExpanded": true,
     "startedAt": "2026-09-04T12:55:14.494Z",
     "status": "done",
     "toolName": "Edit",
@@ -38558,6 +38582,7 @@
     "kind": "cell",
     "label": "Used docs · search",
     "paths": [],
+    "runExpanded": true,
     "startedAt": "2026-09-04T13:01:33.304Z",
     "status": "done",
     "toolName": "mcp__docs__search",
@@ -40980,6 +41005,7 @@
     "kind": "cell",
     "label": "Used TodoWrite",
     "paths": [],
+    "runExpanded": true,
     "startedAt": "2026-09-04T14:01:59.792Z",
     "status": "done",
     "toolName": "TodoWrite",
@@ -42015,6 +42041,7 @@
     "kind": "cell",
     "label": "Used docs · search",
     "paths": [],
+    "runExpanded": true,
     "startedAt": "2026-09-04T14:14:02.348Z",
     "status": "done",
     "toolName": "mcp__docs__search",
@@ -44369,6 +44396,7 @@
     "kind": "cell",
     "label": "Used TodoWrite",
     "paths": [],
+    "runExpanded": true,
     "startedAt": "2026-09-04T23:42:01.563Z",
     "status": "done",
     "toolName": "TodoWrite",
@@ -44689,6 +44717,7 @@
     "kind": "cell",
     "label": "Used docs · search",
     "paths": [],
+    "runExpanded": true,
     "startedAt": "2026-09-04T23:42:07.145Z",
     "status": "done",
     "toolName": "mcp__docs__search",
@@ -44928,6 +44957,7 @@
     "kind": "cell",
     "label": "Ran `git status` in 0s",
     "paths": [],
+    "runExpanded": true,
     "startedAt": "2026-09-04T23:58:47.780Z",
     "status": "done",
     "toolName": "Bash",
@@ -44981,6 +45011,7 @@
     "kind": "cell",
     "label": "Loaded 1 tool",
     "paths": [],
+    "runExpanded": true,
     "startedAt": "2026-09-04T23:58:47.952Z",
     "status": "done",
     "toolName": "ToolSearch",
@@ -45123,6 +45154,7 @@
     "kind": "cell",
     "label": "Ran /test-driven-development",
     "paths": [],
+    "runExpanded": true,
     "startedAt": "2026-09-05T00:02:38.160Z",
     "status": "done",
     "toolName": "Skill",
@@ -47408,6 +47440,7 @@
     "paths": [
       "src/store.ts"
     ],
+    "runExpanded": true,
     "startedAt": "2026-09-05T00:44:00.824Z",
     "status": "done",
     "toolName": "Edit",
@@ -49720,6 +49753,7 @@
     "paths": [
       "src/view/List.tsx"
     ],
+    "runExpanded": true,
     "startedAt": "2026-09-06T02:50:00.481Z",
     "status": "done",
     "toolName": "Edit",
@@ -50646,6 +50680,7 @@
     "paths": [
       "src/view/List.tsx"
     ],
+    "runExpanded": true,
     "startedAt": "2026-09-06T03:05:28.992Z",
     "status": "done",
     "toolName": "Edit",
@@ -56947,6 +56982,7 @@
     "kind": "cell",
     "label": "Used docs · search",
     "paths": [],
+    "runExpanded": true,
     "startedAt": "2026-09-06T06:49:53.828Z",
     "status": "done",
     "toolName": "mcp__docs__search",
@@ -57305,6 +57341,7 @@
     "paths": [
       "src/store.ts"
     ],
+    "runExpanded": true,
     "startedAt": "2026-09-06T23:27:18.024Z",
     "status": "done",
     "toolName": "Edit",
@@ -58207,6 +58244,7 @@
     "kind": "cell",
     "label": "Used TodoWrite",
     "paths": [],
+    "runExpanded": true,
     "startedAt": "2026-09-06T23:46:04.571Z",
     "status": "done",
     "toolName": "TodoWrite",
@@ -58585,6 +58623,7 @@
     "kind": "cell",
     "label": "Used docs · search",
     "paths": [],
+    "runExpanded": true,
     "startedAt": "2026-09-06T23:53:56.482Z",
     "status": "done",
     "toolName": "mcp__docs__search",
@@ -59648,6 +59687,7 @@
     "kind": "cell",
     "label": "Used TodoWrite",
     "paths": [],
+    "runExpanded": true,
     "startedAt": "2026-09-07T00:12:43.102Z",
     "status": "done",
     "toolName": "TodoWrite",
@@ -61702,6 +61742,7 @@
     "kind": "cell",
     "label": "Ran `git status` in 2s",
     "paths": [],
+    "runExpanded": true,
     "startedAt": "2026-09-08T09:52:29.006Z",
     "status": "done",
     "toolName": "Bash",
@@ -64736,6 +64777,7 @@
     "paths": [
       "src/app.ts"
     ],
+    "runExpanded": true,
     "startedAt": "2026-09-08T10:43:05.630Z",
     "status": "done",
     "toolName": "Edit",
@@ -64809,6 +64851,7 @@
     "kind": "cell",
     "label": "Searched for `engine` in src",
     "paths": [],
+    "runExpanded": true,
     "startedAt": "2026-09-08T10:43:07.735Z",
     "status": "done",
     "toolName": "Grep",
@@ -72057,6 +72100,7 @@
     "kind": "cell",
     "label": "Ran `ls -la src` in 3s",
     "paths": [],
+    "runExpanded": true,
     "startedAt": "2026-09-09T13:40:55.092Z",
     "status": "done",
     "toolName": "Bash",
@@ -73610,6 +73654,7 @@
     "paths": [
       "src/app.ts"
     ],
+    "runExpanded": true,
     "startedAt": "2026-09-10T17:39:14.411Z",
     "status": "done",
     "toolName": "Read",
@@ -73751,6 +73796,7 @@
     "kind": "cell",
     "label": "Searched the web for Fixture anchor from below.",
     "paths": [],
+    "runExpanded": true,
     "startedAt": "2026-09-10T17:50:19.985Z",
     "status": "done",
     "toolName": "WebSearch",
@@ -74427,6 +74473,7 @@
     "paths": [
       "package.json"
     ],
+    "runExpanded": true,
     "startedAt": "2026-09-10T18:17:04.755Z",
     "status": "done",
     "toolName": "Edit",
@@ -75074,6 +75121,7 @@
     "paths": [
       "src/store.ts"
     ],
+    "runExpanded": true,
     "startedAt": "2026-09-10T18:54:24.566Z",
     "status": "done",
     "toolName": "Read",
@@ -76585,6 +76633,7 @@
     "paths": [
       "src/store.ts"
     ],
+    "runExpanded": true,
     "startedAt": "2026-09-11T16:45:15.383Z",
     "status": "done",
     "toolName": "Read",
@@ -77227,6 +77276,7 @@
     "kind": "cell",
     "label": "Searched the web for Receipt turn.",
     "paths": [],
+    "runExpanded": true,
     "startedAt": "2026-09-12T15:52:04.467Z",
     "status": "done",
     "toolName": "WebSearch",
@@ -78142,6 +78192,7 @@
     "kind": "cell",
     "label": "Used TodoWrite",
     "paths": [],
+    "runExpanded": true,
     "startedAt": "2026-09-13T15:08:00.811Z",
     "status": "done",
     "toolName": "TodoWrite",
@@ -79087,6 +79138,7 @@
     "kind": "cell",
     "label": "Used docs · search",
     "paths": [],
+    "runExpanded": true,
     "startedAt": "2026-09-13T15:20:31.782Z",
     "status": "done",
     "toolName": "mcp__docs__search",
@@ -79273,6 +79325,7 @@
     "kind": "cell",
     "label": "Ran `rg TODO src` in 3s",
     "paths": [],
+    "runExpanded": true,
     "startedAt": "2026-09-13T15:20:34.754Z",
     "status": "done",
     "toolName": "Bash",
@@ -79433,6 +79486,7 @@
     "paths": [
       "test/derive.test.ts"
     ],
+    "runExpanded": true,
     "startedAt": "2026-09-13T15:26:21.787Z",
     "status": "done",
     "toolName": "Write",
@@ -81198,6 +81252,7 @@
     "kind": "cell",
     "label": "Searched the web for Events parse token rows.",
     "paths": [],
+    "runExpanded": true,
     "startedAt": "2026-09-13T15:43:21.188Z",
     "status": "done",
     "toolName": "WebSearch",
@@ -81509,6 +81564,7 @@
     "kind": "cell",
     "label": "Searched the web for Session arrives list.",
     "paths": [],
+    "runExpanded": true,
     "startedAt": "2026-09-13T15:50:47.925Z",
     "status": "done",
     "toolName": "WebSearch",
@@ -85325,6 +85381,7 @@
     "kind": "cell",
     "label": "Fetched example.com",
     "paths": [],
+    "runExpanded": true,
     "startedAt": "2026-09-14T05:18:29.165Z",
     "status": "done",
     "toolName": "WebFetch",
@@ -85624,6 +85681,7 @@
     "paths": [
       "src/store.ts"
     ],
+    "runExpanded": true,
     "startedAt": "2026-09-14T05:35:23.120Z",
     "status": "done",
     "toolName": "Write",
@@ -89686,6 +89744,7 @@
     "paths": [
       "src/util/time.ts"
     ],
+    "runExpanded": true,
     "startedAt": "2026-09-14T06:40:19.178Z",
     "status": "done",
     "toolName": "Write",
@@ -90267,6 +90326,7 @@
     "kind": "cell",
     "label": "Ran `ls -la src` in 3s",
     "paths": [],
+    "runExpanded": true,
     "startedAt": "2026-09-14T06:51:34.175Z",
     "status": "done",
     "toolName": "Bash",
@@ -92896,6 +92956,7 @@
     "paths": [
       "test/derive.test.ts"
     ],
+    "runExpanded": true,
     "startedAt": "2026-09-14T07:21:17.829Z",
     "status": "done",
     "toolName": "Write",
@@ -93743,6 +93804,7 @@
     "kind": "cell",
     "label": "Loaded 1 tool",
     "paths": [],
+    "runExpanded": true,
     "startedAt": "2026-09-14T07:37:48.325Z",
     "status": "done",
     "toolName": "ToolSearch",
@@ -94117,6 +94179,7 @@
     "kind": "cell",
     "label": "Loaded 1 tool",
     "paths": [],
+    "runExpanded": true,
     "startedAt": "2026-09-14T07:46:38.264Z",
     "status": "done",
     "toolName": "ToolSearch",
@@ -98337,6 +98400,7 @@
     "paths": [
       "src/store.ts"
     ],
+    "runExpanded": true,
     "startedAt": "2026-09-15T09:39:21.748Z",
     "status": "done",
     "toolName": "Edit",
@@ -98601,6 +98665,7 @@
     "kind": "cell",
     "label": "Used docs · search",
     "paths": [],
+    "runExpanded": true,
     "startedAt": "2026-09-15T09:39:31.064Z",
     "status": "done",
     "toolName": "mcp__docs__search",
@@ -99141,6 +99206,7 @@
     "kind": "cell",
     "label": "Ran `ls -la src` in 4s",
     "paths": [],
+    "runExpanded": true,
     "startedAt": "2026-09-15T09:53:26.387Z",
     "status": "done",
     "toolName": "Bash",
@@ -99207,6 +99273,7 @@
     "paths": [
       "src/util/time.ts"
     ],
+    "runExpanded": true,
     "startedAt": "2026-09-15T09:53:31.516Z",
     "status": "done",
     "toolName": "Edit",
@@ -101671,6 +101738,7 @@
     "paths": [
       "src/app.ts"
     ],
+    "runExpanded": true,
     "startedAt": "2026-09-15T13:12:57.132Z",
     "status": "done",
     "toolName": "Edit",
@@ -102291,6 +102359,7 @@
     "paths": [
       "src/view/List.tsx"
     ],
+    "runExpanded": true,
     "startedAt": "2026-09-16T05:23:42.493Z",
     "status": "done",
     "toolName": "Write",
@@ -106252,6 +106321,7 @@
     "kind": "cell",
     "label": "Used TodoWrite",
     "paths": [],
+    "runExpanded": true,
     "startedAt": "2026-09-17T11:03:50.661Z",
     "status": "done",
     "toolName": "TodoWrite",
@@ -106845,6 +106915,7 @@
     "kind": "cell",
     "label": "Used docs · search",
     "paths": [],
+    "runExpanded": true,
     "startedAt": "2026-09-17T11:17:03.665Z",
     "status": "done",
     "toolName": "mcp__docs__search",
@@ -109920,6 +109991,7 @@
     "kind": "cell",
     "label": "Loaded 1 tool",
     "paths": [],
+    "runExpanded": true,
     "startedAt": "2026-09-18T04:07:59.438Z",
     "status": "done",
     "toolName": "ToolSearch",
@@ -110070,6 +110142,7 @@
     "kind": "cell",
     "label": "Ran `pnpm test` in 3s",
     "paths": [],
+    "runExpanded": true,
     "startedAt": "2026-09-18T06:28:28.810Z",
     "status": "done",
     "toolName": "Bash",
@@ -111373,6 +111446,7 @@
     "kind": "cell",
     "label": "Used docs · search",
     "paths": [],
+    "runExpanded": true,
     "startedAt": "2026-09-18T22:33:55.395Z",
     "status": "done",
     "toolName": "mcp__docs__search",
@@ -112095,6 +112169,7 @@
     "kind": "cell",
     "label": "Fetched example.com",
     "paths": [],
+    "runExpanded": true,
     "startedAt": "2026-09-20T00:57:27.504Z",
     "status": "done",
     "toolName": "WebFetch",
@@ -113270,6 +113345,7 @@
     "paths": [
       "README.md"
     ],
+    "runExpanded": true,
     "startedAt": "2026-09-20T01:33:44.064Z",
     "status": "done",
     "toolName": "Write",
@@ -113321,6 +113397,7 @@
     "kind": "cell",
     "label": "Ran `git status` in 1s",
     "paths": [],
+    "runExpanded": true,
     "startedAt": "2026-09-20T01:33:45.395Z",
     "status": "done",
     "toolName": "Bash",
@@ -114158,6 +114235,7 @@
     "paths": [
       "README.md"
     ],
+    "runExpanded": true,
     "startedAt": "2026-09-20T19:05:40.273Z",
     "status": "done",
     "toolName": "Edit",
@@ -115375,6 +115453,7 @@
     "paths": [
       "package.json"
     ],
+    "runExpanded": true,
     "startedAt": "2026-09-20T19:24:29.127Z",
     "status": "done",
     "toolName": "Read",
@@ -116638,6 +116717,7 @@
     "kind": "cell",
     "label": "Ran `pnpm test` in 3s",
     "paths": [],
+    "runExpanded": true,
     "startedAt": "2026-09-20T19:43:19.981Z",
     "status": "done",
     "toolName": "Bash",
@@ -117389,6 +117469,7 @@
     "paths": [
       "src/model/derive.ts"
     ],
+    "runExpanded": true,
     "startedAt": "2026-09-20T19:55:03.197Z",
     "status": "done",
     "toolName": "Edit",
@@ -122821,6 +122902,7 @@
     "paths": [
       "src/util/time.ts"
     ],
+    "runExpanded": true,
     "startedAt": "2026-09-20T23:39:39.839Z",
     "status": "done",
     "toolName": "Edit",
@@ -125870,6 +125952,7 @@
     "paths": [
       "README.md"
     ],
+    "runExpanded": true,
     "startedAt": "2026-09-22T00:31:52.501Z",
     "status": "done",
     "toolName": "Edit",
@@ -130565,6 +130648,7 @@
     "paths": [
       "src/view/List.tsx"
     ],
+    "runExpanded": true,
     "startedAt": "2026-09-23T05:10:06.806Z",
     "status": "done",
     "toolName": "Read",
@@ -130997,6 +131081,7 @@
     "paths": [
       "src/model/derive.ts"
     ],
+    "runExpanded": true,
     "startedAt": "2026-09-23T05:21:25.870Z",
     "status": "done",
     "toolName": "Edit",
@@ -131815,6 +131900,7 @@
     "kind": "cell",
     "label": "Used docs · search",
     "paths": [],
+    "runExpanded": true,
     "startedAt": "2026-09-24T11:17:03.892Z",
     "status": "done",
     "toolName": "mcp__docs__search",
@@ -132968,6 +133054,7 @@
     "paths": [
       "src/store.ts"
     ],
+    "runExpanded": true,
     "startedAt": "2026-09-24T11:36:32.903Z",
     "status": "done",
     "toolName": "Edit",
@@ -134405,6 +134492,7 @@
     "kind": "cell",
     "label": "Used docs · search",
     "paths": [],
+    "runExpanded": true,
     "startedAt": "2026-09-25T12:52:09.967Z",
     "status": "done",
     "toolName": "mcp__docs__search",
@@ -134561,6 +134649,7 @@
     "kind": "cell",
     "label": "Used TodoWrite",
     "paths": [],
+    "runExpanded": true,
     "startedAt": "2026-09-25T13:02:16.030Z",
     "status": "done",
     "toolName": "TodoWrite",
@@ -138602,6 +138691,7 @@
     "kind": "cell",
     "label": "Used docs · search",
     "paths": [],
+    "runExpanded": true,
     "startedAt": "2026-09-26T17:55:58.230Z",
     "status": "done",
     "toolName": "mcp__docs__search",
@@ -138986,6 +139076,7 @@
     "kind": "cell",
     "label": "Used docs · search",
     "paths": [],
+    "runExpanded": true,
     "startedAt": "2026-09-26T18:22:29.203Z",
     "status": "done",
     "toolName": "mcp__docs__search",
@@ -139391,6 +139482,7 @@
     "kind": "cell",
     "label": "Fetched example.com",
     "paths": [],
+    "runExpanded": true,
     "startedAt": "2026-09-26T18:27:37.065Z",
     "status": "done",
     "toolName": "WebFetch",
@@ -140673,6 +140765,7 @@
     "paths": [
       "src/util/time.ts"
     ],
+    "runExpanded": true,
     "startedAt": "2026-09-26T18:42:05.930Z",
     "status": "done",
     "toolName": "Edit",
@@ -142812,6 +142905,7 @@
     "kind": "cell",
     "label": "Used docs · search",
     "paths": [],
+    "runExpanded": true,
     "startedAt": "2026-09-27T15:38:36.068Z",
     "status": "done",
     "toolName": "mcp__docs__search",
@@ -145716,6 +145810,7 @@
     "kind": "cell",
     "label": "Ran /test-driven-development",
     "paths": [],
+    "runExpanded": true,
     "startedAt": "2026-09-28T15:42:42.036Z",
     "status": "done",
     "toolName": "Skill",
@@ -145868,6 +145963,7 @@
     "kind": "cell",
     "label": "Ran `ls -la src` in 3s",
     "paths": [],
+    "runExpanded": true,
     "startedAt": "2026-09-28T22:00:13.452Z",
     "status": "done",
     "toolName": "Bash",
@@ -148246,6 +148342,7 @@
     "paths": [
       "package.json"
     ],
+    "runExpanded": true,
     "startedAt": "2026-09-29T21:06:26.133Z",
     "status": "done",
     "toolName": "Read",
@@ -149086,6 +149183,7 @@
     "paths": [
       "src/model/derive.ts"
     ],
+    "runExpanded": true,
     "startedAt": "2026-09-29T21:15:40.425Z",
     "status": "done",
     "toolName": "Edit",
@@ -149926,6 +150024,7 @@
     "kind": "cell",
     "label": "Used TodoWrite",
     "paths": [],
+    "runExpanded": true,
     "startedAt": "2026-09-29T21:23:59.544Z",
     "status": "done",
     "toolName": "TodoWrite",
@@ -150083,6 +150182,7 @@
     "kind": "cell",
     "label": "Fetched example.com",
     "paths": [],
+    "runExpanded": true,
     "startedAt": "2026-10-01T00:49:16.662Z",
     "status": "done",
     "toolName": "WebFetch",
@@ -150453,6 +150553,7 @@
     "kind": "cell",
     "label": "Loaded 1 tool",
     "paths": [],
+    "runExpanded": true,
     "startedAt": "2026-10-01T00:49:27.498Z",
     "status": "done",
     "toolName": "ToolSearch",
@@ -151671,6 +151772,7 @@
     "kind": "cell",
     "label": "Used TodoWrite",
     "paths": [],
+    "runExpanded": true,
     "startedAt": "2026-10-02T01:00:15.495Z",
     "status": "done",
     "toolName": "TodoWrite",
@@ -151957,6 +152059,7 @@
     "paths": [
       "test/derive.test.ts"
     ],
+    "runExpanded": true,
     "startedAt": "2026-10-02T01:06:44.274Z",
     "status": "done",
     "toolName": "Read",
@@ -152109,6 +152212,7 @@
     "kind": "cell",
     "label": "Used docs · search",
     "paths": [],
+    "runExpanded": true,
     "startedAt": "2026-10-02T09:08:18.650Z",
     "status": "done",
     "toolName": "mcp__docs__search",
@@ -153464,6 +153568,7 @@
     "kind": "cell",
     "label": "Searched the web for Receipt from.",
     "paths": [],
+    "runExpanded": true,
     "startedAt": "2026-10-02T09:41:35.782Z",
     "status": "done",
     "toolName": "WebSearch",
@@ -153620,6 +153725,7 @@
     "kind": "cell",
     "label": "Fetched example.com",
     "paths": [],
+    "runExpanded": true,
     "startedAt": "2026-10-02T09:42:52.199Z",
     "status": "done",
     "toolName": "WebFetch",
@@ -154367,6 +154473,7 @@
     "kind": "cell",
     "label": "Searched for `anchor` in src",
     "paths": [],
+    "runExpanded": true,
     "startedAt": "2026-10-03T05:43:17.745Z",
     "status": "done",
     "toolName": "Grep",
@@ -154978,6 +155085,7 @@
     "paths": [
       "src/util/time.ts"
     ],
+    "runExpanded": true,
     "startedAt": "2026-10-03T05:52:37.171Z",
     "status": "done",
     "toolName": "Edit",
@@ -155139,6 +155247,7 @@
     "kind": "cell",
     "label": "Used TodoWrite",
     "paths": [],
+    "runExpanded": true,
     "startedAt": "2026-10-04T00:39:20.103Z",
     "status": "done",
     "toolName": "TodoWrite",
@@ -156857,6 +156966,7 @@
     "paths": [
       "test/derive.test.ts"
     ],
+    "runExpanded": true,
     "startedAt": "2026-10-04T01:02:42.361Z",
     "status": "done",
     "toolName": "Read",
@@ -161192,6 +161302,7 @@
     "kind": "cell",
     "label": "Used docs · search",
     "paths": [],
+    "runExpanded": true,
     "startedAt": "2026-10-04T22:08:10.999Z",
     "status": "done",
     "toolName": "mcp__docs__search",
@@ -161923,6 +162034,7 @@
     "paths": [
       "test/derive.test.ts"
     ],
+    "runExpanded": true,
     "startedAt": "2026-10-04T22:15:56.229Z",
     "status": "done",
     "toolName": "Edit",
@@ -163041,6 +163153,7 @@
     "kind": "cell",
     "label": "Used docs · search",
     "paths": [],
+    "runExpanded": true,
     "startedAt": "2026-10-04T22:49:00.188Z",
     "status": "done",
     "toolName": "mcp__docs__search",
@@ -163295,6 +163408,7 @@
     "paths": [
       "src/view/List.tsx"
     ],
+    "runExpanded": true,
     "startedAt": "2026-10-05T12:13:29.391Z",
     "status": "done",
     "toolName": "Edit",
@@ -163447,6 +163561,7 @@
     "kind": "cell",
     "label": "Fetched example.com",
     "paths": [],
+    "runExpanded": true,
     "startedAt": "2026-10-05T16:12:23.389Z",
     "status": "done",
     "toolName": "WebFetch",
@@ -164858,6 +164973,7 @@
     "paths": [
       "package.json"
     ],
+    "runExpanded": true,
     "startedAt": "2026-10-06T04:06:47.816Z",
     "status": "done",
     "toolName": "Edit",
@@ -167798,6 +167914,7 @@
     "kind": "cell",
     "label": "Searched for `src/**/*.ts`",
     "paths": [],
+    "runExpanded": true,
     "startedAt": "2026-10-07T07:16:34.343Z",
     "status": "done",
     "toolName": "Glob",
@@ -168516,6 +168633,7 @@
     "paths": [
       "test/derive.test.ts"
     ],
+    "runExpanded": true,
     "startedAt": "2026-10-07T07:31:55.095Z",
     "status": "done",
     "toolName": "Edit",
@@ -169253,6 +169371,7 @@
     "kind": "cell",
     "label": "Ran /test-driven-development",
     "paths": [],
+    "runExpanded": true,
     "startedAt": "2026-10-07T07:57:15.501Z",
     "status": "done",
     "toolName": "Skill",
@@ -169500,6 +169619,7 @@
     "paths": [
       "test/derive.test.ts"
     ],
+    "runExpanded": true,
     "startedAt": "2026-10-07T08:12:59.911Z",
     "status": "done",
     "toolName": "Write",
@@ -169549,6 +169669,7 @@
     "kind": "cell",
     "label": "Used docs · search",
     "paths": [],
+    "runExpanded": true,
     "startedAt": "2026-10-07T08:13:01.013Z",
     "status": "done",
     "toolName": "mcp__docs__search",
@@ -170807,6 +170928,7 @@
     "paths": [
       "src/store.ts"
     ],
+    "runExpanded": true,
     "startedAt": "2026-10-07T16:31:28.033Z",
     "status": "done",
     "toolName": "Edit",
@@ -173187,6 +173309,7 @@
     "paths": [
       "src/util/time.ts"
     ],
+    "runExpanded": true,
     "startedAt": "2026-10-07T16:58:50.054Z",
     "status": "done",
     "toolName": "Edit",
@@ -174409,6 +174532,7 @@
     "paths": [
       "package.json"
     ],
+    "runExpanded": true,
     "startedAt": "2026-10-07T17:19:14.155Z",
     "status": "done",
     "toolName": "Edit",
@@ -174940,6 +175064,7 @@
     "kind": "cell",
     "label": "Searched for `receipt` in src",
     "paths": [],
+    "runExpanded": true,
     "startedAt": "2026-10-07T17:54:22.242Z",
     "status": "done",
     "toolName": "Grep",
@@ -177011,6 +177136,7 @@
     "kind": "cell",
     "label": "Used docs · search",
     "paths": [],
+    "runExpanded": true,
     "startedAt": "2026-10-07T23:29:32.434Z",
     "status": "done",
     "toolName": "mcp__docs__search",
@@ -178378,6 +178504,7 @@
     "paths": [
       "src/model/derive.ts"
     ],
+    "runExpanded": true,
     "startedAt": "2026-10-09T04:44:25.791Z",
     "status": "done",
     "toolName": "Edit",
@@ -180190,6 +180317,7 @@
     "kind": "cell",
     "label": "Searched for `and` in src",
     "paths": [],
+    "runExpanded": true,
     "startedAt": "2026-10-09T05:13:09.613Z",
     "status": "done",
     "toolName": "Grep",
@@ -180381,6 +180509,7 @@
     "paths": [
       "src/model/derive.ts"
     ],
+    "runExpanded": true,
     "startedAt": "2026-10-09T05:17:04.267Z",
     "status": "done",
     "toolName": "Edit",
@@ -181192,6 +181321,7 @@
     "kind": "cell",
     "label": "Ran `pnpm lint` in 0s",
     "paths": [],
+    "runExpanded": true,
     "startedAt": "2026-10-09T05:54:24.841Z",
     "status": "done",
     "toolName": "Bash",
@@ -181243,6 +181373,7 @@
     "paths": [
       "test/derive.test.ts"
     ],
+    "runExpanded": true,
     "startedAt": "2026-10-09T05:54:25.863Z",
     "status": "done",
     "toolName": "Read",
@@ -184377,6 +184508,7 @@
     "kind": "cell",
     "label": "Used TodoWrite",
     "paths": [],
+    "runExpanded": true,
     "startedAt": "2026-10-10T17:38:23.710Z",
     "status": "done",
     "toolName": "TodoWrite",
@@ -186449,6 +186581,7 @@
     "paths": [
       "package.json"
     ],
+    "runExpanded": true,
     "startedAt": "2026-10-11T07:18:31.234Z",
     "status": "done",
     "toolName": "Edit",
@@ -188811,6 +188944,7 @@
     "paths": [
       "src/app.ts"
     ],
+    "runExpanded": true,
     "startedAt": "2026-10-12T19:48:14.420Z",
     "status": "done",
     "toolName": "Write",
@@ -189135,6 +189269,7 @@
     "kind": "cell",
     "label": "Used TodoWrite",
     "paths": [],
+    "runExpanded": true,
     "startedAt": "2026-10-12T19:48:26.404Z",
     "status": "done",
     "toolName": "TodoWrite",
@@ -191265,6 +191400,7 @@
     "kind": "cell",
     "label": "Ran `pnpm lint` in 3s",
     "paths": [],
+    "runExpanded": true,
     "startedAt": "2026-10-12T20:42:41.035Z",
     "status": "done",
     "toolName": "Bash",
@@ -192893,6 +193029,7 @@
     "kind": "cell",
     "label": "Used docs · search",
     "paths": [],
+    "runExpanded": true,
     "startedAt": "2026-10-14T17:56:41.261Z",
     "status": "done",
     "toolName": "mcp__docs__search",
@@ -195563,6 +195700,7 @@
     "kind": "cell",
     "label": "Searched the web for The layout budget a.",
     "paths": [],
+    "runExpanded": true,
     "startedAt": "2026-10-15T19:30:52.983Z",
     "status": "done",
     "toolName": "WebSearch",
@@ -196709,6 +196847,7 @@
     "paths": [
       "src/model/derive.ts"
     ],
+    "runExpanded": true,
     "startedAt": "2026-10-15T20:06:27.688Z",
     "status": "done",
     "toolName": "Write",
@@ -199023,6 +199162,7 @@
     "kind": "cell",
     "label": "Ran `pnpm test` in 0s",
     "paths": [],
+    "runExpanded": true,
     "startedAt": "2026-10-15T23:10:36.062Z",
     "status": "done",
     "toolName": "Bash",
