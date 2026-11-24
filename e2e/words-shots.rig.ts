@@ -6596,8 +6596,11 @@ test('the word cut’s M5: the library’s Spaces, opened artifacts, the documen
       await page.mouse.move(W - 2, H - 2);
       await focusTip(page, owner(), rest(), m5Cut);
     };
-    const tipHolds = (owner: () => Locator, what: string, words: readonly (string | RegExp)[], master: () => Promise<unknown>) => async () => {
-      if (!m5Cut()) return master();
+    const tipHolds = (owner: () => Locator, what: string, words: readonly (string | RegExp)[], master: () => Promise<unknown>) => async (): Promise<void> => {
+      if (!m5Cut()) {
+        await master();
+        return;
+      }
       const held = owner().first();
       await expect(held, `${what} holds the keyboard`).toBeFocused({ timeout: 3_000 });
       await expect(held, `${what}’s own tooltip open`).toHaveAttribute('data-state', /^(delayed|instant)-open$/, { timeout: 3_000 });
