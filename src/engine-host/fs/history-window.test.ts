@@ -369,16 +369,18 @@ describe('a long transcript is read in windows', () => {
     expect(lastState()).toMatchObject({ state: 'stopped', message: null });
   });
 
-  it('never parses the silent request records, and parses a line that only mentions them later on', async () => {
+  it('never parses the records it drops, and parses a line that only mentions them later on', async () => {
     const lines = transcript(3);
     const mention = JSON.stringify({ type: 'user', uuid: 'm1', parentUuid: 'd3', sessionId: SESSION, cwd: DIR, message: { role: 'user', content: 'the line {"type":"api-request" and {"type":"file-history-snapshot" in a prompt' } });
-    // Torn lines: one opening as a silent record is known by its first key and never parsed (so never counted as
-    // skipped); one of another type that merely starts alike (`api-request-blob`) is parsed, fails and is counted.
-    await fixture.addTranscript(DIR, SESSION, [...lines, mention, '{"type":"api-request","torn', '{"type":"file-history-snapshot","torn', '{"type":"api-request-blob","torn']);
+    // Torn lines: one opening as a record the follower drops is known by its first key and never parsed (so never counted
+    // as skipped: tail-first, 2026-11-24, every dropped type); one of a type that merely starts alike, and one of a type
+    // whose facts the follower reads (`last-prompt`), are parsed, fail and are counted.
+    const dropped = ['api-request', 'file-history-snapshot', 'api-request-blob', 'queue-operation', 'attribution-snapshot'].map((type) => `{"type":"${type}","torn`);
+    await fixture.addTranscript(DIR, SESSION, [...lines, mention, ...dropped, '{"type":"api-request-blobs","torn', '{"type":"last-prompt","torn']);
     const fs = await start();
     const page = await fs.eventsSnapshot(APP, null);
     expect(userTexts(page.events).at(-1)).toBe('the line');
-    expect(emitted.flatMap((e) => (e.name === 'fs.followState' && e.payload.appSessionId === APP ? [e.payload.skippedLines] : [])).at(-1)).toBe(1);
+    expect(emitted.flatMap((e) => (e.name === 'fs.followState' && e.payload.appSessionId === APP ? [e.payload.skippedLines] : [])).at(-1)).toBe(2);
   });
 });
 

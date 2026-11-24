@@ -95,7 +95,10 @@ export type LaunchResult = z.infer<typeof LaunchResultSchema>;
 // out (`earlier` for a window, `lastSeq` for a live page), so the next page goes on beyond it.
 export const EVENTS_MIN_BYTES = 4096; // the least `maxBytes`: an answer's envelope and cursor always fit
 export const EventsOmittedSchema = z.strictObject({ events: z.number().int().positive(), bytes: z.number().int().positive(), seq: z.number().int().nullable() });
-export const EventsSnapshotSchema = z.strictObject({ events: z.array(SessionEventSchema), lastSeq: z.number().int(), complete: z.boolean(), historyUnavailable: z.literal(true).optional(), earlier: EventIdSchema.optional(), sought: HistorySoughtSchema.optional(), cronHistory: z.array(SessionEventSchema).optional(), omitted: EventsOmittedSchema.optional() });
+// 2026-11-24, tail-first (minor 63): `provisional`, a newest window the engine host read from the transcript's end while
+// its read from the start runs, answered only to a read that asked for one; that read's `fs.followState` `following`
+// says the window it then answers is there.
+export const EventsSnapshotSchema = z.strictObject({ events: z.array(SessionEventSchema), lastSeq: z.number().int(), complete: z.boolean(), historyUnavailable: z.literal(true).optional(), earlier: EventIdSchema.optional(), sought: HistorySoughtSchema.optional(), cronHistory: z.array(SessionEventSchema).optional(), omitted: EventsOmittedSchema.optional(), provisional: z.literal(true).optional() });
 export type EventsSnapshot = z.infer<typeof EventsSnapshotSchema>;
 
 // C7's `session.catalog` (coordinator, C7's asks): the engine's command catalogue as the wire carries it.
@@ -128,7 +131,9 @@ const c3Commands = {
   // P5 O7 M4 (acceptance 12): `maxBytes` bounds the answer's UTF-8 JSON: a window's whole turns end where the next would
   // pass it (a turn alone past it is cut, never kept whole), a live page's whole rows likewise, and `earlier` or `lastSeq`
   // reaches what it left out, so a reader behind a bounded channel pages every window within it.
-  'session.events': host(input({ afterSeq: z.number().int().nullable(), limit: z.number().int().positive().nullable(), before: EventIdSchema.optional(), agentId: AgentIdSchema.optional(), seek: MessageUuidSchema.optional(), maxBytes: z.number().int().min(EVENTS_MIN_BYTES).optional() }), EventsSnapshotSchema),
+  // 2026-11-24, tail-first (minor 63): `provisional`, a newest window read from the transcript's end will do while the
+  // engine host reads it from the start (a disk-backed session's newest, unbounded window; ignored otherwise)
+  'session.events': host(input({ afterSeq: z.number().int().nullable(), limit: z.number().int().positive().nullable(), before: EventIdSchema.optional(), agentId: AgentIdSchema.optional(), seek: MessageUuidSchema.optional(), maxBytes: z.number().int().min(EVENTS_MIN_BYTES).optional(), provisional: z.literal(true).optional() }), EventsSnapshotSchema),
   // W7: `ifIdle` stops only while the process could end without losing work (`canYield`, decided in the host in the same
   // step as the stop); otherwise nothing happens and the answer says `skipped`
   'session.stop': host(input({ reason: z.enum(['stop', 'archive']), ifIdle: z.boolean().optional() }), z.strictObject({ exited: z.boolean(), code: z.number().int().nullable(), signal: z.string().nullable(), skipped: z.literal(true).optional() })),
