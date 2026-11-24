@@ -14,7 +14,7 @@ import type { PanelToolContext } from '../../panel/tool';
 import { surfaceTabs } from '../../panel/surface-model';
 import { CLASH, FIXTURE, NOTICES, sheetOf } from '../../sheet/test-support/questions';
 import { useLayout } from '../../stores/layout';
-import { connectSheets, resetSheetStore, updateSheetMemory } from '../../stores/sheet';
+import { connectSheets, resetSheetStore, updateSheetMemory, watchSheet } from '../../stores/sheet';
 import { A as SHOWN, resetPanelStores } from '../../test-support/panel';
 import { appSheetHost } from './host';
 import { openSheet, SHEET_TOOL_ID, sheetTool, type SheetToolParams } from './SheetTool';
@@ -139,6 +139,36 @@ describe('the side sheet', () => {
     expect(document.querySelector('[data-sheet-question="q9"]')).not.toBeNull();
     expect(document.activeElement).toBe(elsewhere);
     elsewhere.remove();
+  });
+
+  it('takes an ask again when the host draws the body again while the tab stays in view', async () => {
+    registerPanelTool(sheetTool);
+    await listed(summary());
+    act(() => openSheet(SHOWN, 'q5'));
+    const tab = surfaceTabs(useLayout.getState(), SHOWN).find((ref) => ref.toolId === SHEET_TOOL_ID)!;
+    const state = sheetTool.createState({ appSessionId: SHOWN, session: record(SHOWN), instanceId: tab.id, params: { at: 'q5' } });
+    const Body = sheetTool.render;
+    const at = ctx({ editorHost: { surface: 'panel', tabId: tab.id } });
+    const first = render(<Body state={state} ctx={at} />);
+    await act(() => fake.reply('sheet.read', { model: MODEL, door: { known: false } }));
+    expect(document.activeElement?.getAttribute('data-sheet-question')).toBe('q5');
+    first.unmount(); // the host draws the tab's body again, the tab still in view
+    render(<Body state={state} ctx={at} />);
+    await act(() => fake.reply('sheet.read', { model: MODEL, door: { known: false } }));
+    expect(document.activeElement?.getAttribute('data-sheet-question')).toBe('q5');
+  });
+
+  it('keeps an ask made while the column is not on screen until it is, then puts the keyboard on its card', async () => {
+    await listed(summary());
+    const state = sheetTool.createState({ appSessionId: SHOWN, session: record(SHOWN), instanceId: 'sheet:test', params: { at: 'q7' } });
+    const Body = sheetTool.render;
+    const view = render(<Body state={state} ctx={ctx({ visible: false })} />);
+    act(() => watchSheet(SESSION)); // another view of the session reads it meanwhile
+    await act(() => fake.reply('sheet.read', { model: MODEL, door: { known: false } }));
+    expect(document.querySelector('[data-sheet-question="q7"]')).not.toBeNull();
+    expect(document.activeElement?.getAttribute('data-sheet-question')).toBeNull();
+    view.rerender(<Body state={state} ctx={ctx({ visible: true })} />);
+    expect(document.activeElement?.getAttribute('data-sheet-question')).toBe('q7');
   });
 
   it('keeps a draft in the window’s memory, which another mount of the session shows', async () => {

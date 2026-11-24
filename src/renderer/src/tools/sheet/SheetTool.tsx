@@ -7,7 +7,7 @@
 // O-17, kept: nothing but a person's act adds or activates it. `openSheet` is the one way in (a row's Open, a line of
 // the "Waiting for you" card, a notice's button, Needs you, all through the transcript actions' `openSheet`), and "+".
 // A record that appears, a question added and a `sheet.changed` leave the side column as it was.
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import { useStore } from 'zustand';
 import { createStore, type StoreApi } from 'zustand/vanilla';
 import type { AppSessionId } from '@shared/graph/ids';
@@ -16,6 +16,8 @@ import { Icon } from '../../app/IconButton';
 import { ipc } from '../../ipc/client';
 import { panelHost, setTitle, usePanelHost } from '../../panel/host';
 import type { PanelTool, PanelToolContext, PanelToolInit } from '../../panel/tool';
+import { sideGroups } from '../../panel/surface-model';
+import { useLayout } from '../../stores/layout';
 import { SessionSheet, SHEET_WORDS } from '../../sheet';
 import { selectSheetSession, useSheets } from '../../stores/sheet';
 import { useSessionSheet } from './use-session-sheet';
@@ -26,8 +28,8 @@ export interface SheetToolParams {
   at?: string; // a question's id: the sheet shows its card and puts the keyboard on it
 }
 
-// The last question asked for, how many asks so far, and whether the sheet has put the keyboard on it: an ask is used
-// once for the tab's lifetime, not once a mount, so the body mounting again (the tab shown again) moves nothing.
+// The last question asked for, how many asks so far, and whether it was used: an ask is used once for the tab's
+// lifetime, not once a mount, so the body mounting again when the tab is shown again moves nothing.
 type Focus = { id: string; request: number; used: boolean } | null;
 
 export interface SheetToolState {
@@ -72,15 +74,33 @@ function Centered({ words }: { words: string }) {
   return <p className="m-0 flex flex-1 items-center justify-center p-6 text-center text-fg-muted">{words}</p>;
 }
 
-function SheetBody({ appSessionId, state, visible }: { appSessionId: AppSessionId; state: SheetToolState; visible: boolean }) {
+// Whether the tab is in view in the session's side column now: the shown tab of one of its groups.
+function tabInView(appSessionId: AppSessionId, tabId: string): boolean {
+  const groups = sideGroups(useLayout.getState(), appSessionId);
+  return !groups.hidden && (groups.upper.shown?.id === tabId || groups.lower?.shown?.id === tabId);
+}
+
+function SheetBody({ appSessionId, tabId, state, visible }: { appSessionId: AppSessionId; tabId: string; state: SheetToolState; visible: boolean }) {
   const sheet = useSessionSheet(appSessionId, visible);
   const focus = useStore(state.focus);
-  const pending = focus !== null && !focus.used ? focus : null;
-  const landed = pending !== null && sheet.shown === 'sheet' && sheet.model.open.some((question) => question.id === pending.id);
-  // The sheet puts the keyboard on the card in its own effect, which runs before this one: the ask is then used.
+  // An ask is handed to the sheet while the tab shows, and the sheet puts the keyboard on its card once the card is
+  // listed. It is used for the tab's lifetime when the body goes with the tab out of view (another tab shown, the column
+  // hidden, the tab closed), so the tab shown again moves nothing; a body the host draws again while the tab stays in
+  // view takes it again, as does one that came before the card was listed.
+  const pending = visible && focus !== null && !focus.used ? focus : null;
+  const landed = useRef<number | null>(null);
+  const listed = pending !== null && sheet.shown === 'sheet' && sheet.model.open.some((question) => question.id === pending.id);
   useEffect(() => {
-    if (landed) state.focus.setState((now) => (now !== null && now.request === pending.request ? { ...now, used: true } : now), true);
-  }, [landed, pending, state.focus]);
+    if (listed) landed.current = pending.request;
+  }, [listed, pending]);
+  useEffect(
+    () => () => {
+      const request = landed.current;
+      if (request === null || tabInView(appSessionId, tabId)) return;
+      state.focus.setState((now) => (now !== null && now.request === request ? { ...now, used: true } : now), true);
+    },
+    [appSessionId, tabId, state.focus],
+  );
   if (sheet.shown === 'sheet') {
     return <SessionSheet model={sheet.model} memory={sheet.memory} onMemory={sheet.onMemory} host={sheet.host} focus={pending} unavailable={sheet.unavailable} />;
   }
@@ -91,7 +111,7 @@ function SheetBody({ appSessionId, state, visible }: { appSessionId: AppSessionI
 function SheetToolBody({ state, ctx }: { state: SheetToolState; ctx: PanelToolContext }) {
   return (
     <div className={SCROLL} data-sheet-tool="">
-      {ctx.appSessionId === null ? <Centered words={SHEET_WORDS.empty} /> : <SheetBody appSessionId={ctx.appSessionId} state={state} visible={ctx.visible} />}
+      {ctx.appSessionId === null ? <Centered words={SHEET_WORDS.empty} /> : <SheetBody appSessionId={ctx.appSessionId} tabId={ctx.editorHost.tabId} state={state} visible={ctx.visible} />}
     </div>
   );
 }
