@@ -43,7 +43,8 @@ How to see it working: open the build beside today's build on the same fixtures 
 - [x] (2026-11-24 10:40Z) M5 task 5: the e2e moves, reviewed clean.
 - [x] (2026-11-24 08:20Z) M5 task 6: the rig's scenes for the library, an opened artifact, the document and the dashboard, reviewed clean and merged.
 - [x] (2026-11-24 12:10Z) M5 task 7: the rig's scenes for the slides editor, the design workbench and the design system page, reviewed clean and merged.
-- [ ] M5: the cut built area by area, each with pictures and the owner's call.
+- [x] (2026-11-24) M5 built: artifacts and the editors. Its 227 rows were read against master `f2b32d6c9`, and 15 `new` rows were added (N190 to N204, 11 cuts and 4 `stays`). Of the cuts and rewordings, all but G289 are built; G289 is held because its menu is not drawn where the head's New Space is. The `stays` rows read as on master. The deck now says "All changes saved" like every other editor, through one `SavedStatus`. The editors import the `ui/` parts directly, since they were never separate bundles. Unit tests moved with each area. Task 5 moved the Electron e2e reads, and the groups are unchanged; no harness probe or desk spec read a changed control. The rig gained 95 `m5-` scenes, in launch 2 and in launch 16. An xhigh panel returned 14 findings: 9 were fixed and 5 logged. The rig was repaired after each of four Mac shakedowns. Class 1a passed at the hand-over head. Still owed: the picture pairs and the owner's call, and the Electron e2e groups on a Mac.
+- [ ] M5's pictures and the owner's call.
 - [ ] Retrospective.
 
 ## Acceptance
