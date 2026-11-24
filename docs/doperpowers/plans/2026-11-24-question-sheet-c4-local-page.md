@@ -293,9 +293,9 @@ The command line (`src/mawsd/cli.ts`, with its usage text):
 
     export function pageOrigin(port: number): string                                       // http://sheet.localhost:<port>
     export type Refusal = { status: 400 | 401 | 403 | 404 | 405 | 413 | 421 | 429 | 503; body: string }   // body: one of a fixed list of sentences
-    export function hostPasses(header: string | undefined, port: number): boolean          // equal to sheet.localhost:<port>, case folded; nothing else
+    export function hostPasses(rawHeaders: readonly string[], port: number): boolean       // exactly one Host header, equal to sheet.localhost:<port>, case folded; nothing else
     export function originOf(headers: IncomingHttpHeaders, port: number): 'absent' | 'page' | 'other'   // 'null' and a repeated header are 'other'
-    export function bearerOf(headers: IncomingHttpHeaders): string | null                  // the one Authorization header, scheme Bearer; never a cookie, never the target
+    export function bearerOf(rawHeaders: readonly string[]): string | null                 // the one Authorization header, scheme Bearer; two are none; never a cookie, never the target
     export function routeOf(method: string, target: string): Route | Refusal               // a target that is not origin-form (it does not start with '/') is refused
 
 | request | Host | Origin | credential | answers |
@@ -479,13 +479,13 @@ Five milestones in two landings. M1 is the page server with its three checks and
 - The checks are written and tested as a table before the server exists: `checks.test.ts` holds §L's table row by row, each row as the request that passes and the requests that are refused, so the table in this document and the code cannot drift without a test moving.
 - The process-level suite follows `src/mawsd/process-spine.test.ts`: `startDaemon` in the test's process with the product's options, a scratch profile, the fixture bundle given as `bundleDir`, port 0. Its clients are Node's `http` and `net`, which write any header; a connection is made to the address under test and the Host header set by hand, so no test depends on how its machine resolves a name.
 - A machine with no IPv6 loopback is common among containers. The suite asserts both addresses where `::1` can be bound and one where it cannot, and T3's rule itself (one bind refused as in use means neither is served) is tested through `listen`, the seam.
-- Pitfalls the code shows: a second `Host` header is refused by Node's parser with a 400 before any handler runs, and that answer too must carry no shell; a request target in absolute form reaches the handler as written and is refused by `routeOf`; `server.address()` is the proof of what was bound, not the options passed.
+- Pitfalls of Node's HTTP server, each confirmed and pinned by a test before the checks are trusted: of a repeated `Host` or `Authorization` header the parsed `headers` object keeps one and drops the rest, so the checks read `rawHeaders` and refuse a request that carries either twice; a request with no `Host` may be answered 400 by the parser before any handler runs, and that answer too must carry no shell; a request target in absolute form reaches the handler as written and is refused by `routeOf`; `server.address()` is the proof of what was bound, not the options passed.
 
 **Does not touch.** The spine and anything under `src/services/`; the renderer; `apps/`; the workflow; the sminos home (no registration yet).
 
 **Proves.** Of A.e: every Host refusal, the pairing, the headers, and that an unpaired request still gets the shell. Its tests pin:
 
-- **another Host** (Acceptance 11, "any request with another Host"): for the shell, a static file, the exchange, `whoami` and an upgrade to `/live`, a Host of `127.0.0.1:<port>`, `localhost:<port>`, `[::1]:<port>`, `rebound.example:<port>`, the name without its port, with another port and with a trailing dot, and no Host at all, each answered 421 or the parser's 400, each with no byte of the shell; the name in upper case passes;
+- **another Host** (Acceptance 11, "any request with another Host"): for the shell, a static file, the exchange, `whoami` and an upgrade to `/live`, a Host of `127.0.0.1:<port>`, `localhost:<port>`, `[::1]:<port>`, `rebound.example:<port>`, the name without its port, with another port and with a trailing dot, two Host headers of which one is the page's, and no Host at all, each answered 421 or the parser's 400, each with no byte of the shell; the name in upper case passes;
 - **the shell on the Host alone** (Acceptance 11, "an unpaired browser still gets the pairing screen"): `GET /` and `GET /s/<a session>` with no credential answer 200 with the same bytes, for a session that has a record and for a string that names nothing;
 - **the exchange is a write** (rule 2): `POST /api/pair` with the right code and an Origin of `http://localhost:<port>`, of the name on another port, of `https:` on the same, of `null`, and with none, is 403 each time and the code is still live; with the page's Origin it is 200;
 - **the code** (T8): it works once; a second `pair` voids the first; it is refused after five minutes of an injected clock; the fifth wrong try voids it; the eleventh exchange in a minute is 429; no log line and no file holds it;
