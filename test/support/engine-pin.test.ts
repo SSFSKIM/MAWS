@@ -101,5 +101,5 @@ it('records the resolved version even when a probe exits before system/init', ()
   });
   const rows = JSON.parse(output) as { frame: Record<string, unknown> }[];
   expect(rows.some(({ frame }) => frame.type === 'system' && frame.subtype === 'init')).toBe(false);
-  expect(rows.find(({ frame }) => frame.event === 'provenance')?.frame).toMatchObject({ engineVersion: '4.2.7', engineBin: bin });
+  expect(rows.find(({ frame }) => frame.event === 'provenance')?.frame).toMatchObject({ engineVersion: '4.2.7', engineBin: bin.replace(s.home, '~') }); // the journal writes the home as ~
 });
