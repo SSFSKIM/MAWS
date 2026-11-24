@@ -108,6 +108,7 @@ export const RELAY_COPY = {
   driven: {
     label: (title: string) => `Message ${title}`, // for screen readers only (the word cut, T191)
     told: 'Sent', // the word cut (T203)
+    resumes: (title: string) => `Sent · ${title} resumes with it`, // the direct tell: a finished agent, which the engine resumes with the message
     unknown: 'Sent; the terminal did not confirm it arrived',
     failed: (message: string) => `Not sent: ${message}`,
   },

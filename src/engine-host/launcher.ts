@@ -24,7 +24,7 @@ import { parseJournalRow, type JournalRow } from '@shared/wire/journal';
 import type { BinaryCheck } from './binary-info';
 import { JOURNAL_MAX_BYTES, JournalWriter, ownerOnlyJournalDirectory } from './journal'; // P3-HD: ownerOnlyJournalDirectory
 import { TESTED_ENGINE_VERSION } from './engine-compat';
-import { buildLaunch, LaunchSpecConflict, RELAY_URL, type LaunchPlan } from './launch';
+import { buildLaunch, installedTellMod, LaunchSpecConflict, RELAY_URL, type LaunchPlan } from './launch';
 import type { ProcessTable } from './process-table';
 import { replayEngine } from './replay-transport';
 import { seedOnFirstUser } from './replay-transcript'; // P3-F L242
@@ -57,6 +57,7 @@ export interface LauncherDeps {
   table: ProcessTable;
   store: SessionStateStore;
   binaryProbe: () => Promise<BinaryCheck>;
+  tellMod?: () => string | null; // the direct tell: the built-in mod's folder for a live launch (default: beside this build, when there)
   checkRelay: (force: boolean) => Promise<RelayHealth>;
   captureEnv: () => Promise<Record<string, string>>;
   spawn: (plan: LaunchPlan) => EngineTransport;
@@ -118,7 +119,7 @@ export function createLauncher(deps: LauncherDeps): (spec: LaunchSpec, artifactS
     let journal: JournalRow[] | null = null;
     let relayHealth: RelayHealth | undefined;
     let connectorLocalKey: ConnectorLocalKey | undefined; // P3-HD: live launches only
-    let engine: { bin: string; engineVersion: string; declaresSystemPromptSnapshot?: boolean; declaresAwaitInitialize?: boolean }; // P2-C, P5 O16 M2: the flags' declarations
+    let engine: { bin: string; engineVersion: string; declaresSystemPromptSnapshot?: boolean; declaresAwaitInitialize?: boolean; tellMod?: string | null }; // P2-C, P5 O16 M2: the flags' declarations
     if (spec.replay !== null) {
       const fixture = resolve(deps.cwd, spec.replay);
       journal = readJournal(fixture); // throws on a missing or malformed fixture: the command fails `internal`
@@ -136,7 +137,7 @@ export function createLauncher(deps: LauncherDeps): (spec: LaunchSpec, artifactS
       captured = env;
       relayHealth = relay ?? undefined;
       connectorLocalKey = localKey; // P3-HD
-      engine = { bin: binary.path, engineVersion: binary.version, declaresSystemPromptSnapshot: binary.declaresSystemPromptSnapshot, declaresAwaitInitialize: binary.declaresAwaitInitialize }; // P2-C; P5 O16 M2 (D20, D48)
+      engine = { bin: binary.path, engineVersion: binary.version, declaresSystemPromptSnapshot: binary.declaresSystemPromptSnapshot, declaresAwaitInitialize: binary.declaresAwaitInitialize, tellMod: (deps.tellMod ?? installedTellMod)() }; // P2-C; P5 O16 M2 (D20, D48); the direct tell's mod
     }
 
     spec = await withParentBudget(spec, artifactScope, deps); // P2-F wave S (S-budget)

@@ -474,7 +474,9 @@ export type McpMessageRequest = z.infer<typeof McpMessageRequestSchema>;
 // plain call only: `expires_at`, `timeout_ms` and staged files route the engine through its staging lane (Agent SDK
 // 0.3.259 sdk.d.ts SDKControlMcpCallRequest), so the request has no room for them. `content` is the tool's result after
 // the engine's processing, a string or content blocks (seqs 11 and 17).
-export interface McpCallRequest { tool: string; arguments: Record<string, unknown> }
+// The direct tell (spikes/protocol-probe/findings-uxwave-tell-direct.txt): `check_permissions: true` runs the call through
+// the engine's own tool steps, so a plugin's `tool.run` hook answers it, after its permission check (2.1.331).
+export interface McpCallRequest { tool: string; arguments: Record<string, unknown>; check_permissions?: true }
 export const McpCallResponseSchema = z.looseObject({ content: z.union([z.string(), z.array(z.unknown())]), structuredContent: z.unknown().optional(), _meta: z.unknown().optional() });
 export type McpCallResponse = z.infer<typeof McpCallResponseSchema>;
 // P3-H end
