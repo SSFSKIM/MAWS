@@ -18,7 +18,7 @@ import { FLOAT_COPY } from '../shell/floating'; // P3-F wave S (F6)
 import { useLayout } from '../stores/layout'; // P3-F wave S (F6)
 import { A, probeTool, resetPanelStores, type ProbeState } from '../test-support/panel';
 import { installResizeObserver } from '../test-support/resize';
-import { editorHostOf, focusEditorHostAction, registerEditorHost, resetEditorHosts, SAVED_COPY, useEditorHost, useEditorHostScope, type EditorHostAction, type EditorHostRegistration, type SavedState } from './editor-host';
+import { editorHostOf, focusEditorHostAction, registerEditorHost, resetEditorHosts, SAVED_COPY, useEditorHost, useEditorHostScope, type EditorHostAction, type EditorHostRegistration } from './editor-host';
 import { panelHost, registerPanelTool, setTitle } from './host';
 import { PanelHost } from './PanelHost';
 import { PanelRegion } from './PanelRegion';

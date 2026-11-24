@@ -5,7 +5,7 @@
 // dependency the section is absent (H's sheet, ./ConnectorsSheet.test.tsx).
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { accessibleDescription } from '../../../../test-support/accessible-text';
+import { accessibleDescription, accessibleText } from '../../../../test-support/accessible-text';
 import type { ConnectorServerRow, ConnectorServers } from '@shared/ipc/schema/connectors';
 import type { ConnectorsOwner } from '../../../../artifacts/connector-owner';
 import { ConnectorsSheet } from './ConnectorsSheet';
@@ -77,7 +77,7 @@ describe('the Connectors sheet’s Servers section', () => {
     expect(server('wiki').textContent).toContain('Connect didn’t finish: the sign-in was declined');
     // T600: "Session only" at rest; why waits on the word, which takes the keyboard
     const only = within(server('mail')).getByText('Session only');
-    expect(server('mail').querySelector('[data-connector-server-state]')!.textContent).toBe('Session only');
+    expect(accessibleText(server('mail').querySelector('[data-connector-server-state]')!), 'the reason is not drawn at rest').toBe('Session only');
     expect(only.tabIndex).toBe(0);
     expect(accessibleDescription(only)).toBe('No session has reported this server since MAWS started. Start the artifact’s session once and MAWS can reach it directly afterwards.');
     expect(buttons(server('mail'))).toEqual([]);
