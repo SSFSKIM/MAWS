@@ -48,7 +48,8 @@ export interface SheetPageHandler {
   upgrade(req: IncomingMessage, socket: Duplex, head: Buffer): void;
   pair(): { code: string; expiresAt: string };
   browsers(): BrowserList;
-  unpair(id: string | null): { removed: number; saved: boolean; why?: string };
+  count(): number | null; // the status's: memory alone, never the file
+  unpair(id: string | null): { removed: number; saved: boolean; why?: string; unread?: true };
   connections(): number; // the live connections paired on the connection
   spineState(state: SpineState): void;
   tick(): void; // the page server's timer: a replace of the browsers' file still owed
@@ -272,9 +273,10 @@ export async function createSheetPageHandler(deps: HandlerDeps): Promise<SheetPa
 
     pair: () => pairing.mint(),
     browsers: () => pairing.list(),
+    count: () => pairing.count(),
     unpair(id) {
-      const { ids, saved, why } = pairing.revoke(id);
-      return { removed: ids.length, saved, ...(why !== undefined && { why }) };
+      const { ids, saved, why, unread } = pairing.revoke(id);
+      return { removed: ids.length, saved, ...(why !== undefined && { why }), ...(unread && { unread }) };
     },
     connections: () => [...live].filter((connection) => connection.step === 'paired').length,
     spineState(state) {

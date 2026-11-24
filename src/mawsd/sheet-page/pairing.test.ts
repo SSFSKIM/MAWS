@@ -245,8 +245,9 @@ describe('the credential and the browsers’ file (T9, T10)', () => {
     mkdirSync(file); // read fails EISDIR
     const pairing = make();
     expect(pairing.list()).toEqual({ browsers: [], why: 'EISDIR' });
-    expect(pairing.revoke(null)).toEqual({ ids: [], saved: false, why: 'EISDIR' }); // never answered saved
-    expect(pairing.revoke(id)).toEqual({ ids: [], saved: false, why: 'EISDIR' });
+    expect(pairing.revoke(null)).toEqual({ ids: [], saved: false, why: 'EISDIR', unread: true }); // never answered saved
+    expect(pairing.revoke(id)).toEqual({ ids: [], saved: false, why: 'EISDIR', unread: true });
+    expect(pairing.count()).toBeNull();
     expect(pairing.check(credential)).toBeNull();
     const { code } = pairing.mint();
     expect(pairing.exchange(code, CHROME_MAC)).toEqual({ ok: false, why: 'not-saved' });
@@ -256,10 +257,25 @@ describe('the credential and the browsers’ file (T9, T10)', () => {
 
     rmSync(file, { recursive: true });
     writeFileSync(file, kept);
+    expect(pairing.count()).toBeNull(); // the count reads no file
     expect(pairing.list().browsers.map((browser) => browser.id)).toEqual([id]);
+    expect(pairing.count()).toBe(1);
     expect(pairing.check(credential)).toMatchObject({ id });
     clock += MINUTE;
     expect(pairing.exchange(code, CHROME_MAC)).toMatchObject({ ok: true }); // the code stayed live
+  });
+
+  it('reads an unreadable file again for a proof, so a live hello heals with nothing else in between', () => {
+    const { id, credential } = paired(make());
+    const kept = readFileSync(file, 'utf8');
+    rmSync(file);
+    mkdirSync(file);
+    const pairing = make();
+    expect(pairing.prove(id, nonce())).toBeNull();
+    rmSync(file, { recursive: true });
+    writeFileSync(file, kept);
+    const once = nonce();
+    expect(pairing.prove(id, once)).toBe(macOf(credential, id, once));
   });
 
   it('labels a browser from a fixed set of words, so nothing a requester wrote reaches a terminal', () => {

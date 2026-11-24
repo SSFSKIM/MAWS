@@ -623,10 +623,14 @@ async function sheet(context: Context, args: readonly string[]): Promise<number>
       return withDaemon(context, async (link) => {
         const answer = await link.request('daemon.sheetUnpair', { id });
         if (!answer.ok) return failed(deps, `daemon.sheetUnpair failed: ${answer.error.message}`);
-        const { removed, saved, why } = answer.value as CommandOutput<'daemon.sheetUnpair'>;
+        const { removed, saved, why, unread } = answer.value as CommandOutput<'daemon.sheetUnpair'>;
         if (saved) {
           deps.out(`unpaired ${plural(removed, 'browser')}\n`);
           return EXIT.done;
+        }
+        if (unread) {
+          deps.err(`nothing was unpaired: the browsers’ file could not be read (${why ?? 'unknown'})\n`);
+          return EXIT.failed;
         }
         deps.err(`unpaired ${plural(removed, 'browser')} for now: the change could not be saved (${why ?? 'unknown'}). ${removed === 1 ? 'It is' : 'They are'} paired again if mawsd restarts before a save succeeds.\n`);
         return EXIT.failed;

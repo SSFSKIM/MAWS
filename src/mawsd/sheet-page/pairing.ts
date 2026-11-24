@@ -46,9 +46,11 @@ export interface Pairing {
   check(credential: string): PairedBrowser | null; // constant time over the kept hashes; touches lastSeenAt by the grain
   seen(id: string): boolean; // whether the browser is still paired (known and not idle 90 days); a live connection's use, touched by the grain
   list(): BrowserList;
+  count(): number | null; // the browsers memory holds, reading no file; null while the file could not be read
   // refused in memory at once; saved: the file's replace succeeded (a replace still owed is tried again, so a repeat never
-  // reads saved while the file holds a revoked credential); why: the failure's code when it did not
-  revoke(id: string | null): { ids: string[]; saved: boolean; why?: string };
+  // reads saved while the file holds a revoked credential); why: the failure's code when it did not; unread: the file
+  // could not be read, so nothing was revoked
+  revoke(id: string | null): { ids: string[]; saved: boolean; why?: string; unread?: true };
   retry(): boolean; // a replace still owed is tried again; true once none is owed
   onRevoked(listener: (id: string) => void): () => void; // the live connections' end: a revocation, or a browser dropped for a newer one
 }
@@ -76,7 +78,8 @@ export function createPairing(deps: PairingDeps): Pairing {
   const write = deps.write ?? atomicWriteFileSync;
   let browsers: Kept[] = [];
   // The error's code of a browsers' file that could not be read: while it is set nobody is paired and nothing replaces
-  // the file (its credentials would be lost, or a revocation read as saved), and each command reads it again
+  // the file (its credentials would be lost, or a revocation read as saved), and each use reads it again (a command, a
+  // credential's check, a live hello's proof; never the status's count)
   let unread: string | null = null;
   const load = () => {
     const got = readKept(file, log, unread);
@@ -190,6 +193,7 @@ export function createPairing(deps: PairingDeps): Pairing {
     },
 
     prove(id, nonce) {
+      if (!readable()) return null;
       const browser = browsers.find((kept) => kept.id === id);
       if (browser === undefined || !alive(browser)) return null;
       return createHmac('sha256', browser.proof).update(`${PROOF_MAC_LABEL}\n${id}\n${nonce}`).digest('base64url');
@@ -210,8 +214,10 @@ export function createPairing(deps: PairingDeps): Pairing {
 
     list: () => (readable() ? { browsers: browsers.filter(alive).map(shown) } : { browsers: [], why: unread! }),
 
+    count: () => (unread === null ? browsers.filter(alive).length : null),
+
     revoke(id) {
-      if (!readable()) return { ids: [], saved: false, why: unread! };
+      if (!readable()) return { ids: [], saved: false, why: unread!, unread: true };
       const gone = browsers.filter((browser) => id === null || browser.id === id);
       if (gone.length === 0) {
         if (!owed) return { ids: [], saved: true };

@@ -609,6 +609,29 @@ describe('the server’s proof (T28) and the live connection (Acceptance 11, “
     expect(daemon.sheetPage.status().connections).toBe(1);
   });
 
+  it('heals at a hello once an unreadable browsers’ file reads again; the status counts in memory alone, null while it is unread', async () => {
+    const first = await served();
+    const browser = await pairBrowser(first.daemon, first.port);
+    await first.daemon.stop('a restart');
+    const file = join(scene.paths.dir, 'sheet-page.json');
+    const kept = readFileSync(file, 'utf8');
+    rmSync(file);
+    mkdirSync(file); // read fails EISDIR
+    const { daemon, port } = await served();
+    expect((await request(port, 'GET', '/', [HOST(port)])).status).toBe(200); // the handler loaded
+    const refused = await Tab.open(port);
+    refused.send({ t: 'hello', v: 1, id: browser.id, nonce: nonce() });
+    expect(await refused.next(0)).toEqual({ closed: 4401 });
+    expect(daemon.sheetPage.status().browsers).toBeNull(); // not known, not 0
+
+    rmSync(file, { recursive: true });
+    writeFileSync(file, kept, { mode: 0o600 });
+    expect(daemon.sheetPage.status().browsers).toBeNull(); // the status read no file: still unread
+    const tab = await pairedTab(port, browser); // no status or command in between: the hello read it again
+    expect(daemon.sheetPage.status()).toMatchObject({ browsers: 1, connections: 1 });
+    tab.ws.close();
+  });
+
   it('gives two MACs for two nonces, and two for one nonce under two browsers', async () => {
     const { daemon, port } = await served();
     const [a, b] = [await pairBrowser(daemon, port), await pairBrowser(daemon, port)];
@@ -857,9 +880,7 @@ describe('never in the way (T2, T5, T6)', () => {
     expect(json.code).toBe(1);
     expect(JSON.parse(json.out)).toEqual({ served: false, browsers: [], why: 'EISDIR' });
     const unpaired = await cli(['sheet', 'unpair', '--all']);
-    expect(unpaired.code).toBe(1);
-    expect(unpaired.err).toContain('EISDIR');
-    expect(unpaired.out).toBe('');
+    expect(unpaired).toEqual({ code: 1, out: '', err: 'nothing was unpaired: the browsers’ file could not be read (EISDIR)\n' });
     expect(`${listed.err}${unpaired.err}`).not.toContain(scene.root); // a code, never a path
   });
 

@@ -74,7 +74,7 @@ export interface SheetPage {
   status(): DaemonSheetPage; // daemon.status.sheetPage
   pair(): Promise<SheetPairAnswer>; // §K
   browsers(): Promise<BrowserList>;
-  unpair(id: string | null): Promise<{ removed: number; saved: boolean; why?: string }>;
+  unpair(id: string | null): Promise<{ removed: number; saved: boolean; why?: string; unread?: true }>;
   spineState(state: SpineState): void; // T15: a spine that cannot be had is said on the live connections
   stop(): Promise<void>; // listeners closed, connections ended; at most STOP_MS
 }
@@ -313,7 +313,7 @@ export function createSheetPage(options: SheetPageOptions): SheetPage {
       state,
       detail,
       url: state === 'listening' ? pageOrigin(port) : null,
-      browsers: handler ? handler.browsers().browsers.length : null,
+      browsers: handler ? handler.count() : null, // memory alone: a status reads no file
       connections: handler ? handler.connections() : null,
       registered: false, // the registration is M3's
     }),
