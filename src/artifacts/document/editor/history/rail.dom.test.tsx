@@ -631,6 +631,8 @@ describe('the owner’s actions', () => {
     elsewhere.focus();
     land();
     await until(() => screen.queryByRole('toolbar', { name: 'Version preview' }) === null, 'history left');
+    // the document takes the keyboard on the frame after a restore lands; wait past it
+    await new Promise((resolve) => requestAnimationFrame(() => setTimeout(resolve, 20)));
     expect(document.activeElement).toBe(elsewhere);
     elsewhere.remove();
   });
