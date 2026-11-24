@@ -35,6 +35,13 @@
 // 6: with MAWS_LATENCY_STUB_STOP_HOOK=1 each turn calls the host's Stop hook (the callback its initialize registered)
 // before its result, with no crons and no background tasks, as the engine's Stop does, so the host reads the session's
 // work as known after a turn (an adopted session's included).
+//
+// Ticket 851, M5 (docs/doperpowers/plans/2026-11-24-prestart-engine.md, D14): the prestart measure's engine. With
+// MAWS_LATENCY_STUB_INIT_MS it answers `initialize` that many milliseconds after reading it, as the engine answers it
+// only once its boot and its SessionStart hooks are done (W1); the controls read meanwhile are answered after it, in the
+// order they came. With MAWS_LATENCY_STUB_STARTS_FILE every process start but a `--version` probe appends one line, its
+// pid, its clock's read, its session id and its arguments, so engine starts are counted outside the journal, a start
+// the host never journaled (a hidden prestart it ended) included.
 import { randomUUID } from 'node:crypto';
 import { appendFileSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
@@ -58,6 +65,12 @@ if (args.length === 1 && args[0] === '--version') {
 }
 if (!samplesPath) {
   process.stderr.write('latency engine stub: no samples file\n');
+  process.exit(64);
+}
+
+const INIT_MS = Number(process.env.MAWS_LATENCY_STUB_INIT_MS ?? 0);
+if (!Number.isFinite(INIT_MS) || INIT_MS < 0) {
+  process.stderr.write(`latency engine stub: MAWS_LATENCY_STUB_INIT_MS is not a delay: ${process.env.MAWS_LATENCY_STUB_INIT_MS}\n`);
   process.exit(64);
 }
 
@@ -116,6 +129,9 @@ const argOf = (flag) => {
   return at >= 0 ? args[at + 1] : undefined;
 };
 const sessionId = argOf('--session-id') ?? argOf('--resume') ?? recordedSession;
+if (process.env.MAWS_LATENCY_STUB_STARTS_FILE) {
+  appendFileSync(process.env.MAWS_LATENCY_STUB_STARTS_FILE, `${JSON.stringify({ pid: process.pid, at: performance.timeOrigin + performance.now(), sessionId: argOf('--session-id') ?? argOf('--resume') ?? null, args })}\n`);
+}
 
 function rewrite(value, ids) {
   if (typeof value === 'string') return ids.get(value) ?? value;
@@ -181,8 +197,10 @@ async function playTurn(user) {
   }
 }
 
-// Turns play one after another, in the order their prompts arrived.
+// Turns play one after another, in the order their prompts arrived; control answers go out in the order asked, behind
+// initialize's delay.
 let playing = Promise.resolve();
+let answering = Promise.resolve();
 let stopCallback = null; // P5 O17 M8: the Stop hook's callback id, from the latest initialize
 function onFrame(frame) {
   if (frame.type === 'control_request') {
@@ -194,7 +212,8 @@ function onFrame(frame) {
       process.stderr.write(`latency engine stub: no recorded answer for control_request ${subtype}\n`);
       process.exit(70);
     }
-    write({ type: 'control_response', response: { ...answer, request_id: frame.request_id } });
+    const respond = () => write({ type: 'control_response', response: { ...answer, request_id: frame.request_id } });
+    answering = answering.then(() => (subtype === 'initialize' && INIT_MS > 0 ? sleep(INIT_MS) : undefined)).then(respond);
     return;
   }
   if (frame.type === 'user') playing = playing.then(() => playTurn(frame));
