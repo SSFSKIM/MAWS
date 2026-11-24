@@ -336,7 +336,7 @@ class HostedTransport {
   // (`withinMs`, else the host start's), whichever comes first. A session whose engine has exited, or with no writer
   // connection (a reconnect under way), is refused at once: the caller launches afresh rather than wait.
   private promote(opts: { withinMs?: number } = {}): Promise<Promotion> {
-    if (this.ended) return Promise.resolve({ ok: false, message: 'the engine has exited' });
+    if (this.ended) return Promise.resolve({ ok: false, message: 'the session is over on this transport: its engine exited, or it was handed over' });
     const connection = this.connection;
     if (connection === null || this.reconnecting) return Promise.resolve({ ok: false, message: 'the session host has no writer connection' });
     const ms = opts.withinMs ?? this.o.deps.startMs ?? HOST_START_MS;

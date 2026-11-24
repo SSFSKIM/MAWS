@@ -563,7 +563,7 @@ Each milestone is built test-first, and gets one `doperpowers:reviewer-medium` r
 ## Progress
 
 - [x] M0 · The probe. (2026-11-24.)
-- [ ] M1 · The native holder.
+- [x] M1 · The native holder. (2026-11-24, as built: `6e2752e84` (Go and the three prebuilds, Go 1.25.3) and `699549ab6` (TypeScript), and the commit carrying this entry (the other adoption tests' calls of `adoptAll`, one refusal's wording).) R4-1's native protocol, its native tests and the successor's rule are built as written; the decisions R4-1 left open are Decision Log 8. Two of R4-1's TypeScript tests, an engine host killed between staging and promotion and right after promotion, need M2's staging and adopt, so they move to M2.
 - [ ] M2 · The host.
 - [ ] M3 · The spine and the window.
 - [ ] M4 · The endpoint.
@@ -594,6 +594,15 @@ Each milestone is built test-first, and gets one `doperpowers:reviewer-medium` r
    - *Why it is strong:* a parked spare has no session, no folder and no identity until it is claimed, so nothing would have to be hidden. That removes the cause of every visibility finding.
    - *Why it lost:* the charter defers the spare pool (§P1, ticket 851's "Done when"), and the owner chose this route on 2026-11-24.
    - *Unknowns, if it comes back:* whether SessionStart hooks run at boot or at claim, and how a spare would sit under the native holder; a probe would have to answer both.
+
+8. **2026-11-24. M1's open points, decided while building it:**
+   - **Who promotes:** the writer only. An observer is answered `error` ("not the writer"), a superseded writer `fenced`, as for every other writer-only command.
+   - **Where the mark is first written:** in the entry `launch` writes, the first that names the session. The entry the host writes at its start names no session, so a successor releases that host as holding no engine. `launch`'s write only warns on failure, as today. The commit then writes the marked entry before the fork, and a failure there fails the spawn. So no child ever runs under an entry without the mark.
+   - **The entry's field:** `prestart` is written only while true, so an unmarked or promoted entry reads exactly as before. The `hello` does not carry it: only the successor reads the mark, and it reads the roster.
+   - **What `promote` refuses:** a host with no running child (before the spawn, after the reap or the exit) and a host already exiting; both answer `ok: false` with the reason. A launch that is unmarked, or already promoted, is answered `ok: true` with no write.
+   - **What counts as the writer's loss:** the writer's connection ends and no pending writer is attaching. The child is then ended at once through the host's own stop path (SIGTERM to its group, `HOST_EXIT_GRACE`, exit), with no grace for a reconnect. The prestart belongs to the connection that asked for it (D3), and a lost prestart costs only a cold Send. A writer superseded by a higher fence is not a loss. "No writer at all" needs no timer of its own: only a writer can set the mark, so a marked host with no writer is one whose writer was lost.
+   - **The transport's `promote()`:** it is bounded by the host start's bound (`HOST_START_MS`, 5 s, or the deps' `startMs`), and a caller may pass a shorter one. It resolves with the host's answer, with a refusal when its connection closes, or with a refusal at the bound. It never rejects. It is refused at once when the engine has exited or no writer connection is up (a reconnect under way), so M2's adopt launches fresh instead of waiting. An answer that comes after its bound is skipped as owed, never taken for a later promotion's.
+   - **How the successor ends a marked host:** a live one is recorded unattached at the start, never held, so a launch, a forget or a stop all of its session stops it first. It is ended through `stopHeldHost`: SIGTERM to the host, its own stop ladder, then SIGKILL to the child past the grace. Then its launch's `<launchId>.jsonl`, `<launchId>.<n>.jsonl`, `<launchId>.hseq` and `<launchId>.<n>.hseq` are removed from its session's journal directory, whatever the stop's outcome, since no writer is left for them. An end that fails is logged and not counted as a failed adoption: the unattached record guards the engine until it is gone. A dead marked host's staged files are removed along with its other files.
 
 ## Outcomes & Retrospective
 

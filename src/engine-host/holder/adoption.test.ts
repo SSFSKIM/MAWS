@@ -124,7 +124,7 @@ function successor(stub: string, opts: { env?: Record<string, string> } = {}) {
   const adopt = async () => {
     const { live } = liveHosts(readRoster(hostsDir(), () => {}), { isAlive, procStartOf });
     ipc.table.holdForAdoption(live.flatMap((entry) => (entry.appSessionId ? [entry.appSessionId as AppSessionId] : [])));
-    const outcome = await adoptAll(live, { adopt: (entry) => ipc.adopt(entry), log: () => {} });
+    const outcome = await adoptAll(live, { adopt: (entry) => ipc.adopt(entry), end: async () => 'gone' as const /* no prestart here (ticket 851) */, log: () => {} });
     for (const entry of live) if (entry.appSessionId) ipc.table.adoptionEnded(entry.appSessionId as AppSessionId);
     return { live, outcome };
   };
@@ -157,7 +157,7 @@ describe.skipIf(!existsSync(BINARY))('adoption after an engine host is killed wi
     const next = successor(stub);
     const { live, outcome } = await next.adopt();
     expect(live.map((entry) => entry.appSessionId)).toEqual([id]);
-    expect(outcome).toEqual({ adopted: [id], failed: [] });
+    expect(outcome).toEqual({ adopted: [id], failed: [], ended: [] });
     await until(() => next.events(id).some((e) => e.kind === 'turn.ended'), 'the turn ended under the successor');
     await until(() => next.status(id).process === 'ready', 'ready');
     const status = next.status(id);
@@ -303,7 +303,7 @@ describe.skipIf(!existsSync(BINARY))('adoption after an engine host is killed wi
       }
     };
     const next = successor(stub, { env });
-    expect((await next.adopt()).outcome).toEqual({ adopted: [id], failed: [] });
+    expect((await next.adopt()).outcome).toEqual({ adopted: [id], failed: [], ended: [] });
     expect(next.status(id)).toMatchObject({ process: 'ready', pid: before.pid });
 
     const rows = [...launchRows(dir, before.launchId)];
@@ -350,7 +350,7 @@ describe.skipIf(!existsSync(BINARY))('the handover to a successor', () => {
     expect(rowsBefore.at(-1)!.frame).toMatchObject({ event: 'host_detach', reason: 'handover', holderId: before.holder!.holderId });
 
     const next = successor(stub);
-    expect((await next.adopt()).outcome).toEqual({ adopted: [id], failed: [] });
+    expect((await next.adopt()).outcome).toEqual({ adopted: [id], failed: [], ended: [] });
     await until(() => next.events(id).some((e) => e.kind === 'permission.requested'), 'the request raised by the successor', 30_000);
     expect(next.status(id)).toMatchObject({ pid: before.pid, holder: { holderId: before.holder!.holderId, adopted: true } });
     const requested = ofKind(next.events(id), 'permission.requested')[0]!;
