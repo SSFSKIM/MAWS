@@ -26,11 +26,12 @@
 // owner does; a close Radix asks for while the pointer is still within the region (its leave of the owner) is not taken,
 // and a leave of the region into the tip keeps it open, as a leave of the owner into it does.
 //
-// Where it opens: below its owner, since what explains an owner (a field's caption, a section's heading, the message a
-// rule's words follow, the window's toolbar above a panel's head) stands above it in reading order, and what lies below
-// is what comes next. Radix flips it above where the window has no room below and shifts it along the edge it would
-// cross, `collisionPadding` from the window's edges; inside a `TipBoundary` it keeps to that container too (a page in a
-// panel, so a tip on a word near the page's edge does not run onto the sidebar).
+// Where it opens: above its owner, the app's side, unless the owner names another (`side`). An owner whose explanation
+// stands above it (a field's caption, a section's heading, the message a rule's words follow, the window's toolbar over
+// a panel's head) names `side="bottom"`, so its tip does not cover what it explains. Radix flips it to the other side
+// where the window has no room and shifts it along the edge it would cross, `collisionPadding` from the window's edges;
+// inside a `TipBoundary` it keeps to that container too (a page in a panel, so a tip on a word near the page's edge
+// does not run onto the sidebar).
 //
 // `UnavailableButton` is a greyed click-activated control's enabled owner ("Every hidden fact has an owner that takes
 // keyboard focus"): a button, a link, a checkbox or a radio drawn `aria-disabled`, still in the Tab order, its reason
@@ -49,6 +50,8 @@ const TIP = 'z-50 max-w-[20rem] rounded-sm border border-border-strong bg-bg-ove
 type ClickGuard = { 'aria-disabled'?: true; onClickCapture?(event: MouseEvent): void };
 type Owner = ReactElement<{ 'aria-describedby'?: string }>;
 
+export type TipSide = 'top' | 'bottom' | 'left' | 'right';
+
 // The container the tips inside it keep to, besides the window's edges; none by default.
 const Boundary = createContext<Element | null>(null);
 export function TipBoundary({ element, children }: { element: Element | null; children: ReactNode }) {
@@ -58,7 +61,7 @@ export function TipBoundary({ element, children }: { element: Element | null; ch
 // The tip that shows, closed when another opens (Radix's own signal for that fires only for the openings it makes).
 let showing: { close(): void } | null = null;
 
-export function Tip({ content, description, pointedWithin, children, ...guard }: { content: ReactNode; description?: string | null; pointedWithin?: RefObject<HTMLElement | null>; children: Owner } & ClickGuard) {
+export function Tip({ content, description, pointedWithin, side = 'top', children, ...guard }: { content: ReactNode; description?: string | null; pointedWithin?: RefObject<HTMLElement | null>; side?: TipSide; children: Owner } & ClickGuard) {
   const descriptionId = useId();
   const boundary = useContext(Boundary);
   const shows = content !== null && content !== undefined && content !== '';
@@ -191,7 +194,7 @@ export function Tip({ content, description, pointedWithin, children, ...guard }:
           <Tooltip.Portal>
             <Tooltip.Content
               ref={tip}
-              side="bottom"
+              side={side}
               sideOffset={4}
               collisionPadding={8}
               collisionBoundary={boundary ?? []}
@@ -228,9 +231,9 @@ export const unavailableClickProps = (reason: string | null | undefined): ClickG
 // The look of a greyed control, for a control drawn `aria-disabled`.
 export const UNAVAILABLE_LOOK = 'aria-disabled:cursor-default aria-disabled:text-fg-faint aria-disabled:hover:bg-transparent';
 
-export function UnavailableButton({ reason, children }: { reason: string | null; children: Owner }) {
+export function UnavailableButton({ reason, side, children }: { reason: string | null; side?: TipSide; children: Owner }) {
   return (
-    <Tip content={reason} description={reason} {...unavailableClickProps(reason)}>
+    <Tip content={reason} description={reason} side={side} {...unavailableClickProps(reason)}>
       {children}
     </Tip>
   );

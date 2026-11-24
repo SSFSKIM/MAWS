@@ -272,7 +272,7 @@ function ActionButton({ action, text = false }: { action: EditorHostAction; text
   }
   if (ActionIcon) {
     return (
-      <NamedGlyph label={action.label} unavailable={action.unavailable} pressed={action.pressed} onClick={() => action.onSelect()} data-editor-action={action.id}>
+      <NamedGlyph label={action.label} unavailable={action.unavailable} pressed={action.pressed} side={action.tipSide} onClick={() => action.onSelect()} data-editor-action={action.id}>
         <ActionIcon className="size-4" />
       </NamedGlyph>
     );
@@ -280,7 +280,7 @@ function ActionButton({ action, text = false }: { action: EditorHostAction; text
   // An action with no icon is drawn by its label; always under its owner's tip, so a reason that comes or goes keeps the
   // button (and its focus) where it is.
   return (
-    <UnavailableButton reason={action.unavailable ?? null}>
+    <UnavailableButton reason={action.unavailable ?? null} side={action.tipSide}>
       <button type="button" aria-pressed={action.pressed} disabled={action.disabled} onClick={() => action.onSelect()} data-editor-action={action.id} className={`${GHOST} px-2 text-ui ${UNAVAILABLE_LOOK}`}>
         {action.label}
       </button>
