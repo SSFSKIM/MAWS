@@ -123,7 +123,7 @@ describe('a mark’s note', () => {
   /** A mark `width` wide at `left` in a scroller that shows `seen` (its left and width) of the page. */
   function markIn(seen: [number, number], left: number, width = 14) {
     const scroller = document.body.appendChild(document.createElement('div'));
-    scroller.style.overflow = 'auto';
+    scroller.style.overflowX = 'auto'; // happy-dom's computed style does not expand the `overflow` shorthand
     scroller.getBoundingClientRect = () => rect(seen[0], 0, seen[1], 600);
     Object.defineProperties(scroller, { clientWidth: { value: seen[1] }, clientHeight: { value: 600 }, clientLeft: { value: 0 }, clientTop: { value: 0 } });
     const mark = scroller.appendChild(document.createElement('span'));
