@@ -15,7 +15,7 @@ How to see each of these is Concrete Steps. What closes the child is its two gat
 - [x] (2026-11-23) This document written against the composite at `635073ce9`, MAWS master `90ce5c017` and doperpowers pull request #628 at `7b53f8a2d`.
 - [x] (2026-11-24) The document's buildability review: fifteen findings, each checked against the code and all fifteen held. The composite's writer ruled on five (a carried draft, the Send, the locator, receipts across a parent's and a child's history, the links of the sheet's Markdown); this revision repairs all fifteen and brings §B to §D to the set at `9f4860205`. It is the document's only review round: the milestones' task reviews and the branch reviews check it from here.
 - [x] (2026-11-24) The look: a drawn example of six frames put to the owner, and the owner's four answers recorded, each the recommended one ("The look"). The drawing milestones are no longer blocked by it. Parent pin moved to `80645243b`.
-- [x] (2026-11-24) doperpowers pull request #628 merged: the pin is doperpowers `2594002af`, sminos 1.57.0, set version 1, digest `594200ae4e539c0688c67b511968861d8ebf03c87d1c45b512903a538326e277`. Between `9f4860205`, which §B to §D were written to, and the merge, the set changed in its README and `schema/show.schema.json` only: a queued `sent` entry is discriminated by kind (an answer or a dismissal carries `id`, a retract `target`, a `delivered` line neither), `show`'s schema states the reader's cuts, a lone surrogate is printed as U+FFFD, and an upload's name is bounded by its stem. M1 reads these against §B to §D as its first act says.
+- [x] (2026-11-24) doperpowers pull request #628 merged: the pin is doperpowers `2594002af`, sminos 1.57.0, set version 1, digest `594200ae4e539c0688c67b511968861d8ebf03c87d1c45b512903a538326e277`. Between `9f4860205`, which §B to §D were written to, and the merge, the set changed in its README and `schema/show.schema.json` only: a queued `sent` entry is discriminated by kind (an answer or a dismissal carries `id`, a retract `target`, a `delivered` line neither), `show`'s schema states the reader's cuts, a lone surrogate is printed as U+FFFD, and an upload's name is bounded by its stem. §B to §D are corrected to the pin (2026-11-24, in a commit of their own, from the set's diff `9f4860205..2594002af`): the queued `sent` entry's kinds and the lone surrogate in §B, the unlocked reader's glimpse of a rolled-back write in §C; the cuts, the handle and the upload's stem needed no change.
 - [ ] M1 — The pin and the model. Blocked by: nothing.
 - [ ] M2 — The service: live reading, and the writer's call. Blocked by: M1.
 - [ ] M3 — The components (the composite's X5), on fixtures. Blocked by: M1.
@@ -166,7 +166,7 @@ Paths are from the repository's root. `R/` is `src/renderer/src/`. A name given 
 
 `src/shared/sheet/pin.test.ts` recomputes the digest as the set's README defines it (the SHA-256 of the lines `<sha256>  <path>\n` of every file but `MANIFEST.json`, sorted by path) and asserts three things: it equals `MANIFEST.json`'s `digest`; it equals the digest `PROVENANCE.md` names; the directory holds no file the manifest lacks. The set holds a PNG, files without a final newline and an inbox that ends in a torn line, so `.gitattributes` marks `test/fixtures/sheet/set/**` as `-text`, and the formatter and the linter ignore the directory.
 
-This document's §B to §D are written to the set at `9f4860205`: 21 fixture directories, 6 examples (with `split/then`), the result grammar with its examples, six schemas, and a README whose section "Readings fixed with the set" is read with them. **What the pin holds binds; M1 corrects these sections to it where the merge differs, before M2 starts.**
+§B to §D are written to the pin, doperpowers `2594002af`: 21 fixture directories, 6 examples (with `split/then`), the result grammar with its examples, six schemas, and a README whose section "Readings fixed with the set" is read with them. They were first written to the set at `9f4860205` and corrected to the pin on 2026-11-24 (the differences: the queued `sent` entry's three kinds and the lone surrogate, §B; the unlocked reader's glimpse of a rolled-back write, §C). **What the pin holds binds** wherever a later reading finds these sections differ from it.
 
 ### §B · The model (M1)
 
@@ -180,7 +180,8 @@ This document's §B to §D are written to the set at `9f4860205`: 21 fixture dir
     SheetQuestion   a question of §1 with `handle`, its references each with `changed`, and `queued` when a queued answer stands on it
     SheetOutcome    by `kind`: an answer (with `picks`, the cut labels, and `places`, the same picks as integers from 1) or a dismissal; each with its question's snapshot
     SheetClosed     by `how`: answered (with `receipt` and `places`), dismissed, withdrawn (never a `deliveredAt`)
-    SheetSent       by `state`: queued (with `cancelled` where a queued retract names it), accepted, delivered, stale (with `current`), closed (with `how`), retracted, too-late
+    SheetSent       by `state`, and within a state by `kind`: queued is an answer or a dismissal (with `id`, and `cancelled` where a queued retract names it), a retract (with `target`) or a `delivered` line (neither);
+                    accepted, delivered, stale (with `current`), closed (with `how`), retracted and too-late each as the pin's `show.schema.json` gives their kinds
     SheetSentState  'queued' | 'accepted' | 'delivered' | 'stale' | 'closed' | 'retracted' | 'too-late'
     SheetReference  SheetOption  SheetAsker
     SheetLine       one inbox line as a surface writes it: { v: 1, key, kind: 'answer' | 'dismiss' | 'retract', id?, revision?, picks?, text?, images?, target?, by }
@@ -202,7 +203,7 @@ A surface writes no `at` and no `batch`: the door fills both. `SheetSummary.open
     export function lineError(line: unknown): string | null            // why an inbox line fails the line's schema, or null
     export function summaryOf(model: SheetModel, facts: Pick<SheetSummary, 'appSessionId' | 'title' | 'live'>): SheetSummary
 
-`modelOf` is C2's I4, steps 2 to 7, on bytes already read; `tail` is the inbox from `state.inbox.offset` to the end of the file, and the function itself stops at the last newline. Pitfalls the Python source shows and a port gets wrong: `sent`'s keys sort by code unit (the default comparator; keys are ASCII), never by locale; every cut counts code points (`[...text]`), not UTF-16 units, and a pending outcome is cut as the README lists (the question at 2,000, its header at 60, each label and each pick at 200, a subagent's name at 200) with `places` read from the whole labels before any is cut; a tail line is dropped when it is not valid UTF-8, is not JSON (`NaN` and the infinities are not), holds a lone UTF-16 surrogate in any string, fails the line's schema, or answers an open question at its current revision with a pick that is no label of it or with two picks on a single-select question; a queued line is dropped when its key has a verdict or occurred earlier in the tail.
+`modelOf` is C2's I4, steps 2 to 7, on bytes already read; `tail` is the inbox from `state.inbox.offset` to the end of the file, and the function itself stops at the last newline. Pitfalls the Python source shows and a port gets wrong: `sent`'s keys sort by code unit (the default comparator; keys are ASCII), never by locale; every cut counts code points (`[...text]`), not UTF-16 units, and a pending outcome is cut as the README lists (the question at 2,000, its header at 60, each label and each pick at 200, a subagent's name at 200) with `places` read from the whole labels before any is cut; a tail line is dropped when it is not valid UTF-8, is not JSON (`NaN` and the infinities are not), holds a lone UTF-16 surrogate in any string, fails the line's schema, or answers an open question at its current revision with a pick that is no label of it or with two picks on a single-select question; a queued line is dropped when its key has a verdict or occurred earlier in the tail. A lone UTF-16 surrogate in any string the model carries from `state.json` (where `JSON.parse` keeps it) is written as U+FFFD, as `show` prints it (the README's "A reader never fails on a record's strings"); it is a tail line holding one that is dropped.
 
 `call.ts`, the stored call (X7):
 
@@ -281,7 +282,7 @@ A draft holds what the person typed and **the revision they typed it against**. 
 
 It is started in `startSpine` (`src/services/spine-root.ts`) beside the lane A driver, under the same condition, and joins `parts` for the stop. It is also what C4's page server calls, so every rule of this section holds at the service's own boundary and not only at the wire's.
 
-**Following records.** The service watches `<home>/sheet/` with `watchTree` (`src/shared/fs/watch-tree.ts`) and, because the directory may not exist yet and a file event can be lost, also lists it every `pollMs`, as `watchBridgeDir` does for `bridge/`. A change under a record's directory re-reads that record after `debounceMs`; a summary is emitted when the record appeared, went, or its `seq`, its inbox's length or its count of queued lines moved. A read that answers `busy` changes nothing: the service keeps the last model it verified, emits nothing, and reads again at the next tick. A record that went emits null.
+**Following records.** The service watches `<home>/sheet/` with `watchTree` (`src/shared/fs/watch-tree.ts`) and, because the directory may not exist yet and a file event can be lost, also lists it every `pollMs`, as `watchBridgeDir` does for `bridge/`. A change under a record's directory re-reads that record after `debounceMs`; a reader that takes no lock can see a call's first inbox lines between a short write and its completion, or lines the door then cuts back (the README's "The door"), so an inbox that shrinks is a change like one that grows; a summary is emitted when the record appeared, went, or its `seq`, its inbox's length or its count of queued lines moved. A read that answers `busy` changes nothing: the service keeps the last model it verified, emits nothing, and reads again at the next tick. A record that went emits null.
 
 **Following the index.** A summary joins a record to the app's session by `sessionOf`, and that join moves without any file moving: a record can be found before the index holds its session, a terminal can close without writing to its sheet, a session can be removed. So the service projects again on `onSessionsChanged`, from the models it already holds and with no file read, and emits each summary whose `appSessionId`, `title` or `live` moved; `onChange` hands a listener the summary as it was, so §H's feeder clears the list of the app session a record no longer joins. Lane A's driver follows the index the same way (`index.sessions.onChange` in `spine-root.ts`).
 
@@ -542,7 +543,7 @@ Six milestones in two landings. M1 and M2 draw nothing and wait for no look. M3 
 
 **Decisions.**
 
-- Its first act is the pin: copy the set from the merge commit of doperpowers pull request #628, write `PROVENANCE.md` with the three values, then read the pinned README's "Readings fixed with the set" against §B to §D of this document and report every difference; the controller corrects those sections before M2 is dispatched. This document was written while the set's review was still changing it.
+- Its first act is the pin: copy the set from the merge commit of doperpowers pull request #628 (Concrete Steps), and write `PROVENANCE.md` with the three values. §B to §D were corrected to that commit before M1 was dispatched; a difference the executor still finds between the pin and these sections is reported, and the pin binds.
 - Tests walk the directories of the pin; none lists the cases by name. A re-pin that adds a case is then covered without an edit, and one that removes a case fails nothing by accident.
 - Each side of a fixture is a home (`<case>/before`, `<case>/after`, each holding `sheet/<session>/`), read in place: `readRecord(<side>, <case.json's session>)` is compared, as parsed JSON, with `show.before.json` or `show.after.json`; a side with no directory compares with `null`. The fixtures' referenced files exist on no machine, so `changedOf` runs for real and reads `true`.
 - `grammar/result.examples.json` gives, for each stored call, `input`, `result` and `parsed`: `parseSheetResult(result)` equals `parsed`, and `callEntries` is asserted on the examples the composite names (the call that partly succeeded with an added and a revised entry and a refused one; the foreclosed call; the call whose outcome is not known).
@@ -687,10 +688,11 @@ Six milestones in two landings. M1 and M2 draw nothing and wait for no look. M3 
 
 All from the worktree's root. A gate tests the committed head; while iterating, one focused file may be run on the machine (`pnpm exec vitest run <path>`).
 
-**M1.** With a doperpowers checkout at the merge commit of pull request #628:
+**M1.** From the merge commit of pull request #628 itself, not from a checkout's files on disk:
 
-    rm -rf test/fixtures/sheet/set && mkdir -p test/fixtures/sheet
-    cp -R <doperpowers>/sminos/types/sheet test/fixtures/sheet/set
+    rm -rf test/fixtures/sheet/set && mkdir -p test/fixtures/sheet "$TMPDIR/pin"
+    git -C <doperpowers> archive 2594002afc6ce00ddf43808791ac78705e80ab47 sminos/types/sheet | tar -x -C "$TMPDIR/pin"
+    cp -R "$TMPDIR/pin/sminos/types/sheet" test/fixtures/sheet/set
     pnpm exec vitest run src/shared/sheet src/services/sheet/reader.test.ts
     scripts/ci-gate.sh "$PWD" --gates static,unit,probes
 
