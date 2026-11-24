@@ -874,6 +874,7 @@ const M5_WORDS = {
   notFound: 'Artifact not found', // the tab's title, both builds
   // the header's saved slot (panel/PanelHeader.tsx; M5's panel/SavedStatus.tsx)
   saved: 'All changes saved', // both builds, in the editor's header (Acceptance 1)
+  general: 'General', // master's tools/document/DocumentPanel.tsx, the breadcrumb's home of a document in no Space (T608)
   readOnly: 'Read-only', // master's word in a viewer's header, which M5 removed (T567, N191)
   // tools/artifacts/viewers/copy.ts VIEWERS_COPY (T570, T571)
   version: 'Version',
@@ -5824,7 +5825,7 @@ test('the word cut’s M5: the library’s Spaces, opened artifacts, the documen
       await expect(historyRail(key), 'the history rail').toBeVisible({ timeout: 10_000 });
     };
     const toolsNamed = (key: string) => [M5_WORDS.addComment, M5_WORDS.versionHistory].map((name) => toolbar(key).getByRole('button', { name, exact: true })).concat([commentsButton(key)]);
-    await shot(page, m5Meta('m5-doc-rest', 'G332, G333, G335, G336, G337, G357, T607, T608, T609', 'A document at rest: its toolbar, a table, a callout, comment marks', 'Artifacts, Field notes (a heading, marked passages, a table, a callout)', 'The formatting toolbar at rest (on M5 Add comment, Comments with its count, Version history and Find as glyphs; master’s words), the page with its table and callout', ['tools/document', 'src/artifacts/document/editor']), async () => {
+    await shot(page, m5Meta('m5-doc-rest', 'G332, G333, G335, G336, G357, T608, T609', 'A document at rest: its toolbar, a table, a callout, comment marks', 'Artifacts, Field notes (a heading, marked passages, a table, a callout)', 'The formatting toolbar at rest (on M5 Add comment, Comments with its count, Version history and Find as glyphs; master’s words), the page with its table and callout', ['tools/document', 'src/artifacts/document/editor']), async () => {
       await docAtRest('notes');
     }, {
       check: async () => {
@@ -5833,6 +5834,10 @@ test('the word cut’s M5: the library’s Spaces, opened artifacts, the documen
         else await expect(historyButton('notes'), 'master’s word History').toHaveText('History', { timeout: 3_000 });
         await inView(editorOf('notes').locator('table'), 'the table');
         await inView(editorOf('notes').getByText('Bring the spare batteries.', { exact: true }), 'the callout');
+        // the breadcrumb of a document in no Space: master's starts with General (T608)
+        const crumb = header().locator('[data-header-breadcrumb]');
+        if (m5Cut()) await expect(crumb.filter({ hasText: M5_WORDS.general }), 'no General in the breadcrumb').toHaveCount(0);
+        else await expect(crumb, 'master’s breadcrumb').toContainText(M5_WORDS.general, { timeout: 3_000 });
       },
     });
     const addComment = () => toolbar('notes').getByRole('button', { name: M5_WORDS.addComment, exact: true }).first();
