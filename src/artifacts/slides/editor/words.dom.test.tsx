@@ -85,10 +85,10 @@ describe('the toolbar’s glyphs (G401 to G404)', () => {
     const add = tool('Add comment');
     expect(add.getAttribute('aria-disabled')).toBe('true');
     expect((add as HTMLButtonElement).disabled).toBe(false);
-    expect(accessibleDescription(add)).toBe('Select one element to comment on · ⌘⌥M');
+    expect(accessibleDescription(add)).toBe('Select one element to comment on · Comment on the selected element · ⌘⌥M');
     act(() => session.select(['ta']));
     expect(tool('Add comment').getAttribute('aria-disabled')).toBeNull();
-    expect(accessibleDescription(tool('Add comment'))).toBe('⌘⌥M');
+    expect(accessibleDescription(tool('Add comment'))).toBe('Comment on the selected element · ⌘⌥M'); // where the comment goes, heard too
   });
 
   it('draws no comment count at zero', () => {

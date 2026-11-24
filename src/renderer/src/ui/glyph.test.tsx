@@ -51,15 +51,24 @@ describe('NamedGlyph', () => {
     expect(tooltip()).toBe('New slide · ⌘⇧N');
   });
 
-  it('shows a tip’s longer words, its shortcut after them, its name staying the word', async () => {
+  it('shows a tip’s longer words, its shortcut after them, its name staying the word and the words its description', async () => {
     render(
       <NamedGlyph label="Add comment" tip="Comment on the selected element" shortcut="⌘⌥M">
         <Plus />
       </NamedGlyph>,
     );
     await user().tab();
-    expect(screen.getByRole('button', { name: 'Add comment', description: '⌘⌥M' })).toBe(document.activeElement);
+    expect(screen.getByRole('button', { name: 'Add comment', description: 'Comment on the selected element · ⌘⌥M' })).toBe(document.activeElement);
     expect(tooltip()).toBe('Comment on the selected element · ⌘⌥M');
+  });
+
+  it('says a tip the name already holds only once', () => {
+    render(
+      <NamedGlyph label="Comments (3 open)" tip="Comments">
+        <Plus />
+      </NamedGlyph>,
+    );
+    expect(screen.getByRole('button', { name: 'Comments (3 open)' }).getAttribute('aria-describedby')).toBeNull();
   });
 
   it('shows its word at once on keyboard focus, and acts on Enter', async () => {

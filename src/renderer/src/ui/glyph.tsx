@@ -6,7 +6,8 @@
 // `useChordHint(action)`, app/IconButton.tsx), so the part reads no store and an editor bundle can draw it. A `detail`
 // says what the press acts on now (the board a design's comment goes on, M5's G514): a line of the tooltip under the
 // word, and part of the description, the name staying the word. A `tip` is the tooltip's words where a row the owner
-// saw keeps a longer tooltip than the name (the deck's Add comment, G403), the shortcut still after it.
+// saw keeps a longer tooltip than the name (the deck's Add comment, G403), the shortcut still after it; its words are
+// part of the description too, unless the name already says them ("Comments" on "Comments (3 open)").
 import type { ComponentPropsWithRef, ReactNode } from 'react';
 import { Tip, UNAVAILABLE_LOOK, unavailableClickProps } from './tip';
 
@@ -26,7 +27,8 @@ export interface NamedGlyphProps extends Omit<ComponentPropsWithRef<'button'>, '
 
 export function NamedGlyph({ label, shortcut, unavailable, detail, tip = label, pressed, className = GLYPH_BUTTON, children, ref, ...button }: NamedGlyphProps) {
   const named = shortcut ? `${tip} · ${shortcut}` : tip;
-  const description = [unavailable, detail, shortcut].filter((part) => part).join(' · ');
+  const told = tip.toLowerCase() !== label.toLowerCase() && !label.toLowerCase().includes(tip.toLowerCase()) ? tip : null; // the name says the rest
+  const description = [unavailable, told, detail, shortcut].filter((part) => part).join(' · ');
   return (
     <Tip
       content={
