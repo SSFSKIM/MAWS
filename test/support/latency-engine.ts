@@ -22,11 +22,13 @@ export interface LatencyEngineOptions {
 }
 
 // One process start of the stub, as it writes it to its starts file: its pid, its clock's read (the bench's clock,
-// `performance.timeOrigin + performance.now()`), the session id it was launched under and its engine arguments.
+// `performance.timeOrigin + performance.now()`), the session id it was launched under, its folder and its engine
+// arguments.
 export interface LatencyEngineStart {
   pid: number;
   at: number;
   sessionId: string | null;
+  cwd: string;
   args: string[];
 }
 

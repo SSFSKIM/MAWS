@@ -40,8 +40,8 @@
 // MAWS_LATENCY_STUB_INIT_MS it answers `initialize` that many milliseconds after reading it, as the engine answers it
 // only once its boot and its SessionStart hooks are done (W1); the controls read meanwhile are answered after it, in the
 // order they came. With MAWS_LATENCY_STUB_STARTS_FILE every process start but a `--version` probe appends one line, its
-// pid, its clock's read, its session id and its arguments, so engine starts are counted outside the journal, a start
-// the host never journaled (a hidden prestart it ended) included.
+// pid, its clock's read, its session id, its folder and its arguments, so engine starts are counted outside the journal,
+// a start the host never journaled (a hidden prestart it ended) included.
 import { randomUUID } from 'node:crypto';
 import { appendFileSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
@@ -130,7 +130,7 @@ const argOf = (flag) => {
 };
 const sessionId = argOf('--session-id') ?? argOf('--resume') ?? recordedSession;
 if (process.env.MAWS_LATENCY_STUB_STARTS_FILE) {
-  appendFileSync(process.env.MAWS_LATENCY_STUB_STARTS_FILE, `${JSON.stringify({ pid: process.pid, at: performance.timeOrigin + performance.now(), sessionId: argOf('--session-id') ?? argOf('--resume') ?? null, args })}\n`);
+  appendFileSync(process.env.MAWS_LATENCY_STUB_STARTS_FILE, `${JSON.stringify({ pid: process.pid, at: performance.timeOrigin + performance.now(), sessionId: argOf('--session-id') ?? argOf('--resume') ?? null, cwd: process.cwd(), args })}\n`);
 }
 
 function rewrite(value, ids) {

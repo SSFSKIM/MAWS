@@ -91,7 +91,7 @@ describe('the latency engine stub', () => {
 
   // Ticket 851, M5 (docs/doperpowers/plans/2026-11-24-prestart-engine.md, D14): the prestart measure counts engine starts
   // outside the journal, one line per process start, so a start the host never journaled still counts
-  it('writes one line per process start to its starts file, with its pid, session id and arguments; none for --version', { timeout: 30_000 }, async () => {
+  it('writes one line per process start to its starts file, with its pid, session id, folder and arguments; none for --version', { timeout: 30_000 }, async () => {
     const { root } = scratch();
     const starts = join(root, 'starts.jsonl');
     const counted = writeLatencyEngine(join(root, 'counted-engine'), join(root, 'samples.jsonl'), { startsFile: starts });
@@ -99,12 +99,12 @@ describe('the latency engine stub', () => {
     expect(startsOf(starts), 'a version probe is no start').toEqual([]);
     const sessionId = randomUUID();
     for (const n of [1, 2]) {
-      const child = spawn(counted, ['--input-format', 'stream-json', '--session-id', sessionId], { stdio: ['pipe', 'pipe', 'pipe'] });
+      const child = spawn(counted, ['--input-format', 'stream-json', '--session-id', sessionId], { cwd: root, stdio: ['pipe', 'pipe', 'pipe'] });
       const code = exited(child);
       await expect.poll(() => startsOf(starts).length, { timeout: 10_000 }).toBe(n);
       child.stdin.end();
       expect(await code).toBe(0);
-      expect(startsOf(starts)[n - 1]).toMatchObject({ pid: child.pid, sessionId, args: ['--input-format', 'stream-json', '--session-id', sessionId] });
+      expect(startsOf(starts)[n - 1]).toMatchObject({ pid: child.pid, sessionId, cwd: root, args: ['--input-format', 'stream-json', '--session-id', sessionId] });
     }
     expect(startsOf(starts)[0]!.at).toBeLessThan(startsOf(starts)[1]!.at);
   });
