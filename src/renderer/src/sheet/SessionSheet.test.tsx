@@ -323,10 +323,10 @@ describe('shared memory', () => {
 describe('the hidden line', () => {
   it("reads its question's header when the surface drew the card, and the bare id when it did not", async () => {
     const { redraw } = sheet(sheetOf([CLASH]));
-    redraw(sheetOf([], { hidden: [{ id: 'q4', key: 'maws-fixture-0009' }] }));
+    redraw(sheetOf([], { hidden: [{ id: 'q4', key: 'maws-k-0009' }] }));
     await waitFor(() => expect(document.querySelector('[data-sheet-hidden="q4"]')?.textContent).toMatch(/^q4Clash rule→Dismissed/));
     cleanup();
-    sheet(sheetOf([], { hidden: [{ id: 'q4', key: 'maws-fixture-0009' }] }));
+    sheet(sheetOf([], { hidden: [{ id: 'q4', key: 'maws-k-0009' }] }));
     expect(document.querySelector('[data-sheet-hidden="q4"]')?.textContent).toMatch(/^q4→Dismissed/);
   });
 });
