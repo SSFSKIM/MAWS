@@ -932,6 +932,7 @@ const M5_WORDS = {
   kept: 'The caption, comments and edits on this block are kept.', // master's line under a view that cannot be drawn (G599)
   // render/render.ts's failure: the reason drawn in the view's frame, both builds (VIEW_STATES.needs)
   pieNeedsSizes: 'a pie view needs a y column (the sizes)',
+  barMismatch: '2 of 8 values in revenue are not number', // states.ts DATASET_STATES.mismatches over SALES_CSV, both builds
   closeSheet: 'Close', // the sheet's close: M5's × glyph's name, master's word, both its name
   thisView: { m5: /^This view \(\d+\)$/, master: /^This view’s rows \(\d+\)$/ },
   allRows: { m5: /^All rows \(\d+\)$/, master: /^All source rows \(\d+\)$/ },
@@ -6026,7 +6027,8 @@ test('the word cut’s M5: the library’s Spaces, opened artifacts, the documen
     // the version named Draft previewed, from the live document: never a preview an earlier scene left open
     const toDraft = async () => {
       await openHistory('notes');
-      await historyRail('notes').getByRole('button', { name: /^Draft/ }).first().click();
+      // a version row is named `Version <title> by <author>` (history/HistoryRail.tsx, both builds); "Restored from Draft" is another
+      await historyRail('notes').getByRole('button', { name: /^Version Draft by / }).first().click();
       await expect(tab('notes').locator('[data-editor="preview"]').first(), 'the version previewed').toBeVisible({ timeout: 10_000 });
     };
     const versionActions = () => page.getByRole('menu', { name: M5_WORDS.versionActions, exact: true });
@@ -6162,7 +6164,8 @@ test('the word cut’s M5: the library’s Spaces, opened artifacts, the documen
       check: async () => {
         if (!m5Cut()) return inView(views().first().locator('.dash-notes').filter({ hasText: /are not number/ }), 'master’s note at rest');
         await pointedAt(barMark(), 'the ⚠')();
-        await expect(barMark(), 'its note').toHaveAttribute('data-note', /values in revenue are not number/, { timeout: 3_000 });
+        // the whole note: the column's wrong-type values alone, no spec warning beside them (G597; states.ts mismatches)
+        await expect(barMark(), 'its note').toHaveAttribute('data-note', M5_WORDS.barMismatch, { timeout: 3_000 });
         await expect.poll(() => barMark().evaluate((el) => getComputedStyle(el, '::after').visibility), { message: 'the note shown', timeout: 3_000 }).toBe('visible');
       },
     });
