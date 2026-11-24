@@ -227,11 +227,13 @@ The pattern is the pin's `grammar/result.md`, matched whole against the result's
 
 A reader reads the block and nothing above it (C2's I7). The block is held to every bound the pin's delivery schema states, and, like every record-sourced shape (S5), takes a field it does not know.
 
+`questionSentence`'s rule is one definition shared with C2's terminal row, so the two surfaces show the same line (the composite's writer, 2026-11-24, folded into M5). A sentence ends (a) at a line break; (b) at a run of `.`, `?`, `!` with closing quotes or brackets kept, only where whitespace or the end follows; (c) at a run of the full-width marks `。？！` with closing quotes or brackets kept, whatever follows. A sentence asks when its ending run holds `?` or `？`. The pattern is `/(?:[.?!]+["'”’)\]]*(?=\s|$)|[。？！]+["'”’)\]」』）]*)/g`, and `asks` tests `/[?？]/`. The writer's eleven cases are in `words.test.ts` as given: "We ship Friday. Keep the earlier sailing?" gives "Keep the earlier sailing?"; "Use v1.2 or v2.0?" the whole text; "Pick one" itself; "First line\nWhich one?" "Which one?"; `He said "go?" Then left.` gives `He said "go?"`; "배포할까요？다음 주에 합니다。" gives "배포할까요？"; "Statement。Question？rest" gives "Question？"; "What?! Really." gives "What?!"; "No marks here\nSecond line." gives "No marks here"; "e.g. this?" gives "this?"; "" gives "".
+
 `text.ts` holds strings as the sheet counts them, for every module here: `codePoints`, `cut`, `hasLoneSurrogate`, `wellFormed`.
 
 `words.ts`:
 
-    export function questionSentence(text: string): string               // the first sentence that ends in a question mark, or the first sentence when none does; a sentence runs through the first `.`, `?` or `!` that ends a word, or to a line break
+    export function questionSentence(text: string): string               // the first sentence that asks, or the first sentence when none does (the rule below)
     export function receiptOf(labels: readonly string[], text: string): string   // the labels joined by ", "; with none, the text's first 80 characters: the record's own rule (C2's I2), so a receipt reads alike from either source
     export interface QuestionDraft { revision: number; picks: string[]; text: string; images: string[]; replaces?: string }
     export const hasAnswer = (draft: QuestionDraft | undefined): boolean // a pick, or text that is not blank; an image alone is no answer (§4.1)
