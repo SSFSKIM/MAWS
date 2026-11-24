@@ -1,7 +1,7 @@
 // P4-B2 D19 (docs/doperpowers/plans/2026-10-21-p4-b2-slides-boards.md): Theme ▸ Faces lists each of the deck's faces by
 // family with its state, so the owner sees what MAWS fetched from Google Fonts, what waits for it, and what it refused
 // by name.
-import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, describe, expect, it } from 'vitest';
 import { newDoc, transact } from '../../../yjs';
 import type { DeckFace } from '../../deck';
@@ -58,13 +58,13 @@ describe('Theme ▸ Faces (D19)', () => {
 describe('the word cut in the Theme panel', () => {
   const theme = (chosen: string | null) => ({ systems: [{ id: 'ds1', name: 'Brand' }], chosen, choose: async () => {} });
 
-  it('Default carries no caption while another system is chosen, and the governing system’s name once it is', () => {
+  it('Default carries no caption while another system is chosen, and the governing system’s name once it is', async () => {
     render(<ThemePanel session={session()} system={{ builtin: 'maws' }} theme={theme('ds1')} overrides={{}} faces={{}} readOnly={false} />);
     const radio = screen.getByRole('radio', { name: /^Default/ });
     expect(radio.querySelector('.deck-theme-system-detail')).toBeNull();
     cleanup();
     render(<ThemePanel session={session()} system={{ builtin: 'maws' }} theme={theme(null)} overrides={{}} faces={{}} readOnly={false} />);
-    expect(screen.getByRole('radio', { name: /^Default/ }).querySelector('.deck-theme-system-detail')?.textContent).toBeTruthy();
+    await waitFor(() => expect(screen.getByRole('radio', { name: /^Default/ }).querySelector('.deck-theme-system-detail')?.textContent).toBeTruthy());
   });
 
   it('the Faces rows read Display and Body; their selects keep the full names', () => {

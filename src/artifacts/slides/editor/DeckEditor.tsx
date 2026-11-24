@@ -24,7 +24,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, use
 import { DesignSystemScope, useDesignSystem, type DesignSystemRef } from '../../design-system/apply';
 import { NamedGlyph } from '../../../renderer/src/ui/glyph';
 import { Tip } from '../../../renderer/src/ui/tip';
-import { HistoryIcon } from '../ui/icons';
+import { HistoryIcon } from '../../ui/icons';
 import type { AssetUrl, SlideCanvas } from '../canvas';
 import { DECK_LIMITS } from '../deck';
 import { insertElements, newElement, type NewKind } from '../writers-elements';

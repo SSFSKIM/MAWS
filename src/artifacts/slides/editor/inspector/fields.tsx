@@ -10,7 +10,7 @@
 // (`unavailable`: a token transform's Rotation, an outline shadow's Spread) keeps the keyboard, guards its own edits and
 // carries the reason as its tooltip and description (G449, G450); a hover names a token by its friendly name alone (G447,
 // G448).
-import { createContext, useContext, useId, useState, type ReactNode } from 'react';
+import { createContext, useContext, useId, useState, type ComponentPropsWithRef, type ReactNode } from 'react';
 import { Tip } from '../../../../renderer/src/ui/tip';
 import type { DeckFace } from '../../deck';
 import type { DeckSession } from '../session';
@@ -323,10 +323,11 @@ export function Toggles({ label, value, choices, onChange }: { label: string; va
 }
 
 /** `busy`: its action waits (an upload): it says so (`aria-busy`) and takes no second press, keeping the keyboard. */
-export function Button({ label, children, disabled = false, busy = false, onClick }: { label: string; children?: ReactNode; disabled?: boolean; busy?: boolean; onClick: () => void }) {
+// The rest of a button's props (a ref, `aria-describedby`, pointer handlers) reach the button, so a `Tip` can own it.
+export function Button({ label, children, disabled = false, busy = false, onClick, ...owner }: { label: string; children?: ReactNode; disabled?: boolean; busy?: boolean; onClick: () => void } & Omit<ComponentPropsWithRef<'button'>, 'onClick' | 'children'>) {
   const { readOnly } = useInspector();
   return (
-    <button type="button" className="deck-inspector-button" aria-label={label} aria-busy={busy || undefined} disabled={readOnly || disabled} onClick={() => !busy && onClick()}>
+    <button {...owner} type="button" className="deck-inspector-button" aria-label={label} aria-busy={busy || undefined} disabled={readOnly || disabled} onClick={() => !busy && onClick()}>
       {children ?? label}
     </button>
   );

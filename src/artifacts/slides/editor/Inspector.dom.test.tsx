@@ -415,7 +415,7 @@ describe('fix wave 1: a shadow the canvas cannot draw is never offered', () => {
     const before = styleOf(shape.doc, 'shape')['box-shadow'];
     fireEvent.keyDown(spread, { key: 'ArrowUp' });
     expect(styleOf(shape.doc, 'shape')['box-shadow']).toBe(before);
-    expect(screen.queryByText(reason)).toBeNull(); // no note at rest
+    expect(screen.queryByText(reason, { ignore: '[hidden], script, style' })).toBeNull(); // no note at rest
   });
 });
 
@@ -430,7 +430,7 @@ describe('fix wave 3: a transform that is a design-system token', () => {
     expect(rotation.readOnly).toBe(true);
     expect(rotation.getAttribute('aria-disabled')).toBe('true');
     expect(accessibleDescription(rotation)).toMatch(/design-system token/);
-    expect(screen.queryByText(/design-system token/)).toBeNull(); // no note at rest
+    expect(screen.queryByText(/design-system token/, { ignore: '[hidden], script, style' })).toBeNull(); // no note at rest
     fireEvent.keyDown(rotation, { key: 'ArrowUp' });
     expect(styleOf(doc, 'box').transform).toBe('var(--ds-pose, scale(1.5))');
     fireEvent.click(screen.getByRole('button', { name: 'Detach transform' }));
