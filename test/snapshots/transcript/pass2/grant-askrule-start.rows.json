@@ -53,6 +53,7 @@
     "kind": "cell",
     "label": "Ran `git log --oneline` in 0s",
     "paths": [],
+    "runExpanded": true,
     "startedAt": "2026-09-28T10:06:30.735Z",
     "status": "done",
     "toolName": "Bash",

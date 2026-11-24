@@ -19,6 +19,10 @@ import { PROJECT, S, stageProject } from './scene';
 import type { HubDouble } from '../test/double/hub-double';
 import { readRecording } from '../../../src/renderer/src/lane-a/test-support/session-stream';
 
+// The recording's Bash call, a run of one at rest (board ticket 852): its row, so a fold is read by the row and not by the
+// call's own line, which shows only once the run is opened
+const BASH_ROW = '[data-row-id="cell:toolu_01Xbf4x8J3oTQ2QUW2EbihFp"]';
+
 const MACHINE = 'fake';
 const ANSWER = 'You chose blue';
 const streamingRows = (scope: Locator) => scope.locator('[data-row-id^="desk-stream:"]');
@@ -111,7 +115,7 @@ test("the report: the marks and questions in view, one record line per stretch o
   expect(folds.every((id) => id.startsWith('record-fold:closed:'))).toBe(true);
   await view.locator('[data-transcript-scroller]').evaluate((el) => { el.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: -200 })); el.scrollTo({ top: 0 }); });
   await expect(records(view).first()).toHaveText('› working record');
-  await expect(view).not.toContainText("Wrote 'blue' to recorded.txt in the current directory"); // the Bash call, folded
+  await expect(view.locator(BASH_ROW)).toHaveCount(0); // the Bash call, folded
   await expect(view).toContainText('Color→blue'); // its question (the ask mod's, answered) stays in view
 
   await toggle(page, 'Transcript').click();
@@ -266,7 +270,8 @@ test('a marked response is drawn as its message while it streams, before its row
   const uuid = answerRow(fm);
   fm.step(fm.recording.steps.findIndex(isAnswerChunk(uuid, fm)) - fm.played); // up to the answer's first chunk
   await expect(view).toContainText('Color→blue');
-  await expect(view).toContainText("Wrote 'blue' to recorded.txt in the current directory"); // nothing marked yet: the turn draws whole, its Bash call too
+  // nothing marked yet: the turn draws whole, its Bash call too, a run of one reading the call's description
+  await expect(view.locator(`${BASH_ROW} [data-run-of-one] > .transcript-cell-line`)).toHaveText("Wrote 'blue' to recorded.txt in the current directory");
   await expect(records(view)).toHaveCount(0);
 
   for (let i = 0; i < 40 && !(await streamingRows(view).allTextContents()).join('').includes(ANSWER); i++) {
@@ -282,7 +287,7 @@ test('a marked response is drawn as its message while it streams, before its row
   await expect(records(view)).toHaveCount(1);
   await expect(records(view)).toHaveText('› working record');
   await expect(workingLine(view)).toHaveCount(1);
-  await expect(view).not.toContainText("Wrote 'blue' to recorded.txt in the current directory");
+  await expect(view.locator(BASH_ROW)).toHaveCount(0);
   const named = fm.recording.steps.find((s) => s.k === 'block-row' && s.body.uuid === uuid)!;
   if (named.k !== 'block-row') throw new Error('no block-row');
   const lastText = fm.recording.steps.findLastIndex((s) => s.k === 'chunk' && s.turnId === named.body.turnId && s.step === named.body.step && s.chunk.index === named.body.index && s.chunk.kind === 'text');
@@ -291,13 +296,13 @@ test('a marked response is drawn as its message while it streams, before its row
   await expect(live.locator('.owner-message-ink')).toContainText(ANSWER);
   await expect(live).not.toContainText('<message>');
   await expect(records(view)).toHaveCount(1); // the turn folded into its record while the mark streams
-  await expect(view).not.toContainText("Wrote 'blue' to recorded.txt in the current directory");
+  await expect(view.locator(BASH_ROW)).toHaveCount(0);
   expect(fm.depth.rows.get('main')!.some((row) => row.uuid === uuid)).toBe(false); // and its row is not written yet
 
   fm.playThrough();
   await expect(streamingRows(view)).toHaveCount(0);
   await expect.poll(() => occurrences(view, ANSWER)).toBe(1);
-  await expect(view).not.toContainText("Wrote 'blue' to recorded.txt in the current directory"); // still folded
+  await expect(view.locator(BASH_ROW)).toHaveCount(0); // still folded
 });
 
 /** The recorded session's plane with its snapshots cut to the newest `limit` rows, the browser on its channel. */

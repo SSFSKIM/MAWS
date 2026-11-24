@@ -86,7 +86,7 @@ export const RowSchema = z.discriminatedUnion('kind', [
     caption: z.string(), fold: z.number().int().positive().optional() /* the word cut (T2) */, parts: z.array(z.string()), counts: LineCountsSchema, // UX wave U2
   }),
   z.strictObject({ ...base, kind: z.literal('group'), state: z.enum(['active', 'completed']), cells: z.array(CellSchema), summary: z.string(), fold: z.number().int().positive().optional() /* the word cut (T2) */, counts: LineCountsSchema, icon: category, expanded: z.boolean() }),
-  z.strictObject({ ...base, kind: z.literal('cell'), ...cellShape }),
+  z.strictObject({ ...base, kind: z.literal('cell'), ...cellShape, runExpanded: z.boolean().optional() /* board ticket 852 */ }),
   z.strictObject({
     ...base, kind: z.literal('receipt'), files: z.array(z.strictObject({ path: z.string(), change: z.enum(['create', 'update', 'delete']), added: z.number(), removed: z.number(), cellId: z.string() })),
     added: z.number(), removed: z.number(), state: z.enum(['applied', 'undoing', 'undone', 'reapplying']), canUndo: z.boolean(), canReapply: z.boolean(),

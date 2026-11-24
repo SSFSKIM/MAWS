@@ -59,6 +59,7 @@ it('bounds a long multiline command behind Show more without losing the command'
 
 // Board ticket 850, item 6: a standalone call's wrapper leaves no space of its own where what it holds draws nothing (a
 // mod's answer that hides the call); the space above and below a call is the call's own line's, kept inside the wrapper.
+// Board ticket 852: a lone finished call is its one line, read as its run of one, with a run's space.
 it('a standalone call’s space is its line’s: the wrapper with nothing drawn in it takes no height of its own', async () => {
   const style = document.createElement('style');
   style.textContent = readFileSync(join(__dirname, '../transcript.css'), 'utf8');

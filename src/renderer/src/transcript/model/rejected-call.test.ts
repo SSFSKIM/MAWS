@@ -14,6 +14,7 @@ import { parseTranscriptRecord } from '@shared/wire/transcript';
 import { createBackfillContext, recordToEvents } from '../../../../engine-host/fs/backfill';
 import { journalToEvents } from '../dev/journal';
 import { restingRows, rowsOf, withAllExpanded } from './derive';
+import { disclosureKeyOf } from './groups';
 import { dividerCopy } from './copy';
 import { turnContextOf } from './cells';
 import { continuedAfter } from './classify';
@@ -93,7 +94,7 @@ describe('a Stop with four commands in flight (queue-and-interrupt), on the wire
     // the person opened the run before the Stop: it stays open after it, under the same key
     const first = events.indexOf(rejected[0]!);
     let state = applyEvents(createState(null, null), events.slice(0, first));
-    const opened = withUi(state, { ...state.ui, expandedGroups: new Set([run.id]), global: state.ui.global + 1, version: state.ui.version + 1 });
+    const opened = withUi(state, { ...state.ui, expandedGroups: new Set([disclosureKeyOf(run)!]), global: state.ui.global + 1, version: state.ui.version + 1 }); // the run's key (board ticket 852)
     expect(runsOf(rowsOf(opened)).map((r) => r.expanded)).toEqual([true]);
     state = applyEvents(opened, events.slice(first));
     const turn = run.turnId!;

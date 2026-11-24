@@ -64,7 +64,10 @@ interface KnownWatch {
 export const BACKFILL_WAIT_MS = 60_000;
 const backfilling = (page: CommandOutput<'session.events'>) => !page.complete && page.events.length === 0 && page.historyUnavailable !== true;
 
-async function eventsOnceKnown(client: MawsBridge, appSessionId: AppSessionId, watch: KnownWatch | null): Promise<CommandResult<'session.events'>> {
+// Tail-first (2026-11-24): a session on this machine is read with `provisional`, so the engine host answers a long
+// transcript's newest window from its end while it reads it from the start (the source swaps that read's window in at
+// its `following`); another machine's history crosses its link as before.
+async function eventsOnceKnown(client: MawsBridge, appSessionId: AppSessionId, watch: KnownWatch | null, provisional: boolean): Promise<CommandResult<'session.events'>> {
   let signalled = false;
   let wake: (() => void) | null = null;
   const signal = () => {
@@ -83,7 +86,7 @@ async function eventsOnceKnown(client: MawsBridge, appSessionId: AppSessionId, w
   try {
     for (;;) {
       signalled = false;
-      const result = await client.invoke('session.events', { appSessionId, afterSeq: null, limit: null });
+      const result = await client.invoke('session.events', { appSessionId, afterSeq: null, limit: null, ...(provisional && { provisional: true as const }) });
       const reading = result.ok && backfilling(result.value);
       if (!reading && (result.ok || !result.error.message.startsWith(UNKNOWN_SESSION) || ended?.aborted)) return result;
       if (reading && (ended?.aborted || Date.now() >= backfillDeadline)) return result;
@@ -173,9 +176,10 @@ function readAgainAtReady(key: string, after: number): void {
 
 async function eventsOnceHostIsBack(client: MawsBridge, appSessionId: AppSessionId, watch: KnownWatch | null): Promise<CommandResult<'session.events'>> {
   const from = engineRevision();
-  const first = await eventsOnceKnown(client, appSessionId, watch);
+  const local = machineOf(appSessionId) === client.localMachine;
+  const first = await eventsOnceKnown(client, appSessionId, watch, local);
   const away = (result: CommandResult<'session.events'>) => !result.ok && result.error.code === 'host_unavailable';
-  if (machineOf(appSessionId) !== client.localMachine || !away(first)) return first;
+  if (!local || !away(first)) return first;
   const ended = watch?.ended.signal ?? null;
   const ready = await readyAfter(from, HOST_RETURN_WAIT_MS, ended);
   if (ended?.aborted) return first;
@@ -183,7 +187,7 @@ async function eventsOnceHostIsBack(client: MawsBridge, appSessionId: AppSession
     readAgainAtReady(appSessionId, engineRevision());
     return first;
   }
-  const second = await eventsOnceKnown(client, appSessionId, watch);
+  const second = await eventsOnceKnown(client, appSessionId, watch, local);
   if (away(second) && !ended?.aborted) readAgainAtReady(appSessionId, ready);
   return second;
 }
@@ -356,6 +360,7 @@ function sessionSource(client: MawsBridge, appSessionId: AppSessionId): Transcri
     foreign: boolean; // W7: the record's latest custody seen, a foreign holder's (remembered while the snapshot is pending)
     running: SessionEvent | null; // E10: the latest live-form event since the last exit the subscription delivered
     gapped: boolean; // P5 O7 M8: a gap was told and no live turn event arrived since (`remote.gap`'s healing, below)
+    followed: boolean; // tail-first: the follow reported `following` while this subscription's snapshot was on its way
   }
   let latest: Subscription | null = null;
   const track = (subscription: Subscription, events: SessionEvent[]) => {
@@ -372,6 +377,22 @@ function sessionSource(client: MawsBridge, appSessionId: AppSessionId): Transcri
   // client's interest while the source stayed mounted, as a side thread off screen), so the transcript's later writes
   // no longer reach it. At the next sign of new history, the record's change, the source reads the host again.
   let stale = false;
+  // Tail-first (2026-11-24): the newest window the host answered was read from the transcript's end while its follow reads
+  // the transcript from the start. At that follow's `following` the key rebuilds, staged as for an older page, from the
+  // host's window then (the rows drawn stay until it is whole); until then the follow's own batches, which that window
+  // holds, are not drawn over the tail's, and older pages wait for the follow (the pager asks again while it reads).
+  // An older page or a jump the reader asked for meanwhile is let finish first (the rebuild would stop it); if it took
+  // pages in, what is drawn is already the follow's history (the tail's window is the follow's, and so are its older
+  // pages) and stays, the rebuild skipped: only the older crons the follow's window carries wait for the next read.
+  let provisional = false;
+  let provisionalAt = -1; // the pager's revision when the provisional window was drawn
+  const swapIn = () => {
+    provisional = false;
+    const at = provisionalAt;
+    void pager.idle().then(() => {
+      if (pager.state.getState().revision === at) pager.refresh(); // after this event's dispatch, as a re-read is (below)
+    });
+  };
   let gaps = 0; // P5 O7 M2: the gap bars `remote.gap` put in, each an id of its own
   // P5 O7 M2 (the milestone review): the windows main last said were too large for the channel (`remote.historyTooLarge`),
   // each said just before the read it answers `historyUnavailable`; that read's bar takes their words, once
@@ -437,6 +458,7 @@ function sessionSource(client: MawsBridge, appSessionId: AppSessionId): Transcri
         foreign: false, // W7
         running: null, // E10
         gapped: false, // P5 O7 M8
+        followed: false, // tail-first
         held: [],
         batch: null,
         ended: new AbortController(),
@@ -507,7 +529,14 @@ function sessionSource(client: MawsBridge, appSessionId: AppSessionId): Transcri
         if ((subscription.gapped || heldHeal !== null) && batch.events.some((event) => isTurnEvent(event) && shown(event))) liveTurnArrived();
         subscription.batch?.();
         if (subscription.held) subscription.held.push(batch.events);
-        else subscription.pass(batch.events);
+        else subscription.pass(provisional ? batch.events.filter((event) => !diskForm(event)) : batch.events); // tail-first
+      });
+      // tail-first: the follow has read the transcript through (or failed to start: a read again says so); a provisional
+      // window gives way to its window
+      const offFollowing = client.on('fs.followState', (state) => {
+        if (state.appSessionId !== appSessionId || state.agentId !== null || (state.state !== 'following' && state.state !== 'error')) return;
+        if (subscription.held) subscription.followed = true; // the snapshot on its way may be the tail's
+        else if (provisional && latest === subscription) swapIn();
       });
       // W7: the record's custody, kept even while the snapshot is pending; foreign-live with the live form seen (now, or
       // once the snapshot establishes it) starts the key over from disk
@@ -589,6 +618,7 @@ function sessionSource(client: MawsBridge, appSessionId: AppSessionId): Transcri
       });
       return () => {
         off();
+        offFollowing();
         offChanged();
         offReleased();
         offLoss();
@@ -632,14 +662,18 @@ function sessionSource(client: MawsBridge, appSessionId: AppSessionId): Transcri
         if (latest === subscription && !subscription?.ended.signal.aborted) {
           appAside = app.filter((event) => !placed.includes(event));
           pager.started(events, earlier, answer.cronHistory);
+          provisional = read.provisional === true; // tail-first
+          provisionalAt = pager.state.getState().revision;
         }
       }
       if (subscription) {
         if (events.some(liveForm)) subscription.live = true;
         track(subscription, events); // E10
-        const waiting = withoutOlderThanWindow(subscription.held ?? [], events, diskForm); // the long-transcript window
+        const window = withoutOlderThanWindow(subscription.held ?? [], events, diskForm); // the long-transcript window
+        const waiting = provisional && latest === subscription ? window.map((batch) => batch.filter((event) => !diskForm(event))) : window; // tail-first
         subscription.held = null;
         for (const batch of waiting) subscription.pass(batch);
+        if (provisional && latest === subscription && subscription.followed) swapIn(); // tail-first: it read through meanwhile
         resetIfOverturned(subscription); // W7: a turn to foreign-live heard while this snapshot was on its way
       }
       return events;
