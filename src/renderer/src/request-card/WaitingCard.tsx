@@ -55,7 +55,7 @@ export function WaitingCard({ appSessionId }: { appSessionId: AppSessionId }) {
       <div className="flex min-w-0 flex-col pb-1">
         {items.map((item) => {
           const question = questionOfItem(item.id);
-          if (question !== null) return <SheetLine key={item.id} item={item} questionId={question.questionId} from={sheetFrom(item, question.questionId)} age={itemAge(item, now)} onChoose={() => registeredActions().openSheet(appSessionId, question.questionId)} />;
+          if (question !== null) return <SheetLine key={item.id} item={item} from={sheetFrom(item, question.questionId)} age={itemAge(item, now)} onChoose={() => registeredActions().openSheet(appSessionId, question.questionId)} />;
           const heading = ATTENTION_HEADINGS[item.kind];
           const from = item.request.agentId === null ? null : requesterName(rows ?? [], item.request.agentId as AgentId);
           return (
@@ -81,7 +81,7 @@ export function WaitingCard({ appSessionId }: { appSessionId: AppSessionId }) {
 
 // A sheet question's line: the summary keeps its room and "from <agent>" shrinks first (its shrink far above the
 // summary's), so a narrow card cuts the asker before the question.
-function SheetLine({ item, questionId, from, age, onChoose }: { item: AttentionItem; questionId: string; from: string | null; age: string; onChoose(): void }) {
+function SheetLine({ item, from, age, onChoose }: { item: AttentionItem; from: string | null; age: string; onChoose(): void }) {
   const heading = ATTENTION_HEADINGS[item.kind];
   return (
     <button type="button" className={LINE} title={item.summary} data-waiting-card-line={item.id} onClick={onChoose}>

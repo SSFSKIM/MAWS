@@ -13,7 +13,7 @@
 // it) and every other request at the transcript's end; an asynchronous question's answer and dismissal stand on its row,
 // before and after a reload; a prompt its terminal settles leaves its receipt at the end for SETTLED_MS.
 import { randomUUID } from 'node:crypto';
-import { readFileSync, realpathSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { expect, type Locator, type Page } from '@playwright/test';
 import type { CommandInput, CommandName, CommandResult } from '@shared/ipc/schema';
@@ -33,6 +33,8 @@ import { markPixels, minimalPdf } from './support/media-fixtures'; // UX wave U6
 import { created } from './support/nothing-created'; // UX wave U6b-2: B8
 import { sidebarOf, sidebarRow } from './support/sidebar';
 import { FINISHED_TURN_LINE } from './support/turn-line'; // the word cut (T1)
+import { FAKE_SMINOS, asked, fixtureSession, rewriteState, seedRecord, stageOutcome, withdrawn } from '../test/support/sheet-records'; // the question sheet's C3 M4
+import { SHEET_WORDS } from '../src/renderer/src/sheet/copy'; // the question sheet's C3 M4
 
 function invoke<N extends CommandName>(page: Page, name: N, input: CommandInput<N>): Promise<CommandResult<N>> {
   return page.evaluate(([n, i]) => window.maws.invoke(n as never, i as never), [name as string, input as unknown] as const) as Promise<CommandResult<N>>;
@@ -146,11 +148,16 @@ test.describe('lane A: a terminal session driven through its bridge', () => {
   });
 
   // A launch over an engine store holding the session's transcript (one exchange, then the rows `more` gives after its
-  // answer; or, UX wave U1c, the rows `seed` gives in their place), the session in the sidebar.
-  async function begin(more: (sid: string, cwd: string, after: string) => Record<string, unknown>[] = () => [], seed?: (sid: string, cwd: string) => Record<string, unknown>[]): Promise<Case> {
+  // answer; or, UX wave U1c, the rows `seed` gives in their place), the session in the sidebar. The question sheet's C3
+  // M4: `opts` names the session's id (a sheet fixture's) and adds to the launch's environment, given the store.
+  async function begin(
+    more: (sid: string, cwd: string, after: string) => Record<string, unknown>[] = () => [],
+    seed?: (sid: string, cwd: string) => Record<string, unknown>[],
+    opts: { sid?: string; env?: (store: StoreFixture) => Record<string, string> } = {},
+  ): Promise<Case> {
     const repo = await ScratchRepo.create();
     const store = await StoreFixture.create();
-    const sid = randomUUID();
+    const sid = opts.sid ?? randomUUID();
     const prompt = randomUUID();
     const answer = randomUUID();
     const rows = seed?.(sid, repo.root) ?? [
@@ -159,7 +166,7 @@ test.describe('lane A: a terminal session driven through its bridge', () => {
       ...more(sid, repo.root, answer),
     ];
     const transcript = await store.addTranscript(repo.root, sid, rows.map((row) => JSON.stringify(row)));
-    const maws = await launchMaws({ env: { CLAUDE_CONFIG_DIR: store.configHome } });
+    const maws = await launchMaws({ env: { CLAUDE_CONFIG_DIR: store.configHome, ...opts.env?.(store) } });
     const { page } = maws;
     await expect(main(page)).toBeVisible({ timeout: 60_000 });
     await expect.poll(async () => value(await invoke(page, 'session.list', {})).sessions.some((r) => r.engineSessionId === sid), { timeout: 20_000 }).toBe(true);
@@ -1714,6 +1721,140 @@ test.describe('lane A: a terminal session driven through its bridge', () => {
     await retried(page, retryId(records, 56));
     await test.info().attach('u1c-s4-stopped-approved', { body: await main(page).screenshot(), contentType: 'image/png' });
     expect(bodies(bridge, 'deliver'), 'one delivery').toHaveLength(1);
+    expect(c.maws.consoleErrors()).toEqual([]);
+  });
+
+  // The question sheet's C3 M4 (docs/doperpowers/plans/2026-11-23-question-sheet-c3-maws-app.md, M4 "Proves": the
+  // composite's G2.a, G2.d, G2.e, G2.f's card and G2.g against the stand-in door, test/support/fake-sminos-cli.mjs): a
+  // record of the pinned set seeded in the launch's sminos home, the session given the fixture's id, the door named in
+  // the launch's environment. A change the door makes is its staged outcome; one the tool makes on its own (a question
+  // asked, one withdrawn) is the test's rewrite of the seeded record.
+  const doorFile = (c: Case, name: 'ran' | 'barrier') => join(c.store.configHome, 'sheet-door', name);
+  const sheetDoor = (opts: { barrier?: boolean } = {}) => (store: StoreFixture): Record<string, string> => {
+    const dir = join(store.configHome, 'sheet-door');
+    mkdirSync(dir, { recursive: true });
+    return { MAWS_SMINOS_CLI: FAKE_SMINOS, FAKE_SMINOS_RAN: join(dir, 'ran'), ...(opts.barrier === true && { FAKE_SMINOS_BARRIER: join(dir, 'barrier') }) };
+  };
+  const sheetOf = (page: Page) => page.locator('[data-sheet-tool]');
+  const sheetItems = async (page: Page, sid: string) =>
+    value(await invoke(page, 'attention.list', undefined)).filter((item) => item.id.startsWith(`sheet:${sid}:`)).map((item) => String(item.request.requestId)).sort();
+  const textLines = (file: string): string[] => {
+    try {
+      return readFileSync(file, 'utf8').split('\n').filter((line) => line !== '');
+    } catch {
+      return [];
+    }
+  };
+  const inboxLines = (c: Case) => textLines(join(c.maws.sminosHome, 'sheet', c.sid, 'inbox.jsonl')).map((line) => JSON.parse(line) as Record<string, unknown>);
+  const doorStarts = (c: Case) => textLines(doorFile(c, 'ran')).length;
+  const sideTabs = (page: Page) => page.locator('[data-region="panel"] [data-side-strip] [role="tab"]').allTextContents();
+  const needsYouRow = async (page: Page, c: Case) => sidebarOf(page).locator(`[data-needs-you="${await addressed(page, c.appId)}"]`);
+
+  test('the question sheet: a record appearing and a question added open nothing; a waiting line shows the sheet at its question; a withdrawn question’s card goes; three answers of one Send reach the door as one batch', async () => {
+    const c = await begin(undefined, undefined, { sid: fixtureSession('batch'), env: sheetDoor() });
+    await drive(c);
+    const { page } = c;
+    const cards = await showSessionCards(page);
+    const column = await sideTabs(page);
+
+    // G2.a: the record appears, then a later call asks a fourth question; each is listed as waiting, and nothing opens
+    seedRecord(c.maws.sminosHome, 'batch');
+    await expect.poll(() => sheetItems(page, c.sid), { timeout: 15_000 }).toEqual(['q1', 'q2', 'q3']);
+    rewriteState(c.maws.sminosHome, c.sid, asked('Which colour should the badge be?', '2026-11-23T09:05:00.000Z', 'toolu_01Badge0004'));
+    await expect.poll(() => sheetItems(page, c.sid), { timeout: 15_000 }).toEqual(['q1', 'q2', 'q3', 'q4']);
+    const waiting = cards.getByRole('region', { name: 'Waiting for you', exact: true });
+    await expect(waiting.locator('[data-waiting-card-line]')).toHaveCount(4);
+    expect(await sideTabs(page), 'the side column as it was').toEqual(column);
+    await expect(sheetOf(page), 'no sheet opened').toHaveCount(0);
+    await expect(cards).toBeVisible();
+
+    // a line of the waiting card names a subagent's question by the sheet, and shows the sheet with the keyboard on its card
+    const line = waiting.locator('[data-waiting-card-line$=":q2"]');
+    await expect(line).toContainText('Ship the migration today?');
+    await expect(line).toContainText('from reviewer');
+    await line.click();
+    const sheet = sheetOf(page);
+    await expect(sheet.locator('[data-sheet-question="q2"]'), 'the keyboard on q2’s card').toBeFocused({ timeout: 10_000 });
+
+    // G2.f's card: the fourth question withdrawn, its card goes, and it waits no more
+    await expect(sheet.locator('[data-sheet-question="q4"]')).toBeVisible();
+    rewriteState(c.maws.sminosHome, c.sid, withdrawn('q4', '2026-11-23T09:06:00.000Z'));
+    await expect(sheet.locator('[data-sheet-question="q4"]'), 'the withdrawn question’s card').toHaveCount(0, { timeout: 15_000 });
+    await expect.poll(() => sheetItems(page, c.sid)).toEqual(['q1', 'q2', 'q3']);
+
+    // G2.d: three drafts and one Send are one call of the door, its three inbox lines by MAWS sharing one batch
+    await sheet.locator('[data-sheet-question="q1"]').getByRole('radio', { name: 'Passkeys', exact: true }).click();
+    await sheet.locator('[data-sheet-question="q2"]').getByRole('radio', { name: 'Yes', exact: true }).click();
+    await sheet.getByRole('textbox', { name: SHEET_WORDS.answerName('q3'), exact: true }).fill('Nothing here yet.');
+    await sheet.getByRole('button', { name: SHEET_WORDS.send(3), exact: true }).click();
+    await expect.poll(() => inboxLines(c).length, { timeout: 15_000 }).toBe(3);
+    const lines = inboxLines(c);
+    expect(lines.map((l) => [l.kind, l.id, l.by, l.picks, l.text ?? ''])).toEqual([
+      ['answer', 'q1', 'maws', ['Passkeys'], ''],
+      ['answer', 'q2', 'maws', ['Yes'], ''],
+      ['answer', 'q3', 'maws', [], 'Nothing here yet.'],
+    ]);
+    expect(lines[0]!.batch, 'one batch').toEqual(expect.any(String));
+    expect(new Set(lines.map((l) => l.batch)).size, 'shared by the three').toBe(1);
+    await expect(sheet.getByText(SHEET_WORDS.queued, { exact: true }), 'each card reads its answer queued').toHaveCount(3, { timeout: 15_000 });
+    expect(c.maws.consoleErrors()).toEqual([]);
+  });
+
+  test('the question sheet: a stopped session lists its question and its Needs you row is calm; an answer given reads queued and is taken back', async () => {
+    const c = await begin(undefined, undefined, { sid: fixtureSession('two-surfaces'), env: sheetDoor() });
+    const { page } = c;
+    seedRecord(c.maws.sminosHome, 'two-surfaces');
+    await expect.poll(() => sheetItems(page, c.sid), { timeout: 15_000 }).toEqual(['q1']);
+    const row = await needsYouRow(page, c);
+    await expect(row.locator('[data-tone]'), 'the calm mark').toHaveAttribute('data-tone', 'calm');
+    await row.click();
+    const sheet = sheetOf(page);
+    const card = sheet.locator('[data-sheet-question="q1"]');
+    await expect(card, 'the sheet at its question').toBeFocused({ timeout: 10_000 });
+
+    // G2.e: answered, the card reads queued and the question waits no more; taken back, it is open and waits again
+    await card.getByRole('radio', { name: 'Yes', exact: true }).click();
+    await sheet.getByRole('button', { name: SHEET_WORDS.send(1), exact: true }).click();
+    await expect(card.getByText(SHEET_WORDS.queued, { exact: true })).toBeVisible({ timeout: 15_000 });
+    await expect.poll(() => sheetItems(page, c.sid), { message: 'a queued answer stands on it' }).toEqual([]);
+    await card.getByRole('button', { name: SHEET_WORDS.takeBack, exact: true }).click();
+    await expect(card.getByText(SHEET_WORDS.queued, { exact: true })).toHaveCount(0, { timeout: 15_000 });
+    await expect(card.getByRole('radio', { name: 'Yes', exact: true })).toBeEnabled();
+    await expect.poll(() => sheetItems(page, c.sid), { timeout: 15_000 }).toEqual(['q1']);
+    expect(inboxLines(c).map((l) => [l.kind, l.by])).toEqual([['answer', 'maws'], ['retract', 'maws']]);
+    expect(c.maws.consoleErrors()).toEqual([]);
+  });
+
+  test('the question sheet: two windows answer one question and both Sends wait at the door; released, one is taken and the other reads that it was already answered', async () => {
+    const c = await begin(undefined, undefined, { sid: fixtureSession('two-surfaces'), env: sheetDoor({ barrier: true }) });
+    const { page, maws } = c;
+    seedRecord(maws.sminosHome, 'two-surfaces');
+    stageOutcome(maws.sminosHome, 'two-surfaces', ['page-0401a001', 'cli-0401b002']);
+    await expect.poll(() => sheetItems(page, c.sid), { timeout: 15_000 }).toEqual(['q1']);
+    await expect.poll(async () => value(await invoke(page, 'sheet.read', { session: c.sid })).door, { timeout: 15_000, message: 'the door located' }).toEqual({ known: true, available: true });
+    const [second] = await Promise.all([maws.app.waitForEvent('window'), maws.app.evaluate(() => (globalThis as unknown as { __maws_documents: { openWindow(): number } }).__maws_documents.openWindow())]);
+    await second.waitForLoadState('domcontentloaded');
+
+    const sheets: Locator[] = [];
+    for (const [window, pick] of [[page, 'Yes'], [second, 'No']] as const) {
+      await (await needsYouRow(window, c)).click({ timeout: 30_000 });
+      const card = sheetOf(window).locator('[data-sheet-question="q1"]');
+      await expect(card).toBeVisible({ timeout: 10_000 });
+      await card.getByRole('radio', { name: pick, exact: true }).click();
+      sheets.push(sheetOf(window));
+    }
+    const started = doorStarts(c);
+    for (const sheet of sheets) await sheet.getByRole('button', { name: SHEET_WORDS.send(1), exact: true }).click();
+    await expect.poll(() => doorStarts(c), { timeout: 15_000, message: 'both Sends started the door' }).toBe(started + 2);
+    expect(inboxLines(c), 'both held at the barrier').toEqual([]);
+
+    // released: the door appends both lines and replays the fixture's step, the first line applied and the second closed
+    writeFileSync(doorFile(c, 'barrier'), '');
+    const note = SHEET_WORDS.notes.answered('q1');
+    await expect.poll(async () => (await Promise.all(sheets.map((sheet) => sheet.getByText(note, { exact: true }).count()))).sort(), { timeout: 15_000, message: 'one window reads it' }).toEqual([0, 1]);
+    expect(inboxLines(c).map((l) => [l.kind, l.id, l.by])).toEqual([['answer', 'q1', 'maws'], ['answer', 'q1', 'maws']]);
+    for (const sheet of sheets) await expect(sheet.locator('[data-sheet-question="q1"]'), 'answered, its card goes in both').toHaveCount(0);
+    await expect.poll(() => sheetItems(page, c.sid)).toEqual([]);
     expect(c.maws.consoleErrors()).toEqual([]);
   });
 });

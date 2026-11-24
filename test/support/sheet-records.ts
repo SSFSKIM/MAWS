@@ -1,7 +1,7 @@
 // Question sheet records for tests (docs/doperpowers/plans/2026-11-23-question-sheet-c3-maws-app.md §E): a fixture of
 // the pinned set seeded under a scratch sminos home, and a fixture's outcome staged for the stand-in door
 // (test/support/fake-sminos-cli.mjs) to replay. The fixtures are read in place and never edited.
-import { copyFileSync, cpSync, mkdirSync, readFileSync, readdirSync, truncateSync, writeFileSync } from 'node:fs';
+import { copyFileSync, cpSync, mkdirSync, readFileSync, readdirSync, renameSync, truncateSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 export const SHEET_FIXTURES = join(__dirname, '../fixtures/sheet/set/fixtures');
@@ -39,3 +39,32 @@ export function stageOutcome(home: string, name: string, keys: readonly string[]
   copyFileSync(join(SHEET_FIXTURES, name, 'after', 'sheet', session, 'state.json'), join(next, 'state.json'));
   writeFileSync(join(next, 'keys.json'), JSON.stringify(keys));
 }
+
+type StoredState = { seq: number; nextId: number; questions: Record<string, unknown>[]; closed: Record<string, unknown> } & Record<string, unknown>;
+
+/**
+ * A step of the tool's own, done to a seeded record by a test: `edit` gives the record's next `state.json` (its `seq`
+ * moved on here), which replaces the old one by a rename as the tool writes it, so no reader sees half of it. No fixture
+ * of the pinned set has a question open on one side and added or withdrawn on the other; a test that needs one derives
+ * it from a seeded record with these steps (`asked`, `withdrawn`), in the record's own shapes.
+ */
+export function rewriteState(home: string, session: string, edit: (state: StoredState) => StoredState): void {
+  const file = join(home, 'sheet', session, 'state.json');
+  const state = readJson(file) as StoredState;
+  const temporary = join(home, 'sheet', session, '.state.rewrite.json');
+  writeFileSync(temporary, JSON.stringify({ ...edit(state), seq: state.seq + 1 }));
+  renameSync(temporary, file);
+}
+
+/** A question asked by a later call: the last question's shape, under the record's next id. */
+export const asked = (question: string, at: string, callId: string) => (state: StoredState): StoredState => ({
+  ...state,
+  nextId: state.nextId + 1,
+  questions: [...state.questions, { ...state.questions.at(-1), id: `q${state.nextId}`, revision: 1, question, askedAt: at, callId, references: [] }],
+});
+
+/** An open question withdrawn: out of `questions`, into `closed` as `withdrawn`. */
+export const withdrawn = (id: string, at: string) => (state: StoredState): StoredState => {
+  const { asker, header, question, revision } = state.questions.find((q) => q.id === id) as { asker: unknown; header?: string; question: string; revision: number };
+  return { ...state, questions: state.questions.filter((q) => q.id !== id), closed: { ...state.closed, [id]: { asker, at, ...(header !== undefined && { header }), how: 'withdrawn', question, revision } } };
+};
