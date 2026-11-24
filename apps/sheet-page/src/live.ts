@@ -13,7 +13,14 @@
 // once a connection was paired. 4401 and 4403 read `unpaired`, which shows the pairing screen and deletes nothing (T19):
 // the client goes on trying with what is stored, so a tab that a stranger on the port sent to the pairing screen comes
 // back by itself when `mawsd` has the port again. The pairing is read when each socket opens, so a new one is used at
-// once. The snapshot and the changes after `paired` (§N) are M4's.
+// once.
+//
+// After `paired` (§N) the server sends a snapshot, `ready`, and then one `changed` a change; each is handed on once it
+// holds to its shape, and anything else is passed over. `unavailable` (the spine refused, yielded or left `loaded`)
+// reads so, keeps the socket, which is still the tab's proof, and asks for the snapshot again after 5 and then every 10
+// seconds until one comes.
+import { DoorStateSchema, type DoorState } from '@shared/ipc/schema/sheet';
+import { SheetSummarySchema, type SheetSummary } from '@shared/sheet/model';
 import type { StoredPairing } from './credential';
 import { freshNonce, macOf, macsEqual, proofKeyOf } from './proof';
 
@@ -39,6 +46,9 @@ export interface LiveSocket {
 
 export const PROOF_WAIT_MS = 5_000; // each step of the opening, as the server's helloMs
 export const RETRY_MS = [1_000, 2_000, 5_000, 10_000] as const; // then every 10 s
+export const ASK_MS = [5_000, 10_000] as const; // after `unavailable`: then every 10 s
+const SummariesSchema = SheetSummarySchema.array();
+const SummarySchema = SheetSummarySchema.nullable();
 const OPEN = 1;
 const REFUSED = new Set([4401, 4403]); // not known, refused or late; unpaired while connected
 
@@ -46,6 +56,8 @@ export interface LiveDeps {
   url: string; // ws://sheet.localhost:<port>/live
   pairing(): StoredPairing | null;
   onPaired(): void;
+  onReady?(sessions: SheetSummary[], door: DoorState): void; // a snapshot
+  onChanged?(session: string, summary: SheetSummary | null): void; // one change, after a snapshot
   onState(state: Connection): void;
   open?(url: string): LiveSocket; // test seam: the browser's WebSocket
 }
@@ -57,6 +69,7 @@ export function connect(deps: LiveDeps): Live {
   let proven: StoredPairing | null = null; // the pairing the open socket proved
   let tries = 0; // closes since the last paired connection
   let wait: ReturnType<typeof setTimeout> | null = null; // the opening's step, or the next try
+  let asking: ReturnType<typeof setTimeout> | null = null; // the next ask for a snapshot, while unavailable
   let closed = false;
 
   const become = (next: Connection) => {
@@ -67,6 +80,8 @@ export function connect(deps: LiveDeps): Live {
   const clear = () => {
     if (wait !== null) clearTimeout(wait);
     wait = null;
+    if (asking !== null) clearTimeout(asking);
+    asking = null;
   };
 
   function start(): void {
@@ -104,8 +119,31 @@ export function connect(deps: LiveDeps): Live {
         tries = 0;
         become('connected');
         deps.onPaired();
+        return;
       }
-      // after paired: the snapshot and the changes, M4's
+      if (message.t === 'ready') {
+        const sessions = SummariesSchema.safeParse(message.sessions);
+        const door = DoorStateSchema.safeParse(message.door);
+        if (!sessions.success || !door.success) return;
+        if (asking !== null) clearTimeout(asking);
+        asking = null;
+        become('connected');
+        deps.onReady?.(sessions.data, door.data);
+      } else if (message.t === 'changed') {
+        const summary = SummarySchema.safeParse(message.summary);
+        if (typeof message.session === 'string' && summary.success) deps.onChanged?.(message.session, summary.data);
+      } else if (message.t === 'unavailable') {
+        become('unavailable');
+        if (asking !== null) return;
+        const ask = (at: number) => {
+          asking = setTimeout(() => {
+            if (socket !== here || here.readyState !== OPEN) return;
+            here.send(JSON.stringify({ t: 'list' }));
+            ask(1);
+          }, ASK_MS[at]);
+        };
+        ask(0);
+      }
     };
     here.onclose = ({ code }) => {
       if (socket !== here) return;

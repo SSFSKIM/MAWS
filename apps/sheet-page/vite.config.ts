@@ -4,6 +4,29 @@ import { createRequire } from 'node:module';
 import { resolve } from 'node:path';
 import { defineConfig } from 'vite';
 
+// The Markdown stack splits out of the sheet's chunk into chunks of its own, as desk-web's does (apps/desk-web/
+// vite.config.ts, whose rule this is): left to itself, the bundler folds the lazy sheet view into the largest chunk that
+// shares its modules (mermaid's), so the first sheet would load all of it. React and Vite's helpers have a chunk of
+// their own, so the entry imports no chunk of the Markdown stack.
+const MARKDOWN = /^(streamdown|unified|bail|trough|marked|longest-streak|markdown-table|(remark|micromark|mdast)(-.*)?)$/;
+const HTML = /^(parse5|entities|property-information|space-separated-tokens|comma-separated-tokens|html-url-attributes|web-namespaces|zwitch|trim-lines|devlop|ccount|decode-named-character-reference|character-entities.*|(rehype|hast|estree-util|unist|vfile)(-.*)?)$/;
+const SHIKI = /^(shiki|@shikijs\/(core|types|vscode-textmate|engine-javascript)|oniguruma-to-es|oniguruma-parser|regex|regex-recursion|regex-utilities)$/;
+
+function vendorChunk(id: string): string | undefined {
+  if (id.startsWith('\0vite/preload-helper') || id.startsWith('\0commonjsHelpers')) return 'base';
+  if (/\/node_modules\/.+\/node_modules\//.test(id.replace(/\/node_modules\/\.pnpm\/[^/]+/, ''))) return undefined; // a package's own copy stays with it
+  const at = id.lastIndexOf('/node_modules/');
+  if (at < 0) return undefined;
+  const pkg = /^((?:@[^/]+\/)?[^/]+)/.exec(id.slice(at + '/node_modules/'.length))?.[1] ?? '';
+  if (pkg === 'react' || pkg === 'react-dom' || pkg === 'scheduler') return 'base';
+  if (pkg === 'katex') return 'katex';
+  if (SHIKI.test(pkg)) return 'shiki';
+  if (MARKDOWN.test(pkg)) return 'markdown';
+  if (HTML.test(pkg)) return 'markdown-html';
+  if (pkg === '@shikijs/langs') return `lang-${/([^/]+)\.mjs$/.exec(id)?.[1] ?? 'grammar'}`;
+  return undefined;
+}
+
 // The question sheet's local page (docs/doperpowers/plans/2026-11-24-question-sheet-c4-local-page.md, §P; T23), built as
 // desk-web is (apps/desk-web/vite.config.ts): the React plugin under the React Compiler, Tailwind's plugin, and the
 // aliases MAWS's renderer modules need, so the page ships the same configuration of them. Built into the repository's
@@ -22,5 +45,5 @@ export default defineConfig({
       'lowlight-engine': resolve(createRequire(resolve(import.meta.dirname, '../../package.json')).resolve('lowlight'), '../lib/index.js'),
     },
   },
-  build: { outDir: resolve(import.meta.dirname, '../../out/sheet-page'), emptyOutDir: true, sourcemap: false },
+  build: { outDir: resolve(import.meta.dirname, '../../out/sheet-page'), emptyOutDir: true, sourcemap: false, rollupOptions: { output: { manualChunks: vendorChunk } } },
 });

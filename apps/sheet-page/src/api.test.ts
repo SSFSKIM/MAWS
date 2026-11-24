@@ -96,3 +96,80 @@ describe('unpair', () => {
     expect(await proven(async () => Promise.reject(new TypeError('Failed to fetch'))).unpair()).toEqual({ ok: false, why: 'failed' });
   });
 });
+
+describe('the sheet’s requests (§N)', () => {
+  const S = '5eed0000-0000-4000-8000-000000000019';
+  const MODEL = { v: 1, session: S, seq: 3, open: [], hidden: [], sent: [], pending: [], closed: {} };
+  const proven = (answer: () => Promise<Response>) => {
+    const made = harness(answer);
+    made.prove(PAIRING);
+    return made;
+  };
+
+  it('makes none of them while the connection is not proven', async () => {
+    const { api, calls } = harness(json(200, {}));
+    expect(await api.read(S)).toEqual({ ok: false, why: 'unproven' });
+    expect(await api.put(S, [])).toEqual({ ok: false, why: 'failed', message: expect.any(String) });
+    await expect(api.body(S, { ref: 'a'.repeat(64) })).rejects.toThrow();
+    expect(await api.upload(S, { mediaType: 'image/png', bytes: new Uint8Array([1]) })).toEqual({ ok: false, why: expect.any(String) });
+    expect(calls).toEqual([]);
+  });
+
+  it('reads a session’s model and the door’s state, with the credential, the session in the path', async () => {
+    const { api, calls } = proven(json(200, { model: MODEL, door: { known: false } }));
+    expect(await api.read(S)).toEqual({ ok: true, model: MODEL, door: { known: false } });
+    expect(calls[0]!.url).toBe(`/api/sheets/${S}`);
+    expect(calls[0]!.init.method ?? 'GET').toBe('GET');
+    expect(headersOf(calls[0]!.init).get('authorization')).toBe(`Bearer ${CREDENTIAL}`);
+    expect(await proven(json(200, { model: null, door: { known: true, available: true } })).api.read(S)).toEqual({ ok: true, model: null, door: { known: true, available: true } });
+  });
+
+  it('answers a read the spine could not serve, or anything not of its shape, as not read', async () => {
+    expect(await proven(json(503, { why: 'refused' })).api.read(S)).toEqual({ ok: false, why: 'unavailable' });
+    expect(await proven(json(200, { model: { v: 2 }, door: { known: false } })).api.read(S)).toEqual({ ok: false, why: 'failed' });
+    expect(await proven(async () => Promise.reject(new TypeError('Failed to fetch'))).api.read(S)).toEqual({ ok: false, why: 'failed' });
+  });
+
+  it('puts the lines as JSON and answers the door’s result as it stands', async () => {
+    const lines = [{ v: 1 as const, key: 'page-0000000000000000000000000a', kind: 'dismiss' as const, id: 'q1', by: 'page' as const }];
+    const result = { ok: true, results: [{ key: lines[0]!.key, state: 'queued' }] };
+    const { api, calls } = proven(json(200, result));
+    expect(await api.put(S, lines)).toEqual(result);
+    expect(calls[0]!.url).toBe(`/api/sheets/${S}/put`);
+    expect(calls[0]!.init.method).toBe('POST');
+    expect(JSON.parse(String(calls[0]!.init.body))).toEqual({ lines });
+    expect(headersOf(calls[0]!.init).get('content-type')).toBe('application/json');
+    const refused = { ok: false, why: 'refused', message: 'no such question' };
+    expect(await proven(json(200, refused)).api.put(S, lines)).toEqual(refused);
+  });
+
+  it('answers a put that failed, a 5xx or a network failure, as failed, so the sheet offers the same lines again', async () => {
+    expect(await proven(json(503, { why: 'refused' })).api.put(S, [])).toEqual({ ok: false, why: 'failed', message: expect.any(String) });
+    expect(await proven(async () => Promise.reject(new TypeError('Failed to fetch'))).api.put(S, [])).toEqual({ ok: false, why: 'failed', message: expect.any(String) });
+    expect(await proven(json(200, { ok: 'maybe' })).api.put(S, [])).toEqual({ ok: false, why: 'failed', message: expect.any(String) });
+  });
+
+  it('asks a body by one parameter, an upload by its name under uploads/, and reads it as text or an image’s bytes', async () => {
+    const text = proven(async () => new Response('line one\n', { status: 200, headers: { 'Content-Type': 'text/plain; charset=utf-8' } }));
+    expect(await text.api.body(S, { ref: 'a'.repeat(64) })).toEqual({ kind: 'text', text: 'line one\n' });
+    expect(text.calls[0]!.url).toBe(`/api/sheets/${S}/body?ref=${'a'.repeat(64)}`);
+    const image = proven(async () => new Response(new Uint8Array([137, 80, 78, 71]), { status: 200, headers: { 'Content-Type': 'image/png' } }));
+    expect(await image.api.body(S, { upload: 'uploads/maws-0123.png' })).toEqual({ kind: 'image', mediaType: 'image/png', data: 'iVBORw==' });
+    expect(image.calls[0]!.url).toBe(`/api/sheets/${S}/body?upload=maws-0123.png`);
+    const gone = proven(async () => new Response('Not found.', { status: 404 }));
+    expect(await gone.api.body(S, { text: 'b'.repeat(64) })).toEqual({ kind: 'gone' });
+    expect(gone.calls[0]!.url).toBe(`/api/sheets/${S}/body?text=${'b'.repeat(64)}`);
+    // a type that is neither text nor one of the four images is no body
+    expect(await proven(async () => new Response('<svg/>', { status: 200, headers: { 'Content-Type': 'image/svg+xml' } })).api.body(S, { ref: 'a'.repeat(64) })).toEqual({ kind: 'gone' });
+  });
+
+  it('posts an image’s bytes with its type, and answers the path the service wrote', async () => {
+    const { api, calls } = proven(json(200, { ok: true, path: 'uploads/maws-0123.png' }));
+    expect(await api.upload(S, { mediaType: 'image/png', bytes: new Uint8Array([1, 2, 3]) })).toEqual({ ok: true, path: 'uploads/maws-0123.png' });
+    expect(calls[0]!.url).toBe(`/api/sheets/${S}/uploads`);
+    expect(headersOf(calls[0]!.init).get('content-type')).toBe('image/png');
+    expect(new Uint8Array(calls[0]!.init.body as ArrayBuffer)).toEqual(new Uint8Array([1, 2, 3]));
+    expect(await proven(json(200, { ok: false, why: 'not an image' })).api.upload(S, { mediaType: 'image/png', bytes: new Uint8Array([1]) })).toEqual({ ok: false, why: 'not an image' });
+    expect(await proven(json(413, {})).api.upload(S, { mediaType: 'image/png', bytes: new Uint8Array([1]) })).toEqual({ ok: false, why: expect.any(String) });
+  });
+});

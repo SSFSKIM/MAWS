@@ -1,20 +1,24 @@
-// The page's frame ("The look", frames 2 and 3; F4, F6, F7, F9): a bar of the toolbar's height over one centred column
-// of the transcript's measure, which is the window below 768 px. The bar holds, from its left: on a session's sheet the
-// outline's button (F9; named, and inert until M4 builds the outline), the page's name, then where the person is: "This
-// Mac" on the overview; on a sheet the link back, "All sessions", then the session's title and "stopped" once the
-// sheet's data names them (M4). At its right a quiet menu whose one entry unpairs this browser. The bar says nothing of
-// the connection (F4: the band under it does, M4).
+// The page's frame ("The look", frames 2 to 4; F4, F6, F7, F9): a bar of the toolbar's height, the band under it when
+// the page is not connected, and under them what the place draws (the views lay out their own column: the overview one
+// centred column of the transcript's measure, a session's sheet the whole width the outline leaves). The bar holds, from
+// its left: on a session's sheet the outline's button (F9), the page's name, then where the person is: "This Mac" on the
+// overview; on a sheet the link back, "All sessions", then the session's title and "stopped" where no process holds it.
+// At its right a quiet menu whose one entry unpairs this browser. The bar says nothing of the connection (F4: the band
+// does).
 import { DropdownMenu } from 'radix-ui';
 import type { MouseEvent, ReactNode } from 'react';
 import { GLYPH_BUTTON, NamedGlyph } from '../../../../src/renderer/src/ui/glyph';
 import { PAGE } from '../copy';
 import { pathOf, type Place } from '../route';
+import { Band } from './Band';
 import { MenuIcon, OutlineIcon } from './icons';
 
 export interface FrameProps {
   place: Place;
-  title?: string | null; // the session's title, on its sheet (M4)
-  stopped?: boolean; // no process holds the session (M4)
+  title?: string | null; // the session's title, on its sheet
+  stopped?: boolean; // no process holds the session
+  outline?: { open: boolean; toggle(): void }; // the outline's button, on a sheet (F9)
+  band?: string | null; // what the band says; null: no band
   navigate(place: Place): void;
   unpair(): void;
   children?: ReactNode;
@@ -26,14 +30,14 @@ const MENU_ITEM = 'flex h-(--row-h) cursor-default items-center rounded-sm px-2.
 // A plain click moves the page without a load; a modified or middle click is the browser's, as on any link
 const plainClick = (event: MouseEvent) => event.button === 0 && !event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey;
 
-export function Frame({ place, title = null, stopped = false, navigate, unpair, children }: FrameProps) {
+export function Frame({ place, title = null, stopped = false, outline, band = null, navigate, unpair, children }: FrameProps) {
   const onSheet = place.at === 'sheet';
   const overview: Place = { at: 'overview' };
   return (
     <div className="flex h-full flex-col bg-bg text-ui text-fg">
       <header className={`relative flex h-(--toolbar-h) flex-none items-center gap-3 border-b border-border bg-bg pr-2 ${onSheet ? 'pl-2' : 'pl-4'}`}>
         {onSheet && (
-          <NamedGlyph label={PAGE.showQuestions} pressed={false} className={`${GLYPH_BUTTON} -mr-1`}>
+          <NamedGlyph label={outline?.open ? PAGE.hideQuestions : PAGE.showQuestions} pressed={outline?.open ?? false} onClick={outline?.toggle} className={`${GLYPH_BUTTON} -mr-1`}>
             <OutlineIcon />
           </NamedGlyph>
         )}
@@ -81,9 +85,8 @@ export function Frame({ place, title = null, stopped = false, navigate, unpair, 
           </DropdownMenu.Portal>
         </DropdownMenu.Root>
       </header>
-      <main className="flex min-h-0 flex-1 flex-col overflow-auto">
-        <div className="thread-column">{children}</div>
-      </main>
+      {band !== null && <Band text={band} />}
+      <main className="flex min-h-0 flex-1 flex-col">{children}</main>
     </div>
   );
 }

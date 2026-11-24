@@ -36,3 +36,30 @@ export const PAIRING = {
   notSaved: 'MAWS could not save the pairing. Try again.', // this child's own: the browsers' file could not be replaced
   failed: 'MAWS did not answer. Try again.', // this child's own: no answer, or not one of the exchange's
 } as const;
+
+// What the page says while it cannot send, and of a Send or an image that did not reach MAWS ("The look", frame 4; §P)
+export const SEND = {
+  notReachable: 'Answers cannot be sent while MAWS is not reachable.', // frame 4: where Send was
+  servicesDown: 'Answers cannot be sent right now.', // this child's own: where Send was while MAWS's session services are not available
+  beingSent: 'Your answers are being sent.', // the composite's writer's words: a Send this window did not make, younger than the door's limit
+  noAnswer: 'MAWS did not answer.', // this child's own: under "Not sent." for a Send with no answer, or not one of the door's
+  notConnected: 'Not connected to MAWS.', // this child's own: under "Not sent." for a Send made while no connection was proven
+  imageNotSaved: 'The image could not be saved.', // this child's own: a paste that did not reach MAWS
+} as const;
+
+// The page's own parts around the sheet ("The look", M4: frames 2 to 4)
+export const VIEWS = {
+  notConnected: 'Not connected to MAWS on this Mac. Trying again.', // frame 4: the band
+  servicesDown: 'MAWS is running, but its session services are not available right now.', // frame 4: the band's other sentence
+  noQuestions: 'No open questions on this Mac', // frame 2: the empty overview
+  noQuestionsNote: 'A session’s questions appear here when it asks.', // frame 2, in --fg-muted (F7)
+  noSession: 'No open questions for this session', // frame 3: a session with no record, or a path that names none
+} as const;
+
+// The outline (F9)
+export const OUTLINE = {
+  name: 'Questions', // the panel's accessible name
+  count: (n: number) => `${n} ${n === 1 ? 'question' : 'questions'}`,
+  drafted: (n: number) => `${n} drafted`,
+  queued: 'queued', // before a stopped session's queued answer
+} as const;

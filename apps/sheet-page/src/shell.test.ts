@@ -32,6 +32,8 @@ describe('the built shell', () => {
     const files = readdirSync(out, { recursive: true, withFileTypes: true }).filter((entry) => entry.isFile()).map((entry) => entry.name);
     expect(files).toContain('index.html');
     for (const name of files) expect(name, name).toMatch(/\.(html|js|css|woff2|woff|ttf|png|ico|svg|json)$/);
-    expect(files.some((name) => /^(sw|service-worker)/.test(name))).toBe(false);
+    expect(files.some((name) => /^(sw|service-worker)([-.][A-Za-z0-9_]+)?\.js$/.test(name))).toBe(false); // not mermaid's `swimlanes-…` chunk
+    const scripts = readdirSync(out, { recursive: true, withFileTypes: true }).filter((entry) => entry.isFile() && entry.name.endsWith('.js'));
+    for (const entry of scripts) expect(readFileSync(join(entry.parentPath, entry.name), 'utf8'), entry.name).not.toContain('serviceWorker.register');
   });
 });

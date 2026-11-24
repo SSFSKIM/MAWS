@@ -1,38 +1,96 @@
-// The page (§P; T19, T20, T28): which screen it shows is decided from two facts alone, whether the browser holds a
+// The page (§P; T15, T19, T20, T28): which screen it shows is decided from two facts alone, whether the browser holds a
 // credential and what the live connection's opening said of it. No credential: the pairing screen, with no request
 // made and no socket opened. A credential: the connection opens, the frame shows at `paired`, and the pairing screen at
 // a refusal, which deletes nothing, so the tab comes back by itself once the real `mawsd` answers again. Until the first
-// `paired` the ground is blank. Nothing else is asked of the server to find out, since any such request would carry
-// the credential before the server had proven itself. The pairing screen keeps the address the browser asked for, and
-// that place shows once paired. The page reads its path alone (T20).
-import { useEffect, useState } from 'react';
+// `paired` the ground is blank, and after a second without a connection the frame stands with its band. Nothing else is
+// asked of the server to find out, since any such request would carry the credential before the server had proven
+// itself. The pairing screen keeps the address the browser asked for, and that place shows once paired. The page reads
+// its path alone (T20).
+//
+// Once paired, the connection's snapshots and changes feed the store (store.ts), which reads the model of the session
+// on screen; what the frame holds is the workspace, loaded apart (views/Workspace.tsx). The band under the bar says
+// when the page is not connected, once a second has passed (availability.ts). A tab hidden for five minutes lets its
+// connection go and opens it again when it is shown (T15), so a forgotten tab costs nothing.
+import { lazy, Suspense, useCallback, useEffect, useState } from 'react';
 import { createApi } from './api';
+import { BAND_AFTER_MS, bandOf } from './availability';
+import { PAGE } from './copy';
 import { CREDENTIAL_KEY, forgetEverything, readPairing, writePairing, type StoredPairing } from './credential';
 import { Frame } from './frame/Frame';
-import { connect, type Live } from './live';
+import { connect, type Connection, type Live } from './live';
+import { useOutline } from './outline/state';
 import { PairingScreen } from './pairing/PairingScreen';
 import { pathOf, placeOf, type Place } from './route';
+import { createStore } from './store';
 import { unpairThisBrowser, type Unpaired } from './unpair';
 
+const Workspace = lazy(() => import('./views/Workspace'));
+
 type Screen = 'waiting' | 'pairing' | 'frame';
+
+export const HIDDEN_MS = 5 * 60_000; // a tab hidden this long lets its connection go (T15)
 
 const liveUrl = () => `ws://${location.host}/live`;
 
 // The page's one live connection, which every request that carries the credential asks first (api.ts)
 const current: { live: Live | null } = { live: null };
 const api = createApi({ proven: () => current.live?.proven() ?? null });
+const store = createStore({ read: api.read });
+
+// Whether the tab may hold its connection: not once it has been hidden for five minutes
+function useAwake(): boolean {
+  const [awake, setAwake] = useState(true);
+  useEffect(() => {
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const seen = () => {
+      if (timer !== null) clearTimeout(timer);
+      timer = null;
+      if (document.visibilityState === 'hidden') timer = setTimeout(() => setAwake(false), HIDDEN_MS);
+      else setAwake(true);
+    };
+    seen();
+    document.addEventListener('visibilitychange', seen);
+    return () => {
+      if (timer !== null) clearTimeout(timer);
+      document.removeEventListener('visibilitychange', seen);
+    };
+  }, []);
+  return awake;
+}
+
+// The band's sentence, which speaks only once a second has passed in a state that is not connected
+function useBand(connection: { state: Connection; since: number }): string | null {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (connection.state === 'connected' || connection.state === 'unpaired') return;
+    const timer = setTimeout(() => setNow(Date.now()), Math.max(0, connection.since + BAND_AFTER_MS - Date.now()));
+    return () => clearTimeout(timer);
+  }, [connection]);
+  return bandOf(connection.state, connection.since, now);
+}
 
 export function App() {
   const [place, setPlace] = useState<Place>(() => placeOf(location.pathname));
   const [pairing, setPairing] = useState<StoredPairing | null>(() => readPairing());
   const [screen, setScreen] = useState<Screen>(() => (pairing === null ? 'pairing' : 'waiting'));
   const [unpaired, setUnpaired] = useState<Unpaired | null>(null);
+  const [connection, setConnection] = useState<{ state: Connection; since: number }>(() => ({ state: 'connecting', since: Date.now() }));
+  const [bar, setBar] = useState<{ title: string | null; stopped: boolean }>({ title: null, stopped: false });
+  const awake = useAwake();
+  const outline = useOutline();
+  const band = useBand(connection);
 
   useEffect(() => {
     const moved = () => setPlace(placeOf(location.pathname));
     addEventListener('popstate', moved);
     return () => removeEventListener('popstate', moved);
   }, []);
+  useEffect(() => {
+    store.show(place.at === 'sheet' ? place.session : null);
+  }, [place]);
+  useEffect(() => {
+    if (screen !== 'frame') document.title = PAGE.name;
+  }, [screen]);
 
   // Another tab of this browser paired anew or unpaired: this one follows what is stored (the connection it holds proves
   // only the pairing it opened with, live.ts), and a pairing no longer stored shows the pairing screen
@@ -50,31 +108,35 @@ export function App() {
   }, []);
 
   useEffect(() => {
-    if (pairing === null) return;
-    const connection = connect({
+    if (pairing === null || !awake) return;
+    const live = connect({
       url: liveUrl(),
       pairing: readPairing, // read as each socket opens: what is stored now
       onPaired: () => {
         setUnpaired(null);
         setScreen('frame');
       },
+      onReady: (sessions, door) => store.ready(sessions, door),
+      onChanged: (session, summary) => store.changed(session, summary),
       onState: (state) => {
+        setConnection({ state, since: Date.now() });
         if (state !== 'unpaired') return;
         setUnpaired('refused');
         setScreen('pairing');
       },
     });
-    current.live = connection;
+    current.live = live;
     return () => {
-      connection.close();
-      if (current.live === connection) current.live = null;
+      live.close();
+      if (current.live === live) current.live = null;
+      setConnection({ state: 'connecting', since: Date.now() }); // the next connection, or none while the tab sleeps
     };
-  }, [pairing]);
+  }, [pairing, awake]);
 
-  const navigate = (next: Place) => {
+  const navigate = useCallback((next: Place) => {
     history.pushState(null, '', pathOf(next));
     setPlace(next);
-  };
+  }, []);
 
   // The person's own Unpair (unpair.ts): told to mawsd only over a proven connection, forgotten here whatever the answer,
   // and the pairing screen says which of the three it was
@@ -96,6 +158,23 @@ export function App() {
         }}
       />
     );
-  if (screen === 'waiting') return null;
-  return <Frame place={place} navigate={navigate} unpair={() => void unpair()} />;
+  if (screen === 'waiting' && band === null) return null;
+  const onSheet = place.at === 'sheet';
+  return (
+    <Frame
+      place={place}
+      title={onSheet ? bar.title : null}
+      stopped={onSheet && bar.stopped}
+      outline={{ open: outline.open, toggle: outline.toggle }}
+      band={band}
+      navigate={navigate}
+      unpair={() => void unpair()}
+    >
+      {screen === 'frame' && (
+        <Suspense fallback={null}>
+          <Workspace place={place} store={store} api={api} connection={connection.state} outline={outline} navigate={navigate} setBar={setBar} />
+        </Suspense>
+      )}
+    </Frame>
+  );
 }

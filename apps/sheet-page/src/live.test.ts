@@ -52,6 +52,7 @@ let sockets: Scripted[];
 let states: Connection[];
 let paired: number;
 let stored: { id: string; credential: string } | null;
+let heard: unknown[];
 
 const live = () =>
   connect({
@@ -59,6 +60,8 @@ const live = () =>
     pairing: () => stored,
     onPaired: () => void (paired += 1),
     onState: (state) => void states.push(state),
+    onReady: (sessions, door) => void heard.push({ ready: sessions, door }),
+    onChanged: (session, summary) => void heard.push({ changed: session, summary }),
     open: (url) => {
       const socket = new Scripted(url);
       sockets.push(socket);
@@ -72,6 +75,7 @@ beforeEach(() => {
   states = [];
   paired = 0;
   stored = { id: ID, credential: CREDENTIAL };
+  heard = [];
 });
 afterEach(() => vi.useRealTimers());
 
@@ -279,5 +283,55 @@ describe('after a close', () => {
     expect(last().closedBy).toBe('tab');
     vi.advanceTimersByTime(60_000);
     expect(sockets).toHaveLength(1);
+  });
+});
+
+describe('after paired: the snapshot and the changes (§N)', () => {
+  const SUMMARY = { session: '5eed0000-0000-4000-8000-000000000019', appSessionId: null, title: 'Winter timetable import', live: true, seq: 2, open: 4, queued: 0, pending: 0, hidden: 0, oldestAskedAt: '2026-11-24T09:00:00.000Z', unreadable: false };
+  const DOOR = { known: true, available: true };
+  function pairedLive() {
+    const connection = live();
+    last().open();
+    last().say(proofFor(last()));
+    last().say({ t: 'paired' });
+    return connection;
+  }
+  const asked = (socket: Scripted) => socket.sent.filter((text) => JSON.parse(text).t === 'list').length;
+
+  it('hands on each snapshot and each change, and nothing that is not of their shape', () => {
+    pairedLive();
+    last().say({ t: 'ready', v: 1, sessions: [SUMMARY], door: DOOR });
+    last().say({ t: 'changed', session: SUMMARY.session, summary: { ...SUMMARY, open: 3 } });
+    last().say({ t: 'changed', session: SUMMARY.session, summary: null });
+    last().say({ t: 'ready', v: 1, sessions: [{ session: 'x' }], door: DOOR });
+    last().say({ t: 'changed', session: SUMMARY.session, summary: { open: 'many' } });
+    expect(heard).toEqual([{ ready: [SUMMARY], door: DOOR }, { changed: SUMMARY.session, summary: { ...SUMMARY, open: 3 } }, { changed: SUMMARY.session, summary: null }]);
+    expect(states.at(-1)).toBe('connected');
+  });
+
+  it('reads unavailable as so, keeps the socket, and asks again after 5 and then every 10 seconds until a snapshot comes', () => {
+    pairedLive();
+    last().say({ t: 'unavailable', why: 'refused' });
+    expect(states.at(-1)).toBe('unavailable');
+    expect(last().closedBy).toBeNull();
+    vi.advanceTimersByTime(4_999);
+    expect(asked(last())).toBe(0);
+    vi.advanceTimersByTime(1);
+    expect(asked(last())).toBe(1);
+    vi.advanceTimersByTime(10_000);
+    expect(asked(last())).toBe(2);
+    last().say({ t: 'ready', v: 1, sessions: [], door: DOOR });
+    expect(states.at(-1)).toBe('connected');
+    vi.advanceTimersByTime(30_000);
+    expect(asked(last())).toBe(2);
+  });
+
+  it('asks nothing of a socket that closed while it waited to ask', () => {
+    pairedLive();
+    last().say({ t: 'unavailable', why: 'no-service' });
+    const first = last();
+    first.end(1001);
+    vi.advanceTimersByTime(5_000);
+    expect(asked(first)).toBe(0);
   });
 });

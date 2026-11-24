@@ -5,10 +5,13 @@
 // never that page's own account: it is the status Playwright saw on the wire, and what the daemon holds after it.
 //
 // This is the one launcher that turns the page on (T2), always with a scratch home and a port of its own: no run here
-// listens on the real port or writes under a real home.
-import { execFile, spawn, type ChildProcess } from 'node:child_process';
+// listens on the real port or writes under a real home. From M4 its daemon names C3's stand-in door (MAWS_SMINOS_CLI),
+// its sminos home can hold records of the pin (records.ts), and its engine's store can hold terminal sessions, one a
+// live stand-in process holds and one nobody holds, which the daemon's own discovery brings into its index (T29), so a
+// session reads running or stopped with no app attached.
+import { execFile, execFileSync, spawn, type ChildProcess } from 'node:child_process';
 import { createHmac, randomBytes } from 'node:crypto';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer, type IncomingMessage } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -16,6 +19,8 @@ import type { Page } from '@playwright/test';
 import WebSocket, { WebSocketServer } from 'ws';
 // the page's origin and Host come from the server's own module (it imports nothing), so a change there reaches this suite
 import { pageOrigin, SHEET_HOST } from '../../../src/mawsd/sheet-page/headers';
+import { slugOf } from '../../../src/engine-host/fs/paths';
+import { FAKE_SMINOS, seedRecord } from '../../../test/support/sheet-records';
 import { closeAll, listenLoopback } from './second-origin.mjs';
 
 export { secondOrigin } from './second-origin.mjs';
@@ -24,11 +29,20 @@ export const ROOT = resolve(import.meta.dirname, '../../..');
 const MAWSD = join(ROOT, 'out/main/mawsd.js');
 const START_MS = 30_000;
 
+// A terminal session in the engine's store (§Q): its transcript, its first prompt the title the index reads, and for a
+// held one a registry record naming a live stand-in process
+export interface SeededSession {
+  session: string;
+  title: string;
+  held: boolean;
+}
+
 export interface Mawsd {
   url: string; // the page's origin, http://sheet.localhost:<port>
   port: number;
   home: string; // the scratch sminos home
   profile: string; // the scratch profile
+  scratch: string; // the scratch root, for a test's own files (a barrier's)
   cli(...args: string[]): Promise<{ code: number; out: string }>;
   pair(page: Page): Promise<void>; // `mawsd sheet pair`, its code typed into the page's pairing screen, and the frame shown
   browsers(): Promise<{ id: string; label: string }[]>; // `mawsd sheet browsers --json`
@@ -45,23 +59,29 @@ export const until = async (check: () => boolean | Promise<boolean>, ms: number,
   throw new Error(`timed out waiting for ${what}`);
 };
 
-export async function startMawsd(options: { env?: Record<string, string> } = {}): Promise<Mawsd> {
+export async function startMawsd(options: { records?: string[]; sessions?: SeededSession[]; env?: Record<string, string> } = {}): Promise<Mawsd> {
   if (!existsSync(MAWSD)) throw new Error(`${MAWSD} is not built (pnpm -w run build:main-preload)`);
   if (!existsSync(join(ROOT, 'out/sheet-page/index.html'))) throw new Error('out/sheet-page is not built (vite build)');
-  const scratch = mkdtempSync(join(tmpdir(), 'sheet-rig-'));
-  const dirs = { profile: join(scratch, 'profile'), home: join(scratch, 'home'), sminos: join(scratch, 'sminos'), config: join(scratch, 'claude-config') };
+  const scratch = realpathSync(mkdtempSync(join(tmpdir(), 'sheet-rig-'))); // the index keeps a project's real directory
+  const dirs = { profile: join(scratch, 'profile'), home: join(scratch, 'home'), sminos: join(scratch, 'sminos'), config: join(scratch, 'claude-config'), project: join(scratch, 'proj') };
   for (const dir of Object.values(dirs)) mkdirSync(dir, { recursive: true });
+  mkdirSync(join(dirs.sminos, 'sheet'), { recursive: true });
   const base: Record<string, string> = {
     PATH: process.env.PATH ?? '/usr/bin:/bin',
     ...options.env, // a test's own, which can name none of what follows: the scratch homes and the switches are enforced
     HOME: dirs.home,
+    SHELL: '/bin/sh', // the login shell the daemon captures: this scratch's, never the runner's
     MAWS_USER_DATA: dirs.profile,
     CLAUDE_CONFIG_DIR: dirs.config,
     SMINOS_HOME: dirs.sminos,
     MAWS_SHEET_PAGE: '1',
-    MAWS_E2E: '1', // under which sminosHome refuses the real home
+    MAWS_E2E: '1', // under which sminosHome refuses the real home, and the door's locator reads MAWS_SMINOS_CLI alone
     MAWS_ENGINE_REPLAY: '1', // no engine runs
+    MAWS_SMINOS_CLI: FAKE_SMINOS, // C3's stand-in door (§E): no test reaches an installed sminos
   };
+  for (const name of options.records ?? []) seedRecord(dirs.sminos, name);
+  const holders: ChildProcess[] = [];
+  for (const seeded of options.sessions ?? []) holders.push(...seedSession(dirs.config, dirs.project, seeded));
   let port = 0;
   let child: ChildProcess | null = null;
   let output = '';
@@ -114,10 +134,14 @@ export async function startMawsd(options: { env?: Record<string, string> } = {})
     clearTimeout(late);
   }
 
+  const endHolders = () => {
+    for (const holder of holders) if (holder.exitCode === null && holder.signalCode === null) holder.kill('SIGKILL');
+  };
   try {
     await start();
   } catch (error) {
     await stop(); // a daemon that never came to listen
+    endHolders();
     rmSync(scratch, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
     throw error;
   }
@@ -130,6 +154,7 @@ export async function startMawsd(options: { env?: Record<string, string> } = {})
     },
     home: dirs.sminos,
     profile: dirs.profile,
+    scratch,
     cli,
     async pair(page) {
       const { code, out } = await cli('sheet', 'pair');
@@ -165,9 +190,27 @@ export async function startMawsd(options: { env?: Record<string, string> } = {})
     },
     async dispose() {
       await stop();
+      endHolders();
       rmSync(scratch, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
     },
   };
+}
+
+// A terminal session's transcript in the engine's store, and for a held one a registry record naming a live stand-in
+// process with its start time as the engine renders it (e2e/support/lane-a.ts's terminal). Answers the processes it
+// started, which the rig ends.
+function seedSession(config: string, cwd: string, { session, title, held }: SeededSession): ChildProcess[] {
+  const folder = join(config, 'projects', slugOf(cwd));
+  mkdirSync(folder, { recursive: true });
+  const first = { parentUuid: null, isSidechain: false, type: 'user', message: { role: 'user', content: title }, uuid: `${session.slice(0, -2)}ff`, timestamp: '2026-11-24T09:00:00.000Z', cwd, sessionId: session, version: '2.1.300' };
+  writeFileSync(join(folder, `${session}.jsonl`), `${JSON.stringify(first)}\n`);
+  if (!held) return [];
+  const child = spawn('/bin/sh', ['-c', 'read -r _'], { stdio: ['pipe', 'ignore', 'ignore'] });
+  const pid = child.pid!;
+  const procStart = execFileSync('/bin/ps', ['-o', 'lstart=', '-p', String(pid)], { env: { LC_ALL: 'C', TZ: 'UTC' }, encoding: 'utf8' }).trim();
+  mkdirSync(join(config, 'sessions'), { recursive: true });
+  writeFileSync(join(config, 'sessions', `${pid}.json`), JSON.stringify({ pid, sessionId: session, cwd, kind: 'interactive', procStart, status: 'idle' }));
+  return [child];
 }
 
 // --- the impostor ----------------------------------------------------------------------------------------------------
