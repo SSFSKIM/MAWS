@@ -27,6 +27,7 @@ import { newChatIn, openProject, sidebarRow } from './support/sidebar';
 import { unfoldInfoGroup } from './support/session-info';
 import { pageRegion, unfoldSessionCard } from './support/shell';
 import { customizePage } from './support/customize';
+import { trackPluginReads } from './support/plugins-live';
 import { expectNewChatInFront } from './support/screen-reader-only';
 
 // A packaged app is built without the harness (`pnpm build:app`), whatever `out/` holds now.
@@ -1660,6 +1661,36 @@ test.describe('plugin management (E8)', () => {
     await expect(tools).toHaveCount(0);
     await expect(manage.locator('[data-marketplace-result="tools"]')).toContainText('Successfully removed marketplace: tools');
     expect(mutations(backend)).toEqual(shown);
+    expect(backend.consoleErrors()).toEqual([]);
+  });
+
+  // plugins-live's audit holds every CLI read in main from a confirm to the operation's end (e2e/support/plugins-live.ts).
+  // Its first paid run at 9cc91e7e7 waited under the hold for a removed marketplace's result line, which is drawn only once
+  // the held list refetch drops the row, and timed out with the Manage marketplaces dialog left open. The hold now ends on
+  // the operation's `done` event, which this case shows arrives with the reads still held.
+  test('the live audit’s read hold: a removal’s done event arrives while every CLI read waits, and the removed row’s result line only after the release', async ({ backend }) => {
+    const { page } = backend;
+    const w = await openPlugins(backend);
+    const manage = await openAdd(w, 'Manage marketplaces');
+    const reads = await trackPluginReads(backend.app);
+    const gone = manage.locator(`[data-marketplace-result="${MARKET}"]`);
+    await marketplaceAction(marketplaceRow(manage, MARKET), 'Remove…');
+    const sheet = sheetOf(page, 'marketplace-remove');
+    await sheet.getByRole('checkbox', { name: 'I understand' }).check();
+    const doneBefore = await reads.done();
+    await reads.hold();
+    let waited: string[];
+    try {
+      await sheet.getByRole('button', { name: 'Remove', exact: true }).click();
+      await expect.poll(() => reads.done(), { timeout: 60_000, intervals: [250] }).toBeGreaterThan(doneBefore);
+      await expect(lineOf(marketplaceRow(manage, MARKET))).toContainText('Successfully removed marketplace: e8-scratch'); // the row's own line, drawn without a read
+      await expect(gone).toHaveCount(0); // what the paid run waited on: it needs the held refetch
+    } finally {
+      waited = await reads.release();
+    }
+    expect(waited).toContain('marketplaces.list');
+    await expect(gone).toContainText('Successfully removed marketplace: e8-scratch');
+    await expect(marketplaceRow(manage, MARKET)).toHaveCount(0);
     expect(backend.consoleErrors()).toEqual([]);
   });
 

@@ -280,6 +280,19 @@ async function backToSession(page: Page): Promise<Locator> {
   return openPlugins(page);
 }
 
+// After a failed step: whatever it left in front (a confirm sheet, a marketplaces dialog, the widget, Customize's page)
+// closed, then the session's `/plugins` opened on My items, where a passing step leaves the run, so the steps after it
+// run (a failure at step 04 left the Manage marketplaces dialog over the session and every later step timed out).
+async function backOnSession(page: Page): Promise<void> {
+  for (let i = 0; i < 6 && (await page.locator('[role="dialog"]:visible').count()) > 0; i += 1) {
+    await page.keyboard.press('Escape');
+    await page.waitForTimeout(250);
+  }
+  await expect(page.locator('[role="dialog"]:visible')).toHaveCount(0);
+  if ((await pageRegion(page).count()) > 0) await backToTabs(page);
+  await openPlugins(page);
+}
+
 // ---- the run ---------------------------------------------------------------------------------------------------
 
 test('E8 live: marketplaces and plugins managed from /plugins and the panel through the engine’s CLI, reflected in the running session', async () => {
@@ -308,6 +321,9 @@ test('E8 live: marketplaces and plugins managed from /plugins and the panel thro
         failures.push(`${label}: ${message}`);
         scratch.log(`FAILED: ${message}`);
         scratch.observe(`${label}.failed`, message);
+        await shot(label);
+        await backOnSession(page).catch((recovery: unknown) => scratch.log(`could not return to the session: ${recovery instanceof Error ? recovery.message.split('\n')[0] : String(recovery)}`));
+        return;
       }
       await shot(label);
     });
@@ -334,21 +350,23 @@ test('E8 live: marketplaces and plugins managed from /plugins and the panel thro
     scratch.log(`sheet then: ${then}`);
     await page.screenshot({ path: join(scratch.root, `live-${String(n).padStart(2, '0')}-${spec.name}-sheet.png`) });
     if (spec.acknowledge) await sheet.getByRole('checkbox', { name: 'I understand' }).check();
-    // the sheet's own reads have landed; from the confirm to the mutation's end no CLI read starts (`hold`), so the
-    // tree read there is the mutation's alone
+    // the sheet's own reads have landed; from the confirm to the operation's `done` (its CLI, the settle and the reload)
+    // no CLI read starts (`hold`), so the tree read there is the mutation's alone. The hold ends on that event, not on the
+    // row's words, which may need a held refetch (a removed row's line is drawn once the list has dropped the row).
     await untilQuiet(reads, { quietMs: QUIET_MS, timeoutMs: 180_000 });
+    const doneBefore = await reads.done();
     await reads.hold();
-    let result: { text: string; failed: boolean };
     let endedTree: Tree;
     let waited: string[];
     try {
       await sheet.getByRole('button', { name: spec.submit, exact: true }).click();
       await expect(sheet).toBeHidden();
-      result = await ended(spec.line(), spec.timeout);
+      await expect.poll(() => reads.done(), { message: `${spec.name}: the operation's done event`, timeout: spec.timeout ?? DONE_TIMEOUT, intervals: [250] }).toBeGreaterThan(doneBefore);
       endedTree = scratch.tree();
     } finally {
       waited = await reads.release();
     }
+    const result = await ended(spec.line(), spec.timeout);
     scratch.log(`row: ${result.text.replaceAll('\n', ' ⏎ ')}${result.failed ? '   [drawn as a failure]' : ''}`);
     scratch.observe(spec.name, { argv, writes, then, uninstalls, row: result });
     scratch.log(`(writesOf ${spec.action}, ${spec.scope}, ${spec.source ?? 'null'}${spec.uninstalls ? `, uninstalling ${spec.uninstalls.map((u) => u.id).join(', ')}` : ''})`);
@@ -580,8 +598,7 @@ test('E8 live: marketplaces and plugins managed from /plugins and the panel thro
     });
 
     await step('remove-folder', 'Remove… e8-scratch with e8-probe installed: the sheet names the uninstall; the marketplace and the plugin leave; its result stays', async () => {
-      // a reinstall that failed before its way back leaves Discover's page in front: this step starts from the session
-      const w = (await pageRegion(page).count()) > 0 ? await backToSession(page) : page.locator('[data-widget="plugins"]');
+      const w = page.locator('[data-widget="plugins"]');
       const manage = await openDialog(w, 'Manage marketplaces');
       const row = marketplaceRow(manage, 'e8-scratch');
       const uninstalls = [{ id: PLUGIN, scope: 'user', projectPath: null }];
