@@ -51,7 +51,7 @@ test('the code pairs the browser and the place asked for shows; a wrong code say
   await expect(page.getByRole(BAR)).toBeVisible();
   await expect(page.getByRole('heading', { name: 'Pair this browser' })).toHaveCount(0);
 
-  await page.getByRole('link', { name: 'All sessions' }).click();
+  await page.getByRole(BAR).getByRole('link', { name: 'All sessions' }).click(); // the sheet's own empty state has one too
   await expect(page).toHaveURL(`${mawsd.url}/`);
   await expect(page.getByRole(BAR).getByText('This Mac')).toBeVisible();
   await expect(page.getByRole(BAR).getByRole('button', { name: 'Show questions' })).toHaveCount(0); // a session's sheet only

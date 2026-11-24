@@ -25,7 +25,7 @@ export async function violationsOf(context: BrowserContext): Promise<() => Promi
   await context.addInitScript(() => {
     const seen: string[] = [];
     (globalThis as { __violations?: string[] }).__violations = seen;
-    document.addEventListener('securitypolicyviolation', (event) => seen.push(`${event.violatedDirective} ${event.blockedURI}`));
+    document.addEventListener('securitypolicyviolation', (event) => seen.push(`${event.violatedDirective} ${event.blockedURI} ${event.sourceFile}:${event.lineNumber}:${event.columnNumber}`));
   });
   return async () => (await Promise.all(context.pages().map((page) => page.evaluate(() => (globalThis as { __violations?: string[] }).__violations ?? []).catch(() => [])))).flat();
 }

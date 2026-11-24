@@ -56,10 +56,10 @@ export const VIEWS = {
   noSession: 'No open questions for this session', // frame 3: a session with no record, or a path that names none
 } as const;
 
-// The outline (F9)
+// The outline (F9, and its settlement once drawn)
 export const OUTLINE = {
-  name: 'Questions', // the panel's accessible name
-  count: (n: number) => `${n} ${n === 1 ? 'question' : 'questions'}`,
-  drafted: (n: number) => `${n} drafted`,
+  name: 'Questions', // this child's own: the panel's accessible name, never drawn
+  count: (n: number) => `${n} ${n === 1 ? 'question' : 'questions'}`, // "8 questions", "1 question"
+  drafted: (n: number) => `${n} drafted`, // after the count: "8 questions · 3 drafted"
   queued: 'queued', // before a stopped session's queued answer
 } as const;

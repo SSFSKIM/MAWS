@@ -5,6 +5,7 @@
 // rebound to loopback gets the Host refusal and no shell.
 import type { CDPSession, Page } from '@playwright/test';
 import { BAR, expect, storedKeys, test } from './fixtures';
+import { inboxBytes, REFERENCES, seedRecord, uploadsOf } from './records';
 import { secondOrigin, type Mawsd } from './rig';
 
 const STRANGERS = ['sameName', 'otherName'] as const;
@@ -80,6 +81,39 @@ for (const name of STRANGERS) {
       await pairWith(await other.newPage(), mawsd.url, code);
       await other.close();
       expect(await mawsd.browsers()).toHaveLength(2);
+    } finally {
+      await stranger.close();
+    }
+  });
+}
+
+for (const name of STRANGERS) {
+  test(`a stranger under ${name === 'sameName' ? 'the page’s own name on another port' : 'localhost'}, at a sheet’s data, is refused on the wire and changes nothing of the record (M4)`, async ({ page, context, mawsd }) => {
+    seedRecord(mawsd.home, 'references');
+    const stranger = await secondOrigin();
+    try {
+      await page.goto(`${mawsd.url}/s/${REFERENCES}`);
+      await mawsd.pair(page);
+      await expect(page.locator('[data-sheet-question]').first()).toBeVisible({ timeout: 20_000 });
+      const inbox = inboxBytes(mawsd.home, REFERENCES);
+      const uploads = uploadsOf(mawsd.home, REFERENCES);
+      const at = await context.newPage();
+      const { seen, sent } = await wire(at, mawsd.url);
+      await at.goto(stranger.pageFor(stranger[name], mawsd.url, undefined, REFERENCES));
+      await expect(at.locator('body[data-done="1"]')).toBeAttached({ timeout: 20_000 });
+      await at.waitForTimeout(500);
+      const sheet = `/api/sheets/${REFERENCES}`;
+      // a read with no credential: 401; one with a credential it made up never gets past its preflight
+      // (the browser names both reads; only the first reached mawsd, and was answered 401)
+      expect(sent().filter((entry) => entry.path === sheet && entry.method === 'GET')).toHaveLength(2);
+      expect(seen.filter((entry) => entry.path === sheet && entry.method === 'GET')).toEqual([{ method: 'GET', path: sheet, status: 401 }]);
+      for (const preflight of seen.filter((entry) => entry.path === sheet && entry.method === 'OPTIONS')) expect(preflight.status).toBe(405);
+      // a Send's lines and an image's bytes: 403, their Origin is not the page's
+      expect(seen.filter((entry) => entry.path === `${sheet}/put`)).toEqual([{ method: 'POST', path: `${sheet}/put`, status: 403 }]);
+      expect(seen.filter((entry) => entry.path === `${sheet}/uploads`)).toEqual([{ method: 'POST', path: `${sheet}/uploads`, status: 403 }]);
+      // and the record is what it was
+      expect(inboxBytes(mawsd.home, REFERENCES)).toBe(inbox);
+      expect(uploadsOf(mawsd.home, REFERENCES)).toEqual(uploads);
     } finally {
       await stranger.close();
     }

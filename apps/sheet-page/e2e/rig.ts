@@ -42,7 +42,8 @@ export interface Mawsd {
   port: number;
   home: string; // the scratch sminos home
   profile: string; // the scratch profile
-  scratch: string; // the scratch root, for a test's own files (a barrier's)
+  scratch: string; // the scratch root, for a test's own files
+  release(): void; // with `barrier`: the stand-in door's held puts go on (C3's §E, FAKE_SMINOS_BARRIER)
   cli(...args: string[]): Promise<{ code: number; out: string }>;
   pair(page: Page): Promise<void>; // `mawsd sheet pair`, its code typed into the page's pairing screen, and the frame shown
   browsers(): Promise<{ id: string; label: string }[]>; // `mawsd sheet browsers --json`
@@ -59,7 +60,7 @@ export const until = async (check: () => boolean | Promise<boolean>, ms: number,
   throw new Error(`timed out waiting for ${what}`);
 };
 
-export async function startMawsd(options: { records?: string[]; sessions?: SeededSession[]; env?: Record<string, string> } = {}): Promise<Mawsd> {
+export async function startMawsd(options: { records?: string[]; sessions?: SeededSession[]; barrier?: boolean; env?: Record<string, string> } = {}): Promise<Mawsd> {
   if (!existsSync(MAWSD)) throw new Error(`${MAWSD} is not built (pnpm -w run build:main-preload)`);
   if (!existsSync(join(ROOT, 'out/sheet-page/index.html'))) throw new Error('out/sheet-page is not built (vite build)');
   const scratch = realpathSync(mkdtempSync(join(tmpdir(), 'sheet-rig-'))); // the index keeps a project's real directory
@@ -78,6 +79,7 @@ export async function startMawsd(options: { records?: string[]; sessions?: Seede
     MAWS_E2E: '1', // under which sminosHome refuses the real home, and the door's locator reads MAWS_SMINOS_CLI alone
     MAWS_ENGINE_REPLAY: '1', // no engine runs
     MAWS_SMINOS_CLI: FAKE_SMINOS, // C3's stand-in door (§E): no test reaches an installed sminos
+    ...(options.barrier && { FAKE_SMINOS_BARRIER: join(scratch, 'barrier') }), // a put waits until the file exists
   };
   for (const name of options.records ?? []) seedRecord(dirs.sminos, name);
   const holders: ChildProcess[] = [];
@@ -155,6 +157,7 @@ export async function startMawsd(options: { records?: string[]; sessions?: Seede
     home: dirs.sminos,
     profile: dirs.profile,
     scratch,
+    release: () => writeFileSync(join(scratch, 'barrier'), ''),
     cli,
     async pair(page) {
       const { code, out } = await cli('sheet', 'pair');

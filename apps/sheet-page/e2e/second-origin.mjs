@@ -48,7 +48,9 @@ export const closeAll = (servers) =>
   ).then(() => undefined);
 
 // The stranger's script. Parameters in its own address: `target`, the page's origin; `code`, a live pairing code where
-// one is had. Each try is one `<li data-try>`; `data-done` on the body once all have run.
+// one is had; `session`, a session whose data it then tries for (M4): a read with no credential and one with a
+// credential it made up, a Send's lines and an image's bytes. Each try is one `<li data-try>`; `data-done` on the body
+// once all have run.
 const STRANGER_SCRIPT = String.raw`
 const params = new URLSearchParams(location.search);
 const target = params.get('target');
@@ -78,6 +80,16 @@ const opaque = (promise) => promise.then((r) => 'answered, unreadable here (' + 
   frame.src = target + '/';
   await new Promise((done) => { frame.onload = done; document.body.append(frame); setTimeout(done, 3000); });
   said('frame', 'framed; whether it shows the page is the browser\'s to say');
+  const session = params.get('session');
+  if (session) {
+    const sheet = target + '/api/sheets/' + encodeURIComponent(session);
+    said('read', await opaque(fetch(sheet, { mode: 'no-cors' })));
+    said('read with a made-up credential', await fetch(sheet, { headers: { Authorization: 'Bearer ' + 'A'.repeat(43) } }).then(() => 'read it', (e) => 'refused: ' + e.message));
+    const line = { v: 1, key: 'page-strangerstrangerstranger00', kind: 'dismiss', id: 'q1', by: 'page' };
+    said('put', await opaque(fetch(sheet + '/put', { method: 'POST', mode: 'no-cors', headers: { 'Content-Type': 'text/plain' }, body: JSON.stringify({ lines: [line] }) })));
+    const png = Uint8Array.from(atob('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=='), (c) => c.charCodeAt(0));
+    said('upload', await opaque(fetch(sheet + '/uploads', { method: 'POST', mode: 'no-cors', body: new Blob([png], { type: 'image/png' }) })));
+  }
   document.body.dataset.done = '1';
 })();
 `;
@@ -92,7 +104,7 @@ const strangerPage = (target, code) => `<!doctype html>
 <p><a id="to-fragment" href="${escaped(`${target}/#x`)}">The page, with a fragment</a> · <a id="to-query" href="${escaped(`${target}/?code=${encodeURIComponent(code || 'AAAA-AAAA')}`)}">The page, with a code in its query</a></p>
 <script src="/stranger.js"></script></body></html>`;
 
-// Answers { port, sameName, otherName, pageFor(origin, target, code?), close() }
+// Answers { port, sameName, otherName, pageFor(origin, target, code?, session?), close() }
 export async function secondOrigin() {
   const make = () =>
     createServer((req, res) => {
@@ -106,7 +118,7 @@ export async function secondOrigin() {
     port,
     sameName: `http://sheet.localhost:${port}`,
     otherName: `http://localhost:${port}`,
-    pageFor: (origin, target, code) => `${origin}/?target=${encodeURIComponent(target)}${code ? `&code=${encodeURIComponent(code)}` : ''}`,
+    pageFor: (origin, target, code, session) => `${origin}/?target=${encodeURIComponent(target)}${code ? `&code=${encodeURIComponent(code)}` : ''}${session ? `&session=${encodeURIComponent(session)}` : ''}`,
     close: () => closeAll(servers),
   };
 }

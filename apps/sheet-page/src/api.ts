@@ -42,6 +42,7 @@ function base64(bytes: Uint8Array): string {
 
 export interface ApiDeps {
   proven(): StoredPairing | null; // the pairing the live connection proved, read at each request
+  leaving?(): boolean; // the page is going (a reload, a close): a Send cut off by it settles nothing
   fetch?: typeof fetch;
 }
 
@@ -116,6 +117,9 @@ export function createApi(deps: ApiDeps): Api {
       try {
         response = await authorized(`${sheetPath(session)}/put`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ lines }), signal: AbortSignal.timeout(PUT_WAIT_MS) });
       } catch {
+        // A request the page's own going cut off is not a failure to record: its stored Send stays in flight, and the
+        // next window offers it again past the door's limit (availability.ts), under the same keys
+        if (deps.leaving?.()) return new Promise<SheetPutResult>(() => {});
         return failed(SEND.noAnswer);
       }
       if (response === 'unproven') return failed(SEND.notConnected);

@@ -1,0 +1,121 @@
+// Two tabs of one browser share one memory (M4; T19): a draft typed in one is in a second opened on the same address;
+// two tabs editing different cards do not undo each other, however late each hears of the other; a Send's stored entry
+// keeps its keys through the other tab's writes, and a reload sends those same keys again; unpairing in one shows the
+// pairing screen in the other.
+import type { BrowserContext, Page } from '@playwright/test';
+import { expect, test } from './fixtures';
+import { inboxOf, question, questionRecord } from './records';
+import { startMawsd, until, type Mawsd } from './rig';
+
+const S = '5eed0000-0000-4000-8000-0000000000e1';
+const card = (page: Page, id: string) => page.locator(`[data-sheet-question="${id}"]`);
+const foot = (page: Page) => page.locator('[data-sheet-foot]');
+const field = (page: Page, id: string) => card(page, id).getByLabel(`Your answer to ${id}`);
+
+// Each page of the context can hold back the storage events it is told of, and let them through later in order
+async function holdableStorage(context: BrowserContext) {
+  await context.addInitScript(() => {
+    const queue: [EventListenerOrEventListenerObject, Event][] = [];
+    const wrapped = new WeakMap<object, EventListener>();
+    let holding = false;
+    const call = (listener: EventListenerOrEventListenerObject, event: Event) => (typeof listener === 'function' ? listener.call(window, event) : listener.handleEvent(event));
+    (globalThis as { __holdStorage?: (on: boolean) => void }).__holdStorage = (on) => {
+      holding = on;
+      if (!on) for (const [listener, event] of queue.splice(0)) call(listener, event);
+    };
+    const add = window.addEventListener.bind(window);
+    const remove = window.removeEventListener.bind(window);
+    window.addEventListener = ((type: string, listener: EventListenerOrEventListenerObject, options?: boolean | AddEventListenerOptions) => {
+      if (type !== 'storage' || listener === null) return add(type, listener, options);
+      const through: EventListener = (event) => (holding ? void queue.push([listener, event]) : call(listener, event));
+      wrapped.set(listener, through);
+      return add(type, through, options);
+    }) as typeof window.addEventListener;
+    window.removeEventListener = ((type: string, listener: EventListenerOrEventListenerObject, options?: boolean | EventListenerOptions) =>
+      remove(type, (type === 'storage' && wrapped.get(listener)) || listener, options)) as typeof window.removeEventListener;
+  });
+}
+const hold = (page: Page, on: boolean) => page.evaluate((value) => (globalThis as { __holdStorage?: (on: boolean) => void }).__holdStorage!(value), on);
+const sendEntries = (page: Page) => page.evaluate((session) => Object.entries(localStorage).filter(([key]) => key.startsWith(`maws.sheet.send.${session}.`)), S);
+
+async function twoTabs(context: BrowserContext, page: Page, mawsd: Mawsd): Promise<[Page, Page]> {
+  questionRecord(mawsd.home, S, [question(1), question(2), question(3)]);
+  await page.goto(`${mawsd.url}/s/${S}`);
+  await mawsd.pair(page);
+  await expect(card(page, 'q1')).toBeVisible();
+  const second = await context.newPage();
+  await second.goto(`${mawsd.url}/s/${S}`);
+  await expect(card(second, 'q1')).toBeVisible({ timeout: 20_000 });
+  return [page, second];
+}
+
+test('a draft typed in one tab is in a second opened on the same address', async ({ page, context, mawsd }) => {
+  questionRecord(mawsd.home, S, [question(1), question(2)]);
+  await page.goto(`${mawsd.url}/s/${S}`);
+  await mawsd.pair(page);
+  await field(page, 'q2').fill('As the harbour office does it');
+  const second = await context.newPage();
+  await second.goto(`${mawsd.url}/s/${S}`);
+  await expect(field(second, 'q2')).toHaveValue('As the harbour office does it', { timeout: 20_000 });
+});
+
+test('two tabs typing on different cards, each hearing of the other late, both keep both, after a reload too', async ({ page, context, mawsd }) => {
+  await holdableStorage(context);
+  const [first, second] = await twoTabs(context, page, mawsd);
+  await hold(first, true);
+  await hold(second, true);
+  await field(first, 'q1').fill('typed in the first');
+  await field(second, 'q2').fill('typed in the second');
+  await hold(first, false);
+  await hold(second, false);
+  for (const tab of [first, second]) {
+    await expect(field(tab, 'q1')).toHaveValue('typed in the first');
+    await expect(field(tab, 'q2')).toHaveValue('typed in the second');
+  }
+  await first.reload();
+  await expect(field(first, 'q1')).toHaveValue('typed in the first', { timeout: 20_000 });
+  await expect(field(first, 'q2')).toHaveValue('typed in the second');
+});
+
+test('a Send held at the barrier keeps its stored keys through the other tab’s writes, and a reload sends those same keys again', async ({ browser }) => {
+  const mawsd = await startMawsd({ barrier: true });
+  const context = await browser.newContext();
+  try {
+    await holdableStorage(context);
+    const [first, second] = await twoTabs(context, await context.newPage(), mawsd);
+    await hold(second, true); // the second tab's picture stays from before the press
+    await field(first, 'q1').fill('sent from the first');
+    await foot(first).getByRole('button', { name: 'Send 1 answer' }).click();
+    await until(async () => (await sendEntries(first)).length === 1, 10_000, 'the Send’s entry, at its press');
+    const [[key, entry]] = await sendEntries(first);
+    const keys = (JSON.parse(entry) as { lines: { key: string }[] }).lines.map((line) => line.key);
+
+    await field(second, 'q3').fill('typed in the second'); // a write against a picture from before the press
+    await second.waitForTimeout(500);
+    expect(await sendEntries(first)).toEqual([[key, entry]]); // untouched: only its own end removes it
+
+    await first.clock.install();
+    await first.reload();
+    await expect(foot(first)).toHaveText('Your answers are being sent.', { timeout: 20_000 }); // not this window's: younger than 35 s
+    const again = first.waitForRequest((request) => request.url().endsWith('/put'));
+    await first.clock.fastForward(36_000);
+    await foot(first).getByRole('button', { name: 'Send again' }).click();
+    const sent = (await again).postDataJSON() as { lines: { key: string }[] };
+    expect(sent.lines.map((line) => line.key)).toEqual(keys); // the same act, for the door
+    mawsd.release();
+    await until(() => inboxOf(mawsd.home, S).length >= 1, 20_000, 'the lines');
+    for (const line of inboxOf(mawsd.home, S)) expect(keys).toContain(line.key);
+  } finally {
+    await context.close();
+    await mawsd.dispose();
+  }
+});
+
+test('unpairing in one tab shows the pairing screen in the other', async ({ page, context, mawsd }) => {
+  const [first, second] = await twoTabs(context, page, mawsd);
+  await first.getByRole('banner').getByRole('button', { name: 'Menu' }).click();
+  await first.getByRole('menuitem', { name: 'Unpair this browser' }).click();
+  await expect(first.getByRole('heading', { name: 'Pair this browser' })).toBeVisible();
+  await expect(second.getByRole('heading', { name: 'Pair this browser' })).toBeVisible();
+  await expect(second.getByTestId('unpaired')).toHaveText('This browser is not paired.');
+});

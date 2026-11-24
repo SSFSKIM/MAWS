@@ -143,6 +143,17 @@ describe('the sheet’s requests (§N)', () => {
     expect(await proven(json(200, refused)).api.put(S, lines)).toEqual(refused);
   });
 
+  it('settles nothing of a put cut off because the page is going (a reload): its stored Send stays in flight for the next', async () => {
+    let leaving = false;
+    const fetch = vi.fn(async () => {
+      leaving = true; // the page went while the request was out
+      throw new DOMException('The user aborted a request.', 'AbortError');
+    });
+    const api = createApi({ proven: () => PAIRING, fetch, leaving: () => leaving });
+    const answer = await Promise.race([api.put(S, []), new Promise((done) => setTimeout(() => done('unsettled'), 50))]);
+    expect(answer).toBe('unsettled');
+  });
+
   it('answers a put that failed, a 5xx or a network failure, as failed, so the sheet offers the same lines again', async () => {
     expect(await proven(json(503, { why: 'refused' })).api.put(S, [])).toEqual({ ok: false, why: 'failed', message: expect.any(String) });
     expect(await proven(async () => Promise.reject(new TypeError('Failed to fetch'))).api.put(S, [])).toEqual({ ok: false, why: 'failed', message: expect.any(String) });

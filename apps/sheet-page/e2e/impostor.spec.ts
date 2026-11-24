@@ -40,7 +40,7 @@ for (const play of PLAYS) {
     expect(await mawsd.connections()).toBe(1);
     // what M4's memory keeps beside the credential: a refusal deletes neither (T19)
     const draft = `maws.sheet.draft.${SESSION}.q1`;
-    await page.evaluate((key) => localStorage.setItem(key, JSON.stringify({ v: 1, touchedAt: 1, text: 'kept' })), draft);
+    await page.evaluate((key) => localStorage.setItem(key, JSON.stringify({ v: 1, touchedAt: Date.now(), draft: { revision: 1, picks: [], text: 'kept', images: [] } })), draft);
     const recorded = play === 'replay' ? await mawsd.proofFor(pairing.id) : undefined;
     await mawsd.stop();
     const fake = await impostor(mawsd.port, play, recorded);
