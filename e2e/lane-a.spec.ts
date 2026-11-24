@@ -1594,7 +1594,7 @@ test.describe('lane A: a terminal session driven through its bridge', () => {
     await expect(async () => {
       const line = main(page).locator('.transcript-divider .transcript-disclosure').last();
       if ((await line.getAttribute('aria-expanded')) === 'false') await line.click();
-      await expect(run).toHaveAccessibleName('Ran a command', { timeout: 1_000 });
+      await expect(run).toBeVisible({ timeout: 1_000 });
     }, 'the newest turn opened to the retry’s run').toPass();
     if ((await run.getAttribute('aria-expanded')) === 'false') await run.click();
     await expect(cell).toBeVisible();

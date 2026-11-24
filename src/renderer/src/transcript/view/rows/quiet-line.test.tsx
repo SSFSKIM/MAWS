@@ -121,6 +121,19 @@ describe('each case of the table, as a line', () => {
     expect(indent(alone.container)).toBe('0px'); // a row at its own time stands at the margin
   });
 
+  // The pair review of 2026-11-24: with no box whose corner held it, Raw opens the opened result's first row, under the
+  // label, instead of floating at the column's far edge.
+  it('cua_repl js opened: Raw at the start of its result, under the label', async () => {
+    const store = await opened(everyCase());
+    const view = renderRow(cellRow(store.rows(), 'js'), { storeKey: store.key });
+    fireEvent.click(view.container.querySelector('.transcript-cell-line')!);
+    view.rerenderRow(cellRow(store.rows(), 'js'));
+    const heading = view.container.querySelector<HTMLElement>('.transcript-mcp > .transcript-detail-heading')!;
+    expect(heading.querySelector('button')?.textContent).toBe('Raw');
+    expect(getComputedStyle(heading).justifyContent).toBe('flex-start');
+    expect(getComputedStyle(heading.closest('.transcript-cell-detail')!).marginLeft).toBe('19px');
+  });
+
   it('an image result: its thumbnail under the line at rest, gone while the line is open', async () => {
     const store = await opened(everyCase());
     const view = renderRow(cellRow(store.rows(), 'shot'), { storeKey: store.key });
@@ -134,20 +147,26 @@ describe('each case of the table, as a line', () => {
     expect(view.container.querySelector('.transcript-cell-detail img.transcript-detail-image')).not.toBeNull();
   });
 
-  it('a run of one: its run’s line, “Ran a command”, opening onto its call as any run does', async () => {
+  // The owner's call of 2026-11-24: a run of one reads its call's description (the run's words only where it has none,
+  // work.test.tsx's "Ran a command"), and one press opens it straight onto the command and its result, with no block.
+  it('a run of one: a run’s line reading its call’s description, one press opening onto its command and result', async () => {
     const store = await opened(everyCase());
     const row = cellRow(store.rows(), 'one');
     expect(row.kind).toBe('cell'); // the rule that puts it apart is unchanged
     const view = renderRow(row, { storeKey: store.key });
-    const line = screen.getByRole('button', { name: 'Ran a command' });
+    const line = screen.getByRole('button', { name: 'Listed the notes' });
     expect(line.className).toBe('transcript-run-line');
     expect(line.getAttribute('aria-expanded')).toBe('false');
     expect(view.container.querySelector('[data-cell-id]')).toBeNull();
     expect(boxed(view.container)).toEqual([]);
     fireEvent.click(line);
     view.rerenderRow(cellRow(store.rows(), 'one'));
-    expect(screen.getByRole('button', { name: 'Ran a command' }).getAttribute('aria-expanded')).toBe('true');
-    expect(view.container.querySelector(`[data-cell-id="${cellId.tool(tool('one'))}"] > .transcript-cell-line`)?.textContent).toBe('Listed the notes');
+    expect(screen.getByRole('button', { name: 'Listed the notes' }).getAttribute('aria-expanded')).toBe('true');
+    const call = view.container.querySelector<HTMLElement>(`[data-cell-id="${cellId.tool(tool('one'))}"][data-run-of-one]`)!;
+    expect(call.querySelector('.transcript-shell-command')?.textContent).toBe('$ ls notes');
+    expect(call.textContent).toContain('alpha.txt');
+    expect([view.container.querySelector('.transcript-cell-line'), view.container.querySelector('.transcript-tool-block')]).toEqual([null, null]);
+    expect(getComputedStyle(call.querySelector('.transcript-cell-detail')!).marginLeft).toBe('19px'); // under the label
   });
 
   it('running: the running ring in the mark’s place on a line with no box', async () => {
@@ -176,6 +195,20 @@ it('a standalone line takes a run’s space: its size, its line, its space above
   const [line, runLine] = [cell.querySelector('.transcript-cell-line')!, group.querySelector('.transcript-run-line')!];
   expect(of(line, ['fontSize', 'lineHeight'])).toEqual(of(runLine, ['fontSize', 'lineHeight']));
   expect(getComputedStyle(line.querySelector('.transcript-chevron')!).marginLeft || '0px').toBe('0px'); // the chevron after the text, as a run's
+});
+
+// The pair review of 2026-11-24: a mark sits in a glyph slot every tool line has, a call's and a run's, marked or not, so
+// labels start at one x (a slot's 12 px and the line's 7 px gap: the 19 px a detail is indented by).
+// happy-dom computes no pseudo-element, so the slot is read from the stylesheet's rule and the gap from each line drawn.
+it('every tool line has a 12 px glyph slot and a 7 px gap, marked or not', async () => {
+  const rules = [...style.sheet!.cssRules].filter((rule): rule is CSSStyleRule => rule instanceof CSSStyleRule);
+  const slot = rules.find((rule) => rule.selectorText.replace(/\s+/g, ' ') === '.transcript-cell-line::before, .transcript-run-line::before')!;
+  expect([slot.style.content, slot.style.width, slot.style.flexGrow, slot.style.flexShrink]).toEqual(["''", '12px', '0', '0']); // every line, marked or not
+  const ring = rules.find((rule) => rule.selectorText.includes('.transcript-run-line[data-line="running"]::before') && rule.style.margin !== '')!;
+  expect(ring.style.margin).toBe('0px 1.5px'); // the 9 px ring centred in the slot
+  const store = await opened(everyCase());
+  const gapOf = (row: Row) => getComputedStyle(renderRow(row, { storeKey: store.key }).container.querySelector('.transcript-cell-line, .transcript-run-line')!).gap;
+  expect([gapOf(cellRow(store.rows(), 'fail')), gapOf(cellRow(store.rows(), 'js')), gapOf(cellRow(store.rows(), 'one')), gapOf(rowOf(store.rows(), 'group'))]).toEqual(['7px', '7px', '7px', '7px']);
 });
 
 // The whole transcript and the report view: no tool call draws a box at rest. (An opened run keeps its block of calls,
@@ -235,11 +268,13 @@ it('the denied call is still the jump target, and takes focus; a run of one open
     act(() => useTranscriptStore.getState().jumpTo(source.key!, target));
     await waitFor(() => expect(document.activeElement?.getAttribute('data-cell-id')).toBe(target));
     expect(document.activeElement?.hasAttribute('data-standalone')).toBe(true);
-    // and a jump to a run of one's call opens its run, as a jump into a run does, and lands on the call's line
+    // and a jump to a run of one's call opens its run, as a jump into a run does, and lands on the run's line
     const lone = cellId.tool(tool('one'));
     act(() => useTranscriptStore.getState().jumpTo(source.key!, lone));
-    await waitFor(() => expect(document.activeElement?.closest('[data-cell-id]')?.getAttribute('data-cell-id')).toBe(lone));
-    expect(document.querySelector(`[data-row-id="${lone}"] .transcript-run-line`)?.getAttribute('aria-expanded')).toBe('true');
+    const runLine = () => document.querySelector(`[data-row-id="${lone}"] .transcript-run-line`);
+    await waitFor(() => expect(document.activeElement).toBe(runLine()));
+    expect(runLine()?.getAttribute('aria-expanded')).toBe('true');
+    expect(document.querySelector(`[data-cell-id="${lone}"][data-run-of-one]`)).not.toBeNull();
   } finally {
     Object.defineProperty(HTMLElement.prototype, 'offsetHeight', offsetHeight);
   }

@@ -897,10 +897,9 @@ test('U4a, Send now: on a next-step row it writes the engine’s send-now reques
   await expect(transcript).not.toContainText('You stopped after');
   const toggle = transcript.locator('button[aria-expanded]').filter({ hasText: 'Ended for your message after' });
   if ((await toggle.count()) > 0 && (await toggle.first().getAttribute('aria-expanded')) === 'false') await toggle.first().click();
-  // the command is its cut turn's one call, a run of one (board ticket 852): its line opened onto the command's row
+  // the command is its cut turn's one call, a run of one (board ticket 852), whose line reads its moved label
   const moved = transcript.locator('[data-row-id="cell:toolu_01Gx93c9u7cmXMhky2vE5tjp"] .transcript-run-line');
-  if ((await moved.getAttribute('aria-expanded')) === 'false') await moved.click();
-  await expect(transcript).toContainText(/Moved\s*`?node wait\.cjs a1 30`?\s*to the background after/);
+  await expect(moved).toHaveText(/Moved\s*`?node wait\.cjs a1 30`?\s*to the background after/);
   await expect(transcript).toContainText(message); // drawn once the engine started it
   await expect(list).toHaveCount(0);
   expect((await queueOf(page, id)).paused).toBe(false);
@@ -1259,12 +1258,12 @@ const toTop = (page: Page) =>
     element.dispatchEvent(new Event('scroll'));
   });
 
-// A call alone in its run (board ticket 852: a finished turn's lone call is a run of one, its cell mounted once its line
-// opens): its run's line, by the call's own row (never "the last run": an earlier one stands until the call's rows land),
-// and that line opened, read by the run's caption.
+// A call alone in its run (board ticket 852: a finished turn's lone call is a run of one, reading its description or the
+// run's words, its call's element mounted once its line opens): its run's line, by the call's own row (never "the last
+// run": an earlier one stands until the call's rows land), and that line opened.
 const runOfOne = (page: Page, toolUseId: string) => transcriptOf(page, 0).locator(`[data-row-id="cell:${toolUseId}"] .transcript-run-line`);
-async function openRunOfOne(page: Page, toolUseId: string, name: string): Promise<void> {
-  await expect(runOfOne(page, toolUseId)).toHaveAccessibleName(name);
+async function openRunOfOne(page: Page, toolUseId: string): Promise<void> {
+  await expect(runOfOne(page, toolUseId)).toBeVisible();
   if ((await runOfOne(page, toolUseId).getAttribute('aria-expanded')) === 'false') await runOfOne(page, toolUseId).click();
 }
 
@@ -1274,9 +1273,9 @@ async function inNewestTurn(page: Page, toolUseId: string): Promise<Locator> {
   await expect(async () => {
     const line = transcriptOf(page, 0).locator('.transcript-divider .transcript-disclosure').last();
     if ((await line.getAttribute('aria-expanded')) === 'false') await line.click();
-    await expect(runOfOne(page, toolUseId)).toHaveAccessibleName('Ran a command', { timeout: 1_000 });
+    await expect(runOfOne(page, toolUseId)).toBeVisible({ timeout: 1_000 });
   }, 'the newest turn opened to its run').toPass();
-  await openRunOfOne(page, toolUseId, 'Ran a command');
+  await openRunOfOne(page, toolUseId);
   const cell = cellIn(page, toolUseId);
   await expect(cell).toBeVisible();
   return cell;
@@ -1397,7 +1396,7 @@ test('U1c S3: a blocked command of two lines shows its subject whole above the b
   await count.click(); // the ended turn folded its work: the count opens it again
   await expect(labelOf(row)).toHaveText(/ · approved$/);
   await expect(row.getByRole('button', { name: APPROVE })).toHaveCount(0);
-  await openRunOfOne(page, 'toolu_01QgESWU7YNR7Dsx71taDieF', 'Ran a command'); // the retry, alone in its run
+  await openRunOfOne(page, 'toolu_01QgESWU7YNR7Dsx71taDieF'); // the retry, alone in its run
   await expect(cellIn(page, 'toolu_01QgESWU7YNR7Dsx71taDieF'), 'the retry ran').toHaveAttribute('data-status', 'done');
   await testInfo.attach('u1c-s3-approved', { body: await pane(page, 0).screenshot(), contentType: 'image/png' });
   expect(editor.consoleErrors()).toEqual([]);

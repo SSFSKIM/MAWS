@@ -379,7 +379,7 @@ button.transcript-chip:hover { background: var(--bg-hover); }
    header's did; it reads a running call beside the running ring a call's row draws, and a waiting one in the tone of
    the attention glyph it leads with (ATTENTION_HEADINGS: a permission's is the warning tone, the only kind that takes
    the line). */
-.transcript-run-line { display: inline-flex; align-items: center; gap: 6px; max-width: 100%; min-width: 0; color: var(--fg-muted); font-size: var(--text-ui); line-height: 24px; text-align: left; }
+.transcript-run-line { display: inline-flex; align-items: center; gap: 7px; max-width: 100%; min-width: 0; color: var(--fg-muted); font-size: var(--text-ui); line-height: 24px; text-align: left; }
 .transcript-run-line:hover { color: var(--fg); }
 .transcript-run-label { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .transcript-run-line > .transcript-counts { flex: none; }
@@ -388,7 +388,7 @@ button.transcript-chip:hover { background: var(--bg-hover); }
 .transcript-run-line[data-line="running"] { color: var(--fg); }
 .transcript-run-line[data-line="running"]::before { flex: none; }
 .transcript-run-line[data-tone="warning"], .transcript-run-line[data-tone="warning"]:hover { color: var(--warning); }
-.transcript-run-glyph { flex: none; }
+.transcript-run-glyph { flex: none; width: 12px; text-align: center; } /* in the glyph slot (board ticket 852) */
 .transcript :where(code) { font-family: var(--font-mono); font-size: 0.92em; }
 
 /* Cell: the one line, then its detail */
@@ -425,8 +425,11 @@ button.transcript-chip:hover { background: var(--bg-hover); }
 .transcript-cell-reason { margin-left: 3px; color: var(--fg-faint); }
 .transcript-file-verb { color: var(--fg-muted); }
 .transcript-file-target { color: var(--fg); }
-/* The status mark is drawn here, so the line's text is its label alone. */
-.transcript-cell-line::before { flex: none; width: 12px; text-align: center; }
+/* The status mark is drawn here, so the line's text is its label alone. Board ticket 852: every tool line, a call's and a
+   run's, has this 12 px glyph slot, marked or not, so their labels start at one x and a detail's 19 px indent meets
+   them; a run's waiting glyph takes the slot as its own element. */
+.transcript-cell-line::before, .transcript-run-line::before { content: ''; flex: none; width: 12px; text-align: center; }
+.transcript-run-line[data-line="waiting"]::before { content: none; }
 /* The running ring, shared with E4c's browser row (its own rule below adds the row's flex and margin) and a run's line
    while it reads a running call (UX wave U2). */
 .transcript-cell[data-status="running"] > .transcript-cell-line::before,
@@ -441,6 +444,7 @@ button.transcript-chip:hover { background: var(--bg-hover); }
   border-radius: 50%;
   animation: transcript-spin 1s linear infinite;
 }
+.transcript-cell[data-status="running"] > .transcript-cell-line::before, .transcript-run-line[data-line="running"]::before { margin: 0 1.5px; } /* the 9 px ring centred in the 12 px slot */
 .transcript-cell[data-status="error"] > .transcript-cell-line::before { content: '✕'; color: var(--danger); }
 .transcript-cell[data-status="denied"] > .transcript-cell-line::before { content: '⊘'; }
 .transcript-cell[data-status="stopped"] > .transcript-cell-line::before { content: '■'; font-size: 0.7em; }
@@ -460,6 +464,9 @@ button.transcript-chip:hover { background: var(--bg-hover); }
 .transcript-cell-detail { display: flex; flex-direction: column; gap: 6px; margin: 2px 0 8px 19px; font-size: var(--text-ui-sm); }
 .transcript-detail-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; color: var(--fg-muted); }
 .transcript-mcp > .transcript-detail-heading { justify-content: flex-end; } /* the word cut (T31): Raw alone, where it stood */
+/* board ticket 852: under a lone line, with no box whose corner held it, Raw opens the result's first row, under the label */
+:is(.transcript-cell[data-standalone], .transcript-cell[data-run-of-one]) .transcript-mcp > .transcript-detail-heading { justify-content: flex-start; }
+:is(.transcript-cell[data-standalone], .transcript-cell[data-run-of-one]) .transcript-mcp > .transcript-detail-heading button { margin-left: -6px; }
 .transcript-detail-heading button { padding: 2px 6px; border-radius: var(--radius-sm); color: var(--fg-muted); }
 .transcript-detail-heading button[aria-pressed="true"] { background: var(--bg-active); color: var(--fg); }
 .transcript-detail-label { color: var(--fg-muted); }
@@ -833,7 +840,7 @@ button.transcript-line-words:focus-visible { outline-width: 2px; outline-style: 
    permission draws the waiting glyph in place of its status mark, and its glyph and label in the warning tone, as its
    run's line does. The form of a waiting row, and the capsule's form under its top line. */
 .transcript-cell[data-waiting] > .transcript-cell-line { color: var(--warning); }
-.transcript-cell[data-waiting] > .transcript-cell-line::before { content: '◐'; width: 12px; height: auto; border: 0; border-radius: 0; animation: none; color: var(--warning); }
+.transcript-cell[data-waiting] > .transcript-cell-line::before { content: '◐'; width: 12px; height: auto; margin: 0; border: 0; border-radius: 0; animation: none; color: var(--warning); }
 .transcript-waiting-form { margin: 4px 0 10px; }
 .transcript-ask-form { padding: 8px 12px; border-top: 1px solid var(--border); }
 /* M5 (Interfaces §D, the jump button; the architect's ruling A1): while a waiting request is out of view the round button

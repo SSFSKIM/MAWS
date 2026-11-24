@@ -270,11 +270,8 @@ test('a marked response is drawn as its message while it streams, before its row
   const uuid = answerRow(fm);
   fm.step(fm.recording.steps.findIndex(isAnswerChunk(uuid, fm)) - fm.played); // up to the answer's first chunk
   await expect(view).toContainText('Color→blue');
-  // nothing marked yet: the turn draws whole, its Bash call too, a run of one whose line opens onto the call
-  const bash = view.locator(`${BASH_ROW} .transcript-run-line`);
-  await expect(bash).toHaveText('Ran a command');
-  await bash.click();
-  await expect(view).toContainText("Wrote 'blue' to recorded.txt in the current directory");
+  // nothing marked yet: the turn draws whole, its Bash call too, a run of one reading the call's description
+  await expect(view.locator(`${BASH_ROW} .transcript-run-line`)).toHaveText("Wrote 'blue' to recorded.txt in the current directory");
   await expect(records(view)).toHaveCount(0);
 
   for (let i = 0; i < 40 && !(await streamingRows(view).allTextContents()).join('').includes(ANSWER); i++) {

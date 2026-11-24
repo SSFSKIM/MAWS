@@ -8,6 +8,7 @@
 import type { AttentionItem } from '@shared/graph/attention';
 import type { ToolUseId } from '@shared/graph/ids';
 import { caption, captionParts, finishedLines, stepsOfCells } from './caption';
+import { descriptionLabel } from './copy';
 import { thinkingCell } from './cells';
 import { rowId } from './keys';
 import type { TranscriptUi, TurnState } from './reduce';
@@ -120,7 +121,16 @@ function runRow(first: CellId, turnId: TurnId | null, cells: Cell[], active: boo
 // the run's site by). Which calls stand alone is unchanged; only how this one is drawn.
 export const drawsAsRun = (row: RowOf<'cell'>): boolean => row.classification.groupable && row.status !== 'error';
 export const runOfOneId = (row: RowOf<'cell'>): RowId => rowId.group(row.id);
-export const runOfOne = (row: RowOf<'cell'>): RowOf<'group'> => runRow(row.id, row.turnId, [row], false, row.runExpanded === true);
+// The owner's call of 2026-11-24: a run of one reads its call's description ("Ran the linter"), inflected as its call's
+// own line reads one; the run's usual words only where the call has none. A call the engine moved to the background reads
+// its moved label first, as its own line does (UX wave U4a, decision 33).
+export function runOfOne(row: RowOf<'cell'>): RowOf<'group'> {
+  const run = runRow(row.id, row.turnId, [row], false, row.runExpanded === true);
+  if (row.detail.kind === 'shell' && row.moved === true) return { ...run, summary: row.label };
+  const description = row.detail.kind === 'shell' ? row.detail.description?.trim().split(/\r?\n/, 1)[0] : undefined;
+  if (!description) return run;
+  return { ...run, summary: descriptionLabel(description, row.status) }; // one call's caption has no count to fold
+}
 
 export const iconOf = (cells: Cell[]): ToolCategory => {
   const present = new Set(cells.filter((cell) => cell.toolName !== 'thinking').map((cell) => cell.category));

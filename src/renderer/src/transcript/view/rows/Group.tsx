@@ -26,7 +26,8 @@ type DrawCell = (cell: Cell) => ReactNode;
 
 const NO_CALLS: ReadonlyMap<ToolUseId, AttentionItem> = new Map();
 
-export function GroupRow({ row, renderCell }: { row: GroupRowData; renderCell?: (cell: Cell) => ReactNode }) {
+// `renderBody` (board ticket 852): what the opened run draws in place of its blocks of calls, a run of one's call's detail
+export function GroupRow({ row, renderCell, renderBody }: { row: GroupRowData; renderCell?: (cell: Cell) => ReactNode; renderBody?: () => ReactNode }) {
   const { storeKey, variant, idPrefix } = useTranscriptContext();
   // decision 16: the waiting calls of the row's own session (a subagent's transcript reads its parent's list, which
   // keys the subagent's requests by its calls); a transcript with no session reads none
@@ -61,7 +62,7 @@ export function GroupRow({ row, renderCell }: { row: GroupRowData; renderCell?: 
           <Chevron />
         </button>
         <DisclosureBody open={row.expanded} id={bodyId} closed={live?.kind === 'thought' && <Thought segment={live} row={row} />}>
-          <RunBody row={row} draw={draw} />
+          {renderBody ? renderBody() : <RunBody row={row} draw={draw} />}
         </DisclosureBody>
       </div>
     </FilePathsContext>

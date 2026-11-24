@@ -52,9 +52,10 @@ function ToolResult({ input, drawnProps = input.props, turnId, enabled = true }:
 
 // A run of one: the `ToolGroup` site under the run's id, MAWS's own drawing in its engine slot (an answer with none
 // replaces it, as a run's does). Mounted while it asks nothing (a request waits on the call, the jump's target), so the
-// drawing keeps its element. Board ticket 852: drawn as a run is, its one line reading its run's caption and opening onto
-// its call's line, its open state its run's (a run's rewrite of that state opens it, as a run's does); a call the
-// classification put apart (a refusal, an image) or a failed one is its call's own line.
+// drawing keeps its element. Board ticket 852: drawn as a run is, its one line reading its run's caption, its open state
+// its run's (a run's rewrite of that state opens it, as a run's does); one press opens it straight onto its call's detail
+// (the command and its result), under the line with no block, the call's own element (`data-cell-id`, its status) holding
+// it. A call the classification put apart (a refusal, an image) or a failed one is its call's own line.
 const NO_GROUP = { calls: [], isActive: false, isExpanded: false };
 function RunOfOne({ cell, turnId, focusable, inputs }: { cell: Extract<Row, { kind: 'cell' }>; turnId: TurnId | null; focusable: boolean; inputs: ToolInput[] }) {
   const { appSessionId, state, turn, storeKey } = useTranscriptSurface({ turnId });
@@ -67,10 +68,15 @@ function RunOfOne({ cell, turnId, focusable, inputs }: { cell: Extract<Row, { ki
     const open = useTranscriptStore.getState().entries[storeKey]?.state.ui.expandedGroups.has(id) ?? false;
     if (!open) useTranscriptStore.getState().toggleGroup(storeKey, id);
   }, [run, storeKey, id]);
-  const line = (concealed: boolean, standalone: boolean) => <CellLine cell={cell} turnId={turnId} focusable={focusable && !concealed} standalone={standalone} renderDetail={inputs.length === 1 ? (drawn) => <ToolResult input={{ ...inputs[0], cell: drawn }} turnId={turnId} enabled={!concealed} /> : undefined} />;
+  const detail = (concealed: boolean) => (
+    <div className="transcript-cell" data-cell-id={cell.id} data-status={cell.status} data-expanded="" data-run-of-one="">
+      {inputs.length === 1 ? <ToolResult input={{ ...inputs[0], cell }} turnId={turnId} enabled={!concealed} /> : <CellDetailView cell={cell} turnId={turnId} />}
+    </div>
+  );
+  const line = (concealed: boolean) => <CellLine cell={cell} turnId={turnId} focusable={focusable && !concealed} standalone renderDetail={inputs.length === 1 ? (drawn) => <ToolResult input={{ ...inputs[0], cell: drawn }} turnId={turnId} enabled={!concealed} /> : undefined} />;
   return <SurfaceRow appSessionId={appSessionId} component="ToolGroup" instanceId={input?.instanceId ?? cell.id} props={input?.props ?? NO_GROUP} enabled={input !== null} onRewrite={expand} placeholder={<span className="text-fg-faint">…</span>}>
     {(_props, { concealed }) => run
-      ? <GroupRow row={runOfOne(cell)} renderCell={() => line(concealed, false)} />
-      : line(concealed, true)}
+      ? <GroupRow row={runOfOne(cell)} renderBody={() => detail(concealed)} />
+      : line(concealed)}
   </SurfaceRow>;
 }

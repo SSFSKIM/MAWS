@@ -5378,7 +5378,8 @@ test('the word cut’s M4: the mods’ rows, Customize’s plugin and skill rows
 //   report      (invented) the cases above in one turn between the person's messages: the to-human view;
 //   run, rvrun  started here, each on a replay journal of e2e/support/computer-use-replay.ts held while its `js` call
 //               runs (rvrun after a finished to-human turn, so the to-human view is in force over the running call).
-// Each scene opens its session afresh and sets the lines it needs open or closed; the started sessions are last.
+// Each scene opens its session afresh and sets the lines it needs open or closed; the started sessions are last. Two
+// scenes point at a run's line (a run of one, a run of two): its chevron shows only on pointing, focus or open.
 // Every check finds the call by its row (`data-row-id`) or its cell (`data-cell-id`) and the state both builds share
 // (`data-status`, `aria-expanded`), never by what the ticket added, so each holds on master's build too.
 // ======================================================================================================================
@@ -5511,7 +5512,7 @@ const TC_LIVE = {
   rvrun: { title: 'Keep an eye on the sign-in page', prompt: 'The deploy is out: check the sign-in page now.' },
 } as const;
 
-const TC_IDS = ['tc-failed', 'tc-failed-open', 'tc-auto-denied', 'tc-run-of-one-open', 'tc-rhythm', 'tc-denied-jump', 'tc-image-open', 'tc-image-recorded', 'tc-run-opened', 'tc-js-activity', 'tc-js-open', 'tc-rv-rest', 'tc-rv-open', 'tc-rv-open-js', 'tc-rv-denied-jump', 'tc-running-js', 'tc-rv-running'];
+const TC_IDS = ['tc-failed', 'tc-failed-open', 'tc-hover-run-of-one', 'tc-auto-denied', 'tc-run-of-one-open', 'tc-rhythm', 'tc-hover-run', 'tc-denied-jump', 'tc-image-open', 'tc-image-recorded', 'tc-run-opened', 'tc-js-activity', 'tc-js-open', 'tc-rv-rest', 'tc-rv-open', 'tc-rv-open-js', 'tc-rv-denied-jump', 'tc-running-js', 'tc-rv-running'];
 test('the tool card retired: lone calls failed, denied, a js call, an image, a run of one, running, in the transcript and the report view', async () => {
   test.setTimeout(900_000);
   if (!TC_IDS.some(wanted)) return;
@@ -5599,48 +5600,99 @@ test('the tool card retired: lone calls failed, denied, a js call, an image, a r
       await press(page, pane(page).locator(`a[href="#cell:${id}"]`).first(), 'the turn line’s denied count');
       await page.waitForTimeout(1500);
     };
+    // `target` brought near the list's top, as far as the list scrolls: seek stops where the target first shows (often at
+    // the bottom edge, under the message box), so what follows it would be left out of the picture
+    const place = async (target: Locator) => {
+      await seek(page, target);
+      const [at, list] = await Promise.all([target.boundingBox(), scroller(page).boundingBox()]);
+      if (at && list) {
+        await scroller(page).evaluate((el, dy) => {
+          el.scrollTop += dy;
+          el.dispatchEvent(new Event('scroll'));
+        }, at.y - list.y - 72);
+      }
+      await page.waitForTimeout(700);
+    };
+    // The check that `target` is in sight: the point near its start shows the target itself, so it is inside the window
+    // and nothing is drawn over it (the message box, a notice); a row the message box covers is still in the viewport
+    const seen = (target: Locator, what: string) => () =>
+      expect.poll(() => target.evaluate((el) => {
+        const r = el.getBoundingClientRect();
+        if (r.width === 0 || r.height === 0) return false;
+        const hit = document.elementFromPoint(r.left + Math.min(48, r.width / 2), r.top + Math.min(10, r.height / 2));
+        return hit !== null && el.contains(hit);
+      }), { message: `${what} in sight, nothing over it`, timeout: 3_000 }).toBe(true);
+    // A run's line (or, on master's build, a lone call's card line, the first disclosure of its row) pointed at, and the
+    // check that its chevron is drawn: lines and runs show it only on pointing, focus or open (a card always did)
+    const pointAt = async (line: Locator) => {
+      await letGo(page);
+      await line.hover();
+      await page.waitForTimeout(800);
+    };
+    const chevronShown = (line: Locator, what: string) => checks(pointedAt(line, what), () =>
+      expect.poll(() => line.locator('.transcript-chevron').first().evaluate((el) => getComputedStyle(el).opacity), { message: `the chevron of ${what} drawn`, timeout: 3_000 }).toBe('1'));
     const focused = (id: string) => () => expect.poll(() => cellOf(id).evaluate((el) => el === document.activeElement), { message: 'the denied call holds the keyboard', timeout: 3_000 }).toBe(true);
     const FOLDERS = ['transcript/view/cells', 'transcript/view/rows', 'transcript/surface', 'transcript/model'];
     const meta = (id: string, title: string, how: string, state: string, folders = FOLDERS) => tc({ id, title, how: `${how} (launch 15)`, state, folders });
+    const hoverMeta = (id: string, title: string, how: string, state: string) => tc({ id, title, how: `${how} (launch 15)`, state, folders: FOLDERS, hover: true });
 
     // ---- the transcript ---------------------------------------------------------------------------------------------
     const fail = tcTool('failed', 'Test');
+    const lint = tcTool('failed', 'Lint'); // a run of one whose call has a description
     await shot(page, meta('tc-failed', 'A lone command that failed, then a run of one', 'The session “failed” (invented), its turn opened', 'The failed command at rest: its mark and the error’s first line; under it the lone passing command (a run of one on the ticket’s build)'), async () => {
       await opened('failed');
       await turns(true);
-      await seek(page, cellOf(fail));
-    }, { check: checks(() => inView(cellOf(fail), 'the failed call'), () => status(fail, 'error'), () => inView(rowOf(`cell:${tcTool('failed', 'Lint')}`), 'the passing call after it')) });
+      await place(cellOf(fail));
+    }, { check: checks(seen(cellOf(fail), 'the failed call'), () => status(fail, 'error'), seen(rowOf(`cell:${lint}`), 'the passing call after it')) });
     await shot(page, meta('tc-failed-open', 'A lone failed command, opened', 'The session “failed” (invented), its turn opened, then the failed command’s line pressed', 'The whole error under the command’s line'), async () => {
       await opened('failed');
       await turns(true);
-      await seek(page, cellOf(fail));
+      await place(cellOf(fail));
       await openLine(fail);
-    }, { check: checks(() => inView(cellOf(fail), 'the failed call'), () => lineOpen(fail)) });
+    }, { check: checks(seen(cellOf(fail), 'the failed call'), () => lineOpen(fail)) });
+    // the passing command pointed at: on the ticket's build its run's line (the call's description, the chevron after
+    // it); on master's, the call's card line
+    const lintLine = () => rowOf(`cell:${lint}`).locator('button[aria-expanded]').first();
+    await shot(page, hoverMeta('tc-hover-run-of-one', 'A run of one pointed at', 'The session “failed” (invented), its turn opened, the pointer on the lone passing command (`pnpm lint`, described “Run the linter”)', 'The run of one’s line under the pointer with its chevron drawn (master: the call’s card, its chevron always drawn)'), async () => {
+      await opened('failed');
+      await turns(true);
+      await place(rowOf(`cell:${lint}`));
+      await pointAt(lintLine());
+    }, { check: checks(seen(rowOf(`cell:${lint}`), 'the lone passing command'), chevronShown(lintLine(), 'the lone passing command’s line')) });
 
     const auto = TC_RECORDED.autodenied;
     await shot(page, meta('tc-auto-denied', 'A command the auto mode classifier denied', 'The session “autodenied” (recorded, uxwave/u1c-t-idle-1), both turns opened', 'A lone Read (a run of one on the ticket’s build), the denied command with its reason, and the grant’s turn with the command run again'), async () => {
       await opened('autodenied');
       await turns(true);
-      await seek(page, cellOf(auto.denied));
-    }, { check: checks(() => inView(cellOf(auto.denied), 'the denied call'), () => status(auto.denied, 'denied'), () => inView(rowOf(`cell:${auto.read}`), 'the lone Read before it')) });
-    // the lone command of the grant's turn pressed: on the ticket's build its run's line, opening onto the call's line;
-    // on master's, the call's own card (the first disclosure of the call's row, on either build)
+      await place(rowOf(`cell:${auto.read}`));
+    }, { check: checks(seen(rowOf(`cell:${auto.read}`), 'the lone Read before it'), seen(cellOf(auto.denied), 'the denied call'), () => status(auto.denied, 'denied')) });
+    // the lone command of the grant's turn pressed: on the ticket's build its run's line, opening straight onto the call's
+    // detail (its command and result); on master's, the call's own card (the first disclosure of the call's row, on either
+    // build)
     const again = () => rowOf(`cell:${auto.again}`).locator('button[aria-expanded]').first();
-    await shot(page, meta('tc-run-of-one-open', 'A run of one, opened', 'The session “autodenied” (recorded, uxwave/u1c-t-idle-1), both turns opened, then the second turn’s lone command pressed', 'On the ticket’s build the run’s line open over the call’s line; on master the call’s card open'), async () => {
+    await shot(page, meta('tc-run-of-one-open', 'A run of one, opened', 'The session “autodenied” (recorded, uxwave/u1c-t-idle-1), both turns opened, then the second turn’s lone command pressed', 'On the ticket’s build the run’s line open onto the call’s command and result, no inner line; on master the call’s card open'), async () => {
       await opened('autodenied');
       await turns(true);
-      await seek(page, rowOf(`cell:${auto.again}`));
+      await place(rowOf(`cell:${auto.again}`));
       if ((await again().getAttribute('aria-expanded')) !== 'true') await press(page, again(), 'the lone command’s first line');
       await page.waitForTimeout(800);
-    }, { check: checks(() => inView(rowOf(`cell:${auto.again}`), 'the lone command'), () => expect(again(), 'its line open').toHaveAttribute('aria-expanded', 'true', { timeout: 3_000 })) });
+    }, { check: checks(seen(rowOf(`cell:${auto.again}`), 'the lone command'), () => expect(again(), 'its line open').toHaveAttribute('aria-expanded', 'true', { timeout: 3_000 })) });
 
     const deny = tcTool('rhythm', 'Deny');
     const cover = tcTool('rhythm', 'Cover');
+    const run = () => rowOf(`group:cell:${tcTool('rhythm', 'Grep')}`);
     await shot(page, meta('tc-rhythm', 'A run, then two lone calls in a row', 'The session “rhythm” (invented), its turn opened', 'A run of two calls, then the denied command with its reason and the image Read with its thumbnail on the ticket’s build: the space between lines and runs'), async () => {
       await opened('rhythm');
       await turns(true);
-      await seek(page, cellOf(deny));
-    }, { check: checks(() => inView(rowOf(`group:cell:${tcTool('rhythm', 'Grep')}`), 'the run before them'), () => inView(cellOf(deny), 'the denied call'), () => status(deny, 'denied'), () => inView(cellOf(cover), 'the image Read')) });
+      await place(run());
+    }, { check: checks(seen(run(), 'the run before them'), seen(cellOf(deny), 'the denied call'), () => status(deny, 'denied'), seen(cellOf(cover), 'the image Read')) });
+    const runLine = () => run().locator('.transcript-run-line').first();
+    await shot(page, hoverMeta('tc-hover-run', 'A run of two pointed at', 'The session “rhythm” (invented), its turn opened, the pointer on the run of a search and a read', 'The run’s line under the pointer with its chevron drawn'), async () => {
+      await opened('rhythm');
+      await turns(true);
+      await place(run());
+      await pointAt(runLine());
+    }, { check: checks(seen(run(), 'the run'), chevronShown(runLine(), 'the run’s line')) });
     await shot(page, meta('tc-denied-jump', 'The turn line’s denied count pressed', 'The session “rhythm” (invented), its turn folded, then its line’s “1 denied” pressed', 'The turn open, the denied command in view holding the keyboard'), async () => {
       await opened('rhythm');
       await turns(false);
@@ -5649,17 +5701,17 @@ test('the tool card retired: lone calls failed, denied, a js call, an image, a r
     await shot(page, meta('tc-image-open', 'A lone image result, opened', 'The session “rhythm” (invented), its turn opened, then the image Read’s line pressed', 'The image whole under the line, no thumbnail'), async () => {
       await opened('rhythm');
       await turns(true);
-      await seek(page, cellOf(cover));
+      await place(cellOf(cover));
       await openLine(cover);
-    }, { check: checks(() => inView(cellOf(cover), 'the image Read'), () => lineOpen(cover), () => expect(cellOf(cover).locator('img.transcript-cell-thumb'), 'no thumbnail while open').toHaveCount(0)) });
+    }, { check: checks(seen(cellOf(cover), 'the image Read'), () => lineOpen(cover), () => expect(cellOf(cover).locator('img.transcript-cell-thumb'), 'no thumbnail while open').toHaveCount(0)) });
 
     const art = TC_RECORDED.artifacts;
     const edits = () => rowOf(`group:cell:${art.edits}`);
     await shot(page, meta('tc-image-recorded', 'An artifact’s screenshot between two runs', 'The session “artifacts” (recorded, p1-maws-artifacts), its turn opened', 'The screenshot call at rest (its thumbnail on the ticket’s build), the run of two edits after it closed'), async () => {
       await opened('artifacts');
       await turns(true);
-      await seek(page, cellOf(art.shot));
-    }, { check: checks(() => inView(cellOf(art.shot), 'the screenshot call'), () => inView(edits(), 'the run after it')) });
+      await place(cellOf(art.shot));
+    }, { check: checks(seen(cellOf(art.shot), 'the screenshot call'), seen(edits(), 'the run after it')) });
     // the coordinator's pair: an opened run (its bordered block kept for now) beside a call that stood alone
     await shot(page, meta('tc-run-opened', 'An opened run beside a lone call', 'The session “artifacts” (recorded, p1-maws-artifacts), its turn opened, then the run after the screenshot pressed', 'The run of two edits open (one failed), its block under the screenshot call’s line'), async () => {
       await opened('artifacts');
@@ -5668,22 +5720,21 @@ test('the tool card retired: lone calls failed, denied, a js call, an image, a r
       const line = edits().locator('.transcript-run-line').first();
       if ((await line.getAttribute('aria-expanded')) !== 'true') await press(page, line, 'the run’s line');
       await page.waitForTimeout(800);
-      await cellOf(art.shot).evaluate((el) => el.scrollIntoView({ block: 'center' }));
-      await page.waitForTimeout(600);
-    }, { check: checks(() => inView(cellOf(art.shot), 'the screenshot call'), () => expect(edits().locator('.transcript-run-line').first(), 'the run open').toHaveAttribute('aria-expanded', 'true', { timeout: 3_000 })) });
+      await place(cellOf(art.shot));
+    }, { check: checks(seen(cellOf(art.shot), 'the screenshot call'), seen(edits(), 'the run after it'), () => expect(edits().locator('.transcript-run-line').first(), 'the run open').toHaveAttribute('aria-expanded', 'true', { timeout: 3_000 })) });
 
     const js = tcTool('js', 'Js');
     await shot(page, meta('tc-js-activity', 'A finished js call with its browser activity', 'The session “js” (invented; its activity sent to the window), its turn opened', 'The js call’s line, the agent’s steps in the browser under it'), async () => {
       await opened('js');
       await turns(true);
-      await seek(page, cellOf(js));
-    }, { check: checks(() => inView(cellOf(js), 'the js call'), () => inView(activityOf(js), 'its browser activity')) });
+      await place(cellOf(js));
+    }, { check: checks(seen(cellOf(js), 'the js call'), seen(activityOf(js).last(), 'its browser activity, to the last row')) });
     await shot(page, meta('tc-js-open', 'A finished js call, opened', 'The session “js” (invented), its turn opened, then the js call’s line pressed', 'The cell’s code and its result under the line, the activity after them'), async () => {
       await opened('js');
       await turns(true);
-      await seek(page, cellOf(js));
+      await place(cellOf(js));
       await openLine(js);
-    }, { check: checks(() => inView(cellOf(js), 'the js call'), () => lineOpen(js)) });
+    }, { check: checks(seen(cellOf(js), 'the js call'), () => lineOpen(js)) });
 
     // ---- the to-human view (MAWS's mirror) -----------------------------------------------------------------------------
     const rvFolders = ['owner/view', ...FOLDERS];
@@ -5702,12 +5753,13 @@ test('the tool card retired: lone calls failed, denied, a js call, an image, a r
       await opened('report');
       await openStretchesAll();
       await seek(page, cellOf(rvFail));
-    }, { check: checks(() => inView(cellOf(rvFail), 'the failed call'), () => status(rvFail, 'error')) });
-    await shot(page, meta('tc-rv-open-js', 'The to-human view opened at the js call', 'The session “report” (invented), each record line pressed, scrolled to the js call', 'The js call with its browser activity, then the lone command before the last message', rvFolders), async () => {
+    }, { check: checks(seen(cellOf(rvFail), 'the failed call'), () => status(rvFail, 'error')) });
+    // scrolled so the js call stands near the top: tc-rv-open's picture ends above it
+    await shot(page, meta('tc-rv-open-js', 'The to-human view opened at the js call', 'The session “report” (invented), each record line pressed, scrolled so the js call’s row is near the top', 'The js call with its browser activity, then the lone command before the last message', rvFolders), async () => {
       await opened('report');
       await openStretchesAll();
-      await seek(page, cellOf(rvJs));
-    }, { check: checks(() => inView(cellOf(rvJs), 'the js call'), () => inView(activityOf(rvJs), 'its browser activity')) });
+      await place(rowOf(`cell:${rvJs}`));
+    }, { check: checks(seen(cellOf(rvJs), 'the js call'), seen(activityOf(rvJs).last(), 'its browser activity, to the last row'), seen(rowOf(`cell:${tcTool('report', 'Branch')}`), 'the lone command after it')) });
     // The report draws a finished turn's line only while one of its stretches is open (owner/view/mirror.ts), so the
     // first record line, the failed command's, is opened first: the denied command's stretch stays folded for the jump
     await shot(page, meta('tc-rv-denied-jump', 'The to-human view, the denied count pressed', 'The session “report” (invented), opened, its first record line pressed (the failed command’s), then its turn line’s “1 denied” pressed', 'The stretch holding the denied command open, the command holding the keyboard', rvFolders), async () => {
@@ -5737,18 +5789,18 @@ test('the tool card retired: lone calls failed, denied, a js call, an image, a r
     const stop = (key: TcKey) => async () => void (await invoke(page, 'session.stop', { appSessionId: sid[key] as never, reason: 'stop' }));
     for (const entry of live) {
       await start(entry);
-      const running = () => checks(() => inView(cellOf(entry.call), 'the running js call'), () => status(entry.call, 'running'), () => inView(activityOf(entry.call), 'its browser activity'));
+      const running = () => checks(seen(cellOf(entry.call), 'the running js call'), () => status(entry.call, 'running'), seen(activityOf(entry.call).last(), 'its browser activity, to the last row'));
       if (entry.key === 'run') {
         await shot(page, meta('tc-running-js', 'A js call running', `The session “${TC_LIVE.run.title}”, started with its prompt on a replay journal held while its js call runs; the activity sent to the window`, 'The running ring in the call’s mark’s place, the agent’s steps in the browser under it'), async () => {
           await opened('run');
           await toEnd(page);
-          await seek(page, cellOf(entry.call));
+          await place(cellOf(entry.call));
         }, { check: running(), after: stop('run') });
       } else {
         await shot(page, meta('tc-rv-running', 'The to-human view while a js call runs', 'The session “rvrun” (invented: a finished to-human turn), started with its prompt on a replay journal held while its js call runs; each record line pressed', 'The person’s prompt, the running js call with its ring and its browser activity under the earlier message', rvFolders), async () => {
           await opened('rvrun');
           await openStretchesAll();
-          await seek(page, cellOf(entry.call));
+          await place(cellOf(entry.call));
         }, { check: running(), after: stop('rvrun') });
       }
     }

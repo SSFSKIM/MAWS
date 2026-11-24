@@ -9,6 +9,7 @@ import { journalToEvents } from '../../dev/journal';
 import type { Row, TurnId } from '../../model/rows';
 import { BASH_RESULT, builder, parent, task, tool, uuid } from '../../model/test-events';
 import { NO_ACTIONS } from '../context';
+import { runOfOne } from '../../model/groups';
 import { renderRow, rowOf, spyActions, storeWith } from './test-support';
 
 afterEach(cleanup);
@@ -79,7 +80,8 @@ describe('group row', () => {
 });
 
 describe('standalone cell row', () => {
-  // board ticket 852: drawn as its run, opened here (expandAll opens a run of one as it opens any run)
+  // board ticket 852: drawn as its run, opened here (expandAll opens a run of one as it opens any run) straight onto its
+  // call's detail, with no line of the call's own
   it('a completed single-cell group renders as a standalone cell row, drawn as a run of one', async () => {
     const b = builder();
     b.turn('u1');
@@ -90,8 +92,9 @@ describe('standalone cell row', () => {
     expect(ofKind(store.rows(), 'group')).toHaveLength(0);
     const view = renderRow(rowOf(store.rows(), 'cell'), { storeKey: store.key });
     expect(view.container.querySelector('[data-cell-count]')?.getAttribute('data-cell-count')).toBe('1');
-    expect(view.container.querySelector('.transcript-run-line')?.textContent).toBe('Ran a command');
-    expect(view.container.querySelector('[data-cell-id="cell:t1"] > button')?.textContent).toBe('Ran git status…');
+    expect(view.container.querySelector('.transcript-run-line')?.textContent).toBe('Ran a command'); // no description: the run's words
+    expect(view.container.querySelector('[data-cell-id="cell:t1"][data-run-of-one] .transcript-cell-detail .transcript-shell-command')?.textContent).toBe('$ git status --short');
+    expect(view.container.querySelector('.transcript-cell-line')).toBeNull();
   });
 
   it('pass1/permission-roundtrip: the denied call is a standalone, focusable cell row, never inside a group', async () => {
@@ -113,7 +116,7 @@ describe('standalone cell row', () => {
     const inTurn = (id: TurnId) => store.rows().filter((row) => row.turnId === id);
     const interrupted = ofKind(inTurn(second), 'cell')[0];
     expect(interrupted).toMatchObject({ status: 'stopped', classification: { denial: { kind: 'user-rejected', interruption: true } } });
-    const cellView = renderRow(interrupted, { storeKey: store.key });
+    const cellView = renderRow({ ...runOfOne(interrupted), expanded: true }, { storeKey: store.key }); // the call's own line, in its run (board ticket 852)
     expect(cellView.container.querySelector(`[data-cell-id="${interrupted.id}"] > button`)?.textContent).toMatch(/^Stopped: /);
     cellView.unmount();
     const hrefs = [first, second].flatMap((id) => {
