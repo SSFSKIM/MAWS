@@ -95,8 +95,12 @@ function exchangeBytes(port: number, bytes: string | Buffer, host = '127.0.0.1')
     socket.on('error', (error: NodeJS.ErrnoException) => (error.code === 'ECONNRESET' ? undefined : failed(error)));
     socket.on('close', () => {
       const answer = parse(Buffer.concat(chunks), Date.now() - began);
-      if (answer.status !== 0) standing(answer, port); // every answer, whatever its status
-      done(answer);
+      try {
+        if (answer.status !== 0) standing(answer, port); // every answer, whatever its status
+        done(answer);
+      } catch (error) {
+        failed(error); // the test's failure, not an uncaught throw it would time out on
+      }
     });
     socket.write(bytes);
   });
@@ -455,10 +459,10 @@ describe('the credential (§8.2’s rule 1; T9)', () => {
       expect(answer.status, JSON.stringify(extra)).toBe(401);
       expect(answer.body.toString()).toBe('This browser is not paired.');
     }
-    expect(await daemon.sheetPage.browsers()).toHaveLength(1);
+    expect((await daemon.sheetPage.browsers()).browsers).toHaveLength(1);
     const unpaired = await request(port, 'POST', '/api/unpair', [HOST(port), ORIGIN(port), ['Authorization', `Bearer ${credential}`]]);
     expect(unpaired.status).toBe(204);
-    expect(await daemon.sheetPage.browsers()).toEqual([]);
+    expect(await daemon.sheetPage.browsers()).toEqual({ browsers: [] });
   });
 
   it('is not enough on unpair without exactly the page’s Origin: each foreign Origin and none are 403 and revoke nothing', async () => {
@@ -468,7 +472,7 @@ describe('the credential (§8.2’s rule 1; T9)', () => {
       const answer = await request(port, 'POST', '/api/unpair', [HOST(port), ...(origin === null ? [] : [['Origin', origin] as [string, string]]), ['Authorization', `Bearer ${credential}`]]);
       expect(answer.status, String(origin)).toBe(403);
     }
-    expect(await daemon.sheetPage.browsers()).toHaveLength(1);
+    expect((await daemon.sheetPage.browsers()).browsers).toHaveLength(1);
   });
 
   it('revokes nothing when the unpair’s request is cut off before its body ends, and answers nothing', async () => {
@@ -486,7 +490,7 @@ describe('the credential (§8.2’s rule 1; T9)', () => {
     });
     expect(heard).toBe('');
     await new Promise((done) => setTimeout(done, 200));
-    expect(await daemon.sheetPage.browsers()).toHaveLength(1);
+    expect((await daemon.sheetPage.browsers()).browsers).toHaveLength(1);
     expect(scene.logs.join('\n')).not.toMatch(/unpaired/);
   });
 
@@ -573,7 +577,7 @@ describe('a browser dropped or aged out (T10)', () => {
     expect(await tab.closedWith()).toBe(4403);
     expect((await unpairWith(port, oldest.credential)).status).toBe(401);
     expect(await helloOf(port, oldest.id)).toEqual({ closed: 4401 });
-    expect((await daemon.sheetPage.browsers()).map((browser) => browser.id)).not.toContain(oldest.id);
+    expect((await daemon.sheetPage.browsers()).browsers.map((browser) => browser.id)).not.toContain(oldest.id);
   });
 
   it('a credential unused for 90 days leaves no socket paired: closed 4403 at the next ping, and refused over HTTP and on a new connection', async () => {
@@ -840,6 +844,23 @@ describe('never in the way (T2, T5, T6)', () => {
     expect(await cli(['sheet', 'unpair', a.id])).toEqual({ code: 0, out: 'unpaired 1 browser\n', err: '' });
     expect(readFileSync(join(scene.paths.dir, 'sheet-page.json'), 'utf8')).not.toContain(a.id);
     expect(await reaches('127.0.0.1', first.port)).toBe(false); // still no socket
+  });
+
+  it('surfaces a browsers’ file it could not read, by its error’s code: `sheet browsers` and `sheet unpair --all` claim nothing', async () => {
+    mkdirSync(scene.paths.dir, { recursive: true, mode: 0o700 }); // mawsd's own directory, as it requires it
+    mkdirSync(join(scene.paths.dir, 'sheet-page.json')); // read fails EISDIR
+    const off = await scene.start(options({ MAWS_SHEET_PAGE: '' }));
+    await decided(off);
+    const listed = await cli(['sheet', 'browsers']);
+    expect(listed).toEqual({ code: 1, out: '', err: 'this mawsd does not serve the sheet page now\nthe browsers’ file could not be read (EISDIR)\n' });
+    const json = await cli(['sheet', 'browsers', '--json']);
+    expect(json.code).toBe(1);
+    expect(JSON.parse(json.out)).toEqual({ served: false, browsers: [], why: 'EISDIR' });
+    const unpaired = await cli(['sheet', 'unpair', '--all']);
+    expect(unpaired.code).toBe(1);
+    expect(unpaired.err).toContain('EISDIR');
+    expect(unpaired.out).toBe('');
+    expect(`${listed.err}${unpaired.err}`).not.toContain(scene.root); // a code, never a path
   });
 
   it('loads its chunk at the first request, not at the start; a chunk that cannot load answers 503 and the daemon serves the rest', async () => {

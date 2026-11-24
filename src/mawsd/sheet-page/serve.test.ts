@@ -3,7 +3,7 @@
 // src/mawsd/process-sheet-page.test.ts's. No case here listens on the real port: a bind is port 0, a port this test
 // holds, or the `listen` seam, which records and refuses.
 import type * as Http from 'node:http';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { createConnection, createServer, type AddressInfo, type Server } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -290,5 +290,28 @@ describe('the chunk and the stop (T1, T6)', () => {
     expect(Date.now() - before).toBeLessThan(600);
     expect(made.status().state).toBe('stopped');
     expect(await reaches('127.0.0.1', port)).toBe(false);
+  });
+  it('acts on no command whose load outlasted the stop: no code is made and the browsers’ file is not written', async () => {
+    const stamp = new Date().toISOString();
+    mkdirSync(join(scratch, 'mawsd'), { recursive: true });
+    const kept = { id: '0a1b2c3d', label: 'Chrome on macOS', pairedAt: stamp, lastSeenAt: stamp, hash: 'a'.repeat(64), proof: 'b'.repeat(64) };
+    writeFileSync(join(scratch, 'mawsd', 'sheet-page.json'), JSON.stringify({ v: 1, browsers: [kept] }));
+    let release!: () => void;
+    const gate = new Promise<void>((done) => (release = done));
+    const load = vi.fn(async () => (await gate, import('./handler')));
+    const write = vi.fn();
+    const made = page({ load, write });
+    made.start();
+    expect(await settled(made)).toBe('listening');
+    const pairing = made.pair();
+    const listing = made.browsers();
+    const unpairing = made.unpair(kept.id);
+    await vi.waitFor(() => expect(load).toHaveBeenCalled());
+    await made.stop();
+    release();
+    expect(await pairing).toMatchObject({ ok: false });
+    expect(await listing).toEqual({ browsers: [] });
+    expect(await unpairing).toEqual({ removed: 0, saved: false, why: 'stopping' });
+    expect(write).not.toHaveBeenCalled();
   });
 });

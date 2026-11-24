@@ -180,9 +180,10 @@ export const commands = {
   // The question sheet's C4 (docs/doperpowers/plans/2026-11-24-question-sheet-c4-local-page.md, §K; T11): `mawsd sheet
   // pair|browsers|unpair`. Three commands and not one with a union for its input, since a member added to a union later
   // breaks the wire. A code is made only while the page listens; an unpair answers `saved` once the browsers' file was
-  // replaced, and the failure's code (`why`) when it was not (the browser is refused until mawsd restarts).
+  // replaced, and the failure's code (`why`) when it was not (the browser is refused until mawsd restarts). A browsers'
+  // file that could not be read is its error's code (`why`) in both: nobody listed, nothing answered saved.
   'daemon.sheetPair': machine(z.void(), SheetPairAnswerSchema),
-  'daemon.sheetBrowsers': machine(z.void(), z.strictObject({ served: z.boolean(), browsers: z.array(PairedBrowserSchema) })),
+  'daemon.sheetBrowsers': machine(z.void(), z.strictObject({ served: z.boolean(), browsers: z.array(PairedBrowserSchema), why: z.string().optional() })),
   'daemon.sheetUnpair': machine(
     z.strictObject({ id: z.string().regex(/^[0-9a-f]{8}$/).nullable() }),
     z.strictObject({ removed: z.number().int().nonnegative(), saved: z.boolean(), why: z.string().optional() }),

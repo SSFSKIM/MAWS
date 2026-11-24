@@ -17,7 +17,7 @@ import { WebSocketServer, type RawData, type WebSocket } from 'ws';
 import type { SpineState } from '../spine-seam';
 import { admit } from './checks';
 import { isRefusal, refusal, refusalBytes, refusalHeaders, STANDING_HEADERS, type Refusal } from './headers';
-import { createPairing, type PairedBrowser } from './pairing';
+import { createPairing, type BrowserList } from './pairing';
 import type { SheetAccess } from './serve';
 import { readBundle, type BundleFile, type BundleTable } from './static';
 import type { SheetPageTiming } from './timing';
@@ -47,7 +47,7 @@ export interface SheetPageHandler {
   request(req: IncomingMessage, res: ServerResponse): void;
   upgrade(req: IncomingMessage, socket: Duplex, head: Buffer): void;
   pair(): { code: string; expiresAt: string };
-  browsers(): PairedBrowser[];
+  browsers(): BrowserList;
   unpair(id: string | null): { removed: number; saved: boolean; why?: string };
   connections(): number; // the live connections paired on the connection
   spineState(state: SpineState): void;

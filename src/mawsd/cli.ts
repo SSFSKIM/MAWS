@@ -606,13 +606,14 @@ async function sheet(context: Context, args: readonly string[]): Promise<number>
       return withDaemon(context, async (link) => {
         const answer = await link.request('daemon.sheetBrowsers', undefined);
         if (!answer.ok) return failed(deps, `daemon.sheetBrowsers failed: ${answer.error.message}`);
-        const { served, browsers } = answer.value as CommandOutput<'daemon.sheetBrowsers'>;
-        if (json) deps.out(`${JSON.stringify({ served, browsers })}\n`);
+        const { served, browsers, why } = answer.value as CommandOutput<'daemon.sheetBrowsers'>;
+        if (json) deps.out(`${JSON.stringify({ served, browsers, ...(why !== undefined && { why }) })}\n`);
         else {
           if (!served) deps.err('this mawsd does not serve the sheet page now\n');
+          if (why !== undefined) deps.err(`the browsers’ file could not be read (${why})\n`);
           for (const browser of browsers) deps.out(`${browser.id}  ${browser.label} · paired ${browser.pairedAt} · last seen ${browser.lastSeenAt}\n`);
         }
-        return EXIT.done;
+        return why === undefined ? EXIT.done : EXIT.failed;
       });
     }
     case 'unpair': {

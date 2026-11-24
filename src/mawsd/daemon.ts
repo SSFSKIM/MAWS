@@ -1101,7 +1101,7 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
       case 'daemon.sheetPair':
         return sheetPage.pair();
       case 'daemon.sheetBrowsers':
-        return { served: sheetPage.status().state === 'listening', browsers: await sheetPage.browsers() };
+        return { served: sheetPage.status().state === 'listening', ...(await sheetPage.browsers()) };
       case 'daemon.sheetUnpair':
         return sheetPage.unpair((input as CommandInput<'daemon.sheetUnpair'>).id);
       case 'daemon.endpoint': {

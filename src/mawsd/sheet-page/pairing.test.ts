@@ -1,7 +1,7 @@
 // Pairing (docs/doperpowers/plans/2026-11-24-question-sheet-c4-local-page.md, §K; T8 to T10, T28): the code, the
 // browsers' file and the server's proof, over a scratch file and an injected clock.
 import { createHash, createHmac, randomBytes } from 'node:crypto';
-import { chmodSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -173,14 +173,14 @@ describe('the credential and the browsers’ file (T9, T10)', () => {
   it('touches lastSeenAt at most once an hour, and a failed touch is only logged', () => {
     const pairing = make();
     const { credential } = paired(pairing);
-    const first = pairing.list()[0]!.lastSeenAt;
+    const first = pairing.list().browsers[0]!.lastSeenAt;
     clock += 30 * MINUTE;
     pairing.check(credential);
-    expect(pairing.list()[0]!.lastSeenAt).toBe(first);
+    expect(pairing.list().browsers[0]!.lastSeenAt).toBe(first);
     clock += 31 * MINUTE;
     pairing.check(credential);
-    expect(pairing.list()[0]!.lastSeenAt).toBe(new Date(clock).toISOString());
-    expect(make().list()[0]!.lastSeenAt).toBe(new Date(clock).toISOString());
+    expect(pairing.list().browsers[0]!.lastSeenAt).toBe(new Date(clock).toISOString());
+    expect(make().list().browsers[0]!.lastSeenAt).toBe(new Date(clock).toISOString());
     failWrites = true;
     clock += 2 * 60 * MINUTE;
     expect(pairing.check(credential)).not.toBeNull();
@@ -193,7 +193,7 @@ describe('the credential and the browsers’ file (T9, T10)', () => {
     clock += 90 * DAY;
     expect(pairing.check(credential)).toBeNull();
     expect(pairing.prove(id, nonce())).toBeNull();
-    expect(pairing.list()).toEqual([]);
+    expect(pairing.list()).toEqual({ browsers: [] });
   });
 
   it('keeps at most 16 browsers: a seventeenth drops the one seen longest ago, and says so once the file was replaced', () => {
@@ -212,7 +212,7 @@ describe('the credential and the browsers’ file (T9, T10)', () => {
     clock += MINUTE;
     expect(pairing.exchange(code, CHROME_MAC)).toMatchObject({ ok: true });
     expect(revoked).toEqual([browsers[0]!.id]);
-    expect(pairing.list()).toHaveLength(BROWSERS_MAX);
+    expect(pairing.list().browsers).toHaveLength(BROWSERS_MAX);
     expect(pairing.check(browsers[0]!.credential)).toBeNull();
     expect(pairing.check(browsers[1]!.credential)).not.toBeNull();
   });
@@ -223,7 +223,7 @@ describe('the credential and the browsers’ file (T9, T10)', () => {
     expect(pairing.seen(id)).toBe(true);
     clock += 2 * 60 * MINUTE;
     expect(pairing.seen(id)).toBe(true);
-    expect(pairing.list()[0]!.lastSeenAt).toBe(new Date(clock).toISOString());
+    expect(pairing.list().browsers[0]!.lastSeenAt).toBe(new Date(clock).toISOString());
     clock += 90 * DAY;
     expect(pairing.seen(id)).toBe(false);
     expect(pairing.seen('0badc0de')).toBe(false);
@@ -231,11 +231,35 @@ describe('the credential and the browsers’ file (T9, T10)', () => {
 
   it('reads a file that does not parse, or whose v is not 1, as no browsers', () => {
     writeFileSync(file, '{ not json');
-    expect(make().list()).toEqual([]);
+    expect(make().list()).toEqual({ browsers: [] }); // read as no browsers, no failure surfaced
     writeFileSync(file, JSON.stringify({ v: 2, browsers: [] }));
-    expect(make().list()).toEqual([]);
+    expect(make().list()).toEqual({ browsers: [] }); // read as no browsers, no failure surfaced
     expect(logs.filter((line) => line === 'the browsers’ file does not parse: read as no browsers')).toHaveLength(2);
     expect(logs.join('\n')).not.toMatch(/JSON|token|position|version 2/i); // a fixed sentence, not the parser's words
+  });
+
+  it('surfaces a file it could not read, other than a missing one: by its error’s code, paired with nobody, written over by nothing, and read again at the next use', () => {
+    const { id, credential } = paired(make());
+    const kept = readFileSync(file, 'utf8');
+    rmSync(file);
+    mkdirSync(file); // read fails EISDIR
+    const pairing = make();
+    expect(pairing.list()).toEqual({ browsers: [], why: 'EISDIR' });
+    expect(pairing.revoke(null)).toEqual({ ids: [], saved: false, why: 'EISDIR' }); // never answered saved
+    expect(pairing.revoke(id)).toEqual({ ids: [], saved: false, why: 'EISDIR' });
+    expect(pairing.check(credential)).toBeNull();
+    const { code } = pairing.mint();
+    expect(pairing.exchange(code, CHROME_MAC)).toEqual({ ok: false, why: 'not-saved' });
+    expect(statSync(file).isDirectory()).toBe(true);
+    expect(logs.some((line) => line.includes('EISDIR'))).toBe(true);
+    expect(logs.join('\n')).not.toContain(scratch); // the error's code, never the path
+
+    rmSync(file, { recursive: true });
+    writeFileSync(file, kept);
+    expect(pairing.list().browsers.map((browser) => browser.id)).toEqual([id]);
+    expect(pairing.check(credential)).toMatchObject({ id });
+    clock += MINUTE;
+    expect(pairing.exchange(code, CHROME_MAC)).toMatchObject({ ok: true }); // the code stayed live
   });
 
   it('labels a browser from a fixed set of words, so nothing a requester wrote reaches a terminal', () => {
@@ -291,7 +315,7 @@ describe('a revocation’s two moments (T10)', () => {
     paired(pairing);
     expect(pairing.revoke('00000000')).toEqual({ ids: [], saved: true });
     expect(pairing.revoke(null).ids).toHaveLength(2);
-    expect(pairing.list()).toEqual([]);
+    expect(pairing.list()).toEqual({ browsers: [] });
   });
 
   it('hands out a credential only once the file was replaced: a failed replace answers not-saved and leaves the code live', () => {
@@ -299,7 +323,7 @@ describe('a revocation’s two moments (T10)', () => {
     const { code } = pairing.mint();
     failWrites = true;
     expect(pairing.exchange(code, CHROME_MAC)).toEqual({ ok: false, why: 'not-saved' });
-    expect(pairing.list()).toEqual([]);
+    expect(pairing.list()).toEqual({ browsers: [] });
     failWrites = false;
     expect(pairing.exchange(code, CHROME_MAC)).toMatchObject({ ok: true });
   });

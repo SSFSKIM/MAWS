@@ -32,7 +32,7 @@ import type { DaemonSheetPage } from '@shared/ipc/schema/daemon';
 import type { SpineState } from '../spine-seam';
 import type { SheetPageChunk, SheetPageHandler } from './handler';
 import { HEADERS_MAX, pageOrigin, refusal, refusalBytes, refusalHeaders, SHEET_HOST, SHEET_PORT, type Refusal } from './headers';
-import type { PairedBrowser, SheetPairAnswer } from './pairing';
+import type { BrowserList, SheetPairAnswer } from './pairing';
 import { SHEET_PAGE_TIMING, type SheetPageTiming } from './timing';
 
 export { SHEET_HOST, SHEET_PORT, SHEET_PAGE_TIMING, type SheetPageTiming };
@@ -73,7 +73,7 @@ export interface SheetPage {
   start(): void; // returns at once; T6
   status(): DaemonSheetPage; // daemon.status.sheetPage
   pair(): Promise<SheetPairAnswer>; // §K
-  browsers(): Promise<PairedBrowser[]>;
+  browsers(): Promise<BrowserList>;
   unpair(id: string | null): Promise<{ removed: number; saved: boolean; why?: string }>;
   spineState(state: SpineState): void; // T15: a spine that cannot be had is said on the live connections
   stop(): Promise<void>; // listeners closed, connections ended; at most STOP_MS
@@ -297,8 +297,10 @@ export function createSheetPage(options: SheetPageOptions): SheetPage {
   }
 
   // `browsers` and `unpair` read and change the browsers' file in every state but `stopped` (a browser can be unpaired
-  // while the page is off or its port taken); `pair` alone needs `listening` (T8). Either loads the chunk for its command.
+  // while the page is off or its port taken); `pair` alone needs `listening` (T8). Either loads the chunk for its command,
+  // and the state is read again once it loaded: a stop that came meanwhile closed the handler, which then acts on nothing.
   const stopped = () => stopping !== null;
+  const notServed = (): SheetPairAnswer => ({ ok: false, why: `this mawsd does not serve the sheet page now: ${detail ?? 'it has not started'}` });
 
   return {
     start() {
@@ -311,27 +313,32 @@ export function createSheetPage(options: SheetPageOptions): SheetPage {
       state,
       detail,
       url: state === 'listening' ? pageOrigin(port) : null,
-      browsers: handler ? handler.browsers().length : null,
+      browsers: handler ? handler.browsers().browsers.length : null,
       connections: handler ? handler.connections() : null,
       registered: false, // the registration is M3's
     }),
 
     async pair() {
-      if (state !== 'listening') return { ok: false, why: `this mawsd does not serve the sheet page now: ${detail ?? 'it has not started'}` };
+      if (state !== 'listening') return notServed();
+      let served: SheetPageHandler;
       try {
-        const { code, expiresAt } = (await ensure()).pair();
-        return { ok: true, code, expiresAt, url: pageOrigin(port) };
+        served = await ensure();
       } catch (error) {
         return { ok: false, why: `the sheet page could not load: ${messageOf(error)}` };
       }
+      if (state !== 'listening') return notServed();
+      const { code, expiresAt } = served.pair();
+      return { ok: true, code, expiresAt, url: pageOrigin(port) };
     },
 
     async browsers() {
-      return stopped() ? [] : (await ensure()).browsers();
+      const served = stopped() ? null : await ensure();
+      return served === null || stopped() ? { browsers: [] } : served.browsers();
     },
 
     async unpair(id) {
-      return stopped() ? { removed: 0, saved: false, why: 'stopping' } : (await ensure()).unpair(id);
+      const served = stopped() ? null : await ensure();
+      return served === null || stopped() ? { removed: 0, saved: false, why: 'stopping' } : served.unpair(id);
     },
 
     spineState(next) {

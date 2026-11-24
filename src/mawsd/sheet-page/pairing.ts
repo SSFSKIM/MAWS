@@ -30,6 +30,13 @@ export interface PairedBrowser {
 // `daemon.sheetPair`'s answer (its schema: SheetPairAnswerSchema, src/shared/ipc/schema/daemon.ts)
 export type SheetPairAnswer = { ok: true; code: string /* XXXX-XXXX */; expiresAt: string; url: string } | { ok: false; why: string };
 
+// The browsers it keeps; why: the error's code of a browsers' file that could not be read (none for a missing one, or for
+// one that does not parse, both read as no browsers)
+export interface BrowserList {
+  browsers: PairedBrowser[];
+  why?: string;
+}
+
 export type Exchange = { ok: true; id: string; credential: string } | { ok: false; why: 'wrong' | 'expired' | 'none' | 'busy' | 'not-saved'; left?: number };
 
 export interface Pairing {
@@ -38,7 +45,7 @@ export interface Pairing {
   prove(id: string, nonce: string): string | null; // the MAC of §L for a browser it knows; null for one it does not
   check(credential: string): PairedBrowser | null; // constant time over the kept hashes; touches lastSeenAt by the grain
   seen(id: string): boolean; // whether the browser is still paired (known and not idle 90 days); a live connection's use, touched by the grain
-  list(): PairedBrowser[];
+  list(): BrowserList;
   // refused in memory at once; saved: the file's replace succeeded (a replace still owed is tried again, so a repeat never
   // reads saved while the file holds a revoked credential); why: the failure's code when it did not
   revoke(id: string | null): { ids: string[]; saved: boolean; why?: string };
@@ -67,7 +74,20 @@ const MINUTE_MS = 60_000;
 export function createPairing(deps: PairingDeps): Pairing {
   const { file, now, random, log, timing } = deps;
   const write = deps.write ?? atomicWriteFileSync;
-  let browsers: Kept[] = readKept(file, log);
+  let browsers: Kept[] = [];
+  // The error's code of a browsers' file that could not be read: while it is set nobody is paired and nothing replaces
+  // the file (its credentials would be lost, or a revocation read as saved), and each command reads it again
+  let unread: string | null = null;
+  const load = () => {
+    const got = readKept(file, log, unread);
+    if (typeof got === 'string') unread = got;
+    else [browsers, unread] = [got, null];
+  };
+  load();
+  const readable = (): boolean => {
+    if (unread !== null) load();
+    return unread === null;
+  };
   let code: { value: string; expiresAt: number; left: number } | null = null;
   let exchanges: number[] = []; // the times of this minute's exchanges
   let owed = false; // a revocation's replace that failed
@@ -90,6 +110,18 @@ export function createPairing(deps: PairingDeps): Pairing {
       log(`the browsers’ file could not be replaced: ${messageOf(error)}`);
       return false;
     }
+  };
+
+  // A use of a paired browser, over HTTP or live: false once it went 90 days unused; its last seen time is touched by the
+  // grain, and a failed replace for it is only logged
+  const used = (browser: Kept): boolean => {
+    if (!alive(browser)) return false;
+    const at = now();
+    if (at - Date.parse(browser.lastSeenAt) >= timing.lastSeenGrainMs) {
+      browser.lastSeenAt = new Date(at).toISOString();
+      if (!save()) log(`browser ${browser.id}’s last seen time was not written`);
+    }
+    return true;
   };
 
   const tellRevoked = (id: string) => {
@@ -131,6 +163,7 @@ export function createPairing(deps: PairingDeps): Pairing {
         if (left === 0) code = null;
         return { ok: false, why: 'wrong', left };
       }
+      if (!readable()) return { ok: false, why: 'not-saved' }; // the file that would keep it cannot be read; the code stays live
       const bytes = random(32);
       const stamp = new Date(at).toISOString();
       const before = browsers;
@@ -163,33 +196,22 @@ export function createPairing(deps: PairingDeps): Pairing {
     },
 
     check(credential) {
-      if (!CREDENTIAL.test(credential)) return null;
+      if (!CREDENTIAL.test(credential) || !readable()) return null;
       const presented = sha256(Buffer.from(credential, 'base64url'));
       let found: Kept | null = null;
       for (const browser of browsers) if (timingSafeEqual(browser.hash, presented)) found = browser; // every hash compared
-      if (found === null || !alive(found)) return null;
-      const at = now();
-      if (at - Date.parse(found.lastSeenAt) >= timing.lastSeenGrainMs) {
-        found.lastSeenAt = new Date(at).toISOString();
-        if (!save()) log(`browser ${found.id}’s last seen time was not written`);
-      }
-      return shown(found);
+      return found !== null && used(found) ? shown(found) : null;
     },
 
     seen(id) {
       const browser = browsers.find((kept) => kept.id === id);
-      if (browser === undefined || !alive(browser)) return false;
-      const at = now();
-      if (at - Date.parse(browser.lastSeenAt) >= timing.lastSeenGrainMs) {
-        browser.lastSeenAt = new Date(at).toISOString();
-        if (!save()) log(`browser ${browser.id}’s last seen time was not written`);
-      }
-      return true;
+      return browser !== undefined && used(browser);
     },
 
-    list: () => browsers.filter(alive).map(shown),
+    list: () => (readable() ? { browsers: browsers.filter(alive).map(shown) } : { browsers: [], why: unread! }),
 
     revoke(id) {
+      if (!readable()) return { ids: [], saved: false, why: unread! };
       const gone = browsers.filter((browser) => id === null || browser.id === id);
       if (gone.length === 0) {
         if (!owed) return { ids: [], saved: true };
@@ -224,14 +246,17 @@ const HEX_ID = /^[0-9a-f]{8}$/;
 const HEX_32 = /^[0-9a-f]{64}$/;
 const isStamp = (value: unknown): value is string => typeof value === 'string' && !Number.isNaN(Date.parse(value));
 
-// The browsers' file; one that does not parse, or whose v is not 1, is read as no browsers and replaced at the next write
-function readKept(file: string, log: (line: string) => void): Kept[] {
+// The browsers' file; a missing one, one that does not parse, or one whose v is not 1, is read as no browsers and
+// replaced at the next write. One that could not be read is its error's code (logged when it is not the last one's).
+function readKept(file: string, log: (line: string) => void, before: string | null): Kept[] | string {
   let text: string;
   try {
     text = readFileSync(file, 'utf8');
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') log(`the browsers’ file could not be read (${messageOf(error)}): read as no browsers`);
-    return [];
+    const code = (error as NodeJS.ErrnoException).code ?? 'an error';
+    if (code === 'ENOENT') return [];
+    if (code !== before) log(`the browsers’ file could not be read (${code}): nobody is paired until it can be`); // its code: the message names the file
+    return code;
   }
   try {
     const parsed = JSON.parse(text) as { v?: unknown; browsers?: unknown };
