@@ -85,8 +85,8 @@ import { AgentSeam } from './support/dashboards';
 import { BOARD, drawsRows, labelOf, liveBlock, liveViews, NOT_FETCHED, openSheet, rows, tableRows, writeBoard } from './support/live-data';
 import { installedEngine } from './support/p1-live';
 import { isAlive, tcpListeners } from './support/processes';
-import { engineRunning } from './support/prestart'; // ticket 851, M5
-import { startsOf, writeLatencyEngine } from '../test/support/latency-engine'; // ticket 851, M5: A's engine, its starts counted
+import { engineRunning, startedEngines } from './support/prestart'; // ticket 851, M5
+import { writeLatencyEngine } from '../test/support/latency-engine'; // ticket 851, M5: A's engine, its starts counted
 import { DATASET_STATES } from '../src/artifacts/dashboard/states';
 import { applicationOf, launchMaws, REPO_ROOT, type MawsLaunch } from './support/launch';
 import { menu } from './support/menu';
@@ -2482,13 +2482,13 @@ test('ticket 851: a New chat prestarts its engine on A as the person types; choo
     await newChat(page, A_PROJECT);
     await composerOf(page).click();
     await page.keyboard.type(typed);
-    await expect.poll(() => startsOf(startsFile).length, { timeout: 30_000, message: `typing in the New chat on A starts its engine there\n${mainSaid(page)}` }).toBe(1);
-    const [engine] = startsOf(startsFile);
+    await expect.poll(() => startedEngines(startsFile).length, { timeout: 30_000, message: `typing in the New chat on A starts its engine there\n${mainSaid(page)}` }).toBe(1);
+    const [engine] = startedEngines(startsFile);
     expect(engine!.cwd, 'in A’s checkout').toBe(aCheckout);
     await chooseMachine(page, B_NAME);
     await expect.poll(() => engineRunning(engine!.pid), { timeout: 30_000, message: `the pick of B withdraws A's prestart: its engine ends\n${mainSaid(page)}` }).toBe(false);
     await expect(composerOf(page), 'the draft stays as it was').toHaveText(typed);
-    expect(startsOf(startsFile), 'no engine started on A since').toHaveLength(1);
+    expect(startedEngines(startsFile), 'no engine started on A since').toHaveLength(1);
   } finally {
     await a?.cleanup();
     await scene?.stop();

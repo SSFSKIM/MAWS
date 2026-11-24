@@ -30,9 +30,10 @@ export async function newChatTab(page: Page, directory: string): Promise<{ id: s
 // A process still running: a zombie (exited, not yet reaped) is not.
 export const engineRunning = (pid: number): boolean => isAlive(pid) && !ps(pid, 'stat').startsWith('Z');
 
-// The engine processes the stub counted, and those of them still running.
-export const startedEngines = (startsFile: string): LatencyEngineStart[] => startsOf(startsFile);
-export const runningEngines = (startsFile: string): LatencyEngineStart[] => startsOf(startsFile).filter((start) => engineRunning(start.pid));
+// The session engines the stub counted (a process launched on the stream-json wire, as the engine host launches a
+// session's; any other run of the binary, a CLI read, is not one), and those of them still running.
+export const startedEngines = (startsFile: string): LatencyEngineStart[] => startsOf(startsFile).filter((start) => start.args.includes('--input-format'));
+export const runningEngines = (startsFile: string): LatencyEngineStart[] => startedEngines(startsFile).filter((start) => engineRunning(start.pid));
 
 type JournalRow = { direction: string; frame: Record<string, unknown> };
 // Every journal row of a session under the engine host's journal directory (its `.jsonl` files, oldest first); none when
