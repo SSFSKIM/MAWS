@@ -5868,9 +5868,13 @@ test('the word cut’s M5: the library’s Spaces, opened artifacts, the documen
       },
       blank: () => make('document', 'Blank notes'),
       saving: () => make('document', 'Meeting notes'), // the save scene's own document
+      // A document with no tab. The host gives a document whose last tab an update deleted one empty tab again, unless
+      // its files root holds something (artifacts/document/adapter.ts, `ensureTab` after `tabDeleted`): so a file first,
+      // then the tabs removed, or the seed's delete is undone at once and the tab draws an empty editor
       memo: async () => {
         await docSeam();
         const id = await make('document', 'Old memo');
+        value(await invoke(page, 'artifacts.testWrite', { artifactId: id, opId: 'words-memo-file', ops: [{ op: 'setAttr', root: 'files', key: 'memo.txt', value: 'Bring the keys.' }] } as never));
         await seam.seed(id, noTabsState());
         return id;
       },
@@ -5879,11 +5883,13 @@ test('the word cut’s M5: the library’s Spaces, opened artifacts, the documen
       board: () => make('dashboard', 'Team board'), // the dashboard save scene's own
       empty: () => make('dashboard', 'Empty board'),
       // the old format: files under the `files` root and no tab (artifacts/dashboard/legacy.ts)
+      // its files first, then its tabs removed: the host keeps a document's last tab unless its files root holds something
+      // (the same `ensureTab` as the memo's), so the other order leaves it a dashboard of today with one empty tab
       legacy: async () => {
         await docSeam();
         const id = await make('dashboard', 'Old weekly board');
-        await seam.seed(id, noTabsState());
         value(await invoke(page, 'artifacts.testWrite', { artifactId: id, opId: 'words-legacy-files', ops: [{ op: 'setAttr', root: 'files', key: 'index.html', value: '<h1>Weekly visits</h1>' }, { op: 'setAttr', root: 'files', key: 'data/visits.csv', value: 'week,visits\n1,40\n2,52\n' }] } as never));
+        await seam.seed(id, noTabsState());
         return id;
       },
       // the page's two versions, its bytes made in the page as launch 2 makes them
@@ -6220,12 +6226,19 @@ test('the word cut’s M5: the library’s Spaces, opened artifacts, the documen
       await editorOf('notes').locator('td').first().click();
       await page.waitForTimeout(400);
       if (m5Cut()) await toolbar('notes').getByRole('button', { name: M5_WORDS.table, exact: true }).click();
+      // master's tools are one row scrolling in a strip (Toolbar.tsx, P3-F1): the strip scrolled to its table commands,
+      // the first at its start, as a person scrolls it to them
+      else await toolbar('notes').getByRole('button', { name: M5_WORDS.tableCommands[0], exact: true }).evaluate((el) => el.scrollIntoView({ inline: 'start', block: 'nearest' }));
     }, {
       check: async () => {
         if (m5Cut()) {
           await expect(tableMenu(), 'the Table menu').toBeVisible({ timeout: 3_000 });
           for (const item of M5_WORDS.tableCommands) await inView(tableMenu().getByRole('menuitem', { name: item, exact: true }), item);
-        } else for (const item of M5_WORDS.tableCommands) await inView(toolbar('notes').getByRole('button', { name: item, exact: true }), `master’s ${item}`);
+        } else {
+          // the strip shows what its width holds: the first command in view, every one drawn in the row
+          await inView(toolbar('notes').getByRole('button', { name: M5_WORDS.tableCommands[0], exact: true }), `master’s ${M5_WORDS.tableCommands[0]}`);
+          for (const item of M5_WORDS.tableCommands) await expect(toolbar('notes').getByRole('button', { name: item, exact: true }), `master’s ${item}`).toBeVisible({ timeout: 3_000 });
+        }
       },
       after: () => closeOverlays(page),
     });
