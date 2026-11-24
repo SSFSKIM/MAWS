@@ -3,11 +3,19 @@
 // artifacts": titles and text, main's index), the type filter (All types and the seven kinds, each with the count the
 // view and search would give it) and New Space. P5 O7 M5a: beside the title, the machine whose library it lists
 // (MachineMenu.tsx); New Space is this Mac's, so it is not offered for another machine's library.
+// The word cut: the title stays for assistive technology only, since the sidebar's row names the page (G283); the type
+// filter is a funnel glyph named by its word, and a chosen kind stands beside the search as a chip that clears it (G287).
+// New Space stays a worded button: the strip's More, the one menu that makes things here, is not drawn under Pinned,
+// By Space or a search, where the button is (G289 not built; rule 3).
 import { DropdownMenu, ToggleGroup } from 'radix-ui';
 import { ARTIFACT_KINDS, type ArtifactKind } from '@shared/artifacts/entity';
 import type { LibraryCounts } from '@shared/ipc/schema/library';
-import { ChevronDownIcon, Icon, PlusIcon } from '../app/IconButton';
+import { Icon, PlusIcon } from '../app/IconButton';
 import { SECONDARY } from '../sessions/ui';
+import { GLYPH_BUTTON, NamedGlyph } from '../ui/glyph';
+import { HiddenHeading } from '../ui/hidden-heading';
+import { Tip } from '../ui/tip';
+import { FilterIcon } from '../widgets/plugins/icons';
 import { SearchField } from '../widgets/plugins/LibraryHeader';
 import { KIND_PLURAL_LABELS, LIBRARY_PAGE as P } from './copy';
 import { openLibraryDialog } from './dialogs';
@@ -47,9 +55,38 @@ const CheckIcon = () => (
   </Icon>
 );
 
+const XIcon = () => (
+  <Icon className="size-3">
+    <path d="m4.5 4.5 7 7m0-7-7 7" />
+  </Icon>
+);
+
+// The chosen kind beside the search: its glyph and name, and a press clears it.
+function KindChip() {
+  const kind = useLibraryView((s) => s.kind);
+  if (kind === null) return null;
+  const name = KIND_PLURAL_LABELS[kind];
+  return (
+    <Tip content={P.clearKind(name)}>
+      <button
+        type="button"
+        data-library-kind-chip={kind}
+        aria-label={P.clearKind(name)}
+        onClick={() => setLibraryView({ kind: null })}
+        className="inline-flex h-7 shrink-0 items-center gap-1 rounded-md border border-border-strong bg-bg-active px-2 text-ui text-fg outline-accent hover:bg-bg-hover focus-visible:outline-2"
+      >
+        <KindIcon kind={kind} className="size-3.5" />
+        {name}
+        <span aria-hidden className="text-fg-muted">
+          <XIcon />
+        </span>
+      </button>
+    </Tip>
+  );
+}
+
 function TypeFilter({ counts }: { counts: LibraryCounts | undefined }) {
   const kind = useLibraryView((s) => s.kind);
-  const label = kind === null ? P.allTypes : KIND_PLURAL_LABELS[kind];
   const total = counts ? ARTIFACT_KINDS.reduce((sum, k) => sum + counts[k], 0) : undefined;
   const choice = (value: string, text: string, count: number | undefined, icon?: ArtifactKind) => (
     <DropdownMenu.RadioItem key={value} value={value} className={MENU_ITEM}>
@@ -66,17 +103,9 @@ function TypeFilter({ counts }: { counts: LibraryCounts | undefined }) {
   return (
     <DropdownMenu.Root modal={false}>
       <DropdownMenu.Trigger asChild>
-        <button
-          type="button"
-          aria-label={`${P.typeFilter}: ${label}`}
-          title={P.typeFilter}
-          aria-pressed={kind !== null}
-          className="inline-flex h-7 shrink-0 items-center gap-1 rounded-md border border-border px-2 text-ui text-fg-muted outline-accent hover:bg-bg-hover hover:text-fg focus-visible:outline-2 aria-pressed:border-border-strong aria-pressed:text-fg data-[state=open]:bg-bg-active"
-        >
-          {kind !== null && <KindIcon kind={kind} className="size-3.5" />}
-          {label}
-          <ChevronDownIcon />
-        </button>
+        <NamedGlyph label={P.typeFilter} pressed={kind !== null} data-library-type-filter="" className={`${GLYPH_BUTTON} data-[state=open]:bg-bg-active`}>
+          <FilterIcon className="size-3.5" />
+        </NamedGlyph>
       </DropdownMenu.Trigger>
       <DropdownMenu.Portal>
         <DropdownMenu.Content align="end" sideOffset={4} className={MENU}>
@@ -97,10 +126,11 @@ export function LibraryHeader({ counts }: { counts: LibraryCounts | undefined })
   return (
     <div data-library-header className="shrink-0 border-b border-border">
       <div className="mx-auto flex max-w-(--measure-wide) flex-wrap items-center gap-x-3 gap-y-2 px-6 py-3">
-        <h1 className="m-0 text-ui font-semibold text-fg">{P.title}</h1>
+        <HiddenHeading level={1}>{P.title}</HiddenHeading>
         <LibraryMachineMenu />
         <ViewSwitch />
         <span className="ml-auto flex min-w-0 items-center gap-1.5">
+          <KindChip />
           <SearchField label={P.search} value={query} onChange={(next) => setLibraryView({ query: next })} />
           <TypeFilter counts={counts} />
           {!remote && (

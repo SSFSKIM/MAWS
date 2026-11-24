@@ -1,7 +1,8 @@
 // P4-B5: the Send to sheet (docs/doperpowers/plans/2026-10-19-p4-smoothing.md §4.7), app-wide, opened from an editor
 // header's Send to and a library row's Export menu; C10's Sheet and button weights, X7's tokens. It names the target
-// (Notion, or Google Drive), the connection MAWS sends through (Notion: "Connected through MAWS", route D's own sign-in;
-// Drive: the gws CLI's own sign-in), where the delivery goes and, for Drive, the format; then it sends, with no session
+// (Notion, or Google Drive), the connection MAWS sends through (a ready one in a word, "Connected" or Drive's Google
+// account, its source on that word: Notion's route D sign-in, Drive's gws CLI sign-in), where the delivery goes and, for
+// Drive, the format; then it sends, with no session
 // and no Claude turn, and ends on the receipt. When the connection needs something first, the sheet says what and offers
 // it: Connect (Notion's consent in the browser, sealed by MAWS), gws's own login (its URL opened in the browser, the
 // sign-in kept by the CLI), or a Terminal tab running gws's install or setup. The run (./run.ts) is the sheet's, outside
@@ -27,6 +28,7 @@ import { Sheet } from '../sessions/Sheet';
 import { FIELD, PRIMARY, SECONDARY } from '../sessions/ui';
 import { TERMINAL_TOOL_ID, type TerminalParams } from '../tools/terminal';
 import { VIEWERS_COPY } from '../tools/artifacts/viewers/copy';
+import { Tip } from '../ui/tip';
 import { GWS_INSTALL, GWS_SETUP, SEND_TO_COPY as C, SERVICE } from './copy';
 import type { SendToPhase, SendToRun } from './run';
 import { closeSendTo, receiptKey, useDelivery, type SendToSubject } from './store';
@@ -109,11 +111,8 @@ function SendToSheet({ subject, run }: { subject: SendToSubject; run: SendToRun 
             </button>
           ))}
         </div>
-        <p className="m-0 text-ui-sm text-fg-muted">{C.direct}</p>
         <Connection target={target} phase={phase} run={run} terminal={terminal} />
-        {target === 'notion' ? (
-          <p className="m-0 text-ui-sm text-fg-muted">{C.asPage}</p>
-        ) : (
+        {target === 'drive' && (
           <label className="flex items-center gap-3">
             <span className="w-16 shrink-0 text-ui-sm text-fg-muted">{C.format}</span>
             <select aria-label={C.format} disabled={busy || formats.length === 0} value={format ?? ''} onChange={(event) => setPicked(event.target.value as ArtifactExportFormat)} className={`${FIELD} py-0.5`}>
@@ -147,9 +146,9 @@ function SendToSheet({ subject, run }: { subject: SendToSubject; run: SendToRun 
           )}
           {where === 'inside' && link.trim() !== '' && insideId === null && <p className="m-0 text-ui-sm text-danger">{target === 'notion' ? C.notionInsideInvalid : C.driveInsideInvalid}</p>}
         </fieldset>
-        {receipt && phase.phase !== 'sent' && <p className="m-0 text-ui-sm text-fg-muted">{C.lastSent(target, formatAgo(Math.max(0, now - receipt.at)))}</p>}
+        {receipt && phase.phase !== 'sent' && <p className="m-0 text-ui-sm text-fg-muted">{C.lastSent(formatAgo(Math.max(0, now - receipt.at)))}</p>}
         <p role="status" data-send-to-status="" className={`m-0 min-h-[1lh] text-ui-sm ${phase.phase === 'failed' ? 'text-danger' : 'text-fg-muted'}`}>
-          {phase.phase === 'sending' ? C.sending(target) : phase.phase === 'sent' ? C.sent(target, phase.receipt.name) : phase.phase === 'failed' ? phase.words : ''}
+          {phase.phase === 'sending' ? C.sending : phase.phase === 'sent' ? C.sent(phase.receipt.name) : phase.phase === 'failed' ? phase.words : ''}
         </p>
         <div className="flex items-center justify-end gap-2">
           {phase.phase === 'sent' ? (
@@ -185,7 +184,7 @@ function Connection({ target, phase, run, terminal }: { target: DeliveryTarget; 
   // P5 O7 M5c: what is done first on another machine is done there (its sign-in, its gws), so it is offered greyed
   const there = run.elsewhere === null ? null : REMOTE_SURFACE_WORDS.connectOn(target === 'drive' ? 'Drive' : 'Notion', run.elsewhere);
   let greyed = false; // a greyed action is in this line: it says why
-  const line = (text: string | null, actions?: ReactNode, code?: string) => (
+  const line = (text: ReactNode, actions?: ReactNode, code?: string) => (
     <div data-send-to-connection={status?.state ?? phase.phase} className="flex flex-col gap-2 rounded-sm border border-border p-2.5">
       {text !== null && <p className="m-0 text-ui text-fg">{text}</p>}
       {code && <code className="block rounded-sm bg-bg-raised px-2 py-1 font-mono text-ui-sm text-fg">{code}</code>}
@@ -213,14 +212,14 @@ function Connection({ target, phase, run, terminal }: { target: DeliveryTarget; 
     );
   };
   const again = button(C.checkAgain, () => void run.check());
-  if (phase.phase === 'checking') return line(C.checking[target]);
+  if (phase.phase === 'checking') return line(C.checking);
   if (phase.phase === 'connecting') return line(target === 'notion' ? C.connecting : C.signingIn);
   if (status === null) return line(null, again); // the state unread: the status line says why, once
   if (status.target === 'notion') {
     const { source } = status;
     switch (status.state) {
       case 'ready':
-        return source && status.connection ? line(C.notionReady(source, status.connection)) : line(C.notionUnavailable, again);
+        return source && status.connection ? line(<Ready word={C.connected} source={C.notionReady(source, status.connection)} />) : line(C.notionUnavailable, again);
       case 'signIn':
         return line(C.notionSignIn(source?.server ?? 'Notion'), here(C.connect, () => void run.connect()));
       case 'reconnect':
@@ -235,7 +234,7 @@ function Connection({ target, phase, run, terminal }: { target: DeliveryTarget; 
   }
   switch (status.state) {
     case 'ready':
-      return line(C.driveReady(status.user));
+      return line(<Ready word={status.user ?? C.connected} source={C.driveReady(status.user)} />);
     case 'absent':
       return line(C.driveAbsent, <>{here(C.installInTerminal, () => terminal(GWS_INSTALL))}{again}</>, GWS_INSTALL);
     case 'needsSetup':
@@ -249,4 +248,16 @@ function Connection({ target, phase, run, terminal }: { target: DeliveryTarget; 
     default:
       return line(C.driveFailed(status.message), again);
   }
+}
+
+// A ready connection in one word (the word cut, T134), the sentence naming what it goes through on that word, which takes
+// the keyboard so the sentence is reachable.
+function Ready({ word, source }: { word: string; source: string }) {
+  return (
+    <Tip content={source} description={source}>
+      <span tabIndex={0} className="rounded-sm outline-accent focus-visible:outline-2">
+        {word}
+      </span>
+    </Tip>
+  );
 }

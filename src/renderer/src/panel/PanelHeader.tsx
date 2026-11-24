@@ -22,8 +22,9 @@ import { cardHost, cardSession, FLOAT_COPY, useFloatingCard } from '../shell/flo
 import { ShowChat } from '../shell/ShowChat'; // UX wave U10b (O-43): Show chat, before the float control
 import { MARKUP_COPY, startMarkup, useMarkup } from '../markup/session'; // P3-G
 import { useMarkupSurface } from '../markup/surface'; // P3-G
-import { SAVED_COPY, useEditorHeaderFocus, useEditorHostRegistration, type EditorHostAction, type EditorHostExport, type EditorHostRegistration, type EditorHostScope } from './editor-host';
+import { useEditorHeaderFocus, useEditorHostRegistration, type EditorHostAction, type EditorHostExport, type EditorHostRegistration, type EditorHostScope } from './editor-host';
 import { COPY } from './copy';
+import { SavedStatus } from './SavedStatus';
 import { shownSession, useTabLabel } from './host';
 
 export const HEADER_COPY = {
@@ -88,7 +89,7 @@ export function EditorHeader({ icon: TabIcon, title, suffix = null, registration
   if (toolbarHost) return createPortal(
     <div ref={row} data-editor-toolbar className="flex max-w-full min-w-0 flex-wrap items-center gap-1">
       {scope?.surface === 'panel' && registration && <span data-header-title title={registration.title} className="max-w-full min-w-0 truncate text-ui text-fg">{registration.title}</span>}
-      {registration?.saved && <span data-header-saved title={SAVED_COPY[registration.saved]} className="truncate px-1 text-ui-sm text-fg-muted">{registration.saved === 'saved' ? 'Saved' : SAVED_COPY[registration.saved]}</span>}
+      {registration?.saved && <SavedStatus state={registration.saved} className="px-1" />}
       {shown.map((action) => <ActionButton key={action.id} action={action} text />)}
       {(overflow.length > 0 || folded.length > 0) && <MoreMenu actions={overflow} exports={folded} label={toolbarHost.menuLabel} text />}
       {unresolved > 0 && <CommentCount count={unresolved} action={comments} />}
@@ -120,11 +121,7 @@ export function EditorHeader({ icon: TabIcon, title, suffix = null, registration
           {registration ? registration.title : title}
           {!registration && suffix && <span className="text-fg-faint"> · {suffix}</span>}
         </span>
-        {registration?.saved && (
-          <span data-header-saved title={SAVED_COPY[registration.saved]} className="max-w-max min-w-0 flex-[1000_1_0px] truncate text-ui-sm text-fg-muted">
-            {SAVED_COPY[registration.saved]}
-          </span>
-        )}
+        {registration?.saved && <SavedStatus state={registration.saved} className="max-w-max min-w-0 flex-[1000_1_0px]" />}
         {unresolved > 0 && <CommentCount count={unresolved} action={comments} />}
       </div>
       <div className="flex shrink-0 items-center gap-1">

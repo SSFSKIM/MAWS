@@ -4,6 +4,7 @@ import { useEffect, useState, useSyncExternalStore } from 'react';
 import { listDatasets, type DatasetDescriptor } from '@artifacts/dashboard/datasets';
 import { onUpdate, type Doc } from '@artifacts/yjs';
 import type { CommandOutput } from '@shared/ipc/schema';
+import { WaitingWords } from '../../ui/spinner';
 import type { DatasetFileApi } from './file-source-api';
 import './FileSources.css';
 
@@ -62,8 +63,10 @@ export function FileSources({ doc, shown, api }: { doc: Doc | null; shown: boole
     <div className="dash-file-sources" role="status" aria-label="Dataset source files">
       {changed.map(({ id, state, descriptor }) => (
         <div key={id} className="dash-file-source">
-          <span>{state === 'changed' ? `${descriptor.source.kind === 'file' ? descriptor.source.name : descriptor.title} changed. Showing the saved data.` : `${descriptor.source.kind === 'file' ? descriptor.source.name : descriptor.title} is unavailable. Showing the saved data.`}</span>
-          {state === 'changed' && <button type="button" className="doc-tool" aria-label={`Reread ${descriptor.title}`} disabled={busy !== null} onClick={() => void reread(id)}>{busy === id ? 'Rereading…' : 'Reread'}</button>}
+          {/* the word cut (T626): the fact and Reread; the saved data shown below says itself */}
+          <span>{`${descriptor.source.kind === 'file' ? descriptor.source.name : descriptor.title} ${state === 'changed' ? 'changed' : 'is unavailable'}`}</span>
+          {/* the word cut (N192): Reread keeps its word while it reads, the quiet spinner beside it */}
+          {state === 'changed' && <button type="button" className="doc-tool" aria-label={`Reread ${descriptor.title}`} aria-busy={busy === id} disabled={busy !== null} onClick={() => void reread(id)}><WaitingWords words="Reread" wait={busy === id ? 'Rereading…' : null} /></button>}
         </div>
       ))}
       {(checkIssue || actionIssue) && <p className="dash-file-source-issue">{actionIssue || checkIssue}</p>}

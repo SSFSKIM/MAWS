@@ -25,14 +25,14 @@ const KIND_PLURALS: Record<ArtifactKind, string> = {
 
 export const LIBRARY_COPY = {
   fallbackTitle: 'Artifact', // an `artifact` tab whose row is not known (yet)
-  reading: 'Opening…',
+  reading: 'Opening…', // the word cut (G317): the quiet spinner's name, never drawn
   readFailed: (message: string) => `Couldn’t read this artifact: ${message}`,
   retry: 'Try again',
   hostUnreachable: (message: string) => `Couldn’t confirm this artifact with its host: ${message}`,
   goneTitle: 'Artifact not found',
-  gone: 'This artifact was deleted, or it is not in the library.',
+  gone: 'This artifact was deleted.', // the word cut (G319): the tab's title says "Artifact not found"
   // UX wave U10b (M5, §C.5): an editor open on an artifact an agent deleted, with the row's Undo
-  deletedByAgent: 'An agent deleted this artifact. It takes no edits until it is restored.',
+  deletedByAgent: 'An agent deleted this artifact.', // the word cut (N152): the editor already shows it takes no edit
   deletedUnsent: 'An agent deleted this artifact. Your last edit is not saved; restoring the artifact saves it.',
   noEditor: (kind: ArtifactKind) => `No editor for ${KIND_PLURALS[kind]} yet`,
   inSpace: (name: string) => `in ${name}`,
@@ -96,7 +96,8 @@ export const LIBRARY_PAGE = {
   viewLabel: 'View',
   search: 'Search artifacts',
   typeFilter: 'Filter by type',
-  allTypes: 'All types',
+  allTypes: 'All types', // the type menu's first row; the head draws the funnel glyph alone (the word cut, G287)
+  clearKind: (kind: string) => `Clear filter: ${kind}`, // the chosen kind's chip beside the search
   newSpace: 'New Space',
   allSpaces: 'All Spaces',
   // P5 O7 M5a: the machine menu
@@ -112,7 +113,8 @@ export const LIBRARY_PAGE = {
   systemOf: (shown: string) => `Design system: ${shown}`, // the choice's name
   systemDefault: (name: string) => `${name} · default`,
   floorSystem: 'MAWS', // the bundled floor's name, as the document's breadcrumb says it
-  reading: 'Reading the library…',
+  reading: 'Reading the library…', // the word cut (N190): the quiet spinner's name, never drawn
+  readingSpace: 'Loading Space…', // the word cut (N193): the strip heading's spinner while the Spaces are read
   readFailed: (message: string) => `Couldn’t read the library: ${message}`,
   retry: 'Try again',
   // empty states: what puts artifacts here
@@ -156,7 +158,7 @@ export const DIALOG_COPY = {
   delete: 'Delete',
   inUseTitle: 'This design system is in use',
   inUseBody: (title: string) => `“${title}” styles the artifacts below. Move them to another design system before deleting it.`,
-  inUseReading: 'Finding them…',
+  inUseReading: 'Finding them…', // the word cut (N194): the quiet spinner's name, never drawn
   close: 'Close',
   newSpaceTitle: 'New Space',
   nameField: 'Name',

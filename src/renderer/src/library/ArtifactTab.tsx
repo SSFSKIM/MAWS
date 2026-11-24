@@ -40,6 +40,7 @@ import { markArtifactViewed, undeleteArtifact } from './actions';
 import { KIND_LABELS, LIBRARY_COPY } from './copy';
 import { library, libraryRow, refreshLibrary, useLibraryRow, type LibraryRead } from './store';
 import { useMachineUndoUnavailable, useUndoAct, useUnsentWhileDeleted } from './undo-delete'; // UX wave U10b
+import { QuietSpinner } from '../ui/spinner';
 import { unsentWhileDeleted } from '../artifacts/deleted-replicas'; // fix wave 4
 import { DesignSystemHostContext } from '@artifacts/design-system/apply';
 import { artifactHost } from '../artifacts';
@@ -108,7 +109,7 @@ export function ArtifactView({ artifactId, machine, scope, visible }: { artifact
       </MountedEditor>
     );
   }
-  return <Quiet>{notice || <p className="m-0">{LIBRARY_COPY.reading}</p>}</Quiet>;
+  return <Quiet>{notice || <QuietSpinner label={LIBRARY_COPY.reading} /> /* the word cut (G317) */}</Quiet>;
 }
 
 // UX wave U10b: `deleted`, an agent's delete Undo can take back (any other deleted artifact is `absent`, as today).

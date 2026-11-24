@@ -120,7 +120,7 @@ function exportAction(status: ExportStatus, commands: DocumentHeaderCommands): E
   const name = FORMAT_NAMES[status.format];
   switch (status.phase) {
     case 'running':
-      return { id: 'export', label: `Exporting ${name}…`, disabled: true, onSelect: () => {} };
+      return { id: 'export', label: 'Exporting…', disabled: true, onSelect: () => {} }; // the word cut (T612): the format is the one just chosen
     case 'failed':
       return { id: 'export', label: clip(`${name} export failed: ${status.message}`), onSelect: () => commands.dismissExport() };
   }

@@ -34,6 +34,7 @@ import { useSettings } from '../stores/settings';
 import { createArtifact, openArtifactTab } from './actions';
 import { askClaudePrefill, KIND_BLURBS, KIND_LABELS, LIBRARY_PAGE as P, SPACE_COPY, untitledTitle } from './copy';
 import { toastFailure } from './dialogs';
+import { QuietSpinner } from '../ui/spinner';
 import { ChevronRightIcon, KindIcon, MoreIcon } from './icons';
 import { MENU, MENU_ITEM } from './LibraryHeader';
 import { useLibraryList, useLibrarySpaces, useSpaceInstructions } from './store';
@@ -277,7 +278,12 @@ export function MakeSomethingNew({ spaceId }: { spaceId: string | null }) {
         <h2 id="library-make" className="m-0 shrink-0 font-semibold">
           {P.makeNew}
         </h2>
-        <span className="min-w-0 truncate">· {spaceId === null ? 'General' : (space?.name ?? 'Loading Space…')}</span>
+        {spaceId === null || space !== undefined ? (
+          <span className="min-w-0 truncate">· {space?.name ?? 'General'}</span>
+        ) : (
+          // the word cut (N193): while the Spaces are read, the quiet spinner where the Space's name will be
+          <QuietSpinner label={P.readingSpace} />
+        )}
         <SystemChoice choice={choice} />
       </div>
       <div className="flex items-stretch gap-2">

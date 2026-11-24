@@ -18,7 +18,7 @@
 // P5 O7 M5c (docs/doperpowers/plans/2026-10-28-p5-o7-remote-lane-b.md, acceptance 6): another machine's artifact's sheet
 // is drawn from the device's rights there and the machine's offer (../../../../artifacts/remote-surfaces.ts): a part the
 // machine doesn't offer, or whose `machine-admin` the device lacks, is greyed with why, never hidden.
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, type ReactNode } from 'react';
 import { ipc } from '../../../../ipc/client';
 import { useStore } from 'zustand';
 import { connectorToolKey, type ConnectorToolRef } from '@shared/artifacts/connectors';
@@ -27,6 +27,8 @@ import { GRANT_NEEDS, LEASE_NEEDS, REMOTE_SURFACE_WORDS, SERVER_NEEDS, useRemote
 import { NO_SESSION_CONTEXT, useArtifactSessionContext, type ArtifactContextOf, type ArtifactSessionContext } from '../../../../artifacts/session-context';
 import { Sheet } from '../../../../sessions/Sheet';
 import { PRIMARY, SECONDARY } from '../../../../sessions/ui';
+import { QuietSpinner } from '../../../../ui/spinner';
+import { Tip } from '../../../../ui/tip';
 import { useLayout } from '../../../../stores/layout';
 import { CONNECTORS_COPY as C, SERVERS_COPY as S } from './copy';
 import { sheetTools, type ConnectorsTab } from './tab';
@@ -203,9 +205,13 @@ function ServersSection({ tab }: { tab: ConnectorsTab }) {
         </div>
       ) : rows === null ? (
         <div className="flex flex-wrap items-baseline gap-2">
-          <p role="status" className="m-0 text-ui-sm text-fg-muted">
-            {failed ? S.readFailed : S.reading}
-          </p>
+          {failed ? (
+            <p role="status" className="m-0 text-ui-sm text-fg-muted">
+              {S.readFailed}
+            </p>
+          ) : (
+            <QuietSpinner label={S.reading} /> // the word cut (T595)
+          )}
           {refresh}
         </div>
       ) : (
@@ -246,7 +252,7 @@ interface RowAction {
 }
 
 // What a row says and offers: its name, its configuration's origin, its state in words, its actions.
-function describe(tab: ConnectorsTab, row: ConnectorServerRow, unattributed: boolean): { name: string; origin: string | null; status: string; actions: RowAction[] } {
+function describe(tab: ConnectorsTab, row: ConnectorServerRow, unattributed: boolean): { name: string; origin: string | null; status: ReactNode; actions: RowAction[] } {
   const actions: RowAction[] = [];
   const disconnect = (connectionId: string, retry: boolean, server?: string) =>
     actions.push({ label: retry ? S.retry : S.disconnect, aria: retry ? S.retryLabel(server) : S.disconnectLabel(server ?? ''), run: () => void tab.disconnectServer(connectionId) });
@@ -273,7 +279,7 @@ function describe(tab: ConnectorsTab, row: ConnectorServerRow, unattributed: boo
       return { name: row.server, origin: S.origin(row.scope, row.path), status: S.connection(row, unattributed), actions };
     }
     case 'engineOnly':
-      return { name: row.server, origin: null, status: S.engineOnly(row.why), actions };
+      return { name: row.server, origin: null, status: <SessionOnly why={S.engineOnlyWhy(row.why)} />, actions };
     case 'saved':
       if (row.disconnecting !== 'pending') disconnect(row.connectionId, row.disconnecting === 'unconfirmed', row.server);
       return { name: row.server, origin: S.origin(row.scope, row.path), status: row.disconnecting === 'pending' ? S.disconnecting : row.disconnecting === 'unconfirmed' ? S.unconfirmed : S.savedRow, actions };
@@ -332,6 +338,16 @@ function ServerRow({ tab, row, unattributed }: { tab: ConnectorsTab; row: Connec
         </div>
       )}
     </li>
+  );
+}
+// A server only a session can use (the word cut, T600): "Session only" at rest, why on that word, which takes the keyboard.
+function SessionOnly({ why }: { why: string }) {
+  return (
+    <Tip content={why} description={why}>
+      <span tabIndex={0} className="rounded-sm outline-accent focus-visible:outline-2">
+        {S.engineOnly}
+      </span>
+    </Tip>
   );
 }
 // P3-HD M3c2 end

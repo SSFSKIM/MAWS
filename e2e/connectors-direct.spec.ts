@@ -1015,7 +1015,7 @@ test('engine only: an entry with a reference is the session’s alone; with its 
       const engine = await scene.ownerStart(run.page);
       await expect(frame.locator('#last')).toHaveText('revoked:notGranted', { timeout: WATCH_MS + 15_000 });
       const sheet = await scene.openSheet(run.page);
-      await expect(serverRow(sheet, SERVER, 'engineOnly'), 'the sheet says the server is the session’s alone, and why').toContainText(S.engineOnly('unattested'));
+      await expect(serverRow(sheet, SERVER, 'engineOnly'), 'the sheet says the server is the session’s alone, and why').toContainText(S.engineOnly);
       await expect(serverRow(sheet, SERVER, 'source'), 'no direct source for it').toHaveCount(0);
       await shot(info, 'engine-only-servers.png', sheet);
       await scene.closeSheet(run.page);

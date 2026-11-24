@@ -36,7 +36,7 @@ import { closeCard, useCommentCard } from '../../side/card/store';
 import { useLayout } from '../../stores/layout';
 
 const COPY = SIDE_COPY.card;
-const STARTING = 'Starting a session for this comment…';
+const STARTING = 'Starting a session…'; // the word cut (T621): the card it stands in for names the comment
 const COULD_NOT_START = 'The session did not start';
 const OPEN_SESSION = 'Open session';
 // P3-F F4: the trust question in the card's place (what it records and turns on is the composer card's, TrustDetails)

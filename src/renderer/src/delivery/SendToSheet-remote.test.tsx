@@ -36,7 +36,7 @@ const install = (given: Parameters<typeof fakeClient>[0]) => {
 const openSheet = async (target: 'notion' | 'drive' = 'notion') => {
   render(<SendToHost />);
   act(() => openSendTo(subject, target));
-  await waitFor(() => expect(screen.queryByText(C.checking[target])).toBeNull());
+  await waitFor(() => expect(screen.queryByText(C.checking)).toBeNull());
 };
 const status = () => document.querySelector('[data-send-to-status]')!.textContent;
 const elsewhere = () => document.querySelector('[data-send-to-elsewhere]')?.textContent ?? null;

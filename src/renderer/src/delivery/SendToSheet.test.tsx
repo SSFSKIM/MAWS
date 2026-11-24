@@ -52,7 +52,7 @@ afterEach(() => cleanup());
 const openSheet = async (target?: 'notion' | 'drive', of: SendToSubject = subject) => {
   render(<SendToHost />);
   act(() => openSendTo(of, target));
-  await waitFor(() => expect(screen.queryByText(C.checking[target ?? 'notion'])).toBeNull());
+  await waitFor(() => expect(screen.queryByText(C.checking)).toBeNull());
 };
 const sendButton = () => screen.getByRole('button', { name: /^Send/ });
 const connection = () => document.querySelector<HTMLElement>('[data-send-to-connection]')!;
@@ -75,6 +75,7 @@ describe('the Send to sheet’s words', () => {
     await openSheet('drive');
     await waitFor(() => expect(connection().textContent).toBe('me@example.com'));
     cleanup();
+    resetDelivery();
     status.drive = { target: 'drive', state: 'ready' };
     await openSheet('drive');
     await waitFor(() => expect(connection().textContent).toBe('Connected'));
