@@ -413,7 +413,7 @@ The observable state that closes the unit as a whole; each item is observed in t
 - **Contracts:** none; its verdicts may move X3 and §6.
 - **Design inheritance:** §12; `docs/doperpowers/specs/2026-10-13-ask-async-design.md` in doperpowers ("How the engine is reached") shows the probe-plugin method used for today's tool.
 - **Required:** required.
-- **Status:** landed as findings (2026-11-23): the verdicts are in §2.3, §3, §5.3, §5.4, §5.5, §6 and §12; the fixtures await the merge of pull request #874.
+- **Status:** landed (2026-11-23): the verdicts are in §2.3, §3, §5.3, §5.4, §5.5, §6 and §12; the fixtures are on master (#874, `90ce5c017`).
 
 ### C1: Behaviour baseline — brief (doperpowers repository)
 
@@ -545,7 +545,7 @@ Tickets are on MAWS's board, children of #600.
 
 | child | artifact | status |
 |---|---|---|
-| C0 engine probes (#865) | verdicts in §12 and the sections it names; `spikes/protocol-probe/findings-qsheet-c0.txt` and `fixtures/qsheet/`, pull request #874 | verdicts landed; the fixtures' pull request open |
+| C0 engine probes (#865) | verdicts in §12 and the sections it names; `spikes/protocol-probe/findings-qsheet-c0.txt` and `fixtures/qsheet/`, pull request #874 | landed: master `90ce5c017`; ticket closed with the findings |
 | C1 behaviour baseline (#866) | ledger in doperpowers `docs/doperpowers/ledgers/`; the evals under `tests/output-styles/` | in-flight |
 | C2 the sheet in sminos (#867) | execution document in doperpowers `docs/doperpowers/plans/2026-11-23-question-sheet-c2-sminos.md` (branch `question-sheet-c2`, reviewed twice, at `198dff493`) | in-flight: M1 (G1) dispatched |
 | C3 the sheet in the MAWS app (#868) | execution document in `docs/doperpowers/plans/` | not-dispatched |
