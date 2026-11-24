@@ -566,6 +566,53 @@ describe('the owner’s actions', () => {
     await until(() => document.activeElement === screen.queryByRole('textbox', { name: 'Version name' }), 'the field focused');
   });
 
+  // The medium review: the name form closing (Cancel, or a save) takes away the field that held the keyboard; the
+  // keyboard goes back to the version's actions, where the form was opened from.
+  it('gives the keyboard back to the version’s actions when the name form closes', async () => {
+    await setup(async ({ history: hist }) => {
+      hist.version('auto', HUMAN);
+    });
+    await openHistory();
+    click(within(rail()).getAllByRole('button', { name: /^Version / })[0]);
+    await previewing();
+    const actions = within(bar()).getByRole('button', { name: 'Actions for this version' });
+    await versionAction('Name this version');
+    await until(() => document.activeElement === screen.queryByRole('textbox', { name: 'Version name' }), 'the field focused');
+    await userEvent.click(within(screen.getByRole('form', { name: 'Name this version' })).getByRole('button', { name: 'Cancel' }));
+    expect(screen.queryByRole('form', { name: 'Name this version' })).toBeNull();
+    expect(document.activeElement).toBe(actions);
+    await versionAction('Name this version');
+    await until(() => document.activeElement === screen.queryByRole('textbox', { name: 'Version name' }), 'the field focused again');
+    await userEvent.type(screen.getByRole('textbox', { name: 'Version name' }), 'Before legal');
+    await userEvent.click(within(screen.getByRole('form', { name: 'Name this version' })).getByRole('button', { name: 'Save' }));
+    await until(() => screen.queryByRole('form', { name: 'Name this version' }) === null, 'the form closed by the save');
+    expect(document.activeElement).toBe(within(bar()).getByRole('button', { name: 'Actions for this version' }));
+  });
+
+  // The medium review: confirming Restore takes away the Cancel that held the keyboard; it goes to the document once the
+  // restore lands, and back to Restore this version when the restore fails.
+  it('puts the keyboard in the document after a restore, and back on Restore when the restore fails', async () => {
+    const { editor, history: h } = await setup(async ({ history: hist }) => {
+      hist.version('named', HUMAN, { label: 'Clean draft' });
+    });
+    await openHistory();
+    click(row('Clean draft'));
+    await previewing();
+    const restore = () => within(bar()).getByRole('button', { name: 'Restore this version' });
+    const confirmRestore = async () => {
+      await userEvent.click(restore());
+      await userEvent.click(within(screen.getByRole('alertdialog', { name: 'Restore this version?' })).getByRole('button', { name: 'Restore' }));
+    };
+    const working = h.restore.bind(h);
+    h.restore = () => Promise.reject(new Error('offline'));
+    await confirmRestore();
+    await until(() => document.activeElement === screen.queryByRole('button', { name: 'Restore this version' }), 'Restore focused after the failure');
+    h.restore = working;
+    await confirmRestore();
+    await until(() => screen.queryByRole('toolbar', { name: 'Version preview' }) === null, 'history left');
+    await until(() => editor().view.dom.contains(document.activeElement), 'the keyboard in the document');
+  });
+
   it('makes a copy of the selected version', async () => {
     const { history: h } = await setup(async ({ history: hist, agentWrites }) => {
       hist.version('named', HUMAN, { label: 'Keep this' });

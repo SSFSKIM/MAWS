@@ -168,7 +168,9 @@ describe('the card’s forms', () => {
       return found[2]!.replace(/\s+/g, ' ');
     };
     const card = rule('.thread-card');
-    expect(card).not.toContain('grid-template-columns');
+    // one column, its track allowed below a long unbroken passage's min-content width, so the card never grows past
+    // its host (the panel) and its action stays on screen (the medium review)
+    expect(card).toContain('grid-template-columns: minmax(0, 1fr);');
     for (const declaration of ['position: relative;', 'anchor-scope: --thread-head;']) expect(card).toContain(declaration);
     expect(commentsCss).not.toMatch(/subgrid|grid-column|grid-row/);
     expect(rule('.thread-card > .thread-card-messages:first-of-type > .thread-card-message:first-child > .thread-card-author')).toContain('anchor-name: --thread-head;');

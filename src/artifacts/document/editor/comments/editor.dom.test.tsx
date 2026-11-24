@@ -241,9 +241,9 @@ describe('the threads rail', () => {
     const field = (id: string) => within(rail().querySelector<HTMLElement>(`[data-thread="${id}"]`)!).getByRole('textbox', { name: 'Reply' }) as HTMLTextAreaElement;
     expect(ids()).toEqual([first]);
     act(() => fireEvent.click(within(rail()).getByRole('button', { name: /^Deleted \(/ })));
-    // All: the open thread first, then the Deleted fold's own in thread order, the resolved thread whose passage is gone
-    // among them (the pair review's fix wave, G395)
-    expect(ids()).toEqual([first, second, 'zz000001']);
+    // All: the open thread, then the Deleted fold's open thread under it, then the Resolved section, which lists the
+    // resolved thread whose passage is gone while Deleted is open (the pair review's fix wave, G395)
+    expect(ids()).toEqual([first, 'zz000001', second]);
     expect(within(rail()).getByRole('radio', { name: 'All' })).toHaveProperty('checked', true);
     expect(within(rail()).getByRole('radio', { name: 'All tabs' })).toHaveProperty('checked', true);
     act(() => fireEvent.change(field(first), { target: { value: 'Draft kept' } }));
@@ -266,14 +266,14 @@ describe('the threads rail', () => {
     expect(ids()).toEqual(['zz000001']);
     search('claude'); // an author: the agent replied to the first and wrote the third
     expect(ids()).toEqual([first, 'zz000001']);
-    search('owners'); // a resolved thread's quote, its passage gone: listed under the Deleted fold, no note above it
+    search('owners'); // a resolved thread's quote, its passage gone: listed under Resolved, no note above it
     expect(ids()).toEqual([second]);
     expect(rail().querySelector('.doc-rail-empty')).toBeNull();
     search('nothing like it');
     expect(ids()).toEqual([]);
     expect(rail().querySelector('.doc-rail-empty')?.textContent).toBe('No matches'); // the word cut (G398)
     search('');
-    expect(ids()).toEqual([first, second, 'zz000001']);
+    expect(ids()).toEqual([first, 'zz000001', second]);
     expect(field(first).value).toBe('Draft kept');
   });
 
@@ -549,12 +549,43 @@ describe('the word cut in the comments panel', () => {
     expect(toggle.getAttribute('aria-expanded')).toBe('true');
     const deleted = cardOf('zz000001')!;
     expect(follows(toggle, deleted) && follows(deleted, resolvedToggle)).toBe(true); // under its own toggle
-    expect(toggle.closest('section')?.contains(deleted)).toBe(true);
+    expect(deleted.parentElement).toBe(toggle.parentElement); // one list with the open cards, so a card moves in place
     expect(within(rail()).getAllByRole('group').map((card) => [card.dataset.thread, card.getAttribute('aria-label')!.replace(/^.*\((\d+ of \d+)\)$/, '$1')])).toEqual([
       [open!.id, '1 of 3'],
       ['zz000001', '2 of 3'],
       [settled!.id, '3 of 3'],
     ]);
+  });
+
+  // The medium review: a passage deleted (or restored) by someone else moves its thread between the open threads and the
+  // Deleted fold; the card moves in place, one list, so it is not remounted and keeps the keyboard.
+  it('keeps a card mounted, with the keyboard, when its passage is deleted while Deleted is open', async () => {
+    const { editor, first } = await seeded();
+    act(() => fireEvent.click(within(toolbar()).getByRole('button', { name: /^Comments/ })));
+    await quiet();
+    act(() => fireEvent.click(within(rail()).getByRole('button', { name: /^Deleted \(/ })));
+    const card = rail().querySelector<HTMLElement>(`[data-thread="${first}"]`)!;
+    expect(card.dataset.orphan).toBeUndefined();
+    act(() => card.focus());
+    act(() => {
+      const at = findPos(editor(), 'ships quarterly');
+      editor().view.dispatch(editor().state.tr.delete(at, at + 'ships quarterly'.length));
+    });
+    await quiet();
+    expect(rail().querySelector(`[data-thread="${first}"]`)).toBe(card);
+    expect(card.dataset.orphan).toBe('');
+    expect(document.activeElement).toBe(card);
+  });
+
+  // The medium review: "No open comments" only where no open thread is listed, the open Deleted fold's included.
+  it('says there are no open comments only while the Deleted fold lists none of them', async () => {
+    const { handle } = await mount(content());
+    addThread(handle.doc, { threadId: 'zz000001', tabId: TAB, blockId: 'p1', quote: 'Gone', anchor: { start: null, end: null, block: null }, by: SESSION, at: Date.now() });
+    act(() => fireEvent.click(within(toolbar()).getByRole('button', { name: /^Comments/ })));
+    await quiet();
+    expect(rail().querySelector('.doc-rail-empty')?.textContent).toBe('No open comments. Select text and choose Add comment.');
+    act(() => fireEvent.click(within(rail()).getByRole('button', { name: 'Deleted (1)' })));
+    expect(rail().querySelector('.doc-rail-empty')).toBeNull();
   });
 
   it('counts in Deleted (N) the deleted threads the status filter and the search let through, and hides it at none', async () => {

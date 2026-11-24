@@ -8,7 +8,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { accessibleText } from '../test-support/accessible-text';
 import { fakeTimeouts, realTimeouts } from '../test-support/fake-timeouts';
 import { POINTING_DELAY_MS } from './pointing';
-import { Tip, UnavailableButton } from './tip';
+import { Tip, tipBoundaryOf, UnavailableButton } from './tip';
 
 const FACT = 'MAWS falls back to a dock bounce and a toast';
 
@@ -372,5 +372,21 @@ describe('UnavailableButton', () => {
     await keys.click(button);
     expect(commit).not.toHaveBeenCalled();
     expect(submit).not.toHaveBeenCalled();
+  });
+});
+
+// The medium review: a `TipBoundary`'s tips keep to what can be seen of its element, the element cut by its nearest
+// scrolling ancestor (a page in a side panel's group, whose lower edge is the group's, not the page's).
+describe('a tip boundary', () => {
+  it('is the element’s nearest scrolling ancestor and the element itself', () => {
+    const scroller = document.body.appendChild(document.createElement('div'));
+    scroller.style.overflowY = 'auto';
+    const page = scroller.appendChild(document.createElement('div')).appendChild(document.createElement('div'));
+    expect(tipBoundaryOf(page)).toEqual([scroller, page]);
+    const alone = document.body.appendChild(document.createElement('div'));
+    expect(tipBoundaryOf(alone)).toEqual([alone]);
+    expect(tipBoundaryOf(null)).toEqual([]);
+    scroller.remove();
+    alone.remove();
   });
 });
