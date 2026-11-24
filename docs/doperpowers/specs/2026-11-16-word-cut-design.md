@@ -43,7 +43,7 @@ How to see it working: open the build beside today's build on the same fixtures 
 - [x] (2026-11-24 10:40Z) M5 task 5: the e2e moves, reviewed clean.
 - [x] (2026-11-24 08:20Z) M5 task 6: the rig's scenes for the library, an opened artifact, the document and the dashboard, reviewed clean and merged.
 - [x] (2026-11-24 12:10Z) M5 task 7: the rig's scenes for the slides editor, the design workbench and the design system page, reviewed clean and merged.
-- [x] (2026-11-24) M5 built: artifacts and the editors. Its 227 rows were read against master `f2b32d6c9`, and 15 `new` rows were added (N190 to N204, 11 cuts and 4 `stays`). Of the cuts and rewordings, all but G289 are built; G289 is held because its menu is not drawn where the head's New Space is. The `stays` rows read as on master. The deck now says "All changes saved" like every other editor, through one `SavedStatus`. The editors import the `ui/` parts directly, since they were never separate bundles. Unit tests moved with each area. Task 5 moved the Electron e2e reads, and the groups are unchanged; no harness probe or desk spec read a changed control. The rig gained 95 `m5-` scenes, in launch 2 and in launch 16. An xhigh panel returned 14 findings: 9 were fixed and 5 logged. The rig was repaired after each of four Mac shakedowns. Class 1a passed at the hand-over head. Still owed: the picture pairs and the owner's call, and the Electron e2e groups on a Mac.
+- [x] (2026-11-24) M5 built: artifacts and the editors. Its 227 rows were read against master `f2b32d6c9`, and 15 `new` rows were added (N190 to N204, 11 cuts and 4 `stays`). Of the cuts and rewordings, all but G289 are built; G289 is held because its menu is not drawn where the head's New Space is. The `stays` rows read as on master. The deck now says "All changes saved" like every other editor, through one `SavedStatus`. The editors import the `ui/` parts directly, since they were never separate bundles. Unit tests moved with each area. Task 5 moved the Electron e2e reads, and the groups are unchanged; no harness probe or desk spec read a changed control. The rig gained 95 `m5-` scenes, in launch 2 and in launch 16. An xhigh panel returned 14 findings: 9 were fixed and 5 logged. The rig was repaired after each of four Mac shakedowns. Four Mac shakedowns repaired the rig, and the pair review's fix wave followed. Class 1a passed at the hand-over head. Still owed: the owner's call on the pictures, and the Mac rerun of the groups the fix wave touched.
 - [ ] M5's pictures and the owner's call.
 - [ ] Retrospective.
 
@@ -540,7 +540,7 @@ Kept by the session that wrote this document (sminos alias `design-experiment`, 
   - A glyph's tooltip takes `NamedGlyph`'s form, "Add comment · ⌘⌥M", not the rows' "(⌘⌥M)", and History carries its ⌘⌥⇧H. A greyed Add comment or Reply is `aria-disabled` with its reason: "Read-only", "Select text to comment on", "Write a reply first".
   - G331's Table is a Radix menu that keeps the editor's selection.
   - A version's actions are one "Actions for this version" menu, and Restore keeps the name "Restore this version".
-  - G384's Resolve/Reopen sits in a cell of its own beside the quote, never over it.
+  - G384's Resolve/Reopen sits in a cell of its own beside the quote, never over it. *Superseded by the pair review's fix wave (below): the cell narrowed every message, so Resolve now draws over the end of the first author line.*
   - G385: a panel card shows its reply field only when active. Pressing R or clicking an inactive card in the wide panel hands the request to the margin card that takes the thread, and the editor consumes the request once.
   - `HistoryRail` and `ThreadCard` are shared with the deck and the design editor, so these rows reach those editors too.
   - The dashboard tile is DOM built outside React. G598's mismatch mark reveals its words by CSS on a focusable mark, as M3's find bar did, and G603's folded-pie note joins that mark while the view's other limits stay at rest (G596). G604's wait is a CSS spinner, unnamed for its quiet half second, standing in for the row's "muted ellipsis" (the quiet spinner wins over a row's wording). G597 removes the warnings from the editor's tile only; exports keep them, and `types/dashboard/format.md`, the agents' guide to the kind, says so.
@@ -587,6 +587,31 @@ Kept by the session that wrote this document (sminos alias `design-experiment`, 
   - **Unreached rows.** G518 is unreached: the workbench greys every board edit the model would refuse, and the canvas resize that could still raise it is not staged. G421 is unreached too, because every system in the fixtures has layouts.
   - **The Mac shakedowns.** The coordinator ran three after-only shakedowns on the Mac, and three rig faults came out of them. The library's View switch is a radiogroup on both builds. G512 removed the design toolbar's Comments toggle, so the design rail now opens through the header's count. And the host's `ensureTab` restores an empty tab unless a document's files root holds something, so the empty-document and legacy-dashboard fixtures write their files before removing the tabs.
   - **Rows reached.** Of M5's 182 changing rows, 112 have a scene; the other 70 are listed with the state each needs in `scenes.md`'s "M5's states with no scene" (board ticket 816).
+- 2026-11-24. **M5 after the panel: the shakedowns, the pair review and its fix wave.**
+  - **Shakedown 4.** The coordinator's fourth Mac shakedown left 11 scenes unreached. All 11 were the rig's doing:
+    - Escape went to a thumbnail rather than the stage.
+    - The planning deck had no theme override, so Reset all was never drawn.
+    - The library is virtualised, so the bundled systems' rows were never mounted. A new `libraryRow` now scrolls the list until the row mounts.
+  - **The pair review.** Three reviewers compared the final before and after pictures. They found 12 product defects and several states the pictures did not show. One fix wave ran, with three fixers by area, merged here. Two rows that predate M5 went to the tracker, and the "Fit" tooltip over a tab icon was dismissed.
+  - **What changed:**
+    - Margin cards span their width. Resolve draws over the end of the first author line, so it no longer reserves a gutter.
+    - "Deleted (N)" is a disclosure placed after the open threads.
+    - The version actions' "…" is a glyph in the ×'s box, pressed while its menu is open.
+    - The pie's ⚠ note flips up near the bottom edge.
+    - The deck's badge is a 12 px corner badge, and the deck header no longer draws a second count.
+    - The opened speaker notes are framed and take the caret.
+    - A board's own thread names the board once.
+    - The design workbench keeps the word "Inspector": G401 is the deck's row, and no design row covers it.
+    - The empty design system page takes the app's empty-state style.
+    - The rows' tooltip text reads as drawn, "Label · ⌘⌥M".
+  - **Tooltip side.** Four tips opened above and covered what they explain: G558, G584, G585 and G450. Each now names `side="bottom"`. `TipBoundary` keeps a page's tips on the page.
+    - Every other tip keeps the app's established side, above. An app-wide flip to below was built and then withdrawn by the coordinator's ruling: it would reopen every tip scene the owner approved in M1 to M4.
+    - Whether below should become the default is a separate change, to go to the owner with its own pictures.
+  - **Rings by Tab.** The missing focus rings were the rig's doing. A scripted focus after a pointer action does not trigger `:focus-visible`, so six tip scenes now reach their owner by Tab.
+  - **Mac e2e at the hand-over candidate.** Three e2e failures were M5's, and the fix wave settled them:
+    - The restore confirm now takes the keyboard on open, which closes the "…"'s tooltip that had covered it.
+    - The dashboard's live-data read now expects the sheet itself to take focus, as task 2 decided.
+    - The margin-push case keeps its 20 px bound, and its agent reply is longer: M5's shorter card had left room to spare.
 
 ## Outcomes & Retrospective
 
