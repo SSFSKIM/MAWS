@@ -22,6 +22,8 @@ const directModels = () => (loadJournal('pass2', 'auto-unrouted').find((r) => r.
 const RELAY = modelsKey('2.1.283', 'gateway');
 const DIRECT = modelsKey('2.1.283', 'direct');
 
+const FINGERPRINT = expect.stringMatching(/^[0-9a-f]{64}$/); // ticket 851, M3's review: the gateway values' digest
+
 describe('models catalogue cache', () => {
   it('answers the built-in list before any catalogue was seen: the five entries of reads.jsonl, no relay alias', async () => {
     const cache = new ModelsCache(userData);
@@ -370,11 +372,28 @@ describe('effectiveBaseUrl', () => {
   it('names the gateway keys the machine sets, through the same layering', async () => {
     const home = join(root, 'home');
     const project = join(root, 'project');
-    expect(await resolve({ HOME: home }, project)).toEqual({ kind: 'resolved', baseUrl: null, gatewayKeys: [] });
+    expect(await resolve({ HOME: home }, project)).toEqual({ kind: 'resolved', baseUrl: null, gatewayKeys: [], gatewayFingerprint: FINGERPRINT });
     await settings(home, 'settings.json', { env: { ANTHROPIC_AUTH_TOKEN: 'machine-token' } });
-    expect(await resolve({ HOME: home, ENABLE_TOOL_SEARCH: 'true' }, project)).toEqual({ kind: 'resolved', baseUrl: null, gatewayKeys: ['ANTHROPIC_AUTH_TOKEN', 'ENABLE_TOOL_SEARCH'] });
+    expect(await resolve({ HOME: home, ENABLE_TOOL_SEARCH: 'true' }, project)).toEqual({ kind: 'resolved', baseUrl: null, gatewayKeys: ['ANTHROPIC_AUTH_TOKEN', 'ENABLE_TOOL_SEARCH'], gatewayFingerprint: FINGERPRINT });
     await settings(project, 'settings.json', { env: { ANTHROPIC_AUTH_TOKEN: '' } });
-    expect(await resolve({ HOME: home }, project)).toEqual({ kind: 'resolved', baseUrl: null, gatewayKeys: [] });
+    expect(await resolve({ HOME: home }, project)).toEqual({ kind: 'resolved', baseUrl: null, gatewayKeys: [], gatewayFingerprint: FINGERPRINT });
+  });
+
+  // Ticket 851, M3's review (finding 3): what the gateway keys are set to decides the launch as much as which are set, so
+  // a digest of their effective values is told beside their names (a prestart's key carries it); never the values
+  it('digests the gateway keys’ effective values: a rotated value at the same names gives another digest, with no value in clear', async () => {
+    const home = join(root, 'home');
+    const project = join(root, 'project');
+    await settings(home, 'settings.json', { env: { ANTHROPIC_BASE_URL: OTHER, ANTHROPIC_AUTH_TOKEN: 'first-made-up-value' } });
+    const first = await resolve({ HOME: home }, project);
+    await settings(home, 'settings.json', { env: { ANTHROPIC_BASE_URL: OTHER, ANTHROPIC_AUTH_TOKEN: 'second-made-up-value' } });
+    const second = await resolve({ HOME: home }, project);
+    expect(first).toMatchObject({ kind: 'resolved', baseUrl: OTHER, gatewayKeys: ['ANTHROPIC_BASE_URL', 'ANTHROPIC_AUTH_TOKEN'] });
+    expect(second).toMatchObject({ kind: 'resolved', baseUrl: OTHER, gatewayKeys: ['ANTHROPIC_BASE_URL', 'ANTHROPIC_AUTH_TOKEN'] });
+    const digest = (r: typeof first) => (r.kind === 'resolved' ? r.gatewayFingerprint : null);
+    expect(digest(first)).not.toBe(digest(second));
+    expect(digest(first)).not.toContain('first-made-up-value');
+    expect(await resolve({ HOME: home }, project)).toEqual(second); // the same values, the same digest
   });
 
   // P5 O7 M9 (the architect's fail-closed rule): a source the resolver does not model could set a gateway key unseen, so
@@ -413,7 +432,7 @@ describe('effectiveBaseUrl', () => {
       await mkdir(join(home(), '.claude'), { recursive: true });
       await writeFile(join(home(), '.claude', '.config.json'), JSON.stringify({ env: {} })); // the legacy file, selected
       await writeFile(join(home(), '.claude.json'), JSON.stringify({ env: { MAX_THINKING_TOKENS: '8000' } }));
-      expect(await at()).toEqual({ kind: 'resolved', baseUrl: null, gatewayKeys: [] });
+      expect(await at()).toEqual({ kind: 'resolved', baseUrl: null, gatewayKeys: [], gatewayFingerprint: FINGERPRINT });
       await writeFile(join(home(), '.claude.json'), JSON.stringify({ env: { ANTHROPIC_AUTH_TOKEN: 'modern-token' } }));
       expect(await at()).toMatchObject({ kind: 'uncertain' });
     });
@@ -427,13 +446,13 @@ describe('effectiveBaseUrl', () => {
     await writeFile(join(home, '.claude-custom-oauth.json'), JSON.stringify({ env: { ANTHROPIC_AUTH_TOKEN: 'oauth-token' } }));
     await writeFile(join(home, '.claude.json'), JSON.stringify({ env: { ANTHROPIC_BASE_URL: OTHER } }));
     const at = (env: Record<string, string>) => effectiveBaseUrl({ env: { HOME: home, ...env }, cwd: null, platform: 'linux', systemRoot: system });
-    expect(await at({})).toEqual({ kind: 'resolved', baseUrl: OTHER, gatewayKeys: ['ANTHROPIC_BASE_URL'] });
-    expect(await at({ CLAUDE_CODE_CUSTOM_OAUTH_URL: 'https://oauth.example.invalid' })).toEqual({ kind: 'resolved', baseUrl: null, gatewayKeys: ['ANTHROPIC_AUTH_TOKEN'] });
+    expect(await at({})).toEqual({ kind: 'resolved', baseUrl: OTHER, gatewayKeys: ['ANTHROPIC_BASE_URL'], gatewayFingerprint: FINGERPRINT });
+    expect(await at({ CLAUDE_CODE_CUSTOM_OAUTH_URL: 'https://oauth.example.invalid' })).toEqual({ kind: 'resolved', baseUrl: null, gatewayKeys: ['ANTHROPIC_AUTH_TOKEN'], gatewayFingerprint: FINGERPRINT });
     await writeFile(join(home, '.claude', '.config.json'), JSON.stringify({ env: { ENABLE_TOOL_SEARCH: 'true' } }));
     // the legacy file is selected, and the custom-OAuth one beside it sets a gateway key: not known which counts
     expect(await at({ CLAUDE_CODE_CUSTOM_OAUTH_URL: 'https://oauth.example.invalid' })).toMatchObject({ kind: 'uncertain' });
     await writeFile(join(home, '.claude-custom-oauth.json'), JSON.stringify({ env: {} })); // none there: the legacy file's alone
-    expect(await at({ CLAUDE_CODE_CUSTOM_OAUTH_URL: 'https://oauth.example.invalid' })).toEqual({ kind: 'resolved', baseUrl: null, gatewayKeys: ['ENABLE_TOOL_SEARCH'] });
+    expect(await at({ CLAUDE_CODE_CUSTOM_OAUTH_URL: 'https://oauth.example.invalid' })).toEqual({ kind: 'resolved', baseUrl: null, gatewayKeys: ['ENABLE_TOOL_SEARCH'], gatewayFingerprint: FINGERPRINT });
   });
 
   // P5 O7 M9 fix round (item 2): a launch in a worktree not yet created reads what its branch tracks: the caller hands

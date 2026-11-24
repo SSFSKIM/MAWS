@@ -71,3 +71,35 @@ func TestLineAndRecordHeader(t *testing.T) {
 		t.Fatalf("hello's absent fields are not null: %s", hello.String())
 	}
 }
+
+func TestPrestartAndPromote(t *testing.T) {
+	br := reader(`{"t":"launch","prestart":true,"argv":["/bin/cat"]}` + "\n" + `{"t":"launch","argv":["/bin/cat"]}` + "\n" + `{"t":"promote"}` + "\n")
+	m, _, err := ReadFrame(br, 1<<10, 1<<10)
+	if err != nil || m.T != "launch" || !m.Prestart {
+		t.Fatalf("a prestart launch: %+v %v", m, err)
+	}
+	m, _, err = ReadFrame(br, 1<<10, 1<<10)
+	if err != nil || m.Prestart {
+		t.Fatalf("a launch with no mark: %+v %v", m, err)
+	}
+	m, _, err = ReadFrame(br, 1<<10, 1<<10)
+	if err != nil || m.T != "promote" {
+		t.Fatalf("promote: %+v %v", m, err)
+	}
+	if got := string(Line(Promoted{T: "promoted", OK: true})); got != `{"t":"promoted","ok":true}`+"\n" {
+		t.Fatalf("an acknowledged promotion = %q", got)
+	}
+	if got := string(Line(Promoted{T: "promoted", OK: false, Message: "disk full"})); got != `{"t":"promoted","ok":false,"message":"disk full"}`+"\n" {
+		t.Fatalf("a refused promotion = %q", got)
+	}
+}
+
+func TestDiscard(t *testing.T) {
+	m, _, err := ReadFrame(reader(`{"t":"discard"}`+"\n"), 1<<10, 1<<10)
+	if err != nil || m.T != "discard" {
+		t.Fatalf("discard: %+v %v", m, err)
+	}
+	if got := string(Line(Discarded{T: "discarded", Marked: false})); got != `{"t":"discarded","marked":false}`+"\n" {
+		t.Fatalf("a discard of an unmarked host = %q", got)
+	}
+}

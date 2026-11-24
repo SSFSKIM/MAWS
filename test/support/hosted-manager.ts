@@ -10,6 +10,9 @@
 // `{id, handover: graceMs}` arms the handover as the engine host's `host.handover` does (the table's freeze, the drain),
 // answers `detaching` or `deferred` with the calls in flight, and once the drain has settled runs the detached exit
 // order's shutdown (`detach`) and exits 0.
+// Ticket 851, M2: `{id, stage: appSessionId}` writes a prestart's stage and held writes (R4-1's step 2) and answers,
+// promoting nothing, so a test can kill the manager between the staging and the promotion; every handler runs under one
+// connection that never ends (a prestart's owner is the manager's spine root).
 // stdout, one JSON line each: `{id, value}` or `{id, error}` answers a line; `{emit, payload}` is every event emitted.
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -17,6 +20,7 @@ import process from 'node:process';
 import { createInterface } from 'node:readline';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { HostEmit, HostOn } from '@shared/host/runtime';
+import type { ClientRef } from '@shared/ipc/client';
 import { HandoverDrain } from '../../src/engine-host/handover';
 import { hostsDirOf } from '../../src/engine-host/holder/files';
 import { startSessionHost } from '../../src/engine-host/holder/transport';
@@ -34,8 +38,8 @@ export interface HostedManagerConfig {
 
 const config = JSON.parse(process.argv[2] ?? '{}') as HostedManagerConfig;
 const out = (line: unknown) => process.stdout.write(`${JSON.stringify(line)}\n`);
-const handlers = new Map<string, (input: unknown) => Promise<unknown>>();
-const on: HostOn = (name, handler) => void handlers.set(name, handler as (input: unknown) => Promise<unknown>);
+const handlers = new Map<string, (input: unknown, ctx: unknown) => Promise<unknown>>();
+const on: HostOn = (name, handler) => void handlers.set(name, handler as (input: unknown, ctx: unknown) => Promise<unknown>);
 const emit: HostEmit = (name, payload) => {
   out({ emit: name, payload });
   return true;
@@ -51,6 +55,7 @@ const ipc = registerEngineIpc(on, emit, {
   captureEnv: async () => ({ PATH: '/usr/bin:/bin', ...config.env }),
 });
 
+const MANAGER_CLIENT = { id: 'hosted-manager', onGone: () => () => {} } as unknown as ClientRef; // ticket 851: never ends
 let drain: HandoverDrain | null = null;
 const handover = async (graceMs: number): Promise<unknown> => {
   if (!drain) {
@@ -64,13 +69,21 @@ const handover = async (graceMs: number): Promise<unknown> => {
 };
 
 createInterface({ input: process.stdin, crlfDelay: Infinity }).on('line', (line) => {
-  const asked = JSON.parse(line) as { id: number; call?: string; input?: unknown; status?: string; handover?: number };
+  const asked = JSON.parse(line) as { id: number; call?: string; input?: unknown; status?: string; handover?: number; stage?: string };
+  if (asked.stage !== undefined) {
+    const row = ipc.table.getAny(asked.stage as AppSessionId);
+    void (row ? row.commitStage() : Promise.reject(new Error(`no row ${asked.stage}`))).then(
+      () => out({ id: asked.id, value: row!.status().launchId }),
+      (error: unknown) => out({ id: asked.id, error: error instanceof Error ? error.message : String(error) }),
+    );
+    return;
+  }
   if (asked.handover !== undefined) {
     void handover(asked.handover).then((value) => out({ id: asked.id, value }));
     return;
   }
   if (asked.status !== undefined) {
-    out({ id: asked.id, value: ipc.table.get(asked.status as AppSessionId)?.status() ?? null });
+    out({ id: asked.id, value: ipc.table.getAny(asked.status as AppSessionId)?.status() ?? null }); // ticket 851: a hidden row's too
     return;
   }
   const handler = handlers.get(asked.call ?? '');
@@ -78,7 +91,7 @@ createInterface({ input: process.stdin, crlfDelay: Infinity }).on('line', (line)
     out({ id: asked.id, error: `no handler ${asked.call}` });
     return;
   }
-  handler(asked.input).then(
+  handler(asked.input, { client: MANAGER_CLIENT }).then(
     (value) => out({ id: asked.id, value }),
     (error: unknown) => out({ id: asked.id, error: error instanceof Error ? error.message : String(error) }),
   );

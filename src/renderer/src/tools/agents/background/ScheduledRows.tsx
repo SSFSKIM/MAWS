@@ -84,13 +84,25 @@ export function ScheduledSection({ appSessionId, session, live, visible, expande
     <Group id="scheduled" heading={BACKGROUND_COPY.scheduled(rows.length)} expanded={expanded} onToggle={onToggle}>
       {error !== null && <p className="px-3.5 pb-1 text-ui-sm text-danger">{SCHEDULED_COPY.unavailable(error)}</p>}
       <ul className="flex flex-col">
-        {rows.map((row, i) => (
-          // the index too: a hand-authored durable file may repeat an id (the engine loads any string, SPEC 22 §22.5)
-          <ScheduledItem key={`${i}:${row.store}:${row.id}`} row={row} now={now} onOpen={open} />
+        {keyed(rows).map(({ row, key }) => (
+          <ScheduledItem key={key} row={row} now={now} onOpen={open} />
         ))}
       </ul>
     </Group>
   );
+}
+
+// Each row's key: its store and id, and which of the rows with both it is, since a hand-authored durable file may repeat
+// an id (the engine loads any string, SPEC 22 §22.5). Not its place in the list: the older history's crons a long
+// session's window fills in later (tail-first) go before the rows already drawn, which keep their items.
+function keyed(rows: readonly ScheduledRow[]): { row: ScheduledRow; key: string }[] {
+  const seen = new Map<string, number>();
+  return rows.map((row) => {
+    const name = `${row.store}:${row.id}`;
+    const n = (seen.get(name) ?? 0) + 1;
+    seen.set(name, n);
+    return { row, key: `${name}:${n}` };
+  });
 }
 
 function ScheduledItem({ row, now, onOpen }: { row: ScheduledRow; now: number; onOpen: (row: ScheduledRow) => void }) {

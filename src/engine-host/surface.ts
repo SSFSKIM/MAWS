@@ -101,6 +101,14 @@ export class SessionSurface {
     this.asks.set(requestId, { subtype, timer });
   }
 
+  // Ticket 851, M2 (D2): a request of a prestart's hidden row, answered at once as one no window took (`copied: false`,
+  // an empty box, `filled: false`, `shown: false`); nothing waits and nothing reaches a window.
+  refuse(req: ControlRequestFrame, respond: (requestId: RequestId, response: unknown) => Promise<void>): void {
+    const subtype = req.request.subtype;
+    if (!isSurfaceRequest(subtype)) return;
+    respond(req.request_id as RequestId, REFUSALS[subtype]).catch((error: unknown) => this.deps.log(`${subtype} refusal not written: ${error instanceof Error ? error.message : String(error)}`));
+  }
+
   // The renderer's answer: written once, while the request still waits; an answer of another kind is refused.
   async answer(requestId: RequestId, answer: SurfaceAnswer, respond: (requestId: RequestId, response: unknown) => Promise<void>): Promise<'delivered' | 'not_pending'> {
     const pending = this.asks.get(requestId);

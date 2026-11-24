@@ -439,7 +439,8 @@ describe('the icons of installed plugins and configured connectors', () => {
     const [pluginData, , , connectorData] = await Promise.all([draw(plugin), draw(plugin), draw(plugin), draw(connector), draw(connector)]);
     expect(pluginData!.dataUrl).toMatch(/^data:image\/png;base64,/);
     expect(connectorData!.dataUrl).toMatch(/^data:image\/svg\+xml;base64,/);
-    expect(net.asked).toEqual([plugin, connector]);
+    // the two draws race, so the network may be asked for either first: their order is not what this case is about
+    expect([...net.asked].sort()).toEqual([plugin, connector].sort());
     // a copy younger than a day: none
     now += 23 * 60 * 60_000;
     await draw(plugin);
@@ -452,7 +453,8 @@ describe('the icons of installed plugins and configured connectors', () => {
     expect(net.asked).toHaveLength(2);
     // a connector icon's copy older than a day: one request; it fails, and the old copy is still drawn
     expect(await draw(connector)).toEqual(connectorData);
-    expect(net.asked).toEqual([plugin, connector, connector]);
+    expect(net.asked).toHaveLength(3);
+    expect(net.asked[2]).toBe(connector);
     // not asked again inside five minutes, the old copy drawn meanwhile; then once more
     now += 4 * 60_000;
     expect(await draw(connector)).toEqual(connectorData);

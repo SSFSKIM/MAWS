@@ -48,6 +48,7 @@ const TIMING_NODE_TESTS = [
   'test/artifacts/one-schema.test.ts', // P3-B: the portability test's pattern, for the one-schema rule
   'test/one-locale.test.ts', // the same pattern, for the one-locale rule over src/ and the desk's web app
   'test/services/boundary.test.ts', // P5 O3-C M3: the same pattern, for the services library's boundary (rules A and B)
+  'test/sheet/boundary.test.ts', // Question sheet C3: the same pattern, for the sheet's components
   'src/services/spine-root.test.ts', // P5 O3-C M4: a replay played at its fastest and a real spine.lock wait (5 s)
   'test/mawsd/checkouts-clients.test.ts', // P5 O3-E M2: git.changed and files.changed from real watches, over a real machine.sock
   'test/endpoint/enroll.test.ts', // P5 O10 M2: enrolls against desk-hub's local runner, a wrangler dev child process

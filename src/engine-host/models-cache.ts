@@ -114,7 +114,10 @@ async function layeredEnv(sources: ModelEnvSources, pick: (name: string) => bool
 // plugins switch (CLAUDE_CODE_USE_COWORK_PLUGINS, which moves the user settings to `cowork_settings.json`), and a
 // gateway key in the global config file the engine does not select where both it and the legacy `.config.json` exist.
 // A plugin's `settings.read` overlay is not told: its presence is a loaded plugin module's hook, not a file.
-export type BaseUrlResolution = { kind: 'resolved'; baseUrl: string | null; gatewayKeys: string[] } | { kind: 'uncertain'; why: string };
+// Ticket 851 (docs/doperpowers/plans/2026-11-24-prestart-engine.md, Decision Log 13): `gatewayFingerprint`, a sha256
+// of those keys' effective values (a rotated token or another tool-search switch at the same names moves it), which a
+// prestart's key carries so a changed value relaunches; the values never leave this function.
+export type BaseUrlResolution = { kind: 'resolved'; baseUrl: string | null; gatewayKeys: string[]; gatewayFingerprint: string } | { kind: 'uncertain'; why: string };
 
 export async function effectiveBaseUrl(sources: ModelEnvSources & { platform?: NodeJS.Platform; systemRoot?: string }): Promise<BaseUrlResolution> {
   const unreadable: string[] = [];
@@ -127,7 +130,8 @@ export async function effectiveBaseUrl(sources: ModelEnvSources & { platform?: N
   const merged: Record<string, string | undefined> = Object.assign({}, launch, ...managed.map((file) => envOf(isRecord(file) ? file.env : undefined, pick)));
   if (envFlag(merged[COWORK])) return { kind: 'uncertain', why: `${COWORK} moves the user settings` };
   const value = (key: string) => merged[key] || null; // an empty value is none
-  return { kind: 'resolved', baseUrl: value(BASE_URL), gatewayKeys: GATEWAY_KEYS.filter((key) => value(key) !== null) };
+  const gatewayFingerprint = createHash('sha256').update(JSON.stringify(GATEWAY_KEYS.map((key) => [key, value(key)]))).digest('hex');
+  return { kind: 'resolved', baseUrl: value(BASE_URL), gatewayKeys: GATEWAY_KEYS.filter((key) => value(key) !== null), gatewayFingerprint };
 }
 
 const BASE_URL = 'ANTHROPIC_BASE_URL';

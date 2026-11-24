@@ -178,10 +178,17 @@ env:
   # daemon-idle-session-host (P5 O16 M6), the spec's ninth case, is one session host's own cost: the daemon shape's scene
   # with its session on the stub engine under a real session host, the host's footprint read over 300 s and held to its
   # own 4 MiB bound (test/support/daemon-idle.ts), outside the two-process bound; about 7 minutes past the build.
+  # prestart-latency (ticket 851, M5; docs/doperpowers/plans/2026-11-24-prestart-engine.md, D14 (a)) is the prestart's
+  # regression bound: five pairs of New chat runs on the latency stub with its initialize held 2 s, flag-off (Send's
+  # path today) and flag-on (the engine prestarted at the first keystroke) in alternating order, 3 s of typing each, the
+  # Send-to-first-row medians reported and flag-on's held at least 1.5 s below flag-off's, one engine start per Send.
+  # prestart-engine (D14 (b)) is its acceptance on the pinned engine (provisioned below, as for discover) with three
+  # 200 ms SessionStart hooks, against the loopback Messages stand-in: the same runs, both medians reported, no bound,
+  # nothing spent. Both run in the foreground: the paint is read through a frame a covered window never draws.
   # A group with a timing bound turns its timed cases on with a switch, MAWS_<name>_PERF or MAWS_<name>_SCALE set to 1 in
   # its package script, each such spec skipping without it or asserting its bounds only under it (presentations-drag's
   # one class-1 trial in e2e:presentations logs its p95), and is on this list: ci-kit's VM contract above rests on it.
-  MEASURED_E2E: artifacts-perf daemon-idle daemon-idle-floor daemon-idle-mawsd daemon-idle-enrolled daemon-idle-spine daemon-idle-mawsd-spine daemon-idle-render daemon-idle-session-host dashboard-scale design-scale document-scale document-scale-repeat local-latency-daemon presentations-drag presentations-scale remote-latency tool-time-heavy-live
+  MEASURED_E2E: artifacts-perf daemon-idle daemon-idle-floor daemon-idle-mawsd daemon-idle-enrolled daemon-idle-spine daemon-idle-mawsd-spine daemon-idle-render daemon-idle-session-host dashboard-scale design-scale document-scale document-scale-repeat local-latency-daemon prestart-engine prestart-latency presentations-drag presentations-scale remote-latency tool-time-heavy-live
   # A group whose own run needs more than its class's minutes (30; a measured group's 45, or 60 when its script builds
   # out/): name=minutes, before the Mac wait is added (gate-plan.mjs); the plan refuses an entry that is not a positive
   # whole number of minutes for a group with a package script. p1-live runs every sitting in one invocation (S3, S6's twenty resumes, A-47, S2's three cases): about 5 minutes at
@@ -953,8 +960,9 @@ jobs:
       # 2.1.309, provisioned here, before its offline test phase: the official build, verified against the checksum
       # committed in scripts/engine-checksums.txt and cached by version under the runner's user directory; the script
       # exports MAWS_E2E_ENGINE_BIN to the steps after. e2e/support/real-engine.ts checks the version again at test time,
-      # so a run that skipped this step fails there rather than running another engine.
-      - if: matrix.group == 'discover'
+      # so a run that skipped this step fails there rather than running another engine. Ticket 851, M5: so does the
+      # prestart's acceptance on the pinned engine.
+      - if: matrix.group == 'discover' || matrix.group == 'prestart-engine'
         run: scripts/provision-engine.sh 2.1.309
       # Decision Log 60(2): beside other e2e groups, `default` runs only the specs none of them collects, derived at this
       # tree from their package scripts through `playwright test --list`; the groups of a `DefaultBeside:` trailer count

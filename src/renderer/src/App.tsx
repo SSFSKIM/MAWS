@@ -11,6 +11,7 @@ import { registerShellActions } from './app/shell-actions';
 import { ipc } from './ipc/client';
 import { connectShell } from './ipc/events';
 import { connectLaneA } from './stores/lane-a'; // P5 O9 M5
+import { connectSheets } from './stores/sheet'; // the question sheet's C3 M2
 import { connectRemoteLaneA } from './lane-a/remote-connect'; // P5 O9 M9
 import { connectRemoteLaneB } from './lane-b/remote-connect'; // P5 O7 M2
 import { connectHubAccess } from './stores/hub-access'; // P5 O7 M2
@@ -184,6 +185,7 @@ export function App() {
   useEffect(() => useSettings.getState().connect(), []);
   useEffect(() => connectShell(), []); // C5: sessions, attention and layout, app-wide
   useEffect(() => connectLaneA(), []); // P5 O9 M5: the terminal sessions MAWS drives through their sminos bridges
+  useEffect(() => connectSheets(ipc), []); // the question sheet's C3 M2: this machine's sheets, in lane A's order
   useEffect(() => connectRemoteLaneA(), []); // P5 O9 M9: other machines' terminal sessions: their rows' opener, their cards
   useEffect(() => connectRemoteLaneB(), []); // P5 O7 M2: other machines' lane B sessions: their rows' opener, their panes' reads (after connectShell)
   useEffect(() => connectHubAccess(), []); // P5 O7 M2 (A2): the sidebar's "Hub unreachable"

@@ -1584,3 +1584,42 @@ test('the direct tell, the mod the app ships (mods/maws-tell): every case withou
  assert.deepEqual(metaTell(model,'named_in_requests')[0].named,[false,false]);
  assert.match(metaTell(model,'model_call_result')[0].results[0].content,/No such tool available: mcp__maws-tell__tell/);
 });
+// Board ticket 851 (findings-uxwave-851-prestart.txt; scenarios/pass3/uxwave-851-prestart.mjs; the plan
+// docs/doperpowers/plans/2026-11-24-prestart-engine.md, M0): an engine started before its first message, against the
+// scripted Messages API stand-in (stub-api.mjs, nothing spent) under a scratch config home.
+const load851=n=>readFileSync(new URL('./fixtures/uxwave/uxwave-851-'+n+'.jsonl',import.meta.url),'utf8').trim().split('\n').map(JSON.parse);
+const meta851=(rows,event)=>rows.filter(r=>r.direction==='meta'&&r.frame.event===event).map(r=>r.frame);
+const requests851=rows=>meta851(rows,'stub_requests')[0].requests;
+const main851=rows=>requests851(rows).filter(r=>r.main);
+test('ticket 851: a new session held 60 s after initialize makes no Messages API request, writes no file and emits no system/init',()=>{
+ const rows=load851('idle');
+ assert.deepEqual(requests851(rows).map(r=>[r.method??'POST',r.path]),[['HEAD','/api/hello']]);
+ const marks=meta851(rows,'idle_marks')[0].marks;assert.equal(marks.at(-1).afterMs,60000);
+ for(const mark of marks)assert.deepEqual([mark.requests,mark.transcript,mark.projectFiles],[1,false,[]]);
+ assert.equal(meta851(rows,'system_init')[0].present,false);
+ assert.deepEqual(meta851(rows,'files_after_exit')[0],{event:'files_after_exit',transcript:false,projectFiles:[]});
+});
+test('ticket 851: a SessionStart hook\'s additionalContext writes no file before a message, and reaches the first request once one is sent',()=>{
+ const idle=load851('hook-idle');
+ assert.deepEqual(idle.filter(r=>r.direction==='in'&&/^hook_/.test(r.frame.subtype??'')).map(r=>r.frame.subtype),['hook_started','hook_response']);
+ assert.deepEqual(meta851(idle,'files_after_exit')[0],{event:'files_after_exit',transcript:false,projectFiles:[]});
+ assert.ok(requests851(idle).every(r=>r.path!=='/v1/messages'));
+ const turn=load851('hook-turn');
+ assert.equal(main851(turn)[0].hookContext,true);
+ assert.equal(meta851(turn,'files_after_exit')[0].transcript,true);
+});
+test('ticket 851: set_model and set_permission_mode sent before the first message hold for the first turn, each leaving the other alone',()=>{
+ const model=load851('set-model');
+ assert.equal(meta851(model,'control_answer')[0].answer.response.model,'claude-sonnet-5-5');
+ assert.ok(requests851(model).filter(r=>r.path==='/v1/messages').every(r=>r.model==='claude-sonnet-5-5'));
+ assert.deepEqual([meta851(model,'system_init')[0].model,meta851(model,'system_init')[0].permissionMode],['claude-sonnet-5-5','default']);
+ const mode=load851('set-mode');
+ assert.deepEqual(meta851(mode,'control_answer')[0].answer.response,{mode:'acceptEdits'});
+ assert.deepEqual([meta851(mode,'system_init')[0].model,meta851(mode,'system_init')[0].permissionMode],['claude-haiku-5-5','acceptEdits']);
+});
+test('ticket 851: apply_flag_settings {effortLevel} before the first message gives the first turn the effort a launch with it gives',()=>{
+ const effort=n=>main851(load851(n))[0].output_config.effort;
+ assert.deepEqual([effort('effort-none'),effort('effort-launch'),effort('effort-live')],['medium','low','low']);
+ const live=load851('effort-live');assert.equal(meta851(live,'control_answer')[0].answer.subtype,'success');
+ assert.equal(meta851(live,'system_init')[0].permissionMode,'default');
+});

@@ -67,6 +67,8 @@ beforeAll(async () => {
 // ---- The machine's sessions, as the fake services and the fake sources hold them ------------------------------------
 
 /** Lane B: appSessionId → the engine's session id (`session.status`). */
+/** The question sheet's C3 M2: a session's sheet is named by the engine's id (`sheet.*`'s `session`). */
+const SHEET_SESSION = '5eed0000-0000-4000-8000-000000000004';
 const ENGINE: Record<string, string> = {
   'app-own': 'eng-own',
   'app-shared': 'eng-shared',
@@ -88,6 +90,7 @@ const RECORDS: SessionRecord[] = [
   record('A', 'la-converse', { owners: [A], shares: [{ member: B, grade: 'converse' }], launch: 'L1' }),
   record('A', 'la-b', { owners: [B], launch: 'L1' }),
   record('A', 'la-orgview', { owners: [A], access: 'org-view', launch: 'L1' }),
+  record('A', SHEET_SESSION, { owners: [A], launch: 'L1' }), // the question sheet's C3 M2: a terminal session with a sheet
 ];
 /** requestId → the kind of the event that opened it (`session.pendingRequest`). */
 const PENDING: Record<string, string> = { 'rq-question': 'question.requested', 'rq-ask': 'maws.ask.opened', 'rq-perm': 'permission.requested', 'rq-plan': 'plan.requested' };
@@ -397,6 +400,46 @@ describe('one command of each grade class, refused below its grade (acceptance 8
     const f = await start({ offers: fixture });
     const a = await open(f, a1, A);
     expect(await send(a, laneB(f, a, 'session.ui.press', 'app-own', { plugin: 'p', handle: 1 }))).toBe('no-rule');
+  });
+});
+
+// The question sheet's C3 M2 (docs/doperpowers/plans/2026-11-23-question-sheet-c3-maws-app.md §D): a machine's sheets
+// are a window's on that machine alone. Offered by a fixture table as a call and as an act, so the refusal is the grade's
+// own and not the offer table's, each that names a session is refused `no-rule` to the machine's owner, by either path.
+// `sheet.list` names none, and a `view` floor with no session is refused at the floor (`no-target`) before its row is
+// read: C6 places it per session when it writes its rule.
+describe('the sheet, refused to every remote caller until C6', () => {
+  const inputs: Record<string, Record<string, unknown>> = {
+    'sheet.list': {},
+    'sheet.read': { session: SHEET_SESSION },
+    'sheet.body': { session: SHEET_SESSION, of: { ref: 'a'.repeat(64) } },
+    'sheet.put': { session: SHEET_SESSION, lines: [{ v: 1, key: 'page-00000001', kind: 'dismiss', id: 'q1', by: 'page' }] },
+    'sheet.upload': { session: SHEET_SESSION, mediaType: 'image/png', data: 'iVBORw0KGgo=' },
+  };
+  const offered = (kind: 'call' | 'act'): Offers => ({
+    ...OFFERS,
+    commands: { ...OFFERS.commands, ...Object.fromEntries(Object.keys(inputs).map((name) => [name, { kind, executor: 'machine', target: name === 'sheet.list' ? 'machine' : 'session' } as const])) },
+  });
+
+  it('refuses each by its command path, `no-rule`, an owner included', async () => {
+    const f = await start({ offers: offered('call') });
+    const a = await open(f, a1, A);
+    for (const [name, input] of Object.entries(inputs)) expect(await call(a, name, input), name).toBe(name === 'sheet.list' ? 'no-target' : 'no-rule');
+  });
+
+  it('refuses each by its action path, `no-rule`, an owner included', async () => {
+    const f = await start({ offers: offered('act') });
+    const a = await open(f, a1, A);
+    for (const [name, input] of Object.entries(inputs)) {
+      const action = a.device.action({ machine: f.ref, action: name, ...(name === 'sheet.list' ? {} : { session: SHEET_SESSION, context: { lane: 'A', session: SHEET_SESSION, launch: 'L1' } }), args: input });
+      expect(await send(a, action), name).toBe(name === 'sheet.list' ? 'no-target' : 'no-rule');
+    }
+  });
+
+  it('is offered to no remote caller at all by the endpoint’s own table', async () => {
+    const f = await start();
+    const a = await open(f, a1, A);
+    for (const [name, input] of Object.entries(inputs)) expect(await call(a, name, input), name).toBe('not-offered');
   });
 });
 

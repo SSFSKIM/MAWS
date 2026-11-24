@@ -75,6 +75,7 @@
     "kind": "cell",
     "label": "Loaded 1 tool",
     "paths": [],
+    "runExpanded": true,
     "startedAt": "2026-10-06T06:35:34.886Z",
     "status": "done",
     "toolName": "ToolSearch",
@@ -153,6 +154,7 @@
     "kind": "cell",
     "label": "Ran `sleep 15; echo WAITED` in 1s",
     "paths": [],
+    "runExpanded": true,
     "startedAt": "2026-10-06T06:35:37.839Z",
     "status": "done",
     "toolName": "Bash",
@@ -260,6 +262,7 @@
     "paths": [
       "/private/tmp/claude-501/-private-tmp-maws-e1-repo-zQsycy/ccd2c390-f412-47ce-a480-87c2524d643e/tasks/bufnxcjfn.output"
     ],
+    "runExpanded": true,
     "startedAt": "2026-10-06T06:35:42.890Z",
     "status": "done",
     "toolName": "Read",

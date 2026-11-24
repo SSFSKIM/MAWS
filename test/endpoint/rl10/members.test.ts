@@ -257,7 +257,9 @@ describe('a member whose project is a declared channel’s id', () => {
     expect(m.members.handedOff(target)).toBe(true);
     // the app session placed as the join places it, so its next engine session is handed off too
     expect(m.members.handedOff({ lane: 'B', session: S2, appSessionId: APP })).toBe(true);
+    // ticket 851 (the prestart panel, scalpel-4#6): told at its sight, held early while the host is asked, then as before
     expect(told).toEqual([
+      { lane: 'B', session: S1, appSessionId: '' },
       { lane: 'B', session: S1, appSessionId: '' },
       { lane: 'B', session: S1, appSessionId: APP },
     ]);

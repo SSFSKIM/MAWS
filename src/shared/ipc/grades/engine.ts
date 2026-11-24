@@ -15,4 +15,6 @@ export const grades = {
   'engine.policy.set': 'internal',
   'engine.observedFacts': 'internal',
   'engine.pendingItems': 'internal', // P5 O10: the endpoint's, from mawsd
+  'engine.prestarts': 'internal', // ticket 851, M2: the endpoint's hidden set (M4)
+  'engine.relayHealth.cached': 'internal', // ticket 851, the xhigh panel: the spine's prestart reads the relay without a probe
 } as const satisfies CommandGrades<'engine'>;

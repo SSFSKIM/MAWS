@@ -12,7 +12,7 @@
 // change at the next poke.
 import { open, type FileHandle } from 'node:fs/promises';
 import type { SessionEvent } from '@shared/graph/events';
-import { boundedBudget, CRON_HISTORY_BYTES, cronHistoryOf, eventBytes, eventUtf8Bytes, HISTORY_WINDOW_BUDGET, historyWindowStart, soughtIn, utf8Length, type HistorySought, type WindowBudget } from '@shared/graph/history-window';
+import { boundedBudget, CRON_HISTORY_BYTES, cronHistoryOf, eventBytes, eventUtf8Bytes, HISTORY_WINDOW_BUDGET, historyWindowStart, ofMessage, soughtIn, utf8Length, type HistorySought, type WindowBudget } from '@shared/graph/history-window';
 import type { AgentId, AppSessionId, EventId, MessageUuid, ParentToolUseId, SessionId } from '@shared/graph/ids';
 import { HostCommandError, type HostEmit } from '@shared/host/runtime';
 import type { SubagentLookup } from './backfill';
@@ -96,6 +96,7 @@ export interface FollowOptions {
   emit: HostEmit;
   quiet?: boolean; // emits neither batches nor states: a live session's history, read for its older pages
   window?: WindowBudget; // tests' smaller pages; absent, HISTORY_WINDOW_BUDGET
+  startAt?: number; // a tail-first read's first line (tail-first.ts): the follow reads from there, not the file's start
 }
 
 // What a read asks of the log: the page before `before` (an event id an earlier page started at), the first `limit`
@@ -111,6 +112,9 @@ export interface HistoryRequest {
   agentId?: AgentId | null;
   seek?: MessageUuid | null;
   maxBytes?: number | null;
+  // 2026-11-24, tail-first: a newest window read from the transcript's end will do while the read from its start runs
+  // (the service's `eventsSnapshot`); its answer says so (`provisional`)
+  provisional?: boolean | null;
 }
 
 export interface HistoryPage {
@@ -120,6 +124,9 @@ export interface HistoryPage {
   sought?: HistorySought; // where the page stands to the message `seek` named
   cronHistory?: SessionEvent[]; // the newest window's: the cron calls before it a whole-history read counts (cronHistoryOf)
   omitted?: { events: number; bytes: number; seq: number | null }; // a bounded page's event alone past its budget, left out
+  // 2026-11-24, tail-first: the newest window as a read of the transcript's end mapped it, while the read from its start
+  // runs; that read's window replaces it once the follow reports `following` (complete is false, cronHistory absent)
+  provisional?: true;
 }
 
 // What a bounded answer's envelope (its cursor, flags and `lastSeq`) is first allowed before it is measured exactly.
@@ -212,7 +219,7 @@ export class Follow {
             return; // the watcher's re-summary carries head and tail facts to main
         }
       },
-      { subagents: options.subagents, holders: options.holders, pinned: options.pinned, isOwnRecord: options.isOwnRecord },
+      { subagents: options.subagents, holders: options.holders, pinned: options.pinned, isOwnRecord: options.isOwnRecord, ...(options.startAt !== undefined && { startAt: options.startAt }) },
     );
     this.started = this.follower.start();
   }
@@ -299,6 +306,38 @@ export class Follow {
 
   get backfillDone(): boolean {
     return this.backfilled;
+  }
+
+  // Every event delivered so far, in order (a tail-first read's checks).
+  get log(): readonly SessionEvent[] {
+    return this.delivered;
+  }
+
+  // 2026-11-24, tail-first (tail-first.ts): the newest window of a follow that read the transcript from `startAt`, when
+  // it is the window the read from the file's start answers, else null (the next rung, or that read). It is when the
+  // tail holds what the window's mapping reads before it: whole turns, a whole turn before the first of them (the
+  // mapping's context, warmed), every record in the window rooted in what was read (none branched from, or rewound to,
+  // before the tail, whatever restarted the chain since), the message each of its rewinds names, the tool use of each
+  // result and the start of each task it reports, and a chain that says whether the transcript's end gets the
+  // synthesised exit. Cron history needs the whole log, so the page carries none.
+  tailWindow(): HistoryPage | null {
+    if (!this.backfilled || this.phase !== 'following') return null;
+    const events = this.delivered;
+    const start = this.windowStart(events.length);
+    if (events[start]?.kind !== 'turn.started') return null; // no turn, or one cut at the hard cap: longer than the tail
+    // the tail's first turn may begin before it: a whole one before the window is two starts
+    if (events.slice(0, start).filter((event) => event.kind === 'turn.started').length < 2) return null;
+    const first = messageOf(events[start]!);
+    const firstAt = first === null ? null : this.follower.offsetOf(first);
+    if (firstAt === null || this.follower.unrootedAt() >= firstAt) return null;
+    if (!this.follower.chainOpensTurn()) return null;
+    const tools = new Set<string>();
+    for (const event of events) if (event.kind === 'tool.use') tools.add(event.toolUseId);
+    for (const event of events.slice(start)) {
+      if (event.kind === 'boundary.rewind' && !events.some((held) => ofMessage(held, event.targetMessageUuid))) return null;
+      if ((event.kind === 'task.notification' || event.kind === 'tool.result') && event.toolUseId !== null && !tools.has(event.toolUseId)) return null;
+    }
+    return { events: events.slice(start), complete: false, ...(start > 0 && { earlier: events[start]!.id }), provisional: true };
   }
 
   get state(): FollowState {

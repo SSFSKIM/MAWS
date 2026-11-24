@@ -154,6 +154,7 @@
     "paths": [
       "/private/tmp/maws-w4a-1790726852-repo-IXJjDf/big1.txt"
     ],
+    "runExpanded": true,
     "startedAt": "2026-09-30T00:07:45.681Z",
     "status": "done",
     "toolName": "Read",
@@ -296,6 +297,7 @@
     "paths": [
       "/private/tmp/maws-w4a-1790726852-repo-IXJjDf/big2.txt"
     ],
+    "runExpanded": true,
     "startedAt": "2026-09-30T00:07:50.510Z",
     "status": "done",
     "toolName": "Read",
@@ -438,6 +440,7 @@
     "paths": [
       "/private/tmp/maws-w4a-1790726852-repo-IXJjDf/big3.txt"
     ],
+    "runExpanded": true,
     "startedAt": "2026-09-30T00:07:54.095Z",
     "status": "done",
     "toolName": "Read",
@@ -580,6 +583,7 @@
     "paths": [
       "/private/tmp/maws-w4a-1790726852-repo-IXJjDf/big4.txt"
     ],
+    "runExpanded": true,
     "startedAt": "2026-09-30T00:07:58.790Z",
     "status": "done",
     "toolName": "Read",

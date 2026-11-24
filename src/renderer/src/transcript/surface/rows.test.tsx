@@ -125,11 +125,13 @@ describe('mounted transcript surface integration', () => {
     const b = builder(); b.turn('u'); b.toolUse('t', 'Bash', { command: 'pwd' }); b.result('t', 'original', { structured: BASH_RESULT('original') }); b.end(['u']);
     const store = await mounted(b); act(() => useTranscriptStore.getState().expandAll(store.key));
     const row = rowOf(store.rows(), 'cell'); const view = renderRow(row, { storeKey: store.key });
-    await act(() => fake.reply('session.ui.render', { ...answer({}), hooked: false }));
-    fireEvent.click(screen.getByRole('button', { name: 'Ran pwd' })); view.rerenderRow(rowOf(store.rows(), 'cell'));
-    await waitFor(() => expect(asks().some((x) => x.component === 'ToolResult')).toBe(true));
-    const props = asks().find((x) => x.component === 'ToolResult')!.props;
-    await act(() => fake.reply('session.ui.render', answer({ ...props, output: BASH_RESULT('rewritten output') }, engine, true)));
+    // board ticket 852: a run of one, opened (expandAll), shows its call's detail at once, so its run's ask and the
+    // detail's ToolResult ask are both out before any answer; each is answered as its own
+    await waitFor(() => expect(asks().map((x) => x.component).sort()).toEqual(['ToolGroup', 'ToolResult']));
+    const result = asks().findIndex((x) => x.component === 'ToolResult');
+    await act(() => fake.reply('session.ui.render', { ...answer({}), hooked: false }, 1 - result)); // the run's
+    const props = asks()[result]!.props;
+    await act(() => fake.reply('session.ui.render', answer({ ...props, output: BASH_RESULT('rewritten output') }, engine, true))); // the detail's, the one left
     expect(view.container.textContent).toContain('rewritten output'); expect(view.container.textContent).not.toContain('original');
   });
 

@@ -680,3 +680,28 @@ describe('an adopted session, fix wave 1', () => {
     });
   });
 });
+
+// Ticket 851's xhigh panel, scalpel-1#5: a prestart's predecessor that died after its promotion and before journaling
+// the reveal leaves the hidden period open in the journal. The successor adopts a promoted launch (a marked one is
+// discarded, never adopted), so its adoption closes that period in the journal: the engine's toasts and surface asks
+// from then on reach the app, live and in every rebuild.
+describe('an adopted session whose journal left a prestart’s hidden period open (scalpel-1#5)', () => {
+  it('closes it at the adoption: a toast after it is told, and a rebuild keeps it', async () => {
+    const plan = planOf();
+    predecessor(plan, (w) => {
+      w.row('meta', { event: 'prestart', phase: 'hidden' });
+      w.row('in', { type: 'system', subtype: 'ui_toast', plugin: 'p', text: 'hidden toast', session_id: 's' });
+    });
+    const a = adopter(plan);
+    await a.session.start();
+    a.caughtUp();
+    await until(() => a.session.lifecycle === 'ready', 'ready');
+    a.transport.push({ type: 'system', subtype: 'ui_toast', plugin: 'p', text: 'shown toast', session_id: 's' }, 1);
+    await until(() => a.transport.journaledSeqs.includes(1), 'the toast journaled');
+    expect(a.events.filter((e) => e.kind === 'plugin.toast').map((e) => (e.kind === 'plugin.toast' ? e.text : ''))).toEqual(['shown toast']);
+    const phases = a.rows().flatMap((row) => ((row.frame as { event?: string }).event === 'prestart' ? [(row.frame as { phase: string }).phase] : []));
+    expect(phases).toEqual(['hidden', 'revealed']);
+    a.transport.exit(0);
+    await a.session.exited;
+  });
+});

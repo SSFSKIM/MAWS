@@ -29,6 +29,7 @@ import { grades as layout } from './grades/layout';
 import { grades as machine } from './grades/machine';
 import { grades as machines } from './grades/machines'; // P5 O6 M3
 import { grades as laneA } from './grades/lane-a'; // P5 O9 M2
+import { grades as sheet } from './grades/sheet'; // the question sheet's C3 M2
 import { grades as machineSettings } from './grades/machine-settings'; // P5 O3-D
 import { grades as clientPort } from './grades/client-port'; // P5 O3-D
 import { grades as render } from './grades/render'; // P5 O5 M3
@@ -86,6 +87,7 @@ export const NAMESPACE_GRADES = {
   channel, // P5 O8 M7b
   endpoint, // P5 O8 M6b
   projects, // the project registry's M12
+  sheet, // the question sheet's C3 M2
 } as const satisfies { readonly [N in Namespace]: NamespaceGrades<CommandsOf<N>> };
 
 const isSpec = (declared: NamespaceGrades<string>): declared is GradeSpec =>

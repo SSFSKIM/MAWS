@@ -21,7 +21,7 @@ import { join } from 'node:path';
 import { isActionable as archiveActionable, waits as archiveWaits } from '@shared/attention/kinds';
 import type { ClientPort } from '@shared/client/port';
 import { claudeConfigDir } from '@shared/engine/config-dir';
-import type { AppSessionId, ProjectId } from '@shared/graph/ids';
+import type { AppSessionId, ProjectId, SessionId } from '@shared/graph/ids';
 import type { HostSupervisor } from '@shared/host/host-supervisor';
 import { OpLedger } from '@shared/host/op-ledger';
 import type { HandlerContext } from '@shared/ipc/client'; // P5 O7 M5c
@@ -60,6 +60,7 @@ import { IndexSessionSource } from './index/source';
 import { laneAAttention } from './lane-a/attention';
 import { sminosHome } from './lane-a/discovery';
 import { createLaneADriver, registerLaneA, type LaneAView } from './lane-a/driver';
+import { createSheetService, registerSheet, type SheetService } from './sheet/service'; // the question sheet's C3 M2
 import { startLibrary } from './library';
 import { registerLibraryReads } from './library/files';
 import { registerMachineOps } from './machine-ops';
@@ -87,6 +88,7 @@ import { readRecentTurns } from './sessions/recent-turns';
 import { ReplaySeam } from './sessions/replay-seam';
 import { readRestoredCost } from './sessions/restored-cost';
 import { SessionService } from './sessions/service';
+import { prestartSwitchedOn } from './sessions/prestart'; // ticket 851, M3
 import { engineHostSettled, registerSessionServiceHandlers } from './sessions/service-register';
 import { intentPatchHoldFor } from './sessions/e2e-patch-hold'; // board ticket 854's e2e
 import { registerSpawn } from './sessions/spawn'; // P5 O7 M4
@@ -163,6 +165,12 @@ export interface SpineDeps {
   // a session started from another machine in `mode` (mawsd: its endpoint's policy as it stands when asked); a fork from
   // another machine is held to it where it is allocated. None (main's root, which no other machine reaches): every mode
   aboveCeiling?(mode: string): boolean;
+  // Ticket 851 (docs/doperpowers/plans/2026-11-24-prestart-engine.md, R4-7): this root's owner of its prestarts, which
+  // `mawsd`'s seam names at the load and releases as it disposes of the root; absent, the root prestarts nothing
+  prestartOwner?: string;
+  // Ticket 851, M3's review (finding 1): the path `browserSocket` names for a session, looked up with nothing set up (no
+  // socket listens, no launch is marked, no capability tracked), for a prestart's spec; absent, a prestart names none
+  browserSocketPath?(appSessionId: AppSessionId): string | null;
 }
 
 export interface SpineRoot {
@@ -183,6 +191,10 @@ export interface SpineRoot {
   // endpoint reads of the index (its declared rows and stored statements), which mawsd hands on while the spine is loaded;
   // asked only by mawsd's wiring (src/mawsd/projects-seam.ts), so building a root reads nothing of it
   projects?: () => ProjectsSource;
+  // The question sheet's C3 M2 (docs/doperpowers/plans/2026-11-23-question-sheet-c3-maws-app.md §C): the sheet's service,
+  // which C4's page server calls in process (the wire's `sheet.put` stamps `by: 'maws'`, and the page's lines are not the
+  // app's); absent in a run refused the spine.
+  sheet?: SheetService;
 }
 
 export function startSpine(deps: SpineDeps): SpineRoot {
@@ -300,6 +312,28 @@ export function startSpine(deps: SpineDeps): SpineRoot {
         laneA.stop();
       }]);
     } else parts.push(['lane A', () => laneA.stop()]);
+  }
+
+  // The question sheet's C3 M2 (docs/doperpowers/plans/2026-11-23-question-sheet-c3-maws-app.md §C, S3): the sheet's
+  // service, beside lane A and under its condition: it follows every record under the same sminos home, joins each to the
+  // index's session by its engine id, and appends through `sminos sheet put`, found only once there is a record to answer.
+  let sheet: SheetService | undefined;
+  if (attention) {
+    const service = createSheetService({
+      home: engineEnv.then((shellEnv) => sminosHome(deps.env, shellEnv)),
+      shell: engineEnv,
+      env: deps.env,
+      configHome: engineEnv.then((env) => claudeConfigDir(env, env.HOME || deps.home)),
+      sessionOf: (engineSessionId) => {
+        const record = index.unavailable === null ? index.sessions.getByEngineId(engineSessionId as SessionId) : null;
+        return record === null ? null : { appSessionId: record.appId, title: record.title.text, live: record.holder.kind !== 'none' };
+      },
+      onSessionsChanged: (listener) => (index.unavailable === null ? index.sessions.onChange(() => listener()) : () => {}),
+      emit: (name, payload) => void bus.emit(name, payload),
+    });
+    registerSheet(service, bus.register);
+    parts.push(['sheet', () => service.stop()]);
+    sheet = service;
   }
 
   // C5: the read side (launch mode, read model, the stub source in launch mode scenario). A relative scenario path is
@@ -433,6 +467,14 @@ export function startSpine(deps: SpineDeps): SpineRoot {
       acquisitions: sessions.model, // P2-A (X16): the digest's availability follows each acquisition
       systemRoot: data.systemRoot, // P5 O7 M9: the machine route's managed settings (the tests' seam)
       ...(deps.aboveCeiling === undefined ? {} : { aboveCeiling: deps.aboveCeiling }), // the UX wave (U9, M2)
+      // ticket 851, M3 (D9, R4-7); its review (Decision Log 13): the engine host's connection is its welcome while ready
+      ...(deps.prestartOwner !== undefined && prestartSwitchedOn(deps.env, sessions.mode) && {
+        prestart: {
+          owner: deps.prestartOwner,
+          link: () => (hosts.snapshot('engine-host').state === 'ready' ? (hosts.peer?.('engine-host') ?? null) : null),
+          browserSocketPath: (appSessionId: AppSessionId) => deps.browserSocketPath?.(appSessionId) ?? null,
+        },
+      }),
     });
     const unintercept = registerSessionServiceHandlers(service, bus, sessions.mode, intentPatchHoldFor(deps.env)); // P5 O3-D M4: the rewind repair's intercepts in launch mode index only; board ticket 854: the e2e's hold on a Tools choice's write
     registerSpawn(bus, { sessions: service, projects: () => index.projects.list({ includeHidden: true }) }); // P5 O7 M4: a spawn from another device
@@ -658,6 +700,7 @@ export function startSpine(deps: SpineDeps): SpineRoot {
     discovery: { applied: () => indexSource.discoveryApplied(), onApplied: (listener) => indexSource.onDiscoveryApplied(listener) },
     ...(channel === undefined ? {} : { channel }), // P5 O8 M7b
     projects: () => index.projectsSource(), // the project registry: asked by mawsd alone
+    ...(sheet === undefined ? {} : { sheet }), // the question sheet's C3 M2
   };
 }
 

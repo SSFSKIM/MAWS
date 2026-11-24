@@ -175,6 +175,11 @@ export class HistoryPager implements OlderPages {
     }
   }
 
+  // Tail-first (2026-11-24): settles once no older page and no seek is on its way.
+  async idle(): Promise<void> {
+    while (this.inFlight !== null || this.seeking) await (this.inFlight ?? new Promise((resolve) => setTimeout(resolve, PAGE_RETRY_MS / 10)));
+  }
+
   stopSeek(): void {
     this.seekRun += 1;
     this.seeking = false;

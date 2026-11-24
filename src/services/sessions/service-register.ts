@@ -39,6 +39,10 @@ export function registerSessionServiceHandlers(service: SessionService, { regist
   register('session.intent.discard', ({ appSessionId }) => relay(() => service.discard(id(appSessionId))));
   register('session.intent.resolveWorktree', ({ appSessionId, resolution }) => relay(() => service.resolveRetainedWorktree(id(appSessionId), resolution)));
   register('session.start', ({ appSessionId, message, options }) => relay(() => service.startSession(id(appSessionId), { message, options })));
+  // ticket 851, M3: the window's prestart of a New chat's engine under the token it minted, and its withdraw by that token
+  // (neither refuses)
+  register('session.intent.prestart', ({ appSessionId, token }) => service.prestart(id(appSessionId), token));
+  register('session.intent.prestart.withdraw', ({ appSessionId, token }) => service.withdrawPrestart(id(appSessionId), token));
   // P2-A (X16): the one acquisition entry; a host that cannot answer is `host_unavailable`, so the supervisor's banner
   // returns for it as for the other launches (LAUNCHES in supervisor-notices.ts)
   register('session.acquire', ({ appSessionId, reason, options }) => relayHost(() => service.acquire(id(appSessionId), reason, options)));

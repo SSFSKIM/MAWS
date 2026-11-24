@@ -78,6 +78,8 @@ import type { DatasetRefreshRequests } from './connectors/dataset-requests'; // 
 import { connectorLaunchContext, type ConnectorLaunchContext } from './connectors/provenance'; // P3-HD
 import type { ConnectorLocalKey } from './connectors/local-key'; // P3-HD
 import { CHECKPOINT_ROWS, isRequested, type Checkpoint } from './session-stream'; // P5 O16 M3c fix wave 1; P5 O15 M2b (§L): the checkpoints
+import type { Stage, StagedJournal, StagingStore } from './prestart'; // ticket 851, M2
+import type { Promotion } from './transport'; // ticket 851, M2
 
 export { HostHookRegistry } from './host-hooks';
 export type { Catalog } from './session-status';
@@ -167,6 +169,11 @@ export interface EngineSessionOptions {
   adopted?: AdoptedLaunch;
   reinitializeMs?: number; // P5 O16 M3a fix wave 1: the adopted re-initialize's wait before it logs and waits on (tests)
   checkpointRows?: number; // P5 O15 M2b (§L): the rows between the stream's checkpoints, CHECKPOINT_ROWS (tests)
+  // Ticket 851, M2 (docs/doperpowers/plans/2026-11-24-prestart-engine.md, D2, R4-2, R4-3): a prestart, hidden until its
+  // adopt reveals it. `journal` and `store` are the ones above, staged (prestart.ts); the host map's lines join the
+  // stage. While hidden the surface is not attached (its requests are refused here, nothing reaches a window) and the
+  // observed facts are held.
+  prestart?: { stage: Stage; journal: StagedJournal; store: StagingStore };
 }
 
 // P5 O16 M3a fix wave 1 (D58): how long an adopted engine's re-initialize is waited for before the wait is logged and
@@ -306,6 +313,15 @@ export class EngineSession {
   // C10 start: the initialize response's `workspace_trust_recorded` (status.trust.recorded), and whether the snapshot
   // was inherited from `spec.inheritGrantsFrom` (then it is re-applied like a resume's)
   private trustRecorded: boolean | null = null;
+  // Ticket 851, M2: hidden while a prestart; the capabilities its initialize answered, for an attach at its reveal; the
+  // initialize response's model list, which the host keeps for a hidden row and publishes at its commit
+  private hidden: boolean;
+  private initCapabilities: readonly string[] | undefined = undefined;
+  private initModels: unknown[] | null = null;
+  private settleSpawn: () => void = () => {};
+  private settleState: () => void = () => {};
+  private readonly stateLoaded = new Promise<void>((resolve) => (this.settleState = resolve)); // M2's review, finding 1: loadState's writes submitted
+  private readonly spawnSettled = new Promise<void>((resolve) => (this.settleSpawn = resolve)); // the transport set, or the exit
   private inheritedGrants = false;
   // C10 end
   private kept = false; // P5 O2 M2: the owner's Keep running mark, from the store at the launch and `session.setKeep`
@@ -366,6 +382,7 @@ export class EngineSession {
     this.lastUsedAt = this.launchedAt; // C12
     this.observerSaved = opts.adopted?.observerSeen ?? false; // P5 O16 M3 (D53): already in the state file
     this.releaseDeferred = opts.adopted !== undefined; // P5 O16 M3
+    this.hidden = opts.prestart !== undefined; // ticket 851, M2
     // fix wave 1: settled once, at ready or at the failure; a launch that adopts nothing has nothing to wait for
     this.adoption = opts.adopted === undefined ? Promise.resolve() : new Promise<void>((resolve, reject) => {
       let settled = false;
@@ -423,6 +440,7 @@ export class EngineSession {
     this.normalizer = new Normalizer({ appSessionId: opts.spec.appSessionId, launchId: opts.plan.launchId, sessionId: opts.plan.sessionId, warn: (w) => this.pendingWarnings.push(w) });
     // P2-A (X17): its base (what earlier launches observed) loads now, before this launch's first write
     this.observed = opts.observedFacts?.recorder({ appSessionId: opts.spec.appSessionId, launchId: opts.plan.launchId, engineSessionId: () => this.normalizer.state.sessionId ?? this.plan.sessionId }) ?? null;
+    if (this.hidden) this.observed?.hold(true); // ticket 851, M2: nothing on disk until the reveal
     this.broker = new PermissionBroker({
       appSessionId: opts.spec.appSessionId,
       client: { respond: (requestId, response, opts) => (this.client ? this.client.respond(requestId, response, opts) : Promise.reject(new Error('no engine process'))) },
@@ -1088,7 +1106,11 @@ export class EngineSession {
     // session's from the start, so a stop meanwhile runs the ladder against it
     const adopted = this.opts.adopted;
     if (adopted) this.transport = this.opts.spawn(this.plan);
-    await this.loadState();
+    try {
+      await this.loadState();
+    } finally {
+      this.settleState(); // M2's review, finding 1
+    }
     // The launch's first status (`starting`) goes out before its first row (a resume's `reconnect`, the spawn row, a
     // spawn failure's exit), so a consumer folding events only under a live status never sees a launch's events
     // against no status or the previous launch's `exited` (C5's second re-check). Emitted after the state load's await,
@@ -1099,6 +1121,9 @@ export class EngineSession {
       this.handleExit({ code: null, signal: null }); // stopped while the state loaded: never spawn (idempotent)
       return;
     }
+    // M2's review, finding 11: the hidden period opens here and closes at the reveal's row, so a rebuild from the journal
+    // drops what the live one dropped (normalizer.ts)
+    if (this.hidden) this.record('meta', { event: 'prestart', phase: 'hidden' });
     if (this.reconnect) this.record('meta', { event: 'reconnect', phase: 'attempting', ...this.attempt, trigger: this.reconnectTrigger, reason: this.spec.retry?.reason ?? null });
     if (this.spec.retry) this.notice('launch:retry', `${this.spec.retry.reason} Trying once more (attempt ${this.spec.retry.attempt} of ${this.spec.retry.maxAttempts}).`); // C3 corrective
     this.record('meta', spawnMeta(this.plan, { appVersion: this.opts.appVersion ?? 'unknown', holder: this.opts.holder }));
@@ -1119,6 +1144,7 @@ export class EngineSession {
       return;
     }
     this.transport = transport;
+    this.settleSpawn(); // ticket 851, M2
     const client = this.connect(transport);
     this.silence = setTimeout(() => {
       this.silence = null;
@@ -1136,7 +1162,7 @@ export class EngineSession {
   // The process's writer, control client and read loops, and the exit they end in; `initializing` from here.
   // P5 O16 M3 (D26): an adopted writer's `fence`, which names its requests apart from the old manager's.
   private connect(transport: EngineTransport, fence?: number): ControlClient {
-    if (transport.holder !== undefined) this.hostMap = new HostMap(); // P5 O16 M2
+    if (transport.holder !== undefined) this.hostMap = new HostMap(this.opts.prestart?.stage ?? null); // P5 O16 M2; ticket 851: staged while a prestart
     // One writer for every out frame of this process (requests, answers, user frames); the read loop holds inbound
     // frames while any of its writes is in flight and journals them after the write's own row.
     const writer = new OutboundWriter(transport, { row: (direction, frame) => this.record(direction, frame) });
@@ -1218,9 +1244,15 @@ export class EngineSession {
     this.publishCatalog(); // C7
     // C10 start: trust into the status; the model list to the catalogue cache
     this.trustRecorded = init.workspace_trust_recorded ?? null;
-    if (Array.isArray(init.models)) this.emit('models', init.models);
+    if (Array.isArray(init.models)) {
+      this.initModels = init.models; // ticket 851, M2
+      this.emit('models', init.models);
+    }
     // C10 end
-    await this.surface.attach(client, init.capabilities); // R2: as the desktop surface, when the engine speaks ui_surface_v1
+    // R2: as the desktop surface, when the engine speaks ui_surface_v1; ticket 851 (D2): never while hidden, the reveal
+    // attaches it
+    if (this.hidden) this.initCapabilities = init.capabilities;
+    else await this.surface.attach(client, init.capabilities);
     if (this.frozen) return; // P5 O16 M3b fix wave 1
 
     // Visibility only: null preserves the engine's thinking budget (2.1.309 probe). Queue it before the gateway read,
@@ -1390,6 +1422,79 @@ export class EngineSession {
     return this.processState === 'exiting';
   }
 
+  // ---- ticket 851, M2 (docs/doperpowers/plans/2026-11-24-prestart-engine.md, D4, R4-1 to R4-5, R4-9) ----------------
+  // A prestart until its reveal; whether an initialize failure was seen (R4-9: never adopted); the initialize response's
+  // model list (R4-3: the host publishes it once, at the commit).
+  get prestartHidden(): boolean {
+    return this.hidden;
+  }
+
+  get initializeFailedSeen(): boolean {
+    return this.initFailed;
+  }
+
+  get initializeModels(): unknown[] | null {
+    return this.initModels;
+  }
+
+  // The engine this process was spawned as (its plan's), which an adopt compares with the configured one (D4)
+  get spawnedBinary(): { bin: string; engineVersion: string } {
+    return { bin: this.plan.bin, engineVersion: this.plan.engineVersion };
+  }
+
+  // R4-1's step 2, the row still hidden: the stage written whole (R4-2), then the held store writes. Throws when a write
+  // fails; the caller then ends the prestart and launches afresh.
+  // M2's review, finding 1: after the state load has submitted its writes (the stored spec among them), and with every
+  // write under way settled, so the state file is durable before the promotion.
+  async commitStage(): Promise<void> {
+    const prestart = this.opts.prestart;
+    if (!prestart) return;
+    await this.stateLoaded;
+    prestart.journal.commit();
+    await prestart.store.commit(this.spec.appSessionId);
+    await prestart.store.flushed();
+    while (this.storeWrites.size > 0) await Promise.allSettled([...this.storeWrites]);
+  }
+
+  // M2's review, finding 2: a staged commit that will not be promoted: no write lands from now on, and the state it wrote
+  // is restored (or removed) before the caller launches afresh
+  async discardStage(): Promise<void> {
+    await this.opts.prestart?.store.discard(this.spec.appSessionId);
+  }
+
+  // The promotion was acknowledged: the state's backup goes
+  settleStage(): void {
+    this.opts.prestart?.store.settle(this.spec.appSessionId);
+  }
+
+  // R4-1's step 3: the session host's acknowledged promotion (never rejects); a direct spawn has no roster to promote.
+  async promote(withinMs?: number): Promise<Promotion> {
+    await this.spawnSettled;
+    const transport = this.transport;
+    if (transport === null || this.processState === 'exited') return { ok: false, message: 'the prestart’s engine is not running' };
+    return transport.promote ? transport.promote(withinMs === undefined ? {} : { withinMs }) : { ok: true };
+  }
+
+  // R4-1's step 4 and R4-5: no longer hidden; the observed facts written from now on; the surface attached, not awaited,
+  // when the handshake has passed its attach (one still under way attaches as any launch's does).
+  reveal(): void {
+    if (!this.hidden) return;
+    this.hidden = false;
+    try {
+      this.record('meta', { event: 'prestart', phase: 'revealed' }); // M2's review, finding 11
+    } catch (error) {
+      this.log(`the prestart's reveal not journaled: ${messageOf(error)}`);
+    }
+    if (this.observed) {
+      this.observed.hold(false);
+      this.storeWrite(this.observed.flush(false), 'observed facts');
+    }
+    const client = this.client;
+    if (this.handshakeDone && client !== null && this.processState !== 'exited' && this.processState !== 'exiting') {
+      void this.surface.attach(client, this.initCapabilities);
+    }
+  }
+
   // The row let go for the successor: the writer's in-flight writes awaited (bounded by EOF_WRITE_WAIT_MS), the
   // `host_detach` row, the journal and the map closed, then the final ack and the connection ended without `release`, so
   // the session host and its engine run on. A row frozen before its adoption connected writes no row (the journal is
@@ -1457,6 +1562,10 @@ export class EngineSession {
     this.sideQuestions.adopted(new Date().toISOString());
     this.emit('brokerItems', this.brokerItems()); // the fold told nothing: the restored list, once
     this.publishCatalog();
+    // ticket 851's panel (scalpel-1#5): a launch adopted is a promoted one (a marked one is discarded, never adopted), so a
+    // prestart's hidden period its predecessor left open (it died between the promotion and its reveal's row) closes here,
+    // for the live normaliser and every rebuild alike
+    if (this.normalizer.state.prestartHidden === true) this.record('meta', { event: 'prestart', phase: 'revealed' });
     this.record('meta', { event: 'reconnect', phase: 'attempting', ...this.attempt, trigger: this.reconnectTrigger, reason: null });
     this.connect(transport, adopted.fence);
     if (this.stopReason !== null) void this.terminate(true); // stopped while the journal was folded
@@ -1824,7 +1933,10 @@ export class EngineSession {
       this.tracker.observe(frame, typeof frame.timestamp === 'string' ? frame.timestamp : row.at);
       if (frame.type === 'system') this.publishCatalog(); // C7: only system/init and system/commands_changed move the catalogue
       // R2: an init that advertises the surface after an initialize answer that did not
-      if (this.handshakeDone && this.client && frame.type === 'system' && frame.subtype === 'init' && Array.isArray(frame.capabilities)) void this.surface.attach(this.client, frame.capabilities as string[]);
+      if (this.handshakeDone && this.client && frame.type === 'system' && frame.subtype === 'init' && Array.isArray(frame.capabilities)) {
+        if (this.hidden) this.initCapabilities = frame.capabilities as string[]; // ticket 851: the reveal's attach
+        else void this.surface.attach(this.client, frame.capabilities as string[]);
+      }
       this.settleOwedInterrupt(frame); // P5 O16 M2
       if (this.outstanding !== null) this.observeStop(frame); // P5 O16 M3: the barrier holds the Stop's dispatch, not its evidence
       this.broker.observe(item.frame);
@@ -1998,7 +2110,9 @@ export class EngineSession {
       case 'ui_prompt_read':
       case 'ui_prompt_fill':
       case 'ui_prompt_suggest':
-        this.surface.accept(req, this.respond);
+        // ticket 851 (D2): a hidden row's are answered here at once, as no window took them; nothing is forwarded
+        if (this.hidden) this.surface.refuse(req, this.respond);
+        else this.surface.accept(req, this.respond);
         return;
       // E1 start: the `maws` server's JSON-RPC traffic (the server answers another server's name itself)
       case 'mcp_message':
@@ -2259,7 +2373,8 @@ export class EngineSession {
     }
     this.exitInfo = { code: exit.code, signal: exit.signal, reason, at: new Date().toISOString(), release, ...(this.exitCause && { cause: this.exitCause }) /* P5 O16 M3b */ };
     this.settleAdoption(new AdoptionFailed(`the adopted process exited (${reason}) before it was ready`, false)); // fix wave 1: no-op once ready
-    if (this.observed) this.storeWrite(this.observed.flush(true), 'observed facts'); // P2-A: issued before the exited status
+    if (this.observed && !this.hidden) this.storeWrite(this.observed.flush(true), 'observed facts'); // P2-A: issued before the exited status; ticket 851: never a prestart's
+    this.settleSpawn(); // ticket 851, M2
     this.setProcess('exited');
     this.journalClosed = true;
     this.hostMap?.close(); // P5 O16 M2

@@ -1,7 +1,7 @@
 import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
-import { afterEach, describe, expect, it } from 'vitest';
-import { checkRelay, RELAY_HEALTH_CACHE_MS, resetRelayHealthCache } from './relay-health';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { cachedRelay, checkRelay, RELAY_HEALTH_CACHE_MS, resetRelayHealthCache } from './relay-health';
 
 const servers: Server[] = [];
 afterEach(async () => {
@@ -76,5 +76,29 @@ describe('relay health', () => {
     resetRelayHealthCache();
     await checkRelay(url, 1500);
     expect(hits).toBe(3);
+  });
+});
+
+// Ticket 851 (the xhigh panel, scalpel-3 finding 5): the prestart's read while its person types
+describe('the cache-only read', () => {
+  it('answers the last check while it is fresh and null otherwise, never probing', async () => {
+    let requests = 0;
+    const url = await serve((_, res) => {
+      requests += 1;
+      res.writeHead(200);
+      res.end('{}');
+    });
+    expect(cachedRelay(url)).toBeNull();
+    expect(requests).toBe(0);
+    const health = await checkRelay(url, 1500);
+    expect(cachedRelay(url)).toEqual(health);
+    const now = Date.now();
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(now + RELAY_HEALTH_CACHE_MS + 1);
+    try {
+      expect(cachedRelay(url)).toBeNull();
+    } finally {
+      clock.mockRestore();
+    }
+    expect(requests).toBe(1);
   });
 });

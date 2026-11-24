@@ -8,6 +8,7 @@ import { webFetchCases } from '../../../../../../test/support/web-fetch-recorded
 import { reviewsOf } from '../../../tools/session-info/lane';
 import { useTranscriptStore } from '../../../stores/transcript';
 import { journalToEvents } from '../../dev/journal';
+import { drawsAsRun, runOfOne } from '../../model/groups';
 import { cellId } from '../../model/keys';
 import type { Cell, Row } from '../../model/rows';
 import { BASH_RESULT, builder, tool, type Builder } from '../../model/test-events';
@@ -24,7 +25,10 @@ import { shellLabel } from './CellLine';
 afterEach(cleanup);
 
 const cellsOf = (rows: Row[]): Cell[] => rows.flatMap((row) => (row.kind === 'group' ? row.cells : row.kind === 'cell' ? [row] : []));
-const rowHolding = (rows: Row[], id: string) => rows.find((row) => row.id === id || (row.kind === 'group' && row.cells.some((cell) => cell.id === id)))!;
+// Board ticket 852: a run of one opens straight to its call's detail, so a call that draws as one is read where its own
+// line is drawn, in its run opened
+const asCallRow = (row: Row): Row => (row.kind === 'cell' && drawsAsRun(row) ? { ...runOfOne(row), expanded: true } : row);
+const rowHolding = (rows: Row[], id: string) => asCallRow(rows.find((row) => row.id === id || (row.kind === 'group' && row.cells.some((cell) => cell.id === id)))!);
 
 // One closed turn from `build`, every turn and group expanded and the named cell's detail open; renders the row that
 // holds that cell.
@@ -52,14 +56,15 @@ describe('cell line', () => {
     b.end(['u1']);
     const store = await storeWith(b.events);
     useTranscriptStore.getState().expandAll(store.key);
-    const row = store.rows().find((r) => r.kind === 'cell')!;
+    const row = asCallRow(store.rows().find((r) => r.kind === 'cell')!);
     const view = renderRow(row, { storeKey: store.key });
-    const line = screen.getByRole('button', { expanded: false });
+    const line = view.container.querySelector<HTMLElement>('[data-cell-id] > .transcript-cell-line')!; // inside its opened run of one (board ticket 852)
+    expect(line.getAttribute('aria-expanded')).toBe('false');
     expect(line.textContent).toBe('Ran pnpm test'); // UX wave U2 (O-49): the short form of the command, in the code font
     expect(line.querySelector('code')?.textContent).toBe('pnpm test');
     fireEvent.click(line);
-    view.rerenderRow(store.rows().find((r) => r.kind === 'cell')!);
-    expect(screen.getByRole('button', { expanded: true })).toBe(line);
+    view.rerenderRow(asCallRow(store.rows().find((r) => r.kind === 'cell')!));
+    expect(view.container.querySelector<HTMLElement>('[data-cell-id] > .transcript-cell-line')!.getAttribute('aria-expanded')).toBe('true');
     expect(view.container.querySelector('[data-cell-id][data-expanded]')).not.toBeNull();
   });
 });

@@ -16,18 +16,42 @@ import { buildLaunch, RELAY_URL } from '../../src/engine-host/launch';
 import { EngineSession, SESSION_START_HOOK_MS } from '../../src/engine-host/session';
 import { MAX_LINE_CHARS, spawnEngine } from '../../src/engine-host/transport';
 import { FIXTURE_ENGINE_VERSION } from './engine-pin';
-import { LATENCY_STUB_PACE_MS, markerOf, writeLatencyEngine } from './latency-engine';
+import { LATENCY_STUB_PACE_MS, markerOf, startsOf, writeLatencyEngine, type LatencyEngineOptions } from './latency-engine';
 
 const roots: string[] = [];
 afterEach(() => {
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
 });
-function scratch(): { root: string; bin: string; samples: string } {
+function scratch(options?: LatencyEngineOptions): { root: string; bin: string; samples: string } {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'maws-latency-stub-')));
   roots.push(root);
   const samples = join(root, 'samples.jsonl');
-  return { root, samples, bin: writeLatencyEngine(join(root, 'latency-engine'), samples) };
+  return { root, samples, bin: writeLatencyEngine(join(root, 'latency-engine'), samples, options) };
 }
+// The frames `child` writes, one per stdout line, in order: `next()` answers the next one, waiting for it.
+function framesOf(child: ReturnType<typeof spawn>): { next(): Promise<Record<string, unknown>> } {
+  const lines: string[] = [];
+  const waiting: ((line: string) => void)[] = [];
+  let stdout = '';
+  child.stdout!.on('data', (chunk) => {
+    stdout += String(chunk);
+    for (let at = stdout.indexOf('\n'); at >= 0; at = stdout.indexOf('\n')) {
+      const line = stdout.slice(0, at);
+      stdout = stdout.slice(at + 1);
+      if (line.trim() === '') continue;
+      const take = waiting.shift();
+      if (take) take(line);
+      else lines.push(line);
+    }
+  });
+  const next = () => new Promise<string>((resolve) => {
+    const line = lines.shift();
+    if (line !== undefined) resolve(line);
+    else waiting.push(resolve);
+  });
+  return { next: async () => JSON.parse(await next()) as Record<string, unknown> };
+}
+const exited = (child: ReturnType<typeof spawn>) => new Promise<number | null>((resolve) => child.once('exit', resolve));
 const samplesOf = (path: string) => readFileSync(path, 'utf8').split('\n').filter(Boolean).map((line) => JSON.parse(line) as { turn: number; k: number; writtenAt: number });
 
 describe('the latency engine stub', () => {
@@ -63,6 +87,55 @@ describe('the latency engine stub', () => {
     expect(await answered).toMatchObject({ type: 'control_response', response: { subtype: 'success', request_id: 'r-models' } });
     child.stdin.end();
     await new Promise((resolve) => child.once('exit', resolve));
+  });
+
+  // Ticket 851, M5 (docs/doperpowers/plans/2026-11-24-prestart-engine.md, D14): the prestart measure counts engine starts
+  // outside the journal, one line per process start, so a start the host never journaled still counts
+  it('writes one line per process start to its starts file, with its pid, session id, folder and arguments; none for --version', { timeout: 30_000 }, async () => {
+    const { root } = scratch();
+    const starts = join(root, 'starts.jsonl');
+    const counted = writeLatencyEngine(join(root, 'counted-engine'), join(root, 'samples.jsonl'), { startsFile: starts });
+    expect(execFileSync(counted, ['--version'], { encoding: 'utf8' })).toBe(`${FIXTURE_ENGINE_VERSION} (Claude Code)\n`);
+    expect(startsOf(starts), 'a version probe is no start').toEqual([]);
+    const sessionId = randomUUID();
+    for (const n of [1, 2]) {
+      const child = spawn(counted, ['--input-format', 'stream-json', '--session-id', sessionId], { cwd: root, stdio: ['pipe', 'pipe', 'pipe'] });
+      const code = exited(child);
+      await expect.poll(() => startsOf(starts).length, { timeout: 10_000 }).toBe(n);
+      child.stdin.end();
+      expect(await code).toBe(0);
+      expect(startsOf(starts)[n - 1]).toMatchObject({ pid: child.pid, sessionId, cwd: root, args: ['--input-format', 'stream-json', '--session-id', sessionId] });
+    }
+    expect(startsOf(starts)[0]!.at).toBeLessThan(startsOf(starts)[1]!.at);
+  });
+
+  // D14: the measure's engine takes as long to answer initialize as the delay it is given (the real engine's boot and
+  // SessionStart hooks, W1), and answers it under the host's request id; a lower bound, never an upper one
+  it('holds its initialize answer for the delay it is given, then plays the recorded answer', async () => {
+    const { bin } = scratch({ initMs: 400 });
+    const child = spawn(bin, ['--input-format', 'stream-json'], { stdio: ['pipe', 'pipe', 'pipe'] });
+    const frames = framesOf(child);
+    // the process up and reading first, so its own start is not in the time read below
+    child.stdin.write(`${JSON.stringify({ type: 'control_request', request_id: 'r-up', request: { subtype: 'list_models' } })}\n`);
+    expect(await frames.next()).toMatchObject({ response: { request_id: 'r-up' } });
+    const askedAt = performance.now();
+    child.stdin.write(`${JSON.stringify({ type: 'control_request', request_id: 'r-init', request: { subtype: 'initialize', hooks: {} } })}\n`);
+    expect(await frames.next()).toMatchObject({ type: 'control_response', response: { subtype: 'success', request_id: 'r-init' } });
+    expect(performance.now() - askedAt).toBeGreaterThanOrEqual(400);
+    child.stdin.end();
+    await exited(child);
+  });
+
+  it('answers a control asked during the initialize delay only after initialize, in the order asked', async () => {
+    const { bin } = scratch({ initMs: 200 });
+    const child = spawn(bin, ['--input-format', 'stream-json'], { stdio: ['pipe', 'pipe', 'pipe'] });
+    const frames = framesOf(child);
+    child.stdin.write(`${JSON.stringify({ type: 'control_request', request_id: 'r-init', request: { subtype: 'initialize', hooks: {} } })}\n`);
+    child.stdin.write(`${JSON.stringify({ type: 'control_request', request_id: 'r-models', request: { subtype: 'list_models' } })}\n`);
+    const ids = [await frames.next(), await frames.next()].map((frame) => (frame as { response: { request_id: string } }).response.request_id);
+    expect(ids).toEqual(['r-init', 'r-models']);
+    child.stdin.end();
+    await exited(child);
   });
 
   it("reaches ready under the host's Session, answers a context read, plays two whole turns of 300 paced markers, and ends on end_session", { timeout: 60_000 }, async () => {
