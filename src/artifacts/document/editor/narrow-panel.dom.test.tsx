@@ -194,6 +194,9 @@ describe('the rail in the body’s width', () => {
     width = 600;
     await mount();
     press(/^Comments/);
+    // the reply field is the active card's (the word cut, G385): choosing the card activates it, the drawer staying open
+    act(() => fireEvent.click(screen.getByRole('complementary', { name: 'Comments' }).querySelector<HTMLElement>('[data-thread="th1"]')!));
+    await until(() => within(screen.getByRole('complementary', { name: 'Comments' })).queryByRole('textbox', { name: 'Reply' }) !== null, 'the active card’s reply field');
     const field = () => within(screen.getByRole('complementary', { name: 'Comments' })).getByRole('textbox', { name: 'Reply' });
     act(() => fireEvent.change(field(), { target: { value: 'Not yet sent' } }));
     act(() => fireEvent.keyDown(field(), { key: 'Escape' }));

@@ -897,7 +897,7 @@ describe('resolve, orphans, the panel (Z1 to Z3, Z5) and the rail state (D5)', (
     m.rerender({ rail: 'comments' });
     const panel = screen.getByRole('complementary', { name: 'Comments' });
     expect(within(panel).queryByText('The commented passage was removed.')).toBeNull();
-    fireEvent.click(within(panel).getByRole('button', { name: 'Show deleted-target comments' }));
+    fireEvent.click(within(panel).getByRole('button', { name: /^Deleted \(/ }));
     expect(within(panel).getByText('The commented passage was removed.')).toBeDefined();
     m.rerender({ rail: null });
     act(() => void m.editor().commands.undo());
@@ -952,7 +952,7 @@ describe('resolve, orphans, the panel (Z1 to Z3, Z5) and the rail state (D5)', (
     await settle();
     const panel = screen.getByRole('complementary', { name: 'Comments' });
     const told = m.rails.length;
-    fireEvent.click(within(panel).getByRole('button', { name: 'Show deleted-target comments' }));
+    fireEvent.click(within(panel).getByRole('button', { name: /^Deleted \(/ }));
     act(() => fireEvent.click(within(panel.querySelector<HTMLElement>('[data-thread="t1"]')!).getByRole('button', { name: /^Show/ })));
     await settle();
     expect(screen.getByRole('complementary', { name: 'Comments' })).toBe(panel);

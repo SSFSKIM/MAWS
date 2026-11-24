@@ -138,6 +138,20 @@ describe('the overlay’s reach', () => {
   });
 });
 
+// A click as ProseMirror hands it to its plugins: at the text's position, its target the element drawn there (happy-dom
+// has no layout, so ProseMirror's own mouse handling cannot place it).
+function clickOn(editor: Editor, needle: string): boolean {
+  const pos = findPos(editor, needle) + 1;
+  const { node } = editor.view.domAtPos(pos);
+  const target = node.nodeType === Node.TEXT_NODE ? node.parentElement! : (node as Element);
+  let event: MouseEvent | null = null;
+  target.addEventListener('click', (e) => void (event = e as MouseEvent), { once: true });
+  target.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+  let handled = false;
+  act(() => void (handled = editor.view.someProp('handleClick', (handle) => handle(editor.view, pos, event!)) ?? false));
+  return handled;
+}
+
 describe('the threads rail', () => {
   async function seeded() {
     const m = await mount(content());
@@ -217,7 +231,7 @@ describe('the threads rail', () => {
   it('filters by status, scope and a search, each card keeping its draft (P4-B1, Z4)', async () => {
     const { handle, first, second, editor } = await seeded();
     act(() => void resolve(handle.doc, second, { kind: 'human' }, Date.now() + 2));
-    act(() => void select(editor(), 'ships quarterly')); // the first thread active: its card holds the reply field (the word cut, G385)
+    clickOn(editor(), 'quarterly'); // the first thread active: its card holds the reply field (the word cut, G385)
     act(() => fireEvent.click(within(toolbar()).getByRole('button', { name: /^Comments/ })));
     await quiet();
     expect(within(rail()).getByRole('heading', { name: 'All comments' })).toBeTruthy();
@@ -266,7 +280,7 @@ describe('the threads rail', () => {
     const { first, editor } = await seeded();
     const toggle = () => within(toolbar()).getByRole('button', { name: /^Comments/ });
     const field = () => within(rail().querySelector<HTMLElement>(`[data-thread="${first}"]`)!).getByRole('textbox', { name: 'Reply' }) as HTMLTextAreaElement;
-    act(() => void select(editor(), 'ships quarterly')); // the first thread active: its card holds the reply field (the word cut, G385)
+    clickOn(editor(), 'quarterly'); // the first thread active: its card holds the reply field (the word cut, G385)
     act(() => fireEvent.click(toggle()));
     await quiet();
     act(() => fireEvent.change(field(), { target: { value: 'Not sent yet' } }));
@@ -349,19 +363,6 @@ describe('a reply in the rail', () => {
 // selected in the rail, which opens on it; where passages overlap the innermost (the shortest at the click) is taken;
 // a click on text no open thread covers draws none active.
 describe('a click on a passage', () => {
-  // A click as ProseMirror hands it to its plugins: at the text's position, its target the element drawn there (happy-dom
-  // has no layout, so ProseMirror's own mouse handling cannot place it).
-  function clickOn(editor: Editor, needle: string): boolean {
-    const pos = findPos(editor, needle) + 1;
-    const { node } = editor.view.domAtPos(pos);
-    const target = node.nodeType === Node.TEXT_NODE ? node.parentElement! : (node as Element);
-    let event: MouseEvent | null = null;
-    target.addEventListener('click', (e) => void (event = e as MouseEvent), { once: true });
-    target.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    let handled = false;
-    act(() => void (handled = editor.view.someProp('handleClick', (handle) => handle(editor.view, pos, event!)) ?? false));
-    return handled;
-  }
   const active = (editor: Editor) => [...editor.view.dom.querySelectorAll('.comment-active')].map((span) => span.textContent).join('') || null;
   const selectedInRail = () => within(rail()).queryAllByRole('group').filter((item) => item.getAttribute('aria-current') === 'true').map((item) => item.dataset.thread);
 

@@ -970,7 +970,7 @@ describe('an empty document', () => {
         await whenSynced(handle);
         render(<DocumentEditor artifactId="doc1" handle={handle} host={owner} onEditor={(e) => (editors[i] = e)} />);
       }
-      expect(screen.getAllByRole('status').filter((s) => s.textContent === 'Loading…')).toHaveLength(2);
+      await until(() => screen.queryAllByRole('progressbar', { name: 'Loading…' }).length === 2, 'a quiet spinner in each editor'); // the word cut (G345)
       host.write((d) => createDocument(d, { title: 'Draft', id: 'tab00001' }));
       await until(() => editors.every((e) => e !== null && !e.isDestroyed), 'both editors bound');
       await act(async () => {

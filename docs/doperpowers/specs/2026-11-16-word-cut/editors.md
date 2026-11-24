@@ -4,7 +4,7 @@
 
 159 items: 131 cut, 5 reworded, 23 stay. Of the 136 that change, the owner saw 15 in a picture or ruled on them; 121 follow the pattern and were not seen.
 
-Against master (M0): 159 unchanged; 0 recorded for the owner. M0 added 0 rows for the UX wave's new text (0 cut, 0 reworded, 0 stay), listed at the end.
+Against master (M0): 159 unchanged; 0 recorded for the owner. M0 added 2 rows for the UX wave's new text (1 cut, 0 reworded, 1 stay), listed at the end.
 
 Columns: **Id** is the item's id in `items.json`. **Where** is the place on the surface. **Today** is the text at the pin `2c7044231` (an example value where the text is built from data). **Decision** is `cut` (the text leaves the resting surface), `reword` (it changes) or `stays` (today's text is kept; the row is here so that nobody proposes it again). **After** says what the surface shows afterwards, as it was built on the scratch branch and shown in the pictures. **Basis** is how firm the decision is, in the words of the root document's "How firm each decision is". **Source** is the file and line at the pin. **M0** is what the re-reading against master found (see the root document's "M0's record"): `unchanged`, `moved`, `rewritten by the wave`, `gone` or `moot`, with the file and line on master, and for a rewritten row the text master shows and the row decided again by the five rules. **Build** is the milestone that builds the row and the scene whose before and after pictures show it.
 
@@ -371,3 +371,16 @@ Columns: **Id** is the item's id in `items.json`. **Where** is the place on the 
 | G620 | a note when the tab is hidden | Refresh is available while this dashboard is on screen. | stays | Stays. Refresh is disabled with no reason while the tab is hidden \| no picture reached it in either round: today's words stay (was leaning cut) | unseen | `src/artifacts/dashboard/editor/live.ts:147` | unchanged `src/artifacts/dashboard/editor/live.ts:147` | M5 · no scene: needs a dashboard fixture in that state (wanted: a dashboard with the source sheet open on a live-query dataset while the tab is hidden) |
 | G621 | a note with a Show latest button when newer rows arrived after the sheet opened | Newer rows were fetched at 2026-10-16 09:35 UTC; the rows here are the ones captured when the source opened. | cut | When newer rows arrive the note reads 'Newer rows at 09:35 [Show latest]', the full UTC time on hover. | pattern | `src/artifacts/dashboard/editor/live.ts:150` | unchanged `src/artifacts/dashboard/editor/live.ts:150` | M5 · no scene: needs a dashboard fixture in that state (wanted: a dashboard with the source sheet open on a live-query dataset after newer rows arrived) |
 | G622 | the block when the query was replaced after the sheet opened, with Show current | This query was replaced or removed after the source opened, so it cannot be refreshed from here. | cut | A replaced query's block reads 'Query changed since opening [Show current]'. | pattern | `src/artifacts/dashboard/editor/live.ts:148` | unchanged `src/artifacts/dashboard/editor/live.ts:148` | M5 · no scene: needs a dashboard fixture in that state (wanted: a dashboard with the source sheet open on a live-query dataset whose query was replaced) |
+
+## The UX wave's new text (M0)
+
+Rows added by M0 for text the UX wave added after the pin. **Today** here is the text on master `028cecd10`, every row's basis is `pattern` (or `consent` for a consent text, or `ruled` where the owner has since ruled on it), and **Source** is the file and line on master.
+
+### Dashboard editor
+
+#### Dashboard editor, live query block
+
+| Id | Where | Today | Decision | After | Basis | Source | M0 | Build |
+|---|---|---|---|---|---|---|---|---|
+| N198 | the status line beside Start session while the session it asked for starts (state: starting, then ready) | Starting… / Starting the session… / The session is ready | cut | Beside Start session the status reads "Starting…" while it asks and starts, then "Ready". | pattern | `src/artifacts/dashboard/editor/live.ts:131` | new `src/artifacts/dashboard/editor/live.ts:131` | M5 · no scene: a transient wait no fixture holds (wanted: a dashboard with the source sheet open on a live-query dataset paused for want of a session, Start session pressed) |
+| N199 | the permission line while the permission is read, and the status line while a refresh runs | Checking permission… / Refreshing… | stays | Stays. rule 2: the live state of the block's permission and of its refresh, beside the controls they govern, as M3 kept "Answering…" (N166) and task 1 "Connecting…" (N197); a spinner would leave the line without its state | pattern | `src/artifacts/dashboard/editor/live.ts:123` | new `src/artifacts/dashboard/editor/live.ts:123` | M5 · no scene: a transient wait no fixture holds (wanted: a dashboard with the source sheet open on a live-query dataset, Refresh pressed with the fetch held) |

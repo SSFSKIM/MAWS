@@ -128,8 +128,8 @@ export const LIVE_COPY = {
   start: 'Start session',
   openSession: 'Open session',
   asking: 'Starting…',
-  starting: 'Starting the session…',
-  ready: 'The session is ready',
+  starting: 'Starting…', // the word cut (N198): the same wait as asking, in the connector sheet's words (T591)
+  ready: 'Ready',
   refreshing: 'Refreshing…',
   allowLabel: (name: string) => `Allow ${name} to read`,
   allowAgainLabel: (name: string) => `Allow ${name} again`,

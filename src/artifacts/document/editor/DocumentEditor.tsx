@@ -415,8 +415,9 @@ export function DocumentEditor(props: DocumentEditorProps) {
               previewRevision={shownVersion} /* P3-E */
             />
           ) : (
+            // the word cut (G345): the opening wait is the quiet spinner, no words
             <div className="doc-editor-loading">
-              <QuietSpinner label="Loading…" /> {/* the word cut (G345) */}
+              <QuietSpinner label="Loading…" />
             </div>
           )}
         </div>
