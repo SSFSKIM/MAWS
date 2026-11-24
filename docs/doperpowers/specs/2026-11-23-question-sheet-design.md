@@ -2,7 +2,7 @@
 
 > **Parent:** the MAWS charter (`docs/charter.md`) and board ticket 600 ("O-19 step two: the sminos question tool in a session MAWS runs"), which this design carries out and widens: the tool is redesigned on the way. **Consumes:** the sminos plugin in the doperpowers repository (`sminos/hooks/mods/`, `sminos/skills/sminos/scripts/`), MAWS's engine host, services, renderer, `mawsd` and `apps/desk-web`. **Amends:** the UX wave's U1 (`docs/doperpowers/specs/2026-11-12-ux-wave/U1-requests.md`, sections l4-approvals-08, O-17, O-21, O-22) and the tool choice (`docs/doperpowers/plans/2026-11-23-tool-choice.md`, D6), each where §8 and §9 say.
 >
-> **Status:** the design below was approved by the owner on 2026-11-23, in conversation, after the grill and a critique debate of two rounds. The roadmap sections (Children, Cross-Child Contracts, Ordering, Tracking Map) were added the same day by doperpowers:decomposing and await the owner's gate. Children dispatch per their grain hint, each carrying its section as its spec; each child's artifact (plan, ledger, findings, pull request, ticket) opens by citing this document by path, child id and parent pin.
+> **Status:** the design below was approved by the owner on 2026-11-23, in conversation, after the grill and a critique debate of two rounds. The roadmap sections (Children, Cross-Child Contracts, Ordering, Tracking Map) were added the same day by doperpowers:decomposing and approved by the owner that day. Children dispatch per their grain hint, each carrying its section as its spec; each child's artifact (plan, ledger, findings, pull request, ticket) opens by citing this document by path, child id and parent pin.
 
 ## Purpose
 
@@ -28,7 +28,7 @@
 - [x] (2026-11-23) Buildability review of the roadmap: thirteen findings, all taken.
 - [x] (2026-11-23) Independent spec review: fifteen findings, fourteen taken, one answered in §2.2.
 - [x] (2026-11-23) Closing review of the folds: eleven findings, all taken. Review of this document stops here; each plan child's execution document gets its own buildability review.
-- [ ] The owner's gate on the cut.
+- [x] (2026-11-23) The owner approved the cut and asked for C0, C1 and C2.G1 to start.
 - [ ] Children: see the Tracking Map.
 
 ## Terms
@@ -521,7 +521,7 @@ The observable state that closes the unit as a whole; each item is observed in t
 
 ## Tracking Map
 
-Approved design: commit `2fe16c685` (the design, 2026-11-23). The roadmap's approval is recorded here when the owner gives it.
+Approved design: commit `2fe16c685` (the design, 2026-11-23). Approved cut: commit `d845b4973` (the roadmap after its three reviews), by the owner on 2026-11-23, with the instruction to start what nothing blocks.
 
 | child | artifact | status |
 |---|---|---|
