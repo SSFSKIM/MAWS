@@ -368,6 +368,13 @@ describe('a provisional window from the transcript\u2019s end', () => {
       invoke: (async (name: CommandName, input: Record<string, unknown>) => {
         if (name === 'session.appEvents') return { ok: true, value: { events: [notice] } };
         asked.push(input);
+        if (input.before !== undefined) {
+          // an older page: none while the follow still reads, then the page before the cursor
+          if (!read) return { ok: true, value: { events: [], lastSeq: 0, complete: false, earlier: input.before } };
+          const end = events.findIndex((event) => event.id === input.before);
+          const from = historyWindowStart(events, end, (i) => eventBytes(events[i]!), BUDGET);
+          return { ok: true, value: { events: events.slice(from, end), lastSeq: 0, complete: true, ...(from > 0 && { earlier: events[from]!.id }) } };
+        }
         if (!read) return { ok: true, value: { events: tail, lastSeq: 0, complete: false, earlier: tail[0]!.id, provisional: true } };
         await options.gate;
         return { ok: true, value: { events: window, lastSeq: 0, complete: true, earlier: window[0]!.id } };
@@ -424,6 +431,24 @@ describe('a provisional window from the transcript\u2019s end', () => {
     await store.getState().attach(APP, source);
     await vi.waitFor(() => expect([...store.getState().entries[APP]!.state.seen]).toEqual(fake.window.map((event) => event.id)));
     expect(fake.asked).toHaveLength(2);
+  });
+
+  it('lets an older page asked while the window was provisional finish, and keeps what it took in', async () => {
+    const fake = host();
+    const store = createTranscriptStore();
+    const source = ipcSourceOver(fake.client, APP);
+    await store.getState().attach(APP, source);
+    const pages = source.older!;
+    pages.loadOlder(); // the follow still reads: the pager asks again each second
+    await vi.waitFor(() => expect(fake.asked.filter((input) => input.before !== undefined).length).toBeGreaterThan(0));
+    fake.readThrough();
+    fake.emit('fs.followState', following);
+    await vi.waitFor(() => expect(pages.state.getState().revision).toBe(1), { timeout: 3_000 });
+    await vi.waitFor(() => expect(store.getState().entries[APP]!.phase).toBe('live'));
+    const seen = store.getState().entries[APP]!.state.seen;
+    for (const event of fake.tail) expect(seen.has(event.id)).toBe(true);
+    expect(seen.size).toBeGreaterThan(fake.tail.length); // the older page is in
+    expect(fake.asked.filter((input) => input.before === undefined)).toHaveLength(1); // no rebuild threw it away
   });
 
   it('asks another machine\u2019s session for no provisional window', async () => {

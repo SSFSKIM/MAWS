@@ -131,6 +131,10 @@ class FollowerCore {
   out: Produced[] = [];
   facts: FollowerFacts = {};
   private groups = 0;
+  // 2026-11-24, tail-first: the byte position of the last record the read could not root (its branch walk met a parent
+  // it never read, or an anchor named a leaf it never read): -1 when none. A read from the file's start roots everything
+  // its file holds; a tail's first record is always one.
+  unrootedAt = -1;
   interrupted = false; // a by-offset re-read met another file: this core's picture of the file is incomplete
   held = false; // W7: a sibling branch is being held back while the session is contested (its notice went out once)
 
@@ -257,6 +261,7 @@ class FollowerCore {
     if (leafUuid === null) return;
     this.facts.leafUuid = leafUuid;
     if (record.rewound !== true) return;
+    if (!this.skeletons.has(leafUuid)) this.unrootedAt = Math.max(this.unrootedAt, offset);
     // Board ticket 740: no text. The anchor's `lastPrompt` is the session's latest prompt when the rewind was made, not the
     // rewound message (p5-o3-rewind-resume-post: T3 cut, the anchor reads T4; often it is empty), trimmed and on one line;
     // the window reads the rewound message's own row from the branch the rewind hid
@@ -348,6 +353,7 @@ class FollowerCore {
       const ancestor = this.skeletons.get(current);
       if (ancestor === undefined || visited.has(current)) {
         gap = { parentUuid: current, childUuid: child };
+        if (ancestor === undefined) this.unrootedAt = Math.max(this.unrootedAt, this.skeletons.get(uuid)!.offset);
         break;
       }
       if (this.onChain.has(current)) {
@@ -778,14 +784,16 @@ export class ChainFollower {
     };
   }
 
-  // 2026-11-24, tail-first: where the chain starts when the read could not root it (a gap: its first record's parent is
-  // not in what was read), as that record's byte position; null when it starts at a root the read holds (a session's
-  // first record, a compaction's boundary).
-  chainRoot(): { offset: number } | null {
-    const core = this.core;
-    if (core.gap === null && core.chain.length > 0) return null;
-    const root = core.chain[0];
-    return { offset: (root === undefined ? undefined : core.skeletons.get(root)?.offset) ?? Infinity };
+  // 2026-11-24, tail-first: the byte position of the last record this read could not root (FollowerCore.unrootedAt);
+  // -1 when none.
+  unrootedAt(): number {
+    return this.core.unrootedAt;
+  }
+
+  // 2026-11-24, tail-first: whether the chain holds a record that opens a turn, which a synthesised exit needs
+  // (exitAtLeaf): a tail whose chain holds none cannot say whether the chain before it does.
+  chainOpensTurn(): boolean {
+    return this.core.chain.some((uuid) => this.core.skeletons.get(uuid)?.opensTurn === true);
   }
 
   // The byte position of the record `uuid`, when it was read.

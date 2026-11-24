@@ -276,21 +276,16 @@ export class Follow {
   // transcript's history from before the launch and none of what the launch's stream carries; null when no message is
   // before the seam, or the backfill is not done (the log is no history yet). The page before it ends with the earlier
   // process's exit (`seamExit`).
-  // `located` (a tail-first read, which holds no history before its tail): undefined unless the log holds a message of
-  // the launch and one before it, so a seam the tail cannot place (the launch's first message before it, or the tail
-  // starting at it) is never answered from it.
-  seamCursor(journal: readonly MessageUuid[], located = false): EventId | null | undefined {
+  seamCursor(journal: readonly MessageUuid[]): EventId | null {
     if (!this.backfilled) return null;
     const wanted = new Set(journal);
     const found = this.delivered.findIndex((event) => {
       const uuid = messageOf(event);
       return uuid !== null && wanted.has(uuid);
     });
-    if (located && found === -1) return undefined;
     const seam = found === -1 ? this.delivered.length : found;
-    // the session's start, which the log opens with, is no history of its own; a tail that holds none before the seam
-    // cannot say whether the transcript does
-    if (!this.delivered.slice(0, seam).some((event) => messageOf(event) !== null)) return located ? undefined : null;
+    // the session's start, which the log opens with, is no history of its own
+    if (!this.delivered.slice(0, seam).some((event) => messageOf(event) !== null)) return null;
     return `${SEAM}${this.delivered[seam - 1]!.id}` as EventId;
   }
 
@@ -320,25 +315,28 @@ export class Follow {
 
   // 2026-11-24, tail-first (tail-first.ts): the newest window of a follow that read the transcript from `startAt`, when
   // it is the window the read from the file's start answers, else null (the next rung, or that read). It is when the
-  // tail holds what the window's mapping reads before it: whole turns, a turn before the first of them, the turn each of
-  // its rewinds names, the start of each task whose end it reports, and the start of the chain it stands on (a chain the
-  // tail cannot root is one that branched from before it). Cron history needs the whole log, so the page carries none.
+  // tail holds what the window's mapping reads before it: whole turns, a whole turn before the first of them (the
+  // mapping's context, warmed), every record in the window rooted in what was read (none branched from, or rewound to,
+  // before the tail, whatever restarted the chain since), the message each of its rewinds names, the tool use of each
+  // result and the start of each task it reports, and a chain that says whether the transcript's end gets the
+  // synthesised exit. Cron history needs the whole log, so the page carries none.
   tailWindow(): HistoryPage | null {
     if (!this.backfilled || this.phase !== 'following') return null;
     const events = this.delivered;
     const start = this.windowStart(events.length);
     if (events[start]?.kind !== 'turn.started') return null; // no turn, or one cut at the hard cap: longer than the tail
-    if (!events.slice(0, start).some((event) => event.kind === 'turn.started')) return null; // the tail's first turn may begin before it
+    // the tail's first turn may begin before it: a whole one before the window is two starts
+    if (events.slice(0, start).filter((event) => event.kind === 'turn.started').length < 2) return null;
+    const first = messageOf(events[start]!);
+    const firstAt = first === null ? null : this.follower.offsetOf(first);
+    if (firstAt === null || this.follower.unrootedAt() >= firstAt) return null;
+    if (!this.follower.chainOpensTurn()) return null;
     const tools = new Set<string>();
     for (const event of events) if (event.kind === 'tool.use') tools.add(event.toolUseId);
     for (const event of events.slice(start)) {
       if (event.kind === 'boundary.rewind' && !events.some((held) => ofMessage(held, event.targetMessageUuid))) return null;
-      if (event.kind === 'task.notification' && event.toolUseId !== null && !tools.has(event.toolUseId)) return null;
+      if ((event.kind === 'task.notification' || event.kind === 'tool.result') && event.toolUseId !== null && !tools.has(event.toolUseId)) return null;
     }
-    const root = this.follower.chainRoot();
-    const first = messageOf(events[start]!);
-    const firstAt = first === null ? null : this.follower.offsetOf(first);
-    if (root !== null && (firstAt === null || root.offset >= firstAt)) return null;
     return { events: events.slice(start), complete: false, ...(start > 0 && { earlier: events[start]!.id }), provisional: true };
   }
 

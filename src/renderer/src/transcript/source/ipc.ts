@@ -381,10 +381,17 @@ function sessionSource(client: MawsBridge, appSessionId: AppSessionId): Transcri
   // the transcript from the start. At that follow's `following` the key rebuilds, staged as for an older page, from the
   // host's window then (the rows drawn stay until it is whole); until then the follow's own batches, which that window
   // holds, are not drawn over the tail's, and older pages wait for the follow (the pager asks again while it reads).
+  // An older page or a jump the reader asked for meanwhile is let finish first (the rebuild would stop it); if it took
+  // pages in, what is drawn is already the follow's history (the tail's window is the follow's, and so are its older
+  // pages) and stays, the rebuild skipped: only the older crons the follow's window carries wait for the next read.
   let provisional = false;
+  let provisionalAt = -1; // the pager's revision when the provisional window was drawn
   const swapIn = () => {
     provisional = false;
-    queueMicrotask(() => pager.refresh()); // after this event's dispatch, as a re-read is (below)
+    const at = provisionalAt;
+    void pager.idle().then(() => {
+      if (pager.state.getState().revision === at) pager.refresh(); // after this event's dispatch, as a re-read is (below)
+    });
   };
   let gaps = 0; // P5 O7 M2: the gap bars `remote.gap` put in, each an id of its own
   // P5 O7 M2 (the milestone review): the windows main last said were too large for the channel (`remote.historyTooLarge`),
@@ -524,9 +531,10 @@ function sessionSource(client: MawsBridge, appSessionId: AppSessionId): Transcri
         if (subscription.held) subscription.held.push(batch.events);
         else subscription.pass(provisional ? batch.events.filter((event) => !diskForm(event)) : batch.events); // tail-first
       });
-      // tail-first: the follow has read the transcript through; a provisional window gives way to its window
+      // tail-first: the follow has read the transcript through (or failed to start: a read again says so); a provisional
+      // window gives way to its window
       const offFollowing = client.on('fs.followState', (state) => {
-        if (state.appSessionId !== appSessionId || state.agentId !== null || state.state !== 'following') return;
+        if (state.appSessionId !== appSessionId || state.agentId !== null || (state.state !== 'following' && state.state !== 'error')) return;
         if (subscription.held) subscription.followed = true; // the snapshot on its way may be the tail's
         else if (provisional && latest === subscription) swapIn();
       });
@@ -655,6 +663,7 @@ function sessionSource(client: MawsBridge, appSessionId: AppSessionId): Transcri
           appAside = app.filter((event) => !placed.includes(event));
           pager.started(events, earlier, answer.cronHistory);
           provisional = read.provisional === true; // tail-first
+          provisionalAt = pager.state.getState().revision;
         }
       }
       if (subscription) {

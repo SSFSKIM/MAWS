@@ -6,7 +6,7 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { SessionEvent } from '@shared/graph/events';
 import type { WindowBudget } from '@shared/graph/history-window';
-import type { AppSessionId, MessageUuid } from '@shared/graph/ids';
+import type { AppSessionId } from '@shared/graph/ids';
 import type { EventName, EventPayload } from '@shared/ipc/schema';
 import { longTranscript, turnLines, LONG_DIR as DIR, LONG_SESSION as SESSION } from '../../../test/support/long-transcript';
 import { StoreFixture } from '../../../test/support/store-fixture';
@@ -187,21 +187,44 @@ describe('a provisional window read from the transcript\'s end', () => {
     sameWindow(first, await fs.eventsSnapshot(APP, null));
   });
 
-  it('places a live launch\'s seam from the tail, the cursor the read from the start places', async () => {
+  it('a branch from before the tail stays unrooted though a compaction restarted the chain after it', async () => {
+    // a terminal /rewind to turn 30, then a compaction: the chain the tail ends on starts at the boundary, a root it
+    // holds, but the branch above it in the window is still one the read from the start reads as a rewind
+    const lines = [...longTranscript(200), ...turnLines(201, 'd30', 201).lines];
+    lines.push(JSON.stringify({ type: 'system', subtype: 'compact_boundary', uuid: 'c202', parentUuid: null, logicalParentUuid: 'd201', sessionId: SESSION, cwd: DIR, timestamp: ts(202), compactMetadata: { trigger: 'auto', preTokens: 1000 } }));
+    lines.push(...turnLines(202, 'c202', 202).lines);
+    const { first, full } = await both(lines);
+    expect(first.provisional).toBeUndefined();
+    sameWindow(first, full);
+  });
+
+  it('a tool result in the window whose call is before the tail is left to the next rung', async () => {
+    const use = 'toolu_long';
+    const lines = [
+      ...longTranscript(149),
+      JSON.stringify({ ...base(150), type: 'user', uuid: 'u150', parentUuid: 'd149', message: { role: 'user', content: 'prompt 150' } }),
+      JSON.stringify({ ...base(150), type: 'assistant', uuid: 't150', parentUuid: 'u150', message: { id: 'msg_t150', role: 'assistant', model: 'm', content: [{ type: 'tool_use', id: use, name: 'Read', input: { file_path: '/a' } }] } }),
+    ];
+    let parent = 't150';
+    for (let n = 151; n <= 200; n++) {
+      const turn = turnLines(n, parent, n);
+      lines.push(...turn.lines);
+      parent = turn.last;
+    }
+    // the call's result, written long after it (a resumed tool loop's shape), inside the newest turn
+    lines.push(JSON.stringify({ ...base(201), type: 'user', uuid: 'r201', parentUuid: parent, message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: use, content: 'late' }] } }));
+    const { first, full } = await both(lines);
+    expect(full.events.some((event) => event.kind === 'tool.result')).toBe(true);
+    expect(first.provisional).toBe(true); // at the rung that holds the call (about 150 KB back: the third)
+    sameWindow(first, full);
+  });
+
+  it('takes no tail for a session a follow is already reading: its window is that follow\'s cut of the file', async () => {
     await fixture.addTranscript(DIR, SESSION, longTranscript(200));
     const fs = await start();
-    const journal = async () => ['u199', 'a199', 'd199', 'u200', 'a200', 'd200'] as MessageUuid[];
-    const fromTail = await fs.historySeam(APP, journal);
-    expect(fromTail).not.toBeNull();
-    // the quiet follow reads through behind it (a page before the cursor is empty until it has); asked again then, the
-    // cursor is the read from the start's
-    let page = await fs.eventsSnapshot(APP, null, { before: fromTail }, true);
-    for (let tries = 0; tries < 200 && page.events.length === 0; tries++) {
-      await new Promise((resolve) => setTimeout(resolve, 10));
-      page = await fs.eventsSnapshot(APP, null, { before: fromTail }, true);
-    }
-    expect(await fs.historySeam(APP, journal)).toBe(fromTail);
-    expect(page.events.at(-1)?.kind).toBe('process.exited'); // the page before the seam ends with the earlier process's exit
-    expect(page.events.some((event) => event.kind === 'turn.started' && event.userMessageUuid === 'u198')).toBe(true);
+    const reading = fs.eventsSnapshot(APP, null); // the follow starts
+    const second = await fs.eventsSnapshot(APP, null, { provisional: true });
+    expect(second.provisional).toBeUndefined();
+    await reading;
   });
 });
