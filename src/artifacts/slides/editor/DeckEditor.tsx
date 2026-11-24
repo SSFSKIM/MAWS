@@ -319,7 +319,7 @@ export function DeckEditor({ session, assetUrl, system, readOnly, compact = fals
       if (TEXT_KINDS.includes(kind)) session.editText(ids[0]!);
       else session.select(ids);
     },
-    [editable, slide, session, doc],
+    [editable, slide, session, doc, setNotice], // setNotice is the notice's stable `show`
   );
 
   const tokens = useDesignSystem(system).view?.tokens ?? null; // M6: the Text style menu's role faces

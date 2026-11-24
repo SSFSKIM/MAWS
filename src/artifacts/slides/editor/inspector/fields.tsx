@@ -107,6 +107,11 @@ export function NumberField({ label, caption, value, mixed = false, hint = '', u
   const shown = draft ?? (whole && value !== null ? String(Math.round(value)) : fmt(value));
   const how: Write = { typing: label };
   const token = hint.startsWith('--ds-') ? hint : null;
+  // the refusal's and the reason's nodes, written as statements (the React Compiler takes no ternary inside a `||`)
+  const describers: string[] = [];
+  if (error !== null) describers.push(`${id}-error`);
+  if (greyed) describers.push(`${id}-why`);
+  const describedBy = describers.length > 0 ? describers.join(' ') : undefined;
 
   const commit = (text: string, keep: boolean) => {
     const t = text.trim();
@@ -133,7 +138,7 @@ export function NumberField({ label, caption, value, mixed = false, hint = '', u
           className="deck-inspector-input"
           aria-label={label}
           aria-invalid={error !== null || undefined}
-          aria-describedby={[error !== null ? `${id}-error` : '', greyed ? `${id}-why` : ''].filter(Boolean).join(' ') || undefined}
+          aria-describedby={describedBy}
           aria-disabled={greyed || undefined}
           disabled={readOnly && !greyed}
           readOnly={greyed || undefined}

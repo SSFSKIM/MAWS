@@ -405,7 +405,7 @@ export function DesignWorkbench(props: DesignWorkbenchProps) {
       if (TEXT_KINDS.includes(kind)) session.editText(ids[0]!);
       else session.select(ids);
     },
-    [editable, active, session, doc],
+    [editable, active, session, doc, setNotice], // setNotice is the shared notice's stable `show` (slides/editor/notice.tsx)
   );
 
   const [regions] = useState(() => new RegionRing(BOARD_REGIONS)); // P4-B2 (D14)
