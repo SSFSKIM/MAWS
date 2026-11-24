@@ -4,7 +4,9 @@
 // its writer releases it after the child's exit, when the linger after that exit ends, when it has no child and no
 // writer, or on its own SIGTERM, SIGINT or SIGHUP, which it relays to the child's process group first (D7). A prestart
 // (docs/doperpowers/plans/2026-11-24-prestart-engine.md, R4-1: a launch marked `prestart`, its roster entry marked until
-// a `promote` the host acknowledges once written) is ended the same way when its writer is lost.
+// a `promote` the host acknowledges once written) is ended the same way, with SIGKILL past the grace, when its writer is
+// lost or a successor discards it; a marked host keeps its entry when it exits, since it alone names the launch's staged
+// files, which the successor removes before the entry.
 package host
 
 import (
@@ -44,6 +46,7 @@ type Options struct {
 	rosterWrite func(dir string, e roster.Entry) error // tests: a roster that cannot be written; roster.Write otherwise
 	beforeSpawn func()                                 // tests: what happens while the fork is under way
 	afterReap   func()                                 // tests: what happens between the child's reap and its record
+	beforeEnd   func()                                 // tests: what happens between a prestart's loss and its end
 }
 
 const (
@@ -76,7 +79,7 @@ type Host struct {
 	token     string
 	tokenOnce sync.Once
 	quit      chan int
-	lost      chan struct{} // a prestart's writer is lost: its child is ended as at the host's own signal
+	lost      chan string // a prestart lost or discarded (why): its child is ended as at the host's own signal, then killed
 
 	mu          sync.Mutex
 	inCond      *sync.Cond // the stdin goroutine waits on it
@@ -110,7 +113,7 @@ type Host struct {
 
 // New makes the host's directories, opens its log, listens on its socket and writes its roster entry (`ready`).
 func New(opt Options) (*Host, error) {
-	h := &Host{opt: opt, lim: opt.Limits, tokenSet: make(chan struct{}), quit: make(chan int, 1), lost: make(chan struct{}, 1), state: stateReady,
+	h := &Host{opt: opt, lim: opt.Limits, tokenSet: make(chan struct{}), quit: make(chan int, 1), lost: make(chan string, 1), state: stateReady,
 		ring: ring.New(opt.Limits.RingCap), conns: map[*conn]struct{}{}}
 	h.inCond = sync.NewCond(&h.mu)
 	h.in.Cap = opt.Limits.StdinQueueCap
@@ -170,9 +173,9 @@ func (h *Host) Run() int {
 	h.mu.Unlock()
 	select {
 	case sig := <-h.opt.Signals:
-		return h.endChild(sig.String())
-	case <-h.lost:
-		return h.endChild("a prestart's writer is lost")
+		return h.endChild(sig.String(), false)
+	case why := <-h.lost:
+		return h.endChild(why, true)
 	case code := <-h.quit:
 		h.finish()
 		return code
@@ -186,10 +189,15 @@ func (h *Host) requestQuit(code int) {
 	}
 }
 
-// endChild relays the host's own signal (or a prestart's lost writer, `why`) to the child's process group as SIGTERM and
-// gives the child the grace to exit: a host that died leaving its engine would leave an engine nothing can reach (D7).
-// A fork under way is let finish first, so its child is known and signalled rather than left behind untracked.
-func (h *Host) endChild(why string) int {
+// endChild relays the host's own signal (or a prestart's end, `why`) to the child's process group as SIGTERM and gives
+// the child the grace to exit: a host that died leaving its engine would leave an engine nothing can reach (D7). A fork
+// under way is let finish first, so its child is known and signalled rather than left behind untracked. A prestart's end
+// (`kill`) takes the ladder to its end: a child still there past the grace is killed with its group, since no one else
+// owns it; the host's own signal keeps leaving such a child to the sweep, its entry naming it.
+func (h *Host) endChild(why string, kill bool) int {
+	if h.opt.beforeEnd != nil {
+		h.opt.beforeEnd()
+	}
 	h.awaitSpawn()
 	h.mu.Lock()
 	signallable := h.signallable()
@@ -211,10 +219,32 @@ func (h *Host) endChild(why string) int {
 		case <-wait:
 		case <-time.After(h.lim.HostExitGrace):
 			h.log.printf("the child did not exit within %v", h.lim.HostExitGrace)
+			if kill {
+				h.killChild(pgid, reaped)
+			}
 		}
 	}
 	h.finish()
 	return 0
+}
+
+// killChild sends SIGKILL to the child's group while its pid is still the child's, and waits for its reap.
+func (h *Host) killChild(pgid int, reaped <-chan struct{}) {
+	h.mu.Lock()
+	signallable := h.signallable()
+	h.mu.Unlock()
+	if !signallable {
+		return
+	}
+	h.log.printf("SIGKILL to the child's process group")
+	if gone, err := signalChild(pgid, true, syscall.SIGKILL); !gone && err != nil {
+		h.log.printf("SIGKILL to group %d: %v", pgid, err)
+	}
+	select {
+	case <-reaped:
+	case <-time.After(h.lim.HostExitGrace):
+		h.log.printf("the child was not reaped within %v of its SIGKILL", h.lim.HostExitGrace)
+	}
 }
 
 // signallable says the child's pid is still the child's: it has been spawned and its reap not yet recorded. The exit
@@ -252,10 +282,11 @@ func (h *Host) finish() {
 	h.mu.Lock()
 	h.closing = true
 	childAlive := h.signallable() // a child reaped while its output drains is gone, whether or not its exit is recorded
-	for c := range h.conns {
-		c.closed = true
+	conns := make([]*conn, 0, len(h.conns))
+	for c := range h.conns { // the control lines already queued are written first (a `discarded` answer is one), not the output
+		c.ending = true
 		c.poke()
-		c.nc.Close()
+		conns = append(conns, c)
 	}
 	for _, t := range []*time.Timer{h.noChild, h.linger} {
 		if t != nil {
@@ -264,6 +295,14 @@ func (h *Host) finish() {
 	}
 	ln := h.ln
 	h.mu.Unlock()
+	flushBy := time.Now().Add(finishFlush)
+	for _, c := range conns {
+		select {
+		case <-c.done:
+		case <-time.After(time.Until(flushBy)):
+		}
+		c.nc.Close()
+	}
 	ln.Close()
 	if info, err := os.Lstat(h.opt.SocketPath); err == nil && info.Mode()&fs.ModeSocket != 0 {
 		os.Remove(h.opt.SocketPath)
@@ -273,6 +312,8 @@ func (h *Host) finish() {
 	}
 	if childAlive {
 		h.log.printf("the child outlives its host; its roster entry stays for the sweep")
+	} else if h.prestart {
+		h.log.printf("an unpromoted prestart's roster entry stays: it names the launch's staged files")
 	} else if err := roster.Remove(h.opt.HostsDir, h.opt.HolderID); err != nil {
 		h.log.printf("removing the roster entry: %v", err)
 	}
@@ -441,7 +482,7 @@ func (h *Host) serve(nc net.Conn) {
 		return
 	}
 	nc.SetReadDeadline(time.Time{})
-	c := &conn{h: h, nc: nc, wake: make(chan struct{}, 1)}
+	c := &conn{h: h, nc: nc, wake: make(chan struct{}, 1), done: make(chan struct{})}
 	h.mu.Lock()
 	if h.closing {
 		h.mu.Unlock()
@@ -494,11 +535,7 @@ func (h *Host) drop(c *conn) {
 		h.pending = nil
 	}
 	if h.prestart && h.writer == nil && h.pending == nil && !h.closing {
-		h.log.printf("a prestart's writer is lost; ending it")
-		select {
-		case h.lost <- struct{}{}:
-		default:
-		}
+		h.endPrestart("a prestart's writer is lost")
 	}
 	for i, old := range h.superseded {
 		if old == c {
@@ -578,6 +615,18 @@ func (h *Host) handle(c *conn, m proto.ClientMsg, payload []byte) {
 			return
 		}
 		h.promote(c)
+	case "discard":
+		if !h.isWriter(c) {
+			return
+		}
+		if !h.prestart {
+			c.send(proto.Discarded{T: "discarded", Marked: false})
+			return
+		}
+		c.send(proto.Discarded{T: "discarded", Marked: true})
+		if !h.closing {
+			h.endPrestart("a successor discarded the prestart")
+		}
 	case "read":
 		if c.role == "" {
 			c.send(proto.Error{T: "error", Message: "attach first"})
@@ -646,6 +695,17 @@ func (h *Host) handle(c *conn, m proto.ClientMsg, payload []byte) {
 	}
 }
 
+// endPrestart closes promotion and admission at once, under the lock that saw the prestart lost or discarded, and has
+// Run end the child. The caller holds mu.
+func (h *Host) endPrestart(why string) {
+	h.closing = true
+	h.log.printf("%s; ending it", why)
+	select {
+	case h.lost <- why:
+	default:
+	}
+}
+
 // promote unmarks a prestart (R4-1): the entry without the mark is written, and only then is `ok` answered. A write that
 // fails is answered with its reason and the mark kept (unlike persist, which only warns), so the entry never says more
 // than the disk does. A launch that is not marked, or is promoted already, is answered `ok` again; a child that is not
@@ -659,8 +719,8 @@ func (h *Host) promote(c *conn) {
 	case h.child == nil:
 		refuse("no child to promote")
 		return
-	case !h.signallable():
-		refuse("the child has exited")
+	case !h.signallable() || errors.Is(syscall.Kill(h.child.Pid, 0), syscall.ESRCH):
+		refuse("the child has exited") // the kernel says reaped before the reap's record does
 		return
 	}
 	if h.prestart {

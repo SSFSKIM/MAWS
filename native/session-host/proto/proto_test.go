@@ -93,3 +93,13 @@ func TestPrestartAndPromote(t *testing.T) {
 		t.Fatalf("a refused promotion = %q", got)
 	}
 }
+
+func TestDiscard(t *testing.T) {
+	m, _, err := ReadFrame(reader(`{"t":"discard"}`+"\n"), 1<<10, 1<<10)
+	if err != nil || m.T != "discard" {
+		t.Fatalf("discard: %+v %v", m, err)
+	}
+	if got := string(Line(Discarded{T: "discarded", Marked: false})); got != `{"t":"discarded","marked":false}`+"\n" {
+		t.Fatalf("a discard of an unmarked host = %q", got)
+	}
+}

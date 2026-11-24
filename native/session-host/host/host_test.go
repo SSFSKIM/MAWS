@@ -853,8 +853,14 @@ func TestAMarkedHostWhoseWriterIsLostEndsItsChildAndExits(t *testing.T) {
 		t.Fatalf("exit code %d", code)
 	}
 	waitGone(t, pid, 5*time.Second)
-	if _, err := os.Lstat(filepath.Join(hs.dir, "TESTHOST.json")); !os.IsNotExist(err) {
-		t.Fatal("the ended prestart's roster entry survived its host")
+	// the entry is the only record naming the launch's staged files: it stays, exited and marked, for the successor
+	if e := hs.entry(); e["prestart"] != true || e["state"] != "exited" {
+		t.Fatalf("the ended prestart's entry: %v", e)
+	}
+	for _, name := range []string{"TESTHOST.token", "TESTHOST.sock"} {
+		if _, err := os.Lstat(filepath.Join(hs.dir, name)); !os.IsNotExist(err) {
+			t.Fatalf("%s survived the host", name)
+		}
 	}
 	if log := hs.log(); !strings.Contains(log, "prestart") {
 		t.Fatalf("the log does not say why the host ended:\n%s", log)
@@ -932,4 +938,166 @@ func TestAnUnmarkedHostOutlivesItsWriter(t *testing.T) {
 			again.expect("applied")
 		})
 	}
+}
+
+func TestAMarkedHostReleasedAfterItsChildsExitKeepsItsEntry(t *testing.T) {
+	hs := start(t, nil)
+	w := hs.writer(1)
+	hs.launchPrestart(w)
+	w.send(map[string]any{"t": "end"})
+	w.expect("exit")
+	w.send(map[string]any{"t": "release"})
+	hs.waitExit(5 * time.Second)
+	if e := hs.entry(); e["prestart"] != true || e["state"] != "exited" {
+		t.Fatalf("a released prestart's entry: %v", e)
+	}
+}
+
+// writerAt attaches a second connection as writer at `fence`, superseding the first.
+func (hs *harness) writerAt(fence uint64) *client {
+	c := dial(hs.t, hs.sock)
+	c.send(map[string]any{"t": "auth", "token": testToken})
+	c.expect("hello")
+	c.send(map[string]any{"t": "attach", "role": "writer", "fence": fence})
+	c.expect("attached")
+	return c
+}
+
+func TestADiscardOfAMarkedHostClosesPromotionAndEndsItsChild(t *testing.T) {
+	gate := make(chan struct{})
+	release := sync.OnceFunc(func() { close(gate) })
+	hs := startWith(t, nil, func(o *Options) { o.beforeEnd = func() { <-gate } }) // the end held: promotion is closed already
+	t.Cleanup(release)
+	old := hs.writer(1)
+	pid := int(hs.launchPrestart(old).Raw["pid"].(float64))
+	successor := hs.writerAt(2)
+	old.expect("fenced")
+	old.send(map[string]any{"t": "promote"}) // a predecessor's promote still in its socket: refused once fenced
+	old.expect("fenced", "promoted")
+	successor.send(map[string]any{"t": "discard"})
+	if d := successor.expect("discarded"); d.Raw["marked"] != true {
+		t.Fatalf("the discard of a marked host: %v", d.Raw)
+	}
+	successor.send(map[string]any{"t": "promote"})
+	if p := successor.expect("promoted"); p.Raw["ok"] != false {
+		t.Fatalf("a promotion after the discard: %v", p.Raw)
+	}
+	release()
+	hs.waitExit(10 * time.Second)
+	waitGone(t, pid, 5*time.Second)
+	if e := hs.entry(); e["prestart"] != true || e["state"] != "exited" {
+		t.Fatalf("the discarded prestart's entry: %v", e)
+	}
+}
+
+func TestADiscardOfAPromotedHostDoesNothing(t *testing.T) {
+	hs := start(t, func(l *Limits) { l.NoChild = 100 * time.Millisecond })
+	old := hs.writer(1)
+	pid := int(hs.launchPrestart(old).Raw["pid"].(float64))
+	old.send(map[string]any{"t": "promote"})
+	old.expect("promoted")
+	successor := hs.writerAt(2)
+	successor.send(map[string]any{"t": "discard"})
+	if d := successor.expect("discarded"); d.Raw["marked"] != false {
+		t.Fatalf("the discard of a promoted host: %v", d.Raw)
+	}
+	successor.stdin(0, "adopted\n") // the successor goes on with it as any host
+	successor.expect("applied")
+	if err := syscall.Kill(pid, 0); err != nil {
+		t.Fatalf("a discard of a promoted host ended its child: %v", err)
+	}
+}
+
+func TestOnlyTheWriterDiscards(t *testing.T) {
+	hs := start(t, nil)
+	w := hs.writer(1)
+	hs.launchPrestart(w)
+	o := dial(t, hs.sock)
+	o.send(map[string]any{"t": "auth", "token": testToken})
+	o.expect("hello")
+	o.send(map[string]any{"t": "discard"})
+	if e := o.expect("error", "discarded"); e.Raw["message"] != "not the writer" {
+		t.Fatalf("a discard from a connection that is no writer: %v", e.Raw)
+	}
+}
+
+func TestADiscardFencesACommitStillInThePredecessorsSocket(t *testing.T) {
+	hs := start(t, nil)
+	old := hs.writer(1)
+	old.send(map[string]any{"t": "launch", "prestart": true, "appSessionId": "app-1", "engineSessionId": "eng-1", "argv": []string{"/bin/cat"}, "cwd": "/", "env": map[string]string{}})
+	successor := hs.writerAt(2)
+	old.send(map[string]any{"t": "commit"})
+	old.expect("fenced", "spawned")
+	successor.send(map[string]any{"t": "discard"})
+	if d := successor.expect("discarded"); d.Raw["marked"] != true {
+		t.Fatalf("the discard of a launched prestart: %v", d.Raw)
+	}
+	hs.waitExit(5 * time.Second)
+	hs.h.mu.Lock()
+	child := hs.h.child
+	hs.h.mu.Unlock()
+	if child != nil {
+		t.Fatalf("a discarded prestart spawned %d", child.Pid)
+	}
+}
+
+func TestAWriterLostClosesPromotionAtOnce(t *testing.T) {
+	gate := make(chan struct{})
+	release := sync.OnceFunc(func() { close(gate) })
+	hs := startWith(t, nil, func(o *Options) { o.beforeEnd = func() { <-gate } })
+	t.Cleanup(release)
+	w := hs.writer(1)
+	hs.launchPrestart(w)
+	next := dial(t, hs.sock) // a connection already admitted, which takes the writer in the loss's wake
+	next.send(map[string]any{"t": "auth", "token": testToken})
+	next.expect("hello")
+	w.nc.Close()
+	for deadline := time.Now().Add(5 * time.Second); !strings.Contains(hs.log(), "writer is lost"); time.Sleep(5 * time.Millisecond) {
+		if time.Now().After(deadline) {
+			t.Fatal("the loss was not seen")
+		}
+	}
+	next.send(map[string]any{"t": "attach", "role": "writer", "fence": 2})
+	next.expect("attached")
+	next.send(map[string]any{"t": "promote"})
+	if p := next.expect("promoted"); p.Raw["ok"] != false {
+		t.Fatalf("a promotion after the writer's loss: %v", p.Raw)
+	}
+	release()
+	hs.waitExit(10 * time.Second)
+}
+
+func TestAWriterLostKillsAChildThatIgnoresTERM(t *testing.T) {
+	hs := start(t, func(l *Limits) { l.HostExitGrace = 300 * time.Millisecond })
+	w := hs.writer(1)
+	w.send(map[string]any{"t": "read", "fromSeq": 1})
+	w.expect("caughtUp")
+	w.send(map[string]any{"t": "launch", "prestart": true, "appSessionId": "app-1", "engineSessionId": "eng-1", "argv": []string{"/bin/sh", "-c", "trap '' TERM; echo ready; exec /bin/sleep 30"}, "cwd": "/", "env": map[string]string{"PATH": "/usr/bin:/bin"}})
+	w.send(map[string]any{"t": "commit"})
+	pid := int(w.expect("spawned").Raw["pid"].(float64))
+	t.Cleanup(func() { syscall.Kill(pid, syscall.SIGKILL) })
+	w.expect("out") // TERM is ignored from here on
+	w.nc.Close()
+	hs.waitExit(10 * time.Second)
+	waitGone(t, pid, 3*time.Second)
+}
+
+func TestAPromotionAfterTheReapIsRefused(t *testing.T) {
+	gate := make(chan struct{})
+	release := sync.OnceFunc(func() { close(gate) })
+	hs := startWith(t, nil, func(o *Options) { o.afterReap = func() { <-gate } })
+	t.Cleanup(release)
+	w := hs.writer(1)
+	w.send(map[string]any{"t": "launch", "prestart": true, "appSessionId": "app-1", "engineSessionId": "eng-1", "argv": []string{"/bin/sh", "-c", "exit 0"}, "cwd": "/", "env": map[string]string{}})
+	w.send(map[string]any{"t": "commit"})
+	pid := int(w.expect("spawned").Raw["pid"].(float64))
+	waitGone(t, pid, 5*time.Second) // reaped; the reap's record is held
+	w.send(map[string]any{"t": "promote"})
+	if p := w.expect("promoted"); p.Raw["ok"] != false {
+		t.Fatalf("a promotion after the reap: %v", p.Raw)
+	}
+	if e := hs.entry(); e["prestart"] != true {
+		t.Fatalf("a promotion after the reap unmarked the entry: %v", e)
+	}
+	release()
 }
