@@ -4,7 +4,7 @@
 
 62 items: 33 cut, 1 reworded, 28 stay. Of the 34 that change, the owner saw 4 in a picture or ruled on them; 30 follow the pattern and were not seen.
 
-Against master (M0): 60 unchanged, 2 rewritten by the wave; none waits on the owner; 1 put to the owner (new rows included) and since ruled. M0 added 11 rows for the UX wave's new text (5 cut, 1 reworded, 5 stay), listed at the end.
+Against master (M0): 60 unchanged, 2 rewritten by the wave; none waits on the owner; 1 put to the owner (new rows included) and since ruled. M0 added 14 rows for the UX wave's new text (5 cut, 1 reworded, 8 stay), listed at the end.
 
 Columns: **Id** is the item's id in `items.json`. **Where** is the place on the surface. **Today** is the text at the pin `2c7044231` (an example value where the text is built from data). **Decision** is `cut` (the text leaves the resting surface), `reword` (it changes) or `stays` (today's text is kept; the row is here so that nobody proposes it again). **After** says what the surface shows afterwards, as it was built on the scratch branch and shown in the pictures. **Basis** is how firm the decision is, in the words of the root document's "How firm each decision is". **Source** is the file and line at the pin. **M0** is what the re-reading against master found (see the root document's "M0's record"): `unchanged`, `moved`, `rewritten by the wave`, `gone` or `moot`, with the file and line on master, and for a rewritten row the text master shows and the row decided again by the five rules. **Build** is the milestone that builds the row and the scene whose before and after pictures show it.
 
@@ -178,6 +178,24 @@ Rows added by M0 for text the UX wave added after the pin. **Today** here is the
 | Id | Where | Today | Decision | After | Basis | Source | M0 | Build |
 |---|---|---|---|---|---|---|---|---|
 | N192 | Reread, in the strip above the dashboard, while a changed source is read again | Rereading… | cut | Reread keeps its word, with the quiet spinner named "Rereading…" beside it (`WaitingWords`), and says it is busy. | pattern | `src/renderer/src/tools/dashboard/FileSources.tsx:66` | new `src/renderer/src/tools/dashboard/FileSources.tsx:66` | M5 · no scene: a transient wait no fixture holds (wanted: a dashboard whose CSV changed on disk, Reread pressed with the reread held) |
+
+#### Send to sheet
+
+| Id | Where | Today | Decision | After | Basis | Source | M0 | Build |
+|---|---|---|---|---|---|---|---|---|
+| N195 | the connection box while a sign-in is under way in the browser (Notion's Connect, gws's sign-in) | Finish connecting in your browser… / Finish signing in in your browser. If you declined, cancel here. | stays | Stays. rule 5: a state the person must act on keeps what to do (finish in the browser, or cancel here); no spinner stands in for an instruction | pattern | `src/renderer/src/delivery/copy.ts:59` | new `src/renderer/src/delivery/copy.ts:59` | M5 · no scene: a sign-in held open in a browser (wanted: Connect pressed on a Notion connector that needs MAWS's sign-in, the browser not answered) |
+
+#### Artifact header, Send to action
+
+| Id | Where | Today | Decision | After | Basis | Source | M0 | Build |
+|---|---|---|---|---|---|---|---|---|
+| N196 | the same action while a send of the artifact runs | Sending to Notion… | stays | Stays. rule 2 and T129: the header's Send to is the delivery's receipt, naming the service; while it runs it says where it is going, as "Sent to Notion" says where it went | pattern | `src/renderer/src/delivery/copy.ts:18` | new `src/renderer/src/delivery/copy.ts:18` | M5 · no scene: a transient wait no fixture holds (wanted: a document whose Send to Notion is held mid-send) |
+
+#### Connectors sheet of an HTML page artifact
+
+| Id | Where | Today | Decision | After | Basis | Source | M0 | Build |
+|---|---|---|---|---|---|---|---|---|
+| N197 | a server row's status while an action on it runs (connecting, disconnecting, forgetting) | Connecting… / Disconnecting… / Forgetting… | stays | Stays. rule 2: the live status of one row among several, as M3 kept "Answering…" (N166); a spinner would leave the row without its state | pattern | `src/renderer/src/tools/artifacts/viewers/connectors/copy.ts:142` | new `src/renderer/src/tools/artifacts/viewers/connectors/copy.ts:142` | M5 · no scene: a transient wait no fixture holds (wanted: Disconnect pressed on a connected server with the disconnect held) |
 
 ### Artifacts library
 
