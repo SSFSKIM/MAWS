@@ -170,8 +170,13 @@ interface Showing {
   threadId: string;
   serial: number;
   /** The word cut (G385): the panel's card that asked closed with the panel, so the margin's card takes the keyboard to
-   * its reply field once active, as the panel's would have (a click on the card, or R). */
+   * its reply field once active, as the panel's would have (a click on the card, or R). Asked only of an open thread the
+   * person can reply to: no margin card answers any other, and a request left standing would be answered by a later
+   * reopen, taking the keyboard from wherever the person is then. */
   reply?: boolean;
+  /** Some tab holds the thread's passage or block (its `live`). One that none holds has nothing to select: it is shown
+   * active with no selection, so its card (the panel's, where the margin cannot draw it) holds the reply field (G385). */
+  anchored: boolean;
 }
 /** The word cut (G385): a thread whose margin card takes the keyboard to its reply field, once per serial. */
 type ReplyAsked = { threadId: string; serial: number };
@@ -444,7 +449,7 @@ export function DocumentEditor(props: DocumentEditorProps) {
               // stays open as before, and so does the panel for an orphan, which the margin cannot draw (Z3). The margin
               // is not drawn while the panel is, so the panel's own layout says whether it would host (the same 720 px)
               const handedToMargin = !thread.orphan && commentsView !== 'hide' && railLayout.mode === 'beside';
-              setShowing({ threadId: thread.id, serial: (showing?.serial ?? 0) + 1, reply: handedToMargin });
+              setShowing({ threadId: thread.id, serial: (showing?.serial ?? 0) + 1, reply: handedToMargin && thread.status === 'open' && !readOnly, anchored: thread.live });
               if (handedToMargin) openRail(null);
             }}
             onClose={() => openRail(null)}
@@ -594,7 +599,15 @@ function TabEditor({ tabId, tabTitle, newSection, artifactId, handle, host, rend
       const range = liveRanges(editor.state.doc).get(showing.threadId)?.[0];
       // P3-E: a block thread's block, selected whole
       const block = range ? -1 : blockPos(editor, handle.doc, showing.threadId);
-      if (!range && block < 0) return false;
+      if (!range && block < 0) {
+        // not bound yet (a switched tab binds a moment later), or nothing left to select: the thread's passage or block
+        // was deleted, and it is made active as it is (the word cut, G385: its card's reply field is the active card's)
+        if (showing.anchored) return false;
+        editor.commands.setActiveThread(showing.threadId);
+        setReplyAsked(null);
+        onShown();
+        return true;
+      }
       (range ? editor.chain().setTextSelection(range) : editor.chain().setNodeSelection(block)).setActiveThread(showing.threadId).scrollIntoView().run();
       setReplyAsked(showing.reply ? { threadId: showing.threadId, serial: showing.serial } : null);
       onShown();

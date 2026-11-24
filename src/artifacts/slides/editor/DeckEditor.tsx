@@ -21,7 +21,7 @@
 // words with the model's reason on it (G413), the inspector card is headed by what it edits (G439), and the pill's ↻
 // says what it does (G498).
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react';
-import { DesignSystemScope, useDesignSystem, type DesignSystemRef } from '../../design-system/apply';
+import { DesignSystemScope, useDesignSystem, type DesignSystemRef, type SystemUnread } from '../../design-system/apply';
 import { NamedGlyph } from '../../../renderer/src/ui/glyph';
 import { Tip } from '../../../renderer/src/ui/tip';
 import { HistoryIcon } from '../../ui/icons';
@@ -72,6 +72,9 @@ export interface DeckEditorProps extends DeckRevealProps /* P4-B4: a place asked
   assetUrl: AssetUrl;
   /** The deck's governing design system (D's chain); null draws the slides' own fallbacks. */
   system: DesignSystemRef | { builtin: 'maws' } | null;
+  /** Why `system` is null while the deck's placement is unknown (its row still read, or a read that failed): the Check
+   * panel and From layout wait or say so, never reading as a deck with no system. */
+  systemUnread?: SystemUnread;
   readOnly: boolean;
   /** The panel's narrow body: a narrower filmstrip. */
   compact?: boolean;
@@ -115,7 +118,7 @@ const TEXT_KINDS: readonly NewKind[] = ['text', 'heading', 'bullets', 'numbers']
 
 const STAGE_GUTTER = 48; // px of app chrome around the fitted slide
 
-export function DeckEditor({ session, assetUrl, system, readOnly, compact = false, onToolbarHost, onStage, onDrawn, onThumbnailsDrawn, uploadAsset, artifactId, importAsset, theme, comments, commentAuthor, history: historySource, versionExports, sessionTitle, assetUrlAt, onPreviewDrawn, reveal, onRevealed, registerEditClaimant /* P4-B2 K6 */, bindsKey, provisional = null }: DeckEditorProps) {
+export function DeckEditor({ session, assetUrl, system, systemUnread, readOnly, compact = false, onToolbarHost, onStage, onDrawn, onThumbnailsDrawn, uploadAsset, artifactId, importAsset, theme, comments, commentAuthor, history: historySource, versionExports, sessionTitle, assetUrlAt, onPreviewDrawn, reveal, onRevealed, registerEditClaimant /* P4-B2 K6 */, bindsKey, provisional = null }: DeckEditorProps) {
   useCanvasCss();
   const doc = session.doc;
   const view = useDeckView(doc);
@@ -356,6 +359,7 @@ export function DeckEditor({ session, assetUrl, system, readOnly, compact = fals
               fromLayout={
                 <LayoutsMenu
                   system={system}
+                  systemUnread={systemUnread}
                   disabled={readOnly}
                   unavailable={view.slides.length >= DECK_LIMITS.slides ? C.deckFull(DECK_LIMITS.slides) : null}
                   scope={scope}
@@ -463,7 +467,7 @@ export function DeckEditor({ session, assetUrl, system, readOnly, compact = fals
             )}
             {historyRail && <div className="deck-tool-card">{historyRail}</div>}
             {!preview && state.rail === 'theme' && <div className="deck-tool-card">{scope(<ThemePanel session={session} system={system} theme={theme} overrides={view.overrides} faces={view.faces} readOnly={readOnly} />)}</div>}
-            {!preview && state.rail === 'check' && <div className="deck-tool-card"><CheckPanel session={session} system={system} /></div>}
+            {!preview && state.rail === 'check' && <div className="deck-tool-card"><CheckPanel session={session} system={system} systemUnread={systemUnread} /></div>}
             {!preview && state.rail === 'comments' && <div className="deck-tool-card"><CommentsRail api={commentsApi} onClose={() => session.toggleRail('comments')} /></div>}
           </div>
         )}

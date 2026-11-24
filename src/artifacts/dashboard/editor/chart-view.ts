@@ -24,7 +24,7 @@ import { parseSpec } from '../spec';
 import { QUIET_MS } from '../../../renderer/src/ui/spinner';
 import { DATASET_STATES, isSlicesFolded, mismatchNotes, sourceLabel } from '../states';
 import { TILE_COPY } from './copy';
-import { attachHover } from './hover';
+import { attachHover, placeNote } from './hover';
 import { livePauseLabel, livePauseOf, type LiveDatasets } from './live'; // E3
 import type { SnapshotReader } from '../snapshots';
 
@@ -202,6 +202,10 @@ export function createChartRenderer(deps: ChartRendererDeps): NonNullable<ViewEn
         mark.tabIndex = 0;
         mark.setAttribute('aria-label', marked.join(' · '));
         mark.dataset.note = marked.join(' · ');
+        // the note opens inside what can be seen of the editor, flipped or narrowed at its edge (hover.ts)
+        const place = () => placeNote(mark);
+        mark.addEventListener('pointerenter', place);
+        mark.addEventListener('focus', place);
         source.append(mark);
       }
       const notes = viewNotes.filter((note) => !isSlicesFolded(note));

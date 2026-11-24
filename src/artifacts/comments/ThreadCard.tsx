@@ -99,12 +99,14 @@ export function ThreadCard({ thread, active, compact, onActivate, onReply, onRes
   const whole = active || !compact;
   const replying = active && open && !readOnly; // the word cut (G385): the active card's only
   // the word cut (G385): a reply asked of this card from elsewhere (the panel's card that asked closed with the panel)
-  // takes the keyboard to the field once the card is active; the asker then drops the request, so it is answered once
+  // takes the keyboard to the field once the card is active; the asker then drops the request, so it is answered once.
+  // An active card that cannot reply (resolved, read-only) answers it by dropping it: kept, a later reopen would mount the
+  // field and take the keyboard from wherever the person is by then.
   useEffect(() => {
-    if (replyAsked === undefined || !replying) return;
-    replyField.current?.focus();
+    if (replyAsked === undefined || !active) return;
+    if (replying) replyField.current?.focus();
     onReplyTaken?.();
-  }, [replyAsked, replying, onReplyTaken]);
+  }, [replyAsked, active, replying, onReplyTaken]);
   const { messages } = thread;
   const hidden = whole ? 0 : Math.max(0, messages.length - 1 - COMPACT_LATEST);
   const head = hidden > 0 ? messages.slice(0, 1) : messages;

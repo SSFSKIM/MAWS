@@ -15,12 +15,14 @@
 // this artifact on this surface, taken once the editor has it.
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
 import type { ArtifactHost } from '@artifacts/host';
+import type { SystemUnread } from '@artifacts/design-system/apply';
 import { DeckEditor } from '@artifacts/slides/editor/DeckEditor';
 import { showSlides } from '@artifacts/slides/editor/present/sequence';
 import type { DeckSession } from '@artifacts/slides/editor/session';
 import { slideOrder } from '@artifacts/slides/model';
 import { onUpdate, type Doc } from '@artifacts/yjs';
 import type { ArtifactEditorProps } from '../../artifacts/registry';
+import { LIBRARY_COPY } from '../../library/copy';
 import { useLibraryList, useLibraryRow } from '../../library/store';
 import { useRegionMarkupSurface } from '../../markup/surface';
 import { sendToSubject, useSendToAction } from '../../delivery/header'; // P4-B5
@@ -73,7 +75,8 @@ function useDeckCount(session: DeckSession | null, count: (doc: Doc) => number):
 
 function DeckBody({ artifactId, machine, state, scope, visible, onShown, compact }: DeckEditorBodyProps & { compact: boolean }) {
   const snapshot = useSyncExternalStore(state.subscribe, state.snapshot);
-  const row = useLibraryRow(artifactId, machine).value;
+  const rowRead = useLibraryRow(artifactId, machine);
+  const row = rowRead.value;
   const title = row?.title ?? 'Presentation';
   useEffect(() => state.setTitle(title), [state, title]);
   // M6: the actions drive the tab's own session (X32's lifetime rule), Present from the slide it shows
@@ -102,6 +105,12 @@ function DeckBody({ artifactId, machine, state, scope, visible, onShown, compact
 
   const placement = useMemo(() => (row ? { ...(row.designSystemId && { designSystemId: row.designSystemId }), ...(row.spaceId && { spaceId: row.spaceId }) } : null), [row]);
   const system = useDeckSystem(placement, machine);
+  // the word cut's whole-branch review, its fix wave: with no row there is no placement, so no system; the Check panel and
+  // From layout wait while the row is read, and say so when it could not be read (or the deck is not in the library)
+  const systemUnread = useMemo<SystemUnread | undefined>(
+    () => (row ? undefined : row === null ? { failed: LIBRARY_COPY.absent } : rowRead.status === 'error' ? { failed: rowRead.error ?? '' } : 'reading'),
+    [row, rowRead.status, rowRead.error],
+  );
   // M6: the Theme panel's systems (the library's live design systems) and the deck's own choice
   const systemRows = useLibraryList({ kind: 'design_system' }, machine).value?.rows;
   const theme = useMemo(
@@ -153,6 +162,7 @@ function DeckBody({ artifactId, machine, state, scope, visible, onShown, compact
         session={session}
         assetUrl={assetUrl}
         system={system}
+        systemUnread={systemUnread}
         readOnly={snapshot.document?.readOnly ?? false}
         compact={compact}
         onToolbarHost={setToolbarElement}

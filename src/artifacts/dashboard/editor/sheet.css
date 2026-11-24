@@ -126,7 +126,9 @@
   flex-basis: 100%;
 }
 /* the word cut (G598): a column's wrong-type values, a mark after the source label whose notes show beside it while it
-   is pointed at or holds the keyboard, and at rest where nothing can point (the touch rule) */
+   is pointed at or holds the keyboard, and at rest where nothing can point (the touch rule). Pointed at or focused, the
+   mark is placed (hover.ts's placeNote): the note opens from its end leftward near the editor's right edge, and its width
+   is capped to the room on the side it opens to, so it is never clipped */
 .ds-doc .dash-warning {
   position: relative;
   cursor: default;
@@ -144,7 +146,8 @@
   left: 0;
   top: calc(100% + var(--space));
   width: max-content;
-  max-width: 320px;
+  max-width: var(--dash-note-max, 320px);
+  box-sizing: border-box;
   padding: var(--space) calc(var(--space) * 2);
   font-family: var(--font-ui);
   font-size: var(--text-ui-sm);
@@ -155,6 +158,10 @@
   box-shadow: var(--shadow-float);
   pointer-events: none;
   visibility: hidden;
+}
+.ds-doc .dash-warning[data-note-side='end']::after {
+  right: 0;
+  left: auto;
 }
 .ds-doc .dash-warning:hover::after {
   visibility: visible;

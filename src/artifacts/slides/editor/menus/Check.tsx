@@ -6,10 +6,11 @@
 // The word cut (docs/doperpowers/specs/2026-11-16-word-cut-design.md, M5 task 3): titled Check (G471), its summary the
 // issues or "No issues" with the rules counted (G472), an issue row its message and its rule's words (G473), the manual
 // sections in a person's words (G475), and its wait the quiet spinner (G476). Every wait settles: a system the check
-// cannot read says so, and none, or one with no tagged don'ts, is nothing to check.
+// cannot read says so, and none, or one whose don'ts no check runs, is nothing to check. A deck whose placement is not
+// read yet waits, and one whose placement could not be read says it cannot read the system: neither is a deck with none.
 import { useCallback, useMemo, useRef, useSyncExternalStore } from 'react';
 import { QuietSpinner } from '../../../../renderer/src/ui/spinner';
-import { useDesignSystem, type DesignSystemRef } from '../../../design-system/apply';
+import { useDesignSystem, type DesignSystemRef, type SystemUnread } from '../../../design-system/apply';
 import { onUpdate } from '../../../yjs';
 import { checkDeck, elementOfLocator, type DeckCheck } from '../../check';
 import { slideOrder } from '../../model';
@@ -23,6 +24,8 @@ export const CHECK_SETTLE_MS = 300;
 export interface CheckPanelProps {
   session: DeckSession;
   system: DesignSystemRef | { builtin: 'maws' } | null;
+  /** Why `system` is null while the deck's placement is unknown: the panel waits, or says the read failed. */
+  systemUnread?: SystemUnread;
 }
 
 // A number that moves a moment after the deck's last change (the check's cue to run again).
@@ -54,7 +57,7 @@ function useDeckCheck(session: DeckSession, law: string | null, tokens: Paramete
   return run.check;
 }
 
-export function CheckPanel({ session, system }: CheckPanelProps) {
+export function CheckPanel({ session, system, systemUnread }: CheckPanelProps) {
   const { view, status } = useDesignSystem(system);
   const check = useDeckCheck(session, view?.law ?? null, view?.tokens ?? null);
   const order = check ? slideOrder(session.doc) : [];
@@ -65,22 +68,23 @@ export function CheckPanel({ session, system }: CheckPanelProps) {
     session.select(id ? [id] : []);
   };
 
+  const waiting = (
+    <p className="deck-check-note deck-check-wait">
+      <QuietSpinner label={C.loading} />
+    </p>
+  );
   let body;
-  if (system === null || check?.donts.length === 0) body = <p className="deck-check-note">{C.noDonts}</p>;
+  if (system === null) body = systemUnread === 'reading' ? waiting : <p className="deck-check-note">{systemUnread ? C.unread : C.noDonts}</p>;
+  else if (check?.donts.length === 0) body = <p className="deck-check-note">{C.noDonts}</p>;
   else if (status === 'missing') body = <p className="deck-check-note">{C.unread}</p>;
-  else if (!view || !check)
-    body = (
-      <p className="deck-check-note deck-check-wait">
-        <QuietSpinner label={C.loading} />
-      </p>
-    );
+  else if (!view || !check) body = waiting;
   else {
     const { report } = check;
     const bySlide = order.map((slideId, i) => ({ slideId, n: i + 1, violations: report.violations.filter((v) => v.unit === slideId) })).filter((s) => s.violations.length > 0);
     body = (
       <>
         <p className="deck-check-summary" role="status">
-          {report.violations.length ? C.summary(report.violations.length) : C.clean(report.checks.length)}
+          {report.violations.length ? C.summary(report.violations.length) : report.checks.length ? C.clean(report.checks.length) : C.noDonts /* no check ran (G472) */}
         </p>
         {bySlide.map(({ slideId, n, violations }) => (
           <section key={slideId} className="deck-inspector-section" aria-label={C.slide(n)}>

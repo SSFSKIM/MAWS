@@ -113,6 +113,21 @@
   grid-row: 1;
   display: flex;
 }
+/* where the card draws no quote, its first row is the list of messages: only the first message sits beside the action,
+   and the replies under it take the card's whole width. The list spans the first row on the card's two columns (a
+   subgrid of them, over the action's cell, which holds no message) */
+.thread-card > .thread-card-messages:first-child {
+  grid-column: 1 / -1;
+  grid-row: 1;
+  display: grid;
+  grid-template-columns: subgrid;
+}
+.thread-card > .thread-card-messages:first-child > .thread-card-message {
+  grid-column: 1 / -1;
+}
+.thread-card > .thread-card-messages:first-child > .thread-card-message:first-child {
+  grid-column: 1;
+}
 /* the word cut (G388): a card whose passage is gone, where it draws no quote (a deck's or a design's pin popover) */
 .thread-card-removed {
   align-self: flex-start;
