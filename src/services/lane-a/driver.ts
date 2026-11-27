@@ -156,7 +156,8 @@ class Backoff {
 interface Watch {
   id: string;
   stream: EventStream | null;
-  reshaper: Reshaper | null;
+  reshaper: Reshaper | null; // the last stream's that opened, kept while the next is asked for, so the final body reaches it
+  open: boolean; // the current stream's snapshot came: it carries what follows (a broken or unanswered one does not)
   backoff: Backoff;
   timer: NodeJS.Timeout | null;
   offGone: () => void;
@@ -465,15 +466,16 @@ export function createLaneADriver(deps: LaneADeps): LaneADriver {
 
   // ---- watches --------------------------------------------------------------------------------------------------------
   function openWatch(s: Session, w: Watch): void {
-    w.reshaper = null;
+    w.open = false;
     const stream: EventStream = subscribe(s.socket.path, {
       onLines: (lines) => {
         if (w.stream !== stream) return;
         const messages = [];
         for (const line of lines) {
-          if (w.reshaper === null) {
+          if (!w.open) {
             if (line.type !== 'snapshot') return watchEnded(s, w, stream);
             w.reshaper = new Reshaper({ machine: deps.machine, session: s.engine, sub: w.id });
+            w.open = true;
             const body = s.follow?.body ?? NO_SUBAGENTS;
             w.body = JSON.stringify(body);
             messages.push(...w.reshaper.snapshot(line, body));
@@ -499,9 +501,12 @@ export function createLaneADriver(deps: LaneADeps): LaneADriver {
     stream.close();
     w.stream = null;
     w.backoff.broke();
+    const drew = w.open;
+    w.open = false;
     if (w.ended || s.gone) return;
-    if (w.reshaper !== null) deps.emit('laneA.plane', { appSessionId: s.appId, watch: w.id, reset: true }); // what it drew no longer follows
-    // its reshaper stays until the stream opens again, so the body's last word reaches it if the bridge went meanwhile
+    if (drew) deps.emit('laneA.plane', { appSessionId: s.appId, watch: w.id, reset: true }); // what it drew no longer follows
+    // its reshaper stays until a stream opens again (its snapshot, not the attempt), so the body's last word reaches it if
+    // the bridge or its process went meanwhile, however many attempts came first
     w.timer = setTimeout(() => {
       w.timer = null;
       if (!w.ended) openWatch(s, w);
@@ -559,7 +564,7 @@ export function createLaneADriver(deps: LaneADeps): LaneADriver {
   function bodyChanged(s: Session, f: SessionFollow): void {
     const key = JSON.stringify(f.body);
     for (const w of s.watches.values()) {
-      if (w.reshaper === null || (f.sessionRunning && w.stream === null) || w.body === key) continue;
+      if (w.reshaper === null || (f.sessionRunning && !w.open) || w.body === key) continue;
       w.body = key;
       deps.emit('laneA.plane', { appSessionId: s.appId, watch: w.id, messages: [w.reshaper.subagents(f.body)] });
     }
@@ -843,7 +848,7 @@ export function createLaneADriver(deps: LaneADeps): LaneADriver {
     watch(appId, client) {
       const s = sessions.get(appId);
       if (!s || (s.bridge?.bridge !== 'live' && s.bridge?.bridge !== 'starting')) throw new Error(`${appId}: ${s?.bridge?.reason ?? NO_BRIDGE}`);
-      const w: Watch = { id: randomUUID(), stream: null, reshaper: null, backoff: new Backoff(timing.backoff), timer: null, offGone: () => {}, ended: false, body: null };
+      const w: Watch = { id: randomUUID(), stream: null, reshaper: null, open: false, backoff: new Backoff(timing.backoff), timer: null, offGone: () => {}, ended: false, body: null };
       s.watches.set(w.id, w);
       follow(s);
       w.offGone = client.onGone(() => endWatch(s, w, null));
