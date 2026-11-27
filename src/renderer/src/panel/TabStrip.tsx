@@ -316,28 +316,31 @@ function Tab({ tab, appSessionId, group, selected, shape, maxWidth, canPin, body
       style={maxWidth === null ? undefined : { maxWidth }}
       className={`group flex h-7 shrink-0 items-center rounded-sm ${iconOnly ? 'w-7' : 'max-w-48 min-w-18'} ${selected ? 'bg-bg-active text-fg' : 'text-fg-muted hover:bg-bg-hover hover:text-fg'}`}
     >
-      <button
-        ref={button}
-        type="button"
-        role="tab"
-        aria-selected={selected}
-        aria-controls={selected ? bodyId : undefined}
-        aria-label={iconOnly ? name : undefined}
-        title={file ? file.file : iconOnly ? name : undefined} // UX wave U6e (decision 11): a file's tab has its full path as its tooltip
-        tabIndex={selected ? 0 : -1}
-        onClick={onSelect}
-        onFocus={() => revealTab(outer.current)} // the F6 stop and the arrows focus without scrolling
-        onDoubleClick={preview ? () => keep(tab.id) : undefined}
-        className={`flex h-full min-w-0 flex-1 items-center rounded-sm text-ui outline-accent focus-visible:outline-2 ${iconOnly ? 'justify-center' : 'gap-1.5 pr-1 pl-2'}`}
-      >
-        {ToolIcon ? <ToolIcon className="size-3.5 shrink-0" /> : iconOnly && <span aria-hidden>{title.slice(0, 1).toUpperCase()}</span>}
-        {!iconOnly && (
-          <span className={preview ? 'truncate italic' : 'truncate'}>
-            {title}
-            {suffix && <span className="text-fg-faint"> · {suffix}</span>}
-          </span>
-        )}
-      </button>
+      {/* UX wave U6e (decision 11): a file's tab has its full path as its tooltip and its description; a tab drawn as its
+          icon alone has its name as its tooltip (ticket 815: a Tip the keyboard reaches, no longer a system title) */}
+      <Tip content={file ? file.file : iconOnly ? name : null} description={file?.file}>
+        <button
+          ref={button}
+          type="button"
+          role="tab"
+          aria-selected={selected}
+          aria-controls={selected ? bodyId : undefined}
+          aria-label={iconOnly ? name : undefined}
+          tabIndex={selected ? 0 : -1}
+          onClick={onSelect}
+          onFocus={() => revealTab(outer.current)} // the F6 stop and the arrows focus without scrolling
+          onDoubleClick={preview ? () => keep(tab.id) : undefined}
+          className={`flex h-full min-w-0 flex-1 items-center rounded-sm text-ui outline-accent focus-visible:outline-2 ${iconOnly ? 'justify-center' : 'gap-1.5 pr-1 pl-2'}`}
+        >
+          {ToolIcon ? <ToolIcon className="size-3.5 shrink-0" /> : iconOnly && <span aria-hidden>{title.slice(0, 1).toUpperCase()}</span>}
+          {!iconOnly && (
+            <span className={preview ? 'truncate italic' : 'truncate'}>
+              {title}
+              {suffix && <span className="text-fg-faint"> · {suffix}</span>}
+            </span>
+          )}
+        </button>
+      </Tip>
       {!iconOnly && dirty && (
         <span role="img" aria-label={EDITOR_COPY.unsaved} className="shrink-0 px-0.5 text-fg">
           •

@@ -1607,7 +1607,7 @@ test.describe('the product over a session discovered from its transcript', () =>
       await card();
       await expect(folderRow(), 'the folder row names the worktree').toHaveText(worktree, { timeout: 20_000 });
       await expect(movedFrom()).toHaveText(moved);
-      await expect(movedFrom()).toHaveAttribute('title', repo.root);
+      await expect(movedFrom(), 'the launch folder whole, its tooltip and description').toHaveAccessibleDescription(repo.root);
       await expect(branchRow('worktree-w1'), 'the branch git reports at the worktree').toBeVisible({ timeout: 20_000 });
       let body = await review();
       await expect(reviewRow(body, 'worktree-note.txt'), 'Review lists the worktree’s change').toBeVisible({ timeout: 20_000 });

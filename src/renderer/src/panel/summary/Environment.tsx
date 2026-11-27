@@ -41,10 +41,13 @@ export function Environment({ appSessionId, record, folder, fold }: { appSession
           <bdi dir="ltr">{folder.cwd}</bdi>
         </span>
       </Row>
+      {/* the launch folder's whole path its tooltip and description, the line taking the keyboard for it (ticket 815) */}
       {folder.moved && (
-        <p data-testid="moved-from" className="m-0 truncate text-ui-sm text-fg-muted" title={folder.launch}>
-          {SUMMARY_COPY.movedFrom(lastSegment(folder.launch))}
-        </p>
+        <Tip content={folder.launch} description={folder.launch}>
+          <p data-testid="moved-from" tabIndex={0} className="m-0 truncate rounded-sm text-ui-sm text-fg-muted outline-accent focus-visible:outline-2">
+            {SUMMARY_COPY.movedFrom(lastSegment(folder.launch))}
+          </p>
+        </Tip>
       )}
       {status && (
         <>
@@ -63,7 +66,8 @@ export function Environment({ appSessionId, record, folder, fold }: { appSession
 }
 
 // W9 (H4): the model as the composer's chip names it over the route's catalogue (the same `engine.models` read the chip
-// makes), with the exact id the engine reported in the tooltip; Session info has the rest. UX wave U4a (decision 19): in
+// makes), with the exact id the engine reported in the tooltip, a Tip the line takes the keyboard for (ticket 815);
+// Session info has the rest. UX wave U4a (decision 19): in
 // `modelName`'s words, "Opus 5.5 High", and "Fast" while a live process's status says fast mode is on (the record holds
 // no fast-mode state, so a session with no live process says none).
 function ModelLine({ record, directory }: { record: SessionRecord; directory: string }) {
@@ -74,9 +78,11 @@ function ModelLine({ record, directory }: { record: SessionRecord; directory: st
   const id = record.model.resolved ?? record.model.requested;
   const named = modelName(id, catalogue.data?.models ?? [], { effort: EffortSchema.safeParse(record.effort).data ?? null, fast });
   return (
-    <span className="block truncate text-fg-muted" title={id ?? undefined}>
-      {named?.text ?? SUMMARY_COPY.modelUnknown}
-    </span>
+    <Tip content={id} description={id}>
+      <span tabIndex={id ? 0 : undefined} className="block truncate rounded-sm text-fg-muted outline-accent focus-visible:outline-2">
+        {named?.text ?? SUMMARY_COPY.modelUnknown}
+      </span>
+    </Tip>
   );
 }
 

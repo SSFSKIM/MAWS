@@ -1,7 +1,7 @@
 import type { AppSessionId } from '@shared/graph/ids';
 import { openComposerWidget, useComposerStore } from '../../stores/composer';
 import { useSessions } from '../../stores/sessions';
-import { UNAVAILABLE_LOOK, UnavailableButton } from '../../ui/tip';
+import { Tip, UNAVAILABLE_LOOK, UnavailableButton } from '../../ui/tip';
 import { SUMMARY_COPY } from '../copy';
 import { FloatingCard, type CardFold } from './FloatingCard';
 import { Plugins } from './Plugins';
@@ -26,8 +26,11 @@ export function Connectors({ appSessionId, fold }: { appSessionId: AppSessionId;
     <FloatingCard title="Connectors" summary={summary} {...fold}>
       {reported && (
         <ul className="flex flex-col gap-1">
-          {servers.map((server) => <li key={server.name} className="flex min-w-0 items-baseline justify-between gap-2 py-1" title={server.source ?? undefined}>
-            <span className="min-w-0 truncate">{server.name}</span>
+          {servers.map((server) => <li key={server.name} className="flex min-w-0 items-baseline justify-between gap-2 py-1">
+            {/* where the server comes from: its name's tooltip and description, the name taking the keyboard for it (ticket 815) */}
+            <Tip content={server.source} description={server.source}>
+              <span tabIndex={server.source ? 0 : undefined} className="min-w-0 truncate rounded-sm outline-accent focus-visible:outline-2">{server.name}</span>
+            </Tip>
             <span className="shrink-0 text-ui-sm text-fg-muted">{server.status}</span>
           </li>)}
         </ul>

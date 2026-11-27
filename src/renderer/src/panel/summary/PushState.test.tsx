@@ -22,6 +22,7 @@ import { panelHost, registerPanelTool } from '../host';
 import { PushState } from './PushState';
 import { TEST_MACHINE } from '../../../../../test/support/machine';
 import { preloadOf } from '../../test-support/preload-of';
+import { accessibleDescription } from '../../test-support/accessible-text';
 
 const DIR = `/work/${A}`; // A's directory in the builders' record (P5 O6 M2: built from A's address)
 const MAIN_A = bareOf(A); // P5 O6 M2: A as main (the fake bridge) is asked and speaks of it
@@ -107,7 +108,8 @@ describe('push state row shows PR state, install and sign-in states and opens th
     await mount();
     await lineReads('PR #12 · 1 pending');
     const refresh = within(push()).getByRole('button', { name: 'Refresh PR state' });
-    expect(refresh.getAttribute('title')).toMatch(/^Checked /);
+    expect(accessibleDescription(refresh), 'when it last asked, its description and its tooltip').toMatch(/^Checked /);
+    expect(refresh.hasAttribute('title')).toBe(false);
     await user.click(refresh);
     await lineReads('PR #12'); // the word cut (P44): an open PR whose checks passed says its number alone
     expect(fake.invoked('scm.pr.state')).toEqual([{ appSessionId: MAIN_A, refresh: false }, { appSessionId: MAIN_A, refresh: true }]);
@@ -220,6 +222,8 @@ describe('push state row shows PR state, install and sign-in states and opens th
     bridge({ 'scm.status': { ...SCM, gh: signedOut }, 'scm.pr.state': { ...PR, gh: signedOut, pr: null, error: 'gh_unauthenticated', checkedAt: SCM.checkedAt } });
     await mount();
     await lineReads('GitHub CLI not signed in · Sign in');
+    expect(accessibleDescription(prLine()!), 'gh’s own words, the line’s description').toBe('You are not logged into any GitHub hosts');
+    expect(prLine()!.tabIndex, 'the line takes the keyboard for them').toBe(0);
     await user.click(within(push()).getByRole('button', { name: 'Sign in' }));
     expect(addTool).toHaveBeenCalledWith('terminal', { appSessionId: A, params: { cwd: DIR, command: 'gh auth login' } });
   });
