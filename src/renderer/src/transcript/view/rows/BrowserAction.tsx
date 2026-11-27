@@ -16,6 +16,7 @@ import { BROWSER_ACTION, browserActionError, browserActionHeading, took } from '
 import type { Row } from '../../model/rows';
 import { Output } from '../cells/Truncated';
 import { useActions, useDisclosure, useRowSession, useTranscriptContext } from '../context';
+import { useFoldOnClick } from '../fold-on-click';
 import { BrowserIcon } from './icons';
 import { useWorkingMs } from './parts';
 
@@ -30,9 +31,11 @@ export function BrowserActionRow({ row }: { row: BrowserActionRowData }) {
   const tab = row.tabId !== null && row.state !== 'error' && !(row.tool === 'browser_tabs' && row.action === 'close') ? row.tabId : null;
   const detail = row.state === 'done' ? row.detail : null;
   const line = useRef<HTMLDivElement>(null);
+  const head = useRef<HTMLButtonElement>(null);
+  const foldOnClick = useFoldOnClick(open && detail !== null, toggle, head); // the owner's ruling (obs4): an open snapshot folds at a click on the row's blank space
   const time = row.state === 'done' && row.ms !== null ? [took(row.ms), ...(row.waitedFor !== null && row.waitedMs !== null ? [BROWSER_ACTION.waited(row.waitedFor, row.waitedMs)] : [])].join(' · ') : null;
   return (
-    <section className="transcript-browser-action" data-tool={row.tool} data-state={row.state} data-open={open && detail !== null ? '' : undefined}>
+    <section {...foldOnClick} className="transcript-browser-action" data-tool={row.tool} data-state={row.state} data-open={open && detail !== null ? '' : undefined}>
       <div ref={line} className="transcript-browser-action-line">
         <BrowserIcon />
         <Tip content={time} description={time} pointedWithin={line}>
@@ -46,7 +49,7 @@ export function BrowserActionRow({ row }: { row: BrowserActionRowData }) {
         {appSessionId !== null && (detail !== null || shot !== null || tab !== null) && (
           <span className="transcript-browser-action-actions" data-on-hover="">
             {detail !== null && (
-              <button type="button" className="transcript-quiet-button" aria-expanded={open} onClick={toggle}>
+              <button ref={head} type="button" className="transcript-quiet-button" aria-expanded={open} onClick={toggle}>
                 {open ? BROWSER_ACTION.hide(row.tool) : BROWSER_ACTION.show(row.tool)}
               </button>
             )}

@@ -2,7 +2,7 @@
 // whose state lives in the store, and its detail when open. The status shows as a mark drawn by CSS from
 // `data-status`, so the line's text is the label alone. A standalone denied cell is itself focusable (tabindex -1,
 // scroll-margin) so the divider's count can land on it.
-import { createContext, useContext, type ReactNode } from 'react';
+import { createContext, useContext, useRef, type ReactNode } from 'react';
 import { selectWaitingByCall, useAttention } from '../../../stores/attention'; // UX wave U1b
 import { useTranscriptStore } from '../../../stores/transcript';
 import { DisclosureBody } from '../../../ui/disclosure';
@@ -12,6 +12,7 @@ import { blockedStates, hiddenTurnsOf, isBlockedCell, lineNamesWhole, readsAppro
 import { shortCommand } from '../../model/short-command';
 import type { Cell, TurnId } from '../../model/rows';
 import { useRowSession, useTranscriptContext } from '../context';
+import { useFoldOnClick } from '../fold-on-click';
 import { Chevron, CodeText, LineCounts } from '../rows/parts';
 import { CellDetailView } from './CellDetail';
 
@@ -117,8 +118,12 @@ export function CellLine({ cell: model, turnId, focusable = false, standalone = 
   const opened = withoutRefusalText(model); // UX wave U1c (M2 fix 1): an opened blocked row draws no refusal text as output
   // a lone line counts only a finished edit, as a run's line counts its finished edits (U2a §B; board ticket 852)
   const counts = !waiting && cell.detail.kind === 'edit' && !asLabelled(cell) && (!standalone || cell.status === 'done') ? EDIT_COUNTS.exec(cell.label) : null;
+  const toggle = onToggle ?? (() => useTranscriptStore.getState().toggleCell(storeKey, cell.id));
+  const head = useRef<HTMLButtonElement>(null);
+  const foldOnClick = useFoldOnClick(cell.expanded, toggle, head); // the owner's ruling (obs4): an open call folds at a click on its blank space
   return (
     <div
+      {...foldOnClick}
       className="transcript-cell"
       data-cell-id={cell.id}
       data-status={cell.status}
@@ -130,7 +135,7 @@ export function CellLine({ cell: model, turnId, focusable = false, standalone = 
       data-held={held ? '' : undefined}
       tabIndex={focusable ? -1 : undefined}
     >
-      <button type="button" className="transcript-cell-line" title={cell.paths.length > 0 ? cell.paths.join('\n') : undefined} aria-expanded={cell.expanded} onClick={onToggle ?? (() => useTranscriptStore.getState().toggleCell(storeKey, cell.id))}>
+      <button ref={head} type="button" className="transcript-cell-line" title={cell.paths.length > 0 ? cell.paths.join('\n') : undefined} aria-expanded={cell.expanded} onClick={toggle}>
         <span className="transcript-cell-label">
           {waiting ? <CodeText text={waitingLabel(cell)} /> : label !== undefined ? <CodeText text={label} /> : <CellLabel cell={cell} />}
           {cell.error !== undefined && <>{' '}<span className="transcript-cell-reason">{cell.error}</span></>}

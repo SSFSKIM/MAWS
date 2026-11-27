@@ -5,7 +5,7 @@
 // seconds or more at its place between them or under the last; another click closes it. While folded, a thought
 // streaming now has its line under the run's, once the closing body that drew it has gone. The body mounts only while open, so a folded run mounts no call and asks
 // no ToolUse site.
-import { Fragment, type ReactNode } from 'react';
+import { Fragment, useRef, type ReactNode } from 'react';
 import { ATTENTION_HEADINGS } from '@shared/attention/headings';
 import type { AttentionItem } from '@shared/graph/attention';
 import type { ToolUseId } from '@shared/graph/ids';
@@ -18,6 +18,7 @@ import type { Cell, Row } from '../../model/rows';
 import { callsOfTurn } from '../../surface/adapters';
 import { CellLabel, CellLine, FilePathsContext } from '../cells/CellLine';
 import { rowElementId, useRowSession, useTranscriptContext } from '../context';
+import { useFoldOnClick } from '../fold-on-click';
 import { Chevron, CodeText, LineCounts } from './parts';
 import { ThoughtLine } from './Thinking';
 
@@ -48,12 +49,15 @@ export function GroupRow({ row, renderCell }: { row: GroupRowData; renderCell?: 
   const bodyId = rowElementId(idPrefix, `${row.id}-body`);
   const live = streaming && !row.expanded ? runSegments(row.cells, true).at(-1) : undefined;
   const heading = line.kind === 'waiting' ? ATTENTION_HEADINGS[line.item.kind] : null;
+  const toggle = () => useTranscriptStore.getState().toggleGroup(storeKey, row.id);
+  const head = useRef<HTMLButtonElement>(null);
+  const foldOnClick = useFoldOnClick(row.expanded, toggle, head); // the owner's ruling (obs4): an open run folds at a click on its blank space, a call's own first
   return (
     <FilePathsContext value={row.cells.flatMap((cell) => cell.paths)}>
-      <div className="transcript-group" data-state={row.state} data-cell-count={row.cells.length}>
+      <div {...foldOnClick} className="transcript-group" data-state={row.state} data-cell-count={row.cells.length}>
         <button
-          type="button" className="transcript-run-line" data-line={line.kind} data-tone={heading?.tone} aria-expanded={row.expanded} aria-controls={bodyId}
-          onClick={() => useTranscriptStore.getState().toggleGroup(storeKey, row.id)}
+          ref={head} type="button" className="transcript-run-line" data-line={line.kind} data-tone={heading?.tone} aria-expanded={row.expanded} aria-controls={bodyId}
+          onClick={toggle}
         >
           {heading && <span className="transcript-run-glyph" aria-hidden="true">{heading.char}</span>}
           <span className="transcript-run-label"><LineLabel line={line} row={row} /></span>

@@ -394,6 +394,7 @@ button.transcript-chip:hover { background: var(--bg-hover); }
 
 /* Cell: the one line, then its detail */
 .transcript-cell { flex: none; scroll-margin: 20px; outline: none; }
+.transcript-cell-line, .transcript-run-line { scroll-margin: 20px; } /* obs4: a block folded at its body scrolls its line into view this clear of the edge */
 .transcript-cell-line { display: flex; align-items: center; gap: 7px; width: 100%; min-height: 26px; color: var(--fg-muted); font-size: var(--text-ui-sm); text-align: left; }
 .transcript-cell-line:hover { color: var(--fg); }
 .transcript-cell-line > .transcript-counts { flex: none; }

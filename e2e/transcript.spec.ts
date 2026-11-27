@@ -840,6 +840,52 @@ test('a run folds while its turn runs, opens onto its calls’ rows, and folds a
   expect(harness.consoleErrors()).toEqual([]);
 });
 
+// The owner's ruling (UX wave, obs4): an open tool block folds at a click on its blank space, by the real pointer. A drag
+// across its output folds nothing; a click beside an open call's output folds that call alone, focus on its line; a click
+// on the run's own blank space, beside its line, folds the run, focus on the run's line.
+test('an open call folds at a click on its blank space, a drag folds nothing, and the run folds at a click on its own', async ({ harness }) => {
+  const { page } = harness;
+  await harnessReady(page);
+  await blockHumanInput(page);
+  await load(page, 'p4/p4-tool-summaries-live');
+  await play(page, 0);
+  const turn = await turnIdOf(page, 1);
+  await expect(page.locator(`${rowSelector(`divider:${turn}`)} button.transcript-disclosure`)).toHaveText(FINISHED_TURN_LINE);
+  await settle(page, 300);
+  await page.evaluate(() => (window as unknown as HarnessWindow).__maws_harness.expandTurn(1));
+  const run = page.locator(`[data-kind="group"][data-turn-id="${turn}"]`);
+  const line = run.locator('.transcript-run-line');
+  await line.click();
+  await expect(line).toHaveAttribute('aria-expanded', 'true');
+  const call = run.locator('.transcript-cell').nth(1);
+  const callLine = call.locator('.transcript-cell-line');
+  await callLine.click();
+  await expect(callLine).toHaveAttribute('aria-expanded', 'true');
+  const output = call.locator('.transcript-output');
+  await expect(output).toBeVisible();
+  await settle(page, 300);
+  const box = (await output.boundingBox())!;
+  // a drag across the output's text selects it and folds nothing
+  await page.mouse.move(box.x + 12, box.y + box.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(box.x + box.width - 12, box.y + box.height / 2, { steps: 5 });
+  await page.mouse.up();
+  await expect(callLine).toHaveAttribute('aria-expanded', 'true');
+  expect(await page.evaluate(() => document.getSelection()?.isCollapsed), 'the drag selected text').toBe(false);
+  // a click beside the short output's text, inside its box: blank space of the call, not of the run
+  await page.mouse.click(box.x + box.width - 12, box.y + box.height / 2);
+  await expect(callLine).toHaveAttribute('aria-expanded', 'false');
+  await expect(line).toHaveAttribute('aria-expanded', 'true');
+  await expect(callLine).toBeFocused();
+  // beside the run's line (fit to its words) is the run's own blank space
+  const head = (await line.boundingBox())!;
+  const group = (await run.locator('.transcript-group').boundingBox())!;
+  await page.mouse.click(group.x + group.width - 12, head.y + head.height / 2);
+  await expect(line).toHaveAttribute('aria-expanded', 'false');
+  await expect(line).toBeFocused();
+  expect(harness.consoleErrors()).toEqual([]);
+});
+
 // UX wave U2 (O-27; the U2a document, M4 "One component, two identities", decision 12): an opened run draws a thought
 // of ten seconds or more at its place, between the blocks of calls it parts or under the last, in the words a thinking
 // row reads; a shorter one is not drawn; a thought with no text has nothing to open, and its label starts where a
