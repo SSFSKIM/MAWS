@@ -34,7 +34,7 @@ import { asTheRigDraws, cardOf, closeNotices, needsYouRow, openLookSession, open
 import { sidebarRow } from './support/sidebar';
 import {
   README, alive, envelopes, hasRecord, idle, inboxLines, keepRecord, liveConfig, messagesAfter, recordState, recordTranscript, removeScratch, scratchRoot, sheetCalls, show, spawnSurface, stopSurface,
-  surfaceRegistered, Terminals, transcriptRows, until, writeScratch, type LiveConfig, type Scratch,
+  surfaceRegistered, Terminals, transcriptRows, until, writeScratch, type LiveConfig, type Scratch, type TranscriptRow,
 } from './support/sheet-live';
 
 const TURN_MS = 240_000; // one model turn, a call of the tool and what follows it
@@ -302,7 +302,7 @@ test('the question sheet live: a terminal session asks on its sheet and is answe
       await idle(scratch, sid);
       const prompt = rows().slice(rowsBeforeResume).find((row) => row.type === 'user' && row.promptSource === 'typed');
       expect(prompt, 'the first typed prompt after the resume').toBeDefined();
-      const withPrompt = envelopes(rows()).filter((e) => e.parent === prompt!.uuid && e.blocks.some((b) => b.keys.includes(sent!)));
+      const withPrompt = envelopes(rows()).filter((e) => promptOf(rows(), e.parent) === prompt!.uuid && e.blocks.some((b) => b.keys.includes(sent!)));
       expect(withPrompt, 'the answer goes with that prompt, in its added context').toHaveLength(1);
       expect(JSON.stringify(rows()).includes(takenBack!), 'the answer taken back appears nowhere in the transcript').toBe(false);
       await expect.poll(() => lineFor(page(), later), { timeout: 15_000, message: 'the line is its receipt' }).toBe(`${later} | ${named(question)} | ${SHEET_ROW.arrow} ${label}`);
@@ -421,6 +421,16 @@ async function appIdOf(page: Page, sid: string): Promise<string> {
 async function holderOf(page: Page, appId: string): Promise<string | undefined> {
   const got = await invoke(page, 'session.get', { appSessionId: appId });
   return (got.value as { holder?: { kind: string } } | undefined)?.holder?.kind;
+}
+
+/** The prompt a row hangs from: up its parent chain, past the rows the engine writes between, to the nearest typed prompt. */
+function promptOf(rows: TranscriptRow[], parent: string | null): string | null {
+  const byUuid = new Map(rows.flatMap((row) => (row.uuid ? [[row.uuid, row] as const] : [])));
+  for (let at = parent === null ? undefined : byUuid.get(parent); at; at = at.parentUuid ? byUuid.get(at.parentUuid) : undefined) {
+    if (at.type === 'user' && at.promptSource === 'typed') return at.uuid ?? null;
+    if (at.type === 'assistant') return null; // a turn of the model's stands between: not this prompt's context
+  }
+  return null;
 }
 
 /** The row line of question `id`, whichever call's row holds it (its cells joined as rowLines joins them), or ''. */

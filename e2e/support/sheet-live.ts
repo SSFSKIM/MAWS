@@ -158,6 +158,7 @@ export async function stopSurface(surface: ChildProcess): Promise<void> {
 /** The terminal sessions of this run, in a tmux server of its own, each started from the env file alone (`env -i`). */
 export class Terminals {
   private readonly tmux: string[];
+  private readonly engines = new Set<number>(); // every engine process a pane ran, so the teardown waits for each to end
   constructor(private readonly cfg: LiveConfig, private readonly s: Scratch) {
     this.tmux = ['-L', `qsl-${process.pid}`, '-f', '/dev/null'];
   }
@@ -168,6 +169,7 @@ export class Terminals {
     const inner = `set -e; . ${quote(this.s.envFile)}; cd ${quote(this.s.work)}; exec ${quote(this.cfg.claude)} --plugin-dir ${quote(this.s.plugin)} --model ${quote(this.cfg.model)} --permission-mode default ${args.map(quote).join(' ')}`;
     this.run(['new-session', '-d', '-s', name, '-x', '200', '-y', '50', `env -i /bin/bash --noprofile --norc -c ${quote(inner)}`]);
     const { pid, sid } = await until(`${name}'s session`, 90_000, () => presences(this.s).find((p) => !known.has(p.pid)) ?? null, () => this.pane(name));
+    this.engines.add(pid);
     await until(`${name}'s bridge`, 60_000, () => ping(this.s, sid), () => this.pane(name));
     return { sid, pid };
   }
@@ -187,10 +189,20 @@ export class Terminals {
     spawnSync('tmux', [...this.tmux, 'kill-session', '-t', name]);
   }
 
-  /** Every pane and the server itself, and the socket file a killed server leaves behind. */
-  closeAll(): void {
+  /**
+   * Every pane and the server itself, and the socket file a killed server leaves behind; returns once every engine a
+   * pane ran has ended (an engine writes under its config directory as it exits, so the scratch is removed after it).
+   */
+  async closeAll(): Promise<void> {
     spawnSync('tmux', [...this.tmux, 'kill-server']);
     rmSync(join(process.env.TMUX_TMPDIR ?? '/tmp', `tmux-${process.getuid!()}`, this.tmux[1]!), { force: true });
+    const ended = () => [...this.engines].every((pid) => !alive(pid));
+    try {
+      await until('the terminals’ engines ended', 20_000, ended);
+    } catch {
+      for (const pid of this.engines) if (alive(pid)) process.kill(pid, 'SIGKILL');
+      await until('the terminals’ engines killed', 5_000, ended);
+    }
   }
 
   private run(args: string[]): void {
@@ -395,9 +407,12 @@ export function recordTranscript(s: Scratch, sid: string, dir: string): void {
 }
 
 /** The scratch root removed, or, with `keep`, left with its env file (the gateway's variables) removed. */
-export function removeScratch(root: string, keep: boolean): void {
+export async function removeScratch(root: string, keep: boolean): Promise<void> {
   rmSync(join(root, 'env'), { force: true });
-  if (!keep) rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
+  if (keep) return;
+  rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
+  await new Promise((resolve) => setTimeout(resolve, 2_000)); // a late writer recreates what it writes under the root
+  if (existsSync(root)) throw new Error(`the scratch root came back after its removal: ${readdirSync(root).join(', ')}`);
 }
 
 // ---- waiting ----------------------------------------------------------------------------------------------------------
