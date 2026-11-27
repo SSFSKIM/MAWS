@@ -1531,7 +1531,7 @@ test.describe('plugin management (E8)', () => {
     await detail.getByRole('button', { name: 'Update', exact: true }).click();
     await confirm('update', 'Update', ['plugin', 'update', id, '--scope', 'user', '--json']);
     await expect(opLineOf(detail)).toHaveText('Plugin "e8-tools" updated from 1.0.0 to 1.1.0 for scope user. Restart to apply changes. · 1.0.0 → 1.1.0');
-    await expect(detail.locator('h3 + p')).toContainText('1.1.0');
+    await expect(detail.locator('h3 ~ p')).toContainText('1.1.0'); // the byline after the name, past the name's tip description (board ticket 815)
 
     // Uninstall: destructive, so the default button waits for the acknowledgement; the plugin leaves the list, so the
     // detail returns to it, where the result stays

@@ -2032,7 +2032,7 @@ test('the owner’s time, Copy and Edit sit on one line under the bubble, shown 
         // by (its negative margin), so Edit's target ending the line 2 px past it is in place (hidden, the controls are
         // clipped by their box of no width and draw nothing). Not `scrollWidth`: the line packs to its end, so what cannot
         // fit runs out past its start, which scrolling never reaches (a 71 px overflow read none), while that 2 px read one.
-        lineSpills: [...(box(actions).width === 0 ? [] : Array.from(actions.children)), ...(tail ? [tail] : [])].some((part) => {
+        lineSpills: [...(box(actions).width === 0 ? [] : Array.from(actions.children).filter((part) => !part.hasAttribute('hidden') /* Edit's tip's description, board ticket 815: no box */)), ...(tail ? [tail] : [])].some((part) => {
           const { left, right } = part.getBoundingClientRect();
           const style = getComputedStyle(part);
           const [inLeft, inRight] = [Math.max(0, -parseFloat(style.marginLeft)), Math.max(0, -parseFloat(style.marginRight))];

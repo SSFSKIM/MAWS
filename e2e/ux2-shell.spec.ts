@@ -135,15 +135,16 @@ async function dragBy(page: Page, resizer: Locator, dx: number): Promise<void> {
 // The upper group's strip once its fit holds still (two reads that agree) and keeps `fitTabs`' rule (UX wave U8b, M2,
 // decision 5; panel/TabStrip.tsx): one tab in view, never an icon; the tabs not in view whole or icons, the icons the
 // rightmost of them; the tab in view cut only once every other is an icon, never under 72 px; an icon 28 px wide, its
-// title its name and tooltip; and no sideways scroll while the tab in view could still give up width.
-interface FittedTab { shape: string; selected: boolean; width: number; name: string; tooltip: string | null }
+// title its name (and its tip, board ticket 815: read on pointing, `iconTipReadsName`); and no sideways scroll while the
+// tab in view could still give up width.
+interface FittedTab { shape: string; selected: boolean; width: number; name: string }
 async function fittedStrip(page: Page, message: string): Promise<FittedTab[]> {
   const read = () =>
     sideGroup(page, 'upper').locator('[data-side-strip] [role="tablist"]').evaluate((list) => ({
       overflow: list.scrollWidth - list.clientWidth,
       tabs: Array.from(list.querySelectorAll('[data-tab-id]')).map((tab) => {
         const button = tab.querySelector('[role="tab"]')!;
-        return { shape: tab.getAttribute('data-tab-shape') ?? '', selected: button.getAttribute('aria-selected') === 'true', width: Math.round(tab.getBoundingClientRect().width), name: button.getAttribute('aria-label') ?? button.textContent ?? '', tooltip: button.getAttribute('title') };
+        return { shape: tab.getAttribute('data-tab-shape') ?? '', selected: button.getAttribute('aria-selected') === 'true', width: Math.round(tab.getBoundingClientRect().width), name: button.getAttribute('aria-label') ?? button.textContent ?? '' };
       }),
     }));
   let last = '';
@@ -174,7 +175,7 @@ function fitBreaks({ overflow, tabs }: { overflow: number; tabs: FittedTab[] }):
   if (inView.shape === 'cut' && inView.width < 72 - 1) broken.push(`the tab in view cut to ${inView.width} px`);
   for (const tab of others.filter((other) => other.shape === 'icon')) {
     if (Math.abs(tab.width - 28) > 1) broken.push(`${tab.name}: an icon ${tab.width} px wide`);
-    if (tab.name === '' || tab.tooltip !== tab.name) broken.push(`${tab.name}: an icon without its title as name and tooltip`);
+    if (tab.name === '') broken.push('an icon without its title as name');
   }
   if ((inView.shape === 'whole' || (inView.shape === 'cut' && inView.width > 72 + 1)) && overflow > 2) broken.push(`the strip scrolls ${overflow} px while a tab could still give up width`);
   return broken;
@@ -509,6 +510,16 @@ test('U8b: three cards, Artifacts in More surfaces; tools are tabs with one in v
   }
 });
 
+// An icon tab's tip, on pointing at it, reads its title, which is its name (board ticket 815: a Tip, no system title).
+async function iconTipReadsName(page: Page): Promise<void> {
+  const icon = sideGroup(page, 'upper').locator('[data-side-strip] [data-tab-id][data-tab-shape="icon"] [role="tab"]').first();
+  const name = (await icon.getAttribute('aria-label'))!;
+  await icon.hover();
+  await expect(page.getByRole('tooltip'), 'an icon’s tip is its title').toHaveText(name);
+  await page.mouse.move(0, 0);
+  await expect(page.getByRole('tooltip')).toHaveCount(0);
+}
+
 // UX wave U8b (M2, decision 5: the owner's "Shrink to icons" of 2026-11-12; `fitTabs` in panel/TabStrip.tsx): while a
 // strip's tabs do not fit, the tabs not in view stand as their icons alone (28 px, the title as tooltip and name), the
 // rightmost first; only once every one of them is an icon is the tab in view cut, down to 72 px. Five tools (two
@@ -545,6 +556,7 @@ test('U8b: a narrow strip shrinks the tabs not in view to icons, the rightmost f
   const automatic = await fittedStrip(page, 'at 360 px');
   test.info().annotations.push({ type: 'strip at 360 px', description: JSON.stringify(automatic) });
   expect(automatic.filter((tab) => tab.shape === 'icon').length, 'five tabs do not fit 360 px whole: some are icons').toBeGreaterThan(0);
+  await iconTipReadsName(page);
   await shot(maws, info, 'strip-narrow');
 
   await resizer.focus();
@@ -713,6 +725,12 @@ test('UX2: at 900 the sidebar yields; at 620 a surface is a dismissible sheet', 
   const sheetControl = surface(page, 'files').getByRole('button', { name: 'Refresh', exact: true });
   await sheetControl.focus();
   await expect(sheetControl).toBeFocused();
+  // board ticket 815: the focused glyph's tip shows, and the first Escape is the tip's (it closes it, the sheet stays); the
+  // next is the sheet's
+  await expect(page.getByRole('tooltip'), 'the focused glyph’s tip').toHaveText('Refresh');
+  await page.keyboard.press('Escape');
+  await expect(page.getByRole('tooltip')).toHaveCount(0);
+  await expect(sheetControl, 'the tip closed, the keyboard where it was').toBeFocused();
   await page.keyboard.press('Escape');
   await expect.poll(async () => (await box(panel(page))).width).toBe(0);
   await openSurface(page, 'Files');
@@ -1066,8 +1084,10 @@ test('Acceptance: compact inactive file tabs contain their file glyph, pin, dirt
         // the holder mark's region is `display: contents` (no box of its own, always mounted), so the walk measures what
         // it holds, if anything
         const titleNode = node.querySelector<HTMLElement>(':scope > span > span.truncate')!;
+        // board ticket 815: a tip's description (Close's chord, `hidden`) is no adornment: it draws no box
         const children = Array.from(node.children)
           .flatMap((child) => (child.contains(titleNode) || getComputedStyle(child).display === 'contents' ? Array.from(child.children) : [child]))
+          .filter((child) => !child.hasAttribute('hidden'))
           .map((child) => child.getBoundingClientRect());
         const close = node.querySelector<HTMLButtonElement>('button')!;
         const target = close.getBoundingClientRect();
