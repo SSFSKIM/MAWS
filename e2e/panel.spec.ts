@@ -176,11 +176,20 @@ class PanelPage {
   get changeLine() {
     return this.summary.getByTestId('change-line');
   }
-  // The Sources rows, top to bottom: a file row by its path, a web row by its URL, an MCP row by its text.
+  // The Sources rows, top to bottom: a file row by its path, a web row by its URL, an MCP row by its text. A file row's
+  // path is its tip (board ticket 815): its description where the row draws less of it, else the words it draws.
   sources = (): Promise<string[]> =>
     this.section('Sources')
       .locator('li')
-      .evaluateAll((items) => items.map((li) => li.querySelector('button')?.title ?? `mcp: ${li.textContent ?? ''}`));
+      .evaluateAll((items) =>
+        items.map((li) => {
+          const button = li.querySelector('button');
+          if (button === null) return `mcp: ${li.textContent ?? ''}`;
+          if (button.title !== '') return button.title;
+          const described = (button.getAttribute('aria-describedby') ?? '').split(' ').flatMap((id) => (id === '' ? [] : [document.getElementById(id)?.textContent ?? '']));
+          return described.length > 0 ? described.join(' ') : (button.textContent ?? '');
+        }),
+      );
   tabs = (): Promise<PanelHarnessTab[]> => this.call('tabs');
   ids = async (): Promise<string[]> => (await this.tabs()).map((tab) => tab.id);
   active = async (): Promise<string | null> => (await this.tabs()).find((tab) => tab.active)?.id ?? null;
