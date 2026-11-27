@@ -19,6 +19,10 @@ import { QuietSpinner } from '../ui/spinner';
 import { Sheet } from './Sheet';
 import { TrustCard } from './TrustCard';
 import { PRIMARY, QUIET, SECONDARY } from './ui';
+import { UnavailableButton } from '../ui/tip';
+
+// A greyed primary button drawn `aria-disabled` (board ticket 815), as PRIMARY draws a `disabled` one.
+const PRIMARY_UNAVAILABLE = 'aria-disabled:cursor-default aria-disabled:border-fg-faint aria-disabled:bg-fg-faint aria-disabled:hover:bg-fg-faint';
 
 type FolderRequest = Extract<SetupRequest, { kind: 'folder' }>;
 type Step =
@@ -232,15 +236,12 @@ function FolderSetup({ request }: { request: FolderRequest }) {
               <button type="button" className={SECONDARY} onClick={closeDialog}>
                 Cancel
               </button>
-              <button
-                type="button"
-                className={PRIMARY}
-                disabled={path === null || step.kind === 'busy'}
-                title={path === null ? SETUP_WORDS.useHint : undefined}
-                onClick={() => path !== null && void use(path)}
-              >
-                {SETUP_WORDS.use}
-              </button>
+              {/* board ticket 815: greyed until a folder is open, its reason the tip the keyboard reaches */}
+              <UnavailableButton reason={path === null ? SETUP_WORDS.useHint : null}>
+                <button type="button" className={`${PRIMARY} ${PRIMARY_UNAVAILABLE}`} disabled={path !== null && step.kind === 'busy'} onClick={() => path !== null && void use(path)}>
+                  {SETUP_WORDS.use}
+                </button>
+              </UnavailableButton>
             </div>
           </>
         )}

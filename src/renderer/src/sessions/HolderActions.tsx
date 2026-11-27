@@ -3,7 +3,8 @@
 // forked into a copy MAWS runs (the engine allows a fork beside a `--bg` holder, and reads another holder's file as a
 // snapshot). Rendered by C5's `HolderNotice` in place of its placeholder button; never on the Overview card (§5.2).
 // Ticket 627: for a session on another machine over RL2, Take over is drawn disabled with the window's helper's sentence,
-// before any confirmation: that machine takes no `session.takeOver` from here.
+// before any confirmation: that machine takes no `session.takeOver` from here; board ticket 815: greyed, it keeps Tab and
+// its sentence is its tip and its description.
 import { useEffect, useState } from 'react';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { SessionRecord } from '@shared/graph/session';
@@ -14,7 +15,7 @@ import { useSessions } from '../stores/sessions';
 import { useRemoteUnavailable } from '../lane-b/remote-unavailable';
 import { attachOrSay } from './attach';
 import { canTakeOver, forkInPlace, takeOverSession } from './record-ops';
-import { Tip } from '../ui/tip';
+import { Tip, UNAVAILABLE_LOOK, UnavailableButton } from '../ui/tip';
 
 type ForeignHolder = Extract<SessionRecord['holder'], { kind: 'terminal' | 'background_job' }>;
 
@@ -64,18 +65,19 @@ export function HolderActions({ appSessionId, holder }: { appSessionId: AppSessi
       )}
       {/* W7: end the holder after a confirm, then resume here (D-12 as amended 2026-10-01) */}
       {canTakeOver(holder) && (
-        <button
-          type="button"
-          className={BUTTON}
-          disabled={takingOver || takeOverUnavailable !== null}
-          title={takeOverUnavailable ?? undefined}
-          onClick={() => {
-            setTakingOver(true);
-            void takeOverSession(appSessionId, holder).finally(() => setTakingOver(false));
-          }}
-        >
-          Take over here
-        </button>
+        <UnavailableButton reason={takeOverUnavailable}>
+          <button
+            type="button"
+            className={`${BUTTON} ${UNAVAILABLE_LOOK}`}
+            disabled={takingOver}
+            onClick={() => {
+              setTakingOver(true);
+              void takeOverSession(appSessionId, holder).finally(() => setTakingOver(false));
+            }}
+          >
+            Take over here
+          </button>
+        </UnavailableButton>
       )}
       <button type="button" className={BUTTON} onClick={() => void forkInPlace(appSessionId)}>
         Fork a copy

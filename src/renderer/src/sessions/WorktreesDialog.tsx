@@ -20,9 +20,12 @@ import { Sheet } from './Sheet';
 import { isStarting, useSetup } from './store';
 import { QUIET, SECONDARY } from './ui';
 import { QuietSpinner } from '../ui/spinner';
+import { Tip, UNAVAILABLE_LOOK, UnavailableButton, unavailableClickProps } from '../ui/tip';
 import { worktreeRows, type Claim, type WorktreeRow } from './worktree-rows';
 import { displayTitle } from './title';
 import { machineOf } from '@shared/machine/address';
+
+const NEW_HERE = 'Starts a fresh session using the same files and branch';
 import type { MachineRef } from '@shared/machine/ref';
 
 type Loaded =
@@ -128,6 +131,7 @@ function Row({ projectId, repoRoot, row }: { projectId: ProjectId; repoRoot: str
     setBusy(false);
     closeDialog();
   };
+  const missing = row.state === 'missing' ? 'The checkout is missing' : null;
   const remove = () => openDialog({ kind: 'cleanup', target: cleanupTargetAt(machineOf(projectId), { path: row.info.path, branch: row.info.branch }, repoRoot), returnTo: { kind: 'worktrees', projectId } });
   const openSession = (id: AppSessionId) => {
     useLayout.getState().openSession(id);
@@ -148,18 +152,17 @@ function Row({ projectId, repoRoot, row }: { projectId: ProjectId; repoRoot: str
         </div>
         {!row.isMain && (
           <div className="flex shrink-0 items-center gap-2">
-            <button
-              type="button"
-              disabled={busy || row.state === 'missing'}
-              title={row.state === 'missing' ? 'The checkout is missing' : 'Starts a fresh session using the same files and branch'}
-              onClick={() => void newSessionHere()}
-              className={SECONDARY}
-            >
-              New chat here
-            </button>
-            <button type="button" disabled={!row.removable} title={row.claim ?? undefined} onClick={remove} className={QUIET}>
-              Remove…
-            </button>
+            {/* board ticket 815: what it does, or why it is greyed (keeping Tab), is its tip and its description */}
+            <Tip content={missing ?? NEW_HERE} description={missing ?? NEW_HERE} {...unavailableClickProps(missing)}>
+              <button type="button" disabled={busy} onClick={() => void newSessionHere()} className={`${SECONDARY} ${UNAVAILABLE_LOOK}`}>
+                New chat here
+              </button>
+            </Tip>
+            <UnavailableButton reason={row.claim /* a claimed checkout is the one not removable */}>
+              <button type="button" onClick={remove} className={`${QUIET} ${UNAVAILABLE_LOOK}`}>
+                Remove…
+              </button>
+            </UnavailableButton>
           </div>
         )}
       </div>

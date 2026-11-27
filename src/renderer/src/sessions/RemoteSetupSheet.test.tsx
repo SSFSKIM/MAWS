@@ -103,7 +103,8 @@ describe('setting a project up on another machine', () => {
     const sheet = screen.getByRole('dialog', { name: 'New project on mini' });
     expect(sheet.textContent, 'the word cut (W166): no paragraph first; the warning comes on opening a private folder').not.toContain('macOS protects');
     expect(folders().getAllByRole('button').map((b) => b.textContent)).toEqual(['Developer', 'Documentsprivate']);
-    expect((within(sheet).getByRole('button', { name: SETUP_WORDS.use }) as HTMLButtonElement).disabled).toBe(true); // the home is no project
+    // the home is no project: greyed, still in the Tab order, saying why (board ticket 815)
+    expect(within(sheet).getByRole('button', { name: SETUP_WORDS.use, description: SETUP_WORDS.useHint }).getAttribute('aria-disabled')).toBe('true');
     // the other checkouts' path first
     fireEvent.click(within(within(sheet).getByRole('group', { name: SETUP_WORDS.suggestions })).getByRole('button', { name: '~/Developer/GitHub/app' }));
     await waitFor(() => expect(folders().getAllByRole('button').map((b) => b.textContent)).toEqual(['src']));
