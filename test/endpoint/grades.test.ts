@@ -554,6 +554,20 @@ describe('policy applies to effects, not envelopes', () => {
     expect(await stepped({ env: { PATH: '/tmp' } })).toBe('spec-field');
     expect(await stepped({ flags: ['--dangerously-skip-permissions'] })).toBe('spec-field');
   });
+
+  it('holds a switch to Bypass permissions from another machine to the ceiling, now that every launch admits one', async () => {
+    const f = await start({ settingsMode: 'acceptEdits' });
+    const a = await open(f, a1, A);
+    const mode = async (to: string) => {
+      const action = laneB(f, a, 'session.setPermissionMode', 'app-own', { mode: to });
+      const answer = await send(a, action);
+      return answer === 'step-up' ? send(a, await a.device.stepUp(action)) : answer;
+    };
+    expect(await mode('bypassPermissions')).toBe('ceiling');
+    expect(await mode('auto')).toBe('ok'); // the ceiling bounds a spawn's mode; only Bypass, newly admitted, is held later
+    expect((await f.endpoint.cli('policy', ['--ceiling', 'bypassPermissions'])).code).toBe(0);
+    expect(await mode('bypassPermissions')).toBe('ok');
+  });
 });
 
 describe('step-up', () => {

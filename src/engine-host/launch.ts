@@ -45,13 +45,16 @@ export const GATEWAY_AUTH_TOKEN = 'claudeusage-local-gateway'; // D-19: a non-se
 export const CHARTER_PIN = '87f8c7881119ea670901205dae35917d3751459c'; // the parent pin this child was authored against
 
 // §4.1 launch line, verbatim and in this order. `--strict-mcp-config` is never passed: the user's MCP servers must load
-// as in the terminal.
+// as in the terminal. `--allow-dangerously-skip-permissions` (the owner's observation set 4, 2026-11-27): every session
+// can be switched to Bypass permissions later through the control protocol; it still starts in the mode it is launched
+// in and asks as that mode asks (spikes/protocol-probe/findings-uxwave-obs4-bypass.txt).
 export const ENGINE_FLAGS: readonly string[] = Object.freeze([
   '-p',
   '--input-format', 'stream-json',
   '--output-format', 'stream-json',
   '--verbose',
   '--permission-prompt-tool', 'stdio',
+  '--allow-dangerously-skip-permissions',
   '--include-partial-messages',
   '--forward-subagent-text',
   '--replay-user-messages',

@@ -100,7 +100,7 @@ import { BY_EFFECT, NO_RULE, QUESTION_REQUESTS, type EffectReads } from './by-ef
 import { machineOwnerMembers } from './grants';
 import { higher, isMachineGrade, isRoutingClass, isSessionRank, owns, rankAtLeast, sessionRank } from './grades';
 import { OFFERS, type OfferRow, type Offers } from './offers';
-import { MachineSetup, SETUP_DIRECTORY_COMMANDS, spawnRefusal, type Policy } from './policy';
+import { aboveCeiling, MachineSetup, SETUP_DIRECTORY_COMMANDS, spawnRefusal, type Policy } from './policy';
 import { readerOf } from './readers';
 import { dispatchAs, type EndpointServices } from './services';
 import type { CheckoutSource, RecordSource, SessionRecord, SessionTarget } from './sources';
@@ -505,6 +505,9 @@ export class Authorizer {
       const refusal = spawnRefusal(input as Readonly<Record<string, unknown>>, policy, () => this.ctx.settingsMode(), this.ctx.checkouts, ownerSpawn);
       if (refusal !== null) return no(refusal);
     }
+    // The owner's observation set 4 (2026-11-27): every launch admits Bypass permissions later (engine-host/launch.ts), so
+    // a switch to it from another machine is held to the ceiling a spawn is held to; the engine no longer refuses it
+    if (name === 'session.setPermissionMode' && (input as { mode?: unknown }).mode === 'bypassPermissions' && aboveCeiling('bypassPermissions', policy, () => this.ctx.settingsMode())) return no('ceiling');
     let setup: SetupTarget | undefined;
     if (SETUP_DIRECTORY_COMMANDS.has(name)) {
       const checked = await this.#setup.check(who.member, name, input);

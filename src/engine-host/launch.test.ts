@@ -122,7 +122,7 @@ describe('launch contract builds the X6 command line and environment', () => {
     expect(GATEWAY_AUTH_TOKEN).toBe('claudeusage-local-gateway');
     expect(ENGINE_FLAGS).toEqual([
       '-p', '--input-format', 'stream-json', '--output-format', 'stream-json', '--verbose',
-      '--permission-prompt-tool', 'stdio', '--include-partial-messages', '--forward-subagent-text',
+      '--permission-prompt-tool', 'stdio', '--allow-dangerously-skip-permissions', '--include-partial-messages', '--forward-subagent-text',
       '--replay-user-messages', '--include-hook-events', '--setting-sources', 'user,project,local',
     ]);
   });

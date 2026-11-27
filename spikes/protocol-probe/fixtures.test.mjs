@@ -1623,3 +1623,24 @@ test('ticket 851: apply_flag_settings {effortLevel} before the first message giv
  const live=load851('effort-live');assert.equal(meta851(live,'control_answer')[0].answer.subtype,'success');
  assert.equal(meta851(live,'system_init')[0].permissionMode,'default');
 });
+
+// The owner's observation set 4, item 2 (findings-uxwave-obs4-bypass.txt; scenarios/pass3/uxwave-obs4-bypass.mjs): MAWS's
+// launch line with `--allow-dangerously-skip-permissions`, against the scripted Messages API stand-in.
+const loadObs4=n=>readFileSync(new URL('./fixtures/uxwave/uxwave-obs4-bypass-'+n+'.jsonl',import.meta.url),'utf8').trim().split('\n').map(JSON.parse);
+const metaObs4=(rows,event)=>rows.filter(r=>r.direction==='meta'&&r.frame.event===event).map(r=>r.frame);
+test('observation set 4: without the flag the engine refuses set_permission_mode bypassPermissions',()=>{
+ const answer=metaObs4(loadObs4('unflagged'),'control_answer')[0].answer;
+ assert.deepEqual([answer.subtype,answer.error_code],['error','bypass_not_launched']);
+});
+test('observation set 4: with the flag a session starts in the mode it was launched in and still asks, and bypassPermissions can be set later',()=>{
+ for(const [arm,mode] of [['default','default'],['accept','acceptEdits'],['plan','plan']]){
+  const rows=loadObs4(arm);
+  assert.equal(metaObs4(rows,'initialized')[0].currentPermissionMode,mode);
+  assert.equal(rows.find(r=>r.direction==='in'&&r.frame.type==='system'&&r.frame.subtype==='init').frame.permissionMode,mode);
+ }
+ const rows=loadObs4('default');
+ assert.deepEqual([metaObs4(rows,'first_turn')[0].asked,metaObs4(rows,'first_turn')[0].created],[['Bash'],false]);
+ assert.deepEqual(metaObs4(rows,'control_answer')[0].answer.response,{mode:'bypassPermissions'});
+ assert.deepEqual([metaObs4(rows,'second_turn')[0].asked,metaObs4(rows,'second_turn')[0].created],[[],true]);
+ assert.equal(rows.filter(r=>r.direction==='in'&&r.frame.type==='system'&&r.frame.subtype==='init').at(-1).frame.permissionMode,'bypassPermissions');
+});

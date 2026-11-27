@@ -1,0 +1,34 @@
+The owner's observation set 4, item 2: a session that can be switched to Bypass permissions later
+(2026-11-27)
+
+Question (D-1). Picking Bypass permissions in the mode menu failed with "Cannot set permission mode to bypassPermissions
+because the session was not launched with --dangerously-skip-permissions". The ruling: launch every session so that the
+mode can be switched to bypass later, without starting in it. Does the engine's `--allow-dangerously-skip-permissions`
+do that: the session starts in the mode it was launched in, asks as that mode asks, and accepts
+`set_permission_mode bypassPermissions` later?
+
+Method. scenarios/pass3/uxwave-obs4-bypass.mjs: MAWS's launch line and initialize (p1-common, whose `launch` now takes
+the launch's `--permission-mode`), the scripted Messages API stand-in (stub-api.mjs) as ANTHROPIC_BASE_URL with a
+stand-in token, so nothing was spent; a scratch CLAUDE_CONFIG_DIR per arm. Engine 2.1.332, named by its version path
+(PROBE_ENGINE). The flag is in `claude --help` on every installed release from 2.1.325 on ("Enable bypassing all
+permission checks"). Fixtures fixtures/uxwave/uxwave-obs4-bypass-*.jsonl; tests in fixtures.test.mjs ("observation set
+4").
+
+Without the flag (uxwave-obs4-bypass-unflagged): `set_permission_mode bypassPermissions` answers an error,
+error_code `bypass_not_launched`, the owner's words exactly. The mode stays default.
+
+With the flag:
+- Launched in default (uxwave-obs4-bypass-default): initialize's current_permission_mode and system/init say default.
+  The first turn's Bash call (`touch probe-a.txt`) raised can_use_tool; the probe denied it and no file was made: the
+  flag alone bypasses nothing. `set_permission_mode bypassPermissions` then answered success {mode: bypassPermissions};
+  system/status and the next turn's system/init say bypassPermissions, and that turn's Bash call (`touch probe-b.txt`)
+  ran with no can_use_tool and made the file.
+- Launched in acceptEdits (uxwave-obs4-bypass-accept) and in plan (uxwave-obs4-bypass-plan): initialize and system/init
+  report the launch's mode.
+
+What it decides: MAWS passes `--allow-dangerously-skip-permissions` on every launch line (src/engine-host/launch.ts,
+ENGINE_FLAGS), so the mode menu's Bypass permissions applies through the control protocol on any session; the session
+still starts in the mode the person picked.
+
+Not observed: auto mode launched with the flag (the stand-in serves no classifier); a resume or fork, whose launch line
+differs only by its resume flags.
