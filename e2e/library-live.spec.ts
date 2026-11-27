@@ -259,7 +259,8 @@ test('an agent makes an html artifact and a file artifact through the tools; the
       await expect(row(title).locator('[data-part="sessions"]').getByRole('button', { name: sessionTitle, exact: true })).toBeVisible();
       await expect(row(title)).toContainText(`by ${sessionTitle}`);
     }
-    const chipTooltip = await row(PAGE_TITLE).locator('[data-part="sessions"]').getByRole('button').first().getAttribute('title');
+    // board ticket 815: the chip's roles and age are its tooltip and its description
+    const chipTooltip = await row(PAGE_TITLE).locator('[data-part="sessions"]').getByRole('button').first().evaluate((el) => (el.getAttribute('aria-describedby') ?? '').split(/\s+/).map((id) => document.getElementById(id)?.textContent ?? '').join(' '));
     const shown = await Promise.all([PAGE_TITLE, FILE_NAME].map(async (title) => `${title}: ${(await row(title).textContent())?.replace(/\s+/g, ' ')}`));
     note(`the Artifacts tab: ${JSON.stringify(shown)}; the page's chip tooltip ${JSON.stringify(chipTooltip)}`);
     const search = library.getByRole('searchbox', { name: 'Search artifacts' });

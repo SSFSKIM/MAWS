@@ -1026,7 +1026,8 @@ test('A reaches B’s mawsd over RL2, through the hub and then directly, and dri
       // the word cut (T429): what is drawn is the machine's name; "forwarded from" before it is for a screen reader alone
       await expect(mark.locator('.sr-only')).toHaveText('forwarded from ');
       expect(await mark.evaluate((el) => Array.from(el.childNodes).filter((node) => !(node instanceof Element && node.classList.contains('sr-only'))).map((node) => node.textContent).join('')), 'drawn: the machine alone').toBe(B_NAME);
-      await expect(mark).toHaveAttribute('title', `Port ${devPort} on ${B_NAME}, forwarded to this Mac`);
+      // board ticket 815: the port is a line of the chip's tooltip and part of its description
+      await expect(page.locator('[data-browser-view="panel"] [data-browser-chip]').filter({ has: mark }).getByRole('tab')).toHaveAccessibleDescription(new RegExp(` · Port ${devPort} on ${B_NAME}, forwarded to this Mac$`));
       type Tab = { tabId: string; url: string; forward?: { machine: string; port: number; localPort: number } };
       const forwardedTab = async () => (await invoke<{ tabs: Tab[] }>(page, 'browser.tabs.list', { appSessionId: app }, b.ref)).tabs.find((t) => t.forward?.port === devPort);
       await expect.poll(async () => (await forwardedTab()) !== undefined, { timeout: 30_000, message: 'the session’s browser holds the forwarded tab' }).toBe(true);
