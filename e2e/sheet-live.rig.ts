@@ -101,8 +101,10 @@ test('the question sheet live: a terminal session asks on its sheet and is answe
       keep('2-three-asked', pane);
       return { result: three!.result, open: show(s, sid).open.map((q) => q.id) };
     });
-    const ids = recordState(s, sid).questions.map((q) => q.id);
-    const byId = new Map(recordState(s, sid).questions.map((q) => [q.id, q]));
+    // the call's own questions (an agent told to keep working may ask, or withdraw, more of its own meanwhile)
+    const askedByThree = recordState(s, sid).questions.filter((q) => q.callId === three!.id);
+    const ids = askedByThree.map((q) => q.id);
+    const byId = new Map(askedByThree.map((q) => [q.id, q]));
 
     // ---- 3. nothing opens; the session reads Question waiting; its row has three lines --------------------------------
     let appId = '';
@@ -171,7 +173,7 @@ test('the question sheet live: a terminal session asks on its sheet and is answe
       const receiptOf = (id: string) => `${id} | ${byId.get(id)!.header} | ${SHEET_ROW.arrow} `;
       await expect.poll(() => rowLines(sheetRows(page()).first()), { timeout: 15_000, message: 'each line is its receipt' }).toEqual(ids.map((id) => expect.stringContaining(receiptOf(id)) as unknown as string));
       if (picked[first] !== undefined) expect((await rowLines(sheetRows(page()).first()))[0]).toContain(`${receiptOf(first)}${picked[first]}`);
-      await expect(sheetTool(page()).locator('article[data-sheet-question]'), 'the cards are gone').toHaveCount(0, { timeout: 15_000 });
+      for (const id of ids) await expect(cardOf(page(), id), `${id}’s card is gone`).toHaveCount(0, { timeout: 15_000 });
       await picture(page(), '5-one-send');
       keep('5-one-send', pane);
       return { keys, batch: answers[0]!.batch, envelope: carrying.kind, deliveredWith: carrying.blocks, transcriptRowsBefore: before, reply: reply.slice(0, 1_200), receipts: await rowLines(sheetRows(page()).first()) };
@@ -184,19 +186,18 @@ test('the question sheet live: a terminal session asks on its sheet and is answe
       await terminals.say(pane, ASK_TWO);
       const two = await until('the call of two', TURN_MS, () => sheetCalls(transcriptRows(s, sid)).slice(calls).find((c) => (c.input.ask?.length ?? 0) === 2 && c.result !== null), () => terminals.pane(pane));
       await idle(s, sid);
-      const [gone, kept] = recordState(s, sid).questions.map((q) => q.id).filter((id) => !ids.includes(id));
+      const [gone, kept] = recordState(s, sid).questions.filter((q) => q.callId === two.id).map((q) => q.id);
       later = kept!;
       await expect(cardOf(page(), gone!), `${gone}’s card, before`).toBeVisible({ timeout: 15_000 });
       await terminals.say(pane, WITHDRAW(gone!));
       const withdrawal = await until('the withdrawal', TURN_MS, () => sheetCalls(transcriptRows(s, sid)).slice(calls + 1).find((c) => (c.input.withdraw ?? []).includes(gone!) && c.result !== null), () => terminals.pane(pane));
       expect(recordState(s, sid).closed[gone!]?.how, 'the record: withdrawn').toBe('withdrawn');
       await expect(cardOf(page(), gone!), 'its card disappears').toHaveCount(0, { timeout: 15_000 });
-      await expect.poll(async () => (await rowLines(sheetRows(page()).nth(1)))[0], { timeout: 15_000, message: 'its line reads Withdrawn' }).toContain(`${gone} | `);
-      expect((await rowLines(sheetRows(page()).nth(1)))[0]).toMatch(new RegExp(`${SHEET_ROW.arrow} ${SHEET_ROW.withdrawn}$`));
+      await expect.poll(() => lineFor(page(), gone!), { timeout: 15_000, message: 'its line reads Withdrawn' }).toMatch(new RegExp(`^${gone} \\| .* ${SHEET_ROW.arrow} ${SHEET_ROW.withdrawn}$`));
       await idle(s, sid);
       await picture(page(), '6-withdrawn');
       keep('6-withdrawn', pane);
-      return { asked: two.result, withdrew: withdrawal.result, heads: await rowHeads(page()), lines: await rowLines(sheetRows(page()).nth(1)) };
+      return { asked: two.result, withdrew: withdrawal.result, heads: await rowHeads(page()), lines: [await lineFor(page(), gone!), await lineFor(page(), kept!)] };
     });
 
     // ---- 7. the terminal closed: the stopped session's question, answered queued, taken back, sent again, resumed ---
@@ -238,11 +239,10 @@ test('the question sheet live: a terminal session asks on its sheet and is answe
       expect(carried.length, 'the answer goes with the next prompt').toBeGreaterThan(0);
       expect(envelopes(transcriptRows(s, sid)).some((e) => e.blocks.some((b) => b.keys.includes(takenKey))), 'the one taken back never goes').toBe(false);
       await idle(s, sid);
-      await expect.poll(async () => (await rowLines(sheetRows(page()).nth(1)))[1], { timeout: 15_000, message: 'the line is its receipt' }).toContain(`${later} | ${asked.header ?? ''}`);
-      expect((await rowLines(sheetRows(page()).nth(1)))[1]).toContain(`${SHEET_ROW.arrow} ${label}`);
+      await expect.poll(() => lineFor(page(), later), { timeout: 15_000, message: 'the line is its receipt' }).toContain(`${later} | ${asked.header ?? ''} | ${SHEET_ROW.arrow} ${label}`);
       await picture(page(), '7b-resumed-receipt');
       keep('7b-resumed-receipt', pane);
-      return { question: later, sentKey, takenKey, envelope: carried[0]!.kind, lines: await rowLines(sheetRows(page()).nth(1)) };
+      return { question: later, sentKey, takenKey, envelope: carried[0]!.kind, line: await lineFor(page(), later) };
     });
 
     // ---- 8. the app restarted behind the barrier; two windows answer one question; released, one is taken ----------
@@ -324,6 +324,15 @@ async function appIdOf(page: Page, sid: string): Promise<string> {
 async function holderOf(page: Page, appId: string): Promise<string | undefined> {
   const got = await invoke(page, 'session.get', { appSessionId: appId });
   return (got.value as { holder?: { kind: string } } | undefined)?.holder?.kind;
+}
+
+/** The row line of question `id`, whichever call's row holds it (its cells joined as rowLines joins them), or ''. */
+async function lineFor(page: Page, id: string): Promise<string> {
+  for (const row of await sheetRows(page).all()) {
+    const line = (await rowLines(row)).find((text) => text.startsWith(`${id} | `));
+    if (line !== undefined) return line;
+  }
+  return '';
 }
 
 const sideTabs = (page: Page) => page.locator('[data-region="panel"] [data-side-strip] [role="tab"]').allTextContents();

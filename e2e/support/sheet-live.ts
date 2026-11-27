@@ -233,7 +233,7 @@ export async function idle(s: Scratch, sid: string, ms = 240_000): Promise<void>
 
 // ---- the record (the session's sheet directory) -----------------------------------------------------------------------
 export interface RecordState {
-  questions: { id: string; revision: number; question: string; header?: string; options?: { label: string }[]; references?: { path: string }[] }[];
+  questions: { id: string; revision: number; callId?: string; question: string; header?: string; options?: { label: string }[]; references?: { path: string }[] }[];
   pending: { key: string; id: string }[];
   closed: Record<string, { how: string; key?: string; receipt?: string; deliveredAt?: string }>;
   verdicts: Record<string, { verdict: string; how?: string; id?: string }>;
