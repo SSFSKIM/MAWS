@@ -44,7 +44,7 @@ How to see it working: open the build beside today's build on the same fixtures 
 - [x] (2026-11-24 08:20Z) M5 task 6: the rig's scenes for the library, an opened artifact, the document and the dashboard, reviewed clean and merged.
 - [x] (2026-11-24 12:10Z) M5 task 7: the rig's scenes for the slides editor, the design workbench and the design system page, reviewed clean and merged.
 - [x] (2026-11-24) M5 built: artifacts and the editors. Its 227 rows were read against master `f2b32d6c9`, and 15 `new` rows were added (N190 to N204, 11 cuts and 4 `stays`). Of the cuts and rewordings, all but G289 are built; G289 is held because its menu is not drawn where the head's New Space is. The `stays` rows read as on master. The deck now says "All changes saved" like every other editor, through one `SavedStatus`. The editors import the `ui/` parts directly, since they were never separate bundles. Unit tests moved with each area. Task 5 moved the Electron e2e reads, and the groups are unchanged; no harness probe or desk spec read a changed control. The rig gained 95 `m5-` scenes, in launch 2 and in launch 16. An xhigh panel returned 14 findings: 9 were fixed and 5 logged. The rig was repaired after each of four Mac shakedowns. Four Mac shakedowns repaired the rig, and the pair review's fix wave followed. Class 1a passed at the hand-over head. Still owed: the owner's call on the pictures, and the Mac rerun of the groups the fix wave touched.
-- [ ] M5's pictures and the owner's call.
+- [x] (2026-11-27) M5's pictures and the owner's call: the owner approved them on 2026-11-27, 115 scenes, before at master `c08061175` and after at `629f913ce` (Decision Log).
 - [ ] Retrospective.
 
 ## Acceptance
@@ -612,6 +612,11 @@ Kept by the session that wrote this document (sminos alias `design-experiment`, 
     - The restore confirm now takes the keyboard on open, which closes the "…"'s tooltip that had covered it.
     - The dashboard's live-data read now expects the sheet itself to take focus, as task 2 decided.
     - The margin-push case keeps its 20 px bound, and its agent reply is longer: M5's shorter card had left room to spare.
+- 2026-11-27. **The owner's call on M5's pictures** (115 scenes; before at master `c08061175`, after at `629f913ce`). Four answers:
+  - **The look is approved.**
+  - **"By hand" on both surfaces.** The deck's Check panel heads its manual list "By hand" (G475), the words the design system page uses (G586), in place of "Check by hand". This settles the difference task 4 left for the picture review.
+  - **Tips keep opening above by default.** Below stays only on the four owners whose tip covered what it explains (G558, G584, G585, G450). This answers the question the pair review's fix wave left for the owner: below does not become the default.
+  - **G289 stays a worded button.** "New Space" stays in the library head as task 1 left it, and G289 is not built.
 
 ## Outcomes & Retrospective
 
