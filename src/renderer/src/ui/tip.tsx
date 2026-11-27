@@ -33,6 +33,11 @@
 // inside a `TipBoundary` it keeps to what can be seen of that container too (a page in a panel, so a tip on a word near
 // the page's edge does not run onto the sidebar, nor past its scroller's lower edge onto the group under it).
 //
+// An owner that is a component rather than an element (a Radix radio item, a popover's or a menu's trigger) draws its
+// own `data-state` (checked, open), which the tooltip's would overwrite, since Radix's trigger spreads what it is handed
+// over its own: the tip's state is not handed to such an owner (the xhigh panel's scalpel-2#1). A plain element owner
+// carries the tip's state as before.
+//
 // `UnavailableButton` is a greyed click-activated control's enabled owner ("Every hidden fact has an owner that takes
 // keyboard focus"): a button, a link, a checkbox or a radio drawn `aria-disabled`, still in the Tab order, its reason
 // the tooltip and the description, and its click (by pointer, Enter or Space) swallowed before the control's own
@@ -41,8 +46,8 @@
 // belongs on a focusable owner beside it (its row's note) or on a field that guards its own edits. A control that
 // acts on pointerdown (a Radix menu trigger) guards itself too. The control must not be `disabled`, which takes it out
 // of the Tab order and out of the pointer's reach.
-import { Tooltip } from 'radix-ui';
-import { cloneElement, createContext, useCallback, useContext, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type MouseEvent, type ReactElement, type ReactNode, type RefObject, type SyntheticEvent } from 'react';
+import { Slot, Tooltip } from 'radix-ui';
+import { cloneElement, createContext, forwardRef, useCallback, useContext, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type MouseEvent, type ReactElement, type ReactNode, type RefObject, type SyntheticEvent } from 'react';
 import { POINTING_DELAY_MS } from './pointing';
 
 const TIP = 'z-50 max-w-[20rem] rounded-sm border border-border-strong bg-bg-overlay px-2 py-1 text-ui-sm leading-normal text-fg shadow-float [overflow-wrap:anywhere]';
@@ -71,7 +76,15 @@ export function TipBoundary({ element, children }: { element: Element | null; ch
 }
 
 // The tip that shows, closed when another opens (Radix's own signal for that fires only for the openings it makes).
-let showing: { close(): void } | null = null;
+let showing: { close(): void; owner: RefObject<HTMLElement | null> } | null = null;
+
+/** Whether a tip shows for the owner that holds keyboard focus: Escape there is the tip's (it closes it), so a window's
+ * capturing key handler (the keymap's dispatcher: a request card's Esc denies) leaves that Escape to it (the xhigh
+ * panel's scalpel-1#1). */
+export function focusedTipShowing(doc: Document = document): boolean {
+  const owner = showing?.owner.current;
+  return owner != null && owner.contains(doc.activeElement);
+}
 
 export function Tip({ content, description, pointedWithin, side = 'top', children, ...guard }: { content: ReactNode; description?: string | null; pointedWithin?: RefObject<HTMLElement | null>; side?: TipSide; children: Owner } & ClickGuard) {
   const descriptionId = useId();
@@ -157,7 +170,7 @@ export function Tip({ content, description, pointedWithin, side = 'top', childre
   const drawn = open && shows;
   useEffect(() => {
     if (!drawn) return;
-    const me = { close: () => setOpen(false) };
+    const me = { close: () => setOpen(false), owner: trigger };
     showing?.close();
     showing = me;
     return () => {
@@ -200,7 +213,7 @@ export function Tip({ content, description, pointedWithin, side = 'top', childre
           onPointerDown={dismissByOwner}
           onClick={dismissByOwner} // an activation by the keyboard, which keeps the focus (a disclosure's chevron)
         >
-          {owner}
+          {typeof owner.type === 'string' ? owner : <KeepOwnState>{owner}</KeepOwnState>}
         </Tooltip.Trigger>
         {shows && (
           <Tooltip.Portal>
@@ -229,6 +242,16 @@ export function Tip({ content, description, pointedWithin, side = 'top', childre
     </Tooltip.Provider>
   );
 }
+// Hands the trigger's props on to a component owner, all but the tooltip's `data-state` (the owner's own state wins).
+const KeepOwnState = forwardRef<HTMLElement, { 'data-state'?: string; children: ReactElement }>(function KeepOwnState({ children, ...props }, ref) {
+  delete props['data-state'];
+  return (
+    <Slot.Root ref={ref} {...props}>
+      {children}
+    </Slot.Root>
+  );
+});
+
 // Cancelled before Radix's trigger handlers read it (neither pointermove nor focus has a default action a control
 // relies on).
 const cancel = (event: SyntheticEvent) => event.preventDefault();

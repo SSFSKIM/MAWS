@@ -13,6 +13,7 @@ import { ipc } from '../ipc/client';
 import { useSettings } from '../stores/settings';
 import { enabledActions, runAction, subscribeActions } from './actions-runtime';
 import { bindingsOf, onUnbind, type ChordBinding, type HoldRelease } from './useKeyChord';
+import { focusedTipShowing } from '../ui/tip'; // board ticket 815: Escape on a focused tip owner is the tip's
 
 export function connectActions(client: MawsBridge = ipc): () => void {
   let connected = true;
@@ -168,6 +169,9 @@ export function dispatchKey(event: KeyboardEvent, keymap: KeymapOverrides, table
   // C11 start: the Settings tab's chord capture is recording this key (settings-tab/KeymapSection.tsx): it runs nothing
   if (target.closest('[data-chord-capture]') !== null) return false;
   // C11 end
+  // Board ticket 815: an Escape on a focused owner whose tip shows closes the tip first (Radix's, after this capture),
+  // and runs nothing of the keymap's; the next Escape is the keymap's
+  if (event.key === 'Escape' && !event.altKey && !event.ctrlKey && !event.metaKey && !event.shiftKey && focusedTipShowing(target.ownerDocument)) return false;
   for (const id of table === ACTIONS ? RENDERER_ACTIONS : dispatched(table)) {
     const accelerator = effectiveChord(id, keymap, table);
     if (accelerator === null) continue;

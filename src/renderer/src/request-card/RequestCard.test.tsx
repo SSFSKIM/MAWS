@@ -1389,6 +1389,32 @@ describe('a card’s delivery, held by the request', () => {
     ]);
   });
 
+  // the xhigh panel (scalpel-1#1): the failure's words take Tab for their tip; Esc there closes the tip, as Esc on any
+  // focused tip owner does, and only the next Esc denies
+  it('Esc on the failure’s focused words closes their tip and denies nothing; the next Esc denies', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    held();
+    const item = itemFor(unflaggedRead, APP);
+    list([item]);
+    const first = inPane(item);
+    fireEvent.click(button('Allow once'));
+    await waitFor(() => expect(fake.invoked('session.answer')).toHaveLength(1));
+    first.unmount();
+    await act(() => fake.fail('session.answer', 'the link is down'));
+    inPane(item, 'card'); // a card whose keys answer
+    graceOver();
+    const words = screen.getByText("Couldn't deliver the answer");
+    focusOn(words);
+    expect(screen.getByRole('tooltip').textContent).toBe('the link is down');
+    keyAt(words, ESCAPE);
+    await flush();
+    expect(screen.queryByRole('tooltip')).toBeNull();
+    expect(answers()).toEqual([{ kind: 'permission', decision: 'allow', scope: 'once' }]);
+    keyAt(words, ESCAPE);
+    await flush();
+    expect(answers().at(-1)).toEqual({ kind: 'permission', decision: 'deny' });
+  });
+
   it('answered elsewhere while its card is unmounted: the two seconds pass with no card, and it comes back closed', async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     outcome = 'not_pending';

@@ -8,6 +8,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { accessibleText } from '../test-support/accessible-text';
 import { fakeTimeouts, realTimeouts } from '../test-support/fake-timeouts';
 import { POINTING_DELAY_MS } from './pointing';
+import { Popover, RadioGroup } from 'radix-ui';
 import { Tip, tipBoundaryOf, UnavailableButton } from './tip';
 
 const FACT = 'MAWS falls back to a dock bounce and a toast';
@@ -388,5 +389,50 @@ describe('a tip boundary', () => {
     expect(tipBoundaryOf(null)).toEqual([]);
     scroller.remove();
     alone.remove();
+  });
+});
+
+// The xhigh panel (scalpel-2#1): Radix's Tooltip puts its own `data-state` on its trigger, which an owner that is
+// itself a Radix control (a radio item, a popover's or a menu's trigger) would draw over its own state with.
+describe('a tip over a Radix control', () => {
+  it('keeps a radio item’s checked state and a popover trigger’s open state, through pointing and focus', async () => {
+    render(
+      <>
+        <RadioGroup.Root aria-label="Tool" defaultValue="pen">
+          <Tip content="Pen">
+            <RadioGroup.Item value="pen" aria-label="Pen" />
+          </Tip>
+          <Tip content="Box">
+            <RadioGroup.Item value="box" aria-label="Box" />
+          </Tip>
+        </RadioGroup.Root>
+        <Popover.Root defaultOpen>
+          <Tip content="Where it runs">
+            <Popover.Trigger>Location</Popover.Trigger>
+          </Tip>
+          <Popover.Portal>
+            <Popover.Content>Folders</Popover.Content>
+          </Popover.Portal>
+        </Popover.Root>
+      </>,
+    );
+    const states = () => [screen.getByRole('radio', { name: 'Pen' }), screen.getByRole('radio', { name: 'Box' }), screen.getByRole('button', { name: 'Location' })].map((element) => element.getAttribute('data-state'));
+    expect(states()).toEqual(['checked', 'unchecked', 'open']);
+    await user().hover(screen.getByRole('radio', { name: 'Pen' }));
+    wait(POINTING_DELAY_MS);
+    expect(tooltip()).toBe('Pen');
+    expect(states()).toEqual(['checked', 'unchecked', 'open']);
+    act(() => screen.getByRole('button', { name: 'Location' }).focus());
+    expect(tooltip()).toBe('Where it runs');
+    expect(states()).toEqual(['checked', 'unchecked', 'open']);
+  });
+
+  it('still marks a plain owner with the tip’s state, as before', () => {
+    render(
+      <Tip content={FACT}>
+        <button type="button">Blocked</button>
+      </Tip>,
+    );
+    expect(screen.getByRole('button', { name: 'Blocked' }).getAttribute('data-state')).toBe('closed');
   });
 });
