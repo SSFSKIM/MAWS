@@ -12,6 +12,7 @@ import type { LibrarySpace } from '@shared/ipc/schema/library';
 import { ipc } from '../ipc/client';
 import { Sheet, SheetForm } from '../sessions/Sheet';
 import { DANGER, FIELD, PRIMARY, QUIET, SECONDARY } from '../sessions/ui';
+import { NamedGlyph } from '../ui/glyph';
 import { SPACE_INSTRUCTIONS_MAX } from '@shared/artifacts/space-instructions';
 import { createSpace, deleteSpace, linkSpaceDirectory, moveArtifactToSpace, renameSpace, setSpaceInstructions } from './actions';
 import { DIALOG_COPY as D, SPACE_COPY } from './copy';
@@ -53,14 +54,12 @@ export function SpaceMenu({ space, narrowed = false }: { space: LibrarySpace; na
   return (
     <DropdownMenu.Root modal={false}>
       <DropdownMenu.Trigger asChild>
-        <button
-          type="button"
-          aria-label={SPACE_COPY.menu(space.name)}
-          title={SPACE_COPY.menu(space.name)}
+        <NamedGlyph
+          label={SPACE_COPY.menu(space.name)}
           className="inline-flex size-6 shrink-0 items-center justify-center rounded-sm text-fg-faint outline-accent hover:bg-bg-hover hover:text-fg focus-visible:outline-2 data-[state=open]:bg-bg-active data-[state=open]:text-fg"
         >
           <MoreIcon className="size-3.5" />
-        </button>
+        </NamedGlyph>
       </DropdownMenu.Trigger>
       <DropdownMenu.Portal>
         <DropdownMenu.Content align="start" sideOffset={4} className={MENU}>

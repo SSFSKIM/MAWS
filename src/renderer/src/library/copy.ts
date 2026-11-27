@@ -138,9 +138,10 @@ export const ROW_COPY = {
   edited: (ago: string, by: string) => `Edited ${ago} by ${by}`,
   untitledSession: 'Untitled session',
   more: (n: number) => `+${n}`,
-  moreTitle: (titles: string[]) => titles.join('\n'),
+  moreNames: (titles: string[]) => titles.join(', '), // the +N's description; its tooltip lists them a line each
   roles: { created: 'created', edited: 'edited', viewed: 'viewed', commented: 'commented' } as const,
   sessionTitle: (title: string, roles: string, ago: string) => `${title}: ${roles}, ${ago}`,
+  sessionFacts: (roles: string, ago: string) => `${roles}, ${ago}`, // a session chip's description: its name is the chip's
   open: 'Open',
   pin: 'Pin',
   unpin: 'Unpin',

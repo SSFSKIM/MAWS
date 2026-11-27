@@ -19,6 +19,7 @@ import { useLayout } from '../stores/layout';
 import { allTabs, currentSet } from '../stores/layout-model';
 import { deferred, installFakeMain, ok } from '../test-support/code';
 import { resetShellStores } from '../test-support/shell-stores';
+import { accessibleDescription } from '../test-support/accessible-text';
 import { resetDelivery, useDelivery } from '../delivery/store'; // P4-B5
 import { prefillToDoc } from '../composer/editor/recall';
 import { serializeDraft } from '../composer/editor/serialize';
@@ -364,8 +365,12 @@ describe('a row', () => {
     expect(within(launch).getByText('Edited 3 minutes ago by Session 1')).toBeTruthy(); // English under the Korean system locale (P4 DL 4)
     const chips = within(launch).getAllByRole('button', { name: /^Session \d/ });
     expect(chips.map((c) => c.textContent)).toEqual(['Session 1', 'Session 2', 'Session 3']);
-    expect(chips[0].getAttribute('title')).toMatch(/^Session 1: created, edited, /);
-    expect(within(launch).getByText('+1').getAttribute('title')).toContain('Session 4');
+    // the facts the system tooltip had are tips the keyboard reaches, and descriptions (board ticket 815)
+    expect(accessibleDescription(chips[0]!)).toMatch(/^created, edited, /);
+    act(() => chips[0]!.focus());
+    expect(screen.getByRole('tooltip').textContent).toMatch(/^Session 1: created, edited, /);
+    const more = within(launch).getByText('+1');
+    expect([more.tabIndex, accessibleDescription(more)]).toEqual([0, 'Session 4']); // the list's stop row: in its Tab order
     expect(within(article('Mine')).getByText('HTML page')).toBeTruthy();
     expect(within(article('Mine')).getByText('Edited 2 hours ago by You')).toBeTruthy();
     expect(within(article('Unknown session')).getByText(/by Claude$/)).toBeTruthy();
