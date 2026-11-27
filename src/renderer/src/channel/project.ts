@@ -47,9 +47,9 @@ import { waitsOnAnswer } from '@shared/attention/kinds';
 import { isSheetItem } from '@shared/attention/sheet-item';
 import { addressOf } from '@shared/machine/address';
 import type { MachineRef } from '@shared/machine/ref';
+import type { SheetSummary } from '@shared/sheet/model';
 import { displayTitle, listedTitle } from '../sessions/title';
 import { rowOfListed, rowOfRecord, type OrgIndex, type RowKey } from '../stores/org-projects';
-import { selectSheetHeld, type SheetsState } from '../stores/sheet';
 import type { ListedSession } from '../stores/sessions';
 import { CHANNEL } from './copy';
 
@@ -285,16 +285,17 @@ export function waitingFor(input: ProjectSessions & { bySession: ReadonlyMap<App
 
 /**
  * The sessions of the project whose sheet keeps its card in the section with nothing of it waiting (`items`, the
- * section's waiting list): a Send still in the air, or an act whose note waits (`selectSheetHeld`'s `unsettled`).
+ * section's waiting list): a Send still in the air, or an act whose note waits (`held`, the caller's
+ * `selectSheetHeld(…, 'unsettled')`, given so this projection stays free of the store).
  */
 export function heldSheets(
   items: readonly AttentionItem[],
-  input: Parameters<typeof inProject>[0] & { greyed: ReadonlySet<AppSessionId> } & Pick<SheetsState, 'summaries' | 'memories'>,
+  input: Parameters<typeof inProject>[0] & { greyed: ReadonlySet<AppSessionId>; summaries: ReadonlyMap<string, SheetSummary>; held(appSessionId: AppSessionId): boolean },
 ): AppSessionId[] {
   const holds = inProject(input);
   const asking = new Set(items.filter((item) => isSheetItem(item.id)).map((item) => item.appSessionId));
   return [...input.summaries.values()].flatMap(({ appSessionId }) =>
-    appSessionId !== null && !asking.has(appSessionId) && !input.greyed.has(appSessionId) && holds(appSessionId) && selectSheetHeld(input, appSessionId, 'unsettled') ? [appSessionId] : [],
+    appSessionId !== null && !asking.has(appSessionId) && !input.greyed.has(appSessionId) && holds(appSessionId) && input.held(appSessionId) ? [appSessionId] : [],
   );
 }
 

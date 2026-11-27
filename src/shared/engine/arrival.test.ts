@@ -36,6 +36,8 @@ function said(arrival: Arrival): string {
       return `own ${arrival.via}: ${first(arrival.words)}`;
     case 'wake':
       return 'wake';
+    case 'sheet': // the question sheet's C3 M5: read by its own table (sheet-carrier.test.ts); none of these carriers holds one
+      return `sheet: ${arrival.deliveries.flatMap((delivery) => delivery.keys).join(', ')}`;
     case 'consent':
       return `consent to the ${arrival.kind} ${arrival.subject}`;
   }

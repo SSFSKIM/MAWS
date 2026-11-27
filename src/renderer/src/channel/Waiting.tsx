@@ -19,7 +19,7 @@ import { displayTitle, listedTitle } from '../sessions/title';
 import { useAttention } from '../stores/attention';
 import { selectOrgIndex } from '../stores/org-projects';
 import { useSessions } from '../stores/sessions';
-import { useSheets } from '../stores/sheet';
+import { selectSheetHeld, useSheets } from '../stores/sheet';
 import { SheetInPlace } from '../tools/sheet/SheetInPlace';
 import { CHANNEL } from './copy';
 import { heldSheets, waitingFor } from './project';
@@ -34,7 +34,7 @@ export function Waiting({ project }: { project: string }) {
   const summaries = useSheets((s) => s.summaries);
   const memories = useSheets((s) => s.memories);
   const items = waitingFor({ project, index, projects, records, listed, bySession, greyed });
-  const held = heldSheets(items, { project, index, projects, records, listed, greyed, summaries, memories });
+  const held = heldSheets(items, { project, index, projects, records, listed, greyed, summaries, held: (id) => selectSheetHeld({ summaries, memories }, id, 'unsettled') });
   if (items.length === 0 && held.length === 0) return null;
   return (
     <section data-channel-waiting aria-label={CHANNEL.waiting} className="flex flex-col gap-3 border-t border-border pt-4">

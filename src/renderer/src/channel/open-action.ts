@@ -13,7 +13,7 @@ import { useLayout } from '../stores/layout';
 import { activeTab } from '../stores/layout-model';
 import { selectOrgIndex } from '../stores/org-projects';
 import { useSessions } from '../stores/sessions';
-import { useSheets } from '../stores/sheet';
+import { selectSheetHeld, useSheets } from '../stores/sheet';
 import { channelOfRow, channelProjects, heldSheets, waitingFor } from './project';
 
 /** The channel of the tab in front: a Channel tab's project, or a session tab's row's channel; null for any other. */
@@ -65,6 +65,6 @@ export function usePaletteChannels(): { project: string; name: string; waiting: 
   const memories = useSheets((s) => s.memories);
   return channelProjects(index).map((entry) => {
     const waiting = waitingFor({ project: entry.project, index, projects, records, listed, bySession, greyed });
-    return { ...entry, waiting: waiting.length + heldSheets(waiting, { project: entry.project, index, projects, records, listed, greyed, summaries, memories }).length };
+    return { ...entry, waiting: waiting.length + heldSheets(waiting, { project: entry.project, index, projects, records, listed, greyed, summaries, held: (id) => selectSheetHeld({ summaries, memories }, id, 'unsettled') }).length };
   });
 }
