@@ -3,8 +3,10 @@
 // with the send's state at its end (the word cut, T73: the arrow of its direction, its old words its accessible lead). The line never wraps; it is cut with an ellipsis at
 // the column's edge, so the line is always the control that shows the whole message under it (a click, Enter or Space)
 // and hides it again: a narrower column cuts any line, and no word of a message may be out of reach (the architect's
-// ruling of 2026-11-13). A peer's name has its address as its tooltip and, after it, the owners
-// its sminos frame names, by the sidebar's rule (P5 O15 M2b, §J: a display of the frame, not a verification). A message
+// ruling of 2026-11-13). A peer's name is followed by the owners its sminos frame names, by the sidebar's rule (P5 O15
+// M2b, §J: a display of the frame, not a verification). Ticket 815: the peer's address, every owner with its email and
+// the send's own summary are the line's tip, which the keyboard reaches (the words sit inside the line's one control),
+// and the address stands under the line where nothing points (the touch rule). A message
 // from another session that can be answered offers Reply at the line's end, on hover or focus (always where nothing
 // points, T75), and keeps it while the composer it opens is open (E7). The root keeps the class `transcript-peer` and, for a message between sessions, its
 // `data-peer`, which the live e2e specs and the agents harness select by.
@@ -14,6 +16,7 @@ import type { PeerMessage, Row } from '../../model/rows';
 import { useSessions } from '../../../stores/sessions'; // P5 O15 M2b
 import { ownerEntries, ownerIdsOf, ownersLabel } from '../../../sidebar/owners'; // P5 O15 M2b
 import { useDisclosure, useRowSession } from '../context'; // E7
+import { TouchFact } from '../../../ui/touch-fact'; // ticket 815
 import { ArrivalBody, ArrivalLine } from './Line';
 import { PeerComposer } from './PeerComposer'; // E7
 
@@ -32,6 +35,10 @@ export function AgentMessageRow({ row }: { row: AgentMessageData }) {
   const peer = row.peer ?? null;
   const who = peer === null ? '' : peerLabel(partyOf(peer).address, partyOf(peer).name);
   const arrow = messageArrow(row);
+  const owners = useSenderOwners(peer?.sender?.owners ?? null); // P5 O15 M2b
+  const address = peer === null ? null : partyOf(peer).address;
+  const facts = peer === null ? [] : [address, owners?.every, peer.summary].filter((part): part is string => typeof part === 'string' && part !== '');
+  const fact = facts.length === 0 ? null : { content: facts.map((part, index) => <span key={index} className="block">{part}</span>), description: facts.join(' · ') };
   return (
     <div
       className="transcript-peer"
@@ -41,8 +48,8 @@ export function AgentMessageRow({ row }: { row: AgentMessageData }) {
       data-replying={replying ? '' : undefined}
     >
       <div className="transcript-line">
-        <ArrivalLine mark={arrow ?? MESSAGE_LINE.mark} markWords={arrow === null ? undefined : messageArrowWords(arrow)} open={open} onToggle={toggle}>
-          {peer === null ? row.text : <PeerWords peer={peer} who={who} />}
+        <ArrivalLine mark={arrow ?? MESSAGE_LINE.mark} markWords={arrow === null ? undefined : messageArrowWords(arrow)} fact={fact} open={open} onToggle={toggle}>
+          {peer === null ? row.text : <PeerWords peer={peer} who={who} owners={owners} />}
         </ArrivalLine>
         {peer !== null && peer.result !== null && (
           <span className="transcript-peer-state" data-result={peer.result} title={peer.resultText ?? undefined}>
@@ -55,6 +62,7 @@ export function AgentMessageRow({ row }: { row: AgentMessageData }) {
           </button>
         )}
       </div>
+      <TouchFact block className="ms-6 text-ui-sm [overflow-wrap:anywhere]">{address}</TouchFact>
       {peer?.result === 'failed' && peer.resultText !== null && <p className="transcript-peer-error">{peer.resultText}</p>}
       <ArrivalBody open={open}>
         <p className="transcript-peer-body">{wholeOf(row)}</p>
@@ -66,26 +74,25 @@ export function AgentMessageRow({ row }: { row: AgentMessageData }) {
   );
 }
 
-// A message between sessions on its line: the peer by name (its address the tooltip), the sender's owners, then the
-// preview as one text node (the arrow before them says which way it went).
-function PeerWords({ peer, who }: { peer: PeerMessage; who: string }) {
-  const owners = useSenderOwners(peer.sender?.owners ?? null); // P5 O15 M2b
+// A message between sessions on its line: the peer by name, the sender's owners, then the preview as one text node (the
+// arrow before them says which way it went).
+function PeerWords({ peer, who, owners }: { peer: PeerMessage; who: string; owners: { label: string; every: string } | null }) {
   return (
     <>
-      <span className="transcript-peer-who" title={partyOf(peer).address}>
+      <span className="transcript-peer-who">
         {peerMessageCopy.who(who)}
       </span>
       {owners !== null && (
         <>
           {' ('}
-          <span data-owners title={owners.every}>
+          <span data-owners>
             {owners.label}
           </span>
           {')'}
         </>
       )}
       {': '}
-      <span data-part="preview" title={peer.summary ?? undefined}>
+      <span data-part="preview">
         {peer.preview}
       </span>
     </>
@@ -94,7 +101,7 @@ function PeerWords({ peer, who }: { peer: PeerMessage; who: string }) {
 
 // P5 O15 M2b: the owners a peer message's frame names, labelled as the sidebar labels a session's (nothing when you
 // alone own it) with `me` and `members` from the sessions store; a name the store doesn't hold is drawn as written. The
-// title lists every owner, with its email where the store has one.
+// tip lists every owner, with its email where the store has one.
 function useSenderOwners(names: string[] | null): { label: string; every: string } | null {
   const me = useSessions((s) => s.member);
   const members = useSessions((s) => s.members);

@@ -537,7 +537,7 @@ describe('a path in a side thread’s question answers (U6b-4b)', () => {
     act(() => openSideThread(A, ONE));
     mount();
     act(() => setInlineQuestions(ONE, true));
-    const chip = await screen.findByTitle(path);
+    const chip = await screen.findByRole('button', { description: path }); // board ticket 815: a path link's path is its tip
     expect(chip.closest(`[data-side-btw-view="${ONE}"]`)).not.toBeNull();
     expect(shown()).toBe(A); // the parent in front
     return chip;

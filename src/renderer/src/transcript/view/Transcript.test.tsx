@@ -21,6 +21,7 @@ import type { OlderPagesState, SeekResult, TranscriptSource } from '../source/ty
 import { createStore } from 'zustand/vanilla';
 import { estimateRow, Transcript } from './Transcript';
 import { markTranscriptCarry, recordTranscriptScroll, scrollSignature, takeTranscriptCarry } from './scroll-carry'; // P4-B3
+import { accessibleDescription, accessibleText } from '../../test-support/accessible-text'; // ticket 815
 
 // happy-dom has no layout: give the scroller a viewport and every row a height so the virtualiser mounts rows.
 const offsetHeight = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'offsetHeight')!;
@@ -390,8 +391,8 @@ describe('Transcript', () => {
     };
     render(<Transcript source={source} variant="session" />);
     const alert = await screen.findByRole('alert');
-    expect(alert.textContent).toBe('Couldn’t load this conversationRetry');
-    expect(alert.getAttribute('title')).toBe('engine-host is not running');
+    expect(accessibleText(alert)).toBe('Couldn’t load this conversationRetry'); // the reason after the words is drawn only where nothing points
+    expect(accessibleDescription(within(alert).getByText('Couldn’t load this conversation'))).toBe('engine-host is not running'); // ticket 815: the words' tip
     expect(document.querySelector('.transcript')!.getAttribute('data-hydration')).toBe('failed');
     fireEvent.click(within(alert).getByRole('button', { name: 'Retry' }));
     await waitFor(() => expect(useTranscriptStore.getState().entries[source.key!].phase).toBe('live'));
@@ -883,15 +884,16 @@ describe('the agent’s id on what a child’s transcript opens', () => {
     render(<Transcript source={source} variant={variant} actions={{ openFile }} browserActivity={false} />);
     await waitFor(() => expect(useTranscriptStore.getState().entries[key]?.phase).toBe('live'));
     act(() => useTranscriptStore.getState().expandAll(key, { cells: true }));
-    const chips = [
-      '[data-chip="path"][title="/x/linked.txt"]',
-      '.transcript-read .transcript-chip[title="/x/read.txt"]',
-      '.transcript-chip[title="/x/edited.txt"]',
-      '[data-chip="anchor"]',
+    const chips: [string, string | null][] = [
+      ['[data-chip="path"]', '/x/linked.txt'], // ticket 815: a link's and a read chip's path is their tip, in their description
+      ['.transcript-read .transcript-chip', '/x/read.txt'],
+      ['.transcript-chip[title="/x/edited.txt"]', null],
+      ['[data-chip="anchor"]', null],
     ];
-    for (const selector of chips) {
-      await waitFor(() => expect(document.querySelector(selector)).not.toBeNull());
-      fireEvent.click(document.querySelector(selector)!);
+    for (const [selector, path] of chips) {
+      const chip = () => [...document.querySelectorAll(selector)].find((element) => path === null || accessibleDescription(element) === path);
+      await waitFor(() => expect(chip()).toBeDefined());
+      fireEvent.click(chip()!);
     }
     return openFile.mock.calls as [string, number | undefined, AppSessionId | null, { main?: boolean; agent?: string } | undefined][];
   }
@@ -934,9 +936,9 @@ describe('the agent’s id on what a child’s transcript opens', () => {
     render(<Transcript source={source} variant="child" actions={{ openFile }} browserActivity={false} />);
     await waitFor(() => expect(useTranscriptStore.getState().entries[key]?.phase).toBe('live'));
     act(() => engine('engine-cleared'));
-    const link = '[data-chip="path"][title="/x/linked.txt"]';
-    await waitFor(() => expect(document.querySelector(link)).not.toBeNull());
-    fireEvent.click(document.querySelector(link)!);
+    const link = () => [...document.querySelectorAll('[data-chip="path"]')].find((element) => accessibleDescription(element) === '/x/linked.txt');
+    await waitFor(() => expect(link()).toBeDefined());
+    fireEvent.click(link()!);
     expect(openFile.mock.calls[0]?.[3]).toEqual({ main: false, agent: 'agent-y', conversation: 'engine-drawn' });
   });
 });

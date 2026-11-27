@@ -1,9 +1,10 @@
 // A boundary (residue *Boundaries*): a line where the model's context changed — compaction, reset, a retracted
 // response, a rewind. A rewind's line offers to show the branch it hid (rendered muted and marked not in context) and
 // to hide it again; the rows come and go below the line, so the line itself stays where it is. The word cut (T50): a
-// line's second sentence (`secondary`, a continued branch's) waits on its words, which take the keyboard; they carry an
-// empty title, so the identifiers' title on the row is not drawn over the sentence. Where nothing points the sentence
-// stands after them (the touch rule, ticket 830). Board ticket 850: the branch's rows come and go through the shared
+// line's second sentence (`secondary`, a continued branch's) waits on its words, which take the keyboard. Where nothing
+// points the sentence stands after them (the touch rule, ticket 830). Ticket 815: the identifiers (`detail`) wait on the
+// same words, under the sentence, and only there: they are the developer's words the cut took off the screen, so a
+// screen that cannot point does not draw them. Board ticket 850: the branch's rows come and go through the shared
 // disclosure motion, as a turn's work area does (`motion.ts`): revealed, they grow in from nothing; hidden, they close to
 // nothing before the store hides them, and a second press while they close takes it back.
 import { useSyncExternalStore } from 'react';
@@ -27,19 +28,21 @@ export function BoundaryRow({ row }: { row: Extract<Row, { kind: 'boundary' }> }
       if (current?.kind !== 'boundary' || current.revealed === row.revealed) useTranscriptStore.getState().toggleBoundary(storeKey, row.id);
     });
   };
+  const words = row.secondary ? row.text : row.boundaryKind === 'rewind' ? rewindLabel(row.hiddenRows) : row.text;
+  const facts = [row.secondary, row.detail].filter((fact): fact is string => typeof fact === 'string' && fact !== '');
   return (
-    <div className="transcript-boundary" data-boundary-kind={row.boundaryKind} title={row.detail ?? undefined}>
+    <div className="transcript-boundary" data-boundary-kind={row.boundaryKind}>
       <span className="transcript-boundary-rule" aria-hidden="true" />
       <span className="transcript-boundary-text">
-        {row.secondary ? (
+        {facts.length > 0 ? (
           <>
-            <Tip content={row.secondary} description={row.secondary}>
-              <span tabIndex={0} title="" className="transcript-boundary-words">{row.text}</span>
+            <Tip content={facts.map((fact, index) => <span key={index} className={index === 0 ? 'block' : 'block text-fg-muted'}>{fact}</span>)} description={facts.join(' · ')}>
+              <span tabIndex={0} className="transcript-boundary-words">{words}</span>
             </Tip>
             <TouchFact className="ms-1">{row.secondary}</TouchFact>
           </>
         ) : (
-          <span>{row.boundaryKind === 'rewind' ? rewindLabel(row.hiddenRows) : row.text}</span>
+          <span>{words}</span>
         )}
       </span>
       {toggle && (

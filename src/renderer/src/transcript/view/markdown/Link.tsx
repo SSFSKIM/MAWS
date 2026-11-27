@@ -17,6 +17,7 @@ import type { ExtraProps } from 'streamdown';
 import type { AppSessionId } from '@shared/graph/ids';
 import { artifactLink, parseArtifactLink, type ArtifactLocation } from '@shared/artifacts/link'; // P4-B4
 import { isAddress, machineOf } from '@shared/machine/address';
+import { Tip } from '../../../ui/tip';
 import { useActions, useRowSession, type TranscriptActions } from '../context';
 
 const LINE = /(?:#L(\d+)|:(\d+))$/;
@@ -40,7 +41,8 @@ function pathOf(href: string): { path: string; line: number | undefined } {
 // unless it names one; main's content form (`maws-artifact://<id>/<revision>/<path>`) names the artifact alone. The
 // mention carries the place as the grammar writes it (`data-artifact-at`, the fragment alone, so no element carries the
 // link) for a surface that takes the click before it. U6d (decision 16): one tooltip, true wherever the click lands; the
-// word cut (N125): the shortcut alone, since a click on the mention says it opens the artifact.
+// word cut (N125): the shortcut alone, since a click on the mention says it opens the artifact. Ticket 815: a tip the
+// keyboard reaches, as the path link's path and a web link's address are, never the system tooltip.
 export const ARTIFACT_LINK_TITLE = '⌘-click opens it in a tab';
 
 // UX wave U6d (Interfaces §F): what a click on a mention opens, the one rule of both click sites (this component, and a
@@ -92,24 +94,26 @@ interface InlineLinkProps {
   'data-chip': 'artifact' | 'path';
   'data-artifact-id'?: string;
   'data-artifact-at'?: string;
-  title: string;
+  tip: string;
   open: (metaKey: boolean) => void;
   children?: ReactNode;
 }
-function InlineLink({ open, children, ...attributes }: InlineLinkProps) {
+function InlineLink({ open, tip, children, ...attributes }: InlineLinkProps) {
   return (
-    <span
-      role="button"
-      tabIndex={0}
-      className="transcript-inline-link"
-      {...attributes}
-      onClick={(event) => {
-        if (!endsSelection(event.nativeEvent, event.currentTarget)) open(event.metaKey);
-      }}
-      onKeyDown={activateOnKey}
-    >
-      {children}
-    </span>
+    <Tip content={tip} description={tip}>
+      <span
+        role="button"
+        tabIndex={0}
+        className="transcript-inline-link"
+        {...attributes}
+        onClick={(event) => {
+          if (!endsSelection(event.nativeEvent, event.currentTarget)) open(event.metaKey);
+        }}
+        onKeyDown={activateOnKey}
+      >
+        {children}
+      </span>
+    </Tip>
   );
 }
 
@@ -123,7 +127,7 @@ export function TranscriptLink({ href, children }: ComponentProps<'a'> & ExtraPr
     if (link === null || !actions.openArtifactTab) return <span>{children}</span>;
     const { artifactId, at } = link;
     return (
-      <InlineLink data-chip="artifact" data-artifact-id={artifactId} data-artifact-at={at && artifactLink(artifactId, at).slice(artifactLink(artifactId).length)} title={ARTIFACT_LINK_TITLE} open={(metaKey) => openArtifactMention(actions, session, link, metaKey)}>
+      <InlineLink data-chip="artifact" data-artifact-id={artifactId} data-artifact-at={at && artifactLink(artifactId, at).slice(artifactLink(artifactId).length)} tip={ARTIFACT_LINK_TITLE} open={(metaKey) => openArtifactMention(actions, session, link, metaKey)}>
         {children}
       </InlineLink>
     );
@@ -131,7 +135,7 @@ export function TranscriptLink({ href, children }: ComponentProps<'a'> & ExtraPr
   if (href.startsWith('maws-path:')) {
     const { path, line } = pathOf(href.slice('maws-path:'.length));
     return (
-      <InlineLink data-chip="path" title={path} open={(metaKey) => actions.openFile(path, line, session, { main: metaKey })}>
+      <InlineLink data-chip="path" tip={path} open={(metaKey) => actions.openFile(path, line, session, { main: metaKey })}>
         {children}
       </InlineLink>
     );
@@ -146,16 +150,17 @@ export function TranscriptLink({ href, children }: ComponentProps<'a'> & ExtraPr
     );
   }
   return (
-    <a
-      href={href}
-      title={href}
-      onClick={(event) => {
-        event.preventDefault();
-        if (event.metaKey) actions.openExternal(href, session, { external: true });
-        else actions.openExternal(href, session);
-      }}
-    >
-      {children}
-    </a>
+    <Tip content={href} description={href}>
+      <a
+        href={href}
+        onClick={(event) => {
+          event.preventDefault();
+          if (event.metaKey) actions.openExternal(href, session, { external: true });
+          else actions.openExternal(href, session);
+        }}
+      >
+        {children}
+      </a>
+    </Tip>
   );
 }

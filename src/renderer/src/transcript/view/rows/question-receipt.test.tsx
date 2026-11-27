@@ -23,7 +23,13 @@ const QUESTIONS = [
   { question: 'Which season do you prefer?', header: 'Season', multiSelect: false, options: [{ label: 'Summer', description: null, preview: null }] },
 ];
 const question = (over: Partial<RowOf<'question'>> = {}): RowOf<'question'> => ({ id: 'question:toolu_receipt' as never, turnId: null, at: '2026-11-15T10:00:00.000Z', kind: 'question', toolUseId: CALL, questions: QUESTIONS, answers: null, error: null, ...over });
-const lines = (container: HTMLElement) => [...container.querySelectorAll<HTMLElement>('[data-question]')].map((line) => line.textContent);
+// A line's drawn words: the question's tip description and its touch fact are no part of them (ticket 815)
+const drawnWords = (line: Element) => {
+  const copy = line.cloneNode(true) as Element;
+  copy.querySelectorAll('[hidden], [data-touch-fact]').forEach((element) => element.remove());
+  return copy.textContent;
+};
+const lines = (container: HTMLElement) => [...container.querySelectorAll<HTMLElement>('[data-question]')].map(drawnWords);
 const receipt = (value: Receipt, session = HERE) => useAttention.getState().recordReceipt(session, CALL, value);
 const shown = (row: RowOf<'question'>, storeKey: string = HERE) => {
   const view = renderRow(row, { storeKey });
@@ -82,7 +88,7 @@ describe('MAWS’s ask dismissed whole', () => {
   });
   const chip = (row: RowOf<'ask'>) => {
     const view = renderRow(row, { storeKey: HERE });
-    const said = { chip: view.container.querySelector('[data-ask-chip]')!.textContent, lines: [...view.container.querySelectorAll('[data-ask-answer]')].map((line) => line.textContent) };
+    const said = { chip: view.container.querySelector('[data-ask-chip]')!.textContent, lines: [...view.container.querySelectorAll('[data-ask-answer]')].map(drawnWords) };
     view.unmount();
     return said;
   };

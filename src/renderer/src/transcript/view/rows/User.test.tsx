@@ -28,7 +28,7 @@ describe('user row', () => {
     expect(container.querySelector('[data-streamdown="strong"]')?.textContent).toBe('sidebar');
     fireEvent.click(screen.getByRole('button', { name: 'Edit' }));
     expect(actions.editAndResubmit).toHaveBeenCalledWith(row);
-    expect(screen.getByRole('button', { name: 'Edit' }).getAttribute('title')).toBe('Edit here · Send rewinds this session to this message');
+    expect(screen.getByRole('button', { name: 'Edit', description: 'Edit here · Send rewinds this session to this message' })).toBeTruthy(); // ticket 815: its tip
   });
 
   it('copies the text with pasted blocks restored, untagged', async () => {
@@ -100,7 +100,7 @@ describe('user row', () => {
   // UX wave U3b (decision 10; R12, R14): one line under the bubble, at its side: the time, Copy and Edit, then the
   // caption last. Outside the bubble's body, so nothing of it overlays the bubble or stands beside it.
   const lineOf = (container: HTMLElement) => container.querySelector('section.transcript-user > .transcript-user-line');
-  const wordsOf = (line: Element) => [...line.children].flatMap((part) => (part.classList.contains('transcript-user-line-actions') ? [...part.children] : [part])).map((part) => part.textContent);
+  const wordsOf = (line: Element) => [...line.children].flatMap((part) => (part.classList.contains('transcript-user-line-actions') ? [...part.children] : [part])).filter((part) => !part.hasAttribute('hidden') /* a tip's description */).map((part) => part.textContent);
 
   it('draws the time, Copy and Edit, then the caption last, on one line under the bubble', () => {
     const row = userRow('look at b too');

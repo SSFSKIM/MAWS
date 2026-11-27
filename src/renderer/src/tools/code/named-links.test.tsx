@@ -20,6 +20,7 @@ import { TranscriptActionsProvider, turnFileLinks } from '../../transcript/view/
 import { installFakeMain, ok } from '../../test-support/code';
 import { normalizeLexically, resolveRelative } from './open-file';
 import { MarkdownView } from './viewer/MarkdownView';
+import { accessibleDescription } from '../../test-support/accessible-text';
 
 afterEach(cleanup);
 
@@ -426,7 +427,7 @@ describe('a Markdown file’s text, drawn by MarkdownView (U6b-4c)', () => {
   // the paths of the chips drawn, as each chip holds it
   function drawn(text: string): string[] {
     const { container } = render(<MarkdownView entry={{ tabId: 'u6b4c-doc', appSessionId: null, path: `${BASE}/doc.md`, text } as never} />);
-    const paths = [...container.querySelectorAll('[data-chip="path"]')].map((chip) => chip.getAttribute('title'));
+    const paths = [...container.querySelectorAll('[data-chip="path"]')].map((chip) => accessibleDescription(chip)); // ticket 815: its tip
     cleanup();
     return paths as string[];
   }

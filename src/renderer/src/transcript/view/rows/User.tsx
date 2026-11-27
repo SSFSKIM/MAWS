@@ -14,7 +14,8 @@
 // author, as a line above the bubble and in the region's name; the reader's own reads "Your message". UX wave U3: MAWS's
 // "Approve and retry" prompt (`consent`) is the person's act, drawn as one line and never as a bubble. UX wave U5a (M5;
 // decision 13): a message of several comments draws each comment's chip over its own text and its own screenshot, in the
-// order made, and after them the attachments no comment claimed.
+// order made, and after them the attachments no comment claimed. Ticket 815: a file chip's media type, Edit's sentence and
+// an anchor chip's locator are tips the keyboard reaches (a chip that is no button takes the keyboard for its fact).
 import { useLayoutEffect, useState } from 'react';
 import { CLOSE_MOTION, useDisclosureMotion } from '../../../ui/disclosure';
 import type { Anchor } from '@shared/anchor/anchor'; // E3
@@ -33,6 +34,10 @@ import { Tip } from '../../../ui/tip';
 import { AnchorIcon } from './icons'; // E3
 
 type UserRowData = Extract<Row, { kind: 'user' }>;
+
+const EDIT_TIP = 'Edit here · Send rewinds this session to this message';
+// a chip that is no button, taking the keyboard for its tip (ticket 815)
+const LABEL_CHIP = 'transcript-chip rounded-sm outline-accent focus-visible:outline-2';
 type Segment = { kind: 'text'; text: string } | { kind: 'pasted'; n: number; lines: number; attachment: Attachment };
 
 
@@ -132,9 +137,7 @@ function UserBubble({ row }: { row: UserRowData }) {
                   file.kind === 'image' && file.dataUrl ? (
                     <img key={i} className="transcript-attachment-image" src={file.dataUrl} alt={file.name} />
                   ) : (
-                    <span key={i} className="transcript-chip" data-chip="file" title={file.mediaType ?? undefined}>
-                      {file.name}
-                    </span>
+                    <FileChip key={i} file={file} />
                   ),
                 )}
               </div>
@@ -161,9 +164,11 @@ function UserBubble({ row }: { row: UserRowData }) {
           Copy
         </button>
         {row.editable && !row.pending && (
-          <button type="button" title="Edit here · Send rewinds this session to this message" onClick={() => actions.editAndResubmit(row)}>
-            Edit
-          </button>
+          <Tip content={EDIT_TIP} description={EDIT_TIP}>
+            <button type="button" onClick={() => actions.editAndResubmit(row)}>
+              Edit
+            </button>
+          </Tip>
         )}
       </span>
       {notSent !== null && <span className="transcript-not-sent" title={notSent}>{notSent}</span>}
@@ -206,13 +211,23 @@ function CommentParts({ comment, image }: { comment: UserComment; image: Attachm
           {image.dataUrl ? (
             <img className="transcript-attachment-image" src={image.dataUrl} alt={image.name} />
           ) : (
-            <span className="transcript-chip" data-chip="file" title={image.mediaType ?? undefined}>
-              {image.name}
-            </span>
+            <FileChip file={image} />
           )}
         </div>
       )}
     </>
+  );
+}
+
+// A file the message carried, as a chip: its media type (or how a linked artifact was sent) is its tip.
+function FileChip({ file }: { file: Attachment }) {
+  const fact = file.mediaType;
+  return (
+    <Tip content={fact} description={fact}>
+      <span className="transcript-chip rounded-sm outline-accent focus-visible:outline-2" data-chip="file" tabIndex={fact ? 0 : undefined}>
+        {file.name}
+      </span>
+    </Tip>
   );
 }
 
@@ -249,9 +264,11 @@ function AnchorChip({ anchor }: { anchor: Anchor }) {
   if (path === undefined && pageUrl !== undefined && session !== null) {
     return (
       <div className="transcript-user-anchor">
-        <button type="button" className="transcript-chip" data-chip="anchor" data-anchor-kind={anchor.kind} title={anchor.locator} onClick={() => actions.openBrowserUrl(session, pageUrl)}>
-          {content}
-        </button>
+        <Tip content={anchor.locator} description={anchor.locator}>
+          <button type="button" className="transcript-chip" data-chip="anchor" data-anchor-kind={anchor.kind} onClick={() => actions.openBrowserUrl(session, pageUrl)}>
+            {content}
+          </button>
+        </Tip>
       </div>
     );
   }
@@ -263,29 +280,33 @@ function AnchorChip({ anchor }: { anchor: Anchor }) {
     const openCommit = actions.openCommit;
     return (
       <div className="transcript-user-anchor">
-        {openCommit !== undefined && session !== null ? (
-          <button type="button" className="transcript-chip" data-chip="anchor" data-anchor-kind={anchor.kind} title={anchor.locator} onClick={() => openCommit(session, commit, path)}>
-            {content}
-          </button>
-        ) : (
-          <span className="transcript-chip" data-chip="anchor" data-anchor-kind={anchor.kind} title={anchor.locator}>
-            {content}
-          </span>
-        )}
+        <Tip content={anchor.locator} description={anchor.locator}>
+          {openCommit !== undefined && session !== null ? (
+            <button type="button" className="transcript-chip" data-chip="anchor" data-anchor-kind={anchor.kind} onClick={() => openCommit(session, commit, path)}>
+              {content}
+            </button>
+          ) : (
+            <span className={LABEL_CHIP} data-chip="anchor" data-anchor-kind={anchor.kind} tabIndex={anchor.locator ? 0 : undefined}>
+              {content}
+            </span>
+          )}
+        </Tip>
       </div>
     );
   }
   return (
     <div className="transcript-user-anchor">
-      {path !== undefined ? (
-        <button type="button" className="transcript-chip" data-chip="anchor" data-anchor-kind={anchor.kind} title={anchor.locator} onClick={() => actions.openFile(path, anchor.line, session)}>
-          {content}
-        </button>
-      ) : (
-        <span className="transcript-chip" data-chip="anchor" data-anchor-kind={anchor.kind} title={anchor.locator}>
-          {content}
-        </span>
-      )}
+      <Tip content={anchor.locator} description={anchor.locator}>
+        {path !== undefined ? (
+          <button type="button" className="transcript-chip" data-chip="anchor" data-anchor-kind={anchor.kind} onClick={() => actions.openFile(path, anchor.line, session)}>
+            {content}
+          </button>
+        ) : (
+          <span className={LABEL_CHIP} data-chip="anchor" data-anchor-kind={anchor.kind} tabIndex={anchor.locator ? 0 : undefined}>
+            {content}
+          </span>
+        )}
+      </Tip>
     </div>
   );
 }

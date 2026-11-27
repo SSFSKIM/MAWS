@@ -16,6 +16,7 @@ import type { Row } from '../../model/rows';
 import { renderRow, rowOf, storeWith } from './test-support';
 import { REMOTE_UNAVAILABLE } from '@shared/ipc/remote-unavailable';
 import { leaveRl2, overRl2 } from '../../../test-support/code-disk'; // ticket 627
+import { accessibleDescription } from '../../../test-support/accessible-text'; // ticket 815
 
 afterEach(() => {
   cleanup();
@@ -32,12 +33,12 @@ const ROW: DeliveryRow = {
 };
 
 describe('the delivery row’s file names', () => {
-  it('p1-maws-send-file: the name is a button that opens the recorded file in the viewer, its path as the title', async () => {
+  it('p1-maws-send-file: the name is a button that opens the recorded file in the viewer, its path as the tip', async () => {
     const store = await storeWith(journalToEvents(loadJournal('pass3', 'p1-maws-send-file')));
     useTranscriptStore.getState().expandAll(store.key);
     const { actions } = renderRow(rowOf(store.rows(), 'delivery'), { storeKey: APP });
     const name = screen.getByRole('button', { name: 'hello.txt' });
-    expect(name.getAttribute('title')).toBe('/private/tmp/maws-e1-repo-G8SYJD/hello.txt');
+    expect(accessibleDescription(name)).toBe('/private/tmp/maws-e1-repo-G8SYJD/hello.txt'); // ticket 815
     fireEvent.click(name);
     expect(actions.openArtifact).toHaveBeenCalledExactlyOnceWith(APP, 'd7649bfe-f476-44bc-b238-10c5c7ab4aa2');
   });
@@ -51,7 +52,7 @@ describe('the delivery row’s file names', () => {
   it('a pending file (no id yet) and a refused call’s file stay text: clicking the name does nothing', () => {
     const pending = renderRow({ ...ROW, files: [{ path: 'a.txt', name: 'a.txt', id: null }] }, { storeKey: APP });
     expect(screen.queryByRole('button', { name: 'a.txt' })).toBeNull();
-    fireEvent.click(screen.getByText('a.txt'));
+    fireEvent.click(screen.getByText('a.txt', { selector: '.transcript-delivery-name' }));
     expect(pending.actions.openArtifact).not.toHaveBeenCalled();
     pending.unmount();
     const refused = renderRow({ ...ROW, files: [{ path: 'a.txt', name: 'a.txt', id: null }], error: 'send_file: not a file: /repo/a.txt' }, { storeKey: APP });
@@ -141,6 +142,6 @@ describe('a delivery on another machine’s session', () => {
     expect(facts.map((found) => [found[0]!.getAttribute('data-touch-fact'), found[0]!.getAttribute('aria-hidden')])).toEqual([['', 'true'], ['', 'true']]);
     expect(facts.map((found) => found[0]!.textContent)).toEqual(buttons.map((button) => document.getElementById(button.getAttribute('aria-describedby')!)!.textContent));
     cleanup();
-    expect(renderRow(ROW, { storeKey: APP }).container.querySelector('[data-touch-fact]')).toBeNull();
+    expect(renderRow(ROW, { storeKey: APP }).container.querySelector('.transcript-delivery-actions [data-touch-fact]')).toBeNull();
   });
 });

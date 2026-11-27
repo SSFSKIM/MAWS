@@ -6,6 +6,7 @@ import { loadJournal } from '../../../../../../test/support/fixtures';
 import { journalToEvents } from '../../dev/journal';
 import { api, builder, tool, uuid } from '../../model/test-events';
 import { renderRow, rowOf, storeWith } from './test-support';
+import { accessibleDescription } from '../../../test-support/accessible-text'; // ticket 815: a cell line's paths are its tip
 
 afterEach(cleanup);
 
@@ -50,7 +51,7 @@ it('shows file basenames through the surface wrapper without shortening tooltips
   expect(buttons.map((button) => button.querySelector('.transcript-cell-label')?.textContent)).toEqual([
     'Read readme.md', 'Edited widget.ts', 'Created notes.txt', 'Edited existing.txt',
   ]);
-  expect(buttons.map((button) => button.title)).toEqual(['/p/docs/readme.md', '/p/src/widget.ts', '/p/docs/notes.txt', '/p/docs/existing.txt']);
+  expect(buttons.map((button) => accessibleDescription(button))).toEqual(['/p/docs/readme.md', '/p/src/widget.ts', '/p/docs/notes.txt', '/p/docs/existing.txt']);
   expect(group.cells).toEqual(original);
   expect(group.cells[1]).toMatchObject({ paths: ['/p/src/widget.ts'], label: 'Edited /p/src/widget.ts +1 −1', detail: { filePath: '/p/src/widget.ts' } });
   fireEvent.click(buttons[1]); view.rerenderRow(rowOf(store.rows(), 'group'));
@@ -75,7 +76,7 @@ it('uses each same-basename file’s shortest distinguishing suffix through wrap
   expect(buttons.map((button) => button.querySelector('.transcript-cell-label')?.textContent)).toEqual([
     'Read a/x/index.ts', 'Edited b/x/index.ts', 'Created c/index.ts', 'Read a/x/index.ts',
   ]);
-  expect(buttons.map((button) => button.title)).toEqual(['/p/a/x/index.ts', '/p/b/x/index.ts', '/p/c/index.ts', '/p/a/x/index.ts']);
+  expect(buttons.map((button) => accessibleDescription(button))).toEqual(['/p/a/x/index.ts', '/p/b/x/index.ts', '/p/c/index.ts', '/p/a/x/index.ts']);
 });
 
 it('keeps the basename when repeated file references all name the same full path', async () => {
@@ -133,15 +134,16 @@ it('restores only after a dry run and a confirmation naming the engine’s files
   await vi.waitFor(() => expect(rewind.undo).toHaveBeenCalledOnce());
 });
 
-// P5 O9 M5 (acceptance 2): a session whose port can't roll files back keeps the control in place, disabled, with why.
-it('keeps Restore files in place, disabled with its reason, where the session can’t roll files back', async () => {
+// P5 O9 M5 (acceptance 2): a session whose port can't roll files back keeps the control in place, greyed, with why;
+// ticket 815: greyed, it keeps the keyboard, its reason its description, and a press does nothing.
+it('keeps Restore files in place, greyed with its reason, where the session can’t roll files back', async () => {
   const b = builder(); b.turn('u'); b.toolUse('edit', 'Edit', { file_path: '/p/a', old_string: 'a', new_string: 'b' }); b.result('edit', 'done'); b.end(['u']);
   const store = await storeWith(b.events);
   const rewind = { canUndo: vi.fn(async () => ({ ok: true, reason: null, files: ['/p/a'] })), undo: vi.fn(async () => {}), unavailable: 'File rollback runs in the terminal' };
   renderRow(rowOf(store.rows(), 'divider'), { storeKey: store.key, rewind });
   fireEvent.click(screen.getByRole('button', { name: 'Turn summary' }));
-  const restore = screen.getByRole('button', { name: 'Restore files to before this turn' }) as HTMLButtonElement;
-  expect([restore.disabled, restore.title]).toEqual([true, 'File rollback runs in the terminal']);
+  const restore = screen.getByRole('button', { name: 'Restore files to before this turn', description: 'File rollback runs in the terminal' }) as HTMLButtonElement;
+  expect([restore.disabled, restore.getAttribute('aria-disabled')]).toEqual([false, 'true']);
   fireEvent.click(restore);
   expect(rewind.canUndo).not.toHaveBeenCalled();
 });

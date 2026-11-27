@@ -6,6 +6,7 @@ import { createContext, useContext, type ReactNode } from 'react';
 import { selectWaitingByCall, useAttention } from '../../../stores/attention'; // UX wave U1b
 import { useTranscriptStore } from '../../../stores/transcript';
 import { DisclosureBody } from '../../../ui/disclosure';
+import { Tip } from '../../../ui/tip'; // ticket 815
 import { baseName, descriptionLabel, SHELL_CELL, waitingLabel } from '../../model/copy';
 import { blockedLabel, shellToolOf } from '../../model/cells';
 import { blockedStates, hiddenTurnsOf, isBlockedCell, lineNamesWhole, readsApproved, withoutRefusalText, type BlockedState } from '../../model/blocked'; // UX wave U1c
@@ -116,6 +117,7 @@ export function CellLine({ cell: model, turnId, focusable = false, standalone = 
   const onLine = offered !== null && lineNamesWhole(model, offered.call);
   const opened = withoutRefusalText(model); // UX wave U1c (M2 fix 1): an opened blocked row draws no refusal text as output
   // a lone line counts only a finished edit, as a run's line counts its finished edits (U2a §B; board ticket 852)
+  const paths = cell.paths.length > 0 ? cell.paths.join('\n') : null;
   const counts = !waiting && cell.detail.kind === 'edit' && !asLabelled(cell) && (!standalone || cell.status === 'done') ? EDIT_COUNTS.exec(cell.label) : null;
   return (
     <div
@@ -130,14 +132,17 @@ export function CellLine({ cell: model, turnId, focusable = false, standalone = 
       data-held={held ? '' : undefined}
       tabIndex={focusable ? -1 : undefined}
     >
-      <button type="button" className="transcript-cell-line" title={cell.paths.length > 0 ? cell.paths.join('\n') : undefined} aria-expanded={cell.expanded} onClick={onToggle ?? (() => useTranscriptStore.getState().toggleCell(storeKey, cell.id))}>
-        <span className="transcript-cell-label">
-          {waiting ? <CodeText text={waitingLabel(cell)} /> : label !== undefined ? <CodeText text={label} /> : <CellLabel cell={cell} />}
-          {cell.error !== undefined && <>{' '}<span className="transcript-cell-reason">{cell.error}</span></>}
-        </span>
-        {counts && <LineCounts added={Number(counts[1])} removed={Number(counts[2])} />}
-        <Chevron />
-      </button>
+      {/* ticket 815: the paths the line acts on are its tip, which the keyboard reaches, one to a line */}
+      <Tip content={paths && <span className="whitespace-pre-line">{paths}</span>} description={paths}>
+        <button type="button" className="transcript-cell-line" aria-expanded={cell.expanded} onClick={onToggle ?? (() => useTranscriptStore.getState().toggleCell(storeKey, cell.id))}>
+          <span className="transcript-cell-label">
+            {waiting ? <CodeText text={waitingLabel(cell)} /> : label !== undefined ? <CodeText text={label} /> : <CellLabel cell={cell} />}
+            {cell.error !== undefined && <>{' '}<span className="transcript-cell-reason">{cell.error}</span></>}
+          </span>
+          {counts && <LineCounts added={Number(counts[1])} removed={Number(counts[2])} />}
+          <Chevron />
+        </button>
+      </Tip>
       {standalone && !cell.expanded && <RestThumbnail cell={cell} />}
       {offered !== null && actions.renderBlockedCall!({ cell: model.id, call: offered.call, again: offered.again, grant: offered.grant as 'none' | 'waiting', onLine })}
       <DisclosureBody open={cell.expanded}>

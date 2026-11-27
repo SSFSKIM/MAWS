@@ -511,7 +511,7 @@ describe('the jump button', () => {
     expect(jump()?.dataset.state).toBe('input');
     see(atEnd);
     await waitFor(() => expect(jump()?.getAttribute('aria-label')).toBe('Jump to latest'));
-    expect(jump()!.dataset.state).toBeUndefined();
+    expect(jump()!.dataset.state).not.toBe('input'); // the round button's state is its tip's (board ticket 815: a named glyph)
     see(() => false);
     await waitFor(() => expect(jump()?.dataset.state).toBe('input'));
     list([]); // answered: the button is the round one again

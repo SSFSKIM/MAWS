@@ -16,6 +16,9 @@ import type { AgentId } from '@shared/graph/ids';
 import { useTranscriptStore } from '../../stores/transcript';
 import { HYDRATION, NEEDS_INPUT, OLDER, REACH } from '../model/copy';
 import { QuietSpinner } from '../../ui/spinner'; // the word cut (T111)
+import { NamedGlyph } from '../../ui/glyph'; // ticket 815
+import { Tip } from '../../ui/tip'; // ticket 815
+import { TouchFact } from '../../ui/touch-fact'; // ticket 815
 import { restingRows, withPlacedRows, withQueueTail } from '../model/derive';
 import { answerActionsOf } from '../model/answer-actions'; // UX wave U3b
 import { compactingRow } from './compacting'; // UX wave U3b (M4)
@@ -919,8 +922,14 @@ export function Transcript({ source, variant, actions, rewind, renderRequest, on
           </div>
         )}
         {failed !== null && (
-          <div className="transcript-failed" role="alert" title={failed}>
-            <span>{HYDRATION.failed}</span>
+          // ticket 815: why it failed is the words' tip, which the keyboard reaches, and stands after them where nothing points
+          <div className="transcript-failed" role="alert">
+            <Tip content={failed} description={failed}>
+              <span tabIndex={0} className="rounded-sm outline-accent focus-visible:outline-2">
+                {HYDRATION.failed}
+              </span>
+            </Tip>
+            <TouchFact>{failed}</TouchFact>
             <button type="button" className="transcript-button" onClick={() => void useTranscriptStore.getState().retry(storeKey)}>
               {HYDRATION.retry}
             </button>
@@ -937,7 +946,7 @@ export function Transcript({ source, variant, actions, rewind, renderRequest, on
           </button>
         ) : !following && (
           // W2 (B3): Codex's round scroll-to-bottom button, right of the column; its dots while the turn works
-          <button type="button" className="transcript-jump" aria-label="Jump to latest" title="Jump to latest" onClick={() => listRef.current?.scrollToEnd()}>
+          <NamedGlyph label="Jump to latest" className="transcript-jump" onClick={() => listRef.current?.scrollToEnd()}>
             {working ? (
               <span className="transcript-working-dots" aria-hidden="true">
                 <span />
@@ -949,7 +958,7 @@ export function Transcript({ source, variant, actions, rewind, renderRequest, on
                 <path d="M8 3v10M3.5 8.5 8 13l4.5-4.5" />
               </svg>
             )}
-          </button>
+          </NamedGlyph>
         )}
       </div>
       </WaitingViewProvider>

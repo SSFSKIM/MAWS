@@ -13,6 +13,7 @@ import type { Row } from '../../model/rows';
 import { builder, uuid } from '../../model/test-events';
 import { serializeRows } from '../../model/serialize';
 import { renderRow, rowOf } from './test-support';
+import { accessibleDescription } from '../../../test-support/accessible-text'; // ticket 815
 
 afterEach(cleanup);
 
@@ -83,7 +84,7 @@ describe('the anchored prompt', () => {
     expect(chip.tagName).toBe('BUTTON');
     expect(chip.getAttribute('data-anchor-kind')).toBe('browser-element');
     expect(chip.textContent).toBe('button “Increment”');
-    expect(chip.getAttribute('title')).toBe('#increment');
+    expect(accessibleDescription(chip)).toBe('#increment'); // ticket 815: the locator is the chip's tip
     fireEvent.click(chip);
     expect(actions.openBrowserUrl).toHaveBeenCalledWith(PARENT, 'http://127.0.0.1:4000/comment.html');
     expect(actions.openFile).not.toHaveBeenCalled();

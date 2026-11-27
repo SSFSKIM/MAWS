@@ -280,11 +280,11 @@ describe('viewer', () => {
       fireEvent.click(await screen.findByRole('link', { name: 'Website' }));
       expect(main.callsOf('layout.openExternal')).toEqual([{ url: 'https://example.com/' }]);
       const mainFiles = () => currentSet(useLayout.getState().main).panes.flatMap((pane) => pane.tabs).filter((tab) => tab.kind === 'file' && tab.path === '/r/app.ts');
-      act(() => void fireEvent.click(screen.getByTitle('/r/app.ts')));
+      act(() => void fireEvent.click(screen.getByRole('button', { description: '/r/app.ts' })));
       const beside = (useLayout.getState().panelBySession.get(A)?.tabs ?? []).filter((tab) => tab.toolId === 'files');
       expect(beside.map((tab) => useLayout.getState().panelParams[tab.id])).toEqual([{ file: '/r/app.ts', line: 7, preview: true }]);
       expect(mainFiles()).toEqual([]);
-      act(() => void fireEvent.click(screen.getByTitle('/r/app.ts'), { metaKey: true }));
+      act(() => void fireEvent.click(screen.getByRole('button', { description: '/r/app.ts' }), { metaKey: true }));
       expect(mainFiles()).toEqual([expect.objectContaining({ line: 7, appSessionId: A })]);
       expect(useLayout.getState().panelBySession.get(A)?.tabs.filter((tab) => tab.toolId === 'files')).toEqual([]);
     } finally {
@@ -2613,10 +2613,10 @@ describe('a link in a shown Markdown file, and in a subagent’s transcript (U6b
   it('a relative link opens against the shown file’s folder beside the chat, and on ⌘ in the main area (L4)', async () => {
     disk({ '/r/docs/guide.md': '[setup](setup.md) and [the app](../app.ts#L3)', '/r/docs/setup.md': 's\n', '/r/app.ts': 'a\n' });
     shownFile('/r/docs/guide.md');
-    const setup = await screen.findByTitle('setup.md');
+    const setup = await screen.findByRole('button', { description: 'setup.md' });
     act(() => void fireEvent.click(setup));
     expect(sideFiles()).toEqual([{ file: '/r/docs/setup.md', line: null, preview: true }]);
-    act(() => void fireEvent.click(screen.getByTitle('../app.ts'), { metaKey: true }));
+    act(() => void fireEvent.click(screen.getByRole('button', { description: '../app.ts' }), { metaKey: true }));
     expect(mainFile('/r/app.ts')).toMatchObject({ line: 3, appSessionId: A });
   });
 
@@ -2624,7 +2624,7 @@ describe('a link in a shown Markdown file, and in a subagent’s transcript (U6b
   it('a relative link in a shown file outside the folders follows, then asks for its sibling by name for the tab’s session: one follow and one read of exactly that path, refused where the daemon finds no link (N2.3)', async () => {
     const main = disk({ '/elsewhere/docs/guide.md': '[setup](setup.md)', '/elsewhere/docs/setup.md': 'not named\n' }, ['/elsewhere/docs/guide.md']);
     shownFile('/elsewhere/docs/guide.md');
-    const setup = await screen.findByTitle('setup.md');
+    const setup = await screen.findByRole('button', { description: 'setup.md' });
     act(() => void fireEvent.click(setup, { metaKey: true }));
     const tab = mainFile('/elsewhere/docs/setup.md')!;
     expect(tab).toMatchObject({ appSessionId: A });
@@ -2650,7 +2650,7 @@ describe('a link in a shown Markdown file, and in a subagent’s transcript (U6b
           <Markdown markdown="See [x](../../outside/secret.md)." live={false} />
         </TranscriptProvider>,
       );
-      const chip = await screen.findByTitle('../../outside/secret.md');
+      const chip = await screen.findByRole('button', { description: '../../outside/secret.md' }); // ticket 815: a path link's path is its tip
       act(() => void fireEvent.click(chip, { metaKey: true }));
       const tab = mainFile('/outside/secret.md')!;
       expect(tab).toMatchObject({ appSessionId: A });
@@ -2676,8 +2676,8 @@ describe('a link in a shown Markdown file, and in a subagent’s transcript (U6b
       </TranscriptProvider>,
     );
     shownFile('/elsewhere/guide.md');
-    await waitFor(() => expect(screen.getAllByTitle(OUT)).toHaveLength(2));
-    const [inSubagent, inFile] = screen.getAllByTitle(OUT);
+    await waitFor(() => expect(screen.getAllByRole('button', { description: OUT })).toHaveLength(2));
+    const [inSubagent, inFile] = screen.getAllByRole('button', { description: OUT });
     const reads = () => main.callsOf('files.read').filter((input) => input.path === OUT);
     const follows = () => main.callsOf('files.follow');
     act(() => void fireEvent.click(inSubagent, { metaKey: true }));
@@ -2751,7 +2751,7 @@ describe('a link followed from a shown Markdown file, or from a subagent’s tra
   const linkIn = async (path = OUT, doc = DOC) => {
     showFile(doc);
     await waitFor(() => expect(shown(doc)?.status).toBe('ready'));
-    return screen.findByTitle(path);
+    return screen.findByRole('button', { description: path });
   };
   const click = (chip: HTMLElement, main = true) => act(() => void fireEvent.click(chip, { metaKey: main }));
   // A subagent's chip, as the child's mount opens it (Transcript.tsx gives `agent`)
@@ -2801,7 +2801,7 @@ describe('a link followed from a shown Markdown file, or from a subagent’s tra
     cleanup();
     // an artifact's view names no source: an absolute link, which a follow could take, follows nothing
     render(<MarkdownView entry={shown('/base/dir/doc.md')!} artifactView />);
-    click(screen.getByTitle(OUT));
+    click(screen.getByRole('button', { description: OUT }));
     expect(mainFile(OUT)).toBeDefined(); // the open was made
     expect(main.callsOf('files.follow')).toHaveLength(1);
   });
@@ -3155,14 +3155,14 @@ describe('a link followed from a shown Markdown file, or from a subagent’s tra
     await waitFor(() => expect(shown(DOC)!.dirty).toBe(true));
     fireEvent.click(screen.getByRole('button', { name: 'Rendered' }));
     await waitFor(() => expect(document.querySelector('[data-markdown-view]')).not.toBeNull());
-    expect(screen.queryByTitle(DRAFT), 'the rendered view draws the saved text: no chip for the typed link').toBeNull();
-    expect(screen.getByTitle(OUT), 'the control: the saved link’s chip').toBeTruthy();
+    expect(screen.queryByRole('button', { description: DRAFT }), 'the rendered view draws the saved text: no chip for the typed link').toBeNull(); // ticket 815: a chip's path is its tip
+    expect(screen.getByRole('button', { description: OUT }), 'the control: the saved link’s chip').toBeTruthy();
     expect(await ipc.invoke('files.follow', { appSessionId: A, path: DRAFT, from: { file: DOC } }), 'a direct follow of the typed link’s path').toEqual({ ok: true, value: { status: 'not-linked' } });
     act(() => follow(A, DRAFT, { file: DOC }));
     await settle();
     expect(linkedCount(A, DRAFT)).toBe(0);
     expect(main.linked(MAIN_A, DRAFT)).toBeNull();
-    click(screen.getByTitle(OUT)); // the control: the saved link follows and is recorded
+    click(screen.getByRole('button', { description: OUT })); // the control: the saved link follows and is recorded
     await waitFor(() => expect(main.linked(MAIN_A, OUT)).toEqual({ why: null }));
     expect(linkedCount(A, OUT)).toBe(1);
   });

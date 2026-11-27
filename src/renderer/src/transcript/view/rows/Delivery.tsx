@@ -1,7 +1,7 @@
 // E1 (M3): a `send_file` call's delivery row (E1 execution document, M3's decisions; X12: the record and the viewer are
 // E2's). Board ticket 848 retired the tool on 2026-11-23: the row draws the records written before, and a later call's
 // refusal. A file glyph, "Delivered hello.txt" (or "Delivered N files") with the agent's caption, then a line per file:
-// its name (the full path as its title) and two quiet buttons, Open externally and Reveal in Finder (on pointing or focus
+// its name (the full path as its tip, ticket 815) and two quiet buttons, Open externally and Reveal in Finder (on pointing or focus
 // within the file's line, and always where nothing points: the word cut, T101), which go through
 // `files.openExternal` and `files.reveal` with the row's session; a refusal shows inline for a moment. Open externally
 // is offered only for a file `files.openExternal` hands to the OS (`opensExternally`, as the viewer's row does).
@@ -15,7 +15,8 @@
 // helper's sentence. The word cut (T101): a greyed button keeps the keyboard (`aria-disabled`, as UnavailableButton
 // draws it), its sentence its tooltip and description, and the copy's sentence is Open externally's tooltip the same way;
 // where nothing points, each tip's sentence stands after its button, the two one unit of the actions so a wrap keeps
-// them together (the touch rule, ticket 830).
+// them together (the touch rule, ticket 830). Ticket 815: the full path is the name's tip, the name taking the keyboard
+// where it is no button, and stands after the name where nothing points.
 import { useEffect, useState } from 'react';
 import type { AppSessionId } from '@shared/graph/ids';
 import { opensExternally } from '@shared/ipc/schema/files';
@@ -71,16 +72,19 @@ function FileLine({ file, appSessionId, actionable }: { file: DeliveryRow['files
   };
   return (
     <li className="transcript-delivery-file" data-path={file.path}>
-      {recorded !== null ? (
-        // E2: a recorded file's name opens its artifact (P3-L M6b)
-        <button type="button" className="transcript-delivery-name transcript-delivery-open" title={file.path} disabled={appSessionId === null} onClick={() => appSessionId && actions.openArtifact(appSessionId, recorded)}>
-          {file.name}
-        </button>
-      ) : (
-        <span className="transcript-delivery-name" title={file.path}>
-          {file.name}
-        </span>
-      )}
+      <Tip content={file.path} description={file.path}>
+        {recorded !== null ? (
+          // E2: a recorded file's name opens its artifact (P3-L M6b)
+          <button type="button" className="transcript-delivery-name transcript-delivery-open" disabled={appSessionId === null} onClick={() => appSessionId && actions.openArtifact(appSessionId, recorded)}>
+            {file.name}
+          </button>
+        ) : (
+          <span className="transcript-delivery-name rounded-sm outline-accent focus-visible:outline-2" tabIndex={0}>
+            {file.name}
+          </span>
+        )}
+      </Tip>
+      <TouchFact className="min-w-0 [overflow-wrap:anywhere]">{file.path}</TouchFact>
       {actionable && (
         <span className="transcript-delivery-actions" data-on-hover="">
           {opensExternally(file.name) && <FileAction words={DELIVERY.openExternally} name={file.name} {...opens} disabled={appSessionId === null} onPress={run(actions.openDelivered)} />}

@@ -11,6 +11,7 @@ import { useTranscriptStore } from '../../../stores/transcript';
 import { journalToEvents } from '../../dev/journal';
 import type { Row } from '../../model/rows';
 import { renderRow, rowOf, spyActions, storeWith } from './test-support';
+import { accessibleDescription } from '../../../test-support/accessible-text'; // ticket 815
 
 afterEach(() => {
   cleanup();
@@ -140,7 +141,7 @@ describe('the ask capsule', () => {
 });
 
 describe('the delivery row', () => {
-  it('p1-maws-send-file: "Delivered hello.txt · the greeting", the file by name with its path as title, and the two buttons calling the actions with the session and path', async () => {
+  it('p1-maws-send-file: "Delivered hello.txt · the greeting", the file by name with its path as its tip, and the two buttons calling the actions with the session and path', async () => {
     const store = await fixtureRows('p1-maws-send-file');
     const delivery = rowOf(store.rows(), 'delivery');
     const actions = spyActions();
@@ -149,7 +150,7 @@ describe('the delivery row', () => {
     expect(container.querySelector('[data-delivery-heading]')!.textContent).toBe('Delivered hello.txt · the greeting');
     const file = container.querySelector<HTMLElement>('[data-path]')!;
     expect(file.dataset.path).toBe(path);
-    expect(file.querySelector('[title]')!.getAttribute('title')).toBe(path);
+    expect(accessibleDescription(file.querySelector('.transcript-delivery-name')!)).toBe(path); // ticket 815: the name's tip
     expect(file.textContent).toContain('hello.txt');
     fireEvent.click(screen.getByRole('button', { name: 'Open externally: hello.txt' }));
     fireEvent.click(screen.getByRole('button', { name: 'Reveal in Finder: hello.txt' }));

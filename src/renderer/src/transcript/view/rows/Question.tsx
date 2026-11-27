@@ -1,7 +1,9 @@
 // An answered question in history (Derivation, *Requests*; W4, the owner's compact receipt): one bordered widget, one
-// line per question reading "header (or the question) → answer", the question in full as the line's title. An answer
+// line per question reading "header (or the question) → answer", the question in full where it is cut. An answer
 // that is no option reads as written; a question left out of the reply reads Not answered. No options, no previews, no
 // controls: a pending question is C7's card in the slot. The row stays in view when its turn folds (isPersistentRow).
+// Ticket 815: a line headed by its header has the question as the header's tip, which the keyboard reaches, and under the
+// line where nothing points; a line headed by the question itself keeps it whole as the system tooltip of its cut words.
 // UX wave U1b (the U1b document, Interfaces §D "A question's receipt"; decisions 8 and 10): per line, the first that
 // applies: the row's own answer; Dismissed, for a question dismissed or declined whole; what the attention store knows of
 // the call's answer under the row's own session (the answer this window gave, a dismissal, a settlement's words), until
@@ -12,6 +14,8 @@ import { useAttention, type Receipt } from '../../../stores/attention';
 import { QUESTION, questionRefused /* E1 */ } from '../../model/copy';
 import type { Row } from '../../model/rows';
 import { useRowSession } from '../context';
+import { Tip } from '../../../ui/tip';
+import { TouchFact } from '../../../ui/touch-fact';
 
 type QuestionRowData = Extract<Row, { kind: 'question' }>;
 
@@ -37,16 +41,25 @@ function answerOf(question: Question, row: QuestionRowData, receipt: Receipt | u
 
 function QuestionLine({ question, answer }: { question: Question; answer: { text: string; given: boolean } }) {
   return (
-    <li className="transcript-question-line" data-question="" title={question.question}>
-      <span className="transcript-question-label" data-question-label="">
-        {question.header || question.question}
-      </span>
+    <li className="transcript-question-line" data-question="" title={question.header ? undefined : question.question}>
+      {question.header ? (
+        <Tip content={question.question} description={question.question}>
+          <span className="transcript-question-label rounded-sm outline-accent focus-visible:outline-2" data-question-label="" tabIndex={0}>
+            {question.header}
+          </span>
+        </Tip>
+      ) : (
+        <span className="transcript-question-label" data-question-label="">
+          {question.question}
+        </span>
+      )}
       <span className="transcript-question-arrow" aria-hidden="true">
         →
       </span>
       <span className="transcript-question-answer" data-answer={answer.given ? '' : 'none'}>
         {answer.text}
       </span>
+      {question.header && <TouchFact block className="col-span-full">{question.question}</TouchFact>}
     </li>
   );
 }

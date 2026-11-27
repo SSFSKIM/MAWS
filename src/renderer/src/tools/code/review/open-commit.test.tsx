@@ -13,6 +13,7 @@ import { builder, uuid } from '../../../transcript/model/test-events';
 import { renderRow, rowOf, spyActions } from '../../../transcript/view/rows/test-support';
 import { commitLineAnchor } from '../anchor/anchor';
 import { openCommit, reviewTranscriptActions } from './open-commit';
+import { accessibleDescription } from '../../../test-support/accessible-text';
 
 afterEach(() => {
   cleanup();
@@ -36,7 +37,7 @@ describe('the chip of a comment on a commit’s diff', () => {
     const { container } = renderRow(userRow(), { storeKey: APP, actions });
     const chip = container.querySelector<HTMLButtonElement>('button[data-chip="anchor"]')!;
     expect(chip.textContent).toBe('berths.ts:14 · 3f9a1c2');
-    expect(chip.title).toBe(`src/berths.ts#L14@${SHA}`);
+    expect(accessibleDescription(chip)).toBe(`src/berths.ts#L14@${SHA}`); // ticket 815: the locator is the chip's tip
     fireEvent.click(chip);
     expect(actions.openCommit).toHaveBeenCalledWith(APP, SHA, 'src/berths.ts');
     expect(actions.openFile).not.toHaveBeenCalled();
