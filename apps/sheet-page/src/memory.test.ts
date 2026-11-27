@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import type { SheetLine } from '@shared/sheet/model';
 import type { QuestionDraft } from '@shared/sheet/words';
 import { EMPTY_MEMORY, reconcile, type SentAct, type SheetMemory } from '../../../src/renderer/src/sheet';
+import { settle, startSend } from '../../../src/renderer/src/sheet/memory';
 import { CLASH, NOTICES, SEASON, sheetOf } from '../../../src/renderer/src/sheet/test-support/questions';
 import { CREDENTIAL_KEY } from './credential';
 import { madeElsewhere, onMemory, readMemory, sendingSince, sweepMemory, updateMemory, writeMemory } from './memory';
@@ -136,6 +137,75 @@ describe('the stored memory (T19): one entry a thing', () => {
     expect(readMemory(S, store).sending?.lines).toEqual(second);
   });
 
+  it('a Send sent again from another window is that window’s: the first window reads it as another’s, and its own late answer settles nothing', async () => {
+    const store = testStorage();
+    const lines = [answer('page-000000000000000000000000001', 'q4', 'a')];
+    const target = new EventTarget();
+    updateMemory(S, (current) => pressed(current, 'wa-1', lines), { storage: store, now: 1_000, target });
+    updateMemory(S, (current) => settle(current, 'wa-1', { ok: false, why: 'failed', message: 'MAWS did not answer.' }), { storage: store, now: 2_000, target });
+    expect(readMemory(S, store).sending).toMatchObject({ attempt: 'wa-1', state: 'failed' });
+
+    vi.resetModules();
+    const windowB = await import('./memory');
+    const there = testStorage(store.entries());
+    const seen = windowB.readMemory(S, there).sending!;
+    expect(seen.attempt.startsWith('elsewhere:')).toBe(true);
+    windowB.updateMemory(S, (current) => startSend(current, seen.lines, 3_000, 'wb-1', { drafts: current.drafts, over: seen.attempt }), { storage: there, now: 3_000, target });
+    expect(windowB.readMemory(S, there).sending).toMatchObject({ attempt: 'wb-1', state: 'sending', lines });
+
+    // back in the first window, the same store: the press is B's, not its own finished one
+    const back = testStorage(there.entries());
+    const heldThere = readMemory(S, back).sending!;
+    expect(heldThere.attempt).not.toBe('wa-1');
+    expect(madeElsewhere(readMemory(S, back))).toBe(true);
+    updateMemory(S, (current) => settle(current, 'wa-1', { ok: true, at: 'queued', results: [] } as never), { storage: back, now: 4_000, target }); // A's late answer
+    expect(readMemory(S, back).sending).toMatchObject({ lines, state: 'sending' });
+    expect(Object.keys(back.entries()).filter((key) => key.startsWith('maws.sheet.send.'))).toHaveLength(1);
+  });
+
+  it('two Sends of two windows end in the other order, each settling its own entry whichever is shown', async () => {
+    const store = testStorage();
+    const target = new EventTarget();
+    const first = [answer('page-000000000000000000000000001', 'q4', 'a')];
+    const second = [answer('page-000000000000000000000000002', 'q5', 'b')];
+    updateMemory(S, (current) => pressed(current, 'wa-1', first), { storage: store, now: 1_000, target });
+    vi.resetModules();
+    const windowB = await import('./memory');
+    // B pressed its own a moment later (it had not yet heard A's): two entries, A's shown as the older
+    windowB.writeMemory(S, EMPTY_MEMORY, pressed(EMPTY_MEMORY, 'wb-1', second), 2_000, store);
+    expect(windowB.readMemory(S, store).sending?.lines).toEqual(first);
+    // B's answer comes first: it settles B's entry though A's is the one shown
+    windowB.updateMemory(S, (current) => settle(current, 'wb-1', { ok: true } as never), { storage: store, now: 3_000, target });
+    expect(windowB.readMemory(S, store).sending?.lines).toEqual(first);
+    expect(Object.keys(store.entries()).filter((key) => key.startsWith('maws.sheet.send.'))).toHaveLength(1);
+    // then A's
+    updateMemory(S, (current) => settle(current, 'wa-1', { ok: true } as never), { storage: store, now: 4_000, target });
+    expect(readMemory(S, store).sending).toBeNull();
+    expect(Object.keys(store.entries()).filter((key) => key.startsWith('maws.sheet.send.'))).toHaveLength(0);
+  });
+
+  it('removes an entry only for a question the tab’s model knows: a stale tab’s reconcile leaves a newer tab’s draft (T19)', () => {
+    const store = testStorage();
+    const target = new EventTarget();
+    const told: number[] = [];
+    const off = onMemory(S, () => void told.push(1), target);
+    const old = sheetOf([NOTICES]); // tab B's model, read before the new question was asked
+    const knows = (id: string) => old.open.some((question) => question.id === id) || Object.hasOwn(old.closed, id);
+    updateMemory(S, (current) => reconcile(current, old), { storage: store, now: 1, target, known: knows }); // B's own state
+    told.length = 0;
+    // tab A drafts the new card; B adopts the entry and reconciles against its older model
+    writeMemory(S, readMemory(S, store), withDraft(readMemory(S, store), 'q9', draft('a new card')), 1, store);
+    updateMemory(S, (current) => reconcile(current, old), { storage: store, now: 2, target, known: knows });
+    expect(readMemory(S, store).drafts.get('q9')).toEqual(draft('a new card'));
+    expect(told).toEqual([]); // nothing written, nobody told: the view does not reconcile again for it
+    // a question the model knows was closed is still let go
+    const closed = { ...old, closed: { ...old.closed, q9: { how: 'withdrawn', at: '2026-11-24T10:00:00.000Z', revision: 1, asker: 'main' } } } as typeof old;
+    const knowsClosed = (id: string) => knows(id) || Object.hasOwn(closed.closed, id);
+    updateMemory(S, (current) => reconcile(current, closed), { storage: store, now: 3, target, known: knowsClosed });
+    expect(readMemory(S, store).drafts.has('q9')).toBe(false);
+    off();
+  });
+
   it('lands an update in its own session’s entries, read from the store as it is when applied', () => {
     const store = testStorage();
     writeMemory(S, EMPTY_MEMORY, withDraft(EMPTY_MEMORY, 'q4', draft('there already')), 1, store);
@@ -144,11 +214,11 @@ describe('the stored memory (T19): one entry a thing', () => {
     const off = onMemory(S, () => void seen.push(S), target);
     const offOther = onMemory(OTHER, () => void seen.push(OTHER), target);
     // as a Send's late answer lands after the sheet that made it unmounted: the update is the session's, not the view's
-    updateMemory(S, (current) => withDraft(current, 'q5', draft('late')), store, 2, target);
+    updateMemory(S, (current) => withDraft(current, 'q5', draft('late')), { storage: store, now: 2, target });
     expect([...readMemory(S, store).drafts.keys()].sort()).toEqual(['q4', 'q5']);
     expect(readMemory(OTHER, store)).toEqual(EMPTY_MEMORY);
     expect(seen).toEqual([S]);
-    updateMemory(S, (current) => current, store, 3, target); // no change: nothing written, nobody told
+    updateMemory(S, (current) => current, { storage: store, now: 3, target }); // no change: nothing written, nobody told
     expect(seen).toEqual([S]);
     off();
     offOther();

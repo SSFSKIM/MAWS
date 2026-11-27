@@ -10,10 +10,14 @@
 //
 // Every change is an update (C3's `onMemory`), applied to the memory read from storage at that moment and never to a
 // copy a tab held; `writeMemory` then writes the difference between the two, and nothing a tab merely still holds. A
-// Send's entry is written at its press, before its request leaves, and nothing but that Send's own end removes it. Its
-// attempt (C3's, one window's) is not stored: this window remembers the attempts it made, and a Send it did not make
-// (another tab's, or its own before a reload) is named by an attempt no window makes, which C3's sheet reads as a call
-// whose answer will not come; the page's own 35-second rule stands in front of that (availability.ts). A draft is
+// Send's entry is written at its press, before its request leaves, and nothing but that Send's own end removes it. It
+// stores its press's identity (C3's attempt, unique to one window and one press) beside its lines' keys: a press again,
+// from this window or another, is a new press over the same keys, and replaces the entry. This window remembers the
+// presses it made; a Send it did not make (another tab's, or its own before a reload) is named by an attempt no window
+// makes, which C3's sheet reads as a call whose answer will not come, and the page's own 35-second rule stands in front
+// of that (availability.ts). An update that changes nothing of the Send the memory shows is tried against this window's
+// other stored Sends, so a press's answer settles its own entry whichever is shown. A tab removes an entry only for a
+// question its model knows (`known`): a reconcile against a model older than another tab's write is not a removal. A draft is
 // compared by identity in C3's memory, so a read gives an act whose stored draft equals its question's stored draft that
 // same object. A refusal deletes nothing here; only the person's Unpair does (credential.ts).
 import type { SheetLine } from '@shared/sheet/model';
@@ -30,8 +34,10 @@ const prefixOf = (kind: Kind, session: string) => `${STORAGE_PREFIX}${kind}.${se
 const keyOf = (kind: Kind, session: string, name: string) => prefixOf(kind, session) + name;
 const randomName = () => [...crypto.getRandomValues(new Uint8Array(8))].map((byte) => byte.toString(16).padStart(2, '0')).join('');
 
-// The attempts this window made, by their Send's first key: a Send is one set of keys from its press to its end
-const attempts = new Map<string, string>();
+// The presses this window made, by their attempt
+const pressedHere = new Set<string>();
+const pressOf = (attempt: string) => (attempt.startsWith(ELSEWHERE) ? attempt.slice(ELSEWHERE.length) : attempt);
+const attemptOf = (press: string) => (pressedHere.has(press) ? press : `${ELSEWHERE}${press}`);
 
 interface Stored {
   key: string;
@@ -40,6 +46,7 @@ interface Stored {
 }
 interface StoredSend {
   key: string;
+  press: string; // the attempt that pressed it
   at: number;
   lines: SheetLine[];
   state: 'sending' | 'failed';
@@ -105,14 +112,15 @@ const sameDraft = (a: QuestionDraft, b: QuestionDraft) =>
 function sendsOf(storage: Storage, session: string): StoredSend[] {
   const sends: StoredSend[] = [];
   for (const { key, value } of entriesOf(storage, 'send', session)) {
-    const { at, lines, state, note } = value;
-    if (typeof at !== 'number' || !Array.isArray(lines) || lines.length === 0 || (state !== 'sending' && state !== 'failed') || (note !== null && typeof note !== 'string')) continue;
+    const { press, at, lines, state, note } = value;
+    if (typeof press !== 'string' || press === '' || typeof at !== 'number' || !Array.isArray(lines) || lines.length === 0 || (state !== 'sending' && state !== 'failed') || (note !== null && typeof note !== 'string')) continue;
     if (!lines.every((line) => typeof (line as SheetLine | null)?.key === 'string')) continue;
-    sends.push({ key, at, lines: lines as SheetLine[], state, note });
+    sends.push({ key, press, at, lines: lines as SheetLine[], state, note });
   }
   return sends.sort((a, b) => a.at - b.at || (a.key < b.key ? -1 : 1));
 }
-const firstKey = (lines: readonly SheetLine[]) => lines[0]!.key;
+
+const sendingOf = (send: StoredSend): NonNullable<SheetMemory['sending']> => ({ attempt: attemptOf(send.press), lines: send.lines, state: send.state, note: send.note });
 
 /** One session's memory, assembled from its entries; EMPTY_MEMORY with none. An entry that does not parse is skipped. */
 export function readMemory(session: string, storage: Storage = localStorage): SheetMemory {
@@ -135,7 +143,7 @@ export function readMemory(session: string, storage: Storage = localStorage): Sh
   }
   acts.sort((a, b) => a.sentAt - b.sentAt || (a.key < b.key ? -1 : 1));
   const held = sendsOf(storage, session)[0];
-  const sending = held === undefined ? null : { attempt: attempts.get(firstKey(held.lines)) ?? `${ELSEWHERE}${firstKey(held.lines)}`, lines: held.lines, state: held.state, note: held.note };
+  const sending = held === undefined ? null : sendingOf(held);
   if (drafts.size + seen.size + marked.size + headers.size + acts.length === 0 && sending === null) return EMPTY_MEMORY;
   return { drafts, seen, marked, headers, acts, sending };
 }
@@ -148,10 +156,21 @@ export function sendingSince(session: string, storage: Storage = localStorage): 
 /** Whether the Send a memory holds is one this window did not make. */
 export const madeElsewhere = (memory: SheetMemory): boolean => memory.sending?.attempt.startsWith(ELSEWHERE) ?? false;
 
-/** Writes and removes exactly the entries that differ between the two memories, and touches no other. */
-export function writeMemory(session: string, before: SheetMemory, after: SheetMemory, now: number = Date.now(), storage: Storage = localStorage): void {
-  const put = (kind: Kind, name: string, value: Record<string, unknown>) => store(storage, keyOf(kind, session, name), JSON.stringify({ v: 1, touchedAt: now, ...value }));
-  const remove = (kind: Kind, name: string) => storage.removeItem(keyOf(kind, session, name));
+/**
+ * Writes and removes exactly the entries that differ between the two memories, and touches no other; a removal of a
+ * question's entry only where `known` says the tab's model holds that question. Whether anything was written.
+ */
+export function writeMemory(session: string, before: SheetMemory, after: SheetMemory, now: number = Date.now(), storage: Storage = localStorage, known: (question: string) => boolean = () => true): boolean {
+  let wrote = false;
+  const put = (kind: Kind, name: string, value: Record<string, unknown>) => {
+    store(storage, keyOf(kind, session, name), JSON.stringify({ v: 1, touchedAt: now, ...value }));
+    wrote = true;
+  };
+  const remove = (kind: Kind, name: string) => {
+    if (kind !== 'act' && !known(name)) return; // a question newer than this tab's model: another tab's to keep
+    storage.removeItem(keyOf(kind, session, name));
+    wrote = true;
+  };
 
   for (const id of new Set([...before.drafts.keys(), ...after.drafts.keys()])) {
     const was = before.drafts.get(id);
@@ -182,20 +201,22 @@ export function writeMemory(session: string, before: SheetMemory, after: SheetMe
     else put('act', key, { act });
   }
 
-  if (before.sending === after.sending) return;
+  if (before.sending === after.sending) return wrote;
   const sends = sendsOf(storage, session);
-  const entryOf = (lines: readonly SheetLine[]) => sends.find((send) => firstKey(send.lines) === firstKey(lines));
-  if (before.sending !== null && (after.sending === null || firstKey(before.sending.lines) !== firstKey(after.sending.lines))) {
-    const ended = entryOf(before.sending.lines);
+  const entryOf = (attempt: string) => sends.find((send) => send.press === pressOf(attempt));
+  if (before.sending !== null && before.sending.attempt !== after.sending?.attempt) {
+    // its end, or a press again over its keys: the press it was is over
+    const ended = entryOf(before.sending.attempt);
     if (ended) storage.removeItem(ended.key);
-    attempts.delete(firstKey(before.sending.lines));
+    pressedHere.delete(pressOf(before.sending.attempt));
+    wrote = true;
   }
-  if (after.sending === null) return;
+  if (after.sending === null) return wrote;
   const { attempt, lines, state, note } = after.sending;
-  const entry = entryOf(lines);
-  const pressed = state === 'sending' && attempt !== before.sending?.attempt; // a press, or a press again
-  if (!attempt.startsWith(ELSEWHERE)) attempts.set(firstKey(lines), attempt);
-  store(storage, entry?.key ?? keyOf('send', session, randomName()), JSON.stringify({ v: 1, touchedAt: now, at: pressed || entry === undefined ? now : entry.at, lines, state, note }));
+  const entry = entryOf(attempt);
+  if (!attempt.startsWith(ELSEWHERE)) pressedHere.add(attempt);
+  store(storage, entry?.key ?? keyOf('send', session, randomName()), JSON.stringify({ v: 1, touchedAt: now, press: pressOf(attempt), at: entry?.at ?? now, lines, state, note }));
+  return true;
 }
 
 // A write that makes room when the store is full: the entries of the memory touched longest ago go first, never a
@@ -239,12 +260,27 @@ const CHANGED = 'maws-sheet-memory'; // this tab's own writes, which the storage
  * One update of a session's memory: applied to the memory as it is in storage now, and its difference written. The
  * session is the one the update was made for, wherever the view that made it is by then.
  */
-export function updateMemory(session: string, update: (current: SheetMemory) => SheetMemory, storage: Storage = localStorage, now: number = Date.now(), target: EventTarget = globalThis): void {
-  const before = readMemory(session, storage);
-  const after = update(before);
+export function updateMemory(
+  session: string,
+  update: (current: SheetMemory) => SheetMemory,
+  { storage = localStorage, now = Date.now(), target = globalThis, known }: { storage?: Storage; now?: number; target?: EventTarget; known?: (question: string) => boolean } = {},
+): void {
+  let before = readMemory(session, storage);
+  let after = update(before);
+  if (after === before) {
+    // an update for one of this window's Sends that is not the one shown (a press's late answer): tried against each
+    for (const send of sendsOf(storage, session)) {
+      if (!pressedHere.has(send.press) || before.sending?.attempt === send.press) continue;
+      const shown = { ...before, sending: sendingOf(send) };
+      const changed = update(shown);
+      if (changed === shown) continue;
+      before = shown;
+      after = changed;
+      break;
+    }
+  }
   if (after === before) return;
-  writeMemory(session, before, after, now, storage);
-  target.dispatchEvent(Object.assign(new Event(CHANGED), { session }));
+  if (writeMemory(session, before, after, now, storage, known)) target.dispatchEvent(Object.assign(new Event(CHANGED), { session }));
 }
 
 /** A session's memory changed: in this tab, or in another (the storage event). */

@@ -9,7 +9,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type { DoorState } from '@shared/ipc/schema/sheet';
 import type { SheetModel } from '@shared/sheet/model';
-import { SessionSheet, type SheetHost } from '../../../../src/renderer/src/sheet';
+import { SessionSheet, type SheetHost, type SheetMemory } from '../../../../src/renderer/src/sheet';
 import { sendUnavailable } from '../availability';
 import { PAGE, VIEWS } from '../copy';
 import type { Connection } from '../live';
@@ -17,7 +17,7 @@ import { SheetOutline } from '../outline/SheetOutline';
 import type { Outline } from '../outline/state';
 import { pathOf, type Place } from '../route';
 import type { StoreState } from '../store';
-import { useSessionMemory } from './useMemory';
+import { questionsOf, useSessionMemory } from './useMemory';
 
 export interface SheetViewProps {
   shown: NonNullable<StoreState['shown']>;
@@ -54,6 +54,8 @@ export function SheetView({ shown, navigate, ...rest }: SheetViewProps) {
 
 function Sheet({ model, fresh, door, connection, host, outline }: Omit<SheetViewProps, 'shown' | 'navigate'> & { model: SheetModel; fresh: boolean }) {
   const { memory, elsewhereSince, update } = useSessionMemory(model.session);
+  // every change is made against this model: a removal only of what it knows (T19)
+  const onMemory = (change: (current: SheetMemory) => SheetMemory) => update(change, questionsOf(model));
   const [now, setNow] = useState(() => Date.now()); // moved on by the timer below; an older `now` only holds Send back until it fires
   const { text, until } = sendUnavailable({ connection, fresh, door, elsewhereSince, now });
   useEffect(() => {
@@ -81,7 +83,7 @@ function Sheet({ model, fresh, door, connection, host, outline }: Omit<SheetView
     <div data-sheet-page="" className="relative flex min-h-0 flex-1">
       {outline.wide && outline.open && panel(false)}
       <div ref={holder} className="flex min-h-0 min-w-0 flex-1 flex-col">
-        <SessionSheet model={model} memory={memory} onMemory={update} host={host} focus={focus} unavailable={text} />
+        <SessionSheet model={model} memory={memory} onMemory={onMemory} host={host} focus={focus} unavailable={text} />
       </div>
       {drawer && (
         <>

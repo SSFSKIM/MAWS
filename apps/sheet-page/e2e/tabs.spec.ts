@@ -1,10 +1,11 @@
 // Two tabs of one browser share one memory (M4; T19): a draft typed in one is in a second opened on the same address;
-// two tabs editing different cards do not undo each other, however late each hears of the other; a Send's stored entry
-// keeps its keys through the other tab's writes, and a reload sends those same keys again; unpairing in one shows the
-// pairing screen in the other.
-import type { BrowserContext, Page } from '@playwright/test';
-import { expect, test } from './fixtures';
-import { inboxOf, question, questionRecord } from './records';
+// two tabs editing different cards do not undo each other, however late each hears of the other; a tab whose model is
+// older than another tab's draft leaves that draft alone; a Send's stored entry keeps its keys through the other tab's
+// writes, and a reload sends those same keys again; unpairing in one shows the pairing screen in the other, and an
+// upload that answers after the Unpair writes nothing.
+import type { BrowserContext, Page, Route } from '@playwright/test';
+import { expect, storedKeys, test } from './fixtures';
+import { inboxOf, question, questionRecord, stateOf, writeState } from './records';
 import { startMawsd, until, type Mawsd } from './rig';
 
 const S = '5eed0000-0000-4000-8000-0000000000e1';
@@ -36,6 +37,7 @@ async function holdableStorage(context: BrowserContext) {
   });
 }
 const hold = (page: Page, on: boolean) => page.evaluate((value) => (globalThis as { __holdStorage?: (on: boolean) => void }).__holdStorage!(value), on);
+const draftOf = (page: Page, id: string) => page.evaluate((key) => localStorage.getItem(key), `maws.sheet.draft.${S}.${id}`);
 const sendEntries = (page: Page) => page.evaluate((session) => Object.entries(localStorage).filter(([key]) => key.startsWith(`maws.sheet.send.${session}.`)), S);
 
 async function twoTabs(context: BrowserContext, page: Page, mawsd: Mawsd): Promise<[Page, Page]> {
@@ -77,22 +79,51 @@ test('two tabs typing on different cards, each hearing of the other late, both k
   await expect(field(first, 'q2')).toHaveValue('typed in the second');
 });
 
+test('a tab whose model is older than another tab’s draft leaves that draft alone, and shows it once its read comes', async ({ page, context, mawsd }) => {
+  const [first, second] = await twoTabs(context, page, mawsd);
+  const held: Route[] = [];
+  let holding = true;
+  await second.route(`**/api/sheets/${S}`, (route) => (holding ? void held.push(route) : route.continue())); // the second tab's model stays from before
+  const state = stateOf(mawsd.home, S);
+  writeState(mawsd.home, S, { ...state, questions: [...state.questions, question(4)] }); // a question asked meanwhile
+  await expect(card(first, 'q4')).toBeVisible({ timeout: 20_000 });
+  await until(() => held.length > 0, 20_000, 'the second tab’s read of the change');
+  await field(first, 'q4').fill('on the new card');
+  await until(async () => (await draftOf(first, 'q4')) !== null, 10_000, 'the draft’s entry');
+  await second.waitForTimeout(1_000); // the second tab has heard the entry and reconciled it against its older model
+  await expect(card(second, 'q4')).toHaveCount(0);
+  expect(JSON.parse((await draftOf(second, 'q4'))!)).toMatchObject({ draft: { text: 'on the new card' } });
+  holding = false;
+  for (const route of held.splice(0)) await route.continue();
+  await expect(field(second, 'q4')).toHaveValue('on the new card', { timeout: 20_000 });
+  await expect(field(first, 'q4')).toHaveValue('on the new card');
+});
+
 test('a Send held at the barrier keeps its stored keys through the other tab’s writes, and a reload sends those same keys again', async ({ browser }) => {
   const mawsd = await startMawsd({ barrier: true });
   const context = await browser.newContext();
   try {
     await holdableStorage(context);
     const [first, second] = await twoTabs(context, await context.newPage(), mawsd);
-    await hold(second, true); // the second tab's picture stays from before the press
+    // each tab hears the other late: the second types and saves its draft before the press, which the first has not
+    // heard of when it presses, and the second adopts the Send only after it. (A draft typed after the press is no
+    // write at all: C3 applies a field's change to the memory as stored, and refuses it while a Send is held.)
+    await hold(first, true);
+    await hold(second, true);
     await field(first, 'q1').fill('sent from the first');
+    await field(second, 'q3').fill('typed in the second');
+    await until(async () => (await draftOf(second, 'q3')) !== null, 10_000, 'the second tab’s draft, saved');
     await foot(first).getByRole('button', { name: 'Send 1 answer' }).click();
     await until(async () => (await sendEntries(first)).length === 1, 10_000, 'the Send’s entry, at its press');
     const [[key, entry]] = await sendEntries(first);
     const keys = (JSON.parse(entry) as { lines: { key: string }[] }).lines.map((line) => line.key);
-
-    await field(second, 'q3').fill('typed in the second'); // a write against a picture from before the press
+    expect(keys).toHaveLength(1);
+    await hold(first, false);
+    await hold(second, false);
     await second.waitForTimeout(500);
     expect(await sendEntries(first)).toEqual([[key, entry]]); // untouched: only its own end removes it
+    expect(JSON.parse((await draftOf(first, 'q3'))!)).toMatchObject({ draft: { text: 'typed in the second' } }); // and the draft stands
+    await expect(field(second, 'q3')).toHaveValue('typed in the second');
 
     await first.clock.install();
     await first.reload();
@@ -118,4 +149,30 @@ test('unpairing in one tab shows the pairing screen in the other', async ({ page
   await expect(first.getByRole('heading', { name: 'Pair this browser' })).toBeVisible();
   await expect(second.getByRole('heading', { name: 'Pair this browser' })).toBeVisible();
   await expect(second.getByTestId('unpaired')).toHaveText('This browser is not paired.');
+});
+
+test('an image whose upload answers after the browser was unpaired is written nowhere: Unpair forgot everything', async ({ page, mawsd }) => {
+  questionRecord(mawsd.home, S, [question(1)]);
+  await page.goto(`${mawsd.url}/s/${S}`);
+  await mawsd.pair(page);
+  await field(page, 'q1').fill('with a picture');
+  const answers: Array<() => Promise<void>> = [];
+  await page.route('**/uploads', async (route) => {
+    const response = await route.fetch(); // saved by mawsd while the browser was still paired
+    answers.push(() => route.fulfill({ response }));
+  });
+  await field(page, 'q1').evaluate((element) => {
+    const bytes = Uint8Array.from(atob('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=='), (char) => char.charCodeAt(0));
+    const data = new DataTransfer();
+    data.items.add(new File([bytes], 'pasted.png', { type: 'image/png' }));
+    element.dispatchEvent(new ClipboardEvent('paste', { clipboardData: data, bubbles: true, cancelable: true }));
+  });
+  await until(() => answers.length === 1, 10_000, 'the upload, saved and its answer held');
+  await page.getByRole('banner').getByRole('button', { name: 'Menu' }).click();
+  await page.getByRole('menuitem', { name: 'Unpair this browser' }).click();
+  await expect(page.getByRole('heading', { name: 'Pair this browser' })).toBeVisible();
+  expect(await storedKeys(page)).toEqual([]);
+  await answers[0]!();
+  await page.waitForTimeout(1_000);
+  expect(await storedKeys(page)).toEqual([]);
 });
