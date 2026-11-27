@@ -791,6 +791,30 @@ describe('the Changed group (U6b-3a)', () => {
     expect(['/r', '/wt'].map((path) => main.listed(path))).toEqual(before);
   });
 
+  // Board ticket 815 (once the row's title): where a narrow list cuts a row's folder, or leaves it out, the whole path is
+  // the row's description, beside a rename's words; a row drawn whole has none
+  it('describes a Changed row by its whole path where its folder is cut or left out', async () => {
+    const observer = installResizeObserver();
+    measureWith((_font, text) => text.length * 7);
+    const long = `n/${'x'.repeat(30)}.ts`;
+    changedMain(TREE, { '/r': statusOf([entry('deep/folder-000/sub/file-000.ts', '.M'), entry('a/b.ts', '.M'), entry(long, '.M'), entry('deep/harbor-folder/sub/port.ts', 'R.', { oldPath: 'deep/old.ts' })]) });
+    connect();
+    render(<TestHost />);
+    act(() => void panelHost.addTool('files', { appSessionId: A }));
+    await waitFor(() => expect(heading()?.getAttribute('data-count')).toBe('4'));
+    observer.resize(scroller().firstElementChild!, { width: 220, height: 600 });
+    await waitFor(() => expect(changedRow('/r/deep/folder-000/sub/file-000.ts')!.textContent).toContain('…sub/'));
+    const named = (path: string) => changedRow(path)!.textContent ?? '';
+    expect(named('/r/deep/folder-000/sub/file-000.ts')).not.toContain('deep/');
+    expect(accessibleDescription(changedRow('/r/deep/folder-000/sub/file-000.ts')!)).toBe('deep/folder-000/sub/file-000.ts');
+    expect(named(`/r/${long}`)).not.toContain('n/');
+    expect(accessibleDescription(changedRow(`/r/${long}`)!)).toBe(long);
+    expect(named('/r/deep/harbor-folder/sub/port.ts')).not.toContain('harbor-folder');
+    expect(accessibleDescription(changedRow('/r/deep/harbor-folder/sub/port.ts')!)).toBe(`deep/harbor-folder/sub/port.ts · ${REVIEW_COPY.renamedFrom('deep/old.ts')}`);
+    expect(named('/r/a/b.ts')).toContain('a/');
+    expect(accessibleDescription(changedRow('/r/a/b.ts')!)).toBe('');
+  });
+
   // Decision Log 8: each distinct string measured once per font, and only for the drawn rows
   it('measures each distinct string once per font, and only for the drawn rows, over a list scrolled through twice', async () => {
     const observer = installResizeObserver();
