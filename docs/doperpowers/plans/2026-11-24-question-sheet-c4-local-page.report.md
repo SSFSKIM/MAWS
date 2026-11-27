@@ -43,10 +43,15 @@ The controller's own commits touch the execution document and this report only. 
   - an upload could write after Unpair;
   - rule 4 stopped at the DOM.
 
+## The landing
+
+Master `d697dfaa0` was merged in cleanly at `9b8f10c21`. Every gate the landing names is green there: static, unit, probes, `e2e:sheet-page`, `e2e:transcript`, `e2e:desk-web`, `e2e:supervisor-daemon`, `e2e:daemon-unit` and `e2e:lane-a` (run 46074066415). Pull request #886 is open (Part of #869).
+
 ## Confusions
 
 None of substance. One thing confused the executors briefly: the document's `CREDENTIAL_KEY` line is shown as a redaction placeholder in tool output, while the file itself holds the intended key.
 
 ## Residue
 
-Each item below is on the C4a pull request.
+- **The coverage advisor follows imports, not build entries.** `scripts/ci-gate-e2e-specs.mjs` advises `e2e:sheet-page` only for a change to a module the page's suite imports at run time. A change to `handler.ts`, `pairing.ts` or `checks.ts` is not advised, because the suite runs the built `mawsd`. The Electron groups have the same limit.
+- **Flaky tests outside this branch.** Each reddened a gate once and passed on rerun: `TestExitIsTerminalForOutput` in the Go session host (run 45411518792, rerun 45414473116); the engine-host prestart cleanup and org-recovery timing unit tests (run 46044016943, rerun 46048377325).
