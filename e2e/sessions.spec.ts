@@ -1340,7 +1340,7 @@ test.describe('sessions', () => {
       const content = notes.locator('.cm-content');
       await expect(content).toHaveText(NOTES, { timeout: 20_000 });
       await asItWas();
-      await expect(sideTab(side, 'notes.txt'), 'the file’s tab has its full path as its tooltip').toHaveAttribute('title', file('notes.txt'));
+      await expect(sideTab(side, 'notes.txt'), 'the file’s tab has its full path as its tooltip and description').toHaveAccessibleDescription(file('notes.txt'));
       await expect(notes.locator('[data-read-only]'), 'no label on a file that can be saved').toHaveCount(0);
       const lead = notes.locator('[data-path-lead]');
       await expect(lead).toHaveAttribute('data-outside', 'writable');
@@ -1917,7 +1917,7 @@ test.describe('sessions', () => {
         await appMenu(maws, 'file.open');
         await expect(content).toHaveText(TODO.trimEnd(), { timeout: 20_000 });
         expect(await tabIdsOf(page), 'beside the chat: the main strip as it was').toEqual(strip);
-        await expect(sideTab(sideColumn(page), 'todo.txt')).toHaveAttribute('title', chosen);
+        await expect(sideTab(sideColumn(page), 'todo.txt')).toHaveAccessibleDescription(chosen);
         await expect(sideColumn(page).locator('[data-side-strip] [data-tab-id][data-preview="true"]'), 'a kept tab, not the preview').toHaveCount(0);
         await expect(todo.locator('[data-path-lead]')).toHaveAttribute('title', `Save writes to ${chosen}`);
         await expect(todo).toHaveAttribute('data-editable', 'true');

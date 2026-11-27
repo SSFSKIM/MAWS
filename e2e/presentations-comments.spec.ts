@@ -186,7 +186,7 @@ test('comments on a deck’s elements: the card, the pin through a move, a resiz
   await thread.getByRole('textbox', { name: 'Reply' }).press('Enter');
   await expect(thread.locator('.deck-thread-body')).toHaveText([POSTED]);
   await expect(count).toHaveText('1'); // the toolbar's count
-  await expect(panel.getByTitle(/^\d+ open comments?$/), 'no second count in the header').toHaveCount(0);
+  await expect(panel.getByText(/^\d+ open comments?$/), 'no second count in the header').toHaveCount(0);
 
   // the pin at the element's top-right
   await expect.poll(() => pinOffset(deck, 'body'), { message: 'the pin on the element’s corner' }).toBeLessThan(4);

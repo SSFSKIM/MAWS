@@ -8,6 +8,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { TEST_MACHINE } from '../../../../test/support/machine';
 import { useLayout } from '../stores/layout';
 import { useViewer, type ViewerEntry } from '../tools/code/viewer/viewer-store';
+import { accessibleDescription } from '../test-support/accessible-text';
 import { A, probeTool, ref, resetPanelStores, type ProbeState } from '../test-support/panel';
 import type { PanelTool } from './tool';
 import { installResizeObserver } from '../test-support/resize';
@@ -188,7 +189,10 @@ describe('a strip too narrow for its tabs (decision 5)', () => {
     narrowTo(600); // all but one title fit
     expect(shapes()).toEqual([whole, whole, whole, whole, whole, icon]);
     const last = within(screen.getByRole('tablist')).getAllByRole('tab')[5];
-    expect([last.getAttribute('aria-label'), last.getAttribute('title')]).toEqual(['Tee', 'Tee']); // its tooltip and name
+    expect([last.getAttribute('aria-label'), last.hasAttribute('title')]).toEqual(['Tee', false]); // its name, and no system tooltip
+    act(() => last.focus());
+    expect(screen.getByRole('tooltip').textContent, 'its name its tooltip, which focus opens').toBe('Tee');
+    act(() => last.blur());
     narrowTo(250); // the tab in view whole beside five icons
     expect(shapes()).toEqual([icon, whole, icon, icon, icon, icon]);
     narrowTo(230); // five icons and 72 px still fit: the tab in view is cut to what is left
@@ -378,12 +382,15 @@ describe('a file’s tooltip (U6e)', () => {
     render(<Strip />);
     const button = (id: string) => within(document.querySelector<HTMLElement>(`[data-tab-id="${id}"]`)!).getByRole('tab');
     expect(document.querySelector<HTMLElement>(`[data-tab-id="${app.id}"]`)!.dataset.tabShape).toBe('whole');
-    expect(button(app.id).getAttribute('title')).toBe('/elsewhere/notes/plans/todo.txt');
-    expect(button(ids[1]).hasAttribute('title')).toBe(false);
+    expect(accessibleDescription(button(app.id)), 'the full path its description').toBe('/elsewhere/notes/plans/todo.txt');
+    expect(button(app.id).hasAttribute('title')).toBe(false);
+    expect(accessibleDescription(button(ids[1]))).toBe('');
     room = 590;
     act(() => resize(screen.getByRole('tablist'), { width: room, height: 28 }));
     expect(document.querySelector<HTMLElement>(`[data-tab-id="${app.id}"]`)!.dataset.tabShape).toBe('icon');
-    expect(button(app.id).getAttribute('title')).toBe('/elsewhere/notes/plans/todo.txt');
+    expect(accessibleDescription(button(app.id))).toBe('/elsewhere/notes/plans/todo.txt');
     expect(button(app.id).getAttribute('aria-label')).toBe('todo.txt');
+    act(() => button(app.id).focus());
+    expect(screen.getByRole('tooltip').textContent, 'the full path its tooltip, which focus opens').toBe('/elsewhere/notes/plans/todo.txt');
   });
 });

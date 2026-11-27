@@ -1143,7 +1143,7 @@ test('UX wave U5a: a document’s count ignores a card opened and closed unsent 
     await text.click();
     await page.keyboard.type('The launch moves to Friday.');
     await expect(text.locator('p')).toHaveText(['The launch moves to Friday.']);
-    const count = panel.getByTitle(/^\d+ open comments?$/);
+    const count = panel.getByText(/^\d+ open comments?$/); // the header's count, its meaning its words and its tooltip
     const card = page.locator('[data-comment-card]');
     const addComment = record.getByRole('toolbar', { name: 'Formatting' }).getByRole('button', { name: 'Add comment', exact: true });
     await expect(count, 'before any comment').toHaveCount(0);
@@ -1170,7 +1170,7 @@ test('UX wave U5a: a document’s count ignores a card opened and closed unsent 
     await card.getByRole('button', { name: 'Send', exact: true }).click();
     await expect(card).toHaveCount(0);
     await expect(record.locator('[data-sent-note]'), 'the card’s place says where it went').toHaveText(`Sent to ${listed.trim() === '' ? 'New chat' : listed}`);
-    await expect(panel.getByTitle('1 open comment', { exact: true }).first()).toBeVisible();
+    await expect(panel.getByText('1 open comment', { exact: true }).first()).toBeVisible();
     const users = () =>
       readdirSync(join(maws.userData, 'engine-host', 'journal', parent))
         .filter((name) => name.endsWith('.jsonl'))

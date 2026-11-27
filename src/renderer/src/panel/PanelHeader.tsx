@@ -24,7 +24,7 @@ import { MARKUP_COPY, startMarkup, useMarkup } from '../markup/session'; // P3-G
 import { useMarkupSurface } from '../markup/surface'; // P3-G
 import { GLYPH_BUTTON, NamedGlyph } from '../ui/glyph'; // the word cut (M5's G558): an icon action's word, tipped on focus
 import { RefusedMenuItem } from '../ui/refused-menu-item';
-import { UNAVAILABLE_LOOK, UnavailableButton } from '../ui/tip';
+import { Tip, UNAVAILABLE_LOOK, UnavailableButton } from '../ui/tip';
 import { useEditorHeaderFocus, useEditorHostRegistration, type EditorHostAction, type EditorHostExport, type EditorHostRegistration, type EditorHostScope } from './editor-host';
 import { COPY } from './copy';
 import { SavedStatus } from './SavedStatus';
@@ -232,7 +232,9 @@ export function RegionControls({ hide }: { hide: () => void }) {
 const GHOST =
   'inline-flex h-7 shrink-0 items-center gap-1 rounded-sm px-1.5 text-ui-sm text-fg-muted outline-accent hover:bg-bg-hover hover:text-fg focus-visible:outline-2 disabled:text-fg-faint disabled:hover:bg-transparent aria-pressed:bg-bg-active aria-pressed:text-fg';
 
-// The open-comment count: the comments action's button when the editor registers one, else a label.
+// The open-comment count: the comments action's button when the editor registers one, else a label. Either way its
+// meaning ("3 open comments") is its name and its tooltip, a Tip the keyboard reaches (ticket 815); the label takes Tab
+// for it, as a bare count does (ui/count.tsx).
 function CommentCount({ count, action }: { count: number; action: EditorHostAction | undefined }) {
   const label = HEADER_COPY.comments(count);
   const face = (
@@ -243,18 +245,22 @@ function CommentCount({ count, action }: { count: number; action: EditorHostActi
   );
   if (!action) {
     return (
-      <span title={label} className="inline-flex h-7 shrink-0 items-center gap-1 px-1.5 text-ui-sm text-fg-muted">
-        <span className="sr-only">{label}</span>
-        <span aria-hidden className="inline-flex items-center gap-1">
-          {face}
+      <Tip content={label}>
+        <span tabIndex={0} className="inline-flex h-7 shrink-0 items-center gap-1 rounded-sm px-1.5 text-ui-sm text-fg-muted outline-accent focus-visible:outline-2">
+          <span className="sr-only">{label}</span>
+          <span aria-hidden className="inline-flex items-center gap-1">
+            {face}
+          </span>
         </span>
-      </span>
+      </Tip>
     );
   }
   return (
-    <button type="button" aria-label={label} title={label} aria-pressed={action.pressed} disabled={action.disabled} onClick={() => action.onSelect()} className={GHOST}>
-      {face}
-    </button>
+    <Tip content={label}>
+      <button type="button" aria-label={label} aria-pressed={action.pressed} disabled={action.disabled} onClick={() => action.onSelect()} className={GHOST}>
+        {face}
+      </button>
+    </Tip>
   );
 }
 
