@@ -1519,7 +1519,7 @@ test("a read that fails before a PDF's first byte shows the sentence and Open ag
       const [id] = s.ids;
       await show(s, id);
       const before = await created(s.page, s.maws.userData, id); // B8: nothing created by the frame
-      const chip = s.page.locator(`[data-region="main"] [data-chip="path"][title="${path}"]`);
+      const chip = s.page.locator(`[data-region="main"] [data-chip="path"][data-path="${path}"]`);
       await expect(chip, 'the transcript’s link').toBeVisible({ timeout: 20_000 });
       await chip.click();
       const viewer = sideColumn(s.page).locator(`[data-file-viewer][data-path="${path}"]`);
@@ -1988,8 +1988,8 @@ test('a pass on an HTML page: Escape keeps the text in the card, a second pick l
       await expect(bubble).toHaveCount(1, { timeout: 20_000 });
       const chips = bubble.locator('[data-chip="anchor"][data-anchor-kind="artifact-element"]');
       await expect(chips).toHaveText(read!.comments.map(({ anchor }) => anchor.label));
-      await expect(chips.nth(0)).toHaveAttribute('title', '#hero');
-      await expect(chips.nth(1)).toHaveAttribute('title', secondLocator);
+      await expect(chips.nth(0)).toHaveAccessibleDescription('#hero'); // board ticket 815: the locator is the chip's tip
+      await expect(chips.nth(1)).toHaveAccessibleDescription(secondLocator);
       const drawn = await bubble.innerText();
       const order = [read!.comments[0]!.anchor.label, 'Make the heading larger.', read!.comments[1]!.anchor.label, 'Say which quarter this is.'].map((part) => drawn.indexOf(part));
       expect(order.every((index) => index >= 0), `every part drawn: ${JSON.stringify({ order, drawn })}`).toBe(true);

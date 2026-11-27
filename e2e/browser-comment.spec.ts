@@ -994,8 +994,8 @@ test('2d. a pass on a page (A4): Escape keeps the text in the card; a second pic
         await expect(bubble).toHaveCount(1);
         const chips = bubble.locator('[data-chip="anchor"][data-anchor-kind="browser-element"]');
         await expect(chips).toHaveText([INCREMENT_LABEL, second.label]);
-        await expect(chips.nth(0)).toHaveAttribute('title', '#increment');
-        await expect(chips.nth(1)).toHaveAttribute('title', second.locator);
+        await expect(chips.nth(0)).toHaveAccessibleDescription('#increment'); // board ticket 815: the locator is the chip's tip
+        await expect(chips.nth(1)).toHaveAccessibleDescription(second.locator);
         await expect(bubble.locator('img.transcript-attachment-image'), 'each comment’s picture').toHaveCount(2);
         const drawn = await bubble.innerText();
         const order = [INCREMENT_LABEL, PASS_FIRST, second.label, PASS_SECOND].map((part) => drawn.indexOf(part));
@@ -1444,7 +1444,7 @@ test('9. disk-form parity: a browser comment read from the engine’s JSONL draw
     await expect(bubble).toBeVisible({ timeout: 20_000 });
     const chip = bubble.locator('[data-chip="anchor"][data-anchor-kind="browser-element"]');
     await expect(chip).toHaveText(INCREMENT_LABEL);
-    await expect(chip).toHaveAttribute('title', '#increment');
+    await expect(chip).toHaveAccessibleDescription('#increment'); // board ticket 815: the locator is the chip's tip
     await expect(bubble.locator('img.transcript-attachment-image')).toBeVisible();
     await expect(main.getByText('Comment on "button', { exact: false }), 'the lead line is not drawn').toHaveCount(0);
 

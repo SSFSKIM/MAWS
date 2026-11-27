@@ -1318,7 +1318,7 @@ test.describe('sessions', () => {
 
       await (await sidebarRow(page, { appSessionId: s! })).click();
       const main = page.locator('[data-region="main"]');
-      const chip = (name: string) => main.locator(`[data-chip="path"][title="${file(name)}"]`);
+      const chip = (name: string) => main.locator(`[data-chip="path"][data-path="${file(name)}"]`);
       await expect(chip('notes.txt')).toBeVisible({ timeout: 20_000 });
       await expect(chip('unnamed.txt'), 'a path in prose is no chip').toHaveCount(0);
       const sessionTabId = await activeMainTab(page).getAttribute('data-tab-id');
@@ -1431,7 +1431,7 @@ test.describe('sessions', () => {
 
       // L4 (R2): a relative link opens the file of that name in the session's working folder
       const guidePath = join(repo.root, 'docs', 'guide.md');
-      const guide = main.locator('[data-chip="path"][title="docs/guide.md"]');
+      const guide = main.locator('[data-chip="path"][data-path="docs/guide.md"]');
       await expect(guide, 'the relative link drawn as a path link').toBeVisible();
       await guide.click();
       await expect(side.locator(`[data-file-viewer][data-path="${guidePath}"]`), 'opened at the working folder’s path').toBeVisible({ timeout: 20_000 });
@@ -1440,7 +1440,7 @@ test.describe('sessions', () => {
       // L5, L7: a relative link to an outside file the transcript never writes whole opens its tab at the path it names,
       // whose notice says why in the window, in three sentences, with the path and Copy path (the service's words no longer
       // under it since the word cut, N11); no line begins with "Refused"; nothing of the file is read
-      const toSecretChip = main.locator(`[data-chip="path"][title="${toSecret}"]`);
+      const toSecretChip = main.locator(`[data-chip="path"][data-path="${toSecret}"]`);
       await expect(toSecretChip).toBeVisible();
       await toSecretChip.click();
       const secret = side.locator(`[data-file-viewer][data-path="${file('secret.md')}"]`);
@@ -1526,7 +1526,7 @@ test.describe('sessions', () => {
       type Links = { version: number; sessions: Record<string, { real: string; from: { file: string } | { agent: string; engineSessionId?: string }; why?: string }[]> };
       const linksHeld = () => (existsSync(linksFile) ? (JSON.parse(readFileSync(linksFile, 'utf8')) as Links) : null);
       const viewerOf = (path: string, scope: Locator = sideColumn(page)) => scope.locator(`[data-file-viewer][data-path="${path}"]`);
-      const linkIn = (viewer: Locator, title: string) => viewer.locator(`[data-markdown-view] [data-chip="path"][title="${title}"]`);
+      const linkIn = (viewer: Locator, title: string) => viewer.locator(`[data-markdown-view] [data-chip="path"][data-path="${title}"]`);
 
       await test.step('K1: the guide opened from Files’ tree; its link opens the outside file beside the chat, editable, and Save writes it', async () => {
         await openSurface(page, 'Files');
@@ -1590,8 +1590,8 @@ test.describe('sessions', () => {
         await m2.app.evaluate((_electron, p) => void (process.env.MAWS_E2E_PICK_PATHS = p), file('index.md'));
         await appMenu(m2, 'file.open');
         const index = side2().locator(`[data-file-viewer][data-path="${file('index.md')}"]`);
-        await expect(index.locator('[data-markdown-view] [data-chip="path"][title="next.md"]'), 'the chosen index drawn as Markdown').toBeVisible({ timeout: 20_000 });
-        await index.locator('[data-markdown-view] [data-chip="path"][title="next.md"]').click();
+        await expect(index.locator('[data-markdown-view] [data-chip="path"][data-path="next.md"]'), 'the chosen index drawn as Markdown').toBeVisible({ timeout: 20_000 });
+        await index.locator('[data-markdown-view] [data-chip="path"][data-path="next.md"]').click();
         const next = side2().locator(`[data-file-viewer][data-path="${file('next.md')}"]`);
         await expect(next.locator('[data-markdown-view]'), 'the file beside the index, read').toContainText(NEXT, { timeout: 20_000 });
         await expect(next.locator('[data-read-only]'), 'with no "Read-only" label').toHaveCount(0);
@@ -1661,7 +1661,7 @@ test.describe('sessions', () => {
       await expect(agentRow, 'the agent’s row in the session’s transcript').toBeVisible({ timeout: 15_000 });
       await agentRow.locator('button.transcript-subagent-line').click();
       const drillIn = surface(page, 'subagents').locator('[data-view="agent"]');
-      const link = drillIn.locator(`[data-chip="path"][title="${byAgent}"]`);
+      const link = drillIn.locator(`[data-chip="path"][data-path="${byAgent}"]`);
       await expect(link, 'the drill-in draws the child’s answer with its link').toBeVisible({ timeout: 20_000 });
 
       // the click: the file opens beside the chat, editable, and saves

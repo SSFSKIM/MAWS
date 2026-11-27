@@ -94,6 +94,7 @@ interface InlineLinkProps {
   'data-chip': 'artifact' | 'path';
   'data-artifact-id'?: string;
   'data-artifact-at'?: string;
+  'data-path'?: string; // a path link's path, which its tip shows, for the tests and surfaces that find a link by it
   tip: string;
   open: (metaKey: boolean) => void;
   children?: ReactNode;
@@ -135,7 +136,7 @@ export function TranscriptLink({ href, children }: ComponentProps<'a'> & ExtraPr
   if (href.startsWith('maws-path:')) {
     const { path, line } = pathOf(href.slice('maws-path:'.length));
     return (
-      <InlineLink data-chip="path" tip={path} open={(metaKey) => actions.openFile(path, line, session, { main: metaKey })}>
+      <InlineLink data-chip="path" data-path={path} tip={path} open={(metaKey) => actions.openFile(path, line, session, { main: metaKey })}>
         {children}
       </InlineLink>
     );

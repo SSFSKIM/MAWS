@@ -4293,7 +4293,7 @@ test('(outside file, on the peer’s daemon) this build’s app on the peer’s 
       await showSession(run.page, id, `session:${await addressed(run.page, id)}`);
 
       // the link, clicked: the peer's daemon decides what the page may show
-      const chip = run.page.locator(`[data-region="main"] [data-chip="path"][title="${linked}"]`);
+      const chip = run.page.locator(`[data-region="main"] [data-chip="path"][data-path="${linked}"]`);
       await expect(chip, 'the agent’s link to the outside file').toBeVisible({ timeout: 20_000 });
       await chip.click();
       const viewer = sideColumn(run.page).locator(`[data-file-viewer][data-path="${linked}"]`);
@@ -4330,17 +4330,17 @@ test('(outside file, on the peer’s daemon) this build’s app on the peer’s 
       // answer to the follow by the direct call through the page's bridge below. A link to a file inside the folders opens.
       const guideViewer = sideColumn(run.page).locator(`[data-file-viewer][data-path="${guide}"]`);
       const openGuide = async () => {
-        await run.page.locator(`[data-region="main"] [data-chip="path"][title="${guide}"]`).click();
+        await run.page.locator(`[data-region="main"] [data-chip="path"][data-path="${guide}"]`).click();
         await expect(guideViewer.locator('[data-markdown-view]'), 'the guide drawn as Markdown beside the chat').toBeVisible({ timeout: 20_000 });
       };
       await openGuide();
-      await guideViewer.locator(`[data-markdown-view] [data-chip="path"][title="${followed}"]`).click();
+      await guideViewer.locator(`[data-markdown-view] [data-chip="path"][data-path="${followed}"]`).click();
       const followedNotice = sideColumn(run.page).locator(`[data-file-viewer][data-path="${followed}"] [data-refusal]`);
       await expect(followedNotice.locator('p').first(), 'the peer refuses the file the guide links: the first notice').toHaveText(NOTICE_OUTSIDE, { timeout: 20_000 });
       await expect(followedNotice).toHaveAttribute('data-notice-cause', 'outside');
       expect(await invoke(run.page, 'files.follow', { appSessionId: id, path: followed, from: { file: guide } }), 'the peer’s daemon answers the follow unknown_command').toMatchObject({ ok: false, error: { code: 'unknown_command' } });
       await openGuide();
-      await guideViewer.locator('[data-markdown-view] [data-chip="path"][title="inside.txt"]').click();
+      await guideViewer.locator('[data-markdown-view] [data-chip="path"][data-path="inside.txt"]').click();
       await expect(sideColumn(run.page).locator(`[data-file-viewer][data-path="${inside}"] .cm-content`), 'a link to a file inside the folders opens').toContainText('inside the session’s folder', { timeout: 20_000 });
       expect(existsSync(linksOf(s)), 'nothing recorded').toBe(false);
       expect(run.maws.consoleErrors()).toEqual([]);
@@ -4390,8 +4390,8 @@ test('(a followed link, both ways) two files a Markdown file links, followed by 
     await showSession(run.page, id, `session:${address}`);
     const guideViewer = sideColumn(run.page).locator(`[data-file-viewer][data-path="${guide}"]`);
     const follow = async (path: string): Promise<Locator> => {
-      await run.page.locator(`[data-region="main"] [data-chip="path"][title="${guide}"]`).click();
-      await guideViewer.locator(`[data-markdown-view] [data-chip="path"][title="${path}"]`).click({ timeout: 20_000 });
+      await run.page.locator(`[data-region="main"] [data-chip="path"][data-path="${guide}"]`).click();
+      await guideViewer.locator(`[data-markdown-view] [data-chip="path"][data-path="${path}"]`).click({ timeout: 20_000 });
       const viewer = sideColumn(run.page).locator(`[data-file-viewer][data-path="${path}"]`);
       await expect(viewer, `${basename(path)} followed and beside the chat, savable`).toHaveAttribute('data-editable', 'true', { timeout: 20_000 });
       return viewer;
@@ -4554,7 +4554,7 @@ test('(another machine’s outside file, the peer as that machine) this build’
       await expect(machineRow).toHaveAttribute('aria-expanded', 'true', { timeout: 1_000 });
     }).toPass({ timeout: 30_000 });
     await sidebarOf(page).locator(`[role="treeitem"][data-tree-id="s:${addressOf(b.ref, app)}"]`).click({ timeout: 30_000 });
-    const chip = page.locator(`[data-region="main"] [data-chip="path"][title="${notes}"]`).first();
+    const chip = page.locator(`[data-region="main"] [data-chip="path"][data-path="${notes}"]`).first();
     await expect(chip, 'the reply’s link to the file outside, in A’s pane').toBeVisible({ timeout: 60_000 });
 
     // what A knows of B, and what it offers: nothing of this landing

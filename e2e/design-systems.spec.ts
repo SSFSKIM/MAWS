@@ -37,6 +37,7 @@ import { artifactRefusalOf, type ArtifactRefusal } from '@shared/ipc/schema/arti
 import type { AskAnswer, AskQuestion } from '@shared/maws/tools';
 import type { AppSessionId } from '@shared/graph/ids';
 import { localRef } from './support/address';
+import { answerLines } from './support/answer-lines'; // board ticket 815
 import { invoke, launchReady, value } from './support/c7-replay';
 import { launchMaws, REPO_ROOT, type MawsLaunch } from './support/launch';
 import { accentBand, ACCENT_DECK, deckHeadline, highlightMix, insertThroughEditor, markedBand, markedColor, markElement, openFromLibrary, paintedColor, READING_PASSAGE, recolourThroughReplica, unacknowledged } from './support/design-restyle';
@@ -710,7 +711,7 @@ test('the agent asks for a design system: the form in the ask’s row lists the 
     await expect.poll(() => (written = mcpResultOf(s.journal(id), opened!.requestId)) !== null, { timeout: 20_000 }).toBe(true);
     expect(JSON.parse(resultText(written!))).toEqual({ status: 'answered', askId: ASK_TOOL_USE, answers });
     await expect(capsule).toHaveAttribute('data-ask-state', 'answered');
-    await expect(capsule.locator('[data-ask-answer]')).toHaveText(['Design system→Classroom', 'And the slides?→Build one with me']);
+    await expect.poll(() => answerLines(capsule.locator('[data-ask-answer]'))).toEqual(['Design system→Classroom', 'And the slides?→Build one with me']);
   });
 });
 
