@@ -53,6 +53,8 @@ const TYPED = { picked: 'Only for the beta, please.', reference: 'Keep the READM
 
 type Call = ReturnType<typeof sheetCalls>[number];
 type Entry = { question: string; header?: string; options?: { label: string }[]; references?: { path: string }[] };
+/** What a line names its question by: its header, or with none its sentence (the row's own rule, SheetRow.tsx). */
+const named = (entry: Entry) => entry.header ?? questionSentence(entry.question);
 
 test.use({ trace: 'off', screenshot: 'off', video: 'off' });
 
@@ -230,7 +232,7 @@ test('the question sheet live: a terminal session asks on its sheet and is answe
       expect(quoting.length, 'one assistant message quotes all three answers').toBeGreaterThanOrEqual(1);
       for (const id of ids) {
         const answer = picked.has(id) ? picked.get(id)!.label : typed.get(id)!;
-        await expect.poll(() => lineFor(page(), id), { timeout: 15_000, message: `${id}’s line is its receipt` }).toBe(`${id} | ${asked.get(id)!.header} | ${SHEET_ROW.arrow} ${answer}`);
+        await expect.poll(() => lineFor(page(), id), { timeout: 15_000, message: `${id}’s line is its receipt` }).toBe(`${id} | ${named(asked.get(id)!)} | ${SHEET_ROW.arrow} ${answer}`);
       }
       for (const id of ids) await expect(cardOf(page(), id), `${id}’s card is gone`).toHaveCount(0, { timeout: 15_000 });
       await picture(page(), '5-one-send');
@@ -253,7 +255,7 @@ test('the question sheet live: a terminal session asks on its sheet and is answe
       expect(withdrawal.result, 'the call withdrew it').toMatch(new RegExp(`^Withdrew ${gone}\\.`));
       expect(state().closed[gone!]?.how, 'the record: withdrawn').toBe('withdrawn');
       await expect(cardOf(page(), gone!), 'its card disappears').toHaveCount(0, { timeout: 15_000 });
-      await expect.poll(() => lineFor(page(), gone!), { timeout: 15_000, message: 'its line reads Withdrawn' }).toBe(`${gone} | ${(two.input.ask![0] as Entry).header} | ${SHEET_ROW.arrow} ${SHEET_ROW.withdrawn}`);
+      await expect.poll(() => lineFor(page(), gone!), { timeout: 15_000, message: 'its line reads Withdrawn' }).toBe(`${gone} | ${named(two.input.ask![0] as Entry)} | ${SHEET_ROW.arrow} ${SHEET_ROW.withdrawn}`);
       await idle(scratch, sid);
       await picture(page(), '6-withdrawn');
       keep('6-withdrawn');
@@ -303,7 +305,7 @@ test('the question sheet live: a terminal session asks on its sheet and is answe
       const withPrompt = envelopes(rows()).filter((e) => e.parent === prompt!.uuid && e.blocks.some((b) => b.keys.includes(sent!)));
       expect(withPrompt, 'the answer goes with that prompt, in its added context').toHaveLength(1);
       expect(JSON.stringify(rows()).includes(takenBack!), 'the answer taken back appears nowhere in the transcript').toBe(false);
-      await expect.poll(() => lineFor(page(), later), { timeout: 15_000, message: 'the line is its receipt' }).toBe(`${later} | ${question.header} | ${SHEET_ROW.arrow} ${label}`);
+      await expect.poll(() => lineFor(page(), later), { timeout: 15_000, message: 'the line is its receipt' }).toBe(`${later} | ${named(question)} | ${SHEET_ROW.arrow} ${label}`);
       await picture(page(), '7b-resumed-receipt');
       keep('7b-resumed-receipt');
       return { question: later, sent, takenBack, envelope: withPrompt[0]!.kind, line: await lineFor(page(), later) };
@@ -370,7 +372,7 @@ test('the question sheet live: a terminal session asks on its sheet and is answe
       expect(JSON.stringify(rows()).includes(late!), 'the refused line never delivered').toBe(false);
       for (const sheet of sheets) await expect(sheet.locator(`article[data-sheet-question="${id}"]`), 'its card gone in both').toHaveCount(0, { timeout: 15_000 });
       await openLookSession(page(), appId);
-      await expect.poll(() => lineFor(page(), id!), { timeout: 15_000, message: 'the receipt drawn' }).toBe(`${id} | ${entry.header} | ${SHEET_ROW.arrow} ${label}`);
+      await expect.poll(() => lineFor(page(), id!), { timeout: 15_000, message: 'the receipt drawn' }).toBe(`${id} | ${named(entry)} | ${SHEET_ROW.arrow} ${label}`);
       await picture(page(), '8b-released-first');
       await picture(second, '8b-released-second');
       keep('8-two-windows');

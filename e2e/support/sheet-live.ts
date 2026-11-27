@@ -187,9 +187,10 @@ export class Terminals {
     spawnSync('tmux', [...this.tmux, 'kill-session', '-t', name]);
   }
 
-  /** Every pane and the server itself. */
+  /** Every pane and the server itself, and the socket file a killed server leaves behind. */
   closeAll(): void {
     spawnSync('tmux', [...this.tmux, 'kill-server']);
+    rmSync(join(process.env.TMUX_TMPDIR ?? '/tmp', `tmux-${process.getuid!()}`, this.tmux[1]!), { force: true });
   }
 
   private run(args: string[]): void {
