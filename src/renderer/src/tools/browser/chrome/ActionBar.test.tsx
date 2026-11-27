@@ -3,7 +3,7 @@
 // while main says it is open, an inert action, the action's native menu, the fold into the puzzle button when the
 // address field would drop under 160 px, the list read again when main says it changed, and a menu's choice carried on
 // by the chrome (the options tab shown in a main tab, Settings › Browser opened); an internal tab's address field.
-import { act, cleanup, fireEvent, render } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ExtensionAction } from '@shared/browser/extensions';
@@ -11,6 +11,7 @@ import { profilePartition, type BrowserTab } from '@shared/browser/tab';
 import type { AppSessionId } from '@shared/graph/ids';
 import { browserTab, T1, T2 } from '../../../test-support/browser';
 import { RECORD } from '../../../test-support/browser-import';
+import { accessibleDescription } from '../../../test-support/accessible-text';
 import { installFakeMain, ok } from '../../../test-support/code';
 import { createClient } from '../../../ipc/client';
 import { useLayout } from '../../../stores/layout';
@@ -85,7 +86,7 @@ describe('the extensions action bar', () => {
     show();
     await vi.waitFor(() => expect(bar()).not.toBeNull());
     const button = action(PROBE);
-    expect(button.getAttribute('aria-description')).toBe(actions[0]!.inert);
+    expect(accessibleDescription(button)).toBe(actions[0]!.inert);
     expect(button.getAttribute('aria-disabled')).toBe('true');
     expect(button.querySelector('.opacity-50')).not.toBeNull();
     fireEvent.click(button);
@@ -101,7 +102,9 @@ describe('the extensions action bar', () => {
     const order = [...row.children].map((child) => (child.matches('[data-address-box]') ? 'address' : child === bar() ? 'actions' : child.matches('[data-browser-partition]') ? 'pill' : null)).filter(Boolean);
     expect(order).toEqual(['address', 'actions', 'pill']);
     expect([...bar()!.querySelectorAll('[data-extension-action]')].map((button) => button.getAttribute('data-extension-action'))).toEqual([PROBE, PLAIN]);
-    expect(action(PROBE).title).toBe('MAWS probe');
+    expect(action(PROBE).getAttribute('aria-label')).toBe('MAWS probe');
+    act(() => action(PROBE).focus()); // the tooltip, which keyboard focus opens (board ticket 815)
+    expect(screen.getByRole('tooltip').textContent).toBe('MAWS probe');
     expect(action(PROBE).querySelector('img')).toBeNull(); // no icon: the puzzle glyph
     expect(action(PLAIN).querySelector('img')!.getAttribute('src')).toBe(ICON);
     expect(main.callsOf('browser.extensions.actions')).toEqual([{ partition: WORK }]);
@@ -124,7 +127,8 @@ describe('the extensions action bar', () => {
   it('an extension with no popup here is dimmed and says so, and its click asks nothing', async () => {
     show();
     await vi.waitFor(() => expect(bar()).not.toBeNull());
-    expect(action(PLAIN).title).toBe('Plain\nThis extension has no popup here');
+    expect(action(PLAIN).getAttribute('aria-label')).toBe('Plain');
+    expect(accessibleDescription(action(PLAIN))).toBe('This extension has no popup here');
     expect(action(PLAIN).getAttribute('aria-disabled')).toBe('true');
     expect(action(PLAIN).querySelector('.opacity-50')).not.toBeNull();
     fireEvent.click(action(PLAIN));

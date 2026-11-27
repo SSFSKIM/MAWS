@@ -28,7 +28,7 @@ import { PanelRegion } from '../../../panel/PanelRegion'; // P3-F (F-shell)
 import { registerSlot, resetSlots } from '../../../app/slots'; // P3-F (F-shell)
 import { browser, connectBrowser, onShowRequest, raiseNotice, resetBrowser } from '../store';
 import { Chrome, type ChromeProps } from './Chrome';
-import { accessibleText } from '../../../test-support/accessible-text';
+import { accessibleDescription, accessibleText } from '../../../test-support/accessible-text';
 
 // P5 O6 M2: the page's ids are addresses; main (installFakeMain) is asked and answers with the bare MAIN_A.
 const MAIN_A = 'app-a' as AppSessionId;
@@ -138,7 +138,7 @@ describe('the partition pill', () => {
     const openTab = vi.spyOn(useLayout.getState(), 'openTab');
     const pill = () => document.querySelector<HTMLButtonElement>('[data-browser-partition]')!;
     const { rerender } = show({ tab: tab() });
-    expect([pill().textContent, pill().title]).toEqual(['Default', 'Browsing as Default']);
+    expect([pill().textContent, accessibleDescription(pill())]).toEqual(['Default', 'Browsing as Default']);
     const queries = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     rerender(
       <QueryClientProvider client={queries}>
@@ -146,7 +146,7 @@ describe('the partition pill', () => {
       </QueryClientProvider>,
     );
     expect(pill().textContent).toBe('Profile1'); // its directory until the list answers
-    await vi.waitFor(() => expect([pill().textContent, pill().title]).toEqual(['WWork', 'Browsing as Work'])); // the initial, then the name
+    await vi.waitFor(() => expect([pill().textContent, accessibleDescription(pill())]).toEqual(['WWork', 'Browsing as Work'])); // the initial, then the name
     const before = useLayout.getState().main;
     fireEvent.click(pill());
     const popover = await screen.findByRole('dialog', { name: 'Profile: Work' });
@@ -610,7 +610,8 @@ describe('the tab strip', () => {
     expect(document.querySelector(`[data-browser-chip="${T2}"]`)!.hasAttribute('data-suspended')).toBe(true);
     fireEvent.click(chips[1]!);
     const close = screen.getByRole('button', { name: BROWSER_COPY.closeTabNamed('b.test') });
-    expect(close.getAttribute('title')).toBe('Close'); // the word cut (T426): the tooltip is the word; the name keeps the tab
+    act(() => close.focus());
+    expect(screen.getByRole('tooltip').textContent).toBe('Close'); // the word cut (T426): the tooltip is the word; the name keeps the tab
     fireEvent.click(close);
     fireEvent.click(screen.getByRole('button', { name: BROWSER_COPY.newTabAction }));
     await wait(0);
@@ -970,8 +971,10 @@ describe('the acting dot', () => {
     expect(dot()).toHaveLength(1);
     const chip = document.querySelector(`[data-browser-chip="${T1}"]`)!;
     expect(chip.contains(dot()[0]!)).toBe(true);
-    expect(dot()[0]!.getAttribute('title')).toBe(BROWSER_COPY.acting);
     expect(screen.getByRole('img', { name: BROWSER_COPY.acting })).toBe(dot()[0]);
+    // its words a line of the chip's tooltip, which keyboard focus opens (board ticket 815)
+    act(() => within(chip as HTMLElement).getByRole('tab').focus());
+    expect([...screen.getByRole('tooltip').querySelectorAll('span')].map((line) => line.textContent)).toContain(BROWSER_COPY.acting);
     expect(dot()[0]!.className).toContain('bg-accent');
     expect(dot()[0]!.textContent).toBe('');
     // before the title, after the page's icon
@@ -995,7 +998,7 @@ describe('the agent badge', () => {
     const chip = document.querySelector(`[data-browser-chip="${T2}"]`) as HTMLElement;
     expect(chip.contains(badges()[0]!)).toBe(true);
     expect(badges()[0]!.textContent).toBe('agent');
-    expect(badges()[0]!.getAttribute('title')).toBe(BROWSER_COPY.agentBadge);
+    expect(accessibleDescription(within(chip).getByRole('tab'))).toContain(BROWSER_COPY.agentBadge); // the chip's description (board ticket 815)
     expect(badges()[0]!.className).toContain('bg-accent-soft');
     // after the title
     const title = within(chip).getByText('Features');

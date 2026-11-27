@@ -1,8 +1,8 @@
 // cua #90: the extensions action bar (its spec's "The extensions action bar"): right of the address field, one 24 px
 // button per extension loaded in the tab's imported profile, its icon (a puzzle piece without one) and its title as the
-// tooltip, as Chrome's toolbar draws them. A click opens the extension's popup, which main places under the button as a
+// tooltip (a named glyph's, which keyboard focus opens too: board ticket 815), as Chrome's toolbar draws them. A click opens the extension's popup, which main places under the button as a
 // native view above the page (so no cover is held); the button stays pressed while it is open, and a second click
-// closes it. An extension with no popup here is drawn dimmed, its tooltip saying so, and a click does nothing.
+// closes it. An extension with no popup here is drawn dimmed, its tooltip and description saying so, and a click does nothing.
 // Right-click pops the action's native menu (its name, Options, Manage extensions…).
 //
 // When the inline icons would leave the address field under 160 px (the session panel), they fold into one puzzle
@@ -12,6 +12,7 @@ import { useLayoutEffect, useState, type MouseEvent } from 'react';
 import type { ExtensionAction } from '@shared/browser/extensions';
 import { DEFAULT_PARTITION, type BrowserTab } from '@shared/browser/tab';
 import { ipc } from '../../../ipc/client';
+import { NamedGlyph } from '../../../ui/glyph';
 import { useCommand } from '../../../ipc/query';
 import { BROWSER_COPY } from '../copy';
 import { PuzzleIcon } from '../icons';
@@ -77,31 +78,26 @@ function Bar({ tab, actions, addressBox }: ActionBarProps & { actions: Extension
 
   if (folded) {
     return (
-      <button
-        type="button"
+      <NamedGlyph
+        label={COPY.puzzle}
         data-extensions-puzzle=""
-        aria-label={COPY.puzzle}
-        title={COPY.puzzle}
-        aria-pressed={open !== null}
+        pressed={open !== null}
         onClick={(event) => void ipc.invoke('browser.extensions.puzzle', { tabId, anchor: boxOf(event.currentTarget) }).then(warned('the extensions menu'))}
         className={BUTTON}
       >
         <PuzzleIcon className="size-4" />
-      </button>
+      </NamedGlyph>
     );
   }
   return (
     <div role="toolbar" aria-label={COPY.bar} data-extension-actions="" className="flex shrink-0 items-center gap-0.5">
       {actions.map((action) => (
-        <button
+        <NamedGlyph
           key={action.extensionId}
-          type="button"
+          label={action.title}
+          unavailable={action.inert ?? (action.hasPopup ? null : COPY.noPopup)}
           data-extension-action={action.extensionId}
-          aria-label={action.title}
-          aria-description={action.inert ?? (action.hasPopup ? undefined : COPY.noPopup)}
-          aria-disabled={!action.hasPopup || !!action.inert || undefined}
-          aria-pressed={action.hasPopup && !action.inert ? open === action.extensionId : undefined}
-          title={action.inert ? `${action.title}\n${action.inert}` : COPY.actionTitle(action.title, action.hasPopup)}
+          pressed={action.hasPopup && !action.inert ? open === action.extensionId : undefined}
           onClick={(event) => click(action, event.currentTarget)}
           onContextMenu={(event) => menu(action, event)}
           className={BUTTON}
@@ -109,7 +105,7 @@ function Bar({ tab, actions, addressBox }: ActionBarProps & { actions: Extension
           <span className={`inline-flex ${action.hasPopup && !action.inert ? '' : 'opacity-50'}`}>
             {action.icon ? <img alt="" src={action.icon} draggable={false} className="size-4" /> : <PuzzleIcon className="size-4" />}
           </span>
-        </button>
+        </NamedGlyph>
       ))}
     </div>
   );

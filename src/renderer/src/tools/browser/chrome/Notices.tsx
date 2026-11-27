@@ -18,6 +18,7 @@ import type { ReactNode } from 'react';
 import { useShallow } from 'zustand/react/shallow';
 import type { BrowserTab } from '@shared/browser/tab';
 import type { AppSessionId } from '@shared/graph/ids';
+import { NamedGlyph } from '../../../ui/glyph';
 import { dismiss, navigate, revealDownload } from '../actions';
 import { BROWSER_COPY } from '../copy';
 import { CloseIcon } from '../icons';
@@ -202,15 +203,9 @@ function Line({ kind, edge, actions = [], onDismiss, children }: { kind: string;
         </button>
       ))}
       {onDismiss && (
-        <button
-          type="button"
-          aria-label={BROWSER_COPY.dismiss}
-          title={BROWSER_COPY.dismiss}
-          onClick={onDismiss}
-          className="inline-flex size-6 shrink-0 items-center justify-center rounded-sm text-fg-muted outline-accent hover:bg-bg-hover hover:text-fg focus-visible:outline-2"
-        >
+        <NamedGlyph label={BROWSER_COPY.dismiss} onClick={onDismiss} className="inline-flex size-6 shrink-0 items-center justify-center rounded-sm text-fg-muted outline-accent hover:bg-bg-hover hover:text-fg focus-visible:outline-2">
           <CloseIcon className="size-3" />
-        </button>
+        </NamedGlyph>
       )}
     </div>
   );

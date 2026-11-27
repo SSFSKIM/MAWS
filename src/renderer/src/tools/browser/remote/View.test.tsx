@@ -92,7 +92,7 @@ describe('the agent’s tabs on another machine’s session', () => {
     expect(main.callsOf('browser.remote.select')).toEqual([{ viewId: 'rv-1', epoch: 'e1', tabId: T1 }]);
     expect(surfaceOf()).not.toBeNull();
     expect(document.querySelector('[data-browser-pane]'), 'the picture in place of the pane').toBeNull();
-    expect(screen.getByText('http://127.0.0.1:5173/dev server')).toBeTruthy();
+    expect(document.querySelector('[data-browser-remote-url]')!.textContent).toBe('http://127.0.0.1:5173/dev server'); // the chip's description names it too
     expect(screen.queryByRole('textbox', { name: BROWSER_COPY.address }), 'no address field, find or comments on a screencast tab').toBeNull();
     expect(document.querySelector('[data-browser-agent-unavailable]'), 'the view’s states, not the capability’s notice').toBeNull();
   });

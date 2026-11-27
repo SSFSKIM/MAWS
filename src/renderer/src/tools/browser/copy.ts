@@ -226,7 +226,6 @@ export const BROWSER_COPY = {
   bookmarks: {
     bar: 'Bookmarks bar',
     more: 'More bookmarks', // the » slot (Chrome's tooltip names the hidden ones "bookmarks")
-    chipTitle: (name: string, url: string) => (name === '' ? url : `${name}\n${url}`), // a folder has none: it said its name again (the word cut, T449)
     suggestion: 'Bookmark', // the star's label on an address suggestion
   },
   // the pill's avatar and its popover (Chrome's profile bubble); in English like the rest of MAWS (the owner,
@@ -258,7 +257,6 @@ export const BROWSER_COPY = {
     bar: 'Extensions',
     puzzle: 'Extensions', // Chrome's puzzle button
     noPopup: 'This extension has no popup here',
-    actionTitle: (title: string, hasPopup: boolean) => (hasPopup ? title : `${title}\nThis extension has no popup here`),
     popupFailed: (name: string | undefined) => `${name || 'An extension'}’s popup could not be shown`,
     pageClosed: (name: string | undefined) => `${name || 'An extension'} is no longer loaded, so its options tab closed`,
   },

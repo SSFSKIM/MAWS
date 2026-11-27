@@ -11,6 +11,7 @@ import type { BrowserProfileListItem } from '@shared/browser/profiles';
 import { DEFAULT_PARTITION, profilePartition } from '@shared/browser/tab';
 import type { AppSessionId } from '@shared/graph/ids';
 import { useCommand } from '../../../ipc/query';
+import { Tip } from '../../../ui/tip';
 import { BROWSER_COPY } from '../copy';
 import { holdCover } from '../covering';
 import { ProfileAvatar } from './ProfileAvatar';
@@ -46,16 +47,17 @@ function Pill({ appSessionId, surface, partition, label, profile, profiles }: Pi
   const isDefault = partition === DEFAULT_PARTITION;
   return (
     <Popover.Root open={open} onOpenChange={setOpen} modal={false}>
-      <Popover.Trigger
-        data-browser-partition=""
-        title={BROWSER_COPY.partition.browsingAs(label)}
-        className="inline-flex h-6 max-w-36 shrink-0 items-center gap-1.5 rounded-full border border-border py-0.5 pr-2.5 pl-[3px] text-ui-sm text-fg-muted outline-accent hover:bg-bg-hover hover:text-fg focus-visible:outline-2 data-[state=open]:bg-bg-active data-[state=open]:text-fg"
-      >
-        {isDefault || profile ? <ProfileAvatar profile={profile} size={18} /> : <span aria-hidden className="size-[18px] shrink-0 rounded-full bg-bg-active" />}
-        <span data-browser-partition-name="" className="truncate">
-          {label}
-        </span>
-      </Popover.Trigger>
+      <Tip content={BROWSER_COPY.partition.browsingAs(label)} description={BROWSER_COPY.partition.browsingAs(label)}>
+        <Popover.Trigger
+          data-browser-partition=""
+          className="inline-flex h-6 max-w-36 shrink-0 items-center gap-1.5 rounded-full border border-border py-0.5 pr-2.5 pl-[3px] text-ui-sm text-fg-muted outline-accent hover:bg-bg-hover hover:text-fg focus-visible:outline-2 data-[state=open]:bg-bg-active data-[state=open]:text-fg"
+        >
+          {isDefault || profile ? <ProfileAvatar profile={profile} size={18} /> : <span aria-hidden className="size-[18px] shrink-0 rounded-full bg-bg-active" />}
+          <span data-browser-partition-name="" className="truncate">
+            {label}
+          </span>
+        </Popover.Trigger>
+      </Tip>
       <Popover.Portal>
         <Popover.Content
           data-profile-popover={isDefault ? 'default' : 'profile'}

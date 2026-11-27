@@ -10,6 +10,7 @@ import { useCommand } from '../../../ipc/query';
 import { SheetForm } from '../../../sessions/Sheet';
 import { CHOICE, PRIMARY, QUIET } from '../../../sessions/ui';
 import { QuietSpinner } from '../../../ui/spinner';
+import { Tip } from '../../../ui/tip';
 import { IMPORT_COPY, importDate } from './copy';
 import { inspect, useBrowserImport } from './store';
 
@@ -71,9 +72,12 @@ export function ProfilePicker({ preselect }: { preselect?: PickerPreselect }) {
           {IMPORT_COPY.notFound(answer.userDataDir)}
         </p>
       ) : answer.error !== null ? (
-        <p role="alert" title={answer.error} className="m-0 text-ui-sm text-danger">
-          {IMPORT_COPY.localStateUnreadable}
-        </p>
+        // its code the tooltip and the description, which keyboard focus reaches (board ticket 815)
+        <Tip content={answer.error} description={answer.error}>
+          <p role="alert" tabIndex={0} className="m-0 rounded-sm text-ui-sm text-danger outline-accent focus-visible:outline-2">
+            {IMPORT_COPY.localStateUnreadable}
+          </p>
+        </Tip>
       ) : profiles.length === 0 ? (
         <p className="m-0 text-ui-sm text-fg-muted">{IMPORT_COPY.noProfiles}</p>
       ) : (

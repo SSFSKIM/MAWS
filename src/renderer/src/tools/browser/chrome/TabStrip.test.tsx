@@ -9,7 +9,7 @@ import { addressOf } from '@shared/machine/address';
 import { OTHER_MACHINE } from '../../../../../../test/support/machine';
 import { useMachines } from '../../../stores/machines';
 import { browserTab, T1, T2 } from '../../../test-support/browser';
-import { accessibleText } from '../../../test-support/accessible-text';
+import { accessibleDescription, accessibleText } from '../../../test-support/accessible-text';
 import { TabStrip } from './TabStrip';
 
 const R = addressOf(OTHER_MACHINE, 'session-r' as AppSessionId);
@@ -33,7 +33,8 @@ describe('the tab strip’s forwarded mark', () => {
     expect(drawn).toBe('mini');
     expect(marks[0]!.querySelector('.sr-only')!.textContent).toBe('forwarded from ');
     expect(accessibleText(marks[0]!)).toBe('forwarded from mini');
-    expect(marks[0]!.getAttribute('title')).toBe('Port 5173 on mini, forwarded to this Mac');
+    // its port, a line of the chip's tooltip and part of the chip's description (board ticket 815)
+    expect(accessibleDescription(screen.getByRole('tab', { name: /Vite App/ }))).toBe('http://127.0.0.1:54321/app · Port 5173 on mini, forwarded to this Mac');
     expect(marks[0]!.closest('[data-browser-chip]')?.getAttribute('data-browser-chip')).toBe(T1);
     expect(screen.getByRole('tab', { name: /Vite App/ })).toBeTruthy();
   });
