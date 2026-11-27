@@ -79,23 +79,43 @@ test('two tabs typing on different cards, each hearing of the other late, both k
   await expect(field(first, 'q2')).toHaveValue('typed in the second');
 });
 
-test('a tab whose model is older than another tab’s draft leaves that draft alone, and shows it once its read comes', async ({ page, context, mawsd }) => {
+test('a tab whose model is older than another tab’s leaves what the newer one wrote alone, and neither undoes the other in turn; it shows it all once its read comes', async ({ page, context, mawsd }) => {
   const [first, second] = await twoTabs(context, page, mawsd);
   const held: Route[] = [];
   let holding = true;
   await second.route(`**/api/sheets/${S}`, (route) => (holding ? void held.push(route) : route.continue())); // the second tab's model stays from before
+  // meanwhile, in the record: q2 revised under a new header, q3 withdrawn, and q4 asked
   const state = stateOf(mawsd.home, S);
-  writeState(mawsd.home, S, { ...state, questions: [...state.questions, question(4)] }); // a question asked meanwhile
+  const revised = { ...state.questions.find((entry) => entry.id === 'q2')!, revision: 2, header: 'Harbour office', question: 'Which way should part 2 go now?' };
+  writeState(mawsd.home, S, {
+    ...state,
+    questions: [...state.questions.filter((entry) => entry.id === 'q1'), revised, question(4)],
+    closed: { q3: { how: 'withdrawn', at: '2026-11-24T10:00:00.000Z', revision: 1, asker: 'main', question: 'Which way should part 3 go?' } },
+  });
   await expect(card(first, 'q4')).toBeVisible({ timeout: 20_000 });
+  await expect(card(first, 'q3')).toHaveCount(0);
   await until(() => held.length > 0, 20_000, 'the second tab’s read of the change');
   await field(first, 'q4').fill('on the new card');
   await until(async () => (await draftOf(first, 'q4')) !== null, 10_000, 'the draft’s entry');
-  await second.waitForTimeout(1_000); // the second tab has heard the entry and reconciled it against its older model
+  await second.waitForTimeout(1_000); // the second tab has heard the entries and reconciled them against its older model
   await expect(card(second, 'q4')).toHaveCount(0);
+  await expect(card(second, 'q3')).toBeVisible();
+  const entry = (tab: Page, kind: string, id: string) => tab.evaluate((key) => localStorage.getItem(key), `maws.sheet.${kind}.${S}.${id}`);
+  // what the newer tab wrote stands: the new card's draft, the revised header, the withdrawn question's entries gone
   expect(JSON.parse((await draftOf(second, 'q4'))!)).toMatchObject({ draft: { text: 'on the new card' } });
+  expect(JSON.parse((await entry(second, 'header', 'q2'))!)).toMatchObject({ header: 'Harbour office' });
+  expect(await entry(second, 'seen', 'q3')).toBeNull();
+  expect(await entry(second, 'header', 'q3')).toBeNull();
+  // and the two tabs are quiet: neither writes back what the other wrote
+  const heard = (tab: Page) => tab.evaluate(() => (globalThis as { __heard?: number }).__heard ?? 0);
+  for (const tab of [first, second]) await tab.evaluate(() => addEventListener('storage', () => void ((globalThis as { __heard?: number }).__heard = ((globalThis as { __heard?: number }).__heard ?? 0) + 1)));
+  await first.waitForTimeout(1_500);
+  expect([await heard(first), await heard(second)]).toEqual([0, 0]);
+
   holding = false;
   for (const route of held.splice(0)) await route.continue();
   await expect(field(second, 'q4')).toHaveValue('on the new card', { timeout: 20_000 });
+  await expect(card(second, 'q3')).toHaveCount(0);
   await expect(field(first, 'q4')).toHaveValue('on the new card');
 });
 

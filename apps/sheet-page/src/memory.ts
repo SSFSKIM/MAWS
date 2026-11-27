@@ -17,7 +17,10 @@
 // makes, which C3's sheet reads as a call whose answer will not come, and the page's own 35-second rule stands in front
 // of that (availability.ts). An update that changes nothing of the Send the memory shows is tried against this window's
 // other stored Sends, so a press's answer settles its own entry whichever is shown. A tab removes an entry only for a
-// question its model knows (`known`): a reconcile against a model older than another tab's write is not a removal. A draft is
+// question its model knows (`known`): a reconcile against a model older than another tab's write is not a removal. And a
+// reconcile against a model older than the newest any tab reconciled against (the record's `seq`, kept in the session's
+// model entry) writes nothing at all, so a tab on an older model never puts back what a newer one changed, and two tabs
+// do not undo each other's writes in turn; a change the person makes is theirs, whatever model it was made on. A draft is
 // compared by identity in C3's memory, so a read gives an act whose stored draft equals its question's stored draft that
 // same object. A refusal deletes nothing here; only the person's Unpair does (credential.ts).
 import type { SheetLine } from '@shared/sheet/model';
@@ -25,8 +28,9 @@ import type { QuestionDraft } from '@shared/sheet/words';
 import { EMPTY_MEMORY, type SentAct, type SheetMemory } from '../../../src/renderer/src/sheet';
 import { CREDENTIAL_KEY, STORAGE_PREFIX } from './credential';
 
-type Kind = 'draft' | 'seen' | 'header' | 'act' | 'send';
-const KINDS: readonly Kind[] = ['draft', 'seen', 'header', 'act', 'send'];
+type Kind = 'draft' | 'seen' | 'header' | 'act' | 'send' | 'model';
+const KINDS: readonly Kind[] = ['draft', 'seen', 'header', 'act', 'send', 'model'];
+const LAST = 'last'; // the model entry's one name: the newest model any tab reconciled the memory against
 export const SWEEP_MS = 30 * 24 * 60 * 60 * 1000; // an entry untouched this long goes (T19)
 export const ELSEWHERE = 'elsewhere:'; // the attempt of a Send this window did not make: C3's attempts never hold a colon
 
@@ -260,11 +264,21 @@ const CHANGED = 'maws-sheet-memory'; // this tab's own writes, which the storage
  * One update of a session's memory: applied to the memory as it is in storage now, and its difference written. The
  * session is the one the update was made for, wherever the view that made it is by then.
  */
-export function updateMemory(
-  session: string,
-  update: (current: SheetMemory) => SheetMemory,
-  { storage = localStorage, now = Date.now(), target = globalThis, known }: { storage?: Storage; now?: number; target?: EventTarget; known?: (question: string) => boolean } = {},
-): void {
+// One memory's whole content, in the order its own maps and lists hold it: two results of one pure function of the same
+// memory read the same
+const contentOf = (memory: SheetMemory) =>
+  JSON.stringify([[...memory.drafts], [...memory.seen], [...memory.marked], [...memory.headers], memory.acts, memory.sending]);
+
+export interface MemoryUpdateOptions {
+  storage?: Storage;
+  now?: number;
+  target?: EventTarget;
+  known?: (question: string) => boolean; // the questions the tab's model holds: no other question's entry is removed
+  version?: number; // the `seq` of the model the tab holds
+  derived?: (current: SheetMemory) => SheetMemory; // what that model alone makes of a memory (C3's reconcile against it)
+}
+
+export function updateMemory(session: string, update: (current: SheetMemory) => SheetMemory, { storage = localStorage, now = Date.now(), target = globalThis, known, version, derived }: MemoryUpdateOptions = {}): void {
   let before = readMemory(session, storage);
   let after = update(before);
   if (after === before) {
@@ -280,7 +294,17 @@ export function updateMemory(
     }
   }
   if (after === before) return;
-  if (writeMemory(session, before, after, now, storage, known)) target.dispatchEvent(Object.assign(new Event(CHANGED), { session }));
+  const reconciled = version !== undefined && derived !== undefined && contentOf(after) === contentOf(derived(before));
+  const last = reconciled ? lastReconciled(session, storage) : null;
+  if (reconciled && last !== null && version < last) return; // a model older than another tab's: not this tab's to write
+  const wrote = writeMemory(session, before, after, now, storage, known);
+  if (reconciled && (last === null || version > last)) store(storage, keyOf('model', session, LAST), JSON.stringify({ v: 1, touchedAt: now, seq: version }));
+  if (wrote) target.dispatchEvent(Object.assign(new Event(CHANGED), { session }));
+}
+
+function lastReconciled(session: string, storage: Storage): number | null {
+  const seq = entriesOf(storage, 'model', session).find((entry) => entry.name === LAST)?.value.seq;
+  return typeof seq === 'number' ? seq : null;
 }
 
 /** A session's memory changed: in this tab, or in another (the storage event). */

@@ -7,21 +7,26 @@
 // subscribes, so a view that mounts after a change it did not hear reads storage again.
 import { useCallback, useSyncExternalStore } from 'react';
 import type { SheetModel } from '@shared/sheet/model';
-import type { SheetMemory } from '../../../../src/renderer/src/sheet';
+import { reconcile, type SheetMemory } from '../../../../src/renderer/src/sheet';
 import { readPairing } from '../credential';
-import { madeElsewhere, onMemory, readMemory, sendingSince, updateMemory } from '../memory';
+import { madeElsewhere, onMemory, readMemory, sendingSince, updateMemory, type MemoryUpdateOptions } from '../memory';
 
 export interface SessionMemory {
   memory: SheetMemory;
   elsewhereSince: number | null; // since when a Send this window did not make has been held, while it is being sent
-  // `known`: the questions the model the update was made against holds; an entry of any other question is not removed
-  update(update: (current: SheetMemory) => SheetMemory, known?: (question: string) => boolean): void;
+  // `against`: the model the update was made against (memory.ts: what it knows, its `seq`, and its reconcile)
+  update(update: (current: SheetMemory) => SheetMemory, against?: Against): void;
 }
 
-/** The questions a model holds in any form: open, hidden by a queued dismissal, or closed. */
-export function questionsOf(model: SheetModel): (question: string) => boolean {
+type Against = Pick<MemoryUpdateOptions, 'known' | 'version' | 'derived'>;
+
+/**
+ * What an update made against a model carries of it: the questions it holds in any form (open, hidden by a queued
+ * dismissal, or closed), its `seq`, and C3's reconcile against it.
+ */
+export function against(model: SheetModel): Against {
   const ids = new Set([...model.open.map((question) => question.id), ...model.hidden.map((entry) => entry.id), ...Object.keys(model.closed)]);
-  return (question) => ids.has(question);
+  return { known: (question) => ids.has(question), version: model.seq, derived: (current) => reconcile(current, model) };
 }
 
 const pairingNow = (): string | null => {
@@ -41,9 +46,9 @@ function snapshotOf(session: string): SessionMemory {
     memory,
     elsewhereSince: elsewhere ? sendingSince(session) : null,
     pairing,
-    update: (update: (current: SheetMemory) => SheetMemory, questions?: (question: string) => boolean) => {
+    update: (update: (current: SheetMemory) => SheetMemory, against?: Against) => {
       if (pairing === null || pairingNow() !== pairing) return; // the pairing it was made under has ended
-      updateMemory(session, update, { known: questions });
+      updateMemory(session, update, { ...against });
     },
   };
   snapshots.set(session, made);

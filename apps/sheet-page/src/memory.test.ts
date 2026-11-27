@@ -206,6 +206,33 @@ describe('the stored memory (T19): one entry a thing', () => {
     off();
   });
 
+  it('a reconcile against a model older than the one last reconciled writes nothing, so two tabs never undo each other’s; the person’s own change still lands (T19)', () => {
+    const store = testStorage();
+    const target = new EventTarget();
+    const older = sheetOf([CLASH, NOTICES], { seq: 4 }); // tab B's
+    const revised = { ...NOTICES, revision: 2, header: 'Printed notices' };
+    const newer = sheetOf([CLASH, revised], { seq: 5 }); // tab A's: q5 revised, and the clash question still open
+    const withdrawn = sheetOf([revised], { seq: 6, closed: { q4: { how: 'withdrawn', at: '2026-11-24T10:00:00.000Z', revision: 1, asker: 'main' } } as never });
+    const reconciling = (model: typeof older) => ({ storage: store, now: model.seq, target, known: () => true, version: model.seq, derived: (current: SheetMemory) => reconcile(current, model) });
+    updateMemory(S, (current) => reconcile(current, older), reconciling(older));
+    expect(readMemory(S, store).headers.get('q5')).toBe('Notices');
+    updateMemory(S, (current) => reconcile(current, newer), reconciling(newer));
+    expect(readMemory(S, store).headers.get('q5')).toBe('Printed notices');
+    // B, still on its older model, reconciles what it adopted: nothing is written back
+    updateMemory(S, (current) => reconcile(current, older), reconciling(older));
+    expect(readMemory(S, store).headers.get('q5')).toBe('Printed notices');
+    // A sees q4 withdrawn: its entries go; B's reconcile against the older model does not bring them back
+    updateMemory(S, (current) => reconcile(current, withdrawn), reconciling(withdrawn));
+    expect(readMemory(S, store).seen.has('q4')).toBe(false);
+    expect(readMemory(S, store).headers.has('q4')).toBe(false);
+    updateMemory(S, (current) => reconcile(current, older), reconciling(older));
+    expect(readMemory(S, store).seen.has('q4')).toBe(false);
+    expect(readMemory(S, store).headers.has('q4')).toBe(false);
+    // the person's own change in B, against its older model, is theirs and lands
+    updateMemory(S, (current) => withDraft(current, 'q5', draft('typed in B')), reconciling(older));
+    expect(readMemory(S, store).drafts.get('q5')).toEqual(draft('typed in B'));
+  });
+
   it('lands an update in its own session’s entries, read from the store as it is when applied', () => {
     const store = testStorage();
     writeMemory(S, EMPTY_MEMORY, withDraft(EMPTY_MEMORY, 'q4', draft('there already')), 1, store);

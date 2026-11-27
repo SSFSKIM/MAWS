@@ -18,7 +18,7 @@ import { SheetOutline } from '../outline/SheetOutline';
 import type { Outline } from '../outline/state';
 import { pathOf, type Place } from '../route';
 import type { StoreState } from '../store';
-import { questionsOf, useSessionMemory } from './useMemory';
+import { against, useSessionMemory } from './useMemory';
 
 export interface SheetViewProps {
   shown: NonNullable<StoreState['shown']>;
@@ -55,8 +55,9 @@ export function SheetView({ shown, navigate, ...rest }: SheetViewProps) {
 
 function Sheet({ model, fresh, door, connection, host, outline }: Omit<SheetViewProps, 'shown' | 'navigate'> & { model: SheetModel; fresh: boolean }) {
   const { memory, elsewhereSince, update } = useSessionMemory(model.session);
-  // every change is made against this model: a removal only of what it knows (T19)
-  const onMemory = (change: (current: SheetMemory) => SheetMemory) => update(change, questionsOf(model));
+  // every change is made against this model: a removal only of what it knows, and its reconcile only while no tab has
+  // reconciled against a newer one (T19)
+  const onMemory = (change: (current: SheetMemory) => SheetMemory) => update(change, against(model));
   const [now, setNow] = useState(() => Date.now()); // moved on by the timer below; an older `now` only holds Send back until it fires
   const { text, until } = sendUnavailable({ connection, fresh, door, elsewhereSince, now });
   useEffect(() => {
