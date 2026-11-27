@@ -385,7 +385,7 @@ test.describe('side threads, Send to main and /btw (E3)', () => {
     await expect(toMain).not.toBeChecked();
     await expect(toMain).toBeEnabled();
     await expect(sheet.getByRole('radio'), 'no two-segment control').toHaveCount(0);
-    await expect(sheet.locator('label:has([data-send-to-main])'), 'the parent is idle: an ordinary prompt').toHaveAttribute('title', 'Sent now');
+    await expect(sheet.locator('input[data-send-to-main]'), 'the parent is idle: an ordinary prompt').toHaveAccessibleDescription('Sent now'); // its tip (board ticket 815)
     await expect(sheet.locator('[data-comment-screenshot]'), 'the gutter gives no screenshot').toHaveCount(0);
     const send = sheet.getByRole('button', { name: 'Send' });
     await expect(send).toBeDisabled();
@@ -569,7 +569,7 @@ test.describe('side threads, Send to main and /btw (E3)', () => {
     const viewer = await openFile(page, repo, APP);
     const sheet = await commentOn(page, viewer, 3);
     await sheet.getByRole('checkbox', { name: 'Send to main' }).check();
-    await expect(sheet.locator('label:has([data-send-to-main])')).toHaveAttribute('title', 'Sent now');
+    await expect(sheet.locator('input[data-send-to-main]')).toHaveAccessibleDescription('Sent now');
     await sheet.getByRole('textbox', { name: 'Comment' }).fill(COMMENT);
     await sheet.getByRole('button', { name: 'Send' }).click();
     await expect(sheet).toHaveCount(0);
@@ -602,7 +602,7 @@ test.describe('side threads, Send to main and /btw (E3)', () => {
     await showFileTab(page, 'app.ts'); // beside the parent's chat (UX wave U6b-1)
     const busySheet = await commentOn(page, viewer, 7);
     await busySheet.getByRole('checkbox', { name: 'Send to main' }).check();
-    await expect(busySheet.locator('label:has([data-send-to-main])'), 'the composer’s words for a steer').toHaveAttribute('title', 'Sends at the next step');
+    await expect(busySheet.locator('input[data-send-to-main]'), 'the composer’s words for a steer').toHaveAccessibleDescription('Sends at the next step');
     await busySheet.getByRole('textbox', { name: 'Comment' }).fill(steerComment);
     await busySheet.getByRole('button', { name: 'Send' }).click();
     await expect(busySheet, 'a steer is a confirmed delivery: the sheet closes').toHaveCount(0);

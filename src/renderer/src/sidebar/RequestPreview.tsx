@@ -20,6 +20,11 @@ import { waits } from '@shared/attention/kinds';
 import { itemAge } from './derive';
 import { displayTitle } from '../sessions/title';
 import { workingFolder } from '@shared/sessions/working-folder'; // UX wave U8c-2
+import { Tip } from '../ui/tip';
+
+// The two answers take a pointer's click alone (`byPointer`), and say so in their tips, as the request card's do (board
+// ticket 815: a tip, not the system tooltip).
+const POINTER_ONLY = { deny: 'Click to deny', approve: 'Click to approve' } as const;
 
 export const HEADINGS = ATTENTION_HEADINGS; // the one table C7's card reads too
 const TONE: Record<AttentionTone, string> = { warning: 'text-warning', info: 'text-info', danger: 'text-danger', accent: 'text-accent' /* P2-C */ };
@@ -146,24 +151,28 @@ export const RequestPreview: Slots['requestCard'] = ({ item, request, placement 
         {delivery === 'not_delivered' && <span className="text-danger">Not delivered</span>}
         {canAnswer && (
           <div className="ml-auto flex items-center gap-1.5">
-            <button
-              type="button"
-              disabled={delivery === 'sending'}
-              onPointerDown={onPointerDown}
-              onClick={(event) => byPointer(event) && void answer({ kind: 'permission', decision: 'deny' })}
-              className="rounded-sm border border-border-strong px-2.5 py-1 text-fg outline-accent hover:bg-bg-hover focus-visible:outline-2 disabled:text-fg-faint"
-            >
-              Deny
-            </button>
-            <button
-              type="button"
-              disabled={delivery === 'sending'}
-              onPointerDown={onPointerDown}
-              onClick={(event) => byPointer(event) && void answer({ kind: 'permission', decision: 'allow', scope: 'once' })}
-              className="rounded-sm border border-fg bg-fg px-2.5 py-1 text-bg outline-accent hover:bg-fg-muted focus-visible:outline-2 disabled:bg-fg-faint"
-            >
-              Approve
-            </button>
+            <Tip content={POINTER_ONLY.deny} description={POINTER_ONLY.deny}>
+              <button
+                type="button"
+                disabled={delivery === 'sending'}
+                onPointerDown={onPointerDown}
+                onClick={(event) => byPointer(event) && void answer({ kind: 'permission', decision: 'deny' })}
+                className="rounded-sm border border-border-strong px-2.5 py-1 text-fg outline-accent hover:bg-bg-hover focus-visible:outline-2 disabled:text-fg-faint"
+              >
+                Deny
+              </button>
+            </Tip>
+            <Tip content={POINTER_ONLY.approve} description={POINTER_ONLY.approve}>
+              <button
+                type="button"
+                disabled={delivery === 'sending'}
+                onPointerDown={onPointerDown}
+                onClick={(event) => byPointer(event) && void answer({ kind: 'permission', decision: 'allow', scope: 'once' })}
+                className="rounded-sm border border-fg bg-fg px-2.5 py-1 text-bg outline-accent hover:bg-fg-muted focus-visible:outline-2 disabled:bg-fg-faint"
+              >
+                Approve
+              </button>
+            </Tip>
           </div>
         )}
       </div>

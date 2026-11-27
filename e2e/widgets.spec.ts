@@ -650,7 +650,7 @@ test.describe('interactive', () => {
     await openPage(page, { appSessionId: READY, mode: 'interactive' });
     const chip = page.getByRole('button', { name: /^Model / });
     await expect(chip).toHaveAttribute('aria-label', 'Model Sonnet 5 High'); // named from the route's catalogue (`engine.models`)
-    await expect(chip).toHaveAttribute('title', 'Sonnet 5 · sonnet');
+    await expect(chip).toHaveAccessibleDescription('Sonnet 5 · sonnet'); // its tip (board ticket 815)
     await chip.click();
     const menu = page.getByRole('dialog', { name: 'Model and effort' });
     const selector = menu.locator('[data-model-selector]');

@@ -96,6 +96,8 @@ describe.each(['tree', 'Needs you'] as const)('%s hover card approves read-only 
     const card = await screen.findByRole('dialog', { name: 'Charter + research' });
     const approve = await within(card).findByRole('button', { name: 'Approve' });
     expect(within(card).getByRole('button', { name: 'Deny' })).toBeTruthy();
+    // the answers take a pointer's click alone, and their tips say so (board ticket 815)
+    expect([accessibleDescription(approve), accessibleDescription(within(card).getByRole('button', { name: 'Deny' }))]).toEqual(['Click to approve', 'Click to deny']);
     await user.click(approve);
     expect(fake.invoked('session.answer')).toEqual([
       { appSessionId: bareIdOf('Charter + research'), requestId: 'req-synthetic-read-9a1d4262', answer: { kind: 'permission', decision: 'allow', scope: 'once' } },

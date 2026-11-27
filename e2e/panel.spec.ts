@@ -1339,7 +1339,7 @@ test.describe('the floating session card (P3-G)', () => {
       await test.step('acceptance 3 and 2: Close leaves the bar; ⌥⌘B and Open conversation reopen the card; a turn ending behind the bar marks it', async () => {
         await card.getByRole('button', { name: 'Close session card' }).click();
         await expect(card).toHaveCount(0);
-        await expect(openConversation).toHaveAttribute('title', USAGE);
+        await expect(openConversation).toHaveAccessibleDescription(USAGE); // the session's title, its tip (board ticket 815)
         await expect(composers, 'the compact composer remains usable').toHaveCount(1);
         await bar.getByRole('textbox', { name: 'Message' }).fill('Continue from the compact composer');
         await menu(app, 'panel.float');
@@ -1920,7 +1920,7 @@ test.describe('the chat over an artifact (UX wave U10b, O-43)', () => {
       await expect(bar).toHaveAttribute('data-chat-presentation', 'bar');
       await expect(bar.getByRole('toolbar'), 'no toolbar row under the box').toHaveCount(0);
       await expect(bar.getByRole('button', { name: 'Show session card' }), 'no title button').toHaveCount(0);
-      await expect(openConversation).toHaveAttribute('title', 'Harness A');
+      await expect(openConversation).toHaveAccessibleDescription('Harness A');
       await expect(hideChat).toBeVisible();
       await expect(bar.getByRole('textbox', { name: 'Message' })).toBeFocused();
       expect(Math.round((await bar.boundingBox())!.width)).toBe(484);

@@ -2298,7 +2298,7 @@ test('M8: a session spawned on B leads a full project past its cap and stays amo
       const run = composerOn(page).locator('[data-submit-state]');
       await expect(run, 'the `!` mode’s control').toHaveText('Run', { timeout: 30_000 });
       await expect(run).toBeDisabled();
-      expect(await run.getAttribute('title'), 'its reason, the declared words').toContain(REMOTE_UNAVAILABLE['session.bash']!);
+      expect(await run.evaluate((control) => (control.getAttribute('aria-describedby') ?? '').split(/\s+/).map((id) => document.getElementById(id)?.textContent ?? '').join(' ')), 'its reason, the declared words, its tip (board ticket 815)').toContain(REMOTE_UNAVAILABLE['session.bash']!);
       await page.keyboard.press('Enter');
       await expect(composerOf(page), 'Enter kept the text').toContainText('ls');
       expect((await writtenOn(spawnedApp)).length, 'nothing reached B').toBe(before);
@@ -4487,15 +4487,15 @@ for (const withheld of [['rl2.send-now'], ['rl2.send-now', 'rl2.session-acts']])
 
       const sendNow = row.getByRole('button', { name: 'Send now' });
       await expect(sendNow).toBeDisabled();
-      await expect(sendNow).toHaveAttribute('title', `Can’t send now on ${B_NAME} yet. Update MAWS on ${B_NAME} and try again.`);
+      await expect(sendNow).toHaveAccessibleDescription(`Can’t send now on ${B_NAME} yet. Update MAWS on ${B_NAME} and try again.`); // its tip (board ticket 815)
       if (noActs) {
         const del = row.getByRole('button', { name: 'Delete' });
         await expect(del).toBeDisabled();
-        await expect(del).toHaveAttribute('title', `Can’t delete on ${B_NAME} yet. Update MAWS on ${B_NAME} and try again.`);
+        await expect(del).toHaveAccessibleDescription(`Can’t delete on ${B_NAME} yet. Update MAWS on ${B_NAME} and try again.`);
         await clickRevealed(row, row.getByRole('button', { name: 'More' }));
         const edit = page.getByRole('menuitem', { name: 'Edit', exact: true });
-        await expect(edit).toHaveAttribute('data-disabled', /.*/);
-        await expect(edit).toHaveAttribute('title', `Can’t edit on ${B_NAME} yet. Update MAWS on ${B_NAME} and try again.`);
+        await expect(edit).toHaveAttribute('aria-disabled', 'true'); // a refused item, in the menu's keyboard (board ticket 815)
+        await expect(edit).toHaveAccessibleDescription(`Can’t edit on ${B_NAME} yet. Update MAWS on ${B_NAME} and try again.`);
         await page.keyboard.press('Escape');
         await expect(edit).toHaveCount(0);
         // ↑ in the empty box says Edit's sentence and walks no history: the box stays empty

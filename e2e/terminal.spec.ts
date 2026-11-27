@@ -1010,6 +1010,16 @@ async function terminalMenu(page: Page, id: string, on: 'word' | 'blank'): Promi
   return opened;
 }
 
+// A pasted chip's text: the start of it is the chip's tip (board ticket 815), read under the pointer so the composer
+// keeps the keyboard; the pointer leaves after, closing it.
+async function pastedText(page: Page, chip: Locator): Promise<string> {
+  await chip.getByRole('button').hover();
+  const tip = page.getByRole('tooltip').last();
+  await expect(tip).toBeAttached();
+  const text = (await tip.textContent()) ?? '';
+  await page.mouse.move(1, 1);
+  return text;
+}
 const userSends = async (s: Scene, id: string) => ofKind(await s.events(id), 'user.message').filter((event) => !event.isReplay).length;
 
 test('Attach selection to chat: the menu’s fifth item attaches the selection and Edit ▸ Attach the screen when none, each as one block in the session’s composer, which has the keyboard; nothing is sent until Enter', async () => {
@@ -1039,7 +1049,7 @@ test('Attach selection to chat: the menu’s fifth item attaches the selection a
     await expect(selected.getByRole('menuitem', { name: 'Attach selection to chat' })).toBeEnabled();
     await selected.getByRole('menuitem', { name: 'Attach selection to chat' }).click();
     await expect(chips).toHaveCount(1);
-    await expect(chips.first()).toHaveAttribute('title', 'attach-first');
+    expect(await pastedText(page, chips.first())).toBe('attach-first');
     await expect(box, 'the composer has the keyboard').toBeFocused();
 
     // B3: with nothing selected, Edit ▸ Attach selection to chat attaches what the screen shows, a second block. The
@@ -1056,7 +1066,7 @@ test('Attach selection to chat: the menu’s fifth item attaches the selection a
     await menu(s.maws.app, 'terminal.attachSelection');
     await expect(chips).toHaveCount(2);
     // the screen from its first row, both lines the command printed (the prompt after them, if drawn by then)
-    await expect(chips.nth(1)).toHaveAttribute('title', /^attach-second\nattach-third(\n|$)/);
+    expect(await pastedText(page, chips.nth(1))).toMatch(/^attach-second\nattach-third(\n|$)/);
     await expect(box).toBeFocused();
 
     // nothing was sent: no message of the person's among the session's events (what its transcript draws its rows from);
@@ -1093,7 +1103,7 @@ test('Attach selection to chat from a terminal kept open for every session, besi
     await show(s, alpha);
     const kept = await chipsOf(alpha);
     await expect(kept).toHaveCount(1, { timeout: 15_000 });
-    await expect(kept.first()).toHaveAttribute('title', 'attach-pinned');
+    expect(await pastedText(page, kept.first())).toBe('attach-pinned');
   });
 });
 
@@ -1159,7 +1169,7 @@ test('zoom: the grid refits and a selection is under the pointer at 125 %', asyn
     await (await terminalMenu(page, terminal, 'word')).getByRole('menuitem', { name: 'Attach selection to chat' }).click();
     const chips = box.locator('[data-pasted="text"]');
     await expect(chips).toHaveCount(1);
-    await expect(chips.first(), 'the word under the pointer is the selection').toHaveAttribute('title', 'zoomed-125');
+    expect(await pastedText(page, chips.first()), 'the word under the pointer is the selection').toBe('zoomed-125');
     await zoomTo(s.maws.app, page, 1);
   });
 });
