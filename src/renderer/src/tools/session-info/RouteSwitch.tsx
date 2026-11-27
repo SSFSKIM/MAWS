@@ -3,12 +3,14 @@
 // the target that failed, and the switch's progress and failure in words under it; the machine and its sheet are
 // C11's (`switch-route.ts`, `SwitchSheet`), unchanged.
 // P5 O7 M8: the switch restarts the session (`session.stop`), which a session on another machine doesn't take from here
-// yet (lane-b/remote-unavailable.ts): each button is greyed, saying why.
+// yet (lane-b/remote-unavailable.ts): each button is greyed, saying why (board ticket 815: it keeps Tab, its reason the tip
+// and the description); disabled while a switch runs.
 import type { AppSessionId } from '@shared/graph/ids';
 import { ROUTE, SWITCH, type SwitchTarget } from '../../gateway/copy';
 import { useGateway } from '../../gateway/store';
 import { switchRoute } from '../../gateway/switch-route';
 import { useRemoteUnavailable } from '../../lane-b/remote-unavailable'; // P5 O7 M8
+import { UNAVAILABLE_LOOK, UnavailableButton } from '../../ui/tip';
 
 const ACTION = 'ml-2 rounded-sm px-1 text-ui-sm text-accent outline-accent hover:bg-bg-hover focus-visible:outline-2 disabled:text-fg-faint disabled:hover:bg-transparent';
 
@@ -19,9 +21,11 @@ export function RouteSwitch({ appSessionId, targets }: { appSessionId: AppSessio
   return (
     <>
       {targets.map((target) => (
-        <button key={target} type="button" className={ACTION} disabled={busy || unavailable !== null} title={unavailable ?? undefined} onClick={() => void switchRoute(appSessionId, target)}>
-          {switching?.phase === 'failed' && switching.target === target ? `${SWITCH.retry} · ${ROUTE.switchTo[target]}` : ROUTE.switchTo[target]}
-        </button>
+        <UnavailableButton key={target} reason={unavailable}>
+          <button type="button" className={`${ACTION} ${UNAVAILABLE_LOOK}`} disabled={busy && unavailable === null} onClick={() => void switchRoute(appSessionId, target)}>
+            {switching?.phase === 'failed' && switching.target === target ? `${SWITCH.retry} · ${ROUTE.switchTo[target]}` : ROUTE.switchTo[target]}
+          </button>
+        </UnavailableButton>
       ))}
       {busy && (
         <span role="status" className="block text-fg-muted">
