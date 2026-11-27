@@ -7,6 +7,7 @@ import type { AppSessionId } from '@shared/graph/ids';
 import { MODE_OPTIONS, type ModeBinding } from '../../statusline';
 import { closeModeMenu, requestModeMenu, resetComposerStore, useComposerStore } from '../../stores/composer';
 import { REL } from '../../test-support/relative-time';
+import { accessibleDescription } from '../../test-support/accessible-text';
 import { ModeChip } from './ModeChip';
 
 afterEach(() => {
@@ -35,7 +36,7 @@ describe('the Mode chip', () => {
     expect(chip().getAttribute('aria-label')).toBe('Permission mode not reported');
     expect(chip().textContent).not.toMatch(/Auto|Manual|Plan|Accept|Bypass|Don/);
     expect(chip().textContent).toContain('Mode');
-    expect(chip().getAttribute('title')).toBe('Not reported by the terminal session: its mode is changed in the terminal');
+    expect(accessibleDescription(chip())).toBe('Not reported by the terminal session: its mode is changed in the terminal');
   });
 
   // sminos 1.27.14: a terminal session's mode as it reported it, how long ago on the chip's title
@@ -44,7 +45,7 @@ describe('the Mode chip', () => {
     render(<ModeChip appSessionId={A} binding={binding({ value: 'default', reportedAt, disabled: "A terminal session's mode is changed in the terminal" })} />);
     expect(chip().textContent).toContain('Manual');
     expect(chip().getAttribute('aria-label')).toBe('Permission mode Manual');
-    expect(chip().getAttribute('title')).toBe(`Reported ${REL.ago(2, 'minute')} · A terminal session's mode is changed in the terminal`);
+    expect(accessibleDescription(chip())).toBe(`Reported ${REL.ago(2, 'minute')} · A terminal session's mode is changed in the terminal`);
   });
 });
 

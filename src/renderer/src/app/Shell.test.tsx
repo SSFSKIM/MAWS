@@ -43,7 +43,7 @@ import { PanelHost } from '../panel/PanelHost';
 import { SETTINGS_DEFAULTS_V21 } from '@shared/settings/defaults';
 import { preloadOf } from '../test-support/preload-of';
 import { installResizeObserver } from '../test-support/resize';
-import { accessibleDescription } from '../test-support/accessible-text';
+import { accessibleDescription, accessibleText } from '../test-support/accessible-text';
 import { registerSidePane } from '../side/register';
 import { closeBtwCard, foldBtwCard, openBtwCard, resetSideQuestions, setBtwQuestion } from '../side/store';
 
@@ -385,7 +385,7 @@ describe('toolbar', () => {
     await user.keyboard('{ArrowRight}');
     const menu = (await screen.findByRole('menuitem', { name: 'Pin' })).closest<HTMLElement>('[role="menu"]')!;
     const items = within(menu).getAllByRole('menuitem');
-    expect(items.map((i) => [i.textContent, i.getAttribute('aria-disabled') === 'true'])).toEqual([
+    expect(items.map((i) => [accessibleText(i), i.getAttribute('aria-disabled') === 'true'])).toEqual([ // a greyed item's note is not its text (ticket 815)
       ['Open in split', false],
       ['Pin', false],
       ['Rename…', true],
@@ -440,7 +440,7 @@ describe('another machine’s terminal session in the toolbar', () => {
     await user.keyboard('{ArrowRight}');
     const takeOver = await screen.findByRole('menuitem', { name: 'Take over in MAWS' });
     expect(takeOver.getAttribute('aria-disabled')).toBe('true');
-    expect(takeOver.getAttribute('title')).toBe(LANE_A_WORDS.remoteTakeOver);
+    expect(accessibleDescription(takeOver), 'the reason is its description and note (ticket 815)').toBe(LANE_A_WORDS.remoteTakeOver);
   });
 
   // UX wave U8b (UC-9): only listed, it has no record here, so the column holds no record card.
@@ -490,8 +490,8 @@ describe('another machine’s lane B session in the toolbar', () => {
     act(() => actions.focus());
     await user.keyboard('{ArrowRight}');
     const menu = (await screen.findByRole('menuitem', { name: 'Rename…' })).closest<HTMLElement>('[role="menu"]')!;
-    const items = within(menu).getAllByRole('menuitem').filter((i) => ['Rename…', 'Fork', 'Archive'].includes(i.textContent ?? ''));
-    expect(items.map((i) => [i.textContent, i.getAttribute('aria-disabled'), i.getAttribute('title')])).toEqual([
+    const items = within(menu).getAllByRole('menuitem').filter((i) => ['Rename…', 'Fork', 'Archive'].includes(accessibleText(i)));
+    expect(items.map((i) => [accessibleText(i), i.getAttribute('aria-disabled'), accessibleDescription(i)])).toEqual([ // the reason, its description and note (ticket 815)
       ['Rename…', 'true', 'Can’t rename on Studio yet. Update MAWS on Studio and try again.'],
       ['Fork', 'true', 'Can’t fork on Studio yet. Update MAWS on Studio and try again.'],
       ['Archive', 'true', 'Can’t archive on Studio yet. Update MAWS on Studio and try again.'],
@@ -969,7 +969,10 @@ describe('a page beside the sidebar', () => {
     expect(within(header()).queryByRole('button', { name: 'Session cards' }), 'the surface icons are not drawn').toBeNull();
     expect(within(header()).queryByRole('button', { name: /in sidebar$/ }), 'nor the project chip').toBeNull();
     expect(hiddenNow(strips()), 'the strips stay mounted, hidden').toEqual([true, true]);
-    expect(within(header()).getByRole('button', { name: 'Back' }).getAttribute('title')).toBe('Back · Esc');
+    const back = within(header()).getByRole('button', { name: 'Back' });
+    expect(accessibleDescription(back)).toBe('Esc');
+    act(() => back.focus());
+    expect(screen.getByRole('tooltip').textContent).toBe('Back · Esc');
     await user.click(within(header()).getByRole('button', { name: 'Back' }));
     expect(useLayout.getState().destination).toBeNull();
     expect(hiddenNow(strips())).toEqual([false, false]);

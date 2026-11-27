@@ -25,6 +25,8 @@ import { workingBranch } from '@shared/sessions/working-folder'; // UX wave U8c-
 import { useSessions, type ListedSession } from '../stores/sessions';
 import { Icon, IconButton, SidebarIcon } from './IconButton';
 import { HiddenHeading } from '../ui/hidden-heading';
+import { NamedGlyph } from '../ui/glyph';
+import { RefusedMenuItem } from '../ui/refused-menu-item';
 import { DESTINATION } from '../destination/copy';
 import { PAGE_TITLE_ID } from '../destination/DestinationPage';
 import { useShellGeometry, useShellView } from './shell-view';
@@ -171,15 +173,9 @@ function PageTitle({ destination }: { destination: Destination }) {
   const name = DESTINATION.names[destination.kind];
   return (
     <div data-page-title className="flex min-w-0 shrink items-center gap-1 pr-2">
-      <button
-        type="button"
-        aria-label={DESTINATION.back}
-        title={DESTINATION.backTitle}
-        onClick={() => useLayout.getState().closeDestination()}
-        className="inline-flex size-7 shrink-0 items-center justify-center rounded-sm text-fg-muted outline-accent [-webkit-app-region:no-drag] hover:bg-bg-hover hover:text-fg focus-visible:outline-2"
-      >
+      <NamedGlyph label={DESTINATION.back} shortcut={DESTINATION.backChord} onClick={() => useLayout.getState().closeDestination()}>
         <Icon><path d="M10 3.5 5.5 8l4.5 4.5" /></Icon>
-      </button>
+      </NamedGlyph>
       {NAMED_PAGES.has(destination.kind) ? (
         <h1 id={PAGE_TITLE_ID} className="m-0 min-w-0 truncate text-ui font-semibold text-fg">{name}</h1>
       ) : (
@@ -261,19 +257,18 @@ function SessionMenu({ disabled, children }: { disabled: boolean; children: Reac
   </DropdownMenu.Sub>;
 }
 
+const SESSION_ITEM = 'flex h-7 cursor-default items-center rounded-sm px-2 outline-none select-none aria-disabled:text-fg-faint data-highlighted:bg-bg-hover';
+
 // `gap`: why the session can't take the action at all (P5 O9 M9), shown in place of the unregistered words; the UX wave,
 // U9: else the window's helper's sentence for an act on another machine.
 function SessionMenuItem({ id, appSessionId, label, gap: given = null }: { id: SessionActionId; appSessionId: AppSessionId; label: string; gap?: string | null }) {
   const remoteGap = useSessionActionUnavailable(id, appSessionId);
   const gap = given ?? remoteGap;
   const enabled = useSessionActionEnabled(id) && gap === null;
+  // board ticket 815: a greyed item keeps the menu's keyboard, its reason its description and its row note
+  if (!enabled) return <RefusedMenuItem kit={DropdownMenu} label={label} reason={gap ?? 'Not available here'} className={SESSION_ITEM} />;
   return (
-    <DropdownMenu.Item
-      disabled={!enabled}
-      onSelect={() => runSessionAction(id, appSessionId)}
-      title={enabled ? undefined : (gap ?? 'Not available here')}
-      className="flex h-7 cursor-default items-center rounded-sm px-2 outline-none select-none data-disabled:text-fg-faint data-highlighted:bg-bg-hover"
-    >
+    <DropdownMenu.Item onSelect={() => runSessionAction(id, appSessionId)} className={SESSION_ITEM}>
       {label}
     </DropdownMenu.Item>
   );

@@ -103,7 +103,9 @@ describe('the usage ring', () => {
     expect(track().getAttribute('class')).toContain('stroke-border-strong');
     expect(ring().textContent).toBe('');
     expect(ring().getAttribute('aria-label')).toBe(`Usage · 5h ${percent}% · 3@example.test`);
-    expect(ring().getAttribute('title')).toBe(ring().getAttribute('aria-label'));
+    act(() => ring().focus());
+    expect(screen.getByRole('tooltip').textContent, 'its words its tooltip, which focus opens (ticket 815)').toBe(ring().getAttribute('aria-label'));
+    act(() => ring().blur());
     expect(ring().querySelector('svg')!.getAttribute('class')).not.toContain('opacity-50');
   });
 

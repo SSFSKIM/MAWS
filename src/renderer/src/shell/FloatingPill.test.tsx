@@ -33,7 +33,7 @@ import { resetShellStores } from '../test-support/shell-stores';
 import { FloatingCardLayer, SplitCardLayer } from './FloatingCard';
 import { chatPresentation, hideChat, useFloatingCard } from './floating';
 import { drawsBesideTheBox } from './FloatingPill';
-import { accessibleText } from '../test-support/accessible-text';
+import { accessibleDescription, accessibleText } from '../test-support/accessible-text';
 
 // P5 O6 M2: the page holds addresses; the fake `window.maws` (main) is asked with, and keys its drafts by, the bare ids
 const BARE_A = 'app-a' as AppSessionId;
@@ -196,7 +196,7 @@ it('is the composer’s box alone: no toolbar in the accessibility tree, no titl
   expect(within(bar).queryByRole('toolbar'), 'the toolbar is not in the accessibility tree').toBeNull();
   expect(bar.querySelector('[role="toolbar"]')?.closest('[hidden]'), 'it stays mounted, hidden, as under a docked card').not.toBeNull();
   expect(within(bar).queryByRole('button', { name: 'Show session card' }), 'no title button').toBeNull();
-  expect(within(bar).getByRole('button', { name: 'Open conversation' }).title).toBe(useSessions.getState().records.get(A)!.title.text);
+  expect(accessibleDescription(within(bar).getByRole('button', { name: 'Open conversation' })), 'the title its tip and description (ticket 815)').toBe(useSessions.getState().records.get(A)!.title.text);
   expect(within(bar).getByRole('button', { name: 'Hide chat' })).toBeTruthy();
   expect(bar.style.width).toBe('484px');
   expect([bar.style.right, bar.style.bottom]).toEqual(['16px', '16px']);

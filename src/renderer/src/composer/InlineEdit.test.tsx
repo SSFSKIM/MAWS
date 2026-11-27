@@ -21,6 +21,7 @@ import { resetCatalogStore } from '../stores/catalog';
 import { ipcSource, registerBubbleEditor, useTranscriptStore, type Row } from '../transcript';
 import { builder } from '../transcript/model/test-events';
 import { renderRow } from '../transcript/view/rows/test-support';
+import { accessibleDescription } from '../test-support/accessible-text';
 import { Composer } from './Composer';
 import { resetDockedCards } from './docked/registry';
 import { BubbleEdit, BUSY_REASON } from './InlineEdit';
@@ -207,7 +208,7 @@ describe('Edit turns the bubble into an editor in its place', () => {
   // The UX wave, U9 (O-48, A8; Interfaces §4): the edit's Fork reads the one helper for a session on another machine, so a
   // fork that can't work there is drawn disabled with its sentence. The page is made another machine's (its own is not the
   // session's), the session's machine listed over RL2 by a build that doesn't serve the acts.
-  it('draws Fork disabled with the helper’s sentence for a session on another machine that can’t fork it', async () => {
+  it('draws Fork greyed with the helper’s sentence for a session on another machine that can’t fork it', async () => {
     const forkFrom = vi.fn(async () => ({ appSessionId: at('app-fork' as AppSessionId) }));
     const off = registerResubmitProvider({ forkFrom });
     try {
@@ -220,8 +221,8 @@ describe('Edit turns the bubble into an editor in its place', () => {
         useSessions.setState({ listed: new Map([[A, { ...remoteRow(TEST_MACHINE, A_ID), appId: A }]]), listedMachines: new Set([TEST_MACHINE]) });
       });
       const fork = within(editor()).getByRole('button', { name: 'Fork' }) as HTMLButtonElement;
-      expect(fork.disabled).toBe(true);
-      expect(fork.title).toBe('Can’t fork on Studio yet. Update MAWS on Studio and try again.');
+      expect([fork.disabled, fork.getAttribute('aria-disabled')], 'greyed, keeping Tab (ticket 815)').toEqual([false, 'true']);
+      expect(accessibleDescription(fork)).toBe('Can’t fork on Studio yet. Update MAWS on Studio and try again.');
       fireEvent.click(fork);
       expect(forkFrom).not.toHaveBeenCalled();
     } finally {

@@ -2,7 +2,7 @@
 // default, offering each up RL2 machine (2026-11-06: with or without a project, the local project's checkout there taken
 // when it holds one); another machine chosen, the chip names it, and no line under the row says it again (the word cut,
 // C67). While the machines are asked, a quiet spinner (C71). No RL2 machine up, no menu.
-import { cleanup, render, screen, waitFor, within } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId, ProjectId } from '@shared/graph/ids';
@@ -13,6 +13,7 @@ import type { OrgKey } from '@shared/machine/org-key';
 import { project } from '../../../../../test/support/builders';
 import { OTHER_MACHINE, TEST_MACHINE } from '../../../../../test/support/machine';
 import { ipc } from '../../ipc/client';
+import { accessibleDescription } from '../../test-support/accessible-text';
 import { useDialogs } from '../../sessions/dialogs';
 import { resetRemoteSpawn, spawnTargetOf, useRemoteSpawn } from '../../sessions/remote-spawn';
 import { SETUP_WORDS } from '../../sessions/remote-setup';
@@ -149,8 +150,10 @@ describe('the machine menu', () => {
   it('is closed while the row is, and absent with no RL2 machine up', () => {
     const { unmount } = render(<MachineMenu appSessionId={TAB} projectId={null} projectKey={null} disabled="Starting…" />);
     const chip = screen.getByRole<HTMLButtonElement>('button', { name: 'Machine This Mac' });
-    expect(chip.disabled).toBe(true);
-    expect(chip.title).toBe('Starting…');
+    expect([chip.disabled, chip.getAttribute('aria-disabled')], 'greyed, keeping Tab (ticket 815)').toEqual([false, 'true']);
+    expect(accessibleDescription(chip)).toBe('Starting…');
+    fireEvent.click(chip);
+    expect(screen.queryByRole('dialog', { name: 'Choose a machine' }), 'its press opens nothing').toBeNull();
     unmount();
     useMachines.getState().applyRoster([{ ...up(TEST_MACHINE, 'This Mac'), local: true, carrier: undefined }, up(OTHER_MACHINE, 'profile-b', { carrier: 'socket' })]);
     view();

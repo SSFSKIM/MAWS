@@ -9,6 +9,7 @@
 import { Popover } from 'radix-ui';
 import { useState } from 'react';
 import { NamedGlyph } from '../../ui/glyph';
+import { Tip } from '../../ui/tip';
 import { LOCATION_COPY } from '../copy';
 import type { LocationView } from './bindings';
 import { CHIP, focusPopoverItself, NOTE, POPOVER } from './chip-style';
@@ -52,16 +53,20 @@ export function LocationChip({ location, directories, dirty, onOpen }: LocationC
         setOpen(next);
       }}
     >
-      <Popover.Trigger aria-label={`Location ${path}`} title={[`${path}${branch !== null ? ` · ${branch}` : ''}`, note].filter((part) => part).join(' · ')} className={`${CHIP} shrink-0 font-mono`}>
-        {/* Truncate the location as one label, never an empty project followed by an orphan separator and branch. */}
-        <span className="truncate">{directoryName(path)}{branch !== null ? ` · ⎇ ${branch}` : ''}</span>
-        {dirty && (
-          <span aria-label="uncommitted changes" className="shrink-0 text-warning">
-            ●
-          </span>
-        )}
-        <span aria-hidden className="shrink-0 text-fg-faint">⌄</span>
-      </Popover.Trigger>
+      {/* board ticket 815: the path, the branch and the note are the chip's tooltip, which keyboard focus opens; the note,
+          which neither the name nor the chip says, its description */}
+      <Tip content={[`${path}${branch !== null ? ` · ${branch}` : ''}`, note].filter((part) => part).join(' · ')} description={note}>
+        <Popover.Trigger aria-label={`Location ${path}`} className={`${CHIP} shrink-0 font-mono`}>
+          {/* Truncate the location as one label, never an empty project followed by an orphan separator and branch. */}
+          <span className="truncate">{directoryName(path)}{branch !== null ? ` · ⎇ ${branch}` : ''}</span>
+          {dirty && (
+            <span aria-label="uncommitted changes" className="shrink-0 text-warning">
+              ●
+            </span>
+          )}
+          <span aria-hidden className="shrink-0 text-fg-faint">⌄</span>
+        </Popover.Trigger>
+      </Tip>
       <Popover.Portal>
         <Popover.Content aria-label="Location" side="top" align="start" sideOffset={6} collisionPadding={8} onOpenAutoFocus={focusPopoverItself} className={`${POPOVER} flex w-80 flex-col gap-1`}>
           <p className="px-2 pt-1 font-mono text-ui-sm break-all">{path}</p>

@@ -24,6 +24,7 @@ import { POPOVER_TICK_MS, useNow } from '../statusline/use-now';
 import { useUsage } from '../stores/usage';
 import { useUsageControls } from './controls';
 import { useHandOff } from './hand-off';
+import { UnavailableButton } from '../ui/tip';
 
 const ACTION =
   'rounded-sm px-1.5 py-1 text-ui-sm whitespace-nowrap text-fg-muted outline-accent hover:bg-bg-hover hover:text-fg focus-visible:outline-2 disabled:text-fg-faint disabled:hover:bg-transparent';
@@ -160,8 +161,11 @@ export function UsagePanel() {
 
       <div className="mt-3 flex flex-col gap-1.5 border-t border-border pt-3 text-ui-sm">
         {model?.gateway && (
-          <label className="flex items-center gap-2 text-fg-muted" title={USAGE.routingToggleHint}>
-            <input type="checkbox" checked={model.gateway.routingEnabled} disabled readOnly className="accent-accent" />
+          // board ticket 815: read-only here, the box is greyed and keeps Tab, why its tooltip and its description
+          <label className="flex items-center gap-2 text-fg-muted">
+            <UnavailableButton reason={USAGE.routingToggleHint}>
+              <input type="checkbox" checked={model.gateway.routingEnabled} readOnly className="rounded-sm accent-accent outline-accent focus-visible:outline-2 aria-disabled:opacity-50" />
+            </UnavailableButton>
             {USAGE.routingToggle}
           </label>
         )}

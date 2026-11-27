@@ -65,7 +65,10 @@ describe('the chrome yields to the tab strip', () => {
     const actions = await screen.findByRole('menuitem', { name: 'Session actions' });
     act(() => actions.focus());
     await user.keyboard('{ArrowRight}');
+    // a greyed item keeps the menu's keyboard (ticket 815): Open in split, with no splitter registered, comes first
     const pinItem = await screen.findByRole('menuitem', { name: 'Pin' });
+    expect(document.activeElement).toBe(screen.getByRole('menuitem', { name: 'Open in split' }));
+    await user.keyboard('{ArrowDown}');
     expect(document.activeElement).toBe(pinItem);
     await user.keyboard('{Enter}');
     expect(pin).toHaveBeenCalledWith(A);
@@ -277,6 +280,11 @@ it('Settings opened from the gear of the sidebar drawn over the window gives the
   await userEvent.click(within(document.getElementById('region-sidebar')!).getByRole('button', { name: 'Workspace settings' }));
   expect(useLayout.getState().settings).toEqual({ section: null });
   expect(useShellView.getState().sidebarOverlay).toBe(false);
+  // no section is drawn here, so the keyboard lands on Close, whose tooltip its focus opens (ticket 815): the first Esc
+  // closes that tooltip, the next Settings
+  expect(screen.getByRole('tooltip').textContent).toBe('Close');
+  await userEvent.keyboard('{Escape}');
+  expect(useLayout.getState().settings).toEqual({ section: null });
   await userEvent.keyboard('{Escape}');
   await act(() => new Promise<void>((resolve) => setTimeout(resolve, 0)));
   expect(useLayout.getState().settings).toBeNull();
@@ -334,7 +342,9 @@ describe('the portaled pane strip order', () => {
     const left = within(strips()).getByRole('tablist', { name: 'Left pane tabs' });
     const right = within(strips()).getByRole('tablist', { name: 'Right pane tabs' });
     act(() => within(left).getByRole('tab').focus());
-    // The disabled New chat buttons are skipped; Tab should reach the right active tab next.
+    // The greyed New chat buttons keep Tab (ticket 815): Tab reaches the left strip's, then the right active tab.
+    await user.tab();
+    expect(document.activeElement).toBe(within(left.parentElement!).getByRole('button', { name: 'New chat' }));
     await user.tab();
     expect(document.activeElement).toBe(within(right).getByRole('tab'));
   });

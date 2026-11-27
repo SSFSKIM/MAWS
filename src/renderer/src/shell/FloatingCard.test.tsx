@@ -27,6 +27,7 @@ import { MARKUP_COPY, resetMarkup, useMarkup } from '../markup/session'; // P3-G
 import { resetMarkupSurfaces, useRegionMarkupSurface } from '../markup/surface'; // P3-G (M4)
 import { EditorHostScopeContext } from '../panel/editor-host'; // P3-G (M4)
 import { RegionControls, StripControls } from '../panel/PanelHeader';
+import { accessibleDescription } from '../test-support/accessible-text';
 import { CommentCardHost } from '../side/card/CardHost'; // P3-G (M4)
 import { fail, installFakeMain, ok } from '../test-support/code'; // P3-G (M4)
 import { itemFor, permission } from '../request-card/test-requests'; // UX wave U1b
@@ -149,7 +150,7 @@ describe('the floating card in the Shell', () => {
     expect(composers()).toEqual([A]);
     expect(within(bar()!).getByTestId('composer')).toBeTruthy();
     const open = within(bar()!).getByRole('button', { name: 'Open conversation' });
-    expect(open.title).toBe('Alpha session');
+    expect(accessibleDescription(open), 'the title its tip and description (ticket 815)').toBe('Alpha session');
     expect(open.querySelector('[data-session-mark]')).toBeNull();
     act(() => useSessions.setState({ records: new Map([[A, { ...record(A), title: { text: 'Alpha session', source: 'user' }, unread: true }]]) }));
     expect(open.querySelector('[data-session-mark]')?.getAttribute('data-session-mark')).toBe('unread');

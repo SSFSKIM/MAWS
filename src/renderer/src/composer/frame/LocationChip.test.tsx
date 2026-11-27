@@ -5,6 +5,7 @@ import { act, cleanup, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it } from 'vitest';
 import { LocationChip } from './LocationChip';
+import { accessibleDescription } from '../../test-support/accessible-text';
 
 const tooltip = () => screen.queryByRole('tooltip')?.textContent ?? null;
 afterEach(cleanup);
@@ -13,7 +14,8 @@ describe('the location chip', () => {
   it('shows the path and the extra folders, with no line saying the location is fixed', async () => {
     render(<LocationChip location={{ path: '/work/app', branch: 'main', note: null }} directories={['/work/extra']} dirty={false} />);
     const chip = screen.getByRole('button', { name: 'Location /work/app' });
-    expect(chip.title).toBe('/work/app · main');
+    act(() => chip.focus());
+    expect(tooltip(), 'its tooltip, which focus opens (ticket 815)').toBe('/work/app · main');
     await userEvent.setup().click(chip);
     const popover = screen.getByRole('dialog', { name: 'Location' });
     expect(popover.textContent).not.toContain('fixed');
@@ -22,7 +24,7 @@ describe('the location chip', () => {
 
   it('keeps a note it is given, a gate’s reason', () => {
     render(<LocationChip location={{ path: '', branch: null, note: 'Session ended' }} directories={[]} dirty={false} />);
-    expect(screen.getByRole('button', { name: /^Location/ }).title).toBe('Session ended');
+    expect(accessibleDescription(screen.getByRole('button', { name: /^Location/ }))).toBe('Session ended');
   });
 
   it('copies an extra folder from a glyph named Copy, then Copied, its word its tooltip on focus', async () => {

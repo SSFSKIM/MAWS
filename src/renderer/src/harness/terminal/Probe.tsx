@@ -24,6 +24,7 @@ import type { Metrics } from './metrics';
 import { Pane, type PaneDebug, type ProbeSnapshot } from './pane';
 import { RegistryPane, terminalsApi } from './RegistryPane';
 import { useHarnessTheme } from './useHarnessTheme';
+import { Tip } from '../../ui/tip';
 
 // The candidates on the page; a second entry mounts a second pane on the right.
 const KINDS: RendererKind[] = ['xterm'];
@@ -240,15 +241,12 @@ export function Probe() {
         </div>
         <div role="group" aria-label="workloads" className="flex flex-wrap gap-1 [app-region:no-drag]">
           {Object.entries(workloads).map(([id, workload]) => (
-            <button
-              key={id}
-              type="button"
-              onClick={() => void runWorkload(id)}
-              className="rounded-sm border border-border px-2 py-0.5 text-fg hover:bg-bg-hover"
-              title={workload.title}
-            >
-              {id}
-            </button>
+            // board ticket 815: what the workload does is its tooltip, which keyboard focus opens
+            <Tip key={id} content={workload.title} description={workload.title}>
+              <button type="button" onClick={() => void runWorkload(id)} className="rounded-sm border border-border px-2 py-0.5 text-fg outline-accent hover:bg-bg-hover focus-visible:outline-2">
+                {id}
+              </button>
+            </Tip>
           ))}
           <button
             type="button"

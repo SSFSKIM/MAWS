@@ -15,6 +15,7 @@ import { activeTab, currentSet } from '../stores/layout-model';
 import { fillStores, pageScenario, resetShellStores, scenarioFile } from '../test-support/shell-stores';
 import { DestinationPage } from '../destination/DestinationPage';
 import { OverviewLayer, placeRect } from './OverviewPanel';
+import { accessibleDescription } from '../test-support/accessible-text';
 
 const nine = scenarioFile('nine-sessions');
 const NEW = at('app-overview-created' as AppSessionId);
@@ -101,7 +102,10 @@ describe('the floating Overview', () => {
     expect(screen.queryByRole('dialog', { name: 'Overview' })).toBeNull();
     expect(button().getAttribute('aria-label')).toBe('Overview, 3 waiting');
     expect(button().textContent).toBe('◐3');
-    expect(button().getAttribute('title')).toBe('Overview, 3 waiting · ⌘0');
+    expect(accessibleDescription(button()), 'its chord, beside the name (ticket 815: a named glyph)').toBe('⌘0');
+    act(() => button().focus());
+    expect(screen.getByRole('tooltip').textContent).toBe('Overview, 3 waiting · ⌘0');
+    act(() => button().blur());
     await user.click(button());
     expect(useLayout.getState().overviewOpen).toBe(true);
     expect(button().getAttribute('aria-pressed')).toBe('true');

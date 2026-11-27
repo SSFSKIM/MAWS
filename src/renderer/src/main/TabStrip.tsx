@@ -21,6 +21,7 @@ import { Tab, tabName, useTabLabel, TAB_DRAG_TYPE } from './Tab';
 import { useStripPlaces } from './tab-place';
 import { useKeyChord } from '../keymap/useKeyChord';
 import { focusPaneElement } from './pane-dom';
+import { GLYPH_BUTTON, NamedGlyph } from '../ui/glyph';
 
 export { TAB_DRAG_TYPE };
 
@@ -224,18 +225,12 @@ export function TabStrip({ pane, split, idPrefix }: { pane: Pane; split: boolean
 function NewSessionButton({ pane }: { pane: Pane }) {
   const canCreate = useSessionCreatorRegistered();
   return (
-    <button
-      type="button"
-      aria-label={NEW_CHAT}
-      title={canCreate ? NEW_CHAT : 'Not available here'}
-      disabled={!canCreate}
-      onClick={() => void newChat({ pane })}
-      className="mx-1 inline-flex size-7 shrink-0 items-center justify-center self-center rounded-sm text-fg-muted outline-accent hover:bg-bg-hover hover:text-fg focus-visible:outline-2 disabled:text-fg-faint disabled:hover:bg-transparent"
-    >
+    // board ticket 815: the named glyph; greyed, it keeps Tab and says why
+    <NamedGlyph label={NEW_CHAT} unavailable={canCreate ? null : 'Not available here'} onClick={() => void newChat({ pane })} className={`${GLYPH_BUTTON} mx-1 self-center`}>
       <span aria-hidden className="text-ui leading-none">
         +
       </span>
-    </button>
+    </NamedGlyph>
   );
 }
 

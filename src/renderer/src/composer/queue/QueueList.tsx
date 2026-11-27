@@ -15,6 +15,8 @@ import type { QueueEntry, QueuePauseReason } from '@shared/engine/session-state-
 import type { AppSessionId } from '@shared/graph/ids';
 import type { MawsBridge } from '@shared/ipc/schema';
 import { Icon } from '../../app/IconButton';
+import { RefusedMenuItem } from '../../ui/refused-menu-item';
+import { Tip, UNAVAILABLE_LOOK, UnavailableButton, unavailableClickProps } from '../../ui/tip';
 import { ipc } from '../../ipc/client';
 import { useSessionControls } from '../../session/controls/controls-for'; // P5 O9 M4
 import { clearStackNotice, setSendingNow, setStackOpen, useComposerStore } from '../../stores/composer';
@@ -41,7 +43,7 @@ export const PAUSED_COPY: Record<QueuePauseReason | 'none', string> = {
 
 const BUTTON = 'rounded-sm px-1.5 py-0.5 text-ui-sm text-fg-muted outline-accent hover:bg-bg-hover hover:text-fg focus-visible:outline-2 disabled:text-fg-faint';
 const ICON_BUTTON = 'flex size-6 items-center justify-center rounded-sm text-fg-muted outline-accent hover:bg-bg-hover hover:text-fg focus-visible:outline-2 disabled:text-fg-faint';
-const ITEM = 'flex cursor-default flex-col rounded-sm px-2 py-1 outline-none select-none data-highlighted:bg-bg-hover data-disabled:text-fg-faint';
+const ITEM = 'flex cursor-default flex-col rounded-sm px-2 py-1 outline-none select-none data-highlighted:bg-bg-hover data-disabled:text-fg-faint aria-disabled:text-fg-faint';
 const NO_KEYS: ReadonlySet<string> = new Set();
 
 // The row's three controls, on the app's 16 px icon grid
@@ -224,9 +226,11 @@ function StackRowView({ row, busy, acts, refusals, sending, inFlight, nextKeys, 
           <button type="button" className={BUTTON} disabled={inFlight} onClick={() => void run(row.key, acts.resume)}>
             Resume
           </button>
-          <button type="button" className={BUTTON} disabled={inFlight || editRefused !== null} title={editRefused ?? undefined} onClick={() => onTakeBack?.(row)}>
-            Edit
-          </button>
+          <UnavailableButton reason={editRefused}>
+            <button type="button" className={`${BUTTON} ${UNAVAILABLE_LOOK}`} disabled={editRefused === null && inFlight} onClick={() => onTakeBack?.(row)}>
+              Edit
+            </button>
+          </UnavailableButton>
           <button type="button" className={BUTTON} disabled={inFlight} onClick={() => void run(row.key, () => acts.remove(row))}>
             Delete
           </button>
@@ -278,14 +282,19 @@ function RowControls({ row, busy, acts, refusals, inFlight, nextKeys, run, onTak
   return (
     // over the end of the text, behind a short fade; drawn on the row's hover or keyboard focus
     <div className="absolute inset-y-0 right-0 flex items-start gap-0.5 bg-linear-to-l from-bg-raised from-75% to-transparent pl-6 opacity-0 group-focus-within:opacity-100 group-hover:opacity-100">
-      <button type="button" aria-label="Send now" title={sendTitle} className={ICON_BUTTON} disabled={inFlight || sendRefused !== null} onClick={() => void run(row.key, () => acts.sendNow(row, nextKeys))}>
-        <SendNowGlyph />
-      </button>
+      {/* board ticket 815: the glyphs' tooltips, which keyboard focus opens; greyed by a refusal, a glyph keeps Tab and says why */}
+      <Tip content={sendTitle} description={sendTitle} {...unavailableClickProps(sendRefused)}>
+        <button type="button" aria-label="Send now" className={`${ICON_BUTTON} ${UNAVAILABLE_LOOK}`} disabled={sendRefused === null && inFlight} onClick={() => void run(row.key, () => acts.sendNow(row, nextKeys))}>
+          <SendNowGlyph />
+        </button>
+      </Tip>
       {row.answer === null && (
         <>
-          <button type="button" aria-label="Delete" title={deleteRefused ?? undefined} className={ICON_BUTTON} disabled={inFlight || deleteRefused !== null} onClick={() => void run(row.key, () => acts.remove(row))}>
-            <BinGlyph />
-          </button>
+          <UnavailableButton reason={deleteRefused}>
+            <button type="button" aria-label="Delete" className={`${ICON_BUTTON} ${UNAVAILABLE_LOOK}`} disabled={deleteRefused === null && inFlight} onClick={() => void run(row.key, () => acts.remove(row))}>
+              <BinGlyph />
+            </button>
+          </UnavailableButton>
           {row.grant === null && ( // UX wave U1c (Interfaces §G; card 2): a grant's row is not edited or moved: an edited grant is no grant
             <DropdownMenu.Root modal={false}>
               <DropdownMenu.Trigger aria-label="More" className={ICON_BUTTON} disabled={inFlight}>
@@ -293,9 +302,13 @@ function RowControls({ row, busy, acts, refusals, inFlight, nextKeys, run, onTak
               </DropdownMenu.Trigger>
               <DropdownMenu.Portal>
                 <DropdownMenu.Content align="end" sideOffset={4} className="z-50 min-w-48 rounded-md border border-border-strong bg-bg-overlay p-1 text-ui text-fg">
-                  <DropdownMenu.Item className={ITEM} disabled={editRefused !== null} title={editRefused ?? undefined} onSelect={() => onTakeBack?.(row)}>
-                    Edit
-                  </DropdownMenu.Item>
+                  {editRefused !== null ? (
+                    <RefusedMenuItem kit={DropdownMenu} label="Edit" reason={editRefused} className={ITEM} />
+                  ) : (
+                    <DropdownMenu.Item className={ITEM} onSelect={() => onTakeBack?.(row)}>
+                      Edit
+                    </DropdownMenu.Item>
+                  )}
                   {move !== null && (
                     <DropdownMenu.Item className={ITEM} onSelect={() => void run(row.key, () => acts.move(row))}>
                       {move}

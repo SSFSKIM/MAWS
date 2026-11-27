@@ -11,6 +11,7 @@ import type { MachineState } from '@shared/ipc/schema/machines';
 import type { OrgKey } from '@shared/machine/org-key';
 import { HOME_CHECKOUT, SPAWN_HOME_CAPABILITY } from '@shared/ipc/schema/session';
 import { ipc } from '../../ipc/client';
+import { accessibleDescription } from '../../test-support/accessible-text';
 import { useDialogs } from '../../sessions/dialogs';
 import { resetRemoteSpawn, SPAWN_WORDS, spawnTargetOf, useRemoteSpawn, type SpawnTarget } from '../../sessions/remote-spawn';
 import { forgetRemotePlaces, SETUP_WORDS } from '../../sessions/remote-setup';
@@ -67,7 +68,7 @@ describe('the project row', () => {
   it('reads "Choose a project" with a waiting dot and no branch or checkbox until one is chosen', () => {
     render(<ProjectRow binding={binding()} />);
     const chip = screen.getByRole('button', { name: 'Choose a project' });
-    expect(chip.title, 'the word cut (C65): no tooltip before a choice').toBe('');
+    expect([chip.hasAttribute('title'), accessibleDescription(chip)], 'the word cut (C65): no tooltip before a choice').toEqual([false, '']);
     expect(chip.querySelector('.bg-fg-faint')).not.toBeNull();
     expect(screen.queryByRole('checkbox')).toBeNull();
     expect(screen.queryByLabelText(/^Branch /)).toBeNull();
@@ -198,7 +199,7 @@ describe('the project row', () => {
     const b = binding({ projectId: ALPHA, label: 'Alpha', path: '/work/alpha', branch: 'main', worktree: false });
     render(<ProjectRow binding={b} />);
     const chip = screen.getByRole('button', { name: 'Project Alpha' });
-    expect(chip.title, 'the word cut (C65): the chosen folder').toBe('/work/alpha');
+    expect(accessibleDescription(chip), 'the word cut (C65): the chosen folder').toBe('/work/alpha');
     expect(chip.querySelector('.bg-success')).not.toBeNull();
     expect(screen.getByLabelText('Branch main').textContent).toBe('⎇ main');
     const user = userEvent.setup();
@@ -223,8 +224,13 @@ describe('the project row', () => {
   it('disables every choice with the gate’s reason', async () => {
     const b = binding({ projectId: ALPHA, label: 'Alpha', path: '/work/alpha', worktree: true, disabled: 'Session is starting…' });
     render(<ProjectRow binding={b} />);
-    expect(screen.getByRole('button', { name: 'Project Alpha' }).title).toBe('Session is starting…');
-    expect((screen.getByRole('checkbox', { name: 'Worktree' }) as HTMLInputElement).disabled).toBe(true);
+    expect(accessibleDescription(screen.getByRole('button', { name: 'Project Alpha' }))).toBe('Session is starting…');
+    // ticket 815: the box is greyed, keeping Tab, its reason its description, and its press changes nothing
+    const box = screen.getByRole('checkbox', { name: 'Worktree' }) as HTMLInputElement;
+    expect([box.disabled, box.getAttribute('aria-disabled'), accessibleDescription(box)]).toEqual([false, 'true', 'Session is starting…']);
+    await userEvent.setup().click(box);
+    expect(box.checked).toBe(true);
+    expect(b.setWorktree).not.toHaveBeenCalled();
     await userEvent.setup().click(screen.getByRole('button', { name: 'Project Alpha' }));
     expect(within(menu()).getAllByRole('option').every((o) => o.getAttribute('aria-disabled') === 'true')).toBe(true);
   });
@@ -233,9 +239,9 @@ describe('the project row', () => {
   it('lists the additional directories read-only in the chip’s tooltip and its menu, and nothing when there are none', async () => {
     const b = binding({ projectId: ALPHA, label: 'Alpha', path: '/work/alpha' });
     const { rerender } = render(<ProjectRow binding={b} />);
-    expect(screen.getByRole('button', { name: 'Project Alpha' }).title).toBe('/work/alpha');
+    expect(accessibleDescription(screen.getByRole('button', { name: 'Project Alpha' }))).toBe('/work/alpha');
     rerender(<ProjectRow binding={b} directories={['/work/shared', '/Users/someone/notes']} />);
-    expect(screen.getByRole('button', { name: 'Project Alpha' }).title).toBe('/work/alpha\n\nAdditional directories\n/work/shared\n~/notes');
+    expect(accessibleDescription(screen.getByRole('button', { name: 'Project Alpha' }))).toBe('/work/alpha\n\nAdditional directories\n/work/shared\n~/notes');
     await userEvent.setup().click(screen.getByRole('button', { name: 'Project Alpha' }));
     const list = within(menu()).getByRole('list', { name: 'Additional directories' });
     expect(within(list).getAllByRole('listitem').map((li) => [li.textContent, li.title])).toEqual([
@@ -316,7 +322,7 @@ describe('the project row on another machine', () => {
     onMini();
     render(<ProjectRow binding={binding({ projectId: ALPHA, label: 'Alpha', path: '/work/alpha', branch: 'main', worktree: false })} appSessionId={TAB} />);
     const chip = screen.getByRole('button', { name: 'Choose a project' });
-    expect(chip.title, 'C65: no tooltip before a place is chosen there').toBe('');
+    expect(accessibleDescription(chip), 'C65: no tooltip before a place is chosen there').toBe('');
     expect(screen.queryByLabelText(/^Branch /)).toBeNull();
     expect(screen.queryByRole('checkbox')).toBeNull();
     const user = userEvent.setup();
@@ -326,7 +332,7 @@ describe('the project row on another machine', () => {
     expect(invoke).toHaveBeenCalledWith('machine.folders.list', {}, { machine: OTHER_MACHINE });
     await user.click(within(menu()).getByRole('option', { name: 'notes' }));
     expect(spawnTargetOf(TAB, null)).toEqual({ machine: OTHER_MACHINE, name: 'mini', checkout: '/Users/mini/notes', key: null, label: 'notes' });
-    expect(screen.getByRole('button', { name: 'Project notes' }).title).toBe(PLACE_WORDS.chosen('notes', 'mini'));
+    expect(accessibleDescription(screen.getByRole('button', { name: 'Project notes' }))).toBe(PLACE_WORDS.chosen('notes', 'mini'));
     expect(PLACE_WORDS.chosen('notes', 'mini')).toBe('notes on mini');
   });
 

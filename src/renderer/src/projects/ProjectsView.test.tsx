@@ -12,6 +12,7 @@ import { useSessions } from '../stores/sessions';
 import { resetShellStores } from '../test-support/shell-stores';
 import { ProjectsView } from './ProjectsView';
 import { AddProject } from '../sidebar/AddProject';
+import { accessibleDescription } from '../test-support/accessible-text';
 
 // P5 O6 M2: a project as the page holds it: addressed, named and placed as the builder names and places the bare id
 const projectOnPage = (id: string, order: number, over: Partial<ProjectRecord> = {}) => project(at(id), order, { name: id, directory: `/work/${id}`, ...over });
@@ -161,12 +162,13 @@ describe('Projects sidebar membership', () => {
   it('disables unavailable registry actions and uses the registered native folder chooser, including cancellation', async () => {
     const user = userEvent.setup();
     render(<ProjectsView />);
-    expect(hide('atlas · personal')).toHaveProperty('disabled', true);
+    // ticket 815: greyed, each keeps Tab and says why, and its press does nothing
     const choose = screen.getByRole('button', { name: 'Choose folder…' });
-    expect(choose).toHaveProperty('disabled', true);
+    for (const control of [hide('atlas · personal'), choose]) expect([control.getAttribute('aria-disabled'), accessibleDescription(control)]).toEqual(['true', 'Not available here']);
+    await user.click(choose);
+    expect(fake.calls).toEqual([]);
     act(() => { offs.push(registerSessionActions()); });
-    expect(hide('atlas · personal')).toHaveProperty('disabled', false);
-    expect(choose).toHaveProperty('disabled', false);
+    for (const control of [hide('atlas · personal'), choose]) expect([control.getAttribute('aria-disabled'), (control as HTMLButtonElement).disabled]).toEqual([null, false]);
     await user.click(choose);
     expect(fake.invoked('layout.pickFiles')).toEqual([{ kind: 'directory', directory: null, multiple: false }]);
     await act(() => fake.reply('layout.pickFiles', { files: [] }));

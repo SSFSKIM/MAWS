@@ -1,6 +1,7 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { JSONContent } from '@tiptap/core';
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { accessibleDescription } from '../test-support/accessible-text';
 import userEvent from '@testing-library/user-event';
 import { useRef, useSyncExternalStore, type ReactNode } from 'react';
 import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest';
@@ -205,6 +206,8 @@ const editorOf = (index: 0 | 1 = 0) => within(composerOf(index)).getByRole('text
 const type = (text: string, index: 0 | 1 = 0) => act(() => void editorOf(index).editor.commands.insertContent(text));
 const key = (target: HTMLElement, init: KeyboardEventInit) => act(async () => void target.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, cancelable: true, ...init })));
 const primary = (index: 0 | 1 = 0) => composerOf(index).querySelector<HTMLButtonElement>('[data-submit-state]')!;
+// The submit control greyed: disabled, or, with a reason, drawn aria-disabled and keeping Tab (ticket 815)
+const greyed = (control: HTMLButtonElement): boolean => control.disabled || control.getAttribute('aria-disabled') === 'true';
 const invoked = (name: Parameters<FakeClient['invoked']>[0]) => fake.invoked(name);
 // Board ticket 421: the machine's spine's answer, with its default set when it knows the choice
 const machineAnswer = (mawsTools?: typeof FULL_MAWS_TOOL_SET) => ({ settings: machineSettingsDefaults(), version: 1, ...(mawsTools && { mawsTools }) });
@@ -235,7 +238,7 @@ describe("composer DOM under C5's dispatcher", () => {
     mount([{ index: 0, id: A }]);
     await type('hello');
     expect(primary().textContent).toBe('Send');
-    expect(primary().title).toBe('Send (Enter)');
+    expect(accessibleDescription(primary())).toBe('Send · Enter');
     await key(editorOf(), { key: 'Enter' });
     await waitFor(() => expect(invoked('session.send')).toEqual([{ appSessionId: A_ID, content: 'hello' }]));
     await waitFor(() => expect(editorOf().editor.getText()).toBe(''));
@@ -245,7 +248,7 @@ describe("composer DOM under C5's dispatcher", () => {
     await type('fold this in');
     act(() => editorOf().focus());
     await waitFor(() => expect(primary().textContent).toBe('Send'));
-    expect(primary().title).toBe('Sends at the next step (Enter) · ⌘Enter queues for later'); // UX wave U4a
+    expect(accessibleDescription(primary())).toBe('Sends at the next step · Enter · ⌘Enter queues for later'); // UX wave U4a
     expect(primary().dataset.glyph).toBe('queue'); // UX wave U4a: the queue mark
     expect(primary().getAttribute('aria-description')).toBe('Sends at the next step');
     // ⌥ held changes nothing, and nothing sits beside the button
@@ -270,7 +273,7 @@ describe("composer DOM under C5's dispatcher", () => {
     busy(A);
     mount([{ index: 0, id: A }]);
     await waitFor(() => expect(primary().textContent).toBe('Stop'));
-    expect(primary().title).toBe('Stop the running turn (⌘.)');
+    expect(accessibleDescription(primary())).toBe('Stop the running turn · ⌘.');
     await userEvent.setup().click(primary());
     await waitFor(() => expect(invoked('session.interrupt')).toEqual([{ appSessionId: A_ID, cancelEngineQueued: false, holdEngineQueued: true }]));
   });
@@ -412,7 +415,7 @@ describe("composer DOM under C5's dispatcher", () => {
     await waitFor(() => expect(primary().textContent).toBe('Stop'));
     await type('second');
     await waitFor(() => expect(primary().textContent).toBe('Send'));
-    expect(primary().title).toBe('Sends at the next step (Enter) · ⌘Enter queues for later'); // UX wave U4a
+    expect(accessibleDescription(primary())).toBe('Sends at the next step · Enter · ⌘Enter queues for later'); // UX wave U4a
     expect(within(composerOf(0)).queryByRole('button', { name: 'Stop' })).toBeNull(); // W10: nothing beside it
   });
 
@@ -430,7 +433,7 @@ describe("composer DOM under C5's dispatcher", () => {
     // l2-transcript-15 (b46e2ea63): fresh text after Stop sends now, without resuming older held messages.
     await type('one more');
     await waitFor(() => expect(primary().textContent).toBe('Send'));
-    expect(primary().title).toBe('Sends this now (Enter)');
+    expect(accessibleDescription(primary())).toBe('Sends this now · Enter');
     await key(editorOf(), { key: 'Enter' });
     await waitFor(() => expect(invoked('session.send')).toEqual([{ appSessionId: A_ID, content: 'one more' }]));
     expect(invoked('session.steer')).toEqual([]);
@@ -754,7 +757,7 @@ describe("composer DOM under C5's dispatcher", () => {
       // UX wave U4a (decision 19): the name, the effort drawn muted, the whole display name and the alias as the tooltip
       expect(within(chip()).getByText('Sonnet relay').className).not.toContain('text-fg-muted');
       expect(within(chip()).getByText('High').className).toContain('text-fg-muted');
-      expect(chip().title).toBe('Sonnet relay · sonnet-relay');
+      expect(accessibleDescription(chip())).toBe('Sonnet relay · sonnet-relay');
       expect(invoked('session.getSettings')).toEqual([{ appSessionId: A_ID }]); // once, at ready
       await userEvent.click(chip());
       expect(await screen.findByText('effort view')).toBeTruthy(); // the chip opens on the effort view (Codex's)
@@ -813,8 +816,8 @@ describe("composer DOM under C5's dispatcher", () => {
     mount([{ index: 0, id: A }]);
     await type('!ls');
     await waitFor(() => expect(primary().textContent).toBe('Run'));
-    expect(primary().disabled).toBe(false);
-    expect(primary().title).toBe('Runs now; the model sees the output in this turn (Enter)');
+    expect(greyed(primary())).toBe(false);
+    expect(accessibleDescription(primary())).toBe('Runs now; the model sees the output in this turn · Enter');
     expect(primary().getAttribute('aria-description')).toBe('Runs now; the model sees the output in this turn');
   });
 
@@ -968,7 +971,7 @@ describe('sending from the box', () => {
     act(() => editorOf().focus());
     fold.characters = 0;
     for (const letter of ' and fix it') await type(letter);
-    expect(primary().disabled).toBe(false);
+    expect(greyed(primary())).toBe(false);
     expect(fold.characters).toBe(0);
     await key(editorOf(), { key: 'Enter' });
     await waitFor(() => expect(invoked('session.send')).toHaveLength(1));
@@ -1729,9 +1732,9 @@ describe('unstarted send holds a starting state', () => {
     expect(isStarting(useComposerStore.getState(), A)).toBe(true);
     expect(stub.start).toHaveBeenCalledWith({ content: 'first message', display: 'first message' });
     await waitFor(() => expect(primary().textContent).toBe('Starting…'));
-    expect(primary().disabled).toBe(true);
+    expect(greyed(primary())).toBe(true);
     expect(await addDirectoryState()).toBe('Session is starting…'); // W10: the "+" menu's item is gated as every chip is
-    expect(within(composerOf(0)).getByRole('button', { name: /^Location/ }).title).toContain('Session is starting…');
+    expect(accessibleDescription(within(composerOf(0)).getByRole('button', { name: /^Location/ }))).toContain('Session is starting…');
     await key(editor, { key: 'Enter' });
     expect(editor.getAttribute('contenteditable')).toBe('false'); // read-only: a keystroke changes nothing
     expect(stub.start).toHaveBeenCalledTimes(1);
@@ -1740,7 +1743,7 @@ describe('unstarted send holds a starting state', () => {
     await stub.answer({ ok: false, error: 'missing_directory: /repo is gone' });
     await waitFor(() => expect(isStarting(useComposerStore.getState(), A)).toBe(false));
     expect(editor.editor.getText()).toBe('first message');
-    expect(primary().disabled).toBe(false);
+    expect(greyed(primary())).toBe(false);
     expect(await addDirectoryState()).toBeNull();
     expect(useNotices.getState().notices.map((n) => [n.text, n.actions.map((a) => a.label)])).toEqual([['missing_directory: /repo is gone', ['Retry']]]);
   });
@@ -1754,12 +1757,12 @@ describe('unstarted send holds a starting state', () => {
     await stub.answer({ ok: true });
     await waitFor(() => expect(editorOf().editor.getText()).toBe(''));
     expect(invoked('session.history.append')).toEqual([{ appSessionId: A_ID, display: 'go', pastedContents: {}, project: '/repo' }]);
-    expect(primary().title).toBe('Your first message is with the setup above');
-    expect(primary().disabled).toBe(true);
+    expect(accessibleDescription(primary())).toBe('Your first message is with the setup above');
+    expect(greyed(primary())).toBe(true);
     expect(await addDirectoryState()).toBe('Your first message is with the setup above');
     act(() => stub.set({ message: null }));
     await type('again');
-    await waitFor(() => expect(primary().disabled).toBe(false));
+    await waitFor(() => expect(greyed(primary())).toBe(false));
   });
 
   it('keeps its draft in the intent, never in C4’s drafts, and prefills through it', async () => {
@@ -1798,7 +1801,7 @@ describe('unstarted send holds a starting state', () => {
     const draft = { doc: docOf([paragraph(textNode('the sent text'))]), attachments: [], updatedAt: '2026-09-29T10:00:00.000Z' };
     stubIntent({ draft, message: { content: 'the sent text', display: 'the sent text' } });
     mount([{ index: 0, id: A }]);
-    await waitFor(() => expect(primary().title).toBe('Your first message is with the setup above'));
+    await waitFor(() => expect(accessibleDescription(primary())).toBe('Your first message is with the setup above'));
     await act(() => new Promise((resolve) => setTimeout(resolve, 0))); // the draft's load has answered
     expect(editorOf().editor.getText()).toBe('');
   });
@@ -1846,12 +1849,12 @@ describe('unstarted send holds a starting state', () => {
     await stub.answer({ ok: true });
     for (const phase of ['Creating worktree one…', 'Trusting /repo…', 'Starting…']) {
       act(() => stub.setPhase(phase));
-      await waitFor(() => expect(primary().title).toBe(phase));
+      await waitFor(() => expect(accessibleDescription(primary())).toBe(phase));
       expect(primary().textContent).toBe('Starting…');
-      expect(primary().disabled).toBe(true);
+      expect(greyed(primary())).toBe(true);
     }
     act(() => stub.setPhase(null));
-    await waitFor(() => expect(primary().title).toBe('Your first message is with the setup above'));
+    await waitFor(() => expect(accessibleDescription(primary())).toBe('Your first message is with the setup above'));
   });
 
   // W2 (C3): with no status line, the setup's phase shows in the composer's dock above the frame, before the record
@@ -1884,12 +1887,12 @@ describe('unstarted send holds a starting state', () => {
     mount([{ index: 0, id: A }]);
     await waitFor(() => expect(editorOf()).toBeTruthy());
     const location = within(composerOf(0)).getByRole('button', { name: /^Location/ });
-    expect(location.title).toBe('/repo · Where this session will run');
+    expect([location.getAttribute('aria-label'), accessibleDescription(location)]).toEqual(['Location /repo', 'Where this session will run']); // its tip reads `/repo · Where this session will run` (ticket 815)
     expect(await addDirectoryState()).toBeNull();
     vi.useFakeTimers();
     await type('after the failure');
     expect(primary().textContent).toBe('Send');
-    expect(primary().disabled).toBe(false);
+    expect(greyed(primary())).toBe(false);
     act(() => void vi.advanceTimersByTime(800));
     expect(stub.patch).toHaveBeenCalledTimes(1);
     expect(JSON.stringify(stub.patch.mock.calls[0][0])).toContain('after the failure');
@@ -1927,7 +1930,7 @@ describe('unstarted send holds a starting state', () => {
     mount([{ index: 0, id: A }]);
     const chip = within(composerOf(0)).getByRole('button', { name: `Location ${repo}` });
     expect(chip.textContent).toBe('repo⌄'); // the name; the path is the tooltip and the popover's first line; W9 (H2): no branch, no placeholder
-    expect(chip.title).toBe(`${repo} · Where this session will run`);
+    expect([chip.getAttribute('aria-label'), accessibleDescription(chip)]).toEqual([`Location ${repo}`, 'Where this session will run']);
     const user = userEvent.setup();
     await user.click(chip);
     const popover = screen.getByRole('dialog', { name: 'Location' });
@@ -1940,8 +1943,8 @@ describe('unstarted send holds a starting state', () => {
     stubIntent();
     mount([{ index: 0, id: A }]);
     await type('!ls');
-    await waitFor(() => expect(primary().title).toBe('Available once the session starts'));
-    expect(primary().disabled).toBe(true);
+    await waitFor(() => expect(accessibleDescription(primary())).toBe('Available once the session starts'));
+    expect(greyed(primary())).toBe(true);
     expect(within(composerOf(0)).queryByRole('region', { name: 'Queued messages' })).toBeNull();
     expect(invoked('session.queue.list')).toEqual([{ appSessionId: A_ID }]); // read, but an unstarted session lists nothing
   });
@@ -1960,7 +1963,7 @@ describe('Send on a session with a record and no ready process', () => {
     exitedBy(A, reason);
     mount([{ index: 0, id: A }]);
     await type('carry on');
-    await waitFor(() => expect(primary().disabled).toBe(false));
+    await waitFor(() => expect(greyed(primary())).toBe(false));
     expect(primary().getAttribute('aria-description')).toBe('Starts this session');
     await key(editorOf(), { key: 'Enter' });
     await waitFor(() => expect(fake.pending('session.acquire')).toBe(1));
@@ -2006,8 +2009,8 @@ describe('Send on a session with a record and no ready process', () => {
     useSessions.getState().applyDigest(digest(B, { phase: 'foreign', availability: 'foreign_held' }), TEST_MACHINE);
     mount([{ index: 0, id: A }, { index: 1, id: B }]);
     for (const [pane, words] of [[0, 'Archived · unarchive it to continue'], [1, 'Held by terminal · 42']] as const) {
-      expect(primary(pane).title).toBe(words);
-      expect(primary(pane).disabled).toBe(true);
+      expect(accessibleDescription(primary(pane))).toBe(words);
+      expect(greyed(primary(pane))).toBe(true);
     }
   });
 
@@ -2016,7 +2019,7 @@ describe('Send on a session with a record and no ready process', () => {
     useSessions.getState().applyDigest(digest(A, { phase: 'exited', availability: 'starting' }), TEST_MACHINE);
     mount([{ index: 0, id: A }]);
     await type('carry on');
-    await waitFor(() => expect(primary().disabled).toBe(false));
+    await waitFor(() => expect(greyed(primary())).toBe(false));
     expect(primary().textContent).toBe('Starting…');
     expect(primary().getAttribute('aria-description')).toBe('Sends once the session has started');
   });
@@ -2025,7 +2028,7 @@ describe('Send on a session with a record and no ready process', () => {
     exitedBy(A, 'stop');
     mount([{ index: 0, id: A }]);
     await type('!ls');
-    await waitFor(() => expect(primary().disabled).toBe(false));
+    await waitFor(() => expect(greyed(primary())).toBe(false));
     expect(primary().getAttribute('aria-description')).toBe('Starts this session');
     await key(editorOf(), { key: 'Enter' });
     await waitFor(() => expect(fake.pending('session.acquire')).toBe(1));
@@ -2115,8 +2118,8 @@ describe('a lane B session on another machine', () => {
     await act(() => remote.fail('session.send', 'session.send: refused grade by machine mini', 'internal', { refusal: 'grade' }));
     await waitFor(() => expect(useNotices.getState().notices.map((n) => [n.text, n.actions.map((a) => a.label)])).toEqual([[READER.notSent('Ana'), []]]));
     expect(within(composerOf(0)).getByRole('status', { name: 'Your access' }).textContent).toBe(READER.cantTalk('Ana'));
-    expect(primary().disabled).toBe(true);
-    expect(primary().title).toContain(READER.cantTalk('Ana'));
+    expect(greyed(primary())).toBe(true);
+    expect(accessibleDescription(primary())).toContain(READER.cantTalk('Ana'));
     await waitFor(() => expect(editorOf().getAttribute('contenteditable')).toBe('false'));
     expect(editorOf().editor.getText()).toBe('over there'); // the words stay
     resetReader();
@@ -2135,7 +2138,7 @@ describe('a lane B session on another machine', () => {
     runningWithLinkDown({ since: new Date().toISOString(), generation: 1 });
     mount([{ index: 0, id: R }]);
     await waitFor(() => expect(primary().textContent).toBe('Stop'));
-    expect(primary().disabled).toBe(false);
+    expect(greyed(primary())).toBe(false);
     await act(async () => primary().click());
     await waitFor(() => expect(remote.invoked('session.interrupt')).toHaveLength(1));
   });
@@ -2144,12 +2147,12 @@ describe('a lane B session on another machine', () => {
     runningWithLinkDown({ since: new Date(Date.now() - 5 * 60_000).toISOString(), generation: 1 });
     mount([{ index: 0, id: R }]);
     await waitFor(() => expect(primary().textContent).toBe('Stop'));
-    expect(primary().disabled).toBe(true);
-    expect(primary().title).toContain('Stop is unavailable while mini is offline.');
+    expect(greyed(primary())).toBe(true);
+    expect(accessibleDescription(primary())).toContain('Stop is unavailable while mini is offline.');
     await type('kept for later');
     await waitFor(() => expect(primary().textContent).toBe('Send'));
-    expect(primary().disabled).toBe(true);
-    expect(primary().title).toContain('Send is unavailable while mini is offline.');
+    expect(greyed(primary())).toBe(true);
+    expect(accessibleDescription(primary())).toContain('Send is unavailable while mini is offline.');
     await key(editorOf(), { key: 'Enter' });
     expect(remote.invoked('session.send')).toEqual([]);
     expect(remote.invoked('session.steer')).toEqual([]);
@@ -2161,8 +2164,8 @@ describe('a lane B session on another machine', () => {
     const reason = 'mini refused this device (grade)';
     act(() => applyRemoteSession(remoteSessionState(R, { controls: { ...ALL_OPEN, model: { available: false, reason }, mode: { available: false, reason } } })));
     mount([{ index: 0, id: R }]);
-    expect(within(composerOf(0)).getByRole('button', { name: /^Model / }).title).toBe(reason);
-    expect(within(composerOf(0)).getByRole('button', { name: /^Permission mode/ }).title).toBe(reason);
+    expect(accessibleDescription(within(composerOf(0)).getByRole('button', { name: /^Model / }))).toBe(reason);
+    expect(accessibleDescription(within(composerOf(0)).getByRole('button', { name: /^Permission mode/ }))).toBe(reason);
   });
 
   // P5 O16 M3b fix wave 2: re-attaching after its machine's engine host was replaced, the session's Stop would be
@@ -2174,8 +2177,8 @@ describe('a lane B session on another machine', () => {
     mount([{ index: 0, id: R }]);
     await waitFor(() => expect(primary().dataset.submitState).toBe('end'));
     expect(primary().textContent).toBe('Stop');
-    expect(primary().disabled).toBe(true);
-    expect(primary().title).toBe(REATTACHING_STOP_REMOTE);
+    expect(greyed(primary())).toBe(true);
+    expect(accessibleDescription(primary())).toBe(REATTACHING_STOP_REMOTE);
     expect(remote.invoked('session.stop')).toEqual([]);
   });
 
@@ -2389,8 +2392,8 @@ describe('a lane B session on another machine', () => {
     mount([{ index: 0, id: R }]);
     await type(typed);
     await waitFor(() => expect(primary().textContent).toBe(label));
-    expect(primary().disabled).toBe(true);
-    expect(primary().title).toBe(REMOTE_UNAVAILABLE[command]);
+    expect(greyed(primary())).toBe(true);
+    expect(accessibleDescription(primary())).toBe(REMOTE_UNAVAILABLE[command]);
     await key(editorOf(), { key: 'Enter' });
     await act(() => new Promise((resolve) => setTimeout(resolve, 20)));
     expect(remote.invoked(command)).toEqual([]);
@@ -2433,8 +2436,8 @@ describe('a lane B session on another machine', () => {
     await waitFor(() => expect(primary().getAttribute('aria-description')).toBe('Sends at the next step'));
     queueComposerAttachment(R, { files: [new File(['%PDF-1.4'], 'paper.pdf', { type: 'application/pdf' })], text: '' });
     await waitFor(() => expect(primary().getAttribute('aria-description')).toBe('Sends after this turn'));
-    expect(primary().title).toBe('Sends after this turn (Enter)');
-    expect(primary().disabled).toBe(false);
+    expect(accessibleDescription(primary())).toBe('Sends after this turn · Enter');
+    expect(greyed(primary())).toBe(false);
   });
 
   // P5 O8 M6a: the member's own draft on the machine, which a relaunch loads back
@@ -2479,7 +2482,7 @@ describe('a re-attaching session', () => {
     mount([{ index: 0, id: A }]);
     await waitFor(() => expect(primary().dataset.submitState).toBe('end'));
     expect(primary().textContent).toBe('Stop');
-    expect(primary().disabled).toBe(false);
+    expect(greyed(primary())).toBe(false);
     await userEvent.setup().click(primary());
     await waitFor(() => expect(invoked('session.stop')).toEqual([{ appSessionId: A_ID, reason: 'stop' }]));
     expect(invoked('session.interrupt')).toEqual([]);
@@ -2928,10 +2931,10 @@ describe('a Stop that fails says so (S-01)', () => {
     await act(async () => primary().click());
     expect(primary().textContent, 'not before 300 ms: on this Mac the act normally settles first').toBe('Stop');
     await waitFor(() => expect(primary().textContent).toBe('Stopping…'), { timeout: 2_000 });
-    expect(primary().disabled).toBe(true);
+    expect(greyed(primary())).toBe(true);
     await act(() => stops.reply('session.interrupt', { stillQueued: [], cancelled: [] }));
     await waitFor(() => expect(primary().textContent).toBe('Stop'));
-    expect(primary().disabled).toBe(false);
+    expect(greyed(primary())).toBe(false);
     expect(notices(), 'a Stop that worked says nothing').toEqual([]);
   });
 
@@ -2994,7 +2997,7 @@ describe('a Stop that fails says so (S-01)', () => {
       useMachines.getState().applyRoster([{ ref: OTHER_MACHINE, name: 'mini', local: false, state: 'down', since: '2026-11-13T09:00:00.000Z', generation: 0 }]);
       focusOn(R);
       mount([{ index: 0, id: R }], <ComposerAppKeys />);
-      await waitFor(() => expect(primary().title).toContain('Stop is unavailable while mini is offline.'));
+      await waitFor(() => expect(accessibleDescription(primary())).toContain('Stop is unavailable while mini is offline.'));
       act(() => editorOf().focus());
       await key(editorOf(), { key: 'Escape' });
       await key(editorOf(), { key: '.', code: 'Period', metaKey: true });
@@ -3162,7 +3165,7 @@ describe('the mode said aloud', () => {
     mode(B, 'default');
     try {
       mount([{ index: 0, id: A }, { index: 1, id: B }]);
-      await waitFor(() => expect(within(composerOf(0)).getByRole('button', { name: /^Permission mode/ }).title).not.toBe('Permission mode'));
+      await waitFor(() => expect(accessibleDescription(within(composerOf(0)).getByRole('button', { name: /^Permission mode/ }))).not.toBe('')); // its reason has come
       await shiftTab(0);
       expect(held).toHaveLength(0);
       expect(said(0)).toBe('');

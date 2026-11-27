@@ -6,6 +6,7 @@
 // first open), the board renders the cards it has and says above them, or in place of the empty board, that indexing
 // continues and how far it has come.
 import { useRef, useState, type KeyboardEvent } from 'react';
+import { UNAVAILABLE_LOOK, UnavailableButton } from '../ui/tip';
 import { useShallow } from 'zustand/react/shallow';
 import type { AppSessionId } from '@shared/graph/ids';
 import { NEW_CHAT, newChat, useSessionCreatorRegistered } from '../keymap/actions-runtime';
@@ -100,17 +101,18 @@ function EmptyBoard({ indexing, onSessionCreated }: { indexing: { scanned: numbe
   return (
     <div className="flex h-full flex-col items-center justify-center gap-3 text-ui text-fg-muted">
       {indexing ? <IndexingNote indexing={indexing} /> : <p className="m-0">Nothing live or unread</p>}
-      <button
-        type="button"
-        disabled={!canCreate}
-        title={canCreate ? undefined : 'Not available here'}
-        onClick={async () => {
-          if ((await newChat()) !== null) onSessionCreated?.();
-        }}
-        className="rounded-sm border border-border-strong px-2.5 py-1 text-fg outline-accent hover:bg-bg-hover focus-visible:outline-2 disabled:text-fg-faint disabled:hover:bg-transparent"
-      >
-        {NEW_CHAT}
-      </button>
+      {/* board ticket 815: greyed, it keeps Tab and says why */}
+      <UnavailableButton reason={canCreate ? null : 'Not available here'}>
+        <button
+          type="button"
+          onClick={async () => {
+            if ((await newChat()) !== null) onSessionCreated?.();
+          }}
+          className={`rounded-sm border border-border-strong px-2.5 py-1 text-fg outline-accent hover:bg-bg-hover focus-visible:outline-2 ${UNAVAILABLE_LOOK}`}
+        >
+          {NEW_CHAT}
+        </button>
+      </UnavailableButton>
     </div>
   );
 }

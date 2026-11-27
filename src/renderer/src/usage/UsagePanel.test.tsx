@@ -20,7 +20,7 @@ import { useUsage } from '../stores/usage';
 import { READ_ONLY_CONTROLS, useUsageControlState } from './controls';
 import { UsagePanel } from './UsagePanel';
 import { UsageRing } from './UsageRing';
-import { accessibleText } from '../test-support/accessible-text';
+import { accessibleDescription, accessibleText } from '../test-support/accessible-text';
 import { REL } from '../test-support/relative-time';
 import { TEST_MACHINE } from '../../../../test/support/machine';
 
@@ -139,7 +139,10 @@ describe('the usage panel', () => {
     expect(card(codex, '7@example.test').getAttribute('data-state')).toBe('needs_reauth');
 
     const toggle = within(panel).getByRole('checkbox', { name: 'Route Claude Code through this app' });
-    expect([(toggle as HTMLInputElement).checked, (toggle as HTMLInputElement).disabled]).toEqual([true, true]);
+    // ticket 815: read-only, greyed and keeping Tab, why its description; its press changes nothing
+    expect([(toggle as HTMLInputElement).checked, toggle.getAttribute('aria-disabled'), accessibleDescription(toggle)]).toEqual([true, 'true', "ClaudeUsage's own panel changes this"]);
+    fireEvent.click(toggle);
+    expect((toggle as HTMLInputElement).checked).toBe(true);
     // a listening relay is said in Settings › Gateway's Relay row, not here (G121); its ten minutes had trouble, so they stay (P488)
     expect(panel.querySelector('[data-relay-line]')).toBeNull();
     expect(panel.querySelector('[data-health]')!.textContent).toBe('Last 10 min: 8 requests · response start median 1.0s, p95 3.2s · 1 stall, 1 connection error, 1 refused, 1 held');

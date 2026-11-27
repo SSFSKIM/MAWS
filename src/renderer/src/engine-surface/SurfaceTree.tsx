@@ -10,6 +10,8 @@
 // opens the file through the registered opener for this surface's session (`SiteFiles`), in a composer site and a pane as
 // inside a transcript row; the chip's own click carries the line, ⌘ and the keyboard, so the capture handler is not given it.
 import { createContext, useContext, useId, useState, type MouseEvent, type ReactNode } from 'react';
+import { NamedGlyph } from '../ui/glyph';
+import { Tip } from '../ui/tip';
 import { parseArtifactLink } from '@shared/artifacts/link'; // P4-B4
 import { SURFACE_VALUE_MAX } from '@shared/engine/surface';
 import { endsSelection, Markdown, openArtifactMention, registeredActions } from '../transcript';
@@ -165,9 +167,10 @@ function ButtonNode({ node }: { node: Extract<SurfaceNode, { type: 'Button' }> }
   const onClick = () => sendPress(site, node.press, key);
   if (role === 'dismiss') {
     return (
-      <button type="button" data-surface="button" data-plugin={node.press.plugin} data-key={key} data-autofocus={node.props.autoFocus || undefined} data-role="dismiss" aria-label={SURFACE_COPY.dismiss(label)} title={SURFACE_COPY.dismiss(label)} onClick={onClick} className="inline-flex size-5 shrink-0 items-center justify-center rounded-sm text-fg-muted outline-accent hover:bg-bg-hover hover:text-fg focus-visible:outline-2">
+      // board ticket 815: the named glyph, its word a tooltip keyboard focus opens
+      <NamedGlyph data-surface="button" data-plugin={node.press.plugin} data-key={key} data-autofocus={node.props.autoFocus || undefined} data-role="dismiss" label={SURFACE_COPY.dismiss(label)} onClick={onClick} className="inline-flex size-5 shrink-0 items-center justify-center rounded-sm text-fg-muted outline-accent hover:bg-bg-hover hover:text-fg focus-visible:outline-2">
         ×
-      </button>
+      </NamedGlyph>
     );
   }
   const className = plain ? PLAIN : variant === 'primary' ? PRIMARY : BUTTON;
@@ -275,18 +278,20 @@ function LinkNode({ node }: { node: Extract<SurfaceNode, { type: 'Link' }> }) {
   const { site } = useSurface();
   const { href, label } = node.props;
   return (
-    <a
-      data-surface="link"
-      href={href}
-      title={href}
-      className="text-accent underline-offset-2 hover:underline"
-      onClick={(event) => {
-        event.preventDefault();
-        openExternal(site, href);
-      }}
-    >
-      {node.children.length > 0 ? <Children nodes={node.children} inline /> : (label ?? href)}
-    </a>
+    // board ticket 815: where the link goes is its tooltip, which keyboard focus opens, and its description
+    <Tip content={href} description={href}>
+      <a
+        data-surface="link"
+        href={href}
+        className="rounded-sm text-accent underline-offset-2 outline-accent hover:underline focus-visible:outline-2"
+        onClick={(event) => {
+          event.preventDefault();
+          openExternal(site, href);
+        }}
+      >
+        {node.children.length > 0 ? <Children nodes={node.children} inline /> : (label ?? href)}
+      </a>
+    </Tip>
   );
 }
 

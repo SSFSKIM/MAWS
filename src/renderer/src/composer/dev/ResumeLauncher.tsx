@@ -13,6 +13,7 @@ import { ipc } from '../../ipc/client';
 import { useSessions } from '../../stores/sessions';
 import { isResumable, parseExtraSettings, resumeSpec } from './resume-spec';
 import { displayTitle } from '../../sessions/title';
+import { UNAVAILABLE_LOOK, UnavailableButton } from '../../ui/tip';
 
 const MODES: PermissionMode[] = ['default', 'acceptEdits', 'plan', 'auto'];
 const control = 'rounded-sm border border-border bg-bg px-1 text-fg';
@@ -67,9 +68,11 @@ export function ResumeLauncher({ client = ipc }: { client?: MawsBridge }) {
                 {outcomes.get(record.appId)}
               </output>
             )}
-            <button type="button" disabled={!parsed.ok} title={parsed.ok ? undefined : parsed.error} className={button} onClick={() => void resume(record.appId)}>
-              Resume live
-            </button>
+            <UnavailableButton reason={parsed.ok ? null : parsed.error}>
+              <button type="button" className={`${button} ${UNAVAILABLE_LOOK}`} onClick={() => void resume(record.appId)}>
+                Resume live
+              </button>
+            </UnavailableButton>
           </li>
         ))}
       </ul>

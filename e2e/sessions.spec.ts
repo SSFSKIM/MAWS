@@ -888,7 +888,7 @@ test.describe('sessions', () => {
     await expect(editor(page)).toHaveText('hello');
     const control = page.locator('[data-region="main"] [data-submit-state]');
     await expect(control).toBeDisabled();
-    await expect(control).toHaveAttribute('title', 'Choose a project first');
+    await expect(control).toHaveAccessibleDescription('Choose a project first');
     await page.screenshot({ path: test.info().outputPath('new-chat-choose-a-project.png') });
 
     // the chip's menu: search, the projects most recently active first, New project, No project (C70)
