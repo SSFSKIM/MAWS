@@ -88,7 +88,9 @@ describe('Worktrees… dialog', () => {
     // the word cut (W155): a worktree with no session has no Sessions label and no "No session" line
     expect(within(rows[2]!).queryByText('No session')).toBeNull();
     expect(within(rows[2]!).queryByText('Sessions')).toBeNull();
-    expect(within(rows[3]!).getByRole('button', { name: 'New chat here' }).hasAttribute('disabled')).toBe(true);
+    // board ticket 815: greyed, it keeps Tab and says why; elsewhere its tip says what it does
+    expect(within(rows[3]!).getByRole('button', { name: 'New chat here', description: 'The checkout is missing' }).getAttribute('aria-disabled')).toBe('true');
+    expect(within(rows[2]!).getByRole('button', { name: 'New chat here', description: 'Starts a fresh session using the same files and branch' }).getAttribute('aria-disabled')).toBeNull();
     expect(fake.invoked('git.worktree.list')).toEqual([{ repoRoot: REPO }]);
   });
 
@@ -96,8 +98,8 @@ describe('Worktrees… dialog', () => {
     putIntent(intent({ appSessionId: NEW, projectId: P, location: { kind: 'existingWorktree', repoRoot: REPO, path: at('orphan') } }));
     const row = await rowNamed(await open(), 'orphan');
     expect(row.dataset.state).toBe('busy');
-    expect(within(row).getByText('An unstarted tab uses this checkout')).toBeTruthy();
-    expect(within(row).getByRole('button', { name: 'Remove…' }).hasAttribute('disabled')).toBe(true);
+    expect(within(row).getByText('An unstarted tab uses this checkout', { ignore: '[hidden]' })).toBeTruthy(); // drawn, besides Remove…'s description
+    expect(within(row).getByRole('button', { name: 'Remove…', description: 'An unstarted tab uses this checkout' }).getAttribute('aria-disabled')).toBe('true'); // board ticket 815
   });
 
   it('New chat here creates an unstarted session, sets its location to the checkout, opens its tab and closes the dialog', async () => {

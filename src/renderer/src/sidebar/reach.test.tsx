@@ -8,6 +8,7 @@
 // the session's owners alone; the Decision Log's "M5b Task 1, the renderer", item 6); one in a local-only project, or
 // while signed out, doesn't; it opens the Share sheet. P5 O8 M5b: Add owner sits beside Share wherever Share is.
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
+import { accessibleDescription } from '../test-support/accessible-text';
 import userEvent from '@testing-library/user-event';
 import { QueryClientProvider } from '@tanstack/react-query';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -110,8 +111,9 @@ describe('the reach mark', () => {
     expect(mark('Default one')).toBeNull();
     expect(mark('Here, org can view')).toBe('Shared');
     expect(mark('Theirs, shared with me')).toBe('Private');
-    expect(row('Private one').querySelector('[data-reach]')!.getAttribute('title')).toBe('Private');
-    expect(row('Shared one').querySelector('[data-reach]')!.getAttribute('title')).toBe('Listed · shared with 2 people');
+    // board ticket 815: the access in words is the mark's tip under the pointer, and its description where its name doesn't say it
+    expect(accessibleDescription(row('Private one').querySelector('[data-reach]')!)).toBe('');
+    expect(accessibleDescription(row('Shared one').querySelector('[data-reach]')!)).toBe('Listed · shared with 2 people');
   });
 
   it("says its access in the hover card, and another's private session that it is shared with you", async () => {

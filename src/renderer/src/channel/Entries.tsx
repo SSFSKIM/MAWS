@@ -7,6 +7,7 @@ import { ExchangeRow } from './Exchange';
 import { faintOf, GIVES_WAY, LabelLine, Names, NAMES_ROW, Party, Recipients, Time } from './parts';
 import type { ChannelEntry, HostEntry, SayEntry, WordsEntry } from './project';
 import { ownersLabel } from '../sidebar/owners';
+import { Tip } from '../ui/tip';
 
 const BODY = 'm-0 break-words whitespace-pre-wrap [overflow-wrap:anywhere]';
 const PROSE = `${BODY} text-prose leading-[var(--lh-prose)]`;
@@ -31,9 +32,7 @@ function WordsRow({ entry }: { entry: WordsEntry }) {
   return (
     <article data-channel-entry="words" data-offset={entry.offset ?? undefined} data-channel-label={entry.label} data-word-state={stateName(state)} className={`flex min-w-0 flex-col gap-1 ${faintOf(entry)}`}>
       <header className="flex min-w-0 items-baseline gap-1.5 text-ui-sm">
-        <span className="truncate font-medium text-fg" title={entry.offset !== null && entry.label === 'verified' && entry.notice === undefined ? CHANNEL.signedBy(entry.you ? null : entry.name) : undefined}>
-          {entry.name}
-        </span>
+        <SignedName entry={entry} />
         <Recipients to={entry.to} />
         {state === 'sending' ? <span className="ml-auto shrink-0 pl-2 text-fg-faint">{CHANNEL.sending}</span> : <Time at={entry.at} />}
       </header>
@@ -102,5 +101,19 @@ function HostRow({ entry }: { entry: HostEntry }) {
       )}
       <LabelLine entry={entry} />
     </article>
+  );
+}
+
+// The sender's name; a verified message's signer its tip and description, the name taking focus to show it (board
+// ticket 815).
+function SignedName({ entry }: { entry: WordsEntry }) {
+  const signed = entry.offset !== null && entry.label === 'verified' && entry.notice === undefined ? CHANNEL.signedBy(entry.you ? null : entry.name) : null;
+  if (signed === null) return <span className="truncate font-medium text-fg">{entry.name}</span>;
+  return (
+    <Tip content={signed} description={signed}>
+      <span tabIndex={0} className="truncate rounded-sm font-medium text-fg outline-accent focus-visible:outline-2">
+        {entry.name}
+      </span>
+    </Tip>
   );
 }

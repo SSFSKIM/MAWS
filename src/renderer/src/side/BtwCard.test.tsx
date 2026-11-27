@@ -6,6 +6,7 @@
 // waiting line counts on this window's clock there), a terminal session (its bridge's `laneA.btw`).
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { accessibleDescription } from '../test-support/accessible-text';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { OperationEvent } from '@shared/engine/operations';
 import type { AppSessionId } from '@shared/graph/ids';
@@ -668,7 +669,7 @@ describe('the card’s words, after the cut', () => {
     act(() => openBtwCard(A));
     render(<BtwCard appSessionId={A} />);
     await userEvent.click(within(card()!).getByRole('button', { name: 'Fold side chat' }));
-    expect(chip()!.getAttribute('title')).toBe('Open');
+    expect(accessibleDescription(chip()!)).toBe('Open'); // board ticket 815: its tip, and its description
     expect(screen.getByRole('button', { name: 'Side chat' })).toBe(chip());
   });
 

@@ -1,9 +1,10 @@
 import { Popover } from 'radix-ui';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import type { ProjectRecord } from '@shared/ipc/schema';
 import { IconButton } from '../app/IconButton';
 import type { OrgIndex, RowKey } from '../stores/org-projects';
 import { projectLabels } from './project-labels';
+import { Tip } from '../ui/tip';
 
 // P5 O6 M5: the filter chooses org projects, each once whatever machines hold it; choosing one no checkout lists (a
 // folder only discovered) lists it while it is chosen.
@@ -25,7 +26,7 @@ export function ProjectFilter({ projects, index, current, selected, onChange }: 
       if (!seen.has(key)) seen.set(key, { ...p, name: index.orgs.get(key)?.name ?? p.name });
     }
     const labels = projectLabels([...seen.values()]);
-    return [...seen].map(([key, p]) => ({ key, label: labels.get(p.id)!, title: p.directory }));
+    return [...seen].map(([key, p]) => ({ key, label: labels.get(p.id)!, directory: p.directory }));
   }, [projects, index]);
   const enter = () => { clearTimeout(timer.current); setOpen(true); };
   const leave = () => {
@@ -47,11 +48,20 @@ export function ProjectFilter({ projects, index, current, selected, onChange }: 
       onPointerEnter={enter} onPointerLeave={leave}
       className="z-50 max-h-[60vh] min-w-48 overflow-auto rounded-md border border-border-strong bg-bg-overlay p-1 text-ui text-fg">
       <button type="button" onClick={() => onChange(null)} className="w-full rounded-sm px-2 py-1.5 text-left outline-accent hover:bg-bg-hover focus-visible:outline-2">All projects</button>
-      {options.map((o) => <label key={o.key} className="flex cursor-default items-center gap-2 rounded-sm px-2 py-1.5 hover:bg-bg-hover">
-        <input type="checkbox" checked={selected?.has(o.key) ?? false} className="accent-accent outline-accent focus-visible:outline-2"
-          onChange={(event) => { const next = new Set(selected ?? []); if (event.target.checked) next.add(o.key); else next.delete(o.key); onChange(next.size ? next : null); }} />
-        <span title={o.title}>{o.label}</span>
-      </label>)}
+      {options.map((o) => <Option key={o.key} directory={o.directory} checked={selected?.has(o.key) ?? false}
+        onCheck={(checked) => { const next = new Set(selected ?? []); if (checked) next.add(o.key); else next.delete(o.key); onChange(next.size ? next : null); }}>{o.label}</Option>)}
     </Popover.Content></Popover.Portal>
   </Popover.Root>;
+}
+
+// A project's choice: its folder the checkbox's tip, shown on pointing anywhere in the line or on the checkbox's focus
+// (board ticket 815).
+function Option({ directory, checked, onCheck, children }: { directory: string; checked: boolean; onCheck(checked: boolean): void; children: ReactNode }) {
+  const line = useRef<HTMLLabelElement>(null);
+  return <label ref={line} className="flex cursor-default items-center gap-2 rounded-sm px-2 py-1.5 hover:bg-bg-hover">
+    <Tip content={directory} description={directory} pointedWithin={line}>
+      <input type="checkbox" checked={checked} className="accent-accent outline-accent focus-visible:outline-2" onChange={(event) => onCheck(event.target.checked)} />
+    </Tip>
+    <span>{children}</span>
+  </label>;
 }

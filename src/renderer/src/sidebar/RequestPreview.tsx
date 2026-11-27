@@ -149,7 +149,6 @@ export const RequestPreview: Slots['requestCard'] = ({ item, request, placement 
             <button
               type="button"
               disabled={delivery === 'sending'}
-              title="Click to deny"
               onPointerDown={onPointerDown}
               onClick={(event) => byPointer(event) && void answer({ kind: 'permission', decision: 'deny' })}
               className="rounded-sm border border-border-strong px-2.5 py-1 text-fg outline-accent hover:bg-bg-hover focus-visible:outline-2 disabled:text-fg-faint"
@@ -159,7 +158,6 @@ export const RequestPreview: Slots['requestCard'] = ({ item, request, placement 
             <button
               type="button"
               disabled={delivery === 'sending'}
-              title="Click to approve"
               onPointerDown={onPointerDown}
               onClick={(event) => byPointer(event) && void answer({ kind: 'permission', decision: 'allow', scope: 'once' })}
               className="rounded-sm border border-fg bg-fg px-2.5 py-1 text-bg outline-accent hover:bg-fg-muted focus-visible:outline-2 disabled:bg-fg-faint"

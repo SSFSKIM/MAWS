@@ -27,6 +27,8 @@ import { glyphFor } from '../../attention/glyph';
 import { shownSession } from '../../panel/host'; // UX wave U5a
 import { FIELD, PRIMARY, QUIET } from '../../sessions/ui';
 import { WaitingWords } from '../../ui/spinner';
+import { NamedGlyph } from '../../ui/glyph'; // board ticket 815
+import { Tip } from '../../ui/tip'; // board ticket 815
 import { useLayout } from '../../stores/layout';
 import { selectPendingOf, useAttention } from '../../stores/attention';
 import { useSessions } from '../../stores/sessions';
@@ -143,26 +145,31 @@ export function CommentCard({ card, style, pinned, frame, visible, onDismiss, re
     >
       <header className="flex min-w-0 shrink-0 items-center gap-1">
         {thread && <ThreadGlyph child={thread.child} />}
-        <h3 className="m-0 min-w-0 flex-1 truncate text-ui-sm font-medium text-fg" title={`${anchor.label}\n${anchor.locator}`}>
-          {anchor.label}
-        </h3>
+        {/* board ticket 815: the label in full and where it points, the heading's tip, which focus shows too */}
+        <Tip
+          content={
+            <>
+              <span className="block">{anchor.label}</span>
+              <span className="block text-fg-muted">{anchor.locator}</span>
+            </>
+          }
+          description={anchor.locator}
+        >
+          <h3 tabIndex={0} className="m-0 min-w-0 flex-1 truncate rounded-sm text-ui-sm font-medium text-fg outline-accent focus-visible:outline-2">
+            {anchor.label}
+          </h3>
+        </Tip>
         {frame.actions?.(card) /* P3-B */}
         {thread && (
           <button type="button" className={`${QUIET} text-ui-sm`} onClick={() => openThreadAsTab(serial, thread.child)}>
             {COPY.openAsTab}
           </button>
         )}
-        <button
-          type="button"
-          aria-label={COPY.close}
-          title={COPY.close}
-          onClick={close}
-          className="inline-flex size-6 shrink-0 items-center justify-center rounded-sm text-fg-muted outline-accent hover:bg-bg-hover hover:text-fg focus-visible:outline-2"
-        >
+        <NamedGlyph label={COPY.close} onClick={close} className="inline-flex size-6 shrink-0 items-center justify-center rounded-sm text-fg-muted outline-accent hover:bg-bg-hover hover:text-fg focus-visible:outline-2">
           <svg viewBox="0 0 16 16" aria-hidden className="size-3" fill="none" stroke="currentColor" strokeWidth={1.5} strokeLinecap="round">
             <path d="m4 4 8 8M12 4l-8 8" />
           </svg>
-        </button>
+        </NamedGlyph>
       </header>
       {!thread && shown !== card.parent && <ParentName parent={card.parent} /> /* P3-F1; UX wave U5a: the one rule */}
       {thread ? <CardThread card={card} child={thread.child} echo={thread.echo} frame={frame} visible={visible} /> : phase.kind === 'composing' && <CardComposer card={card} passKey={phase.pass} commentId={phase.comment} listsPass={style.mode !== 'inline' /* UX wave U5b */} {...(restoreFocus && { restoreFocus })} />}
@@ -271,18 +278,20 @@ function OtherComments({ passKey, hostId, comments }: { passKey: string; hostId:
             <span className="shrink-0 font-medium text-fg">{comment.anchor.label}</span>
             <span className="min-w-0 truncate text-fg-muted">{comment.text.trim()}</span>
           </button>
-          <button
-            type="button"
-            aria-label={COPY.removeComment}
-            title={COPY.removeComment}
-            disabled={comment.flight !== null}
-            onClick={() => discardComment(passKey, comment.id)}
-            className="inline-flex size-5 shrink-0 items-center justify-center rounded-sm text-fg-muted hover:bg-bg-hover hover:text-fg disabled:text-fg-faint"
-          >
-            <svg viewBox="0 0 16 16" aria-hidden className="size-2.5" fill="none" stroke="currentColor" strokeWidth={1.5} strokeLinecap="round">
-              <path d="m4 4 8 8M12 4l-8 8" />
-            </svg>
-          </button>
+          {/* board ticket 815: its word its tip; disabled, with no reason to give, while its comment is on its way */}
+          <Tip content={COPY.removeComment}>
+            <button
+              type="button"
+              aria-label={COPY.removeComment}
+              disabled={comment.flight !== null}
+              onClick={() => discardComment(passKey, comment.id)}
+              className="inline-flex size-5 shrink-0 items-center justify-center rounded-sm text-fg-muted hover:bg-bg-hover hover:text-fg disabled:text-fg-faint"
+            >
+              <svg viewBox="0 0 16 16" aria-hidden className="size-2.5" fill="none" stroke="currentColor" strokeWidth={1.5} strokeLinecap="round">
+                <path d="m4 4 8 8M12 4l-8 8" />
+              </svg>
+            </button>
+          </Tip>
         </li>
       ))}
     </ul>

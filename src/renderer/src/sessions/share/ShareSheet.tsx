@@ -28,6 +28,7 @@ import { useSessions, type ListedSession } from '../../stores/sessions';
 import { closeDialog } from '../dialogs';
 import { Sheet, SheetForm } from '../Sheet';
 import { QuietSpinner } from '../../ui/spinner';
+import { NamedGlyph } from '../../ui/glyph'; // board ticket 815
 import { displayTitle, listedTitle } from '../title';
 import { CHOICE, PRIMARY, QUIET, SECONDARY } from '../ui';
 import { ACCESS_ORDER, GRADE_ORDER, lineWords, outcomeWords, refusalWords, SHARE, subtitleTooltip, type ShareAccess, type ShareGrade } from './copy';
@@ -303,16 +304,14 @@ function ReaderSheet({ address, me }: { address: AppSessionId; me: string | null
                             ) : (
                               <>
                                 <GradeSelect label={SHARE.gradeOf(name)} grade={person.grade} onChange={set} />
-                                <button
-                                  type="button"
-                                  aria-label={SHARE.remove(name)}
-                                  title={SHARE.remove(name)}
+                                <NamedGlyph
+                                  label={SHARE.remove(name)}
                                   // one added here leaves the list; one the policy holds stays, marked, until Save
                                   onClick={() => (person.was === null ? setPeople((ps) => ps.filter((p) => p.member !== person.member)) : set(null))}
                                   className={`${QUIET} shrink-0 px-1.5`}
                                 >
-                                  ✕
-                                </button>
+                                  <span aria-hidden>✕</span>
+                                </NamedGlyph>
                               </>
                             )}
                           </div>

@@ -3593,6 +3593,7 @@ async function menuItemOfRow(page: Page, row: ReturnType<typeof sessionRow>, nam
   const item = page.getByRole('menu').getByRole('menuitem', { name, exact: true });
   await expect(item, `the row's menu offers ${name}, enabled`).toBeVisible({ timeout: 10_000 });
   await expect(item).not.toHaveAttribute('data-disabled', /.*/);
+  await expect(item, 'not refused either (board ticket 815: a refused item is aria-disabled)').not.toHaveAttribute('aria-disabled', 'true');
   return item;
 }
 

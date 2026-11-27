@@ -5,7 +5,7 @@
 import { useId, useState } from 'react';
 import { Tip } from '../ui/tip';
 import { CHANNEL } from './copy';
-import { faintOf, LabelLine, Names, NAMES_ROW, Party, Recipients, Time } from './parts';
+import { faintOf, fullTime, LabelLine, Names, NAMES_ROW, Party, partyTooltip, Recipients, Time } from './parts';
 import type { ExchangeEntry, SayEntry } from './project';
 
 export function ExchangeRow({ entry }: { entry: ExchangeEntry }) {
@@ -13,16 +13,30 @@ export function ExchangeRow({ entry }: { entry: ExchangeEntry }) {
   const body = useId();
   const [from, other] = entry.between;
   const count = CHANNEL.messages(entry.count);
+  // board ticket 815: under the count, what the folded row leaves out, the parties' titles and machines in full and the
+  // last message's day; the button's tip and, past the count its name already says, its description
+  const facts = [partyTooltip(from.alias, from.title, from.machine), other === 'everyone' ? null : partyTooltip(other.alias, other.title, other.machine), fullTime(entry.last)].filter((fact) => fact !== null);
   return (
     // The button's hover pill reaches 8px past the text on each side (`-mx-2 px-2`); the section's own padding holds it
     // (`-mx-2 px-2` here too), so nothing reaches past the section's box.
     <section data-channel-entry="exchange" data-offset={entry.offsets[0]} data-channel-label={entry.label} data-count={entry.count} className={`-mx-2 flex min-w-0 flex-col gap-1 px-2 ${faintOf(entry)}`}>
-      <Tip content={count}>
+      <Tip
+        content={
+          <>
+            <span className="block">{count}</span>
+            {facts.map((fact, i) => (
+              <span key={i} className="block text-fg-muted">
+                {fact}
+              </span>
+            ))}
+          </>
+        }
+        description={facts.join(' · ')}
+      >
         <button
           type="button"
           aria-expanded={open}
           aria-controls={body}
-          aria-describedby={undefined}
           onClick={() => setOpen((was) => !was)}
           className={`-mx-2 ${NAMES_ROW} rounded-sm px-2 py-1 text-left text-ui text-fg-muted outline-accent hover:bg-bg-hover focus-visible:outline-2`}
         >
@@ -45,7 +59,7 @@ export function ExchangeRow({ entry }: { entry: ExchangeEntry }) {
               {entry.count}
             </span>
           </Names>
-          <Time at={entry.last} />
+          <Time at={entry.last} owned />
         </button>
       </Tip>
       <LabelLine entry={entry} />

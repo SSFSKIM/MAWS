@@ -24,7 +24,7 @@ import { useLayout } from '../stores/layout';
 import { Sidebar } from './Sidebar';
 import { ListedHoverCard, SidebarHoverCard } from './HoverCard';
 import { useState } from 'react';
-import { accessibleDescription } from '../test-support/accessible-text';
+import { accessibleDescription, accessibleText } from '../test-support/accessible-text';
 import { formatAgo } from '@shared/app/date-format';
 import { registerSlot, resetSlots } from '../app/slots';
 import { RequestCard } from '../request-card/RequestCard';
@@ -467,8 +467,28 @@ describe('a project’s hover card', () => {
     const elapsed = Date.now() - last;
     expect(within(card).getByTestId('project-activity').textContent).toBe(elapsed < 60_000 ? 'Active now' : formatAgo(elapsed, { narrow: true })); // the word cut (W79)
     const worktrees = await within(card).findByRole('list', { name: 'Worktrees' });
-    expect(within(worktrees).getAllByRole('listitem').map((li) => li.textContent)).toEqual(['⎇ mastermain checkout', '⎇ worktree-accept-oneaccept-one']);
+    expect(within(worktrees).getAllByRole('listitem').map((li) => accessibleText(li))).toEqual(['⎇ mastermain checkout', '⎇ worktree-accept-oneaccept-one']);
+    // board ticket 815: under the pointer a checkout's folder is its line's tip, in the line's description
+    expect(within(worktrees).getAllByRole('listitem').map((li) => accessibleDescription(li.firstElementChild!))).toEqual(['/Users/new/Developer/GitHub/MAWS', '/Users/new/Developer/GitHub/MAWS/.claude/worktrees/accept-one']);
     expect(fake.invoked('git.worktree.list')).toEqual([{ repoRoot: maws.directory }]);
+  });
+
+  // board ticket 815: nothing in a hover card takes focus, so a card the row's keyboard focus opened draws each
+  // checkout's folder at rest under its line (the word cut's M4 ruling on the sidebar hover card)
+  it('draws each checkout’s folder at rest on a card the keyboard opened', async () => {
+    fake = fakeClient({
+      'git.worktree.list': {
+        repoRoot: '/Users/new/Developer/GitHub/MAWS',
+        commonDir: '/Users/new/Developer/GitHub/MAWS/.git',
+        worktrees: [info('/Users/new/Developer/GitHub/MAWS', 'master', true)],
+      },
+    });
+    window.maws = fake.client as unknown as PreloadBridge;
+    render(<Sidebar />);
+    act(() => screen.getByRole('treeitem', { name: 'MAWS' }).focus());
+    const card = await screen.findByRole('dialog', { name: 'MAWS' });
+    const worktrees = await within(card).findByRole('list', { name: 'Worktrees' });
+    expect(within(worktrees).getAllByRole('listitem').map((li) => accessibleText(li))).toEqual(['⎇ mastermain checkout/Users/new/Developer/GitHub/MAWS']);
   });
 
   it('opens on the project row’s keyboard focus, says nothing of worktrees outside a repository, and a machine’s own row has none', async () => {

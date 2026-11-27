@@ -6,6 +6,7 @@ import type { MachineRef } from '@shared/machine/ref';
 import type { ReactNode } from 'react';
 import { MachineChip } from '../app/MachineChip';
 import { useMachines } from '../stores/machines';
+import { Tip } from '../ui/tip';
 import { CHANNEL } from './copy';
 import type { ChannelEntry, ChannelParty } from './project';
 
@@ -89,11 +90,13 @@ export function MachineChipPart({ address, name }: { address: string; name?: str
 
 /**
  * A session as the stream names it: its alias, its title faint beside it, its machine's chip, each a name part of the
- * row it sits in (`display: contents`), so they give way in the row's one order among the row's other parts.
+ * row it sits in (`display: contents`), so they give way in the row's one order among the row's other parts. Where the
+ * row draws its title, the parts' full forms are their system tooltip (they repeat what is drawn, cut short); where it
+ * does not, the title is a fact the row's owner carries (an exchange's button, board ticket 815).
  */
 export function Party({ party, title = true }: { party: ChannelParty; title?: boolean }) {
   return (
-    <span data-channel-party={party.session} className="contents" title={partyTooltip(party.alias, party.title, party.machine)}>
+    <span data-channel-party={party.session} className="contents" title={title ? partyTooltip(party.alias, party.title, party.machine) : undefined}>
       <span data-name-part="alias" className={`${GIVES_WAY.alias} font-medium text-fg`}>
         {party.alias}
       </span>
@@ -107,13 +110,28 @@ export function Party({ party, title = true }: { party: ChannelParty; title?: bo
   );
 }
 
-export function Time({ at }: { at: string | null }) {
+/** An entry's day and time in full, its time's tip; null for no time. */
+export const fullTime = (at: string | null): string | null => {
   const ms = at === null ? NaN : Date.parse(at);
-  if (!Number.isFinite(ms)) return null;
+  return Number.isFinite(ms) ? formatDateTime(ms) : null;
+};
+
+/**
+ * An entry's clock time, the day and time in full its tip and description, which focus shows too (board ticket 815).
+ * Inside a control (`owned`: an exchange's button) it takes no focus of its own; the control's tip carries the day.
+ */
+export function Time({ at, owned = false }: { at: string | null; owned?: boolean }) {
+  const full = fullTime(at);
+  if (full === null) return null;
+  const clock = formatClock(Date.parse(at!));
+  const className = 'ml-auto shrink-0 pl-2 text-ui-sm text-fg-faint tabular-nums';
+  if (owned) return <time dateTime={at!} className={className}>{clock}</time>;
   return (
-    <time dateTime={at!} title={formatDateTime(ms)} className="ml-auto shrink-0 pl-2 text-ui-sm text-fg-faint tabular-nums">
-      {formatClock(ms)}
-    </time>
+    <Tip content={full} description={full}>
+      <time dateTime={at!} tabIndex={0} className={`${className} rounded-sm outline-accent focus-visible:outline-2`}>
+        {clock}
+      </time>
+    </Tip>
   );
 }
 

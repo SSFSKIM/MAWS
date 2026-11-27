@@ -472,14 +472,15 @@ describe('take over a session another process holds', () => {
 
   // Ticket 627: a session on another machine over RL2 takes no `session.takeOver`: Take over is drawn disabled with the
   // declared sentence, before any confirmation, in either lane
-  it('is drawn disabled with its sentence for a session on another machine, and asks nothing', async () => {
+  it('is drawn greyed with its sentence for a session on another machine, and asks nothing', async () => {
     for (const lane of ['B', 'A'] as const) {
       const onB = addressOf(OTHER_MACHINE, BARE_A);
       overRl2(onB, {}, lane);
       useSessions.setState({ records: new Map([[onB, record(onB, { engineSessionId: ENGINE, directory: '/work/repo', holder: JOB })]]) });
       const { unmount } = render(<HolderNotice appSessionId={onB} holder={JOB} />);
       const button = screen.getByRole<HTMLButtonElement>('button', { name: 'Take over here' });
-      expect([button.disabled, button.title]).toEqual([true, REMOTE_UNAVAILABLE['session.takeOver']]);
+      // board ticket 815: greyed, still in the Tab order, its sentence its description; the press is swallowed
+      expect([button.getAttribute('aria-disabled'), accessibleDescription(button)]).toEqual(['true', REMOTE_UNAVAILABLE['session.takeOver']]);
       await userEvent.click(button);
       expect(useDialogs.getState().open).toBeNull();
       unmount();

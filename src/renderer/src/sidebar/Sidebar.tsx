@@ -22,6 +22,8 @@ import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useReducer,
 import { FolderIcon, GearIcon, IconButton, SortIcon } from '../app/IconButton';
 import { openCustomize, openProjects } from '../customize/open';
 import { useChordHint } from '../app/IconButton'; // C11
+import { NamedGlyph } from '../ui/glyph'; // board ticket 815
+import { Tip, UNAVAILABLE_LOOK, unavailableClickProps } from '../ui/tip'; // board ticket 815
 import { NEW_CHAT, newChat, useSessionCreatorRegistered } from '../keymap/actions-runtime';
 import { runAction, useActionEnabled } from '../keymap/actions-runtime'; // C11: the footer's gear opens Settings
 import { ipc } from '../ipc/client';
@@ -620,24 +622,29 @@ const CustomizeIcon = () => <svg viewBox="0 0 16 16" aria-hidden className="size
   <path d="M2 4h3m4 0h5M2 12h7m4 0h1" /><circle cx="7" cy="4" r="2" /><circle cx="11" cy="12" r="2" />
 </svg>;
 
+// Board ticket 815: greyed, it keeps Tab and its reason is its tip; otherwise it has none, its shortcut drawn in the row
+// on pointing and on focus, and its description.
 function NewChatRow() {
   const canCreate = useSessionCreatorRegistered();
   const chord = useChordHint('session.new');
+  const why = canCreate ? null : NOT_HERE;
   return (
-    <button
-      type="button"
-      aria-label={NEW_CHAT}
-      disabled={!canCreate}
-      title={canCreate ? (chord ? `${NEW_CHAT} · ${chord}` : NEW_CHAT) : 'Not available here'}
-      onClick={() => void newChat()}
-      className="group/new flex h-(--row-h) w-full cursor-default items-center gap-[7px] rounded-sm pr-1 pl-[9px] text-ui text-fg outline-accent select-none hover:bg-bg-hover focus-visible:outline-2 disabled:text-fg-faint disabled:hover:bg-transparent"
-    >
-      <NewChatIcon className="size-[13px]" />
-      <span className="min-w-0 flex-1 truncate text-left">{NEW_CHAT}</span>
-      {chord && <kbd className="font-ui text-ui-sm text-fg-faint opacity-0 group-hover/new:opacity-100 group-focus-visible/new:opacity-100">{chord}</kbd>}
-    </button>
+    <Tip content={why} description={why ?? chord} {...unavailableClickProps(why)}>
+      <button
+        type="button"
+        aria-label={NEW_CHAT}
+        onClick={() => void newChat()}
+        className={`group/new flex h-(--row-h) w-full cursor-default items-center gap-[7px] rounded-sm pr-1 pl-[9px] text-ui text-fg outline-accent select-none hover:bg-bg-hover focus-visible:outline-2 ${UNAVAILABLE_LOOK}`}
+      >
+        <NewChatIcon className="size-[13px]" />
+        <span className="min-w-0 flex-1 truncate text-left">{NEW_CHAT}</span>
+        {chord && <kbd className="font-ui text-ui-sm text-fg-faint opacity-0 group-hover/new:opacity-100 group-focus-visible/new:opacity-100">{chord}</kbd>}
+      </button>
+    </Tip>
   );
 }
+
+const NOT_HERE = 'Not available here'; // a greyed control's reason, its tip and its description
 
 // A pencil over a square, the new-chat glyph (tokens only: it draws in the current colour).
 const NewChatIcon = ({ className }: { className?: string }) => (
@@ -703,16 +710,16 @@ function Footer() {
   return (
     <footer className="flex min-h-[43px] items-center gap-2 border-t border-border px-4 py-[7px] text-ui-sm text-fg-muted">
       {/* C11 start: the gear opens the Settings tab (settings.open) once C11's handler is registered */}
-      <button
-        type="button"
-        disabled={!settings}
-        aria-label="Workspace settings"
-        title={settings ? `Settings${chord ? ` · ${chord}` : ''}` : 'Not available here'}
+      <NamedGlyph
+        label="Workspace settings"
+        tip="Settings"
+        shortcut={chord}
+        unavailable={settings ? null : NOT_HERE}
         onClick={() => runAction('settings.open')}
-        className="ml-auto inline-flex size-7 items-center justify-center rounded-sm text-fg-muted outline-accent hover:bg-bg-hover hover:text-fg focus-visible:outline-2 disabled:text-fg-faint disabled:hover:bg-transparent"
+        className="ml-auto inline-flex size-7 items-center justify-center rounded-sm text-fg-muted outline-accent hover:bg-bg-hover hover:text-fg focus-visible:outline-2"
       >
         <GearIcon />
-      </button>
+      </NamedGlyph>
       {/* C11 end */}
     </footer>
   );

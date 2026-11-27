@@ -21,10 +21,13 @@ describe('Party', () => {
     expect(alias.className).not.toMatch(/max-w-\[24ch\]/);
   });
 
-  it('holds its alias, title and machine in full in its tooltip, a missing one left out, also where the row draws no title', () => {
-    const { rerender } = render(<Party party={party()} title={false} />);
+  // board ticket 815: where the row draws no title, the title is a fact its owner's tip carries (an exchange's button)
+  it('holds its alias, title and machine in full in its tooltip, a missing one left out, and none where the row draws no title', () => {
+    const { rerender } = render(<Party party={party()} />);
     const tooltip = () => document.querySelector('[data-channel-party]')!.getAttribute('title');
     expect(tooltip()).toBe(`${LONG} · Fix the relay · studio-mini`);
+    rerender(<Party party={party()} title={false} />);
+    expect(tooltip()).toBeNull();
     rerender(<Party party={party({ title: null })} />);
     expect(tooltip()).toBe(`${LONG} · studio-mini`);
     rerender(<Party party={party({ machine: null })} />);

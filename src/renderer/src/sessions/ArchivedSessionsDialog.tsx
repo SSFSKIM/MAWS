@@ -42,7 +42,7 @@ import { SECONDARY } from './ui';
 import { MoreIcon } from '../tools/browser/icons';
 import { RefusedMenuItem } from '../ui/refused-menu-item';
 import { QuietSpinner } from '../ui/spinner';
-import { Tip } from '../ui/tip';
+import { Tip, UNAVAILABLE_LOOK, UnavailableButton } from '../ui/tip';
 import { displayTitle } from './title';
 import { ARCHIVED_WORDS } from './copy';
 
@@ -212,9 +212,12 @@ function ArchivedRow({ record: r, onUnarchive }: { record: SessionRecord; onUnar
         <span className="truncate text-fg">{title}</span>
         <span className="truncate font-mono text-ui-sm text-fg-muted">{r.worktree?.path ?? r.directory}</span>
       </div>
-      <button type="button" onClick={onUnarchive} disabled={unarchiveUnavailable !== null} title={unarchiveUnavailable ?? undefined} className={SECONDARY}>
-        Unarchive
-      </button>
+      {/* board ticket 815: greyed, Unarchive keeps Tab and says why */}
+      <UnavailableButton reason={unarchiveUnavailable}>
+        <button type="button" onClick={onUnarchive} className={`${SECONDARY} ${UNAVAILABLE_LOOK}`}>
+          Unarchive
+        </button>
+      </UnavailableButton>
       <ArchivedRowMenu
         label={ARCHIVED_WORDS.actions(title)}
         removeWorktree={removable ? () => openDialog({ kind: 'cleanup', target: cleanupTargetOf(r)! }) : null}

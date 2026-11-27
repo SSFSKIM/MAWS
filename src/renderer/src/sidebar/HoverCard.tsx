@@ -54,6 +54,7 @@ export interface SidebarHoverCardProps {
   content: ReactNode; // rendered only while open
   open?: boolean; // controlled, for a trigger whose keyboard focus sits elsewhere (a project row's line, its treeitem focused)
   onOpenChange?(open: boolean): void;
+  keyboardElsewhere?: boolean; // that focus is the keyboard's now, so the card draws its facts at rest (board ticket 815)
 }
 
 // Whether the card open now is held by its row's keyboard focus. Nothing in a Radix hover card takes focus (Radix sets
@@ -61,13 +62,13 @@ export interface SidebarHoverCardProps {
 // fix round 1 of M4's task 1): the row is the owner the keyboard holds, and its card shows at once. However the card came
 // open: by the keyboard's focus, by the pointer before the keyboard reached the row (Radix opens nothing it holds open
 // already), or by the row's own Enter (a listed row's, which sets `open` itself).
-const OpenedByKeyboard = createContext(false);
+export const OpenedByKeyboard = createContext(false);
 
 // The card that shows: one at a time (the word cut's fix wave for M4). A card the keyboard holds open, or one Radix keeps
 // open (its text selected), is never closed by the pointer leaving its row, so the next card to open closes it.
 let showingCard: { close(): void } | null = null;
 
-export function SidebarHoverCard({ label, children, content, open, onOpenChange }: SidebarHoverCardProps) {
+export function SidebarHoverCard({ label, children, content, open, onOpenChange, keyboardElsewhere = false }: SidebarHoverCardProps) {
   const [internalOpen, setInternalOpen] = useState(false);
   const [byKeyboard, setByKeyboard] = useState(false); // opened while the row held the keyboard
   const [keyboardOnRow, setKeyboardOnRow] = useState(false); // the row holds the keyboard's focus now
@@ -167,7 +168,7 @@ export function SidebarHoverCard({ label, children, content, open, onOpenChange 
           collisionPadding={8}
           className="z-50 w-[342px] rounded-md border border-border-strong bg-bg-overlay p-4"
         >
-          <OpenedByKeyboard.Provider value={byKeyboard || keyboardOnRow}>{content}</OpenedByKeyboard.Provider>
+          <OpenedByKeyboard.Provider value={byKeyboard || keyboardOnRow || keyboardElsewhere}>{content}</OpenedByKeyboard.Provider>
         </Radix.Content>
       </Radix.Portal>
     </Radix.Root>
