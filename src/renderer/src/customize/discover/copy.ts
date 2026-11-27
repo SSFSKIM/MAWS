@@ -45,6 +45,7 @@ export const DISCOVER = {
   // a card
   add: 'Add',
   addName: (name: string) => `Add ${name}`,
+  adding: 'Adding', // ticket 815: why the + is greyed while its change runs
   view: (name: string) => `View ${name}`,
   installed: 'Installed',
   installedElsewhere: 'In another project', // the word cut (G278)

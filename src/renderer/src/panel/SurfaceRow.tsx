@@ -192,14 +192,14 @@ export function SurfaceRow({ maxIcons = Infinity, overflowControls }: { maxIcons
   const { sessionTab: hasSessionTab, shown: cards } = useCardColumn();
   return (
     <div data-surface-row role="toolbar" aria-label="Session surfaces" className="flex shrink-0 items-center gap-0.5 [-webkit-app-region:no-drag]">
-      {cardsIcon && <IconButton label="Session cards" action="panel.toggle" pressed={cards} disabled={!hasSessionTab} onClick={toggleSessionCards}><Icon><rect x="2.5" y="2.5" width="11" height="11" rx="2" /><path d="M5 6h6M5 9h6" /></Icon></IconButton>}
+      {cardsIcon && <IconButton label="Session cards" action="panel.toggle" pressed={cards} unavailable={hasSessionTab ? null : COPY.cardsNoSession} onClick={toggleSessionCards}><Icon><rect x="2.5" y="2.5" width="11" height="11" rx="2" /><path d="M5 6h6M5 9h6" /></Icon></IconButton>}
       {ids.map((id) => {
         const tool = tools.get(id)!;
         const ToolIcon = tool.icon;
         const tab = held.find((tab) => tab.toolId === id);
         const opened = !state.regions.panel.collapsed && visible.some((tab) => tab.toolId === id);
         return <SurfaceContext key={id} toolId={id}>
-          <IconButton label={tool.title} action={SURFACE_ACTIONS[id]} pressed={opened} disabled={!session && !tab} onClick={() => toggleSurface(id)}><ToolIcon className="size-4" /></IconButton>
+          <IconButton label={tool.title} action={SURFACE_ACTIONS[id]} pressed={opened} unavailable={!session && !tab ? COPY.toolNoSession : null} onClick={() => toggleSurface(id)}><ToolIcon className="size-4" /></IconButton>
         </SurfaceContext>;
       })}
       <DropdownMenu.Root modal={false}>

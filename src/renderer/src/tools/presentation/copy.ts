@@ -4,4 +4,5 @@
 export const DECK_COPY = {
   openingName: 'Opening the presentation…', // accessible name only: the quiet spinner's while the replica opens (T615)
   checkDesign: 'Check design', // the header's Check entry (T636)
+  nothingToPresent: 'No slide to show', // ticket 815: why Present is greyed (no slide, or every slide hidden)
 };

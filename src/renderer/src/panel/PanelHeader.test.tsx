@@ -119,14 +119,16 @@ describe('the panel header', () => {
     expect(document.querySelector('[data-region="panel"]')?.hasAttribute('inert')).toBe(true);
   });
 
-  // P3-F wave S (F6, candidate 58): the card draws the session in front; with none, Float is disabled and names why
-  it('with no session in front, Float is disabled and reads its reason; Maximize and Hide stay', () => {
+  // P3-F wave S (F6, candidate 58): the card draws the session in front; with none, Float is greyed and says why
+  // (ticket 815: its reason the description, its word the name, and it keeps Tab)
+  it('with no session in front, Float is greyed and says its reason; Maximize and Hide stay', () => {
     useLayout.setState({ main: LAYOUT_DEFAULTS.main });
     offs.push(registerPanelTool(probeTool('files', { multiInstance: false }).tool));
     panelHost.addTool('files', { appSessionId: null, pin: true });
     mount();
-    expect(stripEnd()).toEqual([FLOAT_COPY.noSession, 'Expand surface', 'Hide side column']);
-    expect((within(strip()).getByRole('button', { name: FLOAT_COPY.noSession }) as HTMLButtonElement).disabled).toBe(true);
+    expect(stripEnd()).toEqual(['Float conversation over surface', 'Expand surface', 'Hide side column']);
+    const float = within(strip()).getByRole('button', { name: 'Float conversation over surface', description: new RegExp(`^${FLOAT_COPY.noSession}`) }) as HTMLButtonElement;
+    expect([float.disabled, float.getAttribute('aria-disabled')]).toEqual([false, 'true']);
     expect((within(strip()).getByRole('button', { name: 'Expand surface' }) as HTMLButtonElement).disabled).toBe(false);
   });
 

@@ -91,14 +91,14 @@ describe('the deck body', () => {
   it('offers Present while the deck has a slide to show: not with every slide hidden, nor with no slide', async () => {
     const doc = deckOf(['a']);
     const { present } = await mount(doc);
-    expect(present()?.disabled).toBe(false);
+    expect(present()?.unavailable).toBeNull();
     act(() => Y.setSlideKey(doc, 'a', 'attr:hidden', ''));
-    expect(present()?.disabled).toBe(true);
+    expect(present()?.unavailable).toBe('No slide to show');
     act(() => Y.deleteSlideKey(doc, 'a', 'attr:hidden'));
-    expect(present()?.disabled).toBe(false);
+    expect(present()?.unavailable).toBeNull();
     cleanup();
     resetEditorHosts();
-    expect((await mount(deckOf([]))).present()?.disabled).toBe(true);
+    expect((await mount(deckOf([]))).present()?.unavailable).toBe('No slide to show');
   });
 
   // P4-B4: an open's place (a link's `#slide=`) is the open request for this deck on this surface: the slide is selected

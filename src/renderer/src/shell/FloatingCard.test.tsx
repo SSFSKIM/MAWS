@@ -258,15 +258,14 @@ describe('the floating card in the Shell', () => {
 
   // The owner's case (P3 sitting, 09:58Z): an artifact tab in front. Float is disabled and says why; ⌥⌘B (the menu
   // action) floats nothing and says why in a toast; main and its tab strip stay on screen.
-  it('with an artifact tab in front, the header’s Float is disabled with its reason and ⌥⌘B leaves main and its tab strip shown', async () => {
+  it('with an artifact tab in front, the header’s Float is greyed with its reason and ⌥⌘B leaves main and its tab strip shown', async () => {
     installFakeMain(() => fail('not answered here'));
     const artifact = { id: tabId({ kind: 'artifact', artifactId: 'deck-1', machine: TEST_MACHINE }), kind: 'artifact', artifactId: 'deck-1', machine: TEST_MACHINE, pinned: false } as const;
     useLayout.setState({ main: { ...LAYOUT_DEFAULTS.main, panes: [{ tabs: [artifact], activeTabId: artifact.id }] } });
     render(<Shell />);
     const header = region('panel').querySelector<HTMLElement>('[data-editor-header]')!;
-    const float = within(header).getByRole('button', { name: FLOAT_COPY.noSession }) as HTMLButtonElement;
-    expect(float.disabled).toBe(true);
-    expect(within(header).queryByRole('button', { name: 'Float conversation over surface' })).toBeNull();
+    const float = within(header).getByRole('button', { name: 'Float conversation over surface', description: new RegExp(`^${FLOAT_COPY.noSession}`) }) as HTMLButtonElement;
+    expect([float.disabled, float.getAttribute('aria-disabled')]).toEqual([false, 'true']);
     act(() => runAction('panel.float'));
     await act(async () => {});
     expect(useLayout.getState().regions.panel.floating).toBe(false);

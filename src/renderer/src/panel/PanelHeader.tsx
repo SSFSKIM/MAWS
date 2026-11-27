@@ -22,7 +22,7 @@ import { cardHost, cardSession, FLOAT_COPY, useFloatingCard } from '../shell/flo
 import { ShowChat } from '../shell/ShowChat'; // UX wave U10b (O-43): Show chat, before the float control
 import { MARKUP_COPY, startMarkup, useMarkup } from '../markup/session'; // P3-G
 import { useMarkupSurface } from '../markup/surface'; // P3-G
-import { NamedGlyph } from '../ui/glyph'; // the word cut (M5's G558): an icon action's word, tipped on focus
+import { GLYPH_BUTTON, NamedGlyph } from '../ui/glyph'; // the word cut (M5's G558): an icon action's word, tipped on focus
 import { RefusedMenuItem } from '../ui/refused-menu-item';
 import { UNAVAILABLE_LOOK, UnavailableButton } from '../ui/tip';
 import { useEditorHeaderFocus, useEditorHostRegistration, type EditorHostAction, type EditorHostExport, type EditorHostRegistration, type EditorHostScope } from './editor-host';
@@ -184,21 +184,21 @@ export function StripControls({ tab, hide }: { tab: PanelTabRef; hide?: () => vo
   </>;
 }
 
-// P3-G (§D4.4): Mark up over the tab's surface, pressed while a session draws over it; disabled with no shown session
-// (nothing to attach the picture to).
+// P3-G (§D4.4): Mark up over the tab's surface, pressed while a session draws over it; greyed with no shown session
+// (nothing to attach the picture to), its reason in its tooltip.
 function MarkupButton({ scope }: { scope: EditorHostScope }) {
   const shown = useLayout((s) => shownSession(s.main));
   const active = useMarkup((s) => s.session?.scope.surface === scope.surface && s.session.scope.tabId === scope.tabId);
   return (
-    <IconButton label={shown === null ? MARKUP_COPY.noSession : MARKUP_COPY.markUp} action="markup.start" pressed={active} disabled={shown === null} onClick={() => void startMarkup(scope)}>
+    <IconButton label={MARKUP_COPY.markUp} unavailable={shown === null ? MARKUP_COPY.noSession : null} action="markup.start" pressed={active} onClick={() => void startMarkup(scope)}>
       <PenIcon />
     </IconButton>
   );
 }
 
 // Float's label names what a click does (`togglePanelFloat`): floats a docked panel; over a floating one, brings a card
-// closed to its pill back (P3-F L129), else docks. With no session in front there is nothing to float: disabled, the
-// label saying why (P3-F wave S, F6). P4-B3 (its Decision Log 8): with the main split's card up, a click docks that card.
+// closed to its pill back (P3-F L129), else docks. With no session in front there is nothing to float: greyed, the
+// tooltip saying why (P3-F wave S, F6). P4-B3 (its Decision Log 8): with the main split's card up, a click docks that card.
 // Hide (`hide`: the store's `hideSurfaces` for the scope) closes nothing: the cards show where the column was.
 export function RegionControls({ hide }: { hide: () => void }) {
   const { maximized, floating } = useLayout((s) => s.regions.panel);
@@ -211,10 +211,10 @@ export function RegionControls({ hide }: { hide: () => void }) {
     <>
       <ShowChat host="panel" />
       <IconButton
-        label={nothing ? FLOAT_COPY.noSession : split ? 'Dock session' : !floating ? 'Float conversation over surface' : pill ? 'Open session card' : 'Dock session'}
+        label={split ? 'Dock session' : !floating ? 'Float conversation over surface' : pill ? 'Open session card' : 'Dock session'}
+        unavailable={nothing ? FLOAT_COPY.noSession : null}
         action="panel.float"
         pressed={floating}
-        disabled={nothing}
         onClick={() => runAction('panel.float')}
       >
         <FloatIcon />
@@ -259,15 +259,16 @@ function CommentCount({ count, action }: { count: number; action: EditorHostActi
 }
 
 // The word cut (M5's G558): an icon action is a named glyph, its word a tooltip the keyboard reaches; one `unavailable`
-// stays focusable, greyed, its reason in the tooltip and the description, its press swallowed. A `disabled` one (no
-// reason given) is out of the Tab order, so it keeps the system's tooltip for the pointer.
+// stays focusable, greyed, its reason in the tooltip and the description, its press swallowed. A `disabled` one is an
+// action with nothing to say while it waits (a document's suggestions switch before its row is read, ticket 815): out of
+// the Tab order, named, and with no tooltip.
 function ActionButton({ action, text = false }: { action: EditorHostAction; text?: boolean }) {
   const ActionIcon = text ? undefined : action.icon;
   if (ActionIcon && action.disabled) {
     return (
-      <IconButton label={action.label} pressed={action.pressed} disabled onClick={() => action.onSelect()} data-editor-action={action.id}>
+      <button type="button" aria-label={action.label} aria-pressed={action.pressed} disabled data-editor-action={action.id} className={GLYPH_BUTTON}>
         <ActionIcon className="size-4" />
-      </IconButton>
+      </button>
     );
   }
   if (ActionIcon) {

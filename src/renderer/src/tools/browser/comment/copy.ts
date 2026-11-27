@@ -6,7 +6,7 @@ export { COMMENT_WORDS } from '@shared/browser/comment-protocol';
 
 export const COMMENT_COPY = {
   toggle: 'Comment',
-  toggleAgent: 'Comment is unavailable while the agent is browsing',
+  toggleAgent: 'Unavailable while the agent is browsing', // ticket 815: the reason after the word, under the greyed glyph
   toggleNoPage: 'Load a page to comment on it',
   cropFailed: 'Screenshot unavailable; the comment is sent without one',
   cropTooLarge: 'The screenshot was too large; the comment is sent without one',

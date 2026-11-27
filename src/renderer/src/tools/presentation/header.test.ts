@@ -19,10 +19,10 @@ describe('the deck header’s actions (M6)', () => {
     expect(calls).toEqual(['present', 'theme', 'check']);
   });
 
-  it('shows the open panel pressed and Present disabled with no slide to show', () => {
+  it('shows the open panel pressed and Present greyed, saying why, with no slide to show', () => {
     const header = deckHeader(state({ rail: 'check', canPresent: false }), { present: () => {}, toggleRail: () => {} });
     const by = Object.fromEntries((header.actions ?? []).map((a) => [a.id, a]));
-    expect([by.present?.disabled, by.theme?.pressed, by.check?.pressed]).toEqual([true, false, true]);
+    expect([by.present?.unavailable, by.present?.disabled, by.theme?.pressed, by.check?.pressed]).toEqual(['No slide to show', undefined, false, true]);
   });
 
   it('offers no actions before the deck has opened', () => {

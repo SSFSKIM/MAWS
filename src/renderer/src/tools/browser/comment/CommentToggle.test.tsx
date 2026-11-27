@@ -63,11 +63,14 @@ describe('the Comment toggle', () => {
     expect(toggle().getAttribute('aria-pressed')).toBe('false');
   });
 
-  it('is disabled while the agent holds the page, its reason as its label', () => {
+  it('is greyed while the agent holds the page, keeping Tab, its reason its description, its press swallowed', async () => {
     show(browserTab(T1, A, { control: 'agent' }));
-    const button = screen.getByRole<HTMLButtonElement>('button', { name: COMMENT_COPY.toggleAgent });
-    expect(button.disabled).toBe(true);
-    expect(button.getAttribute('title')).toBe(COMMENT_COPY.toggleAgent);
+    const button = screen.getByRole<HTMLButtonElement>('button', { name: COMMENT_COPY.toggle, description: COMMENT_COPY.toggleAgent });
+    expect(button.disabled).toBe(false);
+    expect(button.getAttribute('aria-disabled')).toBe('true');
+    expect(button.hasAttribute('title')).toBe(false);
+    await userEvent.click(button);
+    expect(sets()).toEqual([]);
   });
 
   it.each([
@@ -76,9 +79,9 @@ describe('the Comment toggle', () => {
     ['crashed', { crashed: { reason: 'oom' } }],
     ['an empty tab', { url: '' }],
     ['a view that could not be created', { failed: { message: 'no' } }],
-  ] satisfies [string, Partial<BrowserTab>][])('is disabled with nothing to pick on: %s', (_, over) => {
+  ] satisfies [string, Partial<BrowserTab>][])('is greyed with nothing to pick on, saying why: %s', (_, over) => {
     show(browserTab(T1, A, over));
-    expect(screen.getByRole<HTMLButtonElement>('button', { name: COMMENT_COPY.toggleNoPage }).disabled).toBe(true);
+    expect(screen.getByRole<HTMLButtonElement>('button', { name: COMMENT_COPY.toggle, description: COMMENT_COPY.toggleNoPage }).getAttribute('aria-disabled')).toBe('true');
   });
 
   it('a click asks main to arm the tab, and the toggle shows main’s answer; a second click disarms it', async () => {

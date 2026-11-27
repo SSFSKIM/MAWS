@@ -306,7 +306,7 @@ it('does not show Session cards as pressed for an unstarted New chat', () => {
   renderShell();
   const cards = within(chrome()).getByRole('button', { name: 'Session cards' });
   expect(cards.getAttribute('aria-pressed')).toBe('false');
-  expect(cards.hasAttribute('disabled')).toBe(true);
+  expect(cards.getAttribute('aria-disabled')).toBe('true'); // greyed, keeping Tab (ticket 815)
   expect(screen.queryByRole('complementary', { name: 'Session cards' })).toBeNull();
 });
 

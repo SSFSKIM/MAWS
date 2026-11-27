@@ -85,10 +85,10 @@ export function FindBar({ tab, focusRequest, onClose }: FindBarProps) {
           </>
         )}
       </span>
-      <IconButton label={copy.previous} disabled={text === ''} onClick={() => step(false)}>
+      <IconButton label={copy.previous} unavailable={text === '' ? copy.nothingToFind : null} onClick={() => step(false)}>
         <ChevronUpIcon />
       </IconButton>
-      <IconButton label={copy.next} disabled={text === ''} onClick={() => step(true)}>
+      <IconButton label={copy.next} unavailable={text === '' ? copy.nothingToFind : null} onClick={() => step(true)}>
         <ChevronDownIcon />
       </IconButton>
       <IconButton

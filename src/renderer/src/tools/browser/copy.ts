@@ -60,6 +60,10 @@ export const BROWSER_COPY = {
   forward: 'Forward',
   reloadPage: 'Reload page', // Codex's `thread.browser.reload`
   stop: 'Stop loading',
+  // ticket 815: why Back, Forward and Reload page are greyed
+  noBack: 'No page to go back to',
+  noForward: 'No page to go forward to',
+  noReload: 'No page to reload',
   address: 'Address',
   addressPlaceholder: 'Search or enter a URL', // Codex's `thread.browser.addressPlaceholder`
   addressSuggestions: 'Address suggestions', // Codex's `thread.browser.addressSuggestions`
@@ -110,6 +114,7 @@ export const BROWSER_COPY = {
     unavailable: 'Couldn’t search this page',
     previous: 'Previous result',
     next: 'Next result',
+    nothingToFind: 'Type text to find', // ticket 815: why Previous and Next are greyed
     matchCase: 'Match case',
     matchCaseGlyph: 'Aa',
     close: 'Close find',

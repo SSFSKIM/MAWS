@@ -1,12 +1,13 @@
-// A square icon button for the toolbar and region headers. When it mirrors an action of the table its tooltip carries
-// the action's effective chord (overrides included), so the tooltip, the menu and the palette never disagree. Its
-// tooltip is the system's `title`, which the keyboard does not reach; the word cut's named glyph (ui/glyph.tsx) has
-// the same look with a tooltip that keyboard focus shows.
-import { forwardRef, type ButtonHTMLAttributes, type ReactNode } from 'react';
+// A square icon button for the toolbar and region headers: the word cut's named glyph (ui/glyph.tsx), its word the
+// accessible name and a tooltip keyboard focus shows (board ticket 815). When it mirrors an action of the table its
+// tooltip carries the action's effective chord (overrides included), so the tooltip, the menu and the palette never
+// disagree. A greyed one is `unavailable` with its reason, never `disabled`: it keeps Tab, says why and swallows its
+// press (the cut: greyed controls keep Tab and say why).
+import { forwardRef, type ReactNode } from 'react';
 import { effectiveChord, type ActionId } from '@shared/keymap/actions';
 import { formatChord } from '@shared/keymap/chord';
 import { useSettings } from '../stores/settings';
-import { GLYPH_BUTTON } from '../ui/glyph'; // the word cut: the look the named glyph shares
+import { GLYPH_BUTTON, NamedGlyph, type NamedGlyphProps } from '../ui/glyph';
 
 export function useChordHint(action: ActionId | undefined): string | null {
   const overrides = useSettings((s) => s.state?.settings.keymap);
@@ -15,31 +16,15 @@ export function useChordHint(action: ActionId | undefined): string | null {
   return chord ? formatChord(chord) : null;
 }
 
-interface IconButtonProps extends Omit<ButtonHTMLAttributes<HTMLButtonElement>, 'aria-label' | 'title'> {
+interface IconButtonProps extends Omit<NamedGlyphProps, 'ref' | 'shortcut' | 'detail' | 'tip' | 'children'> {
   label: string;
   action?: ActionId; // adds the action's chord to the tooltip
-  pressed?: boolean;
   children: ReactNode;
 }
 
-export const IconButton = forwardRef<HTMLButtonElement, IconButtonProps>(function IconButton(
-  { label, action, pressed, children, className = '', ...rest },
-  ref,
-) {
+export const IconButton = forwardRef<HTMLButtonElement, IconButtonProps>(function IconButton({ action, className = '', ...glyph }, ref) {
   const chord = useChordHint(action);
-  return (
-    <button
-      ref={ref}
-      type="button"
-      aria-label={label}
-      aria-pressed={pressed}
-      title={chord ? `${label} · ${chord}` : label}
-      className={`${GLYPH_BUTTON} ${className}`}
-      {...rest}
-    >
-      {children}
-    </button>
-  );
+  return <NamedGlyph ref={ref} shortcut={chord} className={`${GLYPH_BUTTON} ${className}`} {...glyph} />;
 });
 
 // The mockup's 16 px stroke icons (mockups/01-shell.html), drawn in currentColor.

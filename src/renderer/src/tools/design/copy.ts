@@ -4,5 +4,6 @@
 export const DESIGN_COPY = {
   openingName: 'Opening the design…', // accessible name only: the quiet spinner's while the replica opens (T615, G557)
   // the fitting sheet's body: the fact in one line; the scale stays in its title and its button (T632)
+  zoomPreviewing: 'Not while viewing a version', // ticket 815: why Zoom to fit is greyed while history shows a version
   tooLarge: (format: 'png' | 'pdf') => `Too large for a ${format === 'png' ? 'PNG' : 'PDF'} at full size.`,
 };

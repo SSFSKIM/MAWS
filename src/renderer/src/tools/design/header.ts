@@ -9,6 +9,7 @@ import type { EditorHostAction, EditorHostExport, EditorHostRegistration } from 
 import { CommentsIcon, HistoryIcon } from '../document/icons';
 import { savedOf } from '../presentation/header';
 import { ThemeIcon } from '../presentation/icons';
+import { DESIGN_COPY } from './copy';
 import { ZoomToFitIcon } from './icons';
 
 export interface DesignHeaderState {
@@ -24,7 +25,7 @@ export interface DesignHeaderState {
   exports?: readonly EditorHostExport[];
   /** M4: version history is offered (the tab has the design's history). */
   history?: boolean;
-  /** The history shows a version (or two compared) in place of the live world: Zoom to fit, the live world's, is disabled. */
+  /** The history shows a version (or two compared) in place of the live world: Zoom to fit, the live world's, is greyed with its reason. */
   previewing?: boolean;
 }
 
@@ -38,7 +39,7 @@ function designActions(state: DesignHeaderState, commands: DesignHeaderCommands)
   return [
     ...(state.history ? [{ id: 'history', label: 'Version history', icon: HistoryIcon, pressed: state.rail === 'history', onSelect: () => commands.toggleRail('history') }] : []), // M4
     { id: 'comments', label: 'Comments', icon: CommentsIcon, pressed: state.rail === 'comments', onSelect: () => commands.toggleRail('comments') }, // M4
-    { id: 'zoom-to-fit', label: 'Zoom to fit', icon: ZoomToFitIcon, onSelect: () => commands.fitAll(), ...(state.previewing && { disabled: true }) },
+    { id: 'zoom-to-fit', label: 'Zoom to fit', icon: ZoomToFitIcon, onSelect: () => commands.fitAll(), ...(state.previewing && { unavailable: DESIGN_COPY.zoomPreviewing }) },
     { id: 'theme', label: 'Theme', icon: ThemeIcon, pressed: state.rail === 'theme', onSelect: () => commands.toggleRail('theme') },
   ];
 }

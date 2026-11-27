@@ -43,6 +43,7 @@ import { PanelHost } from '../panel/PanelHost';
 import { SETTINGS_DEFAULTS_V21 } from '@shared/settings/defaults';
 import { preloadOf } from '../test-support/preload-of';
 import { installResizeObserver } from '../test-support/resize';
+import { accessibleDescription } from '../test-support/accessible-text';
 import { registerSidePane } from '../side/register';
 import { closeBtwCard, foldBtwCard, openBtwCard, resetSideQuestions, setBtwQuestion } from '../side/store';
 
@@ -116,9 +117,12 @@ describe('shell frame', () => {
     const toolbar = screen.getByRole('banner');
     const toggle = within(toolbar).getByRole('button', { name: 'Overview' });
     const sidebar = within(toolbar).getByRole('button', { name: 'Toggle sidebar' });
-    expect(sidebar.nextElementSibling).toBe(toggle);
+    const buttons = within(toolbar).getAllByRole('button');
+    expect(buttons[buttons.indexOf(sidebar) + 1]).toBe(toggle);
     expect(toggle.className).toContain('[-webkit-app-region:no-drag]');
-    expect(toggle.getAttribute('title')).toBe('Overview · ⌘0');
+    expect(accessibleDescription(toggle)).toBe('⌘0');
+    act(() => toggle.focus());
+    expect(screen.getByRole('tooltip').textContent).toBe('Overview · ⌘0');
     expect(toggle.getAttribute('aria-pressed')).toBe('false');
     expect(screen.queryByRole('dialog', { name: 'Overview' })).toBeNull();
     await user.click(toggle);
@@ -313,7 +317,7 @@ describe('toolbar', () => {
     renderShell();
     const cards = within(screen.getByRole('banner')).getByRole('button', { name: 'Session cards' });
     expect(cards.getAttribute('aria-pressed')).toBe('true');
-    expect(cards.getAttribute('title')).toBe('Session cards · ⌘⇧B');
+    expect(accessibleDescription(cards)).toBe('⌘⇧B');
     const floatingCards = screen.getByRole('complementary', { name: 'Session cards' });
     expect(region('main').contains(floatingCards)).toBe(true);
     expect(region('panel').contains(floatingCards)).toBe(false);
@@ -358,7 +362,10 @@ describe('toolbar', () => {
   it('shows a rebound chord in the tooltip', () => {
     useSettings.setState({ state: { settings: { ...SETTINGS_DEFAULTS_V21, keymap: { 'sidebar.toggle': 'Cmd+Alt+S' } }, resolvedTheme: 'light' } });
     renderShell();
-    expect(screen.getByRole('button', { name: 'Toggle sidebar' }).getAttribute('title')).toBe('Toggle sidebar · ⌘⌥S');
+    const toggle = screen.getByRole('button', { name: 'Toggle sidebar' });
+    expect(accessibleDescription(toggle)).toBe('⌘⌥S');
+    act(() => toggle.focus());
+    expect(screen.getByRole('tooltip').textContent).toBe('Toggle sidebar · ⌘⌥S');
     useSettings.setState({ state: null });
   });
 

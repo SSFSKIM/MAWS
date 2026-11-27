@@ -41,10 +41,11 @@ describe('the design header', () => {
     expect(designHeader(state()).actions).toBeUndefined();
   });
 
-  it('(design-workbench scalpel-2#2) offers Zoom to fit disabled while the history shows a version in place of the live world', () => {
+  it('(design-workbench scalpel-2#2) greys Zoom to fit, saying why, while the history shows a version in place of the live world', () => {
     const zoom = (previewing?: boolean) => designHeader(state({ previewing }), { fitAll: () => {}, toggleRail: () => {} }).actions!.find((a) => a.id === 'zoom-to-fit')!;
-    expect(zoom(true).disabled).toBe(true);
-    expect(zoom(false).disabled).toBeFalsy();
-    expect(zoom().disabled).toBeFalsy();
+    expect(zoom(true).unavailable).toBe('Not while viewing a version');
+    expect(zoom(false).unavailable).toBeFalsy();
+    expect(zoom().unavailable).toBeFalsy();
+    expect(zoom(true).disabled).toBeFalsy(); // greyed, it keeps Tab
   });
 });

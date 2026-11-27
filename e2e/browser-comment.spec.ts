@@ -1487,9 +1487,11 @@ test('10. the control gate: under the agent the toggle is disabled and an arm is
     within('disarm heard after', heardAt - at, 200, 'the window heard the disarm within 200 ms');
     await expect(commentNodes(t.page)).toHaveCount(0);
 
-    // the toggle: disabled, its label the reason; main refuses an arm
-    const agentToggle = t.panel.getByRole('button', { name: 'Comment is unavailable while the agent is browsing' });
-    await expect(agentToggle).toBeDisabled();
+    // the toggle: greyed, its reason its description (ticket 815); main refuses an arm
+    const agentToggle = t.panel.locator('[data-browser-comment]');
+    await expect(agentToggle).toHaveAccessibleName('Comment');
+    await expect(agentToggle).toHaveAttribute('aria-disabled', 'true');
+    await expect(agentToggle).toHaveAccessibleDescription('Unavailable while the agent is browsing');
     expect(value(await invoke(s.page, 'browser.comment.set', { tabId: t.tabId, on: true }))).toEqual({ on: false, reason: 'agent' });
 
     // a report for the arm the agent ended: dropped and counted, nothing opens

@@ -3,6 +3,9 @@
 export const COPY = {
   add: 'Add a tool',
   addNoSession: 'Open a session to add a tool',
+  // ticket 815: why the surface row's glyphs are greyed
+  toolNoSession: 'Open a session to use this tool',
+  cardsNoSession: 'Select a session’s tab to show its cards',
   noTools: 'No tools registered yet',
   allOpen: 'Every tool is already open here', // every registered tool is single-instance and has a tab in the shown scope
   footer: 'Tools stay with this session. Pin a tab to keep it with you as you switch.',

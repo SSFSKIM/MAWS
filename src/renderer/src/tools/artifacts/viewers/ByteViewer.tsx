@@ -464,7 +464,7 @@ function useViewerHeader({ kind, artifactId, machine, title, state, scope, conte
     const open = () => (local ? ipc.invoke('library.openExternally', { artifactId, ...at }, { machine }) : openArtifactCopy(machine, artifactId, revision, ipc));
     actions.push({ id: 'external', label: VIEWERS_COPY.openExternally, icon: OpenExternallyIcon, onSelect: () => void answered(open()) });
   }
-  if (content && machineShown !== null) actions.push({ id: 'reveal', label: VIEWERS_COPY.revealOn(machineShown), icon: RevealIcon, disabled: true, onSelect: () => {} });
+  if (content && machineShown !== null) actions.push({ id: 'reveal', label: VIEWERS_COPY.reveal, icon: RevealIcon, unavailable: VIEWERS_COPY.revealOn(machineShown), onSelect: () => {} });
   else if (content) actions.push({ id: 'reveal', label: VIEWERS_COPY.reveal, icon: RevealIcon, onSelect: () => void answered(ipc.invoke('library.reveal', { artifactId, ...at }, { machine })) });
   if (content && session !== null && drawnKind !== null && OPENS_AS_FILE.has(drawnKind) && underSession(content.path, sessionRecord)) {
     actions.push({ id: 'file', label: VIEWERS_COPY.openAsFile, icon: OpenAsFileIcon, onSelect: () => openFile(session, content.path) });

@@ -12,6 +12,7 @@ import { SurfaceRow } from './SurfaceRow';
 import { PANEL_TAB_DRAG_TYPE } from '../shell/transfer';
 import { TRANSFER_COPY } from '../tools/artifacts/copy';
 import { drag, transfer } from '../test-support/drag';
+import { accessibleDescription } from '../test-support/accessible-text';
 import type { PanelTool } from './tool';
 
 const offs: (() => void)[] = [];
@@ -102,18 +103,19 @@ describe('surface icons and same-tool tabs', () => {
     expect(icon('Artifacts').getAttribute('aria-pressed')).toBe('false');
   });
 
-  it('with no session shown new surfaces are disabled, but an existing pin remains selectable and a sessionless pin still lands', async () => {
+  it('with no session shown new surfaces are greyed, saying why, but an existing pin remains selectable and a sessionless pin still lands', async () => {
     const user = userEvent.setup();
     register(probeTool('terminal', { title: 'Terminal' }).tool, probeTool('session-info', { title: 'Session info', multiInstance: false }).tool);
     useLayout.setState({ main: LAYOUT_DEFAULTS.main, panelPinned: [ref('terminal:pin00000', true)] });
     renderHost();
-    expect((icon('Session cards') as HTMLButtonElement).disabled).toBe(true);
+    expect(icon('Session cards').getAttribute('aria-disabled')).toBe('true');
+    expect(accessibleDescription(icon('Session cards'))).toMatch(/^Select a session’s tab to show its cards/);
     await user.click(icon('More surfaces'));
     expect(screen.getByRole('menuitem', { name: 'Session info' }).getAttribute('aria-disabled')).toBe('true');
     await user.keyboard('{Escape}');
     await user.click(icon('Terminal'));
     expect(useLayout.getState().panelActiveNoSession).toBe('terminal:pin00000');
-    expect((screen.getByRole('button', { name: 'Open a session to add a tool' }) as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.getByRole('button', { name: 'Add a tool', description: 'Open a session to add a tool' }).getAttribute('aria-disabled')).toBe('true');
     expect(screen.getByTestId('body:terminal:pin00000').textContent).toContain('no session · pinned');
     let id = '';
     act(() => void (id = panelHost.addTool('terminal', { appSessionId: null, pin: true })));

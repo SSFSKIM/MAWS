@@ -423,11 +423,12 @@ test('a session opens in place of Settings or Diagnostics; a pin keeps its tab; 
 // none in front (an artifact, Diagnostics) Float is disabled and says why, the menu action floats nothing, and a float that
 // meets such a tab docks: main and its tab strip never vanish behind a panel with no card. UX wave U7b (O-40): Settings is
 // a dialog, no tab, so Diagnostics stands for the tab of no session, and Settings over the floating card leaves it floating.
-test('Float with no session in front: disabled with its reason, the action floats nothing, Settings over the card leaves it, and Diagnostics docks it', async () => {
+test('Float with no session in front: greyed with its reason, the action floats nothing, Settings over the card leaves it, and Diagnostics docks it', async () => {
   const maws = await launchMaws({ env: SHELL_ENV });
   try {
     const { app, page } = maws;
     const NO_SESSION = 'Select a session’s tab to float it';
+    const floatButton = page.locator('[data-region="panel"]').getByRole('button', { name: 'Float conversation over surface', exact: true });
     const main = page.locator('[data-region="main"]');
     const panel = page.locator('[data-region="panel"]');
     const strip = page.getByRole('tablist', { name: 'Open tabs' });
@@ -463,7 +464,8 @@ test('Float with no session in front: disabled with its reason, the action float
     await menu(app, 'diagnostics.open');
     await expect.poll(() => tabLabels(page, 'Open tabs')).toEqual([NORTH, 'Diagnostics']);
 
-    await expect(panel.getByRole('button', { name: NO_SESSION })).toBeDisabled();
+    await expect(floatButton).toHaveAttribute('aria-disabled', 'true'); // greyed, keeping Tab (ticket 815)
+    await expect(floatButton).toHaveAccessibleDescription(new RegExp(`^${NO_SESSION}`));
     await menu(app, 'panel.float');
     await expect(page.getByText(NO_SESSION, { exact: true })).toBeVisible(); // the toast says why
     await mainShown('the action floats nothing with Diagnostics in front');
@@ -484,7 +486,8 @@ test('Float with no session in front: disabled with its reason, the action float
     await menu(app, 'diagnostics.open'); // Diagnostics comes in front of the floating card
     await expect(card).toHaveCount(0);
     await mainShown('a float that meets Diagnostics docks');
-    await expect(panel.getByRole('button', { name: NO_SESSION })).toBeDisabled();
+    await expect(floatButton).toHaveAttribute('aria-disabled', 'true'); // greyed, keeping Tab (ticket 815)
+    await expect(floatButton).toHaveAccessibleDescription(new RegExp(`^${NO_SESSION}`));
     expect(maws.consoleErrors(), 'the console stays free of errors').toEqual([]);
   } finally {
     await maws.cleanup();

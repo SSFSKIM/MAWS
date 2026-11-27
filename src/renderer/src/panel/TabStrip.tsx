@@ -457,7 +457,7 @@ function AddMenu({ appSessionId, group }: { appSessionId: AppSessionId | null; g
   const panes = usePanes(appSessionId); // R2: the session's plugin panes, listed under their own heading
   if (appSessionId === null) {
     return (
-      <IconButton label={COPY.addNoSession} disabled>
+      <IconButton label={COPY.add} unavailable={COPY.addNoSession}>
         <PlusIcon />
       </IconButton>
     );

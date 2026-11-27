@@ -39,10 +39,10 @@ export function NavRow({ appSessionId, surface, tab, addressRef, owns, room, onF
   const [addressBox, setAddressBox] = useState<HTMLDivElement | null>(null);
   return (
     <div data-browser-nav="" className="relative flex h-9 shrink-0 items-center gap-0.5 px-1">
-      <IconButton label={BROWSER_COPY.back} disabled={!tab?.canGoBack} onClick={() => tab && navigate(tab.tabId, 'back')}>
+      <IconButton label={BROWSER_COPY.back} unavailable={tab?.canGoBack ? null : BROWSER_COPY.noBack} onClick={() => tab && navigate(tab.tabId, 'back')}>
         <BackIcon />
       </IconButton>
-      <IconButton label={BROWSER_COPY.forward} disabled={!tab?.canGoForward} onClick={() => tab && navigate(tab.tabId, 'forward')}>
+      <IconButton label={BROWSER_COPY.forward} unavailable={tab?.canGoForward ? null : BROWSER_COPY.noForward} onClick={() => tab && navigate(tab.tabId, 'forward')}>
         <ForwardIcon />
       </IconButton>
       {loading ? (
@@ -50,7 +50,7 @@ export function NavRow({ appSessionId, surface, tab, addressRef, owns, room, onF
           <CloseIcon />
         </IconButton>
       ) : (
-        <IconButton label={BROWSER_COPY.reloadPage} disabled={!tab || tab.url === ''} onClick={() => tab && navigate(tab.tabId, 'reload')}>
+        <IconButton label={BROWSER_COPY.reloadPage} unavailable={!tab || tab.url === '' ? BROWSER_COPY.noReload : null} onClick={() => tab && navigate(tab.tabId, 'reload')}>
           <ReloadIcon />
         </IconButton>
       )}

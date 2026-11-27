@@ -15,7 +15,7 @@ import { COMMENT_COPY } from './copy';
 import { CommentIcon } from './icons';
 import { setCommentMode, useCommentMode } from './store';
 
-// Why the tab cannot be commented on now, as the toggle's label says it, or null.
+// Why the tab cannot be commented on now, as the greyed toggle's tooltip and description say it, or null.
 export function commentUnavailable(tab: BrowserTab): string | null {
   if (tab.control === 'agent') return COMMENT_COPY.toggleAgent;
   if (tab.suspended || tab.url === '' || tab.loadError !== null || tab.crashed !== null || tab.failed !== null) return COMMENT_COPY.toggleNoPage;
@@ -45,9 +45,9 @@ export function CommentToggle({ tab }: ChromeExtraProps) {
   return (
     <IconButton
       ref={button}
-      label={unavailable ?? COMMENT_COPY.toggle}
+      label={COMMENT_COPY.toggle}
+      unavailable={unavailable}
       pressed={armed}
-      disabled={unavailable !== null}
       data-browser-comment=""
       onClick={() => void setCommentMode(tabId, !armed)}
     >

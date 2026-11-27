@@ -288,7 +288,7 @@ describe('the HTML viewer', () => {
     const reads = sentTo.filter(([name]) => name === 'artifacts.versions' || name === 'library.content' || name === 'library.get');
     expect(reads.length).toBeGreaterThan(0);
     expect(new Set(reads.map(([, target]) => target))).toEqual(new Set([OTHER_MACHINE]));
-    expect(action('Reveal in Finder (on studio)').disabled).toBe(true);
+    expect(action('Reveal in Finder').unavailable).toBe('The file is on studio');
     act(() => action('Open externally').onSelect());
     await waitFor(() => expect(main.callsOf('remote.openCopy')).toEqual([{ machine: OTHER_MACHINE, source: { artifactId: ID, revision: 9 } }]));
     expect(sentTo.find(([name]) => name === 'remote.openCopy')?.[1]).toBe(TEST_MACHINE);

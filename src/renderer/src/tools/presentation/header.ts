@@ -40,7 +40,7 @@ export interface DeckHeaderCommands {
 
 function deckActions(state: DeckHeaderState, commands: DeckHeaderCommands): EditorHostAction[] {
   return [
-    { id: 'present', label: 'Present', icon: PresentIcon, disabled: !state.canPresent, onSelect: () => commands.present() },
+    { id: 'present', label: 'Present', icon: PresentIcon, unavailable: state.canPresent ? null : DECK_COPY.nothingToPresent, onSelect: () => commands.present() },
     { id: 'theme', label: 'Theme', icon: ThemeIcon, pressed: state.rail === 'theme', onSelect: () => commands.toggleRail('theme') },
     { id: 'check', label: DECK_COPY.checkDesign, icon: CheckIcon, pressed: state.rail === 'check', onSelect: () => commands.toggleRail('check') },
   ];

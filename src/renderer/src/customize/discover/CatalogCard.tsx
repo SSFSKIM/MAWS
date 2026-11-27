@@ -54,7 +54,7 @@ export function AddButton({ item, tab, variant = 'icon' }: { item: CatalogItem; 
       </button>
     );
   return (
-    <IconButton label={D.addName(item.name)} data-catalog-add disabled={busy} onClick={open} className="border border-border bg-bg">
+    <IconButton label={D.addName(item.name)} data-catalog-add unavailable={busy ? D.adding : null} onClick={open} className="border border-border bg-bg">
       <PlusIcon />
     </IconButton>
   );

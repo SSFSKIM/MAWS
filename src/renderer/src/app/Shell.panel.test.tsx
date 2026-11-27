@@ -168,7 +168,7 @@ describe('shell renders the panel host in the region', () => {
     useLayout.getState().openTab({ kind: 'artifact', artifactId: 'document-a', machine: TEST_MACHINE });
     renderShell();
     const row = within(screen.getByRole('toolbar', { name: 'Session surfaces' }));
-    expect((row.getByRole('button', { name: 'Session cards' }) as HTMLButtonElement).disabled).toBe(true);
+    expect(row.getByRole('button', { name: 'Session cards' }).getAttribute('aria-disabled')).toBe('true');
     await user.click(row.getByRole('button', { name: 'Terminal' }));
     const id = panelOf(A)!.activeTabId!;
     expect(activeTab(useLayout.getState().main)).toMatchObject({ kind: 'artifact', artifactId: 'document-a', machine: TEST_MACHINE });
