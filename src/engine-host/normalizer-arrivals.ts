@@ -9,7 +9,7 @@
 // (decision 8: under one uuid the first carrier stands, so a line is always withdrawn before it is placed again). All of
 // it is state in the normaliser's own (`NormalizerState.arrivals`): a journal replayed through a fresh normaliser gives
 // the same events. Pure: no clock, nothing outside the rows.
-import { nothingOpen, readNext, turnOriginOf, type Arrival, type CarriedArrival, type OpenArrivals } from '@shared/engine/arrival';
+import { nothingOpen, readNext, turnOriginOf, type Arrival, type ArrivalEntry, type CarriedArrival, type OpenArrivals } from '@shared/engine/arrival';
 import type { EventPayload } from '@shared/graph/events';
 import type { MessageUuid } from '@shared/graph/ids';
 import type { Attribution, EventSink } from './normalizer-support';
@@ -169,7 +169,7 @@ export function launchEnded(state: LiveArrivals, out: EventSink): void {
 type UserMessage = Extract<EventPayload, { kind: 'user.message' }>;
 
 /** The synthetic message of the carried classes (Interfaces C): never a prompt, its turn the one that runs. */
-export function carried(messageUuid: MessageUuid | null, content: UserMessage['content'], arrival: CarriedArrival[]): UserMessage {
+export function carried(messageUuid: MessageUuid | null, content: UserMessage['content'], arrival: ArrivalEntry[]): UserMessage {
   return { kind: 'user.message', messageUuid, content, isReplay: false, isSynthetic: true, origin: 'task-notification', bash: null, arrival };
 }
 

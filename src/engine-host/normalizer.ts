@@ -46,7 +46,7 @@ import { MAWS_SERVER_NAME } from '@shared/maws/tools'; // P2-C3
 import { TranscriptRecordSchema } from '@shared/wire/transcript'; // P5 O16 M3
 import { createBackfillContext, recordToEvents } from './fs/backfill'; // P5 O16 M3: a gap's reseed
 import { isHookMadeMessageId, isMadeUpFinalAnswer, isMessageTool, messageCallText } from '@shared/owner/message-call'; // P4-R7z
-import { carriedOf, commandEntry, commandFactsOf, ownWordsOf, readArrivals, type Arrival } from '@shared/engine/arrival'; // UX wave U3 (UC-2)
+import { carriedOf, commandEntry, commandFactsOf, ownWordsOf, readArrivals, sheetEntry, sheetFactsOf, type Arrival } from '@shared/engine/arrival'; // UX wave U3 (UC-2)
 import { splitPersonsMessage } from '@shared/engine/persons-message'; // UX wave, ticket 704
 import { localCommandText } from '@shared/engine/engine-markers';
 import { notificationText, taskNotificationBlocks } from '@shared/engine/task-notification';
@@ -545,7 +545,7 @@ export class Normalizer {
         return true;
       default:
         headed(live, first);
-        out.emit({ ...carried(uuid, content, carriedOf(claimed)), isReplay }, attribution);
+        out.emit({ ...carried(uuid, content, [...carriedOf(claimed), ...sheetEntry(sheetFactsOf(claimed))]), isReplay }, attribution); // the question sheet's deliveries beside the carried classes (the C3 plan's §I)
         return true;
     }
   }

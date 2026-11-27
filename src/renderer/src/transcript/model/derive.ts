@@ -41,6 +41,9 @@ import { localCommandParts } from '@shared/engine/engine-markers'; // UX wave U3
 import { isWebFetch, webFetchUrl } from '@shared/engine/web-fetch'; // UX wave U3b
 import { headRole, opensTurn } from './head'; // UX wave U3; U4a
 import { NOTICE } from './copy'; // UX wave U3
+import { sheetDeliveryWords } from './copy'; // the question sheet's C3 M5
+import { isSheetUse, sheetRowOf } from './sheet'; // the question sheet's C3 M5
+import { sheetDeliveriesOf } from '@shared/engine/arrival-schema'; // the question sheet's C3 M5
 import { answeredWords } from './answered'; // UX wave U3
 import { INTERRUPT_CUT, parseInterruptCut } from '@shared/lane-a/interrupt-cut'; // P5 O9
 import { parseListing } from './agent-listing'; // E7
@@ -153,7 +156,7 @@ function flatten(state: TranscriptState, before: Map<RowId, Row>, times: Map<Row
 // alone (`/compact`: its boundary and its output) has no work and no "0s" divider. A question still counts as
 // work for where the answer starts (WORK_ROWS).
 export const isPersistentRow = (row: Row): boolean =>
-  (row.kind === 'assistant_text' && row.cut === true) /* P5 O9: a reply an interrupt cut off, no work of the turn */ || row.kind === 'to_human' /* P4-R7 */ || row.kind === 'ask' || row.kind === 'delivery' /* E1 */ || row.kind === 'side_thread' /* E3 */ || row.kind === 'artifact' /* E2 */ || row.kind === 'browser_action' /* E4c */ || row.kind === 'browser_activity' /* E13: never derived here; placed by the view */ || row.kind === 'user' || row.kind === 'boundary' || row.kind === 'local_command' || row.kind === 'question' || (row.kind === 'assistant_text' && (row.phase === 'answer' || row.forHuman === true)) || (row.kind === 'error' && (row.scope === 'hook' || row.scope === 'plugin' || (row.scope === 'api' && row.severity === 'error')))
+  (row.kind === 'assistant_text' && row.cut === true) /* P5 O9: a reply an interrupt cut off, no work of the turn */ || row.kind === 'to_human' /* P4-R7 */ || row.kind === 'ask' || row.kind === 'delivery' /* E1 */ || row.kind === 'side_thread' /* E3 */ || row.kind === 'artifact' /* E2 */ || row.kind === 'browser_action' /* E4c */ || row.kind === 'browser_activity' /* E13: never derived here; placed by the view */ || row.kind === 'user' || row.kind === 'boundary' || row.kind === 'local_command' || row.kind === 'question' || row.kind === 'sheet' /* the question sheet's C3 M5 */ || (row.kind === 'assistant_text' && (row.phase === 'answer' || row.forHuman === true)) || (row.kind === 'error' && (row.scope === 'hook' || row.scope === 'plugin' || (row.scope === 'api' && row.severity === 'error')))
   || isPersistentNotice(row) // UX wave U3 (O-12, O-28): a message folds with its turn; a task's end with an outcome and a scheduled fire stay
   || (row.kind === 'plan' && row.waiting === true) // UX wave U1b (Interfaces §B, rule 4): a form folded away could not be answered
   || row.kind === 'gap'; // P5 O7 M8: events here were not delivered; a closed turn's fold never hides that
@@ -323,6 +326,7 @@ type Item =
   | { kind: 'subagents'; group: SubagentGroup }
   | { kind: 'steer'; row: RowOf<'user'> } // a prompt folded into this turn: a persistent row at its delivery position (W1)
   | { kind: 'ask' | 'delivery'; toolUseId: ToolUseId } // E1: a `maws` call's row, filled once its result and events are seen
+  | { kind: 'sheet'; toolUseId: ToolUseId } // the question sheet's C3 M5: a call in the sheet's form, filled once its result is seen
   | { kind: 'later'; row: () => Row } // E7: a message or listing row, filled once the turn's results and agents are known
   | { kind: 'artifact'; toolUseId: ToolUseId } // E2: as E1's, for an artifact call
   | { kind: 'browser_action'; toolUseId: ToolUseId } // E4c: as E2's, for a browser tool call
@@ -428,6 +432,7 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): TurnDerivat
   // P4-R7: a message tool's calls, apart from the turn's tool records: an accepted one is a message, not work the turn
   // did; one that is refused becomes the cell its record makes
   const messageCalls = new Map<ToolUseId, ToolRecord>();
+  const sheetCalls = new Map<ToolUseId, { use: Event<'tool.use'>; result: Event<'tool.result'> | null }>(); // the question sheet's C3 M5
   const toolRecord = (toolUseId: ToolUseId): ToolRecord | undefined => tools.get(toolUseId) ?? messageCalls.get(toolUseId);
   const retracted = new Set<string>();
   const superseded = new Set<string>();
@@ -587,6 +592,8 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): TurnDerivat
         if (event.isSynthetic && event.arrival !== undefined) { // UX wave U3: what the engine told the agent, one notice per arrival
           event.arrival.forEach((entry, n) => {
             const known = carriedOf([entry])[0];
+            const sheet = known === undefined ? sheetDeliveriesOf([entry]) : [];
+            if (sheet.length > 0) return arrive({ kind: 'later', row: () => sheetNotice(event, sheet, n, turn.id) }, 'answer'); // the question sheet's C3 M5: as today's answer draws
             if (known === undefined || known.class === 'consent') return; // a class this build does not know; consent is the person's prompt
             arrive({ kind: 'later', row: () => noticeOf(event, known, n, turn.id, questionsOf) }, known.class);
           });
@@ -673,6 +680,9 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): TurnDerivat
         } else if (presentation === 'message') { // P4-R7: a cell's record too, for the call that turns out refused
           messageCalls.set(event.toolUseId, { use: event, result: null, safeguard: 'not_evaluated', elapsedSeconds: 0, humanDecision: false, backgroundTaskId: null, backgroundDone: false });
           items.push({ kind: 'message', toolUseId: event.toolUseId });
+        } else if (isSheetUse(event)) { // the question sheet's C3 M5 (§I, S9): a call in the sheet's form is no question row
+          sheetCalls.set(event.toolUseId, { use: event, result: null });
+          items.push({ kind: 'sheet', toolUseId: event.toolUseId });
         } else {
           pendingRows.set(event.toolUseId, { kind: presentation, use: event, answers: null, outcome: null, feedback: null, requestId: null, error: null });
           items.push({ kind: 'request', toolUseId: event.toolUseId });
@@ -717,6 +727,8 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): TurnDerivat
         if (artifact) resultOfArtifact(artifact, event);
         const browserAction = browserActions.get(event.toolUseId); // E4c
         if (browserAction) browserAction.result = event;
+        const sheetCall = sheetCalls.get(event.toolUseId); // the question sheet's C3 M5
+        if (sheetCall) sheetCall.result = event;
         break;
       }
       case 'tool.safeguard': {
@@ -960,6 +972,11 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): TurnDerivat
         resolved.push({ kind: 'row', row: deliveryRow(deliveries.get(item.toolUseId)!, turn.id, context) });
         break;
       // E1 end
+      case 'sheet': { // the question sheet's C3 M5
+        const call = sheetCalls.get(item.toolUseId)!;
+        resolved.push({ kind: 'row', row: sheetRowOf(call.use, call.result, turn.id, state?.index.sheet ?? null) });
+        break;
+      }
       case 'later': // E7
         resolved.push({ kind: 'row', row: item.row() });
         break;
@@ -1017,7 +1034,7 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): TurnDerivat
   // is followed by hook events (pass3/steer-next seq 230-237), and counting them would class the answer as commentary (W1).
   // P4-R7: a message tool's call is a call too, so a text before it is the turn's commentary, as before any call
   // UX wave U3: a notice that arrived among the work counts as an inbound message does
-  const WORK_ROWS = new Set<Row['kind']>(['subagent', 'agent_message', 'notice', 'question', 'plan', 'request_slot', 'error', 'ask', 'delivery' /* E1: calls, as a question is */, 'agent_list' /* E7 */, 'artifact' /* E2 */, 'browser_action' /* E4c */, 'to_human' /* P4-R7 */]);
+  const WORK_ROWS = new Set<Row['kind']>(['subagent', 'agent_message', 'notice', 'question', 'sheet' /* the question sheet's C3 M5 */, 'plan', 'request_slot', 'error', 'ask', 'delivery' /* E1: calls, as a question is */, 'agent_list' /* E7 */, 'artifact' /* E2 */, 'browser_action' /* E4c */, 'to_human' /* P4-R7 */]);
   const isWork = (item: (typeof resolved)[number]) => item.kind === 'cell' || (item.kind === 'row' && WORK_ROWS.has(item.row.kind) && !(item.row.kind === 'error' && (item.row.severity === 'notice' || item.row.scope === 'plugin')) && !olderHostEnds.has(item.row.id));
   const lastWork = stream.map(isWork).lastIndexOf(true);
   // W1: one stream in event order. The rows that stay in view when the work area folds (isPersistentRow: a prompt the
@@ -1627,6 +1644,18 @@ function noticeOf(event: Event<'user.message'>, arrival: Exclude<CarriedArrival,
   }
 }
 
+// The question sheet's C3 M5 (§I): a delivery of the sheet, as today's answer is drawn: a notice of the turn it reached,
+// worded from its blocks' ids, naming no call (one delivery answers questions of several); the carrier is no bubble.
+function sheetNotice(event: Event<'user.message'>, deliveries: readonly SheetDeliveryBlock[], index: number, turnId: TurnId | null): RowOf<'notice'> {
+  const answered = deliveries.flatMap((delivery) => delivery.answered.map((answer) => answer.id));
+  const dismissed = deliveries.flatMap((delivery) => delivery.dismissed);
+  return {
+    id: rowId.notice(null, event.messageUuid ?? event.id, index), turnId, at: event.at, kind: 'notice', class: 'answer', outcome: null,
+    text: sheetDeliveryWords(answered, dismissed), durationMs: null, detail: null, taskId: null, toolUseId: null, outputFile: null,
+  };
+}
+type SheetDeliveryBlock = ReturnType<typeof sheetDeliveriesOf>[number];
+
 // UX wave U3 (the whole-branch review's finding 3): a background task's end as an older engine host tells it, which sends
 // no arrival (its `task.notification` has no `arrivals` mark): its one line from the `task.notification`, its dot the event's outcome, its words the event's summary (the
 // engine's sentence, or the task's description where the engine gives none, as for a stopped task), its detail the
@@ -1946,6 +1975,8 @@ function looseRows(state: TranscriptState, events: SessionEvent[], after: TurnId
         if (event.isSynthetic && event.arrival !== undefined) { // UX wave U3: an arrival no turn was open for (reduce.ts, placeArrival)
           for (const [n, entry] of event.arrival.entries()) {
             const known = carriedOf([entry])[0];
+            const sheet = known === undefined ? sheetDeliveriesOf([entry]) : [];
+            if (sheet.length > 0) rows.push(sheetNotice(event, sheet, n, null)); // the question sheet's C3 M5
             if (known !== undefined && known.class !== 'consent') rows.push(noticeOf(event, known, n, null, (call) => callQuestions(null, state, call as ToolUseId)));
           }
         } else if (event.origin === INTERRUPT_CUT) { // P5 O9: a recorded cut whose turn is not loaded (a page starting at its marker)

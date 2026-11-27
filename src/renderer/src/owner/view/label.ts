@@ -73,7 +73,7 @@ export function keptIdsOf(row: Row, turn: TurnState | undefined): string[] {
     }
     // rows that ask no site, kept under a call's id or a record's uuid
     case 'subagent': return row.agents.flatMap((agent) => (agent.toolUseId === null ? [] : [agent.toolUseId]));
-    case 'ask': case 'plan': case 'delivery': case 'artifact': return [row.toolUseId];
+    case 'ask': case 'plan': case 'delivery': case 'artifact': case 'sheet': return [row.toolUseId]; // sheet: the question sheet's C3 M5, no mod site (§I)
     case 'local_command': return row.messageUuid === null ? [] : [row.messageUuid];
     // rows the transcript file holds no id of as theirs: MAWS's own lines, a request's slot and the browser's activity
     // (their calls are rows of their own), the person's `!` command as MAWS draws it

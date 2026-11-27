@@ -124,6 +124,11 @@ export type Row = RowBase &
     // the row); `dismissed` for an asynchronous question whose delivery says it was dismissed. Each written only when true
     | { kind: 'plan'; toolUseId: ToolUseId; plan: string; outcome: (typeof PLAN_OUTCOMES)[number] | null; feedback: string | null; waiting?: true }
     | { kind: 'question'; toolUseId: ToolUseId; questions: Question[]; answers: Record<string, string> | null; error: string | null /* E1 (A-17): the engine's refusal of the call, tags stripped */; waiting?: true; dismissed?: true }
+    // The question sheet's C3 M5 (docs/doperpowers/plans/2026-11-23-question-sheet-c3-maws-app.md §I): a call of the
+    // sminos tool in the sheet's form (`isSheetCall`), one line per entry of its `ask`, from the transcript alone (S8):
+    // its result's first line, later calls and the deliveries' blocks the transcript holds. `error`: the engine's refusal
+    // of the whole call, its tags stripped
+    | { kind: 'sheet'; toolUseId: ToolUseId; state: 'running' | 'done' | 'nothing' | 'unknown' | 'error'; lines: SheetRowLine[]; withdrew: string[]; notDone: string | null; error: string | null }
     | {
         kind: 'request_slot'; requestId: RequestId; toolUseId: ToolUseId | null;
         requestKind: 'permission' | 'question' | 'plan' | 'dialog' | 'elicitation'; toolName: string | null; requestedAt: string;
@@ -269,6 +274,23 @@ export function messageMore(row: Extract<Row, { kind: 'agent_message' }>): strin
 // E7 end
 
 export type RowKind = Row['kind'];
+
+/**
+ * One entry of a sheet call, as its row's line (§I). `id` is the question it is on the sheet as, null for a refused
+ * entry and for every entry of a call whose outcome is not known; `entry` its place in the call's `ask`, from 1;
+ * `revises` whether the entry named an id (a revise, as the call put it). `place`: `here` in the last call of the
+ * transcript that added or revised the question, `revised_below` in every earlier one, `refused` for an entry not
+ * asked. `outcome` what the transcript holds of the question, on its `here` line only.
+ */
+export interface SheetRowLine {
+  id: string | null;
+  entry: number;
+  header: string | null;
+  sentence: string;
+  revises: boolean;
+  place: 'here' | 'revised_below' | 'refused';
+  outcome: { how: 'answered'; receipt: string } | { how: 'dismissed' } | { how: 'withdrawn' } | null;
+}
 
 export interface Attachment {
   kind: 'image' | 'file' | 'text';

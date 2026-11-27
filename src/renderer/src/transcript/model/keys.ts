@@ -33,6 +33,7 @@ export const rowId = {
   agentMessage: (id: EventId) => row(`agentmsg:${id}`),
   plan: (toolUse: ToolUseId) => row(`plan:${toolUse}`),
   question: (toolUse: ToolUseId) => row(`question:${toolUse}`),
+  sheet: (toolUse: ToolUseId) => row(`sheet:${toolUse}`), // the question sheet's C3 M5: a call in the sheet's form
   slot: (request: RequestId) => row(`slot:${request}`),
   error: (id: EventId) => row(`error:${id}`),
   retry: (turn: TurnId) => row(`retry:${turn}`),

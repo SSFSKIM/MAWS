@@ -9,7 +9,8 @@ import { artifactHeading } from './copy'; // E2
 import { BROWSER_ACTION, browserActionError, browserActionHeading, took } from './copy'; // E4c
 import { browserActivityLine } from './copy'; // E13
 import { CONSENT, noticeLine } from './copy'; // UX wave U3
-import type { Cell, Row } from './rows';
+import { SHEET_ROW, sheetHead } from './copy'; // the question sheet's C3 M5
+import type { Cell, Row, SheetRowLine } from './rows';
 import { copiedUserText } from './user-text';
 import { SIDE_COPY, sideRowStatus } from '../../side/copy'; // E3
 
@@ -47,6 +48,7 @@ function partOf(row: Row): string | null {
     case 'thinking': return row.text.length > 0 ? `*${row.live ? 'Thinking' : 'Thought'}*\n${indent(row.text, '> ')}` : null;
     case 'plan': return `**Plan · ${planBadge(row.outcome, row.feedback)}**\n\n${row.plan}`;
     case 'question': return row.questions.map((q) => `**${q.header}** ${q.question}: ${row.answers?.[q.question] ?? (row.dismissed === true || (row.answers !== null && Object.keys(row.answers).length === 0) ? QUESTION.dismissed : '—')}`).join('\n'); // UX wave U1b (decision 10): dismissed, or declined whole (a plain deny's empty map)
+    case 'sheet': return sheetPart(row); // the question sheet's C3 M5: its head line, then a line per entry as the row reads it from the transcript
     case 'request_slot': return `*${requestSlotPlaceholder(row.toolName ?? row.requestKind)}*`;
     case 'error': return `*${row.text}*`;
     case 'boundary': return `---\n*${row.text}*`;
@@ -67,6 +69,21 @@ function partOf(row: Row): string | null {
     case 'to_human': return `<message>${row.text}</message>`; // P4-R7: as the span it stands in for copies, verbatim
     case 'activity': return null; // UX wave U3b (decision 17): what the session does now, no part of what it said
   }
+}
+
+// The question sheet's C3 M5: a sheet call's head line and its lines, each its id (a refused entry's number), its
+// header, and its question's sentence or, after the outcome, its receipt; then why an entry was not done.
+function sheetPart(row: Extract<Row, { kind: 'sheet' }>): string {
+  const line = (line: SheetRowLine): string => {
+    const id = line.id ?? (line.place === 'refused' ? String(line.entry) : null);
+    const lead = [id, line.header === null ? null : `**${line.header}**`].filter((part) => part !== null).join(' ');
+    const after = line.place === 'revised_below' ? SHEET_ROW.revisedBelow
+      : line.place === 'refused' ? `${line.sentence} — ${SHEET_ROW.notAsked}`
+      : line.outcome === null ? line.sentence
+      : `${SHEET_ROW.arrow} ${line.outcome.how === 'answered' ? line.outcome.receipt : line.outcome.how === 'dismissed' ? SHEET_ROW.dismissed : SHEET_ROW.withdrawn}`;
+    return `- ${lead === '' ? '' : `${lead} `}${after}`;
+  };
+  return [sheetHead(row), ...row.lines.map(line), ...(row.notDone === null ? [] : [`*${row.notDone}*`]), ...(row.error === null ? [] : [`*${row.error}*`])].join('\n');
 }
 
 // A subagent row's line, with each working workflow's phase written out where the view keeps it for pointing (fix wave,
