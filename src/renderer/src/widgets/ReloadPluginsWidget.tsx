@@ -50,7 +50,7 @@ export function ReloadPluginsWidget({ appSessionId, close }: { appSessionId: App
     <WidgetFrame appSessionId={appSessionId} title={WIDGET_TITLE['reload-plugins']} command="reload-plugins" state={dormant?.state ?? 'ready'} error={dormant?.words ?? null} close={close}>
       {unavailable !== null ? (
         <div className="flex min-w-0 flex-wrap items-baseline gap-x-2">
-          <TextButton onClick={() => {}} disabled title={unavailable}>
+          <TextButton onClick={() => {}} unavailable={unavailable}>
             {PLUGIN_MANAGEMENT.reloadMods}
           </TextButton>
           <span className="min-w-0 text-ui-sm text-fg-muted">{unavailable}</span>

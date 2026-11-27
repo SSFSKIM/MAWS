@@ -2,6 +2,7 @@
 // their capabilities (an unavailable one disabled in place with its reason), and runs one command at a time.
 import { StrictMode } from 'react';
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { accessibleDescription } from '../test-support/accessible-text';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { ControlResult } from '@shared/ipc/schema/lane-a';
@@ -64,8 +65,10 @@ describe('McpDriven', () => {
     const command = vi.fn(async (): Promise<ControlResult> => ({ state: 'done', result: { id: 'run-1' } }));
     render(<McpDriven appSessionId={ID} controls={controlsWith({ 'mcp.disable': DISABLE_GAP }, command)} close={() => {}} />);
     const disable = await screen.findByRole('button', { name: 'Disable' });
-    expect((disable as HTMLButtonElement).disabled).toBe(true);
-    expect(disable.getAttribute('title')).toBe(DISABLE_GAP);
+    expect(disable.getAttribute('aria-disabled')).toBe('true'); // greyed, it keeps Tab and says why
+    expect(accessibleDescription(disable)).toBe(DISABLE_GAP);
+    fireEvent.click(disable);
+    expect(command).not.toHaveBeenCalled();
     cleanup();
 
     render(<McpDriven appSessionId={ID} controls={controlsWith({}, command)} close={() => {}} />);

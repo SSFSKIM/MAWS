@@ -9,7 +9,7 @@ import { displayTitle } from '../../sessions/title';
 import { useSessions } from '../../stores/sessions';
 import { PLUGIN_MANAGEMENT as W } from '../copy';
 import { TextButton } from '../parts';
-import { UnavailableButton } from '../../ui/tip';
+import { Tip, unavailableClickProps } from '../../ui/tip';
 import { CATALOG_INSTALL as D } from './catalog-words';
 import { ConfirmSheet, type Declared, type EngineResolution } from './ConfirmSheet';
 import { factsOf, usePluginOperations, type PluginOperations } from './operation';
@@ -191,12 +191,13 @@ export function Gone({ opKey, name, data }: { opKey: string; name: string; data:
 // `aria-disabled`, keeps the keyboard, gives its reason as its tooltip and description, and its press does nothing;
 // `disabled` is for a wait with nothing to say (an operation in flight). `describedBy`: its row's note.
 const SWITCH = 'relative inline-flex h-4 w-7 shrink-0 items-center rounded-full border border-border outline-accent focus-visible:outline-2 disabled:opacity-50 aria-disabled:opacity-50';
-export function Switch({ checked, label, disabled, unavailable = null, describedBy, onClick }: { checked: boolean; label: string; disabled: boolean; unavailable?: string | null; describedBy?: string; onClick(): void }) {
+// `tip`: what a press does ("Turn off"), its tooltip while it is not greyed.
+export function Switch({ checked, label, disabled, unavailable = null, tip = null, describedBy, onClick }: { checked: boolean; label: string; disabled: boolean; unavailable?: string | null; tip?: string | null; describedBy?: string; onClick(): void }) {
   return (
-    <UnavailableButton reason={unavailable}>
+    <Tip content={unavailable ?? tip} description={unavailable} {...unavailableClickProps(unavailable)}>
       <button type="button" role="switch" aria-checked={checked} aria-label={label} aria-describedby={describedBy} disabled={disabled} onClick={onClick} className={`${SWITCH} ${checked ? 'bg-accent' : 'bg-bg-active'}`}>
         <span aria-hidden className={`absolute size-3 rounded-full bg-bg-raised ${checked ? 'right-0.5' : 'left-0.5'}`} />
       </button>
-    </UnavailableButton>
+    </Tip>
   );
 }

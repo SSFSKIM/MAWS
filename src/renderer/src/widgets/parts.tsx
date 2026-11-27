@@ -3,7 +3,7 @@
 import { useState, type ReactNode } from 'react';
 import type * as z from 'zod';
 import { ipc } from '../ipc/client';
-import { Tip } from '../ui/tip';
+import { Tip, UNAVAILABLE_LOOK, unavailableClickProps } from '../ui/tip';
 import { PERMISSIONS, SHARED } from './copy';
 import type { MachineRef } from '@shared/machine/ref';
 
@@ -72,20 +72,47 @@ export function Rows({ label, children }: { label?: string; children: ReactNode 
   );
 }
 
-export function TextButton({ children, onClick, disabled, title, busy, 'aria-label': name, ...data }: { children: ReactNode; onClick(): void; disabled?: boolean; title?: string; busy?: boolean; 'aria-label'?: string } & DataAttributes) {
+// A greyed one says why (`unavailable`): drawn aria-disabled, it keeps Tab, its reason its tooltip and description, and
+// swallows its press (the word cut: greyed controls keep Tab and say why); one greyed with no reason (while its act
+// runs) is simply disabled. `tip` is a secondary fact about the press (the path Reveal in Finder shows), its tooltip and
+// description. The button stands in its tip, content or none, so a reason that comes and goes keeps its element and the
+// keyboard.
+export function TextButton({ children, onClick, disabled, unavailable = null, tip = null, busy, 'aria-label': name, ...data }: { children: ReactNode; onClick(): void; disabled?: boolean; unavailable?: string | null; tip?: string | null; busy?: boolean; 'aria-label'?: string } & DataAttributes) {
+  const about = unavailable || tip || null;
   return (
-    <button
-      {...data}
-      type="button"
-      onClick={onClick}
-      disabled={disabled}
-      title={title}
-      aria-label={name}
-      aria-busy={busy || undefined}
-      className="shrink-0 rounded-sm px-1 text-ui-sm text-accent outline-accent hover:bg-bg-hover focus-visible:outline-2 disabled:text-fg-faint disabled:hover:bg-transparent"
-    >
-      {children}
-    </button>
+    <Tip content={about} description={about} {...unavailableClickProps(unavailable)}>
+      <button
+        {...data}
+        type="button"
+        onClick={onClick}
+        disabled={disabled && !unavailable}
+        aria-label={name}
+        aria-busy={busy || undefined}
+        className={`shrink-0 rounded-sm px-1 text-ui-sm text-accent outline-accent hover:bg-bg-hover focus-visible:outline-2 disabled:text-fg-faint disabled:hover:bg-transparent ${UNAVAILABLE_LOOK}`}
+      >
+        {children}
+      </button>
+    </Tip>
+  );
+}
+
+// A word with a secondary fact about it (a full path, a whole command line; the word cut's rule 5): the fact is its
+// tooltip and description, and the word takes the keyboard; with no fact, the word alone. A fact of several lines (a
+// list of names) keeps its lines.
+export const FOCUSABLE_WORD = 'rounded-sm outline-accent focus-visible:outline-2';
+export function Fact({ fact, className = '', children, ...data }: { fact: string | null | undefined; className?: string; children: ReactNode } & DataAttributes) {
+  if (!fact)
+    return (
+      <span {...data} className={className}>
+        {children}
+      </span>
+    );
+  return (
+    <Tip content={<span className="whitespace-pre-line">{fact}</span>} description={fact}>
+      <span {...data} tabIndex={0} className={`${FOCUSABLE_WORD} ${className}`}>
+        {children}
+      </span>
+    </Tip>
   );
 }
 
@@ -103,7 +130,7 @@ export function RevealButton({ path, machine, children, ...data }: { path: strin
   return (
     <>
       {refused && <span className="text-fg-faint">{SHARED.revealRefused}</span>}
-      <TextButton {...data} onClick={() => void reveal()} title={path}>
+      <TextButton {...data} onClick={() => void reveal()} tip={path}>
         {children}
       </TextButton>
     </>

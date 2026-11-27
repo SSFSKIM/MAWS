@@ -21,6 +21,8 @@ import { addStepOf, argvOf, commandWords, dependencyWords, DESTRUCTIVE, override
 import { CATALOG_INSTALL as D } from './catalog-words';
 import { SheetDetails } from './SheetDetails';
 import { QuietSpinner } from '../../ui/spinner';
+import { Tip } from '../../ui/tip';
+import { FOCUSABLE_WORD } from '../parts';
 
 // A resolved `plugins.env` answer: the binary (the probe's real path; an answer without one is unresolved), the config
 // home the CLI writes and the engine's global config file (inside a `CLAUDE_CONFIG_DIR`, else `~/.claude.json` beside
@@ -81,13 +83,17 @@ export function ConfirmSheet({ request, declared, env, onConfirm, onClose }: { r
   const commands = engine && (
     <>
       {addStep && (
-        <code data-plugins-add-argv={JSON.stringify(argvOf(addStep))} title={engine.binary} className="block rounded-sm bg-bg-active px-2 py-1 font-mono text-ui-sm break-all text-fg">
-          {commandWords(engine.binary, argvOf(addStep))}
-        </code>
+        <Tip content={engine.binary} description={engine.binary}>
+          <code data-plugins-add-argv={JSON.stringify(argvOf(addStep))} tabIndex={0} className={`block rounded-sm bg-bg-active px-2 py-1 font-mono text-ui-sm break-all text-fg ${FOCUSABLE_WORD}`}>
+            {commandWords(engine.binary, argvOf(addStep))}
+          </code>
+        </Tip>
       )}
-      <code data-plugins-argv={JSON.stringify(argv)} title={engine.binary} className="block rounded-sm bg-bg-active px-2 py-1 font-mono text-ui-sm break-all text-fg">
-        {commandWords(engine.binary, argv)}
-      </code>
+      <Tip content={engine.binary} description={engine.binary}>
+        <code data-plugins-argv={JSON.stringify(argv)} tabIndex={0} className={`block rounded-sm bg-bg-active px-2 py-1 font-mono text-ui-sm break-all text-fg ${FOCUSABLE_WORD}`}>
+          {commandWords(engine.binary, argv)}
+        </code>
+      </Tip>
     </>
   );
   const files = engine && (

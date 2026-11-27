@@ -590,7 +590,7 @@ test.describe('lane A: a terminal session driven through its bridge', () => {
     // table's reason (acceptance 2)
     const server = page.locator('[data-mcp-server="probe"]');
     await expect(server.getByRole('button', { name: 'Disable' })).toBeDisabled();
-    await expect(server.getByRole('button', { name: 'Disable' })).toHaveAttribute('title', sentence(FULL_CAPABILITIES.controls!['mcp.disable']!.reason!));
+    await expect(server.getByRole('button', { name: 'Disable' })).toHaveAccessibleDescription(sentence(FULL_CAPABILITIES.controls!['mcp.disable']!.reason!)); // its reason its tip, the button keeping Tab
     await server.getByRole('button', { name: 'Reconnect' }).click();
     await expect.poll(() => bodies(bridge, 'command').length).toBe(2);
     ended('reconnect probe', 'Reconnected to probe.');

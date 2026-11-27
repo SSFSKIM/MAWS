@@ -8,6 +8,9 @@ export const FilterIcon = ({ className }: { className?: string }) => (
   </Icon>
 );
 
+// The overflow's glyph button (a plugin's row and detail, a marketplace's row): the named glyph's word is "More".
+export const MORE = 'inline-flex size-7 shrink-0 items-center justify-center rounded-sm text-fg-muted outline-accent hover:bg-bg-hover hover:text-fg focus-visible:outline-2 disabled:text-fg-faint data-[state=open]:bg-bg-active';
+
 export const MoreIcon = ({ className }: { className?: string }) => (
   <Icon className={className}>
     <circle cx="8" cy="3.5" r="0.75" className="fill-current" />

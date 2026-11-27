@@ -14,7 +14,8 @@ import type { InstalledPlugin } from '@shared/ipc/schema/plugins';
 import { Sheet } from '../../sessions/Sheet';
 import { PRIMARY } from '../../sessions/ui';
 import { LIBRARY as L } from '../copy';
-import { MoreIcon } from './icons';
+import { MORE, MoreIcon } from './icons';
+import { NamedGlyph } from '../../ui/glyph';
 import { Gone, OperationLine, useManage } from './manage';
 import { requestFor, uninstallsOf } from './present';
 import type { PluginsReadResult } from './read';
@@ -41,16 +42,10 @@ function MarketplaceRow({ marketplace, installed }: { marketplace: Marketplace; 
         </div>
       </div>
       <DropdownMenu.Root modal={false}>
-        <DropdownMenu.Trigger asChild>
-          <button
-            type="button"
-            aria-label={L.moreActions(marketplace.name)}
-            title={L.more}
-            disabled={busy}
-            className="inline-flex size-7 shrink-0 items-center justify-center rounded-sm text-fg-muted outline-accent hover:bg-bg-hover hover:text-fg focus-visible:outline-2 disabled:text-fg-faint data-[state=open]:bg-bg-active"
-          >
+        <DropdownMenu.Trigger asChild disabled={busy /* a wait with nothing to say */}>
+          <NamedGlyph label={L.moreActions(marketplace.name)} tip={L.more} className={MORE}>
             <MoreIcon />
-          </button>
+          </NamedGlyph>
         </DropdownMenu.Trigger>
         <DropdownMenu.Portal>
           <DropdownMenu.Content align="end" sideOffset={4} className="z-50 min-w-48 rounded-md border border-border-strong bg-bg-overlay p-1 text-ui text-fg shadow-float">

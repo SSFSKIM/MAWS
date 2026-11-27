@@ -19,6 +19,7 @@ import { ipc } from '../ipc/client';
 import { useNotices } from '../stores/notices';
 import { useSessions } from '../stores/sessions';
 import { ReloadPluginsWidget } from './ReloadPluginsWidget';
+import { accessibleDescription } from '../test-support/accessible-text';
 
 const ROOT = join(__dirname, '../../../..');
 // P5 O6 M2: the backend is main (bare ids); the page holds the address
@@ -103,9 +104,9 @@ describe('/reload-plugins', () => {
     try {
       mount(remote);
       const button = screen.getByRole('button', { name: 'Reload plugins' });
-      expect(button).toHaveProperty('disabled', true);
-      expect(button.title).toBe('mini doesn’t offer this');
-      expect(screen.getByText('mini doesn’t offer this')).toBeTruthy();
+      expect(button.getAttribute('aria-disabled')).toBe('true'); // greyed, it keeps Tab and says why
+      expect(accessibleDescription(button)).toBe('mini doesn’t offer this');
+      expect(screen.getByText('mini doesn’t offer this', { ignore: '[hidden]' })).toBeTruthy(); // drawn beside it too
       await new Promise((r) => setTimeout(r, 20));
       expect(reloads()).toHaveLength(0);
     } finally {

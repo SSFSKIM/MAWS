@@ -45,7 +45,7 @@ import { useSessionControls } from '../session/controls/controls-for'; // P5 O9 
 import { useSettings } from '../stores/settings';
 import { useUsage } from '../stores/usage';
 import { QuietSpinner } from '../ui/spinner';
-import { Tip, UnavailableButton } from '../ui/tip';
+import { Tip, UnavailableButton, UNAVAILABLE_LOOK } from '../ui/tip';
 import { FRAME, MODEL, SELECTOR } from './copy';
 import {
   applyFlagSettings,
@@ -654,20 +654,23 @@ function SelectorBody({ name, args, binding, state, error, appSessionId, focusSl
       </div>
       {route && route.choices.length > 1 && (
         <div role="radiogroup" aria-label={MODEL.route} className="flex gap-1 px-2 pb-1">
-          {route.choices.map((choice) => (
-            <button
-              key={choice}
-              type="button"
-              role="radio"
-              aria-checked={choice === route.value}
-              disabled={locked || (choice === 'machine' && route.machineRefusal !== null)}
-              title={choice === 'machine' ? (route.machineRefusal ?? undefined) : undefined}
-              onClick={() => choice !== route.value && setRoute(choice)}
-              className="flex-1 rounded-sm border border-border px-2 py-0.5 text-ui-sm outline-accent hover:bg-bg-hover focus-visible:outline-2 disabled:text-fg-faint aria-checked:bg-bg-active"
-            >
-              {choice === 'machine' ? MACHINE_ROUTE.choice : ROUTE.choice[choice]}
-            </button>
-          ))}
+          {route.choices.map((choice) => {
+            const refused = choice === 'machine' ? route.machineRefusal : null;
+            return (
+              <UnavailableButton key={choice} reason={refused}>
+                <button
+                  type="button"
+                  role="radio"
+                  aria-checked={choice === route.value}
+                  disabled={locked && refused === null}
+                  onClick={() => choice !== route.value && setRoute(choice)}
+                  className={`flex-1 rounded-sm border border-border px-2 py-0.5 text-ui-sm outline-accent hover:bg-bg-hover focus-visible:outline-2 disabled:text-fg-faint aria-checked:bg-bg-active ${UNAVAILABLE_LOOK}`}
+                >
+                  {choice === 'machine' ? MACHINE_ROUTE.choice : ROUTE.choice[choice]}
+                </button>
+              </UnavailableButton>
+            );
+          })}
         </div>
       )}
       {unknown && view === 'model' && <p className="m-0 px-2 text-ui-sm text-warning">{unknown}</p>}

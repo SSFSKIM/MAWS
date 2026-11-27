@@ -61,10 +61,10 @@ export function useReloads(appSessionId: AppSessionId): Reloads {
 export function ReloadControls({ reloads }: { reloads: Reloads }) {
   return (
     <span className="flex min-w-0 flex-wrap items-baseline gap-x-2">
-      <TextButton onClick={reloads.reloadMods} disabled={reloads.busy || reloads.modsUnavailable !== null} title={reloads.modsUnavailable ?? undefined}>
+      <TextButton onClick={reloads.reloadMods} disabled={reloads.busy} unavailable={reloads.modsUnavailable}>
         {PLUGIN_MANAGEMENT.reloadMods}
       </TextButton>
-      <TextButton onClick={reloads.reloadSkills} disabled={reloads.busy || reloads.skillsUnavailable !== null} title={reloads.skillsUnavailable ?? undefined}>
+      <TextButton onClick={reloads.reloadSkills} disabled={reloads.busy} unavailable={reloads.skillsUnavailable}>
         {PLUGIN_MANAGEMENT.reloadSkills}
       </TextButton>
       {reloads.line !== null && (

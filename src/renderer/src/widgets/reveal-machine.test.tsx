@@ -24,6 +24,6 @@ it('opens a settings source file on the session’s machine', () => {
   const fake = fakeClient({ 'settings.reveal': { revealed: true } });
   window.maws = preloadOf(fake);
   render(<ConfigBody machine={OTHER_MACHINE} cwd="/work/b" configHome={null} close={() => {}} view={{ effective: [], sources: [{ source: 'projectSettings', label: 'Project', keys: [] }], applied: [], errors: [] }} />);
-  fireEvent.click(screen.getByTitle('/work/b/.claude/settings.json'));
+  fireEvent.click(screen.getByRole('button', { description: '/work/b/.claude/settings.json' })); // the path is Reveal's tip
   expect(fake.machines('settings.reveal')).toEqual([OTHER_MACHINE]);
 });
