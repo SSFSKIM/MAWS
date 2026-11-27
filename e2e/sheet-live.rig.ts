@@ -49,7 +49,7 @@ const TYPED = { picked: 'Only for the beta, please.', reference: 'Keep the READM
 test.use({ trace: 'off', screenshot: 'off', video: 'off' });
 
 test('the question sheet live: a terminal session asks on its sheet and is answered in MAWS (G2.a to G2.g)', async () => {
-  test.setTimeout(40 * 60_000);
+  test.setTimeout(35 * 60_000);
   const cfg = liveConfig();
   mkdirSync(cfg.out, { recursive: true });
   const log = (step: string, evidence: Record<string, unknown>) => appendFileSync(join(cfg.out, 'steps.jsonl'), `${JSON.stringify({ at: new Date().toISOString(), step, ...evidence })}\n`);

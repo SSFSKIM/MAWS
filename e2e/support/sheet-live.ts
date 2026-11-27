@@ -6,7 +6,7 @@
 // rig starts shares the config directory and the sminos home, so it sees the terminal's session and its record.
 // Nothing here names a machine, an account or a home: every location comes from the run's environment (`liveConfig`).
 import { execFileSync, spawn, spawnSync, type ChildProcess } from 'node:child_process';
-import { copyFileSync, cpSync, existsSync, mkdirSync, mkdtempSync, openSync, closeSync, readdirSync, readFileSync, rmSync, writeFileSync, writeSync } from 'node:fs';
+import { copyFileSync, cpSync, existsSync, mkdirSync, mkdtempSync, openSync, closeSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync, writeSync } from 'node:fs';
 import { request } from 'node:http';
 import { delimiter, dirname, join } from 'node:path';
 
@@ -63,8 +63,9 @@ export interface Scratch {
 export const README = ['# Harbour timetable', '', 'Imports the ferry timetable and prints the week’s sailings.', '', 'The importer reads one CSV per route.', ''].join('\n');
 
 export function writeScratch(cfg: LiveConfig): Scratch {
-  // short, under /tmp, as C2's (a bridge's socket path under the sminos home must fit 103 bytes)
-  const root = mkdtempSync('/tmp/qsl.');
+  // short, under /tmp, as C2's (a bridge's socket path under the sminos home must fit 103 bytes); its real path, which is
+  // the one the engine runs in (macOS's /tmp is a link) and so the one its trust and its transcript's folder are keyed by
+  const root = realpathSync(mkdtempSync('/tmp/qsl.'));
   const home = join(root, 'home');
   const config = join(home, '.claude');
   const sminosHome = join(root, 's');
