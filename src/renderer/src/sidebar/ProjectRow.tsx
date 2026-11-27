@@ -33,6 +33,7 @@ import { usePeople } from '../stores/people'; // P5 O8 M5
 import { ChevronDownIcon, FolderIcon, Icon, PlusIcon, SearchIcon } from '../app/IconButton';
 import { newChat, useSessionCreatorRegistered } from '../keymap/actions-runtime';
 import { DisclosureBody } from '../ui/disclosure';
+import { NamedGlyph } from '../ui/glyph';
 import { isListedRow, type ProjectEntry, type ProjectKey, type SidebarTreeRow } from './derive';
 import { ListedRow } from './ListedRow'; // P5 O8 M2
 import { focusVisible } from './HoverCard';
@@ -86,6 +87,7 @@ export function ProjectRow({ entry, open, sessions, more, hidden = NO_HIDDEN, ma
   // The hover card (I6) hangs on the line, so a pointer over the expanded sessions does not open it; keyboard focus sits
   // on the treeitem, which opens it (a focus the pointer caused does not, as on every card).
   const [card, setCard] = useState(false);
+  const [keyboard, setKeyboard] = useState(false); // the treeitem holds the keyboard's focus: the card draws its facts at rest
 
   const line = (
     <div
@@ -149,13 +151,19 @@ export function ProjectRow({ entry, open, sessions, more, hidden = NO_HIDDEN, ma
       onFocus={(event) => {
         if (event.target !== event.currentTarget) return;
         tree.onFocusItem(nodeId);
-        if (project && focusVisible(event.currentTarget)) setCard(true);
+        const byKeyboard = focusVisible(event.currentTarget);
+        setKeyboard(byKeyboard);
+        if (project && byKeyboard) setCard(true);
       }}
-      onBlur={(event) => event.target === event.currentTarget && setCard(false)}
+      onBlur={(event) => {
+        if (event.target !== event.currentTarget) return;
+        setKeyboard(false);
+        setCard(false);
+      }}
       className="group/project outline-none"
     >
       {project ? (
-        <ProjectHoverCard entry={{ ...entry, project }} open={card} onOpenChange={setCard}>
+        <ProjectHoverCard entry={{ ...entry, project }} open={card} onOpenChange={setCard} keyboard={keyboard}>
           {line}
         </ProjectHoverCard>
       ) : (
@@ -186,17 +194,18 @@ export function ProjectRow({ entry, open, sessions, more, hidden = NO_HIDDEN, ma
 const ACTION =
   'inline-flex size-[22px] shrink-0 items-center justify-center rounded-sm text-fg-muted hover:bg-bg-active hover:text-fg disabled:text-fg-faint disabled:hover:bg-transparent';
 
+const NOT_HERE = 'Not available here'; // a greyed action's reason, its tip and its description (board ticket 815)
+
 const HOVER_ACTIONS = 'hidden shrink-0 items-center group-hover/line:flex group-focus-visible/project:flex';
 
 // The row's People toggle (P5 O8 M5): pressed while the row draws other people's sessions.
 function PeopleAction({ rowKey, name, people }: { rowKey: ProjectKey; name: string; people: boolean }) {
   return (
-    <button
-      type="button"
+    <NamedGlyph
       tabIndex={-1}
-      aria-label={`${peopleActionLabel(people)} in ${name}`}
-      aria-pressed={people}
-      title={peopleActionLabel(people)}
+      label={`${peopleActionLabel(people)} in ${name}`}
+      tip={peopleActionLabel(people)}
+      pressed={people}
       onClick={(event) => {
         event.stopPropagation();
         usePeople.getState().toggle(rowKey);
@@ -204,7 +213,7 @@ function PeopleAction({ rowKey, name, people }: { rowKey: ProjectKey; name: stri
       className={`${ACTION} aria-pressed:bg-bg-active aria-pressed:text-fg`}
     >
       <PeopleIcon className="size-[13px]" />
-    </button>
+    </NamedGlyph>
   );
 }
 
@@ -228,11 +237,10 @@ function ProjectActions({ projectId, rowKey, name, people, registry }: { project
   return (
     <span className={HOVER_ACTIONS}>
       {people !== null && <PeopleAction rowKey={rowKey} name={name} people={people} />}
-      <button
-        type="button"
+      <NamedGlyph
         tabIndex={-1}
-        aria-label={`Resume a session in ${name}`}
-        title="Resume a session…"
+        label={`Resume a session in ${name}`}
+        tip="Resume a session…"
         onClick={(event) => {
           event.stopPropagation();
           openResumeChooser(projectId, event.currentTarget);
@@ -240,13 +248,12 @@ function ProjectActions({ projectId, rowKey, name, people, registry }: { project
         className={ACTION}
       >
         <SearchIcon className="size-[13px]" />
-      </button>
-      <button
-        type="button"
+      </NamedGlyph>
+      <NamedGlyph
         tabIndex={-1}
-        aria-label={`Remove ${name} from sidebar`}
-        title={canRemove ? 'Remove from sidebar' : 'Not available here'}
-        disabled={!canRemove}
+        label={`Remove ${name} from sidebar`}
+        tip="Remove from sidebar"
+        unavailable={canRemove ? null : NOT_HERE}
         onClick={(event) => {
           event.stopPropagation();
           runProjectAction('removeProject', projectId);
@@ -254,13 +261,11 @@ function ProjectActions({ projectId, rowKey, name, people, registry }: { project
         className={ACTION}
       >
         <Icon className="size-[13px]"><path d="M3 8h10" /></Icon>
-      </button>
-      <button
-        type="button"
+      </NamedGlyph>
+      <NamedGlyph
         tabIndex={-1}
-        aria-label={`New chat in ${name}`}
-        title={canCreate ? `New chat in ${name}` : 'Not available here'}
-        disabled={!canCreate}
+        label={`New chat in ${name}`}
+        unavailable={canCreate ? null : NOT_HERE}
         onClick={(event) => {
           event.stopPropagation();
           void newChat({ row: rowKey }); // U13a: here, or elsewhere as `elsewhere` says
@@ -268,7 +273,7 @@ function ProjectActions({ projectId, rowKey, name, people, registry }: { project
         className={ACTION}
       >
         <PlusIcon className="size-[13px]" />
-      </button>
+      </NamedGlyph>
     </span>
   );
 }

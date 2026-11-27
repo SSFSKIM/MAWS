@@ -12,6 +12,7 @@ import { listFolders, SETUP_WORDS, type FolderPage } from '../sessions/remote-se
 import { QuietSpinner } from '../ui/spinner';
 import { FIELD, PRIMARY, QUIET, SECONDARY } from '../sessions/ui';
 import { REGISTRY } from './registry-copy';
+import { UNAVAILABLE_LOOK, UnavailableButton } from '../ui/tip';
 
 const within = (path: string, root: string) => path === root || path.startsWith(`${root}/`);
 const parentOf = (path: string) => path.slice(0, path.lastIndexOf('/'));
@@ -181,9 +182,12 @@ function FolderBrowser({ machine, name, onUse }: { machine: MachineRef; name: st
         </p>
       )}
       <div className="flex justify-end">
-        <button type="button" className={SECONDARY} disabled={path === null} title={path === null ? SETUP_WORDS.useHint : undefined} onClick={() => path !== null && onUse(path)}>
-          {SETUP_WORDS.use}
-        </button>
+        {/* board ticket 815: greyed until a folder is open, its reason the tip the keyboard reaches */}
+        <UnavailableButton reason={path === null ? SETUP_WORDS.useHint : null}>
+          <button type="button" className={`${SECONDARY} ${UNAVAILABLE_LOOK}`} onClick={() => path !== null && onUse(path)}>
+            {SETUP_WORDS.use}
+          </button>
+        </UnavailableButton>
       </div>
     </div>
   );

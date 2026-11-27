@@ -1,7 +1,10 @@
 // A row's reach mark (P5 O8 M6b, docs/doperpowers/plans/2026-10-28-p5-o8-org-interface.md, M6b's "A row's mark"; Q4): a
 // small lock for a Private session, a people mark for one whose access is wider than Listed or that has shares, nothing
-// for the default (stores/policies.ts's `reachOf`). Its access in words is the hover card's (`ReachLine`).
+// for the default (stores/policies.ts's `reachOf`). Its access in words is the hover card's (`ReachLine`), and the mark's
+// tip under the pointer (board ticket 815): the mark takes no focus inside its tree row, whose keyboard focus opens the
+// card that draws the same words at rest.
 import { Icon } from '../app/IconButton';
+import { Tip } from '../ui/tip';
 import { SHARE } from '../sessions/share/copy';
 import { useReach, type Reach } from '../stores/policies';
 
@@ -24,10 +27,13 @@ export function ReachMark({ address }: { address: string }) {
   const reach = useReach(address);
   if (reach === null) return null;
   const label = reach.mark === 'private' ? SHARE.mark.private : SHARE.mark.shared;
+  const words = reachWords(reach);
   return (
-    <span role="img" aria-label={label} title={reachWords(reach)} data-reach={reach.mark} className="shrink-0 text-fg-faint">
-      {reach.mark === 'private' ? <LockIcon className="size-[11px]" /> : <PeopleIcon className="size-[11px]" />}
-    </span>
+    <Tip content={words} description={words === label ? null : words}>
+      <span role="img" aria-label={label} data-reach={reach.mark} className="shrink-0 text-fg-faint">
+        {reach.mark === 'private' ? <LockIcon className="size-[11px]" /> : <PeopleIcon className="size-[11px]" />}
+      </span>
+    </Tip>
   );
 }
 

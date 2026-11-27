@@ -1,5 +1,6 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { accessibleDescription, accessibleText } from '../test-support/accessible-text';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { REL } from '../test-support/relative-time';
 import type { AppSessionId, ProjectId } from '@shared/graph/ids';
@@ -354,6 +355,8 @@ describe('Needs you across projects', () => {
     render(<Sidebar />);
     const search = screen.getByRole('searchbox');
     search.focus();
+    await user.tab();
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: 'New chat' })); // greyed with no creator, it keeps Tab (board ticket 815)
     for (const name of ['Projects', 'Artifacts', 'Customize']) {
       await user.tab();
       expect(document.activeElement).toBe(within(screen.getByRole('navigation', { name: 'App destinations' })).getByRole('button', { name }));
@@ -546,7 +549,7 @@ describe('removing a project from the sidebar', () => {
   it('the remove action beside "+" runs the confirmed removal, disabled until it has a handler', async () => {
     const user = userEvent.setup();
     render(<Sidebar />);
-    expect((within(row('MAWS')).getByRole('button', { name: 'Remove MAWS from sidebar' }) as HTMLButtonElement).disabled).toBe(true);
+    expect(within(row('MAWS')).getByRole('button', { name: 'Remove MAWS from sidebar', description: 'Not available here · Remove from sidebar' }).getAttribute('aria-disabled')).toBe('true'); // board ticket 815: greyed, saying why
     const remove = vi.fn();
     offs.push(registerProjectAction('removeProject', remove));
     await user.click(within(row('MAWS')).getByRole('button', { name: 'Remove MAWS from sidebar' }));
@@ -997,7 +1000,8 @@ describe('hiding a session', () => {
     const maws = row('MAWS');
     const title = 'Charter + research';
     expect(within(row(title)).getAllByRole('button').map((b) => b.getAttribute('aria-label'))).toEqual(['Hide', `Actions for ${title}`, 'Mark unread']); // left of the three dots
-    expect(within(row(title)).getByRole('button', { name: 'Hide' }).getAttribute('title')).toBe('Hide');
+    act(() => within(row(title)).getByRole('button', { name: 'Hide' }).focus());
+    expect(screen.getByRole('tooltip').textContent).toBe('Hide'); // its word its tip, which focus shows (board ticket 815)
     await user.click(within(row(title)).getByRole('button', { name: 'Hide' }));
     expect(sessionRows(maws)).toEqual(['Workstation north star', 'Fix sidebar drag', 'Sidebar interaction pass']);
     expect(activeTab(useLayout.getState().main)).toBeNull();
@@ -1009,7 +1013,6 @@ describe('hiding a session', () => {
     for (const waiting of within(screen.getByRole('list', { name: 'Needs you' })).getAllByRole('button')) expect(within(waiting).queryByRole('button', { name: /^(Hide|Unhide)$/ })).toBeNull();
     await user.click(hidden);
     const unhide = within(row(title)).getByRole('button', { name: 'Unhide' });
-    expect(unhide.getAttribute('title')).toBe('Unhide');
     await user.click(unhide);
     expect(sessionRows(maws)).toEqual(['Workstation north star', title, 'Fix sidebar drag', 'Sidebar interaction pass']);
     await waitFor(() => expect(document.activeElement).toBe(row(title)));
@@ -1158,8 +1161,7 @@ describe('the resume chooser from the sidebar', () => {
   it('opens from the row’s search icon on the project, searches, and Enter opens the session in the current tab', async () => {
     const user = userEvent.setup();
     render(<Sidebar />);
-    const button = within(row('MAWS')).getByRole('button', { name: 'Resume a session in MAWS' });
-    expect(button.title).toBe('Resume a session…');
+    const button = within(row('MAWS')).getByRole('button', { name: 'Resume a session in MAWS', description: 'Resume a session…' }); // its tip's words (board ticket 815)
     await user.click(button);
     expect(expanded()).toEqual([]); // the click does not toggle the row
     expect(picker().getAttribute('data-widget-size')).toBe('library'); // X19's box
@@ -1411,11 +1413,12 @@ describe('sidebar keyboard', () => {
 describe('new sessions from the sidebar', () => {
   beforeEach(() => fillStores(nine));
 
-  it('"+" is disabled with "Not available here" while no creator is registered', () => {
+  it('"+" is greyed with "Not available here" while no creator is registered, and a press does nothing', () => {
     render(<Sidebar />);
-    const plus = within(row('MAWS')).getByRole('button', { name: 'New chat in MAWS' }) as HTMLButtonElement;
-    expect(plus.disabled).toBe(true);
-    expect(plus.title).toBe('Not available here');
+    const plus = within(row('MAWS')).getByRole('button', { name: 'New chat in MAWS', description: 'Not available here' }); // board ticket 815
+    expect(plus.getAttribute('aria-disabled')).toBe('true');
+    fireEvent.click(plus);
+    expect(expanded()).toEqual([]); // the press reaches neither the act nor the row
   });
 
   it('with a creator, a project row’s "+" opens an unstarted session tab in that project without expanding it, and the sidebar does not list it', async () => {
@@ -1495,11 +1498,14 @@ describe('sidebar states', () => {
     expect(screen.queryByText('No projects match')).toBeNull();
     expect(screen.queryByText('reconnecting')).toBeNull(); // ticket 407: an ordinary empty workspace
     expect((screen.getByRole('button', { name: 'Add project' }) as HTMLButtonElement).disabled).toBe(false);
-    const create = screen.getByRole('button', { name: 'New chat' }) as HTMLButtonElement;
-    expect(create.disabled).toBe(true);
+    const create = screen.getByRole('button', { name: 'New chat', description: 'Not available here' }); // board ticket 815: greyed, keeping Tab
+    expect(create.getAttribute('aria-disabled')).toBe('true');
+    fireEvent.click(create);
+    expect(activeTab(useLayout.getState().main)).toBeNull(); // the greyed press does nothing
     offs.push(registerSessionCreator(async () => at('app-new-2' as AppSessionId)));
     rerender(<Sidebar />);
-    expect(create.disabled).toBe(false);
+    expect(create.getAttribute('aria-disabled')).toBeNull();
+    expect(accessibleDescription(create)).toBe('⌘N'); // its shortcut, drawn in the row on pointing and focus
     await userEvent.setup().click(create);
     expect(activeTab(useLayout.getState().main)).toMatchObject({ kind: 'session', appSessionId: at('app-new-2') });
     expect(useSessions.getState().unstarted.get(at('app-new-2' as AppSessionId))?.projectId).toBeNull();
@@ -1552,11 +1558,13 @@ describe('the footer gear', () => {
 
   it('is disabled until settings.open has a handler, then opens the Settings dialog', () => {
     render(<Sidebar />);
-    const gear = screen.getByRole('button', { name: 'Workspace settings' }) as HTMLButtonElement;
-    expect(gear.disabled).toBe(true);
+    const gear = screen.getByRole('button', { name: 'Workspace settings', description: 'Not available here · ⌘,' }); // board ticket 815: greyed, keeping Tab
+    expect(gear.getAttribute('aria-disabled')).toBe('true');
     act(() => void offs.push(registerGatewayActions()));
-    expect(gear.disabled).toBe(false);
-    expect(gear.title).toBe('Settings · ⌘,');
+    expect(gear.getAttribute('aria-disabled')).toBeNull();
+    act(() => gear.focus());
+    expect(screen.getByRole('tooltip').textContent).toBe('Settings · ⌘,');
+    act(() => gear.blur());
     const strip = useLayout.getState().main;
     fireEvent.click(gear);
     expect(useLayout.getState().settings).toEqual({ section: null });
@@ -1884,7 +1892,7 @@ describe('the sidebar across machines', () => {
     render(<Sidebar />);
     expect(sessionRows(row('MAWS'))).toEqual(['Studio build']);
     expect(row('MAWS').getAttribute('data-menu')).toBe(`project:${studio('maws-b')}`);
-    expect((within(row('MAWS')).getByRole('button', { name: 'New chat in MAWS' }) as HTMLButtonElement).disabled).toBe(true); // another machine's: O7
+    expect(within(row('MAWS')).getByRole('button', { name: 'New chat in MAWS' }).getAttribute('aria-disabled')).toBe('true'); // another machine's: O7
   });
 });
 
@@ -1951,6 +1959,7 @@ describe('listed rows from another machine', () => {
       fireEvent.contextMenu(row(title));
       return within(await screen.findByRole('menu')).getAllByRole('menuitem');
     };
+    const greyed = (item: HTMLElement) => item.hasAttribute('data-disabled') || item.getAttribute('aria-disabled') === 'true';
     beforeEach(() => {
       for (const id of ['rename', 'fork', 'archive'] as const) offs.push(registerSessionAction(id, vi.fn()));
       offs.push(registerRemoteOpener('B', vi.fn())); // the chain merge: a listing's opens (U7a) take lane B's opener
@@ -1991,15 +2000,17 @@ describe('listed rows from another machine', () => {
       expandAll();
       render(<Sidebar />);
       const items = await menuOf('Studio build');
-      expect(items.map((m) => [m.textContent, m.hasAttribute('data-disabled'), m.getAttribute('title')])).toEqual([
-        ['Open', false, null],
-        ['Open in new tab', false, null],
-        ['Open in (the folder is on Studio)', true, null], // UX wave U6b-4a
-        ['Hide', false, null],
+      // board ticket 815: a refused item keeps the menu's keyboard (aria-disabled), its reason its description
+      expect(items.map((m) => [accessibleText(m), greyed(m), accessibleDescription(m)])).toEqual([
+        ['Open', false, ''],
+        ['Open in new tab', false, ''],
+        ['Open in (the folder is on Studio)', true, ''], // UX wave U6b-4a
+        ['Hide', false, ''],
         ['Rename…', true, 'Can’t rename on Studio yet. Update MAWS on Studio and try again.'],
         ['Fork', true, 'Can’t fork on Studio yet. Update MAWS on Studio and try again.'],
         ['Archive', true, 'Can’t archive on Studio yet. Update MAWS on Studio and try again.'],
       ]);
+      expect(items.filter((m) => m.hasAttribute('data-disabled')).map(accessibleText)).toEqual(['Open in (the folder is on Studio)']);
     });
 
     it('offers a record of another machine’s Rename… and Archive when its listing says it is yours, and Fork disabled for a member who doesn’t own the machine', async () => {
@@ -2010,10 +2021,10 @@ describe('listed rows from another machine', () => {
       expandAll();
       render(<Sidebar />);
       const items = await menuOf('Studio build (record)');
-      expect(items.map((m) => m.textContent)).toEqual(['Open', 'Open in new tab', 'Open in split', 'Open in (the folder is on Studio)', 'Pin', 'Hide', 'Rename…', 'Fork', 'Archive']); // U7a's Hide after Pin; U6b-4a's Open in
-      const fork = items.find((m) => m.textContent === 'Fork')!;
-      expect(fork.hasAttribute('data-disabled')).toBe(true);
-      expect(fork.getAttribute('title')).toBe('Only Studio’s owners can fork a session there.');
+      expect(items.map((m) => accessibleText(m))).toEqual(['Open', 'Open in new tab', 'Open in split', 'Open in (the folder is on Studio)', 'Pin', 'Hide', 'Rename…', 'Fork', 'Archive']); // U7a's Hide after Pin; U6b-4a's Open in
+      const fork = items.find((m) => accessibleText(m) === 'Fork')!;
+      expect(fork.getAttribute('aria-disabled')).toBe('true'); // board ticket 815: a refused item, its reason its description
+      expect(accessibleDescription(fork)).toBe('Only Studio’s owners can fork a session there.');
     });
 
     // The architect's ruling (Decision Log, SessionRow's overflow takes mine): the hover overflow is drawn from the facts
@@ -2247,11 +2258,11 @@ describe('listed rows from another machine', () => {
     expect(row('Studio build').getAttribute('data-menu')).toBe(`session:${studio('b1')}`);
     fireEvent.contextMenu(row('Studio build'));
     const items = within(await screen.findByRole('menu')).getAllByRole('menuitem');
-    expect(items.map((m) => [m.textContent, m.hasAttribute('data-disabled'), m.getAttribute('title')])).toEqual([
-      ['Open', true, null], // the word cut (W68): no "Not available here"
-      ['Open in new tab', true, null],
-      ['Open in (the folder is on Studio)', true, null], // UX wave U6b-4a
-      ['Hide', false, null], // UX wave U7, O-16: hiding needs no opener
+    expect(items.map((m) => [m.textContent, m.hasAttribute('data-disabled'), accessibleDescription(m)])).toEqual([
+      ['Open', true, ''], // the word cut (W68): no "Not available here"
+      ['Open in new tab', true, ''],
+      ['Open in (the folder is on Studio)', true, ''], // UX wave U6b-4a
+      ['Hide', false, ''], // UX wave U7, O-16: hiding needs no opener
     ]);
     fireEvent.keyDown(document.activeElement ?? document.body, { key: 'Escape' });
     await waitFor(() => expect(screen.queryByRole('menu')).toBeNull());

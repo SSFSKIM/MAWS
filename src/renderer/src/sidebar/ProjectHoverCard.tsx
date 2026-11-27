@@ -8,7 +8,7 @@
 // locations in place of the one path, each with its machine, state and actions (`ProjectLocations.tsx`). The word cut
 // (W78, W79, N174): the counts line leaves out a part at zero and is not drawn when every part is; the activity line is
 // the age alone ("Active now" under a minute), not drawn before any activity; the worktrees' read is a quiet spinner.
-import { useEffect, useState, type ReactNode } from 'react';
+import { useContext, useEffect, useState, type ReactNode } from 'react';
 import type { ProjectRecord } from '@shared/ipc/schema';
 import type { WorktreeInfo } from '@shared/sessions/worktree';
 import { formatAgo } from '@shared/app/date-format';
@@ -17,7 +17,8 @@ import { formatCwd } from '../composer/frame/LocationChip';
 import { ipc } from '../ipc/client';
 import { branchLabel } from '../sessions/branch-label';
 import type { ProjectEntry } from './derive';
-import { SidebarHoverCard } from './HoverCard';
+import { OpenedByKeyboard, SidebarHoverCard } from './HoverCard';
+import { Tip } from '../ui/tip';
 import { QuietSpinner } from '../ui/spinner';
 import { ProjectLocations } from './ProjectLocations'; // the project registry
 import { useLocationView } from './location-view'; // the project registry
@@ -28,12 +29,13 @@ export interface ProjectHoverCardProps {
   entry: ProjectEntry & { project: ProjectRecord };
   open: boolean;
   onOpenChange(open: boolean): void;
+  keyboard: boolean; // the row's treeitem holds the keyboard's focus
   children: ReactNode;
 }
 
-export function ProjectHoverCard({ entry, open, onOpenChange, children }: ProjectHoverCardProps) {
+export function ProjectHoverCard({ entry, open, onOpenChange, keyboard, children }: ProjectHoverCardProps) {
   return (
-    <SidebarHoverCard label={entry.name} content={<Body entry={entry} />} open={open} onOpenChange={onOpenChange}>
+    <SidebarHoverCard label={entry.name} content={<Body entry={entry} />} open={open} onOpenChange={onOpenChange} keyboardElsewhere={keyboard}>
       {children}
     </SidebarHoverCard>
   );
@@ -99,13 +101,39 @@ function Worktrees({ machine, directory }: { machine: MachineRef; directory: str
       ) : (
         <ul aria-label="Worktrees" className="m-0 flex max-h-40 list-none flex-col gap-0.5 overflow-y-auto p-0 [scrollbar-width:thin]">
           {read.worktrees.map((w) => (
-            <li key={w.path} title={w.path} className="flex min-w-0 items-baseline gap-2">
-              <span className="min-w-0 truncate">{`⎇ ${branchLabel(null, { repository: true, branch: w.branch })}`}</span>
-              <span className="ml-auto shrink-0 truncate text-fg-faint">{w.isMain ? 'main checkout' : basename(w.path)}</span>
-            </li>
+            <Worktree key={w.path} worktree={w} />
           ))}
         </ul>
       )}
     </div>
+  );
+}
+
+// A checkout's line: its branch and its folder's name, the folder's full path its tip under the pointer. Nothing in the
+// card takes focus (Radix's hover card), so a card the keyboard opened draws the path at rest under the line, as the
+// session card draws its worktree folder (the word cut's M4 ruling on the sidebar hover card; board ticket 815).
+function Worktree({ worktree: w }: { worktree: WorktreeInfo }) {
+  const atRest = useContext(OpenedByKeyboard);
+  const line = (
+    <span className="flex min-w-0 items-baseline gap-2">
+      <span className="min-w-0 truncate">{`⎇ ${branchLabel(null, { repository: true, branch: w.branch })}`}</span>
+      <span className="ml-auto shrink-0 truncate text-fg-faint">{w.isMain ? 'main checkout' : basename(w.path)}</span>
+    </span>
+  );
+  return (
+    <li className="min-w-0">
+      {atRest ? (
+        <>
+          {line}
+          <span data-worktree-path className="block font-mono text-fg-muted [overflow-wrap:anywhere]">
+            {w.path}
+          </span>
+        </>
+      ) : (
+        <Tip content={w.path} description={w.path}>
+          {line}
+        </Tip>
+      )}
+    </li>
   );
 }

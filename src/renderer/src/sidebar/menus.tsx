@@ -53,6 +53,8 @@ import { OWNER, SHARE } from '../sessions/share/copy'; // P5 O8 M6b, M5b
 import { useHidden } from '../stores/hidden'; // UX wave U7, O-16
 import { useTree } from './tree'; // UX wave U7, O-16
 import { OpenInSubmenu } from '../open-in/OpenInMenu'; // UX wave U6b-4a
+import { RefusedMenuItem } from '../ui/refused-menu-item'; // board ticket 815
+import { NamedGlyph } from '../ui/glyph'; // board ticket 815
 
 // P5 O8 M5: a project's or machine's `people` says whether its row offers the People toggle.
 export type MenuTarget =
@@ -75,14 +77,13 @@ export function menuTargetOf(element: Element | null): MenuTarget | null {
 }
 
 const ITEM =
-  'flex h-7 cursor-default items-center rounded-sm px-2 outline-none select-none data-disabled:text-fg-faint data-highlighted:bg-bg-hover';
+  'flex h-7 cursor-default items-center rounded-sm px-2 outline-none select-none data-disabled:text-fg-faint aria-disabled:text-fg-faint data-highlighted:bg-bg-hover';
 
-// `why`: the sentence a disabled item is drawn with (the UX wave, U9); the word cut (W68): an item with no reason of its
-// own says nothing, where it said "Not available here".
-function Item({ enabled, onSelect, children, dropdown = false, why = null }: { dropdown?: boolean; enabled: boolean; onSelect(): void; children: ReactNode; why?: string | null }) {
+// The word cut (W68): a disabled item with no reason of its own says nothing, where it said "Not available here".
+function Item({ enabled, onSelect, children, dropdown = false }: { dropdown?: boolean; enabled: boolean; onSelect(): void; children: ReactNode }) {
   const Component = dropdown ? DropdownMenu.Item : ContextMenu.Item;
   return (
-    <Component disabled={!enabled} onSelect={onSelect} title={enabled ? undefined : (why ?? undefined)} className={ITEM}>
+    <Component disabled={!enabled} onSelect={onSelect} className={ITEM}>
       {children}
     </Component>
   );
@@ -230,14 +231,14 @@ export function RowHideButton({ appSessionId }: { appSessionId: AppSessionId }) 
   const { hidden, act } = useHideAct(appSessionId);
   const label = hidden ? HIDDEN.unhide : HIDDEN.hide;
   return (
-    <button type="button" tabIndex={-1} aria-label={label} title={label}
+    <NamedGlyph tabIndex={-1} label={label}
       onClick={(event) => {
         event.stopPropagation();
         act();
       }}
       className="hidden size-[22px] shrink-0 items-center justify-center rounded-sm text-fg-muted outline-accent group-hover/session:inline-flex group-focus-within/session:inline-flex hover:bg-bg-active hover:text-fg focus-visible:outline-2">
       {hidden ? <EyeIcon /> : <EyeOffIcon />}
-    </button>
+    </NamedGlyph>
   );
 }
 
@@ -285,12 +286,14 @@ function KeepItem({ appSessionId, kept, dropdown }: { appSessionId: AppSessionId
   );
 }
 
-// The UX wave, U9: disabled with the window's helper's sentence where the act can't work on the session's machine.
+// The UX wave, U9: greyed with the window's helper's sentence where the act can't work on the session's machine; board
+// ticket 815: a refused item, which keeps the menu's keyboard and says why in its row note.
 function SessionItem({ id, appSessionId, label, dropdown }: { id: SessionActionId; appSessionId: AppSessionId; label: string; dropdown?: boolean }) {
   const why = useSessionActionUnavailable(id, appSessionId);
-  const enabled = useSessionActionEnabled(id) && why === null;
+  const enabled = useSessionActionEnabled(id);
+  if (why !== null) return <RefusedMenuItem kit={dropdown ? DropdownMenu : ContextMenu} label={label} reason={why} className={ITEM} />;
   return (
-    <Item dropdown={dropdown} enabled={enabled} why={why} onSelect={() => runSessionAction(id, appSessionId)}>
+    <Item dropdown={dropdown} enabled={enabled} onSelect={() => runSessionAction(id, appSessionId)}>
       {label}
     </Item>
   );
