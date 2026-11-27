@@ -128,15 +128,22 @@ const RING = 'outline-accent data-[focus-ring]:outline-2';
 function useRootRing(onRootFocus?: () => void) {
   const [ring, setRing] = useState(false);
   const pointer = useRef(false);
-  const released = () => void (pointer.current = false);
   return {
     'data-focus-ring': ring ? '' : undefined,
+    // Pressed inside the card, the pointer is held until it is released anywhere: a drag out of the card releases it
+    // outside, where the card would see no pointerup of its own.
     onPointerDown: () => {
-      pointer.current = true;
       setRing(false);
+      if (pointer.current) return;
+      pointer.current = true;
+      const release = () => {
+        pointer.current = false;
+        document.removeEventListener('pointerup', release, true);
+        document.removeEventListener('pointercancel', release, true);
+      };
+      document.addEventListener('pointerup', release, true);
+      document.addEventListener('pointercancel', release, true);
     },
-    onPointerUp: released,
-    onPointerCancel: released,
     onFocus: (event: FocusEvent) => {
       const root = event.target === event.currentTarget;
       setRing(root && !pointer.current);

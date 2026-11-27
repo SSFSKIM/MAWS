@@ -55,6 +55,26 @@ describe('QuestionCard', () => {
     expect(root.hasAttribute('data-focus-ring')).toBe(false);
   });
 
+  // The review of the look wave: a press inside the card released outside it (a drag-select out of the card) leaves no
+  // pointer behind it, so the next focus the keyboard or the open-at request gives the root draws the outline.
+  it.each(['full', 'compact'] as const)('draws the outline at the next focus after a press inside the card released outside it (%s)', (density) => {
+    const { container } = card(CLASH, { density });
+    const root = container.firstElementChild as HTMLElement;
+    act(() => root.focus());
+    const inside = root.querySelector('p')!;
+    fireEvent.pointerDown(inside);
+    expect(root.hasAttribute('data-focus-ring')).toBe(false);
+    fireEvent.pointerUp(document.body); // released elsewhere: the card sees no pointerup of its own
+    act(() => root.blur());
+    act(() => root.focus());
+    expect(root.hasAttribute('data-focus-ring')).toBe(true);
+    fireEvent.pointerDown(inside);
+    fireEvent.pointerCancel(document.body);
+    act(() => root.blur());
+    act(() => root.focus());
+    expect(root.hasAttribute('data-focus-ring')).toBe(true);
+  });
+
   it('draws the head, the question, the numbered options with the recommended mark, the text field and Dismiss', () => {
     card(FIXTURE);
     expect(screen.getByText('q7')).toBeTruthy();

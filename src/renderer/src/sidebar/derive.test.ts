@@ -251,6 +251,16 @@ describe('listed rows in the project list', () => {
     expect(entries[1].name).toBe('Studio');
   });
 
+  // L5, the look wave's review: a counted listing is as calm as its live Needs you row, and in today's tone without one
+  it('draws a waiting listing’s count calm when its live row waits on sheet questions alone, in today’s tone without a row', () => {
+    const asks = listedOn('b1', { orgKey: ORG, state: 'waiting' });
+    const asked = item(asks.appId, 'async_input', '2026-11-24T10:00:00Z', { id: `sheet:5eed0000-0000-4000-8000-000000000042:q1` as never });
+    const rows = needsYou(new Map([[asks.appId, [asked]]]), new Map(), { listed: listedMap(asks) });
+    expect(rows.map((row) => [row.appSessionId, row.calm])).toEqual([[asks.appId, true]]); // the live calm row the count reads
+    expect(list(listedMap(asks), { rows })[0]!.rollup).toEqual({ waiting: 1, working: 0, tone: 'calm' });
+    expect(list(listedMap(asks))[0]!.rollup).toEqual({ waiting: 1, working: 0, tone: 'warning' });
+  });
+
   it('files an all-hidden project’s row nowhere, and a row of a key with no checkout under its machine’s row', () => {
     const row = listedOn('b1', { orgKey: ORG });
     expect(shape(list(listedMap(row), { projects: mapOf([{ ...here, hidden: true }]), records: new Map() }))).toEqual([]);

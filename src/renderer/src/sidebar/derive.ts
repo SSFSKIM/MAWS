@@ -175,8 +175,9 @@ export function projectList({ records, digests, projects, rows, local, machineNa
       listed: remote,
       rollup: {
         waiting: counted.length + count('waiting'),
-        // L5: a session counted by its row is as calm as the row; one counted by its digest or its listing alone is not
-        tone: waitingTone([...counted.map((r) => rowOf.get(r.appId) ?? {}), ...remote.filter((l) => l.state === 'waiting' && yours(l.appId)).map(() => ({}))]),
+        // L5: a counted session or listing is as calm as its Needs you row; one with no row (counted by its digest or its
+        // listing's state alone) is not
+        tone: waitingTone([...counted, ...remote.filter((l) => l.state === 'waiting' && yours(l.appId))].map((one) => rowOf.get(one.appId) ?? {})),
         working: sessions.filter((r) => yours(r.appId) && isWorking(digests.get(r.appId), remoteSessions.get(r.appId))).length + count('busy'),
       },
       lastActivity: entryActivity(org.id),
