@@ -189,7 +189,7 @@ describe('the resume chooser', () => {
     vi.useFakeTimers();
     try {
       fill(base);
-      useSessions.setState({ digests: new Map([[at('beta'), digest(at('beta'), { availability: 'foreign_held' })]]) });
+      useSessions.setState({ digests: new Map([[at('beta') as AppSessionId, digest(at('beta'), { availability: 'foreign_held' })]]) });
       change('beta', { holder: { kind: 'terminal', pid: 41 } });
       mount();
       const beta = screen.getAllByRole('option').find((o) => o.querySelector('[data-title]')!.textContent === 'beta')!;
