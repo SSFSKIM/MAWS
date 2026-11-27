@@ -2,7 +2,8 @@
 // all (the word cut, C99: the card's one wording for a long preview); Implement (Enter), Keep planning (Esc: opens and
 // focuses the feedback box, whose Enter or ⌘Enter sends), and Clear context and implement behind one confirmation,
 // since it resets the conversation. P5 O9 M6: each outcome the session's port can't carry (a terminal session's "clear
-// and implement": /clear runs in the terminal) is drawn disabled in place with its reason, and no key answers it.
+// and implement": /clear runs in the terminal) is drawn greyed in place with its reason, and no key answers it; board
+// ticket 815: greyed, it keeps the keyboard, its reason its tip.
 // UX wave U1a §F (A12; l4-approvals-11): Implement names the mode the session will be in afterwards, the one it had
 // before Plan, which a plain allow restores; and where a mode can be chosen (a session MAWS runs on this Mac whose engine
 // host has this build's wire, and whose port carries a named mode) a menu on it lists the other modes an approval may
@@ -98,7 +99,7 @@ export function PlanBody({ item, request, busy, submit, bindKeys, capability = c
         <div ref={box} className="flex flex-col gap-1.5">
           <CardTextarea label="What should change in the plan" value={feedback} onChange={setFeedback} onSubmit={sendFeedback} submitOnEnter autoFocus={openedHere} disabled={busy} />
           <Controls>
-            <CardButton disabled={busy || feedbackGate.disabled} title={feedbackGate.title} onClick={sendFeedback}>
+            <CardButton disabled={busy} unavailable={feedbackGate.reason} onClick={sendFeedback}>
               Send feedback
             </CardButton>
           </Controls>
@@ -111,23 +112,23 @@ export function PlanBody({ item, request, busy, submit, bindKeys, capability = c
             <CardButton disabled={busy} onClick={() => setConfirming(false)}>
               Back
             </CardButton>
-            <CardButton tone="primary" disabled={busy || clearGate.disabled} title={clearGate.title} onClick={clearAndImplement}>
+            <CardButton tone="primary" disabled={busy} unavailable={clearGate.reason} onClick={clearAndImplement}>
               Clear and implement
             </CardButton>
           </Controls>
         </div>
       )}
       <Controls>
-        <CardButton disabled={busy || confirming || clearGate.disabled} title={clearGate.title} onClick={() => setConfirming(true)} className="mr-auto">
+        <CardButton disabled={busy || confirming} unavailable={clearGate.reason} onClick={() => setConfirming(true)} className="mr-auto">
           Clear context and implement
         </CardButton>
         {feedback === null && (
-          <CardButton disabled={busy || feedbackGate.disabled} title={feedbackGate.title} onClick={keepPlanning}>
+          <CardButton disabled={busy} unavailable={feedbackGate.reason} onClick={keepPlanning}>
             Keep planning
           </CardButton>
         )}
         <span className="flex">
-          <CardButton tone="primary" disabled={busy || implementGate.disabled} title={implementGate.title} onClick={implement} className={choices.menu.length === 0 ? '' : 'rounded-r-none'}>
+          <CardButton tone="primary" disabled={busy} unavailable={implementGate.reason} onClick={implement} className={choices.menu.length === 0 ? '' : 'rounded-r-none'}>
             {implementLabel(choices.button)}
           </CardButton>
           {choices.menu.length > 0 && (

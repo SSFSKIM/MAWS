@@ -2,22 +2,27 @@
 import type { ButtonHTMLAttributes, ReactNode } from 'react';
 import type { AttentionTone } from '@shared/attention/headings';
 import { formatChord, parseChord } from '@shared/keymap/chord';
+import { UnavailableButton } from '../ui/tip';
 
 // A kind's glyph in its tone (C5's table), as the card's kind line, the end's lines and the question form's header draw it.
 export const TONE_CLASS: Record<AttentionTone, string> = { warning: 'text-warning', info: 'text-info', danger: 'text-danger', accent: 'text-accent' /* P2-C */ };
 
 const TONES = {
-  primary: 'border-fg bg-fg text-bg hover:bg-fg-muted disabled:border-fg-faint disabled:bg-fg-faint',
-  secondary: 'border-border-strong text-fg hover:bg-bg-hover disabled:text-fg-faint',
-  danger: 'border-border-strong text-danger hover:bg-bg-hover disabled:text-fg-faint',
+  primary: 'border-fg bg-fg text-bg hover:bg-fg-muted disabled:border-fg-faint disabled:bg-fg-faint aria-disabled:border-fg-faint aria-disabled:bg-fg-faint aria-disabled:hover:bg-fg-faint',
+  secondary: 'border-border-strong text-fg hover:bg-bg-hover disabled:text-fg-faint aria-disabled:text-fg-faint aria-disabled:hover:bg-transparent',
+  danger: 'border-border-strong text-danger hover:bg-bg-hover disabled:text-fg-faint aria-disabled:text-fg-faint aria-disabled:hover:bg-transparent',
 } as const;
 
 // UX wave U1a (§D): `chord`, an accelerator (a row's effective chord), is the key that answers this button. It is printed
 // inside the button in the keymap's formatting and hidden from the accessibility tree, and the button carries it in
 // `aria-keyshortcuts`, so the button's name stays its words ("Allow once", not "Allow once ⌘↩"). Null or absent: no hint.
-export function CardButton({ tone = 'secondary', className = '', chord = null, children, ...props }: ButtonHTMLAttributes<HTMLButtonElement> & { tone?: keyof typeof TONES; chord?: string | null }) {
-  return (
-    <button type="button" aria-keyshortcuts={chord === null ? undefined : ariaKeys(chord)} {...props} className={`rounded-sm border px-2.5 py-1 whitespace-nowrap outline-accent focus-visible:outline-2 ${TONES[tone]} ${className}`}>
+// Board ticket 815: `unavailable`, a button the session's controls can't carry, with why: greyed, it keeps the keyboard
+// (`aria-disabled`), a press does nothing, and its reason is its tip and description (ui/tip.tsx, UnavailableButton).
+// A site that may grey its button passes it always, null while available, so the button is never remounted when the
+// answer it carries changes; `disabled` stays for a button that waits (an answer in flight).
+export function CardButton({ tone = 'secondary', className = '', chord = null, unavailable, children, ...props }: ButtonHTMLAttributes<HTMLButtonElement> & { tone?: keyof typeof TONES; chord?: string | null; unavailable?: string | null }) {
+  const button = (
+    <button type="button" aria-keyshortcuts={chord === null ? undefined : ariaKeys(chord)} {...props} className={`rounded-sm border px-2.5 py-1 whitespace-nowrap outline-accent focus-visible:outline-2 aria-disabled:cursor-default ${TONES[tone]} ${className}`}>
       {children}
       {chord !== null && (
         <kbd aria-hidden="true" className="ml-1.5 font-ui opacity-70">
@@ -26,6 +31,7 @@ export function CardButton({ tone = 'secondary', className = '', chord = null, c
       )}
     </button>
   );
+  return unavailable === undefined ? button : <UnavailableButton reason={unavailable}>{button}</UnavailableButton>;
 }
 
 // An accelerator in `aria-keyshortcuts`'s words: the modifiers as a KeyboardEvent names them, then the key ('Cmd+Shift+Enter'

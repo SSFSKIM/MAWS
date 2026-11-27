@@ -7,8 +7,10 @@
 // `data-decision-buttons`); each key is printed on
 // its button (the row's effective chord) and a button whose key is not bound prints none. Under the quick-approval
 // policy: `button_only` (`default_to_no`) binds no allow key; `none` (`requires_user_interaction`) draws no allow button.
-// P5 O9 M6: each button, and each menu entry, is drawn disabled in place with its reason where the session's port can't
+// P5 O9 M6: each button, and each menu entry, is drawn greyed in place with its reason where the session's port can't
 // carry it (a terminal session's bridge: deny-and-interrupt, a scope its request doesn't suggest), and no key answers it.
+// Board ticket 815: greyed, each keeps the keyboard (a button's reason its tip, a menu entry's its row note), never a
+// system tooltip.
 // UX wave U1a (M4, §I): a file change's preview is its diff against the file as read (`proposed`, which the card reads
 // and hands here, since its first line says "Create" or "Edit" by it), or the input alone until and unless one is drawn.
 import { DropdownMenu } from 'radix-ui';
@@ -26,6 +28,7 @@ import { quickApproval } from '../quick-approval';
 import { scopeOptions, type Scope } from '../scope';
 import { toolClass } from '../tools';
 import { CARD_WORDS } from '../copy';
+import { RefusedMenuItem } from '../../ui/refused-menu-item';
 import { carried, gated, type VariantProps } from './types';
 
 const ALLOWED: Record<Scope, string> = { once: 'Allowed once', session: 'Allowed for this session', local_settings: 'Always allowed in this project' };
@@ -33,7 +36,8 @@ const ALLOWED: Record<Scope, string> = { once: 'Allowed once', session: 'Allowed
 // appeared must not answer it.
 const KEY_GRACE_MS = 400;
 const MENU = 'z-50 rounded-md border border-border-strong bg-bg-overlay p-1 text-ui text-fg';
-const MENU_ITEM = 'cursor-default rounded-sm px-2.5 py-1 outline-none data-[disabled]:text-fg-faint data-[highlighted]:bg-bg-hover';
+const MENU_ITEM = 'cursor-default rounded-sm px-2.5 py-1 outline-none data-[disabled]:text-fg-faint aria-disabled:text-fg-faint data-[highlighted]:bg-bg-hover';
+const STOP_WORDS = 'Deny and stop the turn';
 
 export function PermissionBody({ item, request, busy, submit, bindKeys, capability = carried, proposed = INPUT_ALONE, guarded = false }: VariantProps<'permission.requested'> & { proposed?: Proposed; guarded?: boolean }) {
   const project = useSessions((s) => {
@@ -110,12 +114,12 @@ export function PermissionBody({ item, request, busy, submit, bindKeys, capabili
       )}
       <Controls decisions>
         {!reasoning && (
-          <CardButton disabled={busy || denyGate.disabled} title={denyGate.title} onClick={openReason} className="mr-auto border-transparent text-fg-muted">
+          <CardButton disabled={busy} unavailable={denyGate.reason} onClick={openReason} className="mr-auto border-transparent text-fg-muted">
             Deny… with a reason
           </CardButton>
         )}
         <span className="flex">
-          <CardButton disabled={busy || denyGate.disabled} title={denyGate.title} chord={declineKey && chordOf('request.decline')} onClick={() => deny('deny', message)} className="rounded-r-none">
+          <CardButton disabled={busy} unavailable={denyGate.reason} chord={declineKey && chordOf('request.decline')} onClick={() => deny('deny', message)} className="rounded-r-none">
             Deny
           </CardButton>
           <DropdownMenu.Root>
@@ -126,21 +130,25 @@ export function PermissionBody({ item, request, busy, submit, bindKeys, capabili
             </DropdownMenu.Trigger>
             <DropdownMenu.Portal>
               <DropdownMenu.Content align="end" sideOffset={4} className={MENU}>
-                <DropdownMenu.Item disabled={stopGate.disabled} title={stopGate.title} onSelect={() => deny('deny_and_stop', message)} className={MENU_ITEM}>
-                  Deny and stop the turn
-                </DropdownMenu.Item>
+                {stopGate.reason !== null ? (
+                  <RefusedMenuItem kit={DropdownMenu} label={STOP_WORDS} reason={stopGate.reason} className={MENU_ITEM} />
+                ) : (
+                  <DropdownMenu.Item onSelect={() => deny('deny_and_stop', message)} className={MENU_ITEM}>
+                    {STOP_WORDS}
+                  </DropdownMenu.Item>
+                )}
               </DropdownMenu.Content>
             </DropdownMenu.Portal>
           </DropdownMenu.Root>
         </span>
         {lasting !== null && lastingGate !== null && (
-          <CardButton disabled={busy || lastingGate.disabled} title={lastingGate.title} chord={lastingKey && chordOf('request.allowLasting')} onClick={() => allow(lasting.scope)}>
+          <CardButton disabled={busy} unavailable={lastingGate.reason} chord={lastingKey && chordOf('request.allowLasting')} onClick={() => allow(lasting.scope)}>
             {lasting.label}
           </CardButton>
         )}
         {policy !== 'none' && (
           <span className="flex">
-            <CardButton tone="primary" disabled={busy || onceGate.disabled} title={onceGate.title} chord={onceKey && chordOf('request.allowOnce')} onClick={() => allow('once')} className={entry === null ? '' : 'rounded-r-none'}>
+            <CardButton tone="primary" disabled={busy} unavailable={onceGate.reason} chord={onceKey && chordOf('request.allowOnce')} onClick={() => allow('once')} className={entry === null ? '' : 'rounded-r-none'}>
               Allow once
             </CardButton>
             {entry !== null && entryGate !== null && (
@@ -152,9 +160,13 @@ export function PermissionBody({ item, request, busy, submit, bindKeys, capabili
                 </DropdownMenu.Trigger>
                 <DropdownMenu.Portal>
                   <DropdownMenu.Content align="end" sideOffset={4} className={MENU}>
-                    <DropdownMenu.Item disabled={entryGate.disabled} title={entryGate.title} onSelect={() => allow(entry.scope)} className={MENU_ITEM}>
-                      {entry.label}
-                    </DropdownMenu.Item>
+                    {entryGate.reason !== null ? (
+                      <RefusedMenuItem kit={DropdownMenu} label={entry.label} reason={entryGate.reason} className={MENU_ITEM} />
+                    ) : (
+                      <DropdownMenu.Item onSelect={() => allow(entry.scope)} className={MENU_ITEM}>
+                        {entry.label}
+                      </DropdownMenu.Item>
+                    )}
                   </DropdownMenu.Content>
                 </DropdownMenu.Portal>
               </DropdownMenu.Root>

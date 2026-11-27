@@ -37,6 +37,7 @@ export interface VariantProps<K extends SessionEvent['kind']> {
 
 export const carried = (): Capability => ({ available: true });
 
-// A control's disabled state and its reason on hover, from a capability.
-export const gated = (capability: Capability): { disabled: boolean; title: string | undefined } =>
-  capability.available ? { disabled: false, title: undefined } : { disabled: true, title: capability.reason };
+// A control's greyed state and its reason, from a capability: `reason` is the CardButton's `unavailable` (board ticket
+// 815: greyed, it keeps the keyboard, its reason its tip), null while the answer is carried.
+export const gated = (capability: Capability): { disabled: boolean; reason: string | null } =>
+  capability.available ? { disabled: false, reason: null } : { disabled: true, reason: capability.reason };

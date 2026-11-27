@@ -34,6 +34,7 @@ import { openAnchor } from './anchor';
 import { connectAttention } from './navigation';
 import { TEST_MACHINE } from '../../../../test/support/machine';
 import { preloadOf } from '../test-support/preload-of';
+import { accessibleDescription } from '../test-support/accessible-text'; // board ticket 815
 
 // P5 O6 M2: `file` is the scenario as main holds it (bare), which `fillStores` lifts into the stores; `nine` is the page's
 // view of it, whose ids are addresses. `fake`, installed as `window.maws`, stands for main and is asked, and speaks, with bare ids.
@@ -197,17 +198,17 @@ describe('the surfaces', () => {
     expect(screen.getByRole('button', { name: 'Mark read' })).toBeTruthy();
   });
 
-  // Ticket 627: an item of a session on another machine over RL2 is drawn with Mark read disabled, its sentence as the
-  // title, and marking it read sends nothing
-  it('the Overview card’s Mark read is disabled for an item of a session on another machine, in either lane', async () => {
+  // Ticket 627: an item of a session on another machine over RL2 is drawn with Mark read greyed, its sentence as the
+  // tip (board ticket 815: it keeps the keyboard), and marking it read sends nothing
+  it('the Overview card’s Mark read is greyed for an item of a session on another machine, in either lane', async () => {
     for (const lane of ['B', 'A'] as const) {
       const elsewhere = addressOf(OTHER_MACHINE, `app-${lane}` as AppSessionId);
       overRl2(elsewhere, {}, lane);
       const must = item(elsewhere, 'essential_unread', '2026-09-28T08:00:00.000Z', { id: `${elsewhere}:essential_unread:x` as AttentionId, request: NONE, summary: 'Must read — Mind the migration.', anchor });
       render(<RequestCard item={must} request={null} placement="card" paneIndex={0} />);
       const button = screen.getByRole<HTMLButtonElement>('button', { name: 'Mark read' });
-      expect(button.disabled).toBe(true);
-      expect(button.title).toBe(REMOTE_UNAVAILABLE['ownerChannel.markRead']);
+      expect([button.disabled, button.getAttribute('aria-disabled')]).toEqual([false, 'true']);
+      expect(accessibleDescription(button)).toBe(REMOTE_UNAVAILABLE['ownerChannel.markRead']);
       expect(await markRead(elsewhere, 'all')).toBe(REMOTE_UNAVAILABLE['ownerChannel.markRead']);
       cleanup();
     }

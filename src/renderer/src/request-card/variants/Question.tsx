@@ -185,8 +185,11 @@ function Position({ step, count }: { step: number; count: number }) {
   );
 }
 
+// Why Next and Submit are greyed before an answer
+const CHOOSE_FIRST = 'Choose an option or skip this question';
+
 export interface QuestionHostProps {
-  dismiss?: { disabled: boolean; title: string | undefined; run(): void }; // the Dismiss button in the form's foot; no key
+  dismiss?: { disabled: boolean; reason: string | null; run(): void }; // the Dismiss button in the form's foot; no key
   doubleClick?: boolean; // a double-click on a single-choice option picks it and goes on
   header?: { from: string | null; note: string | null }; // U1b: the form in a transcript draws its two-line header (`FormHeader`)
 }
@@ -297,14 +300,15 @@ export function QuestionBody({ item, request, placement, busy, submit, bindKeys,
       <Step key={question.question} question={question} draft={draft} disabled={busy} onPick={onPick} onChoose={doubleClick ? onChoose : undefined} onToggle={onToggle} onOther={onOther} onEnter={forward} />
       <Controls>
         {dismiss && (
-          <CardButton disabled={busy || dismiss.disabled} title={dismiss.title} onClick={dismiss.run} className="mr-auto">
+          <CardButton disabled={busy} unavailable={dismiss.reason} onClick={dismiss.run} className="mr-auto">
             Dismiss
           </CardButton>
         )}
-        <CardButton disabled={busy || skipGate.disabled} title={skipGate.title} onClick={skipStep}>
+        <CardButton disabled={busy} unavailable={skipGate.reason} onClick={skipStep}>
           Skip
         </CardButton>
-        <CardButton tone="primary" disabled={busy || !answered || forwardGate.disabled} title={!answered ? 'Choose an option or skip this question' : forwardGate.title} onClick={forward}>
+        {/* board ticket 815: greyed, Next and Submit keep the keyboard, their reason their tip */}
+        <CardButton tone="primary" disabled={busy} unavailable={!answered ? CHOOSE_FIRST : forwardGate.reason} onClick={forward}>
           {last ? 'Submit' : 'Next'}
         </CardButton>
       </Controls>

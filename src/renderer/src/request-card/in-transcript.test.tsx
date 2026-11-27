@@ -31,6 +31,7 @@ import { journalToEvents } from '../transcript/dev/journal';
 import { builder, request, tool } from '../transcript/model/test-events';
 import { connectRequestCard, renderSessionRequest } from './index';
 import { askItemFor, askOpened, itemFor, type RequestEvent } from './test-requests';
+import { accessibleText } from '../test-support/accessible-text'; // board ticket 815
 
 const APP = at('app-rows' as AppSessionId);
 const QUESTIONS = [
@@ -117,7 +118,13 @@ const questionRow = () => document.querySelector<HTMLElement>('.transcript-row[d
 const endRow = () => document.querySelector<HTMLElement>('[data-row-id="request-end"]');
 const end = () => document.querySelector<HTMLElement>('[data-request-end]');
 const lastRowId = () => [...document.querySelectorAll<HTMLElement>('[data-row-id]')].sort((a, b) => Number(a.dataset.index) - Number(b.dataset.index)).at(-1)?.dataset.rowId;
-const lines = (root: HTMLElement) => [...root.querySelectorAll('[data-question]')].map((line) => line.textContent);
+// A line's drawn words: a header's tip description and its touch fact are no part of them (board ticket 815)
+const lines = (root: HTMLElement) =>
+  [...root.querySelectorAll('[data-question]')].map((line) => {
+    const copy = line.cloneNode(true) as Element;
+    copy.querySelectorAll('[hidden], [data-touch-fact]').forEach((element) => element.remove());
+    return copy.textContent;
+  });
 const answered = () => fake.invoked('session.answer') as { requestId: string; answer: unknown }[];
 const pick = async (label: string, next: string) => {
   fireEvent.click(within(questionRow()).getByRole('radio', { name: label }));
@@ -396,7 +403,7 @@ describe('a card’s delivery, in a row and at the end', () => {
     first.unmount();
     await act(() => fake.fail('session.answer', 'the link is down'));
     render(<section data-pane={0}><TranscriptSlot appSessionId={APP} /></section>);
-    await waitFor(() => expect(end()?.querySelector('[role="alert"]')?.textContent).toBe("Couldn't deliver the answerRetry"));
+    await waitFor(() => expect(accessibleText(end()!.querySelector('[role="alert"]')!)).toBe("Couldn't deliver the answerRetry")); // why is the words' tip (board ticket 815)
     fireEvent.click(within(end()!).getByRole('button', { name: 'Retry' }));
     await waitFor(() => expect(answered()).toHaveLength(2));
     expect(answered()[1]).toEqual(answered()[0]);

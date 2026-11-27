@@ -1,7 +1,7 @@
 // The question stepper's two behaviours of UX wave U1a (Interfaces §E; A10, A18): Dismiss in the form's foot, which
 // sends the decline Esc sends, and a double-click on a single-choice option, which picks it and goes on (Next, or Submit
 // on the last step). Both are the app card's to ask for: without the two props (desk web's use) the stepper is today's.
-import { cleanup, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { RequestAnswer } from '@shared/engine/answers';
@@ -43,7 +43,7 @@ afterEach(() => {
 });
 
 // The stepper alone, as a host draws it: `submit` recorded, `capability` the port's answer (absent: every answer carried).
-function stepper(event: QuestionEvent, props: { dismiss?: { disabled: boolean; title: string | undefined; run(): void }; doubleClick?: boolean; capability?: (answer: RequestAnswer) => Capability } = {}) {
+function stepper(event: QuestionEvent, props: { dismiss?: { disabled: boolean; reason: string | null; run(): void }; doubleClick?: boolean; capability?: (answer: RequestAnswer) => Capability } = {}) {
   const submit = vi.fn();
   render(<QuestionBody item={itemFor(event, APP)} request={event} placement="inline" busy={false} submit={submit} bindKeys={() => {}} {...props} />);
   return submit;
@@ -61,17 +61,21 @@ describe('Dismiss', () => {
     expect(fake.invoked('session.answer')).toHaveLength(1);
   });
 
-  it('runs its own action, and is drawn disabled with its reason when the host says so', async () => {
+  // board ticket 815: greyed, it keeps the keyboard, its reason its description, and a press runs nothing
+  it('runs its own action, and is drawn greyed with its reason when the host says so', async () => {
     const run = vi.fn();
-    stepper(asking([COLOUR]), { dismiss: { disabled: false, title: undefined, run } });
+    stepper(asking([COLOUR]), { dismiss: { disabled: false, reason: null, run } });
     await userEvent.setup().click(screen.getByRole('button', { name: 'Dismiss' }));
     expect(run).toHaveBeenCalledTimes(1);
     cleanup();
     const closed = vi.fn();
-    stepper(asking([COLOUR]), { dismiss: { disabled: true, title: 'Dismiss it in the terminal', run: closed } });
-    const button = screen.getByRole('button', { name: 'Dismiss' }) as HTMLButtonElement;
-    expect(button.disabled).toBe(true);
-    expect(button.title).toBe('Dismiss it in the terminal');
+    stepper(asking([COLOUR]), { dismiss: { disabled: true, reason: 'Dismiss it in the terminal', run: closed } });
+    const button = screen.getByRole('button', { name: 'Dismiss', description: 'Dismiss it in the terminal' }) as HTMLButtonElement;
+    expect([button.disabled, button.getAttribute('aria-disabled'), button.getAttribute('title')]).toEqual([false, 'true', null]);
+    act(() => button.focus());
+    expect(document.activeElement).toBe(button);
+    await userEvent.setup().click(button);
+    expect(closed).not.toHaveBeenCalled();
   });
 });
 
