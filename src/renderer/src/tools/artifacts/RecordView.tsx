@@ -12,12 +12,13 @@ import type { MachineRef } from '@shared/machine/ref';
 import { ARTIFACTS_TOOL_ID } from '@shared/maws/panes';
 import { ChevronLeftIcon, Icon } from '../../app/IconButton';
 import { NamedGlyph } from '../../ui/glyph';
+import { UNAVAILABLE_LOOK, UnavailableButton } from '../../ui/tip';
 import { ArtifactView } from '../../library/ArtifactTab';
 import type { EditorHostScope } from '../../panel/editor-host';
 import { beginDrag, endDragFrom, moveArtifactToTab, useTransferRefusal } from '../../shell/transfer';
 import { ARTIFACTS_TOOL_COPY, TRANSFER_COPY } from './copy';
 
-const bar = 'h-7 shrink-0 rounded-sm px-2 text-ui-sm text-fg-muted outline-accent hover:bg-bg-hover hover:text-fg focus-visible:outline-2 disabled:text-fg-faint disabled:hover:bg-transparent';
+const bar = `h-7 shrink-0 rounded-sm px-2 text-ui-sm text-fg-muted outline-accent hover:bg-bg-hover hover:text-fg focus-visible:outline-2 ${UNAVAILABLE_LOOK}`;
 
 export function ArtifactRecordView({ artifactId, machine, scope, visible, onBack }: { artifactId: string; machine: MachineRef; scope: EditorHostScope; visible: boolean; onBack(): void }) {
   const refusal = useTransferRefusal({ to: 'tab', panelTabId: scope.tabId });
@@ -40,9 +41,12 @@ export function ArtifactRecordView({ artifactId, machine, scope, visible, onBack
         >
           <GripIcon />
         </span>
-        <button type="button" disabled={refusal !== null} title={refusal ?? undefined} onClick={() => void moveArtifactToTab(scope.tabId)} className={bar}>
-          {TRANSFER_COPY.moveToTab}
-        </button>
+        {/* greyed, it keeps Tab and says why (board ticket 815) */}
+        <UnavailableButton reason={refusal}>
+          <button type="button" onClick={() => void moveArtifactToTab(scope.tabId)} className={bar}>
+            {TRANSFER_COPY.moveToTab}
+          </button>
+        </UnavailableButton>
       </div>
       <div className="min-h-0 flex-1">
         <ArtifactView artifactId={artifactId} machine={machine} scope={scope} visible={visible} />
