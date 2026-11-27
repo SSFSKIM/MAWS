@@ -23,6 +23,8 @@ import { openTerminal } from '../terminal';
 import { SCM_COPY } from './copy';
 import { bucketWord, checksOf, mergeWords, signInWay, stateLine, type Check, type Tone } from './page-model';
 import { Part, RefreshButton } from './page-parts';
+import { Tip } from '../../ui/tip';
+import { NamedGlyph } from '../../ui/glyph';
 import { prStateKey, refreshPrState, scmStatusKey, usePrState, useScmStatus } from './queries';
 import type { PageUi } from './SourceControlPage';
 
@@ -81,7 +83,7 @@ function Branch({ appSessionId, directory, mark, ui, branch }: PullRequestPartPr
             </span>
           </>
         )}
-        <RefreshButton label={SUMMARY_COPY.refreshPrState} title={checkedAt ? SUMMARY_COPY.checkedAt(formatClock(Date.parse(checkedAt))) : SUMMARY_COPY.refreshPrState} disabled={refreshing} onClick={() => void refresh()} />
+        <RefreshButton label={SUMMARY_COPY.refreshPrState} tip={checkedAt ? SUMMARY_COPY.checkedAt(formatClock(Date.parse(checkedAt))) : SUMMARY_COPY.refreshPrState} disabled={refreshing} onClick={() => void refresh()} />
       </div>
       {line.kind === 'untrusted' && <Sentence>{SUMMARY_COPY.prUntrusted}</Sentence>}
       {line.kind === 'gh_missing' && (
@@ -115,8 +117,17 @@ function SignedOut({ appSessionId, directory, mark, rights, sentence, detail }: 
   const way = signInWay(mark.local, rights);
   return (
     <>
-      <p data-scm-pr-line title={detail} className="m-0 min-h-6 py-0.5 text-ui-sm text-fg-muted">
-        {sentence}
+      <p data-scm-pr-line className="m-0 min-h-6 py-0.5 text-ui-sm text-fg-muted">
+        {/* board ticket 815: the CLI's own words, the sentence's tip and description, the sentence taking Tab for them */}
+        {detail ? (
+          <Tip content={detail} description={detail}>
+            <span tabIndex={0} className="rounded-sm outline-accent focus-visible:outline-2">
+              {sentence}
+            </span>
+          </Tip>
+        ) : (
+          sentence
+        )}
         {way === 'button' && (
           <>
             {' · '}
@@ -228,9 +239,9 @@ function CheckRow({ check }: { check: Check }) {
         {bucketWord(check.bucket)}
       </span>{' '}
       {check.link !== null ? (
-        <button type="button" data-scm-check-link aria-label={SCM_COPY.openCheck(check.name)} title={SCM_COPY.openCheck(check.name)} onClick={() => openExternal(check.link!)} className="inline-flex h-6 w-5 shrink-0 items-center justify-center rounded-sm text-fg-muted outline-accent hover:bg-bg-hover hover:text-fg focus-visible:outline-2">
+        <NamedGlyph data-scm-check-link="" label={SCM_COPY.openCheck(check.name)} onClick={() => openExternal(check.link!)} className="inline-flex h-6 w-5 shrink-0 items-center justify-center rounded-sm text-fg-muted outline-accent hover:bg-bg-hover hover:text-fg focus-visible:outline-2">
           {SCM_COPY.checkLink}
-        </button>
+        </NamedGlyph>
       ) : (
         <span data-scm-check-link className="w-5 shrink-0" />
       )}
