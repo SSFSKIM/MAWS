@@ -2,8 +2,9 @@
 // its title and locator, Side thread chosen by default, Send disabled until the comment has text, and each destination
 // sent. UX wave U5a (docs/doperpowers/plans/2026-11-12-ux-wave-U5a-comment-card.md, decision 19): the sheet shows the
 // card's checkbox, "Send to main", its caption as its title; ticked, the comment goes through the session's port.
-import { act, cleanup, render, screen, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { accessibleDescription } from '../test-support/accessible-text';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { PreloadBridge } from '@shared/ipc/schema';
@@ -41,7 +42,9 @@ function withParent(process: 'ready' | 'exited', turn = false) {
 const BUILT = [{ type: 'text', text: 'the built message' }];
 const MAIN_SENDS = { 'side.comment.content': { content: BUILT }, 'session.queue.list': { entries: [], paused: false }, 'session.send': { messageUuid: null, disposition: 'sent', queueId: 'q0' } } as const;
 const box = () => screen.getByRole('checkbox', { name: 'Send to main' }) as HTMLInputElement;
-const titleOf = (input: HTMLInputElement) => input.closest('label')!.getAttribute('title');
+// board ticket 815: the box's tip is its description; a fixed box keeps Tab, drawn aria-disabled
+const titleOf = (input: HTMLInputElement) => accessibleDescription(input);
+const fixed = (input: HTMLInputElement) => input.getAttribute('aria-disabled') === 'true';
 // the word cut (P432): Send keeps its word while it goes, busy, with a quiet spinner in it named by the wait's words
 const sendButton = () => screen.getByRole('button', { name: /^Send\b/ }) as HTMLButtonElement;
 async function expectSendWaiting(words: string) {
@@ -92,15 +95,15 @@ describe('the comment composer', () => {
   it('Send to main stays enabled for an exited parent, saying it starts the session; off with the reason for one a terminal holds; an archived parent sends neither way; its title follows the running turn', () => {
     withParent('exited');
     show();
-    expect(box().disabled).toBe(false);
+    expect(fixed(box())).toBe(false);
     expect(titleOf(box())).toBe('Starts this session');
-    expect(screen.queryByText('Starts this session'), 'its caption is its title alone (decision 19)').toBeNull();
+    expect(screen.queryByText('Starts this session', { ignore: '[hidden]' }), 'its caption is its tip alone (decision 19)').toBeNull();
     expect(fake.invoked('session.acquire')).toEqual([]); // opening the sheet starts nothing
     act(() => useSessions.setState((s) => ({ records: new Map([[PARENT, { ...record(PARENT), holder: { kind: 'terminal', pid: 42 } }]]), digests: new Map(s.digests).set(PARENT, digest(PARENT, { availability: 'foreign_held' })) })));
-    expect(box().disabled).toBe(true);
+    expect(fixed(box())).toBe(true);
     expect(titleOf(box())).toBe('Held by terminal · 42');
     act(() => useSessions.setState((s) => ({ digests: new Map(s.digests).set(PARENT, digest(PARENT, { availability: 'archived' })) })));
-    expect(box().disabled).toBe(true);
+    expect(fixed(box())).toBe(true);
     expect(screen.getByText('Archived · unarchive it to continue')).toBeTruthy(); // neither state sends: the line under the field
     cleanup();
     useCommentComposer.setState({ open: null });
@@ -121,8 +124,10 @@ describe('the comment composer', () => {
       render(<CommentComposerHost />);
       act(() => openComposer(ANCHOR, { appSessionId: remote }));
       expect(box().checked).toBe(true);
-      expect(box().disabled).toBe(true);
+      expect(fixed(box())).toBe(true);
       expect(titleOf(box())).toBe('A side thread is not available on Studio yet');
+      fireEvent.click(box()); // board ticket 815: the fixed box keeps Tab, and its tick is swallowed
+      expect(box().checked).toBe(true);
       expect(REMOTE_UNAVAILABLE['side.thread.open']).toBeDefined(); // the window still reads the shared set's row
       await userEvent.type(screen.getByRole('textbox', { name: 'Comment' }), 'Why twice?{Enter}');
       await vi.waitFor(() => expect(fake.invoked('session.send')).toHaveLength(1));

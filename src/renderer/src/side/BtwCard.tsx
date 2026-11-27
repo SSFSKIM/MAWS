@@ -31,6 +31,7 @@ import { useLayout } from '../stores/layout';
 import { useSessions } from '../stores/sessions';
 import { btwCardOf, btwUnseen, closeBtwCard, foldBtwCard, markBtwSeen, openBtwCard, refreshSide, setBtwQuestion, setBtwRefusal, setBtwStarting, sideChildrenShown, sidePaneOf, useBtwCards, useSidePane, waitingSince } from './store';
 import { useBtwPlace } from './btw-place';
+import { Tip } from '../ui/tip'; // board ticket 815
 
 const COPY = SIDE_COPY.btw;
 export type BtwCardPlacement = 'corner' | 'flow' | 'foot';
@@ -185,17 +186,18 @@ function FoldedChip({ parent, placement }: { parent: AppSessionId; placement: Bt
   const awaited = exchanges.findLast((e) => e.state === 'pending');
   const place = placement === 'corner' ? CORNER : 'self-end';
   return (
-    <button
-      type="button"
-      data-btw-chip={placement}
-      aria-label={COPY.card}
-      title={COPY.unfold}
-      onClick={() => openBtwCard(parent)}
-      className={`${place} inline-flex h-7 max-w-[calc(100%-24px)] items-center gap-2 rounded-full px-3 text-ui-sm outline-accent hover:bg-bg-hover focus-visible:outline-2 ${SURFACE}`}
-    >
-      <span className="shrink-0">{COPY.card}</span>
-      {awaited !== undefined && <WaitingLine parent={parent} exchange={awaited} className="min-w-0 truncate text-fg-muted" />}
-      {unseen && <span data-btw-unseen="" role="img" aria-label={COPY.unseen} className="block size-[5px] shrink-0 rounded-full bg-info" />}
-    </button>
+    <Tip content={COPY.unfold} description={COPY.unfold}>
+      <button
+        type="button"
+        data-btw-chip={placement}
+        aria-label={COPY.card}
+        onClick={() => openBtwCard(parent)}
+        className={`${place} inline-flex h-7 max-w-[calc(100%-24px)] items-center gap-2 rounded-full px-3 text-ui-sm outline-accent hover:bg-bg-hover focus-visible:outline-2 ${SURFACE}`}
+      >
+        <span className="shrink-0">{COPY.card}</span>
+        {awaited !== undefined && <WaitingLine parent={parent} exchange={awaited} className="min-w-0 truncate text-fg-muted" />}
+        {unseen && <span data-btw-unseen="" role="img" aria-label={COPY.unseen} className="block size-[5px] shrink-0 rounded-full bg-info" />}
+      </button>
+    </Tip>
   );
 }

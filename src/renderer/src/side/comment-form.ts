@@ -109,7 +109,7 @@ function formOf(route: ReturnType<typeof useRoute>, state: { wantsMain: boolean;
     // UX wave U5a: the box is off where the state it would move to can't send, and while the sheet's send is on its way
     // (`boxHeld`); a card's pass may change it during a flight (§D), which keeps the destination it set out with
     toMainFixed: state.boxHeld || otherRefusal !== null,
-    // its title: why a tick can't send, or why it can't be left, else what a tick does now (the composer's words)
+    // its tip: why a tick can't send, or why it can't be left, else what a tick does now (the composer's words)
     toMainTitle: (threadRemote !== null ? threadRefusal : null) ?? mainRefusal ?? (toMain ? threadRefusal : null) ?? (starts ? STARTS : running ? COPY.mainBusy : COPY.mainIdle),
     unsendable: refusalOf(destination), // the line under the field when the state it is in can't send
     mainEnabled: mainRefusal === null,

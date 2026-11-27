@@ -134,15 +134,17 @@ export function ThreadView({ parent, child, visible }: { parent: AppSessionId; c
       <header className="flex shrink-0 items-center gap-2 border-b border-border px-3 py-2">
         <div className="min-w-0 flex-1">
           {path !== undefined ? (
-            <button
-              type="button"
-              title={anchor?.locator}
-              onClick={() => void openFile(parent, path, anchor?.line ?? null)}
-              className="max-w-full truncate rounded-sm font-mono text-ui-sm text-fg outline-accent hover:underline focus-visible:outline-2"
-              aria-label={COPY.openFile(label)}
-            >
-              {label}
-            </button>
+            // board ticket 815: where in the file, the button's tip and description
+            <Tip content={anchor?.locator} description={anchor?.locator}>
+              <button
+                type="button"
+                onClick={() => void openFile(parent, path, anchor?.line ?? null)}
+                className="max-w-full truncate rounded-sm font-mono text-ui-sm text-fg outline-accent hover:underline focus-visible:outline-2"
+                aria-label={COPY.openFile(label)}
+              >
+                {label}
+              </button>
+            </Tip>
           ) : (
             <p className="m-0 truncate font-mono text-ui-sm text-fg">{label}</p>
           )}
@@ -150,14 +152,15 @@ export function ThreadView({ parent, child, visible }: { parent: AppSessionId; c
               lives (E4d execution document, Design §10): `child` maps to its own parent there, as the chip in its transcript
               does, even when `parent` is itself a thread; E3's text line for any other anchor's URL, moved inside the block */}
           {pageUrl !== undefined ? (
-            <button
-              type="button"
-              title={COMMENT_COPY.openInBrowser}
-              onClick={() => openBrowserUrl(child, pageUrl)}
-              className="block max-w-full truncate rounded-sm text-left text-ui-sm text-fg-muted outline-accent hover:text-fg hover:underline focus-visible:outline-2"
-            >
-              {pageUrl}
-            </button>
+            <Tip content={COMMENT_COPY.openInBrowser} description={COMMENT_COPY.openInBrowser}>
+              <button
+                type="button"
+                onClick={() => openBrowserUrl(child, pageUrl)}
+                className="block max-w-full truncate rounded-sm text-left text-ui-sm text-fg-muted outline-accent hover:text-fg hover:underline focus-visible:outline-2"
+              >
+                {pageUrl}
+              </button>
+            </Tip>
           ) : (
             anchor?.pageUrl !== undefined && <p className="m-0 truncate text-ui-sm text-fg-muted" title={anchor.pageUrl}>{anchor.pageUrl}</p>
           )}
@@ -169,16 +172,18 @@ export function ThreadView({ parent, child, visible }: { parent: AppSessionId; c
           )}
         </div>
         {!inMain && !inCard && (questionsOpen || asked) && (
-          <button
-            type="button"
-            aria-pressed={questionsOpen}
-            title={COPY.questionsTitle}
-            aria-label={COPY.questionsLabel}
-            className={`${QUIET} text-ui-sm aria-pressed:bg-bg-active aria-pressed:text-fg`}
-            onClick={() => setInlineQuestions(child, !questionsOpen)}
-          >
-            {COPY.questions}
-          </button>
+          // board ticket 815: its tip, which its name already says
+          <Tip content={COPY.questionsTitle}>
+            <button
+              type="button"
+              aria-pressed={questionsOpen}
+              aria-label={COPY.questionsLabel}
+              className={`${QUIET} text-ui-sm aria-pressed:bg-bg-active aria-pressed:text-fg`}
+              onClick={() => setInlineQuestions(child, !questionsOpen)}
+            >
+              {COPY.questions}
+            </button>
+          </Tip>
         )}
         {/* P2-E1 start (2026-10-09) */}
         {!inMain && redocks && (

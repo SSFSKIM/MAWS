@@ -127,7 +127,7 @@ export const SIDE_COPY = {
     followUp: 'Follow up…',
     fold: 'Fold side chat',
     close: 'Close side chat',
-    unfold: 'Open', // the folded chip's title (its name is its word, "Side chat"; the word cut, P405)
+    unfold: 'Open', // the folded chip's tip (its name is its word, "Side chat"; the word cut, P405)
     unseen: 'New answer', // the chip's dot
     empty: 'Ask about the conversation without adding to it. The model answers beside the running turn, with no tools.',
     answering: 'Answering…',

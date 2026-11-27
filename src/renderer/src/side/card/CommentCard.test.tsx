@@ -4,6 +4,7 @@
 // Escape dismiss it and give focus back; one card per window.
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { accessibleDescription } from '../../test-support/accessible-text';
 import { StrictMode } from 'react';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Anchor } from '@shared/anchor/anchor';
@@ -109,7 +110,9 @@ async function expectSendWaiting(words: string) {
   expect(await within(send).findByRole('progressbar', { name: words })).toBeTruthy();
 }
 const box = () => screen.getByRole('checkbox', { name: 'Send to main' }) as HTMLInputElement; // UX wave U5a
-const titleOf = (input: HTMLInputElement) => input.closest('label')!.getAttribute('title');
+// board ticket 815: the box's tip is its description; a fixed box keeps Tab, drawn aria-disabled
+const titleOf = (input: HTMLInputElement) => accessibleDescription(input);
+const fixed = (input: HTMLInputElement) => input.getAttribute('aria-disabled') === 'true';
 
 describe('the seam’s dispatch by placement', () => {
   it('a card placement opens the card and no sheet; none, or the sheet’s, opens the sheet and no card', () => {
@@ -192,7 +195,7 @@ describe('the composer half', () => {
     pick();
     expect(screen.getByRole('dialog', { name: `Comment on ${ANCHOR.label}` })).toBe(card());
     expect(card()!.getAttribute('aria-modal')).toBeNull(); // non-modal: the page stays readable and clickable
-    expect(screen.getByRole('heading', { name: ANCHOR.label }).getAttribute('title')).toBe(`${ANCHOR.label}\n${ANCHOR.locator}`);
+    expect(accessibleDescription(screen.getByRole('heading', { name: ANCHOR.label }))).toBe(ANCHOR.locator); // board ticket 815: where it points, the heading's tip
     expect(document.activeElement).toBe(field());
     expect(box().checked).toBe(false);
     expect(card()!.querySelector('input[type="checkbox"][data-send-to-main]')).toBe(box());
@@ -209,10 +212,10 @@ describe('the composer half', () => {
     withParent('exited');
     mount();
     pick();
-    expect(box().disabled).toBe(false);
+    expect(fixed(box())).toBe(false);
     expect(titleOf(box())).toBe('Starts this session');
     act(() => useSessions.setState((s) => ({ records: new Map([[PARENT, { ...record(PARENT), holder: { kind: 'terminal', pid: 42 } }]]), digests: new Map(s.digests).set(PARENT, digest(PARENT, { availability: 'foreign_held' })) })));
-    expect(box().disabled).toBe(true);
+    expect(fixed(box())).toBe(true);
     expect(box().checked).toBe(false);
     expect(titleOf(box())).toBe('Held by terminal · 42');
   });
@@ -532,7 +535,7 @@ describe('the checkbox and the one send path', () => {
     mount();
     act(() => openCommentComposer(ANCHOR, { appSessionId: remote, placement: cardPlacement() }));
     expect(box().checked).toBe(true);
-    expect(box().disabled).toBe(true);
+    expect(fixed(box())).toBe(true);
     expect(titleOf(box())).toBe('A side thread is not available on Studio yet');
   });
 
@@ -546,7 +549,7 @@ describe('the checkbox and the one send path', () => {
     act(() => openCommentComposer(ANCHOR, { appSessionId: PARENT, placement: cardPlacement(), destination }));
     await userEvent.type(field(), 'Look here');
     expect(box().checked).toBe(destination === 'main');
-    expect(box().disabled).toBe(true);
+    expect(fixed(box())).toBe(true);
     expect(titleOf(box())).toBe('Archived · unarchive it to continue');
     expect((screen.getByRole('button', { name: 'Send' }) as HTMLButtonElement).disabled).toBe(true);
     expect(card()!.querySelector('[data-comment-unsendable]')!.textContent).toBe('Archived · unarchive it to continue');
@@ -558,7 +561,7 @@ describe('the checkbox and the one send path', () => {
     expect(availabilityIn(useSessions.getState(), PARENT)).toBe('usable');
     mount();
     pick();
-    expect(box().disabled).toBe(false);
+    expect(fixed(box())).toBe(false);
     expect(card()!.querySelector('[data-comment-unsendable]')).toBeNull();
   });
 
@@ -574,7 +577,7 @@ describe('the checkbox and the one send path', () => {
     window.maws = fake.client as unknown as PreloadBridge;
     mount();
     pick();
-    expect(box().disabled).toBe(false);
+    expect(fixed(box())).toBe(false);
     act(() => box().click());
     expect(card()!.querySelector('[data-comment-unsendable]')).toBeNull();
     typeAndSend('Look here');
@@ -599,7 +602,7 @@ describe('the checkbox and the one send path', () => {
     await userEvent.type(field(), 'Look here{Enter}');
     expect(fake.pending('side.comment.content')).toBe(1);
     expect(field().disabled).toBe(true);
-    expect(box().disabled, 'M3 (§D): the checkbox may change during a flight; it keeps the destination it set out with').toBe(false);
+    expect(fixed(box()), 'M3 (§D): the checkbox may change during a flight; it keeps the destination it set out with').toBe(false);
     fireEvent.keyDown(field(), { key: 'Enter' });
     await act(async () => {});
     expect(fake.invoked('side.comment.content')).toHaveLength(1);
@@ -649,7 +652,7 @@ describe('the checkbox and the one send path', () => {
       vi.useFakeTimers({ shouldAdvanceTime: true });
       mount();
       pick();
-      expect(box().disabled).toBe(false); // a live bridge takes the words
+      expect(fixed(box())).toBe(false); // a live bridge takes the words
       act(() => box().click());
       typeAndSend('Look here');
       await vi.waitFor(() => expect(pendingNote()).not.toBeNull());
