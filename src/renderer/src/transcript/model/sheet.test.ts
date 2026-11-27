@@ -135,6 +135,42 @@ describe('a sheet call’s row, from the transcript alone', () => {
     expect(notices.map((row) => row.kind === 'notice' && [row.class, row.text])).toEqual([['answer', 'answered: q4, q5, q6'], ['answer', 'answered: dismissed q4']]);
   });
 
+  it('says what a call did only where its outcome is known: running, not known and refused have their own words, with ask entries and with withdraw alone', () => {
+    const heads: [unknown, string | null, boolean, string][] = [
+      [{ ask: [entry('Ship it?'), entry('Again?', { id: 'q3' })] }, null, false, 'Changing the sheet'],
+      [{ withdraw: ['q6'] }, null, false, 'Changing the sheet'],
+      [{ ask: [entry('Ship it?'), entry('Again?', { id: 'q3' })] }, EXAMPLES[6]!.result, false, 'Outcome not known yet'],
+      [{ withdraw: ['q6'] }, EXAMPLES[6]!.result, false, 'Outcome not known yet'],
+      [{ ask: [entry('Ship it?')] }, '<tool_use_error>InputValidationError: ask[0].options is too long</tool_use_error>', true, 'Did not change the sheet'],
+      [{ withdraw: ['q6'] }, '<tool_use_error>InputValidationError: withdraw[0] is not an id</tool_use_error>', true, 'Did not change the sheet'],
+    ];
+    for (const [input, result, isError, head] of heads) {
+      const b = builder();
+      call(b, 'toolu_head', input, result, { isError });
+      expect(sheetHead(sheetOf(b, 'toolu_head')), `${JSON.stringify(input)} → ${result}`).toBe(head);
+    }
+  });
+
+  it('a delivery’s turn that holds only its carrier keeps its notice when a later turn starts before any reply', () => {
+    const b = builder();
+    call(b, 'toolu_three', THREE, 'Added q4, q5, q6.');
+    b.emit('turn.started', { userMessageUuid: null, origin: 'engine' });
+    b.emit('user.message', { messageUuid: uuid('u-carrier'), content: '[sheet v1] The human answered questions on your sheet.', isReplay: false, isSynthetic: true, origin: 'task-notification', bash: null, arrival: [{ class: 'sheet', deliveries: [block({ answered: [answer('q4', 1, [2])] })] }] });
+    b.turn('u-next', 'Carry on.');
+    b.text('m-next', 0, 'Going on.');
+    b.end(['u-next']);
+    expect(lines(sheetOf(b, 'toolu_three'))[0]).toEqual(['q4', 'here', 'Keep the longer route']);
+    expect(rows(b).filter((row) => row.kind === 'notice').map((row) => row.kind === 'notice' && row.text)).toEqual(['answered: q4']);
+  });
+
+  it('an answer whose text opens with spaces stays answered, its receipt the text’s first 80 characters as the record keeps it', () => {
+    const b = builder();
+    call(b, 'toolu_three', THREE, 'Added q4, q5, q6.');
+    const text = `${' '.repeat(80)}From the first of November.`;
+    delivered(b, 'u-delivery', [block({ answered: [answer('q6', 1, [], text)] })]);
+    expect(sheetOf(b, 'toolu_three').lines[2]!.outcome).toEqual({ how: 'answered', receipt: ' '.repeat(80) });
+  });
+
   it('stays in view when its turn folds, and copies as its lines', () => {
     const b = builder();
     call(b, 'toolu_three', THREE, 'Added q4, q5, q6.');

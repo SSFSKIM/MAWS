@@ -319,23 +319,26 @@ export const SHEET_ROW = {
   queued: 'queued', // an answer or a dismissal the record holds and the session has not taken yet
   more: (n: number) => `${n} more`,
   nothing: 'Nothing done', // a call whose result's first line is "Nothing done."
+  // what a call did is said only where its result says it: a call with no result yet, one whose result says its outcome
+  // is not known, and one the engine refused are said whole, whatever its entries (asks, revises, a withdrawal alone)
+  running: 'Changing the sheet',
+  unknown: 'Outcome not known yet', // the result's own first line (X7), without its stop
+  refused: 'Did not change the sheet',
 } as const;
-const asked = (n: number, verb: 'Asked' | 'Did not ask') => (n === 1 ? `${verb} a question` : `${verb} ${n} questions`);
+const asked = (n: number) => (n === 1 ? 'Asked a question' : `Asked ${n} questions`);
 const lowerFirst = (text: string) => text.charAt(0).toLowerCase() + text.slice(1);
 
 /**
  * A sheet call's head line: "Asked 3 questions", "Revised q5", "Asked a question, revised q5", "Withdrew q6", and the
- * like. A call whose outcome is not known yet, or that has no result yet, is said by its entries; one the engine refused
- * whole asked none of them.
+ * like, from the ids its result confirmed. A call with no result yet, one whose outcome is not known, and one the engine
+ * refused whole have their own words.
  */
 export function sheetHead(row: { state: 'running' | 'done' | 'nothing' | 'unknown' | 'error'; lines: readonly { id: string | null; revises: boolean; place: string }[]; withdrew: readonly string[] }): string {
-  if (row.state === 'nothing') return SHEET_ROW.nothing;
-  if (row.state === 'error') return asked(row.lines.length, 'Did not ask');
-  const done = row.state === 'done';
-  const added = done ? row.lines.filter((line) => line.place !== 'refused' && !line.revises).length : row.lines.length;
-  const revised = done ? row.lines.flatMap((line) => (line.place !== 'refused' && line.revises && line.id !== null ? [line.id] : [])) : [];
+  if (row.state !== 'done') return { nothing: SHEET_ROW.nothing, running: SHEET_ROW.running, unknown: SHEET_ROW.unknown, error: SHEET_ROW.refused }[row.state];
+  const added = row.lines.filter((line) => line.place !== 'refused' && !line.revises).length;
+  const revised = row.lines.flatMap((line) => (line.place !== 'refused' && line.revises && line.id !== null ? [line.id] : []));
   const parts = [
-    ...(added > 0 ? [asked(added, 'Asked')] : []),
+    ...(added > 0 ? [asked(added)] : []),
     ...(revised.length > 0 ? [`Revised ${revised.join(', ')}`] : []),
     ...(row.withdrew.length > 0 ? [`Withdrew ${row.withdrew.join(', ')}`] : []),
   ];

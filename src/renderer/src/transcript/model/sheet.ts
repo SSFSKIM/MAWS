@@ -85,8 +85,8 @@ export function noteSheetDeliveries(index: SheetIndex, deliveries: readonly Shee
 
 /**
  * A held outcome as a line reads it. An answer's receipt is `receiptOf` of the labels its picks name among the options
- * of the entry that set the answered revision in this transcript, and of its text; an answer that names no label this
- * transcript holds and has no text reads as nothing held.
+ * of the entry that set the answered revision in this transcript, and of its text. The answer stands whatever its
+ * preview reads: a text that opens with spaces keeps them, as the record's receipt does.
  */
 function outcomeOf(index: SheetIndex, id: string): SheetRowLine['outcome'] {
   const held = index.outcomes.get(id);
@@ -94,8 +94,7 @@ function outcomeOf(index: SheetIndex, id: string): SheetRowLine['outcome'] {
   if (held.how !== 'answered') return { how: held.how };
   const labels = index.labels.get(id)?.get(held.revision) ?? [];
   const picked = held.picks.flatMap((place) => (labels[place - 1] === undefined ? [] : [labels[place - 1]!]));
-  const receipt = receiptOf(picked, held.text);
-  return receipt.trim() === '' ? null : { how: 'answered', receipt };
+  return { how: 'answered', receipt: receiptOf(picked, held.text) };
 }
 
 /** A sheet call's row, from its call, its result when it has one, and what the transcript holds of its questions. */
