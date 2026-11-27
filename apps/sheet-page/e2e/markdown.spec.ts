@@ -6,6 +6,7 @@
 import { createHash } from 'node:crypto';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import type { Response } from '@playwright/test';
 import { expect, test, violationsOf } from './fixtures';
 import { question, questionRecord } from './records';
 
@@ -43,6 +44,8 @@ test('an agent’s text is drawn as text, a refused link has no address, and not
   const violations = await violationsOf(context);
   const requests: string[] = [];
   page.on('request', (request) => void requests.push(request.url()));
+  const bodies: Response[] = [];
+  page.on('response', (response) => void (new URL(response.url()).pathname === `/api/sheets/${S}/body` && bodies.push(response)));
   await context.route('https://example.com/**', (route) => route.fulfill({ status: 200, contentType: 'text/plain', body: 'elsewhere' }));
   await page.goto(`${mawsd.url}/s/${S}`);
   await mawsd.pair(page);
@@ -91,6 +94,18 @@ test('an agent’s text is drawn as text, a refused link has no address, and not
   await expect(q2).toContainText('<script>window.__marker = 4</script>');
   await expect(q2).toContainText('<svg xmlns="http://www.w3.org/2000/svg" onload="window.__marker = 5">');
   await expect(q2.locator('svg text')).toHaveCount(0);
+  // and on the wire (rule 4): each answered as plain text the browser may not sniff, byte for byte the capture
+  expect(bodies).toHaveLength(2);
+  const answered = await Promise.all(
+    bodies.map(async (response) => ({ status: response.status(), type: response.headers()['content-type'], sniff: response.headers()['x-content-type-options'], bytes: (await response.body()).toString('base64') })),
+  );
+  const plain = { status: 200, type: 'text/plain; charset=utf-8', sniff: 'nosniff' };
+  expect(answered).toEqual(
+    expect.arrayContaining([
+      { ...plain, bytes: Buffer.from(HTML).toString('base64') },
+      { ...plain, bytes: Buffer.from(SVG).toString('base64') },
+    ]),
+  );
 
   expect(await page.evaluate(() => (window as { __marker?: number }).__marker)).toBeUndefined();
   expect(requests.filter((url) => !url.startsWith(`${mawsd.url}/`) && !url.startsWith('data:') && !url.startsWith('blob:'))).toEqual([]);

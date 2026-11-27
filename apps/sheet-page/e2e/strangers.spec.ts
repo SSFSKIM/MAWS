@@ -102,16 +102,16 @@ for (const name of STRANGERS) {
       const { seen, sent } = await wire(at, mawsd.url);
       await at.goto(stranger.pageFor(stranger[name], mawsd.url, undefined, REFERENCES));
       await expect(at.locator('body[data-done="1"]')).toBeAttached({ timeout: 20_000 });
-      await at.waitForTimeout(500);
       const sheet = `/api/sheets/${REFERENCES}`;
-      // a read with no credential: 401; one with a credential it made up never gets past its preflight
-      // (the browser names both reads; only the first reached mawsd, and was answered 401)
+      const of = (method: string, path: string) => () => seen.filter((entry) => entry.method === method && entry.path === path);
+      // a read with no credential: 401; one with a credential it made up never gets past its preflight, which mawsd
+      // answers 405 (the browser names both reads; only the first reached mawsd)
+      await expect.poll(of('OPTIONS', sheet)).toEqual([{ method: 'OPTIONS', path: sheet, status: 405 }]);
+      await expect.poll(of('GET', sheet)).toEqual([{ method: 'GET', path: sheet, status: 401 }]);
       expect(sent().filter((entry) => entry.path === sheet && entry.method === 'GET')).toHaveLength(2);
-      expect(seen.filter((entry) => entry.path === sheet && entry.method === 'GET')).toEqual([{ method: 'GET', path: sheet, status: 401 }]);
-      for (const preflight of seen.filter((entry) => entry.path === sheet && entry.method === 'OPTIONS')) expect(preflight.status).toBe(405);
       // a Send's lines and an image's bytes: 403, their Origin is not the page's
-      expect(seen.filter((entry) => entry.path === `${sheet}/put`)).toEqual([{ method: 'POST', path: `${sheet}/put`, status: 403 }]);
-      expect(seen.filter((entry) => entry.path === `${sheet}/uploads`)).toEqual([{ method: 'POST', path: `${sheet}/uploads`, status: 403 }]);
+      await expect.poll(of('POST', `${sheet}/put`)).toEqual([{ method: 'POST', path: `${sheet}/put`, status: 403 }]);
+      await expect.poll(of('POST', `${sheet}/uploads`)).toEqual([{ method: 'POST', path: `${sheet}/uploads`, status: 403 }]);
       // and the record is what it was
       expect(inboxBytes(mawsd.home, REFERENCES)).toBe(inbox);
       expect(uploadsOf(mawsd.home, REFERENCES)).toEqual(uploads);
