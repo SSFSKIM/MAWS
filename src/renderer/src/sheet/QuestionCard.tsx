@@ -10,7 +10,7 @@
 // is open, a compact card's fold. Its root carries `data-sheet-question`, by which C4's page finds a card to scroll to,
 // and is the preview's size container, with no padding or border of its own, so its breakpoint is the card's width.
 import { Checkbox, RadioGroup } from 'radix-ui';
-import { useEffect, useState, type ClipboardEvent, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ClipboardEvent, type FocusEvent, type ReactNode } from 'react';
 import type { SheetBody, SheetImageType, SheetOption, SheetQuestion, SheetReference } from '@shared/sheet/model';
 import { confirmDraft, draftConflict, isConfirmed, isTooLong, questionSentence, type QuestionDraft } from '@shared/sheet/words';
 import { CardButton } from '../request-card/controls';
@@ -120,6 +120,32 @@ function Note({ tone, children }: { tone: 'warning' | 'neutral'; children: React
   );
 }
 
+// The card the side sheet opens at shows where the keyboard is (L5): the app's focus outline on the root whenever the
+// root itself holds focus. Only the open-at request and the keyboard's own moves put focus there unasked; a pointer
+// pressed inside the card draws none (its click focuses the root when it lands on no control of its own), and the
+// browser's :focus-visible cannot tell the two apart for a root that is focused by script.
+const RING = 'outline-accent data-[focus-ring]:outline-2';
+function useRootRing(onRootFocus?: () => void) {
+  const [ring, setRing] = useState(false);
+  const pointer = useRef(false);
+  const released = () => void (pointer.current = false);
+  return {
+    'data-focus-ring': ring ? '' : undefined,
+    onPointerDown: () => {
+      pointer.current = true;
+      setRing(false);
+    },
+    onPointerUp: released,
+    onPointerCancel: released,
+    onFocus: (event: FocusEvent) => {
+      const root = event.target === event.currentTarget;
+      setRing(root && !pointer.current);
+      if (root) onRootFocus?.();
+    },
+    onBlur: (event: FocusEvent) => event.target === event.currentTarget && setRing(false),
+  };
+}
+
 export function QuestionCard({ session, question, draft, mark, busy, host, density = 'full', queuedHere = false, live = null, onDraft, onDismiss, onRetract, onAttach }: QuestionCardProps) {
   const [pointed, setPointed] = useState<string | null>(null);
   const [focused, setFocused] = useState<string | null>(null);
@@ -129,6 +155,7 @@ export function QuestionCard({ session, question, draft, mark, busy, host, densi
   // answer and Take back in view. Every other card is folded to its line until chosen.
   const [folded, setFolded] = useState(() => !queuedHere);
   const [pasteNote, setPasteNote] = useState<string | null>(null);
+  const ring = useRootRing(density === 'compact' ? () => setFolded(false) : undefined);
 
   const queued = question.queued;
   const conflict = draft !== undefined && draftConflict(draft, question);
@@ -342,7 +369,7 @@ export function QuestionCard({ session, question, draft, mark, busy, host, densi
 
   if (density === 'compact') {
     return (
-      <article data-sheet-question={question.id} tabIndex={-1} onFocus={(event) => event.target === event.currentTarget && setFolded(false)} className="@container flex min-w-0 flex-col outline-none [&+&]:border-t [&+&]:border-border">
+      <article data-sheet-question={question.id} tabIndex={-1} {...ring} className={`@container flex min-w-0 flex-col rounded-sm ${RING} data-[focus-ring]:-outline-offset-2 [&+&]:border-t [&+&]:border-border`}>
         <button type="button" aria-expanded={!folded} onClick={() => setFolded(!folded)} className="flex w-full min-w-0 items-baseline gap-1.5 rounded-sm py-1.5 text-left text-fg-muted outline-accent focus-visible:outline-2">
           <Chevron className="self-center" />
           <span className="shrink-0 text-fg-faint tabular-nums">{question.id}</span>
@@ -361,7 +388,7 @@ export function QuestionCard({ session, question, draft, mark, busy, host, densi
     );
   }
   return (
-    <article data-sheet-question={question.id} tabIndex={-1} className="@container min-w-0 rounded-md outline-accent focus-visible:outline-2">
+    <article data-sheet-question={question.id} tabIndex={-1} {...ring} className={`@container min-w-0 rounded-md ${RING}`}>
       <div className="flex min-w-0 flex-col gap-3 rounded-md border border-border bg-bg-raised p-3 text-ui text-fg">
         <div className="flex min-w-0 flex-col gap-1">
           {head}

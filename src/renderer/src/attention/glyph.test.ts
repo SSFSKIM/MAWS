@@ -113,3 +113,21 @@ describe('an answered request', () => {
     expect(listedGlyph('busy', [answered]).label).toBe('Working');
   });
 });
+
+// The question sheet's C3 look wave (L5, the composite's writer, 2026-11-27): the session's glyph on its row, tab and
+// card is calm when all it waits for is sheet questions, and the other item's glyph as soon as anything else waits
+describe('a session waiting on sheet questions', () => {
+  const asked = (question: string) => item('s', 'async_input', at, { id: `sheet:5eed0000-0000-4000-8000-000000000042:${question}` as never });
+  it('reads Question waiting, calm, with sheet questions alone', () => {
+    expect(glyphFor(record('s'), null, [asked('q1'), asked('q2')])).toMatchObject({ tone: 'info', label: 'Question waiting' });
+    expect(listedGlyph('busy', [asked('q1')])).toMatchObject({ tone: 'info', label: 'Question waiting' });
+  });
+  it('reads the other item’s glyph, in its tone, beside anything else', () => {
+    expect(glyphFor(record('s'), null, [asked('q1'), item('s', 'permission', at)])).toMatchObject({ tone: 'warning', label: 'Needs approval' });
+    expect(listedGlyph('busy', [asked('q1'), item('s', 'permission', at)])).toMatchObject({ tone: 'warning', label: 'Needs approval' });
+  });
+  it('reads as before with no sheet question', () => {
+    expect(glyphFor(record('s'), null, [item('s', 'permission', at)])).toMatchObject({ tone: 'warning', label: 'Needs approval' });
+    expect(glyphFor(record('s'), null, [item('s', 'async_input', at)])).toMatchObject({ tone: 'info', label: 'Question waiting' });
+  });
+});

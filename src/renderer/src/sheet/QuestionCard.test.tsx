@@ -27,6 +27,34 @@ describe('QuestionCard', () => {
     expect(container.firstElementChild?.getAttribute('data-sheet-question')).toBe('q4');
   });
 
+  // The card the side sheet opens at shows where the keyboard is (L5's ruling): the app's focus outline on the root
+  // whenever the root itself holds focus, from the open-at request or the keyboard's own moves; a pointer's click inside
+  // the card draws none, and focus moving on inside the card takes it away.
+  it.each(['full', 'compact'] as const)('draws the focus outline on its root while the root holds focus, and none for a pointer’s click inside (%s)', (density) => {
+    const { container } = card(CLASH, { density });
+    const root = container.firstElementChild as HTMLElement;
+    const ringed = () => root.hasAttribute('data-focus-ring') && root.className.includes('data-[focus-ring]:outline-2') && root.className.includes('outline-accent');
+    act(() => root.focus());
+    expect(ringed()).toBe(true);
+    act(() => root.blur());
+    expect(ringed()).toBe(false);
+    const inside = root.querySelector('p')!; // the question's sentence: no control of its own, so a click there focuses the root
+    fireEvent.pointerDown(inside);
+    act(() => root.focus());
+    fireEvent.pointerUp(inside);
+    fireEvent.click(inside);
+    expect(root.hasAttribute('data-focus-ring')).toBe(false);
+    act(() => root.blur());
+    act(() => root.focus()); // the keyboard back on it: drawn again
+    expect(ringed()).toBe(true);
+    fireEvent.pointerDown(inside); // a click on the root that already holds focus: the pointer took over
+    expect(root.hasAttribute('data-focus-ring')).toBe(false);
+    fireEvent.pointerUp(inside);
+    act(() => root.focus());
+    act(() => root.querySelector<HTMLElement>('button')!.focus()); // on inside the card: the root no longer holds focus
+    expect(root.hasAttribute('data-focus-ring')).toBe(false);
+  });
+
   it('draws the head, the question, the numbered options with the recommended mark, the text field and Dismiss', () => {
     card(FIXTURE);
     expect(screen.getByText('q7')).toBeTruthy();

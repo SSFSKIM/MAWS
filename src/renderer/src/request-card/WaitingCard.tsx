@@ -8,7 +8,7 @@
 // The question sheet's C3 M4 (docs/doperpowers/plans/2026-11-23-question-sheet-c3-maws-app.md §H; the composite's §8.1;
 // frame 4): a sheet question's line is its calm mark, the question's sentence, "from <agent>" when a subagent asked
 // (named by the transcript's rows, else by the sheet), and its age; where the card is too narrow for all four, "from
-// <agent>" gives way before the question does. Choosing it opens the session's sheet at the question.
+// <agent>" gives way before the question does, whole or not at all (SheetLine). Choosing it opens the session's sheet at the question.
 import { useEffect } from 'react';
 import type { AttentionItem } from '@shared/graph/attention';
 import type { AgentId, AppSessionId } from '@shared/graph/ids';
@@ -79,17 +79,22 @@ export function WaitingCard({ appSessionId }: { appSessionId: AppSessionId }) {
   }
 }
 
-// A sheet question's line: the summary keeps its room and "from <agent>" shrinks first (its shrink far above the
-// summary's), so a narrow card cuts the asker before the question.
+// A sheet question's line: "from <agent>" is shown whole or not at all (the composite's writer, 2026-11-27). The
+// question and the asker share a row that wraps and shows its first line only: the question counts there as its first
+// twenty characters at least (its basis, never past its own width), so where the asker cannot stand whole beside those
+// and the age it wraps out of sight, and the question takes the line. The line's title and accessible name keep it.
 function SheetLine({ item, from, age, onChoose }: { item: AttentionItem; from: string | null; age: string; onChoose(): void }) {
   const heading = ATTENTION_HEADINGS[item.kind];
+  const asker = from === null ? null : WAITING.from(from);
   return (
-    <button type="button" className={LINE} title={item.summary} data-waiting-card-line={item.id} onClick={onChoose}>
+    <button type="button" className={LINE} title={asker === null ? item.summary : `${item.summary} ${asker}`} data-waiting-card-line={item.id} onClick={onChoose}>
       <span aria-hidden className={`shrink-0 ${TONE_CLASS[heading.tone]}`}>
         {heading.char}
       </span>
-      <span className="min-w-0 flex-auto truncate">{item.summary}</span>
-      {from !== null && <span className="min-w-0 shrink-[1000] truncate text-fg-muted">{WAITING.from(from)}</span>}
+      <span className="flex h-7 min-w-0 flex-1 flex-wrap content-start gap-x-1.5 overflow-hidden">
+        <span className="min-w-0 max-w-max grow basis-[20ch] truncate leading-7">{item.summary}</span>
+        {asker !== null && <span data-waiting-from="" className="shrink-0 leading-7 whitespace-nowrap text-fg-muted">{asker}</span>}
+      </span>
       <span className="shrink-0 text-fg-muted tabular-nums">{age}</span>
     </button>
   );

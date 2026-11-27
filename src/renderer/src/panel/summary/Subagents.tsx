@@ -6,7 +6,9 @@
 // them beneath the row, one level at a time, by the set the panel shares (`useOpenAgents`); a press anywhere else on a
 // row opens that agent in the panel. `N finished`, the panel's Done count, is its last line and opens that fold.
 import { useId, useMemo } from 'react';
+import type { AttentionItem } from '@shared/graph/attention';
 import type { AgentId, AppSessionId, TaskId } from '@shared/graph/ids';
+import { calmWaiting, WAITING_TONE_CLASS } from '../../attention/derive'; // the question sheet's C3 look wave (L5)
 import { selectPendingOf, useAttention } from '../../stores/attention';
 import { SubagentGlyph } from '../../transcript';
 import { SUBAGENTS_COPY } from '../../tools/agents/copy';
@@ -54,7 +56,12 @@ export function SubagentsCard({ appSessionId }: { appSessionId: AppSessionId }) 
   const open = useOpenAgents((s) => openOf(s, appSessionId));
   const pending = useAttention((s) => selectPendingOf(s, appSessionId));
   // An agent with an open request of its own: the panel's source (Interfaces §C.6).
-  const waiting = useMemo(() => new Set<string>(pending.flatMap((item) => [item.request.agentId, item.request.taskId].filter((id): id is NonNullable<typeof id> => id !== null))), [pending]);
+  // L5 (the question sheet's C3 look wave): each agent's own items, so an agent waiting on sheet questions alone reads calm.
+  const waiting = useMemo(() => {
+    const byAgent = new Map<string, AttentionItem[]>();
+    for (const item of pending) for (const id of new Set([item.request.agentId, item.request.taskId])) if (id !== null) byAgent.set(id, [...(byAgent.get(id) ?? []), item]);
+    return byAgent;
+  }, [pending]);
   const { rows, more } = useMemo(() => cardAgentRows(graph, open), [graph, open]);
   const nodes = rows.map((row) => graph.tasks.get(row.taskId)!);
   const now = useCardClock(nodes);
@@ -76,6 +83,7 @@ export function SubagentsCard({ appSessionId }: { appSessionId: AppSessionId }) 
           node={nodes[i]!}
           graph={graph}
           waiting={waiting.has(row.taskId as string)}
+          calm={calmWaiting(waiting.get(row.taskId as string) ?? [])}
           now={now}
           onOpen={() => openPanel(appSessionId, { agentId: row.taskId as unknown as AgentId })}
           under={agentsRunningUnder(graph, row.taskId) > 0 ? { open: open.has(row.taskId), onToggle: () => useOpenAgents.getState().toggle(appSessionId, row.taskId) } : null}
@@ -88,8 +96,8 @@ export function SubagentsCard({ appSessionId }: { appSessionId: AppSessionId }) 
 // The row's one line: `Approval needed` while a request of its own waits; else its activity (`Working` without one); for
 // an agent whose own run has ended, kept by an agent running under it, its outcome word without a time. Never what runs
 // under it.
-function stateOf(node: TaskNode, waiting: boolean): { text: string; tone: string } {
-  if (waiting) return { text: SUBAGENTS_COPY.approvalNeeded, tone: 'text-warning' };
+function stateOf(node: TaskNode, waiting: boolean, calm: boolean): { text: string; tone: string } {
+  if (waiting) return { text: SUBAGENTS_COPY.approvalNeeded, tone: WAITING_TONE_CLASS[calm ? 'calm' : 'warning'] };
   if (isEnded(node.status)) return { text: outcomeWord(node), tone: node.status === 'failed' ? 'text-danger' : 'text-fg-muted' };
   return { text: rowSecondLine(node), tone: 'text-fg-muted' };
 }
@@ -97,18 +105,19 @@ function stateOf(node: TaskNode, waiting: boolean): { text: string; tone: string
 // Two sibling controls, as the panel's row (`AgentRow`): the row's own button laid over the whole row, its content drawn
 // above it with pointer events passing through, and the disclosure between the content and the elapsed time; two
 // keyboard stops, the row first. A nested row is indented 16 px with a rule at its left.
-function CardAgentRowView({ row, node, graph, waiting, now, onOpen, under }: {
+function CardAgentRowView({ row, node, graph, waiting, calm, now, onOpen, under }: {
   row: CardAgentRow;
   node: TaskNode;
   graph: TaskGraph;
   waiting: boolean;
+  calm: boolean; // L5: all it waits for is sheet questions
   now: number;
   onOpen: () => void;
   under: { open: boolean; onToggle: () => void } | null;
 }) {
   const id = useId();
   const title = rowTitle(node);
-  const state = stateOf(node, waiting);
+  const state = stateOf(node, waiting, calm);
   const parent = row.orphan ? graph.tasks.get(node.agent!.parentAgentId as unknown as TaskId) : undefined;
   return (
     <div

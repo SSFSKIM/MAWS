@@ -86,11 +86,28 @@ describe('the project list', () => {
   it('counts each project’s waiting (Needs-you rows) and working sessions', () => {
     const rollups = Object.fromEntries(projectList(base).map((e) => [e.name, e.rollup]));
     expect(rollups).toEqual({
-      MAWS: { waiting: 2, working: 1 },
-      codex_somersault: { waiting: 1, working: 0 },
-      'claude-usage-menubar': { waiting: 0, working: 1 },
-      'This Mac': { waiting: 0, working: 0 },
+      MAWS: { waiting: 2, working: 1, tone: 'warning' },
+      codex_somersault: { waiting: 1, working: 0, tone: 'warning' },
+      'claude-usage-menubar': { waiting: 0, working: 1, tone: 'warning' },
+      'This Mac': { waiting: 0, working: 0, tone: 'warning' },
     });
+  });
+
+  // The question sheet's C3 look wave (L5, the composite's writer, 2026-11-27): the project's waiting count is calm when
+  // every session it counts waits on sheet questions alone, and in today's tone as soon as one counted item is anything else
+  it('draws the waiting count calm when all it counts is sheet questions, in today’s tone mixed or with none', () => {
+    const a = projectOn(TEST_MACHINE, 'a', 0);
+    const one = sessionOn(TEST_MACHINE, 'one', { projectId: a.id });
+    const two = sessionOn(TEST_MACHINE, 'two', { projectId: a.id });
+    const asked = (id: AppSessionId, question: string) => item(id, 'async_input', '2026-11-24T10:00:00Z', { id: `sheet:5eed0000-0000-4000-8000-000000000042:${question}` as never });
+    const rollupOf = (bySession: [AppSessionId, ReturnType<typeof item>[]][]) => {
+      const recs = new Map([one, two].map((r) => [r.appId, r]));
+      const rows = needsYou(new Map(bySession), recs);
+      return projectList(input({ records: recs, digests: new Map(), projects: mapOf([a]), rows }))[0]!.rollup;
+    };
+    expect(rollupOf([[one.appId, [asked(one.appId, 'q1')]], [two.appId, [asked(two.appId, 'q2')]]])).toMatchObject({ waiting: 2, tone: 'calm' });
+    expect(rollupOf([[one.appId, [asked(one.appId, 'q1')]], [two.appId, [item(two.appId, 'permission', '2026-11-24T11:00:00Z')]]])).toMatchObject({ waiting: 2, tone: 'warning' });
+    expect(rollupOf([[one.appId, [item(one.appId, 'permission', '2026-11-24T11:00:00Z')]]])).toMatchObject({ waiting: 1, tone: 'warning' });
   });
 
   it('hides archived sessions, keeps their activity for the order, and puts a session of an unknown project under its machine’s row', () => {
@@ -259,7 +276,7 @@ describe('listed rows in the project list', () => {
     const entries = list(listedMap(...states.map((state, i) => listedOn(`b${i}`, { orgKey: ORG, state }))), {
       digests: new Map([[local.appId, digest(local.appId, { phase: 'working' })]]),
     });
-    expect(entries[0].rollup).toEqual({ waiting: 1, working: 3 });
+    expect(entries[0].rollup).toEqual({ waiting: 1, working: 3, tone: 'warning' });
   });
 
   // P5 O7 M10 (a busy remote session's state): a record at a listed address with no digest counts by its listing, as
@@ -272,7 +289,7 @@ describe('listed rows in the project list', () => {
       digests: new Map([[there('b2') as AppSessionId, digest(there('b2'), { phase: 'idle' })]]),
     });
     expect(shape(entries)).toEqual([[ORG, [addr('s1'), ...states.map((_, i) => there(`b${i}`))], []]]);
-    expect(entries[0].rollup).toEqual({ waiting: 1, working: 1 });
+    expect(entries[0].rollup).toEqual({ waiting: 1, working: 1, tone: 'warning' });
   });
 
   it('a search finds a listed row by its title', () => {
@@ -332,7 +349,7 @@ describe('other people’s sessions and the People toggle', () => {
     expect(shape(off)).toEqual([[ORG, [addr('s1')], [], 0], [OTHER_ROW, [], [], 1]]);
     const on = list(listed, new Set([OTHER_ROW]), over);
     expect(shape(on)).toEqual([[ORG, [addr('s1')], [], 0], [OTHER_ROW, [there('c1')], [], 0]]);
-    expect(on[1].rollup).toEqual({ waiting: 0, working: 0 });
+    expect(on[1].rollup).toEqual({ waiting: 0, working: 0, tone: 'warning' });
   });
 
   // P5 O7 M2: where its listing is filed (one row per address), its project being unknown here
@@ -344,8 +361,8 @@ describe('other people’s sessions and the People toggle', () => {
 
   it('counts yours only in the rollups: others’ waiting and busy rows add nothing', () => {
     const listed = listedMap(listedOn('b1', { state: 'waiting' }), theirs('b2', { state: 'waiting' }), theirs('b3', { state: 'busy' }));
-    expect(list(listed, new Set([ORG]))[0].rollup).toEqual({ waiting: 1, working: 0 });
-    expect(list(listed)[0].rollup).toEqual({ waiting: 1, working: 0 });
+    expect(list(listed, new Set([ORG]))[0].rollup).toEqual({ waiting: 1, working: 0, tone: 'warning' });
+    expect(list(listed)[0].rollup).toEqual({ waiting: 1, working: 0, tone: 'warning' });
   });
 
   it('a search matches drawn rows only, so others’ rows match while the toggle is on', () => {

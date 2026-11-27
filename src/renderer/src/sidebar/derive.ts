@@ -5,7 +5,7 @@ import type { AttentionItem } from '@shared/graph/attention';
 import type { AppSessionId, ProjectId } from '@shared/graph/ids';
 import type { SessionRecord } from '@shared/graph/session';
 import type { ProjectRecord, SessionDigest } from '@shared/ipc/schema';
-import type { NeedsYouRow } from '../attention/derive';
+import { waitingTone, type NeedsYouRow, type WaitingTone } from '../attention/derive';
 import { dateFormats, formatAgo } from '@shared/app/date-format';
 import { issuedAt, lastActivity, priorityRank, RANK_REST, sortSessions, type SeenActivity, type SidebarSort } from '../overview/derive';
 import { branchLabel, recordBranch } from '../sessions/branch-label';
@@ -71,7 +71,7 @@ export interface ProjectEntry {
   name: string;
   sessions: SessionRecord[]; // not archived, unsorted
   listed: ListedSession[]; // P5 O8 M2: the listed rows drawn under it, unsorted
-  rollup: { waiting: number; working: number }; // P5 O8 M5: yours only
+  rollup: { waiting: number; working: number; tone: WaitingTone }; // P5 O8 M5: yours only; L5: the waiting count's tone (`waitingTone`)
   lastActivity: number | null; // W11 (I6): the latest movement of any of its drawn sessions, archived ones included; null without one
   others: number; // P5 O8 M5: other people's sessions filed under it and not drawn (its People toggle is off)
   // the project registry (§J): the registry's project the row is, and the machines its folders are on, this Mac's first
@@ -100,6 +100,7 @@ export interface ProjectEntry {
 export function projectList({ records, digests, projects, rows, local, machineName, alsoListed, listed: remoteSessions = new Map(), people = new Set(), seen, registry }: ProjectListInput): ProjectEntry[] {
   const index = orgIndex(projects.values(), local, registry);
   const waiting = new Set(rows.map((row) => row.appSessionId));
+  const rowOf = new Map(rows.map((row) => [row.appSessionId, row])); // L5: a counted session's row says whether it is calm
   const grouped = new Map<ProjectKey, { live: SessionRecord[]; listed: ListedSession[]; activity: number; theirs: Set<AppSessionId>; others: number }>();
   const groupOf = (key: ProjectKey) => {
     let entry = grouped.get(key);
@@ -161,6 +162,7 @@ export function projectList({ records, digests, projects, rows, local, machineNa
     const yours = (id: AppSessionId) => !group?.theirs.has(id);
     const count = (state: string) => remote.filter((l) => l.state === state && yours(l.appId)).length;
     const said = (r: SessionRecord) => listedStateOf(digests.get(r.appId), remoteSessions.get(r.appId)); // P5 O7 M10: a remote lane B record's listing
+    const counted = sessions.filter((r) => yours(r.appId) && (waiting.has(r.appId) || said(r) === 'waiting'));
     return {
       key: org.id,
       org,
@@ -172,7 +174,9 @@ export function projectList({ records, digests, projects, rows, local, machineNa
       sessions,
       listed: remote,
       rollup: {
-        waiting: sessions.filter((r) => yours(r.appId) && (waiting.has(r.appId) || said(r) === 'waiting')).length + count('waiting'),
+        waiting: counted.length + count('waiting'),
+        // L5: a session counted by its row is as calm as the row; one counted by its digest or its listing alone is not
+        tone: waitingTone([...counted.map((r) => rowOf.get(r.appId) ?? {}), ...remote.filter((l) => l.state === 'waiting' && yours(l.appId)).map(() => ({}))]),
         working: sessions.filter((r) => yours(r.appId) && isWorking(digests.get(r.appId), remoteSessions.get(r.appId))).length + count('busy'),
       },
       lastActivity: entryActivity(org.id),

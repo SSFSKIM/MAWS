@@ -181,10 +181,18 @@ export async function openLookSession(page: Page, appId: string): Promise<void> 
   await expect(page.locator('[data-region="main"] .transcript-row[data-kind]').first(), 'the session’s transcript').toBeVisible({ timeout: 20_000 });
 }
 
-/** The sidebar's Needs you row of a session whose waiting items are all sheet questions: its mark calm, in the info tone. */
+/**
+ * The sidebar's Needs you row of a session whose waiting items are all sheet questions: its mark calm, in the info tone;
+ * and so every mark that counts the same fact (L5, the composite's writer, 2026-11-27): its project row's waiting count
+ * and the toolbar's Overview badge.
+ */
 export async function calmRow(page: Page, appId: string): Promise<void> {
-  const mark = (await needsYouRow(page, appId)).locator('[data-tone]');
-  await expect(mark, 'the calm mark').toHaveAttribute('data-tone', 'calm', { timeout: 15_000 });
+  await calmMark((await needsYouRow(page, appId)).locator('[data-tone]'), 'the Needs you row’s mark');
+  await calmMark(sidebarOf(page).locator('[data-kind="project"] [data-tone]'), 'the project row’s waiting count');
+  await calmMark(page.locator('[data-toolbar] [data-tone]'), 'the toolbar’s Overview badge');
+}
+async function calmMark(mark: Locator, what: string): Promise<void> {
+  await expect(mark, what).toHaveAttribute('data-tone', 'calm', { timeout: 15_000 });
   const tones = await mark.evaluate((el) => {
     const probe = (tone: string) => {
       const span = document.createElement('span');
@@ -196,8 +204,8 @@ export async function calmRow(page: Page, appId: string): Promise<void> {
     };
     return { drawn: getComputedStyle(el).color, info: probe('text-info'), warning: probe('text-warning') };
   });
-  expect(tones.drawn, 'drawn in the info tone').toBe(tones.info);
-  expect(tones.drawn, 'not the warning tone today’s rows use').not.toBe(tones.warning);
+  expect(tones.drawn, `${what}, drawn in the info tone`).toBe(tones.info);
+  expect(tones.drawn, `${what}, not the warning tone`).not.toBe(tones.warning);
 }
 
 /** The `sheet` session in front with its cards: "Waiting for you" lists its three questions, the subagent's "from reviewer". */
@@ -210,6 +218,14 @@ export async function waitingLines(page: Page): Promise<void> {
   await expect(lines).toHaveCount(3, { timeout: 15_000 });
   await expect(lines.nth(1), 'the subagent’s question').toContainText('Ship the migration today?');
   await expect(lines.nth(1)).toContainText(SHEET_WORDS.from('reviewer'));
+  await expect(lines.nth(1), 'the line names its asker whole').toHaveAttribute('title', new RegExp(`${SHEET_WORDS.from('reviewer')}$`));
+  // "from <agent>" is shown whole or not at all: in the line's first row beside the question, or wrapped below it where the row clips it
+  const from = await lines.nth(1).locator('[data-waiting-from]').evaluate((asker) => {
+    const row = asker.parentElement!.getBoundingClientRect();
+    const box = asker.getBoundingClientRect();
+    return { shown: box.top >= row.top && box.bottom <= row.bottom && box.right <= row.right, hidden: box.top >= row.bottom };
+  });
+  expect(from.shown || from.hidden, 'from <agent> neither cut nor half shown').toBe(true);
 }
 
 /** The app's notices closed (the toast region's own dismiss buttons), so none stands over a picture. */
@@ -233,6 +249,7 @@ export async function openSheetAt(page: Page, id: string): Promise<void> {
 }
 export async function sheetAt(page: Page, id: string): Promise<void> {
   await expect(cardOf(page, id), `the keyboard on ${id}’s card`).toBeFocused({ timeout: 10_000 });
+  await expect(cardOf(page, id), `${id}’s card shows where the keyboard is`).toHaveAttribute('data-focus-ring', '');
   await expect(sheetTool(page).locator('article[data-sheet-question]'), 'every open question a card').toHaveCount(3);
 }
 

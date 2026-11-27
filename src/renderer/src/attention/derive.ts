@@ -19,6 +19,18 @@ export { ACTIONABLE_KINDS, isActionable } from '@shared/attention/kinds';
 // calm tone. Counted as any row is.
 export interface NeedsYouRow { appSessionId: AppSessionId; oldest: AttentionItem; count: number; tier: 1 | 2; greyed?: true; calm?: true }
 
+// L5, as the composite's writer reached it (2026-11-27): every mark or count that stands for sessions waiting on the
+// person is calm when everything it counts is a sheet question, and in today's tone as soon as one counted item is
+// anything else. The rule is here alone: `calmWaiting` for one session's items (its row, its glyph, its tab's mark),
+// `waitingTone` for a mark over several (a project's count, the toolbar's badge), each counted one calm or not.
+export const calmWaiting = (items: readonly AttentionItem[]): boolean => {
+  const open = items.filter(waits);
+  return open.length > 0 && open.every((item) => isSheetItem(item.id));
+};
+export type WaitingTone = 'calm' | 'warning';
+export const waitingTone = (counted: readonly { calm?: true }[]): WaitingTone => (counted.length > 0 && counted.every((one) => one.calm === true) ? 'calm' : 'warning');
+export const WAITING_TONE_CLASS: Record<WaitingTone, string> = { calm: 'text-info', warning: 'text-warning' };
+
 // P5 O7 M6 (docs/doperpowers/plans/2026-10-28-p5-o7-remote-lane-b.md, M6 "Counting without a record"): what stands in for
 // a record (another machine's listed rows, by address) and the sessions whose items are greyed.
 export interface NeedsYouContext {
@@ -55,8 +67,7 @@ export function needsYou(
     const record = records.get(appSessionId);
     if (record ? record.archived : !listed.has(appSessionId)) continue;
     const waiting = waitingItem(items);
-    const calm = items.every((item) => !waits(item) || isSheetItem(item.id));
-    if (waiting) rows.push({ appSessionId, ...waiting, ...(greyed.has(appSessionId) && { greyed: true as const }), ...(calm && { calm: true as const }) });
+    if (waiting) rows.push({ appSessionId, ...waiting, ...(greyed.has(appSessionId) && { greyed: true as const }), ...(calmWaiting(items) && { calm: true as const }) });
   }
   const title = (id: AppSessionId) => {
     const record = records.get(id);

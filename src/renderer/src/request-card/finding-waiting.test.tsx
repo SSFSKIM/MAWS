@@ -245,6 +245,11 @@ describe('a sheet question in Waiting for you', () => {
     expect(lines[0]!.textContent).not.toContain('from ');
     expect(lines[1]!.textContent).toContain('from reviewer');
     expect(lines[1]!.textContent).toContain('waiting ');
+    // "from <agent>" is whole or not at all: never cut, and always in the line's name and title
+    const from = lines[1]!.querySelector<HTMLElement>('[data-waiting-from]')!;
+    expect([from.textContent, from.className.includes('truncate'), from.className.includes('whitespace-nowrap')]).toEqual(['from reviewer', false, true]);
+    expect(lines[1]!.title).toBe('Sentence of q7? from reviewer');
+    expect(within(card()!).getByRole('button', { name: /Sentence of q7\? from reviewer/ })).toBe(lines[1]);
   });
 
   it('opens the session’s sheet at its question when chosen, and nothing in the transcript', async () => {
