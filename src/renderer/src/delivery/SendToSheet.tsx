@@ -28,7 +28,7 @@ import { Sheet } from '../sessions/Sheet';
 import { FIELD, PRIMARY, SECONDARY } from '../sessions/ui';
 import { TERMINAL_TOOL_ID, type TerminalParams } from '../tools/terminal';
 import { VIEWERS_COPY } from '../tools/artifacts/viewers/copy';
-import { Tip } from '../ui/tip';
+import { Tip, UNAVAILABLE_LOOK, UnavailableButton } from '../ui/tip';
 import { GWS_INSTALL, GWS_SETUP, SEND_TO_COPY as C, SERVICE } from './copy';
 import type { SendToPhase, SendToRun } from './run';
 import { closeSendTo, receiptKey, useDelivery, type SendToSubject } from './store';
@@ -207,14 +207,17 @@ function Connection({ target, phase, run, terminal }: { target: DeliveryTarget; 
       {label}
     </button>
   );
-  // an action that acts on the artifact's machine's connections: here, or greyed for another machine's
+  // an action that acts on the artifact's machine's connections: here, or greyed for another machine's, keeping the
+  // keyboard with why as its tip and description (board ticket 815)
   const here = (label: string, onClick: () => void) => {
     if (there === null) return button(label, onClick);
     greyed = true;
     return (
-      <button type="button" disabled title={there} className={SECONDARY}>
-        {label}
-      </button>
+      <UnavailableButton reason={there}>
+        <button type="button" className={`${SECONDARY} ${UNAVAILABLE_LOOK}`}>
+          {label}
+        </button>
+      </UnavailableButton>
     );
   };
   const again = button(C.checkAgain, () => void run.check());

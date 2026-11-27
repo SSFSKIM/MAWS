@@ -11,6 +11,7 @@ import type { SheetReference } from '@shared/sheet/model';
 import { Markdown } from '../transcript/view/markdown/Markdown';
 import { NO_ACTIONS, TranscriptActionsProvider, type TranscriptActions } from '../transcript/view/context';
 import type { SheetHost } from './host';
+import { Tip } from '../ui/tip';
 
 export type SheetLinkAction = { kind: 'open'; url: string } | { kind: 'reference'; reference: SheetReference } | null;
 
@@ -56,30 +57,34 @@ function activateOnKey(event: KeyboardEvent<HTMLElement>, run: () => void): void
 }
 
 // The sheet's one link: drawn as the transcript draws a link (transcript.css), with a destination only where the policy
-// allows one to be followed.
+// allows one to be followed. A link's address and a reference's path are its tip, which the keyboard reaches (board ticket
+// 815), as the transcript's links have theirs.
 function SheetLink({ href, children }: ComponentProps<'a'>): ReactNode {
   const scope = useContext(LinkScopeContext);
   const action = href && scope ? sheetLinkAction(href, scope.references) : null;
   if (action?.kind === 'open') {
     return (
-      <a
-        href={action.url}
-        title={action.url}
-        onClick={(event) => {
-          event.preventDefault();
-          scope?.host.openLink(action.url);
-        }}
-      >
-        {children}
-      </a>
+      <Tip content={action.url} description={action.url}>
+        <a
+          href={action.url}
+          onClick={(event) => {
+            event.preventDefault();
+            scope?.host.openLink(action.url);
+          }}
+        >
+          {children}
+        </a>
+      </Tip>
     );
   }
   if (action?.kind === 'reference') {
     const open = () => scope?.onReference(action.reference);
     return (
-      <span role="button" tabIndex={0} className="transcript-inline-link" data-chip="path" title={action.reference.path} onClick={open} onKeyDown={(event) => activateOnKey(event, open)}>
-        {children}
-      </span>
+      <Tip content={action.reference.path} description={action.reference.path}>
+        <span role="button" tabIndex={0} className="transcript-inline-link" data-chip="path" onClick={open} onKeyDown={(event) => activateOnKey(event, open)}>
+          {children}
+        </span>
+      </Tip>
     );
   }
   return (

@@ -19,6 +19,7 @@ import { builder, tool, uuid, type Builder } from '../transcript/model/test-even
 import { COMPUTER_USE_COPY } from './copy';
 import { ComputerUseStrip } from './Strip';
 import { COMPUTER_USE_SETTLE_MS } from './strip-state';
+import { accessibleDescription } from '../test-support/accessible-text'; // board ticket 815
 
 const port = vi.hoisted(() => ({ controls: null as SessionControls | null, unavailable: null as string | null }));
 vi.mock('../session/controls/controls-for', () => ({ useSessionControls: () => port.controls }));
@@ -182,20 +183,23 @@ describe('its Stop', () => {
     expect(fake.interrupt).toHaveBeenCalledTimes(1);
   });
 
-  it('is disabled with the helper’s sentence, or else the port’s reason, as its tooltip and its description', () => {
+  // board ticket 815: greyed, it keeps the keyboard, the sentence its tip and its description, and a press does nothing
+  it('is greyed with the helper’s sentence, or else the port’s reason, as its tip and its description', () => {
+    const fake = fakePort();
+    port.controls = fake.controls;
     port.unavailable = 'Stopping isn’t offered for a session on that machine';
     const { rerender } = render(<ComputerUseStrip appSessionId={ID} />);
     show(running());
     advance(COMPUTER_USE_SETTLE_MS);
-    expect((stop() as HTMLButtonElement).disabled).toBe(true);
-    expect(stop().getAttribute('title')).toBe(port.unavailable);
-    expect(stop().getAttribute('aria-description')).toBe(port.unavailable);
+    expect([(stop() as HTMLButtonElement).disabled, stop().getAttribute('aria-disabled'), stop().getAttribute('title')]).toEqual([false, 'true', null]);
+    expect(accessibleDescription(stop())).toBe(port.unavailable);
+    fireEvent.click(stop());
+    expect(fake.interrupt).not.toHaveBeenCalled();
     port.unavailable = null;
     port.controls = fakePort({ capability: { available: false, reason: 'The session has ended' } }).controls;
     rerender(<ComputerUseStrip appSessionId={ID} />);
-    expect((stop() as HTMLButtonElement).disabled).toBe(true);
-    expect(stop().getAttribute('title')).toBe('The session has ended');
-    expect(stop().getAttribute('aria-description')).toBe('The session has ended');
+    expect(stop().getAttribute('aria-disabled')).toBe('true');
+    expect(accessibleDescription(stop())).toBe('The session has ended');
   });
 
   it('is absent without a controls port, and the line stands alone', () => {

@@ -20,6 +20,7 @@ import { SEND_TO_COPY as C } from './copy';
 import { useSendToAction } from './header';
 import { SendToHost } from './SendToSheet';
 import { closeSendTo, connectDelivery, latestReceipt, openSendTo, receiptKey, resetDelivery, useDelivery } from './store';
+import { accessibleDescription } from '../test-support/accessible-text'; // board ticket 815
 
 const ART = '00000000-0000-4000-8000-000000000001'; // on OTHER_MACHINE ("mini")
 const HERE = '00000000-0000-4000-8000-000000000002'; // this Mac's
@@ -41,6 +42,11 @@ const openSheet = async (target: 'notion' | 'drive' = 'notion') => {
 const status = () => document.querySelector('[data-send-to-status]')!.textContent;
 const elsewhere = () => document.querySelector('[data-send-to-elsewhere]')?.textContent ?? null;
 const disabled = (name: string) => (screen.getByRole('button', { name }) as HTMLButtonElement).disabled;
+// board ticket 815: an action greyed for the artifact's machine keeps the keyboard, why its description
+const greyed = (name: string) => {
+  const button = screen.getByRole('button', { name }) as HTMLButtonElement;
+  return button.getAttribute('aria-disabled') === 'true' && !button.disabled ? accessibleDescription(button) : null;
+};
 
 beforeEach(() => {
   resetDelivery();
@@ -78,18 +84,18 @@ describe('Send to for another machine’s artifact', () => {
   it('greys what is done first on the machine, with “Connect <service> on <machine>”, and asks nothing of it', async () => {
     install({ 'delivery.status': (input: { target: string }): DeliveryStatus => (input.target === 'notion' ? { target: 'notion', state: 'signIn', source: SOURCE } : { target: 'drive', state: 'signedOut' }) });
     await openSheet();
-    expect(disabled(C.connect)).toBe(true);
+    expect(greyed(C.connect)).toBe(W.connectOn('Notion', 'mini'));
     expect(elsewhere()).toBe(W.connectOn('Notion', 'mini'));
     await act(() => useDelivery.getState().sheet!.run.connect()); // reached anyway: the run asks nothing
     expect(fake.invoked('delivery.connect')).toEqual([]);
     fireEvent.click(screen.getByRole('radio', { name: 'Google Drive' }));
     await waitFor(() => expect(elsewhere()).toBe('Connect Drive on mini'));
-    expect(disabled(C.signIn)).toBe(true);
+    expect(greyed(C.signIn)).toBe('Connect Drive on mini');
     cleanup();
 
     install({ 'delivery.status': { target: 'drive', state: 'absent' } });
     await openSheet('drive');
-    expect(disabled(C.installInTerminal)).toBe(true);
+    expect(greyed(C.installInTerminal)).toBe('Connect Drive on mini');
     expect(elsewhere()).toBe('Connect Drive on mini');
   });
 
@@ -97,7 +103,7 @@ describe('Send to for another machine’s artifact', () => {
     resetArtifactMachines();
     install({ 'delivery.status': { target: 'notion', state: 'signIn', source: SOURCE } });
     await openSheet();
-    expect(disabled(C.connect)).toBe(false);
+    expect([disabled(C.connect), greyed(C.connect)]).toEqual([false, null]);
     expect(elsewhere()).toBeNull();
     expect(fake.machines('delivery.status')).toEqual([TEST_MACHINE]);
   });
