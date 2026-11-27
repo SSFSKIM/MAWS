@@ -140,6 +140,8 @@ describe('question row', () => {
     const region = screen.getByRole('region', { name: 'Question' });
     expect(lines(region)).toEqual(['Color→Red', 'Fruits→Apple, Pear']);
     expect([...region.querySelectorAll('[data-question-label]')].map((label) => accessibleDescription(label))).toEqual(['Which color do you prefer?', 'Which fruits do you like?']); // ticket 815: the header's tip
+    expect([...region.querySelectorAll<HTMLElement>('[data-question-label]')].map((label) => label.tabIndex)).toEqual([0, 0]); // the header takes the keyboard for it
+    expect(region.querySelector('[title]')).toBeNull();
     expect(region.textContent).not.toContain('Blue'); // the options not chosen are not listed
     expect(region.textContent).not.toContain('A warm, bold color'); // nor their descriptions
     expect(region.textContent).not.toContain('This is a red preview');
@@ -159,6 +161,10 @@ describe('question row', () => {
     const answered = await expanded(questions(true));
     let view = renderRow(rowOf(answered.rows(), 'question'), { storeKey: answered.key });
     expect(lines(view.container)).toEqual(['Which colour?→Teal, actually']);
+    // board ticket 815: a line headed by the question itself adds no Tab stop for words on screen; its cut words keep
+    // the whole question as their system tooltip
+    const label = view.container.querySelector<HTMLElement>('[data-question-label]')!;
+    expect([label.tabIndex, label.hasAttribute('aria-describedby'), label.closest('[data-question]')!.getAttribute('title')]).toEqual([-1, false, 'Which colour?']);
     view.unmount();
     const unanswered = await expanded(questions(false));
     view = renderRow(rowOf(unanswered.rows(), 'question'), { storeKey: unanswered.key });
