@@ -249,6 +249,7 @@ test('the question sheet live: a terminal session asks on its sheet and is answe
       await app().cleanup();
       const barrier = join(s.root, 'barrier');
       maws = await launchApp(s, { MAWS_SMINOS_CLI: BARRIER, SMINOS_REAL: s.sminos, SMINOS_BARRIER: barrier });
+      appId = await appIdOf(page(), sid); // a new profile: the app's own id for the session is new
       const calls = sheetCalls(transcriptRows(s, sid)).length;
       await terminals.say(pane, ASK_ONE);
       const one = await until('the call of one', TURN_MS, () => sheetCalls(transcriptRows(s, sid)).slice(calls).find((c) => (c.input.ask?.length ?? 0) === 1 && c.result !== null), () => terminals.pane(pane));
