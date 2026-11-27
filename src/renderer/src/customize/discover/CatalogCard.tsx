@@ -29,13 +29,24 @@ const CheckIcon = () => (
   </svg>
 );
 
-/** The trust label: a quiet pill whose tooltip says what the label rests on. */
-export function TrustLabel({ item }: { item: CatalogItem }) {
+const TRUST = 'shrink-0 rounded-sm border border-border px-1 text-ui-sm leading-4 text-fg-muted';
+
+/** The trust label: a quiet pill whose tooltip says what the label rests on, the pill taking the keyboard (the word
+ * cut's rule 5); where those words are drawn beside it (`explained`, the detail), the pill alone. */
+export function TrustLabel({ item, explained = false }: { item: CatalogItem; explained?: boolean }) {
   const trust = trustOf(item);
+  if (explained)
+    return (
+      <span data-trust={trust.label} data-trust-tooltip={trust.tooltip} className={TRUST}>
+        {trust.label}
+      </span>
+    );
   return (
-    <span data-trust={trust.label} data-trust-tooltip={trust.tooltip} title={trust.tooltip} className="shrink-0 rounded-sm border border-border px-1 text-ui-sm leading-4 text-fg-muted">
-      {trust.label}
-    </span>
+    <Tip content={trust.tooltip} description={trust.tooltip}>
+      <span data-trust={trust.label} data-trust-tooltip={trust.tooltip} tabIndex={0} className={`${TRUST} outline-accent focus-visible:outline-2`}>
+        {trust.label}
+      </span>
+    </Tip>
   );
 }
 
@@ -77,11 +88,21 @@ export function CatalogCard({ item, tab, kindWord = false, onOpen }: { item: Cat
   const lined = ops.entries.has(catalogKey(item));
   const metric = metricWords(item);
   const here = item.installed === 'here';
-  const name = (
-    <span className="truncate font-medium text-fg" title={item.installName ?? item.name}>
-      {item.name}
-    </span>
-  );
+  // the name the plugin installs as, where it differs from the one drawn, is the name's tooltip, the name taking the
+  // keyboard (rule 5); otherwise the system's tooltip gives the whole of a name cut short
+  const installName = item.installName && item.installName !== item.name ? item.installName : null;
+  const name =
+    installName === null ? (
+      <span className="truncate font-medium text-fg" title={item.name}>
+        {item.name}
+      </span>
+    ) : (
+      <Tip content={installName} description={installName}>
+        <span tabIndex={0} className="truncate rounded-sm font-medium text-fg outline-accent focus-visible:outline-2">
+          {item.name}
+        </span>
+      </Tip>
+    );
   return (
     <li
       data-catalog-card={item.id}

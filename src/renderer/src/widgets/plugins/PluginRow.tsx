@@ -22,7 +22,10 @@ import { ItemImage } from '../../customize/image/ItemImage';
 import { KindWord } from '../../customize/KindWord';
 import { pluginSeedOf } from '../../customize/image/tile';
 import { LIBRARY as L } from '../copy';
-import { MoreIcon } from './icons';
+import { MORE, MoreIcon } from './icons';
+import { NamedGlyph } from '../../ui/glyph';
+import { Tip } from '../../ui/tip';
+import { Fact, FOCUSABLE_WORD } from '../parts';
 import { basename, dateWords, displayNameOf, isNew, updatedOf, versionWords, type PluginIdentity } from './library';
 import { CATALOG_KEY } from '../../customize/discover/add';
 import { OperationLine, Switch, useManage } from './manage';
@@ -66,14 +69,9 @@ function RowMenu({ identity, name, busy }: { identity: PluginIdentity; name: str
   return (
     <DropdownMenu.Root modal={false}>
       <DropdownMenu.Trigger asChild>
-        <button
-          type="button"
-          aria-label={L.moreActions(name)}
-          title={L.more}
-          className="inline-flex size-7 shrink-0 items-center justify-center rounded-sm text-fg-muted outline-accent hover:bg-bg-hover hover:text-fg focus-visible:outline-2 data-[state=open]:bg-bg-active"
-        >
+        <NamedGlyph label={L.moreActions(name)} tip={L.more} className={MORE}>
           <MoreIcon />
-        </button>
+        </NamedGlyph>
       </DropdownMenu.Trigger>
       <DropdownMenu.Portal>
         <DropdownMenu.Content align="end" sideOffset={4} className="z-50 min-w-40 rounded-md border border-border-strong bg-bg-overlay p-1 text-ui text-fg shadow-float">
@@ -144,20 +142,24 @@ export function PluginRow({ identity, now, iconUrl, onOpen, kindWord = false }: 
       <ItemImage kind="plugin" seed={pluginSeedOf(identity.id)} iconUrl={iconUrl} size="row" />
       <div className="relative flex min-w-0 flex-1 flex-col gap-0.5">
         <span className="flex min-w-0 items-center gap-2">
-          <span className="truncate font-medium text-fg" title={identity.id}>
-            {name}
-          </span>
-          {isNew(updated, now) && (
-            <span title={L.newTooltip} className={`${BADGE} bg-accent-soft text-accent`}>
-              {L.isNew}
+          <Tip content={identity.id} description={identity.id}>
+            <span tabIndex={0} className={`truncate font-medium text-fg ${FOCUSABLE_WORD}`}>
+              {name}
             </span>
+          </Tip>
+          {isNew(updated, now) && (
+            <Tip content={L.newTooltip} description={L.newTooltip}>
+              <span tabIndex={0} className={`${BADGE} bg-accent-soft text-accent ${FOCUSABLE_WORD}`}>
+                {L.isNew}
+              </span>
+            </Tip>
           )}
         </span>
         {manifest?.author && <span className="truncate text-ui-sm text-fg-muted">{L.by(manifest.author)}</span>}
         {managed && (
-          <span className="truncate text-ui-sm text-fg-muted" title={managed.title}>
+          <Fact fact={managed.title} className="truncate text-ui-sm text-fg-muted">
             {managed.text}
-          </span>
+          </Fact>
         )}
         {target.errors.map((error, i) => (
           <span key={`e${i}`} className="text-ui-sm text-danger [overflow-wrap:anywhere]">

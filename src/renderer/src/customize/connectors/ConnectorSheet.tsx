@@ -17,6 +17,8 @@ import { PLUGIN_MANAGEMENT as W } from '../../widgets/copy';
 import { FixedScope, type EngineResolution } from '../../widgets/plugins/ConfirmSheet';
 import { argvOf, commandWords, type PluginsRequest } from '../../widgets/plugins/present';
 import { SheetDetails } from '../../widgets/plugins/SheetDetails';
+import { FOCUSABLE_WORD } from '../../widgets/parts';
+import { Tip } from '../../ui/tip';
 import { CONNECTORS as C } from './copy';
 import { CustomConnectorSheet } from './CustomConnectorSheet';
 import { Configured, Problem, Unresolved, type ConnectorSheetEnv } from './sheet-parts';
@@ -37,9 +39,11 @@ function Details({ engine, request, scope, cwd }: { engine: EngineResolution; re
   return (
     <SheetDetails>
       {argv && (
-        <code data-plugins-argv={JSON.stringify(argv)} title={engine.env.binary} className="block rounded-sm bg-bg-active px-2 py-1 font-mono text-ui-sm break-all text-fg">
-          {commandWords(engine.env.binary, argv)}
-        </code>
+        <Tip content={engine.env.binary} description={engine.env.binary}>
+          <code data-plugins-argv={JSON.stringify(argv)} tabIndex={0} className={`block rounded-sm bg-bg-active px-2 py-1 font-mono text-ui-sm break-all text-fg ${FOCUSABLE_WORD}`}>
+            {commandWords(engine.env.binary, argv)}
+          </code>
+        </Tip>
       )}
       <div className="flex flex-col gap-0.5 text-ui-sm text-fg-muted">
         <p className="m-0">{C.writes}</p>

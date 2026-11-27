@@ -24,7 +24,7 @@ import type { SessionPlugins } from './LoadedLine';
 import { ManageProvider, type Manage } from './manage';
 import { PluginDetail, type PluginDetailProps } from './PluginDetail';
 import { REL } from '../../test-support/relative-time';
-import { accessibleDescription } from '../../test-support/accessible-text';
+import { accessibleDescription, accessibleText } from '../../test-support/accessible-text';
 
 const ID = 'frontend-design@claude-plugins-official';
 const DAY = 86_400_000;
@@ -150,7 +150,7 @@ describe('the detail: the head', () => {
     const p = inst(ID, { version: 'unknown', lastUpdated: new Date(Date.now() - 3 * DAY).toISOString() });
     const detail = show(identityOf(p, viewOf(p, { author: 'Anthropic' })));
     expect(within(detail).getByRole('heading', { name: 'Frontend design' })).toBeTruthy();
-    expect(detail.querySelector('h3 + p')!.textContent).toBe(`by Anthropic · claude-plugins-official · updated ${REL.ago(3, 'day')}`);
+    expect(accessibleText(detail.querySelector('h3 ~ p')!)).toBe(`by Anthropic · claude-plugins-official · updated ${REL.ago(3, 'day')}`);
     expect(detail.textContent).not.toContain('unknown');
   });
 
@@ -158,15 +158,16 @@ describe('the detail: the head', () => {
     const p = inst(ID, { version: '1.0.0' });
     show(identityOf(p, viewOf(p, { marketplaceVersion: '1.1.0' })));
     const update = screen.getByRole('button', { name: 'Update' });
-    expect(update.parentElement!.getAttribute('title')).toBe('Update to 1.1.0');
-    expect(update).toHaveProperty('disabled', false);
+    expect(accessibleDescription(update)).toBe('Update to 1.1.0');
+    expect(update.getAttribute('aria-disabled')).toBeNull();
     cleanup();
     show(identityOf(p, viewOf(p, { marketplaceVersion: '1.0.0' })));
-    expect(screen.getByRole('button', { name: 'Update' }).parentElement!.getAttribute('title')).toBe('On latest version');
-    expect(screen.getByRole('button', { name: 'Update' })).toHaveProperty('disabled', true);
+    expect(accessibleDescription(screen.getByRole('button', { name: 'Update' }))).toBe('On latest version');
+    expect(screen.getByRole('button', { name: 'Update' }).getAttribute('aria-disabled')).toBe('true'); // greyed, it keeps Tab and says why
     cleanup();
     show(identityOf(p, viewOf(p)));
-    expect(screen.getByRole('button', { name: 'Update' })).toHaveProperty('disabled', false); // nothing to compare
+    expect(screen.getByRole('button', { name: 'Update' }).getAttribute('aria-disabled')).toBeNull(); // nothing to compare
+    expect(accessibleDescription(screen.getByRole('button', { name: 'Update' }))).toBe(''); // and no tooltip repeating its name
   });
 
   it('Back and ⌘[ return to the list; the detail takes the keyboard when it opens', () => {
@@ -234,7 +235,7 @@ describe('the detail over the reader’s answers', () => {
     });
     const detail = show(identityOf(p, await read(p, plugin, marketplace)));
     expect(detail.textContent).toContain('TypeScript/JavaScript language server');
-    expect(detail.querySelector('h3 + p')!.textContent).toContain('by Anthropic');
+    expect(detail.querySelector('h3 ~ p')!.textContent).toContain('by Anthropic');
     expect(detail.querySelector('[data-inside="lspServers"]')!.textContent).toContain('Language servers · 1· typescript');
     fireEvent.click(within(detail).getByRole('tab', { name: /Language servers/ }));
     fireEvent.mouseDown(within(detail).getByRole('tab', { name: /Language servers/ }));

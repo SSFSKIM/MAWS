@@ -17,7 +17,7 @@
 // P569 and P570 draw the quiet spinner on the knob or beside Reconnect while either works (on the line of a row folded
 // meanwhile), and nothing under the row after a success.
 // U11a M8 (§A): a dynamic connector that needs a sign-in, a plugin's or one of MAWS's own list, offers Sign in too, by its
-// name (`connectors.signInDynamicServer`); for a session on another machine it is drawn disabled with U9's sentence until
+// name (`connectors.signInDynamicServer`); for a session on another machine it is greyed with U9's sentence, keeping Tab, until
 // U11f, a file-scope row beside it keeping its own.
 // U11a (§D, l8-settings-03): before the first message on this Mac the dialog lists the folder's configured connectors,
 // one row per name (the entry the engine will use) with its scope in place of a status, and no switch, Reconnect or Sign
@@ -45,10 +45,11 @@ import { connectorStatusWords } from './connector-status';
 import { McpDriven } from './McpDriven'; // P5 O9 M5
 import { RowNote, useRowNote } from '../ui/row-note';
 import { QuietSpinner, WaitingWords } from '../ui/spinner';
+import { UnavailableButton, UNAVAILABLE_LOOK } from '../ui/tip';
 import { useRemoteUnavailable } from '../lane-b/remote-unavailable'; // P5 O7 M8
 import { BEFORE_START, MCP, MCP_ACTIONS, WIDGET_TITLE } from './copy';
 import { operationLine, outcomeWords, useOperation } from './operation';
-import { Mono, parseEach, Rows, TextButton } from './parts';
+import { Fact, Mono, parseEach, Rows, TextButton } from './parts';
 import { MOVES_READS, useEngineRead, type EngineRead } from './read';
 import { WidgetFrame } from './WidgetFrame';
 import { useCloseOnLeavingForRemote, useTabPlace, type TabPlace } from './tab-place';
@@ -121,7 +122,7 @@ export function toggleView(requested: boolean, outcome: Outcome, read: ReadBack)
   return position === (requested ? 'on' : 'off') ? { position, line: words } : unconfirmed;
 }
 
-const SWITCH = 'relative mt-0.5 inline-flex h-4 w-7 shrink-0 items-center rounded-full border border-border outline-accent focus-visible:outline-2 disabled:opacity-50';
+const SWITCH = 'relative mt-0.5 inline-flex h-4 w-7 shrink-0 items-center rounded-full border border-border outline-accent focus-visible:outline-2 disabled:opacity-50 aria-disabled:opacity-50';
 const DISCLOSURE = 'flex min-w-0 flex-1 flex-wrap items-baseline gap-x-2 rounded-sm text-left outline-accent focus-visible:outline-2';
 const knobAt = (position: ToggleView['position']) => (position === 'on' ? 'right-0.5' : position === 'off' ? 'left-0.5' : 'left-1.5');
 const tone = (status: string) => (status === 'connected' ? 'text-success' : status === 'failed' ? 'text-danger' : 'text-fg-muted');
@@ -164,9 +165,9 @@ export function ConnectorRow({ server, words, control, actions, opened, under, n
       {open && (
         <div id={part} className="flex flex-col gap-0.5 text-fg-muted [overflow-wrap:anywhere]">
           {server.transport && (
-            <span title={server.command ?? undefined}>
+            <Fact fact={server.command}>
               <Mono>{server.transport}</Mono>
-            </span>
+            </Fact>
           )}
           {where !== '' && <span>{where}</span>}
           {server.error && <span className="text-danger">{server.error}</span>}
@@ -202,13 +203,15 @@ function useSignIn({ server, appSessionId, cwd, readAt }: { server: McpServerVie
   const line = record === null ? null : (signInViewOf({ live, liveRead: readAt === null ? null : { appSessionId, at: readAt }, posture: null, last: record, transport: null })?.text ?? null);
   const button =
     server.status === 'needs-auth' ? (
-      <button type="button" aria-label={CONNECTORS.signInName(server.name)} disabled={unavailable !== null} title={unavailable ?? undefined} onClick={() => void (target.scope === 'dynamic' ? startSignInDynamic({ name: target.name }, null, appSessionId) : startSignInByName({ ...target, scope: target.scope }, appSessionId))} className={SIGN_IN}>
-        {CONNECTORS.signIn}
-      </button>
+      <UnavailableButton reason={unavailable}>
+        <button type="button" aria-label={CONNECTORS.signInName(server.name)} onClick={() => void (target.scope === 'dynamic' ? startSignInDynamic({ name: target.name }, null, appSessionId) : startSignInByName({ ...target, scope: target.scope }, appSessionId))} className={SIGN_IN}>
+          {CONNECTORS.signIn}
+        </button>
+      </UnavailableButton>
     ) : null;
   return { button, line: line || null };
 }
-const SIGN_IN = 'shrink-0 rounded-sm px-1 text-ui-sm text-accent outline-accent hover:bg-bg-hover focus-visible:outline-2 disabled:text-fg-faint disabled:hover:bg-transparent';
+const SIGN_IN = `shrink-0 rounded-sm px-1 text-ui-sm text-accent outline-accent hover:bg-bg-hover focus-visible:outline-2 ${UNAVAILABLE_LOOK}`;
 
 // Reconnect sits on the line of a row that needs a sign-in or failed, and in the opened part of any other (U11a).
 const RECONNECT_ON_LINE = new Set(['needs-auth', 'failed']);
@@ -268,8 +271,8 @@ function McpServerRow({ server, appSessionId, ready, live, answer, refresh, cwd,
         setLast('reconnect');
         void reconnect.run({ serverName: server.name });
       }}
-      disabled={!ready || busy || reconnect.unavailable !== null}
-      title={reconnect.unavailable ?? undefined}
+      disabled={!ready || busy}
+      unavailable={reconnect.unavailable}
       busy={reconnecting}
     >
       <WaitingWords words={MCP_ACTIONS.reconnect} wait={reconnecting ? MCP_ACTIONS.working : null} />
@@ -284,21 +287,22 @@ function McpServerRow({ server, appSessionId, ready, live, answer, refresh, cwd,
       note={reach}
       folded={!onLine && reconnecting ? <QuietSpinner label={MCP_ACTIONS.working} className="mt-0.5 shrink-0" /> : null}
       control={
-        <button
-          type="button"
-          role="switch"
-          aria-checked={checked}
-          aria-label={MCP_ACTIONS.enabled(server.name)}
-          aria-busy={toggling || undefined}
-          data-state={position}
-          disabled={!ready || reach === null || busy || toggle.unavailable !== null}
-          title={toggle.unavailable ?? undefined}
-          onClick={() => void flip()}
-          className={`${SWITCH} ${position === 'on' ? 'bg-accent' : 'bg-bg-active'}`}
-        >
-          <span aria-hidden className={`absolute size-3 rounded-full bg-bg-raised ${knobAt(position)}`} />
-          {toggling && <QuietSpinner label={MCP_ACTIONS.working} className={`absolute ${knobAt(position)}`} />}
-        </button>
+        <UnavailableButton reason={toggle.unavailable}>
+          <button
+            type="button"
+            role="switch"
+            aria-checked={checked}
+            aria-label={MCP_ACTIONS.enabled(server.name)}
+            aria-busy={toggling || undefined}
+            data-state={position}
+            disabled={(!ready || reach === null || busy) && toggle.unavailable === null}
+            onClick={() => void flip()}
+            className={`${SWITCH} ${position === 'on' ? 'bg-accent' : 'bg-bg-active'}`}
+          >
+            <span aria-hidden className={`absolute size-3 rounded-full bg-bg-raised ${knobAt(position)}`} />
+            {toggling && <QuietSpinner label={MCP_ACTIONS.working} className={`absolute ${knobAt(position)}`} />}
+          </button>
+        </UnavailableButton>
       }
       actions={
         <>
@@ -417,10 +421,10 @@ function McpBeforeStart({ appSessionId, place, close }: { appSessionId: AppSessi
             ) : (
               <Rows label={MCP.list}>
                 {servers.map((server) => (
-                  <ConnectorRow key={serverKey(server)} server={configuredView(server)} words={CONNECTORS.scopeOf(server.scope)} opened={<span title={server.path}>{homeAbbreviated(server.path)}</span>} />
+                  <ConnectorRow key={serverKey(server)} server={configuredView(server)} words={CONNECTORS.scopeOf(server.scope)} opened={<Fact fact={server.path}>{homeAbbreviated(server.path)}</Fact>} />
                 ))}
                 {pluginServers.map((server) => (
-                  <ConnectorRow key={pluginRowKey(server)} server={configuredView({ name: server.server, scope: server.installScope, path: server.path, transport: server.transport })} words={CONNECTORS.fromPlugin(keyNameOf(server.plugin))} opened={<span title={server.path}>{homeAbbreviated(server.path)}</span>} />
+                  <ConnectorRow key={pluginRowKey(server)} server={configuredView({ name: server.server, scope: server.installScope, path: server.path, transport: server.transport })} words={CONNECTORS.fromPlugin(keyNameOf(server.plugin))} opened={<Fact fact={server.path}>{homeAbbreviated(server.path)}</Fact>} />
                 ))}
               </Rows>
             ))}

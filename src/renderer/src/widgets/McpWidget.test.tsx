@@ -237,8 +237,8 @@ describe('mcp sign in', () => {
       for (const name of ['connectors.signInServer', 'session.mcpReconnect', 'session.mcpToggle'] as const) act(() => heardRefusal(name, { issues: { refusal: 'not-offered' } }, OTHER_MACHINE, TEST_MACHINE));
       const docs = await row(DOCS);
       for (const control of [within(docs).getByRole('button', { name: `Sign in to ${DOCS}` }), within(docs).getByRole('button', { name: 'Reconnect' }), within(docs).getByRole('switch')]) {
-        expect(control).toHaveProperty('disabled', true);
-        expect(control.title).toBe('mini doesn’t offer this');
+        expect(control.getAttribute('aria-disabled')).toBe('true'); // greyed, it keeps Tab and says why
+        expect(accessibleDescription(control)).toBe('mini doesn’t offer this');
       }
     } finally {
       resetRemoteSurfaces();
@@ -285,7 +285,8 @@ describe('the Connectors dialog: one line per connector (U11a §C)', () => {
     expect(disclosure(notes).getAttribute('aria-expanded')).toBe('true');
     for (const opened of ['http · https://notes.example.test/mcp', 'from user', 'scope user', 'find_note, write_note']) expect(notes.textContent).toContain(opened);
     fireEvent.click(disclosure(files));
-    expect(within(files).getByTitle('/opt/tools/bin/files-mcp --root /work').textContent).toBe('stdio · …/files-mcp --root …/work');
+    const transport = within(files).getByText('stdio · …/files-mcp --root …/work').closest<HTMLElement>('[tabindex="0"]')!; // the whole command line is its tip, which focus reaches
+    expect(accessibleDescription(transport)).toBe('/opt/tools/bin/files-mcp --root /work');
     expect(files.textContent).toContain('scope project');
   });
 
@@ -615,8 +616,8 @@ describe('the Connectors dialog’s Sign in for a dynamic connector', () => {
         </QueryClientProvider>,
       );
       const dynamic = await signInOf(PLUGIN);
-      expect(dynamic).toHaveProperty('disabled', true);
-      expect(dynamic.title).toBe(NOT_YET);
+      expect(dynamic.getAttribute('aria-disabled')).toBe('true');
+      expect(accessibleDescription(dynamic)).toBe(NOT_YET);
       fireEvent.click(dynamic);
       const file = await signInOf('tickets');
       expect(file).toHaveProperty('disabled', false);

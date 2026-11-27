@@ -15,6 +15,8 @@ import { ItemImage } from '../../customize/image/ItemImage';
 import { KindWord, NoLastControl, NoMenu } from '../../customize/KindWord';
 import { HOVER_SCOPE, ON_HOVER } from '../../ui/hover-scope';
 import { RowNote, useRowNote } from '../../ui/row-note';
+import { UnavailableButton } from '../../ui/tip';
+import { Fact } from '../parts';
 import { LIBRARY as L, PLUGIN_MANAGEMENT, SKILLS_LIBRARY as S } from '../copy';
 import { BackButton, backOnChord } from '../plugins/PluginDetail';
 import { Choice, SearchField } from '../plugins/LibraryHeader';
@@ -23,7 +25,7 @@ import { GroupHeading } from '../plugins/PluginRow';
 import { badgeOf, invocationOf, labelOf, type SkillGroup, type SkillRow, type SkillsSort } from './skills';
 
 const setSkills = (patch: Partial<ReturnType<typeof useLibraryStore.getState>['skills']>) => useLibraryStore.setState((s) => ({ skills: { ...s.skills, ...patch } }));
-const ACTION = 'inline-flex h-7 shrink-0 items-center rounded-md px-2.5 text-ui outline-accent focus-visible:outline-2 disabled:cursor-default disabled:opacity-50';
+const ACTION = 'inline-flex h-7 shrink-0 items-center rounded-md px-2.5 text-ui outline-accent focus-visible:outline-2 disabled:cursor-default disabled:opacity-50 aria-disabled:cursor-default aria-disabled:opacity-50';
 const SECONDARY = `${ACTION} border border-border text-fg hover:bg-bg-hover`;
 const PRIMARY = `${ACTION} bg-accent text-bg hover:opacity-90`;
 const BADGE = 'shrink-0 truncate rounded-sm bg-bg-active px-1.5 text-ui-sm leading-[18px] text-fg-muted';
@@ -40,9 +42,11 @@ export function SkillsToolbar({ plugins, canReload = false, reloading = false, o
       <SearchField label={S.search} value={search} onChange={(next) => setSkills({ search: next })} />
       <Choice label={L.sortBy} icon={<SortIcon />} value={plugins ? sort : 'name'} values={sorts} words={S.sort} isDefault={!plugins || sort === 'name'} onChange={(next) => setSkills({ sort: next })} />
       {onReload && (
-        <button type="button" className={SECONDARY} disabled={!canReload || reloading || unavailable !== null} title={unavailable ?? undefined} onClick={onReload}>
-          {PLUGIN_MANAGEMENT.reloadSkills}
-        </button>
+        <UnavailableButton reason={unavailable}>
+          <button type="button" className={SECONDARY} disabled={(!canReload || reloading) && unavailable === null} onClick={onReload}>
+            {PLUGIN_MANAGEMENT.reloadSkills}
+          </button>
+        </UnavailableButton>
       )}
     </span>
   );
@@ -87,9 +91,9 @@ export function SkillItem({ row, onOpen, onUse, kindWord = false }: { row: Skill
       <ItemImage kind="skill" seed={label} iconUrl={null} size="row" />
       <div className="relative flex min-w-0 flex-1 flex-col gap-0.5">
         <span className="flex min-w-0 items-center gap-2">
-          <span data-skill-name className="truncate font-medium text-fg" title={invocation === null ? undefined : `/${invocation}`}>
+          <Fact fact={invocation === null ? null : `/${invocation}`} data-skill-name className="truncate font-medium text-fg">
             {label}
-          </span>
+          </Fact>
           {badge !== null && (
             <span data-skill-badge className={BADGE}>
               {badge}
@@ -102,9 +106,13 @@ export function SkillItem({ row, onOpen, onUse, kindWord = false }: { row: Skill
           {row.description}
         </RowNote>
       )}
-      {onUse && invocation !== null && <button type="button" {...ON_HOVER} className={`relative ${SECONDARY}`} disabled={row.unavailable != null} title={row.unavailable ?? undefined} onClick={() => onUse(invocation)}>
-        {S.useInChat}
-      </button>}
+      {onUse && invocation !== null && (
+        <UnavailableButton reason={row.unavailable ?? null}>
+          <button type="button" {...ON_HOVER} className={`relative ${SECONDARY}`} onClick={() => onUse(invocation)}>
+            {S.useInChat}
+          </button>
+        </UnavailableButton>
+      )}
       {kindWord && (
         <>
           <KindWord kind="skill" />
@@ -144,9 +152,13 @@ export function SkillDetail({ row, onBack, onUse, backTo = S.list, extras = {} }
             {labelOf(row)}
           </h3>
         </div>
-        {onUse && invocation !== null && <button type="button" className={PRIMARY} disabled={row.unavailable != null} title={row.unavailable ?? undefined} onClick={() => onUse(invocation)}>
-          {S.useInChat}
-        </button>}
+        {onUse && invocation !== null && (
+          <UnavailableButton reason={row.unavailable ?? null}>
+            <button type="button" className={PRIMARY} onClick={() => onUse(invocation)}>
+              {S.useInChat}
+            </button>
+          </UnavailableButton>
+        )}
         {extras.actions}
       </div>
       {extras.alert}

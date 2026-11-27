@@ -26,10 +26,11 @@ import { ItemImage } from '../../customize/image/ItemImage';
 import { pluginSeedOf } from '../../customize/image/tile';
 import { usePluginIcons } from '../../customize/discover/read';
 import { LIBRARY as L, RELOAD } from '../copy';
-import { TextButton } from '../parts';
-import { UnavailableButton } from '../../ui/tip';
+import { FOCUSABLE_WORD, TextButton } from '../parts';
+import { Tip, unavailableClickProps } from '../../ui/tip';
+import { NamedGlyph } from '../../ui/glyph';
 import { chipLabel, chipManagedWords, chipsOf, loadedFactOf, OTHER_PROJECTS, projectCount, unreadNotice, updateOffer } from './detail';
-import { MoreIcon } from './icons';
+import { MORE, MoreIcon } from './icons';
 import { basename, dateWords, displayNameOf, installationRef, manifestKeyOf, updatedOf, versionWords, type PluginIdentity } from './library';
 import { RefreshGesture, useRefresh, type SessionPlugins } from './LoadedLine';
 import { present } from './LoadedView';
@@ -101,6 +102,10 @@ export function PluginDetail({ appSessionId, availability, identity, loaded, loa
   const busy = chip !== null && ops.entries.get(chip.key)?.state.phase === 'working';
   const managed = chip === null ? L.whereManaged(projectCount(others) === 1 ? L.managedIn(basename(others[0].projectPath ?? '')) : L.managedInMany(projectCount(others))) : chipManagedWords(chip);
   const update = updateOffer(installation.version, view?.marketplaceVersion ?? null);
+  // Update greyed says why (where it is managed, or that this is the latest version) and keeps Tab; offered, its tooltip
+  // is the version it updates to
+  const updateRefused = managed ?? (update.latest ? update.title : null);
+  const updateTip = updateRefused ?? (update.available ? update.title : null);
   const change = (action: Change) => chip && ask(chip.key, requestFor(action, { plugin: identity.id, scope: chip.installation.scope as PluginsScope }, null));
 
   // the results of changes whose installation left the list, for this plugin
@@ -126,43 +131,38 @@ export function PluginDetail({ appSessionId, availability, identity, loaded, loa
         <div className="flex min-w-0 items-start gap-3">
           <ItemImage kind="plugin" seed={pluginSeedOf(identity.id)} iconUrl={icons.get(identity.id) ?? null} size="head" />
           <div className="flex min-w-0 flex-1 flex-col gap-0.5">
-            <h3 className="m-0 truncate text-prose font-semibold text-fg" title={identity.id}>
-              {name}
-            </h3>
+            <Tip content={identity.id} description={identity.id}>
+              <h3 tabIndex={0} className={`m-0 truncate text-prose font-semibold text-fg ${FOCUSABLE_WORD}`}>
+                {name}
+              </h3>
+            </Tip>
             <p className="m-0 truncate text-ui-sm text-fg-muted">
               {byline.join(' · ')}
               {date && (
                 <>
                   {' · '}
-                  <time dateTime={updated ?? undefined} title={date.title}>
-                    {L.updated(date.text)}
-                  </time>
+                  <Tip content={date.title} description={date.title}>
+                    <time dateTime={updated ?? undefined} tabIndex={0} className={FOCUSABLE_WORD}>
+                      {L.updated(date.text)}
+                    </time>
+                  </Tip>
                 </>
               )}
             </p>
           </div>
           <div className="flex shrink-0 items-center gap-2">
-            <span className="inline-flex" title={managed === null ? (identity.enabledHere ? L.turnOff : L.turnOn) : undefined}>
-              <Switch checked={identity.enabledHere} label={L.enablePlugin} disabled={busy} unavailable={managed} onClick={() => change(identity.enabledHere ? 'disable' : 'enable')} />
-            </span>
-            <span className="inline-flex" title={managed === null ? update.title : undefined}>
-              <UnavailableButton reason={managed}>
-                <button type="button" className={update.available ? PRIMARY : SECONDARY} disabled={busy || (managed === null && update.latest)} onClick={() => change('update')}>
-                  {L.update}
-                </button>
-              </UnavailableButton>
-            </span>
+            <Switch checked={identity.enabledHere} label={L.enablePlugin} disabled={busy} unavailable={managed} tip={identity.enabledHere ? L.turnOff : L.turnOn} onClick={() => change(identity.enabledHere ? 'disable' : 'enable')} />
+            <Tip content={updateTip} description={updateTip} {...unavailableClickProps(updateRefused)}>
+              <button type="button" className={update.available ? PRIMARY : SECONDARY} disabled={busy && updateRefused === null} onClick={() => change('update')}>
+                {L.update}
+              </button>
+            </Tip>
             {offered && (
               <DropdownMenu.Root modal={false}>
                 <DropdownMenu.Trigger asChild>
-                  <button
-                    type="button"
-                    aria-label={L.moreActions(name)}
-                    title={L.more}
-                    className="inline-flex size-7 shrink-0 items-center justify-center rounded-sm text-fg-muted outline-accent hover:bg-bg-hover hover:text-fg focus-visible:outline-2 data-[state=open]:bg-bg-active"
-                  >
+                  <NamedGlyph label={L.moreActions(name)} tip={L.more} className={MORE}>
                     <MoreIcon />
-                  </button>
+                  </NamedGlyph>
                 </DropdownMenu.Trigger>
                 <DropdownMenu.Portal>
                   <DropdownMenu.Content align="end" sideOffset={4} className="z-50 min-w-40 rounded-md border border-border-strong bg-bg-overlay p-1 text-ui text-fg shadow-float">

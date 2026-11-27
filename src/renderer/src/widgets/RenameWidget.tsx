@@ -16,6 +16,7 @@ import { ipc } from '../ipc/client';
 import { remoteUnavailableOf, useRemoteUnavailable } from '../lane-b/remote-unavailable'; // P5 O7 M8
 import { useSessions } from '../stores/sessions';
 import { QuietSpinner } from '../ui/spinner';
+import { UnavailableButton } from '../ui/tip';
 import { RENAME, WIDGET_TITLE } from './copy';
 import { WidgetFrame } from './WidgetFrame';
 
@@ -86,15 +87,16 @@ export function RenameWidget({ appSessionId, args, close }: { appSessionId: AppS
                 className="rounded-sm border border-border bg-bg px-2 py-0.5 text-ui outline-accent focus-visible:outline-2"
               />
             </label>
-            <button
-              type="button"
-              disabled={busy || title.trim() === '' || unavailable !== null}
-              title={unavailable ?? undefined}
-              onClick={() => rename(title.trim())}
-              className="rounded-sm bg-accent px-2 py-0.5 text-ui-sm text-bg outline-accent focus-visible:outline-2 disabled:bg-bg-active disabled:text-fg-faint"
-            >
-              {RENAME.rename}
-            </button>
+            <UnavailableButton reason={unavailable}>
+              <button
+                type="button"
+                disabled={(busy || title.trim() === '') && unavailable === null}
+                onClick={() => rename(title.trim())}
+                className="rounded-sm bg-accent px-2 py-0.5 text-ui-sm text-bg outline-accent focus-visible:outline-2 disabled:bg-bg-active disabled:text-fg-faint aria-disabled:cursor-default aria-disabled:bg-bg-active aria-disabled:text-fg-faint"
+              >
+                {RENAME.rename}
+              </button>
+            </UnavailableButton>
           </div>
         )}
         {outcome && (

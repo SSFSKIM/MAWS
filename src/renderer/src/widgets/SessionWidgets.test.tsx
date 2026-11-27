@@ -24,6 +24,7 @@ import { useSessions } from '../stores/sessions';
 import { RenameWidget } from './RenameWidget';
 import { clearPreviewCache } from '../resume/preview'; // P2-D
 import { ResumeWidget } from './ResumeWidget';
+import { accessibleDescription } from '../test-support/accessible-text';
 
 const ROOT = join(__dirname, '../../../..');
 const READY_ID = 'app-7412a115' as AppSessionId; // main's (the backend's) id
@@ -132,8 +133,8 @@ describe('rename widget', () => {
       const words = 'Can’t rename on Studio yet. Update MAWS on Studio and try again.';
       expect(screen.getAllByRole('status').map((s) => s.textContent)).toEqual([words, words]);
       const rename = screen.getByRole('button', { name: 'Rename' });
-      expect(rename).toHaveProperty('disabled', true);
-      expect(rename.title).toBe(words);
+      expect(rename.getAttribute('aria-disabled')).toBe('true'); // greyed, it keeps Tab and says why
+      expect(accessibleDescription(rename)).toBe(words);
       expect(screen.getByRole('textbox', { name: 'New title' })).toHaveProperty('disabled', true);
       await new Promise((r) => setTimeout(r, 20));
       expect(backend.calls.filter((c) => c.command === 'session.rename')).toEqual([]);

@@ -34,6 +34,7 @@ import { forgetKeptOperations } from './plugins/operation';
 import { PluginsWidget } from './PluginsWidget';
 import { useReadLoads } from './read';
 import { SkillsWidget } from './SkillsWidget';
+import { accessibleDescription } from '../test-support/accessible-text';
 
 const BARE = 'app-new-chat' as AppSessionId;
 const ID = at(BARE);
@@ -104,6 +105,8 @@ const startedStatus = (process: EngineSessionStatus['process']): EngineSessionSt
 // The settings as read, their launch profile starting the chat without `off`'s plugins.
 const profileOff = (off: string[]) =>
   useSettings.setState({ state: { settings: { ...SETTINGS_DEFAULTS_V21, engine: { ...SETTINGS_DEFAULTS_V21.engine, launchProfile: { plugins: { off }, hooks: 'user' } } }, resolvedTheme: 'light' } });
+// greyed, Use in chat keeps Tab and says why (its reason its description), and its press does nothing
+const greyed = (button: HTMLElement | undefined) => button!.getAttribute('aria-disabled') === 'true';
 const detailUse = (name: string) => within(document.querySelector<HTMLElement>(`[data-skill-detail="${name}"]`)!).getByRole('button', { name: 'Use in chat' });
 
 describe('the Connectors dialog before the first message', () => {
@@ -257,24 +260,24 @@ describe('a skill of a plugin the chat starts without', () => {
     await screen.findByRole('region', { name: 'In this project' });
     const [onRow] = useButtons('draw');
     expect(onRow).toBeTruthy();
-    expect(onRow).toHaveProperty('disabled', true);
-    expect(onRow!.getAttribute('title')).toBe('Off in the sessions MAWS runs: Settings › Sessions › Plugins in sessions');
+    expect(greyed(onRow)).toBe(true);
+    expect(accessibleDescription(onRow!)).toBe('Off in the sessions MAWS runs: Settings › Sessions › Plugins in sessions');
     fireEvent.click(onRow!);
     expect(insertText).not.toHaveBeenCalled();
-    expect(useButtons('review')[0]).toHaveProperty('disabled', false);
+    expect(greyed(useButtons('review')[0])).toBe(false);
     fireEvent.click(screen.getByRole('button', { name: 'View draw' }));
     const inDetail = within(document.querySelector<HTMLElement>('[data-skill-detail="draw"]')!).getByRole('button', { name: 'Use in chat' });
-    expect(inDetail).toHaveProperty('disabled', true);
-    expect(inDetail.getAttribute('title')).toBe('Off in the sessions MAWS runs: Settings › Sessions › Plugins in sessions');
+    expect(greyed(inDetail)).toBe(true);
+    expect(accessibleDescription(inDetail)).toBe('Off in the sessions MAWS runs: Settings › Sessions › Plugins in sessions');
   });
 
   it('is usable again once the profile turns the plugin back on', async () => {
     profileOff(['fx-entry@fx-market']);
     mount(SkillsWidget);
     await screen.findByRole('region', { name: 'In this project' });
-    expect(useButtons('draw')[0]).toHaveProperty('disabled', true);
+    expect(greyed(useButtons('draw')[0])).toBe(true);
     act(() => profileOff([]));
-    await waitFor(() => expect(useButtons('draw')[0]).toHaveProperty('disabled', false));
+    await waitFor(() => expect(greyed(useButtons('draw')[0])).toBe(false));
   });
 
   // The task review of the branch panel's fix (Important 1): an open detail follows its row as the profile changes.
@@ -282,12 +285,12 @@ describe('a skill of a plugin the chat starts without', () => {
     profileOff([]);
     mount(SkillsWidget);
     fireEvent.click(await screen.findByRole('button', { name: 'View draw' }));
-    expect(detailUse('draw')).toHaveProperty('disabled', false);
+    expect(greyed(detailUse('draw'))).toBe(false);
     act(() => profileOff(['fx-entry@fx-market']));
-    expect(detailUse('draw')).toHaveProperty('disabled', true);
-    expect(detailUse('draw').getAttribute('title')).toBe('Off in the sessions MAWS runs: Settings › Sessions › Plugins in sessions');
+    expect(greyed(detailUse('draw'))).toBe(true);
+    expect(accessibleDescription(detailUse('draw'))).toBe('Off in the sessions MAWS runs: Settings › Sessions › Plugins in sessions');
     act(() => profileOff([]));
-    expect(detailUse('draw')).toHaveProperty('disabled', false);
+    expect(greyed(detailUse('draw'))).toBe(false);
   });
 
   // The task review (Minor 3): until the settings are read, which plugins the chat starts without is not known.
@@ -295,11 +298,11 @@ describe('a skill of a plugin the chat starts without', () => {
     mount(SkillsWidget);
     await screen.findByRole('region', { name: 'In this project' });
     const [draw] = useButtons('draw');
-    expect(draw).toHaveProperty('disabled', true);
-    expect(draw!.getAttribute('title')).toBe('Reading Settings › Sessions › Plugins in sessions…');
-    expect(useButtons('review')[0]).toHaveProperty('disabled', false);
+    expect(greyed(draw)).toBe(true);
+    expect(accessibleDescription(draw!)).toBe('Reading Settings › Sessions › Plugins in sessions…');
+    expect(greyed(useButtons('review')[0])).toBe(false);
     act(() => profileOff([]));
-    await waitFor(() => expect(useButtons('draw')[0]).toHaveProperty('disabled', false));
+    await waitFor(() => expect(greyed(useButtons('draw')[0])).toBe(false));
   });
 });
 

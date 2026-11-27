@@ -58,7 +58,7 @@ export function DiffBody({ view, appSessionId, close }: { view: DiffView; appSes
             </Tip>
           )}
         </p>
-        <TextButton onClick={() => open()} disabled={!review} title={review ? undefined : DIFF.reviewUnavailable}>
+        <TextButton onClick={() => open()} unavailable={review ? null : DIFF.reviewUnavailable}>
           {DIFF.openInReview}
         </TextButton>
       </div>

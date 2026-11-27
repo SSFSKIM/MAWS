@@ -352,7 +352,7 @@ test('labels: search over both names, the trust labels and tooltips, a joined pa
       const card = byName(results(page), name);
       await expect(card, name).toContainText('by Anthropic');
       await expect(card.locator('[data-trust]'), name).toHaveAttribute('data-trust', 'Verified');
-      await expect(card.locator('[data-trust]'), name).toHaveAttribute('title', 'Verified — Anthropic has reviewed this plugin for quality and security.');
+      await expect(card.locator('[data-trust]'), name).toHaveAccessibleDescription('Verified — Anthropic has reviewed this plugin for quality and security.');
     }
     // the M4 picture review: the trust label has its own line beneath the publisher on every card, so each card's
     // description starts at one height, whatever the words beside the name
@@ -369,14 +369,14 @@ test('labels: search over both names, the trust labels and tooltips, a joined pa
     const partner = byName(results(page), 'cocounsel-legal');
     await expect(partner).toContainText('by Thomson Reuters');
     await expect(partner.locator('[data-trust]')).toHaveAttribute('data-trust', 'Partner');
-    await expect(partner.locator('[data-trust]')).toHaveAttribute('title', 'Anthropic’s directory lists the publisher as a partner.');
+    await expect(partner.locator('[data-trust]')).toHaveAccessibleDescription('Anthropic’s directory lists the publisher as a partner.');
   });
 
   await test.step('a community item: Community, with Desktop’s community wording', async () => {
     await searchAfresh(page, '0x');
     const card = byName(results(page), '0x');
     await expect(card.locator('[data-trust]')).toHaveAttribute('data-trust', 'Community');
-    await expect(card.locator('[data-trust]')).toHaveAttribute('title', 'This plugin hasn’t been reviewed in depth by Anthropic.');
+    await expect(card.locator('[data-trust]')).toHaveAccessibleDescription('This plugin hasn’t been reviewed in depth by Anthropic.');
   });
 
   await test.step('the official-and-community pair is one card whose detail reads Also listed by claude-community', async () => {

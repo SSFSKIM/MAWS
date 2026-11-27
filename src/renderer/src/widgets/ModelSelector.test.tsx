@@ -28,7 +28,7 @@ import type { SetupIntent } from '@shared/sessions/intent';
 import { machineSettingsDefaults } from '@shared/settings/defaults';
 import { GATEWAY } from '../settings-tab/copy';
 import { REL } from '../test-support/relative-time';
-import { accessibleText } from '../test-support/accessible-text';
+import { accessibleDescription, accessibleText } from '../test-support/accessible-text';
 
 const SELECTOR_BACK = 'Back to effort';
 
@@ -540,8 +540,8 @@ describe('an unstarted session writes its intent, with D-19’s route', () => {
     const invoke = vi.spyOn(ipc, 'invoke').mockImplementation(((name: string, input: unknown, opts?: { machine?: string }) => (opts?.machine === OTHER_MACHINE ? older : local)(name, input)) as never);
     mount('model', '', TARGET);
     const machine = within(screen.getByRole('radiogroup', { name: 'Route' })).getByRole('radio', { name: 'Machine’s own' }) as HTMLButtonElement;
-    await waitFor(() => expect(machine.disabled).toBe(true));
-    expect(machine.title).toBe(GATEWAY.routeDropped);
+    await waitFor(() => expect(machine.getAttribute('aria-disabled')).toBe('true'));
+    expect(accessibleDescription(machine)).toBe(GATEWAY.routeDropped);
     expect(invoke.mock.calls.filter(([name]) => name === 'machineSettings.get').map(([, , opts]) => (opts as { machine?: string }).machine)).toEqual([OTHER_MACHINE]);
     invoke.mockRestore();
   });
@@ -554,8 +554,11 @@ describe('an unstarted session writes its intent, with D-19’s route', () => {
     mount('model', '', INTENT);
     const segment = screen.getByRole('radiogroup', { name: 'Route' });
     const machine = within(segment).getByRole('radio', { name: 'Machine’s own' }) as HTMLButtonElement;
-    await waitFor(() => expect(machine.disabled).toBe(true));
-    expect(machine.title).toBe(GATEWAY.routeDropped);
+    await waitFor(() => expect(machine.getAttribute('aria-disabled')).toBe('true'));
+    expect(machine.disabled).toBe(false); // greyed, it keeps Tab and says why
+    expect(accessibleDescription(machine)).toBe(GATEWAY.routeDropped);
+    fireEvent.click(machine); // and its press is swallowed
+    expect(invoke).not.toHaveBeenCalledWith('session.intent.patch', expect.objectContaining({ patch: expect.objectContaining({ route: 'machine' }) }));
     fireEvent.click(within(segment).getByRole('radio', { name: 'Direct' }));
     await waitFor(() => expect(invoke).toHaveBeenCalledWith('session.intent.patch', { appSessionId: INTENT, patch: { route: 'direct', gateway: 'direct' } }));
     invoke.mockRestore();

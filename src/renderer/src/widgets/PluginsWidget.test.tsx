@@ -1128,7 +1128,7 @@ describe('plugins widget: the library', () => {
     expect(text).not.toContain('/work/other');
     expect(row('code-review@claude-plugins-official').textContent).toContain('Code review');
     expect(row('code-review@claude-plugins-official').textContent).toContain(REL.ago(3, 'day'));
-    expect(within(row('code-review@claude-plugins-official')).getByText('New').getAttribute('title')).toBe('Added or updated in the last 14 days');
+    expect(accessibleDescription(within(row('code-review@claude-plugins-official')).getByText('New'))).toBe('Added or updated in the last 14 days'); // its tooltip, which focus reaches
     expect(within(row('frontend-design@claude-plugins-official')).queryByText('New')).toBeNull(); // 20 days
     expect(row('e8-probe@e8-scratch').textContent).toContain('a1b2c3d4e5f6'); // a commit prefix is a version as it is
   });
@@ -1224,7 +1224,7 @@ describe('plugins widget: the library', () => {
     act(() => useLibraryStore.setState((s) => ({ plugins: { ...s.plugins, filter: 'otherProjects' } })));
     const elsewhere = await waitFor(() => row('e8-probe@e8-scratch'));
     const words = within(elsewhere).getByText('In 2 other projects');
-    expect(words.getAttribute('title')).toBe('alpha\nbeta');
+    expect(accessibleDescription(words)).toBe('alpha\nbeta');
     expect(elsewhere.outerHTML).not.toMatch(/\/work\/alpha|\/srv\/beta/);
   });
 
@@ -1321,7 +1321,7 @@ describe('plugins widget: the detail', () => {
     fireEvent.click(row('e8-probe@e8-scratch').querySelector('span')!); // anywhere on the row
     expect(detail()!.getAttribute('data-plugin-detail')).toBe('e8-probe@e8-scratch');
     expect(within(detail()!).getByRole('heading', { name: 'E8 probe' })).toBeTruthy();
-    await waitFor(() => expect(detail()!.querySelector('h3 + p')!.textContent).toBe('by E8 · 0.1.0 · e8-scratch'));
+    await waitFor(() => expect(detail()!.querySelector('h3 ~ p')!.textContent).toBe('by E8 · 0.1.0 · e8-scratch'));
     expect(section('my-items').closest('.hidden')).toBeTruthy(); // the list stays mounted, hidden
     expect(screen.queryByRole('searchbox', { name: 'Search plugins' })).toBeNull();
     expect(loadedLine().closest('.hidden')).toBeTruthy();
@@ -1399,8 +1399,8 @@ describe('plugins widget: the detail', () => {
     await ready();
     const update = () => within(detail()!).getByRole('button', { name: 'Update' });
     fireEvent.click(view('e8-probe@e8-scratch'));
-    await waitFor(() => expect(update().parentElement!.title).toBe('On latest version'));
-    expect(update()).toHaveProperty('disabled', true);
+    await waitFor(() => expect(accessibleDescription(update())).toBe('On latest version'));
+    expect(update().getAttribute('aria-disabled')).toBe('true'); // greyed, it keeps Tab and says why
     fireEvent.click(within(detail()!).getByRole('button', { name: 'Back to My items' }));
     openAdd('Manage marketplaces');
     await waitFor(() => expect(marketRow('e8-scratch')).toBeTruthy());
@@ -1416,8 +1416,8 @@ describe('plugins widget: the detail', () => {
     fireEvent.click(within(manageDialog()).getByRole('button', { name: 'Done' }));
     await waitFor(() => expect(document.querySelector('[data-marketplaces-dialog]')).toBeNull());
     fireEvent.click(view('e8-probe@e8-scratch'));
-    await waitFor(() => expect(update().parentElement!.title).toBe('Update to 0.2.0'));
-    expect(update()).toHaveProperty('disabled', false);
+    await waitFor(() => expect(accessibleDescription(update())).toBe('Update to 0.2.0'));
+    expect(update().getAttribute('aria-disabled')).toBeNull();
     expect(installed[0].lastUpdated).toBeNull(); // no reinstall: the listing's lastUpdated never moved
   });
 
@@ -1478,7 +1478,7 @@ describe('plugins widget: the detail', () => {
     installed = [plugin('e8-probe@e8-scratch', { scope: 'project', projectPath: cwd, here: true, coversHere: true }), plugin('e8-probe@e8-scratch')];
     await ready();
     fireEvent.click(view('e8-probe@e8-scratch'));
-    await waitFor(() => expect(detail()!.querySelector('h3 + p')!.textContent).toContain('by E8')); // this project's, read with the list
+    await waitFor(() => expect(detail()!.querySelector('h3 ~ p')!.textContent).toContain('by E8')); // this project's, read with the list
     expect(within(detail()!).queryByText(/Couldn.t read this plugin.s details/)).toBeNull();
     // the user's installation is the detail's own read, refused
     fireEvent.click(within(detail()!).getByRole('radio', { name: 'User' }));
@@ -1487,10 +1487,10 @@ describe('plugins widget: the detail', () => {
     expect(switchOf()).toHaveProperty('disabled', false); // the listing's controls and facts stay
     expect(within(detail()!).getByRole('button', { name: 'Update' })).toBeTruthy();
     expect(detail()!.querySelector('[data-plugin-fact="loaded"]')).toBeTruthy();
-    expect(detail()!.querySelector('h3 + p')!.textContent).not.toContain('by E8');
+    expect(detail()!.querySelector('h3 ~ p')!.textContent).not.toContain('by E8');
     refuse = false;
     fireEvent.click(within(notice).getByRole('button', { name: 'Retry' }));
-    await waitFor(() => expect(detail()!.querySelector('h3 + p')!.textContent).toContain('by E8'));
+    await waitFor(() => expect(detail()!.querySelector('h3 ~ p')!.textContent).toContain('by E8'));
     expect(within(detail()!).queryByText(/Couldn.t read this plugin.s details/)).toBeNull();
   });
 
@@ -1514,7 +1514,7 @@ describe('plugins widget: the detail', () => {
     await ready();
     await waitFor(() => expect(row('e8-probe@e8-scratch').textContent).toContain('by E8'));
     fireEvent.click(view('e8-probe@e8-scratch'));
-    expect(within(detail()!).getByRole('button', { name: 'Update' }).parentElement!.getAttribute('title')).toBe('Update to 0.2.0');
+    expect(accessibleDescription(within(detail()!).getByRole('button', { name: 'Update' }))).toBe('Update to 0.2.0');
     fireEvent.keyDown(within(detail()!).getByRole('button', { name: /^More actions for / }), { key: 'Enter' });
     fireEvent.click(screen.getByRole('menuitem', { name: 'Uninstall…' }));
     await resolved();
@@ -1679,7 +1679,10 @@ describe('the word cut: a plugin row', () => {
     await ready();
     const probe = row('e8-probe@e8-scratch');
     expect(rowSwitch('e8-probe@e8-scratch').getAttribute('aria-label')).toBe('Enable E8 probe');
-    expect(within(probe).getByRole('button', { name: 'More actions for E8 probe' }).getAttribute('title')).toBe('More');
+    const more = within(probe).getByRole('button', { name: 'More actions for E8 probe' });
+    act(() => more.focus()); // its word is its tooltip, which focus opens
+    expect(screen.getByRole('tooltip').textContent).toBe('More');
+    act(() => more.blur());
     expect(within(probe).queryByText('Disabled')).toBeNull();
     toggle('e8-probe@e8-scratch');
     await resolved();

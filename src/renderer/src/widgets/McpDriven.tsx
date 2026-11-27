@@ -108,10 +108,10 @@ export function McpDriven({ appSessionId, controls, close }: { appSessionId: App
                 note={statusNote(server.status, server.tools)}
                 actions={
                   <>
-                    <TextButton onClick={() => void run('reconnect', server.name)} disabled={busy || !reconnect.available} title={reconnect.available ? undefined : reconnect.reason}>
+                    <TextButton onClick={() => void run('reconnect', server.name)} disabled={busy} unavailable={reconnect.available ? null : reconnect.reason}>
                       {MCP_ACTIONS.reconnect}
                     </TextButton>
-                    <TextButton onClick={() => void run('disable', server.name)} disabled={busy || !disable.available} title={disable.available ? undefined : disable.reason}>
+                    <TextButton onClick={() => void run('disable', server.name)} disabled={busy} unavailable={disable.available ? null : disable.reason}>
                       {MCP_DRIVEN.disable}
                     </TextButton>
                   </>
@@ -128,8 +128,8 @@ export function McpDriven({ appSessionId, controls, close }: { appSessionId: App
             if (name.trim() !== '') void run('enable', name.trim());
           }}
         >
-          <input aria-label={MCP_DRIVEN.enableLabel} placeholder={MCP_DRIVEN.enableLabel} className={FIELD} value={name} disabled={!enable.available} title={enable.available ? undefined : enable.reason} onChange={(event) => setName(event.target.value)} />
-          <TextButton onClick={() => name.trim() !== '' && void run('enable', name.trim())} disabled={busy || !enable.available || name.trim() === ''} title={enable.available ? undefined : enable.reason}>
+          <input aria-label={MCP_DRIVEN.enableLabel} placeholder={MCP_DRIVEN.enableLabel} className={FIELD} value={name} disabled={!enable.available} onChange={(event) => setName(event.target.value)} />
+          <TextButton onClick={() => name.trim() !== '' && void run('enable', name.trim())} disabled={busy || name.trim() === ''} unavailable={enable.available ? null : enable.reason}>
             {MCP_DRIVEN.enable}
           </TextButton>
         </form>
