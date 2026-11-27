@@ -33,6 +33,7 @@ import { ErrorRow } from './Error';
 import { PlanRow } from './Plan';
 import { RequestSlotRow } from './RequestSlot';
 import { WaitingAsk, WaitingRow } from './WaitingForm'; // UX wave U1b
+import { SheetRow } from './SheetRow'; // the question sheet's C3 M5
 import { SubagentRow } from './Subagent';
 import { TimeRow } from './Time';
 import { ToHumanMessageRow } from '../../../owner/to-human/MessageRow'; // P4-R7
@@ -55,6 +56,7 @@ function body(row: Row) {
     // UX wave U1b (Interfaces §D): a waiting row draws its request's form and asks no mod's site of its own
     case 'plan': return row.waiting ? <WaitingRow row={row} receipt={<PlanRow row={row} />} /> : <PlanRow row={row} />;
     case 'question': return row.waiting ? <WaitingRow row={row} receipt={<SurfaceQuestionRow row={row} />} /> : <SurfaceQuestionRow row={row} />;
+    case 'sheet': return <SheetRow row={row} />; // the question sheet's C3 M5: no mod site (§I)
     case 'request_slot': return <RequestSlotRow row={row} />;
     case 'boundary': return <BoundaryRow row={row} />;
     case 'gap': return <GapRow row={row} />; // P5 O7 M2

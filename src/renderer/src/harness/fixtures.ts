@@ -1,8 +1,8 @@
 // The harness's fixture catalogue. Journals are bundled lazily as raw text (harness builds only): the probe's pass-1
 // root journals, pass-2 and pass-3 journals (never the gitignored `private/` owner data; sidecars and `workflow-disk/`
-// are transcripts, not journals) and C6's synthetic journals, played through C3's normaliser; C6's X1 event fixtures
-// (`events/<name>`) for shapes C3 has not fixed on the wire; and the seeded synthetic transcript (`synthetic/<turns>`),
-// also in the to-human view (`synthetic/<turns>/report`, which the picker does not list).
+// are transcripts, not journals), C6's synthetic journals and the question sheet's (`sheet/<name>`), played through C3's
+// normaliser; C6's X1 event fixtures (`events/<name>`) for shapes C3 has not fixed on the wire; and the seeded synthetic
+// transcript (`synthetic/<turns>`), also in the to-human view (`synthetic/<turns>/report`, which the picker does not list).
 import { SessionEventSchema, type SessionEvent } from '@shared/graph/events';
 import type { ApiMessageId } from '@shared/graph/ids';
 import { parseJournalRow } from '@shared/wire/journal';
@@ -17,6 +17,7 @@ const pass3 = import.meta.glob<string>(['../../../../spikes/protocol-probe/fixtu
 const summaries = import.meta.glob<string>('../../../../spikes/protocol-probe/fixtures/p4/p4-tool-summaries-*.jsonl', { query: '?raw', import: 'default' });
 const transcript = import.meta.glob<string>('../../../../test/fixtures/transcript/*.jsonl', { query: '?raw', import: 'default' });
 const events = import.meta.glob<string>('../../../../test/fixtures/transcript/events/*.events.jsonl', { query: '?raw', import: 'default' });
+const sheet = import.meta.glob<string>('../../../../test/fixtures/sheet/transcripts/*.journal.jsonl', { query: '?raw', import: 'default' }); // the question sheet's C3 M5
 
 export interface LoadedFixture {
   events: SessionEvent[];
@@ -34,9 +35,9 @@ const lines = (text: string) =>
 
 const baseName = (path: string, suffix: RegExp) => path.split('/').at(-1)!.replace(suffix, '');
 
-function journals(pass: string, modules: Record<string, () => Promise<string>>): [string, Loader][] {
+function journals(pass: string, modules: Record<string, () => Promise<string>>, suffix = /\.jsonl$/): [string, Loader][] {
   return Object.entries(modules).map(([path, load]) => [
-    `${pass}/${baseName(path, /\.jsonl$/)}`,
+    `${pass}/${baseName(path, suffix)}`,
     async () => ({ events: journalToEvents(lines(await load()).map(parseJournalRow)), streamFrom: null }),
   ]);
 }
@@ -88,6 +89,7 @@ const LOADERS = new Map<string, Loader>([
   ...journals('pass3', pass3),
   ...journals('transcript', transcript),
   ...journals('p4', summaries),
+  ...journals('sheet', sheet, /\.journal\.jsonl$/), // the question sheet's C3 M5: a sheet session's rows, its answers delivered by the plugin's prompt
   ...eventFixtures,
 ]);
 
