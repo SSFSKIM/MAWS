@@ -6,7 +6,8 @@
 // transcript says it), `auto_mode_unavailable` from a tool result denied that way, `interrupted` from an exit that lost
 // approvals (the summary string is the contract), and `held_peer_message` from the status's held messages. Error-like
 // items retire when the session's next human turn
-// starts (a prompt read back from disk included) or the session is stopped, each retiring what came before it; an archive (`session.forgotten`, or an
+// starts (a prompt read back from disk included) or the session is stopped, each retiring what came before it, and
+// `auto_mode_unavailable` also when the status says the session's mode left auto; an archive (`session.forgotten`, or an
 // archive exit) retires everything. The owner's ruling (2026-10-30; it replaces E11 F2b's "ended with an error" fact):
 // an `error` is raised only when it is newer than the last time the session was seen (`seenAt`, the unread rule's
 // last-seen mark), and it retires for good once the session is seen after it (`seen`) or the item is acknowledged
@@ -40,6 +41,7 @@ export const HARD_FAILURE_REASONS: ReadonlySet<string> = new Set([
 ]);
 const BROKER_KINDS: ReadonlySet<AttentionItem['kind']> = new Set(['permission', 'question', 'plan', 'dialog', 'elicitation']);
 const RETIRED_BY_NEXT_TURN: ReadonlySet<AttentionItem['kind']> = new Set(['error', 'interrupted', 'auto_mode_unavailable']);
+const AUTO_MODE_ANSWERED: ReadonlySet<AttentionItem['kind']> = new Set(['auto_mode_unavailable']); // retired by leaving auto mode too
 // P2-C (2026-10-09; the P2-C document, Design §5): the owner channel's kinds, a projection of its marks table, which it
 // re-projects at start; never restored from this service's store, and retired by no turn
 const OWNER_KINDS: ReadonlySet<AttentionItem['kind']> = new Set(['async_input', 'essential_unread']);
@@ -138,6 +140,7 @@ interface SessionState {
   // retired live since this run started, per kind: the moment (ms) before which a persisted item of the kind stays retired
   retiredBefore: Map<AttentionItem['kind'], number>;
   apiError: string | null; // the main conversation's last assistant message, when it is the engine's API error envelope: its text
+  mode: EngineSessionStatus['permissionMode']['effective'] | null; // the effective permission mode its last status said; null before one
 }
 
 export const PERSIST_RETRY_MS = 5_000;
@@ -152,7 +155,7 @@ export function startAttentionService(deps: AttentionServiceDeps): AttentionServ
 
   const stateOf = (id: AppSessionId): SessionState => {
     let state = sessions.get(id);
-    if (!state) sessions.set(id, (state = { broker: [], derived: new Map(), owner: [], laneA: [], signature: '[]', retiredBefore: new Map(), apiError: null }));
+    if (!state) sessions.set(id, (state = { broker: [], derived: new Map(), owner: [], laneA: [], signature: '[]', retiredBefore: new Map(), apiError: null, mode: null }));
     return state;
   };
   const merged = (state: SessionState): AttentionItem[] => [...state.broker, ...state.derived.values(), ...state.owner, ...state.laneA.map((e) => e.item)];
@@ -308,9 +311,15 @@ export function startAttentionService(deps: AttentionServiceDeps): AttentionServ
     changed(id, state);
   };
 
-  const onHeld = (id: AppSessionId, status: EngineSessionStatus) => {
+  const onStatus = (id: AppSessionId, status: EngineSessionStatus) => {
     if (status.process === 'exited') return; // the exit retired them; a late exited status must not re-derive any (M5 review)
     const state = stateOf(id);
+    // The owner's ruling (UX wave, obs 4): auto mode unavailable asks the session to leave auto mode; once its effective
+    // mode leaves auto (the card's Switch to Manual mode, or any other way), the item has been answered and retires then,
+    // not at the next prompt. Only a move off auto: a status merely in another mode is no answer to it.
+    const mode = status.permissionMode.effective;
+    if (state.mode === 'auto' && mode !== 'auto') retireDerived(state, AUTO_MODE_ANSWERED);
+    state.mode = mode;
     const keep = new Set<string>();
     for (const held of status.heldPeerMessages) {
       const key = held.messageUuid ?? `${held.from}:${held.lane}`;
@@ -328,7 +337,7 @@ export function startAttentionService(deps: AttentionServiceDeps): AttentionServ
       changed(appSessionId, state);
     }),
     deps.onEvent('session.eventBatch', ({ appSessionId, events }) => onEvents(appSessionId, events)),
-    deps.onEvent('session.status', ({ appSessionId, status }) => onHeld(appSessionId, status)),
+    deps.onEvent('session.status', ({ appSessionId, status }) => onStatus(appSessionId, status)),
     deps.onEvent('session.forgotten', ({ appSessionId }) => retireSession(appSessionId)),
     deps.onState('engine-host', (host) => {
       if (host.state === 'ready' || deps.handingOver?.()) return; // a handover's successor republishes what it adopts

@@ -13,6 +13,7 @@ import type { LaneAView } from '../lane-a/driver';
 const APP = 'app-a' as AppSessionId;
 const SID = '33333333-3333-4333-8333-333333333333';
 const AT = '2026-09-28T10:00:00.000Z';
+const MANUAL = { requested: 'default', effective: 'default', refusal: null }; // a status's permission mode, never auto here
 
 class FakeStore implements AttentionStore {
   sessions = new Map<string, AttentionItem[]>();
@@ -136,7 +137,7 @@ describe('attention service merges broker items with the derived kinds', () => {
     await h.service.ready;
     const permission = item({ kind: 'permission', state: 'pending' });
     h.fire('session.brokerItems', { appSessionId: APP, items: [permission] });
-    h.fire('session.status', { appSessionId: APP, status: { process: 'ready', engineSessionId: SID, heldPeerMessages: [{ from: 'peer', lane: 'main', messageUuid: 'message', heldAt: AT, expiresAt: null }] } });
+    h.fire('session.status', { appSessionId: APP, status: { process: 'ready', engineSessionId: SID, permissionMode: MANUAL, heldPeerMessages: [{ from: 'peer', lane: 'main', messageUuid: 'message', heldAt: AT, expiresAt: null }] } });
     h.batch(event('turn.ended', { isError: true, result: 'error', errors: [] }));
     expect(h.service.list().map((i) => i.kind)).toEqual(['permission', 'held_peer_message', 'error']);
     h.hostState('crashed'); // the supervisor cannot synthesize engine session exits
@@ -161,7 +162,7 @@ describe('attention service merges broker items with the derived kinds', () => {
     await h.service.ready;
     const permission = item({ kind: 'permission', state: 'pending' });
     h.fire('session.brokerItems', { appSessionId: APP, items: [permission] });
-    h.fire('session.status', { appSessionId: APP, status: { process: 'ready', engineSessionId: SID, heldPeerMessages: [{ from: 'peer', lane: 'main', messageUuid: 'message', heldAt: AT, expiresAt: null }] } });
+    h.fire('session.status', { appSessionId: APP, status: { process: 'ready', engineSessionId: SID, permissionMode: MANUAL, heldPeerMessages: [{ from: 'peer', lane: 'main', messageUuid: 'message', heldAt: AT, expiresAt: null }] } });
     const changes = h.changed.length;
     handover.draining = true;
     h.hostState('restarting'); // the handover's ask: the link leaves ready and drains
@@ -206,15 +207,51 @@ describe('attention service merges broker items with the derived kinds', () => {
       ['auto_mode_unavailable', 'Auto mode unavailable: switch out of auto mode to continue', { requestId: null, toolUseId: 'toolu_7', taskId: null, agentId: null }],
     ]);
     const held = { messageUuid: 'm-1', from: 'peer', fromName: 'Reviewer', lane: 'team', heldAt: AT, expiresAt: '2026-09-28T10:05:00.000Z' };
-    fire('session.status', { appSessionId: APP, status: { engineSessionId: SID, heldPeerMessages: [held] } as unknown as EngineSessionStatus });
+    fire('session.status', { appSessionId: APP, status: { engineSessionId: SID, permissionMode: MANUAL, heldPeerMessages: [held] } as unknown as EngineSessionStatus });
     expect(last().at(-1)).toMatchObject({ kind: 'held_peer_message', summary: 'Held message from Reviewer', createdAt: AT, expiresAt: '2026-09-28T10:05:00.000Z' });
 
     batch(event('turn.started', { userMessageUuid: 'u-2', origin: 'engine' })); // an engine-initiated turn retires nothing
     expect(last()).toHaveLength(4);
     batch(event('turn.started', { userMessageUuid: 'u-3', origin: 'human' }));
     expect(last().map((i) => i.kind)).toEqual(['held_peer_message']);
-    fire('session.status', { appSessionId: APP, status: { engineSessionId: SID, heldPeerMessages: [] } as unknown as EngineSessionStatus });
+    fire('session.status', { appSessionId: APP, status: { engineSessionId: SID, permissionMode: MANUAL, heldPeerMessages: [] } as unknown as EngineSessionStatus });
     expect(last()).toEqual([]);
+  });
+
+  // The owner's ruling (UX wave, obs 4): the card's remedy is leaving auto mode, so the session's effective mode moving off
+  // auto (the card's "Switch to Manual mode", or any other way) retires it then, not at the next prompt. The engine says
+  // the new mode in its `set_permission_mode` answer and a `system/status` frame (uxwave/uxwave-851-set-mode seq 9, 11),
+  // both of which the host's status carries as `permissionMode.effective`.
+  it('retires auto_mode_unavailable when the effective mode leaves auto, and only then; an error waits for the next turn', async () => {
+    const { service, store, fire, batch, last } = setup();
+    await service.ready;
+    const status = (effective: string) =>
+      fire('session.status', { appSessionId: APP, status: { process: 'ready', engineSessionId: SID, heldPeerMessages: [], permissionMode: { requested: effective, effective, refusal: null } } as unknown as EngineSessionStatus });
+    status('auto');
+    batch(event('turn.ended', { isError: true, terminalReason: 'model_error', result: 'x', resultText: null, isEchoReceipt: false, origin: 'human', errors: [] }), event('tool.result', { toolUseId: 'toolu_7', denial: 'automode-unavailable' }));
+    status('auto'); // a status that keeps auto (any other change of the session) retires nothing
+    expect(last().map((i) => i.kind)).toEqual(['error', 'auto_mode_unavailable']);
+    status('default');
+    expect(last().map((i) => i.kind)).toEqual(['error']);
+    await service.settled();
+    expect(store.sessions.get(APP)?.map((i) => i.kind)).toEqual(['error']);
+    // back in auto, a new denial raises anew; plan mode is out of auto too
+    status('auto');
+    batch(event('tool.result', { toolUseId: 'toolu_8', denial: 'automode-unavailable' }));
+    expect(last().map((i) => i.kind)).toEqual(['error', 'auto_mode_unavailable']);
+    status('plan');
+    expect(last().map((i) => i.kind)).toEqual(['error']);
+  });
+
+  it('keeps auto_mode_unavailable while the mode was never seen in auto: a status in another mode is no leaving it', () => {
+    const { fire, batch, last } = setup();
+    const status = (effective: string) =>
+      fire('session.status', { appSessionId: APP, status: { process: 'ready', engineSessionId: SID, heldPeerMessages: [], permissionMode: { requested: effective, effective, refusal: null } } as unknown as EngineSessionStatus });
+    status('default');
+    batch(event('tool.result', { toolUseId: 'toolu_7', denial: 'automode-unavailable' }));
+    status('default');
+    status('acceptEdits');
+    expect(last().map((i) => i.kind)).toEqual(['auto_mode_unavailable']);
   });
 
   // UX wave U3, O-34 (the U3a document, Acceptance 5): a failed task raises nothing, whether it ran in the background or in
@@ -509,11 +546,11 @@ describe('attention service merges broker items with the derived kinds', () => {
   it('an exit drops the held-message item, and the exited status that follows never re-derives it (M5 review)', () => {
     const { fire, batch, last } = setup();
     const held = { messageUuid: 'm-1', from: 'peer', fromName: null, lane: 'team', heldAt: AT, expiresAt: '2026-09-28T10:05:00.000Z' };
-    fire('session.status', { appSessionId: APP, status: { process: 'ready', engineSessionId: SID, heldPeerMessages: [held] } as unknown as EngineSessionStatus });
+    fire('session.status', { appSessionId: APP, status: { process: 'ready', engineSessionId: SID, permissionMode: MANUAL, heldPeerMessages: [held] } as unknown as EngineSessionStatus });
     expect(last().map((i) => i.kind)).toEqual(['held_peer_message']);
     batch(event('process.exited', { code: 1, signal: null, reason: 'crash', lostAttentionCount: 0 }));
     expect(last()).toEqual([]);
-    fire('session.status', { appSessionId: APP, status: { process: 'exited', engineSessionId: SID, heldPeerMessages: [held] } as unknown as EngineSessionStatus });
+    fire('session.status', { appSessionId: APP, status: { process: 'exited', engineSessionId: SID, permissionMode: MANUAL, heldPeerMessages: [held] } as unknown as EngineSessionStatus });
     expect(last()).toEqual([]);
   });
 

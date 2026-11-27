@@ -1,6 +1,7 @@
 // An attention item that is not a request (an error, an interrupted turn, auto mode unavailable, a held peer message):
 // its summary and its age, and for `auto_mode_unavailable` the remedy X1 names. Nothing to answer: these retire on the
-// next human turn or by C3's expiry. Never takes keys, never blocks the editor.
+// next human turn or by C3's expiry, and auto mode unavailable as soon as the session's mode leaves auto (the remedy
+// pressed, or the mode changed any other way; the attention service). Never takes keys, never blocks the editor.
 // E11 F2b (plan 2.4): an outcome says when it happened ("2 weeks ago"), not how long it waited; an error offers Dismiss,
 // and shown in its opened session (`seenHere`: the composer's notice) for two continuous seconds while the window is in
 // front it counts as seen (L102's dwell). The owner's ruling (2026-10-30): an error is only ever an unseen one, its
