@@ -46,6 +46,32 @@ describe('readBundle', () => {
     for (const path of ['/assets/linked.js', '/linked-dir/secret.js', '/notes.txt', '/source.map']) expect(table.get(path), path).toBeNull();
   });
 
+  it('holds each file’s bytes once: every read, concurrent or later, is the one buffer read at the first (S1)', async () => {
+    const bundle = join(scratch, 'bundle');
+    mkdirSync(bundle);
+    writeFileSync(join(bundle, 'index.html'), '<!doctype html>');
+    writeFileSync(join(bundle, 'page.js'), 'first');
+    const file = (await readBundle(bundle)).get('/page.js')!;
+    const reads = await Promise.all(Array.from({ length: 64 }, () => file.read())); // pipelined requests, before any write
+    for (const read of reads) expect(read).toBe(reads[0]);
+    writeFileSync(join(bundle, 'page.js'), 'changed under the daemon');
+    const later = await file.read();
+    expect(later).toBe(reads[0]); // the bundle is immutable for the daemon's life: nothing is read again
+    expect(later.toString('utf8')).toBe('first');
+  });
+
+  it('reads a file again after a read that failed, so a passing error is not kept', async () => {
+    const bundle = join(scratch, 'bundle');
+    mkdirSync(bundle);
+    writeFileSync(join(bundle, 'index.html'), '<!doctype html>');
+    writeFileSync(join(bundle, 'page.js'), 'here');
+    const file = (await readBundle(bundle)).get('/page.js')!;
+    rmSync(join(bundle, 'page.js'));
+    await expect(file.read()).rejects.toThrow();
+    writeFileSync(join(bundle, 'page.js'), 'back');
+    expect((await file.read()).toString('utf8')).toBe('back');
+  });
+
   it('refuses a directory with no index.html', async () => {
     await expect(readBundle(scratch)).rejects.toThrow(/index\.html/);
   });
