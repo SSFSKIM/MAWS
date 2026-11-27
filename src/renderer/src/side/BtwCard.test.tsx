@@ -597,7 +597,7 @@ describe('a path in the card’s answer (U6b-4b)', () => {
     listing([exchange({ response: 'See [a](/work/a.ts#L12).' })]);
     act(() => openBtwCard(A));
     render(<BtwCard appSessionId={A} />);
-    const chip = await within(card()!).findByTitle('/work/a.ts');
+    const chip = await within(card()!).findByRole('button', { name: 'a', description: '/work/a.ts' }); // the path is its tip (board ticket 815)
     act(() => void fireEvent.click(chip));
     expect(vi.mocked(openFile).mock.calls).toEqual([[A, '/work/a.ts', 12, { main: false }]]); // one open per click, the tabs' reuse aside
     expect(filesBeside(A)).toEqual([{ file: '/work/a.ts', line: 12, preview: true }]);
@@ -612,7 +612,7 @@ describe('a path in the card’s answer (U6b-4b)', () => {
     listing([exchange({ response: 'See [o](/elsewhere/o.md).' })], { 'files.watch': undefined, 'files.unwatch': undefined });
     act(() => openBtwCard(A));
     render(<BtwCard appSessionId={A} />);
-    const chip = await within(card()!).findByTitle('/elsewhere/o.md');
+    const chip = await within(card()!).findByRole('button', { name: 'o', description: '/elsewhere/o.md' });
     act(() => void fireEvent.click(chip, { metaKey: true }));
     expect(vi.mocked(openFile).mock.calls).toEqual([[A, '/elsewhere/o.md', undefined, { main: true }]]);
     const [tab] = mainFiles();

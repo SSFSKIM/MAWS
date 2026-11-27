@@ -169,7 +169,7 @@ describe('resume widget', () => {
     useSessions.setState({ digests });
     mount(ResumeWidget, at('app-bac6130b' as AppSessionId));
     expect(screen.getByTestId('resume-refusal').textContent).toMatch(/^Held by terminal · \d+$/);
-    expect(screen.getAllByRole('option')[0].title).toBe(screen.getByTestId('resume-refusal').textContent);
+    expect(accessibleDescription(screen.getAllByRole('option')[0])).toBe(screen.getByTestId('resume-refusal').textContent); // the row's note (board ticket 815)
     fireEvent.keyDown(screen.getByRole('combobox'), { key: 'ArrowDown' }); // Trace stream reconnects: no process
     expect(screen.queryByTestId('resume-refusal')).toBeNull();
   });

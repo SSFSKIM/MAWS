@@ -105,7 +105,12 @@ describe('connectRemoteLaneA', () => {
       const asked = { ...raised, request: 'toolu_q', tool: 'mcp__plugin_sminos_ask__ask', async: true as const, input: { questions: [{ question: 'Ship it?', header: 'Ship', options: [{ label: 'Yes' }] }] } };
       const row = (answers: Record<string, string> | null) => {
         const view = renderRow({ id: 'question:toolu_q' as never, turnId: null, at: '2026-10-29T08:00:00.000Z', kind: 'question', toolUseId: 'toolu_q' as ToolUseId, questions: [{ question: 'Ship it?', header: 'Ship', multiSelect: false, options: [{ label: 'Yes', description: null, preview: null }] }], answers, error: null }, { storeKey: REMOTE });
-        const said = [...view.container.querySelectorAll('[data-question]')].map((line) => line.textContent);
+        // the line's drawn words: its header's tip description and touch line apart (board ticket 815)
+        const said = [...view.container.querySelectorAll('[data-question]')].map((line) => {
+          const copy = line.cloneNode(true) as Element;
+          copy.querySelectorAll('[hidden], [data-touch-fact]').forEach((element) => element.remove());
+          return copy.textContent;
+        });
         view.unmount();
         return said;
       };

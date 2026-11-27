@@ -931,8 +931,8 @@ describe('comments on lines in Review', () => {
     addOn('src/report.ts', 'new', 12);
     await painted(() => card() !== null);
     expect(box().checked).toBe(true);
-    expect(box().disabled).toBe(true);
-    expect(box().closest('label')!.getAttribute('title')).toBe('A side thread is not available on Studio yet');
+    expect(box().getAttribute('aria-disabled')).toBe('true'); // locked, keeping Tab (board ticket 815)
+    expect(accessibleDescription(box())).toBe('A side thread is not available on Studio yet');
   });
 
   // Last turn: one file edited twice, each edit a block of its own whose new side shows `l9` at line 9.
