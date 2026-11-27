@@ -12,6 +12,7 @@ import type { SetupEvent } from '@shared/sessions/setup';
 import { defaultBranchName, type WorktreeInfo } from '@shared/sessions/worktree';
 import type { ModelInfo, SetupIntentHook as ComposerSetupIntentHook, SetupProject } from '../composer/setup-intent';
 import { ipc } from '../ipc/client';
+import { useCommand } from '../ipc/query';
 import { useSessions } from '../stores/sessions';
 import { useSettings } from '../stores/settings'; // W3
 import { patchIntent, startIntent, type HookResult } from './setup-actions';
@@ -27,7 +28,7 @@ export type { ModelInfo };
 export interface SetupIntentOptions {
   models: ModelInfo[];
   autoModeNote: string | null;
-  modelsLoading: boolean; // the observation set 4: no catalogue answered for the launch's route yet
+  modelsLoading: boolean; // the observation set 4: no catalogue answered for the launch yet
   refreshModels(): void; // read the catalogue again (the model menu, as it opens)
 }
 
@@ -191,23 +192,34 @@ async function readRepository(machine: MachineRef, directory: string): Promise<R
   return { directory, repoRoot, worktrees: listed.ok ? listed.value.worktrees : [], trustError: null };
 }
 
-// The catalogue at every mount, on every route change and each time the model menu opens: the host answers the tab's
-// route's catalogue from its cache, which every launch's initialize, every list_models and (the owner's observation set
-// 4) the prestart engine's initialize update, falling back to what a session on the machine last listed, so each new tab
-// sees what a running session would list for the route it would launch on. Until it answers nothing is listed (the
-// menu says it is reading), never a list built into the app; a failed read keeps what was read, else lists nothing.
-// The directory it names is the one the launch would read settings from, which may set a model environment of its own
-// (debt wave 5).
-// P5 O7 M9: the machine's own route is asked by `route` (with the legacy field the intent holds beside it), whose
-// catalogue the host answers from what the machine resolves to; Gateway and Direct by the legacy field alone, as before.
-async function readCatalogue(machine: MachineRef, route: Route, gateway: SetupIntent['gateway'], cwd: string | null): Promise<ModelCatalogue | null> {
-  const asked = route === 'machine' ? { refresh: false, gateway, route } : { refresh: false, gateway: route };
-  const result = await ipc.invoke('engine.models', cwd === null ? asked : { ...asked, cwd }, { machine });
-  if (result.ok) return result.value;
-  console.warn('[sessions] engine.models unavailable', result.error);
-  return null;
+// What a launch's model list answers to: the machine the intent is read on, the route and the legacy field beside it,
+// and the directory whose settings it reads, which may set a model environment of its own (debt wave 5).
+interface LaunchContext {
+  machine: MachineRef;
+  route: Route;
+  gateway: SetupIntent['gateway'];
+  cwd: string | null;
 }
 
+function launchContextOf(appSessionId: AppSessionId, intent: SetupIntent): LaunchContext {
+  return { machine: machineOf(appSessionId), route: readRoute(intent), gateway: intent.gateway, cwd: intent.location ? settingsDirectoryOf(intent.location) : null };
+}
+
+// P5 O7 M9: the machine's own route is asked by `route` (with the legacy field the intent holds beside it), whose
+// catalogue the host answers from what the machine resolves to; Gateway and Direct by the legacy field alone, as before.
+function catalogueAsk({ route, gateway, cwd }: LaunchContext) {
+  const asked = route === 'machine' ? { refresh: false, gateway, route } : { refresh: false, gateway: route };
+  return cwd === null ? asked : { ...asked, cwd };
+}
+
+// The catalogue: the host answers the launch's catalogue from its cache, which every launch's initialize, every
+// list_models and (the owner's observation set 4) the prestart engine's initialize update, falling back to what a session
+// on the machine last listed, so each new tab sees what a running session would list for the route it would launch on.
+// One cached read per launch context (the whole request is its key), shared by every caller of the hook (the composer's
+// chips and auto-mode note, the model menu): read at every mount, on every change of context and each time the menu
+// opens (`refreshModels`), and one refresh updates them all. Until the context's own read answers nothing is listed (the
+// menu says it is reading), never another context's list nor one built into the app; a failed read keeps what was read
+// for the context, else lists nothing.
 function useSetupOptions(
   appSessionId: AppSessionId,
   intent: SetupIntent | null,
@@ -215,29 +227,19 @@ function useSetupOptions(
   const location = intent?.location ?? null; // New chat: none until a project is chosen, and nothing to read
   const base = location ? baseDirectoryOf(location) : null;
   const [facts, setFacts] = useState<RepositoryFacts | null>(null);
-  const [read, setRead] = useState<{ route: Route; catalogue: ModelCatalogue } | null>(null); // P5 O7 M9: the route it answers
   const fallback = useSettings((s) => s.state?.settings.permissions.autoFallback) ?? 'acceptEdits'; // W3
   const machine = machineOf(appSessionId);
 
   // Only an unstarted session reads it: C7 calls this hook from every composer, and a started session's has no intent.
-  // P5 O7 M9: the route the launch would take (`route` before the legacy field), each one's catalogue its own: until the
-  // new route's answers, the built-in list stands rather than another route's (a gateway alias the machine can't reach)
-  const gateway = intent?.gateway ?? null;
-  const route = intent === null ? null : readRoute(intent);
-  const settingsDirectory = location ? settingsDirectoryOf(location) : null;
-  const [asks, setAsks] = useState(0); // each `refreshModels` reads again
-  const refreshModels = useCallback(() => setAsks((n) => n + 1), []);
-  useEffect(() => {
-    if (route === null || gateway === null) return;
-    let live = true;
-    void readCatalogue(machine, route, gateway, settingsDirectory).then((catalogue) => {
-      if (live) setRead((was) => (catalogue !== null ? { route, catalogue } : was !== null && was.route === route ? was : { route, catalogue: NO_CATALOGUE }));
-    });
-    return () => {
-      live = false;
-    };
-  }, [machine, route, gateway, settingsDirectory, asks]);
-  const catalogue = read !== null && read.route === route ? read.catalogue : null;
+  const context = intent === null ? null : launchContextOf(appSessionId, intent);
+  const read = useCommand('engine.models', context === null ? { refresh: false } : catalogueAsk(context), { enabled: context !== null }, { machine: context?.machine ?? machine });
+  const { refetch } = read;
+  const reads = context !== null;
+  // a read already on its way (the menu's own mount asked) is the one waited for
+  const refreshModels = useCallback(() => {
+    if (reads) void refetch({ cancelRefetch: false });
+  }, [reads, refetch]);
+  const catalogue = read.data ?? (read.isError ? NO_CATALOGUE : null);
 
   // The repository is read again only when the base directory moves to another repository or out of one; a move
   // between two locations of one repository keeps what was read.

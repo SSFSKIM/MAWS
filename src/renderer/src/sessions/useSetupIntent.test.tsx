@@ -1,4 +1,6 @@
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { act, cleanup, renderHook, waitFor } from '@testing-library/react';
+import type { ReactNode } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId, ProjectId } from '@shared/graph/ids';
 import type { PreloadBridge } from '@shared/ipc/schema';
@@ -41,6 +43,9 @@ const P1 = at(BARE_P1);
 const pageIntent: typeof intent = (over = {}) => intent({ appSessionId: A, ...over });
 
 let fake: FakeClient;
+// one cache per test, shared by every reader in it (the composer and the model menu each call the hook)
+let queries: QueryClient;
+const wrapper = ({ children }: { children: ReactNode }) => <QueryClientProvider client={queries}>{children}</QueryClientProvider>;
 // `auto` answers commands at once; a command given as undefined waits for the test to answer it.
 function withMain(auto: Parameters<typeof fakeClient>[0] = {}) {
   const answers: Parameters<typeof fakeClient>[0] = {
@@ -62,12 +67,14 @@ function withMain(auto: Parameters<typeof fakeClient>[0] = {}) {
 }
 
 beforeEach(() => {
+  queries = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   resetShellStores();
   resetSetupStore();
   useNotices.setState({ notices: [] });
 });
 afterEach(() => {
   cleanup();
+  queries.clear();
   closeDialog();
   delete (window as { maws?: PreloadBridge }).maws;
 });
@@ -80,7 +87,7 @@ void assignableToC7;
 describe('setup intent hook', () => {
   it('is null for an id with a record and a status, and non-null for an intent', async () => {
     withMain();
-    const { result } = renderHook(() => useSetupIntent(A));
+    const { result } = renderHook(() => useSetupIntent(A), { wrapper });
     expect(result.current).toBeNull();
     act(() => putIntent(pageIntent()));
     expect(result.current?.intent.appSessionId).toBe(A);
@@ -95,7 +102,7 @@ describe('setup intent hook', () => {
     withMain();
     useSessions.setState({ projects: new Map([[P1, { id: P1, name: 'Repo', directory: REPO, order: 0, createdAt: '2026-09-29T10:00:00.000Z' }]]) });
     putIntent(pageIntent({ projectId: P1 }));
-    const { result } = renderHook(() => useSetupIntent(A));
+    const { result } = renderHook(() => useSetupIntent(A), { wrapper });
     await waitFor(() => expect(result.current?.project.branch).toBe('main'));
     expect(result.current!.project).toMatchObject({ projectId: P1, label: 'Repo', path: REPO, branch: 'main', worktree: false });
     void result.current!.project.setWorktree(true); // the patch waits for main's answer, which this test never gives
@@ -111,7 +118,7 @@ describe('setup intent hook', () => {
   it('answers the running setup’s phase in words (the composer’s disabled-state reason), and null otherwise', async () => {
     withMain();
     putIntent(pageIntent({ location: { kind: 'newWorktree', repoRoot: REPO, name: 'one', branch: { kind: 'new', name: 'worktree-one', base: 'HEAD' } }, trust: 'accepted', trustKey: REPO }));
-    const { result } = renderHook(() => useSetupIntent(A));
+    const { result } = renderHook(() => useSetupIntent(A), { wrapper });
     expect(result.current!.phase).toBeNull();
     const phase = (p: 'worktree' | 'trusting' | 'launching' | 'ready' | 'failed', detail: string | null) =>
       act(() => useSetup.getState().applySetup({ appSessionId: A, phase: p, detail, outcome: p === 'failed' ? { kind: 'error', message: 'no', resources: { worktree: null, record: 'none', transcript: 'none' } } : null }));
@@ -131,7 +138,7 @@ describe('setup intent hook', () => {
   it('lists nothing, reading, until the host answers; a failed read lists nothing and stops reading', async () => {
     withMain({ 'engine.models': undefined });
     putIntent(pageIntent());
-    const { result } = renderHook(() => useSetupIntent(A));
+    const { result } = renderHook(() => useSetupIntent(A), { wrapper });
     expect(result.current!.options).toMatchObject({ models: [], modelsLoading: true });
     await act(() => fake.fail('engine.models', 'host unavailable'));
     expect(result.current!.options).toMatchObject({ models: [], modelsLoading: false });
@@ -141,7 +148,7 @@ describe('setup intent hook', () => {
     let catalogue: ModelCatalogue = CATALOGUE;
     withMain({ 'engine.models': () => catalogue });
     putIntent(pageIntent());
-    const { result } = renderHook(() => useSetupIntent(A));
+    const { result } = renderHook(() => useSetupIntent(A), { wrapper });
     await waitFor(() => expect(result.current!.options.models.map((m) => m.value)).toEqual(['default', 'haiku', 'claude/astra']));
     const reads = fake.invoked('engine.models').length;
     catalogue = { models: [{ value: 'opus', displayName: 'Opus 5.5' }], source: 'cached', at: null }; // the prestart engine listed meanwhile
@@ -154,11 +161,11 @@ describe('setup intent hook', () => {
     let catalogue: ModelCatalogue = { models: [{ value: 'default', displayName: 'Default' }], source: 'builtin', at: null };
     withMain({ 'engine.models': () => catalogue });
     putIntent(pageIntent());
-    const first = renderHook(() => useSetupIntent(A));
+    const first = renderHook(() => useSetupIntent(A), { wrapper });
     await waitFor(() => expect(first.result.current!.options.models.map((m) => m.value)).toEqual(['default']));
     first.unmount();
     catalogue = CATALOGUE; // a launch filled the host's cache, the relay's aliases included
-    const second = renderHook(() => useSetupIntent(A));
+    const second = renderHook(() => useSetupIntent(A), { wrapper });
     await waitFor(() => expect(second.result.current!.options.models.map((m) => m.value)).toEqual(['default', 'haiku', 'claude/astra']));
     expect(fake.invoked('engine.models')).toEqual([{ refresh: false, gateway: 'gateway', cwd: REPO }, { refresh: false, gateway: 'gateway', cwd: REPO }]);
   });
@@ -171,7 +178,7 @@ describe('setup intent hook', () => {
     };
     withMain({ 'engine.models': (input: { gateway: 'gateway' | 'direct' }) => byRoute[input.gateway] });
     putIntent(pageIntent({ gateway: 'direct' }));
-    const { result } = renderHook(() => useSetupIntent(A));
+    const { result } = renderHook(() => useSetupIntent(A), { wrapper });
     await waitFor(() => expect(result.current!.options.models.map((m) => m.value)).toEqual(['sonnet']));
     act(() => putIntent(pageIntent({ gateway: 'gateway' })));
     await waitFor(() => expect(result.current!.options.models.map((m) => m.value)).toEqual(['default', 'haiku', 'claude/astra']));
@@ -189,7 +196,7 @@ describe('setup intent hook', () => {
     const MACHINE: ModelCatalogue = { models: [{ value: 'opus', displayName: 'Opus 5.5' }], source: 'cached', at: null };
     withMain({ 'engine.models': (input: { route?: string }) => (input.route === 'machine' ? MACHINE : CATALOGUE) });
     putIntent(pageIntent({ gateway: 'gateway' }));
-    const { result } = renderHook(() => useSetupIntent(A));
+    const { result } = renderHook(() => useSetupIntent(A), { wrapper });
     await waitFor(() => expect(result.current!.options.models.map((m) => m.value)).toEqual(['default', 'haiku', 'claude/astra']));
     act(() => putIntent(pageIntent({ gateway: 'gateway', route: 'machine' })));
     await waitFor(() => expect(fake.invoked('engine.models').at(-1)).toEqual({ refresh: false, gateway: 'gateway', route: 'machine', cwd: REPO }));
@@ -204,10 +211,42 @@ describe('setup intent hook', () => {
   it('names the directory whose settings the launch would read: an existing worktree’s own path, a new worktree’s repository', async () => {
     withMain();
     putIntent(pageIntent({ location: { kind: 'existingWorktree', repoRoot: REPO, path: WORKTREE } }));
-    renderHook(() => useSetupIntent(A));
+    renderHook(() => useSetupIntent(A), { wrapper });
     await waitFor(() => expect(fake.invoked('engine.models')).toEqual([{ refresh: false, gateway: 'gateway', cwd: WORKTREE }]));
     act(() => putIntent(pageIntent({ location: { kind: 'newWorktree', repoRoot: REPO, name: 'two', branch: { kind: 'new', name: 'worktree-two', base: 'HEAD' } } })));
     await waitFor(() => expect(fake.invoked('engine.models').at(-1)).toEqual({ refresh: false, gateway: 'gateway', cwd: REPO }));
+  });
+
+  // A list answers the whole request it was read for: a move to another settings directory (another model environment)
+  // shows the reading state until that directory's answers, never the last directory's list
+  it('keys the list by the whole request: another settings directory reads, showing no other directory’s list meanwhile', async () => {
+    withMain({ 'engine.models': undefined });
+    putIntent(pageIntent());
+    const { result } = renderHook(() => useSetupIntent(A), { wrapper });
+    await act(() => fake.reply('engine.models', CATALOGUE));
+    expect(result.current!.options.models.map((m) => m.value)).toEqual(['default', 'haiku', 'claude/astra']);
+    act(() => putIntent(pageIntent({ location: { kind: 'existingWorktree', repoRoot: REPO, path: WORKTREE } })));
+    await waitFor(() => expect(fake.invoked('engine.models').at(-1)).toEqual({ refresh: false, gateway: 'gateway', cwd: WORKTREE }));
+    expect(result.current!.options, 'the repository’s list is not the worktree’s').toMatchObject({ models: [], modelsLoading: true });
+    await act(() => fake.reply('engine.models', { models: [{ value: 'opus', displayName: 'Opus 5.5' }], source: 'cached', at: null } satisfies ModelCatalogue));
+    expect(result.current!.options.models.map((m) => m.value)).toEqual(['opus']);
+  });
+
+  // The composer's chips and the model menu each call the hook: one catalogue per launch, so a refresh as the menu opens
+  // reaches the chips and the auto-mode note too
+  it('shares one catalogue among the hook’s callers for a launch: a refresh from one updates every one, with one read', async () => {
+    let catalogue: ModelCatalogue = CATALOGUE;
+    withMain({ 'engine.models': () => catalogue });
+    putIntent(pageIntent({ model: 'opus', permissionMode: 'auto' }));
+    const composer = renderHook(() => useSetupIntent(A), { wrapper });
+    const menu = renderHook(() => useSetupIntent(A), { wrapper });
+    await waitFor(() => expect(menu.result.current!.options.models.map((m) => m.value)).toEqual(['default', 'haiku', 'claude/astra']));
+    const reads = fake.invoked('engine.models').length;
+    catalogue = { models: [{ value: 'opus', displayName: 'Opus 5.5', supportsAutoMode: false }], source: 'cached', at: null };
+    act(() => menu.result.current!.options.refreshModels());
+    await waitFor(() => expect(composer.result.current!.options.models.map((m) => m.value)).toEqual(['opus']));
+    expect(composer.result.current!.options.autoModeNote, 'the composer’s note follows the menu’s read').not.toBeNull();
+    expect(fake.invoked('engine.models')).toHaveLength(reads + 1);
   });
 
   // Debt wave 4: the catalogue's effort levels reach C7's ModelInfo, so the model widget can lower an effort
@@ -231,7 +270,7 @@ describe('setup intent hook', () => {
   // C7 calls the hook from every composer: a started session's has no intent and reads nothing
   it('reads no catalogue for an id without an intent, and reads it once the intent arrives', async () => {
     withMain();
-    const { result } = renderHook(() => useSetupIntent(A));
+    const { result } = renderHook(() => useSetupIntent(A), { wrapper });
     await act(async () => {});
     expect(result.current).toBeNull();
     expect(fake.invoked('engine.models'), 'a started session’s composer asks nothing').toEqual([]);
@@ -243,7 +282,7 @@ describe('setup intent hook', () => {
   it('notes a model that cannot hold auto mode, and a gateway model’s local auto lane', async () => {
     withMain();
     putIntent(pageIntent({ model: 'haiku', permissionMode: 'auto' }));
-    const { result } = renderHook(() => useSetupIntent(A));
+    const { result } = renderHook(() => useSetupIntent(A), { wrapper });
     await waitFor(() => expect(result.current!.options.autoModeNote).toBe("Auto mode isn't available for Haiku. This session will use Accept edits instead.")); // W3: the fallback setting's default
     act(() => putIntent(pageIntent({ model: 'claude/astra', permissionMode: null, updatedAt: '2026-09-29T10:00:01.000Z' })));
     expect(result.current!.options.autoModeNote).toBe(GATEWAY_AUTO_NOTE);
@@ -257,7 +296,7 @@ describe('setup intent hook', () => {
   it('claims nothing about auto mode from the built-in list: Haiku in auto has no note and keeps auto offered', async () => {
     withMain({ 'engine.models': () => ({ models: [...BUILTIN_MODELS], source: 'builtin', at: null }) satisfies ModelCatalogue });
     putIntent(pageIntent({ model: 'haiku', permissionMode: 'auto' }));
-    const { result } = renderHook(() => useSetupIntent(A));
+    const { result } = renderHook(() => useSetupIntent(A), { wrapper });
     await waitFor(() => expect(result.current!.options.models.map((m) => m.value)).toEqual(['default', 'opus', 'fable', 'sonnet', 'haiku']));
     expect(result.current!.options.autoModeNote).toBeNull();
     expect(result.current!.options.models.find((m) => m.value === 'haiku')!.supportsAutoMode).toBe(true); // offered, as an unknown model is
@@ -271,7 +310,7 @@ describe('setup intent hook', () => {
   it("surfaces the validator's message from patch", async () => {
     withMain({ 'session.intent.patch': undefined });
     putIntent(pageIntent());
-    const { result } = renderHook(() => useSetupIntent(A));
+    const { result } = renderHook(() => useSetupIntent(A), { wrapper });
     const messages = [
       'location: directory not found: /nowhere',
       "location: Worktree name cannot start with '-'",
@@ -290,7 +329,7 @@ describe('setup intent hook', () => {
     let outcome: StartOutcome = { status: 'starting', appSessionId: ID };
     withMain({ 'session.start': () => outcome });
     putIntent(pageIntent());
-    const { result } = renderHook(() => useSetupIntent(A));
+    const { result } = renderHook(() => useSetupIntent(A), { wrapper });
     await waitFor(() => expect(result.current!.project.branch).toBe('main')); // the repository read
     expect(await act(() => result.current!.start(MESSAGE))).toEqual({ ok: true });
     expect(fake.invoked('session.start')[0]).toEqual({ appSessionId: ID, message: MESSAGE, options: {} });
@@ -308,7 +347,7 @@ describe('setup intent hook', () => {
   it('refuses to start with the error when the trust check failed', async () => {
     withMain({ 'session.trust.check': undefined, 'session.start': () => ({ status: 'starting', appSessionId: ID }) });
     putIntent(pageIntent());
-    const { result } = renderHook(() => useSetupIntent(A));
+    const { result } = renderHook(() => useSetupIntent(A), { wrapper });
     await act(() => fake.fail('session.trust.check', 'global config unreadable: EACCES'));
     const refused = result.current!.start(MESSAGE); // Send checks again first
     await act(() => fake.fail('session.trust.check', 'global config unreadable: EACCES'));
@@ -319,7 +358,7 @@ describe('setup intent hook', () => {
   it('checks trust again at Send after a failed check, and starts once the check answers', async () => {
     withMain({ 'session.trust.check': undefined, 'session.start': () => ({ status: 'starting', appSessionId: ID }) });
     putIntent(pageIntent());
-    const { result } = renderHook(() => useSetupIntent(A));
+    const { result } = renderHook(() => useSetupIntent(A), { wrapper });
     await act(() => fake.fail('session.trust.check', 'global config unreadable: EACCES'));
     const started = result.current!.start(MESSAGE);
     await act(() => fake.reply('session.trust.check', trustState({ trusted: true, source: 'trustKey' })));
@@ -491,7 +530,7 @@ describe('the project row’s facts', () => {
   it('chooses a project by id alone (main moves the location), keeps the same choice, and adds a picked folder as a New project', async () => {
     withMain({ 'layout.pickFiles': () => ({ files: [{ path: '/picked', name: 'picked', bytes: 0, mediaType: 'inode/directory', data: null }] }), 'session.projects.addFolder': () => ({ project: { id: 'p-9', name: 'picked', directory: '/picked', order: 3, createdAt: '2026-10-01T00:00:00.000Z' }, location: { kind: 'directory', path: '/picked' } }) });
     putIntent(pageIntent({ location: null }));
-    const { result } = renderHook(() => useSetupIntent(A));
+    const { result } = renderHook(() => useSetupIntent(A), { wrapper });
     void result.current!.project.choose(P1);
     await waitFor(() => expect(fake.invoked('session.intent.patch')).toEqual([{ appSessionId: ID, patch: { projectId: BARE_P1 } }]));
     void result.current!.project.newProject();
