@@ -1,6 +1,6 @@
 // P2-D (the P2 spec, child P2-D, G1 to G5): the chooser over the real session store — an empty list, a selection that
 // holds while the store reorders and drops rows, and the folder badges by the scope shown.
-import { act, cleanup, render, screen, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId, ProjectId } from '@shared/graph/ids';
@@ -9,13 +9,15 @@ import type { OrgKey } from '@shared/machine/org-key';
 import type { SessionRecord } from '@shared/graph/session';
 import type { PreloadBridge } from '@shared/ipc/schema';
 import { fakeClient } from '../../../../test/support/fake-client';
-import { project, record, remoteRow } from '../../../../test/support/builders';
+import { digest, project, record, remoteRow } from '../../../../test/support/builders';
 import { at, OTHER_MACHINE } from '../../../../test/support/machine';
 import { registerRemoteOpener } from '../sessions/remote-openers';
 import { useMachines } from '../stores/machines';
 import { labelOf } from '../stores/org-projects';
 import { formatDateTime } from '@shared/app/date-format';
 import { useSessions, type ListedSession } from '../stores/sessions';
+import { accessibleDescription } from '../test-support/accessible-text';
+import { POINTING_DELAY_MS } from '../ui/pointing';
 import { RESUME_COPY } from './copy';
 import { clearPreviewCache, SETTLE_MS } from './preview';
 import { ResumeChooser } from './ResumeChooser';
@@ -168,13 +170,43 @@ describe('the resume chooser', () => {
     expect(turns.textContent).not.toContain(RESUME_COPY.empty);
   });
 
-  it('a row’s time and the preview’s last activity carry the date and time in the display locale, as the rest of MAWS', () => {
+  // Ticket 815: an option takes no Tab stop (the keyboard stays in the search field), so the row's time holds no tooltip;
+  // the selected row's preview carries the date and time, its last activity's Tip and description.
+  it('the preview’s last activity carries the date and time in the display locale, as the rest of MAWS, a tip its words take Tab for', () => {
     fill(base);
     mount();
     const full = formatDateTime(Date.parse(minute(9)));
     const alpha = screen.getAllByRole('option').find((o) => o.querySelector('[data-title]')!.textContent === 'alpha')!;
-    expect(alpha.querySelector(`[title="${full}"]`)).not.toBeNull();
-    expect(within(screen.getByTestId('resume-preview')).getByTitle(full)).toBeTruthy();
+    expect(alpha.querySelector('[title]'), 'no system tooltip on the row').toBeNull();
+    const facts = within(screen.getByTestId('resume-preview'));
+    const lastActive = facts.getByText((_, element) => element?.tagName === 'SPAN' && accessibleDescription(element) === full);
+    expect(lastActive.tabIndex).toBe(0);
+    act(() => lastActive.focus());
+    expect(tooltip()).toBe(full);
+  });
+
+  it('a row its session cannot be continued from says why in its note and its description; the preview says it at rest', () => {
+    vi.useFakeTimers();
+    try {
+      fill(base);
+      useSessions.setState({ digests: new Map([[at('beta'), digest(at('beta'), { availability: 'foreign_held' })]]) });
+      change('beta', { holder: { kind: 'terminal', pid: 41 } });
+      mount();
+      const beta = screen.getAllByRole('option').find((o) => o.querySelector('[data-title]')!.textContent === 'beta')!;
+      const alpha = screen.getAllByRole('option').find((o) => o.querySelector('[data-title]')!.textContent === 'alpha')!;
+      expect(accessibleDescription(beta)).toBe('Held by terminal · 41');
+      expect(alpha.hasAttribute('aria-describedby'), 'a row that can be continued has no note').toBe(false);
+      expect(beta.hasAttribute('title')).toBe(false);
+      const note = beta.querySelector<HTMLElement>('[data-row-note]')!;
+      expect(note.hidden, 'hidden at rest').toBe(true);
+      fireEvent.pointerEnter(beta);
+      act(() => void vi.advanceTimersByTime(POINTING_DELAY_MS));
+      expect(note.hidden, 'shown on pointing').toBe(false);
+      fireEvent.click(beta);
+      expect(screen.getByTestId('resume-refusal').textContent).toBe('Held by terminal · 41');
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('badges the opened project’s rows only once All projects widens past it', async () => {

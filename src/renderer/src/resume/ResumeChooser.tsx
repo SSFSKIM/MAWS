@@ -28,6 +28,7 @@ import { useMachines } from '../stores/machines';
 import { machineName, rowName, selectOrgIndex } from '../stores/org-projects';
 import { usePeople } from '../stores/people'; // P5 O7 M8
 import { useSessions } from '../stores/sessions';
+import { RowNote, useRowNote } from '../ui/row-note';
 import { Tip } from '../ui/tip';
 import { RESUME_COPY as COPY } from './copy';
 import {
@@ -318,7 +319,7 @@ function useRefusal(record: SessionRecord): string | null {
 }
 
 type RowProps = { id: string; kind: GroupKind; now: number; selected: boolean; onSelect(): void; onOpen(): void };
-const ROW_CLASS = 'flex h-8 cursor-default items-center gap-1.5 rounded-sm px-2 text-fg-muted hover:bg-bg-hover data-[selected=true]:bg-bg-active data-[selected=true]:text-fg';
+const ROW_CLASS = 'relative flex h-8 cursor-default items-center gap-1.5 rounded-sm px-2 text-fg-muted hover:bg-bg-hover data-[selected=true]:bg-bg-active data-[selected=true]:text-fg';
 
 function Row({ id, row, kind, now, selected, badge, onSelect, onOpen }: RowProps & { row: ChooserRecordRow; badge: string | null }) {
   const { record } = row;
@@ -329,16 +330,20 @@ function Row({ id, row, kind, now, selected, badge, onSelect, onOpen }: RowProps
   const refusal = useRefusal(record);
   const branch = sessionBranch(record);
   const title = displayTitle(record);
+  // Ticket 815: the reason it cannot be continued is the row's note on pointing and its description (the selected row's
+  // preview draws it at rest). The row's words hold no tooltip: an option takes no Tab stop, the keyboard staying in the
+  // search field, so the facts they shorten (the whole branch, the folder, the date and time) are the preview's.
+  const note = useRowNote();
   return (
     <div
       id={id}
-      title={refusal ?? undefined}
       role="option"
       aria-selected={selected}
       data-selected={selected}
       onClick={onSelect}
       onDoubleClick={onOpen}
       className={ROW_CLASS}
+      {...(refusal ? note.rowProps : {})}
     >
       <GlyphMark glyph={glyph} className="w-3 shrink-0 text-ui-sm" />
       <span data-title className="min-w-8 shrink truncate">
@@ -348,18 +353,19 @@ function Row({ id, row, kind, now, selected, badge, onSelect, onOpen }: RowProps
       <MachineChip address={record.appId} className="max-w-[9rem]" />
       {record.archived &&<span className="shrink-0 rounded-sm border border-border px-1 text-ui-sm text-fg-faint">{COPY.archived}</span>}
       {branch && (
-        <span data-testid="row-branch" title={branch} className="max-w-[9rem] min-w-9 shrink-[100] truncate text-ui-sm text-fg-faint">
+        <span data-testid="row-branch" className="max-w-[9rem] min-w-9 shrink-[100] truncate text-ui-sm text-fg-faint">
           ⎇ {shortBranch(branch)}
         </span>
       )}
       {badge && (
-        <span data-testid="row-folder" title={record.worktree?.path ?? record.directory} className="max-w-[7rem] shrink-0 truncate rounded-sm border border-border px-1 text-ui-sm text-fg-muted">
+        <span data-testid="row-folder" className="max-w-[7rem] shrink-0 truncate rounded-sm border border-border px-1 text-ui-sm text-fg-muted">
           {badge}
         </span>
       )}
-      <span title={formatDateTime(row.at)} className="ml-auto min-w-14 shrink-0 text-right text-ui-sm text-fg-faint tabular-nums">
+      <span className="ml-auto min-w-14 shrink-0 text-right text-ui-sm text-fg-faint tabular-nums">
         {rowTime(row.at, kind, now)}
       </span>
+      {refusal && <RowNote note={note}>{refusal}</RowNote>}
     </div>
   );
 }
@@ -376,20 +382,32 @@ function ListedChooserRow({ id, row, kind, now, selected, onSelect, onOpen }: Ro
         {listedTitle(listed)}
       </span>
       <MachineChip address={listed.appId} className="max-w-[9rem]" />
-      <span title={formatDateTime(row.at)} className="ml-auto min-w-14 shrink-0 text-right text-ui-sm text-fg-faint tabular-nums">
+      <span className="ml-auto min-w-14 shrink-0 text-right text-ui-sm text-fg-faint tabular-nums">
         {rowTime(row.at, kind, now)}
       </span>
     </div>
   );
 }
 
-function Fact({ label, children, title }: { label: string; children: ReactNode; title?: string }) {
+// A fact of the preview. `title` is the whole of words the row may cut short; `tip` a fact the words do not show (the
+// date and time of "2 hours ago"), a Tip the words take the keyboard for (ticket 815).
+function Fact({ label, children, title, tip }: { label: string; children: ReactNode; title?: string; tip?: string }) {
   return (
     <>
       <dt className="text-fg-faint">{label}</dt>
-      <dd className="m-0 min-w-0 truncate text-fg" title={title}>
-        {children}
-      </dd>
+      {tip ? (
+        <dd className="m-0 min-w-0 text-fg">
+          <Tip content={tip} description={tip}>
+            <span tabIndex={0} className="block truncate rounded-sm outline-accent focus-visible:outline-2">
+              {children}
+            </span>
+          </Tip>
+        </dd>
+      ) : (
+        <dd className="m-0 min-w-0 truncate text-fg" title={title}>
+          {children}
+        </dd>
+      )}
     </>
   );
 }
@@ -423,7 +441,7 @@ function ListedPreview({ row, now }: { row: ChooserListedRow; now: number }) {
       </h3>
       <dl className="m-0 mt-2 grid shrink-0 grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-1 text-ui-sm">
         <Fact label={COPY.facts.machine}>{machineLabel}</Fact>
-        <Fact label={COPY.facts.lastActive} title={formatDateTime(row.at)}>
+        <Fact label={COPY.facts.lastActive} tip={formatDateTime(row.at)}>
           {capitalised(formatAgo(Math.max(0, now - row.at)))}
         </Fact>
       </dl>
@@ -461,7 +479,7 @@ function SessionPreview({ row, projects, now, immediate }: PreviewProps) {
         </Fact>
         {branch && <Fact label={COPY.facts.branch}>⎇ {branch}</Fact>}
         {projectName && <Fact label={COPY.facts.project}>{projectName}</Fact>}
-        <Fact label={COPY.facts.lastActive} title={formatDateTime(row.at)}>
+        <Fact label={COPY.facts.lastActive} tip={formatDateTime(row.at)}>
           {capitalised(formatAgo(Math.max(0, now - row.at)))}
         </Fact>
         {digest?.lastAssistantLine && (
