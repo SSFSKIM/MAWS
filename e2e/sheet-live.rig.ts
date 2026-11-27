@@ -39,7 +39,8 @@ const BARRIER = join(REPO_ROOT, 'test/support/sminos-barrier.sh');
 
 // What the agent is asked (the plan's step 2, with C2's live check's preface so its reply to a delivery can be matched)
 const REPEAT = 'When answers from the human’s question sheet reach you later, reply by repeating each one: its question id, the option picked, and the human’s text word for word. Do not read any file an answer points to. ';
-const ASK_THREE = 'Put three questions to me on your sheet in one call: one with two options and a recommendation, one that references README.md, one with no options. Then keep working: list this directory.';
+// the plan's words, with the reference named as the tool's field: a small model otherwise picks another file of the folder
+const ASK_THREE = 'Put three questions to me on your sheet in one call: one with two options and a recommendation, one that references README.md (README.md in its references), one with no options. Then keep working: list this directory.';
 const ASK_TWO = 'Put two more questions to me on your sheet in one call, each with two options. Do nothing else.';
 const WITHDRAW = (id: string) => `Withdraw ${id} from your sheet: you no longer need it. Do nothing else.`;
 const ASK_ONE = 'Put one more question to me on your sheet: one with two options. Do nothing else.';
