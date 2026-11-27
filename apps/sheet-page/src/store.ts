@@ -1,7 +1,9 @@
 // The page's data (§P, "The page and the model"; T14, C3's S7): the summaries and the door's state from each snapshot
 // and each change, and the model of the one session on screen, read over HTTP for it alone. At every snapshot that
 // model is read again, since changes made while a tab was not connected are never replayed to it, and until that read
-// has been applied the model is not `fresh`: Send cannot be pressed on a model older than the connection. A change of
+// has been applied the model is not `fresh`: Send cannot be pressed on a model older than the connection. A connection
+// is not fresh from its `paired` (`opened`) on: a read started before its `ready` (a change heard meanwhile) is applied
+// but does not make it fresh, since only the snapshot's read follows everything the tab missed. A change of
 // the session on screen reads it again. Each read carries a count that only grows, and an answer is applied only when
 // no later read of that session has been. A read that failed is tried again after a while, while its session is still
 // on screen and nothing newer was asked.
@@ -22,6 +24,7 @@ export interface StoreState {
 export interface SheetStore {
   state(): StoreState;
   subscribe(listener: () => void): () => void;
+  opened(): void; // a connection reached `paired`; its `ready` is to come
   ready(sessions: SheetSummary[], door: DoorState): void;
   changed(session: string, summary: SheetSummary | null): void;
   show(session: string | null): void;
@@ -31,6 +34,7 @@ export function createStore(deps: { read(session: string): Promise<ReadAnswer> }
   let state: StoreState = { sessions: null, door: null, shown: null };
   const listeners = new Set<() => void>();
   let snapshot = 0; // which snapshot the page is at
+  let awaitingReady = false; // between a connection's `paired` and its `ready`
   let asked = 0; // the count of the last read started
   let applied = 0; // the count of the last read applied
   let retry: ReturnType<typeof setTimeout> | null = null;
@@ -44,7 +48,7 @@ export function createStore(deps: { read(session: string): Promise<ReadAnswer> }
     if (retry !== null) clearTimeout(retry);
     retry = null;
     const count = (asked += 1);
-    const at = snapshot;
+    const at = awaitingReady ? null : snapshot;
     void deps.read(session).then((answer) => {
       const shown = state.shown;
       if (shown === null || shown.session !== session || count < applied) return;
@@ -63,8 +67,14 @@ export function createStore(deps: { read(session: string): Promise<ReadAnswer> }
       listeners.add(listener);
       return () => void listeners.delete(listener);
     },
+    opened() {
+      snapshot += 1;
+      awaitingReady = true;
+      if (state.shown) set({ shown: { ...state.shown, fresh: false } });
+    },
     ready(sessions, door) {
       snapshot += 1;
+      awaitingReady = false;
       set({ sessions, door, shown: state.shown && { ...state.shown, fresh: false } });
       if (state.shown) read(state.shown.session);
     },

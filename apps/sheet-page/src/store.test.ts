@@ -37,6 +37,24 @@ describe('the store', () => {
     expect(store.state().door).toEqual(DOOR);
   });
 
+  it('a new connection is not fresh from its `paired` until the read its `ready` started is applied (T14)', async () => {
+    const { store, pending, answer } = harness();
+    store.show(S);
+    store.ready([summary(S, 1)], DOOR);
+    await answer(0, { ok: true, model: model(1), door: DOOR });
+    await answer(1, { ok: true, model: model(1), door: DOOR });
+    expect(store.state().shown?.fresh).toBe(true);
+    store.opened(); // the next connection reached `paired`; its `ready` has not come
+    expect(store.state().shown).toEqual({ session: S, model: model(1), fresh: false });
+    store.changed(S, summary(S, 2)); // a change heard before `ready` reads, but is not the snapshot's read
+    await answer(2, { ok: true, model: model(2), door: DOOR });
+    expect(store.state().shown).toEqual({ session: S, model: model(2), fresh: false });
+    store.ready([summary(S, 2)], DOOR);
+    expect(pending).toHaveLength(4);
+    await answer(3, { ok: true, model: model(2), door: DOOR });
+    expect(store.state().shown).toEqual({ session: S, model: model(2), fresh: true });
+  });
+
   it('leaves the later read standing when two finish in the other order', async () => {
     const { store, answer } = harness();
     store.show(S);

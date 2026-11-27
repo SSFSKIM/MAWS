@@ -12,7 +12,8 @@ const card = (page: Page, id: string) => page.locator(`[data-sheet-question="${i
 const foot = (page: Page) => page.locator('[data-sheet-foot]');
 const draftKey = `maws.sheet.draft.${S}.q2`;
 
-async function drafted(page: Page, mawsd: Mawsd) {
+async function drafted(page: Page, mawsd: Mawsd): Promise<ReadyHold> {
+  const ready = await routeReady(page);
   questionRecord(mawsd.home, S, [question(1), question(2)]);
   await page.goto(`${mawsd.url}/s/${S}`);
   await mawsd.pair(page);
@@ -21,6 +22,7 @@ async function drafted(page: Page, mawsd: Mawsd) {
   await expect(foot(page).getByRole('button', { name: 'Send 2 answers' })).toBeEnabled();
   expect(await page.evaluate((key) => localStorage.getItem(key), draftKey)).not.toBeNull();
   await page.evaluate(() => void ((globalThis as { __loaded?: number }).__loaded = 1));
+  return ready;
 }
 
 // q2 withdrawn in the record, as the agent's tool would
@@ -43,11 +45,44 @@ async function holdReads(page: Page): Promise<{ held: Route[]; release(): Promis
   };
 }
 
-async function sentOnlyAfterTheRead(page: Page, reads: { held: Route[]; release(): Promise<void> }) {
-  await until(() => reads.held.length > 0, 30_000, 'the read after the snapshot');
-  await expect(page.locator('[data-sheet-band]')).toHaveCount(0); // connected again
+// The live connection's `ready`, held between the server and the tab from `hold()` until let go; every other message
+// passes. Playwright routes a page's sockets from a script it adds to each document, so this is set up before the load.
+interface ReadyHold {
+  hold(): void;
+  held(): number;
+  release(): void;
+}
+async function routeReady(page: Page): Promise<ReadyHold> {
+  const held: Array<() => void> = [];
+  let holding = false;
+  await page.routeWebSocket('**/live', (socket) => {
+    const server = socket.connectToServer();
+    server.onMessage((message) => {
+      const isReady = typeof message === 'string' && (JSON.parse(message) as { t?: string }).t === 'ready';
+      if (holding && isReady) held.push(() => socket.send(message));
+      else socket.send(message);
+    });
+  });
+  return {
+    hold: () => void (holding = true),
+    held: () => held.length,
+    release() {
+      holding = false;
+      for (const send of held.splice(0)) send();
+    },
+  };
+}
+
+// From the new connection's `paired` until its `ready`'s read is applied, Send cannot be pressed (T14)
+async function sentOnlyAfterTheRead(page: Page, ready: ReadyHold, reads: { held: Route[]; release(): Promise<void> }) {
+  await until(() => ready.held() > 0, 30_000, 'the snapshot after the reconnection');
+  await expect(page.locator('[data-sheet-band]')).toHaveCount(0); // connected again: `paired` came
   await expect(foot(page)).toHaveText('Answers cannot be sent while MAWS is not reachable.');
   await expect(foot(page).getByRole('button')).toHaveCount(0);
+  const before = reads.held.length; // a read retried before the snapshot may be among them, and does not count
+  ready.release();
+  await until(() => reads.held.length > before, 30_000, 'the read after the snapshot');
+  await expect(foot(page)).toHaveText('Answers cannot be sent while MAWS is not reachable.');
   await expect(card(page, 'q2')).toBeVisible(); // the old model, until the read is applied
   await reads.release();
   await expect(card(page, 'q2')).toHaveCount(0);
@@ -57,17 +92,18 @@ async function sentOnlyAfterTheRead(page: Page, reads: { held: Route[]; release(
 }
 
 test('after a restart on the same port, the tab reconnects by itself, and Send waits for the sheet to be read again', async ({ page, mawsd }) => {
-  await drafted(page, mawsd);
+  const ready = await drafted(page, mawsd);
   await mawsd.stop();
   withdraw(mawsd);
+  ready.hold();
   const reads = await holdReads(page);
   await mawsd.restart();
-  await sentOnlyAfterTheRead(page, reads);
+  await sentOnlyAfterTheRead(page, ready, reads);
 });
 
 test('a tab hidden past its five minutes lets its connection go, and when shown reads the sheet again before Send', async ({ page, mawsd }) => {
   await page.clock.install();
-  await drafted(page, mawsd);
+  const ready = await drafted(page, mawsd);
   expect(await mawsd.connections()).toBe(1);
   const shown = (state: 'hidden' | 'visible') =>
     page.evaluate((value) => {
@@ -80,7 +116,8 @@ test('a tab hidden past its five minutes lets its connection go, and when shown 
   await page.clock.fastForward(60_000 + 1_000);
   await until(async () => (await mawsd.connections()) === 0, 10_000, 'the hidden tab to let its connection go');
   withdraw(mawsd); // while it was not connected: never replayed
+  ready.hold();
   const reads = await holdReads(page);
   await shown('visible');
-  await sentOnlyAfterTheRead(page, reads);
+  await sentOnlyAfterTheRead(page, ready, reads);
 });

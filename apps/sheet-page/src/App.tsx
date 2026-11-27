@@ -125,6 +125,7 @@ export function App() {
       onPaired: () => {
         setUnpaired(null);
         setScreen('frame');
+        store.opened(); // not fresh until this connection's `ready` has been read (T14)
         chunks.opened();
       },
       onReady: (sessions, door) => store.ready(sessions, door),
