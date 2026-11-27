@@ -227,7 +227,10 @@ export interface Heard {
   requests: { method: string; target: string; headers: string[] }[]; // every request and every upgrade, raw headers flat
 }
 
-export async function impostor(port: number, plays: ImpostorPlay, recorded?: string): Promise<{ heard: Heard; close(): Promise<void> }> {
+// `scripts`: every HTTP request is answered 200 with a script that counts itself in `__strangerRan`, as a stand-in
+// that wanted to run its own code in the page's origin would answer a chunk (T28's "no chunk from a stranger")
+export const STRANGER_SCRIPT = 'globalThis.__strangerRan = (globalThis.__strangerRan ?? 0) + 1; export default {};';
+export async function impostor(port: number, plays: ImpostorPlay, recorded?: string, options: { scripts?: boolean } = {}): Promise<{ heard: Heard; close(): Promise<void> }> {
   const heard: Heard = { frames: [], requests: [] };
   const wss = new WebSocketServer({ noServer: true });
   const sockets = new Set<WebSocket>();
@@ -256,7 +259,8 @@ export async function impostor(port: number, plays: ImpostorPlay, recorded?: str
   const make = () => {
     const server = createServer((req, res) => {
       note(req);
-      res.writeHead(404, { 'Content-Type': 'text/plain' }).end('not here');
+      if (options.scripts) res.writeHead(200, { 'Content-Type': 'text/javascript' }).end(STRANGER_SCRIPT);
+      else res.writeHead(404, { 'Content-Type': 'text/plain' }).end('not here');
     });
     server.on('upgrade', (req, socket, head) => {
       note(req);

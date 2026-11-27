@@ -14,6 +14,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { createApi } from './api';
 import { BAND_AFTER_MS, bandOf } from './availability';
+import { createChunkGate, installChunkGate } from './chunk-gate';
 import { PAGE } from './copy';
 import { CREDENTIAL_KEY, forgetEverything, readPairing, writePairing, type StoredPairing } from './credential';
 import { Frame } from './frame/Frame';
@@ -41,6 +42,9 @@ const current: { live: Live | null; leaving: boolean } = { live: null, leaving: 
 addEventListener('pagehide', () => void (current.leaving = true));
 addEventListener('pageshow', () => void (current.leaving = false));
 const api = createApi({ proven: () => current.live?.proven() ?? null, leaving: () => current.leaving });
+// The Markdown stack's lazy chunks ask the same connection (chunk-gate.ts; T28)
+const chunks = createChunkGate({ proven: () => (current.live?.proven() ?? null) !== null, importer: (url) => import(/* @vite-ignore */ url) });
+installChunkGate(chunks);
 const store = createStore({ read: api.read });
 
 // Whether the tab may hold its connection: not once it has been hidden for five minutes
@@ -121,6 +125,7 @@ export function App() {
       onPaired: () => {
         setUnpaired(null);
         setScreen('frame');
+        chunks.opened();
       },
       onReady: (sessions, door) => store.ready(sessions, door),
       onChanged: (session, summary) => store.changed(session, summary),

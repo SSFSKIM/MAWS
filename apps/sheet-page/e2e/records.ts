@@ -23,7 +23,7 @@ export interface Question {
   revision: number;
   question: string;
   header?: string;
-  options: { label: string; description?: string; recommended?: boolean }[];
+  options: { label: string; description?: string; recommended?: boolean; preview?: string }[];
   multiSelect: boolean;
   context?: string;
   references: unknown[];
