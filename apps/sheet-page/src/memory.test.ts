@@ -163,6 +163,37 @@ describe('the stored memory (T19): one entry a thing', () => {
     expect(Object.keys(back.entries()).filter((key) => key.startsWith('maws.sheet.send.'))).toHaveLength(1);
   });
 
+  it('a press again keeps the Send’s one stored entry, its value replaced with the new press; a replacement that cannot be written leaves the old value', async () => {
+    const store = testStorage();
+    const target = new EventTarget();
+    const lines = [answer('page-000000000000000000000000001', 'q4', 'a')];
+    const sendKeys = () => Object.keys(store.entries()).filter((key) => key.startsWith('maws.sheet.send.'));
+    updateMemory(S, (current) => pressed(current, 'wa-1', lines), { storage: store, now: 1_000, target });
+    updateMemory(S, (current) => settle(current, 'wa-1', { ok: false, why: 'failed', message: 'MAWS did not answer.' }), { storage: store, now: 2_000, target });
+    const [key] = sendKeys();
+    updateMemory(S, (current) => startSend(current, lines, 3_000, 'wa-2', { drafts: current.drafts, over: 'wa-1' }), { storage: store, now: 3_000, target });
+    expect(sendKeys()).toEqual([key]);
+    expect(JSON.parse(store.getItem(key!)!)).toMatchObject({ press: 'wa-2', at: 3_000, state: 'sending', lines });
+    expect(readMemory(S, store).sending?.attempt).toBe('wa-2');
+
+    // from another window, under the same keys: still the one entry
+    vi.resetModules();
+    const windowB = await import('./memory');
+    updateMemory(S, (current) => settle(current, 'wa-2', { ok: false, why: 'failed', message: 'MAWS did not answer.' }), { storage: store, now: 4_000, target });
+    const seen = windowB.readMemory(S, store).sending!;
+    const before = store.getItem(key!);
+    store.quota = Object.entries(store.entries()).reduce((sum, [name, value]) => sum + name.length + value.length, 0); // full: no room for a longer value
+    expect(() =>
+      windowB.updateMemory(S, (current) => startSend(current, seen.lines, 5_000, 'wb-1-a-press-with-a-longer-name', { drafts: current.drafts, over: seen.attempt }), { storage: store, now: 5_000, target }),
+    ).toThrow();
+    expect(sendKeys()).toEqual([key]);
+    expect(store.getItem(key!)).toBe(before); // the only record of the Send stands
+    store.quota = null;
+    windowB.updateMemory(S, (current) => startSend(current, seen.lines, 6_000, 'wb-1', { drafts: current.drafts, over: seen.attempt }), { storage: store, now: 6_000, target });
+    expect(sendKeys()).toEqual([key]);
+    expect(JSON.parse(store.getItem(key!)!)).toMatchObject({ press: 'wb-1', at: 6_000 });
+  });
+
   it('two Sends of two windows end in the other order, each settling its own entry whichever is shown', async () => {
     const store = testStorage();
     const target = new EventTarget();

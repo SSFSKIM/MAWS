@@ -12,8 +12,8 @@
 // copy a tab held; `writeMemory` then writes the difference between the two, and nothing a tab merely still holds. A
 // Send's entry is written at its press, before its request leaves, and nothing but that Send's own end removes it. It
 // stores its press's identity (C3's attempt, unique to one window and one press) beside its lines' keys: a press again,
-// from this window or another, is a new press over the same keys, and replaces the entry. This window remembers the
-// presses it made; a Send it did not make (another tab's, or its own before a reload) is named by an attempt no window
+// from this window or another, is a new press over the same keys, written into the same entry under the same key. This
+// window remembers the presses it made; a Send it did not make (another tab's, or its own before a reload) is named by an attempt no window
 // makes, which C3's sheet reads as a call whose answer will not come, and the page's own 35-second rule stands in front
 // of that (availability.ts). An update that changes nothing of the Send the memory shows is tried against this window's
 // other stored Sends, so a press's answer settles its own entry whichever is shown. A tab removes an entry only for a
@@ -208,18 +208,28 @@ export function writeMemory(session: string, before: SheetMemory, after: SheetMe
   if (before.sending === after.sending) return wrote;
   const sends = sendsOf(storage, session);
   const entryOf = (attempt: string) => sends.find((send) => send.press === pressOf(attempt));
-  if (before.sending !== null && before.sending.attempt !== after.sending?.attempt) {
-    // its end, or a press again over its keys: the press it was is over
-    const ended = entryOf(before.sending.attempt);
-    if (ended) storage.removeItem(ended.key);
+  const held = before.sending === null ? undefined : entryOf(before.sending.attempt);
+  // a press again over the same lines is the same Send: its one entry keeps its key, its value replaced in one write, so
+  // no tab sees the slot empty and a write that fails leaves the record as it was
+  const again =
+    held !== undefined &&
+    after.sending !== null &&
+    after.sending.attempt !== before.sending!.attempt &&
+    after.sending.lines.length === held.lines.length &&
+    after.sending.lines.every((line, i) => line.key === held.lines[i]!.key);
+  if (!again && before.sending !== null && before.sending.attempt !== after.sending?.attempt) {
+    // its end: the Send is over
+    if (held) storage.removeItem(held.key);
     pressedHere.delete(pressOf(before.sending.attempt));
     wrote = true;
   }
   if (after.sending === null) return wrote;
   const { attempt, lines, state, note } = after.sending;
-  const entry = entryOf(attempt);
+  const entry = again ? held : entryOf(attempt);
+  const at = again || entry === undefined ? now : entry.at; // since its press, or its press again
+  store(storage, entry?.key ?? keyOf('send', session, randomName()), JSON.stringify({ v: 1, touchedAt: now, press: pressOf(attempt), at, lines, state, note }));
+  if (again) pressedHere.delete(pressOf(before.sending!.attempt));
   if (!attempt.startsWith(ELSEWHERE)) pressedHere.add(attempt);
-  store(storage, entry?.key ?? keyOf('send', session, randomName()), JSON.stringify({ v: 1, touchedAt: now, press: pressOf(attempt), at: entry?.at ?? now, lines, state, note }));
   return true;
 }
 
