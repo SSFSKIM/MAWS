@@ -354,7 +354,7 @@ test('1. the Comment toggle arms the page: the hover outline names the button, a
     await expect(card).toHaveAttribute('data-anchor-kind', 'browser-element');
     await expect(card).toHaveAttribute('data-anchor-locator', '#increment');
     await expect(card).toHaveAttribute('data-placement', 'strip');
-    await expect(card.getByRole('heading', { name: INCREMENT_LABEL }), 'the locator in the heading’s title').toHaveAttribute('title', `${INCREMENT_LABEL}\n#increment`);
+    await expect(card.getByRole('heading', { name: INCREMENT_LABEL }), 'the locator, the heading’s tip and description (board ticket 815)').toHaveAccessibleDescription('#increment');
     await expect(card.getByRole('textbox', { name: 'Comment' })).toBeFocused();
     const chip = card.locator('[data-comment-screenshot]');
     const [w, h] = await thumbnailSize(card);

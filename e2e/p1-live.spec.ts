@@ -707,10 +707,11 @@ test.describe.serial('S3: deliverables, a side thread, Send to main and /btw thr
       return bash !== undefined && ofKind(all, 'permission.requested').every((e) => resolved.has(e.requestId));
     }, allowed);
     const sheet = await pickTitle(l); // the card's composer half (P2-E1), with the sheet's names
-    // UX wave U5a: the "Send to main" checkbox ticked; its caption is its title (the composer's words for a steer)
+    // UX wave U5a: the "Send to main" checkbox ticked; its caption is its tip, and its description (the composer's words
+    // for a steer; board ticket 815)
     await sheet.getByRole('checkbox', { name: 'Send to main' }).check();
     await expect(sheet.getByRole('checkbox', { name: 'Send to main' })).toBeChecked();
-    const caption = (await sheet.locator('label:has([data-send-to-main])').getAttribute('title'))?.trim() ?? '';
+    const caption = (await sheet.locator('[data-send-to-main]').evaluate((box) => (box.getAttribute('aria-describedby') ?? '').split(/\s+/).filter(Boolean).map((id) => document.getElementById(id)?.textContent ?? '').join(' '))).trim();
     await sheet.getByRole('textbox', { name: 'Comment' }).fill(PROMPTS.steer);
     const sentAt = Date.now();
     await sheet.getByRole('button', { name: 'Send' }).click();
