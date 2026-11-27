@@ -22,14 +22,26 @@ async function liveCode(mawsd: Mawsd): Promise<string> {
 async function wire(page: Page, origin: string) {
   const cdp: CDPSession = await page.context().newCDPSession(page);
   const sent = new Map<string, { method: string; path: string }>();
+  const statuses = new Map<string, number>();
   const seen: { method: string; path: string; status: number }[] = [];
+  // the two events of one request come in either order (an answer's extra info may precede its request's event)
+  const joined = new Set<string>();
+  const join = (id: string) => {
+    const request = sent.get(id);
+    const status = statuses.get(id);
+    if (request === undefined || status === undefined || joined.has(id)) return;
+    joined.add(id);
+    seen.push({ ...request, status });
+  };
   cdp.on('Network.requestWillBeSent', (event: { requestId: string; request: { method: string; url: string } }) => {
     const url = new URL(event.request.url);
-    if (url.origin === origin) sent.set(event.requestId, { method: event.request.method, path: url.pathname });
+    if (url.origin !== origin) return;
+    sent.set(event.requestId, { method: event.request.method, path: url.pathname });
+    join(event.requestId);
   });
   cdp.on('Network.responseReceivedExtraInfo', (event: { requestId: string; statusCode: number }) => {
-    const request = sent.get(event.requestId);
-    if (request) seen.push({ ...request, status: event.statusCode });
+    statuses.set(event.requestId, event.statusCode);
+    join(event.requestId);
   });
   await cdp.send('Network.enable');
   return { seen, sent: () => [...sent.values()] };

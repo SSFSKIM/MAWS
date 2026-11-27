@@ -156,11 +156,13 @@ test('an image whose upload answers after the browser was unpaired is written no
   await page.goto(`${mawsd.url}/s/${S}`);
   await mawsd.pair(page);
   await field(page, 'q1').fill('with a picture');
+  // the upload's answer held in the browser, after mawsd saved the image while the browser was still paired
+  const cdp = await page.context().newCDPSession(page);
   const answers: Array<() => Promise<void>> = [];
-  await page.route('**/uploads', async (route) => {
-    const response = await route.fetch(); // saved by mawsd while the browser was still paired
-    answers.push(() => route.fulfill({ response }));
+  cdp.on('Fetch.requestPaused', (event: { requestId: string; responseStatusCode?: number }) => {
+    answers.push(async () => void (await cdp.send('Fetch.continueResponse', { requestId: event.requestId })));
   });
+  await cdp.send('Fetch.enable', { patterns: [{ urlPattern: '*/uploads', requestStage: 'Response' }] });
   await field(page, 'q1').evaluate((element) => {
     const bytes = Uint8Array.from(atob('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=='), (char) => char.charCodeAt(0));
     const data = new DataTransfer();
@@ -172,7 +174,9 @@ test('an image whose upload answers after the browser was unpaired is written no
   await page.getByRole('menuitem', { name: 'Unpair this browser' }).click();
   await expect(page.getByRole('heading', { name: 'Pair this browser' })).toBeVisible();
   expect(await storedKeys(page)).toEqual([]);
+  const answered = page.waitForResponse((response) => response.url().endsWith('/uploads'));
   await answers[0]!();
+  expect((await answered).ok()).toBe(true); // the page has the saved image's answer
   await page.waitForTimeout(1_000);
   expect(await storedKeys(page)).toEqual([]);
 });
