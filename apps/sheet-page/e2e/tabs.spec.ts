@@ -40,6 +40,28 @@ const hold = (page: Page, on: boolean) => page.evaluate((value) => (globalThis a
 const draftOf = (page: Page, id: string) => page.evaluate((key) => localStorage.getItem(key), `maws.sheet.draft.${S}.${id}`);
 const sendEntries = (page: Page) => page.evaluate((session) => Object.entries(localStorage).filter(([key]) => key.startsWith(`maws.sheet.send.${session}.`)), S);
 
+const PNG = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=='; // one pixel
+const paste = (page: Page, id: string) =>
+  field(page, id).evaluate((element, data64) => {
+    const bytes = Uint8Array.from(atob(data64), (char) => char.charCodeAt(0));
+    const data = new DataTransfer();
+    data.items.add(new File([bytes], 'pasted.png', { type: 'image/png' }));
+    element.dispatchEvent(new ClipboardEvent('paste', { clipboardData: data, bubbles: true, cancelable: true }));
+  }, PNG);
+// An upload's answer held in the browser once mawsd has saved the image (CDP Fetch, at the response stage), until let go
+async function holdUploadAnswers(page: Page): Promise<{ held(): number; release(): Promise<void> }> {
+  const cdp = await page.context().newCDPSession(page);
+  const held: string[] = [];
+  cdp.on('Fetch.requestPaused', (event: { requestId: string }) => void held.push(event.requestId));
+  await cdp.send('Fetch.enable', { patterns: [{ urlPattern: '*/uploads', requestStage: 'Response' }] });
+  return {
+    held: () => held.length,
+    async release() {
+      for (const requestId of held.splice(0)) await cdp.send('Fetch.continueResponse', { requestId });
+    },
+  };
+}
+
 async function twoTabs(context: BrowserContext, page: Page, mawsd: Mawsd): Promise<[Page, Page]> {
   questionRecord(mawsd.home, S, [question(1), question(2), question(3)]);
   await page.goto(`${mawsd.url}/s/${S}`);
@@ -125,26 +147,34 @@ test('a Send held at the barrier keeps its stored keys through the other tab’s
   try {
     await holdableStorage(context);
     const [first, second] = await twoTabs(context, await context.newPage(), mawsd);
-    // each tab hears the other late: the second types and saves its draft before the press, which the first has not
-    // heard of when it presses, and the second adopts the Send only after it. (A draft typed after the press is no
-    // write at all: C3 applies a field's change to the memory as stored, and refuses it while a Send is held.)
+    // each tab hears the other late. The second types on q3 and pastes an image there before the press, the upload's
+    // answer held; the first presses Send (held at the barrier) without having heard of it; then the answer comes, and
+    // C3's late attachment writes the second tab's draft while the Send is held (C3 refuses a typed change then, and
+    // takes a saved image)
     await hold(first, true);
     await hold(second, true);
     await field(first, 'q1').fill('sent from the first');
     await field(second, 'q3').fill('typed in the second');
-    await until(async () => (await draftOf(second, 'q3')) !== null, 10_000, 'the second tab’s draft, saved');
+    const uploads = await holdUploadAnswers(second);
+    await paste(second, 'q3');
+    await until(() => uploads.held() === 1, 10_000, 'the upload, saved and its answer held');
     await foot(first).getByRole('button', { name: 'Send 1 answer' }).click();
     await until(async () => (await sendEntries(first)).length === 1, 10_000, 'the Send’s entry, at its press');
     const [[key, entry]] = await sendEntries(first);
     const keys = (JSON.parse(entry) as { lines: { key: string }[] }).lines.map((line) => line.key);
     expect(keys).toHaveLength(1);
+    const drafted = JSON.parse((await draftOf(second, 'q3'))!) as { draft: { text: string; images: string[] } };
+    expect(drafted.draft.images).toEqual([]);
+
+    await uploads.release();
+    await until(async () => (JSON.parse((await draftOf(second, 'q3'))!) as typeof drafted).draft.images.length === 1, 10_000, 'the image joining the draft');
+    const after = JSON.parse((await draftOf(second, 'q3'))!) as typeof drafted;
+    expect(after.draft).toMatchObject({ text: 'typed in the second', images: [expect.stringMatching(/^uploads\/maws-[0-9a-f]{32}\.png$/)] }); // the draft changed
+    expect(await sendEntries(first)).toEqual([[key, entry]]); // and the Send's entry, keys and all, did not
     await hold(first, false);
     await hold(second, false);
     await second.waitForTimeout(500);
-    expect(await sendEntries(first)).toEqual([[key, entry]]); // untouched: only its own end removes it
-    expect(JSON.parse((await draftOf(first, 'q3'))!)).toMatchObject({ draft: { text: 'typed in the second' } }); // and the draft stands
-    await expect(field(second, 'q3')).toHaveValue('typed in the second');
-
+    expect(await sendEntries(first)).toEqual([[key, entry]]);
     await first.clock.install();
     await first.reload();
     await expect(foot(first)).toHaveText('Your answers are being sent.', { timeout: 20_000 }); // not this window's: younger than 35 s
@@ -176,26 +206,15 @@ test('an image whose upload answers after the browser was unpaired is written no
   await page.goto(`${mawsd.url}/s/${S}`);
   await mawsd.pair(page);
   await field(page, 'q1').fill('with a picture');
-  // the upload's answer held in the browser, after mawsd saved the image while the browser was still paired
-  const cdp = await page.context().newCDPSession(page);
-  const answers: Array<() => Promise<void>> = [];
-  cdp.on('Fetch.requestPaused', (event: { requestId: string; responseStatusCode?: number }) => {
-    answers.push(async () => void (await cdp.send('Fetch.continueResponse', { requestId: event.requestId })));
-  });
-  await cdp.send('Fetch.enable', { patterns: [{ urlPattern: '*/uploads', requestStage: 'Response' }] });
-  await field(page, 'q1').evaluate((element) => {
-    const bytes = Uint8Array.from(atob('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=='), (char) => char.charCodeAt(0));
-    const data = new DataTransfer();
-    data.items.add(new File([bytes], 'pasted.png', { type: 'image/png' }));
-    element.dispatchEvent(new ClipboardEvent('paste', { clipboardData: data, bubbles: true, cancelable: true }));
-  });
-  await until(() => answers.length === 1, 10_000, 'the upload, saved and its answer held');
+  const uploads = await holdUploadAnswers(page); // the answer held, after mawsd saved the image while the browser was still paired
+  await paste(page, 'q1');
+  await until(() => uploads.held() === 1, 10_000, 'the upload, saved and its answer held');
   await page.getByRole('banner').getByRole('button', { name: 'Menu' }).click();
   await page.getByRole('menuitem', { name: 'Unpair this browser' }).click();
   await expect(page.getByRole('heading', { name: 'Pair this browser' })).toBeVisible();
   expect(await storedKeys(page)).toEqual([]);
   const answered = page.waitForResponse((response) => response.url().endsWith('/uploads'));
-  await answers[0]!();
+  await uploads.release();
   expect((await answered).ok()).toBe(true); // the page has the saved image's answer
   await page.waitForTimeout(1_000);
   expect(await storedKeys(page)).toEqual([]);
