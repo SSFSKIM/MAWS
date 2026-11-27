@@ -15,6 +15,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { SessionEvent } from '@shared/graph/events';
 import type { AppSessionId, SessionId } from '@shared/graph/ids';
 import type { SheetModel, SheetSummary } from '@shared/sheet/model';
+import { receiptOf } from '@shared/sheet/words';
 import { parseJournalRow } from '@shared/wire/journal';
 import { ChainFollower } from '../../../engine-host/fs/chain-follower';
 import { TEST_FIXTURE_DIR } from '../../../../test/support/fixtures';
@@ -26,6 +27,7 @@ import { rowsOf, withAllExpanded } from '../transcript/model/derive';
 import { applyEvents, createState } from '../transcript/model/reduce';
 import type { Row } from '../transcript/model/rows';
 import { serializeRows } from '../transcript/model/serialize';
+import { builder, uuid, type Builder } from '../transcript/model/test-events';
 import { renderRow } from '../transcript/view/rows/test-support';
 
 const SESSION = '5eed0000-0000-4000-8000-0000000000c3';
@@ -117,29 +119,77 @@ describe('a receipt reads the same from the block and from the record', () => {
     expect(fromRecord).toEqual(fromBlock);
     expect(fromBlock).toEqual(['q7 | Auth method | Revised below', 'q8 | Empty state | → Nothing waiting for you.', 'q9 | Export | → Dismissed', 'q10 | Button | → Withdrawn', 'q7 | Auth method | → OAuth, Passkeys']);
   });
+  // The fix round's finding 5: a typed answer that opens with spaces. The record keeps the text's first 80 characters
+  // as its receipt (C2's I2, `receiptOf`); the transcript's block holds the whole text. The line stays answered from
+  // either, and reads the same.
+  it('an answer that opens with eighty spaces reads answered, the same from the block and from the record', () => {
+    const text = `${' '.repeat(80)}From the first of November.`;
+    const asking = (b: Builder) => {
+      b.turn('u-ask', 'Set the season.');
+      b.toolUse('toolu_01SheetSeason0001', 'mcp__sminos__AskUserQuestion', { ask: [{ question: 'What are the first and last days of the winter season?', header: 'Season dates' }] });
+      b.result('toolu_01SheetSeason0001', 'Added q6.');
+      b.end(['u-ask']);
+    };
+    const withBlock = builder();
+    asking(withBlock);
+    withBlock.emit('turn.started', { userMessageUuid: uuid('u-delivery'), origin: 'task-notification' });
+    withBlock.emit('user.message', { messageUuid: uuid('u-delivery'), content: '', isReplay: false, isSynthetic: true, origin: 'task-notification', bash: null, arrival: [{ class: 'sheet', deliveries: [{ v: 1, keys: ['page-00000010'], answered: [{ id: 'q6', revision: 1, picks: [], text, images: [] }], dismissed: [] }] }] });
+    withBlock.end([], { origin: 'task-notification' });
+    const bare = builder();
+    asking(bare);
+    const fromBlock = drawnLines(sheetRows(drawn(withBlock.events)));
+    const summary: SheetSummary = { session: SESSION, appSessionId: APP, title: null, live: true, seq: 2, open: 0, queued: 0, pending: 0, hidden: 0, oldestAskedAt: null, unreadable: false };
+    useSheets.setState({ summaries: new Map([[SESSION, summary]]), models: new Map([[SESSION, { v: 1, session: SESSION, seq: 2, open: [], hidden: [], sent: [], pending: [], closed: { q6: { how: 'answered', receipt: receiptOf([], text), places: [], at: '2026-11-23T09:05:00.000Z', revision: 1, asker: 'main' } } }]]) });
+    const fromRecord = drawnLines(sheetRows(drawn(bare.events)));
+    expect(fromBlock).toEqual([`q6 | Season dates | → ${' '.repeat(80)}`]);
+    expect(fromRecord).toEqual(fromBlock);
+  });
 });
 
-// S8's edge: a subagent's own history holds its call, and its answer as its coordinator's message, which is not read
-// here; its outcomes come from the record while the record lives.
+// S8's edge. A running subagent's answer is its coordinator's message in its own history, not read here: the message
+// draws as any coordinator's message does, and the row's outcome comes from the record while the record lives. An ended
+// subagent's answer goes to the parent (the pin's terminal example: the reviewer a1b2c3's q12), so the child's history
+// holds the question and the parent's the answer; once the record is gone the child's row shows its question and no
+// receipt, stated and not repaired.
 describe('a subagent’s transcript', () => {
   const APP = at('app-sheet-c3' as AppSessionId);
   const summary: SheetSummary = { session: SESSION, appSessionId: APP, title: null, live: false, seq: 4, open: 0, queued: 0, pending: 0, hidden: 0, oldestAskedAt: null, unreadable: false };
-  const model: SheetModel = { v: 1, session: SESSION, seq: 4, open: [], hidden: [], sent: [], pending: [], closed: { q3: { how: 'answered', receipt: 'Yes', places: [1], at: '2026-11-23T09:05:00.000Z', revision: 1, asker: { agentId: 'a7c0ffee' } as never } } };
+  const closed = (receipt: string, agentId: string) => ({ how: 'answered' as const, receipt, places: [1], at: '2026-11-23T09:05:00.000Z', revision: 1, asker: { agentId } as never });
+  const withRecord = (closedById: SheetModel['closed']) =>
+    useSheets.setState({ summaries: new Map([[SESSION, summary]]), models: new Map([[SESSION, { v: 1, session: SESSION, seq: 4, open: [], hidden: [], sent: [], pending: [], closed: closedById }]]) });
   beforeEach(resetSheetStore);
   afterEach(cleanup);
   const lineText = () => [...document.querySelectorAll<HTMLElement>('[data-sheet-line]')].map((el) => [...el.children].map((cell) => cell.textContent).filter((t) => t !== '').join(' | '));
+  const shown = (row: SheetRowData, agent: string) => {
+    renderRow(row, { storeKey: `${APP}:${agent}` });
+    const lines = lineText();
+    cleanup();
+    return lines;
+  };
 
-  it('draws its own call’s row, the coordinator’s message as a message and no receipt from it; the record’s receipt while the record lives, none once it is gone', async () => {
+  it('a running one: its own call’s row, the coordinator’s message drawn as a message and read for nothing; the record’s receipt while it lives', async () => {
     const rows = drawn(await fromFile('subagent-a7c0ffee'));
     expect(readings(rows)).toEqual([['q3 …']]);
     expect(answerNotices(rows)).toEqual([]);
+    expect(users(rows), 'the coordinator’s message, as a message').toEqual(['Review the cache layer and ask what you need on the sheet.', 'From the human, through the question tool, not from your coordinator: answers to questions you put on the sheet.']);
     const row = sheetRows(rows)[0]!;
-    useSheets.setState({ summaries: new Map([[SESSION, summary]]), models: new Map([[SESSION, model]]) });
-    renderRow(row, { storeKey: `${APP}:a7c0ffee` });
-    expect(lineText()).toEqual(['q3 | Cache key | → Yes']);
-    cleanup();
+    withRecord({ q3: closed('Yes', 'a7c0ffee') });
+    expect(shown(row, 'a7c0ffee')).toEqual(['q3 | Cache key | → Yes']);
     resetSheetStore();
-    renderRow(row, { storeKey: `${APP}:a7c0ffee` });
-    expect(lineText()).toEqual(['q3 | Cache key | Should the cache key include the locale?']);
+    expect(shown(row, 'a7c0ffee')).toEqual(['q3 | Cache key | Should the cache key include the locale?']);
+  });
+
+  it('an ended one: the question in the child’s row, its answer in the parent’s turn; the record’s receipt while it lives, none once it is gone', async () => {
+    const parent = drawn(await fromFile('main-plugin-prompt'));
+    expect(answerNotices(parent), 'the answer reached the parent').toEqual(['answered: q7, q8, q12; dismissed q9, q11']);
+    expect(readings(parent).flat().some((line) => line.startsWith('q12 ')), 'no row of the parent’s holds the child’s question').toBe(false);
+    const child = drawn(await fromFile('subagent-a1b2c3'));
+    expect(readings(child)).toEqual([['q12 …']]);
+    expect(answerNotices(child)).toEqual([]);
+    const row = sheetRows(child)[0]!;
+    withRecord({ q12: closed('Yes', 'a1b2c3') });
+    expect(shown(row, 'a1b2c3')).toEqual(['q12 | Migration | → Yes']);
+    resetSheetStore();
+    expect(shown(row, 'a1b2c3')).toEqual(['q12 | Migration | Ship the migration today?']);
   });
 });
