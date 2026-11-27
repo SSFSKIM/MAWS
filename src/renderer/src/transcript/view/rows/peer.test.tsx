@@ -350,6 +350,18 @@ describe('the owners of a message from another session', () => {
     expect(owners()?.textContent).toBe('zed@example.com, Ana');
     expect(accessibleDescription(owners()!.closest('button')!)).toBe(`${B} · zed@example.com, Ana <ana@example.com>`);
   });
+
+  // Ticket 815's touch rule: where nothing points, the owners with their emails stand under the line after the address,
+  // as the tip lists them; owners whose list adds nothing to the drawn label leave the address alone there
+  it('stands every owner with its email under the line, after the address, where the list says more than the label', () => {
+    const { container } = renderRow(labelled('ana@example.com, sam@example.com'), { storeKey: A });
+    const under = () => [...container.querySelector('.transcript-peer')!.children].find((element) => element.hasAttribute('data-touch-fact'));
+    expect([under()?.textContent, under()?.getAttribute('aria-hidden')]).toEqual([`${B}\nyou <sam@example.com>, Ana <ana@example.com>`, 'true']);
+    cleanup();
+    const { container: unknown } = renderRow(labelled('zed@example.com'), { storeKey: A });
+    expect(unknown.querySelector('[data-owners]')?.textContent).toBe('zed@example.com');
+    expect([...unknown.querySelector('.transcript-peer')!.children].find((element) => element.hasAttribute('data-touch-fact'))?.textContent).toBe(B);
+  });
 });
 
 describe('a message sent to another session, and a subagent’s report', () => {
@@ -371,6 +383,26 @@ describe('a message sent to another session, and a subagent’s report', () => {
     renderRow(rows[1]!, { storeKey: A });
     expect(screen.getByText('Sending')).toBeTruthy();
     expect(screen.queryByRole('button', { name: 'Reply' })).toBeNull();
+  });
+
+  // Ticket 815's touch rule: a send's own summary, which the line's tip shows, stands over the opened message where
+  // nothing points, unless it is the message itself
+  it('stands a send’s summary over its opened message where nothing points, unless the summary is the message', () => {
+    const rows = derived((b) => {
+      b.turn('u1');
+      b.toolUse('s1', 'SendMessage', { to: B, message: 'reply\nmore', summary: 'Answer B' });
+      b.toolUse('s2', 'SendMessage', { to: B, message: 'same words', summary: 'same words' });
+    }).filter((row): row is Message => row.kind === 'agent_message');
+    const { container } = renderRow(rows[0]!, { storeKey: A });
+    expect(container.querySelector('.transcript-peer-body')).toBeNull(); // closed: under the line, the address alone
+    fireEvent.click(screen.getByRole('button', { name: /^Sent to/ }));
+    const body = container.querySelector('.transcript-peer-body')!;
+    const summary = body.previousElementSibling!;
+    expect([summary.textContent, summary.getAttribute('data-touch-fact'), summary.getAttribute('aria-hidden')]).toEqual(['Answer B', 'block', 'true']);
+    cleanup();
+    const { container: same } = renderRow(rows[1]!, { storeKey: A });
+    fireEvent.click(screen.getByRole('button', { name: /^Sent to/ }));
+    expect(same.querySelector('.transcript-peer-body')?.previousElementSibling).toBeNull();
   });
 
   it('reads a hand-back as Report from its agent and the report’s first line; the line opens the whole report', () => {

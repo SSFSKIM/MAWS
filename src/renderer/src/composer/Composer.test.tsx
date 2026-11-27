@@ -1887,7 +1887,7 @@ describe('unstarted send holds a starting state', () => {
     mount([{ index: 0, id: A }]);
     await waitFor(() => expect(editorOf()).toBeTruthy());
     const location = within(composerOf(0)).getByRole('button', { name: /^Location/ });
-    expect([location.getAttribute('aria-label'), accessibleDescription(location)]).toEqual(['Location /repo', 'Where this session will run']); // its tip reads `/repo · Where this session will run` (ticket 815)
+    expect([location.getAttribute('aria-label'), accessibleDescription(location)]).toEqual(['Location /repo', '/repo · Where this session will run']); // its tip's words, its description too (ticket 815)
     expect(await addDirectoryState()).toBeNull();
     vi.useFakeTimers();
     await type('after the failure');
@@ -1930,7 +1930,7 @@ describe('unstarted send holds a starting state', () => {
     mount([{ index: 0, id: A }]);
     const chip = within(composerOf(0)).getByRole('button', { name: `Location ${repo}` });
     expect(chip.textContent).toBe('repo⌄'); // the name; the path is the tooltip and the popover's first line; W9 (H2): no branch, no placeholder
-    expect([chip.getAttribute('aria-label'), accessibleDescription(chip)]).toEqual([`Location ${repo}`, 'Where this session will run']);
+    expect([chip.getAttribute('aria-label'), accessibleDescription(chip)]).toEqual([`Location ${repo}`, `${repo} · Where this session will run`]);
     const user = userEvent.setup();
     await user.click(chip);
     const popover = screen.getByRole('dialog', { name: 'Location' });

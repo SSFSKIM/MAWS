@@ -5,8 +5,9 @@
 // and hides it again: a narrower column cuts any line, and no word of a message may be out of reach (the architect's
 // ruling of 2026-11-13). A peer's name is followed by the owners its sminos frame names, by the sidebar's rule (P5 O15
 // M2b, §J: a display of the frame, not a verification). Ticket 815: the peer's address, every owner with its email and
-// the send's own summary are the line's tip, which the keyboard reaches (the words sit inside the line's one control),
-// and the address stands under the line where nothing points (the touch rule). A message
+// the send's own summary are the line's tip, which the keyboard reaches (the words sit inside the line's one control).
+// Where nothing points (the touch rule) the address stands under the line, with every owner and its email where that
+// list says more than the drawn label, and a summary that is not the message itself stands over the opened message. A message
 // from another session that can be answered offers Reply at the line's end, on hover or focus (always where nothing
 // points, T75), and keeps it while the composer it opens is open (E7). The root keeps the class `transcript-peer` and, for a message between sessions, its
 // `data-peer`, which the live e2e specs and the agents harness select by.
@@ -39,6 +40,8 @@ export function AgentMessageRow({ row }: { row: AgentMessageData }) {
   const address = peer === null ? null : partyOf(peer).address;
   const facts = peer === null ? [] : [address, owners?.every, peer.summary].filter((part): part is string => typeof part === 'string' && part !== '');
   const fact = facts.length === 0 ? null : { content: facts.map((part, index) => <span key={index} className="block">{part}</span>), description: facts.join(' · ') };
+  const atRest = [address, owners !== null && owners.every !== owners.label ? owners.every : null].filter((part) => part !== null).join('\n'); // the touch rule
+  const summary = peer !== null && peer.summary !== null && peer.summary.trim() !== wholeOf(row).trim() ? peer.summary : null;
   return (
     <div
       className="transcript-peer"
@@ -62,9 +65,10 @@ export function AgentMessageRow({ row }: { row: AgentMessageData }) {
           </button>
         )}
       </div>
-      <TouchFact block className="ms-6 text-ui-sm [overflow-wrap:anywhere]">{address}</TouchFact>
+      <TouchFact block className="ms-6 text-ui-sm [overflow-wrap:anywhere]">{atRest}</TouchFact>
       {peer?.result === 'failed' && peer.resultText !== null && <p className="transcript-peer-error">{peer.resultText}</p>}
       <ArrivalBody open={open}>
+        <TouchFact block className="ms-6 mb-1 text-ui-sm [overflow-wrap:anywhere]">{summary}</TouchFact>
         <p className="transcript-peer-body">{wholeOf(row)}</p>
       </ArrivalBody>
       {peer !== null && peer.replyTo !== null && replying && (

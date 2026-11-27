@@ -190,9 +190,6 @@ export function Tab({ tab, pane, domId, active, place = null, stop, onKeyDown }:
       id={domId}
       aria-selected={active}
       aria-label={name}
-      // UX wave U6e (decision 11; U13's): a file's tab has its full path as its tooltip, a `Tip` the keyboard reaches (the
-      // word cut's fix wave for M4); any other tab its name, the system's
-      title={tab.kind === 'file' ? undefined : name}
       tabIndex={stop ? 0 : -1}
       data-tab-id={tab.id}
       data-dirty={dirty ? 'true' : undefined} // E5
@@ -223,8 +220,11 @@ export function Tab({ tab, pane, domId, active, place = null, stop, onKeyDown }:
       {/* U13a: the place gives way before the title, and is drawn readable or not at all. The box is one line high and
           clips what wraps. The title keeps its width up to the whole box. The place asks the line for its whole text or
           5em, whichever is less (four characters and an ellipsis are never wider), and grows to its whole text from there;
-          a line with less room wraps it out of sight, with its gap, and the title takes the room. */}
-      <span className="flex h-[1lh] min-w-0 flex-wrap items-baseline gap-x-1.5 overflow-hidden">
+          a line with less room wraps it out of sight, with its gap, and the title takes the room. UX wave U6e (decision
+          11; U13's): a file's tab has its full path as its tooltip, a `Tip` the keyboard reaches (the word cut's fix wave
+          for M4); any other tab its name, the system's, on the words it repeats (board ticket 815: not on the tab, so
+          the pin and the close glyph show their own tips and no other tooltip over them). */}
+      <span title={tab.kind === 'file' ? undefined : name} className="flex h-[1lh] min-w-0 flex-wrap items-baseline gap-x-1.5 overflow-hidden">
         {tab.kind === 'file' ? (
           <FileTitle name={label.title} className={offline ? 'text-fg-faint' : ''} />
         ) : (

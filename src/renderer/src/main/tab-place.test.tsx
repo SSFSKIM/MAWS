@@ -47,7 +47,7 @@ describe('a tab’s place', () => {
     open(idOf('Quota reset recovery'));
     expect(names()).toEqual(['Charter + research · MAWS', 'Fix sidebar drag · MAWS', 'Diagnostics', 'Quota reset recovery · codex_somersault']);
     const charter = tabOf(idOf('Charter + research'));
-    expect(charter.title).toBe('Charter + research · MAWS'); // the tooltip carries both
+    expect(charter.querySelector('[title]')?.getAttribute('title')).toBe('Charter + research · MAWS'); // the tooltip carries both (on the words, board ticket 815)
     expect(charter.querySelector('[data-tab-place]')?.textContent).toBe('MAWS');
 
     act(() => useLayout.getState().closeTab(`session:${idOf('Quota reset recovery')}`));

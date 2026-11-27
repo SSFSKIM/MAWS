@@ -11,7 +11,7 @@
 // a message tool: its landing, and its drawing while its input streams.
 //
 // With DESK_SHOTS set to a directory, the report and the transcript at one point are saved there at desktop width.
-import { allTranscriptRowIds, revealEarlier } from './transcript-history';
+import { allTranscriptRowIds, answerLine, revealEarlier } from './transcript-history';
 import type { Locator, Page } from '@playwright/test';
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
@@ -134,7 +134,7 @@ test("G1: the report over the session's rows — each stretch of work between th
   await expect(view).toContainText('Count from one to three hundred');
   await expect(view).not.toContainText('forty-nine');
   // The marked answer's turn: its work folded (its Bash call) behind a record line, its questions in view.
-  await scrollUntil(view, view.getByText('Color→blue'), -1);
+  await scrollUntil(view, answerLine(view, 'Color', 'blue'), -1);
   await expect(records(view).first()).toHaveText('› working record');
   await expect(view.locator(BASH_ROW)).toHaveCount(0);
   await scrollUntil(view, view.locator(`[data-row-id^="question:${ASK_CALL}"]`), -1); // the ask mod's async question, a question row
@@ -205,7 +205,7 @@ test("G1: a marked answer streams per block as its message, the work before it f
   const recording = fm.recording;
   const uuid = answerRow(recording);
   fm.step(recording.steps.findIndex(isAnswerChunk(uuid, recording)) - fm.played); // up to the answer's first chunk
-  await expect(view).toContainText('Color→blue');
+  await expect(answerLine(view, 'Color', 'blue').first()).toBeAttached();
   // UX wave U2b: the session already holds the older turns' messages, so the running turn's work is folded before its
   // answer starts, its Bash call too
   await expect(view.locator(BASH_ROW)).toHaveCount(0);
