@@ -5,7 +5,7 @@
 import { act, cleanup, fireEvent, render, renderHook, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { formatDayTime } from '@shared/app/date-format';
+import { formatDateTime, formatDayTime } from '@shared/app/date-format';
 import type { PreloadBridge } from '@shared/ipc/schema';
 import type { ChannelAnswer, ChannelChanged, ChannelEvent, ChannelHost, ChannelSession, OrgMember } from '@shared/ipc/schema/org';
 import { tabId } from '@shared/ipc/schema/layout';
@@ -22,6 +22,7 @@ import { useHubAccess, type HubAccess } from '../stores/hub-access';
 import { useLayout } from '../stores/layout';
 import { allTabs } from '../stores/layout-model';
 import { fillStores, resetShellStores } from '../test-support/shell-stores';
+import { accessibleDescription } from '../test-support/accessible-text';
 import { resetAskSheets } from '../tools/maws/ask/store';
 import { ChannelView } from './ChannelView';
 import { useChannelTitle } from './title';
@@ -116,11 +117,29 @@ describe('the tab’s hold', () => {
     expect(names.lastElementChild).toBe(count);
     expect(names.nextElementSibling!.tagName).toBe('TIME');
     act(() => fold.focus());
-    expect((await screen.findByRole('tooltip')).textContent).toBe('3 messages');
+    // board ticket 815: under the count, what the fold leaves out (the parties in full, the last message's day), which
+    // the time inside the button no longer tips on its own
+    const left = ['maws-45 · Fix the relay · mini', 'ci-opt · mini', formatDateTime(Date.parse(T(2)))];
+    expect((await screen.findByRole('tooltip')).textContent).toBe(['3 messages', ...left].join(''));
+    expect(accessibleDescription(fold)).toBe(left.join(' · '));
+    expect(fold.querySelector('time')!.hasAttribute('tabindex')).toBe(false);
     expect(screen.queryByText('say 2')).toBeNull();
     fireEvent.click(fold);
     expect(fold.getAttribute('aria-expanded')).toBe('true');
     expect(within(stream().querySelector<HTMLElement>('[data-channel-exchange-messages]')!).getAllByRole('listitem')).toHaveLength(3);
+  });
+
+  // board ticket 815: a verified word's sender says who signed it, and an entry's time its day in full, each a word that
+  // takes focus to show it
+  it('a verified word’s name tips who signed it, and its time the day in full', async () => {
+    install();
+    render(<ChannelView project={SMNS} />);
+    await act(() => fake.reply('org.channel.open', opened({ events: [human(3, ANA, 'hi all')] })));
+    const row = stream().querySelector<HTMLElement>('[data-channel-entry="words"]')!;
+    const name = within(row).getByText('Ana', { ignore: '[hidden]' });
+    expect([name.tabIndex, accessibleDescription(name)]).toEqual([0, 'Signed by one of Ana’s devices']);
+    const time = row.querySelector('time')!;
+    expect([time.tabIndex, accessibleDescription(time)]).toEqual([0, formatDateTime(Date.parse(T(3)))]);
   });
 
   // the word cut (P447): the default audience is not said, on a message nor on a folded run of them

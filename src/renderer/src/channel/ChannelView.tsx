@@ -25,6 +25,7 @@ import { formatDayTime } from '@shared/app/date-format';
 import { ipc } from '../ipc/client';
 import { useHubAccess, type HubAccess } from '../stores/hub-access';
 import { QuietSpinner } from '../ui/spinner';
+import { Tip } from '../ui/tip';
 import { useSessions } from '../stores/sessions';
 import { CHANNEL } from './copy';
 import { Composer } from './Composer';
@@ -80,9 +81,12 @@ export function ChannelView({ project }: { project: string }) {
           {held.phase === 'opening' && channel.failed === null && <QuietSpinner label={CHANNEL.opening} className="self-center" />}
           {channel.failed !== null && (
             <div role="alert" className="flex flex-wrap items-center gap-2 text-danger">
-              <span className="min-w-0 break-words" title={channel.failed}>
-                {CHANNEL.failed}
-              </span>
+              {/* board ticket 815: what failed, the words' tip and description, which focus shows too */}
+              <Tip content={channel.failed} description={channel.failed}>
+                <span tabIndex={0} className="min-w-0 rounded-sm break-words outline-accent focus-visible:outline-2">
+                  {CHANNEL.failed}
+                </span>
+              </Tip>
               <button type="button" className={ACTION} onClick={channel.retry}>
                 {CHANNEL.retry}
               </button>
