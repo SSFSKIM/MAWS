@@ -5,7 +5,7 @@ import * as z from 'zod';
 import { MAIN_ONLY_COMMANDS, NAMES } from '../names';
 import { commands } from '../schema';
 import { validateCommandOutput } from '../validate';
-import { DaemonStatusSchema, isLocalOnly, remoteDaemonStatus, type DaemonStatus } from './daemon';
+import { DaemonStatusSchema, isLocalOnly, localOnly, remoteDaemonStatus, withoutLocalOnly, type DaemonStatus } from './daemon';
 
 const status: DaemonStatus = {
   pid: 41022,
@@ -60,6 +60,20 @@ describe('daemon.status for a remote caller', () => {
     delete rest.profile;
     delete rest.logPath;
     expect(remote).toEqual(rest);
+  });
+
+  it('drops a local-only field inside an optional object: a listening page’s address', () => {
+    const listening: DaemonStatus = { ...status, sheetPage: { state: 'listening', detail: 'served on 127.0.0.1 and ::1, port 47590', url: 'http://sheet.localhost:47590', browsers: 2, connections: 1, registered: true } };
+    const remote = remoteDaemonStatus(listening);
+    expect(remote.sheetPage).toEqual({ state: 'listening', detail: 'served on 127.0.0.1 and ::1, port 47590', browsers: 2, connections: 1, registered: true });
+    expect(DaemonStatusSchema.safeParse(remote).success).toBe(true);
+  });
+
+  it('walks a nullable or optional wrapper to the object inside it, and keeps a null as it is', () => {
+    const schema = z.strictObject({ wrapped: z.strictObject({ secret: localOnly(z.string()), kept: z.number() }).nullable().optional() });
+    expect(withoutLocalOnly(schema, { wrapped: { secret: 'x', kept: 1 } })).toEqual({ wrapped: { kept: 1 } });
+    expect(withoutLocalOnly(schema, { wrapped: null })).toEqual({ wrapped: null });
+    expect(withoutLocalOnly(schema, {})).toEqual({});
   });
 
   it('validates as the registry output both whole and redacted', () => {

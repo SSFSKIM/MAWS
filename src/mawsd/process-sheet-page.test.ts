@@ -12,6 +12,7 @@ import { join, resolve } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, onTestFailed, vi } from 'vitest';
 import { atomicWriteFileSync } from '@shared/fs/atomic-write';
 import { gradeOf } from '@shared/ipc/grades';
+import { remoteDaemonStatus } from '@shared/ipc/schema/daemon';
 import { launchEnvironment } from '../../e2e/support/scratch-env';
 import { MawsdScene, until } from '../../test/support/mawsd-scene';
 import { exchangeBytes, type Headers, HOST, ORIGIN, JSON_BODY, request, jsonOf, macOf, nonce, Tab, pairedTab } from '../../test/support/sheet-page-client';
@@ -764,5 +765,12 @@ describe('the three commands (T11)', () => {
     expect(await app.request('daemon.sheetBrowsers')).toMatchObject({ ok: true, value: { served: true, browsers: [] } });
     expect(await app.request('daemon.sheetUnpair', { id: null })).toMatchObject({ ok: true, value: { removed: 0, saved: true } });
     expect(await app.request('daemon.status')).toMatchObject({ ok: true, value: { sheetPage: { state: 'listening', url: `http://sheet.localhost:${port}`, browsers: 0, connections: 0, registered: false } } });
+  });
+
+  it('give a remote caller of daemon.status a listening page without its address', async () => {
+    const { daemon } = await served();
+    const remote = remoteDaemonStatus(await daemon.status());
+    expect(remote.sheetPage).toMatchObject({ state: 'listening' });
+    expect(remote.sheetPage).not.toHaveProperty('url');
   });
 });

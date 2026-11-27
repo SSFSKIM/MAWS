@@ -121,7 +121,10 @@ export function remoteDaemonStatus(status: DaemonStatus): DaemonStatus {
   return withoutLocalOnly(DaemonStatusSchema, status) as DaemonStatus;
 }
 
-function withoutLocalOnly(schema: z.ZodType, value: unknown): unknown {
+// The walk unwraps an optional or nullable field to the object inside it (`sheetPage` is an optional object holding a
+// local-only `url`), so a mark is honoured at any depth whatever wraps the object that holds it.
+export function withoutLocalOnly(schema: z.ZodType, value: unknown): unknown {
+  while (schema instanceof z.ZodOptional || schema instanceof z.ZodNullable) schema = schema.unwrap() as z.ZodType;
   if (!(schema instanceof z.ZodObject) || typeof value !== 'object' || value === null) return value;
   const shape = schema.shape as Record<string, z.ZodType>;
   const out: Record<string, unknown> = {};
