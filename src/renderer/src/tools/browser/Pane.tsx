@@ -226,11 +226,12 @@ function PlacedPane({ tab, surface, onOwns, onRoom }: { tab: BrowserTab; surface
   const frame = useMemo<CardFrame>(() => ({ scale: 1, offset: inset, key: tabId }), [tabId, inset]);
   const accepts = (card: OpenCard) => card.target?.kind === 'browser' && card.target.pageUrl === tab.url;
   // after Close, Escape or a send: the Comment toggle of the chrome over this pane, which armed the pick, or its address
-  // field while the toggle is disabled (the agent took the page)
+  // field while the toggle is unavailable (the agent took the page): greyed as `aria-disabled`, which keeps it focusable
+  // but presses nothing (board ticket 815)
   const restoreFocus = () => {
     const view = element.current?.closest('[data-browser-view]');
     const toggle = view?.querySelector<HTMLButtonElement>('[data-browser-comment]');
-    const target = toggle && !toggle.disabled ? toggle : view?.querySelector<HTMLElement>('[data-address-box] input');
+    const target = toggle && toggle.getAttribute('aria-disabled') !== 'true' ? toggle : view?.querySelector<HTMLElement>('[data-address-box] input');
     target?.focus({ preventScroll: true });
   };
 

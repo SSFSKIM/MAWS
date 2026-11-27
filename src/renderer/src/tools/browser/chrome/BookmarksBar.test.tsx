@@ -3,6 +3,7 @@
 // tab and an anchor, the chips that do not fit hidden and handed to the », the icons the partition already showed, the
 // hidden states, ⌘⇧B from the chrome and from the page, and the tree read again when main says it changed.
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { emptyBookmarkTree, type BookmarkNode, type BookmarkTree } from '@shared/browser/bookmarks';
@@ -118,6 +119,17 @@ describe('the bookmarks bar', () => {
         { tabId: T1, nodeId: 7, how: 'newTab' },
       ]),
     );
+  });
+
+  it('Enter on a focused chip loads it and closes the tip its focus opened, the focus staying on the chip', async () => {
+    show();
+    await vi.waitFor(() => expect(bar()).not.toBeNull());
+    act(() => chip(3).focus());
+    expect(screen.getByRole('tooltip').textContent).toBe('Bhttps://b.example/B');
+    await userEvent.setup({ delay: null }).keyboard('{Enter}');
+    await vi.waitFor(() => expect(main.callsOf('browser.bookmarks.open')).toEqual([{ tabId: T1, nodeId: 3, how: 'current' }]));
+    expect(document.activeElement).toBe(chip(3));
+    expect(screen.queryByRole('tooltip')).toBeNull();
   });
 
   it('a folder asks main for its native menu under the chip; » for the overflow from the first chip that does not fit', async () => {

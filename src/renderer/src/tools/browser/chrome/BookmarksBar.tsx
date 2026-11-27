@@ -132,10 +132,10 @@ function Chip({ node, icon, hidden, onOpen, onMenu }: ChipProps) {
       </button>
     );
   }
-  const click = (event: MouseEvent<HTMLButtonElement>) => {
-    event.preventDefault();
-    onOpen(chipHow(event));
-  };
+  // A click is not prevented: a button's has no default, and a prevented one is not the activation that closes the
+  // chip's tip (Radix skips its close for it), so Enter would leave the tip its focus opened standing (board ticket 815).
+  // The middle button's is, as it always was.
+  const click = (event: MouseEvent<HTMLButtonElement>) => onOpen(chipHow(event));
   // The tooltip, which keyboard focus opens too (board ticket 815): the name in full, then the address, which is the
   // chip's description (an unnamed bookmark's address is its name).
   const named = node.name !== '';
@@ -158,7 +158,11 @@ function Chip({ node, icon, hidden, onOpen, onMenu }: ChipProps) {
         data-bookmark={node.id}
         aria-label={named ? undefined : node.url}
         onClick={click}
-        onAuxClick={(event) => event.button === 1 && click(event)}
+        onAuxClick={(event) => {
+          if (event.button !== 1) return;
+          event.preventDefault();
+          click(event);
+        }}
         className={`${CHIP} ${hidden ? 'invisible' : ''}`}
         inert={hidden}
       >

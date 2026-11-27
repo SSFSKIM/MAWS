@@ -6,8 +6,9 @@
 // dialog element or the popper wrapper. Each child is classified in this order, because a Popover's content carries
 // role="dialog" inside its popper wrapper:
 //   1. a Radix popper wrapper (Popover, DropdownMenu, ContextMenu, HoverCard, Tooltip): covers when its rect meets a
-//      pane, measured after two animation frames (floating-ui positions it asynchronously) and again on its own resize;
-//      a Tooltip's never covers (small, transient; the chrome's own controls use native titles);
+//      pane, measured after two animation frames (floating-ui positions it asynchronously) and again on its own resize.
+//      A Tooltip's too: the chrome's tips (a tab's or a bookmark's full title, wrapping in a long one) can flip below
+//      the strip into the page, and a tip that stays off every pane, as almost all do, never touches the cover;
 //   2. a dialog or alertdialog, or a child holding one: modal, covers while mounted (every Sheet, the palette, the widget
 //      dialog, InlineEdit's confirm, the resume picker);
 //   3. anything else but the app root, Radix's focus guards and inert elements: the intersection rule (the composer's
@@ -35,7 +36,7 @@ const TOAST_VIEWPORT = '[data-toast-viewport]';
 const INERT = new Set(['SCRIPT', 'STYLE', 'TEMPLATE', 'LINK', 'META', 'NOSCRIPT']);
 
 export function classifyLayer(element: Element): LayerKind {
-  if (element.matches(POPPER)) return element.querySelector('[role="tooltip"]') ? 'never' : 'measured';
+  if (element.matches(POPPER)) return 'measured';
   if (element.matches(DIALOG) || element.querySelector(DIALOG)) return 'modal';
   if (element.id === 'root' || element.matches('[data-radix-focus-guard]') || INERT.has(element.tagName)) return 'never';
   return 'measured';
@@ -92,10 +93,6 @@ export function watchCoverLayers(rectsOf: () => readonly PaneRect[], onChange: (
     entry.frame = requestAnimationFrame(() => {
       entry.frame = requestAnimationFrame(() => {
         entry.frame = 0;
-        if (element.matches(POPPER) && classifyLayer(element) === 'never') {
-          forget(element); // a tooltip whose content arrived after its wrapper
-          return;
-        }
         entry.rect = element.getBoundingClientRect();
         evaluate();
       });

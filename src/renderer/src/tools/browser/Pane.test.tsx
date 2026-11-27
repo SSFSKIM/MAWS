@@ -351,13 +351,14 @@ describe('the comment card’s dock', () => {
     expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Comment' }));
   });
 
-  it('Escape in the docked card gives focus to the chrome’s address field while the Comment toggle is disabled', async () => {
+  // the toggle greyed as the chrome draws it (board ticket 815): `aria-disabled`, still focusable, its press swallowed
+  it('Escape in the docked card gives focus to the chrome’s address field while the Comment toggle is unavailable', async () => {
     render(
       <div data-browser-view="panel">
         <div data-address-box="">
           <input role="combobox" aria-label="Address" />
         </div>
-        <button type="button" data-browser-comment="" disabled>
+        <button type="button" data-browser-comment="" aria-disabled="true">
           Comment
         </button>
         <BrowserPane tab={tab()} surface="panel" />
