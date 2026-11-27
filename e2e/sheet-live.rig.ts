@@ -7,7 +7,7 @@
 // variables in its environment:
 //
 //   pnpm install && scripts/e2e-build.sh plain
-//   SHEET_LIVE_DOPERPOWERS=<a doperpowers checkout at C2's merge> SHEET_LIVE_OUT=<a directory outside the repository> \
+//   SHEET_LIVE_DOPERPOWERS=<a doperpowers checkout at C2's merge> SHEET_LIVE_OUT=<a new directory outside the repository> \
 //   [SHEET_LIVE_CLAUDE=<the terminal's claude, else the one on PATH>] [SHEET_LIVE_MODEL=haiku] [SHEET_LIVE_KEEP=1] \
 //   ANTHROPIC_BASE_URL=… ANTHROPIC_AUTH_TOKEN=… \
 //     pnpm exec playwright test --config e2e/sheet-live.config.ts
@@ -18,9 +18,12 @@
 // test/support/sminos-barrier.sh in front of it). Each step asserts what the record says (state.json, inbox.jsonl,
 // `sheet show --json`) and what the window shows, and leaves under SHEET_LIVE_OUT one picture (`<n>-<what>.png`), the
 // terminal's pane, the record as it stood, and a line of steps.jsonl; the session's transcript is kept under
-// SHEET_LIVE_OUT/transcript. Everything the run started is stopped at its end, and its scratch removed.
+// SHEET_LIVE_OUT/transcript, scrubbed for the repository (test/support/transcript-scrub.ts; a name left in it fails the
+// run). SHEET_LIVE_OUT must not exist yet and must lie outside the checkout. Everything the run started is stopped at
+// its end and its scratch removed, whatever happened; a release that fails fails the run.
 import { appendFileSync, mkdirSync, writeFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
+import { loadavg } from 'node:os';
 import { join } from 'node:path';
 import { expect, test, type Locator, type Page } from '@playwright/test';
 import { SHEET_WORDS } from '../src/renderer/src/sheet/copy';
@@ -30,12 +33,13 @@ import { launchMaws, REPO_ROOT, type MawsLaunch } from './support/launch';
 import { asTheRigDraws, cardOf, closeNotices, needsYouRow, openLookSession, openSheetAt, rowHeads, rowLines, sheetRows, sheetTool } from './support/sheet-look';
 import { sidebarRow } from './support/sidebar';
 import {
-  README, alive, envelopes, hasRecord, idle, inboxLines, keepRecord, keepTranscript, liveConfig, recordState, removeScratch, repliesAfter, sheetCalls, show, startSurface, stopSurface, Terminals,
-  transcriptRows, until, writeScratch, type Scratch,
+  README, alive, envelopes, hasRecord, idle, inboxLines, keepRecord, liveConfig, messagesAfter, recordState, recordTranscript, removeScratch, scratchRoot, sheetCalls, show, spawnSurface, stopSurface,
+  surfaceRegistered, Terminals, transcriptRows, until, writeScratch, type LiveConfig, type Scratch,
 } from './support/sheet-live';
 
 const TURN_MS = 240_000; // one model turn, a call of the tool and what follows it
 const BARRIER = join(REPO_ROOT, 'test/support/sminos-barrier.sh');
+const WAITING = 'Question waiting'; // the attention heading of a sheet question (ATTENTION_HEADINGS.async_input)
 
 // What the agent is asked (the plan's step 2, with C2's live check's preface so its reply to a delivery can be matched)
 const REPEAT = 'When answers from the human’s question sheet reach you later, reply by repeating each one: its question id, the option picked, and the human’s text word for word. Do not read any file an answer points to. ';
@@ -47,87 +51,136 @@ const ASK_ONE = 'Put one more question to me on your sheet: one with two options
 // What the person types
 const TYPED = { picked: 'Only for the beta, please.', reference: 'Keep the README as it is.', open: 'Start with the North Quay route.', later: 'After the timetable import lands.' };
 
+type Call = ReturnType<typeof sheetCalls>[number];
+type Entry = { question: string; header?: string; options?: { label: string }[]; references?: { path: string }[] };
+
 test.use({ trace: 'off', screenshot: 'off', video: 'off' });
 
 test('the question sheet live: a terminal session asks on its sheet and is answered in MAWS (G2.a to G2.g)', async () => {
   test.setTimeout(35 * 60_000);
-  const cfg = liveConfig();
-  mkdirSync(cfg.out, { recursive: true });
-  const log = (step: string, evidence: Record<string, unknown>) => appendFileSync(join(cfg.out, 'steps.jsonl'), `${JSON.stringify({ at: new Date().toISOString(), step, ...evidence })}\n`);
-  const s = writeScratch(cfg);
-  const terminals = new Terminals(cfg, s);
-  const surface = await startSurface(cfg, s);
+  // Teardown: each resource's release registered as it is acquired, run in reverse whatever happened; a release that
+  // fails fails the run, after the others have run.
+  const releases: { what: string; run: () => unknown }[] = [];
+  const own = (what: string, run: () => unknown) => releases.push({ what, run });
+  let failure: unknown = null;
+  let cfg: LiveConfig | null = null;
+  let s: Scratch | null = null;
   let maws: MawsLaunch | null = null;
   let sid = '';
-  let mainPid = 0;
-  const picture = async (page: Page, name: string) => page.screenshot({ path: join(cfg.out, `${name}.png`), animations: 'disabled', caret: 'hide' });
-  const keep = (name: string, pane: string) => {
-    writeFileSync(join(cfg.out, `${name}-pane.txt`), terminals.pane(pane));
-    if (sid !== '' && hasRecord(s, sid)) keepRecord(s, sid, join(cfg.out, `${name}-record`));
-  };
-  const step = async (name: string, body: () => Promise<Record<string, unknown>>) => {
-    try {
-      const evidence = await test.step(name, body);
-      log(name, { ok: true, ...evidence });
-    } catch (error) {
-      log(name, { ok: false, error: String(error).slice(0, 4_000) });
-      for (const page of maws?.app.windows() ?? []) await picture(page, `${name}-FAILED-${maws!.app.windows().indexOf(page)}`).catch(() => undefined);
-      keep(`${name}-FAILED`, pane);
-      throw error;
-    }
-  };
-  let pane = 'main';
+  const log = (step: string, evidence: Record<string, unknown>) => cfg && appendFileSync(join(cfg.out, 'steps.jsonl'), `${JSON.stringify({ at: new Date().toISOString(), step, ...evidence })}\n`);
   try {
+    cfg = liveConfig();
+    mkdirSync(cfg.out, { recursive: true });
+    const config = cfg;
+    const root = scratchRoot();
+    own('the scratch root', () => removeScratch(root, config.keep));
+    const scratch = (s = writeScratch(config, root));
+    const terminals = new Terminals(config, scratch);
+    own('the terminals', () => terminals.closeAll());
+    const surface = spawnSurface(config, scratch);
+    own('the stand-in surface', () => stopSurface(surface));
+    await surfaceRegistered(scratch);
+    const launch = async (env: Record<string, string>): Promise<MawsLaunch> => {
+      const launched = await launchMaws({ env: { CLAUDE_CONFIG_DIR: scratch.config, SMINOS_HOME: scratch.sminosHome, ...env } });
+      let closed: Promise<void> | null = null;
+      const close = () => (closed ??= launched.cleanup());
+      own('the app', close);
+      await asTheRigDraws(launched);
+      return { ...launched, cleanup: close };
+    };
+
+    let pane = 'main';
+    // Evidence: never in the way of the step's own verdict or of the teardown
+    const picture = (page: Page, name: string) => page.screenshot({ path: join(config.out, `${name}.png`), animations: 'disabled', caret: 'hide' }).then(() => undefined, (error: unknown) => console.error(`[sheet-live] picture ${name}`, error));
+    const keep = (name: string) => {
+      try {
+        writeFileSync(join(config.out, `${name}-pane.txt`), terminals.pane(pane));
+        if (sid !== '' && hasRecord(scratch, sid)) keepRecord(scratch, sid, join(config.out, `${name}-record`));
+      } catch (error) {
+        console.error(`[sheet-live] keeping ${name}`, error);
+      }
+    };
+    const step = async (name: string, body: () => Promise<Record<string, unknown>>) => {
+      try {
+        log(name, { ok: true, ...(await test.step(name, body)) });
+      } catch (error) {
+        log(name, { ok: false, error: String(error).slice(0, 4_000) });
+        const windows = maws?.app.windows() ?? [];
+        for (const [n, page] of windows.entries()) await picture(page, `${name}-FAILED-${n}`);
+        keep(`${name}-FAILED`);
+        throw error;
+      }
+    };
+    const rows = () => transcriptRows(scratch, sid);
+    const state = () => recordState(scratch, sid);
+    const callAfter = (count: number, what: string, match: (call: Call) => boolean) => until(what, TURN_MS, () => sheetCalls(rows()).slice(count).find((c) => c.result !== null && match(c)), () => terminals.pane(pane));
+    /** The ids a call added, from its result's first line ("Added q1, q2, q3."), checked against the record's own. */
+    const addedBy = (call: Call, n: number): string[] => {
+      const ids = /^Added ((?:q\d+, )*q\d+)\./.exec(call.result ?? '')?.[1]?.split(', ') ?? [];
+      expect(ids, `the call added exactly ${n} (its result: ${call.result})`).toHaveLength(n);
+      expect(state().questions.filter((q) => q.callId === call.id).map((q) => q.id), 'the record’s questions of that call').toEqual(ids);
+      return ids;
+    };
+    const page = () => maws!.page;
+    /** A call's row: the transcript's sheet calls and the drawn sheet rows are in the same order. */
+    const rowOf = async (call: Call) => {
+      const calls = sheetCalls(rows());
+      await expect(sheetRows(page()), 'a row for each call').toHaveCount(calls.length, { timeout: 15_000 });
+      return sheetRows(page()).nth(calls.findIndex((c) => c.id === call.id));
+    };
+
     // ---- 1. the setup: the app first, then the terminal --------------------------------------------------------------
+    let mainPid = 0;
     await step('1-setup', async () => {
-      maws = await launchApp(s, { MAWS_SMINOS_CLI: s.sminos });
-      ({ sid, pid: mainPid } = await terminals.open('main'));
-      await picture(maws.page, '1-setup');
-      keep('1-setup', pane);
-      return { session: sid, terminalClaude: versionOf(cfg.claude), appEngine: appEngine() };
+      maws = await launch({ MAWS_SMINOS_CLI: scratch.sminos });
+      ({ sid, pid: mainPid } = await terminals.open(pane));
+      await picture(page(), '1-setup');
+      keep('1-setup');
+      return { session: sid, admissionLoad: loadavg().map((n) => n.toFixed(2)), terminalClaude: versionOf(config.claude), appEngine: appEngine() };
     });
-    const app = () => maws!;
-    const page = () => app().page;
-    const sideBefore = await sideTabs(page());
+    const sideBefore = await sideStrip(page());
 
     // ---- 2. three questions in one call; the record exists before anything of the app is read -----------------------
-    let three: ReturnType<typeof sheetCalls>[number] | undefined;
+    let three: Call | null = null;
+    let ids: string[] = [];
     await step('2-three-asked', async () => {
       await terminals.say(pane, REPEAT + ASK_THREE);
-      three = await until('the call of three', TURN_MS, () => sheetCalls(transcriptRows(s, sid)).find((c) => (c.input.ask?.length ?? 0) === 3 && c.result !== null), () => terminals.pane(pane));
-      expect(hasRecord(s, sid), 'the session’s record: without it the session ran today’s tool').toBe(true);
+      three = await callAfter(0, 'the call of three', (c) => (c.input.ask?.length ?? 0) === 3);
+      expect(hasRecord(scratch, sid), 'the session’s record: without it the session ran today’s tool').toBe(true);
+      ids = addedBy(three, 3);
       await until('the band’s line', 30_000, () => terminals.pane(pane).includes('3 open questions'), () => terminals.pane(pane));
-      await idle(s, sid);
-      keep('2-three-asked', pane);
-      return { result: three!.result, open: show(s, sid).open.map((q) => q.id) };
+      await idle(scratch, sid);
+      keep('2-three-asked');
+      return { result: three.result, ids };
     });
-    // the call's own questions (an agent told to keep working may ask, or withdraw, more of its own meanwhile)
-    const askedByThree = recordState(s, sid).questions.filter((q) => q.callId === three!.id);
-    const ids = askedByThree.map((q) => q.id);
-    const byId = new Map(askedByThree.map((q) => [q.id, q]));
+    const asked = new Map(ids.map((id, n) => [id, three!.input.ask![n] as Entry]));
 
     // ---- 3. nothing opens; the session reads Question waiting; its row has three lines --------------------------------
     let appId = '';
     await step('3-row-lines', async () => {
       appId = await appIdOf(page(), sid);
-      expect(await sideTabs(page()), 'the side column as it was').toEqual(sideBefore);
+      expect(await sideStrip(page()), 'the side column’s tabs and its active tab as they were').toEqual(sideBefore);
       await expect(sheetTool(page()), 'nothing opened by itself').toHaveCount(0);
       expect(await holderOf(page(), appId), 'held by its terminal, not stopped').toBe('terminal');
-      await expect((await sidebarRow(page(), { appSessionId: appId })).getByRole('img', { name: 'Question waiting' }), 'the row reads Question waiting').toBeVisible({ timeout: 15_000 });
+      await expect((await sidebarRow(page(), { appSessionId: appId })).getByRole('img', { name: WAITING }), 'the sidebar row reads Question waiting').toBeVisible({ timeout: 15_000 });
       await openLookSession(page(), appId);
+      await expect(page().locator('[data-chrome-tabs]').getByRole('img', { name: WAITING }).first(), 'the session’s tab reads Question waiting').toBeVisible({ timeout: 15_000 });
+      expect((await sideStrip(page())).active.some((tab) => tab.startsWith(SHEET_WORDS.tab)), 'opening the session added or activated no Sheet tab').toBe(false);
       await expect(sheetTool(page()), 'opening the session opened no sheet').toHaveCount(0);
-      const row = sheetRows(page()).first();
-      await expect.poll(() => rowLines(row), { timeout: 15_000, message: 'one line per question, each with Open' }).toEqual(ids.map((id) => [id, byId.get(id)!.header ?? '', questionSentence(byId.get(id)!.question), SHEET_ROW.open].filter((cell) => cell !== '').join(' | ')));
+      const row = await rowOf(three!);
+      await expect(row.locator('.transcript-run-label'), 'the call’s head line').toHaveText('Asked 3 questions');
+      const expected = ids.map((id) => [id, asked.get(id)!.header ?? '', questionSentence(asked.get(id)!.question), SHEET_ROW.open].filter((cell) => cell !== '').join(' | '));
+      await expect.poll(() => rowLines(row), { timeout: 15_000, message: 'one line per question of the call, each with Open' }).toEqual(expected);
       await picture(page(), '3-row-lines');
-      keep('3-row-lines', pane);
-      return { heads: await rowHeads(page()), lines: await rowLines(row) };
+      keep('3-row-lines');
+      return { heads: await rowHeads(page()), lines: await rowLines(row), tab: WAITING };
     });
 
     // ---- 4. Open on the question that references README.md: the sheet at its card, the file as captured -------------
-    const referencing = ids.find((id) => (byId.get(id)!.references ?? []).some((r) => r.path.endsWith('README.md')));
+    const referencing = ids.find((id) => (state().questions.find((q) => q.id === id)!.references ?? []).some((r) => r.path.endsWith('README.md')));
     await step('4-open-at', async () => {
       expect(referencing, 'a question references README.md').toBeDefined();
-      await sheetRows(page()).first().getByRole('button', { name: SHEET_ROW.openName(referencing!), exact: true }).click();
+      await (await rowOf(three!)).getByRole('button', { name: SHEET_ROW.openName(referencing!), exact: true }).click();
       await expect(cardOf(page(), referencing!), `the keyboard on ${referencing}’s card`).toBeFocused({ timeout: 10_000 });
       await expect(cardOf(page(), referencing!)).toHaveAttribute('data-focus-ring', '');
       const reference = cardOf(page(), referencing!).locator('[data-sheet-reference] button[aria-expanded]').first();
@@ -140,70 +193,77 @@ test('the question sheet live: a terminal session asks on its sheet and is answe
 
     // ---- 5. all three answered, one with a pick and typed text, one Send; the agent has them together -------------
     await step('5-one-send', async () => {
-      const typed: Record<string, string> = {};
-      const picked: Record<string, string> = {};
+      const typed = new Map<string, string>();
+      const picked = new Map<string, { label: string; pick: number }>();
       for (const id of ids) {
-        const q = byId.get(id)!;
-        const card = cardOf(page(), id);
-        if ((q.options ?? []).length > 0) {
-          picked[id] = q.options![0]!.label;
-          await card.getByRole('radio', { name: picked[id], exact: true }).click();
+        const options = asked.get(id)!.options ?? [];
+        if (options.length > 0) {
+          picked.set(id, { label: options[0]!.label, pick: 1 }); // a pick is the option's number, from 1
+          await cardOf(page(), id).getByRole('radio', { name: options[0]!.label, exact: true }).click();
         }
-        const text = id === referencing ? TYPED.reference : (q.options ?? []).length > 0 ? (Object.keys(typed).length === 0 ? TYPED.picked : null) : TYPED.open;
+        const text = id === referencing ? TYPED.reference : options.length === 0 ? TYPED.open : [...typed.keys()].some((k) => picked.has(k)) ? null : TYPED.picked;
         if (text !== null) {
-          typed[id] = text;
+          typed.set(id, text);
           await sheetTool(page()).getByRole('textbox', { name: SHEET_WORDS.answerName(id), exact: true }).fill(text);
         }
       }
-      expect(Object.keys(picked).some((id) => typed[id] !== undefined), 'one answer is a pick with typed text').toBe(true);
-      const before = transcriptRows(s, sid).length;
+      expect([...picked.keys()].some((id) => typed.has(id)), 'one answer is a pick with typed text').toBe(true);
+      const inboxBefore = inboxLines(scratch, sid).length;
       await sheetTool(page()).getByRole('button', { name: SHEET_WORDS.send(ids.length), exact: true }).click();
-      const answers = await until('three answer lines, one call of the door', 30_000, () => {
-        const lines = inboxLines(s, sid).filter((l) => l.kind === 'answer');
-        return lines.length === ids.length ? lines : null;
+      const lines = await until('the Send’s inbox lines', 30_000, () => {
+        const added = inboxLines(scratch, sid).slice(inboxBefore);
+        return added.length >= ids.length ? added : null;
       });
-      expect(new Set(answers.map((l) => l.batch)).size, 'one batch').toBe(1);
-      const keys = answers.map((l) => String(l.key));
-      await until('the three delivered', TURN_MS, () => ids.every((id) => recordState(s, sid).closed[id]?.deliveredAt !== undefined));
-      const carrying = await until('one envelope carrying all three', TURN_MS, () => envelopes(transcriptRows(s, sid)).find((e) => e.blocks.some((b) => keys.every((k) => b.keys.includes(k)))));
-      await idle(s, sid);
-      const reply = repliesAfter(transcriptRows(s, sid), carrying.index);
-      for (const text of Object.values(typed)) expect(reply, 'the agent quotes the typed text').toContain(text);
-      const first = ids[0]!;
-      const receiptOf = (id: string) => `${id} | ${byId.get(id)!.header} | ${SHEET_ROW.arrow} `;
-      await expect.poll(() => rowLines(sheetRows(page()).first()), { timeout: 15_000, message: 'each line is its receipt' }).toEqual(ids.map((id) => expect.stringContaining(receiptOf(id)) as unknown as string));
-      if (picked[first] !== undefined) expect((await rowLines(sheetRows(page()).first()))[0]).toContain(`${receiptOf(first)}${picked[first]}`);
+      expect(lines.map((l) => [l.kind, l.id]), 'one answer line per question, nothing else').toEqual(ids.map((id) => ['answer', id]));
+      const batch = lines[0]!.batch;
+      expect(typeof batch === 'string' && batch !== '', 'the lines carry a batch').toBe(true);
+      expect(lines.map((l) => l.batch), 'one batch: one call of the door').toEqual(ids.map(() => batch));
+      const keys = lines.map((l) => String(l.key));
+      await until('the three delivered', TURN_MS, () => ids.every((id) => state().closed[id]?.deliveredAt !== undefined));
+      await idle(scratch, sid);
+      const carrying = envelopes(rows()).flatMap((e) => e.blocks.filter((b) => b.keys.some((k) => keys.includes(k))).map((block) => ({ ...e, block })));
+      expect(carrying, 'one delivery block carries the Send’s keys').toHaveLength(1);
+      expect([...carrying[0]!.block.keys].sort(), 'its keys are the Send’s').toEqual([...keys].sort());
+      const byId = (list: { id: string }[]) => [...list].sort((x, y) => x.id.localeCompare(y.id));
+      expect(byId(carrying[0]!.block.answered), 'it pairs each question with its pick and its text').toEqual(byId(ids.map((id) => ({ id, picks: picked.has(id) ? [picked.get(id)!.pick] : [], text: typed.get(id) ?? '' }))));
+      const quoting = messagesAfter(rows(), carrying[0]!.index).filter((message) => [...typed.values()].every((text) => message.includes(text)));
+      expect(quoting.length, 'one assistant message quotes all three answers').toBeGreaterThanOrEqual(1);
+      for (const id of ids) {
+        const answer = picked.has(id) ? picked.get(id)!.label : typed.get(id)!;
+        await expect.poll(() => lineFor(page(), id), { timeout: 15_000, message: `${id}’s line is its receipt` }).toBe(`${id} | ${asked.get(id)!.header} | ${SHEET_ROW.arrow} ${answer}`);
+      }
       for (const id of ids) await expect(cardOf(page(), id), `${id}’s card is gone`).toHaveCount(0, { timeout: 15_000 });
       await picture(page(), '5-one-send');
-      keep('5-one-send', pane);
-      return { keys, batch: answers[0]!.batch, envelope: carrying.kind, deliveredWith: carrying.blocks, transcriptRowsBefore: before, reply: reply.slice(0, 1_200), receipts: await rowLines(sheetRows(page()).first()) };
+      keep('5-one-send');
+      return { keys, batch, envelope: carrying[0]!.kind, delivered: carrying[0]!.block, reply: quoting[0]!.slice(0, 1_200), receipts: await Promise.all(ids.map((id) => lineFor(page(), id))) };
     });
 
     // ---- 6. two more, then the first withdrawn: its card goes and its line reads Withdrawn ------------------------
     let later = '';
     await step('6-withdrawn', async () => {
-      const calls = sheetCalls(transcriptRows(s, sid)).length;
+      const count = sheetCalls(rows()).length;
       await terminals.say(pane, ASK_TWO);
-      const two = await until('the call of two', TURN_MS, () => sheetCalls(transcriptRows(s, sid)).slice(calls).find((c) => (c.input.ask?.length ?? 0) === 2 && c.result !== null), () => terminals.pane(pane));
-      await idle(s, sid);
-      const [gone, kept] = recordState(s, sid).questions.filter((q) => q.callId === two.id).map((q) => q.id);
+      const two = await callAfter(count, 'the call of two', (c) => (c.input.ask?.length ?? 0) === 2);
+      await idle(scratch, sid);
+      const [gone, kept] = addedBy(two, 2);
       later = kept!;
       await expect(cardOf(page(), gone!), `${gone}’s card, before`).toBeVisible({ timeout: 15_000 });
       await terminals.say(pane, WITHDRAW(gone!));
-      const withdrawal = await until('the withdrawal', TURN_MS, () => sheetCalls(transcriptRows(s, sid)).slice(calls + 1).find((c) => (c.input.withdraw ?? []).includes(gone!) && c.result !== null), () => terminals.pane(pane));
-      expect(recordState(s, sid).closed[gone!]?.how, 'the record: withdrawn').toBe('withdrawn');
+      const withdrawal = await callAfter(count + 1, 'the withdrawal', (c) => (c.input.withdraw ?? []).includes(gone!));
+      expect(withdrawal.result, 'the call withdrew it').toMatch(new RegExp(`^Withdrew ${gone}\\.`));
+      expect(state().closed[gone!]?.how, 'the record: withdrawn').toBe('withdrawn');
       await expect(cardOf(page(), gone!), 'its card disappears').toHaveCount(0, { timeout: 15_000 });
-      await expect.poll(() => lineFor(page(), gone!), { timeout: 15_000, message: 'its line reads Withdrawn' }).toMatch(new RegExp(`^${gone} \\| .* ${SHEET_ROW.arrow} ${SHEET_ROW.withdrawn}$`));
-      await idle(s, sid);
+      await expect.poll(() => lineFor(page(), gone!), { timeout: 15_000, message: 'its line reads Withdrawn' }).toBe(`${gone} | ${(two.input.ask![0] as Entry).header} | ${SHEET_ROW.arrow} ${SHEET_ROW.withdrawn}`);
+      await idle(scratch, sid);
       await picture(page(), '6-withdrawn');
-      keep('6-withdrawn', pane);
+      keep('6-withdrawn');
       return { asked: two.result, withdrew: withdrawal.result, heads: await rowHeads(page()), lines: [await lineFor(page(), gone!), await lineFor(page(), kept!)] };
     });
 
     // ---- 7. the terminal closed: the stopped session's question, answered queued, taken back, sent again, resumed ---
     await step('7-stopped', async () => {
-      const asked = recordState(s, sid).questions.find((q) => q.id === later)!;
-      const label = asked.options![0]!.label;
+      const question = state().questions.find((q) => q.id === later)!;
+      const label = question.options![0]!.label;
       terminals.close(pane);
       await until('the terminal’s process gone', 30_000, () => !alive(mainPid));
       await expect.poll(() => holderOf(page(), appId), { timeout: 20_000, message: 'stopped' }).not.toBe('terminal');
@@ -218,96 +278,131 @@ test('the question sheet live: a terminal session asks on its sheet and is answe
         await expect(card.getByText(SHEET_WORDS.queuedStopped, { exact: true }), 'queued while stopped').toBeVisible({ timeout: 15_000 });
         await expect(card.getByRole('button', { name: SHEET_WORDS.takeBack, exact: true })).toBeEnabled();
       };
+      const inboxBefore = inboxLines(scratch, sid).length;
       await send();
       await card.getByRole('button', { name: SHEET_WORDS.takeBack, exact: true }).scrollIntoViewIfNeeded();
       await picture(page(), '7a-queued-stopped');
-      keep('7a-queued-stopped', pane);
+      keep('7a-queued-stopped');
       await card.getByRole('button', { name: SHEET_WORDS.takeBack, exact: true }).click();
       await expect(card.getByText(SHEET_WORDS.queuedStopped, { exact: true }), 'taken back').toHaveCount(0, { timeout: 15_000 });
-      expect(show(s, sid).open.map((q) => q.id), 'open again').toContain(later);
+      expect(show(scratch, sid).open.map((q) => q.id), 'open again').toContain(later);
       await send();
-      const kinds = inboxLines(s, sid).slice(-3).map((l) => l.kind);
-      expect(kinds, 'answer, retract, answer').toEqual(['answer', 'retract', 'answer']);
-      const sentKey = String(inboxLines(s, sid).at(-1)!.key);
-      const takenKey = String(inboxLines(s, sid).at(-3)!.key);
+      const lines = inboxLines(scratch, sid).slice(inboxBefore);
+      expect(lines.map((l) => l.kind), 'answer, retract, answer').toEqual(['answer', 'retract', 'answer']);
+      const [takenBack, , sent] = lines.map((l) => String(l.key));
+      expect(lines[1]!.target, 'the retract names the first answer').toBe(takenBack);
+      const rowsBeforeResume = rows().length;
       pane = 'resumed';
       const resumed = await terminals.open(pane, ['--resume', sid]);
       expect(resumed.sid, 'the same session resumed').toBe(sid);
       await terminals.say(pane, 'Reply with only: ok.');
-      await until(`${later}'s answer delivered`, TURN_MS, () => recordState(s, sid).closed[later]?.deliveredAt !== undefined, () => terminals.pane(pane));
-      const carried = envelopes(transcriptRows(s, sid)).filter((e) => e.blocks.some((b) => b.keys.includes(sentKey)));
-      expect(carried.length, 'the answer goes with the next prompt').toBeGreaterThan(0);
-      expect(envelopes(transcriptRows(s, sid)).some((e) => e.blocks.some((b) => b.keys.includes(takenKey))), 'the one taken back never goes').toBe(false);
-      await idle(s, sid);
-      await expect.poll(() => lineFor(page(), later), { timeout: 15_000, message: 'the line is its receipt' }).toContain(`${later} | ${asked.header ?? ''} | ${SHEET_ROW.arrow} ${label}`);
+      await until(`${later}'s answer delivered`, TURN_MS, () => state().closed[later]?.deliveredAt !== undefined, () => terminals.pane(pane));
+      await idle(scratch, sid);
+      const prompt = rows().slice(rowsBeforeResume).find((row) => row.type === 'user' && row.promptSource === 'typed');
+      expect(prompt, 'the first typed prompt after the resume').toBeDefined();
+      const withPrompt = envelopes(rows()).filter((e) => e.parent === prompt!.uuid && e.blocks.some((b) => b.keys.includes(sent!)));
+      expect(withPrompt, 'the answer goes with that prompt, in its added context').toHaveLength(1);
+      expect(JSON.stringify(rows()).includes(takenBack!), 'the answer taken back appears nowhere in the transcript').toBe(false);
+      await expect.poll(() => lineFor(page(), later), { timeout: 15_000, message: 'the line is its receipt' }).toBe(`${later} | ${question.header} | ${SHEET_ROW.arrow} ${label}`);
       await picture(page(), '7b-resumed-receipt');
-      keep('7b-resumed-receipt', pane);
-      return { question: later, sentKey, takenKey, envelope: carried[0]!.kind, line: await lineFor(page(), later) };
+      keep('7b-resumed-receipt');
+      return { question: later, sent, takenBack, envelope: withPrompt[0]!.kind, line: await lineFor(page(), later) };
     });
 
     // ---- 8. the app restarted behind the barrier; two windows answer one question; released, one is taken ----------
     await step('8-two-windows', async () => {
-      await app().cleanup();
-      const barrier = join(s.root, 'barrier');
-      maws = await launchApp(s, { MAWS_SMINOS_CLI: BARRIER, SMINOS_REAL: s.sminos, SMINOS_BARRIER: barrier });
+      await maws!.cleanup();
+      const barrier = join(scratch.root, 'barrier');
+      maws = await launch({ MAWS_SMINOS_CLI: BARRIER, SMINOS_REAL: scratch.sminos, SMINOS_BARRIER: barrier });
+      const app = maws;
       appId = await appIdOf(page(), sid); // a new profile: the app's own id for the session is new
-      const calls = sheetCalls(transcriptRows(s, sid)).length;
+      const count = sheetCalls(rows()).length;
       await terminals.say(pane, ASK_ONE);
-      const one = await until('the call of one', TURN_MS, () => sheetCalls(transcriptRows(s, sid)).slice(calls).find((c) => (c.input.ask?.length ?? 0) === 1 && c.result !== null), () => terminals.pane(pane));
-      await idle(s, sid);
-      const id = show(s, sid).open.map((q) => q.id).at(-1)!;
-      const label = recordState(s, sid).questions.find((q) => q.id === id)!.options![0]!.label;
-      const [second] = await Promise.all([app().app.waitForEvent('window'), app().app.evaluate(() => (globalThis as unknown as { __maws_documents: { openWindow(): number } }).__maws_documents.openWindow())]);
+      const one = await callAfter(count, 'the call of one', (c) => (c.input.ask?.length ?? 0) === 1);
+      await idle(scratch, sid);
+      const [id] = addedBy(one, 1);
+      const entry = one.input.ask![0] as Entry;
+      const label = entry.options![0]!.label;
+      const [second] = await Promise.all([app.app.waitForEvent('window'), app.app.evaluate(() => (globalThis as unknown as { __maws_documents: { openWindow(): number } }).__maws_documents.openWindow())]);
       await second.waitForLoadState('domcontentloaded');
+      const windows = [page(), second];
       const sheets: Locator[] = [];
-      for (const window of [page(), second]) {
+      for (const window of windows) {
         await (await needsYouRow(window, appId)).click({ timeout: 30_000 });
-        await expect(cardOf(window, id)).toBeVisible({ timeout: 15_000 });
-        await cardOf(window, id).getByRole('radio', { name: label, exact: true }).click();
+        await expect(cardOf(window, id!)).toBeVisible({ timeout: 15_000 });
+        await cardOf(window, id!).getByRole('radio', { name: label, exact: true }).click();
         sheets.push(sheetTool(window));
       }
-      const inboxBefore = inboxLines(s, sid).length;
+      const inboxBefore = inboxLines(scratch, sid).length;
       for (const sheet of sheets) await sheet.getByRole('button', { name: SHEET_WORDS.send(1), exact: true }).click();
-      await until('both Sends at the barrier', 15_000, () => heldAtBarrier() === 2);
-      expect(inboxLines(s, sid).length, 'neither appended while held').toBe(inboxBefore);
+      const held = await until('both Sends held at this run’s barrier', 15_000, () => {
+        const puts = heldPuts(app.userData, sid);
+        return puts.length === 2 ? puts : null;
+      });
+      expect(inboxLines(scratch, sid).length, 'neither appended while held').toBe(inboxBefore);
       await picture(page(), '8a-held-first');
       await picture(second, '8a-held-second');
       writeFileSync(barrier, '');
       const appended = await until('both lines appended', 30_000, () => {
-        const lines = inboxLines(s, sid).slice(inboxBefore);
-        return lines.length === 2 ? lines : null;
+        const lines = inboxLines(scratch, sid).slice(inboxBefore);
+        return lines.length >= 2 ? lines : null;
       });
+      expect(appended.map((l) => [l.kind, l.id]), 'the two Sends’ lines, both answering the question').toEqual([['answer', id], ['answer', id]]);
       const [taken, late] = appended.map((l) => String(l.key));
-      await until('the second refused as closed', 30_000, () => recordState(s, sid).verdicts[late!]?.verdict === 'closed');
-      expect(recordState(s, sid).verdicts[late!]?.how, 'refused: already answered').toBe('answered');
-      expect(recordState(s, sid).closed[id]?.key, 'the first appended is the answer').toBe(taken);
-      const notes = async () => (await Promise.all(sheets.map((sheet) => sheet.locator('[data-sheet-note]').allTextContents()))).map((texts) => texts.join(' '));
-      await expect.poll(async () => (await notes()).filter((text) => text.includes(SHEET_WORDS.notes.answered(id))).length, { timeout: 15_000, message: 'one window reads it was already answered' }).toBe(1);
-      await until(`${id}'s answer delivered`, TURN_MS, () => recordState(s, sid).closed[id]?.deliveredAt !== undefined);
-      await idle(s, sid);
+      expect(taken, 'two distinct keys').not.toBe(late);
+      await until('the second refused', 30_000, () => state().verdicts[late!] !== undefined);
+      expect(state().verdicts[taken!], 'the first appended applied').toMatchObject({ verdict: 'applied', kind: 'answer', id });
+      expect(state().verdicts[late!], 'the second closed: already answered').toMatchObject({ verdict: 'closed', kind: 'answer', id, how: 'answered' });
+      expect(state().closed[id!]?.key, 'the question closed by the first').toBe(taken);
+      // the window whose line was refused reads it, by its key, and only that window
+      const refusals = windows.map((window) => sheetTool(window).locator(`[data-sheet-note="${late}"]`));
+      const losing = await until('the refusal drawn', 15_000, async () => {
+        const counts = await Promise.all(refusals.map((note) => note.count()));
+        return counts.filter((n) => n > 0).length === 1 ? counts.findIndex((n) => n > 0) + 1 : null;
+      }) - 1;
+      await expect(refusals[losing]!, 'the losing window reads that it was already answered').toBeVisible();
+      await expect(refusals[losing]!).toContainText(SHEET_WORDS.notes.answered(id!));
+      await expect(sheetTool(windows[1 - losing]!).locator('[data-sheet-note]'), 'the winning window reads no refusal').toHaveCount(0);
+      await until(`${id}'s answer delivered`, TURN_MS, () => state().closed[id!]?.deliveredAt !== undefined);
+      await idle(scratch, sid);
+      const winning = envelopes(rows()).flatMap((e) => e.blocks).filter((b) => b.keys.includes(taken!));
+      expect(winning.map((b) => b.answered.map((a) => [a.id, a.picks])), 'the winning answer delivered in the transcript').toEqual([[[id, [1]]]]);
+      expect(JSON.stringify(rows()).includes(late!), 'the refused line never delivered').toBe(false);
       for (const sheet of sheets) await expect(sheet.locator(`article[data-sheet-question="${id}"]`), 'its card gone in both').toHaveCount(0, { timeout: 15_000 });
       await openLookSession(page(), appId);
+      await expect.poll(() => lineFor(page(), id!), { timeout: 15_000, message: 'the receipt drawn' }).toBe(`${id} | ${entry.header} | ${SHEET_ROW.arrow} ${label}`);
       await picture(page(), '8b-released-first');
       await picture(second, '8b-released-second');
-      keep('8-two-windows', pane);
-      return { question: id, asked: one.result, taken, late, notes: await notes(), verdicts: { [taken!]: recordState(s, sid).verdicts[taken!], [late!]: recordState(s, sid).verdicts[late!] } };
+      keep('8-two-windows');
+      return { question: id, asked: one.result, held: held.length, taken, late, losingWindow: losing + 1, verdicts: { [taken!]: state().verdicts[taken!], [late!]: state().verdicts[late!] } };
     });
     expect(maws!.consoleErrors(), 'no console errors in the first window').toEqual([]);
+  } catch (error) {
+    failure = error;
   } finally {
-    if (sid !== '') keepTranscript(s, sid, join(cfg.out, 'transcript'));
-    terminals.closeAll();
-    await stopSurface(surface);
-    await (maws as MawsLaunch | null)?.cleanup().catch((error: unknown) => console.error('[sheet-live] the app’s cleanup', error));
-    removeScratch(s, cfg.keep);
+    // the recording first, while the scratch stands; a leak in it fails the run, after the teardown
+    let recording: unknown = null;
+    if (cfg && s && sid !== '') {
+      try {
+        recordTranscript(s, sid, join(cfg.out, 'transcript'));
+      } catch (error) {
+        recording = error;
+      }
+    }
+    const failed: string[] = [];
+    for (const { what, run } of releases.reverse()) {
+      try {
+        await run();
+      } catch (error) {
+        failed.push(`${what}: ${String(error)}`);
+      }
+    }
+    log('teardown', { ok: failed.length === 0 && recording === null, failed, recording: recording === null ? null : String(recording) });
+    if (failure === null && failed.length > 0) failure = new Error(`the teardown failed: ${failed.join('; ')}`);
+    if (failure === null && recording !== null) failure = recording;
   }
+  if (failure !== null) throw failure;
 });
-
-/** The app, launched over the run's scratch config directory and sminos home, at the rig's size in its light theme. */
-async function launchApp(s: Scratch, env: Record<string, string>): Promise<MawsLaunch> {
-  const maws = await launchMaws({ env: { CLAUDE_CONFIG_DIR: s.config, SMINOS_HOME: s.sminosHome, ...env } });
-  await asTheRigDraws(maws);
-  return maws;
-}
 
 const invoke = (page: Page, name: string, input: unknown) => page.evaluate(([n, i]) => window.maws.invoke(n as never, i as never), [name, input] as const) as Promise<{ ok: boolean; value?: unknown; error?: { message: string } }>;
 
@@ -335,12 +430,29 @@ async function lineFor(page: Page, id: string): Promise<string> {
   return '';
 }
 
-const sideTabs = (page: Page) => page.locator('[data-region="panel"] [data-side-strip] [role="tab"]').allTextContents();
+/** The side column's strip: its tabs' words and which is active. */
+async function sideStrip(page: Page): Promise<{ tabs: string[]; active: string[] }> {
+  const strip = page.locator('[data-region="panel"] [data-side-strip]');
+  const tabs = await strip.locator('[role="tab"]').allTextContents();
+  expect(tabs.some((tab) => tab.startsWith(SHEET_WORDS.tab)), 'no Sheet tab').toBe(false);
+  return { tabs, active: await strip.locator('[role="tab"][aria-selected="true"]').allTextContents() };
+}
 
-/** The `sheet put`s waiting at the barrier: the barrier script's processes. */
-function heldAtBarrier(): number {
-  const ps = spawnSync('/bin/ps', ['-axo', 'command='], { encoding: 'utf8' }).stdout;
-  return ps.split('\n').filter((line) => line.includes(BARRIER) && line.includes(' sheet put ')).length;
+/**
+ * The `sheet put`s of this session waiting at the barrier in front of this launch's door: the barrier script's
+ * processes for the session, descended from a process of this launch's profile (its mawsd).
+ */
+function heldPuts(userData: string, sid: string): number[] {
+  const table = spawnSync('/bin/ps', ['-axo', 'pid=,ppid=,command='], { encoding: 'utf8' }).stdout.split('\n').flatMap((line) => {
+    const m = /^\s*(\d+)\s+(\d+)\s+(.*)$/.exec(line);
+    return m ? [{ pid: Number(m[1]), ppid: Number(m[2]), command: m[3]! }] : [];
+  });
+  const byPid = new Map(table.map((p) => [p.pid, p]));
+  const underProfile = (pid: number) => {
+    for (let at = byPid.get(pid); at && at.pid > 1; at = byPid.get(at.ppid)) if (at.command.includes(userData)) return true;
+    return false;
+  };
+  return table.filter((p) => p.command.includes(BARRIER) && p.command.includes(' sheet put ') && p.command.includes(`--session ${sid}`) && underProfile(p.pid)).map((p) => p.pid);
 }
 
 function versionOf(bin: string): string {
@@ -351,4 +463,3 @@ function versionOf(bin: string): string {
 function appEngine(): string {
   return spawnSync(process.execPath, ['-e', "process.stdout.write(require('fs').readFileSync(process.argv[1], 'utf8').match(/TESTED_ENGINE_VERSION = '([^']+)'/)[1])", join(REPO_ROOT, 'src/engine-host/engine-compat.ts')], { encoding: 'utf8' }).stdout;
 }
-

@@ -6,9 +6,12 @@
 // rig starts shares the config directory and the sminos home, so it sees the terminal's session and its record.
 // Nothing here names a machine, an account or a home: every location comes from the run's environment (`liveConfig`).
 import { execFileSync, spawn, spawnSync, type ChildProcess } from 'node:child_process';
-import { copyFileSync, cpSync, existsSync, mkdirSync, mkdtempSync, openSync, closeSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync, writeSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, openSync, closeSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync, writeSync } from 'node:fs';
 import { request } from 'node:http';
-import { delimiter, dirname, join } from 'node:path';
+import { hostname, userInfo } from 'node:os';
+import { delimiter, dirname, join, resolve, sep } from 'node:path';
+import { remainingNames, scrubTranscript, type ScrubNames } from '../../test/support/transcript-scrub';
+import { REPO_ROOT } from './launch';
 
 export const SHEET_TOOL = 'mcp__sminos__AskUserQuestion';
 
@@ -39,7 +42,20 @@ export function liveConfig(env: NodeJS.ProcessEnv = process.env): LiveConfig {
   const claude = env.SHEET_LIVE_CLAUDE ?? onPath('claude', env.PATH ?? '');
   if (claude === null) throw new Error('no `claude` on PATH: name the terminal’s engine in SHEET_LIVE_CLAUDE');
   const gateway = Object.fromEntries(GATEWAY_KEYS.flatMap((key) => (env[key] ? [[key, env[key]!]] : [])));
-  return { doperpowers, out: need('SHEET_LIVE_OUT'), claude, model: env.SHEET_LIVE_MODEL ?? 'haiku', gateway, keep: env.SHEET_LIVE_KEEP === '1' };
+  return { doperpowers, out: freshOutside(need('SHEET_LIVE_OUT'), REPO_ROOT), claude, model: env.SHEET_LIVE_MODEL ?? 'haiku', gateway, keep: env.SHEET_LIVE_KEEP === '1' };
+}
+
+/**
+ * SHEET_LIVE_OUT as an absolute path that does not exist yet and lies outside the checkout: a run never mixes its evidence
+ * with an earlier run's, and never writes a transcript into the tree.
+ */
+export function freshOutside(out: string, checkout: string): string {
+  const path = resolve(out);
+  if (existsSync(path)) throw new Error(`SHEET_LIVE_OUT must name a directory that does not exist yet (${path} does): one run’s evidence each`);
+  const real = (p: string): string => (existsSync(p) ? realpathSync(p) : join(real(dirname(p)), p.slice(dirname(p).length + 1)));
+  const tree = realpathSync(checkout) + sep;
+  if ((real(path) + sep).startsWith(tree)) throw new Error(`SHEET_LIVE_OUT must lie outside the checkout (${path} is inside ${tree})`);
+  return path;
 }
 
 function onPath(name: string, path: string): string | null {
@@ -62,10 +78,16 @@ export interface Scratch {
 /** README.md of the scratch project: the file the agent's second question references. */
 export const README = ['# Harbour timetable', '', 'Imports the ferry timetable and prints the week’s sailings.', '', 'The importer reads one CSV per route.', ''].join('\n');
 
-export function writeScratch(cfg: LiveConfig): Scratch {
-  // short, under /tmp, as C2's (a bridge's socket path under the sminos home must fit 103 bytes); its real path, which is
-  // the one the engine runs in (macOS's /tmp is a link) and so the one its trust and its transcript's folder are keyed by
-  const root = realpathSync(mkdtempSync('/tmp/qsl.'));
+/**
+ * The run's scratch root: short, under /tmp, as C2's (a bridge's socket path under the sminos home must fit 103 bytes);
+ * by its real path, the one the engine runs in (macOS's /tmp is a link) and so the one its trust and its transcript's
+ * folder are keyed by. Made apart from its contents, so its removal is registered before anything is written in it.
+ */
+export function scratchRoot(): string {
+  return realpathSync(mkdtempSync('/tmp/qsl.'));
+}
+
+export function writeScratch(cfg: LiveConfig, root: string): Scratch {
   const home = join(root, 'home');
   const config = join(home, '.claude');
   const sminosHome = join(root, 's');
@@ -115,11 +137,14 @@ function sminosRun(s: Scratch, args: string[], opts: { cwd?: string; input?: str
 const quote = (value: string) => `'${value.replaceAll("'", `'\\''`)}'`;
 
 // ---- the stand-in surface (C2's sminos/tests/sheet_surface.py) --------------------------------------------------------
-/** C2's stand-in surface, registered under the scratch sminos home and heartbeating every 2 s, as C2's live check runs it. */
-export async function startSurface(cfg: LiveConfig, s: Scratch): Promise<ChildProcess> {
-  const surface = spawn('python3', ['-B', join(cfg.doperpowers, 'sminos/tests/sheet_surface.py'), '--every', '2'], { env: sminosEnv(s), stdio: 'ignore' });
+/** C2's stand-in surface, heartbeating every 2 s under the scratch sminos home, as C2's live check runs it; not yet registered. */
+export function spawnSurface(cfg: LiveConfig, s: Scratch): ChildProcess {
+  return spawn('python3', ['-B', join(cfg.doperpowers, 'sminos/tests/sheet_surface.py'), '--every', '2'], { env: sminosEnv(s), stdio: 'ignore' });
+}
+
+/** The stand-in's registration written. */
+export async function surfaceRegistered(s: Scratch): Promise<void> {
   await until('the stand-in surface’s registration', 10_000, () => existsSync(join(s.sminosHome, 'sheet', 'surfaces', 'standin.json')));
-  return surface;
 }
 
 export async function stopSurface(surface: ChildProcess): Promise<void> {
@@ -270,7 +295,7 @@ export function keepRecord(s: Scratch, sid: string, dir: string): void {
 }
 
 // ---- the transcript -------------------------------------------------------------------------------------------------
-type TranscriptRow = { type?: string; uuid?: string; origin?: unknown; attachment?: { type?: string; hookName?: string; content?: unknown }; message?: { role?: string; content?: unknown } };
+export type TranscriptRow = { type?: string; uuid?: string; parentUuid?: string | null; promptSource?: string; origin?: unknown; attachment?: { type?: string; hookName?: string; content?: unknown }; message?: { role?: string; content?: unknown } };
 
 export function transcriptFile(s: Scratch, sid: string): string | null {
   const projects = join(s.config, 'projects');
@@ -309,11 +334,11 @@ export function sheetCalls(rows: TranscriptRow[]): { id: string; input: { ask?: 
 }
 
 /** One `<sheet-delivery>` block of an envelope (C2's I7): its keys and the ids it answers and dismisses. */
-export interface DeliveryBlock { keys: string[]; answered: string[]; dismissed: string[] }
+export interface DeliveryBlock { keys: string[]; answered: { id: string; picks: number[]; text: string }[]; dismissed: string[] }
 const BLOCK = /^<sheet-delivery>(.*)<\/sheet-delivery>$/;
 
 /** The envelopes the transcript holds, as C2's live check reads them: a hook's added context, or the plugin's prompt. */
-export function envelopes(rows: TranscriptRow[]): { index: number; kind: string; text: string; blocks: DeliveryBlock[] }[] {
+export function envelopes(rows: TranscriptRow[]): { index: number; parent: string | null; kind: string; text: string; blocks: DeliveryBlock[] }[] {
   return rows.flatMap((row, index) => {
     const texts: { kind: string; text: string }[] = [];
     if (row.type === 'attachment' && row.attachment?.type === 'hook_additional_context') {
@@ -322,7 +347,7 @@ export function envelopes(rows: TranscriptRow[]): { index: number; kind: string;
     } else if (row.type === 'user' && JSON.stringify(row.origin) === JSON.stringify({ kind: 'plugin', name: 'sminos' })) {
       texts.push({ kind: 'plugin', text: textOf(row.message?.content) });
     }
-    return texts.map(({ kind, text }) => ({ index, kind, text, blocks: blocksOf(text) }));
+    return texts.map(({ kind, text }) => ({ index, parent: row.parentUuid ?? null, kind, text, blocks: blocksOf(text) }));
   });
 }
 
@@ -331,32 +356,47 @@ function blocksOf(text: string): DeliveryBlock[] {
     const m = BLOCK.exec(line);
     if (!m) return [];
     try {
-      const b = JSON.parse(m[1]!) as { keys?: string[]; answered?: { id: string }[]; dismissed?: string[] };
-      return [{ keys: b.keys ?? [], answered: (b.answered ?? []).map((a) => a.id), dismissed: b.dismissed ?? [] }];
+      const b = JSON.parse(m[1]!) as { keys?: string[]; answered?: { id: string; picks?: number[]; text?: string }[]; dismissed?: string[] };
+      return [{ keys: b.keys ?? [], answered: (b.answered ?? []).map((a) => ({ id: a.id, picks: a.picks ?? [], text: a.text ?? '' })), dismissed: b.dismissed ?? [] }];
     } catch {
       return [];
     }
   });
 }
 
-/** The model's text in the assistant rows after row `since`. */
-export const repliesAfter = (rows: TranscriptRow[], since: number): string =>
-  rows.slice(since + 1).filter((row) => row.type === 'assistant').map((row) => textOf(row.message?.content)).filter((t) => t !== '').join('\n');
+/** Each assistant message after row `since`, its text blocks joined (the engine writes one row per content block). */
+export function messagesAfter(rows: TranscriptRow[], since: number): string[] {
+  const byMessage = new Map<string, string[]>();
+  for (const row of rows.slice(since + 1)) {
+    if (row.type !== 'assistant') continue;
+    const id = String((row.message as { id?: string } | undefined)?.id ?? row.uuid);
+    const text = textOf(row.message?.content);
+    if (text !== '') byMessage.set(id, [...(byMessage.get(id) ?? []), text]);
+  }
+  return [...byMessage.values()].map((texts) => texts.join('\n'));
+}
 
-/** The session's transcript and its subagents' kept under `dir` (the recorded transcript's source, scrubbed before commit). */
-export function keepTranscript(s: Scratch, sid: string, dir: string): void {
+/**
+ * The session's transcript kept under `dir`, scrubbed (test/support/transcript-scrub.ts): never the raw rows, so the
+ * recording can be committed as it is. A name the scrub left in it fails the recording, naming it.
+ */
+export function recordTranscript(s: Scratch, sid: string, dir: string): void {
   const file = transcriptFile(s, sid);
   if (file === null) return;
+  const names: ScrubNames = { project: s.work, scratch: s.root, home: userInfo().homedir, account: userInfo().username, host: hostname() };
+  const rows = readFileSync(file, 'utf8').split('\n').filter((line) => line.trim() !== '').map((line) => JSON.parse(line) as Record<string, unknown>);
+  const text = scrubTranscript(rows, names).map((row) => JSON.stringify(row)).join('\n') + '\n';
+  const left = remainingNames(text, names);
+  if (left.length > 0) throw new Error(`the recording still names ${left.length} of the account, the machine or the scratch after its scrub; not kept`);
   mkdirSync(dir, { recursive: true });
-  copyFileSync(file, join(dir, 'session.jsonl'));
-  const subagents = join(dirname(file), sid, 'subagents');
-  if (existsSync(subagents)) cpSync(subagents, join(dir, 'subagents'), { recursive: true });
+  writeFileSync(join(dir, 'session.jsonl'), text);
+  if (existsSync(join(dirname(file), sid, 'subagents'))) writeFileSync(join(dir, 'SUBAGENTS'), 'the session ran subagents, whose rows are not recorded\n');
 }
 
 /** The scratch root removed, or, with `keep`, left with its env file (the gateway's variables) removed. */
-export function removeScratch(s: Scratch, keep: boolean): void {
-  rmSync(s.envFile, { force: true });
-  if (!keep) rmSync(s.root, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
+export function removeScratch(root: string, keep: boolean): void {
+  rmSync(join(root, 'env'), { force: true });
+  if (!keep) rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
 }
 
 // ---- waiting ----------------------------------------------------------------------------------------------------------

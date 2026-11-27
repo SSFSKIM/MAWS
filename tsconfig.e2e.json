@@ -107,6 +107,7 @@
     "test/support/index-fixture.ts",
     "test/support/spine-fixture.ts",
     "test/support/sheet-records.ts", // the question sheet's C3 M4: the lane A spec seeds a record of the pinned set
+    "test/support/transcript-scrub.ts", // the question sheet's C3 M6: the live check records its transcript scrubbed
     "src/renderer/src/app/date-format.ts",
     // the UX wave, U9: e2e:remote reads a listed row's acts over the link by their own labels and order, and the module's registry
     "src/renderer/src/app/session-actions.ts",
