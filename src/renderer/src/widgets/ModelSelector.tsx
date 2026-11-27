@@ -6,14 +6,14 @@
 // track takes a press and a drag, and fast mode is a row at the view's foot with a switch (its auto-lane warning first,
 // inline), drawn only where the model offers it or it is on; (decision 21) in the model view a digit 1 to 9 picks the
 // row drawn at that place, and ⇧⌘E's request puts the keyboard on the slider. The model view, headed "Model": the
-// catalogue with the model the session runs (or will start on) checked, gateway aliases with their "From gateway"
-// description. The owner's observation set 4: no Default row (the default is the model the session starts with, checked)
-// and no route segment (a new chat starts on the route it was given). A choice applies at once and returns to the
-// effort view; the engine's answer (C3's status, the next init frame) is what shows afterwards. A live session is C3's
-// (`list_models`, `set_model`, `apply_flag_settings`), always for this session only; an unstarted one writes its setup
-// intent through C7's seam, over the catalogue the engine host keeps of what the engine lists (useSetupIntent.ts), read
-// again each time the menu opens. The palette's argument proposes (`/model haiku`), sets the view (`/effort`), or opens
-// the fast warning (`/fast on`).
+// catalogue with the model the session runs (or will start on, when that is known) checked, gateway aliases with their
+// "From gateway" description. The owner's observation set 4: no Default row (the default is the model the session starts
+// with, checked) and no route segment (a new chat starts on the route it was given). A choice applies at once and
+// returns to the effort view; the engine's answer (C3's status, the next init frame) is what shows afterwards. A live
+// session is C3's (`list_models`, `set_model`, `apply_flag_settings`), always for this session only; an unstarted one
+// writes its setup intent through C7's seam, over the catalogue the engine host keeps of what the engine lists
+// (useSetupIntent.ts), read again each time the menu opens. The palette's argument proposes (`/model haiku`), sets the
+// view (`/effort`), or opens the fast warning (`/fast on`).
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type PointerEvent, type ReactNode } from 'react';
 import type { Effort } from '@shared/engine/launch-spec';
 import { EffortSchema } from '@shared/engine/launch-spec';
@@ -24,7 +24,6 @@ import { useShownEffort } from '../composer/effective-effort';
 import { intentBindings } from '../composer/frame/bindings';
 import { aliasOf, DEFAULT_ROW, EFFORT_WORDS, modelAsk, rowFor } from '@shared/sessions/model-label';
 import { useSetupIntent } from '../composer/setup-intent';
-import { useCommand } from '../ipc/query';
 import { acquireSession, refusalWords } from '../sessions/acquire'; // P2-A
 import { availabilityRefusal, useAvailability } from '../sessions/availability'; // P2-A
 import { FRESHNESS, useObservedFacts } from '../sessions/observed'; // P2-A
@@ -81,6 +80,9 @@ interface Binding {
   fast: { view: FastView; pending: boolean; offered: boolean; closed: string | null; set(on: boolean): Promise<ControlAnswer> } | null;
   unstarted: boolean;
   loading?: boolean; // an unstarted session's catalogue not answered yet
+  // an unstarted session on its default whose start model is not known for certain (the settings of the machine it
+  // starts on not read, or another machine's): no row is checked, and any pick is written
+  startUnknown?: boolean;
   observed?: { model: string; at: string } | null; // P2-A: a dormant session's model as the engine last reported it
   note?: string; // P5 O9 M5: the model view's footnote, in place of "For this session only"
 }
@@ -122,13 +124,13 @@ function useLiveBinding(appSessionId: AppSessionId, models: readonly ModelRow[])
 }
 
 // An unstarted session: C7's frame binding over C10's setup intent (the chip writes the same intent the same way), the
-// user's own settings naming what the session's default runs.
+// user's own settings on the machine it starts on naming what the session's default runs (the hook's, null while unknown).
 function useIntentBinding(appSessionId: AppSessionId): Binding | null {
   const setup = useSetupIntent(appSessionId);
   const starting = useComposerStore((s) => isStarting(s, appSessionId));
-  const defaults = useCommand('settings.userEngineDefaults', undefined, { enabled: setup !== null, staleTime: 30_000 }).data ?? null;
+  const defaults = setup?.options.defaults ?? null;
   // the owner's observation set 4: the catalogue is read again as the menu opens, so a list the engine host learned since
-  // the tab mounted (the prestart engine's, a session launched meanwhile) is the one shown
+  // the tab mounted (the prestart engine's, a session launched meanwhile) is the one shown, the composer's chips' too
   const refresh = setup?.options.refreshModels;
   useEffect(() => {
     refresh?.();
@@ -158,6 +160,7 @@ function useIntentBinding(appSessionId: AppSessionId): Binding | null {
     fast: null,
     unstarted: true,
     loading: setup.options.modelsLoading === true,
+    startUnknown: model === null && defaults === null,
   };
 }
 
@@ -452,8 +455,8 @@ function SelectorBody({ name, args, binding, state, error, appSessionId, focusSl
 
   const { claude, gateway } = presentModels(binding.models.filter((m) => m.value !== DEFAULT_ROW));
   const shownRow = rowFor(binding.models, binding.shown) ?? rowOf(binding.models, binding.shown);
-  // the row checked: the one asked for, else (the session's default) the one it runs or will start on
-  const checked = binding.current !== null && binding.current !== DEFAULT_ROW ? binding.current : (shownRow?.value ?? null);
+  // the row checked: the one asked for, else (the session's default) the one it runs or will start on, when that is known
+  const checked = binding.current !== null && binding.current !== DEFAULT_ROW ? binding.current : binding.startUnknown === true ? null : (shownRow?.value ?? null);
   const levels = effortLevelsOf(shownRow);
   const modelName = shownRow?.displayName ?? aliasOf(binding.shown, binding.models) ?? SELECTOR.model;
 

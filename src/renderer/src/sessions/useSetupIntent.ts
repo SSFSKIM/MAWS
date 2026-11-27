@@ -3,6 +3,8 @@
 // through C7's `registerSetupIntentHook` at module load, so this module's `SetupIntentHook` extends C7's landed type:
 // the intent is C10's whole `SetupIntent` (C7 reads a subset) and `patch` takes C10's patch (C7 writes a subset).
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { HOME_CHECKOUT } from '@shared/ipc/schema/session';
+import type { UserEngineDefaults } from '@shared/ipc/schema/settings';
 import type { PermissionMode } from '@shared/graph/enums';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { ModelCatalogue, ModelCatalogueEntry } from '@shared/sessions/models';
@@ -16,6 +18,7 @@ import { useCommand } from '../ipc/query';
 import { useSessions } from '../stores/sessions';
 import { useSettings } from '../stores/settings'; // W3
 import { patchIntent, startIntent, type HookResult } from './setup-actions';
+import { useSpawnTarget, type SpawnTarget } from './remote-spawn';
 import { useSetup } from './store';
 import { machineOf } from '@shared/machine/address';
 import { readRoute, type Route } from '@shared/engine/route'; // P5 O7 M9
@@ -30,6 +33,7 @@ export interface SetupIntentOptions {
   autoModeNote: string | null;
   modelsLoading: boolean; // the observation set 4: no catalogue answered for the launch yet
   refreshModels(): void; // read the catalogue again (the model menu, as it opens)
+  defaults: UserEngineDefaults | null; // the user's settings on the machine the launch starts on; null while unknown
 }
 
 export interface SetupIntentHook extends ComposerSetupIntentHook {
@@ -192,8 +196,10 @@ async function readRepository(machine: MachineRef, directory: string): Promise<R
   return { directory, repoRoot, worktrees: listed.ok ? listed.value.worktrees : [], trustError: null };
 }
 
-// What a launch's model list answers to: the machine the intent is read on, the route and the legacy field beside it,
-// and the directory whose settings it reads, which may set a model environment of its own (debt wave 5).
+// What a launch's model list answers to: the machine it starts on (the machine menu's spawn target, else the intent's
+// own), the route and the legacy field beside it, and the directory whose settings it reads, which may set a model
+// environment of its own (debt wave 5): on another machine its checkout there (none for its home or while no place
+// there is chosen).
 interface LaunchContext {
   machine: MachineRef;
   route: Route;
@@ -201,8 +207,9 @@ interface LaunchContext {
   cwd: string | null;
 }
 
-function launchContextOf(appSessionId: AppSessionId, intent: SetupIntent): LaunchContext {
-  return { machine: machineOf(appSessionId), route: readRoute(intent), gateway: intent.gateway, cwd: intent.location ? settingsDirectoryOf(intent.location) : null };
+function launchContextOf(appSessionId: AppSessionId, intent: SetupIntent, target: SpawnTarget | null): LaunchContext {
+  const cwd = target !== null ? (target.checkout === HOME_CHECKOUT ? null : target.checkout) : intent.location ? settingsDirectoryOf(intent.location) : null;
+  return { machine: target?.machine ?? machineOf(appSessionId), route: readRoute(intent), gateway: intent.gateway, cwd };
 }
 
 // P5 O7 M9: the machine's own route is asked by `route` (with the legacy field the intent holds beside it), whose
@@ -220,9 +227,12 @@ function catalogueAsk({ route, gateway, cwd }: LaunchContext) {
 // opens (`refreshModels`), and one refresh updates them all. Until the context's own read answers nothing is listed (the
 // menu says it is reading), never another context's list nor one built into the app; a failed read keeps what was read
 // for the context, else lists nothing.
+// The user's own settings (`settings.userEngineDefaults`, which name the model a session on its default starts on) are
+// read on this machine alone: no other machine offers the read, so another machine's are unknown, never this one's.
 function useSetupOptions(
   appSessionId: AppSessionId,
   intent: SetupIntent | null,
+  target: SpawnTarget | null,
 ): { options: SetupIntentOptions; facts: RepositoryFacts | null; trustError: string | null; recheck(): Promise<string | null> } {
   const location = intent?.location ?? null; // New chat: none until a project is chosen, and nothing to read
   const base = location ? baseDirectoryOf(location) : null;
@@ -231,7 +241,7 @@ function useSetupOptions(
   const machine = machineOf(appSessionId);
 
   // Only an unstarted session reads it: C7 calls this hook from every composer, and a started session's has no intent.
-  const context = intent === null ? null : launchContextOf(appSessionId, intent);
+  const context = intent === null ? null : launchContextOf(appSessionId, intent, target);
   const read = useCommand('engine.models', context === null ? { refresh: false } : catalogueAsk(context), { enabled: context !== null }, { machine: context?.machine ?? machine });
   const { refetch } = read;
   const reads = context !== null;
@@ -240,6 +250,9 @@ function useSetupOptions(
     if (reads) void refetch({ cancelRefetch: false });
   }, [reads, refetch]);
   const catalogue = read.data ?? (read.isError ? NO_CATALOGUE : null);
+  const here = context !== null && context.machine === ipc.localMachine;
+  const defaultsRead = useCommand('settings.userEngineDefaults', undefined, { enabled: here, staleTime: 30_000 });
+  const defaults = here ? (defaultsRead.data ?? null) : null;
 
   // The repository is read again only when the base directory moves to another repository or out of one; a move
   // between two locations of one repository keeps what was read.
@@ -254,10 +267,10 @@ function useSetupOptions(
   }, [machine, base, known]);
 
   const options = useMemo((): SetupIntentOptions => {
-    if (intent === null) return { models: [], autoModeNote: null, modelsLoading: false, refreshModels };
-    if (catalogue === null) return { models: [], autoModeNote: null, modelsLoading: true, refreshModels };
-    return { models: modelsOf(catalogue), autoModeNote: noteFor(catalogue, intent, fallback), modelsLoading: false, refreshModels };
-  }, [intent, catalogue, fallback, refreshModels]);
+    if (intent === null) return { models: [], autoModeNote: null, modelsLoading: false, refreshModels, defaults: null };
+    if (catalogue === null) return { models: [], autoModeNote: null, modelsLoading: true, refreshModels, defaults };
+    return { models: modelsOf(catalogue), autoModeNote: noteFor(catalogue, intent, fallback), modelsLoading: false, refreshModels, defaults };
+  }, [intent, catalogue, fallback, refreshModels, defaults]);
   // A failed trust check is read again at Send (the directory may be readable now): the refusal stands only while the
   // check still fails.
   const recheck = useCallback(async () => {
@@ -291,7 +304,9 @@ export function useSetupIntent(appSessionId: AppSessionId): SetupIntentHook | nu
   const started = useSessions((s) => s.records.has(appSessionId) && s.engine.has(appSessionId));
   const event = useSetup((s) => s.phases.get(appSessionId));
   const project = useSessions((s) => (intent?.projectId ? (s.projects.get(intent.projectId) ?? null) : null));
-  const { options, facts, trustError, recheck } = useSetupOptions(appSessionId, intent);
+  // P5 O7 M4: the machine the tab's machine menu chose, where Send spawns it (null: the intent's own)
+  const target = useSpawnTarget(appSessionId, project?.org?.key ?? null);
+  const { options, facts, trustError, recheck } = useSetupOptions(appSessionId, intent, target);
   return useMemo(() => {
     if (intent === null || started) return null;
     const shown = projectFacts(intent, project, facts);

@@ -9,6 +9,7 @@ import type { Effort } from '@shared/engine/launch-spec';
 import type { ContentBlock } from '@shared/graph/events';
 import type { PermissionMode } from '@shared/graph/enums';
 import type { AppSessionId, ProjectId } from '@shared/graph/ids';
+import type { UserEngineDefaults } from '@shared/ipc/schema/settings';
 import type { ListModelsResponse } from '@shared/wire/control';
 import type { MawsToolSet } from '@shared/maws/tool-set';
 
@@ -49,8 +50,9 @@ export type HookResult = { ok: true } | { ok: false; error: string };
 export interface SetupIntentHook {
   intent: SetupIntent;
   // the owner's observation set 4: `modelsLoading` while the catalogue has not answered (no list is shown in its place);
-  // `refreshModels` reads it again (the model menu, as it opens)
-  options: { models: ModelInfo[]; autoModeNote: string | null; modelsLoading?: boolean; refreshModels?(): void };
+  // `refreshModels` reads it again (the model menu, as it opens). `defaults`: the user's engine settings on the machine the
+  // session will start on, null while they are not known (not read yet, or another machine's); absent, the caller's own
+  options: { models: ModelInfo[]; autoModeNote: string | null; modelsLoading?: boolean; refreshModels?(): void; defaults?: UserEngineDefaults | null };
   // C10: the running setup's phase in words ("Creating worktree <name>…", "Trusting <key>…", "Starting…"), the submit
   // control's disabled-state reason while it runs; null (or absent) otherwise.
   phase?: string | null;

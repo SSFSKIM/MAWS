@@ -249,8 +249,12 @@ export function Composer({ appSessionId, paneIndex, client = ipc }: ComposerProp
   const [opened, setOpened] = useState({ models: false, rules: false });
   const ready = status?.process === 'ready';
   const reads = useLiveReads(appSessionId, { models: ready && opened.models, rules: ready && opened.rules }, setup ? null : cwd || null, repo, routeOf(status, record), status, client);
-  // W3: an unstarted tab names what the engine will use, the user's own settings included (read only)
+  // W3: an unstarted tab names what the engine will use, the user's own settings included (read only): the model and
+  // effort from the settings of the machine it starts on, as the setup hook reads them (none known for another machine);
+  // the mode seed this machine's, which a spawn on another machine sends as its mode (sessions/remote-spawn.ts)
   const userDefaults = useCommand('settings.userEngineDefaults', undefined, { enabled: unstarted, staleTime: 30_000 }).data ?? null;
+  const launchDefaults = setup?.options.defaults ?? null;
+  const startDefaults = setup ? { model: launchDefaults?.model ?? null, effortLevel: launchDefaults?.effortLevel ?? null, defaultMode: userDefaults?.defaultMode ?? null } : userDefaults;
   const availability = useAvailability(appSessionId); // P2-A: what the chips and the submit control may start
   // P5 O9 M4: a started session's chips and controls are its port's (lane B: today's live bindings over this frame); a
   // session no port drives is read-only, its chips refused with who holds it
@@ -270,7 +274,7 @@ export function Composer({ appSessionId, paneIndex, client = ipc }: ComposerProp
   useEffect(() => {
     if (spawnsElsewhere) leftThisMachine(appSessionId, client);
   }, [spawnsElsewhere, appSessionId, client]);
-  const bindings: FrameBindings = setup ? intentBindings(setup, { starting }, userDefaults, tools) : controls ? controls.bindings() : endedBindings(heldWords(appSessionId));
+  const bindings: FrameBindings = setup ? intentBindings(setup, { starting }, startDefaults, tools) : controls ? controls.bindings() : endedBindings(heldWords(appSessionId));
   // P5 O9 M5: a session another process runs and the port drives (lane A): its turn is that process's, and Send and Stop
   // go by the port's capabilities
   const elsewhere = setup ? null : (controls?.turn() ?? null);

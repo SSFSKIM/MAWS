@@ -9,6 +9,7 @@ import { compileAddressing } from '@shared/machine/address';
 import { digest, remoteRow } from '../../../../test/support/builders';
 import { addressOf } from '@shared/machine/address';
 import { REMOTE_UNAVAILABLE } from '@shared/ipc/remote-unavailable';
+import type { UserEngineDefaults } from '@shared/ipc/schema/settings';
 import { loadScenario } from '../../../../test/support/scenario';
 import { createWidgetBackend, type WidgetBackend } from '../../../../test/support/widget-backend';
 import { at, OTHER_MACHINE, TEST_MACHINE } from '../../../../test/support/machine';
@@ -441,8 +442,11 @@ describe('an unstarted session writes its intent, with no route segment and no D
     useSetup.setState({ intents: new Map() });
   });
 
-  function stub(over: Partial<SetupIntentHook['intent']> = {}, tab: AppSessionId = INTENT, catalogue: { loading?: boolean; refreshes?: string[] } = {}) {
+  // `defaults`: the user's settings on the machine the tab starts on, as the hook reads them (null: unknown); by default
+  // read, naming no model
+  function stub(over: Partial<SetupIntentHook['intent']> = {}, tab: AppSessionId = INTENT, catalogue: { loading?: boolean; refreshes?: string[]; defaults?: UserEngineDefaults | null } = {}) {
     const patches: unknown[] = [];
+    const defaults = catalogue.defaults === undefined ? { model: null, effortLevel: null, defaultMode: null } : catalogue.defaults;
     const refreshModels = catalogue.refreshes ? refreshOnce(catalogue.refreshes) : undefined;
     let current: SetupIntentHook['intent'] = { kind: 'create', location: { kind: 'directory', path: '/repo' }, additionalDirectories: [], model: null, effort: null, permissionMode: null, message: null, draft: null, ...over };
     const models = [
@@ -455,7 +459,7 @@ describe('an unstarted session writes its intent, with no route segment and no D
       id === tab
         ? {
             intent: current,
-            options: { models: catalogue.loading ? [] : models, autoModeNote: null, modelsLoading: catalogue.loading === true, refreshModels },
+            options: { models: catalogue.loading ? [] : models, autoModeNote: null, modelsLoading: catalogue.loading === true, refreshModels, defaults },
             patch: async (p) => {
               patches.push(p);
               current = { ...current, ...p };
@@ -490,6 +494,37 @@ describe('an unstarted session writes its intent, with no route segment and no D
     expect(screen.queryByRole('menuitemradio', { name: /^Default/ })).toBeNull();
     expect(screen.getAllByRole('menuitemradio', { checked: true }).map((r) => r.querySelector('.truncate')?.textContent)).toEqual(['Opus 5.5 (1M context)']);
     fireEvent.click(item(/^Opus/));
+    await waitFor(() => expect(view()).toBe('effort'));
+    expect(patches).toEqual([]);
+  });
+
+  it('checks the model the user’s settings on the machine it starts on name, and writes nothing when it is picked', async () => {
+    const patches = stub({}, INTENT, { defaults: { model: 'haiku', effortLevel: null, defaultMode: null } });
+    mount('model', '', INTENT);
+    await screen.findByRole('group', { name: 'Claude models' });
+    expect(screen.getAllByRole('menuitemradio', { checked: true }).map((r) => r.querySelector('.truncate')?.textContent)).toEqual(['Haiku']);
+    fireEvent.click(item(/^Haiku/));
+    await waitFor(() => expect(view()).toBe('effort'));
+    expect(patches).toEqual([]);
+  });
+
+  // A New chat aimed at another machine (its machine menu's choice), or one whose settings are not read yet: what it
+  // starts on is not known, so no row claims it, and any pick is the one it asks for
+  it('checks no row while the model the tab starts on is unknown, and writes any pick', async () => {
+    const patches = stub({}, INTENT, { defaults: null });
+    mount('model', '', INTENT);
+    await screen.findByRole('group', { name: 'Claude models' });
+    expect(screen.queryAllByRole('menuitemradio', { checked: true })).toEqual([]);
+    fireEvent.click(item(/^Opus/));
+    await waitFor(() => expect(patches).toEqual([{ model: 'opus', effort: null }]));
+  });
+
+  it('checks the model the intent names while its start is otherwise unknown, and writes nothing for it', async () => {
+    const patches = stub({ model: 'haiku' }, INTENT, { defaults: null });
+    mount('model', '', INTENT);
+    await screen.findByRole('group', { name: 'Claude models' });
+    expect(screen.getAllByRole('menuitemradio', { checked: true }).map((r) => r.querySelector('.truncate')?.textContent)).toEqual(['Haiku']);
+    fireEvent.click(item(/^Haiku/));
     await waitFor(() => expect(view()).toBe('effort'));
     expect(patches).toEqual([]);
   });

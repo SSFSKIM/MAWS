@@ -9,7 +9,7 @@ import { BUILTIN_MODELS, GATEWAY_AUTO_NOTE } from '@shared/sessions/models';
 import type { StartOutcome } from '@shared/sessions/setup';
 import { record, status } from '../../../../test/support/builders';
 import { fakeClient, type FakeClient } from '../../../../test/support/fake-client';
-import { at, TEST_MACHINE } from '../../../../test/support/machine';
+import { at, OTHER_MACHINE, TEST_MACHINE } from '../../../../test/support/machine';
 import { ipc } from '../ipc/client';
 import { isSessionCreatorRegistered, useUnstartedTitle } from '../keymap/actions-runtime';
 import { useNotices } from '../stores/notices';
@@ -20,6 +20,7 @@ import { resetShellStores } from '../test-support/shell-stores';
 import { beforeCloseUnstarted, unstartedReplaceVerdict } from './setup-actions';
 import { closeDialog, useDialogs } from './dialogs';
 import { connectSessions, createUnstartedSession, retainsTab, unstartedTitle } from './connect';
+import { resetRemoteSpawn, useRemoteSpawn } from './remote-spawn';
 import { connectSetup, useSetup } from './store';
 import { modelsOf, projectFacts, useSetupIntent, worktreeNameFor } from './useSetupIntent';
 import type { UseSetupIntent } from '../composer/setup-intent';
@@ -75,6 +76,7 @@ beforeEach(() => {
 afterEach(() => {
   cleanup();
   queries.clear();
+  resetRemoteSpawn();
   closeDialog();
   delete (window as { maws?: PreloadBridge }).maws;
 });
@@ -247,6 +249,23 @@ describe('setup intent hook', () => {
     await waitFor(() => expect(composer.result.current!.options.models.map((m) => m.value)).toEqual(['opus']));
     expect(composer.result.current!.options.autoModeNote, 'the composer’s note follows the menu’s read').not.toBeNull();
     expect(fake.invoked('engine.models')).toHaveLength(reads + 1);
+  });
+
+  // A New chat whose machine menu chose another machine starts there on Send: its list is that machine's, read in the
+  // checkout there, and this Mac's settings say nothing of what it starts on
+  it('reads the catalogue of the machine the tab will start on, and claims no defaults for another machine', async () => {
+    const DEFAULTS = { model: 'haiku', effortLevel: 'low', defaultMode: null };
+    withMain({ 'settings.userEngineDefaults': () => DEFAULTS });
+    putIntent(pageIntent());
+    const { result } = renderHook(() => useSetupIntent(A), { wrapper });
+    await waitFor(() => expect(result.current!.options.defaults).toEqual(DEFAULTS));
+    act(() => useRemoteSpawn.getState().choose(A, { machine: OTHER_MACHINE, name: 'Studio', checkout: '/srv/checkouts/repo', key: null }));
+    await waitFor(() => expect(fake.machines('engine.models').at(-1)).toBe(OTHER_MACHINE));
+    expect(fake.invoked('engine.models').at(-1)).toEqual({ refresh: false, gateway: 'gateway', cwd: '/srv/checkouts/repo' });
+    expect(result.current!.options.defaults, 'another machine’s settings are unknown here').toBeNull();
+    expect(fake.machines('settings.userEngineDefaults'), 'nothing asked of a machine that offers no such read').not.toContain(OTHER_MACHINE);
+    act(() => useRemoteSpawn.getState().choose(A, null)); // back to this Mac
+    await waitFor(() => expect(result.current!.options.defaults).toEqual(DEFAULTS));
   });
 
   // Debt wave 4: the catalogue's effort levels reach C7's ModelInfo, so the model widget can lower an effort
