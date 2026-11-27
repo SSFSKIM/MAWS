@@ -43,8 +43,9 @@ export function createStore(deps: { read(session: string): Promise<ReadAnswer> }
   let applied = 0; // the count of the last read applied
   let retry: ReturnType<typeof setTimeout> | null = null;
   let adoptedAt = 0; // the count of the last read started before the last adoption
-  let out = 0; // reads not yet answered
-  let readAgain = false; // an adoption came while a read was out: one more once they are in
+  const out = new Map<string, number>(); // each session's reads not yet answered
+  // the session an adoption came for while a read of it was out: one more read of it once they are in
+  let readAgain: string | null = null;
 
   const set = (next: Partial<StoreState>) => {
     state = { ...state, ...next };
@@ -56,11 +57,11 @@ export function createStore(deps: { read(session: string): Promise<ReadAnswer> }
     retry = null;
     const count = (asked += 1);
     const at = awaitingReady ? null : snapshot;
-    out += 1;
+    out.set(session, (out.get(session) ?? 0) + 1);
     void deps.read(session).then((answer) => {
-      out -= 1;
-      if (readAgain && out === 0 && state.shown?.session === session) {
-        readAgain = false;
+      out.set(session, out.get(session)! - 1);
+      if (readAgain === session && out.get(session) === 0 && state.shown?.session === session) {
+        readAgain = null;
         read(session);
       }
       const shown = state.shown;
@@ -104,11 +105,12 @@ export function createStore(deps: { read(session: string): Promise<ReadAnswer> }
       if (state.shown?.session !== session) return;
       adoptedAt = asked;
       if (state.shown.settled) set({ shown: { ...state.shown, settled: false } });
-      if (out === 0) read(session);
-      else readAgain = true;
+      if ((out.get(session) ?? 0) === 0) read(session);
+      else readAgain = session;
     },
     show(session) {
       if ((state.shown?.session ?? null) === session) return;
+      readAgain = null; // what was queued is another session's, and this one's read starts now
       applied = asked; // reads of another session are not this one's
       set({ shown: session === null ? null : { session, model: undefined, fresh: false, settled: false } });
       if (session !== null) read(session);

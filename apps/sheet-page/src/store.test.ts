@@ -75,6 +75,28 @@ describe('the store', () => {
     expect(pending).toHaveLength(3);
   });
 
+  it('an adoption’s read belongs to the session on screen: a read of the one left before does not hold it back', async () => {
+    const { store, pending, answer } = harness();
+    store.show(S); // its read held
+    store.show(T);
+    await answer(1, { ok: true, model: model(1, T), door: DOOR });
+    expect(store.state().shown).toMatchObject({ session: T, settled: true });
+    store.adopted(T);
+    expect(pending.map((read) => read.session)).toEqual([S, T, T]); // read at once: nothing of T's is out
+    await answer(0, { ok: true, model: model(1), door: DOOR }); // the read of the session left
+    await answer(2, { ok: true, model: model(2, T), door: DOOR });
+    expect(store.state().shown).toMatchObject({ session: T, model: model(2, T), settled: true });
+    store.adopted(T);
+    store.adopted(T); // while that read is out: one more once it lands
+    expect(pending).toHaveLength(4);
+    store.show(S);
+    store.show(T); // and back: the queue was T's, and T's read is what it waits for
+    expect(pending.map((read) => read.session)).toEqual([S, T, T, T, S, T]);
+    await answer(3, { ok: true, model: model(2, T), door: DOOR });
+    await answer(5, { ok: true, model: model(3, T), door: DOOR });
+    expect(store.state().shown).toMatchObject({ session: T, model: model(3, T), settled: true });
+  });
+
   it('leaves the later read standing when two finish in the other order', async () => {
     const { store, answer } = harness();
     store.show(S);
