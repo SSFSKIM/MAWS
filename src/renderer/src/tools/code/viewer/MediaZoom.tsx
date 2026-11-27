@@ -4,6 +4,7 @@
 // at `drawn`; `ZoomControls` are the view's bar controls: zoom out, the scale, zoom in, actual size and fit. Fit, the
 // default, follows the pane as it resizes; a zoom keeps the point at the pane's centre where it was.
 import { useCallback, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
+import { Tip } from '../../../ui/tip';
 import { VIEWER_COPY } from '../copy';
 import { drawnSize, fitScale, ZOOM_STEPS, zoomedIn, zoomedOut, type Size, type Zoom } from './zoom';
 
@@ -105,15 +106,19 @@ export function ZoomControls({ zoom }: { zoom: MediaZoom }) {
   const top = ZOOM_STEPS[ZOOM_STEPS.length - 1];
   return (
     <span role="group" aria-label={VIEWER_COPY.zoom} className="flex min-w-0 flex-wrap items-center gap-1 whitespace-nowrap">
-      <button type="button" className={control} aria-label={VIEWER_COPY.zoomOut} title={VIEWER_COPY.zoomOut} disabled={scale === null || scale <= ZOOM_STEPS[0]} onClick={zoom.zoomOut}>
-        −
-      </button>
+      <Tip content={VIEWER_COPY.zoomOut}>
+        <button type="button" className={control} aria-label={VIEWER_COPY.zoomOut} disabled={scale === null || scale <= ZOOM_STEPS[0]} onClick={zoom.zoomOut}>
+          −
+        </button>
+      </Tip>
       <span data-zoom-percent="" className="min-w-[4ch] text-center text-ui-sm text-fg-muted tabular-nums">
         {scale === null ? '' : VIEWER_COPY.zoomPercent(scale)}
       </span>
-      <button type="button" className={control} aria-label={VIEWER_COPY.zoomIn} title={VIEWER_COPY.zoomIn} disabled={scale === null || scale >= top} onClick={zoom.zoomIn}>
-        +
-      </button>
+      <Tip content={VIEWER_COPY.zoomIn}>
+        <button type="button" className={control} aria-label={VIEWER_COPY.zoomIn} disabled={scale === null || scale >= top} onClick={zoom.zoomIn}>
+          +
+        </button>
+      </Tip>
       <button type="button" className={control} aria-pressed={zoom.zoom === 1} disabled={scale === null} onClick={() => zoom.set(1)}>
         {VIEWER_COPY.actualSize}
       </button>

@@ -17,6 +17,7 @@ import { useMachines } from '../../../stores/machines';
 import { ok } from '../../../test-support/code';
 import { installDisk, leaveRl2, overRl2 } from '../../../test-support/code-disk';
 import { formatSize, VIEWER_COPY } from '../copy';
+import { accessibleDescription } from '../../../test-support/accessible-text';
 import { useFiles } from '../files/store';
 import { forgetOpenedThere, openedThere } from '../files/elsewhere';
 import { ExternalRow, OpenExternally, rowWords } from './ExternalRow';
@@ -42,7 +43,7 @@ describe('Open externally', () => {
     render(<OpenExternally appSessionId={REMOTE} path="/r/doc.pdf" />);
     const button = screen.getByRole<HTMLButtonElement>('button', { name: 'Open externally' });
     expect(button.disabled).toBe(false);
-    expect(button.title).toBe('Opens a copy of this file from mini on this Mac');
+    expect(accessibleDescription(button)).toBe('Opens a copy of this file from mini on this Mac'); // board ticket 815: its tip's words
     expect(screen.getByText('on mini')).toBeTruthy();
     fireEvent.click(button);
     expect(invoke).toHaveBeenCalledExactlyOnceWith('remote.openCopy', { machine: OTHER_MACHINE, source: { appSessionId: REMOTE, path: '/r/doc.pdf' } });

@@ -1344,7 +1344,7 @@ test.describe('sessions', () => {
       await expect(notes.locator('[data-read-only]'), 'no label on a file that can be saved').toHaveCount(0);
       const lead = notes.locator('[data-path-lead]');
       await expect(lead).toHaveAttribute('data-outside', 'writable');
-      await expect(lead).toHaveAttribute('title', `Save writes to ${file('notes.txt')}`);
+      await expect(lead).toHaveAccessibleDescription(`Save writes to ${file('notes.txt')}`);
       await expect(lead).toHaveAttribute('aria-description', `Save writes to ${file('notes.txt')}`);
       await expect(notes).toHaveAttribute('data-editable', 'true');
       await expect(content).not.toHaveAttribute('title');
@@ -1544,7 +1544,7 @@ test.describe('sessions', () => {
         await expect(content, 'the outside file, read').toHaveText(NOTES, { timeout: 20_000 });
         await expect(notes).toHaveAttribute('data-editable', 'true');
         await expect(notes.locator('[data-read-only]'), 'no "Read-only" label').toHaveCount(0);
-        await expect(notes.locator('[data-path-lead]')).toHaveAttribute('title', `Save writes to ${file('notes.txt')}`);
+        await expect(notes.locator('[data-path-lead]')).toHaveAccessibleDescription(`Save writes to ${file('notes.txt')}`);
         await content.click();
         await page.keyboard.press('Meta+a');
         await page.keyboard.type('Notes edited through the guide’s link.');
@@ -1919,7 +1919,7 @@ test.describe('sessions', () => {
         expect(await tabIdsOf(page), 'beside the chat: the main strip as it was').toEqual(strip);
         await expect(sideTab(sideColumn(page), 'todo.txt')).toHaveAttribute('title', chosen);
         await expect(sideColumn(page).locator('[data-side-strip] [data-tab-id][data-preview="true"]'), 'a kept tab, not the preview').toHaveCount(0);
-        await expect(todo.locator('[data-path-lead]')).toHaveAttribute('title', `Save writes to ${chosen}`);
+        await expect(todo.locator('[data-path-lead]')).toHaveAccessibleDescription(`Save writes to ${chosen}`);
         await expect(todo).toHaveAttribute('data-editable', 'true');
         await expect(todo.locator('[data-read-only]')).toHaveCount(0);
         await content.click();
@@ -1981,7 +1981,7 @@ test.describe('sessions', () => {
         await sideTab(side2(), 'todo.txt').click();
         await expect(content2).toHaveText('Ship the editor first, then Open File.', { timeout: 20_000 });
         await expect(todo2).toHaveAttribute('data-editable', 'true');
-        await expect(todo2.locator('[data-path-lead]')).toHaveAttribute('title', `Save writes to ${chosen}`);
+        await expect(todo2.locator('[data-path-lead]')).toHaveAccessibleDescription(`Save writes to ${chosen}`);
         await content2.click();
         await p2.keyboard.press('Meta+End');
         await p2.keyboard.type(' Kept across a relaunch.');
@@ -2033,7 +2033,7 @@ test.describe('sessions', () => {
         await sideColumnAt(p2, 320);
         const lead = todo2.locator('[data-path-lead]');
         await expect(lead).toHaveAttribute('aria-description', `Save writes to ${chosen}`);
-        await expect(lead).toHaveAttribute('title', `Save writes to ${chosen}`);
+        await expect(lead).toHaveAccessibleDescription(`Save writes to ${chosen}`);
         const drawn = await lead.evaluate((el) => {
           const [folder, , name] = Array.from(el.children) as HTMLElement[];
           const rect = (node: Element) => node.getBoundingClientRect();

@@ -1231,7 +1231,7 @@ test('A reaches B’s mawsd over RL2, through the hub and then directly, and dri
       await expect(pageViewer.locator('[data-external-row]'), 'no row').toHaveCount(0);
       expect(frameCopies(), 'A’s frame-copies folder lists no entry while the page is drawn').toEqual([]);
       const open = pageViewer.getByRole('button', { name: 'Open externally', exact: true }); // the bar's
-      await expect(open).toHaveAttribute('title', `Opens a copy of this file from ${B_NAME} on this Mac`, { timeout: 60_000 });
+      await expect(open).toHaveAccessibleDescription(`Opens a copy of this file from ${B_NAME} on this Mac`, { timeout: 60_000 }); // board ticket 815: its tip's words
       await open.click();
       // the open seam's lines for the file, less the file frames' own (`frame-decision`, `frame-entry`), which share its log
       const opened = () => (existsSync(openLog) ? readFileSync(openLog, 'utf8').split('\n') : []).filter((line) => line.endsWith(`/${PAGE_ON_B.name}`) && !line.startsWith('frame-'));
@@ -4643,7 +4643,7 @@ test('U6f: a file outside the session’s folders on B opens in A, is edited, an
       const viewer = sideColumn(page).locator(`[data-file-viewer][data-path="${w.notes}"]`);
       await quoting(expect(viewer, 'the file beside the chat, editable').toHaveAttribute('data-editable', 'true', { timeout: 60_000 }), said);
       await expect(viewer.locator('[data-path-lead]')).toHaveAttribute('data-outside', 'writable');
-      await expect(viewer.locator('[data-path-lead]'), 'the tooltip names where Save writes, on B').toHaveAttribute('title', `Save writes to ${w.notes} on ${B_NAME}`);
+      await expect(viewer.locator('[data-path-lead]'), 'the tooltip names where Save writes, on B').toHaveAccessibleDescription(`Save writes to ${w.notes} on ${B_NAME}`);
       await expect(viewer.locator('[data-read-only]'), 'no “Read-only” before the path').toHaveCount(0);
       await expect(viewer.locator('.cm-content')).toContainText('An invented note outside');
       await viewer.locator('.cm-content').click();
@@ -4786,7 +4786,7 @@ test('U6f: a file outside the session’s folders on B opens in A, is edited, an
       await expect(chosenTab, 'its tab in the side strip').toHaveCount(1);
       await expect(chosenTab, 'a kept tab, not the preview').not.toHaveAttribute('data-preview', 'true');
       await expect(viewer.locator('[data-path-lead]')).toHaveAttribute('data-outside', 'writable');
-      await expect(viewer.locator('[data-path-lead]')).toHaveAttribute('title', `Save writes to ${w.chosen} on ${B_NAME}`);
+      await expect(viewer.locator('[data-path-lead]')).toHaveAccessibleDescription(`Save writes to ${w.chosen} on ${B_NAME}`);
       const chosen = outsideLogOnB(b, 'choice');
       expect(chosen, 'a second choice in B’s daemon log').toHaveLength(2);
       expect(chosen[1]).toContain(`: granted ${w.chosen}`);

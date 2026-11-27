@@ -1,7 +1,7 @@
 // UX wave U6b-3a (docs/doperpowers/plans/2026-11-17-ux-wave-U6b-3a-what-changed.md, M2; acceptance B1 to B5 in unit
 // tests; sequences S2 to S5): the Files tab's Changed group, the marks in its tree and the dimmed entries, over C8a's
 // host with main as a fake bridge that answers `git.watch` with a status a test sets. Every name is invented.
-import { act, cleanup, fireEvent, render, waitFor, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { FilesEntry } from '@shared/ipc/schema/files';
 import type { GitFileStatus, GitStatus } from '@shared/ipc/schema/git';
@@ -24,6 +24,16 @@ import { CHANGED_ROW_FIXED, filesTool, FILES_ROW_HEIGHT } from './FilesTool';
 import { measureWith } from './path-cut';
 import { useFiles } from './store';
 import { resetTreeState, treeOf, useTreeState } from './tree-state';
+import { accessibleDescription } from '../../../test-support/accessible-text';
+
+// A row's tip (board ticket 815), as keyboard focus opens it; the focus given back after
+async function tipOf(row: HTMLElement): Promise<string> {
+  act(() => row.focus());
+  const tip = (await screen.findByRole('tooltip')).textContent ?? '';
+  act(() => row.blur());
+  await waitFor(() => expect(screen.queryByRole('tooltip')).toBeNull());
+  return tip;
+}
 
 const flush = () => act(() => new Promise((resolve) => setTimeout(resolve, 0)));
 
@@ -216,14 +226,17 @@ describe('the Changed group (U6b-3a)', () => {
     expect(changedPaths().filter((path) => changedRow(path!)!.hasAttribute('data-folder'))).toEqual(['/r/notes']);
     expect(changedPaths().every((path) => changedRow(path!)!.getAttribute('aria-level') === '2')).toBe(true);
     expect(head.compareDocumentPosition(treeRow('/r')!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    // the title is the path the row shows, whole; a rename's is Review's words; a folder's row is its name with its slash
-    expect(changedRow('/r/src/cart.ts')!.getAttribute('title')).toBe('src/cart.ts');
-    expect(changedRow('/r/src/port.ts')!.getAttribute('title')).toBe(REVIEW_COPY.renamedFrom('src/harbor-port.ts'));
-    expect(changedRow('/r/notes')!.getAttribute('title')).toBe('notes/');
+    // the tip (board ticket 815: once the title) is the path the row shows, whole, with the letter's kind under it; a
+    // rename's is Review's words, also its description; a folder's row is its name with its slash
+    expect(await tipOf(changedRow('/r/src/cart.ts')!)).toBe('src/cart.tsModified');
+    expect(await tipOf(changedRow('/r/src/port.ts')!)).toBe(`${REVIEW_COPY.renamedFrom('src/harbor-port.ts')}Renamed`);
+    expect(accessibleDescription(changedRow('/r/src/port.ts')!)).toBe(REVIEW_COPY.renamedFrom('src/harbor-port.ts'));
+    expect(accessibleDescription(changedRow('/r/src/cart.ts')!)).toBe(''); // the path is on the row
+    expect((await tipOf(changedRow('/r/notes')!)).startsWith('notes/')).toBe(true);
     expect(changedRow('/r/notes')!.textContent).toContain('notes/');
-    // the letter is hidden from a screen reader, which hears the state after the name; the letter's title says it too
+    // the letter is hidden from a screen reader, which hears the state after the name; the row's tip says it too
     const mark = changedRow('/r/src/cart.ts')!.querySelector<HTMLElement>('[data-mark]')!;
-    expect([mark.getAttribute('aria-hidden'), mark.getAttribute('title'), mark.textContent, mark.className]).toEqual(['true', 'Modified', 'M', expect.stringContaining('text-warning')]);
+    expect([mark.getAttribute('aria-hidden'), mark.hasAttribute('title'), mark.textContent, mark.className]).toEqual(['true', false, 'M', expect.stringContaining('text-warning')]);
     expect(changedRow('/r/src/cart.ts')!.textContent).toContain('Modified');
     expect(changedRow('/r/src/merge.ts')!.textContent).toContain('Conflict');
     expect(changedRow('/r/src/merge.ts')!.querySelector('[data-mark]')!.className).toContain('text-danger');
@@ -299,8 +312,8 @@ describe('the Changed group (U6b-3a)', () => {
     expect(changedPaths()).toEqual(['/coast/harbor/src/gauge.ts', '/coast/lighthouse/beacon.ts', '/coast/lighthouse/charts']);
     const outside = (path: string) => changedRow(path)!.hasAttribute('data-outside');
     expect(changedPaths().map((path) => outside(path!))).toEqual([false, true, true]);
-    expect(changedRow('/coast/lighthouse/beacon.ts')!.getAttribute('title')).toBe('lighthouse/beacon.ts · Outside the folders this session works in');
-    expect(changedRow('/coast/harbor/src/gauge.ts')!.getAttribute('title')).toBe('src/gauge.ts'); // from the working folder
+    expect(accessibleDescription(changedRow('/coast/lighthouse/beacon.ts')!)).toBe('lighthouse/beacon.ts · Outside the folders this session works in'); // board ticket 815
+    expect((await tipOf(changedRow('/coast/harbor/src/gauge.ts')!)).startsWith('src/gauge.ts')).toBe(true); // from the working folder
     expect(changedRow('/coast/harbor/src/gauge.ts')!.textContent).toContain('src/');
     expect(changedRow('/coast/harbor/src/gauge.ts')!.textContent).not.toContain('harbor/');
     expect(changedRow('/coast/lighthouse/beacon.ts')!.textContent).toContain('lighthouse/'); // from the repository's root

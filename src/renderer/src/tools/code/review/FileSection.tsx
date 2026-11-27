@@ -15,6 +15,8 @@
 // re-read brings other hunks for it, the header shows one muted line under its row, "This file changed · Refresh".
 import { lazy, Suspense, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { QuietSpinner } from '../../../ui/spinner';
+import { NamedGlyph } from '../../../ui/glyph';
+import { Tip } from '../../../ui/tip';
 import { REVIEW_COPY } from '../copy';
 import type { DiffBlockData } from './FileBody';
 import { reviewLayout } from './measure';
@@ -132,18 +134,20 @@ export function FileSection({ section, drawn, near, spacer, width, mode, wrap, t
     <section data-review-file={file.path} data-kind={file.kind} data-folded={folded || undefined} data-viewed={viewed || undefined}>
       <div data-review-file-header className="sticky top-0 z-10 border-b border-border bg-bg">
         <div className="flex h-8 items-center gap-2 px-2">
-          <button type="button" data-review-fold aria-expanded={!folded} onClick={onFold} className="flex h-full min-w-0 flex-1 items-center gap-1.5 text-left text-ui-sm outline-accent focus-visible:outline-2">
-            <FoldMark folded={folded} />
-            <PathLabel file={file} />
-            <Badge file={file} />
-            <Counts file={file} />
-          </button>
+          <Tip content={pathWords(file)} description={renamedFrom(file)}>
+            <button type="button" data-review-fold aria-expanded={!folded} onClick={onFold} className="flex h-full min-w-0 flex-1 items-center gap-1.5 text-left text-ui-sm outline-accent focus-visible:outline-2">
+              <FoldMark folded={folded} />
+              <PathLabel file={file} />
+              <Badge file={file} />
+              <Counts file={file} />
+            </button>
+          </Tip>
           <ViewedControl markable={signature !== null} viewed={viewed} narrow={narrow} onToggle={onViewed} />
           {file.openPath !== null ? (
             narrow ? (
-              <button type="button" data-open-file aria-label={REVIEW_COPY.openFile} title={REVIEW_COPY.openFile} className={glyph} onClick={() => onOpen(openLine)}>
+              <NamedGlyph data-open-file="" label={REVIEW_COPY.openFile} className={glyph} onClick={() => onOpen(openLine)}>
                 {REVIEW_COPY.openFileGlyph}
-              </button>
+              </NamedGlyph>
             ) : (
               <button type="button" data-open-file className={quiet} onClick={() => onOpen(openLine)}>
                 {REVIEW_COPY.openFile}
@@ -187,13 +191,19 @@ function FoldMark({ folded }: { folded: boolean }) {
   );
 }
 
+// The path whole (a rename's "old → new"), the header's tip; and the old path of a rename, which the badge names and the
+// header's description says (board ticket 815: these were the path's and the badge's titles, the fold button their owner).
+const renamedWords = (file: ReviewFile): string | null => (file.kind === 'renamed' && file.oldPath !== null ? REVIEW_COPY.renamed(file.oldPath, file.displayPath) : null);
+const pathWords = (file: ReviewFile): string => renamedWords(file) ?? file.displayPath;
+const renamedFrom = (file: ReviewFile): string | null => (file.kind === 'renamed' && file.oldPath !== null ? REVIEW_COPY.renamedFrom(file.oldPath) : null);
+
 // The path, its folder part shortening first; a rename reads "old → new" only while both paths fit whole (D2), else the
 // new path, its badge naming the old one. The fit is measured against the room the header leaves the path, by a probe
 // beside the path (not in it, so the path reads only what is drawn).
 function PathLabel({ file }: { file: ReviewFile }) {
   const slot = useRef<HTMLSpanElement>(null);
   const probe = useRef<HTMLSpanElement>(null);
-  const renamed = file.kind === 'renamed' && file.oldPath !== null ? REVIEW_COPY.renamed(file.oldPath, file.displayPath) : null;
+  const renamed = renamedWords(file);
   const [fits, setFits] = useState(true);
   useLayoutEffect(() => {
     const el = slot.current;
@@ -213,7 +223,7 @@ function PathLabel({ file }: { file: ReviewFile }) {
   const cut = file.displayPath.lastIndexOf('/') + 1;
   return (
     <span className="relative flex min-w-0 flex-1">
-      <span ref={slot} data-review-path title={renamed ?? file.displayPath} className="flex min-w-0 flex-1 items-baseline overflow-hidden whitespace-nowrap">
+      <span ref={slot} data-review-path className="flex min-w-0 flex-1 items-baseline overflow-hidden whitespace-nowrap">
         {renamed !== null && fits ? (
           <span className="min-w-0 truncate text-fg">{renamed}</span>
         ) : (
@@ -242,7 +252,7 @@ function PathLabel({ file }: { file: ReviewFile }) {
 function Badge({ file }: { file: ReviewFile }) {
   if (file.kind === 'modified') return null;
   return (
-    <span data-review-badge title={file.kind === 'renamed' && file.oldPath !== null ? REVIEW_COPY.renamedFrom(file.oldPath) : undefined} className={`${BADGE} ${file.kind === 'conflict' ? 'text-danger' : 'text-fg-muted'}`}>
+    <span data-review-badge className={`${BADGE} ${file.kind === 'conflict' ? 'text-danger' : 'text-fg-muted'}`}>
       {REVIEW_COPY.kinds[file.kind]}
     </span>
   );
@@ -270,11 +280,15 @@ function Counts({ file }: { file: ReviewFile }) {
 // tooltip. A file whose mark cannot be signed yet (its own read not answered) keeps the control's room.
 function ViewedControl({ markable, viewed, narrow, onToggle }: { markable: boolean; viewed: boolean; narrow: boolean; onToggle(): void }) {
   const words = viewed ? REVIEW_COPY.viewed : REVIEW_COPY.markViewed;
+  const box = useRef<HTMLLabelElement>(null);
   if (!markable) return <span aria-hidden className={narrow ? 'size-6 shrink-0' : `${toggle} invisible`}>{narrow ? null : REVIEW_COPY.markViewed}</span>;
   if (narrow)
     return (
-      <label title={words} className="inline-flex size-6 shrink-0 cursor-pointer items-center justify-center">
-        <input type="checkbox" data-review-viewed checked={viewed} aria-label={words} onChange={onToggle} className="accent-accent outline-accent focus-visible:outline-2" />
+      <label ref={box} className="inline-flex size-6 shrink-0 cursor-pointer items-center justify-center">
+        {/* board ticket 815: its words, its name, are a tip the keyboard reaches, pointed at anywhere in its 24 px box */}
+        <Tip content={words} pointedWithin={box}>
+          <input type="checkbox" data-review-viewed checked={viewed} aria-label={words} onChange={onToggle} className="accent-accent outline-accent focus-visible:outline-2" />
+        </Tip>
       </label>
     );
   return (

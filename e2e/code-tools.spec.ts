@@ -362,7 +362,7 @@ test.describe('the #panel harness: Review and its hand-offs', () => {
       expect(narrow.controls.right, 'the controls inside the toolbar').toBeLessThanOrEqual(narrow.bar.right + 0.5);
       const menuOpen = await expectViewMenuPlaced(review);
       await expect(menuOpen.locator('[data-review-view-item="split"]')).toHaveAttribute('aria-disabled', 'true');
-      await expect(menuOpen.locator('[data-review-view-item="split"]')).toHaveAttribute('title', 'Split needs a wider column');
+      await expect(menuOpen.locator('[data-review-view-item="split"]')).toHaveAccessibleDescription('Split needs a wider column'); // board ticket 815
       await expect(menuOpen.locator('[data-review-view-item="unified"]')).toHaveAttribute('aria-checked', 'true');
       await h.page.keyboard.press('Escape');
       await expect(menuOpen).toHaveCount(0);

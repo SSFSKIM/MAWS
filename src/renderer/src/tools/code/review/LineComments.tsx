@@ -15,6 +15,7 @@ import type { AppSessionId } from '@shared/graph/ids';
 import { CARD_WIDTH } from '../../../side/card/placement';
 import { discardComment, editComment, passKey, useCommentCard, type PassComment } from '../../../side/card/store';
 import { SIDE_COPY } from '../../../side/copy';
+import { Tip } from '../../../ui/tip';
 import { openCommentComposer } from '../anchor/anchor';
 import { anchorPathOf, cardOffset, isUnplaced, lineText, placementOf, reviewLineAnchor, sectionStateOf, type LinePlace, type LineSide, type ScopeLines, type Unplaced } from './comment-place';
 import { reviewLayout } from './measure';
@@ -216,21 +217,23 @@ export function UnsentRows({ comments, side }: { comments: readonly PassComment[
   );
 }
 
-/** Remove on an unsent comment's row (card 6): drops it from its pass; a 24 px target (D6); off while it is in flight. */
+/** Remove on an unsent comment's row (card 6): drops it from its pass; a 24 px target (D6); off while it is in flight.
+ * Its word is a tip the keyboard reaches (board ticket 815). */
 export function RemoveComment({ passKey: key, comment }: { passKey: string; comment: PassComment }) {
   return (
-    <button
-      type="button"
-      data-review-unsent-remove=""
-      aria-label={SIDE_COPY.card.removeComment}
-      title={SIDE_COPY.card.removeComment}
-      disabled={comment.flight !== null}
-      onClick={() => discardComment(key, comment.id)}
-      className="inline-flex size-6 shrink-0 items-center justify-center rounded-sm text-fg-muted outline-accent hover:bg-bg-hover hover:text-fg focus-visible:outline-2 disabled:text-fg-faint"
-    >
-      <svg viewBox="0 0 16 16" aria-hidden className="size-2.5" fill="none" stroke="currentColor" strokeWidth={1.5} strokeLinecap="round">
-        <path d="m4 4 8 8M12 4l-8 8" />
-      </svg>
-    </button>
+    <Tip content={SIDE_COPY.card.removeComment}>
+      <button
+        type="button"
+        data-review-unsent-remove=""
+        aria-label={SIDE_COPY.card.removeComment}
+        disabled={comment.flight !== null}
+        onClick={() => discardComment(key, comment.id)}
+        className="inline-flex size-6 shrink-0 items-center justify-center rounded-sm text-fg-muted outline-accent hover:bg-bg-hover hover:text-fg focus-visible:outline-2 disabled:text-fg-faint"
+      >
+        <svg viewBox="0 0 16 16" aria-hidden className="size-2.5" fill="none" stroke="currentColor" strokeWidth={1.5} strokeLinecap="round">
+          <path d="m4 4 8 8M12 4l-8 8" />
+        </svg>
+      </button>
+    </Tip>
   );
 }

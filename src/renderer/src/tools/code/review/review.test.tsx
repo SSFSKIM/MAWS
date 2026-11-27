@@ -27,6 +27,7 @@ import { useMachines } from '../../../stores/machines'; // UX wave U5b-2: a mach
 import { deferred, fail, installFakeMain, ok } from '../../../test-support/code';
 import { installResizeObserver } from '../../../test-support/resize';
 import { fakeStackLayout } from '../../../test-support/review-layout';
+import { accessibleDescription } from '../../../test-support/accessible-text';
 import { A, B, panelOf, resetPanelStores, TestHost } from '../../../test-support/panel';
 import { useTranscriptStore, type Row, type TranscriptSource, type TurnActivity, type TurnId } from '../../../transcript';
 import { journalToEvents } from '../../../transcript/dev/journal';
@@ -1264,7 +1265,7 @@ describe('review tool', () => {
     resize(inSection('src/b.ts', '[data-review-path]')!, { width: room, height: 20 });
     expect(pathOf('src/b.ts')).toBe('src/b.ts');
     expect(badgeOf('src/b.ts')).toBe('Renamed');
-    expect(inSection('src/b.ts', '[data-review-badge]')?.title).toBe('Renamed from src/a.ts');
+    expect(accessibleDescription(inSection('src/b.ts', '[data-review-fold]')!)).toBe('Renamed from src/a.ts'); // board ticket 815: the header's description, once the badge's title
   });
 
   it('folds and unfolds at a click on a header; marking Viewed folds; Collapse all reads Expand all, and each acts on every file', async () => {
@@ -1384,15 +1385,23 @@ describe('review tool', () => {
     openReview();
     render(<TestHost />);
     await waitFor(() => expect(inSection('src/app.ts', '[data-review-viewed]')).not.toBeNull());
+    // board ticket 815: each one's words are a tip keyboard focus opens
+    const tipOf = async (element: HTMLElement) => {
+      act(() => element.focus());
+      const tip = (await screen.findByRole('tooltip')).textContent;
+      act(() => element.blur());
+      await waitFor(() => expect(screen.queryByRole('tooltip')).toBeNull());
+      return tip;
+    };
     const box = inSection<HTMLInputElement>('src/app.ts', '[data-review-viewed]')!;
-    expect([box.tagName, box.type, box.checked, box.title || box.closest('label')?.title]).toEqual(['INPUT', 'checkbox', false, 'Mark viewed']);
-    const open = inSection('src/app.ts', '[data-open-file]')!;
-    expect([open.textContent, open.title]).toEqual(['↗', 'Open file ↗']);
+    expect([box.tagName, box.type, box.checked, await tipOf(box)]).toEqual(['INPUT', 'checkbox', false, 'Mark viewed']);
+    const open = inSection<HTMLElement>('src/app.ts', '[data-open-file]')!;
+    expect([open.textContent, open.getAttribute('aria-label'), await tipOf(open)]).toEqual(['↗', 'Open file ↗', 'Open file ↗']);
     fireEvent.click(box);
     expect(viewed('src/app.ts')).toBe(true);
     expect(folded('src/app.ts')).toBe(true);
     const marked = inSection<HTMLInputElement>('src/app.ts', '[data-review-viewed]')!;
-    expect([marked.checked, marked.title || marked.closest('label')?.title]).toEqual([true, 'Viewed']);
+    expect([marked.checked, await tipOf(marked)]).toEqual([true, 'Viewed']);
   });
 
   it('counts hunks across the files, folded or not; ↑ and ↓ move through them; Open file ↗ opens the counter’s hunk in its file, else the file’s first', async () => {
@@ -1494,7 +1503,7 @@ describe('review tool', () => {
     expect(document.querySelector<HTMLElement>('[data-review]')!.dataset.mode).toBe('unified');
     await user.click(screen.getByRole('button', { name: 'View' }));
     const split = await screen.findByRole('menuitemradio', { name: 'Split' });
-    expect([split.getAttribute('aria-disabled'), split.title]).toEqual(['true', 'Split needs a wider column']);
+    expect([split.getAttribute('aria-disabled'), accessibleDescription(split)]).toEqual(['true', 'Split needs a wider column']);
     await user.keyboard('{Escape}');
     width = 720;
     resize(document.querySelector('[data-review]')!, { width, height: 600 });

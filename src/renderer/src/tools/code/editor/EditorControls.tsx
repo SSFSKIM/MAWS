@@ -32,12 +32,16 @@ function Counter({ tabId, kind, label, previous, next, count }: { tabId: string;
       <span role="status" {...data} className="mr-0.5 whitespace-nowrap text-fg-muted">
         {label}
       </span>
-      <button type="button" className={arrow} aria-label={previous} title={previous} disabled={count === 0} onClick={() => step(tabId, kind, -1)}>
-        ↑
-      </button>
-      <button type="button" className={arrow} aria-label={next} title={next} disabled={count === 0} onClick={() => step(tabId, kind, 1)}>
-        ↓
-      </button>
+      <Tip content={previous}>
+        <button type="button" className={arrow} aria-label={previous} disabled={count === 0} onClick={() => step(tabId, kind, -1)}>
+          ↑
+        </button>
+      </Tip>
+      <Tip content={next}>
+        <button type="button" className={arrow} aria-label={next} disabled={count === 0} onClick={() => step(tabId, kind, 1)}>
+          ↓
+        </button>
+      </Tip>
     </span>
   );
 }
