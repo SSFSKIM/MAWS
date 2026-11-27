@@ -53,6 +53,6 @@ export const CHECK_COPY = {
   summary: (issues: number) => `${issues} ${issues === 1 ? 'issue' : 'issues'}`,
   slide: (n: number) => `Slide ${n}`,
   select: (where: string) => `Select ${where}`,
-  manual: 'Check by hand', // G475
+  manual: 'By hand', // G475, the design system page's words (G586)
   unknown: 'Unknown checks',
 } as const;

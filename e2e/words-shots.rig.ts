@@ -1015,7 +1015,7 @@ const M5_EDITOR_WORDS = {
   // menus/copy.ts CHECK_COPY and THEME_COPY
   checkTitle: { m5: 'Check', master: 'Check against the design system' }, // G471
   checkSummary: { m5: /^(\d+ issues?|No issues · \d+ rules?)$/, master: /^(\d+ violations? of \d+ checked rules?\.|The deck keeps every checked rule \(\d+\)\.)$/ }, // G472
-  byHand: { m5: 'Check by hand', master: 'To judge by hand' }, // G475
+  byHand: { m5: 'By hand', master: 'To judge by hand' }, // G475
   resetAll: { m5: 'Reset all', master: 'Use the system’s colours and faces' }, // G468
   displayCaption: { m5: 'Display', master: 'Display face' }, // G463
   // comments/copy.ts COMMENTS_COPY
@@ -7420,7 +7420,7 @@ test('the word cut’s M5: the library’s Spaces, opened artifacts, the documen
         },
       ),
     });
-    await shot(page, m5Meta('m5-slides-check', 'G471, G472, G473, G475', 'A deck, the Check rail on a deck that breaks rules', 'Planning deck (one slide’s heading in a colour no system has), Deck actions › Check', 'The Check rail settled and its body scrolled to Check by hand, the last issues above it: on M5 titled Check, its issues counted, each issue its message and its rule’s words; master’s title, its summary, the element path and “[check: …]” on each issue, To judge by hand', ['tools/presentation', 'src/artifacts/slides/editor/menus']), async () => {
+    await shot(page, m5Meta('m5-slides-check', 'G471, G472, G473, G475', 'A deck, the Check rail on a deck that breaks rules', 'Planning deck (one slide’s heading in a colour no system has), Deck actions › Check', 'The Check rail settled and its body scrolled to By hand, the last issues above it: on M5 titled Check, its issues counted, each issue its message and its rule’s words; master’s title, its summary, the element path and “[check: …]” on each issue, To judge by hand', ['tools/presentation', 'src/artifacts/slides/editor/menus']), async () => {
       await deckAtRest('planning');
       await toggleDeckRail('planning', 'check');
       await expect(deckRail('planning', 'check'), 'the Check rail').toBeVisible({ timeout: 10_000 });

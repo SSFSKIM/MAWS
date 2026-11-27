@@ -51,7 +51,7 @@ describe('the Check panel', () => {
     expect(row.querySelector('.deck-check-where')).toBeNull();
     expect(panel.textContent).not.toMatch(/To judge by hand|Tags MAWS cannot run/);
     const headings = within(panel).queryAllByRole('heading', { level: 3 }).map((h) => h.textContent);
-    expect(headings.filter((h) => /^(Check by hand|Unknown checks)$/.test(h ?? '') || /^Slide \d+$/.test(h ?? ''))).toEqual(headings);
+    expect(headings.filter((h) => /^(By hand|Unknown checks)$/.test(h ?? '') || /^Slide \d+$/.test(h ?? ''))).toEqual(headings);
   });
 
   it('a system it cannot read settles in words, with no spinner left standing; none at all is nothing to check', async () => {
@@ -100,7 +100,7 @@ describe('the Check panel', () => {
       const panel = screen.getByRole('complementary', { name: 'Check design' });
       expect(within(panel).getByRole('status').textContent, name).toBe('Nothing to check');
       expect(panel.querySelector('[data-violation]'), name).toBeNull();
-      expect(within(panel).getAllByRole('heading', { level: 3 }).length, name).toBeGreaterThan(0); // Check by hand, or Unknown checks
+      expect(within(panel).getAllByRole('heading', { level: 3 }).length, name).toBeGreaterThan(0); // By hand, or Unknown checks
       cleanup();
     }
   });
