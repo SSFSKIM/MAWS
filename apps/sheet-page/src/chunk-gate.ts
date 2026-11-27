@@ -6,8 +6,9 @@
 // waits, what needs it draws plain (Streamdown shows a block's code until its highlighting arrives, and a diagram as its
 // source until its renderer does), and it draws again when the chunk comes. A load that failed (mawsd went while it was
 // out) stays failed in the browser's module map, so it is asked again on the next proven connection under a fresh
-// specifier, which the page server answers as the file (its query dropped). A chunk the failed one imports statically
-// stays failed with it: what needed it stays plain until a reload.
+// specifier, which the page server answers as the file (its query dropped). A chunk the gate asks for imports,
+// statically, only chunks of the page's load (vite.config.ts, `withThePage`), so the gate's one fetch is all there is
+// to it and a retry under a fresh specifier is a whole new try.
 export interface ChunkGate {
   load(base: string, specifier: string): Promise<unknown>;
   opened(): void; // a connection reached `paired`: what waits looks again at whether the page's connection is proven

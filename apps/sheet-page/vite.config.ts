@@ -13,8 +13,35 @@ const CHUNK_GATE_GLOBAL = '__sheetChunk'; // chunk-gate.ts's, which installs it 
 const gateDynamicImports = (): Plugin => ({
   name: 'sheet-page:gate-dynamic-imports',
   apply: 'build',
+  buildStart: () => void (startup = null), // each build reads its own graph
   renderDynamicImport: ({ targetModuleId }) => (targetModuleId === null ? null : { left: `${CHUNK_GATE_GLOBAL}(import.meta.url,`, right: ')' }),
 });
+
+// What the gate lets through is one fetch: a chunk the gate asks for imports, statically, only chunks already loaded
+// with the page, so the browser fetches nothing more on its own once the gate has said yes. Rollup puts a module in one
+// chunk only, so a module two gated chunks share (a grammar another grammar embeds, mermaid's core under its kinds) is
+// put with the page's own code, in the chunk the entry loads; a module only one gated chunk reaches goes inside it.
+type ChunkMeta = { getModuleIds(): IterableIterator<string>; getModuleInfo(id: string): { isEntry: boolean; importedIds: readonly string[]; dynamicImporters: readonly string[] } | null };
+function startupOf(meta: ChunkMeta): Set<string> {
+  const ids = [...meta.getModuleIds()];
+  const staticClosure = (start: string, stop: Set<string>) => {
+    const reached = new Set([start]);
+    for (const todo = [start]; todo.length > 0; )
+      for (const next of meta.getModuleInfo(todo.pop()!)?.importedIds ?? []) if (!stop.has(next) && !reached.has(next) && reached.add(next)) todo.push(next);
+    return reached;
+  };
+  const startup = new Set(ids.filter((id) => meta.getModuleInfo(id)?.isEntry).flatMap((id) => [...staticClosure(id, new Set())]));
+  const reachedBy = new Map<string, number>(); // how many gated chunks reach a module statically, themselves included
+  for (const id of ids) {
+    if (startup.has(id) || (meta.getModuleInfo(id)?.dynamicImporters.length ?? 0) === 0) continue;
+    for (const reached of staticClosure(id, startup)) reachedBy.set(reached, (reachedBy.get(reached) ?? 0) + 1);
+  }
+  for (const [id, count] of reachedBy) if (count > 1) startup.add(id);
+  return startup;
+}
+let startup: Set<string> | null = null;
+const STARTUP_CHUNK = 'page';
+const withThePage = (id: string, meta: ChunkMeta) => ((startup ??= startupOf(meta)).has(id) && !/\.css($|\?)/.test(id) ? STARTUP_CHUNK : undefined);
 
 // The question sheet's local page (docs/doperpowers/plans/2026-11-24-question-sheet-c4-local-page.md, §P; T23), built as
 // desk-web is (apps/desk-web/vite.config.ts): the React plugin under the React Compiler, Tailwind's plugin, and the
@@ -34,5 +61,5 @@ export default defineConfig({
       'lowlight-engine': resolve(createRequire(resolve(import.meta.dirname, '../../package.json')).resolve('lowlight'), '../lib/index.js'),
     },
   },
-  build: { outDir: resolve(import.meta.dirname, '../../out/sheet-page'), emptyOutDir: true, sourcemap: false, modulePreload: false },
+  build: { outDir: resolve(import.meta.dirname, '../../out/sheet-page'), emptyOutDir: true, sourcemap: false, modulePreload: false, rollupOptions: { output: { manualChunks: withThePage } } },
 });

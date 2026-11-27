@@ -37,6 +37,24 @@ describe('the built shell', () => {
     for (const entry of scripts) expect(readFileSync(join(entry.parentPath, entry.name), 'utf8'), entry.name).not.toContain('serviceWorker.register');
   });
 
+  it('loads no chunk past the gate: every chunk the gate asks for imports, statically, only chunks of the page’s load (T28)', () => {
+    const assets = join(out, 'assets');
+    const entry = /src="\/assets\/([^"]+\.js)"/.exec(readFileSync(join(out, 'index.html'), 'utf8'))![1]!;
+    const code = new Map(readdirSync(assets).filter((name) => name.endsWith('.js')).map((name) => [name, readFileSync(join(assets, name), 'utf8')]));
+    const staticOf = (name: string) =>
+      new Set([...code.get(name)!.matchAll(/(?:^|[;}\s])(?:import|export)\s*(?:[\w$*{},\s]*?from\s*)?["']\.\/([^"']+\.js)["']/g)].map((match) => match[1]!));
+    const closure = (start: string) => {
+      const reached = new Set([start]);
+      for (const todo = [start]; todo.length > 0; ) for (const next of staticOf(todo.pop()!)) if (!reached.has(next) && reached.add(next)) todo.push(next);
+      return reached;
+    };
+    const startup = closure(entry);
+    const gated = new Set([...code.values()].flatMap((text) => [...text.matchAll(/__sheetChunk\(import\.meta\.url,"\.\/([^"]+\.js)"\)/g)].map((match) => match[1]!)));
+    expect(gated.size).toBeGreaterThan(100);
+    const past = [...gated].flatMap((chunk) => [...staticOf(chunk)].filter((name) => !startup.has(name)).map((name) => `${chunk} -> ${name}`));
+    expect(past).toEqual([]);
+  });
+
   it('asks for every lazy chunk through the chunk gate, and preloads none past it (T28)', () => {
     const html = readFileSync(join(out, 'index.html'), 'utf8');
     expect(html).not.toContain('modulepreload');
