@@ -20,18 +20,29 @@ const CONTEXT = /^(?:<system-reminder>\n)?[A-Za-z][A-Za-z.]* hook additional con
 
 const object = (value: unknown): Json | null => (typeof value === 'object' && value !== null && !Array.isArray(value) ? (value as Json) : null);
 
-/** The blocks of the envelopes a carrier's text holds, in order: each under its head, on the line that ends it. */
-function envelopesIn(text: string): SheetDelivery[] {
-  const out: SheetDelivery[] = [];
-  let open = false;
-  for (const line of text.replace(CONTEXT, '').split('\n')) {
-    if (line.startsWith(HEAD)) open = true;
-    else if (open && BLOCK_LINE.test(line)) {
-      out.push(...parseSheetDeliveries(line));
-      open = false;
-    }
-  }
-  return out;
+/**
+ * The blocks of the envelopes a carrier's text holds, in order, each under its head on the line that ends it, and the
+ * text outside them: an envelope's lines, its head to its block, are the sheet's, and a block that does not parse
+ * claims nothing.
+ */
+function envelopesIn(text: string): { deliveries: SheetDelivery[]; rest: string } {
+  const lines = text.replace(CONTEXT, '').split('\n');
+  const deliveries: SheetDelivery[] = [];
+  const rest: string[] = [];
+  let head: number | null = null;
+  lines.forEach((line, at) => {
+    if (line.startsWith(HEAD)) {
+      if (head !== null) rest.push(...lines.slice(head, at));
+      head = at;
+    } else if (head !== null && BLOCK_LINE.test(line)) {
+      const read = parseSheetDeliveries(line);
+      if (read.length > 0) deliveries.push(...read);
+      else rest.push(...lines.slice(head, at + 1));
+      head = null;
+    } else if (head === null) rest.push(line);
+  });
+  if (head !== null) rest.push(...lines.slice(head));
+  return { deliveries, rest: rest.join('\n') };
 }
 
 /** The plugin's own text of a prompt the sminos plugin submitted, else null. */
@@ -46,9 +57,33 @@ function promptText(row: Json): string | null {
 /** The deliveries a held row or a frame carries, by the plugin's prompt or a hook's context; none for any other. */
 export function sheetCarried(row: Json): SheetDelivery[] {
   const prompt = promptText(row);
-  if (prompt !== null) return envelopesIn(prompt);
+  if (prompt !== null) return envelopesIn(prompt).deliveries;
   const attachment = object(row.attachment);
   if (row.type !== 'attachment' || attachment?.type !== 'hook_additional_context') return [];
   const content = attachment.content;
-  return (Array.isArray(content) ? content : [content]).flatMap((entry) => (typeof entry === 'string' ? envelopesIn(entry) : []));
+  return (Array.isArray(content) ? content : [content]).flatMap((entry) => (typeof entry === 'string' ? envelopesIn(entry).deliveries : []));
+}
+
+/**
+ * The row as today's answer reader is to read it: the same row with each carrier text that holds an envelope rewritten
+ * to the text outside its envelopes, so an answer the envelope quotes is not read as today's, and a separate answer of
+ * today's beside it still is. Every other row, and a carrier that holds no envelope, is the row itself.
+ */
+export function withoutSheetEnvelopes(row: Json): Json {
+  const outside = (text: string): string => {
+    const read = envelopesIn(text);
+    return read.deliveries.length === 0 ? text : read.rest;
+  };
+  if (promptText(row) !== null) {
+    const message = object(row.message)!;
+    const content = message.content;
+    if (typeof content === 'string') return { ...row, message: { ...message, content: outside(content) } };
+    const block = object((content as unknown[])[0])!;
+    return { ...row, message: { ...message, content: [{ ...block, text: outside(block.text as string) }] } };
+  }
+  const attachment = object(row.attachment);
+  if (row.type !== 'attachment' || attachment?.type !== 'hook_additional_context') return row;
+  const content = attachment.content;
+  const rewritten = Array.isArray(content) ? content.map((entry) => (typeof entry === 'string' ? outside(entry) : entry)) : typeof content === 'string' ? outside(content) : content;
+  return { ...row, attachment: { ...attachment, content: rewritten } };
 }

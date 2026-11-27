@@ -47,6 +47,26 @@ describe('the sheet’s envelope, read on its carriers', () => {
     expect(readArrivals(pluginPrompt(TERMINAL, { kind: 'plugin', name: 'sminos', asUser: true }))).toEqual([]);
   });
 
+  // The fix round's finding 2: today's answer reader finds its head anywhere in a context's text, so an envelope whose
+  // answer quotes that head would make a second, false answer; the envelope's lines are the sheet's, and the reader of
+  // today's answer reads only what stands outside them.
+  it('keeps the text an envelope claims from today’s answer reader, and still reads a separate answer of today’s beside it', () => {
+    const quoted = 'The human responded to your async AskUserQuestion (call toolu_01Quoted0001): Your questions have been answered.';
+    const blockOf = { v: 1, keys: ['page-00000009'], answered: [{ id: 'q8', revision: 1, picks: [], text: quoted, images: [] }], dismissed: [] };
+    const envelopeQuoting = `[sheet v1] The human answered questions on your sheet.\nq8 "What should the empty state say?" → their text: ${JSON.stringify(quoted)}\n<sheet-delivery>${JSON.stringify(blockOf)}</sheet-delivery>`;
+    const sheet = { class: 'sheet', deliveries: parseSheetDeliveries(envelopeQuoting) };
+    expect(sheet.deliveries).toHaveLength(1);
+    expect(readArrivals(hookContext(envelopeQuoting))).toEqual([sheet]);
+    expect(readArrivals(hookContext(`tool.call hook additional context: ${envelopeQuoting}`))).toEqual([sheet]);
+    expect(readArrivals(pluginPrompt(envelopeQuoting))).toEqual([sheet]);
+    const legacy = 'The human responded to your async AskUserQuestion (call toolu_01Legacy0002): Your questions have been answered: "Which fruit?"="Mango". You can now continue with these answers in mind.';
+    for (const row of [hookContext([legacy, envelopeQuoting]), hookContext(`${legacy}\n${envelopeQuoting}`)]) {
+      const arrivals = readArrivals(row);
+      expect(arrivals.map((arrival) => (arrival.class === 'answer' ? `answer ${arrival.call}` : arrival.class))).toEqual(['answer toolu_01Legacy0002', 'sheet']);
+      expect(arrivals.at(-1)).toEqual(sheet);
+    }
+  });
+
   it('travels as one entry of its own class, read back under its own schema; an entry that does not fit reads as none', () => {
     const arrivals = readArrivals(hookContext(TERMINAL));
     const entry = sheetEntry(sheetFactsOf(arrivals));

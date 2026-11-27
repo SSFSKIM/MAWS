@@ -29,7 +29,7 @@ import { INTERRUPT_MARKER, localCommandParts } from './engine-markers';
 import { GRANT_ONE, GRANT_OPENING, GRANT_SEVERAL } from './grant';
 import { handbackReport, messageText, parsePeerMessage, peerEventsOf, sminosFrameAlias, sminosFrameOwners, sminosFrameSender, sminosParts } from './peer-envelope';
 import { BRIDGE_PLUGINS, BRIDGE_WAKE_LINE, deliveredPrompts, deliveredText, firstLine, isBridgeWake, markedSteerWords, STEER_LINE } from './sminos-delivery';
-import { sheetCarried } from './sheet-carrier';
+import { sheetCarried, withoutSheetEnvelopes } from './sheet-carrier';
 import { notificationText, taskNotificationBlocks } from './task-notification';
 
 export { ArrivalEntrySchema, CarriedArrivalSchema, carriedOf, commandEntry, commandOf, sheetDeliveriesOf, sheetEntry, sheetFactsOf, type Arrival, type ArrivalEntry, type CarriedArrival, type CommandFacts } from './arrival-schema';
@@ -576,10 +576,8 @@ function inboxPeer(text: string, origin: Json | null, frame: string | null, note
  * row that opens with a sminos frame line is read as the delivery it is, before this.
  */
 function pluginRow(row: Json): Arrival[] {
-  const answers = answersOf(row);
-  if (answers.length > 0) return answers;
-  const sheet = sheetOf(row);
-  if (sheet.length > 0) return sheet;
+  const carried = carriedAnswers(row);
+  if (carried.length > 0) return carried;
   if (isBridgeWake(row)) return [{ class: 'wake' }];
   const prompts = deliveredPrompts(row);
   if (prompts === null || (prompts.kind !== 'submitted' && prompts.kind !== 'appended')) return [];
@@ -655,7 +653,7 @@ function scheduledRow(row: Json, text: string, open: OpenArrivals): Read {
 
 function attachmentRow(row: Json, open: OpenArrivals): Read {
   const attachment = object(row.attachment);
-  if (attachment?.type === 'hook_additional_context') return { arrivals: [...answersOf(row), ...sheetOf(row)], open };
+  if (attachment?.type === 'hook_additional_context') return { arrivals: carriedAnswers(row), open };
   if (attachment?.type !== 'queued_command') return none(open);
   const origin = object(attachment.origin);
   const persons = origin?.kind === 'human' && attachment.commandMode === 'prompt' && attachment.isMeta !== true;
@@ -699,10 +697,15 @@ function answersOf(row: Json): Answer[] {
   return askAnswers(row).map(({ call, text }) => ({ class: 'answer', tool: 'sminos', call, summary: text, answers: null, dismissed: text === DISMISSED }));
 }
 
-/** The question sheet's deliveries a plugin's prompt or a hook's context carries, as one arrival (the C3 plan's §I). */
-function sheetOf(row: Json): Arrival[] {
+/**
+ * What a plugin's prompt or a hook's context delivers: today's answers, then the question sheet's deliveries as one
+ * arrival (the C3 plan's §I). The sheet's envelopes are read first and today's reader reads only the text outside them,
+ * so an answer an envelope quotes is not taken for one of today's.
+ */
+function carriedAnswers(row: Json): Arrival[] {
   const deliveries = sheetCarried(row);
-  return deliveries.length === 0 ? [] : [{ class: 'sheet', deliveries }];
+  const answers = answersOf(deliveries.length === 0 ? row : withoutSheetEnvelopes(row));
+  return deliveries.length === 0 ? answers : [...answers, { class: 'sheet', deliveries }];
 }
 
 // ---------------------------------------------------------------------------------------------------------------------
