@@ -58,6 +58,19 @@ describe('the chunk gate (T28)', () => {
     await expect(loaded).resolves.toBe('go');
   });
 
+  it('a load that fails after the next connection opened counts as failed on its own, and is tried again on the next at once', async () => {
+    const { gate, asked, answers } = rig(true);
+    const loaded = gate.load(BASE, './lang-rs-e.js');
+    await settle();
+    gate.opened(); // connection B is proven before A's load answers
+    answers[0]!.reject(new TypeError('Failed to fetch dynamically imported module'));
+    await settle();
+    await settle();
+    expect(asked).toEqual(['http://sheet.localhost:47000/assets/lang-rs-e.js', 'http://sheet.localhost:47000/assets/lang-rs-e.js?again=1']);
+    answers[1]!.resolve('rust');
+    await expect(loaded).resolves.toBe('rust');
+  });
+
   it('each chunk waits on its own: one proven connection lets all the waiting through', async () => {
     const { gate, state, asked } = rig(false);
     void gate.load(BASE, './a.js');

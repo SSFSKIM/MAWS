@@ -25,10 +25,11 @@ export function createChunkGate(deps: { proven: () => boolean; importer: (url: s
       let failedOn: number | null = null;
       for (let tries = 0; ; ) {
         while (!deps.proven() || connection === failedOn) await next();
+        const on = connection; // the connection this try is made on, whatever opened before it answers
         try {
           return await deps.importer(tries === 0 ? url : `${url}?again=${tries}`);
         } catch {
-          failedOn = connection;
+          failedOn = on;
           tries += 1;
         }
       }
