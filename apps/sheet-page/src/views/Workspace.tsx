@@ -40,5 +40,5 @@ export default function Workspace({ place, store, api, connection, outline, navi
 
   if (place.at === 'overview') return <Overview sessions={state.sessions} open={(next) => navigate({ at: 'sheet', session: next })} />;
   if (state.shown === null || state.shown.session !== place.session) return null;
-  return <SheetView shown={state.shown} door={state.door} connection={connection} host={host} outline={outline} navigate={navigate} />;
+  return <SheetView shown={state.shown} door={state.door} connection={connection} host={host} outline={outline} navigate={navigate} adopted={store.adopted} />;
 }

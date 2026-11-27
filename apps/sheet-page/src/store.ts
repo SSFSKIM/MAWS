@@ -6,7 +6,9 @@
 // but does not make it fresh, since only the snapshot's read follows everything the tab missed. A change of
 // the session on screen reads it again. Each read carries a count that only grows, and an answer is applied only when
 // no later read of that session has been. A read that failed is tried again after a while, while its session is still
-// on screen and nothing newer was asked.
+// on screen and nothing newer was asked. A write of another tab this tab adopted reads the session again, and until a
+// read started after it is applied the model is not `settled`: the tab shows its reconcile against it but writes none
+// of it (§P, "What a tab writes of `reconcile`").
 import type { DoorState } from '@shared/ipc/schema/sheet';
 import type { SheetModel, SheetSummary } from '@shared/sheet/model';
 import type { ReadAnswer } from './api';
@@ -16,9 +18,10 @@ export const READ_RETRY_MS = 5_000;
 export interface StoreState {
   sessions: readonly SheetSummary[] | null; // null until the first snapshot
   door: DoorState | null;
-  // the session on screen: its model (undefined until a read is applied; null where the service holds no record), and
-  // whether a read started after the last snapshot has been applied
-  shown: { session: string; model: SheetModel | null | undefined; fresh: boolean } | null;
+  // the session on screen: its model (undefined until a read is applied; null where the service holds no record),
+  // whether a read started after the last snapshot has been applied, and whether one started after the last write of
+  // another tab this tab adopted has been (`settled`: the tab's reconcile against it may be written, §P)
+  shown: { session: string; model: SheetModel | null | undefined; fresh: boolean; settled: boolean } | null;
 }
 
 export interface SheetStore {
@@ -28,6 +31,7 @@ export interface SheetStore {
   ready(sessions: SheetSummary[], door: DoorState): void;
   changed(session: string, summary: SheetSummary | null): void;
   show(session: string | null): void;
+  adopted(session: string): void; // this tab adopted another tab's write of the session's memory
 }
 
 export function createStore(deps: { read(session: string): Promise<ReadAnswer> }): SheetStore {
@@ -38,6 +42,9 @@ export function createStore(deps: { read(session: string): Promise<ReadAnswer> }
   let asked = 0; // the count of the last read started
   let applied = 0; // the count of the last read applied
   let retry: ReturnType<typeof setTimeout> | null = null;
+  let adoptedAt = 0; // the count of the last read started before the last adoption
+  let out = 0; // reads not yet answered
+  let readAgain = false; // an adoption came while a read was out: one more once they are in
 
   const set = (next: Partial<StoreState>) => {
     state = { ...state, ...next };
@@ -49,7 +56,13 @@ export function createStore(deps: { read(session: string): Promise<ReadAnswer> }
     retry = null;
     const count = (asked += 1);
     const at = awaitingReady ? null : snapshot;
+    out += 1;
     void deps.read(session).then((answer) => {
+      out -= 1;
+      if (readAgain && out === 0 && state.shown?.session === session) {
+        readAgain = false;
+        read(session);
+      }
       const shown = state.shown;
       if (shown === null || shown.session !== session || count < applied) return;
       if (!answer.ok) {
@@ -57,7 +70,7 @@ export function createStore(deps: { read(session: string): Promise<ReadAnswer> }
         return;
       }
       applied = count;
-      set({ door: answer.door, shown: { session, model: answer.model, fresh: shown.fresh || at === snapshot } });
+      set({ door: answer.door, shown: { session, model: answer.model, fresh: shown.fresh || at === snapshot, settled: shown.settled || count > adoptedAt } });
     });
   }
 
@@ -87,10 +100,17 @@ export function createStore(deps: { read(session: string): Promise<ReadAnswer> }
       }
       if (state.shown?.session === session) read(session);
     },
+    adopted(session) {
+      if (state.shown?.session !== session) return;
+      adoptedAt = asked;
+      if (state.shown.settled) set({ shown: { ...state.shown, settled: false } });
+      if (out === 0) read(session);
+      else readAgain = true;
+    },
     show(session) {
       if ((state.shown?.session ?? null) === session) return;
       applied = asked; // reads of another session are not this one's
-      set({ shown: session === null ? null : { session, model: undefined, fresh: false } });
+      set({ shown: session === null ? null : { session, model: undefined, fresh: false, settled: false } });
       if (session !== null) read(session);
     },
   };

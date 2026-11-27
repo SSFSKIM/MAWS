@@ -10,7 +10,8 @@
 import { useEffect, useRef, useState } from 'react';
 import type { DoorState } from '@shared/ipc/schema/sheet';
 import type { SheetModel } from '@shared/sheet/model';
-import { SessionSheet, type SheetHost, type SheetMemory } from '../../../../src/renderer/src/sheet';
+import { reconcile, SessionSheet, type SheetHost, type SheetMemory } from '../../../../src/renderer/src/sheet';
+import { onMemory as onMemoryChanged, writeReconciled } from '../memory';
 import { sendUnavailable } from '../availability';
 import { PAGE, VIEWS } from '../copy';
 import type { Connection } from '../live';
@@ -27,6 +28,7 @@ export interface SheetViewProps {
   host: SheetHost;
   outline: Outline;
   navigate(place: Place): void;
+  adopted(session: string): void; // this tab adopted another tab's write of the session's memory (the store reads again)
 }
 
 export function SheetView({ shown, navigate, ...rest }: SheetViewProps) {
@@ -50,14 +52,21 @@ export function SheetView({ shown, navigate, ...rest }: SheetViewProps) {
       </div>
     );
   }
-  return <Sheet key={shown.model.session} model={shown.model} fresh={shown.fresh} {...rest} />;
+  return <Sheet key={shown.model.session} model={shown.model} fresh={shown.fresh} settled={shown.settled} {...rest} />;
 }
 
-function Sheet({ model, fresh, door, connection, host, outline }: Omit<SheetViewProps, 'shown' | 'navigate'> & { model: SheetModel; fresh: boolean }) {
-  const { memory, elsewhereSince, update } = useSessionMemory(model.session);
-  // every change is made against this model: a removal only of what it knows, and its reconcile only while no tab has
-  // reconciled against a newer one (T19)
+function Sheet({ model, fresh, settled, door, connection, host, outline, adopted }: Omit<SheetViewProps, 'shown' | 'navigate'> & { model: SheetModel; fresh: boolean; settled: boolean }) {
+  const { memory: stored, elsewhereSince, update } = useSessionMemory(model.session);
+  // What the tab shows is its own reconcile of the stored memory against its model, so SessionSheet's finds nothing to
+  // do and every change it asks for is the person's or a Send's, applied to that view and written as what it changes;
+  // reconcile's own changes are written only while the model was read after this tab last adopted another tab's write
+  // (§P, "What a tab writes of `reconcile`"; T19)
+  const memory = reconcile(stored, model);
   const onMemory = (change: (current: SheetMemory) => SheetMemory) => update(change, against(model));
+  useEffect(() => {
+    if (memory !== stored) writeReconciled(model.session, model, settled, { known: against(model).known });
+  }, [memory, stored, model, settled]);
+  useEffect(() => onMemoryChanged(model.session, (fromAnotherTab) => fromAnotherTab && adopted(model.session)), [model.session, adopted]);
   const [now, setNow] = useState(() => Date.now()); // moved on by the timer below; an older `now` only holds Send back until it fires
   const { text, until } = sendUnavailable({ connection, fresh, door, elsewhereSince, now });
   useEffect(() => {

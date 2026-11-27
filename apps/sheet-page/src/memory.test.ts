@@ -5,7 +5,7 @@ import { EMPTY_MEMORY, reconcile, type SentAct, type SheetMemory } from '../../.
 import { settle, startSend } from '../../../src/renderer/src/sheet/memory';
 import { CLASH, NOTICES, SEASON, sheetOf } from '../../../src/renderer/src/sheet/test-support/questions';
 import { CREDENTIAL_KEY } from './credential';
-import { madeElsewhere, onMemory, readMemory, sendingSince, sweepMemory, updateMemory, writeMemory } from './memory';
+import { madeElsewhere, onMemory, readMemory, sendingSince, sweepMemory, updateMemory, writeMemory, writeReconciled } from './memory';
 import { testStorage } from './test-support/storage';
 
 const S = '5eed0000-0000-4000-8000-0000000000aa';
@@ -237,31 +237,51 @@ describe('the stored memory (T19): one entry a thing', () => {
     off();
   });
 
-  it('a reconcile against a model older than the one last reconciled writes nothing, so two tabs never undo each other’s; the person’s own change still lands (T19)', () => {
+  it('writes reconcile’s own changes while settled: a sent draft retired by its verdict, a stale one restored and marked, and what was first seen, all there after a reload', () => {
     const store = testStorage();
-    const target = new EventTarget();
-    const older = sheetOf([CLASH, NOTICES], { seq: 4 }); // tab B's
-    const revised = { ...NOTICES, revision: 2, header: 'Printed notices' };
-    const newer = sheetOf([CLASH, revised], { seq: 5 }); // tab A's: q5 revised, and the clash question still open
-    const withdrawn = sheetOf([revised], { seq: 6, closed: { q4: { how: 'withdrawn', at: '2026-11-24T10:00:00.000Z', revision: 1, asker: 'main' } } as never });
-    const reconciling = (model: typeof older) => ({ storage: store, now: model.seq, target, known: () => true, version: model.seq, derived: (current: SheetMemory) => reconcile(current, model) });
-    updateMemory(S, (current) => reconcile(current, older), reconciling(older));
-    expect(readMemory(S, store).headers.get('q5')).toBe('Notices');
-    updateMemory(S, (current) => reconcile(current, newer), reconciling(newer));
-    expect(readMemory(S, store).headers.get('q5')).toBe('Printed notices');
-    // B, still on its older model, reconciles what it adopted: nothing is written back
-    updateMemory(S, (current) => reconcile(current, older), reconciling(older));
-    expect(readMemory(S, store).headers.get('q5')).toBe('Printed notices');
-    // A sees q4 withdrawn: its entries go; B's reconcile against the older model does not bring them back
-    updateMemory(S, (current) => reconcile(current, withdrawn), reconciling(withdrawn));
-    expect(readMemory(S, store).seen.has('q4')).toBe(false);
-    expect(readMemory(S, store).headers.has('q4')).toBe(false);
-    updateMemory(S, (current) => reconcile(current, older), reconciling(older));
-    expect(readMemory(S, store).seen.has('q4')).toBe(false);
-    expect(readMemory(S, store).headers.has('q4')).toBe(false);
-    // the person's own change in B, against its older model, is theirs and lands
-    updateMemory(S, (current) => withDraft(current, 'q5', draft('typed in B')), reconciling(older));
-    expect(readMemory(S, store).drafts.get('q5')).toEqual(draft('typed in B'));
+    const k1 = 'page-000000000000000000000000001';
+    const k2 = 'page-000000000000000000000000002';
+    const typed = withDraft(withDraft(EMPTY_MEMORY, 'q4', draft('as the clash rule says')), 'q5', draft('the season notice'));
+    writeMemory(S, EMPTY_MEMORY, typed, 1, store);
+    const read = readMemory(S, store); // the stored acts' drafts are the drafts themselves (identity restored on read)
+    const sent = { ...read, acts: [act(k1, 'q4', read.drafts.get('q4')!), act(k2, 'q5', read.drafts.get('q5')!)] };
+    writeMemory(S, read, sent, 2, store);
+    const at = '2026-11-24T10:00:00.000Z';
+    const model = sheetOf([CLASH, NOTICES], {
+      sent: [
+        { key: k1, state: 'accepted', verdict: 'applied', kind: 'answer', at, id: 'q4' },
+        { key: k2, state: 'stale', verdict: 'stale', kind: 'answer', at, id: 'q5', current: 2 },
+      ],
+    } as never);
+    writeReconciled(S, model, true, { storage: store, now: 3, target: new EventTarget() });
+    const reloaded = readMemory(S, store);
+    expect(reloaded.drafts.has('q4')).toBe(false); // answered: the draft that was sent is no longer the person's to send
+    expect(reloaded.drafts.get('q5')?.text).toBe('the season notice'); // stale: back on its card
+    expect([...reloaded.marked]).toEqual(['q5']); // and the card says so (answer-stale)
+    expect(reloaded.acts.find((entry) => entry.key === k2)?.state).toBe('stale');
+    expect([...reloaded.seen.keys()].sort()).toEqual(['q4', 'q5']); // what was first seen: an "Updated" mark measures from it
+    expect(reconcile(reloaded, model)).toBe(reloaded); // nothing of it left to write
+  });
+
+  it('writes none of reconcile’s changes while a write of another tab is adopted and the read after it has not been applied', async () => {
+    const storage = testStorage();
+    const reads: Array<(model: ReturnType<typeof sheetOf>) => Promise<void>> = [];
+    const { createStore } = await import('./store');
+    const sheets = createStore({ read: () => new Promise((done) => void reads.push(async (model) => done({ ok: true, model, door: { known: true, available: true } }))) });
+    const model = sheetOf([CLASH], { session: S } as never);
+    sheets.show(S);
+    await reads[0]!(model);
+    await Promise.resolve();
+    sheets.adopted(S); // another tab wrote; its write is in storage, the model is not yet read again
+    writeMemory(S, EMPTY_MEMORY, withDraft(EMPTY_MEMORY, 'q4', draft('from the other tab')), 1, storage);
+    writeReconciled(S, model, sheets.state().shown!.settled, { storage, now: 2, target: new EventTarget() });
+    expect(readMemory(S, storage).seen.size).toBe(0); // shown, but not written
+    await reads[1]!(model);
+    await Promise.resolve();
+    expect(sheets.state().shown!.settled).toBe(true);
+    writeReconciled(S, model, sheets.state().shown!.settled, { storage, now: 3, target: new EventTarget() });
+    expect([...readMemory(S, storage).seen.keys()]).toEqual(['q4']);
+    expect(readMemory(S, storage).drafts.get('q4')?.text).toBe('from the other tab');
   });
 
   it('lands an update in its own session’s entries, read from the store as it is when applied', () => {

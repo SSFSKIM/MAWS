@@ -31,9 +31,9 @@ describe('the store', () => {
     store.show(S);
     store.show(S);
     expect(pending.map((read) => read.session)).toEqual([S]);
-    expect(store.state().shown).toEqual({ session: S, model: undefined, fresh: false });
+    expect(store.state().shown).toMatchObject({ session: S, model: undefined, fresh: false });
     await answer(0, { ok: true, model: model(1), door: DOOR });
-    expect(store.state().shown).toEqual({ session: S, model: model(1), fresh: true });
+    expect(store.state().shown).toMatchObject({ session: S, model: model(1), fresh: true });
     expect(store.state().door).toEqual(DOOR);
   });
 
@@ -45,14 +45,34 @@ describe('the store', () => {
     await answer(1, { ok: true, model: model(1), door: DOOR });
     expect(store.state().shown?.fresh).toBe(true);
     store.opened(); // the next connection reached `paired`; its `ready` has not come
-    expect(store.state().shown).toEqual({ session: S, model: model(1), fresh: false });
+    expect(store.state().shown).toMatchObject({ session: S, model: model(1), fresh: false });
     store.changed(S, summary(S, 2)); // a change heard before `ready` reads, but is not the snapshot's read
     await answer(2, { ok: true, model: model(2), door: DOOR });
-    expect(store.state().shown).toEqual({ session: S, model: model(2), fresh: false });
+    expect(store.state().shown).toMatchObject({ session: S, model: model(2), fresh: false });
     store.ready([summary(S, 2)], DOOR);
     expect(pending).toHaveLength(4);
     await answer(3, { ok: true, model: model(2), door: DOOR });
-    expect(store.state().shown).toEqual({ session: S, model: model(2), fresh: true });
+    expect(store.state().shown).toMatchObject({ session: S, model: model(2), fresh: true });
+  });
+
+  it('a write of another tab, adopted, unsettles the model until a read started after it is applied, and starts that read', async () => {
+    const { store, pending, answer } = harness();
+    store.show(S);
+    await answer(0, { ok: true, model: model(1), door: DOOR });
+    expect(store.state().shown).toMatchObject({ model: model(1), settled: true });
+    store.adopted(S);
+    expect(store.state().shown).toMatchObject({ model: model(1), settled: false });
+    expect(pending).toHaveLength(2); // the read the adoption starts
+    store.adopted(S); // another, while that read is out: one more read once it lands, not one each
+    expect(pending).toHaveLength(2);
+    await answer(1, { ok: true, model: model(1), door: DOOR });
+    expect(store.state().shown).toMatchObject({ settled: false }); // started before the second adoption
+    expect(pending).toHaveLength(3);
+    await answer(2, { ok: true, model: model(2), door: DOOR });
+    expect(store.state().shown).toMatchObject({ model: model(2), settled: true });
+    store.adopted(T); // another session's: nothing of this one
+    expect(store.state().shown).toMatchObject({ settled: true });
+    expect(pending).toHaveLength(3);
   });
 
   it('leaves the later read standing when two finish in the other order', async () => {
@@ -94,7 +114,7 @@ describe('the store', () => {
     store.show(S);
     store.show(T);
     await answer(0, { ok: true, model: model(1), door: DOOR });
-    expect(store.state().shown).toEqual({ session: T, model: undefined, fresh: false });
+    expect(store.state().shown).toMatchObject({ session: T, model: undefined, fresh: false });
     store.show(null);
     expect(store.state().shown).toBeNull();
   });
@@ -107,7 +127,7 @@ describe('the store', () => {
     vi.advanceTimersByTime(READ_RETRY_MS);
     expect(pending).toHaveLength(2);
     await answer(1, { ok: true, model: null, door: DOOR });
-    expect(store.state().shown).toEqual({ session: S, model: null, fresh: true });
+    expect(store.state().shown).toMatchObject({ session: S, model: null, fresh: true });
   });
 
   it('tells its listeners of every change', async () => {

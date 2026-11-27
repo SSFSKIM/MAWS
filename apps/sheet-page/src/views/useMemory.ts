@@ -18,15 +18,15 @@ export interface SessionMemory {
   update(update: (current: SheetMemory) => SheetMemory, against?: Against): void;
 }
 
-type Against = Pick<MemoryUpdateOptions, 'known' | 'version' | 'derived'>;
+type Against = Pick<MemoryUpdateOptions, 'known' | 'base'>;
 
 /**
  * What an update made against a model carries of it: the questions it holds in any form (open, hidden by a queued
- * dismissal, or closed), its `seq`, and C3's reconcile against it.
+ * dismissal, or closed), and the tab's view of the stored memory, its reconcile against that model.
  */
-export function against(model: SheetModel): Against {
+export function against(model: SheetModel): Required<Against> {
   const ids = new Set([...model.open.map((question) => question.id), ...model.hidden.map((entry) => entry.id), ...Object.keys(model.closed)]);
-  return { known: (question) => ids.has(question), version: model.seq, derived: (current) => reconcile(current, model) };
+  return { known: (question) => ids.has(question), base: (stored) => reconcile(stored, model) };
 }
 
 const pairingNow = (): string | null => {

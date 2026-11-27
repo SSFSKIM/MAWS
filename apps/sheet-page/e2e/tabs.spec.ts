@@ -103,9 +103,23 @@ test('two tabs typing on different cards, each hearing of the other late, both k
 
 test('a tab whose model is older than another tab’s leaves what the newer one wrote alone, and neither undoes the other in turn; it shows it all once its read comes', async ({ page, context, mawsd }) => {
   const [first, second] = await twoTabs(context, page, mawsd);
+  // q1 dismissed, the dismissal queued: both tabs list it hidden
+  await card(first, 'q1').getByRole('button', { name: 'Dismiss' }).click();
+  for (const tab of [first, second]) await expect(tab.locator('[data-sheet-hidden="q1"]')).toBeVisible({ timeout: 20_000 });
   const held: Route[] = [];
   let holding = true;
   await second.route(`**/api/sheets/${S}`, (route) => (holding ? void held.push(route) : route.continue())); // the second tab's model stays from before
+  // the first takes the dismissal back, a change of the inbox alone (the record's `seq` stays), and drafts the reopened card
+  const seq = stateOf(mawsd.home, S).seq;
+  await first.locator('[data-sheet-hidden="q1"]').getByRole('button', { name: 'Take back' }).click();
+  await expect(field(first, 'q1')).toBeVisible({ timeout: 20_000 });
+  expect(stateOf(mawsd.home, S).seq).toBe(seq);
+  await field(first, 'q1').fill('reopened, and answered');
+  await until(async () => (await draftOf(first, 'q1')) !== null, 10_000, 'the reopened card’s draft');
+  await until(() => held.length > 0, 20_000, 'the second tab’s read after it adopted the draft');
+  await second.waitForTimeout(1_000);
+  await expect(second.locator('[data-sheet-hidden="q1"]')).toBeVisible(); // its model still has it hidden
+  expect(JSON.parse((await draftOf(second, 'q1'))!)).toMatchObject({ draft: { text: 'reopened, and answered' } });
   // meanwhile, in the record: q2 revised under a new header, q3 withdrawn, and q4 asked
   const state = stateOf(mawsd.home, S);
   const revised = { ...state.questions.find((entry) => entry.id === 'q2')!, revision: 2, header: 'Harbour office', question: 'Which way should part 2 go now?' };
@@ -116,7 +130,6 @@ test('a tab whose model is older than another tab’s leaves what the newer one 
   });
   await expect(card(first, 'q4')).toBeVisible({ timeout: 20_000 });
   await expect(card(first, 'q3')).toHaveCount(0);
-  await until(() => held.length > 0, 20_000, 'the second tab’s read of the change');
   await field(first, 'q4').fill('on the new card');
   await until(async () => (await draftOf(first, 'q4')) !== null, 10_000, 'the draft’s entry');
   await second.waitForTimeout(1_000); // the second tab has heard the entries and reconciled them against its older model
@@ -137,6 +150,7 @@ test('a tab whose model is older than another tab’s leaves what the newer one 
   holding = false;
   for (const route of held.splice(0)) await route.continue();
   await expect(field(second, 'q4')).toHaveValue('on the new card', { timeout: 20_000 });
+  await expect(field(second, 'q1')).toHaveValue('reopened, and answered');
   await expect(card(second, 'q3')).toHaveCount(0);
   await expect(field(first, 'q4')).toHaveValue('on the new card');
 });
