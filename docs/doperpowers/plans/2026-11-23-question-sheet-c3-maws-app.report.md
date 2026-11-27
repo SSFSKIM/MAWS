@@ -159,7 +159,7 @@ All are written into the plan's §C, §F, §H and §I.
 
 ## Pictures
 
-They are in `~/.local/share/question-sheet/built-look/`, from run 46061691137, at 1440 x 900 in the light theme:
+They are in a directory outside the repository, with the composite's writer, from run 46061691137, at 1440 x 900 in the light theme:
 
 1. `1-carried-draft.png`: a card rewritten under a draft, with "Updated", the dashed carried pick, "You wrote this before the question changed." and "Keep my answer".
 2. `2-needs-you-calm.png`: the sidebar's Needs you row for a session whose waiting items are all sheet questions, in the calm info tone.
