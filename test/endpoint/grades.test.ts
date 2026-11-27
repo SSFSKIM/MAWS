@@ -697,7 +697,7 @@ describe('the decision without a channel', () => {
     changed(target: SessionTarget): void;
   };
 
-  async function authorizer(options: { tooOld?: boolean; dispatch?: AuthorizeContext['dispatch'] } = {}): Promise<Unit> {
+  async function authorizer(options: { tooOld?: boolean; dispatch?: AuthorizeContext['dispatch']; settingsMode?: () => string } = {}): Promise<Unit> {
     const ref = 'R'.repeat(22);
     const key = await generateSigningKey();
     const s1 = await genesis(ORG, A, a1, recovery);
@@ -715,7 +715,7 @@ describe('the decision without a channel', () => {
       org: () => ({ head, certificates: NO_CERTIFICATES, tooOld: options.tooOld === true }),
       rights: async (member) => (member === A ? ['spawn', 'shell', 'machine-admin'] : []),
       policy: () => ({ read_only: false, ceiling: 'settings' }),
-      settingsMode: () => 'default',
+      settingsMode: options.settingsMode ?? (() => 'default'),
       records: {
         record: (t) => records.get(`${t.lane}:${t.session}`) ?? null,
         onChange: (listener) => {
@@ -797,6 +797,32 @@ describe('the decision without a channel', () => {
     unit.changed({ lane: 'B', session: 'eng-shared', appSessionId: 'app-shared' });
     host.release();
     expect(await deciding).toEqual({ ok: false, reason: 'grade' });
+  });
+
+  // Observation set 4's review: a ceiling of `settings` is the machine's defaultMode, read where the decision reads it; the
+  // decision stands only while that reads the same, as it does on the policy and the head.
+  it('stands only while the defaultMode a `settings` ceiling read is unchanged: a switch to Bypass permissions, and a spawn', async () => {
+    let defaultMode = 'bypassPermissions';
+    const unit = await authorizer({ settingsMode: () => defaultMode });
+    const d = new Device({ identity: { org: ORG, member: A, device: 'a1', clientClass: 'native-mac', channelKey: a1.channel, build: 'x', capabilities: [] }, org: memoryOrgView({ chain: [{} as SignedOrgState] }) });
+    const bypass = d.action({ machine: unit.ref, action: 'session.setPermissionMode', session: 'app-own', context: { lane: 'B', launchId: 'launch-1', engineSessionId: ENGINE['app-own'] }, args: { appSessionId: 'app-own', mode: 'bypassPermissions' } });
+    const decided = await unit.authorizer.authorize({ kind: 'act', name: bypass.action, input: bypass.args, action: bypass }, whoA, Date.now());
+    expect(decided.ok && decided.stands?.()).toBe(true);
+    defaultMode = 'acceptEdits'; // the owner tightens their defaultMode before the switch runs
+    expect(decided.ok && decided.stands?.()).toBe(false);
+    // the same of a spawn's mode, judged against the ceiling at its admission
+    defaultMode = 'bypassPermissions';
+    const stepping = new Device({ identity: { org: ORG, member: A, device: 'a1', clientClass: 'native-mac', channelKey: a1.channel, build: 'x', capabilities: [] }, org: memoryOrgView({ chain: [{} as SignedOrgState] }), stepUpKey: a1.stepUp });
+    const spawn = await stepping.stepUp(stepping.action({ machine: unit.ref, action: 'session.spawn', args: { checkout: CHECKOUT, permission_mode: 'bypassPermissions' } }));
+    const admitted = await unit.authorizer.authorize({ kind: 'act', name: spawn.action, input: spawn.args, action: spawn }, whoA, Date.now());
+    expect(admitted.ok && admitted.stands?.()).toBe(true);
+    defaultMode = 'auto';
+    expect(admitted.ok && admitted.stands?.()).toBe(false);
+    // a decision that never read the defaultMode rests nowhere on it
+    const send = sendOn(unit.ref, 'app-own', 'hello');
+    const sent = await unit.authorizer.authorize(send, whoA, Date.now());
+    defaultMode = 'plan';
+    expect(sent.ok && sent.stands?.()).toBe(true);
   });
 
   it('gives up `unavailable` when the head keeps moving under its reads', async () => {

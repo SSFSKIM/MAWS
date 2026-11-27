@@ -231,6 +231,8 @@ class Reads implements EffectReads {
   #readOtherwise = false;
   /** P5 O7 M5a: whether each cached artifact placement this decision read still stands. */
   readonly #artifacts: Array<() => boolean> = [];
+  /** The machine's `defaultMode` as this decision first read it for a `settings` ceiling; null while it read none. */
+  #settingsMode: string | null = null;
 
   constructor(
     private readonly ctx: AuthorizeContext,
@@ -264,6 +266,22 @@ class Reads implements EffectReads {
     const placed = await this.ctx.artifacts.of(this.who.client, artifactId, placing);
     this.#artifacts.push(placed.current);
     return placed.resolved;
+  }
+
+  /**
+   * The machine's `defaultMode`, which a `settings` ceiling reads (observation set 4's review): kept, so the decision
+   * stands only while it reads the same (`ceilingMoved`) and a second reading otherwise moved under it.
+   */
+  settingsMode(): string {
+    const mode = this.ctx.settingsMode();
+    if (this.#settingsMode === null) this.#settingsMode = mode;
+    else if (mode !== this.#settingsMode) this.#readOtherwise = true;
+    return mode;
+  }
+
+  /** Whether the `defaultMode` this decision read for its ceiling reads otherwise now (read again only when it was read). */
+  ceilingMoved(): boolean {
+    return this.#settingsMode !== null && this.ctx.settingsMode() !== this.#settingsMode;
   }
 
   /** Whether a cached artifact placement read here was dropped since (a relink, a record, a head). */
@@ -352,7 +370,7 @@ export class Authorizer {
       if (org === null || ref === null) return refuse('unavailable');
       const before = this.#stamp();
       const reads = new Reads(this.ctx, org, ref, new Date(now), who, dispatchAs(this.ctx.dispatch, who.client));
-      const moved = () => reads.recordsMoved() || reads.artifactsMoved() || !sameStamp(before, this.#stamp());
+      const moved = () => reads.recordsMoved() || reads.artifactsMoved() || reads.ceilingMoved() || !sameStamp(before, this.#stamp());
       let standing: Standing;
       try {
         if (request.kind === 'query') standing = decided(await this.#query(request, who, reads));
@@ -502,12 +520,12 @@ export class Authorizer {
     if (grade === 'spawn' && row.target === 'machine') {
       // P5 O7 M9: a trust card's answer is a current owner's alone to give; 2026-11-06: so is a chat in the home
       const ownerSpawn = name === 'session.spawn' && owners.includes(who.member);
-      const refusal = spawnRefusal(input as Readonly<Record<string, unknown>>, policy, () => this.ctx.settingsMode(), this.ctx.checkouts, ownerSpawn);
+      const refusal = spawnRefusal(input as Readonly<Record<string, unknown>>, policy, () => reads.settingsMode(), this.ctx.checkouts, ownerSpawn);
       if (refusal !== null) return no(refusal);
     }
     // The owner's observation set 4 (2026-11-27): every launch admits Bypass permissions later (engine-host/launch.ts), so
     // a switch to it from another machine is held to the ceiling a spawn is held to; the engine no longer refuses it
-    if (name === 'session.setPermissionMode' && (input as { mode?: unknown }).mode === 'bypassPermissions' && aboveCeiling('bypassPermissions', policy, () => this.ctx.settingsMode())) return no('ceiling');
+    if (name === 'session.setPermissionMode' && (input as { mode?: unknown }).mode === 'bypassPermissions' && aboveCeiling('bypassPermissions', policy, () => reads.settingsMode())) return no('ceiling');
     let setup: SetupTarget | undefined;
     if (SETUP_DIRECTORY_COMMANDS.has(name)) {
       const checked = await this.#setup.check(who.member, name, input);
