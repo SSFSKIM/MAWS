@@ -58,10 +58,11 @@ for (const name of STRANGERS) {
       await at.goto(stranger.pageFor(stranger[name], mawsd.url, code));
       await expect(at.locator('body[data-done="1"]')).toBeAttached({ timeout: 20_000 });
 
-      // the exchange is a write, and its Origin is not the page's: 403 on the wire, and the code is still live
-      expect(seen.filter((entry) => entry.path === '/api/pair')).toEqual([{ method: 'POST', path: '/api/pair', status: 403 }]);
+      // the exchange is a write, and its Origin is not the page's: 403 on the wire, and the code is still live (the
+      // status comes in the browser's own event for the answer, which may follow the stranger's page marking itself done)
+      await expect.poll(() => seen.filter((entry) => entry.path === '/api/pair')).toEqual([{ method: 'POST', path: '/api/pair', status: 403 }]);
       // so is unpair, before its credential is even read
-      expect(seen.filter((entry) => entry.path === '/api/unpair')).toEqual([{ method: 'POST', path: '/api/unpair', status: 403 }]);
+      await expect.poll(() => seen.filter((entry) => entry.path === '/api/unpair')).toEqual([{ method: 'POST', path: '/api/unpair', status: 403 }]);
       // the live connection is refused at the upgrade, as the browser itself reports the answer, and nothing was sent on it
       expect(said.some((text) => /\/live' failed: .*Unexpected response code: 403/.test(text)), said.join('\n')).toBe(true);
       expect(sockets).toEqual([]);
