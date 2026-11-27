@@ -651,7 +651,7 @@ describe('drill-in', () => {
     // A callback another child registered (C8c's openFile, stubbed here) reaches the child transcript's rows.
     const openFile = vi.fn();
     const off = registerTranscriptActions({ openFile });
-    fireEvent.click(await within(drill).findByTitle('src/a.ts'));
+    fireEvent.click(await within(drill).findByRole('button', { description: 'src/a.ts' })); // board ticket 815: its path is its tip
     // UX wave U6b-1: a path link says whether ⌘ was held; UX wave U6b-4c (decision 9): the drill-in's mount adds the agent's id,
     // and the branch panel the conversation the session was in at the mount (the record's engine session, `record`'s `eng-<id>`)
     expect(openFile).toHaveBeenCalledWith('src/a.ts', undefined, A, { main: false, agent: child, conversation: `eng-${A}` });

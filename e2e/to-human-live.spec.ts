@@ -629,9 +629,9 @@ test('U2b trial: the mod draws the view of a session MAWS runs, nothing twice, a
       // Link.tsx), and a plain click opens the file beside the chat, the main strip as it was (e2e/sessions.spec.ts)
       const strip = () => mountedTabs(page).evaluateAll((tabs) => tabs.map((tab) => tab.getAttribute('data-tab-id') ?? ''));
       const stripBefore = await strip();
-      const path = drawn.locator(`[data-chip="path"][title="${join(repo, 'README.md')}"]`).first(); // as e2e/sessions.spec.ts selects a chip
+      const path = drawn.locator(`[data-chip="path"][data-path="${join(repo, 'README.md')}"]`).first(); // as e2e/sessions.spec.ts selects a chip
       await expect(path, 'a path link inside a mod-drawn message').toBeVisible({ timeout: 20_000 });
-      const pathTitle = await path.getAttribute('title');
+      const pathTitle = await path.getAttribute('data-path'); // board ticket 815: the path its tip shows
       await path.click();
       const viewer = sideColumn(page).locator(`[data-file-viewer][data-path="${join(repo, 'README.md')}"]`);
       await expect(viewer, 'README.md beside the chat').toBeVisible({ timeout: 20_000 });

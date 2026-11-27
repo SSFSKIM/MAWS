@@ -5,6 +5,7 @@ import { DEFAULT_ACTIONS } from '../default-actions';
 import '../Transcript'; // UX wave U6b-4b (N1.12): what the desk's web app loads of the window, default-actions.ts through it
 import { Markdown } from './Markdown';
 import { transcriptUrlTransform } from './sanitize';
+import { accessibleDescription } from '../../../test-support/accessible-text'; // ticket 815
 
 // UX wave U6b-4b (N1.9): whatever a case of this suite draws, no element carries a `file:` or a `maws-path:` href
 afterEach(() => {
@@ -77,7 +78,7 @@ describe.each([false, true])('markdown sanitisation (live: %s)', (live) => {
     expect(hrefs).toContain('https://example.com/a');
     expect(hrefs).toContain('mailto:me@example.com');
     // The path link (Link.tsx) names the path it opens; it acts as a button, never a navigable link.
-    expect([...view().querySelectorAll('[data-chip="path"]')].map((chip) => chip.getAttribute('title'))).toEqual(['src/renderer/x.ts']);
+    expect([...view().querySelectorAll('[data-chip="path"]')].map((chip) => accessibleDescription(chip))).toEqual(['src/renderer/x.ts']); // ticket 815: its tip
   });
 
   // P3-F wave S (F14, the owner's obs 2): an artifact link survives every gate as a chip that only calls an action; no
@@ -109,7 +110,7 @@ describe.each([false, true])('markdown sanitisation (live: %s)', (live) => {
 // the desk's web app loads this Markdown and its default actions and never turns it.
 describe('the file: form', () => {
   const FORMS = '[r](file:///work/x.md) [h](file://host/work/x.md) [s](file:/work/x.md) <file:///work/a.md> [p](src/y.ts)';
-  const chips = (root: HTMLElement) => [...root.querySelectorAll('[data-chip="path"]')].map((chip) => chip.getAttribute('title'));
+  const chips = (root: HTMLElement) => [...root.querySelectorAll('[data-chip="path"]')].map((chip) => accessibleDescription(chip));
 
   it('with what the desk loads loaded and the switch never turned, a `file:` link is its text; a scheme-less one is the chip it was (N1.12)', () => {
     expect(fileLinksTurned()).toBe(false);

@@ -20,6 +20,7 @@ import type { CellId, Row, RowId, TurnId } from '../../model/rows';
 import { rowElementId, useTranscriptContext, useWorkMotion } from '../context';
 import { Chevron, LineCounts } from './parts';
 import { CLOSE_MOTION, OPEN_MOTION } from '../../../ui/disclosure';
+import { UnavailableButton } from '../../../ui/tip'; // ticket 815
 import { Backdrop } from '../../../sessions/scrim'; // board 523 (U11a): the one scrim
 import { turnDurationMs } from '../../surface/adapters'; // UX wave U2b
 
@@ -239,9 +240,12 @@ function TurnSummary({ row, durationMs }: { row: DividerRowData; durationMs: num
         <Popover.Content className="transcript-popover" side="bottom" align="start" sideOffset={6}>
           <SummaryText row={row} durationMs={durationMs} />
           {(row.files?.length ?? 0) > 0 && <button type="button" className="transcript-button" onClick={() => { actions.reviewChanges(row.turnId!); setMenuOpen(false); }}>Review changes</button>}
-          {rewind && (row.files?.length ?? 0) > 0 && <button type="button" className="transcript-button" disabled={working || busy || restoreState === 'undone' || !!rewind.unavailable} title={rewind.unavailable ?? undefined} onClick={() => void preview()}>
-            {restoreState === 'undone' ? 'Files restored' : checking ? 'Checking files…' : 'Restore files to before this turn'}
-          </button>}
+          {/* ticket 815: greyed for a reason, it keeps the keyboard, its reason its tip and description */}
+          {rewind && (row.files?.length ?? 0) > 0 && <UnavailableButton reason={restoreState === 'undone' ? null : (rewind.unavailable ?? null)}>
+            <button type="button" className="transcript-button" disabled={working || busy || restoreState === 'undone'} onClick={() => void preview()}>
+              {restoreState === 'undone' ? 'Files restored' : checking ? 'Checking files…' : 'Restore files to before this turn'}
+            </button>
+          </UnavailableButton>}
           {error && <p role="alert">{error}</p>}
         </Popover.Content>
       </Popover.Portal>

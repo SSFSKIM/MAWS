@@ -7,7 +7,8 @@
 // under the line. The word cut (T93, T94, T97, T98): an ask with no title of its own is headed by its count ("3
 // questions"), a titled one keeps the count after its title; a cancelled capsule's chip reads Cancelled, why its tooltip
 // and its description (and after the chip where nothing points: the touch rule, ticket 830); an answered capsule has no
-// button, its top row is the press that opens its answers.
+// button, its top row is the press that opens its answers. Ticket 815: an answer line headed by its header has the
+// question as the header's tip and under the line where nothing points, as the question row's does.
 import { useId, type ReactNode } from 'react';
 import type { AskQuestion } from '@shared/maws/tools';
 import { Tip } from '../../../ui/tip';
@@ -26,15 +27,26 @@ export const askRowData = (row: AskRow): AskRowData => ({
 
 function AnswerLine({ question, row }: { question: AskQuestion; row: AskRow }) {
   const answer = row.answers?.find((candidate) => candidate.id === question.id);
+  const label = askQuestionTitle(question);
+  const headed = label !== question.question;
   return (
-    <li className="transcript-question-line" data-ask-answer="" title={question.question}>
-      <span className="transcript-question-label">{askQuestionTitle(question)}</span>
+    <li className="transcript-question-line" data-ask-answer="" title={headed ? undefined : question.question}>
+      {headed ? (
+        <Tip content={question.question} description={question.question}>
+          <span className="transcript-question-label rounded-sm outline-accent focus-visible:outline-2" tabIndex={0}>
+            {label}
+          </span>
+        </Tip>
+      ) : (
+        <span className="transcript-question-label">{label}</span>
+      )}
       <span className="transcript-question-arrow" aria-hidden="true">
         →
       </span>
       <span className="transcript-question-answer" data-answer={answer === undefined ? 'none' : ''}>
         {askAnswerCopy(answer)}
       </span>
+      {headed && <TouchFact block className="col-span-full">{question.question}</TouchFact>}
     </li>
   );
 }

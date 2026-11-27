@@ -786,7 +786,7 @@ test.describe('side threads, Send to main and /btw (E3)', () => {
     await page.keyboard.press('Enter');
     const card = main.locator('[data-btw-card]');
     await expect(card.locator('[data-side-exchange="answered"]'), 'the card with its two exchanges').toHaveCount(2);
-    const chip = card.locator('[data-side-exchange="answered"]').nth(1).locator(`[data-chip="path"][title="${appPath}"]`);
+    const chip = card.locator('[data-side-exchange="answered"]').nth(1).locator(`[data-chip="path"][data-path="${appPath}"]`);
     await expect(chip, 'the answer’s path drawn as a path link').toBeVisible();
     await chip.click();
     await expect(sideColumn(page).locator(`[data-file-viewer][data-path="${appPath}"]`), 'the file beside the chat').toBeVisible({ timeout: 20_000 });
@@ -1435,7 +1435,7 @@ async function allowEvidence(c: Case, child: string, request: Locator, from: num
             requestCard: root.getAttribute('data-request-card'),
             busy: root.getAttribute('aria-busy'),
             allow: allow && box ? { disabled: allow.disabled, focused: allow === document.activeElement, x: Math.round(box.x), y: Math.round(box.y), w: Math.round(box.width), h: Math.round(box.height) } : null,
-            alert: Array.from(root.querySelectorAll('[role="alert"]')).map((node) => `${node.textContent ?? ''} | ${node.querySelector('[title]')?.getAttribute('title') ?? ''}`.slice(0, 200)),
+            alert: Array.from(root.querySelectorAll('[role="alert"]')).map((node) => `${node.textContent ?? ''} | ${document.getElementById(node.querySelector('[aria-describedby]')?.getAttribute('aria-describedby') ?? '')?.textContent ?? ''}`.slice(0, 200)),
             status: Array.from(root.querySelectorAll('[role="status"]')).map((node) => (node.textContent ?? '').slice(0, 80)),
           };
         }),

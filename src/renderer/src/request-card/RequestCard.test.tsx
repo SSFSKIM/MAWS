@@ -37,6 +37,7 @@ import { HEADINGS as PREVIEW_HEADINGS } from '../sidebar/RequestPreview';
 import { BUTTON_LIKE_INPUTS as CARD_INPUTS, HEADINGS, RequestCard, type Placement } from './RequestCard';
 import { fixtureRequest, itemFor, permission, syntheticRequest, type RequestEvent } from './test-requests';
 import { QUIET_MS } from '../ui/spinner';
+import { accessibleDescription, accessibleText } from '../test-support/accessible-text'; // board ticket 815
 
 const APP = at('app-test' as AppSessionId);
 const MAIN_APP = bareOf(APP); // P5 O6 M2: as main (the fake bridge) is asked
@@ -413,7 +414,7 @@ describe('request card placements and delivery states', () => {
     useLayout.setState({ hydrated: true });
     const unregister = registerPanelTool(filesTool);
     try {
-      fireEvent.click(screen.getByTitle('/r/app.ts'));
+      fireEvent.click(screen.getByRole('button', { description: '/r/app.ts' })); // board ticket 815: a path link's path is its tip
       const files = (useLayout.getState().panelBySession.get(APP)?.tabs ?? []).filter((tab) => tab.toolId === 'files');
       expect(files.map((tab) => useLayout.getState().panelParams[tab.id])).toEqual([{ file: '/r/app.ts', line: 7, preview: true }]);
       expect(currentSet(useLayout.getState().main).panes.flatMap((pane) => pane.tabs).filter((tab) => tab.kind === 'file')).toEqual([]);
@@ -438,8 +439,8 @@ describe('request card placements and delivery states', () => {
     expect(screen.getByText('1 of 2')).toBeTruthy();
     expect(screen.getByText('Which color do you prefer?')).toBeTruthy();
     expect(screen.queryByText('Which fruits do you like?')).toBeNull(); // one question at a time
-    const next = screen.getByRole('button', { name: 'Next' });
-    expect((next as HTMLButtonElement).disabled).toBe(true);
+    const next = screen.getByRole('button', { name: 'Next', description: 'Choose an option or skip this question' });
+    expect(next.getAttribute('aria-disabled')).toBe('true'); // board ticket 815: greyed, it keeps the keyboard
     await user.click(screen.getByRole('radio', { name: 'Red' }));
     expect(screen.getByTitle('Preview of Red').getAttribute('sandbox')).toBe(''); // no allow-scripts, no allow-same-origin
     expect(screen.getByTitle('Preview of Red').getAttribute('srcdoc')).toContain('This is a red preview');
@@ -448,7 +449,7 @@ describe('request card placements and delivery states', () => {
     expect(screen.getByText('2 of 2')).toBeTruthy();
     expect(screen.getByText('Which fruits do you like?')).toBeTruthy();
     const submit = screen.getByRole('button', { name: 'Submit' });
-    expect((submit as HTMLButtonElement).disabled).toBe(true);
+    expect(submit.getAttribute('aria-disabled')).toBe('true');
     await user.click(screen.getByRole('checkbox', { name: 'Apple' }));
     await user.click(screen.getByRole('checkbox', { name: 'Pear' }));
     expect(answers()).toEqual([]); // nothing leaves before Submit
@@ -480,7 +481,7 @@ describe('request card placements and delivery states', () => {
     mount(question, 'inline');
     const user = userEvent.setup();
     await user.click(screen.getByRole('radio', { name: 'Other…' }));
-    expect((screen.getByRole('button', { name: 'Next' }) as HTMLButtonElement).disabled).toBe(true); // blank is no answer
+    expect(screen.getByRole('button', { name: 'Next' }).getAttribute('aria-disabled')).toBe('true'); // blank is no answer
     await user.type(screen.getByRole('textbox', { name: 'Other answer to Which color do you prefer?' }), 'Teal{Enter}');
     expect(screen.getByText('2 of 2')).toBeTruthy();
     await user.click(screen.getByRole('checkbox', { name: 'Pear' }));
@@ -772,7 +773,8 @@ describe('request card placements and delivery states', () => {
       </EndRow>,
     ); // UX wave U1b (decision 14): drawn at the end
     expect(screen.queryByRole('progressbar', { name: 'Loading the request…' })).toBeNull();
-    expect(screen.getByRole('alert').textContent).toBe('The request could not be readRetry');
+    expect(accessibleText(screen.getByRole('alert'))).toBe('The request could not be readRetry');
+    expect(accessibleDescription(screen.getByText('The request could not be read'))).toBe('no host'); // board ticket 815: why, the words' tip
     expect(screen.getByText(item.summary)).toBeTruthy();
   });
 
@@ -1374,7 +1376,7 @@ describe('a card’s delivery, held by the request', () => {
     first.unmount();
     await act(() => fake.fail('session.answer', 'the link is down'));
     inPane(item);
-    expect(screen.getByText("Couldn't deliver the answer").getAttribute('title')).toBe('the link is down');
+    expect(accessibleDescription(screen.getByText("Couldn't deliver the answer"))).toBe('the link is down'); // board ticket 815: the words' tip
     expect(button('Allow once').disabled).toBe(false); // back to pending
     fireEvent.click(button('Retry'));
     await waitFor(() => expect(fake.invoked('session.answer')).toHaveLength(2));

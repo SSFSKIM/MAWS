@@ -337,7 +337,7 @@ describe('a path in a surface’s Markdown (U6b-4b)', () => {
     const openFile = vi.fn();
     offs.push(registerTranscriptActions({ openFile }));
     const fake = draw('See [a](/work/a.ts#L12).');
-    const chip = await screen.findByTitle('/work/a.ts');
+    const chip = await screen.findByRole('button', { description: '/work/a.ts' }); // ticket 815: a path link's path is its tip
     fireEvent.click(chip);
     fireEvent.click(chip, { metaKey: true });
     expect(openFile.mock.calls).toEqual([
@@ -353,7 +353,7 @@ describe('a path in a surface’s Markdown (U6b-4b)', () => {
     const rowOpenFile = vi.fn();
     offs.push(registerTranscriptActions({ openFile }));
     draw('See [a](/work/a.ts#L12).', transcriptOf(rowOpenFile));
-    fireEvent.click(await screen.findByTitle('/work/a.ts'), { metaKey: true });
+    fireEvent.click(await screen.findByRole('button', { description: '/work/a.ts' }), { metaKey: true });
     expect(openFile.mock.calls).toEqual([['/work/a.ts', 12, ID, { main: true }]]);
     expect(rowOpenFile).not.toHaveBeenCalled();
   });
@@ -366,7 +366,7 @@ describe('a path in a surface’s Markdown (U6b-4b)', () => {
     const fake = draw('See [o](/elsewhere/o.md).', null, SESSION);
     window.maws = fake.client as unknown as PreloadBridge;
     offs.push(() => delete (window as { maws?: unknown }).maws);
-    fireEvent.click(await screen.findByTitle('/elsewhere/o.md'), { metaKey: true });
+    fireEvent.click(await screen.findByRole('button', { description: '/elsewhere/o.md' }), { metaKey: true });
     const tab = allTabs(useLayout.getState().main).find((t): t is Extract<typeof t, { kind: 'file' }> => t.kind === 'file');
     expect(tab).toMatchObject({ path: '/elsewhere/o.md', appSessionId: SESSION });
     render(<FileViewer tab={tab!} />);

@@ -77,6 +77,7 @@ import { openAnchor, ownerAnchorOf, type ItemAnchor } from '../attention/anchor'
 import { markRead } from '../owner/report/answering';
 import { useRemoteUnavailable } from '../lane-b/remote-unavailable'; // ticket 627
 import { ESSENTIAL } from '../owner/report/copy';
+import { Tip } from '../ui/tip'; // board ticket 815
 // P2-C end
 
 export type { Placement } from './variants/types';
@@ -180,7 +181,9 @@ const isTextEntry = (target: EventTarget | null) =>
   (target instanceof Element && target.closest('[contenteditable]:not([contenteditable="false"])') !== null);
 
 // A click counts only as the release of a pointer press on the same button (`detail` > 0): a keyboard- or
-// script-synthesised click answers nothing (§5.1: the hover card approves by explicit click).
+// script-synthesised click answers nothing (§5.1: the hover card approves by explicit click). The two buttons say so in
+// their tips (board ticket 815: a tip, not the system tooltip).
+const HOVER_TIP = { deny: 'Click to deny', allowOnce: 'Click to allow once' } as const;
 function usePointerOnly() {
   const pressed = useRef<EventTarget | null>(null);
   return {
@@ -481,8 +484,13 @@ function NativeRequestCard({ item, request, placement, onAnswered, loading, unre
       )}
       {failed && (
         <div role="alert" className="flex items-center gap-2 rounded-sm border border-danger px-2.5 py-1.5 text-danger">
-          <span className="flex-1" title={failed.detail ?? undefined}>
-            Couldn't deliver the answer
+          {/* board ticket 815: why is the words' tip, which the keyboard reaches */}
+          <span className="flex-1">
+            <Tip content={failed.detail} description={failed.detail}>
+              <span className="rounded-sm outline-accent focus-visible:outline-2" tabIndex={failed.detail ? 0 : undefined}>
+                Couldn't deliver the answer
+              </span>
+            </Tip>
           </span>
           <CardButton onClick={failed.retry}>Retry</CardButton>
         </div>
@@ -490,8 +498,12 @@ function NativeRequestCard({ item, request, placement, onAnswered, loading, unre
       {body}
       {request === null && unreadable !== null && (
         <div role="alert" className="flex items-center gap-2 text-danger">
-          <span className="flex-1" title={unreadable}>
-            The request could not be read
+          <span className="flex-1">
+            <Tip content={unreadable} description={unreadable}>
+              <span className="rounded-sm outline-accent focus-visible:outline-2" tabIndex={0}>
+                The request could not be read
+              </span>
+            </Tip>
           </span>
           <CardButton onClick={() => void useAttention.getState().retryRequest(ipc, item)}>Retry</CardButton>
         </div>
@@ -513,20 +525,23 @@ function NativeRequestCard({ item, request, placement, onAnswered, loading, unre
           )}
           {/* P2-C end */}
           {hoverDeny && (
-            <CardButton disabled={busy} title="Click to deny" onPointerDown={pointer.onPointerDown} onClick={(event) => pointer.byPointer(event) && submit(DENY, 'Denied')}>
-              Deny
-            </CardButton>
+            <Tip content={HOVER_TIP.deny} description={HOVER_TIP.deny}>
+              <CardButton disabled={busy} onPointerDown={pointer.onPointerDown} onClick={(event) => pointer.byPointer(event) && submit(DENY, 'Denied')}>
+                Deny
+              </CardButton>
+            </Tip>
           )}
           {hoverAllow && (
-            <CardButton
-              tone="primary"
-              disabled={busy}
-              title="Click to allow once"
-              onPointerDown={pointer.onPointerDown}
-              onClick={(event) => pointer.byPointer(event) && submit(ALLOW_ONCE, 'Allowed once')}
-            >
-              Allow once
-            </CardButton>
+            <Tip content={HOVER_TIP.allowOnce} description={HOVER_TIP.allowOnce}>
+              <CardButton
+                tone="primary"
+                disabled={busy}
+                onPointerDown={pointer.onPointerDown}
+                onClick={(event) => pointer.byPointer(event) && submit(ALLOW_ONCE, 'Allowed once')}
+              >
+                Allow once
+              </CardButton>
+            </Tip>
           )}
         </Controls>
       )}
@@ -535,8 +550,8 @@ function NativeRequestCard({ item, request, placement, onAnswered, loading, unre
 }
 
 // P2-C start (2026-10-10; M6's fix wave): a must-read's Mark read; one that failed is said on the card beside it, the
-// button staying to try again. Ticket 627: for a session on another machine over RL2 it is drawn disabled, the window's
-// helper's sentence its title.
+// button staying to try again. Ticket 627: for a session on another machine over RL2 it is drawn greyed, the window's
+// helper's sentence its tip (board ticket 815: it keeps the keyboard).
 function MarkRead({ appSessionId, anchor }: { appSessionId: AttentionItem['appSessionId']; anchor: ItemAnchor }) {
   const [failed, setFailed] = useState<string | null>(null);
   const unavailable = useRemoteUnavailable(appSessionId, 'ownerChannel.markRead');
@@ -551,7 +566,7 @@ function MarkRead({ appSessionId, anchor }: { appSessionId: AttentionItem['appSe
           {ESSENTIAL.notMarked(failed)}
         </span>
       )}
-      <CardButton disabled={unavailable !== null} title={unavailable ?? undefined} onClick={() => void read()}>
+      <CardButton unavailable={unavailable} onClick={() => void read()}>
         {ESSENTIAL.markRead}
       </CardButton>
     </>

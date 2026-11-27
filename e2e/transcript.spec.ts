@@ -20,6 +20,7 @@ import { thinkingTier } from '../src/renderer/src/transcript/model/copy'; // dec
 import { FOLDS_SHAPE, foldsFileOf } from '../src/shared/owner/folds'; // UX wave U2b (M6): the labelled variant's folds file
 import { synthesise } from '../test/support/synth-transcript'; // the harness's `synthetic/<turns>` seed, for the folds file's runs
 import { addressed } from './support/address';
+import { answerLines } from './support/answer-lines'; // board ticket 815
 import { withNativeClipboard } from './support/clipboard';
 import { invoke, launchReady, turnsJournal, value } from './support/c7-replay';
 import { idle, scene, show } from './support/maws-tools'; // UX wave U6b-5b
@@ -1007,7 +1008,7 @@ test('an answered question reads as one compact receipt that stays in view when 
   await expect(page.locator('[data-kind="thinking"]')).toHaveCount(0); // the folded work
   const widget = page.locator('[data-kind="question"] .transcript-question');
   await expect(widget).toBeVisible();
-  expect(await widget.locator('[data-question]').allTextContents()).toEqual(['Color→Red', 'Fruits→Apple, Pear']);
+  expect(await answerLines(widget.locator('[data-question]'))).toEqual(['Color→Red', 'Fruits→Apple, Pear']);
   await expect(widget).not.toContainText('Blue');
   await expect(widget).not.toContainText('Chosen');
   const box = (await widget.boundingBox())!;
@@ -2039,7 +2040,7 @@ test('the owner’s time, Copy and Edit sit on one line under the bubble, shown 
         }),
         actions: box(actions),
         shown: getComputedStyle(actions).opacity,
-        parts: [...Array.from(actions.children), ...(tail ? [tail] : [])].map((part) => ({ text: part.textContent ?? '', box: box(part) })),
+        parts: [...Array.from(actions.children).filter((part) => !part.hasAttribute('hidden') /* Edit's tip's description, board ticket 815 */), ...(tail ? [tail] : [])].map((part) => ({ text: part.textContent ?? '', box: box(part) })),
         tail: tail && { box: box(tail), whole: tail.scrollWidth <= tail.clientWidth, title: tail.title, last: line.lastElementChild === tail },
       };
     });
@@ -2666,8 +2667,8 @@ for (const { site, component, outcome } of r3DomCases) {
       } else {
         const receipt = pane.locator('[data-kind="question"] .transcript-question');
         await expect(receipt).toBeVisible();
-        await expect(receipt.locator('[data-question]')).toHaveText('Path→One');
-        await expect(receipt.locator('[data-question]')).toHaveAttribute('title', 'Which path?');
+        await expect.poll(() => answerLines(receipt.locator('[data-question]'))).toEqual(['Path→One']);
+        await expect(receipt.locator('[data-question-label]')).toHaveAccessibleDescription('Which path?'); // board ticket 815: the header's tip
         await expect(receipt.getByRole('button')).toHaveCount(0);
       }
     }, seed);
@@ -2726,7 +2727,7 @@ test('R3 owner to-human draws every span as Markdown, folds the working record, 
     await expect(pane.getByText('Private follow-up record.', { exact: true })).not.toBeVisible();
     await expect(pane.getByRole('button', { name: 'working record', exact: true })).toHaveCount(1);
     const receipt = pane.locator('[data-kind="question"] .transcript-question');
-    await expect(receipt.locator('[data-question]')).toHaveText('Path→One');
+    await expect.poll(() => answerLines(receipt.locator('[data-question]'))).toEqual(['Path→One']);
     await expect(receipt.getByRole('button')).toHaveCount(0);
     await captureR3bEvidence(page, 'to-human-folded');
     const usersBefore = await pane.locator('[data-kind="user"]').count();
@@ -2743,7 +2744,7 @@ test('R3 owner to-human draws every span as Markdown, folds the working record, 
     await expect(unfoldedDrawing.locator('[data-engine-slot]')).toHaveCount(1);
     await expect(pane.locator('[data-plugin-drawn="AssistantMessage"] [data-surface="markdown"]')).toHaveCount(0);
     await expect(pane.getByRole('button', { name: 'working record', exact: true })).toHaveCount(0);
-    await expect(receipt.locator('[data-question]')).toHaveText('Path→One');
+    await expect.poll(() => answerLines(receipt.locator('[data-question]'))).toEqual(['Path→One']);
     await expect(receipt.getByRole('button')).toHaveCount(0);
     await captureR3bEvidence(page, 'to-human-unfolded');
   }, (base) => {
@@ -3151,7 +3152,7 @@ test('Code-mode transcript rows keep labels, counts and inline diffs without a f
   await expect(page.getByRole('button', { name: 'Ran the unit tests', exact: true })).toBeVisible();
   const edit = page.getByRole('button', { name: /^Edited.*app.ts.*\+1.*−1/ });
   await expect(edit.locator('.transcript-file-target')).toHaveText('app.ts');
-  await expect(edit).toHaveAttribute('title', '/tmp/maws-synth-edit-and-receipt/src/app.ts');
+  await expect(edit).toHaveAccessibleDescription('/tmp/maws-synth-edit-and-receipt/src/app.ts'); // board ticket 815: a cell line's path is its tip
   await expect(edit.locator('.transcript-counts')).toHaveText(/^[+]1\s*−1$/);
   const colours = await page.evaluate(() => {
     const probe = document.createElement('span');

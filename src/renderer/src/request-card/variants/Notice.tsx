@@ -72,7 +72,7 @@ export function NoticeBody({ item, seenHere = false }: { item: AttentionItem; se
         </CardButton>
       )}
       {isError && item.state !== 'retired' && (
-        <CardButton className="self-start" disabled={unavailable !== null} title={unavailable ?? undefined} onClick={() => acknowledge(item, 'dismissed')}>
+        <CardButton className="self-start" unavailable={unavailable} onClick={() => acknowledge(item, 'dismissed')}>
           Dismiss
         </CardButton>
       )}

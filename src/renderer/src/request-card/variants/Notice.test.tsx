@@ -14,6 +14,7 @@ import { useMachines } from '../../stores/machines';
 import { useSessions } from '../../stores/sessions';
 import { NoticeBody } from './Notice';
 import { REL } from '../../test-support/relative-time';
+import { accessibleDescription } from '../../test-support/accessible-text'; // board ticket 815
 
 const APP = 'app-notice'; // main's (bare): what the fake bridge is asked; the item the page holds is addressed
 const DAY = 86_400_000;
@@ -63,8 +64,7 @@ describe('an error notice', () => {
     studio(['rl2.project-acts']);
     render(<NoticeBody item={onStudio(lane)} seenHere />);
     const dismiss = screen.getByRole('button', { name: 'Dismiss' });
-    expect(dismiss).toHaveProperty('disabled', true);
-    expect(dismiss.title).toBe('Can’t dismiss on Studio yet. Update MAWS on Studio and try again.');
+    expect([dismiss.getAttribute('aria-disabled'), accessibleDescription(dismiss)]).toEqual(['true', 'Can’t dismiss on Studio yet. Update MAWS on Studio and try again.']); // board ticket 815: greyed, it keeps the keyboard
     await act(async () => fireEvent.click(dismiss));
     expect(acknowledged()).toEqual([]);
   });

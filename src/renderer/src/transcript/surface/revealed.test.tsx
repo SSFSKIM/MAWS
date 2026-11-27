@@ -15,6 +15,7 @@ import { rowsOf, withAllExpanded } from '../model/derive';
 import type { Row } from '../model/rows';
 import { BASH_RESULT, builder, uuid } from '../model/test-events';
 import { renderRow, storeWith } from '../view/rows/test-support';
+import { accessibleDescription } from '../../test-support/accessible-text'; // ticket 815
 
 const holder = vi.hoisted(() => ({ client: null as ReturnType<typeof fakeClient>['client'] | null }));
 vi.mock('../../ipc/client', () => ({ ipc: { invoke: (...args: Parameters<ReturnType<typeof fakeClient>['client']['invoke']>) => (holder.client!.invoke as unknown as (...a: unknown[]) => unknown)(...args) } }));
@@ -49,7 +50,7 @@ const cases: [string, Kind, string, () => ReturnType<typeof builder>, (container
     b.toolUse('q-alpha', 'AskUserQuestion', { questions: question('alpha') }); b.result('q-alpha', 'answered');
     b.toolUse('q-beta', 'AskUserQuestion', { questions: question('beta') }); b.result('q-beta', 'answered');
     return b;
-  }, (c) => c.querySelector('.transcript-question-line')?.getAttribute('title') === 'Which alpha?'],
+  }, (c) => { const label = c.querySelector('.transcript-question-line [data-question-label]'); return label !== null && accessibleDescription(label) === 'Which alpha?'; }] // ticket 815: the header's tip,
 ];
 
 describe('a jump’s revealed target with a mods surface attached', () => {

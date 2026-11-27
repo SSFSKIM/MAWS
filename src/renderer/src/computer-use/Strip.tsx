@@ -10,6 +10,7 @@ import { useRemoteUnavailable } from '../lane-b/remote-unavailable';
 import { useSessionControls } from '../session/controls/controls-for';
 import type { SessionControls } from '../session/controls/types';
 import { toast } from '../stores/notices';
+import { UNAVAILABLE_LOOK, UnavailableButton } from '../ui/tip';
 import { COMPUTER_USE_COPY } from './copy';
 import { useComputerUse } from './strip-state';
 
@@ -41,8 +42,9 @@ export function ComputerUseStrip({ appSessionId }: { appSessionId: AppSessionId 
   );
 }
 
-// The composer's Stop: the turn's interrupt, holding what is queued. Disabled with the sentence that says why when it
-// cannot work; once pressed, busy until its line goes, unless refused, which enables it again and says why.
+// The composer's Stop: the turn's interrupt, holding what is queued. Greyed with the sentence that says why when it
+// cannot work, keeping the keyboard, the sentence its tip and description (board ticket 815); once pressed, busy until
+// its line goes, unless refused, which enables it again and says why.
 function StopButton({ controls, reason }: { controls: SessionControls; reason: string | null }) {
   const [busy, setBusy] = useState(false);
   const stop = () => {
@@ -54,8 +56,10 @@ function StopButton({ controls, reason }: { controls: SessionControls; reason: s
     });
   };
   return (
-    <button type="button" onClick={stop} disabled={busy || reason !== null} aria-busy={busy || undefined} title={reason ?? undefined} aria-description={reason ?? undefined} className={BUTTON}>
-      {COMPUTER_USE_COPY.stop}
-    </button>
+    <UnavailableButton reason={reason}>
+      <button type="button" onClick={stop} disabled={busy} aria-busy={busy || undefined} className={`${BUTTON} ${UNAVAILABLE_LOOK}`}>
+        {COMPUTER_USE_COPY.stop}
+      </button>
+    </UnavailableButton>
   );
 }

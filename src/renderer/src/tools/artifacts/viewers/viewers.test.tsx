@@ -645,7 +645,7 @@ describe('the File viewer', () => {
     const opened = () => allTabs(useLayout.getState().main).filter((tab) => tab.kind === 'file');
     useLayout.setState({ main: LAYOUT_DEFAULTS.main, hydrated: true });
     mount('file');
-    const chip = await screen.findByTitle('setup.md');
+    const chip = await screen.findByRole('button', { description: 'setup.md' }); // ticket 815: a path link's path is its tip
     act(() => void fireEvent.click(chip, { metaKey: true }));
     expect(opened()).toEqual([expect.objectContaining({ path: 'setup.md', appSessionId: PAGE_P })]); // not /store/9/setup.md, nor /repo/setup.md
     cleanup();
@@ -654,7 +654,7 @@ describe('the File viewer', () => {
     row = rowOf('file', { title: 'notes', sessions: [] });
     useSessions.setState({ records: new Map() });
     mount('file');
-    const alone = await screen.findByTitle('setup.md');
+    const alone = await screen.findByRole('button', { description: 'setup.md' });
     act(() => void fireEvent.click(alone, { metaKey: true }));
     expect(opened()).toEqual([expect.objectContaining({ path: 'setup.md', appSessionId: null })]);
     useLayout.setState({ main: LAYOUT_DEFAULTS.main });

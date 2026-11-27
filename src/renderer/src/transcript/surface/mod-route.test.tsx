@@ -29,6 +29,7 @@ import type { Row } from '../model/rows';
 import type { TranscriptSource } from '../source/types';
 import { Transcript } from '../view/Transcript';
 import { answerOf, recordedAsks, SEED, SEED_TEXT, seedEvents } from '../../test-support/mod-recordings';
+import { accessibleDescription } from '../../test-support/accessible-text'; // ticket 815
 
 const offsetHeight = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'offsetHeight')!;
 beforeAll(() => {
@@ -96,8 +97,9 @@ async function mount(events: SessionEvent[], { lane = false, modDraws = true }: 
   return { ...view, push, rerenderWith: (m: Mount) => view.rerender(element(m)) };
 }
 
-// What a person sees of an element: its text outside anything hidden (display none, inert, visibility hidden)
-const hidden = (element: Element) => element instanceof HTMLElement && (element.style.display === 'none' || element.hasAttribute('inert') || element.style.visibility === 'hidden');
+// What a person sees of an element: its text outside anything hidden (display none, inert, visibility hidden, the
+// `hidden` attribute of a tip's description; ticket 815) and what only a screen that cannot point draws (a touch fact)
+const hidden = (element: Element) => element instanceof HTMLElement && (element.style.display === 'none' || element.hasAttribute('inert') || element.hasAttribute('hidden') || element.hasAttribute('data-touch-fact') || element.style.visibility === 'hidden');
 function inSight(element: Element): string {
   if (hidden(element)) return '';
   let text = '';
@@ -126,7 +128,7 @@ describe('where the mod draws, over the seeded session the probe resumed (u2b-mo
     for (const kind of ['group', 'agent_list', 'notice', 'divider'] as const) expect(seen(rowOfKind(kind)), kind).toBe('');
     expect(seen(rowsOf().find((row) => row.kind === 'assistant_text' && row.messageUuid === SEED.a5)!)).toBe(''); // the unmarked text
     expect(seen(rowOfKind('user'))).toContain(SEED_TEXT.prompt);
-    expect(slotOf(rowOfKind('question'))!.querySelector('[data-question]')!.getAttribute('title')).toBe(SEED_TEXT.question);
+    expect(accessibleDescription(slotOf(rowOfKind('question'))!.querySelector('[data-question-label]')!)).toBe(SEED_TEXT.question);
     const mixed = rowsOf().find((row) => row.kind === 'assistant_text' && row.messageUuid === SEED.a7)!;
     expect(seen(mixed)).toContain('› working record'); // the mod's record line, in its own drawing
     expect(slotOf(mixed)!.querySelector('[data-plugin-drawn]')).not.toBeNull();
@@ -162,7 +164,7 @@ describe('where the mod draws, over the seeded session the probe resumed (u2b-mo
     await waitFor(() => expect(asksOf(SEED.t5).length).toBeGreaterThan(0));
     expect(asksOf(SEED.t5).map((ask) => ask.component)).toEqual(['AskUserQuestion']);
     const question = slotOf(rowOfKind('question'))!;
-    expect(question.querySelector('[data-question]')!.getAttribute('title')).toBe(SEED_TEXT.question); // MAWS's QuestionRow
+    expect(accessibleDescription(question.querySelector('[data-question-label]')!)).toBe(SEED_TEXT.question); // MAWS's QuestionRow
     expect(inSight(question)).toMatch(/^Archive→/);
     expect(question.querySelector('[data-plugin-drawn]')).toBeNull();
   });
@@ -199,7 +201,7 @@ describe('the ask tool’s question with its receipt (point 21, R13)', () => {
     expect(asksOf(question.toolUseId).map((ask) => ask.component)).toEqual(['AskUserQuestion']);
     expect(asks().some((ask) => ask.component === 'ToolUse' && ask.instanceId === question.toolUseId)).toBe(false);
     const drawn = slotOf(question)!;
-    expect(drawn.querySelector('[data-question]')!.getAttribute('title')).toBe(QUESTION);
+    expect(accessibleDescription(drawn.querySelector('[data-question-label]')!)).toBe(QUESTION);
     expect(drawn.querySelector('[data-answer]')!.textContent).toBe('Old'); // the receipt, drawn
     expect(drawn.querySelector('[data-answer="none"]')).toBeNull();
     // the notice asked as the delivery the mod folds, and folded: it heads a record line, the answer nowhere in it

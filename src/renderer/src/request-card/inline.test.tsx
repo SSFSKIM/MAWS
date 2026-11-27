@@ -14,6 +14,7 @@ import { TranscriptSlot, useTranscriptStore } from '../transcript';
 import { builder, request, tool } from '../transcript/model/test-events';
 import { connectRequestCard, renderInlineRequest, RequestCard } from './index';
 import { itemFor, permission, type RequestEvent } from './test-requests';
+import { accessibleText } from '../test-support/accessible-text'; // board ticket 815
 
 const APP = at('app-inline' as AppSessionId);
 const bash = permission({ requestId: request('r1'), toolUseId: tool('b1'), toolName: 'Bash', displayName: 'Bash', input: { command: 'git status' } });
@@ -141,7 +142,7 @@ describe("request renderer registers through C6's seam", () => {
     const { renderSessionRequest } = await import('./inline');
     render(<div data-testid="inline">{renderSessionRequest(slotRow)}</div>);
     const inline = screen.getByTestId('inline');
-    expect(inline.querySelector('[role="alert"]')?.textContent).toBe('The request could not be readRetry');
+    expect(accessibleText(inline.querySelector('[role="alert"]')!)).toBe('The request could not be readRetry'); // why is the words' tip (board ticket 815)
     act(() => inline.querySelector<HTMLButtonElement>('[role="alert"] button')!.click());
     await waitFor(() => expect(useAttention.getState().requests.get(item.id)).toMatchObject({ requestId: 'r1' }));
     expect(useAttention.getState().unreadable.has(item.id)).toBe(false);

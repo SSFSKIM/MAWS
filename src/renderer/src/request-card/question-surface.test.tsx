@@ -86,7 +86,7 @@ it('rewritten option sets cannot submit a previously picked option that is no lo
   drawing = { tree: { type: 'engine', ref: 0 }, props: { tool: 'AskUserQuestion', questions: [{ ...rewritten[0], question: 'Where should we deploy?' }] }, rewritten: true, hooked: true };
   act(() => invalidateSession(APP));
   await screen.findByRole('radio', { name: 'Europe' });
-  expect((screen.getByRole('button', { name: 'Submit' }) as HTMLButtonElement).disabled).toBe(true);
+  expect(screen.getByRole('button', { name: 'Submit' }).getAttribute('aria-disabled')).toBe('true'); // board ticket 815: greyed, it keeps the keyboard
   fireEvent.click(screen.getByRole('radio', { name: 'America' }));
   fireEvent.click(screen.getByRole('button', { name: 'Submit' }));
   await waitFor(() => expect(answers()[0]).toMatchObject({ answer: { kind: 'question', answers: { 'Where should we deploy?': 'America' } } }));
@@ -184,7 +184,7 @@ it.each(['Private datacenter', ''])('a multi-to-single rewrite keeps Other exclu
   expect(screen.queryByTitle('Preview of Local')).toBeNull();
   expect((screen.getByRole('textbox') as HTMLInputElement).value).toBe(text);
   const submit = screen.getByRole('button', { name: 'Submit' }) as HTMLButtonElement;
-  expect(submit.disabled).toBe(text === '');
+  expect(submit.getAttribute('aria-disabled') === 'true').toBe(text === '');
   if (text === '') {
     fireEvent.click(submit);
     expect(answers()).toEqual([]);

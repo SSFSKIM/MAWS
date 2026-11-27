@@ -1739,7 +1739,7 @@ test.describe('UX wave U6b-1: a file opens beside the chat', () => {
       const appId = await indexedSession(page, sid);
       await (await sidebarRow(page, { appSessionId: appId })).click();
       const main = page.locator('[data-region="main"]');
-      const link = (name: string) => main.locator(`[data-chip="path"][title="${repo.path(name)}"]`);
+      const link = (name: string) => main.locator(`[data-chip="path"][data-path="${repo.path(name)}"]`);
       await expect(link('alpha.txt')).toBeVisible({ timeout: 20_000 });
       const sessionTab = `session:${await addressed(page, appId)}`;
       await expect(activeMainTab(page)).toHaveAttribute('data-tab-id', sessionTab);
@@ -1848,7 +1848,7 @@ test.describe('UX wave U6b-4b: the notice of a file that cannot be read', () => 
       const { page } = maws;
       const appId = await indexedSession(page, sid);
       await (await sidebarRow(page, { appSessionId: appId })).click();
-      const link = page.locator(`[data-region="main"] [data-chip="path"][title="${missing}"]`);
+      const link = page.locator(`[data-region="main"] [data-chip="path"][data-path="${missing}"]`);
       await expect(link).toBeVisible({ timeout: 20_000 });
       await link.click();
       const notice = sideColumn(page).locator(`[data-file-viewer][data-path="${missing}"] [data-refusal]`);

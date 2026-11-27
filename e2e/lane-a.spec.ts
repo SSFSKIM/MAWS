@@ -16,6 +16,7 @@ import { randomUUID } from 'node:crypto';
 import { readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { expect, type Locator, type Page } from '@playwright/test';
+import { answerLines } from './support/answer-lines'; // board ticket 815
 import type { CommandInput, CommandName, CommandResult } from '@shared/ipc/schema';
 import { FULL_CAPABILITIES, startFakeBridge, type FakeBridge, type FakeBridgeOptions } from '../test/support/fake-bridge';
 import { ScratchRepo } from '../test/support/scratch-repo';
@@ -73,7 +74,7 @@ const card = (page: Page) => main(page).locator('[data-request-card]');
 const end = (page: Page) => main(page).locator('[data-request-end]');
 const questionRow = (page: Page, call: string) => main(page).locator(`[data-row-id="question:${call}"] .transcript-row`);
 // A question receipt's lines as the row reads them: "header→answer" each (the arrow is the row's own glyph).
-const receiptLines = (row: Locator) => row.locator('[data-question]').allTextContents();
+const receiptLines = (row: Locator) => answerLines(row.locator('[data-question]'));
 const decided = (bridge: FakeBridge) => bridge.decisions.map((d) => ({ request: d.request, ...d.body }));
 const AS_MAWS = { by: 'maws', launch: 'launch-1' }; // every decision MAWS posts names itself and the launch it was read under
 const badge = (maws: MawsLaunch) => maws.app.evaluate(({ app }) => app.dock?.getBadge() ?? '');
@@ -256,7 +257,7 @@ test.describe('lane A: a terminal session driven through its bridge', () => {
     await main(page).getByRole('button', { name: 'Turn summary' }).last().click();
     const restore = page.getByRole('button', { name: 'Restore files to before this turn' });
     await expect(restore, 'file rollback, in place').toBeDisabled();
-    await expect(restore).toHaveAttribute('title', reasonOf('rewind-files'));
+    await expect(restore).toHaveAccessibleDescription(reasonOf('rewind-files')); // board ticket 815: greyed, it keeps the keyboard
     await page.keyboard.press('Escape');
     // Session info lists every control the bridge doesn't reach, with its reason. Forget and the queue have no control of
     // their own on a terminal session; the cards' gaps (deny-and-interrupt, an edited input, a plan's clear, a form) are
@@ -1063,16 +1064,16 @@ test.describe('lane A: a terminal session driven through its bridge', () => {
     const offers2 = "A scoped allow takes the request's one suggestion; this request offers 2";
     const always = card(page).getByRole('button', { name: /^Always allow in / });
     await expect(always).toBeDisabled({ timeout: 5_000 });
-    await expect(always).toHaveAttribute('title', offers2);
+    await expect(always).toHaveAccessibleDescription(offers2); // board ticket 815: greyed, its reason its tip
     await card(page).getByRole('button', { name: 'More allow options' }).click();
     const session = page.getByRole('menuitem', { name: 'Allow for this session' });
     await expect(session).toHaveAttribute('aria-disabled', 'true');
-    await expect(session).toHaveAttribute('title', offers2);
+    await expect(session).toHaveAccessibleDescription(offers2); // the refused entry's row note
     await page.keyboard.press('Escape');
     await card(page).getByRole('button', { name: 'More deny options' }).click();
     const stop = page.getByRole('menuitem', { name: 'Deny and stop the turn' });
     await expect(stop).toHaveAttribute('aria-disabled', 'true');
-    await expect(stop).toHaveAttribute('title', 'Deny-and-interrupt is answered in the terminal');
+    await expect(stop).toHaveAccessibleDescription('Deny-and-interrupt is answered in the terminal');
     await page.keyboard.press('Escape');
     const edited = value(await invoke(page, 'laneA.answer', { appSessionId: c.appId, request: 'toolu_two', answer: { kind: 'permission', decision: 'allow', scope: 'once', updatedInput: { command: 'npm test -- --watch' } } }));
     expect(edited, 'no MAWS control edits an input; the port refuses one').toEqual({ outcome: 'refused', code: 'unsupported', message: 'an edited input is answered in the terminal' });
@@ -1084,11 +1085,11 @@ test.describe('lane A: a terminal session driven through its bridge', () => {
     bridge.raise({ request: 'toolu_bg', tool: 'Bash', input: { command: 'make' }, agentId: 'a1e2e000000000002', deadline: Date.now() + 4_000 });
     const allow = card(page).getByRole('button', { name: 'Allow once', exact: true });
     await expect(allow).toBeEnabled({ timeout: 1_000 });
-    await expect(card(page).getByText('Answer this in the terminal')).toBeVisible({ timeout: 8_000 });
+    await expect(card(page).getByText('Answer this in the terminal').filter({ visible: true })).toBeVisible({ timeout: 8_000 }); // the buttons' descriptions say it too
     for (const name of ['Deny', 'Allow for this session', 'Allow once']) {
       const button = card(page).getByRole('button', { name, exact: true });
       await expect(button).toBeDisabled();
-      await expect(button).toHaveAttribute('title', 'Answer this in the terminal');
+      await expect(button).toHaveAccessibleDescription('Answer this in the terminal');
     }
     expect(decided(bridge)).toHaveLength(2);
     expect(c.maws.consoleErrors()).toEqual([]);
@@ -1132,7 +1133,7 @@ test.describe('lane A: a terminal session driven through its bridge', () => {
     bridge.raise({ request: 'toolu_q3', tool: 'mcp__plugin_sminos_ask__ask', async: true, input: asked('Ship it?', ['Yes', 'Not yet']) });
     const skip = card(page).getByRole('button', { name: 'Skip', exact: true });
     await expect(skip).toBeDisabled({ timeout: 5_000 });
-    await expect(skip).toHaveAttribute('title', 'An async question needs an answer');
+    await expect(skip).toHaveAccessibleDescription('An async question needs an answer'); // board ticket 815: greyed, its reason its tip
     await pick('Ship it?', 'Yes');
     await card(page).getByRole('button', { name: 'Submit', exact: true }).click();
     await expect.poll(lastDecision).toEqual([{ request: 'toolu_q3', behavior: 'allow', updatedInput: { answers: { 'Ship it?': 'Yes' } }, ...AS_MAWS }]);
@@ -1144,7 +1145,7 @@ test.describe('lane A: a terminal session driven through its bridge', () => {
     bridge.raise({ request: 'toolu_p1', tool: 'ExitPlanMode', input: plan });
     const clear = card(page).getByRole('button', { name: 'Clear context and implement' });
     await expect(clear).toBeDisabled({ timeout: 5_000 });
-    await expect(clear).toHaveAttribute('title', '/clear runs in the terminal');
+    await expect(clear).toHaveAccessibleDescription('/clear runs in the terminal'); // board ticket 815: greyed, its reason its tip
     await card(page).getByRole('button', { name: 'Implement', exact: true }).click();
     await expect.poll(lastDecision).toEqual([{ request: 'toolu_p1', behavior: 'allow', ...AS_MAWS }]);
     await settledHere(page, bridge, 'toolu_p1');
@@ -1191,7 +1192,7 @@ test.describe('lane A: a terminal session driven through its bridge', () => {
 
       if (!declared) {
         await expect(dismiss).toBeDisabled();
-        await expect(dismiss).toHaveAttribute('title', 'Dismiss it in the terminal');
+        await expect(dismiss).toHaveAccessibleDescription('Dismiss it in the terminal'); // board ticket 815: greyed, its reason its tip
       } else {
         await expect(dismiss).toBeEnabled();
         await dismiss.click();
@@ -1291,7 +1292,7 @@ test.describe('lane A: a terminal session driven through its bridge', () => {
     const doorForm = formIn(ASKS.door.call);
     const skip = doorForm.getByRole('button', { name: 'Skip', exact: true });
     await expect(skip).toBeDisabled({ timeout: 5_000 });
-    await expect(skip).toHaveAttribute('title', 'An async question needs an answer');
+    await expect(skip).toHaveAccessibleDescription('An async question needs an answer'); // board ticket 815: greyed, its reason its tip
     bridge.settle(ASKS.door.call, 'terminal', 'answered');
     await expect(doorForm).toHaveCount(0, { timeout: 2_000 });
     await expect.poll(() => receiptLines(questionRow(page, ASKS.door.call))).toEqual(['Door finish→Answered in the terminal']);

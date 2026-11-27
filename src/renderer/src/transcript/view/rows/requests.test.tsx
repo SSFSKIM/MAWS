@@ -15,7 +15,7 @@ import { api, builder, request, tool, uuid } from '../../model/test-events';
 import { Disclosures } from '../context';
 import { DEFAULT_ACTIONS } from '../default-actions';
 import { renderRow, rowOf, spyActions, storeWith } from './test-support';
-import { accessibleText } from '../../../test-support/accessible-text';
+import { accessibleDescription, accessibleText } from '../../../test-support/accessible-text';
 
 afterEach(cleanup);
 
@@ -124,7 +124,13 @@ describe('plan row', () => {
 });
 
 // W4: one compact widget, a line per question reading "header (or question) → answer".
-const lines = (container: HTMLElement) => [...container.querySelectorAll<HTMLElement>('[data-question]')].map((line) => line.textContent);
+// A line's drawn words: the question's tip description and its touch fact are no part of them (ticket 815)
+const drawnWords = (line: Element) => {
+  const copy = line.cloneNode(true) as Element;
+  copy.querySelectorAll('[hidden], [data-touch-fact]').forEach((element) => element.remove());
+  return copy.textContent;
+};
+const lines = (container: HTMLElement) => [...container.querySelectorAll<HTMLElement>('[data-question]')].map(drawnWords);
 
 describe('question row', () => {
   it('pass1/question-roundtrip: one line per question, header → answer, no options, previews or controls', async () => {
@@ -133,7 +139,9 @@ describe('question row', () => {
     const view = renderRow(question, { storeKey: store.key });
     const region = screen.getByRole('region', { name: 'Question' });
     expect(lines(region)).toEqual(['Color→Red', 'Fruits→Apple, Pear']);
-    expect([...region.querySelectorAll('[data-question]')].map((line) => line.getAttribute('title'))).toEqual(['Which color do you prefer?', 'Which fruits do you like?']);
+    expect([...region.querySelectorAll('[data-question-label]')].map((label) => accessibleDescription(label))).toEqual(['Which color do you prefer?', 'Which fruits do you like?']); // ticket 815: the header's tip
+    expect([...region.querySelectorAll<HTMLElement>('[data-question-label]')].map((label) => label.tabIndex)).toEqual([0, 0]); // the header takes the keyboard for it
+    expect(region.querySelector('[title]')).toBeNull();
     expect(region.textContent).not.toContain('Blue'); // the options not chosen are not listed
     expect(region.textContent).not.toContain('A warm, bold color'); // nor their descriptions
     expect(region.textContent).not.toContain('This is a red preview');
@@ -153,6 +161,10 @@ describe('question row', () => {
     const answered = await expanded(questions(true));
     let view = renderRow(rowOf(answered.rows(), 'question'), { storeKey: answered.key });
     expect(lines(view.container)).toEqual(['Which colour?→Teal, actually']);
+    // board ticket 815: a line headed by the question itself adds no Tab stop for words on screen; its cut words keep
+    // the whole question as their system tooltip
+    const label = view.container.querySelector<HTMLElement>('[data-question-label]')!;
+    expect([label.tabIndex, label.hasAttribute('aria-describedby'), label.closest('[data-question]')!.getAttribute('title')]).toEqual([-1, false, 'Which colour?']);
     view.unmount();
     const unanswered = await expanded(questions(false));
     view = renderRow(rowOf(unanswered.rows(), 'question'), { storeKey: unanswered.key });
@@ -266,12 +278,13 @@ describe('boundary row', () => {
     expect(accessibleText(element)).toBe('Continued from an earlier point');
     const owner = screen.getByText('Continued from an earlier point');
     expect(owner.tabIndex).toBe(0);
-    expect(owner.getAttribute('title'), 'the identifiers’ title does not reach the sentence’s owner').toBe('');
-    expect(document.getElementById(owner.getAttribute('aria-describedby')!)?.textContent).toBe(sentence);
+    // ticket 815: the identifiers wait on the same words, after the sentence, and no system tooltip is left on the line
+    expect(document.getElementById(owner.getAttribute('aria-describedby')!)?.textContent).toBe(`${sentence} · transcript_branch · m1-u0`);
     act(() => owner.focus());
-    expect(screen.getByRole('tooltip').textContent).toBe(sentence);
-    expect(element.getAttribute('title')).toBe('transcript_branch · m1-u0');
-    expect(element.textContent).not.toMatch(/transcript_branch|m1-u0|Another process|Response retracted/);
+    expect(screen.getByRole('tooltip').textContent).toBe(`${sentence}transcript_branch · m1-u0`);
+    expect(element.querySelector('[title]')).toBeNull();
+    expect(element.getAttribute('title')).toBeNull();
+    expect(accessibleText(element)).not.toMatch(/transcript_branch|m1-u0|Another process|Response retracted/);
     expect(element.querySelector('button')).toBeNull();
   });
 
@@ -288,7 +301,8 @@ describe('boundary row', () => {
     const owner = screen.getByText('Continued from an earlier point');
     const fact = [...owner.parentElement!.children].find((element) => element.hasAttribute('data-touch-fact'))!; // after the words
     expect([fact.getAttribute('data-touch-fact'), fact.getAttribute('aria-hidden')]).toEqual(['', 'true']);
-    expect(fact.textContent).toBe(document.getElementById(owner.getAttribute('aria-describedby')!)!.textContent);
+    expect(fact.textContent).toBe('Later messages from the previous path are no longer part of the current conversation history'); // the sentence alone: the identifiers are no fact for a phone (ticket 815)
+    expect(accessibleDescription(owner).startsWith(fact.textContent!)).toBe(true);
   });
 
   it('transcript/boundaries: compaction and retraction read as boundaries, and the retracted text row is gone from where the boundary stands', async () => {
@@ -296,7 +310,7 @@ describe('boundary row', () => {
     const boundaries = ofKind(store.rows(), 'boundary');
     expect(boundaries.map((row) => row.boundaryKind)).toEqual(['retraction', 'compaction']);
     const view = renderRow(boundaries[0], { storeKey: store.key });
-    expect(view.container.querySelector('[data-boundary-kind="retraction"]')?.textContent).toBe('Response retracted · refusal · switched to claude-sonnet-5');
+    expect(accessibleText(view.container.querySelector('[data-boundary-kind="retraction"]')!)).toBe('Response retracted · refusal · switched to claude-sonnet-5');
     expect(view.container.querySelector('button')).toBeNull();
   });
 

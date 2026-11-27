@@ -18,6 +18,7 @@ import type { Row } from '../../model/rows';
 import { builder, task, tool, uuid } from '../../model/test-events';
 import { Disclosures, type PeerReply, type PeerReplies, type TranscriptActions } from '../context';
 import { renderRow, spyActions } from './test-support';
+import { accessibleDescription } from '../../../test-support/accessible-text'; // ticket 815
 
 const A = at('A' as AppSessionId); // the page's; main (the fake bridge) is asked and answers with bareOf(A)
 const B = 'uds:/tmp/cc-socks/1.sock';
@@ -60,12 +61,12 @@ beforeEach(() => useSessions.setState({ engine: new Map(), records: new Map(), d
 afterEach(cleanup);
 
 describe('a message from another session', () => {
-  it('leads with ← and reads @sender, the address as its tooltip, and the preview, its accessible name keeping Message from; Reply opens the composer, which sends through replyToPeer', async () => {
+  it('leads with ← and reads @sender, the address as the line’s tip, and the preview, its accessible name keeping Message from; Reply opens the composer, which sends through replyToPeer', async () => {
     live();
     const { source } = replies();
     const actions: TranscriptActions = { ...spyActions(), peerReplies: source };
     const { container } = renderRow(inbound(), { storeKey: A, actions });
-    expect(screen.getByText('@repo-b').getAttribute('title')).toBe(B);
+    expect(accessibleDescription(screen.getByText('@repo-b').closest('button')!)).toBe(B); // ticket 815: the line's tip, which the keyboard reaches
     expect(screen.getByText('hello from B')).toBeTruthy();
     // the word cut (T73, ruled): the direction is the arrow, the old words the line's accessible lead
     expect(container.querySelector('.transcript-line-mark')?.textContent).toBe('←');
@@ -340,14 +341,14 @@ describe('the owners of a message from another session', () => {
     const { container } = renderRow(labelled('ana@example.com, sam@example.com'), { storeKey: A });
     expect(owners()?.textContent).toBe('you, Ana');
     expect(container.querySelector('.transcript-line-text')?.textContent).toBe('@repo-b (you, Ana): hello from B'); // after the name, in parentheses
-    expect(owners()?.getAttribute('title')).toBe('you <sam@example.com>, Ana <ana@example.com>');
+    expect(accessibleDescription(owners()!.closest('button')!)).toBe(`${B} · you <sam@example.com>, Ana <ana@example.com>`); // ticket 815: after the address, in the line's tip
     cleanup();
     renderRow(labelled('ana@example.com'), { storeKey: A });
     expect(owners()?.textContent).toBe('Ana');
     cleanup();
     renderRow(labelled('zed@example.com, mem-ana'), { storeKey: A });
     expect(owners()?.textContent).toBe('zed@example.com, Ana');
-    expect(owners()?.getAttribute('title')).toBe('zed@example.com, Ana <ana@example.com>');
+    expect(accessibleDescription(owners()!.closest('button')!)).toBe(`${B} · zed@example.com, Ana <ana@example.com>`);
   });
 });
 

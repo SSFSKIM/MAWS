@@ -132,7 +132,7 @@ describe('TranscriptSlot', () => {
       register({ editAndResubmit });
       register({ openFile });
     });
-    fireEvent.click(screen.getByTitle('Edit here · Send rewinds this session to this message'));
+    fireEvent.click(screen.getByRole('button', { name: 'Edit', description: 'Edit here · Send rewinds this session to this message' })); // ticket 815: its tip
     expect(editAndResubmit).toHaveBeenCalledTimes(1);
     fireEvent.click(document.querySelector<HTMLElement>('[data-chip="path"]')!);
     expect(openFile).toHaveBeenCalledWith('src/a.ts', undefined, APP, { main: false });

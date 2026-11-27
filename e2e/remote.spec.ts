@@ -4067,7 +4067,7 @@ test('U6b-4b L9, a session on B: a file outside B’s folders reads why, naming 
     const said = () => `${mainSaid(page)}\nB's log:\n${b.log().slice(-3000)}`;
 
     await test.step('a file outside B’s folders that B has no evidence for: the notice names B, says the three ways and offers Copy path', async () => {
-      const chip = main(page).locator(`[data-chip="path"][title="${NOTICE_RELATIVE}"]`);
+      const chip = main(page).locator(`[data-chip="path"][data-path="${NOTICE_RELATIVE}"]`);
       await expect(chip, 'the relative link drawn as a path link').toBeVisible({ timeout: 60_000 });
       await chip.click();
       const notice = sideColumn(page).locator(`[data-file-viewer][data-path="${outside}"] [data-refusal]`);
@@ -4090,7 +4090,7 @@ test('U6b-4b L9, a session on B: a file outside B’s folders reads why, naming 
       scene.aHub.cut();
       await quoting(expect(linkLine(page), 'the link’s offline mark').toHaveAttribute('data-link-phase', 'offline', { timeout: REMOTE_ACT_PENDING_MS + 60_000 }), said);
       const unreachable = async (path: string) => {
-        await main(page).locator(`[data-chip="path"][title="${path}"]`).click();
+        await main(page).locator(`[data-chip="path"][data-path="${path}"]`).click();
         const viewer = sideColumn(page).locator(`[data-file-viewer][data-path="${path}"]`);
         const notice = viewer.locator('[data-refusal]');
         await quoting(expect(notice, `the read of ${path} failed for the link`).toHaveAttribute('data-notice-cause', 'unreachable', { timeout: REMOTE_ACT_PENDING_MS + 60_000 }), said);
@@ -4112,7 +4112,7 @@ test('U6b-4b L9, a session on B: a file outside B’s folders reads why, naming 
 
       // the file in the checkout's own folder: read again by the invalidation of a watch that stood, by its showing again,
       // or by Retry where its notice still offers it
-      await main(page).locator(`[data-chip="path"][title="${inside}"]`).click();
+      await main(page).locator(`[data-chip="path"][data-path="${inside}"]`).click();
       const viewer = sideColumn(page).locator(`[data-file-viewer][data-path="${inside}"]`);
       const text = viewer.locator('.cm-content', { hasText: 'Invented tide notes' });
       const offered = viewer.locator('[data-refusal] [data-notice-retry]:enabled');
@@ -4639,7 +4639,7 @@ test('U6f: a file outside the session’s folders on B opens in A, is edited, an
     const linkUp = async () => (await machineOf(page, b.ref))?.state ?? null;
 
     await test.step('B1, B2, B8: the link opens the file beside the chat, editable; it is written on B only by Save, and B’s log has the line', async () => {
-      const chip = main(page).locator(`[data-chip="path"][title="${w.notes}"]`).first();
+      const chip = main(page).locator(`[data-chip="path"][data-path="${w.notes}"]`).first();
       await expect(chip, 'the agent’s link to the file outside').toBeVisible({ timeout: 60_000 });
       await chip.click();
       const viewer = sideColumn(page).locator(`[data-file-viewer][data-path="${w.notes}"]`);
@@ -4883,7 +4883,7 @@ test('U6f: with B’s endpoint listing no rl2.outside-files, Open File… is dis
     await expect(openRow).not.toHaveAttribute('title', /.*/);
     await page.keyboard.press('Escape');
 
-    const chip = main(page).locator(`[data-chip="path"][title="${w.notes}"]`).first();
+    const chip = main(page).locator(`[data-chip="path"][data-path="${w.notes}"]`).first();
     await expect(chip, 'the agent’s link to the file outside').toBeVisible({ timeout: 60_000 });
     await chip.click();
     const refusal = sideColumn(page).locator(`[data-file-viewer][data-path="${w.notes}"] [data-refusal]`);

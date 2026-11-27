@@ -1,10 +1,11 @@
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
 import { NO_ACTIONS, setHostActions, TranscriptProvider, turnFileLinks, useTranscriptContext, type TranscriptActions } from '../context';
 import { DEFAULT_ACTIONS } from '../default-actions';
 import { ARTIFACT_LINK_TITLE, openArtifactMention } from './Link';
 import { Markdown } from './Markdown';
+import { accessibleDescription } from '../../../test-support/accessible-text'; // ticket 815
 
 afterEach(cleanup);
 
@@ -29,7 +30,7 @@ describe.each([false, true])('markdown links and images (live: %s)', (live) => {
   it('a web link opens externally through the action, never by navigation', () => {
     const { actions } = renderWith('See [the docs](https://example.com/docs).', live);
     const link = screen.getByRole('link', { name: 'the docs' });
-    expect(link.getAttribute('title')).toBe('https://example.com/docs');
+    expect([link.getAttribute('title'), accessibleDescription(link)]).toEqual([null, 'https://example.com/docs']); // ticket 815: its address the tip
     const click = fireEvent.click(link);
     expect(click).toBe(false); // default prevented
     expect(actions.openExternal).toHaveBeenCalledWith('https://example.com/docs', null);
@@ -90,7 +91,7 @@ describe.each([false, true])('markdown links and images (live: %s)', (live) => {
     try {
       const { actions } = renderWith('Open [x.ts](file:///work/x.ts#L12), [y](FILE:///work/y.ts:7) and [h](file://host/work/h.ts).', live, 'app-local-session');
       const link = screen.getByRole('button', { name: 'x.ts' });
-      expect([link.dataset.chip, link.getAttribute('title')]).toEqual(['path', '/work/x.ts']);
+      expect([link.dataset.chip, accessibleDescription(link)]).toEqual(['path', '/work/x.ts']);
       fireEvent.click(link);
       fireEvent.click(screen.getByRole('button', { name: 'y' }), { metaKey: true });
       expect(vi.mocked(actions.openFile).mock.calls).toEqual([['/work/x.ts', 12, 'app-local-session', { main: false }], ['/work/y.ts', 7, 'app-local-session', { main: true }]]);
@@ -102,11 +103,11 @@ describe.each([false, true])('markdown links and images (live: %s)', (live) => {
   });
 
   // UX wave U6d: a path link takes the mention's element and look (its text in the monospace font, by its data-chip),
-  // its title its path, and the keyboard's Enter and Space; its click is today's openFile, beside the chat (no ⌘: UX wave U6b-1)
+  // its tip its path (ticket 815), and the keyboard's Enter and Space; its click is today's openFile, beside the chat (no ⌘: UX wave U6b-1)
   it('a path link is link text too: a focusable span with the role of a button, opened by Enter and Space', () => {
     const { actions } = renderWith('Open [x.ts](src/renderer/x.ts#L7).', live);
     const link = screen.getByRole('button', { name: 'x.ts' });
-    expect([link.tagName, link.className, link.getAttribute('tabindex'), link.getAttribute('title'), link.dataset.chip]).toEqual(['SPAN', 'transcript-inline-link', '0', 'src/renderer/x.ts', 'path']);
+    expect([link.tagName, link.className, link.getAttribute('tabindex'), accessibleDescription(link), link.dataset.chip]).toEqual(['SPAN', 'transcript-inline-link', '0', 'src/renderer/x.ts', 'path']);
     fireEvent.keyDown(link, { key: 'Enter' });
     fireEvent.keyDown(link, { key: ' ' });
     fireEvent.keyDown(link, { key: ' ', repeat: true });
@@ -191,7 +192,9 @@ describe.each([false, true])('markdown links and images (live: %s)', (live) => {
     it('is link text: a focusable span with the role of a button, the inline link class and the one tooltip', () => {
       renderWith(`See [the plan](maws-artifact:${ARTIFACT}#block=b7).`, live, SESSION);
       const link = screen.getByRole('button', { name: 'the plan' });
-      expect([link.tagName, link.className, link.getAttribute('tabindex'), link.getAttribute('title'), link.getAttribute('aria-label')]).toEqual(['SPAN', 'transcript-inline-link', '0', ARTIFACT_LINK_TITLE, null]);
+      expect([link.tagName, link.className, link.getAttribute('tabindex'), link.getAttribute('title'), accessibleDescription(link), link.getAttribute('aria-label')]).toEqual(['SPAN', 'transcript-inline-link', '0', null, ARTIFACT_LINK_TITLE, null]);
+      act(() => link.focus()); // ticket 815: the tooltip the keyboard reaches, not the system's
+      expect(screen.getByRole('tooltip').textContent).toBe(ARTIFACT_LINK_TITLE);
       expect(link.dataset).toMatchObject({ chip: 'artifact', artifactId: ARTIFACT, artifactAt: '#block=b7' });
       expect(ARTIFACT_LINK_TITLE).toBe('⌘-click opens it in a tab'); // the word cut (N125): the shortcut alone
     });

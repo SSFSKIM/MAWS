@@ -24,6 +24,7 @@ import { hostStatus } from '../test-support/host-status';
 import { resetShellStores } from '../test-support/shell-stores';
 import { RequestCard } from './RequestCard';
 import { itemFor, permission } from './test-requests';
+import { accessibleDescription } from '../test-support/accessible-text'; // board ticket 815
 
 // The hover card asks the session's port of each of its buttons on its own answer (U1a §H). The lane A port carries both
 // answers or neither, so the cases where it carries one and not the other refuse that one answer over the real port.
@@ -80,6 +81,12 @@ function mount(event: Extract<SessionEvent, { kind: `${string}.requested` }>, ov
   return item;
 }
 
+// Board ticket 815: a button the terminal's port can't carry is greyed and keeps the keyboard (`aria-disabled`, never
+// `disabled`), its reason its description; null where it is not greyed. A tip's description repeats words drawn on the
+// card, so a read of the drawn words skips it.
+const greyed = (button: HTMLElement) => (button.getAttribute('aria-disabled') === 'true' && !button.hasAttribute('disabled') ? accessibleDescription(button) : null);
+const DRAWN = 'script, style, [hidden]';
+
 describe('a terminal session’s permission card', () => {
   it('says the terminal asks too, closes deny-and-interrupt and a scope it can’t carry in place with their reasons, and answers the rest', async () => {
     live({ pending: [raised({ suggestions: [{ type: 'addRules' }, { type: 'addRules' }] })] });
@@ -88,19 +95,18 @@ describe('a terminal session’s permission card', () => {
     const offers2 = "A scoped allow takes the request's one suggestion; this request offers 2";
     // U1a §D: the third button and the menu's one entry, each closed with its reason, bound to no key and showing none
     const always = screen.getByRole('button', { name: 'Always allow in this project' });
-    expect(always.hasAttribute('disabled')).toBe(true);
-    expect(always.getAttribute('title')).toBe(offers2);
+    expect(greyed(always)).toBe(offers2);
     expect(always.hasAttribute('aria-keyshortcuts')).toBe(false);
     expect(bindingsOf('request.allowLasting')).toEqual([]);
     await userEvent.setup().click(screen.getByRole('button', { name: 'More allow options' }));
     const session = await screen.findByRole('menuitem', { name: 'Allow for this session' });
     expect(session.getAttribute('aria-disabled')).toBe('true');
-    expect(session.getAttribute('title')).toBe(offers2);
+    expect(accessibleDescription(session)).toBe(offers2); // board ticket 815: the refused entry's row note
     await userEvent.setup().keyboard('{Escape}');
     await userEvent.setup().click(screen.getByRole('button', { name: 'More deny options' }));
     const stop = await screen.findByRole('menuitem', { name: 'Deny and stop the turn' });
     expect(stop.getAttribute('aria-disabled')).toBe('true');
-    expect(stop.getAttribute('title')).toBe('Deny-and-interrupt is answered in the terminal');
+    expect(accessibleDescription(stop)).toBe('Deny-and-interrupt is answered in the terminal');
     await userEvent.setup().keyboard('{Escape}');
     expect(screen.getByRole('button', { name: 'Allow once' }).getAttribute('aria-keyshortcuts')).toBe('Meta+Enter'); // what it carries keeps its key
     await userEvent.setup().click(screen.getByRole('button', { name: 'Allow once' }));
@@ -133,10 +139,10 @@ describe('a terminal session’s permission card', () => {
     mount(permission({ requestId: REQ, agentId: 'a1' as never }));
     vi.useFakeTimers({ shouldAdvanceTime: true });
     await userEvent.setup({ advanceTimers: vi.advanceTimersByTime }).click(screen.getByRole('button', { name: 'Allow once' }));
-    await waitFor(() => expect(screen.getByText('Answer this in the terminal')).toBeTruthy());
+    await waitFor(() => expect(screen.getByText('Answer this in the terminal', { ignore: DRAWN })).toBeTruthy());
     await act(async () => void vi.advanceTimersByTime(5_000)); // past the not-pending card's close
     expect(screen.queryByText('Answered elsewhere')).toBeNull();
-    for (const name of ['Allow once', 'Allow for this session', 'Deny']) expect(screen.getByRole('button', { name }).hasAttribute('disabled')).toBe(true);
+    for (const name of ['Allow once', 'Allow for this session', 'Deny']) expect(greyed(screen.getByRole('button', { name }))).toBe('Answer this in the terminal');
     act(() => live({ pending: [], settled: [{ request: REQ, session: 'eng-1', winner: 'terminal', outcome: 'allow', by: 'terminal' }] }));
     expect(screen.getByRole('status').textContent).toBe('Answered in the terminal: Allowed');
   });
@@ -147,11 +153,9 @@ describe('a terminal session’s permission card', () => {
     mount(permission({ requestId: REQ, agentId: 'a1' as never }));
     expect(screen.getByRole('button', { name: 'Allow once' }).hasAttribute('disabled')).toBe(false);
     await act(async () => void vi.advanceTimersByTime(1100));
-    expect(screen.getByText('Answer this in the terminal')).toBeTruthy();
+    expect(screen.getByText('Answer this in the terminal', { ignore: DRAWN })).toBeTruthy();
     for (const name of ['Allow once', 'Allow for this session', 'Deny']) { // every answer button the card has
-      const button = screen.getByRole('button', { name });
-      expect(button.hasAttribute('disabled')).toBe(true);
-      expect(button.getAttribute('title')).toBe('Answer this in the terminal');
+      expect(greyed(screen.getByRole('button', { name }))).toBe('Answer this in the terminal');
     }
   });
 });
@@ -208,8 +212,7 @@ describe('a terminal session’s plan and question cards', () => {
     live({ pending: [raised({ tool: 'ExitPlanMode', input: { plan: '1. do it' } })] });
     mount({ id: 'e' as never, sessionId: 's' as never, at: '2026-10-28T10:00:00.000Z', seq: null, agentId: null, parentToolUseId: null, kind: 'plan.requested', requestId: REQ, toolUseId: REQ as never, plan: '1. do it', input: { plan: '1. do it' } });
     const clear = screen.getByRole('button', { name: 'Clear context and implement' });
-    expect(clear.hasAttribute('disabled')).toBe(true);
-    expect(clear.getAttribute('title')).toBe('/clear runs in the terminal');
+    expect(greyed(clear)).toBe('/clear runs in the terminal');
     await userEvent.setup().click(screen.getByRole('button', { name: 'Implement' }));
     await waitFor(() => expect(answers()).toEqual([{ kind: 'plan', outcome: 'implement', feedback: null }]));
   });
@@ -245,8 +248,7 @@ describe('a terminal session’s plan and question cards', () => {
     live({ pending: [asyncRaised], controls: withDismiss({ available: true }) });
     mountAsync();
     const skip = screen.getByRole('button', { name: 'Skip' });
-    expect(skip.hasAttribute('disabled')).toBe(true);
-    expect(skip.getAttribute('title')).toBe('An async question needs an answer');
+    expect(greyed(skip)).toBe('An async question needs an answer');
     act(() => document.querySelector<HTMLElement>('[data-end-row]')!.focus());
     await userEvent.setup().keyboard('{Escape}');
     expect(answers()).toEqual([]);
@@ -267,16 +269,14 @@ describe('a terminal session’s plan and question cards', () => {
   it('draws Dismiss disabled with why where the bridge declares no dismissal, or declares it unavailable', async () => {
     live({ pending: [asyncRaised] });
     mountAsync();
-    expect(dismissButton().disabled).toBe(true);
-    expect(dismissButton().title).toBe('Dismiss it in the terminal');
+    expect(greyed(dismissButton())).toBe('Dismiss it in the terminal');
     await userEvent.setup().click(dismissButton());
     expect(answers()).toEqual([]);
     cleanup();
     live({ pending: [asyncRaised], controls: withDismiss({ available: false, reason: 'MAWS controls this session' }) });
     mountAsync();
-    expect(dismissButton().disabled).toBe(true);
-    expect(dismissButton().title).toBe('MAWS controls this session');
-    expect(screen.getByRole('button', { name: 'Skip' }).hasAttribute('disabled')).toBe(true);
+    expect(greyed(dismissButton())).toBe('MAWS controls this session');
+    expect(greyed(screen.getByRole('button', { name: 'Skip' }))).not.toBeNull();
   });
 
   it('returns to its controls with Retry when the bridge refuses the dismissal, the question still waiting', async () => {
@@ -286,7 +286,7 @@ describe('a terminal session’s plan and question cards', () => {
     mountAsync();
     await userEvent.setup().click(dismissButton());
     expect(await screen.findByText("Couldn't deliver the answer")).toBeTruthy();
-    expect(screen.getByText("Couldn't deliver the answer").getAttribute('title')).toBe('behavior is allow or deny');
+    expect(accessibleDescription(screen.getByText("Couldn't deliver the answer"))).toBe('behavior is allow or deny'); // board ticket 815: the words' tip
     expect(screen.getByRole('button', { name: 'Retry' })).toBeTruthy();
     expect(dismissButton().disabled).toBe(false);
   });
