@@ -13,6 +13,7 @@ import type { PanelToolContext } from '../../../panel/tool';
 import { useLayout } from '../../../stores/layout';
 import { useSessions } from '../../../stores/sessions';
 import { A, B, panelOf, resetPanelStores } from '../../../test-support/panel';
+import { accessibleDescription } from '../../../test-support/accessible-text';
 import { createState, registerTranscriptActions, useTranscriptStore, type Cell, type CellDetail, type CellId } from '../../../transcript';
 import { setAgentWorkClient } from '../client';
 import { fakeAgentWorkClient } from '../fake-work-client';
@@ -355,6 +356,8 @@ function HostedBody({ tabId }: { tabId: string }) {
 
 describe('log tool: Copy path', () => {
   const copyButton = () => screen.getByRole('button', { name: 'Copy path' });
+  // board ticket 815: how the copy went is the glyph's tip and its description; at rest it says its name alone
+  const said = () => accessibleDescription(copyButton());
   afterEach(() => {
     vi.useRealTimers();
     Reflect.deleteProperty(navigator, 'clipboard');
@@ -367,15 +370,15 @@ describe('log tool: Copy path', () => {
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
     await act(async () => void fireEvent.click(copyButton()));
     expect(writeText).toHaveBeenCalledWith(PATH);
-    expect(copyButton().title).toBe('Copied');
+    expect(said()).toBe('Copied');
     act(() => vi.advanceTimersByTime(COPY_FEEDBACK_MS));
-    expect(copyButton().title).toBe('Copy path');
+    expect(said()).toBe('');
   });
 
   it('says so when the clipboard refuses', async () => {
     Object.defineProperty(navigator, 'clipboard', { value: { writeText: async () => Promise.reject(new Error('denied')) }, configurable: true });
     await mount({ path: PATH, title: 'x' });
     await act(async () => void fireEvent.click(copyButton()));
-    expect(copyButton().title).toBe("Couldn't copy the path");
+    expect(said()).toBe("Couldn't copy the path");
   });
 });

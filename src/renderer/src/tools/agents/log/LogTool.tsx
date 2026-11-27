@@ -179,12 +179,13 @@ function PathLine({ path }: { path: string }) {
       <code data-part="path" title={path} className="min-w-0 flex-1 truncate font-mono text-ui-sm text-fg-muted">
         {path}
       </code>
-      <button type="button" aria-label={LOG_COPY.copyPath} title={copied === 'copied' ? LOG_COPY.copied : copied === 'failed' ? LOG_COPY.copyFailed : LOG_COPY.copyPath} onClick={copy} className="shrink-0 rounded-sm p-0.5 text-fg-muted outline-accent hover:bg-bg-hover hover:text-fg focus-visible:outline-2">
+      {/* board ticket 815: its word, then how the copy went, a tip the keyboard reaches */}
+      <NamedGlyph label={LOG_COPY.copyPath} tip={copied === 'copied' ? LOG_COPY.copied : copied === 'failed' ? LOG_COPY.copyFailed : LOG_COPY.copyPath} onClick={copy} className="shrink-0 rounded-sm p-0.5 text-fg-muted outline-accent hover:bg-bg-hover hover:text-fg focus-visible:outline-2">
         <Icon className="size-3.5">
           <rect x="5.5" y="5.5" width="8" height="8" rx="1.5" />
           <path d="M10.5 5.5V3.5a1 1 0 0 0-1-1h-6a1 1 0 0 0-1 1v6a1 1 0 0 0 1 1h2" />
         </Icon>
-      </button>
+      </NamedGlyph>
     </div>
   );
 }

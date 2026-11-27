@@ -27,6 +27,7 @@ import { useTaskGraph } from '../store';
 import { AgentRow, Chevron, indent } from './AgentRow';
 import { hasAgentsUnder, panelRows } from './panel-rows';
 import { SLOW_TICK_MS, useTicker } from './shared';
+import { RowNote, useRowNote } from '../../../ui/row-note';
 import type { ListSection, SubagentsHandle, SubagentsState } from './SubagentsTool';
 
 const EMPTY_GRAPH = emptyGraph();
@@ -185,8 +186,15 @@ function TreeRowView({ row, graph, waiting, now, handle, open, appSessionId, dis
     );
   }
   if (row.kind === 'team') return null; // drawn by TeamGroup
+  return <RosterRow row={row} now={now} />;
+}
+
+// A teammate the roster lists, which opens nothing: why is its row's note (board ticket 815, rule 5's helper sentence),
+// shown on pointing or on focus, the row taking Tab for it, and its description at all times.
+function RosterRow({ row, now }: { row: Extract<TreeRow, { kind: 'roster' }>; now: number }) {
+  const note = useRowNote();
   return (
-    <div data-roster={row.name} data-depth={row.depth} title={SUBAGENTS_COPY.teammateNoTranscript} style={indent(row.depth)} className="flex min-h-12 items-center gap-2.5 border-l border-border-strong px-3.5 py-2">
+    <div data-roster={row.name} data-depth={row.depth} tabIndex={0} {...note.rowProps} style={indent(row.depth)} className="relative flex min-h-12 items-center gap-2.5 border-l border-border-strong px-3.5 py-2 outline-accent focus-visible:outline-2 focus-visible:-outline-offset-2">
       <span aria-hidden className="size-4 shrink-0 rounded-full border border-dashed border-border-strong" />
       <span className="min-w-0 flex-1">
         <span data-part="title" className="block truncate font-medium">
@@ -196,6 +204,9 @@ function TreeRowView({ row, graph, waiting, now, handle, open, appSessionId, dis
           {SUBAGENTS_COPY.teammateListed(row.extras, formatAgo(now - Date.parse(row.at)))}
         </span>
       </span>
+      <RowNote note={note} className="px-3.5">
+        {SUBAGENTS_COPY.teammateNoTranscript}
+      </RowNote>
     </div>
   );
 }

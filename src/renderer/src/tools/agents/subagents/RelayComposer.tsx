@@ -204,19 +204,24 @@ function EngineRelayComposer({ appSessionId, agentId, node, status, sessionTitle
         <label htmlFor={id} className="sr-only">
           {RELAY_COPY.label(sessionTitle)}
         </label>
-        <textarea
-          id={id}
-          rows={2}
-          value={draft}
-          disabled={disabled}
-          placeholder={reason?.text ?? RELAY_COPY.placeholderVia(title, sessionTitle)}
-          title={reason?.tooltip ?? undefined}
-          onChange={(e) => edit(e.target.value)}
-          className="block w-full resize-none bg-transparent text-ui text-fg outline-accent placeholder:text-fg-muted focus-visible:outline-2 disabled:cursor-not-allowed"
-        />
+        {/* Board ticket 815: a reason that says more (a foreground child's) is the box's tip and description, so the box
+            keeps Tab for it: greyed, it is read-only rather than disabled, its own edits guarded */}
+        <Tip content={reason?.tooltip} description={reason?.tooltip}>
+          <textarea
+            id={id}
+            rows={2}
+            value={draft}
+            disabled={disabled && !reason?.tooltip}
+            readOnly={disabled}
+            aria-disabled={disabled || undefined}
+            placeholder={reason?.text ?? RELAY_COPY.placeholderVia(title, sessionTitle)}
+            onChange={(e) => edit(e.target.value)}
+            className="block w-full resize-none bg-transparent text-ui text-fg outline-accent placeholder:text-fg-muted focus-visible:outline-2 aria-disabled:cursor-not-allowed"
+          />
+        </Tip>
         {/* a kept draft hides the placeholder, so the reason the box is closed shows as a line of its own */}
         {reason !== null && draft !== '' && (
-          <p data-part="relay-reason" title={reason.tooltip ?? undefined} className="text-ui-sm text-fg-muted">
+          <p data-part="relay-reason" className="text-ui-sm text-fg-muted">
             {reason.text}
           </p>
         )}

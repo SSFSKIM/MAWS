@@ -64,8 +64,11 @@ export function AgentRow({
     elapsed = e ? formatElapsed(e.ms) : SUBAGENTS_COPY.elapsedUnavailable;
   }
   const line = lineOf(node, graph, now);
-  // the row is where pointing opens its tip (its disclosure included); the open button its keyboard owner (T166)
+  // the row is where pointing opens its tip (its disclosure included); the open button its keyboard owner (T166). Board
+  // ticket 815: a nested row's parent, once the system tooltip of its "nested" (which the row's open button covered), is
+  // a line of the same tip and of the description.
   const rowRef = useRef<HTMLDivElement>(null);
+  const facts = [waiting ? SUBAGENTS_COPY.approvalNeeded : null, row.orphan ? (listedParent ? SUBAGENTS_COPY.childOf(rowTitle(parent)) : SUBAGENTS_COPY.childOfUnlisted) : null].filter((fact) => fact !== null);
   return (
     <div
       ref={rowRef}
@@ -75,7 +78,21 @@ export function AgentRow({
       style={indent(row.depth)}
       className={`relative flex min-h-12 items-stretch ${row.depth > 0 ? 'border-l border-border-strong' : ''}`}
     >
-      <Tip content={waiting ? SUBAGENTS_COPY.approvalNeeded : null} description={waiting ? SUBAGENTS_COPY.approvalNeeded : null} pointedWithin={rowRef}>
+      <Tip
+        content={
+          facts.length === 0 ? null : (
+            <>
+              {facts.map((fact) => (
+                <span key={fact} className="block">
+                  {fact}
+                </span>
+              ))}
+            </>
+          )
+        }
+        description={facts.join(' · ')}
+        pointedWithin={rowRef}
+      >
         <button
           type="button"
           data-part="open"
@@ -94,7 +111,7 @@ export function AgentRow({
           <span className="block min-w-0 truncate font-medium">
             <span data-part="title">{title}</span>
             {row.orphan && (
-              <span data-part="nested" title={listedParent ? SUBAGENTS_COPY.childOf(rowTitle(parent)) : SUBAGENTS_COPY.childOfUnlisted} className="ml-1.5 text-ui-sm font-normal text-fg-muted">
+              <span data-part="nested" className="ml-1.5 text-ui-sm font-normal text-fg-muted">
                 {SUBAGENTS_COPY.nested}
               </span>
             )}

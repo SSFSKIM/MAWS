@@ -28,6 +28,7 @@ import { agentOfToolUse, refOf, STOP_DOUBT_MS, taskOf, useTicker } from './share
 import type { SubagentsHandle } from './SubagentsTool';
 import { displayTitle } from '../../../sessions/title';
 import { QuietSpinner } from '../../../ui/spinner';
+import { UNAVAILABLE_LOOK, UnavailableButton } from '../../../ui/tip';
 
 // The child's source: C6's `ipcSource` in the product; the `#panel` harness sets `HarnessSession.childSource(ref)` here
 // (as C8a's `child` tool mounts it), so the product path stays `ipcSource`.
@@ -182,9 +183,12 @@ function StopAgent({ appSessionId, node, title, driven }: { appSessionId: AppSes
           {SUBAGENTS_COPY.stopping}
         </button>
       ) : closed && !closed.available ? (
-        <button type="button" disabled title={closed.reason} className={ACTION}>
-          {SUBAGENTS_COPY.stopAgent}
-        </button>
+        // board ticket 815: greyed, it keeps Tab, its reason the tip and the description
+        <UnavailableButton reason={closed.reason}>
+          <button type="button" className={`${ACTION} ${UNAVAILABLE_LOOK}`}>
+            {SUBAGENTS_COPY.stopAgent}
+          </button>
+        </UnavailableButton>
       ) : (
         <Popover.Root open={open} onOpenChange={setOpen}>
           <Popover.Trigger asChild>

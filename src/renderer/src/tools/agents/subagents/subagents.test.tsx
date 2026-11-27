@@ -47,6 +47,7 @@ import { bareOf } from '@shared/machine/address'; // UX wave U8d
 import { fakeClient, type FakeClient } from '../../../../../../test/support/fake-client'; // UX wave U8d
 import { preloadOf } from '../../../test-support/preload-of'; // UX wave U8d
 import { resetLaneAWatches } from '../../../lane-a/watches'; // UX wave U8d
+import { accessibleText } from '../../../test-support/accessible-text';
 
 const M3 = REL.agoNarrow(3, 'minute'); // 3m ago, 3분 전
 
@@ -160,7 +161,8 @@ const rowsOf = (name: Section) =>
     title: row.querySelector('[data-part="title"]')?.textContent,
     line: row.querySelector('[data-part="line"]')?.textContent,
     elapsed: row.querySelector('[data-part="elapsed"]')?.textContent,
-    nested: row.querySelector<HTMLElement>('[data-part="nested"]')?.title ?? null,
+    // board ticket 815: a nested row's parent is a line of its open button's tip and description
+    nested: row.querySelector('[data-part="nested"]') ? descriptionOf(row.querySelector(':scope > [data-part="open"]')!) : null,
     waiting: row.dataset.waiting !== undefined,
     under: underOf(row.dataset.agentRow!),
   }));
@@ -174,7 +176,7 @@ const treeOf = (name: Section) =>
       ? `${'  '.repeat(Number(el.dataset.depth))}${el.dataset.agentRow}${underText(el.dataset.agentRow)}`
       : el.dataset.fold !== undefined
         ? `${'  '.repeat(Number(el.dataset.depth))}[${el.textContent}${el.getAttribute('aria-expanded') === 'true' ? ' open' : ''}]`
-        : `${'  '.repeat(Number(el.dataset.depth))}${el.textContent}`,
+        : `${'  '.repeat(Number(el.dataset.depth))}${accessibleText(el)}`, // a roster row's note is hidden at rest
   );
 const expandDone = () => fireEvent.click(within(section('done')!).getByRole('button', { name: /^Done \d+/ })); // Done is folded by default
 const row = (id: string) => document.querySelector<HTMLElement>(`[data-agent-row="${id}"]`)!;
@@ -415,7 +417,8 @@ describe('subagents lists', () => {
     const roster = document.querySelector<HTMLElement>('[data-roster="tester"]')!;
     expect(roster.tagName).not.toBe('BUTTON'); // no transcript to open
     expect(roster.querySelector('[data-part="title"]')?.textContent).toBe('tester');
-    expect(roster.title).toBe('No transcript here'); // the word cut (T177)
+    // the word cut (T177); board ticket 815: its row's note, which the row takes Tab for, and its description
+    expect([roster.tabIndex, descriptionOf(roster)]).toEqual([0, 'No transcript here']);
   });
 
   // E11 S2(d): the listing of the team an interactive terminal formed under the teams gate on 2.1.293 (pass3/e7-team-terminal),
@@ -1010,7 +1013,6 @@ describe('relay composer', () => {
   it.each<[string, Setup, string]>([
     ['an agent known only from disk', { status: null, events: [] }, 'Known only from disk'],
     ['a running agent of a session no longer live here', { status: 'drop', events: [started('a1', 1)] }, 'Relay needs the session running here'],
-    ['a foreground child', { events: [started('a1', 1, { isBackground: false })] }, `${TITLE} is waiting on this agent`], // the word cut (T195)
     ['a child whose background flag is unknown', { status: live({ backgroundTasks: [{ taskId: 'a1' as TaskId, taskType: 'local_agent', description: 'x', ambient: false }] }), events: [] }, `Not known whether ${TITLE} is waiting on this agent`],
     ['a finished agent', { events: [started('a1', 1), finished('a1', 2)] }, 'This agent has finished'],
     ['a stopped agent', { events: [started('a1', 1), finished('a1', 2, { status: 'stopped' })] }, 'This agent was stopped'],
@@ -1053,9 +1055,17 @@ describe('relay composer', () => {
     expect((await screen.findByRole('tooltip')).textContent).toContain('Send');
   });
 
-  it('gives a foreground child’s reason its tooltip', async () => {
+  // Board ticket 815: the reason that says more is the box's tip and description, so the greyed box keeps Tab for it:
+  // read-only, not disabled, its edits and its send refused
+  it('greys a foreground child’s box with its reason and keeps it focusable for its tooltip', async () => {
     await mount({ events: [started('a1', 1, { isBackground: false })], params: { agentId: 'a1' as AgentId } });
-    expect(box().title).toBe('A message sent now would resume the finished agent instead of reaching this one');
+    const why = 'A message sent now would resume the finished agent instead of reaching this one';
+    expect([box().disabled, box().readOnly, box().getAttribute('aria-disabled')]).toEqual([false, true, 'true']);
+    expect(box().placeholder).toBe(`${TITLE} is waiting on this agent`); // the word cut (T195)
+    expect(descriptionOf(box())).toBe(why);
+    expect(sendButton().disabled).toBe(true);
+    act(() => box().focus());
+    expect((await screen.findByRole('tooltip')).textContent).toBe(why);
   });
 
   it('is enabled for a running background child whether the parent is idle or mid-turn, and for a foreground child once backgrounded', async () => {
@@ -1065,9 +1075,9 @@ describe('relay composer', () => {
     setStatus(live({ turn: openTurn }));
     expect(box().disabled).toBe(false);
     act(() => subagentsTool.open!(handle, { agentId: 'fg' as AgentId }));
-    expect(box().disabled).toBe(true);
+    expect(box().readOnly).toBe(true); // greyed, keeping Tab for its reason (board ticket 815)
     push([event('task.updated', { taskId: 'fg', patch: { isBackground: true } }, { seq: 3 })]);
-    expect(box().disabled).toBe(false);
+    expect([box().disabled, box().readOnly]).toEqual([false, false]);
   });
 
   it('sends one next steer, disables the box and walks the line: asked with its wait alone (no turn clause, no long-wait clause), forwarded, resting there, then a receipt clears it', async () => {
