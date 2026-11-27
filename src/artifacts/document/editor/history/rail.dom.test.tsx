@@ -5,6 +5,7 @@
 // and the banner; Make a copy; Compare by shift-click; the "See N new changes" pill; Show editors on a selection.
 import type { Editor } from '@tiptap/core';
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { StrictMode, type ComponentProps, type ReactNode } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { actorDisplay, type Actor } from '@shared/artifacts/actor';
@@ -26,6 +27,7 @@ import type { DocumentHandle } from '../host-types';
 import { MemoryDocumentHost, memoryEditorHost, openMemoryHandle, whenSynced } from '../memory-host';
 import { endOf, until } from '../test-world';
 import { MemoryHistory } from './memory-history';
+import chromeCss from '../chrome.css?raw';
 
 const SESSION = '00000000-0000-4000-8000-0000000000a1' as AppSessionId;
 const AGENT: Actor = { kind: 'session', appSessionId: SESSION };
@@ -110,7 +112,13 @@ const agentAppends = (text: string) => (agent: DocumentHandle) => {
   const p2 = tabBody(agent.doc, TAB)!.get(1) as { insert(i: number, s: string): void; toArray(): unknown[] };
   p2.insert((p2.toArray()[0] as string).length, text);
 };
-const previewing = async () => until(() => screen.queryByRole('toolbar', { name: 'Version preview' }) !== null && !screen.queryByText('Loading the version…'), 'the preview');
+// the word cut (G371): the version's wait is a quiet spinner in the status line, which goes once the version is shown
+const previewing = async () => until(() => screen.queryByRole('toolbar', { name: 'Version preview' }) !== null && document.querySelector('.doc-history-status:not([data-error])') === null, 'the preview');
+// the word cut (G379): Make a copy and Name this version are in the bar's actions menu
+const versionAction = async (name: string) => {
+  await userEvent.click(within(bar()).getByRole('button', { name: 'Actions for this version' }));
+  await userEvent.click(screen.getByRole('menuitem', { name }));
+};
 const liveText = (editor: Editor) => editor.state.doc.textContent;
 // M9 (the controller's fix wave, step 2): a version is shown in an editor of its own, beside the live one.
 const previewEditor = (): Editor | null => (document.querySelector('.ProseMirror[data-editor="preview"]') as unknown as { editor?: Editor } | null)?.editor ?? null;
@@ -516,6 +524,119 @@ describe('the owner’s actions', () => {
     expect(banner.textContent).toContain('Restored from Clean draft');
   });
 
+  // The pair review's fix wave (the e2e:document case at document-editor.spec.ts:554, G379): a menu item chosen gives the
+  // keyboard back to the "…", whose tooltip then shows while it holds focus; the bar's buttons keep the focus where it
+  // is (they guard the editor's selection), so that tooltip stayed open over the confirm opened next. The confirm is an
+  // alertdialog and takes the keyboard (its Cancel, as the transcript's restore dialog does), which closes the tooltip,
+  // and its Restore takes a click; Cancel gives the keyboard back to Restore this version. Name this version, chosen in
+  // the menu, puts the keyboard in its field.
+  it('opens Restore’s confirm with the keyboard in it after a menu action, the “…” tooltip closed, and restores on its click', async () => {
+    const { history: h } = await setup(async ({ history: hist, agentWrites }) => {
+      hist.version('named', HUMAN, { label: 'Clean draft' });
+      await agentWrites(agentAppends(' Later.'));
+      hist.version('named', HUMAN, { label: 'Later one' });
+    });
+    await openHistory();
+    click(row('Clean draft'));
+    await previewing();
+    await versionAction('Make a copy');
+    await until(() => h.copies.length === 1, 'the copy');
+    const restore = within(bar()).getByRole('button', { name: 'Restore this version' });
+    await userEvent.click(restore);
+    const confirm = screen.getByRole('alertdialog', { name: 'Restore this version?' });
+    expect(document.activeElement).toBe(within(confirm).getByRole('button', { name: 'Cancel' }));
+    await until(() => screen.queryByRole('tooltip') === null, 'no tooltip left over the confirm');
+    await userEvent.click(within(confirm).getByRole('button', { name: 'Cancel' }));
+    expect(screen.queryByRole('alertdialog')).toBeNull();
+    expect(document.activeElement).toBe(restore);
+    await userEvent.click(restore);
+    await userEvent.click(within(screen.getByRole('alertdialog', { name: 'Restore this version?' })).getByRole('button', { name: 'Restore' }));
+    await until(() => screen.queryByRole('status', { name: 'Restored' }) !== null, 'the restore');
+    expect(screen.getByRole('status', { name: 'Restored' }).textContent).toContain('Restored from Clean draft');
+  });
+
+  it('puts the keyboard in the version’s name field when Name this version is chosen from the menu', async () => {
+    await setup(async ({ history: hist }) => {
+      hist.version('auto', HUMAN);
+    });
+    await openHistory();
+    click(within(rail()).getAllByRole('button', { name: /^Version / })[0]);
+    await previewing();
+    await versionAction('Name this version');
+    await until(() => document.activeElement === screen.queryByRole('textbox', { name: 'Version name' }), 'the field focused');
+  });
+
+  // The medium review: the name form closing (Cancel, or a save) takes away the field that held the keyboard; the
+  // keyboard goes back to the version's actions, where the form was opened from.
+  it('gives the keyboard back to the version’s actions when the name form closes', async () => {
+    await setup(async ({ history: hist }) => {
+      hist.version('auto', HUMAN);
+    });
+    await openHistory();
+    click(within(rail()).getAllByRole('button', { name: /^Version / })[0]);
+    await previewing();
+    const actions = within(bar()).getByRole('button', { name: 'Actions for this version' });
+    await versionAction('Name this version');
+    await until(() => document.activeElement === screen.queryByRole('textbox', { name: 'Version name' }), 'the field focused');
+    await userEvent.click(within(screen.getByRole('form', { name: 'Name this version' })).getByRole('button', { name: 'Cancel' }));
+    expect(screen.queryByRole('form', { name: 'Name this version' })).toBeNull();
+    expect(document.activeElement).toBe(actions);
+    await versionAction('Name this version');
+    await until(() => document.activeElement === screen.queryByRole('textbox', { name: 'Version name' }), 'the field focused again');
+    await userEvent.type(screen.getByRole('textbox', { name: 'Version name' }), 'Before legal');
+    await userEvent.click(within(screen.getByRole('form', { name: 'Name this version' })).getByRole('button', { name: 'Save' }));
+    await until(() => screen.queryByRole('form', { name: 'Name this version' }) === null, 'the form closed by the save');
+    expect(document.activeElement).toBe(within(bar()).getByRole('button', { name: 'Actions for this version' }));
+  });
+
+  // The medium review: confirming Restore takes away the Cancel that held the keyboard; it goes to the document once the
+  // restore lands, and back to Restore this version when the restore fails.
+  it('puts the keyboard in the document after a restore, and back on Restore when the restore fails', async () => {
+    const { editor, history: h } = await setup(async ({ history: hist }) => {
+      hist.version('named', HUMAN, { label: 'Clean draft' });
+    });
+    await openHistory();
+    click(row('Clean draft'));
+    await previewing();
+    const restore = () => within(bar()).getByRole('button', { name: 'Restore this version' });
+    const confirmRestore = async () => {
+      await userEvent.click(restore());
+      await userEvent.click(within(screen.getByRole('alertdialog', { name: 'Restore this version?' })).getByRole('button', { name: 'Restore' }));
+    };
+    const working = h.restore.bind(h);
+    h.restore = () => Promise.reject(new Error('offline'));
+    await confirmRestore();
+    await until(() => document.activeElement === screen.queryByRole('button', { name: 'Restore this version' }), 'Restore focused after the failure');
+    h.restore = working;
+    await confirmRestore();
+    await until(() => screen.queryByRole('toolbar', { name: 'Version preview' }) === null, 'history left');
+    await until(() => editor().view.dom.contains(document.activeElement), 'the keyboard in the document');
+  });
+
+  // The second medium review: a restore that lands after the person moved the keyboard elsewhere leaves it there.
+  it('leaves the keyboard where the person moved it while the restore ran', async () => {
+    const { history: h } = await setup(async ({ history: hist }) => {
+      hist.version('named', HUMAN, { label: 'Clean draft' });
+    });
+    await openHistory();
+    click(row('Clean draft'));
+    await previewing();
+    const working = h.restore.bind(h);
+    let land = () => {};
+    h.restore = (...args: Parameters<typeof working>) => new Promise((resolve) => { land = () => resolve(working(...args)); });
+    await userEvent.click(within(bar()).getByRole('button', { name: 'Restore this version' }));
+    await userEvent.click(within(screen.getByRole('alertdialog', { name: 'Restore this version?' })).getByRole('button', { name: 'Restore' }));
+    const elsewhere = document.body.appendChild(document.createElement('button'));
+    elsewhere.textContent = 'Elsewhere';
+    elsewhere.focus();
+    land();
+    await until(() => screen.queryByRole('toolbar', { name: 'Version preview' }) === null, 'history left');
+    // the document takes the keyboard on the frame after a restore lands; wait past it
+    await new Promise((resolve) => requestAnimationFrame(() => setTimeout(resolve, 20)));
+    expect(document.activeElement).toBe(elsewhere);
+    elsewhere.remove();
+  });
+
   it('makes a copy of the selected version', async () => {
     const { history: h } = await setup(async ({ history: hist, agentWrites }) => {
       hist.version('named', HUMAN, { label: 'Keep this' });
@@ -525,7 +646,7 @@ describe('the owner’s actions', () => {
     await openHistory();
     click(row('Keep this'));
     await previewing();
-    click(within(bar()).getByRole('button', { name: 'Make a copy' }));
+    await versionAction('Make a copy');
     await until(() => h.copies.length === 1, 'the copy');
     const kept = (await h.versions()).find((v) => v.label === 'Keep this')!;
     expect(h.copies).toEqual([kept.id]);
@@ -544,7 +665,7 @@ describe('the owner’s actions', () => {
     const auto = (await h.versions()).find((v) => v.kind === 'auto')!;
     click(within(rail()).getAllByRole('button', { name: /^Version / }).find((b) => !/Later one/.test(b.getAttribute('aria-label') ?? ''))!);
     await previewing();
-    click(within(bar()).getByRole('button', { name: 'Name this version' }));
+    await versionAction('Name this version');
     const field = screen.getByRole('textbox', { name: 'Version name' });
     act(() => void fireEvent.change(field, { target: { value: '  Before legal  ' } }));
     act(() => void fireEvent.submit(field.closest('form')!));
@@ -562,7 +683,31 @@ describe('the owner’s actions', () => {
     await openHistory();
     click(within(rail()).getAllByRole('button', { name: /^Version / })[0]);
     await previewing();
-    expect(within(bar()).queryByRole('button', { name: 'Name this version' })).toBeNull();
+    await userEvent.click(within(bar()).getByRole('button', { name: 'Actions for this version' }));
+    expect(screen.getAllByRole('menuitem').map((item) => item.textContent)).toEqual(['Make a copy']);
+  });
+
+  // The pair review's fix wave (G379): the "…" is a drawn glyph in the ×'s own box, centred as the × is rather than a
+  // text ellipsis on the baseline, and it shows its pressed state while its menu is open (the app's open-menu trigger).
+  it('draws the version’s actions as a glyph in the ×’s box, pressed while its menu is open', async () => {
+    await setup(async ({ history: hist }) => {
+      hist.version('auto', HUMAN);
+    });
+    await openHistory();
+    click(within(rail()).getAllByRole('button', { name: /^Version / })[0]);
+    await previewing();
+    const actions = within(bar()).getByRole('button', { name: 'Actions for this version' });
+    const back = bar().querySelector('[data-history-back]')!;
+    expect(actions.textContent).toBe('');
+    expect(actions.querySelector(':scope > svg[aria-hidden="true"]')).not.toBeNull();
+    expect([...actions.classList].filter((name) => name.startsWith('doc-tool'))).toEqual([...back.classList].filter((name) => name.startsWith('doc-tool')));
+    expect(actions.getAttribute('data-state')).toBe('closed');
+    await userEvent.click(actions);
+    expect(actions.getAttribute('data-state')).toBe('open');
+    expect(actions.getAttribute('aria-expanded')).toBe('true');
+    const css = chromeCss.replace(/\/\*[\s\S]*?\*\//g, '');
+    const pressed = [...css.matchAll(/([^{}]+)\{([^{}]*)\}/g)].find(([, head]) => head!.split(',').some((selector) => selector.trim() === ".doc-tool[data-state='open']"));
+    expect(pressed?.[2]).toContain('background: var(--bg-active);');
   });
 
   it('offers See N new changes after an agent changed the document since the last view, and opens that comparison', async () => {
@@ -579,7 +724,7 @@ describe('the owner’s actions', () => {
       },
       { now: () => t.value },
     );
-    const pill = await until(() => screen.queryByRole('button', { name: 'See 2 new changes' }) !== null, 'the pill').then(() => screen.getByRole('button', { name: 'See 2 new changes' }));
+    const pill = await until(() => screen.queryByRole('button', { name: '2 new changes' }) !== null, 'the pill').then(() => screen.getByRole('button', { name: '2 new changes' }));
     expect(h.viewedAt).toBe(t.value); // this view is marked
     click(pill);
     await previewing();
@@ -699,7 +844,7 @@ describe('a deleted tab and a failed count', () => {
     expect([...tabs.querySelectorAll('option')].map((option) => option.textContent)).toEqual(['Main', 'Appendix (deleted)']);
     act(() => void fireEvent.change(tabs, { target: { value: 'tab2' } }));
     await until(() => document.querySelector('.ProseMirror y-del')?.textContent === 'Raw numbers live here.', 'the deleted tab’s text, struck');
-    expect(within(bar()).getByText('This tab was deleted.')).toBeTruthy();
+    expect(within(bar()).queryByText('This tab was deleted.'), 'the word cut (G377): the tab’s label says it').toBeNull();
     expect(document.querySelector<HTMLElement>('.ProseMirror .doc-change-del')?.style.getPropertyValue('--doc-author')).toBe(`var(${actorDisplay(AGENT).color})`);
   });
 
@@ -719,9 +864,9 @@ describe('a deleted tab and a failed count', () => {
       { now: () => t.value },
     );
     await until(() => screen.queryByRole('button', { name: 'Count the new changes again' }) !== null, 'the retry');
-    expect(screen.getByRole('button', { name: 'See new changes' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'New changes' })).toBeTruthy();
     click(screen.getByRole('button', { name: 'Count the new changes again' }));
-    await until(() => screen.queryByRole('button', { name: 'See 1 new change' }) !== null, 'the counted pill');
+    await until(() => screen.queryByRole('button', { name: '1 new change' }) !== null, 'the counted pill');
     expect(screen.queryByRole('button', { name: 'Count the new changes again' })).toBeNull();
   });
 });
@@ -870,5 +1015,75 @@ describe('a rail the caller holds', () => {
     expect(changes).toEqual(['history']);
     rerender(mount('history', 1));
     await until(() => screen.queryByRole('textbox', { name: 'Version name' }) !== null, 'the Save version form');
+  });
+});
+
+// The word cut (docs/doperpowers/specs/2026-11-16-word-cut-design.md, M5 task 2): the preview's bar ends with Restore,
+// an actions menu and a × back to the document (G379); a button whose words show draws no tooltip repeating them (G337).
+describe('the word cut in the preview’s bar', () => {
+  it('ends with Restore, the version’s actions and a × back to the document, no tooltip repeating a word', async () => {
+    await setup(async ({ history: hist }) => {
+      hist.version('named', HUMAN, { label: 'Clean draft' });
+    });
+    await openHistory();
+    click(row('Clean draft'));
+    await previewing();
+    const restore = within(bar()).getByRole('button', { name: 'Restore this version' });
+    expect(restore.textContent).toBe('Restore');
+    expect(restore.getAttribute('title')).toBeNull();
+    for (const name of ['Make a copy', 'Name this version']) expect(within(bar()).queryByRole('button', { name }), `${name} is in the menu`).toBeNull();
+    await userEvent.click(within(bar()).getByRole('button', { name: 'Actions for this version' }));
+    expect(screen.getAllByRole('menuitem').map((item) => item.textContent)).toEqual(['Make a copy', 'Name this version']);
+    act(() => void fireEvent.keyDown(screen.getByRole('menu'), { key: 'Escape' }));
+    click(restore);
+    const confirm = screen.getByRole('alertdialog', { name: 'Restore this version?' });
+    for (const name of ['Cancel', 'Restore']) expect(within(confirm).getByRole('button', { name }).getAttribute('title'), name).toBeNull();
+    click(within(confirm).getByRole('button', { name: 'Cancel' }));
+    const back = within(bar()).getByRole('button', { name: 'Back to document' });
+    expect(back.textContent).toBe('×');
+    expect(back.getAttribute('title')).toBeNull();
+    click(back);
+    await until(() => screen.queryByRole('toolbar', { name: 'Version preview' }) === null, 'back to the document');
+  });
+
+  it('names a version from the menu with a form whose field says only Name', async () => {
+    await setup(async ({ history: hist }) => {
+      hist.version('auto', HUMAN);
+    });
+    await openHistory();
+    click(within(rail()).getAllByRole('button', { name: /^Version / })[0]);
+    await previewing();
+    await versionAction('Name this version');
+    const form = screen.getByRole('form', { name: 'Name this version' });
+    expect(within(form).getByRole('textbox', { name: 'Version name' }).getAttribute('placeholder')).toBe('Name');
+    expect(within(form).getByRole('button', { name: 'Cancel' }).getAttribute('title')).toBeNull();
+  });
+});
+
+describe('the word cut in the rail', () => {
+  it('closes by a × whose tooltip is Close, and a row’s tooltip says only how to compare', async () => {
+    await setup(async ({ history: hist }) => {
+      hist.version('named', HUMAN, { label: 'Clean draft' });
+    });
+    await openHistory();
+    const close = within(rail()).getByRole('button', { name: 'Close version history' });
+    expect(close.getAttribute('title')).toBe('Close');
+    expect(row('Clean draft').getAttribute('title')).toBe('Shift-click to compare');
+  });
+
+  it('shows the version’s wait as a quiet spinner in the status line, not words', async () => {
+    let release = () => {};
+    await setup(async ({ history: hist }) => {
+      hist.version('named', HUMAN, { label: 'Clean draft' });
+      const versionState = hist.versionState.bind(hist);
+      hist.versionState = (id) => new Promise((resolve) => (release = () => resolve(versionState(id))));
+    });
+    await openHistory();
+    click(row('Clean draft'));
+    await until(() => screen.queryByRole('progressbar', { name: 'Loading the version…' }) !== null, 'the version’s spinner');
+    expect(screen.queryByText('Loading the version…')).toBeNull();
+    release();
+    await previewing();
+    expect(screen.queryByRole('progressbar', { name: 'Loading the version…' })).toBeNull();
   });
 });

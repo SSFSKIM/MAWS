@@ -65,9 +65,6 @@ export function tokenLabel(name: string): string {
   return name;
 }
 
-/** What a hover over a token's friendly name says: the name and the token, as a swatch's title does. */
-export const tokenTitle = (name: string): string => `${tokenLabel(name)} (${name})`;
-
 /** A colour as a field shows it: a system colour by its role's name, anything else as written. */
 export function showColour(value: string | undefined): string {
   if (value === undefined) return '';

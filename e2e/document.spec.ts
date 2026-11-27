@@ -19,6 +19,7 @@ import { openArtifactInPanel, openArtifactReplicaInPanel, pinSurfaceForSessions 
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs';
 import { expect, test, type Locator, type Page } from '@playwright/test';
 import { withNativeClipboard } from './support/clipboard';
+import { replyThroughActiveCard } from './support/comment-reply';
 import { traceForeground } from './support/foreground-trace';
 import { launchMaws, type MawsLaunch } from './support/launch';
 import { sidebarRow } from './support/sidebar';
@@ -104,14 +105,16 @@ async function durable(scope: Locator): Promise<void> {
   await expect.poll(unsaved, { timeout: 10_000, message: 'every edit acknowledged by the host' }).toBe(0);
 }
 
-// Every text the header's saved word showed since this call, in order.
+// Every state the header's saved slot showed since this call, in order, each by its words: the drawn words, or (the
+// word cut, P23 and P24) the name of the ring or the dot drawn in their place, so a save in flight reads "Saving…".
 async function watchSaved(page: Page, header: Locator): Promise<() => Promise<string[]>> {
   const handle = await header.elementHandle();
   await page.evaluate((row) => {
     const seen: string[] = [];
     (window as unknown as { __saved: string[] }).__saved = seen;
     const read = () => {
-      const text = row!.querySelector('[data-header-saved]')?.textContent ?? '';
+      const slot = row!.querySelector('[data-header-saved]');
+      const text = slot?.textContent || slot?.querySelector('[role="progressbar"], [role="img"]')?.getAttribute('aria-label') || '';
       if (seen.at(-1) !== text) seen.push(text);
     };
     read();
@@ -1020,11 +1023,9 @@ test('restore brings back a deleted tab and the earlier text while a later reply
   await expect(tabs).toHaveCount(0);
   await expect(text.locator('p')).toHaveText(['The budget review is on Friday.']);
   let rail = await railOf(record);
-  const reply = rail.locator(`article[data-thread="${older}"]`).getByRole('textbox', { name: 'Reply' });
-  await reply.fill('Posted after the version.');
-  await reply.press('Enter');
-  await expect(rail.locator(`article[data-thread="${older}"]`).getByRole('listitem')).toHaveText(['YouPosted after the version.']);
-  await record.getByRole('toolbar', { name: 'Formatting' }).getByRole('button', { name: /^Comments/ }).click();
+  const replied = await replyThroughActiveCard(record, rail, older, 'Posted after the version.'); // the word cut (G385)
+  await expect(replied.getByRole('listitem')).toHaveText(['YouPosted after the version.']);
+  if (await rail.isVisible()) await record.getByRole('toolbar', { name: 'Formatting' }).getByRole('button', { name: /^Comments/ }).click();
   await caretAtEndOf(page, text, 0);
   await page.keyboard.press('Enter');
   await page.keyboard.type('A later sentence for the board.');
@@ -1043,12 +1044,16 @@ test('restore brings back a deleted tab and the earlier text while a later reply
   await expect(olderItem.getByRole('listitem'), 'the reply posted after the version stays').toHaveText(['YouPosted after the version.']);
   await expect(olderItem).not.toHaveAttribute('data-orphan');
   const newerItem = rail.locator(`article[data-thread="${newer}"]`);
-  const showDeleted = rail.getByRole('button', { name: 'Show deleted-target comments', exact: true });
-  await expect(showDeleted).toHaveAttribute('aria-pressed', 'false');
+  // the word cut (G395, G388): the toggle reads "Deleted (N)", what it holds its description; a gone passage's quote is
+  // struck, the sentence its description
+  const showDeleted = rail.getByRole('button', { name: /^Deleted \(\d+\)$/ });
+  await expect(showDeleted).toHaveAccessibleDescription('Comments on deleted text');
+  await expect(showDeleted).toHaveAttribute('aria-expanded', 'false'); // a disclosure (the pair review's fix wave)
   await expect(newerItem, 'the thread whose passage is gone is hidden by default').toHaveCount(0);
   await showDeleted.click();
   await expect(newerItem, 'the thread made after the version stays, its passage gone').toHaveAttribute('data-orphan', '');
-  await expect(newerItem).toContainText('The commented passage was removed.');
+  await expect(newerItem.locator('.doc-thread-quote-text[data-removed]')).toHaveText('later sentence');
+  await expect(newerItem.getByRole('button', { name: /^Show passage: / })).toHaveAccessibleDescription('The commented passage was removed.');
   await tabs.getByRole('tab', { name: 'Tab 2' }).click();
   await expect(text).toHaveText('Appendix figures for October.', { timeout: 10_000 });
   const listed = await ok<{ versions: { id: number; kind: string; label?: string }[] }>(page, 'artifacts.versions', { artifactId: id });

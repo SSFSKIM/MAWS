@@ -8,9 +8,15 @@
 // assets, not the deck's: the thumbnail draws them through the system's own asset URLs, and the slide made from it has
 // each copied into the deck first (`artifacts.copyAsset`, Decision Log 25) and its refs rewritten to the copies, the
 // copy being the session's awaited edit (B4). The bundled floor's layouts name no assets.
+// The word cut (docs/doperpowers/specs/2026-11-16-word-cut-design.md, M5 task 3): the menu's wait is the quiet spinner and
+// every read settles in words (G421), the deck's own placement's too (a deck whose row is not read yet is not a deck with
+// no system); a refused layout is the toolbar's short "Can’t add this layout", the reason its
+// tooltip (G413), a late one "Not added…" (G416); at the deck's limit the trigger is greyed with the limit (G423).
 import { DropdownMenu } from 'radix-ui';
+import { QuietSpinner } from '../../../../renderer/src/ui/spinner';
+import { UnavailableButton } from '../../../../renderer/src/ui/tip';
 import { useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
-import { DesignSystemHostContext, type DesignSystemRef } from '../../../design-system/apply';
+import { DesignSystemHostContext, type DesignSystemRef, type SystemUnread } from '../../../design-system/apply';
 import { readSystem } from '../../../design-system/model';
 import { defaultSystem, HOUSE_KEY } from '../../../types/design_system/defaults';
 import { newDoc, onUpdate, transact, type Doc } from '../../../yjs';
@@ -22,6 +28,7 @@ import type { ImportAsset } from '../transform/clipboard';
 import { loadSlide } from '../../parse';
 import type { AssetUrl } from '../../canvas';
 import { SLIDE_W, SlideView } from '../SlideView';
+import { DECK_COPY } from '../copy';
 import { LAYOUTS_COPY as C } from './copy';
 import './menus.css';
 
@@ -84,14 +91,15 @@ export function withAssets(slide: SlideIR, refs: ReadonlyMap<string, string>): S
   return { ...slide, style: style(slide.style), children: slide.children.map(element) };
 }
 
-type Inserted = { id: string } | { reason: string };
+/** The slide added, or what the toolbar says: a short refusal, and the model's own reason when there is one. */
+type Inserted = { id: string } | { refused: string; why?: string };
 
 function place(session: DeckSession, layout: SlideIR, afterId: string | null): Inserted {
   const id = mintSlideId(session.doc);
   try {
     session.edit((origin) => addSlide(session.doc, slideFromLayout(session.doc, layout, id), afterId, origin));
   } catch (e) {
-    return { reason: e instanceof Error ? e.message : String(e) };
+    return { refused: DECK_COPY.refused.layout, why: e instanceof Error ? e.message : String(e) };
   }
   session.show(id);
   return { id };
@@ -106,23 +114,25 @@ export async function insertLayoutSlide(session: DeckSession, layout: PickedLayo
   const { system } = layout;
   const refs = system === null ? [] : layoutAssets(layout.slide);
   if (system === null || refs.length === 0) return place(session, layout.slide, afterId);
-  if (!copyAsset) return { reason: C.noAssetCopy };
+  if (!copyAsset) return { refused: DECK_COPY.refused.layout, why: C.noAssetCopy };
   const copied = (async () => {
     const map = new Map<string, string>();
     for (const ref of refs) map.set(ref, await copyAsset(system, ref));
     return withAssets(layout.slide, map);
   })();
-  let inserted: Inserted = { reason: C.notPlaced };
+  let inserted: Inserted = { refused: C.notPlaced };
   try {
     await session.later(copied, (slide) => (inserted = place(session, slide, afterId)));
   } catch (e) {
-    return { reason: C.assetsFailed(e instanceof Error ? e.message : String(e)) };
+    return { refused: DECK_COPY.refused.layout, why: C.assetsFailed(e instanceof Error ? e.message : String(e)) };
   }
   return inserted;
 }
 
 /** A system's files: the bundled house system's for the floor, a live system's from its doc (followed while shown). */
-function useSystemFiles(system: DesignSystemRef | { builtin: 'maws' } | null): { files: Readonly<Record<string, string>> | null; error: string | null; source: string | null } {
+/** `files` undefined while a live system's are read, or while the deck's placement is (`systemUnread`); null when there
+ * is no system to read (nothing ever comes), or with the error of a placement that could not be read. */
+function useSystemFiles(system: DesignSystemRef | { builtin: 'maws' } | null, systemUnread: SystemUnread | undefined): { files: Readonly<Record<string, string>> | null | undefined; error: string | null; source: string | null } {
   const host = useContext(DesignSystemHostContext);
   const id = system && !('builtin' in system) ? system.id : null;
   const [read, setRead] = useState<{ id: string; files: Readonly<Record<string, string>> | null; error: string | null } | null>(null);
@@ -150,14 +160,18 @@ function useSystemFiles(system: DesignSystemRef | { builtin: 'maws' } | null): {
       close();
     };
   }, [host, id]);
-  if (system === null) return { files: null, error: null, source: null };
+  if (system === null) return systemUnread === 'reading' ? { files: undefined, error: null, source: null } : { files: null, error: systemUnread?.failed ?? null, source: null };
   if ('builtin' in system || !host) return { files: defaultSystem(HOUSE_KEY)?.files ?? {}, error: null, source: null };
-  return read?.id === id ? { files: read.files, error: read.error, source: id } : { files: null, error: null, source: null };
+  return read?.id === id ? { files: read.files ?? undefined, error: read.error, source: id } : { files: undefined, error: null, source: null };
 }
 
 export interface LayoutsMenuProps {
   system: DesignSystemRef | { builtin: 'maws' } | null;
+  /** Why `system` is null while the deck's placement is unknown: the menu waits, or says the read failed. */
+  systemUnread?: SystemUnread;
   disabled: boolean;
+  /** G423: greyed for this reason (the deck's limit), focusable, the reason its tooltip; no menu opens. */
+  unavailable?: string | null;
   /** Draws its children in the deck's design system (the menu is portalled outside the editor's scope). */
   scope: (children: ReactNode) => ReactNode;
   /** Makes a slide from the layout picked. */
@@ -166,7 +180,16 @@ export interface LayoutsMenuProps {
 
 const THUMB_W = 160;
 
-export function LayoutsMenu({ system, disabled, scope, onPick }: LayoutsMenuProps) {
+export function LayoutsMenu({ system, systemUnread, disabled, unavailable = null, scope, onPick }: LayoutsMenuProps) {
+  // a Radix trigger acts on pointerdown, past a click guard: a greyed one is a plain button with its reason, no menu
+  if (unavailable && !disabled)
+    return (
+      <UnavailableButton reason={unavailable}>
+        <button type="button" className="deck-button deck-new-slide" aria-label={C.button}>
+          {C.open}
+        </button>
+      </UnavailableButton>
+    );
   return (
     <DropdownMenu.Root modal={false}>
       <DropdownMenu.Trigger asChild>
@@ -176,20 +199,27 @@ export function LayoutsMenu({ system, disabled, scope, onPick }: LayoutsMenuProp
       </DropdownMenu.Trigger>
       <DropdownMenu.Portal>
         <DropdownMenu.Content align="start" side="right" sideOffset={6} className="deck-menu deck-layouts" aria-label={C.menu}>
-          <LayoutList system={system} scope={scope} onPick={onPick} />
+          <LayoutList system={system} systemUnread={systemUnread} scope={scope} onPick={onPick} />
         </DropdownMenu.Content>
       </DropdownMenu.Portal>
     </DropdownMenu.Root>
   );
 }
 
-function LayoutList({ system, scope, onPick }: Omit<LayoutsMenuProps, 'disabled'>) {
-  const { files, error, source } = useSystemFiles(system);
+function LayoutList({ system, systemUnread, scope, onPick }: Omit<LayoutsMenuProps, 'disabled' | 'unavailable'>) {
+  const { files, error, source } = useSystemFiles(system, systemUnread);
   const host = useContext(DesignSystemHostContext);
   // B5: a system's layout draws its pictures from the system's own assets
   const assetUrl = useMemo<AssetUrl>(() => (source !== null && host ? (ref) => host.assetUrl(source, ref) : NO_ASSETS), [source, host]);
-  if (error) return <p className="deck-layouts-note">{C.failed(error)}</p>;
-  if (!files) return <p className="deck-layouts-note">{C.loading}</p>;
+  if (error !== null) return <p className="deck-layouts-note">{C.failed(error)}</p>;
+  // the wait holds a line's height, so the menu does not open as a sliver and grow
+  if (files === undefined)
+    return (
+      <p className="deck-layouts-note deck-layouts-wait">
+        <QuietSpinner label={C.loading} />
+      </p>
+    );
+  if (files === null) return <p className="deck-layouts-note">{C.none}</p>;
   const layouts = layoutsOf(files).filter((l) => l.slide !== null);
   if (!layouts.length) return <p className="deck-layouts-note">{C.none}</p>;
   return (

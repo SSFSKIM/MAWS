@@ -1,7 +1,8 @@
 // P3-C (docs/doperpowers/plans/2026-10-12-p3-c-presentations.md, D13; M6): the show's words.
 export const PRESENT_COPY = {
   nothing: 'This deck has no slides to show (every slide is hidden).',
-  count: (n: number, of: number) => `Slide ${n} of ${of}`,
+  count: (n: number, of: number) => `${n} / ${of}`, // the word cut (G502): the numbers, named in words
+  countName: (n: number, of: number) => `Slide ${n} of ${of}`,
   elapsed: (time: string) => `Elapsed ${time}`,
   back: 'Previous',
   next: 'Next',

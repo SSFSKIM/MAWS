@@ -8,7 +8,15 @@
 // count, orphans counted, said in its thumbnail's name.
 // P4-A2 G2.3 (G-R5 of docs/doperpowers/plans/2026-10-19-p4-a2-agent-experience.md): every slide a publish is writing shows
 // it, ringed in the agent's colour, and a slide new to the deck stands at its place as an entry that is no button.
+// The word cut (docs/doperpowers/specs/2026-11-16-word-cut-design.md, M5 task 3): at the deck's limit New slide is greyed
+// and keeps the keyboard, the limit its reason (G423); a hidden slide carries an eye-with-a-slash, not the word (G424); a
+// slide's menu says each action once (G428); a section's rename and remove show on pointing or focus, and a double-click
+// on its title renames it (G429).
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
+import { NamedGlyph } from '../../../renderer/src/ui/glyph';
+import { HOVER_SCOPE, ON_HOVER } from '../../../renderer/src/ui/hover-scope';
+import { UnavailableButton } from '../../../renderer/src/ui/tip';
+import { EyeOffIcon, PencilIcon } from '../../ui/icons';
 import { DropdownMenu } from 'radix-ui';
 import { closestCenter, DndContext, KeyboardSensor, PointerSensor, useSensor, useSensors, type DragEndEvent } from '@dnd-kit/core';
 import { arrayMove, horizontalListSortingStrategy, SortableContext, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable';
@@ -122,13 +130,14 @@ export function Filmstrip({ session, view, current, assetUrl, width, horizontal 
       </DndContext>
       {!readOnly && (
         <div className="deck-new-slides">
-          <button type="button" className="deck-button deck-new-slide" disabled={full} onClick={addBlank}>
-            {C.newSlide}
-          </button>
+          <UnavailableButton reason={full ? C.deckFull(DECK_LIMITS.slides) : null}>
+            <button type="button" className="deck-button deck-new-slide" onClick={addBlank}>
+              {C.newSlide}
+            </button>
+          </UnavailableButton>
           {fromLayout}
         </div>
       )}
-      {!readOnly && full && <p className="deck-filmstrip-note">{C.deckFull(DECK_LIMITS.slides)}</p>}
     </nav>
   );
 }
@@ -209,7 +218,11 @@ function Thumbnail(props: {
         <SlideView doc={doc} slideId={slide.id} token={slide.token} assetUrl={assetUrl} scale={scale} onCanvas={onCanvas} faces={faces} thumbnail />
         {provisional && <ThumbnailLayer deck={provisional} slideId={slide.id} scale={scale} assetUrl={assetUrl} faces={faces} />}
         {slide.held && <span className="deck-thumb-badge">{C.held}</span>}
-        {slide.hidden && <span className="deck-thumb-badge deck-thumb-badge-quiet">{C.hiddenBadge}</span>}
+        {slide.hidden && (
+          <span className="deck-thumb-badge deck-thumb-badge-quiet deck-thumb-hidden" data-hidden-mark aria-hidden>
+            <EyeOffIcon />
+          </span>
+        )}
         {comments > 0 && (
           <span className="deck-thumb-comments" data-comments-badge aria-hidden>
             {comments}
@@ -251,6 +264,14 @@ function Thumbnail(props: {
 function SectionTitle({ session, header, readOnly }: { session: DeckSession; header: SectionHeader; readOnly: boolean }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(header.description);
+  // a rename ended from the keyboard (Enter, Escape) gives the focus back to the pencil, so the field's leaving drops none
+  const renameGlyph = useRef<HTMLButtonElement>(null);
+  const returnFocus = useRef(false);
+  useEffect(() => {
+    if (editing || !returnFocus.current) return;
+    returnFocus.current = false;
+    renameGlyph.current?.focus({ preventScroll: true });
+  }, [editing]);
   const commit = () => {
     setEditing(false);
     const description = draft.trim();
@@ -268,6 +289,7 @@ function SectionTitle({ session, header, readOnly }: { session: DeckSession; hea
         onChange={(event) => setDraft(event.target.value)}
         onBlur={commit}
         onKeyDown={(event) => {
+          if (event.key === 'Enter' || event.key === 'Escape') returnFocus.current = true;
           if (event.key === 'Enter') commit();
           else if (event.key === 'Escape') setEditing(false);
           event.stopPropagation();
@@ -275,25 +297,23 @@ function SectionTitle({ session, header, readOnly }: { session: DeckSession; hea
       />
     );
   }
+  const rename = () => {
+    setDraft(header.description);
+    setEditing(true);
+  };
   return (
-    <div className="deck-section" data-section-key={header.key} data-empty={header.empty || undefined}>
-      <span className="deck-section-title">{header.description || C.untitledSection}</span>
+    <div className="deck-section" data-section-key={header.key} data-empty={header.empty || undefined} {...(readOnly ? {} : HOVER_SCOPE)}>
+      <span className="deck-section-title" onDoubleClick={readOnly ? undefined : rename}>
+        {header.description || C.untitledSection}
+      </span>
       {!readOnly && (
-        <span className="deck-section-actions">
-          <button
-            type="button"
-            className="deck-icon-button"
-            aria-label={C.renameSection(header.description)}
-            onClick={() => {
-              setDraft(header.description);
-              setEditing(true);
-            }}
-          >
-            {C.rename}
-          </button>
-          <button type="button" className="deck-icon-button" aria-label={C.removeSection(header.description)} onClick={() => session.edit((origin) => setSection(session.doc, header.key, null, origin))}>
-            ×
-          </button>
+        <span className="deck-section-actions" {...ON_HOVER}>
+          <NamedGlyph ref={renameGlyph} label={C.renameSection(header.description)} className="deck-icon-button" onClick={rename}>
+            <PencilIcon />
+          </NamedGlyph>
+          <NamedGlyph label={C.removeSection(header.description)} className="deck-icon-button" onClick={() => session.edit((origin) => setSection(session.doc, header.key, null, origin))}>
+            <span aria-hidden>×</span>
+          </NamedGlyph>
         </span>
       )}
     </div>

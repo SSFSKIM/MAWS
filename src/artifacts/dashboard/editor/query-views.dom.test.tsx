@@ -59,9 +59,9 @@ describe('a never-fetched query in the editor (E3)', () => {
     await settle();
     const dialog = screen.getByRole('dialog');
     expect(within(dialog).getByText('Live sales · fixture · rows · not fetched')).toBeTruthy();
-    expect(within(dialog).getByText('This query has not been fetched yet; there are no rows to show.')).toBeTruthy();
+    expect(within(dialog).getByText('Not fetched yet')).toBeTruthy(); // the word cut (G616)
     expect(within(dialog).queryByRole('button', { name: /Download/ })).toBeNull();
-    expect(within(dialog).queryByText('Reading the rows…')).toBeNull();
+    expect(dialog.querySelector('.dash-sheet-loading')).toBeNull();
     expect(readDataset).not.toHaveBeenCalled();
     expect(downloadAsset).not.toHaveBeenCalled();
   });

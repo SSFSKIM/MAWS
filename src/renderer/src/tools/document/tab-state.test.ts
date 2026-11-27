@@ -319,7 +319,7 @@ describe('a document tab’s state', () => {
     const state = w.open();
     await ready(state);
     await state.export('docx', 'letter');
-    expect(useNotices.getState().notices.map((n) => n.text)).toEqual(['Saved to /Downloads/Review.docx · Comments credited to Kim Min; change in Settings › Artifacts.']);
+    expect(useNotices.getState().notices.map((n) => n.text)).toEqual(['Saved to /Downloads/Review.docx · Comments credited to Kim Min']);
   });
 
   it('exports nothing while two versions are compared', async () => {

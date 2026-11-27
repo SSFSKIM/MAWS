@@ -23,6 +23,7 @@ import { ROOT } from '../../model';
 import { CommentPins } from '../comments/Pins';
 import { DECK_COPY as C } from '../copy';
 import { armedBox } from '../armed';
+import type { ShowNotice } from '../notice';
 import type { DeckSession } from '../session';
 import { setText } from '../../model';
 import { copySelection, pasteClipboard, type ClipboardContext, type ImportAsset } from './clipboard';
@@ -44,7 +45,7 @@ export interface OverlayProps {
   /** The scaled slide's frame: screen coordinates are read against it. */
   frame: RefObject<HTMLDivElement | null>;
   /** A refusal or a note to show the owner (a paste that did not load, a group past the limit). */
-  onNotice?: (text: string) => void;
+  onNotice?: ShowNotice;
   /** The deck's artifact, named on what is copied, and how a paste brings another deck's pictures over (fix wave 1). */
   artifactId?: string;
   importAsset?: ImportAsset;
@@ -266,7 +267,7 @@ export function Overlay({ session, canvas, slideId, scale, readOnly, surface, fr
           handle === 'rotate' ? startRotate(c, id, p) : handle === 'end0' || handle === 'end1' ? startEndpoint(c, id, handle === 'end0' ? 0 : 1) : startResize(c, id, handle as Handle, p);
         const g = make();
         if (g.refused) {
-          onNotice?.(g.refused);
+          onNotice?.(g.refused, g.why);
           e.preventDefault();
           return;
         }
@@ -324,7 +325,7 @@ export function Overlay({ session, canvas, slideId, scale, readOnly, surface, fr
         gesture.current = pend.make();
         pending.current = null;
         if (gesture.current?.refused) {
-          onNotice?.(gesture.current.refused);
+          onNotice?.(gesture.current.refused, gesture.current.why);
           gesture.current = null;
         }
         if (!gesture.current) return;
@@ -455,7 +456,7 @@ export function Overlay({ session, canvas, slideId, scale, readOnly, surface, fr
     const el = surface.current;
     if (!el) return;
     const fromStage = (e: Event) => stageFocus(el, e.target); // P4-B2 (A3): the surface or a node holding the focus
-    const notice = (reason: string | null) => reason && onNotice?.(reason);
+    const notice = (refused: string, reason: string | null) => reason && onNotice?.(refused, reason); // the word cut (G413)
 
     // the element keys, from the stage or (P4-B2) the armed box; true when a key was taken
     const stageKey = (e: KeyboardEvent): boolean => {
@@ -511,14 +512,14 @@ export function Overlay({ session, canvas, slideId, scale, readOnly, surface, fr
       } else if (key.startsWith('Arrow') && !mod && (cmds.canZ || cmds.canDetach)) {
         const step = e.shiftKey ? 10 : 1;
         const d = { x: key === 'ArrowLeft' ? -step : key === 'ArrowRight' ? step : 0, y: key === 'ArrowUp' ? -step : key === 'ArrowDown' ? step : 0 };
-        notice(nudge(c, sel, d));
+        notice(C.refused.move, nudge(c, sel, d));
         done();
       } else if (mod && !e.shiftKey && key.toLowerCase() === 'd' && cmds.canEdit) { // U6a: ⇧⌘D is View ▸ Review's
-        notice(cmds.duplicate());
+        notice(C.refused.duplicate, cmds.duplicate());
         done();
       } else if (mod && key.toLowerCase() === 'g') {
-        if (e.shiftKey && cmds.canUngroup) notice(cmds.ungroup());
-        else if (!e.shiftKey && cmds.canGroup) notice(cmds.group());
+        if (e.shiftKey && cmds.canUngroup) notice(C.refused.ungroup, cmds.ungroup());
+        else if (!e.shiftKey && cmds.canGroup) notice(C.refused.group, cmds.group());
         done();
       } else if (mod && (key === ']' || key === '[') && cmds.canZ) {
         cmds.z(key === ']' ? (e.altKey ? 'front' : 'forward') : e.altKey ? 'back' : 'backward');
@@ -612,7 +613,7 @@ export function Overlay({ session, canvas, slideId, scale, readOnly, surface, fr
       if (!c) return;
       void pasteClipboard(e, c, session.snapshot().selection).then((result) => {
         if (result && 'ids' in result) session.select(result.ids);
-        else if (result) onNotice?.(result.reason);
+        else if (result) onNotice?.(C.refused.paste, result.reason);
       });
     };
     // Chromium enables its Copy, Cut and Paste commands on a focus that holds no text selection only when the page takes

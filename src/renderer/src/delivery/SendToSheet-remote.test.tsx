@@ -36,7 +36,7 @@ const install = (given: Parameters<typeof fakeClient>[0]) => {
 const openSheet = async (target: 'notion' | 'drive' = 'notion') => {
   render(<SendToHost />);
   act(() => openSendTo(subject, target));
-  await waitFor(() => expect(screen.queryByText(C.checking[target])).toBeNull());
+  await waitFor(() => expect(screen.queryByText(C.checking)).toBeNull());
 };
 const status = () => document.querySelector('[data-send-to-status]')!.textContent;
 const elsewhere = () => document.querySelector('[data-send-to-elsewhere]')?.textContent ?? null;
@@ -60,7 +60,7 @@ describe('Send to for another machine’s artifact', () => {
     install({ 'delivery.status': NOTION_READY, 'delivery.send': { ok: true, receipt: receipt(ART, 'notion', 1) } });
     await openSheet();
     fireEvent.click(screen.getByRole('button', { name: /^Send/ }));
-    await waitFor(() => expect(screen.getByText(C.sent('notion', 'Plan'))).toBeTruthy());
+    await waitFor(() => expect(screen.getByText(C.sent('Plan'))).toBeTruthy());
     expect(fake.machines('delivery.status')).toEqual([OTHER_MACHINE]);
     expect(fake.machines('delivery.send')).toEqual([OTHER_MACHINE]);
     expect(latestReceipt(useDelivery.getState(), ART, OTHER_MACHINE)).toMatchObject({ artifactId: ART, target: 'notion' });

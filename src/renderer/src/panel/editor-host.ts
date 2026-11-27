@@ -11,11 +11,16 @@ import { createContext, useContext, useLayoutEffect, useRef, type ComponentType 
 import { create } from 'zustand';
 import { useLayout } from '../stores/layout';
 import { allTabs } from '../stores/layout-model';
+import type { TipSide } from '../ui/tip';
 
 export type SavedState = 'saved' | 'saving' | 'unsaved' | 'reconnecting' | 'readonly';
 // P4-B5: `pinned`, drawn in the row beside the first three rather than counted among them (the header's Send to); folded
 // into "More actions" only under the narrow header, as every action is.
-export interface EditorHostAction { id: string; label: string; icon?: ComponentType<{ className?: string }>; onSelect(): void; disabled?: boolean; pressed?: boolean; pinned?: boolean }
+// The word cut (M5's G558): `unavailable`, why the action cannot act now; the header draws it greyed and still in the
+// keyboard's reach, its reason the tooltip and the description, and its press does nothing. `disabled` takes the control
+// out of the Tab order and says nothing; prefer a reason.
+// `tipSide`: where its tooltip opens, when not above (Tip's rule; the design system's Check against law, G558).
+export interface EditorHostAction { id: string; label: string; icon?: ComponentType<{ className?: string }>; onSelect(): void; disabled?: boolean; unavailable?: string | null; pressed?: boolean; pinned?: boolean; tipSide?: TipSide }
 // UX wave U10b (§B.5 of docs/doperpowers/plans/2026-11-15-ux-wave-U10b-artifacts.md): `checked`, an entry drawn as a
 // checkbox item (a document's page: Letter, A4, Compact) after the menu's other rows and a separator.
 export interface EditorHostExport { id: string; label: string; onSelect(): void; disabled?: boolean; children?: readonly EditorHostExport[]; description?: string; checked?: boolean }
@@ -25,6 +30,9 @@ export interface EditorHostRegistration {
   toolbarHost?: { element: HTMLElement; menuLabel: string } | null;
   breadcrumb?: readonly string[];
   saved?: SavedState | null; // absent or null: no indicator
+  // Edits the host has not acknowledged yet, said at once by an editor whose `saved` holds "Saving…" back for the quiet
+  // half second (the word cut, P23): what the replace rule reads, since replacing a tab skips its closeGuard.
+  pendingEdits?: boolean;
   unresolved?: number; // 0 or absent: no count
   actions?: readonly EditorHostAction[]; // version history, Open in tab, comments, …
   exports?: readonly EditorHostExport[];
@@ -148,7 +156,7 @@ export const EditorHostScopeContext = createContext<EditorHostScope | null>(null
 export const useEditorHostScope = (): EditorHostScope | null => useContext(EditorHostScopeContext);
 
 // Every optional field named, so a render that drops one clears it from the registration.
-const CLEARED: Partial<EditorHostRegistration> = { breadcrumb: undefined, saved: undefined, unresolved: undefined, actions: undefined, exports: undefined, closeGuard: undefined };
+const CLEARED: Partial<EditorHostRegistration> = { breadcrumb: undefined, saved: undefined, pendingEdits: undefined, unresolved: undefined, actions: undefined, exports: undefined, closeGuard: undefined };
 
 // Registers on mount, updates with each render's fields. The registration outlives the body: an unmount (a tab switch)
 // keeps it for the tab, and the tab's body mounting again replaces it. A mounted body that changes its scope moves its

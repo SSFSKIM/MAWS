@@ -45,27 +45,27 @@ describe('a board moved', () => {
 
 describe('a board resized', () => {
   it('moves only the dragged edges', () => {
-    expect(resizedFrame('p', phone, 'e', { x: 10, y: 99 }, [], 1, true)).toEqual({ frame: { x: 0, y: 0, w: 400, h: 844 }, guides: [], problems: [] });
-    expect(resizedFrame('p', phone, 'nw', { x: 10, y: 20 }, [], 1, true).frame).toEqual({ x: 10, y: 20, w: 380, h: 824 });
-    expect(resizedFrame('p', phone, 's', { x: 50, y: -44 }, [], 1, true).frame).toEqual({ x: 0, y: 0, w: 390, h: 800 });
+    expect(resizedFrame(phone, 'e', { x: 10, y: 99 }, [], 1, true)).toEqual({ frame: { x: 0, y: 0, w: 400, h: 844 }, guides: [], faults: [] });
+    expect(resizedFrame(phone, 'nw', { x: 10, y: 20 }, [], 1, true).frame).toEqual({ x: 10, y: 20, w: 380, h: 824 });
+    expect(resizedFrame(phone, 's', { x: 50, y: -44 }, [], 1, true).frame).toEqual({ x: 0, y: 0, w: 390, h: 800 });
   });
 
   it('snaps a dragged edge to a sibling’s edge', () => {
-    const r = resizedFrame('p', phone, 's', { x: 0, y: 1024 - 844 - 3 }, [desktop], 1, true);
+    const r = resizedFrame(phone, 's', { x: 0, y: 1024 - 844 - 3 }, [desktop], 1, true);
     expect(r.frame.h).toBe(1024);
     expect(r.guides.length).toBeGreaterThan(0);
   });
 
   it('keeps at least one pixel a side', () => {
-    expect(resizedFrame('p', phone, 'w', { x: 1000, y: 0 }, [], 1, true).frame).toEqual({ x: 389, y: 0, w: 1, h: 844 });
+    expect(resizedFrame(phone, 'w', { x: 1000, y: 0 }, [], 1, true).frame).toEqual({ x: 389, y: 0, w: 1, h: 844 });
   });
 
   it('names the cap it would pass, the frame unchanged from the request (never clamped)', () => {
     const tall = { x: 0, y: 0, w: 1080, h: 16_000 };
-    const over = resizedFrame('poster', tall, 's', { x: 0, y: 1000 }, [], 1, true);
+    const over = resizedFrame(tall, 's', { x: 0, y: 1000 }, [], 1, true);
     expect(over.frame.h).toBe(17_000);
-    expect(over.problems).toEqual(['board poster: h is 17000 px (over 16384 px a side)']);
-    const wide = resizedFrame('poster', { x: 0, y: 0, w: 8192, h: 8192 }, 'e', { x: 10, y: 0 }, [], 1, true);
-    expect(wide.problems[0]).toMatch(/^board poster: 8202×8192 is \d+ px \(over 67108864 px\)$/);
+    expect(over.faults).toEqual([{ kind: 'side', key: 'h', value: 17_000 }]);
+    const wide = resizedFrame({ x: 0, y: 0, w: 8192, h: 8192 }, 'e', { x: 10, y: 0 }, [], 1, true);
+    expect(wide.faults).toEqual([{ kind: 'area', w: 8202, h: 8192 }]);
   });
 });

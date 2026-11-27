@@ -4,6 +4,7 @@
 // the image's crop and replacement, shape kind, connector heads, table rows and columns, and a multi-selection's change
 // as one undo step.
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
+import { accessibleDescription } from '../../../renderer/src/test-support/accessible-text';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { newDoc, onUpdate, transact, type Doc } from '../../yjs';
 import { importSlide, readSlide, slideFile, writeDeckKeys, ROOT } from '../model';
@@ -205,6 +206,7 @@ describe('the inspector', () => {
   it('an image: fit, crop (zoom and focus, reset), alt text and a replacement through the upload', async () => {
     const uploadAsset = vi.fn(async () => 'assets/b.png');
     const { doc } = mount(['pic'], { uploadAsset });
+    expect([...combo('Image fit').options].map((o) => o.text)).toEqual(['Fill', 'Fit']); // G446
     choose('Image fit', 'contain');
     expect(styleOf(doc, 'pic')['object-fit']).toBe('contain');
     enter('Crop zoom', '2');
@@ -218,7 +220,7 @@ describe('the inspector', () => {
     expect(attrsOf(doc, 'pic')['data-crop']).toBeUndefined();
     type('Alt text', 'A dog');
     expect(attrsOf(doc, 'pic').alt).toBe('A dog');
-    expect(screen.getByRole('button', { name: 'Replace image' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Replace image' }).textContent).toBe('Replace'); // G453
     const file = new File(['x'], 'b.png', { type: 'image/png' });
     await act(async () => {
       fireEvent.change(screen.getByLabelText('Image file'), { target: { files: [file] } });
@@ -366,13 +368,13 @@ describe('names: the element by its type class, a token by the name its role goe
     expect(heading()).toBe('Box');
   });
 
-  it('token fields show the friendly name, the token’s own name in the title, as the swatches do', () => {
+  it('token fields show the friendly name, in the title too (G448), as the swatches do', () => {
     mount(['head'], { slide: ROLES });
     expect(box('Font size').placeholder).toBe('Title');
-    expect(box('Font size').title).toBe('Title (--ds-type-title-size)');
+    expect(box('Font size').title).toBe('Title'); // G448: the friendly name alone on hover
     expect(box('Line height').placeholder).toBe('Title');
     expect(shown('Font weight').text).toBe('Title');
-    expect(shown('Font weight').title).toBe('Title (--ds-type-title-weight)');
+    expect(shown('Font weight').title).toBe('Title');
     expect(shown('Font').text).toBe('Display (system)');
     const panel = screen.getByRole('complementary', { name: 'Inspector' });
     const words = [...panel.querySelectorAll('input, option, h2, h3, span, p')].map((e) => `${e.textContent ?? ''} ${(e as HTMLInputElement).placeholder ?? ''}`);
@@ -380,12 +382,13 @@ describe('names: the element by its type class, a token by the name its role goe
     cleanup();
     mount(['grp'], { slide: ROLES });
     expect(box('Corner radius').placeholder).toBe('Medium');
-    expect(box('Corner radius').title).toBe('Medium (--ds-radius-md)');
+    expect(box('Corner radius').title).toBe('Medium');
   });
 });
 
 describe('fix wave 1: a shadow the canvas cannot draw is never offered', () => {
-  it('inset and spread are offered on a box, and held off on a shape that is not a rect, with the reason', async () => {
+  // the word cut (G450): the reason is on the greyed Spread and Inset, which keep the keyboard, not a note under them
+  it('inset and spread are offered on a box, and greyed on a shape that is not a rect, the reason on each', async () => {
     const { setAttrsOf } = await import('../writers-elements');
     const { doc } = mount(['box']);
     fireEvent.click(screen.getByRole('checkbox', { name: 'Shadow' }));
@@ -396,37 +399,101 @@ describe('fix wave 1: a shadow the canvas cannot draw is never offered', () => {
     const shape = mount(['shape']);
     act(() => setAttrsOf(shape.doc, 'a', { shape: { kind: 'ellipse' } }));
     fireEvent.click(screen.getByRole('checkbox', { name: 'Shadow' }));
-    expect((screen.getByRole('checkbox', { name: 'Inset shadow' }) as HTMLInputElement).disabled).toBe(true);
-    expect(box('Shadow spread').disabled).toBe(true);
-    expect(screen.getByText(/drawn from its outline/)).toBeTruthy();
+    const reason = 'This shape’s shadow is drawn from its outline, which casts no inset shadow and no spread.';
+    const inset = screen.getByRole('checkbox', { name: 'Inset shadow' }) as HTMLInputElement;
+    expect(inset.disabled).toBe(false);
+    expect(inset.getAttribute('aria-disabled')).toBe('true');
+    expect(accessibleDescription(inset)).toBe(reason);
+    fireEvent.click(inset);
+    expect(inset.checked).toBe(false);
+    expect(styleOf(shape.doc, 'shape')['box-shadow']).not.toMatch(/inset/);
+    const spread = box('Shadow spread');
+    expect(spread.disabled).toBe(false);
+    expect(spread.readOnly).toBe(true);
+    expect(spread.getAttribute('aria-disabled')).toBe('true');
+    expect(accessibleDescription(spread)).toBe(reason);
+    const before = styleOf(shape.doc, 'shape')['box-shadow'];
+    fireEvent.keyDown(spread, { key: 'ArrowUp' });
+    expect(styleOf(shape.doc, 'shape')['box-shadow']).toBe(before);
+    expect(screen.queryByText(reason, { ignore: '[hidden], script, style' })).toBeNull(); // no note at rest
   });
 });
 
 describe('fix wave 3: a transform that is a design-system token', () => {
-  it('holds the rotation off with the reason, and Detach writes the token’s own value, which reloads clean', async () => {
+  // the word cut (G449): the sentence is on the greyed Rotation, which keeps the keyboard, and on Detach transform
+  it('holds the rotation off with the reason on it, and Detach writes the token’s own value, which reloads clean', async () => {
     const { setStyles } = await import('../writers-elements');
     const { doc } = mount(['box']);
     act(() => setStyles(doc, 'a', { box: { transform: 'var(--ds-pose, scale(1.5))' } }));
-    expect(box('Rotation').disabled).toBe(true);
-    expect(screen.getByText(/design-system token/)).toBeTruthy();
+    const rotation = box('Rotation');
+    expect(rotation.disabled).toBe(false);
+    expect(rotation.readOnly).toBe(true);
+    expect(rotation.getAttribute('aria-disabled')).toBe('true');
+    expect(accessibleDescription(rotation)).toMatch(/design-system token/);
+    expect(screen.queryByText(/design-system token/, { ignore: '[hidden], script, style' })).toBeNull(); // no note at rest
+    fireEvent.keyDown(rotation, { key: 'ArrowUp' });
+    expect(styleOf(doc, 'box').transform).toBe('var(--ds-pose, scale(1.5))');
     fireEvent.click(screen.getByRole('button', { name: 'Detach transform' }));
     expect(styleOf(doc, 'box').transform).toBe('scale(1.5)');
     expect(box('Rotation').disabled).toBe(false);
+    expect(box('Rotation').getAttribute('aria-disabled')).toBeNull();
     const reloaded = loadSlide(slideFile(doc, 'a'), { fileId: 'a' });
     expect(reloaded.ok && reloaded.diagnostics.filter((d) => d.severity === 'warning')).toEqual([]);
   });
 
-  // M6 (M5's review, Minor): the note says what Detach does, and never points at a button it does not show
+  // M6 (M5's review, Minor): the sentence says what Detach does, and never points at a button it does not show
   it('says Detach replaces the token with its fallback value, and with no fallback offers no Detach and asks for none', async () => {
     const { setStyles } = await import('../writers-elements');
     const { doc } = mount(['box']);
     act(() => setStyles(doc, 'a', { box: { transform: 'var(--ds-pose, scale(1.5))' } }));
-    expect(screen.getByText(/Detach transform replaces the token with its fallback value, scale\(1\.5\)/)).toBeTruthy();
+    const detach = screen.getByRole('button', { name: 'Detach transform' });
+    expect(accessibleDescription(detach)).toMatch(/Detach transform replaces the token with its fallback value, scale\(1\.5\)/);
+    expect(accessibleDescription(box('Rotation'))).toBe(accessibleDescription(detach));
     act(() => setStyles(doc, 'a', { box: { transform: 'var(--ds-pose)' } }));
     expect(screen.queryByRole('button', { name: 'Detach transform' })).toBeNull();
-    const note = screen.getByText(/design-system token/).textContent!;
-    expect(note).toMatch(/no fallback value/);
-    expect(note).not.toMatch(/[Dd]etach/);
+    const reason = accessibleDescription(box('Rotation'));
+    expect(reason).toMatch(/no fallback value/);
+    expect(reason).not.toMatch(/[Dd]etach/);
+  });
+});
+
+// fix round (task 3's review; G449, G450): a read-only deck keeps each greyed field's reason on an owner the keyboard
+// reaches, and still writes nothing
+describe('the reasons of greyed fields in a read-only deck', () => {
+  it('Rotation keeps the keyboard and its reason, and writes nothing', async () => {
+    const { setStyles } = await import('../writers-elements');
+    const { doc } = mount(['box'], { readOnly: true });
+    act(() => setStyles(doc, 'a', { box: { transform: 'var(--ds-pose, scale(1.5))' } }));
+    const rotation = box('Rotation');
+    act(() => rotation.focus());
+    expect(document.activeElement).toBe(rotation);
+    expect(rotation.getAttribute('aria-disabled')).toBe('true');
+    expect(accessibleDescription(rotation)).toMatch(/design-system token/);
+    fireEvent.keyDown(rotation, { key: 'ArrowUp' });
+    expect(styleOf(doc, 'box').transform).toBe('var(--ds-pose, scale(1.5))');
+    expect(box('Opacity').disabled).toBe(true); // a field with no reason stays plainly off
+  });
+
+  it('Spread and Inset keep the keyboard and the outline’s reason, and write nothing', async () => {
+    const { setAttrsOf, setStyles } = await import('../writers-elements');
+    const shape = mount(['shape'], { readOnly: true });
+    act(() => {
+      setAttrsOf(shape.doc, 'a', { shape: { kind: 'ellipse' } });
+      setStyles(shape.doc, 'a', { shape: { 'box-shadow': '0px 8px 24px 0px #00000033' } });
+    });
+    const reason = 'This shape’s shadow is drawn from its outline, which casts no inset shadow and no spread.';
+    const before = styleOf(shape.doc, 'shape')['box-shadow'];
+    const spread = box('Shadow spread');
+    act(() => spread.focus());
+    expect(document.activeElement).toBe(spread);
+    expect(accessibleDescription(spread)).toBe(reason);
+    fireEvent.keyDown(spread, { key: 'ArrowUp' });
+    const inset = screen.getByRole('checkbox', { name: 'Inset shadow' }) as HTMLInputElement;
+    act(() => inset.focus());
+    expect(document.activeElement).toBe(inset);
+    expect(accessibleDescription(inset)).toBe(reason);
+    fireEvent.click(inset);
+    expect(styleOf(shape.doc, 'shape')['box-shadow']).toBe(before);
   });
 });
 
@@ -538,5 +605,86 @@ describe('P4-B2 (D13): the inspector settles at each gesture’s end, in whole p
     flow.title = { ...flow.title, w: 1500.4 }; // a face arrived: the heading lays out narrower, nothing written
     act(() => canvas.layoutNow());
     expect(box('Width').value).toBe('1500');
+  });
+});
+
+// The word cut (docs/doperpowers/specs/2026-11-16-word-cut-design.md, M5 task 3): a caption under its section's heading
+// drops the section's word, the full name staying the field's (G442); the lists name a weight and a fit in plain words
+// (G445, G446); a swatch's hover is its role alone (G447); Replace and its upload (G453, G455, G416).
+describe('the word cut: captions, lists and the image', () => {
+  const captions = () => [...document.querySelectorAll('.deck-inspector-mini, .deck-inspector-caption')].map((n) => n.textContent);
+
+  it('captions under a section’s heading drop its word; each field keeps its full name', () => {
+    mount(['box']);
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Shadow' }));
+    for (const name of ['Shadow X', 'Shadow Y', 'Shadow blur', 'Shadow spread', 'Border width', 'Corner radius']) expect(box(name)).toBeTruthy();
+    expect(combo('Border style')).toBeTruthy();
+    expect(captions()).toEqual(expect.arrayContaining(['X', 'Y', 'Blur', 'Spread', 'Width', 'Style']));
+    for (const cut of ['Shadow X', 'Shadow blur', 'Border width', 'Border style']) expect(captions()).not.toContain(cut);
+    cleanup();
+    mount(['note']);
+    expect(captions()).toEqual(expect.arrayContaining(['Size', 'Weight', 'Fit']));
+    for (const cut of ['Font size', 'Font weight', 'Text fit']) expect(captions()).not.toContain(cut);
+    cleanup();
+    mount(['pic']);
+    expect(captions()).toContain('Fit');
+    expect(captions()).not.toContain('Image fit');
+    cleanup();
+    mount(['link']);
+    expect(captions()).toEqual(expect.arrayContaining(['Width', 'Style']));
+    expect(captions()).not.toContain('Line width');
+    expect(box('Line width')).toBeTruthy();
+  });
+
+  it('a gradient’s angle and stop positions are captioned Angle and Position', () => {
+    const { doc } = mount(['box']);
+    act(() => void restyle(doc, 'a', 'box', { background: 'linear-gradient(180deg, #ffffff 0%, #000000 100%)' }, 'test'));
+    expect(captions()).toEqual(expect.arrayContaining(['Angle', 'Position']));
+    expect(captions()).not.toContain('Gradient angle');
+    expect(captions()).not.toContain('Stop 1 position');
+    expect(box('Gradient angle')).toBeTruthy();
+    expect(box('Stop 1 position')).toBeTruthy();
+  });
+
+  it('weights read by name alone; a text fit reads Clip; a fill as written reads Other', () => {
+    mount(['note']);
+    const weights = [...combo('Font weight').options].map((o) => o.text);
+    expect(weights).toEqual(['Inherited', 'Thin', 'Extra light', 'Light', 'Regular', 'Medium', 'Semibold', 'Bold', 'Extra bold', 'Black']);
+    expect([...combo('Text fit').options].map((o) => o.text)).toEqual(['Auto', 'Clip', 'Shrink to fit', 'Grow to fit']);
+    cleanup();
+    const other = mount(['box']);
+    act(() => void restyle(other.doc, 'a', 'box', { background: 'radial-gradient(#ffffff, #000000)' }, 'test'));
+    expect([...combo('Fill').options].map((o) => o.text)).toContain('Other');
+  });
+
+  it('a swatch’s hover names its role alone', () => {
+    mount(['box']);
+    const swatches = within(screen.getByRole('group', { name: 'Fill colour swatches' })).getAllByRole('button');
+    const accent = swatches.find((b) => b.getAttribute('aria-label') === 'Accent')!;
+    expect(accent.title).toBe('Accent');
+    expect(swatches.every((b) => !b.title.includes('--ds-'))).toBe(true);
+  });
+
+  it('Replace keeps its word while it uploads; an unexpected answer and a late one say so shortly', async () => {
+    let finish!: (ref: string) => void;
+    const uploadAsset = vi.fn(() => new Promise<string>((resolve) => (finish = resolve)));
+    mount(['pic'], { uploadAsset });
+    fireEvent.change(screen.getByLabelText('Image file'), { target: { files: [new File(['x'], 'b.png', { type: 'image/png' })] } });
+    const replace = screen.getByRole('button', { name: 'Replace image' });
+    expect(replace.getAttribute('aria-busy')).toBe('true');
+    expect(replace.textContent).toBe('Replace');
+    await act(async () => finish('pictures/b.png'));
+    expect(screen.getByRole('alert').textContent).toBe('The image could not be replaced');
+    expect(screen.getByRole('button', { name: 'Replace image' }).getAttribute('aria-busy')).toBeNull();
+  });
+
+  it('a replacement finishing after the deck turned read-only is not placed, and says so shortly', async () => {
+    let finish!: (ref: string) => void;
+    const uploadAsset = vi.fn(() => new Promise<string>((resolve) => (finish = resolve)));
+    const { session } = mount(['pic'], { uploadAsset });
+    fireEvent.change(screen.getByLabelText('Image file'), { target: { files: [new File(['x'], 'b.png', { type: 'image/png' })] } });
+    act(() => session.holdWrites(true));
+    await act(async () => finish('assets/b.png'));
+    expect(screen.getByRole('alert').textContent).toBe('Not placed: the deck became read-only');
   });
 });

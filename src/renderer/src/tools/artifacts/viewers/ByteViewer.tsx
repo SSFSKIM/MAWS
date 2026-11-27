@@ -17,7 +17,7 @@
 // visible, so content that loaded hidden counts when it shows. Export and Save a copy are disabled until the shown
 // version and its file are resolved.
 //
-// The header (X32): the title, read-only, the actions (Comment on an HTML page, Reload, Open externally for a kind the
+// The header (X32): the title (no saved state: a page or a file is always read-only), the actions (Comment on an HTML page, Reload, Open externally for a kind the
 // OS opens as a document, Reveal in Finder, Open as file for a drawn file inside its session's directories) and the
 // Export menu (the kind's formats main's exporters serve, a File artifact's Save a copy…). The body's own bar holds the
 // version picker and the frame's console chip, when there is either. The tab owns what the actions read (the version
@@ -80,6 +80,7 @@ import { useDocumentVisible } from './connectors/use-document-visible';
 import { clearArtifactConsole, noteArtifactVersions, useArtifactConsole } from './console';
 import { ConsoleEntriesChip } from './ConsoleChip';
 import { VIEWERS_COPY } from './copy';
+import { QuietSpinner } from '../../../ui/spinner';
 import { HtmlFrame, type FrameHandle } from './frames/HtmlFrame';
 import { Media } from './frames/Media';
 import { PdfFrame } from './frames/PdfFrame';
@@ -268,7 +269,9 @@ function ByteViewer({ kind, artifactId, machine, state, scope, visible, onShown 
         {failed !== null ? (
           <ReadError message={failed} onRetry={reload} />
         ) : content === null || body === null || frameKey === null ? (
-          <p className="p-4 text-ui text-fg-muted">{VIEWERS_COPY.loading}</p>
+          <div className="p-4">
+            <QuietSpinner label={VIEWERS_COPY.loading} />
+          </div>
         ) : (
           <Body
             key={frameKey}
@@ -488,7 +491,7 @@ function useViewerHeader({ kind, artifactId, machine, title, state, scope, conte
   // P4-B5: Send to, the revision the viewer shows (a version's when it is not the latest followed)
   const sendTo = useSendToAction(selection === null ? null : sendToSubject(artifactId, machine, kind, title, selection.versionId === undefined ? null : { versionId: selection.versionId }));
   if (sendTo && formats.length > 0) actions.push(sendTo);
-  useEditorHost(scope, { title, saved: 'readonly', actions, exports });
+  useEditorHost(scope, { title, actions, exports }); // the word cut (T567): a page or a file is always read-only, so no saved state is said
 }
 
 // ---- registration ------------------------------------------------------------------------------------------------------

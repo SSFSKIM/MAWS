@@ -1015,9 +1015,20 @@ test('engine only: an entry with a reference is the session’s alone; with its 
       const engine = await scene.ownerStart(run.page);
       await expect(frame.locator('#last')).toHaveText('revoked:notGranted', { timeout: WATCH_MS + 15_000 });
       const sheet = await scene.openSheet(run.page);
-      await expect(serverRow(sheet, SERVER, 'engineOnly'), 'the sheet says the server is the session’s alone, and why').toContainText(S.engineOnly('unattested'));
+      // the word cut (T600): the row reads "Session only" at rest, and why is the row's note, owned by that word (its
+      // description at all times, drawn in the row once the word has the keyboard)
+      const engineOnly = serverRow(sheet, SERVER, 'engineOnly');
+      const sessionOnly = engineOnly.locator('[data-connector-server-state] [aria-describedby]');
+      await expect(sessionOnly, 'the sheet says the server is the session’s alone').toHaveText(S.engineOnly);
+      await expect(sessionOnly, 'and why').toHaveAccessibleDescription(S.engineOnlyWhy('unattested'));
       await expect(serverRow(sheet, SERVER, 'source'), 'no direct source for it').toHaveCount(0);
       await shot(info, 'engine-only-servers.png', sheet);
+      const why = engineOnly.getByText(S.engineOnlyWhy('unattested'), { exact: true });
+      await run.page.mouse.move(0, 0); // the row not pointed at
+      await expect(why, 'the why undrawn at rest').toBeHidden();
+      await sessionOnly.focus();
+      await expect(sessionOnly, 'the word takes the keyboard').toBeFocused();
+      await expect(why, 'the why opens in the row on keyboard focus').toBeVisible();
       await scene.closeSheet(run.page);
       await allow(scene, run.page, TOOL_NAME);
       await expect(frame.locator('#last')).toHaveText('ok n=1 via=engine', { timeout: 20_000 });

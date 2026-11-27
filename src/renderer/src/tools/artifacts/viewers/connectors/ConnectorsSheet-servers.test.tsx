@@ -5,6 +5,7 @@
 // dependency the section is absent (H's sheet, ./ConnectorsSheet.test.tsx).
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { accessibleDescription } from '../../../../test-support/accessible-text';
 import type { ConnectorServerRow, ConnectorServers } from '@shared/ipc/schema/connectors';
 import type { ConnectorsOwner } from '../../../../artifacts/connector-owner';
 import { ConnectorsSheet } from './ConnectorsSheet';
@@ -67,13 +68,25 @@ describe('the Connectors sheet’s Servers section', () => {
     expect(notes.textContent).toContain('HTTP');
     expect(notes.textContent).toContain('User config · /Users/me/.claude.json');
     expect(within(notes).getByText(/Connected through MAWS/)).toBeTruthy();
-    expect(notes.textContent).toContain('Connected · 3 tools listed');
+    expect(within(notes).getByText(/· 3 tools$/), 'T601: the receipt is the tool count').toBeTruthy();
+    expect(notes.textContent).not.toContain('tools listed');
     expect(buttons(notes)).toEqual(['Reconnect', 'Disconnect']);
     expect(buttons(server('files'))).toEqual(['Connect']);
     expect(server('files').textContent).toContain('MAWS hasn’t listed its tools yet');
     expect(server('wiki').textContent).toContain('This server needs a sign-in');
     expect(server('wiki').textContent).toContain('Connect didn’t finish: the sign-in was declined');
-    expect(server('mail').textContent).toContain('Session only: No session has reported this server since MAWS started');
+    // T600: "Session only" at rest; why in the row's note, owned by the word, which takes the keyboard
+    const why = 'No session has reported this server since MAWS started. Start the artifact’s session once and MAWS can reach it directly afterwards.';
+    const only = within(server('mail')).getByText('Session only');
+    expect(server('mail').querySelector('[data-connector-server-state]')!.textContent, 'the reason is outside the line').toBe('Session only');
+    expect(only.tabIndex).toBe(0);
+    expect(accessibleDescription(only)).toBe(why);
+    const note = server('mail').querySelector<HTMLElement>('[data-row-note]')!;
+    expect(note.hidden, 'the note is closed at rest').toBe(true);
+    act(() => only.focus());
+    expect(note.hidden, 'the keyboard opens it at once').toBe(false);
+    expect(note.textContent).toBe(why);
+    act(() => only.blur());
     expect(buttons(server('mail'))).toEqual([]);
     expect(buttons(server('notes', 'saved'))).toEqual(['Disconnect']);
     expect(server('notes', 'saved').textContent).toContain('Project-local config · /Users/me/old/.claude.json');
@@ -111,7 +124,7 @@ describe('the Connectors sheet’s Servers section', () => {
     await flush();
     expect(server('notes').textContent).toContain('Not used by MAWS until you Connect or MAWS relaunches');
     expect(buttons(server('notes'))).toEqual(['Connect']);
-    expect(document.querySelector('[data-connectors-withdrawn]')!.textContent).toMatch(/until MAWS relaunches.*works again after a relaunch/);
+    expect(document.querySelector('[data-connectors-withdrawn]')!.textContent).toBe('A saved connection couldn’t be read and was forgotten. Connect to sign in again, or relaunch MAWS.'); // T605
   });
 
   // P3-F: recovery rows stand apart from the tools; a page with none declared (and no grant) still reaches them
@@ -128,14 +141,32 @@ describe('the Connectors sheet’s Servers section', () => {
     expect(owner.disconnect).toHaveBeenCalledWith(ARTIFACT, BAD);
   });
 
-  it('says while it reads, and keeps the tools usable', async () => {
+  // T595: the read is a quiet spinner under the heading, no words
+  it('shows a quiet spinner while it reads, and keeps the tools usable', async () => {
     const { tab, owner } = setup();
     vi.mocked(owner.servers).mockImplementation(() => new Promise(() => {}));
     tab.openSheet();
     render(<ConnectorsSheet tab={tab} context={{ kind: 'none' }} />);
     await flush();
-    expect(screen.getByRole('status').textContent).toBe('Reading MAWS’s connections…');
+    const section = document.querySelector<HTMLElement>('[data-connectors-servers]')!;
+    expect(section.textContent).not.toContain('Reading');
+    expect(await within(section).findByRole('progressbar', { name: 'Reading MAWS’s connections…' })).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Allow notes · search to read' })).toBeTruthy();
+  });
+});
+
+describe('the Servers section’s receipts (T601)', () => {
+  it('reads a disconnect as “Disconnected”, revoked or not, and a reach with no MAWS sign-in as the tool count', async () => {
+    const rows: ConnectorServerRow[] = [
+      { kind: 'source', handle: H1, server: 'notes', scope: 'user', transport: 'http', path: '/u/.claude.json', tools: ['search'], needsDiscovery: false, last: { action: 'disconnect', local: 'forgotten', host: 'confirmed', revocation: 'revoked' } },
+      { kind: 'source', handle: H2, server: 'files', scope: 'user', transport: 'stdio', path: '/u/.claude.json', tools: ['read'], needsDiscovery: false, last: { action: 'connect', ok: true, tools: 1, credential: 'none' } },
+    ];
+    const { tab } = setup({ servers: rows });
+    tab.openSheet();
+    render(<ConnectorsSheet tab={tab} context={{ kind: 'none' }} />);
+    await flush();
+    expect(server('notes').querySelector('[data-connector-server-last]')!.textContent).toBe(' · Disconnected');
+    expect(server('files').querySelector('[data-connector-server-last]')!.textContent).toBe(' · 1 tool');
   });
 });
 

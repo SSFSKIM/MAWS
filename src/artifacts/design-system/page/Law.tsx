@@ -3,6 +3,7 @@
 // the web (`urlTransform`); an image loads nothing (the law describes, its canon shows).
 import { harden } from 'rehype-harden';
 import { defaultRehypePlugins, Streamdown, type StreamdownProps, type UrlTransform } from 'streamdown';
+import { PAGE_COPY } from './copy';
 
 const REHYPE: NonNullable<StreamdownProps['rehypePlugins']> = [
   defaultRehypePlugins.sanitize!,
@@ -30,7 +31,7 @@ export function Law(props: { law: string; askAdopt?: AskAdopt }) {
         </Streamdown>
       ) : (
         <div className="dsp-actions">
-          <p className="dsp-muted">No law yet. A system’s law is written, never generated: ask the agent to adopt this system, and it writes DESIGN.md from what it reads.</p>
+          <p className="dsp-muted">{PAGE_COPY.noLaw /* the word cut, G579: the Ask button says what to do */}</p>
           {askAdopt ? (
             <p className="dsp-row">
               <button type="button" className="dsp-button" disabled={askAdopt.unavailable !== null} onClick={() => askAdopt.onAsk()}>

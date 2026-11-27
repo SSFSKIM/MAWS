@@ -128,8 +128,8 @@ export const LIVE_COPY = {
   start: 'Start session',
   openSession: 'Open session',
   asking: 'Starting…',
-  starting: 'Starting the session…',
-  ready: 'The session is ready',
+  starting: 'Starting…', // the word cut (N198): the same wait as asking, in the connector sheet's words (T591)
+  ready: 'Ready',
   refreshing: 'Refreshing…',
   allowLabel: (name: string) => `Allow ${name} to read`,
   allowAgainLabel: (name: string) => `Allow ${name} again`,
@@ -145,8 +145,8 @@ export const LIVE_COPY = {
     failed: 'The last refresh did not reach the dashboard.',
   }),
   hidden: 'Refresh is available while this dashboard is on screen.',
-  replaced: 'This query was replaced or removed after the source opened, so it cannot be refreshed from here.',
+  replaced: 'Query changed since opening', // the word cut (G622)
   showCurrent: 'Show current',
-  newer: (at: string) => `Newer rows were fetched at ${at}; the rows here are the ones captured when the source opened.`,
+  newer: 'Newer rows at', // the word cut (G621): then the fetch's UTC clock, its full time the clock's tooltip
   showLatest: 'Show latest',
 } as const;

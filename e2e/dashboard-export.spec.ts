@@ -389,7 +389,7 @@ test('the owner’s comment on a chart, replied to in the rail, is a Word commen
   await expect(card).toHaveCount(0);
   const rail = await railOf(record);
   await rail.locator(`article[data-thread="${threadId}"]`).getByRole('button', { name: 'Reopen' }).click();
-  await reply(rail, threadId, 'Why does the west dip?');
+  await reply(record, threadId, 'Why does the west dip?');
   await expect(rail.locator(`article[data-thread="${threadId}"]`).getByRole('listitem')).toHaveText(['YouWhy does the west dip?']);
   await durable(record);
 

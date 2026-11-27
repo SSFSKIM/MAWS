@@ -269,7 +269,7 @@ describe('renderView', () => {
     const t: ViewTable = { columns: [{ name: 'k', type: 'string' }, { name: 'v', type: 'number' }], rows: [['a', 1], ['b', 2], ['c', 3], ['d', 4], ['e', 5], ['f', 100], ['g', 200]] };
     const { svg = '', warnings } = renderView({ view: 'pie', x: 'k', y: 'v' }, t, theme, 't');
     expect(tips(svg)).toEqual(['c: 3 (1%)', 'd: 4 (1.3%)', 'e: 5 (1.6%)', 'f: 100 (31.7%)', 'g: 200 (63.5%)', 'other (2): 3 (1%)']);
-    expect(warnings).toContain('7 slices; the five largest are shown individually and the rest are drawn as one');
+    expect(warnings).toContain('Top 5 of 7 slices; the rest as “other”'); // the word cut (G603)
     // unsorted, and ties: equal sizes keep the earlier rows
     const tied: ViewTable = { columns: t.columns, rows: [['a', 5], ['b', 9], ['c', 5], ['d', 1], ['e', 5], ['f', 5], ['g', 5], ['h', 9]] };
     expect(tips(renderView({ view: 'pie', x: 'k', y: 'v' }, tied, theme, 't').svg!).map((tip) => tip.split(':')[0])).toEqual(['a', 'b', 'c', 'e', 'h', 'other (3)']);
@@ -402,6 +402,7 @@ describe('renderView', () => {
     const unreadable = renderFailure(byId('edge-no-dataset').spec, theme, 'sales', 'the file of "sales" could not be read');
     expect(unreadable.svg).toContain('the file of &quot;sales&quot; could not be read');
     expect(unreadable.svg).toContain('aria-label="Monthly sales"');
+    expect(grade(unreadable.svg!).texts.slice(2), 'the word cut (G599): in its frame, after the title and the description, the reason alone').toEqual(['the file of "sales" could not be read']);
     expect(renderView('{"view":"bar"}', gdp, theme, 'gdp').svg).toContain('the view spec is not an object');
   });
 

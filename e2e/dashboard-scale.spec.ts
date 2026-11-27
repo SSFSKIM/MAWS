@@ -361,7 +361,7 @@ test('the dashboard scale gate on the 50,000-row bench: bind, cold open, a 10,00
       await expect(sheet).toBeVisible();
       const readAll = await trial(async () => {
         const started = Date.now();
-        await sheet.getByRole('button', { name: `All source rows (${BENCH_ROWS.toLocaleString('en-US')})` }).click();
+        await sheet.getByRole('button', { name: `All rows (${BENCH_ROWS.toLocaleString('en-US')})` }).click(); // the word cut (G612)
         await expect(sheet.getByRole('table', { name: 'Rows' })).toHaveAttribute('aria-rowcount', String(BENCH_ROWS + 1), { timeout: 60_000 });
         return { value: Date.now() - started };
       });

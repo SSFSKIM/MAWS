@@ -9,8 +9,12 @@
 // editor's reply drafts, the pin popover's too, so a reply typed in either is there in the other. Show opens the
 // thread's pin popover (the controller's, V11) and the rail stays open.
 // WR 49: conversations whose targets were deleted stay out of both sections until explicitly revealed.
+// The word cut (docs/doperpowers/specs/2026-11-16-word-cut-design.md, M5 task 3): the toggle reads Show deleted, its name
+// the longer words (G479); an orphan says Element deleted (G481); Reply is a send glyph, greyed while empty (G482).
 import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
 import { actorDisplay } from '@shared/artifacts/actor';
+import { NamedGlyph } from '../../../../renderer/src/ui/glyph';
+import { SendIcon } from '../../../ui/icons';
 import { newThreadId, reopen, reply, resolve, type DeckThreadState } from '../../threads';
 import { useDeckView } from '../deck-view';
 import { COMMENTS_ORIGIN, type DeckCommentsApi } from './controller';
@@ -23,11 +27,13 @@ import './comments.css';
 /**
  * P3-E (E1 M4; the P3-E spec's Decision Log 29): the rail's words for an artifact whose threads are not on slides (a
  * design's boards): the empty text, and per thread where it is, its Show button's name and its orphan note (`index`: the
- * thread's slide's place, 1-based, null when it is gone). Absent, C's own words.
+ * thread's slide's place, 1-based, null when it is gone); a null note draws none (the word cut, G545: a design says a
+ * deleted board once, in the location); a null location draws no location line (a design's board, which its quote names
+ * already). Absent, C's own words.
  */
 export interface CommentsRailLabels {
   empty: string;
-  target(thread: DeckThreadState, index: number | null): { location: string; show: string; orphan: string };
+  target(thread: DeckThreadState, index: number | null): { location: string | null; show: string; orphan: string | null };
 }
 
 export function CommentsRail({ api, onClose, labels }: { api: DeckCommentsApi; onClose(): void; labels?: CommentsRailLabels /* P3-E */ }) {
@@ -71,8 +77,8 @@ export function CommentsRail({ api, onClose, labels }: { api: DeckCommentsApi; o
       </header>
       <div className="deck-comments-body">
         {threads.some((thread) => !thread.live) && (
-          <button type="button" className="deck-comments-section" aria-pressed={showDeleted} onClick={() => setShowDeleted(!showDeleted)}>
-            {showDeleted ? 'Hide deleted-target comments' : 'Show deleted-target comments'}
+          <button type="button" className="deck-comments-section" aria-label={showDeleted ? C.hideDeletedName : C.showDeletedName} aria-pressed={showDeleted} onClick={() => setShowDeleted(!showDeleted)}>
+            {showDeleted ? C.hideDeleted : C.showDeleted}
           </button>
         )}
         {open.length === 0 ? <p className="deck-comments-empty">{labels?.empty ?? C.empty /* P3-E */}</p> : open.map(item)}
@@ -94,7 +100,7 @@ interface ItemProps {
   thread: DeckThreadState;
   slide: number | null;
   /** P3-E: the thread's words from the rail's labels, else C's. */
-  copy?: { location: string; show: string; orphan: string };
+  copy?: { location: string | null; show: string; orphan: string | null };
   selected: boolean;
   readOnly: boolean;
   /** P4-B2: the thread's reply draft, the editor's. */
@@ -123,10 +129,10 @@ function ThreadItem({ thread, slide, copy, number, selected, readOnly, draft, on
       data-element={thread.elementId}
     >
       <button type="button" className="deck-thread-quote" aria-label={copy?.show ?? C.show(thread.quote) /* P3-E */} onClick={onShow}>
-        <span className="deck-thread-slide">{copy?.location ?? C.slide(slide) /* P3-E */}</span>
+        {copy?.location !== null && <span className="deck-thread-slide">{copy ? copy.location : C.slide(slide) /* P3-E */}</span>}
         <span className="deck-thread-quote-text">{thread.quote}{number === undefined ? '' : ` · Element ${number}`}</span>
       </button>
-      {thread.orphan && <p className="deck-thread-note">{copy?.orphan ?? C.orphan /* P3-E */}</p>}
+      {thread.orphan && (copy ? copy.orphan : C.orphan) !== null && <p className="deck-thread-note">{copy ? copy.orphan : C.orphan /* P3-E */}</p>}
       {thread.messages.length > 0 && (
         <ol className="deck-thread-messages">
           {thread.messages.map((message) => {
@@ -182,9 +188,9 @@ function ReplyField({ text, setText, onReply }: { text: string; setText(text: st
       }}
     >
       <textarea className="deck-thread-reply-field" aria-label={C.reply} placeholder={C.replyPlaceholder} rows={1} value={text} onChange={(event) => setText(event.target.value)} onKeyDown={onKeyDown} />
-      <button type="submit" className="deck-button" disabled={body === ''}>
-        {C.reply}
-      </button>
+      <NamedGlyph type="submit" label={C.reply} unavailable={body === '' ? C.replyUnavailable : null} className="deck-button deck-glyph">
+        <SendIcon />
+      </NamedGlyph>
     </form>
   );
 }

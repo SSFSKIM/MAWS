@@ -70,7 +70,7 @@ async function openFromLibrary(page: Page, title: string, artifactId: string): P
 }
 
 /** Present stays direct; Theme and Check live in the deck toolbar's action menu. */
-async function deckAction(page: Page, label: 'Present' | 'Theme' | 'Check against the design system'): Promise<void> {
+async function deckAction(page: Page, label: 'Present' | 'Theme' | 'Check design'): Promise<void> {
   const toolbar = page.locator('[data-region="main"] .deck-toolbar [data-editor-toolbar]');
   if (label === 'Present') return toolbar.getByRole('button', { name: label, exact: true }).click();
   await toolbar.getByRole('button', { name: 'Deck actions', exact: true }).click();
@@ -150,7 +150,7 @@ test('the design system: Theme switches the deck’s system and overrides it, Te
   expect(files[`project/slides/${made.at(-1)}.html`]).toContain('var(--ds-type-title-size)');
 
   // Check: the planted literal colour is listed under its slide; a click shows the slide and selects the element
-  await deckAction(page, 'Check against the design system');
+  await deckAction(page, 'Check design'); // the word cut (T636)
   const check = tab.locator('[data-deck-rail="check"]');
   await expect(check).toBeVisible();
   const violation = check.locator('[data-violation="literal-color"][data-element="loud"]');
@@ -233,7 +233,9 @@ test('the presenter: the audience window and the presenter view, builds, a fade,
   await expect(presenter.locator('[data-present-view="presenter"]')).toBeVisible();
   await expect.poll(() => at(presenter)).toBe('build/2');
   await expect(presenter.locator('[data-present-notes]')).toContainText('Build the points one by one.');
-  await expect(presenter.locator('[data-present-count]')).toHaveText('Slide 2 of 3');
+  // the word cut (G502): the count reads "2 / 3", its words its name
+  await expect(presenter.locator('[data-present-count]')).toHaveText('2 / 3');
+  await expect(presenter.getByRole('img', { name: 'Slide 2 of 3', exact: true })).toBeVisible();
   // the hidden backup slide is skipped: next is the closing slide
   await expect(presenter.locator('[data-present-next] .maws-slide')).toHaveAttribute('data-slide', 'close');
   await expect(presenter.locator('[data-present-timer]')).toHaveText(/^\d+:\d\d$/);

@@ -10,8 +10,18 @@
 // activates it as a click does first), E resolves or reopens, J and K the next and previous thread, U and Escape back
 // to the text (the prior art's K3); Escape in the reply field exits too and keeps a written draft (X36's draft rule).
 // Each key acts only when the host gave its handler. App chrome: comments.css, app tokens only.
+// The word cut (docs/doperpowers/specs/2026-11-16-word-cut-design.md, M5; G384, G385, G388): Resolve or Reopen shows over
+// the right end of the first author line on the card pointed at, holding the keyboard or active (the shared hover scope;
+// placed by comments.css, it takes no space, so the quote and the messages keep the card's whole width); the reply field
+// is the active card's only, the panel's cards included, and its send a glyph named Reply; a card whose passage is gone
+// strikes its quote where it draws one, or carries a Removed tag, the sentence each one's tooltip.
 import { useEffect, useRef, type KeyboardEvent, type MouseEvent, type Ref } from 'react';
 import { actorDisplay } from '@shared/artifacts/actor';
+import { NamedGlyph } from '../../renderer/src/ui/glyph';
+import { HOVER_SCOPE, ON_HOVER } from '../../renderer/src/ui/hover-scope';
+import { Tip } from '../../renderer/src/ui/tip';
+import { SendIcon } from '../ui/icons';
+import { THREAD_CARD_COPY as W } from './copy';
 import type { ThreadState } from '../document/threads';
 import './comments.css';
 
@@ -47,7 +57,13 @@ export interface ThreadCardProps {
   tabTitle?: string | null;
   /** The store is read-only: no reply field, Resolve and Reopen disabled. */
   readOnly?: boolean;
+  /** A request (its serial) to take the keyboard to the reply field once the card is active: the word cut (G385) put
+   * the field on the active card only, and the card that asked may have closed before this one became active. */
+  replyAsked?: number;
+  /** The field took the keyboard for `replyAsked`: the request's owner drops it, so it is answered once. */
+  onReplyTaken?(): void;
 }
+
 
 /** The latest replies a compacted card keeps after the first message. */
 const COMPACT_LATEST = 2;
@@ -70,7 +86,7 @@ const isTextField = (target: EventTarget): boolean =>
   (target instanceof HTMLTextAreaElement || target instanceof HTMLInputElement || target instanceof HTMLSelectElement || (target instanceof HTMLElement && target.isContentEditable)) &&
   !(target instanceof HTMLInputElement && ['checkbox', 'radio', 'button', 'submit', 'reset'].includes(target.type));
 
-export function ThreadCard({ thread, active, compact, onActivate, onReply, onResolve, onReopen, draft, onDraftChange, onNext, onPrevious, onExit, position, showQuote = false, tabTitle = null, readOnly = false }: ThreadCardProps) {
+export function ThreadCard({ thread, active, compact, onActivate, onReply, onResolve, onReopen, draft, onDraftChange, onNext, onPrevious, onExit, position, showQuote = false, tabTitle = null, readOnly = false, replyAsked, onReplyTaken }: ThreadCardProps) {
   const replyField = useRef<HTMLTextAreaElement>(null);
   // set by the card's own click, so the activation that click causes moves the keyboard to the reply field; cleared
   // once the activation lands or the focus leaves the card
@@ -82,7 +98,16 @@ export function ThreadCard({ thread, active, compact, onActivate, onReply, onRes
 
   const open = thread.status === 'open';
   const whole = active || !compact;
-  const replying = whole && open && !readOnly;
+  const replying = active && open && !readOnly; // the word cut (G385): the active card's only
+  // the word cut (G385): a reply asked of this card from elsewhere (the panel's card that asked closed with the panel)
+  // takes the keyboard to the field once the card is active; the asker then drops the request, so it is answered once.
+  // An active card that cannot reply (resolved, read-only) answers it by dropping it: kept, a later reopen would mount the
+  // field and take the keyboard from wherever the person is by then.
+  useEffect(() => {
+    if (replyAsked === undefined || !active) return;
+    if (replying) replyField.current?.focus();
+    onReplyTaken?.();
+  }, [replyAsked, active, replying, onReplyTaken]);
   const { messages } = thread;
   const hidden = whole ? 0 : Math.max(0, messages.length - 1 - COMPACT_LATEST);
   const head = hidden > 0 ? messages.slice(0, 1) : messages;
@@ -126,6 +151,7 @@ export function ThreadCard({ thread, active, compact, onActivate, onReply, onRes
 
   return (
     <article
+      {...HOVER_SCOPE}
       className="thread-card"
       role="group"
       aria-label={accessibleName(thread, position)}
@@ -141,13 +167,28 @@ export function ThreadCard({ thread, active, compact, onActivate, onReply, onRes
       }}
     >
       {showQuote && (
-        // the class names after the card's own are the panel's long-standing hooks (the e2e cases read them)
-        <button type="button" className="thread-card-quote doc-thread-quote" aria-label={`Show passage: ${thread.quote}`} onClick={activateByClick}>
-          {tabTitle !== null && <span className="thread-card-tab doc-thread-tab">{tabTitle}</span>}
-          <span className="thread-card-quote-text doc-thread-quote-text">{thread.quote}</span>
-        </button>
+        // the class names after the card's own are the panel's long-standing hooks (the e2e cases read them); an
+        // orphan's quote is struck, the sentence its tooltip (the word cut, G388)
+        <Tip content={thread.orphan ? W.removedTip : null} description={thread.orphan ? W.removedTip : null}>
+          <button type="button" className="thread-card-quote doc-thread-quote" aria-label={`Show passage: ${thread.quote}`} onClick={activateByClick}>
+            {tabTitle !== null && <span className="thread-card-tab doc-thread-tab">{tabTitle}</span>}
+            {thread.orphan ? (
+              <s className="thread-card-quote-text doc-thread-quote-text" data-removed="">
+                {thread.quote}
+              </s>
+            ) : (
+              <span className="thread-card-quote-text doc-thread-quote-text">{thread.quote}</span>
+            )}
+          </button>
+        </Tip>
       )}
-      {thread.orphan && <p className="thread-card-note">The commented passage was removed.</p>}
+      {thread.orphan && !showQuote && (
+        <Tip content={W.removedTip} description={W.removedTip}>
+          <span className="thread-card-removed" tabIndex={0}>
+            {W.removed}
+          </span>
+        </Tip>
+      )}
       {head.length > 0 && <Messages messages={head} />}
       {hidden > 0 && (
         <>
@@ -156,7 +197,9 @@ export function ThreadCard({ thread, active, compact, onActivate, onReply, onRes
         </>
       )}
       {replying && <ReplyField ref={replyField} draft={draft} onDraftChange={onDraftChange} onReply={onReply} onExit={onExit} />}
-      <div className="thread-card-actions">
+      {/* the word cut (G384): over the first author line's right end, drawn on the card pointed at, focused or active;
+          last in the card, so the Tab order reaches it after the reply field */}
+      <div className="thread-card-actions" {...(active ? {} : ON_HOVER)}>
         {open ? (
           <button type="button" className="thread-card-button" disabled={readOnly} onClick={onResolve}>
             Resolve
@@ -218,9 +261,9 @@ function ReplyField({ ref, draft, onDraftChange, onReply, onExit }: { ref: Ref<H
       }}
     >
       <textarea ref={ref} className="thread-card-reply-field" aria-label="Reply" placeholder="Reply…" rows={1} value={draft} onChange={(event) => onDraftChange(event.target.value)} onKeyDown={onKeyDown} />
-      <button type="submit" className="thread-card-button" disabled={body === ''}>
-        Reply
-      </button>
+      <NamedGlyph type="submit" label={W.replyName} unavailable={body === '' ? W.replyUnavailable : null} className="thread-card-button thread-card-send">
+        <SendIcon />
+      </NamedGlyph>
     </form>
   );
 }

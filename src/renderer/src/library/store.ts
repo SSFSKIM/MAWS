@@ -156,6 +156,8 @@ export const watchLibrarySpaces = (client: MawsBridge = ipc, machine: MachineRef
     const result = await c.invoke('library.spaces', undefined, { machine });
     return result.ok ? { ok: true, value: result.value.spaces } : result;
   }, machine, client);
+// The Spaces read again alone (a failed read's Try again).
+export const refreshLibrarySpaces = (client: MawsBridge = ipc, machine: MachineRef = client.localMachine): void => read(spacesKey(machine), client);
 
 // UX wave U10b (M9, §E.2): this Mac's Spaces' instructions. Not a read of main's index, whose `library.changed` they do not
 // follow: read again at this Mac's `spaces.changed` (connectLibrary) and after this window's own write.

@@ -11,6 +11,7 @@ import type { MachineRef } from '@shared/machine/ref';
 import type { LibraryRow, LibrarySpace } from '@shared/ipc/schema/library';
 import { openArtifactTab } from './actions';
 import { LIBRARY_PAGE as P } from './copy';
+import { QuietSpinner } from '../ui/spinner';
 import { MakeSomethingNew } from './MakeSomethingNew';
 import { Row } from './Row';
 import { SpaceInstructionsMark, SpaceMenu } from './SpaceDialogs';
@@ -21,9 +22,10 @@ export type Line =
   | { kind: 'heading'; key: string; title: string; space?: LibrarySpace }
   | { kind: 'row'; key: string; row: LibraryRow }
   | { kind: 'groupEmpty'; key: string }
-  | { kind: 'note'; key: string; text: string; retry?: () => void; tone?: 'quiet' | 'warning' };
+  | { kind: 'note'; key: string; text: string; retry?: () => void; tone?: 'quiet' | 'warning' }
+  | { kind: 'wait'; key: string; label: string };
 
-const ESTIMATES: Record<Line['kind'], number> = { make: 132, heading: 36, row: 56, groupEmpty: 28, note: 72 };
+const ESTIMATES: Record<Line['kind'], number> = { make: 132, heading: 36, row: 56, groupEmpty: 28, note: 72, wait: 72 };
 const MOVES: Record<string, (at: number, last: number) => number> = {
   ArrowDown: (at, last) => Math.min(at + 1, last),
   ArrowUp: (at) => Math.max(at - 1, 0),
@@ -140,6 +142,13 @@ export function Rows({ lines, machine }: { lines: Line[]; machine: MachineRef })
         return <p className="m-0 px-2 py-1 text-ui-sm text-fg-faint">{P.emptySpaceGroup}</p>;
       case 'note':
         return <Note text={line.text} retry={line.retry} tone={line.tone} />;
+      case 'wait':
+        // the word cut (N190): a read is the quiet spinner in the note's place, with the note's height
+        return (
+          <div className="flex min-h-[calc(1lh+3rem)] items-center px-2 text-ui">
+            <QuietSpinner label={line.label} />
+          </div>
+        );
       case 'row':
         return (
           <Row

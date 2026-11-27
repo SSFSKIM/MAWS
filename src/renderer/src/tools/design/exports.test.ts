@@ -71,9 +71,9 @@ describe('an export from the menu', () => {
     await act(() => exportDesign(A, TEST_MACHINE, { format: 'png', board: 'poster' }, { ask: async (sheet) => (asked.push(sheet), true), boardName: () => 'Poster' }));
     expect(asked).toEqual([
       {
-        title: 'Export “Poster” at 91.02%?',
-        body: '“Poster” is 1080 × 9000 px. A PNG can be at most 8192 px on a side, so MAWS exports the whole board at 91.02% (983 × 8192 px); nothing is cropped.',
-        confirmLabel: 'Export at 91.02%',
+        title: 'Export “Poster” at 91%?', // the word cut (G556): a whole-number percentage; the export takes the exact scale
+        body: 'Too large for a PNG at full size.', // T632: the numbers stay in the title and the button
+        confirmLabel: 'Export at 91%',
         destructive: false,
       },
     ]);
@@ -89,7 +89,7 @@ describe('an export from the menu', () => {
     const asked: string[] = [];
     const context = { board: 'poster', label: 'Festival poster (Draft)', shown: { versionId: 2, board: 'poster', label: 'Festival poster (Draft)' } };
     await act(() => runDesignExport(A, TEST_MACHINE, entry('png'), context, { ask: async (sheet) => (asked.push(sheet.title), false) }));
-    expect(asked).toEqual(['Export “Festival poster (Draft)” at 91.02%?']);
+    expect(asked).toEqual(['Export “Festival poster (Draft)” at 91%?']);
   });
 
   it('declined, nothing more is asked of main; any other refusal is told and nothing is saved', async () => {

@@ -6,7 +6,11 @@
 // through the tab's shared reader, drops any paint a later change has made stale, keeps the earlier figure dimmed while
 // a replacement's rows are read, and releases everything (its subscriptions, its pending paint, its hover) through the
 // disposer it answers. Under the figure: the source label (a button opening the source sheet on the descriptor as it
-// was drawn) and the notes (validation mismatches, what the view could not show). The caption above is the spec's title.
+// was drawn) and the notes (what the view could not show). The caption above is the spec's title. The word cut
+// (docs/doperpowers/specs/2026-11-16-word-cut-design.md, M5; G597, G598, G604): the spec's own warnings are not on the
+// tile (the host's answers to the agent carry them); a column's wrong-type values are a ⚠ mark after the label, the note
+// its name and what it shows pointed at or focused (the source sheet says them as before); the first load is a quiet
+// spinner named by its wait.
 // Portable: DOM only, no window.maws; the renderer's tab supplies the reader and the source sheet.
 import type { TiptapEditorHTMLElement } from '@tiptap/core';
 import type { Node as PMNode } from '@tiptap/pm/model';
@@ -17,8 +21,10 @@ import { datasetIdFromSource, readDataset, snapshotOf, type DatasetDescriptor } 
 import { dsOverrides } from '../../document/meta';
 import { captionOf, renderFailure, renderView, themeFrom, THEME_PROPERTIES, type Rendered, type Theme } from '../render';
 import { parseSpec } from '../spec';
-import { DATASET_STATES, mismatchNotes, sourceLabel } from '../states';
-import { attachHover } from './hover';
+import { QUIET_MS } from '../../../renderer/src/ui/spinner';
+import { DATASET_STATES, isSlicesFolded, mismatchNotes, sourceLabel } from '../states';
+import { TILE_COPY } from './copy';
+import { attachHover, placeNote } from './hover';
 import { livePauseLabel, livePauseOf, type LiveDatasets } from './live'; // E3
 import type { SnapshotReader } from '../snapshots';
 
@@ -176,6 +182,8 @@ export function createChartRenderer(deps: ChartRendererDeps): NonNullable<ViewEn
       button.addEventListener('click', () => deps.openSource(captured));
       source.append(button);
     };
+    // the spec's own warnings (an unknown key, an invalid value): the agent's to read in the host's answers, not the tile's
+    const specWarnings = new Set(parsed.ok ? parsed.warnings : []);
     const show = (rendered: Rendered, descriptor: DatasetDescriptor | null) => {
       frame.innerHTML = rendered.svg ?? rendered.html; // the renderer's escaped, script-free SVG or table (its grade), never a string of the page's
       frame.append(tip);
@@ -183,10 +191,27 @@ export function createChartRenderer(deps: ChartRendererDeps): NonNullable<ViewEn
       label(descriptor);
       // what the view could not show as asked; a view that cannot be drawn says so in its own frame already
       const drawnInPlace = rendered.svg?.includes('<desc>This view cannot be drawn: ') ?? false;
-      const notes = [...(descriptor ? mismatchNotes(descriptor) : []), ...(drawnInPlace ? [] : rendered.warnings)];
+      const viewNotes = [...new Set(drawnInPlace ? [] : rendered.warnings.filter((warning) => !specWarnings.has(warning)))];
+      // a column's wrong-type values (G598) and a folded pie's note (G603): a mark that takes the keyboard, the notes
+      // its name and what it shows (sheet.css); the view's other limits stay at rest under it (G596)
+      const marked = [...(descriptor ? mismatchNotes(descriptor) : []), ...viewNotes.filter(isSlicesFolded)];
+      if (marked.length > 0) {
+        const mark = element('span', 'dash-warning');
+        mark.textContent = '⚠';
+        mark.setAttribute('role', 'img');
+        mark.tabIndex = 0;
+        mark.setAttribute('aria-label', marked.join(' · '));
+        mark.dataset.note = marked.join(' · ');
+        // the note opens inside what can be seen of the editor, flipped or narrowed at its edge (hover.ts)
+        const place = () => placeNote(mark);
+        mark.addEventListener('pointerenter', place);
+        mark.addEventListener('focus', place);
+        source.append(mark);
+      }
+      const notes = viewNotes.filter((note) => !isSlicesFolded(note));
       if (notes.length > 0) {
         const list = element('div', 'dash-notes');
-        list.textContent = [...new Set(notes)].join(' · ');
+        list.textContent = notes.join(' · ');
         source.append(list);
       }
       view.removeAttribute('aria-busy');
@@ -205,8 +230,17 @@ export function createChartRenderer(deps: ChartRendererDeps): NonNullable<ViewEn
       shown = { descriptor };
       if (frame.querySelector('svg, table')) view.setAttribute('aria-busy', 'true'); // the earlier view stays, dimmed
       else if (descriptor) {
-        frame.textContent = `Loading ${descriptor.title}…`;
+        // the word cut (G604): the quiet spinner. For its quiet half second the ring is nothing, to the eye (sheet.css) and
+        // to assistive technology alike; then it is a progressbar named by the wait
+        const spinner = element('span', 'dash-loading-ring');
+        frame.replaceChildren(spinner);
         frame.classList.add('dash-loading');
+        const wait = TILE_COPY.loadingName(descriptor.title);
+        setTimeout(() => {
+          if (released || spinner.parentNode !== frame) return;
+          spinner.setAttribute('role', 'progressbar');
+          spinner.setAttribute('aria-label', wait);
+        }, QUIET_MS);
       }
       let rendered: Rendered;
       let started: number | null = null;

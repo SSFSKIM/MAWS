@@ -148,13 +148,16 @@ describe('the dashboard editor in L’s registry', () => {
     fileChecks.mockResolvedValue({ revision: 12, files: [{ id: 'sales', ref: 'assets/sales.csv', state: 'changed' }] });
     mount();
     await until(() => screen.queryByRole('button', { name: 'Reread Regional sales' }) !== null, 'changed source action');
-    expect(screen.getByRole('status').textContent).toContain('sales.csv changed');
+    expect(screen.getByRole('status').textContent).toBe('sales.csv changedReread'); // T626: the fact and Reread, no explanation
     let finish!: (result: { revision: number; versionId: number }) => void;
     rereads.mockImplementation(() => new Promise((resolve) => { finish = resolve; }));
     act(() => screen.getByRole('button', { name: 'Reread Regional sales' }).click());
     expect(rereads).toHaveBeenCalledWith({ artifactId: A, id: 'sales', baseRevision: 12 });
     expect(screen.getByRole<HTMLButtonElement>('button', { name: 'Reread Regional sales' }).disabled).toBe(true);
-    expect(screen.getByRole('status').textContent).toContain('Rereading');
+    // N192: Reread keeps its word while it reads, with the quiet spinner beside it
+    expect(screen.getByRole<HTMLButtonElement>('button', { name: 'Reread Regional sales' }).textContent).toBe('Reread');
+    expect(screen.getByRole('status').textContent).not.toContain('Rereading');
+    expect(await screen.findByRole('progressbar', { name: 'Rereading…' })).toBeTruthy();
     fileChecks.mockResolvedValue({ revision: 13, files: [{ id: 'sales', ref: 'assets/new-sales.csv', state: 'current' }] });
     await act(async () => finish({ revision: 13, versionId: 4 }));
     await until(() => screen.queryByRole('button', { name: 'Reread Regional sales' }) === null, 'stale signal cleared');
@@ -168,6 +171,7 @@ describe('the dashboard editor in L’s registry', () => {
     fileChecks.mockResolvedValue({ revision: 12, files: [{ id: 'sales', ref: 'assets/sales.csv', state: 'unavailable' }] });
     mount();
     await until(() => screen.queryByText(/sales.csv is unavailable/) !== null, 'missing source signal');
+    expect(screen.getByRole('status').textContent).toBe('sales.csv is unavailable'); // T626
     expect(screen.queryByRole('button', { name: 'Reread Regional sales' })).toBeNull();
     expect(rereads).not.toHaveBeenCalled();
   });
@@ -179,11 +183,13 @@ describe('the dashboard editor in L’s registry', () => {
       files.setAttr('data.csv', 'a,b\n1,2\n');
     });
     const { onShown } = mount();
-    await until(() => screen.queryByText(/made before dashboards were documents/) !== null, 'the held notice');
+    // T629: the notice says what it is and the way on, above the files, and nothing below them
+    await until(() => screen.queryByText('An older dashboard, kept read-only. To keep working on it, ask an agent to rebuild it from these files:') !== null, 'the held notice');
+    expect(screen.getByRole('status').lastElementChild?.tagName).toBe('UL');
     expect(screen.getByText('data.csv')).toBeTruthy();
     expect(screen.getByText('index.html')).toBeTruthy();
     expect(document.querySelector('.ProseMirror')).toBeNull();
-    expect(header().saved).toBe('readonly');
+    expect(header().saved ?? null, 'N191: the notice says read-only; the header does not say it again').toBeNull();
     await until(() => onShown.mock.calls.length > 0, 'the owner’s view');
   });
 });

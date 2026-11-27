@@ -21,7 +21,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { expect, test, type Locator, type Page } from '@playwright/test';
 import { launchMaws, REPO_ROOT, type MawsLaunch } from './support/launch';
-import { asAgent, boardsOf, createDesign, DESIGN_FILES, editDesign, elementOf, filesOf, headerAction, ok, openFromLibrary, pinOffset, plain, seamInstalled, seed, threadsOf } from './support/design';
+import { asAgent, boardsOf, createDesign, DESIGN_FILES, editDesign, elementOf, filesOf, headerAction, ok, openFromLibrary, pinOffset, plain, seamInstalled, seed, threadsOf, toggleComments } from './support/design';
 
 let launch: MawsLaunch | null = null;
 let channel: string | null = null;
@@ -140,7 +140,7 @@ test('history per board: the rail, two versions’ changes in the world and list
   });
   expect(await elementOf(page, id, 'desktop', 'gone')).toBeUndefined();
   await tab.getByRole('button', { name: 'Board Spare options' }).click();
-  await page.getByRole('menuitem', { name: 'Delete board' }).click();
+  await page.getByRole('menuitem', { name: 'Delete', exact: true }).click(); // the word cut (G525)
   await expect.poll(async () => (await boardsOf(page, id)).map((b) => b.id)).toEqual(['phone', 'desktop']);
   await ok(page, 'artifacts.update', { artifactId: id, designSystemId: maws.id });
   await expect.poll(() => computed(liveHead, 'color'), { timeout: 15_000 }).toBe(TEXT_IN.maws);
@@ -290,8 +290,8 @@ test('See N new changes: an agent’s cross-board move between two views is offe
 
   tab = await openFromLibrary(page, 'Pill lab', id);
   const pill = tab.locator('.deck-history-pill');
-  await expect(pill.getByRole('button', { name: 'See 1 new change' })).toBeVisible();
-  await pill.getByRole('button', { name: 'See 1 new change' }).click();
+  await expect(pill.getByRole('button', { name: '1 new change', exact: true })).toBeVisible(); // the word cut (N201)
+  await pill.getByRole('button', { name: '1 new change', exact: true }).click();
   const bar = tab.getByRole('toolbar', { name: 'Version preview' });
   await expect(bar.locator('.deck-history-heading')).toHaveText('Changes since you last looked');
   await expect(bar.locator('[data-history-count]')).toHaveText('1 change');
@@ -410,7 +410,7 @@ test('carried design survives app relaunch with geometry, in-place text, convers
   const pin = tab.locator('[data-comment-pin="note"]');
   await expect(pin).toHaveCount(1);
   await expect.poll(() => pinOffset(pin, tab.locator('[data-board-id="desktop"] [data-eid="note"]'))).toBeLessThan(4);
-  await tab.getByRole('toolbar', { name: 'Design' }).getByRole('button', { name: /^Comments/ }).click();
+  await toggleComments(page); // the word cut (G512): the header's Comments action opens the rail
   const thread = tab.getByRole('complementary', { name: 'Comments' }).locator('article[data-thread="carried-note"]');
   await expect(thread).toContainText('Keep the launch date.');
   await expect(thread).toContainText('The date is confirmed.');

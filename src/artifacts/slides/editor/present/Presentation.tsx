@@ -6,8 +6,11 @@
 // audience window is the only one and P shows the presenter view in it. The two windows keep one position over a
 // `BroadcastChannel` (channel.ts). The deck is a live replica nobody writes here: an edit, an agent's republish, a slide
 // hidden or removed while the show runs shows at once, and the show stays where it can (sequence.ts).
+// The word cut (docs/doperpowers/specs/2026-11-16-word-cut-design.md, M5 task 3; G502): the presenter bar's count reads
+// "3 / 12", named "Slide 3 of 12".
 import { useCallback, useEffect, useEffectEvent, useLayoutEffect, useRef, useState, useSyncExternalStore, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react';
 import { DesignSystemScope, type DesignSystemRef } from '../../../design-system/apply';
+import { BareCount } from '../../../../renderer/src/ui/count';
 import { onUpdate, type Doc } from '../../../yjs';
 import * as Y from '../../../yjs/slides';
 import type { AssetUrl } from '../../canvas';
@@ -199,7 +202,7 @@ export function Presentation({ doc, artifactId, role, paired, start, system, ass
         <header className="present-bar" onMouseDown={dropBarFocus}>
           <Elapsed since={startedAt} />
           <span className="present-count" data-present-count>
-            {C.count(read.index, read.count)}
+            <BareCount count={C.count(read.index, read.count)} meaning={C.countName(read.index, read.count)} />
           </span>
           {shown.black && <span className="present-black-badge">{C.blackShown}</span>}
           <span className="present-bar-spacer" />

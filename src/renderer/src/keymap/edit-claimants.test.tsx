@@ -185,9 +185,9 @@ describe('everything else stays native, through layout.nativeEdit', () => {
     const { session, container, left } = mountDeck({ history: api });
     act(() => session.toggleRail('history'));
     fireEvent.click(await screen.findByRole('button', { name: /^Version Draft by/ }));
-    await screen.findByRole('button', { name: 'Back to presentation' });
+    await screen.findByRole('button', { name: 'Done, back to presentation' });
     expect(container.querySelector('[data-history-previewing]')).not.toBeNull();
-    focus(screen.getByRole('button', { name: 'Back to presentation' }));
+    focus(screen.getByRole('button', { name: 'Done, back to presentation' }));
     page.menu('undo');
     expect(native()).toEqual([{ op: 'undo' }]);
     expect(left()).toBe('340px');

@@ -4,6 +4,8 @@
 // `newElement`, loaded through the dialect; where it goes is the editor's.
 // Final fix wave (B4): the image's upload is the session's awaited edit (`later`): the tab's close waits for it, and it
 // is placed only if the deck still takes writes when the upload is done.
+// The word cut (docs/doperpowers/specs/2026-11-16-word-cut-design.md, M5 task 3): a table's size reads bare, its name
+// "2 × 3 table" (G411); the upload's notice reads "Uploading…" (G415) and a late one "Not placed…" (G416).
 import { preserveSubmenuPointer } from '../../../ui/menu-pointer';
 import { DropdownMenu } from 'radix-ui';
 import { useRef } from 'react';
@@ -11,6 +13,7 @@ import { ICON_GLYPHS } from '../../glyphs';
 import { ICON_NAMES } from '../../parse';
 import type { NewKind } from '../../writers-elements';
 import { DECK_COPY as C } from '../copy';
+import type { ShowNotice, StartStatus } from '../notice';
 import type { DeckSession } from '../session';
 
 const SHAPES = ['rect', 'rounded', 'ellipse', 'diamond', 'arrow-right', 'arrow-left', 'arrow-up', 'arrow-down', 'line'] as const;
@@ -30,10 +33,12 @@ export interface InsertMenuProps {
   onInsert: (kind: NewKind) => void;
   /** Uploads a picked image and answers its `assets/<name>` ref; without it the menu has no Image item. */
   uploadAsset?: (file: File) => Promise<string>;
-  onNotice?: (text: string) => void;
+  onNotice?: ShowNotice;
+  /** The upload's status, shown while it runs (G415). */
+  onStatus?: StartStatus;
 }
 
-export function InsertMenu({ session, disabled, onInsert, uploadAsset, onNotice }: InsertMenuProps) {
+export function InsertMenu({ session, disabled, onInsert, uploadAsset, onNotice, onStatus }: InsertMenuProps) {
   const file = useRef<HTMLInputElement>(null);
   const item = (kind: NewKind, label: string) => (
     <DropdownMenu.Item className="deck-menu-item" onSelect={() => onInsert(kind)}>
@@ -44,11 +49,14 @@ export function InsertMenu({ session, disabled, onInsert, uploadAsset, onNotice 
     const picked = file.current?.files?.[0];
     if (file.current) file.current.value = '';
     if (!picked || !uploadAsset) return;
-    onNotice?.(C.uploading);
+    // the status lasts while the upload runs; its end clears only it, so a refusal the placing said stays (G413, G415)
+    const uploaded = onStatus?.(C.uploading);
     try {
       const placed = await session.later(uploadAsset(picked), (ref) => onInsert(`image:${ref}`));
-      onNotice?.(placed ? '' : C.uploadNotPlaced);
+      uploaded?.();
+      if (!placed) onNotice?.(C.uploadNotPlaced);
     } catch (e) {
+      uploaded?.();
       onNotice?.(C.uploadFailed(e instanceof Error ? e.message : String(e)));
     }
   };
@@ -102,7 +110,7 @@ export function InsertMenu({ session, disabled, onInsert, uploadAsset, onNotice 
               <DropdownMenu.Portal>
                 <DropdownMenu.SubContent className="deck-menu" sideOffset={2}>
                   {TABLES.map(([rows, cols]) => (
-                    <DropdownMenu.Item key={`${rows}x${cols}`} className="deck-menu-item" onSelect={() => onInsert(`table:${rows}x${cols}`)}>
+                    <DropdownMenu.Item key={`${rows}x${cols}`} className="deck-menu-item" aria-label={C.tableSizeName(rows, cols)} onSelect={() => onInsert(`table:${rows}x${cols}`)}>
                       {C.tableSize(rows, cols)}
                     </DropdownMenu.Item>
                   ))}

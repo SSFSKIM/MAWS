@@ -17,7 +17,8 @@ import { fakeClient } from '../../../../../test/support/fake-client';
 import { TEST_MACHINE, at } from '../../../../../test/support/machine';
 import { artifactEditorFor, holdArtifactEditorState, releaseArtifactEditorState, resetArtifactEditors } from '../../artifacts/registry';
 import { markupSurfaceOf, resetMarkupSurfaces } from '../../markup/surface';
-import { editorHostOf, EditorHostScopeContext, resetEditorHosts, type EditorHostScope } from '../../panel/editor-host';
+import { editorHostOf, EditorHostScopeContext, resetEditorHosts, useEditorHostRegistration, type EditorHostScope } from '../../panel/editor-host';
+import { SavedStatus } from '../../panel/SavedStatus';
 import { resetLibrary } from '../../library/store';
 import { useLayout } from '../../stores/layout';
 import { resetShellStores } from '../../test-support/shell-stores';
@@ -44,6 +45,8 @@ beforeEach(() => {
   sent = [];
   noContentMs = undefined;
   versions = [];
+  placedIn = SPACE;
+  openHeld = false;
   memory = new MemoryDocumentHost();
   memory.write((doc) => createDocument(doc, { title: 'Launch plan' })); // the host's first tab (kinds/document.ts)
 });
@@ -67,16 +70,19 @@ const until = async (check: () => boolean, what: string) => {
 let sent: string[] = [];
 let noContentMs: number | undefined;
 let versions: unknown[] = []; // what `artifacts.versions` answers
+let placedIn: string | undefined = SPACE; // the artifact's Space, as `artifacts.get` answers it (undefined: in no Space)
+let openHeld = false; // the replica never opens
 
 function deps(): DocumentTabDeps {
   const ipc: Pick<MawsBridge, 'invoke' | 'on'> = {
-    invoke: (async (name: CommandName) => (sent.push(name), { ok: true, value: name === 'artifacts.get' ? { artifact: { id: A, kind: 'document', title: 'Launch plan', lastViewedAt: null, spaceId: SPACE, revision: 1 } } : name === 'artifacts.versions' ? { versions } : undefined })) as unknown as MawsBridge['invoke'],
+    invoke: (async (name: CommandName) => (sent.push(name), { ok: true, value: name === 'artifacts.get' ? { artifact: { id: A, kind: 'document', title: 'Launch plan', lastViewedAt: null, ...(placedIn !== undefined && { spaceId: placedIn }), revision: 1 } } : name === 'artifacts.versions' ? { versions } : undefined })) as unknown as MawsBridge['invoke'],
     on: (() => () => {}) as MawsBridge['on'],
   };
   const editor = memoryEditorHost({ actor: { kind: 'human' }, name: 'Owner', color: '--author-2' });
   const host = {
     ...editor,
     open: async () => {
+      if (openHeld) await new Promise(() => {});
       const handle = openMemoryHandle(memory, { log: () => {} });
       await whenSynced(handle);
       return handle;
@@ -145,7 +151,7 @@ describe('the document editor in L’s registry', () => {
 
   it('shows the document and says so once it is on screen', async () => {
     const { onShown } = mount();
-    expect(screen.getByRole('status').textContent).toContain('Opening the document');
+    expect(screen.getByRole('status').textContent, 'T615: no words while it opens').toBe('');
     await shown();
     await until(() => onShown.mock.calls.length > 0, 'onShown');
     await act(() => new Promise((resolve) => setTimeout(resolve, 30)));
@@ -223,11 +229,37 @@ describe('the document editor in L’s registry', () => {
     memory.destroy();
     memory = new MemoryDocumentHost();
     mount();
-    await until(() => screen.queryByText(/This document has no content yet/) !== null, 'the notice');
-    expect(screen.getByRole('status').textContent).toContain('it was created before MAWS gave every new document its first page');
+    await until(() => screen.queryByText('This document is empty.') !== null, 'the notice'); // T617
+    expect(screen.getByRole('status').textContent).toBe('This document is empty.');
     act(() => memory.write((doc) => createDocument(doc, { title: 'Launch plan' })));
     await shown();
-    expect(screen.queryByText(/This document has no content yet/)).toBeNull();
+    expect(screen.queryByText('This document is empty.')).toBeNull();
+  });
+
+  // T615: the open is a quiet spinner where the editor will be
+  it('opens on nothing for half a second, then a quiet spinner named by the wait', async () => {
+    openHeld = true;
+    mount();
+    expect(screen.getByRole('status').textContent).toBe('');
+    expect(await screen.findByRole('progressbar', { name: 'Opening the document…' })).toBeTruthy();
+  });
+
+  // T608, T610: the breadcrumb names a Space only when the document is in one and its name is known
+  it('names no “General” for a document in no Space, and no “Loading Space…” while the Spaces are read', async () => {
+    mount(); // its Space, whose name `library.spaces` never answers here
+    await shown();
+    await until(() => editorHostOf(scope)?.saved === 'saved', 'the header');
+    expect(editorHostOf(scope)?.breadcrumb).toEqual([]);
+    cleanup();
+    releaseArtifactEditorState(scope);
+    off();
+    placedIn = undefined;
+    window.maws = fakeClient({ 'session.intent.get': null, 'library.spaces': { spaces: [] } }).client as unknown as PreloadBridge;
+    mount();
+    await shown();
+    await until(() => editorHostOf(scope)?.saved === 'saved', 'the header');
+    await act(() => new Promise((resolve) => setTimeout(resolve, 30)));
+    expect(editorHostOf(scope)?.breadcrumb).toEqual([]);
   });
 
   it('names the document’s home and governing system without a manual inspection step', async () => {
@@ -264,6 +296,29 @@ describe('the document editor in L’s registry', () => {
     // an export's failure is said in the header's own action
     act(() => editorHostOf(scope)!.exports!.find((e) => e.id === 'pdf')!.onSelect());
     await until(() => editorHostOf(scope)!.actions!.some((a) => a.id === 'export' && /PDF export failed/.test(a.label)), 'the export’s failure');
+  });
+
+  // P23 (the word cut): one delay. The tab holds `saving` back until an edit has waited past its half second, and the
+  // header then draws the ring at once, so a save acknowledged at 750 ms shows progress from 500 ms until it lands.
+  it('draws the saving ring the moment the tab says saving, for an edit whose acknowledgement the host holds', async () => {
+    const { state } = mount();
+    function Saved() {
+      const saved = useEditorHostRegistration(scope)?.saved;
+      return saved ? <SavedStatus state={saved} /> : null;
+    }
+    render(<Saved />);
+    await shown();
+    await until(() => editorHostOf(scope)?.saved === 'saved', 'saved');
+    const ring = () => screen.queryByRole('progressbar', { name: 'Saving…' });
+    memory.holdAcks(true);
+    act(() => setDocPage(state.snapshot().handle!.doc, { size: 'a4' }));
+    await until(() => state.snapshot().handle!.state().unsaved > 0, 'the edit sent and unacknowledged');
+    expect(ring(), 'an edit inside the hold shows nothing').toBeNull();
+    await until(() => state.snapshot().saving, 'the tab to say saving');
+    expect(ring(), 'drawn with no second delay').not.toBeNull();
+    memory.holdAcks(false);
+    await until(() => ring() === null, 'the acknowledgement');
+    expect(document.querySelector('[data-header-saved]')?.textContent).toBe('All changes saved');
   });
 
   // UX wave U10b (§B.5, M3 decision 1 of docs/doperpowers/plans/2026-11-15-ux-wave-U10b-artifacts.md; the owner's

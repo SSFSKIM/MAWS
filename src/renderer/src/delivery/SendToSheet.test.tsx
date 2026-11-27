@@ -3,7 +3,7 @@
 // connector that needs the owner's Connect offers it; Drive's gws state is said as it is (absent: its install, never a
 // Send; signed out: its own login; a refused login: said, still signed out); the destination link is read; the send
 // ends on the receipt with Open, and the header's Send to reads "Sent to …"; closing the sheet cancels what runs.
-import { act, cleanup, fireEvent, render, renderHook, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, renderHook, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { CommandName } from '@shared/ipc/schema';
 import type { DeliveryStatus } from '@shared/ipc/schema/delivery';
@@ -12,6 +12,7 @@ import { resetExportFormats } from '../library/export';
 import { useNotices } from '../stores/notices';
 import { deferred, fail, installFakeMain, ok } from '../test-support/code';
 import { createClient } from '../ipc/client';
+import { accessibleDescription } from '../test-support/accessible-text';
 import { CONNECT_FAILURE, GWS_INSTALL, MAYBE_SENT, SEND_TO_COPY as C, sendFailure } from './copy';
 import { useSendToAction } from './header';
 import { SendToHost } from './SendToSheet';
@@ -51,18 +52,72 @@ afterEach(() => cleanup());
 const openSheet = async (target?: 'notion' | 'drive', of: SendToSubject = subject) => {
   render(<SendToHost />);
   act(() => openSendTo(of, target));
-  await waitFor(() => expect(screen.queryByText(C.checking[target ?? 'notion'])).toBeNull());
+  await waitFor(() => expect(screen.queryByText(C.checking)).toBeNull());
 };
 const sendButton = () => screen.getByRole('button', { name: /^Send/ });
+const connection = () => document.querySelector<HTMLElement>('[data-send-to-connection]')!;
+// The connection's line as text: a tip's description sits outside it, so this is the line's words alone.
+const lineText = () => connection().querySelector('[data-send-to-line]')?.textContent;
+
+// T131 to T140: the sheet says what it sends through in a word and leaves the mechanism unsaid; its waits and receipts
+// are short, the age of the last send kept
+describe('the Send to sheet’s words', () => {
+  it('says neither how MAWS sends nor what a Notion page keeps, and names a ready connection in one word whose source waits on it', async () => {
+    await openSheet();
+    const sheet = screen.getByRole('dialog');
+    expect(sheet.textContent).not.toContain('MAWS sends it itself');
+    expect(sheet.textContent).not.toContain('As a Notion page');
+    expect(lineText()).toBe('Connected');
+    const word = within(connection()).getByText('Connected');
+    expect(word.tabIndex, 'the word takes the keyboard, so its source is reachable').toBe(0);
+    expect(accessibleDescription(word)).toBe('Connected through MAWS: “notion” in your user settings.');
+  });
+
+  it('names Drive by its Google account, or “Connected” when gws names none', async () => {
+    await openSheet('drive');
+    await waitFor(() => expect(lineText()).toBe('me@example.com'));
+    expect(accessibleDescription(within(connection()).getByText('me@example.com'))).toBe('Signed in to Google as me@example.com through gws.');
+    cleanup();
+    resetDelivery();
+    status.drive = { target: 'drive', state: 'ready' };
+    await openSheet('drive');
+    await waitFor(() => expect(lineText()).toBe('Connected'));
+  });
+
+  it('reads “Checking…” while it checks, for either service', async () => {
+    const held = deferred<unknown>();
+    main = installFakeMain((name, input) => {
+      if (name === 'library.exportFormats') return ok({ formats });
+      if (name === 'delivery.status') return input.target === 'drive' ? (held.promise as never) : ok(NOTION_READY);
+      if (name === 'delivery.receipts') return ok({ receipts: [] });
+      return fail('unscripted');
+    });
+    render(<SendToHost />);
+    act(() => openSendTo(subject, 'drive'));
+    await waitFor(() => expect(lineText()).toBe('Checking…'));
+  });
+
+  it('reads “Sending…” while it sends, “Sent as …” after, and “Sent <age>” for an earlier send', async () => {
+    const sending = deferred<unknown>();
+    extra = (name) => (name === 'delivery.send' ? sending.promise : fail('unscripted'));
+    await openSheet();
+    fireEvent.click(sendButton());
+    await waitFor(() => expect(screen.getByRole('status').textContent).toBe('Sending…'));
+    sending.resolve(ok({ ok: true, receipt: RECEIPT }));
+    await waitFor(() => expect(screen.getByRole('status').textContent).toBe('Sent as “Plan”'));
+    fireEvent.click(screen.getByRole('button', { name: C.done }));
+    act(() => openSendTo(subject, 'notion'));
+    await waitFor(() => expect(screen.getByText(/^Sent (now|.+ ago)$/)).toBeTruthy());
+  });
+});
 
 describe('the Send to sheet: Notion', () => {
   it('names MAWS’s own connection and sends the shown artifact with no session, ending on the receipt', async () => {
     extra = (name) => (name === 'delivery.send' ? ok({ ok: true, receipt: RECEIPT }) : fail('unscripted'));
     await openSheet();
-    expect(screen.getByText(C.notionReady(SOURCE, 'connected'))).toBeTruthy();
-    expect(screen.getByText(C.direct)).toBeTruthy();
+    expect(lineText()).toBe('Connected');
     fireEvent.click(sendButton());
-    await waitFor(() => expect(screen.getByText(C.sent('notion', 'Plan'))).toBeTruthy());
+    await waitFor(() => expect(screen.getByText(C.sent('Plan'))).toBeTruthy());
     const [sent] = main.callsOf('delivery.send');
     expect(sent).toMatchObject({ target: 'notion', artifactId: ART, format: 'md', destination: { kind: 'default' }, source: SOURCE.key });
     expect(main.calls.map((call) => call.name).filter((name) => name.startsWith('session.') || name.startsWith('engine.'))).toEqual([]);
@@ -88,7 +143,7 @@ describe('the Send to sheet: Notion', () => {
   it('offers app-configured Notion with no session and describes the app settings rather than project settings', async () => {
     status.notion = { target: 'notion', state: 'ready', connection: 'connected', source: { ...SOURCE, scope: 'app', file: '/app/settings.json' } };
     await openSheet();
-    expect(screen.getByText(/Connected through MAWS:.*MAWS settings/)).toBeTruthy();
+    expect(accessibleDescription(screen.getByText('Connected'))).toMatch(/Connected through MAWS:.*MAWS settings/);
     expect((sendButton() as HTMLButtonElement).disabled).toBe(false);
     expect(main.calls.map((call) => call.name).filter((name) => name.startsWith('session.') || name.startsWith('engine.'))).toEqual([]);
   });
@@ -178,7 +233,7 @@ describe('the Send to sheet: Notion', () => {
     expect(screen.getByRole('status').textContent).toBe(C.checkFailed.notion);
     status.notion = NOTION_READY;
     fireEvent.click(screen.getByRole('button', { name: C.checkAgain }));
-    await waitFor(() => expect(screen.getByText(C.notionReady(SOURCE, 'connected'))).toBeTruthy());
+    await waitFor(() => expect(lineText()).toBe('Connected'));
   });
 });
 
@@ -236,7 +291,7 @@ describe('the Send to sheet: Drive through gws', () => {
     fireEvent.click(screen.getByLabelText(C.driveInside, { selector: 'input[type=radio]' }));
     fireEvent.change(screen.getByLabelText(C.driveInside, { selector: 'input:not([type=radio])' }), { target: { value: 'https://drive.google.com/drive/folders/1AbCdEfGhIjKlMnOp' } });
     fireEvent.click(sendButton());
-    await waitFor(() => expect(screen.getByText(C.sent('drive', 'Plan.docx'))).toBeTruthy());
+    await waitFor(() => expect(screen.getByText(C.sent('Plan.docx'))).toBeTruthy());
     expect(main.callsOf('delivery.send')[0]).toMatchObject({ target: 'drive', format: 'pdf', destination: { kind: 'inside', id: '1AbCdEfGhIjKlMnOp' } });
   });
 });
@@ -275,7 +330,7 @@ describe('the header’s Send to', () => {
     act(() => openSendTo(subject, 'drive'));
     await waitFor(() => expect((sendButton() as HTMLButtonElement).disabled).toBe(false));
     fireEvent.click(sendButton());
-    await waitFor(() => expect(screen.getByText(C.sent('drive', 'Plan.docx'))).toBeTruthy());
+    await waitFor(() => expect(screen.getByText(C.sent('Plan.docx'))).toBeTruthy());
     expect(result.current?.label).toBe(C.actionSending('notion'));
     notion.resolve(ok({ ok: true, receipt: { ...RECEIPT, at: RECEIPT.at + 1 } }));
     await waitFor(() => expect(result.current?.label).toBe(C.actionSent('notion')));

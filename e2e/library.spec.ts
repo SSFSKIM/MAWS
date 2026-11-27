@@ -476,7 +476,8 @@ test('an HTML artifact in the panel’s Artifacts tool: its versions switch, Com
   const content = viewer.frameLocator('[data-artifact-frame="html"]');
   await expect(content.locator('#version')).toHaveText('VERSION_TWO');
   await expect(panel.locator('[data-editor-header] [data-header-title]')).toHaveText('Dashboard');
-  await expect(panel.locator('[data-editor-header] [data-header-saved]')).toHaveText('Read-only');
+  // the word cut (T567): a page viewer registers no saved state, so its header draws none, not "Read-only"
+  await expect(panel.locator('[data-editor-header] [data-header-saved]')).toHaveCount(0);
   // the owner's view is recorded once the page is on screen (Decision Log 15)
   await expect.poll(async () => value(await invoke(page, 'artifacts.get', { artifactId: id })).artifact!.lastViewedAt, { message: 'markViewed set lastViewedAt' }).not.toBeNull();
 

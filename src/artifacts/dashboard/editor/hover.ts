@@ -46,19 +46,56 @@ const CLIPS = new Set(['hidden', 'clip', 'scroll', 'auto']);
 /** What can be seen of `frame`, in window coordinates: its client box, cut on each axis by every ancestor that clips
  * that axis, and by the window. */
 function visibleBox(frame: HTMLElement): Box {
-  const seen = clientBox(frame);
-  const view = frame.ownerDocument.defaultView;
-  for (let el = frame.parentElement; el && view; el = el.parentElement) {
-    const style = view.getComputedStyle(el);
+  return seenWithin(frame, clientBox(frame));
+}
+
+/** `box` (window coordinates) cut on each axis by every ancestor of `el` that clips that axis, and by the window. */
+function seenWithin(el: Element, box: Box): Box {
+  const seen = { ...box };
+  const view = el.ownerDocument.defaultView;
+  for (let ancestor = el.parentElement; ancestor && view; ancestor = ancestor.parentElement) {
+    const style = view.getComputedStyle(ancestor);
     const clipsX = CLIPS.has(style.overflowX);
     const clipsY = CLIPS.has(style.overflowY);
     if (!clipsX && !clipsY) continue;
-    const box = clientBox(el);
-    if (clipsX) [seen.left, seen.right] = [Math.max(seen.left, box.left), Math.min(seen.right, box.right)];
-    if (clipsY) [seen.top, seen.bottom] = [Math.max(seen.top, box.top), Math.min(seen.bottom, box.bottom)];
+    const clip = clientBox(ancestor);
+    if (clipsX) [seen.left, seen.right] = [Math.max(seen.left, clip.left), Math.min(seen.right, clip.right)];
+    if (clipsY) [seen.top, seen.bottom] = [Math.max(seen.top, clip.top), Math.min(seen.bottom, clip.bottom)];
   }
   if (view) [seen.left, seen.top, seen.right, seen.bottom] = [Math.max(seen.left, 0), Math.max(seen.top, 0), Math.min(seen.right, view.innerWidth), Math.min(seen.bottom, view.innerHeight)];
   return seen;
+}
+
+/** The widest a mark's note is drawn (sheet.css's `.dash-warning::after`, its `--dash-note-max`'s fallback). */
+export const NOTE_MAX_PX = 320;
+/** The room a mark's note leaves between itself and the edge of what can be seen. */
+export const NOTE_INSET_PX = 8;
+/** The note's distance from its mark (sheet.css's `var(--space)` between them). */
+export const NOTE_GAP_PX = 4;
+
+/**
+ * Where a ⚠ mark's note opens (the word cut, G598, G603; sheet.css draws it): from the mark's start rightward, as at rest,
+ * while its widest fits in what can be seen around the mark (the editor's scroller, the window); otherwise from the
+ * mark's end leftward when that side has more room; its width capped to the room on the side it opens to. Under the
+ * mark while its height (read as drawn at that width) fits below it; otherwise above it when that side has more room. So
+ * no part of it is clipped (the shared Tip's flip and shift, for a note drawn by CSS). Called as the mark is pointed at
+ * or focused, before the note shows.
+ */
+export function placeNote(mark: HTMLElement): void {
+  const seen = seenWithin(mark, { left: -Infinity, top: -Infinity, right: Infinity, bottom: Infinity });
+  const box = mark.getBoundingClientRect();
+  const after = seen.right - box.left - NOTE_INSET_PX;
+  const before = box.right - seen.left - NOTE_INSET_PX;
+  const leftward = after < NOTE_MAX_PX && before > after;
+  if (leftward) mark.dataset.noteSide = 'end';
+  else delete mark.dataset.noteSide;
+  mark.style.setProperty('--dash-note-max', `${Math.max(0, Math.floor(Math.min(NOTE_MAX_PX, leftward ? before : after)))}px`);
+  // the note is laid out at rest (hidden, not undrawn), so its height at the width just set can be read
+  const height = Number.parseFloat(mark.ownerDocument.defaultView?.getComputedStyle(mark, '::after').height ?? '');
+  const below = seen.bottom - box.bottom - NOTE_INSET_PX;
+  const above = box.top - seen.top - NOTE_INSET_PX;
+  if (Number.isFinite(height) && below < height + NOTE_GAP_PX && above > below) mark.dataset.noteAbove = '';
+  else delete mark.dataset.noteAbove;
 }
 
 /** Where a tip `extent` long starts on one axis: `OFFSET` after the pointer, else before it where that would cross `hi`,

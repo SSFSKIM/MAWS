@@ -86,9 +86,9 @@ const TIMING_RENDERER_TESTS = [
 // project (the slide canvas, the deck editor).
 const ARTIFACTS_DOM_TESTS = 'src/artifacts/**/*.dom.test.{ts,tsx}';
 // Their stylesheets read as text: the document editor's sheets and the app's tokens (the theme suite), and the deck,
-// design and comment sheets as `?raw` only (P3-F F3, the toolbar suite; P4-B1), never injected into their DOM suites (the
+// design, comment and dashboard-sheet sheets as `?raw` only (P3-F F3, the toolbar suite; P4-B1; the word cut M5), never injected into their DOM suites (the
 // plain `import './chrome.css'` stays blank: the pattern is read against the id's query).
-const ARTIFACTS_DOM_CSS = { include: [/\/document\/editor\/.+\.css/, /\/renderer\/src\/styles\/tokens\.css/, /\/(slides|design)\/editor\/.+\.css\?raw$/, /\/artifacts\/comments\/.+\.css\?raw$/] };
+const ARTIFACTS_DOM_CSS = { include: [/\/document\/editor\/.+\.css/, /\/renderer\/src\/styles\/tokens\.css/, /\/(slides|design)\/editor\/.+\.css\?raw$/, /\/artifacts\/comments\/.+\.css\?raw$/, /\/dashboard\/editor\/.+\.css\?raw$/] };
 // Every happy-dom project drops KaTeX's one quirks-mode advisory (happy-dom has no `document.compatMode`, so no doctype
 // silences it); every other warning passes through.
 const HAPPY_DOM_SETUP = ['test/support/artifacts-dom-setup.ts', 'test/support/renderer-machine-setup.ts']; // P5 O6 M2: the page's local machine

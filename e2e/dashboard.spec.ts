@@ -370,7 +370,7 @@ test('a dashboard draws its views in the main tab and the panel, hovers every po
     await page.keyboard.press('Enter');
     const sheet = main.page().getByRole('dialog', { name: 'Source of 세계은행 GDP 성장률' });
     await expect(sheet).toBeVisible();
-    await expect(sheet.getByRole('button', { name: 'This view’s rows (8)' })).toHaveAttribute('aria-pressed', 'true');
+    await expect(sheet.getByRole('button', { name: 'This view (8)' })).toHaveAttribute('aria-pressed', 'true'); // the word cut (G612)
     await expect(sheet.getByRole('table', { name: 'Rows' })).toHaveAttribute('aria-rowcount', '9'); // 2024, sorted as the view
     await expect(sheet.getByRole('row').nth(1)).toContainText('미국');
     await page.keyboard.press('Escape');
@@ -381,7 +381,7 @@ test('a dashboard draws its views in the main tab and the panel, hovers every po
   await test.step('the sheet sorts and copies its rows, downloads the snapshot\'s own bytes, and keeps its snapshot across a replacement', async () => {
     await figures(main).nth(0).locator('button.dash-source-label').click();
     const sheet = page.getByRole('dialog', { name: 'Source of 세계은행 GDP 성장률' });
-    await sheet.getByRole('button', { name: 'All source rows (48)' }).click();
+    await sheet.getByRole('button', { name: 'All rows (48)' }).click(); // the word cut (G612)
     await expect(sheet.getByRole('table', { name: 'Rows' })).toHaveAttribute('aria-rowcount', '49');
     await sheet.getByRole('button', { name: 'Sort by growth_pct' }).click();
     await sheet.getByRole('button', { name: 'Sort by growth_pct' }).click(); // descending
@@ -405,7 +405,7 @@ test('a dashboard draws its views in the main tab and the panel, hovers every po
     await expect(sheet.getByRole('table', { name: 'Rows' })).toHaveAttribute('aria-rowcount', '49');
     await sheet.getByRole('button', { name: 'Close' }).click();
     await figures(main).nth(0).locator('button.dash-source-label').click();
-    await page.getByRole('dialog').getByRole('button', { name: 'All source rows (8)' }).click();
+    await page.getByRole('dialog').getByRole('button', { name: 'All rows (8)' }).click();
     await expect(page.getByRole('dialog').getByRole('table', { name: 'Rows' })).toHaveAttribute('aria-rowcount', '9');
     await page.keyboard.press('Escape');
   });
@@ -414,7 +414,10 @@ test('a dashboard draws its views in the main tab and the panel, hovers every po
     const datasets = () => toggleDatasets(mainHeader);
     await datasets();
     const picker = page.getByRole('dialog').getByRole('combobox', { name: 'Dataset' });
-    await expect(picker.locator('option')).toHaveText(['세계은행 GDP 성장률 (gdp)', 'Palmer penguins (penguins)', '마라도 관측소 (합성) (sites)']);
+    // the word cut (G609): options by title (the id only where two titles meet); the chosen id is the select's description
+    await expect(picker.locator('option')).toHaveText(['세계은행 GDP 성장률', 'Palmer penguins', '마라도 관측소 (합성)']);
+    await picker.selectOption('penguins'); // a second dataset by its id: the description follows the choice
+    await expect(picker).toHaveAccessibleDescription('penguins');
     await page.screenshot({ path: `${PROOF}/datasets-sheet.png` });
     await datasets();
     await expect(page.getByRole('dialog')).toBeHidden();
@@ -587,7 +590,7 @@ test('beside the agent’s views the owner comments on the chart and writes; B�
     await expect(card).toHaveCount(0);
     const rail = await railOf(record);
     await rail.locator(`article[data-thread="${threadId}"]`).getByRole('button', { name: 'Reopen' }).click();
-    await reply(rail, threadId, 'Is Jeju this low every quarter?');
+    await reply(record, threadId, 'Is Jeju this low every quarter?');
     await expect(rail.locator(`article[data-thread="${threadId}"]`).getByRole('listitem')).toHaveText(['YouIs Jeju this low every quarter?']);
     await durable(record);
   });
@@ -670,7 +673,22 @@ test('every dataset state draws in place from a fixture: a missing column, an un
   const TIME = 'updated 2026-10-01 09:00 UTC by You';
   await expect(frame(0)).toContainText('dataset "missing" has no column "revenue"', { timeout: 15_000 });
   await expect(frame(1)).toContainText('the file of "broken" could not be read', { timeout: 15_000 });
-  await expect(views.nth(2).locator('.dash-notes')).toContainText('1 of 3 values in total are not number', { timeout: 15_000 });
+  // the word cut (G598): a column's wrong-type values are a ⚠ mark after the source label, the notes its name. The notes
+  // are drawn beside it once it holds the keyboard (or is pointed at), and at rest only where nothing can point (the
+  // touch rule, sheet.css)
+  const mismatch = views.nth(2).getByRole('img', { name: /1 of 3 values in total are not number/ });
+  await expect(mismatch).toHaveText('⚠', { timeout: 15_000 });
+  const notesShown = () => mismatch.evaluate((el) => getComputedStyle(el, '::after').visibility === 'visible');
+  expect(await mismatch.evaluate((el) => getComputedStyle(el, '::after').content)).toContain('1 of 3 values in total are not number');
+  const canPoint = !(await page.evaluate(() => matchMedia('(hover: none)').matches));
+  await page.mouse.move(0, 0); // nothing pointed at, nothing focused: the mark at rest
+  await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+  expect(await notesShown(), canPoint ? 'the notes undrawn at rest' : 'the notes drawn at rest where nothing can point').toBe(!canPoint);
+  await label(2).focus(); // the label before it, then Tab: the keyboard's focus, which :focus-visible answers
+  await page.keyboard.press('Tab');
+  await expect(mismatch).toBeFocused();
+  await expect.poll(notesShown, { message: 'the notes drawn while the mark holds the keyboard' }).toBe(true);
+  await mismatch.blur();
   await expect(label(3)).toHaveText(`Sales · from sales.csv · ${TIME} · the source answered 503`);
   await expect(label(4)).toHaveText(`Sales · from sales.csv · ${TIME} · stale since 2026-10-01 09:00 UTC`);
   await expect(label(5)).toHaveText(`Sales · from sales.csv · ${TIME} · paused: no live session`);

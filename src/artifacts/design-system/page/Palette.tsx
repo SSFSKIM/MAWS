@@ -1,5 +1,10 @@
 // D14 §1, the palette: each colour role (then the system's other colours) as a swatch drawn in the system, its hex
 // field and a colour picker; each edit writes the token in one transaction. Contrast badges for the floor's pairs.
+// The word cut (docs/doperpowers/specs/2026-11-16-word-cut-design.md, M5 task 4; G568): a badge is its pair and its
+// ratio, a failing one marked ✕ (its border was already red); the verdict is the badge's tooltip and description, the
+// badge taking Tab for it, its description node kept outside the badge's text.
+import { useId } from 'react';
+import { Tip } from '../../../renderer/src/ui/tip';
 import type { Doc } from '../../yjs';
 import { colorFromHex, contrastRatio, rgbToHex, toSrgb, type ColorValue } from '../color';
 import type { ResolvedToken, ResolvedTokens } from '../resolve';
@@ -7,6 +12,7 @@ import { byIdentity, cssNamesOf, ROLES, tokenIdentity } from '../roles';
 import type { TokenSet } from '../tokens';
 import { isAlias } from '../values';
 import type { DesignSystemView } from '../view';
+import { PAGE_COPY } from './copy';
 import { editToken } from './edit';
 import { AliasOf, CommitField } from './fields';
 import { PreviewScope } from './PreviewScope';
@@ -39,6 +45,15 @@ export function Palette(props: { doc: Doc; tokens: TokenSet; resolved: ResolvedT
     return editToken(doc, tokens, shown, (token) => ({ ...token, $value: next }));
   };
   const at = (path: string) => byIdentity(resolved.tokens, path);
+  const verdictId = useId();
+  const badges = CONTRAST_PAIRS.flatMap((pair, i) => {
+    const fg = at(pair.fg);
+    const bg = at(pair.bg);
+    if (fg?.type !== 'color' || bg?.type !== 'color') return [];
+    const ratio = contrastRatio(fg.value, bg.value);
+    const passes = ratio >= pair.min;
+    return [{ pair, ratio, passes, verdict: PAGE_COPY.contrastTip(passes, pair.min), id: `${verdictId}-${i}` }];
+  });
   return (
     <section className="dsp-section" data-ds-section="palette" aria-labelledby="dsp-palette">
       <h2 id="dsp-palette" className="dsp-heading">
@@ -71,21 +86,27 @@ export function Palette(props: { doc: Doc; tokens: TokenSet; resolved: ResolvedT
         })}
       </PreviewScope>
       <ul className="dsp-badges" aria-label="Contrast">
-        {CONTRAST_PAIRS.map((pair) => {
-          const fg = at(pair.fg);
-          const bg = at(pair.bg);
-          if (fg?.type !== 'color' || bg?.type !== 'color') return null;
-          const ratio = contrastRatio(fg.value, bg.value);
-          const passes = ratio >= pair.min;
-          return (
-            <li key={pair.label} className="dsp-badge" data-passes={passes}>
+        {badges.map(({ pair, ratio, passes, verdict, id }) => (
+          <Tip key={pair.label} content={verdict}>
+            <li className="dsp-badge" data-passes={passes} tabIndex={0} aria-describedby={id}>
               <span>{pair.label}</span>
               <strong>{ratio.toFixed(1)} : 1</strong>
-              <span className="dsp-muted">{passes ? `meets ${pair.min} : 1` : `below ${pair.min} : 1`}</span>
+              {passes ? null : (
+                <span className="dsp-badge-mark" aria-hidden>
+                  {PAGE_COPY.contrastFails}
+                </span>
+              )}
             </li>
-          );
-        })}
+          </Tip>
+        ))}
       </ul>
+      <div hidden>
+        {badges.map(({ pair, verdict, id }) => (
+          <span key={pair.label} id={id}>
+            {verdict}
+          </span>
+        ))}
+      </div>
     </section>
   );
 }
