@@ -45,7 +45,8 @@ export function registerSessionServiceHandlers(service: SessionService, { regist
   register('session.intent.prestart.withdraw', ({ appSessionId, token }) => service.withdrawPrestart(id(appSessionId), token));
   // P2-A (X16): the one acquisition entry; a host that cannot answer is `host_unavailable`, so the supervisor's banner
   // returns for it as for the other launches (LAUNCHES in supervisor-notices.ts)
-  register('session.acquire', ({ appSessionId, reason, options }) => relayHost(() => service.acquire(id(appSessionId), reason, options)));
+  // Observation set 4's review: one under an operation's claim is another machine's, its auto fallback held to the ceiling
+  register('session.acquire', ({ appSessionId, reason, options }, { op }) => relayHost(() => (op === undefined ? service.acquire(id(appSessionId), reason, options) : service.acquireFromAnotherMachine(id(appSessionId), reason, options))));
   // the UX wave (U9, M2): a fork under an operation's claim is another machine's, composed here and held to the ceiling
   register('session.fork', ({ appSessionId, target, message, rewindTo }, { op }) => {
     const args = { message, rewindTo: rewindTo as MessageUuid | null };

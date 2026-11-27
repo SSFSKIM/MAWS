@@ -16,7 +16,7 @@ import { attachCommand } from '@shared/sessions/attach';
 import { bgRefusalOf } from './attach';
 import { hostCall, reservationOf, type Emit, type HostEvents, type LaunchGate } from './context'; // C12: LaunchGate
 import type { BootstrapNotes, IntentStore } from './intents';
-import type { C10Settings } from './launch-mapping';
+import type { C10Settings, CeilingCheck } from './launch-mapping';
 import type { LaunchWatch } from './launch-watch';
 import type { ReplaySeam } from './replay-seam';
 import type { OwnerChannelLaunches } from '../owner/launch'; // P2-C (2026-10-09)
@@ -52,7 +52,16 @@ export interface Setup {
   // and the tests' seam for the managed settings' root (machine-route.ts)
   hostLists(capability: string): Promise<boolean>;
   systemRoot?: string;
+  // Observation set 4's review: the machine's ceiling over a session started from another machine (absent in the deps,
+  // every mode refused), and the sessions whose launch another machine asked for (a fork, an acquisition), held to it
+  aboveCeiling: CeilingCheck;
+  askedElsewhere: ReadonlySet<AppSessionId>;
 }
+
+// Observation set 4's review: the ceiling a launch is held to, a remote member's spawn (its `launchedBy`) and a launch
+// another machine asked for; null for every launch of this machine's own.
+export const launchCeiling = (s: Pick<Setup, 'aboveCeiling' | 'askedElsewhere'>, appSessionId: AppSessionId, launchedBy: unknown): CeilingCheck | null =>
+  launchedBy !== undefined || s.askedElsewhere.has(appSessionId) ? s.aboveCeiling : null;
 
 // ---- failures ------------------------------------------------------------------------------------------------------
 

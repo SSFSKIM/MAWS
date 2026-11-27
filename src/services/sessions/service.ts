@@ -139,6 +139,9 @@ export class SessionService {
   // P5 O3-D M4 (D18): each session's last act while it is a rewind, which a resume repeats (rewind-note.ts)
   private readonly rewinds: RewindNotes;
   private readonly spawnerProofs: SpawnerProofs; // P5 O12 M11: a remote spawn's proof, beside its record
+  // Observation set 4's review: the sessions whose launch another machine asked for, held to the ceiling (Setup's
+  // `askedElsewhere`): a fork for the service's life, an acquisition while it is asked
+  private readonly askedElsewhere = new Set<AppSessionId>();
   private offStatus: (() => void) | null = null;
   private readonly handoverResumes = new Set<string>(); // P5 O16 M3b (D58a): the launch ids already resumed after a failed re-initialize
   private readonly setupListeners = new Set<(event: SetupEvent) => void>(); // U9 (M2): a fork from another machine waits for its `launching`
@@ -225,6 +228,8 @@ export class SessionService {
       spawnerProofs: this.spawnerProofs, // P5 O12 M11
       hostLists: (capability) => this.hostLists(capability), // P5 O7 M9
       systemRoot: this.deps.systemRoot, // P5 O7 M9
+      aboveCeiling: (mode) => this.deps.aboveCeiling?.(mode) ?? true, // observation set 4's review
+      askedElsewhere: this.askedElsewhere,
     };
     await this.work.track(this.deps.intents.load());
     if (this.disposed) return;
@@ -1037,6 +1042,19 @@ export class SessionService {
     return this.acquireOrJoin(appSessionId, options);
   }
 
+  // Observation set 4's review: `session.acquire` asked from another machine (the handler's context carries the
+  // operation's claim). The resume it launches falls back from a refused auto to no mode above the machine's ceiling, as a
+  // spawn and a fork from another machine do; one that joins a launch already under way takes that launch as it is.
+  async acquireFromAnotherMachine(appSessionId: AppSessionId, reason: AcquireReason, options: StartOptions = {}): Promise<AcquireOutcome> {
+    const marked = !this.askedElsewhere.has(appSessionId);
+    this.askedElsewhere.add(appSessionId);
+    try {
+      return await this.acquire(appSessionId, reason, options);
+    } finally {
+      if (marked) this.askedElsewhere.delete(appSessionId);
+    }
+  }
+
   private acquireOrJoin(appSessionId: AppSessionId, options: StartOptions): Promise<AcquireOutcome> {
     const entry = this.inflight.get(appSessionId);
     if (entry === undefined) return this.acquirable(appSessionId) ? this.acquireOnce(appSessionId, options) : this.refuseUnknown(appSessionId);
@@ -1163,6 +1181,7 @@ export class SessionService {
       if (this.deps.aboveCeiling?.(mode) ?? true) throw new CeilingRefused(mode);
     });
     if (typeof allocated !== 'string') return allocated;
+    this.askedElsewhere.add(allocated); // observation set 4's review: its launches' auto fallback is held to the ceiling too
     const launching = untilLaunching((listener) => (this.setupListeners.add(listener), () => void this.setupListeners.delete(listener)), allocated);
     let outcome: StartOutcome;
     try {

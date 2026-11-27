@@ -63,6 +63,31 @@ describe('launch mapping', () => {
     expect(seedPermissionMode({ defaultMode: 'acceptEdits' })).toBe('acceptEdits');
   });
 
+  // Observation set 4's review: every launch admits Bypass permissions later, so a launch held to the machine's ceiling (one
+  // started or asked from another machine) falls back to the loosest mode neither the owner's fallback nor the ceiling exceeds
+  it('holds the auto fallback of a launch under a ceiling to it, and leaves every other launch the owner’s fallback', () => {
+    const bypass: C10Settings = { ...C10_SETTING_DEFAULTS, permissions: { autoFallback: 'bypassPermissions' } };
+    const under = (ceiling: string) => {
+      const order = ['plan', 'default', 'acceptEdits', 'auto', 'dontAsk', 'bypassPermissions'];
+      return (mode: string) => order.indexOf(mode) > order.indexOf(ceiling);
+    };
+    expect(toLaunchSpec({ ...base, permissionMode: 'auto' }, bypass).permissionFallback).toBe('bypassPermissions');
+    expect(toLaunchSpec({ ...base, permissionMode: 'auto', ceiling: null }, bypass).permissionFallback).toBe('bypassPermissions');
+    expect(toLaunchSpec({ ...base, permissionMode: 'auto', ceiling: under('auto') }, bypass).permissionFallback).toBe('acceptEdits');
+    expect(toLaunchSpec({ ...base, permissionMode: 'auto', ceiling: under('dontAsk') }, bypass).permissionFallback).toBe('dontAsk');
+    expect(toLaunchSpec({ ...base, permissionMode: 'auto', ceiling: under('bypassPermissions') }, bypass).permissionFallback).toBe('bypassPermissions');
+    expect(toLaunchSpec({ ...base, permissionMode: 'auto', ceiling: under('plan') }, bypass).permissionFallback).toBe('plan');
+    expect(toLaunchSpec({ ...base, permissionMode: 'auto', ceiling: () => true }, bypass).permissionFallback).toBe('plan'); // no ceiling to read: the tightest
+    // a fallback already under the ceiling is the owner's, and a launch not in auto carries none
+    expect(toLaunchSpec({ ...base, permissionMode: 'auto', ceiling: under('auto') }, { ...C10_SETTING_DEFAULTS, permissions: { autoFallback: 'default' } }).permissionFallback).toBe('default');
+    expect(toLaunchSpec({ ...base, permissionMode: 'acceptEdits', ceiling: under('auto') }, bypass).permissionFallback).toBeNull();
+    // the intent's and the record's launches carry the ceiling they are given
+    expect(intentLaunchSpec(intent({ permissionMode: 'auto' }), { cwd: REPO, trust: null, replay: null, ceiling: under('auto') }, bypass).permissionFallback).toBe('acceptEdits');
+    const auto = record(APP, { directory: REPO, ...UNTITLED });
+    expect(resumeLaunchSpec(auto, {}, { trust: null, replay: null, ceiling: under('auto') }, bypass).permissionFallback).toBe('acceptEdits');
+    expect(resumeLaunchSpec(auto, {}, { trust: null, replay: null }, bypass).permissionFallback).toBe('bypassPermissions');
+  });
+
   it('attests the trust key, not the session directory, only for an accepted decision given for that key', () => {
     const worktree = `${REPO}/.claude/worktrees/one`;
     const state = trustState({ directory: worktree });

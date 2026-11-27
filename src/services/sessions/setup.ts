@@ -27,6 +27,7 @@ import {
   exitFailure,
   heldOutcome,
   HeldFailure,
+  launchCeiling,
   messageOf,
   newestUserUuid,
   RelayFailure,
@@ -292,7 +293,7 @@ export function intentSpecOf(s: Setup, intent: SetupIntent, attempt: IntentAttem
   const { appSessionId } = intent;
   return intentLaunchSpec(
     { ...intent, permissionMode: ctx.mode, ...attemptRoute(intent, attempt) },
-    { cwd: ctx.cwd, trust: ctx.attestation, replay: ctx.replay, browserBackend: ctx.browserBackend, proofFile: s.spawnerProofs.pathOf(appSessionId) /* P5 O12 M11 */, mawsTools: ctx.mawsTools /* board ticket 421 */ },
+    { cwd: ctx.cwd, trust: ctx.attestation, replay: ctx.replay, browserBackend: ctx.browserBackend, proofFile: s.spawnerProofs.pathOf(appSessionId) /* P5 O12 M11 */, mawsTools: ctx.mawsTools /* board ticket 421 */, ceiling: launchCeiling(s, appSessionId, intent.launchedBy) },
     s.settings(),
   );
 }

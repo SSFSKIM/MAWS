@@ -37,6 +37,7 @@ import { transcriptPathOf } from './context';
 import { ROUTE_UNSUPPORTED } from './machine-route'; // P5 O7 M9
 import { ENGINE_MAWS_TOOLS_CAPABILITY } from '@shared/host/socket-protocol'; // board ticket 421
 import type { MawsToolSet } from '@shared/maws/tool-set'; // board ticket 421
+import type { AutoFallback } from '@shared/ipc/schema/settings';
 
 const MACHINE = 'TestMachineRef00000000' as MachineRef;
 const BUILD = '0.0.0+spawn-test';
@@ -79,13 +80,15 @@ describe('session.spawn on the spine', () => {
   // P5 O7 M9: `machineRoute`, the machine route as the default instead (its managed settings beneath a scratch root)
   // Board ticket 421: `mawsTools`, the machine's default set of MAWS's tools, written before the spawn, and `capabilities`,
   // what the engine host's welcome lists (this fake lists nothing unless given)
-  const composed = async ({ parked = false, seed, machineRoute = false, aboveCeiling, mawsTools, capabilities }: { parked?: boolean; seed?: (index: Index) => void; machineRoute?: boolean; aboveCeiling?: (mode: string) => boolean; mawsTools?: MawsToolSet; capabilities?: string[] } = {}) => {
+  // Observation set 4's review: `autoFallback`, the machine's "When auto mode is unavailable"
+  const composed = async ({ parked = false, seed, machineRoute = false, aboveCeiling, mawsTools, capabilities, autoFallback }: { parked?: boolean; seed?: (index: Index) => void; machineRoute?: boolean; aboveCeiling?: (mode: string) => boolean; mawsTools?: MawsToolSet; capabilities?: string[]; autoFallback?: AutoFallback } = {}) => {
     const seeded = new Index(join(profile, 'index.sqlite'));
     seeded.projects.add(checkout);
     seed?.(seeded);
     seeded.close();
     const data = await openSpineData(profile, { build: BUILD, systemRoot: join(dir.path, 'system') });
     if (!machineRoute) data.machineSettings.update({ gateway: { defaultRoute: 'direct' } });
+    if (autoFallback !== undefined) data.machineSettings.update({ permissions: { autoFallback } });
     const host = new FakeSpineHost();
     const launched: LaunchSpec[] = [];
     const proofs: ({ mode: number; text: string } | 'missing' | null)[] = []; // P5 O12 M11: each launch's proof file as the launch found it
@@ -372,6 +375,65 @@ describe('session.spawn on the spine', () => {
     expect((await record(bus, forkId))?.launchedBy).toBeUndefined();
     await expect.poll(() => launched.map((spec) => spec.appSessionId)).toEqual([forkId]);
     expect(launched[0]).not.toHaveProperty('launchedBy');
+  });
+
+  // Observation set 4's review: every launch admits Bypass permissions later (engine-host/launch.ts), so a session in auto
+  // started or asked from another machine falls back, where the engine refuses auto, to no mode above the machine's
+  // ceiling: a spawn, a fork and an acquisition another machine asks for, and every launch of a record a remote member
+  // spawned; a fork or a start in this machine's own window keeps the machine's fallback.
+  it('holds the auto fallback of a session started or asked from another machine to the ceiling, and no session of this machine’s own', async () => {
+    trust(checkout);
+    const engine = 'e0000000-0000-4000-8000-0000000000c1' as SessionId;
+    const owned = 'e0000000-0000-4000-8000-0000000000c2' as SessionId;
+    const permissionMode = { requested: 'auto' as const, effective: 'auto' as const, refusal: null };
+    const above = new Set(['dontAsk', 'bypassPermissions']); // the ceiling auto
+    let spawnedId = '' as AppSessionId;
+    let localId = '' as AppSessionId;
+    const { bus, launched } = await composed({
+      autoFallback: 'bypassPermissions',
+      aboveCeiling: (mode) => above.has(mode),
+      seed: (index) => {
+        const launchedBy = { member: 'mem-a', device: 'dev-1', opId: '9b8f3a52-0000-4000-8000-0000000000c0', action: ACTION as never };
+        spawnedId = index.sessions.createForLaunch({ directory: checkout, additionalDirectories: [], worktree: null, model: { requested: null, resolved: null }, effort: null, permissionMode, launchedBy }).record.appId;
+        index.sessions.bindEngineId(spawnedId, engine);
+        localId = index.sessions.createForLaunch({ directory: checkout, additionalDirectories: [], worktree: null, model: { requested: null, resolved: null }, effort: null, permissionMode }).record.appId;
+        index.sessions.bindEngineId(localId, owned);
+      },
+    });
+    for (const id of [engine, owned]) {
+      const transcript = await transcriptPathOf({ CLAUDE_CONFIG_DIR: config, HOME: join(dir.path, 'home') }, checkout, id);
+      mkdirSync(dirname(transcript), { recursive: true });
+      writeFileSync(transcript, `${JSON.stringify({ type: 'user', sessionId: id, uuid: 'u1', message: { role: 'user', content: 'hi' } })}\n`);
+    }
+    const claim = { member: 'mem-a', device: 'dev-1', fingerprint: 'fp-1' };
+    const fallbackOf = async (appSessionId: string) => {
+      await expect.poll(() => launched.some((spec) => spec.appSessionId === appSessionId)).toBe(true);
+      return launched.filter((spec) => spec.appSessionId === appSessionId).at(-1)!.permissionFallback;
+    };
+    const resultId = (outcome: unknown) => (outcome as { value: { result: { value: { appSessionId: string } } } }).value.result.value.appSessionId;
+
+    // a spawn another machine asks for, in auto
+    const spawn = await bus.main('machine.op', { opId: '9b8f3a52-0000-4000-8000-0000000000c3', opCreated: new Date().toISOString(), claim, name: 'session.spawn', input: { checkout, permission_mode: 'auto' }, action: ACTION });
+    expect(spawn).toMatchObject({ ok: true, value: { state: 'done', result: { ok: true, value: { status: 'ok' } } } });
+    expect(await fallbackOf(resultId(spawn))).toBe('acceptEdits');
+    // a fork another machine asks for, of a session of this machine's own
+    const fork = await bus.main('machine.op', { opId: '9b8f3a52-0000-4000-8000-0000000000c4', opCreated: new Date().toISOString(), claim, name: 'session.fork', input: { appSessionId: localId, target: { kind: 'inPlace' }, message: null, rewindTo: null } });
+    expect(fork).toMatchObject({ ok: true, value: { state: 'done', result: { ok: true, value: { status: 'starting' } } } });
+    expect(await fallbackOf(resultId(fork))).toBe('acceptEdits');
+    // a fork in this machine's own window of the session a remote member spawned is this machine's own
+    const localFork = await bus.invoke('session.fork', { appSessionId: spawnedId, target: { kind: 'inPlace' }, message: null, rewindTo: null });
+    expect(localFork).toMatchObject({ ok: true, value: { status: 'starting' } });
+    expect(await fallbackOf((localFork as { value: { appSessionId: string } }).value.appSessionId)).toBe('bypassPermissions');
+    // the resume of the record a remote member spawned, asked here
+    expect(await bus.invoke('session.start', { appSessionId: spawnedId, message: null, options: {} })).toMatchObject({ ok: true, value: { status: 'starting' } });
+    expect(await fallbackOf(spawnedId)).toBe('acceptEdits');
+    // an acquisition another machine asks for, of a session of this machine's own
+    const acquired = await bus.main('machine.op', { opId: '9b8f3a52-0000-4000-8000-0000000000c5', opCreated: new Date().toISOString(), claim, name: 'session.acquire', input: { appSessionId: localId, reason: 'resume', options: {} } });
+    expect(acquired).toMatchObject({ ok: true, value: { state: 'done', result: { ok: true } } });
+    expect(await fallbackOf(localId)).toBe('acceptEdits');
+    // a spawn asked in this machine's own window
+    const local = await bus.invoke('session.spawn', { checkout, permission_mode: 'auto' });
+    expect(await fallbackOf((local as { value: { appSessionId: string } }).value.appSessionId)).toBe('bypassPermissions');
   });
 
   it('resumes a spawned record naming its spawner, a lost proof written again first; its fork, the trust bootstrap and a session nobody spawned name nobody; the delete takes the proof', async () => {

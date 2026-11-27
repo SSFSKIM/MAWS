@@ -44,6 +44,18 @@ export const C10_SETTING_DEFAULTS: C10Settings = Object.freeze({
 // `permissions.defaultMode`, else auto, MAWS's default.
 export const seedPermissionMode = (defaults: { defaultMode: PermissionMode | null }): PermissionMode => defaults.defaultMode ?? 'auto';
 
+// Observation set 4's review: whether the machine's ceiling refuses a mode to a session started from another machine
+// (Endpoint.aboveCeiling, as mawsd hands it; absent, every mode refused). A launch held to it falls back from a refused auto
+// to the loosest mode above neither the owner's fallback nor the ceiling (the ceiling's order, src/endpoint/policy.ts),
+// `plan` where the ceiling allows none: every launch admits Bypass permissions later (engine-host/launch.ts), so the
+// owner's fallback would otherwise give another machine a mode its ceiling refuses.
+export type CeilingCheck = (mode: string) => boolean;
+const FALLBACKS_TIGHTEST_FIRST: readonly PermissionMode[] = ['plan', 'default', 'acceptEdits', 'dontAsk', 'bypassPermissions'];
+function fallbackUnder(fallback: PermissionMode, aboveCeiling: CeilingCheck): PermissionMode {
+  for (let at = FALLBACKS_TIGHTEST_FIRST.indexOf(fallback); at >= 0; at--) if (!aboveCeiling(FALLBACKS_TIGHTEST_FIRST[at]!)) return FALLBACKS_TIGHTEST_FIRST[at]!;
+  return 'plan';
+}
+
 export function readSettings(): C10Settings {
   return C10_SETTING_DEFAULTS;
 }
@@ -84,6 +96,8 @@ export interface LaunchInput {
   // Board ticket 421 (Interfaces §E, D8): the set this attempt serves, resolved once before the launch (served-set.ts);
   // absent, the full set. The spec carries it only when it is not the full set (D3)
   mawsTools?: MawsToolSet;
+  // Observation set 4's review: the ceiling a launch started or asked from another machine is held to; null or absent, none
+  ceiling?: CeilingCheck | null;
 }
 
 export function toLaunchSpec(input: LaunchInput, settings: C10Settings = readSettings()): LaunchSpec {
@@ -94,7 +108,7 @@ export function toLaunchSpec(input: LaunchInput, settings: C10Settings = readSet
     model: input.model,
     effort: input.effort,
     permissionMode: input.permissionMode,
-    permissionFallback: input.permissionMode === 'auto' ? settings.permissions.autoFallback : null, // W3
+    permissionFallback: input.permissionMode !== 'auto' ? null : input.ceiling ? fallbackUnder(settings.permissions.autoFallback, input.ceiling) : settings.permissions.autoFallback, // W3
     gateway: input.gateway,
     ...(input.route !== undefined && { route: input.route }), // P5 O7 M9
     subagentModel: settings.engine.subagentModel,
@@ -199,7 +213,7 @@ export function trustMapping(
 // P5 O12 M11: `ctx.proofFile`, where the spine writes the session's proof; the spec names its spawner only with it.
 // Board ticket 421: `ctx.mawsTools`, the set the attempt serves (the intent's, a fork's source's, or the full set on an
 // older host: served-set.ts), never read from the intent here, so the record, the supplement and the line share it.
-export function intentLaunchSpec(intent: SetupIntent, ctx: { cwd: string; trust: Attestation | null; replay: string | null; browserBackend?: string | null; proofFile?: string | null; mawsTools?: MawsToolSet }, settings: C10Settings = readSettings()): LaunchSpec {
+export function intentLaunchSpec(intent: SetupIntent, ctx: { cwd: string; trust: Attestation | null; replay: string | null; browserBackend?: string | null; proofFile?: string | null; mawsTools?: MawsToolSet; ceiling?: CeilingCheck | null }, settings: C10Settings = readSettings()): LaunchSpec {
   const fork = intent.kind === 'fork' ? intent.source : null;
   return toLaunchSpec(
     {
@@ -219,6 +233,7 @@ export function intentLaunchSpec(intent: SetupIntent, ctx: { cwd: string; trust:
       browserBackend: ctx.browserBackend ?? null,
       launchedBy: spawnerOf(intent.appSessionId, intent.launchedBy, ctx.proofFile), // P5 O12 M11: a fork's intent carries none
       ...(ctx.mawsTools !== undefined && { mawsTools: ctx.mawsTools }), // board ticket 421
+      ceiling: ctx.ceiling ?? null,
     },
     settings,
   );
@@ -243,7 +258,7 @@ export function resumeRouteOf(record: Pick<SessionRecord, 'gateway'>, options: P
 // and `effort` are C11's route-switch overrides for this launch; C3 re-applies the session's own grants by app id.
 // P5 O12 M11: the record's spawner, as at its start, with `ctx.proofFile`. Board ticket 421: `ctx.mawsTools`, the set
 // the attempt serves, which is the record's own (D1; served-set.ts refuses rather than serve another).
-export function resumeLaunchSpec(record: SessionRecord, options: ResumeOptions, ctx: { trust: Attestation | null; replay: string | null; browserBackend?: string | null; proofFile?: string | null; mawsTools?: MawsToolSet }, settings: C10Settings = readSettings()): LaunchSpec {
+export function resumeLaunchSpec(record: SessionRecord, options: ResumeOptions, ctx: { trust: Attestation | null; replay: string | null; browserBackend?: string | null; proofFile?: string | null; mawsTools?: MawsToolSet; ceiling?: CeilingCheck | null }, settings: C10Settings = readSettings()): LaunchSpec {
   const route = resumeRouteOf(record, options, settings); // P5 O7 M9
   const recordEffort = EffortSchema.safeParse(record.effort);
   return toLaunchSpec(
@@ -264,6 +279,7 @@ export function resumeLaunchSpec(record: SessionRecord, options: ResumeOptions, 
       cursorLabel: cursorLabelOf(record.title), // UX wave U12a
       launchedBy: spawnerOf(record.appId, record.launchedBy, ctx.proofFile),
       ...(ctx.mawsTools !== undefined && { mawsTools: ctx.mawsTools }), // board ticket 421
+      ceiling: ctx.ceiling ?? null,
     },
     settings,
   );

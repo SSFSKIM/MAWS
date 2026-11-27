@@ -18,7 +18,7 @@ import { LaunchWatch, type LaunchEnd } from './launch-watch';
 import { resumeLaunchSpec, resumeRouteOf } from './launch-mapping'; // P5 O7 M9: resumeRouteOf
 import { launchOnHost } from './machine-route'; // P5 O7 M9
 import { passLaunchGate, runBootstrap, writeSpawnerProof } from './setup'; // C12: passLaunchGate; P5 O12 M11: writeSpawnerProof
-import { exitFailure, heldOutcome, HeldFailure, messageOf, RelayFailure, SetupFailure, setupEvent, stopQuietly, takeReplay, WatchdogFailure, type Setup } from './setup-steps';
+import { exitFailure, heldOutcome, HeldFailure, launchCeiling, messageOf, RelayFailure, SetupFailure, setupEvent, stopQuietly, takeReplay, WatchdogFailure, type Setup } from './setup-steps';
 import { trustStateOf } from './trust';
 import { ownerChannelLaunch, ownerChannelLaunched } from '../owner/launch'; // P2-C (2026-10-09)
 import { launchScopeOf } from './artifact-scope'; // P2-E1
@@ -79,7 +79,8 @@ export async function runResume(
     // P2-C start (2026-10-09): the owner channel's decision for this launch, over the session's own transcript
     // P5 O12 M11: the record's spawner, as at its start; the bootstrap above named none
     const proofFile = s.spawnerProofs.pathOf(appSessionId);
-    const decided = await ownerChannelLaunch(s, resumeLaunchSpec(record, input.options, { trust: attestation, replay: fixture?.path ?? null, browserBackend: s.browserBackend(appSessionId), proofFile, mawsTools: served.set /* board ticket 421 */ }, s.settings()), { kind: 'resume', transcriptOf: appSessionId });
+    const ceiling = launchCeiling(s, appSessionId, record.launchedBy); // observation set 4's review
+    const decided = await ownerChannelLaunch(s, resumeLaunchSpec(record, input.options, { trust: attestation, replay: fixture?.path ?? null, browserBackend: s.browserBackend(appSessionId), proofFile, mawsTools: served.set /* board ticket 421 */, ceiling }, s.settings()), { kind: 'resume', transcriptOf: appSessionId });
     let spec = decided.spec;
     // P2-C end
     let end: LaunchEnd;
