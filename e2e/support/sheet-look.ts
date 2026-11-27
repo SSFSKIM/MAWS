@@ -254,6 +254,8 @@ export async function carriedDraft(page: Page): Promise<void> {
   await expect(card.getByText(SHEET_WORDS.updated, { exact: true }), 'the Updated mark').toBeVisible();
   await expect(card.getByText(SHEET_WORDS.carried, { exact: true }), 'the carried draft’s line').toBeVisible();
   await expect(card.getByRole('button', { name: SHEET_WORDS.keep, exact: true }), 'its Keep control').toBeEnabled();
+  await expect(card.getByText(SHEET_WORDS.updated, { exact: true }), 'the mark in sight').toBeInViewport();
+  await expect(card.getByRole('button', { name: SHEET_WORDS.keep, exact: true }), 'the Keep control in sight').toBeInViewport();
   await expect(card.getByRole('radio', { name: 'Passkeys', exact: true }), 'the pick carried, not chosen').toHaveAttribute('data-carried', '');
   await expect(card.getByRole('radio', { name: 'Passkeys', exact: true })).toHaveAttribute('aria-checked', 'false');
   await expect(sendButton(page, 0), 'Send counts no carried draft').toBeDisabled();
@@ -267,6 +269,7 @@ export async function refusedSend(page: Page, door: { refuse(on: boolean): void 
 }
 export async function refusedNote(page: Page): Promise<void> {
   await expect(sheetTool(page).locator('[data-sheet-note]'), 'the refusal’s note').toContainText(SHEET_WORDS.notSentNote(LOOK_REFUSAL), { timeout: 15_000 });
+  await expect(sheetTool(page).locator('[data-sheet-note]'), 'the note in sight').toBeInViewport();
   await expect(sendButton(page, 1), 'the Send released, its draft kept').toBeEnabled();
 }
 
@@ -278,10 +281,14 @@ export async function queueAnswer(page: Page, door: { refuse(on: boolean): void 
   const field = sheetTool(page).getByRole('textbox', { name: SHEET_WORDS.answerName('q3'), exact: true });
   if ((await field.inputValue()) === '') await field.fill(Q3_ANSWER); // reached alone: the refused Send never typed it
   await sendButton(page, 1).click();
+  const takeBack = cardOf(page, 'q3').getByRole('button', { name: SHEET_WORDS.takeBack, exact: true });
+  await takeBack.waitFor({ state: 'visible', timeout: 15_000 });
+  await takeBack.scrollIntoViewIfNeeded(); // q3 is the sheet's last card: its queued answer stands under the column's fold
 }
 export async function queuedStopped(page: Page): Promise<void> {
   const card = cardOf(page, 'q3');
-  await expect(card.getByText(SHEET_WORDS.queuedStopped, { exact: true }), 'queued, the session stopped').toBeVisible({ timeout: 15_000 });
+  await expect(card.getByText(SHEET_WORDS.queuedStopped, { exact: true }), 'queued, the session stopped').toBeInViewport({ timeout: 15_000 });
+  await expect(card.getByRole('button', { name: SHEET_WORDS.takeBack, exact: true }), 'Take back in sight').toBeInViewport();
   await expect(card.getByRole('button', { name: SHEET_WORDS.takeBack, exact: true })).toBeEnabled();
 }
 
