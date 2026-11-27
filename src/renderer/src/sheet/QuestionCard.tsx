@@ -30,6 +30,7 @@ export interface QuestionCardProps {
   host: SheetHost;
   density?: 'full' | 'compact'; // compact: folded to its row line until chosen
   queuedHere?: boolean; // the queued answer on the question is one this surface sent: a compact card mounted over it starts open
+  live?: boolean | null; // whether a process holds the session (its summary's `live`); absent or null: not known. A queued answer reads stopped only when false
   // The person's act, as an update of the draft as it stands when applied (undefined: none; null: none after it): a
   // field's edit changes that field of it, so an image or another edit applied first stays.
   onDraft(update: (current: QuestionDraft | undefined) => QuestionDraft | null): void;
@@ -119,7 +120,7 @@ function Note({ tone, children }: { tone: 'warning' | 'neutral'; children: React
   );
 }
 
-export function QuestionCard({ session, question, draft, mark, busy, host, density = 'full', queuedHere = false, onDraft, onDismiss, onRetract, onAttach }: QuestionCardProps) {
+export function QuestionCard({ session, question, draft, mark, busy, host, density = 'full', queuedHere = false, live = null, onDraft, onDismiss, onRetract, onAttach }: QuestionCardProps) {
   const [pointed, setPointed] = useState<string | null>(null);
   const [focused, setFocused] = useState<string | null>(null);
   const [opened, setOpened] = useState<ReadonlySet<number>>(new Set()); // references open, by their place in the list (two may share a hash)
@@ -254,7 +255,7 @@ export function QuestionCard({ session, question, draft, mark, busy, host, densi
         <>
           <QueuedAnswer picks={queued.picks} text={queued.text} />
           <div className="flex flex-wrap items-center justify-end gap-2">
-            <p className="m-0 basis-full text-ui-sm text-fg-muted">{SHEET_WORDS.queued}</p>
+            <p className="m-0 basis-full text-ui-sm text-fg-muted">{live === false ? SHEET_WORDS.queuedStopped : SHEET_WORDS.queued}</p>
             <CardButton disabled={busy} onClick={() => onRetract(queued.key)}>
               {SHEET_WORDS.takeBack}
             </CardButton>

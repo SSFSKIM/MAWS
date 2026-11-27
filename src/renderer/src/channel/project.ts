@@ -35,7 +35,8 @@
 //
 // `waitingFor` is the "Waiting on you" section's filter: the open requests of the sessions the sidebar files under this
 // org project, this Mac's and other machines' (`rowOfRecord`, `rowOfListed`), a greyed machine's left out (nothing
-// there can be answered now).
+// there can be answered now). `heldSheets` is what the section keeps beside it: a session's sheet with nothing of it
+// waiting, while a Send of it is still in the air or an act's note waits (the composite's writer, 2026-11-27).
 import type { AttentionItem } from '@shared/graph/attention';
 import type { AppSessionId, ProjectId } from '@shared/graph/ids';
 import type { SessionRecord } from '@shared/graph/session';
@@ -43,10 +44,12 @@ import type { ProjectRecord } from '@shared/ipc/schema';
 import type { ChannelEvent, ChannelHost, ChannelMachine, ChannelRecipients, ChannelSession, ChannelWord, OrgMember } from '@shared/ipc/schema/org';
 import { noticeSender } from 'org-protocol';
 import { waitsOnAnswer } from '@shared/attention/kinds';
+import { isSheetItem } from '@shared/attention/sheet-item';
 import { addressOf } from '@shared/machine/address';
 import type { MachineRef } from '@shared/machine/ref';
 import { displayTitle, listedTitle } from '../sessions/title';
 import { rowOfListed, rowOfRecord, type OrgIndex, type RowKey } from '../stores/org-projects';
+import { selectSheetHeld, type SheetsState } from '../stores/sheet';
 import type { ListedSession } from '../stores/sessions';
 import { CHANNEL } from './copy';
 
@@ -278,6 +281,21 @@ export function waitingFor(input: ProjectSessions & { bySession: ReadonlyMap<App
     out.push(...items.filter(waitsOnAnswer));
   }
   return out.sort((a, b) => (a.createdAt < b.createdAt ? -1 : a.createdAt > b.createdAt ? 1 : 0));
+}
+
+/**
+ * The sessions of the project whose sheet keeps its card in the section with nothing of it waiting (`items`, the
+ * section's waiting list): a Send still in the air, or an act whose note waits (`selectSheetHeld`'s `unsettled`).
+ */
+export function heldSheets(
+  items: readonly AttentionItem[],
+  input: Parameters<typeof inProject>[0] & { greyed: ReadonlySet<AppSessionId> } & Pick<SheetsState, 'summaries' | 'memories'>,
+): AppSessionId[] {
+  const holds = inProject(input);
+  const asking = new Set(items.filter((item) => isSheetItem(item.id)).map((item) => item.appSessionId));
+  return [...input.summaries.values()].flatMap(({ appSessionId }) =>
+    appSessionId !== null && !asking.has(appSessionId) && !input.greyed.has(appSessionId) && holds(appSessionId) && selectSheetHeld(input, appSessionId, 'unsettled') ? [appSessionId] : [],
+  );
 }
 
 /** The parts of a lane B `src` (`<project>/lane-b/<appSessionId>/<anchor…>`, each part encoded); null for any other. */

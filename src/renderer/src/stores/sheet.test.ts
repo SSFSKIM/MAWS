@@ -200,9 +200,9 @@ describe('the memory', () => {
 // M4's review: what keeps a compact sheet in place once none of its questions waits
 describe('a sheet that holds what the person did', () => {
   const appSessionId = at('app-held' as AppSessionId);
-  const held = (extra: Partial<SheetSummary>, memory = EMPTY_MEMORY) => {
+  const held = (extra: Partial<SheetSummary>, memory = EMPTY_MEMORY, holds: 'acted' | 'unsettled' = 'acted') => {
     useSheets.setState({ summaries: new Map([[A, summary(A, { appSessionId, open: 0, ...extra })]]), memories: new Map([[A, memory]]) });
-    return selectSheetHeld(useSheets.getState(), appSessionId);
+    return selectSheetHeld(useSheets.getState(), appSessionId, holds);
   };
   const act = (state: 'sending' | 'queued' | 'accepted' | 'delivered' | 'closed', note: string | null) => ({ key: 'maws-1', kind: 'answer' as const, id: 'q1', draft: null, sentAt: 0, state, note });
 
@@ -216,5 +216,18 @@ describe('a sheet that holds what the person did', () => {
     expect(held({}, { ...EMPTY_MEMORY, acts: [act('queued', null)] })).toBe(false);
     expect(held({ open: 2 })).toBe(false); // waiting questions are attention's, not this
     expect(selectSheetHeld(useSheets.getState(), at('app-none' as AppSessionId)), 'a session with no record').toBe(false);
+  });
+
+  // The composite's writer (2026-11-27): the channel's "Waiting on you" says what waits on the person, so there only a
+  // Send still in the air or one whose note waits holds the card
+  it('holds, for the channel, only a Send in flight, an act sending and one with a note', () => {
+    const unsettled = (extra: Partial<SheetSummary>, memory = EMPTY_MEMORY) => held(extra, memory, 'unsettled');
+    expect(unsettled({}, { ...EMPTY_MEMORY, sending: { attempt: 'a1', lines: [], state: 'failed', note: null } }), 'a Send that failed, held').toBe(true);
+    expect(unsettled({}, { ...EMPTY_MEMORY, acts: [act('sending', null)] })).toBe(true);
+    expect(unsettled({}, { ...EMPTY_MEMORY, acts: [act('closed', 'q1 was already answered')] })).toBe(true);
+    expect(unsettled({ queued: 1 }), 'a queued answer').toBe(false);
+    expect(unsettled({ hidden: 1 }), 'a queued dismissal').toBe(false);
+    expect(unsettled({ pending: 1 }, { ...EMPTY_MEMORY, acts: [act('accepted', null)] }), 'accepted, not yet delivered').toBe(false);
+    expect(unsettled({ queued: 1 }, { ...EMPTY_MEMORY, acts: [act('queued', null)] })).toBe(false);
   });
 });

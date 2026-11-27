@@ -105,7 +105,7 @@ function SheetBody({ appSessionId, tabId, state, visible }: { appSessionId: AppS
     [appSessionId, tabId, state.focus],
   );
   if (sheet.shown === 'sheet') {
-    return <SessionSheet model={sheet.model} memory={sheet.memory} onMemory={sheet.onMemory} host={sheet.host} focus={pending} unavailable={sheet.unavailable} />;
+    return <SessionSheet model={sheet.model} memory={sheet.memory} onMemory={sheet.onMemory} host={sheet.host} focus={pending} unavailable={sheet.unavailable} live={sheet.live} />;
   }
   if (sheet.shown === 'reading') return null;
   return <Centered words={sheet.shown === 'unreadable' ? SHEET_WORDS.unreadable : SHEET_WORDS.empty} />;

@@ -90,9 +90,21 @@ describe('QuestionCard', () => {
     expect(onDraft).toHaveLastReturnedWith(draft(2, { picks: ['Keep the earlier sailing'], text: 'xy' }));
   });
 
+  // The composite's writer (2026-11-27): the stopped sentence only where the session is known stopped
+  it.each([
+    [true, 'Queued. The session has not picked it up yet.'],
+    [undefined, 'Queued. The session has not picked it up yet.'],
+    [null, 'Queued. The session has not picked it up yet.'],
+    [false, 'Queued. The session is stopped and gets this when it resumes.'],
+  ] as const)('says of a queued answer, with the session’s live %s: %s', (live, words) => {
+    const queued = { key: 'page-1601a001', kind: 'answer' as const, picks: ['Keep the earlier sailing'], text: '', images: [], revision: 1, by: 'page' as const };
+    card({ ...CLASH, queued }, live === undefined ? {} : { live });
+    expect(screen.getByText(words)).toBeTruthy();
+  });
+
   it('reads back a queued answer with Take back and Edit; Edit opens a draft that replaces it', () => {
     const queued = { key: 'page-1601a001', kind: 'answer' as const, picks: ['Keep the earlier sailing'], text: 'Shuttle times are the ones people check.', images: [], revision: 1, by: 'page' as const };
-    const { onRetract, onDraft } = card({ ...CLASH, queued });
+    const { onRetract, onDraft } = card({ ...CLASH, queued }, { live: false });
     expect(screen.queryByRole('radio')).toBeNull();
     expect(screen.getByText('Keep the earlier sailing')).toBeTruthy();
     expect(screen.getByText('Queued. The session is stopped and gets this when it resumes.')).toBeTruthy();

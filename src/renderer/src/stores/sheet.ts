@@ -151,14 +151,19 @@ export const selectSheetMemory = (state: Pick<SheetsState, 'memories'>, session:
  * questions no longer wait (M4's review): a queued answer or a queued dismissal (neither is an attention item), or an
  * act of this window still sending, accepted and not yet delivered (the model's `pending` holds its outcome), or carrying
  * a note. It waits on nobody: nothing counts it.
+ *
+ * `holds: 'unsettled'` is the channel's "Waiting on you", which says what waits on the person (the composite's writer,
+ * 2026-11-27): there only a Send still in the air (held, sending or failed) or an act whose note waits holds the sheet;
+ * a queued answer, a queued dismissal and an accepted outcome leave with the question, as an answered permission does.
  */
-export function selectSheetHeld(state: Pick<SheetsState, 'summaries' | 'memories'>, appSessionId: AppSessionId): boolean {
+export function selectSheetHeld(state: Pick<SheetsState, 'summaries' | 'memories'>, appSessionId: AppSessionId, holds: 'acted' | 'unsettled' = 'acted'): boolean {
   const session = selectSheetSession(state, appSessionId);
   if (session === null) return false;
   const summary = state.summaries.get(session)!;
-  if (summary.queued > 0 || summary.hidden > 0) return true;
+  const acted = holds === 'acted';
+  if (acted && (summary.queued > 0 || summary.hidden > 0)) return true;
   const memory = state.memories.get(session);
-  return memory !== undefined && (memory.sending !== null || memory.acts.some((act) => act.state === 'sending' || act.state === 'accepted' || act.note !== null));
+  return memory !== undefined && (memory.sending !== null || memory.acts.some((act) => act.state === 'sending' || (acted && act.state === 'accepted') || act.note !== null));
 }
 
 /** Applies an update to a session's memory as it stands now (X5's `onMemory`); callable after the sheet that asked is gone. */

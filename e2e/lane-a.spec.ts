@@ -1815,10 +1815,10 @@ test.describe('lane A: a terminal session driven through its bridge', () => {
     // G2.e: answered, the card reads queued and the question waits no more; taken back, it is open and waits again
     await card.getByRole('radio', { name: 'Yes', exact: true }).click();
     await sheet.getByRole('button', { name: SHEET_WORDS.send(1), exact: true }).click();
-    await expect(card.getByText(SHEET_WORDS.queued, { exact: true })).toBeVisible({ timeout: 15_000 });
+    await expect(card.getByText(SHEET_WORDS.queuedStopped, { exact: true })).toBeVisible({ timeout: 15_000 });
     await expect.poll(() => sheetItems(page, c.sid), { message: 'a queued answer stands on it' }).toEqual([]);
     await card.getByRole('button', { name: SHEET_WORDS.takeBack, exact: true }).click();
-    await expect(card.getByText(SHEET_WORDS.queued, { exact: true })).toHaveCount(0, { timeout: 15_000 });
+    await expect(card.getByText(SHEET_WORDS.queuedStopped, { exact: true })).toHaveCount(0, { timeout: 15_000 });
     await expect(card.getByRole('radio', { name: 'Yes', exact: true })).toBeEnabled();
     await expect.poll(() => sheetItems(page, c.sid), { timeout: 15_000 }).toEqual(['q1']);
     expect(inboxLines(c).map((l) => [l.kind, l.by])).toEqual([['answer', 'maws'], ['retract', 'maws']]);

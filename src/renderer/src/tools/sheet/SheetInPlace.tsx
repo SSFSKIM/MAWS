@@ -16,7 +16,7 @@ export function SheetInPlace({ appSessionId, className, head = null, fallback = 
   return (
     <div className={className} data-sheet-in-place={sheet.session}>
       {head}
-      <SessionSheet model={sheet.model} memory={sheet.memory} onMemory={sheet.onMemory} host={sheet.host} density="compact" unavailable={sheet.unavailable} />
+      <SessionSheet model={sheet.model} memory={sheet.memory} onMemory={sheet.onMemory} host={sheet.host} density="compact" unavailable={sheet.unavailable} live={sheet.live} />
     </div>
   );
 }

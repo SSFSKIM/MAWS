@@ -52,7 +52,7 @@ describe('the card states (G1.b)', () => {
   });
 
   it('queued: stopped-queue, before, with its take back; the dismissal it hides, and the accepted outcome', () => {
-    sheet(pin('stopped-queue', 'before'));
+    sheet(pin('stopped-queue', 'before'), { live: false });
     expect(within(cardOf('q1')).getByText('Queued. The session is stopped and gets this when it resumes.')).toBeTruthy();
     expect(within(cardOf('q1')).getByRole('button', { name: 'Take back' })).toBeTruthy();
     const hidden = document.querySelector<HTMLElement>('[data-sheet-hidden="q2"]')!;

@@ -382,7 +382,7 @@ describe('a session whose sheet questions wait', () => {
     const answer = puts()[0]!.lines[0]!;
     model = sheetOf([{ ...FIXTURE, queued: { key: answer.key, kind: 'answer', picks: ['Replace it'], text: '', images: [], revision: 1, by: 'maws' } }], { sent: [{ key: answer.key, state: 'queued', kind: 'answer', id: 'q7' }] });
     changed(true);
-    await waitFor(() => expect(within(fix()).getByText(SHEET_WORDS.queued)).toBeTruthy());
+    await waitFor(() => expect(within(fix()).getByText(SHEET_WORDS.queuedStopped)).toBeTruthy());
     expect(fix().querySelectorAll('[data-sheet-in-place]'), 'the sheet stays where the answer was sent').toHaveLength(1);
 
     fireEvent.click(within(fix()).getByRole('button', { name: SHEET_WORDS.takeBack }));
@@ -391,7 +391,7 @@ describe('a session whose sheet questions wait', () => {
     expect(retract).toMatchObject({ kind: 'retract', target: answer.key });
     model = sheetOf([FIXTURE], { sent: [{ key: answer.key, state: 'queued', kind: 'answer', id: 'q7', cancelled: true }, { key: retract.key, state: 'queued', kind: 'retract', target: answer.key }] });
     changed(false);
-    await waitFor(() => expect(within(fix()).queryByText(SHEET_WORDS.queued)).toBeNull());
+    await waitFor(() => expect(within(fix()).queryByText(SHEET_WORDS.queuedStopped)).toBeNull());
     expect(fix().querySelectorAll('[data-sheet-in-place]')).toHaveLength(1);
     expect(fix().querySelector('[data-sheet-question="q7"]'), 'open again, its line in the card').not.toBeNull();
   });
