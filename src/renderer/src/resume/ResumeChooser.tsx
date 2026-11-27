@@ -7,7 +7,7 @@
 // preview; Enter or a double click opens the session in the current tab (F2b 2.5's `openSession`), ⌘Enter in a new tab.
 // Nothing here launches an engine or marks anything read: opening shows the transcript, and the first Send continues the
 // session (P2-A's acquisition once it lands). The host gives the box (X19's library size) and Esc.
-import { useEffect, useId, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
+import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
 import type { AppSessionId, ProjectId } from '@shared/graph/ids';
 import type { SessionRecord } from '@shared/graph/session';
 import type { ProjectRecord } from '@shared/ipc/schema';
@@ -198,11 +198,24 @@ export function ResumeChooser({ context, close }: ResumeChooserProps) {
     if (event.key.length === 1 && !event.metaKey && !event.ctrlKey && !isTextField(event.target) && event.key !== ' ') search.current?.focus();
   };
 
+  // Ticket 815: a part the keyboard is in can go with the selection (the preview's Last active, when the next row's
+  // preview is of the other kind); the keyboard, dropped to the page, is given back to the search field, where the arrows
+  // and type-to-search are the chooser's, before the dialog's focus trap would take it to its own frame.
+  const focusedLast = useRef<Element | null>(null);
+  useLayoutEffect(() => {
+    const lost = focusedLast.current;
+    if (lost === null || lost.isConnected) return;
+    focusedLast.current = null;
+    if (document.activeElement === null || document.activeElement === document.body) search.current?.focus();
+  });
+
   const scopeLabel = toggles.allProjects ? COPY.allProjects : scopeName;
   const listId = `${ids}-list`;
 
   return (
-    <div data-resume-chooser className="flex min-h-0 min-w-0 flex-1 flex-col text-ui" onKeyDown={onKeyDown}>
+    <div data-resume-chooser className="flex min-h-0 min-w-0 flex-1 flex-col text-ui" onKeyDown={onKeyDown} onFocus={(event) => {
+        focusedLast.current = event.target;
+      }}>
       {/* the word cut (C155): the scope alone; "Resume session" is the dialog's title, which its host gives it */}
       <header className="flex items-center gap-2 px-1 pb-2">
         <span data-testid="resume-scope" className="min-w-0 truncate text-ui-sm text-fg-muted">
@@ -389,9 +402,10 @@ function ListedChooserRow({ id, row, kind, now, selected, onSelect, onOpen }: Ro
   );
 }
 
-// A fact of the preview. `title` is the whole of words the row may cut short; `tip` a fact the words do not show (the
-// date and time of "2 hours ago"), a Tip the words take the keyboard for (ticket 815).
-function Fact({ label, children, title, tip }: { label: string; children: ReactNode; title?: string; tip?: string }) {
+// A fact of the preview. `title` is the whole of words the row may cut short; `wrap` draws words too long for a line on
+// as many as they take instead (a branch, a path whose end matters), so nothing of them is out of reach; `tip` a fact the
+// words do not show (the date and time of "2 hours ago"), a Tip the words take the keyboard for (ticket 815).
+function Fact({ label, children, title, wrap, tip }: { label: string; children: ReactNode; title?: string; wrap?: boolean; tip?: string }) {
   return (
     <>
       <dt className="text-fg-faint">{label}</dt>
@@ -404,7 +418,7 @@ function Fact({ label, children, title, tip }: { label: string; children: ReactN
           </Tip>
         </dd>
       ) : (
-        <dd className="m-0 min-w-0 truncate text-fg" title={title}>
+        <dd className={`m-0 min-w-0 text-fg ${wrap ? '[overflow-wrap:anywhere]' : 'truncate'}`} title={title}>
           {children}
         </dd>
       )}
@@ -477,7 +491,17 @@ function SessionPreview({ row, projects, now, immediate }: PreviewProps) {
         <Fact label={COPY.facts.folder} title={record.directory}>
           {record.directory}
         </Fact>
-        {branch && <Fact label={COPY.facts.branch}>⎇ {branch}</Fact>}
+        {/* ticket 815: once the row's titles, the checkout a session in a worktree's subfolder ran in, and its whole branch */}
+        {record.worktree !== null && record.worktree.path !== record.directory && (
+          <Fact label={COPY.facts.worktree} wrap>
+            {record.worktree.path}
+          </Fact>
+        )}
+        {branch && (
+          <Fact label={COPY.facts.branch} wrap>
+            ⎇ {branch}
+          </Fact>
+        )}
         {projectName && <Fact label={COPY.facts.project}>{projectName}</Fact>}
         <Fact label={COPY.facts.lastActive} tip={formatDateTime(row.at)}>
           {capitalised(formatAgo(Math.max(0, now - row.at)))}

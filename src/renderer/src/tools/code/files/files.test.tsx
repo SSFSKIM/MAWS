@@ -30,6 +30,7 @@ import { filesTool, FILES_ROW_HEIGHT } from './FilesTool';
 import { useFiles, WATCH_GRACE_MS } from './store';
 import { FILE_WIDTH_MIN, resetTreeState, treeOf, TREE_WIDTH_DEFAULT, TREE_WIDTH_MIN, useTreeState } from './tree-state';
 import { installResizeObserver } from '../../../test-support/resize';
+import { accessibleDescription } from '../../../test-support/accessible-text';
 import { connectSideFiles } from './tabs';
 import { dirname, expandTo, hidden, joinPath, roleOf, rootsFor, rowsOf, sameFile, type Listing } from './tree';
 import { activeTab, allTabs, currentSet } from '../../../stores/layout-model';
@@ -535,6 +536,29 @@ describe('files tool', () => {
     expect(row.textContent).toBe('No folder at this path.');
     expect(row.getAttribute('data-notice-cause')).toBe('not-found');
     expect(row.getAttribute('title')).toBe('No folder at this path.'); // the word cut (N11)
+  });
+
+  // Board ticket 815: a failure's own words are a tip on the row's sentence, which takes Tab for them; when the folder
+  // lists again and the row goes, the keyboard stays on the folder's row, not dropped out of Files
+  it('keeps the keyboard on a folder’s row when its focused listing error clears', async () => {
+    const before = REPO['/r/src'];
+    REPO['/r/src'] = 'files.list: permission denied';
+    try {
+      render(<TestHost />);
+      openTool();
+      fireEvent.click(await screen.findByText('src'));
+      await waitFor(() => expect(document.querySelector('[data-notice="error"] [tabindex="0"]')).not.toBeNull());
+      const sentence = document.querySelector<HTMLElement>('[data-notice="error"] [tabindex="0"]')!;
+      expect(accessibleDescription(sentence)).toBe('files.list: permission denied');
+      act(() => sentence.focus());
+      REPO['/r/src'] = before;
+      act(() => main.emit('files.changed', { appSessionId: bareOf(A), path: '/r/src', kind: 'invalidated' }));
+      await screen.findByText('app.ts');
+      expect(document.querySelector('[data-notice]')).toBeNull();
+      await waitFor(() => expect(document.activeElement).toBe(item('src')));
+    } finally {
+      REPO['/r/src'] = before;
+    }
   });
 
   it('roots that could not be listed read the folder’s sentences and the command’s words, and Retry lists them again', async () => {

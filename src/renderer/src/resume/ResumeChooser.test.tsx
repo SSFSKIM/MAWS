@@ -185,6 +185,31 @@ describe('the resume chooser', () => {
     expect(tooltip()).toBe(full);
   });
 
+  // Ticket 815: the row's titles once gave the checkout a session ran in and its whole branch; the preview keeps both,
+  // the worktree where it is not the session's folder, the branch whole on as many lines as it takes
+  it('the preview names the worktree a session ran in where it is not its folder, and its whole branch', async () => {
+    const user = userEvent.setup();
+    const branch = 'feature/a-branch-name-long-enough-that-a-narrow-preview-would-cut-it';
+    fill([
+      pageRecord('alpha', { projectId: P.id, updatedAt: minute(9), directory: '/work/p-wt/packages/app', worktree: { path: '/work/p-wt', branch } }),
+      pageRecord('beta', { projectId: P.id, updatedAt: minute(5), directory: '/work/p-wt2', worktree: { path: '/work/p-wt2', branch: null } }),
+    ]);
+    mount();
+    await user.click(screen.getByRole('button', { name: 'All worktrees' }));
+    expect(selected()).toBe('alpha');
+    const fact = (label: string) => {
+      const dt = [...screen.getByTestId('resume-preview').querySelectorAll('dt')].find((d) => d.textContent === label);
+      return dt?.nextElementSibling?.textContent ?? null;
+    };
+    expect(fact(RESUME_COPY.facts.folder)).toBe('/work/p-wt/packages/app');
+    expect(fact(RESUME_COPY.facts.worktree)).toBe('/work/p-wt');
+    expect(fact(RESUME_COPY.facts.branch)).toBe(`⎇ ${branch}`);
+    await user.keyboard('{ArrowDown}');
+    expect(selected()).toBe('beta');
+    expect(fact(RESUME_COPY.facts.folder)).toBe('/work/p-wt2');
+    expect(fact(RESUME_COPY.facts.worktree), 'the worktree is the folder').toBeNull();
+  });
+
   it('a row its session cannot be continued from says why in its note and its description; the preview says it at rest', () => {
     vi.useFakeTimers();
     try {
@@ -243,6 +268,27 @@ describe('the resume chooser', () => {
     await user.keyboard('{Meta>}{Enter}{/Meta}');
     expect(open).toHaveBeenLastCalledWith(spawned, { newTab: true });
     off();
+  });
+
+  // Ticket 815: Last active's words take Tab for their tip; an arrow there moves the selection, and where the next row's
+  // preview is of the other kind the words go with it, the keyboard given back to the search field, where the arrows and
+  // type-to-search are the chooser's
+  it('gives the keyboard back to the search field when the preview it was in changes kind', async () => {
+    const user = userEvent.setup();
+    fill(base);
+    useMachines.getState().applyRoster([{ ref: OTHER_MACHINE, name: 'mini', local: false, state: 'up', since: minute(0), generation: 1, carrier: 'relay' }]);
+    const spawned: ListedSession = { ...remoteRow(OTHER_MACHINE, 'spawned', { title: 'Testing session', orgKey: labelOf(P) as OrgKey, issued: minute(7) }), appId: addressOf(OTHER_MACHINE, 'spawned' as AppSessionId) };
+    useSessions.setState({ listed: new Map([[spawned.appId, spawned]]) });
+    render(<ResumeChooser context={{ projectId: P.id as ProjectId, row: labelOf(P), exclude: null }} close={vi.fn()} />);
+    expect(selected()).toBe('alpha');
+    const full = formatDateTime(Date.parse(minute(9)));
+    const lastActive = within(screen.getByTestId('resume-preview')).getByText((_, element) => element?.tagName === 'SPAN' && accessibleDescription(element) === full);
+    act(() => lastActive.focus());
+    await user.keyboard('{ArrowDown}');
+    expect(selected()).toBe('Testing session');
+    expect(document.activeElement).toBe(screen.getByRole('combobox'));
+    await user.keyboard('{ArrowDown}');
+    expect(selected()).toBe('beta');
   });
 
   // m8-5's discovery (review 2): a window that still holds a remote session's record draws it as a record row, marked as

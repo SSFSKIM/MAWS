@@ -35,7 +35,6 @@ const EXCEPTIONS: Record<string, { count: number; why: string }> = {
   'src/renderer/src/sessions/ArchiveDialog.tsx': { count: 1, why: "whether another session's record still names the worktree being archived" },
   'src/renderer/src/sessions/ArchivedSessionsDialog.tsx': { count: 1, why: 'the folder an archived record names' },
   'src/renderer/src/sessions/DeleteDialog.tsx': { count: 1, why: 'the folder of the record about to be deleted' },
-  'src/renderer/src/resume/ResumeChooser.tsx': { count: 1, why: "the Resume picker's folder badge: where a past session was" },
 };
 
 const FACT_READS = [

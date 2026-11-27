@@ -681,6 +681,7 @@ function TreeList({
   // that grows above it moves it out of that range before the offset is corrected, and an unmounted row would drop the
   // keyboard to the page.
   const [focused, setFocused] = useState<string | null>(null);
+  const focusedRow = useRef<TreeRow | null>(null); // the row the keyboard is in, read once it is gone (board ticket 815)
   const kept = useMemo(() => (focused === null ? -1 : rows.findIndex((row) => row.key === focused)), [rows, focused]);
   const rangeExtractor = useCallback(
     (range: Range) => {
@@ -767,6 +768,19 @@ function TreeList({
     aim.current = rows[at].key;
     setFocused(rows[at].key);
   }, [asked, settled, rows, selected, tabId]);
+  // Board ticket 815: a failure's sentence takes Tab for its words; when the folder lists again its row goes, and the
+  // keyboard that was in it is given to the folder's row (an unmounted row drops it to the page, and the list keeps only
+  // a row that is still there). The row is the one last focused, forgotten when the keyboard leaves a row still drawn.
+  useLayoutEffect(() => {
+    const lost = focusedRow.current;
+    if (lost?.kind !== 'notice' || rows.some((row) => row.key === lost.key)) return;
+    focusedRow.current = null;
+    if (document.activeElement !== null && document.activeElement !== document.body) return; // the keyboard went elsewhere
+    const at = rows.findIndex((row) => (row.kind === 'root' || row.kind === 'entry') && sameFile(row.path, lost.path));
+    if (at < 0) return;
+    aim.current = rows[at].key;
+    setFocused(rows[at].key);
+  }, [rows]);
   useLayoutEffect(() => {
     const key = aim.current;
     if (key === null) return;
@@ -788,8 +802,14 @@ function TreeList({
                 data-row-key={row.key}
                 className={`absolute inset-x-0 flex items-center ${item.index === rootAt ? 'pr-8' : 'pr-1'}`}
                 style={{ top: item.start, height: FILES_ROW_HEIGHT }}
-                onFocus={() => setFocused(row.key)}
-                onBlur={() => setFocused((key) => (key === row.key ? null : key))}
+                onFocus={() => {
+                  focusedRow.current = row;
+                  setFocused(row.key);
+                }}
+                onBlur={(event) => {
+                  if (event.target.isConnected && focusedRow.current?.key === row.key) focusedRow.current = null;
+                  setFocused((key) => (key === row.key ? null : key));
+                }}
               >
                 {row.kind === 'changed-heading' ? (
                   <ChangedHeading count={row.count} folded={row.folded} fold={changed.fold} />
@@ -944,9 +964,11 @@ function ChangedItem({ row, changed, width, fonts }: { row: ChangedRow; changed:
   // The folder gives way first; until the list has a width (its first layout) it is drawn whole.
   const folder = label.folder === '' || width <= 0 ? label.folder : folderFromEnd(label.folder, width - CHANGED_ROW_FIXED - measureIn(fonts.name)(label.name), measureIn(fonts.folder));
   // Board ticket 815: the row's tip (once its title), the letter's kind under it; a fact the row does not draw is its
-  // description too
+  // description too: the whole path where the folder is cut or gone (a narrow list), and the tip's other words
+  const cut = folder !== label.folder;
+  const description = title === label.shown ? (cut ? label.shown : null) : cut && !title.includes(label.shown) ? `${label.shown} · ${title}` : title;
   return (
-    <Tip content={<RowTip words={title} under={KIND[row.letter]} />} description={title === label.shown ? null : title}>
+    <Tip content={<RowTip words={title} under={KIND[row.letter]} />} description={description}>
       <button
         type="button"
         role="treeitem"

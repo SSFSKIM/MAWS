@@ -59,9 +59,13 @@ function selectedTab(): { id: string; toolId: string } | null {
 }
 const bodyOf = (toolId: string) => region()?.querySelector<HTMLElement>(`[data-surface="${CSS.escape(toolId)}"] [role="tabpanel"]`) ?? null;
 
+// A greyed button: disabled, or `aria-disabled`, which keeps Tab for its reason's tip and swallows its press (board ticket 815)
+const unavailable = (button: HTMLButtonElement) => button.disabled || button.getAttribute('aria-disabled') === 'true';
+const enabled = (button: HTMLButtonElement | null) => button !== null && !unavailable(button);
+
 function click(el: Element | null | undefined, what: string): void {
   if (!(el instanceof HTMLElement)) throw new Error(`agents: no ${what}`);
-  if (el instanceof HTMLButtonElement && el.disabled) throw new Error(`agents: ${what} is disabled`);
+  if (el instanceof HTMLButtonElement && unavailable(el)) throw new Error(`agents: ${what} is disabled`);
   el.click();
 }
 // by its text, or by its accessible name where the word cut made its word a glyph (Open creating turn, T222)
@@ -168,7 +172,7 @@ function background(): BackgroundView | null {
     shells: [...body.querySelectorAll<HTMLElement>('[data-shell]')].map((row) => ({
       taskId: row.dataset.shell!,
       line: text(row.querySelector('[data-part="line"]')),
-      output: buttonNamed(row, BACKGROUND_COPY.output)?.disabled === false ? 'enabled' : 'disabled',
+      output: enabled(buttonNamed(row, BACKGROUND_COPY.output)) ? 'enabled' : 'disabled',
       stopping: stoppingIn(row),
       error: errorOf(row),
     })),
