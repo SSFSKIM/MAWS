@@ -9,11 +9,12 @@ import { useCallback, useSyncExternalStore } from 'react';
 import type { SheetModel } from '@shared/sheet/model';
 import { reconcile, type SheetMemory } from '../../../../src/renderer/src/sheet';
 import { readPairing } from '../credential';
-import { madeElsewhere, onMemory, readMemory, sendingSince, updateMemory, type MemoryUpdateOptions } from '../memory';
+import { madeElsewhere, onMemory, readMemory, sendingSince, unkeptDraft, updateMemory, type MemoryUpdateOptions } from '../memory';
 
 export interface SessionMemory {
   memory: SheetMemory;
   elsewhereSince: number | null; // since when a Send this window did not make has been held, while it is being sent
+  unkept: boolean; // a draft is held in this window alone, too long for the store (memory.ts)
   // `against`: the model the update was made against (memory.ts: what it knows, its `seq`, and its reconcile)
   update(update: (current: SheetMemory) => SheetMemory, against?: Against): void;
 }
@@ -45,6 +46,7 @@ function snapshotOf(session: string): SessionMemory {
   const made = {
     memory,
     elsewhereSince: elsewhere ? sendingSince(session) : null,
+    unkept: unkeptDraft(session),
     pairing,
     update: (update: (current: SheetMemory) => SheetMemory, against?: Against) => {
       if (pairing === null || pairingNow() !== pairing) return; // the pairing it was made under has ended

@@ -13,13 +13,25 @@ const DOOR = { known: true as const, available: true as const };
 
 function harness() {
   const pending: { session: string; done(answer: ReadAnswer): void }[] = [];
-  const store = createStore({ read: (session) => new Promise<ReadAnswer>((done) => void pending.push({ session, done })) });
+  const watched = new Map<string, Set<(adopted: boolean) => void>>(); // the memory's listeners, by session
+  const store = createStore({
+    read: (session) => new Promise<ReadAnswer>((done) => void pending.push({ session, done })),
+    onMemory: (session, listener) => {
+      const set = watched.get(session) ?? new Set();
+      watched.set(session, set.add(listener));
+      return () => void set.delete(listener);
+    },
+  });
+  // a write of the session's memory: another tab's (adopted) or this tab's own
+  const wrote = (session: string, adopted = true) => {
+    for (const listener of watched.get(session) ?? []) listener(adopted);
+  };
   const answer = async (at: number, value: ReadAnswer) => {
     pending[at]!.done(value);
     await Promise.resolve();
     await Promise.resolve();
   };
-  return { store, pending, answer };
+  return { store, pending, answer, wrote, watched };
 }
 
 beforeEach(() => vi.useFakeTimers());
@@ -73,6 +85,58 @@ describe('the store', () => {
     store.adopted(T); // another session's: nothing of this one
     expect(store.state().shown).toMatchObject({ settled: true });
     expect(pending).toHaveLength(3);
+  });
+
+  it('a write of another tab while the first read is out leaves that read unsettled, though no view was mounted to hear it (B1)', async () => {
+    const { store, pending, answer, wrote } = harness();
+    store.show(S); // the first read, slow
+    wrote(S); // another tab writes a draft against a newer model, before this tab draws anything
+    await answer(0, { ok: true, model: model(1), door: DOOR });
+    expect(store.state().shown).toMatchObject({ model: model(1), settled: false }); // an older model: its reconcile is not written
+    expect(pending).toHaveLength(2); // and it is read again
+    await answer(1, { ok: true, model: model(2), door: DOOR });
+    expect(store.state().shown).toMatchObject({ model: model(2), settled: true });
+  });
+
+  it('a write of this tab’s own, or of another session, settles nothing less; a session left is no longer heard (B1)', async () => {
+    const { store, pending, answer, wrote, watched } = harness();
+    store.show(S);
+    wrote(S, false);
+    wrote(T);
+    await answer(0, { ok: true, model: model(1), door: DOOR });
+    expect(store.state().shown).toMatchObject({ settled: true });
+    expect(pending).toHaveLength(1);
+    store.show(T);
+    expect(watched.get(S)?.size ?? 0).toBe(0);
+    expect(watched.get(T)?.size).toBe(1);
+  });
+
+  it('forgets everything of a pairing that ended, keeps the place, and applies none of its reads still out (B5)', async () => {
+    const { store, pending, answer } = harness();
+    store.show(S);
+    store.ready([summary(S, 1)], DOOR);
+    await answer(0, { ok: true, model: model(1), door: DOOR });
+    await answer(1, { ok: true, model: model(1), door: DOOR });
+    store.changed(S, summary(S, 2)); // a read out when the pairing ends
+    store.reset();
+    expect(store.state()).toEqual({ sessions: null, door: null, shown: { session: S, model: undefined, fresh: false, settled: false } });
+    await answer(2, { ok: true, model: model(2), door: DOOR });
+    expect(store.state().shown?.model).toBeUndefined(); // the old pairing's read is not applied
+    expect(pending).toHaveLength(3); // and the reset reads nothing itself
+    store.opened(); // the next pairing's connection
+    store.ready([summary(S, 3)], DOOR);
+    expect(pending).toHaveLength(4);
+    await answer(3, { ok: true, model: model(3), door: DOOR });
+    expect(store.state().shown).toMatchObject({ model: model(3), fresh: true, settled: true });
+  });
+
+  it('retries no read of a pairing that ended (B5)', async () => {
+    const { store, pending, answer } = harness();
+    store.show(S);
+    await answer(0, { ok: false, why: 'unproven' });
+    store.reset();
+    vi.advanceTimersByTime(READ_RETRY_MS * 2);
+    expect(pending).toHaveLength(1);
   });
 
   it('an adoption’s read belongs to the session on screen: a read of the one left before does not hold it back', async () => {

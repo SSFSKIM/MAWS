@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { CREDENTIAL_KEY, forgetEverything, readPairing, writePairing } from './credential';
+import { CREDENTIAL_KEY, forgetEverything, forgetPairing, readPairing, writePairing } from './credential';
 
 function storage(entries: Record<string, string> = {}): Storage {
   const map = new Map(Object.entries(entries));
@@ -46,5 +46,20 @@ describe('the stored pairing (T9, T19)', () => {
     const store = storage({ [CREDENTIAL_KEY]: '{}', 'maws.sheet.draft.s.q1': '{}', 'maws.sheet.outline': 'open', 'maws.other': 'kept', unrelated: 'kept' });
     forgetEverything(store);
     expect(Object.fromEntries(Array.from({ length: store.length }, (_, i) => [store.key(i)!, store.getItem(store.key(i)!)]))).toEqual({ 'maws.other': 'kept', unrelated: 'kept' });
+  });
+
+  it('forgets a pairing being removed, and everything with it, only while it is the one stored (B4)', () => {
+    const a = { id: '0a1b2c3d', credential: CREDENTIAL };
+    const b = { id: 'ffffffff', credential: 'B'.repeat(43) };
+    const held = storage({ 'maws.sheet.draft.s.q1': '{}' });
+    writePairing(b, held); // another tab paired anew
+    expect(forgetPairing(a, held)).toBe(false);
+    expect(readPairing(held)).toEqual(b);
+    expect(held.getItem('maws.sheet.draft.s.q1')).toBe('{}');
+    expect(forgetPairing(b, held)).toBe(true);
+    expect(held.length).toBe(0);
+    const empty = storage({ 'maws.sheet.draft.s.q1': '{}' });
+    expect(forgetPairing(a, empty)).toBe(true); // nothing stored: what is left of the memory goes too
+    expect(empty.length).toBe(0);
   });
 });

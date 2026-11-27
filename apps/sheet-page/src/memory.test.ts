@@ -183,13 +183,12 @@ describe('the stored memory (T19): one entry a thing', () => {
     const seen = windowB.readMemory(S, store).sending!;
     const before = store.getItem(key!);
     store.quota = Object.entries(store.entries()).reduce((sum, [name, value]) => sum + name.length + value.length, 0); // full: no room for a longer value
-    expect(() =>
-      windowB.updateMemory(S, (current) => startSend(current, seen.lines, 5_000, 'wb-1-a-press-with-a-longer-name', { drafts: current.drafts, over: seen.attempt }), { storage: store, now: 5_000, target }),
-    ).toThrow();
+    // a press whose entry cannot be written even with every other entry gone: B6 evicts nothing and holds it in this window
+    windowB.updateMemory(S, (current) => startSend(current, seen.lines, 5_000, `wb-1-${'a-press-with-a-longer-name'.repeat(200)}`, { drafts: current.drafts, over: seen.attempt }), { storage: store, now: 5_000, target });
     expect(sendKeys()).toEqual([key]);
-    expect(store.getItem(key!)).toBe(before); // the only record of the Send stands
+    expect(store.getItem(key!)).toBe(before); // the only stored record of the Send stands (the press is held in this window alone)
     store.quota = null;
-    windowB.updateMemory(S, (current) => startSend(current, seen.lines, 6_000, 'wb-1', { drafts: current.drafts, over: seen.attempt }), { storage: store, now: 6_000, target });
+    windowB.updateMemory(S, (current) => startSend(current, seen.lines, 6_000, 'wb-1', { drafts: current.drafts, over: current.sending!.attempt }), { storage: store, now: 6_000, target });
     expect(sendKeys()).toEqual([key]);
     expect(JSON.parse(store.getItem(key!)!)).toMatchObject({ press: 'wb-1', at: 6_000 });
   });
@@ -368,6 +367,43 @@ describe('the stored memory (T19): one entry a thing', () => {
     expect(kept.some((key) => key.startsWith(`maws.sheet.send.${S}.`))).toBe(true);
     expect(kept).toContain(`maws.sheet.draft.${S}.q7`);
     expect(kept).not.toContain(`maws.sheet.draft.${S}.q5`); // touched longest ago, a Send's aside
+  });
+
+  it('evicts nothing for an edit too large for the store even alone, holds it in this window, and says so (B6)', async () => {
+    vi.resetModules();
+    const fresh = await import('./memory');
+    const store = testStorage({ [CREDENTIAL_KEY]: JSON.stringify({ v: 1, id: '0a1b2c3d', credential: 'A'.repeat(43) }) });
+    fresh.writeMemory(OTHER, EMPTY_MEMORY, withDraft(EMPTY_MEMORY, 'q1', draft('another session’s unsent draft')), 0, store);
+    fresh.writeMemory(S, EMPTY_MEMORY, withDraft(EMPTY_MEMORY, 'q5', draft('a draft of this session')), 1, store);
+    const stored = store.entries();
+    store.quota = Object.entries(stored).reduce((sum, [key, value]) => sum + key.length + value.length, 0) + 200;
+    const target = new EventTarget();
+    const heard = vi.fn();
+    fresh.onMemory(S, heard, target);
+    const long = draft('x'.repeat(5_000)); // past the whole store, whatever is evicted
+    fresh.updateMemory(S, (current) => withDraft(current, 'q4', long), { storage: store, now: 2, target });
+    expect(store.entries()).toEqual(stored); // nothing evicted, nothing written
+    expect(fresh.readMemory(S, store).drafts.get('q4')).toEqual(long); // still this window's draft: editable and sendable
+    expect(fresh.readMemory(S, store).drafts.get('q5')).toEqual(draft('a draft of this session'));
+    expect(fresh.unkeptDraft(S, store)).toBe(true);
+    expect(fresh.unkeptDraft(OTHER, store)).toBe(false);
+    expect(heard).toHaveBeenCalledTimes(1);
+
+    fresh.updateMemory(S, (current) => withDraft(current, 'q4', draft('short again')), { storage: store, now: 3, target });
+    expect(fresh.unkeptDraft(S, store)).toBe(false);
+    expect(JSON.parse(store.getItem(`maws.sheet.draft.${S}.q4`)!)).toMatchObject({ draft: draft('short again') });
+  });
+
+  it('forgets what it held in this window when the person unpairs (B6)', async () => {
+    vi.resetModules();
+    const fresh = await import('./memory');
+    const store = testStorage();
+    store.quota = 100;
+    fresh.updateMemory(S, (current) => withDraft(current, 'q4', draft('x'.repeat(500))), { storage: store, now: 1, target: new EventTarget() });
+    expect(fresh.unkeptDraft(S, store)).toBe(true);
+    fresh.forgetUnkept(store);
+    expect(fresh.unkeptDraft(S, store)).toBe(false);
+    expect(fresh.readMemory(S, store)).toEqual(EMPTY_MEMORY);
   });
 
   it('reads the drafts of the questions it holds whatever else is stored for them', () => {

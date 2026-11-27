@@ -1,7 +1,7 @@
 // The page's requests (§P): the exchange carries no credential; every request that does is made only while the tab's
 // own connection is proven at that moment (T28), and otherwise is not made and its caller is told so.
 import { describe, expect, it, vi } from 'vitest';
-import { createApi } from './api';
+import { createApi, UNPAIR_WAIT_MS } from './api';
 
 const CREDENTIAL = Buffer.alloc(32, 7).toString('base64url');
 
@@ -55,6 +55,23 @@ describe('unpair', () => {
     const { api, calls } = harness();
     expect(await api.unpair()).toEqual({ ok: false, why: 'unproven' });
     expect(calls).toEqual([]);
+  });
+
+  it('gives up waiting after UNPAIR_WAIT_MS, as an answer that did not come (B4)', async () => {
+    vi.useFakeTimers();
+    try {
+      // a server that never answers: only the request's own signal ends it, as a browser's fetch ends at an abort
+      const fetch = vi.fn((_url: string | URL | Request, init?: RequestInit) => new Promise<Response>((_, failed) => init?.signal?.addEventListener('abort', () => failed(new DOMException('aborted', 'AbortError')))));
+      const api = createApi({ proven: () => PAIRING, fetch });
+      let answered: unknown = null;
+      void api.unpair().then((done) => void (answered = done));
+      await vi.advanceTimersByTimeAsync(UNPAIR_WAIT_MS - 1);
+      expect(answered).toBeNull();
+      await vi.advanceTimersByTimeAsync(1);
+      expect(answered).toEqual({ ok: false, why: 'failed' });
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('posts to /api/unpair with the credential as a Bearer header once proven', async () => {

@@ -3,7 +3,12 @@
 // not made, failed, met a 5xx or had no answer in 30 seconds, so C3's sheet offers the same lines again. A link opens in
 // a new tab that has no opener. A pasted image is scaled as the app scales one, then uploaded; the record's service
 // checks its bytes and writes it. A browser opens no file of the machine, so there is no `openFile`.
-import type { SheetImageType } from '@shared/sheet/model';
+//
+// Every write to the inbox (a Send, and a card's Dismiss and Take back, all of them `send`) is refused here while the
+// model of the session on screen is not fresh (`writable`: from a connection's `paired` until the read after its
+// `ready` is applied, T14), answered `failed` as a Send not made, so C3's sheet offers it again once it can. Editing a
+// draft stays possible, a pasted image's upload included: it writes nothing the door reads until a Send names it.
+import type { SheetImageType, SheetPutResult } from '@shared/sheet/model';
 import { downscaleImage } from '../../../src/renderer/src/composer/editor/attachments';
 import type { SheetHost } from '../../../src/renderer/src/sheet';
 import type { Api } from './api';
@@ -35,13 +40,15 @@ export function pageSheetHost(deps: {
   api: Api;
   downscale?: (blob: Blob, mediaType: string) => Promise<{ mediaType: string; data: string }>;
   open?: (url: string, target: string, features: string) => unknown;
+  writable?: (session: string) => boolean; // the session is the one on screen and its model is fresh; a refusal reads as a Send made while no connection was proven
 }): SheetHost {
   const { api } = deps;
+  const writable = deps.writable ?? (() => true);
   const downscale = deps.downscale ?? downscaleImage;
   return {
     by: 'page',
     newKey,
-    send: (session, lines) => api.put(session, lines),
+    send: (session, lines) => (writable(session) ? api.put(session, lines) : Promise.resolve<SheetPutResult>({ ok: false, why: 'failed', message: SEND.notConnected })),
     openLink: (url) => void (deps.open ? deps.open(url, '_blank', 'noopener,noreferrer') : window.open(url, '_blank', 'noopener,noreferrer')),
     body: (session, of) => api.body(session, of),
     async saveImage(session, image) {

@@ -73,9 +73,10 @@ test('“Unpair this browser” clears every key under maws.sheet., shows the pa
   await page.getByRole(BAR).getByRole('button', { name: 'Menu' }).click();
   await page.getByRole('menuitem', { name: 'Unpair this browser' }).click();
   await expect(page.getByRole('heading', { name: 'Pair this browser' })).toBeVisible();
-  await expect(page.getByTestId('unpaired')).toHaveText('This browser is not paired.'); // revoked, and saved
-  expect(await storedKeys(page)).toEqual([]);
-  expect(await mawsd.browsers()).toEqual([]);
+  await expect(page.getByTestId('unpaired')).toHaveText('This browser is not paired.'); // at once; and once mawsd answers, revoked and saved
+  expect(await storedKeys(page)).toEqual([]); // forgotten at the press, before mawsd's answer (B4)
+  await expect.poll(() => mawsd.browsers()).toEqual([]);
+  await expect(page.getByTestId('unpaired')).toHaveText('This browser is not paired.'); // the answer confirmed it: the line stays plain
   await page.reload();
   await expect(page.getByRole('heading', { name: 'Pair this browser' })).toBeVisible();
 });

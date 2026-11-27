@@ -23,6 +23,12 @@
 // as the difference it makes to that view, whatever model it was made on (§P, "What a tab writes of `reconcile`"). A draft is
 // compared by identity in C3's memory, so a read gives an act whose stored draft equals its question's stored draft that
 // same object. A refusal deletes nothing here; only the person's Unpair does (credential.ts).
+//
+// A full store makes room by dropping the entries touched longest ago, never a Send's; but an entry that cannot fit even
+// with all of those gone (an answer too long for the origin's storage) evicts nothing: what was dropped to try is put
+// back, and the entry is held in this window alone (`unkept`), read in place of storage's, so the draft stays editable
+// and sendable here, and the sheet says it would not survive a reload (`unkeptDraft`). A later write of the entry that
+// fits, or its removal, ends the hold; the person's Unpair forgets every hold (`forgetUnkept`).
 import type { SheetLine } from '@shared/sheet/model';
 import type { QuestionDraft } from '@shared/sheet/words';
 import { EMPTY_MEMORY, type SentAct, type SheetMemory } from '../../../src/renderer/src/sheet';
@@ -56,15 +62,32 @@ interface StoredSend {
   note: string | null;
 }
 
+// The entries this window could not store, by storage key, held in place of storage's own (one map a storage)
+const held = new WeakMap<Storage, Map<string, string>>();
+const unkeptOf = (storage: Storage) => {
+  let entries = held.get(storage);
+  if (entries === undefined) held.set(storage, (entries = new Map()));
+  return entries;
+};
+const itemOf = (storage: Storage, key: string): string | null => unkeptOf(storage).get(key) ?? storage.getItem(key);
+const drop = (storage: Storage, key: string) => {
+  unkeptOf(storage).delete(key);
+  storage.removeItem(key);
+};
+
 function entriesOf(storage: Storage, kind: Kind, session: string): Stored[] {
   const prefix = prefixOf(kind, session);
-  const found: Stored[] = [];
+  const keys = new Set<string>(unkeptOf(storage).keys());
   for (let i = 0; i < storage.length; i++) {
     const key = storage.key(i);
-    if (key === null || !key.startsWith(prefix)) continue;
+    if (key !== null) keys.add(key);
+  }
+  const found: Stored[] = [];
+  for (const key of keys) {
+    if (!key.startsWith(prefix)) continue;
     const name = key.slice(prefix.length);
     if (name === '' || (kind !== 'act' && kind !== 'send' && name.includes('.'))) continue;
-    const value = parsed(storage.getItem(key));
+    const value = parsed(itemOf(storage, key));
     if (value !== null) found.push({ key, name, value });
   }
   return found;
@@ -189,7 +212,7 @@ function writeDiff(session: string, before: SheetMemory, after: SheetMemory, now
   let conflict = false;
   const stillAsBefore = (kind: Kind, name: string) => {
     if (!guarded) return true;
-    const stored = parsed(storage.getItem(keyOf(kind, session, name)));
+    const stored = parsed(itemOf(storage, keyOf(kind, session, name)));
     const now = stored === null ? 'null' : canonical(Object.fromEntries(Object.entries(stored).filter(([field]) => field !== 'v' && field !== 'touchedAt')));
     if (now === canonical(shapeOf(kind, after, name))) return false; // already so
     if (now === canonical(shapeOf(kind, before, name))) return true;
@@ -204,7 +227,7 @@ function writeDiff(session: string, before: SheetMemory, after: SheetMemory, now
   const remove = (kind: Kind, name: string) => {
     if (kind !== 'act' && !known(name)) return; // a question newer than this tab's model: another tab's to keep
     if (!stillAsBefore(kind, name)) return;
-    storage.removeItem(keyOf(kind, session, name));
+    drop(storage, keyOf(kind, session, name));
     wrote = true;
   };
 
@@ -251,7 +274,7 @@ function writeDiff(session: string, before: SheetMemory, after: SheetMemory, now
     after.sending.lines.every((line, i) => line.key === held.lines[i]!.key);
   if (!again && before.sending !== null && before.sending.attempt !== after.sending?.attempt) {
     // its end: the Send is over
-    if (held) storage.removeItem(held.key);
+    if (held) drop(storage, held.key);
     pressedHere.delete(pressOf(before.sending.attempt));
     wrote = true;
   }
@@ -266,21 +289,52 @@ function writeDiff(session: string, before: SheetMemory, after: SheetMemory, now
 }
 
 // A write that makes room when the store is full: the entries of the memory touched longest ago go first, never a
-// Send's, and never the pairing or anything that is not the memory's
+// Send's, and never the pairing or anything that is not the memory's. One that cannot fit with all of those gone puts
+// back what it dropped and is held in this window instead (the file's head).
 function store(storage: Storage, key: string, value: string): void {
+  const dropped: [string, string][] = [];
+  const putBack = () => {
+    for (const [was, text] of dropped.reverse()) {
+      try {
+        storage.setItem(was, text); // it fitted before, and the write that failed took no room
+      } catch {
+        // nothing more to do: the entry was the oldest, and is lost as a full store loses one
+      }
+    }
+  };
   for (;;) {
     try {
       storage.setItem(key, value);
+      unkeptOf(storage).delete(key);
       return;
     } catch (error) {
-      if (!(error instanceof DOMException) || error.name !== 'QuotaExceededError') throw error;
+      if (!(error instanceof DOMException) || error.name !== 'QuotaExceededError') {
+        putBack();
+        throw error;
+      }
       const oldest = memoryEntries(storage)
         .filter((entry) => entry.kind !== 'send' && entry.key !== key)
         .sort((a, b) => a.touchedAt - b.touchedAt)[0];
-      if (oldest === undefined) throw error;
+      if (oldest === undefined) {
+        putBack();
+        unkeptOf(storage).set(key, value);
+        return;
+      }
+      dropped.push([oldest.key, storage.getItem(oldest.key)!]);
       storage.removeItem(oldest.key);
     }
   }
+}
+
+/** Whether a draft of the session is held in this window alone, too long for the store: it would not survive a reload. */
+export function unkeptDraft(session: string, storage: Storage = localStorage): boolean {
+  const prefix = prefixOf('draft', session);
+  return [...unkeptOf(storage).keys()].some((key) => key.startsWith(prefix));
+}
+
+/** The person's Unpair: nothing this window held stands. */
+export function forgetUnkept(storage: Storage = localStorage): void {
+  unkeptOf(storage).clear();
 }
 
 function memoryEntries(storage: Storage): { key: string; kind: Kind; touchedAt: number }[] {

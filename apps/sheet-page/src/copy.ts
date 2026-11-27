@@ -45,6 +45,7 @@ export const SEND = {
   noAnswer: 'MAWS did not answer.', // this child's own: under "Not sent." for a Send with no answer, or not one of the door's
   notConnected: 'Not connected to MAWS.', // this child's own: under "Not sent." for a Send made while no connection was proven
   imageNotSaved: 'The image could not be saved.', // this child's own: a paste that did not reach MAWS
+  tooLong: 'This answer is too long to keep if the page reloads.', // this child's own: a draft too large for the browser's storage, held in this tab alone
 } as const;
 
 // The page's own parts around the sheet ("The look", M4: frames 2 to 4)

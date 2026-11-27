@@ -6,14 +6,15 @@
 // stands beside the column on a wide window and is a drawer over the whole sheet under the bar on a narrow one, the sheet
 // under it inert while it is open; a line chosen focuses its card, and Escape gives focus back to the outline's button. A
 // `null` model (no record, or a path that names none) is the page's own empty state; until a read is applied nothing is
-// drawn.
+// drawn. A draft too long for the browser's storage, held in this tab alone, is said once, at the sheet's head where its
+// notes stand.
 import { useEffect, useRef, useState } from 'react';
 import type { DoorState } from '@shared/ipc/schema/sheet';
 import type { SheetModel } from '@shared/sheet/model';
 import { reconcile, SessionSheet, type SheetHost, type SheetMemory } from '../../../../src/renderer/src/sheet';
-import { onMemory as onMemoryChanged, writeReconciled } from '../memory';
+import { writeReconciled } from '../memory';
 import { sendUnavailable } from '../availability';
-import { PAGE, VIEWS } from '../copy';
+import { PAGE, SEND, VIEWS } from '../copy';
 import type { Connection } from '../live';
 import { SheetOutline } from '../outline/SheetOutline';
 import type { Outline } from '../outline/state';
@@ -56,7 +57,7 @@ export function SheetView({ shown, navigate, ...rest }: SheetViewProps) {
 }
 
 function Sheet({ model, fresh, settled, door, connection, host, outline, adopted }: Omit<SheetViewProps, 'shown' | 'navigate'> & { model: SheetModel; fresh: boolean; settled: boolean }) {
-  const { memory: stored, elsewhereSince, update } = useSessionMemory(model.session);
+  const { memory: stored, elsewhereSince, unkept, update } = useSessionMemory(model.session);
   // What the tab shows is its own reconcile of the stored memory against its model, so SessionSheet's finds nothing to
   // do and every change it asks for is the person's or a Send's, applied to that view and written as what it changes;
   // reconcile's own changes are written only while the model was read after this tab last adopted another tab's write
@@ -70,7 +71,6 @@ function Sheet({ model, fresh, settled, door, connection, host, outline, adopted
     const { conflict } = writeReconciled(model.session, stored, memory, settled, { known: against(model).known });
     if (conflict) adopted(model.session);
   }, [memory, stored, model, settled, adopted]);
-  useEffect(() => onMemoryChanged(model.session, (fromAnotherTab) => fromAnotherTab && adopted(model.session)), [model.session, adopted]);
   const [now, setNow] = useState(() => Date.now()); // moved on by the timer below; an older `now` only holds Send back until it fires
   const { text, until } = sendUnavailable({ connection, fresh, door, elsewhereSince, now });
   useEffect(() => {
@@ -103,6 +103,13 @@ function Sheet({ model, fresh, settled, door, connection, host, outline, adopted
     <div data-sheet-page="" className="relative flex min-h-0 flex-1">
       {outline.wide && outline.open && panel(false)}
       <div ref={holder} inert={drawer} className="flex min-h-0 min-w-0 flex-1 flex-col">
+        {unkept && (
+          <div data-sheet-page-note="" className="shrink-0 pt-3">
+            <p role="status" className="m-0 rounded-sm border border-border-strong bg-bg-raised px-2.5 py-1 text-fg">
+              {SEND.tooLong}
+            </p>
+          </div>
+        )}
         <SessionSheet model={model} memory={memory} onMemory={onMemory} host={host} focus={focus} unavailable={text} />
       </div>
       {drawer && (

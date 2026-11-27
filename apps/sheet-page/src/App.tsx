@@ -10,18 +10,20 @@
 // Once paired, the connection's snapshots and changes feed the store (store.ts), which reads the model of the session
 // on screen; what the frame holds is the workspace (views/Workspace.tsx). The band under the bar says
 // when the page is not connected, once a second has passed (availability.ts). A tab hidden for five minutes lets its
-// connection go and opens it again when it is shown (T15), so a forgotten tab costs nothing.
-import { useCallback, useEffect, useState } from 'react';
+// connection go and opens it again when it is shown (T15), so a forgotten tab costs nothing. The store is one pairing's:
+// a pairing that ends or changes resets it, so pairing again without a reload shows nothing of the one before.
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { createApi } from './api';
 import { BAND_AFTER_MS, bandOf } from './availability';
 import { createChunkGate, installChunkGate } from './chunk-gate';
 import { PAGE } from './copy';
-import { CREDENTIAL_KEY, forgetEverything, readPairing, writePairing, type StoredPairing } from './credential';
+import { CREDENTIAL_KEY, forgetPairing, readPairing, writePairing, type StoredPairing } from './credential';
 import { Frame } from './frame/Frame';
 import { connect, type Connection, type Live } from './live';
 import { useOutline } from './outline/state';
 import { PairingScreen } from './pairing/PairingScreen';
 import { pathOf, placeOf, type Place } from './route';
+import { forgetUnkept, onMemory } from './memory';
 import { createStore } from './store';
 import { unpairThisBrowser, type Unpaired } from './unpair';
 
@@ -36,6 +38,7 @@ type Screen = 'waiting' | 'pairing' | 'frame';
 export const HIDDEN_MS = 5 * 60_000; // a tab hidden this long lets its connection go (T15)
 
 const liveUrl = () => `ws://${location.host}/live`;
+const pairingKey = (pairing: StoredPairing | null) => (pairing === null ? null : `${pairing.id} ${pairing.credential}`);
 
 // The page's one live connection, which every request that carries the credential asks first (api.ts)
 const current: { live: Live | null; leaving: boolean } = { live: null, leaving: false };
@@ -45,7 +48,7 @@ const api = createApi({ proven: () => current.live?.proven() ?? null, leaving: (
 // The Markdown stack's lazy chunks ask the same connection (chunk-gate.ts; T28)
 const chunks = createChunkGate({ proven: () => (current.live?.proven() ?? null) !== null, importer: (url) => import(/* @vite-ignore */ url) });
 installChunkGate(chunks);
-const store = createStore({ read: api.read });
+const store = createStore({ read: api.read, onMemory });
 
 // Whether the tab may hold its connection: not once it has been hidden for five minutes
 function useAwake(): boolean {
@@ -110,12 +113,22 @@ export function App() {
       const now = readPairing();
       setPairing(now);
       if (now !== null) return;
+      forgetUnkept(); // another tab's Unpair forgot everything stored; nothing held here stands either
       setUnpaired('refused'); // the plain line: what became of it is the other tab's to say
       setScreen('pairing');
     };
     addEventListener('storage', stored);
     return () => removeEventListener('storage', stored);
   }, []);
+
+  // The store holds one pairing's data: reset when the pairing ends or changes, kept across its reconnects (B5)
+  const storeFor = useRef(pairingKey(pairing));
+  useEffect(() => {
+    const key = pairingKey(pairing);
+    if (key === storeFor.current) return;
+    storeFor.current = key;
+    store.reset();
+  }, [pairing]);
 
   useEffect(() => {
     if (pairing === null || !awake) return;
@@ -151,13 +164,20 @@ export function App() {
     setPlace(next);
   }, []);
 
-  // The person's own Unpair (unpair.ts): told to mawsd only over a proven connection, forgotten here whatever the answer,
-  // and the pairing screen says which of the three it was
-  const unpair = async () => {
-    const outcome = await unpairThisBrowser({ unpair: api.unpair, close: () => current.live?.close(), forget: forgetEverything });
-    setPairing(null);
-    setUnpaired(outcome);
+  // The person's own Unpair (unpair.ts): asked of mawsd only over a proven connection, and the pairing forgotten here at
+  // once, whatever and whenever mawsd answers; the pairing screen says "not paired" at once and, once mawsd answers,
+  // which of the three it was, unless the browser was paired again meanwhile
+  const unpairs = useRef(0);
+  const unpair = () => {
+    const removing = current.live?.proven() ?? readPairing();
+    const outcome = unpairThisBrowser({ pairing: removing, unpair: api.unpair, close: () => current.live?.close(), forget: (pairing) => forgetPairing(pairing) && forgetUnkept() });
+    const now = readPairing();
+    setPairing(now);
+    if (now !== null) return; // another tab paired this browser anew: this one follows it
+    const which = (unpairs.current += 1);
+    setUnpaired('refused'); // the plain line until mawsd answers
     setScreen('pairing');
+    void outcome.then((said) => which === unpairs.current && readPairing() === null && setUnpaired(said));
   };
 
   if (screen === 'pairing')
@@ -166,6 +186,7 @@ export function App() {
         unpaired={unpaired}
         pair={api.pair}
         onPaired={(paired) => {
+          unpairs.current += 1; // an earlier Unpair's answer no longer speaks here
           writePairing(paired);
           setPairing(paired); // a new connection opens with it; the frame shows at its `paired`
         }}
@@ -181,7 +202,7 @@ export function App() {
       outline={{ open: outline.open, toggle: outline.toggle }}
       band={band}
       navigate={navigate}
-      unpair={() => void unpair()}
+      unpair={unpair}
     >
       {screen === 'frame' && <Workspace place={place} store={store} api={api} connection={connection.state} outline={outline} navigate={navigate} setBar={setBar} />}
     </Frame>

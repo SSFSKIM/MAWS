@@ -27,6 +27,10 @@
   padding-inline: max(0px, calc((100% - var(--measure)) / 2));
   scrollbar-gutter: stable;
 }
+[data-sheet-page] [data-sheet-page-note] {
+  padding-inline: calc(max(0px, calc((100% - var(--measure)) / 2)) + 12px);
+  scrollbar-gutter: stable;
+}
 [data-sheet-page] [data-sheet-foot] {
   padding-inline: calc(max(0px, calc((100% - var(--measure)) / 2)) + 12px);
   overflow: hidden;

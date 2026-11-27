@@ -30,6 +30,7 @@ export interface Api {
 }
 
 export const PUT_WAIT_MS = 30_000; // a Send with no answer by then failed, and is offered again under the same keys
+export const UNPAIR_WAIT_MS = 10_000; // an Unpair with no answer by then is not confirmed (the pairing is forgotten already)
 const sheetPath = (session: string) => `/api/sheets/${encodeURIComponent(session)}`;
 const bodyQuery = (of: SheetBodyRequest) => ('ref' in of ? `ref=${of.ref}` : 'text' in of ? `text=${of.text}` : `upload=${encodeURIComponent(of.upload.slice('uploads/'.length))}`);
 const failed = (message: string): SheetPutResult => ({ ok: false, why: 'failed', message });
@@ -86,7 +87,9 @@ export function createApi(deps: ApiDeps): Api {
     async unpair() {
       let response: Response | 'unproven';
       try {
-        response = await authorized('/api/unpair', { method: 'POST' });
+        const gave = new AbortController();
+        const timer = setTimeout(() => gave.abort(), UNPAIR_WAIT_MS);
+        response = await authorized('/api/unpair', { method: 'POST', signal: gave.signal }).finally(() => clearTimeout(timer));
       } catch {
         return { ok: false, why: 'failed' };
       }

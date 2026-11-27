@@ -36,6 +36,28 @@ describe('the page’s host', () => {
     expect(api.put).toHaveBeenCalledWith(S, lines);
   });
 
+  it('refuses every write while the session’s model is not fresh, and asks nothing of the page’s put (B3)', async () => {
+    const api = fakeApi();
+    let fresh = false;
+    const host = pageSheetHost({ api, writable: (session) => session === S && fresh });
+    const dismiss = [{ v: 1 as const, key: host.newKey(), kind: 'dismiss' as const, id: 'q1', by: 'page' as const }];
+    const takeBack = [{ v: 1 as const, key: host.newKey(), kind: 'retract' as const, target: 'page-x', by: 'page' as const }];
+    expect(await host.send(S, dismiss)).toMatchObject({ ok: false, why: 'failed' });
+    expect(await host.send(S, takeBack)).toMatchObject({ ok: false, why: 'failed' });
+    expect(api.put).not.toHaveBeenCalled();
+    fresh = true;
+    expect(await host.send('5eed0000-0000-4000-8000-0000000000a2', dismiss)).toMatchObject({ ok: false, why: 'failed' }); // not the session on screen
+    expect(api.put).not.toHaveBeenCalled();
+    expect(await host.send(S, dismiss)).toMatchObject({ ok: true });
+    expect(api.put).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps a draft editable while the model is not fresh: a pasted image is still saved (B3)', async () => {
+    const api = fakeApi();
+    const host = pageSheetHost({ api, writable: () => false, downscale: async () => ({ mediaType: 'image/png', data: 'AQID' }) });
+    expect(await host.saveImage!(S, { mediaType: 'image/png', bytes: new Uint8Array([1]) })).toEqual({ ok: true, path: 'uploads/maws-0123.png' });
+  });
+
   it('opens a link in a new tab with no opener and no referrer, and offers no file of the machine', () => {
     const open = vi.fn();
     const host = pageSheetHost({ api: fakeApi(), open });

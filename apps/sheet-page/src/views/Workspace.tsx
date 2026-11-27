@@ -25,7 +25,8 @@ export interface WorkspaceProps {
 
 export default function Workspace({ place, store, api, connection, outline, navigate, setBar }: WorkspaceProps) {
   const state = useSyncExternalStore(store.subscribe, store.state);
-  const host = useMemo(() => pageSheetHost({ api }), [api]);
+  // every write is held while the model on screen is not fresh (B3): the store is read when the write is asked
+  const host = useMemo(() => pageSheetHost({ api, writable: (session) => store.state().shown?.session === session && store.state().shown?.fresh === true }), [api, store]);
   useEffect(() => sweepMemory(Date.now()), []);
 
   const session = place.at === 'sheet' ? place.session : null;

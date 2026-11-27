@@ -41,3 +41,13 @@ export function forgetEverything(storage: Storage = localStorage): void {
   }
   for (const key of keys) storage.removeItem(key);
 }
+
+// The person's own Unpair of one pairing: everything is forgotten while that pairing is the one stored (or none is),
+// and nothing while another is, since another tab has paired this browser anew and the memory is that pairing's now.
+// Whether it forgot.
+export function forgetPairing(pairing: StoredPairing | null, storage: Storage = localStorage): boolean {
+  const stored = readPairing(storage);
+  if (stored !== null && (pairing === null || stored.id !== pairing.id || stored.credential !== pairing.credential)) return false;
+  forgetEverything(storage);
+  return true;
+}

@@ -8,7 +8,11 @@
 // no later read of that session has been. A read that failed is tried again after a while, while its session is still
 // on screen and nothing newer was asked. A write of another tab this tab adopted reads the session again, and until a
 // read started after it is applied the model is not `settled`: the tab shows its reconcile against it but writes none
-// of it (§P, "What a tab writes of `reconcile`").
+// of it (§P, "What a tab writes of `reconcile`"). The store hears the shown session's memory itself, from the moment it
+// is shown and its first read starts, so a write another tab makes while that read is out unsettles it even though no
+// view was mounted yet to hear the write. A pairing that ends or changes resets it (`reset`): nothing of the old
+// pairing's summaries, door or model stays, no read of it still out is applied, and the place on screen is read again
+// by the next pairing's snapshot. Reconnects of one pairing keep it.
 import type { DoorState } from '@shared/ipc/schema/sheet';
 import type { SheetModel, SheetSummary } from '@shared/sheet/model';
 import type { ReadAnswer } from './api';
@@ -32,9 +36,16 @@ export interface SheetStore {
   changed(session: string, summary: SheetSummary | null): void;
   show(session: string | null): void;
   adopted(session: string): void; // this tab adopted another tab's write of the session's memory
+  reset(): void; // the pairing ended or changed
 }
 
-export function createStore(deps: { read(session: string): Promise<ReadAnswer> }): SheetStore {
+export interface StoreDeps {
+  read(session: string): Promise<ReadAnswer>;
+  // a session's memory written, in this tab or (`adopted`) in another (memory.ts's onMemory)
+  onMemory?(session: string, listener: (adopted: boolean) => void): () => void;
+}
+
+export function createStore(deps: StoreDeps): SheetStore {
   let state: StoreState = { sessions: null, door: null, shown: null };
   const listeners = new Set<() => void>();
   let snapshot = 0; // which snapshot the page is at
@@ -44,6 +55,8 @@ export function createStore(deps: { read(session: string): Promise<ReadAnswer> }
   let retry: ReturnType<typeof setTimeout> | null = null;
   let adoptedAt = 0; // the count of the last read started before the last adoption
   const out = new Map<string, number>(); // each session's reads not yet answered
+  let unwatch: (() => void) | null = null; // the shown session's memory, heard from its show on
+  let pairing = 0; // moved on by each reset: a read started under an earlier pairing is applied nowhere
   // the session an adoption came for while a read of it was out: one more read of it once they are in
   let readAgain: string | null = null;
 
@@ -57,8 +70,10 @@ export function createStore(deps: { read(session: string): Promise<ReadAnswer> }
     retry = null;
     const count = (asked += 1);
     const at = awaitingReady ? null : snapshot;
+    const under = pairing;
     out.set(session, (out.get(session) ?? 0) + 1);
     void deps.read(session).then((answer) => {
+      if (under !== pairing) return; // the pairing it was read under has ended
       out.set(session, out.get(session)! - 1);
       if (readAgain === session && out.get(session) === 0 && state.shown?.session === session) {
         readAgain = null;
@@ -73,6 +88,14 @@ export function createStore(deps: { read(session: string): Promise<ReadAnswer> }
       applied = count;
       set({ door: answer.door, shown: { session, model: answer.model, fresh: shown.fresh || at === snapshot, settled: shown.settled || count > adoptedAt } });
     });
+  }
+
+  function adopted(session: string): void {
+    if (state.shown?.session !== session) return;
+    adoptedAt = asked;
+    if (state.shown.settled) set({ shown: { ...state.shown, settled: false } });
+    if ((out.get(session) ?? 0) === 0) read(session);
+    else readAgain = session;
   }
 
   return {
@@ -101,19 +124,28 @@ export function createStore(deps: { read(session: string): Promise<ReadAnswer> }
       }
       if (state.shown?.session === session) read(session);
     },
-    adopted(session) {
-      if (state.shown?.session !== session) return;
-      adoptedAt = asked;
-      if (state.shown.settled) set({ shown: { ...state.shown, settled: false } });
-      if ((out.get(session) ?? 0) === 0) read(session);
-      else readAgain = session;
+    adopted,
+    reset() {
+      pairing += 1;
+      if (retry !== null) clearTimeout(retry);
+      retry = null;
+      out.clear();
+      readAgain = null;
+      awaitingReady = false;
+      applied = adoptedAt = asked;
+      const shown = state.shown && { session: state.shown.session, model: undefined, fresh: false, settled: false };
+      set({ sessions: null, door: null, shown });
     },
     show(session) {
       if ((state.shown?.session ?? null) === session) return;
       readAgain = null; // what was queued is another session's, and this one's read starts now
       applied = asked; // reads of another session are not this one's
+      unwatch?.();
+      unwatch = null;
       set({ shown: session === null ? null : { session, model: undefined, fresh: false, settled: false } });
-      if (session !== null) read(session);
+      if (session === null) return;
+      unwatch = deps.onMemory?.(session, (fromAnother) => fromAnother && adopted(session)) ?? null; // before its read starts
+      read(session);
     },
   };
 }
