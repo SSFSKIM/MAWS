@@ -45,7 +45,7 @@ How to see it working: open the build beside today's build on the same fixtures 
 - [x] (2026-11-24 12:10Z) M5 task 7: the rig's scenes for the slides editor, the design workbench and the design system page, reviewed clean and merged.
 - [x] (2026-11-24) M5 built: artifacts and the editors. Its 227 rows were read against master `f2b32d6c9`, and 15 `new` rows were added (N190 to N204, 11 cuts and 4 `stays`). Of the cuts and rewordings, all but G289 are built; G289 is held because its menu is not drawn where the head's New Space is. The `stays` rows read as on master. The deck now says "All changes saved" like every other editor, through one `SavedStatus`. The editors import the `ui/` parts directly, since they were never separate bundles. Unit tests moved with each area. Task 5 moved the Electron e2e reads, and the groups are unchanged; no harness probe or desk spec read a changed control. The rig gained 95 `m5-` scenes, in launch 2 and in launch 16. An xhigh panel returned 14 findings: 9 were fixed and 5 logged. The rig was repaired after each of four Mac shakedowns. Four Mac shakedowns repaired the rig, and the pair review's fix wave followed. Class 1a passed at the hand-over head. Still owed: the owner's call on the pictures, and the Mac rerun of the groups the fix wave touched.
 - [x] (2026-11-27) M5's pictures and the owner's call: the owner approved them on 2026-11-27, 115 scenes, before at master `c08061175` and after at `629f913ce` (Decision Log).
-- [ ] Retrospective.
+- [x] (2026-11-27) Retrospective.
 
 ## Acceptance
 
@@ -620,4 +620,48 @@ Kept by the session that wrote this document (sminos alias `design-experiment`, 
 
 ## Outcomes & Retrospective
 
-Not built yet.
+Written 2026-11-27, after M5 landed on master at `bdc829160` (#883). M0 to M5 are all on master.
+
+**What was delivered.** The window at rest now shows where a person is, what waits and what could have failed; explanations and secondary facts open in their row on pointing or focus, and every control keeps its accessible name. The scenes of Acceptance 1 read as ruled: "3s · Ran an agent", "Agents 2", "Sonnet 5 High", Settings rows as label and control, plugin rows as name, author and version, "All changes saved" in every editor, and the Projects page without its sentence. Of the 1,264 rows in `items.json`, M0 closed 56 as gone or moot. The milestones built, kept or held the other 1,208, among them the 49 `new` rows they added for text found while building (N156 to N204).
+
+| Milestone | Rows | Cut | Reworded | Kept (`stays`) | Not built |
+|---|---|---|---|---|---|
+| M1 Settings | 115 | 90 | 1 | 24 | none |
+| M2 The conversation and the message box | 196 | 107 | 14 | 73 | C40, C42 (held for U11b) |
+| M3 Panels beside the conversation | 376 | 188 | 37 | 149 | N160, N170 (the desk's frozen views keep master's words) |
+| M4 Window, typed dialogs, Customize | 279 | 166 | 17 | 95 | G224 (the ruled G225 keeps its mark) |
+| M5 Artifacts and the editors | 242 | 174 | 7 | 60 | G289 (the owner kept the worded button) |
+| | 1,208 | 725 | 76 | 401 | 6 |
+
+**The shared parts.** In `src/renderer/src/ui/`, M1 built the row note (`RowNote`, which since the owner's choice of 2026-11-21 is also the pointed-row line and floats over the rows below), `Tip`, `UnavailableButton`, `NamedGlyph`, `BareCount`, `QuietSpinner` and `HiddenHeading`. M2 added the counted fold, and M3 added `TouchFact`, `RefusedMenuItem`, the hover scope and `WaitingWords`. M4 added none. M5 imported the parts into the editors as they are, added `panel/SavedStatus.tsx` for the one saved wording, and gave `Tip` a `side` and `TipBoundary`. Tests read what is drawn through `test-support/accessible-text.ts`, `fake-timeouts.ts` and `app-css.ts`. The picture rig, `e2e/words-shots.rig.ts`, grew from M0's 175 scenes to 402, and the desk gained its own words rig.
+
+**The pictures and the owner's calls.** For each milestone the rig photographed master and the branch on the same fixtures, and the owner judged the pairs:
+- M1 on 2026-11-21: 57 scenes, and the floating note chosen over the pushing one.
+- M2 on 2026-11-22: 62 pairs.
+- M3 on 2026-11-22: 84 of 85 scenes reached on both builds.
+- M4 on 2026-11-23.
+- M5 on 2026-11-27: 115 scenes, with four answers in the Decision Log.
+
+From M3 on, a pair review compared the pictures before the owner saw them. It found two layout defects in M3, six in M4 and twelve product defects in M5. Each was fixed and photographed again, except one M5 item that looks the same on master and went to the tracker. Each milestone took its own "before" set from master at its time (Decision Log, 2026-11-20), so the single "before" line in Progress was overtaken rather than done.
+
+**Against Acceptance.** 1, 3 and 5 hold on the approved scenes. 2 holds for every scene the rig reaches; the changed rows with no scene have no picture pair yet (#816). 4 holds through the shared parts, except for the native titles and greyed actions #815 names. 6: every milestone passed class 1a and desk-web on its head before it merged. Each also ran its Electron e2e groups on a Mac, where every red was either fixed or shown not to be the cut's (a stale test, the guest lane, the network, or master failing the same way).
+
+**What went well, and what a later initiative can use.**
+- **Pictures catch what code reviews don't.** M4's pair review found six layout defects after an xhigh panel had read the range and returned 18 findings; among them were a note under a sticky group head, a 12 px spinner shift and a row's centring. A UI change gets a picture review before the owner's call.
+- **A picture-script flaw looks like a product defect.** The six missing focus rings in M5's pictures came from the rig's scripted `.focus()` after a pointer action, which does not trigger `:focus-visible`. The scenes now reach their owners by Tab, and the product did not change. When a picture shows a defect, first check that the scene reached its state the way a person would. Take a scene's locator from an e2e spec that already reaches the control; guessed forms cost M5 Mac shakedowns.
+- **Fix rounds shrank until they stopped.** In M4 the panel found 18, the pair review 6 and the medium review 3, then a round came back clean. In M5 the pair review found 28, the next review 6 and the last 4, of which 2 were fixed and 2 logged. Logging what was rare, cosmetic or older than the change kept each milestone finite.
+- **Build a shared part once, early.** `Tip` took four review rounds in M1. Later milestones reused it and the other parts as they were: M4 added nothing to `ui/`, and M5 needed no twin for the editors.
+- **A spinner can hide a wait that never ends.** In M3 and M4, some words also stood for a settled state: "Reading ClaudeUsage…" with no account, or a stopped session's "Connecting…". Each needed a settled form before a spinner could replace it.
+- **A measured gate with no margin.** dashboard-scale's line 4, "replace to all views" (≤ 500 ms), failed on master as it did on M5: master's first trials took 504 and 508 ms, and M5's took 513 ms. Running master's own control first showed the red was not M5's, and a tracker row records the bound.
+- **Master moves during hand-over.** After the owner's approval at `0f3509af2`, master moved twice: first the dashboard-scale tracker row, then #882. So the gated head was merged with master twice (`af13ad4f8`, `bf661be84`). Each merge needed its own gates and its own argument that no M5 group runs what it brought in.
+
+**What stays open.**
+- #816: changed rows with no rig scene (117 in M3, 98 in M4, 70 in M5, and the Settings and Org states with no fixture seam). Their picture pairs are owed.
+- #815: native `title`s that carry a fact keyboard focus never reaches, and greyed header actions that give no reason (Zoom to fit while previewing, Present, Reveal on another machine).
+- The `m0-dialog-rename` rig scene, broken since M4: opening its session times out on the sidebar's project row.
+- #823: three pointer-and-keyboard edges of the row note, from M1.
+- C40 and C42 wait on U11b.
+- The owner's rulings of 2026-11-27 (Decision Log) leave G289 unbuilt. They also keep tips opening above, with below only on G558, G584, G585 and G450. Making below the default would be a separate change with its own pictures.
+- The rows each milestone logged in `docs/tech-debt-tracker.md` under the stop rule.
+
+**The board ticket.** The cut is built and every milestone's pictures are approved. Board #720 can be retired once #815, #816 and #823 carry its residue on their own. That is the owner's decision, and the ticket stays open until then.
