@@ -330,6 +330,68 @@ describe('the chunk and the stop (T1, T6)', () => {
   });
 });
 
+describe('a response that makes no write progress (S2)', () => {
+  it('is ended, and its connection’s slot released, when its client stops reading a large asset', async () => {
+    const bundle = join(scratch, 'bundle');
+    mkdirSync(join(bundle, 'assets'), { recursive: true });
+    writeFileSync(join(bundle, 'index.html'), '<!doctype html>');
+    writeFileSync(join(bundle, 'assets', 'large.js'), Buffer.alloc(32 * 1024 * 1024, 0x61)); // past any loopback socket's buffers
+    const servers: Http.Server[] = [];
+    const made = page({
+      bundleDir: bundle,
+      timing: { checkMs: 50, stallMs: 400 },
+      listen: (server, host, port) => (servers.push(server), listenExclusive(server, host, port)),
+    });
+    made.start();
+    expect(await settled(made)).toBe('listening');
+    const port = portOf(made);
+    const connections = () => Promise.all(servers.map((server) => new Promise<number>((done) => server.getConnections((_, count) => done(count))))).then((counts) => counts.reduce((a, b) => a + b, 0));
+
+    const reader = createConnection({ host: '127.0.0.1', port });
+    reader.on('error', () => {});
+    await new Promise<void>((done) => reader.once('connect', () => done()));
+    let received = 0;
+    reader.on('data', (chunk: Buffer) => {
+      received += chunk.length;
+      if (received > 256 * 1024) reader.pause(); // it read the start, and stops
+    });
+    reader.write(`GET /assets/large.js HTTP/1.1\r\nHost: sheet.localhost:${port}\r\n\r\n`);
+    await until(() => received > 0);
+    expect(await connections()).toBe(1);
+    await until(() => logs.some((line) => /made no write progress/.test(line)), 5_000);
+    await vi.waitFor(async () => expect(await connections()).toBe(0), { timeout: 2_000 });
+    reader.destroy();
+  }, 15_000);
+
+  it('is not ended while its client reads, however slowly the whole of it arrives', async () => {
+    const bundle = join(scratch, 'bundle');
+    mkdirSync(join(bundle, 'assets'), { recursive: true });
+    writeFileSync(join(bundle, 'index.html'), '<!doctype html>');
+    const size = 12 * 1024 * 1024;
+    writeFileSync(join(bundle, 'assets', 'large.js'), Buffer.alloc(size, 0x62));
+    const made = page({ bundleDir: bundle, timing: { checkMs: 50, stallMs: 400 } });
+    made.start();
+    expect(await settled(made)).toBe('listening');
+    const port = portOf(made);
+    const reader = createConnection({ host: '127.0.0.1', port });
+    reader.on('error', () => {});
+    await new Promise<void>((done) => reader.once('connect', () => done()));
+    let received = 0;
+    const ended = new Promise<void>((done) => reader.once('close', () => done()));
+    // reads a part at a time, pausing 20 ms after each: the whole takes far longer than stallMs
+    reader.on('data', (chunk: Buffer) => {
+      received += chunk.length;
+      reader.pause();
+      setTimeout(() => reader.resume(), 20);
+    });
+    reader.setNoDelay(true);
+    reader.write(`GET /assets/large.js HTTP/1.1\r\nHost: sheet.localhost:${port}\r\nConnection: close\r\n\r\n`);
+    await ended;
+    expect(received).toBeGreaterThan(size);
+    expect(logs.some((line) => /made no write progress/.test(line))).toBe(false);
+  }, 60_000);
+});
+
 describe('the registration (T18, §O): the heartbeat, on the page server’s own timer', () => {
   const heartbeatMs = 40;
   const fileIn = (home: string, name: string) => join(home, 'sheet', 'surfaces', `${name}.json`);

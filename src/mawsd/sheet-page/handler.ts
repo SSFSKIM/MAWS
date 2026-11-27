@@ -18,6 +18,12 @@
 // then the list, so a change during the list is delivered after the snapshot and none is lost. Sheets that cannot be had
 // are said as `unavailable`, and the connection stays: it is also the tab's proof of the server. The sheet's HTTP routes
 // are sheet-routes.ts's.
+//
+// Whether a session is running is the index's fact, and no `sheet.changed` is announced when it changes (a terminal
+// session that exits or resumes). So while at least one paired connection is open, every `refreshMs` (the discovery
+// wake's own freshness) each ready connection is given a quiet snapshot: the same steps, discovery brought up to date
+// again, and the snapshot sent only when it differs from what that connection was last told; nothing runs with no paired
+// connection open.
 import { randomBytes } from 'node:crypto';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { Duplex } from 'node:stream';
@@ -26,6 +32,7 @@ import type { SpineState } from '../spine-seam';
 import { admit } from './checks';
 import { isRefusal, pageOrigin, refusal, refusalBytes, refusalHeaders, STANDING_HEADERS, type Refusal } from './headers';
 import { createPairing, type BrowserList } from './pairing';
+import { sendBytes } from './respond';
 import { createSheetRoutes, isSheetRoute } from './sheet-routes';
 import { unavailableWhy, type SheetAccess } from './sheets';
 import { readBundle, type BundleFile, type BundleTable } from './static';
@@ -89,8 +96,9 @@ interface Live {
   release: (() => void) | null; // its standing hold, taken at its first snapshot
   unsubscribe: (() => void) | null; // its subscription to `sheet.changed`, made once
   ready: boolean; // a snapshot was sent since the spine was last lost: a change goes out as it comes
-  held: object[] | null; // the changes heard while a list is out, sent after its snapshot
+  held: { t: string; session: string; summary: unknown }[] | null; // the changes heard while a list is out, sent after its snapshot
   generation: number; // moved on when the spine is lost: a snapshot begun before then sends nothing
+  told: Map<string, string> | null; // what the connection was last told of each session (its summary as JSON) and of the door ('')
 }
 
 export async function createSheetPageHandler(deps: HandlerDeps): Promise<SheetPageHandler> {
@@ -129,7 +137,7 @@ export async function createSheetPageHandler(deps: HandlerDeps): Promise<SheetPa
     } catch {
       return refuse(res, refusal(404)); // gone from under the table
     }
-    res.writeHead(200, { ...headers, 'Content-Type': file.type, 'Content-Length': String(bytes.length) }).end(bytes);
+    sendBytes(res, 200, { ...headers, 'Content-Type': file.type }, bytes); // the one buffer, in slices
   }
 
   // The body, refused as soon as it is known to pass `max`; 'aborted' when the request ended before its body did, after
@@ -191,18 +199,27 @@ export async function createSheetPageHandler(deps: HandlerDeps): Promise<SheetPa
   const send = (connection: Live, message: object) => {
     if (connection.ws.readyState === connection.ws.OPEN) connection.ws.send(JSON.stringify(message));
   };
+  const toldOf = (sessions: { session: string }[], door: unknown) => new Map([['', JSON.stringify(door)], ...sessions.map((each) => [each.session, JSON.stringify(each)] as [string, string])]);
+  const sameAs = (told: Map<string, string> | null, now: Map<string, string>) => told !== null && told.size === now.size && [...now].every(([key, value]) => told.get(key) === value);
+  // A change sent, and what the connection now holds
+  const sendChange = (connection: Live, message: { t: string; session: string; summary: unknown }) => {
+    send(connection, message);
+    if (message.summary === null) connection.told?.delete(message.session);
+    else connection.told?.set(message.session, JSON.stringify(message.summary));
+  };
   // A change, as the spine's service announced it: sent at once after a snapshot, held while a list is out
   const changed = (connection: Live, payload: unknown) => {
     const { session, summary } = (payload ?? {}) as { session?: unknown; summary?: unknown };
     if (typeof session !== 'string') return;
     const message = { t: 'changed', session, summary: summary ?? null };
     if (connection.held) connection.held.push(message);
-    else if (connection.ready) send(connection, message);
+    else if (connection.ready) sendChange(connection, message);
   };
   // A snapshot, in §N's order: the hold, the service, discovery, the subscription, then the list. One begun before the
   // spine was lost reads a root that is gone (a yield releases it under the connection's
   // hold, and its service's list does not reject at its stop): it sends nothing, and leaves the connection to the next.
-  async function snapshot(connection: Live): Promise<void> {
+  // `quiet` (the holders' refresh): the snapshot is sent only when it differs from what the connection was last told.
+  async function snapshot(connection: Live, quiet = false): Promise<void> {
     if (connection.held || !live.has(connection)) return; // one is out: its answer is the snapshot asked for
     const { generation } = connection;
     const current = () => live.has(connection) && connection.generation === generation;
@@ -220,9 +237,13 @@ export async function createSheetPageHandler(deps: HandlerDeps): Promise<SheetPa
       if (!current()) return;
       const held = connection.held;
       connection.held = null;
-      connection.ready = true;
-      send(connection, { t: 'ready', v: 1, sessions, door });
-      for (const message of held) send(connection, message);
+      const now = toldOf(sessions, door);
+      if (!(quiet && connection.ready && sameAs(connection.told, now))) {
+        connection.ready = true;
+        connection.told = now;
+        send(connection, { t: 'ready', v: 1, sessions, door });
+      }
+      for (const message of held) sendChange(connection, message);
     } catch (error) {
       if (!current()) return;
       connection.held = null; // what it heard is in the next snapshot
@@ -234,17 +255,34 @@ export async function createSheetPageHandler(deps: HandlerDeps): Promise<SheetPa
     connection.generation += 1;
     connection.held = null;
     connection.ready = false;
+    connection.told = null;
     send(connection, { t: 'unavailable', why });
+  };
+  // The holders' refresh: one timer while a paired connection is open, none otherwise
+  let refreshTimer: NodeJS.Timeout | null = null;
+  let closing = false;
+  const refreshing = () => {
+    const any = !closing && [...live].some((connection) => connection.step === 'paired');
+    if (any && refreshTimer === null) {
+      refreshTimer = setInterval(() => {
+        for (const connection of live) if (connection.step === 'paired' && connection.ready) void snapshot(connection, true);
+      }, timing.refreshMs);
+      refreshTimer.unref();
+    } else if (!any && refreshTimer !== null) {
+      clearInterval(refreshTimer);
+      refreshTimer = null;
+    }
   };
   const ended = (connection: Live) => {
     live.delete(connection);
     connection.unsubscribe?.();
     connection.release?.();
     connection.unsubscribe = connection.release = null;
+    refreshing();
   };
 
   function open(ws: WebSocket): void {
-    const connection: Live = { ws, step: 'hello', browser: null, heard: Date.now(), listed: 0, release: null, unsubscribe: null, ready: false, held: null, generation: 0 };
+    const connection: Live = { ws, step: 'hello', browser: null, heard: Date.now(), listed: 0, release: null, unsubscribe: null, ready: false, held: null, generation: 0, told: null };
     live.add(connection);
     const late = () => closeWith(ws, CLOSE.refused, 'too late');
     let deadline = setTimeout(late, timing.helloMs);
@@ -283,6 +321,7 @@ export async function createSheetPageHandler(deps: HandlerDeps): Promise<SheetPa
         connection.step = 'paired';
         connection.listed = Date.now();
         send(connection, { t: 'paired' });
+        refreshing();
         return void snapshot(connection);
       }
       if (message.t !== 'list') return closeWith(ws, CLOSE.unexpected, 'unexpected');
@@ -358,6 +397,8 @@ export async function createSheetPageHandler(deps: HandlerDeps): Promise<SheetPa
     },
     tick: () => void pairing.retry(),
     close() {
+      closing = true;
+      refreshing();
       for (const connection of live) closeWith(connection.ws, CLOSE.stopping, 'mawsd is stopping');
     },
   };

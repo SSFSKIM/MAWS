@@ -14,6 +14,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import { SheetImageTypeSchema, type SheetLine } from '@shared/sheet/model';
 import type { Route } from './checks';
 import { refusal, STANDING_HEADERS, type Refusal } from './headers';
+import { sendBytes } from './respond';
 import { SheetsUnavailable, type SheetAccess } from './sheets';
 
 export const PUT_BODY_MAX = 8 * 1024 * 1024; // fifty lines of 20,000 code points, with room
@@ -39,8 +40,7 @@ export const isSheetRoute = (route: Route): route is SheetRoute => route.kind ==
 export function createSheetRoutes(deps: SheetRoutesDeps): (route: SheetRoute, req: IncomingMessage, res: ServerResponse, paired: () => boolean) => Promise<void> {
   const { json, refuse } = deps;
 
-  const bytes = (res: ServerResponse, type: string, body: Buffer) =>
-    void res.writeHead(200, { ...STANDING_HEADERS(deps.port()), 'Content-Type': type, 'Cache-Control': 'no-store', 'Content-Length': String(body.length) }).end(body);
+  const bytes = (res: ServerResponse, type: string, body: Buffer) => sendBytes(res, 200, { ...STANDING_HEADERS(deps.port()), 'Content-Type': type, 'Cache-Control': 'no-store' }, body);
 
   async function answer(route: SheetRoute, req: IncomingMessage, res: ServerResponse, paired: () => boolean): Promise<void> {
     switch (route.kind) {

@@ -248,6 +248,53 @@ describe('the snapshot at paired (§N; T14, T15, T29)', () => {
   });
 });
 
+describe('the holders kept fresh while a page is open (S5)', () => {
+  const REFRESH_MS = 150;
+  beforeEach(async () => {
+    await page.stop();
+    page = createSheetPage(options({ timing: { refreshMs: REFRESH_MS } }));
+    page.start();
+  });
+  const discoveries = () => steps.filter((step) => step === 'discovery').length;
+
+  it('brings discovery up to date at each period and sends a snapshot when a session’s holder changed, with no change announced', async () => {
+    const port = await listening();
+    const opened = await tab(port, await paired(port));
+    expect(await opened.next(2)).toEqual({ t: 'ready', v: 1, sessions, door: DOOR });
+    sessions = [{ ...summary(A), live: false }, summary(B, 2)]; // its terminal session exited: no sheet.changed
+    expect(await opened.next(3, 2_000)).toEqual({ t: 'ready', v: 1, sessions, door: DOOR });
+    expect(discoveries()).toBeGreaterThanOrEqual(2);
+  });
+
+  it('sends nothing at a period when nothing changed, and keeps a change announced meanwhile as it is', async () => {
+    const port = await listening();
+    const opened = await tab(port, await paired(port));
+    await opened.next(2);
+    await until(() => discoveries() >= 3, 'two periods');
+    expect(frames(opened)).toHaveLength(1); // the first snapshot alone
+    const moved = summary(A, 5);
+    emit(A, moved); // announced, and the next list holds it too
+    sessions = [moved, summary(B, 2)];
+    expect(await opened.next(3)).toEqual({ t: 'changed', session: A, summary: moved });
+    const seen = discoveries();
+    await until(() => discoveries() >= seen + 2, 'two more periods');
+    expect(frames(opened)).toHaveLength(2); // what the tab holds is what the list says: no snapshot
+  });
+
+  it('runs nothing while no paired connection is open', async () => {
+    const port = await listening();
+    await new Promise((done) => setTimeout(done, REFRESH_MS * 3));
+    expect(steps).toEqual([]);
+    const opened = await tab(port, await paired(port));
+    await opened.next(2);
+    opened.ws.close();
+    await until(() => listeners.size === 0, 'the connection gone');
+    const after = steps.length;
+    await new Promise((done) => setTimeout(done, REFRESH_MS * 3));
+    expect(steps.length).toBe(after);
+  });
+});
+
 describe('a request for data (§N; T15)', () => {
   it('holds the daemon while it is answered, and lets the hold go after', async () => {
     const port = await listening();

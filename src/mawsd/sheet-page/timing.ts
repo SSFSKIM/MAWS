@@ -13,6 +13,8 @@ export interface SheetPageTiming {
   requestMs: number; // Node's requestTimeout
   keepAliveMs: number; // Node's keepAliveTimeout
   checkMs: number; // Node's connectionsCheckingInterval: the deadlines above are enforced at its ticks
+  refreshMs: number; // while a paired live connection is open, the holders are brought up to date this often (the discovery wake's freshness)
+  stallMs: number; // a connection with bytes queued that its peer took none of for this long is ended (checked every checkMs)
 }
 
 export const SHEET_PAGE_TIMING: SheetPageTiming = {
@@ -28,4 +30,6 @@ export const SHEET_PAGE_TIMING: SheetPageTiming = {
   requestMs: 30_000,
   keepAliveMs: 5_000,
   checkMs: 1_000,
+  refreshMs: 30_000,
+  stallMs: 10_000,
 };

@@ -19,7 +19,9 @@
 // carries the standing headers, Node's own among them: `requireHostHeader` is off so a request with no Host reaches
 // the Host check, and `clientError`, `checkContinue` and `checkExpectation` are answered by headers.ts's refusal. The
 // parser collects one header more than HEADERS_MAX, so the checks only ever read a complete list. At most
-// CONNECTIONS_MAX connections across both servers; one past it is destroyed at once.
+// CONNECTIONS_MAX connections across both servers; one past it is destroyed at once. Node's deadlines end when a request
+// is complete, so a response a client stops reading would hold its slot for good: a connection with bytes queued that
+// its peer has taken none of for `stallMs` (no write completed, the queue never empty) is ended, which releases it.
 //
 // The registration (T18, §O): while listening, the page's file under the sminos home is written at once and then at
 // each tick of the page server's timer, which needs nothing loaded; the home is `sminosHome` over the daemon's
@@ -125,6 +127,8 @@ export function createSheetPage(options: SheetPageOptions): SheetPage {
   let spine: SpineState = 'cold';
   let retryTimer: NodeJS.Timeout | null = null;
   let tickTimer: NodeJS.Timeout | null = null;
+  let stallTimer: NodeJS.Timeout | null = null;
+  const progressAt = new Map<Socket, number>(); // when each connection's queue last emptied or a write of it completed
   const now = options.now ?? Date.now;
   let captured: Promise<Record<string, string>> | null = null;
   const shell = () => (captured ??= options.shell()); // one capture, at the first need: the port, the switch, the home
@@ -175,7 +179,12 @@ export function createSheetPage(options: SheetPageOptions): SheetPage {
       // nothing is served on a provisional listener (T3: both addresses or neither) or past the bound
       if (stopping || !committed || sockets.size >= CONNECTIONS_MAX) return void socket.destroy();
       sockets.add(socket);
-      socket.once('close', () => void sockets.delete(socket));
+      progressAt.set(socket, Date.now());
+      socket.on('drain', () => void progressAt.set(socket, Date.now())); // a write the peer's reading let complete
+      socket.once('close', () => {
+        sockets.delete(socket);
+        progressAt.delete(socket);
+      });
     });
     server.on('request', (req: Http.IncomingMessage, res: Http.ServerResponse) => void serve(req, res));
     server.on('upgrade', (req: Http.IncomingMessage, socket: Duplex, head: Buffer) => void upgrade(req, socket, head));
@@ -239,12 +248,30 @@ export function createSheetPage(options: SheetPageOptions): SheetPage {
     if (stopping) return void (await Promise.all([...made].map(close)));
     if (outcome === 'bound') {
       committed = true;
+      watchStalls();
       become('listening', `served on ${servers.length === 2 ? '127.0.0.1 and ::1' : '127.0.0.1'}, port ${port}`);
       return register();
     }
     become('port-taken', outcome === 'again' ? 'no port was free on both loopback addresses' : outcome);
     retryTimer = setTimeout(() => void bind().catch((error: unknown) => become('port-taken', `the bind failed: ${messageOf(error)}`)), timing.portRetryMs);
     retryTimer.unref();
+  }
+
+  // A connection whose queued bytes its peer has not taken for stallMs is ended: an empty queue, or a 'drain', is
+  // progress. A response is written in slices (handler.ts), so a peer that reads, however slowly, drains between them.
+  function watchStalls(): void {
+    if (stallTimer !== null) return;
+    stallTimer = setInterval(() => {
+      const at = Date.now();
+      for (const socket of sockets) {
+        if (socket.writableLength === 0) progressAt.set(socket, at);
+        else if (at - (progressAt.get(socket) ?? at) >= timing.stallMs) {
+          log(`a response made no write progress for ${timing.stallMs / 1000} s: its connection is ended`);
+          socket.destroy();
+        }
+      }
+    }, timing.checkMs);
+    stallTimer.unref();
   }
 
   // --- the timer and the registration (T10, T18) ------------------------------------------------------------------------
@@ -404,6 +431,7 @@ export function createSheetPage(options: SheetPageOptions): SheetPage {
         if (state === 'listening' || state === 'port-taken') become('stopped', 'mawsd is stopping');
         if (retryTimer) clearTimeout(retryTimer);
         if (tickTimer) clearInterval(tickTimer);
+        if (stallTimer) clearInterval(stallTimer);
         const bound = new Promise((resolve) => setTimeout(resolve, STOP_MS).unref()); // STOP_MS covers the removal too
         // first, so no session is offered a page that is going; only a file that still names this process. Best effort:
         // a home that changed under mawsd is logged, and the stop goes on (T6)
