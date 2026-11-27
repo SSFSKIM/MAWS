@@ -16,6 +16,7 @@ import { useTaskGraph } from '../../tools/agents/store';
 import { Disclosure } from '../../tools/agents/subagents/AgentRow';
 import { outcomeWord, refOf } from '../../tools/agents/subagents/shared';
 import { AGENT_TOOL_IDS } from '../../tools/agents/tool-ids';
+import { Tip } from '../../ui/tip';
 import { SUMMARY_COPY } from '../copy';
 import { panelHost } from '../host';
 import { CARD_ROWS, coarseElapsed, RunningCard, useCardClock } from './RunningCard';
@@ -110,6 +111,7 @@ function CardAgentRowView({ row, node, graph, waiting, now, onOpen, under }: {
   const title = rowTitle(node);
   const state = stateOf(node, waiting);
   const parent = row.orphan ? graph.tasks.get(node.agent!.parentAgentId as unknown as TaskId) : undefined;
+  const childOf = !row.orphan ? null : parent !== undefined && listedAgent(parent) ? SUBAGENTS_COPY.childOf(rowTitle(parent)) : SUBAGENTS_COPY.childOfUnlisted;
   return (
     <div
       data-agent-row={row.taskId}
@@ -118,20 +120,24 @@ function CardAgentRowView({ row, node, graph, waiting, now, onOpen, under }: {
       style={{ marginInlineStart: row.depth * 16 }}
       className={`relative flex min-h-10 items-stretch ${row.depth > 0 ? 'border-l border-border-strong' : ''}`}
     >
-      <button
-        type="button"
-        data-part="open"
-        aria-labelledby={`${id}-text ${id}-elapsed`}
-        onClick={onOpen}
-        className="absolute inset-0 outline-accent hover:bg-bg-hover focus-visible:outline-2 focus-visible:-outline-offset-2"
-      />
+      {/* the words over the row let the pointer through to it, so a nested row's parent is the row's tooltip and its
+          description (ticket 815), the open button its keyboard owner, as the panel's row has its reason (T166) */}
+      <Tip content={childOf} description={childOf}>
+        <button
+          type="button"
+          data-part="open"
+          aria-labelledby={`${id}-text ${id}-elapsed`}
+          onClick={onOpen}
+          className="absolute inset-0 outline-accent hover:bg-bg-hover focus-visible:outline-2 focus-visible:-outline-offset-2"
+        />
+      </Tip>
       <span className="pointer-events-none relative flex min-w-0 flex-1 items-center gap-2 py-1.5 pl-3">
         <SubagentGlyph agent={refOf(node)} className="shrink-0 text-ui text-accent" />
         <span id={`${id}-text`} className="min-w-0 flex-1 text-left">
           <span className="block min-w-0 truncate font-medium">
             <span data-part="title">{title}</span>
             {row.orphan && (
-              <span data-part="nested" title={parent !== undefined && listedAgent(parent) ? SUBAGENTS_COPY.childOf(rowTitle(parent)) : SUBAGENTS_COPY.childOfUnlisted} className="ml-1.5 text-ui-sm font-normal text-fg-muted">
+              <span data-part="nested" className="ml-1.5 text-ui-sm font-normal text-fg-muted">
                 {SUBAGENTS_COPY.nested}
               </span>
             )}

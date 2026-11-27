@@ -111,50 +111,58 @@ function PrRow({ appSessionId, directory, branch }: { appSessionId: AppSessionId
     }
   };
   const checkedAt = pr.data?.checkedAt ?? scm.data?.checkedAt;
+  const checked = checkedAt ? SUMMARY_COPY.checkedAt(formatClock(Date.parse(checkedAt))) : null;
+  const signedOut = line.kind === 'gh_unauthenticated' ? line.detail : null;
 
   return (
     <Row
       action={
-        <button
-          type="button"
-          aria-label={SUMMARY_COPY.refreshPrState}
-          title={checkedAt ? SUMMARY_COPY.checkedAt(formatClock(Date.parse(checkedAt))) : SUMMARY_COPY.refreshPrState}
-          disabled={refreshing}
-          onClick={() => void refresh()}
-          className="inline-flex size-6 shrink-0 items-center justify-center rounded-sm text-fg-muted outline-accent hover:bg-bg-hover hover:text-fg focus-visible:outline-2 disabled:text-fg-faint disabled:hover:bg-transparent"
-        >
-          <RefreshIcon />
-        </button>
+        // the glyph's tooltip, a Tip the keyboard reaches (ticket 815): when it last asked, once it has (its description too),
+        // else its name
+        <Tip content={checked ?? SUMMARY_COPY.refreshPrState} description={checked}>
+          <button
+            type="button"
+            aria-label={SUMMARY_COPY.refreshPrState}
+            disabled={refreshing}
+            onClick={() => void refresh()}
+            className="inline-flex size-6 shrink-0 items-center justify-center rounded-sm text-fg-muted outline-accent hover:bg-bg-hover hover:text-fg focus-visible:outline-2 disabled:text-fg-faint disabled:hover:bg-transparent"
+          >
+            <RefreshIcon />
+          </button>
+        </Tip>
       }
     >
-      <span data-testid="pr-line" className={`block truncate ${line.kind === 'pr' ? '' : 'text-fg-muted'}`} title={line.kind === 'gh_unauthenticated' ? line.detail : undefined}>
-        {line.kind === 'untrusted' && SUMMARY_COPY.prUntrusted}
-        {line.kind === 'gh_missing' && (
-          <>
-            {`${SUMMARY_COPY.ghMissing} · `}
-            <button type="button" className={INLINE_LINK} onClick={() => openExternal(GH_INSTALL_URL)}>
-              {SUMMARY_COPY.install}
-            </button>
-          </>
-        )}
-        {line.kind === 'gh_unauthenticated' && (
-          <>
-            {`${SUMMARY_COPY.ghSignedOut} · `}
-            <button type="button" className={INLINE_LINK} onClick={() => openTerminal({ appSessionId, cwd: directory, command: GH_SIGN_IN })}>
-              {SUMMARY_COPY.signIn}
-            </button>
-          </>
-        )}
-        {line.kind === 'pr' && (
-          <>
-            <button type="button" className={INLINE_LINK} onClick={() => openExternal(line.url)}>
-              {SUMMARY_COPY.prNumber(line.number)}
-            </button>
-            {line.details && ` · ${line.details}`}
-          </>
-        )}
-        {line.kind === 'unavailable' && SUMMARY_COPY.prUnavailable(line.reason)}
-      </span>
+      {/* gh's own words on a signed-out CLI: the line's tooltip and description, the line taking the keyboard for them */}
+      <Tip content={signedOut} description={signedOut}>
+        <span data-testid="pr-line" tabIndex={signedOut ? 0 : undefined} className={`block truncate rounded-sm outline-accent focus-visible:outline-2 ${line.kind === 'pr' ? '' : 'text-fg-muted'}`}>
+          {line.kind === 'untrusted' && SUMMARY_COPY.prUntrusted}
+          {line.kind === 'gh_missing' && (
+            <>
+              {`${SUMMARY_COPY.ghMissing} · `}
+              <button type="button" className={INLINE_LINK} onClick={() => openExternal(GH_INSTALL_URL)}>
+                {SUMMARY_COPY.install}
+              </button>
+            </>
+          )}
+          {line.kind === 'gh_unauthenticated' && (
+            <>
+              {`${SUMMARY_COPY.ghSignedOut} · `}
+              <button type="button" className={INLINE_LINK} onClick={() => openTerminal({ appSessionId, cwd: directory, command: GH_SIGN_IN })}>
+                {SUMMARY_COPY.signIn}
+              </button>
+            </>
+          )}
+          {line.kind === 'pr' && (
+            <>
+              <button type="button" className={INLINE_LINK} onClick={() => openExternal(line.url)}>
+                {SUMMARY_COPY.prNumber(line.number)}
+              </button>
+              {line.details && ` · ${line.details}`}
+            </>
+          )}
+          {line.kind === 'unavailable' && SUMMARY_COPY.prUnavailable(line.reason)}
+        </span>
+      </Tip>
     </Row>
   );
 }

@@ -20,6 +20,7 @@ import { useTranscriptStore } from '../../stores/transcript';
 import { loadSyntheticJournal } from '../../../../../test/support/fixtures';
 import { journalToEvents } from '../../transcript/dev/journal';
 import type { SessionEvent } from '@shared/graph/events';
+import { accessibleDescription } from '../../test-support/accessible-text';
 import { A, B, probeTool, resetPanelStores } from '../../test-support/panel';
 import { SUMMARY_COPY } from '../copy';
 import { panelHost, registerPanelTool } from '../host';
@@ -245,7 +246,8 @@ describe('floating session cards', () => {
     await waitFor(() => expect(fake.pending('engine.models')).toBeGreaterThan(0));
     await act(() => fake.reply('engine.models', { models: [{ value: 'default', displayName: 'Default (recommended)', resolvedModel: 'claude-opus-5-5[1m]' }, { value: 'opus', displayName: 'Opus 5.5 (1M context)', resolvedModel: 'claude-opus-5-5[1m]' }], source: 'live', at: null }));
     const line = await within(region('Environment')).findByText('Opus 5.5 High');
-    expect(line.getAttribute('title')).toBe('claude-opus-5-5[1m]');
+    expect(accessibleDescription(line), 'the engine’s id, its tooltip and description').toBe('claude-opus-5-5[1m]');
+    expect(line.tabIndex, 'the line takes the keyboard for it').toBe(0);
     // a live process whose status has fast mode on says Fast, as the chip does; once the process has exited, none
     act(() => useSessions.setState({ engine: new Map([[A, { ...status(A), fastMode: { state: 'on', disabledReason: null } }]]) }));
     expect(within(region('Environment')).getByText('Opus 5.5 Fast High')).toBeTruthy();
@@ -402,9 +404,10 @@ describe('the Environment card follows the agent', () => {
     expect(folderRow().getAttribute('dir')).toBe('rtl'); // the browser's ellipsis at the path's start; the text itself runs left to right
     const line = movedFrom()!;
     expect(line.textContent).toBe('moved from repo');
-    expect(line.title).toBe(REPO);
+    expect(accessibleDescription(line), 'the launch folder whole, its tooltip and description').toBe(REPO);
     expect(line.previousElementSibling?.contains(folderRow())).toBe(true); // directly under the folder row
-    expect(line.nextElementSibling?.textContent).toBe('⎇ main'); // above the branch row
+    expect(line.nextElementSibling?.hasAttribute('hidden'), 'its tip’s description, kept for the tree').toBe(true);
+    expect(line.nextElementSibling?.nextElementSibling?.textContent).toBe('⎇ main'); // above the branch row
   });
 
   it('draws no "moved from" at the launch folder nor in a sub-folder of it, and a change of sub-folder changes the row in place', async () => {

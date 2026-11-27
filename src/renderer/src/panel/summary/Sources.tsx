@@ -66,18 +66,17 @@ const rowClass = 'flex h-7 min-w-0 flex-1 items-center gap-2 rounded-sm px-1 -mx
 const buttonClass = `${rowClass} outline-accent hover:bg-bg-hover focus-visible:outline-2`;
 
 function SourceRow({ source, appSessionId, directory }: { source: Source; appSessionId: AppSessionId; directory: string }) {
-  // the word cut (P57): a file row ends at its name, which carries the extension
+  // the word cut (P57): a file row ends at its name, which carries the extension; its path as the session read it is its
+  // tooltip, a Tip the keyboard reaches (ticket 815), and its description where the row shows less of it
   if (source.kind === 'file') {
+    const shown = displayPath(source.path, directory);
     return (
-      <button
-        type="button"
-        title={source.path}
-        className={buttonClass}
-        onClick={() => void openFile(appSessionId, absolutePath(source.path, directory), null)}
-      >
-        <FileIcon />
-        <span className="min-w-0 flex-1 truncate">{displayPath(source.path, directory)}</span>
-      </button>
+      <Tip content={source.path} description={shown === source.path ? null : source.path}>
+        <button type="button" className={buttonClass} onClick={() => void openFile(appSessionId, absolutePath(source.path, directory), null)}>
+          <FileIcon />
+          <span className="min-w-0 flex-1 truncate">{shown}</span>
+        </button>
+      </Tip>
     );
   }
   if (source.kind === 'web') {
