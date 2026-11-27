@@ -24,6 +24,7 @@ import { registerPanelTool } from '../../../panel/host';
 import { surfaceTabs } from '../../../panel/surface-model';
 import { useLayout } from '../../../stores/layout';
 import { A as SHOWN, probeTool, resetPanelStores } from '../../../test-support/panel';
+import { accessibleDescription } from '../../../test-support/accessible-text';
 import { mawsTranscriptActionsOver, type AskSheetParams } from '../actions';
 import { askSheetTool } from './AskSheetTool';
 import { connectAsks } from './connect';
@@ -74,6 +75,9 @@ function mount(params?: AskSheetParams, over: Partial<PanelToolContext> = {}) {
 
 const section = (id: string) => document.querySelector<HTMLElement>(`[data-question-id="${id}"]`)!;
 const submitButton = () => screen.getByRole('button', { name: /^Submit/ });
+// Greyed with a reason: drawn aria-disabled, still in the Tab order, its reason its description (board ticket 815). A
+// control one answer in flight holds back is `disabled`.
+const greyed = (button: HTMLElement) => button.getAttribute('aria-disabled') === 'true' && !(button as HTMLButtonElement).disabled;
 
 async function mountWithAsk(asks: PendingAsk[] = [ASK]) {
   mount({ askId: asks[0]?.askId });
@@ -235,8 +239,12 @@ describe('Submit', () => {
     await mountWithAsk();
     expect(submitButton().textContent).toBe('Submit');
     fireEvent.click(within(section('q1')).getByRole('radio', { name: 'Other…' }));
-    expect((submitButton() as HTMLButtonElement).disabled).toBe(true);
+    expect(greyed(submitButton())).toBe(true);
+    expect(accessibleDescription(submitButton())).toBe('Type your Other answer, or clear Other');
+    fireEvent.click(submitButton()); // swallowed
+    expect(fake.invoked('maws.ask.answer')).toEqual([]);
     fireEvent.change(within(section('q1')).getByRole('textbox'), { target: { value: 'Teal' } });
+    expect(greyed(submitButton())).toBe(false);
     expect((submitButton() as HTMLButtonElement).disabled).toBe(false);
     expect(submitButton().textContent).toBe('Submit');
     fireEvent.click(within(section('q3')).getByRole('button', { name: 'Skip' }));
@@ -307,7 +315,8 @@ describe('Submit', () => {
     await screen.findByText("Couldn't deliver the answers");
     fireEvent.click(within(section('q1')).getByRole('radio', { name: 'Other…' }));
     const retry = screen.getByRole('button', { name: 'Retry' }) as HTMLButtonElement;
-    expect(retry.disabled).toBe(true);
+    expect(greyed(retry)).toBe(true);
+    expect(accessibleDescription(retry)).toBe('Type your Other answer, or clear Other');
     fireEvent.click(retry);
     expect(fake.invoked('maws.ask.answer')).toHaveLength(1);
   });
@@ -340,7 +349,7 @@ describe('Dismiss and the double-click', () => {
     await mountWithAsk();
     fireEvent.click(within(section('q1')).getByRole('radio', { name: 'Red' }));
     fireEvent.click(within(section('q2')).getByRole('checkbox', { name: 'Other…' })); // half answered: Submit waits
-    expect((submitButton() as HTMLButtonElement).disabled).toBe(true);
+    expect(greyed(submitButton())).toBe(true);
     const dismiss = screen.getByRole('button', { name: 'Dismiss' }) as HTMLButtonElement;
     expect(dismiss.disabled).toBe(false);
     fireEvent.click(dismiss);
@@ -647,11 +656,11 @@ describe('a session on a machine that doesn’t offer the answer', () => {
       await userEvent.type(within(section('q3')).getByRole('textbox', { name: 'What should the title be?' }), 'Hello');
       expect(submitButton()).toHaveProperty('disabled', false);
       act(() => heardRefusal('maws.ask.answer', { issues: { refusal: 'not-offered' } }, OTHER_MACHINE, TEST_MACHINE));
-      expect(submitButton()).toHaveProperty('disabled', true);
-      expect(submitButton().title).toBe('mini doesn’t offer this');
+      expect(greyed(submitButton())).toBe(true);
+      expect(accessibleDescription(submitButton())).toBe('mini doesn’t offer this');
       // U1a: Dismiss is gated as Submit is
-      expect(screen.getByRole('button', { name: 'Dismiss' })).toHaveProperty('disabled', true);
-      expect(screen.getByRole('button', { name: 'Dismiss' }).title).toBe('mini doesn’t offer this');
+      expect(greyed(screen.getByRole('button', { name: 'Dismiss' }))).toBe(true);
+      expect(accessibleDescription(screen.getByRole('button', { name: 'Dismiss' }))).toBe('mini doesn’t offer this');
     } finally {
       resetRemoteSurfaces();
       useSessions.setState({ listed: new Map(), listedMachines: new Set() });

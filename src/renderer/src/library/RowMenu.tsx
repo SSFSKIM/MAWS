@@ -22,6 +22,7 @@ import { SEND_TO_COPY, SERVICE } from '../delivery/copy'; // P4-B5
 import { openSendTo } from '../delivery/store'; // P4-B5
 import { VIEWERS_COPY } from '../tools/artifacts/viewers/copy';
 import { closeLibraryDialog, openLibraryDialog, replaceLibraryDialog, toastFailure, type ArtifactRef, type SheetOf } from './dialogs';
+import { NamedGlyph } from '../ui/glyph';
 import { QuietSpinner } from '../ui/spinner';
 import { MoreIcon } from './icons';
 import { MENU, MENU_ITEM } from './LibraryHeader';
@@ -150,15 +151,13 @@ export function RowMenu({ row, machine, open, onOpenChange, tabIndex }: { row: L
   return (
     <DropdownMenu.Root modal={false} open={open} onOpenChange={onOpenChange}>
       <DropdownMenu.Trigger asChild>
-        <button
-          type="button"
-          aria-label={R.menu(row.title)}
-          title={R.menu(row.title)}
+        <NamedGlyph
+          label={R.menu(row.title)}
           tabIndex={tabIndex}
           className="inline-flex size-7 shrink-0 items-center justify-center rounded-sm text-fg-faint outline-accent group-hover:text-fg-muted group-focus-visible:text-fg-muted hover:bg-bg-active hover:text-fg focus-visible:outline-2 data-[state=open]:bg-bg-active data-[state=open]:text-fg"
         >
           <MoreIcon />
-        </button>
+        </NamedGlyph>
       </DropdownMenu.Trigger>
       <DropdownMenu.Portal>
         <DropdownMenu.Content align="end" sideOffset={4} className={MENU}>

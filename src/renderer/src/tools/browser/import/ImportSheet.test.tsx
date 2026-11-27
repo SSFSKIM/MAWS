@@ -12,6 +12,7 @@ import type { PreloadBridge } from '@shared/ipc/schema';
 import { SETTINGS_DEFAULTS_V21 } from '@shared/settings/defaults';
 import { CANCELLED_REPORT, NO_SKIPS, WRONG_KEY_REPORT } from '../../../../../../test/support/import-reports';
 import { useSettings } from '../../../stores/settings';
+import { accessibleDescription } from '../../../test-support/accessible-text';
 import { CHROME, DISABLED_ID, DONE, FAILS_ID, IMPORT_ID, importBridge, INSPECTION, INSPECTION_ID, PROFILES_ANSWER, RECORD, WALLET_ID, type ImportBridge } from '../../../test-support/browser-import';
 import { IMPORT_COPY } from './copy';
 import { ImportSheet } from './ImportSheet';
@@ -168,7 +169,7 @@ describe('consent', () => {
     expect(box('Import Probe Wallet').checked).toBe(true); // imported, off
     expect(box('Import Disabled in Chrome').checked).toBe(false); // Decision Log 9
     expect(within(row(DISABLED_ID)).getByText('Disabled in Chrome', { selector: 'span span' })).toBeTruthy();
-    expect(within(row(FAILS_ID)).getByText('1 permission MAWS doesn\'t support').closest('[title]')!.getAttribute('title')).toBe('contextMenus');
+    expect(accessibleDescription(within(row(FAILS_ID)).getByText('1 permission MAWS doesn\'t support').closest('[tabindex]')!)).toBe('contextMenus'); // its tooltip (board ticket 815)
     expect(within(row(WALLET_ID)).queryByText('No background')).toBeNull();
     expect(sheet().textContent).not.toContain('MV2');
   });
@@ -423,16 +424,16 @@ describe('report', () => {
   it('a history write that failed in MAWS’s index is said about the index, not Chrome', () => {
     showReport({ ...DONE, history: { ...DONE.history, imported: 2, error: 'ERR_SQLITE_ERROR' } });
     renderSheet();
-    expect(within(sheet()).getByTitle('ERR_SQLITE_ERROR').textContent).toBe("MAWS couldn't write the history into its index; some history wasn't imported.");
+    expect(accessibleDescription(within(sheet()).getByText("MAWS couldn't write the history into its index; some history wasn't imported."))).toBe('ERR_SQLITE_ERROR');
     cleanup();
     disconnect();
     showReport({ ...DONE, history: { ...DONE.history, imported: 0, error: 'indexUnavailable' } });
     renderSheet();
-    expect(within(sheet()).getByTitle('indexUnavailable').textContent).toBe("MAWS's index is read-only right now, so history couldn't be imported.");
+    expect(accessibleDescription(within(sheet()).getByText("MAWS's index is read-only right now, so history couldn't be imported."))).toBe('indexUnavailable');
   });
 
   // cua #90
-  it('the bookmarks count joins the summary, and a bookmarks error is said in words with its code as the title', () => {
+  it('the bookmarks count joins the summary, and a bookmarks error is said in words with its code as the tooltip and description', () => {
     showReport({ ...DONE, bookmarks: { imported: 46, skipped: 1, error: null } });
     renderSheet();
     expect(sheet().querySelector('[data-import-summary]')!.textContent).toBe('4 cookies, 4 history entries, 46 bookmarks, 3 extensions · 4 skipped');
@@ -440,12 +441,14 @@ describe('report', () => {
     disconnect();
     showReport({ ...DONE, bookmarks: { imported: 0, skipped: 0, error: 'missing' } });
     renderSheet();
-    expect(within(sheet()).getByTitle('missing').textContent).toBe("Chrome's Bookmarks file was gone by the time of the import, so no bookmarks were imported. MAWS reads it again each time this profile opens.");
+    expect(accessibleDescription(within(sheet()).getByText("Chrome's Bookmarks file was gone by the time of the import, so no bookmarks were imported. MAWS reads it again each time this profile opens."))).toBe('missing');
     cleanup();
     disconnect();
     showReport({ ...DONE, bookmarks: { imported: 0, skipped: 1, error: 'indexUnavailable' } });
     renderSheet();
-    expect(within(sheet()).getByTitle('indexUnavailable').textContent).toBe("MAWS's index is read-only right now, so bookmarks couldn't be imported.");
+    const line = within(sheet()).getByText("MAWS's index is read-only right now, so bookmarks couldn't be imported.");
+    expect(accessibleDescription(line)).toBe('indexUnavailable');
+    expect(line.tabIndex).toBe(0); // the keyboard reaches the code
   });
 
   it('a failed run says why and that nothing was kept', () => {

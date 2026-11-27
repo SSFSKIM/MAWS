@@ -13,6 +13,7 @@ import type { Settings } from '@shared/ipc/schema';
 import { SETTINGS_DEFAULTS_V21 } from '@shared/settings/defaults';
 import { browserTab, T1 } from '../../../test-support/browser';
 import { RECORD } from '../../../test-support/browser-import';
+import { accessibleDescription } from '../../../test-support/accessible-text';
 import { installFakeMain, ok } from '../../../test-support/code';
 import { createClient } from '../../../ipc/client';
 import { useSettings } from '../../../stores/settings';
@@ -94,8 +95,10 @@ describe('the bookmarks bar', () => {
     await vi.waitFor(() => expect(chip(2).querySelector('img')?.getAttribute('src')).toBe(ICON));
     expect(chip(3).querySelector('img')).toBeNull(); // never shown in this partition: the glyph, no fetch
     expect(chip(6).getAttribute('aria-label')).toBe('https://icon-only.example/');
-    expect(chip(3).title).toBe('B\nhttps://b.example/B');
-    expect(chip(4).hasAttribute('title')).toBe(false); // the word cut (T449): a folder's tooltip only said its name again
+    expect(accessibleDescription(chip(3))).toBe('https://b.example/B'); // its tooltip's address (board ticket 815)
+    act(() => chip(3).focus());
+    expect(screen.getByRole('tooltip').textContent).toBe('Bhttps://b.example/B'); // the name, then the address, as two lines
+    expect(chip(4).hasAttribute('aria-describedby')).toBe(false); // the word cut (T449): a folder's tooltip only said its name again
     expect(main.callsOf('browser.bookmarks.favicons')).toContainEqual({ partition: WORK, origins: ['https://a.example', 'https://b.example', 'https://icon-only.example'] });
     // the bar sits between the navigation row and anything below it
     const chrome = document.querySelector('[data-browser-chrome]')!;
@@ -134,7 +137,7 @@ describe('the bookmarks bar', () => {
   it('hides the chips past the room and hands them to the »', async () => {
     // each chip 50 px wide from the list's left edge, the list 160 px: three fit
     const rects = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
-      const siblings = this.parentElement ? [...this.parentElement.children] : [];
+      const siblings = this.parentElement ? [...this.parentElement.children].filter((sibling) => sibling.matches('[data-bookmark], [data-bookmark-folder]')) : [];
       const at = this.matches('[data-bookmark], [data-bookmark-folder]') ? siblings.indexOf(this) : -1;
       return DOMRect.fromRect({ x: at === -1 ? 0 : at * 50, y: 0, width: at === -1 ? 160 : 48, height: 24 });
     });

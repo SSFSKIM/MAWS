@@ -39,11 +39,15 @@ function Mark({ multi }: { multi: boolean }) {
   );
 }
 
-export function OptionText({ label, description }: { label: string; description?: string | null }) {
+export function OptionText({ label, description, descriptionId }: { label: string; description?: string | null; descriptionId?: string }) {
   return (
     <span className="flex min-w-0 flex-col">
       <span className="text-fg">{label}</span>
-      {description && <span className="text-ui-sm text-fg-muted">{description}</span>}
+      {description && (
+        <span id={descriptionId} className="text-ui-sm text-fg-muted">
+          {description}
+        </span>
+      )}
     </span>
   );
 }

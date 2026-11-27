@@ -11,6 +11,7 @@ import { formatAgo } from '@shared/app/date-format';
 import { PinIcon } from '../app/IconButton';
 import { useNow } from '../app/use-now';
 import { useLayout } from '../stores/layout';
+import { Tip } from '../ui/tip';
 import { openArtifactTab } from './actions';
 import { KIND_LABELS, ROW_COPY } from './copy';
 import { KindIcon } from './icons';
@@ -40,18 +41,24 @@ export interface RowProps {
 
 const sessionName = (session: LibrarySession) => session.title.trim() || ROW_COPY.untitledSession;
 
+// The facts the pointer and the keyboard reach (board ticket 815): a session chip's roles and age, the sessions past
+// the +N, the name a receipt's delivery arrived as and the pin's word are tips, each owner in the row's Tab order.
+const WORD_OWNER = 'rounded-sm outline-accent focus-visible:outline-2';
+
 function SessionChip({ session, now, tabIndex }: { session: LibrarySession; now: number; tabIndex: number }) {
   const roles = session.roles.map((role) => ROW_COPY.roles[role]).join(', ');
+  const ago = formatAgo(Math.max(0, now - session.lastAt));
   return (
-    <button
-      type="button"
-      tabIndex={tabIndex}
-      title={ROW_COPY.sessionTitle(sessionName(session), roles, formatAgo(Math.max(0, now - session.lastAt)))}
-      onClick={() => useLayout.getState().openSession(session.appSessionId, { how: 'tab' })}
-      className={`${CHIP} outline-accent hover:border-border-strong hover:bg-bg-hover hover:text-fg focus-visible:outline-2`}
-    >
-      <span className="truncate">{sessionName(session)}</span>
-    </button>
+    <Tip content={ROW_COPY.sessionTitle(sessionName(session), roles, ago)} description={ROW_COPY.sessionFacts(roles, ago)}>
+      <button
+        type="button"
+        tabIndex={tabIndex}
+        onClick={() => useLayout.getState().openSession(session.appSessionId, { how: 'tab' })}
+        className={`${CHIP} outline-accent hover:border-border-strong hover:bg-bg-hover hover:text-fg focus-visible:outline-2`}
+      >
+        <span className="truncate">{sessionName(session)}</span>
+      </button>
+    </Tip>
   );
 }
 
@@ -63,9 +70,22 @@ function Sessions({ sessions, now, tabIndex }: { sessions: LibrarySession[]; now
         <SessionChip key={session.appSessionId} session={session} now={now} tabIndex={tabIndex} />
       ))}
       {rest.length > 0 && (
-        <span title={ROW_COPY.moreTitle(rest.map(sessionName))} className="shrink-0 px-1 text-ui-sm text-fg-muted tabular-nums">
-          {ROW_COPY.more(rest.length)}
-        </span>
+        <Tip
+          content={
+            <>
+              {rest.map((session) => (
+                <span key={session.appSessionId} className="block">
+                  {sessionName(session)}
+                </span>
+              ))}
+            </>
+          }
+          description={ROW_COPY.moreNames(rest.map(sessionName))}
+        >
+          <span tabIndex={tabIndex} className={`shrink-0 px-1 text-ui-sm text-fg-muted tabular-nums ${WORD_OWNER}`}>
+            {ROW_COPY.more(rest.length)}
+          </span>
+        </Tip>
       )}
     </span>
   );
@@ -86,15 +106,17 @@ function Receipt({ artifactId, machine, now, tabIndex }: { artifactId: string; m
   return (
     <>
       <Dot />
-      {receipt.url ? (
-        <button type="button" data-part="receipt" tabIndex={tabIndex} title={receipt.name} onClick={() => void ipc.invoke('layout.openExternal', { url: receipt.url! })} className="shrink-0 truncate text-ui-sm text-fg-muted underline-offset-2 outline-accent hover:text-fg hover:underline focus-visible:outline-2">
-          {words}
-        </button>
-      ) : (
-        <span data-part="receipt" title={receipt.name} className="shrink-0 truncate">
-          {words}
-        </span>
-      )}
+      <Tip content={receipt.name} description={receipt.name}>
+        {receipt.url ? (
+          <button type="button" data-part="receipt" tabIndex={tabIndex} onClick={() => void ipc.invoke('layout.openExternal', { url: receipt.url! })} className="shrink-0 truncate text-ui-sm text-fg-muted underline-offset-2 outline-accent hover:text-fg hover:underline focus-visible:outline-2">
+            {words}
+          </button>
+        ) : (
+          <span data-part="receipt" tabIndex={receipt.name ? tabIndex : undefined} className={`shrink-0 truncate ${WORD_OWNER}`}>
+            {words}
+          </span>
+        )}
+      </Tip>
     </>
   );
 }
@@ -132,9 +154,11 @@ export function Row({ row, machine, stop, menuOpen, onMenuOpen, onFocus, onFocus
             {row.title}
           </span>
           {row.pinned && (
-            <span role="img" aria-label={ROW_COPY.pinned} title={ROW_COPY.pinned} className="shrink-0 text-fg-faint">
-              <PinIcon className="size-3.5" />
-            </span>
+            <Tip content={ROW_COPY.pinned}>
+              <span role="img" aria-label={ROW_COPY.pinned} tabIndex={tabIndex} className={`shrink-0 text-fg-faint ${WORD_OWNER}`}>
+                <PinIcon className="size-3.5" />
+              </span>
+            </Tip>
           )}
         </span>
         <span data-part="facts" className="col-start-2 row-start-2 flex min-w-0 items-center gap-1.5 text-ui-sm text-fg-muted">

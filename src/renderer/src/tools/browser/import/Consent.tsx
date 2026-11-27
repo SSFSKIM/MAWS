@@ -9,11 +9,14 @@ import type { BrowserImportInspection } from '@shared/ipc/schema/browser';
 import { SheetForm } from '../../../sessions/Sheet';
 import { CHOICE, PRIMARY } from '../../../sessions/ui';
 import { Chip } from '../../../settings-tab/parts';
+import { Tip } from '../../../ui/tip';
 import { IMPORT_COPY } from './copy';
 import { start, useBrowserImport } from './store';
 
 const WALLET_CHIP = 'inline-flex items-center rounded-sm border border-l-2 border-border border-l-warning px-2 py-0.5 text-ui-sm whitespace-nowrap text-fg-muted';
 
+// A word whose code or list is its tooltip and description takes keyboard focus (board ticket 815).
+const CODE_OWNER = 'rounded-sm outline-accent focus-visible:outline-2';
 const importable = (candidate: ExtensionCandidate) => candidate.error === null;
 const checkedByDefault = (candidate: ExtensionCandidate) => importable(candidate) && candidate.chromeState !== 'disabled'; // Decision Log 9
 
@@ -153,9 +156,11 @@ function Category({
 
 function StoreError({ store, code }: { store: 'history' | 'cookies'; code: string }) {
   return (
-    <span role="alert" title={code} className="text-danger">
-      {IMPORT_COPY.storeError(store, code)}
-    </span>
+    <Tip content={code} description={code}>
+      <span role="alert" tabIndex={0} className={`text-danger ${CODE_OWNER}`}>
+        {IMPORT_COPY.storeError(store, code)}
+      </span>
+    </Tip>
   );
 }
 
@@ -170,9 +175,11 @@ function CandidateFacts({ candidate }: { candidate: ExtensionCandidate }) {
         <Chip key={fact}>{fact}</Chip>
       ))}
       {candidate.unsupportedPermissions.length > 0 && (
-        <span title={candidate.unsupportedPermissions.join(', ')}>
-          <Chip>{IMPORT_COPY.unsupported(candidate.unsupportedPermissions.length)}</Chip>
-        </span>
+        <Tip content={candidate.unsupportedPermissions.join(', ')} description={candidate.unsupportedPermissions.join(', ')}>
+          <span tabIndex={0} className={`inline-flex ${CODE_OWNER}`}>
+            <Chip>{IMPORT_COPY.unsupported(candidate.unsupportedPermissions.length)}</Chip>
+          </span>
+        </Tip>
       )}
     </span>
   );

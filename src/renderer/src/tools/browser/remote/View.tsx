@@ -28,7 +28,8 @@ import { machineOf } from '@shared/machine/address';
 import { ipc } from '../../../ipc/client';
 import { useMachines } from '../../../stores/machines';
 import { machineName } from '../../../stores/org-projects';
-import { moveAlongTabs, tabStop } from '../chrome/TabStrip';
+import { Tip } from '../../../ui/tip';
+import { ActingDot, chipTip, moveAlongTabs, tabStop } from '../chrome/TabStrip';
 import { BROWSER_COPY } from '../copy';
 import { BrowserIcon, PersonIcon } from '../icons';
 import { QuietSpinner } from '../../../ui/spinner';
@@ -183,21 +184,23 @@ export function AgentGroup({ remote, machine, onShow }: { remote: RemoteBrowser;
 function AgentChip({ tab, selected, tabbable, onSelect }: { tab: BrowserTabSummary; selected: boolean; tabbable: boolean; onSelect(): void }) {
   const title = titleOf(tab);
   const tone = selected ? 'bg-bg text-fg' : 'text-fg-muted hover:bg-bg-hover hover:text-fg';
+  const tip = chipTip(title, tab.url, tab.control === 'agent' ? [{ fact: BROWSER_COPY.acting, named: true }] : []);
   return (
-    <button
-      type="button"
-      role="tab"
-      aria-selected={selected}
-      tabIndex={tabbable ? 0 : -1}
-      data-browser-agent-chip={tab.tabId}
-      title={tab.url === '' ? title : `${title}\n${tab.url}`}
-      onClick={onSelect}
-      className={`flex h-6 w-40 min-w-16 shrink items-center gap-1.5 rounded-sm px-2 text-ui-sm outline-accent focus-visible:outline-2 ${tone}`}
-    >
-      <BrowserIcon className="size-3.5" />
-      {tab.control === 'agent' && <span data-browser-acting role="img" aria-label={BROWSER_COPY.acting} title={BROWSER_COPY.acting} className="size-1.5 shrink-0 rounded-full bg-accent" />}
-      <span className="min-w-0 truncate">{title}</span>
-    </button>
+    <Tip content={tip.content} description={tip.description}>
+      <button
+        type="button"
+        role="tab"
+        aria-selected={selected}
+        tabIndex={tabbable ? 0 : -1}
+        data-browser-agent-chip={tab.tabId}
+        onClick={onSelect}
+        className={`flex h-6 w-40 min-w-16 shrink items-center gap-1.5 rounded-sm px-2 text-ui-sm outline-accent focus-visible:outline-2 ${tone}`}
+      >
+        <BrowserIcon className="size-3.5" />
+        {tab.control === 'agent' && <ActingDot />}
+        <span className="min-w-0 truncate">{title}</span>
+      </button>
+    </Tip>
   );
 }
 

@@ -8,7 +8,13 @@
 import { COOKIE_SKIP_REASONS, HISTORY_SKIP_REASONS, type ImportedExtension, type ImportReport } from '@shared/browser/import';
 import { PRIMARY, SECONDARY } from '../../../sessions/ui';
 import { useSettings } from '../../../stores/settings';
+import { Tip } from '../../../ui/tip';
 import { IMPORT_COPY } from './copy';
+
+// A line whose code (main's, for a failure or an unreadable store) is its tooltip and its description: the line takes
+// keyboard focus while it has one, so the keyboard reaches the code too (board ticket 815).
+const CODE_OWNER = 'rounded-sm outline-accent focus-visible:outline-2';
+const owning = (code: string | null | undefined) => (code ? 0 : undefined);
 
 export function Report({ report, onClose }: { report: ImportReport; onClose(): void }) {
   const done = report.outcome === 'done';
@@ -30,9 +36,11 @@ function Stopped({ report }: { report: ImportReport }) {
   return (
     <>
       {report.outcome === 'failed' && (
-        <p role="alert" title={report.failure ?? undefined} className="m-0 text-danger">
-          {IMPORT_COPY.failure(report.failure)}
-        </p>
+        <Tip content={report.failure} description={report.failure}>
+          <p role="alert" tabIndex={owning(report.failure)} className={`m-0 text-danger ${CODE_OWNER}`}>
+            {IMPORT_COPY.failure(report.failure)}
+          </p>
+        </Tip>
       )}
       <p className="m-0 text-fg">{IMPORT_COPY.nothingKept(report.name)}</p>
     </>
@@ -49,19 +57,25 @@ function Finished({ report }: { report: ImportReport }) {
         {IMPORT_COPY.summary(report)}
       </p>
       {keychain !== null && (
-        <p data-import-keychain={cookies!.keychain} title={cookies!.error ?? undefined} className="m-0 text-ui-sm text-fg-muted">
-          {keychain}
-        </p>
+        <Tip content={cookies!.error} description={cookies!.error}>
+          <p data-import-keychain={cookies!.keychain} tabIndex={owning(cookies!.error)} className={`m-0 text-ui-sm text-fg-muted ${CODE_OWNER}`}>
+            {keychain}
+          </p>
+        </Tip>
       )}
       {history?.error != null && (
-        <p title={history.error} className="m-0 text-ui-sm text-danger">
-          {IMPORT_COPY.historyError(history.error)}
-        </p>
+        <Tip content={history.error} description={history.error}>
+          <p tabIndex={0} className={`m-0 text-ui-sm text-danger ${CODE_OWNER}`}>
+            {IMPORT_COPY.historyError(history.error)}
+          </p>
+        </Tip>
       )}
       {bookmarks?.error != null && (
-        <p title={bookmarks.error} className="m-0 text-ui-sm text-danger">
-          {IMPORT_COPY.bookmarksError(bookmarks.error)}
-        </p>
+        <Tip content={bookmarks.error} description={bookmarks.error}>
+          <p tabIndex={0} className={`m-0 text-ui-sm text-danger ${CODE_OWNER}`}>
+            {IMPORT_COPY.bookmarksError(bookmarks.error)}
+          </p>
+        </Tip>
       )}
       {cookies !== null && cookies.partitioned.imported > cookies.partitioned.verified && (
         <p className="m-0 text-ui-sm text-fg-muted">{IMPORT_COPY.partitionedLine(cookies.partitioned.imported, cookies.partitioned.verified)}</p>
@@ -119,16 +133,19 @@ function Skipped({ count, label, hosts }: { count: number; label: string; hosts:
 }
 
 // An imported extension's state as a chip; a failure (it could not be copied or loaded, or its background died) in the
-// danger token, its code or first line in the title. Settings › Browser's extension rows show the same chip.
+// danger token, its code or first line its tooltip and description, the chip then taking keyboard focus (board ticket
+// 815). Settings › Browser's extension rows show the same chip.
 export function StatusChip({ extension }: { extension: ImportedExtension }) {
   const failed = extension.status === 'loadFailed' || extension.status === 'copyFailed' || (extension.status === 'loaded' && extension.background === 'failed');
   return (
-    <span
-      data-extension-status={extension.status}
-      title={extension.error ?? undefined}
-      className={`inline-flex items-center rounded-sm border px-2 py-0.5 text-ui-sm ${failed ? 'border-danger text-danger' : 'border-border text-fg-muted'}`}
-    >
-      {IMPORT_COPY.extensionStatus(extension)}
-    </span>
+    <Tip content={extension.error} description={extension.error}>
+      <span
+        data-extension-status={extension.status}
+        tabIndex={owning(extension.error)}
+        className={`inline-flex items-center rounded-sm border px-2 py-0.5 text-ui-sm ${failed ? 'border-danger text-danger' : 'border-border text-fg-muted'} ${CODE_OWNER}`}
+      >
+        {IMPORT_COPY.extensionStatus(extension)}
+      </span>
+    </Tip>
   );
 }

@@ -6,6 +6,7 @@ import { DropdownMenu } from 'radix-ui';
 import type { MachineRef } from '@shared/machine/ref';
 import { ChevronDownIcon, Icon } from '../app/IconButton';
 import { useMachines } from '../stores/machines';
+import { Tip } from '../ui/tip';
 import { LIBRARY_PAGE as P } from './copy';
 import { MENU, MENU_ITEM } from './LibraryHeader';
 import { setLibraryView, useLibraryView } from './view';
@@ -32,18 +33,20 @@ export function LibraryMachineMenu() {
   const label = chosenName ?? P.machine.local;
   return (
     <DropdownMenu.Root modal={false}>
-      <DropdownMenu.Trigger asChild>
-        <button
-          type="button"
-          aria-label={P.machine.label(label)}
-          title={P.machine.title}
-          data-library-machine={chosen ?? LOCAL}
-          className="inline-flex h-7 max-w-48 shrink-0 items-center gap-1 rounded-md border border-border px-2 text-ui text-fg-muted outline-accent hover:bg-bg-hover hover:text-fg focus-visible:outline-2 data-[state=open]:bg-bg-active"
-        >
-          <span className="truncate">{label}</span>
-          <ChevronDownIcon />
-        </button>
-      </DropdownMenu.Trigger>
+      {/* its helper sentence a tip the keyboard reaches, and its description (board ticket 815) */}
+      <Tip content={P.machine.title} description={P.machine.title}>
+        <DropdownMenu.Trigger asChild>
+          <button
+            type="button"
+            aria-label={P.machine.label(label)}
+            data-library-machine={chosen ?? LOCAL}
+            className="inline-flex h-7 max-w-48 shrink-0 items-center gap-1 rounded-md border border-border px-2 text-ui text-fg-muted outline-accent hover:bg-bg-hover hover:text-fg focus-visible:outline-2 data-[state=open]:bg-bg-active"
+          >
+            <span className="truncate">{label}</span>
+            <ChevronDownIcon />
+          </button>
+        </DropdownMenu.Trigger>
+      </Tip>
       <DropdownMenu.Portal>
         <DropdownMenu.Content align="start" sideOffset={4} aria-label={P.machine.menu} className={MENU}>
           <DropdownMenu.RadioGroup value={chosen ?? LOCAL} onValueChange={(next) => setLibraryView({ machine: next === LOCAL ? null : (next as MachineRef), spaceId: null })}>

@@ -13,6 +13,8 @@ import type { BookmarkNode, BookmarkTree } from '@shared/browser/bookmarks';
 import type { BrowserTab } from '@shared/browser/tab';
 import { ipc } from '../../../ipc/client';
 import { useCommand } from '../../../ipc/query';
+import { NamedGlyph } from '../../../ui/glyph';
+import { Tip } from '../../../ui/tip';
 import { BROWSER_COPY } from '../copy';
 import { FolderIcon, MoreBookmarksIcon, PageIcon } from '../icons';
 import { useBrowserImport } from '../import/store';
@@ -57,7 +59,8 @@ function Bar({ tab, tree }: { tab: BrowserTab; tree: BookmarkTree }) {
     if (!element) return;
     const measure = () => {
       const left = element.getBoundingClientRect().left;
-      const rights = [...element.children].map((chip) => chip.getBoundingClientRect().right - left);
+      // the chips alone: a named one's tooltip keeps its description in a hidden element beside it
+      const rights = [...element.querySelectorAll(':scope > [data-bookmark], :scope > [data-bookmark-folder]')].map((chip) => chip.getBoundingClientRect().right - left);
       setHiddenFrom(firstHidden(rights, element.clientWidth));
     };
     measure();
@@ -91,16 +94,14 @@ function Bar({ tab, tree }: { tab: BrowserTab; tree: BookmarkTree }) {
         ))}
       </div>
       {(hiddenFrom !== null || roots) && (
-        <button
-          type="button"
+        <NamedGlyph
+          label={BROWSER_COPY.bookmarks.more}
           data-bookmarks-more=""
-          aria-label={BROWSER_COPY.bookmarks.more}
-          title={BROWSER_COPY.bookmarks.more}
           onClick={(event) => menu({ kind: 'overflow', hiddenFrom: hiddenFrom ?? chips.length }, below(event.currentTarget))}
           className="inline-flex size-6 shrink-0 items-center justify-center rounded-sm text-fg-muted outline-accent hover:bg-bg-hover hover:text-fg focus-visible:outline-2"
         >
           <MoreBookmarksIcon className="size-3.5" />
-        </button>
+        </NamedGlyph>
       )}
     </div>
   );
@@ -135,19 +136,35 @@ function Chip({ node, icon, hidden, onOpen, onMenu }: ChipProps) {
     event.preventDefault();
     onOpen(chipHow(event));
   };
+  // The tooltip, which keyboard focus opens too (board ticket 815): the name in full, then the address, which is the
+  // chip's description (an unnamed bookmark's address is its name).
+  const named = node.name !== '';
   return (
-    <button
-      type="button"
-      data-bookmark={node.id}
-      aria-label={node.name === '' ? node.url : undefined}
-      title={BROWSER_COPY.bookmarks.chipTitle(node.name, node.url)}
-      onClick={click}
-      onAuxClick={(event) => event.button === 1 && click(event)}
-      className={`${CHIP} ${hidden ? 'invisible' : ''}`}
-      inert={hidden}
+    <Tip
+      content={
+        named ? (
+          <>
+            <span className="block">{node.name}</span>
+            <span className="block">{node.url}</span>
+          </>
+        ) : (
+          node.url
+        )
+      }
+      description={named ? node.url : null}
     >
-      {icon ? <img alt="" src={icon} className="size-4 shrink-0" /> : <PageIcon className="size-4 text-fg-muted" />}
-      {node.name !== '' && <span className="min-w-0 truncate">{node.name}</span>}
-    </button>
+      <button
+        type="button"
+        data-bookmark={node.id}
+        aria-label={named ? undefined : node.url}
+        onClick={click}
+        onAuxClick={(event) => event.button === 1 && click(event)}
+        className={`${CHIP} ${hidden ? 'invisible' : ''}`}
+        inert={hidden}
+      >
+        {icon ? <img alt="" src={icon} className="size-4 shrink-0" /> : <PageIcon className="size-4 text-fg-muted" />}
+        {named && <span className="min-w-0 truncate">{node.name}</span>}
+      </button>
+    </Tip>
   );
 }

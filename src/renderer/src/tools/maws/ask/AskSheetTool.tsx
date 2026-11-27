@@ -27,7 +27,9 @@ import { SHEET } from './copy';
 import { canSubmit, EMPTY_DRAFT } from './draft';
 import { AnsweredSection, QuestionSection } from './QuestionSection';
 import { WaitingWords } from '../../../ui/spinner';
-import { askSheet, canRetry, chooseOption, dismissAsk, editDraft, ensureLoaded, loadAsks, retryAsk, selectAsk, shownAsk, submitAsk, type AskSheetState as SheetStore, type SheetAsk } from './store';
+import { UnavailableButton } from '../../../ui/tip';
+import { DetailedLine } from './detail';
+import { askSheet, chooseOption, dismissAsk, editDraft, ensureLoaded, loadAsks, retryAsk, selectAsk, shownAsk, submitAsk, type AskSheetState as SheetStore, type SheetAsk } from './store';
 
 export interface AskSheetState {
   appSessionId: AppSessionId | null;
@@ -162,26 +164,27 @@ function LiveAsk({ appSessionId, ask, state, directory }: { appSessionId: AppSes
       <Footer>
         {failed && (
           <div role="alert" className="flex items-center gap-2 rounded-sm border border-danger px-2.5 py-1.5 text-danger">
-            <span className="flex-1" title={failed.detail ?? undefined}>
-              {SHEET.failed}
-            </span>
-            <CardButton
-              disabled={busy || !canRetry(failed, ask.questions, drafts) || unavailable !== null}
-              title={failed.dismiss ? (unavailable ?? undefined) : why}
-              onClick={() => void retryAsk(appSessionId, ask.askId, ipc, projects)}
-            >
-              {SHEET.retry}
-            </CardButton>
+            <DetailedLine words={SHEET.failed} detail={failed.detail} />
+            {/* greyed, a button keeps Tab and says why (board ticket 815): every case `canRetry` refuses has a reason; one answer in flight disables it */}
+            <UnavailableButton reason={(failed.dismiss ? unavailable : why) ?? null}>
+              <CardButton disabled={busy} onClick={() => void retryAsk(appSessionId, ask.askId, ipc, projects)}>
+                {SHEET.retry}
+              </CardButton>
+            </UnavailableButton>
           </div>
         )}
         <div className="flex items-center justify-end gap-2">
-          <CardButton disabled={busy || unavailable !== null} title={unavailable ?? undefined} onClick={dismiss} className="mr-auto">
-            {SHEET.dismiss}
-          </CardButton>
-          <CardButton tone="primary" disabled={busy || !ready || unavailable !== null} aria-busy={sending || undefined} title={why} onClick={submit}>
-            {/* the word cut (N164): Submit keeps its words while the answers go */}
-            <WaitingWords words={skipped > 0 ? SHEET.submitSkipping(skipped) : SHEET.submit} wait={sending ? SHEET.submitting : null} />
-          </CardButton>
+          <UnavailableButton reason={unavailable}>
+            <CardButton disabled={busy} onClick={dismiss} className="mr-auto">
+              {SHEET.dismiss}
+            </CardButton>
+          </UnavailableButton>
+          <UnavailableButton reason={why ?? null}>
+            <CardButton tone="primary" disabled={busy} aria-busy={sending || undefined} onClick={submit}>
+              {/* the word cut (N164): Submit keeps its words while the answers go */}
+              <WaitingWords words={skipped > 0 ? SHEET.submitSkipping(skipped) : SHEET.submit} wait={sending ? SHEET.submitting : null} />
+            </CardButton>
+          </UnavailableButton>
         </div>
       </Footer>
     </>
@@ -226,9 +229,7 @@ function Sheet({ appSessionId, ctx }: { appSessionId: AppSessionId; ctx: PanelTo
       {state.readError !== null && (
         // the host's table could not be read: "No open questions" would hide a pending ask, so say so and offer a read
         <div role="alert" className="mx-4 mt-3 flex items-center gap-2 rounded-sm border border-danger px-2.5 py-1.5 text-ui text-danger">
-          <span className="flex-1" title={state.readError}>
-            {SHEET.readFailed}
-          </span>
+          <DetailedLine words={SHEET.readFailed} detail={state.readError} />
           <CardButton disabled={state.reading} onClick={() => void loadAsks(appSessionId, ipc)}>
             {SHEET.retry}
           </CardButton>

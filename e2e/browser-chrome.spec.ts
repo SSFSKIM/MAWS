@@ -835,12 +835,16 @@ test('9, 10, 12: the extensions action bar: the probe\'s icon right of the addre
       expect(icon!.x).toBeGreaterThanOrEqual(field!.x + field!.width);
       expect(icon!.x + icon!.width).toBeLessThanOrEqual(pill!.x);
       expect([icon!.width, icon!.height]).toEqual([24, 24]);
-      await expect(probe).toHaveAttribute('title', 'MAWS probe');
+      // board ticket 815: a named glyph, its title the name and the tooltip keyboard focus opens
+      await expect(probe).toHaveAccessibleName('MAWS probe');
+      await probe.focus();
+      await expect(s.page.getByRole('tooltip')).toHaveText('MAWS probe');
+      await probe.blur();
       const fails = actionIn(main, chrome.extensions.fails.id);
       await expect(fails).toHaveAttribute('aria-disabled', 'true');
       const failure = 'Loaded · background failed: chrome.contextMenus.onClicked is not available in MAWS';
-      await expect(fails).toHaveAttribute('title', `Probe fails\n${failure}`);
-      await expect(fails).toHaveAttribute('aria-description', failure);
+      await expect(fails).toHaveAccessibleName('Probe fails');
+      await expect(fails).toHaveAccessibleDescription(failure); // the reason, its tooltip's second line
       await expect(fails.locator('span')).toHaveCSS('opacity', '0.5');
       const failedActions = value(await invoke(s.page, 'browser.extensions.actions', { partition: DEFAULT })).actions;
       expect(failedActions.find((action) => action.extensionId === chrome.extensions.fails.id)).toMatchObject({ hasPopup: true, inert: failure });
