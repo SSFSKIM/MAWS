@@ -88,15 +88,18 @@ export interface Frame {
   ghost?: Box;
 }
 export interface Gesture {
-  /** Fix wave 3: why the gesture does nothing (shown to the owner); it writes nothing at all. */
+  /** Fix wave 3: why the gesture does nothing (shown to the owner, shortly); it writes nothing at all. */
   refused?: string;
+  /** The word cut (G413): the model's own reason behind a short refusal, for the notice's tooltip. */
+  why?: string;
   frame(p: Pt, mods: Mods): Frame;
   /** Ends it (`commit` false: a cancelled flow drag drops nothing). */
   end(commit?: boolean): void;
 }
 
 const NO_GUIDES: Frame = { guides: [] };
-const refusal = (reason: string): Gesture => ({ refused: reason, frame: () => NO_GUIDES, end: () => {} });
+// the word cut (G413, G414): what is refused said shortly, and the model's own reason, if any, beside it for its tooltip
+const refusal = (refused: string, why?: string): Gesture => ({ refused, why, frame: () => NO_GUIDES, end: () => {} });
 /**
  * A gesture that composes or reads the element's transform (rotate, resize) needs it readable: a design-system token
  * (`var(--ds-pose, …)`) is a whole value the dialect takes as it is, and a rotation composed beside it would be dropped
@@ -227,7 +230,7 @@ function movedBy(bases: readonly MoveBase[], d: Pt, first: boolean): Record<stri
 export function startMove(ctx: GestureContext, ids: readonly string[], p0: Pt): Gesture {
   const tree = slideTree(ctx.session.doc, ctx.slideId);
   let placement: ReturnType<typeof freePlacement>;
-  try { placement = freePlacement(ctx); } catch (error) { return refusal(String(error)); }
+  try { placement = freePlacement(ctx); } catch (error) { return refusal(C.refused.move, error instanceof Error ? error.message : String(error)); }
   const ms = ids.map((id) => placement.measured.get(id) ?? measure(ctx.canvas, id, ctx.scale)).filter((m): m is Measured => m !== null);
   const bases = ms.map((m) => {
     const base = moveBase(tree, m);

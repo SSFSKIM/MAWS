@@ -21,6 +21,7 @@ import { decodeMap, stateV2, type Doc } from '../../../yjs';
 import { changeStops, deckChanges, elementEditors, elementHistory, openDeckDiff, type ChangeStop, type DeckChanges, type DeckDiff, type ElementPlace, type KeyChange, type Touch } from '../../history'; // P3-E: elementHistory
 import { slideOrder } from '../../model';
 import { getThread } from '../../threads';
+import { HISTORY_COPY } from './copy';
 
 export type DeckPreviewTarget = { kind: 'version'; versionId: number } | { kind: 'compare'; versionIds: [number, number] } | { kind: 'since'; versionId: number | null };
 
@@ -257,7 +258,7 @@ export class DeckHistoryController {
     try {
       await this.api.saveVersion(version);
       await this.refresh();
-      this.set({ status: `Saved “${version.label}”.` });
+      this.set({ status: null }); // the word cut (G500): the new row is the confirmation
       return true;
     } catch (error) {
       this.set({ error: message(error) });
@@ -275,7 +276,7 @@ export class DeckHistoryController {
     try {
       await this.api.nameVersion(versionId, { label });
       await this.refresh();
-      this.set({ status: `Named “${label}”.` });
+      this.set({ status: null }); // G500: the renamed row is the confirmation
       return true;
     } catch (error) {
       this.set({ error: message(error) });
@@ -300,7 +301,7 @@ export class DeckHistoryController {
     if (versionId == null) return;
     try {
       await this.api.duplicate(versionId);
-      this.set({ status: 'A copy of this version was made.' });
+      this.set({ status: HISTORY_COPY.copied });
     } catch (error) {
       this.set({ error: message(error) });
     }

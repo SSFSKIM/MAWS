@@ -167,8 +167,7 @@ function failure(theme: Theme, message: string, caption: string): Rendered {
   const h = 72;
   const body =
     `<rect x="0.5" y="0.5" width="${theme.width - 1}" height="${h - 1}" rx="6" fill="${theme.ground}" stroke="${theme.rule}"/>` +
-    text(16, 30, wrap(message, theme.body, theme.width - 32, 1).lines, { size: theme.body }) +
-    text(16, 52, VIEW_STATES.kept, { fill: theme.muted });
+    text(16, 41, wrap(message, theme.body, theme.width - 32, 1).lines, { size: theme.body }); // the word cut (G599): the reason alone, centred as a notice's
   return { svg: frame(theme, h, caption, `This view cannot be drawn: ${message}.`, body), warnings: [message] };
 }
 

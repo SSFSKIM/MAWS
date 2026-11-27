@@ -19,6 +19,9 @@
 // workbench's regions (C's a11y.ts), keeping the selection.
 // P4-A2 G2.4 (X35; G-R6 of docs/doperpowers/plans/2026-10-19-p4-a2-agent-experience.md): an agent's publish drawn as it
 // streams, from the tab's provisional layers, in the live world (World.tsx, ./provisional.tsx).
+// The word cut (docs/doperpowers/specs/2026-11-16-word-cut-design.md, M5 task 4): a refused board edit is said in a
+// person's words (G518, ./refusals.ts); the held banner is one line that opens the loader's reasons (G533, G534); the
+// toolbar keeps Add comment alone, the header's Comments opening the rail (G512); the pill's ↻ is a named glyph (N204).
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from 'react';
 import { DesignSystemScope, useDesignSystem, type DesignSystemRef } from '../../design-system/apply';
 import type { CommentAuthor, DocumentComments } from '../../document/editor/comments/surface';
@@ -38,6 +41,7 @@ import { historyAssets } from '../../slides/editor/history/HistoryPreview';
 import { useDeckHistoryController, useDeckHistorySnapshot, type DeckHistorySource } from '../../slides/editor/history/use-deck-history';
 import { Inspector } from '../../slides/editor/Inspector';
 import { TextStyleMenu } from '../../slides/editor/menus/TextStyle';
+import { ToolbarNotice, useToolbarNotice } from '../../slides/editor/notice';
 import { ThemePanel, type DeckThemeChoice } from '../../slides/editor/menus/Theme';
 import { useCanvasCss, useDeckFaces } from '../../slides/editor/page-styles';
 import { useDeckReveal, type DeckRevealProps } from '../../slides/editor/reveal'; // P4-B4
@@ -49,7 +53,8 @@ import { measure } from '../../slides/editor/transform/measure';
 import { BOARD_CSS } from '../board-css';
 import { designChanges } from '../history';
 import { placementAfter, writeBoardEntry } from '../model';
-import { BoardError, deleteBoard, duplicateBoard, insertBoard } from '../writers';
+import { deleteBoard, duplicateBoard, insertBoard } from '../writers';
+import { NamedGlyph } from '../../../renderer/src/ui/glyph';
 import { BoardInspector } from './BoardInspector';
 import { BoardList } from './BoardList';
 import { boardLabel, keepEqualBoards, readBoards, type BoardView, type DesignBoards } from './boards';
@@ -57,6 +62,7 @@ import { DESIGN_COPY as C, type BoardPreset } from './copy';
 import { DesignCommentButtons, DesignCommentFrame, designRailLabels, useDesignComments } from './comments';
 import { DesignHistoryBar, HistoryBoardList, historyBoards, HistoryWorld, useDesignFocus } from './history';
 import { boardElement } from './insert';
+import { boardRefusal, type BoardAct } from './refusals';
 import { MoveToBoard } from './MoveToBoard';
 import { BOARD_FIT_MAX, DesignView, unionRect, ZOOM_MAX, ZOOM_MIN, ZOOM_STEPS, type Rect } from './viewport';
 import { useViewFrame, useViewZoom, WithZoom } from './use-view';
@@ -111,7 +117,6 @@ export interface DesignWorkbenchProps extends DeckRevealProps /* P4-B4 */ {
   provisional?: ProvisionalLayers | null;
 }
 
-const NOTICE_MS = 6_000;
 const TEXT_KINDS: readonly NewKind[] = ['text', 'heading', 'bullets', 'numbers'];
 
 /** The boards, followed through the replica's updates (the same object while nothing they show changed). */
@@ -230,12 +235,10 @@ export function DesignWorkbench(props: DesignWorkbenchProps) {
   );
   const tokens = useDesignSystem(system).view?.tokens ?? null;
 
-  const [notice, setNotice] = useState('');
-  useEffect(() => {
-    if (!notice) return;
-    const timer = setTimeout(() => setNotice(''), NOTICE_MS);
-    return () => clearTimeout(timer);
-  }, [notice]);
+  // the deck's toolbar notice (slides/editor/notice.tsx): a short refusal from the shared parts keeps the model's reason
+  // on the notice (the word cut, G413); a board's own refusal is still its writer's words (G518 is the design's row)
+  const notice = useToolbarNotice();
+  const setNotice = notice.show;
   const [inspectorOpen, setInspectorOpen] = useState(!compact);
   const [boardsOpen, setBoardsOpen] = useState(!compact);
 
@@ -348,12 +351,13 @@ export function DesignWorkbench(props: DesignWorkbenchProps) {
   );
 
   // ---- board commands (each one gesture, one undo step)
-  const tryEdit = (write: (origin: object) => void): boolean => {
+  const tryEdit = (act: BoardAct, write: (origin: object) => void): boolean => {
     try {
       session.edit(write);
       return true;
     } catch (error) {
-      setNotice(error instanceof BoardError ? error.problems.join('; ') : error instanceof Error ? error.message : String(error));
+      const refused = boardRefusal(error, act); // G518: in a person's words, the model's kept where none fit
+      setNotice(refused.text, refused.why);
       return false;
     }
   };
@@ -365,17 +369,17 @@ export function DesignWorkbench(props: DesignWorkbenchProps) {
   const addBoard = (preset: BoardPreset) => {
     const id = mintSlideId(doc);
     const frame = { ...placementAfter(doc), w: preset.w, h: preset.h };
-    if (!tryEdit((origin) => insertBoard(doc, { id, frame, title: preset.label }, order.at(-1) ?? null, origin))) return;
+    if (!tryEdit('add', (origin) => insertBoard(doc, { id, frame, title: preset.label }, order.at(-1) ?? null, origin))) return;
     selectBoard(id);
     view.fitTo(frame, BOARD_FIT_MAX);
   };
   const duplicate = (boardId: string) => {
     let made: string | null = null;
-    if (!tryEdit((origin) => (made = duplicateBoard(doc, boardId, {}, origin).id)) || made === null) return;
+    if (!tryEdit('duplicate', (origin) => (made = duplicateBoard(doc, boardId, {}, origin).id)) || made === null) return;
     selectBoard(made);
   };
   const remove = (boardId: string) => {
-    tryEdit((origin) => deleteBoard(doc, boardId, origin));
+    tryEdit('delete', (origin) => deleteBoard(doc, boardId, origin));
     if (view.snapshot().frame === boardId) view.selectFrame(null);
   };
   // M6 final review: a rename commits only while the replica takes writes and the board, as the model holds it now, is
@@ -383,7 +387,7 @@ export function DesignWorkbench(props: DesignWorkbenchProps) {
   const rename = (boardId: string, title: string) => {
     const now = readBoards(doc).boards.find((b) => b.id === boardId);
     if (readOnly || !session.writable() || !now || now.held !== null || now.missing) return false;
-    return tryEdit(() => writeBoardEntry(doc, boardId, { title: title || undefined })); // inside the edit's transaction
+    return tryEdit('rename', () => writeBoardEntry(doc, boardId, { title: title || undefined })); // inside the edit's transaction
   };
 
   const editable = !readOnly && active !== null && active.held === null && !active.missing;
@@ -401,7 +405,7 @@ export function DesignWorkbench(props: DesignWorkbenchProps) {
       if (TEXT_KINDS.includes(kind)) session.editText(ids[0]!);
       else session.select(ids);
     },
-    [editable, active, session, doc],
+    [editable, active, session, doc, setNotice], // setNotice is the shared notice's stable `show` (slides/editor/notice.tsx)
   );
 
   const [regions] = useState(() => new RegionRing(BOARD_REGIONS)); // P4-B2 (D14)
@@ -462,7 +466,7 @@ export function DesignWorkbench(props: DesignWorkbenchProps) {
         <DesignHistoryBar preview={preview} controller={history} count={projected.count} onStep={step} onBack={() => history.close()} />
       ) : (
       <div className="deck-toolbar" role="toolbar" aria-label={C.toolbar}>
-        <button type="button" className="deck-button" aria-label={C.boards} aria-pressed={boardsOpen} title={C.showBoards} onClick={() => setBoardsOpen((open) => !open)}>
+        <button type="button" className="deck-button" aria-label={C.boards} aria-pressed={boardsOpen} title={C.boards /* G510: the same word open or closed */} onClick={() => setBoardsOpen((open) => !open)}>
           ☷
         </button>
         <span className="deck-toolbar-divider" aria-hidden />
@@ -484,29 +488,33 @@ export function DesignWorkbench(props: DesignWorkbenchProps) {
               onInsert={insert}
               uploadAsset={uploadAsset}
               onNotice={setNotice}
+              onStatus={notice.begin}
               inspectorOpen={inspectorOpen}
               onToggleInspector={() => setInspectorOpen((open) => !open)}
+              inspectorWord // no design row cuts it: G401 is the deck's
             >
               <TextStyleMenu session={session} slideId={active?.id ?? null} tokens={tokens} readOnly={!editable} onNotice={setNotice} />
             </ElementBar>
           )}
         </WithZoom>
-        <DesignCommentButtons api={commentsApi} view={view} railOpen={state.rail === 'comments'} onToggleRail={() => session.toggleRail('comments')} />
-        <span role="status" className="deck-notice" data-deck-notice>
-          {notice}
-        </span>
+        <DesignCommentButtons api={commentsApi} view={view} />
+        <ToolbarNotice notice={notice} />
         <span className="deck-toolbar-spacer" />
         <ZoomControls view={view} onFitAll={fitAll} onFitSelection={fitSelection} />
       </div>
       )}
       {!preview && active?.held && (
         <div role="status" className="deck-held-banner" data-held-banner>
-          <strong>{C.heldBanner}</strong>
-          <ul>
-            {active.held.map((reason) => (
-              <li key={reason}>{reason}</li>
-            ))}
-          </ul>
+          <details key={active.id} className="design-held-details">
+            <summary>
+              <strong>{C.heldBanner}</strong>
+            </summary>
+            <ul>
+              {active.held.map((reason) => (
+                <li key={reason}>{reason}</li>
+              ))}
+            </ul>
+          </details>
         </div>
       )}
       {!preview && active?.missing && (
@@ -554,9 +562,9 @@ export function DesignWorkbench(props: DesignWorkbenchProps) {
               {HISTORY_COPY.pill(historySnapshot.pill.count)}
             </button>
             {historySnapshot.pill.failed !== null && (
-              <button type="button" className="deck-button" aria-label={HISTORY_COPY.pillRetry} title={historySnapshot.pill.failed} onClick={() => void history?.recount()}>
-                ↻
-              </button>
+              <NamedGlyph label={HISTORY_COPY.pillRetry} className="deck-button" onClick={() => void history?.recount()}>
+                <span aria-hidden>↻</span>
+              </NamedGlyph>
             )}
             <button type="button" className="deck-button" aria-label={HISTORY_COPY.pillDismiss} onClick={() => history?.dismissPill()}>
               ×

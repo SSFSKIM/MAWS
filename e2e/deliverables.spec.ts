@@ -567,11 +567,12 @@ test('the artifact replay: two artifact rows and a refusal, the list and screens
       await expect(viewer).toHaveAttribute('data-version', '1');
       const frame = await frameAt(s.page, await pageUrlOf(s.page, deliverableId, 1));
       await expect(frame.locator('#heading')).toHaveText('HELLO_E2 v1');
-      await expect(viewer.locator('[data-console-chip]')).toHaveText('1 console error');
-      await expect(v1Row.locator('[data-console-chip]')).toHaveText('1 console error');
+      // the word cut (T571): the chip reads the count and its level, on the viewer's bar and the transcript's row alike
+      await expect(viewer.locator('[data-console-chip]')).toHaveText('1 error');
+      await expect(v1Row.locator('[data-console-chip]')).toHaveText('1 error');
       await expect(artifactRows.nth(1).locator('[data-console-chip]')).toHaveCount(0);
       await s.page.waitForTimeout(1_000);
-      await expect(viewer.locator('[data-console-chip]')).toHaveText('1 console error');
+      await expect(viewer.locator('[data-console-chip]')).toHaveText('1 error');
       await artifactRows.nth(2).scrollIntoViewIfNeeded();
       await shoot(s, 'artifact-row');
 
@@ -1741,7 +1742,7 @@ test('comment mode: Escape ends picking and nothing else, picking highlights the
     const viewer = viewerOf(s.panel);
     const frame = await frameAt(s.page, await pageUrlOf(s.page, record.id));
     await expect(frame.locator('#hero')).toHaveText('Sales overview');
-    await expect(viewer.locator('[data-console-chip]')).toHaveText('1 console error');
+    await expect(viewer.locator('[data-console-chip]')).toHaveText('1 error');
     const comment = s.panel.locator('[data-editor-header]').getByRole('button', { name: 'Comment', exact: true });
     const hint = viewer.locator('[data-picking]');
     const tools = surfaceRow(s.page);
@@ -1750,7 +1751,7 @@ test('comment mode: Escape ends picking and nothing else, picking highlights the
     // Escape while picking ends picking; the viewer, the panel's tab and the session's composer stay as they were
     await comment.click();
     await expect(comment).toHaveAttribute('aria-pressed', 'true');
-    await expect(hint).toHaveText('Click an element to comment on it · Esc cancels');
+    await expect(hint).toHaveText('Click an element · Esc cancels'); // the word cut (T575)
     await s.page.keyboard.press('Escape');
     await expect(hint).toHaveCount(0);
     await expect(comment).toHaveAttribute('aria-pressed', 'false');

@@ -11,7 +11,9 @@
 // but the replica keeps it durably only once the host acknowledges it, so the closeGuard (./close-guard.ts) reads the
 // tab's handle and keeps a showing whose edits are unacknowledged until they save or the owner discards them
 // (whole-branch review F-I1). Hidden (`visible` false), the body reports nothing shown and offers no Mark-up surface.
-import { useEffect, useRef, useSyncExternalStore } from 'react';
+// The word cut (docs/doperpowers/specs/2026-11-16-word-cut-design.md, M5 task 4; G558): the three actions are icons, as
+// other editors' headers draw theirs, each label its name and tooltip; the owner saw them so.
+import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { create } from 'zustand';
 import type { ArtifactHost, DocumentHandle, DocumentState } from '@artifacts/host';
 import { DesignSystemPage } from '@artifacts/design-system/page/DesignSystemPage';
@@ -20,8 +22,10 @@ import { usePageState } from '@artifacts/design-system/page/use-system';
 import { useRegionMarkupSurface } from '../../markup/surface';
 import { useEditorHost, useEditorHostScope, type EditorHostScope, type SavedState } from '../../panel/editor-host';
 import { toast } from '../../stores/notices';
+import { QUIET_MS } from '../../ui/spinner';
 import { allowSystemClose } from './close-guard';
 import { DESIGN_SYSTEM_COPY } from './copy';
+import { CheckLawIcon, DefaultStarIcon, DeleteBinIcon } from './icons';
 
 // "Check against law" asks the tab's page to bring its check into view: a serial per tab, outside any component.
 const useCheckRequests = create<{ serials: Readonly<Record<string, number>> }>()(() => ({ serials: {} }));
@@ -35,6 +39,23 @@ export function savedStateOf(state: DocumentState): SavedState {
   if (state.readOnly) return 'readonly';
   if (state.phase !== 'live') return 'reconnecting';
   return state.unsaved > 0 ? 'saving' : 'saved';
+}
+
+// The header draws "Saving…" at once (panel/SavedStatus.tsx), so the body holds the ring back as the document's and the
+// deck's tab-states do: edits acknowledged within the half second leave the header at "All changes saved". The edits
+// are said at once all the same (the registration's `pendingEdits`), so the replace rule keeps the tab meanwhile.
+function useHeldSaving(saved: SavedState): SavedState {
+  const waiting = saved === 'saving';
+  const [late, setLate] = useState(false);
+  useEffect(() => {
+    if (!waiting) return;
+    const timer = setTimeout(() => setLate(true), QUIET_MS);
+    return () => {
+      clearTimeout(timer);
+      setLate(false);
+    };
+  }, [waiting]);
+  return waiting && !late ? 'saved' : saved;
 }
 
 function exportForClaude(host: Pick<ArtifactHost, 'export'>, artifactId: string): void {
@@ -73,20 +94,23 @@ export function DesignSystemBody(props: DesignSystemBodyProps) {
   const scope = useEditorHostScope();
   const key = keyOf(scope, artifactId);
   const reveal = useCheckRequests((s) => s.serials[key] ?? 0);
-  const saved = useSyncExternalStore(
+  const replica = useSyncExternalStore(
     (listener) => handle.subscribe(listener),
     () => savedStateOf(handle.state()),
   );
+  const saved = useHeldSaving(replica);
   const name = usePageState(handle.doc).system.meta?.name ?? null;
   const shownTitle = title ?? name ?? DESIGN_SYSTEM_COPY.untitled;
 
   useEditorHost(scope, {
     title: shownTitle,
     saved,
+    pendingEdits: replica === 'saving',
     actions: [
-      { id: 'design-system.check', label: DESIGN_SYSTEM_COPY.check, onSelect: () => requestCheck(key) },
-      { id: 'design-system.set-default', label: DESIGN_SYSTEM_COPY.setDefault, onSelect: () => onSetDefault?.(), disabled: !onSetDefault || isDefault },
-      ...(onDelete ? [{ id: 'design-system.delete', label: DESIGN_SYSTEM_COPY.deleteAction, onSelect: () => onDelete() }] : []),
+      // G558: the head's icons' tooltips open below, off the window's toolbar above the head (the pair review)
+      { id: 'design-system.check', label: DESIGN_SYSTEM_COPY.check, icon: CheckLawIcon, onSelect: () => requestCheck(key), tipSide: 'bottom' },
+      { id: 'design-system.set-default', label: DESIGN_SYSTEM_COPY.setDefault, icon: DefaultStarIcon, onSelect: () => onSetDefault?.(), disabled: !onSetDefault, unavailable: isDefault ? DESIGN_SYSTEM_COPY.alreadyDefault : null, tipSide: 'bottom' }, // G558: the default's star keeps the keyboard and says why
+      ...(onDelete ? [{ id: 'design-system.delete', label: DESIGN_SYSTEM_COPY.deleteAction, icon: DeleteBinIcon, onSelect: () => onDelete(), tipSide: 'bottom' as const }] : []),
     ],
     exports: [{ id: 'design-system.export-claude', label: DESIGN_SYSTEM_COPY.exportClaude, onSelect: () => exportForClaude(host, artifactId) }],
     closeGuard: () => allowSystemClose(handle, shownTitle, ended), // the tab's handle and showing (L's createState), never this body's state

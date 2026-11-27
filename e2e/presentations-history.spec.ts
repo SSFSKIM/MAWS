@@ -206,7 +206,9 @@ test('history per slide: the rail, a version’s changes on the stage and filmst
     await expect(filmstrip.locator('[data-slide-thumb]')).toHaveCount(4); // the deleted slide at its earlier place
     expect(await filmstrip.locator('[data-slide-thumb]').evaluateAll((els) => els.map((e) => e.getAttribute('data-slide-thumb')))).toEqual(['s1', 's2', 's3', 's4']);
     // "N changes": the deck's cover, s1 removed, s4 added, s3's element cut, s2's title and its notes
-    await expect(bar.locator('[data-history-count]')).toContainText('of 6 changes');
+    // the word cut (G489): the step reads "N / 6", its name "Change N of 6"
+    await expect(bar.locator('[data-history-count]')).toHaveText(/^\d+ \/ 6$/);
+    await expect(bar.locator('[data-history-count]').getByRole('img', { name: /^Change \d+ of 6$/ })).toBeVisible();
     await expect(tab.locator('.deck-history-deck')).toHaveCount(0);
 
     // ↓ from the first slide: the stage moves to each change; s2's title outlined, its notes' diff below
@@ -348,8 +350,8 @@ test('See N new changes: an agent session’s write between two views is offered
   // the next showing offers the pill with the count, and opening it shows the comparison since the last view
   tab = await openFromLibrary(page, 'Pill lab', id);
   const pill = tab.locator('.deck-history-pill');
-  await expect(pill.getByRole('button', { name: 'See 2 new changes' })).toBeVisible();
-  await pill.getByRole('button', { name: 'See 2 new changes' }).click();
+  await expect(pill.getByRole('button', { name: '2 new changes', exact: true })).toBeVisible(); // the word cut (N201)
+  await pill.getByRole('button', { name: '2 new changes', exact: true }).click();
   const bar = tab.getByRole('toolbar', { name: 'Version preview' });
   await expect(bar.locator('.deck-history-heading')).toHaveText('Changes since you last looked');
   await expect(bar.locator('[data-history-count]')).toHaveText('2 changes');

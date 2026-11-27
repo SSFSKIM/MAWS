@@ -83,7 +83,7 @@ describe('comments on a deck’s elements (D9)', () => {
   it('Comment writes a thread on the one selected element and hands it to the surface with the slide’s number and title', () => {
     const { doc, session, surface: s, toolbar } = mount();
     const button = within(toolbar).getByRole('button', { name: 'Add comment' });
-    expect(button).toHaveProperty('disabled', true);
+    expect(button.getAttribute('aria-disabled')).toBe('true'); // the word cut (G403): greyed, the reason on it
     act(() => session.select(['body']));
     fireEvent.click(button);
     const [thread] = listThreads(doc);
@@ -207,7 +207,7 @@ describe('comments on a deck’s elements (D9)', () => {
     expect(item(title!)).toBeNull();
     fireEvent.click(within(rail).getByRole('button', { name: 'Show deleted-target comments' }));
     expect(item(title!).hasAttribute('data-orphan')).toBe(true);
-    expect(item(title!).textContent).toContain('The commented element was deleted.');
+    expect(item(title!).textContent).toContain('Element deleted');
     expect(item(title!).textContent).toContain('Plan');
     fireEvent.click(within(item(title!)).getByRole('button', { name: 'Resolve' }));
     await settle();

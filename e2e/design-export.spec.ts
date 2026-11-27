@@ -370,12 +370,14 @@ test('the editor’s Export menu and sheet: the selected board, the poster at th
   await test.step('the poster: the sheet states the scale that fits and its size; agreed, the whole poster at that scale', async () => {
     await selectBoard('poster');
     await pick('PNG (selected board)');
-    const sheet = page.getByRole('dialog', { name: 'Export “Poster” at 91.02%?' });
+    // the word cut (G556, T632): the scale in whole percent rounded down, the body one line; the exact scale and the
+    // size it gives are the export's, read from the saved file below
+    const sheet = page.getByRole('dialog', { name: 'Export “Poster” at 91%?' });
     await expect(sheet).toBeVisible();
-    await expect(sheet).toContainText('“Poster” is 1080 × 9000 px. A PNG can be at most 8192 px on a side, so MAWS exports the whole board at 91.02% (983 × 8192 px); nothing is cropped.');
+    await expect(sheet).toContainText('Too large for a PNG at full size.');
     mkdirSync(test.info().outputDir, { recursive: true });
     await page.screenshot({ path: join(test.info().outputDir, 'design-export-sheet.png') }); // the sheet, for the owner's sitting
-    await sheet.getByRole('button', { name: 'Export at 91.02%' }).click();
+    await sheet.getByRole('button', { name: 'Export at 91%' }).click();
     await expectCorners(await appears('Export lab.png'), 983, 8192, 'the menu’s poster');
   });
 

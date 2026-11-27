@@ -3,6 +3,7 @@
 // draws is given the editor's reach (record, discard, resolve, reopen, locate); the threads rail lists open and resolved
 // threads, orphans marked, and resolves, reopens and shows a thread, switching tab when it lives in another.
 import type { Editor, JSONContent } from '@tiptap/core';
+import { accessibleDescription } from '../../../../renderer/src/test-support/accessible-text';
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { Actor } from '@shared/artifacts/actor';
@@ -66,9 +67,9 @@ const quiet = () => act(() => new Promise<void>((resolve) => setTimeout(resolve,
 describe('commenting a selection', () => {
   it('writes the thread, then the mark, and hands the passage to the surface; the passage is drawn active; nothing to undo', async () => {
     const { editor, handle, opened } = await mount(content());
-    expect(commentButton().disabled).toBe(true); // no selection
+    expect(commentButton().getAttribute('aria-disabled')).toBe('true'); // no selection (the word cut: a greyed glyph keeps the keyboard)
     act(() => void select(editor(), 'ships quarterly'));
-    expect(commentButton().disabled).toBe(false);
+    expect(commentButton().hasAttribute('aria-disabled')).toBe(false);
     act(() => fireEvent.click(commentButton()));
 
     expect(opened).toHaveLength(1);
@@ -137,6 +138,20 @@ describe('the overlay’s reach', () => {
   });
 });
 
+// A click as ProseMirror hands it to its plugins: at the text's position, its target the element drawn there (happy-dom
+// has no layout, so ProseMirror's own mouse handling cannot place it).
+function clickOn(editor: Editor, needle: string): boolean {
+  const pos = findPos(editor, needle) + 1;
+  const { node } = editor.view.domAtPos(pos);
+  const target = node.nodeType === Node.TEXT_NODE ? node.parentElement! : (node as Element);
+  let event: MouseEvent | null = null;
+  target.addEventListener('click', (e) => void (event = e as MouseEvent), { once: true });
+  target.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+  let handled = false;
+  act(() => void (handled = editor.view.someProp('handleClick', (handle) => handle(editor.view, pos, event!)) ?? false));
+  return handled;
+}
+
 describe('the threads rail', () => {
   async function seeded() {
     const m = await mount(content());
@@ -168,10 +183,10 @@ describe('the threads rail', () => {
     await quiet();
     expect(within(rail()).getAllByRole('group').map((item) => item.dataset.thread)).toEqual([first]);
     const before = listThreads(handle.doc);
-    const reveal = within(rail()).getByRole('button', { name: 'Show deleted-target comments' });
-    expect(reveal.getAttribute('aria-pressed')).toBe('false');
+    const reveal = within(rail()).getByRole('button', { name: 'Deleted (2)' }); // the word cut (G395)
+    expect(reveal.getAttribute('aria-expanded')).toBe('false');
     act(() => fireEvent.click(reveal));
-    expect(reveal.getAttribute('aria-pressed')).toBe('true');
+    expect(reveal.getAttribute('aria-expanded')).toBe('true');
     expect(listThreads(handle.doc)).toEqual(before);
     const items = within(rail()).getAllByRole('group');
     expect(items.map((item) => item.dataset.thread)).toEqual([first, second, 'zz000001']);
@@ -179,7 +194,7 @@ describe('the threads rail', () => {
     expect(items[0]!.textContent).toContain('Should this be monthly?');
     expect(items[0]!.textContent).toContain('Changed to monthly.');
     expect(items[1]!.dataset.orphan).toBe('');
-    expect(items[1]!.textContent).toContain('passage was removed');
+    expect(accessibleDescription(within(items[1]!).getByRole('button', { name: /^Show passage/ }))).toBe('The commented passage was removed.'); // the word cut (G388)
 
     act(() => fireEvent.click(within(items[0]!).getByRole('button', { name: 'Resolve' })));
     await quiet();
@@ -205,17 +220,38 @@ describe('the threads rail', () => {
     act(() => fireEvent.click(within(toolbar()).getByRole('button', { name: /^Comments/ })));
     await quiet();
 
-    act(() => fireEvent.click(within(rail()).getByRole('button', { name: 'Show deleted-target comments' })));
+    act(() => fireEvent.click(within(rail()).getByRole('button', { name: /^Deleted \(/ })));
     act(() => fireEvent.click(within(rail()).getByRole('button', { name: 'Show passage: Appendix' })));
     await until(() => screen.getByRole('tab', { name: 'Appendix' }).getAttribute('aria-selected') === 'true', 'the other tab');
+  });
+
+  // The medium review: a passage deleted (or restored) by someone else moves its thread between the open threads and the
+  // Deleted fold; the card moves in place, one list, so it is not remounted and keeps the keyboard.
+  it('keeps a card mounted, with the keyboard, when its passage is deleted while Deleted is open', async () => {
+    const { editor, first } = await seeded();
+    act(() => fireEvent.click(within(toolbar()).getByRole('button', { name: /^Comments/ })));
+    await quiet();
+    act(() => fireEvent.click(within(rail()).getByRole('button', { name: /^Deleted \(/ })));
+    const card = rail().querySelector<HTMLElement>(`[data-thread="${first}"]`)!;
+    expect(card.dataset.orphan).toBeUndefined();
+    act(() => card.focus());
+    act(() => {
+      const at = findPos(editor(), 'ships quarterly');
+      editor().view.dispatch(editor().state.tr.delete(at, at + 'ships quarterly'.length));
+    });
+    await quiet();
+    expect(rail().querySelector(`[data-thread="${first}"]`)).toBe(card);
+    expect(card.dataset.orphan).toBe('');
+    expect(document.activeElement).toBe(card);
   });
 
   // P4-B1 (D9, the prior art's Z4): the rail is the All comments panel, its cards X36's; it filters by status, by tab and
   // by a search over the messages, the quotes and the authors' names, and each card's reply draft is the panel's, so a
   // card a filter hides keeps it.
   it('filters by status, scope and a search, each card keeping its draft (P4-B1, Z4)', async () => {
-    const { handle, first, second } = await seeded();
+    const { handle, first, second, editor } = await seeded();
     act(() => void resolve(handle.doc, second, { kind: 'human' }, Date.now() + 2));
+    clickOn(editor(), 'quarterly'); // the first thread active: its card holds the reply field (the word cut, G385)
     act(() => fireEvent.click(within(toolbar()).getByRole('button', { name: /^Comments/ })));
     await quiet();
     expect(within(rail()).getByRole('heading', { name: 'All comments' })).toBeTruthy();
@@ -224,8 +260,10 @@ describe('the threads rail', () => {
     const search = (value: string) => act(() => fireEvent.change(within(rail()).getByRole('searchbox', { name: 'Search comments' }), { target: { value } }));
     const field = (id: string) => within(rail().querySelector<HTMLElement>(`[data-thread="${id}"]`)!).getByRole('textbox', { name: 'Reply' }) as HTMLTextAreaElement;
     expect(ids()).toEqual([first]);
-    act(() => fireEvent.click(within(rail()).getByRole('button', { name: 'Show deleted-target comments' })));
-    expect(ids()).toEqual([first, 'zz000001', second]); // All: open first, then the resolved section
+    act(() => fireEvent.click(within(rail()).getByRole('button', { name: /^Deleted \(/ })));
+    // All: the open thread, then the Deleted fold's open thread under it, then the Resolved section, which lists the
+    // resolved thread whose passage is gone while Deleted is open (the pair review's fix wave, G395)
+    expect(ids()).toEqual([first, 'zz000001', second]);
     expect(within(rail()).getByRole('radio', { name: 'All' })).toHaveProperty('checked', true);
     expect(within(rail()).getByRole('radio', { name: 'All tabs' })).toHaveProperty('checked', true);
     act(() => fireEvent.change(field(first), { target: { value: 'Draft kept' } }));
@@ -248,12 +286,12 @@ describe('the threads rail', () => {
     expect(ids()).toEqual(['zz000001']);
     search('claude'); // an author: the agent replied to the first and wrote the third
     expect(ids()).toEqual([first, 'zz000001']);
-    search('owners'); // a resolved thread's quote: listed under Resolved, no note above it
+    search('owners'); // a resolved thread's quote, its passage gone: listed under Resolved, no note above it
     expect(ids()).toEqual([second]);
     expect(rail().querySelector('.doc-rail-empty')).toBeNull();
     search('nothing like it');
     expect(ids()).toEqual([]);
-    expect(rail().textContent).toContain('No comments match');
+    expect(rail().querySelector('.doc-rail-empty')?.textContent).toBe('No matches'); // the word cut (G398)
     search('');
     expect(ids()).toEqual([first, 'zz000001', second]);
     expect(field(first).value).toBe('Draft kept');
@@ -261,9 +299,10 @@ describe('the threads rail', () => {
 
   // P4-B1 (X36: a hidden card keeps its draft): the drafts are the editor's, not the panel's, so closing it loses none
   it('keeps a reply being written across closing and reopening the panel (P4-B1, X36)', async () => {
-    const { first } = await seeded();
+    const { first, editor } = await seeded();
     const toggle = () => within(toolbar()).getByRole('button', { name: /^Comments/ });
     const field = () => within(rail().querySelector<HTMLElement>(`[data-thread="${first}"]`)!).getByRole('textbox', { name: 'Reply' }) as HTMLTextAreaElement;
+    clickOn(editor(), 'quarterly'); // the first thread active: its card holds the reply field (the word cut, G385)
     act(() => fireEvent.click(toggle()));
     await quiet();
     act(() => fireEvent.change(field(), { target: { value: 'Not sent yet' } }));
@@ -278,7 +317,7 @@ describe('the threads rail', () => {
     const { first } = await seeded();
     act(() => fireEvent.click(within(toolbar()).getByRole('button', { name: /^Comments/ })));
     await quiet();
-    act(() => fireEvent.click(within(rail()).getByRole('button', { name: 'Show deleted-target comments' })));
+    act(() => fireEvent.click(within(rail()).getByRole('button', { name: /^Deleted \(/ })));
     const cards = () => within(rail()).getAllByRole('group');
     cards()[0]!.focus();
     expect(cards()[0]!.dataset.thread).toBe(first);
@@ -309,9 +348,9 @@ describe('a reply in the rail', () => {
 
     const field = within(item).getByRole('textbox', { name: 'Reply' }) as HTMLTextAreaElement;
     const send = within(item).getByRole('button', { name: 'Reply' }) as HTMLButtonElement;
-    expect(send.disabled).toBe(true);
+    expect(send.getAttribute('aria-disabled')).toBe('true'); // the word cut (G385): a greyed glyph keeps the keyboard
     act(() => fireEvent.change(field, { target: { value: '  ' } }));
-    expect(send.disabled).toBe(true);
+    expect(send.getAttribute('aria-disabled')).toBe('true');
     act(() => fireEvent.change(field, { target: { value: 'Thanks, monthly works.' } }));
     act(() => fireEvent.keyDown(field, { key: 'Enter' }));
     expect(getThread(handle.doc, id)!.messages.at(-1)).toMatchObject({ by: { kind: 'human' }, body: 'Thanks, monthly works.' });
@@ -346,19 +385,6 @@ describe('a reply in the rail', () => {
 // selected in the rail, which opens on it; where passages overlap the innermost (the shortest at the click) is taken;
 // a click on text no open thread covers draws none active.
 describe('a click on a passage', () => {
-  // A click as ProseMirror hands it to its plugins: at the text's position, its target the element drawn there (happy-dom
-  // has no layout, so ProseMirror's own mouse handling cannot place it).
-  function clickOn(editor: Editor, needle: string): boolean {
-    const pos = findPos(editor, needle) + 1;
-    const { node } = editor.view.domAtPos(pos);
-    const target = node.nodeType === Node.TEXT_NODE ? node.parentElement! : (node as Element);
-    let event: MouseEvent | null = null;
-    target.addEventListener('click', (e) => void (event = e as MouseEvent), { once: true });
-    target.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    let handled = false;
-    act(() => void (handled = editor.view.someProp('handleClick', (handle) => handle(editor.view, pos, event!)) ?? false));
-    return handled;
-  }
   const active = (editor: Editor) => [...editor.view.dom.querySelectorAll('.comment-active')].map((span) => span.textContent).join('') || null;
   const selectedInRail = () => within(rail()).queryAllByRole('group').filter((item) => item.getAttribute('aria-current') === 'true').map((item) => item.dataset.thread);
 
@@ -470,5 +496,135 @@ describe('the commented passage’s tab title', () => {
     act(() => void select(editor(), 'Owners'));
     act(() => fireEvent.click(commentButton()));
     expect(opened[1]!.tabTitle).toBe('Main');
+  });
+});
+
+// The word cut in the All comments panel (docs/doperpowers/specs/2026-11-16-word-cut-design.md, M5 task 2; G391, G393 to
+// G398): its × tooltip is Close; This tab / All tabs only for a document of two tabs or more; the search's placeholder
+// Search; the deleted-text toggle "Deleted (N)", what it holds in its tooltip; the empty lists in few words.
+describe('the word cut in the comments panel', () => {
+  it('draws no scope filter for a one-tab document, and the short words of its controls and empty lists', async () => {
+    const { editor, handle } = await mount(content());
+    act(() => void select(editor(), 'ships quarterly'));
+    act(() => fireEvent.click(commentButton()));
+    const [written] = listThreads(handle.doc);
+    reply(handle.doc, written!.id, { id: 'r1', by: SESSION, at: 2, body: 'Monthly?' });
+    act(() => fireEvent.click(within(toolbar()).getByRole('button', { name: /^Comments/ })));
+    await quiet();
+    expect(within(rail()).getByRole('button', { name: 'Close comments' }).getAttribute('title')).toBe('Close');
+    expect(within(rail()).queryByRole('radiogroup', { name: 'Scope' })).toBeNull();
+    expect(within(rail()).queryByRole('radio', { name: 'This tab' })).toBeNull();
+    expect(within(rail()).getByRole('searchbox', { name: 'Search comments' }).getAttribute('placeholder')).toBe('Search');
+    act(() => fireEvent.click(within(rail()).getByRole('radio', { name: 'Resolved' })));
+    expect(rail().querySelector('.doc-rail-empty')?.textContent).toBe('No resolved comments');
+    act(() => fireEvent.click(within(rail()).getByRole('radio', { name: 'Open' })));
+    act(() => void resolve(handle.doc, written!.id, { kind: 'human' }, Date.now()));
+    await quiet();
+    expect(rail().querySelector('.doc-rail-empty')?.textContent).toBe('No open comments. Select text and choose Add comment.');
+
+    act(() => void addTab(handle.doc, { title: 'Appendix', id: 'tab2', body: schemaFor().nodeFromJSON(doc(para('a1', 'Appendix text.'))) }));
+    await quiet();
+    expect(within(rail()).getByRole('radio', { name: 'This tab' })).toBeTruthy();
+  });
+
+  it('reveals comments on deleted text by a toggle that counts them and says what it holds in its tooltip', async () => {
+    const { handle } = await mount(content());
+    addThread(handle.doc, { threadId: 'zz000001', tabId: TAB, blockId: 'p1', quote: 'Gone', anchor: { start: null, end: null, block: null }, by: SESSION, at: Date.now() });
+    act(() => fireEvent.click(within(toolbar()).getByRole('button', { name: /^Comments/ })));
+    await quiet();
+    const toggle = within(rail()).getByRole('button', { name: 'Deleted (1)' });
+    expect(toggle.getAttribute('aria-expanded')).toBe('false');
+    expect(accessibleDescription(toggle)).toBe('Comments on deleted text');
+    act(() => fireEvent.click(toggle));
+    expect(toggle.getAttribute('aria-expanded')).toBe('true');
+    expect(within(rail()).getAllByRole('group').map((card) => card.dataset.thread)).toEqual(['zz000001']);
+  });
+
+  // The pair review's fix wave (G395, G390): "Deleted (N)" is a disclosure, never a heading over cards not its own. It
+  // follows the open threads and comes before Resolved; opened, it lists the deleted threads under it, in the panel's
+  // keyboard order; its chevron turns with its expanded state, as Resolved's does.
+  it('draws Deleted (N) as a disclosure after the open threads and before Resolved, its own cards under it', async () => {
+    const { editor, handle } = await mount(content());
+    act(() => void select(editor(), 'ships quarterly'));
+    act(() => fireEvent.click(commentButton()));
+    act(() => void select(editor(), 'Owners'));
+    act(() => fireEvent.click(commentButton()));
+    const [open, settled] = listThreads(handle.doc);
+    reply(handle.doc, open!.id, { id: 'r1', by: SESSION, at: 2, body: 'Monthly?' });
+    reply(handle.doc, settled!.id, { id: 'r2', by: SESSION, at: 3, body: 'Done.' });
+    act(() => void resolve(handle.doc, settled!.id, { kind: 'human' }, Date.now()));
+    addThread(handle.doc, { threadId: 'zz000001', tabId: TAB, blockId: 'p1', quote: 'Gone', anchor: { start: null, end: null, block: null }, by: SESSION, at: Date.now() });
+    act(() => fireEvent.click(within(toolbar()).getByRole('button', { name: /^Comments/ })));
+    await quiet();
+    const toggle = within(rail()).getByRole('button', { name: 'Deleted (1)' });
+    const resolvedToggle = within(rail()).getByRole('button', { name: 'Resolved (1)' });
+    const cardOf = (id: string) => rail().querySelector<HTMLElement>(`[data-thread="${id}"]`);
+    const follows = (a: Node, b: Node) => Boolean(a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING);
+    expect(follows(cardOf(open!.id)!, toggle)).toBe(true); // after the open card, not a heading over it
+    expect(follows(toggle, resolvedToggle)).toBe(true);
+    for (const disclosure of [toggle, resolvedToggle]) expect(disclosure.querySelector(':scope > svg[aria-hidden="true"]')).not.toBeNull();
+    expect(cardOf('zz000001')).toBeNull();
+
+    act(() => fireEvent.click(toggle));
+    expect(toggle.getAttribute('aria-expanded')).toBe('true');
+    const deleted = cardOf('zz000001')!;
+    expect(follows(toggle, deleted) && follows(deleted, resolvedToggle)).toBe(true); // under its own toggle
+    expect(deleted.parentElement).toBe(toggle.parentElement); // one list with the open cards, so a card moves in place
+    expect(within(rail()).getAllByRole('group').map((card) => [card.dataset.thread, card.getAttribute('aria-label')!.replace(/^.*\((\d+ of \d+)\)$/, '$1')])).toEqual([
+      [open!.id, '1 of 3'],
+      ['zz000001', '2 of 3'],
+      [settled!.id, '3 of 3'],
+    ]);
+  });
+
+  // The medium review: "No open comments" only where no open thread is listed, the open Deleted fold's included.
+  it('says there are no open comments only while the Deleted fold lists none of them', async () => {
+    const { handle } = await mount(content());
+    addThread(handle.doc, { threadId: 'zz000001', tabId: TAB, blockId: 'p1', quote: 'Gone', anchor: { start: null, end: null, block: null }, by: SESSION, at: Date.now() });
+    act(() => fireEvent.click(within(toolbar()).getByRole('button', { name: /^Comments/ })));
+    await quiet();
+    expect(rail().querySelector('.doc-rail-empty')?.textContent).toBe('No open comments. Select text and choose Add comment.');
+    act(() => fireEvent.click(within(rail()).getByRole('button', { name: 'Deleted (1)' })));
+    expect(rail().querySelector('.doc-rail-empty')).toBeNull();
+  });
+
+  // The second medium review: under All, Deleted (N) counts the resolved threads on deleted text, which Resolved lists;
+  // opening it opens Resolved too, so what it counts is shown even where Resolved had been folded.
+  it('opens Resolved with Deleted when the deleted threads it counts are resolved ones', async () => {
+    const { editor, handle } = await mount(content());
+    act(() => void select(editor(), 'ships quarterly'));
+    act(() => fireEvent.click(commentButton()));
+    const [live] = listThreads(handle.doc);
+    reply(handle.doc, live!.id, { id: 'r1', by: SESSION, at: 2, body: 'Monthly?' });
+    addThread(handle.doc, { threadId: 'zz000002', tabId: TAB, blockId: 'p1', quote: 'Also gone', anchor: { start: null, end: null, block: null }, by: SESSION, at: Date.now() + 1 });
+    act(() => void resolve(handle.doc, live!.id, { kind: 'human' }, Date.now()));
+    act(() => void resolve(handle.doc, 'zz000002', { kind: 'human' }, Date.now()));
+    act(() => fireEvent.click(within(toolbar()).getByRole('button', { name: /^Comments/ })));
+    await quiet();
+    act(() => fireEvent.click(within(rail()).getByRole('button', { name: 'Resolved (1)' })));
+    act(() => fireEvent.change(within(rail()).getByRole('searchbox', { name: 'Search comments' }), { target: { value: 'Also gone' } }));
+    act(() => fireEvent.click(within(rail()).getByRole('button', { name: 'Deleted (1)' })));
+    expect(within(rail()).getAllByRole('group').map((card) => card.dataset.thread)).toEqual(['zz000002']);
+  });
+
+  it('counts in Deleted (N) the deleted threads the status filter and the search let through, and hides it at none', async () => {
+    const { editor, handle } = await mount(content());
+    act(() => void select(editor(), 'ships quarterly'));
+    act(() => fireEvent.click(commentButton()));
+    const [live] = listThreads(handle.doc);
+    reply(handle.doc, live!.id, { id: 'r1', by: SESSION, at: 2, body: 'Monthly?' });
+    addThread(handle.doc, { threadId: 'zz000001', tabId: TAB, blockId: 'p1', quote: 'Gone', anchor: { start: null, end: null, block: null }, by: SESSION, at: Date.now() });
+    addThread(handle.doc, { threadId: 'zz000002', tabId: TAB, blockId: 'p1', quote: 'Also gone', anchor: { start: null, end: null, block: null }, by: SESSION, at: Date.now() + 1 });
+    act(() => void resolve(handle.doc, 'zz000002', { kind: 'human' }, Date.now()));
+    act(() => fireEvent.click(within(toolbar()).getByRole('button', { name: /^Comments/ })));
+    await quiet();
+    expect(within(rail()).getByRole('button', { name: 'Deleted (2)' })).toBeTruthy();
+    act(() => fireEvent.click(within(rail()).getByRole('radio', { name: 'Open' })));
+    act(() => fireEvent.click(within(rail()).getByRole('button', { name: 'Deleted (1)' })));
+    expect(within(rail()).getAllByRole('group').map((card) => card.dataset.thread)).toEqual([live!.id, 'zz000001']);
+    act(() => fireEvent.click(within(rail()).getByRole('radio', { name: 'Resolved' })));
+    expect(within(rail()).getAllByRole('group').map((card) => card.dataset.thread)).toEqual(['zz000002']);
+    act(() => fireEvent.change(within(rail()).getByRole('searchbox', { name: 'Search comments' }), { target: { value: 'nothing like it' } }));
+    expect(within(rail()).queryByRole('button', { name: /^Deleted/ })).toBeNull();
   });
 });

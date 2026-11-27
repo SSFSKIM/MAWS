@@ -19,6 +19,20 @@ import { queryIdentity } from '../query';
 import { notOfferedPause, type LiveDatasets, type LiveQueryStatus, type LiveSnapshot } from './live';
 import { SourceSheet } from './SourceSheet';
 import { SourceSheetState } from './sheet';
+import { accessibleDescription, accessibleText } from '../../../renderer/src/test-support/accessible-text';
+
+// The word cut (G621): a newer fetch reads "Newer rows at <hh:mm>", the full UTC time the clock's tooltip and description
+// on a word that takes the keyboard, then Show latest.
+function expectNewer(at: number): void {
+  const note = block().querySelector<HTMLElement>('[data-live-newer]')!;
+  const clock = note.querySelector<HTMLElement>('[data-live-newer-at]')!;
+  expect(accessibleText(note)).toBe(`Newer rows at ${utcTime(at).slice(11, 16)} Show latest`);
+  expect(clock.tabIndex).toBe(0);
+  expect(accessibleDescription(clock)).toBe(utcTime(at));
+  // the description's node sits outside the line, so a read of the line's text is what it shows
+  expect(note.querySelector('[hidden]')).toBeNull();
+  expect(note.textContent).toBe(`Newer rows at ${utcTime(at).slice(11, 16)} Show latest`);
+}
 
 const AT = Date.UTC(2026, 9, 17, 9, 0);
 const SOURCE = { kind: 'query' as const, server: 'fixture', tool: 'rows', args: { region: 'north' }, schedule: 30, staleAfter: 120 };
@@ -177,6 +191,10 @@ describe('the source sheet’s live query (E3 M3)', () => {
     expect(live.openSession).toHaveBeenCalledWith('a1111111-1111-4111-8111-111111111111');
     act(() => live.set({ start: { phase: 'starting', appSessionId: 'a1111111-1111-4111-8111-111111111111' } }));
     expect(within(block()).getByRole('button', { name: 'Start session' }).hasAttribute('disabled')).toBe(true);
+    // the word cut (N198, as the Connectors sheet's T591): "Starting…" while it asks and starts, then "Ready"
+    expect(within(block()).getByRole('status').textContent).toBe('Starting…');
+    act(() => live.set({ start: { phase: 'ready', appSessionId: 'a1111111-1111-4111-8111-111111111111' } }));
+    expect(within(block()).getByRole('status').textContent).toBe('Ready');
   });
 
   it('a grant refused for want of a session explains it beside Start; with no grant and no pause, says how to allow it', async () => {
@@ -199,7 +217,7 @@ describe('the source sheet’s live query (E3 M3)', () => {
     await settle();
     const dialog = screen.getByRole('dialog');
     expect(within(dialog).getByText(`Live sales · fixture · rows · updated ${utcTime(AT)} by You`)).toBeTruthy();
-    expect(within(block()).getByText(`Newer rows were fetched at ${utcTime(AT + 60_000)}; the rows here are the ones captured when the source opened.`)).toBeTruthy();
+    expectNewer(AT + 60_000);
     expect(m.readDataset).toHaveBeenCalledWith('dash1', 'assets/query-1.json', { format: 'json' });
     fireEvent.click(within(block()).getByRole('button', { name: 'Show latest' }));
     expect(m.reopen).toHaveBeenCalledWith('sales');
@@ -210,12 +228,12 @@ describe('the source sheet’s live query (E3 M3)', () => {
     const m = mountSheet(live);
     act(() => m.sheet.open([{ id: 'sales', descriptor: fetched() }]));
     await settle();
-    expect(within(block()).getByText(/This query was replaced or removed/)).toBeTruthy();
+    expect(within(block()).getByText('Query changed since opening')).toBeTruthy();
     for (const name of [/^Allow/, /^Revoke/, /^Refresh/, 'Start session']) expect(within(block()).queryByRole('button', { name })).toBeNull();
     fireEvent.click(within(block()).getByRole('button', { name: 'Show current' }));
     expect(m.reopen).toHaveBeenCalledWith('sales');
     act(() => live.set({}, null));
-    expect(within(block()).getByText(/This query was replaced or removed/)).toBeTruthy();
+    expect(within(block()).getByText('Query changed since opening')).toBeTruthy();
   });
 
   it('opened over a history preview, or on a file, shows no live controls at all', async () => {
@@ -315,7 +333,7 @@ describe('the source sheet’s live query after the panel (E3 panel)', () => {
     await settle();
     expect(within(block()).queryByRole('button', { name: 'Show latest' })).toBeNull(); // the fetch it captured
     act(() => live.set({}, { snapshot: { ref: 'assets/query-1.json', at: AT + 60_000 } }));
-    expect(within(block()).getByText(`Newer rows were fetched at ${utcTime(AT + 60_000)}; the rows here are the ones captured when the source opened.`)).toBeTruthy();
+    expectNewer(AT + 60_000);
     const dialog = screen.getByRole('dialog');
     expect(within(dialog).getByText(`Live sales · fixture · rows · updated ${utcTime(AT)} by You`)).toBeTruthy();
     expect(within(dialog).getAllByRole('row')).toHaveLength(2);

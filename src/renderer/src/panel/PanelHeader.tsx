@@ -22,8 +22,12 @@ import { cardHost, cardSession, FLOAT_COPY, useFloatingCard } from '../shell/flo
 import { ShowChat } from '../shell/ShowChat'; // UX wave U10b (O-43): Show chat, before the float control
 import { MARKUP_COPY, startMarkup, useMarkup } from '../markup/session'; // P3-G
 import { useMarkupSurface } from '../markup/surface'; // P3-G
-import { SAVED_COPY, useEditorHeaderFocus, useEditorHostRegistration, type EditorHostAction, type EditorHostExport, type EditorHostRegistration, type EditorHostScope } from './editor-host';
+import { NamedGlyph } from '../ui/glyph'; // the word cut (M5's G558): an icon action's word, tipped on focus
+import { RefusedMenuItem } from '../ui/refused-menu-item';
+import { UNAVAILABLE_LOOK, UnavailableButton } from '../ui/tip';
+import { useEditorHeaderFocus, useEditorHostRegistration, type EditorHostAction, type EditorHostExport, type EditorHostRegistration, type EditorHostScope } from './editor-host';
 import { COPY } from './copy';
+import { SavedStatus } from './SavedStatus';
 import { shownSession, useTabLabel } from './host';
 
 export const HEADER_COPY = {
@@ -88,7 +92,7 @@ export function EditorHeader({ icon: TabIcon, title, suffix = null, registration
   if (toolbarHost) return createPortal(
     <div ref={row} data-editor-toolbar className="flex max-w-full min-w-0 flex-wrap items-center gap-1">
       {scope?.surface === 'panel' && registration && <span data-header-title title={registration.title} className="max-w-full min-w-0 truncate text-ui text-fg">{registration.title}</span>}
-      {registration?.saved && <span data-header-saved title={SAVED_COPY[registration.saved]} className="truncate px-1 text-ui-sm text-fg-muted">{registration.saved === 'saved' ? 'Saved' : SAVED_COPY[registration.saved]}</span>}
+      {registration?.saved && <SavedStatus state={registration.saved} className="px-1" />}
       {shown.map((action) => <ActionButton key={action.id} action={action} text />)}
       {(overflow.length > 0 || folded.length > 0) && <MoreMenu actions={overflow} exports={folded} label={toolbarHost.menuLabel} text />}
       {unresolved > 0 && <CommentCount count={unresolved} action={comments} />}
@@ -120,11 +124,7 @@ export function EditorHeader({ icon: TabIcon, title, suffix = null, registration
           {registration ? registration.title : title}
           {!registration && suffix && <span className="text-fg-faint"> · {suffix}</span>}
         </span>
-        {registration?.saved && (
-          <span data-header-saved title={SAVED_COPY[registration.saved]} className="max-w-max min-w-0 flex-[1000_1_0px] truncate text-ui-sm text-fg-muted">
-            {SAVED_COPY[registration.saved]}
-          </span>
-        )}
+        {registration?.saved && <SavedStatus state={registration.saved} className="max-w-max min-w-0 flex-[1000_1_0px]" />}
         {unresolved > 0 && <CommentCount count={unresolved} action={comments} />}
       </div>
       <div className="flex shrink-0 items-center gap-1">
@@ -258,25 +258,38 @@ function CommentCount({ count, action }: { count: number; action: EditorHostActi
   );
 }
 
+// The word cut (M5's G558): an icon action is a named glyph, its word a tooltip the keyboard reaches; one `unavailable`
+// stays focusable, greyed, its reason in the tooltip and the description, its press swallowed. A `disabled` one (no
+// reason given) is out of the Tab order, so it keeps the system's tooltip for the pointer.
 function ActionButton({ action, text = false }: { action: EditorHostAction; text?: boolean }) {
   const ActionIcon = text ? undefined : action.icon;
-  if (ActionIcon) {
+  if (ActionIcon && action.disabled) {
     return (
-      <IconButton label={action.label} pressed={action.pressed} disabled={action.disabled} onClick={() => action.onSelect()} data-editor-action={action.id}>
+      <IconButton label={action.label} pressed={action.pressed} disabled onClick={() => action.onSelect()} data-editor-action={action.id}>
         <ActionIcon className="size-4" />
       </IconButton>
     );
   }
-  // An action with no icon is drawn by its label.
+  if (ActionIcon) {
+    return (
+      <NamedGlyph label={action.label} unavailable={action.unavailable} pressed={action.pressed} side={action.tipSide} onClick={() => action.onSelect()} data-editor-action={action.id}>
+        <ActionIcon className="size-4" />
+      </NamedGlyph>
+    );
+  }
+  // An action with no icon is drawn by its label; always under its owner's tip, so a reason that comes or goes keeps the
+  // button (and its focus) where it is.
   return (
-    <button type="button" aria-pressed={action.pressed} disabled={action.disabled} onClick={() => action.onSelect()} data-editor-action={action.id} className={`${GHOST} px-2 text-ui`}>
-      {action.label}
-    </button>
+    <UnavailableButton reason={action.unavailable ?? null} side={action.tipSide}>
+      <button type="button" aria-pressed={action.pressed} disabled={action.disabled} onClick={() => action.onSelect()} data-editor-action={action.id} className={`${GHOST} px-2 text-ui ${UNAVAILABLE_LOOK}`}>
+        {action.label}
+      </button>
+    </UnavailableButton>
   );
 }
 
 const MENU = 'z-50 min-w-44 rounded-md border border-border-strong bg-bg-overlay p-1 text-ui text-fg';
-const ITEM = 'flex h-7 cursor-default items-center gap-2 rounded-sm px-2 outline-none select-none data-disabled:text-fg-faint data-highlighted:bg-bg-hover';
+const ITEM = 'flex h-7 cursor-default items-center gap-2 rounded-sm px-2 outline-none select-none data-disabled:text-fg-faint aria-disabled:text-fg-faint data-highlighted:bg-bg-hover';
 
 // The overflow: the actions past the inline ones, and under a narrow header every action and the exports (under their
 // own heading). A pressed action is a checkbox item with its check drawn; while any is, every item keeps the check's
@@ -286,7 +299,9 @@ function MoreMenu({ actions, exports, label = HEADER_COPY.more, text = false }: 
   return (
     <HeaderMenu label={label} icon={<MoreIcon />} more text={text}>
       {actions.map((action) =>
-        action.pressed === undefined ? (
+        action.unavailable ? (
+          <RefusedMenuItem key={action.id} kit={DropdownMenu} label={action.label} reason={action.unavailable} lead={checks && <CheckRoom />} className={ITEM} />
+        ) : action.pressed === undefined ? (
           <DropdownMenu.Item key={action.id} disabled={action.disabled} onSelect={() => action.onSelect()} className={ITEM}>
             {checks && <span aria-hidden className="size-3.5 shrink-0" />}
             {action.label}

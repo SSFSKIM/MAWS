@@ -7,7 +7,7 @@
 // at the version); while two versions are compared nothing is offered rather than one side silently chosen.
 //
 // A picture over the cap is never cropped: main refuses it `exportTooLarge {board, w, h, maxScale}`, and the sheet states
-// that scale and the size it gives; the owner agreeing, the export runs at it.
+// the scale that fits; the owner agreeing, the export runs at it.
 import type { MachineRef } from '@shared/machine/ref';
 import type { MawsBridge } from '@shared/ipc/schema';
 import { artifactRefusalOf } from '@shared/ipc/schema/artifacts';
@@ -18,6 +18,7 @@ import { applyV2, newDoc } from '@artifacts/yjs';
 import { ipc } from '../../ipc/client';
 import { toastFailure } from '../../library/dialogs';
 import type { EditorHostExport } from '../../panel/editor-host';
+import { DESIGN_COPY } from './copy';
 import { confirm, type ConfirmRequest } from '../../sessions/dialogs';
 import { toast } from '../../stores/notices';
 import { VIEWERS_COPY } from '../artifacts/viewers/copy';
@@ -100,15 +101,16 @@ export function designVersionExports(artifactId: string, machine: MachineRef, ve
 
 export type DesignExportAsk = (sheet: ConfirmRequest) => Promise<boolean>;
 
-const percent = (scale: number) => `${Math.round(scale * 10_000) / 100}%`;
-const side = (v: number) => Math.max(1, Math.round(v));
+// the word cut (G556): a whole-number percentage in the sheet, rounded down so a board just over the cap never reads
+// "100%"; the export takes the exact scale
+const percent = (scale: number) => `${Math.max(1, Math.floor(scale * 100))}%`;
 
-/** The sheet for a board too large to picture at the size asked: the scale that fits and what it gives. */
-function fittingSheet(name: string, format: 'png' | 'pdf', { w, h, maxScale }: { w: number; h: number; maxScale: number }): ConfirmRequest {
-  const cap = format === 'png' ? 'A PNG can be at most 8192 px on a side' : 'A PDF page can be at most 19200 px on a side';
+/** The sheet for a board too large to picture at the size asked: the scale that fits. */
+function fittingSheet(name: string, format: 'png' | 'pdf', maxScale: number): ConfirmRequest {
+  // the word cut (T632): the fact in one line; the scale stays in the title and the button
   return {
     title: `Export “${name}” at ${percent(maxScale)}?`,
-    body: `“${name}” is ${w} × ${h} px. ${cap}, so MAWS exports the whole board at ${percent(maxScale)} (${side(w * maxScale)} × ${side(h * maxScale)} px); nothing is cropped.`,
+    body: DESIGN_COPY.tooLarge(format),
     confirmLabel: `Export at ${percent(maxScale)}`,
     destructive: false,
   };
@@ -121,7 +123,7 @@ export async function exportDesign(artifactId: string, machine: MachineRef, requ
     const refusal = artifactRefusalOf(exported.error);
     const data = refusal?.data as { board?: unknown; w?: unknown; h?: unknown; maxScale?: unknown } | undefined;
     if (refusal?.reason !== 'exportTooLarge' || request.scale !== undefined || typeof data?.board !== 'string' || typeof data.w !== 'number' || typeof data.h !== 'number' || typeof data.maxScale !== 'number') return toastFailure(VIEWERS_COPY.exportFailed(exported.error.message));
-    if (!(await ask(fittingSheet(boardName(data.board), request.format, { w: data.w, h: data.h, maxScale: data.maxScale })))) return;
+    if (!(await ask(fittingSheet(boardName(data.board), request.format, data.maxScale)))) return;
     exported = await client.invoke('artifacts.export', { artifactId, ...request, scale: data.maxScale }, { machine });
     if (!exported.ok) return toastFailure(VIEWERS_COPY.exportFailed(exported.error.message));
   }

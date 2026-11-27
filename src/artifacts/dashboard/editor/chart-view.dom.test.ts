@@ -15,6 +15,7 @@ import { editorExtensions } from '../../document/editor/extensions';
 import { memoryEditorHost } from '../../document/editor/memory-host';
 import { createChartRenderer, type SourceCapture } from './chart-view';
 import { SnapshotReader } from '../snapshots';
+import sheetCss from './sheet.css?raw';
 
 const AT = Date.UTC(2026, 9, 16, 8, 30);
 const descriptor = (ref: string, over: Partial<FileDatasetDescriptor> = {}): FileDatasetDescriptor => ({ // E3: the file arm of the descriptor union
@@ -219,7 +220,24 @@ describe('the chart view', () => {
     expect(into.querySelector('svg')?.textContent).toContain('the file of "sales" could not be read');
     setDataset(doc, 'sales', descriptor('assets/sales.csv', { columns: [{ name: 'region', type: 'string' }, { name: 'sales', type: 'number', mismatches: 1 }] }));
     await settle();
-    expect(into.querySelector('.dash-notes')?.textContent).toContain('1 of 3 values in sales are not number');
+    // the word cut (G598): a column's wrong-type note leaves the line under the tile for a ⚠ mark that takes the keyboard,
+    // the note its name and what it shows when pointed at or focused; the source sheet says it as before
+    expect(into.querySelector('.dash-notes')).toBeNull();
+    const mark = into.querySelector<HTMLElement>('.dash-source .dash-warning')!;
+    expect([mark.textContent, mark.getAttribute('role'), mark.tabIndex]).toEqual(['⚠', 'img', 0]);
+    expect(mark.getAttribute('aria-label')).toBe('1 of 3 values in sales are not number');
+    expect(mark.dataset.note).toBe('1 of 3 values in sales are not number');
+    // the whole-branch review's fix wave: the note is placed as the mark is pointed at or focused (hover.ts's placeNote),
+    // inside what can be seen of the editor; at rest under the touch rule it stays in the line
+    expect(mark.style.getPropertyValue('--dash-note-max')).toBe('');
+    mark.dispatchEvent(new PointerEvent('pointerenter'));
+    expect(mark.style.getPropertyValue('--dash-note-max')).toBe('320px');
+    mark.style.removeProperty('--dash-note-max');
+    mark.dispatchEvent(new FocusEvent('focus'));
+    expect(mark.style.getPropertyValue('--dash-note-max')).toBe('320px');
+    const css = sheetCss.replace(/\s+/g, ' ');
+    expect(css).toContain("max-width: var(--dash-note-max, 320px);");
+    expect(css).toContain(".ds-doc .dash-warning[data-note-side='end']::after { right: 0; left: auto; }");
     removeDataset(doc, 'sales');
     await settle();
     expect(into.querySelector('svg')?.textContent).toContain('no dataset "sales"');
@@ -227,6 +245,26 @@ describe('the chart view', () => {
     setDataset(doc, 'sales', descriptor('assets/sales.csv'));
     await settle();
     expect(other.into.querySelector('svg')?.textContent).toContain('dataset "sales" has no column "revenue"');
+  });
+
+  // the word cut (G603, G596): a folded pie's note goes to the ⚠ mark the keyboard reaches; the view's other limits stay
+  // at rest under it, and a pie with no column mismatch still has the mark
+  it('says a folded pie’s note in the ⚠ mark, with no column mismatch, and keeps the other limits at rest', async () => {
+    const doc = newDoc();
+    const regions = ['서울', '부산', '제주', '대구', '광주', '대전', '울산', '수원'];
+    SNAPSHOTS['assets/eight.csv'] = { columns: descriptor('').columns, rows: [...regions.map((region, i) => [region, 10 - i] as [string, number]), ['세종', null as unknown as number]], total: 9, truncated: false };
+    setDataset(doc, 'sales', descriptor('assets/eight.csv', { rows: 9 }));
+    const w = world();
+    const { into } = mount(w.renderChart, doc, node('sales', { view: 'pie', x: 'region', y: 'sales', title: 'Share' }));
+    await settle();
+    const mark = into.querySelector<HTMLElement>('.dash-source .dash-warning')!;
+    expect([mark.textContent, mark.getAttribute('role'), mark.tabIndex]).toEqual(['⚠', 'img', 0]);
+    expect(mark.getAttribute('aria-label')).toBe('Top 5 of 8 slices; the rest as “other”');
+    expect(mark.dataset.note).toBe('Top 5 of 8 slices; the rest as “other”');
+    const atRest = into.querySelector('.dash-notes')?.textContent ?? '';
+    expect(atRest).not.toContain('slices; the rest');
+    expect(atRest).toBe('1 slice has no positive sales; not drawn'); // another limit of the view, at rest (G596)
+    delete SNAPSHOTS['assets/eight.csv'];
   });
 
   it('follows the displayed document when it moves (a preview put on another version)', async () => {
@@ -390,5 +428,44 @@ describe('hover', () => {
     const bar = hatched.map((h) => h.previousElementSibling!).find((el) => el.hasAttribute('data-tip'))!; // the legend's keys come first
     bar.dispatchEvent(new PointerEvent('pointermove', { bubbles: true, clientX: 10, clientY: 10 }));
     expect(into.querySelector('.dash-tip')?.textContent).toBe('서울 · c · sales: 3');
+  });
+});
+
+// The word cut on the chart tile (docs/doperpowers/specs/2026-11-16-word-cut-design.md, M5 task 2; G597, G604): the
+// spec's own warnings (an unknown key, an invalid value) are not on the tile at all, and the first load is the quiet
+// spinner named by its wait, with no words.
+describe('the word cut on the tile', () => {
+  it('draws no warning about the spec itself, and keeps what the view could not draw', async () => {
+    const doc = newDoc();
+    setDataset(doc, 'sales', descriptor('assets/sales.csv'));
+    const { into } = mount(world().renderChart, doc, node('sales', { view: 'bar', x: 'region', y: 'sales', colour: 'red', limit: 'many' }));
+    await settle();
+    expect(into.querySelector('.dash-source')?.textContent).not.toMatch(/ignored/);
+    expect(into.querySelector('.dash-notes')).toBeNull();
+    const short = mount(world().renderChart, doc, node('sales', { view: 'bar', x: 'region', y: 'sales', colour: 'red', filter: [{ column: 'region', op: 'eq', value: '없음' }] })).into;
+    await settle();
+    expect(short.querySelector('.dash-source')?.textContent).not.toMatch(/ignored/);
+    expect(short.querySelector('.dash-notes')?.textContent).toBe('no rows to draw'); // what the view could not draw stays (G596)
+  });
+
+  it('shows its first load as a quiet spinner named by the wait, and no words: nothing to assistive technology for half a second', async () => {
+    const doc = newDoc();
+    setDataset(doc, 'sales', descriptor('assets/sales.csv'));
+    const w = world({ hold: true });
+    const { into } = mount(w.renderChart, doc);
+    await settle();
+    const frame = into.querySelector<HTMLElement>('.dash-figure')!;
+    expect(frame.textContent).toBe('');
+    const ring = frame.querySelector<HTMLElement>('.dash-loading-ring')!;
+    expect([ring.getAttribute('role'), ring.getAttribute('aria-label')], 'unnamed and roleless in the quiet half second').toEqual([null, null]);
+    await new Promise((resolve) => setTimeout(resolve, 600));
+    const spinner = frame.querySelector<HTMLElement>('[role="progressbar"]')!;
+    expect(spinner).toBe(ring);
+    expect(spinner.getAttribute('aria-label')).toBe('Loading 지역별 매출…');
+    expect(sheetCss.replace(/\s+/g, ' ')).toContain('.ds-doc .dash-loading-ring:not([role]) { visibility: hidden; }');
+    w.pending[0].resolve();
+    await settle();
+    expect(frame.querySelector('[role="progressbar"]')).toBeNull();
+    expect(tips(into)).toEqual(['서울 · sales: 12', '부산 · sales: 7', '제주 · sales: 3']);
   });
 });

@@ -64,23 +64,49 @@ export type CanvasParse = { ok: true; canvas: CanvasJson; diagnostics: CanvasDia
 export const dict = <T>(): Record<string, T> => Object.create(null) as Record<string, T>;
 const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
 
+/** One way a frame breaks the manifest's rule, as `frameFaults` finds it: what a reader that words it itself reads. */
+export type FrameFault =
+  | { kind: 'not-number'; key: keyof BoardFrame }
+  | { kind: 'empty'; key: 'w' | 'h'; value: number }
+  | { kind: 'side'; key: 'w' | 'h'; value: number }
+  | { kind: 'area'; w: number; h: number };
+
 /**
- * Why a frame (whole or partial) is not one the model holds, one message per broken key: the coordinates are finite
+ * Why a frame (whole or partial) is not one the model holds, one fault per broken key: the coordinates are finite
  * numbers, a side is more than 0 and at most `CANVAS_LIMITS.side`, and the area of a whole size at most `.area`. The one
  * check the loader, the publish's merge, the writers and the repair share.
  */
-export function frameProblems(board: string, frame: Partial<Record<keyof BoardFrame, unknown>>): string[] {
-  const out: string[] = [];
+export function frameFaults(frame: Partial<Record<keyof BoardFrame, unknown>>): FrameFault[] {
+  const out: FrameFault[] = [];
   for (const key of FRAME_KEYS) {
     if (!(key in frame)) continue;
     const v = frame[key];
-    if (typeof v !== 'number' || !Number.isFinite(v)) out.push(`board ${board}: ${key} is not a finite number`);
-    else if ((key === 'w' || key === 'h') && v <= 0) out.push(`board ${board}: ${key} is ${v} (a side is more than 0 px)`);
-    else if ((key === 'w' || key === 'h') && v > CANVAS_LIMITS.side) out.push(`board ${board}: ${key} is ${v} px (over ${CANVAS_LIMITS.side} px a side)`);
+    if (typeof v !== 'number' || !Number.isFinite(v)) out.push({ kind: 'not-number', key });
+    else if ((key === 'w' || key === 'h') && v <= 0) out.push({ kind: 'empty', key, value: v });
+    else if ((key === 'w' || key === 'h') && v > CANVAS_LIMITS.side) out.push({ kind: 'side', key, value: v });
   }
   const { w, h } = frame;
-  if (out.length === 0 && typeof w === 'number' && typeof h === 'number' && w * h > CANVAS_LIMITS.area) out.push(`board ${board}: ${w}×${h} is ${w * h} px (over ${CANVAS_LIMITS.area} px)`);
+  if (out.length === 0 && typeof w === 'number' && typeof h === 'number' && w * h > CANVAS_LIMITS.area) out.push({ kind: 'area', w, h });
   return out;
+}
+
+/** A frame fault in the model's words, naming the board and the key, for the agents and the loader that read them. */
+export function frameFaultMessage(board: string, fault: FrameFault): string {
+  switch (fault.kind) {
+    case 'not-number':
+      return `board ${board}: ${fault.key} is not a finite number`;
+    case 'empty':
+      return `board ${board}: ${fault.key} is ${fault.value} (a side is more than 0 px)`;
+    case 'side':
+      return `board ${board}: ${fault.key} is ${fault.value} px (over ${CANVAS_LIMITS.side} px a side)`;
+    case 'area':
+      return `board ${board}: ${fault.w}×${fault.h} is ${fault.w * fault.h} px (over ${CANVAS_LIMITS.area} px)`;
+  }
+}
+
+/** `frameFaults` in the model's words, one message per broken key. */
+export function frameProblems(board: string, frame: Partial<Record<keyof BoardFrame, unknown>>): string[] {
+  return frameFaults(frame).map((fault) => frameFaultMessage(board, fault));
 }
 
 /** Load `project/canvas.json`. A malformed manifest, board entry or frame refuses it whole, naming each problem. */

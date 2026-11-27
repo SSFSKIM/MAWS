@@ -172,7 +172,7 @@
   border: 0;
   border-radius: var(--radius-sm);
 }
-.doc-tool:hover:not(:disabled),
+.doc-tool:hover:not(:disabled):not([aria-disabled='true']),
 .doc-icon-button:hover:not(:disabled) {
   background: var(--bg-hover);
 }
@@ -180,9 +180,29 @@
   background: var(--bg-active);
   color: var(--accent);
 }
+/* a menu's trigger pressed while its menu is open (Radix's data-state, as the app's other menu triggers draw it; the pair
+   review's fix wave, G379) */
+.doc-tool[data-state='open'] {
+  background: var(--bg-active);
+}
 .doc-tool:disabled,
+.doc-tool[aria-disabled='true'],
 .doc-icon-button:disabled {
   color: var(--fg-faint);
+}
+/* the word cut (G332 to G336): a toolbar control whose word became a glyph (the shared NamedGlyph), a count beside the
+   comments' glyph; a greyed one stays focusable (aria-disabled) */
+.doc-tool-glyph {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space);
+}
+.doc-tool[aria-disabled='true'] {
+  cursor: default;
+}
+.doc-tool-count {
+  font-variant-numeric: tabular-nums;
 }
 .doc-toolbar-select {
   font: inherit;
@@ -610,18 +630,40 @@
   margin: 0;
   color: var(--fg-muted);
 }
-.doc-rail-resolved {
+/* the panel's folds, Deleted (N) and Resolved (N): a disclosure line, its chevron after the words turning down while open,
+   and the fold's own cards under it (the pair review's fix wave, G395) */
+.doc-rail-fold {
   display: flex;
   flex-direction: column;
   gap: calc(var(--space) * 2);
 }
 .doc-rail-section {
+  display: inline-flex;
+  align-self: flex-start;
+  align-items: center;
+  gap: var(--space);
   font: inherit;
   text-align: left;
   color: var(--fg-muted);
   background: transparent;
   border: 0;
+  border-radius: var(--radius-sm);
   padding: var(--space) 0;
+}
+.doc-rail-section:hover {
+  color: var(--fg);
+}
+.doc-rail-chevron {
+  flex: none;
+  transition: transform 150ms;
+}
+.doc-rail-section[aria-expanded='true'] > .doc-rail-chevron {
+  transform: rotate(90deg);
+}
+@media (prefers-reduced-motion: reduce) {
+  .doc-rail-chevron {
+    transition: none;
+  }
 }
 /* P4-B1: a thread in the panel is X36's card, styled by src/artifacts/comments/comments.css; the panel's filters: */
 .doc-rail-filters {
@@ -719,7 +761,7 @@
   white-space: pre-wrap;
 }
 .ds-doc .doc-provisional-block::before {
-  content: attr(data-provisional-by) " is writing…";
+  content: attr(data-provisional-by);
   display: block;
   width: fit-content;
   margin-bottom: var(--space);
@@ -1008,11 +1050,6 @@
 .doc-history-bar select[data-current] {
   outline: 2px solid var(--accent);
   outline-offset: 1px;
-}
-.doc-history-tab-note {
-  padding: 0 var(--space);
-  color: var(--danger);
-  white-space: nowrap;
 }
 .doc-context-menu,
 .doc-editors {

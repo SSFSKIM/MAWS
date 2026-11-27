@@ -42,6 +42,7 @@ export const TEXTBOX_COPY = {
   link: 'Link',
   removeLink: 'Remove link',
   linkAddress: 'Link address',
+  apply: 'Apply', // the word cut (G486): the row's submit, its name the longer words
   applyLink: 'Apply link',
   httpsOnly: 'Links must start with https://',
   colour: 'Colour',
@@ -511,8 +512,8 @@ function MarkBar({ ref, editor, node, session, refused }: { ref: Ref<HTMLDivElem
             onChange={(event) => setValue(event.target.value)}
             onKeyDown={onKeyDown}
           />
-          <button type="submit" className="deck-markbar-button deck-markbar-apply">
-            {panel === 'link' ? C.applyLink : C.applyColour}
+          <button type="submit" className="deck-markbar-button deck-markbar-apply" aria-label={panel === 'link' ? C.applyLink : C.applyColour}>
+            {C.apply}
           </button>
           {error && (
             <p role="alert" className="deck-markbar-error">

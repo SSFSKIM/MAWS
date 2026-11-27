@@ -18,6 +18,7 @@ import type { DocumentState } from '@artifacts/host';
 import type { DocumentRail, DocumentShown } from '@artifacts/document/editor/DocumentEditor'; // P3-F (F7): DocumentShown
 import type { PageSize } from '@artifacts/document/export/design-system';
 import type { CloseAsk, EditorHostAction, EditorHostExport, EditorHostRegistration, SavedState } from '../../panel/editor-host';
+import { DOCUMENT_COPY } from './copy';
 import { SaveVersionIcon, SuggestIcon } from './icons';
 import type { PageInForce, PageItem } from './page'; // UX wave U10b
 
@@ -120,7 +121,7 @@ function exportAction(status: ExportStatus, commands: DocumentHeaderCommands): E
   const name = FORMAT_NAMES[status.format];
   switch (status.phase) {
     case 'running':
-      return { id: 'export', label: `Exporting ${name}…`, disabled: true, onSelect: () => {} };
+      return { id: 'export', label: DOCUMENT_COPY.exporting, disabled: true, onSelect: () => {} };
     case 'failed':
       return { id: 'export', label: clip(`${name} export failed: ${status.message}`), onSelect: () => commands.dismissExport() };
   }

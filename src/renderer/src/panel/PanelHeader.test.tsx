@@ -18,7 +18,7 @@ import { FLOAT_COPY } from '../shell/floating'; // P3-F wave S (F6)
 import { useLayout } from '../stores/layout'; // P3-F wave S (F6)
 import { A, probeTool, resetPanelStores, type ProbeState } from '../test-support/panel';
 import { installResizeObserver } from '../test-support/resize';
-import { editorHostOf, focusEditorHostAction, registerEditorHost, resetEditorHosts, SAVED_COPY, useEditorHost, useEditorHostScope, type EditorHostAction, type EditorHostRegistration, type SavedState } from './editor-host';
+import { editorHostOf, focusEditorHostAction, registerEditorHost, resetEditorHosts, SAVED_COPY, useEditorHost, useEditorHostScope, type EditorHostAction, type EditorHostRegistration } from './editor-host';
 import { panelHost, registerPanelTool, setTitle } from './host';
 import { PanelHost } from './PanelHost';
 import { PanelRegion } from './PanelRegion';
@@ -87,7 +87,8 @@ describe('the panel header', () => {
     ], exports: [{ id: 'pdf', label: 'PDF', onSelect: () => calls.push('pdf') }] }} controls={<button onClick={() => calls.push('expand')}>Expand pane</button>} />);
     expect(document.querySelector('[data-editor-header]')).toBeNull();
     expect(within(target).getByText('Deck', { exact: true })).toBeTruthy(); // the panel has no main tab naming its record
-    expect(within(target).getByText('Saved').getAttribute('title')).toBe('All changes saved');
+    expect(within(target).getByText('All changes saved'), 'the deck’s toolbar says the editors’ one saved wording (T607)').toBeTruthy();
+    expect(within(target).queryByText('Saved', { exact: true })).toBeNull();
     await user.click(within(target).getByRole('button', { name: 'Present' }));
     await user.click(within(target).getByRole('button', { name: 'Expand pane' }));
     expect(within(target).queryByRole('button', { name: 'Theme' })).toBeNull();
@@ -108,7 +109,7 @@ describe('the panel header', () => {
     offs.push(() => target.remove());
     render(<EditorHeader title="Presentation" scope={{ surface: 'main', tabId: 'main-deck' }} registration={{ title: 'Q3 review', saved: 'saved', toolbarHost: { element: target, menuLabel: 'Deck actions' } }} />);
     expect(within(target).queryByText('Q3 review', { exact: true })).toBeNull();
-    expect(within(target).getByText('Saved')).toBeTruthy();
+    expect(within(target).getByText('All changes saved')).toBeTruthy();
     expect(document.querySelector('[data-editor-header]')).toBeNull();
   });
 
@@ -200,7 +201,9 @@ describe('the panel header', () => {
 
     expect(title().textContent).toBe('Q3 brief');
     expect(header().textContent).toContain('Docs/Planning/Q3 brief');
-    expect(header().textContent).toContain('Saving…');
+    // P23: a save in flight is a quiet spinner, not words
+    expect(header().querySelector('[data-header-saved]')?.getAttribute('data-saved-state')).toBe('saving');
+    expect(header().textContent).not.toContain('Saving…');
     // The count stands for the `comments` action, which is not repeated among the actions.
     expect(buttons()).toEqual(['3 open comments', 'Version history', 'Export']);
     await user.click(within(header()).getByRole('button', { name: '3 open comments' }));
@@ -293,31 +296,42 @@ describe('the panel header', () => {
     let handle!: ReturnType<typeof registerEditorHost>;
     act(() => void (handle = registerEditorHost({ surface: 'panel', tabId: id }, { title: 'Registered', saved: 'unsaved' })));
     expect(title().textContent).toBe('Registered');
-    expect(header().textContent).toContain('Unsaved changes');
+    expect(within(header()).getByRole('img', { name: 'Unsaved changes' })).toBeTruthy();
     act(() => handle.dispose());
     expect(header()).toBeNull(); // the strip's tab names it
     expect(within(strip()).getByRole('tab', { name: 'Plain' })).toBeTruthy();
   });
 
-  it('copies each saved state, and shows none for null', () => {
+  // T607, P23, P24: the editors' one saved wording and unsaved edits as a dot. A save in flight is tested from a held
+  // acknowledgement where the editor holds it back (tools/document/DocumentPanel.test.tsx).
+  it('draws each saved state: its words at rest, a dot whose words wait for the pointer or focus while unsaved; none for null', async () => {
     offs.push(registerPanelTool(probeTool('t').tool));
     mount();
     const id = add('t');
     const handle = registerEditorHost({ surface: 'panel', tabId: id }, { title: 'Doc' });
-    const copy: [SavedState, string][] = [
+    expect(Object.entries(SAVED_COPY)).toEqual([
       ['saved', 'All changes saved'],
       ['saving', 'Saving…'],
       ['unsaved', 'Unsaved changes'],
       ['reconnecting', 'Reconnecting…'],
       ['readonly', 'Read-only'],
-    ];
-    expect(Object.entries(SAVED_COPY)).toEqual(copy);
-    for (const [saved, text] of copy) {
-      act(() => handle.update({ saved }));
-      expect(header().querySelector('[data-header-saved]')?.textContent).toBe(text);
+    ]);
+    const saved = () => header().querySelector<HTMLElement>('[data-header-saved]');
+    for (const [state, text] of [['saved', 'All changes saved'], ['reconnecting', 'Reconnecting…'], ['readonly', 'Read-only']] as const) {
+      act(() => handle.update({ saved: state }));
+      expect(saved()?.textContent).toBe(text);
+      expect(saved()?.getAttribute('data-saved-state')).toBe(state);
     }
+
+    act(() => handle.update({ saved: 'unsaved' }));
+    const dot = within(header()).getByRole('img', { name: 'Unsaved changes' });
+    expect(saved()?.textContent, 'the dot draws no words at rest').toBe('');
+    expect(dot.tabIndex, 'the dot takes the keyboard, so its words are reachable').toBe(0);
+    act(() => dot.focus());
+    expect((await screen.findByRole('tooltip')).textContent).toBe('Unsaved changes');
+
     act(() => handle.update({ saved: null }));
-    expect(header().querySelector('[data-header-saved]')).toBeNull();
+    expect(saved()).toBeNull();
   });
 
   it('labels the count in the singular and plural, inert without a comments action, absent at zero', () => {
@@ -399,6 +413,65 @@ describe('the panel header', () => {
     expect(focusEditorHostAction(scope, 'a2'), 'a disabled control takes no focus').toBe(false);
     expect(focusEditorHostAction(scope, 'nope')).toBe(false);
     expect(focusEditorHostAction({ surface: 'panel', tabId: 'another' }, 'a1'), 'no header over that scope').toBe(false);
+  });
+
+  // The word cut (M5's G558): an icon action's word is a tooltip the keyboard reaches, not the system's title; an action
+  // unavailable with a reason stays in the Tab order, greyed, its reason in the tooltip and the description, and its
+  // press does nothing; folded into "More actions", it stays in the menu's keyboard with its reason
+  it('shows an icon action’s word on keyboard focus, and keeps an unavailable one focusable with its reason', async () => {
+    const user = userEvent.setup();
+    const calls: string[] = [];
+    const icon = () => <svg />;
+    offs.push(registerPanelTool(probeTool('t').tool));
+    mount();
+    const id = add('t');
+    const scope = { surface: 'panel', tabId: id } as const;
+    const check: EditorHostAction = { id: 'check', label: 'Check against law', icon, onSelect: () => calls.push('check') };
+    const star: EditorHostAction = { id: 'star', label: 'Set as my default', icon, unavailable: 'Already your default', onSelect: () => calls.push('star') };
+    const bin: EditorHostAction = { id: 'bin', label: 'Delete design system…', icon, onSelect: () => calls.push('bin') };
+    act(() => void registerEditorHost(scope, { title: 'System', actions: [check, star, bin] }));
+    expect(within(header()).getAllByRole('button').filter((b) => b.hasAttribute('title')), 'no system tooltip').toEqual([]);
+    act(() => within(header()).getByRole('button', { name: 'Check against law' }).focus());
+    expect(screen.getByRole('tooltip').textContent).toBe('Check against law');
+    await user.tab();
+    const starButton = within(header()).getByRole('button', { name: 'Set as my default', description: 'Already your default' });
+    expect(document.activeElement, 'Tab reaches the unavailable star').toBe(starButton);
+    expect(starButton.getAttribute('aria-disabled')).toBe('true');
+    expect(screen.getByRole('tooltip').textContent).toContain('Already your default');
+    await user.keyboard('{Enter}');
+    await user.click(starButton);
+    await user.tab();
+    expect(document.activeElement).toBe(within(header()).getByRole('button', { name: 'Delete design system…' }));
+    expect(screen.getByRole('tooltip').textContent).toBe('Delete design system…');
+    await user.keyboard('{Enter}');
+    expect(calls, 'the star acts on neither Enter nor a click').toEqual(['bin']);
+    act(() => expect(focusEditorHostAction(scope, 'star'), 'an unavailable control keeps its focus').toBe(true));
+    expect(document.activeElement).toBe(starButton);
+
+    resetEditorHosts();
+    act(() => void registerEditorHost(scope, { title: 'System', actions: [check, bin, { id: 'other', label: 'Another', onSelect: () => {} }, star] }));
+    await user.click(within(header()).getByRole('button', { name: 'More actions' }));
+    const folded = within(await screen.findByRole('menu')).getByRole('menuitem', { name: 'Set as my default', description: 'Already your default' });
+    expect(folded.getAttribute('aria-disabled')).toBe('true');
+    await user.keyboard('{ArrowDown}{ArrowDown}');
+    expect(document.activeElement, 'the menu’s keyboard reaches it').toBe(folded);
+    await user.keyboard('{Enter}');
+    expect(screen.queryByRole('menu'), 'selecting it keeps the menu open').not.toBeNull();
+    expect(calls).toEqual(['bin']);
+    await user.keyboard('{Escape}');
+
+    // a word action that becomes unavailable while focused keeps its button and the focus
+    resetEditorHosts();
+    const word: EditorHostAction = { id: 'word', label: 'Publish', onSelect: () => calls.push('word') };
+    let handle!: ReturnType<typeof registerEditorHost>;
+    act(() => void (handle = registerEditorHost(scope, { title: 'System', actions: [word] })));
+    const publish = within(header()).getByRole('button', { name: 'Publish' });
+    act(() => publish.focus());
+    act(() => handle.update({ actions: [{ ...word, unavailable: 'Nothing to publish' }] }));
+    expect(document.activeElement).toBe(publish);
+    expect(within(header()).getByRole('button', { name: 'Publish', description: 'Nothing to publish' }).getAttribute('aria-disabled')).toBe('true');
+    await user.keyboard('{Enter}');
+    expect(calls).toEqual(['bin']);
   });
 
   it('marks a pressed action in "More actions" with a visible check, and an unpressed one without', async () => {

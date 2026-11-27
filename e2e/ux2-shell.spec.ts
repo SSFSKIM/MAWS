@@ -865,7 +865,9 @@ test('UX2: real Library document and deck editors use main without an empty pane
     await deckToolbarPlacement(deckTab);
     await shot(maws, info, 'deck-main');
     const toolbar = deckTab.getByRole('toolbar', { name: 'Deck', exact: true });
-    await expect(toolbar.getByRole('button', { name: 'Inspector', exact: true })).toHaveText('Inspector');
+    // the word cut (G401): Inspector is a named glyph, its word its name and tooltip, nothing drawn but the glyph
+    await expect(toolbar.getByRole('button', { name: 'Inspector', exact: true })).toHaveText('');
+    await expect(toolbar.getByRole('button', { name: 'Inspector', exact: true }).locator('svg')).toHaveCount(1);
     await expect(toolbar.getByRole('button', { name: 'Version history', exact: true })).toHaveCount(1);
     await expect(toolbar.getByRole('button', { name: /^Comments(?: |$)/ })).toHaveCount(1);
     await expect(toolbar.getByRole('button', { name: 'Add comment', exact: true })).toBeVisible();

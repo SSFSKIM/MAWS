@@ -7,8 +7,17 @@
 // Save of the snapshot's own bytes under its source name. A replacement while it is open leaves it on its snapshot until
 // it is opened again. Escape or Close closes it and gives the focus back to what opened it. E3 M3: a query dataset's
 // captured snapshot has the tab's live query block beside it (./LiveQuery.tsx), never over a history preview.
+// The word cut (docs/doperpowers/specs/2026-11-16-word-cut-design.md, M5; G608 to G616): it closes by a × named Close, the
+// keyboard on the sheet itself as it opens (so the ×'s tooltip does not show at every opening); the dataset picker is the
+// select alone, its options by title, an id only where two titles meet, the chosen dataset's id its tooltip; the
+// toggles read "This view (N)" and "All rows (N)", the actions row its count, Copy and Download; the states in place of
+// the rows are short, and the rows' read is the quiet spinner.
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type KeyboardEvent } from 'react';
 import type { Actor } from '@shared/artifacts/actor';
+import { NamedGlyph } from '../../../renderer/src/ui/glyph';
+import { QuietSpinner } from '../../../renderer/src/ui/spinner';
+import { Tip } from '../../../renderer/src/ui/tip';
+import { SHEET_COPY as W } from './copy';
 import type { ArtifactHost } from '../../host';
 import { snapshotOf, type Cell, type DatasetDescriptor } from '../datasets';
 import { compareCells, viewRows, type ViewTable } from '../render';
@@ -44,11 +53,12 @@ export function SourceSheet({ artifactId, sheet, reader, host, actorName, live, 
   const state = useSyncExternalStore(sheet.subscribe, sheet.snapshot);
   const panel = useRef<HTMLElement>(null);
   const opener = useRef<Element | null>(null);
-  // The focus moves into the sheet at each opening and back to what had it when the sheet closes.
+  // The focus moves into the sheet at each opening (the sheet itself, so the ×'s tooltip does not open with it) and back
+  // to what had it when the sheet closes.
   useLayoutEffect(() => {
     if (!state.open) return;
     if (!panel.current?.contains(document.activeElement)) opener.current = document.activeElement;
-    panel.current?.querySelector<HTMLElement>('.dash-sheet-close')?.focus();
+    panel.current?.focus();
   }, [state.open, state.opened]);
   useLayoutEffect(() => {
     if (state.open) return;
@@ -65,29 +75,30 @@ export function SourceSheet({ artifactId, sheet, reader, host, actorName, live, 
     sheet.close();
   };
   return (
-    <aside ref={panel} className="dash-sheet" role="dialog" aria-label={shown ? `Source of ${shown.descriptor.title}` : 'Datasets'} onKeyDown={onKeyDown}>
+    <aside ref={panel} className="dash-sheet" role="dialog" tabIndex={-1} aria-label={shown ? `Source of ${shown.descriptor.title}` : 'Datasets'} onKeyDown={onKeyDown}>
       <header className="dash-sheet-header">
         <h2 className="dash-sheet-title">{shown ? shown.descriptor.title : 'Datasets'}</h2>
-        <button type="button" className="dash-sheet-close doc-tool" onClick={() => sheet.close()}>
-          Close
-        </button>
+        <NamedGlyph label={W.closeName} className="dash-sheet-close doc-tool" onClick={() => sheet.close()}>
+          ×
+        </NamedGlyph>
       </header>
       {state.datasets.length > 1 && (
-        <label className="dash-sheet-picker">
-          <span>Dataset</span>
-          <select className="doc-toolbar-select" aria-label="Dataset" value={state.selected ?? ''} onChange={(event) => sheet.select(event.target.value)}>
-            {state.datasets.map((dataset) => (
-              <option key={dataset.id} value={dataset.id}>
-                {dataset.descriptor.title} ({dataset.id})
-              </option>
-            ))}
-          </select>
-        </label>
+        <div className="dash-sheet-picker">
+          <Tip content={state.selected} description={state.selected}>
+            <select className="doc-toolbar-select" aria-label="Dataset" value={state.selected ?? ''} onChange={(event) => sheet.select(event.target.value)}>
+              {state.datasets.map((dataset) => (
+                <option key={dataset.id} value={dataset.id}>
+                  {state.datasets.some((other) => other !== dataset && other.descriptor.title === dataset.descriptor.title) ? `${dataset.descriptor.title} (${dataset.id})` : dataset.descriptor.title}
+                </option>
+              ))}
+            </select>
+          </Tip>
+        </div>
       )}
       {shown ? (
         <DatasetDetail key={`${state.opened}:${state.capture}:${shown.id}`} artifactId={artifactId} id={shown.id} descriptor={shown.descriptor} view={shown.view} hold={state.hold} reader={reader} host={host} actorName={actorName} live={state.preview || state.previewing ? undefined : live /* E3 M3 fix: no live controls while a preview runs */} onReopen={onReopen} />
       ) : (
-        <p className="dash-sheet-empty">No data is bound to this dashboard yet. An agent binds a file with artifact_dataset.</p>
+        <p className="dash-sheet-empty">{W.noData}</p>
       )}
     </aside>
   );
@@ -179,17 +190,17 @@ function DatasetDetail({ artifactId, id, descriptor, view, hold, reader, host, a
       {view && snapshot && (
         <div className="dash-sheet-shown" role="group" aria-label="Rows shown">
           <button type="button" className="doc-tool" aria-pressed={shown === 'view'} data-active={shown === 'view' ? '' : undefined} onClick={() => choose('view')}>
-            {viewed?.ok ? `This view’s rows (${viewed.table.rows.length.toLocaleString('en-US')})` : 'This view’s rows'}
+            {W.thisView(viewed?.ok ? viewed.table.rows.length : null)}
           </button>
           <button type="button" className="doc-tool" aria-pressed={shown === 'source'} data-active={shown === 'source' ? '' : undefined} onClick={() => choose('source')}>
-            {`All source rows (${descriptor.rows.toLocaleString('en-US')})`}
+            {W.allRows(descriptor.rows)}
           </button>
         </div>
       )}
       <div className="dash-sheet-actions">
-        <span className="dash-sheet-count">{shown === 'view' && view ? `${view.caption}: ${table ? `${table.rows.length.toLocaleString('en-US')} ${table.rows.length === 1 ? 'row' : 'rows'}` : '…'}` : `${descriptor.rows.toLocaleString('en-US')} ${descriptor.rows === 1 ? 'row' : 'rows'}`}</span>
-        <button type="button" className="doc-tool" disabled={!table} onClick={() => void copy()}>
-          Copy rows
+        <span className="dash-sheet-count">{shown === 'view' && view ? (table ? `${table.rows.length.toLocaleString('en-US')} ${table.rows.length === 1 ? 'row' : 'rows'}` : '…') : `${descriptor.rows.toLocaleString('en-US')} ${descriptor.rows === 1 ? 'row' : 'rows'}`}</span>
+        <button type="button" className="doc-tool" aria-label={W.copyName} disabled={!table} onClick={() => void copy()}>
+          {W.copy}
         </button>
         {snapshot && hold !== 'unavailable' && (
           <button type="button" className="doc-tool" aria-label={`Download ${name}`} disabled={hold !== 'held'} onClick={() => void download()}>
@@ -208,15 +219,17 @@ function DatasetDetail({ artifactId, id, descriptor, view, hold, reader, host, a
           </p>
         ))}
       {!snapshot ? (
-        <p className="dash-sheet-note">This query has not been fetched yet; there are no rows to show.</p>
+        <p className="dash-sheet-note">{W.notFetched}</p>
       ) : hold === 'unavailable' ? (
-        <p className="dash-sheet-note" role="alert">This snapshot is no longer available; open the source again to see the current one.</p>
+        <p className="dash-sheet-note" role="alert">{W.snapshotGone}</p>
       ) : held && failed !== null ? (
         <p className="dash-sheet-note" role="alert">{`The rows could not be read: ${failed}`}</p>
       ) : shown === 'view' && viewed && !viewed.ok ? (
         <p className="dash-sheet-note" role="alert">{`This view cannot be drawn: ${viewed.error}`}</p>
       ) : table === null ? (
-        <p className="dash-sheet-loading">Reading the rows…</p>
+        <p className="dash-sheet-loading">
+          <QuietSpinner label={W.readingRowsName} />
+        </p>
       ) : (
         <Rows key={shown} table={table} order={order} sort={sort} onSort={cycle} overflowed={shown === 'view' && viewed?.ok ? viewed.overflowed : undefined} />
       )}

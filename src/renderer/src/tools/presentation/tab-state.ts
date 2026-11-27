@@ -55,7 +55,7 @@ export interface DeckTabSnapshot {
   /** The replica's state as of its last change of phase, sync or read-only. */
   document: DocumentState | null;
   saving: boolean;
-  /** M7, WR 49: the deck's live-target open threads (the header's count). */
+  /** M7, WR 49: the deck's live-target open threads, from the store the toolbar's Comments badge reads (the header draws no count since the word cut's G404). */
   unresolved: number;
   /** P4-A2 G2.3: the replica's provisional layers (an agent's publish as it streams), listening while the tab holds it. */
   provisional: ProvisionalLayers | null;

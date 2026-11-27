@@ -23,6 +23,7 @@ import { YNode } from '../../yjs/document';
 import { schemaFor } from '../schema';
 import { tabBody } from '../tabs';
 import { TAB, World, blocks, doc, endOf, para, ticks, until } from './test-world';
+import chromeCss from './chrome.css?raw';
 
 let world: World | null = null;
 let handles: DocumentHandle[] = [];
@@ -381,7 +382,7 @@ describe('the provisional layer on a dashboard’s charts', () => {
     await until(() => labelled(container).length > 0, 'the labels');
     expect(labelled(container), 'the charts whose source names it').toEqual(['c1', 'c2', 'c4']);
     for (const el of charts(container).filter((c) => c.dataset.provisionalOp === 'dataset')) {
-      expect(el.dataset.provisionalLabel, 'the label the page shows').toBe('Fix the build is updating sales…');
+      expect(el.dataset.provisionalLabel, 'the label the page shows').toBe('Fix the build'); // the word cut (G354): the agent's name alone
       expect([el.dataset.provisional, el.dataset.provisionalBy, el.dataset.provisionalDataset]).toEqual(['tu1', 'Fix the build', 'sales']);
       expect(el.classList.contains('doc-provisional-dataset')).toBe(true);
       expect(el.style.getPropertyValue('--doc-presence')).toBe('var(--author-3)');
@@ -403,7 +404,7 @@ describe('the provisional layer on a dashboard’s charts', () => {
 
     world!.host.announce(dataset('tu2', 'streaming', 'costs'));
     await until(() => labelled(container).length === 1, 'the next call’s label');
-    expect([labelled(container), charts(container)[2].dataset.provisionalLabel]).toEqual([['c3'], 'Fix the build is updating costs…']);
+    expect([labelled(container), charts(container)[2].dataset.provisionalLabel]).toEqual([['c3'], 'Fix the build']);
     world!.host.announce(dataset('tu2', 'dropped', 'costs'));
     await until(() => labelled(container).length === 0, 'the dropped call withdrawn');
   });
@@ -445,5 +446,14 @@ describe('the provisional layer on a dashboard’s charts', () => {
     expect(labelled(container), 'the callout’s chart waits').toEqual(['c1', 'c2']);
     editor().view.dom.dispatchEvent(new CompositionEvent('compositionend', { bubbles: true }));
     await until(() => labelled(container).length === 3, 'the callout’s chart once the composition ended');
+  });
+});
+
+// The word cut (G353): the tag over the text an agent streams names the agent alone, as the dataset's label does (G354).
+// The tag is the stylesheet's generated content, so its rule is read from chrome.css.
+describe('the tag over streamed text', () => {
+  it('names the agent alone', () => {
+    const rule = /\.ds-doc \.doc-provisional-block::before \{([^}]*)\}/.exec(chromeCss)?.[1] ?? '';
+    expect(/content:\s*([^;]*);/.exec(rule)?.[1]).toBe('attr(data-provisional-by)');
   });
 });

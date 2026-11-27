@@ -175,7 +175,7 @@ describe('documentHeader', () => {
   it('says an export’s progress and its failure first in the header’s actions, and holds the menu while one runs', () => {
     const c = commands();
     const running = documentHeader(state({ exporting: { phase: 'running', format: 'pdf' } }), c);
-    expect(running.actions![0]).toMatchObject({ id: 'export', label: 'Exporting PDF…', disabled: true });
+    expect(running.actions![0]).toMatchObject({ id: 'export', label: 'Exporting…', disabled: true });
     expect(running.exports!.every((e) => e.disabled)).toBe(true);
     const failed = documentHeader(state({ exporting: { phase: 'failed', format: 'docx', message: 'exporting an artifact is not available yet' } }), c);
     expect(failed.actions![0]).toMatchObject({ id: 'export', label: 'Word export failed: exporting an artifact is not available yet' });

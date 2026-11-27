@@ -3,12 +3,15 @@
 // layer's overlay (M5) sits beside the scaled canvas in screen pixels; the stage's scroll box takes the pointer and, once
 // focused, the keys and the clipboard. A held slide shows its last good version read-only under a banner with its
 // reasons.
+// The word cut (docs/doperpowers/specs/2026-11-16-word-cut-design.md, M5 task 3): the banner says the last good version
+// shows and how it clears (G431), the loader's reasons behind its Details (G432); an empty deck says so shortly (G433).
 import { useCallback, useRef, type ReactNode, type RefObject } from 'react';
 import type { AssetUrl, SlideCanvas } from '../canvas';
 import type { FaceAliases } from '../canvas/faces';
 import type { SlideEntry } from './deck-view';
 import { describeElement } from './a11y';
 import { DECK_COPY as C } from './copy';
+import type { ShowNotice } from './notice';
 import type { DeckSession } from './session';
 import { SlideView } from './SlideView';
 import { TextBox } from './TextBox';
@@ -29,7 +32,7 @@ export interface StageProps {
   onCanvas?: (canvas: SlideCanvas | null) => void;
   canvas: SlideCanvas | null;
   readOnly: boolean;
-  onNotice?: (text: string) => void;
+  onNotice?: ShowNotice;
   /** The deck's artifact and the clipboard's way to bring another deck's pictures over (fix wave 1). */
   artifactId?: string;
   importAsset?: ImportAsset;
@@ -55,11 +58,14 @@ export function Stage({ session, slide, scale, assetUrl, viewport, frame, onCanv
       {slide?.held && (
         <div role="status" className="deck-held-banner" data-held-banner>
           <strong>{C.heldBanner}</strong>
-          <ul>
-            {slide.held.map((reason) => (
-              <li key={reason}>{reason}</li>
-            ))}
-          </ul>
+          <details className="deck-held-details">
+            <summary>{C.heldDetails}</summary>
+            <ul>
+              {slide.held.map((reason) => (
+                <li key={reason}>{reason}</li>
+              ))}
+            </ul>
+          </details>
         </div>
       )}
       <div ref={viewport} className="deck-stage" aria-label={C.stage} role="region" tabIndex={0} data-stage-surface aria-keyshortcuts="F6" /* P4-B2 (D14): its keyboard exit */>

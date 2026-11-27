@@ -2,10 +2,10 @@
 // board frame goes under a move or resize gesture, in world px. C's snapping (`snapMove`, `snapResize`) runs over the
 // sibling boards' boxes with no lines of its own (the world has no edges or margins), so a board meets another's edge,
 // centre or an equal gap in its row within C's six screen pixels at the zoom; ⌘ places it freely. A frame is whole
-// pixels; one the model's cap refuses keeps its requested size and names the cap (`frameProblems`, the writers' one
-// rule): the workbench shows the refusal and writes nothing, never a clamped frame.
+// pixels; one the model's cap refuses keeps its requested size and names the cap (`frameFaults`, the writers' one rule):
+// the workbench shows the refusal and writes nothing, never a clamped frame.
 import { snapMove, snapResize, SNAP_SCREEN_PX, type Guide, type Handle, type Pt } from '../../slides/geometry';
-import { frameProblems, type BoardFrame } from '../canvas';
+import { frameFaults, type BoardFrame, type FrameFault } from '../canvas';
 
 const NO_LINES = { x: [], y: [] };
 const MIN_SIDE = 1;
@@ -16,8 +16,8 @@ export interface MovedFrame {
   guides: Guide[];
 }
 export interface ResizedFrame extends MovedFrame {
-  /** Why the model refuses `frame` (each naming the board); empty when it takes it. */
-  problems: string[];
+  /** Why the model refuses `frame`; empty when it takes it. */
+  faults: FrameFault[];
 }
 
 const whole = (f: BoardFrame): BoardFrame => ({ x: Math.round(f.x), y: Math.round(f.y), w: Math.round(f.w), h: Math.round(f.h) });
@@ -31,7 +31,7 @@ export function movedFrame(start: BoardFrame, d: Pt, siblings: readonly BoardFra
 }
 
 /** `start` with the edges `handle` names dragged by the world delta `d` (a pixel a side at least), snapped unless off. */
-export function resizedFrame(boardId: string, start: BoardFrame, handle: Handle, d: Pt, siblings: readonly BoardFrame[], zoom: number, snap: boolean): ResizedFrame {
+export function resizedFrame(start: BoardFrame, handle: Handle, d: Pt, siblings: readonly BoardFrame[], zoom: number, snap: boolean): ResizedFrame {
   const f = { ...start };
   if (handle.includes('e')) f.w = Math.max(MIN_SIDE, start.w + d.x);
   if (handle.includes('w')) {
@@ -51,5 +51,5 @@ export function resizedFrame(boardId: string, start: BoardFrame, handle: Handle,
     guides = snapped.guides;
   }
   const out = whole(frame);
-  return { frame: out, guides, problems: frameProblems(boardId, out) };
+  return { frame: out, guides, faults: frameFaults(out) };
 }
