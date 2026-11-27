@@ -86,6 +86,22 @@ describe('a sheet call’s row', () => {
     expect(lineTexts()).toEqual(['q4 | Clash rule | → Keep the earlier sailing queued | Open', 'q5 | Notices | → Dismissed queued', 'q6 | Season dates | → Withdrawn', 'q8 | Paper size | → A4']);
   });
 
+  // The writer's fork ruling (2026-11-27): a record whose floor could not be read restarts at q1, so a row copied from
+  // the parent can name an id the fork's record holds for another call. An entry is laid over a line only when it names
+  // the row's call, wherever the record gives one.
+  it('lays an entry over a line only when the entry names the row’s call, wherever the record gives one', () => {
+    const queued = { key: 'maws-00000001', kind: 'answer' as const, picks: ['Keep the earlier sailing'], text: '', images: [], revision: 1, by: 'maws' as const };
+    const closed = { how: 'answered' as const, receipt: 'Tides', places: [1], at: '2026-11-23T09:05:00.000Z', revision: 1, asker: 'main' as const };
+    const record = model({ open: [question('q4', { callId: 'toolu_fork', queued })], closed: { q5: { ...closed, callId: 'toolu_fork' } as never, q6: { ...closed, receipt: 'March' } } });
+    withRecord(record);
+    draw(row(THREE)); // a copied row: its call is not the record's
+    expect(lineTexts()).toEqual(['q4 | Clash rule | Which one should the import keep?', 'q5 | Notices | Which notices should the printed sheet carry?', 'q6 | Season dates | → March']);
+    cleanup(); // the last row unmounted forgets the model
+    withRecord(record);
+    draw(row(THREE, { id: 'sheet:toolu_fork' as never, toolUseId: 'toolu_fork' as ToolUseId })); // the record's own call
+    expect(lineTexts()).toEqual(['q4 | Clash rule | → Keep the earlier sailing queued | Open', 'q5 | Notices | → Tides', 'q6 | Season dates | → March']);
+  });
+
   it('reads an accepted outcome not yet delivered as its receipt', () => {
     const outcome = { key: 'maws-00000003', kind: 'answer' as const, id: 'q4', revision: 1, by: 'maws' as const, at: '2026-11-23T09:05:00.000Z', acceptedAt: '2026-11-23T09:05:01.000Z', recipient: 'main' as const, taken: false, acrossStop: false, images: [], picks: ['Keep the longer route'], text: 'the island route', places: [2],
       question: { multiSelect: false, askedAt: '2026-11-23T09:00:00.000Z', asker: 'main' as const, question: 'Which one?', header: 'Clash rule', options: ['Keep the earlier sailing', 'Keep the longer route'] } };
@@ -118,7 +134,7 @@ describe('a sheet call’s row', () => {
     expect(screen.queryAllByRole('button', { name: /^Open/ })).toEqual([]);
     cleanup();
     draw(row([line(null, 'Clash rule', 'Which one?')], { state: 'error', error: 'InputValidationError: ask[0].options is too long' }));
-    expect(head().textContent).toBe('Did not ask a question');
+    expect(head().textContent).toBe('Did not change the sheet');
     expect(within(document.querySelector<HTMLElement>('[data-sheet-call]')!).getByText('InputValidationError: ask[0].options is too long')).toBeTruthy();
   });
 });

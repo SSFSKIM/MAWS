@@ -32,23 +32,39 @@ interface DrawnLine {
 const outcomeSaid = (outcome: NonNullable<SheetRowLine['outcome']>, queued = false): Said =>
   outcome.how === 'answered' ? { kind: 'receipt', how: 'answered', text: outcome.receipt, queued } : { kind: 'receipt', how: outcome.how, text: outcome.how === 'dismissed' ? SHEET_ROW.dismissed : SHEET_ROW.withdrawn, queued };
 
+/**
+ * Whether a record's entry may stand for this row's line: it names no call, or it names this row's (the writer's fork
+ * ruling, 2026-11-27: a fork's record whose floor could not be read restarts at q1, and a row copied from the parent
+ * must not take the fork's q1). An open question always names the call that set its revision; a closed or pending
+ * entry only where the model carries one.
+ */
+const namesCall = (entry: object, call: string): boolean => {
+  const named = (entry as { callId?: unknown }).callId;
+  return typeof named !== 'string' || named === call;
+};
+
 /** §I's table: a line as the record reads it, where the transcript holds no outcome for it yet. */
-function overlaid(line: SheetRowLine, model: SheetModel | null): DrawnLine {
+function overlaid(line: SheetRowLine, model: SheetModel | null, call: string): DrawnLine {
+  const stored: DrawnLine = { line, said: { kind: 'sentence' }, open: false };
   if (line.place === 'revised_below') return { line, said: { kind: 'revised_below' }, open: false };
   if (line.outcome !== null) return { line, said: outcomeSaid(line.outcome), open: false };
   const id = line.id;
-  if (id === null || line.place !== 'here' || model === null) return { line, said: { kind: 'sentence' }, open: false };
+  if (id === null || line.place !== 'here' || model === null) return stored;
   const listed = model.open.find((question) => question.id === id);
   if (listed !== undefined) {
+    if (!namesCall(listed, call)) return stored;
     const queued = listed.queued;
     return { line, said: queued === undefined ? { kind: 'sentence' } : outcomeSaid({ how: 'answered', receipt: receiptOf(queued.picks, queued.text) }, true), open: true };
   }
-  if (model.hidden.some((hidden) => hidden.id === id)) return { line, said: outcomeSaid({ how: 'dismissed' }, true), open: false };
+  if (model.hidden.some((hidden) => hidden.id === id && namesCall(hidden, call))) return { line, said: outcomeSaid({ how: 'dismissed' }, true), open: false };
   const pending = model.pending.find((outcome) => outcome.id === id);
-  if (pending !== undefined) return { line, said: outcomeSaid(pending.kind === 'answer' ? { how: 'answered', receipt: receiptOf(pending.picks, pending.text) } : { how: 'dismissed' }), open: false };
+  if (pending !== undefined) {
+    if (!namesCall(pending, call)) return stored;
+    return { line, said: outcomeSaid(pending.kind === 'answer' ? { how: 'answered', receipt: receiptOf(pending.picks, pending.text) } : { how: 'dismissed' }), open: false };
+  }
   const closed = model.closed[id];
-  if (closed !== undefined) return { line, said: outcomeSaid(closed.how === 'answered' ? { how: 'answered', receipt: closed.receipt } : { how: closed.how }), open: false };
-  return { line, said: { kind: 'sentence' }, open: false };
+  if (closed !== undefined && namesCall(closed, call)) return { line, said: outcomeSaid(closed.how === 'answered' ? { how: 'answered', receipt: closed.receipt } : { how: closed.how }), open: false };
+  return stored;
 }
 
 function SheetLine({ drawn, onOpen }: { drawn: DrawnLine; onOpen: ((id: string) => void) | null }) {
@@ -130,7 +146,7 @@ export function SheetRow({ row }: { row: SheetRowData }) {
   }
   const onOpen = appSessionId !== null && actions.openSheet !== NO_ACTIONS.openSheet ? (id: string) => actions.openSheet(appSessionId, id) : null;
   // the ids are the call's own while its outcome is known: a call that is not known to have asked draws no Open
-  const drawn = row.lines.map((line) => overlaid(line, row.state === 'done' ? model : null));
+  const drawn = row.lines.map((line) => overlaid(line, row.state === 'done' ? model : null, row.toolUseId));
   const shown = more ? drawn : drawn.slice(0, SHEET_ROW_SHOWN);
   const bodyId = rowElementId(idPrefix, `${row.id}-lines`);
   return (
