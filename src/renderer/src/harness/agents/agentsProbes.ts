@@ -280,7 +280,7 @@ function peerRowOf(el: HTMLElement): PeerRowView | null {
       direction: message.dataset.peer as 'inbound' | 'outbound',
       who: text(who),
       owners: owners ? text(owners) : null,
-      address: who?.getAttribute('title') ?? null,
+      address: message.dataset.address ?? null, // board ticket 815: the address is the line's tip, no longer a title
       preview: text(message.querySelector('[data-part="preview"]')), // UX wave U3: the preview on the message line
       result: state?.dataset.result ?? null,
       resultText: error ? text(error) : (state?.getAttribute('title') ?? null),

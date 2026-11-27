@@ -47,6 +47,7 @@ export function AgentMessageRow({ row }: { row: AgentMessageData }) {
       className="transcript-peer"
       data-direction={row.direction}
       data-peer={peer === null ? undefined : peer.sender !== null ? 'inbound' : 'outbound'}
+      data-address={address ?? undefined} // board ticket 815: the peer's address, now its line's tip, for the surfaces that read it
       data-part={row.report !== undefined ? 'report' : undefined}
       data-replying={replying ? '' : undefined}
     >

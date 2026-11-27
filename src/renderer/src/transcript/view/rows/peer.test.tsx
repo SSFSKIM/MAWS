@@ -67,6 +67,7 @@ describe('a message from another session', () => {
     const actions: TranscriptActions = { ...spyActions(), peerReplies: source };
     const { container } = renderRow(inbound(), { storeKey: A, actions });
     expect(accessibleDescription(screen.getByText('@repo-b').closest('button')!)).toBe(B); // ticket 815: the line's tip, which the keyboard reaches
+    expect(container.querySelector<HTMLElement>('.transcript-peer')?.dataset.address).toBe(B); // what the agents probe reads
     expect(screen.getByText('hello from B')).toBeTruthy();
     // the word cut (T73, ruled): the direction is the arrow, the old words the line's accessible lead
     expect(container.querySelector('.transcript-line-mark')?.textContent).toBe('←');
