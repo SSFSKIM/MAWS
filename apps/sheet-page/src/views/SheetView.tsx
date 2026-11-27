@@ -3,7 +3,8 @@
 // reach the window's edge, while the page's stylesheet keeps its cards and its foot's content one centred column (by
 // the two attributes `[data-sheet-scroll]` and `[data-sheet-foot]`, app.css). The memory is the session's stored one
 // (T19), every change an update bound to the session. What stands in Send's place is availability.ts's. The outline
-// stands beside the column on a wide window and is a drawer over the whole sheet under the bar on a narrow one. A
+// stands beside the column on a wide window and is a drawer over the whole sheet under the bar on a narrow one, the sheet
+// under it inert while it is open; a line chosen focuses its card, and Escape gives focus back to the outline's button. A
 // `null` model (no record, or a path that names none) is the page's own empty state; until a read is applied nothing is
 // drawn.
 import { useEffect, useRef, useState } from 'react';
@@ -73,7 +74,12 @@ function Sheet({ model, fresh, door, connection, host, outline }: Omit<SheetView
   const drawer = !outline.wide && outline.open;
   useEffect(() => {
     if (!drawer) return;
-    const escape = (event: KeyboardEvent) => event.key === 'Escape' && outline.close();
+    // Escape closes the drawer and gives focus back to the button that opened it
+    const escape = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return;
+      outline.close();
+      document.querySelector<HTMLElement>('[data-outline-toggle]')?.focus();
+    };
     addEventListener('keydown', escape);
     return () => removeEventListener('keydown', escape);
   }, [drawer, outline]);
@@ -82,7 +88,7 @@ function Sheet({ model, fresh, door, connection, host, outline }: Omit<SheetView
   return (
     <div data-sheet-page="" className="relative flex min-h-0 flex-1">
       {outline.wide && outline.open && panel(false)}
-      <div ref={holder} className="flex min-h-0 min-w-0 flex-1 flex-col">
+      <div ref={holder} inert={drawer} className="flex min-h-0 min-w-0 flex-1 flex-col">
         <SessionSheet model={model} memory={memory} onMemory={onMemory} host={host} focus={focus} unavailable={text} />
       </div>
       {drawer && (

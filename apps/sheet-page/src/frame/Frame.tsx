@@ -37,7 +37,7 @@ export function Frame({ place, title = null, stopped = false, outline, band = nu
     <div className="flex h-full flex-col bg-bg text-ui text-fg">
       <header className={`relative flex h-(--toolbar-h) flex-none items-center gap-3 border-b border-border bg-bg pr-2 ${onSheet ? 'pl-2' : 'pl-4'}`}>
         {onSheet && (
-          <NamedGlyph label={outline?.open ? PAGE.hideQuestions : PAGE.showQuestions} pressed={outline?.open ?? false} onClick={outline?.toggle} className={`${GLYPH_BUTTON} -mr-1`}>
+          <NamedGlyph data-outline-toggle="" label={outline?.open ? PAGE.hideQuestions : PAGE.showQuestions} pressed={outline?.open ?? false} onClick={outline?.toggle} className={`${GLYPH_BUTTON} -mr-1`}>
             <OutlineIcon />
           </NamedGlyph>
         )}

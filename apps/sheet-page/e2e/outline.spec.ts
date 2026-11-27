@@ -96,14 +96,19 @@ test('the outline lists the questions, follows a draft, leads to a card and mark
 test('below 1120 px the outline is a drawer over the sheet that a choice, Escape or the scrim closes, and leaves the wide choice alone', async ({ page, mawsd }) => {
   await page.setViewportSize({ width: 480, height: 800 });
   await eight(page, mawsd);
+  const covered = () => page.locator('[data-sheet-scroll]').evaluate((element) => element.closest('[inert]') !== null);
   await toggle(page, 'Show questions');
   await expect(outline(page)).toHaveAttribute('data-sheet-outline', 'drawer');
+  expect(await covered()).toBe(true); // the sheet under the drawer takes no focus and no pointer
   await lines(page).nth(4).click();
   await expect(outline(page)).toHaveCount(0);
   await expect(page.locator('[data-sheet-question="q5"]')).toBeFocused();
+  expect(await covered()).toBe(false);
   await toggle(page, 'Show questions');
+  await lines(page).nth(2).focus();
   await page.keyboard.press('Escape');
   await expect(outline(page)).toHaveCount(0);
+  await expect(page.getByRole('banner').getByRole('button', { name: 'Show questions' })).toBeFocused(); // back where it was opened
   await toggle(page, 'Show questions');
   await page.locator('[data-sheet-scrim]').click({ position: { x: 440, y: 400 } });
   await expect(outline(page)).toHaveCount(0);
