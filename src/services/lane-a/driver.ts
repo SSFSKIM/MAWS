@@ -467,22 +467,23 @@ export function createLaneADriver(deps: LaneADeps): LaneADriver {
   // ---- watches --------------------------------------------------------------------------------------------------------
   function openWatch(s: Session, w: Watch): void {
     w.open = false;
+    let reshaper: Reshaper | null = null; // this stream's, from its snapshot on
     const stream: EventStream = subscribe(s.socket.path, {
       onLines: (lines) => {
         if (w.stream !== stream) return;
         const messages = [];
         for (const line of lines) {
-          if (!w.open) {
+          if (reshaper === null) {
             if (line.type !== 'snapshot') return watchEnded(s, w, stream);
-            w.reshaper = new Reshaper({ machine: deps.machine, session: s.engine, sub: w.id });
+            reshaper = w.reshaper = new Reshaper({ machine: deps.machine, session: s.engine, sub: w.id });
             w.open = true;
             const body = s.follow?.body ?? NO_SUBAGENTS;
             w.body = JSON.stringify(body);
-            messages.push(...w.reshaper.snapshot(line, body));
+            messages.push(...reshaper.snapshot(line, body));
             w.backoff.holding();
             continue;
           }
-          const out = w.reshaper.event(line);
+          const out = reshaper.event(line);
           if (out === 'discontinuity') {
             if (messages.length > 0) deps.emit('laneA.plane', { appSessionId: s.appId, watch: w.id, messages });
             return watchEnded(s, w, stream);
