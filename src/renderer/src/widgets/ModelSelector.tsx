@@ -5,32 +5,26 @@
 // that model and a reset that clears the effort override; UX wave U4a (O-32, decision 20): the slider's whole 28 px
 // track takes a press and a drag, and fast mode is a row at the view's foot with a switch (its auto-lane warning first,
 // inline), drawn only where the model offers it or it is on; (decision 21) in the model view a digit 1 to 9 picks the
-// row drawn at that place, and ⇧⌘E's request puts the keyboard on the slider. The model view, headed "Model": a
-// Default entry (Recommended set of models, no badge), then the catalogue with the current
-// row checked, gateway aliases with their "From gateway" description. A choice applies at once and returns to the
+// row drawn at that place, and ⇧⌘E's request puts the keyboard on the slider. The model view, headed "Model": the
+// catalogue with the model the session runs (or will start on) checked, gateway aliases with their "From gateway"
+// description. The owner's observation set 4: no Default row (the default is the model the session starts with, checked)
+// and no route segment (a new chat starts on the route it was given). A choice applies at once and returns to the
 // effort view; the engine's answer (C3's status, the next init frame) is what shows afterwards. A live session is C3's
 // (`list_models`, `set_model`, `apply_flag_settings`), always for this session only; an unstarted one writes its setup
-// intent through C7's seam and keeps D-19's Route segment at the top of the model view. The palette's argument proposes
-// (`/model haiku`), sets the view (`/effort`), or opens the fast warning (`/fast on`).
+// intent through C7's seam, over the catalogue the engine host keeps of what the engine lists (useSetupIntent.ts), read
+// again each time the menu opens. The palette's argument proposes (`/model haiku`), sets the view (`/effort`), or opens
+// the fast warning (`/fast on`).
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type PointerEvent, type ReactNode } from 'react';
 import type { Effort } from '@shared/engine/launch-spec';
 import { EffortSchema } from '@shared/engine/launch-spec';
 import type { PermissionMode } from '@shared/graph/enums';
 import type { AppSessionId } from '@shared/graph/ids';
 import { machineOf } from '@shared/machine/address';
-import { isGatewayModel } from '@shared/sessions/models';
-import { SETTINGS_DEFAULTS_V21 } from '@shared/settings/defaults';
 import { useShownEffort } from '../composer/effective-effort';
 import { intentBindings } from '../composer/frame/bindings';
 import { aliasOf, DEFAULT_ROW, EFFORT_WORDS, modelAsk, rowFor } from '@shared/sessions/model-label';
 import { useSetupIntent } from '../composer/setup-intent';
-import { readRoute, type Route as AnyRoute } from '@shared/engine/route'; // P5 O7 M9
-import { MACHINE_ROUTE, ROUTE } from '../gateway/copy';
-import { pickDirectModel } from '../gateway/direct-model';
-import { unstartedRoute } from '../gateway/routing-facts';
 import { useCommand } from '../ipc/query';
-import { patchIntent } from '../sessions/setup-actions';
-import { useSetup } from '../sessions/store';
 import { acquireSession, refusalWords } from '../sessions/acquire'; // P2-A
 import { availabilityRefusal, useAvailability } from '../sessions/availability'; // P2-A
 import { FRESHNESS, useObservedFacts } from '../sessions/observed'; // P2-A
@@ -42,7 +36,6 @@ import { useSessions } from '../stores/sessions';
 import { useRemoteUnavailable } from '../lane-b/remote-unavailable'; // P5 O7 M8
 import { useLaneAState } from '../stores/lane-a'; // P5 O9 M5
 import { useSessionControls } from '../session/controls/controls-for'; // P5 O9 M5
-import { useSettings } from '../stores/settings';
 import { useUsage } from '../stores/usage';
 import { QuietSpinner } from '../ui/spinner';
 import { Tip, UnavailableButton } from '../ui/tip';
@@ -68,8 +61,6 @@ import {
   type ModelRow,
 } from './model';
 import { useEngineRead } from './read';
-import { GATEWAY } from '../settings-tab/copy'; // P5 O7 M9: the mirror's words for a daemon predating the machine route
-import { useMachineRouteHonoured } from '../settings-tab/default-route';
 
 type Name = 'model' | 'effort' | 'fast';
 type View = 'effort' | 'model';
@@ -89,9 +80,7 @@ interface Binding {
   // UX wave U4a (decision 20): `offered`, the model has fast mode; `closed`, why the switch is not offered on this route
   fast: { view: FastView; pending: boolean; offered: boolean; closed: string | null; set(on: boolean): Promise<ControlAnswer> } | null;
   unstarted: boolean;
-  // P5 O7 M9: the machine's own route beside Gateway and Direct, written as the intent's `route`; `machineRefusal`: why the
-  // machine's own can't be chosen (its daemon predates it), else null
-  route: { value: AnyRoute; choices: AnyRoute[]; machineRefusal: string | null; set(patch: { route: AnyRoute; model?: string | null; effort?: Effort | null }): Promise<ControlAnswer> } | null;
+  loading?: boolean; // an unstarted session's catalogue not answered yet
   observed?: { model: string; at: string } | null; // P2-A: a dormant session's model as the engine last reported it
   note?: string; // P5 O9 M5: the model view's footnote, in place of "For this session only"
 }
@@ -128,7 +117,6 @@ function useLiveBinding(appSessionId: AppSessionId, models: readonly ModelRow[])
         set: (on) => applyFlagSettings({ appSessionId, settings: { fastMode: on } }),
       },
       unstarted: false,
-      route: null,
     };
   }, [appSessionId, models, status, requests, effort, fastGreyed]);
 }
@@ -138,12 +126,13 @@ function useLiveBinding(appSessionId: AppSessionId, models: readonly ModelRow[])
 function useIntentBinding(appSessionId: AppSessionId): Binding | null {
   const setup = useSetupIntent(appSessionId);
   const starting = useComposerStore((s) => isStarting(s, appSessionId));
-  // C10's intent carries the route C7's hook type does not name; it is read from C10's store and written by its patch
-  const gateway = useSetup((s) => s.intents.get(appSessionId)?.gateway ?? null);
-  const chosen = useSetup((s) => s.intents.get(appSessionId)?.route); // P5 O7 M9: read before the legacy field
-  const settings = useSettings((s) => s.state?.settings) ?? SETTINGS_DEFAULTS_V21;
   const defaults = useCommand('settings.userEngineDefaults', undefined, { enabled: setup !== null, staleTime: 30_000 }).data ?? null;
-  const machineHonoured = useMachineRouteHonoured(machineOf(appSessionId)); // P5 O7 M9: the tab's machine's daemon
+  // the owner's observation set 4: the catalogue is read again as the menu opens, so a list the engine host learned since
+  // the tab mounted (the prestart engine's, a session launched meanwhile) is the one shown
+  const refresh = setup?.options.refreshModels;
+  useEffect(() => {
+    refresh?.();
+  }, [refresh]);
   if (!setup) return null;
   const bound = intentBindings(setup, { starting }, defaults).model;
   const { model, effort } = bound.value;
@@ -168,20 +157,7 @@ function useIntentBinding(appSessionId: AppSessionId): Binding | null {
     setEffort: (next) => write({ model, effort: next }),
     fast: null,
     unstarted: true,
-    route:
-      gateway === null
-        ? null
-        : {
-            value: readRoute({ route: chosen, gateway }),
-            choices: unstartedRoute({ gateway, route: chosen }, settings).choices,
-            machineRefusal: machineHonoured === false ? GATEWAY.routeDropped : null,
-            async set(patch) {
-              // Gateway and Direct carry the legacy field too: a daemon that predates the machine route drops `route` and
-              // applies `gateway`; a current one reads `route` first (the services' route patch)
-              const result = await patchIntent(appSessionId, patch.route === 'machine' ? patch : { ...patch, gateway: patch.route });
-              return result.ok ? ok : { ok: false, error: result.error, caption: null };
-            },
-          },
+    loading: setup.options.modelsLoading === true,
   };
 }
 
@@ -211,7 +187,6 @@ function useDrivenBinding(appSessionId: AppSessionId): Binding | null {
     setEffort: (next) => write({ model, effort: next }),
     fast: null,
     unstarted: false,
-    route: null,
     note: SELECTOR.terminalOnly,
   };
 }
@@ -266,7 +241,6 @@ function useDormantBinding(appSessionId: AppSessionId): (Binding & { choosing: b
     setEffort: (next) => apply({ effort: next }, () => setEffort({ appSessionId, effort: next })),
     fast: null,
     unstarted: false,
-    route: null,
     observed: observed ? { model: observed.value, at: observed.at } : null,
     choosing: choice !== null,
   };
@@ -391,9 +365,9 @@ function Check({ on, pending }: { on: boolean; pending: boolean }) {
 }
 
 // One menu item of the model list.
-function ModelItem({ entry, checked, proposed, pending, locked, greyed, choose }: { entry: ModelEntryView; checked: boolean; proposed: boolean; pending: boolean; locked: boolean; greyed: boolean; choose(): void }) {
+function ModelItem({ entry, checked, proposed, pending, locked, choose }: { entry: ModelEntryView; checked: boolean; proposed: boolean; pending: boolean; locked: boolean; choose(): void }) {
   return (
-    <button type="button" role="menuitemradio" aria-checked={checked} data-proposed={proposed || undefined} disabled={locked} onClick={choose} className={`${ROW} ${greyed ? 'text-fg-faint' : ''} ${proposed ? 'bg-bg-active' : ''}`}>
+    <button type="button" role="menuitemradio" aria-checked={checked} data-proposed={proposed || undefined} disabled={locked} onClick={choose} className={`${ROW} ${proposed ? 'bg-bg-active' : ''}`}>
       <Check on={checked} pending={pending} />
       <span className="flex min-w-0 flex-1 flex-col">
         <span className="flex min-w-0 items-baseline gap-1.5">
@@ -447,7 +421,6 @@ function SelectorBody({ name, args, binding, state, error, appSessionId, focusSl
   const [busy, setBusy] = useState(false);
   const [failure, setFailure] = useState<{ error: string; caption: string | null } | null>(null);
   const [fastAsk, setFastAsk] = useState<'on' | null>(null);
-  const [relayAsk, setRelayAsk] = useState<ModelEntryView | null>(null); // a gateway model picked under Direct
   const [proposed, setProposed] = useState<string | null>(null); // `/model <name>` that the typed path left for a look first
   const [unknown, setUnknown] = useState<string | null>(null);
 
@@ -479,6 +452,8 @@ function SelectorBody({ name, args, binding, state, error, appSessionId, focusSl
 
   const { claude, gateway } = presentModels(binding.models.filter((m) => m.value !== DEFAULT_ROW));
   const shownRow = rowFor(binding.models, binding.shown) ?? rowOf(binding.models, binding.shown);
+  // the row checked: the one asked for, else (the session's default) the one it runs or will start on
+  const checked = binding.current !== null && binding.current !== DEFAULT_ROW ? binding.current : (shownRow?.value ?? null);
   const levels = effortLevelsOf(shownRow);
   const modelName = shownRow?.displayName ?? aliasOf(binding.shown, binding.models) ?? SELECTOR.model;
 
@@ -488,35 +463,14 @@ function SelectorBody({ name, args, binding, state, error, appSessionId, focusSl
   const fast = binding.fast;
   const fastRow = fast && (fast.offered || fast.view.checked || fast.pending) ? { view: fast.view, line: fast.pending ? MODEL.pending : (fast.closed ?? fast.view.caption) } : null;
 
-  const choose = async (model: string | null) => {
+  const choose = async (model: string) => {
     setProposed(null);
+    if (model === checked) return setView('effort'); // the model it already runs or starts on: nothing to set
     if (await run(() => binding.setModel(model))) setView('effort'); // Codex: a choice returns to the effort view
   };
   const setFast = (on: boolean) => {
     setFastAsk(null);
     if (binding.fast) void run(() => binding.fast!.set(on));
-  };
-
-  // D-19 on an unstarted tab: Direct never holds a relay alias, so a gateway model asks for a Claude model first
-  const route = binding.route;
-  const direct = route?.value === 'direct';
-  const goDirect = async () => {
-    if (binding.current !== null && isGatewayModel(binding.current)) {
-      const pick = await pickDirectModel(appSessionId);
-      if (pick === null) return;
-      await run(() => route!.set({ route: 'direct', model: pick.model, ...(pick.effort !== null && { effort: pick.effort }) }));
-      return;
-    }
-    await run(() => route!.set({ route: 'direct' }));
-  };
-  const setRoute = (next: AnyRoute) => void (next === 'direct' ? goDirect() : run(() => route!.set({ route: next })));
-  const startOnRelay = (entry: ModelEntryView) => {
-    setRelayAsk(null);
-    void run(async () => {
-      const answer = await route!.set({ route: 'gateway', model: entry.value });
-      if (answer.ok) setView('effort');
-      return answer;
-    });
   };
 
   const noteFor = binding.shown !== null && showsGatewayNote(proposed ?? binding.current ?? binding.shown, binding.mode);
@@ -534,7 +488,7 @@ function SelectorBody({ name, args, binding, state, error, appSessionId, focusSl
   // P2-A: a dormant session's selector reads nothing of the engine (its options are the catalogue's); it says only why a
   // choice cannot start it. The word cut (P535): a start or a read under way is a quiet spinner named by its words
   const status = state === 'unavailable' || state === 'error' ? error : null;
-  const wait = state === 'starting' ? FRAME.starting : state === 'loading' ? SELECTOR.reading : null;
+  const wait = state === 'starting' ? FRAME.starting : state === 'loading' || binding.loading === true ? SELECTOR.reading : null;
   const observedName = binding.observed ? (rowFor(binding.models, binding.observed.model)?.displayName ?? binding.observed.model) : null;
 
   const effortView = (
@@ -610,34 +564,13 @@ function SelectorBody({ name, args, binding, state, error, appSessionId, focusSl
     </div>
   );
 
-  const greyedGroup = (label: string, entries: ModelEntryView[], greyed: boolean) =>
+  // the first group draws no rule above it: no Default row stands before it any more
+  const group = (label: string, entries: ModelEntryView[], first: boolean) =>
     entries.length > 0 && (
-      <div role="group" aria-label={MODEL.list(label)} className="flex flex-col border-t border-border pt-1">
+      <div role="group" aria-label={MODEL.list(label)} className={`flex flex-col ${first ? '' : 'border-t border-border pt-1'}`}>
         {entries.map((entry) => (
-          <ModelItem
-            key={entry.value}
-            entry={entry}
-            checked={binding.current !== null && entry.value === binding.current}
-            proposed={entry.value === proposed}
-            pending={binding.pending}
-            locked={locked}
-            greyed={greyed}
-            choose={() => (greyed ? setRelayAsk(entry) : void choose(entry.value))}
-          />
+          <ModelItem key={entry.value} entry={entry} checked={entry.value === checked} proposed={entry.value === proposed} pending={binding.pending} locked={locked} choose={() => void choose(entry.value)} />
         ))}
-        {greyed && relayAsk && (
-          <div role="group" aria-label={MODEL.relayAskTitle} className="mx-2 my-1 flex flex-col gap-1 border-l-2 border-warning pl-2 text-ui-sm">
-            <p className="m-0">{MODEL.relayAsk(relayAsk.displayName)}</p>
-            <span className="flex gap-2">
-              <button type="button" className="text-fg-muted underline-offset-2 hover:underline" onClick={() => setRelayAsk(null)}>
-                {MODEL.keepDirect}
-              </button>
-              <button type="button" className="text-accent underline-offset-2 hover:underline" onClick={() => startOnRelay(relayAsk)}>
-                {MODEL.useRelay}
-              </button>
-            </span>
-          </div>
-        )}
       </div>
     );
 
@@ -652,33 +585,8 @@ function SelectorBody({ name, args, binding, state, error, appSessionId, focusSl
         </button>
         <h3 className="m-0 text-ui font-medium">{SELECTOR.model}</h3>
       </div>
-      {route && route.choices.length > 1 && (
-        <div role="radiogroup" aria-label={MODEL.route} className="flex gap-1 px-2 pb-1">
-          {route.choices.map((choice) => (
-            <button
-              key={choice}
-              type="button"
-              role="radio"
-              aria-checked={choice === route.value}
-              disabled={locked || (choice === 'machine' && route.machineRefusal !== null)}
-              title={choice === 'machine' ? (route.machineRefusal ?? undefined) : undefined}
-              onClick={() => choice !== route.value && setRoute(choice)}
-              className="flex-1 rounded-sm border border-border px-2 py-0.5 text-ui-sm outline-accent hover:bg-bg-hover focus-visible:outline-2 disabled:text-fg-faint aria-checked:bg-bg-active"
-            >
-              {choice === 'machine' ? MACHINE_ROUTE.choice : ROUTE.choice[choice]}
-            </button>
-          ))}
-        </div>
-      )}
       {unknown && view === 'model' && <p className="m-0 px-2 text-ui-sm text-warning">{unknown}</p>}
       <div role="menu" aria-label={SELECTOR.models} className="flex max-h-[min(316px,50vh)] flex-col overflow-y-auto">
-        <button type="button" role="menuitemradio" aria-checked={binding.current === null} disabled={locked} onClick={() => void choose(null)} className={ROW}>
-          <Check on={binding.current === null} pending={binding.pending} />
-          <span className="flex min-w-0 flex-1 flex-col">
-            <span className="truncate">{SELECTOR.default}</span>
-            <span className="text-ui-sm text-fg-muted">{SELECTOR.recommended}</span>
-          </span>
-        </button>
         {binding.models.length === 0 && status === null && wait === null && <p className="m-0 px-2 py-1 text-ui-sm text-fg-muted">{MODEL.none}</p>}
         {/* a read or a start under way, above whatever rows the catalogue already gives */}
         {wait && (
@@ -686,8 +594,8 @@ function SelectorBody({ name, args, binding, state, error, appSessionId, focusSl
             <QuietSpinner label={wait} />
           </div>
         )}
-        {greyedGroup(MODEL.group.claude, claude, false)}
-        {greyedGroup(MODEL.group.gateway, gateway, direct)}
+        {group(MODEL.group.claude, claude, true)}
+        {group(MODEL.group.gateway, gateway, claude.length === 0)}
       </div>
       {view === 'model' && gatewayNote}
       {view === 'model' && alert}
@@ -695,18 +603,15 @@ function SelectorBody({ name, args, binding, state, error, appSessionId, focusSl
     </div>
   );
 
-  // UX wave U4a (decision 21): in the model view a digit picks the row drawn at that place, Default first, as a click on
-  // it does; nothing while the rows are disabled
-  const drawn: (ModelEntryView | null)[] = [null, ...claude, ...gateway];
+  // UX wave U4a (decision 21): in the model view a digit picks the row drawn at that place, as a click on it does;
+  // nothing while the rows are disabled
+  const drawn: ModelEntryView[] = [...claude, ...gateway];
   const onDigit = (event: KeyboardEvent<HTMLDivElement>) => {
     const place = view === 'model' ? digitOf(event) : null;
     if (place === null) return;
     event.preventDefault();
     if (locked || place > drawn.length) return;
-    const entry = drawn[place - 1];
-    if (entry === null) void choose(null);
-    else if (direct && gateway.includes(entry)) setRelayAsk(entry);
-    else void choose(entry.value);
+    void choose(drawn[place - 1]!.value);
   };
 
   // Esc closes the whole menu (the chip's popover), as Codex's does

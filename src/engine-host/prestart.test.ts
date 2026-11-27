@@ -6,7 +6,7 @@
 import { chmodSync, existsSync, mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { SessionEvent } from '@shared/graph/events';
 import type { AppSessionId } from '@shared/graph/ids';
 import { LaunchSpecSchema, type LaunchSpec } from '@shared/engine/launch-spec';
@@ -258,7 +258,9 @@ describe('the hidden row', () => {
     await expect(host.call('session.status', { appSessionId: 'app-p' as AppSessionId })).rejects.toThrow(/unknown session/);
     await expect(host.call('session.catalog', { appSessionId: 'app-p' as AppSessionId })).rejects.toThrow(/unknown session/);
     await expect(host.call('session.events', { appSessionId: 'app-p' as AppSessionId, afterSeq: null, limit: null })).rejects.toThrow(/unknown session/);
-    expect(existsSync(join(userData, 'engine-host', 'models-cache.json')) || filesOf(join(userData, 'engine-host')).some((name) => name.startsWith('models'))).toBe(false);
+    // the owner's observation set 4: the catalogue cache takes the hidden row's list at its initialize (a New chat's model
+    // menu lists, before Send, what this engine lists); nothing of the row itself is published
+    await vi.waitFor(() => expect(JSON.parse(readFileSync(join(userData, 'engine-host', 'models.json'), 'utf8')).entries).toMatchObject({ [`${TESTED_ENGINE_VERSION}/direct`]: { models: MODELS } }));
     expect(host.ipc.table.all().map((row) => row.status().appSessionId)).toEqual(['app-p']); // the internal view keeps it
 
     const answer = await host.call('session.launch', { spec: spec('app-p'), adopt: { key: 'key-1' } });

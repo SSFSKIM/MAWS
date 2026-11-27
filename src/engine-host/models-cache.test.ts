@@ -52,13 +52,16 @@ describe('models catalogue cache', () => {
     expect(again.answer(RELAY)).toEqual(cache.answer(RELAY));
   });
 
-  it('a Direct launch and a relay launch keep their own lists; a key never seen answers the built-in list, no key the newest', async () => {
+  it('a Direct launch and a relay launch keep their own lists; a key never seen answers what was last listed, no key the newest', async () => {
     let clock = 0;
     const cache = new ModelsCache(userData, { now: () => `2026-09-29T10:00:0${clock++}.000Z` });
     await cache.load();
     expect(cache.answer(DIRECT).source).toBe('builtin');
     await cache.update(RELAY, readsModels());
-    expect(cache.answer(DIRECT)).toEqual({ source: 'builtin', at: null, models: BUILTIN_MODELS }); // the relay's aliases never answer for Direct
+    // observation set 4: a route never listed answers another route's list, the relay's aliases never answering for Direct
+    expect(cache.answer(DIRECT)).toMatchObject({ source: 'cached', at: '2026-09-29T10:00:00.000Z' });
+    expect(cache.answer(DIRECT).models).toEqual(cache.answer(RELAY).models.filter((m) => !m.value.startsWith('claude/')));
+    expect(cache.answer(RELAY).models.some((m) => m.value.startsWith('claude/'))).toBe(true);
     await cache.update(DIRECT, directModels());
     const values = (key?: string) => cache.answer(key).models.map((m) => m.value);
     expect(values(RELAY)).toContain('claude/astra');
@@ -66,7 +69,9 @@ describe('models catalogue cache', () => {
     expect(values()).toEqual(values(DIRECT)); // the most recently updated
     await cache.update(RELAY, readsModels());
     expect(values()).toEqual(values(RELAY));
-    expect(cache.answer(modelsKey('2.1.284', 'gateway')).source).toBe('builtin'); // another binary's catalogue is another key
+    // another binary's catalogue is another key; until that binary lists, its route's newest list on another binary answers
+    expect(cache.answer(modelsKey('2.1.284', 'gateway'))).toEqual(cache.answer(RELAY));
+    expect(cache.answer(modelsKey('2.1.284', 'direct'))).toEqual(cache.answer(DIRECT));
     const again = new ModelsCache(userData);
     await again.load();
     expect(again.answer(DIRECT)).toEqual(cache.answer(DIRECT));

@@ -1,16 +1,13 @@
 // Routing facts (C11 execution document, Interfaces "Gateway", *Routing facts*): which route a session takes, whose
 // account the relay counts it against and why, and which switch to offer. Pure: Session info reads it. §5.4 as amended
-// 2026-10-01 (W2): these facts live in Session info, whose Route row carries the switch, and the model selector's Route
-// segment, never around the composer frame. Also the pace line (M4 refresh task "the popover footer as C7 asked"),
+// 2026-10-01 (W2): these facts live in Session info, whose Route row carries the switch, never around the composer frame
+// (the owner's observation set 4 took the model selector's Route segment away). Also the pace line (M4 refresh task "the popover footer as C7 asked"),
 // Session info's Pace row since the status line's usage popover went.
 import type { EngineSessionStatus } from '@shared/engine/status';
 import type { SessionRecord } from '@shared/graph/session';
 import type { Settings } from '@shared/ipc/schema';
-import type { SetupIntent } from '@shared/sessions/intent';
 import type { UsageSnapshot, UsageWindow } from '@shared/usage/types';
 import { formatClock, formatWeekdayHour } from '@shared/app/date-format';
-import type { Route as AnyRoute } from '@shared/engine/route';
-import { readRoute } from '@shared/engine/route';
 import { MACHINE_ROUTE, PACE, ROUTE, type Route, type SwitchTarget } from './copy';
 import { machineReached, machineRouteLine, observedOf, routeChosen, throughClaudeUsage } from './observed-route'; // P5 O7 M9
 
@@ -81,25 +78,6 @@ export function routingFacts(record: SessionRecord, status: EngineSessionStatus 
 }
 
 // ---- an unstarted session ------------------------------------------------------------------------------------------------
-
-// D-19's per-session Direct before the first send (the architect's ruling, Decision Log 2026-09-29, from C10's review):
-// the route is the setup intent's `gateway`, chosen with `session.intent.patch`, so nothing restarts. The Direct choice
-// follows `offerDirect` as the switch does; an intent already direct (the default route, or a choice made here) is
-// always offered the way back.
-// P5 O7 M9: the intent's `route` before its legacy field, and the machine's own route (every machine's default) always
-// one of the choices, so an intent moved to Gateway or Direct can always go back to it; Direct follows `offerDirect`
-// except as the way back from it.
-export interface UnstartedRoute {
-  route: AnyRoute;
-  line: string;
-  choices: AnyRoute[]; // the segment's options, in order
-}
-
-export function unstartedRoute(intent: Pick<SetupIntent, 'gateway' | 'route'>, settings: Settings): UnstartedRoute {
-  const route = readRoute(intent);
-  const choices: AnyRoute[] = settings.gateway.offerDirect || route === 'direct' ? ['machine', 'gateway', 'direct'] : ['machine', 'gateway'];
-  return { route, line: route === 'machine' ? MACHINE_ROUTE.starts : ROUTE.starts[route], choices };
-}
 
 // ---- the pace line ------------------------------------------------------------------------------------------------------
 

@@ -127,12 +127,27 @@ describe('setup intent hook', () => {
     expect(result.current!.phase).toBeNull();
   });
 
-  it('shows the built-in catalogue when the host cannot answer', async () => {
+  // the owner's observation set 4: no list built into the app stands in for the host's
+  it('lists nothing, reading, until the host answers; a failed read lists nothing and stops reading', async () => {
     withMain({ 'engine.models': undefined });
     putIntent(pageIntent());
     const { result } = renderHook(() => useSetupIntent(A));
+    expect(result.current!.options).toMatchObject({ models: [], modelsLoading: true });
     await act(() => fake.fail('engine.models', 'host unavailable'));
-    expect(result.current!.options.models.map((m) => m.value)).toEqual(['default', 'opus', 'fable', 'sonnet', 'haiku']);
+    expect(result.current!.options).toMatchObject({ models: [], modelsLoading: false });
+  });
+
+  it('reads again on refreshModels', async () => {
+    let catalogue: ModelCatalogue = CATALOGUE;
+    withMain({ 'engine.models': () => catalogue });
+    putIntent(pageIntent());
+    const { result } = renderHook(() => useSetupIntent(A));
+    await waitFor(() => expect(result.current!.options.models.map((m) => m.value)).toEqual(['default', 'haiku', 'claude/astra']));
+    const reads = fake.invoked('engine.models').length;
+    catalogue = { models: [{ value: 'opus', displayName: 'Opus 5.5' }], source: 'cached', at: null }; // the prestart engine listed meanwhile
+    act(() => result.current!.options.refreshModels());
+    await waitFor(() => expect(result.current!.options.models.map((m) => m.value)).toEqual(['opus']));
+    expect(fake.invoked('engine.models')).toHaveLength(reads + 1);
   });
 
   it('reads the catalogue again at every mount, so a later tab sees what the host learned since', async () => {
@@ -171,13 +186,14 @@ describe('setup intent hook', () => {
   // P5 O7 M9: the machine's own route has a catalogue of its own (what the machine resolves to, which the host answers):
   // asked by `route`, again on each route change, and no other route's catalogue stands in while it is read
   it('asks the machine’s own route’s catalogue by `route`, refetching on Gateway → Machine’s own, with no gateway catalogue meanwhile', async () => {
-    withMain({ 'engine.models': (input: { route?: string }) => (input.route === 'machine' ? undefined : CATALOGUE) });
+    const MACHINE: ModelCatalogue = { models: [{ value: 'opus', displayName: 'Opus 5.5' }], source: 'cached', at: null };
+    withMain({ 'engine.models': (input: { route?: string }) => (input.route === 'machine' ? MACHINE : CATALOGUE) });
     putIntent(pageIntent({ gateway: 'gateway' }));
     const { result } = renderHook(() => useSetupIntent(A));
     await waitFor(() => expect(result.current!.options.models.map((m) => m.value)).toEqual(['default', 'haiku', 'claude/astra']));
     act(() => putIntent(pageIntent({ gateway: 'gateway', route: 'machine' })));
     await waitFor(() => expect(fake.invoked('engine.models').at(-1)).toEqual({ refresh: false, gateway: 'gateway', route: 'machine', cwd: REPO }));
-    expect(result.current!.options.models.map((m) => m.value), 'the gateway’s aliases are not the machine’s').toEqual(['default', 'opus', 'fable', 'sonnet', 'haiku']);
+    await waitFor(() => expect(result.current!.options.models.map((m) => m.value), 'the gateway’s aliases are not the machine’s').toEqual(['opus']));
     act(() => putIntent(pageIntent({ gateway: 'gateway', route: 'gateway' })));
     await waitFor(() => expect(result.current!.options.models.map((m) => m.value)).toEqual(['default', 'haiku', 'claude/astra']));
     expect(fake.invoked('engine.models').at(-1)).toEqual({ refresh: false, gateway: 'gateway', cwd: REPO });

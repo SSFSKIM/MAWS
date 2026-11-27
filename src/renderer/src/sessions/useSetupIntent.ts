@@ -6,7 +6,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { PermissionMode } from '@shared/graph/enums';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { ModelCatalogue, ModelCatalogueEntry } from '@shared/sessions/models';
-import { autoModeNote, BUILTIN_MODELS } from '@shared/sessions/models';
+import { autoModeNote } from '@shared/sessions/models';
 import type { FirstMessage, Location, SetupIntent, SetupIntentPatch } from '@shared/sessions/intent';
 import type { SetupEvent } from '@shared/sessions/setup';
 import { defaultBranchName, type WorktreeInfo } from '@shared/sessions/worktree';
@@ -27,6 +27,8 @@ export type { ModelInfo };
 export interface SetupIntentOptions {
   models: ModelInfo[];
   autoModeNote: string | null;
+  modelsLoading: boolean; // the observation set 4: no catalogue answered for the launch's route yet
+  refreshModels(): void; // read the catalogue again (the model menu, as it opens)
 }
 
 export interface SetupIntentHook extends ComposerSetupIntentHook {
@@ -177,7 +179,7 @@ interface RepositoryFacts {
   trustError: string | null; // a failed trust check disables Send with the error
 }
 
-const BUILTIN_FALLBACK: ModelCatalogue = { models: [...BUILTIN_MODELS], source: 'builtin', at: null };
+const NO_CATALOGUE: ModelCatalogue = { models: [], source: 'builtin', at: null };
 
 // P5 O6 M4: an intent is read on its session's machine, the one its address names (this machine's until O7's picker).
 async function readRepository(machine: MachineRef, directory: string): Promise<RepositoryFacts> {
@@ -189,19 +191,21 @@ async function readRepository(machine: MachineRef, directory: string): Promise<R
   return { directory, repoRoot, worktrees: listed.ok ? listed.value.worktrees : [], trustError: null };
 }
 
-// The catalogue at every mount and on every route change: the host answers the tab's route's catalogue from its cache
-// in memory, which a launch or a refresh updates (the relay's `claude/*` aliases arrive with the first routed launch),
-// so each new tab sees what the host knows now for the route it would launch on, not the most recently updated route's.
-// A failed read shows the built-in list the host itself answers before any launch. The directory it names is the one
-// the launch would read settings from, which may set a model environment of its own (debt wave 5).
+// The catalogue at every mount, on every route change and each time the model menu opens: the host answers the tab's
+// route's catalogue from its cache, which every launch's initialize, every list_models and (the owner's observation set
+// 4) the prestart engine's initialize update, falling back to what a session on the machine last listed, so each new tab
+// sees what a running session would list for the route it would launch on. Until it answers nothing is listed (the
+// menu says it is reading), never a list built into the app; a failed read keeps what was read, else lists nothing.
+// The directory it names is the one the launch would read settings from, which may set a model environment of its own
+// (debt wave 5).
 // P5 O7 M9: the machine's own route is asked by `route` (with the legacy field the intent holds beside it), whose
 // catalogue the host answers from what the machine resolves to; Gateway and Direct by the legacy field alone, as before.
-async function readCatalogue(machine: MachineRef, route: Route, gateway: SetupIntent['gateway'], cwd: string | null): Promise<ModelCatalogue> {
+async function readCatalogue(machine: MachineRef, route: Route, gateway: SetupIntent['gateway'], cwd: string | null): Promise<ModelCatalogue | null> {
   const asked = route === 'machine' ? { refresh: false, gateway, route } : { refresh: false, gateway: route };
   const result = await ipc.invoke('engine.models', cwd === null ? asked : { ...asked, cwd }, { machine });
   if (result.ok) return result.value;
   console.warn('[sessions] engine.models unavailable', result.error);
-  return BUILTIN_FALLBACK;
+  return null;
 }
 
 function useSetupOptions(
@@ -221,15 +225,19 @@ function useSetupOptions(
   const gateway = intent?.gateway ?? null;
   const route = intent === null ? null : readRoute(intent);
   const settingsDirectory = location ? settingsDirectoryOf(location) : null;
+  const [asks, setAsks] = useState(0); // each `refreshModels` reads again
+  const refreshModels = useCallback(() => setAsks((n) => n + 1), []);
   useEffect(() => {
     if (route === null || gateway === null) return;
     let live = true;
-    void readCatalogue(machine, route, gateway, settingsDirectory).then((catalogue) => live && setRead({ route, catalogue }));
+    void readCatalogue(machine, route, gateway, settingsDirectory).then((catalogue) => {
+      if (live) setRead((was) => (catalogue !== null ? { route, catalogue } : was !== null && was.route === route ? was : { route, catalogue: NO_CATALOGUE }));
+    });
     return () => {
       live = false;
     };
-  }, [machine, route, gateway, settingsDirectory]);
-  const catalogue = read !== null && read.route === route ? read.catalogue : BUILTIN_FALLBACK;
+  }, [machine, route, gateway, settingsDirectory, asks]);
+  const catalogue = read !== null && read.route === route ? read.catalogue : null;
 
   // The repository is read again only when the base directory moves to another repository or out of one; a move
   // between two locations of one repository keeps what was read.
@@ -244,9 +252,10 @@ function useSetupOptions(
   }, [machine, base, known]);
 
   const options = useMemo((): SetupIntentOptions => {
-    if (intent === null) return { models: [], autoModeNote: null };
-    return { models: modelsOf(catalogue), autoModeNote: noteFor(catalogue, intent, fallback) };
-  }, [intent, catalogue, fallback]);
+    if (intent === null) return { models: [], autoModeNote: null, modelsLoading: false, refreshModels };
+    if (catalogue === null) return { models: [], autoModeNote: null, modelsLoading: true, refreshModels };
+    return { models: modelsOf(catalogue), autoModeNote: noteFor(catalogue, intent, fallback), modelsLoading: false, refreshModels };
+  }, [intent, catalogue, fallback, refreshModels]);
   // A failed trust check is read again at Send (the directory may be readable now): the refusal stands only while the
   // check still fails.
   const recheck = useCallback(async () => {

@@ -12,7 +12,7 @@ import { access, mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { configFilePath, legacyConfigPath } from '@shared/engine/config-dir'; // P5 O7 M9: the engine's global-config selection, the trust reader's
 import * as z from 'zod';
-import { BUILTIN_MODELS, ModelCatalogueEntrySchema, type ModelCatalogue } from '@shared/sessions/models';
+import { BUILTIN_MODELS, isGatewayModel, ModelCatalogueEntrySchema, type ModelCatalogue } from '@shared/sessions/models';
 import { GATEWAY_KEYS } from '@shared/engine/route'; // P5 O7 M9
 import { linkedWorktreeStore, localSettingsFiles } from './local-store'; // P2-F wave S (S-catalogue); P5 O7 M9: linkedWorktreeStore
 import { managedSettings, managedSettingsDir } from './session-start-hooks'; // P5 O7 M9: resolve-style.ts's managed path
@@ -34,6 +34,9 @@ type CacheFile = z.infer<typeof StoredCacheFileSchema>;
 export function modelsKey(engineVersion: string, gateway: 'gateway' | 'direct'): string {
   return `${engineVersion}/${gateway}`;
 }
+// The route a key names (its second part).
+const routeOfKey = (key: string): string | null => key.split('/')[1] ?? null;
+const cachedOrBuiltin = (entry: Entry | undefined): ModelCatalogue => (entry ? { models: entry.models, source: 'cached', at: entry.at } : { models: [...BUILTIN_MODELS], source: 'builtin', at: null });
 
 // The variables that change the rows the engine lists (SPEC 06 §12.1's model-settings set, less the ones that pick a
 // helper's model rather than a row: the subagent, utility, auto-mode and classifier models; plus the two that add or
@@ -250,10 +253,24 @@ export class ModelsCache {
   }
 
   // The catalogue kept under `key`, else under `fallback` (a launch keyed by its model environment before its first
-  // list: its route's); with no key (a caller that does not name its route), the most recently updated.
+  // list: its route's); with no key (a caller that does not name its route), the most recently updated. The owner's
+  // observation set 4: a key no launch has listed yet (the engine updated since the last session, a route not run on
+  // this version) answers the route's newest list on another version, else the newest of any route's, the relay's
+  // aliases left out for Direct: what a session on this machine last listed, never the built-in list while one is kept.
   answer(key?: string, fallback?: string): ModelCatalogue {
-    const entry: Entry | undefined = key !== undefined ? (this.cached.entries[key] ?? (fallback !== undefined ? this.cached.entries[fallback] : undefined)) : Object.values(this.cached.entries).at(-1);
-    return entry ? { models: entry.models, source: 'cached', at: entry.at } : { models: [...BUILTIN_MODELS], source: 'builtin', at: null };
+    if (key === undefined) return cachedOrBuiltin(this.newest(null));
+    const own = this.cached.entries[key] ?? (fallback !== undefined ? this.cached.entries[fallback] : undefined);
+    const route = routeOfKey(fallback ?? key);
+    const other = own ?? this.newest(route);
+    if (other !== undefined) return cachedOrBuiltin(other);
+    const any = this.newest(null);
+    return cachedOrBuiltin(any && route === 'direct' ? { ...any, models: any.models.filter((model) => !isGatewayModel(model.value)) } : any);
+  }
+
+  // The most recently updated entry: of `route` alone, by its plain route keys (`<version>/<route>`), or of any key.
+  private newest(route: string | null): Entry | undefined {
+    const entries = Object.entries(this.cached.entries).filter(([key]) => route === null || (key.split('/').length === 2 && routeOfKey(key) === route));
+    return entries.map(([, entry]) => entry).sort((a, b) => a.at.localeCompare(b.at)).at(-1);
   }
 
   private async write(file: CacheFile): Promise<void> {

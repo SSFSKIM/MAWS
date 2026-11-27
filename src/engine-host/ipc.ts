@@ -358,7 +358,14 @@ export function registerEngineIpc(hostOn: HostOn, emit: HostEmit, deps: EngineIp
     session.on('queue', (queue) => wire.stream?.queue(queue));
     session.on('brokerItems', (items) => wire.stream?.brokerItems(items));
     session.on('catalog', (catalog) => wire.stream?.catalog(catalog));
-    session.on('models', (list) => (wire.stream ? updateModels(id, list) : void (wire.models = list)));
+    // the owner's observation set 4: the catalogue takes a prestart's list at its initialize, not at its reveal, so a New
+    // chat's picker lists, before Send, what the engine it will run on lists (the list is no session's own state)
+    const prestartKey = catalogueKey(plan.engineVersion, plan.gateway, { env: plan.env, cwd: plan.cwd, flagEnv: plan.flagSettings.env });
+    session.on('models', (list) => {
+      if (wire.stream) return updateModels(id, list);
+      wire.models = list;
+      void Promise.all([prestartKey, modelsLoaded]).then(([key]) => models.update(key, list));
+    });
     session.on('paneShow', (request) => void (wire.stream && emit('maws.pane.show', request)));
     session.on('artifactCapture', (request) => void (wire.stream && emit('maws.artifact.capture', request)));
     session.on('artifactExport', (request) => void (wire.stream && emit('maws.artifact.export', request)));

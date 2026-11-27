@@ -1,7 +1,7 @@
 import { join } from 'node:path';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { EngineSessionStatus } from '@shared/engine/status';
 import type { AppSessionId } from '@shared/graph/ids';
 import { SessionRecordSchema } from '@shared/graph/session';
@@ -14,7 +14,6 @@ import { createWidgetBackend, type WidgetBackend } from '../../../../test/suppor
 import { at, OTHER_MACHINE, TEST_MACHINE } from '../../../../test/support/machine';
 import { registerSetupIntentHook, type SetupIntentHook } from '../composer';
 import { effortBasis, resetEffectiveEfforts, useEffectiveEfforts } from '../composer/effective-effort';
-import { GatewayDialogs } from '../gateway/SwitchSheet';
 import { ipc } from '../ipc/client';
 import { useSetup } from '../sessions/store';
 import { useComposerStore } from '../stores/composer';
@@ -24,9 +23,6 @@ import { ID as INTENT_ID, intent } from '../test-support/setup-intents';
 import { effortLevelsOf, resetModelRequests } from './model';
 import { modelSelector } from './ModelSelector';
 import { emptyObservedFacts } from '@shared/engine/observed-facts';
-import type { SetupIntent } from '@shared/sessions/intent';
-import { machineSettingsDefaults } from '@shared/settings/defaults';
-import { GATEWAY } from '../settings-tab/copy';
 import { REL } from '../test-support/relative-time';
 import { accessibleText } from '../test-support/accessible-text';
 
@@ -44,9 +40,6 @@ let offs: (() => void)[] = [];
 
 beforeEach(() => {
   backend = createWidgetBackend({ root: ROOT, statuses: loadScenario(join(ROOT, 'test/fixtures/shell/nine-sessions.json')).engine });
-  // the machine's default route, as main answers it (the intent binding reads it on every mount); unanswered, each
-  // mount warned on stderr
-  backend.script('machineSettings.get', () => ({ settings: machineSettingsDefaults(), version: 1, defaultRoute: 'machine' }));
   window.maws = backend.bridge();
   useSessions.setState({ engine: new Map([[ID, lifted(backend.status(BARE))]]) });
   offs = [ipc.on('session.status', (event) => useSessions.getState().applyStatus(event, TEST_MACHINE))];
@@ -266,8 +259,8 @@ describe('the effort view: the effort in words over the model, a slider over its
   });
 });
 
-// UX wave U4a (l3-input-12, decision 21): in the open model list a digit 1 to 9 picks the row drawn at that place,
-// Default first; a disabled row is not picked
+// UX wave U4a (l3-input-12, decision 21): in the open model list a digit 1 to 9 picks the row drawn at that place
+// (the owner's observation set 4: there is no Default row); a disabled row is not picked
 describe('the digits in the model list', () => {
   it('a digit picks the row at that place; none while the rows are disabled, none with a modifier, none in the effort view', async () => {
     mount('model');
@@ -276,42 +269,40 @@ describe('the digits in the model list', () => {
     fireEvent.keyDown(back, { key: '3', metaKey: true });
     fireEvent.keyDown(back, { key: '0' });
     expect(calls('set_model')).toHaveLength(0);
-    fireEvent.keyDown(back, { key: '3' }); // Default, Opus, then Fable
-    fireEvent.keyDown(back, { key: '4' }); // the rows are disabled while that change is with the engine
+    fireEvent.keyDown(back, { key: '2' }); // Opus, then Fable
+    fireEvent.keyDown(back, { key: '3' }); // the rows are disabled while that change is with the engine
     await waitFor(() => expect(calls('set_model').map((c) => c.input)).toEqual([{ appSessionId: BARE, model: 'fable' }]));
     await waitFor(() => expect(view()).toBe('effort')); // a choice returns to the effort view, as a click's does
     fireEvent.keyDown(screen.getByRole('slider', { name: 'Effort' }), { key: '1' });
     await act(async () => void (await Promise.resolve()));
     expect(calls('set_model')).toHaveLength(1);
     fireEvent.click(screen.getByRole('button', { name: /Select model/ }));
-    fireEvent.keyDown(screen.getByRole('button', { name: SELECTOR_BACK }), { key: '1' }); // Default
-    await waitFor(() => expect(calls('set_model').map((c) => c.input)).toEqual([{ appSessionId: BARE, model: 'fable' }, { appSessionId: BARE, model: null }]));
+    fireEvent.keyDown(screen.getByRole('button', { name: SELECTOR_BACK }), { key: '1' }); // Opus
+    await waitFor(() => expect(calls('set_model').map((c) => c.input)).toEqual([{ appSessionId: BARE, model: 'fable' }, { appSessionId: BARE, model: 'opus' }]));
   });
 });
 
-describe('the model view: Model, Default with its recommendation, the catalogue with the current row checked', () => {
-  // the word cut (P544): the heading reads "Model", the view's group keeps "Select model"
-  it('lists Default as a recommended set, then the catalogue without `default`, gateway aliases from the gateway', async () => {
+describe('the model view: Model, the catalogue with the model the session runs checked', () => {
+  // the word cut (P544): the heading reads "Model", the view's group keeps "Select model"; the owner's observation set 4:
+  // no Default row, before a session starts or during one
+  it('lists the catalogue without `default` and no Default row, gateway aliases from the gateway', async () => {
     mount('model');
     expect(view()).toBe('model');
     expect(screen.getByRole('heading', { name: 'Model' })).toBeTruthy();
     expect(screen.getByRole('group', { name: 'Select model' })).toBeTruthy();
     const claude = await screen.findByRole('group', { name: 'Claude models' });
-    expect(names(claude)).toEqual(['Opus 5.5 (1M context)', 'Fable 5.1', 'Sonnet 5', 'Haiku']); // `default` is the entry above, not a row
+    expect(names(claude)).toEqual(['Opus 5.5 (1M context)', 'Fable 5.1', 'Sonnet 5', 'Haiku']); // `default` is no row
     expect(within(screen.getByRole('group', { name: 'Gateway models' })).getAllByRole('menuitemradio')).toHaveLength(7);
     expect(item(/^astra/).textContent).toContain('From gateway');
     expect(within(item(/^Haiku/)).getByText('Cannot hold auto mode')).toBeTruthy(); // L99: the mode it runs in is the chip's and the note's, not the caption's
-    const fallback = item(/Default/);
-    expect(fallback.querySelector('.truncate')?.textContent).toBe('Default');
-    expect(within(fallback).getByText('Recommended set of models')).toBeTruthy();
-    expect(within(fallback).getAllByText('Default')).toHaveLength(1); // no second Default badge
-    expect(fallback.getAttribute('aria-checked')).toBe('false');
+    expect(screen.queryByRole('menuitemradio', { name: /^Default/ })).toBeNull();
+    expect(screen.queryByText('Recommended set of models')).toBeNull();
     expect(screen.getAllByRole('menuitemradio', { checked: true }).map((r) => r.querySelector('.truncate')?.textContent)).toEqual(['Sonnet 5']); // the model the session asked for
     expect(screen.queryByText(/Default \(recommended\)|Engine default|Default model/)).toBeNull();
     expect(screen.getByText('For this session only')).toBeTruthy();
   });
 
-  it('a choice applies at once with set_model and returns to the effort view; Default sends null', async () => {
+  it('a choice applies at once with set_model and returns to the effort view; a session on its default has the model it runs checked', async () => {
     mount('model');
     await screen.findByRole('group', { name: 'Claude models' });
     fireEvent.click(item(/^Opus/));
@@ -324,17 +315,16 @@ describe('the model view: Model, Default with its recommendation, the catalogue 
     // the word cut (P549): the checked row's change on its way is a quiet spinner in place of its check, no word
     expect(await within(item(/^Opus/)).findByRole('progressbar', { name: 'setting…' })).toBeTruthy();
     expect(item(/^Opus/).textContent).not.toMatch(/✓|setting…/);
-    fireEvent.click(item(/Default/));
-    await waitFor(() => expect(calls('set_model').map((c) => c.input)).toEqual([{ appSessionId: BARE, model: 'opus' }, { appSessionId: BARE, model: null }]));
+    cleanup();
+    resetModelRequests();
+    setStatus({ model: { requested: null, resolved: 'claude-fable-5-1[1m]' } }); // a session on its default, running Fable
+    mount('model');
+    await screen.findByRole('group', { name: 'Claude models' });
+    expect(screen.getAllByRole('menuitemradio', { checked: true }).map((r) => r.querySelector('.truncate')?.textContent)).toEqual(['Fable 5.1']);
+    const before = calls('set_model').length;
+    fireEvent.click(item(/^Fable/)); // the model it runs: nothing to set
     await waitFor(() => expect(view()).toBe('effort'));
-    fireEvent.click(screen.getByRole('button', { name: /Select model/ }));
-    expect(item(/^Default/).getAttribute('aria-checked')).toBe('true');
-    // an explicit Default on its way is marked as a named row's is (P549), until the engine reports running it
-    expect(await within(item(/^Default/)).findByRole('progressbar', { name: 'setting…' })).toBeTruthy();
-    expect(item(/^Default/).textContent).not.toContain('✓');
-    setStatus({ model: { requested: null, resolved: 'claude-opus-5-5[1m]' } }); // the init frame: Default runs Opus
-    await waitFor(() => expect(within(item(/^Default/)).queryByRole('progressbar', { hidden: true })).toBeNull());
-    expect(item(/^Default/).textContent).toContain('✓');
+    expect(calls('set_model')).toHaveLength(before);
   });
 
   it('`/model claude/astra` in auto proposes it with the local-lane note and applies nothing until chosen', async () => {
@@ -441,24 +431,19 @@ describe('a session with a record and no ready process', () => {
   });
 });
 
-// main's answers for the route segment: the machine's default route (`null`: its daemon predates the machine route, and
-// answers none), and the intent as a patch leaves it
-const routeAnswers = (held: SetupIntent, defaultRoute: 'machine' | 'gateway' | null) => async (name: string, input: unknown) => {
-  if (name === 'machineSettings.get') return { ok: true, value: { settings: machineSettingsDefaults(), version: 1, ...(defaultRoute !== null && { defaultRoute }) } };
-  if (name !== 'session.intent.patch') return { ok: false, error: { code: 'internal', message: `unexpected ${name}` } };
-  const { patch } = input as { patch: { route: 'machine' | 'gateway' | 'direct' } };
-  return { ok: true, value: { ...held, route: patch.route, gateway: patch.route === 'machine' ? held.gateway : patch.route } };
-};
+// one stable function per stub, as the hook's useCallback gives
+const refreshOnce = (log: string[]) => () => void log.push('asked');
 
-describe('an unstarted session writes its intent, with D-19’s route', () => {
+describe('an unstarted session writes its intent, with no route segment and no Default row', () => {
   let offHook: () => void;
   afterEach(() => {
     offHook?.();
     useSetup.setState({ intents: new Map() });
   });
 
-  function stub(over: Partial<SetupIntentHook['intent']> = {}, tab: AppSessionId = INTENT) {
+  function stub(over: Partial<SetupIntentHook['intent']> = {}, tab: AppSessionId = INTENT, catalogue: { loading?: boolean; refreshes?: string[] } = {}) {
     const patches: unknown[] = [];
+    const refreshModels = catalogue.refreshes ? refreshOnce(catalogue.refreshes) : undefined;
     let current: SetupIntentHook['intent'] = { kind: 'create', location: { kind: 'directory', path: '/repo' }, additionalDirectories: [], model: null, effort: null, permissionMode: null, message: null, draft: null, ...over };
     const models = [
       { value: 'default', resolvedModel: 'claude-opus-5-5[1m]', displayName: 'Default (recommended)', supportedEffortLevels: ['low', 'medium', 'high', 'xhigh', 'max'] },
@@ -470,7 +455,7 @@ describe('an unstarted session writes its intent, with D-19’s route', () => {
       id === tab
         ? {
             intent: current,
-            options: { models, autoModeNote: null },
+            options: { models: catalogue.loading ? [] : models, autoModeNote: null, modelsLoading: catalogue.loading === true, refreshModels },
             patch: async (p) => {
               patches.push(p);
               current = { ...current, ...p };
@@ -487,7 +472,8 @@ describe('an unstarted session writes its intent, with D-19’s route', () => {
   it('a model choice drops an effort the model does not admit; the effort slider writes the intent', async () => {
     const patches = stub({ model: 'opus', effort: 'high' });
     mount('model', '', INTENT);
-    expect(screen.getByRole('radiogroup', { name: 'Route' })).toBeTruthy();
+    expect(screen.queryByRole('radiogroup')).toBeNull(); // the owner's observation set 4: the route is not chosen here
+    expect(screen.queryByText(/Machine’s own|ClaudeUsage relay/)).toBeNull();
     fireEvent.click(item(/^Haiku/));
     await waitFor(() => expect(patches).toEqual([{ model: 'haiku', effort: null }]));
     // the word cut (P555): a new chat's list has no last line; C40's "For this session only" is a started session's
@@ -495,81 +481,27 @@ describe('an unstarted session writes its intent, with D-19’s route', () => {
     expect(screen.queryByText('For this session only')).toBeNull();
   });
 
-  // the word cut (P552): on Direct the greyed gateway models have no sentence above them; picking one still asks
-  it('on Direct greys the gateway models with no sentence above them, and picking one asks to start on the relay', async () => {
-    stub();
-    useSetup.setState({ intents: new Map([[INTENT, intent({ appSessionId: INTENT, gateway: 'direct' })]]) });
+  // the owner's observation set 4: a new chat on its default has the model it will start on checked, from the user's
+  // settings, else the catalogue's default; picking it writes nothing
+  it('checks the model a new chat starts on and writes nothing when it is picked', async () => {
+    const patches = stub();
     mount('model', '', INTENT);
-    const gateway = screen.getByRole('group', { name: 'Gateway models' });
-    expect(gateway.querySelector('p')).toBeNull();
-    expect(gateway.textContent).not.toContain('cannot serve');
-    fireEvent.click(within(gateway).getByRole('menuitemradio', { name: /^sol/ }));
-    expect(within(gateway).getByRole('group', { name: 'Start on the relay?' })).toBeTruthy();
+    await screen.findByRole('group', { name: 'Claude models' });
+    expect(screen.queryByRole('menuitemradio', { name: /^Default/ })).toBeNull();
+    expect(screen.getAllByRole('menuitemradio', { checked: true }).map((r) => r.querySelector('.truncate')?.textContent)).toEqual(['Opus 5.5 (1M context)']);
+    fireEvent.click(item(/^Opus/));
+    await waitFor(() => expect(view()).toBe('effort'));
+    expect(patches).toEqual([]);
   });
 
-  // P5 O7 M9: the machine's own route is the intent's `route`, offered beside Gateway and Direct, and always one to go back to
-  it('names the machine’s own route the intent holds, and writes each choice as the intent’s route', async () => {
-    stub();
-    const held = intent({ appSessionId: INTENT, gateway: 'direct', route: 'machine' });
-    useSetup.setState({ intents: new Map([[INTENT, held]]) });
-    const invoke = vi.spyOn(ipc, 'invoke').mockImplementation(routeAnswers(held, 'machine') as never);
+  it('reads the catalogue again as the menu opens, and says it is reading while none has answered', async () => {
+    const refreshes: string[] = [];
+    stub({}, INTENT, { loading: true, refreshes });
     mount('model', '', INTENT);
-    const segment = screen.getByRole('radiogroup', { name: 'Route' });
-    expect(within(segment).getAllByRole('radio').map((r) => [r.textContent, r.getAttribute('aria-checked')])).toEqual([
-      ['Machine’s own', 'true'],
-      ['ClaudeUsage relay', 'false'],
-      ['Direct', 'false'],
-    ]);
-    // the legacy field beside `route` for the two legacy choices: a daemon that predates the machine route still applies it
-    fireEvent.click(within(segment).getByRole('radio', { name: 'ClaudeUsage relay' }));
-    await waitFor(() => expect(invoke).toHaveBeenCalledWith('session.intent.patch', { appSessionId: INTENT, patch: { route: 'gateway', gateway: 'gateway' } }));
-    await waitFor(() => expect(within(segment).getByRole('radio', { name: 'ClaudeUsage relay' }).getAttribute('aria-checked')).toBe('true'));
-    fireEvent.click(within(segment).getByRole('radio', { name: 'Machine’s own' }));
-    await waitFor(() => expect(invoke).toHaveBeenLastCalledWith('session.intent.patch', { appSessionId: INTENT, patch: { route: 'machine' } }));
-    invoke.mockRestore();
-  });
-
-  // the intent's own machine answers for it: a tab on another machine (its project's) is read there, not here
-  it('greys Machine’s own for a tab whose machine’s daemon predates it, though this machine’s is current', async () => {
-    const TARGET = addressOf(OTHER_MACHINE, INTENT_ID);
-    stub({}, TARGET);
-    const held = intent({ appSessionId: TARGET, gateway: 'gateway' });
-    useSetup.setState({ intents: new Map([[TARGET, held]]) });
-    const local = routeAnswers(held, 'gateway');
-    const older = routeAnswers(held, null);
-    const invoke = vi.spyOn(ipc, 'invoke').mockImplementation(((name: string, input: unknown, opts?: { machine?: string }) => (opts?.machine === OTHER_MACHINE ? older : local)(name, input)) as never);
-    mount('model', '', TARGET);
-    const machine = within(screen.getByRole('radiogroup', { name: 'Route' })).getByRole('radio', { name: 'Machine’s own' }) as HTMLButtonElement;
-    await waitFor(() => expect(machine.disabled).toBe(true));
-    expect(machine.title).toBe(GATEWAY.routeDropped);
-    expect(invoke.mock.calls.filter(([name]) => name === 'machineSettings.get').map(([, , opts]) => (opts as { machine?: string }).machine)).toEqual([OTHER_MACHINE]);
-    invoke.mockRestore();
-  });
-
-  it('on a daemon that predates the machine route: Machine’s own greyed with the mirror’s words, and Gateway and Direct still applied through the legacy field', async () => {
-    stub();
-    const held = intent({ appSessionId: INTENT, gateway: 'gateway' });
-    useSetup.setState({ intents: new Map([[INTENT, held]]) });
-    const invoke = vi.spyOn(ipc, 'invoke').mockImplementation(routeAnswers(held, null) as never);
-    mount('model', '', INTENT);
-    const segment = screen.getByRole('radiogroup', { name: 'Route' });
-    const machine = within(segment).getByRole('radio', { name: 'Machine’s own' }) as HTMLButtonElement;
-    await waitFor(() => expect(machine.disabled).toBe(true));
-    expect(machine.title).toBe(GATEWAY.routeDropped);
-    fireEvent.click(within(segment).getByRole('radio', { name: 'Direct' }));
-    await waitFor(() => expect(invoke).toHaveBeenCalledWith('session.intent.patch', { appSessionId: INTENT, patch: { route: 'direct', gateway: 'direct' } }));
-    invoke.mockRestore();
-  });
-
-  it('Direct on a gateway model asks for a Claude model first (pickDirectModel)', async () => {
-    stub({ model: 'claude/sol' });
-    render(
-      <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
-        <GatewayDialogs />
-      </QueryClientProvider>,
-    );
-    mount('model', '', INTENT);
-    fireEvent.click(screen.getByRole('radio', { name: /Direct/ }));
-    await waitFor(() => expect(screen.getByRole('dialog')).toBeTruthy());
+    expect(refreshes).toEqual(['asked']);
+    const list = screen.getByRole('menu', { name: 'Models' });
+    expect(await within(list).findByRole('progressbar', { name: 'Reading the models…' })).toBeTruthy();
+    expect(within(list).queryAllByRole('menuitemradio')).toEqual([]);
+    expect(screen.queryByText('No models')).toBeNull();
   });
 });

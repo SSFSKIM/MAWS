@@ -9,7 +9,7 @@ import type { Settings } from '@shared/ipc/schema';
 import { SETTINGS_DEFAULTS_V21 } from '@shared/settings/defaults';
 import type { AccountUsage, UsageSnapshot } from '@shared/usage/types';
 import { loadScenario } from '../../../../test/support/scenario';
-import { paceLine, paceRunsOutAt, routingFacts, unstartedRoute } from './routing-facts';
+import { paceLine, paceRunsOutAt, routingFacts } from './routing-facts';
 
 const ROOT = join(__dirname, '../../../..');
 const scenario = loadScenario(join(ROOT, 'test/fixtures/shell/nine-sessions.json'));
@@ -109,23 +109,9 @@ describe('routingFacts names the account and the switch', () => {
   });
 });
 
-// The architect's ruling (Decision Log, 2026-09-29, from C10's review): D-19's per-session Direct on an unstarted
-// session is a choice of the intent's route (`session.intent.patch { gateway }`), restarting nothing. The footer reads it
-// before routingFacts, which would call such a session's unrecorded route unknown and offer a restart.
-describe('an unstarted session chooses its route and restarts nothing', () => {
-  it('names the route the intent starts on and offers all three', () => {
-    // P5 O7 M9: the machine's own route first, every machine's default; `route` read before the legacy field
-    expect(unstartedRoute({ gateway: 'gateway' }, settings())).toEqual({ route: 'gateway', line: "Starts routed through ClaudeUsage's relay", choices: ['machine', 'gateway', 'direct'] });
-    expect(unstartedRoute({ gateway: 'direct' }, settings())).toMatchObject({ route: 'direct', line: "Starts direct · engine's own login" });
-    expect(unstartedRoute({ gateway: 'direct', route: 'machine' }, settings())).toEqual({ route: 'machine', line: 'Starts on the machine’s own route · its settings and login decide', choices: ['machine', 'gateway', 'direct'] });
-  });
-
-  it('offerDirect false leaves out Direct, except as the way back from it; the machine’s own route is always one to go back to', () => {
-    expect(unstartedRoute({ gateway: 'gateway' }, settings({ offerDirect: false })).choices).toEqual(['machine', 'gateway']);
-    expect(unstartedRoute({ gateway: 'direct', route: 'machine' }, settings({ offerDirect: false })).choices).toEqual(['machine', 'gateway']);
-    expect(unstartedRoute({ gateway: 'direct' }, settings({ offerDirect: false })).choices).toEqual(['machine', 'gateway', 'direct']);
-  });
-
+// An unstarted session has no route switch (the owner's observation set 4: none in the model menu either); a
+// provisional record's route reads as unknown.
+describe('an unstarted session', () => {
   it('what routingFacts would say of the same session, which is why the footer branches first', () => {
     const unstarted = { ...record, gateway: { ...record.gateway, routed: null } }; // a provisional record: no status, no route yet
     expect(routingFacts(unstarted, null, null, settings(), null)).toMatchObject({ route: 'unknown', targets: ['gateway', 'direct', 'machine'] });

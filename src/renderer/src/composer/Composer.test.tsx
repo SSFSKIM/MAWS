@@ -723,19 +723,6 @@ describe("composer DOM under C5's dispatcher", () => {
       live(A, { status: { model: { requested: 'haiku', resolved: 'claude-haiku-5-5' }, gateway: direct } }); // the first init frame
       await waitFor(() => expect(chip().getAttribute('aria-label')).toBe('Model Haiku'));
     });
-
-    it('Default chosen over another model names what Default runs, marked until the engine runs it', async () => {
-      live(A, { status: { model: { requested: 'haiku', resolved: 'claude-haiku-5-5' }, gateway: direct } });
-      mount([{ index: 0, id: A }]);
-      await waitFor(() => expect(chip().getAttribute('aria-label')).toBe('Model Haiku'));
-      await choose(/^Default/);
-      await waitFor(() => expect(invoked('session.setModel')).toEqual([{ appSessionId: A_ID, model: null }]));
-      await act(() => fake.reply('session.setModel', SET));
-      live(A, { status: { model: { requested: null, resolved: 'claude-haiku-5-5' }, gateway: direct } }); // the host records the null request
-      await waitFor(() => expect(chip().getAttribute('aria-label')).toBe('Model Sonnet, setting…'));
-      live(A, { status: { model: { requested: null, resolved: 'claude-sonnet' }, gateway: direct } }); // the next turn's init frame
-      await waitFor(() => expect(chip().getAttribute('aria-label')).toBe('Model Sonnet'));
-    });
   });
 
   // W3 (C4): the chip names the effort get_settings applied, and opens the selector C11 registers in its own menu, as

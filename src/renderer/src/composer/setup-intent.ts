@@ -48,7 +48,9 @@ export type HookResult = { ok: true } | { ok: false; error: string };
 
 export interface SetupIntentHook {
   intent: SetupIntent;
-  options: { models: ModelInfo[]; autoModeNote: string | null };
+  // the owner's observation set 4: `modelsLoading` while the catalogue has not answered (no list is shown in its place);
+  // `refreshModels` reads it again (the model menu, as it opens)
+  options: { models: ModelInfo[]; autoModeNote: string | null; modelsLoading?: boolean; refreshModels?(): void };
   // C10: the running setup's phase in words ("Creating worktree <name>…", "Trusting <key>…", "Starting…"), the submit
   // control's disabled-state reason while it runs; null (or absent) otherwise.
   phase?: string | null;

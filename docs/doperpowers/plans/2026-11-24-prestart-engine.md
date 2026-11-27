@@ -753,6 +753,7 @@ Each milestone is built test-first, and gets one `doperpowers:reviewer-medium` r
      - **A committed member replayed at a reconnect joins on the live row that confirmed it,** with no second read.
      - **The bench hook's path is quoted** for `/bin/sh` (`markerHookCommand`).
    - **Left, with a tracker row:** a session host that outlives its whole stop ladder and exit bound. Nothing is rolled back, the id is freed, and a later start's discard may restore the old backup over a newer launch's state. It needs a stuck session host.
+20. **2026-11-27. The owner's observation set 4: the model list feeds the catalogue at the hidden row's initialize.** R4-3 kept a hidden row's model list until the reveal. The owner ruled that a New chat's model menu lists, before Send, what a running session would list, from the same source. The prestart engine is that source, and the catalogue cache is no session's state: what it keeps is what any launch under the same key would write. So the host now writes the hidden row's list to the cache when it arrives (`ipc.ts` `wireHidden`), and the window reads the catalogue again each time the model menu opens. Nothing else of the row is published before the reveal. Test: `prestart.test.ts` "emits, lists and counts nothing…", which now expects the cache file.
 
 ## Outcomes & Retrospective
 

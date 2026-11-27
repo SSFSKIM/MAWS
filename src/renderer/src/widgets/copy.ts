@@ -293,12 +293,6 @@ export const MODEL = {
   } as Record<string, string>,
   refused: 'The engine refused the model',
   routingAccount: 'the routing account', // the gateway note's account when ClaudeUsage names none
-  // an unstarted session's route (the architect's ruling of 2026-09-29, the D-19 surface on an unstarted tab)
-  route: 'Route',
-  relayAskTitle: 'Start on the relay?',
-  relayAsk: (name: string) => `${name} runs through ClaudeUsage’s relay · this session would start routed instead of direct`,
-  keepDirect: 'Keep Direct',
-  useRelay: 'Use the relay',
   // A gateway model's auto-mode note as the widget words it (§19; mockup 06 vignette 03): C10's `GATEWAY_AUTO_NOTE`
   // is its chip's one line; the widget's form names the account the local reviews are counted against (the word cut,
   // P534: one sentence, the consequence).
@@ -359,8 +353,6 @@ export const SELECTOR = {
   back: 'Back to effort',
   reset: "Reset effort to the model's default", // the reset's name; its tooltip is `resetTip` (the word cut, P531)
   resetTip: 'Reset effort',
-  default: 'Default',
-  recommended: 'Recommended set of models',
   model: 'Model',
   setting: 'setting…', // the chip's word (C38), and the accessible name of the checked row's spinner (the word cut, P549)
   reading: 'Reading the models…', // the accessible name of the read's spinner (the word cut, P535)

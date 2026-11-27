@@ -645,7 +645,7 @@ test.describe('interactive', () => {
   // W3 (C4, charter §5.4 as amended 2026-10-01 and by the UX wave's U4, l3-input-14): the chip reads the model's display
   // name and the effort in words, with the effort get_settings applied (pass2/dialogs seq 58: high), its tooltip the whole
   // display name and the alias, and opens Codex's selector above itself: the effort view first, then the model list
-  test('the model chip says Sonnet 5 High and opens the selector: effort first, the list with Default, a pick applies at once, fast after its warning', async ({ backend }) => {
+  test('the model chip says Sonnet 5 High and opens the selector: effort first, the list with no Default row, a pick applies at once, fast after its warning', async ({ backend }) => {
     const { page } = backend;
     await openPage(page, { appSessionId: READY, mode: 'interactive' });
     const chip = page.getByRole('button', { name: /^Model / });
@@ -664,9 +664,9 @@ test.describe('interactive', () => {
     await selector.getByRole('button', { name: 'Sonnet 5 · Select model' }).click();
     await expect(selector).toHaveAttribute('data-model-selector', 'model');
     const list = selector.getByRole('menu', { name: 'Models' });
-    await expect(list.getByRole('group', { name: 'Claude models' }).getByRole('menuitemradio')).toHaveCount(4); // pass2/auto-routed seq 143, `default` as the entry above
+    await expect(list.getByRole('group', { name: 'Claude models' }).getByRole('menuitemradio')).toHaveCount(4); // pass2/auto-routed seq 143, `default` drawn as no row (the owner's observation set 4)
     await expect(list.getByRole('group', { name: 'Gateway models' }).getByRole('menuitemradio')).toHaveCount(7);
-    await expect(list.getByRole('menuitemradio', { name: /^Default/ })).toContainText('DefaultRecommended set of models');
+    await expect(list.getByRole('menuitemradio', { name: /^Default/ })).toHaveCount(0);
     await expect(list.getByRole('menuitemradio', { name: /^Sonnet 5/ })).toHaveAttribute('aria-checked', 'true');
     await expect(list.getByRole('menuitemradio', { name: /^Haiku/ })).toContainText('Cannot hold auto mode');
     await expect(list.getByRole('menuitemradio', { name: /^astra/ })).toContainText('From gateway');

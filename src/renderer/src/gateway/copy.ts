@@ -19,9 +19,6 @@ export const ROUTE = {
   held: (holder: string) => `Held by ${holder} · switch it there`,
   holders: { terminal: 'a terminal', background_job: 'a background job' } as Record<string, string>,
   archived: 'Archived · unarchive it to switch',
-  // an unstarted session (D-19's per-session Direct): the intent's route, chosen before the first send
-  starts: { gateway: "Starts routed through ClaudeUsage's relay", direct: "Starts direct · engine's own login" } satisfies Record<Route, string>,
-  choice: { gateway: 'ClaudeUsage relay', direct: 'Direct' } satisfies Record<Route, string>,
 };
 
 // P5 O7 M9: the machine's own route (nothing injected), named by what `get_status` reported (observed-route.ts)
@@ -31,8 +28,6 @@ export const MACHINE_ROUTE = {
   login: (login: string | null) => (login === null ? 'Anthropic login' : `Anthropic login · ${login}`),
   pending: 'not verified yet',
   reachedClaudeUsage: 'ClaudeUsage', // the switch's toast: what the machine reached, briefly
-  choice: 'Machine’s own', // the route segment's (an unstarted session's, Settings › Gateway's)
-  starts: 'Starts on the machine’s own route · its settings and login decide',
   lastRan: (what: string) => `Last ran on the machine’s own route · ${what}`,
   toolSearch: 'as the machine’s settings set it',
 };
