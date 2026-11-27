@@ -33,6 +33,13 @@ async function open(live?: (element: HTMLElement) => void, element: HTMLElement 
   await act(() => startMarkup());
 }
 
+// What a control's tooltip says once it holds focus (ticket 815: a Tip, which keyboard focus opens)
+function tipOnFocus(control: HTMLElement): string | null {
+  act(() => control.focus());
+  const text = screen.queryByRole('tooltip')?.textContent ?? null;
+  act(() => control.blur());
+  return text;
+}
 const canvas = () => document.querySelector<SVGSVGElement>('[data-markup-canvas]')!;
 const paths = () => [...canvas().querySelectorAll('path')].map((p) => p.getAttribute('d'));
 function drag(points: [number, number][]): void {
@@ -75,10 +82,10 @@ describe('MarkupLayer', () => {
     expect(screen.getByRole('radio', { name: 'Red' }).getAttribute('aria-checked')).toBe('true');
     expect(screen.getAllByRole('radio').map((r) => r.getAttribute('aria-label'))).toEqual(['Pen', 'Box', 'Arrow', 'Text', 'Red', 'Blue', 'Green', 'Black', 'White']);
     const undo = screen.getByRole('button', { name: 'Undo' });
-    expect(undo).toHaveProperty('disabled', true);
-    // the word cut (T124): a greyed icon's tooltip is its word, as when it acts
-    expect(undo.getAttribute('title')).toBe('Undo');
-    expect(screen.getByRole('button', { name: 'Clear' }).getAttribute('title')).toBe('Clear');
+    expect(undo.getAttribute('aria-disabled'), 'greyed, keeping Tab (ticket 815)').toBe('true');
+    // the word cut (T124): a greyed icon's tooltip is its word, as when it acts, and keyboard focus opens it (ticket 815)
+    expect(tipOnFocus(undo)).toBe('Undo');
+    expect(tipOnFocus(screen.getByRole('button', { name: 'Clear' }))).toBe('Clear');
     expect(screen.getByRole('button', { name: 'Add to chat' })).toHaveProperty('disabled', false); // an unmarked still is a screenshot
   });
 
@@ -86,8 +93,8 @@ describe('MarkupLayer', () => {
   it('names each ink without a tooltip, and the drag handle’s tooltip reads Move', async () => {
     await open();
     for (const name of ['Red', 'Blue', 'Green', 'Black', 'White']) expect(screen.getByRole('radio', { name }).hasAttribute('title')).toBe(false);
-    expect(screen.getByRole('radio', { name: 'Pen' }).getAttribute('title')).toBe('Pen');
-    expect(screen.getByRole('button', { name: 'Move mark-up toolbar' }).getAttribute('title')).toBe('Move');
+    expect(tipOnFocus(screen.getByRole('radio', { name: 'Pen' }))).toBe('Pen');
+    expect(tipOnFocus(screen.getByRole('button', { name: 'Move mark-up toolbar' }))).toBe('Move');
   });
 
   it('moves the toolbar without drawing and keeps it inside the annotation surface', async () => {
@@ -155,7 +162,7 @@ describe('MarkupLayer', () => {
     expect(paths()).toEqual(['M10 10L20 20L30 15']);
     await userEvent.click(screen.getByRole('button', { name: 'Clear' }));
     expect(paths()).toEqual([]);
-    expect(screen.getByRole('button', { name: 'Clear' })).toHaveProperty('disabled', true);
+    expect(screen.getByRole('button', { name: 'Clear' }).getAttribute('aria-disabled')).toBe('true');
   });
 
   it('places text where clicked: Enter commits, Escape in the field cancels the field only', async () => {

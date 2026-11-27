@@ -10,6 +10,7 @@ import { useSessions } from '../stores/sessions';
 import { SearchField } from '../widgets/plugins/LibraryHeader';
 import { machineOf } from '@shared/machine/address';
 import { QuietSpinner } from '../ui/spinner';
+import { UNAVAILABLE_LOOK, UnavailableButton } from '../ui/tip';
 
 // UX2-K: UX1's Add-project chooser as an app destination. Discovery is a choice, not sidebar membership;
 // only the add command promotes it. Removal and the native chooser keep the shell's existing action paths. UX wave U7b
@@ -46,9 +47,12 @@ export function ProjectsView() {
         <div className="mx-auto flex w-full max-w-(--measure-wide) flex-wrap items-center gap-x-3 gap-y-2 px-6 py-3 @max-lg/projects:px-3">
           <div className="ml-auto flex min-w-0 items-center gap-2 @max-lg/projects:ml-0 @max-lg/projects:w-full @max-lg/projects:flex-wrap [&>label]:max-w-full @max-lg/projects:[&>label]:flex-1">
             <SearchField label="Search projects" value={query} onChange={setQuery} />
-            <button type="button" disabled={!canChooseFolder || busy} title={canChooseFolder ? undefined : 'Not available here'} onClick={runAddProject} className={`${SECONDARY} text-ui-sm`}>
-              Choose folder…
-            </button>
+            {/* board ticket 815: greyed for a reason, a button keeps Tab and says why */}
+            <UnavailableButton reason={canChooseFolder ? null : 'Not available here'}>
+              <button type="button" disabled={canChooseFolder && busy} onClick={runAddProject} className={`${SECONDARY} ${UNAVAILABLE_LOOK} text-ui-sm`}>
+                Choose folder…
+              </button>
+            </UnavailableButton>
           </div>
         </div>
       </header>
@@ -79,16 +83,17 @@ export function ProjectsView() {
                           </div>
                           <div className="mt-0.5 truncate text-ui-sm text-fg-muted @max-lg/projects:break-all @max-lg/projects:whitespace-normal" title={project.directory}>{project.directory}</div>
                         </div>
-                        <button
-                          type="button"
-                          aria-label={`${action}: ${label}`}
-                          disabled={busy || (member && !canHide)}
-                          title={member && !canHide ? 'Not available here' : undefined}
-                          onClick={() => { if (member) runProjectAction('removeProject', project.id); else void show(project); }}
-                          className={`${SECONDARY} shrink-0 text-ui-sm`}
-                        >
-                          {action}
-                        </button>
+                        <UnavailableButton reason={member && !canHide ? 'Not available here' : null}>
+                          <button
+                            type="button"
+                            aria-label={`${action}: ${label}`}
+                            disabled={!(member && !canHide) && busy}
+                            onClick={() => { if (member) runProjectAction('removeProject', project.id); else void show(project); }}
+                            className={`${SECONDARY} ${UNAVAILABLE_LOOK} shrink-0 text-ui-sm`}
+                          >
+                            {action}
+                          </button>
+                        </UnavailableButton>
                       </li>
                     );
                   })}

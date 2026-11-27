@@ -8,6 +8,7 @@
 // the palette's Usage action open it too. Tokens only.
 import { Popover } from 'radix-ui';
 import { useRef } from 'react';
+import { Tip } from '../ui/tip';
 import { USAGE } from '../accounts/copy';
 import { accountsViewModel, usagePill, type Severity } from '../accounts/model';
 import { POPOVER_TICK_MS, useNow } from '../statusline/use-now';
@@ -36,32 +37,34 @@ export function UsageRing() {
 
   return (
     <Popover.Root open={open} onOpenChange={setOpen}>
-      <Popover.Trigger
-        ref={trigger}
-        data-usage-ring={pill.percent ?? ''}
-        data-severity={pill.severity ?? 'none'}
-        aria-label={label}
-        title={label}
-        className="inline-flex size-7 shrink-0 items-center justify-center rounded-sm outline-accent [-webkit-app-region:no-drag] hover:bg-bg-hover focus-visible:outline-2 aria-expanded:bg-bg-active"
-      >
-        <svg aria-hidden viewBox={`0 0 ${SIZE} ${SIZE}`} className={`size-3.5 -rotate-90 ${pill.dimmed ? 'opacity-50' : ''}`}>
-          <circle data-ring-track cx={SIZE / 2} cy={SIZE / 2} r={R} fill="none" strokeWidth={STROKE} className={percent === null ? 'stroke-fg-muted' : 'stroke-border-strong'} />
-          {percent !== null && percent > 0 && (
-            <circle
-              data-ring-arc
-              cx={SIZE / 2}
-              cy={SIZE / 2}
-              r={R}
-              fill="none"
-              strokeWidth={STROKE}
-              strokeLinecap="round"
-              strokeDasharray={CIRCUMFERENCE}
-              strokeDashoffset={CIRCUMFERENCE * (1 - percent / 100)}
-              className={SEVERITY_STROKE[pill.severity ?? 'normal']}
-            />
-          )}
-        </svg>
-      </Popover.Trigger>
+      {/* board ticket 815: the ring's words are its name and its tooltip, which keyboard focus opens */}
+      <Tip content={label}>
+        <Popover.Trigger
+          ref={trigger}
+          data-usage-ring={pill.percent ?? ''}
+          data-severity={pill.severity ?? 'none'}
+          aria-label={label}
+          className="inline-flex size-7 shrink-0 items-center justify-center rounded-sm outline-accent [-webkit-app-region:no-drag] hover:bg-bg-hover focus-visible:outline-2 aria-expanded:bg-bg-active"
+        >
+          <svg aria-hidden viewBox={`0 0 ${SIZE} ${SIZE}`} className={`size-3.5 -rotate-90 ${pill.dimmed ? 'opacity-50' : ''}`}>
+            <circle data-ring-track cx={SIZE / 2} cy={SIZE / 2} r={R} fill="none" strokeWidth={STROKE} className={percent === null ? 'stroke-fg-muted' : 'stroke-border-strong'} />
+            {percent !== null && percent > 0 && (
+              <circle
+                data-ring-arc
+                cx={SIZE / 2}
+                cy={SIZE / 2}
+                r={R}
+                fill="none"
+                strokeWidth={STROKE}
+                strokeLinecap="round"
+                strokeDasharray={CIRCUMFERENCE}
+                strokeDashoffset={CIRCUMFERENCE * (1 - percent / 100)}
+                className={SEVERITY_STROKE[pill.severity ?? 'normal']}
+              />
+            )}
+          </svg>
+        </Popover.Trigger>
+      </Tip>
       <Popover.Portal>
         <Popover.Content aria-label={USAGE.popoverTitle} side="bottom" align="end" sideOffset={4} collisionPadding={8} className={CONTENT}>
           {/* The ring takes the keyboard before the popover closes: its link opens Settings, which remembers the element that

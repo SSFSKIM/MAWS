@@ -409,7 +409,7 @@ test('a session opens in place of Settings or Diagnostics; a pin keeps its tab; 
     await page.getByRole('menuitem', { name: 'Pin tab' }).click();
     const pin = tabNamed(FIX).getByRole('img', { name: 'Pinned' });
     await expect(pin).toBeVisible();
-    await expect(pin).toHaveAttribute('title', 'Pinned: stays open when you open another session');
+    await expect(tabNamed(FIX), 'the pin’s meaning is the tab’s tip and description (ticket 815)').toHaveAccessibleDescription('Pinned: stays open when you open another session');
     await (await sidebarRow(page, CHARTER_ROW)).click();
     await expect.poll(labels, { message: 'the pinned tab stayed, the session opened after it' }).toEqual(expect.arrayContaining([FIX, CHARTER_ROW]));
     await expect.poll(() => selectedTab(page, strip)).toBe(CHARTER_ROW);
@@ -840,7 +840,7 @@ test('a page beside the sidebar', async () => {
     const ring = (await usageRing(page).boundingBox())!;
     expect(ring.x + ring.width, 'the ring at the title bar’s end').toBeGreaterThan(width - 48);
     await expect(mainTabs(page), 'no strip').toHaveCSS('visibility', 'hidden');
-    await expect(pageTitle(page).getByRole('button', { name: 'Back', exact: true })).toHaveAttribute('title', 'Back · Esc');
+    await expect(pageTitle(page).getByRole('button', { name: 'Back', exact: true })).toHaveAccessibleDescription('Esc'); // its tip reads `Back · Esc` (ticket 815)
     await expect(page.getByRole('navigation', { name: 'App destinations' }).getByRole('button', { name: 'Customize', exact: true })).toHaveAttribute('aria-current', 'page');
     // what the page hides stays mounted, invisible and inert
     await expect(behind).toHaveJSProperty('inert', true);

@@ -4,7 +4,7 @@ import type { Destination } from '@shared/ipc/schema/layout';
 
 export const DESTINATION = {
   back: 'Back',
-  backTitle: 'Back · Esc', // Esc is no chord of the keymap, so the tooltip writes it out
+  backChord: 'Esc', // no chord of the keymap, so the tooltip writes it out (`Back · Esc`)
   names: { customize: 'Customize', projects: 'Projects', library: 'Artifacts' } satisfies Record<Destination['kind'], string>,
   settings: 'Settings',
   close: 'Close',

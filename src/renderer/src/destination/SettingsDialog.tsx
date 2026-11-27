@@ -13,6 +13,7 @@ import { Dialog } from 'radix-ui';
 import { useCallback, useRef } from 'react';
 import { useDialogFocus } from '../app/dialog-focus';
 import { Icon } from '../app/IconButton';
+import { NamedGlyph } from '../ui/glyph';
 import { useSlot } from '../app/slots';
 import { WIDGET_DIALOG_BOX } from '../composer/WidgetDialog';
 import { focusPaneElement } from '../main/pane-dom';
@@ -99,17 +100,16 @@ export function SettingsDialog() {
           {/* eslint-disable-next-line react-hooks/static-components -- registered once at composition, not created in render */}
           {settings !== null && <View section={settings.section} request={settings} />}
           <Dialog.Close asChild>
-            <button
-              type="button"
-              aria-label={DESTINATION.close}
-              title={DESTINATION.close}
+            {/* board ticket 815: the named glyph, its word a tooltip keyboard focus opens */}
+            <NamedGlyph
+              label={DESTINATION.close}
               data-settings-close=""
               className="absolute top-1.5 right-1.5 inline-flex size-5.5 items-center justify-center rounded-sm text-fg-muted outline-accent hover:bg-bg-hover hover:text-fg focus-visible:outline-2"
             >
               <Icon className="size-3.5">
                 <path d="M4 4l8 8M12 4l-8 8" />
               </Icon>
-            </button>
+            </NamedGlyph>
           </Dialog.Close>
         </Dialog.Content>
       </Dialog.Portal>

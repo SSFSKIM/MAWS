@@ -15,6 +15,7 @@ import { connectKeys } from '../keymap/dispatcher';
 import { useLayout } from '../stores/layout';
 import { useMachines } from '../stores/machines';
 import { activeTab, currentSet } from '../stores/layout-model';
+import { accessibleDescription } from '../test-support/accessible-text';
 import { useSessions } from '../stores/sessions';
 import { installResizeObserver } from '../test-support/resize';
 import { fillStores, pageScenario, resetShellStores, scenarioFile } from '../test-support/shell-stores';
@@ -126,7 +127,8 @@ describe('tab strip reorders, closes, reopens', () => {
     expect(tabNames()).toEqual([]);
     const panel = within(main()).getByRole('tabpanel', { name: 'No open tabs' }); // the word cut (W22): the panel's name says it; its two ways in are drawn
     expect(within(panel).getByRole('button', { name: 'Overview' })).toBeTruthy();
-    expect((within(panel).getByRole('button', { name: 'New chat' }) as HTMLButtonElement).disabled).toBe(true); // no creator registered
+    const newChat = within(panel).getByRole('button', { name: 'New chat' });
+    expect([newChat.getAttribute('aria-disabled'), accessibleDescription(newChat)], 'no creator registered: greyed, keeping Tab (ticket 815)').toEqual(['true', 'Not available here']);
     expect(within(main()).queryByRole('dialog', { name: 'Overview' })).toBeNull();
     await user.click(within(panel).getByRole('button', { name: /^Overview/ }));
     expect(within(main()).getByRole('dialog', { name: 'Overview' })).toBeTruthy();
@@ -167,7 +169,7 @@ describe('tab strip reorders, closes, reopens', () => {
     expect(tabNames()).toEqual(['Fix sidebar drag']);
     act(() => useLayout.getState().togglePinned('session:' + idOf('Fix sidebar drag')));
     const pin = within(tab('Fix sidebar drag')).getByRole('img', { name: 'Pinned' });
-    expect(pin.getAttribute('title')).toBe(PINNED_HINT);
+    expect(accessibleDescription(tab('Fix sidebar drag')), 'the pin’s meaning is the tab’s tip and description (ticket 815)').toBe(PINNED_HINT);
     expect(pin.querySelector('svg')).not.toBeNull();
     await user.click(sidebarRow('Charter + research'));
     expect(tabNames()).toEqual(['Fix sidebar drag', 'Charter + research']);
@@ -296,11 +298,11 @@ describe('tab strip reorders, closes, reopens', () => {
     });
   });
 
-  it('the strip’s "+" is disabled with "Not available here" while no session creator is registered', () => {
+  it('the strip’s "+" is greyed with "Not available here" while no session creator is registered', () => {
     render(<Shell />);
     const plus = within(strips()[0].parentElement!).getByRole('button', { name: 'New chat' }) as HTMLButtonElement;
-    expect(plus.disabled).toBe(true);
-    expect(plus.title).toBe('Not available here');
+    expect([plus.disabled, plus.getAttribute('aria-disabled')], 'greyed, keeping Tab (ticket 815)').toEqual([false, 'true']);
+    expect(accessibleDescription(plus)).toBe('Not available here');
   });
 
   it('⌘1…9 select tabs of the focused pane, ⌃Tab and ⌃⇧Tab cycle them', () => {

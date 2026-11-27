@@ -14,6 +14,7 @@ import { useLayout } from '../stores/layout';
 import { currentSet } from '../stores/layout-model';
 import { Overview } from './Overview';
 import { HiddenHeading } from '../ui/hidden-heading';
+import { NamedGlyph } from '../ui/glyph';
 
 const MIN = { width: 360, height: 240 };
 // The first place: under the tab strip (40px) with a 12px gap, 16px clear of the sides and the bottom.
@@ -218,17 +219,12 @@ function OverviewPanel({ bounds }: { bounds: { width: number; height: number } }
         className="flex h-9 shrink-0 cursor-grab items-center gap-2 border-b border-border bg-bg-raised pr-1.5 pl-4 select-none active:cursor-grabbing"
       >
         <HiddenHeading level={2}>Overview</HiddenHeading>{/* the word cut (W102): the strip is the layer's handle and its × */}
-        <button
-          type="button"
-          aria-label="Close Overview"
-          title="Close · Esc"
-          onClick={close}
-          className="ml-auto inline-flex size-6 items-center justify-center rounded-sm text-fg-muted outline-accent hover:bg-bg-hover hover:text-fg focus-visible:outline-2"
-        >
+        {/* board ticket 815: the named glyph, its tooltip `Close · Esc`, which keyboard focus opens */}
+        <NamedGlyph label="Close Overview" tip="Close" shortcut="Esc" onClick={close} className="ml-auto inline-flex size-6 items-center justify-center rounded-sm text-fg-muted outline-accent hover:bg-bg-hover hover:text-fg focus-visible:outline-2">
           <span aria-hidden className="text-ui leading-none">
             ×
           </span>
-        </button>
+        </NamedGlyph>
       </div>
       <div className="min-h-0 flex-1">
         <Overview paneIndex={paneIndex} onSessionCreated={sessionCreated} />

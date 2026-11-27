@@ -10,6 +10,8 @@
 import { useLayoutEffect, useRef, useState, type CSSProperties, type RefObject } from 'react';
 import type { AppSessionId } from '@shared/graph/ids';
 import { MaximizeIcon } from '../app/IconButton';
+import { NamedGlyph } from '../ui/glyph';
+import { Tip } from '../ui/tip';
 import { phaseWords, useMachineMark } from '../app/machine-mark';
 import { ComposerBarContext } from '../composer/frame/bar';
 import { LinkStatusLine } from '../lane-b/link-status';
@@ -112,16 +114,19 @@ export function Bar({ host, appSessionId, area, bounds }: { host: CardHost; appS
           <SessionPane key={appSessionId} appSessionId={appSessionId} paneIndex={paneIndex} compact />
         </ComposerBarContext.Provider>
       </div>
-      <button ref={open} type="button" aria-label="Open conversation" title={title} onClick={() => openCard()} className={RAISED_BUTTON}>
-        <MaximizeIcon />
-        {mark && <SessionMark mark={mark} className="absolute -top-1 -right-1" />}
-      </button>
+      {/* board ticket 815: the session's title is the glyph's tooltip, which keyboard focus opens, and its description */}
+      <Tip content={title} description={title}>
+        <button ref={open} type="button" aria-label="Open conversation" onClick={() => openCard()} className={RAISED_BUTTON}>
+          <MaximizeIcon />
+          {mark && <SessionMark mark={mark} className="absolute -top-1 -right-1" />}
+        </button>
+      </Tip>
       {hides && (
-        <button type="button" aria-label="Hide chat" title="Hide chat" onClick={hideChat} className={RAISED_BUTTON}>
+        <NamedGlyph label="Hide chat" onClick={hideChat} className={RAISED_BUTTON}>
           <span aria-hidden className="text-ui leading-none">
             ×
           </span>
-        </button>
+        </NamedGlyph>
       )}
     </section>
   );
@@ -136,18 +141,20 @@ export function Pill({ appSessionId }: { appSessionId: AppSessionId }) {
   const self = useRef<HTMLButtonElement>(null);
   useTakesKeyboardAfterClose(self);
   return (
-    <button
-      ref={self}
-      type="button"
-      aria-label="Show session card"
-      title={unread ? `${title} · Unread` : title}
-      data-floating-pill="inline"
-      onClick={() => openCard()}
-      className="inline-flex h-6 shrink-0 items-center gap-2 rounded-full border border-border-strong bg-bg-raised px-3 text-ui-sm text-fg outline-accent hover:bg-bg-hover focus-visible:outline-2"
-    >
-      <span className="max-w-[220px] truncate">{title}</span>
-      {unread && <span aria-label={SESSION_MARK_WORDS.unread} role="img" className="block size-[5px] shrink-0 rounded-full bg-info" />}
-    </button>
+    // board ticket 815: the session's title (and Unread) is the chip's tooltip, which keyboard focus opens, and its description
+    <Tip content={unread ? `${title} · Unread` : title} description={unread ? `${title} · Unread` : title}>
+      <button
+        ref={self}
+        type="button"
+        aria-label="Show session card"
+        data-floating-pill="inline"
+        onClick={() => openCard()}
+        className="inline-flex h-6 shrink-0 items-center gap-2 rounded-full border border-border-strong bg-bg-raised px-3 text-ui-sm text-fg outline-accent hover:bg-bg-hover focus-visible:outline-2"
+      >
+        <span className="max-w-[220px] truncate">{title}</span>
+        {unread && <span aria-label={SESSION_MARK_WORDS.unread} role="img" className="block size-[5px] shrink-0 rounded-full bg-info" />}
+      </button>
+    </Tip>
   );
 }
 

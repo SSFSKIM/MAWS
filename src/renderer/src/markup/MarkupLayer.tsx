@@ -7,6 +7,8 @@
 import { RadioGroup } from 'radix-ui';
 import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react';
 import { Icon, PenIcon } from '../app/IconButton';
+import { NamedGlyph } from '../ui/glyph';
+import { Tip, UNAVAILABLE_LOOK } from '../ui/tip';
 import { useLayout } from '../stores/layout';
 import {
   addMark,
@@ -332,10 +334,10 @@ function Toolbar({ bounds, tool, ink: inkName, onTool, onInk, undo, clear, addin
       style={placed ? { left: placed.x, top: placed.y, bottom: 'auto', transform: 'none', translate: 'none' } : undefined}
       className="absolute bottom-2.5 left-1/2 flex max-w-[calc(100%-16px)] -translate-x-1/2 flex-wrap items-center justify-center gap-1 rounded-lg border border-border-strong bg-bg-raised p-1 shadow-float"
     >
-      <button
-        type="button"
-        aria-label={MARKUP_COPY.moveToolbar}
-        title={MARKUP_COPY.move}
+      {/* board ticket 815: the named glyph, its tooltip Move, which keyboard focus opens */}
+      <NamedGlyph
+        label={MARKUP_COPY.moveToolbar}
+        tip={MARKUP_COPY.move}
         className={`${BUTTON} cursor-move touch-none`}
         onPointerDown={(event) => {
           if (event.button !== 0) return;
@@ -361,12 +363,14 @@ function Toolbar({ bounds, tool, ink: inkName, onTool, onInk, undo, clear, addin
         }}
       >
         <Icon><path d="M5 3v10M10 3v10" strokeDasharray="1 3" strokeLinecap="round" /></Icon>
-      </button>
+      </NamedGlyph>
       <RadioGroup.Root aria-label={MARKUP_COPY.tools} value={tool} onValueChange={(value) => onTool(value as MarkupTool)} orientation="horizontal" className="flex items-center gap-0.5">
         {MARKUP_TOOLS.map((name) => (
-          <RadioGroup.Item key={name} value={name} aria-label={TOOL_LABEL[name]} title={TOOL_LABEL[name]} className={RADIO}>
-            {TOOL_ICON[name]}
-          </RadioGroup.Item>
+          <Tip key={name} content={TOOL_LABEL[name]}>
+            <RadioGroup.Item value={name} aria-label={TOOL_LABEL[name]} className={RADIO}>
+              {TOOL_ICON[name]}
+            </RadioGroup.Item>
+          </Tip>
         ))}
       </RadioGroup.Root>
       <span aria-hidden className="mx-0.5 h-4 w-px bg-border" />
@@ -379,12 +383,18 @@ function Toolbar({ bounds, tool, ink: inkName, onTool, onInk, undo, clear, addin
         ))}
       </RadioGroup.Root>
       <span aria-hidden className="mx-0.5 h-4 w-px bg-border" />
-      <button type="button" aria-label={MARKUP_COPY.undo} title={MARKUP_COPY.undo} disabled={!undo} onClick={() => undo?.()} className={`${BUTTON} w-7 px-0`}>
-        <UndoIcon />
-      </button>
-      <button type="button" aria-label={MARKUP_COPY.clear} title={MARKUP_COPY.clear} disabled={!clear} onClick={() => clear?.()} className={`${BUTTON} w-7 px-0`}>
-        <ClearIcon />
-      </button>
+      {/* the word cut (T124), board ticket 815: a greyed icon's tooltip is its word, as when it acts; it keeps Tab, and its
+          press does nothing */}
+      <Tip content={MARKUP_COPY.undo}>
+        <button type="button" aria-label={MARKUP_COPY.undo} aria-disabled={!undo || undefined} onClick={() => undo?.()} className={`${BUTTON} ${UNAVAILABLE_LOOK} w-7 px-0`}>
+          <UndoIcon />
+        </button>
+      </Tip>
+      <Tip content={MARKUP_COPY.clear}>
+        <button type="button" aria-label={MARKUP_COPY.clear} aria-disabled={!clear || undefined} onClick={() => clear?.()} className={`${BUTTON} ${UNAVAILABLE_LOOK} w-7 px-0`}>
+          <ClearIcon />
+        </button>
+      </Tip>
       <button type="button" onClick={endMarkup} className={`${BUTTON} px-2`}>
         {MARKUP_COPY.cancel}
       </button>

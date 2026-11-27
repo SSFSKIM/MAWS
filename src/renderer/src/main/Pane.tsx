@@ -27,7 +27,7 @@ import { useLayout } from '../stores/layout';
 import { currentSet, floatingPane, paneShowsSession } from '../stores/layout-model';
 import { focusPaneElement, paneDomId } from './pane-dom';
 import { TabStrip } from './TabStrip';
-import { Tip } from '../ui/tip';
+import { Tip, UNAVAILABLE_LOOK, UnavailableButton } from '../ui/tip';
 import { createPortal } from 'react-dom';
 import { useChromeTabs } from './chrome-tabs';
 import { ChannelView } from '../channel/ChannelView'; // P5 O8 M7a
@@ -217,9 +217,11 @@ export function EmptyPane() {
             Overview
           </button>
         </Tip>
-        <button type="button" disabled={!canCreate} title={canCreate ? undefined : 'Not available here'} onClick={() => void newChat()} className={TEXT_BUTTON}>
-          {NEW_CHAT}
-        </button>
+        <UnavailableButton reason={canCreate ? null : 'Not available here'}>
+          <button type="button" onClick={() => void newChat()} className={`${TEXT_BUTTON} ${UNAVAILABLE_LOOK}`}>
+            {NEW_CHAT}
+          </button>
+        </UnavailableButton>
       </div>
     </div>
   );

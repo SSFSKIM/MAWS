@@ -25,6 +25,7 @@ import { useLayout } from '../stores/layout';
 import { useSessions, type ListedSession } from '../stores/sessions'; // P5 O7 M6: ListedSession
 import { cardActivity, cardFacts } from './derive';
 import { ReleasedMark } from '../budget/ReleasedMark'; // C12
+import { BUDGET } from '../budget/copy';
 import { displayTitle, listedTitle } from '../sessions/title';
 import { previewLine } from '@shared/owner/preview'; // P5 O7 M6
 import { isActionable } from '@shared/attention/kinds'; // P5 O7 M6
@@ -59,7 +60,8 @@ export function SessionCard({ appSessionId, paneIndex, showProject, stop, onFocu
   const request = controlled && waiting?.tier === 1 ? waiting.oldest : null;
   const title = displayTitle(record);
   const branch = branchLabel(workingBranch(record)); // W9 (H2); UX wave U8c-2: the working folder's
-  const facts = cardFacts(digest).join(' · ');
+  // board ticket 815: the released mark's when and why join the card's facts, which keyboard focus shows
+  const facts = [...cardFacts(digest), ...(digest?.released ? [BUDGET.markTitle(digest.released)] : [])].join(' · ');
   const activity = cardActivity(record, digest, pending, listed);
 
   return (
@@ -81,7 +83,7 @@ export function SessionCard({ appSessionId, paneIndex, showProject, stop, onFocu
           <span className="truncate font-medium text-fg">{title}</span>
           {showProject && project && <span className="shrink-0 text-ui-sm text-fg-muted">{project}</span>}
           {branch && <span className="shrink-0 rounded-sm border border-border px-1.5 text-ui-sm text-fg-muted">⎇ {branch}</span>}
-          <ReleasedMark released={digest?.released} /> {/* C12: the memory budget's released mark */}
+          <ReleasedMark released={digest?.released} toldByRow /> {/* C12: the memory budget's released mark */}
           {record.unread && <span role="img" aria-label="Unread" className="ml-auto block size-[5px] shrink-0 rounded-full bg-info" />}
         </div>
         {activity !== null && (

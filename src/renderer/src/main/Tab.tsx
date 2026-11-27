@@ -39,6 +39,7 @@ import { useArtifactTitle } from '../library/store';
 import { beginDrag, endDragFrom, moveToPanel, TAB_DRAG_TYPE, useTransferRefusal } from '../shell/transfer';
 import { TRANSFER_COPY } from '../tools/artifacts/copy';
 import { RefusedMenuItem } from '../ui/refused-menu-item';
+import { NamedGlyph } from '../ui/glyph';
 // E4a start
 import { BROWSER_COPY } from '../tools/browser/copy';
 import { useBrowserTitle } from '../tools/browser/store';
@@ -168,7 +169,11 @@ export function Tab({ tab, pane, domId, active, place = null, stop, onKeyDown }:
   // W10: pointing at the mark shows the tab's tip. The region is always mounted (`contents`: no box, so no gap while
   // empty), since the tip reads it once and the mark comes and goes with the bridge.
   const holderRegion = useRef<HTMLElement>(null);
-  const tip = holderMark?.title ?? (tab.kind === 'file' ? tab.path : null);
+  // Board ticket 815: what the pin means is the tab's tip too, on pointing at the pin (a file's tab: anywhere on it)
+  const pinRegion = useRef<HTMLElement>(null);
+  const lines = [holderMark?.title ?? (tab.kind === 'file' ? tab.path : null), tab.pinned ? PINNED_HINT : null].filter((line) => line !== null);
+  const tip = lines.length > 0 ? lines.join(' · ') : null;
+  const pointed = holderMark ? holderRegion : tab.pinned && tab.kind !== 'file' ? pinRegion : undefined;
   // Keep plain tabs compact, but reserve each nonshrinking mark plus its gap before truncating the title. The place
   // reserves nothing: it gives way first (U13a).
   const minWidth = Math.max(active ? 24 : 16, 16 + (label.glyph ? 4 : 0) + (label.file ? 4 : 0) + (tab.pinned ? 4 : 0) + (dirty ? 4 : 0) + (label.secondary ? 20 : 0) + (holderMark ? 16 : 0));
@@ -210,7 +215,7 @@ export function Tab({ tab, pane, domId, active, place = null, stop, onKeyDown }:
       {label.file && <FileIcon className="size-[12px] shrink-0 text-fg-muted" /> /* W13: the extension is in the name beside it */}
       {/* E11 F2b (plan 2.5): a pin you can see, saying what it does */}
       {tab.pinned && (
-        <span aria-label="Pinned" role="img" title={PINNED_HINT} className="inline-flex shrink-0 text-fg-muted">
+        <span ref={pinRegion} aria-label="Pinned" role="img" className="inline-flex shrink-0 text-fg-muted">
           <PinIcon className="size-[11px]" />
         </span>
       )}
@@ -235,11 +240,12 @@ export function Tab({ tab, pane, domId, active, place = null, stop, onKeyDown }:
         )}
       </span>
       {label.secondary && <small className="max-w-16 shrink-0 truncate text-fg-muted">{label.secondary}</small>}
-      <button
-        type="button"
+      {/* board ticket 815: the named glyph, its tooltip `Close tab · ⌘W`; out of the Tab order, as the strip's one stop is the tab */}
+      <NamedGlyph
         tabIndex={-1}
-        aria-label={`Close ${label.title}`}
-        title={closeChord ? `Close tab · ${closeChord}` : 'Close tab'}
+        label={`Close ${label.title}`}
+        tip="Close tab"
+        shortcut={closeChord}
         onClick={(event) => {
           event.stopPropagation();
           void requestCloseTab(tab.id);
@@ -249,7 +255,7 @@ export function Tab({ tab, pane, domId, active, place = null, stop, onKeyDown }:
         }`}
       >
         <span aria-hidden>×</span>
-      </button>
+      </NamedGlyph>
     </div>
   );
 
@@ -257,7 +263,7 @@ export function Tab({ tab, pane, domId, active, place = null, stop, onKeyDown }:
     <ContextMenu.Root modal={false}>
       {/* W10 (fix round 1): the holder's line is the tab's tip and description, shown at once on the tab's own focus stop
           and after the delay on pointing at the mark. A file's tab: its full path, on pointing at the tab or its focus */}
-      <Tip content={tip} description={tip} pointedWithin={holderMark ? holderRegion : undefined}>
+      <Tip content={tip} description={tip} pointedWithin={pointed}>
         <ContextMenu.Trigger asChild>{element}</ContextMenu.Trigger>
       </Tip>
       <ContextMenu.Portal>

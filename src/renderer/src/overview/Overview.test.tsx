@@ -161,7 +161,7 @@ describe('overview board', () => {
     render(<Overview paneIndex={0} />);
     expect(screen.getByText('Nothing live or unread')).toBeTruthy();
     const button = screen.getByRole('button', { name: 'New chat' }) as HTMLButtonElement;
-    expect(button.disabled).toBe(true);
+    expect([button.getAttribute('aria-disabled'), accessibleDescription(button)], 'greyed, keeping Tab (ticket 815)').toEqual(['true', 'Not available here']);
     let asked = 0;
     offs.push(
       registerSessionCreator(async () => {
@@ -269,7 +269,9 @@ describe('a released session’s card', () => {
     render(<Overview paneIndex={0} />);
     const released = card('Settings idle probe');
     expect(within(released).queryByTestId('card-activity')).toBeNull();
-    expect(within(released).getByText('released').getAttribute('title')).toBe(`Released at ${formatClock(Date.parse(AT_RELEASE))} to stay under the 8 GB memory budget · Send resumes it`);
+    // board ticket 815: when and why is the card's tip and description, which its keyboard focus shows; the mark has no title
+    expect(within(released).getByText('released').hasAttribute('title')).toBe(false);
+    expect(accessibleDescription(released)).toContain(`Released at ${formatClock(Date.parse(AT_RELEASE))} to stay under the 8 GB memory budget · Send resumes it`);
     expect(cardTitles(group('Needs you'))).not.toContain('Settings idle probe');
   });
 });

@@ -34,6 +34,7 @@ import { useTranscriptStore } from '../stores/transcript'; // M2 review: the rou
 import { builder } from '../transcript/model/test-events';
 import type { TranscriptSource } from '../transcript/source/types';
 import { Transcript } from '../transcript/view/Transcript';
+import { accessibleDescription } from '../test-support/accessible-text';
 
 // The region's controls as the side column's first strip draws them (UX wave U8b, M2), in a header row as before.
 const PanelControls = () => <div data-editor-header><RegionControls hide={() => {}} /></div>;
@@ -256,7 +257,7 @@ describe('the split’s floating card in the Shell', () => {
     const compact = bar()!;
     expect([compact.style.right, compact.style.bottom, compact.dataset.chatPresentation]).toEqual(['16px', '16px', 'bar']);
     expect(mainRegion().contains(shown)).toBe(true);
-    expect(shown.title, 'its tooltip is the session’s title').toBe('Alpha session');
+    expect(accessibleDescription(shown), 'its tooltip is the session’s title (ticket 815: its tip and description)').toBe('Alpha session');
     expect(shown.querySelector('[data-session-mark]')).toBeNull();
     act(() => useSessions.setState({ records: new Map([[A, { ...record(A), title: { text: 'Alpha session', source: 'user' }, unread: true }]]) }));
     expect(shown.querySelector('[data-session-mark]')?.getAttribute('data-session-mark')).toBe('unread');
