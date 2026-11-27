@@ -58,7 +58,7 @@ describe('exporting', () => {
   it('reports the DOCX comment author returned by main beside the saved result', async () => {
     installFakeMain((name) => name === 'artifacts.export' ? ok({ path: '/x.docx', revision: 7, commentAuthorName: 'Kim Min' }) : ok({ saved: true, path: '/Downloads/Review.docx' }));
     await act(() => exportArtifact(A, TEST_MACHINE, 'docx'));
-    expect(toasts()).toEqual([['info', 'Saved to /Downloads/Review.docx · Comments credited to Kim Min; change in Settings › Artifacts.']]);
+    expect(toasts()).toEqual([['info', 'Saved to /Downloads/Review.docx · Comments credited to Kim Min']]);
   });
 
   it('exports the version asked and saves that export where the owner chooses', async () => {

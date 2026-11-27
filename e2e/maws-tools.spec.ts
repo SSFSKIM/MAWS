@@ -948,10 +948,10 @@ test('an artifact link in the agent’s reply: link text that wraps, a click ope
     await expect(chip('Linked plan')).toBeVisible();
 
     // an id no record answers to: the record's not-found notice in its body, its title in the panel's header, as the tool
-    // says them (library/copy.ts's gone and goneTitle; the e2e project lists no renderer copy module)
+    // says them (library/copy.ts's absent and goneTitle; the e2e project lists no renderer copy module)
     await chip('Old notes').click();
     const gone = s.panel.locator(`[data-artifact-record="${GONE}"]`);
-    await expect(gone.getByText('This artifact was deleted, or it is not in the library.')).toBeVisible();
+    await expect(gone.getByText('This artifact isn’t in the library.')).toBeVisible(); // the word cut (N200): no record, no deletion
     await expect(surface(s.page, 'artifacts').locator('[data-editor-header] [data-header-title]')).toHaveText('Artifact not found');
 
     // ⌘-click: the artifact in a main tab of its own

@@ -46,11 +46,12 @@ export const CONNECTORS_COPY = {
         return FAILED[outcome.reason];
     }
   },
-  noSession: 'No live session has these tools’ server. Start the artifact’s session to read live data; no message is sent.',
+  // the word cut (T589, T591): the fact and the reassurance, short; the start reads Starting… in both phases, then Ready
+  noSession: 'No live session has these tools. Starting one sends no message.',
   start: 'Start session',
   asking: 'Starting…',
-  starting: 'Starting the session…',
-  ready: 'The session is ready',
+  starting: 'Starting…',
+  ready: 'Ready',
   openSession: 'Open session',
 } as const;
 
@@ -110,16 +111,18 @@ export const SERVERS_COPY = {
     if (outcome?.ok === false && outcome.state === 'failed' && outcome.reason === 'routeFailed') return 'The last call failed: MAWS couldn’t reach the server';
     return CONNECTORS_COPY.detail(outcome);
   },
-  noSession: 'Neither a live session nor MAWS’s own connection reaches these tools’ server. Start the artifact’s session to read live data; no message is sent.',
+  noSession: 'No live session reaches these tools. Starting one sends no message.', // the word cut (T589)
   heading: 'Servers',
   headingNote: 'MAWS’s own connections. Disconnect affects MAWS only: sessions keep their own sign-in, and allowed tools stay allowed.',
-  reading: 'Reading MAWS’s connections…',
+  reading: 'Reading MAWS’s connections…', // the word cut (T595): the quiet spinner's name, never drawn
   readFailed: 'MAWS couldn’t read its connections just now.',
   savedUnavailable: 'MAWS couldn’t read its saved connections (its encrypted storage isn’t available).',
-  withdrawnUnattributed: 'An unreadable saved MAWS connection was forgotten, so until MAWS relaunches it won’t reach a server without its own MAWS sign-in. Connect signs a server in now; one that needs no sign-in works again after a relaunch.',
+  withdrawnUnattributed: 'A saved connection couldn’t be read and was forgotten. Connect to sign in again, or relaunch MAWS.', // the word cut (T605)
   transport: (transport: 'stdio' | 'http') => (transport === 'http' ? 'HTTP' : 'local command'),
   origin: (scope: 'user' | 'local' | 'app', path: string) => `${scope === 'app' ? 'MAWS' : scope === 'user' ? 'User' : 'Project-local'} config · ${path}`,
-  engineOnly: (why: Extract<ConnectorServerRow, { kind: 'engineOnly' }>['why']) => `Session only: ${ENGINE_ONLY[why]}`,
+  // the word cut (T600): "Session only" at rest; why, in the row's note
+  engineOnly: 'Session only',
+  engineOnlyWhy: (why: Extract<ConnectorServerRow, { kind: 'engineOnly' }>['why']) => ENGINE_ONLY[why],
   // `unattributed`: the answer's withdrawnUnattributed (a withdrawn row may be paused by it rather than Disconnected)
   connection(row: SourceRow, unattributed = false): string {
     if (row.action === 'connecting') return row.connection?.state === 'connecting' ? 'Connecting… finish signing in in your browser' : 'Connecting…';
@@ -132,10 +135,11 @@ export const SERVERS_COPY = {
   last(last: Last): string {
     if ('local' in last) {
       if (last.local === 'failed') return 'MAWS couldn’t forget it: disconnect again';
-      return last.host === 'unconfirmed' ? 'Forgotten; the disconnect is unconfirmed' : last.revocation === 'revoked' ? 'Disconnected and revoked' : 'Disconnected';
+      return last.host === 'unconfirmed' ? 'Forgotten; the disconnect is unconfirmed' : 'Disconnected'; // the word cut (T601): revoked or not
     }
     const verb = last.action === 'reconnect' ? 'Reconnect' : 'Connect';
-    if (last.ok) return `${last.credential === 'none' ? 'Reached without a MAWS sign-in' : 'Connected'} · ${last.tools === 1 ? '1 tool' : `${last.tools} tools`} listed`;
+    // the word cut (T601): the receipt is the tool count; the row's status already says how it is reached
+    if (last.ok) return last.tools === 1 ? '1 tool' : `${last.tools} tools`;
     return `${verb} didn’t finish: ${failureWords(last.why)}`;
   },
   refused: (why: 'stale' | 'busy' | 'capacity' | 'stopped') => (why === 'busy' ? 'Already in progress' : why === 'capacity' ? 'Too many MAWS connections are busy; try again' : why === 'stopped' ? 'MAWS is quitting' : 'This row changed; it was read again'),

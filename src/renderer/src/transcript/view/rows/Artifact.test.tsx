@@ -118,7 +118,7 @@ describe('the artifact row', () => {
       noteArtifactVersions(ID, placed(3, 8));
       applyArtifactConsole({ artifactId: ID, revision: 8, level: 'error', message: 'Uncaught Error: E1_BOOM', line: 3, source: null });
     });
-    expect(container.querySelector('[data-console-chip]')!.textContent).toBe('1 console error');
+    expect(container.querySelector('[data-console-chip]')!.textContent).toBe('1 error');
   });
 
   // P3-L M6b fix wave 2: a row whose call's answer named its revision opens that revision, and its chip reads that
@@ -131,7 +131,7 @@ describe('the artifact row', () => {
       noteArtifactVersions(ID, placed(9)); // thinned: v1 gone, the publish now the first place
       applyArtifactConsole({ artifactId: ID, revision: 9, level: 'error', message: 'Uncaught Error: REV_9', line: 1, source: null });
     });
-    expect(container.querySelector('[data-console-chip]')!.textContent).toBe('1 console error');
+    expect(container.querySelector('[data-console-chip]')!.textContent).toBe('1 error');
   });
 
   it('outside a mounted transcript its name opens nothing', () => {
@@ -149,10 +149,10 @@ describe('the artifact row', () => {
     act(() => applyArtifactConsole({ artifactId: ID, revision: 5, level: 'error', message: 'Uncaught Error: E2_BOOM', line: 3, source: null }));
     expect(container.querySelector('[data-console-chip]')).toBeNull(); // no viewer has placed the versions yet
     act(() => noteArtifactVersions(ID, placed(5, 9)));
-    expect(container.querySelector('[data-console-chip]')!.textContent).toBe('1 console error');
+    expect(container.querySelector('[data-console-chip]')!.textContent).toBe('1 error');
     act(() => applyArtifactConsole({ artifactId: ID, revision: 1, level: 'error', message: 'revision 1 is not v1', line: 1, source: null }));
     act(() => applyArtifactConsole({ artifactId: ID, revision: 9, level: 'error', message: 'other version', line: 1, source: null }));
-    expect(container.querySelector('[data-console-chip]')!.textContent).toBe('1 console error');
+    expect(container.querySelector('[data-console-chip]')!.textContent).toBe('1 error');
     act(() => resetArtifactConsole());
     expect(container.querySelector('[data-console-chip]')).toBeNull();
   });
@@ -165,7 +165,7 @@ describe('the artifact row', () => {
       noteArtifactVersions(ID, [{ seq: 5, kind: 'import', label: 'v1' }, { seq: 14, kind: 'import', label: 'v3' }, { seq: 20, kind: 'auto' }]);
       applyArtifactConsole({ artifactId: ID, revision: 14, level: 'error', message: 'Uncaught Error: X12_V3', line: 1, source: null });
     });
-    expect(container.querySelector('[data-console-chip]')!.textContent).toBe('1 console error');
+    expect(container.querySelector('[data-console-chip]')!.textContent).toBe('1 error');
   });
 });
 

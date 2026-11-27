@@ -68,7 +68,9 @@ const offs: (() => void)[] = [];
 const mainRegion = () => document.querySelector<HTMLElement>('[data-region="main"]')!;
 const chromeTabs = () => document.querySelector<HTMLElement>('[data-chrome-tabs]')!;
 const headerTitle = () => mainRegion().querySelector('[data-editor-header] [data-header-title]')?.textContent ?? null;
-const LIBRARY_GONE = 'This artifact was deleted, or it is not in the library.';
+// The tab's title keeps “Artifact not found”; its body says deleted where the host says so (G319), else not there (N200)
+const LIBRARY_DELETED = 'This artifact was deleted.';
+const LIBRARY_ABSENT = 'This artifact isn’t in the library.';
 const tabOpen = () => allTabs(useLayout.getState().main).some((t) => t.id === TAB);
 const changed = async () => {
   await act(async () => main.emit('library.changed', { revision: 9 }));
@@ -242,7 +244,7 @@ describe('an artifact in a main tab', () => {
     await screen.findByText(/main editor for/);
     current = null;
     await changed();
-    expect(await screen.findByText(LIBRARY_GONE)).toBeTruthy();
+    expect(await screen.findByText(LIBRARY_ABSENT)).toBeTruthy();
     expect(main.callsOf('artifacts.get'), 'the host confirms it is gone').toEqual([{ artifactId: A }]);
     expect(editor.dispose).toHaveBeenCalledTimes(1);
     expect(headerTitle(), 'the stale editor header is replaced').toBe('Artifact not found');
@@ -261,7 +263,7 @@ describe('an artifact in a main tab', () => {
     act(() => openArtifactTab(A));
     expect(await screen.findByText(/main editor for/)).toBeTruthy();
     expect(main.callsOf('artifacts.get')).toEqual([{ artifactId: A }]);
-    expect(screen.queryByText(LIBRARY_GONE)).toBeNull();
+    expect(screen.queryByText(LIBRARY_ABSENT)).toBeNull();
     current = row({ title: 'Untitled document' });
     await changed();
     expect(within(chromeTabs()).getByRole('tab', { name: 'Untitled document' })).toBeTruthy();
@@ -314,7 +316,7 @@ describe('an artifact in a main tab', () => {
 
     onHost = null;
     await act(async () => screen.getByRole('button', { name: 'Try again' }).click());
-    expect(await screen.findByText(LIBRARY_GONE)).toBeTruthy();
+    expect(await screen.findByText(LIBRARY_ABSENT)).toBeTruthy();
     expect(editor.dispose).toHaveBeenCalledTimes(1);
   });
 
@@ -326,11 +328,21 @@ describe('an artifact in a main tab', () => {
     render(<Shell />);
     act(() => openArtifactTab(A));
     expect(await screen.findByText('Couldn’t confirm this artifact with its host: the engine host is restarting')).toBeTruthy();
-    expect(screen.queryByText(LIBRARY_GONE)).toBeNull();
+    expect(screen.queryByText(LIBRARY_ABSENT)).toBeNull();
     expect(editor.createState).not.toHaveBeenCalled();
     onHost = hostRow();
     await changed();
     expect(await screen.findByText(/main editor for/)).toBeTruthy();
+  });
+
+  // G317: while the tab reads its artifact, a quiet spinner stands where the editor will be
+  it('reads its artifact behind a quiet spinner named “Opening…”, no words', async () => {
+    main = installFakeMain((name) => (name === 'attention.request' ? ok({ event: null }) : new Promise(() => {})));
+    registerArtifactEditor('document', testEditor());
+    render(<Shell />);
+    act(() => openArtifactTab(A));
+    expect(await screen.findByRole('progressbar', { name: 'Opening…' })).toBeTruthy();
+    expect(screen.queryByText('Opening…')).toBeNull();
   });
 
   it('a failed first read says why and reads again on Try again', async () => {
@@ -355,7 +367,7 @@ describe('an artifact in a main tab', () => {
 // replica's read-only wait, artifacts/host.test.ts). Undo restores it in place, the same editor state. A delete Undo
 // cannot take back shows today's notice.
 describe('an artifact an agent deleted while it is open', () => {
-  const DELETED_BY_AGENT = 'An agent deleted this artifact. It takes no edits until it is restored.';
+  const DELETED_BY_AGENT = 'An agent deleted this artifact.'; // N152: the editor already shows it takes no edit
   const UNSENT = 'An agent deleted this artifact. Your last edit is not saved; restoring the artifact saves it.';
   afterEach(() => resetDeletedReplicas());
   async function deletedWhileOpen() {
@@ -409,7 +421,7 @@ describe('an artifact an agent deleted while it is open', () => {
     act(() => noteDeletedReplica(replica, A, TEST_MACHINE, 1));
     expect(notice()!.textContent).toContain(UNSENT);
     act(() => noteDeletedReplica(replica, A, TEST_MACHINE, null));
-    expect(notice()!.textContent).toContain(DELETED_BY_AGENT);
+    expect(notice()!.querySelector('p')!.textContent).toBe(DELETED_BY_AGENT);
   });
 
   it('an Undo refused here leaves "Not restored: <the store’s sentence>" under the notice, and Undo enabled again', async () => {
@@ -431,7 +443,7 @@ describe('an artifact an agent deleted while it is open', () => {
     current = null;
     onHostDeleted = { title: 'Launch notes', kind: 'document', undoable: false };
     await changed();
-    expect(await screen.findByText(LIBRARY_GONE)).toBeTruthy();
+    expect(await screen.findByText(LIBRARY_DELETED)).toBeTruthy();
     expect(screen.queryByText(DELETED_BY_AGENT)).toBeNull();
     expect(editor.dispose).toHaveBeenCalledTimes(1);
   });

@@ -3,9 +3,13 @@
 // title has); the tooltip is a Tip, so the keyboard reaches it. The shortcut, and the reason of a greyed glyph, are its
 // accessible description. A greyed glyph is `unavailable` with its reason, never `disabled`: it keeps the keyboard.
 // Only for the glyphs rule 4 allows. The shortcut comes formatted (a renderer caller reads it with
-// `useChordHint(action)`, app/IconButton.tsx), so the part reads no store and an editor bundle can draw it.
+// `useChordHint(action)`, app/IconButton.tsx), so the part reads no store and an editor bundle can draw it. A `detail`
+// says what the press acts on now (the board a design's comment goes on, M5's G514): a line of the tooltip under the
+// word, and part of the description, the name staying the word. A `tip` is the tooltip's words where a row the owner
+// saw keeps a longer tooltip than the name (the deck's Add comment, G403), the shortcut still after it; its words are
+// part of the description too, unless the name already says them ("Comments" on "Comments (3 open)").
 import type { ComponentPropsWithRef, ReactNode } from 'react';
-import { Tip, UNAVAILABLE_LOOK, unavailableClickProps } from './tip';
+import { Tip, UNAVAILABLE_LOOK, unavailableClickProps, type TipSide } from './tip';
 
 // The square icon button's look, which IconButton (app/IconButton.tsx) shares.
 export const GLYPH_BUTTON =
@@ -15,26 +19,32 @@ export interface NamedGlyphProps extends Omit<ComponentPropsWithRef<'button'>, '
   label: string; // the word: the accessible name and the tooltip
   shortcut?: string | null;
   unavailable?: string | null; // why it is greyed
+  detail?: string | null; // what the press acts on now
+  tip?: string; // the tooltip's words, when they are not the name's
   pressed?: boolean;
+  side?: TipSide; // where the tooltip opens, when not above (Tip's rule)
   children: ReactNode; // the icon, aria-hidden
 }
 
-export function NamedGlyph({ label, shortcut, unavailable, pressed, className = GLYPH_BUTTON, children, ref, ...button }: NamedGlyphProps) {
-  const named = shortcut ? `${label} · ${shortcut}` : label;
-  const description = [unavailable, shortcut].filter((part) => part).join(' · ');
+export function NamedGlyph({ label, shortcut, unavailable, detail, tip = label, pressed, side, className = GLYPH_BUTTON, children, ref, ...button }: NamedGlyphProps) {
+  const named = shortcut ? `${tip} · ${shortcut}` : tip;
+  const told = tip.toLowerCase() !== label.toLowerCase() && !label.toLowerCase().includes(tip.toLowerCase()) ? tip : null; // the name says the rest
+  const description = [unavailable, told, detail, shortcut].filter((part) => part).join(' · ');
   return (
     <Tip
       content={
-        unavailable ? (
+        unavailable || detail ? (
           <>
             <span className="block">{named}</span>
-            <span className="block text-fg-muted">{unavailable}</span>
+            {detail && <span className="block">{detail}</span>}
+            {unavailable && <span className="block text-fg-muted">{unavailable}</span>}
           </>
         ) : (
           named
         )
       }
       description={description}
+      side={side}
       {...unavailableClickProps(unavailable)}
     >
       <button ref={ref} type="button" aria-label={label} aria-pressed={pressed} className={`${className} ${UNAVAILABLE_LOOK}`} {...button}>

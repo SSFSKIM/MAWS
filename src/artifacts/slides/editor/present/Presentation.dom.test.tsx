@@ -90,7 +90,9 @@ describe('the show', () => {
     const s = show(deck(), 'presenter');
     const next = () => s.container.querySelector('[data-present-next]')!;
     expect(s.container.querySelector('[data-present-notes]')!.textContent).toContain('Say hello');
-    expect(s.container.querySelector('[data-present-count]')!.textContent).toBe('Slide 1 of 3');
+    // the word cut (G502): the count as numbers, named in words
+    expect(s.container.querySelector('[data-present-count]')!.textContent).toBe('1 / 3');
+    expect(s.container.querySelector('[data-present-count] [role="img"]')!.getAttribute('aria-label')).toBe('Slide 1 of 3');
     expect(s.container.querySelector('[data-present-timer]')!.textContent).toBe('0:00');
     expect(next().querySelector('.maws-slide')!.getAttribute('data-slide')).toBe('two');
     key('ArrowRight');

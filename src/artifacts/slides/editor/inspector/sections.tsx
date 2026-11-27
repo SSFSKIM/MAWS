@@ -4,7 +4,12 @@
 // gradient where the element takes one, none), Border (one `border` value from width, style and colour; the radius),
 // Shadow (the first `box-shadow` in parts, the rest kept) and Text (family, size, weight, colour, alignment, line height,
 // letter spacing, `data-fit`).
+// The word cut (docs/doperpowers/specs/2026-11-16-word-cut-design.md, M5 task 3): a caption under its section's heading
+// drops the section's word (G442); the weights read by name (G445); a token transform's sentence is the greyed Rotation's
+// reason and Detach transform's tooltip (G449), an outline shadow's the greyed Spread's and Inset's (G450), no note under
+// them.
 import { useId } from 'react';
+import { Tip, unavailableClickProps } from '../../../../renderer/src/ui/tip';
 import { checkValue } from '../../css';
 import { pinToLeftTop, px, readTransform, rotationOf, transformFallback, withRotation } from '../../geometry';
 import { INSPECTOR_COPY as C } from './copy';
@@ -12,7 +17,7 @@ import { Button, ColourField, NumberField, Refusal, Row, Section, SelectField, T
 import { canAll, common, type Picked } from './selection';
 import {
   addStop, bareOf, BORDER_STYLES, borderWith, COLOUR_TOKENS, familyLabel, fillKind, firstColour, fontGroups, gradientValue, MAX_STOPS, MIN_STOPS,
-  parseBorder, parseGradient, parseShadow, pxOf, rawHint, SHADOW_DEFAULT, shadowValue, tokenLabel, tokenTitle, tokenValue, varName, type Gradient, type Shadow,
+  parseBorder, parseGradient, parseShadow, pxOf, rawHint, SHADOW_DEFAULT, shadowValue, tokenLabel, tokenValue, varName, type Gradient, type Shadow,
 } from './values';
 
 const pxOrNull = (n: number | null) => (n === null ? null : px(n));
@@ -68,6 +73,7 @@ export function Arrange() {
   const token = picked.some((p) => p.style.transform !== undefined && readTransform(p.style.transform, 1, 1) === null);
   const detachable = token && picked.every((p) => p.style.transform === undefined || readTransform(p.style.transform, 1, 1) !== null || transformFallback(p.style.transform) !== null);
   const opacity = common(picked, (p) => bareOf(p.style.opacity));
+  const tokenReason = turns && token ? (picked.length === 1 ? C.tokenTransform(transformFallback(picked[0]!.style.transform)) : C.tokenTransforms(detachable)) : null;
   return (
     <Section title={C.arrange}>
       {pinned && <div className="deck-inspector-pair">{[field('left', C.x), field('top', C.y)]}</div>}
@@ -80,14 +86,16 @@ export function Arrange() {
             unit="°"
             value={rotation.value ?? null}
             mixed={rotation.mixed}
-            disabled={token}
+            unavailable={tokenReason}
             onCommit={(n, how) => style((p) => ({ transform: withRotation(p.style.transform, n ?? 0) }), how)}
           />
         )}
         {turns && token && detachable && (
-          <Button label={C.detachTransform} onClick={() => style((p) => (readTransform(p.style.transform, 1, 1) === null ? { transform: transformFallback(p.style.transform) } : null), 'edit')}>
-            {C.detachTransform}
-          </Button>
+          <Tip content={tokenReason} description={tokenReason}>
+            <Button label={C.detachTransform} onClick={() => style((p) => (readTransform(p.style.transform, 1, 1) === null ? { transform: transformFallback(p.style.transform) } : null), 'edit')}>
+              {C.detachTransform}
+            </Button>
+          </Tip>
         )}
         {fades && (
           <NumberField
@@ -100,7 +108,6 @@ export function Arrange() {
           />
         )}
       </div>
-      {turns && token && <p className="deck-inspector-note">{picked.length === 1 ? C.tokenTransform(transformFallback(picked[0]!.style.transform)) : C.tokenTransforms(detachable)}</p>}
     </Section>
   );
 }
@@ -161,14 +168,14 @@ function GradientEditor({ gradient: g }: { gradient: Gradient }) {
   return (
     <div className="deck-inspector-gradient">
       <Row>
-        <NumberField label={C.gradientAngle} caption={C.gradientAngle} unit="°" value={g.angle} onCommit={(n, how) => write({ ...g, angle: n ?? 180 }, how)} />
+        <NumberField label={C.gradientAngle} caption={C.angleCaption} unit="°" value={g.angle} onCommit={(n, how) => write({ ...g, angle: n ?? 180 }, how)} />
       </Row>
       {g.stops.map((s, i) => (
         <div key={`${stopId}-${i}`} className="deck-inspector-stop">
           <div className="deck-inspector-stop-head">
             <NumberField
               label={C.stopPosition(i + 1)}
-              caption={C.stopPosition(i + 1)}
+              caption={C.positionCaption}
               unit="%"
               value={s.at}
               hint={C.auto}
@@ -209,7 +216,7 @@ export function Border() {
           <div className="deck-inspector-pair">
             <NumberField
               label={C.borderWidth}
-              caption={C.borderWidth}
+              caption={C.widthCaption}
               unit="px"
               value={pxOf(width.value ?? undefined)}
               mixed={width.mixed}
@@ -217,7 +224,7 @@ export function Border() {
               onCommit={(n, how) => (n === null ? [] : style((p) => ({ border: borderWith(p.style.border, { width: px(n) }) }), how))}
             />
             <label className="deck-inspector-number">
-              <span className="deck-inspector-mini">{C.borderStyle}</span>
+              <span className="deck-inspector-mini">{C.styleCaption}</span>
               <SelectField
                 label={C.borderStyle}
                 value={kind.value ?? 'none'}
@@ -258,6 +265,7 @@ export function Border() {
 export function ShadowSection() {
   const { picked, style, readOnly } = useInspector();
   const [refused, refuse] = useRefusal();
+  const insetWhy = useId();
   if (!canAll('box-shadow', picked)) return null;
   const value = common(picked, (p) => p.style['box-shadow']);
   const on = value.mixed || value.value !== undefined;
@@ -269,8 +277,11 @@ export function ShadowSection() {
     }, how);
   // a shape other than a rect draws its shadow from its outline (drop-shadow, fix wave 1): it has no inset and no spread
   const outline = picked.some((p) => p.tag === 'x-shape' && p.attrs.kind !== 'rect');
-  const len = (label: string, key: 'x' | 'y' | 'blur' | 'spread', disabled = false) => (
-    <NumberField label={label} caption={label} unit="px" value={first?.[key] ?? null} mixed={value.mixed} disabled={disabled} onCommit={(n, how) => (n === null && key !== 'spread' ? [] : write({ [key]: n }, how))} />
+  // Spread's and Inset's reason; each stays focusable with it in a read-only deck too, its edits refused
+  const outlineReason = outline ? C.outlineShadow : null;
+  // Spread's reason opens below it, off its caption and the X, Y and Blur row above (G450, the pair review)
+  const len = (label: string, key: 'x' | 'y' | 'blur' | 'spread', unavailable: string | null = null) => (
+    <NumberField label={label} caption={C.shadowCaptions[key]} unit="px" value={first?.[key] ?? null} mixed={value.mixed} unavailable={unavailable} tipSide={key === 'spread' ? 'bottom' : undefined} onCommit={(n, how) => (n === null && key !== 'spread' ? [] : write({ [key]: n }, how))} />
   );
   return (
     <Section title={C.shadow}>
@@ -293,13 +304,19 @@ export function ShadowSection() {
             {len(C.shadowBlur, 'blur')}
           </div>
           <div className="deck-inspector-triple">
-            {len(C.shadowSpread, 'spread', outline)}
+            {len(C.shadowSpread, 'spread', outlineReason)}
             <label className="deck-inspector-check">
-              <input type="checkbox" aria-label={C.shadowInset} checked={!outline && (first?.inset ?? false)} disabled={readOnly || outline || value.mixed} onChange={() => write({ inset: !(first?.inset ?? false) }, 'edit')} />
+              <Tip content={outlineReason} {...unavailableClickProps(outlineReason)}>
+                <input type="checkbox" aria-label={C.shadowInset} aria-describedby={outlineReason ? insetWhy : undefined} checked={!outline && (first?.inset ?? false)} disabled={!outline && (readOnly || value.mixed)} onChange={() => !outline && write({ inset: !(first?.inset ?? false) }, 'edit')} />
+              </Tip>
               <span>{C.shadowInset}</span>
             </label>
+            {outlineReason && (
+              <span id={insetWhy} hidden>
+                {outlineReason}
+              </span>
+            )}
           </div>
-          {outline && <p className="deck-inspector-note">{C.outlineShadow}</p>}
           <ColourField label={C.shadowColour} value={first?.color} mixed={value.mixed} onCommit={(v, how) => (v === null ? [] : write({ color: v }, how))} />
         </>
       )}
@@ -322,7 +339,7 @@ const ALIGNS = [
 /** A weight no list holds (a type class's token, by its friendly name), as a choice. */
 function weightChoice(value: string): Choice {
   const token = varName(value);
-  return token === null ? { value, label: rawHint(value) } : { value, label: tokenLabel(token), title: tokenTitle(token) };
+  return token === null ? { value, label: rawHint(value) } : { value, label: tokenLabel(token), title: tokenLabel(token) } /* G448: the friendly name alone on hover */;
 }
 const normFamily = (v: string) => {
   const r = checkValue('font-family', v);
@@ -346,7 +363,7 @@ export function Text() {
   const listed = groups.flatMap((g) => g.choices).find((c) => c.value === family.value || (familyToken !== null && varName(c.value) === familyToken));
   const familyChoices: Choice[] = [
     { value: '', label: C.inherited },
-    ...(family.value !== undefined && !listed ? [{ value: family.value, label: familyLabel(family.value), title: familyToken === null ? undefined : tokenTitle(familyToken) }] : []),
+    ...(family.value !== undefined && !listed ? [{ value: family.value, label: familyLabel(family.value), title: familyToken === null ? undefined : tokenLabel(familyToken) }] : []),
   ];
   const size = read('font-size');
   const weight = read('font-weight');
@@ -364,7 +381,7 @@ export function Text() {
         {has('font-size') && (
           <NumberField
             label={C.fontSize}
-            caption={C.fontSize}
+            caption={C.sizeCaption}
             unit="px"
             value={pxOf(size.value)}
             mixed={size.mixed}
@@ -374,7 +391,7 @@ export function Text() {
         )}
         {has('font-weight') && (
           <label className="deck-inspector-number">
-            <span className="deck-inspector-mini">{C.fontWeight}</span>
+            <span className="deck-inspector-mini">{C.weightCaption}</span>
             <SelectField
               label={C.fontWeight}
               value={weight.value ?? ''}
@@ -382,7 +399,7 @@ export function Text() {
               choices={[
                 { value: '', label: C.inherited },
                 ...(weight.value !== undefined && !WEIGHTS.includes(weight.value) ? [weightChoice(weight.value)] : []),
-                ...WEIGHTS.map((w) => ({ value: w, label: `${w} ${C.weights[w]}` })),
+                ...WEIGHTS.map((w) => ({ value: w, label: C.weights[w]! })),
               ]}
               onChange={(v) => refuse(set('font-weight')(v === '' ? null : v, 'edit'))}
             />
@@ -421,7 +438,7 @@ export function Text() {
         )}
       </div>
       {fits && (
-        <Row caption={C.textFit}>
+        <Row caption={C.fitCaption}>
           <SelectField
             label={C.textFit}
             value={fit.value ?? ''}

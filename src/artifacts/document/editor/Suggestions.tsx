@@ -16,6 +16,7 @@ import { displayedDocument, type ViewEnvironment } from './nodes/views'; // P3-E
 import type { EditorHost } from './host-types';
 import { usePageGround } from './page-ground';
 import { useReadOnly } from './read-only';
+import { PAGE_COPY } from './copy';
 
 /** How long a difference must hold, with the base caught up, before the review replaces the live editor. */
 const SETTLE_MS = 250;
@@ -255,7 +256,7 @@ function Review({ view, artifactId, tabId, host, editorHost, pageScope: Scope, r
       <button type="button" className="doc-tool" aria-label={`Reject suggestion ${index + 1}`} disabled={busy || !block?.ranges.length || readOnly} onClick={() => void settle('rejectSuggestion')}>Reject</button>
     </div>
     {error && <div className="doc-banner" role="alert">{error}</div>}
-    {block && block.ranges.length === 0 && <div className="doc-banner" role="status">This change cannot be resolved to a review range.</div>}
+    {block && block.ranges.length === 0 && <div className="doc-banner" role="status">{PAGE_COPY.suggestionElsewhere}</div>}
     <div className="doc-page-frame"><div className="doc-page-scope">{Scope ? <Scope>{sheet}</Scope> : sheet}</div></div>
   </section>;
 }

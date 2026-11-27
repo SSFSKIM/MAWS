@@ -175,6 +175,11 @@
   outline-offset: 1px;
   border-radius: var(--radius-sm);
 }
+/* the word cut (G528): a title's size waits for pointing or focus (ui/hover-scope.ts's rule in styles/app.css), and
+   shows while its board is selected; this rule outranks that one's resting opacity */
+.design-screen-title[data-frame-selected] .design-board-title-size[data-on-hover] {
+  opacity: 1;
+}
 .design-board-mark {
   position: absolute;
   display: flex;
@@ -402,4 +407,19 @@
     border-left: 0;
     border-top: 1px solid var(--border);
   }
+}
+
+/* the word cut (G533, G534): a held board's banner is its one line, which opens the loader's reasons */
+.design-held-details > summary {
+  width: fit-content;
+  cursor: default;
+}
+.design-held-details > summary:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+.design-held-details ul {
+  margin: 4px 0 0;
+  padding-left: 18px;
+  color: var(--fg-muted);
 }

@@ -43,7 +43,7 @@ function linesOf(view: LibraryViewState, read: LibraryRead<LibraryList>, list: L
   if ((view.view === 'all' || view.view === 'general' || narrowed) && !searching && view.machine === null) lines.push({ kind: 'make', key: 'make', spaceId: currentSpaceOf(view) });
   if (read.status === 'error') lines.push({ kind: 'note', key: 'error', text: P.readFailed(read.error ?? ''), retry: () => refreshLibrary(), tone: 'warning' });
   if (list === undefined) {
-    if (read.status !== 'error') lines.push({ kind: 'note', key: 'reading', text: P.reading });
+    if (read.status !== 'error') lines.push({ kind: 'wait', key: 'reading', label: P.reading }); // the word cut (N190)
     return lines;
   }
   const unnarrowedSpaces = view.view === 'bySpace' && !narrowed;

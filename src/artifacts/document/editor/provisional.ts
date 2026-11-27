@@ -5,7 +5,7 @@
 // found in the block's text, markdown syntax in it say, is drawn as a block after the block); `replace_block` dims the
 // block and draws the text after it; `insert` draws it after or before its anchor; `set_cell` after the table; `delete`
 // and `move` stream no text (presence outlines them); a dashboard's `dataset` labels every chart block bound to that
-// dataset, "<name> is updating <dataset>…" (G2's G-R7). Rule 1: decorations only, never a document change, never history.
+// dataset with the agent's name (G2's G-R7; the word cut's G354). Rule 1: decorations only, never a document change, never history.
 // Rule 4: an op that would draw inside the block the person composes in waits until the composition ends, and no
 // widget takes focus or the selection. Rule 2's and 3's withdrawal is the store's; this redraws when it changes, in the
 // same task, so the real text and the layer swap within one task. A redraw tells `onGrow` (the page frame's `moved`,
@@ -207,7 +207,7 @@ function opDecorations(op: ProvisionalOp, index: number, who: Who, { blocks: fou
         'data-provisional-op': op.op,
         'data-provisional-by': who.name,
         'data-provisional-dataset': op.dataset,
-        'data-provisional-label': `${who.name} is updating ${op.dataset}…`,
+        'data-provisional-label': who.name, // the word cut (G354): the agent's name alone, as the streamed text's tag (G353)
       };
       return (charts.get(op.dataset) ?? []).filter((chart) => ![...chart.around].some((id) => composing.has(id))).map((chart) => Decoration.node(chart.pos, chart.pos + chart.node.nodeSize, attrs));
     }

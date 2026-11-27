@@ -233,7 +233,8 @@ test('a deck in the panel and a main tab: two replicas, the filmstrip’s gestur
   await expect(inPanel.locator('[data-deck-editor]')).toBeVisible({ timeout: 15_000 });
   await expect(mainTab(page, 'Q3 review')).toHaveAttribute('aria-selected', 'true');
   const saved = inMain.locator('.deck-toolbar [data-editor-toolbar] [data-header-saved]');
-  await expect(saved).toHaveText('Saved');
+  // the word cut (T607): the deck's toolbar reads the one saved wording the other editors' headers read
+  await expect(saved).toHaveText('All changes saved');
   await expect(saved).toHaveAttribute('title', 'All changes saved');
   // the owner's view recorded once a slide is on screen (L's onShown)
   await expect.poll(async () => (await ok<{ artifact: { lastViewedAt: number | null } }>(page, 'artifacts.get', { artifactId: id })).artifact.lastViewedAt).not.toBeNull();
@@ -251,11 +252,15 @@ test('a deck in the panel and a main tab: two replicas, the filmstrip’s gestur
   await inMain.getByRole('textbox', { name: 'Section name' }).press('Enter');
   await expect(inPanel.locator('.deck-section-title')).toHaveText(['Opening', 'Details']);
   await inMain.getByRole('button', { name: 'Slide 5, held' }).click();
-  await expect(inMain.locator('[data-held-banner]')).toContainText('blink');
+  // the word cut (G431, G432): the banner says it in one line; the loader's reasons wait under its Details, drawn once opened
+  const heldBanner = inMain.locator('[data-held-banner]');
+  await expect(heldBanner.locator('details li').filter({ hasText: 'blink' })).toBeHidden();
+  await heldBanner.locator('summary').click();
+  await expect(heldBanner.locator('details li').filter({ hasText: 'blink' })).toBeVisible();
 
   // an edit in one replica shows in the other: hide in the main tab, dimmed in the panel
   await inMain.getByRole('button', { name: 'Slide 2 options' }).click();
-  await page.getByRole('menuitem', { name: 'Hide slide' }).click();
+  await page.getByRole('menuitem', { name: 'Hide', exact: true }).click(); // the word cut (G428): the menu's items in one word
   await expect(inPanel.locator('[data-slide-thumb="plan"]')).toHaveAttribute('data-hidden', 'true');
   // undo and redo, one step each, followed by the other replica
   await inMain.getByRole('button', { name: 'Undo' }).click();
@@ -282,10 +287,10 @@ test('a deck in the panel and a main tab: two replicas, the filmstrip’s gestur
   const added = (await order(page, id))[1]!;
   expect(added).toMatch(/^s[0-9a-z]+-\d+$/);
   await inMain.getByRole('button', { name: 'Slide 3 options' }).click(); // plan, hidden
-  await page.getByRole('menuitem', { name: 'Duplicate slide' }).click();
+  await page.getByRole('menuitem', { name: 'Duplicate', exact: true }).click();
   await expect(thumbs(inPanel)).toHaveCount(8);
   await inMain.getByRole('button', { name: 'Slide 2 options' }).click(); // the new blank slide
-  await page.getByRole('menuitem', { name: 'Delete slide' }).click();
+  await page.getByRole('menuitem', { name: 'Delete', exact: true }).click();
   await expect(thumbs(inPanel)).toHaveCount(7);
   expect(await order(page, id)).not.toContain(added);
 
@@ -668,7 +673,7 @@ test('the transform layer: select, move with guides, resize, rotate, nudge, flow
   await page.mouse.click(tk.x + tk.width / 2, tk.y + tk.height / 2);
   const tkRot = (await tab.locator('[data-overlay] [data-handle="rotate"]').boundingBox())!;
   await drag(page, { x: tkRot.x + tkRot.width / 2, y: tkRot.y + tkRot.height / 2 }, { x: tkRot.x + 120, y: tkRot.y + 80 });
-  await expect(tab.locator('[data-deck-notice]')).toContainText('design-system token');
+  await expect(tab.locator('[data-deck-notice]')).toHaveText('Set by the design system: Detach it in the inspector'); // the word cut (G413)
   // P3-F F3 review 4: the notice takes the row's free space beside the spacer, not half of it, and is never narrower
   // than its readable floor (12rem, or the row's width when that is less), so a refusal never reads as an ellipsis
   const split = await tab.getByRole('toolbar', { name: 'Deck' }).evaluate((bar) => {

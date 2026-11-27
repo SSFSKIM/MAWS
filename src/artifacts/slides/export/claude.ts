@@ -36,6 +36,14 @@ const rewrite = (children: ElementIR[], moved: (src: string) => string, resolveV
     children: rewrite(el.children, moved, resolveVar),
   }));
 
+/** Why a deck with slides that do not load is not exported for Claude: the slides by number, and the way out. The
+ * header's Export prefixes its own "Couldn’t export:" (VIEWERS_COPY.exportFailed). */
+export function heldRefusal(numbers: readonly number[]): string {
+  if (numbers.length === 1) return `slide ${numbers[0]} does not load. Fix or remove it first.`;
+  const list = `${numbers.slice(0, -1).join(', ')} and ${numbers.at(-1)}`;
+  return `slides ${list} do not load. Fix or remove them first.`;
+}
+
 export interface ClaudeDeckOptions {
   /** A token's literal at the deck's scale with its overrides (the mirror's `deckTokenValues`). */
   resolveVar: (name: string) => string | undefined;
@@ -49,11 +57,9 @@ export interface ClaudeDeckOptions {
 export function claudeDeckFiles(doc: Doc, { resolveVar, assets, measured }: ClaudeDeckOptions): Record<string, string | Uint8Array> {
   const bySlide = new Map((measured?.slides ?? []).map((s) => [s.id, new Map(s.elements.map((e) => [e.id, e]))]));
   const measuredOf = (id: string) => (measured ? (bySlide.get(id) ?? new Map<string, MeasuredElement>()) : null);
-  const held = slideOrder(doc).flatMap((id) => {
-    const h = heldOf(doc, id);
-    return h ? [`slide ${id} is held (${h.reasons.join('; ')})`] : [];
-  });
-  if (held.length) throw new Error(`the presentation cannot be exported for Claude while slides are held: ${held.join('; ')}; fix or remove them first`);
+  // the word cut (G508): in a person's words, each held slide by its filmstrip number, and the way out
+  const held = slideOrder(doc).flatMap((id, i) => (heldOf(doc, id) ? [i + 1] : []));
+  if (held.length) throw new Error(heldRefusal(held));
   const moved = (src: string) => (src.startsWith('assets/') ? claudeAssetPath(src) : src);
   const deck = readDeckJson(doc);
   delete deck.dsOverrides; // MAWS's, applied in the literals

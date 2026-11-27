@@ -156,7 +156,7 @@ describe('an image pasted from another document', () => {
     act(() => b.editor().setEditable(false));
     release();
     const alert = await within(toolbarOf(b.container)).findByRole('alert');
-    expect(alert.textContent).toContain('stopped taking edits');
+    expect(alert.textContent).toBe('Couldn’t paste: the document is read-only'); // the word cut (G330)
     expect(imagesIn(b.editor().state.doc)).toEqual([]);
   });
 });

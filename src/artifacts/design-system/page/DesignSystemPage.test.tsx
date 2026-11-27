@@ -166,7 +166,7 @@ describe('the Design System page (D14)', () => {
     expect(violations).toHaveLength(1);
     expect(violations[0]).toContain('components/chip.html');
     expect(violations[0]).toContain('#ff00ff');
-    expect(check.querySelector('[aria-label="To judge by hand"]')!.textContent).toContain('Nothing louder than the title.');
+    expect(check.querySelector('[aria-label="By hand"]')!.textContent).toContain('Nothing louder than the title.'); // the word cut (G586)
     view.rerender(<DesignSystemPage artifactId="ds1" handle={{ doc }} host={host} revealCheck={1} />);
     expect(document.activeElement).toBe(check);
   });

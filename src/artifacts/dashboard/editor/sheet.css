@@ -125,6 +125,93 @@
 .ds-doc .dash-notes {
   flex-basis: 100%;
 }
+/* the word cut (G598): a column's wrong-type values, a mark after the source label whose notes show beside it while it
+   is pointed at or holds the keyboard, and at rest where nothing can point (the touch rule). Pointed at or focused, the
+   mark is placed (hover.ts's placeNote): the note opens from its end leftward near the editor's right edge, its width
+   capped to the room on the side it opens to, and above the mark near the editor's or the window's bottom edge (the
+   pair review's fix wave, G603), so it is never clipped */
+.ds-doc .dash-warning {
+  position: relative;
+  cursor: default;
+  color: var(--warning);
+  border-radius: var(--ds-radius-sm, var(--radius-sm));
+}
+.ds-doc .dash-warning:focus-visible {
+  outline: 2px solid var(--ds-color-accent, var(--accent));
+  outline-offset: 2px;
+}
+.ds-doc .dash-warning::after {
+  content: attr(data-note);
+  position: absolute;
+  z-index: 1;
+  left: 0;
+  top: calc(100% + var(--space));
+  width: max-content;
+  max-width: var(--dash-note-max, 320px);
+  box-sizing: border-box;
+  padding: var(--space) calc(var(--space) * 2);
+  font-family: var(--font-ui);
+  font-size: var(--text-ui-sm);
+  color: var(--fg);
+  background: var(--bg-overlay);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow-float);
+  pointer-events: none;
+  visibility: hidden;
+}
+.ds-doc .dash-warning[data-note-side='end']::after {
+  right: 0;
+  left: auto;
+}
+.ds-doc .dash-warning[data-note-above]::after {
+  top: auto;
+  bottom: calc(100% + var(--space));
+}
+.ds-doc .dash-warning:hover::after {
+  visibility: visible;
+  transition: visibility 0s 300ms; /* the pointing delay (renderer/src/ui/pointing.ts) */
+}
+.ds-doc .dash-warning:focus-visible::after {
+  visibility: visible;
+}
+@media (hover: none) {
+  .ds-doc .dash-warning::after {
+    position: static;
+    display: inline;
+    visibility: visible;
+    margin-left: var(--space);
+    padding: 0;
+    color: inherit;
+    background: none;
+    border: 0;
+    box-shadow: none;
+  }
+}
+/* the word cut (G604): the first load's quiet spinner, nothing for its first half second (renderer/src/ui/spinner.tsx) */
+.ds-doc .dash-loading-ring {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  border: 1px solid var(--border-strong);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: dash-ring-turn 1s linear infinite;
+}
+/* the quiet half second: chart-view.ts gives the ring its role and name once it is over */
+.ds-doc .dash-loading-ring:not([role]) {
+  visibility: hidden;
+}
+@keyframes dash-ring-turn {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .ds-doc .dash-loading-ring {
+    animation: none;
+  }
+}
 
 /* ── the source sheet ── */
 .dash-shell {
@@ -190,6 +277,12 @@
   margin: 0;
   overflow-wrap: anywhere;
   word-break: keep-all;
+}
+/* the line the rows' wait stands in holds its height from the start, so the quiet spinner moves nothing as it shows */
+.dash-sheet-loading {
+  display: flex;
+  align-items: center;
+  min-height: 1lh;
 }
 .dash-sheet-label,
 .dash-sheet-status,
@@ -288,6 +381,10 @@
 }
 .dash-sheet-sort:hover {
   color: var(--fg);
+}
+/* the word cut (G608): the sheet takes the keyboard itself as it opens, a container's focus drawn by nothing */
+.dash-sheet:focus {
+  outline: none;
 }
 .dash-sheet-sort:focus-visible,
 .dash-sheet-close:focus-visible {

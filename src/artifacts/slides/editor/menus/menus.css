@@ -195,12 +195,11 @@
 .deck-check-message {
   overflow-wrap: anywhere;
 }
-.deck-check-where {
-  overflow: hidden;
-  color: var(--fg-muted);
-  font-family: var(--font-mono);
-  text-overflow: ellipsis;
-  white-space: nowrap;
+/* G476: the check's wait, a quiet spinner in a line's height from the start */
+.deck-check-wait {
+  display: flex;
+  align-items: center;
+  min-height: 1lh;
 }
 .deck-check-rule {
   color: var(--fg-faint);
@@ -243,4 +242,11 @@
   margin: 0;
   padding: 8px;
   color: var(--fg-muted);
+}
+/* G421: the layouts' wait is the quiet spinner, in a line's height from the start */
+.deck-layouts-wait {
+  display: flex;
+  align-items: center;
+  min-height: 1lh;
+  box-sizing: content-box;
 }

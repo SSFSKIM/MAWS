@@ -1,8 +1,12 @@
 /* X36, the shared comment card (ThreadCard.tsx; P4-B1): app chrome wherever it is drawn (a document's margin and panel,
    a deck's or a design's pin popover), so it reads the app's tokens only. */
+/* one column: the quote and every message take the card's whole width. The card's action (Resolve or Reopen) is drawn over
+   the right end of its first author line (below), so nothing is laid out for it (the pair review's fix wave, G384) */
 .thread-card {
-  display: flex;
-  flex-direction: column;
+  position: relative;
+  anchor-scope: --thread-head;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr); /* never wider than its host, whatever a long unbroken passage asks */
   gap: var(--space);
   padding: calc(var(--space) * 2);
   border: 1px solid var(--border);
@@ -45,7 +49,6 @@
   overflow: hidden;
 }
 .thread-card-tab,
-.thread-card-note,
 .thread-card-more {
   margin: 0;
   font-size: var(--text-ui-sm);
@@ -98,9 +101,49 @@
   border-radius: var(--radius-sm);
   padding: var(--space) calc(var(--space) * 2);
 }
-.thread-card-actions {
+/* the word cut (G384), placed by the pair review's fix wave: Resolve or Reopen over the right end of the first message's
+   author line, which holds only a name, centred on it and masking what runs under it with the card's own ground; it
+   takes no space and moves no text as it shows. The hover scope's rule (styles/app.css) shows it on the card pointed at
+   or focused, the card shows it while active. Each card anchors its own (`anchor-scope`); a card with no message keeps
+   it in a row of its own (below). It stays last in the card, after the reply field, so the Tab order is unchanged. */
+.thread-card > .thread-card-messages:first-of-type > .thread-card-message:first-child > .thread-card-author {
+  anchor-name: --thread-head;
+}
+.thread-card > .thread-card-actions {
+  position: absolute;
+  position-anchor: --thread-head;
+  top: calc(anchor(center, calc(var(--space) * 5)) - var(--space) * 3);
+  right: anchor(right, calc(var(--space) * 2));
   display: flex;
-  justify-content: flex-end;
+  background: inherit;
+  border-radius: var(--radius-sm);
+}
+.thread-card > .thread-card-actions > .thread-card-button {
+  height: calc(var(--space) * 6);
+}
+/* a card with no message (a thread whose first comment was never written) has no author line: its action keeps a row
+   of its own at the foot, under the reply field, rather than over the field's send */
+.thread-card:not(:has(> .thread-card-messages)) > .thread-card-actions {
+  position: static;
+  justify-self: end;
+}
+/* the word cut (G388): a card whose passage is gone, where it draws no quote (a deck's or a design's pin popover) */
+.thread-card-removed {
+  justify-self: start;
+  padding: 0 var(--space);
+  font-size: var(--text-ui-sm);
+  color: var(--fg-muted);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+.thread-card-removed:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+.thread-card-send {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 }
 .thread-card-button {
   font: inherit;
@@ -112,10 +155,11 @@
   border: 0;
   border-radius: var(--radius-sm);
 }
-.thread-card-button:hover:not(:disabled) {
+.thread-card-button:hover:not(:disabled):not([aria-disabled='true']) {
   background: var(--bg-hover);
 }
-.thread-card-button:disabled {
+.thread-card-button:disabled,
+.thread-card-button[aria-disabled='true'] {
   color: var(--fg-faint);
 }
 

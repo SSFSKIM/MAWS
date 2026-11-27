@@ -55,6 +55,7 @@ import {
   surfaceEvidence,
   type SurfaceGeometry,
   threadsOf,
+  toggleComments,
   viewOf,
   worldAt,
 } from './support/design';
@@ -365,13 +366,13 @@ test('board frames: moved and snapped, resized, sized by preset and refused past
   await page.keyboard.up('Meta');
   await expect.poll(() => frame('tablet')).toEqual({ x: 650, y: 0, w: 934, h: 1194 });
 
-  // a preset sizes it; a size past the cap is refused by name and nothing is written
+  // a preset sizes it; a size past the cap is refused with the limit and nothing is written
   await tab.getByRole('combobox', { name: 'Board size' }).selectOption('phone');
   await expect.poll(() => frame('tablet')).toEqual({ x: 650, y: 0, w: 390, h: 844 });
   const height = tab.getByRole('textbox', { name: 'Board height' });
   await height.fill('20000');
   await height.press('Enter');
-  await expect(tab.getByRole('alert')).toContainText('over 16384 px a side');
+  await expect(tab.getByRole('alert')).toHaveText('At most 16,384 px a side'); // the word cut (G539): the limit in a person's words
   expect(await frame('tablet')).toEqual({ x: 650, y: 0, w: 390, h: 844 });
   await height.press('Escape');
 
@@ -406,7 +407,7 @@ test('board frames: moved and snapped, resized, sized by preset and refused past
   await expect(tab.locator(`[data-board-id="${added.id}"] .maws-slide[data-board]`)).toHaveCount(1);
 
   await tab.getByRole('button', { name: 'Board Phone options' }).click();
-  await page.getByRole('menuitem', { name: 'Duplicate board' }).click();
+  await page.getByRole('menuitem', { name: 'Duplicate', exact: true }).click(); // the word cut (G525)
   await expect.poll(async () => (await boardsOf(page, id)).length).toBe(7);
   const copy = (await boardsOf(page, id))[1]!;
   expect(copy.frame).toEqual({ x: 490, y: 0, w: 390, h: 844 });
@@ -430,7 +431,7 @@ test('board frames: moved and snapped, resized, sized by preset and refused past
   await expect.poll(ids).toEqual([...before.slice(0, at), next, 'tablet', ...before.slice(at + 2)]);
 
   await tab.locator(`[data-board-row="${copy.id}"]`).getByRole('button', { name: 'Board Phone options' }).click();
-  await page.getByRole('menuitem', { name: 'Delete board' }).click();
+  await page.getByRole('menuitem', { name: 'Delete', exact: true }).click();
   await expect.poll(async () => (await ids()).includes(copy.id)).toBe(false);
 
   // undone from one stack: the delete, the reorder, the duplicate, the add
@@ -634,7 +635,11 @@ test('a held board is drawn labelled and never written; Theme restyles every boa
   expect(await frameOf(page, id, 'broken')).toEqual(frameOnly('broken'));
   await expect(tab.locator('[data-board-handle]')).toHaveCount(0);
   await expect(tab.getByRole('textbox', { name: 'Board X' })).toBeDisabled();
-  await expect(tab.locator('[data-held-banner]')).toContainText('blink');
+  // the word cut (G533, G534): the banner's sentence is its summary; the reasons are drawn once it is opened
+  const heldBanner = tab.locator('[data-held-banner]');
+  await expect(heldBanner.locator('details li').filter({ hasText: 'blink' })).toBeHidden();
+  await heldBanner.locator('summary').click();
+  await expect(heldBanner.locator('details li').filter({ hasText: 'blink' })).toBeVisible();
 
   // Theme: an override of the background recolours every board (the deck root's dsOverrides, the document medium's scope)
   await headerAction(page, 'Theme');
@@ -676,12 +681,13 @@ test('the comments, history and Export sheet surfaces, wide and narrow: evidence
   const keep = async (name: string, body: Locator, shot: Locator | null) => bounds.push([name, await surfaceEvidence(page, name, body, shot)]);
   const toolbarOf = (body: Locator) => body.getByRole('toolbar', { name: 'Design' });
 
-  const commentsRail = async (surface: string, body: Locator, shot: Locator) => {
-    await toolbarOf(body).getByRole('button', { name: /^Comments/ }).click();
+  // the word cut (G512): the header's Comments action opens the rail; the design's toolbar has no toggle of its own
+  const commentsRail = async (surface: string, body: Locator, shot: Locator, region: 'main' | 'panel') => {
+    await toggleComments(page, region);
     const rail = body.getByRole('complementary', { name: 'Comments' });
     await expect(rail.locator('article[data-thread]')).toHaveCount(2);
     await keep(`design-comments-rail-${surface}`, body, shot);
-    await toolbarOf(body).getByRole('button', { name: /^Comments/ }).click();
+    await toggleComments(page, region);
     await expect(rail).toHaveCount(0);
   };
   const commentCard = async (surface: string, body: Locator, region: 'main' | 'panel') => {
@@ -716,7 +722,7 @@ test('the comments, history and Export sheet surfaces, wide and narrow: evidence
     await body.locator('[data-board-title="poster"]').click(); // its frame selected: what Export takes
     await expect.poll(async () => (await viewOf(page, id, region)).frame).toBe('poster');
     await exportEntry(page, 'PNG (selected board)', region);
-    const sheet = page.getByRole('dialog', { name: 'Export “Poster” at 91.02%?' });
+    const sheet = page.getByRole('dialog', { name: 'Export “Poster” at 91%?' }); // the word cut (G556): rounded down
     await expect(sheet).toBeVisible();
     await keep(`design-export-sheet-${surface}`, body, null);
     await page.keyboard.press('Escape');
@@ -724,7 +730,7 @@ test('the comments, history and Export sheet surfaces, wide and narrow: evidence
   };
 
   await test.step('wide, the design’s main tab: the comments rail, a new comment’s notice (no session shown, no context), history, the Export sheet', async () => {
-    await commentsRail('wide', inMain, mainRegion);
+    await commentsRail('wide', inMain, mainRegion, 'main');
     // P3-F (L230): the design's own context decides; none here, so the notice in the card's place says why
     await inMain.getByRole('button', { name: 'Board Phone', exact: true }).click(); // its frame selected
     await expect.poll(async () => (await viewOf(page, id, 'main')).frame).toBe('phone');
@@ -758,7 +764,7 @@ test('the comments, history and Export sheet surfaces, wide and narrow: evidence
   });
 
   await test.step('narrow, the panel beside the chat: the comments rail and card, history, the Export sheet', async () => {
-    await commentsRail('narrow', inPanel, panel);
+    await commentsRail('narrow', inPanel, panel, 'panel');
     await commentCard('narrow', inPanel, 'panel');
     await history('narrow', inPanel, panel, 'panel');
     await exportSheet('narrow', inPanel, 'panel');

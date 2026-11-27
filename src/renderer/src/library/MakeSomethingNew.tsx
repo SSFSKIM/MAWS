@@ -18,7 +18,7 @@
 // the ones known when the card is pressed (this Mac's `spaces.instructions`); a Space without any adds no chip.
 import { preserveSubmenuPointer } from '@artifacts/ui/menu-pointer';
 import { DropdownMenu } from 'radix-ui';
-import { createContext, useContext, useId, useState } from 'react';
+import { createContext, useContext, useId, useLayoutEffect, useRef, useState } from 'react';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { ArtifactKind } from '@shared/artifacts/entity';
 import type { LibrarySpace } from '@shared/ipc/schema/library';
@@ -32,11 +32,12 @@ import { prefillComposer, type Prefill } from '../stores/composer';
 import { placeOf, useLayout } from '../stores/layout';
 import { useSettings } from '../stores/settings';
 import { createArtifact, openArtifactTab } from './actions';
-import { askClaudePrefill, KIND_BLURBS, KIND_LABELS, LIBRARY_PAGE as P, SPACE_COPY, untitledTitle } from './copy';
+import { askClaudePrefill, GROUP_COPY, KIND_BLURBS, KIND_LABELS, LIBRARY_PAGE as P, SPACE_COPY, untitledTitle } from './copy';
 import { toastFailure } from './dialogs';
+import { QuietSpinner, WaitingWords } from '../ui/spinner';
 import { ChevronRightIcon, KindIcon, MoreIcon } from './icons';
 import { MENU, MENU_ITEM } from './LibraryHeader';
-import { useLibraryList, useLibrarySpaces, useSpaceInstructions } from './store';
+import { refreshLibrarySpaces, useLibraryList, useLibrarySpaces, useSpaceInstructions } from './store';
 
 const CARD_KINDS = ['document', 'presentation', 'dashboard', 'design'] as const satisfies readonly ArtifactKind[];
 const DEFAULT = 'default'; // the radio value of the default system (no system id is it)
@@ -265,19 +266,55 @@ function More({ spaceId, space, spaceKnown, instructions }: { spaceId: string | 
 }
 
 export function MakeSomethingNew({ spaceId }: { spaceId: string | null }) {
-  const spaces = useLibrarySpaces().value;
+  const spacesRead = useLibrarySpaces();
+  const spaces = spacesRead.value;
   const space = spaceId === null ? undefined : spaces?.find((s) => s.id === spaceId);
   const spaceKnown = spaceId === null || space !== undefined;
   const choice = useSystemChoice(spaceId);
   const held = useSpaceInstructions();
   const instructions = spaceId === null ? undefined : held.get(spaceId);
+  // N193: a read that failed while the Space was not known says so and offers a new read. Try again stays the one
+  // control through its read (busy, its spinner beside it) and through a read that fails again, so focus never drops; a
+  // read that succeeds takes it away, and focus it held goes to the strip's heading.
+  const failed = !spaceKnown && spacesRead.error !== null;
+  const retrying = failed && spacesRead.status === 'reading';
+  const heading = useRef<HTMLHeadingElement>(null);
+  const retryFocused = useRef(false);
+  useLayoutEffect(() => {
+    if (failed) return;
+    const lost = document.activeElement === null || document.activeElement === document.body;
+    if (retryFocused.current && lost) heading.current?.focus();
+    retryFocused.current = false;
+  }, [failed]);
   return (
     <section aria-labelledby="library-make" className="flex flex-col gap-2 pb-4">
       <div className="flex min-w-0 items-center gap-2 px-2 text-ui-sm text-fg-muted">
-        <h2 id="library-make" className="m-0 shrink-0 font-semibold">
+        <h2 ref={heading} id="library-make" tabIndex={-1} className="m-0 shrink-0 font-semibold outline-none">
           {P.makeNew}
         </h2>
-        <span className="min-w-0 truncate">· {spaceId === null ? 'General' : (space?.name ?? 'Loading Space…')}</span>
+        {spaceKnown ? (
+          <span className="min-w-0 truncate">· {space?.name ?? GROUP_COPY.noSpace}</span>
+        ) : failed ? (
+          // the cards stay disabled meanwhile, so nothing is made outside the narrowed Space
+          <>
+            <span data-library-space-failed="" className="min-w-0 truncate text-warning">
+              · {P.spaceFailed}
+            </span>
+            <button
+              type="button"
+              aria-busy={retrying}
+              onClick={() => !retrying && refreshLibrarySpaces()}
+              onFocus={() => (retryFocused.current = true)}
+              onBlur={(event) => event.relatedTarget !== null && (retryFocused.current = false)} // a removal blurs to nothing
+              className="shrink-0 rounded-sm px-1 text-ui-sm text-fg underline outline-accent hover:bg-bg-hover focus-visible:outline-2"
+            >
+              <WaitingWords words={P.retry} wait={retrying ? P.readingSpace : null} />
+            </button>
+          </>
+        ) : (
+          // the word cut (N193): while the Spaces are read, the quiet spinner where the Space's name will be
+          <QuietSpinner label={P.readingSpace} />
+        )}
         <SystemChoice choice={choice} />
       </div>
       <div className="flex items-stretch gap-2">

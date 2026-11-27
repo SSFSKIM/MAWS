@@ -7,6 +7,8 @@
 // their threads with them, and refuses a move the destination cannot take, writing nothing. Real layout is the e2e's.
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { formatChord } from '@shared/keymap/chord';
+import { accessibleDescription } from '../../../renderer/src/test-support/accessible-text';
 import type { CommentOverlayProps, CommentedPassage, DocumentComments } from '../../document/editor/comments/surface';
 import { readFlat, ROOT } from '../../slides/model';
 import { addThread, threadStates } from '../../slides/threads';
@@ -59,7 +61,7 @@ describe('comments on a design', () => {
       view.selectFrame('b1');
     });
     const comment = within(toolbar()).getByRole('button', { name: 'Add comment' });
-    expect(comment.getAttribute('title')).toBe('Comment on board Phone (⌥⌘M)');
+    expect(accessibleDescription(comment)).toBe(`On Phone · ${formatChord('Cmd+Alt+M')}`); // the word cut (G514)
     fireEvent.click(comment);
     expect(opened).toHaveBeenCalledTimes(1);
     const passage = opened.mock.calls[0]![0];
@@ -105,7 +107,7 @@ describe('comments on a design', () => {
     expect(passage).toEqual({ threadId: expect.any(String), tabId: 'b1', tabTitle: 'Phone', quote: 'Ship the first week.', artifactTarget: 'element' });
     expect(thread(doc, passage.threadId)).toMatchObject({ slideId: 'b1', elementId: 'lede' });
     act(() => session.select(['lede', 'title']));
-    expect(within(toolbar()).getByRole('button', { name: 'Add comment' }).hasAttribute('disabled')).toBe(true); // two: neither target
+    expect(within(toolbar()).getByRole('button', { name: 'Add comment' }).getAttribute('aria-disabled')).toBe('true'); // two: neither target (the word cut: greyed, still focusable)
   });
 
   it('the card’s frame locates a board’s thread by its frame and an element’s on its own board; unknown threads nowhere', () => {
@@ -121,7 +123,7 @@ describe('comments on a design', () => {
     const { doc, session, view } = mount();
     addThread(doc, { threadId: 'tb', slideId: 'b2', elementId: ROOT, quote: 'Desktop', by: { kind: 'human' }, at: 1 }, 'deck-comments');
     addThread(doc, { threadId: 'te', slideId: 'b1', elementId: 'lede', quote: 'Ship the first week.', by: { kind: 'human' }, at: 1 }, 'deck-comments');
-    fireEvent.click(within(toolbar()).getByRole('button', { name: /^Comments/ }));
+    act(() => session.toggleRail('comments')); // the word cut (G512): the header's Comments opens it
     const rail = await screen.findByRole('complementary', { name: 'Comments' });
     await act(async () => new Promise((r) => setTimeout(r, 80)));
     fireEvent.click(within(rail).getByRole('button', { name: 'Show board: Desktop' }));
@@ -199,12 +201,14 @@ describe('the rail’s words for a design (Decision Log 29)', () => {
     // UX wave U5a (M7; A3): a comment counts once it holds a message
     addThread(doc, { threadId: 'tb', slideId: 'b2', elementId: ROOT, quote: 'Desktop', by: { kind: 'human' }, at: 1, body: 'Wider margins?' }, 'deck-comments');
     addThread(doc, { threadId: 'te', slideId: 'b1', elementId: 'lede', quote: 'Ship the first week.', by: { kind: 'human' }, at: 1, body: 'Which week?' }, 'deck-comments');
-    fireEvent.click(within(toolbar()).getByRole('button', { name: /^Comments/ }));
+    act(() => session.toggleRail('comments')); // the word cut (G512): the header's Comments opens it
     const rail = await screen.findByRole('complementary', { name: 'Comments' });
     await act(async () => new Promise((r) => setTimeout(r, 80)));
     const board = rail.querySelector<HTMLElement>('article[data-thread="tb"]')!;
     const element = rail.querySelector<HTMLElement>('article[data-thread="te"]')!;
-    expect(board.querySelector('.deck-thread-slide')!.textContent).toBe('Board Desktop');
+    // the word cut (G543) and the pair review: a board's own thread names its board once, by its quote
+    expect(board.querySelector('.deck-thread-slide')).toBeNull();
+    expect(board.querySelector('.deck-thread-quote')!.textContent).toBe('Desktop');
     expect(element.querySelector('.deck-thread-slide')!.textContent).toBe('Phone');
     expect(within(board).getByRole('button', { name: 'Show board: Desktop' })).toBeTruthy();
     expect(within(element).getByRole('button', { name: 'Show element: Ship the first week.' })).toBeTruthy();
@@ -212,18 +216,17 @@ describe('the rail’s words for a design (Decision Log 29)', () => {
     act(() => session.edit((origin) => Y.deleteSlide(doc, 'b2') ?? origin));
     await act(async () => new Promise((r) => setTimeout(r, 80)));
     expect(container.querySelector('article[data-thread="tb"]')).toBeNull();
-    expect(within(toolbar()).getByRole('button', { name: 'Comments (1 open)' })).toBeTruthy();
     fireEvent.click(within(rail).getByRole('button', { name: 'Show deleted-target comments' }));
     const orphan = container.querySelector<HTMLElement>('article[data-thread="tb"]')!;
     expect(orphan.querySelector('.deck-thread-slide')!.textContent).toBe('A deleted board');
-    expect(orphan.querySelector('.deck-thread-note')!.textContent).toBe('The commented board was deleted.');
+    expect(orphan.querySelector('.deck-thread-note')).toBeNull(); // the word cut (G545): said once, in its location
   });
 
   it('says what to select when nothing is open', async () => {
-    mount();
-    fireEvent.click(within(toolbar()).getByRole('button', { name: /^Comments/ }));
+    const { session } = mount();
+    act(() => session.toggleRail('comments'));
     const rail = await screen.findByRole('complementary', { name: 'Comments' });
-    expect(rail.querySelector('.deck-comments-empty')!.textContent).toBe('No open comments. Select a board or an element and choose Comment.');
+    expect(rail.querySelector('.deck-comments-empty')!.textContent).toBe('No open comments. Select a board or an element and choose Add comment.'); // G542
   });
 });
 
@@ -293,7 +296,10 @@ describe('Move to board…', () => {
     fireEvent.click(screen.getByRole('menuitem', { name: 'Full' }));
     expect(Y.elementIds(doc, 'full')).toHaveLength(before);
     expect(Y.hasElement(doc, 'b1', 'cta') && Y.hasElement(doc, 'b1', 'cta2')).toBe(true);
-    expect(container.querySelector('[data-deck-notice]')!.textContent).toMatch(/board full/);
+    // the word cut (G518): the notice in a person's words, the model's reason its description
+    const notice = container.querySelector<HTMLElement>('[data-deck-notice]')!;
+    expect(notice.textContent).toBe('Can’t move these elements there');
+    expect(accessibleDescription(notice)).toMatch(/board full/);
     expect(session.snapshot().canUndo).toBe(false);
   });
 });
@@ -447,7 +453,7 @@ describe('the pin popover over the world', () => {
   });
 
   it('a board’s own pin opens its popover; the rail’s Show of a board’s thread does too (V11)', async () => {
-    const { doc, container } = mount();
+    const { doc, session, container } = mount();
     addThread(doc, { threadId: 'tb', slideId: 'b2', elementId: ROOT, quote: 'Desktop', by: { kind: 'human' }, at: 1, body: 'Wider?' }, 'deck-comments');
     fakeRects(container);
     await settle();
@@ -455,7 +461,7 @@ describe('the pin popover over the world', () => {
     expect(screen.getByRole('dialog', { name: 'Comments on “Desktop”' })).toBeTruthy();
     fireEvent.click(container.querySelector<HTMLElement>('[data-board-pin="b2"]')!);
     expect(popover()).toBeNull();
-    fireEvent.click(within(toolbar()).getByRole('button', { name: /^Comments/ }));
+    act(() => session.toggleRail('comments')); // the word cut (G512): the header's Comments opens it
     await settle();
     fireEvent.click(within(screen.getByRole('complementary', { name: 'Comments' })).getByRole('button', { name: 'Show board: Desktop' }));
     expect(popover()!.querySelector('[data-thread="tb"]')!.getAttribute('aria-current')).toBe('true');
@@ -463,7 +469,7 @@ describe('the pin popover over the world', () => {
 
   // the review's P2: a popover's pin merged into a count would leave the popover nowhere to stand
   it('the open popover’s pin is never merged: a zoom-out while open, and the rail’s Show of a merged pin’s thread', async () => {
-    const { doc, view, container } = mount();
+    const { doc, session, view, container } = mount();
     addThread(doc, { threadId: 'a', slideId: 'b1', elementId: 'cta', quote: 'Buy', by: { kind: 'human' }, at: 1, body: 'One' }, 'deck-comments');
     addThread(doc, { threadId: 'b', slideId: 'b1', elementId: 'cta2', quote: 'Also', by: { kind: 'human' }, at: 2, body: 'Two' }, 'deck-comments');
     fakeLayout(container, 'b1');
@@ -481,7 +487,7 @@ describe('the pin popover over the world', () => {
     act(() => (container.querySelector<HTMLElement>('[data-comment-pin="cta"]')!.blur()));
     await settle();
     expect(container.querySelector('[data-pin-cluster]')).not.toBeNull();
-    fireEvent.click(within(toolbar()).getByRole('button', { name: /^Comments/ }));
+    act(() => session.toggleRail('comments')); // the word cut (G512): the header's Comments opens it
     await settle();
     fireEvent.click(screen.getByRole('complementary', { name: 'Comments' }).querySelector<HTMLElement>('article[data-thread="b"] .deck-thread-quote')!);
     await settle();
@@ -542,7 +548,7 @@ describe('the pin popover over the world', () => {
     expect(container.querySelectorAll('[data-comment-pin]')).toHaveLength(0);
     const cluster = container.querySelector<HTMLElement>('[data-pin-cluster]')!;
     expect(cluster.textContent).toBe('3'); // the threads they hold
-    expect(cluster.getAttribute('aria-label')).toBe('3 comments here; zoom to them');
+    expect([cluster.getAttribute('aria-label'), cluster.getAttribute('title')]).toEqual(['3 comments here; zoom to them', '3 comments']); // the word cut (G532)
     expect([Number.parseFloat(cluster.style.left), Number.parseFloat(cluster.style.top)]).toEqual([10 + 366 * 0.25, 20 + ((740 + 640) / 2) * 0.25]);
     fireEvent.click(cluster);
     const v = view.snapshot().viewport!;

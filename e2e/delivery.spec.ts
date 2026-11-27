@@ -27,6 +27,7 @@ import { appendFileSync, chmodSync, existsSync, mkdirSync, mkdtempSync, readdirS
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { expect, test, type Locator, type Page } from '@playwright/test';
+import { expectDrawn } from './support/screen-reader-only';
 import { FIXTURE_SERVER } from './support/connector-engine';
 import { expectQuietJournals, sessionJournals } from './support/connector-direct-scene';
 import { invoke, value, wait, withScene } from './support/connector-scene';
@@ -75,6 +76,15 @@ const exportsOf = (userData: string, artifactId: string) => {
 const sheetOf = (page: Page) => page.locator('[data-send-to]');
 const status = (page: Page) => sheetOf(page).locator('[data-send-to-status]');
 const connection = (page: Page) => sheetOf(page).locator('[data-send-to-connection]');
+// The word cut (T134): a ready connection is one word on its line ("Connected", or Drive's Google account), and the
+// sentence naming what it goes through is that word's description, held outside the line.
+const readyLine = (page: Page) => connection(page).locator('[data-send-to-line]');
+const readyWord = (page: Page) => readyLine(page).locator('[aria-describedby]');
+async function expectNotionReady(page: Page): Promise<void> {
+  await expect(readyLine(page)).toHaveText('Connected', { timeout: 30_000, useInnerText: true }); // the line as rendered
+  await expectDrawn(readyWord(page), 'the word “Connected” drawn');
+  await expect(readyWord(page)).toHaveAccessibleDescription(/Through MAWS’s own connection: “notion” in your user settings\./);
+}
 
 test('notion: the document header’s Send to makes a readable page through MAWS’s own connection, with no session and no turn', async () => {
   const info = test.info();
@@ -97,8 +107,9 @@ test('notion: the document header’s Send to makes a readable page through MAWS
 
       await header(page).getByRole('button', { name: 'Send to…' }).click();
       await expect(sheetOf(page)).toHaveAttribute('data-send-to', 'notion');
-      await expect(connection(page)).toHaveText(/Through MAWS’s own connection: “notion” in your user settings\./, { timeout: 30_000 });
-      await expect(sheetOf(page).getByText('MAWS sends it itself: no session, no Claude turn.')).toBeVisible();
+      await expectNotionReady(page);
+      // the word cut: the sheet no longer explains that MAWS sends it itself; the journals below prove it
+      await expect(sheetOf(page)).not.toContainText('MAWS sends it itself');
       await info.attach('notion-sheet', { body: await page.screenshot(), contentType: 'image/png' });
 
       // P5 O4 M2 (D15, D29): the owner's Cancel inside the export phase. Main's send is held after its export while the
@@ -124,9 +135,9 @@ test('notion: the document header’s Send to makes a readable page through MAWS
       // the sheet again, and the send
       await header(page).getByRole('button', { name: 'Send to…' }).click();
       await expect(sheetOf(page)).toHaveAttribute('data-send-to', 'notion');
-      await expect(connection(page)).toHaveText(/Through MAWS’s own connection: “notion” in your user settings\./, { timeout: 30_000 });
+      await expectNotionReady(page);
       await sheetOf(page).getByRole('button', { name: 'Send', exact: true }).click();
-      await expect(status(page)).toHaveText(`Sent to Notion as “${DOC}”.`, { timeout: 60_000 });
+      await expect(status(page)).toHaveText(`Sent as “${DOC}”`, { timeout: 60_000 }); // the word cut (T138): the sheet names the service
       await info.attach('notion-receipt', { body: await page.screenshot(), contentType: 'image/png' });
 
       // exactly one page made, the document as Notion's Markdown under its title, by MAWS's own instance
@@ -320,7 +331,7 @@ test('drive: gws absent, a refused login and a cancelled one leave it signed out
       await expect(connection(page)).toHaveAttribute('data-send-to-connection', 'ready', { timeout: 30_000 });
       await expect(sheetOf(page).getByRole('combobox', { name: 'Format' })).toHaveValue('docx');
       await sheetOf(page).getByRole('button', { name: 'Send', exact: true }).click();
-      await expect(status(page)).toHaveText(`Sent to Google Drive as “${DOC}.docx”.`, { timeout: 60_000 });
+      await expect(status(page)).toHaveText(`Sent as “${DOC}.docx”`, { timeout: 60_000 }); // the word cut (T138)
       await info.attach('drive-receipt', { body: await page.screenshot(), contentType: 'image/png' });
       const upload = gwsRuns(scratch).filter((run) => run.upload).at(-1)!;
       expect(upload.json?.name).toBe(`${DOC}.docx`);

@@ -31,6 +31,8 @@ import { returnedTo } from './history-api'; // P4 (tracker L274)
 import { setCommentsView } from './comments-view'; // P4-B1
 import { useSettings } from '../../stores/settings'; // P4-B1
 import type { CommentsView } from '@artifacts/comments/view'; // P4-B1
+import { QuietSpinner } from '../../ui/spinner';
+import { DOCUMENT_COPY } from './copy';
 import type { DocumentTabState } from './tab-state';
 import { captureDocumentView, keepUndoManager, liveBody, restoreDocumentViewWhenDrawn, type DocumentView } from './view-carry'; // P4-B3 M5
 
@@ -87,9 +89,10 @@ export function DocumentBody({ artifactId, machine, state, scope, visible, onSho
   const actions = [...(header.actions ?? []), ...(additionalActions ?? []), ...(sendTo ? [sendTo] : [])]; // P3-E: a dashboard's actions after B's; P4-B5: Send to last
   const systemRow = useLibraryRow(governing && 'id' in governing ? governing.id : null, machine).value;
   const spaces = useLibrarySpaces(machine).value;
-  const home = snapshot.placement.spaceId ? spaces?.find((space) => space.id === snapshot.placement.spaceId)?.name : 'General';
+  // the word cut (T608, T610): a Space is named once its name is known; a document in no Space names none ("General")
+  const home = snapshot.placement.spaceId ? spaces?.find((space) => space.id === snapshot.placement.spaceId)?.name : undefined;
   const systemName = governing && ('builtin' in governing ? 'MAWS' : systemRow?.title);
-  const breadcrumb = snapshot.ready ? [home ?? 'Loading Space…', ...(systemName && snapshot.shown === null ? [`Design: ${systemName}`] : [])] : [];
+  const breadcrumb = snapshot.ready ? [...(home ? [home] : []), ...(systemName && snapshot.shown === null ? [`Design: ${systemName}`] : [])] : [];
   useEditorHost(scope, { ...header, breadcrumb, actions });
 
   // Comments go to the session the main area shows (its Side thread, or its conversation). P3-F1: with none shown, to
@@ -177,8 +180,8 @@ export function DocumentBody({ artifactId, machine, state, scope, visible, onSho
   }, [placed, reveal]);
 
   if (snapshot.failed !== null) return <Notice>{`This document could not be opened: ${snapshot.failed}`}</Notice>;
-  if (!snapshot.ready || !snapshot.handle) return <Notice>Opening the document…</Notice>;
-  if (snapshot.noContent) return <Notice>This document has no content yet: it was created before MAWS gave every new document its first page.</Notice>;
+  if (!snapshot.ready || !snapshot.handle) return <Notice><QuietSpinner label={DOCUMENT_COPY.openingName} /></Notice>; // the word cut (T615)
+  if (snapshot.noContent) return <Notice>{DOCUMENT_COPY.empty}</Notice>; // the word cut (T617)
   return (
     <SystemScope machine={machine} placement={snapshot.placement} handle={snapshot.handle}>
       <DocumentEditor

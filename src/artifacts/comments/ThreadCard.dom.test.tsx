@@ -9,6 +9,7 @@ import { actorDisplay, type Actor } from '@shared/artifacts/actor';
 import type { DeckThreadState } from '../slides/threads';
 import commentsCss from './comments.css?raw';
 import tokensCss from '../../renderer/src/styles/tokens.css?raw';
+import { accessibleDescription, accessibleText } from '../../renderer/src/test-support/accessible-text';
 import { ThreadCard, type ThreadCardProps, type ThreadCardThread } from './ThreadCard';
 
 afterEach(cleanup);
@@ -101,7 +102,9 @@ describe('the card’s forms', () => {
     expect(card().querySelector('.thread-card-more')).toBeNull();
   });
 
-  it('shows every message and the reply field when active, or when the host does not compact', () => {
+  // the word cut (G385): a card that does not compact (the panel's) shows every message, and its reply field only once
+  // it is active, as every other card
+  it('shows every message when active, or when the host does not compact; the reply field only when active', () => {
     const messages = [0, 1, 2, 3, 4, 5].map((n) => message(n));
     const { card, view } = show({ thread: thread({ messages }), active: true });
     expect(bodies(card())).toHaveLength(6);
@@ -109,12 +112,26 @@ describe('the card’s forms', () => {
     expect(within(card()).getByRole('textbox', { name: 'Reply' })).toBeTruthy();
     view.rerender(<ThreadCard thread={thread({ messages })} active={false} compact={false} draft="" {...handlers()} />);
     expect(bodies(card())).toHaveLength(6);
+    expect(within(card()).queryByRole('textbox', { name: 'Reply' })).toBeNull();
+    view.rerender(<ThreadCard thread={thread({ messages })} active compact={false} draft="" {...handlers()} />);
     expect(within(card()).getByRole('textbox', { name: 'Reply' })).toBeTruthy();
   });
 
-  it('notes an orphan', () => {
-    const { card } = show({ thread: thread({ orphan: true }) });
-    expect(within(card()).getByText('The commented passage was removed.')).toBeTruthy();
+  // the word cut (G388): a card whose passage is gone says so by its struck quote where it draws one (the panel), or by
+  // a Removed tag (a deck's or a design's pin popover); the sentence is each one's tooltip and description
+  it('marks an orphan by its struck quote, or a Removed tag, the sentence in its tooltip', () => {
+    const SENTENCE = 'The commented passage was removed.';
+    const { card, view } = show({ thread: thread({ orphan: true }) });
+    expect(accessibleText(card())).not.toContain(SENTENCE);
+    const tag = within(card()).getByText('Removed');
+    expect(tag.tabIndex).toBe(0);
+    expect(accessibleDescription(tag)).toBe(SENTENCE);
+    view.rerender(<ThreadCard thread={thread({ orphan: true })} active={false} compact={false} showQuote draft="" {...handlers()} />);
+    expect(within(card()).queryByText('Removed')).toBeNull();
+    const quote = within(card()).getByRole('button', { name: 'Show passage: ships quarterly' });
+    expect(quote.querySelector('s, del, [data-removed]')?.textContent).toBe('ships quarterly');
+    expect(accessibleDescription(quote)).toBe(SENTENCE);
+    expect(accessibleText(card())).not.toContain(SENTENCE);
   });
 
   it('chips each message with its author’s name and colour', () => {
@@ -122,6 +139,72 @@ describe('the card’s forms', () => {
     const authors = [...card().querySelectorAll('.thread-card-author')];
     expect(authors.map((a) => a.textContent)).toEqual([actorDisplay(HUMAN).name, actorDisplay(SESSION).name]);
     expect(authors.map((a) => (a.querySelector('.thread-card-chip') as HTMLElement).style.background)).toEqual([`var(${actorDisplay(HUMAN).color})`, `var(${actorDisplay(SESSION).color})`]);
+  });
+
+  // the word cut (G384): Resolve or Reopen shows on the card pointed at, holding the keyboard or active, over its first
+  // author line; at rest an inactive card is its messages alone (the hover scope's rule in styles/app.css draws it)
+  it('draws Resolve and Reopen only on the card pointed at, focused or active', () => {
+    const { card, view } = show();
+    expect(card().hasAttribute('data-hover-scope')).toBe(true);
+    const actions = () => card().querySelector<HTMLElement>('.thread-card-actions')!;
+    expect(actions().hasAttribute('data-on-hover')).toBe(true);
+    expect(within(actions()).getByRole('button', { name: 'Resolve' })).toBeTruthy(); // still in the Tab order
+    view.rerender(<ThreadCard thread={thread()} active compact draft="" {...handlers()} />);
+    expect(actions().hasAttribute('data-on-hover')).toBe(false);
+    view.rerender(<ThreadCard thread={thread({ status: 'resolved' })} active={false} compact draft="" {...handlers()} />);
+    expect(actions().hasAttribute('data-on-hover')).toBe(true);
+    expect(within(actions()).getByRole('button', { name: 'Reopen' })).toBeTruthy();
+  });
+
+  // The pair review's fix wave (G384, G385, G388): happy-dom lays nothing out, so the placement is pinned by the
+  // stylesheet. The card is one column, so the quote and every message take its whole width; Resolve or Reopen is
+  // positioned over the right end of the first message's author line (anchored to it, each card its own), so it takes no
+  // space at rest and moves no text as it shows. It stays last in the card, so the Tab order is as it was.
+  it('draws Resolve over the right end of the first author line, the quote and the messages taking the card’s whole width', () => {
+    const rule = (selector: string) => {
+      const css = commentsCss.replace(/\/\*[\s\S]*?\*\//g, '');
+      const found = [...css.matchAll(/([^{}]+)\{([^{}]*)\}/g)].find(([, head]) => head!.trim() === selector);
+      if (!found) throw new Error(`no rule ${selector}`);
+      return found[2]!.replace(/\s+/g, ' ');
+    };
+    const card = rule('.thread-card');
+    // one column, its track allowed below a long unbroken passage's min-content width, so the card never grows past
+    // its host (the panel) and its action stays on screen (the medium review)
+    expect(card).toContain('grid-template-columns: minmax(0, 1fr);');
+    for (const declaration of ['position: relative;', 'anchor-scope: --thread-head;']) expect(card).toContain(declaration);
+    expect(commentsCss).not.toMatch(/subgrid|grid-column|grid-row/);
+    expect(rule('.thread-card > .thread-card-messages:first-of-type > .thread-card-message:first-child > .thread-card-author')).toContain('anchor-name: --thread-head;');
+    const actions = rule('.thread-card > .thread-card-actions');
+    for (const declaration of ['position: absolute;', 'position-anchor: --thread-head;', 'background: inherit;']) expect(actions).toContain(declaration);
+    expect(actions).toMatch(/top: calc\(anchor\(center/);
+    expect(actions).toMatch(/right: anchor\(right/);
+
+    // the anchor is the first author line whatever comes before it: the quote, the Removed tag, or nothing
+    const firstAuthor = (el: HTMLElement) => el.querySelector(':scope > ol.thread-card-messages:first-of-type > .thread-card-message:first-child > .thread-card-author');
+    const { card: quoted, view } = show({ showQuote: true, active: true });
+    expect(quoted().firstElementChild!.matches('.thread-card-quote')).toBe(true);
+    expect(firstAuthor(quoted())?.textContent).toBe(actorDisplay(HUMAN).name);
+    expect(quoted().lastElementChild!.matches('.thread-card-actions')).toBe(true); // after the reply field
+    expect(quoted().querySelector('.thread-card-reply')).not.toBeNull();
+    view.rerender(<ThreadCard thread={thread({ orphan: true })} active={false} compact draft="" {...handlers()} />);
+    expect(quoted().firstElementChild!.matches('.thread-card-removed')).toBe(true);
+    expect(firstAuthor(quoted())?.textContent).toBe(actorDisplay(HUMAN).name);
+    // compacted, the replies' second list comes after the first: the first of type is still the first message's
+    view.rerender(<ThreadCard thread={thread({ messages: [message(0, SESSION), message(1, HUMAN), message(2, HUMAN), message(3, HUMAN), message(4, HUMAN)] })} active={false} compact draft="" {...handlers()} />);
+    expect(quoted().querySelectorAll(':scope > ol.thread-card-messages')).toHaveLength(2);
+    expect(firstAuthor(quoted())?.textContent).toBe(actorDisplay(SESSION).name);
+  });
+
+  // A thread with no message yet (its first comment never written, then reopened) has no author line to anchor on: its
+  // action keeps a row of its own at the card's foot, under the reply field, rather than over the field's send.
+  it('keeps the action in a row of its own on a card with no message', () => {
+    const css = commentsCss.replace(/\/\*[\s\S]*?\*\//g, '');
+    const found = [...css.matchAll(/([^{}]+)\{([^{}]*)\}/g)].find(([, head]) => head!.trim() === '.thread-card:not(:has(> .thread-card-messages)) > .thread-card-actions');
+    expect(found?.[2]).toContain('position: static;');
+    expect(found?.[2]).toContain('justify-self: end;');
+    const { card } = show({ thread: thread({ messages: [] }), active: true });
+    expect(card().querySelector(':scope > .thread-card-messages')).toBeNull();
+    expect([...card().children].map((child) => child.className)).toEqual(['thread-card-reply', 'thread-card-actions']);
   });
 
   it('offers Resolve on an open thread, Reopen and no reply field on a resolved one', () => {
@@ -207,7 +290,13 @@ describe('the draft', () => {
     expect(on.onReply).toHaveBeenCalledWith('Monthly works.');
     expect(on.onDraftChange).toHaveBeenCalledWith('');
     view.rerender(<ThreadCard thread={thread()} active compact draft="   " {...on} />);
-    expect((within(card()).getByRole('button', { name: 'Reply' }) as HTMLButtonElement).disabled).toBe(true);
+    // the word cut (G385): the send is a glyph named Reply, greyed with its reason and still focusable
+    const send = within(card()).getByRole('button', { name: 'Reply' });
+    expect(send.getAttribute('aria-disabled')).toBe('true');
+    expect(send.querySelector('svg')).not.toBeNull();
+    expect(accessibleText(send).trim()).toBe('');
+    act(() => fireEvent.click(send));
+    expect(on.onReply).toHaveBeenCalledOnce();
     act(() => fireEvent.keyDown(field(), { key: 'Enter' }));
     expect(on.onReply).toHaveBeenCalledOnce();
   });
@@ -278,6 +367,22 @@ describe('the keys on a focused card', () => {
     expect(press(card, 'r')).toBe(true);
     expect(card.getAttribute('aria-current')).toBe('true');
     expect(document.activeElement).toBe(within(card).getByRole('textbox', { name: 'Reply' }));
+  });
+
+  // the word cut (G385), the whole-branch review's fix wave: a reply asked of a card is answered once it is active; an
+  // active card that cannot reply (resolved, read-only) drops it, so no later reopen hands the keyboard to its field
+  it('a reply asked of an active card that cannot reply is dropped, the keyboard left where it was; an inactive card keeps it', () => {
+    const elsewhere = document.body.appendChild(document.createElement('input'));
+    elsewhere.focus();
+    const onReplyTaken = vi.fn();
+    const { on, view } = show({ thread: thread({ status: 'resolved' }), active: false, replyAsked: 1, onReplyTaken });
+    expect(onReplyTaken).not.toHaveBeenCalled();
+    view.rerender(<ThreadCard thread={thread({ status: 'resolved' })} active compact draft="" replyAsked={1} onReplyTaken={onReplyTaken} {...on} />);
+    expect(onReplyTaken).toHaveBeenCalledOnce();
+    view.rerender(<ThreadCard thread={thread()} active compact readOnly draft="" replyAsked={2} onReplyTaken={onReplyTaken} {...on} />);
+    expect(onReplyTaken).toHaveBeenCalledTimes(2);
+    expect(document.activeElement).toBe(elsewhere);
+    elsewhere.remove();
   });
 
   it('R activates nothing on a resolved or read-only card', () => {

@@ -4,6 +4,9 @@
 // refusal shown inline); a frame the model refuses is named there and nothing is written, never adjusted. A held or
 // missing board, or a read-only replica, shows its values without offering a write, and a draft left in a field when
 // either turned so commits nothing.
+// The word cut (docs/doperpowers/specs/2026-11-16-word-cut-design.md, M5 task 4): the board heading, "Board" and "Board
+// name" stay as the owner brought them back (G536); the size select is captioned "Size", its name the whole words
+// (G538); a refused size reads its limit, with no board id (G539).
 import { useMemo, useState } from 'react';
 import { heldOf } from '../../slides/model';
 import type { DeckSession } from '../../slides/editor/session';
@@ -12,6 +15,7 @@ import * as Y from '../../yjs/slides';
 import { FRAME_KEYS, type BoardFrame } from '../canvas';
 import { isMissingSource, writeBoardEntry } from '../model';
 import { BoardError, setBoardFrame } from '../writers';
+import { boardRefusal } from './refusals';
 import { boardLabel, type BoardView } from './boards';
 import { BOARD_PRESETS, DESIGN_COPY as C } from './copy';
 
@@ -47,7 +51,7 @@ export function BoardInspector({ session, board, readOnly }: BoardInspectorProps
       setRefused(null);
       return [];
     } catch (error) {
-      if (error instanceof BoardError) return error.problems;
+      if (error instanceof BoardError) return [boardRefusal(error, 'resize').text];
       throw error;
     }
   };
@@ -76,7 +80,7 @@ export function BoardInspector({ session, board, readOnly }: BoardInspectorProps
           <Row caption={C.boardSize} wide>
             <select
               className="deck-inspector-select"
-              aria-label={C.boardSize}
+              aria-label={C.boardSizeName}
               value={preset}
               disabled={locked}
               onChange={(event) => {

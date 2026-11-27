@@ -141,7 +141,9 @@ test.describe('the document editor', () => {
     await typing('cell one');
     await page.keyboard.press('Tab');
     await typing('cell two');
-    await press('Add row below');
+    // the word cut (G331): the table's commands are the Table menu's items
+    await press('Table');
+    await page.getByRole('menu', { name: 'Table' }).getByRole('menuitem', { name: 'Add row below', exact: true }).click();
     await expect(a.locator('table tr')).toHaveCount(4);
 
     await line();
@@ -544,7 +546,9 @@ test.describe('the document editor', () => {
 
     await rail.getByRole('button', { name: /^Version Clean draft/ }).click();
     await expect(bar.getByText(/^Clean draft/)).toBeVisible();
-    await bar.getByRole('button', { name: 'Make a copy' }).click();
+    // the word cut (G379): Make a copy is an item of the bar's "Actions for this version" menu
+    await bar.getByRole('button', { name: 'Actions for this version' }).click();
+    await page.getByRole('menu', { name: 'Actions for this version' }).getByRole('menuitem', { name: 'Make a copy' }).click();
     await expect.poll(() => page.evaluate(() => (window as unknown as HarnessWindow).__maws_document.copies().length)).toBe(1);
     await bar.getByRole('button', { name: 'Restore this version' }).click();
     await replica(page, 'a').getByRole('alertdialog', { name: 'Restore this version?' }).getByRole('button', { name: 'Restore', exact: true }).click();
@@ -636,8 +640,11 @@ test.describe('the document editor', () => {
     const pointer = { x: choice.x + choice.width / 2, y: choice.y + choice.height / 2 };
     await page.mouse.click(pointer.x, pointer.y);
     const dialog = replica(page, 'a').getByRole('dialog', { name: 'Editors' });
-    await expect(dialog.getByText('Reading the history…')).toHaveCount(0, { timeout: 15_000 });
-    const title = dialog.getByText('Editors of the selection', { exact: true });
+    // the answer, not the wait's words: the editors listed, or the line that says there are none (the word cut, G359 and G360:
+    // the wait is a wordless spinner, and the title reads Editors)
+    await expect(dialog.locator('.doc-editors-list, .doc-editors-empty:not(:empty):not(:has([role="progressbar"]))')).toBeVisible({ timeout: 15_000 });
+    const title = dialog.locator('.doc-editors-title');
+    await expect(title).toHaveText('Editors');
     const line = await title.evaluate((el) => parseFloat(getComputedStyle(el).lineHeight) || parseFloat(getComputedStyle(el).fontSize) * 1.5);
     const titleBox = (await title.boundingBox())!;
     expect(titleBox.height).toBeLessThan(line * 1.5); // one line

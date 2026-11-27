@@ -184,7 +184,7 @@
   font: inherit;
   cursor: default;
 }
-.deck-button:hover:not(:disabled),
+.deck-button:hover:not(:disabled):not([aria-disabled='true']),
 .deck-icon-button:hover {
   background: var(--bg-hover);
   color: var(--fg);
@@ -194,8 +194,38 @@
   background: var(--bg-active);
   color: var(--fg);
 }
-.deck-button:disabled {
+.deck-button:disabled,
+.deck-button[aria-disabled='true'] {
   color: var(--fg-faint);
+}
+/* the word cut (G401 to G404, G482): a glyph button keeps the square of a word button */
+.deck-glyph {
+  gap: var(--space);
+  padding: 0 5px;
+}
+/* G404 (seen): the open count as a small badge on the glyph's top right corner. It sits past the bubble's corner, over
+   the button's own edge, and a ring in the toolbar's ground parts it from the stroke, so the bubble stays whole and legible
+   (the pair review: a badge the bubble's size hid half of it). */
+.deck-glyph-badged {
+  position: relative;
+}
+.deck-glyph-badge {
+  position: absolute;
+  top: calc(var(--space) * -0.5);
+  right: calc(var(--space) * -0.75);
+  min-width: calc(var(--space) * 3);
+  height: calc(var(--space) * 3);
+  padding: 0 calc(var(--space) * 0.5);
+  border-radius: calc(var(--space) * 1.5);
+  box-shadow: 0 0 0 1.5px var(--bg-raised);
+  background: var(--accent);
+  color: var(--bg);
+  font-size: calc(var(--text-ui-sm) * 0.75);
+  font-weight: 600;
+  line-height: calc(var(--space) * 3);
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+  pointer-events: none;
 }
 .deck-button:focus-visible,
 .deck-icon-button:focus-visible,
@@ -297,6 +327,11 @@
   background: var(--bg-overlay);
   color: var(--fg-muted);
 }
+/* G424: a hidden slide's eye-with-a-slash in the badge's corner */
+.deck-thumb-hidden {
+  display: inline-flex;
+  padding: 2px;
+}
 .deck-thumb-menu {
   position: absolute;
   top: 4px;
@@ -336,10 +371,14 @@
 .deck-section[data-empty] .deck-section-title {
   font-style: italic;
 }
+.deck-section-actions {
+  display: inline-flex;
+  flex-shrink: 0;
+}
 .deck-section-actions .deck-icon-button {
   height: 20px;
   min-width: 20px;
-  padding: 0 4px;
+  padding: 0 2px;
   font-size: var(--text-ui-sm);
 }
 .deck-section-input {
@@ -596,6 +635,11 @@
 .deck-notice:not(:empty) {
   min-width: min(12rem, 100%);
 }
+/* G413: a notice with a reason takes Tab, its reason the tooltip */
+.deck-notice:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
 .deck-icon-grid {
   display: grid;
   grid-template-columns: repeat(6, 32px);
@@ -613,6 +657,20 @@
   color: var(--danger);
   font-size: var(--text-ui-sm);
 }
+/* G432: the loader's reasons behind the banner's Details */
+.deck-held-details {
+  margin-top: 4px;
+  color: var(--fg-muted);
+}
+.deck-held-details > summary {
+  width: fit-content;
+  cursor: default;
+}
+.deck-held-details > summary:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+/* the held reasons' list, in the deck's Details and wherever a banner lists them plainly */
 .deck-held-banner ul {
   margin: 4px 0 0;
   padding-left: 18px;
@@ -648,15 +706,21 @@
   white-space: nowrap;
   font-size: var(--text-ui-sm);
 }
+/* G436 and the pair review: the opened field has no placeholder, so it is drawn as a field (its frame and fill), set in
+   from the notes' edges under the disclosure, and opening it is seen */
+.deck-notes-body {
+  padding: 0 calc(var(--space) * 3) calc(var(--space) * 2);
+}
 .deck-notes-field {
   display: block;
   width: 100%;
   height: 96px;
-  padding: 8px 12px;
+  padding: calc(var(--space) * 1.5) calc(var(--space) * 2);
   box-sizing: border-box;
-  border: 0;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
   resize: vertical;
-  background: transparent;
+  background: var(--bg-raised);
   color: var(--fg);
   font-family: var(--font-ui);
   font-size: var(--text-ui);
@@ -664,18 +728,17 @@
 }
 .deck-notes-field:focus {
   outline: 2px solid var(--accent);
-  outline-offset: -2px;
+  outline-offset: -1px;
 }
-.deck-notes-refused,
-.deck-filmstrip-note {
+.deck-notes-refused {
   margin: 0;
-  padding: 4px 12px 8px;
+  padding: var(--space) 0 0;
   color: var(--danger);
   font-size: var(--text-ui-sm);
 }
 .deck-notes-field[aria-invalid='true'] {
   outline: 2px solid var(--danger);
-  outline-offset: -2px;
+  outline-offset: -1px;
 }
 .deck-quiet {
   margin: auto;

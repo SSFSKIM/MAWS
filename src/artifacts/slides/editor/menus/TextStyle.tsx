@@ -15,6 +15,8 @@ import { setStyles, siteOf } from '../../writers-elements';
 import { TEXT_STYLE_COPY as C } from './copy';
 import './menus.css';
 import type { DeckSession } from '../session';
+import { DECK_COPY } from '../copy';
+import type { ShowNotice } from '../notice';
 
 export const ROLE_LABELS: Record<TypeRole, string> = { title: 'Title', subtitle: 'Subtitle', h1: 'Heading 1', h2: 'Heading 2', h3: 'Heading 3', body: 'Body', caption: 'Caption', quote: 'Quote' };
 
@@ -77,7 +79,7 @@ export interface TextStyleMenuProps {
   /** The governing system's tokens (each role's family); null while it loads. */
   tokens: TokenSet | null;
   readOnly: boolean;
-  onNotice: (text: string) => void;
+  onNotice: ShowNotice;
 }
 
 /**
@@ -114,7 +116,7 @@ export function TextStyleMenu({ session, slideId, tokens, readOnly, onNotice }: 
     if (!usable || slideId === null) return;
     let reasons: string[] = [];
     session.edit((origin) => (reasons = applyTextStyle(session.doc, slideId, selection, role, tokens, origin)));
-    if (reasons.length) onNotice(reasons.join('; '));
+    if (reasons.length) onNotice(DECK_COPY.refused.textStyle, reasons.join('; ')); // the word cut (G413)
   };
   return (
     <DropdownMenu.Root modal={false}>

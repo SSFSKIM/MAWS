@@ -276,6 +276,20 @@ describe('the deck’s history controller (D11)', () => {
     expect(await controller.name('Before legal')).toBe(true);
     expect(controller.getSnapshot().versions!.find((x) => x.id === v.id)!.label).toBe('Before legal');
     expect(controller.getSnapshot().preview!.title).toBe(`Before legal · ${formatWhen(v.at)}`);
+    expect(controller.getSnapshot().status).toBeNull(); // the word cut (G500): the renamed row is the confirmation
+  });
+
+  // the word cut (G500): a saved version's new row is its confirmation; a copy, made outside the list, still says so
+  it('saving a version writes no status line; making a copy does', async () => {
+    const h = deckHost(['a']);
+    const v = h.version('auto');
+    const controller = attach(h);
+    await until(() => controller.getSnapshot().versions !== null);
+    expect(await controller.save({ label: 'Before the review' })).toBe(true);
+    expect(controller.getSnapshot().status).toBeNull();
+    await controller.select(v.id);
+    await controller.duplicate();
+    expect(controller.getSnapshot().status).toBe('A copy of this version was made.');
   });
 
   it('shows the editors of a live element by name, colour and time', async () => {

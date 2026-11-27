@@ -51,6 +51,26 @@ describe('NamedGlyph', () => {
     expect(tooltip()).toBe('New slide · ⌘⇧N');
   });
 
+  it('shows a tip’s longer words, its shortcut after them, its name staying the word and the words its description', async () => {
+    render(
+      <NamedGlyph label="Add comment" tip="Comment on the selected element" shortcut="⌘⌥M">
+        <Plus />
+      </NamedGlyph>,
+    );
+    await user().tab();
+    expect(screen.getByRole('button', { name: 'Add comment', description: 'Comment on the selected element · ⌘⌥M' })).toBe(document.activeElement);
+    expect(tooltip()).toBe('Comment on the selected element · ⌘⌥M');
+  });
+
+  it('says a tip the name already holds only once', () => {
+    render(
+      <NamedGlyph label="Comments (3 open)" tip="Comments">
+        <Plus />
+      </NamedGlyph>,
+    );
+    expect(screen.getByRole('button', { name: 'Comments (3 open)' }).getAttribute('aria-describedby')).toBeNull();
+  });
+
   it('shows its word at once on keyboard focus, and acts on Enter', async () => {
     const add = vi.fn();
     render(
@@ -102,6 +122,19 @@ describe('NamedGlyph', () => {
     await user().tab();
     expect(tooltip()).toBe('New slide · ⌘⇧NThe deck has reached its slide limit');
     expect(screen.getByRole('button', { name: 'New slide', description: both })).toBe(document.activeElement);
+  });
+
+  // the word cut, M5 task 4 (G514): what the press acts on now (the board a comment goes on) is a line of the tooltip
+  // under the word, and part of the description; the name stays the word
+  it('adds what it acts on now under its word, in the tooltip and the description', async () => {
+    render(
+      <NamedGlyph label="Add comment" shortcut="⌘⌥M" detail="On Hero">
+        <Plus />
+      </NamedGlyph>,
+    );
+    expect(screen.getByRole('button', { name: 'Add comment', description: 'On Hero · ⌘⌥M' })).toBeTruthy();
+    await user().tab();
+    expect(tooltip()).toBe('Add comment · ⌘⌥MOn Hero');
   });
 
   it('says whether it is pressed', () => {

@@ -1,9 +1,12 @@
 // P3-C (docs/doperpowers/plans/2026-10-12-p3-c-presentations.md, D9; M7): the words of the deck's comments: the
 // toolbar's Comment and Comments, the threads rail, the pins.
+// The word cut (docs/doperpowers/specs/2026-11-16-word-cut-design.md, M5 task 3): a word kept only as a control's name
+// is named `…Name`.
 export const COMMENTS_COPY = {
   comment: 'Add comment',
-  commentTitle: 'Comment on the selected element (⌥⌘M)',
-  comments: 'Comments',
+  commentTip: 'Comment on the selected element', // G403 (seen): the glyph's tooltip, its chord after it
+  commentUnavailable: 'Select one element to comment on', // G403: the greyed glyph's reason
+  comments: 'Comments', // G404 (seen): the toggle's tooltip
   commentsOpen: (open: number) => (open > 0 ? `Comments (${open} open)` : 'Comments'),
   rail: 'Comments',
   close: 'Close comments',
@@ -12,8 +15,14 @@ export const COMMENTS_COPY = {
   slide: (n: number | null) => (n === null ? 'A removed slide' : `Slide ${n}`),
   show: (quote: string) => `Show element: ${quote}`,
   thread: (quote: string) => `Comment on “${quote}”`,
-  orphan: 'The commented element was deleted.',
-  reply: 'Reply',
+  orphan: 'Element deleted', // G481
+  reply: 'Reply', // G482: the reply field's name, and the send glyph's name and tooltip
+  replyUnavailable: 'Write a reply first',
+  // G479: the toggle's words, its name the longer ones
+  showDeleted: 'Show deleted',
+  hideDeleted: 'Hide deleted',
+  showDeletedName: 'Show deleted-target comments',
+  hideDeletedName: 'Hide deleted-target comments',
   replyPlaceholder: 'Reply…',
   resolve: 'Resolve',
   reopen: 'Reopen',

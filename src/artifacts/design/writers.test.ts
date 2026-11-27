@@ -4,7 +4,7 @@
 import { describe, expect, it } from 'vitest';
 import { readFlat, readSlide, setStyle, slideOrder } from '../slides/model';
 import { addThread, threadStates } from '../slides/threads';
-import { transact } from '../yjs';
+import { applyV2, newDoc, stateV2, transact } from '../yjs';
 import * as Y from '../yjs/slides';
 import { createDeckUndo } from '../yjs/slides-undo';
 import { CANVAS_LIMITS } from './canvas';
@@ -13,15 +13,16 @@ import { BoardError, blankBoard, deleteBoard, duplicateBoard, insertBoard, setBo
 import { BOARDS, boardIR, design, updatesOf } from './fixtures/support';
 
 const human = { kind: 'human' as const };
-const refusal = (write: () => void): string[] => {
+const refused = (write: () => void): BoardError => {
   try {
     write();
   } catch (e) {
     expect(e).toBeInstanceOf(BoardError);
-    return (e as BoardError).problems;
+    return e as BoardError;
   }
   throw new Error('not refused');
 };
+const refusal = (write: () => void): string[] => refused(write).problems;
 
 describe('setBoardFrame', () => {
   it('writes the changed keys in one transaction under the caller’s origin, nothing when nothing changes', () => {
@@ -87,6 +88,7 @@ describe('insertBoard', () => {
     expect(designFiles(doc)).toEqual(before);
     const full = design(Array.from({ length: CANVAS_LIMITS.boards }, (_, i) => ({ id: `b${i}`, at: { x: i * 10, y: 0, w: 1, h: 1 } })));
     expect(refusal(() => insertBoard(full, { id: 'one-more', frame: { x: 0, y: 0, w: 1, h: 1 } }, null))).toEqual(['a design holds at most 200 boards']);
+    expect(refused(() => insertBoard(full, { id: 'one-more', frame: { x: 0, y: 0, w: 1, h: 1 } }, null)).fault).toEqual({ kind: 'full', limit: 200 });
   });
 });
 
@@ -132,6 +134,32 @@ describe('duplicateBoard', () => {
     expect(refusal(() => duplicateBoard(doc, 'b1'))).toEqual(['board b1: its file never arrived, so there is nothing to copy']);
     expect(refusal(() => duplicateBoard(doc, 'nope'))).toEqual(['board nope: no such board']);
     expect(refusal(() => duplicateBoard(doc, 'b2', { at: { x: Number.NaN, y: 0 } }))[0]).toMatch(/^board s[0-9a-z]+-\d+: x is not a finite number$/);
+  });
+
+  // M5 task 4's review (G518, G539): each refusal carries why, beside the words, so the workbench never reads it back
+  // from the design; a copy refused for its frame says the frame, though the copy's id is in no design yet
+  it('says why it refuses: the original gone, held or missing, the design full, the copy’s frame', () => {
+    const doc = design();
+    expect(refused(() => duplicateBoard(doc, 'nope')).fault).toEqual({ kind: 'gone' });
+    transact(doc, () => Y.setSlideKey(doc, 'b3', 'held', { source: '<section id="b3"><script></script></section>', reasons: ['no'] }));
+    expect(refused(() => duplicateBoard(doc, 'b3')).fault).toEqual({ kind: 'held' });
+    transact(doc, () => Y.setSlideKey(doc, 'b1', MISSING_SOURCE_KEY, true));
+    expect(refused(() => duplicateBoard(doc, 'b1')).fault).toEqual({ kind: 'missing' });
+    expect(refused(() => duplicateBoard(doc, 'b2', { id: 'b2' })).fault).toEqual({ kind: 'other' });
+    expect(refused(() => duplicateBoard(doc, 'b2', { at: { x: Number.NaN, y: 0 } })).fault).toEqual({ kind: 'frame', faults: [{ kind: 'not-number', key: 'x' }] });
+  });
+
+  it('refuses to copy a board two replicas merged over the area, for its frame, not as a deleted board', () => {
+    const doc = design();
+    const other = newDoc();
+    applyV2(other, stateV2(doc));
+    setBoardFrame(doc, 'b2', { w: 16_000 }); // each edit within the cap alone
+    setBoardFrame(other, 'b2', { h: 16_000 });
+    applyV2(doc, stateV2(other));
+    expect(boardFrame(doc, 'b2')).toEqual({ x: 500, y: 0, w: 16_000, h: 16_000 });
+    const error = refused(() => duplicateBoard(doc, 'b2'));
+    expect(error.fault).toEqual({ kind: 'frame', faults: [{ kind: 'area', w: 16_000, h: 16_000 }] });
+    expect(error.problems).toEqual([expect.stringMatching(/^board s[0-9a-z]+-\d+: 16000×16000 is 256000000 px \(over 67108864 px\)$/)]);
   });
 });
 

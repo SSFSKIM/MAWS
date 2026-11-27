@@ -5,7 +5,7 @@
 const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 
 export const VIEWERS_COPY = {
-  loading: 'Loading…',
+  loading: 'Loading…', // the word cut (T573): the quiet spinner's name, never drawn
   fallbackTitle: 'Artifact',
   versionLabel: 'Version',
   version: (n: number, latest: boolean) => (latest ? `v${n} · latest` : `v${n}`),
@@ -15,10 +15,10 @@ export const VIEWERS_COPY = {
   openAsFile: 'Open as file',
   reload: 'Reload',
   comment: 'Comment',
-  picking: 'Click an element to comment on it · Esc cancels',
+  picking: 'Click an element · Esc cancels', // the word cut (T575)
   frameTitle: (title: string) => `Artifact ${title}`,
-  consoleErrors: (n: number) => plural(n, 'console error'),
-  consoleWarnings: (n: number) => plural(n, 'console warning'),
+  consoleErrors: (n: number) => plural(n, 'error'), // the word cut (T571): the chip says the count and its level
+  consoleWarnings: (n: number) => plural(n, 'warning'),
   consoleLine: (line: number) => `line ${line}`,
   couldNotRead: (message: string) => `Couldn’t read this artifact: ${message}`,
   retry: 'Retry',
@@ -27,7 +27,7 @@ export const VIEWERS_COPY = {
   exportFormats: { pdf: 'PDF', png: 'PNG', pngs: 'PNG (all slides)', docx: 'Word document', pptx: 'PowerPoint', md: 'Markdown', html: 'HTML', claude: 'For Claude (zip)' /* P3-D: a design system in Claude's shape */ },
   saveCopy: 'Save a copy…',
   exporting: (title: string, format: string) => `Exporting ${title} as ${format}…`,
-  saved: (path: string, commentAuthorName?: string) => `Saved to ${path}${commentAuthorName ? ` · Comments credited to ${commentAuthorName}; change in Settings › Artifacts.` : ''}`,
+  saved: (path: string, commentAuthorName?: string) => `Saved to ${path}${commentAuthorName ? ` · Comments credited to ${commentAuthorName}` : ''}`, // the word cut (T579)
   exportFailed: (message: string) => `Couldn’t export: ${message}`,
   saveFailed: (message: string) => `Couldn’t save a copy: ${message}`,
 } as const;

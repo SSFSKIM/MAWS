@@ -70,6 +70,11 @@ export interface MarginThreadsProps {
   /** P4-B1: the threads' reply drafts, the editor's, so a card the panel or a tab switch hides keeps its draft (X36). */
   drafts: ReadonlyMap<string, string>;
   onDraftChange(threadId: string, text: string): void;
+  /** The word cut (G385): the thread whose card takes the keyboard to its reply field once active (the panel's card
+   * that asked it closed with the panel), once per serial. */
+  replyAsked?: { threadId: string; serial: number } | null;
+  /** The asked card's field took the keyboard: the editor drops the request, so a card drawn again does not replay it. */
+  onReplyTaken?(): void;
 }
 
 /** P4-B1: what moved the passages in a page frame's callback: the frame's size, or edits alone. */
@@ -117,7 +122,7 @@ interface EntryActions {
   dot(id: string): void;
 }
 
-export function MarginThreads({ editor, doc, tabId, author, readOnly, view, relayoutRef, hosting, overlay, onComment, onTier, enterRef, drafts, onDraftChange }: MarginThreadsProps) {
+export function MarginThreads({ editor, doc, tabId, author, readOnly, view, relayoutRef, hosting, overlay, onComment, onTier, enterRef, drafts, onDraftChange, replyAsked = null, onReplyTaken }: MarginThreadsProps) {
   const column = useRef<HTMLDivElement>(null);
   // P4-B1: the tab's open threads from the threads map, at once (a reply, a resolve, a new thread in the task it lands in)
   const open = useCardThreads(useOpenThreads(doc, tabId));
@@ -537,7 +542,7 @@ export function MarginThreads({ editor, doc, tabId, author, readOnly, view, rela
   } as CSSProperties;
   // P4-B1: a memoized card per entry (MarginCard)
   const card = (entry: Entry, index: number, compact: boolean) =>
-    entry.thread && <MarginCard thread={entry.thread} active={entry.id === active} compact={compact} index={index + 1} count={entries.length} readOnly={readOnly} draft={draftOf(entry.id)} handlers={handlersFor(entry.id)} />;
+    entry.thread && <MarginCard thread={entry.thread} active={entry.id === active} compact={compact} index={index + 1} count={entries.length} readOnly={readOnly} draft={draftOf(entry.id)} handlers={handlersFor(entry.id)} {...(replyAsked?.threadId === entry.id && { replyAsked: replyAsked.serial, onReplyTaken })} />;
   return (
     <div ref={column} className="doc-margin" role="region" aria-label="Comments" data-margin-tier={tier.kind} data-markup-occluder style={style}>
       {tier.kind === 'cards' &&
@@ -647,9 +652,11 @@ function IconRail({
 
 // P4-B1: a thread's card, re-rendered only when its own inputs change (a list re-read hands an unchanged thread the
 // same object, `useOpenThreads`, and the handlers are kept per id)
-const MarginCard = memo(function MarginCard({ thread, active, compact, index, count, readOnly, draft, handlers }: { thread: ThreadCardThread; active: boolean; compact: boolean; index: number; count: number; readOnly: boolean; draft: string; handlers: EntryHandlers }) {
+const MarginCard = memo(function MarginCard({ thread, active, compact, index, count, readOnly, draft, handlers, replyAsked, onReplyTaken }: { thread: ThreadCardThread; active: boolean; compact: boolean; index: number; count: number; readOnly: boolean; draft: string; handlers: EntryHandlers; replyAsked?: number; onReplyTaken?(): void }) {
   return (
     <ThreadCard
+      replyAsked={replyAsked}
+      onReplyTaken={onReplyTaken}
       thread={thread}
       active={active}
       compact={compact}

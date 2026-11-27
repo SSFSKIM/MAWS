@@ -1,7 +1,7 @@
 // The dashboard's view spec (P3-E2 M3; parent §2 "Views", ledger X26: the `chart` atom's `spec` is E's): a closed
 // declarative grammar a chart or table block names its dataset's view with. No expression, URL or callback can be
 // written in it; every value is checked against the grammar, never trusted by its shape. An unknown key, or a value the
-// grammar refuses, is dropped with a warning (the agent's `viewWarnings`, and the note under the view); an unknown view
+// grammar refuses, is dropped with a warning (the agent's `viewWarnings`, and the note under an exported view); an unknown view
 // kind, a spec that is not an object, or a pie of more than one measure (P3-F) cannot be drawn and is the shared
 // in-place error. Promoted from M1's spike.
 import type { Cell } from './datasets';
