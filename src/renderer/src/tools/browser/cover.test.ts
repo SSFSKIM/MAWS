@@ -1,7 +1,7 @@
 // E4a (Task 3.2): which renderer layers cover a placed pane (Design §3 "Which layers cover"; Decision Log 2), pinned
 // against the real Radix components in happy-dom rather than hand-made wrappers: a Dialog covers while open; a Popover
-// (whose content carries role="dialog" inside its popper wrapper) and a DropdownMenu cover only when the wrapper meets a
-// pane; a Tooltip never; a bare body child follows the intersection rule; so does a toast over the pane. happy-dom lays
+// (whose content carries role="dialog" inside its popper wrapper), a DropdownMenu and a Tooltip cover only when the
+// wrapper meets a pane; a bare body child follows the intersection rule; so does a toast over the pane. happy-dom lays
 // nothing out, so each layer's rect is given by a `data-rect` marker inside it.
 import { act, cleanup, render } from '@testing-library/react';
 import { createElement as h, type ReactNode } from 'react';
@@ -101,17 +101,30 @@ describe('watchCoverLayers', () => {
     expect(changes).toEqual([true]);
   });
 
-  it('a Tooltip never covers, even over the pane', async () => {
-    render(
+  it('a Tooltip is measured like any popper: over the pane it covers, beside it or on its edge it does not', async () => {
+    const tip = (open: boolean, rect: string) =>
       h(
         Tooltip.Provider,
         null,
-        h(Tooltip.Root, { open: true }, h(Tooltip.Trigger, null, 'Back'), h(Tooltip.Portal, null, h(Tooltip.Content, { 'data-rect': 'over' } as object, 'Back'))),
-      ),
-    );
+        h(Tooltip.Root, { open }, h(Tooltip.Trigger, null, 'Back'), h(Tooltip.Portal, null, h(Tooltip.Content, { 'data-rect': rect } as object, 'Back'))),
+      );
+    const { rerender } = render(tip(true, 'away'));
     await frames();
     expect(document.querySelector('[data-radix-popper-content-wrapper] [role="tooltip"]')).not.toBeNull();
     expect(changes).toEqual([]);
+    rerender(tip(false, 'away'));
+    await frames();
+    rerender(tip(true, 'edge'));
+    await frames();
+    expect(changes).toEqual([]);
+    rerender(tip(false, 'edge'));
+    await frames();
+    rerender(tip(true, 'over'));
+    await frames();
+    expect(changes).toEqual([true]);
+    rerender(tip(false, 'over'));
+    await frames();
+    expect(changes).toEqual([true, false]);
   });
 
   it('a bare body child with no marker (the composer’s suggestion popup) follows the intersection rule', async () => {

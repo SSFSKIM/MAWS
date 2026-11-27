@@ -1,7 +1,7 @@
 // E4d (Task 3.1): the chrome's Comment toggle (E4d execution document, Design §2), registered into E4a's extras slot so
 // it sits in the navigation row before the overflow menu in both surfaces. Pressed while main has the tab armed (the
-// comment-mode store); a click asks main to arm or disarm; disabled, with the reason as its label (IconButton's label is
-// its tooltip too), while the agent holds the page or there is no page to pick on.
+// comment-mode store); a click asks main to arm or disarm; greyed (`aria-disabled`, still in the Tab order, its press
+// swallowed), its reason the tooltip and the description, while the agent holds the page or there is no page to pick on.
 //
 // While armed, a plain Escape whose target is inside this chrome leaves the mode. The listener runs in the capture phase
 // on `window`, ahead of the chrome's own handlers: the address field and the find bar take their Escape with
