@@ -4,10 +4,9 @@ import { createRequire } from 'node:module';
 import { resolve } from 'node:path';
 import { defineConfig } from 'vite';
 
-// The Markdown stack splits out of the sheet's chunk into chunks of its own, as desk-web's does (apps/desk-web/
-// vite.config.ts, whose rule this is): left to itself, the bundler folds the lazy sheet view into the largest chunk that
-// shares its modules (mermaid's), so the first sheet would load all of it. React and Vite's helpers have a chunk of
-// their own, so the entry imports no chunk of the Markdown stack.
+// The Markdown stack splits into chunks of its own, as desk-web's does (apps/desk-web/vite.config.ts, whose rule this
+// is), so the diagram renderer and the highlighter's languages, which the stack loads only when a card needs them, stay
+// apart from what every load carries. React and Vite's helpers have a chunk of their own.
 const MARKDOWN = /^(streamdown|unified|bail|trough|marked|longest-streak|markdown-table|(remark|micromark|mdast)(-.*)?)$/;
 const HTML = /^(parse5|entities|property-information|space-separated-tokens|comma-separated-tokens|html-url-attributes|web-namespaces|zwitch|trim-lines|devlop|ccount|decode-named-character-reference|character-entities.*|(rehype|hast|estree-util|unist|vfile)(-.*)?)$/;
 const SHIKI = /^(shiki|@shikijs\/(core|types|vscode-textmate|engine-javascript)|oniguruma-to-es|oniguruma-parser|regex|regex-recursion|regex-utilities)$/;

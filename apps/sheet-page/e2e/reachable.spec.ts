@@ -72,10 +72,10 @@ test('with an impostor on the port, a sheet on screen sends nothing that carries
   }
 });
 
-test('a sheet whose code was still loading when mawsd went shows once mawsd is back, with no reload', async ({ page, mawsd }) => {
+test('a sheet paired just as mawsd went shows once mawsd is back, with no reload', async ({ page, mawsd }) => {
   seedRecord(mawsd.home, 'references');
   await page.goto(`${mawsd.url}/s/${REFERENCES}`);
-  await mawsd.pair(page); // the workspace's code is asked for at paired, and mawsd goes at once
+  await mawsd.pair(page); // mawsd goes at once, before the sheet was read
   await page.evaluate(() => void ((globalThis as { __loaded?: number }).__loaded = 1));
   await mawsd.stop();
   await mawsd.restart();

@@ -8,10 +8,10 @@
 // its path alone (T20).
 //
 // Once paired, the connection's snapshots and changes feed the store (store.ts), which reads the model of the session
-// on screen; what the frame holds is the workspace, loaded apart (views/Workspace.tsx, below). The band under the bar says
+// on screen; what the frame holds is the workspace (views/Workspace.tsx). The band under the bar says
 // when the page is not connected, once a second has passed (availability.ts). A tab hidden for five minutes lets its
 // connection go and opens it again when it is shown (T15), so a forgotten tab costs nothing.
-import { useCallback, useEffect, useState, type ComponentType } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { createApi } from './api';
 import { BAND_AFTER_MS, bandOf } from './availability';
 import { PAGE } from './copy';
@@ -23,25 +23,12 @@ import { PairingScreen } from './pairing/PairingScreen';
 import { pathOf, placeOf, type Place } from './route';
 import { createStore } from './store';
 import { unpairThisBrowser, type Unpaired } from './unpair';
-import type { WorkspaceProps } from './views/Workspace';
 
-// The workspace's code is loaded apart, so the pairing screen carries none of the Markdown stack. It is asked for with
-// the page's own load where a pairing is stored, and otherwise at `paired`; a load that failed (mawsd went away while
-// it was out) is asked for again at the next `paired` and at no other time, so an open tab loads code only from a
-// server it has just proven, never from whatever holds the port meanwhile (T28).
-type WorkspaceView = ComponentType<WorkspaceProps>;
-let workspaceLoad: Promise<WorkspaceView> | null = null;
-function loadWorkspace(): Promise<WorkspaceView> {
-  workspaceLoad ??= import('./views/Workspace').then(
-    (module) => module.default,
-    (error: unknown) => {
-      workspaceLoad = null;
-      throw error;
-    },
-  );
-  return workspaceLoad;
-}
-if (readPairing() !== null) void loadWorkspace().catch(() => {});
+// The workspace is in the page's own load, not a chunk asked for later: a module load that failed stays failed in a
+// browser's module map (Chromium's, as the browser suite runs it), so a workspace asked for at `paired` while mawsd went
+// away could never be had again without a reload. Loading it with the page also means an open tab loads no code of its
+// own after the page's load but the Markdown stack's own lazy parts (a highlighter's language, a diagram's renderer).
+import Workspace from './views/Workspace';
 
 type Screen = 'waiting' | 'pairing' | 'frame';
 
@@ -95,7 +82,6 @@ export function App() {
   const [unpaired, setUnpaired] = useState<Unpaired | null>(null);
   const [connection, setConnection] = useState<{ state: Connection; since: number }>(() => ({ state: 'connecting', since: Date.now() }));
   const [bar, setBar] = useState<{ title: string | null; stopped: boolean }>({ title: null, stopped: false });
-  const [Workspace, setWorkspace] = useState<WorkspaceView | null>(null);
   const awake = useAwake();
   const outline = useOutline();
   const band = useBand(connection);
@@ -135,10 +121,6 @@ export function App() {
       onPaired: () => {
         setUnpaired(null);
         setScreen('frame');
-        loadWorkspace().then(
-          (view) => setWorkspace(() => view),
-          () => {}, // asked again at the next paired
-        );
       },
       onReady: (sessions, door) => store.ready(sessions, door),
       onChanged: (session, summary) => store.changed(session, summary),
@@ -194,7 +176,7 @@ export function App() {
       navigate={navigate}
       unpair={() => void unpair()}
     >
-      {screen === 'frame' && Workspace !== null && <Workspace place={place} store={store} api={api} connection={connection.state} outline={outline} navigate={navigate} setBar={setBar} />}
+      {screen === 'frame' && <Workspace place={place} store={store} api={api} connection={connection.state} outline={outline} navigate={navigate} setBar={setBar} />}
     </Frame>
   );
 }

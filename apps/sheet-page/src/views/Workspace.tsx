@@ -1,5 +1,4 @@
-// What the page draws in its frame once paired (§P), loaded apart from the shell so the first load, which may be the
-// pairing screen, carries none of the Markdown stack: the overview at `/`, a session's sheet at `/s/<session>`. It
+// What the page draws in its frame once paired (§P): the overview at `/`, a session's sheet at `/s/<session>`. It
 // reads the store, says the session's title and whether it is stopped to the bar, writes the browser tab's title (F8),
 // and sweeps the memory's old entries once when it first loads (T19).
 import { useEffect, useMemo, useSyncExternalStore } from 'react';
