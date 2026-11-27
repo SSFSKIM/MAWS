@@ -257,19 +257,28 @@ export class ModelsCache {
   // observation set 4: a key no launch has listed yet (the engine updated since the last session, a route not run on
   // this version) answers the route's newest list on another version, else the newest of any route's, the relay's
   // aliases left out for Direct: what a session on this machine last listed, never the built-in list while one is kept.
+  // Its review: a key with a model environment (`<version>/<route>/env-<digest>`) answers the same route and environment's
+  // newest list on another version before its route's, whose rows lack what the environment sets.
   answer(key?: string, fallback?: string): ModelCatalogue {
     if (key === undefined) return cachedOrBuiltin(this.newest(null));
-    const own = this.cached.entries[key] ?? (fallback !== undefined ? this.cached.entries[fallback] : undefined);
     const route = routeOfKey(fallback ?? key);
-    const other = own ?? this.newest(route);
+    const env = key.split('/')[2];
+    const sameEnv = env !== undefined && route !== null ? this.newest({ route, env }) : undefined;
+    const own = this.cached.entries[key] ?? sameEnv ?? (fallback !== undefined ? this.cached.entries[fallback] : undefined);
+    const other = own ?? this.newest(route === null ? null : { route, env: undefined });
     if (other !== undefined) return cachedOrBuiltin(other);
     const any = this.newest(null);
     return cachedOrBuiltin(any && route === 'direct' ? { ...any, models: any.models.filter((model) => !isGatewayModel(model.value)) } : any);
   }
 
-  // The most recently updated entry: of `route` alone, by its plain route keys (`<version>/<route>`), or of any key.
-  private newest(route: string | null): Entry | undefined {
-    const entries = Object.entries(this.cached.entries).filter(([key]) => route === null || (key.split('/').length === 2 && routeOfKey(key) === route));
+  // The most recently updated entry: of the keys of `route` on any version whose model environment is `env` (undefined:
+  // the plain route keys, `<version>/<route>`), or of any key.
+  private newest(of: { route: string; env: string | undefined } | null): Entry | undefined {
+    const entries = Object.entries(this.cached.entries).filter(([key]) => {
+      if (of === null) return true;
+      const [, route, env, ...rest] = key.split('/');
+      return rest.length === 0 && route === of.route && env === of.env;
+    });
     return entries.map(([, entry]) => entry).sort((a, b) => a.at.localeCompare(b.at)).at(-1);
   }
 

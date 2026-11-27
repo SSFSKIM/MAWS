@@ -284,6 +284,31 @@ describe('ModelsCache.answer with a fallback key', () => {
     expect(cache.answer(keyed, RELAY).models.map((m) => m.value)).toEqual(['default', 'opus', 'claude-fable-5-1[1m]', 'sonnet', 'haiku']);
     expect(cache.answer(RELAY).models.map((m) => m.value)).toContain('claude/astra'); // the route's own list untouched
   });
+
+  // Observation set 4's review: a launch keyed by its model environment that no launch of this engine version listed yet
+  // answers the list of the same route and environment on another version, before its route's (whose rows lack what the
+  // environment sets); then its route's plain list, this version's before another's; then any.
+  it("answers a keyed launch's list on another version before its route's, then its route's", async () => {
+    let clock = 0;
+    const cache = new ModelsCache(userData, { now: () => `2026-09-29T10:00:0${clock++}.000Z` });
+    await cache.load();
+    const env = 'env-0123456789ab';
+    const next = modelsKey('2.1.284', 'gateway');
+    const values = (key: string, fallback: string) => cache.answer(key, fallback).models.map((m) => m.value);
+    const envList = directModels().map((m) => (m as { value: string }).value);
+    await cache.update(`${RELAY}/${env}`, directModels()); // the environment's list on the older version, first
+    await cache.update(RELAY, readsModels()); // the route's, later
+    await cache.update(`${RELAY}/env-ffffffffffff`, readsModels()); // another environment's, latest
+    expect(values(`${next}/${env}`, next)).toEqual(envList);
+    // this version's route list, once listed, does not displace the environment's own on another version
+    await cache.update(next, readsModels());
+    expect(values(`${next}/${env}`, next)).toEqual(envList);
+    // an environment no version listed: the route's list, this version's
+    await cache.update(next, directModels().slice(0, 2));
+    expect(values(`${next}/env-aaaaaaaaaaaa`, next)).toEqual(envList.slice(0, 2));
+    // a version whose route never listed either: the route's newest plain list, never another environment's
+    expect(values(`${modelsKey('2.1.285', 'gateway')}/env-aaaaaaaaaaaa`, modelsKey('2.1.285', 'gateway'))).toEqual(envList.slice(0, 2));
+  });
 });
 
 // P5 O7 M9 (docs/doperpowers/plans/2026-10-28-p5-o7-remote-lane-b.md, M9 "The relay check and the features"): the
