@@ -1865,4 +1865,53 @@ test.describe('lane A: a terminal session driven through its bridge', () => {
     await expect.poll(() => sheetItems(page, c.sid)).toEqual([]);
     expect(c.maws.consoleErrors()).toEqual([]);
   });
+
+  // The question sheet's C3 M5 (the plan's M5 "Proves": the composite's G2.b and G2.f's row against the stand-in door):
+  // the session's transcript holds the main agent's two calls of the `batch` record (q1 and q3; q2 is a subagent's), as
+  // the engine writes a call and its result, with invented words; the record is seeded beside it.
+  const sheetCallRecords = (sid: string, cwd: string): Record<string, unknown>[] => {
+    const ids = Array.from({ length: 6 }, () => randomUUID());
+    const base = { cwd, sessionId: sid, isSidechain: false, userType: 'external' };
+    const message = (uuid: string, content: unknown[]) => ({ id: `msg_${uuid.slice(0, 8)}`, type: 'message', role: 'assistant', model: 'claude-demo', content, stop_reason: 'tool_use', stop_sequence: null, usage: { input_tokens: 10, output_tokens: 20 } });
+    const call = (i: number, id: string, entry: Record<string, unknown>, at: string) => ({ ...base, type: 'assistant', uuid: ids[i], parentUuid: ids[i - 1], timestamp: at, message: message(ids[i]!, [{ type: 'tool_use', id, name: 'mcp__sminos__AskUserQuestion', input: { ask: [entry] } }]) });
+    const result = (i: number, id: string, text: string, at: string) => ({ ...base, type: 'user', uuid: ids[i], parentUuid: ids[i - 1], timestamp: at, message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: id, is_error: false, content: text }] } });
+    return [
+      userRecord(sid, cwd, ids[0]!, null, 'Set up the sign-in page.', T0),
+      call(1, 'toolu_01Auth0001', { question: 'Which auth method should the login use?', header: 'Auth method', options: [{ label: 'OAuth' }, { label: 'Passkeys' }, { label: 'Magic link' }] }, '2026-10-28T10:00:01.000Z'),
+      result(2, 'toolu_01Auth0001', 'Added q1.', '2026-10-28T10:00:02.000Z'),
+      call(3, 'toolu_01Empt0003', { question: 'What should the empty state say?', header: 'Empty state' }, '2026-10-28T10:00:03.000Z'),
+      result(4, 'toolu_01Empt0003', 'Added q3.', '2026-10-28T10:00:04.000Z'),
+      assistantRecord(sid, cwd, ids[5]!, ids[4]!, 'Two questions are on your sheet; going on with the layout.', '2026-10-28T10:00:05.000Z'),
+    ];
+  };
+  const sheetLines = (row: Locator) => row.locator('[data-sheet-line]').evaluateAll((lines) => lines.map((line) => Array.from(line.children, (cell) => cell.textContent).filter((text) => text !== '').join(' | ')));
+
+  test('the question sheet: a call’s row reads its lines with Open, which shows the side sheet at the question; an answer sent reads its receipt queued, a withdrawn question reads Withdrawn', async () => {
+    const c = await begin(undefined, sheetCallRecords, { sid: fixtureSession('batch'), env: sheetDoor() });
+    seedRecord(c.maws.sminosHome, 'batch');
+    await drive(c);
+    const { page } = c;
+    const rows = main(page).locator('.transcript-row[data-kind="sheet"]');
+    await expect(rows).toHaveCount(2, { timeout: 15_000 });
+    await expect.poll(async () => [await sheetLines(rows.nth(0)), await sheetLines(rows.nth(1))], { timeout: 15_000, message: 'the record read, each line with Open' }).toEqual([
+      ['q1 | Auth method | Which auth method should the login use? | Open'],
+      ['q3 | Empty state | What should the empty state say? | Open'],
+    ]);
+    await expect(sheetOf(page), 'nothing opened by itself').toHaveCount(0);
+
+    // G2.b: Open shows the side sheet with the keyboard on the line's question
+    await rows.nth(1).getByRole('button', { name: 'Open q3', exact: true }).click();
+    const sheet = sheetOf(page);
+    await expect(sheet.locator('[data-sheet-question="q3"]'), 'the keyboard on q3’s card').toBeFocused({ timeout: 10_000 });
+
+    // an answer sent from the sheet: the row's line reads it in the receipt's shape, queued, until the transcript has it
+    await sheet.locator('[data-sheet-question="q1"]').getByRole('radio', { name: 'Passkeys', exact: true }).click();
+    await sheet.getByRole('button', { name: SHEET_WORDS.send(1), exact: true }).click();
+    await expect.poll(() => sheetLines(rows.nth(0)), { timeout: 15_000 }).toEqual(['q1 | Auth method | → Passkeys queued | Open']);
+
+    // G2.f's row: q3 withdrawn from the record, its line reads Withdrawn and offers no Open
+    rewriteState(c.maws.sminosHome, c.sid, withdrawn('q3', '2026-11-23T09:06:00.000Z'));
+    await expect.poll(() => sheetLines(rows.nth(1)), { timeout: 15_000 }).toEqual(['q3 | Empty state | → Withdrawn']);
+    expect(c.maws.consoleErrors()).toEqual([]);
+  });
 });

@@ -1016,6 +1016,42 @@ test('an answered question reads as one compact receipt that stays in view when 
   expect(harness.consoleErrors()).toEqual([]);
 });
 
+// ---- The question sheet's C3 M5: a sheet call's row (§I; the look's frame 3) ----
+// `sheet/main-plugin-prompt` is a synthetic session (test/fixtures/sheet/transcripts/): a call that put four questions
+// on the sheet, one that revised q7 and one that withdrew q10, then the pin's envelope delivered by the plugin's prompt
+// while the session was idle. The harness holds no sheet record, so each line is what the transcript alone shows.
+test('a sheet call’s row: its head line, its lines and receipts in columns 19 px in, in view with its turn folded, no bubble for the envelope', async ({ harness }) => {
+  const { page } = harness;
+  await harnessReady(page);
+  await blockHumanInput(page);
+  await loadAll(page, 'sheet/main-plugin-prompt');
+  const rows = page.locator('[data-kind="sheet"]');
+  await expect(rows).toHaveCount(3);
+  const heads = rows.locator('.transcript-run-line');
+  expect(await heads.allTextContents()).toEqual(['Asked 4 questions', 'Revised q7', 'Withdrew q10']);
+  const linesOf = (row: number) =>
+    rows.nth(row).locator('[data-sheet-line]').evaluateAll((lines) => lines.map((line) => Array.from(line.children, (cell) => cell.textContent).filter((text) => text !== '').join(' | ')));
+  expect(await linesOf(0)).toEqual(['q7 | Auth method | Revised below', 'q8 | Empty state | → Nothing waiting for you.', 'q9 | Export | → Dismissed', 'q10 | Button | → Withdrawn']);
+  expect(await linesOf(1)).toEqual(['q7 | Auth method | → OAuth, Passkeys']);
+  await expect(rows.nth(2).locator('button.transcript-run-line'), 'a call that only withdrew is its head alone').toHaveCount(0);
+  await expect(rows.getByRole('button', { name: /^Open/ }), 'no record, no Open').toHaveCount(0);
+  await expect(page.locator('[data-kind="user"]').filter({ hasText: '[sheet v1]' }), 'the envelope is no one’s bubble').toHaveCount(0);
+  // the lines hang 19 px in from the head's text, ids and headers each in one column
+  const label = (await rows.nth(0).locator('.transcript-run-label').boundingBox())!;
+  const ids = await rows.nth(0).locator('.transcript-sheet-id').evaluateAll((cells) => cells.map((cell) => cell.getBoundingClientRect().left));
+  const headers = await rows.nth(0).locator('.transcript-sheet-header').evaluateAll((cells) => cells.map((cell) => cell.getBoundingClientRect().left));
+  expect(Math.abs(ids[0]! - label.x - 19), `the lines 19 px in: ${ids[0]} against ${label.x}`).toBeLessThanOrEqual(1);
+  expect(new Set(ids).size, 'the ids in one column').toBe(1);
+  expect(new Set(headers).size, 'the headers in one column').toBe(1);
+  // the head's chevron folds the lines, which stand open at rest
+  await heads.nth(0).click();
+  await expect(heads.nth(0)).toHaveAttribute('aria-expanded', 'false');
+  await expect(rows.nth(0).locator('[data-sheet-line]')).toHaveCount(0);
+  await heads.nth(0).click();
+  await expect(rows.nth(0).locator('[data-sheet-line]')).toHaveCount(4);
+  expect(harness.consoleErrors()).toEqual([]);
+});
+
 // ---- UX wave U1b: a question's form in the row of its call (Proof 3, acceptance 6 and 13; the architect's ruling A2) ----
 // `synthetic/questions` is the seeded transcript with three question calls put in it (harness/questions.ts): two of a
 // terminal session's asynchronous questions (the sminos ask mod's call and its immediate result, the agent going on for a
