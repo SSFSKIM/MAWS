@@ -13,6 +13,8 @@ import { CHOICE, FIELD, PRIMARY, SECONDARY } from '../../sessions/ui';
 import { PLUGIN_MANAGEMENT as W } from '../../widgets/copy';
 import { argvOf, commandWords, type PluginsRequest } from '../../widgets/plugins/present';
 import { SheetDetails } from '../../widgets/plugins/SheetDetails';
+import { FOCUSABLE_WORD } from '../../widgets/parts';
+import { Tip } from '../../ui/tip';
 import { Configured, Problem, Unresolved, type ConnectorSheetEnv } from './sheet-parts';
 import { CONNECTORS as C } from './copy';
 import { addToScopes, addToWords, checkCustom, customFieldsOf, customInputOf, customDetailsInputOf, type CustomCheck, type CustomFields, type CustomType, type RowsField } from './custom-form';
@@ -232,13 +234,15 @@ function ShownCommand({ binary, request }: { binary: string; request: PluginsReq
   const text = commandWords(binary, argv);
   const pieces = text.split(/(?<=[ ,])/);
   return (
-    <code data-plugins-argv={JSON.stringify(argv)} title={binary} className="block rounded-sm bg-bg-active px-2 py-1 font-mono text-ui-sm whitespace-pre-wrap text-fg">
-      {pieces.map((piece, index) => {
-        const spaced = piece.endsWith(' ');
-        const unit = spaced ? piece.slice(0, -1) : piece;
-        return <Unit key={index} text={unit} after={spaced ? ' ' : piece.endsWith(',') ? <wbr /> : null} />;
-      })}
-    </code>
+    <Tip content={binary} description={binary}>
+      <code data-plugins-argv={JSON.stringify(argv)} tabIndex={0} className={`block rounded-sm bg-bg-active px-2 py-1 font-mono text-ui-sm whitespace-pre-wrap text-fg ${FOCUSABLE_WORD}`}>
+        {pieces.map((piece, index) => {
+          const spaced = piece.endsWith(' ');
+          const unit = spaced ? piece.slice(0, -1) : piece;
+          return <Unit key={index} text={unit} after={spaced ? ' ' : piece.endsWith(',') ? <wbr /> : null} />;
+        })}
+      </code>
+    </Tip>
   );
 }
 

@@ -25,6 +25,7 @@ import { SkillsWidget } from '../widgets/SkillsWidget';
 import { resetCatalogStore } from '../stores/catalog';
 import { useReadLoads } from '../widgets/read';
 import { forgetKeptOperations } from '../widgets/plugins/operation';
+import { accessibleDescription } from '../test-support/accessible-text';
 
 // P5 O6 M2: the stores, the layout and the pickers hold the page's ids (addresses); `backend.bridge()`, installed as
 // `window.maws`, stands for main and is asked, answers and emits with the bare ids (`bareOf`).
@@ -254,7 +255,7 @@ it('retains the engine-qualified invocation and Use in chat for the live Skills 
   useSessions.setState({ engine: new Map([[page.appSessionId, page]]) });
   render(<QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}><SkillsWidget appSessionId={page.appSessionId} args="" close={() => {}} /></QueryClientProvider>);
   const open = await screen.findByRole('button', { name: 'View review' });
-  expect(open.closest('li')!.querySelector('[data-skill-name]')!.getAttribute('title')).toBe('/reports:review');
+  expect(accessibleDescription(open.closest('li')!.querySelector('[data-skill-name]')!)).toBe('/reports:review'); // its tooltip, which focus reaches
   expect(open.closest('li')!.querySelector('[data-item-image]')!.textContent).toBe('R'); // UX wave U11c: the tile, "Use in chat" saying it is invocable
   fireEvent.click(open);
   const detail = document.querySelector<HTMLElement>('[data-skill-detail]')!;

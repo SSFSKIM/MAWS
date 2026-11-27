@@ -24,6 +24,7 @@ import { ipc } from '../../ipc/client';
 import { useSessions } from '../../stores/sessions';
 import { forgetKeptOperations } from '../../widgets/plugins/operation';
 import { useCustomizeProject } from '../open';
+import { accessibleDescription } from '../../test-support/accessible-text';
 
 const HOME = '/tmp/discover/config';
 const BINARY = '/opt/claude/2.1.309';
@@ -238,7 +239,8 @@ describe('Customize › Discover, Show: Plugins', () => {
     const h = card(hooked.id);
     expect(h.textContent).toContain('by MAWS e2e hooks');
     expect(h.querySelector('[data-trust]')!.getAttribute('data-trust')).toBe('Added by you');
-    expect(h.querySelector('[data-trust]')!.getAttribute('title')).toBe('You added this marketplace. Anthropic hasn’t reviewed it.');
+    const trust = h.querySelector<HTMLElement>('[data-trust]')!;
+    expect([trust.tabIndex, accessibleDescription(trust)]).toEqual([0, 'You added this marketplace. Anthropic hasn’t reviewed it.']); // its tooltip, which focus reaches
     expect(h.querySelector('[data-catalog-components]')!.textContent).toBe('hooks · runs code');
     await waitFor(() => expect(card(frontend.id).querySelector('[data-item-image]')!.getAttribute('data-item-image')).toBe('icon'));
     expect(h.querySelector('[data-item-image]')!.textContent).toBe('H');
@@ -466,7 +468,7 @@ describe('Customize › Discover, Show: Plugins', () => {
     const publisher = byline.querySelector<HTMLElement>('[data-catalog-publisher]')!;
     expect(publisher.textContent).toBe('by MAWS e2e hooks');
     expect(publisher.title).toBe('by MAWS e2e hooks');
-    expect(byline.lastElementChild!.hasAttribute('data-trust')).toBe(true); // after the publisher, the line beneath it
+    expect(byline.querySelector('[data-trust]')!.previousElementSibling).toBe(publisher); // after the publisher, the line beneath it
   });
 
   // The M4 picture review, round 2: a card with no publisher (an added listing with neither author nor owner) keeps the
@@ -477,10 +479,10 @@ describe('Customize › Discover, Show: Plugins', () => {
     await discover();
     const byline = card(skillsOnly.id).querySelector<HTMLElement>('[data-catalog-byline]')!;
     expect(byline.querySelector('[data-catalog-publisher]')).toBeNull();
-    expect(byline.children).toHaveLength(2);
+    expect([...byline.children].filter((child) => !(child as HTMLElement).hidden)).toHaveLength(2); // the trust tooltip's description, hidden, aside
     const held = byline.firstElementChild as HTMLElement;
     expect([held.textContent, held.getAttribute('aria-hidden'), held.classList.contains('h-[1lh]')]).toEqual(['', 'true', true]);
-    expect(byline.lastElementChild!.hasAttribute('data-trust')).toBe(true);
+    expect(byline.querySelector('[data-trust]')!.previousElementSibling).toBe(held);
   });
 
   // The M4 picture review, round 2: the card's height is fixed so a shelf aligns, but not while a change's line stands on

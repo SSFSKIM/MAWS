@@ -41,7 +41,7 @@ export function CatalogDetail({ item: opened, tab, cwd, onBack }: { item: Catalo
             {item.installName && item.installName !== item.name && <p className="m-0 font-mono text-ui-sm text-fg-muted">{D.installName(item.installName)}</p>}
             <p className="m-0 flex min-w-0 flex-wrap items-center gap-x-1.5 text-ui-sm text-fg-muted">
               <span className="truncate">{byline.join(' · ')}</span>
-              <TrustLabel item={item} />
+              <TrustLabel item={item} explained />
             </p>
           </div>
           {item.installed === 'here' ? <InstalledMark /> : addable(item) && <AddButton item={item} tab={tab} variant="text" />}

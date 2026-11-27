@@ -272,7 +272,7 @@ describe('the head', () => {
     mountCustomize({ view: 'mine', show: 'plugins' });
     const plugin = await pluginRow('buoy-log@harbour-market');
     const pluginName = within(plugin).getByText('Buoy log');
-    expect(pluginName.getAttribute('title')).toBe('buoy-log@harbour-market');
+    expect([pluginName.tabIndex, accessibleDescription(pluginName)]).toEqual([0, 'buoy-log@harbour-market']); // its tooltip, which focus reaches
     fireEvent.click(pluginName);
     await waitFor(() => expect(tools()).toBeNull()); // the detail, in the list's place
     chooseShow('Skills');
