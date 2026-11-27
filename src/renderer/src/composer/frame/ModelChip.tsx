@@ -9,6 +9,7 @@
 // its checked row, "setting…" (P2-F wave S, the sitting's A1.6).
 import { keyboardTaken } from './close-focus';
 import { Popover } from 'radix-ui';
+import { Tip } from '../../ui/tip';
 import { useEffect, useLayoutEffect, useRef } from 'react';
 import type { AppSessionId } from '@shared/graph/ids';
 import { closeChipWidget, requestChipWidget, useComposerStore } from '../../stores/composer';
@@ -52,17 +53,21 @@ export function ModelChip({ appSessionId, binding, onOpen, onClosed }: { appSess
         else if (chipWidget('effort')) requestChipWidget(appSessionId, 'effort', '');
       }}
     >
-      <Popover.Trigger aria-label={`Model ${binding.label}${binding.requested ? `, ${SELECTOR.setting}` : ''}`} title={binding.disabled ?? tooltipOf(binding)} className={`${CHIP} shrink-0`}>
-        {/* E3: whole and on one line in a narrow pane (the Side pane's thread): the location's label gives way first */}
-        <span className="truncate">{binding.name?.name ?? binding.label}</span>
-        {muted !== '' && <span className="shrink-0 text-fg-muted">{muted}</span>}
-        {binding.requested && (
-          <span aria-hidden className="shrink-0 text-fg-faint">
-            {SELECTOR.setting}
-          </span>
-        )}
-        <span aria-hidden className="shrink-0 text-fg-faint">⌄</span>
-      </Popover.Trigger>
+      {/* board ticket 815: why it can't change, else the whole name and the alias, is the chip's tooltip, which keyboard
+          focus opens, and its description */}
+      <Tip content={binding.disabled ?? tooltipOf(binding)} description={binding.disabled ?? tooltipOf(binding)}>
+        <Popover.Trigger aria-label={`Model ${binding.label}${binding.requested ? `, ${SELECTOR.setting}` : ''}`} className={`${CHIP} shrink-0`}>
+          {/* E3: whole and on one line in a narrow pane (the Side pane's thread): the location's label gives way first */}
+          <span className="truncate">{binding.name?.name ?? binding.label}</span>
+          {muted !== '' && <span className="shrink-0 text-fg-muted">{muted}</span>}
+          {binding.requested && (
+            <span aria-hidden className="shrink-0 text-fg-faint">
+              {SELECTOR.setting}
+            </span>
+          )}
+          <span aria-hidden className="shrink-0 text-fg-faint">⌄</span>
+        </Popover.Trigger>
+      </Tip>
       <Popover.Portal>
         <Popover.Content
           aria-label="Model and effort"

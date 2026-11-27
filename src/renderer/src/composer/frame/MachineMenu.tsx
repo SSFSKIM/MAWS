@@ -19,6 +19,7 @@ import { readMachines, tabProject, type MachineChoice } from '../../sessions/rem
 import { useSessions } from '../../stores/sessions';
 import { useMachines } from '../../stores/machines';
 import { QuietSpinner } from '../../ui/spinner';
+import { Tip, UNAVAILABLE_LOOK, unavailableClickProps } from '../../ui/tip';
 import { CHIP, NOTE, POPOVER } from './chip-style';
 
 export const MACHINE_WORDS = {
@@ -84,10 +85,13 @@ export function MachineMenu({ appSessionId, projectId, projectKey, disabled }: {
         setOpen(next);
       }}
     >
-      <Popover.Trigger aria-label={`Machine ${label}`} title={disabled ?? MACHINE_WORDS.title} disabled={disabled !== null} className={`${CHIP} ${chosen ? 'text-fg' : ''}`}>
-        <span className="truncate">{label}</span>
-        <span aria-hidden className="shrink-0 text-fg-faint">⌄</span>
-      </Popover.Trigger>
+      {/* board ticket 815: greyed, it keeps Tab and says why; else what it chooses, a tooltip focus opens */}
+      <Tip content={disabled ?? MACHINE_WORDS.title} description={disabled ?? MACHINE_WORDS.title} {...unavailableClickProps(disabled)}>
+        <Popover.Trigger aria-label={`Machine ${label}`} className={`${CHIP} ${UNAVAILABLE_LOOK} ${chosen ? 'text-fg' : ''}`}>
+          <span className="truncate">{label}</span>
+          <span aria-hidden className="shrink-0 text-fg-faint">⌄</span>
+        </Popover.Trigger>
+      </Tip>
       <Popover.Portal>
         <Popover.Content aria-label="Choose a machine" side="top" align="start" sideOffset={6} collisionPadding={8} className={`${POPOVER} w-60`}>
           <div role="menu" aria-label="Machines" className="flex flex-col">

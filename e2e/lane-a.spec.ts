@@ -229,7 +229,7 @@ test.describe('lane A: a terminal session driven through its bridge', () => {
     const reasonOf = (key: string) => sentence(FULL_CAPABILITIES.controls![key]!.reason!);
     // the O9 sitting: no mode is reported, so the chip names none, only why
     const mode = main(page).getByRole('button', { name: 'Permission mode not reported' });
-    await expect(mode).toHaveAttribute('title', 'Not reported by the terminal session: its mode is changed in the terminal');
+    await expect(mode).toHaveAccessibleDescription('Not reported by the terminal session: its mode is changed in the terminal');
     await expect(mode).toHaveText(/^Mode/);
     await editor(page).click();
     // UX wave U4a (decision 17 f): a row that cannot run from here is listed, greyed, once the typed text matches its
@@ -296,11 +296,11 @@ test.describe('lane A: a terminal session driven through its bridge', () => {
     const reported = (mode: string) => async () => {
       await expect(chip).toHaveAttribute('aria-label', `Permission mode ${mode}`);
       await expect(chip).toHaveText(new RegExp(`^${mode}`));
-      await expect(chip).toHaveAttribute('title', /^Reported (now|1 minute ago) · A terminal session's mode is changed in the terminal$/);
+      await expect(chip).toHaveAccessibleDescription(/^Reported (now|1 minute ago) · A terminal session's mode is changed in the terminal$/);
     };
     bridge.heartbeat(); // the session's start reports none
     await expect(chip).toHaveAttribute('aria-label', 'Permission mode not reported');
-    await expect(chip).toHaveAttribute('title', 'Not reported by the terminal session: its mode is changed in the terminal');
+    await expect(chip).toHaveAccessibleDescription('Not reported by the terminal session: its mode is changed in the terminal');
 
     bridge.setMode({ mode: 'plan', at: Date.now(), from: 'UserPromptSubmit' });
     bridge.heartbeat();

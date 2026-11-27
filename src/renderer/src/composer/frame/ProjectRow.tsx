@@ -24,7 +24,7 @@
 // and every row's title is its whole path.
 import { Command } from 'cmdk';
 import { Popover } from 'radix-ui';
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import type { AppSessionId, ProjectId } from '@shared/graph/ids';
 import type { SessionRecord } from '@shared/graph/session';
 import type { ProjectRecord, SessionDigest } from '@shared/ipc/schema';
@@ -43,11 +43,13 @@ import { CHIP, NOTE, POPOVER } from './chip-style';
 import { formatCwd } from './LocationChip';
 import { MachineMenu } from './MachineMenu'; // P5 O7 M4
 import { QuietSpinner } from '../../ui/spinner';
+import { Tip, unavailableClickProps } from '../../ui/tip';
 
 export const CHOOSE_PROJECT = 'Choose a project';
 export const NEW_PROJECT = 'New project';
 export const NO_PROJECT_LABEL = 'No project'; // the chip's words for a chat in no project (useSetupIntent's, for another machine's home)
 export const NO_PROJECT = NO_PROJECT_LABEL; // the menu's action for it, in the chip's words (C70)
+export const WORKTREE_HINT = 'Run this chat in a new git worktree';
 export const PLACE_WORDS = {
   chosen: (label: string, machine: string) => `${label} on ${machine}`, // the chip's tooltip for a place on another machine (C65)
 } as const;
@@ -266,6 +268,7 @@ export function ProjectRow({ binding, directories = [], appSessionId }: { bindin
   const there = remote !== null && remote.key === null ? remote : null;
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
+  const worktreeLabel = useRef<HTMLLabelElement>(null); // the box's tip opens on pointing at its word too
   const label = there === null ? binding.label : there.checkout === null ? null : (there.label ?? basename(there.checkout));
   const chosen = label !== null;
   const disabled = binding.disabled !== null || pending;
@@ -284,18 +287,21 @@ export function ProjectRow({ binding, directories = [], appSessionId }: { bindin
   // C65: where the chat will run, once chosen; before a choice the chip says it itself
   const base = binding.disabled ?? (there !== null ? (label === null ? null : PLACE_WORDS.chosen(label, there.name)) : chosen ? (binding.path ?? binding.label) : null);
   const listed = directories.length > 0 && remote === null ? `${ADDITIONAL_DIRECTORIES}\n${directories.map(formatCwd).join('\n')}` : null;
-  const title = [base, listed].filter((part) => part !== null).join('\n\n') || undefined;
+  const tip = [base, listed].filter((part) => part !== null).join('\n\n') || null;
   return (
     <div data-project-row className="flex min-w-0 flex-col">
       <div className="flex min-w-0 items-center justify-between gap-2 px-1 py-1.5">
         <div className="flex min-w-0 items-center gap-1">
           <Popover.Root open={open} onOpenChange={setOpen}>
-            <Popover.Trigger aria-label={chosen ? `Project ${label}` : CHOOSE_PROJECT} title={title} className={`${CHIP} ${chosen ? 'text-fg' : ''}`}>
-              {/* the status dot: ready to run where the chip says, or waiting for a project (Codex's size-2 badge, app-initial:453119-453146) */}
-              <span aria-hidden className={`size-2 shrink-0 rounded-full ${chosen ? 'bg-success' : 'bg-fg-faint'}`} />
-              <span className="truncate">{chosen ? label : CHOOSE_PROJECT}</span>
-              <span aria-hidden className="shrink-0 text-fg-faint">⌄</span>
-            </Popover.Trigger>
+            {/* board ticket 815: the chip's tooltip and description, which keyboard focus opens */}
+            <Tip content={tip && <span className="whitespace-pre-line">{tip}</span>} description={tip}>
+              <Popover.Trigger aria-label={chosen ? `Project ${label}` : CHOOSE_PROJECT} className={`${CHIP} ${chosen ? 'text-fg' : ''}`}>
+                {/* the status dot: ready to run where the chip says, or waiting for a project (Codex's size-2 badge, app-initial:453119-453146) */}
+                <span aria-hidden className={`size-2 shrink-0 rounded-full ${chosen ? 'bg-success' : 'bg-fg-faint'}`} />
+                <span className="truncate">{chosen ? label : CHOOSE_PROJECT}</span>
+                <span aria-hidden className="shrink-0 text-fg-faint">⌄</span>
+              </Popover.Trigger>
+            </Tip>
             <Popover.Portal>
               <Popover.Content aria-label="Choose a project" side="top" align="start" sideOffset={6} collisionPadding={8} className={`${POPOVER} w-72 p-0`}>
                 {remote !== null && appSessionId !== undefined ? (
@@ -315,15 +321,18 @@ export function ProjectRow({ binding, directories = [], appSessionId }: { bindin
           )}
         </div>
         {binding.worktree !== null && there === null && (
-          <label title={binding.disabled ?? 'Run this chat in a new git worktree'} className="relative flex shrink-0 items-center gap-2 pe-2 text-ui-sm text-fg-muted select-none">
+          <label ref={worktreeLabel} className="relative flex shrink-0 items-center gap-2 pe-2 text-ui-sm text-fg-muted select-none">
             Worktree
-            <input
-              type="checkbox"
-              checked={binding.worktree}
-              disabled={disabled}
-              onChange={(event) => void run(() => binding.setWorktree(event.target.checked))}
-              className="size-3.5 accent-accent"
-            />
+            {/* board ticket 815: greyed by the gate, the box keeps Tab and says why; else its helper sentence */}
+            <Tip content={binding.disabled ?? WORKTREE_HINT} description={binding.disabled ?? WORKTREE_HINT} pointedWithin={worktreeLabel} {...unavailableClickProps(binding.disabled)}>
+              <input
+                type="checkbox"
+                checked={binding.worktree}
+                disabled={binding.disabled === null && pending}
+                onChange={(event) => void run(() => binding.setWorktree(event.target.checked))}
+                className="size-3.5 rounded-sm accent-accent outline-accent focus-visible:outline-2 aria-disabled:opacity-50"
+              />
+            </Tip>
           </label>
         )}
       </div>

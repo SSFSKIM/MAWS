@@ -519,18 +519,18 @@ test('the composer sends, steers, stops and resumes as labelled', async ({ edito
   await expect(control(page, 0)).toBeDisabled(); // nothing to send yet
   await page.keyboard.type(COUNT);
   await expect(control(page, 0)).toBeEnabled();
-  await expect(control(page, 0)).toHaveAttribute('title', 'Send (Enter)');
+  await expect(control(page, 0)).toHaveAccessibleDescription('Send · Enter'); // its tooltip's words (ticket 815)
   await page.keyboard.press('Enter');
   await expect.poll(() => sent(page, id)).toEqual([COUNT]);
   await expect(control(page, 0)).toHaveText('Stop'); // the turn runs, the editor is empty
   await expect(control(page, 0)).toHaveAttribute('data-glyph', 'square');
-  await expect(control(page, 0)).toHaveAttribute('title', 'Stop the running turn (⌘.)');
+  await expect(control(page, 0)).toHaveAccessibleDescription('Stop the running turn · ⌘.');
 
   const steered = 'Counting is cancelled. Reply exactly RESUMED.';
   await page.keyboard.type(steered);
   await expect(control(page, 0)).toHaveText('Send');
   await expect(control(page, 0)).toHaveAttribute('data-glyph', 'queue');
-  await expect(control(page, 0)).toHaveAttribute('title', 'Sends at the next step (Enter) · ⌘Enter queues for later');
+  await expect(control(page, 0)).toHaveAccessibleDescription('Sends at the next step · Enter · ⌘Enter queues for later');
   await page.keyboard.down('Alt');
   await expect(control(page, 0)).toHaveText('Send'); // no relabel under ⌥
   await page.keyboard.up('Alt');
@@ -645,7 +645,7 @@ test('an unstarted session binds the frame to the intent, holds a starting state
   await messageIn(page, 0).click();
   await page.keyboard.type('!ls');
   await expect(control(page, 0)).toBeDisabled();
-  await expect(control(page, 0)).toHaveAttribute('title', 'Available once the session starts');
+  await expect(control(page, 0)).toHaveAccessibleDescription('Available once the session starts');
   await page.keyboard.press('Meta+a');
   await page.keyboard.press('Backspace');
 
@@ -676,7 +676,7 @@ test('an unstarted session binds the frame to the intent, holds a starting state
   await cards(page, 'intent', id, { ...intent, message: { content: 'first words', display: 'first words' } });
   await cards(page, 'answerStart', { ok: true });
   await expect(messageIn(page, 0)).toHaveText('');
-  await expect(control(page, 0)).toHaveAttribute('title', 'Your first message is with the setup above');
+  await expect(control(page, 0)).toHaveAccessibleDescription('Your first message is with the setup above');
   await expect(control(page, 0)).toBeDisabled();
   await cards(page, 'intent', id, { ...intent, message: null });
   await messageIn(page, 0).click();
@@ -878,7 +878,7 @@ test('U4a, Send now: on a next-step row it writes the engine’s send-now reques
   await expect(row).toContainText(message);
   const sendNow = row.getByRole('button', { name: 'Send now' });
   await expect(sendNow, 'this build’s engine host serves the session (decision 30)').toBeEnabled();
-  await expect(sendNow).toHaveAttribute('title', 'Sends this now; what the agent is running keeps running');
+  await expect(sendNow).toHaveAccessibleDescription('Sends this now; what the agent is running keeps running');
   await clickRevealed(row, sendNow);
 
   // decision 3: the request as the probe wrote it, naming the row's message; nothing held, nothing paused
@@ -936,7 +936,7 @@ test('U4b, Send now: on an after-the-turn row while a turn runs it goes at the n
   expect((await outFrames(page, id)).some((f) => f.type === 'user' && f.message?.content === later), 'kept for after the turn, not written').toBe(false);
   const sendNow = after.getByRole('button', { name: 'Send now' });
   await expect(sendNow).toBeEnabled();
-  await expect(sendNow, 'the message goes with the one waiting at the next step').toHaveAttribute('title', 'Sends the 2 waiting messages now; what the agent is running keeps running');
+  await expect(sendNow, 'the message goes with the one waiting at the next step').toHaveAccessibleDescription('Sends the 2 waiting messages now; what the agent is running keeps running');
   await clickRevealed(after, sendNow);
 
   // the promote at `next` (40), then the request naming the promoted message (41); no frame at `now` for it, nothing

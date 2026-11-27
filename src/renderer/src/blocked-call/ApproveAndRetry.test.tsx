@@ -47,6 +47,7 @@ import { renderRow } from '../transcript/view/rows/test-support';
 import { Transcript } from '../transcript/view/Transcript';
 import { resetGrantsOut, SETTLE_MS, terminalStateOf, useGrantsOut, type TerminalState } from './grants';
 import { registerBlockedCalls } from './index';
+import { accessibleDescription } from '../test-support/accessible-text';
 
 const MARKER = 'curl -s -o marker-1.txt "https://example.com/?maws-probe-marker-1"';
 const UUID = '11111111-1111-4111-8111-111111111111' as MessageUuid;
@@ -504,11 +505,11 @@ describe('while the grant waits, during a turn (Design 5; Acceptance 11; GRANT_D
     act(() => queueOf(remote, { steers: [{ messageUuid: G1, content: GRANT, createdAt: T0 }] }));
     render(<QueueList appSessionId={remote} busy queue={useQueueStore.getState().bySession.get(remote)!} />);
     const del = within(stackRow()).getByRole('button', { name: 'Delete' }) as HTMLButtonElement;
-    expect(del.disabled).toBe(true);
+    expect(del.getAttribute('aria-disabled'), 'greyed, keeping Tab (ticket 815)').toBe('true');
     // the stack's words for its Delete (U4b: Edit, ↑ and Delete pass their own labels to the refusal)
     expect(remoteUnavailableAsOf('delete', remote, 'session.steer.cancel')).toContain('Update MAWS on mini');
-    expect(del.getAttribute('title')).toBe(remoteUnavailableAsOf('delete', remote, 'session.steer.cancel'));
-    expect((within(stackRow()).getByRole('button', { name: 'Send now' }) as HTMLButtonElement).disabled, 'no Send now from a machine that lists no rl2.send-now').toBe(true);
+    expect(accessibleDescription(del)).toBe(remoteUnavailableAsOf('delete', remote, 'session.steer.cancel'));
+    expect(within(stackRow()).getByRole('button', { name: 'Send now' }).getAttribute('aria-disabled'), 'no Send now from a machine that lists no rl2.send-now').toBe('true');
     await act(() => vi.advanceTimersByTimeAsync(SETTLE_MS * 3));
     expect(useGrantsOut.getState().out.size, 'the grant stays out').toBe(1);
     expect(row.shut()).toBe(true);
@@ -537,9 +538,9 @@ describe('while the grant waits, during a turn (Design 5; Acceptance 11; GRANT_D
     const sendNow = within(stackRow()).getByRole('button', { name: 'Send now' }) as HTMLButtonElement;
     const del = within(stackRow()).getByRole('button', { name: 'Delete' }) as HTMLButtonElement;
     // offered: open, its title the stack's own words for Send now during a turn, no refusal's
-    expect([sendNow.disabled, sendNow.getAttribute('title')], 'Send now offered').toEqual([false, STACK_WORDS.sendNowWhileRunning]);
-    expect(del.disabled, 'Delete offered').toBe(false);
-    expect(del.getAttribute('title') ?? '', 'no refusal on Delete').not.toContain('Update MAWS');
+    expect([sendNow.disabled, sendNow.getAttribute('aria-disabled'), accessibleDescription(sendNow)], 'Send now offered').toEqual([false, null, STACK_WORDS.sendNowWhileRunning]);
+    expect([del.disabled, del.getAttribute('aria-disabled')], 'Delete offered').toEqual([false, null]);
+    expect(accessibleDescription(del), 'no refusal on Delete').not.toContain('Update MAWS');
     fireEvent.click(sendNow);
     await flush();
     expect(fake.invoked('session.steer.sendNow')).toEqual([{ appSessionId: 'app-r', messageUuid: G1 }]);

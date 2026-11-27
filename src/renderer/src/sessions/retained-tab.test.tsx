@@ -21,6 +21,7 @@ import { closeDialog, useDialogs } from './dialogs';
 import { beforeCloseUnstarted } from './setup-actions';
 import { useSetup } from './store';
 import { useSetupIntent } from './useSetupIntent';
+import { accessibleDescription } from '../test-support/accessible-text';
 
 // P5 O6 M2: the page holds the intent's id as an address; the fake `window.maws` (main) answers with the bare `ID`
 const A = at(ID);
@@ -62,7 +63,7 @@ describe("a failed setup's retained tab", () => {
     );
     // New chat: the intent's project row (an intent with no project runs in its directory), not the live location chip
     const chip = await screen.findByRole('button', { name: 'Project No project' });
-    expect(chip.title).toBe(REPO); // the word cut (C65): the chosen folder
+    expect(accessibleDescription(chip)).toBe(REPO); // the word cut (C65): the chosen folder, its tip and description (ticket 815)
     expect(screen.queryByRole('button', { name: `Location ${REPO}` })).toBeNull();
     const editor = screen.getByRole('textbox', { name: 'Message', hidden: true }) as HTMLElement & { editor: { commands: { insertContent(text: string): boolean } } };
     act(() => void editor.editor.commands.insertContent('typed after the failure'));

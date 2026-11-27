@@ -13,6 +13,7 @@ import { ContextPopoverBody } from '../../statusline/ContextPopover';
 import { tokens } from '../../statusline/format';
 import { contextOfUsage, useLaneAUsage } from '../../stores/lane-a'; // P5 O9 M5
 import { useSessions } from '../../stores/sessions';
+import { Tip } from '../../ui/tip';
 import { CHIP, focusPopoverItself } from './chip-style';
 import { useOpenWhileShown } from './draft-shown';
 
@@ -51,23 +52,26 @@ function Ring({ record }: { record: SessionRecord }) {
   const label = observed && !shown ? `${ring.label} · ${FRESHNESS.lastReading(observed.at)}` : ring.label;
   return (
     <Popover.Root open={open} onOpenChange={setOpen}>
-      <Popover.Trigger aria-label={label} title={label} data-context-ring={ring.percent ?? ''} className={`${CHIP} size-7 justify-center`}>
-        <svg aria-hidden viewBox="0 0 16 16" className="size-4 -rotate-90">
-          <circle cx="8" cy="8" r={R} fill="none" className="stroke-border-strong" strokeWidth="2" />
-          {ring.percent !== null && ring.percent > 0 && (
-            <circle
-              cx="8"
-              cy="8"
-              r={R}
-              fill="none"
-              className={ring.near ? 'stroke-warning' : 'stroke-fg-muted'}
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeDasharray={`${(ring.percent / 100) * CIRCUMFERENCE} ${CIRCUMFERENCE}`}
-            />
-          )}
-        </svg>
-      </Popover.Trigger>
+      {/* board ticket 815: the ring's words are its name and its tooltip, which keyboard focus opens */}
+      <Tip content={label}>
+        <Popover.Trigger aria-label={label} data-context-ring={ring.percent ?? ''} className={`${CHIP} size-7 justify-center`}>
+          <svg aria-hidden viewBox="0 0 16 16" className="size-4 -rotate-90">
+            <circle cx="8" cy="8" r={R} fill="none" className="stroke-border-strong" strokeWidth="2" />
+            {ring.percent !== null && ring.percent > 0 && (
+              <circle
+                cx="8"
+                cy="8"
+                r={R}
+                fill="none"
+                className={ring.near ? 'stroke-warning' : 'stroke-fg-muted'}
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeDasharray={`${(ring.percent / 100) * CIRCUMFERENCE} ${CIRCUMFERENCE}`}
+              />
+            )}
+          </svg>
+        </Popover.Trigger>
+      </Tip>
       <Popover.Portal>
         <Popover.Content aria-label="Context window" side="top" align="end" sideOffset={6} collisionPadding={8} onOpenAutoFocus={focusPopoverItself} className={CONTENT}>
           <ContextPopoverBody record={record} close={() => setOpen(false)} />

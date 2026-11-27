@@ -535,7 +535,8 @@ test('bash, memory, paste, history recall, the palette, the status line and Add 
       await page.keyboard.press('ArrowUp');
       const chipAfter = pane.locator('[contenteditable="true"] [data-pasted]');
       await expect(chipAfter).toHaveAttribute('data-pasted', 'text');
-      expect(await chipAfter.getAttribute('title')).toContain('live paste line 1\nlive paste line 2');
+      await chipAfter.getByRole('button').focus(); // its text's start is its tooltip, which focus opens (ticket 815)
+      expect(await page.getByRole('tooltip').textContent()).toContain('live paste line 1\nlive paste line 2');
     });
 
     await test.step('ArrowUp recalls this session’s prompts, then the terminal session’s', async () => {
@@ -669,7 +670,7 @@ test('the mode chip after switching the model to Haiku and requesting auto', asy
       answers: answers.map((a) => a.frame.response),
       status: { model: (await statusOf(page, h.id)).model, permissionMode: (await statusOf(page, h.id)).permissionMode },
       chip: await chip.getAttribute('aria-label'),
-      chipTitle: await chip.getAttribute('title'),
+      chipDescription: await chip.evaluate((el) => (el.getAttribute('aria-describedby') ?? '').split(' ').map((id) => document.getElementById(id)?.textContent ?? '').join(' ')), // its tooltip's words (ticket 815)
       line: await pane.getByRole('toolbar', { name: 'Composer tools' }).innerText(), // W2: no status line
       alerts: await page.locator('[role="alert"]').allInnerTexts(),
     });

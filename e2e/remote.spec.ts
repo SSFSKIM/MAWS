@@ -2740,7 +2740,7 @@ async function newChatInNoProject(page: Page): Promise<void> {
 // choice of its own whatever it holds; the chip then names it (`chooseMachine`'s checks).
 async function chooseMachineFirst(page: Page, name: string): Promise<void> {
   const trigger = page.getByRole('button', { name: 'Machine This Mac', exact: true });
-  await quoting(expect(trigger, 'the machine chip, with no project chosen').toBeEnabled({ timeout: 30_000 }), async () => `the chip's title: ${(await trigger.getAttribute('title', { timeout: 1_000 }).catch(() => null)) ?? 'no chip'}\n${mainSaid(page)}`);
+  await quoting(expect(trigger, 'the machine chip, with no project chosen').toBeEnabled({ timeout: 30_000 }), async () => `the chip's tooltip: ${(await trigger.evaluate((el) => (el.getAttribute('aria-describedby') ?? '').split(' ').map((id) => document.getElementById(id)?.textContent ?? '').join(' '), undefined, { timeout: 1_000 }).catch(() => null)) ?? 'no chip'}\n${mainSaid(page)}`);
   await trigger.click();
   const menu = page.getByRole('dialog', { name: 'Choose a machine' });
   await quoting(menu.getByRole('menuitemradio', { name, exact: true }).click({ timeout: 30_000 }), async () => `the menu: ${await menu.innerText({ timeout: 1_000 }).catch(() => 'gone')}\n${mainSaid(page)}`);

@@ -9,6 +9,7 @@ import { NodeViewWrapper, type ReactNodeViewProps } from '@tiptap/react';
 import { Popover } from 'radix-ui';
 import { useState } from 'react';
 import { NOTE, POPOVER } from '../../frame/chip-style';
+import { Tip } from '../../../ui/tip';
 import { plainTextSlice } from '../clipboard';
 import type { PastedAttrs } from '../doc';
 
@@ -38,18 +39,22 @@ export function PastedView({ node, selected, decorations, editor, getPos }: Reac
     view.focus();
   };
   return (
-    <NodeViewWrapper as="span" contentEditable={false} data-pasted={unavailable ? 'unavailable' : 'text'} title={unavailable ? UNAVAILABLE_TITLE : text.length > 400 ? `${text.slice(0, 400)}…` : text} className="mx-px inline-flex max-w-full align-baseline">
+    <NodeViewWrapper as="span" contentEditable={false} data-pasted={unavailable ? 'unavailable' : 'text'} className="mx-px inline-flex max-w-full align-baseline">
       <Popover.Root open={open} onOpenChange={setOpen}>
-        <Popover.Trigger asChild>
-          <button
-            type="button"
-            className={`inline-flex max-w-full min-w-0 items-center rounded-sm border px-1 text-ui-sm ${unavailable ? 'border-dashed border-border-strong text-fg-faint' : 'border-border bg-bg-hover text-fg-muted'} ${selected || open ? 'outline outline-1 outline-accent' : ''}`}
-          >
-            {/* UX wave U10b (L6): no wider than its line; a long name is cut with an ellipsis, what follows it stays whole */}
-            <span className="min-w-0 truncate">{name}</span>
-            <span className="shrink-0 whitespace-pre">{unavailable ? ' · unavailable' : ` +${lines} lines`}</span>
-          </button>
-        </Popover.Trigger>
+        {/* board ticket 815: the text's start, or why there is none, is the chip's tooltip, which keyboard focus opens too;
+            no description of its own, so nothing is added to the chip's text at rest */}
+        <Tip content={<span className="whitespace-pre-line">{unavailable ? UNAVAILABLE_TITLE : text.length > 400 ? `${text.slice(0, 400)}…` : text}</span>}>
+          <Popover.Trigger asChild>
+            <button
+              type="button"
+              className={`inline-flex max-w-full min-w-0 items-center rounded-sm border px-1 text-ui-sm ${unavailable ? 'border-dashed border-border-strong text-fg-faint' : 'border-border bg-bg-hover text-fg-muted'} ${selected || open ? 'outline outline-1 outline-accent' : ''}`}
+            >
+              {/* UX wave U10b (L6): no wider than its line; a long name is cut with an ellipsis, what follows it stays whole */}
+              <span className="min-w-0 truncate">{name}</span>
+              <span className="shrink-0 whitespace-pre">{unavailable ? ' · unavailable' : ` +${lines} lines`}</span>
+            </button>
+          </Popover.Trigger>
+        </Tip>
         <Popover.Portal>
           {/* the composer's popup: a key in it is the composer's, never a pane's (C5's sink rule) */}
           <Popover.Content

@@ -18,9 +18,15 @@ import { useSessions } from '../stores/sessions';
 import { Backdrop } from '../sessions/scrim'; // board 523 (U11a): the one scrim
 import type { UserRow } from './edit-prefill';
 import { INLINE_EDIT_LINE } from './inline-edit-copy';
+import { Tip, UNAVAILABLE_LOOK, unavailableClickProps } from '../ui/tip';
 import { cancelInlineEdit, cancelRewind, confirmRewind, forkInlineEdit, keepEditing, resubmitProvider, rewindAgain, sendInlineEdit } from './resubmit-seam';
 
 const BUTTON = 'rounded-sm px-2 py-0.5 text-ui-sm text-fg-muted outline-accent hover:bg-bg-hover hover:text-fg focus-visible:outline-2 disabled:text-fg-faint disabled:hover:bg-transparent';
+// The tooltips of the edit's buttons, which keyboard focus opens (board ticket 815)
+const FORK_TIP = 'Send this in a forked session; this one stays as it is';
+const SEND_TIP = { edit: 'Rewinds this session to here and sends · ⌘Enter', blocked: 'Sends it as a new message · ⌘Enter' } as const;
+const LEAVE = 'Leave the edit';
+const LEAVE_HELP = 'your edited text goes into the composer';
 const PRIMARY = 'rounded-sm bg-accent px-2.5 py-0.5 text-ui-sm text-bg outline-accent hover:opacity-90 focus-visible:outline-2 disabled:bg-bg-active disabled:text-fg-faint';
 
 export const BUSY_REASON = 'Wait for the turn to end, or stop it first';
@@ -78,6 +84,7 @@ function InlineEditor({ appSessionId, edit, client }: { appSessionId: AppSession
   // P2-A end
   const empty = edit.text.trim() === '' && edit.images.length === 0;
   const fork = edit.kind === 'edit' && resubmitProvider() !== null;
+  const sendTip = SEND_TIP[edit.kind];
   const forkUnavailable = useForkUnavailable(appSessionId); // the UX wave, U9: a fork on another machine that can't work there
   const line = lineCopy(resubmit, !ready);
   const send = () => !locked && why === null && !empty && void sendInlineEdit(client, appSessionId);
@@ -137,13 +144,18 @@ function InlineEditor({ appSessionId, edit, client }: { appSessionId: AppSession
               Cancel
             </button>
             {fork && (
-              <button type="button" className={BUTTON} title={forkUnavailable ?? 'Send this in a forked session; this one stays as it is'} disabled={locked || status?.process !== 'ready' || empty || forkUnavailable !== null} onClick={() => void forkInlineEdit(client, appSessionId)}>
-                Fork
-              </button>
+              // board ticket 815: greyed by another machine, it keeps Tab and says why; its helper sentence otherwise
+              <Tip content={forkUnavailable ?? FORK_TIP} description={forkUnavailable ?? FORK_TIP} {...unavailableClickProps(forkUnavailable)}>
+                <button type="button" className={`${BUTTON} ${UNAVAILABLE_LOOK}`} disabled={forkUnavailable === null && (locked || status?.process !== 'ready' || empty)} onClick={() => void forkInlineEdit(client, appSessionId)}>
+                  Fork
+                </button>
+              </Tip>
             )}
-            <button type="button" className={PRIMARY} title={edit.kind === 'edit' ? 'Rewinds this session to here and sends (⌘Enter)' : 'Sends it as a new message (⌘Enter)'} disabled={locked || why !== null || empty} onClick={send}>
-              Send
-            </button>
+            <Tip content={sendTip} description={sendTip}>
+              <button type="button" className={PRIMARY} disabled={locked || why !== null || empty} onClick={send}>
+                Send
+              </button>
+            </Tip>
           </>
         )}
       </div>
@@ -188,9 +200,11 @@ export function ResubmitLine({ resubmit, onSend, onLeave }: { resubmit: Resubmit
       <button type="button" className={BUTTON} disabled={resubmit.sending} onClick={onSend}>
         {resubmit.sendFailed ? 'Retry' : 'Send'}
       </button>
-      <button type="button" aria-label="Leave the edit" title="Leave the edit · your edited text goes into the composer" className={BUTTON} disabled={resubmit.sending} onClick={onLeave}>
-        ×
-      </button>
+      <Tip content={`${LEAVE} · ${LEAVE_HELP}`} description={LEAVE_HELP}>
+        <button type="button" aria-label={LEAVE} className={BUTTON} disabled={resubmit.sending} onClick={onLeave}>
+          ×
+        </button>
+      </Tip>
     </div>
   );
 }

@@ -27,10 +27,14 @@ import { rowsOf } from '../../transcript/model/derive';
 import { applyEvents, createState } from '../../transcript/model/reduce';
 import { builder } from '../../transcript/model/test-events';
 import { hostStatus, supervisorStatus } from '../../test-support/host-status';
+import { accessibleDescription } from '../../test-support/accessible-text';
 import { HOST_UPDATING } from './host-wire';
 import { PAUSED_COPY, QueueList } from './QueueList';
 import { newestToTake, STACK_WORDS, stackRows } from './stack';
 import { resetTakeBack, TAKE_BACK_WORDS, takeBack } from './take-back';
+
+// A control greyed for a reason keeps Tab (ticket 815): drawn aria-disabled, or disabled while its act is under way
+const greyed = (control: HTMLElement): boolean => (control as HTMLButtonElement).disabled || control.getAttribute('aria-disabled') === 'true';
 
 const APP = 'app-1' as AppSessionId;
 const U1 = '11111111-1111-4111-8111-111111111111' as MessageUuid;
@@ -94,9 +98,9 @@ describe('the stack’s rows and their marks', () => {
     const { client } = bridge();
     const view = (busy: boolean) => <QueueList appSessionId={APP} busy={busy} queue={queue([entry('q-1')], { paused: !busy, pauseReason: busy ? null : 'interrupt' })} client={client} />;
     const { rerender } = render(view(true));
-    expect(screen.getByRole('button', { name: 'Send now' }).getAttribute('title')).toBe('Sends this now; what the agent is running keeps running');
+    expect(accessibleDescription(screen.getByRole('button', { name: 'Send now' }))).toBe('Sends this now; what the agent is running keeps running');
     rerender(view(false));
-    expect(screen.getByRole('button', { name: 'Send now' }).getAttribute('title')).toBe('Sends this now');
+    expect(accessibleDescription(screen.getByRole('button', { name: 'Send now' }))).toBe('Sends this now');
   });
 
   // UX wave U4a (l3-input-01): a next-step row's Send now is the engine's send-now, never an interrupt
@@ -122,7 +126,7 @@ describe('the stack’s rows and their marks', () => {
     const { client, invoke } = bridge({ 'session.steer.sendNow': { ok: true, value: { outcome: 'delivering' } } });
     const view = (steers: PendingSteer[]) => <QueueList appSessionId={APP} busy queue={queue([], { steers })} client={client} />;
     const { rerender } = render(view([steer(U1, 'first'), steer(U2, 'second', 1)]));
-    for (const row of rows()) expect(within(row).getByRole('button', { name: 'Send now' }).getAttribute('title')).toBe('Sends the 2 waiting messages now; what the agent is running keeps running');
+    for (const row of rows()) expect(accessibleDescription(within(row).getByRole('button', { name: 'Send now' }))).toBe('Sends the 2 waiting messages now; what the agent is running keeps running');
     await userEvent.setup().click(within(rows()[1]).getByRole('button', { name: 'Send now' }));
     expect(invoke.mock.calls.filter(([name]) => name === 'session.steer.sendNow')).toEqual([['session.steer.sendNow', { appSessionId: APP, messageUuid: U2 }]]);
     await waitFor(() => expect(rows().map(mark)).toEqual(['Sending…', 'Sending…']));
@@ -507,7 +511,7 @@ describe('the stack’s refused controls', () => {
     const editItem = async (row: HTMLElement) => {
       await userEvent.setup().click(within(row).getByRole('button', { name: 'More' }));
       const item = await screen.findByRole('menuitem', { name: 'Edit' });
-      const state = [item.getAttribute('aria-disabled') === 'true', item.getAttribute('title')];
+      const state = [item.getAttribute('aria-disabled') === 'true', accessibleDescription(item) || null];
       await userEvent.setup().keyboard('{Escape}');
       return state;
     };
@@ -515,19 +519,19 @@ describe('the stack’s refused controls', () => {
     machineLists(['rl2.executor.machine']); // build F's
     let view = mount();
     let [next, after] = rows();
-    expect([button(next, 'Send now').disabled, button(next, 'Send now').getAttribute('title')]).toEqual([true, 'Can’t send now on mini yet. Update MAWS on mini and try again.']);
-    expect([button(next, 'Delete').disabled, button(next, 'Delete').getAttribute('title')]).toEqual([true, 'Can’t delete on mini yet. Update MAWS on mini and try again.']);
+    expect([greyed(button(next, 'Send now')), accessibleDescription(button(next, 'Send now'))]).toEqual([true, 'Can’t send now on mini yet. Update MAWS on mini and try again.']);
+    expect([greyed(button(next, 'Delete')), accessibleDescription(button(next, 'Delete'))]).toEqual([true, 'Can’t delete on mini yet. Update MAWS on mini and try again.']);
     expect(await editItem(next)).toEqual([true, 'Can’t edit on mini yet. Update MAWS on mini and try again.']);
-    expect(button(after, 'Send now').disabled).toBe(false);
-    expect(button(after, 'Delete').disabled).toBe(false);
+    expect(greyed(button(after, 'Send now'))).toBe(false);
+    expect(greyed(button(after, 'Delete'))).toBe(false);
     expect(await editItem(after)).toEqual([true, TAKE_BACK_WORDS.needsNewer('mini')]);
     view.unmount();
 
     machineLists(['rl2.executor.machine', SESSION_ACTS_CAPABILITY]); // build G's
     view = mount();
     [next, after] = rows();
-    expect([button(next, 'Send now').disabled, button(next, 'Send now').getAttribute('title')]).toEqual([true, 'Can’t send now on mini yet. Update MAWS on mini and try again.']);
-    expect(button(next, 'Delete').disabled).toBe(false);
+    expect([greyed(button(next, 'Send now')), accessibleDescription(button(next, 'Send now'))]).toEqual([true, 'Can’t send now on mini yet. Update MAWS on mini and try again.']);
+    expect(greyed(button(next, 'Delete'))).toBe(false);
     expect((await editItem(next))[0]).toBe(false);
     expect((await editItem(after))[0]).toBe(false);
     view.unmount();
@@ -535,8 +539,8 @@ describe('the stack’s refused controls', () => {
     machineLists(['rl2.executor.machine', SESSION_ACTS_CAPABILITY, SEND_NOW_CAPABILITY]); // this build's
     mount();
     [next] = rows();
-    expect(button(next, 'Send now').disabled).toBe(false);
-    expect(button(next, 'Delete').disabled).toBe(false);
+    expect(greyed(button(next, 'Send now'))).toBe(false);
+    expect(greyed(button(next, 'Delete'))).toBe(false);
     expect(invoke).not.toHaveBeenCalled();
   });
 
@@ -549,8 +553,8 @@ describe('the stack’s refused controls', () => {
     const { client } = bridge();
     render(<QueueList appSessionId={R} busy queue={queue([], { steers: [steer(U1, 'remote steer')] })} client={client} />);
     const [next] = rows();
-    expect(within(next).getByRole('button', { name: 'Send now' }).getAttribute('title')).toBe('Send now is unavailable while mini is offline.');
-    expect(within(next).getByRole('button', { name: 'Delete' }).getAttribute('title')).toBe('Delete is unavailable while mini is offline.');
+    expect(accessibleDescription(within(next).getByRole('button', { name: 'Send now' }))).toBe('Send now is unavailable while mini is offline.');
+    expect(accessibleDescription(within(next).getByRole('button', { name: 'Delete' }))).toBe('Delete is unavailable while mini is offline.');
   });
 
   // the panel's finding 7: a next-step row can outlive its turn (the queue, the status and the lifecycles arrive apart),
@@ -564,14 +568,14 @@ describe('the stack’s refused controls', () => {
     const { client, invoke } = bridge();
     const { unmount } = render(<QueueList appSessionId={R} busy={false} queue={queue([], { steers: [steer(U1, 'outlived its turn')] })} client={client} />);
     const remote = within(rows()[0]).getByRole('button', { name: 'Send now' }) as HTMLButtonElement;
-    expect(remote.disabled).toBe(true);
-    expect(remote.getAttribute('title')).toBe('Can’t send now on mini yet. Update MAWS on mini and try again.');
+    expect(greyed(remote), 'greyed, keeping Tab (ticket 815)').toBe(true);
+    expect(accessibleDescription(remote)).toBe('Can’t send now on mini yet. Update MAWS on mini and try again.');
     unmount();
     useHosts.setState({ supervisor: hostStatus({ supervisor: supervisorStatus({ wire: 'w-older' }), matches: 'wire' }) });
     render(<QueueList appSessionId={APP} busy={false} queue={queue([], { steers: [steer(U1, 'outlived its turn')] })} client={client} />);
     const here = within(rows()[0]).getByRole('button', { name: 'Send now' }) as HTMLButtonElement;
-    expect(here.disabled).toBe(true);
-    expect(here.getAttribute('title')).toBe(HOST_UPDATING);
+    expect(greyed(here), 'greyed, keeping Tab (ticket 815)').toBe(true);
+    expect(accessibleDescription(here)).toBe(HOST_UPDATING);
     expect(invoke).not.toHaveBeenCalled();
   });
 
@@ -580,12 +584,12 @@ describe('the stack’s refused controls', () => {
     const { client } = bridge();
     render(<QueueList appSessionId={APP} busy queue={queue([entry('q-1')], { steers: [steer(U1, 'waits')] })} client={client} />);
     const send = () => within(rows()[0]).getByRole('button', { name: 'Send now' }) as HTMLButtonElement;
-    expect(send().disabled).toBe(true);
-    expect(send().getAttribute('title')).toBe(HOST_UPDATING);
-    expect((within(rows()[0]).getByRole('button', { name: 'Delete' }) as HTMLButtonElement).disabled).toBe(false);
-    expect((within(rows()[1]).getByRole('button', { name: 'Send now' }) as HTMLButtonElement).disabled).toBe(false);
+    expect(greyed(send())).toBe(true);
+    expect(accessibleDescription(send())).toBe(HOST_UPDATING);
+    expect(greyed(within(rows()[0]).getByRole('button', { name: 'Delete' }))).toBe(false);
+    expect(greyed(within(rows()[1]).getByRole('button', { name: 'Send now' }))).toBe(false);
     act(() => useHosts.setState({ supervisor: hostStatus() }));
-    expect(send().disabled).toBe(false);
+    expect(greyed(send())).toBe(false);
   });
 
   // decision 13, "Where the store is of an earlier build": Edit is refused for that machine's sessions; Delete never is
@@ -597,11 +601,11 @@ describe('the stack’s refused controls', () => {
     render(<QueueList appSessionId={APP} busy queue={queue([entry('q-1')])} client={client} />);
     expect(notice()).toBe(TAKE_BACK_WORDS.needsServices);
     const del = within(rows()[0]).getByRole('button', { name: 'Delete' }) as HTMLButtonElement;
-    expect(del.disabled).toBe(false);
+    expect(greyed(del)).toBe(false);
     await userEvent.setup().click(within(rows()[0]).getByRole('button', { name: 'More' }));
     const edit = await screen.findByRole('menuitem', { name: 'Edit' });
     expect(edit.getAttribute('aria-disabled')).toBe('true');
-    expect(edit.getAttribute('title')).toBe(TAKE_BACK_WORDS.needsServices);
+    expect(accessibleDescription(edit)).toBe(TAKE_BACK_WORDS.needsServices);
     resetTakeBack();
   });
 });
@@ -738,8 +742,8 @@ describe('Send now on an after-the-turn row while a turn runs', () => {
     const { client } = bridge();
     const view = (steers: PendingSteer[]) => <QueueList appSessionId={APP} busy queue={queue([entry('q-1')], { steers })} client={client} />;
     const { rerender } = render(view([steer(U1, 'first')]));
-    expect(within(rows()[1]).getByRole('button', { name: 'Send now' }).getAttribute('title')).toBe(STACK_WORDS.sendNowAll(2));
+    expect(accessibleDescription(within(rows()[1]).getByRole('button', { name: 'Send now' }))).toBe(STACK_WORDS.sendNowAll(2));
     rerender(view([]));
-    expect(within(rows()[0]).getByRole('button', { name: 'Send now' }).getAttribute('title')).toBe(STACK_WORDS.sendNowWhileRunning);
+    expect(accessibleDescription(within(rows()[0]).getByRole('button', { name: 'Send now' }))).toBe(STACK_WORDS.sendNowWhileRunning);
   });
 });

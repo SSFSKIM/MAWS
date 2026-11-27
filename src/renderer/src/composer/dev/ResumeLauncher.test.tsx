@@ -9,6 +9,7 @@ import { fakeClient, type FakeClient } from '../../../../../test/support/fake-cl
 import { at } from '../../../../../test/support/machine';
 import { useSessions } from '../../stores/sessions';
 import { resetShellStores } from '../../test-support/shell-stores';
+import { accessibleDescription } from '../../test-support/accessible-text';
 import { parseExtraSettings, resumeSpec, type Resumable } from './resume-spec';
 import { ResumeLauncher } from './ResumeLauncher';
 
@@ -66,13 +67,15 @@ describe('the dev-only resume launcher', () => {
     await waitFor(() => expect(within(list).getByRole('status').textContent).toBe('launching'));
   });
 
-  it('disables Resume live with the parse error while extraSettings is not a JSON object', async () => {
+  it('greys Resume live with the parse error while extraSettings is not a JSON object', async () => {
     render(<ResumeLauncher />);
     const user = userEvent.setup();
     await user.click(screen.getByRole('textbox', { name: 'extraSettings' }));
     await user.paste('[1, 2]');
     const button = screen.getByRole('button', { name: 'Resume live' });
-    expect((button as HTMLButtonElement).disabled).toBe(true);
-    expect(button.title).toBe('extraSettings must be a JSON object');
+    expect(button.getAttribute('aria-disabled'), 'greyed, keeping Tab (ticket 815)').toBe('true');
+    expect(accessibleDescription(button)).toBe('extraSettings must be a JSON object');
+    await user.click(button);
+    expect(fake.invoked('session.launch')).toEqual([]);
   });
 });

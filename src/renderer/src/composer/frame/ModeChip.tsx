@@ -8,6 +8,7 @@
 // as the draft hides (a docked card) and with its composer.
 import { PERMISSION_MODE_LABELS } from '@shared/sessions/permission-mode-labels';
 import { Popover } from 'radix-ui';
+import { Tip } from '../../ui/tip';
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { AppSessionId } from '@shared/graph/ids';
 import { ModeMenu, modeReported, MODE_REFUSAL_WORDS, type ModeBinding } from '../../statusline';
@@ -52,19 +53,23 @@ export function ModeChip({ appSessionId, binding, onOpen }: { appSessionId: AppS
   const refusal = binding.refusal ? MODE_REFUSAL_WORDS[binding.refusal] : null;
   const mode = binding.unreported ? null : PERMISSION_MODE_LABELS[binding.value ?? 'auto'];
   const reported = binding.reportedAt === undefined ? null : modeReported(binding.reportedAt, now);
-  const why = [reported, binding.disabled].filter((part) => part !== null).join(' · ');
+  const why = [reported, binding.disabled].filter((part) => part !== null).join(' · ') || null;
   return (
     <Popover.Root open={open} onOpenChange={setOpen}>
-      <Popover.Trigger aria-label={mode === null ? 'Permission mode not reported' : `Permission mode ${mode}${refusal ? ` · ${refusal}` : ''}`} title={refusal ?? (why || 'Permission mode')} className={`${CHIP} shrink-0`}>
-        {refusal && (
-          <span aria-hidden className="text-warning">
-            ⚠
-          </span>
-        )}
-        {/* E3: whole and on one line in a narrow pane (the Side pane's thread): the location's label gives way first */}
-        <span className="truncate">{mode ?? 'Mode'}</span>
-        <span aria-hidden className="shrink-0 text-fg-faint">⌄</span>
-      </Popover.Trigger>
+      {/* board ticket 815: the refusal, else when the mode was reported and why it is changed elsewhere, is the chip's
+          tooltip, which keyboard focus opens; what the name does not say is its description */}
+      <Tip content={refusal ?? why} description={refusal ? null : why}>
+        <Popover.Trigger aria-label={mode === null ? 'Permission mode not reported' : `Permission mode ${mode}${refusal ? ` · ${refusal}` : ''}`} className={`${CHIP} shrink-0`}>
+          {refusal && (
+            <span aria-hidden className="text-warning">
+              ⚠
+            </span>
+          )}
+          {/* E3: whole and on one line in a narrow pane (the Side pane's thread): the location's label gives way first */}
+          <span className="truncate">{mode ?? 'Mode'}</span>
+          <span aria-hidden className="shrink-0 text-fg-faint">⌄</span>
+        </Popover.Trigger>
+      </Tip>
       <Popover.Portal>
         <Popover.Content aria-label="Permission mode" side="top" align="start" sideOffset={6} collisionPadding={8} onCloseAutoFocus={(event) => { if (keyboardTaken()) event.preventDefault(); }} className={`${POPOVER} w-72`}>
           <ModeMenu binding={binding} onDone={() => setOpen(false)} />
