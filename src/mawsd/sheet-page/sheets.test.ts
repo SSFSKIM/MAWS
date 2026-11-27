@@ -41,7 +41,7 @@ const service = (): SheetService => ({
     return sessions;
   },
   read: async (session) => (steps.push(`read ${session}`), null),
-  put: async () => ({ ok: true, results: [] }),
+  put: async () => (steps.push('put'), { ok: true, results: [] }),
   body: async () => ({ kind: 'gone' }),
   upload: async () => (steps.push('upload'), { ok: false, why: 'stand-in' }),
   onChange: () => () => {},
@@ -288,6 +288,49 @@ describe('a request for data (§N; T15)', () => {
     expect(answer.status).toBe(401);
     expect(steps).toEqual([]);
     expect(holds).toEqual([]);
+  });
+});
+
+describe('a write whose body finishes after the browser was unpaired (S3)', () => {
+  // The request's head, authorized at its headers, and a part of its body; the rest is sent after `mawsd sheet unpair`
+  async function begun(port: number, credential: string, path: string, type: string, length: number) {
+    const socket = createConnection({ host: '127.0.0.1', port });
+    const chunks: Buffer[] = [];
+    socket.on('data', (chunk) => void chunks.push(chunk));
+    socket.on('error', () => {});
+    await new Promise<void>((done) => socket.once('connect', () => done()));
+    const head = [`POST ${path} HTTP/1.1`, `Host: sheet.localhost:${port}`, `Origin: http://sheet.localhost:${port}`, `Authorization: Bearer ${credential}`, `Content-Type: ${type}`, `Content-Length: ${length}`, 'Connection: close'].join('\r\n');
+    socket.write(`${head}\r\n\r\n`);
+    const closed = new Promise<string>((done) => socket.once('close', () => done(Buffer.concat(chunks).toString('latin1'))));
+    return { socket, closed };
+  }
+
+  it('refuses a put with 401, and the door is not run', async () => {
+    const port = await listening();
+    const browser = await paired(port);
+    const body = JSON.stringify({ lines: [{ v: 1, kind: 'dismiss', question: 'q1', key: 'k1' }] });
+    const { socket, closed } = await begun(port, browser.credential, `/api/sheets/${A}/put`, 'application/json', Buffer.byteLength(body));
+    socket.write(body.slice(0, 10));
+    await until(() => holds.length === 1, 'the put admitted');
+    expect(await page.unpair(browser.id)).toMatchObject({ removed: 1, saved: true });
+    socket.write(body.slice(10));
+    expect((await closed).split('\r\n', 1)[0]).toBe('HTTP/1.1 401 Unauthorized');
+    expect(steps).not.toContain('put');
+    expect(unreleased()).toBe(0);
+  });
+
+  it('refuses an upload with 401, and nothing is uploaded', async () => {
+    const port = await listening();
+    const browser = await paired(port);
+    const png = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.alloc(64)]);
+    const { socket, closed } = await begun(port, browser.credential, `/api/sheets/${A}/uploads`, 'image/png', png.length);
+    socket.write(png.subarray(0, 8));
+    await until(() => holds.length === 1, 'the upload admitted');
+    expect(await page.unpair(browser.id)).toMatchObject({ removed: 1, saved: true });
+    socket.write(png.subarray(8));
+    expect((await closed).split('\r\n', 1)[0]).toBe('HTTP/1.1 401 Unauthorized');
+    expect(steps).not.toContain('upload');
+    expect(unreleased()).toBe(0);
   });
 });
 

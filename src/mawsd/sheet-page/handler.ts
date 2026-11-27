@@ -324,7 +324,7 @@ export async function createSheetPageHandler(deps: HandlerDeps): Promise<SheetPa
       // rule 1: everything that reads or changes a sheet requires a credential this server knows, and nothing of the
       // sheets is asked before it is checked
       if (pairing.check(credential!) === null) return refuse(res, refusal(401));
-      sheetRoutes(route, req, res).catch(failed);
+      sheetRoutes(route, req, res, () => pairing.check(credential!) !== null).catch(failed); // a write asks again before its mutation
     },
 
     upgrade(req, socket, head) {

@@ -33,13 +33,16 @@ export interface SheetRoutesDeps {
 
 export const isSheetRoute = (route: Route): route is SheetRoute => route.kind === 'read' || route.kind === 'body' || route.kind === 'put' || route.kind === 'upload';
 
-export function createSheetRoutes(deps: SheetRoutesDeps): (route: SheetRoute, req: IncomingMessage, res: ServerResponse) => Promise<void> {
+// `paired()` asks again whether the credential the request was admitted with is still a paired browser's: a write's body
+// can finish after `mawsd sheet unpair`, so a put or an upload checks it once more immediately before the mutation is
+// handed to the service, and is refused 401 when it no longer holds.
+export function createSheetRoutes(deps: SheetRoutesDeps): (route: SheetRoute, req: IncomingMessage, res: ServerResponse, paired: () => boolean) => Promise<void> {
   const { json, refuse } = deps;
 
   const bytes = (res: ServerResponse, type: string, body: Buffer) =>
     void res.writeHead(200, { ...STANDING_HEADERS(deps.port()), 'Content-Type': type, 'Cache-Control': 'no-store', 'Content-Length': String(body.length) }).end(body);
 
-  async function answer(route: SheetRoute, req: IncomingMessage, res: ServerResponse): Promise<void> {
+  async function answer(route: SheetRoute, req: IncomingMessage, res: ServerResponse, paired: () => boolean): Promise<void> {
     switch (route.kind) {
       case 'read': {
         const service = await deps.sheets.service();
@@ -67,6 +70,7 @@ export function createSheetRoutes(deps: SheetRoutesDeps): (route: SheetRoute, re
         if (!Array.isArray(lines)) return refuse(res, refusal(400));
         const stamped = lines.map((line: unknown) => (typeof line === 'object' && line !== null && !Array.isArray(line) ? { ...line, by: 'page' } : line)) as SheetLine[];
         const service = await deps.sheets.service();
+        if (!paired()) return refuse(res, refusal(401)); // unpaired while its body came
         return json(res, 200, await service.put(route.session, stamped));
       }
       case 'upload': {
@@ -76,15 +80,16 @@ export function createSheetRoutes(deps: SheetRoutesDeps): (route: SheetRoute, re
         if (read === 'aborted') return;
         if (read === 'too-large') return refuse(res, refusal(413));
         const service = await deps.sheets.service();
+        if (!paired()) return refuse(res, refusal(401));
         return json(res, 200, await service.upload(route.session, { mediaType: type.data, data: read.toString('base64') }));
       }
     }
   }
 
-  return async (route, req, res) => {
+  return async (route, req, res, paired) => {
     const release = deps.hold(`the sheet page: ${route.kind}`);
     try {
-      await answer(route, req, res);
+      await answer(route, req, res, paired);
     } catch (error) {
       if (!(error instanceof SheetsUnavailable)) throw error; // not the spine's: the handler's 500
       if (!res.headersSent) json(res, 503, { why: error.why });
