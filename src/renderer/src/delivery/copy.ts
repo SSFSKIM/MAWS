@@ -19,8 +19,6 @@ export const SEND_TO_COPY = {
   actionSent: (target: DeliveryTarget) => `Sent to ${SERVICE[target]}`,
   title: (title: string) => `Send “${title}”`,
   target: 'Send to',
-  direct: 'MAWS sends it itself: no session, no Claude turn.',
-  asPage: 'As a Notion page, its headings, lists and tables kept.',
   format: 'Format',
   where: 'Where',
   notionDefault: 'A private page in your workspace',
@@ -38,14 +36,17 @@ export const SEND_TO_COPY = {
   cancel: 'Cancel',
   checkAgain: 'Check again',
   open: (target: DeliveryTarget) => `Open in ${SERVICE[target]}`,
-  sent: (target: DeliveryTarget, name: string) => `Sent to ${SERVICE[target]} as “${name}”.`,
-  lastSent: (target: DeliveryTarget, ago: string) => `Last sent to ${SERVICE[target]} · ${ago}`,
-  sending: (target: DeliveryTarget) => `Exporting and sending to ${SERVICE[target]}…`,
-  checking: { notion: 'Looking for your Notion connector…', drive: 'Checking the gws command-line tool…' } satisfies Record<DeliveryTarget, string>,
+  // the word cut (T137 to T140): the chosen service is the sheet's, so its status lines leave it unsaid
+  sent: (name: string) => `Sent as “${name}”`,
+  lastSent: (ago: string) => `Sent ${ago}`,
+  sending: 'Sending…',
+  checking: 'Checking…',
   checkFailed: { notion: 'MAWS couldn’t look for your Notion connector.', drive: 'MAWS couldn’t check the gws command-line tool.' } satisfies Record<DeliveryTarget, string>, // main didn't answer
   // a send's failure that came after its sheet closed (main had refused the cancel), as a toast
   closedFailure: (title: string, target: DeliveryTarget, words: string) => `Sending “${title}” to ${SERVICE[target]}: ${words}`,
-  // Notion's connection
+  // Notion's connection. The word cut (T134): a ready connection reads "Connected", or Drive's Google account; the
+  // sentence that names its source waits on that word (its tooltip and description).
+  connected: 'Connected',
   notionReady: (source: NotionSource, connection: 'connected' | 'local' | 'open') =>
     connection === 'connected' ? `Connected through MAWS: “${source.server}” in ${scopeWords(source.scope)}.` : `Through MAWS’s own connection: “${source.server}” in ${scopeWords(source.scope)}.`,
   notionSignIn: (server: string) => `MAWS needs your go-ahead to reach “${server}” once. Connect opens Notion in your browser; MAWS keeps its own sign-in.`,

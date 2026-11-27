@@ -37,9 +37,9 @@ export function moveOriginOf(doc: Doc, boardId: string, elementId: string): Move
 const derivedId = (from: string, to: string, id: string): string => `m${hash4(`${from}\u0000${to}\u0000${id}`)}${hash4(`${id}\u0000${to}\u0000${from}`)}`;
 
 function usable(doc: Doc, board: string): void {
-  if (!Y.hasSlide(doc, board)) throw new BoardError(board, [`board ${board}: no such board`]);
-  if (Y.slideScalars(doc, board).held) throw new BoardError(board, [`board ${board}: its file does not load (held); fix it first`]);
-  if (isMissingSource(doc, board)) throw new BoardError(board, [`board ${board}: its file never arrived; publish it first`]);
+  if (!Y.hasSlide(doc, board)) throw new BoardError(board, [`board ${board}: no such board`], { kind: 'gone' });
+  if (Y.slideScalars(doc, board).held) throw new BoardError(board, [`board ${board}: its file does not load (held); fix it first`], { kind: 'held' });
+  if (isMissingSource(doc, board)) throw new BoardError(board, [`board ${board}: its file never arrived; publish it first`], { kind: 'missing' });
 }
 
 function findIR(children: ElementIR[], id: string): ElementIR | null {
@@ -66,13 +66,13 @@ export interface MoveResult {
  * children per host, or a row or cell standing alone).
  */
 export function moveElementToBoard(doc: Doc, fromBoard: string, toBoard: string, elementId: string, options: { at?: { left: number; top: number } } = {}, origin?: unknown): MoveResult {
-  if (fromBoard === toBoard) throw new BoardError(fromBoard, [`board ${fromBoard}: a move within one board is a re-parent, not a cross-board move`]);
+  if (fromBoard === toBoard) throw new BoardError(fromBoard, [`board ${fromBoard}: a move within one board is a re-parent, not a cross-board move`], { kind: 'other' });
   usable(doc, fromBoard);
   usable(doc, toBoard);
   const src = readFlat(doc, fromBoard, true);
   const eff = resolveParents(src);
   const root = src.find((e) => e.id === elementId);
-  if (!root) throw new BoardError(fromBoard, [`board ${fromBoard}: no element ${elementId}`]);
+  if (!root) throw new BoardError(fromBoard, [`board ${fromBoard}: no element ${elementId}`], { kind: 'other' });
   const moved: FlatElement[] = [root]; // each parent before its children
   for (let i = 0; i < moved.length; i++) for (const e of src) if (e !== root && eff.get(e.id) === moved[i]!.id) moved.push(e);
 
@@ -117,7 +117,7 @@ export function moveElementToBoard(doc: Doc, fromBoard: string, toBoard: string,
   });
   after.children.push(remap(findIR(readSlide(doc, fromBoard).children, elementId)!, true));
   const loaded = loadSlide(serializeSlide(after), { fileId: toBoard });
-  if (!loaded.ok) throw new BoardError(toBoard, [`board ${toBoard}: the move would leave it unloadable (${loaded.held.reasons.join('; ')})`]);
+  if (!loaded.ok) throw new BoardError(toBoard, [`board ${toBoard}: the move would leave it unloadable (${loaded.held.reasons.join('; ')})`], { kind: 'other' });
 
   const threads: string[] = [];
   transact(

@@ -27,6 +27,8 @@ import { GRANT_NEEDS, LEASE_NEEDS, REMOTE_SURFACE_WORDS, SERVER_NEEDS, useRemote
 import { NO_SESSION_CONTEXT, useArtifactSessionContext, type ArtifactContextOf, type ArtifactSessionContext } from '../../../../artifacts/session-context';
 import { Sheet } from '../../../../sessions/Sheet';
 import { PRIMARY, SECONDARY } from '../../../../sessions/ui';
+import { QuietSpinner } from '../../../../ui/spinner';
+import { RowNote, useRowNote } from '../../../../ui/row-note';
 import { useLayout } from '../../../../stores/layout';
 import { CONNECTORS_COPY as C, SERVERS_COPY as S } from './copy';
 import { sheetTools, type ConnectorsTab } from './tab';
@@ -203,9 +205,13 @@ function ServersSection({ tab }: { tab: ConnectorsTab }) {
         </div>
       ) : rows === null ? (
         <div className="flex flex-wrap items-baseline gap-2">
-          <p role="status" className="m-0 text-ui-sm text-fg-muted">
-            {failed ? S.readFailed : S.reading}
-          </p>
+          {failed ? (
+            <p role="status" className="m-0 text-ui-sm text-fg-muted">
+              {S.readFailed}
+            </p>
+          ) : (
+            <QuietSpinner label={S.reading} /> // the word cut (T595)
+          )}
           {refresh}
         </div>
       ) : (
@@ -273,7 +279,7 @@ function describe(tab: ConnectorsTab, row: ConnectorServerRow, unattributed: boo
       return { name: row.server, origin: S.origin(row.scope, row.path), status: S.connection(row, unattributed), actions };
     }
     case 'engineOnly':
-      return { name: row.server, origin: null, status: S.engineOnly(row.why), actions };
+      return { name: row.server, origin: null, status: S.engineOnly, actions };
     case 'saved':
       if (row.disconnecting !== 'pending') disconnect(row.connectionId, row.disconnecting === 'unconfirmed', row.server);
       return { name: row.server, origin: S.origin(row.scope, row.path), status: row.disconnecting === 'pending' ? S.disconnecting : row.disconnecting === 'unconfirmed' ? S.unconfirmed : S.savedRow, actions };
@@ -299,8 +305,12 @@ function ServerRow({ tab, row, unattributed }: { tab: ConnectorsTab; row: Connec
   const refusal = refused === null || refused.target !== target ? null : refused.why === null ? refused.words : refused.why === 'busy' && elsewhere !== null ? REMOTE_SURFACE_WORDS.busyOn(elsewhere) : S.refused(refused.why);
   const last = row.kind !== 'engineOnly' && row.last ? S.last(row.last) : null;
   const { name, origin, status, actions } = describe(tab, row, unattributed);
+  // A server only a session can use (the word cut, T600): "Session only" at rest, why in the row's note (rule 5: a
+  // helper sentence shows in its row), owned by that word, which takes the keyboard since the row has no action.
+  const note = useRowNote();
+  const why = row.kind === 'engineOnly' ? S.engineOnlyWhy(row.why) : null;
   return (
-    <li data-connector-server={name} data-kind={row.kind} className="flex flex-wrap items-start gap-x-3 gap-y-1.5 py-2">
+    <li data-connector-server={name} data-kind={row.kind} {...(why !== null && note.rowProps)} className="relative flex flex-wrap items-start gap-x-3 gap-y-1.5 py-2">
       <div className="min-w-[min(100%,16rem)] flex-1">
         <p className="m-0 text-ui break-words text-fg">
           {name}
@@ -317,7 +327,13 @@ function ServerRow({ tab, row, unattributed }: { tab: ConnectorsTab; row: Connec
           </p>
         )}
         <p className="m-0 text-ui-sm text-fg-muted" data-connector-server-state="">
-          {status}
+          {why === null ? (
+            status
+          ) : (
+            <span tabIndex={0} aria-describedby={note.id} className="rounded-sm outline-accent focus-visible:outline-2">
+              {status}
+            </span>
+          )}
           {last !== null && <span data-connector-server-last=""> · {last}</span>}
           {refusal !== null && <span data-connector-server-refusal=""> · {refusal}</span>}
         </p>
@@ -331,6 +347,7 @@ function ServerRow({ tab, row, unattributed }: { tab: ConnectorsTab; row: Connec
           ))}
         </div>
       )}
+      {why !== null && <RowNote note={note}>{why}</RowNote>}
     </li>
   );
 }

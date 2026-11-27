@@ -257,6 +257,7 @@ describe('the text box', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Link' }));
     const url = screen.getByRole('textbox', { name: 'Link address' });
+    expect(screen.getByRole('button', { name: 'Apply link' }).textContent).toBe('Apply'); // the word cut (G486)
     fireEvent.change(url, { target: { value: 'http://x.dev' } });
     fireEvent.submit(url.closest('form')!);
     expect(screen.getByRole('alert').textContent).toMatch(/https/);
@@ -272,6 +273,7 @@ describe('the text box', () => {
     expect(text(doc, 'title')[0]!.inline[0]).toEqual({ text: 'Plan', marks: { span: { color: 'var(--ds-color-accent)' }, b: {} } });
     fireEvent.click(screen.getByRole('button', { name: 'Colour' }));
     const hex = screen.getByRole('textbox', { name: 'Hex colour' });
+    expect(screen.getByRole('button', { name: 'Apply colour' }).textContent).toBe('Apply');
     fireEvent.change(hex, { target: { value: 'red' } });
     fireEvent.submit(hex.closest('form')!);
     expect(screen.getByRole('alert').textContent).toMatch(/#rrggbb/);

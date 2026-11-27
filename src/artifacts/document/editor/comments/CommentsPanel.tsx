@@ -15,14 +15,20 @@
 // names. Each card's reply draft is the editor's (DocumentEditor holds one per thread, the margin draws the same), so a
 // filter hiding the card or the panel closing loses none. J and K move the focus between the cards.
 // WR 49: deleted-target conversations are hidden in every status filter until explicitly revealed.
+// The word cut (docs/doperpowers/specs/2026-11-16-word-cut-design.md, M5; G391 to G398): the ×'s tooltip is Close; This
+// tab / All tabs only where the document has two tabs or more; the search's placeholder Search; the deleted-text toggle
+// "Deleted (N)", what it holds its tooltip; the empty lists in few words. The pair review's fix wave: Deleted (N) is a
+// disclosure after the open threads, holding the deleted ones, and Resolved's toggle takes the same chevron.
 import { useEffect, useId, useRef, useState } from 'react';
 import { actorDisplay } from '@shared/artifacts/actor';
+import { Tip } from '../../../../renderer/src/ui/tip';
 import { ThreadCard } from '../../../comments/ThreadCard';
 import type { Doc } from '../../../yjs';
 import { nanoid8 } from '../../schema';
 import { reopen, reply, resolve, type ThreadState } from '../../threads';
 import type { TabInfo } from '../../tabs';
 import { COMMENTS_ORIGIN } from './plugins';
+import { COMMENTS_PANEL_COPY as W } from '../copy';
 import type { CommentAuthor } from './surface';
 import { useThreadStates } from './use-threads';
 
@@ -55,6 +61,7 @@ const SCOPE: [ScopeFilter, string][] = [
   ['all', 'All tabs'],
 ];
 
+
 // A thread matches a search when any message's body, its quote, or the name of anyone who wrote in it holds the text.
 function matches(thread: ThreadState, needle: string): boolean {
   if (needle === '') return true;
@@ -73,11 +80,28 @@ export function CommentsPanel({ doc, tabs, activeTab, activeThread, author, read
   const name = useId();
 
   const needle = query.trim().toLowerCase();
-  // WR 49: a resolved thread can also have a missing target, so filter by liveness, not just `orphan`.
-  const shown = threads.filter((thread) => (showDeleted || thread.live) && (scope === 'all' || thread.tabId === activeTab) && matches(thread, needle));
-  const open = status === 'resolved' ? [] : shown.filter((thread) => thread.status === 'open');
-  const resolved = status === 'open' ? [] : shown.filter((thread) => thread.status === 'resolved');
-  const listed = [...open, ...(status === 'all' && !showResolved ? [] : resolved)];
+  // the word cut (G393): one tab has no scope to choose, so it is All tabs
+  const scoped = tabs.length > 1;
+  const inScope = scoped ? scope : 'all';
+  const inView = (thread: ThreadState) => (status === 'all' || thread.status === status) && (inScope === 'all' || thread.tabId === activeTab) && matches(thread, needle);
+  // WR 49: a resolved thread can also have a missing target, so filter by liveness, not just `orphan`. The pair review's
+  // fix wave (G395): Deleted (N) counts the deleted threads in view; opened, it lists them under it, but for the resolved
+  // ones under All, which the Resolved section lists among the others (as before the cut)
+  const deleted = threads.filter((thread) => !thread.live && inView(thread));
+  const live = threads.filter((thread) => thread.live && inView(thread));
+  const open = live.filter((thread) => thread.status === 'open');
+  const resolved = live.filter((thread) => thread.status === 'resolved');
+  // the cards before the disclosures: the open threads, or the resolved ones where Resolved is the filter
+  const main = status === 'resolved' ? resolved : open;
+  const folded = status === 'all' ? deleted.filter((thread) => thread.status === 'open') : deleted;
+  const resolvedSection = status === 'all' ? threads.filter((thread) => thread.status === 'resolved' && (thread.live || showDeleted) && inView(thread)) : [];
+  const listed = [...main, ...(showDeleted ? folded : []), ...(showResolved ? resolvedSection : [])];
+  // the second medium review: under All, Deleted (N) also counts resolved threads on deleted text, which Resolved lists;
+  // opening it opens Resolved with it, so whatever it counts is shown
+  const openDeleted = () => {
+    if (!showDeleted && deleted.length > folded.length) setShowResolved(true);
+    setShowDeleted(!showDeleted);
+  };
 
   // the editor's active thread, scrolled into view when it changes (and when the panel opens on one)
   useEffect(() => {
@@ -112,42 +136,65 @@ export function CommentsPanel({ doc, tabs, activeTab, activeThread, author, read
       />
     );
   };
-  // nothing to list: under All, a search that only resolved threads match lists those without a note
-  const empty = status === 'resolved' ? resolved.length === 0 : open.length === 0 && (needle === '' || resolved.length === 0);
-  const emptyText = needle !== '' ? 'No comments match the search.' : status === 'resolved' ? 'No resolved comments.' : 'No open comments. Select text and choose Comment.';
+  // nothing to list: under All, a search that only resolved threads match lists those without a note. The pair review's
+  // fix wave and its medium review: the Deleted fold's cards count while it is open, and a search's matches in it at all
+  const shownFirst = main.length + (showDeleted ? folded.length : 0);
+  const empty = shownFirst === 0 && (needle === '' || resolvedSection.length + deleted.length === 0);
+  const emptyText = needle !== '' ? W.noMatches : status === 'resolved' ? W.noResolved : W.noOpen;
 
   return (
     <aside className="doc-rail" aria-label="Comments">
       <header className="doc-rail-header">
         <h2 className="doc-rail-title">All comments</h2>
-        <button type="button" className="doc-tool" aria-label="Close comments" title="Close comments" onClick={onClose}>
+        <button type="button" className="doc-tool" aria-label="Close comments" title={W.closeTip} onClick={onClose}>
           ×
         </button>
       </header>
       <div className="doc-rail-filters">
         <Segments<StatusFilter> name={`${name}-status`} label="Status" options={STATUS} value={status} onChange={setStatus} />
-        <Segments<ScopeFilter> name={`${name}-scope`} label="Scope" options={SCOPE} value={scope} onChange={setScope} />
-        <input type="search" className="doc-rail-search" aria-label="Search comments" placeholder="Search comments" value={query} onChange={(event) => setQuery(event.target.value)} />
+        {scoped && <Segments<ScopeFilter> name={`${name}-scope`} label="Scope" options={SCOPE} value={scope} onChange={setScope} />}
+        <input type="search" className="doc-rail-search" aria-label="Search comments" placeholder={W.searchPlaceholder} value={query} onChange={(event) => setQuery(event.target.value)} />
       </div>
       <div ref={body} className="doc-rail-body">
-        {threads.some((thread) => !thread.live) && (
-          <button type="button" className="doc-rail-section" aria-pressed={showDeleted} onClick={() => setShowDeleted(!showDeleted)}>
-            {showDeleted ? 'Hide deleted-target comments' : 'Show deleted-target comments'}
-          </button>
-        )}
         {empty && <p className="doc-rail-empty">{emptyText}</p>}
-        {open.map(card)}
-        {status === 'resolved' && resolved.map(card)}
-        {status === 'all' && resolved.length > 0 && (
-          <section className="doc-rail-resolved" aria-label={`Resolved (${resolved.length})`}>
+        {/* the pair review's fix wave (G395, G390): a disclosure after the cards it does not hold, its own under it. One
+            keyed list with the open cards (the medium review), so a card whose passage someone else deletes or restores
+            moves in place, mounted, its keyboard kept */}
+        {[
+          ...main.map(card),
+          ...(deleted.length > 0
+            ? [
+                <Tip key="deleted-toggle" content={W.deletedTip} description={W.deletedTip}>
+                  <button type="button" className="doc-rail-section" aria-expanded={showDeleted} onClick={openDeleted}>
+                    {W.deleted(deleted.length)}
+                    <Chevron />
+                  </button>
+                </Tip>,
+              ]
+            : []),
+          ...(showDeleted ? folded.map(card) : []),
+        ]}
+        {resolvedSection.length > 0 && (
+          <section className="doc-rail-fold" aria-label={`Resolved (${resolvedSection.length})`}>
             <button type="button" className="doc-rail-section" aria-expanded={showResolved} onClick={() => setShowResolved(!showResolved)}>
-              Resolved ({resolved.length})
+              Resolved ({resolvedSection.length})
+              <Chevron />
             </button>
-            {showResolved && resolved.map(card)}
+            {showResolved && resolvedSection.map(card)}
           </section>
         )}
       </div>
     </aside>
+  );
+}
+
+// A disclosure's chevron, after its words (the app's counted fold, renderer/src/ui/counted-fold.tsx): it turns down while
+// its section is open (chrome.css).
+function Chevron() {
+  return (
+    <svg className="doc-rail-chevron" aria-hidden="true" viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round">
+      <path d="M6 3.5 10.5 8 6 12.5" />
+    </svg>
   );
 }
 

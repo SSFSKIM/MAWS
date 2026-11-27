@@ -34,9 +34,10 @@ import { SIDE_COPY } from '../../side/copy';
 import { placeCard, pinOf, type CardStyle } from '../../side/card/placement';
 import { closeCard, useCommentCard } from '../../side/card/store';
 import { useLayout } from '../../stores/layout';
+import { DOCUMENT_COPY } from './copy';
 
 const COPY = SIDE_COPY.card;
-const STARTING = 'Starting a session for this comment…';
+const STARTING = DOCUMENT_COPY.startingSession;
 const COULD_NOT_START = 'The session did not start';
 const OPEN_SESSION = 'Open session';
 // P3-F F4: the trust question in the card's place (what it records and turns on is the composer card's, TrustDetails)

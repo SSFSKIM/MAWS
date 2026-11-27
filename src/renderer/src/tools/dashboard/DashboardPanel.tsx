@@ -16,6 +16,7 @@ import { useEditorHost, type EditorHostAction } from '../../panel/editor-host';
 import { DocumentBody } from '../document/DocumentPanel';
 import { useDocumentVisible } from '../artifacts/viewers/connectors/use-document-visible'; // E3: H's trusted document visibility
 import { DatasetsIcon } from './icons';
+import { DASHBOARD_COPY } from './copy';
 import { FileSources } from './FileSources';
 import type { DashboardTabState } from './tab-state';
 
@@ -77,19 +78,19 @@ function DashboardBody({ state, surface, ...props }: DashboardEditorProps & { su
 
 function HeldDashboard({ state, scope, visible, onShown, files }: Omit<DashboardEditorProps, 'artifactId'> & { files: string[] }) {
   const { title } = useSyncExternalStore(state.document.subscribe, state.document.snapshot);
-  useEditorHost(scope, { title: title || 'Dashboard', saved: 'readonly' });
+  useEditorHost(scope, { title: title || DASHBOARD_COPY.fallbackTitle }); // the word cut (N191): the notice says it is read-only
   useEffect(() => {
     if (visible && state.document.markShown()) onShown();
   }, [visible, state, onShown]);
   return (
     <div role="status" className="flex h-full flex-col items-center justify-center gap-2 p-6 text-center text-ui text-fg-muted">
-      <p>This dashboard was made before dashboards were documents, so it is kept read-only, exactly as it is. It holds these files:</p>
+      {/* the word cut (T629): what it is and the way on, above its files */}
+      <p>{DASHBOARD_COPY.legacy}</p>
       <ul className="font-mono text-code text-fg">
         {files.map((path) => (
           <li key={path}>{path}</li>
         ))}
       </ul>
-      <p>To keep working on it, ask an agent to read its files and create a new dashboard from them, then delete this one.</p>
     </div>
   );
 }

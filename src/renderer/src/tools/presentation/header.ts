@@ -6,10 +6,12 @@
 // formatting toolbar (UX2). Mark up is the header's own, offered while the stage is registered as its surface.
 // M6: Present (the audience window, D13), Theme and Check against the design system (panels beside the stage, D10),
 // each driving the tab's own deck session, offered once the deck has opened.
-// The deck's open-thread count remains a non-interactive header badge; its toolbar owns the card toggle.
+// The deck's open-thread count is drawn once, as the badge on its toolbar's Comments toggle (the word cut, G404): the
+// header carries no count of its own, as the design's header and toolbar no longer both count (G512).
 import type { DocumentState } from '@artifacts/host';
 import type { DeckRail } from '@artifacts/slides/editor/session';
 import type { EditorHostAction, EditorHostExport, EditorHostRegistration, SavedState } from '../../panel/editor-host';
+import { DECK_COPY } from './copy';
 import { CheckIcon, PresentIcon, ThemeIcon } from './icons';
 
 export function savedOf(document: DocumentState | null, saving: boolean): SavedState | null {
@@ -27,7 +29,6 @@ export interface DeckHeaderState {
   exports?: readonly EditorHostExport[]; // M9: the Export menu (exports.ts)
   rail: DeckRail | null; // M6: the panel open beside the stage
   canPresent: boolean; // M6: the deck has a slide to show
-  unresolved?: number; // M7: open threads, orphans included (0 or absent: no count)
   history?: boolean; // M8: version history is offered
 }
 
@@ -41,12 +42,12 @@ function deckActions(state: DeckHeaderState, commands: DeckHeaderCommands): Edit
   return [
     { id: 'present', label: 'Present', icon: PresentIcon, disabled: !state.canPresent, onSelect: () => commands.present() },
     { id: 'theme', label: 'Theme', icon: ThemeIcon, pressed: state.rail === 'theme', onSelect: () => commands.toggleRail('theme') },
-    { id: 'check', label: 'Check against the design system', icon: CheckIcon, pressed: state.rail === 'check', onSelect: () => commands.toggleRail('check') },
+    { id: 'check', label: DECK_COPY.checkDesign, icon: CheckIcon, pressed: state.rail === 'check', onSelect: () => commands.toggleRail('check') },
   ];
 }
 
 /** The registration; without `commands` (the deck not open yet) no actions. */
 export function deckHeader(state: DeckHeaderState, commands?: DeckHeaderCommands): EditorHostRegistration {
-  const { title, document, saving, closeGuard, exports, unresolved } = state;
-  return { title, saved: savedOf(document, saving), closeGuard, ...(commands && { actions: deckActions(state, commands) }), ...(exports && { exports }), ...(unresolved ? { unresolved } : {}) /* M7 */ };
+  const { title, document, saving, closeGuard, exports } = state;
+  return { title, saved: savedOf(document, saving), closeGuard, ...(commands && { actions: deckActions(state, commands) }), ...(exports && { exports }) };
 }

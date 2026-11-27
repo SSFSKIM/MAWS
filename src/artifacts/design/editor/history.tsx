@@ -8,6 +8,8 @@
 // frame edged in its author's colour (a new one badged, a deleted one ghosted where it was), each changed, new or moved
 // element outlined where it is drawn, each deleted one and each moved one's old place ghosted from the earlier state,
 // in the board list the same edges; ↑ ↓ fit each change's board in view. Nothing here writes.
+// The word cut (docs/doperpowers/specs/2026-11-16-word-cut-design.md, M5 task 4): the list is headed "Boards", its
+// landmark still named for the version (G549); the bar keeps its worded buttons as they read (G546).
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties, type FormEvent, type ReactNode } from 'react';
 import type { AssetUrl, SlideCanvas } from '../../slides/canvas';
 import type { FaceAliases } from '../../slides/canvas/faces';
@@ -197,7 +199,7 @@ const authorStyle = (controller: DeckHistoryController, by: string | null): CSSP
 /** The read-only list of the comparison's boards, each changed one edged in its author's colour; a click fits it. */
 export function HistoryBoardList({ controller, boards, showChanges, onFit, current = null }: { controller: DeckHistoryController; boards: readonly HistoryBoard[]; showChanges: boolean; onFit(boardId: string): void; /** M5: the version's board an export takes */ current?: string | null }) {
   return (
-    <nav className="design-boards" aria-label={C.historyBoards} data-design-rail="boards">
+    <nav className="design-boards" aria-label={C.historyBoardsName} data-design-rail="boards">
       <div className="design-boards-header">
         <span>{C.historyBoards}</span>
       </div>

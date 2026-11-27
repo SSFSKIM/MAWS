@@ -1,6 +1,7 @@
 // The Design System page's body in the app (M4, Decision Log 16 and 17): its X32 header (title, saved state, the three
 // actions and the export, read from the tab's state) and its Mark-up surface, over a real replica.
-import { act, cleanup, render } from '@testing-library/react';
+import { act, cleanup, render, screen, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ArtifactHost, DocumentHandle, DocumentState } from '@artifacts/host';
 import { PortProvider } from '@artifacts/provider/port';
@@ -10,8 +11,12 @@ import { setLaw, setToken, writeSystem } from '@artifacts/design-system/model';
 import { parseTokens, serializeTokens } from '@artifacts/design-system/tokens';
 import { markupSurfaceOf, resetMarkupSurfaces } from '../../markup/surface';
 import { askEditorHostClose, editorHostOf, EditorHostScopeContext, resetEditorHosts, type EditorHostScope } from '../../panel/editor-host';
+import { EditorHeader } from '../../panel/PanelHeader';
 import { closeDialog, useDialogs } from '../../sessions/dialogs';
 import { useNotices } from '../../stores/notices';
+import type { TabRef } from '@shared/ipc/schema/layout';
+import { TEST_MACHINE } from '../../../../../test/support/machine';
+import { artifactReplaceVerdict } from '../../library/ArtifactTab';
 import { DesignSystemBody, savedStateOf } from './DesignSystemBody';
 import { OpenedSystem } from './editor';
 
@@ -62,7 +67,7 @@ function mount(props: Partial<Parameters<typeof DesignSystemBody>[0]> = {}) {
 }
 
 describe('the Design System body (X32, Mark-up)', () => {
-  it('registers the header: the system’s name, the saved state, Check against law, Set as my default (disabled without a handler), Export for Claude', () => {
+  it('registers the header: the system’s name, the saved state, Check against law, Set as my default (disabled without a handler), Export for Claude', async () => {
     const { doc, set } = mount();
     const registration = editorHostOf(SCOPE)!;
     expect(registration.title).toBe('Harbor');
@@ -72,8 +77,22 @@ describe('the Design System body (X32, Mark-up)', () => {
       ['Set as my default', true],
     ]);
     expect(registration.exports!.map((e) => e.label)).toEqual(['Export for Claude']);
+    // the word cut (G558): the header's actions are icons, each named and tipped by its label
+    expect(registration.actions!.every((a) => a.icon !== undefined)).toBe(true);
+    // P23: the ring waits the quiet half second; the edits do not: a tab whose edits wait is never replaced (replacing
+    // skips the closeGuard), the ring drawn or not
+    const tab = { id: SCOPE.tabId, kind: 'artifact', artifactId: 'ds1', machine: TEST_MACHINE } as TabRef;
+    expect(artifactReplaceVerdict(tab), 'nothing waits: replaceable').toBeNull();
     act(() => set({ unsaved: 2 }));
+    expect(editorHostOf(SCOPE)!.saved, 'held back: the header draws saving at once').toBe('saved');
+    expect(editorHostOf(SCOPE)!.pendingEdits).toBe(true);
+    expect(artifactReplaceVerdict(tab), 'kept before the ring is drawn').toEqual({ keep: expect.stringContaining('being saved') });
+    await act(() => new Promise((resolve) => setTimeout(resolve, 550)));
     expect(editorHostOf(SCOPE)!.saved).toBe('saving');
+    act(() => set({ unsaved: 0 }));
+    expect(editorHostOf(SCOPE)!.saved).toBe('saved');
+    expect(editorHostOf(SCOPE)!.pendingEdits).toBe(false);
+    expect(artifactReplaceVerdict(tab)).toBeNull();
     act(() => setLaw(doc, '# Harbor Press\n'));
     expect(editorHostOf(SCOPE)!.title).toBe('Harbor Press');
   });
@@ -109,6 +128,29 @@ describe('the Design System body (X32, Mark-up)', () => {
     host.export.mockRejectedValueOnce(new Error('exporting an artifact is not available yet'));
     await act(async () => registration.exports![0]!.onSelect());
     expect(useNotices.getState().notices.at(-1)).toMatchObject({ level: 'danger', text: 'Could not export for Claude: exporting an artifact is not available yet' });
+  });
+
+  // The word cut (G558): drawn in the header, each icon's word shows on keyboard focus; the star of the default system
+  // stays in the Tab order, greyed, saying why, and does nothing
+  it('draws its three icons in the header, each word shown on Tab, the default’s star focusable with its reason', async () => {
+    const user = userEvent.setup();
+    const onSetDefault = vi.fn();
+    const onDelete = vi.fn();
+    mount({ onSetDefault, isDefault: true, onDelete });
+    const header = render(<EditorHeader title="Harbor" scope={SCOPE} registration={editorHostOf(SCOPE)} />).container;
+    const tooltip = () => screen.getByRole('tooltip').textContent;
+    act(() => within(header).getByRole('button', { name: 'Check against law' }).focus());
+    expect(tooltip()).toBe('Check against law');
+    await user.tab();
+    const star = within(header).getByRole('button', { name: 'Set as my default', description: 'Already your default' });
+    expect(document.activeElement).toBe(star);
+    expect(star.getAttribute('aria-disabled')).toBe('true');
+    expect(tooltip()).toContain('Already your default');
+    await user.keyboard('{Enter}');
+    expect(onSetDefault).not.toHaveBeenCalled();
+    await user.tab();
+    expect(document.activeElement).toBe(within(header).getByRole('button', { name: 'Delete design system…' }));
+    expect(tooltip()).toBe('Delete design system…');
   });
 
   it('registers its Mark-up surface and calls onShown once the system is on screen', () => {

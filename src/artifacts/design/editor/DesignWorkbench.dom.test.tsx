@@ -198,7 +198,7 @@ describe('board frames', () => {
     drag(world, 2500, 8192 + 9000);
     release(world, 2500, 8192 + 9000);
     expect(boardFrame(doc, 'b3')).toEqual({ x: 2100, y: 0, w: 1080, h: 8192 });
-    expect(container.querySelector('[data-deck-notice]')!.textContent).toBe('board b3: h is 17192 px (over 16384 px a side)');
+    expect(container.querySelector('[data-deck-notice]')!.textContent).toBe('At most 16,384 px a side'); // the word cut (G518)
   });
 
   it('the inspector edits the selected board’s frame and applies a preset; the cap is refused by name', () => {
@@ -210,7 +210,7 @@ describe('board frames', () => {
     expect(boardFrame(doc, 'b1')!.w).toBe(834);
     fireEvent.change(width, { target: { value: '20000' } });
     fireEvent.keyDown(width, { key: 'Enter' });
-    expect(screen.getByRole('alert').textContent).toContain('over 16384 px a side');
+    expect(screen.getByRole('alert').textContent).toBe('At most 16,384 px a side'); // the word cut (G539)
     expect(boardFrame(doc, 'b1')!.w).toBe(834);
     fireEvent.change(screen.getByRole('combobox', { name: 'Board size' }), { target: { value: 'tablet' } });
     expect(boardFrame(doc, 'b1')).toEqual({ x: 0, y: 0, w: 834, h: 1194 });
@@ -318,7 +318,7 @@ describe('the board list', () => {
     expect(session.snapshot().currentSlide).toBe(added);
 
     openMenu(screen.getByRole('button', { name: 'Board Phone options' }));
-    fireEvent.click(screen.getByRole('menuitem', { name: 'Duplicate board' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Duplicate' })); // the word cut (G525)
     const copy = boardOrder(doc)[1]!;
     expect(boardFrame(doc, copy)).toEqual({ x: 490, y: 0, w: 390, h: 844 });
     expect(readSlide(doc, copy).children.map((c) => c.id)).not.toContain('title'); // new element ids
@@ -328,7 +328,7 @@ describe('the board list', () => {
     expect(boardOrder(doc).slice(0, 2)).toEqual([copy, 'b1']);
 
     openMenu(screen.getByRole('button', { name: 'Board Desktop options' }));
-    fireEvent.click(screen.getByRole('menuitem', { name: 'Delete board' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Delete' })); // the word cut (G525)
     expect(boardOrder(doc)).not.toContain('b2');
 
     for (let i = 0; i < 4; i++) fireEvent.click(screen.getByRole('button', { name: 'Undo' }));

@@ -1,6 +1,6 @@
 // P3-E (E2 M4 of docs/doperpowers/plans/2026-10-16-p3-e2-dashboard.md; E's Decision Log 8 and 28 (3), (4)): the history's
 // optional `extraChanges` in DocumentEditor (happy-dom over the in-memory host and history). A change outside every tab
-// body (a dashboard's dataset replaced, its chart's attributes byte-identical) counts in the "See N new changes" pill
+// body (a dashboard's dataset replaced, its chart's attributes byte-identical) counts in the "N new changes" pill
 // and the bar's "N changes" alike; a bound one marks its block and ↑ ↓ reach it (the block selected and outlined); an
 // unbound one is a labelled stop of the bar's own, with no tab faked; without the hook, the same writes count nothing.
 import type { Editor } from '@tiptap/core';
@@ -91,7 +91,7 @@ const step = (name: 'Next change' | 'Previous change') => click(within(bar()).ge
 describe('extra changes in the history (P3-E)', () => {
   it('a data-only change counts in the pill and the bar, marks its chart, and ↑ ↓ reach the chart and the unbound entry', async () => {
     await setup({ withHook: true });
-    const pill = await until(() => screen.queryByRole('button', { name: 'See 2 new changes' }) !== null, 'the pill').then(() => screen.getByRole('button', { name: 'See 2 new changes' }));
+    const pill = await until(() => screen.queryByRole('button', { name: '2 new changes' }) !== null, 'the pill').then(() => screen.getByRole('button', { name: '2 new changes' }));
     click(pill);
     await until(() => screen.queryByRole('toolbar', { name: 'Version preview' }) !== null && previewChart() !== null, 'the preview');
     expect(within(bar()).getByText('2 changes')).toBeTruthy();
@@ -118,8 +118,8 @@ describe('extra changes in the history (P3-E)', () => {
 
   it('reaching the unbound entry clears the reached chart’s block selection, so its outline is not left drawn (E2 M6)', async () => {
     await setup({ withHook: true });
-    await until(() => screen.queryByRole('button', { name: 'See 2 new changes' }) !== null, 'the pill');
-    click(screen.getByRole('button', { name: 'See 2 new changes' }));
+    await until(() => screen.queryByRole('button', { name: '2 new changes' }) !== null, 'the pill');
+    click(screen.getByRole('button', { name: '2 new changes' }));
     await until(() => screen.queryByRole('toolbar', { name: 'Version preview' }) !== null && previewChart() !== null, 'the preview');
     step('Next change');
     await until(() => previewChart()!.classList.contains('ProseMirror-selectednode'), 'the chart selected whole');

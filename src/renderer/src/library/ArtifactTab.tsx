@@ -40,6 +40,7 @@ import { markArtifactViewed, undeleteArtifact } from './actions';
 import { KIND_LABELS, LIBRARY_COPY } from './copy';
 import { library, libraryRow, refreshLibrary, useLibraryRow, type LibraryRead } from './store';
 import { useMachineUndoUnavailable, useUndoAct, useUnsentWhileDeleted } from './undo-delete'; // UX wave U10b
+import { QuietSpinner } from '../ui/spinner';
 import { unsentWhileDeleted } from '../artifacts/deleted-replicas'; // fix wave 4
 import { DesignSystemHostContext } from '@artifacts/design-system/apply';
 import { artifactHost } from '../artifacts';
@@ -74,7 +75,7 @@ export function ArtifactView({ artifactId, machine, scope, visible }: { artifact
   const editor = useArtifactEditor(artifact?.kind ?? held?.kind ?? null);
   if (artifact && editor) return <MountedEditor machine={machine} artifactId={artifact.id} kind={artifact.kind} editor={editor} scope={scope} visible={visible} />;
   if (artifact) return <NoEditor artifact={artifact} scope={scope} />;
-  if (indexless && host.answer?.status === 'absent') return <Gone scope={scope} />;
+  if (indexless && host.answer?.status === 'absent') return <Gone scope={scope} deleted={host.answer.deleted} />;
   // UX wave U10b (§C.5): an agent's delete, which Undo can take back: the editor held stays, under the notice
   if (indexless && host.answer?.status === 'deleted') {
     const deleted = <DeletedNotice artifactId={artifactId} machine={machine} />;
@@ -108,11 +109,12 @@ export function ArtifactView({ artifactId, machine, scope, visible }: { artifact
       </MountedEditor>
     );
   }
-  return <Quiet>{notice || <p className="m-0">{LIBRARY_COPY.reading}</p>}</Quiet>;
+  return <Quiet>{notice || <QuietSpinner label={LIBRARY_COPY.reading} /> /* the word cut (G317) */}</Quiet>;
 }
 
-// UX wave U10b: `deleted`, an agent's delete Undo can take back (any other deleted artifact is `absent`, as today).
-type HostAnswer = { status: 'present'; row: ArtifactRow } | { status: 'absent' } | { status: 'deleted'; title: string } | { status: 'refused'; error: string };
+// UX wave U10b: `deleted`, an agent's delete Undo can take back (any other deleted artifact is `absent`, as today). An
+// `absent` one says whether the host knows it was deleted, or only that it has no such artifact (the word cut, N200).
+type HostAnswer = { status: 'present'; row: ArtifactRow } | { status: 'absent'; deleted: boolean } | { status: 'deleted'; title: string } | { status: 'refused'; error: string };
 
 // While main's index answers no row, the host's word on the artifact: present (the index has not caught up: just
 // created, or the index unavailable), absent (confirmed gone), or refused (a timeout, a restarting host: no word at
@@ -136,7 +138,7 @@ function useHostAnswer(artifactId: string, machine: MachineRef, read: LibraryRea
           ? { status: 'present', row: result.value.artifact }
           : deleted?.undoable === true
             ? { status: 'deleted', title: deleted.title }
-            : { status: 'absent' };
+            : { status: 'absent', deleted: deleted !== undefined };
       setAnswer({ key, answer: next });
     });
     return () => {
@@ -232,11 +234,11 @@ function DeletedWithoutEditor({ scope, title, children }: { scope: EditorHostSco
   return <div className="flex h-full flex-col">{children}</div>;
 }
 
-function Gone({ scope }: { scope: EditorHostScope }) {
+function Gone({ scope, deleted }: { scope: EditorHostScope; deleted: boolean }) {
   useNoEditor(scope, LIBRARY_COPY.goneTitle);
   return (
     <Quiet>
-      <p className="m-0">{LIBRARY_COPY.gone}</p>
+      <p className="m-0">{deleted ? LIBRARY_COPY.gone : LIBRARY_COPY.absent}</p>
     </Quiet>
   );
 }
@@ -244,12 +246,13 @@ function Gone({ scope }: { scope: EditorHostScope }) {
 // E11 F2b's replace rule for this kind: a session opened over an unpinned `artifact` tab takes its place unless the
 // editor's header says its changes are not saved yet (saving, unsaved, or waiting to reconnect), when the tab stays and
 // the session opens beside it, as an unsaved file's does. Replacing skips the closeGuard, so the sync answer is the
-// header's saved state.
+// header's saved state, and its pending edits where the header holds "Saving…" back (the word cut, P23).
 // Fix wave 4 (the panel's P1): a replica parked by an agent's delete reads read-only in the header, yet keeps the edit the
 // deletion's fence refused, which a replacement would close away; such a tab stays too.
 export function artifactReplaceVerdict(ref: TabRef): ReplaceVerdict {
   if (ref.kind !== 'artifact') return null;
-  const saved = editorHostOf({ surface: 'main', tabId: ref.id })?.saved;
+  const header = editorHostOf({ surface: 'main', tabId: ref.id });
+  const saved = header?.pendingEdits === true ? 'saving' : header?.saved;
   const kept = unsentWhileDeleted(ref.artifactId, ref.machine);
   if (!kept && saved !== 'saving' && saved !== 'unsaved' && saved !== 'reconnecting') return null;
   const title = libraryRow(library.getState(), ref.artifactId, ref.machine).value?.title ?? LIBRARY_COPY.fallbackTitle;

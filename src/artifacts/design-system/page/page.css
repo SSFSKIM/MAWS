@@ -14,9 +14,18 @@
   font-family: var(--font-ui);
   font-size: var(--text-ui);
 }
+/* the empty page (G562): the app's empty state (Customize's, Plugins', Skills'): its title, the hint right under it */
+.dsp-empty { display: flex; flex-direction: column; align-items: center; gap: calc(var(--space) * 2); padding: calc(var(--space) * 16) calc(var(--space) * 6); text-align: center; }
+.dsp-empty p { margin: 0; }
+.dsp-empty-title { font-size: var(--text-ui); font-weight: 500; color: var(--fg); }
+.dsp-empty-hint { max-width: 24rem; font-size: var(--text-ui-sm); }
 .dsp-intro { display: flex; flex-direction: column; gap: var(--space); }
 .dsp-title { margin: 0; font-size: 1.5em; font-weight: 600; }
 .dsp-problems { margin: 0; color: var(--danger); }
+/* the word cut (G565): the count at rest, each path and its message behind it */
+.dsp-problems summary { width: fit-content; cursor: default; }
+.dsp-problems summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; border-radius: var(--radius-sm); }
+.dsp-problems ul { margin: var(--space) 0 0; padding-left: calc(var(--space) * 5); }
 .dsp-muted { color: var(--fg-muted); }
 .dsp-name { font-family: var(--font-mono); font-size: var(--text-code); color: var(--fg); }
 .dsp-alias { font-family: var(--font-mono); font-size: var(--text-code); color: var(--fg-faint); }
@@ -53,7 +62,9 @@
 .dsp-badges { display: flex; flex-wrap: wrap; gap: calc(var(--space) * 2); margin: 0; padding: 0; list-style: none; }
 .dsp-badge { display: flex; gap: calc(var(--space) * 2); align-items: baseline; padding: var(--space) calc(var(--space) * 2.5); border-radius: var(--radius-sm); background: var(--bg-raised); border: 1px solid var(--border); }
 .dsp-badge[data-passes="false"] { border-color: var(--danger); }
-.dsp-badge[data-passes="false"] .dsp-muted { color: var(--danger); }
+/* the word cut (G568): the verdict is the badge's tooltip, so the badge takes Tab; a failing pair keeps a mark */
+.dsp-badge:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.dsp-badge-mark { color: var(--danger); }
 
 /* Type */
 .dsp-type-head, .dsp-type-row { display: grid; grid-template-columns: 160px 1fr 1fr; gap: calc(var(--space) * 4); }
@@ -90,6 +101,8 @@
 /* Check */
 .dsp-violations, .dsp-manual { display: flex; flex-direction: column; gap: calc(var(--space) * 2); margin: 0; padding-left: calc(var(--space) * 5); }
 .dsp-violation > div { margin-top: 2px; }
+.dsp-dont-words { border-radius: var(--radius-sm); }
+.dsp-dont-words:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 
 /* The law's "Ask the agent to adopt it" (M6): a quiet button in the app's chrome. */
 .dsp-actions { display: flex; flex-direction: column; gap: calc(var(--space) * 2); }

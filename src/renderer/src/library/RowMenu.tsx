@@ -22,6 +22,7 @@ import { SEND_TO_COPY, SERVICE } from '../delivery/copy'; // P4-B5
 import { openSendTo } from '../delivery/store'; // P4-B5
 import { VIEWERS_COPY } from '../tools/artifacts/viewers/copy';
 import { closeLibraryDialog, openLibraryDialog, replaceLibraryDialog, toastFailure, type ArtifactRef, type SheetOf } from './dialogs';
+import { QuietSpinner } from '../ui/spinner';
 import { MoreIcon } from './icons';
 import { MENU, MENU_ITEM } from './LibraryHeader';
 import { useLibrarySpaces } from './store';
@@ -255,7 +256,7 @@ export function InUseSheet({ dialog }: SheetOf<'inUse'>) {
       <div className="flex flex-col gap-3">
         <p className="m-0 text-fg-muted">{D.inUseBody(artifact.title)}</p>
         {titles === null ? (
-          <p className="m-0 text-ui-sm text-fg-muted">{D.inUseReading}</p>
+          <QuietSpinner label={D.inUseReading} /> // the word cut (N194)
         ) : (
           <ul className="m-0 flex max-h-60 list-none flex-col overflow-auto p-0">
             {artifactIds.map((artifactId) => (

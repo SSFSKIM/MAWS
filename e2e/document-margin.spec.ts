@@ -135,8 +135,11 @@ test('an agent reply grows a card while the owner types; the stack re-lays, the 
     await page.keyboard.type('The budget review is on Friday with the whole team.');
     await page.keyboard.press('Enter');
     // two lines between the two passages (three line pitches, about 117 px): the first card, compact, fits above the
-    // second without pushing it; the active card with the agent's reply (a name, two lines of text, the reply field) does
-    // not, so the reply's growth pushes the second (four lines left the grown card short of the second's room)
+    // second without pushing it; the active card with the agent's reply (a name, several lines of text, the reply field)
+    // does not, so the reply's growth pushes the second (four lines left the grown card short of the second's room). The
+    // pair review's fix wave: the word cut's card is shorter (Resolve no longer has a row of its own, its message spans
+    // the card), which left the active card with room to spare before the reply; the reply is long enough that its
+    // growth, not the card's own height, decides the push
     for (const line of ['Agenda item one.', 'Agenda item two.']) {
       await page.keyboard.type(line);
       await page.keyboard.press('Enter');
@@ -204,7 +207,7 @@ test('an agent reply grows a card while the owner types; the stack re-lays, the 
     })();
     const read = await seam.call<{ revision: number }>(AGENT, 'artifact_read', { artifact: id });
     expect(read.isError, read.text).toBe(false);
-    const answer = await seam.call(AGENT, 'artifact_reply', { artifact: id, threadId: t1, body: 'The budget review moved to Thursday: the finance team is out on Friday, and the slides need one more pass before then.' });
+    const answer = await seam.call(AGENT, 'artifact_reply', { artifact: id, threadId: t1, body: 'The budget review moved to Thursday: the finance team is out on Friday, and the slides need one more pass before then. The room is booked for the afternoon, the agenda stays as it is, and the notes from the last review go out with the invitation.' });
     expect(answer.isError, answer.text).toBe(false);
     await typing;
     await expect.poll(async () => (await entry(t1).boundingBox())!.height, { message: 'the card grew with the reply' }).toBeGreaterThan(h1Before + 20);

@@ -17,6 +17,9 @@
 // P4-A2 G2.4 (X35; G-R6 of docs/doperpowers/plans/2026-10-19-p4-a2-agent-experience.md): an agent's publish drawn as it
 // streams (./provisional.tsx): each board it writes takes the deck's layer on its canvas, beneath the screen chrome and
 // the overlay, the session protecting the human's elements on the active board; a new board stands at its frame.
+// The word cut (docs/doperpowers/specs/2026-11-16-word-cut-design.md, M5 task 4): a board's title is its name at rest,
+// its size drawn while the title is pointed at, focused or its board selected (G528); a held board keeps its dashed
+// outline and the rail's Held, with no badge in its title (G529); a refused frame is said in a person's words (G518).
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode, type RefObject } from 'react';
 import type { AssetUrl, SlideCanvas } from '../../slides/canvas';
 import type { FaceAliases } from '../../slides/canvas/faces';
@@ -33,11 +36,13 @@ import { Overlay } from '../../slides/editor/transform/Overlay';
 import { pick, slideTree } from '../../slides/editor/transform/selection';
 import * as Y from '../../yjs/slides';
 import { heldOf } from '../../slides/model';
-import type { BoardFrame } from '../canvas';
+import type { BoardFrame, FrameFault } from '../canvas';
 import { boardFrame, boardOrder, isMissingSource } from '../model';
-import { BoardError, setBoardFrame } from '../writers';
+import { setBoardFrame } from '../writers';
+import { HOVER_SCOPE, ON_HOVER } from '../../../renderer/src/ui/hover-scope';
 import { movedFrame, resizedFrame } from './board-gestures';
 import { boardTextMarkup } from './insert';
+import { boardRefusal, frameRefusals } from './refusals';
 import { boardLabel, type BoardView } from './boards';
 import { DESIGN_COPY as C } from './copy';
 import { useViewFrame, useViewZoom } from './use-view';
@@ -64,7 +69,7 @@ export interface WorldProps {
   /** The design system's scope (the document medium) the boards draw in. */
   scope: (children: ReactNode) => ReactNode;
   readOnly: boolean;
-  onNotice: (text: string) => void;
+  onNotice: (text: string, why?: string | null) => void;
   artifactId?: string;
   importAsset?: ImportAsset;
   /** The world's focusable surface: it takes the pointer, the keys and the clipboard (C's overlay reads it too). */
@@ -213,7 +218,8 @@ export function World(props: WorldProps) {
       try {
         setBoardFrame(session.doc, d.id, moved, session.origin);
       } catch (error) {
-        latest.current.onNotice(error instanceof BoardError ? error.problems.join('; ') : String(error));
+        const refused = boardRefusal(error, 'resize');
+        latest.current.onNotice(refused.text, refused.why);
       }
     };
     /** A gesture that may no longer write ends here: nothing more written, the undo step closed, the pointer let go. */
@@ -294,9 +300,9 @@ export function World(props: WorldProps) {
       const snap = !(e.metaKey || e.ctrlKey);
       const base = { ...now, ...keysFrom(d.start, d.keys) }; // the gesture's keys from its start, the rest as they are now
       const siblings = siblingsOf(d.id);
-      const next = d.handle === null ? { ...movedFrame(base, world, siblings, zoom, snap), problems: [] as string[] } : resizedFrame(d.id, base, d.handle, world, siblings, zoom, snap);
+      const next = d.handle === null ? { ...movedFrame(base, world, siblings, zoom, snap), faults: [] as FrameFault[] } : resizedFrame(base, d.handle, world, siblings, zoom, snap);
       setGuides(next.guides);
-      if (next.problems.length > 0) return latest.current.onNotice(next.problems.join('; ')); // shown, never adjusted
+      if (next.faults.length > 0) return latest.current.onNotice(frameRefusals(next.faults).join('; ')); // shown, never adjusted (G518: in a person's words)
       const owned = keysFrom(next.frame, d.keys);
       const key = JSON.stringify(owned);
       if (key === d.last) return;
@@ -305,7 +311,8 @@ export function World(props: WorldProps) {
         setBoardFrame(session.doc, d.id, owned, session.origin);
         d.owned = owned;
       } catch (error) {
-        latest.current.onNotice(error instanceof BoardError ? error.problems.join('; ') : String(error));
+        const refused = boardRefusal(error, 'resize');
+        latest.current.onNotice(refused.text, refused.why);
       }
     };
 
@@ -548,13 +555,14 @@ export function World(props: WorldProps) {
 }
 
 const ORIGIN = { zoom: 1, x: 0, y: 0 } as const;
-/** A title's room on screen below which it shows the board's name alone (no size, no badge). */
+/** A title's room on screen below which it shows the board's name alone (no size, even pointed at). */
 const TITLE_FULL_PX = 160;
 
 /**
  * The boards' titles in screen px over the world (M6: drawn at the zoom, not counter-scaled inside the boards' layer,
- * so a zoom restyles no board), each as wide as its board is drawn: the name truncates, and below 160 px the size and
- * the held badge drop out; the name and size stay the button's accessible name and tooltip.
+ * so a zoom restyles no board), each as wide as its board is drawn: the name truncates; the size waits for pointing,
+ * focus or the board selected (the word cut, G528), and below 160 px drops out; the name and size stay the button's
+ * accessible name and tooltip.
  *
  * DL39's bounded wave: a title renders when its own board, its active or selected state, or its room for the size
  * (the 160 px threshold) changes; its place and width follow the zoom by three style writes from the view, so a zoom
@@ -626,10 +634,14 @@ const Title = memo(function Title(props: { board: BoardView & { frame: BoardFram
       title={words.tooltip}
       aria-pressed={selected}
       onClick={() => onSelect(id)}
+      {...HOVER_SCOPE}
     >
       <span className="design-board-title-name">{words.label}</span>
-      {full && <span className="design-board-title-size">{words.size}</span>}
-      {full && board.held && <span className="design-board-badge">{C.held}</span>}
+      {full && (
+        <span className="design-board-title-size" {...ON_HOVER}>
+          {words.size}
+        </span>
+      )}
     </button>
   );
 });

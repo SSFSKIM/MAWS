@@ -13,11 +13,12 @@
 //   WORDS_OUT=$HOME/maws-words/before pnpm shots:words
 //
 // which builds out/ (the harness variant: Settings › Org reads its seeded org through the harness build's main; every
-// window here is the product's, MAWS_HARNESS=0) and runs the fifteen launches, about 50 minutes (M1 added launches 6
+// window here is the product's, MAWS_HARNESS=0) and runs the sixteen launches, about 50 minutes (M1 added launches 6
 // to 9 and the `m1-` scenes: the Settings and Org states the word cut's M1 changes; M2 added launch 10 and the `m2-`
 // scenes: the conversation's and the message box's states its cut changes; M3 added launches 11 and 12 and the `m3-` scenes:
 // the panels beside the conversation, and the project Channel's folds; M4 added launch 14 and the `m4-` scenes: the
-// window, the typed dialogs and Customize). The pictures are
+// window, the typed dialogs and Customize; M5 added launch 16 and the `m5-` scenes: the library, an opened artifact,
+// the document, dashboard and slides editors, the design workbench and the design system page). The pictures are
 // <WORDS_OUT>/<scene id>.png, with <WORDS_OUT>/_run.json listing each scene's meta and whether it was reached (and why
 // not), and each run's build (its commit and a digest of out/). WORDS_ONLY=<id>,<prefix>* narrows the run to some scenes (a launch with none wanted still starts). The "after"
 // pictures are the same command on the build's branch into another folder. A folder holds one build's pictures: a run of
@@ -41,11 +42,12 @@
 //
 // and on master, as below for the m scenes, into another folder (tc-before).
 //
-// The `m1-` to `m4-` scenes are each their milestone's, so their "before" is this rig run against master's build: in a
+// The `m1-` to `m5-` scenes are each their milestone's, so their "before" is this rig run against master's build: in a
 // clean checkout of master, `git checkout <this branch> -- e2e/words-shots.rig.ts e2e/support`, then the command above.
-// Every launch's state is set from this file and e2e/support (fixtures, seams master's main already has). Each m1 to m4
+// Every launch's state is set from this file and e2e/support (fixtures, seams master's main already has). Each m1 to m5
 // scene checks its named state right before its capture, on master's build in master's terms (`cutBuild` for M1's
-// parts, `m2Build` for M2's, `m3Build` for M3's, `m4Build` for M4's), and is not reached when it cannot.
+// parts, `m2Build` for M2's, `m3Build` for M3's, `m4Build` for M4's, `m5Build` for M5's), and is not reached when it
+// cannot.
 //
 // Locators avoid the app's words (data attributes, menu ids, IPC, positions), because the words are what the other
 // build changes; where only a word reaches a target it comes from the app's own copy module, or is marked. A step that
@@ -65,6 +67,7 @@ import { BROWSER, INDEX, KEYBOARD, NOTIFICATIONS, ORG, SUPERVISOR, VOICE } from 
 import { BROWSER_COPY } from '../src/renderer/src/tools/browser/copy';
 import { BACKGROUND_COPY, SUBAGENTS_COPY } from '../src/renderer/src/tools/agents/copy';
 import { ACTIONS } from '../src/shared/keymap/actions';
+import { formatChord } from '../src/shared/keymap/chord';
 import { benchDeckFiles } from '../src/artifacts/slides/fixtures/bench';
 import { isolatedGitEnv } from '../test/support/git-env';
 import { installToHumanPlugin } from '../test/support/to-human-plugin'; // board ticket 850's launch
@@ -72,14 +75,16 @@ import type { BrowserActivity } from '../src/shared/browser/activity'; // board 
 import { ownerShapedState, writePluginCliStub, type StubState } from '../test/support/plugin-cli-stub';
 import { addressed } from './support/address';
 import { invoke, launchReady, recordedBlockJournal, steerStopJournal, turnsJournal, value } from './support/c7-replay';
-import { bindCsv, chart, insertBlocks } from './support/dashboards';
-import { createDesign, DESIGN_FILES, editDesign, threadsOf } from './support/design';
+import { AgentSeam, bindCsv, chart, insertBlocks, revisionOf } from './support/dashboards';
+import { PerfSeam } from './support/document-scale';
+import { createDesign, DESIGN_FILES, editDesign, FRAMES, headerAction, threadsOf, toggleComments } from './support/design';
 import { closedPort, startBrowserServer } from './support/browser-server';
 import { ComputerUseJournal, CUA_JS } from './support/computer-use-replay'; // board ticket 852's launch
 import { closeSettings, closeSheet, importThrough, openImportSheet, profilesFile, sheetOf } from './support/browser-import-scene';
 import { buildChromeUserData } from '../test/support/chrome-profile';
 import { CHANNEL_FIXTURE_ENV, WORDS_CHANNEL_COUNTS, WORDS_CHANNEL_PROJECT, WORDS_CHANNEL_PROJECT_ID, wordsChannel, wordsChannelScenario } from './support/words-channel';
 import { CHANNEL } from '../src/renderer/src/channel/copy';
+import { noTabsState, WORDS_DOC_TEXT, WORDS_THREADS, wordsDocState } from './support/words-doc';
 import { goToFile } from './support/go-to-file';
 import { launchMaws, REPO_ROOT, type MawsLaunch } from './support/launch';
 import { menu } from './support/menu';
@@ -97,8 +102,9 @@ test.skip(!OUT, 'WORDS_OUT names the folder the captures go to');
 // round: 1 and 2 are the owner's rounds at the pin; 'm0' a scene the word cut's M0 added on master; 'm1' one its M1
 // added for the Settings and Org states the cut changes; 'm2' one its M2 added for the conversation's and the message
 // box's; 'm3' one its M3 added for the panels beside the conversation; 'm4' one its M4 added for the window, the typed
-// dialogs and Customize. A folder is under src/renderer/src, or from the repository's root when it starts with src/.
-type Meta = { id: string; title: string; how: string; state: string; folders: string[]; hover?: boolean; round?: 2 | 'm0' | 'm1' | 'm2' | 'm3' | 'm4' | 'rv' | 'tc' };
+// dialogs and Customize; 'm5' one its M5 added for the library, an opened artifact and the editors. A folder is under
+// src/renderer/src, or from the repository's root when it starts with src/.
+type Meta = { id: string; title: string; how: string; state: string; folders: string[]; hover?: boolean; round?: 2 | 'm0' | 'm1' | 'm2' | 'm3' | 'm4' | 'm5' | 'rv' | 'tc' };
 const META: Meta[] = [];
 const results: { id: string; ok: boolean; error?: string; notes?: string[] }[] = [];
 const wanted = (id: string) => !ONLY || ONLY.has(id) || [...ONLY].some((o) => o.endsWith('*') && id.startsWith(o.slice(0, -1)));
@@ -108,6 +114,7 @@ const m1 = (meta: Omit<Meta, 'round'>): Meta => ({ ...meta, round: 'm1' });
 const m2 = (meta: Omit<Meta, 'round'>): Meta => ({ ...meta, round: 'm2' });
 const m3 = (meta: Omit<Meta, 'round'>): Meta => ({ ...meta, round: 'm3' });
 const m4 = (meta: Omit<Meta, 'round'>): Meta => ({ ...meta, round: 'm4' });
+const m5 = (meta: Omit<Meta, 'round'>): Meta => ({ ...meta, round: 'm5' });
 const rv = (meta: Omit<Meta, 'round'>): Meta => ({ ...meta, round: 'rv' }); // board ticket 850, the report view repair
 const tc = (meta: Omit<Meta, 'round'>): Meta => ({ ...meta, round: 'tc' }); // board ticket 852, the tool card retired
 
@@ -366,6 +373,8 @@ async function shot(page: Page, meta: Meta, prepare: () => Promise<void>, { of, 
     if (meta.round === 'm3' || M3_CARRIED.has(meta.id)) await m3Build(page);
     // M4's likewise (m4Build)
     if (meta.round === 'm4' || M4_CARRIED.has(meta.id)) await m4Build(page);
+    // M5's likewise (m5Build)
+    if (meta.round === 'm5' || M5_CARRIED.has(meta.id)) await m5Build(page);
     const target = of?.() ?? page;
     await settle(target, meta.hover === true);
     if (meta.round === 'm1') await expect(page.locator('[data-settings-dialog]'), 'Settings open').toBeVisible({ timeout: 3_000 });
@@ -389,6 +398,18 @@ function whole(error: unknown): string {
 }
 // A step that stages a launch's state and failed: the whole error in the console, the scenes it was for not reached.
 const setupFailed = (what: string, error: unknown) => console.log(`[words] ${what} failed:\n${whole(error)}`);
+// A launch that stopped before some of its scenes ran (its app's start, its window's size or theme, a step outside every
+// scene): each such scene this run wanted is not reached with the launch's failure and loses an earlier run's picture,
+// so a rerun of the same build into the folder keeps no earlier success under its name (afterAll keeps a same-build
+// result this run did not take again). A scene that already has this run's result keeps it.
+function launchStopped(launch: string, ids: readonly string[], error: unknown) {
+  setupFailed(launch, error);
+  for (const id of ids) {
+    if (!wanted(id) || results.some((result) => result.id === id)) continue;
+    clearPicture(id);
+    results.push({ id, ok: false, error: `${launch} stopped: ${notReached(error)}` });
+  }
+}
 // Why a scene was not reached, as "<reason>: <what was found> · waiting for <locator>": a failed check's message (its
 // first line), what Playwright received ("element(s) not found", a viewport ratio, an attribute), so a miss says which
 // way it missed, and the locator it waited on (an assertion's `Locator:` line, else an action's first "waiting for"
@@ -812,6 +833,328 @@ const M4_CARRIED = new Set([
   'shell-tools-open', 'permissions-dialog', 'm0-dialog-rewind', 'm0-dialog-rename-index', 'r2-usage-popover', 'r2-palette', 'r2-shortcuts', 'r2-project-menu',
 ]);
 
+// ---- the word cut's M5: the library, an opened artifact, the document and dashboard editors ---------------------------
+// The m5 scenes' before is this rig, with its e2e support files, run against master's build, as the m1 to m4 scenes' is
+// (scenes.md). Each proves its named state on either build before its capture: on M5's build the reveal (a menu, a
+// glyph's tooltip, a sheet) and the state it is named for; on master's, the same state in master's terms, what master
+// draws there at rest, in view.
+//
+// Whether the build has M5's cut, read once, the first time a scene asks (m5Build), from whichever of M5's two surfaces
+// the window draws then: the library's head, whose type filter M5 made a funnel glyph (`data-library-type-filter`, G287;
+// master's is a worded button with no such mark), or an editor's saved slot, which M5 made one status with its state
+// (`data-saved-state`, panel/SavedStatus.tsx; master's slot carries words alone). The checkout says which side it is by
+// that module, absent from master's tree, and a build that draws the other side is refused (the m2 check's rule), every
+// m5 scene then not reached with why.
+let cut5: boolean | null = null;
+let cut5Refused: string | null = null;
+const M5_SOURCE = 'src/renderer/src/panel/SavedStatus.tsx';
+async function m5Build(page: Page): Promise<boolean> {
+  if (cut5 === null && cut5Refused === null) {
+    const head = page.locator('[data-library-header]');
+    const slot = page.locator('[data-header-saved]');
+    await expect(head.or(slot).first(), 'the library’s head or an editor’s saved slot').toBeAttached({ timeout: 10_000 });
+    const byHead = (await head.count()) > 0;
+    const drawn = byHead ? (await page.locator('[data-library-header] [data-library-type-filter]').count()) > 0 : (await page.locator('[data-header-saved][data-saved-state]').count()) > 0;
+    const source = existsSync(join(REPO_ROOT, M5_SOURCE));
+    const commit = headCommit();
+    const sign = byHead ? `the library’s type filter ${drawn ? 'is' : 'is not'} a funnel glyph` : `the editor’s saved slot ${drawn ? 'carries' : 'lacks'} its state`;
+    if (CACHE_KEY !== null && !commit.startsWith(CACHE_KEY)) cut5Refused = `out/ came from the build cache under key ${CACHE_KEY}, not this checkout's commit ${commit}`;
+    else if (drawn === source) cut5 = drawn;
+    else cut5Refused = `out/ is not this checkout's build: ${sign}, and the checkout ${source ? 'has' : 'lacks'} ${M5_SOURCE}`;
+    console.log(`[words] ${cut5Refused ?? `this build ${drawn ? 'draws' : 'does not draw'} the word cut's M5 (${sign})`}`);
+  }
+  if (cut5Refused !== null) throw new Error(cut5Refused);
+  return cut5!;
+}
+// why the build is not known, when a launch's read of it failed: the scenes that ask after it carry these words
+let cut5Unread: string | null = null;
+function m5Cut(): boolean {
+  if (cut5Refused !== null) throw new Error(cut5Refused);
+  if (cut5 === null) throw new Error(cut5Unread ?? 'the build is not known yet: no m5 scene has read it in this run');
+  return cut5;
+}
+const byM5 = <T,>(words: { m5: T; master: T }): T => (m5Cut() ? words.m5 : words.master);
+// Words of renderer and editor modules the e2e project does not list (tsconfig.e2e.json), written here with their source,
+// each as its build has it
+const M5_WORDS = {
+  // library/copy.ts LIBRARY_PAGE and KIND_PLURAL_LABELS, the same on both builds unless paired
+  typeFilter: 'Filter by type', // M5's funnel's name; master's button is named `Filter by type: <the kind or All types>`
+  allTypes: 'All types',
+  documents: 'Documents',
+  clearKind: (kind: string) => `Clear filter: ${kind}`, // M5's chip beside the search (G287)
+  viewLabel: 'View',
+  views: { all: 'All', pinned: 'Pinned', bySpace: 'By Space' },
+  newSpace: 'New Space', // the head's worded button, kept on both builds (G289 not built)
+  emptyPinned: 'Pin an artifact from its menu to keep it here.',
+  emptySpaces: 'A Space is a named folder for artifacts. Link it to a project folder and its artifacts are copied, read-only, into that folder’s artifacts/ directory, where agents can read them.',
+  linkedTo: 'Mirrored to ', // LIBRARY_PAGE.linkedTo's words before the folder (G295)
+  system: 'Design system: ', // LIBRARY_PAGE.systemOf's words before the system shown (N150)
+  systemDefault: ' · default', // LIBRARY_PAGE.systemDefault's words after the default system's name
+  // library/copy.ts SPACE_COPY (N151), both builds
+  spaceMenu: (name: string) => `Actions for the Space ${name}`,
+  instructions: 'Instructions…',
+  instructionsFor: (name: string) => `Instructions for “${name}”`,
+  receivers: 'Every agent on this Mac that makes or opens an artifact in this Space is given these, and whoever can read its session can read them.',
+  // the artifact tab (library/ArtifactTab.tsx): an agent's delete (N152), the owner's (G319)
+  agentDeleted: { m5: 'An agent deleted this artifact.', master: 'An agent deleted this artifact. It takes no edits until it is restored.' },
+  undo: 'Undo',
+  deleted: { m5: 'This artifact was deleted.', master: 'This artifact was deleted, or it is not in the library.' },
+  notFound: 'Artifact not found', // the tab's title, both builds
+  // the header's saved slot (panel/PanelHeader.tsx; M5's panel/SavedStatus.tsx)
+  saved: 'All changes saved', // both builds, in the editor's header (Acceptance 1)
+  general: 'General', // master's tools/document/DocumentPanel.tsx, the breadcrumb's home of a document in no Space (T608)
+  readOnly: 'Read-only', // master's word in a viewer's header, which M5 removed (T567, N191)
+  // tools/artifacts/viewers/copy.ts VIEWERS_COPY (T570, T571)
+  version: 'Version',
+  latest: (n: number) => `v${n} · latest`,
+  consoleErrors: { m5: '1 error', master: '1 console error' },
+  // tools/delivery Send to (T131): master's sentence under the targets, which M5 removed
+  sendsItself: 'MAWS sends it itself: no session, no Claude turn.',
+  // tools/document/DocumentPanel.tsx, a document with no tab (T617)
+  docEmpty: { m5: 'This document is empty.', master: 'This document has no content yet: it was created before MAWS gave every new document its first page.' },
+  // tools/dashboard/copy.ts DASHBOARD_COPY.legacy (T629)
+  legacy: { m5: 'An older dashboard, kept read-only. To keep working on it, ask an agent to rebuild it from these files:', master: 'This dashboard was made before dashboards were documents, so it is kept read-only, exactly as it is. It holds these files:' },
+  // tools/design export sheet (T632): M5's body; master's begins with the board's size
+  tooLarge: { m5: 'Too large for a PNG at full size.', master: '“Poster” is 1080 × 9000 px.' },
+  pngSelected: 'PNG (selected board)',
+  // the deck's More menu (T636): its check
+  checkDesign: { m5: 'Check design', master: 'Check against the design system' },
+  theme: 'Theme',
+  // the header's Export menu (T614, N95), both builds
+  exportMenu: 'Export',
+  markdown: 'Markdown (.md)',
+  compact: 'Compact',
+  // src/artifacts/document/editor/copy.ts (M5) and master's Toolbar.tsx literals
+  addComment: 'Add comment', // a glyph's name on M5, a worded button on master (G332)
+  commentNoSelection: 'Select text to comment on', // M5's reason in Add comment's tooltip
+  comments: 'Comments (', // the comments button's name, `Comments (N open)`, both builds (G333)
+  versionHistory: 'Version history', // the history button's name, both builds; master's word "History" (G335)
+  table: 'Table', // M5's one menu (G331)
+  tableCommands: ['Add row above', 'Add row below', 'Add column left', 'Add column right', 'Delete row', 'Delete column', 'Header row', 'Delete table'],
+  showEditors: 'Show editors',
+  editors: { m5: 'Editors', master: 'Editors of the selection' }, // G359
+  // the comments panel (G393 to G398)
+  search: { m5: 'Search', master: 'Search comments' },
+  deletedToggle: { m5: /^Deleted \(\d+\)$/, master: /^(Show|Hide) deleted-target comments$/ },
+  noOpen: { m5: 'No open comments. Select text and choose Add comment.', master: 'No open comments. Select text and choose Comment.' },
+  noResolved: { m5: 'No resolved comments', master: 'No resolved comments.' },
+  noMatches: { m5: 'No matches', master: 'No comments match the search.' },
+  removed: 'The commented passage was removed.', // master's line on an orphan's card; M5 strikes the quote through (G388)
+  reply: 'Reply',
+  resolve: 'Resolve', // comments/ThreadCard.tsx, an open card's action, both builds (G384)
+  // the history rail and preview bar (G373 to G380)
+  namedOnly: 'Named only',
+  noVersions: { m5: 'No versions', master: 'No versions yet.' },
+  noNamedVersions: { m5: 'No named versions', master: 'No named versions yet.' },
+  restoreName: 'Restore this version',
+  versionActions: 'Actions for this version', // M5's "…" (G379)
+  makeCopy: 'Make a copy',
+  nameVersion: 'Name this version',
+  backToDocument: 'Back to document',
+  restoreConfirm: 'Restore this version?',
+  // the dashboard's tiles and source sheet (G594 to G615)
+  piesFolded: { m5: /^Top 5 of 12 slices; the rest as “other”$/, master: /12 slices; the five largest are shown individually and the rest are drawn as one/ },
+  kept: 'The caption, comments and edits on this block are kept.', // master's line under a view that cannot be drawn (G599)
+  // render/render.ts's failure: the reason drawn in the view's frame, both builds (VIEW_STATES.needs)
+  pieNeedsSizes: 'a pie view needs a y column (the sizes)',
+  barMismatch: '2 of 8 values in revenue are not number', // states.ts DATASET_STATES.mismatches over SALES_CSV, both builds
+  closeSheet: 'Close', // the sheet's close: M5's × glyph's name, master's word, both its name
+  thisView: { m5: /^This view \(\d+\)$/, master: /^This view’s rows \(\d+\)$/ },
+  allRows: { m5: /^All rows \(\d+\)$/, master: /^All source rows \(\d+\)$/ },
+  copyRows: { m5: 'Copy', master: 'Copy rows' }, // the button's words; its name is "Copy rows" on both
+  noData: { m5: 'No data yet. Ask an agent to add a data file.', master: 'No data is bound to this dashboard yet. An agent binds a file with artifact_dataset.' },
+};
+// The scenes that existed before M5 and show its surfaces (scenes.md, "Existing scenes that show M5's surfaces"): M5's
+// evidence as much as its own `m5-` scenes, so each is refused on a build that is not the checkout's, as an m5 scene is
+const M5_CARRIED = new Set([
+  'artifacts-library', 'artifacts-library-hover', 'm0-library-more', 'artifact-document', 'm0-send-to', 'r2-deck', 'r2-doc-versions', 'm0-doc-version-preview',
+  'm0-doc-save-version', 'm0-dashboard-states', 'm0-dashboard-source-sheet',
+  // the slides editor's, the design workbench's and the design system page's
+  'r2-deck-element', 'm0-deck-check', 'm0-deck-theme', 'm0-presenter', 'r2-design', 'm0-design-held', 'm0-design-comments', 'r2-design-system', 'm0-ds-check',
+]);
+// The words the slides editor's, the design workbench's and the design system page's scenes read, per build, with
+// their source: M5's in src/artifacts/{slides,design,design-system} and renderer/src/artifacts/design-system, master's the
+// same files at f2b32d6c9. Neither build's editor copy is in the e2e project's list.
+// Add comment's chord as M5's tooltips write it after the word (formatChord, slides and design comments)
+const COMMENT_CHORD = formatChord('Cmd+Alt+M');
+const M5_EDITOR_WORDS = {
+  // slides/editor/copy.ts DECK_COPY
+  deckToolbar: 'Deck', // the deck's toolbar, both builds
+  historyName: 'Version history', // the History control's name, both builds; master's word "History" (G402)
+  inspector: 'Inspector', // the Inspector control's name, both builds; master's word too (G401)
+  zoomShown: { m5: /^\d+%$/, master: /^Fit \(\d+%\)$/ }, // the chosen option while Fit is (G400)
+  fit: 'Fit',
+  insert: 'Insert',
+  tableTrigger: 'Table ›', // Insert's submenu (menus/Insert.tsx), both builds
+  tableName: '2 × 3 table',
+  tableWords: { m5: '2 × 3', master: '2 × 3 table' }, // G411
+  fromLayout: 'From layout',
+  slideMenu: { m5: ['Duplicate', 'Hide', 'New section here', 'Delete'], master: ['Duplicate slide', 'Hide slide', 'Start a section here', 'Delete slide'] }, // G428
+  slideOptions: (n: number) => `Slide ${n} options`,
+  heldBanner: {
+    m5: 'Showing the last good version (read-only). The agent’s next valid file fixes it.',
+    master: 'This slide’s file does not load, so it shows its last good version, read-only. The agent’s next valid file for it clears this.',
+  }, // G431
+  heldDetails: 'Details', // G432
+  hidden: 'Hidden', // master's badge on a hidden slide's thumbnail (G424)
+  renameSection: (name: string) => `Rename section ${name}`,
+  rename: 'Rename', // master's word on the section's rename (G429)
+  notes: 'Speaker notes', // the disclosure's and the field's name, both builds; master's placeholder too (G436)
+  notesTooLong: { m5: 'Too long to save: 4,312 / 4,000', master: 'Speaker notes hold at most 4,000 characters; these have 4,312. Shorten them to save.' }, // G437
+  emptyDeck: { m5: 'No slides yet', master: 'This deck has no slides yet.' }, // G433
+  newSlide: 'New slide',
+  deckFull: 'A deck holds at most 500 slides: delete one to add another.', // G423, both builds
+  saved: { m5: 'All changes saved', master: 'Saved' }, // the deck's toolbar (panel/PanelHeader.tsx's toolbar host; T607)
+  // inspector/copy.ts
+  closeInspector: 'Close inspector',
+  sizeCaption: { m5: 'Size', master: 'Font size' }, // G442: the Text section's captions
+  weightCaption: { m5: 'Weight', master: 'Font weight' },
+  fontSizeName: 'Font size', // the size field's name, both builds
+  outlineShadow: 'This shape’s shadow is drawn from its outline, which casts no inset shadow and no spread.', // G450, both builds
+  shadowSpread: 'Shadow spread',
+  // menus/copy.ts CHECK_COPY and THEME_COPY
+  checkTitle: { m5: 'Check', master: 'Check against the design system' }, // G471
+  checkSummary: { m5: /^(\d+ issues?|No issues · \d+ rules?)$/, master: /^(\d+ violations? of \d+ checked rules?\.|The deck keeps every checked rule \(\d+\)\.)$/ }, // G472
+  byHand: { m5: 'By hand', master: 'To judge by hand' }, // G475
+  resetAll: { m5: 'Reset all', master: 'Use the system’s colours and faces' }, // G468
+  displayCaption: { m5: 'Display', master: 'Display face' }, // G463
+  // comments/copy.ts COMMENTS_COPY
+  addComment: 'Add comment',
+  commentTip: 'Comment on the selected element', // M5's Add comment tooltip, its chord after it (G403)
+  commentTitle: 'Comment on the selected element (⌥⌘M)', // master's Add comment `title`
+  commentUnavailable: 'Select one element to comment on', // M5's reason on the greyed glyph (G403)
+  commentsName: /^Comments \((\d+) open\)$/,
+  commentsWords: /^Comments \d+$/, // master's toggle (G404)
+  commentsEmpty: 'No open comments. Select an element and choose Add comment.', // G478, both builds
+  showDeleted: { m5: 'Show deleted', master: 'Show deleted-target comments' }, // the toggle's words (G479)
+  showDeletedName: 'Show deleted-target comments',
+  orphan: { m5: 'Element deleted', master: 'The commented element was deleted.' }, // G481
+  reply: 'Reply',
+  closeComments: 'Close comments',
+  // history/copy.ts HISTORY_COPY (the deck's version bar)
+  restore: 'Restore this version',
+  restoreWords: 'Restore',
+  done: { m5: 'Done, back to presentation', master: 'Back to presentation' }, // G490
+  doneWords: { m5: 'Done', master: 'Back to presentation' },
+  doneTip: 'Back to presentation',
+  nameVersion: 'Name this version',
+  nameField: 'Version name',
+  namePlaceholder: { m5: 'Version name', master: 'Name, e.g. Before the review' }, // G492
+  nextChange: 'Next change',
+  noNotes: 'No speaker notes.', // a version's slide with no notes (G495), both builds
+  stepped: { m5: /^1 \/ 1$/, master: /^1 of 1 changes$/ }, // G489: Draft's one change
+  // design/editor/copy.ts DESIGN_COPY
+  boardsToggle: 'Boards', // the toggle's name and the rail's heading, both builds
+  addBoard: 'Add board',
+  zoomToBoard: 'Zoom to board', // a board row's menu, both builds
+  boardsTitle: { m5: 'Boards', master: 'Show boards' }, // G510
+  designComment: { m5: 'On Tablet', master: 'Comment on board Tablet (⌥⌘M)' }, // G514: M5's tooltip line, master's `title`
+  boardMenu: { m5: ['Duplicate', 'Delete'], master: ['Duplicate board', 'Delete board'] }, // G525
+  boardOptions: (label: string) => `Board ${label} options`, // the row's ⋯, both builds
+  boardSize: { m5: 'Size', master: 'Board size' }, // G538: the select's caption
+  boardSizeName: 'Board size',
+  boardWidth: 'Board width',
+  boardName: 'Board name', // the inspector's name field, both builds
+  oversize: { m5: /^At most 16,384 px a side$/, master: /^board tablet: w is 20000 px \(over 16384 px a side\)$/ }, // G539
+  designHeld: {
+    m5: 'This board’s file doesn’t load; showing its last good version.',
+    master: 'This board’s file does not load, so it shows its last good version, read-only. The agent’s next valid file for it clears this.',
+  }, // G533
+  designMissing: { m5: 'This board’s file hasn’t arrived yet.', master: 'The design names this board but its file never arrived, so it has nothing to edit yet. The agent’s file for it fills it.' }, // G535
+  fileNotReceived: 'File not received', // G524, both builds
+  noBoards: 'This design has no boards yet.', // G526, both builds
+  designEmpty: { m5: 'No open comments. Select a board or an element and choose Add comment.', master: 'No open comments. Select a board or an element and choose Comment.' }, // G542
+  boardThread: { m5: null, master: 'Board Tablet' }, // G543; on M5 a board's own thread has no location line, its quote the board's name (the pair review)
+  boardThreadQuote: 'Tablet', // both builds
+  deletedBoard: 'A deleted board',
+  orphanBoard: 'The commented board was deleted.', // master's note on a deleted board's thread (G545)
+  historyBoards: { m5: 'Boards', master: 'Boards in this version' }, // G549
+  // design-system: renderer/src/artifacts/design-system/copy.ts and src/artifacts/design-system/page
+  dsCheck: 'Check against law',
+  documentCaption: { m5: 'components/document.css', master: 'components/document.css on a sample handout' }, // G577
+  accentHex: '--ds-color-accent hex', // the palette's accent field (page/Palette.tsx), both builds
+  dsSetDefault: 'Set as my default',
+  dsDelete: 'Delete design system…',
+  dsAlreadyDefault: 'Already your default', // M5's reason on the default's star (G558)
+  dsEmpty: { m5: 'This design system is empty', master: 'Loading the design system…' }, // G562
+  dsEmptyNext: 'Ask Claude to publish a design system here.', // M5's line under it (G562)
+  dsUnresolved: { m5: '1 token doesn’t resolve', master: /^One token does not resolve: / }, // G565
+  dsVerdict: { m5: /^(Meets|Below) [\d.]+ : 1$/, master: /^(meets|below) [\d.]+ : 1$/ }, // G568
+  dsCanonEmpty: { m5: 'None yet', master: 'No layouts, components or document styles yet.' }, // G575
+  dsNoLaw: { m5: 'No law yet', master: /^No law yet\. A system’s law is written, never generated/ }, // G579
+  dsPassed: { m5: /^✓ \d+$/, master: /^The canon keeps every checked rule \(\d+\)\.$/ }, // G584
+  dsPassedName: /^The canon keeps every checked rule \(\d+\)\.$/,
+  dsTag: '[check: literal-color]', // G585: M5's tooltip on the law's words, master's words after them
+  dsByHand: { m5: 'By hand', master: 'To judge by hand' }, // G586
+  dsUnknown: 'Tags MAWS cannot run', // master's second list (G587)
+  confirmDelete: 'Delete', // the delete's first question, both builds
+  inUse: 'Still in use',
+  inUseList: 'Artifacts styled by this system',
+  moveTo: 'Move them to…',
+  theirDefaults: { m5: 'Their default system', master: 'Their defaults (the Space’s, else yours)' }, // G591
+};
+const m5Meta = (id: string, rows: string, title: string, how: string, state: string, folders: string[], hover = false): Meta => m5({ id, title, how, state: `${state} (${rows})`, folders, ...(hover ? { hover } : {}) });
+// The library's head and its two choices, the view and the kind, put back to All and All types: a scene of the library
+// starts from there whatever the one before it chose (the choices live in the window's store, not in the profile).
+const libraryHead = (page: Page) => page.locator('[data-library-header]').first();
+const typeFilter = (page: Page) => libraryHead(page).locator(`button[aria-label^="${M5_WORDS.typeFilter}"]`).first();
+const kindMenu = (page: Page) => page.getByRole('menu').filter({ has: page.getByRole('menuitemradio', { name: new RegExp(`^${literal(M5_WORDS.allTypes)}`) }) }).first();
+// The view switch, the same on both builds (library/LibraryHeader.tsx, ViewSwitch): Radix's single ToggleGroup, which
+// draws a radiogroup named View and each view a radio, checked while shown (e2e/library.spec.ts reaches it so).
+async function libraryView(page: Page, view: keyof typeof M5_WORDS.views) {
+  const item = libraryHead(page).getByRole('radiogroup', { name: M5_WORDS.viewLabel, exact: true }).getByRole('radio', { name: M5_WORDS.views[view], exact: true });
+  if ((await item.getAttribute('aria-checked', { timeout: 10_000 })) !== 'true') await item.click();
+  await expect(item, `the ${M5_WORDS.views[view]} view`).toHaveAttribute('aria-checked', 'true', { timeout: 5_000 });
+}
+async function libraryKind(page: Page, kind: string | null) {
+  await typeFilter(page).click();
+  await expect(kindMenu(page), 'the type menu').toBeVisible({ timeout: 5_000 });
+  await kindMenu(page).getByRole('menuitemradio', { name: new RegExp(`^${literal(kind ?? M5_WORDS.allTypes)}`) }).click();
+  await expect(kindMenu(page), 'the type menu closed').toHaveCount(0, { timeout: 5_000 });
+}
+async function libraryAtRest(app: ElectronApplication, page: Page) {
+  await closeOverlays(page);
+  await library(app, page);
+  await libraryView(page, 'all');
+  if ((await typeFilter(page).getAttribute('aria-pressed')) === 'true') await libraryKind(page, null);
+}
+// An artifact's row in the library's list, scrolled to as a person scrolls to it. The list mounts only the rows near
+// its scroll (library/Rows.tsx, a virtualiser, on both builds), so an artifact far down it (the bundled systems, made
+// with the profile, under every fixture made since) has no row until the list is scrolled to it: from the top, a screen
+// at a time, until it is mounted or the list ends, and again while the list has not yet read a new artifact.
+async function libraryRow(page: Page, id: string): Promise<Locator> {
+  const row = page.locator(`[data-library] article[data-artifact-row="${id}"]`);
+  const scroller = page.locator('[data-library] [data-library-scroller]').first();
+  const deadline = Date.now() + 20_000;
+  while ((await row.count()) === 0) {
+    if (Date.now() > deadline) throw new Error(`no row for ${id} anywhere in the library’s list`);
+    await scroller.evaluate((el) => el.scrollTo({ top: 0, behavior: 'instant' }));
+    await page.waitForTimeout(100);
+    for (let moved = true; moved && (await row.count()) === 0; ) {
+      moved = await scroller.evaluate((el) => {
+        const before = el.scrollTop;
+        el.scrollTo({ top: before + el.clientHeight * 0.8, behavior: 'instant' });
+        return el.scrollTop !== before;
+      });
+      await page.waitForTimeout(100);
+    }
+    if ((await row.count()) === 0) await page.waitForTimeout(500);
+  }
+  return row;
+}
+// The build read where its sign is sure to be drawn, the library's head, before a launch's first scene that asks: an
+// editor's saved state is drawn only once the editor has saved, so a carried editor scene taken alone (WORDS_ONLY)
+// would otherwise find neither sign. Only when the launch takes such a scene.
+async function readM5(app: ElectronApplication, page: Page, ids: readonly string[]) {
+  if (!ids.some(wanted)) return;
+  await library(app, page)
+    .then(() => m5Build(page))
+    .catch((error: unknown) => {
+      setupFailed('reading the build (M5)', error);
+      cut5Unread ??= `reading the build failed: ${notReached(error)}`;
+    });
+}
+
 // Escape only while an overlay is open. Since the UX wave's U1b, Escape on a waiting request's row (or on nothing while
 // its pane holds the keyboard) denies the request (request-card/prompt-guard.ts), so a bare Escape could answer one.
 // The pointer is moved aside first: what it holds open (a sidebar row's hover card, a tooltip) closes on its own once it
@@ -993,7 +1336,7 @@ test.afterAll(() => {
   }
   const kept = [...untaken.filter((old) => old.build === build), ...fresh];
   const screens = [...all.screens.filter((o) => !META.some((f) => f.id === o.id)), ...META].filter((screen) => kept.some((result) => result.id === screen.id));
-  const run: Run = { at: new Date().toISOString(), ...identity, m1: cut, m2: cut2, m3: cut3, m4: cut4, scenes: results.map((result) => result.id) };
+  const run: Run = { at: new Date().toISOString(), ...identity, m1: cut, m2: cut2, m3: cut3, m4: cut4, m5: cut5, scenes: results.map((result) => result.id) };
   writeFileSync(join(OUT, '_run.json'), JSON.stringify({ results: kept, screens, runs: [...(all.runs ?? []), run], stale: [...(all.stale ?? []), ...stale] }, null, 2));
 });
 // What each run into the folder photographed (fix wave, scalpel-5#3), so a before and an after taken from one out/ (a
@@ -1001,7 +1344,7 @@ test.afterAll(() => {
 // it changed (the before's rig and e2e/support, taken from the branch), a digest of out/'s files, the cache key out/
 // came under, and which cut each build check read (null where no scene read it). An m2 scene refuses a cached out/
 // whose key is not the checkout's commit (m2Build).
-type Run = { at: string; commit: string; changed: string[]; out: string; cacheKey: string | null; m1: boolean | null; m2: boolean | null; m3: boolean | null; m4: boolean | null; scenes: string[] };
+type Run = { at: string; commit: string; changed: string[]; out: string; cacheKey: string | null; m1: boolean | null; m2: boolean | null; m3: boolean | null; m4: boolean | null; m5: boolean | null; scenes: string[] };
 // The key out/ was restored or stored under when scripts/e2e-build.sh's cache was on (the commit that built it), else
 // null: out/ was built from this checkout
 const CACHE_KEY = process.env.MAWS_E2E_BUILD_CACHE && process.env.MAWS_E2E_BUILD_KEY ? process.env.MAWS_E2E_BUILD_KEY : null;
@@ -2442,6 +2785,7 @@ test('replay: transcripts, the right column, the Artifacts library and an editor
       )) as { ok: boolean; value?: { artifact: { id: string } } };
       if (html.ok) created.push(html.value!.artifact.id);
     }
+    await readM5(app, page, ['artifacts-library', 'artifacts-library-hover', 'm0-library-more', 'm5-library-head-more', 'm5-library-kind', 'm5-library-kind-menu', 'm5-library-pinned', 'm5-library-spaces-none', 'm5-library-system-menu', 'artifact-document', 'm0-send-to']);
     const make = page.locator('section[aria-labelledby="library-make"]').first();
     await shot(page, { id: 'artifacts-library', title: 'Artifacts library', how: 'Artifacts in the sidebar, or View › Artifacts', state: 'Five artifacts made in this profile and the seeded design systems; above them Make something new: four cards and More, with the design-system choice', folders: ['library', 'artifacts', 'destination'] }, async () => {
       await library(app, page);
@@ -2458,6 +2802,80 @@ test('replay: transcripts, the right column, the Artifacts library and an editor
       await expect(page.locator('[role="menu"]').first()).toBeVisible({ timeout: 5_000 });
     });
     await closeOverlays(page);
+    // ---- the word cut's M5: the library's head (G287, G289), its empty views (G309, G310) and the design-system choice
+    // (N150). Each starts from All and All types (libraryAtRest), and the ones that leave them put them back.
+    const kindChosen = () => (m5Cut() ? libraryHead(page).locator('[data-library-kind-chip="document"]') : libraryHead(page).locator(`button[aria-label="${M5_WORDS.typeFilter}: ${M5_WORDS.documents}"]`));
+    const backAtRest = async () => {
+      await closeOverlays(page);
+      await libraryAtRest(app, page);
+    };
+    // the list itself narrowed: a document's row in view and no other kind's left (a slow read keeps All types' rows
+    // under a pressed control), read from the rows' kind, which both builds draw
+    const narrowedToDocuments = async () => {
+      await expect(page.locator('[data-library] article[data-artifact-row]:not([data-kind="document"])'), 'no row of another kind').toHaveCount(0, { timeout: 10_000 });
+      await inView(page.locator('[data-library] article[data-artifact-row][data-kind="document"]'), 'a document’s row');
+    };
+    await shot(page, m5Meta('m5-library-head-more', 'G289, G290, G291', 'Artifacts library, the head and Make something new’s More menu', 'Artifacts, All, the last button of Make something new', 'The page’s head (the view switch, the search, the type filter, New Space) over the strip, its More menu open: whether New Space moves into that menu is the owner’s call by this picture', ['library']), async () => {
+      await libraryAtRest(app, page);
+      await make.locator('> div:last-child > button').last().click();
+    }, {
+      check: async () => {
+        await expect(page.getByRole('menu').first(), 'the More menu').toBeVisible({ timeout: 3_000 });
+        await inView(libraryHead(page).getByRole('button', { name: M5_WORDS.newSpace, exact: true }), 'New Space in the head');
+        await inView(typeFilter(page), 'the type filter');
+      },
+      after: () => closeOverlays(page),
+    });
+    await shot(page, m5Meta('m5-library-kind', 'G287', 'Artifacts library narrowed to documents', 'Artifacts, the type filter, Documents', 'The list narrowed to documents: on M5 the funnel pressed and the Documents chip beside the search, which clears it; master’s button reads Documents', ['library']), async () => {
+      await libraryAtRest(app, page);
+      await libraryKind(page, M5_WORDS.documents);
+    }, {
+      check: async () => {
+        await expect(typeFilter(page), 'the type filter pressed').toHaveAttribute('aria-pressed', 'true', { timeout: 3_000 });
+        await inView(kindChosen(), m5Cut() ? 'the Documents chip' : 'master’s button naming Documents');
+        if (m5Cut()) await expect(kindChosen().first(), 'the chip named by what it does').toHaveAccessibleName(M5_WORDS.clearKind(M5_WORDS.documents), { timeout: 3_000 });
+        await narrowedToDocuments();
+      },
+      after: backAtRest,
+    });
+    await shot(page, m5Meta('m5-library-kind-menu', 'G287', 'Artifacts library, the type menu with Documents chosen', 'Artifacts, the type filter, Documents, then the type filter again', 'The type menu open over the narrowed list: All types, then the seven kinds with their counts, Documents ticked', ['library']), async () => {
+      await libraryAtRest(app, page);
+      await libraryKind(page, M5_WORDS.documents);
+      await typeFilter(page).click();
+    }, {
+      check: async () => {
+        await expect(kindMenu(page), 'the type menu').toBeVisible({ timeout: 3_000 });
+        await expect(kindMenu(page).getByRole('menuitemradio', { name: new RegExp(`^${literal(M5_WORDS.documents)}`) }), 'Documents ticked').toHaveAttribute('aria-checked', 'true', { timeout: 3_000 });
+        await narrowedToDocuments();
+      },
+      after: backAtRest,
+    });
+    await shot(page, m5Meta('m5-library-pinned', 'G310', 'Artifacts library, Pinned with nothing pinned', 'Artifacts, Pinned', 'The Pinned view with nothing pinned: its line saying how to pin', ['library']), async () => {
+      await libraryAtRest(app, page);
+      await libraryView(page, 'pinned');
+    }, {
+      check: () => inView(page.locator('[data-library]').getByText(M5_WORDS.emptyPinned, { exact: true }), 'the empty Pinned line'),
+      after: backAtRest,
+    });
+    await shot(page, m5Meta('m5-library-spaces-none', 'G309', 'Artifacts library, By Space with no Space', 'Artifacts, By Space (this profile has no Space)', 'The By Space view with no Space: its line saying what a Space is', ['library']), async () => {
+      await libraryAtRest(app, page);
+      await libraryView(page, 'bySpace');
+    }, {
+      check: () => inView(page.locator('[data-library]').getByText(M5_WORDS.emptySpaces, { exact: true }), 'the empty By Space line'),
+      after: backAtRest,
+    });
+    const systemChoice = () => make.locator(`button[aria-label^="${M5_WORDS.system}"]`).first();
+    await shot(page, m5Meta('m5-library-system-menu', 'N150', 'Artifacts library, the design-system choice open', 'Artifacts, All, the design-system choice of Make something new', 'The design-system menu open over the strip: the bundled system marked default and the seeded ones', ['library', 'artifacts/design-system']), async () => {
+      await libraryAtRest(app, page);
+      await systemChoice().click();
+    }, {
+      check: async () => {
+        const opened = page.getByRole('menu').first();
+        await expect(opened, 'the design-system menu').toBeVisible({ timeout: 3_000 });
+        await inView(opened.getByRole('menuitemradio', { name: new RegExp(literal(M5_WORDS.systemDefault)) }), 'the default system’s choice');
+      },
+      after: backAtRest,
+    });
     await shot(page, { id: 'artifact-document', title: 'A document artifact open', how: 'Click a document in the Artifacts library', state: 'The document editor with one paragraph typed', folders: ['artifacts', 'library', 'tools/document', 'src/artifacts/document/editor'] }, async () => {
       await library(app, page);
       await page.locator(`[data-library] article[data-artifact-row="${created[0]}"]`).click();
@@ -3206,6 +3624,10 @@ test('round 2: running agents and shells, the queue, a blocked command, Source c
     } catch (error) {
       setupFailed('seeding', error);
     }
+    await readM5(app, page, [
+      'r2-deck', 'r2-deck-element', 'm0-deck-check', 'm0-deck-theme', 'm0-presenter', 'r2-design', 'm0-design-held', 'm0-design-comments', 'r2-design-system', 'm0-ds-check',
+      'r2-doc-versions', 'm0-doc-version-preview', 'm0-doc-save-version', 'm0-dashboard-states', 'm0-dashboard-source-sheet',
+    ]);
     await shot(page, r2({ id: 'r2-deck', title: 'A presentation open in the slides editor', how: 'Click a presentation in the Artifacts library', state: 'A six-slide deck, its first slide selected', folders: ['tools/presentation', 'artifacts', 'src/artifacts/slides/editor'] }), async () => {
       await openArtifact(created.deck!);
       await expect(page.locator('[data-deck-editor]').first()).toBeVisible({ timeout: 20_000 });
@@ -3222,10 +3644,18 @@ test('round 2: running agents and shells, the queue, a blocked command, Source c
       await openArtifact(created.review!);
       const t = tab(created.review!);
       await t.locator('[data-slide-thumb="broken"] .deck-thumb-button').first().click();
-      await soft(t.locator('[data-held-banner]'), 'the held banner');
+      await expect(t.locator('[data-held-banner]').first(), 'the held banner').toBeVisible({ timeout: 10_000 });
       await t.locator('.deck-toolbar [data-editor-toolbar] [data-editor-more]').first().click();
       await page.locator('[role="menu"] [role="menuitemcheckbox"]').nth(1).click();
       await expect(t.locator('[data-deck-rail="check"]').first()).toBeVisible({ timeout: 10_000 });
+    }, {
+      // G425 names this scene: the held slide's thumbnail with its Held badge (kept on both builds), and its banner
+      check: async () => {
+        const t = tab(created.review!);
+        await inView(t.locator('[data-slide-thumb="broken"] .deck-thumb-badge').filter({ hasText: /^Held$/ }), 'the held slide’s Held');
+        await inView(t.locator('[data-held-banner]'), 'the held banner');
+        await inView(t.locator('[data-deck-rail="check"]'), 'the Check rail');
+      },
     });
     await closeOverlays(page);
     await shot(page, m0({ id: 'm0-deck-theme', title: 'Slides editor, the Theme rail and a thumbnail’s menu', how: 'The same deck, More › Theme, then a thumbnail’s menu', state: 'The Theme rail open; the second slide’s thumbnail menu open', folders: ['tools/presentation', 'src/artifacts/slides/editor'] }), async () => {
@@ -3270,16 +3700,16 @@ test('round 2: running agents and shells, the queue, a blocked command, Source c
       await soft(tab(created.design!).locator('[data-board-inspector]'), 'the board inspector');
     });
     const commentsRail = () => tab(created.design!).locator('[data-deck-rail="comments"]').first();
-    await shot(page, m0({ id: 'm0-design-comments', title: 'Design workbench, the comments rail', how: 'The design with two comments, Comments in its toolbar', state: 'Two threads on the desktop board in the comments rail', folders: ['tools/design', 'src/artifacts/design/editor'] }), async () => {
+    await shot(page, m0({ id: 'm0-design-comments', title: 'Design workbench, the comments rail', how: 'The design with two comments, the header’s count of them', state: 'Two threads on the desktop board in the comments rail', folders: ['tools/design', 'src/artifacts/design/editor'] }), async () => {
       if (!(await tab(created.design!).isVisible().catch(() => false))) await openArtifact(created.design!);
       // the threads as the design's seam reads them, so a retry adds none twice
       const have = new Set((await threadsOf(page, created.design!)).map((thread) => thread.id));
       if (!have.has('on-a')) await editDesign(page, created.design!, { op: 'addThread', threadId: 'on-a', boardId: 'desktop', elementId: 'a', body: 'Can the headline sit higher?' });
       if (!have.has('on-b')) await editDesign(page, created.design!, { op: 'addThread', threadId: 'on-b', boardId: 'desktop', elementId: 'b', body: 'The button reads small here.' });
-      // The workbench's own Comments in its toolbar (design/editor/comments.tsx, DesignCommentButtons), pressed while the
-      // rail is open. Not the header's action: while a thread is open the header draws the comments action as its count
-      // instead, a button with no `data-editor-action` (panel/PanelHeader.tsx, CommentCount), on both builds.
-      const toggle = tab(created.design!).locator('[data-comments-toggle]').first();
+      // The header's count of open comments, which opens the rail on both builds: while a thread is open the header draws
+      // the comments action as its count, a button pressed while the rail is open (panel/PanelHeader.tsx, CommentCount).
+      // Not the workbench's own toolbar button, which M5 removed (G512).
+      const toggle = page.locator('[data-region="main"] [data-editor-header]').filter({ visible: true }).getByRole('button', { name: /^\d+ open comments?$/ }).first();
       if ((await toggle.getAttribute('aria-pressed', { timeout: 10_000 })) !== 'true') await toggle.click();
       await expect(commentsRail(), 'the comments rail').toBeVisible({ timeout: 10_000 });
     }, {
@@ -5836,6 +6266,1883 @@ test('the tool card retired: lone calls failed, denied, a js call, an image, a r
         }, { check: running(), after: stop('rvrun') });
       }
     }
+  } finally {
+    await maws.cleanup();
+  }
+});
+
+// ======================================================================================================================
+// Launch 16: the word cut's M5. A fresh profile of its own, its artifacts made through the store's e2e seams: a document
+// with a table, a callout and comment threads (one resolved, one whose passage was removed) seeded through the scale
+// gate's host seam (support/words-doc.ts) with a named version; a blank document; a document and a dashboard for the
+// saves alone; an old document with no page; a dashboard over two CSV sources with three views (a column of the wrong
+// type, a pie of twelve slices, a view that cannot be drawn); a dashboard with nothing bound; a dashboard of the old
+// format; an HTML page in two versions whose second logs a warning and an error; the bench deck; the design with a poster
+// too tall for a PNG; a Space linked to a folder; an agent's draft (the dashboard seam's agent tools); decks
+// (threads on elements, sections and a held slide, a version, no slides, 500 slides), designs (threads and a version, a
+// board whose file never arrived, no boards) and design systems (an agent's with a violation, with an alias to nothing,
+// with tokens alone; one made empty; the bundled Official with a deck it styles). Each is made the
+// first time a scene needs it (`ensure`), so a fixture that fails leaves only its own scenes not reached, with its
+// failure's words. The profile is removed first, so both builds start from the same store.
+// ======================================================================================================================
+const M5_LAUNCH = [
+  'm5-library-space', 'm5-library-space-instructions', 'm5-artifact-html', 'm5-artifact-deck', 'm5-artifact-send-to', 'm5-artifact-design-too-large', 'm5-artifact-doc-empty',
+  'm5-artifact-legacy-dashboard', 'm5-artifact-agent-deleted', 'm5-doc-rest', 'm5-doc-comment-tip', 'm5-doc-history-tip', 'm5-doc-table-menu', 'm5-doc-editors', 'm5-doc-comments',
+  'm5-doc-comments-deleted', 'm5-doc-margin-active', 'm5-doc-comments-nomatch', 'm5-doc-export-menu', 'm5-doc-version-actions', 'm5-doc-restore-confirm', 'm5-doc-restored',
+  'm5-doc-saved', 'm5-doc-comments-empty', 'm5-doc-comments-resolved', 'm5-doc-versions-named', 'm5-dash-tiles', 'm5-dash-warning', 'm5-dash-unrenderable', 'm5-dash-sheet',
+  'm5-dash-sheet-picker', 'm5-dash-export-menu', 'm5-dash-pie-note', 'm5-dash-selected', 'm5-dash-saved', 'm5-dash-sheet-empty',
+  'm5-slides-rest', 'm5-slides-zoom-tip', 'm5-slides-comment-tip', 'm5-slides-insert-table', 'm5-slides-layouts', 'm5-slides-element', 'm5-slides-shadow-tip',
+  'm5-slides-thumb-menu', 'm5-slides-held', 'm5-slides-section-tip', 'm5-slides-check', 'm5-slides-theme', 'm5-slides-comments', 'm5-slides-comments-deleted',
+  'm5-slides-comments-empty', 'm5-slides-version', 'm5-slides-version-done-tip', 'm5-slides-version-name', 'm5-slides-notes', 'm5-slides-notes-long', 'm5-slides-saved',
+  'm5-slides-empty', 'm5-design-rest', 'm5-design-board', 'm5-design-board-tip', 'm5-design-board-menu', 'm5-design-row-size', 'm5-design-held', 'm5-design-oversize',
+  'm5-design-missing', 'm5-design-empty', 'm5-design-comments', 'm5-design-comments-deleted', 'm5-design-comments-empty', 'm5-design-version', 'm5-design-saved', 'm5-design-held-title', 'm5-ds-rest',
+  'm5-ds-header-tip', 'm5-ds-default-tip', 'm5-ds-badge-tip', 'm5-ds-check', 'm5-ds-check-tip', 'm5-ds-violations', 'm5-ds-violation-tip', 'm5-ds-unresolved',
+  'm5-ds-lawless', 'm5-ds-empty', 'm5-ds-saved', 'm5-ds-canon', 'm5-ds-in-use', 'm5-slides-full',
+  'm5-artifact-deleted',
+];
+const SPACE = 'Field research';
+const DRAFTER = 'words-drafter'; // the agent's session, as the dashboard seam names it
+// The HTML page's second version: a warning and an error in its console (T571)
+const STATUS_PAGE = (line: string, script = '') => `<!doctype html><meta charset="utf-8"><title>Status</title><h1>Status</h1><p>${line}</p>${script}`;
+const SALES_CSV = 'region,revenue\nNorth,120\nSouth,98\nEast,n/a\nWest,40\nCentre,77\nCoast,n/a\nHills,64\nPlains,51\n';
+const VISITS_CSV = `channel,visits\n${['Search', 'Direct', 'Email', 'Social', 'Partners', 'Ads', 'Events', 'Print', 'Radio', 'Podcasts', 'Referrals', 'Other sites'].map((name, i) => `${name},${(12 - i) * 37}`).join('\n')}\n`;
+// The slides editor's decks. Field talk: a title, a body and an ellipse that casts a shadow (G450: drawn from its outline, so no
+// spread), its threads written through the design seam (the deck's own thread model, slides/threads.ts). Each deck file's
+// colours are literals no design system names, so the Check finds issues on both builds (literal-color).
+const DECK_AT = '2026-10-14T09:00:00Z';
+const deckJson = (title: string, order: string[]) => JSON.stringify({ v: 4, createdOnFiles: { v: 1, at: DECK_AT }, title, ...(order.length > 0 && { cover: order[0] }), order });
+const TALK_FILES: Record<string, string> = {
+  'project/deck.json': deckJson('Field talk', ['s1', 's2']),
+  'project/slides/s1.html': '<section id="s1" style="background:#ffffff; padding:128px"><h2 id="title" style="font-size:72px">Field talk</h2><p id="body" style="position:absolute; left:300px; top:500px; width:500px; height:120px; font-size:48px">Three sites, one week</p><x-shape id="dot" kind="ellipse" style="position:absolute; left:1300px; top:420px; width:320px; height:320px; background:#2b7a78; box-shadow:4px 6px 12px #00000040"></x-shape></section>',
+  'project/slides/s2.html': '<section id="s2" style="background:#ffffff; padding:128px"><h2 id="t2" style="font-size:72px">Findings</h2></section>',
+};
+// launch 4's planning deck (sections, a hidden slide, a held one) with one more slide whose heading is a colour no system has,
+// and a border colour of its own
+function checkDeckFiles(): Record<string, string> {
+  const files = deckFiles();
+  const deck = JSON.parse(files['project/deck.json']!) as { order: string[]; dsOverrides?: Record<string, string> };
+  deck.order = [...deck.order, 'loud'];
+  // the deck's own border colour over its system's (X28's dsOverrides), so Theme draws its reset, which both builds
+  // draw only while the deck overrides a colour or a face (menus/Theme.tsx)
+  deck.dsOverrides = { '--ds-color-border': '#c9b8a6' };
+  files['project/deck.json'] = JSON.stringify(deck);
+  files['project/slides/loud.html'] = '<section id="loud" style="background:#ffffff; padding:128px"><h2 id="l" style="font-size:64px; color:#7a1f5c">Late deliveries</h2></section>';
+  return files;
+}
+// A deck at its limit of 500 slides (DECK_LIMITS.slides), each one heading
+function fullDeckFiles(): Record<string, string> {
+  const ids = Array.from({ length: 500 }, (_, i) => `s${String(i + 1).padStart(3, '0')}`);
+  const files: Record<string, string> = { 'project/deck.json': deckJson('Every week', ids) };
+  ids.forEach((id, i) => (files[`project/slides/${id}.html`] = `<section id="${id}" style="background:#ffffff; padding:128px"><h2 id="h${id}" style="font-size:72px">Week ${i + 1}</h2></section>`));
+  return files;
+}
+// The design system page's systems, made by an agent's artifact_create from the bundled MAWS system's files (read from this
+// checkout, the same files on both builds): one whose canon breaks a rule and whose law has a tag MAWS cannot run, one
+// whose token file has an alias to nothing, and one with tokens alone (no law, no canon).
+const MAWS_SYSTEM_DIR = join(REPO_ROOT, 'src/artifacts/types/design_system/defaults/maws');
+const mawsLaw = () => readFileSync(join(MAWS_SYSTEM_DIR, 'DESIGN.md'), 'utf8');
+const mawsTokens = () => readFileSync(join(MAWS_SYSTEM_DIR, 'tokens.tokens.json'), 'utf8');
+const RULES_SYSTEM = (): Record<string, string> => {
+  const donts = /^## 8\. .+\n\n/m;
+  const law = mawsLaw();
+  if (!donts.test(law)) throw new Error('the MAWS law has no section 8 to add a don’t to');
+  return {
+    'DESIGN.md': law.replace(/^# .+$/m, '# Field rules').replace(donts, (heading) => `${heading}- No more than two colours on one slide. [check: colour-count]\n`),
+    'tokens.tokens.json': mawsTokens(),
+    'components/alert.html': '<div id="alert" style="background:#7a1f5c; padding:16px"><p id="alert-text">Late delivery</p></div>',
+  };
+};
+// Field alias is published whole (an agent's publish checks every alias and refuses one to nothing, design-system
+// tokens.ts), then given its alias to nothing by the store's test writer, as replicas that converged on it hold one
+const ALIAS_SYSTEM = (): Record<string, string> => ({ 'DESIGN.md': mawsLaw().replace(/^# .+$/m, '# Field alias'), 'tokens.tokens.json': mawsTokens() });
+const ALIAS_TO_NOTHING = { path: 'color.highlight', token: { $type: 'color', $value: '{color.missing}' } };
+const LAWLESS_SYSTEM = (): Record<string, string> => ({ 'tokens.tokens.json': mawsTokens() });
+// the design system page's save's own: the MAWS system's law and tokens under another title
+const PALETTE_SYSTEM = (): Record<string, string> => ({ 'DESIGN.md': mawsLaw().replace(/^# .+$/m, '# Field palette'), 'tokens.tokens.json': mawsTokens() });
+// the bundled Official system's title, as its law's first heading names it (e2e/design-systems.spec.ts's bundledName);
+// read by the fixture's maker, so a checkout without the file fails that fixture alone
+const OFFICIAL_DECK = 'Clinic handout deck'; // the deck the Official system styles
+const officialTitle = () => {
+  const heading = /^# (.+)$/m.exec(readFileSync(join(REPO_ROOT, 'src/artifacts/types/design_system/defaults/official/DESIGN.md'), 'utf8'));
+  if (!heading) throw new Error('the Official system’s law has no first heading');
+  return heading[1]!.trim();
+};
+test('the word cut’s M5: the library’s Spaces, opened artifacts, the document, dashboard and slides editors, the design workbench and the design system page', async () => {
+  test.setTimeout(2_700_000);
+  if (!M5_LAUNCH.some(wanted)) return;
+  const userData = join(SCRATCH, 'profile-m5');
+  rmSync(userData, { recursive: true, force: true });
+  mkdirSync(userData, { recursive: true });
+  const config = join(SCRATCH, 'claude-config-m5');
+  rmSync(config, { recursive: true, force: true });
+  mkdirSync(config, { recursive: true });
+  const linked = join(SCRATCH, 'home', 'field-research');
+  mkdirSync(linked, { recursive: true });
+  const stopped = (error: unknown) => {
+    launchStopped('launch 16', M5_LAUNCH, error);
+    throw error;
+  };
+  const maws = await launchMaws({ userData, prepare: noGh, env: BASE_ENV({ MAWS_ENGINE_REPLAY: '1', MAWS_DOCUMENT_PERF: '1', MAWS_DASHBOARD_E2E: '1', CLAUDE_CONFIG_DIR: config, PATH: NO_GH_PATH }) }).catch(stopped);
+  const { app, page } = maws;
+  try {
+    await size(maws);
+    await light(page);
+    const make = async (kind: string, title: string, extra: Record<string, unknown> = {}) => {
+      const result = await invoke(page, 'artifacts.create', { kind, title, ...extra } as never);
+      if (!result.ok) throw new Error(result.error.message);
+      return (result.value as { artifact: { id: string } }).artifact.id;
+    };
+    const agent = new AgentSeam(join(userData, 'dashboard-e2e'));
+    const seam = new PerfSeam(join(userData, 'document-perf'));
+    let seamUp: Promise<void> | null = null;
+    const docSeam = () => (seamUp ??= expect.poll(() => existsSync(join(seam.dir, 'in')), { timeout: 30_000, message: 'the document seam is up' }).toBe(true));
+    // a presentation made by the human and its files published onto it through the presentations seam (launch 4's way)
+    const seedDeck = async (title: string, files: Record<string, string>) => {
+      const id = await make('presentation', title);
+      await page.evaluate(([a, f]) => (window as unknown as { __maws_presentations: { seed(id: string, files: Record<string, string>): Promise<void> } }).__maws_presentations.seed(a, f), [id, files] as const);
+      return id;
+    };
+    // Each artifact made the first time a scene needs it, by its own steps: one that fails leaves only the scenes that
+    // need it not reached, each with that failure's words (a fixture is never made twice, a failure never tried again)
+    const MAKERS = {
+      notes: async () => {
+        await docSeam();
+        const id = await make('document', 'Field notes');
+        await seam.seed(id, wordsDocState());
+        value(await invoke(page, 'artifacts.saveVersion', { artifactId: id, label: 'Draft' } as never));
+        return id;
+      },
+      blank: () => make('document', 'Blank notes'),
+      saving: () => make('document', 'Meeting notes'), // the save scene's own document
+      // A document with no tab. The host gives a document whose last tab an update deleted one empty tab again, unless
+      // its files root holds something (artifacts/document/adapter.ts, `ensureTab` after `tabDeleted`): so a file first,
+      // then the tabs removed, or the seed's delete is undone at once and the tab draws an empty editor
+      memo: async () => {
+        await docSeam();
+        const id = await make('document', 'Old memo');
+        value(await invoke(page, 'artifacts.testWrite', { artifactId: id, opId: 'words-memo-file', ops: [{ op: 'setAttr', root: 'files', key: 'memo.txt', value: 'Bring the keys.' }] } as never));
+        await seam.seed(id, noTabsState());
+        return id;
+      },
+      retired: () => make('document', 'Retired memo'),
+      sales: () => make('dashboard', 'Weekly sales'),
+      board: () => make('dashboard', 'Team board'), // the dashboard save scene's own
+      empty: () => make('dashboard', 'Empty board'),
+      // the old format: files under the `files` root and no tab (artifacts/dashboard/legacy.ts)
+      // its files first, then its tabs removed: the host keeps a document's last tab unless its files root holds something
+      // (the same `ensureTab` as the memo's), so the other order leaves it a dashboard of today with one empty tab
+      legacy: async () => {
+        await docSeam();
+        const id = await make('dashboard', 'Old weekly board');
+        value(await invoke(page, 'artifacts.testWrite', { artifactId: id, opId: 'words-legacy-files', ops: [{ op: 'setAttr', root: 'files', key: 'index.html', value: '<h1>Weekly visits</h1>' }, { op: 'setAttr', root: 'files', key: 'data/visits.csv', value: 'week,visits\n1,40\n2,52\n' }] } as never));
+        await seam.seed(id, noTabsState());
+        return id;
+      },
+      // the page's two versions, its bytes made in the page as launch 2 makes them
+      page: async () => {
+        const html = (await page.evaluate(
+          ([t, h]) => (window as unknown as { maws: { invoke(name: string, input: unknown): Promise<{ ok: boolean; value?: { artifact: { id: string } }; error?: { message: string } }> } }).maws.invoke('artifacts.create', { kind: 'html', title: t, content: { bytes: new TextEncoder().encode(h), name: 'index.html' } }),
+          ['Status page', STATUS_PAGE('Every service answers.')] as const,
+        )) as { ok: boolean; value?: { artifact: { id: string } }; error?: { message: string } };
+        if (!html.ok) throw new Error(`the HTML page was not made: ${html.error?.message ?? 'no answer'}`);
+        const id = html.value!.artifact.id;
+        value(await invoke(page, 'artifacts.testWrite', { artifactId: id, opId: 'words-status-v2', ops: [{ op: 'page', text: STATUS_PAGE('The status feed is late.', '<script>console.warn("The status feed is slow."); console.error("The status feed did not answer.");</script>') }] } as never));
+        return id;
+      },
+      deck: async () => {
+        const id = await make('presentation', 'Quarterly review');
+        await page.evaluate(([a, f]) => (window as unknown as { __maws_presentations: { seed(id: string, files: Record<string, string>): Promise<void> } }).__maws_presentations.seed(a, f), [id, benchDeckFiles(6)] as const);
+        return id;
+      },
+      design: () => createDesign(page, 'Launch screens', DESIGN_FILES),
+      planned: async () => {
+        const { space } = value(await invoke(page, 'spaces.create', { name: SPACE, linkedDir: linked } as never)) as { space: { id: string } };
+        return make('document', 'Survey plan', { spaceId: space.id });
+      },
+      draft: async () => (await agent.ok<{ artifactId: string }>(DRAFTER, 'artifact_create', { kind: 'document', title: 'Draft plan', handle: 'draft-plan', content: '# Draft plan\n\nAn agent wrote this.' })).artifactId,
+      // ---- the slides editor's, the design workbench's and the design system page's
+      // Field talk with three threads: two open, one on an element no slide has (an orphan, G481)
+      talk: async () => {
+        const id = await seedDeck('Field talk', TALK_FILES);
+        for (const [threadId, slide, element, body] of [['t-title', 's1', 'title', 'Can the title be shorter?'], ['t-dot', 's1', 'dot', 'Is this the site map colour?'], ['t-gone', 's1', 'chart', 'The chart was clearer.']] as const)
+          await editDesign(page, id, { op: 'addThread', threadId, boardId: slide, elementId: element, body });
+        return id;
+      },
+      planning: () => seedDeck('Planning deck', checkDeckFiles()),
+      speaker: () => seedDeck('Speaker deck', TALK_FILES), // the notes and the save scenes' own
+      // a version is compared with the one before it (history/controller.ts): Baseline, the title's colour changed, then
+      // Draft, so Draft's preview holds that one change
+      versions: async () => {
+        const id = await seedDeck('Site visit', TALK_FILES);
+        value(await invoke(page, 'artifacts.saveVersion', { artifactId: id, label: 'Baseline' } as never));
+        const before = await revisionOf(page, id);
+        await page.evaluate(([a]) => (window as unknown as { __maws_presentations: { edit(id: string, edit: unknown): Promise<void> } }).__maws_presentations.edit(a, { op: 'setStyle', slideId: 's1', elementId: 'title', props: { color: '#2b7a78' } }), [id] as const);
+        await expect.poll(() => revisionOf(page, id), { message: 'the title’s colour written', timeout: 10_000 }).toBeGreaterThan(before);
+        value(await invoke(page, 'artifacts.saveVersion', { artifactId: id, label: 'Draft' } as never));
+        return id;
+      },
+      bare: () => seedDeck('Empty deck', { 'project/deck.json': deckJson('Empty deck', []) }),
+      full: () => seedDeck('Every week', fullDeckFiles()),
+      screens: () => createDesign(page, 'Site screens', DESIGN_FILES),
+      sized: () => createDesign(page, 'Sized screens', DESIGN_FILES), // the refused size's own
+      renamed: () => createDesign(page, 'Kiosk screens', DESIGN_FILES), // the design's save's own
+      // a design with threads on a board, on an element and on a board no longer there, and a version before a move
+      reviewed: async () => {
+        const id = await createDesign(page, 'Review screens', DESIGN_FILES);
+        for (const [threadId, board, element, body] of [['d-board', 'tablet', '', 'The tablet layout feels empty.'], ['d-element', 'desktop', 'a', 'Can the red block go?'], ['d-gone', 'kiosk', '', 'Keep the kiosk screen.']] as const)
+          await editDesign(page, id, { op: 'addThread', threadId, boardId: board, elementId: element, body });
+        value(await invoke(page, 'artifacts.saveVersion', { artifactId: id, label: 'Draft' } as never));
+        await editDesign(page, id, { op: 'setFrame', boardId: 'phone', frame: { y: 120 } });
+        return id;
+      },
+      // a design that names a board whose file never arrived
+      drafts: () =>
+        createDesign(page, 'Draft screens', {
+          'project/canvas.json': JSON.stringify({ v: 1, title: 'Draft screens', boards: { phone: FRAMES.phone, later: { x: 490, y: 0, w: 834, h: 1194, title: 'Later' } }, order: ['phone', 'later'] }),
+          'project/boards/phone.html': DESIGN_FILES['project/boards/phone.html']!,
+        }),
+      blankDesign: () => createDesign(page, 'Blank screens', { 'project/canvas.json': JSON.stringify({ v: 1, title: 'Blank screens', boards: {}, order: [] }) }),
+      house: async () => {
+        const { houseId } = value(await invoke(page, 'designSystems.house', undefined as never)) as { houseId: string | null };
+        if (!houseId) throw new Error('no house design system');
+        return houseId;
+      },
+      blankSystem: () => make('design_system', 'Blank system'),
+      rules: async () => (await agent.ok<{ artifactId: string }>(DRAFTER, 'artifact_create', { kind: 'design_system', title: 'Field rules', files: RULES_SYSTEM() })).artifactId,
+      alias: async () => {
+        const id = (await agent.ok<{ artifactId: string }>(DRAFTER, 'artifact_create', { kind: 'design_system', title: 'Field alias', files: ALIAS_SYSTEM() })).artifactId;
+        value(await invoke(page, 'artifacts.testWrite', { artifactId: id, opId: 'words-alias-to-nothing', ops: [{ op: 'setAttr', root: 'tokens', key: ALIAS_TO_NOTHING.path, value: ALIAS_TO_NOTHING.token }] } as never));
+        return id;
+      },
+      lawless: async () => (await agent.ok<{ artifactId: string }>(DRAFTER, 'artifact_create', { kind: 'design_system', title: 'Field tokens', files: LAWLESS_SYSTEM() })).artifactId,
+      palette: async () => (await agent.ok<{ artifactId: string }>(DRAFTER, 'artifact_create', { kind: 'design_system', title: 'Field palette', files: PALETTE_SYSTEM() })).artifactId,
+      // the bundled Official system, with a deck it styles, so its delete asks where that deck goes
+      official: async () => {
+        const rows = (value(await invoke(page, 'artifacts.list', { filter: { kind: 'design_system' } } as never)) as { artifacts: { id: string; title: string }[] }).artifacts;
+        const title = officialTitle();
+        const official = rows.find((row) => row.title === title);
+        if (!official) throw new Error(`no design system titled ${title}: ${rows.map((row) => row.title).join(', ')}`);
+        await make('presentation', OFFICIAL_DECK, { designSystemId: official.id });
+        return official.id;
+      },
+    } satisfies Record<string, () => Promise<string>>;
+    type Fixture = keyof typeof MAKERS;
+    const made: Partial<Record<Fixture, string>> = {};
+    const failed: Partial<Record<Fixture, string>> = {};
+    const setupError = (key: Fixture) => new Error(`setting up ${key} failed: ${failed[key]}`);
+    const ensure = async (key: Fixture): Promise<string> => {
+      if (made[key]) return made[key]!;
+      if (failed[key] !== undefined) throw setupError(key);
+      try {
+        made[key] = await MAKERS[key]();
+        return made[key]!;
+      } catch (error) {
+        setupFailed(`setting up ${key} (M5)`, error);
+        failed[key] = stripVTControlCharacters(error instanceof Error ? error.message : String(error)).split('\n')[0]!;
+        throw setupError(key);
+      }
+    };
+    await readM5(app, page, M5_LAUNCH);
+    const idOf = (key: Fixture): string => {
+      if (made[key]) return made[key]!;
+      throw failed[key] !== undefined ? setupError(key) : new Error(`the ${key} artifact is not made yet`);
+    };
+    const tab = (key: Fixture) => page.locator(`[data-region="main"] [data-artifact-tab="${idOf(key)}"]`);
+    const header = () => page.locator('[data-region="main"] [data-editor-header]').filter({ visible: true }).first();
+    // A notice the tab draws once it has settled, waited on (a document says it is empty only after waiting 5 s for a
+    // first page: tools/document/tab-state.ts, NO_CONTENT_MS); not drawn, the miss says what the tab reads instead.
+    const noticeDrawn = async (key: Fixture, notice: Locator, what: string) => {
+      try {
+        await expect(notice.first(), what).toBeVisible({ timeout: 15_000 });
+      } catch (error) {
+        const read = (await tab(key).innerText({ timeout: 2_000 }).catch(() => '(nothing)')).replace(/\s+/g, ' ').trim().slice(0, 240);
+        throw new Error(`${what} not drawn; the tab reads: ${read}`, { cause: error });
+      }
+    };
+    const openArtifact = async (key: Fixture) => {
+      await ensure(key);
+      await closeOverlays(page);
+      if (await tab(key).isVisible().catch(() => false)) return;
+      await libraryAtRest(app, page);
+      await (await libraryRow(page, idOf(key))).click();
+      await expect(tab(key), `the ${key} artifact’s tab`).toBeVisible({ timeout: 20_000 });
+      await page.waitForTimeout(1500);
+    };
+
+    // ---- the library's Spaces (G295, N151): By Space with the linked Space; its menu's Instructions…
+    await shot(page, m5Meta('m5-library-space', 'G295', 'Artifacts library, By Space with a linked Space', 'Artifacts, By Space (one Space, linked to a folder, holding one document)', 'The Space’s group: its name, the folder its artifacts are mirrored to, its document', ['library']), async () => {
+      await ensure('planned');
+      await libraryAtRest(app, page);
+      await libraryView(page, 'bySpace');
+    }, {
+      check: () => inView(page.locator('[data-library]').getByText(new RegExp(`^${literal(M5_WORDS.linkedTo)}.+/artifacts$`)), 'the linked folder’s line'),
+      after: () => libraryAtRest(app, page),
+    });
+    await shot(page, m5Meta('m5-library-space-instructions', 'N151', 'Artifacts library, a Space’s instructions sheet', 'Artifacts, By Space, the Space’s menu › Instructions…', 'The instructions sheet of the Space: who is given them, and the empty field', ['library']), async () => {
+      await ensure('planned');
+      await libraryAtRest(app, page);
+      await libraryView(page, 'bySpace');
+      await page.locator('[data-library]').getByRole('button', { name: M5_WORDS.spaceMenu(SPACE), exact: true }).first().click();
+      await page.getByRole('menuitem', { name: M5_WORDS.instructions, exact: true }).click();
+    }, {
+      check: async () => {
+        const sheet = page.getByRole('dialog', { name: M5_WORDS.instructionsFor(SPACE), exact: true });
+        await expect(sheet, 'the instructions sheet').toBeVisible({ timeout: 3_000 });
+        await inView(sheet.getByText(M5_WORDS.receivers, { exact: true }), 'who is given them');
+      },
+      after: async () => {
+        await closeOverlays(page);
+        await libraryAtRest(app, page);
+      },
+    });
+
+    // ---- opened artifacts: the HTML viewer (T567, T570, T571), the deck's actions (T636), Send to (T131), a design's
+    // too-large export (T632), an old empty document (T617), a dashboard of the old format (T629, N191), an agent's delete
+    // (N152)
+    const chip = () => tab('page').locator('[data-console-chip]').first();
+    await shot(page, m5Meta('m5-artifact-html', 'T567, T570, T571', 'An HTML page open in the viewer, two versions, its console chip', 'Artifacts, the HTML page made in two versions (the second logs a warning and an error)', 'The viewer on the latest version: the version picker, the console chip counting the error; master’s header reads Read-only beside the title', ['tools/artifacts/viewers', 'artifacts', 'panel']), async () => {
+      await openArtifact('page');
+      await expect(chip(), 'the console chip').toBeVisible({ timeout: 20_000 });
+    }, {
+      check: async () => {
+        await expect(tab('page').getByRole('combobox', { name: M5_WORDS.version, exact: true }).locator('option:checked'), 'the latest version shown').toHaveText(M5_WORDS.latest(2), { timeout: 3_000 });
+        await expect(chip(), 'the chip’s count').toHaveText(byM5(M5_WORDS.consoleErrors), { timeout: 3_000 });
+        await inView(chip(), 'the console chip');
+        if (m5Cut()) await expect(header().getByText(M5_WORDS.readOnly, { exact: true }), 'no Read-only in the header').toHaveCount(0);
+        else await inView(header().getByText(M5_WORDS.readOnly, { exact: true }), 'master’s Read-only in the header');
+      },
+    });
+    const deckMore = () => tab('deck').locator('.deck-toolbar [data-editor-toolbar] [data-editor-more]').first();
+    await shot(page, m5Meta('m5-artifact-deck', 'T636, T635', 'A deck, its actions menu open', 'Artifacts, the six-slide deck, the More of its toolbar', 'The deck’s actions menu: the design check (“Check design” on M5, master “Check against the design system”) and Theme', ['tools/presentation', 'src/artifacts/slides/editor']), async () => {
+      await openArtifact('deck');
+      await expect(tab('deck').locator('[data-deck-editor]').first()).toBeVisible({ timeout: 20_000 });
+      await deckMore().click();
+    }, {
+      check: async () => {
+        const opened = page.getByRole('menu').first();
+        await expect(opened, 'the deck’s actions').toBeVisible({ timeout: 3_000 });
+        await inView(opened.getByRole('menuitemcheckbox', { name: byM5(M5_WORDS.checkDesign), exact: true }), 'the design check');
+        await inView(opened.getByRole('menuitemcheckbox', { name: M5_WORDS.theme, exact: true }), 'Theme');
+      },
+      after: () => closeOverlays(page),
+    });
+    await shot(page, m5Meta('m5-artifact-send-to', 'T131', 'A document’s Send to sheet', 'Artifacts, Field notes, its header’s Send to', 'The Send to sheet with no connection made; master’s sentence that MAWS sends it itself, which M5 cut', ['delivery', 'tools/document']), async () => {
+      await openArtifact('notes');
+      await header().locator('[data-editor-action="sendTo"]').first().click();
+      await expect(page.locator('[data-send-to]').first(), 'the Send to sheet').toBeVisible({ timeout: 10_000 });
+    }, {
+      check: async () => {
+        await inView(page.locator('[data-send-to]'), 'the Send to sheet');
+        if (m5Cut()) await expect(page.locator('[data-send-to]').getByText(M5_WORDS.sendsItself, { exact: true }), 'no sentence that MAWS sends it itself').toHaveCount(0);
+        else await inView(page.locator('[data-send-to]').getByText(M5_WORDS.sendsItself, { exact: true }), 'master’s sentence');
+      },
+      after: () => closeOverlays(page),
+    });
+    const tooLarge = () => page.getByRole('dialog', { name: /^Export “Poster” at / });
+    await shot(page, m5Meta('m5-artifact-design-too-large', 'T632', 'A design, its PNG export of a board too large', 'Artifacts, the design, the Poster board selected (1080 × 9000 px), Export › PNG (selected board)', 'The sheet offering the scale that fits: on M5 its one sentence, master’s sentence with the sizes', ['tools/design', 'src/artifacts/design/editor']), async () => {
+      await openArtifact('design');
+      await expect(tab('design').locator('[data-design-editor]').first()).toBeVisible({ timeout: 20_000 });
+      await tab('design').locator('[data-board-row="poster"] .design-board-row').first().click();
+      await page.waitForTimeout(500);
+      await header().getByRole('button', { name: M5_WORDS.exportMenu, exact: true }).click();
+      await page.getByRole('menuitem', { name: M5_WORDS.pngSelected, exact: true }).click();
+      await expect(tooLarge(), 'the too-large sheet').toBeVisible({ timeout: 15_000 });
+    }, {
+      check: async () => {
+        await expect(tooLarge(), 'the too-large sheet').toBeVisible({ timeout: 3_000 });
+        await inView(tooLarge().getByText(byM5(M5_WORDS.tooLarge), { exact: m5Cut() }), 'the sheet’s sentence');
+        // G556: the scale a whole-number percentage on M5 (master: to the hundredth), in the title and the button
+        // the poster is 1080 × 9000 px: the scale that fits is 0.9102, a whole 91% on M5, master's 91.02%
+        const scale = m5Cut() ? '91%' : '91.02%';
+        await expect(tooLarge(), 'the scale in the title').toHaveAccessibleName(`Export “Poster” at ${scale}?`);
+        await expect(tooLarge().getByRole('button', { name: `Export at ${scale}`, exact: true }), 'the scale on the button').toHaveCount(1);
+      },
+      after: () => closeOverlays(page),
+    });
+    await shot(page, m5Meta('m5-artifact-doc-empty', 'T617', 'An old document with no page', 'Artifacts, Old memo (a document whose tabs were removed, as one made before every document had a first page)', 'The document’s notice that it is empty', ['tools/document', 'artifacts']), async () => {
+      await openArtifact('memo');
+      await noticeDrawn('memo', tab('memo').getByText(byM5(M5_WORDS.docEmpty)), 'the empty document’s notice');
+    }, {
+      check: () => inView(tab('memo').getByText(byM5(M5_WORDS.docEmpty)), 'the empty document’s notice'),
+    });
+    await shot(page, m5Meta('m5-artifact-legacy-dashboard', 'T629, N191', 'A dashboard of the old format', 'Artifacts, Old weekly board (files and no tab)', 'The held dashboard: its notice, its two files; master’s header reads Read-only, M5’s draws no saved state', ['tools/dashboard', 'src/artifacts/dashboard', 'panel']), async () => {
+      await openArtifact('legacy');
+      await noticeDrawn('legacy', tab('legacy').getByText(byM5(M5_WORDS.legacy), { exact: true }), 'the held dashboard’s notice');
+    }, {
+      check: async () => {
+        await inView(tab('legacy').getByText(byM5(M5_WORDS.legacy), { exact: true }), 'the held dashboard’s notice');
+        await inView(tab('legacy').getByText('data/visits.csv', { exact: true }), 'its files');
+        if (m5Cut()) await expect(header().locator('[data-header-saved]'), 'no saved state in the header').toHaveCount(0);
+        else await inView(header().getByText(M5_WORDS.readOnly, { exact: true }), 'master’s Read-only in the header');
+      },
+    });
+    const deletedNotice = () => tab('draft').locator('[data-artifact-deleted]').first();
+    // deleted, or no longer answered by the store
+    const isDeleted = async (key: Fixture) => {
+      const result = await invoke(page, 'artifacts.get', { artifactId: idOf(key) } as never);
+      return !result.ok || Boolean((result.value as { deleted?: unknown }).deleted);
+    };
+    await shot(page, m5Meta('m5-artifact-agent-deleted', 'N152', 'An artifact an agent deleted, its tab open', 'Artifacts, the agent’s draft open, then the agent deletes it (artifact_delete)', 'The tab’s notice that an agent deleted it, with Undo, over the read-only document', ['library', 'artifacts']), async () => {
+      await ensure('draft');
+      if (await isDeleted('draft')) value(await invoke(page, 'artifacts.undelete', { artifactId: idOf('draft') } as never));
+      await openArtifact('draft');
+      await agent.ok(DRAFTER, 'artifact_delete', { artifact: idOf('draft') });
+      await expect(deletedNotice(), 'the notice').toBeVisible({ timeout: 20_000 });
+    }, {
+      check: async () => {
+        await inView(deletedNotice(), 'the notice');
+        await expect(deletedNotice(), 'its words').toContainText(byM5(M5_WORDS.agentDeleted), { timeout: 3_000 });
+        if (m5Cut()) await expect(deletedNotice(), 'no second sentence').not.toContainText(M5_WORDS.agentDeleted.master);
+        await inView(deletedNotice().getByRole('button', { name: M5_WORDS.undo, exact: true }), 'Undo');
+      },
+      after: async () => {
+        if (made.draft && (await isDeleted('draft'))) value(await invoke(page, 'artifacts.undelete', { artifactId: idOf('draft') } as never));
+        await closeOverlays(page);
+      },
+    });
+
+    // ---- the document editor, on Field notes: the toolbar at rest and its glyphs' tooltips (G331 to G337), Show editors
+    // (G359, G361), the comments panel and cards (G384 to G398), the version preview (G379, G380, G346), Export (T614)
+    const editorOf = (key: Fixture) => tab(key).locator('.ds-doc .ProseMirror[data-editor="live"]').first();
+    const toolbar = (key: Fixture) => tab(key).locator('.doc-format-toolbar').first();
+    const commentsButton = (key: Fixture) => toolbar(key).getByRole('button', { name: new RegExp(`^${literal(M5_WORDS.comments)}`) }).first();
+    const historyButton = (key: Fixture) => toolbar(key).getByRole('button', { name: M5_WORDS.versionHistory, exact: true }).first();
+    const commentsRail = (key: Fixture) => tab(key).locator('aside.doc-rail[aria-label="Comments"]').first();
+    const historyRail = (key: Fixture) => tab(key).locator('aside.doc-rail[aria-label="Version history"]').first();
+    const previewBar = (key: Fixture) => tab(key).locator('.doc-history-bar').first();
+    // the document open, at rest: out of a version's preview, both rails closed, the caret at the start of its first
+    // block (Field notes' heading, which no comment marks: no thread active, nothing selected), the keyboard let go
+    const docAtRest = async (key: Fixture) => {
+      await openArtifact(key);
+      await expect(editorOf(key), 'the live page').toBeAttached({ timeout: 20_000 });
+      if (await previewBar(key).isVisible()) await previewBar(key).getByRole('button', { name: M5_WORDS.backToDocument, exact: true }).click();
+      await expect(previewBar(key), 'out of the preview').toHaveCount(0, { timeout: 10_000 });
+      if (await commentsRail(key).isVisible()) await commentsButton(key).click();
+      if (await historyRail(key).isVisible()) await historyButton(key).click();
+      await expect(commentsRail(key).or(historyRail(key)), 'both rails closed').toHaveCount(0, { timeout: 5_000 });
+      await editorOf(key).locator(':scope > *').first().click({ position: { x: 2, y: 4 } });
+      await expect.poll(() => editorOf(key).evaluate(() => getSelection()?.isCollapsed ?? false), { message: 'nothing selected', timeout: 3_000 }).toBe(true);
+      await letGo(page);
+    };
+    const openComments = async (key: Fixture) => {
+      await docAtRest(key);
+      await commentsButton(key).click();
+      await expect(commentsRail(key), 'the comments panel').toBeVisible({ timeout: 10_000 });
+    };
+    const openHistory = async (key: Fixture) => {
+      await docAtRest(key);
+      await historyButton(key).click();
+      await expect(historyRail(key), 'the history rail').toBeVisible({ timeout: 10_000 });
+    };
+    const toolsNamed = (key: Fixture) => [M5_WORDS.addComment, M5_WORDS.versionHistory].map((name) => toolbar(key).getByRole('button', { name, exact: true })).concat([commentsButton(key)]);
+    await shot(page, m5Meta('m5-doc-rest', 'G332, G333, G335, G336, G357, T608, T609', 'A document at rest: its toolbar, a table, a callout, comment marks', 'Artifacts, Field notes (a heading, marked passages, a table, a callout)', 'The formatting toolbar at rest (on M5 Add comment, Comments with its count, Version history and Find as glyphs; master’s words), the page with its table and callout', ['tools/document', 'src/artifacts/document/editor']), async () => {
+      await docAtRest('notes');
+    }, {
+      check: async () => {
+        for (const tool of toolsNamed('notes')) await inView(tool, 'a toolbar button');
+        if (m5Cut()) await expect(toolbar('notes').locator('[data-doc-glyph]'), 'the four glyphs').toHaveCount(4, { timeout: 3_000 });
+        else await expect(historyButton('notes'), 'master’s word History').toHaveText('History', { timeout: 3_000 });
+        await inView(editorOf('notes').locator('table'), 'the table');
+        await inView(editorOf('notes').getByText('Bring the spare batteries.', { exact: true }), 'the callout');
+        // the breadcrumb of a document in no Space: master's starts with General (T608)
+        const crumb = header().locator('[data-header-breadcrumb]');
+        if (m5Cut()) await expect(crumb.filter({ hasText: M5_WORDS.general }), 'no General in the breadcrumb').toHaveCount(0);
+        else await expect(crumb, 'master’s breadcrumb').toContainText(M5_WORDS.general, { timeout: 3_000 });
+      },
+    });
+    const addComment = () => toolbar('notes').getByRole('button', { name: M5_WORDS.addComment, exact: true }).first();
+    await shot(page, m5Meta('m5-doc-comment-tip', 'G332, G337', 'A document, Add comment’s tooltip with nothing selected', 'Field notes, nothing selected, the keyboard on Add comment', 'Add comment’s tooltip with its reason, “Select text to comment on” (master: the greyed worded button)', ['tools/document', 'src/artifacts/document/editor']), async () => {
+      await docAtRest('notes');
+      await focusTip(page, addComment(), addComment(), m5Cut);
+    }, {
+      // the locators made at the check, not at the shot's call: Field notes is made by the prepare (`idOf` throws for an
+      // artifact not made, which at the call would end the launch for every scene after it)
+      check: async () => {
+        await tipShown(page, addComment(), 'Add comment', addComment(), m5Cut)();
+        if (m5Cut()) await expect(page.getByRole('tooltip').first(), 'the reason in the tooltip').toContainText(M5_WORDS.commentNoSelection, { timeout: 3_000 });
+        else await expect(addComment(), 'master’s button greyed').toBeDisabled({ timeout: 3_000 });
+      },
+    });
+    await shot(page, m5Meta('m5-doc-history-tip', 'G335', 'A document, Version history’s tooltip', 'Field notes, the keyboard on Version history', 'The history glyph’s tooltip “Version history” (master: the word History on the button)', ['tools/document', 'src/artifacts/document/editor']), async () => {
+      await docAtRest('notes');
+      await focusTip(page, historyButton('notes'), historyButton('notes'), m5Cut);
+    }, {
+      check: () => tipShown(page, historyButton('notes'), 'Version history', historyButton('notes'), m5Cut)(),
+    });
+    const tableMenu = () => page.getByRole('menu', { name: M5_WORDS.table, exact: true });
+    await shot(page, m5Meta('m5-doc-table-menu', 'G331, G337', 'A document, the caret in a table, its Table menu', 'Field notes, click a table cell, then Table ▾', 'The Table menu’s eight commands (master: its worded commands in the toolbar’s scrolling strip, scrolled to them: the first in view, all eight drawn in the row)', ['tools/document', 'src/artifacts/document/editor']), async () => {
+      await docAtRest('notes');
+      await editorOf('notes').locator('td').first().click();
+      await page.waitForTimeout(400);
+      if (m5Cut()) await toolbar('notes').getByRole('button', { name: M5_WORDS.table, exact: true }).click();
+      // master's tools are one row scrolling in a strip (Toolbar.tsx, P3-F1): the strip scrolled to its table commands,
+      // the first at its start, as a person scrolls it to them
+      else await toolbar('notes').getByRole('button', { name: M5_WORDS.tableCommands[0], exact: true }).evaluate((el) => el.scrollIntoView({ inline: 'start', block: 'nearest' }));
+    }, {
+      check: async () => {
+        if (m5Cut()) {
+          await expect(tableMenu(), 'the Table menu').toBeVisible({ timeout: 3_000 });
+          for (const item of M5_WORDS.tableCommands) await inView(tableMenu().getByRole('menuitem', { name: item, exact: true }), item);
+        } else {
+          // the strip shows what its width holds: the first command in view, every one drawn in the row
+          await inView(toolbar('notes').getByRole('button', { name: M5_WORDS.tableCommands[0], exact: true }), `master’s ${M5_WORDS.tableCommands[0]}`);
+          for (const item of M5_WORDS.tableCommands) await expect(toolbar('notes').getByRole('button', { name: item, exact: true }), `master’s ${item}`).toBeVisible({ timeout: 3_000 });
+        }
+      },
+      after: () => closeOverlays(page),
+    });
+    const editorsPopover = () => tab('notes').locator('.doc-editors').first();
+    await shot(page, m5Meta('m5-doc-editors', 'G359', 'A document, Show editors over a selection', 'Field notes, select a paragraph, right-click › Show editors', 'The editors popover over the selection: its heading (“Editors” on M5, master “Editors of the selection”) and the owner who wrote the passage', ['tools/document', 'src/artifacts/document/editor/history']), async () => {
+      await docAtRest('notes');
+      const plain = editorOf('notes').getByText(WORDS_DOC_TEXT.plain, { exact: true }).first();
+      await plain.click({ clickCount: 3 });
+      await plain.click({ button: 'right' });
+      await tab('notes').locator('.doc-context-menu').getByRole('menuitem', { name: M5_WORDS.showEditors, exact: true }).click();
+      await expect(editorsPopover(), 'the editors popover').toBeVisible({ timeout: 10_000 });
+    }, {
+      check: async () => {
+        await expect(editorsPopover().locator('.doc-editors-title'), 'its heading').toHaveText(byM5(M5_WORDS.editors), { timeout: 3_000 });
+        // the seed is the owner's write through the store, so the answer is a row of the list: never the reading line, an
+        // error or the empty answer, which share .doc-editors-empty
+        await inView(editorsPopover().locator('.doc-editors-list .doc-editors-row'), 'an attribution row');
+      },
+      after: () => closeOverlays(page),
+    });
+    // the document panel's toggle for comments on deleted text, by its words in each build
+    const docDeletedToggle = (rail: Locator) => rail.locator('button.doc-rail-section').filter({ hasText: byM5(M5_WORDS.deletedToggle) });
+    await shot(page, m5Meta('m5-doc-comments', 'G390, G393, G394, G395, G385', 'A document’s comments panel', 'Field notes, Comments in the toolbar', 'The panel: its filters (no tab scope with one tab on M5), the search, the open cards at rest, the toggle for comments on deleted text (on M5 the closed disclosure “Deleted (1)” after the open cards; master’s line above them) and the resolved one', ['tools/document', 'src/artifacts/document/editor/comments']), async () => {
+      await openComments('notes');
+    }, {
+      check: async () => {
+        const rail = commentsRail('notes');
+        await inView(rail.locator('input.doc-rail-search'), 'the search');
+        await expect(rail.locator('input.doc-rail-search'), 'its placeholder').toHaveAttribute('placeholder', byM5(M5_WORDS.search), { timeout: 3_000 });
+        await expect(docDeletedToggle(rail), 'the deleted-text toggle').toHaveText(byM5(M5_WORDS.deletedToggle), { timeout: 3_000 });
+        // the pair review's fix wave (G395): on M5 a disclosure after the open cards, never a heading over them
+        if (m5Cut()) {
+          await expect(docDeletedToggle(rail), 'the disclosure closed').toHaveAttribute('aria-expanded', 'false');
+          const below = await rail.evaluate((el, id) => {
+            const card = el.querySelector(`article[data-thread="${id}"]`);
+            const toggle = Array.from(el.querySelectorAll('button.doc-rail-section')).find((button) => /^Deleted \(\d+\)$/.test(button.textContent ?? ''));
+            return Boolean(card && toggle && card.compareDocumentPosition(toggle) & Node.DOCUMENT_POSITION_FOLLOWING);
+          }, WORDS_THREADS.second);
+          expect(below, 'the toggle after the open cards').toBe(true);
+        }
+        if (m5Cut()) await expect(rail.getByRole('radiogroup', { name: 'Scope', exact: true }), 'no scope with one tab').toHaveCount(0);
+        else await inView(rail.getByRole('radiogroup', { name: 'Scope', exact: true }), 'master’s scope');
+        const resting = rail.locator(`article[data-thread="${WORDS_THREADS.second}"]`);
+        await inView(resting, 'an open card');
+        // a card not active: its messages alone on M5; master draws the reply field on every open card of the panel
+        if (m5Cut()) await expect(resting.locator('textarea[aria-label="Reply"]'), 'no reply field at rest').toHaveCount(0);
+        else await inView(resting.locator('textarea[aria-label="Reply"]'), 'master’s reply field at rest');
+      },
+    });
+    await shot(page, m5Meta('m5-doc-comments-deleted', 'G395, G388', 'A document’s comments panel showing comments on deleted text', 'Field notes, Comments, the deleted-text toggle pressed', 'The card whose passage was removed: on M5 under the opened “Deleted (1)”, its quote struck through and spanning the card; master’s line under it', ['tools/document', 'src/artifacts/document/editor/comments']), async () => {
+      await openComments('notes');
+      await docDeletedToggle(commentsRail('notes')).click();
+    }, {
+      check: async () => {
+        const rail = commentsRail('notes');
+        // M5's toggle is a disclosure (the pair review's fix wave), master's a pressed button
+        await expect(docDeletedToggle(rail), 'the toggle on').toHaveAttribute(m5Cut() ? 'aria-expanded' : 'aria-pressed', 'true', { timeout: 3_000 });
+        const orphan = rail.locator(`article[data-thread="${WORDS_THREADS.gone}"]`);
+        await inView(orphan, 'the card on deleted text');
+        if (m5Cut()) await inView(orphan.locator('s[data-removed]'), 'its quote struck through');
+        else await inView(orphan.getByText(M5_WORDS.removed, { exact: true }), 'master’s line');
+      },
+    });
+    await shot(page, m5Meta('m5-doc-margin-active', 'G384, G385', 'A document, a comment made active from its passage', 'Field notes, panels closed, click a marked passage', 'The margin’s cards beside the page: the active one with Resolve on its author line’s right end, its reply field and send; on M5 the other card its messages alone across the card’s width (its Resolve waits for the pointer, no reply field)', ['tools/document', 'src/artifacts/document/editor/comments']), async () => {
+      await docAtRest('notes');
+      await editorOf('notes').locator(`span[data-thread="${WORDS_THREADS.open}"]`).first().click();
+      await page.waitForTimeout(800);
+    }, {
+      check: async () => {
+        // the margin hosting the cards, not the panel the editor opens when the margin cannot (DocumentEditor.tsx)
+        await expect(commentsRail('notes'), 'no comments panel').toHaveCount(0);
+        const margin = tab('notes').locator('.doc-margin[data-margin-tier="cards"]');
+        const active = margin.locator(`article[data-thread="${WORDS_THREADS.open}"]`);
+        const resting = margin.locator(`article[data-thread="${WORDS_THREADS.second}"]`);
+        await inView(active, 'the active card in the margin');
+        await inView(resting, 'the other card in the margin');
+        await inView(active.getByRole('button', { name: M5_WORDS.resolve, exact: true }), 'the active card’s Resolve');
+        await inView(active.locator('textarea[aria-label="Reply"]'), 'the active card’s reply field');
+        await inView(active.getByRole('button', { name: M5_WORDS.reply, exact: true }), 'its send');
+        if (m5Cut()) {
+          await expect(resting.locator('textarea[aria-label="Reply"]'), 'no reply field on a card at rest').toHaveCount(0);
+          await expect(resting.locator('.thread-card-actions'), 'its Resolve waits for the pointer').toHaveAttribute('data-on-hover', '');
+        }
+      },
+    });
+    await shot(page, m5Meta('m5-doc-comments-nomatch', 'G398', 'A document’s comments panel, a search with no match', 'Field notes, Comments, “harbour” in its search', 'The panel’s line for a search that matches nothing', ['tools/document', 'src/artifacts/document/editor/comments']), async () => {
+      await openComments('notes');
+      await commentsRail('notes').locator('input.doc-rail-search').fill('harbour');
+    }, {
+      check: () => inView(commentsRail('notes').locator('p.doc-rail-empty').filter({ hasText: new RegExp(`^${literal(byM5(M5_WORDS.noMatches))}$`) }), 'the no-match line'),
+    });
+    const exportMenu = () => page.getByRole('menu').filter({ has: page.getByRole('menuitem', { name: M5_WORDS.markdown, exact: true }) }).first();
+    await shot(page, m5Meta('m5-doc-export-menu', 'T614, N95', 'A document’s Export menu', 'Field notes, its header’s Export', 'The formats, then the page’s Letter, A4 and Compact', ['tools/document', 'panel']), async () => {
+      await docAtRest('notes');
+      await header().getByRole('button', { name: M5_WORDS.exportMenu, exact: true }).click();
+    }, {
+      check: async () => {
+        await expect(exportMenu(), 'the Export menu').toBeVisible({ timeout: 3_000 });
+        await inView(exportMenu().getByText(M5_WORDS.compact, { exact: true }), 'the page’s Compact');
+      },
+      after: () => closeOverlays(page),
+    });
+    // the version named Draft previewed, from the live document: never a preview an earlier scene left open
+    const toDraft = async () => {
+      await openHistory('notes');
+      // a version row is named `Version <title> by <author>` (history/HistoryRail.tsx, both builds); "Restored from Draft" is another
+      await historyRail('notes').getByRole('button', { name: /^Version Draft by / }).first().click();
+      await expect(tab('notes').locator('[data-editor="preview"]').first(), 'the version previewed').toBeVisible({ timeout: 10_000 });
+    };
+    const versionActions = () => page.getByRole('menu', { name: M5_WORDS.versionActions, exact: true });
+    await shot(page, m5Meta('m5-doc-version-actions', 'G379', 'A document showing a version, its actions', 'Field notes, Version history, the version “Draft”, then the bar’s “…”', 'The preview bar: Restore, the version’s actions menu (Make a copy) under its “…” drawn pressed, the “…” and the × alike in size and centre, and the × back to the document (master: four worded buttons)', ['tools/document', 'src/artifacts/document/editor/history']), async () => {
+      await toDraft();
+      if (m5Cut()) await previewBar('notes').locator('[data-history-actions]').click();
+    }, {
+      check: async () => {
+        await inView(previewBar('notes').getByRole('button', { name: M5_WORDS.restoreName, exact: true }), 'Restore');
+        if (m5Cut()) {
+          await expect(versionActions(), 'the version’s actions').toBeVisible({ timeout: 3_000 });
+          await inView(versionActions().getByRole('menuitem', { name: M5_WORDS.makeCopy, exact: true }), 'Make a copy');
+          await expect(previewBar('notes').locator('[data-history-actions]'), 'its “…” pressed while the menu is open').toHaveAttribute('data-state', 'open');
+        } else {
+          await inView(previewBar('notes').getByRole('button', { name: M5_WORDS.makeCopy, exact: true }), 'master’s Make a copy');
+          await inView(previewBar('notes').getByRole('button', { name: M5_WORDS.backToDocument, exact: true }), 'master’s Back to document');
+        }
+      },
+      after: () => closeOverlays(page),
+    });
+    const confirmRestore = () => tab('notes').getByRole('alertdialog', { name: M5_WORDS.restoreConfirm, exact: true });
+    await shot(page, m5Meta('m5-doc-restore-confirm', 'G380', 'A document showing a version, Restore pressed', 'Field notes, the version “Draft” previewed, Restore', 'The confirmation of the restore under the preview bar', ['tools/document', 'src/artifacts/document/editor/history']), async () => {
+      await toDraft();
+      await previewBar('notes').getByRole('button', { name: M5_WORDS.restoreName, exact: true }).click();
+    }, {
+      check: () => inView(confirmRestore(), 'the confirmation'),
+      after: async () => {
+        if (await confirmRestore().isVisible()) await confirmRestore().getByRole('button', { name: 'Cancel', exact: true }).click();
+      },
+    });
+    await shot(page, m5Meta('m5-doc-restored', 'G346', 'A document right after a version was restored', 'Field notes, the version “Draft” restored (Restore, then Restore in the confirmation)', 'The page back on the live document with its banner “Restored from Draft”', ['tools/document', 'src/artifacts/document/editor/history']), async () => {
+      await toDraft();
+      await previewBar('notes').getByRole('button', { name: M5_WORDS.restoreName, exact: true }).click();
+      await confirmRestore().getByRole('button', { name: 'Restore', exact: true }).click();
+    }, {
+      check: async () => {
+        await expect(tab('notes').locator('.doc-banner'), 'the banner').toContainText('Restored from Draft', { timeout: 10_000 });
+        await inView(tab('notes').locator('.doc-banner'), 'the banner');
+      },
+    });
+
+    // ---- a save's state (Acceptance 1's saved-status scene: T607) on a document and a dashboard of their own, so no
+    // other scene's page holds what it typed; then Blank notes: the empty comments panel (G397, G398) and the empty
+    // history of named versions (G373)
+    // A sentence typed on `key`'s page and its save landed: the store's revision past the one before the typing
+    const typedAndSaved = (key: Fixture, editor: () => Locator, sentence: string) => {
+      let before: number | null = null;
+      return {
+        type: async () => {
+          if ((await editor().innerText()).includes(sentence)) return;
+          before = await revisionOf(page, idOf(key));
+          await editor().click(); // a page of one empty paragraph, made for this save alone
+          await page.keyboard.type(sentence);
+          await page.waitForTimeout(1500);
+        },
+        check: async () => {
+          if (before !== null) {
+            const was = before;
+            await expect.poll(() => revisionOf(page, idOf(key)), { message: 'the save landed', timeout: 10_000 }).toBeGreaterThan(was);
+          }
+          const saved = header().locator('[data-header-saved]').first();
+          await expect(saved, 'the header’s saved state').toHaveText(M5_WORDS.saved, { timeout: 10_000 });
+          if (m5Cut()) await expect(saved, 'its state').toHaveAttribute('data-saved-state', 'saved');
+          await inView(saved, 'the saved state');
+        },
+      };
+    };
+    const docSave = typedAndSaved('saving', () => editorOf('saving'), 'The survey team meets on Monday.');
+    await shot(page, m5Meta('m5-doc-saved', 'T607', 'A document just saved', 'Artifacts, Meeting notes (a document of its own), a sentence typed, its save landed', 'The header’s saved state after the save: “All changes saved” (M5: one status, its state saved)', ['tools/document', 'panel']), async () => {
+      await docAtRest('saving');
+      await docSave.type();
+    }, { check: docSave.check });
+    await shot(page, m5Meta('m5-doc-comments-empty', 'G397, G393', 'A document’s comments panel with no comment', 'Blank notes, Comments', 'The panel’s line for no open comment', ['tools/document', 'src/artifacts/document/editor/comments']), async () => {
+      await openComments('blank');
+    }, {
+      check: () => inView(commentsRail('blank').locator('p.doc-rail-empty').filter({ hasText: new RegExp(`^${literal(byM5(M5_WORDS.noOpen))}$`) }), 'the no-comment line'),
+    });
+    await shot(page, m5Meta('m5-doc-comments-resolved', 'G398', 'A document’s comments panel, Resolved with none resolved', 'Blank notes, Comments, Resolved', 'The panel’s line for no resolved comment', ['tools/document', 'src/artifacts/document/editor/comments']), async () => {
+      await openComments('blank');
+      await commentsRail('blank').locator('label.doc-rail-segment').filter({ has: page.locator('input[value="resolved"]') }).click();
+    }, {
+      check: () => inView(commentsRail('blank').locator('p.doc-rail-empty').filter({ hasText: new RegExp(`^${literal(byM5(M5_WORDS.noResolved))}$`) }), 'the no-resolved line'),
+    });
+    await shot(page, m5Meta('m5-doc-versions-named', 'G373', 'A document’s history, named versions only, none named', 'Blank notes, Version history, Named only', 'The rail’s line for no named version', ['tools/document', 'src/artifacts/document/editor/history']), async () => {
+      await openHistory('blank');
+      await historyRail('blank').locator('.doc-history-filter input[type="checkbox"]').first().check();
+    }, {
+      check: () => inView(historyRail('blank').locator('p.doc-rail-empty').filter({ hasText: new RegExp(`^${literal(byM5(M5_WORDS.noNamedVersions))}$`) }), 'the no-named-version line'),
+      after: () => docAtRest('blank'),
+    });
+
+    // ---- the dashboard editor: Weekly sales's three views over two sources (G594 to G603), the source sheet from a view
+    // (G608 to G613), Export (T614); Empty board's sheet with nothing bound (G615). The sources and views are written the
+    // first time a scene needs them, as the owner's own binds (support/dashboards.ts).
+    const views = () => tab('sales').locator('.ds-doc figure.dash-view');
+    const salesReady = async () => {
+      await openArtifact('sales');
+      await expect(tab('sales').locator('.ds-doc .ProseMirror').first(), 'the dashboard’s page').toBeVisible({ timeout: 20_000 });
+      if ((await views().count()) < 3) {
+        const at = Date.UTC(2026, 8, 20, 9, 0);
+        await bindCsv(page, idOf('sales'), 'sales', { title: 'Sales', name: 'sales.csv', csv: SALES_CSV, at });
+        await bindCsv(page, idOf('sales'), 'visits', { title: 'Visits', name: 'visits.csv', csv: VISITS_CSV, at });
+        await insertBlocks(tab('sales'), [
+          chart('sales', { view: 'bar', x: 'region', y: 'revenue', title: 'Revenue by region', colour: 'teal' }),
+          chart('visits', { view: 'pie', x: 'channel', y: 'visits', title: 'Visits by channel' }),
+          chart('visits', { view: 'pie', x: 'channel', title: 'Missing sizes' }),
+        ]);
+      }
+      await expect(views().locator('.dash-source-label'), 'the three views’ sources').toHaveCount(3, { timeout: 20_000 });
+    };
+    await shot(page, m5Meta('m5-dash-tiles', 'G594, G596, G597', 'A dashboard’s views with their notes', 'Artifacts, Weekly sales (a bar over a column with two values not numbers and an unknown spec key, a pie of twelve slices)', 'Each view’s source line, the bar’s and the pie’s; on M5 the bar’s ⚠ mark and no spec warning; master’s notes at rest under the bar, its spec warning among them', ['tools/dashboard', 'src/artifacts/dashboard']), async () => {
+      await salesReady();
+      // the pie's end at the editor's bottom edge, so its source line is in the picture with the bar's (the pair review)
+      await views().nth(1).evaluate((el) => el.scrollIntoView({ block: 'end' }));
+    }, {
+      check: async () => {
+        await inView(views().first().locator('.dash-source-label'), 'the bar’s source line');
+        await inView(views().nth(1).locator('.dash-source-label'), 'the pie’s source line');
+        if (m5Cut()) {
+          await inView(views().first().locator('.dash-warning'), 'the bar’s ⚠');
+          await expect(tab('sales').getByText(/unknown key/), 'no spec warning on the tile').toHaveCount(0);
+        } else {
+          await inView(views().first().locator('.dash-notes').filter({ hasText: /are not number/ }), 'master’s wrong-type note');
+          await inView(views().first().locator('.dash-notes').filter({ hasText: /unknown key "colour" ignored/ }), 'master’s spec warning');
+        }
+      },
+    });
+    const barMark = () => views().first().locator('.dash-warning').first();
+    await shot(page, m5Meta('m5-dash-warning', 'G598', 'A dashboard view, the pointer on its ⚠', 'Weekly sales, the pointer on the bar’s ⚠', 'The ⚠’s note: how many values are not numbers (master: the same note at rest under the view)', ['tools/dashboard', 'src/artifacts/dashboard'], true), async () => {
+      await salesReady();
+      await views().first().scrollIntoViewIfNeeded();
+      await page.waitForTimeout(400);
+      if (m5Cut()) await barMark().hover();
+      await page.waitForTimeout(900);
+    }, {
+      check: async () => {
+        if (!m5Cut()) return inView(views().first().locator('.dash-notes').filter({ hasText: /are not number/ }), 'master’s note at rest');
+        await pointedAt(barMark(), 'the ⚠')();
+        // the whole note: the column's wrong-type values alone, no spec warning beside them (G597; states.ts mismatches)
+        await expect(barMark(), 'its note').toHaveAttribute('data-note', M5_WORDS.barMismatch, { timeout: 3_000 });
+        await expect.poll(() => barMark().evaluate((el) => getComputedStyle(el, '::after').visibility), { message: 'the note shown', timeout: 3_000 }).toBe('visible');
+      },
+    });
+    // The folded pie's note in each build's form, in frame: on M5 in the pie's ⚠, pointed at; master's at rest under it
+    const pieMark = () => views().nth(1).locator('.dash-warning').first();
+    await shot(page, m5Meta('m5-dash-pie-note', 'G603', 'A pie of twelve slices, its note', 'Weekly sales, the pointer on the pie’s ⚠ (master: the pie in view)', 'The folded pie’s note: “Top 5 of 12 slices; the rest as “other”” on M5, opened upward over the pie from its ⚠ at the editor’s bottom edge; master’s sentence at rest under it', ['tools/dashboard', 'src/artifacts/dashboard'], true), async () => {
+      await salesReady();
+      // the pie's end at the editor's bottom edge: its ⚠ there, the note opens upward (the pair review's fix wave, G603)
+      await views().nth(1).evaluate((el) => el.scrollIntoView({ block: 'end' }));
+      await page.waitForTimeout(400);
+      if (m5Cut()) await pieMark().hover();
+      await page.waitForTimeout(900);
+    }, {
+      check: async () => {
+        await inView(views().nth(1), 'the pie');
+        if (!m5Cut()) return inView(views().nth(1).locator('.dash-notes').filter({ hasText: M5_WORDS.piesFolded.master }), 'master’s note at rest');
+        await pointedAt(pieMark(), 'the pie’s ⚠')();
+        await expect(pieMark(), 'its note').toHaveAttribute('data-note', M5_WORDS.piesFolded.m5, { timeout: 3_000 });
+        await expect(pieMark(), 'its note opened upward at the bottom edge').toHaveAttribute('data-note-above', '', { timeout: 3_000 });
+        await expect.poll(() => pieMark().evaluate((el) => getComputedStyle(el, '::after').visibility), { message: 'the note shown', timeout: 3_000 }).toBe('visible');
+      },
+    });
+    await shot(page, m5Meta('m5-dash-unrenderable', 'G599', 'A dashboard view that cannot be drawn', 'Weekly sales, the pie with no sizes (no y column)', 'The view’s framed reason (master adds that the caption, comments and edits are kept)', ['tools/dashboard', 'src/artifacts/dashboard']), async () => {
+      await salesReady();
+      await views().nth(2).scrollIntoViewIfNeeded();
+    }, {
+      check: async () => {
+        await inView(views().nth(2), 'the view that cannot be drawn');
+        // the reason drawn in the view's own frame (render.ts's failure), not a view still loading
+        await inView(views().nth(2).locator('.dash-figure svg text').filter({ hasText: M5_WORDS.pieNeedsSizes }), 'the drawn reason');
+        await expect(views().nth(2), 'drawn, not loading').not.toHaveAttribute('aria-busy', 'true');
+        if (m5Cut()) await expect(views().nth(2).getByText(M5_WORDS.kept), 'no line about what is kept').toHaveCount(0);
+        else await inView(views().nth(2).getByText(M5_WORDS.kept), 'master’s line about what is kept');
+      },
+    });
+    const sheet = () => tab('sales').locator('aside.dash-sheet').first();
+    await shot(page, m5Meta('m5-dash-sheet', 'G608, G612, G613', 'A dashboard’s source sheet opened from a view', 'Weekly sales, click the bar’s source line', 'The sheet on the bar’s dataset: its close, the two toggles of rows shown and the count with Copy', ['tools/dashboard', 'src/artifacts/dashboard']), async () => {
+      await salesReady();
+      await closeOverlays(page);
+      await views().first().locator('button.dash-source-label').click();
+      await expect(sheet(), 'the source sheet').toBeVisible({ timeout: 10_000 });
+    }, {
+      check: async () => {
+        await inView(sheet().getByRole('button', { name: M5_WORDS.closeSheet, exact: true }), 'its close');
+        const shown = sheet().getByRole('group', { name: 'Rows shown', exact: true });
+        await inView(shown.locator('button').filter({ hasText: byM5(M5_WORDS.thisView) }), 'This view');
+        await inView(shown.locator('button').filter({ hasText: byM5(M5_WORDS.allRows) }), 'All rows');
+        await inView(sheet().locator('.dash-sheet-actions').getByRole('button', { name: 'Copy rows', exact: true }).filter({ hasText: new RegExp(`^${literal(byM5(M5_WORDS.copyRows))}$`) }), 'Copy');
+      },
+      after: () => closeOverlays(page),
+    });
+    // the sheet on every dataset (the header's Datasets): its picker, M5's options by title alone (G609)
+    const picker = () => sheet().locator('select[aria-label="Dataset"]').first();
+    await shot(page, m5Meta('m5-dash-sheet-picker', 'G609', 'A dashboard’s source sheet on both its datasets', 'Weekly sales, its header’s Datasets', 'The sheet’s dataset picker: the select alone, its options by title, drawn as an open list (master: “Dataset” beside it, each option with its id)', ['tools/dashboard', 'src/artifacts/dashboard']), async () => {
+      await salesReady();
+      await closeOverlays(page);
+      await header().locator('[data-editor-action="datasets"]').first().click();
+      await expect(picker(), 'the dataset picker').toBeVisible({ timeout: 10_000 });
+      // A native select's popup is the system's menu, outside the page, so no screenshot holds it: the rig draws the
+      // select as a list as tall as its options (its `size`, at least three rows, its height let go so no scrollbar
+      // covers the words), each option's words in the picture. The sheet closes after.
+      await picker().evaluate((el) => {
+        const select = el as HTMLSelectElement;
+        select.size = Math.max(3, select.options.length);
+        select.style.height = 'auto';
+        select.style.overflowY = 'hidden';
+      });
+    }, {
+      check: async () => {
+        await inView(picker(), 'the dataset picker');
+        await expect.poll(() => picker().evaluate((el) => el.scrollHeight <= el.clientHeight + 1), { message: 'every option drawn, no scrollbar', timeout: 3_000 }).toBe(true);
+        for (const [title, id] of [['Sales', 'sales'], ['Visits', 'visits']])
+          await expect(picker().locator('option').filter({ hasText: new RegExp(`^${literal(m5Cut() ? title : `${title} (${id})`)}$`) }), `the ${title} option`).toHaveCount(1, { timeout: 3_000 });
+        // the selected dataset's own rows drawn under the picker, not its wait or a failed read: its first column's head
+        // and its first row's first value (SALES_CSV's, VISITS_CSV's)
+        const selected = await picker().inputValue();
+        const first = ({ sales: ['region', 'North'], visits: ['channel', 'Search'] } as Record<string, [string, string]>)[selected];
+        if (!first) throw new Error(`the picker chose ${JSON.stringify(selected)}, neither fixture’s dataset`);
+        const rows = sheet().getByRole('table', { name: 'Rows', exact: true });
+        await expect(rows.getByRole('button', { name: `Sort by ${first[0]}`, exact: true }), `the ${selected} rows’ head`).toBeVisible({ timeout: 10_000 });
+        await inView(rows.getByRole('cell', { name: first[1], exact: true }), `the ${selected} rows`);
+      },
+      after: () => closeOverlays(page),
+    });
+    await shot(page, m5Meta('m5-dash-export-menu', 'T614', 'A dashboard’s Export menu', 'Weekly sales, its header’s Export', 'The six formats, Word and PDF each on Letter and on A4', ['tools/dashboard', 'panel']), async () => {
+      await salesReady();
+      await closeOverlays(page);
+      await header().getByRole('button', { name: M5_WORDS.exportMenu, exact: true }).click();
+    }, {
+      check: async () => {
+        await expect(exportMenu(), 'the Export menu').toBeVisible({ timeout: 3_000 });
+        await inView(exportMenu().getByRole('menuitem', { name: 'PDF, A4 (.pdf)', exact: true }), 'PDF on A4');
+      },
+      after: () => closeOverlays(page),
+    });
+    // a selection: the bar chosen whole, as a person chooses it (a click on its caption), the toolbar's Add comment then
+    // available; and a save, on a dashboard of its own
+    const salesToolbar = () => tab('sales').locator('.doc-format-toolbar').first();
+    await shot(page, m5Meta('m5-dash-selected', 'G332, G594', 'A dashboard, a view selected', 'Weekly sales, click the bar’s caption', 'The bar selected whole, its source line under it; the toolbar’s Add comment available (on M5 its glyph, master its words)', ['tools/dashboard', 'src/artifacts/dashboard', 'src/artifacts/document/editor']), async () => {
+      await salesReady();
+      await closeOverlays(page);
+      await views().first().scrollIntoViewIfNeeded();
+      await views().first().locator('.dash-caption').click();
+      await page.mouse.move(W - 2, H - 2);
+    }, {
+      check: async () => {
+        await expect(tab('sales').locator('.doc-chart.ProseMirror-selectednode'), 'the bar selected').toHaveCount(1, { timeout: 3_000 });
+        await inView(views().first(), 'the selected view');
+        const add = salesToolbar().getByRole('button', { name: M5_WORDS.addComment, exact: true }).first();
+        await inView(add, 'Add comment');
+        if (m5Cut()) await expect(add, 'Add comment available').not.toHaveAttribute('aria-disabled', 'true');
+        else await expect(add, 'master’s Add comment enabled').toBeEnabled({ timeout: 3_000 });
+      },
+      after: () => closeOverlays(page),
+    });
+    const boardSave = typedAndSaved('board', () => tab('board').locator('.ds-doc .ProseMirror[data-editor="live"]').first(), 'Standup moves to Tuesday.');
+    await shot(page, m5Meta('m5-dash-saved', 'T607', 'A dashboard just saved', 'Artifacts, Team board (a dashboard of its own), a sentence typed on its page, its save landed', 'The header’s saved state after the save: “All changes saved” (M5: one status, its state saved)', ['tools/dashboard', 'panel']), async () => {
+      await openArtifact('board');
+      await expect(tab('board').locator('.ds-doc .ProseMirror[data-editor="live"]').first(), 'the dashboard’s page').toBeVisible({ timeout: 20_000 });
+      await boardSave.type();
+    }, { check: boardSave.check });
+    const emptySheet = () => tab('empty').locator('aside.dash-sheet').first();
+    await shot(page, m5Meta('m5-dash-sheet-empty', 'G615', 'A dashboard’s sheet with nothing bound', 'Artifacts, Empty board, its header’s Datasets', 'The sheet’s line for no data, what to do in plain words (master names the tool)', ['tools/dashboard', 'src/artifacts/dashboard']), async () => {
+      await openArtifact('empty');
+      await header().locator('[data-editor-action="datasets"]').first().click();
+      await expect(emptySheet(), 'the sheet').toBeVisible({ timeout: 10_000 });
+    }, {
+      check: () => inView(emptySheet().locator('p.dash-sheet-empty').filter({ hasText: new RegExp(`^${literal(byM5(M5_WORDS.noData))}$`) }), 'the no-data line'),
+      after: () => closeOverlays(page),
+    });
+
+    // ---- the slides editor (G400 to G508), the design workbench (G510 to G557) and the design system page (G558
+    // to G592). Each editor at rest, its toolbar's glyphs and their tooltips by keyboard focus, its menus, a selection, a
+    // save, and the states its rows name that a fixture of this launch holds; every scene puts the editor back at rest
+    // first (no rail, no preview, nothing selected) rather than taking the scene before it as given.
+    const E = M5_EDITOR_WORDS;
+    // A tooltip reached by the keyboard alone: the pointer moved off first, then the owner focused (on master's build,
+    // `rest`, the words it draws at rest, brought into view). At the capture, on M5's build, the owner still holds the
+    // keyboard and reads open, the one tooltip drawn is its own and holds each of the build's words, the chord included
+    // where the tooltip names one; on master's, `master` checks that build's words at rest. Every locator is made at the
+    // step that uses it, never at the shot's call: a fixture is made by the scene's prepare, and one that is not made (its
+    // setup failed, or the scene is not wanted) must not throw outside its scene.
+    const keyTip = async (owner: () => Locator, rest: () => Locator) => {
+      await page.mouse.move(W - 2, H - 2);
+      await focusTip(page, owner(), rest(), m5Cut);
+    };
+    // The same, the owner then reached as Tab reaches it: a step to the stop beside it and back, so the owner holds the
+    // keyboard's focus and draws its ring (:focus-visible), which a script's focus after a scene's pointer action does
+    // not. The step goes to the neighbour in the owner's own bar or list (`via`), so it scrolls nothing.
+    const tabTip = async (owner: () => Locator, rest: () => Locator, via: 'next' | 'previous' = 'next') => {
+      await keyTip(owner, rest);
+      if (!m5Cut()) return;
+      await page.keyboard.press(via === 'next' ? 'Tab' : 'Shift+Tab');
+      await page.keyboard.press(via === 'next' ? 'Shift+Tab' : 'Tab');
+    };
+    const tipHolds = (owner: () => Locator, what: string, words: readonly (string | RegExp)[], master: () => Promise<unknown>) => async (): Promise<void> => {
+      if (!m5Cut()) {
+        await master();
+        return;
+      }
+      const held = owner().first();
+      await expect(held, `${what} holds the keyboard`).toBeFocused({ timeout: 3_000 });
+      await expect(held, `${what}’s own tooltip open`).toHaveAttribute('data-state', /^(delayed|instant)-open$/, { timeout: 3_000 });
+      const tip = page.getByRole('tooltip');
+      await expect(tip, 'one tooltip drawn').toHaveCount(1, { timeout: 3_000 });
+      await expect(tip, `${what}’s tooltip`).toBeVisible();
+      for (const word of words) await expect(tip, `${what}’s tooltip: ${String(word)}`).toContainText(word, { timeout: 3_000 });
+    };
+    const deckOf = (key: Fixture) => tab(key).locator('[data-deck-editor]').first();
+    const deckBar = (key: Fixture) => deckOf(key).getByRole('toolbar', { name: E.deckToolbar, exact: true }).first();
+    const deckRail = (key: Fixture, rail: 'check' | 'theme' | 'comments') => tab(key).locator(`[data-deck-rail="${rail}"]`).first();
+    const deckHistoryRail = (key: Fixture) => tab(key).locator('aside.doc-rail[aria-label="Version history"]').first();
+    const versionBar = (key: Fixture) => tab(key).locator('.deck-history-bar').first();
+    const deckButton = (key: Fixture, name: string) => deckOf(key).getByRole('button', { name, exact: true }).first();
+    // Check and Theme are the deck's header actions past the first, folded into its toolbar's More (both builds)
+    const toggleDeckRail = async (key: Fixture, rail: 'check' | 'theme') => {
+      await tab(key).locator('.deck-toolbar [data-editor-toolbar] [data-editor-more]').first().click();
+      await page.getByRole('menuitemcheckbox', { name: rail === 'check' ? byM5(M5_WORDS.checkDesign) : M5_WORDS.theme, exact: true }).click();
+    };
+    const deckAtRest = async (key: Fixture) => {
+      await openArtifact(key);
+      await expect(deckOf(key), 'the deck editor').toBeVisible({ timeout: 20_000 });
+      const back = versionBar(key).getByRole('button', { name: byM5(E.done), exact: true });
+      if (await back.isVisible()) await back.click();
+      await expect(versionBar(key), 'out of the version').toHaveCount(0, { timeout: 10_000 });
+      for (const rail of ['check', 'theme'] as const) if (await deckRail(key, rail).isVisible()) await toggleDeckRail(key, rail);
+      if (await deckRail(key, 'comments').isVisible()) await deckRail(key, 'comments').getByRole('button', { name: E.closeComments, exact: true }).click();
+      if ((await deckButton(key, E.historyName).getAttribute('aria-pressed')) === 'true') await deckButton(key, E.historyName).click();
+      const closeInspector = tab(key).getByRole('button', { name: E.closeInspector, exact: true });
+      if (await closeInspector.isVisible()) await closeInspector.click();
+      await expect(tab(key).locator('[data-deck-rail]').or(deckHistoryRail(key)).or(closeInspector), 'no rail and no inspector').toHaveCount(0, { timeout: 5_000 });
+      // the first slide shown, nothing on it selected. The selection outlives the slide's thumbnail, and Escape lets go of
+      // it only from the stage (transform/Overlay.tsx's keys, while the stage holds the focus): the stage takes the
+      // keyboard, then Escape, once per level the selection is nested (escapeUp)
+      await tab(key).locator('[data-slide-thumb] .deck-thumb-button').first().click();
+      const selected = tab(key).locator('[data-overlay] [data-selected]');
+      for (let level = 0; level < 4 && (await selected.count()) > 0; level++) {
+        await tab(key).locator('[data-stage-surface]').first().focus();
+        await page.keyboard.press('Escape');
+        await page.waitForTimeout(150);
+      }
+      await expect(selected, 'nothing selected').toHaveCount(0, { timeout: 5_000 });
+      await letGo(page);
+    };
+    // an element of the shown slide selected as a person selects it, a click at its centre, and the inspector open
+    const selectOnStage = async (key: Fixture, slide: string, element: string) => {
+      const box = (await tab(key).locator(`[data-stage-slide="${slide}"] [data-eid="${element}"]`).first().boundingBox())!;
+      await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+      await expect(tab(key).locator(`[data-overlay] [data-selected="${element}"]`), `${element} selected`).toBeVisible({ timeout: 10_000 });
+      const close = tab(key).getByRole('button', { name: E.closeInspector, exact: true });
+      if (!(await close.isVisible())) await deckButton(key, E.inspector).click();
+      await expect(close, 'the inspector').toBeVisible({ timeout: 10_000 });
+    };
+    // at the capture, the one element selected is `element` (the overlay's mark names it, transform/Overlay.tsx)
+    const selectedOnly = (key: Fixture, element: string) => async () => {
+      await expect(tab(key).locator('[data-overlay] [data-selected]'), 'one element selected').toHaveCount(1, { timeout: 3_000 });
+      await expect(tab(key).locator(`[data-overlay] [data-selected="${element}"]`), `${element} selected`).toBeVisible({ timeout: 3_000 });
+    };
+    const textCaption = (which: 'size' | 'weight') =>
+      inspectorCard('talk').locator('.deck-inspector-mini').filter({ hasText: new RegExp(`^${literal(byM5(which === 'size' ? E.sizeCaption : E.weightCaption))}$`) }).first();
+    const inspectorCard = (key: Fixture) => tab(key).locator('.deck-tool-card').filter({ has: page.getByRole('button', { name: E.closeInspector, exact: true }) }).first();
+
+    // the toolbar at rest (G400 to G404), its tooltips by focus, Insert's table sizes (G411), From layout's menu
+    const zoom = () => deckOf('talk').locator('select.deck-zoom').first();
+    await shot(page, m5Meta('m5-slides-rest', 'G400, G401, G402, G404', 'A deck at rest: its toolbar', 'Artifacts, Field talk (two slides, three threads, one on an element no slide has)', 'The toolbar at rest: on M5 History, Inspector and Comments as glyphs, Comments carrying its open count as a small corner badge and the only count (none beside Deck actions), the zoom reading its percentage; master’s words, “Fit (42%)” and the header’s second count', ['tools/presentation', 'src/artifacts/slides/editor']), async () => {
+      await deckAtRest('talk');
+    }, {
+      check: async () => {
+        const history = deckButton('talk', E.historyName);
+        const inspector = deckButton('talk', E.inspector);
+        const comments = deckBar('talk').locator('[data-comments-toggle]').first();
+        for (const [control, what] of [[history, 'History'], [inspector, 'Inspector'], [comments, 'Comments'], [zoom(), 'the zoom']] as const) await inView(control, what);
+        await expect(zoom().locator('option:checked'), 'the zoom’s choice').toHaveText(byM5(E.zoomShown), { timeout: 3_000 });
+        if (m5Cut()) {
+          await expect(history, 'History a glyph').toHaveText(/^$/);
+          await expect(inspector, 'Inspector a glyph').toHaveText(/^$/);
+          const open = E.commentsName.exec((await comments.getAttribute('aria-label')) ?? '')?.[1];
+          if (open === undefined) throw new Error(`the Comments toggle’s name carries no open count: ${await comments.getAttribute('aria-label')}`);
+          await expect(comments.locator('[data-comments-count]'), 'its badge').toHaveText(open, { timeout: 3_000 });
+          await expect(page.locator('[data-region="main"]').getByTitle(/^\d+ open comments?$/).filter({ visible: true }), 'no second count beside Deck actions').toHaveCount(0);
+        } else {
+          await expect(history, 'master’s History').toHaveText('History');
+          await expect(inspector, 'master’s Inspector').toHaveText(E.inspector);
+          await expect(comments, 'master’s Comments and count').toHaveText(E.commentsWords);
+        }
+      },
+    });
+    await shot(page, m5Meta('m5-slides-zoom-tip', 'G400', 'A deck, the zoom’s tooltip', 'Field talk, the keyboard on the zoom', 'The zoom reading its percentage, its tooltip “Fit” (master: the select reading “Fit (42%)”)', ['tools/presentation', 'src/artifacts/slides/editor']), async () => {
+      await deckAtRest('talk');
+      await keyTip(zoom, zoom);
+    }, {
+      check: checks(
+        tipHolds(zoom, 'the zoom', [E.fit], () => inView(zoom(), 'master’s zoom')),
+        () => expect(zoom().locator('option:checked'), 'the zoom’s choice').toHaveText(byM5(E.zoomShown), { timeout: 3_000 }),
+      ),
+    });
+    const deckComment = () => deckButton('talk', E.addComment);
+    await shot(page, m5Meta('m5-slides-comment-tip', 'G403', 'A deck, Add comment’s tooltip with nothing selected', 'Field talk, nothing selected, Add comment reached by Tab', 'Add comment greyed, its tooltip with the chord and its reason, “Select one element to comment on” (master: the greyed worded button)', ['tools/presentation', 'src/artifacts/slides/editor/comments']), async () => {
+      await deckAtRest('talk');
+      await tabTip(deckComment, deckComment);
+    }, {
+      check: checks(
+        tipHolds(deckComment, 'Add comment', [`${E.commentTip} · ${COMMENT_CHORD}`, E.commentUnavailable], async () => {
+          await inView(deckComment(), 'master’s Add comment');
+          await expect(deckComment(), 'master’s word').toHaveText(E.addComment);
+          await expect(deckComment(), 'master’s title, its chord').toHaveAttribute('title', E.commentTitle);
+          await expect(deckComment(), 'master’s greyed button').toBeDisabled({ timeout: 3_000 });
+        }),
+        async () => {
+          if (m5Cut()) await expect(deckComment(), 'greyed, keeping the keyboard').toHaveAttribute('aria-disabled', 'true');
+        },
+      ),
+    });
+    const tableSize = () => page.getByRole('menuitem', { name: E.tableName, exact: true });
+    await shot(page, m5Meta('m5-slides-insert-table', 'G411', 'A deck, Insert › Table open', 'Field talk, Insert, the pointer on Table', 'Insert’s menu with its Table sizes open: on M5 the bare sizes (“2 × 3”), each named “2 × 3 table”; master’s words carry “table”', ['tools/presentation', 'src/artifacts/slides/editor/menus'], true), async () => {
+      await deckAtRest('talk');
+      await deckButton('talk', E.insert).click();
+      await page.getByRole('menuitem', { name: E.tableTrigger, exact: true }).hover();
+      await expect(tableSize(), 'the table sizes').toBeVisible({ timeout: 5_000 });
+    }, {
+      check: async () => {
+        await inView(tableSize(), 'the 2 × 3 size');
+        await expect(tableSize(), 'its words').toHaveText(byM5(E.tableWords), { timeout: 3_000 });
+      },
+      after: () => closeOverlays(page),
+    });
+    const layouts = () => page.locator('.deck-layouts [data-layout]');
+    await shot(page, m5Meta('m5-slides-layouts', 'G421', 'A deck, From layout’s menu', 'Field talk, From layout under the slides', 'From layout’s menu open on the governing system’s layouts (the bundled MAWS system’s; G421’s wait and its two other settled lines are not drawn here)', ['tools/presentation', 'src/artifacts/slides/editor/menus']), async () => {
+      await deckAtRest('talk');
+      await deckButton('talk', E.fromLayout).click();
+      await expect(layouts().first(), 'the layouts').toBeVisible({ timeout: 10_000 });
+    }, {
+      check: () => inView(layouts(), 'a layout in the menu'),
+      after: () => closeOverlays(page),
+    });
+
+    // a selection: the title with the inspector headed by it (G439, G442); the ellipse's greyed Spread (G450)
+    await shot(page, m5Meta('m5-slides-element', 'G439, G442', 'A deck, an element selected, the inspector open', 'Field talk, click the title, then Inspector', 'The title selected; the inspector card headed by what it edits with its × (master: “Inspector” and its ×), the Text section’s fields captioned Size and Weight (master: Font size, Font weight)', ['tools/presentation', 'src/artifacts/slides/editor', 'src/artifacts/slides/editor/inspector']), async () => {
+      await deckAtRest('talk');
+      await selectOnStage('talk', 's1', 'title');
+      // the Text section's captions in view (G442), the card scrolled to them if it must
+      await textCaption('size').scrollIntoViewIfNeeded({ timeout: 5_000 });
+      await letGo(page);
+    }, {
+      check: async () => {
+        await selectedOnly('talk', 'title')();
+        await inView(inspectorCard('talk'), 'the inspector card');
+        // G442: under the section's heading a caption drops the section's word; the field keeps the full name
+        await inView(textCaption('size'), `the caption ${byM5(E.sizeCaption)}`);
+        await inView(textCaption('weight'), `the caption ${byM5(E.weightCaption)}`);
+        await expect(inspectorCard('talk').getByRole('textbox', { name: E.fontSizeName, exact: true }), 'the size field’s full name').toHaveCount(1);
+        if (m5Cut()) {
+          const heading = inspectorCard('talk').locator('h2.deck-inspector-title').first();
+          await inView(heading, 'the card’s heading');
+          await expect(heading, 'headed by the selection, not “Inspector”').not.toHaveText(E.inspector);
+        } else await expect(inspectorCard('talk').locator('.deck-tool-card-header > span').first(), 'master’s heading').toHaveText(E.inspector, { timeout: 3_000 });
+      },
+    });
+    const spread = () => tab('talk').locator(`input[aria-label="${E.shadowSpread}"]`).first();
+    const outlineNote = () => inspectorCard('talk').locator('.deck-inspector-note').filter({ hasText: E.outlineShadow });
+    await shot(page, m5Meta('m5-slides-shadow-tip', 'G450', 'A deck, the inspector on an ellipse’s shadow, Spread’s reason', 'Field talk, click the ellipse, Inspector, the keyboard on Spread', 'The Shadow section of an ellipse: Spread greyed and still focusable, its reason (the outline casts no spread) as its tooltip (master: the note under the section, Spread disabled)', ['tools/presentation', 'src/artifacts/slides/editor/inspector']), async () => {
+      await deckAtRest('talk');
+      await selectOnStage('talk', 's1', 'dot');
+      await keyTip(spread, outlineNote);
+    }, {
+      check: checks(
+        selectedOnly('talk', 'dot'),
+        tipHolds(spread, 'Spread', [E.outlineShadow], async () => {
+          await inView(outlineNote(), 'master’s note under the section');
+          await expect(spread(), 'master’s Spread disabled').toBeDisabled({ timeout: 3_000 });
+        }),
+        async () => {
+          if (!m5Cut()) return;
+          await expect(spread(), 'greyed').toHaveAttribute('aria-disabled', 'true');
+          await expect(outlineNote(), 'no note at rest').toHaveCount(0);
+        },
+      ),
+    });
+
+    // the planning deck: a slide's menu (G428), the held slide's banner and the hidden slide's mark (G424, G431, G432), a
+    // section's rename by focus (G429), the Check (G471 to G475), Theme (G463, G468)
+    const slideMenu = () => page.getByRole('menu', { name: E.slideOptions(2), exact: true });
+    await shot(page, m5Meta('m5-slides-thumb-menu', 'G428', 'A deck, a slide’s menu', 'Artifacts, Planning deck, the second slide’s ⋯', 'The slide’s menu: Duplicate, Hide, New section here, Delete (master: each with “slide”, and “Start a section here”)', ['tools/presentation', 'src/artifacts/slides/editor']), async () => {
+      await deckAtRest('planning');
+      await tab('planning').locator('[data-slide-thumb="s002"] .deck-thumb-menu').first().click();
+      await expect(slideMenu(), 'the slide’s menu').toBeVisible({ timeout: 5_000 });
+    }, {
+      check: async () => {
+        await expect(slideMenu(), 'the slide’s menu').toBeVisible({ timeout: 3_000 });
+        for (const item of byM5(E.slideMenu)) await inView(slideMenu().getByRole('menuitem', { name: item, exact: true }), item);
+      },
+      after: () => closeOverlays(page),
+    });
+    const heldBanner = () => tab('planning').locator('[data-held-banner]').first();
+    await shot(page, m5Meta('m5-slides-held', 'G424, G425, G431, G432', 'A deck, its held slide selected', 'Planning deck, the held slide’s thumbnail', 'The held slide shown with its banner (on M5 one sentence and Details, the reasons behind it; master’s sentence and the list), the hidden slide marked by an eye with a slash (master: Hidden)', ['tools/presentation', 'src/artifacts/slides/editor']), async () => {
+      await deckAtRest('planning');
+      await tab('planning').locator('[data-slide-thumb="broken"] .deck-thumb-button').first().click();
+      await expect(heldBanner(), 'the held banner').toBeVisible({ timeout: 10_000 });
+    }, {
+      check: async () => {
+        await inView(heldBanner(), 'the held banner');
+        await expect(heldBanner(), 'its sentence').toContainText(byM5(E.heldBanner), { timeout: 3_000 });
+        const quiet = tab('planning').locator('[data-slide-thumb="quiet"]').first();
+        if (m5Cut()) {
+          await expect(heldBanner().locator('details > summary').first(), 'its Details').toHaveText(E.heldDetails);
+          await expect(quiet.locator('[data-hidden-mark]'), 'the hidden slide’s mark').toHaveCount(1);
+          await expect(quiet.getByText(E.hidden, { exact: true }), 'no word Hidden').toHaveCount(0);
+        } else await expect(quiet.getByText(E.hidden, { exact: true }), 'master’s Hidden').toHaveCount(1);
+      },
+    });
+    const renameSection = () => tab('planning').getByRole('button', { name: E.renameSection('Opening'), exact: true }).first();
+    await shot(page, m5Meta('m5-slides-section-tip', 'G429', 'A deck, a section’s rename by the keyboard', 'Planning deck, the first section’s rename reached by Tab', 'The section’s pencil and × drawn while it holds the keyboard, the pencil’s tooltip “Rename section Opening” (master: the worded Rename and × at rest)', ['tools/presentation', 'src/artifacts/slides/editor']), async () => {
+      await deckAtRest('planning');
+      await tabTip(renameSection, renameSection);
+    }, {
+      check: checks(
+        tipHolds(renameSection, 'the section’s rename', [E.renameSection('Opening')], async () => {
+          await inView(renameSection(), 'master’s Rename');
+          await expect(renameSection(), 'master’s word').toHaveText(E.rename);
+        }),
+        async () => {
+          if (m5Cut()) await drawn(renameSection(), 'the pencil')();
+        },
+      ),
+    });
+    await shot(page, m5Meta('m5-slides-check', 'G471, G472, G473, G475', 'A deck, the Check rail on a deck that breaks rules', 'Planning deck (one slide’s heading in a colour no system has), Deck actions › Check', 'The Check rail settled and its body scrolled to By hand, the last issues above it: on M5 titled Check, its issues counted, each issue its message and its rule’s words; master’s title, its summary, the element path and “[check: …]” on each issue, To judge by hand', ['tools/presentation', 'src/artifacts/slides/editor/menus']), async () => {
+      await deckAtRest('planning');
+      await toggleDeckRail('planning', 'check');
+      await expect(deckRail('planning', 'check'), 'the Check rail').toBeVisible({ timeout: 10_000 });
+      // settled, then the rail's body scrolled to the don'ts to judge by hand (G475), below the issues: the last issues
+      // stay above it. The title and summary scroll with the body, and the window is too short to hold them and the
+      // don'ts together, so they are out of this picture
+      await expect(deckRail('planning', 'check').locator('.deck-check-summary'), 'its summary').toHaveText(byM5(E.checkSummary), { timeout: 10_000 });
+      await deckRail('planning', 'check').getByRole('heading', { name: byM5(E.byHand), exact: true }).evaluate((el) => el.scrollIntoView({ block: 'center' }));
+    }, {
+      check: async () => {
+        const rail = deckRail('planning', 'check');
+        await expect(rail.locator('h2.deck-inspector-title'), 'its title').toHaveText(byM5(E.checkTitle), { timeout: 3_000 });
+        // settled: the summary in the build's words, never the wait
+        await expect(rail.locator('.deck-check-summary'), 'its summary').toHaveText(byM5(E.checkSummary), { timeout: 10_000 });
+        const issue = rail.locator('.deck-check-violation').last();
+        await inView(issue, 'an issue');
+        if (m5Cut()) {
+          await expect(rail.locator('.deck-check-where'), 'no element path').toHaveCount(0);
+          await expect(rail, 'no tag').not.toContainText('[check:');
+        } else await expect(issue, 'master’s tag on the issue').toContainText('[check:');
+        await inView(rail.getByRole('heading', { name: byM5(E.byHand), exact: true }), 'the don’ts to judge by hand');
+      },
+    });
+    await shot(page, m5Meta('m5-slides-theme', 'G463, G468', 'A deck, the Theme rail', 'Planning deck (a border colour of its own over its system’s), Deck actions › Theme', 'The Theme rail scrolled to its reset: the Faces rows captioned Display and Body, the reset “Reset all” under them (master: “Display face”, “Use the system’s colours and faces”)', ['tools/presentation', 'src/artifacts/slides/editor/menus']), async () => {
+      await deckAtRest('planning');
+      await toggleDeckRail('planning', 'theme');
+      await expect(deckRail('planning', 'theme'), 'the Theme rail').toBeVisible({ timeout: 10_000 });
+      // the reset sits under Faces, below the rail's fold: the rail scrolled to it, Faces kept above it. The title
+      // scrolls with the body and the window can't hold both, so the title is out of this picture
+      await deckRail('planning', 'theme').getByRole('button', { name: byM5(E.resetAll), exact: true }).evaluate((el) => el.scrollIntoView({ block: 'end' }));
+    }, {
+      check: async () => {
+        const rail = deckRail('planning', 'theme');
+        await inView(rail, 'the Theme rail');
+        await inView(rail.getByRole('button', { name: byM5(E.resetAll), exact: true }), 'the reset');
+        await inView(rail.locator('.deck-inspector-caption').filter({ hasText: new RegExp(`^${literal(byM5(E.displayCaption))}$`) }), 'the display face’s caption');
+      },
+    });
+
+    // comments: the rail on Field talk's threads (G404, G479, G482), the orphan (G481); the empty rail (G478)
+    const openDeckComments = async (key: Fixture) => {
+      await deckAtRest(key);
+      await deckBar(key).locator('[data-comments-toggle]').first().click();
+      await expect(deckRail(key, 'comments'), 'the comments rail').toBeVisible({ timeout: 10_000 });
+    };
+    const deletedToggle = () => deckRail('talk', 'comments').locator('button.deck-comments-section:not([aria-expanded])').first();
+    await shot(page, m5Meta('m5-slides-comments', 'G404, G479, G482', 'A deck’s comments rail', 'Field talk, Comments in its toolbar', 'The rail open on the two open threads: each reply field with its send glyph (master: the worded Reply), the toggle for threads on deleted elements reading “Show deleted” (master: “Show deleted-target comments”); the toolbar’s badge', ['tools/presentation', 'src/artifacts/slides/editor/comments']), async () => {
+      await openDeckComments('talk');
+    }, {
+      check: async () => {
+        const thread = deckRail('talk', 'comments').locator('[data-thread="t-title"]');
+        await inView(thread, 'the title’s thread');
+        const send = thread.locator('form.deck-thread-reply').getByRole('button', { name: E.reply, exact: true });
+        await inView(send, 'its send');
+        await expect(send, 'its words').toHaveText(m5Cut() ? /^$/ : E.reply);
+        await expect(deletedToggle(), 'the deleted toggle').toHaveText(byM5(E.showDeleted), { timeout: 3_000 });
+        if (m5Cut()) await expect(deletedToggle(), 'its name').toHaveAttribute('aria-label', E.showDeletedName);
+      },
+    });
+    await shot(page, m5Meta('m5-slides-comments-deleted', 'G479, G481', 'A deck’s comments rail with the threads on deleted elements', 'Field talk, Comments, then the deleted toggle', 'The thread whose element is gone shown, saying “Element deleted” (master: “The commented element was deleted.”)', ['tools/presentation', 'src/artifacts/slides/editor/comments']), async () => {
+      await openDeckComments('talk');
+      await deletedToggle().click();
+    }, {
+      check: async () => {
+        const orphan = deckRail('talk', 'comments').locator('[data-thread="t-gone"]');
+        await inView(orphan, 'the thread on a deleted element');
+        await expect(orphan.locator('.deck-thread-note'), 'its note').toHaveText(byM5(E.orphan), { timeout: 3_000 });
+      },
+    });
+    await shot(page, m5Meta('m5-slides-comments-empty', 'G478', 'A deck’s comments rail with no comment', 'Artifacts, Speaker deck, Comments in its toolbar', 'The empty rail’s line, which names Add comment', ['tools/presentation', 'src/artifacts/slides/editor/comments']), async () => {
+      await openDeckComments('speaker');
+    }, {
+      check: () => inView(deckRail('speaker', 'comments').locator('.deck-comments-empty').filter({ hasText: new RegExp(`^${literal(E.commentsEmpty)}$`) }), 'the empty line'),
+    });
+
+    // a version previewed (G489, G490, G492, G495): Site visit's Draft, saved after one change since Baseline (the title's
+    // colour), so its preview holds that one change
+    const toVersion = async () => {
+      await deckAtRest('versions');
+      await deckButton('versions', E.historyName).click();
+      await expect(deckHistoryRail('versions'), 'the history rail').toBeVisible({ timeout: 10_000 });
+      // a version row is named `Version <title> by <author>` (document/editor/history/HistoryRail.tsx, both builds)
+      await deckHistoryRail('versions').getByRole('button', { name: /^Version Draft by / }).first().click();
+      await expect(versionBar('versions'), 'the version bar').toBeVisible({ timeout: 10_000 });
+    };
+    const doneButton = () => versionBar('versions').getByRole('button', { name: byM5(E.done), exact: true }).first();
+    await shot(page, m5Meta('m5-slides-version', 'G489, G490, G495', 'A deck showing a version, on its one change', 'Artifacts, Site visit, Version history, the version “Draft” (the title’s colour changed since Baseline), ↓ when no change is focused yet', 'The version bar: “1 / N” (master: “1 of N changes”), Restore, Make a copy, Name and Done (master: the full words); under the slide the version’s notes, “No speaker notes.”', ['tools/presentation', 'src/artifacts/slides/editor/history']), async () => {
+      await toVersion();
+      // the preview may open on the shown slide's change already (history/controller.ts, `focus`); stepped only if not
+      const count = versionBar('versions').locator('.deck-history-count');
+      await expect(count, 'the version’s changes').toHaveAttribute('data-history-count', /^\d+$/, { timeout: 10_000 });
+      if (!byM5(E.stepped).test((await count.innerText()).trim())) await versionBar('versions').getByRole('button', { name: E.nextChange, exact: true }).click();
+    }, {
+      check: async () => {
+        await inView(versionBar('versions'), 'the version bar');
+        const count = versionBar('versions').locator('.deck-history-count');
+        await expect(count, 'one change: the title’s colour').toHaveAttribute('data-history-count', '1');
+        await expect(count, 'the step').toHaveText(byM5(E.stepped), { timeout: 5_000 });
+        await expect(versionBar('versions').getByRole('button', { name: E.restore, exact: true }), 'Restore').toHaveText(m5Cut() ? E.restoreWords : E.restore);
+        await expect(doneButton(), 'Done').toHaveText(byM5(E.doneWords));
+        await inView(tab('versions').locator('[data-history-notes]').getByText(E.noNotes, { exact: true }), 'the version’s notes');
+      },
+    });
+    await shot(page, m5Meta('m5-slides-version-done-tip', 'G490', 'A deck showing a version, Done’s tooltip', 'Site visit, the version “Draft”, Done reached by Tab', 'Done’s tooltip “Back to presentation” (master: the button’s own words)', ['tools/presentation', 'src/artifacts/slides/editor/history']), async () => {
+      await toVersion();
+      await tabTip(doneButton, doneButton, 'previous'); // Done may be its bar's last stop
+    }, {
+      check: checks(
+        tipHolds(doneButton, 'Done', [E.doneTip], () => inView(doneButton(), 'master’s Back to presentation')),
+        () => expect(doneButton(), 'its words').toHaveText(byM5(E.doneWords)),
+      ),
+    });
+    const nameField = () => versionBar('versions').locator('input.deck-history-name').or(tab('versions').getByRole('textbox', { name: E.nameField, exact: true })).first();
+    await shot(page, m5Meta('m5-slides-version-name', 'G492', 'A deck showing a version, naming it', 'Site visit, the version “Draft”, Name', 'The version’s name field, its placeholder “Version name” (master: “Name, e.g. Before the review”)', ['tools/presentation', 'src/artifacts/slides/editor/history']), async () => {
+      await toVersion();
+      await versionBar('versions').getByRole('button', { name: E.nameVersion, exact: true }).click();
+      await expect(nameField(), 'the name field').toBeVisible({ timeout: 5_000 });
+    }, {
+      check: async () => {
+        await inView(nameField(), 'the name field');
+        await expect(nameField(), 'its placeholder').toHaveAttribute('placeholder', byM5(E.namePlaceholder));
+      },
+      after: () => closeOverlays(page),
+    });
+
+    // speaker notes (G436, G437) and a save (T607), on Speaker deck alone
+    const notesField = () => deckOf('speaker').locator('textarea.deck-notes-field').first();
+    const openNotes = async () => {
+      await deckAtRest('speaker');
+      const disclosure = deckOf('speaker').locator('[data-notes-disclosure]').first();
+      // opened by the owner each time (closed first if a scene before left it open): on M5 the opening puts the caret in it
+      if ((await disclosure.getAttribute('aria-expanded')) === 'true') await disclosure.click();
+      await expect(disclosure, 'the notes closed').toHaveAttribute('aria-expanded', 'false', { timeout: 5_000 });
+      await disclosure.click();
+      await expect(notesField(), 'the notes field').toBeVisible({ timeout: 5_000 });
+    };
+    await shot(page, m5Meta('m5-slides-notes', 'G436', 'A deck, its speaker notes opened and empty', 'Speaker deck, Speaker notes under the stage', 'The opened notes field, empty, with no placeholder: on M5 drawn framed and holding the caret (master: “Speaker notes” in it)', ['tools/presentation', 'src/artifacts/slides/editor']), async () => {
+      await openNotes();
+    }, {
+      check: async () => {
+        await inView(notesField(), 'the notes field');
+        await expect(notesField(), 'empty').toHaveValue('');
+        if (m5Cut()) {
+          await expect(notesField(), 'no placeholder').not.toHaveAttribute('placeholder', /./);
+          await expect(notesField(), 'the caret in it').toBeFocused();
+        } else await expect(notesField(), 'master’s placeholder').toHaveAttribute('placeholder', E.notes);
+      },
+    });
+    const refusedNotes = () => deckOf('speaker').locator('p.deck-notes-refused').first();
+    await shot(page, m5Meta('m5-slides-notes-long', 'G437', 'A deck, speaker notes too long to save', 'Speaker deck, 4,312 characters in its notes', 'The notes’ refusal: “Too long to save: 4,312 / 4,000” (master’s sentence)', ['tools/presentation', 'src/artifacts/slides/editor']), async () => {
+      await openNotes();
+      await notesField().fill('Walk the site with the surveyors. '.repeat(130).slice(0, 4312));
+      await expect(refusedNotes(), 'the refusal').toBeVisible({ timeout: 5_000 });
+    }, {
+      check: async () => {
+        await inView(refusedNotes(), 'the refusal');
+        await expect(refusedNotes(), 'its words').toHaveText(byM5(E.notesTooLong));
+      },
+      // the refused text is the tab's until the field is short enough: emptied, so the save scene types on empty notes
+      after: async () => {
+        if (await notesField().isVisible()) await notesField().fill('');
+      },
+    });
+    const SPOKEN = 'Bring the site maps.';
+    let spokenFrom: number | null = null;
+    const deckSaved = () => tab('speaker').locator('.deck-toolbar [data-editor-toolbar] [data-header-saved]').first();
+    await shot(page, m5Meta('m5-slides-saved', 'T607', 'A deck just saved', 'Speaker deck, a sentence typed in its notes, its save landed', 'The saved state in the deck’s own toolbar after the save: “All changes saved” (M5: one status, its state saved; master: “Saved”)', ['tools/presentation', 'panel']), async () => {
+      await openNotes();
+      if ((await notesField().inputValue()) !== SPOKEN) {
+        spokenFrom = await revisionOf(page, idOf('speaker'));
+        await notesField().fill('');
+        await notesField().click();
+        await page.keyboard.type(SPOKEN);
+        await page.waitForTimeout(1500);
+      }
+    }, {
+      check: async () => {
+        if (spokenFrom !== null) {
+          const was = spokenFrom;
+          await expect.poll(() => revisionOf(page, idOf('speaker')), { message: 'the save landed', timeout: 10_000 }).toBeGreaterThan(was);
+        }
+        await expect(notesField(), 'the sentence in the notes').toHaveValue(SPOKEN);
+        await expect(deckSaved(), 'the toolbar’s saved state').toHaveText(byM5(E.saved), { timeout: 10_000 });
+        if (m5Cut()) await expect(deckSaved(), 'its state').toHaveAttribute('data-saved-state', 'saved');
+        await inView(deckSaved(), 'the saved state');
+      },
+    });
+    await shot(page, m5Meta('m5-slides-empty', 'G433', 'A deck with no slides', 'Artifacts, Empty deck (its files name no slide)', 'The stage’s line for a deck with no slides: “No slides yet” (master’s sentence)', ['tools/presentation', 'src/artifacts/slides/editor']), async () => {
+      await openArtifact('bare');
+      await expect(deckOf('bare'), 'the deck editor').toBeVisible({ timeout: 20_000 });
+    }, {
+      check: () => inView(deckOf('bare').getByText(byM5(E.emptyDeck), { exact: true }), 'the empty deck’s line'),
+    });
+
+    // ---- the design workbench, on Site screens (no thread, never edited): at rest (G510 to G512, G522, G528, G529), a board
+    // selected (G528, G536, G538), Add comment's tooltip on it (G513, G514), a row's menu (G525) and size by focus (G522),
+    // the held board's reasons (G533, G534), a refused size (G518, G539); Draft screens' missing board (G524, G535); Blank
+    // screens (G526); Review screens' comments (G542 to G545) and version (G546, G549)
+    const designOf = (key: Fixture) => tab(key).locator('[data-design-editor]').first();
+    const boardTitle = (key: Fixture, board: string) => designOf(key).locator(`[data-board-title="${board}"]`).first();
+    const designRail = (key: Fixture) => tab(key).locator('[data-deck-rail="comments"]').first();
+    const designAtRest = async (key: Fixture) => {
+      await openArtifact(key);
+      await expect(designOf(key), 'the design workbench').toBeVisible({ timeout: 20_000 });
+      const back = designOf(key).getByRole('button', { name: 'Back to design', exact: true });
+      if (await back.isVisible()) await back.click();
+      // the rails closed by the header's own actions (support/design.ts: a narrow header folds them under More actions)
+      if (await designRail(key).isVisible()) await toggleComments(page);
+      if (await tab(key).locator('aside.doc-rail').first().isVisible()) await headerAction(page, 'Version history');
+      await expect(designRail(key).or(tab(key).locator('aside.doc-rail')), 'no rail').toHaveCount(0, { timeout: 5_000 });
+      // no board framed: the world's Escape lets a framed board go (World.tsx)
+      if ((await designOf(key).locator('[data-board-title][aria-pressed="true"]').count()) > 0) {
+        await designOf(key).locator('[data-design-world]').first().focus();
+        await page.keyboard.press('Escape');
+      }
+      await expect(designOf(key).locator('[data-board-title][aria-pressed="true"]'), 'no board framed').toHaveCount(0, { timeout: 5_000 });
+      // every board in view again, whatever a scene zoomed to: the world's Fit all (⇧1, World.tsx)
+      await designOf(key).locator('[data-design-world]').first().focus();
+      await page.keyboard.press('Shift+Digit1');
+      await letGo(page);
+    };
+    // A board brought to a zoom its title has room for (the first fit holds the 9,000 px poster, drawing a board's title
+    // too narrow for its size, World.tsx's TITLE_FULL_PX), by the row's own Zoom to board, as a person reaches it
+    const zoomToBoard = async (key: Fixture, board: string) => {
+      await designOf(key).locator(`[data-board-row="${board}"] button.design-board-menu`).first().click();
+      await page.getByRole('menuitem', { name: E.zoomToBoard, exact: true }).click();
+      await expect(page.getByRole('menu'), 'the board’s menu closed').toHaveCount(0, { timeout: 5_000 });
+      await letGo(page);
+    };
+    const frameBoard = async (key: Fixture, board: string) => {
+      await designAtRest(key);
+      await boardTitle(key, board).click();
+      await expect(designOf(key).locator(`[data-board-inspector="${board}"]`), `the ${board} board’s inspector`).toBeVisible({ timeout: 10_000 });
+    };
+    const designComment = () => designOf('screens').getByRole('button', { name: E.addComment, exact: true }).first();
+    await shot(page, m5Meta('m5-design-rest', 'G510, G511, G512, G522, G528', 'A design at rest', 'Artifacts, Site screens (five boards, one held)', 'The workbench at rest: the boards toggle titled Boards, Add comment a glyph and no Comments of the toolbar’s own, Inspector still its word (G401 is the deck’s), each board’s name alone in the rail and over the canvas, no Held over the held board (master: “Show boards”, the worded pair, the sizes, the badge)', ['tools/design', 'src/artifacts/design/editor']), async () => {
+      await designAtRest('screens');
+    }, {
+      check: async () => {
+        const toggle = designOf('screens').getByRole('button', { name: E.boardsToggle, exact: true }).first();
+        await inView(toggle, 'the boards toggle');
+        await expect(toggle, 'its title').toHaveAttribute('title', byM5(E.boardsTitle));
+        await inView(designComment(), 'Add comment');
+        const size = designOf('screens').locator('[data-board-row="tablet"] .design-board-size');
+        if (m5Cut()) {
+          await expect(designComment(), 'a glyph').toHaveText(/^$/);
+          await expect(designOf('screens').locator('[data-comments-toggle]'), 'no Comments in the toolbar').toHaveCount(0);
+          await expect(size, 'the row’s size waits for the pointer').toHaveCSS('opacity', '0');
+        } else {
+          await inView(designOf('screens').locator('[data-comments-toggle]'), 'master’s Comments');
+          await inView(size, 'master’s size at rest');
+        }
+      },
+    });
+    // G529, at a zoom where master's title has room for its Held (World.tsx draws it only then): the held board zoomed to
+    await shot(page, m5Meta('m5-design-held-title', 'G529', 'A design, the held board’s title', 'Site screens, the Broken row’s Zoom to board', 'The held board’s title over the canvas: its name alone, the size waiting for the pointer (G528), no Held badge, the dashed outline kept (master: the size and a Held badge beside the name)', ['tools/design', 'src/artifacts/design/editor']), async () => {
+      await designAtRest('screens');
+      await zoomToBoard('screens', 'broken');
+    }, {
+      check: async () => {
+        const title = boardTitle('screens', 'broken');
+        await inView(title.locator('.design-board-title-name'), 'the held board’s title');
+        // the title has room for what master draws beside the name: its size is mounted on both builds
+        await expect(title.locator('.design-board-title-size'), 'the title’s size, mounted at this zoom').toHaveCount(1);
+        if (m5Cut()) await expect(title.locator('.design-board-badge'), 'no Held over the canvas').toHaveCount(0);
+        else await inView(title.locator('.design-board-badge').filter({ hasText: /^Held$/ }), 'master’s Held');
+      },
+    });
+    await shot(page, m5Meta('m5-design-board', 'G528, G536, G538', 'A design, a board selected', 'Site screens, the Tablet row’s Zoom to board, then the board’s title', 'The board framed, its title’s size drawn while it is selected (on M5 hidden at rest, master’s always), the inspector headed Tablet with Board and Board name, the size select captioned Size (master: Board size)', ['tools/design', 'src/artifacts/design/editor']), async () => {
+      await designAtRest('screens');
+      await zoomToBoard('screens', 'tablet');
+      const size = boardTitle('screens', 'tablet').locator('.design-board-title-size');
+      // the title has room for its size: drawn on master, waiting for the pointer or the selection on M5
+      await expect(size, 'the title’s size').toBeAttached({ timeout: 5_000 });
+      await expect(size, 'the title’s size at rest').toHaveCSS('opacity', m5Cut() ? '0' : '1', { timeout: 3_000 });
+      await boardTitle('screens', 'tablet').click();
+      await expect(designOf('screens').locator('[data-board-inspector="tablet"]'), 'the Tablet board’s inspector').toBeVisible({ timeout: 10_000 });
+      await letGo(page);
+    }, {
+      check: async () => {
+        await expect(boardTitle('screens', 'tablet'), 'the board framed').toHaveAttribute('aria-pressed', 'true');
+        await drawn(boardTitle('screens', 'tablet').locator('.design-board-title-size'), 'the framed board’s size')();
+        const inspector = designOf('screens').locator('[data-board-inspector="tablet"]');
+        await inView(inspector.locator('h2.deck-inspector-title').filter({ hasText: /^Tablet$/ }), 'the board heading');
+        await inView(inspector.getByRole('combobox', { name: E.boardSizeName, exact: true }), 'the size select');
+        await expect(inspector.locator('.deck-inspector-caption').filter({ hasText: new RegExp(`^${literal(byM5(E.boardSize))}$`) }), 'its caption').toHaveCount(1);
+      },
+    });
+    await shot(page, m5Meta('m5-design-board-tip', 'G511, G513, G514', 'A design, Add comment’s tooltip with a board selected', 'Site screens, the Tablet board selected, the keyboard on Add comment', 'Add comment’s tooltip: the word and the chord, then the board it comments on, “On Tablet” (master: the worded button)', ['tools/design', 'src/artifacts/design/editor']), async () => {
+      await frameBoard('screens', 'tablet');
+      await keyTip(designComment, designComment);
+    }, {
+      check: tipHolds(designComment, 'Add comment', [`${E.addComment} · ${COMMENT_CHORD}`, E.designComment.m5], async () => {
+        await inView(designComment(), 'master’s Add comment');
+        await expect(designComment(), 'master’s word').toHaveText(E.addComment);
+        await expect(designComment(), 'master’s title naming the board, its chord').toHaveAttribute('title', E.designComment.master);
+      }),
+    });
+    const boardMenu = () => page.getByRole('menu', { name: E.boardOptions('Tablet'), exact: true });
+    await shot(page, m5Meta('m5-design-board-menu', 'G525', 'A design, a board’s menu in the rail', 'Site screens, the Tablet row’s ⋯', 'The board’s menu: Zoom to board, Rename, Duplicate, Move up, Move down, Delete (master: Duplicate board, Delete board)', ['tools/design', 'src/artifacts/design/editor']), async () => {
+      await designAtRest('screens');
+      await designOf('screens').locator('[data-board-row="tablet"] button.design-board-menu').first().click();
+      await expect(boardMenu(), 'the board’s menu').toBeVisible({ timeout: 5_000 });
+    }, {
+      check: async () => {
+        await expect(boardMenu(), 'the board’s menu').toBeVisible({ timeout: 3_000 });
+        for (const item of byM5(E.boardMenu)) await inView(boardMenu().getByRole('menuitem', { name: item, exact: true }), item);
+      },
+      after: () => closeOverlays(page),
+    });
+    const tabletRow = () => designOf('screens').locator('[data-board-row="tablet"] .design-board-row').first();
+    await shot(page, m5Meta('m5-design-row-size', 'G522', 'A design, a board’s row holding the keyboard', 'Site screens, the keyboard on the Tablet row', 'The row’s size drawn while it holds the keyboard (master: every row’s size at rest)', ['tools/design', 'src/artifacts/design/editor']), async () => {
+      await designAtRest('screens');
+      await tabletRow().focus();
+    }, {
+      check: async () => {
+        const size = designOf('screens').locator('[data-board-row="tablet"] .design-board-size');
+        await inView(size, 'the row’s size');
+        if (m5Cut()) {
+          await focusIn(designOf('screens').locator('[data-board-row="tablet"]'), 'the Tablet row')();
+          await drawn(size, 'the row’s size')();
+        }
+      },
+    });
+    const designHeld = () => designOf('screens').locator('[data-held-banner]').first();
+    await shot(page, m5Meta('m5-design-held', 'G533, G534', 'A design, the held board’s reasons opened', 'Site screens, the Broken board’s title, then its banner', 'The held board’s banner, one sentence that opens on the loader’s reasons, opened (master: the sentence and the list at rest)', ['tools/design', 'src/artifacts/design/editor']), async () => {
+      await frameBoard('screens', 'broken');
+      await expect(designHeld(), 'the held banner').toBeVisible({ timeout: 10_000 });
+      if (m5Cut()) await designHeld().locator('summary').first().click();
+    }, {
+      check: async () => {
+        await expect(designHeld(), 'its sentence').toContainText(byM5(E.designHeld), { timeout: 3_000 });
+        if (m5Cut()) await expect(designHeld().locator('details').first(), 'opened').toHaveAttribute('open', '');
+        await inView(designHeld().locator('li'), 'a reason');
+      },
+    });
+    // on a design of its own: Escape lets a framed board go but keeps it the current one (World.tsx), so its inspector, and
+    // the refusal in it, would outlast the scene
+    const refusedSize = () => designOf('sized').locator('[data-board-inspector="tablet"] [role="alert"]').first();
+    await shot(page, m5Meta('m5-design-oversize', 'G539', 'A design, a board size refused', 'Artifacts, Sized screens (a design of its own), the Tablet board selected, 20000 typed in its width', 'The refusal under the width in a person’s words, “At most 16,384 px a side” (master: “board tablet: w is 20000 px (over 16384 px a side)”)', ['tools/design', 'src/artifacts/design/editor']), async () => {
+      await frameBoard('sized', 'tablet');
+      const width = designOf('sized').locator(`[data-board-inspector="tablet"] input[aria-label="${E.boardWidth}"]`).first();
+      await width.fill('20000');
+      await width.press('Enter');
+      await expect(refusedSize(), 'the refusal').toBeVisible({ timeout: 5_000 });
+    }, {
+      check: async () => {
+        await inView(refusedSize(), 'the refusal');
+        await expect(refusedSize(), 'its words').toHaveText(byM5(E.oversize));
+      },
+    });
+    await shot(page, m5Meta('m5-design-missing', 'G524, G535', 'A design, a board whose file never arrived', 'Artifacts, Draft screens, the Later board’s row', 'The missing board selected: its banner, “This board’s file hasn’t arrived yet.” (master’s sentence), its row’s File not received', ['tools/design', 'src/artifacts/design/editor']), async () => {
+      await designAtRest('drafts');
+      await designOf('drafts').locator('[data-board-row="later"] .design-board-row').first().click();
+      await expect(designOf('drafts').locator('[data-missing-banner]'), 'the missing banner').toBeVisible({ timeout: 10_000 });
+    }, {
+      check: async () => {
+        await inView(designOf('drafts').locator('[data-missing-banner]').filter({ hasText: byM5(E.designMissing) }), 'the missing banner');
+        await inView(designOf('drafts').locator('[data-board-row="later"]').getByText(E.fileNotReceived, { exact: true }), 'the row’s badge');
+      },
+    });
+    await shot(page, m5Meta('m5-design-empty', 'G526', 'A design with no boards', 'Artifacts, Blank screens (its canvas names no board)', 'The rail with its heading and + alone, the canvas saying the design has no boards (master: the line in the rail too)', ['tools/design', 'src/artifacts/design/editor']), async () => {
+      await openArtifact('blankDesign');
+      await expect(designOf('blankDesign'), 'the design workbench').toBeVisible({ timeout: 20_000 });
+      const rail = designOf('blankDesign').locator('nav[data-design-rail="boards"]');
+      if (!(await rail.isVisible())) await designOf('blankDesign').getByRole('button', { name: E.boardsToggle, exact: true }).first().click();
+      await expect(rail, 'the boards rail').toBeVisible({ timeout: 5_000 });
+    }, {
+      check: async () => {
+        const rail = designOf('blankDesign').locator('nav[data-design-rail="boards"]');
+        await inView(rail.locator('.design-boards-header').getByText(E.boardsToggle, { exact: true }), 'the rail’s heading');
+        await inView(rail.getByRole('button', { name: E.addBoard, exact: true }), 'the rail’s +');
+        const inRail = rail.locator('.deck-quiet');
+        if (m5Cut()) {
+          await expect(inRail, 'no line in the rail').toHaveCount(0);
+          await inView(designOf('blankDesign').getByText(E.noBoards, { exact: true }), 'the canvas’s line');
+        } else await inView(inRail.filter({ hasText: E.noBoards }), 'master’s line in the rail');
+      },
+    });
+    const openDesignComments = async () => {
+      await designAtRest('reviewed');
+      await toggleComments(page);
+      await expect(designRail('reviewed'), 'the comments rail').toBeVisible({ timeout: 10_000 });
+    };
+    await shot(page, m5Meta('m5-design-comments', 'G512, G543', 'A design’s comments rail', 'Artifacts, Review screens, the header’s count of open comments', 'The rail on a board’s thread, reading “Tablet” once, its quote (master: located “Board Tablet” above it), and an element’s, located by its board', ['tools/design', 'src/artifacts/design/editor']), async () => {
+      await openDesignComments();
+    }, {
+      check: async () => {
+        const board = designRail('reviewed').locator('[data-thread="d-board"]');
+        await inView(board, 'the board’s thread');
+        const where = byM5(E.boardThread);
+        if (where === null) await expect(board.locator('.deck-thread-slide'), 'no location line').toHaveCount(0);
+        else await expect(board.locator('.deck-thread-slide'), 'where it is').toHaveText(where, { timeout: 3_000 });
+        await expect(board.locator('.deck-thread-quote-text'), 'its quote, the board’s name').toHaveText(E.boardThreadQuote, { timeout: 3_000 });
+        await inView(designRail('reviewed').locator('[data-thread="d-element"]'), 'the element’s thread');
+      },
+    });
+    await shot(page, m5Meta('m5-design-comments-deleted', 'G545', 'A design’s comments rail with a thread on a deleted board', 'Review screens, the comments rail, then the deleted toggle', 'The thread on a board the design no longer has, located “A deleted board” and nothing more (master: also “The commented board was deleted.”)', ['tools/design', 'src/artifacts/design/editor']), async () => {
+      await openDesignComments();
+      await designRail('reviewed').locator('button.deck-comments-section:not([aria-expanded])').first().click();
+    }, {
+      check: async () => {
+        const gone = designRail('reviewed').locator('[data-thread="d-gone"]');
+        await inView(gone, 'the thread on a deleted board');
+        await expect(gone.locator('.deck-thread-slide'), 'where it is').toHaveText(E.deletedBoard, { timeout: 3_000 });
+        if (m5Cut()) await expect(gone.locator('.deck-thread-note'), 'no second note').toHaveCount(0);
+        else await expect(gone.locator('.deck-thread-note'), 'master’s note').toHaveText(E.orphanBoard);
+      },
+    });
+    await shot(page, m5Meta('m5-design-comments-empty', 'G542', 'A design’s comments rail with no comment', 'Site screens, the header’s Comments', 'The empty rail’s line, which names Add comment (master: “choose Comment”)', ['tools/design', 'src/artifacts/design/editor']), async () => {
+      await designAtRest('screens');
+      await toggleComments(page);
+      await expect(designRail('screens'), 'the comments rail').toBeVisible({ timeout: 10_000 });
+    }, {
+      check: () => inView(designRail('screens').locator('.deck-comments-empty').filter({ hasText: new RegExp(`^${literal(byM5(E.designEmpty))}$`) }), 'the empty line'),
+    });
+    const designBoards = () => designOf('reviewed').locator('nav[data-design-rail="boards"]').filter({ visible: true }).first();
+    await shot(page, m5Meta('m5-design-version', 'G546, G549', 'A design showing a version', 'Review screens, the header’s Version history, the version “Draft”', 'The version previewed: its bar’s worded Restore this version, Make a copy, Name this version and Back to design (unchanged), the boards’ list headed Boards (master: Boards in this version)', ['tools/design', 'src/artifacts/design/editor']), async () => {
+      await designAtRest('reviewed');
+      await headerAction(page, 'Version history');
+      const rail = tab('reviewed').locator('aside.doc-rail[aria-label="Version history"]').first();
+      await expect(rail, 'the history rail').toBeVisible({ timeout: 10_000 });
+      await rail.getByRole('button', { name: /^Version Draft by / }).first().click();
+      await expect(designOf('reviewed').getByRole('button', { name: 'Back to design', exact: true }), 'the version bar').toBeVisible({ timeout: 10_000 });
+    }, {
+      check: async () => {
+        await expect(designBoards(), 'the version’s boards').toHaveAttribute('aria-label', 'Boards in this version');
+        await expect(designBoards().locator('.design-boards-header'), 'their heading').toHaveText(byM5(E.historyBoards), { timeout: 3_000 });
+        await inView(designOf('reviewed').getByRole('button', { name: E.restore, exact: true }).filter({ hasText: E.restore }), 'Restore this version in words');
+      },
+      after: () => designAtRest('reviewed'),
+    });
+
+    // a save (T607), on a design of its own: a board renamed in its inspector as a person renames it, the save landed (the
+    // artifact's revision rose) and the header saying so in the build's words
+    const RENAMED = 'Kiosk portrait';
+    let renamedFrom: number | null = null;
+    const boardName = () => designOf('renamed').locator(`[data-board-inspector="tablet"] input[aria-label="${E.boardName}"]`).first();
+    await shot(page, m5Meta('m5-design-saved', 'T607', 'A design just saved', 'Artifacts, Kiosk screens (a design of its own), the Tablet board renamed in its inspector, its save landed', 'The header’s saved state after the save: “All changes saved” (M5: one status, its state saved)', ['tools/design', 'panel']), async () => {
+      await frameBoard('renamed', 'tablet');
+      if ((await boardName().inputValue()) !== RENAMED) {
+        renamedFrom = await revisionOf(page, idOf('renamed'));
+        await boardName().fill(RENAMED);
+        await boardName().press('Enter');
+      }
+      await letGo(page);
+    }, {
+      check: async () => {
+        if (renamedFrom !== null) {
+          const was = renamedFrom;
+          await expect.poll(() => revisionOf(page, idOf('renamed')), { message: 'the save landed', timeout: 10_000 }).toBeGreaterThan(was);
+        }
+        await expect(boardName(), 'the board’s new name').toHaveValue(RENAMED);
+        const saved = header().locator('[data-header-saved]').first();
+        await expect(saved, 'the header’s saved state').toHaveText(M5_WORDS.saved, { timeout: 10_000 });
+        if (m5Cut()) await expect(saved, 'its state').toHaveAttribute('data-saved-state', 'saved');
+        await inView(saved, 'the saved state');
+      },
+    });
+
+    // ---- the design system page: the house system at rest (G558, G568, G571, G577), its header's icons and a badge by
+    // focus, its passing check (G584, G586); Field rules' violation and by-hand list (G585 to G587); Field alias's token
+    // that does not resolve (G565); Field tokens, no law and no canon (G575, G579); Blank system, empty (G562); Official's
+    // delete while a deck uses it (G591)
+    const dsPage = (key: Fixture) => page.locator(`[data-region="main"] [data-ds-page="${idOf(key)}"]`).first();
+    const dsAction = (action: string) => header().locator(`[data-editor-action="design-system.${action}"]`).first();
+    const dsSection = (key: Fixture, section: string) => dsPage(key).locator(`[data-ds-section="${section}"]`).first();
+    const dsAtRest = async (key: Fixture, section?: string) => {
+      await openArtifact(key);
+      await expect(dsPage(key), 'the design system page').toBeVisible({ timeout: 20_000 });
+      const top = section ? dsSection(key, section) : dsPage(key).locator('.dsp-intro, p.dsp-muted').first();
+      await top.evaluate((el) => el.scrollIntoView({ block: 'start' }));
+      await letGo(page);
+    };
+    await shot(page, m5Meta('m5-ds-rest', 'G558, G568', 'A design system page at rest', 'Artifacts, the MAWS design system', 'The page’s head with its three actions as icons (master: their words), the contrast badges as pair and ratio (master: and “meets 4.5 : 1”)', ['src/artifacts/design-system/page', 'artifacts/design-system']), async () => {
+      await dsAtRest('house');
+    }, {
+      check: async () => {
+        for (const [action, words] of [['check', E.dsCheck], ['set-default', E.dsSetDefault], ['delete', E.dsDelete]] as const) {
+          await inView(dsAction(action), words);
+          await expect(dsAction(action), `${words}: ${m5Cut() ? 'an icon' : 'master’s words'}`).toHaveText(m5Cut() ? /^$/ : words);
+          if (m5Cut()) await expect(dsAction(action).locator('svg'), `${words}’s icon`).toHaveCount(1);
+        }
+        const badge = dsPage('house').locator('.dsp-badge').first();
+        await inView(badge, 'a contrast badge');
+        if (m5Cut()) await expect(badge, 'no verdict at rest').not.toContainText(/meets|below/i);
+        else await expect(badge.locator('.dsp-muted'), 'master’s verdict').toHaveText(E.dsVerdict.master);
+      },
+    });
+    await shot(page, m5Meta('m5-ds-header-tip', 'G558', 'A design system page, Check against law’s tooltip', 'The MAWS design system, its head’s first icon reached by Tab', 'The icon’s tooltip “Check against law” (master: the worded button)', ['src/artifacts/design-system/page', 'artifacts/design-system', 'panel']), async () => {
+      await dsAtRest('house');
+      await tabTip(() => dsAction('check'), () => dsAction('check'));
+    }, {
+      check: tipHolds(() => dsAction('check'), 'Check against law', [E.dsCheck], async () => {
+        await inView(dsAction('check'), 'master’s Check against law');
+        await expect(dsAction('check'), 'master’s words').toHaveText(E.dsCheck);
+      }),
+    });
+    await shot(page, m5Meta('m5-ds-default-tip', 'G558', 'A design system page, the default’s star and its reason', 'The MAWS design system, made the owner’s default for the scene (and put back after), the keyboard on the star', 'The star greyed and still focusable, its tooltip “Set as my default” with “Already your default” (master: the greyed worded button)', ['src/artifacts/design-system/page', 'artifacts/design-system', 'panel']), async () => {
+      // a fresh profile's default is none (settings: null), and the editor compares ids: the house made the owner's
+      // default as its star would make it (the settings write the editor's own Set as my default sends)
+      await ensure('house');
+      value(await invoke(page, 'settings.set', { artifacts: { defaultDesignSystem: idOf('house') } } as never));
+      await dsAtRest('house');
+      if (m5Cut()) await expect(dsAction('set-default'), 'the star greyed: the default').toHaveAttribute('aria-disabled', 'true', { timeout: 10_000 });
+      else await expect(dsAction('set-default'), 'master’s button greyed: the default').toBeDisabled({ timeout: 10_000 });
+      await keyTip(() => dsAction('set-default'), () => dsAction('set-default'));
+    }, {
+      check: checks(
+        tipHolds(() => dsAction('set-default'), 'Set as my default', [E.dsSetDefault, E.dsAlreadyDefault], async () => {
+          await inView(dsAction('set-default'), 'master’s Set as my default');
+          await expect(dsAction('set-default'), 'master’s words').toHaveText(E.dsSetDefault);
+          await expect(dsAction('set-default'), 'master’s greyed button').toBeDisabled({ timeout: 3_000 });
+        }),
+        async () => {
+          if (m5Cut()) await expect(dsAction('set-default'), 'greyed').toHaveAttribute('aria-disabled', 'true');
+        },
+      ),
+      after: async () => {
+        await closeOverlays(page);
+        value(await invoke(page, 'settings.set', { artifacts: { defaultDesignSystem: null } } as never));
+      },
+    });
+    const badge = () => dsPage('house').locator('.dsp-badge').first();
+    await shot(page, m5Meta('m5-ds-badge-tip', 'G568', 'A design system page, a contrast badge’s verdict', 'The MAWS design system, the keyboard on the first contrast badge', 'The badge’s tooltip, “Meets 4.5 : 1” or “Below …” (master: the verdict in the badge)', ['src/artifacts/design-system/page']), async () => {
+      await dsAtRest('house');
+      await keyTip(badge, badge);
+    }, {
+      check: tipHolds(badge, 'the contrast badge', [E.dsVerdict.m5], async () => {
+        await inView(badge(), 'master’s badge');
+        await expect(badge().locator('.dsp-muted'), 'master’s verdict').toHaveText(E.dsVerdict.master);
+      }),
+    });
+    // G577: the canon's document styles, below Palette, Type and Measures: their caption scrolled to
+    const documentCaption = () => dsSection('house', 'canon').locator('figure.dsp-canon-item:has(iframe.dsp-document-frame) figcaption').first();
+    await shot(page, m5Meta('m5-ds-canon', 'G577', 'A design system page, its canon’s document styles', 'The MAWS design system, scrolled to the end of Canon', 'The document styles preview captioned by its file alone, “components/document.css” (master: “… on a sample handout”)', ['src/artifacts/design-system/page']), async () => {
+      await dsAtRest('house', 'canon');
+      await documentCaption().evaluate((el) => el.scrollIntoView({ block: 'end' }));
+      await letGo(page);
+    }, {
+      check: async () => {
+        await inView(documentCaption(), 'the document styles’ caption');
+        await expect(documentCaption(), 'its words').toHaveText(byM5(E.documentCaption));
+      },
+    });
+    const passed = () => dsSection('house', 'check').locator('.dsp-summary').first();
+    const passedCount = () => passed().getByRole('img').first();
+    await shot(page, m5Meta('m5-ds-check', 'G584, G586', 'A design system page, its check passing', 'The MAWS design system, scrolled to Check against law', 'The check of a canon that keeps every rule: a muted ✓ and the count (master: the sentence), the don’ts to judge By hand (master: To judge by hand)', ['src/artifacts/design-system/page']), async () => {
+      await dsAtRest('house', 'check');
+    }, {
+      check: async () => {
+        if (m5Cut()) {
+          await inView(passedCount(), 'the ✓ and the count');
+          await expect(passedCount(), 'its face').toHaveText(E.dsPassed.m5);
+          await expect(passedCount(), 'its name').toHaveAttribute('aria-label', E.dsPassedName);
+        } else {
+          await inView(passed(), 'master’s summary');
+          await expect(passed(), 'its words').toHaveText(E.dsPassed.master);
+        }
+        await expect(dsSection('house', 'check').locator('h3.dsp-subheading').filter({ hasText: new RegExp(`^${literal(byM5(E.dsByHand))}$`) }), 'the by-hand list').toHaveCount(1);
+      },
+    });
+    await shot(page, m5Meta('m5-ds-check-tip', 'G584', 'A design system page, the passing check’s tooltip', 'The MAWS design system, the keyboard on the ✓ count', 'The count’s tooltip, the sentence “The canon keeps every checked rule (N).” (master: the sentence at rest)', ['src/artifacts/design-system/page']), async () => {
+      await dsAtRest('house', 'check');
+      await keyTip(passedCount, passed);
+    }, {
+      check: checks(
+        tipHolds(passedCount, 'the ✓ count', [E.dsPassedName], async () => {
+          await inView(passed(), 'master’s summary');
+          await expect(passed(), 'master’s sentence').toHaveText(E.dsPassed.master);
+        }),
+        async () => {
+          if (m5Cut()) await expect(passedCount(), 'the ✓ and the count').toHaveText(E.dsPassed.m5);
+        },
+      ),
+    });
+    const violation = () => dsSection('rules', 'check').locator('ul[aria-label="Violations"] li').filter({ hasText: 'alert' }).first();
+    await shot(page, m5Meta('m5-ds-violations', 'G585, G586, G587', 'A design system page, its check with a violation and a tag MAWS cannot run', 'Artifacts, Field rules (an agent’s system: a component in a colour no token has, a don’t tagged colour-count), scrolled to Check against law', 'The violation ending with the law’s words (master: and “[check: literal-color]”), the don’ts to judge in one list, By hand, the untaggable one among them (master: To judge by hand, then Tags MAWS cannot run)', ['src/artifacts/design-system/page']), async () => {
+      await dsAtRest('rules', 'check');
+    }, {
+      check: async () => {
+        await inView(violation(), 'the alert’s violation');
+        const check = dsSection('rules', 'check');
+        if (m5Cut()) {
+          await inView(violation().locator('[data-dont-words]'), 'the law’s words');
+          await expect(violation(), 'no tag').not.toContainText('[check:');
+          await expect(check.getByRole('list', { name: E.dsByHand.m5, exact: true }), 'one by-hand list').toContainText('No more than two colours on one slide.');
+          await expect(check.getByText(E.dsUnknown, { exact: true }), 'no second list').toHaveCount(0);
+        } else {
+          await expect(violation(), 'master’s tag').toContainText(E.dsTag);
+          await expect(check.getByRole('list', { name: E.dsUnknown, exact: true }), 'master’s second list').toContainText('colour-count');
+        }
+      },
+    });
+    const dontWords = () => violation().locator('[data-dont-words]').first();
+    await shot(page, m5Meta('m5-ds-violation-tip', 'G585', 'A design system page, a violation’s tag by the keyboard', 'Field rules, Check against law, the violation’s law words reached by Tab', 'The law’s words with their tag as the tooltip, “[check: literal-color]” (master: the tag after the words)', ['src/artifacts/design-system/page']), async () => {
+      await dsAtRest('rules', 'check');
+      await tabTip(dontWords, violation);
+    }, {
+      check: checks(
+        tipHolds(dontWords, 'the law’s words', [E.dsTag], async () => {
+          await inView(violation(), 'master’s violation');
+          await expect(violation(), 'master’s tag after the words').toContainText(E.dsTag);
+        }),
+        async () => {
+          if (m5Cut()) await expect(violation(), 'no tag in the row').not.toContainText('[check:');
+        },
+      ),
+    });
+    const problems = () => dsPage('alias').locator('.dsp-problems').first();
+    await shot(page, m5Meta('m5-ds-unresolved', 'G565', 'A design system page whose token does not resolve', 'Artifacts, Field alias (an agent’s system, then a colour aliased to a token it lacks written by the store’s test writer), its line opened', 'One red line, “1 token doesn’t resolve”, opened on the token and why (master: the sentence with every path at rest)', ['src/artifacts/design-system/page']), async () => {
+      await dsAtRest('alias');
+      await expect(problems(), 'the line').toBeVisible({ timeout: 10_000 });
+      if (m5Cut() && (await problems().locator('details').getAttribute('open')) === null) await problems().locator('summary').click();
+    }, {
+      check: async () => {
+        await inView(problems(), 'the line');
+        if (m5Cut()) {
+          await expect(problems().locator('summary'), 'its count').toHaveText(E.dsUnresolved.m5);
+          await expect(problems().locator('details'), 'opened').toHaveAttribute('open', '');
+          await inView(problems().locator('li').filter({ hasText: 'color.highlight' }), 'the token');
+        } else await expect(problems(), 'master’s line').toHaveText(E.dsUnresolved.master);
+      },
+    });
+    await shot(page, m5Meta('m5-ds-lawless', 'G575, G579', 'A design system page with no law and no canon', 'Artifacts, Field tokens (an agent’s system of tokens alone), scrolled to Canon', 'Canon’s “None yet” and Law’s “No law yet” over Ask the agent to adopt it (master: their sentences)', ['src/artifacts/design-system/page']), async () => {
+      await dsAtRest('lawless', 'canon');
+    }, {
+      check: async () => {
+        await inView(dsSection('lawless', 'canon').locator('.dsp-muted').filter({ hasText: m5Cut() ? new RegExp(`^${literal(E.dsCanonEmpty.m5)}$`) : E.dsCanonEmpty.master }), 'the empty canon’s line');
+        await expect(dsSection('lawless', 'law').locator('.dsp-muted').filter({ hasText: m5Cut() ? new RegExp(`^${literal(E.dsNoLaw.m5)}$`) : E.dsNoLaw.master }), 'the lawless line').toHaveCount(1);
+      },
+    });
+    await shot(page, m5Meta('m5-ds-empty', 'G562', 'A design system page that holds no system', 'Artifacts, Blank system (made in the library, nothing written to it)', 'The page saying the system is empty and what to do, settled (master: “Loading the design system…” for ever)', ['src/artifacts/design-system/page', 'artifacts/design-system']), async () => {
+      await openArtifact('blankSystem');
+      await expect(dsPage('blankSystem'), 'the design system page').toBeVisible({ timeout: 20_000 });
+    }, {
+      check: async () => {
+        await inView(dsPage('blankSystem').locator('p').filter({ hasText: new RegExp(`^${literal(byM5(E.dsEmpty))}$`) }), 'the page’s line');
+        if (m5Cut()) await inView(dsPage('blankSystem').locator('p.dsp-muted').filter({ hasText: new RegExp(`^${literal(E.dsEmptyNext)}$`) }), 'what to do');
+      },
+    });
+    // a save (T607), on a system of its own: its accent typed in the palette as a person types it (the page writes it as it
+    // is typed), the save landed and the header saying so in the build's words
+    const ACCENT = '#2b7a78';
+    let accentFrom: number | null = null;
+    const accentHex = () => dsPage('palette').locator(`input[aria-label="${E.accentHex}"]`).first();
+    await shot(page, m5Meta('m5-ds-saved', 'T607', 'A design system just saved', 'Artifacts, Field palette (a system of its own), a new accent typed in its palette, its save landed', 'The header’s saved state after the save: “All changes saved” (M5: one status, its state saved)', ['src/artifacts/design-system/page', 'panel']), async () => {
+      await dsAtRest('palette', 'palette');
+      if ((await accentHex().inputValue()).toLowerCase() !== ACCENT) {
+        accentFrom = await revisionOf(page, idOf('palette'));
+        await accentHex().fill(ACCENT);
+        await accentHex().press('Tab');
+      }
+      await letGo(page);
+    }, {
+      check: async () => {
+        if (accentFrom !== null) {
+          const was = accentFrom;
+          await expect.poll(() => revisionOf(page, idOf('palette')), { message: 'the save landed', timeout: 10_000 }).toBeGreaterThan(was);
+        }
+        await expect(accentHex(), 'the new accent').toHaveValue(new RegExp(`^${ACCENT}$`, 'i'));
+        const saved = header().locator('[data-header-saved]').first();
+        await expect(saved, 'the header’s saved state').toHaveText(M5_WORDS.saved, { timeout: 10_000 });
+        if (m5Cut()) await expect(saved, 'its state').toHaveAttribute('data-saved-state', 'saved');
+        await inView(saved, 'the saved state');
+      },
+    });
+    const inUse = () => page.getByRole('dialog', { name: E.inUse, exact: true });
+    await shot(page, m5Meta('m5-ds-in-use', 'G591', 'A design system’s delete while a deck uses it', 'Artifacts, the Official design system (a deck styled by it), Delete design system…, then Delete (the store refuses: the deck names it)', 'The sheet saying it is still in use, the deck listed and where it goes: “Their default system” (master: “Their defaults (the Space’s, else yours)”)', ['artifacts/design-system']), async () => {
+      await dsAtRest('official');
+      await dsAction('delete').click();
+      // the delete asks first; confirmed, the store refuses it while a live artifact names the system, and the sheet says
+      // so (e2e/design-systems.spec.ts's Acceptance 13); nothing is deleted
+      await page.getByRole('dialog', { name: /^Delete “.+”\?$/ }).getByRole('button', { name: E.confirmDelete, exact: true }).click();
+      await expect(inUse(), 'the in-use sheet').toBeVisible({ timeout: 15_000 });
+    }, {
+      check: async () => {
+        await expect(inUse().getByRole('list', { name: E.inUseList, exact: true }).getByRole('listitem'), 'the deck it styles').toHaveText([OFFICIAL_DECK], { timeout: 5_000 });
+        const target = inUse().getByRole('combobox', { name: E.moveTo, exact: true });
+        await inView(target, 'where its artifacts go');
+        await expect(target.locator('option:checked'), 'the first choice').toHaveText(byM5(E.theirDefaults));
+      },
+      after: () => closeOverlays(page),
+    });
+
+    // the deck at its limit (G423), after the others: its 500 slides stay open in the window
+    const newSlide = () => deckButton('full', E.newSlide);
+    const fullNote = () => deckOf('full').locator('.deck-filmstrip-note').filter({ hasText: E.deckFull });
+    await shot(page, m5Meta('m5-slides-full', 'G423', 'A deck at its limit, New slide’s reason by the keyboard', 'Artifacts, Every week (500 slides), New slide reached by Tab', 'New slide greyed and still focusable, its reason as its tooltip, no red line (master: New slide disabled and the red line under it)', ['tools/presentation', 'src/artifacts/slides/editor']), async () => {
+      await openArtifact('full');
+      await expect(newSlide(), 'New slide').toBeAttached({ timeout: 60_000 });
+      await tabTip(newSlide, fullNote);
+    }, {
+      check: checks(
+        tipHolds(newSlide, 'New slide', [E.deckFull], async () => {
+          await inView(fullNote(), 'master’s red line');
+          await expect(newSlide(), 'master’s New slide').toBeDisabled({ timeout: 3_000 });
+        }),
+        async () => {
+          if (!m5Cut()) return;
+          await expect(newSlide(), 'greyed').toHaveAttribute('aria-disabled', 'true');
+          await expect(fullNote(), 'no red line').toHaveCount(0);
+        },
+      ),
+    });
+
+    // ---- last, since it cannot be taken back here: the owner's delete of an open artifact (G319)
+    await shot(page, m5Meta('m5-artifact-deleted', 'G319', 'The tab of an artifact the owner deleted', 'Artifacts, Retired memo open, then deleted (artifacts.delete)', 'The tab after the delete: “Artifact not found” and its one sentence', ['library', 'artifacts']), async () => {
+      await ensure('retired');
+      if (!(await isDeleted('retired'))) {
+        await openArtifact('retired');
+        value(await invoke(page, 'artifacts.delete', { artifactId: idOf('retired') } as never));
+      }
+      await expect(page.locator('[data-region="main"]').getByText(byM5(M5_WORDS.deleted), { exact: true }).first(), 'the deleted tab’s sentence').toBeVisible({ timeout: 20_000 });
+    }, {
+      check: async () => {
+        await inView(page.locator('[data-region="main"]').getByText(byM5(M5_WORDS.deleted), { exact: true }), 'the sentence');
+        await inView(page.locator('[data-region="main"]').getByText(M5_WORDS.notFound, { exact: true }), 'the tab’s title');
+      },
+    });
+  } catch (error) {
+    stopped(error);
   } finally {
     await maws.cleanup();
   }

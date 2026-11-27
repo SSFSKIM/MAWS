@@ -28,6 +28,10 @@ export type { DesignSystemView, TokenOverrides } from './view';
 export { governingSystem, type DesignSystemRef } from './governing';
 export { resolveDsVars } from './resolve-vars';
 type SystemRef = DesignSystemRef | { builtin: 'maws' };
+/** Why a surface's governing system is not known (its `system` null) while what it governs is still being placed: the
+ * placement is still read (`'reading'`), or that read failed with nothing read before (`failed`, its reason). Absent,
+ * a null system is no system at all. */
+export type SystemUnread = 'reading' | { failed: string };
 
 /** The system is not there: no such artifact, a deleted one, no retained state at that seq, or not a design system. */
 export class DesignSystemMissing extends Error {

@@ -1,9 +1,12 @@
 // Show editors (D10 of docs/doperpowers/plans/2026-10-12-p3-b-documents.md; §4.7 of the parent: Google Docs' right-click
 // "Show editors"): a right-click over a selection of the live document opens a small menu; "Show editors" lists who
 // edited the selection and when each last did, from provenance (so an edit older than a compaction is named too). A
-// right-click with nothing selected keeps the system's menu.
+// right-click with nothing selected keeps the system's menu. The word cut (G359 to G361): headed "Editors", its read a
+// quiet spinner, an empty list "No edits recorded".
 import type { Editor } from '@tiptap/core';
 import { useCallback, useEffect, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react';
+import { QuietSpinner } from '../../../../renderer/src/ui/spinner';
+import { HISTORY_COPY as W } from '../copy';
 import type { HistoryController, ShownEditor } from './controller';
 
 interface Open {
@@ -72,19 +75,21 @@ export function ShowEditorsMenu({ open, onShow, onClose }: { open: Open; onShow(
       </div>
     );
   return (
-    <div ref={root} className="doc-popover doc-editors" role="dialog" aria-label="Editors" style={style} data-markup-occluder>
+    <div ref={root} className="doc-popover doc-editors" role="dialog" aria-label={W.editors} style={style} data-markup-occluder>
       <header className="doc-editors-header">
-        <span className="doc-editors-title">Editors of the selection</span>
+        <span className="doc-editors-title">{W.editors}</span>
         <button type="button" className="doc-tool" aria-label="Close editors" onClick={close}>
           ×
         </button>
       </header>
       {open.editors === null ? (
-        <p className="doc-editors-empty">Reading the history…</p>
+        <p className="doc-editors-empty">
+          <QuietSpinner label={W.readingHistoryName} />
+        </p>
       ) : open.error ? (
         <p className="doc-editors-empty">{open.error}</p>
       ) : open.editors.length === 0 ? (
-        <p className="doc-editors-empty">No edits recorded for this selection.</p>
+        <p className="doc-editors-empty">{W.noEdits}</p>
       ) : (
         <ul className="doc-editors-list">
           {open.editors.map((who) => (

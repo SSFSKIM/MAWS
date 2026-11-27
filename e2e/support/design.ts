@@ -212,6 +212,17 @@ export async function headerAction(page: Page, label: string, region: 'main' | '
   await page.getByRole('menuitemcheckbox', { name: label }).or(page.getByRole('menuitem', { name: label })).click();
 }
 
+/**
+ * The header's Comments action, which opens and closes the comments rail (the word cut, G512: the design's toolbar has no
+ * Comments toggle of its own). With open comments it is the count beside the title, inline at every width; with none it
+ * is the Comments icon among the actions, which a narrow header folds into More actions.
+ */
+export async function toggleComments(page: Page, region: 'main' | 'panel' = 'main'): Promise<void> {
+  const count = page.locator(`[data-region="${region}"] [data-editor-header]`).getByRole('button', { name: /^\d+ open comments?$/ });
+  if (await count.isVisible()) return count.click();
+  await headerAction(page, 'Comments', region);
+}
+
 /** M6: an Export entry by its label, from the header's Export menu, or from More actions where a narrow header folds it. */
 export async function exportEntry(page: Page, label: string, region: 'main' | 'panel' = 'main'): Promise<void> {
   const header = page.locator(`[data-region="${region}"] [data-editor-header]`);

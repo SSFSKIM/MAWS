@@ -85,7 +85,7 @@ describe('a design system’s layout that names its assets (final fix wave B5)',
       ['sys-1', 'assets/bg.png'],
       ['sys-1', 'assets/logo.png'],
     ]);
-    if (!('id' in inserted)) throw new Error(inserted.reason);
+    if (!('id' in inserted)) throw new Error(inserted.why ?? inserted.refused);
     expect(slideOrder(session.doc)).toEqual(['cover', inserted.id]);
     const made = readSlide(session.doc, inserted.id);
     expect(made.style.background).toBe('url(assets/copied-bg.png) center / cover');
@@ -98,7 +98,8 @@ describe('a design system’s layout that names its assets (final fix wave B5)',
     const inserted = await insertLayoutSlide(session, { slide: branded(), system: 'sys-1' }, 'cover', async () => {
       throw new Error('no asset assets/bg.png in sys-1');
     });
-    expect(inserted).toEqual({ reason: expect.stringMatching(/no asset assets\/bg\.png/) });
+    // the word cut (G413): a short refusal for the toolbar, the copy's own reason its tooltip
+    expect(inserted).toEqual({ refused: 'Can’t add this layout', why: expect.stringMatching(/no asset assets\/bg\.png/) });
     expect(slideOrder(session.doc)).toEqual(['cover']);
   });
 
@@ -109,7 +110,7 @@ describe('a design system’s layout that names its assets (final fix wave B5)',
     await vi.waitFor(() => expect(finish).toBeDefined());
     session.dispose();
     finish('assets/copied-logo.png');
-    await expect(inserted).resolves.toEqual({ reason: expect.any(String) });
+    await expect(inserted).resolves.toEqual({ refused: 'Not added: the deck became read-only' }); // G416
     expect(slideOrder(session.doc)).toEqual(['cover']);
   });
 });

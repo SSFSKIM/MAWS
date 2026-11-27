@@ -103,7 +103,9 @@ describe('the design system’s editor in L’s registry', () => {
     const state = editor.createState!({ artifactId: DS, machine: TEST_MACHINE, kind: 'design_system', surface: 'main' });
     expect(host.open).toHaveBeenCalledWith(DS, { signal: expect.any(AbortSignal) }); // P5 O7 M5b review fix 2: the tab owns the open
     const { view } = mount(editor as RegisteredArtifactEditor, state);
-    expect(view.container.textContent).toContain('Opening the design system…');
+    expect(view.container.textContent).not.toContain('Opening the design system…'); // the word cut (G562): a quiet spinner
+    await act(async () => new Promise((r) => setTimeout(r, 550)));
+    expect(view.getByRole('progressbar', { name: 'Opening the design system…' })).toBeTruthy();
     await act(async () => arrive(handle));
     expect(view.container.querySelector('[data-ds-page]')).not.toBeNull();
     expect(editorHostOf(SCOPE)!.title).toBe('Harbor');
@@ -167,14 +169,16 @@ describe('the header’s app actions', () => {
     return mounted;
   }
 
-  it('Set as my default writes settings 14, and is disabled once it is the default', async () => {
+  it('Set as my default writes settings 14, and once it is the default is unavailable, saying why (G558)', async () => {
     const main = installFakeMain((name, input) => (name === 'settings.set' ? ok({ settings: { ...SETTINGS_DEFAULTS_V21, artifacts: { defaultDesignSystem: (input as { artifacts: { defaultDesignSystem: string } }).artifacts.defaultDesignSystem, spaceDesignSystems: {}, commentsView: 'expand' /* P4-B1 */ } }, resolvedTheme: 'light' }) : listed(input)));
     await opened();
     expect(action('Set as my default').disabled).toBe(false);
+    expect(action('Set as my default').unavailable).toBeNull();
     await act(async () => action('Set as my default').onSelect());
     expect(main.callsOf('settings.set')).toEqual([{ artifacts: { defaultDesignSystem: DS } }]);
     act(() => useSettings.setState({ state: { settings: { ...SETTINGS_DEFAULTS_V21, artifacts: { defaultDesignSystem: DS, spaceDesignSystems: {}, commentsView: 'expand' /* P4-B1 */ } }, resolvedTheme: 'light' } }));
-    expect(action('Set as my default').disabled).toBe(true);
+    expect(action('Set as my default').unavailable).toBe('Already your default');
+    expect(action('Set as my default').disabled, 'still in the keyboard’s reach').toBe(false);
   });
 
   it('Delete asks first; refused while an artifact uses the system, it lists it and moves it before deleting', async () => {
@@ -198,7 +202,7 @@ describe('the header’s app actions', () => {
     const inUse = screen.getByRole('dialog', { name: 'Still in use' });
     expect(within(inUse).getByRole('list', { name: 'Artifacts styled by this system' }).textContent).toBe('Handout');
     const target = within(inUse).getByRole('combobox', { name: 'Move them to…' }) as HTMLSelectElement;
-    expect([...target.options].map((o) => o.text)).toEqual(['Their defaults (the Space’s, else yours)', 'Classroom']);
+    expect([...target.options].map((o) => o.text)).toEqual(['Their default system', 'Classroom']);
     fireEvent.change(target, { target: { value: OTHER } });
     await act(async () => fireEvent.click(within(inUse).getByRole('button', { name: 'Move and delete' })));
     expect(main.callsOf('artifacts.update')).toEqual([{ artifactId: DOC, designSystemId: OTHER }]);
@@ -237,7 +241,7 @@ describe('the header’s app actions', () => {
     expect(queued).toHaveLength(1);
     expect(queued[0]!.files).toEqual([]);
     expect(queued[0]!.text).toContain(`Adopt a law for the design system “Imported Harbor” (artifact ${DS})`);
-    expect(useNotices.getState().notices.map((n) => n.text)).toEqual(['The request is in the chat’s message box; send it when it reads right.']);
+    expect(useNotices.getState().notices.map((n) => n.text)).toEqual(['Request added to the message box']);
   });
 
   // board ticket 739: a system's name, which a model can write, enters the request as one line

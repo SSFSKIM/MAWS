@@ -25,6 +25,11 @@ const settle = async () => {
 };
 afterEach(() => cleanup());
 
+// the word cut (G616): the rows' read is the quiet spinner in their place, named by the wait, and no words
+const reading = (dialog: HTMLElement) => {
+  const wait = dialog.querySelector('.dash-sheet-loading');
+  return wait !== null && wait.textContent === '';
+};
 function mount() {
   const sheet = new SourceSheetState();
   const readDataset = vi.fn(async () => page);
@@ -49,7 +54,7 @@ describe('the source sheet’s hold (E3)', () => {
     act(() => m.sheet.open([{ id: 'live', descriptor: fetched('assets/q1.json') }], 'live', held));
     await settle();
     const dialog = screen.getByRole('dialog');
-    expect(within(dialog).getByText('Reading the rows…')).toBeTruthy();
+    expect(reading(dialog)).toBe(true);
     expect(m.readDataset).not.toHaveBeenCalled();
     expect(within(dialog).getByRole('button', { name: /Download/ }).hasAttribute('disabled')).toBe(true);
     held.resolve();
@@ -66,7 +71,7 @@ describe('the source sheet’s hold (E3)', () => {
     held.reject(new Error('the snapshot assets/q1.json is unavailable'));
     await settle();
     const dialog = screen.getByRole('dialog');
-    expect(within(dialog).getByRole('alert').textContent).toBe('This snapshot is no longer available; open the source again to see the current one.');
+    expect(within(dialog).getByRole('alert').textContent).toBe('Snapshot gone; reopen to see the current one'); // the word cut (G616)
     expect(m.readDataset).not.toHaveBeenCalled();
     expect(within(dialog).queryByRole('button', { name: /Download/ })).toBeNull();
   });
@@ -111,7 +116,7 @@ describe('the source sheet across a host restart (E3)', () => {
     expect(recapture).toHaveBeenCalledTimes(1);
     expect(first.released).toBe(1);
     expect(screen.getByRole('dialog').getAttribute('aria-label')).toBe('Source of Live sales, later'); // the new capture, its rows still pending
-    expect(within(screen.getByRole('dialog')).getByText('Reading the rows…')).toBeTruthy();
+    expect(reading(screen.getByRole('dialog'))).toBe(true);
     second.resolve();
     await settle();
     expect(m.readDataset).toHaveBeenLastCalledWith('dash1', 'assets/q2.json', { format: 'json' });
@@ -130,14 +135,14 @@ describe('the source sheet across a host restart (E3)', () => {
     await settle();
     second.lose();
     await settle();
-    expect(within(screen.getByRole('dialog')).getByRole('alert').textContent).toMatch(/no longer available/);
+    expect(within(screen.getByRole('dialog')).getByRole('alert').textContent).toMatch(/^Snapshot gone/);
     expect(second.released).toBe(1);
     const third = lease();
     act(() => m.sheet.open([{ id: 'live', descriptor: fetched('assets/q1.json') }], 'live', third, async () => null));
     third.resolve();
     third.lose();
     await settle();
-    expect(within(screen.getByRole('dialog')).getByRole('alert').textContent).toMatch(/no longer available/);
+    expect(within(screen.getByRole('dialog')).getByRole('alert').textContent).toMatch(/^Snapshot gone/);
   });
 });
 
@@ -200,11 +205,11 @@ describe('the source sheet’s rows under a lost hold (P3-F)', () => {
       await settle();
       expect(m.sheet.snapshot().hold).toBe('pending');
       expect(within(dialog).queryAllByRole('row')).toHaveLength(0);
-      expect(within(dialog).getByText('Reading the rows…')).toBeTruthy();
+      expect(reading(dialog)).toBe(true);
       expect(copy().hasAttribute('disabled')).toBe(true);
       answer(null);
       await settle();
-      expect(within(dialog).getByRole('alert').textContent).toBe('This snapshot is no longer available; open the source again to see the current one.');
+      expect(within(dialog).getByRole('alert').textContent).toBe('Snapshot gone; reopen to see the current one'); // the word cut (G616)
       expect(within(dialog).queryAllByRole('row')).toHaveLength(0);
       expect(copy().hasAttribute('disabled')).toBe(true);
     });

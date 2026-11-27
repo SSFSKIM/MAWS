@@ -15,6 +15,7 @@ import { expect, type Locator, type Page } from '@playwright/test';
 import { DatasetError, parseDataset } from '../../src/artifacts/dashboard/parse';
 import { launchMaws, type MawsLaunch } from './launch';
 import { sidebarRow } from './sidebar';
+import { replyThroughActiveCard } from './comment-reply';
 
 type Result<T> = { ok: true; value: T } | { ok: false; error: { code: string; message: string } };
 /** A's command from the page, its value or a thrown refusal. */
@@ -200,10 +201,10 @@ export async function railOf(record: Locator): Promise<Locator> {
   return rail;
 }
 
-export async function reply(rail: Locator, threadId: string, text: string): Promise<void> {
-  const field = rail.locator(`article[data-thread="${threadId}"]`).getByRole('textbox', { name: 'Reply' });
-  await field.fill(text);
-  await field.press('Enter');
+// A reply from the active card (support/comment-reply.ts), the rail open again afterwards so the caller reads it as before.
+export async function reply(record: Locator, threadId: string, text: string): Promise<void> {
+  await replyThroughActiveCard(record, await railOf(record), threadId, text);
+  await railOf(record);
 }
 
 // ---- P3-E2 M6: the agent's tools through the host's acceptance seam ---------------------------------------------------

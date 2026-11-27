@@ -37,10 +37,12 @@ export const VIEW_STATES = {
   unsupportedDomain: (column: string) => `${column} has a numeric range that cannot be drawn`,
   noPositive: (column: string) => `no positive ${column} to draw`,
   slicesDropped: (count: number, column: string) => `${count} ${count === 1 ? 'slice has' : 'slices have'} no positive ${column}; not drawn`,
-  slicesFolded: (count: number) => `${count} slices; the five largest are shown individually and the rest are drawn as one`,
+  slicesFolded: (count: number) => `Top 5 of ${count} slices; the rest as “other”`, // the word cut (G603)
   labelsShortened: 'some category labels are shortened; the source table has them whole',
-  kept: 'The caption, comments and edits on this block are kept.',
 } as const;
+
+/** The word cut (G603): a folded pie's note, which the editor's tile says in its ⚠ mark rather than under the view. */
+export const isSlicesFolded = (note: string): boolean => /^Top 5 of \d+ slices; the rest as “other”$/.test(note);
 
 /**
  * The source label under a view (parent §2 "Views"): the dataset's title, where its snapshot came from, when and by whom
@@ -96,6 +98,12 @@ export function mismatchNotes(descriptor: DatasetDescriptor): string[] {
 }
 
 const pad = (n: number, width = 2) => String(n).padStart(width, '0');
+
+/** `08:30`: an epoch time's UTC clock, where the full time (`utcTime`) is its tooltip (the word cut, G621). */
+export function utcClock(at: number): string {
+  const d = new Date(at);
+  return `${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}`;
+}
 
 /** `2026-10-16 08:30 UTC`: an epoch time as every label and answer shows it. */
 export function utcTime(at: number): string {

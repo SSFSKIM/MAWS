@@ -94,6 +94,29 @@ describe('the new-change pill (C’s `countChanges` hook)', () => {
   });
 });
 
+describe('the new-change pill in the workbench (the word cut, N204)', () => {
+  it('a count that failed offers ↻ as a glyph named for what it does, with no error words on it', async () => {
+    const h = host();
+    h.version(HUMAN, 'named', 'Before');
+    h.view();
+    h.land(AGENT, (d) => setBoardFrame(d, 'b', { x: 640 }));
+    h.version(AGENT, 'auto');
+    const session = new DeckSession(h.doc, 0);
+    const view = new DesignView();
+    view.setRoom({ w: 1000, h: 800 });
+    const failing = () => {
+      throw new Error('the diff could not be read');
+    };
+    const { container } = render(<DesignWorkbench session={session} view={view} assetUrl={() => null} system={null} readOnly={false} history={{ api: h.api, handle: h.handle, countChanges: failing }} />);
+    for (let i = 0; i < 20 && !container.querySelector('.deck-history-pill'); i++) await settle();
+    const pill = container.querySelector<HTMLElement>('.deck-history-pill')!;
+    expect(within(pill).getByRole('button', { name: 'New changes' })).toBeTruthy();
+    const retry = within(pill).getByRole('button', { name: 'Count the new changes again' });
+    expect(retry.hasAttribute('title')).toBe(false);
+    expect(pill.textContent).not.toContain('could not be read');
+  });
+});
+
 describe('a version’s preview in the workbench', () => {
   function mount(props: Partial<DesignWorkbenchProps> = {}) {
     const h = host();
@@ -138,6 +161,7 @@ describe('a version’s preview in the workbench', () => {
     ]);
     expect(world.querySelector<HTMLElement>('[data-history-board="b"]')!.style.left).toBe('600px'); // the version's frame
     const list = screen.getByRole('navigation', { name: 'Boards in this version' });
+    expect(list.querySelector('.design-boards-header')!.textContent).toBe('Boards'); // the word cut (G549): its name keeps the words
     expect(within(list).getByRole('button', { name: 'Spare, deleted' })).toBeTruthy();
     // the ghost of the move's old place on a, from the earlier state
     await settle();

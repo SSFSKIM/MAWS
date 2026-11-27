@@ -9,9 +9,10 @@
 // a change of the query's source clears the refusal in the tab). E3 panel wave (Decision Log 16): a newer fetch time with
 // the same ref (identical rows refetched) is a newer fetch too, and the block says the live descriptor's committed error
 // in its source label's words beside the controls, while the captured rows and time stay as captured.
-import { useState, useSyncExternalStore } from 'react';
+import { useId, useState, useSyncExternalStore } from 'react';
 import type { QuerySource } from '../datasets';
-import { utcTime } from '../states';
+import { Tip } from '../../../renderer/src/ui/tip';
+import { utcClock, utcTime } from '../states';
 import { queryIdentity } from '../query'; // E3 M3 fix: the shared identity
 import { concrete, LIVE_COPY as C, notOfferedOn, scheduleWords, type LiveDatasets, type LivePause, type LiveStart } from './live';
 
@@ -27,6 +28,7 @@ const startWords = (start: LiveStart): string => (start.phase === 'asking' ? C.a
 
 export function LiveQuery({ id, title, captured, live, onReopen }: LiveQueryProps) {
   const snapshot = useSyncExternalStore(live.subscribe, live.snapshot);
+  const newerAtId = useId(); // the word cut (G621): the newer rows' clock's description, after its line
   const status = snapshot.queries.get(id);
   // E3 M3 fix: a not-read-only refusal standing when this opening began is tried once more; one met in it stands
   const [refusedBefore] = useState(() => status?.pause === 'mayWrite');
@@ -75,14 +77,26 @@ export function LiveQuery({ id, title, captured, live, onReopen }: LiveQueryProp
       {detail && <p className="dash-sheet-note">{C.detail[detail]}</p>}
       {!snapshot.shown && <p className="dash-sheet-note">{C.hidden}</p>}
       {newer && (
-        <p className="dash-sheet-note">
-          {C.newer(utcTime(newer.at))}{' '}
-          {reopen && (
-            <button type="button" className="doc-tool" onClick={reopen}>
-              {C.showLatest}
-            </button>
-          )}
-        </p>
+        <>
+          <p className="dash-sheet-note" data-live-newer="">
+            {C.newer}{' '}
+            {/* the word cut (G621): the clock owns the full time as its tooltip and description; the description's node
+                sits after the line, so the line's text is what it shows */}
+            <Tip content={utcTime(newer.at)}>
+              <span tabIndex={0} data-live-newer-at="" aria-describedby={newerAtId}>
+                {utcClock(newer.at)}
+              </span>
+            </Tip>{' '}
+            {reopen && (
+              <button type="button" className="doc-tool" onClick={reopen}>
+                {C.showLatest}
+              </button>
+            )}
+          </p>
+          <span id={newerAtId} hidden>
+            {utcTime(newer.at)}
+          </span>
+        </>
       )}
       <div className="dash-sheet-live-actions">
         {(status.permission !== 'read' || changed) && !mayWrite && !notOffered && (

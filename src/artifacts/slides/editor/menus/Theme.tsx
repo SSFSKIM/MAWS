@@ -7,6 +7,9 @@
 // P4-B2 D19 (docs/doperpowers/plans/2026-10-21-p4-b2-slides-boards.md): Faces lists each of the deck's own faces with
 // its state, so the owner sees what the engine host fetched from Google Fonts, what waits for it and what it refused by
 // name (the same panel serves the design workbench).
+// The word cut (docs/doperpowers/specs/2026-11-16-word-cut-design.md, M5 task 3): Default carries no caption unless it is
+// chosen (G461), the Faces rows read Display and Body, their selects keeping the full names (G463), a face that draws is
+// its family alone (G465, G466), and the reset of every override reads Reset all (G468).
 import { useId, useState, type ReactNode } from 'react';
 import { useDesignSystem, type DesignSystemRef, type TokenOverrides } from '../../../design-system/apply';
 import { toSrgb, rgbToHex } from '../../../design-system/color';
@@ -47,9 +50,9 @@ export const THEME_COLOURS: readonly [name: string, label: string][] = [
   ['--ds-color-accent-text', 'Text on accent'],
   ['--ds-color-border', 'Border'],
 ];
-export const THEME_FONTS: readonly [name: string, label: string][] = [
-  ['--ds-font-display', 'Display face'],
-  ['--ds-font-body', 'Body face'],
+export const THEME_FONTS: readonly [name: string, label: string, caption: string][] = [
+  ['--ds-font-display', 'Display face', 'Display'],
+  ['--ds-font-body', 'Body face', 'Body'],
 ];
 
 // Claude's basic faces with their generics: an override never names a face the Mac may lack without a fallback.
@@ -100,8 +103,8 @@ export function ThemePanel({ session, system, theme, overrides, faces, readOnly 
         ))}
       </Section>
       <Section title={C.faces}>
-        {THEME_FONTS.map(([name, label]) => (
-          <FaceOverride key={name} name={name} label={label} value={values.get(name)} own={overrides[name]} faces={faces} readOnly={readOnly} onWrite={write} />
+        {THEME_FONTS.map(([name, label, caption]) => (
+          <FaceOverride key={name} name={name} label={label} caption={caption} value={values.get(name)} own={overrides[name]} faces={faces} readOnly={readOnly} onWrite={write} />
         ))}
         <DeckFaces faces={faces} />
       </Section>
@@ -145,7 +148,7 @@ function SystemPicker({ theme, governing, readOnly }: { theme: DeckThemeChoice; 
     <section className="deck-inspector-section" aria-label={C.system}>
       <h3 className="deck-inspector-heading">{C.system}</h3>
       <div role="radiogroup" aria-label={C.system} className="deck-theme-systems">
-        <SystemOption label={C.followDefault} detail={chosen === null && governing ? governing : C.followDefaultDetail} system={null} checked={chosen === null} disabled={readOnly} onPick={() => pick(null)} />
+        <SystemOption label={C.followDefault} detail={chosen === null && governing ? governing : undefined} system={null} checked={chosen === null} disabled={readOnly} onPick={() => pick(null)} />
         {theme.systems.map((s) => (
           <SystemOption key={s.id} label={s.name} system={{ id: s.id }} checked={chosen === s.id} disabled={readOnly} onPick={() => pick(s.id)} />
         ))}
@@ -240,7 +243,7 @@ function ColourOverride({ name, label, value, own, readOnly, onWrite }: Override
 
 const SYSTEM_FACE = '';
 
-function FaceOverride({ name, label, value, own, faces, readOnly, onWrite }: OverrideProps & { faces: Readonly<Record<string, DeckFace>> }) {
+function FaceOverride({ name, label, caption, value, own, faces, readOnly, onWrite }: OverrideProps & { caption: string; faces: Readonly<Record<string, DeckFace>> }) {
   const systemFamily = parseFontStack(value ?? '')?.[0] ?? '';
   const deckFamilies = [...new Set(Object.values(faces).map((f) => f.family).filter((f): f is string => typeof f === 'string' && f.trim() !== ''))];
   const options: { value: string; label: string; group: string }[] = [
@@ -250,7 +253,7 @@ function FaceOverride({ name, label, value, own, faces, readOnly, onWrite }: Ove
   const known = own === undefined || options.some((o) => o.value === own);
   return (
     <div className="deck-inspector-row deck-theme-row" data-token={name} data-overridden={own !== undefined || undefined}>
-      <span className="deck-inspector-caption">{label}</span>
+      <span className="deck-inspector-caption">{caption}</span>
       <div className="deck-inspector-control">
         <select className="deck-inspector-select" aria-label={label} disabled={readOnly} value={own ?? SYSTEM_FACE} onChange={(event) => onWrite(name, event.target.value === SYSTEM_FACE ? null : event.target.value)}>
           <option value={SYSTEM_FACE}>{C.systemFace(own === undefined ? systemFamily : null)}</option>
@@ -275,12 +278,13 @@ function FaceOverride({ name, label, value, own, faces, readOnly, onWrite }: Ove
 
 type FaceState = 'uploaded' | 'missing' | 'saved' | 'pending' | 'refused';
 
-/** What a face draws from (D19): its uploaded file, the files MAWS saved from Google Fonts, or its fallback, and why. */
+/** What a face draws from (D19): its uploaded file, the files MAWS saved from Google Fonts, or its fallback, and why; a
+ * face that draws says nothing (G465). */
 function faceState(face: DeckFace): { state: FaceState; text: string } {
   const google = googleFaceState(face);
-  if (google === null) return faceFiles(face).length > 0 ? { state: 'uploaded', text: C.faceUploaded } : { state: 'missing', text: C.faceMissing };
+  if (google === null) return faceFiles(face).length > 0 ? { state: 'uploaded', text: '' } : { state: 'missing', text: C.faceMissing };
   if (google.state === 'refused') return { state: 'refused', text: google.message };
-  return google.state === 'saved' ? { state: 'saved', text: C.faceSaved } : { state: 'pending', text: C.facePending };
+  return google.state === 'saved' ? { state: 'saved', text: '' } : { state: 'pending', text: C.facePending };
 }
 
 /** The deck's own faces by family, each with its state (D19). */
@@ -300,8 +304,13 @@ function DeckFaces({ faces }: { faces: Readonly<Record<string, DeckFace>> }) {
           const { state, text } = faceState(face);
           return (
             <li key={key} className="deck-theme-face" data-face={key} data-face-state={state}>
-              <span className="deck-theme-face-family">{face.family}</span>{' '}
-              <span className="deck-theme-face-state">{text}</span>
+              <span className="deck-theme-face-family">{face.family}</span>
+              {text && (
+                <>
+                  {' '}
+                  <span className="deck-theme-face-state">{text}</span>
+                </>
+              )}
             </li>
           );
         })}

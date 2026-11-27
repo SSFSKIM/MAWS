@@ -16,7 +16,8 @@ import type { DocumentHandle, EditorHost } from './host-types';
 
 interface Connection {
   port: MessagePort;
-  received: number; // content frames received, all acked at once
+  received: number; // content frames received, all acked at once unless acks are held
+  acked: number; // the frames the last ack counted
   actor: Actor;
 }
 
@@ -37,6 +38,7 @@ export class MemoryDocumentHost {
   private readonly offUpdate: () => void;
   private readonly landed = new Set<(row: Landed) => void>();
   private writer: Actor = HUMAN;
+  private acksHeld = false;
 
   constructor() {
     // Whatever lands in the host doc goes to every connection but the one it came from (a host-side write, origin
@@ -54,7 +56,7 @@ export class MemoryDocumentHost {
   /** A new connection, its updates credited to `actor`: the replica's end of the channel. */
   connect(actor: Actor = HUMAN): MessagePort {
     const channel = new MessageChannel();
-    const connection: Connection = { port: channel.port1, received: 0, actor };
+    const connection: Connection = { port: channel.port1, received: 0, acked: 0, actor };
     this.connections.add(connection);
     connection.port.onmessage = (event: MessageEvent) => this.receive(connection, decodeFrame(event.data));
     connection.port.postMessage(encodeFrame({ type: 'step1', sv: stateVector(this.doc) }));
@@ -97,6 +99,13 @@ export class MemoryDocumentHost {
     return this.revision + 1;
   }
 
+  /** Holds every ack while on, as a slow host does (frames are still applied and broadcast); turning it off acks what
+   * each connection sent meanwhile. */
+  holdAcks(on: boolean): void {
+    this.acksHeld = on;
+    if (!on) for (const connection of this.connections) this.ack(connection);
+  }
+
   /** Drops every connection, as a host restart does; each provider moves its unacked updates into its next step 2. */
   dropConnections(): void {
     for (const connection of this.connections) connection.port.close();
@@ -118,7 +127,7 @@ export class MemoryDocumentHost {
       case 'update':
         applyV1(this.doc, frame.update, connection);
         connection.received += 1;
-        connection.port.postMessage(encodeFrame({ type: 'ack', frames: connection.received, revision: this.revision }));
+        if (!this.acksHeld) this.ack(connection);
         return;
       case 'awareness':
         for (const other of this.connections) if (other !== connection) other.port.postMessage(encodeFrame(frame));
@@ -126,6 +135,12 @@ export class MemoryDocumentHost {
       default:
         return; // ack and restored are the host's own
     }
+  }
+
+  private ack(connection: Connection): void {
+    if (connection.acked === connection.received) return;
+    connection.acked = connection.received;
+    connection.port.postMessage(encodeFrame({ type: 'ack', frames: connection.received, revision: this.revision }));
   }
 }
 
