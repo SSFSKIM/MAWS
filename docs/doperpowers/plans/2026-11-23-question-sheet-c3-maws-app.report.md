@@ -121,7 +121,7 @@ Run through doperpowers:subagent-driven-execution, continuing the controller's r
 ## Range and head
 
 - Commits: `43c95d3c3..be2edec5c` on `question-sheet-c3`, master `b65a1e175` merged in at `7dae81a6c`.
-- The final gate ran on the pushed head `be2edec5c`; its run id is below.
+- The final gate ran on the pushed head `be2edec5c` (the two commits after it touch this report only): static, unit, probes, e2e:lane-a, e2e:c7, e2e:panel, e2e:transcript, e2e:desk-web and e2e:to-human, with the mini copies, all green, run 46064457999.
 
 ## What landed
 
