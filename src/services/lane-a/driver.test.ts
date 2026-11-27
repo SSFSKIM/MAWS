@@ -762,6 +762,26 @@ describe('subagents', () => {
     expect(originOf(s.h.planes, s.watch)).toBe('terminal:4242');
   });
 
+  // X-168 on a slow host: the watch's stream broke and its next stream has not opened (its snapshot unsent, or the bridge
+  // gone) when the process is found gone. The last stream's reshaper still carries the final body, so the window keeps
+  // the agents ended rather than forgetting them as still running.
+  it.each([
+    ['its holder ends', (s: Awaited<ReturnType<typeof session>>) => s.h.driver.observe({ appId: APP, engineSessionId: ENGINE, holder: { kind: 'none' } })],
+    ['its bridge goes with its process', (s: Awaited<ReturnType<typeof session>>) => void s.b.close()],
+  ])('says every agent ended with the session to a watch whose stream is opening again when %s, before the watch ends', async (_how, end) => {
+    const s = await session({ main: launched(A1, 1), entries: (dir) => [entry(dir, A1)], before: (b) => b.agentSpawned({ agentId: A1, toolUseId: tool(A1) }) });
+    await expect.poll(() => statusOf(s.h.planes, s.watch, A1)).toBe('running/bridge');
+    s.b.holdStreams(true);
+    s.b.reset(); // every stream ends, and the next one waits with no snapshot
+    await expect.poll(() => s.h.planes.some((p) => p.watch === s.watch && p.reset === true)).toBe(true);
+    await new Promise((r) => setTimeout(r, 150)); // past the watch's backoff (30 ms): its next stream asked for, unanswered
+    end(s);
+    await expect.poll(() => s.h.planes.some((p) => p.watch === s.watch && p.ended !== undefined), { timeout: 3000 }).toBe(true);
+    expect(s.h.planes.filter((p) => p.watch === s.watch).at(-1)?.ended).toBeDefined();
+    expect(statusOf(s.h.planes, s.watch, A1)).toBe('exited/session');
+    expect(s.h.planes.filter((p) => p.watch === s.watch && p.reset === true)).toHaveLength(1); // the attempt that never opened drew nothing to reset
+  });
+
   // Ticket 701: its bridge going while the terminal's process runs ends the watch on the agents as last heard; none reads
   // ended with the session (the window takes a running one as no longer known to run: status unknown).
   it('says nothing of how an agent ended when its bridge goes while the terminal’s process runs', async () => {
