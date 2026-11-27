@@ -408,15 +408,17 @@ describe('the route switch and the Direct poll, re-homed from the status line', 
   };
 
   // P5 O7 M8: the switch's restart (`session.stop`) is declared not offered on another machine (REMOTE_UNAVAILABLE): the
-  // button is greyed with the declared words
+  // button is greyed with the declared words; board ticket 815: it keeps Tab, its reason its description, and a press
+  // starts no switch
   it('greys the switch for a session on another machine, with the declared reason', () => {
     const remote = addressOf(OTHER_MACHINE, READY_BARE);
     useSessions.setState({ listed: new Map([[remote, { ...remoteRow(OTHER_MACHINE, READY_BARE), appId: remote }]]), listedMachines: new Set([OTHER_MACHINE]) });
     try {
       render(<RouteSwitch appSessionId={remote} targets={['direct']} />);
-      const button = screen.getByRole('button', { name: 'Switch to Direct…' });
-      expect(button).toHaveProperty('disabled', true);
-      expect(button.title).toBe(REMOTE_UNAVAILABLE['session.stop']);
+      const button = screen.getByRole('button', { name: 'Switch to Direct…', description: REMOTE_UNAVAILABLE['session.stop'] });
+      expect([button.getAttribute('aria-disabled'), button.hasAttribute('disabled')]).toEqual(['true', false]);
+      fireEvent.click(button);
+      expect(useGateway.getState().switching.get(remote)).toBeUndefined();
     } finally {
       useSessions.setState({ listed: new Map(), listedMachines: new Set() });
     }

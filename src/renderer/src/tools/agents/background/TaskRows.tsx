@@ -13,6 +13,8 @@ import { BACKGROUND_COPY } from '../copy';
 import { elapsedOf, formatAgo, formatElapsed } from '../model/elapsed';
 import type { TaskNode, TaskStatus } from '../model/task-graph';
 import { KindMark } from '../marks';
+import { Tip, UNAVAILABLE_LOOK, UnavailableButton, unavailableClickProps } from '../../../ui/tip';
+import { TouchFact } from '../../../ui/touch-fact';
 
 export const ACTION =
   'shrink-0 rounded-sm border border-border px-2 py-0.5 text-ui-sm text-fg outline-accent hover:bg-bg-hover focus-visible:outline-2 disabled:text-fg-faint disabled:hover:bg-transparent';
@@ -47,12 +49,15 @@ export function taskName(node: TaskNode, now: number): string {
   return BACKGROUND_COPY.rowName(node.description, [word, ago].filter((part) => part !== '').join(' '));
 }
 
-// `gap`: why the session's port can't stop it (P5 O9 M5, its `stop-task` capability): drawn in place, disabled, with that.
+// `gap`: why the session's port can't stop it (P5 O9 M5, its `stop-task` capability): drawn in place, greyed, with that
+// (board ticket 815: it keeps Tab, its reason the tip and the description); disabled while it stops.
 export function StopButton({ node, label, onStop, gap = null }: { node: TaskNode; label: string; onStop: (taskId: TaskId) => void; gap?: string | null }) {
   return (
-    <button type="button" disabled={node.stopping || gap !== null} title={gap ?? undefined} onClick={() => onStop(node.taskId)} className={ACTION}>
-      {node.stopping ? BACKGROUND_COPY.stopping : label}
-    </button>
+    <UnavailableButton reason={gap}>
+      <button type="button" disabled={gap === null && node.stopping} onClick={() => onStop(node.taskId)} className={`${ACTION} ${UNAVAILABLE_LOOK}`}>
+        {node.stopping ? BACKGROUND_COPY.stopping : label}
+      </button>
+    </UnavailableButton>
   );
 }
 
@@ -78,7 +83,9 @@ interface RowProps {
   kindMark?: boolean;
 }
 
-function TaskRow({ node, now, selected, stopError, stopDoubt = false, onStop, stopGap = null, kindMark = false, kind, children }: RowProps & { kind: 'shell' | 'monitor' | 'other'; children?: ReactNode }) {
+// `touch`: a fact a control of the line carries as its tip, drawn under the line where the screen cannot point (the touch
+// rule: the desk's phone draws these rows).
+function TaskRow({ node, now, selected, stopError, stopDoubt = false, onStop, stopGap = null, kindMark = false, kind, touch = null, children }: RowProps & { kind: 'shell' | 'monitor' | 'other'; touch?: string | null; children?: ReactNode }) {
   const running = node.status === 'running';
   const state = taskState(node, now);
   return (
@@ -108,20 +115,28 @@ function TaskRow({ node, now, selected, stopError, stopDoubt = false, onStop, st
         {children}
         {running && <StopButton node={node} label={BACKGROUND_COPY.stop} onStop={onStop} gap={stopGap} />}
       </div>
+      <TouchFact block className="text-ui-sm">
+        {touch}
+      </TouchFact>
       <StopError message={stopError} />
       {stopDoubt && running && <StopDoubt />}
     </div>
   );
 }
 
+// Board ticket 815: Output's path is its tip and its description; greyed until one is reported, it keeps Tab, its reason
+// the tip and the description, and stands under the line on a touch screen.
 export function ShellRow({ onOutput, ...props }: RowProps & { onOutput: ((path: string) => void) | null }) {
   const path = props.node.outputFile;
+  const pending = path === null ? BACKGROUND_COPY.outputPending : null;
   return (
-    <TaskRow {...props} kind="shell">
+    <TaskRow {...props} kind="shell" touch={onOutput === null ? null : pending}>
       {onOutput !== null && (
-        <button type="button" disabled={path === null} title={path === null ? BACKGROUND_COPY.outputPending : path} onClick={() => path !== null && onOutput(path)} className={ACTION}>
-          {BACKGROUND_COPY.output}
-        </button>
+        <Tip content={path ?? pending} description={path ?? pending} {...unavailableClickProps(pending)}>
+          <button type="button" onClick={() => path !== null && onOutput(path)} className={`${ACTION} ${UNAVAILABLE_LOOK}`}>
+            {BACKGROUND_COPY.output}
+          </button>
+        </Tip>
       )}
     </TaskRow>
   );

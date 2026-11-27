@@ -74,6 +74,8 @@ import { FILE_WIDTH_MIN, treeOf, treePlace, TREE_WIDTH_DEFAULT, TREE_WIDTH_MIN, 
 import { useSetup } from '../../../sessions/store'; // E11
 import type { SetupIntent } from '@shared/sessions/intent'; // E11
 import { RefusedMenuItem } from '../../../ui/refused-menu-item'; // the word cut (N29)
+import { NamedGlyph } from '../../../ui/glyph'; // board ticket 815: the glyphs' words, tips the keyboard reaches
+import { Tip } from '../../../ui/tip';
 
 export { FILES_TOOL_ID };
 export { FILES_ROW_HEIGHT }; // U6b-3b: kept in `row-metrics.ts`, which the result rows read too
@@ -311,13 +313,15 @@ function keepChosen(tabId: string, target: EventTarget): void {
   keep(tabId);
 }
 
-// M4: the file into the main area from its bar, as from its tab's menu; disabled with the reason while it cannot move.
+// M4: the file into the main area from its bar, as from its tab's menu; greyed with the reason while it cannot move
+// (board ticket 815: it keeps Tab, its reason the tip and the description).
+const BAR_GLYPH = 'inline-flex size-6 shrink-0 items-center justify-center rounded-sm text-fg-muted outline-accent hover:bg-bg-hover hover:text-fg focus-visible:outline-2';
 function MoveToMain({ tabId }: { tabId: string }) {
   const refusal = useTransferRefusal({ to: 'tab', panelTabId: tabId });
   return (
-    <button type="button" data-move-to-main aria-label={TRANSFER_COPY.moveToMain} title={refusal ?? TRANSFER_COPY.moveToMain} disabled={refusal !== null} onClick={() => void moveFileToMain(tabId)} className="inline-flex size-6 shrink-0 items-center justify-center rounded-sm text-fg-muted outline-accent hover:bg-bg-hover hover:text-fg focus-visible:outline-2 disabled:text-fg-faint">
+    <NamedGlyph data-move-to-main="" label={TRANSFER_COPY.moveToMain} unavailable={refusal} onClick={() => void moveFileToMain(tabId)} className={BAR_GLYPH}>
       <MoveToMainIcon className="size-3.5" />
-    </button>
+    </NamedGlyph>
   );
 }
 
@@ -335,9 +339,9 @@ function MoveToMainIcon({ className }: { className?: string }) {
 function TreeToggle({ drawn, onToggle, keepKeyboard }: { drawn: boolean; onToggle(): void; keepKeyboard: boolean }) {
   const label = drawn ? FILES_COPY.hideTree : FILES_COPY.showTree;
   return (
-    <button type="button" data-files-tree-toggle aria-label={label} title={label} onMouseDown={keepKeyboard ? (event) => event.preventDefault() : undefined} onClick={onToggle} className="inline-flex size-6 shrink-0 items-center justify-center rounded-sm text-fg-muted outline-accent hover:bg-bg-hover hover:text-fg focus-visible:outline-2">
+    <NamedGlyph data-files-tree-toggle="" label={label} onMouseDown={keepKeyboard ? (event) => event.preventDefault() : undefined} onClick={onToggle} className={BAR_GLYPH}>
       <TreeIcon className="size-3.5" />
-    </button>
+    </NamedGlyph>
   );
 }
 
@@ -820,7 +824,11 @@ function keyboardRow(rows: readonly TreeRow[], selected: string | null): number 
 const UNKNOWN_SESSION = 'unknown app session';
 
 function RefreshButton({ refresh }: { refresh(): void }) {
-  return <button type="button" aria-label={FILES_COPY.refresh} title={FILES_COPY.refresh} onClick={refresh} className="inline-flex size-6 shrink-0 items-center justify-center rounded-sm text-fg-muted outline-accent hover:bg-bg-hover hover:text-fg focus-visible:outline-2"><RefreshIcon className="size-3.5" /></button>;
+  return (
+    <NamedGlyph label={FILES_COPY.refresh} onClick={refresh} className={BAR_GLYPH}>
+      <RefreshIcon className="size-3.5" />
+    </NamedGlyph>
+  );
 }
 
 // UX wave U6b-4b: the notice's sentences for a folder, the command's own words under them, and Retry (the list's refresh).
@@ -877,11 +885,11 @@ const KIND: Record<ChangeLetter, string> = {
 
 // UX wave U6b-3a (decision 9): the mark's slot at the row's end, 16 px after the row's gap, only on a row that carries a
 // letter or a dot; hidden from a screen reader, which hears the state after the name. `plain`: the selected row, whose
-// letter takes the row's own colour.
+// letter takes the row's own colour. The letter's kind is a line of its row's tip (board ticket 815), the row its owner.
 function Mark({ letter, dot, plain }: { letter: ChangeLetter | null; dot: ChangeLetter | null; plain: boolean }) {
   if (letter !== null) {
     return (
-      <span data-mark aria-hidden="true" title={KIND[letter]} className={`ml-auto inline-flex w-4 shrink-0 justify-center text-ui-sm font-semibold ${plain ? '' : LETTER_TONE[letter]}`}>
+      <span data-mark aria-hidden="true" className={`ml-auto inline-flex w-4 shrink-0 justify-center text-ui-sm font-semibold ${plain ? '' : LETTER_TONE[letter]}`}>
         {letter}
       </span>
     );
@@ -935,42 +943,66 @@ function ChangedItem({ row, changed, width, fonts }: { row: ChangedRow; changed:
       : label.shown;
   // The folder gives way first; until the list has a width (its first layout) it is drawn whole.
   const folder = label.folder === '' || width <= 0 ? label.folder : folderFromEnd(label.folder, width - CHANGED_ROW_FIXED - measureIn(fonts.name)(label.name), measureIn(fonts.folder));
+  // Board ticket 815: the row's tip (once its title), the letter's kind under it; a fact the row does not draw is its
+  // description too
   return (
-    <button
-      type="button"
-      role="treeitem"
-      aria-level={2}
-      aria-selected={false}
-      data-changed-row=""
-      data-path={row.path}
-      data-letter={row.letter}
-      data-folder={row.folder ? '' : undefined}
-      data-outside={outside ? '' : undefined}
-      title={title}
-      onClick={(event) => changed.activate(row, event.metaKey)}
-      onDoubleClick={() => changed.keep(row)}
-      className="flex h-full min-w-0 flex-1 items-center gap-1.5 overflow-hidden pr-2 text-left text-ui text-fg hover:bg-bg-hover"
-      style={indent(1)}
-    >
-      <span data-name className="truncate">
-        {label.name}
-      </span>
-      {folder ? <span className="shrink-0 whitespace-nowrap text-ui-sm text-fg-muted">{folder}</span> : null}
-      <span className="sr-only"> {KIND[row.letter]}</span>
-      <Mark letter={row.letter} dot={null} plain={false} />
-    </button>
+    <Tip content={<RowTip words={title} under={KIND[row.letter]} />} description={title === label.shown ? null : title}>
+      <button
+        type="button"
+        role="treeitem"
+        aria-level={2}
+        aria-selected={false}
+        data-changed-row=""
+        data-path={row.path}
+        data-letter={row.letter}
+        data-folder={row.folder ? '' : undefined}
+        data-outside={outside ? '' : undefined}
+        onClick={(event) => changed.activate(row, event.metaKey)}
+        onDoubleClick={() => changed.keep(row)}
+        className="flex h-full min-w-0 flex-1 items-center gap-1.5 overflow-hidden pr-2 text-left text-ui text-fg hover:bg-bg-hover"
+        style={indent(1)}
+      >
+        <span data-name className="truncate">
+          {label.name}
+        </span>
+        {folder ? <span className="shrink-0 whitespace-nowrap text-ui-sm text-fg-muted">{folder}</span> : null}
+        <span className="sr-only"> {KIND[row.letter]}</span>
+        <Mark letter={row.letter} dot={null} plain={false} />
+      </button>
+    </Tip>
+  );
+}
+
+// A row's tip: its words, and what qualifies them (a change letter's kind, a failure's own words) on a line under them.
+function RowTip({ words, under }: { words: string; under: string | null }) {
+  return (
+    <>
+      <span className="block">{words}</span>
+      {under !== null && <span className="block text-fg-muted">{under}</span>}
+    </>
   );
 }
 
 function Row({ row, marks, selected, activate, keepRow, place }: { row: ListedRow; marks: Marks; selected: boolean; activate: (row: TreeRow, main: boolean) => void; keepRow: (row: TreeRow) => void; place: NoticePlace }) {
   if (row.kind === 'notice') {
     // UX wave U6b-4b: a failed listing's row reads its notice's first sentence; its title holds that sentence whole (a narrow
-    // row cuts it) and the command's own words (fix wave 1)
+    // row cuts it) and the command's own words (fix wave 1). Board ticket 815: where there are such words, the title is a
+    // tip on the sentence, which takes Tab for it, the words its description; the sentence alone stays the system tooltip.
     const failed = row.failure === null ? null : classifyFailure(row.failure, { ...place, subject: 'folder' });
     const text = row.notice === 'empty' ? FILES_COPY.empty : row.notice === 'truncated' ? FILES_COPY.truncated : (failed?.lines[0] ?? NOTICE_COPY.other.folder);
+    const tone = row.notice === 'refused' || row.notice === 'error' ? 'text-danger' : '';
+    const detail = failed === null || failed.detail === '' ? null : failed.detail;
     return (
-      <div data-notice={row.notice} data-notice-cause={failed?.cause} title={failed === null ? undefined : [failed.lines[0], failed.detail].filter((part) => part !== '').join('\n')} className="flex h-full items-center gap-2 truncate text-ui-sm text-fg-muted" style={indent(row.depth + 1)}>
-        <span className={row.notice === 'refused' || row.notice === 'error' ? 'text-danger' : ''}>{text}</span>
+      <div data-notice={row.notice} data-notice-cause={failed?.cause} title={failed !== null && detail === null ? failed.lines[0] : undefined} className="flex h-full items-center gap-2 truncate text-ui-sm text-fg-muted" style={indent(row.depth + 1)}>
+        {failed === null || detail === null ? (
+          <span className={tone}>{text}</span>
+        ) : (
+          <Tip content={<RowTip words={failed.lines[0]} under={detail} />} description={detail}>
+            <span tabIndex={0} className={`rounded-sm outline-accent focus-visible:outline-2 ${tone}`}>
+              {text}
+            </span>
+          </Tip>
+        )}
         {row.notice === 'refused' ? <span className="truncate font-mono text-fg-faint">{row.path}</span> : null}
       </div>
     );
@@ -988,38 +1020,40 @@ function Row({ row, marks, selected, activate, keepRow, place }: { row: ListedRo
   const dot = directory && letter === null ? marks.dot(row.path) : null;
   const ignored = row.kind === 'entry' && row.entry.ignored === true;
   const state = letter !== null ? KIND[letter] : dot !== null ? FILES_COPY.containsChanges : null;
+  // Board ticket 815: the full path is the row's tip and its description, the letter's kind under it in the tip
   return (
-    <button
-      type="button"
-      role="treeitem"
-      aria-level={row.depth + 1}
-      aria-expanded={directory ? row.expanded : undefined}
-      aria-selected={selected}
-      data-path={row.path}
-      data-kind={row.kind === 'root' ? 'root' : row.entry.kind}
-      data-letter={letter ?? undefined}
-      data-dot={dot ?? undefined}
-      data-ignored={ignored ? '' : undefined}
-      title={row.path}
-      onClick={(event) => activate(row, event.metaKey)}
-      onDoubleClick={() => keepRow(row)}
-      className={`flex h-full min-w-0 flex-1 items-center gap-1.5 truncate pr-2 text-left text-ui hover:bg-bg-hover ${selected ? 'bg-bg-active text-fg' : inert ? 'text-fg-muted' : 'text-fg'}`}
-      style={indent(row.depth)}
-    >
-      {directory ? <Chevron open={row.expanded} /> : <span className="size-3 shrink-0" />}
-      <span data-name className={`truncate ${row.kind === 'root' ? 'font-medium' : ''} ${ignored && !selected ? 'text-fg-muted' : ''}`}>
-        {name}
-      </span>
-      {secondary ? (
-        <span className="truncate text-ui-sm text-fg-faint">
-          {link ? <span className="sr-only">{FILES_COPY.symlinkName} </span> : null}
-          {secondary}
+    <Tip content={<RowTip words={row.path} under={letter !== null ? KIND[letter] : null} />} description={row.path}>
+      <button
+        type="button"
+        role="treeitem"
+        aria-level={row.depth + 1}
+        aria-expanded={directory ? row.expanded : undefined}
+        aria-selected={selected}
+        data-path={row.path}
+        data-kind={row.kind === 'root' ? 'root' : row.entry.kind}
+        data-letter={letter ?? undefined}
+        data-dot={dot ?? undefined}
+        data-ignored={ignored ? '' : undefined}
+        onClick={(event) => activate(row, event.metaKey)}
+        onDoubleClick={() => keepRow(row)}
+        className={`flex h-full min-w-0 flex-1 items-center gap-1.5 truncate pr-2 text-left text-ui hover:bg-bg-hover ${selected ? 'bg-bg-active text-fg' : inert ? 'text-fg-muted' : 'text-fg'}`}
+        style={indent(row.depth)}
+      >
+        {directory ? <Chevron open={row.expanded} /> : <span className="size-3 shrink-0" />}
+        <span data-name className={`truncate ${row.kind === 'root' ? 'font-medium' : ''} ${ignored && !selected ? 'text-fg-muted' : ''}`}>
+          {name}
         </span>
-      ) : null}
-      {ignored ? <span className="sr-only"> {FILES_COPY.ignored}</span> : null}
-      {state !== null ? <span className="sr-only"> {state}</span> : null}
-      <Mark letter={letter} dot={dot} plain={selected} />
-    </button>
+        {secondary ? (
+          <span className="truncate text-ui-sm text-fg-faint">
+            {link ? <span className="sr-only">{FILES_COPY.symlinkName} </span> : null}
+            {secondary}
+          </span>
+        ) : null}
+        {ignored ? <span className="sr-only"> {FILES_COPY.ignored}</span> : null}
+        {state !== null ? <span className="sr-only"> {state}</span> : null}
+        <Mark letter={letter} dot={dot} plain={selected} />
+      </button>
+    </Tip>
   );
 }
 

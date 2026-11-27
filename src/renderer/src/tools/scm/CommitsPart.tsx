@@ -22,6 +22,7 @@ import type { ReadFailure } from '../code/review/reads';
 import { REVIEW_TOOL_ID } from '../code/review/ReviewTool';
 import { REVIEW_COPY } from '../code/copy';
 import { QuietSpinner } from '../../ui/spinner';
+import { Tip } from '../../ui/tip';
 import { SCM_COPY } from './copy';
 import { ageColumnChars, commitAge, commitList, commitsHeadingFit, commitsState, type CommitGroup, type CommitList, type CommitsHeading } from './page-model';
 import { CountBadge, fixedWidth, Measured, measuredWidth, Part, quietControl, RefreshButton, shortest, useLineFit } from './page-parts';
@@ -43,7 +44,7 @@ export function CommitsPart({ appSessionId, serves, read, mark, ui, retry }: Com
       <Part name="commits" label={SCM_COPY.commitsPart}>
         <div data-scm-commits-heading className="flex min-h-6 min-w-0 items-center">
           <span className="shrink-0 text-fg-muted">{SCM_COPY.commitsPart}</span>
-          {state.kind === 'failed' && state.refresh && <RefreshButton label={REVIEW_COPY.retry} title={REVIEW_COPY.retry} onClick={retry} />}
+          {state.kind === 'failed' && state.refresh && <RefreshButton label={REVIEW_COPY.retry} onClick={retry} />}
         </div>
         {state.kind === 'failed' && (
           <p data-scm-failure className="m-0 wrap-anywhere text-ui-sm text-fg-muted">
@@ -207,24 +208,27 @@ function GroupLine({ group }: { group: CommitGroup }) {
 }
 
 // A commit's row (§H; frames' S12, S13): a button with the subject (which shortens first), the seven-character hash and
-// the age, in a column as wide as the widest age drawn; its title the author, the date and the full hash.
+// the age, in a column as wide as the widest age drawn; its tip the author, the date and the full hash, one to a line,
+// and its description (board ticket 815: a tip the keyboard reaches, where the system tooltip was).
 function CommitRow({ appSessionId, commit, age, ageChars }: { appSessionId: AppSessionId; commit: GitBranchCommit; age: string; ageChars: number }) {
   const sha7 = commit.sha.slice(0, 7);
+  const facts = SCM_COPY.commitTitle(commit.author, formatDateTime(Date.parse(commit.authoredAt)), commit.sha);
   return (
-    <button
-      type="button"
-      data-scm-commit
-      aria-label={SCM_COPY.openCommit(sha7)}
-      title={SCM_COPY.commitTitle(commit.author, formatDateTime(Date.parse(commit.authoredAt)), commit.sha)}
-      onClick={() => openCommit(appSessionId, commit.sha)}
-      className="-mx-1 flex h-6 min-w-0 items-center gap-2 rounded-sm px-1 text-left text-ui text-fg outline-accent hover:bg-bg-hover focus-visible:outline-2"
-    >
-      <span className="min-w-0 flex-1 truncate">{commit.subject}</span>{' '}
-      <span className="shrink-0 font-mono text-ui-sm text-fg-muted">{sha7}</span>{' '}
-      <span data-scm-age className="shrink-0 text-right text-ui-sm text-fg-muted tabular-nums" style={{ width: `${ageChars}ch` }}>
-        {age}
-      </span>
-    </button>
+    <Tip content={<span className="whitespace-pre-line">{facts}</span>} description={facts}>
+      <button
+        type="button"
+        data-scm-commit
+        aria-label={SCM_COPY.openCommit(sha7)}
+        onClick={() => openCommit(appSessionId, commit.sha)}
+        className="-mx-1 flex h-6 min-w-0 items-center gap-2 rounded-sm px-1 text-left text-ui text-fg outline-accent hover:bg-bg-hover focus-visible:outline-2"
+      >
+        <span className="min-w-0 flex-1 truncate">{commit.subject}</span>{' '}
+        <span className="shrink-0 font-mono text-ui-sm text-fg-muted">{sha7}</span>{' '}
+        <span data-scm-age className="shrink-0 text-right text-ui-sm text-fg-muted tabular-nums" style={{ width: `${ageChars}ch` }}>
+          {age}
+        </span>
+      </button>
+    </Tip>
   );
 }
 

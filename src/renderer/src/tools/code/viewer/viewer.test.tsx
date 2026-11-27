@@ -41,6 +41,7 @@ import { existingViewState, readOnlyReason, useViewer, VIEWER_ENTRIES_MAX } from
 import { registerPanelTool } from '../../../panel/host'; // UX wave U6b-1: a link opens beside the chat, in a Files tab
 import { filesTool } from '../files/FilesTool';
 import { currentSet } from '../../../stores/layout-model';
+import { accessibleDescription } from '../../../test-support/accessible-text';
 
 // UX wave U6b-2: happy-dom knows no `maws-artifact:` scheme, so a file's frame only takes its URL (child-frame navigation off)
 beforeAll(() => void ((window as unknown as { happyDOM: { settings: { navigation: { disableChildFrameNavigation: boolean } } } }).happyDOM.settings.navigation.disableChildFrameNavigation = true));
@@ -994,8 +995,7 @@ describe('a file from outside the folders edits and saves (U6e)', () => {
     expect(lead().querySelector('svg')).toBeNull();
     expect(lead().textContent).toBe(OUT); // the bar shows the path as any file's
     expect(lead().getAttribute('data-outside')).toBe('writable');
-    expect(lead().getAttribute('title')).toBe(`Save writes to ${REAL}`);
-    expect(lead().getAttribute('aria-description')).toBe(`Save writes to ${REAL}`);
+    expect([lead().hasAttribute('title'), lead().tabIndex, accessibleDescription(lead())]).toEqual([false, 0, `Save writes to ${REAL}`]); // board ticket 815: a tip on the path, which takes Tab
     expect(title()).toBeNull(); // the editor's title is gone for a file that can be saved
     expect(document.querySelector('[data-file-viewer]')!.getAttribute('data-editable')).toBe('true');
     typed('two ');
@@ -1039,8 +1039,7 @@ describe('a file from outside the folders edits and saves (U6e)', () => {
     show();
     await editable();
     expect(lead().getAttribute('data-outside')).toBe('writable');
-    expect(lead().getAttribute('title')).toBe(`Save writes to ${OUT}`);
-    expect(lead().getAttribute('aria-description')).toBe(`Save writes to ${OUT}`);
+    expect([lead().hasAttribute('title'), lead().tabIndex, accessibleDescription(lead())]).toEqual([false, 0, `Save writes to ${OUT}`]); // board ticket 815: a tip on the path, which takes Tab
   });
 
   it('a chosen and a sent file save the same way; a file inside the folders keeps its tooltip and today’s files.write', async () => {
@@ -1049,7 +1048,7 @@ describe('a file from outside the folders edits and saves (U6e)', () => {
     for (const path of [OUT, '/elsewhere/sent.txt']) {
       const shownNow = show(path);
       await editable(path);
-      expect(lead().getAttribute('title')).toBe(`Save writes to ${path}`);
+      expect(accessibleDescription(lead())).toBe(`Save writes to ${path}`); // board ticket 815
       typed('+');
       await waitFor(() => expect(shown(path).dirty).toBe(true));
       expect(await act(() => useViewer.getState().save(FILE(path)))).toBe('ok');
@@ -1683,7 +1682,7 @@ describe('a file from outside the folders edits and saves (U6e)', () => {
     expect(slash.className.split(/\s+/)).toContain('shrink-0');
     expect(name.className.split(/\s+/)).toContain('shrink-0');
     expect(lead().style.minWidth).toBe(`${'todo.txt'.length + 3}ch`); // the name, the slash and the folder's two characters
-    expect(lead().getAttribute('aria-description')).toBe(`Save writes to ${LONG}`);
+    expect(accessibleDescription(lead())).toBe(`Save writes to ${LONG}`); // board ticket 815
   });
 
   it('reads with agent while the tab holds the agent’s mark; a grant alone is then refused, and the read without it shows the file', async () => {
@@ -2198,8 +2197,7 @@ describe('a file outside the folders on another machine (U6f)', () => {
     expect(shown()).toMatchObject({ named: true, locked: null, pin: REAL });
     expect(label()).toBeNull();
     expect(lead().getAttribute('data-outside')).toBe('writable');
-    expect(lead().getAttribute('title')).toBe(`Save writes to ${REAL} on studio`);
-    expect(lead().getAttribute('aria-description')).toBe(`Save writes to ${REAL} on studio`);
+    expect([lead().hasAttribute('title'), lead().tabIndex, accessibleDescription(lead())]).toEqual([false, 0, `Save writes to ${REAL} on studio`]); // board ticket 815: a tip on the path, which takes Tab
     typed('two ');
     await waitFor(() => expect(shown().dirty).toBe(true));
     await settle();

@@ -9,6 +9,7 @@
 import { DropdownMenu } from 'radix-ui';
 import { useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import { BareCount } from '../../../ui/count';
+import { RowNote, useRowNote } from '../../../ui/row-note';
 import { Tip } from '../../../ui/tip';
 import { REVIEW_COPY } from '../copy';
 import { reviewLayout } from './measure';
@@ -129,12 +130,16 @@ export function Toolbar({ totals, scopeWords, chip, allFolded, onFoldAll, counte
             <span data-review-hunk data-index={counter.index + 1} data-count={counter.count} className="whitespace-nowrap text-ui-sm">
               <BareCount count={shown} meaning={REVIEW_COPY.hunkOf(counter.index + 1, counter.count)} />
             </span>
-            <button type="button" className={quiet} aria-label={REVIEW_COPY.previousHunk} title={REVIEW_COPY.previousHunk} disabled={counter.index === 0} onClick={() => onHunk(counter.index - 1)}>
-              ↑
-            </button>
-            <button type="button" className={quiet} aria-label={REVIEW_COPY.nextHunk} title={REVIEW_COPY.nextHunk} disabled={counter.index >= counter.count - 1} onClick={() => onHunk(counter.index + 1)}>
-              ↓
-            </button>
+            <Tip content={REVIEW_COPY.previousHunk}>
+              <button type="button" className={quiet} aria-label={REVIEW_COPY.previousHunk} disabled={counter.index === 0} onClick={() => onHunk(counter.index - 1)}>
+                ↑
+              </button>
+            </Tip>
+            <Tip content={REVIEW_COPY.nextHunk}>
+              <button type="button" className={quiet} aria-label={REVIEW_COPY.nextHunk} disabled={counter.index >= counter.count - 1} onClick={() => onHunk(counter.index + 1)}>
+                ↓
+              </button>
+            </Tip>
           </>
         )}
         <ViewMenu drawn={drawn} splitRoom={splitRoom} onMode={onMode} wrap={wrap} onWrap={onWrap} />
@@ -144,8 +149,12 @@ export function Toolbar({ totals, scopeWords, chip, allFolded, onFoldAll, counte
 }
 
 // Unified, Split and Wrap: the stack's, so they apply to every section. The radio reads what is drawn: Unified where the
-// stack is too narrow for Split, whose item is then disabled with its reason (D9); the stored choice is not changed.
+// stack is too narrow for Split, whose item is then greyed with its reason (D9); the stored choice is not changed.
+// Board ticket 815: greyed, Split stays in the menu's keyboard (aria-disabled, not disabled, which the menu skips), its
+// reason its description and a note in its row, as the refused menu item draws one (ui/refused-menu-item.tsx); choosing
+// it does nothing and keeps the menu open.
 function ViewMenu({ drawn, splitRoom, onMode, wrap, onWrap }: { drawn: ReviewMode; splitRoom: boolean; onMode(mode: ReviewMode): void; wrap: boolean; onWrap(): void }) {
+  const note = useRowNote();
   return (
     <DropdownMenu.Root modal={false}>
       <DropdownMenu.Trigger asChild>
@@ -158,15 +167,26 @@ function ViewMenu({ drawn, splitRoom, onMode, wrap, onWrap }: { drawn: ReviewMod
       </DropdownMenu.Trigger>
       <DropdownMenu.Portal>
         <DropdownMenu.Content align="end" sideOffset={4} className={MENU}>
-          <DropdownMenu.RadioGroup value={drawn} onValueChange={(value) => onMode(value === 'split' ? 'split' : 'unified')}>
+          <DropdownMenu.RadioGroup value={drawn} onValueChange={(value) => {
+              if (value === 'split' && !splitRoom) return; // the greyed Split, chosen: nothing
+              onMode(value === 'split' ? 'split' : 'unified');
+            }}>
             <DropdownMenu.RadioItem value="unified" data-review-view-item="unified" className={ITEM}>
               <Check />
               {REVIEW_COPY.unified}
             </DropdownMenu.RadioItem>
-            <DropdownMenu.RadioItem value="split" data-review-view-item="split" disabled={!splitRoom} title={splitRoom ? undefined : REVIEW_COPY.splitNeedsRoom} className={ITEM}>
-              <Check />
-              {REVIEW_COPY.split}
-            </DropdownMenu.RadioItem>
+            {splitRoom ? (
+              <DropdownMenu.RadioItem value="split" data-review-view-item="split" className={ITEM}>
+                <Check />
+                {REVIEW_COPY.split}
+              </DropdownMenu.RadioItem>
+            ) : (
+              <DropdownMenu.RadioItem value="split" data-review-view-item="split" aria-disabled aria-label={REVIEW_COPY.split} textValue={REVIEW_COPY.split} {...note.rowProps} onSelect={(event) => event.preventDefault()} className={`relative ${ITEM} aria-disabled:text-fg-faint`}>
+                <Check />
+                {REVIEW_COPY.split}
+                <RowNote note={note}>{REVIEW_COPY.splitNeedsRoom}</RowNote>
+              </DropdownMenu.RadioItem>
+            )}
           </DropdownMenu.RadioGroup>
           <DropdownMenu.Separator className="my-1 h-px bg-border" />
           <DropdownMenu.CheckboxItem checked={wrap} onCheckedChange={() => onWrap()} data-review-view-item="wrap" className={ITEM}>

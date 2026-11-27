@@ -35,6 +35,7 @@ import { placeCard, pinOf, type CardStyle } from '../../side/card/placement';
 import { closeCard, useCommentCard } from '../../side/card/store';
 import { useLayout } from '../../stores/layout';
 import { DOCUMENT_COPY } from './copy';
+import { NamedGlyph } from '../../ui/glyph';
 
 const COPY = SIDE_COPY.card;
 const STARTING = DOCUMENT_COPY.startingSession;
@@ -251,17 +252,11 @@ function Notice({ pending, locate, layoutKey, onClose, inFlow = false /* P4-B1 *
       >
         <header className="flex min-w-0 shrink-0 items-center gap-1">
           <h3 className="m-0 min-w-0 flex-1 truncate text-ui-sm font-medium text-fg">{pending.label}</h3>
-          <button
-            type="button"
-            aria-label={COPY.close}
-            title={COPY.close}
-            onClick={onClose}
-            className="inline-flex size-6 shrink-0 items-center justify-center rounded-sm text-fg-muted outline-accent hover:bg-bg-hover hover:text-fg focus-visible:outline-2"
-          >
+          <NamedGlyph label={COPY.close} onClick={onClose} className="inline-flex size-6 shrink-0 items-center justify-center rounded-sm text-fg-muted outline-accent hover:bg-bg-hover hover:text-fg focus-visible:outline-2">
             <svg viewBox="0 0 16 16" aria-hidden className="size-3" fill="none" stroke="currentColor" strokeWidth={1.5} strokeLinecap="round">
               <path d="m4 4 8 8M12 4l-8 8" />
             </svg>
-          </button>
+          </NamedGlyph>
         </header>
         <p role="status" className={`m-0 text-ui-sm ${notice.status === 'refused' ? 'text-danger' : 'text-fg-muted'}`}>
           {notice.words}

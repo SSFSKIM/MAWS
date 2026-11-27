@@ -4253,7 +4253,7 @@ test('(an outside file, both ways) two files this build chose with Open File…,
     await mainTabById(back.page, mainTabId).click({ timeout: 20_000 });
     const backMain = back.page.locator(`[data-region="main"] [data-file-viewer][data-path="${inMain}"]`);
     await expect(backMain, 'the main tab of the chosen file savable again').toHaveAttribute('data-editable', 'true', { timeout: 20_000 });
-    await expect(backMain.locator('[data-path-lead]')).toHaveAttribute('title', `Save writes to ${inMain}`);
+    await expect(backMain.locator('[data-path-lead]')).toHaveAccessibleDescription(`Save writes to ${inMain}`);
     await showSession(back.page, id, `session:${address}`);
     await sideTab(sideColumn(back.page), basename(beside)).click({ timeout: 20_000 });
     const backBeside = sideColumn(back.page).locator(`[data-file-viewer][data-path="${beside}"]`);
@@ -4433,7 +4433,7 @@ test('(a followed link, both ways) two files a Markdown file links, followed by 
     await mainTabById(back.page, mainTabId).click({ timeout: 20_000 });
     const backMain = back.page.locator(`[data-region="main"] [data-file-viewer][data-path="${inMain}"]`);
     await expect(backMain, 'the main tab of the followed file savable again').toHaveAttribute('data-editable', 'true', { timeout: 20_000 });
-    await expect(backMain.locator('[data-path-lead]')).toHaveAttribute('title', `Save writes to ${inMain}`);
+    await expect(backMain.locator('[data-path-lead]')).toHaveAccessibleDescription(`Save writes to ${inMain}`);
     await showSession(back.page, id, `session:${address}`);
     await sideTab(sideColumn(back.page), basename(beside)).click({ timeout: 20_000 });
     const backBeside = sideColumn(back.page).locator(`[data-file-viewer][data-path="${beside}"]`);

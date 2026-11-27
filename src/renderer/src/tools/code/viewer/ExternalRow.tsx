@@ -30,6 +30,7 @@ import { externalKindOf } from './kinds';
 import { classifyFailure, failureOf, type FileFailure } from './notice';
 import { useNoticePlace } from './notice-place';
 import { opens, type ViewerEntry } from './viewer-store';
+import { Tip } from '../../../ui/tip';
 
 // The row's button shape, which the framed file's failure body takes too (UX wave U6b-2, M5 decision 3).
 export const rowButton = 'rounded-sm border border-border px-2 py-0.5 text-ui-sm text-fg hover:bg-bg-hover';
@@ -48,9 +49,12 @@ export function OpenExternally({ appSessionId, path, agent = false }: { appSessi
   const words = problem === null ? null : 'said' in problem ? problem.said : classifyFailure(problem.failure, { ...place, subject: 'file' }).lines[0];
   return (
     <span className="inline-flex items-center gap-2">
-      <button type="button" className={rowButton} title={elsewhere === null ? undefined : COPY_WORDS.title(elsewhere)} onClick={() => void open()}>
-        {VIEWER_COPY.openExternally}
-      </button>
+      {/* board ticket 815: where the copy comes from, a tip the keyboard reaches and the button's description */}
+      <Tip content={elsewhere === null ? null : COPY_WORDS.title(elsewhere)} description={elsewhere === null ? null : COPY_WORDS.title(elsewhere)}>
+        <button type="button" className={rowButton} onClick={() => void open()}>
+          {VIEWER_COPY.openExternally}
+        </button>
+      </Tip>
       {elsewhere !== null ? <span className="text-ui-sm text-fg-faint">{ELSEWHERE_WORDS.on(elsewhere)}</span> : null}
       {words ? (
         <span role="alert" className="text-ui-sm text-danger">

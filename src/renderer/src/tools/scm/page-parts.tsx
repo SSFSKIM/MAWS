@@ -5,6 +5,7 @@
 // the widths what each line gives up first (page-model.ts).
 import { useLayoutEffect, useState, type ReactNode, type RefObject } from 'react';
 import { reviewLayout } from '../code/review/measure';
+import { Tip } from '../../ui/tip';
 import { SCM_COPY } from './copy';
 
 // A part of the page under the Where line: its own block, ruled off below as today's header row is
@@ -29,22 +30,25 @@ export function CountBadge({ n, fixed = false }: { n: number; fixed?: boolean })
 // (frames' S13), the drawn look a muted word
 export const quietControl = 'inline-flex h-6 shrink-0 items-center whitespace-nowrap rounded-sm px-1 text-ui-sm text-fg-muted outline-accent hover:bg-bg-hover hover:text-fg focus-visible:outline-2';
 
-// The refresh control: the Pull request part's (the card's refresh glyph), which a failed Commits part carries too
-export function RefreshButton({ label, title, disabled = false, onClick }: { label: string; title: string; disabled?: boolean; onClick(): void }) {
+// The refresh control: the Pull request part's (the card's refresh glyph), which a failed Commits part carries too.
+// `tip`, its tooltip (board ticket 815: a tip the keyboard reaches), is its label unless it says more ("Checked 3:04 PM"),
+// which is its description then; it is greyed while a refresh runs.
+export function RefreshButton({ label, tip = label, disabled = false, onClick }: { label: string; tip?: string; disabled?: boolean; onClick(): void }) {
   return (
-    <button
-      type="button"
-      data-scm-refresh
-      aria-label={label}
-      title={title}
-      disabled={disabled}
-      onClick={onClick}
-      className="ml-auto inline-flex size-6 shrink-0 items-center justify-center rounded-sm text-fg-muted outline-accent hover:bg-bg-hover hover:text-fg focus-visible:outline-2 disabled:text-fg-faint disabled:hover:bg-transparent"
-    >
-      <svg viewBox="0 0 16 16" aria-hidden="true" className="size-3.5" fill="none" stroke="currentColor" strokeWidth={1.4} strokeLinecap="round" strokeLinejoin="round">
-        <path d="M13.5 8a5.5 5.5 0 1 1-1.6-3.9M13.5 2.5v3h-3" />
-      </svg>
-    </button>
+    <Tip content={tip} description={tip === label ? null : tip}>
+      <button
+        type="button"
+        data-scm-refresh
+        aria-label={label}
+        disabled={disabled}
+        onClick={onClick}
+        className="ml-auto inline-flex size-6 shrink-0 items-center justify-center rounded-sm text-fg-muted outline-accent hover:bg-bg-hover hover:text-fg focus-visible:outline-2 disabled:text-fg-faint disabled:hover:bg-transparent"
+      >
+        <svg viewBox="0 0 16 16" aria-hidden="true" className="size-3.5" fill="none" stroke="currentColor" strokeWidth={1.4} strokeLinecap="round" strokeLinejoin="round">
+          <path d="M13.5 8a5.5 5.5 0 1 1-1.6-3.9M13.5 2.5v3h-3" />
+        </svg>
+      </button>
+    </Tip>
   );
 }
 

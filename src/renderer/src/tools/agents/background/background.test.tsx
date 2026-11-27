@@ -28,6 +28,7 @@ import { useSetup } from '../../../sessions/store';
 import { setAgentWorkClient, type AgentWorkClient } from '../client';
 import { fakeAgentWorkClient, type FakeAgentWorkClient } from '../fake-work-client';
 import { openLog } from '../log/LogTool';
+import { accessibleDescription } from '../../../test-support/accessible-text';
 import { useTaskGraph } from '../store';
 import { SLOW_TICK_MS, STOP_DOUBT_MS } from '../subagents/shared';
 import { subagentsTool, type SubagentsParams } from '../subagents/SubagentsTool';
@@ -160,7 +161,13 @@ const options = () =>
   Array.from(widget()!.querySelectorAll<HTMLElement>('[role="option"]')).map(
     (o) => `${o.getAttribute('aria-selected') === 'true' ? '*' : ''}${o.querySelector('[data-part="title"]')?.textContent}|${o.querySelector('[data-part="count"]')?.textContent}`,
   );
-const tableRows = () => Array.from(widget()!.querySelectorAll<HTMLElement>('tbody tr')).map((tr) => Array.from(tr.querySelectorAll('td')).map((td) => td.textContent));
+// a cell's drawn words: a tip's description, hidden (board ticket 815), is not among them
+const drawnText = (cell: Element) => {
+  const copy = cell.cloneNode(true) as Element;
+  copy.querySelectorAll('[hidden]').forEach((hidden) => hidden.remove());
+  return copy.textContent;
+};
+const tableRows = () => Array.from(widget()!.querySelectorAll<HTMLElement>('tbody tr')).map((tr) => Array.from(tr.querySelectorAll('td')).map(drawnText));
 const openWidget = (taskId: string) => fireEvent.click(within(card(taskId)).getByRole('button', { name: `Open ${within(card(taskId)).getByRole('heading').textContent}` }));
 
 const workflow = replayed('pass2', 'workflow');
@@ -456,7 +463,9 @@ describe('background work', () => {
     });
     openWidget('wf1');
     expect(within(widget()!).queryByRole('button', { name: /queued-one/ })).toBeNull();
-    expect(within(widget()!).getByTitle('Not started').textContent).toBe('queued-one');
+    // board ticket 815: why it opens nothing is the label's description and tip, the label taking Tab for it
+    const queued = within(widget()!).getByText('queued-one').closest<HTMLElement>('[tabindex]')!;
+    expect([queued.tabIndex, accessibleDescription(queued)]).toEqual([0, 'Not started']);
     // a started row whose id neither the row nor the journal gives is not "not started"
     unmountAll();
     await mount({
@@ -466,8 +475,7 @@ describe('background work', () => {
       ],
     });
     openWidget('wf1');
-    expect(within(widget()!).queryByTitle('Not started')).toBeNull();
-    expect(within(widget()!).getByTitle('No transcript known for this agent').textContent).toBe('done-one');
+    expect(accessibleDescription(within(widget()!).getByText('done-one').closest('[tabindex]')!)).toBe('No transcript known for this agent');
   });
 
   it('a per-agent row opens its drill-in on a pinned Subagents tab still holding another session, keeping the selection', async () => {
@@ -493,11 +501,14 @@ describe('background work', () => {
     expect(openLog).toHaveBeenCalledWith(A, path, 'Sleep 30s then write BG_DONE to bg.txt');
   });
 
-  it('disables Output until the engine reports the path', async () => {
+  // board ticket 815: greyed, it keeps Tab, its reason its description, and a press opens nothing
+  it('greys Output until the engine reports the path', async () => {
     await mount({ events: upTo(stopOn, 43) });
     const output = within(document.querySelector<HTMLElement>('[data-shell="b53no4rmo"]')!).getByRole('button', { name: 'Output' }) as HTMLButtonElement;
-    expect(output.disabled).toBe(true);
-    expect(output.title).toBe('Output path not reported yet');
+    expect([output.getAttribute('aria-disabled'), output.disabled]).toEqual(['true', false]);
+    expect(accessibleDescription(output)).toBe('Output path not reported yet');
+    fireEvent.click(output);
+    expect(openLog).not.toHaveBeenCalled();
   });
 
   it('lists a monitor from a task.started of type monitor_ws', async () => {
@@ -598,8 +609,8 @@ describe('background work', () => {
       await watched();
       plane('snapshot', [job('bsleep01')]);
       const stop = within(row('bsleep01')!).getByRole('button', { name: 'Stop' }) as HTMLButtonElement;
-      expect(stop.disabled).toBe(true);
-      expect(stop.getAttribute('title')).toBe('Not in this session’s sminos (1.25.0)');
+      expect([stop.getAttribute('aria-disabled'), stop.disabled]).toEqual(['true', false]); // board ticket 815: it keeps Tab
+      expect(accessibleDescription(stop)).toBe('Not in this session’s sminos (1.25.0)');
       fireEvent.click(stop);
       expect(bridge.invoked('laneA.stopTask')).toEqual([]);
     });

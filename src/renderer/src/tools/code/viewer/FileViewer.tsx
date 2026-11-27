@@ -68,6 +68,7 @@ import { useNoticePlace } from './notice-place'; // UX wave U6b-4b
 import { elsewhereWords, readOnlyReason, useViewer, type ArtifactRead, type ReadOnlyReason, type ViewerEntry } from './viewer-store';
 import { OpenInButton } from '../../../open-in/OpenInMenu'; // UX wave U6b-4a
 import { shownLine } from './shown-line'; // UX wave U6b-4a
+import { Tip } from '../../../ui/tip';
 
 const CodeView = lazy(() => import('./CodeView'));
 
@@ -86,7 +87,8 @@ const toggle = 'rounded-sm border border-border px-2 py-0.5 text-ui-sm text-fg-m
 // characters (its first and the ellipsis, where one character left a stray glyph), the slash before the name stays, and
 // the lead's least width counts them, within the 40. A savable outside file's path says where Save writes, as its tooltip
 // and its accessible description (UX wave U6b-2: only where the body is text Save writes); `outside` marks how the file
-// stands outside the folders.
+// stands outside the folders. Board ticket 815: that tooltip is a tip the keyboard reaches, the path taking Tab for it;
+// a path with nothing more to say keeps its whole form as its system tooltip, its words already on the bar.
 const NAME_MIN_CH = 40;
 const FOLDER_MIN_CH = 2;
 
@@ -96,14 +98,14 @@ function PathLead({ path, savesTo, outside }: { path: string; savesTo: string | 
   const folder = cut > 0 ? path.slice(0, cut) : '';
   const reserve = (cut >= 0 ? 1 : 0) + (folder ? FOLDER_MIN_CH : 0);
   const nameMax = reserve === 0 ? 'max-w-full' : reserve === 1 ? 'max-w-[calc(100%_-_1ch)]' : 'max-w-[calc(100%_-_3ch)]';
-  return (
+  const lead = (
     <span
       data-path-lead
       data-outside={outside ?? undefined}
-      className="flex flex-1 overflow-hidden font-mono text-fg-muted"
+      className={`flex flex-1 overflow-hidden font-mono text-fg-muted ${savesTo === null ? '' : 'rounded-sm outline-accent focus-visible:outline-2'}`}
       style={{ minWidth: `${Math.min(name.length + reserve, NAME_MIN_CH)}ch` }}
-      title={savesTo ?? path}
-      aria-description={savesTo ?? undefined}
+      title={savesTo === null ? path : undefined}
+      tabIndex={savesTo === null ? undefined : 0}
     >
       {folder ? <span className="min-w-[2ch] truncate">{folder}</span> : null}
       {cut >= 0 ? <span className="shrink-0">/</span> : null}
@@ -111,6 +113,13 @@ function PathLead({ path, savesTo, outside }: { path: string; savesTo: string | 
         {name}
       </span>
     </span>
+  );
+  return savesTo === null ? (
+    lead
+  ) : (
+    <Tip content={savesTo} description={savesTo}>
+      {lead}
+    </Tip>
   );
 }
 

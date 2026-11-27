@@ -5,6 +5,7 @@
 // counter reads "n / m" at every width, "Hunk n of m" its name and tooltip (T306); in a diff tab, which has no scope
 // chips, the totals line owns the scope's words (T357).
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { accessibleDescription } from '../../../test-support/accessible-text';
 import userEvent from '@testing-library/user-event';
 import type { ComponentProps } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -178,7 +179,7 @@ describe('the toolbar’s controls', () => {
     expect(onHunk).toHaveBeenLastCalledWith(0);
   });
 
-  it('holds Unified, Split and Wrap in one View menu; Split is disabled with its reason where the stack lacks the room', async () => {
+  it('holds Unified, Split and Wrap in one View menu; Split is greyed with its reason where the stack lacks the room', async () => {
     const user = userEvent.setup();
     const onMode = vi.fn();
     const onWrap = vi.fn();
@@ -196,7 +197,17 @@ describe('the toolbar’s controls', () => {
     rerender(<Toolbar {...props({ onMode, onWrap, mode: 'split', splitRoom: false })} />);
     await user.click(screen.getByRole('button', { name: 'View' }));
     const split = await screen.findByRole('menuitemradio', { name: 'Split' });
-    expect([split.getAttribute('aria-disabled'), split.title, split.getAttribute('aria-checked')]).toEqual(['true', 'Split needs a wider column', 'false']);
+    expect([split.getAttribute('aria-disabled'), accessibleDescription(split), split.getAttribute('aria-checked')]).toEqual(['true', 'Split needs a wider column', 'false']);
     expect(screen.getByRole('menuitemradio', { name: 'Unified' }).getAttribute('aria-checked')).toBe('true'); // what is drawn
+    // board ticket 815: greyed, Split stays in the menu's keyboard, its reason opening in its row; choosing it does
+    // nothing and keeps the menu open
+    await user.keyboard('{ArrowDown}{ArrowDown}');
+    expect(document.activeElement).toBe(split);
+    expect(split.querySelector('[data-row-note]')?.hasAttribute('data-open')).toBe(true);
+    onMode.mockClear();
+    await user.keyboard('{Enter}');
+    await user.click(split);
+    expect(onMode).not.toHaveBeenCalled();
+    expect(screen.getByRole('menu')).toBeTruthy();
   });
 });

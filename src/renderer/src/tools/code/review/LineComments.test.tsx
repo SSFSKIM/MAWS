@@ -38,6 +38,7 @@ import { REVIEW_SCOPE_BYTES_CAP } from './review-model';
 import { useReview } from './review-store';
 import { useBranchReads } from './branch-read';
 import { reviewTool } from './ReviewTool';
+import { accessibleDescription, accessibleText } from '../../../test-support/accessible-text';
 
 // The highlighter would load shiki's grammars; the diff paints plain until it is ready, which here is never.
 vi.mock('@git-diff-view/shiki', () => ({ getDiffViewHighlighter: () => new Promise(() => {}) }));
@@ -1084,7 +1085,8 @@ describe('comments on lines in Review', () => {
     const ELSE = 'c3d4e5f60718293a4b5c6d7e8f901234567890ab';
     const serve = () => act(() => useMachines.getState().applyRoster([{ ref: TEST_MACHINE, name: 'This Mac', local: true, state: 'up', since: T0, generation: 0, capabilities: ['rl2.git-reads'] }]));
     const openOn = (commit: string) => act(() => void panelHost.addTool('review', { appSessionId: A, params: { scope: 'commit', commit } }));
-    const onCommitWords = () => [...document.querySelectorAll<HTMLElement>('[data-review-unplaced-words="on-commit"]')].map((each) => each.textContent);
+    // the sentence's drawn words: the hash button's description (its full hash, board ticket 815) is hidden, not drawn
+    const onCommitWords = () => [...document.querySelectorAll<HTMLElement>('[data-review-unplaced-words="on-commit"]')].map((each) => accessibleText(each));
     const commitButton = () => document.querySelector<HTMLButtonElement>('[data-review-unplaced] [data-review-unplaced-commit]');
     afterEach(() => useMachines.setState({ roster: 'unread', machines: new Map(), loaded: new Set() }));
 
@@ -1126,6 +1128,7 @@ describe('comments on lines in Review', () => {
           expect(sectionOf('src/report.ts') !== null).toBe(present);
           expect(onCommitWords()).toEqual(['This comment is on commit a1b2c3d.']);
           expect(commitButton()?.textContent).toBe('a1b2c3d');
+          expect(accessibleDescription(commitButton()!)).toMatch(/^a1b2c3d[0-9a-f]{33}$/); // the full hash
           expect(unplacedRows()).toHaveLength(1);
           expect(unplacedRows()[0].textContent).toContain('Quote only where a comma is.');
           expect(within(unplacedRows()[0]).getByRole('button', { name: 'Remove comment' })).toBeTruthy();

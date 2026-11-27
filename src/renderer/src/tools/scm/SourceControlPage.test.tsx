@@ -6,6 +6,7 @@
 import { QueryClientProvider } from '@tanstack/react-query';
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { accessibleDescription } from '../../test-support/accessible-text';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { MachineState } from '@shared/ipc/schema/machines';
@@ -65,12 +66,13 @@ function mount(appSessionId: AppSessionId = LOCAL, visible = true) {
 
 const part = (name: string) => document.querySelector<HTMLElement>(`[data-scm-part="${name}"]`);
 const parts = () => [...document.querySelectorAll<HTMLElement>('[data-scm-part]')].map((el) => el.dataset.scmPart);
-// What a person reads in an element: its text pieces in order, a space between blocks and pieces, spaces collapsed
+// What a person reads in an element: its text pieces in order, a space between blocks and pieces, spaces collapsed; a
+// hidden piece (a tip's description, board ticket 815) is not read
 function text(el: Element | null | undefined): string | null {
   if (!el) return null;
   const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
   const pieces: string[] = [];
-  for (let node = walker.nextNode(); node; node = walker.nextNode()) pieces.push(node.textContent ?? '');
+  for (let node = walker.nextNode(); node; node = walker.nextNode()) if (!node.parentElement?.closest('[hidden]')) pieces.push(node.textContent ?? '');
   return pieces.join(' ').replace(/\s+/g, ' ').trim();
 }
 const commitRows = () => [...(part('commits')?.querySelectorAll<HTMLButtonElement>('[data-scm-commit]') ?? [])];
@@ -320,8 +322,12 @@ describe('the commit list and its rows (frames’ S1, S2, S12; S13’s row)', ()
     await waitFor(() => expect(commitRows()).toHaveLength(4));
     const row = screen.getByRole('button', { name: 'Open commit 0002bbb in Review' });
     expect(row).toBe(commitRows()[1]);
-    expect(row.title).toContain('Ada Example');
-    expect(row.title).toContain(shaOf(2));
+    // board ticket 815: the author, the date and the full hash are its description and its tip, which focus opens
+    expect(accessibleDescription(row)).toContain('Ada Example');
+    expect(accessibleDescription(row)).toContain(shaOf(2));
+    act(() => row.focus());
+    expect((await screen.findByRole('tooltip')).textContent).toContain(shaOf(2));
+    act(() => row.blur());
     fireEvent.click(row);
     expect(review.created.map((init) => init.params)).toEqual([{ scope: 'commit', commit: shaOf(2) }]);
     const user = userEvent.setup();
@@ -662,6 +668,9 @@ describe('the pull request (S5, S6, S10; frames’ S11)', () => {
     main.state.scm = signedOut;
     mount(REMOTE);
     await waitFor(() => expect(lines()).toEqual(['GitHub CLI not signed in on berth-mini · Sign in']));
+    // board ticket 815: the CLI's own words are the sentence's tip and description, the sentence taking Tab for them
+    const sentence = part('pr')!.querySelector<HTMLElement>('[data-scm-pr-line] [tabindex="0"]')!;
+    expect([text(sentence), accessibleDescription(sentence)]).toEqual(['GitHub CLI not signed in on berth-mini', 'gh auth status: not logged in']);
     cleanup();
     queryClient.clear();
     servesRemote({ rights: ['spawn'] });

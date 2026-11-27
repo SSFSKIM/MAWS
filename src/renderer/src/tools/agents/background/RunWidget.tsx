@@ -20,6 +20,7 @@ import { useTicker } from '../subagents/shared';
 import { AGENT_TOOL_IDS } from '../tool-ids';
 import type { BackgroundHandle } from './BackgroundTool';
 import { StopButton, StopError } from './TaskRows';
+import { Tip } from '../../../ui/tip';
 import { PendingRun, PhasesPending, RunBadge, runLine } from './run-parts';
 
 const EMPTY_GRAPH = emptyGraph();
@@ -222,6 +223,8 @@ function AgentRow({ agent, onOpenAgent }: { agent: RunAgent; onOpenAgent: (agent
       </span>
     </span>
   );
+  // board ticket 815: why a row without an agent opens nothing, its label's tip and description, the label taking Tab
+  const closed = agent.state === 'queued' ? BACKGROUND_COPY.notStarted : BACKGROUND_COPY.noTranscript;
   return (
     <tr data-run-agent={agent.key} className="h-6">
       <td data-part="label" className="truncate py-0.5 text-left">
@@ -230,9 +233,11 @@ function AgentRow({ agent, onOpenAgent }: { agent: RunAgent; onOpenAgent: (agent
             {label}
           </button>
         ) : (
-          <span title={agent.state === 'queued' ? BACKGROUND_COPY.notStarted : BACKGROUND_COPY.noTranscript} className="block">
-            {label}
-          </span>
+          <Tip content={closed} description={closed}>
+            <span tabIndex={0} className="block rounded-sm outline-accent focus-visible:outline-2">
+              {label}
+            </span>
+          </Tip>
         )}
       </td>
       <td data-part="model" className="truncate py-0.5 text-left text-fg-muted" title={agent.model ?? undefined}>

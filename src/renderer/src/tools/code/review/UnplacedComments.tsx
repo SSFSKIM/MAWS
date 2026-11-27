@@ -16,6 +16,7 @@ import { UNPLACED_ORDER, UNPLACED_WORDS } from './comment-place';
 import { COMMIT_HASH_BUTTON, openCommit } from './open-commit';
 import { RemoveComment, type UnplacedComment } from './LineComments';
 import { reviewLayout } from './measure';
+import { Tip } from '../../../ui/tip';
 
 /** How many rows the list shows before it scrolls inside the row under the toolbar. */
 export const UNPLACED_ROWS_SHOWN = 3;
@@ -103,7 +104,8 @@ function groupsOf(name: string, own: readonly UnplacedComment[]): SentenceGroup[
   return [...groups.values()];
 }
 
-// "This comment is on commit <sha7>.", the short hash a button that opens the commit at the comment's file.
+// "This comment is on commit <sha7>.", the short hash a button that opens the commit at the comment's file; the full
+// hash its tip and its description (board ticket 815).
 function OnCommit({ appSessionId, commit, path }: { appSessionId: AppSessionId; commit: string; path: string | undefined }) {
   const words = UNPLACED_WORDS['on-commit'](commit);
   const short = commit.slice(0, 7);
@@ -111,9 +113,11 @@ function OnCommit({ appSessionId, commit, path }: { appSessionId: AppSessionId; 
   return (
     <>
       {words.slice(0, at)}
-      <button type="button" data-review-unplaced-commit="" title={commit} className={COMMIT_HASH_BUTTON} onClick={() => openCommit(appSessionId, commit, path)}>
-        {short}
-      </button>
+      <Tip content={commit} description={commit}>
+        <button type="button" data-review-unplaced-commit="" className={COMMIT_HASH_BUTTON} onClick={() => openCommit(appSessionId, commit, path)}>
+          {short}
+        </button>
+      </Tip>
       {words.slice(at + short.length)}
     </>
   );

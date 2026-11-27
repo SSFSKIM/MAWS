@@ -103,8 +103,8 @@ function subagents(): SubagentsView | null {
       requestCards: agent.querySelectorAll('[data-request-card]').length,
       relay: {
         label: text(agent.querySelector('[data-key-sink="composer"] label')),
-        disabled: box?.disabled ? box.placeholder : null,
-        tooltip: box?.title || null,
+        disabled: box?.disabled || box?.readOnly ? box.placeholder : null, // greyed: disabled, or read-only keeping Tab for its tip (board ticket 815)
+        tooltip: box ? describedBy(box) : null, // its tip, its description at all times (board ticket 815)
         pending: agent.querySelector('[data-part="relay-line"]') ? text(agent.querySelector('[data-part="relay-line"]')) : null,
       },
     };
