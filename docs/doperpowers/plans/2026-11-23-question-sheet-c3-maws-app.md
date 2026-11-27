@@ -123,7 +123,7 @@ The composite fixes where each thing is and how it behaves; it does not fix appe
 | L2 | A call of many questions shows its first eight lines, then "N more". | the composite's writer | `SheetRow.tsx`, one constant |
 | L3 | The option's preview stands under the options below 560 px of card width and beside them from 560 px. With no option focused it is the picked option's, else the recommended one's, so the card does not move when focus leaves the options. | the owner; the second sentence the writer | `QuestionCard.tsx`, one constant and one rule |
 | L4 | An open sheet question does not raise the transcript's jump pill. The pill's visible words are "Needs you" ("Needs your input" is its accessible name, `NEEDS_INPUT` in `R/transcript/model/copy.ts`). | the owner | `placeWaiting` (§H) |
-| L5 | A stopped session's open sheet questions are items like any other: the session is in the sidebar's Needs you and counted in the dock badge. Its row there is drawn in a calm tone, as is the row of any session whose waiting items are all sheet questions. | the owner; the reach by the composite's writer | the items, `src/services/sheet/attention.ts`; the tone, `needsYou` in `R/attention/derive.ts` and `R/sidebar/NeedsYou.tsx` (§H) |
+| L5 | A stopped session's open sheet questions are items like any other: the session is in the sidebar's Needs you and counted in the dock badge. Its row there is drawn in a calm tone, as is the row of any session whose waiting items are all sheet questions; and so is every mark or count that stands for the same fact (the project row's, the toolbar's, and every other place that draws that aggregate): calm when everything it counts is a sheet question, today's tone as soon as one counted item is anything else (the composite's writer, 2026-11-27, on the built look). | the owner; the reach by the composite's writer | the items, `src/services/sheet/attention.ts`; the tone, `needsYou` in `R/attention/derive.ts` and `R/sidebar/NeedsYou.tsx` (§H) |
 | L6 | The words, as drawn and as the writer settled them. | the frames; the writer | §I's lists, in `R/sheet/copy.ts` and `R/transcript/model/copy.ts` |
 
 **Settled by the composite's writer where the drawing showed a gap** (2026-11-24; the first three are in the composite's §8 and §8.1 at the parent pin):
@@ -134,7 +134,8 @@ The composite fixes where each thing is and how it behaves; it does not fix appe
 - The side column's tool is titled "Sheet", with its count: today's ask sheet is titled "Questions" and both live until the flip.
 - A call that both adds and revises reads, in its head line, "Asked a question, revised q5". A refused entry's line shows its entry's number where an id would stand, so the "Not done" note can be matched to it.
 - A card refused as stale carries the "Updated" badge and its note.
-- In "Waiting for you", where the card is too narrow for a subagent's line (its mark, the question, "from <agent>", its age), "from <agent>" gives way before the question does.
+- In "Waiting for you", where the card is too narrow for a subagent's line (its mark, the question, "from <agent>", its age), "from <agent>" gives way before the question does, whole or not at all: where the line cannot hold it whole beside at least the question's first twenty characters and the age, it leaves the line and stays in the line's accessible name and title (the composite's writer, 2026-11-27, on the built look).
+- The card the side sheet opens at shows where the keyboard is: a card's root draws the app's focus outline (the accent outline the sheet's buttons use) whenever the root itself holds focus, which only the open-at request and the keyboard's own moves cause, so a pointer click inside a card draws none (the composite's writer, 2026-11-27; X5, so C4's page has it too).
 
 **What each drawing milestone builds to match.** The tokens and the app's own classes named here are the drawing's; a milestone's executor has the frames before it and builds to them.
 
@@ -784,6 +785,8 @@ State, like Progress. Three lists: the sentences of the composite, as it stands 
 2. §8.1, "opens with a head line saying what the call did ("Asked 3 questions")". Incomplete for the other calls. Proposed addition, from your settlement and the frames: "A call that revised reads "Revised q5", one that did both "Asked a question, revised q5", one that only withdrew "Withdrew q6" and has no lines; past eight lines the rest stand behind "N more"; a refused entry's line shows its entry's number where an id would stand, and "Not asked"."
 3. §8.1, on the "Waiting for you" card: "one line per open question, "from <agent>" when a subagent asked". Proposed addition, from your settlement: "where the card is too narrow, "from <agent>" gives way before the question does."
 4. X2 as read at the pin: `sheet put`'s results are `{ key, state: 'queued' }` or the bridge's verdict under its own name (`applied`), not `SheetSent`s; MAWS reads an act's fate from the model's `sent` only. And sminos's `show` at `2594002af` copies `id` and `target` from any queued inbox line that has them, which the show schema's closed queued variants refuse; MAWS projects by kind (reported for C2).
+
+5. X5, for C4: a question card's root draws the app's focus outline whenever the root itself holds focus (the open-at request; the keyboard's moves), and none for a pointer click inside it (the writer's ruling of 2026-11-27, built in C3b's look wave).
 
 **For the owner, through you.**
 
