@@ -54,6 +54,7 @@ const REFUSED = new Set([4401, 4403]); // not known, refused or late; unpaired w
 
 export interface LiveDeps {
   url: string; // ws://sheet.localhost:<port>/live
+  origin: string; // the tab's own location.origin, which the server's MAC must cover
   pairing(): StoredPairing | null;
   onPaired(): void;
   onReady?(sessions: SheetSummary[], door: DoorState): void; // a snapshot
@@ -104,7 +105,7 @@ export function connect(deps: LiveDeps): Live {
       const message = typeof data === 'string' ? parsed(data) : null;
       if (message === null) return giveUp();
       if (step === 'proof') {
-        if (message.t !== 'proof' || typeof message.mac !== 'string' || !macsEqual(message.mac, macOf(key, pairing.id, nonce))) return giveUp();
+        if (message.t !== 'proof' || typeof message.mac !== 'string' || !macsEqual(message.mac, macOf(key, deps.origin, pairing.id, nonce))) return giveUp();
         proven = pairing;
         step = 'paired';
         here.send(JSON.stringify({ t: 'credential', credential: pairing.credential }));

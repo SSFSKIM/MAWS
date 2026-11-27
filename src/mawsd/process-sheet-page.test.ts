@@ -441,7 +441,7 @@ describe('the server’s proof (T28) and the live connection (Acceptance 11, “
     expect(tab.frames).toEqual([]);
     const once = nonce();
     tab.send({ t: 'hello', v: 1, id: browser.id, nonce: once });
-    expect(await tab.next(0)).toEqual({ t: 'proof', mac: macOf(browser.credential, browser.id, once) });
+    expect(await tab.next(0)).toEqual({ t: 'proof', mac: macOf(browser.credential, browser.id, once, port) });
     tab.send({ t: 'credential', credential: browser.credential });
     expect(await tab.next(1)).toEqual({ t: 'paired' });
     expect(await tab.next(2)).toEqual({ t: 'unavailable', why: 'no-service' }); // this suite's sheets are none
@@ -484,7 +484,7 @@ describe('the server’s proof (T28) and the live connection (Acceptance 11, “
     const once = nonce();
     const macs = [await proofOf(a.id, once), await proofOf(a.id, nonce()), await proofOf(b.id, once)];
     expect(new Set(macs).size).toBe(3);
-    expect(macs[2]).toBe(macOf(b.credential, b.id, once));
+    expect(macs[2]).toBe(macOf(b.credential, b.id, once, port));
   });
 
   it('closes an unknown id with 4401, a credential sent first with 1008, a late credential, and a wrong one with 4401', async () => {

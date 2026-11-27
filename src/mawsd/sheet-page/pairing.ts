@@ -42,7 +42,7 @@ export type Exchange = { ok: true; id: string; credential: string } | { ok: fals
 export interface Pairing {
   mint(): { code: string; expiresAt: string }; // voids the code before it
   exchange(typed: string, userAgent: string): Exchange;
-  prove(id: string, nonce: string): string | null; // the MAC of §L for a browser it knows; null for one it does not
+  prove(id: string, nonce: string, origin: string): string | null; // the MAC of §L for a browser it knows, under the page's origin it serves; null for one it does not
   check(credential: string): PairedBrowser | null; // constant time over the kept hashes; touches lastSeenAt by the grain
   seen(id: string): boolean; // whether the browser is still paired (known and not idle 90 days); a live connection's use, touched by the grain
   list(): BrowserList;
@@ -192,11 +192,11 @@ export function createPairing(deps: PairingDeps): Pairing {
       return { ok: true, id, credential: bytes.toString('base64url') };
     },
 
-    prove(id, nonce) {
+    prove(id, nonce, origin) {
       if (!readable()) return null;
       const browser = browsers.find((kept) => kept.id === id);
       if (browser === undefined || !alive(browser)) return null;
-      return createHmac('sha256', browser.proof).update(`${PROOF_MAC_LABEL}\n${id}\n${nonce}`).digest('base64url');
+      return createHmac('sha256', browser.proof).update(`${PROOF_MAC_LABEL}\n${origin}\n${id}\n${nonce}`).digest('base64url');
     },
 
     check(credential) {

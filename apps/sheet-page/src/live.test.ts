@@ -7,6 +7,7 @@ import { macOf, proofKeyOf } from './proof';
 const ID = '0a1b2c3d';
 const CREDENTIAL = Buffer.alloc(32, 7).toString('base64url');
 const KEY = proofKeyOf(CREDENTIAL);
+const ORIGIN = 'http://sheet.localhost:47590';
 
 class Scripted implements LiveSocket {
   readyState = 0;
@@ -57,6 +58,7 @@ let heard: unknown[];
 const live = () =>
   connect({
     url: 'ws://sheet.localhost:47590/live',
+    origin: ORIGIN,
     pairing: () => stored,
     onPaired: () => void (paired += 1),
     onState: (state) => void states.push(state),
@@ -80,7 +82,7 @@ beforeEach(() => {
 afterEach(() => vi.useRealTimers());
 
 const last = () => sockets.at(-1)!;
-const proofFor = (socket: Scripted) => ({ t: 'proof', mac: macOf(KEY, ID, socket.hello().nonce) });
+const proofFor = (socket: Scripted) => ({ t: 'proof', mac: macOf(KEY, ORIGIN, ID, socket.hello().nonce) });
 
 describe('the opening', () => {
   it('says nothing before the socket opens, then the hello: its browser’s id and a fresh nonce', () => {
@@ -108,9 +110,10 @@ describe('the opening', () => {
   });
 
   const refusedOpenings: [string, (socket: Scripted) => void][] = [
-    ['a MAC under another key', (socket) => socket.say({ t: 'proof', mac: macOf(proofKeyOf(Buffer.alloc(32, 9).toString('base64url')), ID, socket.hello().nonce) })],
-    ['a MAC for another nonce (a recorded proof)', (socket) => socket.say({ t: 'proof', mac: macOf(KEY, ID, Buffer.alloc(32, 1).toString('base64url')) })],
-    ['a MAC for another browser', (socket) => socket.say({ t: 'proof', mac: macOf(KEY, 'ffffffff', socket.hello().nonce) })],
+    ['a MAC under another key', (socket) => socket.say({ t: 'proof', mac: macOf(proofKeyOf(Buffer.alloc(32, 9).toString('base64url')), ORIGIN, ID, socket.hello().nonce) })],
+    ['a MAC for another nonce (a recorded proof)', (socket) => socket.say({ t: 'proof', mac: macOf(KEY, ORIGIN, ID, Buffer.alloc(32, 1).toString('base64url')) })],
+    ['a MAC for another browser', (socket) => socket.say({ t: 'proof', mac: macOf(KEY, ORIGIN, 'ffffffff', socket.hello().nonce) })],
+    ['a MAC made for the origin of another port', (socket) => socket.say({ t: 'proof', mac: macOf(KEY, 'http://sheet.localhost:47591', ID, socket.hello().nonce) })],
     ['a proof with no MAC', (socket) => socket.say({ t: 'proof' })],
     ['paired, with no proof before it', (socket) => socket.say({ t: 'paired' })],
     ['paired and ready, with no proof before them', (socket) => (socket.say({ t: 'paired' }), socket.say({ t: 'ready', v: 1, sessions: [], door: {} }))],

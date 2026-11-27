@@ -121,6 +121,7 @@ export function App() {
     if (pairing === null || !awake) return;
     const live = connect({
       url: liveUrl(),
+      origin: location.origin, // what the server's proof must cover (T28)
       pairing: readPairing, // read as each socket opens: what is stored now
       onPaired: () => {
         setUnpaired(null);

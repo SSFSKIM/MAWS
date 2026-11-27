@@ -25,22 +25,25 @@ function paired() {
   return { pairing, id: answer.id, credential: answer.credential };
 }
 
+const ORIGIN = 'http://sheet.localhost:47590';
+
 describe('the proof, as the page makes it', () => {
-  it('is the MAC mawsd’s pairing makes for that browser and nonce', () => {
+  it('is the MAC mawsd’s pairing makes for that origin, browser and nonce', () => {
     const { pairing, id, credential } = paired();
     const key = proofKeyOf(credential);
     for (let i = 0; i < 3; i++) {
       const nonce = freshNonce();
-      expect(macOf(key, id, nonce)).toBe(pairing.prove(id, nonce));
+      expect(macOf(key, ORIGIN, id, nonce)).toBe(pairing.prove(id, nonce, ORIGIN));
     }
   });
 
-  it('differs for another nonce and for another credential', () => {
-    const { id, credential } = paired();
+  it('differs for another nonce, another credential and another origin', () => {
+    const { pairing, id, credential } = paired();
     const nonce = freshNonce();
-    const mac = macOf(proofKeyOf(credential), id, nonce);
-    expect(macOf(proofKeyOf(credential), id, freshNonce())).not.toBe(mac);
-    expect(macOf(proofKeyOf(randomBytes(32).toString('base64url')), id, nonce)).not.toBe(mac);
+    const mac = macOf(proofKeyOf(credential), ORIGIN, id, nonce);
+    expect(macOf(proofKeyOf(credential), ORIGIN, id, freshNonce())).not.toBe(mac);
+    expect(macOf(proofKeyOf(randomBytes(32).toString('base64url')), ORIGIN, id, nonce)).not.toBe(mac);
+    expect(pairing.prove(id, nonce, 'http://sheet.localhost:47591')).not.toBe(mac); // a daemon serving another port
   });
 
   it('takes a nonce of 32 random bytes in base64url, fresh each time', () => {

@@ -30,7 +30,7 @@ class Socket implements LiveSocket {
     this.onopen?.();
     const hello = JSON.parse(this.sent[0]!) as { id: string; nonce: string };
     const known = pairings.find((pairing) => pairing.id === hello.id)!;
-    this.onmessage?.({ data: JSON.stringify({ t: 'proof', mac: macOf(proofKeyOf(known.credential), hello.id, hello.nonce) }) });
+    this.onmessage?.({ data: JSON.stringify({ t: 'proof', mac: macOf(proofKeyOf(known.credential), 'http://x', hello.id, hello.nonce) }) });
     this.onmessage?.({ data: JSON.stringify({ t: 'paired' }) });
   }
 }
@@ -41,7 +41,7 @@ afterEach(() => void vi.useRealTimers());
 it('replacing the stored pairing cannot authorize a fetch on the old proof', async () => {
   let stored: typeof A | null = A;
   const sockets: Socket[] = [];
-  const live = connect({ url: 'ws://x/live', pairing: () => stored, onPaired: () => {}, onState: () => {}, open: () => (sockets.push(new Socket()), sockets.at(-1)!) });
+  const live = connect({ url: 'ws://x/live', origin: 'http://x', pairing: () => stored, onPaired: () => {}, onState: () => {}, open: () => (sockets.push(new Socket()), sockets.at(-1)!) });
   const fetch = vi.fn(async () => new Response(null, { status: 204 }));
   const api = createApi({ proven: () => live.proven(), fetch });
   sockets[0]!.serve([A, B]);

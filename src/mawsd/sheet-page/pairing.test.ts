@@ -40,9 +40,10 @@ function paired(pairing: Pairing, userAgent = CHROME_MAC): { id: string; credent
   return answer;
 }
 
-const macOf = (credential: string, id: string, nonce: string) => {
+const ORIGIN = 'http://sheet.localhost:47590';
+const macOf = (credential: string, id: string, nonce: string, origin = ORIGIN) => {
   const key = createHmac('sha256', Buffer.from(credential, 'base64url')).update(PROOF_KEY_LABEL).digest();
-  return createHmac('sha256', key).update(`${PROOF_MAC_LABEL}\n${id}\n${nonce}`).digest('base64url');
+  return createHmac('sha256', key).update(`${PROOF_MAC_LABEL}\n${origin}\n${id}\n${nonce}`).digest('base64url');
 };
 const nonce = () => randomBytes(32).toString('base64url');
 
@@ -192,7 +193,7 @@ describe('the credential and the browsers’ file (T9, T10)', () => {
     const { id, credential } = paired(pairing);
     clock += 90 * DAY;
     expect(pairing.check(credential)).toBeNull();
-    expect(pairing.prove(id, nonce())).toBeNull();
+    expect(pairing.prove(id, nonce(), ORIGIN)).toBeNull();
     expect(pairing.list()).toEqual({ browsers: [] });
   });
 
@@ -271,11 +272,11 @@ describe('the credential and the browsers’ file (T9, T10)', () => {
     rmSync(file);
     mkdirSync(file);
     const pairing = make();
-    expect(pairing.prove(id, nonce())).toBeNull();
+    expect(pairing.prove(id, nonce(), ORIGIN)).toBeNull();
     rmSync(file, { recursive: true });
     writeFileSync(file, kept);
     const once = nonce();
-    expect(pairing.prove(id, once)).toBe(macOf(credential, id, once));
+    expect(pairing.prove(id, once, ORIGIN)).toBe(macOf(credential, id, once));
   });
 
   it('labels a browser from a fixed set of words, so nothing a requester wrote reaches a terminal', () => {
@@ -359,12 +360,20 @@ describe('a revocation’s two moments (T10)', () => {
 });
 
 describe('the server’s proof (T28)', () => {
-  it('is the MAC over the label, the id and the nonce, under the key both sides derive from the credential', () => {
+  it('is the MAC over the label, the origin, the id and the nonce, under the key both sides derive from the credential', () => {
     const pairing = make();
     const { id, credential } = paired(pairing);
     const once = nonce();
-    expect(pairing.prove(id, once)).toBe(macOf(credential, id, once));
-    expect(make().prove(id, once)).toBe(macOf(credential, id, once)); // kept beside the hash
+    expect(pairing.prove(id, once, ORIGIN)).toBe(macOf(credential, id, once));
+    expect(make().prove(id, once, ORIGIN)).toBe(macOf(credential, id, once)); // kept beside the hash
+  });
+
+  it('differs for the origin of another port, so a daemon serving one port proves nothing to a tab of another', () => {
+    const pairing = make();
+    const { id, credential } = paired(pairing);
+    const once = nonce();
+    expect(pairing.prove(id, once, 'http://sheet.localhost:47591')).toBe(macOf(credential, id, once, 'http://sheet.localhost:47591'));
+    expect(pairing.prove(id, once, 'http://sheet.localhost:47591')).not.toBe(pairing.prove(id, once, ORIGIN));
   });
 
   it('differs for two nonces, and for one nonce under two browsers', () => {
@@ -372,11 +381,11 @@ describe('the server’s proof (T28)', () => {
     const a = paired(pairing);
     const b = paired(pairing);
     const once = nonce();
-    expect(pairing.prove(a.id, once)).not.toBe(pairing.prove(a.id, nonce()));
-    expect(pairing.prove(a.id, once)).not.toBe(pairing.prove(b.id, once));
+    expect(pairing.prove(a.id, once, ORIGIN)).not.toBe(pairing.prove(a.id, nonce(), ORIGIN));
+    expect(pairing.prove(a.id, once, ORIGIN)).not.toBe(pairing.prove(b.id, once, ORIGIN));
   });
 
   it('is null for a browser it does not know', () => {
-    expect(make().prove('0badc0de', nonce())).toBeNull();
+    expect(make().prove('0badc0de', nonce(), ORIGIN)).toBeNull();
   });
 });

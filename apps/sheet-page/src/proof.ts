@@ -1,7 +1,8 @@
 // The server's proof, as the tab checks it (§L's opening; T28, T21). The proof key is HMAC-SHA-256 under the
 // credential's 32 decoded bytes of PROOF_KEY_LABEL, which mawsd made at the exchange and the page makes again at each
-// load; the server proves itself with HMAC-SHA-256 under that key of PROOF_MAC_LABEL, the browser's id and the tab's
-// nonce, each on a line. With @noble/hashes and crypto.getRandomValues: crypto.subtle exists only in a secure context,
+// load; the server proves itself with HMAC-SHA-256 under that key of PROOF_MAC_LABEL, the page's origin, the browser's
+// id and the tab's nonce, each on a line: the origin the daemon serves, which the tab checks against its own, so a proof
+// made by a `mawsd` serving another port is worth nothing here. With @noble/hashes and crypto.getRandomValues: crypto.subtle exists only in a secure context,
 // and the page works wherever it loads. The labels are mawsd's (src/mawsd/sheet-page/pairing.ts).
 import { hmac } from '@noble/hashes/hmac';
 import { sha256 } from '@noble/hashes/sha2';
@@ -43,7 +44,7 @@ export function fromBase64url(value: string): Uint8Array {
 
 export const proofKeyOf = (credential: string): Uint8Array => hmac(sha256, fromBase64url(credential), text.encode(PROOF_KEY_LABEL));
 
-export const macOf = (key: Uint8Array, id: string, nonce: string): string => base64url(hmac(sha256, key, text.encode(`${PROOF_MAC_LABEL}\n${id}\n${nonce}`)));
+export const macOf = (key: Uint8Array, origin: string, id: string, nonce: string): string => base64url(hmac(sha256, key, text.encode(`${PROOF_MAC_LABEL}\n${origin}\n${id}\n${nonce}`)));
 
 export const freshNonce = (): string => base64url(crypto.getRandomValues(new Uint8Array(32)));
 

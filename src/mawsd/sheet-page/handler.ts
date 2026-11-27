@@ -24,7 +24,7 @@ import type { Duplex } from 'node:stream';
 import { WebSocketServer, type RawData, type WebSocket } from 'ws';
 import type { SpineState } from '../spine-seam';
 import { admit } from './checks';
-import { isRefusal, refusal, refusalBytes, refusalHeaders, STANDING_HEADERS, type Refusal } from './headers';
+import { isRefusal, pageOrigin, refusal, refusalBytes, refusalHeaders, STANDING_HEADERS, type Refusal } from './headers';
 import { createPairing, type BrowserList } from './pairing';
 import { createSheetRoutes, isSheetRoute } from './sheet-routes';
 import { unavailableWhy, type SheetAccess } from './sheets';
@@ -268,7 +268,7 @@ export async function createSheetPageHandler(deps: HandlerDeps): Promise<SheetPa
       if (connection.step === 'hello') {
         const { t, v, id, nonce } = message;
         if (t !== 'hello' || v !== 1 || typeof id !== 'string' || !BROWSER_ID.test(id) || typeof nonce !== 'string' || !NONCE.test(nonce)) return closeWith(ws, CLOSE.unexpected, 'unexpected');
-        const mac = pairing.prove(id, nonce);
+        const mac = pairing.prove(id, nonce, pageOrigin(deps.port())); // the origin under the MAC: a proof is worth nothing to a tab of another port
         if (mac === null) return closeWith(ws, CLOSE.refused, 'not known');
         connection.browser = id;
         connection.step = 'credential';

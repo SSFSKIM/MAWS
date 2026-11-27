@@ -77,9 +77,9 @@ export function standing(answer: { headers: Record<string, string[]> }, port: nu
 }
 export const jsonOf = (answer: Answer) => JSON.parse(answer.body.toString('utf8')) as Record<string, unknown>;
 
-export const macOf = (credential: string, id: string, nonce: string) => {
+export const macOf = (credential: string, id: string, nonce: string, port: number) => {
   const key = createHmac('sha256', Buffer.from(credential, 'base64url')).update(PROOF_KEY_LABEL).digest();
-  return createHmac('sha256', key).update(`${PROOF_MAC_LABEL}\n${id}\n${nonce}`).digest('base64url');
+  return createHmac('sha256', key).update(`${PROOF_MAC_LABEL}\nhttp://sheet.localhost:${port}\n${id}\n${nonce}`).digest('base64url');
 };
 export const nonce = () => randomBytes(32).toString('base64url');
 
@@ -165,7 +165,7 @@ export async function pairedTab(port: number, browser: { id: string; credential:
   const tab = await Tab.open(port);
   const once = nonce();
   tab.send({ t: 'hello', v: 1, id: browser.id, nonce: once });
-  expect(await tab.next(0)).toEqual({ t: 'proof', mac: macOf(browser.credential, browser.id, once) });
+  expect(await tab.next(0)).toEqual({ t: 'proof', mac: macOf(browser.credential, browser.id, once, port) });
   tab.send({ t: 'credential', credential: browser.credential });
   expect(await tab.next(1)).toEqual({ t: 'paired' });
   return tab;
