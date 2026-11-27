@@ -14,7 +14,7 @@ export const RESUME_COPY = {
   more: (shown: number, all: number) => `${shown.toLocaleString('en-US')} of ${all.toLocaleString('en-US')}`, // the word cut (C159): the count
   archived: 'Archived',
   legend: { move: 'navigate', open: 'open', newTab: 'new tab', close: 'close' },
-  facts: { folder: 'Folder', branch: 'Branch', project: 'Project', lastActive: 'Last active', lastAnswer: 'Last answer', machine: 'Machine' /* P5 O7 M8 */ },
+  facts: { folder: 'Folder', worktree: 'Worktree' /* ticket 815 */, branch: 'Branch', project: 'Project', lastActive: 'Last active', lastAnswer: 'Last answer', machine: 'Machine' /* P5 O7 M8 */ },
   where: 'Where you left off',
   loading: 'Loading preview…',
   failed: 'Couldn’t load the preview.',
