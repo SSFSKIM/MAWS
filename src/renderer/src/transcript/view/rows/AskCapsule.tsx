@@ -46,7 +46,7 @@ function AnswerLine({ question, row }: { question: AskQuestion; row: AskRow }) {
       <span className="transcript-question-answer" data-answer={answer === undefined ? 'none' : ''}>
         {askAnswerCopy(answer)}
       </span>
-      {headed && <TouchFact block className="col-span-full">{question.question}</TouchFact>}
+      {headed && <TouchFact block>{question.question}</TouchFact>}
     </li>
   );
 }

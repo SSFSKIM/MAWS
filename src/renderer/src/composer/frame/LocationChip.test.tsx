@@ -22,6 +22,16 @@ describe('the location chip', () => {
     expect(within(popover).getByRole('list', { name: 'Additional directories' }).textContent).toBe('/work/extra');
   });
 
+  // board ticket 815: what the system tooltip said is the chip's description at all times, the tip open or not
+  it('is described by its path and its branch, and its note when there is one, with its tooltip closed', () => {
+    render(<LocationChip location={{ path: '/work/app', branch: 'main', note: null }} directories={[]} dirty={false} />);
+    expect(tooltip()).toBeNull();
+    expect(accessibleDescription(screen.getByRole('button', { name: 'Location /work/app' }))).toBe('/work/app · main');
+    cleanup();
+    render(<LocationChip location={{ path: '/work/app', branch: 'main', note: 'Session ended' }} directories={[]} dirty={false} />);
+    expect(accessibleDescription(screen.getByRole('button', { name: 'Location /work/app' }))).toBe('/work/app · main · Session ended');
+  });
+
   it('keeps a note it is given, a gate’s reason', () => {
     render(<LocationChip location={{ path: '', branch: null, note: 'Session ended' }} directories={[]} dirty={false} />);
     expect(accessibleDescription(screen.getByRole('button', { name: /^Location/ }))).toBe('Session ended');

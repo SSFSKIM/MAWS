@@ -41,6 +41,7 @@ export function LocationChip({ location, directories, dirty, onOpen }: LocationC
   const [open, setOpen] = useOpenWhileShown();
   const [copied, setCopied] = useState<string | null>(null);
   const { path, branch, note } = location;
+  const where = [`${path}${branch !== null ? ` · ${branch}` : ''}`, note].filter((part) => part).join(' · ');
   const copy = (text: string) => {
     void navigator.clipboard?.writeText(text);
     setCopied(text);
@@ -53,9 +54,9 @@ export function LocationChip({ location, directories, dirty, onOpen }: LocationC
         setOpen(next);
       }}
     >
-      {/* board ticket 815: the path, the branch and the note are the chip's tooltip, which keyboard focus opens; the note,
-          which neither the name nor the chip says, its description */}
-      <Tip content={[`${path}${branch !== null ? ` · ${branch}` : ''}`, note].filter((part) => part).join(' · ')} description={note}>
+      {/* board ticket 815: the path, the branch and the note are the chip's tooltip, which keyboard focus opens, and its
+          description at all times, as the system tooltip's words were */}
+      <Tip content={where} description={where}>
         <Popover.Trigger aria-label={`Location ${path}`} className={`${CHIP} shrink-0 font-mono`}>
           {/* Truncate the location as one label, never an empty project followed by an orphan separator and branch. */}
           <span className="truncate">{directoryName(path)}{branch !== null ? ` · ⎇ ${branch}` : ''}</span>

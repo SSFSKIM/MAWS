@@ -8,7 +8,7 @@
 // the top of the view until the first row, on a live session and on one that ended while the view was open, against
 // the recorded session's plane (`depth-player.ts`), whose snapshots can be cut short (the fake machine's recording fits
 // one snapshot). The column and the center share one subscription.
-import { revealEarlier } from './transcript-history';
+import { answerLine, revealEarlier } from './transcript-history';
 import type { Locator, Page } from '@playwright/test';
 import type { Step } from 'desk-hub/fake-machine';
 import type { JsonObject } from 'desk-hub/protocol';
@@ -116,7 +116,7 @@ test("the report: the marks and questions in view, one record line per stretch o
   await view.locator('[data-transcript-scroller]').evaluate((el) => { el.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: -200 })); el.scrollTo({ top: 0 }); });
   await expect(records(view).first()).toHaveText('› working record');
   await expect(view.locator(BASH_ROW)).toHaveCount(0); // the Bash call, folded
-  await expect(view).toContainText('Color→blue'); // its question (the ask mod's, answered) stays in view
+  await expect(answerLine(view, 'Color', 'blue').first()).toBeAttached(); // its question (the ask mod's, answered) stays in view
 
   await toggle(page, 'Transcript').click();
   await expect(toggle(page, 'Transcript')).toHaveAttribute('aria-pressed', 'true');
@@ -269,7 +269,7 @@ test('a marked response is drawn as its message while it streams, before its row
   const { fm, view } = await openSession(page, hub);
   const uuid = answerRow(fm);
   fm.step(fm.recording.steps.findIndex(isAnswerChunk(uuid, fm)) - fm.played); // up to the answer's first chunk
-  await expect(view).toContainText('Color→blue');
+  await expect(answerLine(view, 'Color', 'blue').first()).toBeAttached();
   // nothing marked yet: the turn draws whole, its Bash call too, a run of one reading the call's description
   await expect(view.locator(`${BASH_ROW} [data-run-of-one] > .transcript-cell-line`)).toHaveText("Wrote 'blue' to recorded.txt in the current directory");
   await expect(records(view)).toHaveCount(0);

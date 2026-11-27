@@ -601,6 +601,12 @@ button.transcript-glyph-overflow:hover { color: var(--fg); background: var(--bg-
 .transcript-question-arrow { color: var(--fg-faint); }
 .transcript-question-answer { min-width: 0; color: var(--fg-muted); overflow-wrap: anywhere; }
 .transcript-question-answer[data-answer="none"] { color: var(--fg-faint); }
+/* Board ticket 815's touch rule: the question a header's tip shows, drawn at rest under its line where nothing can point.
+   It takes the line's whole width without widening the line: inline-size containment keeps its words out of the
+   columns' sizing (spanning the arrow's max-content column, they would size it to the sentence), and its span reaches
+   a fourth, implicit column, an auto one, which alone takes the line's free width. A long token in it breaks as the
+   answer's does. */
+.transcript-question-line > [data-touch-fact] { grid-column: 1 / span 4; contain: inline-size; overflow-wrap: anywhere; }
 
 /* A pending request's slot: C7's card, or the placeholder */
 .transcript-slot { margin: 4px 0 10px; }

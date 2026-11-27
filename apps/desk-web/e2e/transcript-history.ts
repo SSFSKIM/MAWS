@@ -1,5 +1,17 @@
 import type { Locator } from '@playwright/test';
 
+const exactly = (text: string) => new RegExp(`^${text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`);
+/**
+ * A question's answer line drawn as "label→answer". The line's text is no read of it: the question a header's tip
+ * shows (board ticket 815) is in the line too, in the header's hidden description and in the fallback drawn under the
+ * line where nothing can point.
+ */
+export const answerLine = (scope: Locator, label: string, answer: string): Locator =>
+  scope
+    .locator('.transcript-question-line')
+    .filter({ has: scope.page().locator('.transcript-question-label', { hasText: exactly(label) }) })
+    .filter({ has: scope.page().locator('.transcript-question-answer', { hasText: exactly(answer) }) });
+
 /** UX1 preserves authored line breaks; seek from the top regardless of the initial or asynchronously loaded position. */
 export async function revealEarlier(view: Locator, target: Locator): Promise<void> {
   const scroller = view.locator('[data-transcript-scroller]').first();

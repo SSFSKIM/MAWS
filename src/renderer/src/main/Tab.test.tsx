@@ -309,7 +309,15 @@ describe('a file tab’s tooltip (U6e)', () => {
     cleanup();
     render(<Tab tab={sessionTab(A)} pane={0} domId="t-session" active stop onKeyDown={() => {}} />);
     const session = document.getElementById('t-session')!;
-    expect(session.getAttribute('title')).toBe(session.getAttribute('aria-label'));
+    // board ticket 815: the name is the system tooltip of the words it repeats, not of the whole tab, so the pin and the
+    // close glyph, whose tips are their own, show no other tooltip over them
+    expect(session.getAttribute('title')).toBeNull();
+    expect(session.querySelector('[title]')?.getAttribute('title')).toBe(session.getAttribute('aria-label'));
+    cleanup();
+    render(<Tab tab={{ ...sessionTab(A), pinned: true }} pane={0} domId="t-pinned" active stop onKeyDown={() => {}} />);
+    const pinned = document.getElementById('t-pinned')!;
+    expect(screen.getByRole('img', { name: 'Pinned' }).closest('[title]')).toBeNull();
+    expect(within(pinned).getByRole('button', { name: /^Close / }).closest('[title]')).toBeNull();
   });
 
   it('clips the stem of a long name and keeps its extension, so two names that differ only there stay apart', () => {

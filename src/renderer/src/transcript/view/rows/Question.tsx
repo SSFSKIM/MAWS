@@ -59,7 +59,7 @@ function QuestionLine({ question, answer }: { question: Question; answer: { text
       <span className="transcript-question-answer" data-answer={answer.given ? '' : 'none'}>
         {answer.text}
       </span>
-      {question.header && <TouchFact block className="col-span-full">{question.question}</TouchFact>}
+      {question.header && <TouchFact block>{question.question}</TouchFact>}
     </li>
   );
 }
