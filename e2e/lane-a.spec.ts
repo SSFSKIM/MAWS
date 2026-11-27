@@ -35,6 +35,7 @@ import { sidebarOf, sidebarRow } from './support/sidebar';
 import { FINISHED_TURN_LINE } from './support/turn-line'; // the word cut (T1)
 import { FAKE_SMINOS, asked, fixtureSession, rewriteState, seedRecord, stageOutcome, withdrawn } from '../test/support/sheet-records'; // the question sheet's C3 M4
 import { SHEET_WORDS } from '../src/renderer/src/sheet/copy'; // the question sheet's C3 M4
+import * as look from './support/sheet-look'; // the question sheet's C3 M6: the built look
 
 function invoke<N extends CommandName>(page: Page, name: N, input: CommandInput<N>): Promise<CommandResult<N>> {
   return page.evaluate(([n, i]) => window.maws.invoke(n as never, i as never), [name as string, input as unknown] as const) as Promise<CommandResult<N>>;
@@ -149,11 +150,12 @@ test.describe('lane A: a terminal session driven through its bridge', () => {
 
   // A launch over an engine store holding the session's transcript (one exchange, then the rows `more` gives after its
   // answer; or, UX wave U1c, the rows `seed` gives in their place), the session in the sidebar. The question sheet's C3
-  // M4: `opts` names the session's id (a sheet fixture's) and adds to the launch's environment, given the store.
+  // M4: `opts` names the session's id (a sheet fixture's) and adds to the launch's environment, given the store; M6:
+  // `also` adds more sessions' transcripts to the store, which the case finds by their engine ids.
   async function begin(
     more: (sid: string, cwd: string, after: string) => Record<string, unknown>[] = () => [],
     seed?: (sid: string, cwd: string) => Record<string, unknown>[],
-    opts: { sid?: string; env?: (store: StoreFixture) => Record<string, string> } = {},
+    opts: { sid?: string; env?: (store: StoreFixture) => Record<string, string>; also?: { sid: string; seed: (sid: string, cwd: string) => Record<string, unknown>[] }[] } = {},
   ): Promise<Case> {
     const repo = await ScratchRepo.create();
     const store = await StoreFixture.create();
@@ -166,6 +168,7 @@ test.describe('lane A: a terminal session driven through its bridge', () => {
       ...more(sid, repo.root, answer),
     ];
     const transcript = await store.addTranscript(repo.root, sid, rows.map((row) => JSON.stringify(row)));
+    for (const other of opts.also ?? []) await store.addTranscript(repo.root, other.sid, other.seed(other.sid, repo.root).map((row) => JSON.stringify(row))); // the question sheet's C3 M6
     const maws = await launchMaws({ env: { CLAUDE_CONFIG_DIR: store.configHome, ...opts.env?.(store) } });
     const { page } = maws;
     await expect(main(page)).toBeVisible({ timeout: 60_000 });
@@ -1868,26 +1871,12 @@ test.describe('lane A: a terminal session driven through its bridge', () => {
 
   // The question sheet's C3 M5 (the plan's M5 "Proves": the composite's G2.b and G2.f's row against the stand-in door):
   // the session's transcript holds the main agent's two calls of the `batch` record (q1 and q3; q2 is a subagent's), as
-  // the engine writes a call and its result, with invented words; the record is seeded beside it.
-  const sheetCallRecords = (sid: string, cwd: string): Record<string, unknown>[] => {
-    const ids = Array.from({ length: 6 }, () => randomUUID());
-    const base = { cwd, sessionId: sid, isSidechain: false, userType: 'external' };
-    const message = (uuid: string, content: unknown[]) => ({ id: `msg_${uuid.slice(0, 8)}`, type: 'message', role: 'assistant', model: 'claude-demo', content, stop_reason: 'tool_use', stop_sequence: null, usage: { input_tokens: 10, output_tokens: 20 } });
-    const call = (i: number, id: string, entry: Record<string, unknown>, at: string) => ({ ...base, type: 'assistant', uuid: ids[i], parentUuid: ids[i - 1], timestamp: at, message: message(ids[i]!, [{ type: 'tool_use', id, name: 'mcp__sminos__AskUserQuestion', input: { ask: [entry] } }]) });
-    const result = (i: number, id: string, text: string, at: string) => ({ ...base, type: 'user', uuid: ids[i], parentUuid: ids[i - 1], timestamp: at, message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: id, is_error: false, content: text }] } });
-    return [
-      userRecord(sid, cwd, ids[0]!, null, 'Set up the sign-in page.', T0),
-      call(1, 'toolu_01Auth0001', { question: 'Which auth method should the login use?', header: 'Auth method', options: [{ label: 'OAuth' }, { label: 'Passkeys' }, { label: 'Magic link' }] }, '2026-10-28T10:00:01.000Z'),
-      result(2, 'toolu_01Auth0001', 'Added q1.', '2026-10-28T10:00:02.000Z'),
-      call(3, 'toolu_01Empt0003', { question: 'What should the empty state say?', header: 'Empty state' }, '2026-10-28T10:00:03.000Z'),
-      result(4, 'toolu_01Empt0003', 'Added q3.', '2026-10-28T10:00:04.000Z'),
-      assistantRecord(sid, cwd, ids[5]!, ids[4]!, 'Two questions are on your sheet; going on with the layout.', '2026-10-28T10:00:05.000Z'),
-    ];
-  };
+  // the engine writes a call and its result, with invented words (e2e/support/sheet-look.ts's `sheetCallRecords`); the
+  // record is seeded beside it.
   const sheetLines = (row: Locator) => row.locator('[data-sheet-line]').evaluateAll((lines) => lines.map((line) => Array.from(line.children, (cell) => cell.textContent).filter((text) => text !== '').join(' | ')));
 
   test('the question sheet: a call’s row reads its lines with Open, which shows the side sheet at the question; an answer sent reads its receipt queued, a withdrawn question reads Withdrawn', async () => {
-    const c = await begin(undefined, sheetCallRecords, { sid: fixtureSession('batch'), env: sheetDoor() });
+    const c = await begin(undefined, look.sheetCallRecords, { sid: fixtureSession('batch'), env: sheetDoor() });
     seedRecord(c.maws.sminosHome, 'batch');
     await drive(c);
     const { page } = c;
@@ -1912,6 +1901,69 @@ test.describe('lane A: a terminal session driven through its bridge', () => {
     // G2.f's row: q3 withdrawn from the record, its line reads Withdrawn and offers no Open
     rewriteState(c.maws.sminosHome, c.sid, withdrawn('q3', '2026-11-23T09:06:00.000Z'));
     await expect.poll(() => sheetLines(rows.nth(1)), { timeout: 15_000 }).toEqual(['q3 | Empty state | → Withdrawn']);
+    expect(c.maws.consoleErrors()).toEqual([]);
+  });
+
+  // The question sheet's C3 M6, the built look (the plan's "The look" and M6; its pictures are the owner's first look at
+  // the built surfaces): each state the words rig's launch 17 photographs, reached by the same steps
+  // (e2e/support/sheet-look.ts), asserted, and attached as the rig would take it, at its window size in its light theme.
+  // No terminal: every session is one the engine store lists and nothing holds, so it reads stopped.
+  const lookDoorOf = (store: StoreFixture) => look.lookDoor(join(store.configHome, 'look-door'));
+  const attachLook = async (page: Page, name: string) => test.info().attach(name, { body: await look.lookShot(page), contentType: 'image/png' });
+
+  test('the question sheet’s built look: the calm Needs you row, the waiting card’s lines, the side sheet at a question, a carried draft, a refused Send’s note, an answer queued while stopped', async () => {
+    const c = await begin(undefined, look.sheetCallRecords, { sid: look.LOOK_SESSIONS.sheet, env: (store) => ({ MAWS_SMINOS_CLI: lookDoorOf(store).cli }) });
+    const { page, maws } = c;
+    const door = lookDoorOf(c.store); // the launch's own launcher, written again as it was
+    await look.asTheRigDraws(maws);
+    look.seedSheetRecord(maws.sminosHome);
+    await expect.poll(() => sheetItems(page, c.sid), { timeout: 15_000 }).toEqual(['q1', 'q2', 'q3']);
+    await look.closeNotices(page);
+
+    await look.calmRow(page, c.appId);
+    await attachLook(page, '2-needs-you-calm');
+    await look.showWaitingLines(page, c.appId);
+    await look.waitingLines(page);
+    await expect(sheetOf(page), 'nothing opened by itself').toHaveCount(0);
+    await attachLook(page, '6-waiting-card');
+    await look.openSheetAt(page, 'q2');
+    await look.sheetAt(page, 'q2');
+    await attachLook(page, '5-side-sheet');
+    await look.carryDraft(page, maws.sminosHome);
+    await look.carriedDraft(page);
+    await attachLook(page, '1-carried-draft');
+    await look.refusedSend(page, door);
+    await look.refusedNote(page);
+    expect(inboxLines(c), 'the refused Send appended nothing').toEqual([]);
+    await attachLook(page, '8-refused-send');
+    await look.queueAnswer(page, door);
+    await look.queuedStopped(page);
+    expect(inboxLines(c).map((l) => [l.kind, l.id, l.text])).toEqual([['answer', 'q3', look.Q3_ANSWER]]);
+    await attachLook(page, '9-queued-stopped');
+    expect(c.maws.consoleErrors()).toEqual([]);
+  });
+
+  test('the question sheet’s built look: a call’s row at rest with Open, the same row with its receipts, and the head lines of a revise, a call that did nothing and one refused', async () => {
+    const c = await begin(undefined, look.rowCallRecords, { sid: look.LOOK_SESSIONS.rows, env: (store) => ({ MAWS_SMINOS_CLI: lookDoorOf(store).cli }), also: [{ sid: look.LOOK_SESSIONS.forms, seed: look.formCallRecords }] });
+    const { page, maws } = c;
+    await look.asTheRigDraws(maws);
+    look.seedRowsRecord(maws.sminosHome);
+    await expect.poll(() => sheetItems(page, c.sid), { timeout: 15_000 }).toEqual(['q1', 'q2', 'q3']);
+    await look.closeNotices(page);
+
+    await look.openLookSession(page, c.appId);
+    await look.rowAtRest(page);
+    await attachLook(page, '3-row-at-rest');
+    look.closeRowsRecord(maws.sminosHome);
+    await look.rowReceipts(page);
+    await expect.poll(() => sheetItems(page, c.sid), { message: 'nothing waits once all three are closed' }).toEqual([]);
+    await attachLook(page, '4-row-receipts');
+
+    await expect.poll(async () => value(await invoke(page, 'session.list', {})).sessions.some((r) => r.engineSessionId === look.LOOK_SESSIONS.forms), { timeout: 20_000 }).toBe(true);
+    const forms = value(await invoke(page, 'session.list', {})).sessions.find((r) => r.engineSessionId === look.LOOK_SESSIONS.forms)!.appId;
+    await look.openLookSession(page, forms);
+    await look.rowForms(page);
+    await attachLook(page, '7-row-forms');
     expect(c.maws.consoleErrors()).toEqual([]);
   });
 });

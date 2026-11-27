@@ -14,15 +14,19 @@ export const fixtureSession = (name: string): string => (readJson(join(SHEET_FIX
 /**
  * A seeded record: a fixture's `before` record under `<home>/sheet/`, its inbox cut to the offset its `state.json`
  * records. A fixture's `before` holds the inbox lines its step is about to apply; copied whole, those answers would
- * already stand queued. Answers the record's session.
+ * already stand queued. `as` seeds it as another session's record (its directory and its `state.json`'s `session`), so
+ * one fixture can stand for two sessions of a launch. Answers the record's session.
  */
-export function seedRecord(home: string, name: string, side: 'before' | 'after' = 'before'): string {
-  const session = fixtureSession(name);
-  const from = join(SHEET_FIXTURES, name, side, 'sheet', session);
+export function seedRecord(home: string, name: string, side: 'before' | 'after' = 'before', as?: string): string {
+  const fixture = fixtureSession(name);
+  const session = as ?? fixture;
+  const from = join(SHEET_FIXTURES, name, side, 'sheet', fixture);
   const record = join(home, 'sheet', session);
   mkdirSync(join(home, 'sheet'), { recursive: true });
   cpSync(from, record, { recursive: true });
-  const { inbox } = readJson(join(record, 'state.json')) as { inbox: { offset: number } };
+  const state = readJson(join(record, 'state.json')) as { inbox: { offset: number }; session: string };
+  if (as !== undefined) writeFileSync(join(record, 'state.json'), JSON.stringify({ ...state, session }));
+  const { inbox } = state;
   try {
     truncateSync(join(record, 'inbox.jsonl'), inbox.offset);
   } catch (error) {
@@ -68,3 +72,31 @@ export const withdrawn = (id: string, at: string) => (state: StoredState): Store
   const { asker, header, question, revision } = state.questions.find((q) => q.id === id) as { asker: unknown; header?: string; question: string; revision: number };
   return { ...state, questions: state.questions.filter((q) => q.id !== id), closed: { ...state.closed, [id]: { asker, at, ...(header !== undefined && { header }), how: 'withdrawn', question, revision } } };
 };
+
+type Asker = 'main' | { agentId: string; name: string };
+type Stored = { id: string; asker: Asker; header?: string; question: string; revision: number; options: { label: string }[] };
+const take = (state: StoredState, id: string) => state.questions.find((q) => q.id === id) as unknown as Stored;
+const closing = (state: StoredState, id: string, entry: Record<string, unknown>): StoredState => {
+  const { asker, header, question, revision } = take(state, id);
+  return { ...state, questions: state.questions.filter((q) => q.id !== id), closed: { ...state.closed, [id]: { asker, ...(header !== undefined && { header }), question, revision, ...entry } } };
+};
+
+/** Every open question made the main conversation's, asked by the one call `callId` (a call that asked them together). */
+export const oneCall = (callId: string) => (state: StoredState): StoredState => ({ ...state, questions: state.questions.map((q) => ({ ...q, callId, asker: 'main' })) });
+
+/** An open question rewritten by its asker: its next revision, in new words. */
+export const revised = (id: string, question: string) => (state: StoredState): StoredState => ({
+  ...state,
+  questions: state.questions.map((q) => (q.id === id ? { ...q, question, revision: (q.revision as number) + 1 } : q)),
+});
+
+/** An open question answered with `picks` (its labels) and delivered: out of `questions`, into `closed` with its receipt. */
+export const closedAnswered = (id: string, picks: string[], key: string, at: string) => (state: StoredState): StoredState => {
+  const { options } = take(state, id);
+  const places = picks.map((pick) => options.findIndex((option) => option.label === pick) + 1);
+  return closing(state, id, { how: 'answered', at, key, places, receipt: picks.join(', ') });
+};
+
+/** An open question dismissed by the person and delivered: into `closed` as `dismissed`. */
+export const closedDismissed = (id: string, key: string, at: string) => (state: StoredState): StoredState => closing(state, id, { how: 'dismissed', at, key });
+

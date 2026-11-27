@@ -13,7 +13,7 @@
 //   WORDS_OUT=$HOME/maws-words/before pnpm shots:words
 //
 // which builds out/ (the harness variant: Settings › Org reads its seeded org through the harness build's main; every
-// window here is the product's, MAWS_HARNESS=0) and runs the sixteen launches, about 50 minutes (M1 added launches 6
+// window here is the product's, MAWS_HARNESS=0) and runs the seventeen launches, about 50 minutes (M1 added launches 6
 // to 9 and the `m1-` scenes: the Settings and Org states the word cut's M1 changes; M2 added launch 10 and the `m2-`
 // scenes: the conversation's and the message box's states its cut changes; M3 added launches 11 and 12 and the `m3-` scenes:
 // the panels beside the conversation, and the project Channel's folds; M4 added launch 14 and the `m4-` scenes: the
@@ -41,6 +41,12 @@
 //   WORDS_OUT=$HOME/maws-words/tc-after pnpm shots:words -g "the tool card retired"
 //
 // and on master, as below for the m scenes, into another folder (tc-before).
+//
+// The question sheet's C3 M6 (docs/doperpowers/plans/2026-11-23-question-sheet-c3-maws-app.md, "The look") added launch
+// 17 and the `qs-` scenes: the built look of the sheet's surfaces for the owner's first sight of them, the carried
+// draft's card and the calm Needs you row first. Master has no sheet, so the scenes have no before. One launch alone:
+//
+//   WORDS_OUT=$HOME/maws-words/qs WORDS_ONLY='qs-*' pnpm shots:words
 //
 // The `m1-` to `m5-` scenes are each their milestone's, so their "before" is this rig run against master's build: in a
 // clean checkout of master, `git checkout <this branch> -- e2e/words-shots.rig.ts e2e/support`, then the command above.
@@ -80,6 +86,7 @@ import { PerfSeam } from './support/document-scale';
 import { createDesign, DESIGN_FILES, editDesign, FRAMES, headerAction, threadsOf, toggleComments } from './support/design';
 import { closedPort, startBrowserServer } from './support/browser-server';
 import { ComputerUseJournal, CUA_JS } from './support/computer-use-replay'; // board ticket 852's launch
+import * as look from './support/sheet-look'; // the question sheet's launch
 import { closeSettings, closeSheet, importThrough, openImportSheet, profilesFile, sheetOf } from './support/browser-import-scene';
 import { buildChromeUserData } from '../test/support/chrome-profile';
 import { CHANNEL_FIXTURE_ENV, WORDS_CHANNEL_COUNTS, WORDS_CHANNEL_PROJECT, WORDS_CHANNEL_PROJECT_ID, wordsChannel, wordsChannelScenario } from './support/words-channel';
@@ -104,7 +111,7 @@ test.skip(!OUT, 'WORDS_OUT names the folder the captures go to');
 // box's; 'm3' one its M3 added for the panels beside the conversation; 'm4' one its M4 added for the window, the typed
 // dialogs and Customize; 'm5' one its M5 added for the library, an opened artifact and the editors. A folder is under
 // src/renderer/src, or from the repository's root when it starts with src/.
-type Meta = { id: string; title: string; how: string; state: string; folders: string[]; hover?: boolean; round?: 2 | 'm0' | 'm1' | 'm2' | 'm3' | 'm4' | 'm5' | 'rv' | 'tc' };
+type Meta = { id: string; title: string; how: string; state: string; folders: string[]; hover?: boolean; round?: 2 | 'm0' | 'm1' | 'm2' | 'm3' | 'm4' | 'm5' | 'rv' | 'tc' | 'qs' };
 const META: Meta[] = [];
 const results: { id: string; ok: boolean; error?: string; notes?: string[] }[] = [];
 const wanted = (id: string) => !ONLY || ONLY.has(id) || [...ONLY].some((o) => o.endsWith('*') && id.startsWith(o.slice(0, -1)));
@@ -117,6 +124,7 @@ const m4 = (meta: Omit<Meta, 'round'>): Meta => ({ ...meta, round: 'm4' });
 const m5 = (meta: Omit<Meta, 'round'>): Meta => ({ ...meta, round: 'm5' });
 const rv = (meta: Omit<Meta, 'round'>): Meta => ({ ...meta, round: 'rv' }); // board ticket 850, the report view repair
 const tc = (meta: Omit<Meta, 'round'>): Meta => ({ ...meta, round: 'tc' }); // board ticket 852, the tool card retired
+const qs = (meta: Omit<Meta, 'round'>): Meta => ({ ...meta, round: 'qs' }); // the question sheet's C3 M6, its built look
 
 // ---- scratch fixtures ------------------------------------------------------------------------------------------------
 const FIXED_DATE = '2026-09-20T09:00:00+00:00';
@@ -8141,6 +8149,108 @@ test('the word cut’s M5: the library’s Spaces, opened artifacts, the documen
         await inView(page.locator('[data-region="main"]').getByText(M5_WORDS.notFound, { exact: true }), 'the tab’s title');
       },
     });
+  } catch (error) {
+    stopped(error);
+  } finally {
+    await maws.cleanup();
+  }
+});
+
+// ======================================================================================================================
+// Launch 17 (the question sheet's C3 M6, the built look; docs/doperpowers/plans/2026-11-23-question-sheet-c3-maws-app.md,
+// "The look"): the sheet's surfaces as the owner first sees them built. Three sessions the engine store lists and nothing
+// runs, so each reads stopped; the door is the stand-in (test/support/fake-sminos-cli.mjs) behind sheet-look's launcher,
+// which runs it with this Node whatever PATH the shell has and refuses a Send on demand. Every scene reaches its state by
+// the steps of e2e/support/sheet-look.ts, which e2e:lane-a's two built-look cases take and assert:
+//   sheet   the pin's `batch` record (q1 and q3 the main conversation's, q2 the subagent reviewer's) beside the two calls
+//           that asked q1 and q3: Needs you, the waiting card, the side sheet at q2, q1's draft carried over its
+//           rewrite, q3's Send refused, then queued;
+//   rows    the same record seeded as its own and made one call's, beside that call: its row at rest, then its receipts;
+//   forms   a transcript alone: calls that added two questions, revised both, did nothing, and were refused whole.
+// The records are seeded when their scenes begin, as the cases seed theirs, so Needs you holds the one session the case's
+// picture holds. The scenes run in order and build on each other; a step that ran already leaves the state as it was.
+// ======================================================================================================================
+const QS_IDS = ['qs-needs-you-calm', 'qs-waiting-card', 'qs-side-sheet', 'qs-carried-draft', 'qs-refused-send', 'qs-queued-stopped', 'qs-row-rest', 'qs-row-receipts', 'qs-row-forms'];
+test('the question sheet: the calm Needs you row, the waiting card, the side sheet, a carried draft, a refused Send, the row’s lines and head lines', async () => {
+  test.setTimeout(600_000);
+  if (!QS_IDS.some(wanted)) return;
+  const repo = makeRepo('orbit');
+  const config = join(SCRATCH, 'claude-config-qs');
+  rmSync(config, { recursive: true, force: true });
+  const project = join(config, 'projects', repo.replace(/[^a-zA-Z0-9]/g, '-'));
+  mkdirSync(project, { recursive: true });
+  const SESSIONS = look.LOOK_SESSIONS;
+  for (const [sid, records] of [[SESSIONS.sheet, look.sheetCallRecords], [SESSIONS.rows, look.rowCallRecords], [SESSIONS.forms, look.formCallRecords]] as const) {
+    writeFileSync(join(project, `${sid}.jsonl`), `${records(sid, repo).map((row) => JSON.stringify(row)).join('\n')}\n`);
+  }
+  trust(config);
+  const door = look.lookDoor(join(SCRATCH, 'sheet-door'));
+  door.refuse(false);
+  const usage = usageFixture();
+  const userData = join(SCRATCH, 'profile-qs');
+  rmSync(userData, { recursive: true, force: true });
+  mkdirSync(userData, { recursive: true });
+  const stopped = (error: unknown) => {
+    launchStopped('launch 17', QS_IDS, error);
+    throw error;
+  };
+  const maws = await launchMaws({ userData, prepare: noGh, env: BASE_ENV({ CLAUDE_CONFIG_DIR: config, MAWS_CLAUDE_USAGE_DIR: usage, PATH: NO_GH_PATH, MAWS_SMINOS_CLI: door.cli }) }).catch(stopped);
+  const { page } = maws;
+  try {
+    await size(maws);
+    await light(page);
+    value(await invoke(page, 'settings.set', { gateway: { defaultRoute: 'direct' } })); // no relay in the run
+    const keys = Object.keys(SESSIONS) as (keyof typeof SESSIONS)[];
+    const sid: Partial<Record<keyof typeof SESSIONS, string>> = {};
+    await expect.poll(async () => {
+      const { sessions } = value(await invoke(page, 'session.list', {}));
+      for (const key of keys) sid[key] = sessions.find((s) => s.engineSessionId === SESSIONS[key])?.appId ?? '';
+      return keys.every((key) => sid[key]);
+    }, { timeout: 30_000, message: 'the sheet’s sessions listed' }).toBe(true);
+    const items = async (engine: string) => value(await invoke(page, 'attention.list', undefined)).filter((item) => item.id.startsWith(`sheet:${engine}:`)).length;
+    await dismissToasts(page);
+    const FOLDERS = ['sheet', 'tools/sheet', 'request-card', 'attention', 'sidebar', 'transcript/view/rows', 'transcript/model'];
+    const meta = (id: string, title: string, how: string, state: string, folders = FOLDERS) => qs({ id, title, how: `${how} (launch 17)`, state, folders });
+
+    // ---- the sheet session: its record seeded now, as the case seeds it ------------------------------------------------
+    look.seedSheetRecord(maws.sminosHome);
+    await expect.poll(() => items(SESSIONS.sheet), { timeout: 15_000, message: 'the sheet session’s three questions waiting' }).toBe(3);
+    await shot(page, meta('qs-needs-you-calm', 'Needs you, a session whose waiting items are all sheet questions', 'The sheet session’s record seeded; no session opened yet', 'The sidebar’s Needs you row of the stopped session: its mark in the calm info tone, where every row today uses the warning tone', ['attention', 'sidebar']), async () => {
+      await reset(page);
+    }, { check: () => look.calmRow(page, sid.sheet!) });
+    await shot(page, meta('qs-waiting-card', 'The “Waiting for you” card with the sheet’s question lines', 'The sheet session opened, its cards shown', 'Three lines, each the calm question mark, the sentence that asks and its age; the subagent’s with “from reviewer”; nothing opened in the side column', ['request-card', 'attention', 'panel']), async () => {
+      await look.showWaitingLines(page, sid.sheet!);
+    }, { check: () => look.waitingLines(page) });
+    await shot(page, meta('qs-side-sheet', 'The side sheet open at a question', 'The waiting card’s q2 line chosen', 'The side column’s Sheet tab with the session’s three cards, the keyboard on q2’s card (the subagent’s), one Send'), async () => {
+      await look.showWaitingLines(page, sid.sheet!);
+      await look.openSheetAt(page, 'q2');
+    }, { check: () => look.sheetAt(page, 'q2') });
+    await shot(page, meta('qs-carried-draft', 'A question card whose question was rewritten while a draft stood', 'In the side sheet, Passkeys picked on q1; then q1 rewritten by its asker (the record’s next revision)', 'q1’s card marked Updated, its rewritten question, the pick drawn as carried (a dashed edge, muted), “You wrote this before the question changed.” with “Keep my answer”; Send counts nothing'), async () => {
+      await look.ensureSheet(page, sid.sheet!);
+      await look.carryDraft(page, maws.sminosHome);
+    }, { check: () => look.carriedDraft(page) });
+    await shot(page, meta('qs-refused-send', 'A Send the door refused', 'q3 answered in its text field and sent while the door refuses the line', 'The note at the sheet’s head, “Not sent:” and the door’s reason, with its close; the drafts kept and Send offered again'), async () => {
+      await look.ensureSheet(page, sid.sheet!);
+      await look.refusedSend(page, door);
+    }, { check: () => look.refusedNote(page) });
+    await shot(page, meta('qs-queued-stopped', 'An answer queued while the session is stopped', 'The note closed; the same answer sent again, the door taking it', 'q3’s card reading its answer back, “Queued. The session is stopped and gets this when it resumes.”, Take back and Edit'), async () => {
+      await look.ensureSheet(page, sid.sheet!);
+      await look.queueAnswer(page, door);
+    }, { check: () => look.queuedStopped(page) });
+
+    // ---- the rows session ----------------------------------------------------------------------------------------------
+    look.seedRowsRecord(maws.sminosHome);
+    await expect.poll(() => items(SESSIONS.rows), { timeout: 15_000, message: 'the rows session’s three questions waiting' }).toBe(3);
+    await shot(page, meta('qs-row-rest', 'A sheet call’s row at rest', 'The rows session opened: one call that asked three questions, its record beside it', 'The head line “Asked 3 questions”, and under it, 19 px in, a line per question: its id, its header, the sentence that asks, Open', ['transcript/view/rows', 'transcript/model']), async () => {
+      await look.openLookSession(page, sid.rows!);
+    }, { check: () => look.rowAtRest(page) });
+    await shot(page, meta('qs-row-receipts', 'The same row with its receipts', 'The rows session; its record then holds q1 answered OAuth, q2 dismissed, q3 withdrawn', 'The lines as receipts: “q1 Auth method → OAuth”, “q2 Migration → Dismissed”, “q3 Empty state → Withdrawn”, no Open', ['transcript/view/rows', 'transcript/model']), async () => {
+      await look.openLookSession(page, sid.rows!);
+      look.closeRowsRecord(maws.sminosHome);
+    }, { check: () => look.rowReceipts(page) });
+    await shot(page, meta('qs-row-forms', 'The head lines of a revise, a call that did nothing and one refused', 'The forms session opened (a transcript alone, no record)', 'Four rows: “Asked 2 questions” whose lines read Revised below, “Revised q5, q6”, “Nothing done” with its Not done note, “Did not change the sheet” with the engine’s refusal', ['transcript/view/rows', 'transcript/model']), async () => {
+      await look.openLookSession(page, sid.forms!);
+    }, { check: () => look.rowForms(page) });
   } catch (error) {
     stopped(error);
   } finally {
