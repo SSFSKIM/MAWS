@@ -233,6 +233,7 @@ export function startSpine(deps: SpineDeps): SpineRoot {
         dispatch: hosts.dispatch,
         emit: bus.emit,
         register: bus.register,
+        intercept: bus.intercept, // review finding 7 (obs 4): a mode set the engine answered out of auto answers auto mode unavailable
         fallbackFile: join(profile, 'attention.json'),
         seenNow: (id) => indexSource.seenNow(id), // the ruling (2026-10-30): an error a client shows as it arrives is seen, durably
         handingOver: () => hosts.handoverState?.('engine-host')?.state === 'draining', // O16 panel 1: a live handover keeps them

@@ -7,7 +7,8 @@
 // approvals (the summary string is the contract), and `held_peer_message` from the status's held messages. Error-like
 // items retire when the session's next human turn
 // starts (a prompt read back from disk included) or the session is stopped, each retiring what came before it, and
-// `auto_mode_unavailable` also when the status says the session's mode left auto; an archive (`session.forgotten`, or an
+// `auto_mode_unavailable` also once the session's mode is out of auto (a status moving off auto, the first confirmed
+// status after a restore, or a `session.setPermissionMode` the engine answered in another mode); an archive (`session.forgotten`, or an
 // archive exit) retires everything. The owner's ruling (2026-10-30; it replaces E11 F2b's "ended with an error" fact):
 // an `error` is raised only when it is newer than the last time the session was seen (`seenAt`, the unread rule's
 // last-seen mark), and it retires for good once the session is seen after it (`seen`) or the item is acknowledged
@@ -29,6 +30,8 @@ import type { SessionEvent } from '@shared/graph/events';
 import type { AppSessionId, AttentionId, RequestId, ToolUseId } from '@shared/graph/ids';
 import type { EngineSessionStatus } from '@shared/engine/status';
 import type { CommandInput, CommandName, CommandOutput, EventName, EventPayload } from '@shared/ipc/schema';
+import type { IpcError } from '@shared/ipc/errors';
+import { HostCommandError } from '@shared/host/runtime';
 import { messageLine } from '@shared/owner/preview';
 import type { AttentionStore } from './store';
 import type { Settling } from '../work'; // P5 O3-D M2
@@ -91,7 +94,7 @@ const count = (n: number, noun: string) => `${n} ${n === 1 ? noun : `${noun}s`}`
 export const interruptedSummary = (approvals: number, questions = 0) =>
   `Session interrupted, ${[approvals > 0 || questions === 0 ? count(approvals, 'approval') : null, questions > 0 ? count(questions, 'question') : null].filter((part) => part !== null).join(' and ')} lost`;
 
-type Dispatch = (owner: 'engine-host', name: 'session.pendingRequest', input: CommandInput<'session.pendingRequest'>) => Promise<{ ok: true; value: unknown } | { ok: false; error: { message: string } }>;
+type Dispatch = <N extends 'session.pendingRequest' | 'session.setPermissionMode'>(owner: 'engine-host', name: N, input: CommandInput<N>) => Promise<{ ok: true; value: unknown } | { ok: false; error: IpcError }>;
 
 export interface AttentionServiceDeps {
   onState: HostSupervisor['onState'];
@@ -100,6 +103,9 @@ export interface AttentionServiceDeps {
   store: AttentionStore;
   emit: <N extends EventName>(name: N, payload: EventPayload<N>) => unknown; // the services bus's validated emit to every client
   register: <N extends CommandName>(name: N, handler: (input: CommandInput<N>) => CommandOutput<N> | Promise<CommandOutput<N>>) => void; // the services bus's register
+  // the services bus's intercept: `session.setPermissionMode` passes through here on its way to the engine host, so an
+  // answer in a mode other than auto retires the session's auto-mode items (absent: only statuses retire them)
+  intercept?: <N extends CommandName>(name: N, handler: (input: CommandInput<N>) => Promise<CommandOutput<N>>) => () => void;
   log?: (message: string) => void;
   // The ruling (2026-10-30): the last time the session was seen, in ms; Infinity while a client shows it, null when MAWS
   // never has. An error raised at or before it was seen and is not raised. Absent: every error is unseen. A call may
@@ -140,7 +146,8 @@ interface SessionState {
   // retired live since this run started, per kind: the moment (ms) before which a persisted item of the kind stays retired
   retiredBefore: Map<AttentionItem['kind'], number>;
   apiError: string | null; // the main conversation's last assistant message, when it is the engine's API error envelope: its text
-  mode: EngineSessionStatus['permissionMode']['effective'] | null; // the effective permission mode its last status said; null before one
+  mode: EngineSessionStatus['permissionMode']['effective'] | null; // the effective mode its last confirmed status said (a ready process's); null before one
+  unreconciled: Set<AttentionId>; // auto-mode items restored from the store that no confirmed status of this run has answered yet
 }
 
 export const PERSIST_RETRY_MS = 5_000;
@@ -155,7 +162,7 @@ export function startAttentionService(deps: AttentionServiceDeps): AttentionServ
 
   const stateOf = (id: AppSessionId): SessionState => {
     let state = sessions.get(id);
-    if (!state) sessions.set(id, (state = { broker: [], derived: new Map(), owner: [], laneA: [], signature: '[]', retiredBefore: new Map(), apiError: null, mode: null }));
+    if (!state) sessions.set(id, (state = { broker: [], derived: new Map(), owner: [], laneA: [], signature: '[]', retiredBefore: new Map(), apiError: null, mode: null, unreconciled: new Set() }));
     return state;
   };
   const merged = (state: SessionState): AttentionItem[] => [...state.broker, ...state.derived.values(), ...state.owner, ...state.laneA.map((e) => e.item)];
@@ -241,6 +248,7 @@ export function startAttentionService(deps: AttentionServiceDeps): AttentionServ
   const derive = (id: AppSessionId, state: SessionState, key: string, fields: Pick<AttentionItem, 'kind' | 'summary' | 'sessionId' | 'createdAt'> & Partial<AttentionItem>) => {
     const itemId = `${id}:${fields.kind}:${key}` as AttentionId;
     const existing = state.derived.get(itemId);
+    state.unreconciled.delete(itemId); // a restored item this run saw on the stream is this run's: the move rule answers it
     if (existing) {
       // the same occurrence, still open, reads as derived now (the ruling, 2026-10-30: one an earlier build stored in the
       // generic words takes the API error's when the transcript replays it); its state and moments stay
@@ -316,10 +324,19 @@ export function startAttentionService(deps: AttentionServiceDeps): AttentionServ
     const state = stateOf(id);
     // The owner's ruling (UX wave, obs 4): auto mode unavailable asks the session to leave auto mode; once its effective
     // mode leaves auto (the card's Switch to Manual mode, or any other way), the item has been answered and retires then,
-    // not at the next prompt. Only a move off auto: a status merely in another mode is no answer to it.
-    const mode = status.permissionMode.effective;
-    if (state.mode === 'auto' && mode !== 'auto') retireDerived(state, AUTO_MODE_ANSWERED);
-    state.mode = mode;
+    // not at the next prompt. Only a move off auto: a status merely in another mode is no answer to a denial this run saw.
+    // An item restored from the store predates every status of this run, which remembers no mode from the last: the
+    // first confirmed status answers it in another mode, and in auto leaves it to the move (review finding 7). Only a
+    // ready process's mode is the engine's: before, the status echoes the spec's.
+    if (status.process === 'ready') {
+      const mode = status.permissionMode.effective;
+      if (mode !== 'auto') {
+        if (state.mode === 'auto') retireDerived(state, AUTO_MODE_ANSWERED);
+        for (const itemId of state.unreconciled) state.derived.delete(itemId);
+      }
+      state.unreconciled.clear();
+      state.mode = mode;
+    }
     const keep = new Set<string>();
     for (const held of status.heldPeerMessages) {
       const key = held.messageUuid ?? `${held.from}:${held.lane}`;
@@ -339,6 +356,20 @@ export function startAttentionService(deps: AttentionServiceDeps): AttentionServ
     deps.onEvent('session.eventBatch', ({ appSessionId, events }) => onEvents(appSessionId, events)),
     deps.onEvent('session.status', ({ appSessionId, status }) => onStatus(appSessionId, status)),
     deps.onEvent('session.forgotten', ({ appSessionId }) => retireSession(appSessionId)),
+    // Review finding 7 (obs 4): a mode change the engine answered in another mode than auto (the card's remedy, the
+    // composer's mode menu) answers the session's auto-mode items standing at its answer, whatever the statuses said
+    // before, a session never seen in auto included; a denial raised after it is not its.
+    deps.intercept?.('session.setPermissionMode', async (input) => {
+      const answer = await deps.dispatch('engine-host', 'session.setPermissionMode', input);
+      if (!answer.ok) throw new HostCommandError(answer.error);
+      const value = answer.value as CommandOutput<'session.setPermissionMode'>;
+      const state = sessions.get(input.appSessionId as AppSessionId);
+      if (state && value.error === null && value.effective !== 'auto') {
+        retireDerived(state, AUTO_MODE_ANSWERED);
+        changed(input.appSessionId as AppSessionId, state);
+      }
+      return value;
+    }) ?? (() => {}),
     deps.onState('engine-host', (host) => {
       if (host.state === 'ready' || deps.handingOver?.()) return; // a handover's successor republishes what it adopts
       // A dead host cannot retire its broker or release held messages. Durable errors stay.
@@ -396,6 +427,10 @@ export function startAttentionService(deps: AttentionServiceDeps): AttentionServ
         // a failure the transcript replayed before the load is the same occurrence: the stored acknowledgement stands
         const live = state.derived.get(item.id);
         if (live && !(live.state === 'pending' && item.state !== 'pending')) continue;
+        // review finding 7: a status this run confirmed before the read already answers an auto-mode item in another
+        // mode; with none yet, the first confirmed one will
+        if (item.kind === 'auto_mode_unavailable' && state.mode !== null && state.mode !== 'auto') continue;
+        if (item.kind === 'auto_mode_unavailable' && state.mode === null) state.unreconciled.add(item.id);
         restoredIds.add(item.id);
         state.derived.set(item.id, item);
       }

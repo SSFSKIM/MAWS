@@ -119,9 +119,10 @@ export const ENDPOINT_EVENTS: ReadonlySet<string> = new Set(['engine.prestart'])
 // P5 O17 M3: `mawsd`'s own signals to the engine host, refused from any forwarded caller
 const DAEMON_SIGNALS: ReadonlySet<string> = new Set(['host.attachment', 'host.browserWork']);
 // P5 O3-D M5 (D44(3)): the engine host's names the spine's session service intercepts in launch mode `index`
-// (src/services/sessions/index.ts's `session.answer`, service-register.ts's `session.rewind` and CONVERSATION_ACTS);
+// (src/services/sessions/index.ts's `session.answer`, service-register.ts's `session.rewind` and CONVERSATION_ACTS), and
+// the attention service's `session.setPermissionMode` (an answer out of auto answers auto mode unavailable, obs 4);
 // daemon-spine.test.ts pins it to what the spine registers.
-export const SPINE_ENGINE_INTERCEPTS: ReadonlySet<string> = new Set(['session.answer', 'session.bash', 'session.queue.promote', 'session.rewind', 'session.send', 'session.steer']);
+export const SPINE_ENGINE_INTERCEPTS: ReadonlySet<string> = new Set(['session.answer', 'session.bash', 'session.queue.promote', 'session.rewind', 'session.send', 'session.setPermissionMode', 'session.steer']);
 // D47: lane B's claimed act (`host.op`) carries one of them as its inner name; the session service intercepts it too.
 export function spineTakes(name: string, input: unknown): boolean {
   if (SPINE_ENGINE_INTERCEPTS.has(name)) return true;

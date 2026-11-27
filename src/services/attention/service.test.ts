@@ -52,6 +52,7 @@ function event(kind: string, payload: Record<string, unknown> = {}): SessionEven
 function setup(opts: { store?: FakeStore; dispatch?: AttentionServiceDeps['dispatch']; log?: (message: string) => void; seenAt?: AttentionServiceDeps['seenAt']; handingOver?: AttentionServiceDeps['handingOver'] } = {}) {
   const listeners = new Map<string, ((payload: unknown) => void)[]>();
   const handlers = new Map<string, (input: unknown) => unknown>();
+  const intercepts = new Map<string, (input: unknown) => unknown>();
   const states = new Set<(state: HostState) => void>();
   const changed: { appSessionId: string; items: AttentionItem[]; silent?: string[] }[] = [];
   const store = opts.store ?? new FakeStore();
@@ -70,6 +71,7 @@ function setup(opts: { store?: FakeStore; dispatch?: AttentionServiceDeps['dispa
       return true;
     }) as AttentionServiceDeps['emit'],
     register: ((name: CommandName, handler: (input: unknown) => unknown) => void handlers.set(name, handler)) as AttentionServiceDeps['register'],
+    intercept: ((name: CommandName, handler: (input: unknown) => unknown) => (intercepts.set(name, handler), () => void intercepts.delete(name))) as NonNullable<AttentionServiceDeps['intercept']>,
     log: opts.log ?? (() => {}),
     ...(opts.seenAt && { seenAt: opts.seenAt }),
     ...(opts.handingOver && { handingOver: opts.handingOver }),
@@ -77,7 +79,7 @@ function setup(opts: { store?: FakeStore; dispatch?: AttentionServiceDeps['dispa
   const fire = (name: EventName, payload: unknown) => listeners.get(name)?.forEach((l) => l(payload));
   const batch = (...events: SessionEvent[]) => fire('session.eventBatch', { appSessionId: APP, events });
   const last = () => changed.at(-1)?.items ?? [];
-  return { service, store, dispatch, handlers, changed, fire, batch, last, hostState: (state: HostState['state']) => states.forEach((listener) => listener({ state, pid: null, restarts: 1, revision: 2 })) };
+  return { service, store, dispatch, handlers, intercepts, changed, fire, batch, last, hostState: (state: HostState['state']) => states.forEach((listener) => listener({ state, pid: null, restarts: 1, revision: 2 })) };
 }
 
 describe('attention service merges broker items with the derived kinds', () => {
@@ -252,6 +254,121 @@ describe('attention service merges broker items with the derived kinds', () => {
     status('default');
     status('acceptEdits');
     expect(last().map((i) => i.kind)).toEqual(['auto_mode_unavailable']);
+  });
+
+  // Review finding 7 (obs 4): a run remembers no mode from the last one, so an item restored from the store is reconciled
+  // with the first status of this run that carries a mode the engine confirmed (a ready process's): another mode than
+  // auto answers it (the switch was made, before the restart or at the relaunch), auto keeps it waiting for a move off
+  // auto. A status before the engine confirmed its mode (the launch spec's, echoed while starting) says nothing.
+  describe('a restored auto_mode_unavailable item', () => {
+    const restoredDenial = () => item({ kind: 'auto_mode_unavailable', state: 'pending', id: `${APP}:auto_mode_unavailable:toolu_r` as never, summary: 'Auto mode unavailable: switch out of auto mode to continue', request: { requestId: null, toolUseId: 'toolu_r' as never, taskId: null, agentId: null } });
+    const statusOf = (fire: ReturnType<typeof setup>['fire'], effective: string, process = 'ready') =>
+      fire('session.status', { appSessionId: APP, status: { process, engineSessionId: SID, heldPeerMessages: [], permissionMode: { requested: effective, effective, refusal: null } } as unknown as EngineSessionStatus });
+
+    it('retires at the first confirmed status in another mode, and only a confirmed one', async () => {
+      const { service, store, fire, last } = setup({ store: new FakeStore([restoredDenial()]) });
+      await service.ready;
+      expect(last().map((i) => i.kind)).toEqual(['auto_mode_unavailable']);
+      statusOf(fire, 'auto', 'starting'); // the spec's mode, echoed before the engine answered
+      statusOf(fire, 'default', 'initializing');
+      expect(last().map((i) => i.kind)).toEqual(['auto_mode_unavailable']);
+      statusOf(fire, 'default');
+      expect(last()).toEqual([]);
+      await service.settled();
+      expect(store.sessions.get(APP)).toEqual([]);
+    });
+
+    it('stays while the first confirmed status reads auto, and retires when the mode then leaves auto', async () => {
+      const { service, fire, last } = setup({ store: new FakeStore([restoredDenial()]) });
+      await service.ready;
+      statusOf(fire, 'auto');
+      statusOf(fire, 'auto');
+      expect(last().map((i) => i.kind)).toEqual(['auto_mode_unavailable']);
+      statusOf(fire, 'default');
+      expect(last()).toEqual([]);
+    });
+
+    it('is not restored when this run already confirmed another mode before the store was read', async () => {
+      let release!: () => void;
+      const gate = new Promise<void>((resolve) => (release = resolve));
+      const store = new (class extends FakeStore {
+        override async list() {
+          await gate;
+          return super.list();
+        }
+      })([restoredDenial()]);
+      const { service, fire, last } = setup({ store });
+      statusOf(fire, 'default');
+      release();
+      await service.ready;
+      expect(last()).toEqual([]);
+      await service.settled();
+      expect(store.sessions.get(APP)).toEqual([]);
+    });
+
+    // The e2e's kept session (e2e/supervisor.spec.ts case (b)): a denial this run derives from the stream is this run's,
+    // under the move rule, even when the store held it too; and a denial raised after the reconciling status is never
+    // answered by it, nor by a later status that merely keeps another mode.
+    it('leaves a denial this run saw on the stream to the move rule, the same occurrence or a later one', async () => {
+      const { service, fire, batch, last } = setup({ store: new FakeStore([restoredDenial()]) });
+      await service.ready;
+      batch(event('tool.result', { toolUseId: 'toolu_r', denial: 'automode-unavailable' })); // the stored occurrence, read live
+      statusOf(fire, 'default');
+      expect(last().map((i) => i.id)).toEqual([`${APP}:auto_mode_unavailable:toolu_r`]);
+
+      const other = setup({ store: new FakeStore([restoredDenial()]) });
+      await other.service.ready;
+      statusOf(other.fire, 'default'); // answers the restored one
+      other.batch(event('tool.result', { toolUseId: 'toolu_n', denial: 'automode-unavailable' }));
+      statusOf(other.fire, 'default');
+      statusOf(other.fire, 'acceptEdits');
+      expect(other.last().map((i) => i.id)).toEqual([`${APP}:auto_mode_unavailable:toolu_n`]);
+    });
+  });
+
+  // Review finding 7 (obs 4): the card's remedy, or any mode change the person asks for, that the engine confirms in a mode
+  // other than auto answers the session's auto-mode items standing at its answer, whatever the statuses said before (a
+  // session never seen in auto included). The host's answer passes through as it came.
+  describe('a confirmed set_permission_mode', () => {
+    const answered = (value: unknown) => vi.fn(async () => ({ ok: true as const, value }));
+    const setMode = (intercepts: Map<string, (input: unknown) => unknown>, mode: string) => intercepts.get('session.setPermissionMode')!({ appSessionId: APP, mode });
+
+    it('in another mode retires the auto-mode items standing at its answer, and passes the answer on', async () => {
+      const dispatch = answered({ effective: 'default', refusal: null, error: null });
+      const { service, intercepts, batch, last } = setup({ dispatch });
+      await service.ready;
+      batch(event('turn.ended', { isError: true, terminalReason: 'model_error', result: 'x', resultText: null, isEchoReceipt: false, origin: 'human', errors: [] }), event('tool.result', { toolUseId: 'toolu_7', denial: 'automode-unavailable' }));
+      expect(await setMode(intercepts, 'default')).toEqual({ effective: 'default', refusal: null, error: null });
+      expect(dispatch).toHaveBeenCalledWith('engine-host', 'session.setPermissionMode', { appSessionId: APP, mode: 'default' });
+      expect(last().map((i) => i.kind)).toEqual(['error']);
+      batch(event('tool.result', { toolUseId: 'toolu_8', denial: 'automode-unavailable' })); // raised after the answer: not its
+      expect(last().map((i) => i.kind)).toEqual(['error', 'auto_mode_unavailable']);
+    });
+
+    it('retires nothing when the engine refused it, stayed in auto, or the host failed it (its error passes on intact)', async () => {
+      for (const value of [{ effective: 'auto', refusal: null, error: null }, { effective: 'default', refusal: null, error: 'Cannot set permission mode' }]) {
+        const { service, intercepts, batch, last } = setup({ dispatch: answered(value) });
+        await service.ready;
+        batch(event('tool.result', { toolUseId: 'toolu_7', denial: 'automode-unavailable' }));
+        expect(await setMode(intercepts, value.effective)).toEqual(value);
+        expect(last().map((i) => i.kind)).toEqual(['auto_mode_unavailable']);
+      }
+      const error = { code: 'host_unavailable', message: 'the engine host is restarting' };
+      const { service, intercepts, batch, last } = setup({ dispatch: vi.fn(async () => ({ ok: false as const, error })) as never });
+      await service.ready;
+      batch(event('tool.result', { toolUseId: 'toolu_7', denial: 'automode-unavailable' }));
+      await expect(setMode(intercepts, 'default')).rejects.toMatchObject({ name: 'HostCommandError', ipcError: error });
+      expect(last().map((i) => i.kind)).toEqual(['auto_mode_unavailable']);
+    });
+
+    it('answers a restored item too, and its intercept is released at the stop', async () => {
+      const { service, intercepts, last } = setup({ store: new FakeStore([item({ kind: 'auto_mode_unavailable', state: 'pending' })]), dispatch: answered({ effective: 'acceptEdits', refusal: null, error: null }) });
+      await service.ready;
+      await setMode(intercepts, 'acceptEdits');
+      expect(last()).toEqual([]);
+      service.stop();
+      expect(intercepts.has('session.setPermissionMode')).toBe(false);
+    });
   });
 
   // UX wave U3, O-34 (the U3a document, Acceptance 5): a failed task raises nothing, whether it ran in the background or in
