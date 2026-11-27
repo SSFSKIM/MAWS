@@ -48,19 +48,24 @@ const paste = (page: Page, id: string) =>
     data.items.add(new File([bytes], 'pasted.png', { type: 'image/png' }));
     element.dispatchEvent(new ClipboardEvent('paste', { clipboardData: data, bubbles: true, cancelable: true }));
   }, PNG);
-// An upload's answer held in the browser once mawsd has saved the image (CDP Fetch, at the response stage), until let go
-async function holdUploadAnswers(page: Page): Promise<{ held(): number; release(): Promise<void> }> {
+// Answers held in the browser once the server has answered (CDP Fetch, at the response stage), until let go; `stop`
+// lets every later one through
+async function holdAnswers(page: Page, urlPattern: string): Promise<{ held(): number; release(): Promise<void>; stop(): Promise<void> }> {
   const cdp = await page.context().newCDPSession(page);
   const held: string[] = [];
   cdp.on('Fetch.requestPaused', (event: { requestId: string }) => void held.push(event.requestId));
-  await cdp.send('Fetch.enable', { patterns: [{ urlPattern: '*/uploads', requestStage: 'Response' }] });
+  await cdp.send('Fetch.enable', { patterns: [{ urlPattern, requestStage: 'Response' }] });
   return {
     held: () => held.length,
     async release() {
       for (const requestId of held.splice(0)) await cdp.send('Fetch.continueResponse', { requestId });
     },
+    async stop() {
+      await cdp.send('Fetch.disable');
+    },
   };
 }
+const holdUploadAnswers = (page: Page) => holdAnswers(page, '*/uploads'); // after mawsd saved the image
 
 async function twoTabs(context: BrowserContext, page: Page, mawsd: Mawsd): Promise<[Page, Page]> {
   questionRecord(mawsd.home, S, [question(1), question(2), question(3)]);
@@ -153,6 +158,34 @@ test('a tab whose model is older than another tab’s leaves what the newer one 
   await expect(field(second, 'q1')).toHaveValue('reopened, and answered');
   await expect(card(second, 'q3')).toHaveCount(0);
   await expect(field(first, 'q4')).toHaveValue('on the new card');
+});
+
+test('a tab whose read answers before it hears of another tab’s writes writes only what its view changed of what it had, and leaves those writes alone', async ({ page, context, mawsd }) => {
+  await holdableStorage(context);
+  const [first, second] = await twoTabs(context, page, mawsd);
+  await card(first, 'q1').getByRole('button', { name: 'Dismiss' }).click();
+  for (const tab of [first, second]) await expect(tab.locator('[data-sheet-hidden="q1"]')).toBeVisible({ timeout: 20_000 });
+  // the second tab's next read answered and held, and it hears of no other tab's write until let go
+  const reads = await holdAnswers(second, `*/api/sheets/${S}`);
+  await hold(second, true);
+  // q2 revised under a new header: the second tab's read of it answers with q1 still hidden
+  const state = stateOf(mawsd.home, S);
+  writeState(mawsd.home, S, { ...state, questions: state.questions.map((entry) => (entry.id === 'q2' ? { ...entry, revision: 2, header: 'Harbour office' } : entry)) });
+  await until(() => reads.held() >= 1, 20_000, 'the second tab’s read of the change, answered');
+  // the first takes the dismissal back and drafts the reopened card
+  await first.locator('[data-sheet-hidden="q1"]').getByRole('button', { name: 'Take back' }).click();
+  await field(first, 'q1').fill('reopened, and answered');
+  await until(async () => (await draftOf(first, 'q1')) !== null, 10_000, 'the reopened card’s draft');
+  // the second tab's answer lands before it hears of those writes: its reconcile of q2 is written, A's draft is not touched
+  await reads.release();
+  await reads.stop();
+  await expect(card(second, 'q2')).toContainText('Harbour office', { timeout: 20_000 });
+  await second.waitForTimeout(1_000);
+  expect(JSON.parse((await draftOf(second, 'q1'))!)).toMatchObject({ draft: { text: 'reopened, and answered' } });
+  // and then it hears, reads again, and shows the reopened card with its draft
+  await hold(second, false);
+  await expect(field(second, 'q1')).toHaveValue('reopened, and answered', { timeout: 20_000 });
+  expect(JSON.parse((await draftOf(first, 'q1'))!)).toMatchObject({ draft: { text: 'reopened, and answered' } });
 });
 
 test('a Send held at the barrier keeps its stored keys through the other tab’s writes, and a reload sends those same keys again', async ({ browser }) => {

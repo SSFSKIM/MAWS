@@ -25,8 +25,7 @@
 // same object. A refusal deletes nothing here; only the person's Unpair does (credential.ts).
 import type { SheetLine } from '@shared/sheet/model';
 import type { QuestionDraft } from '@shared/sheet/words';
-import type { SheetModel } from '@shared/sheet/model';
-import { EMPTY_MEMORY, reconcile, type SentAct, type SheetMemory } from '../../../src/renderer/src/sheet';
+import { EMPTY_MEMORY, type SentAct, type SheetMemory } from '../../../src/renderer/src/sheet';
 import { CREDENTIAL_KEY, STORAGE_PREFIX } from './credential';
 
 type Kind = 'draft' | 'seen' | 'header' | 'act' | 'send';
@@ -165,13 +164,46 @@ export const madeElsewhere = (memory: SheetMemory): boolean => memory.sending?.a
  * question's entry only where `known` says the tab's model holds that question. Whether anything was written.
  */
 export function writeMemory(session: string, before: SheetMemory, after: SheetMemory, now: number = Date.now(), storage: Storage = localStorage, known: (question: string) => boolean = () => true): boolean {
+  return writeDiff(session, before, after, now, storage, known, false).wrote;
+}
+
+// An entry's value as the memory holds it, in the shape `writeDiff` stores it, or null where it holds none
+function shapeOf(kind: Kind, memory: SheetMemory, name: string): Record<string, unknown> | null {
+  if (kind === 'draft') return memory.drafts.has(name) ? { draft: memory.drafts.get(name) } : null;
+  if (kind === 'seen') return memory.seen.has(name) || memory.marked.has(name) ? { revision: memory.seen.get(name) ?? null, marked: memory.marked.has(name) } : null;
+  if (kind === 'header') return memory.headers.has(name) ? { header: memory.headers.get(name) } : null;
+  const act = memory.acts.find((entry) => entry.key === name);
+  return act ? { act } : null;
+}
+// A value written out with its keys in order, so two equal values read the same whoever built them
+const canonical = (value: unknown): string =>
+  JSON.stringify(value, (_, inner: unknown) =>
+    inner !== null && typeof inner === 'object' && !Array.isArray(inner) ? Object.fromEntries(Object.entries(inner as Record<string, unknown>).sort(([a], [b]) => (a < b ? -1 : 1))) : inner,
+  );
+
+// The difference between two memories, written. `guarded`: each entry only where storage still holds it as `before`
+// has it (one it already holds as `after` has it is left alone); any other is another tab's write, not yet adopted,
+// and is left and said (`conflict`). A guarded write is reconcile's, which never changes the Send the memory holds.
+function writeDiff(session: string, before: SheetMemory, after: SheetMemory, now: number, storage: Storage, known: (question: string) => boolean, guarded: boolean): { wrote: boolean; conflict: boolean } {
   let wrote = false;
+  let conflict = false;
+  const stillAsBefore = (kind: Kind, name: string) => {
+    if (!guarded) return true;
+    const stored = parsed(storage.getItem(keyOf(kind, session, name)));
+    const now = stored === null ? 'null' : canonical(Object.fromEntries(Object.entries(stored).filter(([field]) => field !== 'v' && field !== 'touchedAt')));
+    if (now === canonical(shapeOf(kind, after, name))) return false; // already so
+    if (now === canonical(shapeOf(kind, before, name))) return true;
+    conflict = true;
+    return false;
+  };
   const put = (kind: Kind, name: string, value: Record<string, unknown>) => {
+    if (!stillAsBefore(kind, name)) return;
     store(storage, keyOf(kind, session, name), JSON.stringify({ v: 1, touchedAt: now, ...value }));
     wrote = true;
   };
   const remove = (kind: Kind, name: string) => {
     if (kind !== 'act' && !known(name)) return; // a question newer than this tab's model: another tab's to keep
+    if (!stillAsBefore(kind, name)) return;
     storage.removeItem(keyOf(kind, session, name));
     wrote = true;
   };
@@ -205,7 +237,7 @@ export function writeMemory(session: string, before: SheetMemory, after: SheetMe
     else put('act', key, { act });
   }
 
-  if (before.sending === after.sending) return wrote;
+  if (before.sending === after.sending || guarded) return { wrote, conflict };
   const sends = sendsOf(storage, session);
   const entryOf = (attempt: string) => sends.find((send) => send.press === pressOf(attempt));
   const held = before.sending === null ? undefined : entryOf(before.sending.attempt);
@@ -223,14 +255,14 @@ export function writeMemory(session: string, before: SheetMemory, after: SheetMe
     pressedHere.delete(pressOf(before.sending.attempt));
     wrote = true;
   }
-  if (after.sending === null) return wrote;
+  if (after.sending === null) return { wrote, conflict };
   const { attempt, lines, state, note } = after.sending;
   const entry = again ? held : entryOf(attempt);
   const at = again || entry === undefined ? now : entry.at; // since its press, or its press again
   store(storage, entry?.key ?? keyOf('send', session, randomName()), JSON.stringify({ v: 1, touchedAt: now, press: pressOf(attempt), at, lines, state, note }));
   if (again) pressedHere.delete(pressOf(before.sending!.attempt));
   if (!attempt.startsWith(ELSEWHERE)) pressedHere.add(attempt);
-  return true;
+  return { wrote: true, conflict };
 }
 
 // A write that makes room when the store is full: the entries of the memory touched longest ago go first, never a
@@ -304,11 +336,16 @@ export function updateMemory(session: string, update: (current: SheetMemory) => 
 }
 
 /**
- * Writes what C3's `reconcile` against `model` changes of the memory as stored now, when `settled`: the model was read
- * after the last write of another tab this tab adopted. Until then the tab shows its reconcile and writes none of it.
+ * Writes what C3's `reconcile` changed of the memory a tab's view was made from (`snapshot`, the stored memory it read;
+ * `view`, its reconcile against the tab's model), when `settled`: that model was read after the last write of another
+ * tab this tab adopted. Each entry only where storage still holds it as the snapshot had it; one another tab changed
+ * since, and this tab has not yet adopted, is left, and `conflict` says so: the tab reads the model again.
  */
-export function writeReconciled(session: string, model: SheetModel, settled: boolean, options: Omit<MemoryUpdateOptions, 'base'> = {}): void {
-  if (settled) updateMemory(session, (current) => reconcile(current, model), options);
+export function writeReconciled(session: string, snapshot: SheetMemory, view: SheetMemory, settled: boolean, { storage = localStorage, now = Date.now(), target = globalThis, known = () => true }: Omit<MemoryUpdateOptions, 'base'> = {}): { conflict: boolean } {
+  if (!settled || snapshot === view) return { conflict: false };
+  const { wrote, conflict } = writeDiff(session, snapshot, view, now, storage, known, true);
+  if (wrote) target.dispatchEvent(Object.assign(new Event(CHANGED), { session }));
+  return { conflict };
 }
 
 /** A session's memory changed: in this tab, or in another (the storage event: `adopted`). */

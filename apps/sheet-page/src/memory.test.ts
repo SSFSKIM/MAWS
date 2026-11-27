@@ -253,7 +253,8 @@ describe('the stored memory (T19): one entry a thing', () => {
         { key: k2, state: 'stale', verdict: 'stale', kind: 'answer', at, id: 'q5', current: 2 },
       ],
     } as never);
-    writeReconciled(S, model, true, { storage: store, now: 3, target: new EventTarget() });
+    const snapshot = readMemory(S, store);
+    expect(writeReconciled(S, snapshot, reconcile(snapshot, model), true, { storage: store, now: 3, target: new EventTarget() })).toEqual({ conflict: false });
     const reloaded = readMemory(S, store);
     expect(reloaded.drafts.has('q4')).toBe(false); // answered: the draft that was sent is no longer the person's to send
     expect(reloaded.drafts.get('q5')?.text).toBe('the season notice'); // stale: back on its card
@@ -274,14 +275,44 @@ describe('the stored memory (T19): one entry a thing', () => {
     await Promise.resolve();
     sheets.adopted(S); // another tab wrote; its write is in storage, the model is not yet read again
     writeMemory(S, EMPTY_MEMORY, withDraft(EMPTY_MEMORY, 'q4', draft('from the other tab')), 1, storage);
-    writeReconciled(S, model, sheets.state().shown!.settled, { storage, now: 2, target: new EventTarget() });
+    const snapshot = readMemory(S, storage);
+    writeReconciled(S, snapshot, reconcile(snapshot, model), sheets.state().shown!.settled, { storage, now: 2, target: new EventTarget() });
     expect(readMemory(S, storage).seen.size).toBe(0); // shown, but not written
     await reads[1]!(model);
     await Promise.resolve();
     expect(sheets.state().shown!.settled).toBe(true);
-    writeReconciled(S, model, sheets.state().shown!.settled, { storage, now: 3, target: new EventTarget() });
+    const later = readMemory(S, storage);
+    writeReconciled(S, later, reconcile(later, model), sheets.state().shown!.settled, { storage, now: 3, target: new EventTarget() });
     expect([...readMemory(S, storage).seen.keys()]).toEqual(['q4']);
     expect(readMemory(S, storage).drafts.get('q4')?.text).toBe('from the other tab');
+  });
+
+  it('writes reconcile’s changes from the memory the view was made from, each entry only where storage still holds it: another tab’s write not yet adopted is left, and said', () => {
+    const store = testStorage();
+    const target = new EventTarget();
+    writeMemory(S, EMPTY_MEMORY, { ...EMPTY_MEMORY, headers: new Map([['q5', 'Notices']]), seen: new Map([['q5', 1]]) }, 1, store);
+    const snapshot = readMemory(S, store); // what tab B's view is made from
+    const modelB = sheetOf([{ ...NOTICES, revision: 2, header: 'Printed notices' }], { hidden: [{ id: 'q4', key: 'page-000000000000000000000000009' }] } as never); // q4 still hidden
+    // tab A, meanwhile, took the dismissal back and drafted q4; B has not adopted it
+    writeMemory(S, readMemory(S, store), withDraft(readMemory(S, store), 'q4', draft('reopened')), 2, store);
+    const view = reconcile(snapshot, modelB);
+    expect(writeReconciled(S, snapshot, view, true, { storage: store, now: 3, target })).toEqual({ conflict: false });
+    expect(readMemory(S, store).drafts.get('q4')).toEqual(draft('reopened')); // not B's to prune: it was never in B's view
+    expect(readMemory(S, store).headers.get('q5')).toBe('Printed notices');
+    expect([...readMemory(S, store).marked]).toEqual(['q5']);
+
+    // an entry another tab changed since the snapshot: left as it is, and the conflict said, so the tab reads again
+    const again = readMemory(S, store);
+    const revised = sheetOf([CLASH, { ...NOTICES, revision: 3, header: 'Notices for the season' }]); // read after B adopted q4's draft: q4 open again
+    writeMemory(S, readMemory(S, store), { ...readMemory(S, store), headers: new Map([['q5', 'Harbour notices']]) }, 4, store); // A's newer header
+    expect(writeReconciled(S, again, reconcile(again, revised), true, { storage: store, now: 5, target })).toEqual({ conflict: true });
+    expect(readMemory(S, store).headers.get('q5')).toBe('Harbour notices');
+    expect(readMemory(S, store).drafts.get('q4')).toEqual(draft('reopened'));
+
+    // one storage already holds as the view has it is no conflict
+    const same = readMemory(S, store);
+    const sameView = { ...same, headers: new Map([['q5', 'Harbour notices']]) };
+    expect(writeReconciled(S, { ...same, headers: new Map([['q5', 'Notices']]) }, sameView, true, { storage: store, now: 6, target })).toEqual({ conflict: false });
   });
 
   it('lands an update in its own session’s entries, read from the store as it is when applied', () => {

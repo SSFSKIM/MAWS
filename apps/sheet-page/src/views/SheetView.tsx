@@ -64,8 +64,12 @@ function Sheet({ model, fresh, settled, door, connection, host, outline, adopted
   const memory = reconcile(stored, model);
   const onMemory = (change: (current: SheetMemory) => SheetMemory) => update(change, against(model));
   useEffect(() => {
-    if (memory !== stored) writeReconciled(model.session, model, settled, { known: against(model).known });
-  }, [memory, stored, model, settled]);
+    if (memory === stored) return;
+    // what the view changed of the memory it was made from; an entry another tab changed since, not yet adopted, is
+    // left, and the model is read again
+    const { conflict } = writeReconciled(model.session, stored, memory, settled, { known: against(model).known });
+    if (conflict) adopted(model.session);
+  }, [memory, stored, model, settled, adopted]);
   useEffect(() => onMemoryChanged(model.session, (fromAnotherTab) => fromAnotherTab && adopted(model.session)), [model.session, adopted]);
   const [now, setNow] = useState(() => Date.now()); // moved on by the timer below; an older `now` only holds Send back until it fires
   const { text, until } = sendUnavailable({ connection, fresh, door, elsewhereSince, now });
