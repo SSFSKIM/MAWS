@@ -233,3 +233,113 @@ probe tree, features.json (the feature-gate cache), the runs' scratch roots in r
 logs), the raw journals in out/, the discarded trials in discarded/, run.sh and batch.sh); no process, tmux server or
 /tmp folder of the round remains. This laptop: ~/.local/share/question-sheet-c5-probe/ (the scratch sminos copy and
 the two readers used to tabulate).
+
+================================================================================================================
+M1's branch on the wire (M2's sitting; docs/doperpowers/plans/2026-11-27-question-sheet-c5-maws-run.md, §S "The wire
+sitting"). DRAFT: the cells below were recorded at doperpowers question-sheet-c5 7040fbae5 (M1, the ring marked);
+the recordings committed beside this, and the heads named here, are replaced by one run of the whole set on the head
+M1's pull request merges. P6 to P8 and the first P9 were recorded at 34e1942ca and stand as the first sitting found
+them.
+
+How it runs. scenarios/pass3/qsheet-c5-m1.mjs, through qsheet-c5.mjs with QC5_CELLS=m1 (QC5_ONLY=<cells> for some).
+M1's sminos as it is, no patch, under MAWS's launch line as src/engine-host/launch.ts builds it: the fixed flags,
+--await-initialize, the direct tell's mod by --plugin-dir before sminos's, buildEnvironment's constants (SMNS_MEMBER the
+scenario's pid, the engine's parent; MAWS_LANE=B; the sdk-ts entrypoint), CLAUDE_CODE_ENABLE_FUNCTION_HOOKS=1,
+MAWS_QUESTION_SHEET=2:<session id>, and the sminos home in --settings' env. initialize is the app's. The stand-in
+model (stub-api.mjs), nothing spent. Engine 2.1.331. Each cell's work folder, HOME, configuration directory, sminos
+home and debug file are in one scratch root under /tmp; the scenario refuses any other place. Every recording's
+containment note lists no instruction file, every engine exited 0 (W6's first process is killed), and no process of a
+cell outlived it. Fixtures fixtures/qsheet/qsheet-c5-m1-<cell>.jsonl; the tests are fixtures.test.mjs's "question
+sheet C5 M2" cases. The ring below is the sentence followed by its mark, U+2060 (F33); "the sentence" is it without.
+
+P6. The home named only in --settings' env reaches sminos's mod, step and bridge from the first start: before any
+prompt the record (sheet/<id>/state.json), the bridge's socket and the command hooks' project log were under the named
+home, and $HOME/.claude/sminos never existed (p6). F4 as written.
+
+P7. 2:<id> takes the sheet at a new session, a --resume and a --fork-session (the fork named by its own new id): the
+request offers mcp__sminos__AskUserQuestion with the sheet's schema (ask, withdraw) and not the built-in, and the record
+is made (p7-new, -resume, -fork). The bare id ("names no form") and the plugin of 40b79a7d1 given 2:<id> ("names
+another session") give the built-in only and no record (p7-bare, p7-old). system/init lists the name AskUserQuestion
+in every case, the sheet's included (the carriers round's b1 too): the model's request, not system/init, says which
+tool it is offered.
+
+P8. One request tells, before any prompt: mcp_status, asked after initialize resolved, names a server sminos, source
+plugin, with the tool AskUserQuestion, beside maws-tell's tell; under 40b79a7d1 only maws-tell (p8, p8-old).
+get_context_usage names mcp__sminos__AskUserQuestion too. Nothing in the initialize reply, nor any frame the engine
+sends unasked, names it.
+
+P9, the first sitting (stop S9; p9-string, p9-block, the plain sentence then the ring). A string reaches the prompt
+hook's e.text as sent. A message's text blocks reach it trimmed and joined: the sentence and a line break as one block,
+a line break before it, a second block holding the line break, and the sentence beside an image all gave e.text equal
+to the sentence, and each was dropped, the image with it (prompt_kept false). The hook's event holds only text, wait
+and origin. U+200B after the sentence survived the trim. Ruled: the mark goes on the ring (F33).
+
+P9 with the mark (p9-mark-string, p9-mark-block). The ring reaches e.text exactly, as a string and as one block: dropped
+with nothing ready (RING_DROP), filled with an answer pending. The sentence entered in every form, nothing dropped, the
+image in the model's request. The sentence in one block and the mark alone in the next reach e.text as the sentence, a
+line break and the mark: the engine joins blocks with "\n", so a ring split over two blocks is no ring.
+
+W1. A ring to an idle session with an answer pending: filled; one request, whose last user message is two text
+blocks, the hook's context (the envelope) and the ring; the envelope once in the history; the key out of pending and
+closed.q1.deliveredAt set ("a hook-context row … landed 1 key"). The file: the ring's user record has entrypoint sdk-ts,
+promptSource sdk, origin human, content the ring's text; the envelope's attachment row (hook_additional_context, hook
+prompt.submit, entrypoint sdk-ts) is bound to it through its parentUuid chain, with a budget_usd attachment row between
+(the launch passes --max-budget-usd): the record a context belongs to is the first that is not an attachment up its
+parents, not necessarily its direct parent. Stop S1 not reached.
+
+W2. A ring with nothing pending, and one with only a dismissal pending: each is B2's frames with RING_DROP, no user
+replay, no request (the mod's reasons: no envelope is ready; the envelope holds no answer). Then a person's message
+entered and carried {"answered":[],"dismissed":["q1"]} once. The file of each drop: no record of the ring at all, and
+one system record, subtype informational, level warning, content "Prompt dropped by a hook: nothing is ready on the
+sheet", isMeta false, preventContinuation true, promptSubmitEnding {ending: {kind: "dropped_by_hook", reason},
+promptKept: false}, entrypoint sdk-ts, its parentUuid the conversation's previous record. The file names the outcome
+promptSubmitEnding; the wire, prompt_submit_outcome.
+
+W3. Two rings one after the other: the first filled, the second dropped (no envelope is ready); one request; the
+envelope once. Both frames end queued, started, completed.
+
+W4a. An answer landed by a ring; /clear (a new session id); a ring: dropped; the old conversation's history holds the
+envelope once and the new one's nothing. The old record was removed at the /clear, landed or not. W4b. An answer
+pending; /clear: the old record went with its outcome; a ring: dropped; no request in either conversation held it.
+
+W5. An answer one second into a 15 s call, and a ring written next during it: the result route put the envelope on
+the call's result (a system-role message after the tool result) and it landed; the ring, folded in at that result, was
+dropped ("the main conversation's envelope is on a route already"). For §Y: the folded ring's frames are
+command_lifecycle queued, started and completed, then the informational warning with prompt_submit_outcome, inside the
+running turn; it has no result of its own, and the turn's one result (num_turns 2) is the call's; the file keeps the
+warning as in W2.
+
+W6. B6 on M1: the engine and its three children killed as the request held the envelope, the key still pending; at the
+resumed start the key left pending, deliveredAt set, before any prompt and with no request; a ring: dropped; a person's
+message after it: the envelope once across both processes' history.
+
+W7. A ring with an answer pending, its turn running a call, interrupted as soon as its command_lifecycle started: the
+mod had filled it ("a ring is filled"), and the engine then ended the frame cancelled after started, with a result
+error_during_execution, num_turns 0, and no model request. The key stayed pending; the person's message carried the
+envelope, once. For §V: a frame can end cancelled after started; that end names no turn the model ran.
+
+W8. Two questions; a call running; an answer applied; an interrupt; a dismissal: no request between the interrupt and
+the person's message, which carried one envelope with q1's answer and q2's dismissal.
+
+W9. A question asked, the process stopped, an answer given while stopped (queued in the inbox, nothing pending yet); a
+resume: at ready, before any frame was written, the answer was pending with acrossStop true; a ring at once: filled,
+carrying the envelope ("while this session was stopped") and the start's context ("after a resume"); a second ring:
+dropped; the envelope once.
+
+W10. On this engine the Agent tool runs a subagent in the background: its call returns at once and the completion
+arrives later as a task notification that opens a turn. A subagent that asks and still runs: its answer reached its own
+history, on its running call's result (the result route, a system-role message), and no request of the main
+conversation held it. A second subagent that asks and ends: the main conversation was told once ("[sheet v1] The
+subagent asker B (<id>) ended with questions still open on your sheet: q2 …"), on the turn its completion opened; its
+answer then rang in the main conversation, the envelope naming the asker ("q2 (from the subagent asker B, <id>, which
+has ended)") with the question's words and the picked label. A first trial that did not wait for the first subagent's
+completion saw that completion's turn carry the second answer by the prompt route, and the ring dropped as nothing was
+left: any prompt carries what is ready, as designed.
+
+W11. An answer pending; /compact (a compact_boundary); a ring: filled, the request after the compaction holding the
+envelope once, with the question's words and the label.
+
+W12. A person's frame written right behind a ring with nothing ready. The frames in order: the ring queued, started;
+the person's frame queued; system/init; the informational warning (dropped_by_hook); a result (num_turns 0); the
+ring's command_lifecycle completed; then the person's frame started, its replay, the model's reply, its result and its
+completed. The engine itself starts the frame queued behind a dropped one, after the dropped one's completed.

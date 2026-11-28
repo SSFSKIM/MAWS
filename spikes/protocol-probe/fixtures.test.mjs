@@ -1623,3 +1623,138 @@ test('ticket 851: apply_flag_settings {effortLevel} before the first message giv
  const live=load851('effort-live');assert.equal(meta851(live,'control_answer')[0].answer.subtype,'success');
  assert.equal(meta851(live,'system_init')[0].permissionMode,'default');
 });
+// Question sheet C5, M2: M1's branch of sminos on MAWS's launch line (docs/doperpowers/plans/2026-11-27-question-sheet-c5-
+// maws-run.md, §S "The wire sitting"; findings-qsheet-c5-carriers.txt, "M1's branch on the wire"). Each case reads the
+// facts that decide its cell from the recording's own rows: the wire both ways, the stand-in's requests, the record, the
+// transcript and the mod's debug lines. The phase B recordings (P9 with the mark, W1 to W12) are committed together
+// from one run on M1's merged head; until then their cases are skipped as one group, and once any of them is there,
+// every one is required.
+const dirQ5=new URL('./fixtures/qsheet/',import.meta.url);
+const loadQ5=n=>readFileSync(new URL('qsheet-c5-m1-'+n+'.jsonl',dirQ5),'utf8').trim().split('\n').map(JSON.parse);
+const metaQ5=(rows,event)=>rows.filter(r=>r.direction==='meta'&&r.frame.event===event).map(r=>r.frame);
+const verdictQ5=rows=>metaQ5(rows,'qc5_verdict').at(-1);
+const mainQ5=rows=>metaQ5(rows,'stub_requests').at(-1).requests.filter(x=>x.main);
+const inQ5=(rows,pred)=>rows.filter(r=>r.direction==='in'&&pred(r.frame));
+const RING_Q5='The human answered questions on your sheet.⁠',SENTENCE_Q5='The human answered questions on your sheet.',DROP_Q5='nothing is ready on the sheet';
+const filesQ5=readdirSync(dirQ5).filter(f=>f.startsWith('qsheet-c5-m1-')&&f.endsWith('.jsonl'));
+const PHASE_B_Q5=['p9-mark-string','p9-mark-block','w1','w2','w3','w4a','w4b','w5','w6','w6-resumed','w7','w8','w9','w9-resumed','w10','w11','w12'];
+const haveBQ5=PHASE_B_Q5.some(n=>filesQ5.includes(`qsheet-c5-m1-${n}.jsonl`));
+const testB=(name,fn)=>test(name,{skip:haveBQ5?false:'the phase B recordings are committed with the final run on M1\'s merged head'},fn);
+test('question sheet C5 M2: the phase B recordings are there together or not at all',()=>{
+ if(haveBQ5)for(const n of PHASE_B_Q5)assert.ok(filesQ5.includes(`qsheet-c5-m1-${n}.jsonl`),n);
+});
+for(const file of filesQ5)test(`qsheet/${file}: ordered, its replies correlated, contained under /tmp, nothing left running`,()=>{
+ const text=readFileSync(new URL(file,dirQ5),'utf8');const rows=text.trim().split('\n').map(JSON.parse);
+ assert.ok(!/\/Users\/[a-z]/.test(text),'no home path');assert.ok(!text.includes('sk-ant-'));
+ let seq=0;const pending=new Set();
+ for(const row of rows){assert.equal(row.seq,++seq);const f=row.frame;
+  if(f.type==='control_request')pending.add(row.direction+':'+f.request_id);
+  if(f.type==='control_response')assert.ok(pending.delete((row.direction==='in'?'out':'in')+':'+f.response.request_id));
+  assert.notEqual(f.event,'scenario_error');}
+ const prov=metaQ5(rows,'provenance')[0];assert.equal(prov.sitting,'M2');assert.match(prov.engineVersion,/^2\.1\.\d+$/);
+ assert.ok(rows[0].frame.cwd.startsWith('/private/tmp/'));
+ const exit=metaQ5(rows,'exit')[0];
+ // W6's first process is the one killed, with its children, as the envelope landed (B6)
+ if(file==='qsheet-c5-m1-w6.jsonl')assert.equal(exit.signal,'SIGKILL');else{assert.equal(exit.code,0);assert.equal(pending.size,0);}
+ for(const c of metaQ5(rows,'qc5_containment'))assert.deepEqual(c.instructionFiles,[]);
+ for(const s of metaQ5(rows,'qc5_sweep'))assert.deepEqual(s.left,[]);
+});
+test('question sheet C5 M2 P6: the sminos home named only in --settings\' env holds the record from the first start, and the default place stays empty',()=>{
+ const rows=loadQ5('p6');const spawn=rows[0].frame;
+ const settings=JSON.parse(spawn.args[spawn.args.indexOf('--settings')+1]);assert.match(settings.env.SMINOS_HOME,/sminos-home$/);
+ assert.ok(!metaQ5(rows,'provenance')[0].envKeys.includes('SMINOS_HOME'));
+ const [start,asked]=metaQ5(rows,'qc5_homes');
+ assert.ok(start.named.some(f=>/^sheet\/[0-9a-f-]{36}\/state\.json$/.test(f)));assert.ok(start.named.some(f=>/^bridge\/.*\.sock/.test(f)));
+ assert.equal(start.default,null);assert.equal(asked.default,null);
+ assert.equal(mainQ5(rows).at(-1).deliveries.length,1);
+});
+test('question sheet C5 M2 P7: 2:<id> gives the sheet\'s schema at a new session, a resume and a fork; the bare id and the plugin before M1 give the built-in',()=>{
+ const offered=n=>mainQ5(loadQ5(n))[0].tools.map(t=>`${t.name}:${t.properties.join(',')}`);
+ for(const n of ['p7-new','p7-resume','p7-fork'])assert.deepEqual(offered(n),['mcp__sminos__AskUserQuestion:ask,withdraw'],n);
+ for(const n of ['p7-bare','p7-old'])assert.deepEqual(offered(n),['AskUserQuestion:questions,answers,annotations,metadata'],n);
+ assert.ok(loadQ5('p7-fork')[0].frame.args.includes('--fork-session'));
+});
+test('question sheet C5 M2 P8: before any prompt, mcp_status names sminos\'s AskUserQuestion under M1 and not under the plugin before it',()=>{
+ const servers=n=>{const rows=loadQ5(n);const req=rows.find(r=>r.direction==='out'&&r.frame.request?.subtype==='mcp_status');
+  const res=rows.find(r=>r.direction==='in'&&r.frame.response?.request_id===req.frame.request_id);
+  const firstUser=rows.find(r=>r.direction==='out'&&r.frame.type==='user');assert.ok(res.seq<firstUser.seq);
+  return res.frame.response.response.mcpServers.filter(s=>s.source==='plugin').map(s=>`${s.name}:${s.tools.map(t=>t.name).join(',')}`).sort();};
+ assert.deepEqual(servers('p8'),['maws-tell:tell','sminos:AskUserQuestion']);
+ assert.deepEqual(servers('p8-old'),['maws-tell:tell']);
+});
+test('question sheet C5 M2 P9, the first sitting (S9): the engine trims a block\'s text before the hook, so the plain sentence with a line break as a block was dropped',()=>{
+ const drops=n=>inQ5(loadQ5(n),f=>f.prompt_submit_outcome?.kind==='dropped_by_hook').length;
+ assert.equal(drops('p9-string'),1);assert.equal(drops('p9-block'),5);
+ const sent=verdictQ5(loadQ5('p9-block')).sent.find(x=>x.label==='the sentence and a line break');
+ assert.deepEqual([sent.hookText,sent.dropped],[[SENTENCE_Q5],true]);
+});
+testB('question sheet C5 M2 P9 with the mark: the ring\'s text reaches the hook exactly in both forms, and the plain sentence enters in every form',()=>{
+ for(const n of ['p9-mark-string','p9-mark-block']){
+  const rows=loadQ5(n);const sent=verdictQ5(rows).sent;
+  for(const x of sent){if(x.expect!==null)assert.equal(x.got,x.expect,`${n}: ${x.label}`);if(x.hookWant===RING_Q5)assert.deepEqual(x.hookText,[RING_Q5],`${n}: ${x.label}`);}
+  assert.equal(inQ5(rows,f=>f.prompt_submit_outcome?.kind==='dropped_by_hook').length,1,n);
+ }
+ const block=verdictQ5(loadQ5('p9-mark-block')).sent;
+ assert.equal(block.find(x=>x.label==='the sentence and an image').imageInRequest,true);
+ assert.deepEqual(block.find(x=>x.label==='the sentence, then the mark alone as a second block').hookText,[SENTENCE_Q5+'\n⁠']);
+});
+testB('question sheet C5 M2 W1: a ring to an idle session is filled once; the file binds the envelope to the ring\'s record, which names MAWS\'s entrypoint',()=>{
+ const rows=loadQ5('w1');const last=mainQ5(rows).at(-1);
+ assert.equal(last.deliveries.length,1);assert.ok(last.last.text.includes('<sheet-delivery>')&&last.last.text.includes(RING_Q5));
+ const rec=metaQ5(rows,'qc5_ring_records')[0];
+ assert.deepEqual([rec.record.entrypoint,rec.record.message.content],['sdk-ts',RING_Q5]);
+ assert.equal(rec.bound.attachment.hookName,'prompt.submit');assert.deepEqual(rec.chain.map(x=>x.attachment),['hook_additional_context','budget_usd']);
+ const sheet=metaQ5(rows,'qc5_sheet').find(s=>s.label==='after the ring');assert.deepEqual(sheet.pending,[]);assert.ok(sheet.closed.q1.deliveredAt);
+});
+testB('question sheet C5 M2 W2: a ring with nothing, or only a dismissal, is dropped with no request; the file keeps a warning with promptSubmitEnding and no record of the ring',()=>{
+ const rows=loadQ5('w2');const v=verdictQ5(rows);
+ assert.deepEqual(inQ5(rows,f=>f.prompt_submit_outcome?.kind==='dropped_by_hook').map(r=>r.frame.prompt_submit_outcome.reason),[DROP_Q5,DROP_Q5]);
+ for(const k of ['nothing','dismissal'])assert.deepEqual([v[k].dropped,v[k].modelCalls],[true,0]);
+ assert.ok(v.person.carries.some(d=>d.replace(/\\"/g,'"').includes('"dismissed":["q1"]')));
+ const whole=metaQ5(rows,'qc5_transcript_whole')[0].rows.filter(x=>x.promptSubmitEnding);
+ assert.equal(whole.length,2);
+ for(const x of whole)assert.deepEqual([x.type,x.subtype,x.level,x.preventContinuation,x.promptSubmitEnding],['system','informational','warning',true,{ending:{kind:'dropped_by_hook',reason:DROP_Q5},promptKept:false}]);
+ assert.deepEqual(v.ringRowsInFile,[false,false]);
+});
+// W3 to W12: each cell's own verdict, and the one fact of the wire or the record that carries it.
+const passQ5=n=>{const v=verdictQ5(loadQ5(n));assert.equal(v.answer,'pass',`${n}: ${JSON.stringify(v).slice(0,600)}`);return v;};
+testB('question sheet C5 M2 W3: two rings in a row, an answer pending: the first is filled, the second dropped, the envelope once',()=>{
+ const v=passQ5('w3');assert.deepEqual([v.drops,v.modelCalls,v.history.length],[1,1,1]);
+});
+testB('question sheet C5 M2 W4a and W4b: after a /clear a ring is dropped and the new conversation holds nothing of the old answer, landed or pending',()=>{
+ const a=passQ5('w4a');assert.equal(a.oldHistory.length,1);assert.deepEqual(a.newHistory,[]);
+ const b=passQ5('w4b');assert.equal(b.oldRecordGone,true);assert.deepEqual(b.newHistory,[]);
+ assert.ok(mainQ5(loadQ5('w4b')).every(x=>x.deliveries.length===0));
+});
+testB('question sheet C5 M2 W5: an answer during a long call goes on its result; a ring folded into the turn is dropped, its lifecycle completed before the warning',()=>{
+ const v=passQ5('w5');assert.deepEqual(v.ringLifecycle,['queued','started','completed']);
+ const f=v.ringFrames;assert.ok(f.findIndex(x=>x.state==='completed')<f.findIndex(x=>x.prompt_submit_outcome?.kind==='dropped_by_hook'));
+ assert.equal(v.results,1);
+});
+testB('question sheet C5 M2 W6: killed as the envelope landed, the resumed start takes the key out before any prompt, and the envelope is once in the history',()=>{
+ const v=passQ5('w6');assert.equal(v.pendingAfterKill.length,1);assert.deepEqual([v.pendingAtStart,v.requestsBeforePrompt],[0,0]);
+ assert.deepEqual(metaQ5(loadQ5('w6-resumed'),'qc5_sheet').find(s=>s.label.startsWith('after the resumed start')).pending,[]);
+});
+testB('question sheet C5 M2 W7: a ring interrupted as soon as it started; the envelope once, in the turn or with the person\'s message',()=>{
+ const v=passQ5('w7');assert.ok(v.ringLifecycle.includes('started'));assert.equal(v.history.length,1);
+});
+testB('question sheet C5 M2 W8: after an interrupt nothing reaches the model until the person writes, and their message carries the answer and the dismissal',()=>{
+ const v=passQ5('w8');assert.equal(v.requestsBetween,0);assert.equal(v.history.length,1);
+});
+testB('question sheet C5 M2 W9: an answer queued while stopped is applied at the resumed start with no frame, and the ring at ready carries it with the start\'s context',()=>{
+ const v=passQ5('w9');assert.deepEqual(v.atReady.pending,[{id:'q1',acrossStop:true}]);assert.deepEqual([v.startContext,v.marked,v.second.dropped],[true,true,true]);
+});
+testB('question sheet C5 M2 W10: a running subagent\'s answer goes to it alone; an ended one\'s is noticed once and rings in the main conversation, the asker named',()=>{
+ const v=passQ5('w10');assert.deepEqual([v.a.inMain,v.notice,v.noticesInHistory],[0,1,1]);assert.ok(v.a.inSubagent>=1);
+ assert.deepEqual([v.envelope.namesAsker,v.envelope.questionWords],[true,true]);
+});
+testB('question sheet C5 M2 W11: after a compaction a ring carries the envelope once, with the question\'s words',()=>{
+ const v=passQ5('w11');assert.ok(inQ5(loadQ5('w11'),f=>f.type==='system'&&f.subtype==='compact_boundary').length===1);
+ assert.deepEqual([v.afterCompaction.deliveries,v.afterCompaction.questionWords],[1,true]);
+});
+testB('question sheet C5 M2 W12: a person\'s frame queued behind a ring the hook drops starts once the ring\'s lifecycle has completed',()=>{
+ const v=passQ5('w12');const o=v.order;
+ const at=(of,state)=>o.findIndex(x=>x.of===of&&x.state===state);
+ assert.ok(at('ring','completed')<at('person','started'));
+ assert.ok(o.findIndex(x=>x.outcome==='dropped_by_hook')<at('ring','completed'));
+});

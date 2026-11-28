@@ -77,10 +77,10 @@ const settingsOf=r=>({dialogExpiry:'never',...(HOME_VIA==='settings'&&{env:{SMIN
 // The stand-in's record of a request: where an envelope stood, the last user message (raw, so a line break shows), and
 // the question tools the request offers, each with its schema's properties and whether it is deferred.
 const record=body=>{
- const whole=JSON.stringify(body.messages??[]);const last=lastUser(body);
+ const whole=JSON.stringify(body.messages??[]);const last=lastUser(body);const first=(body.messages??[]).find(m=>m.role==='user');
  const holders=(body.messages??[]).map((m,i)=>({i,role:m.role,types:Array.isArray(m.content)?m.content.map(b=>b.type):['string'],has:JSON.stringify(m.content).includes('sheet-delivery')})).filter(x=>x.has).map(({has,...x})=>x);
  const tools=(body.tools??[]).filter(t=>/AskUserQuestion/.test(t?.name??'')).map(t=>({name:t.name,deferred:t.defer_loading??false,properties:Object.keys(t.input_schema?.properties??{})}));
- return {messages:(body.messages??[]).length,roles:(body.messages??[]).map(m=>m.role).join(''),holders,deliveries:[...whole.matchAll(/<sheet-delivery>(.*?)<\/sheet-delivery>/g)].map(x=>x[1].slice(0,300)),tools,toolCount:(body.tools??[]).length,
+ return {first:first?textOf(first.content).slice(-300):null,ended:(whole.match(/ended with questions still open/g)||[]).length,messages:(body.messages??[]).length,roles:(body.messages??[]).map(m=>m.role).join(''),holders,deliveries:[...whole.matchAll(/<sheet-delivery>(.*?)<\/sheet-delivery>/g)].map(x=>x[1].slice(0,300)),tools,toolCount:(body.tools??[]).length,
   last:last?{types:Array.isArray(last.content)?last.content.map(b=>b.type):['string'],text:textOf(last.content).slice(-2500),raw:JSON.stringify(last.content).slice(-400)}:null};
 };
 const ASK_INPUT=n=>({ask:[{question:`QC5-M2 question ${n}?`,options:[{label:'Alpha'},{label:'Beta'}]}]});
@@ -88,11 +88,30 @@ const SCRIPT=rules([
  ['toolu_ask',textTurn('ASKED')],['QC5-ASK',body=>{const n=(JSON.stringify(lastUser(body)).match(/QC5-ASK (\d+)/)||[])[1]||'1';return toolTurn('toolu_ask'+n,'mcp__sminos__AskUserQuestion',ASK_INPUT(n));}],
  ['QC5-HELLO',textTurn('HELLO')],[SENTENCE,textTurn('RING READ')],
 ]);
+// A Bash wait: python's, since the engine refuses a standalone `sleep` (the carriers round's B1).
+const sleepTurn=(id,sec)=>toolTurn(id,'Bash',{command:`python3 -c 'import time; time.sleep(${sec})'`,description:'wait'});
+const SUB_ASK=x=>({ask:[{question:`QC5-M2 sub question ${x}?`,options:[{label:'Alpha'},{label:'Beta'}]}]});
+const agentTurn=x=>toolTurn(`toolu_agent${x.toLowerCase()}`,'Agent',{description:`asker ${x}`,subagent_type:'general-purpose',prompt:`QC5-SUB ${x}: ask your question, then go on.`});
+// The W cells' script: the shared one's needles, after the ones that are a tool's id (each matched first, since a later
+// message of the same conversation holds both).
+const W_SCRIPT=rules([
+ ['toolu_sleep',textTurn('SLEPT')],['toolu_ringsleep',textTurn('SLEPT')],
+ ['toolu_suba_sleep',textTurn('SUB A DONE')],['toolu_suba_ask',sleepTurn('toolu_suba_sleep',20)],['toolu_subb_ask',textTurn('SUB B DONE')],
+ ['toolu_agent',textTurn('AGENT DONE')],
+ ['QC5-SUB A',toolTurn('toolu_suba_ask','mcp__sminos__AskUserQuestion',SUB_ASK('A'))],['QC5-SUB B',toolTurn('toolu_subb_ask','mcp__sminos__AskUserQuestion',SUB_ASK('B'))],
+ ['QC5-AGENT A',agentTurn('A')],['QC5-AGENT B',agentTurn('B')],
+ ['QC5-SLEEP',body=>{const sec=(JSON.stringify(lastUser(body)).match(/QC5-SLEEP (\d+)/)||[])[1]||'8';return sleepTurn('toolu_sleep'+Date.now(),sec);}],
+ ['toolu_ask',textTurn('ASKED')],['QC5-ASK',body=>{const n=(JSON.stringify(lastUser(body)).match(/QC5-ASK (\d+)/)||[])[1]||'1';return toolTurn('toolu_ask'+n,'mcp__sminos__AskUserQuestion',ASK_INPUT(n));}],
+ ['QC5-HELLO',textTurn('HELLO')],
+ // W7's ring opens a turn that runs a wait, so the Stop finds it running
+ [SENTENCE,body=>W7_RING_SLEEPS.on?sleepTurn('toolu_ringsleep'+Date.now(),10):textTurn('RING READ')],
+]);
+const W7_RING_SLEEPS={on:false};
 
 // One engine process, launched as MAWS launches it. `sheet` is MAWS_QUESTION_SHEET's value (null: unset); `resume` is
 // the session id to resume, with `fork` its fork's new id; `plugins` the plugin directories after the tell's.
-async function launch(name,r,sid,{sheet=`2:${sid}`,resume=null,fork=false,plugin=SMINOS,firstPlugins=[],cell}={}){
- const stub=await startStubApi({record,respond:SCRIPT,side:()=>textTurn('ok')});
+async function launch(name,r,sid,{sheet=`2:${sid}`,resume=null,fork=false,plugin=SMINOS,firstPlugins=[],cell,script=SCRIPT}={}){
+ const stub=await startStubApi({record,respond:script,side:()=>textTurn('ok')});
  clearEnv();
  const env=mawsEnv(r,{sheet,stub});
  const session=resume?['--resume',resume,...(fork?['--fork-session','--session-id',sid]:[])]:['--session-id',sid];
@@ -410,7 +429,278 @@ async function w2(){
  return verdict(p,cell,out);
 }
 
-const CELLS={p6,p7,p8,p9,'p9-first':p9first,w1,w2};
+// ---------------------------------------------------------------- W3 to W12
+const ENDS=['completed','cancelled','discarded','refused'];
+const lifecycle=(p,uuid)=>p.frames.filter(x=>x.frame.type==='command_lifecycle'&&x.frame.command_uuid===uuid).map(x=>x.frame.state);
+const ended=(p,uuid)=>lifecycle(p,uuid).some(st=>ENDS.includes(st));
+const toolUseSeen=(p,from,needle)=>p.wait(f=>f.type==='assistant'&&JSON.stringify(f.message?.content??'').includes(needle),{after:from,timeout:60000}).catch(()=>null);
+const lines=(debug,re)=>debug.filter(l=>re.test(l)).map(l=>l.replace(/^.*\$\.ui\.log \(to debug\): /,''));
+const RING_LINES=/a ring is (filled|dropped)|landed \d+ key|took \d+ entr/;
+// Every envelope the model's history holds, by its keys, over the requests given (a history repeats what it held).
+const historyKeys=reqs=>{const last=reqs.filter(x=>x.main).at(-1);return last?last.deliveries.map(d=>{try{return JSON.parse(d.replace(/\\"/g,'"')).keys;}catch{return d;}}):[];};
+const newSessionAfter=(p,from,sid)=>p.frames.find(x=>x.seq>from&&x.frame.type==='system'&&x.frame.subtype==='init'&&x.frame.session_id&&x.frame.session_id!==sid)?.frame.session_id??null;
+async function prepared(cell,{script=W_SCRIPT,n=1}={}){
+ const r=scratchRoot(cell),sid=randomUUID();
+ const {p,stub}=await launch(`qsheet-c5-m1-${cell}`,r,sid,{cell,script});
+ await init(p,r);await quiet(p,2000,15000);
+ const qs=[];for(let i=1;i<=n;i++)qs.push(await ask(p,r,sid,i));
+ return {r,sid,p,stub,qs};
+}
+async function answered(p,r,sid,q){answer(p,r,sid,q.id,'Beta');await waitPending(p,r,sid);await delay(6000);}
+
+async function w3(){
+ const cell='w3';const {r,sid,p,stub,qs}=await prepared(cell);const out={};
+ try{
+  await answered(p,r,sid,qs[0]);
+  const from=p.seq,n=stub.requests.length;const u1=frame(p,RING),u2=frame(p,RING);
+  await until(()=>ended(p,u1)&&ended(p,u2),60000,200);await quiet(p);
+  const s=step(p,stub,'w3: two rings one after the other, an answer pending',from,n);
+  const drops=s.wire.filter(w=>w.prompt_submit_outcome?.kind==='dropped_by_hook');
+  Object.assign(out,{lifecycle:{first:lifecycle(p,u1),second:lifecycle(p,u2)},drops:drops.length,reason:drops[0]?.prompt_submit_outcome?.reason??null,modelCalls:s.requests.filter(x=>x.main).length,history:historyKeys(stub.requests)});
+  const m=noteSheet(p,r,sid,'after the rings');out.pending=(m?.pending??[]).length;out.deliveredAt=m?.closed?.[qs[0].id]?.deliveredAt??null;
+ }catch(e){p.note({event:'scenario_error',error:e.stack});console.error(e.message);}
+ const {debug}=await finish(p,stub,r,sid);out.ringLines=lines(debug,RING_LINES);
+ out.answer=out.drops===1&&out.reason===RING_DROP&&out.modelCalls===1&&out.history.length===1&&out.pending===0&&!!out.deliveredAt?'pass':'fail';
+ return verdict(p,cell,out);
+}
+
+// W4a and W4b: a /clear between an answer and a ring. `landed`: the answer lands by a ring before the /clear.
+async function w4(cell,landed){
+ const {r,sid,p,stub,qs}=await prepared(cell);const out={};let nsid=null;
+ try{
+  answer(p,r,sid,qs[0].id,'Beta');await waitPending(p,r,sid);await delay(6000);
+  if(landed){const n=stub.requests.length;const t=await turn(p,RING);await quiet(p);out.before=ringStep(step(p,stub,`${cell}: a ring before the /clear`,t.from,n));}
+  const cleared=stub.requests.length;
+  const c=await turn(p,'/clear');await quiet(p);nsid=newSessionAfter(p,c.from,sid);
+  step(p,stub,`${cell}: /clear`,c.from,cleared);
+  // the old sheet: kept with its outcome (landed) or removed with it (pending); the record's directory is looked at
+  if(!landed)out.oldRecordGone=!!(await until(()=>!existsSync(join(r.sminos,'sheet',sid,'state.json')),40000,500));
+  out.oldRecord=existsSync(join(r.sminos,'sheet',sid,'state.json'))?noteSheet(p,r,sid,'the old session after the /clear')?.closed??null:null;
+  await delay(4000);
+  let n=stub.requests.length;let t=await turn(p,RING);await quiet(p);
+  out.after=ringStep(step(p,stub,`${cell}: a ring after the /clear`,t.from,n));
+  n=stub.requests.length;t=await turn(p,'QC5-HELLO: say hello.');await quiet(p);
+  const hello=step(p,stub,`${cell}: a person's message in the new conversation`,t.from,n);
+  out.newHistory=historyKeys(hello.requests);out.before&&(out.oldHistory=historyKeys(stub.requests.slice(0,cleared)));
+  out.newSession=nsid!==null;if(nsid)noteSheet(p,r,nsid,'the new session');
+ }catch(e){p.note({event:'scenario_error',error:e.stack});console.error(e.message);}
+ const {debug}=await finish(p,stub,r,sid);
+ if(nsid)noteTranscript(p,r,nsid,'the new conversation\'s transcript');
+ out.ringLines=lines(debug,RING_LINES);out.clearLines=lines(debug,/a \/clear left|cleared/);
+ const dropped=x=>x?.dropped&&x.reason===RING_DROP&&x.modelCalls===0;
+ out.answer=(landed?out.before?.deliveries===1&&out.oldHistory?.length===1:out.oldRecordGone)&&dropped(out.after)&&out.newHistory.length===0&&out.newSession?'pass':'fail';
+ return verdict(p,cell,out);
+}
+const w4a=()=>w4('w4a',true),w4b=()=>w4('w4b',false);
+
+async function w5(){
+ const cell='w5';const {r,sid,p,stub,qs}=await prepared(cell);const out={};
+ try{
+  const from=p.seq,n=stub.requests.length;frame(p,'QC5-SLEEP 15: run the wait.');
+  await toolUseSeen(p,from,'toolu_sleep');await delay(1000);
+  answer(p,r,sid,qs[0].id,'Beta');await waitPending(p,r,sid);await delay(2000);
+  const u=frame(p,RING,'next');out.ringWrittenAt=p.seq;
+  await p.wait(f=>f.type==='result',{after:from,timeout:90000}).catch(()=>null);await until(()=>ended(p,u),30000,200);await quiet(p);
+  const s=step(p,stub,'w5: an answer one second into a long call, and a ring written next during it',from,n);
+  const main=s.requests.filter(x=>x.main);
+  out.carriedBy=main.filter(x=>x.deliveries.length).map(x=>x.last?.types);out.holders=main.filter(x=>x.deliveries.length).map(x=>x.holders);out.modelCalls=main.length;out.history=historyKeys(stub.requests);
+  out.ringLifecycle=lifecycle(p,u);out.ringFrames=s.wire.filter(w=>w.seq>out.ringWrittenAt&&(w.command_uuid===u||w.prompt_submit_outcome||w.type==='result'||w.subtype==='informational')).map(w=>({seq:w.seq,type:w.type,subtype:w.subtype??null,state:w.state??null,num_turns:w.num_turns,prompt_submit_outcome:w.prompt_submit_outcome??null,content:w.content??null,result:w.result}));
+  out.results=s.wire.filter(w=>w.type==='result').length;
+  const m=noteSheet(p,r,sid,'after the call');out.pending=(m?.pending??[]).length;
+ }catch(e){p.note({event:'scenario_error',error:e.stack});console.error(e.message);}
+ const {raw,debug}=await finish(p,stub,r,sid);out.ringLines=lines(debug,RING_LINES);
+ out.fileDrops=raw.filter(x=>x.promptSubmitEnding).map(x=>({type:x.type,subtype:x.subtype,level:x.level,content:x.content,promptSubmitEnding:x.promptSubmitEnding}));
+ out.answer=out.history.length===1&&out.carriedBy.length>=1&&(out.carriedBy[0]??[]).includes('tool_result')&&out.pending===0?'pass':'fail';
+ return verdict(p,cell,out);
+}
+
+// The engine and its children killed at once, as B6: the `landed` step the engine started dies with it.
+function killTree(p){
+ const tree=execFileSync('ps',['-axo','pid=,ppid='],{encoding:'utf8'}).trim().split('\n').map(l=>l.trim().split(/\s+/).map(Number));
+ const kids=[];const walk=id=>{for(const [c,pp] of tree)if(pp===id){kids.push(c);walk(c);}};walk(p.child.pid);
+ for(const id of [p.child.pid,...kids])try{process.kill(id,'SIGKILL');}catch{}
+ return 1+kids.length;
+}
+async function w6(){
+ const cell='w6';let {r,sid,p,stub,qs}=await prepared(cell);const out={};
+ try{
+  await answered(p,r,sid,qs[0]);
+  const n=stub.requests.length;frame(p,RING);
+  await until(()=>stub.requests.slice(n).some(x=>x.deliveries?.length),20000,20);
+  out.killed=killTree(p);p.note({event:'qc5_kill',afterRequests:stub.requests.length,killed:out.killed});await p.closed;
+  const m=noteSheet(p,r,sid,'after the kill');out.pendingAfterKill=(m?.pending??[]).map(o=>o.key);
+  p.note({event:'stub_requests',requests:stub.requests});await stub.close();noteTranscript(p,r,sid,'first process');noteDebug(p,r);sweep(p,r);
+  verdict(p,cell,{part:'first process',...out});
+  const r2={...r,debug:join(r.root,'engine-debug-resumed.log')};
+  ({p,stub}=await launch(`qsheet-c5-m1-${cell}-resumed`,r2,sid,{cell:cell+'-resumed',resume:sid,script:W_SCRIPT}));r=r2;
+  await init(p,r);await delay(8000);
+  const s0=noteSheet(p,r,sid,'after the resumed start, before any prompt');out.pendingAtStart=(s0?.pending??[]).length;out.deliveredAt=s0?.closed?.[qs[0].id]?.deliveredAt??null;out.requestsBeforePrompt=stub.requests.filter(x=>x.main).length;
+  let k=stub.requests.length,t=await turn(p,RING);await quiet(p);out.ring=ringStep(step(p,stub,'w6: a ring after the resumed start',t.from,k));
+  k=stub.requests.length;t=await turn(p,'QC5-HELLO: say hello.');await quiet(p);step(p,stub,'w6: a person\'s message',t.from,k);
+  out.history=historyKeys(stub.requests);
+ }catch(e){p.note({event:'scenario_error',error:e.stack});console.error(e.message);}
+ const {debug}=await finish(p,stub,r,sid);out.ringLines=lines(debug,RING_LINES);out.startLines=lines(debug,/search|landed|delivered envelopes/);
+ out.answer=out.pendingAfterKill?.length===1&&out.pendingAtStart===0&&!!out.deliveredAt&&out.requestsBeforePrompt===0&&out.ring?.dropped&&out.history.length===1?'pass':'fail';
+ return verdict(p,cell,out);
+}
+
+async function w7(){
+ const cell='w7';const {r,sid,p,stub,qs}=await prepared(cell);const out={};
+ try{
+  await answered(p,r,sid,qs[0]);
+  W7_RING_SLEEPS.on=true;
+  const from=p.seq,n=stub.requests.length;const u=frame(p,RING);
+  await until(()=>lifecycle(p,u).includes('started'),20000,5);
+  const at=p.seq;let reply=null;try{reply=await p.request('interrupt',{},15000);}catch(e){reply={error:e.message};}
+  await p.wait(f=>f.type==='result',{after:from,timeout:60000}).catch(()=>null);await until(()=>ended(p,u),20000,200);await quiet(p);
+  W7_RING_SLEEPS.on=false;
+  const s=step(p,stub,'w7: a ring, interrupted as soon as it started',from,n);
+  out.interruptAt=at;out.interrupt=reply?.subtype??reply;out.ringLifecycle=lifecycle(p,u);
+  out.ringTurn={modelCalls:s.requests.filter(x=>x.main).length,carried:s.requests.filter(x=>x.main&&x.deliveries.length).length,result:s.wire.filter(w=>w.type==='result').map(w=>({subtype:w.subtype,num_turns:w.num_turns,result:w.result}))};
+  const m=noteSheet(p,r,sid,'after the interrupt');out.pendingAfterStop=(m?.pending??[]).map(o=>o.key);
+  const k=stub.requests.length,t=await turn(p,'QC5-HELLO: say hello.');await quiet(p);
+  const h=step(p,stub,'w7: a person\'s message',t.from,k);out.helloCarried=h.requests.filter(x=>x.main&&x.last?.text?.includes('<sheet-delivery>')).length;
+  out.history=historyKeys(stub.requests);
+  const m2=noteSheet(p,r,sid,'after the message');out.pending=(m2?.pending??[]).length;
+ }catch(e){p.note({event:'scenario_error',error:e.stack});console.error(e.message);}
+ const {debug}=await finish(p,stub,r,sid);out.ringLines=lines(debug,RING_LINES);
+ out.landedIn=out.ringTurn?.carried?(out.pendingAfterStop?.length?'neither yet':'the interrupted turn'):'the message';
+ out.answer=out.history?.length===1&&out.pending===0?'pass':'fail';
+ return verdict(p,cell,out);
+}
+
+async function w8(){
+ const cell='w8';const {r,sid,p,stub,qs}=await prepared(cell,{n:2});const out={};
+ try{
+  const from=p.seq;frame(p,'QC5-SLEEP 20: run the wait.');
+  await toolUseSeen(p,from,'toolu_sleep');await delay(1000);
+  answer(p,r,sid,qs[0].id,'Beta');await waitPending(p,r,sid);await delay(3000);
+  let reply=null;try{reply=await p.request('interrupt',{},15000);}catch(e){reply={error:e.message};}
+  await p.wait(f=>f.type==='result',{after:from,timeout:60000}).catch(()=>null);await quiet(p);
+  out.interrupt=reply?.subtype??reply;const atStop=stub.requests.length;
+  step(p,stub,'w8: a wait, an answer, an interrupt',from,0);
+  dismiss(p,r,sid,qs[1].id);
+  await until(()=>{const m=show(r,sid);return (m?.pending??[]).length>=2;},40000,700);noteSheet(p,r,sid,'after the dismissal');await delay(8000);
+  out.requestsBetween=stub.requests.length-atStop;
+  const k=stub.requests.length,t=await turn(p,'QC5-HELLO: say hello.');await quiet(p);
+  const h=step(p,stub,'w8: a person\'s message',t.from,k);
+  const req=h.requests.find(x=>x.main);out.carries=req?.deliveries??[];
+  const m=noteSheet(p,r,sid,'after the message');out.pending=(m?.pending??[]).length;out.history=historyKeys(stub.requests);
+ }catch(e){p.note({event:'scenario_error',error:e.stack});console.error(e.message);}
+ const {debug}=await finish(p,stub,r,sid);out.ringLines=lines(debug,RING_LINES);
+ const all=(out.carries??[]).map(d=>d.replace(/\\"/g,'"')).join(' ');
+ out.answer=out.requestsBetween===0&&/"answered":\[\{"id":"q1"/.test(all)&&/"dismissed":\[[^\]]*"q2"/.test(all)&&out.pending===0?'pass':'fail';
+ return verdict(p,cell,out);
+}
+
+async function w9(){
+ const cell='w9';let {r,sid,p,stub,qs}=await prepared(cell);const out={};
+ try{
+  await finish(p,stub,r,sid,'stopped');verdict(p,cell,{part:'first process'});
+  answer(p,r,sid,qs[0].id,'Beta');const m0=noteSheet(p,r,sid,'answered while stopped');out.whileStopped={open:(m0?.open??[]).length,pending:(m0?.pending??[]).length};
+  const r2={...r,debug:join(r.root,'engine-debug-resumed.log')};
+  ({p,stub}=await launch(`qsheet-c5-m1-${cell}-resumed`,r2,sid,{cell:cell+'-resumed',resume:sid,script:W_SCRIPT}));r=r2;
+  await init(p,r);
+  const m1=noteSheet(p,r,sid,'at ready, before any frame');out.atReady={pending:(m1?.pending??[]).map(o=>({id:o.id,acrossStop:o.acrossStop})),framesWritten:p.frames.filter(x=>x.direction==='out'&&x.frame.type==='user').length,requests:stub.requests.filter(x=>x.main).length};
+  const k=stub.requests.length,t=await turn(p,RING);await quiet(p);
+  const s=step(p,stub,'w9: a ring at ready of the resumed launch',t.from,k);out.ring=ringStep(s);
+  const req=s.requests.find(x=>x.main);out.startContext=!!req?.last?.text?.includes('after a resume');out.marked=!!req?.last?.text?.includes('while this session was stopped');
+  const k2=stub.requests.length,t2=await turn(p,RING);await quiet(p);out.second=ringStep(step(p,stub,'w9: a second ring',t2.from,k2));
+  out.history=historyKeys(stub.requests);const m2=noteSheet(p,r,sid,'after the rings');out.pending=(m2?.pending??[]).length;
+ }catch(e){p.note({event:'scenario_error',error:e.stack});console.error(e.message);}
+ const {debug}=await finish(p,stub,r,sid);out.ringLines=lines(debug,RING_LINES);
+ out.answer=out.whileStopped?.pending===0&&out.atReady?.pending?.length===1&&out.atReady.pending[0].acrossStop===true&&out.atReady.framesWritten===0&&!out.ring?.dropped&&out.ring?.deliveries===1&&out.startContext&&out.marked&&out.second?.dropped&&out.history.length===1&&out.pending===0?'pass':'fail';
+ return verdict(p,cell,out);
+}
+
+// The Agent tool runs a subagent in the background on this engine (its call returns at once; the main turn ends, and
+// the agent's completion comes later as a task notification that opens a turn of its own): each subagent is waited for
+// by its notification and the turn that follows.
+async function agentDone(p,toolUseId,from){
+ const note=await p.wait(f=>f.type==='system'&&f.subtype==='task_notification'&&f.tool_use_id===toolUseId&&f.status==='completed',{after:from,timeout:150000}).catch(()=>null);
+ if(!note)return false;
+ const at=p.frames.find(x=>x.frame===note)?.seq??from;
+ await p.wait(f=>f.type==='result',{after:at,timeout:60000}).catch(()=>null);await quiet(p);return true;
+}
+async function w10(){
+ const cell='w10',r=scratchRoot(cell),sid=randomUUID();
+ const {p,stub}=await launch(`qsheet-c5-m1-${cell}`,r,sid,{cell,script:W_SCRIPT});const out={};
+ const subOf=x=>(x.first??'').includes('QC5-SUB A')?'A':(x.first??'').includes('QC5-SUB B')?'B':'main';
+ const holds=(x,id)=>x.deliveries.some(d=>d.replace(/\\"/g,'"').includes(`"id":"${id}"`));
+ try{
+  await init(p,r);await quiet(p,2000,15000);
+  // A: asks and still runs (a 20 s wait); the answer comes during the wait
+  let from=p.seq;frame(p,'QC5-AGENT A: start the subagent.');
+  const qa=await until(()=>show(r,sid)?.open?.find(q=>q.question==='QC5-M2 sub question A?'),60000,500);
+  noteSheet(p,r,sid,'A asked');out.askerA=qa?.asker??null;
+  await toolUseSeen(p,from,'toolu_suba_sleep');await delay(1500);
+  if(qa)answer(p,r,sid,qa.id,'Beta');
+  out.aDone=await agentDone(p,'toolu_agenta',from);
+  const sa=step(p,stub,'w10: subagent A asks and still runs; the answer comes during its wait',from,0);
+  noteSheet(p,r,sid,'after A');
+  const reqs=sa.requests.filter(x=>x.main);
+  out.a={inSubagent:reqs.filter(x=>subOf(x)==='A'&&holds(x,qa?.id)).length,inMain:reqs.filter(x=>subOf(x)==='main'&&holds(x,qa?.id)).length,
+   subRequestAfterWait:reqs.filter(x=>subOf(x)==='A').at(-1)?.last?.text?.slice(-900)??null,
+   waitMovedToBackground:sa.wire.some(w=>w.type==='system'&&w.subtype==='task_started')&&p.frames.some(x=>x.frame.type==='system'&&x.frame.subtype==='task_started'&&x.frame.tool_use_id==='toolu_suba_sleep'&&x.frame.is_background===true)};
+  // B: asks and ends with its question open; then the answer, then a ring
+  from=p.seq;const n=stub.requests.length;frame(p,'QC5-AGENT B: start the subagent.');
+  out.bDone=await agentDone(p,'toolu_agentb',from);
+  const sb=step(p,stub,'w10: subagent B asks and ends',from,n);
+  const qb=show(r,sid)?.open?.find(q=>q.question==='QC5-M2 sub question B?');noteSheet(p,r,sid,'B ended');out.askerB=qb?.asker??null;
+  out.notice=sb.requests.filter(x=>x.main&&subOf(x)==='main'&&/ended with questions still open/.test(x.last?.text??'')).length;
+  if(qb){answer(p,r,sid,qb.id,'Alpha');await waitPending(p,r,sid);await delay(6000);}
+  const k=stub.requests.length,t=await turn(p,RING);await quiet(p);
+  const s=step(p,stub,'w10: a ring for the ended subagent\'s answer',t.from,k);out.ring=ringStep(s);
+  const req=s.requests.find(x=>x.main);const text=req?.last?.text??'';
+  out.envelope={namesAsker:/from the subagent/.test(text)&&/which has ended/.test(text),questionWords:text.includes('QC5-M2 sub question B?'),label:/→ Alpha/.test(text),excerpt:text.slice(0,700)};
+  const mainReqs=stub.requests.filter(x=>x.main&&subOf(x)==='main');
+  out.noticesInHistory=mainReqs.at(-1)?.ended??null;out.history=historyKeys(mainReqs);
+  out.mainHoldsA=mainReqs.some(x=>holds(x,qa?.id));
+  const m=noteSheet(p,r,sid,'after the ring');out.pending=(m?.pending??[]).length;
+ }catch(e){p.note({event:'scenario_error',error:e.stack});console.error(e.message);}
+ const {debug}=await finish(p,stub,r,sid);out.ringLines=lines(debug,RING_LINES);out.sendLines=lines(debug,/sheet: .*(send|subagent)/);
+ out.answer=out.aDone&&out.bDone&&out.a?.inSubagent>=1&&out.a.inMain===0&&!out.mainHoldsA&&out.notice===1&&out.noticesInHistory===1&&!out.ring?.dropped&&out.envelope?.namesAsker&&out.envelope.questionWords&&out.history.length===1&&out.pending===0?'pass':'fail';
+ return verdict(p,cell,out);
+}
+
+async function w11(){
+ const cell='w11';const {r,sid,p,stub,qs}=await prepared(cell);const out={};
+ try{
+  answer(p,r,sid,qs[0].id,'Beta');await waitPending(p,r,sid);await delay(6000);
+  const c=await turn(p,'/compact',{timeout:120000});await quiet(p);
+  out.compacted=p.frames.some(x=>x.seq>c.from&&x.frame.type==='system'&&x.frame.subtype==='compact_boundary');
+  noteSheet(p,r,sid,'after the compaction');
+  const k=stub.requests.length,t=await turn(p,RING);await quiet(p);
+  const s=step(p,stub,'w11: a ring after the compaction',t.from,k);out.ring=ringStep(s);
+  const req=s.requests.find(x=>x.main);
+  out.afterCompaction={deliveries:req?.deliveries?.length??0,questionWords:/QC5-M2 question 1\?/.test(req?.last?.text??''),label:/→ Beta/.test(req?.last?.text??''),messages:req?.messages??null};
+  const m=noteSheet(p,r,sid,'after the ring');out.pending=(m?.pending??[]).length;
+ }catch(e){p.note({event:'scenario_error',error:e.stack});console.error(e.message);}
+ const {debug}=await finish(p,stub,r,sid);out.ringLines=lines(debug,RING_LINES);out.startLines=lines(debug,/compact|start's context|SessionStart/i).slice(0,10);
+ out.answer=out.compacted&&!out.ring?.dropped&&out.afterCompaction?.deliveries===1&&out.afterCompaction.questionWords&&out.pending===0?'pass':'fail';
+ return verdict(p,cell,out);
+}
+
+async function w12(){
+ const cell='w12',r=scratchRoot(cell),sid=randomUUID();
+ const {p,stub}=await launch(`qsheet-c5-m1-${cell}`,r,sid,{cell,script:W_SCRIPT});const out={};
+ try{
+  await init(p,r);await quiet(p,2000,15000);
+  const from=p.seq,n=stub.requests.length;const ring=frame(p,RING),person=frame(p,'QC5-HELLO: say hello.');
+  await until(()=>ended(p,ring)&&ended(p,person),60000,100);await quiet(p);
+  const s=step(p,stub,'w12: a person\'s frame queued behind a ring that is dropped',from,n);
+  const who=u=>u===ring?'ring':u===person?'person':undefined;
+  out.order=p.frames.filter(x=>x.seq>from&&x.frame.type!=='stream_event').map(x=>({seq:x.seq,type:x.frame.type,subtype:x.frame.subtype??null,state:x.frame.state??null,of:who(x.frame.command_uuid)??(x.frame.type==='user'?who(x.frame.uuid)??null:null),
+   outcome:x.frame.prompt_submit_outcome?.kind??null,num_turns:x.frame.num_turns,result:typeof x.frame.result==='string'?x.frame.result.slice(0,80):undefined}));
+  out.ring=ringStep({...s,wire:s.wire.filter(w=>w.seq<=(p.frames.find(x=>x.frame.command_uuid===ring&&ENDS.includes(x.frame.state))?.seq??Infinity))});
+  out.personAnswered=s.wire.some(w=>w.type==='result'&&w.result==='HELLO');out.modelCalls=s.requests.filter(x=>x.main).length;
+ }catch(e){p.note({event:'scenario_error',error:e.stack});console.error(e.message);}
+ await finish(p,stub,r,sid);
+ out.answer=out.ring?.dropped&&out.ring.reason===RING_DROP&&out.personAnswered&&out.modelCalls===1?'pass':'fail';
+ return verdict(p,cell,out);
+}
+
+const CELLS={p6,p7,p8,p9,'p9-first':p9first,w1,w2,w3,w4a,w4b,w5,w6,w7,w8,w9,w10,w11,w12};
 export default async()=>{
  // the whole set by default; `p9-first` (the first sitting's frames, M1 at 34e1942ca) only when named
  const only=(env0.QC5_ONLY||Object.keys(CELLS).filter(c=>c!=='p9-first').join(',')).split(',').filter(Boolean);
