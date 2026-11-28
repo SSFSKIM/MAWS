@@ -1,0 +1,71 @@
+--- a/sminos/hooks/mods/sheet.tsx
++++ b/sminos/hooks/mods/sheet.tsx
+@@ -765,7 +765,7 @@
+   if (!isStarted(gen)) {
+     return
+   }
+-  if (isTerminal() && sheet.mainTurn === undefined) {
++  if (isTerminal() && sheet.mainTurn === undefined && !(sheet as any).probeNoIdle) {
+     const envelope = readyFor(gen, 'main')
+     const wake = envelope !== undefined && envelope.wakes ? freshWake(gen, envelope) : undefined
+     if (envelope !== undefined && wake !== undefined) {
+@@ -1748,7 +1748,7 @@
+     sheet.home = await sminosHome($)
+     sheet.remote = ((await $.env.get('SSH_CONNECTION')) ?? '') !== ''
+     const port = portOf($)
+-    const chosen = await chooseStart({
++    let chosen = await chooseStart({
+       kept,
+       hasKeptAsk: kept === undefined && (await hasKeptAsk($)),
+       session,
+@@ -1772,6 +1772,13 @@
+       },
+     })
+     chosen.log?.forEach((line) => port.log(line))
++    // PROBE SCRATCH PATCH (MAWS question-sheet C5 carriers probe; never on a branch): force the choice and runner.
++    const probeForce = await $.env.get('PROBE_SHEET_FORCE')
++    if (probeForce === 'terminal' || probeForce === 'maws') chosen = { choice: 'sheet', runner: probeForce, why: 'PROBE_SHEET_FORCE (probe scratch patch)' }
++    ;(sheet as any).probeNoIdle = (await $.env.get('PROBE_SHEET_NO_IDLE')) === '1'
++    ;(sheet as any).probeDropEmpty = (await $.env.get('PROBE_SHEET_DROP_EMPTY')) === '1'
++    ;(sheet as any).probeDelayMs = Number((await $.env.get('PROBE_SHEET_PROMPT_DELAY_MS')) || 0)
++    port.log(`sheet-probe: force=${probeForce ?? ''} noIdle=${(sheet as any).probeNoIdle} dropEmpty=${(sheet as any).probeDropEmpty} delayMs=${(sheet as any).probeDelayMs}`)
+     port.log(`sheet: ${chosen.choice}${chosen.runner === undefined ? '' : ` (${chosen.runner})`}: ${chosen.why}`)
+     // A start owed is its session's: one kept for another session (the process moved on before this reload) is not
+     // ordered under this one, its nonce, transcript and asks being that session's.
+@@ -1956,7 +1963,14 @@
+   // and a prompt that carries a block (MAWS's steer, or a rider on the
+   // person's message) also carries the words of a subagent's question it
+   // answers, a context of that prompt alone (MAWS's C5, F9).
+-  on('prompt.submit', { text: /^/ }, async (_, e, next) => {
++  on('prompt.submit', { text: /^/ }, async ($p, e, next) => {
++    // PROBE SCRATCH PATCH: what the hook saw, an optional wait before its context, an optional drop of an empty doorbell.
++    const t0 = Date.now()
++    sheet.port?.log(`sheet-probe: prompt.submit seen turnId=${e.turnId ?? '(none)'} origin=${JSON.stringify(e.origin)} isMeta=${e.isMeta === true} mainTurn=${sheet.mainTurn ?? '(none)'} text=${JSON.stringify(e.text.slice(0, 80))}`)
++    if ((sheet as any).probeDelayMs > 0) {
++      await $p.clock.sleep((sheet as any).probeDelayMs)
++      sheet.port?.log(`sheet-probe: prompt.submit waited ${Date.now() - t0} ms`)
++    }
+     triggerCheck()
+     const gen = routable()
+     // A slash command's prompt is passed over: what it runs may never reach the model.
+@@ -1971,7 +1985,12 @@
+     }
+     const taken = take(gen, 'prompt')
+     const own = asked === undefined ? [] : [asked]
++    sheet.port?.log(`sheet-probe: prompt.submit took ${taken.entries.length} entries (flight ${taken.flight === undefined ? 'none' : taken.flight.keys.join(',')}), ${own.length} own`)
+     if (taken.entries.length === 0 && own.length === 0) {
++      if ((sheet as any).probeDropEmpty && e.text === 'The human answered questions on your sheet.') {
++        sheet.port?.log('sheet-probe: prompt.submit drops the empty doorbell')
++        return { drop: 'probe: nothing pending on the sheet' }
++      }
+       return next(e)
+     }
+     const flight = taken.flight
+@@ -1980,6 +1999,7 @@
+     let result: Awaited<ReturnType<typeof next>>
+     try {
+       result = await next({ ...e, context: [...(e.context ?? []), ...taken.entries, ...own] })
++      sheet.port?.log(`sheet-probe: prompt.submit next resolved after ${Date.now() - t0} ms: drop=${(result as any).drop ?? '(none)'} context=${(result.context ?? []).length}`)
+     } catch (error) {
+       putBack(gen, taken, [])
+       if (flight !== undefined) failFlight(port, gen, flight, message(error))
