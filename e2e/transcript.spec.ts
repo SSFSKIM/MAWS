@@ -865,15 +865,24 @@ test('an open call folds at a click on its blank space, a drag folds nothing, an
   await expect(output).toBeVisible();
   await settle(page, 300);
   const box = (await output.boundingBox())!;
+  // the first line's glyphs, where a drag is on text: the box's middle is the gap between this two-line output's lines,
+  // where a drag selects nothing
+  const text = await output.evaluate((pre) => {
+    const range = document.createRange();
+    range.setStart(pre.firstChild!, 0);
+    range.setEnd(pre.firstChild!, 4);
+    const glyphs = range.getBoundingClientRect();
+    return { left: glyphs.left, y: glyphs.top + glyphs.height / 2 };
+  });
   // a drag across the output's text selects it and folds nothing
-  await page.mouse.move(box.x + 12, box.y + box.height / 2);
+  await page.mouse.move(text.left + 1, text.y);
   await page.mouse.down();
-  await page.mouse.move(box.x + box.width - 12, box.y + box.height / 2, { steps: 5 });
+  await page.mouse.move(box.x + box.width - 12, text.y, { steps: 5 });
   await page.mouse.up();
   await expect(callLine).toHaveAttribute('aria-expanded', 'true');
   expect(await page.evaluate(() => document.getSelection()?.isCollapsed), 'the drag selected text').toBe(false);
-  // a click beside the short output's text, inside its box: blank space of the call, not of the run
-  await page.mouse.click(box.x + box.width - 12, box.y + box.height / 2);
+  // a click beside the short output's first line, inside its box: blank space of the call, not of the run
+  await page.mouse.click(box.x + box.width - 12, text.y);
   await expect(callLine).toHaveAttribute('aria-expanded', 'false');
   await expect(line).toHaveAttribute('aria-expanded', 'true');
   await expect(callLine).toBeFocused();
