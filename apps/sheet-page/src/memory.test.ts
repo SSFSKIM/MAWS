@@ -182,9 +182,9 @@ describe('the stored memory (T19): one entry a thing', () => {
     updateMemory(S, (current) => settle(current, 'wa-2', { ok: false, why: 'failed', message: 'MAWS did not answer.' }), { storage: store, now: 4_000, target });
     const seen = windowB.readMemory(S, store).sending!;
     const before = store.getItem(key!);
-    store.quota = Object.entries(store.entries()).reduce((sum, [name, value]) => sum + name.length + value.length, 0); // full: no room for a longer value
-    // a press whose entry cannot be written even with every other entry gone: B6 evicts nothing and holds it in this window
-    windowB.updateMemory(S, (current) => startSend(current, seen.lines, 5_000, `wb-1-${'a-press-with-a-longer-name'.repeat(200)}`, { drafts: current.drafts, over: seen.attempt }), { storage: store, now: 5_000, target });
+    // a press whose entry is past the bound: B6 tries nothing and holds it in this window
+    store.quota = null;
+    windowB.updateMemory(S, (current) => startSend(current, seen.lines, 5_000, `wb-1-${'a'.repeat(windowB.ENTRY_KEPT_MAX)}`, { drafts: current.drafts, over: seen.attempt }), { storage: store, now: 5_000, target });
     expect(sendKeys()).toEqual([key]);
     expect(store.getItem(key!)).toBe(before); // the only stored record of the Send stands (the press is held in this window alone)
     store.quota = null;
@@ -286,6 +286,21 @@ describe('the stored memory (T19): one entry a thing', () => {
     expect(readMemory(S, storage).drafts.get('q4')?.text).toBe('from the other tab');
   });
 
+  it('judges reconcile’s removals against the memory stored when the model’s read started: another tab’s draft written after it, its notification still to come, stands (B1)', () => {
+    const store = testStorage();
+    const target = new EventTarget();
+    writeMemory(S, EMPTY_MEMORY, { ...EMPTY_MEMORY, seen: new Map([['q5', 1]]) }, 1, store);
+    const baseline = readMemory(S, store); // when tab B's read of the model started
+    const modelB = sheetOf([NOTICES], { hidden: [{ id: 'q4', key: 'page-000000000000000000000000009' }] } as never); // q4 hidden in that older model
+    // tab A takes the dismissal back and drafts q4 while B's read is out; B's storage event comes only after the answer
+    writeMemory(S, readMemory(S, store), withDraft(readMemory(S, store), 'q4', draft('reopened')), 2, store);
+    const stored = readMemory(S, store); // what B's view reads when it mounts: the draft is in it
+    const view = reconcile(stored, modelB);
+    expect(view.drafts.has('q4')).toBe(false); // reconcile against the older model would prune it
+    expect(writeReconciled(S, stored, view, true, { storage: store, now: 3, target, baseline })).toEqual({ conflict: true });
+    expect(readMemory(S, store).drafts.get('q4')).toEqual(draft('reopened'));
+  });
+
   it('writes reconcile’s changes from the memory the view was made from, each entry only where storage still holds it: another tab’s write not yet adopted is left, and said', () => {
     const store = testStorage();
     const target = new EventTarget();
@@ -369,37 +384,70 @@ describe('the stored memory (T19): one entry a thing', () => {
     expect(kept).not.toContain(`maws.sheet.draft.${S}.q5`); // touched longest ago, a Send's aside
   });
 
-  it('evicts nothing for an edit too large for the store even alone, holds it in this window, and says so (B6)', async () => {
+  it('holds an edit past ENTRY_KEPT_MAX in this window without trying the store, evicting nothing, and says so (B6)', async () => {
     vi.resetModules();
     const fresh = await import('./memory');
     const store = testStorage({ [CREDENTIAL_KEY]: JSON.stringify({ v: 1, id: '0a1b2c3d', credential: 'A'.repeat(43) }) });
     fresh.writeMemory(OTHER, EMPTY_MEMORY, withDraft(EMPTY_MEMORY, 'q1', draft('another session’s unsent draft')), 0, store);
     fresh.writeMemory(S, EMPTY_MEMORY, withDraft(EMPTY_MEMORY, 'q5', draft('a draft of this session')), 1, store);
     const stored = store.entries();
-    store.quota = Object.entries(stored).reduce((sum, [key, value]) => sum + key.length + value.length, 0) + 200;
+    const setItem = vi.spyOn(store, 'setItem');
+    const removeItem = vi.spyOn(store, 'removeItem');
     const target = new EventTarget();
     const heard = vi.fn();
     fresh.onMemory(S, heard, target);
-    const long = draft('x'.repeat(5_000)); // past the whole store, whatever is evicted
+    const long = draft('x'.repeat(fresh.ENTRY_KEPT_MAX)); // past the bound, however much room the store has
     fresh.updateMemory(S, (current) => withDraft(current, 'q4', long), { storage: store, now: 2, target });
-    expect(store.entries()).toEqual(stored); // nothing evicted, nothing written
-    expect(fresh.readMemory(S, store).drafts.get('q4')).toEqual(long); // still this window's draft: editable and sendable
-    expect(fresh.readMemory(S, store).drafts.get('q5')).toEqual(draft('a draft of this session'));
+    expect(setItem).not.toHaveBeenCalled(); // nothing tried, so nothing of another tab's can be overwritten
+    expect(removeItem).not.toHaveBeenCalled();
+    expect(store.entries()).toEqual(stored);
+    expect(fresh.readMemory(S, store).drafts.get('q4')).toEqual(long); // this window's draft: editable and sendable
     expect(fresh.unkeptDraft(S, store)).toBe(true);
     expect(fresh.unkeptDraft(OTHER, store)).toBe(false);
     expect(heard).toHaveBeenCalledTimes(1);
 
+    setItem.mockRestore();
     fresh.updateMemory(S, (current) => withDraft(current, 'q4', draft('short again')), { storage: store, now: 3, target });
     expect(fresh.unkeptDraft(S, store)).toBe(false);
     expect(JSON.parse(store.getItem(`maws.sheet.draft.${S}.q4`)!)).toMatchObject({ draft: draft('short again') });
+  });
+
+  it('lets a later durable write of a held draft win, from another tab, and no removal of this one reaches it (B6)', async () => {
+    vi.resetModules();
+    const fresh = await import('./memory');
+    const store = testStorage();
+    const target = new EventTarget();
+    fresh.updateMemory(S, (current) => withDraft(current, 'q4', draft('x'.repeat(fresh.ENTRY_KEPT_MAX))), { storage: store, now: 10, target });
+    expect(fresh.unkeptDraft(S, store)).toBe(true);
+    // another tab writes the same draft, later and durably
+    store.setItem(`maws.sheet.draft.${S}.q4`, JSON.stringify({ v: 1, touchedAt: 20, draft: draft('the other tab’s') }));
+    expect(fresh.readMemory(S, store).drafts.get('q4')).toEqual(draft('the other tab’s'));
+    expect(fresh.unkeptDraft(S, store)).toBe(false); // the held entry is dropped
+    // a reconcile made from this window's older view would remove q4's draft: storage holds the other tab's, so it stays
+    const older = withDraft(EMPTY_MEMORY, 'q4', draft('x'));
+    expect(fresh.writeReconciled(S, older, EMPTY_MEMORY, true, { storage: store, now: 30, target })).toEqual({ conflict: true });
+    expect(fresh.readMemory(S, store).drafts.get('q4')).toEqual(draft('the other tab’s'));
+  });
+
+  it('below the bound, makes room by eviction as before, and holds the edit here only where nothing more can go (B6)', async () => {
+    vi.resetModules();
+    const fresh = await import('./memory');
+    const store = testStorage();
+    fresh.writeMemory(OTHER, EMPTY_MEMORY, withDraft(EMPTY_MEMORY, 'q1', draft('y'.repeat(300))), 0, store);
+    store.quota = Object.entries(store.entries()).reduce((sum, [key, value]) => sum + key.length + value.length, 0) + 100;
+    fresh.updateMemory(S, (current) => withDraft(current, 'q4', draft('z'.repeat(300))), { storage: store, now: 1, target: new EventTarget() });
+    expect(store.getItem(`maws.sheet.draft.${OTHER}.q1`)).toBeNull(); // touched longest ago: it made room
+    expect(fresh.unkeptDraft(S, store)).toBe(false);
+    fresh.updateMemory(S, (current) => withDraft(current, 'q5', draft('w'.repeat(2_000))), { storage: store, now: 2, target: new EventTarget() });
+    expect(fresh.unkeptDraft(S, store)).toBe(true); // all that could go went, and it still did not fit
+    expect(fresh.readMemory(S, store).drafts.get('q5')).toEqual(draft('w'.repeat(2_000)));
   });
 
   it('forgets what it held in this window when the person unpairs (B6)', async () => {
     vi.resetModules();
     const fresh = await import('./memory');
     const store = testStorage();
-    store.quota = 100;
-    fresh.updateMemory(S, (current) => withDraft(current, 'q4', draft('x'.repeat(500))), { storage: store, now: 1, target: new EventTarget() });
+    fresh.updateMemory(S, (current) => withDraft(current, 'q4', draft('x'.repeat(fresh.ENTRY_KEPT_MAX))), { storage: store, now: 1, target: new EventTarget() });
     expect(fresh.unkeptDraft(S, store)).toBe(true);
     fresh.forgetUnkept(store);
     expect(fresh.unkeptDraft(S, store)).toBe(false);

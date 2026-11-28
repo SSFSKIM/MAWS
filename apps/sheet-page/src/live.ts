@@ -12,7 +12,8 @@
 // After a close it tries again after 1, 2, 5 and then every 10 seconds, a new nonce each time; the waits start again
 // once a connection was paired. 4401 and 4403 read `unpaired`, which shows the pairing screen and deletes nothing (T19):
 // the client goes on trying with what is stored, so a tab that a stranger on the port sent to the pairing screen comes
-// back by itself when `mawsd` has the port again. The pairing is read when each socket opens, so a new one is used at
+// back by itself when `mawsd` has the port again. Where the refusal came on a socket whose proof matched, it is the real
+// `mawsd`'s and is told as such (`onRevoked`), so the page lets go of what it read under that pairing. The pairing is read when each socket opens, so a new one is used at
 // once.
 //
 // After `paired` (§N) the server sends a snapshot, `ready`, and then one `changed` a change; each is handed on once it
@@ -60,6 +61,9 @@ export interface LiveDeps {
   onReady?(sessions: SheetSummary[], door: DoorState): void; // a snapshot
   onChanged?(session: string, summary: SheetSummary | null): void; // one change, after a snapshot
   onState(state: Connection): void;
+  // the server this socket proved refused or unpaired the browser (4401 or 4403 after the proof matched): an authenticated
+  // end of the pairing, unlike a refusal before any proof, which says nothing of who refused
+  onRevoked?(): void;
   open?(url: string): LiveSocket; // test seam: the browser's WebSocket
 }
 
@@ -148,10 +152,12 @@ export function connect(deps: LiveDeps): Live {
     };
     here.onclose = ({ code }) => {
       if (socket !== here) return;
+      const authenticated = proven !== null;
       socket = null;
       proven = null;
       clear();
       if (closed) return;
+      if (REFUSED.has(code) && authenticated) deps.onRevoked?.();
       become(REFUSED.has(code) ? 'unpaired' : 'lost');
       wait = setTimeout(start, RETRY_MS[Math.min(tries, RETRY_MS.length - 1)]);
       tries++;

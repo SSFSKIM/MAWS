@@ -12,9 +12,14 @@
 // is shown and its first read starts, so a write another tab makes while that read is out unsettles it even though no
 // view was mounted yet to hear the write. A pairing that ends or changes resets it (`reset`): nothing of the old
 // pairing's summaries, door or model stays, no read of it still out is applied, and the place on screen is read again
-// by the next pairing's snapshot. Reconnects of one pairing keep it.
+// by the next pairing's snapshot. Reconnects of one pairing keep it. Each read takes the stored memory as it is when
+// the read starts (`baseline`), and the model applied carries it: reconcile's removals are judged against what storage
+// held when the model was asked for, not what it holds when the model lands, so another tab's write whose notification
+// comes after the answer is never taken for part of the model's past. A connection that says `unavailable` holds the
+// model unfresh (`stale`) until a read started after its next snapshot is applied.
 import type { DoorState } from '@shared/ipc/schema/sheet';
 import type { SheetModel, SheetSummary } from '@shared/sheet/model';
+import type { SheetMemory } from '../../../src/renderer/src/sheet';
 import type { ReadAnswer } from './api';
 
 export const READ_RETRY_MS = 5_000;
@@ -25,7 +30,8 @@ export interface StoreState {
   // the session on screen: its model (undefined until a read is applied; null where the service holds no record),
   // whether a read started after the last snapshot has been applied, and whether one started after the last write of
   // another tab this tab adopted has been (`settled`: the tab's reconcile against it may be written, §P)
-  shown: { session: string; model: SheetModel | null | undefined; fresh: boolean; settled: boolean } | null;
+  // `baseline`: the session's stored memory when the applied read started (null before one is applied, or without the dep)
+  shown: { session: string; model: SheetModel | null | undefined; fresh: boolean; settled: boolean; baseline?: SheetMemory | null } | null;
 }
 
 export interface SheetStore {
@@ -37,10 +43,12 @@ export interface SheetStore {
   show(session: string | null): void;
   adopted(session: string): void; // this tab adopted another tab's write of the session's memory
   reset(): void; // the pairing ended or changed
+  stale(): void; // the connection said `unavailable`: not fresh until the read after its next snapshot
 }
 
 export interface StoreDeps {
   read(session: string): Promise<ReadAnswer>;
+  baseline?(session: string): SheetMemory; // the session's stored memory now (memory.ts's readMemory)
   // a session's memory written, in this tab or (`adopted`) in another (memory.ts's onMemory)
   onMemory?(session: string, listener: (adopted: boolean) => void): () => void;
 }
@@ -71,6 +79,7 @@ export function createStore(deps: StoreDeps): SheetStore {
     const count = (asked += 1);
     const at = awaitingReady ? null : snapshot;
     const under = pairing;
+    const baseline = deps.baseline?.(session) ?? null; // before the read leaves
     out.set(session, (out.get(session) ?? 0) + 1);
     void deps.read(session).then((answer) => {
       if (under !== pairing) return; // the pairing it was read under has ended
@@ -86,8 +95,15 @@ export function createStore(deps: StoreDeps): SheetStore {
         return;
       }
       applied = count;
-      set({ door: answer.door, shown: { session, model: answer.model, fresh: shown.fresh || at === snapshot, settled: shown.settled || count > adoptedAt } });
+      set({ door: answer.door, shown: { session, model: answer.model, fresh: shown.fresh || at === snapshot, settled: shown.settled || count > adoptedAt, baseline } });
     });
+  }
+
+  // Not fresh until a read started after the next `ready` is applied (a connection's `paired`, or its `unavailable`)
+  function unfresh(): void {
+    snapshot += 1;
+    awaitingReady = true;
+    if (state.shown?.fresh) set({ shown: { ...state.shown, fresh: false } });
   }
 
   function adopted(session: string): void {
@@ -104,11 +120,8 @@ export function createStore(deps: StoreDeps): SheetStore {
       listeners.add(listener);
       return () => void listeners.delete(listener);
     },
-    opened() {
-      snapshot += 1;
-      awaitingReady = true;
-      if (state.shown) set({ shown: { ...state.shown, fresh: false } });
-    },
+    opened: unfresh,
+    stale: unfresh,
     ready(sessions, door) {
       snapshot += 1;
       awaitingReady = false;

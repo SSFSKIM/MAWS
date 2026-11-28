@@ -13,9 +13,11 @@ const DOOR = { known: true as const, available: true as const };
 
 function harness() {
   const pending: { session: string; done(answer: ReadAnswer): void }[] = [];
+  let stored = 0; // what storage holds of the memory, as a version the baseline captures
   const watched = new Map<string, Set<(adopted: boolean) => void>>(); // the memory's listeners, by session
   const store = createStore({
     read: (session) => new Promise<ReadAnswer>((done) => void pending.push({ session, done })),
+    baseline: () => ({ version: stored }) as never,
     onMemory: (session, listener) => {
       const set = watched.get(session) ?? new Set();
       watched.set(session, set.add(listener));
@@ -31,7 +33,8 @@ function harness() {
     await Promise.resolve();
     await Promise.resolve();
   };
-  return { store, pending, answer, wrote, watched };
+  const write = () => void (stored += 1); // a write lands in storage, its event not yet delivered
+  return { store, pending, answer, wrote, watched, write };
 }
 
 beforeEach(() => vi.useFakeTimers());
@@ -96,6 +99,32 @@ describe('the store', () => {
     expect(pending).toHaveLength(2); // and it is read again
     await answer(1, { ok: true, model: model(2), door: DOOR });
     expect(store.state().shown).toMatchObject({ model: model(2), settled: true });
+  });
+
+  it('carries the stored memory as it was when the applied read started, whatever storage holds when it lands (B1)', async () => {
+    const { store, answer, write, wrote } = harness();
+    store.show(S);
+    write(); // another tab's write after the read started; its event comes only after the answer
+    await answer(0, { ok: true, model: model(1), door: DOOR });
+    expect(store.state().shown).toMatchObject({ model: model(1), settled: true, baseline: { version: 0 } }); // judged against the start
+    wrote(S); // the event, delivered late: the read again carries the newer baseline
+  });
+
+  it('holds the model unfresh from `unavailable` until a read started after the next snapshot is applied (B3)', async () => {
+    const { store, pending, answer } = harness();
+    store.show(S);
+    store.ready([summary(S, 1)], DOOR);
+    await answer(0, { ok: true, model: model(1), door: DOOR });
+    await answer(1, { ok: true, model: model(1), door: DOOR });
+    expect(store.state().shown?.fresh).toBe(true);
+    store.stale(); // the spine went away: no snapshot can be had now
+    expect(store.state().shown?.fresh).toBe(false);
+    store.changed(S, summary(S, 2)); // a read before the next snapshot does not make it fresh
+    await answer(2, { ok: true, model: model(2), door: DOOR });
+    expect(store.state().shown?.fresh).toBe(false);
+    store.ready([summary(S, 2)], DOOR);
+    await answer(pending.length - 1, { ok: true, model: model(2), door: DOOR });
+    expect(store.state().shown?.fresh).toBe(true);
   });
 
   it('a write of this tab’s own, or of another session, settles nothing less; a session left is no longer heard (B1)', async () => {

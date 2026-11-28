@@ -54,6 +54,7 @@ let states: Connection[];
 let paired: number;
 let stored: { id: string; credential: string } | null;
 let heard: unknown[];
+let revoked: number;
 
 const live = () =>
   connect({
@@ -64,6 +65,7 @@ const live = () =>
     onState: (state) => void states.push(state),
     onReady: (sessions, door) => void heard.push({ ready: sessions, door }),
     onChanged: (session, summary) => void heard.push({ changed: session, summary }),
+    onRevoked: () => void (revoked += 1),
     open: (url) => {
       const socket = new Scripted(url);
       sockets.push(socket);
@@ -78,6 +80,7 @@ beforeEach(() => {
   paired = 0;
   stored = { id: ID, credential: CREDENTIAL };
   heard = [];
+  revoked = 0;
 });
 afterEach(() => vi.useRealTimers());
 
@@ -209,6 +212,34 @@ describe('the pairing it proved', () => {
     last().say({ t: 'paired' });
     stored = null;
     expect(connection.proven()).toBeNull();
+  });
+});
+
+describe('a revocation by the server it proved (B5)', () => {
+  it('is told for 4403 on a paired socket and for 4401 after the proof matched, and never for an unproven refusal or a disconnect', () => {
+    live();
+    last().open();
+    last().say(proofFor(last()));
+    last().say({ t: 'paired' });
+    last().end(4403);
+    expect(revoked).toBe(1);
+    vi.advanceTimersByTime(RETRY_MS[0]!);
+    last().open();
+    last().say(proofFor(last()));
+    last().end(4401); // the proven server refused the credential
+    expect(revoked).toBe(2);
+    vi.advanceTimersByTime(RETRY_MS[0]!);
+    last().open();
+    last().end(4401); // refused at the hello: no proof, so it says nothing of who refused
+    vi.advanceTimersByTime(RETRY_MS[1]!);
+    last().open();
+    last().end(4403); // a stranger's 4403 before any proof
+    vi.advanceTimersByTime(RETRY_MS[2]!);
+    last().open();
+    last().say(proofFor(last()));
+    last().say({ t: 'paired' });
+    last().end(1006); // a disconnect
+    expect(revoked).toBe(2);
   });
 });
 

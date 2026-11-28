@@ -17,15 +17,16 @@ import { createApi } from './api';
 import { BAND_AFTER_MS, bandOf } from './availability';
 import { createChunkGate, installChunkGate } from './chunk-gate';
 import { PAGE } from './copy';
-import { CREDENTIAL_KEY, forgetPairing, readPairing, writePairing, type StoredPairing } from './credential';
+import { CREDENTIAL_KEY, readPairing, writePairing, type StoredPairing } from './credential';
 import { Frame } from './frame/Frame';
 import { connect, type Connection, type Live } from './live';
 import { useOutline } from './outline/state';
+import { pageLive } from './page-live';
 import { PairingScreen } from './pairing/PairingScreen';
 import { pathOf, placeOf, type Place } from './route';
-import { forgetUnkept, onMemory } from './memory';
+import { forgetUnkept, onMemory, readMemory } from './memory';
 import { createStore } from './store';
-import { unpairThisBrowser, type Unpaired } from './unpair';
+import { unpairScreen, type Unpaired } from './unpair';
 
 // The workspace is in the page's own load, not a chunk asked for later: a module load that failed stays failed in a
 // browser's module map (Chromium's, as the browser suite runs it), so a workspace asked for at `paired` while mawsd went
@@ -48,7 +49,7 @@ const api = createApi({ proven: () => current.live?.proven() ?? null, leaving: (
 // The Markdown stack's lazy chunks ask the same connection (chunk-gate.ts; T28)
 const chunks = createChunkGate({ proven: () => (current.live?.proven() ?? null) !== null, importer: (url) => import(/* @vite-ignore */ url) });
 installChunkGate(chunks);
-const store = createStore({ read: api.read, onMemory });
+const store = createStore({ read: api.read, onMemory, baseline: (session) => readMemory(session) });
 
 // Whether the tab may hold its connection: not once it has been hidden for five minutes
 function useAwake(): boolean {
@@ -136,20 +137,20 @@ export function App() {
       url: liveUrl(),
       origin: location.origin, // what the server's proof must cover (T28)
       pairing: readPairing, // read as each socket opens: what is stored now
-      onPaired: () => {
-        setUnpaired(null);
-        setScreen('frame');
-        store.opened(); // not fresh until this connection's `ready` has been read (T14)
-        chunks.opened();
-      },
-      onReady: (sessions, door) => store.ready(sessions, door),
-      onChanged: (session, summary) => store.changed(session, summary),
-      onState: (state) => {
-        setConnection({ state, since: Date.now() });
-        if (state !== 'unpaired') return;
-        setUnpaired('refused');
-        setScreen('pairing');
-      },
+      ...pageLive({
+        store,
+        chunks,
+        paired: () => {
+          setUnpaired(null);
+          setScreen('frame');
+        },
+        state: (state) => {
+          setConnection({ state, since: Date.now() });
+          if (state !== 'unpaired') return;
+          setUnpaired('refused');
+          setScreen('pairing');
+        },
+      }),
     });
     current.live = live;
     return () => {
@@ -169,8 +170,7 @@ export function App() {
   // which of the three it was, unless the browser was paired again meanwhile
   const unpairs = useRef(0);
   const unpair = () => {
-    const removing = current.live?.proven() ?? readPairing();
-    const outcome = unpairThisBrowser({ pairing: removing, unpair: api.unpair, close: () => current.live?.close(), forget: (pairing) => forgetPairing(pairing) && forgetUnkept() });
+    const outcome = unpairScreen({ shown: pairing, api, close: () => current.live?.close() }); // the pairing this screen belongs to
     const now = readPairing();
     setPairing(now);
     if (now !== null) return; // another tab paired this browser anew: this one follows it

@@ -22,7 +22,7 @@ export type UploadAnswer = { ok: true; path: string } | { ok: false; why: string
 
 export interface Api {
   pair(code: string): Promise<PairAnswer>;
-  unpair(): Promise<Done>;
+  unpair(expected?: StoredPairing): Promise<Done>; // `expected`: made only while the live proof is that pairing's
   read(session: string): Promise<ReadAnswer>;
   put(session: string, lines: SheetLine[]): Promise<SheetPutResult>; // not made, a failure, a 5xx or no answer in time: `failed`
   body(session: string, of: SheetBodyRequest): Promise<SheetBody>; // rejects where it could not be asked or read
@@ -60,10 +60,11 @@ export function createApi(deps: ApiDeps): Api {
     }
   };
 
-  // A request that carries the credential, made only on a proven connection
-  async function authorized(url: string, init: RequestInit): Promise<Response | 'unproven'> {
+  // A request that carries the credential, made only on a proven connection, and, where `expected` is named, only while
+  // that connection proved that very pairing
+  async function authorized(url: string, init: RequestInit, expected?: StoredPairing): Promise<Response | 'unproven'> {
     const pairing = deps.proven();
-    if (pairing === null) return 'unproven';
+    if (pairing === null || (expected !== undefined && (expected.id !== pairing.id || expected.credential !== pairing.credential))) return 'unproven';
     return send(url, { ...init, headers: { ...init.headers, Authorization: `Bearer ${pairing.credential}` } });
   }
 
@@ -84,19 +85,24 @@ export function createApi(deps: ApiDeps): Api {
       return { ok: false, why: 'failed' };
     },
 
-    async unpair() {
-      let response: Response | 'unproven';
+    async unpair(expected) {
+      // one deadline for the whole of it, the body of a refusal included
+      const gave = new AbortController();
+      const timer = setTimeout(() => gave.abort(), UNPAIR_WAIT_MS);
       try {
-        const gave = new AbortController();
-        const timer = setTimeout(() => gave.abort(), UNPAIR_WAIT_MS);
-        response = await authorized('/api/unpair', { method: 'POST', signal: gave.signal }).finally(() => clearTimeout(timer));
-      } catch {
+        let response: Response | 'unproven';
+        try {
+          response = await authorized('/api/unpair', { method: 'POST', signal: gave.signal }, expected);
+        } catch {
+          return { ok: false, why: 'failed' };
+        }
+        if (response === 'unproven') return { ok: false, why: 'unproven' };
+        if (response.status === 204) return { ok: true };
+        if (response.status === 500 && (await read(response)).why === 'not-saved') return { ok: false, why: 'not-saved' };
         return { ok: false, why: 'failed' };
+      } finally {
+        clearTimeout(timer);
       }
-      if (response === 'unproven') return { ok: false, why: 'unproven' };
-      if (response.status === 204) return { ok: true };
-      if (response.status === 500 && (await read(response)).why === 'not-saved') return { ok: false, why: 'not-saved' };
-      return { ok: false, why: 'failed' };
     },
 
     async read(session) {

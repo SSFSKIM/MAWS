@@ -74,6 +74,31 @@ describe('unpair', () => {
     }
   });
 
+  it('makes no request when the proven pairing is not the one asked to unpair (B4)', async () => {
+    const { api, calls, prove } = harness();
+    prove(PAIRING);
+    expect(await api.unpair({ id: 'ffffffff', credential: PAIRING.credential })).toEqual({ ok: false, why: 'unproven' });
+    expect(calls).toEqual([]);
+  });
+
+  it('keeps its deadline while a refusal’s body is read (B4)', async () => {
+    vi.useFakeTimers();
+    try {
+      // headers come, the body never does: only the request's own signal ends its read
+      const fetch = vi.fn(async (_url: string | URL | Request, init?: RequestInit) => {
+        const body = new ReadableStream({ start: (controller) => init?.signal?.addEventListener('abort', () => controller.error(new DOMException('aborted', 'AbortError'))) });
+        return new Response(body, { status: 500, headers: { 'Content-Type': 'application/json' } });
+      });
+      const api = createApi({ proven: () => PAIRING, fetch });
+      let answered: unknown = null;
+      void api.unpair(PAIRING).then((done) => void (answered = done));
+      await vi.advanceTimersByTimeAsync(UNPAIR_WAIT_MS);
+      expect(answered).toEqual({ ok: false, why: 'failed' });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('posts to /api/unpair with the credential as a Bearer header once proven', async () => {
     const { api, calls, prove } = harness();
     prove(PAIRING);

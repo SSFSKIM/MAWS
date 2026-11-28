@@ -53,10 +53,10 @@ export function SheetView({ shown, navigate, ...rest }: SheetViewProps) {
       </div>
     );
   }
-  return <Sheet key={shown.model.session} model={shown.model} fresh={shown.fresh} settled={shown.settled} {...rest} />;
+  return <Sheet key={shown.model.session} model={shown.model} fresh={shown.fresh} settled={shown.settled} baseline={shown.baseline ?? null} {...rest} />;
 }
 
-function Sheet({ model, fresh, settled, door, connection, host, outline, adopted }: Omit<SheetViewProps, 'shown' | 'navigate'> & { model: SheetModel; fresh: boolean; settled: boolean }) {
+function Sheet({ model, fresh, settled, baseline, door, connection, host, outline, adopted }: Omit<SheetViewProps, 'shown' | 'navigate'> & { model: SheetModel; fresh: boolean; settled: boolean; baseline: SheetMemory | null }) {
   const { memory: stored, elsewhereSince, unkept, update } = useSessionMemory(model.session);
   // What the tab shows is its own reconcile of the stored memory against its model, so SessionSheet's finds nothing to
   // do and every change it asks for is the person's or a Send's, applied to that view and written as what it changes;
@@ -67,10 +67,11 @@ function Sheet({ model, fresh, settled, door, connection, host, outline, adopted
   useEffect(() => {
     if (memory === stored) return;
     // what the view changed of the memory it was made from; an entry another tab changed since, not yet adopted, is
-    // left, and the model is read again
-    const { conflict } = writeReconciled(model.session, stored, memory, settled, { known: against(model).known });
+    // left, and the model is read again. A removal is judged against the memory stored when the model's read started
+    // (the store's baseline), never only against what the view read at render (B1)
+    const { conflict } = writeReconciled(model.session, stored, memory, settled, { known: against(model).known, baseline });
     if (conflict) adopted(model.session);
-  }, [memory, stored, model, settled, adopted]);
+  }, [memory, stored, model, settled, baseline, adopted]);
   const [now, setNow] = useState(() => Date.now()); // moved on by the timer below; an older `now` only holds Send back until it fires
   const { text, until } = sendUnavailable({ connection, fresh, door, elsewhereSince, now });
   useEffect(() => {

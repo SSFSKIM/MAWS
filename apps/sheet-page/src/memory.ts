@@ -24,11 +24,13 @@
 // compared by identity in C3's memory, so a read gives an act whose stored draft equals its question's stored draft that
 // same object. A refusal deletes nothing here; only the person's Unpair does (credential.ts).
 //
-// A full store makes room by dropping the entries touched longest ago, never a Send's; but an entry that cannot fit even
-// with all of those gone (an answer too long for the origin's storage) evicts nothing: what was dropped to try is put
-// back, and the entry is held in this window alone (`unkept`), read in place of storage's, so the draft stays editable
-// and sendable here, and the sheet says it would not survive a reload (`unkeptDraft`). A later write of the entry that
-// fits, or its removal, ends the hold; the person's Unpair forgets every hold (`forgetUnkept`).
+// An entry past ENTRY_KEPT_MAX (an answer too long to keep) is never tried against the store: it is held in this window
+// alone (`unkept`), read in place of storage's, so the draft stays editable and sendable here and the sheet says it would
+// not survive a reload (`unkeptDraft`). Nothing is removed or written back for it, so no other tab's entry is touched.
+// Below the bound, a full store makes room by dropping the entries touched longest ago, never a Send's and never the
+// pairing, as before; an entry that still does not fit once nothing more can go is held here the same way. A held entry
+// never hides a later durable write of the same entry, from this window or another: whichever was touched later is read,
+// and a held entry older than storage's is dropped. The person's Unpair forgets every hold (`forgetUnkept`).
 import type { SheetLine } from '@shared/sheet/model';
 import type { QuestionDraft } from '@shared/sheet/words';
 import { EMPTY_MEMORY, type SentAct, type SheetMemory } from '../../../src/renderer/src/sheet';
@@ -37,6 +39,9 @@ import { CREDENTIAL_KEY, STORAGE_PREFIX } from './credential';
 type Kind = 'draft' | 'seen' | 'header' | 'act' | 'send';
 const KINDS: readonly Kind[] = ['draft', 'seen', 'header', 'act', 'send'];
 export const SWEEP_MS = 30 * 24 * 60 * 60 * 1000; // an entry untouched this long goes (T19)
+// The most characters (key and value together) an entry is stored with: well under every engine's quota for an
+// origin (the smallest, Safari's and Firefox's, is about 5 MB), so a draft past it is one no store keeps whole
+export const ENTRY_KEPT_MAX = 256 * 1024;
 export const ELSEWHERE = 'elsewhere:'; // the attempt of a Send this window did not make: C3's attempts never hold a colon
 
 const prefixOf = (kind: Kind, session: string) => `${STORAGE_PREFIX}${kind}.${session}.`;
@@ -69,7 +74,19 @@ const unkeptOf = (storage: Storage) => {
   if (entries === undefined) held.set(storage, (entries = new Map()));
   return entries;
 };
-const itemOf = (storage: Storage, key: string): string | null => unkeptOf(storage).get(key) ?? storage.getItem(key);
+const touchedOf = (text: string | null): number => (parsed(text)?.touchedAt as number | undefined) ?? Number.NEGATIVE_INFINITY;
+// An entry as this window reads it: what it holds, unless storage holds a write of it touched as late or later
+function itemOf(storage: Storage, key: string): string | null {
+  const held = unkeptOf(storage);
+  const mine = held.get(key);
+  const durable = storage.getItem(key);
+  if (mine === undefined) return durable;
+  if (durable !== null && touchedOf(durable) >= touchedOf(mine)) {
+    held.delete(key); // a later durable write wins
+    return durable;
+  }
+  return mine;
+}
 const drop = (storage: Storage, key: string) => {
   unkeptOf(storage).delete(key);
   storage.removeItem(key);
@@ -207,15 +224,21 @@ const canonical = (value: unknown): string =>
 // The difference between two memories, written. `guarded`: each entry only where storage still holds it as `before`
 // has it (one it already holds as `after` has it is left alone); any other is another tab's write, not yet adopted,
 // and is left and said (`conflict`). A guarded write is reconcile's, which never changes the Send the memory holds.
-function writeDiff(session: string, before: SheetMemory, after: SheetMemory, now: number, storage: Storage, known: (question: string) => boolean, guarded: boolean): { wrote: boolean; conflict: boolean } {
+// `baseline` (a guarded write's): the memory stored when the model the view was reconciled against was asked for. A
+// removal is written only where storage holds the entry as the baseline had it too, so an entry another tab wrote after
+// that read started (its notification not yet heard when the view read storage) is never pruned by an older model.
+function writeDiff(session: string, before: SheetMemory, after: SheetMemory, now: number, storage: Storage, known: (question: string) => boolean, guarded: boolean, baseline: SheetMemory | null = null): { wrote: boolean; conflict: boolean } {
   let wrote = false;
   let conflict = false;
-  const stillAsBefore = (kind: Kind, name: string) => {
-    if (!guarded) return true;
+  const storedShape = (kind: Kind, name: string) => {
     const stored = parsed(itemOf(storage, keyOf(kind, session, name)));
-    const now = stored === null ? 'null' : canonical(Object.fromEntries(Object.entries(stored).filter(([field]) => field !== 'v' && field !== 'touchedAt')));
+    return stored === null ? 'null' : canonical(Object.fromEntries(Object.entries(stored).filter(([field]) => field !== 'v' && field !== 'touchedAt')));
+  };
+  const stillAsBefore = (kind: Kind, name: string, removal = false) => {
+    if (!guarded) return true;
+    const now = storedShape(kind, name);
     if (now === canonical(shapeOf(kind, after, name))) return false; // already so
-    if (now === canonical(shapeOf(kind, before, name))) return true;
+    if (now === canonical(shapeOf(kind, before, name)) && !(removal && baseline !== null && now !== canonical(shapeOf(kind, baseline, name)))) return true;
     conflict = true;
     return false;
   };
@@ -226,7 +249,7 @@ function writeDiff(session: string, before: SheetMemory, after: SheetMemory, now
   };
   const remove = (kind: Kind, name: string) => {
     if (kind !== 'act' && !known(name)) return; // a question newer than this tab's model: another tab's to keep
-    if (!stillAsBefore(kind, name)) return;
+    if (!stillAsBefore(kind, name, true)) return;
     drop(storage, keyOf(kind, session, name));
     wrote = true;
   };
@@ -288,39 +311,23 @@ function writeDiff(session: string, before: SheetMemory, after: SheetMemory, now
   return { wrote: true, conflict };
 }
 
-// A write that makes room when the store is full: the entries of the memory touched longest ago go first, never a
-// Send's, and never the pairing or anything that is not the memory's. One that cannot fit with all of those gone puts
-// back what it dropped and is held in this window instead (the file's head).
+// A write: held in this window when past the bound, without trying the store; else stored, making room in a full store
+// by dropping the entries of the memory touched longest ago (never a Send's, never the pairing or anything that is not
+// the memory's), and held here when nothing more can go
 function store(storage: Storage, key: string, value: string): void {
-  const dropped: [string, string][] = [];
-  const putBack = () => {
-    for (const [was, text] of dropped.reverse()) {
-      try {
-        storage.setItem(was, text); // it fitted before, and the write that failed took no room
-      } catch {
-        // nothing more to do: the entry was the oldest, and is lost as a full store loses one
-      }
-    }
-  };
+  const held = unkeptOf(storage);
+  if (key.length + value.length > ENTRY_KEPT_MAX) return void held.set(key, value);
   for (;;) {
     try {
       storage.setItem(key, value);
-      unkeptOf(storage).delete(key);
+      held.delete(key);
       return;
     } catch (error) {
-      if (!(error instanceof DOMException) || error.name !== 'QuotaExceededError') {
-        putBack();
-        throw error;
-      }
+      if (!(error instanceof DOMException) || error.name !== 'QuotaExceededError') throw error;
       const oldest = memoryEntries(storage)
         .filter((entry) => entry.kind !== 'send' && entry.key !== key)
         .sort((a, b) => a.touchedAt - b.touchedAt)[0];
-      if (oldest === undefined) {
-        putBack();
-        unkeptOf(storage).set(key, value);
-        return;
-      }
-      dropped.push([oldest.key, storage.getItem(oldest.key)!]);
+      if (oldest === undefined) return void held.set(key, value);
       storage.removeItem(oldest.key);
     }
   }
@@ -329,7 +336,7 @@ function store(storage: Storage, key: string, value: string): void {
 /** Whether a draft of the session is held in this window alone, too long for the store: it would not survive a reload. */
 export function unkeptDraft(session: string, storage: Storage = localStorage): boolean {
   const prefix = prefixOf('draft', session);
-  return [...unkeptOf(storage).keys()].some((key) => key.startsWith(prefix));
+  return [...unkeptOf(storage).keys()].some((key) => key.startsWith(prefix) && (itemOf(storage, key), unkeptOf(storage).has(key))); // a hold a later write overtook is dropped first
 }
 
 /** The person's Unpair: nothing this window held stands. */
@@ -392,12 +399,19 @@ export function updateMemory(session: string, update: (current: SheetMemory) => 
 /**
  * Writes what C3's `reconcile` changed of the memory a tab's view was made from (`snapshot`, the stored memory it read;
  * `view`, its reconcile against the tab's model), when `settled`: that model was read after the last write of another
- * tab this tab adopted. Each entry only where storage still holds it as the snapshot had it; one another tab changed
- * since, and this tab has not yet adopted, is left, and `conflict` says so: the tab reads the model again.
+ * tab this tab adopted. Each entry only where storage still holds it as the snapshot had it, and a removal only where
+ * it holds it as `baseline` had it too (the memory stored when that model's read started); one another tab changed since,
+ * and this tab has not yet adopted, is left, and `conflict` says so: the tab reads the model again.
  */
-export function writeReconciled(session: string, snapshot: SheetMemory, view: SheetMemory, settled: boolean, { storage = localStorage, now = Date.now(), target = globalThis, known = () => true }: Omit<MemoryUpdateOptions, 'base'> = {}): { conflict: boolean } {
+export function writeReconciled(
+  session: string,
+  snapshot: SheetMemory,
+  view: SheetMemory,
+  settled: boolean,
+  { storage = localStorage, now = Date.now(), target = globalThis, known = () => true, baseline = null }: Omit<MemoryUpdateOptions, 'base'> & { baseline?: SheetMemory | null } = {},
+): { conflict: boolean } {
   if (!settled || snapshot === view) return { conflict: false };
-  const { wrote, conflict } = writeDiff(session, snapshot, view, now, storage, known, true);
+  const { wrote, conflict } = writeDiff(session, snapshot, view, now, storage, known, true, baseline);
   if (wrote) target.dispatchEvent(Object.assign(new Event(CHANGED), { session }));
   return { conflict };
 }
