@@ -7,7 +7,7 @@
 // under it inert while it is open; a line chosen focuses its card, and Escape gives focus back to the outline's button. A
 // `null` model (no record, or a path that names none) is the page's own empty state; until a read is applied nothing is
 // drawn. A draft too long for the browser's storage, held in this tab alone, is said once, at the sheet's head where its
-// notes stand.
+// notes stand, and there too a press the storage had no room to keep, which was therefore not sent.
 import { useEffect, useRef, useState } from 'react';
 import type { DoorState } from '@shared/ipc/schema/sheet';
 import type { SheetModel } from '@shared/sheet/model';
@@ -57,7 +57,7 @@ export function SheetView({ shown, navigate, ...rest }: SheetViewProps) {
 }
 
 function Sheet({ model, fresh, settled, baseline, door, connection, host, outline, adopted }: Omit<SheetViewProps, 'shown' | 'navigate'> & { model: SheetModel; fresh: boolean; settled: boolean; baseline: StoredBaseline | null }) {
-  const { memory: stored, elsewhereSince, unkept, update } = useSessionMemory(model.session);
+  const { memory: stored, elsewhereSince, unkept, noRoom, update } = useSessionMemory(model.session);
   // What the tab shows is its own reconcile of the stored memory against its model, so SessionSheet's finds nothing to
   // do and every change it asks for is the person's or a Send's, applied to that view and written as what it changes;
   // reconcile's own changes are written only while the model was read after this tab last adopted another tab's write
@@ -104,10 +104,10 @@ function Sheet({ model, fresh, settled, baseline, door, connection, host, outlin
     <div data-sheet-page="" className="relative flex min-h-0 flex-1">
       {outline.wide && outline.open && panel(false)}
       <div ref={holder} inert={drawer} className="flex min-h-0 min-w-0 flex-1 flex-col">
-        {unkept && (
+        {(noRoom || unkept) && (
           <div data-sheet-page-note="" className="shrink-0 pt-3">
             <p role="status" className="m-0 rounded-sm border border-border-strong bg-bg-raised px-2.5 py-1 text-fg">
-              {SEND.tooLong}
+              {noRoom ? SEND.noRoom : SEND.tooLong}
             </p>
           </div>
         )}

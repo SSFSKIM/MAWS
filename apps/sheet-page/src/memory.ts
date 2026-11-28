@@ -28,7 +28,9 @@
 // alone (`unkept`), read in place of storage's, so the draft stays editable and sendable here and the sheet says it would
 // not survive a reload (`unkeptDraft`). A Send is never capped (it must be durable before its put). A full store makes
 // room by dropping the entries touched longest ago, never a Send's and never the pairing, only when that is sure to make
-// room; otherwise nothing is removed and the entry is held here the same way. A held entry
+// room; otherwise nothing is removed and the entry is held here the same way, but for a press: a Send's entry must be
+// durable before its put, so a press the store will not keep is written nothing of, held nowhere and owned by no window,
+// C3's sheet has no Send to launch, and the sheet says there was no room (`noRoom`). A held entry
 // never hides a later durable write of the same entry, from this window or another: whichever was touched later is read,
 // and a held entry older than storage's is dropped. The person's Unpair forgets every hold (`forgetUnkept`).
 import type { SheetLine } from '@shared/sheet/model';
@@ -212,7 +214,8 @@ export const madeElsewhere = (memory: SheetMemory): boolean => memory.sending?.a
  * question's entry only where `known` says the tab's model holds that question. Whether anything was written.
  */
 export function writeMemory(session: string, before: SheetMemory, after: SheetMemory, now: number = Date.now(), storage: Storage = localStorage, known: (question: string) => boolean = () => true): boolean {
-  return writeDiff(session, before, after, now, storage, known, false).wrote;
+  const { wrote, refused } = writeDiff(session, before, after, now, storage, known, false);
+  return wrote || refused;
 }
 
 // An entry's value as the memory holds it, in the shape `writeDiff` stores it, or null where it holds none
@@ -237,9 +240,16 @@ const canonical = (value: unknown): string =>
 // touchedAt included, so an entry another tab wrote after that read started (its notification not yet heard when the
 // view read storage), even one written again with the same content, is never pruned by an older model; a spurious
 // conflict costs one more read.
-function writeDiff(session: string, before: SheetMemory, after: SheetMemory, now: number, storage: Storage, known: (question: string) => boolean, guarded: boolean, baseline: StoredBaseline | null = null): { wrote: boolean; conflict: boolean } {
+function writeDiff(session: string, before: SheetMemory, after: SheetMemory, now: number, storage: Storage, known: (question: string) => boolean, guarded: boolean, baseline: StoredBaseline | null = null): { wrote: boolean; conflict: boolean; refused: boolean } {
   let wrote = false;
   let conflict = false;
+  const changesSend = before.sending !== after.sending && !guarded; // a guarded write is reconcile's, which never does
+  const sent = changesSend ? writeSend(session, before, after, now, storage) : null;
+  if (changesSend && sent === null) {
+    refusedPress(storage).add(session); // a press the store will not keep: no part of it is written, and none owned
+    return { wrote: false, conflict, refused: true };
+  }
+  if (sent !== null && after.sending?.state === 'sending' && after.sending.attempt !== before.sending?.attempt) refusedPress(storage).delete(session);
   const storedShape = (kind: Kind, name: string) => {
     const stored = parsed(itemOf(storage, keyOf(kind, session, name)));
     return stored === null ? 'null' : canonical(Object.fromEntries(Object.entries(stored).filter(([field]) => field !== 'v' && field !== 'touchedAt')));
@@ -294,7 +304,24 @@ function writeDiff(session: string, before: SheetMemory, after: SheetMemory, now
     else put('act', key, { act });
   }
 
-  if (before.sending === after.sending || guarded) return { wrote, conflict };
+  if (sent === null) return { wrote, conflict, refused: false };
+  if (sent.ended !== null) {
+    // its end: the Send is over
+    if (sent.ended.entry) drop(storage, sent.ended.entry.key);
+    pressedHere.delete(pressOf(sent.ended.attempt));
+  }
+  if (sent.again !== null) pressedHere.delete(pressOf(sent.again));
+  if (sent.owned !== null) pressedHere.add(sent.owned);
+  return { wrote: true, conflict, refused: false };
+}
+
+// The Send's part of an update (never a guarded write's), its new entry written first. A press (the Send held as being
+// sent under an attempt it was not held under) is the one write never held in this window: its entry must be durable
+// before its put, since the put's keys are only safe to send again from storage (T19). Refused, it is answered `null`
+// and the update is written nothing of. Otherwise what remains of it once the update's other entries are written: the
+// end of the Send it replaces, and what this window owns now.
+type SendPart = { ended: { attempt: string; entry: StoredSend | undefined } | null; again: string | null; owned: string | null };
+function writeSend(session: string, before: SheetMemory, after: SheetMemory, now: number, storage: Storage): SendPart | null {
   const sends = sendsOf(storage, session);
   const entryOf = (attempt: string) => sends.find((send) => send.press === pressOf(attempt));
   const held = before.sending === null ? undefined : entryOf(before.sending.attempt);
@@ -306,55 +333,66 @@ function writeDiff(session: string, before: SheetMemory, after: SheetMemory, now
     after.sending.attempt !== before.sending!.attempt &&
     after.sending.lines.length === held.lines.length &&
     after.sending.lines.every((line, i) => line.key === held.lines[i]!.key);
-  if (!again && before.sending !== null && before.sending.attempt !== after.sending?.attempt) {
-    // its end: the Send is over
-    if (held) drop(storage, held.key);
-    pressedHere.delete(pressOf(before.sending.attempt));
-    wrote = true;
-  }
-  if (after.sending === null) return { wrote, conflict };
+  const ended = !again && before.sending !== null && before.sending.attempt !== after.sending?.attempt ? { attempt: before.sending.attempt, entry: held } : null;
+  if (after.sending === null) return { ended, again: null, owned: null };
   const { attempt, lines, state, note } = after.sending;
   const entry = again ? held : entryOf(attempt);
   const at = again || entry === undefined ? now : entry.at; // since its press, or its press again
-  store(storage, entry?.key ?? keyOf('send', session, randomName()), JSON.stringify({ v: 1, touchedAt: now, press: pressOf(attempt), at, lines, state, note }));
-  if (again) pressedHere.delete(pressOf(before.sending!.attempt));
-  if (!attempt.startsWith(ELSEWHERE)) pressedHere.add(attempt);
-  return { wrote: true, conflict };
+  const press = state === 'sending' && attempt !== before.sending?.attempt;
+  const kept = store(storage, entry?.key ?? keyOf('send', session, randomName()), JSON.stringify({ v: 1, touchedAt: now, press: pressOf(attempt), at, lines, state, note }), { session, durable: press });
+  if (!kept) return null;
+  return { ended, again: again ? before.sending!.attempt : null, owned: attempt.startsWith(ELSEWHERE) ? null : attempt };
 }
 
-// A write. A draft past ENTRY_KEPT_MAX is held in this window without trying the store; a Send is never capped, since it
-// must be durable before its put (T19), and the door's own bounds let a valid one pass the cap. A write the full store
-// refuses makes room by dropping the entries of the memory touched longest ago (never a Send's, never the pairing or
-// anything that is not the memory's), but only when dropping all of them, with the entry being replaced, is sure to
-// make room: free space is never negative, so their sizes together covering the new entry's is enough. Otherwise
-// nothing is removed and the entry is held here.
-function store(storage: Storage, key: string, value: string): void {
+// A write; whether storage or this window keeps it. A draft past ENTRY_KEPT_MAX is held in this window without trying
+// the store; a Send is never capped, since it must be durable before its put (T19), and the door's own bounds let a
+// valid one pass the cap. A write the full store refuses makes room by dropping the entries of the memory touched
+// longest ago (never a Send's, never the pairing or anything that is not the memory's, and for a Send nothing of its
+// own session, the drafts its press was made of among them), but only when dropping all of them, with the entry being
+// replaced, is sure to make room: free space is never negative, so their sizes together covering the new entry's is
+// enough. Otherwise nothing is removed and the entry is held here, but a `durable` one (a press) is not kept at all.
+function store(storage: Storage, key: string, value: string, { session = null, durable = false }: { session?: string | null; durable?: boolean } = {}): boolean {
   const held = unkeptOf(storage);
-  if (key.startsWith(`${STORAGE_PREFIX}draft.`) && key.length + value.length > ENTRY_KEPT_MAX) return void held.set(key, value);
+  const unkept = () => (durable ? false : (held.set(key, value), true));
+  if (key.startsWith(`${STORAGE_PREFIX}draft.`) && key.length + value.length > ENTRY_KEPT_MAX) return unkept();
   try {
     storage.setItem(key, value);
     held.delete(key);
-    return;
+    return true;
   } catch (error) {
     if (!(error instanceof DOMException) || error.name !== 'QuotaExceededError') throw error;
   }
+  const own = session === null ? [] : KINDS.map((kind) => prefixOf(kind, session));
   const evictable = memoryEntries(storage)
-    .filter((entry) => entry.kind !== 'send' && entry.key !== key)
+    .filter((entry) => entry.kind !== 'send' && entry.key !== key && !own.some((prefix) => entry.key.startsWith(prefix)))
     .sort((a, b) => a.touchedAt - b.touchedAt);
   const replaced = storage.getItem(key);
   const room = evictable.reduce((sum, entry) => sum + entry.size, replaced === null ? 0 : key.length + replaced.length);
-  if (room < key.length + value.length) return void held.set(key, value); // not sure to make room: remove nothing
+  if (room < key.length + value.length) return unkept(); // not sure to make room: remove nothing
   for (const entry of evictable) {
     storage.removeItem(entry.key);
     try {
       storage.setItem(key, value);
       held.delete(key);
-      return;
+      return true;
     } catch (error) {
       if (!(error instanceof DOMException) || error.name !== 'QuotaExceededError') throw error;
     }
   }
-  held.set(key, value); // the store counts otherwise than its keys' and values' lengths: held, as when nothing could go
+  return unkept(); // the store counts otherwise than its keys' and values' lengths: as when nothing could go
+}
+
+// The sessions whose last press this window made the store would not keep, by storage
+const refused = new WeakMap<Storage, Set<string>>();
+const refusedPress = (storage: Storage) => {
+  let sessions = refused.get(storage);
+  if (sessions === undefined) refused.set(storage, (sessions = new Set()));
+  return sessions;
+};
+
+/** Whether this window's last press of the session was refused, there being no room in storage to keep it: nothing was sent. */
+export function noRoom(session: string, storage: Storage = localStorage): boolean {
+  return refusedPress(storage).has(session);
 }
 
 /** Whether a draft of the session is held in this window alone, too long for the store: it would not survive a reload. */
@@ -366,6 +404,7 @@ export function unkeptDraft(session: string, storage: Storage = localStorage): b
 /** The person's Unpair: nothing this window held stands. */
 export function forgetUnkept(storage: Storage = localStorage): void {
   unkeptOf(storage).clear();
+  refusedPress(storage).clear();
 }
 
 function memoryEntries(storage: Storage): { key: string; kind: Kind; touchedAt: number; size: number }[] {

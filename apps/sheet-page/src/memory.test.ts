@@ -183,13 +183,16 @@ describe('the stored memory (T19): one entry a thing', () => {
     const seen = windowB.readMemory(S, store).sending!;
     const before = store.getItem(key!);
     // a full store, and a press whose entry would not fit even with every evictable entry gone: nothing is removed, and the
-    // press is held in this window
+    // press is refused, held nowhere
     store.quota = Object.entries(store.entries()).reduce((sum, [name, value]) => sum + name.length + value.length, 0);
     windowB.updateMemory(S, (current) => startSend(current, seen.lines, 5_000, `wb-1-${'a'.repeat(5_000)}`, { drafts: current.drafts, over: seen.attempt }), { storage: store, now: 5_000, target });
     expect(sendKeys()).toEqual([key]);
-    expect(store.getItem(key!)).toBe(before); // the only stored record of the Send stands (the press is held in this window alone)
+    expect(store.getItem(key!)).toBe(before); // the only stored record of the Send stands
+    expect(windowB.readMemory(S, store).sending).toEqual(seen); // and is the one this window shows: the press is not its own
+    expect(windowB.noRoom(S, store)).toBe(true);
     store.quota = null;
-    windowB.updateMemory(S, (current) => startSend(current, seen.lines, 6_000, 'wb-1', { drafts: current.drafts, over: current.sending!.attempt }), { storage: store, now: 6_000, target });
+    windowB.updateMemory(S, (current) => startSend(current, seen.lines, 6_000, 'wb-1', { drafts: current.drafts, over: seen.attempt }), { storage: store, now: 6_000, target });
+    expect(windowB.noRoom(S, store)).toBe(false); // a press stored: what the refused one said is over
     expect(sendKeys()).toEqual([key]);
     expect(JSON.parse(store.getItem(key!)!)).toMatchObject({ press: 'wb-1', at: 6_000 });
   });
@@ -474,6 +477,56 @@ describe('the stored memory (T19): one entry a thing', () => {
     vi.resetModules();
     const another = await import('./memory'); // a new window: nothing held in the first one's memory
     expect(another.readMemory(S, store).sending).toMatchObject({ lines, state: 'sending' });
+  });
+
+  it('never holds a press the store will not keep: nothing of it is written or owned, the draft stands, and the refusal is said (B6)', async () => {
+    vi.resetModules();
+    const fresh = await import('./memory');
+    const store = testStorage({ [CREDENTIAL_KEY]: JSON.stringify({ v: 1, id: '0a1b2c3d', credential: 'A'.repeat(43) }) });
+    const target = new EventTarget();
+    const heard = vi.fn();
+    fresh.onMemory(S, heard, target);
+    fresh.updateMemory(S, (current) => withDraft(current, 'q4', draft('keep the earlier sailing')), { storage: store, now: 1, target });
+    const before = store.entries();
+    // full, and nothing that may go would make room: the pairing never goes, nor the session's own draft
+    store.quota = Object.entries(before).reduce((sum, [key, value]) => sum + key.length + value.length, 0);
+    const lines = [answer('page-000000000000000000000000001', 'q4', 'keep the earlier sailing')];
+    const removeItem = vi.spyOn(store, 'removeItem');
+    fresh.updateMemory(S, (current) => startSend(current, lines, 2, 'wa-1', { drafts: current.drafts }), { storage: store, now: 2, target });
+    expect(removeItem).not.toHaveBeenCalled();
+    expect(store.entries()).toEqual(before); // no act, no Send
+    const read = fresh.readMemory(S, store);
+    expect(read.sending).toBeNull(); // C3's sheet launches no put: it holds no Send to launch
+    expect(read.acts).toEqual([]);
+    expect(read.drafts.get('q4')).toEqual(draft('keep the earlier sailing'));
+    expect(fresh.noRoom(S, store)).toBe(true);
+    expect(fresh.noRoom(OTHER, store)).toBe(false);
+    expect(heard).toHaveBeenCalledTimes(2); // the view hears it, to say so
+
+    // the draft stays editable: an edit is held as ever, and the press is still refused
+    fresh.updateMemory(S, (current) => withDraft(current, 'q4', draft('keep the longer route')), { storage: store, now: 3, target });
+    expect(fresh.readMemory(S, store).drafts.get('q4')).toEqual(draft('keep the longer route'));
+  });
+
+  it('refuses a press the store will not keep after eviction, and evicts nothing of its own session for it (B6)', async () => {
+    vi.resetModules();
+    const fresh = await import('./memory');
+    const store = testStorage();
+    const target = new EventTarget();
+    fresh.writeMemory(OTHER, EMPTY_MEMORY, withDraft(EMPTY_MEMORY, 'q1', draft('y'.repeat(5_000))), 0, store);
+    fresh.writeMemory(S, EMPTY_MEMORY, withDraft(EMPTY_MEMORY, 'q4', draft('the answer')), 1, store);
+    // a store that counts otherwise than its keys' and values' lengths: a Send never fits, whatever goes
+    const setItem = store.setItem.bind(store);
+    vi.spyOn(store, 'setItem').mockImplementation((key, value) => {
+      if (key.startsWith('maws.sheet.send.')) throw new DOMException('The quota has been exceeded.', 'QuotaExceededError');
+      setItem(key, value);
+    });
+    const lines = [answer('page-000000000000000000000000001', 'q4', 'the answer')];
+    fresh.updateMemory(S, (current) => startSend(current, lines, 2, 'wa-1', { drafts: current.drafts }), { storage: store, now: 2, target });
+    expect(fresh.readMemory(S, store).sending).toBeNull();
+    expect(fresh.readMemory(S, store).acts).toEqual([]);
+    expect(store.getItem(`maws.sheet.draft.${S}.q4`)).not.toBeNull(); // the draft the press was made of was never offered up
+    expect(fresh.noRoom(S, store)).toBe(true);
   });
 
   it('forgets what it held in this window when the person unpairs (B6)', async () => {

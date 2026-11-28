@@ -13,6 +13,7 @@ export default defineConfig({
     root: import.meta.dirname,
     environment: 'node',
     include: ['src/**/*.test.{ts,tsx}'],
+    setupFiles: ['../../test/support/artifacts-dom-setup.ts'], // KaTeX's one quirks-mode advisory, under happy-dom, dropped
     env: { LC_ALL: 'ko_KR.UTF-8', LANG: 'ko_KR.UTF-8' },
   },
 });
