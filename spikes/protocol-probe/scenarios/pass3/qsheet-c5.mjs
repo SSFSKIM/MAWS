@@ -23,6 +23,8 @@
 //   compact   the answer pending, a /compact: the tool's SessionStart (compact) context lists it; then the sentence
 //   subagent  $.session.send of the subagent's envelope to the running subagent whose call was blocked (runner maws)
 // Part B, the stand-in model (stub-api.mjs, nothing spent). QC5_CASE=b1 .. b6.
+// M2's sitting (M1's branch of sminos on MAWS's launch line, no patch): QC5_CELLS=m1, in qsheet-c5-m1.mjs, which reuses
+// the readers exported here.
 import {Probe,redact} from '../../harness.mjs';
 import {probeInitialize} from '../../probe-initialize.mjs';
 import {startStubApi,textTurn,toolTurn} from '../../stub-api.mjs';
@@ -43,9 +45,9 @@ if(!/^[a-z0-9-]*$/.test(CASE+CARRIER+VARIANT+RUN))throw new Error('QC5_* knobs t
 const DIR='fixtures/qsheet/';
 const HOST=hostname().split('.')[0];
 const scrub=t=>redact(String(t)).split(HOST).join('<host>');
-const delay=ms=>new Promise(r=>setTimeout(r,ms));
-const until=async(test,timeout,step=500)=>{const end=Date.now()+timeout;while(Date.now()<end){const v=await test();if(v)return v;await delay(step);}return null;};
-const slug=p=>p.replace(/[^a-zA-Z0-9]/g,'-');
+export const delay=ms=>new Promise(r=>setTimeout(r,ms));
+export const until=async(test,timeout,step=500)=>{const end=Date.now()+timeout;while(Date.now()<end){const v=await test();if(v)return v;await delay(step);}return null;};
+export const slug=p=>p.replace(/[^a-zA-Z0-9]/g,'-');
 
 // ---------------------------------------------------------------- the scratch root
 function scratchRoot(label){
@@ -108,10 +110,11 @@ function envelopeNow(r,sid,recipient='main'){
 
 // ---------------------------------------------------------------- the transcript and the debug log
 const transcriptFile=(r,sid)=>join(r.config,'projects',slug(r.work),sid+'.jsonl');
-const rowsOf=f=>existsSync(f)?readFileSync(f,'utf8').split('\n').filter(Boolean).map((l,i)=>{try{return {line:i+1,row:JSON.parse(l)};}catch{return {line:i+1,row:{unparsed:true}};}}):[];
-function brief(r){
+export const rowsOf=f=>existsSync(f)?readFileSync(f,'utf8').split('\n').filter(Boolean).map((l,i)=>{try{return {line:i+1,row:JSON.parse(l)};}catch{return {line:i+1,row:{unparsed:true}};}}):[];
+export function brief(r){
  const b={type:r.type};
- for(const k of ['subtype','level','isMeta','promptSource','toolDenialKind','isSidechain','agentId'])if(r[k]!==undefined)b[k]=r[k];
+ // entrypoint, prompt_submit_outcome and prevent_continuation: M2's sitting reads what the file holds of a ring and its drop
+ for(const k of ['subtype','level','isMeta','promptSource','toolDenialKind','isSidechain','agentId','entrypoint','prompt_submit_outcome','prevent_continuation'])if(r[k]!==undefined)b[k]=r[k];
  if(r.origin)b.origin=r.origin;
  if(r.attachment?.type){b.attachment=r.attachment.type;for(const k of ['hookName','hookEvent','toolUseID'])if(r.attachment[k]!==undefined)b[k]=r.attachment[k];const c=r.attachment.content??r.attachment.stdout??r.attachment.prompt;if(c!==undefined)b.attachmentText=(typeof c==='string'?c:JSON.stringify(c)).slice(0,700);}
  if(r.permissionDecision)b.permissionDecision=r.permissionDecision;
@@ -306,13 +309,13 @@ async function subagentCell(name,r,sid,q,vars){
 }
 
 // ---------------------------------------------------------------- part B (the stand-in model)
-const lastUser=body=>[...(body.messages??[])].reverse().find(m=>m.role==='user');
-const textOf=c=>typeof c==='string'?c:Array.isArray(c)?c.map(b=>b.type==='text'?b.text:b.type==='tool_result'?'[tool_result '+b.tool_use_id+'] '+textOf(b.content):b.type==='tool_use'?'[tool_use '+b.name+' '+b.id+']':'['+b.type+']').join('\n'):'';
+export const lastUser=body=>[...(body.messages??[])].reverse().find(m=>m.role==='user');
+export const textOf=c=>typeof c==='string'?c:Array.isArray(c)?c.map(b=>b.type==='text'?b.text:b.type==='tool_result'?'[tool_result '+b.tool_use_id+'] '+textOf(b.content):b.type==='tool_use'?'[tool_use '+b.name+' '+b.id+']':'['+b.type+']').join('\n'):'';
 const record=body=>{const whole=JSON.stringify(body.messages??[]);const last=lastUser(body);const holders=(body.messages??[]).map((m,i)=>({i,role:m.role,types:Array.isArray(m.content)?m.content.map(b=>b.type):['string'],has:JSON.stringify(m.content).includes('sheet-delivery')})).filter(x=>x.has).map(({has,...x})=>x);return {messages:(body.messages??[]).length,holders,deliveries:[...whole.matchAll(/<sheet-delivery>(.*?)<\/sheet-delivery>/g)].map(x=>x[1].slice(0,300)),last:last?{types:Array.isArray(last.content)?last.content.map(b=>b.type):['string'],text:textOf(last.content).slice(-2500)}:null};};
 const ASK_INPUT=n=>({ask:[{question:`QC5-B question ${n}?`,options:[{label:'Alpha'},{label:'Beta'}]}]});
 // Scripted turns: the rule whose needle the last user message holds answers. The wait is python's: the engine refuses a
 // standalone `sleep 30` in the Bash tool itself ("Blocked: standalone sleep 30", seen in this round's first B1).
-const rules=list=>body=>{const last=JSON.stringify(lastUser(body)??'');for(const [needle,t] of list)if(last.includes(needle))return typeof t==='function'?t(body):t;return undefined;};
+export const rules=list=>body=>{const last=JSON.stringify(lastUser(body)??'');for(const [needle,t] of list)if(last.includes(needle))return typeof t==='function'?t(body):t;return undefined;};
 const SCRIPT=rules([
  ['toolu_ask',textTurn('ASKED')],['QC5-ASK',body=>{const n=(JSON.stringify(lastUser(body)).match(/QC5-ASK (\d+)/)||[])[1]||'1';return toolTurn('toolu_ask'+n,'mcp__sminos__AskUserQuestion',ASK_INPUT(n));}],
  ['toolu_sleep',textTurn('SLEPT')],['QC5-SLEEP',body=>{const sec=(JSON.stringify(lastUser(body)).match(/QC5-SLEEP (\d+)/)||[])[1]||'8';return toolTurn('toolu_sleep'+Date.now(),'Bash',{command:`python3 -c 'import time; time.sleep(${sec})'`,description:'wait'});}],
@@ -413,6 +416,7 @@ async function partB(){
 }
 
 export default async()=>{
+ if(env0.QC5_CELLS==='m1')return (await import('./qsheet-c5-m1.mjs')).default();
  if(CASE==='a'){if(!['grant','compact','host','steer','submit','doorbell','result','start','subagent'].includes(CARRIER))throw new Error('QC5_CARRIER');await partA();}
  else if(/^b[1-6]$/.test(CASE))await partB();
  else throw new Error('QC5_CASE=a | b1..b6');
