@@ -4,6 +4,7 @@
 // that `graph/events.ts` imports the schema without the reader's parsers.
 import * as z from 'zod';
 import { AskAnswerSchema, type AskAnswer } from '../maws/tools';
+import { SheetDeliverySchema, type SheetDelivery } from '../sheet/delivery';
 
 export type Arrival =
   // a message from another session: by the engine's inbox, by the sminos bridge, from a teammate, or typed in as a background session's prompt
@@ -43,7 +44,10 @@ export type Arrival =
   | { class: 'wake' }
   // MAWS's own "Approve and retry" message for a call auto mode blocked (U1, l4-approvals-12): the person's act, not their prose
   | { class: 'consent'; kind: 'command' | 'call';
-      subject: string };       // the command, or the call's input, as the message quotes it (JSON-unquoted)
+      subject: string }        // the command, or the call's input, as the message quotes it (JSON-unquoted)
+  // the question sheet's deliveries: the blocks of the envelopes a plugin's prompt or a hook's context carried (the C3
+  // plan's §I), each held to the pinned delivery schema
+  | { class: 'sheet'; deliveries: SheetDelivery[] };
 
 /** The classes that travel on `user.message.arrival` (B). */
 export type CarriedArrival = Extract<Arrival, { class: 'task' | 'schedule' | 'answer' | 'wake' | 'consent' }>;
@@ -104,4 +108,26 @@ export function commandEntry(facts: CommandFacts): ArrivalEntry[] {
 export function commandOf(arrival: readonly ArrivalEntry[] | undefined): CommandFacts {
   const read = CommandEntrySchema.safeParse(arrival?.find((entry) => entry.class === 'command'));
   return read.success ? { run: read.data.run ?? null, plain: read.data.plain === true } : { run: null, plain: false };
+}
+
+// The question sheet's C3 M5 (docs/doperpowers/plans/2026-11-23-question-sheet-c3-maws-app.md §I): what travels with a
+// carrier of the sheet's envelope, on the same rule as `command`'s: not a member of the carried union, held here to a
+// strict schema of its own, so a build that knows no such entry keeps the event and an entry that does not fit is none.
+
+const SheetEntrySchema = z.strictObject({ class: z.literal('sheet'), deliveries: z.array(SheetDeliverySchema) });
+
+/** The deliveries the arrivals of one carrier hold, in order. */
+export function sheetFactsOf(arrivals: readonly Arrival[]): SheetDelivery[] {
+  return arrivals.flatMap((arrival) => (arrival.class === 'sheet' ? arrival.deliveries : []));
+}
+
+/** The entry of `arrival` that carries them; none when there is none. */
+export function sheetEntry(deliveries: readonly SheetDelivery[]): ArrivalEntry[] {
+  return deliveries.length === 0 ? [] : [{ class: 'sheet', deliveries: [...deliveries] }];
+}
+
+/** The deliveries a `user.message` carries: its first entry of class `sheet`, held strictly; an entry that does not fit, or none, reads as none. */
+export function sheetDeliveriesOf(arrival: readonly ArrivalEntry[] | undefined): SheetDelivery[] {
+  const read = SheetEntrySchema.safeParse(arrival?.find((entry) => entry.class === 'sheet'));
+  return read.success ? (read.data.deliveries as SheetDelivery[]) : [];
 }

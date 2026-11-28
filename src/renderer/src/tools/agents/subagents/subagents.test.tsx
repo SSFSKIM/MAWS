@@ -475,6 +475,28 @@ describe('subagents lists', () => {
     expect((await screen.findByRole('tooltip')).textContent).toContain('Approval needed');
   });
 
+  // The composite's writer (2026-11-27): an agent waiting on sheet questions alone reads as an async_input item, its
+  // mark calm and Question waiting its words; anything else waiting beside them keeps Approval needed and the warning.
+  it('reads Question waiting, its mark calm, for an agent waiting on sheet questions alone, and Approval needed beside anything else', async () => {
+    await mount({ events: [started('a1', 1), started('a2', 2)] });
+    const asked = (question: string) =>
+      item(A, 'async_input', T, { id: `sheet:5eed0000-0000-4000-8000-0000000000aa:${question}` as never, request: { requestId: `sheet-${question}` as RequestId, toolUseId: null, taskId: null, agentId: 'a1' as AgentId } });
+    act(() => useAttention.getState().applySnapshot([asked('q1'), asked('q2')], TEST_MACHINE));
+    const mark = () => row('a1').querySelector<HTMLElement>('[data-part="waiting"]')!;
+    const open = () => row('a1').querySelector<HTMLElement>(':scope > [data-part="open"]')!;
+    expect([mark().className.includes('bg-info'), mark().className.includes('bg-warning')]).toEqual([true, false]);
+    expect(descriptionOf(open())).toBe('Question waiting');
+    act(() => open().focus());
+    expect((await screen.findByRole('tooltip')).textContent).toContain('Question waiting');
+    act(() => open().blur());
+    act(() =>
+      useAttention.getState().applySnapshot([asked('q1'), item(A, 'permission', T, { request: { requestId: 'r1' as RequestId, toolUseId: null, taskId: null, agentId: 'a1' as AgentId } })], TEST_MACHINE),
+    );
+    expect([mark().className.includes('bg-warning'), mark().className.includes('bg-info')]).toEqual([true, false]);
+    expect(descriptionOf(open())).toBe('Approval needed');
+    expect(row('a2').querySelector('[data-part="waiting"]')).toBeNull();
+  });
+
   // Pair review of M3's pictures (T166): the mark takes no room in the row's flow, so a waiting row's title and line
   // start where every sibling's do. It is drawn out of flow (absolute) within the glyph's own slot, beside the glyph.
   it('draws the waiting mark within the glyph’s slot, out of the row’s flow, so the title does not move', async () => {

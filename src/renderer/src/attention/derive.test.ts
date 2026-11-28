@@ -10,7 +10,7 @@ import { loadScenario } from '../../../../test/support/scenario';
 import { ATTENTION_HEADINGS } from '@shared/attention/headings';
 import { isActionable, waits } from '@shared/attention/kinds';
 import { laneAEntryOf } from '@shared/lane-a/attention-entry';
-import { needsYou, nextNeedsYou, waitingItem } from './derive';
+import { calmWaiting, needsYou, nextNeedsYou, waitingItem, waitingTone } from './derive';
 
 const scenario = loadScenario(join(TEST_FIXTURE_DIR, 'shell/nine-sessions.json'));
 const records = new Map(scenario.sessions.map((r) => [r.appId, r]));
@@ -26,6 +26,59 @@ describe('a terminal session’s asynchronous question', () => {
     expect(rows).toEqual([{ appSessionId: id, oldest: asked, count: 1, tier: 1 }]);
     expect(ATTENTION_HEADINGS[rows[0]!.oldest.kind]).toEqual({ char: '?', tone: 'info', text: 'Question waiting' });
     expect(waits(asked) && isActionable(asked)).toBe(true); // the dock badge's rule (src/main/attention/notifier.ts)
+  });
+});
+
+// The question sheet's C3 M4 (the look's L5; the composite's §8.1): a row whose waiting items are all sheet questions is
+// calm, its session running or stopped (no sheet question marks a session as stopped on the human); any other item
+// waiting keeps today's tone. Counted as any row is.
+describe('a session whose waiting items are sheet questions', () => {
+  const SHEET = '5eed0000-0000-4000-8000-000000000042';
+  const asked = (id: string, question: string, at = '2026-11-24T10:00:00Z') => item(id, 'async_input', at, { id: `sheet:${SHEET}:${question}` as AttentionItem['id'] });
+  const rowOf = (items: AttentionItem[], holder: SessionRecord['holder']) => needsYou(new Map([['s' as AppSessionId, items]]), new Map([['s' as AppSessionId, record('s', { holder })]]))[0];
+  const STOPPED: SessionRecord['holder'] = { kind: 'none' };
+  const RUNNING: SessionRecord['holder'] = { kind: 'terminal', pid: 7 };
+
+  it('is calm stopped and running, and counts every question', () => {
+    for (const holder of [STOPPED, RUNNING]) {
+      expect(rowOf([asked('s', 'q1'), asked('s', 'q2')], holder), holder.kind).toMatchObject({ calm: true, count: 2, tier: 1 });
+    }
+  });
+
+  it('keeps today’s tone with any other item waiting, stopped or running; an item that no longer waits does not count against it', () => {
+    for (const holder of [STOPPED, RUNNING]) {
+      expect(rowOf([asked('s', 'q1'), item('s', 'permission', '2026-11-24T11:00:00Z')], holder)?.calm, holder.kind).toBeUndefined();
+      expect(rowOf([asked('s', 'q1'), item('s', 'held_peer_message', '2026-11-24T11:00:00Z')], holder)?.calm, holder.kind).toBeUndefined();
+      expect(rowOf([item('s', 'async_input', '2026-11-24T11:00:00Z')], holder)?.calm, `a terminal's own async question, ${holder.kind}`).toBeUndefined();
+    }
+    expect(rowOf([asked('s', 'q1'), item('s', 'permission', '2026-11-24T11:00:00Z', { state: 'delivered' })], STOPPED)?.calm).toBe(true);
+  });
+});
+
+// The question sheet's C3 look wave (L5, the composite's writer, 2026-11-27): a mark or count over waiting sessions is
+// calm when everything it counts is a sheet question, and in today's tone as soon as one is anything else
+describe('the tone of a mark that stands for waiting sessions', () => {
+  const SHEET = '5eed0000-0000-4000-8000-000000000042';
+  const asked = (id: string, question: string) => item(id, 'async_input', '2026-11-24T10:00:00Z', { id: `sheet:${SHEET}:${question}` as AttentionItem['id'] });
+  const rows = (bySession: Record<string, AttentionItem[]>) =>
+    needsYou(new Map(Object.entries(bySession).map(([id, items]) => [id as AppSessionId, items])), new Map(Object.keys(bySession).map((id) => [id as AppSessionId, record(id)])));
+
+  it('is calm when every counted session waits on sheet questions alone', () => {
+    expect(calmWaiting([asked('a', 'q1'), asked('a', 'q2')])).toBe(true);
+    expect(waitingTone(rows({ a: [asked('a', 'q1')], b: [asked('b', 'q2'), asked('b', 'q3')] }))).toBe('calm');
+  });
+
+  it('is today’s tone as soon as one counted item is anything else, in the same session or another', () => {
+    expect(calmWaiting([asked('a', 'q1'), item('a', 'permission', '2026-11-24T11:00:00Z')])).toBe(false);
+    expect(waitingTone(rows({ a: [asked('a', 'q1')], b: [item('b', 'permission', '2026-11-24T11:00:00Z')] }))).toBe('warning');
+    expect(waitingTone(rows({ a: [asked('a', 'q1'), item('a', 'question', '2026-11-24T11:00:00Z')] }))).toBe('warning');
+  });
+
+  it('is today’s tone with no sheet question, and with nothing counted', () => {
+    expect(calmWaiting([item('a', 'permission', '2026-11-24T11:00:00Z')])).toBe(false);
+    expect(calmWaiting([])).toBe(false);
+    expect(waitingTone(rows({ a: [item('a', 'permission', '2026-11-24T11:00:00Z')] }))).toBe('warning');
+    expect(waitingTone([])).toBe('warning');
   });
 });
 

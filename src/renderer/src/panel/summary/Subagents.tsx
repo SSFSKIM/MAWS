@@ -7,6 +7,7 @@
 // row opens that agent in the panel. `N finished`, the panel's Done count, is its last line and opens that fold.
 import { useId, useMemo } from 'react';
 import type { AgentId, AppSessionId, TaskId } from '@shared/graph/ids';
+import { WAITING_TONE_CLASS } from '../../attention/derive'; // the question sheet's C3 look wave (L5)
 import { selectPendingOf, useAttention } from '../../stores/attention';
 import { SubagentGlyph } from '../../transcript';
 import { SUBAGENTS_COPY } from '../../tools/agents/copy';
@@ -14,7 +15,7 @@ import { agentsRunningUnder, emptyGraph, firstLevelAgents, isEnded, listedAgent,
 import { openOf, useOpenAgents } from '../../tools/agents/open-agents';
 import { useTaskGraph } from '../../tools/agents/store';
 import { Disclosure } from '../../tools/agents/subagents/AgentRow';
-import { outcomeWord, refOf } from '../../tools/agents/subagents/shared';
+import { agentWaitsOf, outcomeWord, refOf, type AgentWait } from '../../tools/agents/subagents/shared';
 import { AGENT_TOOL_IDS } from '../../tools/agents/tool-ids';
 import { SUMMARY_COPY } from '../copy';
 import { panelHost } from '../host';
@@ -54,7 +55,7 @@ export function SubagentsCard({ appSessionId }: { appSessionId: AppSessionId }) 
   const open = useOpenAgents((s) => openOf(s, appSessionId));
   const pending = useAttention((s) => selectPendingOf(s, appSessionId));
   // An agent with an open request of its own: the panel's source (Interfaces §C.6).
-  const waiting = useMemo(() => new Set<string>(pending.flatMap((item) => [item.request.agentId, item.request.taskId].filter((id): id is NonNullable<typeof id> => id !== null))), [pending]);
+  const waiting = useMemo(() => agentWaitsOf(pending), [pending]);
   const { rows, more } = useMemo(() => cardAgentRows(graph, open), [graph, open]);
   const nodes = rows.map((row) => graph.tasks.get(row.taskId)!);
   const now = useCardClock(nodes);
@@ -75,7 +76,7 @@ export function SubagentsCard({ appSessionId }: { appSessionId: AppSessionId }) 
           row={row}
           node={nodes[i]!}
           graph={graph}
-          waiting={waiting.has(row.taskId as string)}
+          waiting={waiting.get(row.taskId as string) ?? null}
           now={now}
           onOpen={() => openPanel(appSessionId, { agentId: row.taskId as unknown as AgentId })}
           under={agentsRunningUnder(graph, row.taskId) > 0 ? { open: open.has(row.taskId), onToggle: () => useOpenAgents.getState().toggle(appSessionId, row.taskId) } : null}
@@ -85,11 +86,12 @@ export function SubagentsCard({ appSessionId }: { appSessionId: AppSessionId }) 
   );
 }
 
-// The row's one line: `Approval needed` while a request of its own waits; else its activity (`Working` without one); for
+// The row's one line: `Approval needed` while a request of its own waits (`Question waiting`, calm, while all that waits
+// is sheet questions: `agentWaitsOf`); else its activity (`Working` without one); for
 // an agent whose own run has ended, kept by an agent running under it, its outcome word without a time. Never what runs
 // under it.
-function stateOf(node: TaskNode, waiting: boolean): { text: string; tone: string } {
-  if (waiting) return { text: SUBAGENTS_COPY.approvalNeeded, tone: 'text-warning' };
+function stateOf(node: TaskNode, waiting: AgentWait | null): { text: string; tone: string } {
+  if (waiting !== null) return { text: waiting.word, tone: WAITING_TONE_CLASS[waiting.tone] };
   if (isEnded(node.status)) return { text: outcomeWord(node), tone: node.status === 'failed' ? 'text-danger' : 'text-fg-muted' };
   return { text: rowSecondLine(node), tone: 'text-fg-muted' };
 }
@@ -101,7 +103,7 @@ function CardAgentRowView({ row, node, graph, waiting, now, onOpen, under }: {
   row: CardAgentRow;
   node: TaskNode;
   graph: TaskGraph;
-  waiting: boolean;
+  waiting: AgentWait | null; // its own requests' word and tone (`agentWaitsOf`)
   now: number;
   onOpen: () => void;
   under: { open: boolean; onToggle: () => void } | null;
@@ -114,7 +116,7 @@ function CardAgentRowView({ row, node, graph, waiting, now, onOpen, under }: {
     <div
       data-agent-row={row.taskId}
       data-depth={row.depth}
-      data-waiting={waiting || undefined}
+      data-waiting={waiting !== null || undefined}
       style={{ marginInlineStart: row.depth * 16 }}
       className={`relative flex min-h-10 items-stretch ${row.depth > 0 ? 'border-l border-border-strong' : ''}`}
     >

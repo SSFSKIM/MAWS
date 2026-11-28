@@ -38,6 +38,9 @@ import { builder, request, tool } from '../transcript/model/test-events';
 import { connectRequestCard } from './index';
 import { itemFor, type RequestEvent } from './test-requests';
 import { accessibleText } from '../test-support/accessible-text';
+import { registerTranscriptActions } from '../transcript/view/registry'; // the question sheet's C3 M4
+import { connectSheets, resetSheetStore, useSheets } from '../stores/sheet';
+import { CLASH, FIXTURE, sheetOf } from '../sheet/test-support/questions';
 
 const APP = at('app-finding' as AppSessionId);
 const QUESTIONS = [
@@ -106,6 +109,19 @@ function scene() {
     question: itemFor(asked as RequestEvent, APP, { id: at('att-rq' as AttentionId), summary: 'Which colour?' }),
     prompt: itemFor(prompt as RequestEvent, APP, { id: at('att-rp' as AttentionId), summary: 'Bash: make check' }),
     second: itemFor(second as RequestEvent, APP, { id: at('att-rp2' as AttentionId), summary: 'Bash: make lint' }),
+  };
+}
+
+// The question sheet's C3 M4: a sheet question's item, as the spine makes it (src/shared/attention/sheet-item.ts) and the
+// page holds it (addressed); it names the call that asked, here the scene's own question call, so a placement that did
+// not skip it would draw a form in that row.
+const SHEET = sheetOf([CLASH, FIXTURE]);
+function sheetItem(questionId: string, minute: number, agentId: string | null = null): AttentionItem {
+  const at0 = `2026-11-24T10:${String(minute).padStart(2, '0')}:00.000Z`;
+  return {
+    id: at(`sheet:${SHEET.session}:${questionId}` as AttentionId), appSessionId: APP, sessionId: SHEET.session as AttentionItem['sessionId'], kind: 'async_input',
+    request: { requestId: questionId as AttentionItem['request']['requestId'], toolUseId: tool('q1'), taskId: null, agentId: agentId as AttentionItem['request']['agentId'] },
+    summary: `Sentence of ${questionId}?`, createdAt: at0, state: 'pending', stateChangedAt: at0, expiresAt: null,
   };
 }
 
@@ -199,6 +215,64 @@ describe('the card column’s card, Waiting for you', () => {
     await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
     expect(document.activeElement).toBe(before);
     expect(openPrompt()).toContain('make check');
+  });
+});
+
+// The question sheet's C3 M4 (§H; frame 4): a sheet question's line in the card, and its way, which is the sheet.
+describe('a sheet question in Waiting for you', () => {
+  let opened: [AppSessionId, string | null][];
+  beforeEach(() => {
+    resetSheetStore();
+    opened = [];
+    offs.push(registerTranscriptActions({ openSheet: (appSessionId, questionId) => void opened.push([appSessionId, questionId]) }));
+  });
+
+  it('is a line of its own: the calm mark, the question’s sentence, from <agent> named by the sheet where the rows do not know the subagent, its age', async () => {
+    const WaitingCard = await waitingCard();
+    const { prompt } = scene();
+    offs.push(connectSheets(ipc)); // the window's sheets, as App.tsx connects them
+    act(() => useSheets.setState({ summaries: new Map([[SHEET.session, { session: SHEET.session, appSessionId: APP, title: null, live: true, seq: 1, open: 2, queued: 0, pending: 0, hidden: 0, oldestAskedAt: null, unreadable: false }]]) }));
+    act(() => useAttention.getState().applySnapshot([prompt, sheetItem('q4', 0), sheetItem('q7', 1, 'a1b2c3')], TEST_MACHINE));
+    render(<WaitingCard appSessionId={APP} />);
+    await waitFor(() => expect(fake.invoked('sheet.read')).toEqual([{ session: SHEET.session }])); // the sheet read for the asker's name
+    await act(() => fake.reply('sheet.read', { model: SHEET, door: { known: false } }));
+    const all = [...card()!.querySelectorAll<HTMLElement>('[data-waiting-card-line]')];
+    expect(all.map((line) => line.dataset.waitingCardLine)).toEqual([prompt.id, sheetItem('q4', 0).id, sheetItem('q7', 1).id]); // oldest first
+    const lines = all.slice(1);
+    const mark = lines[0]!.querySelector('[aria-hidden]')!;
+    expect([mark.textContent, mark.className.includes('text-info')]).toEqual(['?', true]);
+    expect(lines[0]!.textContent).toContain('Sentence of q4?');
+    expect(lines[0]!.textContent).not.toContain('from ');
+    expect(lines[1]!.textContent).toContain('from reviewer');
+    expect(lines[1]!.textContent).toContain('waiting ');
+    // "from <agent>" is whole or not at all: never cut, and always in the line's name and title
+    const from = lines[1]!.querySelector<HTMLElement>('[data-waiting-from]')!;
+    expect([from.textContent, from.className.includes('truncate'), from.className.includes('whitespace-nowrap')]).toEqual(['from reviewer', false, true]);
+    expect(lines[1]!.title).toBe('Sentence of q7? from reviewer');
+    expect(within(card()!).getByRole('button', { name: /Sentence of q7\? from reviewer/ })).toBe(lines[1]);
+  });
+
+  it('opens the session’s sheet at its question when chosen, and nothing in the transcript', async () => {
+    const WaitingCard = await waitingCard();
+    const { prompt } = scene();
+    await mount([prompt, sheetItem('q4', 0)], <WaitingCard appSessionId={APP} />);
+    await waitFor(() => expect(end()?.querySelector('[data-request-card]')).not.toBeNull());
+    expect(questionRow().querySelector('[data-waiting-form]')).toBeNull(); // its call's row draws no form
+    expect(end()!.querySelectorAll('[data-request-card]')).toHaveLength(1); // and the end no card: the prompt's alone
+    const before = document.activeElement;
+    fireEvent.click(cardLine(sheetItem('q4', 0).id));
+    expect(opened).toEqual([[APP, 'q4']]);
+    expect(toasts()).toEqual([]);
+    expect(document.activeElement).toBe(before);
+  });
+
+  it('is reached from outside the transcript the same way: Needs you, a notice and ⇧⌘J open the sheet at it', async () => {
+    const showWaiting = await showWaitingOf();
+    act(() => useAttention.getState().applySnapshot([sheetItem('q4', 0)], TEST_MACHINE));
+    act(() => showWaiting(APP, sheetItem('q4', 0).id));
+    act(() => showWaiting(APP, null)); // the session's oldest waiting
+    expect(opened).toEqual([[APP, 'q4'], [APP, 'q4']]);
+    expect(toasts()).toEqual([]);
   });
 });
 
@@ -575,5 +649,23 @@ describe('the jump button', () => {
     await waitFor(() => expect(keyboardRow()).toBe('request-end'));
     see(() => true);
     await waitFor(() => expect(jump()).toBeNull());
+  });
+
+  // The question sheet's C3 M4 (the look's L4, the owner's answer): an open sheet question does not raise the pill
+  it('with a prompt and a sheet question waiting the pill is the prompt’s; with sheet questions alone it is the plain arrow', async () => {
+    const { prompt } = scene();
+    const view = await mount([prompt, sheetItem('q4', 0)]);
+    await waitFor(() => expect(end()?.querySelector('[data-request-card]')).not.toBeNull());
+    see(() => false);
+    await waitFor(() => expect(jump()?.dataset.state).toBe('input'));
+    fireEvent.click(jump()!);
+    await waitFor(() => expect(keyboardRow()).toBe('request-end'));
+    view.unmount();
+    list([sheetItem('q4', 0)]);
+    await mount([sheetItem('q4', 0)]);
+    fireEvent.wheel(scroller(), { deltaY: -100 });
+    see(() => false);
+    await waitFor(() => expect(jump()?.getAttribute('aria-label')).toBe('Jump to latest'));
+    expect(jump()!.dataset.state).toBeUndefined();
   });
 });

@@ -33,6 +33,7 @@ import { usePeople } from '../stores/people'; // P5 O8 M5
 import { ChevronDownIcon, FolderIcon, Icon, PlusIcon, SearchIcon } from '../app/IconButton';
 import { newChat, useSessionCreatorRegistered } from '../keymap/actions-runtime';
 import { DisclosureBody } from '../ui/disclosure';
+import { WAITING_TONE_CLASS } from '../attention/derive'; // the question sheet's C3 look wave (L5)
 import { isListedRow, type ProjectEntry, type ProjectKey, type SidebarTreeRow } from './derive';
 import { ListedRow } from './ListedRow'; // P5 O8 M2
 import { focusVisible } from './HoverCard';
@@ -109,7 +110,7 @@ export function ProjectRow({ entry, open, sessions, more, hidden = NO_HIDDEN, ma
       {!open && (rollup.waiting > 0 || rollup.working > 0) && (
         <span className="flex shrink-0 items-center gap-[7px] group-hover/line:hidden group-focus-visible/project:hidden">
           {rollup.waiting > 0 && (
-            <span aria-label={`${rollup.waiting} waiting`} className="text-ui-sm text-warning tabular-nums">
+            <span aria-label={`${rollup.waiting} waiting`} data-tone={rollup.tone} className={`text-ui-sm tabular-nums ${WAITING_TONE_CLASS[rollup.tone]}`}>
               ◐{rollup.waiting}
             </span>
           )}

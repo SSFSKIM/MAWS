@@ -24,4 +24,5 @@ export const SHOW = { all: 'Show all', less: 'Show less' } as const;
 export const WAITING = {
   title: 'Waiting for you',
   countName: (n: number) => `${n} ${n === 1 ? 'request' : 'requests'}`,
+  from: (agent: string) => `from ${agent}`, // the question sheet's C3 M4: a subagent's sheet question (the composite's §8.1)
 } as const;

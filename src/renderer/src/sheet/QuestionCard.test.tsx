@@ -27,6 +27,54 @@ describe('QuestionCard', () => {
     expect(container.firstElementChild?.getAttribute('data-sheet-question')).toBe('q4');
   });
 
+  // The card the side sheet opens at shows where the keyboard is (L5's ruling): the app's focus outline on the root
+  // whenever the root itself holds focus, from the open-at request or the keyboard's own moves; a pointer's click inside
+  // the card draws none, and focus moving on inside the card takes it away.
+  it.each(['full', 'compact'] as const)('draws the focus outline on its root while the root holds focus, and none for a pointer’s click inside (%s)', (density) => {
+    const { container } = card(CLASH, { density });
+    const root = container.firstElementChild as HTMLElement;
+    const ringed = () => root.hasAttribute('data-focus-ring') && root.className.includes('data-[focus-ring]:outline-2') && root.className.includes('outline-accent');
+    act(() => root.focus());
+    expect(ringed()).toBe(true);
+    act(() => root.blur());
+    expect(ringed()).toBe(false);
+    const inside = root.querySelector('p')!; // the question's sentence: no control of its own, so a click there focuses the root
+    fireEvent.pointerDown(inside);
+    act(() => root.focus());
+    fireEvent.pointerUp(inside);
+    fireEvent.click(inside);
+    expect(root.hasAttribute('data-focus-ring')).toBe(false);
+    act(() => root.blur());
+    act(() => root.focus()); // the keyboard back on it: drawn again
+    expect(ringed()).toBe(true);
+    fireEvent.pointerDown(inside); // a click on the root that already holds focus: the pointer took over
+    expect(root.hasAttribute('data-focus-ring')).toBe(false);
+    fireEvent.pointerUp(inside);
+    act(() => root.focus());
+    act(() => root.querySelector<HTMLElement>('button')!.focus()); // on inside the card: the root no longer holds focus
+    expect(root.hasAttribute('data-focus-ring')).toBe(false);
+  });
+
+  // The review of the look wave: a press inside the card released outside it (a drag-select out of the card) leaves no
+  // pointer behind it, so the next focus the keyboard or the open-at request gives the root draws the outline.
+  it.each(['full', 'compact'] as const)('draws the outline at the next focus after a press inside the card released outside it (%s)', (density) => {
+    const { container } = card(CLASH, { density });
+    const root = container.firstElementChild as HTMLElement;
+    act(() => root.focus());
+    const inside = root.querySelector('p')!;
+    fireEvent.pointerDown(inside);
+    expect(root.hasAttribute('data-focus-ring')).toBe(false);
+    fireEvent.pointerUp(document.body); // released elsewhere: the card sees no pointerup of its own
+    act(() => root.blur());
+    act(() => root.focus());
+    expect(root.hasAttribute('data-focus-ring')).toBe(true);
+    fireEvent.pointerDown(inside);
+    fireEvent.pointerCancel(document.body);
+    act(() => root.blur());
+    act(() => root.focus());
+    expect(root.hasAttribute('data-focus-ring')).toBe(true);
+  });
+
   it('draws the head, the question, the numbered options with the recommended mark, the text field and Dismiss', () => {
     card(FIXTURE);
     expect(screen.getByText('q7')).toBeTruthy();
@@ -90,9 +138,21 @@ describe('QuestionCard', () => {
     expect(onDraft).toHaveLastReturnedWith(draft(2, { picks: ['Keep the earlier sailing'], text: 'xy' }));
   });
 
+  // The composite's writer (2026-11-27): the stopped sentence only where the session is known stopped
+  it.each([
+    [true, 'Queued. The session has not picked it up yet.'],
+    [undefined, 'Queued. The session has not picked it up yet.'],
+    [null, 'Queued. The session has not picked it up yet.'],
+    [false, 'Queued. The session is stopped and gets this when it resumes.'],
+  ] as const)('says of a queued answer, with the session’s live %s: %s', (live, words) => {
+    const queued = { key: 'page-1601a001', kind: 'answer' as const, picks: ['Keep the earlier sailing'], text: '', images: [], revision: 1, by: 'page' as const };
+    card({ ...CLASH, queued }, live === undefined ? {} : { live });
+    expect(screen.getByText(words)).toBeTruthy();
+  });
+
   it('reads back a queued answer with Take back and Edit; Edit opens a draft that replaces it', () => {
     const queued = { key: 'page-1601a001', kind: 'answer' as const, picks: ['Keep the earlier sailing'], text: 'Shuttle times are the ones people check.', images: [], revision: 1, by: 'page' as const };
-    const { onRetract, onDraft } = card({ ...CLASH, queued });
+    const { onRetract, onDraft } = card({ ...CLASH, queued }, { live: false });
     expect(screen.queryByRole('radio')).toBeNull();
     expect(screen.getByText('Keep the earlier sailing')).toBeTruthy();
     expect(screen.getByText('Queued. The session is stopped and gets this when it resumes.')).toBeTruthy();

@@ -7,7 +7,7 @@ import { useLayoutEffect, useRef } from 'react';
 import type { AppSessionId } from '@shared/graph/ids';
 import { useLayout } from '../stores/layout';
 import { cardHost, cardSession, chatPresentation, showChat, useFloatingCard, type CardHost } from './floating';
-import { SESSION_MARK_WORDS, SessionMark, useSessionMark } from './SessionMark';
+import { SESSION_MARK_WORDS, SessionMark, useSessionMark, useSessionMarkCalm } from './SessionMark';
 
 export function ShowChat({ host }: { host: CardHost }) {
   const session = useLayout((s) => (cardHost(s) === host ? cardSession(s) : null));
@@ -17,6 +17,7 @@ export function ShowChat({ host }: { host: CardHost }) {
 
 function ShowChatButton({ appSessionId }: { appSessionId: AppSessionId }) {
   const mark = useSessionMark(appSessionId);
+  const calm = useSessionMarkCalm(appSessionId); // L5
   const self = useRef<HTMLButtonElement>(null);
   // Hide chat unmounted the focused bar: the Show chat that mounts next takes the keyboard, once
   useLayoutEffect(() => {
@@ -34,7 +35,7 @@ function ShowChatButton({ appSessionId }: { appSessionId: AppSessionId }) {
       className="inline-flex h-7 shrink-0 items-center gap-1.5 rounded-sm px-1.5 text-ui-sm whitespace-nowrap text-fg outline-accent [-webkit-app-region:no-drag] hover:bg-bg-hover focus-visible:outline-2"
     >
       Show chat
-      {mark && <SessionMark mark={mark} />}
+      {mark && <SessionMark mark={mark} calm={calm} />}
     </button>
   );
 }

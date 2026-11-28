@@ -6,10 +6,15 @@ import type { Row } from '../transcript';
 
 export function requesterName(rows: readonly Row[], agentId: AgentId | null): string {
   if (agentId === null) return 'Main session';
+  return agentNameIn(rows, agentId) ?? 'A subagent';
+}
+
+/** The subagent's name as the transcript's subagent rows give it; null when they do not know it. */
+export function agentNameIn(rows: readonly Row[], agentId: AgentId): string | null {
   for (const row of rows) {
     if (row.kind !== 'subagent') continue;
     const agent = row.agents.find((a) => a.agentId === agentId);
     if (agent) return agent.name;
   }
-  return 'A subagent';
+  return null;
 }

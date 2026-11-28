@@ -1,4 +1,4 @@
-import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { SessionEvent } from '@shared/graph/events';
@@ -14,13 +14,21 @@ import { accessibleDescription } from '../test-support/accessible-text';
 import { TEST_MACHINE } from '../../../../test/support/machine';
 import { formatClock } from '@shared/app/date-format'; // L129
 import type { AppSessionId } from '@shared/graph/ids'; // P5 O7 M6
-import { addressOf } from '@shared/machine/address';
-import { item, record, remoteRow } from '../../../../test/support/builders';
+import { addressOf, bareOf } from '@shared/machine/address';
+import { digest, item, record, remoteRow } from '../../../../test/support/builders';
 import { OTHER_MACHINE } from '../../../../test/support/machine';
 import { Toolbar } from '../app/Toolbar';
 import { registerRemoteOpener } from '../sessions/remote-openers';
 import { useAttention } from '../stores/attention';
 import { useMachines } from '../stores/machines';
+import { ipc } from '../ipc/client'; // the question sheet's C3 M4
+import { CLASH, FIXTURE, sheetOf } from '../sheet/test-support/questions';
+import { connectSheets, resetSheetStore } from '../stores/sheet';
+import { SHEET_WORDS } from '../sheet';
+import { preloadOf } from '../test-support/preload-of';
+import type { SheetLine } from '@shared/sheet/model';
+import { vi } from 'vitest';
+vi.mock('../transcript/view/markdown/Markdown', () => ({ Markdown: ({ markdown }: { markdown: string }) => <div data-markdown="">{markdown}</div> }));
 
 const nine = scenarioFile('nine-sessions');
 const idOf = (title: string) => pageScenario(nine).sessions.find((r) => r.title.text === title)!.appId; // P5 O6 M2: the page's id
@@ -33,6 +41,7 @@ const card = (title: string) => screen.getByRole('article', { name: title });
 
 beforeEach(() => {
   resetShellStores();
+  resetSheetStore();
   fillStores(nine);
   window.maws = fakeClient({ 'attention.request': ({ requestId }: { requestId: string }) => ({ event: requests[requestId] ?? null }) }).client as unknown as PreloadBridge;
 });
@@ -274,3 +283,123 @@ describe('a released session’s card', () => {
   });
 });
 // C12 end
+
+// The question sheet's C3 M4 (§H; frame 5): where the card would mount a request card for a sheet question, the session's
+// sheet questions together mount one compact sheet, a stopped session's too; the transcript's Markdown as text.
+describe('a session whose sheet questions wait', () => {
+  const SHEET = sheetOf([CLASH, FIXTURE]);
+  const asked = (appSessionId: AppSessionId, question: string, minute: number) =>
+    item(appSessionId, 'async_input', `2026-09-28T07:0${minute}:00.000Z`, { id: addressOf(TEST_MACHINE, `sheet:${SHEET.session}:${question}`) as never, request: { requestId: question as never, toolUseId: 'toolu_sheet' as never, taskId: null, agentId: null } });
+
+  function scene(holder: 'none' | 'self') {
+    const id = idOf('Fix sidebar drag');
+    const summary = { session: SHEET.session, appSessionId: bareOf(id), title: null, live: holder !== 'none', seq: 1, open: 2, queued: 0, pending: 0, hidden: 0, oldestAskedAt: null, unreadable: false };
+    window.maws = fakeClient({ 'sheet.list': { sessions: [summary], door: { known: false } }, 'sheet.read': { model: SHEET, door: { known: false } } }).client as unknown as PreloadBridge;
+    if (holder === 'none') act(() => useSessions.setState((s) => ({ records: new Map(s.records).set(id, { ...s.records.get(id)!, holder: { kind: 'none' } }) })));
+    act(() => useAttention.getState().applyChanged({ appSessionId: id, items: [asked(id, 'q4', 1), asked(id, 'q7', 2)] }, TEST_MACHINE));
+    offs.push(connectSheets(ipc));
+    return id;
+  }
+
+  it.each(['self', 'none'] as const)('mounts one compact sheet a session, its questions folded to their lines (holder %s)', async (holder) => {
+    scene(holder);
+    render(<Overview paneIndex={0} />);
+    const fix = card('Fix sidebar drag');
+    await waitFor(() => expect(fix.querySelectorAll('[data-sheet-in-place]')).toHaveLength(1));
+    expect(fix.querySelectorAll('[data-sheet-session][data-density="compact"]')).toHaveLength(1);
+    expect([...fix.querySelectorAll('[data-sheet-question]')].map((q) => q.getAttribute('data-sheet-question'))).toEqual(['q4', 'q7']);
+    expect(fix.querySelectorAll('[data-request-card]')).toHaveLength(0);
+  });
+
+  // M4's re-review: a running session accepts the last answer sent from its card; nothing of it waits, and the card keeps
+  // its sheet, which reads the outcome accepted until it is delivered
+  it('keeps a running session’s compact sheet once the last answer sent from it is accepted, its outcome in view', async () => {
+    const id = idOf('Fix sidebar drag');
+    let model = sheetOf([FIXTURE]);
+    const summary = (accepted: boolean) => ({ session: model.session, appSessionId: bareOf(id), title: null, live: true, seq: accepted ? 2 : 1, open: accepted ? 0 : 1, queued: 0, pending: accepted ? 1 : 0, hidden: 0, oldestAskedAt: null, unreadable: false });
+    const door = { known: true, available: true };
+    const fake = fakeClient({
+      'sheet.list': { sessions: [summary(false)], door },
+      'sheet.read': () => ({ model, door }),
+      'sheet.put': ({ lines }: { lines: SheetLine[] }) => ({ ok: true, results: lines.map((line) => ({ key: line.key, state: 'queued' })) }),
+    });
+    window.maws = preloadOf(fake);
+    act(() => useAttention.getState().applyChanged({ appSessionId: id, items: [asked(id, 'q7', 1)] }, TEST_MACHINE));
+    offs.push(connectSheets(ipc));
+    render(<Overview paneIndex={0} />);
+    const fix = () => card('Fix sidebar drag');
+    await waitFor(() => expect(fix().querySelector('[data-sheet-question="q7"]')).not.toBeNull());
+    fireEvent.click(within(fix()).getByRole('button', { name: /q7/ }));
+    fireEvent.click(within(fix()).getByRole('radio', { name: 'Replace it' }));
+    fireEvent.click(within(fix()).getByRole('button', { name: SHEET_WORDS.send(1) }));
+    await waitFor(() => expect(fake.invoked('sheet.put')).toHaveLength(1));
+    const [answer] = (fake.invoked('sheet.put') as { lines: SheetLine[] }[])[0]!.lines;
+    // the session's next step applies it: the question closes, its outcome pending delivery
+    const outcome = { key: answer!.key, kind: 'answer', id: 'q7', by: 'maws', at: '2026-11-23T10:00:00.000Z', acceptedAt: '2026-11-23T10:00:01.000Z', acrossStop: false, recipient: 'main', revision: 1, taken: false, picks: ['Replace it'], text: '', images: [], places: [1],
+      question: { askedAt: FIXTURE.askedAt, asker: FIXTURE.asker, header: FIXTURE.header, multiSelect: false, options: FIXTURE.options.map((option) => option.label), question: FIXTURE.question } };
+    model = sheetOf([], { seq: 2, pending: [outcome as never], sent: [{ key: answer!.key, state: 'accepted', verdict: 'applied', kind: 'answer', id: 'q7', at: '2026-11-23T10:00:01.000Z' }] });
+    act(() => {
+      useAttention.getState().applyChanged({ appSessionId: id, items: [] }, TEST_MACHINE);
+      fake.event('sheet.changed', { session: model.session, summary: summary(true) });
+    });
+    await waitFor(() => expect(fix().querySelector('[data-sheet-outcome="q7"]')?.textContent).toContain(SHEET_WORDS.accepted));
+    expect(fix().querySelectorAll('[data-sheet-in-place]'), 'the sheet stays where the answer was sent').toHaveLength(1);
+    expect(fix().querySelector('[data-sheet-question]'), 'nothing of it open').toBeNull();
+  });
+
+  // M4's review: a stopped session's one question answered from its card is queued and waits no more; the card keeps its
+  // sheet, which reads the answer queued with Take back; taken back, the question is open and waits again. The branch
+  // review of pull request 890 (R1): the session is read and exited, so only its held sheet keeps its card on the board.
+  it('keeps a stopped session’s compact sheet once its one question is answered from it: queued with Take back, which opens it again', async () => {
+    const id = idOf('Fix sidebar drag');
+    let model = sheetOf([FIXTURE]);
+    const summary = (queued: boolean) => ({ session: model.session, appSessionId: bareOf(id), title: null, live: false, seq: 1, open: queued ? 0 : 1, queued: queued ? 1 : 0, pending: 0, hidden: 0, oldestAskedAt: null, unreadable: false });
+    const door = { known: true, available: true };
+    const fake = fakeClient({
+      'sheet.list': { sessions: [summary(false)], door },
+      'sheet.read': () => ({ model, door }),
+      'sheet.put': ({ lines }: { lines: SheetLine[] }) => ({ ok: true, results: lines.map((line) => ({ key: line.key, state: 'queued' })) }),
+    });
+    window.maws = preloadOf(fake); // the fake under the real client, so its events reach the store lifted
+    act(() =>
+      useSessions.setState((s) => ({
+        records: new Map(s.records).set(id, { ...s.records.get(id)!, holder: { kind: 'none' }, unread: false }),
+        digests: new Map(s.digests).set(id, digest(id, { phase: 'exited' })),
+      })),
+    );
+    const waiting = asked(id, 'q7', 1);
+    act(() => useAttention.getState().applyChanged({ appSessionId: id, items: [waiting] }, TEST_MACHINE));
+    offs.push(connectSheets(ipc));
+    render(<Overview paneIndex={0} />);
+    const fix = () => card('Fix sidebar drag'); // the card moves out of the Needs-you group once nothing of it waits
+    await waitFor(() => expect(fix().querySelector('[data-sheet-question="q7"]')).not.toBeNull());
+    const puts = () => fake.invoked('sheet.put') as { lines: SheetLine[] }[];
+    // what the service does with each line: the answer queued on the question, which no longer waits; the retract cancels it
+    const changed = (queued: boolean) =>
+      act(() => {
+        useAttention.getState().applyChanged({ appSessionId: id, items: queued ? [] : [waiting] }, TEST_MACHINE);
+        fake.event('sheet.changed', { session: model.session, summary: summary(queued) });
+      });
+
+    fireEvent.click(within(fix()).getByRole('button', { name: /q7/ })); // unfold the compact card
+    fireEvent.click(within(fix()).getByRole('radio', { name: 'Replace it' }));
+    fireEvent.click(within(fix()).getByRole('button', { name: SHEET_WORDS.send(1) }));
+    await waitFor(() => expect(puts()).toHaveLength(1));
+    const answer = puts()[0]!.lines[0]!;
+    model = sheetOf([{ ...FIXTURE, queued: { key: answer.key, kind: 'answer', picks: ['Replace it'], text: '', images: [], revision: 1, by: 'maws' } }], { sent: [{ key: answer.key, state: 'queued', kind: 'answer', id: 'q7' }] });
+    changed(true);
+    await waitFor(() => expect(within(fix()).getByText(SHEET_WORDS.queuedStopped)).toBeTruthy());
+    expect(fix().querySelectorAll('[data-sheet-in-place]'), 'the sheet stays where the answer was sent').toHaveLength(1);
+    expect(screen.queryByRole('listitem', { name: 'Needs you' }) === null || !within(group('Needs you')).queryByRole('article', { name: 'Fix sidebar drag' }), 'a queued answer waits nowhere').toBe(true);
+
+    fireEvent.click(within(fix()).getByRole('button', { name: SHEET_WORDS.takeBack }));
+    await waitFor(() => expect(puts()).toHaveLength(2));
+    const retract = puts()[1]!.lines[0]!;
+    expect(retract).toMatchObject({ kind: 'retract', target: answer.key });
+    model = sheetOf([FIXTURE], { sent: [{ key: answer.key, state: 'queued', kind: 'answer', id: 'q7', cancelled: true }, { key: retract.key, state: 'queued', kind: 'retract', target: answer.key }] });
+    changed(false);
+    await waitFor(() => expect(within(fix()).queryByText(SHEET_WORDS.queuedStopped)).toBeNull());
+    expect(fix().querySelectorAll('[data-sheet-in-place]')).toHaveLength(1);
+    expect(fix().querySelector('[data-sheet-question="q7"]'), 'open again, its line in the card').not.toBeNull();
+  });
+});

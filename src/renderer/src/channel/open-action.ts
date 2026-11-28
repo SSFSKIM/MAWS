@@ -13,7 +13,8 @@ import { useLayout } from '../stores/layout';
 import { activeTab } from '../stores/layout-model';
 import { selectOrgIndex } from '../stores/org-projects';
 import { useSessions } from '../stores/sessions';
-import { channelOfRow, channelProjects, waitingFor } from './project';
+import { selectSheetHeld, useSheets } from '../stores/sheet';
+import { channelOfRow, channelProjects, heldSheets, waitingFor } from './project';
 
 /** The channel of the tab in front: a Channel tab's project, or a session tab's row's channel; null for any other. */
 export function frontChannel(strip: Strip): string | null {
@@ -52,7 +53,7 @@ export function connectChannelAction(): () => void {
   };
 }
 
-/** The palette's entries: every project that has a channel, with the length of its Channel's "Waiting on you" list. */
+/** The palette's entries: every project that has a channel, with the length of its Channel's "Waiting on you" list (its waiting items and its held sheets). */
 export function usePaletteChannels(): { project: string; name: string; waiting: number }[] {
   const index = useSessions((s) => selectOrgIndex(s, ipc.localMachine));
   const projects = useSessions((s) => s.projects);
@@ -60,5 +61,10 @@ export function usePaletteChannels(): { project: string; name: string; waiting: 
   const listed = useSessions((s) => s.listed);
   const bySession = useAttention((s) => s.bySession);
   const greyed = useAttention((s) => s.greyed);
-  return channelProjects(index).map((entry) => ({ ...entry, waiting: waitingFor({ project: entry.project, index, projects, records, listed, bySession, greyed }).length }));
+  const summaries = useSheets((s) => s.summaries);
+  const memories = useSheets((s) => s.memories);
+  return channelProjects(index).map((entry) => {
+    const waiting = waitingFor({ project: entry.project, index, projects, records, listed, bySession, greyed });
+    return { ...entry, waiting: waiting.length + heldSheets(waiting, { project: entry.project, index, projects, records, listed, greyed, summaries, held: (id) => selectSheetHeld({ summaries, memories }, id, 'unsettled') }).length };
+  });
 }

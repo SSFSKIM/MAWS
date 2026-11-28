@@ -26,7 +26,7 @@ import { openOf, useOpenAgents } from '../open-agents';
 import { useTaskGraph } from '../store';
 import { AgentRow, Chevron, indent } from './AgentRow';
 import { hasAgentsUnder, panelRows } from './panel-rows';
-import { SLOW_TICK_MS, useTicker } from './shared';
+import { agentWaitsOf, SLOW_TICK_MS, useTicker, type AgentWait } from './shared';
 import type { ListSection, SubagentsHandle, SubagentsState } from './SubagentsTool';
 
 const EMPTY_GRAPH = emptyGraph();
@@ -47,8 +47,8 @@ export function AgentList({ appSessionId, handle, expanded, shown, expandedFolds
   const sidecarsError = useTaskGraph((s) => s.entries.get(appSessionId)?.disk.error ?? null);
   const open = useOpenAgents((s) => openOf(s, appSessionId));
   const pending = useAttention((s) => selectPendingOf(s, appSessionId));
-  // An agent with an open request of its own (the child's permission, answered in its drill-in).
-  const waiting = useMemo(() => new Set<string>(pending.flatMap((item) => [item.request.agentId, item.request.taskId].filter((id): id is NonNullable<typeof id> => id !== null))), [pending]);
+  // An agent with an open request of its own (the child's permission, answered in its drill-in), and how its row reads it.
+  const waiting = useMemo(() => agentWaitsOf(pending), [pending]);
   // P5 O9: a session a terminal drives through its bridge is not live here, whatever engine status MAWS kept from an
   // earlier run of it
   const controls = useSessionControls(appSessionId);
@@ -139,7 +139,7 @@ function grouped(rows: TreeRow[]): (TreeRow | TreeRow[])[] {
   return out;
 }
 
-type RowProps = { graph: TaskGraph; waiting: ReadonlySet<string>; now: number; handle: SubagentsHandle; open: ReadonlySet<TaskId>; appSessionId: AppSessionId };
+type RowProps = { graph: TaskGraph; waiting: ReadonlyMap<string, AgentWait>; now: number; handle: SubagentsHandle; open: ReadonlySet<TaskId>; appSessionId: AppSessionId };
 
 // The team header and its rows in one group named by the header.
 function TeamGroup({ rows, ...props }: RowProps & { rows: TreeRow[] }) {
@@ -164,7 +164,7 @@ const keyOf = (row: TreeRow) =>
 function TreeRowView({ row, graph, waiting, now, handle, open, appSessionId, disclosure }: RowProps & { row: TreeRow; disclosure: boolean }) {
   if (row.kind === 'agent') {
     const under = disclosure && hasAgentsUnder(graph, row.taskId) ? { open: open.has(row.taskId), onToggle: () => useOpenAgents.getState().toggle(appSessionId, row.taskId) } : null;
-    return <AgentRow row={row} graph={graph} waiting={waiting.has(row.taskId as string)} now={now} onOpen={handle.openAgent} under={under} />;
+    return <AgentRow row={row} graph={graph} waiting={waiting.get(row.taskId as string) ?? null} now={now} onOpen={handle.openAgent} under={under} />;
   }
   if (row.kind === 'done-fold') {
     const parent = graph.tasks.get(row.parentTaskId);

@@ -113,3 +113,143 @@ These are carried into the pull request's section of that name:
 
 1. **sminos `show` prints fields its own schema refuses** (doperpowers, C2). At `2594002af`, `model()` copies `id` and `target` from any queued inbox line that has them, and the show schema's closed queued variants refuse them. MAWS projects by kind. No fixture holds such a line.
 2. **Pictures of the built components before M6.** A small harness case on the Mac lane would give the owner a first look at M3, the carried draft's card first, before C3b.
+
+# Landing C3b, M4 and M5 with the built look's pictures: execution report (2026-11-27)
+
+Run through doperpowers:subagent-driven-execution, continuing the controller's run above, from master `386028383`. Each milestone had one executor (opus) and one task reviewer, with fixes resumed on the executor. M6's live gate was not started: it waits on C2.G2 in doperpowers. No whole-branch review was run, and no pull request was opened (the brief).
+
+## Range and head
+
+- Commits: `43c95d3c3..be2edec5c` on `question-sheet-c3`, master `b65a1e175` merged in at `7dae81a6c`.
+- The final gate ran on the pushed head `be2edec5c` (the two commits after it touch this report only): static, unit, probes, e2e:lane-a, e2e:c7, e2e:panel, e2e:transcript, e2e:desk-web and e2e:to-human, with the mini copies, all green, run 46064457999.
+
+## What landed
+
+| part | commits | review | gate |
+|---|---|---|---|
+| refresh, before M4 | `43c95d3c3` (parent pin to `e6a07c35e`, the writer's list trimmed) | n/a | n/a |
+| M4, the side sheet, the waiting card, the items | `7b0898665`, `3966b1bc1`, `0c3893379`, `4daa71c25`; fixes `cf868a163`, `4609b9802`, `f5db347c2` | clean after 2 rounds | run 45470212254, green but lane-a's mini copy (X-168, see below) |
+| M5, the row's lines and receipts | `c91e48011`, `2aecf2075`, `af4cdc412`, `eddee6700`, `7932da929`, `49685844c`, `699bac4f8`; fixes `6832adbd5`, `ccba46b1f`, `7a888a0ab`, `9e689d0a2` | clean after 1 round | run 46053751902, all green |
+| lane A's reshaper race (pull request #882, cherry-picked, then folded by the merge) | `3ca14e4fc`, `b491fbf89`; merge `7dae81a6c` | #882's own review (the composite's writer) | at #882's head: runs 46044133874, 46044222157, 46051964590 |
+| the built look's pictures and the rig's launch 17 | `db8c870b5`, `4981e443e` | not task-reviewed (test and rig code only; the branch review reads it) | run 46061691137 |
+
+## The writer's rulings built in this landing
+
+- `questionSentence`'s rule is now one definition shared with C2's terminal row: full-width marks end a sentence, and the writer's eleven cases are in the tests.
+- The channel's held sheet: held there only while an act is sending or carries a note. `selectSheetHeld` takes that as one argument.
+- The queued card's sentence follows `live`. This added X5's optional `live` prop.
+- The fork ruling: the record is laid over a row line only where its entry names that row's call.
+
+## Decisions, by milestone
+
+All are written into the plan's §C, §F, §H and §I.
+
+- M4: `SheetService.verified`; the store's setter is an updater; `appSheetHost` takes the session; the tab's count is the strip's suffix ("Sheet · 3"); the compact sheet is held for what was sent; a focus request is used once per tab; a notice is resolved when pressed; and `e2e:panel`'s menu list names the Sheet.
+- M5: master's `GroupRow` has no `renderBody`, so the row uses #852's classes directly; `SheetRowLine.revises`; the envelope is read before today's answer reader; a turn holding only the carrier counts as a turn.
+
+## X-168
+
+- The symptom: lane-a's X-168 and `:895` failed on the mini copy only.
+- My first control run was mistaken. It was taken at `3863923cb`, which holds M4's first commits, not at a plain base. The investigator caught it.
+- Plain master fails on the mini (`--lane no-hosted`):
+  - `386028383`: 3 of 3 runs (46045126445, 46045210798, 46045293955).
+  - `a873c6f25`: 2 of 3 for X-168 (46045169950, 46045251728, 46045334890).
+- The cause is a race in lane A's driver, which predates the sheet. When a bridge closed, the stream's 500 ms reopen cleared the reshaper before any snapshot came, so the final "agents exited" body reached no watch.
+- The fix is #882, master `0e903ea7c`, which also clears the condition the landing's architect had set.
+
+## Pictures
+
+They are in a directory outside the repository, with the composite's writer, from run 46061691137, at 1440 x 900 in the light theme:
+
+1. `1-carried-draft.png`: a card rewritten under a draft, with "Updated", the dashed carried pick, "You wrote this before the question changed." and "Keep my answer".
+2. `2-needs-you-calm.png`: the sidebar's Needs you row for a session whose waiting items are all sheet questions, in the calm info tone.
+3. `3-row-at-rest.png`: "Asked 3 questions" with three lines (id, header, sentence, Open).
+4. `4-row-receipts.png`: the same row as receipts: `q1 Auth method → OAuth`, "Dismissed", "Withdrawn".
+5. `5-side-sheet.png`: the side sheet "Sheet · 3" open at q2, with the keyboard on its card.
+6. `6-waiting-card.png`: "Waiting for you" with the sheet's three lines, a subagent's among them.
+7. `7-row-forms.png`: "Asked 2 questions" (Revised below), "Revised q5, q6", "Nothing done" with its note, and "Did not change the sheet" with its error.
+8. `8-refused-send.png`: a refused Send's "Not sent: …" note, with Send offered again.
+9. `9-queued-stopped.png`: a stopped session's queued answer, with Take back, Edit and the row line's "queued".
+
+Seen while shooting, and worth the owner's eye:
+- Only the Needs you row is calm. The project row's mark and the toolbar badge for the same session stay in the warning tone, which is L5 as written.
+- "from reviewer" is cut almost to nothing at the waiting card's default width.
+- The card the side sheet opened at shows no focus ring.
+- A card rewritten in the record alone, with no revising call, keeps the old wording in the transcript's row line (a scripted state only).
+
+## Strings added, for the owner's look
+
+- M4: none beyond "from <agent>", which the composite quotes.
+- M5, all in §I's list:
+  - "Queued. The session has not picked it up yet." (the writer's, provisional)
+  - "Open q7" (Open's accessible name)
+  - "Nothing done"
+  - "Changing the sheet"
+  - "Outcome not known yet"
+  - "Did not change the sheet"
+  - the list forms "Revised q5, q6" and "Withdrew q6, q7"
+  - the carrier's notice in today's answer words, "answered: q7, q8; dismissed q9"
+
+## Gates seen red on the mini and not this change's
+
+- lane-a `:204`, a bridgeless terminal's holder, at load 12: run 46045119581.
+- panel `:1285`, the floating card, where toasts intercept the bar's click: merge head run 46058186543 (its rerun was cancelled when the final run superseded it).
+- transcript `:3304`, zoom and follow: run 46061691137.
+None touches sheet code, and each passed on the hosted lane in the same run.
+
+## Unresolved review findings, for the landing's pull request
+
+- From C3a (carried over): `body`'s cached-model window; confinement by path with no `openat`; a recreated root falls back to the 2 s poll; the door's pipes are not destroyed at its deadline; `QuestionCardProps.busy`'s stale comment; a reservation committed after the session's last sheet unmounted waits until the sheet is shown again.
+- M4, notifier.ts ~L175: a question queued at the app's start and later taken back, whose latest call was a revise, announces that call once (in-app only). It is rare and cosmetic.
+- M4, stores/sheet.ts ~L150: a late paste reply after the record's removal can recreate that session's memory (memory.ts ~L214). The orphan is harmless until the record returns.
+
+## Left for M6
+
+- The live steps 1 to 8 on a Mac with C2.G2: a real terminal session, the real sminos, the two-window barrier in front of the real command.
+- One recorded transcript, scrubbed.
+- The tracker's five rows.
+- The pictures again from the landing's head if anything drawn moves.
+- The landing's pull request, with this report's findings and residue.
+
+## Environmental friction
+
+- No Mac could run the rig, so the pictures came from asserting e2e cases through `--evidence`.
+- The mini lane is loaded, and three unrelated cases failed on it once each.
+- ci-gate's master runs add no mini copy (the spec is unchanged against the peer), so measuring master on the mini needed `--lane no-hosted`.
+
+## Residue
+
+1. **Calm tone beyond the Needs you row.** The project row's mark and the toolbar badge stay in the warning tone for a session whose waiting items are all sheet questions (picture 2). Whether L5's calm reaches them is the owner's call.
+2. **Focus ring on the opened card.** The side sheet opened at a question gives no visible sign of which card holds the keyboard (picture 5).
+3. **Mini-lane flakes** in lane-a `:204`, panel `:1285` and transcript `:3304`, each seen once at load. They are worth a CI-opt look if they recur on an unloaded mini.
+
+## After the first return: the look wave and M6 (2026-11-28)
+
+- **The look wave** (`04bf48574`, `641be82fc`) builds the writer's rulings on the pictures:
+  - calm reaches every aggregate of the same waiting sessions (`calmWaiting`, `waitingTone` in `R/attention/derive.ts`);
+  - "from <agent>" is shown whole or not at all;
+  - a question card's root draws the focus outline when the root itself holds focus;
+  - an agent's row of sheet questions reads "Question waiting".
+  Its task review was clean after one fix round. Gates: runs 46069249204 and 46076249313. Pictures 2, 5 and 6 were re-shot beside their `*-before.png`. The owner kept the built look and the carried draft.
+- **M6, the live gate**, runs as the writer ruled: a committed driver (`e2e/sheet-live.config.ts`, `e2e/sheet-live.rig.ts`, `e2e/support/sheet-live.ts`) on the project's Mac runner over SSH.
+  - It starts the app through the e2e harness, a real terminal `claude --plugin-dir` of doperpowers `42ab7915d` in tmux, C2's stand-in surface, and the real sminos.
+  - It asserts steps 1 to 8 from the record and the window.
+  - G2.a to G2.g passed whole at the landing's code: run 11 at `9997c4f3d`, admission load 7.00. Earlier passes were run 5 at `b8d841c59`, run 8 at `585072a11` and run 9 at `c9c9718ab`.
+  - Run 10 (load 11.27) failed at step 6: MAWS's transcript stood 15 to 20 s behind the engine's file, while the sheet and the record were already current. It was not reproduced.
+  - The task review was clean after three rounds, the last verified by the controller.
+- **The recorded session** is in `test/fixtures/sheet-live/` with its test. An account name in a directory listing was scrubbed by amending its commit (`5e64d8536` became `a99bcd727`, force-pushed with a lease). The old object may stay fetchable on GitHub by its sha until garbage collection. The driver now scrubs every string of a recording and fails the run on a leftover name.
+- **Five tracker rows**, as M6's Decisions list them.
+- **A flaky test of M3's**, `SessionSheet.test.tsx` "a host whose send throws", now waits for the memory its effect writes (`acfe60772`).
+- **Master `d697dfaa0`** (the composite's text) is merged as `d39daa1fa`.
+
+### Unresolved review findings, added
+
+- `QuestionCard.tsx` ~L139: the pointer latch's document listeners clear only on a pointer-up or cancel that the document receives. A gesture lost to the window can still miss one later keyboard ring, and an unmounted card's listeners stay until the next such event.
+- `WaitingCard.tsx` ~L94: the asker's room is a 20ch basis, not the width of the question's first twenty characters. "Whole or not at all" holds; the difference shows only at the boundary.
+- The channel's section of held-only cards keeps "Waiting on you" only while an act is sending or carries a note, by the writer's ruling, so the earlier finding is resolved.
+
+### Residue, added
+
+4. **The transcript lags the engine's file under load.** In run 10, at a 1-minute load of 11.27 on the mini, MAWS's transcript stood 15 to 20 s behind the engine's file for a terminal session, while the sheet and the record were current. It was not reproduced at load 7. The file follow under load is worth a look.
+5. **The pick's place in the envelope.** In two of three live runs the agent doubted whether a delivered pick (`[1]`) counts from 0. The writer passes this to C5, whose steer names a pick by place only.
+6. **What is left on the mini.** About 2 GB in a directory of its own on the project's Mac runner: the checkouts, `out/`, the run directories and `run.sh`. Remove it when M6's evidence is no longer needed.

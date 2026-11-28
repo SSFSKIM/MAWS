@@ -16,10 +16,15 @@
 // UX wave U1a §H (l4-approvals-09, ticket 333): a permission's notification carries what the one rule for answers from
 // outside a pane admits for its request, read before it posts ("Allow once" and "Deny", or "Deny" alone), and a short
 // command is its body; the port numbers the buttons by position, so the order sent is kept to map a press back.
+// The question sheet's C3 M4 (docs/doperpowers/plans/2026-11-23-question-sheet-c3-maws-app.md §H, S11): a sheet
+// question's item is told in-app only, as a terminal's prompts are (O-22), and once per call: an item is told when it is
+// new and no item of its call was told before (or was open at the start, or arrived silent), so a call of eight
+// questions makes one notice and a revise none. What a MAWS-run session's sheet item does with macOS notifications is C5's.
 import type { AttentionItem } from '@shared/graph/attention';
 import { isNoClient, type ClientPort, type NotificationHandle, type NotifyEvent, type NotifyRequest } from '@shared/client/port';
 import type { AttentionKind } from '@shared/graph/enums';
 import { isLaneAItem } from '@shared/attention/lane-a-item'; // P5 O9 M6; P5 O3-C: neutral, lane A being the spine's
+import { isSheetItem } from '@shared/attention/sheet-item'; // the question sheet's C3 M4
 import type { AppSessionId, AttentionId } from '@shared/graph/ids';
 import type { SpineView } from '@shared/spine/view';
 import type { EventPayload, NotificationKinds, Settings, SessionDigest } from '@shared/ipc/schema';
@@ -65,6 +70,17 @@ export type NotifierView = Pick<SpineView, 'allAttention' | 'digests' | 'attenti
 
 export function startNotifier(view: NotifierView, deps: NotifierDeps): () => void {
   const seen = new Set<AttentionId>([...view.allAttention().values()].flat().map((i) => i.id));
+  // The question sheet's C3 M4 (S11): the calls whose sheet questions were told, or were open at the start, by session and call
+  const callOf = (item: AttentionItem, machine = '') => `${machine}\n${item.appSessionId}\n${item.request.toolUseId ?? item.id}`;
+  const calls = new Set<string>([...view.allAttention().values()].flat().filter((i) => isSheetItem(i.id)).map((i) => callOf(i)));
+  /** Whether a new item may be told: any item but a sheet question whose call was told already. */
+  const firstOfCall = (item: AttentionItem, machine?: string) => {
+    if (!isSheetItem(item.id)) return true;
+    const key = callOf(item, machine);
+    if (calls.has(key)) return false;
+    calls.add(key);
+    return true;
+  };
   const previous = new Map(view.digests().map((d) => [d.appSessionId, d]));
   const live = new Map<NotificationHandle, Notice>();
   let fallback: string | null = null; // why OS notifications are unavailable, once the port has said so
@@ -87,7 +103,7 @@ export function startNotifier(view: NotifierView, deps: NotifierDeps): () => voi
   const post = (notice: Notice, offer: NotificationOffer | null = null, checked = false) => {
     if (notice.remote === undefined && deps.isViewing(notice.appSessionId)) return; // a page viewing a remote session reports none
     if (deps.isFocused()) { notified(notice, 'in-app'); return; }
-    if (notice.attentionId !== null && isLaneAItem(notice.attentionId)) return; // P5 O9 M6: in-app only
+    if (notice.attentionId !== null && (isLaneAItem(notice.attentionId) || isSheetItem(notice.attentionId))) return; // P5 O9 M6, and a sheet question (C3 M4): in-app only
     if (fallback !== null) { fallBack(notice); return; }
     let request: NotifyRequest;
     let item: AttentionItem | undefined;
@@ -159,8 +175,11 @@ export function startNotifier(view: NotifierView, deps: NotifierDeps): () => voi
     for (const item of items) {
       if (seen.has(item.id)) continue;
       seen.add(item.id);
-      if (silent.has(item.id)) continue;
-      if (!waits(item) || !isActionable(item) || !inNeedsYou(appSessionId)) continue;
+      if (silent.has(item.id)) {
+        if (isSheetItem(item.id)) calls.add(callOf(item)); // a question that waited before the launch: its call was told
+        continue;
+      }
+      if (!waits(item) || !isActionable(item) || !inNeedsYou(appSessionId) || !firstOfCall(item)) continue;
       const settings = deps.settings().notifications;
       if (settings.enabled && settings.kinds[GROUP[item.kind]]) post({ appSessionId, attentionId: item.id, body: item.summary });
     }
@@ -219,8 +238,11 @@ export function startNotifier(view: NotifierView, deps: NotifierDeps): () => voi
           const key = `${change.machine}\n${item.id}`;
           if (remoteSeen.has(key)) continue;
           remoteSeen.add(key);
-          if (restoring) continue;
-          if (!waits(item) || !isActionable(item)) continue;
+          if (restoring) {
+            if (isSheetItem(item.id)) calls.add(callOf(item, change.machine));
+            continue;
+          }
+          if (!waits(item) || !isActionable(item) || !firstOfCall(item, change.machine)) continue;
           const settings = deps.settings().notifications;
           if (settings.enabled && settings.kinds[GROUP[item.kind]]) post({ appSessionId: app as AppSessionId, attentionId: item.id, body: item.summary, remote: { machine: change.machine, title: titleOf(change.machine, held.name, app) } });
         }

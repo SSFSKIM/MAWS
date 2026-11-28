@@ -78,6 +78,7 @@ const ESTIMATES: Record<RowKind, number> = {
   browser_activity: 34, // E13: as a browser action's
   record_fold: 32, // UX wave U2b: one line
   to_human: 96, // P4-R7: a message card, its label and a few lines
+  sheet: 104, // the question sheet's C3 M5: its head line and three question lines of 24 px
   gap: 36, // P5 O7 M2: one bar
   notice: 32, // UX wave U3: one line, as a message's
   activity: 40, // UX wave U3b (Interfaces §E): the divider's, whose type and height it has

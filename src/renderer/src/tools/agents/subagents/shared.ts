@@ -2,7 +2,10 @@
 // `SubagentGlyph` takes a `SubagentRef`, and the mark follows the task id, so a row, the transcript and the summary
 // agree), a finished agent's outcome line, and the agent a tool-use id started.
 import { useEffect, useState } from 'react';
+import { ATTENTION_HEADINGS } from '@shared/attention/headings';
+import type { AttentionItem } from '@shared/graph/attention';
 import type { AgentId, TaskId, ToolUseId } from '@shared/graph/ids';
+import { calmWaiting, type WaitingTone } from '../../../attention/derive';
 import { glyphFor, type SubagentRef } from '../../../transcript';
 import { SUBAGENTS_COPY } from '../copy';
 import { formatAgo } from '../model/elapsed';
@@ -14,6 +17,22 @@ import type { TaskGraphEntry } from '../store';
 // by the tool's visibility, which `useNow` cannot be. The clock is read again whenever the ticker (re)activates, so a
 // list shown again does not read a stale time for a whole period.
 export const SLOW_TICK_MS = 30_000;
+
+// An agent waiting on requests of its own, as its row reads it in the Subagents panel and on the summary's card
+// (Interfaces §C.6): `Approval needed` in the warning tone; an agent whose waiting items are all sheet questions reads
+// as an async_input item, its heading's words in the calm tone (L5; the composite's writer, 2026-11-27). Keyed by agent
+// id and by task id, either of which a request may name.
+export interface AgentWait {
+  word: string;
+  tone: WaitingTone;
+}
+export function agentWaitsOf(pending: readonly AttentionItem[]): ReadonlyMap<string, AgentWait> {
+  const byAgent = new Map<string, AttentionItem[]>();
+  for (const item of pending) for (const id of new Set([item.request.agentId, item.request.taskId])) if (id !== null) byAgent.set(id, [...(byAgent.get(id) ?? []), item]);
+  const calm: AgentWait = { word: ATTENTION_HEADINGS.async_input.text, tone: 'calm' };
+  const warning: AgentWait = { word: SUBAGENTS_COPY.approvalNeeded, tone: 'warning' };
+  return new Map([...byAgent].map(([id, items]) => [id, calmWaiting(items) ? calm : warning]));
+}
 
 // P5 O9: how long a terminal session's stop whose outcome is unknown (a subagent's or a background task's) reads
 // stopping… before Stop is offered again, if nothing has shown it stopped by then.

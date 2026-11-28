@@ -885,3 +885,52 @@ describe('lane A items', () => {
     service.stop();
   });
 });
+
+// The question sheet's C3 M4 (docs/doperpowers/plans/2026-11-23-question-sheet-c3-maws-app.md §H): a fifth list, a
+// session's open sheet questions from the spine's sheet service (src/services/sheet/attention.ts), a live projection
+// with no request view, never restored from the store.
+describe('sheet items', () => {
+  const sheetItem = (question: string): AttentionItem =>
+    AttentionItemSchema.parse({
+      id: `sheet:${SID}:${question}`, appSessionId: APP, sessionId: SID, kind: 'async_input', request: { requestId: question, toolUseId: 'toolu_sheet', taskId: null, agentId: null },
+      summary: 'Which sailing should the import keep?', createdAt: AT, state: 'pending', stateChangedAt: AT, expiresAt: null,
+    });
+
+  it('merges them after the rest, replaces them whole, answers attention.request with none and asks the host nothing', async () => {
+    const { service, fire, batch, last, handlers, dispatch } = setup();
+    await service.ready;
+    const permission = item({ kind: 'permission', state: 'pending' });
+    fire('session.brokerItems', { appSessionId: APP, items: [permission] });
+    const [q1, q2] = [sheetItem('q1'), sheetItem('q2')];
+    service.setSheetItems(APP, [q1, q2], []);
+    expect(last()).toEqual([permission, q1, q2]);
+    expect(await handlers.get('attention.request')!({ appSessionId: APP, requestId: 'q1' })).toEqual({ event: null });
+    expect(dispatch).not.toHaveBeenCalled();
+    batch(event('turn.started', { userMessageUuid: null, origin: 'human' })); // no turn retires them
+    expect(last()).toEqual([permission, q1, q2]);
+    service.setSheetItems(APP, [q2], []);
+    expect(last()).toEqual([permission, q2]);
+    service.stop();
+  });
+
+  // The branch review of #890 (S3): a projection of questions that waited before the launch is silent, as the owner
+  // channel's restart is, and stays so
+  it('carries the silent ids of a projection on its change, and on every later one', async () => {
+    const { service, changed } = setup();
+    await service.ready;
+    const [q1, q2] = [sheetItem('q1'), sheetItem('q2')];
+    service.setSheetItems(APP, [q1], [q1.id]);
+    expect(changed.at(-1)).toEqual({ appSessionId: APP, items: [q1], silent: [q1.id] });
+    service.setSheetItems(APP, [q1, q2], []);
+    expect(changed.at(-1)).toEqual({ appSessionId: APP, items: [q1, q2], silent: [q1.id] });
+    service.stop();
+  });
+
+  it('is not restored from the store: the sheet service re-projects its records at start', async () => {
+    const { service, last } = setup({ store: new FakeStore([sheetItem('q1')]) });
+    await service.ready;
+    expect(last()).toEqual([]);
+    expect(service.list()).toEqual([]);
+    service.stop();
+  });
+});

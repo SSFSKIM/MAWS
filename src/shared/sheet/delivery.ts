@@ -9,7 +9,7 @@ const ID = /^q[1-9][0-9]{0,8}$/;
 const Int1 = z.number().int().min(1);
 
 // Loose, as every shape sminos writes is read here (S5): a field a later sminos adds does not lose an answer's receipt.
-const SheetDeliverySchema = z.looseObject({
+export const SheetDeliverySchema = z.looseObject({
   v: z.literal(1),
   keys: z.array(z.string().regex(KEY)).max(200),
   answered: z.array(

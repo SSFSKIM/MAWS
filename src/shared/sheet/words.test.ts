@@ -48,6 +48,20 @@ describe('questionSentence', () => {
     expect(questionSentence('Really?! Then ship.')).toBe('Really?!');
     expect(questionSentence('')).toBe('');
   });
+
+  it('holds the writer\'s eleven cases, one definition with C2\'s terminal row', () => {
+    expect(questionSentence('We ship Friday. Keep the earlier sailing?')).toBe('Keep the earlier sailing?');
+    expect(questionSentence('Use v1.2 or v2.0?')).toBe('Use v1.2 or v2.0?');
+    expect(questionSentence('Pick one')).toBe('Pick one');
+    expect(questionSentence('First line\nWhich one?')).toBe('Which one?');
+    expect(questionSentence('He said "go?" Then left.')).toBe('He said "go?"');
+    expect(questionSentence('배포할까요？다음 주에 합니다。')).toBe('배포할까요？');
+    expect(questionSentence('Statement。Question？rest')).toBe('Question？');
+    expect(questionSentence('What?! Really.')).toBe('What?!');
+    expect(questionSentence('No marks here\nSecond line.')).toBe('No marks here');
+    expect(questionSentence('e.g. this?')).toBe('this?');
+    expect(questionSentence('')).toBe('');
+  });
 });
 
 describe('receiptOf', () => {

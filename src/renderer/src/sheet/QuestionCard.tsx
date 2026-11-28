@@ -10,7 +10,7 @@
 // is open, a compact card's fold. Its root carries `data-sheet-question`, by which C4's page finds a card to scroll to,
 // and is the preview's size container, with no padding or border of its own, so its breakpoint is the card's width.
 import { Checkbox, RadioGroup } from 'radix-ui';
-import { useEffect, useState, type ClipboardEvent, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ClipboardEvent, type FocusEvent, type ReactNode } from 'react';
 import type { SheetBody, SheetImageType, SheetOption, SheetQuestion, SheetReference } from '@shared/sheet/model';
 import { confirmDraft, draftConflict, isConfirmed, isTooLong, questionSentence, type QuestionDraft } from '@shared/sheet/words';
 import { CardButton } from '../request-card/controls';
@@ -29,6 +29,8 @@ export interface QuestionCardProps {
   busy: boolean; // an act of this surface on this question is in flight
   host: SheetHost;
   density?: 'full' | 'compact'; // compact: folded to its row line until chosen
+  queuedHere?: boolean; // the queued answer on the question is one this surface sent: a compact card mounted over it starts open
+  live?: boolean | null; // whether a process holds the session (its summary's `live`); absent or null: not known. A queued answer reads stopped only when false
   // The person's act, as an update of the draft as it stands when applied (undefined: none; null: none after it): a
   // field's edit changes that field of it, so an image or another edit applied first stays.
   onDraft(update: (current: QuestionDraft | undefined) => QuestionDraft | null): void;
@@ -118,12 +120,49 @@ function Note({ tone, children }: { tone: 'warning' | 'neutral'; children: React
   );
 }
 
-export function QuestionCard({ session, question, draft, mark, busy, host, density = 'full', onDraft, onDismiss, onRetract, onAttach }: QuestionCardProps) {
+// The card the side sheet opens at shows where the keyboard is (L5): the app's focus outline on the root whenever the
+// root itself holds focus. Only the open-at request and the keyboard's own moves put focus there unasked; a pointer
+// pressed inside the card draws none (its click focuses the root when it lands on no control of its own), and the
+// browser's :focus-visible cannot tell the two apart for a root that is focused by script.
+const RING = 'outline-accent data-[focus-ring]:outline-2';
+function useRootRing(onRootFocus?: () => void) {
+  const [ring, setRing] = useState(false);
+  const pointer = useRef(false);
+  return {
+    'data-focus-ring': ring ? '' : undefined,
+    // Pressed inside the card, the pointer is held until it is released anywhere: a drag out of the card releases it
+    // outside, where the card would see no pointerup of its own.
+    onPointerDown: () => {
+      setRing(false);
+      if (pointer.current) return;
+      pointer.current = true;
+      const release = () => {
+        pointer.current = false;
+        document.removeEventListener('pointerup', release, true);
+        document.removeEventListener('pointercancel', release, true);
+      };
+      document.addEventListener('pointerup', release, true);
+      document.addEventListener('pointercancel', release, true);
+    },
+    onFocus: (event: FocusEvent) => {
+      const root = event.target === event.currentTarget;
+      setRing(root && !pointer.current);
+      if (root) onRootFocus?.();
+    },
+    onBlur: (event: FocusEvent) => event.target === event.currentTarget && setRing(false),
+  };
+}
+
+export function QuestionCard({ session, question, draft, mark, busy, host, density = 'full', queuedHere = false, live = null, onDraft, onDismiss, onRetract, onAttach }: QuestionCardProps) {
   const [pointed, setPointed] = useState<string | null>(null);
   const [focused, setFocused] = useState<string | null>(null);
   const [opened, setOpened] = useState<ReadonlySet<number>>(new Set()); // references open, by their place in the list (two may share a hash)
-  const [folded, setFolded] = useState(true); // compact only
+  // compact only. A card mounted over an answer this surface queued starts open (C3 M4's review): the Overview's card
+  // moves to another group once its last question no longer waits, and its sheet mounts again there with the person's
+  // answer and Take back in view. Every other card is folded to its line until chosen.
+  const [folded, setFolded] = useState(() => !queuedHere);
   const [pasteNote, setPasteNote] = useState<string | null>(null);
+  const ring = useRootRing(density === 'compact' ? () => setFolded(false) : undefined);
 
   const queued = question.queued;
   const conflict = draft !== undefined && draftConflict(draft, question);
@@ -250,7 +289,7 @@ export function QuestionCard({ session, question, draft, mark, busy, host, densi
         <>
           <QueuedAnswer picks={queued.picks} text={queued.text} />
           <div className="flex flex-wrap items-center justify-end gap-2">
-            <p className="m-0 basis-full text-ui-sm text-fg-muted">{SHEET_WORDS.queued}</p>
+            <p className="m-0 basis-full text-ui-sm text-fg-muted">{live === false ? SHEET_WORDS.queuedStopped : SHEET_WORDS.queued}</p>
             <CardButton disabled={busy} onClick={() => onRetract(queued.key)}>
               {SHEET_WORDS.takeBack}
             </CardButton>
@@ -337,7 +376,7 @@ export function QuestionCard({ session, question, draft, mark, busy, host, densi
 
   if (density === 'compact') {
     return (
-      <article data-sheet-question={question.id} tabIndex={-1} onFocus={(event) => event.target === event.currentTarget && setFolded(false)} className="@container flex min-w-0 flex-col outline-none [&+&]:border-t [&+&]:border-border">
+      <article data-sheet-question={question.id} tabIndex={-1} {...ring} className={`@container flex min-w-0 flex-col rounded-sm ${RING} data-[focus-ring]:-outline-offset-2 [&+&]:border-t [&+&]:border-border`}>
         <button type="button" aria-expanded={!folded} onClick={() => setFolded(!folded)} className="flex w-full min-w-0 items-baseline gap-1.5 rounded-sm py-1.5 text-left text-fg-muted outline-accent focus-visible:outline-2">
           <Chevron className="self-center" />
           <span className="shrink-0 text-fg-faint tabular-nums">{question.id}</span>
@@ -356,7 +395,7 @@ export function QuestionCard({ session, question, draft, mark, busy, host, densi
     );
   }
   return (
-    <article data-sheet-question={question.id} tabIndex={-1} className="@container min-w-0 rounded-md outline-accent focus-visible:outline-2">
+    <article data-sheet-question={question.id} tabIndex={-1} {...ring} className={`@container min-w-0 rounded-md ${RING}`}>
       <div className="flex min-w-0 flex-col gap-3 rounded-md border border-border bg-bg-raised p-3 text-ui text-fg">
         <div className="flex min-w-0 flex-col gap-1">
           {head}

@@ -10,6 +10,8 @@ import type { SessionDigest } from '@shared/ipc/schema';
 import { listedStateOf } from '../sessions/listed-state'; // P5 O7 M10
 import type { ListedSession } from '../stores/sessions';
 import { isActionable, waits } from '@shared/attention/kinds';
+import { isSheetItem } from '@shared/attention/sheet-item';
+import { calmWaiting } from './derive';
 
 export type Glyph = { char: string; tone: 'accent' | 'warning' | 'info' | 'danger' | 'faint'; label: string; pulse: boolean };
 
@@ -34,7 +36,8 @@ export function glyphFor(record: SessionRecord, digest: SessionDigest | null, pe
   // W7: MAWS runs it and a foreign process resumed it too (contested); MAWS yields once that process writes
   if (holder.kind === 'self' && holder.contestedBy !== undefined) return glyph('⇄', 'warning', holder.contestedBy.kind === 'terminal' ? 'Contested: also live in terminal' : 'Contested: also live as background job');
 
-  const waiting = waitingGlyph(open);
+  // L5 (the composite's writer, 2026-11-27): sheet questions alone draw their calm glyph; beside anything else, the glyph is that other item's
+  const waiting = waitingGlyph(calmWaiting(open) ? open : open.filter((item) => !isSheetItem(item.id)));
   if (waiting !== null) return waiting;
   const word = listedStateOf(digest, listed); // P5 O7 M10
   if (word !== null) return wordGlyph(word) ?? idleGlyph(record);
@@ -71,7 +74,8 @@ function waitingGlyph(open: AttentionItem[]): Glyph | null {
 // read these live glyphs. P5 O7 M6: its machine's attention feed, when it holds open items for it, says what it waits for
 // (the record's rows above), whatever the listing's word.
 export function listedGlyph(state: string, pending: AttentionItem[] = []): Glyph {
-  return waitingGlyph(pending.filter((i) => waits(i) && isActionable(i))) ?? wordGlyph(state) ?? glyph('○', 'faint', 'Idle');
+  const open = pending.filter((i) => waits(i) && isActionable(i));
+  return waitingGlyph(calmWaiting(open) ? open : open.filter((item) => !isSheetItem(item.id))) ?? wordGlyph(state) ?? glyph('○', 'faint', 'Idle');
 }
 
 const STOPPED = 'Stopped';

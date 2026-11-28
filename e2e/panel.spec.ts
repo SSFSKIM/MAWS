@@ -1165,8 +1165,8 @@ test.describe('the product host over a scenario derived from C5’s records', ()
       await surfaceRow(page).getByRole('button', { name: 'More surfaces', exact: true }).click();
       // UX2: non-primary tools and the Session actions submenu share one More menu; Log is internal. UX wave U8b: Artifacts
       // is an entry of it like any tool (A3), and Background tasks is the tool's name (M7; the word cut's T152 and T153:
-      // Agents and Background).
-      expect((await page.getByRole('menuitem').allTextContents()).sort()).toEqual(['Agents', 'Background', 'Session info', 'Tasks', 'Source control', 'Side', 'Artifacts', 'Session actions'].sort());
+      // Agents and Background). The question sheet's C3 M4 (S12): the session's Sheet is offered here like any tool.
+      expect((await page.getByRole('menuitem').allTextContents()).sort()).toEqual(['Agents', 'Background', 'Session info', 'Tasks', 'Source control', 'Side', 'Artifacts', 'Sheet', 'Session actions'].sort());
       await page.keyboard.press('Escape');
       expect(maws.consoleErrors(), 'the console stays free of errors').toEqual([]);
     });

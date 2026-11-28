@@ -29,13 +29,14 @@ export interface SessionSheetProps {
   focus?: { id: string; request: number } | null; // bring this question's card into view and put the keyboard on it; `request` grows with each ask
   density?: 'full' | 'compact';
   unavailable?: string | null; // why this surface cannot send now; drawn in place of Send
+  live?: boolean | null; // whether a process holds the session (the consumer's summary's `live`; the model does not carry it); absent or null: not known
 }
 
 const COUNTING = () => 'counting';
 const clock = () => Date.now(); // read when a Send is pressed, never while drawing // `sendOf` asked only for its count makes no key worth keeping
 const QUIET = 'shrink-0 rounded-sm text-ui-sm text-fg-muted outline-accent hover:text-fg focus-visible:outline-2 disabled:text-fg-faint disabled:hover:text-fg-faint';
 
-export function SessionSheet({ model, memory, onMemory, host, focus = null, density = 'full', unavailable = null }: SessionSheetProps) {
+export function SessionSheet({ model, memory, onMemory, host, focus = null, density = 'full', unavailable = null, live = null }: SessionSheetProps) {
   const root = useRef<HTMLElement>(null);
   useEffect(() => {
     if (reconcile(memory, model) !== memory) onMemory((current) => reconcile(current, model));
@@ -160,6 +161,8 @@ export function SessionSheet({ model, memory, onMemory, host, focus = null, dens
               busy={!free || awaiting.has(question.id)}
               host={host}
               density={density}
+              live={live}
+              queuedHere={question.queued !== undefined && memory.acts.some((act) => act.key === question.queued?.key)}
               onDraft={(update) => draft(question, update)}
               onDismiss={() => dismiss(question)}
               onRetract={retract}

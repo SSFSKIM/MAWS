@@ -15,7 +15,8 @@ import { isInterruptionMarker, isLocalCommand } from './user-text';
 import { INTERRUPT_CUT } from '@shared/lane-a/interrupt-cut'; // P5 O9
 import { continuedAfter, presentationOf } from './classify'; // P5 O9; UX wave U2: continuedAfter
 import { isUnseenTurnEnd } from './gap'; // P5 O7 M8
-import { carriedOf } from '@shared/engine/arrival-schema'; // UX wave U3
+import { carriedOf, sheetDeliveriesOf } from '@shared/engine/arrival-schema'; // UX wave U3; the question sheet's C3 M5
+import { emptySheetIndex, noteSheetCall, noteSheetDeliveries, noteSheetResult, type SheetIndex } from './sheet'; // the question sheet's C3 M5
 import { answerEnvelopeOf, splitPersonsMessage } from '@shared/engine/persons-message'; // UX wave, ticket 704; E1's steer read as the split reads it
 import { headRole } from './head'; // UX wave U3
 
@@ -201,8 +202,9 @@ export interface TranscriptState {
   // the same uuid takes that one out (one arrival per uuid). `endArrivals` (the whole-branch review's finding 3, its
   // handover round): the uuids of the arrivals placed that tell a task's end (taskEndArrived). `answers` (UX wave U1b,
   // Interfaces §B): the delivered answer of each asynchronous question the sminos ask asked, by its call, the latest
-  // delivery standing, whatever turn it reached the agent in and whether or not the call is loaded yet
-  index: { toolUses: Map<ToolUseId, TurnId>; tasks: Map<TaskId, TurnId>; requests: Map<RequestId, TurnId>; hooks: Map<string, TurnId>; messages: Map<MessageUuid, TurnId>; pluginIssues: Set<string>; arrivals: Map<MessageUuid, { turn: TurnId | null; event: EventId }>; endArrivals: Map<TaskId, Set<MessageUuid>>; answers: Map<ToolUseId, { summary: string; dismissed: boolean }> };
+  // delivery standing, whatever turn it reached the agent in and whether or not the call is loaded yet. `sheet` (the
+  // question sheet's C3 M5, §I): which sheet call holds each question's line now, and each question's outcome
+  index: { toolUses: Map<ToolUseId, TurnId>; tasks: Map<TaskId, TurnId>; requests: Map<RequestId, TurnId>; hooks: Map<string, TurnId>; messages: Map<MessageUuid, TurnId>; pluginIssues: Set<string>; arrivals: Map<MessageUuid, { turn: TurnId | null; event: EventId }>; endArrivals: Map<TaskId, Set<MessageUuid>>; answers: Map<ToolUseId, { summary: string; dismissed: boolean }>; sheet: SheetIndex };
   memo: Map<TurnId, MemoEntry>;
   lineage: { latest: TranscriptState | null };
   // E3 start: where each side thread's row lives (Design §5): the turn its first event landed in, or, for one that
@@ -227,7 +229,7 @@ export function createState(sessionId: SessionId | null, agentId: AgentId | null
     sessionId, agentId, turns: new Map(), order: [], loose: [], hidden: null, pending: new Map(), seen: new Set(), echoUuids: new Set(),
     ui: { assistantInk: new Set(), expandedTurns: new Set(), collapsedTurns: new Set(), expandedGroups: new Set(), expandedCells: new Set(), revealedBoundaries: new Set(), receipts: new Map(), spills: new Map(), global: 0, stamps: new Map(), version: 0 },
     current: null, cwd: null, pluginStatus: new Map(), placement: new Map(),
-    index: { toolUses: new Map(), tasks: new Map(), requests: new Map(), hooks: new Map(), messages: new Map(), pluginIssues: new Set(), arrivals: new Map(), endArrivals: new Map(), answers: new Map() },
+    index: { toolUses: new Map(), tasks: new Map(), requests: new Map(), hooks: new Map(), messages: new Map(), pluginIssues: new Set(), arrivals: new Map(), endArrivals: new Map(), answers: new Map(), sheet: emptySheetIndex() },
     memo: new Map(),
     lineage: { latest: null },
   };
@@ -761,6 +763,7 @@ function apply(batch: Batch, event: SessionEvent): void {
     case 'tool.use': {
       const turn = batch.currentOrOpen(event);
       index.toolUses.set(event.toolUseId, turn.id);
+      noteSheetCall(index.sheet, event); // the question sheet's C3 M5
       batch.push(turn, event);
       return;
     }
@@ -777,6 +780,7 @@ function apply(batch: Batch, event: SessionEvent): void {
         if (owner) index.messages.set(event.messageUuid, owner);
       }
       if (!pushRouted(index.toolUses.get(event.toolUseId))) batch.loose(event, false);
+      if (event.kind === 'tool.result') touchCalls(batch, noteSheetResult(index.sheet, event)); // the question sheet's C3 M5: a moved line, a withdrawal
       return;
     }
     case 'subagent.started':
@@ -1034,7 +1038,7 @@ function recordAskSteer(batch: Batch, event: Event<'user.message'>): void {
 // older page rebuilds the view from the whole history, where it joins its turn.
 function placeArrival(batch: Batch, event: Event<'user.message'>): void {
   const arrival = event.arrival ?? [];
-  const known = carriedOf(arrival).length > 0;
+  const known = carriedOf(arrival).length > 0 || sheetDeliveriesOf(arrival).length > 0; // the question sheet's C3 M5: a delivery is a notice's line too
   if (!known && arrival.length > 0) {
     const turn = batch.current();
     if (turn) batch.push(turn, event, false);
@@ -1047,6 +1051,7 @@ function placeArrival(batch: Batch, event: Event<'user.message'>): void {
   if (turn) batch.push(turn, event);
   else batch.loose(event);
   joinAnswers(batch, event); // UX wave U1b
+  touchCalls(batch, noteSheetDeliveries(batch.state.index.sheet, sheetDeliveriesOf(arrival))); // the question sheet's C3 M5
   if (event.messageUuid === null) return;
   batch.state.index.arrivals.set(event.messageUuid, { turn: turn?.id ?? null, event: event.id });
   for (const taskId of endedTasks(event)) {
@@ -1065,6 +1070,15 @@ function joinAnswers(batch: Batch, event: Event<'user.message'>): void {
     if (entry.class !== 'answer' || entry.tool !== 'sminos') continue;
     const call = entry.call as ToolUseId;
     batch.state.index.answers.set(call, { summary: entry.summary, dismissed: entry.dismissed });
+    const owner = batch.state.index.toolUses.get(call);
+    if (owner !== undefined && batch.state.turns.has(owner)) batch.touch(owner).version += 1;
+  }
+}
+
+// The question sheet's C3 M5 (§I): the turns that hold these calls derive again, which are rarely the turn of the event
+// that moved their lines. A call not loaded yet derives with what the index holds when its page comes.
+function touchCalls(batch: Batch, calls: readonly ToolUseId[]): void {
+  for (const call of calls) {
     const owner = batch.state.index.toolUses.get(call);
     if (owner !== undefined && batch.state.turns.has(owner)) batch.touch(owner).version += 1;
   }

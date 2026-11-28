@@ -105,6 +105,8 @@ function classOf(row: Row, context: Context): ViewClass {
     case 'question': return 'stays';
     case 'ask': return 'stays';
     case 'plan': return 'stays';
+    // The question sheet's C3 M5 (§I): a call in the sheet's form, no mod site; a question's lines, never inside a record.
+    case 'sheet': return 'stays';
     case 'request_slot': return 'stays';
     // `promptRow`: a row with `from` is `record`; a sent message is a tool call (`recordRow`).
     case 'agent_message': return 'folds';

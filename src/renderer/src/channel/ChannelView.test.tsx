@@ -24,7 +24,14 @@ import { allTabs } from '../stores/layout-model';
 import { fillStores, resetShellStores } from '../test-support/shell-stores';
 import { resetAskSheets } from '../tools/maws/ask/store';
 import { ChannelView } from './ChannelView';
+import { usePaletteChannels } from './open-action';
 import { useChannelTitle } from './title';
+import { ipc } from '../ipc/client'; // the question sheet's C3 M4
+import { CLASH, FIXTURE, sheetOf } from '../sheet/test-support/questions';
+import { connectSheets, resetSheetStore, useSheets } from '../stores/sheet';
+import { SHEET_WORDS } from '../sheet';
+import { preloadOf } from '../test-support/preload-of';
+import type { SheetLine, SheetModel, SheetPutResult } from '@shared/sheet/model';
 
 const SMNS = '1f0e2d3c-4b5a-4968-8776-a5b4c3d2e1f0';
 const KEY = `smns:${SMNS}` as OrgKey;
@@ -387,6 +394,87 @@ describe('Waiting on you', () => {
       ],
     }]));
     expect(fake.invoked('session.answer')).toEqual([]);
+  });
+
+  // The question sheet's C3 M4 (§H): a session's sheet questions together are one card, its sheet in place, compact
+  it('holds one compact sheet for a session’s sheet questions, beside the other cards', async () => {
+    const SHEET = sheetOf([CLASH, FIXTURE]);
+    const asked = (question: string) =>
+      ({ ...askItemFor(askOpened({ requestId: question as never }), at(mine.appId)), id: at(`sheet:${SHEET.session}:${question}`) as never, kind: 'async_input' as const, request: { requestId: question as never, toolUseId: 'toolu_sheet' as never, taskId: null, agentId: null } });
+    useAttention.getState().applyChanged({ appSessionId: at(mine.appId), items: [askItemFor(event, at(mine.appId)), asked('q4'), asked('q7')] }, TEST_MACHINE);
+    const summary = { session: SHEET.session, appSessionId: mine.appId, title: null, live: true, seq: 1, open: 2, queued: 0, pending: 0, hidden: 0, oldestAskedAt: null, unreadable: false };
+    install({ 'attention.request': { event }, 'maws.asks.list': { asks: [] }, 'sheet.list': { sessions: [summary], door: { known: false } }, 'sheet.read': { model: SHEET, door: { known: false } } });
+    const off = connectSheets(ipc);
+    try {
+      render(<ChannelView project={SMNS} />);
+      await act(() => fake.reply('org.channel.open', opened()));
+      const waiting = stream().querySelector<HTMLElement>('[data-channel-waiting]')!;
+      await waitFor(() => expect(waiting.querySelectorAll('[data-sheet-in-place]')).toHaveLength(1));
+      expect(waiting.querySelectorAll('[data-channel-card]')).toHaveLength(1); // the ask's
+      expect([...waiting.querySelectorAll('[data-sheet-question]')].map((q) => q.getAttribute('data-sheet-question'))).toEqual(['q4', 'q7']);
+      expect(within(waiting.querySelector<HTMLElement>('[data-sheet-in-place]')!).getByText('Release notes')).toBeTruthy();
+    } finally {
+      off();
+      resetSheetStore();
+    }
+  });
+
+  // The composite's writer (2026-11-27): the section says what waits on the person. A stopped session's only question,
+  // answered here, leaves with its card once the door has it queued, as an answered permission card does; Take back
+  // stays in the side sheet. A refused Send keeps the card, its note standing, while nothing of it waits.
+  describe('a sheet answered here', () => {
+    const asked = { ...askItemFor(askOpened({ requestId: 'q7' as never }), at(mine.appId)), id: at(`sheet:5eed0000-0000-4000-8000-0000000000aa:q7`) as never, kind: 'async_input' as const, request: { requestId: 'q7' as never, toolUseId: 'toolu_sheet' as never, taskId: null, agentId: null } };
+    const queuedBy = (key: string, by: 'maws' | 'cli') => sheetOf([{ ...FIXTURE, queued: { key, kind: 'answer', picks: ['Keep both'], text: '', images: [], revision: 1, by } }], { sent: [{ key, state: 'queued', kind: 'answer', id: 'q7' }] });
+    const summaryOf = (queued: boolean) => ({ session: queuedBy('x', 'cli').session, appSessionId: mine.appId, title: null, live: false, seq: 1, open: queued ? 0 : 1, queued: queued ? 1 : 0, pending: 0, hidden: 0, oldestAskedAt: null, unreadable: false });
+    const door = { known: true, available: true };
+
+    async function answerHere(put: (lines: SheetLine[]) => SheetPutResult): Promise<{ model: { current: SheetModel }; key: () => string }> {
+      const model = { current: sheetOf([FIXTURE]) };
+      install({ 'maws.asks.list': { asks: [] }, 'sheet.list': { sessions: [summaryOf(false)], door }, 'sheet.read': () => ({ model: model.current, door }), 'sheet.put': ({ lines }: { lines: SheetLine[] }) => put(lines) });
+      window.maws = preloadOf(fake); // the fake under the real client, so its events reach the store lifted
+      useAttention.getState().applyChanged({ appSessionId: at(mine.appId), items: [asked] }, TEST_MACHINE);
+      offs.push(connectSheets(ipc));
+      render(<ChannelView project={SMNS} />);
+      await act(() => fake.reply('org.channel.open', opened()));
+      const sheet = () => stream().querySelector<HTMLElement>('[data-channel-waiting] [data-sheet-in-place]')!;
+      await waitFor(() => expect(sheet()).not.toBeNull());
+      fireEvent.click(within(sheet()).getByRole('button', { name: /q7/ })); // unfold the compact card
+      fireEvent.click(within(sheet()).getByRole('radio', { name: 'Keep both' }));
+      fireEvent.click(within(sheet()).getByRole('button', { name: SHEET_WORDS.send(1) }));
+      await waitFor(() => expect(fake.invoked('sheet.put')).toHaveLength(1));
+      return { model, key: () => (fake.invoked('sheet.put') as { lines: SheetLine[] }[])[0]!.lines[0]!.key };
+    }
+    // the record moves: the answer queued on the question, which waits no more
+    const queuedNow = (model: { current: SheetModel }, key: string, by: 'maws' | 'cli') =>
+      act(() => {
+        model.current = queuedBy(key, by);
+        useAttention.getState().applyChanged({ appSessionId: at(mine.appId), items: [] }, TEST_MACHINE);
+        fake.event('sheet.changed', { session: model.current.session, summary: summaryOf(true) });
+      });
+    const paletteCount = () => renderHook(() => usePaletteChannels()).result.current.find((entry) => entry.project === SMNS)?.waiting;
+    const offs: (() => void)[] = [];
+    afterEach(() => {
+      offs.splice(0).forEach((off) => off());
+      resetSheetStore();
+    });
+
+    it('leaves the section once the door has the answer queued', async () => {
+      const { model, key } = await answerHere((lines) => ({ ok: true, results: lines.map((line) => ({ key: line.key, state: 'queued' })) }));
+      queuedNow(model, key(), 'maws');
+      await waitFor(() => expect(stream().querySelector('[data-channel-waiting]'), 'the section, its heading with it').toBeNull());
+      expect(paletteCount(), 'the palette’s count with it').toBe(0);
+    });
+
+    it('keeps the card of a refused Send with its note, once nothing of it waits', async () => {
+      const { model } = await answerHere(() => ({ ok: false, why: 'refused', message: 'The inbox could not take the line.' }));
+      const note = () => stream().querySelector<HTMLElement>('[data-channel-waiting] [data-sheet-note]');
+      await waitFor(() => expect(note()?.textContent).toContain(SHEET_WORDS.notSentNote('The inbox could not take the line.')));
+      queuedNow(model, 'cli-00000001', 'cli'); // another surface's answer stands on it now
+      await waitFor(() => expect(useSheets.getState().models.get(model.current.session)?.open[0]?.queued?.by).toBe('cli'));
+      expect(stream().querySelector('[data-channel-waiting] [data-sheet-question="q7"]'), 'the card stays').not.toBeNull();
+      expect(note()?.textContent, 'its note standing').toContain(SHEET_WORDS.notSentNote('The inbox could not take the line.'));
+      expect(paletteCount(), 'the palette counts the held card').toBe(1);
+    });
   });
 });
 

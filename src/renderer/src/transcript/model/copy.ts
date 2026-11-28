@@ -303,6 +303,54 @@ export const PLAN = { heading: 'Plan', showMore: 'Show more', showLess: 'Show le
 // line for a question passed over.
 export const QUESTION = { heading: 'Question', notAnswered: 'Not answered', skipped: 'Skipped', dismissed: 'Dismissed' } as const;
 
+// The question sheet's C3 M5 (docs/doperpowers/plans/2026-11-23-question-sheet-c3-maws-app.md §I; the composite's §8.1;
+// the look's frame 3): a sheet call's row. The head line says what the call did; a line reads its question, or after
+// the outcome its receipt (`q7 Auth method → OAuth`). The composite fixes "Asked 3 questions", "Revised below",
+// "Dismissed", "Withdrawn" and "Open"; the writer settled the head line's other forms, "N more", "Not asked" and
+// "queued"; the rest are this child's own until the owner sees the built look (M6).
+export const SHEET_ROW = {
+  arrow: '→',
+  open: 'Open',
+  openName: (id: string) => `Open ${id}`, // Open's accessible name, its line's id with it: every line has its own
+  revisedBelow: 'Revised below',
+  notAsked: 'Not asked',
+  dismissed: 'Dismissed',
+  withdrawn: 'Withdrawn',
+  queued: 'queued', // an answer or a dismissal the record holds and the session has not taken yet
+  more: (n: number) => `${n} more`,
+  nothing: 'Nothing done', // a call whose result's first line is "Nothing done."
+  // what a call did is said only where its result says it: a call with no result yet, one whose result says its outcome
+  // is not known, and one the engine refused are said whole, whatever its entries (asks, revises, a withdrawal alone)
+  running: 'Changing the sheet',
+  unknown: 'Outcome not known yet', // the result's own first line (X7), without its stop
+  refused: 'Did not change the sheet',
+} as const;
+const asked = (n: number) => (n === 1 ? 'Asked a question' : `Asked ${n} questions`);
+const lowerFirst = (text: string) => text.charAt(0).toLowerCase() + text.slice(1);
+
+/**
+ * A sheet call's head line: "Asked 3 questions", "Revised q5", "Asked a question, revised q5", "Withdrew q6", and the
+ * like, from the ids its result confirmed. A call with no result yet, one whose outcome is not known, and one the engine
+ * refused whole have their own words.
+ */
+export function sheetHead(row: { state: 'running' | 'done' | 'nothing' | 'unknown' | 'error'; lines: readonly { id: string | null; revises: boolean; place: string }[]; withdrew: readonly string[] }): string {
+  if (row.state !== 'done') return { nothing: SHEET_ROW.nothing, running: SHEET_ROW.running, unknown: SHEET_ROW.unknown, error: SHEET_ROW.refused }[row.state];
+  const added = row.lines.filter((line) => line.place !== 'refused' && !line.revises).length;
+  const revised = row.lines.flatMap((line) => (line.place !== 'refused' && line.revises && line.id !== null ? [line.id] : []));
+  const parts = [
+    ...(added > 0 ? [asked(added)] : []),
+    ...(revised.length > 0 ? [`Revised ${revised.join(', ')}`] : []),
+    ...(row.withdrew.length > 0 ? [`Withdrew ${row.withdrew.join(', ')}`] : []),
+  ];
+  return parts.map((part, at) => (at === 0 ? part : lowerFirst(part))).join(', ');
+}
+
+/** What a notice says of a sheet delivery, from its block's ids: "answered: q4, q5", "answered: dismissed q9". */
+export function sheetDeliveryWords(answered: readonly string[], dismissed: readonly string[]): string {
+  const dismissal = dismissed.length === 0 ? null : `${NOTICE.dismissed} ${dismissed.join(', ')}`;
+  return NOTICE.answered(answered.length === 0 ? (dismissal ?? '') : dismissal === null ? answered.join(', ') : `${answered.join(', ')}; ${dismissal}`);
+}
+
 export const requestSlotPlaceholder = (subject: string) => `Waiting for you · ${subject} · answer in the composer`;
 
 export type BoundaryCopyInput =

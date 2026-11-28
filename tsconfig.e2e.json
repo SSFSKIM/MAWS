@@ -106,6 +106,8 @@
     "src/services/owner/store.ts",
     "test/support/index-fixture.ts",
     "test/support/spine-fixture.ts",
+    "test/support/sheet-records.ts", // the question sheet's C3 M4: the lane A spec seeds a record of the pinned set
+    "test/support/transcript-scrub.ts", // the question sheet's C3 M6: the live check records its transcript scrubbed
     "src/renderer/src/app/date-format.ts",
     // the UX wave, U9: e2e:remote reads a listed row's acts over the link by their own labels and order, and the module's registry
     "src/renderer/src/app/session-actions.ts",
@@ -124,6 +126,7 @@
     "src/renderer/src/channel/copy.ts", // P5 O8 M7a Task 3: the channel spec reads the tab's own words
     "src/renderer/src/sessions/share/copy.ts", // P5 O8 M6b Task 3: the share spec reads the sheet's own words
     "src/renderer/src/sidebar/registry-copy.ts", // the project registry's M11: the registry spec reads the page's own words
+    "src/renderer/src/sheet/copy.ts", // the question sheet's C3 M4: the lane A spec reads the sheet's own words
     "src/renderer/src/tools/agents/copy.ts",
     // UX wave U2a (M5): the reasoning scene reads the thinking tier from the transcript's copy (decision 17), with what
     // the copy imports

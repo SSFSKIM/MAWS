@@ -2,7 +2,7 @@
 // and on Show chat, the one its sidebar row shows: a request waiting (the glyph of a session that needs approval), else
 // unread (the row's dot). Waiting wins over unread; one mark at a time.
 import type { AppSessionId } from '@shared/graph/ids';
-import { waitingItem } from '../attention/derive';
+import { calmWaiting, WAITING_TONE_CLASS, waitingItem } from '../attention/derive';
 import { SIDE_COPY } from '../side/copy';
 import { selectPendingOf, useAttention } from '../stores/attention';
 import { useSessions } from '../stores/sessions';
@@ -19,10 +19,13 @@ export function useSessionMark(appSessionId: AppSessionId): SessionMarkKind | nu
   return waiting ? 'waiting' : unread ? 'unread' : null;
 }
 
+// L5 (the composite's writer, 2026-11-27): the waiting mark of a session whose waiting items are all sheet questions is calm.
+export const useSessionMarkCalm = (appSessionId: AppSessionId): boolean => useAttention((s) => calmWaiting(selectPendingOf(s, appSessionId)));
+
 // Drawn beside a control's own words or glyph; the control's name stays its own.
-export function SessionMark({ mark, className = '' }: { mark: SessionMarkKind; className?: string }) {
+export function SessionMark({ mark, calm = false, className = '' }: { mark: SessionMarkKind; calm?: boolean; className?: string }) {
   return mark === 'waiting' ? (
-    <span aria-hidden data-session-mark="waiting" className={`text-ui-sm leading-none text-warning ${className}`}>
+    <span aria-hidden data-session-mark="waiting" data-tone={calm ? 'calm' : 'warning'} className={`text-ui-sm leading-none ${WAITING_TONE_CLASS[calm ? 'calm' : 'warning']} ${className}`}>
       ◐
     </span>
   ) : (

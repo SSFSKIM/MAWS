@@ -19,7 +19,7 @@ import { currentSet } from '../stores/layout-model';
 import { useSessions } from '../stores/sessions';
 import { SessionPane } from '../session/SessionPane';
 import { CARD_MARGIN, cardOver, cardSession, focusCompactCard, hideChat, openCard, splitFloat, useFloatingCard, usePublishedPlace, useShowChatHeader, type CardHost } from './floating';
-import { SESSION_MARK_WORDS, SessionMark, useSessionMark } from './SessionMark';
+import { SESSION_MARK_WORDS, SessionMark, useSessionMark, useSessionMarkCalm } from './SessionMark';
 
 export const useSessionTitle = (appSessionId: AppSessionId) => useSessions((s) => displayTitle(s.records.get(appSessionId)));
 
@@ -85,6 +85,7 @@ const RAISED_BUTTON =
 export function Bar({ host, appSessionId, area, bounds }: { host: CardHost; appSessionId: AppSessionId; area: RefObject<HTMLElement | null>; bounds: { height: number } }) {
   const title = useSessionTitle(appSessionId);
   const mark = useSessionMark(appSessionId);
+  const calm = useSessionMarkCalm(appSessionId); // L5
   const hides = useShowChatHeader();
   const machine = useMachineMark(appSessionId);
   const words = phaseWords(machine.phase, machine.name); // B4: the link's phase words above the box, as the tab says them
@@ -114,7 +115,7 @@ export function Bar({ host, appSessionId, area, bounds }: { host: CardHost; appS
       </div>
       <button ref={open} type="button" aria-label="Open conversation" title={title} onClick={() => openCard()} className={RAISED_BUTTON}>
         <MaximizeIcon />
-        {mark && <SessionMark mark={mark} className="absolute -top-1 -right-1" />}
+        {mark && <SessionMark mark={mark} calm={calm} className="absolute -top-1 -right-1" />}
       </button>
       {hides && (
         <button type="button" aria-label="Hide chat" title="Hide chat" onClick={hideChat} className={RAISED_BUTTON}>

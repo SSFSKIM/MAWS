@@ -602,6 +602,28 @@ button.transcript-glyph-overflow:hover { color: var(--fg); background: var(--bg-
 .transcript-question-answer { min-width: 0; color: var(--fg-muted); overflow-wrap: anywhere; }
 .transcript-question-answer[data-answer="none"] { color: var(--fg-faint); }
 
+/* The question sheet's C3 M5 (SheetRow.tsx; the look's frame 3): within board ticket 852's line model, no box. The head
+   is a run's quiet line; the lines hang in its run body, one grid so ids, headers, sentences and Open stand in columns.
+   A receipt keeps the receipt's tones (the label, the arrow, the answer); "Dismissed" and "Withdrawn" are muted as an
+   answer is, the line's own words ("Revised below", "Not asked", "queued") fainter, and a moved line's header muted. */
+.transcript-sheet { padding: 1px 0 6px; }
+.transcript-run-line[data-line="error"]::before { content: '✕'; color: var(--danger); }
+.transcript-sheet-lines { display: grid; grid-template-columns: max-content minmax(0, max-content) minmax(0, max-content) max-content; column-gap: 8px; align-items: baseline; width: fit-content; max-width: 100%; margin: 0; padding: 0; list-style: none; color: var(--fg-muted); font-size: var(--text-ui); line-height: 24px; }
+.transcript-sheet-line { display: contents; }
+.transcript-sheet-id { color: var(--fg-faint); font-size: var(--text-ui-sm); font-variant-numeric: tabular-nums; }
+.transcript-sheet-header { max-width: 15em; }
+.transcript-sheet-line[data-away] > .transcript-sheet-header { color: var(--fg-muted); }
+.transcript-sheet-sentence { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.transcript-sheet-sentence[data-span] { grid-column: 2 / 4; color: var(--fg); font-weight: 500; }
+.transcript-sheet-receipt { display: flex; align-items: baseline; gap: 6px; min-width: 0; }
+.transcript-sheet-receipt > .transcript-question-answer { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.transcript-sheet-word { color: var(--fg-faint); }
+.transcript-sheet-end { display: flex; align-items: baseline; gap: 8px; white-space: nowrap; }
+.transcript-sheet-end > .transcript-quiet-button, .transcript-sheet-more { margin-top: 0; }
+.transcript-sheet-more { display: block; line-height: 24px; }
+.transcript-sheet-note { margin: 0; color: var(--fg-muted); font-size: var(--text-ui-sm); line-height: 20px; overflow-wrap: anywhere; }
+.transcript-sheet-note[data-tone="danger"] { color: var(--danger); }
+
 /* A pending request's slot: C7's card, or the placeholder */
 .transcript-slot { margin: 4px 0 10px; }
 .transcript-slot-placeholder { padding: 8px 12px; border: 1px dashed var(--border-strong); border-radius: var(--radius); color: var(--fg-muted); font-size: var(--text-ui); }

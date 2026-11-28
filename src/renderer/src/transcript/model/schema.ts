@@ -26,6 +26,12 @@ const SpillSchema = z.strictObject({ path: z.string(), bytes: nullable(z.number(
 const HunkSchema = z.strictObject({ oldStart: z.number(), oldLines: z.number(), newStart: z.number(), newLines: z.number(), lines: z.array(z.string()) });
 const result = z.union([z.string(), z.array(ContentBlockSchema)]);
 
+// The question sheet's C3 M5 (§I): one line of a sheet call's row
+const SheetRowLineSchema = z.strictObject({
+  id: nullable(z.string()), entry: z.number(), header: nullable(z.string()), sentence: z.string(), revises: z.boolean(), place: z.enum(['here', 'revised_below', 'refused']),
+  outcome: nullable(z.discriminatedUnion('how', [z.strictObject({ how: z.literal('answered'), receipt: z.string() }), z.strictObject({ how: z.literal('dismissed') }), z.strictObject({ how: z.literal('withdrawn') })])),
+});
+
 export const CellDetailSchema = z.discriminatedUnion('kind', [
   z.strictObject({
     kind: z.literal('shell'), command: z.string(), description: nullable(z.string()), cwd: nullable(z.string()), stdout: z.string(), stderr: z.string(), exitCode: nullable(z.number()),
@@ -99,6 +105,7 @@ export const RowSchema = z.discriminatedUnion('kind', [
   z.strictObject({ ...base, kind: z.literal('thinking'), messageUuid: nullable(z.string()), text: z.string(), live: z.boolean(), durationMs: nullable(z.number()), recordedMs: nullable(z.number()), clock: z.literal('wall').optional() }),
   z.strictObject({ ...base, kind: z.literal('plan'), toolUseId: z.string(), plan: z.string(), outcome: nullable(z.enum(PLAN_OUTCOMES)), feedback: nullable(z.string()), waiting: z.literal(true).optional() /* UX wave U1b */ }),
   z.strictObject({ ...base, kind: z.literal('question'), toolUseId: z.string(), questions: z.array(QuestionSchema), answers: nullable(z.record(z.string(), z.string())), error: nullable(z.string()) /* E1 */, waiting: z.literal(true).optional(), dismissed: z.literal(true).optional() /* UX wave U1b */ }),
+  z.strictObject({ ...base, kind: z.literal('sheet'), toolUseId: z.string(), state: z.enum(['running', 'done', 'nothing', 'unknown', 'error']), lines: z.array(SheetRowLineSchema), withdrew: z.array(z.string()), notDone: nullable(z.string()), error: nullable(z.string()) }), // the question sheet's C3 M5
   z.strictObject({
     ...base, kind: z.literal('request_slot'), requestId: z.string(), toolUseId: nullable(z.string()), requestKind: z.enum(['permission', 'question', 'plan', 'dialog', 'elicitation']), toolName: nullable(z.string()), requestedAt: z.string(),
   }),

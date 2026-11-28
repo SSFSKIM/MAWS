@@ -1,11 +1,11 @@
-// The Overview board (§5.2; residue *Overview card*): one card per live or unread session, grouped Needs you first,
+// The Overview board (§5.2; residue *Overview card*): one card per live or unread session (or one whose question sheet holds an act, C3), grouped Needs you first,
 // then the projects in sidebar order, then each machine's sessions of no project (`overviewGroups`). A scrolling `role="list"` of groups; the
 // cards share one tab stop and the arrow keys move focus across them in reading order (Home and End to the ends),
 // Enter opens the focused card's session and ⌘Enter opens it in the split.
 // Debt wave 5 (the cold first paint): while the engine host's discovery pass reads the store (a cold index, the owner's
 // first open), the board renders the cards it has and says above them, or in place of the empty board, that indexing
 // continues and how far it has come.
-import { useRef, useState, type KeyboardEvent } from 'react';
+import { useMemo, useRef, useState, type KeyboardEvent } from 'react';
 import { useShallow } from 'zustand/react/shallow';
 import type { AppSessionId } from '@shared/graph/ids';
 import { NEW_CHAT, newChat, useSessionCreatorRegistered } from '../keymap/actions-runtime';
@@ -15,6 +15,7 @@ import { useMachines } from '../stores/machines';
 import { machineName } from '../stores/org-projects';
 import { useLayout } from '../stores/layout';
 import { selectProjectOrder, useSessions } from '../stores/sessions';
+import { selectSheetsHeld, useSheets } from '../stores/sheet'; // the question sheet's C3
 import { openListed } from '../sessions/remote-openers'; // P5 O7 M6
 import { CardGroup } from './CardGroup';
 import { overviewGroups } from './derive';
@@ -37,8 +38,13 @@ export function Overview({ paneIndex, onSessionCreated }: { paneIndex: PaneIndex
   const attention = useAttention(useShallow((a) => ({ loaded: a.loaded, bySession: a.bySession, version: a.version, greyed: a.greyed })));
   const rows = selectNeedsYou(attention, sessions);
   const machines = useMachines((s) => s.machines);
+  const sheets = useSheets(useShallow((s) => ({ summaries: s.summaries, memories: s.memories })));
+  const held = useMemo(() => selectSheetsHeld(sheets), [sheets]);
   const local = ipc.localMachine;
-  const groups = overviewGroups({ records: sessions.records, digests: sessions.digests, projects: sessions.projects, rows, local, machineName: (m) => machineName(machines, m, local), listed: sessions.listed });
+  const groups = overviewGroups({
+    records: sessions.records, digests: sessions.digests, projects: sessions.projects, rows, local, machineName: (m) => machineName(machines, m, local), listed: sessions.listed,
+    held: (appSessionId) => held.has(appSessionId),
+  });
   const order = groups.flatMap((g) => g.sessions);
 
   const board = useRef<HTMLDivElement>(null);

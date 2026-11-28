@@ -20,7 +20,7 @@ import { liveMarkedRowIds, mirrorRows } from './mirror';
 
 // Every row kind, so a kind added to the rows fails to compile here until this test says what it is kept under.
 const KINDS: Record<Row['kind'], true> = {
-  time: true, user: true, assistant_text: true, divider: true, group: true, cell: true, receipt: true, subagent: true, agent_message: true, thinking: true, plan: true, question: true,
+  time: true, user: true, assistant_text: true, divider: true, group: true, cell: true, receipt: true, subagent: true, agent_message: true, thinking: true, plan: true, question: true, sheet: true,
   request_slot: true, error: true, gap: true, boundary: true, bash: true, notice: true, local_command: true, ask: true, delivery: true, side_thread: true, agent_list: true, artifact: true,
   browser_action: true, browser_activity: true, record_fold: true, to_human: true, activity: true,
 };
@@ -161,6 +161,7 @@ describe('keptIdsOf: the id the row asks its site under, kind by kind', () => {
     ['plan', { toolUseId: 'p1' }, ['p1']],
     ['delivery', { toolUseId: 'd1' }, ['d1']],
     ['artifact', { toolUseId: 'x1' }, ['x1']],
+    ['sheet', { toolUseId: 's1' }, ['s1']], // the question sheet's C3 M5: a call in the sheet's form, no mod site
     ['local_command', { messageUuid: 'lc1' }, ['lc1']],
     ['time', {}, []], ['divider', {}, []], ['receipt', {}, []], ['record_fold', { stretch: 't1', open: false }, []], ['activity', {}, []],
     ['gap', {}, []], ['boundary', {}, []], ['error', {}, []], ['side_thread', {}, []], ['request_slot', { toolUseId: 't1' }, []],

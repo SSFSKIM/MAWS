@@ -157,7 +157,12 @@ function fallbackToast(toasted: ToastedItems, { appSessionId, attentionId, deliv
     id: toastId(attentionId as AttentionId),
     level: 'warning',
     text: item?.summary ? `${title} needs you · ${previewLine(item.summary, 200) ?? item.summary}` : `${title} needs you`, // E11 F2b (plan 2.6)
-    actions: [{ label: 'Open session', run: () => openItem(id, item, requestOf(item)) }], // P2-C: an owner-channel item at its mark; U1b: a request at its request
+    // P2-C: an owner-channel item at its mark; U1b: a request at its request. The question sheet's C3 M4 (its review): the
+    // item as the list holds it at the press, since the notice may have come before the list did
+    actions: [{ label: 'Open session', run: () => {
+      const now = itemOf(id, attentionId as AttentionId) ?? item;
+      openItem(id, now, requestOf(now));
+    } }],
     dismissible: true,
   });
   toasted.set(attentionId as AttentionId, { appSessionId: id, held: item !== undefined });

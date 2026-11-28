@@ -24,6 +24,7 @@ import { fillStores, pageScenario, resetShellStores, scenarioFile } from '../tes
 import { applyAskEvents, resetAskSheets } from '../tools/maws/ask/store';
 import { closeCard, floatSplit, useFloatingCard } from '../shell/floating'; // P4-B3
 import { connectAttention } from './navigation';
+import { registerTranscriptActions } from '../transcript/view/registry'; // the question sheet's C3 M4
 
 // P5 O6 M2: `file` is the scenario as main holds it (bare), which `fillStores` lifts into the stores; `nine` is the page's
 // view of it, whose ids are addresses. `fake` is the page's client, so its answers and events carry addresses too.
@@ -267,6 +268,24 @@ describe('the fallback toast', () => {
     expect(toast).toMatchObject({ kind: 'toast', text: `Fix sidebar drag needs you · ${fix.summary}`, dismissible: true });
     toast.actions[0].run();
     expect(active()).toBe(`session:${fix.appSessionId}`);
+  });
+
+  // The question sheet's C3 M4 (its review): a notice may come before the page's list holds its item; Open session reads
+  // the item at the press, so a sheet question's notice still shows the session's sheet at its question
+  it('a notice that came before its item: once the list holds it, Open session shows the sheet at its question', () => {
+    const opened: [string, string | null][] = [];
+    const off = registerTranscriptActions({ openSheet: (appSessionId, questionId) => void opened.push([appSessionId, questionId]) });
+    const session = idOf('Fix sidebar drag');
+    const id = addressOf(TEST_MACHINE, 'sheet:5eed0000-0000-4000-8000-000000000042:q3') as AttentionId;
+    fake.event('attention.notified', { appSessionId: session, attentionId: id, delivery: 'fallback', at: '2026-09-28T10:00:00Z' });
+    const [toast] = useNotices.getState().notices;
+    expect(toast).toMatchObject({ id: `attention:${id}`, text: 'Fix sidebar drag needs you' }); // no item yet: no summary
+    const asked = item(session, 'async_input', '2026-09-28T10:00:00.000Z', { id, summary: 'Which berth?', request: { requestId: 'q3' as RequestId, toolUseId: 'toolu_sheet' as never, taskId: null, agentId: null } });
+    act(() => useAttention.getState().applyChanged({ appSessionId: session, items: [asked] }, TEST_MACHINE));
+    toast.actions[0].run();
+    expect(active()).toBe(`session:${session}`);
+    expect(opened).toEqual([[session, 'q3']]);
+    off();
   });
 
   it('posts no toast when the OS delivered the notification', () => {

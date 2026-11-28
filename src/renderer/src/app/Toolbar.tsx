@@ -18,6 +18,7 @@ import type { SessionRecord } from '@shared/graph/session';
 import type { Destination, TabRef } from '@shared/ipc/schema/layout';
 import { runAction } from '../keymap/actions-runtime';
 import { selectNeedsYou, useAttention } from '../stores/attention';
+import { WAITING_TONE_CLASS, waitingTone } from '../attention/derive'; // the question sheet's C3 look wave (L5)
 import { useLayout } from '../stores/layout';
 import { activeTab, currentSet } from '../stores/layout-model';
 import { branchLabel } from '../sessions/branch-label';
@@ -107,6 +108,7 @@ export function Toolbar() {
   const recordsVersion = useSessions((s) => s.recordsVersion);
   const listed = useSessions((s) => s.listed); // P5 O7 M6: another machine's listed rows count
   const waiting = useAttention((s) => selectNeedsYou(s, { records, recordsVersion, listed }).filter((row) => row.tier === 1).length);
+  const tone = useAttention((s) => waitingTone(selectNeedsYou(s, { records, recordsVersion, listed }).filter((row) => row.tier === 1))); // L5
   const overviewOpen = useLayout((s) => s.overviewOpen);
   const destination = useLayout((s) => s.destination); // UX wave U7b
   const appSessionId = tab?.kind === 'session' ? tab.appSessionId : null;
@@ -139,7 +141,7 @@ export function Toolbar() {
           >
             <BoardIcon />
             {waiting > 0 && (
-              <span aria-hidden className="absolute -right-1 -bottom-1 rounded-sm bg-bg-raised px-0.5 text-ui-sm leading-none text-warning tabular-nums">
+              <span aria-hidden data-tone={tone} className={`absolute -right-1 -bottom-1 rounded-sm bg-bg-raised px-0.5 text-ui-sm leading-none tabular-nums ${WAITING_TONE_CLASS[tone]}`}>
                 ◐{waiting}
               </span>
             )}

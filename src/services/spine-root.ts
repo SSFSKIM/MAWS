@@ -61,6 +61,7 @@ import { laneAAttention } from './lane-a/attention';
 import { sminosHome } from './lane-a/discovery';
 import { createLaneADriver, registerLaneA, type LaneAView } from './lane-a/driver';
 import { createSheetService, registerSheet, type SheetService } from './sheet/service'; // the question sheet's C3 M2
+import { feedSheetItems } from './sheet/attention'; // the question sheet's C3 M4
 import { startLibrary } from './library';
 import { registerLibraryReads } from './library/files';
 import { registerMachineOps } from './machine-ops';
@@ -332,7 +333,17 @@ export function startSpine(deps: SpineDeps): SpineRoot {
       emit: (name, payload) => void bus.emit(name, payload),
     });
     registerSheet(service, bus.register);
-    parts.push(['sheet', () => service.stop()]);
+    // M4 (§H): each open question of a record the index's session holds is an item of that session's list, none while
+    // the session is archived; nothing else of the session moves (its digest counts the lane A list's stopping requests
+    // alone)
+    const offSheetItems = feedSheetItems(service, (appSessionId, items, silent) => attention.setSheetItems(appSessionId, items, silent), {
+      archived: (appSessionId) => index.unavailable === null && index.sessions.get(appSessionId)?.archived === true,
+      onChange: (listener) => (index.unavailable === null ? index.sessions.onChange((record) => listener(record.appId)) : () => {}),
+    });
+    parts.push(['sheet', () => {
+      offSheetItems();
+      service.stop();
+    }]);
     sheet = service;
   }
 

@@ -10,7 +10,7 @@ import { slashCommandLine } from '@shared/wire/local-command';
 import { denialKindOf, INTERRUPT_MARKER } from '../normalizer-support';
 import { apiRetryOfApiError } from '../normalizer-system';
 import { messageText, parsePeerMessage, peerEventsOf } from '@shared/engine/peer-envelope'; // E7
-import { commandEntry, commandFactsOf, nothingOpen, readConsents, readNext, type Arrival, type OpenArrivals } from '@shared/engine/arrival'; // UX wave U3 (UC-2); U1c, readConsents
+import { commandEntry, commandFactsOf, nothingOpen, readConsents, readNext, sheetEntry, sheetFactsOf, type Arrival, type OpenArrivals } from '@shared/engine/arrival'; // UX wave U3 (UC-2); U1c, readConsents
 import { splitPersonsMessage } from '@shared/engine/persons-message'; // UX wave, ticket 704
 import { localCommandText } from '@shared/engine/engine-markers';
 import { isBridgeRow, isMirrorLine } from '@shared/engine/sminos-delivery';
@@ -600,9 +600,13 @@ export function endedByExit(ctx: BackfillContext): void {
 
 const isScheduledPrompt = (record: TranscriptRecord) => record.type === 'user' && record.turnOrigin === 'scheduled';
 
-// The synthetic message of an arrival of the carried classes (Interfaces C): the carrier's text, never a prompt.
+// The synthetic message of an arrival of the carried classes (Interfaces C): the carrier's text, never a prompt. The
+// question sheet's deliveries travel beside them in an entry of their own (the C3 plan's §I, `sheetEntry`).
 function carried(messageUuid: MessageUuid, content: string | ContentBlock[], arrivals: Arrival[], base: Base): SessionEvent {
-  const arrival = arrivals.filter((entry): entry is Extract<Arrival, { class: 'task' | 'schedule' | 'answer' | 'wake' }> => entry.class === 'task' || entry.class === 'schedule' || entry.class === 'answer' || entry.class === 'wake');
+  const arrival = [
+    ...arrivals.filter((entry): entry is Extract<Arrival, { class: 'task' | 'schedule' | 'answer' | 'wake' }> => entry.class === 'task' || entry.class === 'schedule' || entry.class === 'answer' || entry.class === 'wake'),
+    ...sheetEntry(sheetFactsOf(arrivals)),
+  ];
   return { ...base(), kind: 'user.message', messageUuid, content, isReplay: false, isSynthetic: true, origin: 'task-notification', bash: null, arrival };
 }
 

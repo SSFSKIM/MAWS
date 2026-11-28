@@ -9,6 +9,7 @@
 import type { AttentionItem } from '../graph/attention';
 import type { AttentionKind } from '../graph/enums';
 import type { ToolUseId } from '../graph/ids';
+import { isSheetItem } from './sheet-item';
 
 export const ACTIONABLE_KINDS: AttentionKind[] = ['permission', 'question', 'plan', 'dialog', 'elicitation', 'auto_mode_unavailable', 'error', 'interrupted',
   'async_input', 'essential_unread', // P2-C (2026-10-09): the owner channel's question and must-read count in the badge and stand in tier 1
@@ -28,12 +29,13 @@ export const isActionable = (item: AttentionItem) => ACTIONABLE.has(item.kind);
 
 const at = (item: AttentionItem) => Date.parse(item.createdAt);
 
-/** The waiting requests that name a tool call, by that call's id: a permission prompt's call, a question's, an ask's, a plan's. */
+/** The waiting requests that name a tool call, by that call's id: a permission prompt's call, a question's, an ask's, a
+ * plan's. A sheet question's item marks no call (the question sheet's C3 M4, S10): its call's row has no form. */
 export function waitingByCall(items: readonly AttentionItem[]): ReadonlyMap<ToolUseId, AttentionItem> {
   const byCall = new Map<ToolUseId, AttentionItem>();
   for (const item of items) {
     const call = item.request.toolUseId;
-    if (call === null || !waitsOnAnswer(item)) continue;
+    if (call === null || !waitsOnAnswer(item) || isSheetItem(item.id)) continue;
     const held = byCall.get(call);
     if (held === undefined || at(item) < at(held)) byCall.set(call, item); // two naming one call: the oldest
   }

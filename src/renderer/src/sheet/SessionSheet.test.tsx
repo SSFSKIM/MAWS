@@ -52,7 +52,7 @@ describe('the card states (G1.b)', () => {
   });
 
   it('queued: stopped-queue, before, with its take back; the dismissal it hides, and the accepted outcome', () => {
-    sheet(pin('stopped-queue', 'before'));
+    sheet(pin('stopped-queue', 'before'), { live: false });
     expect(within(cardOf('q1')).getByText('Queued. The session is stopped and gets this when it resumes.')).toBeTruthy();
     expect(within(cardOf('q1')).getByRole('button', { name: 'Take back' })).toBeTruthy();
     const hidden = document.querySelector<HTMLElement>('[data-sheet-hidden="q2"]')!;
@@ -223,6 +223,19 @@ describe('the sheet', () => {
     expect(screen.getAllByRole('button', { name: /^Send/ })).toHaveLength(1);
     await waitFor(() => expect(within(cardOf('q5')).getAllByRole('checkbox')).toHaveLength(4));
     expect(within(cardOf('q4')).queryByRole('radio')).toBeNull();
+  });
+
+  // C3 M4's review: a compact card mounted over an answer this surface queued starts open, its answer and Take back in
+  // view; one whose queued answer another surface sent stays folded to its line until chosen
+  it('starts a compact card open over an answer this surface queued, and folded over one queued elsewhere', () => {
+    const queued = (key: string) => ({ key, kind: 'answer' as const, picks: ['Keep the earlier sailing'], text: '', images: [], revision: 1, by: 'maws' as const });
+    const model = sheetOf([{ ...CLASH, queued: queued('maws-mine') }, { ...FIXTURE, queued: queued('cli-theirs') }]);
+    const mine = { key: 'maws-mine', kind: 'answer' as const, id: 'q4', draft: null, sentAt: 0, state: 'queued' as const, note: null };
+    sheet(model, { density: 'compact', memory: { ...EMPTY_MEMORY, acts: [mine] } });
+    expect(within(cardOf('q4')).getByRole('button', { name: /q4/ }).getAttribute('aria-expanded')).toBe('true');
+    expect(within(cardOf('q4')).getByRole('button', { name: 'Take back' })).toBeTruthy();
+    expect(within(cardOf('q7')).getByRole('button', { name: /q7/ }).getAttribute('aria-expanded')).toBe('false');
+    expect(within(cardOf('q7')).queryByRole('button', { name: 'Take back' })).toBeNull();
   });
 
   it('takes nothing while a Send is held', async () => {
@@ -520,8 +533,11 @@ describe('every change through an update', () => {
     sheet(sheetOf([CLASH]), { host });
     typeIn('q4', 'Earlier.');
     fireEvent.click(send());
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Send again' })).toBeTruthy());
-    expect(kept.sending).toMatchObject({ state: 'failed', note: 'no door' });
+    // kept is written by an effect after the render that shows Send again: wait for both
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'Send again' })).toBeTruthy();
+      expect(kept.sending).toMatchObject({ state: 'failed', note: 'no door' });
+    });
   });
 });
 

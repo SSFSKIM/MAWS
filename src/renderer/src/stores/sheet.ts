@@ -14,19 +14,26 @@
 // made after it would otherwise never show, since the service speaks only on change. Each read of a session carries a
 // count that only grows, and an answer is applied only when no later read of that session was: `seq` cannot stand for
 // it, since an inbox line changes a model without moving it.
+//
+// M4 (§F; S13): each session's memory of its sheet (drafts, what the person saw, the acts this window sent, a Send in
+// flight), held here, outside the components, so it survives a tab's unmount and is shared by every mount of the
+// session's sheet in this window (the side sheet, an Overview card, the channel's card). The components change it only
+// through an update applied to the memory as it stands (`updateSheetMemory`, X5's `onMemory`); it goes with the record.
 import { create } from 'zustand';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { CommandResult, MawsBridge } from '@shared/ipc/schema';
 import type { DoorState } from '@shared/ipc/schema/sheet';
 import type { SheetModel, SheetSummary } from '@shared/sheet/model';
+import { EMPTY_MEMORY, type SheetMemory } from '../sheet/memory';
 
 export interface SheetsState {
   summaries: ReadonlyMap<string, SheetSummary>; // by the engine's session id
   models: ReadonlyMap<string, SheetModel | null>; // the sessions watched; null: read, and no record (or not one this build reads)
   door: DoorState; // from the last list or read; the service announces every record it holds when the door moves, so a watched one is read again
+  memories: ReadonlyMap<string, SheetMemory>; // M4: by the engine's session id, while its record lives
 }
 
-const empty = (): SheetsState => ({ summaries: new Map(), models: new Map(), door: { known: false } });
+const empty = (): SheetsState => ({ summaries: new Map(), models: new Map(), door: { known: false }, memories: new Map() });
 
 export const useSheets = create<SheetsState>(() => empty());
 
@@ -39,7 +46,13 @@ function applySummary(session: string, summary: SheetSummary | null): void {
   const summaries = new Map(useSheets.getState().summaries);
   if (summary === null) summaries.delete(session);
   else summaries.set(session, summary);
-  useSheets.setState({ summaries });
+  useSheets.setState({ summaries, ...(summary === null && { memories: without(useSheets.getState().memories, (held) => held === session) }) });
+}
+
+// The memories but those `gone` holds for; the same map when none goes.
+function without(memories: ReadonlyMap<string, SheetMemory>, gone: (session: string) => boolean): ReadonlyMap<string, SheetMemory> {
+  if (![...memories.keys()].some(gone)) return memories;
+  return new Map([...memories].filter(([session]) => !gone(session)));
 }
 
 // One read of a session's model, applied unless a later read of it already was, or nothing watches it any more.
@@ -73,7 +86,10 @@ export function connectSheets(client: MawsBridge): () => void {
     held = null;
     listing = false;
     if (!live) return;
-    if (result?.ok) useSheets.setState({ summaries: new Map(result.value.sessions.map((summary) => [summary.session, summary])), door: result.value.door });
+    if (result?.ok) {
+      const summaries = new Map(result.value.sessions.map((summary) => [summary.session, summary]));
+      useSheets.setState({ summaries, door: result.value.door, memories: without(useSheets.getState().memories, (session) => !summaries.has(session)) });
+    }
     else console.warn('[sheet] sheet.list unavailable; keeping what the store holds', result?.error.message ?? 'rejected');
     for (const [session, summary] of raced) applySummary(session, summary);
     if (result?.ok) for (const session of watchers.keys()) read(client, session);
@@ -126,6 +142,47 @@ export const selectSheetSession = (state: Pick<SheetsState, 'summaries'>, appSes
 };
 
 export const selectSheetModel = (state: Pick<SheetsState, 'models'>, session: string | null): SheetModel | null => (session === null ? null : (state.models.get(session) ?? null));
+
+/** A session's memory of its sheet; the empty one for a session this window has not touched. */
+export const selectSheetMemory = (state: Pick<SheetsState, 'memories'>, session: string): SheetMemory => state.memories.get(session) ?? EMPTY_MEMORY;
+
+/**
+ * Whether an app session's sheet holds something the person acted on, which a compact sheet keeps showing once its
+ * questions no longer wait (M4's review): a queued answer or a queued dismissal (neither is an attention item), or an
+ * act of this window still sending, accepted and not yet delivered (the model's `pending` holds its outcome), or carrying
+ * a note. It waits on nobody: nothing counts it.
+ *
+ * `holds: 'unsettled'` is the channel's "Waiting on you", which says what waits on the person (the composite's writer,
+ * 2026-11-27): there only a Send still in the air (held, sending or failed) or an act whose note waits holds the sheet;
+ * a queued answer, a queued dismissal and an accepted outcome leave with the question, as an answered permission does.
+ */
+export function selectSheetHeld(state: Pick<SheetsState, 'summaries' | 'memories'>, appSessionId: AppSessionId, holds: 'acted' | 'unsettled' = 'acted'): boolean {
+  const session = selectSheetSession(state, appSessionId);
+  return session !== null && summaryHeld(state, state.summaries.get(session)!, holds);
+}
+
+/** The app sessions whose sheet `selectSheetHeld` holds, read in one pass over the summaries (a board of every session's cards). */
+export function selectSheetsHeld(state: Pick<SheetsState, 'summaries' | 'memories'>, holds: 'acted' | 'unsettled' = 'acted'): Set<AppSessionId> {
+  const held = new Set<AppSessionId>();
+  for (const summary of state.summaries.values()) if (summary.appSessionId !== null && summaryHeld(state, summary, holds)) held.add(summary.appSessionId);
+  return held;
+}
+
+function summaryHeld(state: Pick<SheetsState, 'memories'>, summary: SheetSummary, holds: 'acted' | 'unsettled'): boolean {
+  const acted = holds === 'acted';
+  if (acted && (summary.queued > 0 || summary.hidden > 0)) return true;
+  const memory = state.memories.get(summary.session);
+  return memory !== undefined && (memory.sending !== null || memory.acts.some((act) => act.state === 'sending' || (acted && act.state === 'accepted') || act.note !== null));
+}
+
+/** Applies an update to a session's memory as it stands now (X5's `onMemory`); callable after the sheet that asked is gone. */
+export function updateSheetMemory(session: string, update: (current: SheetMemory) => SheetMemory): void {
+  const { memories } = useSheets.getState();
+  const current = memories.get(session) ?? EMPTY_MEMORY;
+  const next = update(current);
+  if (next === current) return;
+  useSheets.setState({ memories: new Map(memories).set(session, next) });
+}
 
 // Tests: the store and its reads back to empty.
 export function resetSheetStore(): void {

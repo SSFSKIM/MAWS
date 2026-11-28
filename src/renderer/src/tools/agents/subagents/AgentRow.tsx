@@ -8,7 +8,8 @@
 // without a time, then how many tasks run under it, the part of the line that is never cut. The word cut: an agent
 // waiting on a request of its own keeps its line, its mark a warning disc beside its glyph, drawn in the glyph's slot so
 // its title stays in line with its siblings', and `Approval needed` the row's tooltip and description (T166); a row of
-// unknown status has no second line and a running one with no start time no elapsed (T167, T168).
+// unknown status has no second line and a running one with no start time no elapsed (T167, T168). An agent waiting on
+// sheet questions alone reads `Question waiting` there, its disc calm (`agentWaitsOf`; the composite's writer, 2026-11-27).
 import { useId, useRef } from 'react';
 import type { AgentId, TaskId } from '@shared/graph/ids';
 import { Icon } from '../../../app/IconButton';
@@ -17,7 +18,7 @@ import { Tip } from '../../../ui/tip';
 import { SUBAGENTS_COPY } from '../copy';
 import { elapsedOf, formatElapsed } from '../model/elapsed';
 import { agentsRunningUnder, isEnded, outcomeSummary, rowSecondLine, rowTitle, runningUnder, tasksRunningUnder, type TaskGraph, type TaskNode, type TreeRow } from '../model/task-graph';
-import { outcomeOf, outcomeWord, refOf } from './shared';
+import { outcomeOf, outcomeWord, refOf, type AgentWait } from './shared';
 
 type AgentTreeRow = Extract<TreeRow, { kind: 'agent' }>;
 export const indent = (depth: number) => ({ marginInlineStart: depth * 24 });
@@ -42,13 +43,14 @@ function lineOf(node: TaskNode, graph: TaskGraph, now: number): Line | null {
 }
 
 const TONE = { muted: 'text-fg-muted', danger: 'text-danger' } as const;
+const DISC = { calm: 'bg-info', warning: 'bg-warning' } as const; // the waiting mark's tone (`AgentWait`)
 
 export function AgentRow({
   row, graph, waiting, now, onOpen, under,
 }: {
   row: AgentTreeRow;
   graph: TaskGraph;
-  waiting: boolean;
+  waiting: AgentWait | null;
   now: number;
   onOpen: (agentId: AgentId) => void;
   under: { open: boolean; onToggle: () => void } | null; // the disclosure, while agents are under the row
@@ -71,11 +73,11 @@ export function AgentRow({
       ref={rowRef}
       data-agent-row={row.taskId}
       data-depth={row.depth}
-      data-waiting={waiting || undefined}
+      data-waiting={waiting !== null || undefined}
       style={indent(row.depth)}
       className={`relative flex min-h-12 items-stretch ${row.depth > 0 ? 'border-l border-border-strong' : ''}`}
     >
-      <Tip content={waiting ? SUBAGENTS_COPY.approvalNeeded : null} description={waiting ? SUBAGENTS_COPY.approvalNeeded : null} pointedWithin={rowRef}>
+      <Tip content={waiting?.word ?? null} description={waiting?.word ?? null} pointedWithin={rowRef}>
         <button
           type="button"
           data-part="open"
@@ -88,7 +90,7 @@ export function AgentRow({
         {/* the glyph's slot holds the waiting disc at its right, out of the flow, so the mark never moves the text */}
         <span data-part="glyph" className="relative flex shrink-0">
           <SubagentGlyph agent={refOf(node)} className={`text-accent ${row.depth > 0 ? 'text-ui' : 'text-prose'}`} />
-          {waiting && <span data-part="waiting" aria-hidden="true" className="absolute top-1/2 -right-1.5 size-1.5 -translate-y-1/2 rounded-full bg-warning" />}
+          {waiting !== null && <span data-part="waiting" data-tone={waiting.tone} aria-hidden="true" className={`absolute top-1/2 -right-1.5 size-1.5 -translate-y-1/2 rounded-full ${DISC[waiting.tone]}`} />}
         </span>
         <span id={`${id}-text`} className="min-w-0 flex-1 text-left">
           <span className="block min-w-0 truncate font-medium">

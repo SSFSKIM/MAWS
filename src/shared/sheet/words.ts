@@ -3,13 +3,17 @@
 import type { SheetBy, SheetLine, SheetQuestion } from './model';
 import { codePoints, cut } from './text';
 
-// A sentence ends at a run of `.`, `?` or `!` (closing quotes and brackets after it kept) that ends a word.
-const SENTENCE_END = /[.?!]+["'”’)\]]*(?=\s|$)/g;
+// A sentence ends at a run of `.`, `?` or `!` that whitespace or the line's end follows, or at a run of the full-width
+// marks `。？！` whatever follows; closing quotes and brackets after either run are kept with it. One definition with
+// C2's terminal row (the composite's §8.1), held by the same eleven cases.
+const SENTENCE_END = /(?:[.?!]+["'”’)\]]*(?=\s|$)|[。？！]+["'”’)\]」』）]*)/g;
+// A sentence asks when its ending run holds a question mark of either width.
+const ASKS = /[?？]/;
 
 /**
  * The question's first sentence that ends in a question mark, or its first sentence when none does: a row line or a
- * waiting line shows what is asked, not the statement before it. A sentence runs through the first `.`, `?` or `!`
- * that ends a word, or to a line break.
+ * waiting line shows what is asked, not the statement before it. A sentence runs to a line break or through the first
+ * run of marks that ends it (`SENTENCE_END`).
  */
 export function questionSentence(text: string): string {
   const sentences: { text: string; asks: boolean }[] = [];
@@ -21,7 +25,7 @@ export function questionSentence(text: string): string {
     let start = 0;
     for (const end of line.matchAll(SENTENCE_END)) {
       const stop = end.index + end[0].length;
-      add(line.slice(start, stop), end[0].includes('?'));
+      add(line.slice(start, stop), ASKS.test(end[0]));
       start = stop;
     }
     add(line.slice(start), false);

@@ -236,6 +236,20 @@ describe('the Subagents card', () => {
     expect(lineOf('p').textContent).toBe('Working');
   });
 
+  // The composite's writer (2026-11-27): an agent's row whose waiting items are all sheet questions reads as an
+  // async_input item, calm; anything else waiting beside them keeps Approval needed and the warning colour.
+  it('reads Question waiting, calm, on the row of an agent waiting on sheet questions alone, and Approval needed beside anything else', async () => {
+    await mount([started('p', 1), started('q', 2)]);
+    const asked = (agentId: string, question: string) =>
+      item(A, 'async_input', T0, { id: `sheet:5eed0000-0000-4000-8000-0000000000aa:${question}` as never, request: { requestId: `sheet-${question}` as RequestId, toolUseId: null, taskId: null, agentId: agentId as AgentId } });
+    const waiting = (items: ReturnType<typeof item>[]) => act(() => useAttention.setState((s) => ({ bySession: new Map([[A, items]]), version: s.version + 1 })));
+    waiting([asked('q', 'q1'), asked('q', 'q2')]);
+    expect([lineOf('q').textContent, lineOf('q').className.includes('text-info'), lineOf('q').className.includes('text-warning')]).toEqual(['Question waiting', true, false]);
+    waiting([asked('q', 'q1'), item(A, 'permission', T0, { request: { requestId: 'req-q' as RequestId, toolUseId: null, taskId: null, agentId: 'q' as AgentId } })]);
+    expect([lineOf('q').textContent, lineOf('q').className.includes('text-warning')]).toEqual(['Approval needed', true]);
+    expect(lineOf('p').textContent).toBe('Working');
+  });
+
   it('says nothing on a row of what runs under its agent, and cuts a long state line at its end', async () => {
     await mount([started('p', 1), shellOf('s1', 'p', 2), ...nested('p', 'c', 3), event('subagent.progress', { taskId: 'p', description: 'Reading a very long path name that cannot fit in a card of this width.ts' }, { seq: 5 })]);
     expect(lineOf('p').textContent).toBe('Reading a very long path name that cannot fit in a card of this width.ts');

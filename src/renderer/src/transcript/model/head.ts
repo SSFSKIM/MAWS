@@ -7,7 +7,7 @@
 // that is not work (`quiet`); every other event draws nothing of its own (`silent`): a hook that ran and let things go
 // on, and what only updates a row already drawn (a call's result or progress, a task's update or end, a request's
 // answer, the host's account of a maws call). head.test.ts holds the table to the rows drawn over every fixture.
-import { carriedOf } from '@shared/engine/arrival-schema';
+import { carriedOf, sheetDeliveriesOf } from '@shared/engine/arrival-schema';
 import type { SessionEvent } from '@shared/graph/events';
 import { INTERRUPT_CUT } from '@shared/lane-a/interrupt-cut';
 import { hookNotice } from './hooks';
@@ -43,7 +43,7 @@ export function headRole(event: SessionEvent, turn: TurnId): HeadRole {
   switch (event.kind) {
     case 'user.message': {
       // in the derivation's order (derive.ts, its user.message case)
-      if (event.isSynthetic && event.arrival !== undefined) return carriedOf(event.arrival).some((entry) => entry.class !== 'consent') ? 'arrival' : 'silent';
+      if (event.isSynthetic && event.arrival !== undefined) return carriedOf(event.arrival).some((entry) => entry.class !== 'consent') || sheetDeliveriesOf(event.arrival).length > 0 ? 'arrival' : 'silent'; // the question sheet's C3 M5: a sheet's delivery, read under its own schema, is an arrival too
       if (event.bash?.part === 'output') return 'silent'; // it completes the command's row
       if (event.origin === INTERRUPT_CUT || event.bash !== null || (isLocalCommand(event.origin, event.content) && !event.isSynthetic)) return 'work';
       if (event.isSynthetic || isInterruptionMarker(event.origin, event.content) || (event.origin !== null && event.origin !== 'human' && event.origin !== 'peer')) return 'silent';

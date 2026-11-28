@@ -7,10 +7,12 @@ import type { SheetModel, SheetSummary } from '@shared/sheet/model';
 import { fakeClient } from '../../../../test/support/fake-client';
 import { at, OTHER_MACHINE } from '../../../../test/support/machine';
 import { hostStatus } from '../test-support/host-status';
-import { connectSheets, resetSheetStore, selectSheetModel, selectSheetSession, useSheets, watchSheet } from './sheet';
+import { EMPTY_MEMORY } from '../sheet/memory';
+import { connectSheets, resetSheetStore, selectSheetHeld, selectSheetsHeld, selectSheetMemory, selectSheetModel, selectSheetSession, updateSheetMemory, useSheets, watchSheet } from './sheet';
 
 const A = '5eed0000-0000-4000-8000-0000000000a1';
 const B = '5eed0000-0000-4000-8000-0000000000b2';
+const C = '5eed0000-0000-4000-8000-0000000000c3';
 const APP = at('app-a') as AppSessionId;
 const summary = (session: string, extra: Partial<SheetSummary> = {}): SheetSummary => ({
   session, appSessionId: null, title: null, live: null, seq: 1, open: 1, queued: 0, pending: 0, hidden: 0, oldestAskedAt: '2026-11-23T09:59:00.000Z', unreadable: false, ...extra,
@@ -159,5 +161,81 @@ describe('watchSheet', () => {
     expect(selectSheetModel(useSheets.getState(), A)).toBeNull();
     unwatch();
     off();
+  });
+});
+
+// M4 (§F, §G): each session's memory of its sheet, the components' through `onMemory`'s updates, which apply to the
+// memory as it stands at that moment; dropped with the session's record.
+describe('the memory', () => {
+  const draft = { revision: 1, picks: ['Earlier'], text: '', images: [] };
+
+  it('is empty for a session it never saw, and holds an update applied to the memory as it stands', () => {
+    expect(selectSheetMemory(useSheets.getState(), A)).toBe(EMPTY_MEMORY);
+    updateSheetMemory(A, (current) => ({ ...current, drafts: new Map([['q1', draft]]) }));
+    updateSheetMemory(A, (current) => ({ ...current, seen: new Map([['q1', 1]]) })); // a second update keeps the first's draft
+    const memory = selectSheetMemory(useSheets.getState(), A);
+    expect(memory.drafts.get('q1')).toEqual(draft);
+    expect(memory.seen.get('q1')).toBe(1);
+    expect(selectSheetMemory(useSheets.getState(), B)).toBe(EMPTY_MEMORY);
+  });
+
+  it('leaves the store as it was for an update that changes nothing', () => {
+    const before = useSheets.getState();
+    updateSheetMemory(A, (current) => current);
+    expect(useSheets.getState()).toBe(before);
+  });
+
+  it('is dropped when the session’s record goes, and kept while it changes', async () => {
+    const fake = fakeClient();
+    const off = connectSheets(fake.client);
+    await fake.reply('sheet.list', { sessions: [summary(A)], door: { known: false } });
+    updateSheetMemory(A, (current) => ({ ...current, drafts: new Map([['q1', draft]]) }));
+    fake.event('sheet.changed', { session: A, summary: summary(A, { seq: 2 }) });
+    expect(selectSheetMemory(useSheets.getState(), A).drafts.size).toBe(1);
+    fake.event('sheet.changed', { session: A, summary: null });
+    expect(selectSheetMemory(useSheets.getState(), A)).toBe(EMPTY_MEMORY);
+    off();
+  });
+});
+
+// M4's review: what keeps a compact sheet in place once none of its questions waits
+describe('a sheet that holds what the person did', () => {
+  const appSessionId = at('app-held' as AppSessionId);
+  const held = (extra: Partial<SheetSummary>, memory = EMPTY_MEMORY, holds: 'acted' | 'unsettled' = 'acted') => {
+    useSheets.setState({ summaries: new Map([[A, summary(A, { appSessionId, open: 0, ...extra })]]), memories: new Map([[A, memory]]) });
+    return selectSheetHeld(useSheets.getState(), appSessionId, holds);
+  };
+  const act = (state: 'sending' | 'queued' | 'accepted' | 'delivered' | 'closed', note: string | null) => ({ key: 'maws-1', kind: 'answer' as const, id: 'q1', draft: null, sentAt: 0, state, note });
+
+  it('holds a queued answer, a queued dismissal, a Send in flight, an act sending, one accepted not yet delivered and one with a note; nothing else', () => {
+    expect(held({ queued: 1 })).toBe(true);
+    expect(held({ hidden: 1 })).toBe(true);
+    expect(held({}, { ...EMPTY_MEMORY, sending: { attempt: 'a1', lines: [], state: 'sending', note: null } })).toBe(true);
+    expect(held({}, { ...EMPTY_MEMORY, acts: [act('sending', null)] })).toBe(true);
+    expect(held({}, { ...EMPTY_MEMORY, acts: [act('closed', 'q1 was already answered')] })).toBe(true);
+    expect(held({}, { ...EMPTY_MEMORY, acts: [act('accepted', null)] }), 'its outcome pending, not delivered').toBe(true);
+    expect(held({}, { ...EMPTY_MEMORY, acts: [act('queued', null)] })).toBe(false);
+    expect(held({ open: 2 })).toBe(false); // waiting questions are attention's, not this
+    expect(selectSheetHeld(useSheets.getState(), at('app-none' as AppSessionId)), 'a session with no record').toBe(false);
+  });
+
+  it('names the same sessions in one pass over the summaries', () => {
+    const other = at('app-other' as AppSessionId);
+    useSheets.setState({ summaries: new Map([[A, summary(A, { appSessionId, open: 0, queued: 1 })], [B, summary(B, { appSessionId: other, open: 1 })], [C, summary(C, { appSessionId: null, open: 0, queued: 1 })]]), memories: new Map() });
+    expect(selectSheetsHeld(useSheets.getState())).toEqual(new Set([appSessionId]));
+    expect(selectSheetsHeld(useSheets.getState(), 'unsettled')).toEqual(new Set());
+  });
+
+  // The composite's writer (2026-11-27): the channel's "Waiting on you" says what waits on the person, so there only a
+  // Send still in the air or one whose note waits holds the card
+  it('holds, for the channel, only a Send in flight, an act sending and one with a note', () => {
+    const unsettled = (extra: Partial<SheetSummary>, memory = EMPTY_MEMORY) => held(extra, memory, 'unsettled');
+    expect(unsettled({}, { ...EMPTY_MEMORY, sending: { attempt: 'a1', lines: [], state: 'failed', note: null } }), 'a Send that failed, held').toBe(true);
+    expect(unsettled({}, { ...EMPTY_MEMORY, acts: [act('sending', null)] })).toBe(true);
+    expect(unsettled({}, { ...EMPTY_MEMORY, acts: [act('closed', 'q1 was already answered')] })).toBe(true);
+    expect(unsettled({ queued: 1 }), 'a queued answer').toBe(false);
+    expect(unsettled({ hidden: 1 }), 'a queued dismissal').toBe(false);
+    expect(unsettled({ pending: 1 }, { ...EMPTY_MEMORY, acts: [act('accepted', null)] }), 'accepted, not yet delivered').toBe(false);
+    expect(unsettled({ queued: 1 }, { ...EMPTY_MEMORY, acts: [act('queued', null)] })).toBe(false);
   });
 });

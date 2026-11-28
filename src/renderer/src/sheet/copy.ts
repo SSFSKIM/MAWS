@@ -24,7 +24,10 @@ export const SHEET_WORDS = {
   stale: 'The question changed before your answer arrived. Your draft is kept.', // frame 2
   carried: 'You wrote this before the question changed.', // no frame: the carried draft (M6's built look)
   keep: 'Keep my answer', // no frame: the carried draft's one control
-  queued: 'Queued. The session is stopped and gets this when it resumes.', // frame 2
+  // A queued answer's sentence: frame 2's only where the session is known to be stopped (`live === false`); while it
+  // runs or is not known, the writer's (2026-11-27, provisional)
+  queued: 'Queued. The session has not picked it up yet.',
+  queuedStopped: 'Queued. The session is stopped and gets this when it resumes.', // frame 2
   queuedWord: 'queued', // a queued dismissal's line (frame 2)
   takeBack: 'Take back',
   edit: 'Edit',
