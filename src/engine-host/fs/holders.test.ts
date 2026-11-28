@@ -7,6 +7,16 @@ import type { Holder, JobState, LiveSessionRecord } from '@shared/wire/store';
 import { StoreFixture } from '../../../test/support/store-fixture';
 import { HolderRegistry } from './holders';
 
+// A read of `fault.path` fails as unreadable without touching the file, so nothing in the idle listing changes when it
+// stops failing; every other read is the real one.
+const fault = vi.hoisted(() => ({ path: null as string | null }));
+vi.mock('./sidecars', async (original) => {
+  const actual = await original<typeof import('./sidecars')>();
+  const readJsonWithRetry: typeof actual.readJsonWithRetry = (path, parse, accept) =>
+    path === fault.path ? Promise.resolve({ status: 'unreadable', code: 'EIO' } as const) : actual.readJsonWithRetry(path, parse, accept);
+  return { ...actual, readJsonWithRetry };
+});
+
 const S1 = '11111111-1111-4111-8111-111111111111' as SessionId;
 const S2 = '22222222-2222-4222-8222-222222222222' as SessionId;
 const NO_SUCH_PID = 2 ** 22 - 1;
@@ -218,6 +228,35 @@ describe('holders come from live sessions/<pid>.json records', () => {
     await exited;
     await expect.poll(() => holders.holderOf(S1), { timeout: 1_000, interval: 20 }).toEqual({ kind: 'none' });
     expect(emitted.at(-1)).toMatchObject({ sessionId: S1, holder: { kind: 'none' } });
+  });
+
+  it('with no holder known, polls the listing of sessions/: a record added or rewritten in place with no refresh asked for is read', async () => {
+    const holders = create({ pollMs: 50 });
+    await holders.start();
+    await fixture.addRegistryRecord(process.pid, { kind: 'interactive', spare: true }); // a spare holds nothing
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    expect(emitted).toEqual([]);
+    await fixture.addRegistryRecord(process.pid, { sessionId: S1, kind: 'interactive' }); // the same file, now holding S1
+    await expect.poll(() => holders.holderOf(S1), { timeout: 1_000, interval: 10 }).toEqual({ kind: 'terminal', pid: process.pid });
+    expect(emitted).toHaveLength(1);
+  });
+
+  it('with no holder known, a record that could not be read is read again once it can be', async () => {
+    const holders = create({ pollMs: 50 });
+    await holders.start();
+    const path = join(fixture.paths.sessions, `${process.pid}.json`);
+    fault.path = path;
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      await writeFile(path, JSON.stringify({ sessionId: S1, kind: 'interactive' }));
+      await expect.poll(() => errors.mock.calls.some((call) => String(call[0]).includes(`${path} is unreadable`)), { timeout: 2_000, interval: 10 }).toBe(true);
+      expect(holders.holderOf(S1)).toEqual({ kind: 'none' });
+      fault.path = null; // the file and its metadata as they were: only a retry of the failed read can find the holder
+      await expect.poll(() => holders.holderOf(S1), { timeout: 1_000, interval: 10 }).toEqual({ kind: 'terminal', pid: process.pid });
+    } finally {
+      fault.path = null;
+      errors.mockRestore();
+    }
   });
 
   // W7 (charter §4.3 as amended 2026-10-01; pass3/w7-collision: MAWS's own `-p` process registers as `interactive`,
