@@ -15,7 +15,7 @@ import { TEST_MACHINE } from '../../../../test/support/machine';
 import { formatClock } from '@shared/app/date-format'; // L129
 import type { AppSessionId } from '@shared/graph/ids'; // P5 O7 M6
 import { addressOf, bareOf } from '@shared/machine/address';
-import { item, record, remoteRow } from '../../../../test/support/builders';
+import { digest, item, record, remoteRow } from '../../../../test/support/builders';
 import { OTHER_MACHINE } from '../../../../test/support/machine';
 import { Toolbar } from '../app/Toolbar';
 import { registerRemoteOpener } from '../sessions/remote-openers';
@@ -348,7 +348,8 @@ describe('a session whose sheet questions wait', () => {
   });
 
   // M4's review: a stopped session's one question answered from its card is queued and waits no more; the card keeps its
-  // sheet, which reads the answer queued with Take back; taken back, the question is open and waits again
+  // sheet, which reads the answer queued with Take back; taken back, the question is open and waits again. The branch
+  // review of #890 (R1): the session is read and exited, so only its held sheet keeps its card on the board.
   it('keeps a stopped session’s compact sheet once its one question is answered from it: queued with Take back, which opens it again', async () => {
     const id = idOf('Fix sidebar drag');
     let model = sheetOf([FIXTURE]);
@@ -360,7 +361,12 @@ describe('a session whose sheet questions wait', () => {
       'sheet.put': ({ lines }: { lines: SheetLine[] }) => ({ ok: true, results: lines.map((line) => ({ key: line.key, state: 'queued' })) }),
     });
     window.maws = preloadOf(fake); // the fake under the real client, so its events reach the store lifted
-    act(() => useSessions.setState((s) => ({ records: new Map(s.records).set(id, { ...s.records.get(id)!, holder: { kind: 'none' } }) })));
+    act(() =>
+      useSessions.setState((s) => ({
+        records: new Map(s.records).set(id, { ...s.records.get(id)!, holder: { kind: 'none' }, unread: false }),
+        digests: new Map(s.digests).set(id, digest(id, { phase: 'exited' })),
+      })),
+    );
     const waiting = asked(id, 'q7', 1);
     act(() => useAttention.getState().applyChanged({ appSessionId: id, items: [waiting] }, TEST_MACHINE));
     offs.push(connectSheets(ipc));
@@ -384,6 +390,7 @@ describe('a session whose sheet questions wait', () => {
     changed(true);
     await waitFor(() => expect(within(fix()).getByText(SHEET_WORDS.queuedStopped)).toBeTruthy());
     expect(fix().querySelectorAll('[data-sheet-in-place]'), 'the sheet stays where the answer was sent').toHaveLength(1);
+    expect(screen.queryByRole('listitem', { name: 'Needs you' }) === null || !within(group('Needs you')).queryByRole('article', { name: 'Fix sidebar drag' }), 'a queued answer waits nowhere').toBe(true);
 
     fireEvent.click(within(fix()).getByRole('button', { name: SHEET_WORDS.takeBack }));
     await waitFor(() => expect(puts()).toHaveLength(2));

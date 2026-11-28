@@ -1,4 +1,4 @@
-// The Overview board (§5.2; residue *Overview card*): one card per live or unread session, grouped Needs you first,
+// The Overview board (§5.2; residue *Overview card*): one card per live or unread session (or one whose question sheet holds an act, C3), grouped Needs you first,
 // then the projects in sidebar order, then each machine's sessions of no project (`overviewGroups`). A scrolling `role="list"` of groups; the
 // cards share one tab stop and the arrow keys move focus across them in reading order (Home and End to the ends),
 // Enter opens the focused card's session and ⌘Enter opens it in the split.
@@ -15,6 +15,7 @@ import { useMachines } from '../stores/machines';
 import { machineName } from '../stores/org-projects';
 import { useLayout } from '../stores/layout';
 import { selectProjectOrder, useSessions } from '../stores/sessions';
+import { selectSheetHeld, useSheets } from '../stores/sheet'; // the question sheet's C3
 import { openListed } from '../sessions/remote-openers'; // P5 O7 M6
 import { CardGroup } from './CardGroup';
 import { overviewGroups } from './derive';
@@ -37,8 +38,12 @@ export function Overview({ paneIndex, onSessionCreated }: { paneIndex: PaneIndex
   const attention = useAttention(useShallow((a) => ({ loaded: a.loaded, bySession: a.bySession, version: a.version, greyed: a.greyed })));
   const rows = selectNeedsYou(attention, sessions);
   const machines = useMachines((s) => s.machines);
+  const sheets = useSheets(useShallow((s) => ({ summaries: s.summaries, memories: s.memories })));
   const local = ipc.localMachine;
-  const groups = overviewGroups({ records: sessions.records, digests: sessions.digests, projects: sessions.projects, rows, local, machineName: (m) => machineName(machines, m, local), listed: sessions.listed });
+  const groups = overviewGroups({
+    records: sessions.records, digests: sessions.digests, projects: sessions.projects, rows, local, machineName: (m) => machineName(machines, m, local), listed: sessions.listed,
+    held: (appSessionId) => selectSheetHeld(sheets, appSessionId),
+  });
   const order = groups.flatMap((g) => g.sessions);
 
   const board = useRef<HTMLDivElement>(null);

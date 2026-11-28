@@ -32,6 +32,10 @@ export interface OverviewInput {
   // P5 O7 M6 (M6c fix wave 1): other machines' listed sessions; one with no record is carded in Needs you from its
   // listing and its item (as the toolbar counts it), and in no other group, which needs a record's directory and digest.
   listed?: ReadonlyMap<AppSessionId, unknown>;
+  // The question sheet's C3 (the branch review of #890): whether the session's sheet holds what the person did on its
+  // card (`selectSheetHeld`), which keeps the card on the board, in its own group, so the receipt and Take back stay
+  // where the answer was sent (the composite's §8.1). It waits on nobody: it never puts the card in Needs you.
+  held?: (appSessionId: AppSessionId) => boolean;
 }
 
 export interface CardGroup {
@@ -41,16 +45,16 @@ export interface CardGroup {
 }
 
 // §5.2's board is "live or unread": a live process in any phase (a read idle session included), an unread session, or
-// one in Needs you. An exited session only when unread or in Needs you; archived never.
-function eligible(record: SessionRecord, digest: SessionDigest | undefined, waiting: boolean): boolean {
+// one in Needs you. An exited session only when unread, in Needs you or holding a sheet acted on (`held`); archived never.
+function eligible(record: SessionRecord, digest: SessionDigest | undefined, kept: boolean): boolean {
   if (record.archived) return false;
-  return waiting || record.unread || (digest !== undefined && LIVE.has(digest.phase));
+  return kept || record.unread || (digest !== undefined && LIVE.has(digest.phase));
 }
 
 const latestTurn = (record: SessionRecord, digest: SessionDigest | undefined) =>
   time(digest?.turnStartedAt ?? digest?.lastTurnEndedAt ?? record.updatedAt);
 
-export function overviewGroups({ records, digests, projects, rows, local, machineName, listed }: OverviewInput): CardGroup[] {
+export function overviewGroups({ records, digests, projects, rows, local, machineName, listed, held }: OverviewInput): CardGroup[] {
   const waiting = new Set(rows.map((row) => row.appSessionId));
   const carded = (id: AppSessionId) => records.has(id) || (listed?.has(id) ?? false);
   const groups: CardGroup[] = [{ id: 'needs-you', title: 'Needs you', sessions: rows.map((row) => row.appSessionId).filter(carded) }];
@@ -58,7 +62,7 @@ export function overviewGroups({ records, digests, projects, rows, local, machin
   const byProject = new Map<ProjectId | OrgKey, SessionRecord[]>();
   const known = new Set(ordered.map((p) => p.id));
   for (const record of records.values()) {
-    if (waiting.has(record.appId) || !eligible(record, digests.get(record.appId), false)) continue;
+    if (waiting.has(record.appId) || !eligible(record, digests.get(record.appId), held?.(record.appId) ?? false)) continue;
     const key = record.projectId !== null && known.has(record.projectId) ? record.projectId : machineKey(machineOf(record.appId));
     byProject.set(key, [...(byProject.get(key) ?? []), record]);
   }
