@@ -220,6 +220,17 @@ describe('holders come from live sessions/<pid>.json records', () => {
     expect(emitted.at(-1)).toMatchObject({ sessionId: S1, holder: { kind: 'none' } });
   });
 
+  it('with no holder known, polls the listing of sessions/: a record added or rewritten in place with no refresh asked for is read', async () => {
+    const holders = create({ pollMs: 50 });
+    await holders.start();
+    await fixture.addRegistryRecord(process.pid, { kind: 'interactive', spare: true }); // a spare holds nothing
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    expect(emitted).toEqual([]);
+    await fixture.addRegistryRecord(process.pid, { sessionId: S1, kind: 'interactive' }); // the same file, now holding S1
+    await expect.poll(() => holders.holderOf(S1), { timeout: 1_000, interval: 10 }).toEqual({ kind: 'terminal', pid: process.pid });
+    expect(emitted).toHaveLength(1);
+  });
+
   // W7 (charter §4.3 as amended 2026-10-01; pass3/w7-collision: MAWS's own `-p` process registers as `interactive`,
   // `entrypoint: 'sdk-ts'`, the terminal's as `cli`).
   describe('MAWS\'s own records', () => {
