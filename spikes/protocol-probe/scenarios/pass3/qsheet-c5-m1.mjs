@@ -83,6 +83,9 @@ const record=body=>{
  return {first:first?textOf(first.content).slice(-300):null,ended:(whole.match(/ended with questions still open/g)||[]).length,messages:(body.messages??[]).length,roles:(body.messages??[]).map(m=>m.role).join(''),holders,deliveries:[...whole.matchAll(/<sheet-delivery>(.*?)<\/sheet-delivery>/g)].map(x=>x[1].slice(0,300)),tools,toolCount:(body.tools??[]).length,
   last:last?{types:Array.isArray(last.content)?last.content.map(b=>b.type):['string'],text:textOf(last.content).slice(-2500),raw:JSON.stringify(last.content).slice(-400)}:null};
 };
+// W10's: each message that holds an envelope, whole (a subagent's request holds the tool's send as a message of its own,
+// whose opening line is the send's; the request's brief keeps only its last user message).
+const recordHeld=body=>({...record(body),held:(body.messages??[]).map((m,i)=>({i,role:m.role,content:m.content})).filter(m=>JSON.stringify(m.content).includes('sheet-delivery')).map(m=>({...m,content:JSON.stringify(m.content).slice(0,6000)}))});
 const ASK_INPUT=n=>({ask:[{question:`QC5-M2 question ${n}?`,options:[{label:'Alpha'},{label:'Beta'}]}]});
 const SCRIPT=rules([
  ['toolu_ask',textTurn('ASKED')],['QC5-ASK',body=>{const n=(JSON.stringify(lastUser(body)).match(/QC5-ASK (\d+)/)||[])[1]||'1';return toolTurn('toolu_ask'+n,'mcp__sminos__AskUserQuestion',ASK_INPUT(n));}],
@@ -110,8 +113,8 @@ const W7_RING_SLEEPS={on:false};
 
 // One engine process, launched as MAWS launches it. `sheet` is MAWS_QUESTION_SHEET's value (null: unset); `resume` is
 // the session id to resume, with `fork` its fork's new id; `plugins` the plugin directories after the tell's.
-async function launch(name,r,sid,{sheet=`2:${sid}`,resume=null,fork=false,plugin=SMINOS,firstPlugins=[],cell,script=SCRIPT}={}){
- const stub=await startStubApi({record,respond:script,side:()=>textTurn('ok')});
+async function launch(name,r,sid,{sheet=`2:${sid}`,resume=null,fork=false,plugin=SMINOS,firstPlugins=[],cell,script=SCRIPT,keepHeld=false}={}){
+ const stub=await startStubApi({record:keepHeld?recordHeld:record,respond:script,side:()=>textTurn('ok')});
  clearEnv();
  const env=mawsEnv(r,{sheet,stub});
  const session=resume?['--resume',resume,...(fork?['--fork-session','--session-id',sid]:[])]:['--session-id',sid];
@@ -624,8 +627,9 @@ async function agentDone(p,toolUseId,from){
 }
 async function w10(){
  const cell='w10',r=scratchRoot(cell),sid=randomUUID();
- const {p,stub}=await launch(`qsheet-c5-m1-${cell}`,r,sid,{cell,script:W_SCRIPT});const out={};
+ const {p,stub}=await launch(`qsheet-c5-m1-${cell}`,r,sid,{cell,script:W_SCRIPT,keepHeld:true});const out={};
  const subOf=x=>(x.first??'').includes('QC5-SUB A')?'A':(x.first??'').includes('QC5-SUB B')?'B':'main';
+ const SEND_OPENING_Q5=/From the human, through the question tool, not from your coordinator/;
  const holds=(x,id)=>x.deliveries.some(d=>d.replace(/\\"/g,'"').includes(`"id":"${id}"`));
  try{
   await init(p,r);await quiet(p,2000,15000);
@@ -641,6 +645,8 @@ async function w10(){
   const reqs=sa.requests.filter(x=>x.main);
   out.a={inSubagent:reqs.filter(x=>subOf(x)==='A'&&holds(x,qa?.id)).length,inMain:reqs.filter(x=>subOf(x)==='main'&&holds(x,qa?.id)).length,
    subRequestAfterWait:reqs.filter(x=>subOf(x)==='A').at(-1)?.last?.text?.slice(-900)??null,
+   // the message of the subagent's history that holds the envelope: the tool's send, its opening line first
+   subHeld:(reqs.filter(x=>subOf(x)==='A'&&holds(x,qa?.id)).at(0)?.held??[]).map(m=>({i:m.i,role:m.role,opening:SEND_OPENING_Q5.test(m.content),content:m.content})),
    waitMovedToBackground:sa.wire.some(w=>w.type==='system'&&w.subtype==='task_started')&&p.frames.some(x=>x.frame.type==='system'&&x.frame.subtype==='task_started'&&x.frame.tool_use_id==='toolu_suba_sleep'&&x.frame.is_background===true)};
   // B: asks and ends with its question open; then the answer, then a ring
   from=p.seq;const n=stub.requests.length;frame(p,'QC5-AGENT B: start the subagent.');
@@ -659,7 +665,7 @@ async function w10(){
   const m=noteSheet(p,r,sid,'after the ring');out.pending=(m?.pending??[]).length;
  }catch(e){p.note({event:'scenario_error',error:e.stack});console.error(e.message);}
  const {debug}=await finish(p,stub,r,sid);out.ringLines=lines(debug,RING_LINES);out.sendLines=lines(debug,/sheet: .*(send|subagent)/);
- out.answer=out.aDone&&out.bDone&&out.a?.inSubagent>=1&&out.a.inMain===0&&!out.mainHoldsA&&out.notice===1&&out.noticesInHistory===1&&!out.ring?.dropped&&out.envelope?.namesAsker&&out.envelope.questionWords&&out.history.length===1&&out.pending===0?'pass':'fail';
+ out.answer=out.aDone&&out.bDone&&out.a?.inSubagent>=1&&out.a.subHeld.some(m=>m.opening)&&out.a.inMain===0&&!out.mainHoldsA&&out.notice===1&&out.noticesInHistory===1&&!out.ring?.dropped&&out.envelope?.namesAsker&&out.envelope.questionWords&&out.history.length===1&&out.pending===0?'pass':'fail';
  return verdict(p,cell,out);
 }
 

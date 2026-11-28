@@ -1751,6 +1751,8 @@ testB('question sheet C5 M2 W9: an answer queued while stopped is applied at the
 });
 testB('question sheet C5 M2 W10: a running subagent\'s answer goes to it alone; an ended one\'s is noticed once and rings in the main conversation, the asker named',()=>{
  const v=passQ5('w10');assert.deepEqual([v.a.inMain,v.notice,v.noticesInHistory],[0,1,1]);assert.ok(v.a.inSubagent>=1);
+ // the tool's send, kept whole: the subagent's message that holds the envelope opens with the send's line
+ assert.ok(v.a.subHeld.some(m=>m.content.includes('From the human, through the question tool, not from your coordinator')));
  assert.deepEqual([v.envelope.namesAsker,v.envelope.questionWords],[true,true]);
 });
 testB('question sheet C5 M2 W11: after a compaction a ring carries the envelope once, with the question\'s words',()=>{

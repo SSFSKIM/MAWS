@@ -328,8 +328,9 @@ dropped; the envelope once.
 
 W10. On this engine the Agent tool runs a subagent in the background: its call returns at once and the completion
 arrives later as a task notification that opens a turn. A subagent that asks and still runs: its answer reached its own
-history, on its running call's result (the result route, a system-role message), and no request of the main
-conversation held it. A second subagent that asks and ends: the main conversation was told once ("[sheet v1] The
+history by the tool's send ($.session.send; sent.state delivered), which the engine placed after the subagent's running
+call returned, as a message of its own opening "From the human, through the question tool, not from your coordinator:
+…" (the recording keeps that message whole); no request of the main conversation held it. A second subagent that asks and ends: the main conversation was told once ("[sheet v1] The
 subagent asker B (<id>) ended with questions still open on your sheet: q2 …"), on the turn its completion opened; its
 answer then rang in the main conversation, the envelope naming the asker ("q2 (from the subagent asker B, <id>, which
 has ended)") with the question's words and the picked label. A first trial that did not wait for the first subagent's
