@@ -8,10 +8,11 @@ import { fakeClient } from '../../../../test/support/fake-client';
 import { at, OTHER_MACHINE } from '../../../../test/support/machine';
 import { hostStatus } from '../test-support/host-status';
 import { EMPTY_MEMORY } from '../sheet/memory';
-import { connectSheets, resetSheetStore, selectSheetHeld, selectSheetMemory, selectSheetModel, selectSheetSession, updateSheetMemory, useSheets, watchSheet } from './sheet';
+import { connectSheets, resetSheetStore, selectSheetHeld, selectSheetsHeld, selectSheetMemory, selectSheetModel, selectSheetSession, updateSheetMemory, useSheets, watchSheet } from './sheet';
 
 const A = '5eed0000-0000-4000-8000-0000000000a1';
 const B = '5eed0000-0000-4000-8000-0000000000b2';
+const C = '5eed0000-0000-4000-8000-0000000000c3';
 const APP = at('app-a') as AppSessionId;
 const summary = (session: string, extra: Partial<SheetSummary> = {}): SheetSummary => ({
   session, appSessionId: null, title: null, live: null, seq: 1, open: 1, queued: 0, pending: 0, hidden: 0, oldestAskedAt: '2026-11-23T09:59:00.000Z', unreadable: false, ...extra,
@@ -216,6 +217,13 @@ describe('a sheet that holds what the person did', () => {
     expect(held({}, { ...EMPTY_MEMORY, acts: [act('queued', null)] })).toBe(false);
     expect(held({ open: 2 })).toBe(false); // waiting questions are attention's, not this
     expect(selectSheetHeld(useSheets.getState(), at('app-none' as AppSessionId)), 'a session with no record').toBe(false);
+  });
+
+  it('names the same sessions in one pass over the summaries', () => {
+    const other = at('app-other' as AppSessionId);
+    useSheets.setState({ summaries: new Map([[A, summary(A, { appSessionId, open: 0, queued: 1 })], [B, summary(B, { appSessionId: other, open: 1 })], [C, summary(C, { appSessionId: null, open: 0, queued: 1 })]]), memories: new Map() });
+    expect(selectSheetsHeld(useSheets.getState())).toEqual(new Set([appSessionId]));
+    expect(selectSheetsHeld(useSheets.getState(), 'unsettled')).toEqual(new Set());
   });
 
   // The composite's writer (2026-11-27): the channel's "Waiting on you" says what waits on the person, so there only a

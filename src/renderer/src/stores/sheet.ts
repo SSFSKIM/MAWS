@@ -158,11 +158,20 @@ export const selectSheetMemory = (state: Pick<SheetsState, 'memories'>, session:
  */
 export function selectSheetHeld(state: Pick<SheetsState, 'summaries' | 'memories'>, appSessionId: AppSessionId, holds: 'acted' | 'unsettled' = 'acted'): boolean {
   const session = selectSheetSession(state, appSessionId);
-  if (session === null) return false;
-  const summary = state.summaries.get(session)!;
+  return session !== null && summaryHeld(state, state.summaries.get(session)!, holds);
+}
+
+/** The app sessions whose sheet `selectSheetHeld` holds, read in one pass over the summaries (a board of every session's cards). */
+export function selectSheetsHeld(state: Pick<SheetsState, 'summaries' | 'memories'>, holds: 'acted' | 'unsettled' = 'acted'): Set<AppSessionId> {
+  const held = new Set<AppSessionId>();
+  for (const summary of state.summaries.values()) if (summary.appSessionId !== null && summaryHeld(state, summary, holds)) held.add(summary.appSessionId);
+  return held;
+}
+
+function summaryHeld(state: Pick<SheetsState, 'memories'>, summary: SheetSummary, holds: 'acted' | 'unsettled'): boolean {
   const acted = holds === 'acted';
   if (acted && (summary.queued > 0 || summary.hidden > 0)) return true;
-  const memory = state.memories.get(session);
+  const memory = state.memories.get(summary.session);
   return memory !== undefined && (memory.sending !== null || memory.acts.some((act) => act.state === 'sending' || (acted && act.state === 'accepted') || act.note !== null));
 }
 
