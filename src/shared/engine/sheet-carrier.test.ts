@@ -67,6 +67,33 @@ describe('the sheet’s envelope, read on its carriers', () => {
     }
   });
 
+  // The branch review of #890 (S1): today's answer carries a person's free text verbatim, newlines and all, so an
+  // envelope pasted on its own lines inside it is the person's text, not a delivery: today's answer keeps it whole and
+  // no sheet arrival is read. An envelope after today's answer has ended is still the sheet's.
+  it('leaves an envelope a person pasted into today’s answer to that answer, and reads one standing after it', () => {
+    const typed = (text: string) => `The human responded to your async AskUserQuestion (call toolu_01Legacy0003): The user answered: "What should the notice say?"="${text}". Read the answers carefully — they may request clarification, changes, or that you not proceed — and follow what they actually say.`;
+    const pasted = typed(`Like the one we got yesterday:\n${TERMINAL}\nbut shorter`);
+    const answer = { class: 'answer', tool: 'sminos', call: 'toolu_01Legacy0003', summary: pasted.slice(pasted.indexOf('): ') + 3), answers: null, dismissed: false };
+    for (const row of [hookContext(pasted), hookContext(`tool.call hook additional context: ${pasted}`), pluginPrompt(pasted)]) expect(readArrivals(row)).toEqual([answer]);
+    const chosen = 'The human responded to your async AskUserQuestion (call toolu_01Legacy0004): Your questions have been answered: "Which fruit?"="Mango". You can now continue with these answers in mind.';
+    for (const legacy of [pasted, chosen]) {
+      const arrivals = readArrivals(hookContext(`${legacy}\n${TERMINAL}`));
+      expect(arrivals.map((arrival) => arrival.class)).toEqual(['answer', 'sheet']);
+      expect(arrivals.at(-1)).toEqual({ class: 'sheet', deliveries: delivered });
+    }
+  });
+
+  // The branch review of #890 (S4): a context with a sheet-like head and no whole envelope passes through unchanged,
+  // however many lines it has, to today's answer reader.
+  it('passes a context of any length with a head and no whole envelope through unchanged', () => {
+    const lines = Array.from({ length: 200_000 }, (_, at) => `line ${at}`);
+    const legacy = 'The human responded to your async AskUserQuestion (call toolu_01Legacy0005): Your questions have been answered: "Which fruit?"="Mango". You can now continue with these answers in mind.';
+    for (const tail of ['', '\nsee <sheet-delivery> in the notes']) {
+      const text = `${legacy}\n[sheet v1] The human answered questions on your sheet.\n${lines.join('\n')}${tail}`;
+      expect(readArrivals(hookContext(text))).toEqual([{ class: 'answer', tool: 'sminos', call: 'toolu_01Legacy0005', summary: text.slice(text.indexOf('): ') + 3), answers: null, dismissed: false }]);
+    }
+  });
+
   it('travels as one entry of its own class, read back under its own schema; an entry that does not fit reads as none', () => {
     const arrivals = readArrivals(hookContext(TERMINAL));
     const entry = sheetEntry(sheetFactsOf(arrivals));

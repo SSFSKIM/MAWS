@@ -32,6 +32,25 @@ const PLUGIN_PROMPT_END = /\n\nThis is how Claude Code surfaces a prompt a plugi
  */
 export const DISMISSED = 'The human dismissed these questions without answering them; no answer will come. Do not wait for one.';
 
+/**
+ * The sentences that close one answer: the engine's two closings of its summary, the dismissal, and the summary of a
+ * call answered with nothing. A person's free text stands before the closing, verbatim, newlines and all.
+ */
+const ANSWER_ENDS: readonly string[] = ['. You can now continue with these answers in mind.', '. Read the answers carefully', DISMISSED, 'The user did not answer the questions.'];
+
+/**
+ * Whether one of today's answers is still open after `line`, given whether one was open before it: an answer opens at
+ * its head and closes at its closing sentence, so what stands between is the answer's, a person's text among it (the
+ * question sheet's reader leaves an envelope there to the answer, the C3 plan's §I). An answer whose closing this
+ * reader does not know stays open to the end of its text, as `answersIn` reads it.
+ */
+export function answerOpenAfter(line: string, open: boolean): boolean {
+  const heads = [...line.matchAll(DELIVERY)];
+  const last = heads.at(-1);
+  const from = last !== undefined ? last.index + last[0].length : open ? 0 : null;
+  return from !== null && !ANSWER_ENDS.some((end) => line.includes(end, from));
+}
+
 const object = (value: unknown): Json | null => (typeof value === 'object' && value !== null && !Array.isArray(value) ? (value as Json) : null);
 
 /** The answers a delivery's text holds: each call id with the summary after its head, up to the next head. */

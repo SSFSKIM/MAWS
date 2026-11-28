@@ -5,6 +5,7 @@
 // reads the block and nothing above it (C2's I7): the prose is the model's, and its labels can be cut where the
 // block's places never are. Never read from text a person typed: no carrier here is the person's. Pure.
 import { parseSheetDeliveries, type SheetDelivery } from '../sheet/delivery';
+import { answerOpenAfter } from './ask-delivery';
 
 type Json = Record<string, unknown>;
 
@@ -23,25 +24,37 @@ const object = (value: unknown): Json | null => (typeof value === 'object' && va
 /**
  * The blocks of the envelopes a carrier's text holds, in order, each under its head on the line that ends it, and the
  * text outside them: an envelope's lines, its head to its block, are the sheet's, and a block that does not parse
- * claims nothing.
+ * claims nothing. A head inside one of today's answers is that answer's (`answerOpenAfter`): the answer carries a
+ * person's text verbatim, and a person may paste an envelope there. A text with no head and no block is not split.
  */
 function envelopesIn(text: string): { deliveries: SheetDelivery[]; rest: string } {
+  if (!text.includes(HEAD) || !text.includes('<sheet-delivery>')) return { deliveries: [], rest: text };
   const lines = text.replace(CONTEXT, '').split('\n');
   const deliveries: SheetDelivery[] = [];
   const rest: string[] = [];
+  const keep = (from: number, to: number) => {
+    for (let at = from; at < to; at++) rest.push(lines[at]!);
+  };
   let head: number | null = null;
+  let answering = false; // within one of today's answers
   lines.forEach((line, at) => {
-    if (line.startsWith(HEAD)) {
-      if (head !== null) rest.push(...lines.slice(head, at));
+    if (head === null) {
+      if (!answering && line.startsWith(HEAD)) head = at;
+      else {
+        rest.push(line);
+        answering = answerOpenAfter(line, answering);
+      }
+    } else if (line.startsWith(HEAD)) {
+      keep(head, at);
       head = at;
-    } else if (head !== null && BLOCK_LINE.test(line)) {
+    } else if (BLOCK_LINE.test(line)) {
       const read = parseSheetDeliveries(line);
-      if (read.length > 0) deliveries.push(...read);
-      else rest.push(...lines.slice(head, at + 1));
+      if (read.length > 0) for (const delivery of read) deliveries.push(delivery);
+      else keep(head, at + 1);
       head = null;
-    } else if (head === null) rest.push(line);
+    }
   });
-  if (head !== null) rest.push(...lines.slice(head));
+  if (head !== null) keep(head, lines.length);
   return { deliveries, rest: rest.join('\n') };
 }
 
