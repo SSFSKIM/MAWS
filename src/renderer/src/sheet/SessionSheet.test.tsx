@@ -533,8 +533,11 @@ describe('every change through an update', () => {
     sheet(sheetOf([CLASH]), { host });
     typeIn('q4', 'Earlier.');
     fireEvent.click(send());
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Send again' })).toBeTruthy());
-    expect(kept.sending).toMatchObject({ state: 'failed', note: 'no door' });
+    // kept is written by an effect after the render that shows Send again: wait for both
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'Send again' })).toBeTruthy();
+      expect(kept.sending).toMatchObject({ state: 'failed', note: 'no door' });
+    });
   });
 });
 
