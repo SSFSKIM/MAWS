@@ -225,13 +225,15 @@ describe('setup intent hook', () => {
     withMain({ 'engine.models': undefined });
     putIntent(pageIntent());
     const { result } = renderHook(() => useSetupIntent(A), { wrapper });
+    await waitFor(() => expect(fake.pending('engine.models')).toBe(1));
     await act(() => fake.reply('engine.models', CATALOGUE));
-    expect(result.current!.options.models.map((m) => m.value)).toEqual(['default', 'haiku', 'claude/astra']);
+    await waitFor(() => expect(result.current!.options.models.map((m) => m.value)).toEqual(['default', 'haiku', 'claude/astra']));
     act(() => putIntent(pageIntent({ location: { kind: 'existingWorktree', repoRoot: REPO, path: WORKTREE } })));
     await waitFor(() => expect(fake.invoked('engine.models').at(-1)).toEqual({ refresh: false, gateway: 'gateway', cwd: WORKTREE }));
     expect(result.current!.options, 'the repository’s list is not the worktree’s').toMatchObject({ models: [], modelsLoading: true });
+    await waitFor(() => expect(fake.pending('engine.models')).toBe(1));
     await act(() => fake.reply('engine.models', { models: [{ value: 'opus', displayName: 'Opus 5.5' }], source: 'cached', at: null } satisfies ModelCatalogue));
-    expect(result.current!.options.models.map((m) => m.value)).toEqual(['opus']);
+    await waitFor(() => expect(result.current!.options.models.map((m) => m.value)).toEqual(['opus']));
   });
 
   // The composer's chips and the model menu each call the hook: one catalogue per launch, so a refresh as the menu opens
