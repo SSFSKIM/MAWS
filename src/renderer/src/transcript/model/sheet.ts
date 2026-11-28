@@ -20,15 +20,26 @@ type SheetRowData = Extract<Row, { kind: 'sheet' }>;
 /** A question's outcome as the transcript holds it: a delivery's answer, with the revision it answered; a dismissal; a withdrawal. */
 type HeldOutcome = { how: 'answered'; revision: number; picks: number[]; text: string } | { how: 'dismissed' } | { how: 'withdrawn' };
 
+/**
+ * One question as the transcript holds it, from the call that added it: the call whose row holds its line now (the
+ * last that added or revised it), each revision's option labels as the entry that set it gave them, and its outcome,
+ * the latest standing. An add that names an id the transcript already holds is a new question (a fork whose id floor
+ * could not be read starts again at q1, the C3 plan's §I), so an id names the latest of its occurrences.
+ */
+interface Occurrence {
+  owner: ToolUseId;
+  labels: Map<number, string[]>;
+  outcome: HeldOutcome | undefined;
+}
+
 /** What one transcript knows of its sheet calls' questions, append-only along the lineage, as the reducer's `index` is. */
 export interface SheetIndex {
   calls: Map<ToolUseId, unknown>; // a sheet call's input, by its tool use
-  owners: Map<string, ToolUseId>; // a question's id: the last call that added or revised it
-  labels: Map<string, Map<number, string[]>>; // a question's id: each revision's option labels, as the entry that set it gave them
-  outcomes: Map<string, HeldOutcome>; // a question's id: its outcome, the latest standing
+  current: Map<string, Occurrence>; // a question's id: its latest occurrence, which a revise, a withdrawal or a delivery reaches
+  lines: Map<ToolUseId, Map<string, Occurrence>>; // a call's lines: the occurrence each of its ids is
 }
 
-export const emptySheetIndex = (): SheetIndex => ({ calls: new Map(), owners: new Map(), labels: new Map(), outcomes: new Map() });
+export const emptySheetIndex = (): SheetIndex => ({ calls: new Map(), current: new Map(), lines: new Map() });
 
 /** Whether a tool use is a call in the sheet's form: the question presentation's tool, its input the sheet's (§2.1). */
 export const isSheetUse = (use: Event<'tool.use'>): boolean => presentationOf(use.toolName) === 'question' && isSheetCall(use.input);
@@ -39,26 +50,32 @@ export function noteSheetCall(index: SheetIndex, use: Event<'tool.use'>): void {
 }
 
 /**
- * A sheet call's result: each question it added or revised has its line in this call now, and each it withdrew is
- * withdrawn. Answers the calls whose rows changed, the earlier owner of a moved line among them.
+ * A sheet call's result: each question it revised has its line in this call now, each it added is a new question
+ * whose line is here, and each it withdrew is withdrawn. Answers the calls whose rows changed, the earlier owner of a
+ * moved line among them.
  */
 export function noteSheetResult(index: SheetIndex, result: Event<'tool.result'>): ToolUseId[] {
   const input = index.calls.get(result.toolUseId);
   if (input === undefined || result.isError) return [];
   const { entries, withdrew } = callEntries(input, resultText(result.content));
   const touched = new Set<ToolUseId>();
+  const own = index.lines.get(result.toolUseId) ?? new Map<string, Occurrence>();
   for (const entry of entries) {
     if (entry.id === null) continue;
-    const earlier = index.owners.get(entry.id);
-    if (earlier !== undefined && earlier !== result.toolUseId) touched.add(earlier);
-    index.owners.set(entry.id, result.toolUseId);
-    const revisions = index.labels.get(entry.id) ?? new Map<number, string[]>();
-    index.labels.set(entry.id, revisions.set(entry.outcome === 'revised' ? entry.revision! : 1, entry.options));
+    // a result read again is the same call's: its lines stay the occurrences they were
+    const occurrence = own.get(entry.id) ?? (entry.outcome === 'revised' ? index.current.get(entry.id) : undefined) ?? { owner: result.toolUseId, labels: new Map<number, string[]>(), outcome: undefined };
+    if (occurrence.owner !== result.toolUseId) touched.add(occurrence.owner);
+    occurrence.owner = result.toolUseId;
+    occurrence.labels.set(entry.outcome === 'revised' ? entry.revision! : 1, entry.options);
+    own.set(entry.id, occurrence);
+    index.current.set(entry.id, occurrence);
   }
+  if (own.size > 0) index.lines.set(result.toolUseId, own);
   for (const id of withdrew) {
-    index.outcomes.set(id, { how: 'withdrawn' });
-    const owner = index.owners.get(id);
-    if (owner !== undefined) touched.add(owner);
+    const occurrence = index.current.get(id);
+    if (occurrence === undefined) continue;
+    occurrence.outcome = { how: 'withdrawn' };
+    touched.add(occurrence.owner);
   }
   return [...touched];
 }
@@ -66,19 +83,15 @@ export function noteSheetResult(index: SheetIndex, result: Event<'tool.result'>)
 /** A delivery's blocks: each answered or dismissed question's outcome. Answers the calls that hold their lines. */
 export function noteSheetDeliveries(index: SheetIndex, deliveries: readonly SheetDelivery[]): ToolUseId[] {
   const touched = new Set<ToolUseId>();
-  const owned = (id: string) => {
-    const owner = index.owners.get(id);
-    if (owner !== undefined) touched.add(owner);
+  const held = (id: string, outcome: HeldOutcome) => {
+    const occurrence = index.current.get(id);
+    if (occurrence === undefined) return;
+    occurrence.outcome = outcome;
+    touched.add(occurrence.owner);
   };
   for (const delivery of deliveries) {
-    for (const answered of delivery.answered) {
-      index.outcomes.set(answered.id, { how: 'answered', revision: answered.revision, picks: answered.picks, text: answered.text });
-      owned(answered.id);
-    }
-    for (const id of delivery.dismissed) {
-      index.outcomes.set(id, { how: 'dismissed' });
-      owned(id);
-    }
+    for (const answered of delivery.answered) held(answered.id, { how: 'answered', revision: answered.revision, picks: answered.picks, text: answered.text });
+    for (const id of delivery.dismissed) held(id, { how: 'dismissed' });
   }
   return [...touched];
 }
@@ -88,11 +101,11 @@ export function noteSheetDeliveries(index: SheetIndex, deliveries: readonly Shee
  * of the entry that set the answered revision in this transcript, and of its text. The answer stands whatever its
  * preview reads: a text that opens with spaces keeps them, as the record's receipt does.
  */
-function outcomeOf(index: SheetIndex, id: string): SheetRowLine['outcome'] {
-  const held = index.outcomes.get(id);
+function outcomeOf(occurrence: Occurrence): SheetRowLine['outcome'] {
+  const held = occurrence.outcome;
   if (held === undefined) return null;
   if (held.how !== 'answered') return { how: held.how };
-  const labels = index.labels.get(id)?.get(held.revision) ?? [];
+  const labels = occurrence.labels.get(held.revision) ?? [];
   const picked = held.picks.flatMap((place) => (labels[place - 1] === undefined ? [] : [labels[place - 1]!]));
   return { how: 'answered', receipt: receiptOf(picked, held.text) };
 }
@@ -115,9 +128,9 @@ export function sheetRowOf(use: Event<'tool.use'>, result: Event<'tool.result'> 
   const { result: read, entries, withdrew, notDone } = callEntries(use.input, result === null ? null : resultText(result.content));
   const state: SheetRowData['state'] = result === null ? 'running' : read === null || read.form === 'unknown' ? 'unknown' : read.form === 'nothing' ? 'nothing' : 'done';
   const lines = entries.map((entry, at): SheetRowLine => {
-    const owner = entry.id === null ? undefined : index?.owners.get(entry.id);
-    const place = entry.outcome === 'refused' ? 'refused' : owner !== undefined && owner !== use.toolUseId ? 'revised_below' : 'here';
-    const outcome = place === 'here' && entry.id !== null && index !== null ? outcomeOf(index, entry.id) : null;
+    const occurrence = entry.id === null ? undefined : index?.lines.get(use.toolUseId)?.get(entry.id);
+    const place = entry.outcome === 'refused' ? 'refused' : occurrence !== undefined && occurrence.owner !== use.toolUseId ? 'revised_below' : 'here';
+    const outcome = place === 'here' && occurrence !== undefined ? outcomeOf(occurrence) : null;
     return { id: entry.id, entry: entry.entry, header: entry.header, sentence: questionSentence(entry.question), revises: named(use.input, at), place, outcome };
   });
   return { ...base, state, lines, withdrew, notDone, error: null };

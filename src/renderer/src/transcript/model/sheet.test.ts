@@ -171,6 +171,23 @@ describe('a sheet call’s row, from the transcript alone', () => {
     expect(sheetOf(b, 'toolu_three').lines[2]!.outcome).toEqual({ how: 'answered', receipt: ' '.repeat(80) });
   });
 
+  // The branch review of #890 (R2): a fork whose id floor could not be read starts again at q1 (§I, the writer's fork
+  // ruling), so a fresh add can name an id the copied history already holds. It is a new question: the copied row keeps
+  // its own line and outcome, and what comes after (a revise, a delivery) is the new one's.
+  it('takes a repeated id in an add for a new question: the earlier row keeps its outcome, later revises and deliveries are the new one’s', () => {
+    const b = builder();
+    call(b, 'toolu_parent', { ask: [entry('Which berth should the import keep?', { header: 'Clash rule', options: options('Keep the earlier sailing', 'Keep the longer route') })] }, 'Added q1.');
+    delivered(b, 'u-parent-answer', [block({ answered: [answer('q1', 1, [1])] })]);
+    call(b, 'toolu_fork', { ask: [entry('Which paper size?', { header: 'Paper', options: options('A4', 'A5') })] }, 'Added q1.');
+    expect(lines(sheetOf(b, 'toolu_parent'))).toEqual([['q1', 'here', 'Keep the earlier sailing']]);
+    expect(lines(sheetOf(b, 'toolu_fork'))).toEqual([['q1', 'here', null]]);
+    call(b, 'toolu_revise', { ask: [entry('Which paper size, for the winter sheet?', { id: 'q1', header: 'Paper', options: options('A5', 'A4') })] }, 'Revised q1 (revision 2).');
+    delivered(b, 'u-fork-answer', [block({ keys: ['page-00000002'], answered: [answer('q1', 2, [1])] })]);
+    expect(lines(sheetOf(b, 'toolu_parent'))).toEqual([['q1', 'here', 'Keep the earlier sailing']]);
+    expect(lines(sheetOf(b, 'toolu_fork'))).toEqual([['q1', 'revised_below', null]]);
+    expect(lines(sheetOf(b, 'toolu_revise'))).toEqual([['q1', 'here', 'A5']]);
+  });
+
   it('stays in view when its turn folds, and copies as its lines', () => {
     const b = builder();
     call(b, 'toolu_three', THREE, 'Added q4, q5, q6.');
