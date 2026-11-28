@@ -479,15 +479,24 @@ async function focusTip(page: Page, owner: Locator, rest: Locator, cutOf: () => 
   if (!cutOf()) return rest.first().scrollIntoViewIfNeeded({ timeout: 10_000 });
   await owner.first().scrollIntoViewIfNeeded({ timeout: 10_000 });
   await page.waitForTimeout(400);
-  await page.keyboard.press('Shift'); // board ticket 815: a tip opens on keyboard focus, so the keyboard is the last input
-  await owner.first().focus();
+  await keyFocus(owner.first());
 }
-// The check that `trigger`'s own tooltip is open: the element the tip wraps (the focused word or control, or the label
-// around a box) reads open to Radix, and a tooltip is drawn (one shows at a time). On master's, `rest` in view.
+// Focus as the keyboard gives it: a tip opens on keyboard focus alone (ui/tip.tsx, board ticket 815: the focused element
+// matches :focus-visible and the last input was no pointer's press), so a scene that focuses an owner in code says the
+// keyboard was the last input first. Shift binds nothing, and Chromium counts its press as keyboard input for
+// :focus-visible (Control, Alt and Meta it does not).
+async function keyFocus(owner: Locator): Promise<void> {
+  await owner.page().keyboard.press('Shift');
+  await owner.focus();
+}
+// The check that `trigger`'s own tooltip is open: a tooltip is drawn, one alone (one shows at a time), the scene having
+// pointed at or focused `trigger`. The tooltip itself is read, not the owner's `data-state`, which a component owner
+// (a Radix radio item or trigger) keeps as its own (board ticket 815). On master's, `rest` in view.
 const tipShown = (page: Page, trigger: Locator, what: string, rest: Locator, cutOf: () => boolean = cutBuild) => async () => {
   if (!cutOf()) return inView(rest, `master’s words for the tooltip of ${what}`);
-  await expect(trigger.first(), `the tooltip of ${what}`).toHaveAttribute('data-state', /^(delayed|instant)-open$/, { timeout: 3_000 });
-  await expect(page.getByRole('tooltip').first(), `the tooltip of ${what}`).toBeVisible({ timeout: 3_000 });
+  await expect(trigger.first(), `the owner of the tooltip of ${what}`).toBeVisible({ timeout: 3_000 });
+  await expect(page.getByRole('tooltip'), `one tooltip drawn, ${what}’s`).toHaveCount(1, { timeout: 3_000 });
+  await expect(page.getByRole('tooltip'), `the tooltip of ${what}`).toBeVisible({ timeout: 3_000 });
 };
 // The check that the row `scope` names has its own note open; on master's, the row's line at rest (a declared row's
 // `data-settings-note`, else the row, whose plain note master draws in it) in view.
@@ -1848,7 +1857,7 @@ async function m4Scenario(app: ElectronApplication, page: Page, SID: Record<'run
   });
   await shot(page, meta('m4-customize-plugin-row-focus', 'G216, G218', 'Customize, a plugin row holding the keyboard (Acceptance 1)', 'Customize, Show: Plugins (user configuration); keyboard focus on Designer’s row', 'Designer’s row with the keyboard inside it: on M4 its note open in the row, “Design work · updated …”; master: its description and date at rest', ['customize', 'widgets/plugins', 'ui']), async () => {
     await toDesigner();
-    await designer().locator('[data-row-open]').first().focus();
+    await keyFocus(designer().locator('[data-row-open]').first());
     await page.waitForTimeout(400);
   }, {
     check: async () => {
@@ -1891,7 +1900,7 @@ async function m4Scenario(app: ElectronApplication, page: Page, SID: Record<'run
     await letGo(page);
     await installed().scrollIntoViewIfNeeded({ timeout: 20_000 });
     await page.waitForTimeout(400);
-    if (m4Cut()) await installed().focus();
+    if (m4Cut()) await keyFocus(installed());
   }, {
     check: async () => {
       await inView(installed(), 'the installed card’s mark');
@@ -1989,7 +1998,7 @@ async function m4Scenario(app: ElectronApplication, page: Page, SID: Record<'run
     await page.mouse.move(W - 2, H - 2);
     running = await sidebarRow(page, { appSessionId: SID.running });
     await running.scrollIntoViewIfNeeded({ timeout: 10_000 });
-    await running.focus();
+    await keyFocus(running);
     await page.keyboard.press('ArrowUp');
     await page.keyboard.press('ArrowDown');
     await expect(card(), 'the row’s hover card').toBeVisible({ timeout: 5_000 });
@@ -2062,7 +2071,7 @@ async function settingsM1(app: ElectronApplication, page: Page) {
   await shot(page, m1({ id: 'm1-settings-sessions-focus', title: 'Settings, Sessions, keyboard focus in its first row', how: 'Settings, Sessions; Tab from the section’s heading', state: 'The first row of the section holding the keyboard, its note open at once', folders: ['settings-tab', 'ui'] }), async () => {
     await settingsAt(app, page, 'sessions');
     await letGo(page);
-    await page.locator('#settings-sessions').focus();
+    await keyFocus(page.locator('#settings-sessions'));
     await page.keyboard.press('Tab');
   }, { check: checks(focusIn(firstSessions, 'the first Sessions row'), noteShown(firstSessions, 'the first Sessions row')) });
   // the longest note, the Binary row’s, opened by pointing: it floats over the rows that follow (G125, G127, G128)
@@ -2206,7 +2215,7 @@ async function settingsM1(app: ElectronApplication, page: Page) {
     const signIn = CUT_ORG.signInOpen === undefined ? null : section('org').getByRole('button', { name: CUT_ORG.signInOpen, exact: true });
     await expect(signIn === null ? code : signIn.or(code).first()).toBeVisible({ timeout: 10_000 });
     if (signIn !== null && (await signIn.count())) await signIn.click();
-    else await code.focus();
+    else await keyFocus(code);
   }, { check: checks(() => expect(code, 'the pairing-code field').toBeFocused({ timeout: 3_000 }), noteShown(section('org').getByRole('group', { name: ORG.code, exact: true }), 'the pairing-code row')) });
 }
 
@@ -2247,7 +2256,7 @@ async function m2Scenario(app: ElectronApplication, page: Page, SID: Record<'run
     await letGo(page);
     await mic().scrollIntoViewIfNeeded();
     await page.waitForTimeout(400);
-    await mic().focus();
+    await keyFocus(mic());
   }, { check: checks(focusIn(mic(), 'the microphone'), tipShown(page, mic(), 'the microphone', mic(), m2Cut)) });
   await letGo(page);
 
@@ -2601,7 +2610,7 @@ test('replay: transcripts, the right column, the Artifacts library and an editor
       await callOpen();
       await copyCommand().scrollIntoViewIfNeeded();
       await page.waitForTimeout(400);
-      await copyCommand().focus();
+      await keyFocus(copyCommand());
     }, { check: checks(focusIn(copyCommand(), 'Copy command'), drawn(copyCommand(), 'Copy command drawn'), tipShown(page, copyCommand(), 'Copy command', copyCommand(), m2Cut)) });
     await letGo(page);
     // its name on both builds (transcript/model/copy.ts DETAIL.copyOutput): M2's glyph over the output, master's worded footer button
@@ -2611,7 +2620,7 @@ test('replay: transcripts, the right column, the Artifacts library and an editor
       if (!m2Cut()) return void (await call().locator('.transcript-shell-footer').scrollIntoViewIfNeeded());
       await copyOutput().scrollIntoViewIfNeeded();
       await page.waitForTimeout(400);
-      await copyOutput().focus();
+      await keyFocus(copyOutput());
     }, {
       check: async () => {
         if (!m2Cut()) return inView(call().locator('.transcript-shell-footer').getByRole('button', { name: 'Copy output', exact: true }), 'master’s worded Copy output in the footer');
@@ -2651,7 +2660,7 @@ test('replay: transcripts, the right column, the Artifacts library and an editor
     await shot(page, m0({ id: 'm0-scm-commit-review', title: 'A commit opened from Source control', how: 'Source control, focus a commit and press Enter', state: 'Review on the Commit scope: the scratch repository’s unpushed commit', folders: ['tools/scm', 'tools/code/review', 'panel'] }), async () => {
       await openSession(page, ids.agents!);
       await sideSurface(app, page, 'source-control');
-      await surface(page, 'source-control').locator('button[data-scm-commit]').first().focus();
+      await keyFocus(surface(page, 'source-control').locator('button[data-scm-commit]').first());
       await page.keyboard.press('Enter');
       await expect(page.locator('[data-surface="review"] [data-chip="commit"][aria-pressed="true"]').first()).toBeVisible({ timeout: 10_000 });
     });
@@ -3475,7 +3484,7 @@ test('round 2: running agents and shells, the queue, a blocked command, Source c
       await unfoldSections(page, 'subagents');
       await expect(waitingRow(), 'the waiting agent’s row').toBeAttached({ timeout: 10_000 });
       await letGo(page);
-      if (m3Cut()) await waitingOpen().focus();
+      if (m3Cut()) await keyFocus(waitingOpen());
       else await waitingRow().scrollIntoViewIfNeeded();
     }, { check: tip3(page, waitingOpen(), 'the waiting agent’s row', waitingRow().locator('[data-part="state"]')) });
     await letGo(page);
@@ -4176,12 +4185,12 @@ test('states: Settings › Org with no delegation, the code destination set', as
       // cut's, the chevron is pressed by the keyboard from folded, and opening it hands the keyboard to the first field
       if (!cutBuild()) {
         await project().scrollIntoViewIfNeeded();
-        return project().focus();
+        return keyFocus(project());
       }
       const open = delegations().getByRole('button', { name: ORG.destination, exact: true });
       if ((await open.getAttribute('aria-expanded')) === 'true') await open.click(); // a retry finds it open
       await expect(open).toHaveAttribute('aria-expanded', 'false');
-      await open.focus();
+      await keyFocus(open);
       await page.keyboard.press('Enter');
       await expect(open).toHaveAttribute('aria-expanded', 'true');
     }, { check: checks(() => expect(project(), 'the project field').toBeFocused({ timeout: 3_000 }), saved, noteShown(destinationRow(), 'the Code destination row')) });
@@ -4662,7 +4671,7 @@ test('the word cut’s M3: Review, Source control, Files, the browser and its im
       await sideSurface(app, page, 'source-control');
       const commit = scm().locator('button[data-scm-commit]').filter({ hasText: subject }).first();
       await commit.scrollIntoViewIfNeeded({ timeout: 10_000 });
-      await commit.focus();
+      await keyFocus(commit);
       await page.keyboard.press('Enter');
       await expect(review().locator('[data-chip="commit"][aria-pressed="true"]').first(), 'the Commit scope').toBeVisible({ timeout: 10_000 });
       await page.waitForTimeout(800);
@@ -4671,7 +4680,7 @@ test('the word cut’s M3: Review, Source control, Files, the browser and its im
       await openCommit('Merge the side note');
       if (m3Cut()) {
         await letGo(page);
-        await commitChip().focus();
+        await keyFocus(commitChip());
       }
     }, { check: tip3(page, commitChip(), 'the commit’s chip', review().locator('[data-review-footer]')) });
     await letGo(page);
@@ -4747,7 +4756,7 @@ test('the word cut’s M3: Review, Source control, Files, the browser and its im
     await shot(page, meta('m3-file-unsaved', 'T338', 'A file with unsaved edits, Save holding the keyboard', 'The panels session, Files, src/notes.md in its Source view; type at its end, then Tab to Save', 'Save focused; on M3 its chord the tooltip (master: a system title, not drawn)'), async () => {
       await editedNotes();
       await letGo(page);
-      await save().focus();
+      await keyFocus(save());
     }, { check: tip3(page, save(), 'Save', save()) });
     await letGo(page);
     await shot(page, meta('m3-file-disk-changed', 'T341', 'Unsaved edits whose file changed on disk', 'The same file, its copy on disk rewritten', 'The bar’s notice that the disk changed, with Reload, Keep mine and Compare'), diskChanged, {
@@ -4815,7 +4824,7 @@ test('the word cut’s M3: Review, Source control, Files, the browser and its im
       await opened('quiet');
       await sideSurface(app, page, 'files');
       await letGo(page);
-      await pinGlyph().focus();
+      await keyFocus(pinGlyph());
     }, { check: tip3(page, pinGlyph(), 'the pin glyph', pinGlyph()) });
     await letGo(page);
 
@@ -4856,7 +4865,7 @@ test('the word cut’s M3: Review, Source control, Files, the browser and its im
       }
       await expect(back(), 'Back').toBeVisible({ timeout: 15_000 });
       await letGo(page);
-      if (m3Cut()) await back().focus();
+      if (m3Cut()) await keyFocus(back());
     }, { check: tip3(page, back(), 'Back', back()) });
     await letGo(page);
     await shot(page, meta('m3-questions-empty', 'T292', 'Questions with no open ask', 'The panels session, View › More surfaces › Questions', 'The panel’s empty state'), async () => {
@@ -4997,7 +5006,7 @@ test('the word cut’s M3: Review, Source control, Files, the browser and its im
       }
       await expect(zoomed(), 'the zoom’s place').toBeVisible({ timeout: 5_000 });
       await letGo(page);
-      if (m3Cut()) await zoomChip().focus();
+      if (m3Cut()) await keyFocus(zoomChip());
     }, { check: checks(tip3(page, zoomChip(), 'the zoom chip', zoomed()), () => expect(zoomed(), 'the level').toContainText('125%', { timeout: 3_000 })), after: async () => void (tabId && (await invoke(page, 'browser.tabs.zoom', { tabId: tabId as never, action: 'reset' }))) });
     await letGo(page);
     const viewportChip = () => browser().locator('[data-browser-viewport-chip]').first();
@@ -5006,7 +5015,7 @@ test('the word cut’s M3: Review, Source control, Files, the browser and its im
       value(await invoke(page, 'browser.tabs.setViewport', { tabId: tabId as never, viewport: { width: 390, height: 844 } }));
       await expect(viewportChip(), 'the viewport chip').toBeVisible({ timeout: 5_000 });
       await letGo(page);
-      await viewportChip().focus();
+      await keyFocus(viewportChip());
     }, { check: tip3(page, viewportChip(), 'the viewport chip', viewportChip()), after: async () => void (tabId && (await invoke(page, 'browser.tabs.setViewport', { tabId: tabId as never, viewport: null }))) });
     await letGo(page);
     const notice = (kind: string) => browser().locator(`[data-browser-notice="${kind}"]`).first();
@@ -5039,7 +5048,7 @@ test('the word cut’s M3: Review, Source control, Files, the browser and its im
       await expect(loadedValue().first(), 'a loaded page’s value').toBeVisible({ timeout: 15_000 });
       await loadedValue().first().scrollIntoViewIfNeeded();
       await letGo(page);
-      if (m3Cut()) await loadedValue().first().focus();
+      if (m3Cut()) await keyFocus(loadedValue().first());
     }, {
       check: async () => {
         await inView(browserRow(), 'the Browser tabs row');
@@ -5621,7 +5630,7 @@ test('the word cut’s M4: the mods’ rows, Customize’s plugin and skill rows
     });
     await shot(page, m4Meta('m4-customize-plugin-no-description', 'P683, G216, G218', 'Customize, a plugin with no description, holding the keyboard', 'Customize, Show: Plugins (user configuration); keyboard focus on Bare’s row', 'Bare’s row (its manifest has no description) with the keyboard inside it: on M4 its note open, its skills counted, “1 skill · updated …”; master: “by Words Rig · 1 skill” at rest', ['customize', 'widgets/plugins', 'ui']), async () => {
       await toPlugin('bare');
-      await plugin('bare').locator('[data-row-open]').first().focus();
+      await keyFocus(plugin('bare').locator('[data-row-open]').first());
       await page.waitForTimeout(400);
     }, {
       check: async () => {
@@ -7204,7 +7213,6 @@ test('the word cut’s M5: the library’s Spaces, opened artifacts, the documen
       }
       const held = owner().first();
       await expect(held, `${what} holds the keyboard`).toBeFocused({ timeout: 3_000 });
-      await expect(held, `${what}’s own tooltip open`).toHaveAttribute('data-state', /^(delayed|instant)-open$/, { timeout: 3_000 });
       const tip = page.getByRole('tooltip');
       await expect(tip, 'one tooltip drawn').toHaveCount(1, { timeout: 3_000 });
       await expect(tip, `${what}’s tooltip`).toBeVisible();
@@ -7239,7 +7247,7 @@ test('the word cut’s M5: the library’s Spaces, opened artifacts, the documen
       await tab(key).locator('[data-slide-thumb] .deck-thumb-button').first().click();
       const selected = tab(key).locator('[data-overlay] [data-selected]');
       for (let level = 0; level < 4 && (await selected.count()) > 0; level++) {
-        await tab(key).locator('[data-stage-surface]').first().focus();
+        await keyFocus(tab(key).locator('[data-stage-surface]').first());
         await page.keyboard.press('Escape');
         await page.waitForTimeout(150);
       }
@@ -7640,12 +7648,12 @@ test('the word cut’s M5: the library’s Spaces, opened artifacts, the documen
       await expect(designRail(key).or(tab(key).locator('aside.doc-rail')), 'no rail').toHaveCount(0, { timeout: 5_000 });
       // no board framed: the world's Escape lets a framed board go (World.tsx)
       if ((await designOf(key).locator('[data-board-title][aria-pressed="true"]').count()) > 0) {
-        await designOf(key).locator('[data-design-world]').first().focus();
+        await keyFocus(designOf(key).locator('[data-design-world]').first());
         await page.keyboard.press('Escape');
       }
       await expect(designOf(key).locator('[data-board-title][aria-pressed="true"]'), 'no board framed').toHaveCount(0, { timeout: 5_000 });
       // every board in view again, whatever a scene zoomed to: the world's Fit all (⇧1, World.tsx)
-      await designOf(key).locator('[data-design-world]').first().focus();
+      await keyFocus(designOf(key).locator('[data-design-world]').first());
       await page.keyboard.press('Shift+Digit1');
       await letGo(page);
     };
@@ -7741,7 +7749,7 @@ test('the word cut’s M5: the library’s Spaces, opened artifacts, the documen
     const tabletRow = () => designOf('screens').locator('[data-board-row="tablet"] .design-board-row').first();
     await shot(page, m5Meta('m5-design-row-size', 'G522', 'A design, a board’s row holding the keyboard', 'Site screens, the keyboard on the Tablet row', 'The row’s size drawn while it holds the keyboard (master: every row’s size at rest)', ['tools/design', 'src/artifacts/design/editor']), async () => {
       await designAtRest('screens');
-      await tabletRow().focus();
+      await keyFocus(tabletRow());
     }, {
       check: async () => {
         const size = designOf('screens').locator('[data-board-row="tablet"] .design-board-size');
