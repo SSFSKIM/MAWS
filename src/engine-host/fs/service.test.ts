@@ -650,6 +650,21 @@ describe('filesystem state service: discovery, sidecars and holders', () => {
     expect(events('fs.holderChanged').some((e) => e.sessionId === S2)).toBe(false);
   });
 
+  it('a terminal\'s record whose sessions/ event never comes is still found, by the idle poll, within its period', async () => {
+    await fixture.addTranscript('/work/a', S1, [user('u1', null, '/work/a', 'first')]);
+    service = new FsService({ paths: fixture.paths, emit: (name, payload) => {
+      emitted.push({ name, payload } as Emitted);
+      return true;
+    }, watch: deafWatch, holders: { pollMs: 100 } });
+    await service.start();
+    service.bind([{ sessionId: S1, appSessionId: A1 }]);
+    await settled(); // the settle rescan, which is not the watch, has run and found nothing
+    expect(events('fs.holderChanged')).toEqual([]);
+    await fixture.addRegistryRecord(process.pid, { sessionId: S1, kind: 'interactive', cwd: '/work/a' });
+    await expect.poll(() => events('fs.holderChanged').length, { timeout: 1_000, interval: 10 }).toBe(1);
+    expect(events('fs.holderChanged')[0]).toMatchObject({ sessionId: S1, appSessionId: A1, holder: { kind: 'terminal', pid: process.pid } });
+  });
+
   it('a registry record written in two steps (sessionId arriving 60 ms later) emits exactly one fs.holderChanged', async () => {
     const fs = await start();
     await fixture.addRegistryRecord(process.pid, { kind: 'interactive', cwd: '/work/a' });
