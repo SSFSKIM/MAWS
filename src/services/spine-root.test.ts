@@ -320,6 +320,27 @@ describe('the spine and the checkouts composed under plain Node', () => {
     expect(await digestOf()).toMatchObject({ phase: 'working', pendingRequests: 0 });
   });
 
+  // The branch review of #890 (S2): an archive moves only the index's flag; the archived session's questions leave the
+  // attention list, which a remote window's badge counts, and come back when it is unarchived
+  it('takes a stopped session’s sheet questions from attention while it is archived, and gives them back unarchived', async () => {
+    const session = seedRecord(sminos, 'two-surfaces');
+    const seeded = new Index(join(profile, 'index.sqlite'));
+    const appSessionId = seeded.sessions.upsertFromSummary(summary({ sessionId: session as SessionId })).record.appId;
+    seeded.close();
+    const bus = fakeBus();
+    compose(await openSpineData(profile, { build: BUILD }), new FakeSpineHost(), bus);
+    const listed = async () => {
+      const items = await bus.invoke('attention.list', undefined);
+      if (!items.ok) throw new Error(items.error.message);
+      return items.value.map((item) => item.id);
+    };
+    await expect.poll(listed, { timeout: 5000 }).toEqual([`sheet:${session}:q1`]);
+    expect(await bus.invoke('session.update', { appSessionId, patch: { archived: true } })).toMatchObject({ ok: true });
+    await expect.poll(listed, { timeout: 5000 }).toEqual([]);
+    expect(await bus.invoke('session.update', { appSessionId, patch: { archived: false } })).toMatchObject({ ok: true });
+    await expect.poll(listed, { timeout: 5000 }).toEqual([`sheet:${session}:q1`]);
+  });
+
   it('drives a terminal session the index holds through its bridge: laneA.state, its request in attention, its digest', async () => {
     const engineSessionId = '0e5b1c0d-0000-4000-8000-0000000000a1';
     const seeded = new Index(join(profile, 'index.sqlite'));

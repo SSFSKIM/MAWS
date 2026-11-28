@@ -564,6 +564,17 @@ describe('a session’s sheet questions', () => {
     h.set(TERMINAL, [asked('q1', 'toolu_call_1'), asked('q2', 'toolu_call_1')]);
     expect(emitted(h.emit, 'attention.notified')).toHaveLength(0);
   });
+
+  // The branch review of #890 (S3): on a cold start the sheet's first scan can finish after the notifier started; the
+  // questions it found arrive silent, and their calls count as told, so another question of such a call is not told
+  it('a question that arrives silent is not told, and its call counts as told', () => {
+    const h = harness({ focused: true, before: held });
+    h.set(TERMINAL, [asked('q1', 'toolu_call_1')], [`sheet:${SESSION}:q1` as AttentionItem['id']]);
+    h.set(TERMINAL, [asked('q1', 'toolu_call_1'), asked('q2', 'toolu_call_1')]);
+    expect(emitted(h.emit, 'attention.notified')).toHaveLength(0);
+    h.set(TERMINAL, [asked('q1', 'toolu_call_1'), asked('q2', 'toolu_call_1'), asked('q3', 'toolu_call_2')]);
+    expect(emitted(h.emit, 'attention.notified')).toHaveLength(1);
+  });
 });
 
 // P5 O7 M6 ("Counting without a record"): an item of a session on another machine is raised as a local one is, once per

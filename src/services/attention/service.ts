@@ -123,8 +123,9 @@ export interface AttentionService {
   setOwnerItems(appSessionId: AppSessionId, items: AttentionItem[], silent: readonly AttentionId[]): void;
   // P5 O9 M6: the session's lane A items whole (replacing the last), each with its request view.
   setLaneAItems(appSessionId: AppSessionId, entries: readonly { item: AttentionItem; request: SessionEvent }[]): void;
-  // The question sheet's C3 M4: the session's sheet items whole (replacing the last).
-  setSheetItems(appSessionId: AppSessionId, items: AttentionItem[]): void;
+  // The question sheet's C3 M4: the session's sheet items whole (replacing the last); `silent` ids join `restoredIds`
+  // before the change is emitted, as the owner channel's do (questions that waited before the launch, an unarchive).
+  setSheetItems(appSessionId: AppSessionId, items: AttentionItem[], silent: readonly AttentionId[]): void;
   // The session was seen up to `at` (ms; its last-seen mark moved): its errors raised at or before then retire for good.
   seen(appSessionId: AppSessionId, at: number): void;
   settled(): Promise<void>; // every change so far has reached the store
@@ -455,7 +456,8 @@ export function startAttentionService(deps: AttentionServiceDeps): AttentionServ
   };
 
   // The question sheet's C3 M4: a live projection, as lane A's
-  const setSheetItems = (id: AppSessionId, items: AttentionItem[]) => {
+  const setSheetItems = (id: AppSessionId, items: AttentionItem[], silent: readonly AttentionId[]) => {
+    for (const itemId of silent) restoredIds.add(itemId);
     const state = stateOf(id);
     state.sheet = [...items];
     changed(id, state);

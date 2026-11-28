@@ -53,6 +53,7 @@ export interface SheetService {
   onChange(listener: SheetListener): () => void; // what §H's items are made from
   verified(session: string): SheetModel | null; // the model last verified, as the last announcement stood: no read, nothing located (§H's items)
   door(): DoorState; // what is known now; it starts nothing
+  readonly ready: Promise<void>; // the first scan of the home has announced every record it found (at once with no home)
   stop(): void;
 }
 
@@ -394,6 +395,8 @@ export function createSheetService(deps: SheetServiceDeps): SheetService {
     },
 
     verified: (session) => entries.get(session)?.model ?? null,
+
+    ready,
 
     door: () => doorState,
 

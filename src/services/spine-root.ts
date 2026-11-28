@@ -333,9 +333,13 @@ export function startSpine(deps: SpineDeps): SpineRoot {
       emit: (name, payload) => void bus.emit(name, payload),
     });
     registerSheet(service, bus.register);
-    // M4 (§H): each open question of a record the index's session holds is an item of that session's list; nothing else
-    // of the session moves (its digest counts the lane A list's stopping requests alone)
-    const offSheetItems = feedSheetItems(service, (appSessionId, items) => attention.setSheetItems(appSessionId, items));
+    // M4 (§H): each open question of a record the index's session holds is an item of that session's list, none while
+    // the session is archived; nothing else of the session moves (its digest counts the lane A list's stopping requests
+    // alone)
+    const offSheetItems = feedSheetItems(service, (appSessionId, items, silent) => attention.setSheetItems(appSessionId, items, silent), {
+      archived: (appSessionId) => index.unavailable === null && index.sessions.get(appSessionId)?.archived === true,
+      onChange: (listener) => (index.unavailable === null ? index.sessions.onChange((record) => listener(record.appId)) : () => {}),
+    });
     parts.push(['sheet', () => {
       offSheetItems();
       service.stop();

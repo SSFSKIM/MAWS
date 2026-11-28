@@ -902,14 +902,27 @@ describe('sheet items', () => {
     const permission = item({ kind: 'permission', state: 'pending' });
     fire('session.brokerItems', { appSessionId: APP, items: [permission] });
     const [q1, q2] = [sheetItem('q1'), sheetItem('q2')];
-    service.setSheetItems(APP, [q1, q2]);
+    service.setSheetItems(APP, [q1, q2], []);
     expect(last()).toEqual([permission, q1, q2]);
     expect(await handlers.get('attention.request')!({ appSessionId: APP, requestId: 'q1' })).toEqual({ event: null });
     expect(dispatch).not.toHaveBeenCalled();
     batch(event('turn.started', { userMessageUuid: null, origin: 'human' })); // no turn retires them
     expect(last()).toEqual([permission, q1, q2]);
-    service.setSheetItems(APP, [q2]);
+    service.setSheetItems(APP, [q2], []);
     expect(last()).toEqual([permission, q2]);
+    service.stop();
+  });
+
+  // The branch review of #890 (S3): a projection of questions that waited before the launch is silent, as the owner
+  // channel's restart is, and stays so
+  it('carries the silent ids of a projection on its change, and on every later one', async () => {
+    const { service, changed } = setup();
+    await service.ready;
+    const [q1, q2] = [sheetItem('q1'), sheetItem('q2')];
+    service.setSheetItems(APP, [q1], [q1.id]);
+    expect(changed.at(-1)).toEqual({ appSessionId: APP, items: [q1], silent: [q1.id] });
+    service.setSheetItems(APP, [q1, q2], []);
+    expect(changed.at(-1)).toEqual({ appSessionId: APP, items: [q1, q2], silent: [q1.id] });
     service.stop();
   });
 

@@ -18,8 +18,8 @@
 // command is its body; the port numbers the buttons by position, so the order sent is kept to map a press back.
 // The question sheet's C3 M4 (docs/doperpowers/plans/2026-11-23-question-sheet-c3-maws-app.md §H, S11): a sheet
 // question's item is told in-app only, as a terminal's prompts are (O-22), and once per call: an item is told when it is
-// new and no item of its call was told before (or was open at the start), so a call of eight questions makes one notice
-// and a revise none. What a MAWS-run session's sheet item does with macOS notifications is C5's.
+// new and no item of its call was told before (or was open at the start, or arrived silent), so a call of eight
+// questions makes one notice and a revise none. What a MAWS-run session's sheet item does with macOS notifications is C5's.
 import type { AttentionItem } from '@shared/graph/attention';
 import { isNoClient, type ClientPort, type NotificationHandle, type NotifyEvent, type NotifyRequest } from '@shared/client/port';
 import type { AttentionKind } from '@shared/graph/enums';
@@ -175,7 +175,10 @@ export function startNotifier(view: NotifierView, deps: NotifierDeps): () => voi
     for (const item of items) {
       if (seen.has(item.id)) continue;
       seen.add(item.id);
-      if (silent.has(item.id)) continue;
+      if (silent.has(item.id)) {
+        if (isSheetItem(item.id)) calls.add(callOf(item)); // a question that waited before the launch: its call was told
+        continue;
+      }
       if (!waits(item) || !isActionable(item) || !inNeedsYou(appSessionId) || !firstOfCall(item)) continue;
       const settings = deps.settings().notifications;
       if (settings.enabled && settings.kinds[GROUP[item.kind]]) post({ appSessionId, attentionId: item.id, body: item.summary });
