@@ -33,7 +33,7 @@ import { launchMaws, REPO_ROOT, type MawsLaunch } from './support/launch';
 import { asTheRigDraws, cardOf, closeNotices, needsYouRow, openLookSession, openSheetAt, rowHeads, rowLines, sheetRows, sheetTool } from './support/sheet-look';
 import { sidebarRow } from './support/sidebar';
 import {
-  README, alive, envelopes, hasRecord, idle, inboxLines, keepRecord, liveConfig, messagesAfter, recordState, recordTranscript, removeScratch, scratchRoot, sheetCalls, show, spawnSurface, stopSurface,
+  README, envelopes, hasRecord, idle, inboxLines, keepRecord, liveConfig, messagesAfter, recordState, recordTranscript, removeScratch, scratchRoot, processIdentity, sheetCalls, show, spawnSurface, stopSurface,
   surfaceRegistered, Terminals, transcriptRows, until, writeScratch, type LiveConfig, type Scratch, type TranscriptRow,
 } from './support/sheet-live';
 
@@ -49,7 +49,8 @@ const ASK_TWO = 'Put two more questions to me on your sheet in one call, each wi
 const WITHDRAW = (id: string) => `Withdraw ${id} from your sheet: you no longer need it. Do nothing else.`;
 const ASK_ONE = 'Put one more question to me on your sheet: one with two options. Do nothing else.';
 // What the person types
-const TYPED = { picked: 'Only for the beta, please.', reference: 'Keep the README as it is.', open: 'Start with the North Quay route.', later: 'After the timetable import lands.' };
+// What the person types: a text of its own on every answer (a pick too), so a reply that leaves one out is seen
+const TYPED = { picked: 'Only for the beta, please.', reference: 'Keep the README as it is.', open: 'Start with the North Quay route.', another: 'Keep both routes for now.', later: 'After the timetable import lands.' };
 
 type Call = ReturnType<typeof sheetCalls>[number];
 type Entry = { question: string; header?: string; options?: { label: string }[]; references?: { path: string }[] };
@@ -70,6 +71,7 @@ test('the question sheet live: a terminal session asks on its sheet and is answe
   let maws: MawsLaunch | null = null;
   let sid = '';
   const log = (step: string, evidence: Record<string, unknown>) => cfg && appendFileSync(join(cfg.out, 'steps.jsonl'), `${JSON.stringify({ at: new Date().toISOString(), step, ...evidence })}\n`);
+  const admissionLoad = loadavg().map((n) => n.toFixed(2)); // sampled before anything of the run starts
   try {
     cfg = liveConfig();
     mkdirSync(cfg.out, { recursive: true });
@@ -133,12 +135,14 @@ test('the question sheet live: a terminal session asks on its sheet and is answe
 
     // ---- 1. the setup: the app first, then the terminal --------------------------------------------------------------
     let mainPid = 0;
+    let mainIdentity: string | null = null;
     await step('1-setup', async () => {
       maws = await launch({ MAWS_SMINOS_CLI: scratch.sminos });
       ({ sid, pid: mainPid } = await terminals.open(pane));
+      mainIdentity = processIdentity(mainPid);
       await picture(page(), '1-setup');
       keep('1-setup');
-      return { session: sid, admissionLoad: loadavg().map((n) => n.toFixed(2)), terminalClaude: versionOf(config.claude), appEngine: appEngine() };
+      return { session: sid, admissionLoad, loadAfterLaunch: loadavg().map((n) => n.toFixed(2)), terminalClaude: versionOf(config.claude), appEngine: appEngine() };
     });
     const sideBefore = await sideStrip(page());
 
@@ -203,13 +207,12 @@ test('the question sheet live: a terminal session asks on its sheet and is answe
           picked.set(id, { label: options[0]!.label, pick: 1 }); // a pick is the option's number, from 1
           await cardOf(page(), id).getByRole('radio', { name: options[0]!.label, exact: true }).click();
         }
-        const text = id === referencing ? TYPED.reference : options.length === 0 ? TYPED.open : [...typed.keys()].some((k) => picked.has(k)) ? null : TYPED.picked;
-        if (text !== null) {
-          typed.set(id, text);
-          await sheetTool(page()).getByRole('textbox', { name: SHEET_WORDS.answerName(id), exact: true }).fill(text);
-        }
+        const text = id === referencing ? TYPED.reference : options.length === 0 ? TYPED.open : [...typed.values()].includes(TYPED.picked) ? TYPED.another : TYPED.picked;
+        typed.set(id, text);
+        await sheetTool(page()).getByRole('textbox', { name: SHEET_WORDS.answerName(id), exact: true }).fill(text);
       }
-      expect([...picked.keys()].some((id) => typed.has(id)), 'one answer is a pick with typed text').toBe(true);
+      expect([...picked.keys()].length, 'one answer at least is a pick with typed text').toBeGreaterThan(0);
+      expect(new Set(typed.values()).size, 'every answer’s text its own').toBe(ids.length);
       const inboxBefore = inboxLines(scratch, sid).length;
       await sheetTool(page()).getByRole('button', { name: SHEET_WORDS.send(ids.length), exact: true }).click();
       const lines = await until('the Send’s inbox lines', 30_000, () => {
@@ -225,9 +228,11 @@ test('the question sheet live: a terminal session asks on its sheet and is answe
       await idle(scratch, sid);
       const carrying = envelopes(rows()).flatMap((e) => e.blocks.filter((b) => b.keys.some((k) => keys.includes(k))).map((block) => ({ ...e, block })));
       expect(carrying, 'one delivery block carries the Send’s keys').toHaveLength(1);
-      expect([...carrying[0]!.block.keys].sort(), 'its keys are the Send’s').toEqual([...keys].sort());
-      const byId = (list: { id: string }[]) => [...list].sort((x, y) => x.id.localeCompare(y.id));
-      expect(byId(carrying[0]!.block.answered), 'it pairs each question with its pick and its text').toEqual(byId(ids.map((id) => ({ id, picks: picked.has(id) ? [picked.get(id)!.pick] : [], text: typed.get(id) ?? '' }))));
+      // the block pairs its keys and its answers by position (X3): each key with the answer its own line sent
+      const { block } = carrying[0]!;
+      expect(block.keys.map((key, n) => [key, block.answered[n]]), 'each key paired with its question, its pick and its text').toEqual(
+        lines.map((line) => [String(line.key), { id: String(line.id), picks: picked.has(String(line.id)) ? [picked.get(String(line.id))!.pick] : [], text: typed.get(String(line.id))! }]),
+      );
       const quoting = messagesAfter(rows(), carrying[0]!.index).filter((message) => [...typed.values()].every((text) => message.includes(text)));
       expect(quoting.length, 'one assistant message quotes all three answers').toBeGreaterThanOrEqual(1);
       for (const id of ids) {
@@ -267,7 +272,7 @@ test('the question sheet live: a terminal session asks on its sheet and is answe
       const question = state().questions.find((q) => q.id === later)!;
       const label = question.options![0]!.label;
       terminals.close(pane);
-      await until('the terminal’s process gone', 30_000, () => !alive(mainPid));
+      await until('the terminal’s process gone', 30_000, () => processIdentity(mainPid) !== mainIdentity);
       await expect.poll(() => holderOf(page(), appId), { timeout: 20_000, message: 'stopped' }).not.toBe('terminal');
       await closeNotices(page());
       await openSheetAt(page(), later);
@@ -302,8 +307,10 @@ test('the question sheet live: a terminal session asks on its sheet and is answe
       await idle(scratch, sid);
       const prompt = rows().slice(rowsBeforeResume).find((row) => row.type === 'user' && row.promptSource === 'typed');
       expect(prompt, 'the first typed prompt after the resume').toBeDefined();
-      const withPrompt = envelopes(rows()).filter((e) => promptOf(rows(), e.parent) === prompt!.uuid && e.blocks.some((b) => b.keys.includes(sent!)));
-      expect(withPrompt, 'the answer goes with that prompt, in its added context').toHaveLength(1);
+      const withPrompt = envelopes(rows()).flatMap((e) => e.blocks.filter((b) => b.keys.includes(sent!)).map(() => e));
+      expect(withPrompt, 'one delivery block carries the answer').toHaveLength(1);
+      expect(withPrompt[0]!.kind, 'carried in a prompt’s added context').toBe('prompt.submit');
+      expect(promptOf(rows(), withPrompt[0]!.parent), 'that prompt the first typed after the resume').toBe(prompt!.uuid);
       expect(JSON.stringify(rows()).includes(takenBack!), 'the answer taken back appears nowhere in the transcript').toBe(false);
       await expect.poll(() => lineFor(page(), later), { timeout: 15_000, message: 'the line is its receipt' }).toBe(`${later} | ${named(question)} | ${SHEET_ROW.arrow} ${label}`);
       await picture(page(), '7b-resumed-receipt');
@@ -324,15 +331,16 @@ test('the question sheet live: a terminal session asks on its sheet and is answe
       await idle(scratch, sid);
       const [id] = addedBy(one, 1);
       const entry = one.input.ask![0] as Entry;
-      const label = entry.options![0]!.label;
+      const labels = entry.options!.slice(0, 2).map((option) => option.label); // window n picks option n
+      expect(labels, 'two options to tell the windows apart').toHaveLength(2);
       const [second] = await Promise.all([app.app.waitForEvent('window'), app.app.evaluate(() => (globalThis as unknown as { __maws_documents: { openWindow(): number } }).__maws_documents.openWindow())]);
       await second.waitForLoadState('domcontentloaded');
       const windows = [page(), second];
       const sheets: Locator[] = [];
-      for (const window of windows) {
+      for (const [n, window] of windows.entries()) {
         await (await needsYouRow(window, appId)).click({ timeout: 30_000 });
         await expect(cardOf(window, id!)).toBeVisible({ timeout: 15_000 });
-        await cardOf(window, id!).getByRole('radio', { name: label, exact: true }).click();
+        await cardOf(window, id!).getByRole('radio', { name: labels[n]!, exact: true }).click();
         sheets.push(sheetTool(window));
       }
       const inboxBefore = inboxLines(scratch, sid).length;
@@ -350,33 +358,35 @@ test('the question sheet live: a terminal session asks on its sheet and is answe
         return lines.length >= 2 ? lines : null;
       });
       expect(appended.map((l) => [l.kind, l.id]), 'the two Sends’ lines, both answering the question').toEqual([['answer', id], ['answer', id]]);
-      const [taken, late] = appended.map((l) => String(l.key));
-      expect(taken, 'two distinct keys').not.toBe(late);
-      await until('the second refused', 30_000, () => state().verdicts[late!] !== undefined);
-      expect(state().verdicts[taken!], 'the first appended applied').toMatchObject({ verdict: 'applied', kind: 'answer', id });
-      expect(state().verdicts[late!], 'the second closed: already answered').toMatchObject({ verdict: 'closed', kind: 'answer', id, how: 'answered' });
-      expect(state().closed[id!]?.key, 'the question closed by the first').toBe(taken);
-      // the window whose line was refused reads it, by its key, and only that window
-      const refusals = windows.map((window) => sheetTool(window).locator(`[data-sheet-note="${late}"]`));
-      const losing = await until('the refusal drawn', 15_000, async () => {
-        const counts = await Promise.all(refusals.map((note) => note.count()));
-        return counts.filter((n) => n > 0).length === 1 ? counts.findIndex((n) => n > 0) + 1 : null;
-      }) - 1;
-      await expect(refusals[losing]!, 'the losing window reads that it was already answered').toBeVisible();
-      await expect(refusals[losing]!).toContainText(SHEET_WORDS.notes.answered(id!));
-      await expect(sheetTool(windows[1 - losing]!).locator('[data-sheet-note]'), 'the winning window reads no refusal').toHaveCount(0);
+      // each line's key to the window that sent it, by the pick it carries
+      const keyOf = labels.map((label) => appended.find((l) => (l.picks as string[] | undefined)?.[0] === label)?.key);
+      expect(keyOf.every((key) => typeof key === 'string') && keyOf[0] !== keyOf[1], 'one line from each window, under distinct keys').toBe(true);
+      await until('both lines’ verdicts', 30_000, () => keyOf.every((key) => state().verdicts[String(key)] !== undefined));
+      const verdicts = keyOf.map((key) => state().verdicts[String(key)]!);
+      const winner = verdicts.findIndex((v) => v.verdict === 'applied');
+      const loser = 1 - winner;
+      expect(winner, 'one window’s answer applied').toBeGreaterThanOrEqual(0);
+      expect(verdicts[winner], 'applied').toMatchObject({ verdict: 'applied', kind: 'answer', id });
+      expect(verdicts[loser], 'the other closed: already answered').toMatchObject({ verdict: 'closed', kind: 'answer', id, how: 'answered' });
+      const [taken, late] = [String(keyOf[winner]), String(keyOf[loser])];
+      expect(state().closed[id!]?.key, 'the question closed by the winner').toBe(taken);
+      // the losing window, known from its key, reads the refusal; the winning one reads none
+      const refusal = sheetTool(windows[loser]!).locator(`[data-sheet-note="${late}"]`);
+      await expect(refusal, 'the losing window reads that it was already answered').toBeVisible({ timeout: 15_000 });
+      await expect(refusal).toContainText(SHEET_WORDS.notes.answered(id!));
+      await expect(sheetTool(windows[winner]!).locator('[data-sheet-note]'), 'the winning window reads no refusal').toHaveCount(0);
       await until(`${id}'s answer delivered`, TURN_MS, () => state().closed[id!]?.deliveredAt !== undefined);
       await idle(scratch, sid);
-      const winning = envelopes(rows()).flatMap((e) => e.blocks).filter((b) => b.keys.includes(taken!));
-      expect(winning.map((b) => b.answered.map((a) => [a.id, a.picks])), 'the winning answer delivered in the transcript').toEqual([[[id, [1]]]]);
-      expect(JSON.stringify(rows()).includes(late!), 'the refused line never delivered').toBe(false);
+      const winning = envelopes(rows()).flatMap((e) => e.blocks).filter((b) => b.keys.includes(taken));
+      expect(winning.map((b) => b.answered.map((a) => [a.id, a.picks])), 'the winning answer delivered in the transcript, its own pick').toEqual([[[id, [winner + 1]]]]);
+      expect(JSON.stringify(rows()).includes(late), 'the refused line never delivered').toBe(false);
       for (const sheet of sheets) await expect(sheet.locator(`article[data-sheet-question="${id}"]`), 'its card gone in both').toHaveCount(0, { timeout: 15_000 });
       await openLookSession(page(), appId);
-      await expect.poll(() => lineFor(page(), id!), { timeout: 15_000, message: 'the receipt drawn' }).toBe(`${id} | ${named(entry)} | ${SHEET_ROW.arrow} ${label}`);
+      await expect.poll(() => lineFor(page(), id!), { timeout: 15_000, message: 'the winner’s receipt drawn' }).toBe(`${id} | ${named(entry)} | ${SHEET_ROW.arrow} ${labels[winner]}`);
       await picture(page(), '8b-released-first');
       await picture(second, '8b-released-second');
       keep('8-two-windows');
-      return { question: id, asked: one.result, held: held.length, taken, late, losingWindow: losing + 1, verdicts: { [taken!]: state().verdicts[taken!], [late!]: state().verdicts[late!] } };
+      return { question: id, asked: one.result, held: held.length, picks: labels, taken, late, winningWindow: winner + 1, verdicts: { [taken]: state().verdicts[taken], [late]: state().verdicts[late] } };
     });
     expect(maws!.consoleErrors(), 'no console errors in the first window').toEqual([]);
   } catch (error) {

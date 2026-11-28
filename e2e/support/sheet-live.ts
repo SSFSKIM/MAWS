@@ -139,7 +139,10 @@ const quote = (value: string) => `'${value.replaceAll("'", `'\\''`)}'`;
 // ---- the stand-in surface (C2's sminos/tests/sheet_surface.py) --------------------------------------------------------
 /** C2's stand-in surface, heartbeating every 2 s under the scratch sminos home, as C2's live check runs it; not yet registered. */
 export function spawnSurface(cfg: LiveConfig, s: Scratch): ChildProcess {
-  return spawn('python3', ['-B', join(cfg.doperpowers, 'sminos/tests/sheet_surface.py'), '--every', '2'], { env: sminosEnv(s), stdio: 'ignore' });
+  const surface = spawn('python3', ['-B', join(cfg.doperpowers, 'sminos/tests/sheet_surface.py'), '--every', '2'], { env: sminosEnv(s), stdio: 'ignore' });
+  // a spawn that fails (no python3) is an `error` event, which unhandled ends the runner; here the registration's wait says it
+  surface.on('error', (error) => console.error('[sheet-live] the stand-in surface did not start', error));
+  return surface;
 }
 
 /** The stand-in's registration written. */
@@ -147,18 +150,26 @@ export async function surfaceRegistered(s: Scratch): Promise<void> {
   await until('the stand-in surface’s registration', 10_000, () => existsSync(join(s.sminosHome, 'sheet', 'surfaces', 'standin.json')));
 }
 
+/** The stand-in stopped: SIGTERM (it removes its registration), and SIGKILL past 10 s; a child that never started is done. */
 export async function stopSurface(surface: ChildProcess): Promise<void> {
-  if (surface.exitCode !== null || surface.signalCode !== null) return;
-  const exit = new Promise<void>((resolve) => surface.once('exit', () => resolve()));
-  surface.kill('SIGTERM');
-  await exit;
+  const done = () => surface.pid === undefined || surface.exitCode !== null || surface.signalCode !== null;
+  if (done()) return;
+  surface.kill('SIGTERM'); // through its handle: Node signals no process once its own child is reaped
+  try {
+    await until('the stand-in’s exit', 10_000, done);
+  } catch {
+    surface.kill('SIGKILL');
+    await until('the stand-in killed', 5_000, done);
+  }
 }
 
 // ---- the terminal ----------------------------------------------------------------------------------------------------
 /** The terminal sessions of this run, in a tmux server of its own, each started from the env file alone (`env -i`). */
 export class Terminals {
   private readonly tmux: string[];
-  private readonly engines = new Set<number>(); // every engine process a pane ran, so the teardown waits for each to end
+  // every engine process a pane ran, by its pid and what `ps` said of it then, so the teardown waits for each to end and
+  // signals a pid only while it is still that process (a pid freed on this machine can be another job's)
+  private readonly engines = new Map<number, string>();
   constructor(private readonly cfg: LiveConfig, private readonly s: Scratch) {
     this.tmux = ['-L', `qsl-${process.pid}`, '-f', '/dev/null'];
   }
@@ -169,7 +180,8 @@ export class Terminals {
     const inner = `set -e; . ${quote(this.s.envFile)}; cd ${quote(this.s.work)}; exec ${quote(this.cfg.claude)} --plugin-dir ${quote(this.s.plugin)} --model ${quote(this.cfg.model)} --permission-mode default ${args.map(quote).join(' ')}`;
     this.run(['new-session', '-d', '-s', name, '-x', '200', '-y', '50', `env -i /bin/bash --noprofile --norc -c ${quote(inner)}`]);
     const { pid, sid } = await until(`${name}'s session`, 90_000, () => presences(this.s).find((p) => !known.has(p.pid)) ?? null, () => this.pane(name));
-    this.engines.add(pid);
+    const identity = processIdentity(pid);
+    if (identity !== null) this.engines.set(pid, identity);
     await until(`${name}'s bridge`, 60_000, () => ping(this.s, sid), () => this.pane(name));
     return { sid, pid };
   }
@@ -196,12 +208,15 @@ export class Terminals {
   async closeAll(): Promise<void> {
     spawnSync('tmux', [...this.tmux, 'kill-server']);
     rmSync(join(process.env.TMUX_TMPDIR ?? '/tmp', `tmux-${process.getuid!()}`, this.tmux[1]!), { force: true });
-    const ended = () => [...this.engines].every((pid) => !alive(pid));
+    const running = () => {
+      for (const [pid, identity] of this.engines) if (processIdentity(pid) !== identity) this.engines.delete(pid); // ended, or no longer ours
+      return this.engines.size;
+    };
     try {
-      await until('the terminals’ engines ended', 20_000, ended);
+      await until('the terminals’ engines ended', 20_000, () => running() === 0);
     } catch {
-      for (const pid of this.engines) if (alive(pid)) process.kill(pid, 'SIGKILL');
-      await until('the terminals’ engines killed', 5_000, ended);
+      for (const [pid, identity] of this.engines) if (processIdentity(pid) === identity) process.kill(pid, 'SIGKILL');
+      await until('the terminals’ engines killed', 5_000, () => running() === 0);
     }
   }
 
@@ -222,6 +237,13 @@ export function presences(s: Scratch): { pid: number; sid: string }[] {
       return [];
     }
   });
+}
+
+/** A process's start time and command line as `ps` gives them, or null when no such process runs. */
+export function processIdentity(pid: number): string | null {
+  const ps = spawnSync('/bin/ps', ['-o', 'lstart=,command=', '-p', String(pid)], { encoding: 'utf8', env: { LC_ALL: 'C', TZ: 'UTC' } });
+  const line = ps.status === 0 ? ps.stdout.trim() : '';
+  return line === '' ? null : line;
 }
 
 export function alive(pid: number): boolean {
