@@ -681,7 +681,7 @@ function TreeList({
   // that grows above it moves it out of that range before the offset is corrected, and an unmounted row would drop the
   // keyboard to the page.
   const [focused, setFocused] = useState<string | null>(null);
-  const focusedRow = useRef<TreeRow | null>(null); // the row the keyboard is in, read once it is gone (board ticket 815)
+  const focusedRow = useRef<{ row: TreeRow; element: Element } | null>(null); // where the keyboard is, read once that element is gone (board ticket 815)
   const kept = useMemo(() => (focused === null ? -1 : rows.findIndex((row) => row.key === focused)), [rows, focused]);
   const rangeExtractor = useCallback(
     (range: Range) => {
@@ -770,10 +770,13 @@ function TreeList({
   }, [asked, settled, rows, selected, tabId]);
   // Board ticket 815: a failure's sentence takes Tab for its words; when the folder lists again its row goes, and the
   // keyboard that was in it is given to the folder's row (an unmounted row drops it to the page, and the list keeps only
-  // a row that is still there). The row is the one last focused, forgotten when the keyboard leaves a row still drawn.
+  // a row that is still there). What is read is whether the focused element survived, not its row: a failure that lists
+  // again to nothing keeps its row's key (the empty notice's) but not its sentence. It is the element last focused,
+  // forgotten when the keyboard leaves one still drawn.
   useLayoutEffect(() => {
-    const lost = focusedRow.current;
-    if (lost?.kind !== 'notice' || rows.some((row) => row.key === lost.key)) return;
+    const last = focusedRow.current;
+    if (last === null || last.row.kind !== 'notice' || last.element.isConnected) return;
+    const lost = last.row;
     focusedRow.current = null;
     if (document.activeElement !== null && document.activeElement !== document.body) return; // the keyboard went elsewhere
     const at = rows.findIndex((row) => (row.kind === 'root' || row.kind === 'entry') && sameFile(row.path, lost.path));
@@ -802,12 +805,12 @@ function TreeList({
                 data-row-key={row.key}
                 className={`absolute inset-x-0 flex items-center ${item.index === rootAt ? 'pr-8' : 'pr-1'}`}
                 style={{ top: item.start, height: FILES_ROW_HEIGHT }}
-                onFocus={() => {
-                  focusedRow.current = row;
+                onFocus={(event) => {
+                  focusedRow.current = { row, element: event.target };
                   setFocused(row.key);
                 }}
                 onBlur={(event) => {
-                  if (event.target.isConnected && focusedRow.current?.key === row.key) focusedRow.current = null;
+                  if (event.target.isConnected && focusedRow.current?.element === event.target) focusedRow.current = null;
                   setFocused((key) => (key === row.key ? null : key));
                 }}
               >
@@ -956,17 +959,16 @@ function ChangedItem({ row, changed, width, fonts }: { row: ChangedRow; changed:
   const label = labelOf(row, changed.working);
   const outside = expandTo(changed.rootPaths, row.path) === null;
   const oldPath = row.oldRel === null ? null : row.path.slice(0, row.path.length - row.rel.length) + row.oldRel;
-  const title = outside
-    ? FILES_COPY.outside(`${row.rel}${row.folder ? '/' : ''}`)
-    : row.letter === 'R' && oldPath !== null && row.oldRel !== null
-      ? REVIEW_COPY.renamedFrom(shownPath(oldPath, row.oldRel, changed.working))
-      : label.shown;
+  // the rename's words, a fact of their own beside the destination's path
+  const renamed = !outside && row.letter === 'R' && oldPath !== null && row.oldRel !== null ? REVIEW_COPY.renamedFrom(shownPath(oldPath, row.oldRel, changed.working)) : null;
+  const title = outside ? FILES_COPY.outside(`${row.rel}${row.folder ? '/' : ''}`) : (renamed ?? label.shown);
   // The folder gives way first; until the list has a width (its first layout) it is drawn whole.
   const folder = label.folder === '' || width <= 0 ? label.folder : folderFromEnd(label.folder, width - CHANGED_ROW_FIXED - measureIn(fonts.name)(label.name), measureIn(fonts.folder));
   // Board ticket 815: the row's tip (once its title), the letter's kind under it; a fact the row does not draw is its
-  // description too: the whole path where the folder is cut or gone (a narrow list), and the tip's other words
+  // description too: the whole path where the folder is cut or gone (a narrow list), and the tip's other words. Built
+  // from separate facts (the destination, the source): an outside row's sentence already holds its path.
   const cut = folder !== label.folder;
-  const description = title === label.shown ? (cut ? label.shown : null) : cut && !title.includes(label.shown) ? `${label.shown} · ${title}` : title;
+  const description = outside ? title : [cut ? label.shown : null, renamed].filter((fact) => fact !== null).join(' · ') || null;
   return (
     <Tip content={<RowTip words={title} under={KIND[row.letter]} />} description={description}>
       <button

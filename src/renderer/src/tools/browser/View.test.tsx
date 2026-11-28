@@ -95,3 +95,28 @@ describe('one tab in a main tab and in the panel at unequal widths (U12a)', () =
     expect(await offered(user, 'main')).toBe('enabled');
   });
 });
+
+// Board ticket 815, the medium review of fix wave 1: the chrome's tips open above it, never flipped onto the live page
+// below, and a tip covers nothing: covering the page would freeze it and take its keyboard.
+describe('the chrome’s tips', () => {
+  it('open above the chrome and ask main for no cover, even where one would reach the page', async () => {
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+      const surface = this.closest('[data-browser-view]')?.getAttribute('data-browser-view') as keyof typeof ROOMS | undefined;
+      const r = this.matches('[data-radix-popper-content-wrapper]')
+        ? { left: 100, top: 90, right: 400, bottom: 160 } // a tall tip over the page's top
+        : surface && this.matches('[data-browser-page-box], [data-browser-pane]')
+          ? ROOMS[surface]
+          : { left: 0, top: 0, right: 0, bottom: 0 };
+      return { ...r, x: r.left, y: r.top, width: r.right - r.left, height: r.bottom - r.top, toJSON: () => r } as DOMRect;
+    });
+    render(<BrowserView appSessionId={A} surface="main" browserTabId={T1} />);
+    await settle();
+    const back = within(viewOf('main')).getByRole('button', { name: BROWSER_COPY.back });
+    act(() => back.focus());
+    const tip = await screen.findByRole('tooltip');
+    expect(tip.closest('[data-side]')?.getAttribute('data-side')).toBe('top');
+    await act(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+    await settle();
+    expect(main.callsOf('browser.view.cover').filter((call) => call.covered === true)).toEqual([]);
+  });
+});

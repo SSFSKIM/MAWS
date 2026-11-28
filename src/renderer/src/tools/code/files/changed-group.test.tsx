@@ -815,6 +815,22 @@ describe('the Changed group (U6b-3a)', () => {
     expect(accessibleDescription(changedRow('/r/a/b.ts')!)).toBe('');
   });
 
+  // the medium review of fix wave 1: the whole path and the rename's words are separate facts, so an old path that ends
+  // with the new one does not hide the destination
+  it('describes a cut rename by its destination and its source, even where the source’s path ends with the destination’s', async () => {
+    const observer = installResizeObserver();
+    measureWith((_font, text) => text.length * 7);
+    changedMain(TREE, { '/r': statusOf([entry('deep/harbor-folder/sub/dock.ts', 'R.', { oldPath: 'archive/deep/harbor-folder/sub/dock.ts' })]) });
+    connect();
+    render(<TestHost />);
+    act(() => void panelHost.addTool('files', { appSessionId: A }));
+    await waitFor(() => expect(heading()?.getAttribute('data-count')).toBe('1'));
+    observer.resize(scroller().firstElementChild!, { width: 220, height: 600 });
+    const path = '/r/deep/harbor-folder/sub/dock.ts';
+    await waitFor(() => expect(changedRow(path)!.textContent).not.toContain('harbor-folder'));
+    expect(accessibleDescription(changedRow(path)!)).toBe(`deep/harbor-folder/sub/dock.ts · ${REVIEW_COPY.renamedFrom('archive/deep/harbor-folder/sub/dock.ts')}`);
+  });
+
   // Decision Log 8: each distinct string measured once per font, and only for the drawn rows
   it('measures each distinct string once per font, and only for the drawn rows, over a list scrolled through twice', async () => {
     const observer = installResizeObserver();

@@ -75,6 +75,19 @@ export function TipBoundary({ element, children }: { element: Element | null; ch
   return <Boundary value={boundary}>{children}</Boundary>;
 }
 
+// Tips held above their owners (`TipsAbove`): where what lies below the owners must not be covered, the browser's
+// chrome over its live page. The page is a native view over the whole renderer, so a tip flipped onto it would be
+// hidden, and covering the page for a passive tip would freeze it and take its keyboard (the medium review of fix wave
+// 1). Inside, every tip opens above, whatever side its owner names, and never flips below: the side below is given a
+// collision padding no tip can fit in, so Radix's flip always finds above the better fit. It still shifts along the
+// edge it would cross. Where the window has no room above, a tall tip is cut at the window's top rather than drawn over
+// the page.
+const Above = createContext(false);
+export function TipsAbove({ children }: { children: ReactNode }) {
+  return <Above value={true}>{children}</Above>;
+}
+const BELOW_IS_OFF = { top: 8, right: 8, left: 8, bottom: 1_000_000 };
+
 // The tip that shows, closed when another opens (Radix's own signal for that fires only for the openings it makes).
 let showing: { close(): void; owner: RefObject<HTMLElement | null> } | null = null;
 
@@ -89,6 +102,7 @@ export function focusedTipShowing(doc: Document = document): boolean {
 export function Tip({ content, description, pointedWithin, side = 'top', children, ...guard }: { content: ReactNode; description?: string | null; pointedWithin?: RefObject<HTMLElement | null>; side?: TipSide; children: Owner } & ClickGuard) {
   const descriptionId = useId();
   const boundary = useContext(Boundary);
+  const above = useContext(Above);
   const shows = content !== null && content !== undefined && content !== '';
   const [open, setOpen] = useState(false);
   if (open && !shows) setOpen(false); // the content went away: the tip is closed, not merely undrawn
@@ -219,9 +233,9 @@ export function Tip({ content, description, pointedWithin, side = 'top', childre
           <Tooltip.Portal>
             <Tooltip.Content
               ref={tip}
-              side={side}
+              side={above ? 'top' : side}
               sideOffset={4}
-              collisionPadding={8}
+              collisionPadding={above ? BELOW_IS_OFF : 8}
               collisionBoundary={boundary ?? []}
               className={TIP}
               onEscapeKeyDown={() => {

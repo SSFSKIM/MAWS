@@ -9,7 +9,7 @@ import { accessibleText } from '../test-support/accessible-text';
 import { fakeTimeouts, realTimeouts } from '../test-support/fake-timeouts';
 import { POINTING_DELAY_MS } from './pointing';
 import { Popover, RadioGroup } from 'radix-ui';
-import { Tip, tipBoundaryOf, UnavailableButton } from './tip';
+import { Tip, tipBoundaryOf, TipsAbove, UnavailableButton } from './tip';
 
 const FACT = 'MAWS falls back to a dock bounce and a toast';
 
@@ -434,5 +434,29 @@ describe('a tip over a Radix control', () => {
       </Tip>,
     );
     expect(screen.getByRole('button', { name: 'Blocked' }).getAttribute('data-state')).toBe('closed');
+  });
+});
+
+// The medium review of fix wave 1: a tip over what lies below it must not cover it (the browser chrome over its live
+// page, a native view the renderer cannot draw over: covering the page for a passive tip would take its focus).
+describe('tips held above', () => {
+  it('open above their owner inside TipsAbove, whatever side the owner names, and on the named side outside it', async () => {
+    render(
+      <>
+        <TipsAbove>
+          <Tip content="Inside" side="bottom">
+            <button type="button">In</button>
+          </Tip>
+        </TipsAbove>
+        <Tip content="Outside" side="bottom">
+          <button type="button">Out</button>
+        </Tip>
+      </>,
+    );
+    const sideOf = () => screen.getByRole('tooltip').closest('[data-side]')?.getAttribute('data-side');
+    act(() => screen.getByRole('button', { name: 'In' }).focus());
+    expect([tooltip(), sideOf()]).toEqual(['Inside', 'top']);
+    act(() => screen.getByRole('button', { name: 'Out' }).focus());
+    expect([tooltip(), sideOf()]).toEqual(['Outside', 'bottom']);
   });
 });

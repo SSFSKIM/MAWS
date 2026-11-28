@@ -27,6 +27,7 @@ import { listSession, sessionTabs, useBrowser } from './store';
 import type { Room } from './viewport'; // U12a
 import { TabStrip } from './chrome/TabStrip'; // P5 O17 M10
 import { AgentGroup, RemoteCanvas, RemoteNav, useMachineName, useRemoteBrowser } from './remote/View'; // P5 O17 M10
+import { TipsAbove } from '../../ui/tip'; // board ticket 815
 
 const isAddressElsewhere = (appSessionId: AppSessionId): boolean => isAddress(appSessionId) && machineOf(appSessionId) !== ipc.localMachine;
 
@@ -81,15 +82,18 @@ export function BrowserView({ appSessionId, surface, browserTabId, visible = tru
   );
   return (
     <div data-browser-view={surface} className="@container flex h-full min-h-0 flex-col bg-bg">
-      {shownRemote ? (
-        <div data-browser-chrome="" className="relative z-10 flex shrink-0 flex-col border-b border-border bg-bg-raised">
-          <TabStrip appSessionId={appSessionId} surface={surface} tabs={tabs} shownId={null} agent={agent} onLocal={onLocal} />
-          <RemoteNav remote={shownRemote} machine={machine} />
-        </div>
-      ) : (
-        <Chrome appSessionId={appSessionId} surface={surface} tab={tab} tabs={tabs} owns={owns} room={room} agent={agent ?? undefined} onLocal={elsewhere ? onLocal : undefined} />
-      )}
-      {(!elsewhere || remote?.state.view.kind === 'unsupported') && <AgentBrowserNotice appSessionId={appSessionId} />}
+      {/* board ticket 815: the chrome's tips open above it and never flip onto the live page below */}
+      <TipsAbove>
+        {shownRemote ? (
+          <div data-browser-chrome="" className="relative z-10 flex shrink-0 flex-col border-b border-border bg-bg-raised">
+            <TabStrip appSessionId={appSessionId} surface={surface} tabs={tabs} shownId={null} agent={agent} onLocal={onLocal} />
+            <RemoteNav remote={shownRemote} machine={machine} />
+          </div>
+        ) : (
+          <Chrome appSessionId={appSessionId} surface={surface} tab={tab} tabs={tabs} owns={owns} room={room} agent={agent ?? undefined} onLocal={elsewhere ? onLocal : undefined} />
+        )}
+        {(!elsewhere || remote?.state.view.kind === 'unsupported') && <AgentBrowserNotice appSessionId={appSessionId} />}
+      </TipsAbove>
       <div className="min-h-0 flex-1">
         {shownRemote ? (
           <RemoteCanvas remote={shownRemote} machine={machine} />

@@ -561,6 +561,26 @@ describe('files tool', () => {
     }
   });
 
+  // the medium review of fix wave 1: a failure that lists again to nothing keeps its row's key (the empty notice's), but
+  // its focused sentence goes all the same: the keyboard goes to the folder's row
+  it('keeps the keyboard on a folder’s row when its focused listing error lists again to an empty folder', async () => {
+    const before = REPO['/r/src'];
+    REPO['/r/src'] = 'files.list: permission denied';
+    try {
+      render(<TestHost />);
+      openTool();
+      fireEvent.click(await screen.findByText('src'));
+      await waitFor(() => expect(document.querySelector('[data-notice="error"] [tabindex="0"]')).not.toBeNull());
+      act(() => document.querySelector<HTMLElement>('[data-notice="error"] [tabindex="0"]')!.focus());
+      REPO['/r/src'] = [];
+      act(() => main.emit('files.changed', { appSessionId: bareOf(A), path: '/r/src/gone.ts', kind: 'removed' })); // re-listed in place, with no loading between
+      await waitFor(() => expect(document.querySelector('[data-notice="empty"]')).not.toBeNull());
+      await waitFor(() => expect(document.activeElement).toBe(item('src')));
+    } finally {
+      REPO['/r/src'] = before;
+    }
+  });
+
   it('roots that could not be listed read the folder’s sentences and the command’s words, and Retry lists them again', async () => {
     let up = false;
     main = installFakeMain((name, input) => {
