@@ -753,7 +753,18 @@ The first prints `{"session": "5eed0000-…", "results": [{"key": "maws-demo-000
     scripts/ci-gate.sh "$PWD" --gates static,unit,probes,e2e:lane-a,e2e:c7,e2e:panel,e2e:transcript,e2e:desk-web
     scripts/ci-gate.sh "$PWD" --gates e2e:to-human        # M5
 
-**M6.** On a Mac, under the load rule, with the app built from the landing's head and doperpowers at C2.G2:
+**M6, as run** (the composite's writer, 2026-11-27: the steps below are performed by a committed driver on the project's Mac runner over SSH, not by a hand). On that Mac, from a clean checkout of the landing's head, with doperpowers at C2.G2 (`42ab7915d`) cloned beside it:
+
+    pnpm install --frozen-lockfile && scripts/e2e-build.sh plain
+    SHEET_LIVE_DOPERPOWERS=<doperpowers> SHEET_LIVE_OUT=<a fresh directory outside the repository> SHEET_LIVE_CLAUDE=<the terminal's claude> \
+      <the local relay's environment the project's live specs use (D-19)> \
+      LANG=en_US.UTF-8 pnpm exec playwright test --config e2e/sheet-live.config.ts --reporter=line
+
+It prints one `passed` and writes `steps.jsonl` with eight `ok: true` lines, a picture per step and a scrubbed recording, all under `SHEET_LIVE_OUT`. The driver (`e2e/sheet-live.rig.ts`, `e2e/support/sheet-live.ts`, no group collects it) sets up the scratch homes as C2's `live-sheet-check.py` does, starts the app through the e2e harness's Electron launcher with `MAWS_SMINOS_CLI` naming the checkout's sminos, runs the terminal session in tmux, and performs steps 1 to 8 below, each asserted from the record (`state.json`, `inbox.jsonl`, `sheet show --json`) and from the window. It samples the load before launch and refuses to start at the load rule's bound, and tears down every process and scratch path it made, signalling only processes whose start time and command line it recorded.
+
+The steps it performs (first written for a hand):
+
+
 
 1. Set up as C2's live check does (its plan's Concrete Steps, "The live check"): one scratch configuration home and one scratch `SMINOS_HOME`, exported in every shell used below. Start the stand-in surface, `<doperpowers>/sminos/tests/sheet_surface.py`. Start the app from such a shell, in a profile of its own so that its `mawsd` is this one and has this environment, with `MAWS_SMINOS_CLI=<doperpowers>/sminos/bin/sminos`. Start a terminal session in a scratch project with the checkout's plugin and the setting on: `CLAUDE_CODE_ENABLE_FUNCTION_HOOKS=1 SMINOS_QUESTION_SHEET=1 claude --plugin-dir <doperpowers>/sminos`.
 2. Ask it: "Put three questions to me on your sheet in one call: one with two options and a recommendation, one that references README.md, one with no options. Then keep working: list this directory." The terminal shows `3 open questions`, and `ls "$SMINOS_HOME"/sheet/*/state.json` lists the session's record: go on only if it does.
