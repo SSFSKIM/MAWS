@@ -222,3 +222,34 @@ None touches sheet code, and each passed on the hosted lane in the same run.
 1. **Calm tone beyond the Needs you row.** The project row's mark and the toolbar badge stay in the warning tone for a session whose waiting items are all sheet questions (picture 2). Whether L5's calm reaches them is the owner's call.
 2. **Focus ring on the opened card.** The side sheet opened at a question gives no visible sign of which card holds the keyboard (picture 5).
 3. **Mini-lane flakes** in lane-a `:204`, panel `:1285` and transcript `:3304`, each seen once at load. They are worth a CI-opt look if they recur on an unloaded mini.
+
+## After the first return: the look wave and M6 (2026-11-28)
+
+- **The look wave** (`04bf48574`, `641be82fc`) builds the writer's rulings on the pictures:
+  - calm reaches every aggregate of the same waiting sessions (`calmWaiting`, `waitingTone` in `R/attention/derive.ts`);
+  - "from <agent>" is shown whole or not at all;
+  - a question card's root draws the focus outline when the root itself holds focus;
+  - an agent's row of sheet questions reads "Question waiting".
+  Its task review was clean after one fix round. Gates: runs 46069249204 and 46076249313. Pictures 2, 5 and 6 were re-shot beside their `*-before.png`. The owner kept the built look and the carried draft.
+- **M6, the live gate**, runs as the writer ruled: a committed driver (`e2e/sheet-live.config.ts`, `e2e/sheet-live.rig.ts`, `e2e/support/sheet-live.ts`) on the project's Mac runner over SSH.
+  - It starts the app through the e2e harness, a real terminal `claude --plugin-dir` of doperpowers `42ab7915d` in tmux, C2's stand-in surface, and the real sminos.
+  - It asserts steps 1 to 8 from the record and the window.
+  - G2.a to G2.g passed whole at the landing's code: run 11 at `9997c4f3d`, admission load 7.00. Earlier passes were run 5 at `b8d841c59`, run 8 at `585072a11` and run 9 at `c9c9718ab`.
+  - Run 10 (load 11.27) failed at step 6: MAWS's transcript stood 15 to 20 s behind the engine's file, while the sheet and the record were already current. It was not reproduced.
+  - The task review was clean after three rounds, the last verified by the controller.
+- **The recorded session** is in `test/fixtures/sheet-live/` with its test. An account name in a directory listing was scrubbed by amending its commit (`5e64d8536` became `a99bcd727`, force-pushed with a lease). The old object may stay fetchable on GitHub by its sha until garbage collection. The driver now scrubs every string of a recording and fails the run on a leftover name.
+- **Five tracker rows**, as M6's Decisions list them.
+- **A flaky test of M3's**, `SessionSheet.test.tsx` "a host whose send throws", now waits for the memory its effect writes (`acfe60772`).
+- **Master `d697dfaa0`** (the composite's text) is merged as `d39daa1fa`.
+
+### Unresolved review findings, added
+
+- `QuestionCard.tsx` ~L139: the pointer latch's document listeners clear only on a pointer-up or cancel that the document receives. A gesture lost to the window can still miss one later keyboard ring, and an unmounted card's listeners stay until the next such event.
+- `WaitingCard.tsx` ~L94: the asker's room is a 20ch basis, not the width of the question's first twenty characters. "Whole or not at all" holds; the difference shows only at the boundary.
+- The channel's section of held-only cards keeps "Waiting on you" only while an act is sending or carries a note, by the writer's ruling, so the earlier finding is resolved.
+
+### Residue, added
+
+4. **The transcript lags the engine's file under load.** In run 10, at a 1-minute load of 11.27 on the mini, MAWS's transcript stood 15 to 20 s behind the engine's file for a terminal session, while the sheet and the record were current. It was not reproduced at load 7. The file follow under load is worth a look.
+5. **The pick's place in the envelope.** In two of three live runs the agent doubted whether a delivered pick (`[1]`) counts from 0. The writer passes this to C5, whose steer names a pick by place only.
+6. **What is left on the mini.** About 2 GB in a directory of its own on the project's Mac runner: the checkouts, `out/`, the run directories and `run.sh`. Remove it when M6's evidence is no longer needed.
