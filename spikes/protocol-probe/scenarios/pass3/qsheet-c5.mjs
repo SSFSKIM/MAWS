@@ -113,8 +113,9 @@ const transcriptFile=(r,sid)=>join(r.config,'projects',slug(r.work),sid+'.jsonl'
 export const rowsOf=f=>existsSync(f)?readFileSync(f,'utf8').split('\n').filter(Boolean).map((l,i)=>{try{return {line:i+1,row:JSON.parse(l)};}catch{return {line:i+1,row:{unparsed:true}};}}):[];
 export function brief(r){
  const b={type:r.type};
- // entrypoint, prompt_submit_outcome and prevent_continuation: M2's sitting reads what the file holds of a ring and its drop
- for(const k of ['subtype','level','isMeta','promptSource','toolDenialKind','isSidechain','agentId','entrypoint','prompt_submit_outcome','prevent_continuation'])if(r[k]!==undefined)b[k]=r[k];
+ // entrypoint, and a drop's fields as the file names them (promptSubmitEnding, preventContinuation; the wire's frame says
+ // prompt_submit_outcome, prevent_continuation): M2's sitting reads what the file holds of a ring and its drop
+ for(const k of ['subtype','level','isMeta','promptSource','toolDenialKind','isSidechain','agentId','entrypoint','prompt_submit_outcome','prevent_continuation','promptSubmitEnding','preventContinuation','parentUuid'])if(r[k]!==undefined)b[k]=r[k];
  if(r.origin)b.origin=r.origin;
  if(r.attachment?.type){b.attachment=r.attachment.type;for(const k of ['hookName','hookEvent','toolUseID'])if(r.attachment[k]!==undefined)b[k]=r.attachment[k];const c=r.attachment.content??r.attachment.stdout??r.attachment.prompt;if(c!==undefined)b.attachmentText=(typeof c==='string'?c:JSON.stringify(c)).slice(0,700);}
  if(r.permissionDecision)b.permissionDecision=r.permissionDecision;

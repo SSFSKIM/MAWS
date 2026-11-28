@@ -35,7 +35,12 @@ const HOME_VIA=env0.QC5_HOME_VIA||'settings';
 if(!['settings','env'].includes(HOME_VIA))throw new Error('QC5_HOME_VIA=settings|env');
 const versionOf=dir=>JSON.parse(readFileSync(join(dir,'.claude-plugin/plugin.json'),'utf8')).version;
 const DIR='fixtures/qsheet/';
-const RING='The human answered questions on your sheet.'; // MAWS's SHEET_RING, sminos's RING
+// The ring is the sentence and its mark, U+2060 (F33, as ruled after the first sitting's S9): MAWS's SHEET_RING and
+// sminos's RING, written as an escape. SENTENCE alone is a person's words in any form. The first sitting's p9-string and
+// p9-block (M1 at 34e1942ca) wrote the plain sentence as the ring; their frames are kept below (QC5_ONLY=p9-first).
+const SENTENCE='The human answered questions on your sheet.';
+const MARK='\u2060';
+const RING=SENTENCE+MARK;
 const RING_DROP='nothing is ready on the sheet';           // MAWS's SHEET_RING_DROP, sminos's RING_DROP
 const OWN_HOME=homedir();
 const HOST=hostname().split('.')[0]; // sminos names its log files after the machine: scrubbed from each recording at its end
@@ -75,13 +80,13 @@ const record=body=>{
  const whole=JSON.stringify(body.messages??[]);const last=lastUser(body);
  const holders=(body.messages??[]).map((m,i)=>({i,role:m.role,types:Array.isArray(m.content)?m.content.map(b=>b.type):['string'],has:JSON.stringify(m.content).includes('sheet-delivery')})).filter(x=>x.has).map(({has,...x})=>x);
  const tools=(body.tools??[]).filter(t=>/AskUserQuestion/.test(t?.name??'')).map(t=>({name:t.name,deferred:t.defer_loading??false,properties:Object.keys(t.input_schema?.properties??{})}));
- return {messages:(body.messages??[]).length,holders,deliveries:[...whole.matchAll(/<sheet-delivery>(.*?)<\/sheet-delivery>/g)].map(x=>x[1].slice(0,300)),tools,toolCount:(body.tools??[]).length,
+ return {messages:(body.messages??[]).length,roles:(body.messages??[]).map(m=>m.role).join(''),holders,deliveries:[...whole.matchAll(/<sheet-delivery>(.*?)<\/sheet-delivery>/g)].map(x=>x[1].slice(0,300)),tools,toolCount:(body.tools??[]).length,
   last:last?{types:Array.isArray(last.content)?last.content.map(b=>b.type):['string'],text:textOf(last.content).slice(-2500),raw:JSON.stringify(last.content).slice(-400)}:null};
 };
 const ASK_INPUT=n=>({ask:[{question:`QC5-M2 question ${n}?`,options:[{label:'Alpha'},{label:'Beta'}]}]});
 const SCRIPT=rules([
  ['toolu_ask',textTurn('ASKED')],['QC5-ASK',body=>{const n=(JSON.stringify(lastUser(body)).match(/QC5-ASK (\d+)/)||[])[1]||'1';return toolTurn('toolu_ask'+n,'mcp__sminos__AskUserQuestion',ASK_INPUT(n));}],
- ['QC5-HELLO',textTurn('HELLO')],[RING,textTurn('RING READ')],
+ ['QC5-HELLO',textTurn('HELLO')],[SENTENCE,textTurn('RING READ')],
 ]);
 
 // One engine process, launched as MAWS launches it. `sheet` is MAWS_QUESTION_SHEET's value (null: unset); `resume` is
@@ -260,12 +265,27 @@ function probeMod(r){
 // answer is pending, so that frame enters whatever the hook makes of it and its saved row can be read.
 const PNG='iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8DwHwAFBQIAX8jx0gAAAABJRU5ErkJggg=='; // one white pixel
 const P9_FRAMES={
- 'p9-string':[['the exact sentence (the control)',RING],['the sentence and a line break',RING+'\n'],['the sentence and a line break, an answer pending',RING+'\n',true]],
- 'p9-block':[['the exact sentence (the control)',[{type:'text',text:RING}]],['the sentence and a line break',[{type:'text',text:RING+'\n'}]],
-  ['a line break and the sentence',[{type:'text',text:'\n'+RING}]],['the sentence, then a line break as a second block',[{type:'text',text:RING},{type:'text',text:'\n'}]],
+ // the first sitting's (stop S9): the plain sentence was then the ring
+ 'p9-string':[['the exact sentence (the control)',SENTENCE],['the sentence and a line break',SENTENCE+'\n'],['the sentence and a line break, an answer pending',SENTENCE+'\n',true]],
+ 'p9-block':[['the exact sentence (the control)',[{type:'text',text:SENTENCE}]],['the sentence and a line break',[{type:'text',text:SENTENCE+'\n'}]],
+  ['a line break and the sentence',[{type:'text',text:'\n'+SENTENCE}]],['the sentence, then a line break as a second block',[{type:'text',text:SENTENCE},{type:'text',text:'\n'}]],
   // for the writer's remedy: a character no trim removes, and the sentence beside an image (a person's paste)
-  ['the sentence and a zero-width space',[{type:'text',text:RING+'\u200b'}]],['the sentence and an image',[{type:'text',text:RING},{type:'image',source:{type:'base64',media_type:'image/png',data:PNG}}]],
-  ['the sentence and a line break, an answer pending',[{type:'text',text:RING+'\n'}],true]],
+  ['the sentence and a zero-width space',[{type:'text',text:SENTENCE+'\u200b'}]],['the sentence and an image',[{type:'text',text:SENTENCE},{type:'image',source:{type:'base64',media_type:'image/png',data:PNG}}]],
+  ['the sentence and a line break, an answer pending',[{type:'text',text:SENTENCE+'\n'}],true]],
+};
+
+// The second sitting's (F33): the marked ring is dropped with nothing ready and filled with an answer; the plain
+// sentence enters in each of the first sitting's forms; two blocks, the sentence then the mark alone, are recorded.
+// Each frame: [label, content, expect ('drop' | 'enter' | 'fill' | null: recorded), the hook's text wanted, an answer first].
+const IMG={type:'image',source:{type:'base64',media_type:'image/png',data:PNG}};
+const txt=text=>({type:'text',text});
+const P9_MARK={
+ 'p9-mark-string':[['the ring, nothing ready',RING,'drop',RING],['the plain sentence',SENTENCE,'enter',SENTENCE],['the sentence and a line break',SENTENCE+'\n','enter'],
+  ['a line break and the sentence','\n'+SENTENCE,'enter'],['the ring, an answer pending',RING,'fill',RING,true]],
+ 'p9-mark-block':[['the ring, nothing ready',[txt(RING)],'drop',RING],['the plain sentence',[txt(SENTENCE)],'enter',SENTENCE],['the sentence and a line break',[txt(SENTENCE+'\n')],'enter'],
+  ['a line break and the sentence',[txt('\n'+SENTENCE)],'enter'],['the sentence, then a line break as a second block',[txt(SENTENCE),txt('\n')],'enter'],
+  ['the sentence and an image',[txt(SENTENCE),IMG],'enter'],['the sentence, then the mark alone as a second block',[txt(SENTENCE),txt(MARK)],null],
+  ['the ring, an answer pending',[txt(RING)],'fill',RING,true]],
 };
 async function p9One(cell){
  const r=scratchRoot(cell),sid=randomUUID();
@@ -275,26 +295,125 @@ async function p9One(cell){
  const hookLines=()=>existsSync(r.debug)?readFileSync(r.debug,'utf8').split('\n').filter(l=>l.includes('qc5-probe: prompt.submit')).map(l=>{try{return JSON.parse(l.slice(l.indexOf('{')));}catch{return null;}}):[];
  try{
   await init(p,r);await quiet(p,2000,15000);
-  for(const [label,content,pending] of P9_FRAMES[cell]){
+  for(const [label,content,expect,hookWant,pending] of (P9_MARK[cell]??P9_FRAMES[cell].map(([l,c,pd])=>[l,c,undefined,undefined,pd]))){
    if(pending){const q=await ask(p,r,sid,1);seen=hookLines().length;if(q){answer(p,r,sid,q.id,'Beta');await waitPending(p,r,sid);await delay(6000);}}
    const n=stub.requests.length;const t=await turn(p,content);await quiet(p);const s=step(p,stub,`${cell}: ${label}`,t.from,n);
    const lines=hookLines();const hook=lines.slice(seen);seen=lines.length;
    const req=s.requests.find(x=>x.main);
-   sent.push({label,content,uuid:t.uuid,hookText:hook.map(x=>x?.text??null),hookEvent:hook.map(x=>x?{fields:x.fields,event:x.event}:null),dropped:s.wire.some(w=>w.prompt_submit_outcome?.kind==='dropped_by_hook'),modelCalls:s.requests.filter(x=>x.main).length,delivered:!!req?.deliveries?.length,requestLast:req?.last?.raw??null});
+   sent.push({label,content,expect,hookWant,imageInRequest:req?(req.last?.types??[]).includes('image'):null,uuid:t.uuid,hookText:hook.map(x=>x?.text??null),hookEvent:hook.map(x=>x?{fields:x.fields,event:x.event}:null),dropped:s.wire.some(w=>w.prompt_submit_outcome?.kind==='dropped_by_hook'),modelCalls:s.requests.filter(x=>x.main).length,delivered:!!req?.deliveries?.length,requestLast:req?.last?.raw??null});
   }
  }catch(e){p.note({event:'scenario_error',error:e.stack});console.error(e.message);}
  const {raw,debug}=await finish(p,stub,r,sid);
  for(const x of sent){const row=raw.find(y=>y.type==='user'&&y.uuid===x.uuid);x.savedRow=row?{content:row.message?.content,entrypoint:row.entrypoint??null}:null;}
  const ringLines=debug.filter(l=>/a ring is (filled|dropped)/.test(l)).map(l=>l.replace(/^.*\$\.ui\.log \(to debug\): /,''));
+ if(P9_MARK[cell]){
+  // each frame as expected: dropped, entered (nothing dropped, an image in the request where one was sent) or filled
+  for(const x of sent){
+   x.got=x.dropped?'drop':x.delivered?'fill':'enter';
+   x.hookExact=x.hookWant===undefined?null:x.hookText.length===1&&x.hookText[0]===x.hookWant;
+   x.ok=x.expect===null?null:x.got===x.expect&&x.hookExact!==false&&(!x.label.includes('image')||x.imageInRequest===true);
+  }
+  const markKept=sent.filter(x=>x.hookWant===RING).every(x=>x.hookExact);
+  const answer=sent.every(x=>x.ok!==false)?'the mark is kept and every plain form enters':markKept?'a plain form is still dropped (stop S9)':'the mark is not kept in e.text (the U+200B branch)';
+  return verdict(p,cell,{answer,sent:sent.map(({content,...x})=>x),ringLines});
+ }
  const broken=sent.filter(x=>x.label.startsWith('the sentence and a line break'));
- const kept=broken.every(x=>!x.dropped&&x.hookText.length===1&&x.hookText[0]===RING+'\n')&&broken.some(x=>x.savedRow&&JSON.stringify(x.savedRow.content).includes(JSON.stringify(RING+'\n').slice(1,-1)));
+ const kept=broken.every(x=>!x.dropped&&x.hookText.length===1&&x.hookText[0]===SENTENCE+'\n')&&broken.some(x=>x.savedRow&&JSON.stringify(x.savedRow.content).includes(JSON.stringify(SENTENCE+'\n').slice(1,-1)));
  return verdict(p,cell,{answer:kept?'kept':'trimmed',sent:sent.map(({content,...x})=>x),ringLines});
 }
-async function p9(){return {'p9-string':await p9One('p9-string'),'p9-block':await p9One('p9-block')};}
+async function p9(){return {'p9-mark-string':await p9One('p9-mark-string'),'p9-mark-block':await p9One('p9-mark-block')};}
+async function p9first(){return {'p9-string':await p9One('p9-string'),'p9-block':await p9One('p9-block')};}
 
-const CELLS={p6,p7,p8,p9};
+// ---------------------------------------------------------------- the W cells: M1's behaviour on the wire
+// What a step's frames say of a ring: dropped by the tool (B2's frames, the reason RING_DROP), and how many requests
+// reached the model; `deliveries`, how many envelopes the step's last request holds (the history: each once at most).
+function ringStep(s){
+ const drop=s.wire.find(w=>w.prompt_submit_outcome?.kind==='dropped_by_hook');
+ const main=s.requests.filter(x=>x.main);
+ return {dropped:!!drop,reason:drop?.prompt_submit_outcome?.reason??null,modelCalls:main.length,deliveries:main.at(-1)?.deliveries?.length??0,
+  frames:s.wire.filter(w=>w.type!=='stream_event').map(w=>[w.type,w.subtype??w.state??null].filter(Boolean).join('/'))};
+}
+const dismiss=(p,r,sid,id)=>{const x=cli(r,['sheet','dismiss','--session',sid,id]);p.note({event:'qc5_dismiss',id,code:x.code,out:x.out.slice(0,300),err:x.err});return x;};
+// The transcript's records whole but for its listings (the probe's redact runs on every journal row).
+const keepWhole=row=>!(row.type==='attachment'&&!['hook_additional_context','queued_command','edited_text_file'].includes(row.attachment?.type));
+function noteWhole(p,raw,label){const rows=raw.filter(keepWhole).map(x=>{const t=JSON.stringify(x);return t.length>6000?{cut:true,uuid:x.uuid,type:x.type,head:t.slice(0,6000)}:x;});p.note({event:'qc5_transcript_whole',label,rows});return rows;}
+// A ring's record in the file, and the hook context attached to it: the attachment row that names it as its parent, or
+// the one the ring's record names as its own.
+function ringRecords(raw,uuid){
+ const rec=raw.find(x=>x.type==='user'&&x.uuid===uuid)??null;
+ const att=raw.filter(x=>x.type==='attachment'&&x.attachment?.type==='hook_additional_context'&&x.attachment?.hookName==='prompt.submit');
+ // the prompt an attachment belongs to: up its parents through other attachment rows (a budget row sits between, 2.1.331)
+ const byUuid=new Map(raw.filter(x=>x.uuid).map(x=>[x.uuid,x]));
+ const promptOf=a=>{let x=a,hops=0;while(x&&x.type==='attachment'&&hops++<20)x=byUuid.get(x.parentUuid);return x??null;};
+ const bound=rec?att.find(a=>promptOf(a)?.uuid===rec.uuid)??null:null;
+ const chain=[];if(bound){let x=bound;while(x&&x.uuid!==rec.uuid){chain.push({uuid:x.uuid,type:x.type,attachment:x.attachment?.type??null});x=byUuid.get(x.parentUuid);}}
+ return {record:rec,bound,chain,hookRows:att.map(a=>({uuid:a.uuid,parentUuid:a.parentUuid,prompt:promptOf(a)?.uuid??null,entrypoint:a.entrypoint??null}))};
+}
+const deliveredOnce=stub=>{const m=stub.requests.filter(x=>x.main);return m.length?m.at(-1).deliveries.length:0;};
+
+async function w1(){
+ const cell='w1',r=scratchRoot(cell),sid=randomUUID();
+ const {p,stub}=await launch(`qsheet-c5-m1-${cell}`,r,sid,{cell});
+ const out={};let ringUuid=null;
+ try{
+  await init(p,r);await quiet(p,2000,15000);
+  const q=await ask(p,r,sid,1);
+  answer(p,r,sid,q.id,'Beta');await waitPending(p,r,sid);await delay(6000);
+  const n=stub.requests.length;const t=await turn(p,RING);ringUuid=t.uuid;await quiet(p);
+  const s=step(p,stub,'w1: a ring to an idle session, an answer pending',t.from,n);
+  Object.assign(out,ringStep(s));
+  const req=s.requests.find(x=>x.main);
+  // the envelope and the sentence in one message: the last user message holds both
+  out.sameMessage=!!req&&req.last.text.includes('<sheet-delivery>')&&req.last.text.includes(RING);
+  const m=noteSheet(p,r,sid,'after the ring');
+  out.pending=(m?.pending??[]).length;out.deliveredAt=m?.closed?.[q.id]?.deliveredAt??null;out.id=q.id;
+ }catch(e){p.note({event:'scenario_error',error:e.stack});console.error(e.message);}
+ const {raw,debug}=await finish(p,stub,r,sid);
+ out.historyDeliveries=deliveredOnce(stub);
+ const rr=ringRecords(raw,ringUuid);p.note({event:'qc5_ring_records',label:'the ring',...rr});
+ out.ringRecord=rr.record?{entrypoint:rr.record.entrypoint??null,content:rr.record.message?.content,promptSource:rr.record.promptSource??null,origin:rr.record.origin??null}:null;
+ out.bound=rr.bound?{uuid:rr.bound.uuid,entrypoint:rr.bound.entrypoint??null,chain:rr.chain}:null;
+ out.hookRows=rr.hookRows;
+ out.ringLines=debug.filter(l=>/a ring is (filled|dropped)|landed/.test(l)).map(l=>l.replace(/^.*\$\.ui\.log \(to debug\): /,''));
+ const stop=!out.ringRecord?.entrypoint;
+ out.answer=stop?'stop S1: the ring\'s record names no entrypoint':!out.dropped&&out.historyDeliveries===1&&out.sameMessage&&out.pending===0&&!!out.deliveredAt&&!!out.bound?'pass':'fail';
+ return verdict(p,cell,out);
+}
+
+async function w2(){
+ const cell='w2',r=scratchRoot(cell),sid=randomUUID();
+ const {p,stub}=await launch(`qsheet-c5-m1-${cell}`,r,sid,{cell});
+ const out={};
+ try{
+  await init(p,r);await quiet(p,2000,15000);
+  let n=stub.requests.length,t=await turn(p,RING);await quiet(p);
+  out.nothing={...ringStep(step(p,stub,'w2: a ring, nothing pending',t.from,n)),uuid:t.uuid};
+  const q=await ask(p,r,sid,1);dismiss(p,r,sid,q.id);await waitPending(p,r,sid);await delay(6000);
+  n=stub.requests.length;t=await turn(p,RING);await quiet(p);
+  out.dismissal={...ringStep(step(p,stub,'w2: a ring, only a dismissal pending',t.from,n)),uuid:t.uuid};
+  noteSheet(p,r,sid,'after the second ring');
+  n=stub.requests.length;t=await turn(p,'QC5-HELLO: say hello.');await quiet(p);
+  const s=step(p,stub,'w2: a person\'s message of other words',t.from,n);
+  const req=s.requests.find(x=>x.main);
+  out.person={...ringStep(s),answered:s.wire.some(w=>w.type==='result'&&w.result==='HELLO'),carries:req?.deliveries??[]};
+  const m=noteSheet(p,r,sid,'after the person\'s message');out.pending=(m?.pending??[]).length;
+ }catch(e){p.note({event:'scenario_error',error:e.stack});console.error(e.message);}
+ const {raw,debug}=await finish(p,stub,r,sid);
+ // §Y's rule for a dropped ring is written from what the file keeps of each drop: every record kept whole
+ noteWhole(p,raw,'the whole transcript but its listings');
+ const dropRows=raw.filter(x=>x.promptSubmitEnding||x.prompt_submit_outcome||(x.type==='system'&&/dropped/i.test(JSON.stringify(x.content??''))));
+ out.fileDrops=dropRows.map(x=>({type:x.type,subtype:x.subtype??null,level:x.level??null,content:x.content??null,promptSubmitEnding:x.promptSubmitEnding??null,preventContinuation:x.preventContinuation??null,prompt_submit_outcome:x.prompt_submit_outcome??null,parentUuid:x.parentUuid??null,entrypoint:x.entrypoint??null,uuid:x.uuid}));
+ out.ringRowsInFile=[out.nothing?.uuid,out.dismissal?.uuid].map(u=>raw.some(x=>x.uuid===u));
+ out.ringLines=debug.filter(l=>/a ring is (filled|dropped)/.test(l)).map(l=>l.replace(/^.*\$\.ui\.log \(to debug\): /,''));
+ const dropOk=x=>x?.dropped&&x.reason===RING_DROP&&x.modelCalls===0;
+ out.answer=dropOk(out.nothing)&&dropOk(out.dismissal)&&out.person?.answered&&out.person.carries.some(d=>d.replace(/\\"/g,'"').includes('"dismissed":["q1"]'))&&out.pending===0?'pass':'fail';
+ return verdict(p,cell,out);
+}
+
+const CELLS={p6,p7,p8,p9,'p9-first':p9first,w1,w2};
 export default async()=>{
- const only=(env0.QC5_ONLY||Object.keys(CELLS).join(',')).split(',').filter(Boolean);
+ // the whole set by default; `p9-first` (the first sitting's frames, M1 at 34e1942ca) only when named
+ const only=(env0.QC5_ONLY||Object.keys(CELLS).filter(c=>c!=='p9-first').join(',')).split(',').filter(Boolean);
  for(const c of only)if(!CELLS[c])throw new Error(`QC5_ONLY: no cell ${c} (${Object.keys(CELLS).join(', ')})`);
  for(const c of only)await CELLS[c]();
 };
