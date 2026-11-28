@@ -230,6 +230,8 @@ test('the question sheet live: a terminal session asks on its sheet and is answe
       expect(carrying, 'one delivery block carries the Send’s keys').toHaveLength(1);
       // the block pairs its keys and its answers by position (X3): each key with the answer its own line sent
       const { block } = carrying[0]!;
+      expect(block.answered, 'the block answers the three, nothing more').toHaveLength(ids.length);
+      expect(block.dismissed, 'and dismisses nothing').toEqual([]);
       expect(block.keys.map((key, n) => [key, block.answered[n]]), 'each key paired with its question, its pick and its text').toEqual(
         lines.map((line) => [String(line.key), { id: String(line.id), picks: picked.has(String(line.id)) ? [picked.get(String(line.id))!.pick] : [], text: typed.get(String(line.id))! }]),
       );
@@ -369,6 +371,7 @@ test('the question sheet live: a terminal session asks on its sheet and is answe
       expect(verdicts[winner], 'applied').toMatchObject({ verdict: 'applied', kind: 'answer', id });
       expect(verdicts[loser], 'the other closed: already answered').toMatchObject({ verdict: 'closed', kind: 'answer', id, how: 'answered' });
       const [taken, late] = [String(keyOf[winner]), String(keyOf[loser])];
+      expect(appended.slice(0, 2).map((l) => String(l.key)), 'the first appended wins: the applied key, then the refused one').toEqual([taken, late]);
       expect(state().closed[id!]?.key, 'the question closed by the winner').toBe(taken);
       // the losing window, known from its key, reads the refusal; the winning one reads none
       const refusal = sheetTool(windows[loser]!).locator(`[data-sheet-note="${late}"]`);
