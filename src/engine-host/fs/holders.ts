@@ -10,7 +10,7 @@
 // The `sessions/` watch is the fast path to a new or changed record; the poll is the floor under it. While a holder is
 // known the poll re-reads the registry outright, since a killed process leaves its record behind and only liveness ends
 // it. While none is known it lists `sessions/` and stats each record, and re-reads only when that differs from what the
-// last read listed: a record whose event FSEvents delayed or dropped (an overloaded fseventsd loses some outright) is
+// last read listed or that read failed: a record whose event FSEvents delayed or dropped (an overloaded fseventsd loses some outright) is
 // found within one period, for a readdir and a stat per record rather than a read of each and a `ps`.
 // Read-only: registry and job files are read, never written or removed.
 import { execFile } from 'node:child_process';
@@ -59,6 +59,7 @@ export const POLL_MS = 2_000;
 export const JOB_STATE_MAX_BYTES = 8 * 1024 * 1024; // the engine's own cap; a larger state.json is treated as absent
 const NONE: Holder = { kind: 'none' };
 const REGISTRY_FILE = /^(\d+)\.json$/;
+const UNLISTABLE = 'unlistable:';
 
 interface Held {
   holder: Holder;
@@ -120,8 +121,13 @@ export class HolderRegistry {
     if (this.queuedRefresh) return this.queuedRefresh;
     const run = this.serial(async () => {
       this.queuedRefresh = null;
-      this.listed = await this.listing(); // before the read, so a change made during it differs at the next tick
+      // Listed before the read, so a change made during it differs at the next tick, and kept only once the read
+      // succeeds, so the next idle tick retries a read that failed; a directory that cannot be listed at all is retried
+      // when that changes, not on every tick.
+      const listed = await this.listing();
+      this.listed = listed.startsWith(UNLISTABLE) ? listed : null;
       const unreadable = await this.readRegistry();
+      if (unreadable === null) this.listed = listed;
       await this.recompute(); // the poll's view carries on from the records it could read and the ones it kept
       // A record the filesystem refused is not an answer about that process: an on-demand query must not pass it off.
       return unreadable === null ? null : Object.assign(new Error(`registry record unreadable: ${unreadable}`), { code: unreadable });
@@ -191,25 +197,26 @@ export class HolderRegistry {
     if (this.held.size > 0 || (await this.listing()) !== this.listed) await this.refresh();
   }
 
-  // `sessions/` as each record's name, inode, mtime and size: a record added, removed, replaced or rewritten in place
-  // changes it. A listing the filesystem refuses is its errno, so a lasting failure is refreshed (and logged) once.
+  // `sessions/` as each record's name, inode, size, mtime and ctime: a record added, removed, replaced or rewritten in
+  // place changes it (ctime too, which no writer can set back). A record that cannot be statted is its name and errno,
+  // beside the others; a directory that cannot be listed is UNLISTABLE and its errno.
   private async listing(): Promise<string> {
     try {
       const names = (await listNames(this.paths.sessions)).filter((name) => REGISTRY_FILE.test(name)).sort();
       const entries = await Promise.all(
         names.map(async (name) => {
           try {
-            const { ino, mtimeMs, size } = await stat(join(this.paths.sessions, name));
-            return `${name}:${ino}:${mtimeMs}:${size}`;
+            const { ino, size, mtimeMs, ctimeMs } = await stat(join(this.paths.sessions, name));
+            return `${name}:${ino}:${size}:${mtimeMs}:${ctimeMs}`;
           } catch (error) {
             if (isMissing(error)) return null; // unlinked since the readdir
-            throw error;
+            return `${name}:${(error as NodeJS.ErrnoException).code ?? String(error)}`;
           }
         }),
       );
       return entries.filter((entry) => entry !== null).join('\n');
     } catch (error) {
-      return `unlistable:${(error as NodeJS.ErrnoException).code ?? String(error)}`;
+      return `${UNLISTABLE}${(error as NodeJS.ErrnoException).code ?? String(error)}`;
     }
   }
 

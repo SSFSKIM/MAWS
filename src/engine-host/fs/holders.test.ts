@@ -231,6 +231,22 @@ describe('holders come from live sessions/<pid>.json records', () => {
     expect(emitted).toHaveLength(1);
   });
 
+  it('with no holder known, a record that could not be read is read again once it can be', async () => {
+    const holders = create({ pollMs: 50 });
+    await holders.start();
+    const path = join(fixture.paths.sessions, `${process.pid}.json`);
+    await writeFile(path, JSON.stringify({ sessionId: S1, kind: 'interactive' }), { mode: 0o000 }); // the fixture's own temp file
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      await expect.poll(() => errors.mock.calls.some((call) => String(call[0]).includes('unreadable')), { timeout: 2_000, interval: 10 }).toBe(true);
+      expect(holders.holderOf(S1)).toEqual({ kind: 'none' });
+      await chmod(path, 0o644);
+      await expect.poll(() => holders.holderOf(S1), { timeout: 1_000, interval: 10 }).toEqual({ kind: 'terminal', pid: process.pid });
+    } finally {
+      errors.mockRestore();
+    }
+  });
+
   // W7 (charter §4.3 as amended 2026-10-01; pass3/w7-collision: MAWS's own `-p` process registers as `interactive`,
   // `entrypoint: 'sdk-ts'`, the terminal's as `cli`).
   describe('MAWS\'s own records', () => {
