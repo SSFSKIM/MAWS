@@ -65,6 +65,7 @@ import type { AcquisitionMemory } from './availability';
 import { EXIT_WAIT_MS } from './context';
 import { Work } from '../work'; // P5 O3-D M2
 import { acquireOutcomeOf, acquireOutcomeOfGuard, canonicalOptions, capturingSetup, InflightRegistry, type Registration } from './inflight';
+import { heldToCeiling } from './setup-steps';
 import { LaunchWatch } from './launch-watch';
 // P2-A end
 import type { CommandInput, CommandOutput } from '@shared/ipc/schema'; // P5 O3-D M4
@@ -139,8 +140,8 @@ export class SessionService {
   // P5 O3-D M4 (D18): each session's last act while it is a rewind, which a resume repeats (rewind-note.ts)
   private readonly rewinds: RewindNotes;
   private readonly spawnerProofs: SpawnerProofs; // P5 O12 M11: a remote spawn's proof, beside its record
-  // Observation set 4's review: the sessions whose launch another machine asked for, held to the ceiling (Setup's
-  // `askedElsewhere`): a fork for the service's life, an acquisition while it is asked
+  // Observation set 4's review: the forks another machine asked for, every launch of them held to the ceiling (Setup's
+  // `askedElsewhere`), for the service's life
   private readonly askedElsewhere = new Set<AppSessionId>();
   private offStatus: (() => void) | null = null;
   private readonly handoverResumes = new Set<string>(); // P5 O16 M3b (D58a): the launch ids already resumed after a failed re-initialize
@@ -1039,31 +1040,28 @@ export class SessionService {
   // gestures call it (nothing on mount, on a poll or on a timer); `reason` is logged and nothing branches on it.
   acquire(appSessionId: AppSessionId, reason: AcquireReason, options: StartOptions = {}): Promise<AcquireOutcome> {
     this.log(`acquire ${appSessionId} (${reason})`);
-    return this.acquireOrJoin(appSessionId, options);
+    return this.acquireOrJoin(appSessionId, options, false);
   }
 
   // Observation set 4's review: `session.acquire` asked from another machine (the handler's context carries the
   // operation's claim). The resume it launches falls back from a refused auto to no mode above the machine's ceiling, as a
-  // spawn and a fork from another machine do; one that joins a launch already under way takes that launch as it is.
-  async acquireFromAnotherMachine(appSessionId: AppSessionId, reason: AcquireReason, options: StartOptions = {}): Promise<AcquireOutcome> {
-    const marked = !this.askedElsewhere.has(appSessionId);
-    this.askedElsewhere.add(appSessionId);
-    try {
-      return await this.acquire(appSessionId, reason, options);
-    } finally {
-      if (marked) this.askedElsewhere.delete(appSessionId);
-    }
+  // spawn and a fork from another machine do. The origin travels with the acquisition, through a wait for a run with
+  // other options, to the run it launches; one that joins a launch already under way takes that launch as it is, as it
+  // takes a session already ready, and a launch this machine asked for is never held to it by another machine's join.
+  acquireFromAnotherMachine(appSessionId: AppSessionId, reason: AcquireReason, options: StartOptions = {}): Promise<AcquireOutcome> {
+    this.log(`acquire ${appSessionId} (${reason}, from another machine)`);
+    return this.acquireOrJoin(appSessionId, options, true);
   }
 
-  private acquireOrJoin(appSessionId: AppSessionId, options: StartOptions): Promise<AcquireOutcome> {
+  private acquireOrJoin(appSessionId: AppSessionId, options: StartOptions, elsewhere: boolean): Promise<AcquireOutcome> {
     const entry = this.inflight.get(appSessionId);
-    if (entry === undefined) return this.acquirable(appSessionId) ? this.acquireOnce(appSessionId, options) : this.refuseUnknown(appSessionId);
+    if (entry === undefined) return this.acquirable(appSessionId) ? this.acquireOnce(appSessionId, options, elsewhere) : this.refuseUnknown(appSessionId);
     const own = canonicalOptions(options);
     if (entry.kind !== 'take-over' && (own === '{}' || own === entry.options)) {
       entry.joinedByAcquisition(); // W2-A: the rest of a record start's phases stream tagged; this reply tells its end
       return entry.done.then((outcome) => (outcome.status === 'ready' ? { ...outcome, joined: true } : outcome));
     }
-    const settled = () => this.acquireOrJoin(appSessionId, options);
+    const settled = () => this.acquireOrJoin(appSessionId, options, elsewhere);
     return entry.done.then(settled, settled);
   }
 
@@ -1087,12 +1085,12 @@ export class SessionService {
 
   // One acquisition: registered in the caller's tick, its memory published (in flight, the last answer cleared), the
   // steps run, and the answer remembered when it is a card, a missing directory or a failure.
-  private async acquireOnce(appSessionId: AppSessionId, options: StartOptions): Promise<AcquireOutcome> {
+  private async acquireOnce(appSessionId: AppSessionId, options: StartOptions, elsewhere: boolean): Promise<AcquireOutcome> {
     this.lastAttempt.delete(appSessionId);
     const registration = this.inflight.open(appSessionId, 'acquire', options);
     let outcome: AcquireOutcome;
     try {
-      outcome = await this.acquisition(appSessionId, options, registration);
+      outcome = await this.acquisition(appSessionId, options, registration, elsewhere);
     } catch (error) {
       this.remember(appSessionId, 'failed', error instanceof Error ? error.message : String(error));
       registration.end({ error });
@@ -1104,7 +1102,7 @@ export class SessionService {
     return outcome;
   }
 
-  private async acquisition(appSessionId: AppSessionId, options: StartOptions, registration: Registration): Promise<AcquireOutcome> {
+  private async acquisition(appSessionId: AppSessionId, options: StartOptions, registration: Registration, elsewhere: boolean): Promise<AcquireOutcome> {
     const s = await this.ready();
     if (!this.acquirable(appSessionId)) return this.refusal(appSessionId); // the intents are loaded only once ready
     // the watch before the reservation read, so a ready status landing between the two is not missed
@@ -1125,13 +1123,13 @@ export class SessionService {
     } finally {
       watch.dispose();
     }
-    return this.resumeForAcquisition(appSessionId, options, registration);
+    return this.resumeForAcquisition(appSessionId, options, registration, elsewhere);
   }
 
   // The guarded resume under the id's lock and the `starting` mark, the record read again first: an archive or a delete
   // holds the same lock and may have run while the steps above waited. Nothing is retained (no message), so a card's
   // continuation is the caller's own next acquisition.
-  private async resumeForAcquisition(appSessionId: AppSessionId, options: StartOptions, registration: Registration): Promise<AcquireOutcome> {
+  private async resumeForAcquisition(appSessionId: AppSessionId, options: StartOptions, registration: Registration, elsewhere: boolean): Promise<AcquireOutcome> {
     const release = await this.lock(appSessionId);
     this.starting.add(appSessionId);
     if (this.unrecovered !== null) this.startedSince.add(appSessionId); // E10
@@ -1139,7 +1137,8 @@ export class SessionService {
       const record = this.deps.index.sessions.get(appSessionId);
       if (record === null || this.deps.intents.get(appSessionId) !== null) return this.refusal(appSessionId);
       const captured = capturingSetup(this.s, appSessionId, registration.tagged); // its phases stream tagged: the reply tells its end
-      const [guard, run] = await guardResumeStart(captured.setup, record, { message: null, options }, this.resumeMessages);
+      const setup = elsewhere ? heldToCeiling(captured.setup, appSessionId) : captured.setup; // observation set 4's review
+      const [guard, run] = await guardResumeStart(setup, record, { message: null, options }, this.resumeMessages);
       registration.guard(guard);
       if (run === null) return acquireOutcomeOfGuard(guard);
       await run();

@@ -436,6 +436,32 @@ describe('session.spawn on the spine', () => {
     expect(await fallbackOf((local as { value: { appSessionId: string } }).value.appSessionId)).toBe('bypassPermissions');
   });
 
+  // The ceiling travels with the acquisition that launches, not with the session's id: a second acquisition from another
+  // machine, queued behind a first that answers a trust card, launches held to it after the first has ended.
+  it('holds the auto fallback of a remote acquisition queued behind another remote one that answered a trust card', async () => {
+    const owned = 'e0000000-0000-4000-8000-0000000000c6' as SessionId;
+    const permissionMode = { requested: 'auto' as const, effective: 'auto' as const, refusal: null };
+    let localId = '' as AppSessionId;
+    const { bus, launched } = await composed({
+      autoFallback: 'bypassPermissions',
+      aboveCeiling: (mode) => mode === 'dontAsk' || mode === 'bypassPermissions', // the ceiling auto
+      seed: (index) => {
+        localId = index.sessions.createForLaunch({ directory: checkout, additionalDirectories: [], worktree: null, model: { requested: null, resolved: null }, effort: null, permissionMode }).record.appId;
+        index.sessions.bindEngineId(localId, owned);
+      },
+    });
+    const transcript = await transcriptPathOf({ CLAUDE_CONFIG_DIR: config, HOME: join(dir.path, 'home') }, checkout, owned);
+    mkdirSync(dirname(transcript), { recursive: true });
+    writeFileSync(transcript, `${JSON.stringify({ type: 'user', sessionId: owned, uuid: 'u1', message: { role: 'user', content: 'hi' } })}\n`);
+    const claim = { member: 'mem-a', device: 'dev-1', fingerprint: 'fp-1' };
+    const acquire = (n: number, options: Record<string, unknown>) =>
+      bus.main('machine.op', { opId: `9b8f3a52-0000-4000-8000-0000000000d${n}`, opCreated: new Date().toISOString(), claim, name: 'session.acquire', input: { appSessionId: localId, reason: 'resume', options } });
+    const [card, accepted] = await Promise.all([acquire(1, {}), acquire(2, { trust: 'accepted' })]); // the checkout is not trusted
+    expect(card).toMatchObject({ ok: true, value: { state: 'done', result: { ok: true, value: { status: 'needs_trust' } } } });
+    expect(accepted).toMatchObject({ ok: true, value: { state: 'done', result: { ok: true, value: { status: 'ready', launched: true } } } });
+    expect(launched.filter((spec) => spec.appSessionId === localId).map((spec) => spec.permissionFallback)).toEqual(['acceptEdits']);
+  });
+
   it('resumes a spawned record naming its spawner, a lost proof written again first; its fork, the trust bootstrap and a session nobody spawned name nobody; the delete takes the proof', async () => {
     trust(checkout);
     const engine = 'e0000000-0000-4000-8000-0000000000e1' as SessionId;

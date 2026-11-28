@@ -53,7 +53,8 @@ export interface Setup {
   hostLists(capability: string): Promise<boolean>;
   systemRoot?: string;
   // Observation set 4's review: the machine's ceiling over a session started from another machine (absent in the deps,
-  // every mode refused), and the sessions whose launch another machine asked for (a fork, an acquisition), held to it
+  // every mode refused), and the sessions whose launches another machine asked for (a fork, or the one run of an
+  // acquisition: `heldToCeiling`), held to it
   aboveCeiling: CeilingCheck;
   askedElsewhere: ReadonlySet<AppSessionId>;
 }
@@ -62,6 +63,9 @@ export interface Setup {
 // another machine asked for; null for every launch of this machine's own.
 export const launchCeiling = (s: Pick<Setup, 'aboveCeiling' | 'askedElsewhere'>, appSessionId: AppSessionId, launchedBy: unknown): CeilingCheck | null =>
   launchedBy !== undefined || s.askedElsewhere.has(appSessionId) ? s.aboveCeiling : null;
+
+// The setup of one run another machine asked for: its launches of the id are held to the ceiling, and no other run's.
+export const heldToCeiling = (s: Setup, appSessionId: AppSessionId): Setup => ({ ...s, askedElsewhere: new Set(s.askedElsewhere).add(appSessionId) });
 
 // ---- failures ------------------------------------------------------------------------------------------------------
 
