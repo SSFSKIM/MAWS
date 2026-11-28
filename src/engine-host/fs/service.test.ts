@@ -652,7 +652,10 @@ describe('filesystem state service: discovery, sidecars and holders', () => {
 
   it('a terminal\'s record whose sessions/ event never comes is still found, by the idle poll, within its period', async () => {
     await fixture.addTranscript('/work/a', S1, [user('u1', null, '/work/a', 'first')]);
-    service = new FsService({ paths: fixture.paths, emit: (name, payload) => void emitted.push({ name, payload } as Emitted), watch: deafWatch, holders: { pollMs: 100 } });
+    service = new FsService({ paths: fixture.paths, emit: (name, payload) => {
+      emitted.push({ name, payload } as Emitted);
+      return true;
+    }, watch: deafWatch, holders: { pollMs: 100 } });
     await service.start();
     service.bind([{ sessionId: S1, appSessionId: A1 }]);
     await settled(); // the settle rescan, which is not the watch, has run and found nothing
