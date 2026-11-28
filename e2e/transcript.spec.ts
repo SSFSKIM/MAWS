@@ -847,11 +847,11 @@ test('an open call folds at a click on its blank space, a drag folds nothing, an
   const { page } = harness;
   await harnessReady(page);
   await blockHumanInput(page);
-  await load(page, 'p4/p4-tool-summaries-live');
-  await play(page, 0);
+  await loadAll(page, 'p4/p4-tool-summaries-live');
+  // turn 1 is read once it exists: on a slow host its rows can land after the first released batch
+  await expect.poll(() => turnIdOf(page, 1).then(() => true, () => false), { message: 'turn 1 released', timeout: 20_000 }).toBe(true);
   const turn = await turnIdOf(page, 1);
   await expect(page.locator(`${rowSelector(`divider:${turn}`)} button.transcript-disclosure`)).toHaveText(FINISHED_TURN_LINE);
-  await settle(page, 300);
   await page.evaluate(() => (window as unknown as HarnessWindow).__maws_harness.expandTurn(1));
   const run = page.locator(`[data-kind="group"][data-turn-id="${turn}"]`);
   const line = run.locator('.transcript-run-line');
