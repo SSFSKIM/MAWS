@@ -91,6 +91,22 @@ const distanceFromEnd = (page: Page) =>
     const scroller = document.querySelector<HTMLElement>('[data-transcript-scroller]')!;
     return scroller.scrollHeight - scroller.clientHeight - scroller.scrollTop;
   });
+// The same distance as the next frame paints it. A batch commits its text in the player's tick, and the list follows
+// that growth in its resize observers at the next frame, before paint; a read between the two sees the batch's growth
+// not yet followed, a state no frame shows (hosted Macs read 144 to 176 px there). This read is made in a resize
+// observer created after the list's, so its report follows theirs and the follow they run.
+const paintedDistanceFromEnd = (page: Page) =>
+  page.evaluate(
+    () =>
+      new Promise<number>((resolve) => {
+        const scroller = document.querySelector<HTMLElement>('[data-transcript-scroller]')!;
+        const observer = new ResizeObserver(() => {
+          observer.disconnect();
+          resolve(scroller.scrollHeight - scroller.clientHeight - scroller.scrollTop);
+        });
+        observer.observe(scroller);
+      }),
+  );
 // A list row by its X3 id.
 const rowSelector = (rowId: string) => `[data-row-id="${rowId}"]`;
 
@@ -255,7 +271,7 @@ test('anchoring: 500 turns stream while old work is expanded', async ({ harness 
   await expect.poll(() => distanceFromEnd(page), { message: 'Jump to latest lands within 80 px of the end' }).toBeLessThanOrEqual(80);
   const pinned = await metrics(page);
   await expect.poll(async () => (await metrics(page)).batches, { message: 'more batches arrive' }).toBeGreaterThan(pinned.batches + 30);
-  expect(await distanceFromEnd(page), 'the end stays pinned as batches arrive').toBeLessThanOrEqual(80);
+  expect(await paintedDistanceFromEnd(page), 'the end stays pinned as batches arrive').toBeLessThanOrEqual(80);
   expect((await metrics(page)).following, 'follow mode resumed').toBe(true);
 
   // Reported, not asserted (knowledge for the spike's verdict): frames while the stream renders in view, and over the
@@ -267,7 +283,7 @@ test('anchoring: 500 turns stream while old work is expanded', async ({ harness 
   const run = end.frameIntervals.filter((interval) => (sincePlay += interval) > WARMUP_MS);
   const context = {
     inViewP95: round(p95(inView)), inViewMax: round(Math.max(...inView)), runP95: round(p95(run)), runMax: round(Math.max(...run)),
-    longTasks: end.longTasks.map((task) => round(task.duration)), stillPinned: (await distanceFromEnd(page)) <= 80,
+    longTasks: end.longTasks.map((task) => round(task.duration)), stillPinned: (await paintedDistanceFromEnd(page)) <= 80,
   };
   console.log(`anchoring context: ${JSON.stringify(context)}`);
   test.info().annotations.push({ type: 'anchoring context', description: JSON.stringify(context) });
@@ -502,7 +518,7 @@ test('follow mode breaks on scroll-up and Jump to latest restores it', async ({ 
   await expect(jump).toHaveCount(0);
   const batches = (await metrics(page)).batches;
   await expect.poll(async () => (await metrics(page)).batches).toBeGreaterThan(batches + 30);
-  expect(await distanceFromEnd(page), 'the end stays pinned as batches arrive').toBeLessThanOrEqual(80);
+  expect(await paintedDistanceFromEnd(page), 'the end stays pinned as batches arrive').toBeLessThanOrEqual(80);
   expect(harness.consoleErrors()).toEqual([]);
 });
 
@@ -3319,6 +3335,12 @@ test('zoom: at 110 % and 80 % a streaming transcript keeps following while a key
     const field = s.panel.locator('[data-files-filter]');
     await expect(field).toBeVisible();
     for (const f of FACTORS) {
+      // The last factor's last key retired before the window zooms: the list reads movement as the reader's for
+      // `INPUT_SCROLL_SETTLE_MS` (250 ms, Transcript.tsx) after a page key, and a step out can clamp the offset onto a
+      // rounded end, so a step inside that window is the row's condition met by the zoom rather than by this scene's own
+      // clamp (a loaded guest's renderer runs that timer late). A renderer timer of that length set after the key runs
+      // after the list's.
+      await page.evaluate(() => new Promise((resolve) => setTimeout(resolve, 250)));
       await zoomTo(s.maws.app, page, f);
       const before = (await heights()).sizer;
       await send();
