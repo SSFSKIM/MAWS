@@ -99,6 +99,7 @@ interface Live {
   held: { t: string; session: string; summary: unknown }[] | null; // the changes heard while a list is out, sent after its snapshot
   generation: number; // moved on when the spine is lost: a snapshot begun before then sends nothing
   told: Map<string, string> | null; // what the connection was last told of each session (its summary as JSON) and of the door ('')
+  quiet: boolean; // the snapshot out is the holders' refresh alone: no request of the tab's has joined it
 }
 
 export async function createSheetPageHandler(deps: HandlerDeps): Promise<SheetPageHandler> {
@@ -123,10 +124,10 @@ export async function createSheetPageHandler(deps: HandlerDeps): Promise<SheetPa
   });
 
   const refuse = (res: ServerResponse, refused: Refusal) => void res.writeHead(refused.status, refusalHeaders(deps.port(), refused)).end(refused.body);
-  const json = (res: ServerResponse, status: number, value: unknown) => {
-    const body = JSON.stringify(value);
-    res.writeHead(status, { ...STANDING_HEADERS(deps.port()), 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store', 'Content-Length': String(Buffer.byteLength(body)) }).end(body);
-  };
+  // in slices as a file is: a model can be far larger than the socket's buffers, and one write of it would leave the
+  // queue full however fast its peer reads, which the stall watch takes for no progress (serve.ts)
+  const json = (res: ServerResponse, status: number, value: unknown) =>
+    sendBytes(res, status, { ...STANDING_HEADERS(deps.port()), 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' }, Buffer.from(JSON.stringify(value), 'utf8'));
 
   async function sendFile(req: IncomingMessage, res: ServerResponse, file: BundleFile): Promise<void> {
     const headers = { ...STANDING_HEADERS(deps.port()), 'Cache-Control': 'no-cache', ETag: file.etag };
@@ -218,12 +219,18 @@ export async function createSheetPageHandler(deps: HandlerDeps): Promise<SheetPa
   // A snapshot, in §N's order: the hold, the service, discovery, the subscription, then the list. One begun before the
   // spine was lost reads a root that is gone (a yield releases it under the connection's
   // hold, and its service's list does not reject at its stop): it sends nothing, and leaves the connection to the next.
-  // `quiet` (the holders' refresh): the snapshot is sent only when it differs from what the connection was last told.
+  // `quiet` (the holders' refresh): the snapshot is sent only when it differs from what the connection was last told,
+  // unless a request of the tab's joined it while it was out, which is answered whatever it finds.
   async function snapshot(connection: Live, quiet = false): Promise<void> {
-    if (connection.held || !live.has(connection)) return; // one is out: its answer is the snapshot asked for
+    if (!live.has(connection)) return;
+    if (connection.held) {
+      if (!quiet) connection.quiet = false; // one is out: its answer is the snapshot asked for
+      return;
+    }
     const { generation } = connection;
     const current = () => live.has(connection) && connection.generation === generation;
     connection.held = [];
+    connection.quiet = quiet;
     try {
       connection.release ??= deps.hold('the sheet page: a live connection', true);
       const service = await deps.sheets.service();
@@ -238,7 +245,7 @@ export async function createSheetPageHandler(deps: HandlerDeps): Promise<SheetPa
       const held = connection.held;
       connection.held = null;
       const now = toldOf(sessions, door);
-      if (!(quiet && connection.ready && sameAs(connection.told, now))) {
+      if (!(connection.quiet && connection.ready && sameAs(connection.told, now))) {
         connection.ready = true;
         connection.told = now;
         send(connection, { t: 'ready', v: 1, sessions, door });
@@ -282,7 +289,7 @@ export async function createSheetPageHandler(deps: HandlerDeps): Promise<SheetPa
   };
 
   function open(ws: WebSocket): void {
-    const connection: Live = { ws, step: 'hello', browser: null, heard: Date.now(), listed: 0, release: null, unsubscribe: null, ready: false, held: null, generation: 0, told: null };
+    const connection: Live = { ws, step: 'hello', browser: null, heard: Date.now(), listed: 0, release: null, unsubscribe: null, ready: false, held: null, generation: 0, told: null, quiet: false };
     live.add(connection);
     const late = () => closeWith(ws, CLOSE.refused, 'too late');
     let deadline = setTimeout(late, timing.helloMs);

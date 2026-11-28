@@ -526,7 +526,35 @@ describe('the stored memory (T19): one entry a thing', () => {
     expect(fresh.readMemory(S, store).sending).toBeNull();
     expect(fresh.readMemory(S, store).acts).toEqual([]);
     expect(store.getItem(`maws.sheet.draft.${S}.q4`)).not.toBeNull(); // the draft the press was made of was never offered up
+    expect(fresh.readMemory(OTHER, store).drafts.get('q1')).toEqual(draft('y'.repeat(5_000))); // what eviction gave up for a write that failed is put back
     expect(fresh.noRoom(S, store)).toBe(true);
+  });
+
+  it('retires a failure held in this window once its stored Send is gone or another press’s: another tab settled it (B6)', async () => {
+    vi.resetModules();
+    const fresh = await import('./memory');
+    const store = testStorage();
+    const target = new EventTarget();
+    const lines = [answer('page-000000000000000000000000001', 'q4', 'a')];
+    const failHeld = (attempt: string, now: number) => {
+      fresh.updateMemory(S, (current) => pressed(current, attempt, lines), { storage: store, now, target });
+      store.quota = Object.entries(store.entries()).reduce((sum, [key, value]) => sum + key.length + value.length, 0);
+      fresh.updateMemory(S, (current) => settle(current, attempt, { ok: false, why: 'failed', message: 'MAWS did not answer.' }), { storage: store, now: now + 1, target });
+      store.quota = null;
+      expect(fresh.readMemory(S, store).sending).toMatchObject({ attempt, state: 'failed' }); // held here: the note did not fit
+      return Object.keys(store.entries()).find((key) => key.startsWith('maws.sheet.send.'))!;
+    };
+    // another tab sent it again and its answer ended it: the stored entry is gone
+    const key = failHeld('wa-1', 1_000);
+    store.removeItem(key);
+    expect(fresh.readMemory(S, store).sending).toBeNull();
+
+    // another tab's press over the same entry, stamped no later than the hold (its clock): the hold is not that press
+    for (const name of Object.keys(store.entries())) store.removeItem(name);
+    const again = failHeld('wa-2', 5_000);
+    const stored = JSON.parse(store.getItem(again)!) as Record<string, unknown>;
+    store.setItem(again, JSON.stringify({ ...stored, touchedAt: 4_000, press: 'wb-9', at: 4_000 }));
+    expect(fresh.readMemory(S, store).sending).toMatchObject({ attempt: 'elsewhere:wb-9', state: 'sending' });
   });
 
   it('forgets what it held in this window when the person unpairs (B6)', async () => {

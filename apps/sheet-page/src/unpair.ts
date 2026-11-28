@@ -7,7 +7,7 @@
 // removal (no proven connection, no answer in time, or a refusal), which can also mean it was already gone, so mawsd may
 // or may not still list it.
 import type { Api, Done } from './api';
-import { forgetPairing, type StoredPairing } from './credential';
+import { CREDENTIAL_KEY, forgetPairing, readPairing, type StoredPairing } from './credential';
 import { forgetUnkept } from './memory';
 
 // `refused`: the connection's opening was refused, or another tab of this browser unpaired it
@@ -35,4 +35,17 @@ export function unpairScreen(deps: { shown: StoredPairing | null; api: Pick<Api,
       if (forgetPairing(pairing, storage)) forgetUnkept(storage);
     },
   });
+}
+
+/**
+ * Another tab of this browser paired anew or unpaired (the storage event of the pairing's key, or of a cleared storage):
+ * the pairing stored now, which this tab follows, or `undefined` for an event of anything else. A removal is another
+ * tab's Unpair, which forgot everything stored, so nothing this tab held stands either: forgotten at the event itself,
+ * even when another pairing has been stored since and is what this tab reads by the time it hears it (a suspended tab).
+ */
+export function pairingStored(event: Pick<StorageEvent, 'key' | 'newValue'>, storage: Storage = localStorage): StoredPairing | null | undefined {
+  if (event.key !== CREDENTIAL_KEY && event.key !== null) return undefined;
+  const now = readPairing(storage);
+  if (event.newValue === null || now === null) forgetUnkept(storage);
+  return now;
 }

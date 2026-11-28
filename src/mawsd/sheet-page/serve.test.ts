@@ -11,7 +11,8 @@ import { join, resolve } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createSheetPage, listenExclusive, SHEET_PORT, STOP_MS, type SheetPage, type SheetPageOptions } from './serve';
 import { registrationName } from './registration';
-import { NO_SHEETS } from './sheets';
+import { NO_SHEETS, type SheetAccess } from './sheets';
+import { HOST, JSON_BODY, ORIGIN, jsonOf, request } from '../../../test/support/sheet-page-client';
 
 // Whether the page asked for `node:http` (T26: a daemon that serves no page loads nothing for it)
 const askedForHttp = () => vi.mocked(process.getBuiltinModule).mock.calls.filter(([id]) => id === 'node:http').length;
@@ -387,6 +388,43 @@ describe('a response that makes no write progress (S2)', () => {
     reader.setNoDelay(true);
     reader.write(`GET /assets/large.js HTTP/1.1\r\nHost: sheet.localhost:${port}\r\nConnection: close\r\n\r\n`);
     await ended;
+    expect(received).toBeGreaterThan(size);
+    expect(logs.some((line) => /made no write progress/.test(line))).toBe(false);
+  }, 60_000);
+});
+
+describe('a sheet’s model read by a slow reader (S2)', () => {
+  it('is not ended while its client reads, however slowly a model far larger than the socket’s buffers arrives', async () => {
+    const size = 12 * 1024 * 1024;
+    const model = { session: '5eed0000-0000-4000-8000-0000000000aa', note: 'c'.repeat(size) }; // only its size matters here
+    const sheets = { service: async () => ({ read: async () => model, door: () => ({ known: false }) }) } as unknown as SheetAccess;
+    mkdirSync(join(scratch, 'mawsd'), { recursive: true }); // where the pairing is saved
+    const made = page({ sheets, timing: { checkMs: 50, stallMs: 400 } });
+    made.start();
+    expect(await settled(made)).toBe('listening');
+    const port = portOf(made);
+    const minted = await made.pair();
+    if (!minted.ok) throw new Error(minted.why);
+    const exchanged = await request(port, 'POST', '/api/pair', [HOST(port), ORIGIN(port), JSON_BODY], JSON.stringify({ code: minted.code }));
+    expect(exchanged.status, exchanged.body.toString()).toBe(200);
+    const paired = jsonOf(exchanged) as { credential: string };
+
+    const reader = createConnection({ host: '127.0.0.1', port });
+    reader.on('error', () => {});
+    await new Promise<void>((done) => reader.once('connect', () => done()));
+    let received = 0;
+    const ended = new Promise<void>((done) => reader.once('close', () => done()));
+    // reads a part at a time, pausing 20 ms after each: the whole takes far longer than stallMs
+    let head = '';
+    reader.on('data', (chunk: Buffer) => {
+      if (received === 0) head = chunk.subarray(0, 600).toString('latin1');
+      received += chunk.length;
+      reader.pause();
+      setTimeout(() => reader.resume(), 20);
+    });
+    reader.write(`GET /api/sheets/${model.session} HTTP/1.1\r\nHost: sheet.localhost:${port}\r\nAuthorization: Bearer ${paired.credential}\r\nConnection: close\r\n\r\n`);
+    await ended;
+    expect(head).toMatch(/^HTTP\/1\.1 200 /);
     expect(received).toBeGreaterThan(size);
     expect(logs.some((line) => /made no write progress/.test(line))).toBe(false);
   }, 60_000);

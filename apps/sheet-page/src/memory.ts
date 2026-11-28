@@ -32,7 +32,7 @@
 // durable before its put, so a press the store will not keep is written nothing of, held nowhere and owned by no window,
 // C3's sheet has no Send to launch, and the sheet says there was no room (`noRoom`). A held entry
 // never hides a later durable write of the same entry, from this window or another: whichever was touched later is read,
-// and a held entry older than storage's is dropped. The person's Unpair forgets every hold (`forgetUnkept`).
+// and a held entry older than storage's is dropped; a held Send stands only over its own stored press. The person's Unpair forgets every hold (`forgetUnkept`).
 import type { SheetLine } from '@shared/sheet/model';
 import type { QuestionDraft } from '@shared/sheet/words';
 import { EMPTY_MEMORY, type SentAct, type SheetMemory } from '../../../src/renderer/src/sheet';
@@ -77,14 +77,18 @@ const unkeptOf = (storage: Storage) => {
   return entries;
 };
 const touchedOf = (text: string | null): number => (parsed(text)?.touchedAt as number | undefined) ?? Number.NEGATIVE_INFINITY;
-// An entry as this window reads it: what it holds, unless storage holds a write of it touched as late or later
+// An entry as this window reads it: what it holds, unless storage holds a write of it touched as late or later. A Send
+// is held only over its own stored press (its settle, which the store had no room for): with that entry gone, or
+// another press's, another window has ended or taken the Send, and the hold goes.
 function itemOf(storage: Storage, key: string): string | null {
   const held = unkeptOf(storage);
   const mine = held.get(key);
   const durable = storage.getItem(key);
   if (mine === undefined) return durable;
-  if (durable !== null && touchedOf(durable) >= touchedOf(mine)) {
-    held.delete(key); // a later durable write wins
+  const overtaken = durable !== null && touchedOf(durable) >= touchedOf(mine); // a later durable write wins
+  const unmoored = key.startsWith(`${STORAGE_PREFIX}send.`) && (durable === null || parsed(durable)?.press !== parsed(mine)?.press);
+  if (overtaken || unmoored) {
+    held.delete(key);
     return durable;
   }
   return mine;
@@ -350,7 +354,8 @@ function writeSend(session: string, before: SheetMemory, after: SheetMemory, now
 // longest ago (never a Send's, never the pairing or anything that is not the memory's, and for a Send nothing of its
 // own session, the drafts its press was made of among them), but only when dropping all of them, with the entry being
 // replaced, is sure to make room: free space is never negative, so their sizes together covering the new entry's is
-// enough. Otherwise nothing is removed and the entry is held here, but a `durable` one (a press) is not kept at all.
+// enough. Otherwise nothing is removed (what eviction gave up for a write that still fails is put back) and the entry is
+// held here, but a `durable` one (a press) is not kept at all.
 function store(storage: Storage, key: string, value: string, { session = null, durable = false }: { session?: string | null; durable?: boolean } = {}): boolean {
   const held = unkeptOf(storage);
   const unkept = () => (durable ? false : (held.set(key, value), true));
@@ -369,7 +374,10 @@ function store(storage: Storage, key: string, value: string, { session = null, d
   const replaced = storage.getItem(key);
   const room = evictable.reduce((sum, entry) => sum + entry.size, replaced === null ? 0 : key.length + replaced.length);
   if (room < key.length + value.length) return unkept(); // not sure to make room: remove nothing
+  const evicted: [string, string][] = []; // given up only once the write they made room for stands
   for (const entry of evictable) {
+    const text = storage.getItem(entry.key);
+    if (text !== null) evicted.push([entry.key, text]);
     storage.removeItem(entry.key);
     try {
       storage.setItem(key, value);
@@ -379,7 +387,10 @@ function store(storage: Storage, key: string, value: string, { session = null, d
       if (!(error instanceof DOMException) || error.name !== 'QuotaExceededError') throw error;
     }
   }
-  return unkept(); // the store counts otherwise than its keys' and values' lengths: as when nothing could go
+  // the store counts otherwise than its keys' and values' lengths: everything given up for the write is put back, in
+  // the room it left, and the write is as one nothing could make room for
+  for (const [evictedKey, text] of evicted) storage.setItem(evictedKey, text);
+  return unkept();
 }
 
 // The sessions whose last press this window made the store would not keep, by storage

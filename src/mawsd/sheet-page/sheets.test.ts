@@ -281,6 +281,22 @@ describe('the holders kept fresh while a page is open (S5)', () => {
     expect(frames(opened)).toHaveLength(2); // what the tab holds is what the list says: no snapshot
   });
 
+  it('answers a list that joins a refresh with a snapshot, though nothing changed: the tab asked for it (S5)', async () => {
+    const port = await listening();
+    const opened = await tab(port, await paired(port));
+    expect(await opened.next(2)).toEqual({ t: 'ready', v: 1, sessions, door: DOOR });
+    await pause(1_000); // a list sooner than a second after the last is ignored (§N)
+    let release!: () => void;
+    listGate = new Promise<void>((done) => (release = done));
+    const listed = steps.filter((step) => step === 'list').length;
+    await until(() => steps.filter((step) => step === 'list').length > listed, 'a refresh listing');
+    opened.send({ t: 'list' }); // a tab recovering from `unavailable`: it holds writes until a `ready`
+    await pause(50);
+    listGate = null;
+    release();
+    expect(await opened.next(3, 2_000)).toEqual({ t: 'ready', v: 1, sessions, door: DOOR });
+  });
+
   it('runs nothing while no paired connection is open', async () => {
     const port = await listening();
     await new Promise((done) => setTimeout(done, REFRESH_MS * 3));

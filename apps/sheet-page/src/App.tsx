@@ -17,16 +17,16 @@ import { createApi } from './api';
 import { BAND_AFTER_MS, bandOf } from './availability';
 import { createChunkGate, installChunkGate } from './chunk-gate';
 import { PAGE } from './copy';
-import { CREDENTIAL_KEY, readPairing, writePairing, type StoredPairing } from './credential';
+import { readPairing, writePairing, type StoredPairing } from './credential';
 import { Frame } from './frame/Frame';
 import { connect, type Connection, type Live } from './live';
 import { useOutline } from './outline/state';
 import { pageLive } from './page-live';
 import { PairingScreen } from './pairing/PairingScreen';
 import { pathOf, placeOf, type Place } from './route';
-import { forgetUnkept, onMemory, readBaseline } from './memory';
+import { onMemory, readBaseline } from './memory';
 import { createStore } from './store';
-import { unpairScreen, type Unpaired } from './unpair';
+import { pairingStored, unpairScreen, type Unpaired } from './unpair';
 
 // The workspace is in the page's own load, not a chunk asked for later: a module load that failed stays failed in a
 // browser's module map (Chromium's, as the browser suite runs it), so a workspace asked for at `paired` while mawsd went
@@ -110,11 +110,10 @@ export function App() {
   // only the pairing it opened with, live.ts), and a pairing no longer stored shows the pairing screen
   useEffect(() => {
     const stored = (event: StorageEvent) => {
-      if (event.key !== CREDENTIAL_KEY && event.key !== null) return;
-      const now = readPairing();
+      const now = pairingStored(event);
+      if (now === undefined) return;
       setPairing(now);
       if (now !== null) return;
-      forgetUnkept(); // another tab's Unpair forgot everything stored; nothing held here stands either
       setUnpaired('refused'); // the plain line: what became of it is the other tab's to say
       setScreen('pairing');
     };
