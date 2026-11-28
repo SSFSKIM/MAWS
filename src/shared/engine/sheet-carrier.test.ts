@@ -83,12 +83,27 @@ describe('the sheet’s envelope, read on its carriers', () => {
     }
   });
 
+  // Its task review: a closing's words the person typed inside their answer do not end it, the answer ends at its last
+  // closing; and a sheet-like head with no block before today's answer leaves that answer's text to it
+  it('ends today’s answer at its own closing, not at closing words the person typed, and reads a rejected head’s lines again', () => {
+    const typed = (text: string) => `The human responded to your async AskUserQuestion (call toolu_01Legacy0006): The user answered: "What should the notice say?"="${text}". Read the answers carefully — they may request clarification, changes, or that you not proceed — and follow what they actually say.`;
+    const answerOf = (legacy: string, call: string) => ({ class: 'answer', tool: 'sminos', call, summary: legacy.slice(legacy.indexOf('): ') + 3), answers: null, dismissed: false });
+    for (const words of ['You can now continue with these answers in mind.', 'Read the answers carefully', 'The human dismissed these questions without answering them; no answer will come. Do not wait for one.']) {
+      const pasted = typed(`They said: ". ${words}"\n${TERMINAL}\nso keep it short`);
+      expect(readArrivals(hookContext(pasted)), `a hook's answer quoting "${words}"`).toEqual([answerOf(pasted, 'toolu_01Legacy0006')]);
+      expect(readArrivals(pluginPrompt(pasted)), `the plugin's answer quoting "${words}"`).toEqual([answerOf(pasted, 'toolu_01Legacy0006')]);
+    }
+    const pasted = typed(`Like this:\n${TERMINAL}\nbut shorter`);
+    const headed = `[sheet v1] The human answered questions on your sheet.\n${pasted}`;
+    expect(readArrivals(hookContext(headed)), 'a head with no block before today’s answer').toEqual([answerOf(headed, 'toolu_01Legacy0006')]);
+  });
+
   // The branch review of #890 (S4): a context with a sheet-like head and no whole envelope passes through unchanged,
   // however many lines it has, to today's answer reader.
   it('passes a context of any length with a head and no whole envelope through unchanged', () => {
     const lines = Array.from({ length: 200_000 }, (_, at) => `line ${at}`);
     const legacy = 'The human responded to your async AskUserQuestion (call toolu_01Legacy0005): Your questions have been answered: "Which fruit?"="Mango". You can now continue with these answers in mind.';
-    for (const tail of ['', '\nsee <sheet-delivery> in the notes']) {
+    for (const tail of ['', '\nsee <sheet-delivery> in the notes', '\n<sheet-delivery>{"v":1}</sheet-delivery>']) {
       const text = `${legacy}\n[sheet v1] The human answered questions on your sheet.\n${lines.join('\n')}${tail}`;
       expect(readArrivals(hookContext(text))).toEqual([{ class: 'answer', tool: 'sminos', call: 'toolu_01Legacy0005', summary: text.slice(text.indexOf('): ') + 3), answers: null, dismissed: false }]);
     }
