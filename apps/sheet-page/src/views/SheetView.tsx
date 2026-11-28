@@ -12,7 +12,7 @@ import { useEffect, useRef, useState } from 'react';
 import type { DoorState } from '@shared/ipc/schema/sheet';
 import type { SheetModel } from '@shared/sheet/model';
 import { reconcile, SessionSheet, type SheetHost, type SheetMemory } from '../../../../src/renderer/src/sheet';
-import { writeReconciled } from '../memory';
+import { writeReconciled, type StoredBaseline } from '../memory';
 import { sendUnavailable } from '../availability';
 import { PAGE, SEND, VIEWS } from '../copy';
 import type { Connection } from '../live';
@@ -56,7 +56,7 @@ export function SheetView({ shown, navigate, ...rest }: SheetViewProps) {
   return <Sheet key={shown.model.session} model={shown.model} fresh={shown.fresh} settled={shown.settled} baseline={shown.baseline ?? null} {...rest} />;
 }
 
-function Sheet({ model, fresh, settled, baseline, door, connection, host, outline, adopted }: Omit<SheetViewProps, 'shown' | 'navigate'> & { model: SheetModel; fresh: boolean; settled: boolean; baseline: SheetMemory | null }) {
+function Sheet({ model, fresh, settled, baseline, door, connection, host, outline, adopted }: Omit<SheetViewProps, 'shown' | 'navigate'> & { model: SheetModel; fresh: boolean; settled: boolean; baseline: StoredBaseline | null }) {
   const { memory: stored, elsewhereSince, unkept, update } = useSessionMemory(model.session);
   // What the tab shows is its own reconcile of the stored memory against its model, so SessionSheet's finds nothing to
   // do and every change it asks for is the person's or a Send's, applied to that view and written as what it changes;

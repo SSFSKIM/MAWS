@@ -5,7 +5,7 @@ import { EMPTY_MEMORY, reconcile, type SentAct, type SheetMemory } from '../../.
 import { settle, startSend } from '../../../src/renderer/src/sheet/memory';
 import { CLASH, NOTICES, SEASON, sheetOf } from '../../../src/renderer/src/sheet/test-support/questions';
 import { CREDENTIAL_KEY } from './credential';
-import { madeElsewhere, onMemory, readMemory, sendingSince, sweepMemory, updateMemory, writeMemory, writeReconciled } from './memory';
+import { madeElsewhere, onMemory, readBaseline, readMemory, sendingSince, sweepMemory, updateMemory, writeMemory, writeReconciled } from './memory';
 import { testStorage } from './test-support/storage';
 
 const S = '5eed0000-0000-4000-8000-0000000000aa';
@@ -182,9 +182,10 @@ describe('the stored memory (T19): one entry a thing', () => {
     updateMemory(S, (current) => settle(current, 'wa-2', { ok: false, why: 'failed', message: 'MAWS did not answer.' }), { storage: store, now: 4_000, target });
     const seen = windowB.readMemory(S, store).sending!;
     const before = store.getItem(key!);
-    // a press whose entry is past the bound: B6 tries nothing and holds it in this window
-    store.quota = null;
-    windowB.updateMemory(S, (current) => startSend(current, seen.lines, 5_000, `wb-1-${'a'.repeat(windowB.ENTRY_KEPT_MAX)}`, { drafts: current.drafts, over: seen.attempt }), { storage: store, now: 5_000, target });
+    // a full store, and a press whose entry would not fit even with every evictable entry gone: nothing is removed, and the
+    // press is held in this window
+    store.quota = Object.entries(store.entries()).reduce((sum, [name, value]) => sum + name.length + value.length, 0);
+    windowB.updateMemory(S, (current) => startSend(current, seen.lines, 5_000, `wb-1-${'a'.repeat(5_000)}`, { drafts: current.drafts, over: seen.attempt }), { storage: store, now: 5_000, target });
     expect(sendKeys()).toEqual([key]);
     expect(store.getItem(key!)).toBe(before); // the only stored record of the Send stands (the press is held in this window alone)
     store.quota = null;
@@ -290,7 +291,7 @@ describe('the stored memory (T19): one entry a thing', () => {
     const store = testStorage();
     const target = new EventTarget();
     writeMemory(S, EMPTY_MEMORY, { ...EMPTY_MEMORY, seen: new Map([['q5', 1]]) }, 1, store);
-    const baseline = readMemory(S, store); // when tab B's read of the model started
+    const baseline = readBaseline(S, store); // when tab B's read of the model started
     const modelB = sheetOf([NOTICES], { hidden: [{ id: 'q4', key: 'page-000000000000000000000000009' }] } as never); // q4 hidden in that older model
     // tab A takes the dismissal back and drafts q4 while B's read is out; B's storage event comes only after the answer
     writeMemory(S, readMemory(S, store), withDraft(readMemory(S, store), 'q4', draft('reopened')), 2, store);
@@ -298,6 +299,22 @@ describe('the stored memory (T19): one entry a thing', () => {
     const view = reconcile(stored, modelB);
     expect(view.drafts.has('q4')).toBe(false); // reconcile against the older model would prune it
     expect(writeReconciled(S, stored, view, true, { storage: store, now: 3, target, baseline })).toEqual({ conflict: true });
+    expect(readMemory(S, store).drafts.get('q4')).toEqual(draft('reopened'));
+  });
+
+  it('judges a removal against the raw stored entry: a draft another tab removed and wrote again, the same text and revision, after the read started, stands (B1)', () => {
+    const store = testStorage();
+    const target = new EventTarget();
+    writeMemory(S, EMPTY_MEMORY, withDraft(EMPTY_MEMORY, 'q4', draft('reopened')), 1, store);
+    const baseline = readBaseline(S, store); // the draft as it stood when tab B's read started
+    const modelB = sheetOf([NOTICES], { hidden: [{ id: 'q4', key: 'page-000000000000000000000000009' }] } as never);
+    // tab A dismisses q4 and takes it back, writing the same draft again: its shape is what the baseline held, its write is not
+    writeMemory(S, readMemory(S, store), EMPTY_MEMORY, 2, store);
+    writeMemory(S, EMPTY_MEMORY, withDraft(EMPTY_MEMORY, 'q4', draft('reopened')), 3, store);
+    const stored = readMemory(S, store);
+    const view = reconcile(stored, modelB);
+    expect(view.drafts.has('q4')).toBe(false);
+    expect(writeReconciled(S, stored, view, true, { storage: store, now: 4, target, baseline })).toEqual({ conflict: true });
     expect(readMemory(S, store).drafts.get('q4')).toEqual(draft('reopened'));
   });
 
@@ -429,7 +446,7 @@ describe('the stored memory (T19): one entry a thing', () => {
     expect(fresh.readMemory(S, store).drafts.get('q4')).toEqual(draft('the other tab’s'));
   });
 
-  it('below the bound, makes room by eviction as before, and holds the edit here only where nothing more can go (B6)', async () => {
+  it('below the bound, makes room by eviction where it is sure to, and otherwise removes nothing and holds the edit here (B6)', async () => {
     vi.resetModules();
     const fresh = await import('./memory');
     const store = testStorage();
@@ -438,9 +455,25 @@ describe('the stored memory (T19): one entry a thing', () => {
     fresh.updateMemory(S, (current) => withDraft(current, 'q4', draft('z'.repeat(300))), { storage: store, now: 1, target: new EventTarget() });
     expect(store.getItem(`maws.sheet.draft.${OTHER}.q1`)).toBeNull(); // touched longest ago: it made room
     expect(fresh.unkeptDraft(S, store)).toBe(false);
+    const before = store.entries();
+    const removeItem = vi.spyOn(store, 'removeItem');
     fresh.updateMemory(S, (current) => withDraft(current, 'q5', draft('w'.repeat(2_000))), { storage: store, now: 2, target: new EventTarget() });
-    expect(fresh.unkeptDraft(S, store)).toBe(true); // all that could go went, and it still did not fit
+    expect(removeItem).not.toHaveBeenCalled(); // all that could go would not make room: nothing goes
+    expect(store.entries()).toEqual(before);
+    expect(fresh.unkeptDraft(S, store)).toBe(true); // held here instead
     expect(fresh.readMemory(S, store).drafts.get('q5')).toEqual(draft('w'.repeat(2_000)));
+  });
+
+  it('stores a valid Send past ENTRY_KEPT_MAX durably before its put: a fresh window over the same storage reads it whole (B6)', async () => {
+    vi.resetModules();
+    const fresh = await import('./memory');
+    const store = testStorage();
+    const lines = Array.from({ length: 50 }, (_, i) => answer(`page-${String(i).padStart(26, '0')}`, `q${i + 1}`, 'a'.repeat(20_000))); // the door's bounds
+    expect(JSON.stringify(lines).length).toBeGreaterThan(fresh.ENTRY_KEPT_MAX);
+    fresh.updateMemory(S, (current) => pressed(current, 'wa-1', lines), { storage: store, now: 1, target: new EventTarget() });
+    vi.resetModules();
+    const another = await import('./memory'); // a new window: nothing held in the first one's memory
+    expect(another.readMemory(S, store).sending).toMatchObject({ lines, state: 'sending' });
   });
 
   it('forgets what it held in this window when the person unpairs (B6)', async () => {

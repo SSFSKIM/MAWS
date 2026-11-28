@@ -5,6 +5,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { SheetModel } from '@shared/sheet/model';
 import type { ReadAnswer } from './api';
+import { createApi } from './api';
+import { pageSheetHost } from './host';
 import { connect, RETRY_MS, type Connection, type LiveSocket } from './live';
 import { pageLive } from './page-live';
 import { macOf, proofKeyOf } from './proof';
@@ -65,6 +67,11 @@ function wired() {
   store.show(S);
   return { store, live };
 }
+// the page's host as Workspace makes it: writes only while the model on screen is fresh, through the proven-only api
+function hostOf(store: ReturnType<typeof createStore>, live: ReturnType<typeof connect>, fetch: typeof globalThis.fetch) {
+  const api = createApi({ proven: () => live.proven(), fetch });
+  return pageSheetHost({ api, writable: (session) => store.state().shown?.session === session && store.state().shown?.fresh === true });
+}
 const flush = async () => {
   for (let i = 0; i < 3; i++) await Promise.resolve();
 };
@@ -116,5 +123,27 @@ describe('the page’s live wiring', () => {
     reads.at(-1)!({ ok: true, model: model(2), door: DOOR });
     await flush();
     expect(store.state().shown).toMatchObject({ model: model(2), fresh: true });
+  });
+
+  it('holds a card action kept from before a lost connection, after the new socket’s proof and before its `paired` (B3)', async () => {
+    const { store, live } = wired();
+    sockets[0]!.serve();
+    reads.at(-1)!({ ok: true, model: model(1), door: DOOR });
+    await flush();
+    expect(store.state().shown?.fresh).toBe(true);
+    const fetch = vi.fn(async () => new Response(JSON.stringify({ ok: true, results: [] }), { status: 200 }));
+    const host = hostOf(store, live, fetch);
+    sockets[0]!.end(1006);
+    expect(store.state().shown).toMatchObject({ model: model(1), fresh: false }); // kept on screen, not fresh
+    vi.advanceTimersByTime(RETRY_MS[0]!);
+    const next = sockets[1]!;
+    next.readyState = 1;
+    next.onopen?.();
+    const hello = JSON.parse(next.sent[0]!) as { nonce: string };
+    next.say({ t: 'proof', mac: macOf(proofKeyOf(PAIRING.credential), ORIGIN, PAIRING.id, hello.nonce) }); // proven, not yet paired
+    expect(live.proven()).not.toBeNull();
+    const dismiss = [{ v: 1 as const, key: 'page-0000000000000000000000000a', kind: 'dismiss' as const, id: 'q1', by: 'page' as const }];
+    expect(await host.send(S, dismiss)).toMatchObject({ ok: false, why: 'failed' });
+    expect(fetch).not.toHaveBeenCalled();
   });
 });

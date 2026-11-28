@@ -24,7 +24,7 @@ import { useOutline } from './outline/state';
 import { pageLive } from './page-live';
 import { PairingScreen } from './pairing/PairingScreen';
 import { pathOf, placeOf, type Place } from './route';
-import { forgetUnkept, onMemory, readMemory } from './memory';
+import { forgetUnkept, onMemory, readBaseline } from './memory';
 import { createStore } from './store';
 import { unpairScreen, type Unpaired } from './unpair';
 
@@ -49,7 +49,7 @@ const api = createApi({ proven: () => current.live?.proven() ?? null, leaving: (
 // The Markdown stack's lazy chunks ask the same connection (chunk-gate.ts; T28)
 const chunks = createChunkGate({ proven: () => (current.live?.proven() ?? null) !== null, importer: (url) => import(/* @vite-ignore */ url) });
 installChunkGate(chunks);
-const store = createStore({ read: api.read, onMemory, baseline: (session) => readMemory(session) });
+const store = createStore({ read: api.read, onMemory, baseline: (session) => readBaseline(session) });
 
 // Whether the tab may hold its connection: not once it has been hidden for five minutes
 function useAwake(): boolean {
@@ -155,6 +155,7 @@ export function App() {
     current.live = live;
     return () => {
       live.close();
+      store.stale(); // a connection let go (the tab slept, or the pairing changed): not fresh until the next one's read
       if (current.live === live) current.live = null;
       setConnection({ state: 'connecting', since: Date.now() }); // the next connection, or none while the tab sleeps
     };

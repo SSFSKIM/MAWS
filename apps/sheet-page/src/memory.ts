@@ -24,11 +24,11 @@
 // compared by identity in C3's memory, so a read gives an act whose stored draft equals its question's stored draft that
 // same object. A refusal deletes nothing here; only the person's Unpair does (credential.ts).
 //
-// An entry past ENTRY_KEPT_MAX (an answer too long to keep) is never tried against the store: it is held in this window
+// A draft past ENTRY_KEPT_MAX (an answer too long to keep) is never tried against the store: it is held in this window
 // alone (`unkept`), read in place of storage's, so the draft stays editable and sendable here and the sheet says it would
-// not survive a reload (`unkeptDraft`). Nothing is removed or written back for it, so no other tab's entry is touched.
-// Below the bound, a full store makes room by dropping the entries touched longest ago, never a Send's and never the
-// pairing, as before; an entry that still does not fit once nothing more can go is held here the same way. A held entry
+// not survive a reload (`unkeptDraft`). A Send is never capped (it must be durable before its put). A full store makes
+// room by dropping the entries touched longest ago, never a Send's and never the pairing, only when that is sure to make
+// room; otherwise nothing is removed and the entry is held here the same way. A held entry
 // never hides a later durable write of the same entry, from this window or another: whichever was touched later is read,
 // and a held entry older than storage's is dropped. The person's Unpair forgets every hold (`forgetUnkept`).
 import type { SheetLine } from '@shared/sheet/model';
@@ -165,6 +165,14 @@ function sendsOf(storage: Storage, session: string): StoredSend[] {
 
 const sendingOf = (send: StoredSend): NonNullable<SheetMemory['sending']> => ({ attempt: attemptOf(send.press), lines: send.lines, state: send.state, note: send.note });
 
+/** A session's entries as this window reads them, raw: what a removal is judged against (writeReconciled's `baseline`). */
+export type StoredBaseline = ReadonlyMap<string, string>;
+export function readBaseline(session: string, storage: Storage = localStorage): StoredBaseline {
+  const found = new Map<string, string>();
+  for (const kind of KINDS) for (const { key } of entriesOf(storage, kind, session)) found.set(key, itemOf(storage, key)!);
+  return found;
+}
+
 /** One session's memory, assembled from its entries; EMPTY_MEMORY with none. An entry that does not parse is skipped. */
 export function readMemory(session: string, storage: Storage = localStorage): SheetMemory {
   const drafts = new Map<string, QuestionDraft>();
@@ -224,10 +232,12 @@ const canonical = (value: unknown): string =>
 // The difference between two memories, written. `guarded`: each entry only where storage still holds it as `before`
 // has it (one it already holds as `after` has it is left alone); any other is another tab's write, not yet adopted,
 // and is left and said (`conflict`). A guarded write is reconcile's, which never changes the Send the memory holds.
-// `baseline` (a guarded write's): the memory stored when the model the view was reconciled against was asked for. A
-// removal is written only where storage holds the entry as the baseline had it too, so an entry another tab wrote after
-// that read started (its notification not yet heard when the view read storage) is never pruned by an older model.
-function writeDiff(session: string, before: SheetMemory, after: SheetMemory, now: number, storage: Storage, known: (question: string) => boolean, guarded: boolean, baseline: SheetMemory | null = null): { wrote: boolean; conflict: boolean } {
+// `baseline` (a guarded write's): the session's entries as stored, raw, when the model the view was reconciled against
+// was asked for. A removal is written only where storage holds the entry's very text as the baseline had it, its
+// touchedAt included, so an entry another tab wrote after that read started (its notification not yet heard when the
+// view read storage), even one written again with the same content, is never pruned by an older model; a spurious
+// conflict costs one more read.
+function writeDiff(session: string, before: SheetMemory, after: SheetMemory, now: number, storage: Storage, known: (question: string) => boolean, guarded: boolean, baseline: StoredBaseline | null = null): { wrote: boolean; conflict: boolean } {
   let wrote = false;
   let conflict = false;
   const storedShape = (kind: Kind, name: string) => {
@@ -238,7 +248,8 @@ function writeDiff(session: string, before: SheetMemory, after: SheetMemory, now
     if (!guarded) return true;
     const now = storedShape(kind, name);
     if (now === canonical(shapeOf(kind, after, name))) return false; // already so
-    if (now === canonical(shapeOf(kind, before, name)) && !(removal && baseline !== null && now !== canonical(shapeOf(kind, baseline, name)))) return true;
+    const key = keyOf(kind, session, name);
+    if (now === canonical(shapeOf(kind, before, name)) && !(removal && baseline !== null && itemOf(storage, key) !== (baseline.get(key) ?? null))) return true;
     conflict = true;
     return false;
   };
@@ -311,26 +322,39 @@ function writeDiff(session: string, before: SheetMemory, after: SheetMemory, now
   return { wrote: true, conflict };
 }
 
-// A write: held in this window when past the bound, without trying the store; else stored, making room in a full store
-// by dropping the entries of the memory touched longest ago (never a Send's, never the pairing or anything that is not
-// the memory's), and held here when nothing more can go
+// A write. A draft past ENTRY_KEPT_MAX is held in this window without trying the store; a Send is never capped, since it
+// must be durable before its put (T19), and the door's own bounds let a valid one pass the cap. A write the full store
+// refuses makes room by dropping the entries of the memory touched longest ago (never a Send's, never the pairing or
+// anything that is not the memory's), but only when dropping all of them, with the entry being replaced, is sure to
+// make room: free space is never negative, so their sizes together covering the new entry's is enough. Otherwise
+// nothing is removed and the entry is held here.
 function store(storage: Storage, key: string, value: string): void {
   const held = unkeptOf(storage);
-  if (key.length + value.length > ENTRY_KEPT_MAX) return void held.set(key, value);
-  for (;;) {
+  if (key.startsWith(`${STORAGE_PREFIX}draft.`) && key.length + value.length > ENTRY_KEPT_MAX) return void held.set(key, value);
+  try {
+    storage.setItem(key, value);
+    held.delete(key);
+    return;
+  } catch (error) {
+    if (!(error instanceof DOMException) || error.name !== 'QuotaExceededError') throw error;
+  }
+  const evictable = memoryEntries(storage)
+    .filter((entry) => entry.kind !== 'send' && entry.key !== key)
+    .sort((a, b) => a.touchedAt - b.touchedAt);
+  const replaced = storage.getItem(key);
+  const room = evictable.reduce((sum, entry) => sum + entry.size, replaced === null ? 0 : key.length + replaced.length);
+  if (room < key.length + value.length) return void held.set(key, value); // not sure to make room: remove nothing
+  for (const entry of evictable) {
+    storage.removeItem(entry.key);
     try {
       storage.setItem(key, value);
       held.delete(key);
       return;
     } catch (error) {
       if (!(error instanceof DOMException) || error.name !== 'QuotaExceededError') throw error;
-      const oldest = memoryEntries(storage)
-        .filter((entry) => entry.kind !== 'send' && entry.key !== key)
-        .sort((a, b) => a.touchedAt - b.touchedAt)[0];
-      if (oldest === undefined) return void held.set(key, value);
-      storage.removeItem(oldest.key);
     }
   }
+  held.set(key, value); // the store counts otherwise than its keys' and values' lengths: held, as when nothing could go
 }
 
 /** Whether a draft of the session is held in this window alone, too long for the store: it would not survive a reload. */
@@ -344,14 +368,15 @@ export function forgetUnkept(storage: Storage = localStorage): void {
   unkeptOf(storage).clear();
 }
 
-function memoryEntries(storage: Storage): { key: string; kind: Kind; touchedAt: number }[] {
-  const found: { key: string; kind: Kind; touchedAt: number }[] = [];
+function memoryEntries(storage: Storage): { key: string; kind: Kind; touchedAt: number; size: number }[] {
+  const found: { key: string; kind: Kind; touchedAt: number; size: number }[] = [];
   for (let i = 0; i < storage.length; i++) {
     const key = storage.key(i);
     if (key === null || key === CREDENTIAL_KEY) continue;
     const kind = KINDS.find((name) => key.startsWith(`${STORAGE_PREFIX}${name}.`));
     if (kind === undefined) continue;
-    found.push({ key, kind, touchedAt: (parsed(storage.getItem(key))?.touchedAt as number | undefined) ?? 0 });
+    const text = storage.getItem(key);
+    found.push({ key, kind, touchedAt: (parsed(text)?.touchedAt as number | undefined) ?? 0, size: key.length + (text?.length ?? 0) });
   }
   return found;
 }
@@ -408,7 +433,7 @@ export function writeReconciled(
   snapshot: SheetMemory,
   view: SheetMemory,
   settled: boolean,
-  { storage = localStorage, now = Date.now(), target = globalThis, known = () => true, baseline = null }: Omit<MemoryUpdateOptions, 'base'> & { baseline?: SheetMemory | null } = {},
+  { storage = localStorage, now = Date.now(), target = globalThis, known = () => true, baseline = null }: Omit<MemoryUpdateOptions, 'base'> & { baseline?: StoredBaseline | null } = {},
 ): { conflict: boolean } {
   if (!settled || snapshot === view) return { conflict: false };
   const { wrote, conflict } = writeDiff(session, snapshot, view, now, storage, known, true, baseline);

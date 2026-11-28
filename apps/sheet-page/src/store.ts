@@ -19,7 +19,7 @@
 // model unfresh (`stale`) until a read started after its next snapshot is applied.
 import type { DoorState } from '@shared/ipc/schema/sheet';
 import type { SheetModel, SheetSummary } from '@shared/sheet/model';
-import type { SheetMemory } from '../../../src/renderer/src/sheet';
+import type { StoredBaseline } from './memory';
 import type { ReadAnswer } from './api';
 
 export const READ_RETRY_MS = 5_000;
@@ -31,7 +31,7 @@ export interface StoreState {
   // whether a read started after the last snapshot has been applied, and whether one started after the last write of
   // another tab this tab adopted has been (`settled`: the tab's reconcile against it may be written, §P)
   // `baseline`: the session's stored memory when the applied read started (null before one is applied, or without the dep)
-  shown: { session: string; model: SheetModel | null | undefined; fresh: boolean; settled: boolean; baseline?: SheetMemory | null } | null;
+  shown: { session: string; model: SheetModel | null | undefined; fresh: boolean; settled: boolean; baseline?: StoredBaseline | null } | null;
 }
 
 export interface SheetStore {
@@ -48,7 +48,7 @@ export interface SheetStore {
 
 export interface StoreDeps {
   read(session: string): Promise<ReadAnswer>;
-  baseline?(session: string): SheetMemory; // the session's stored memory now (memory.ts's readMemory)
+  baseline?(session: string): StoredBaseline; // the session's entries as stored now, raw (memory.ts's readBaseline)
   // a session's memory written, in this tab or (`adopted`) in another (memory.ts's onMemory)
   onMemory?(session: string, listener: (adopted: boolean) => void): () => void;
 }
