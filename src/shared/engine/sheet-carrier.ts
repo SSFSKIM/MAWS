@@ -25,7 +25,7 @@ const object = (value: unknown): Json | null => (typeof value === 'object' && va
  * The blocks of the envelopes a carrier's text holds, in order, each under its head on the line that ends it, and the
  * text outside them: an envelope's lines, its head to its block, are the sheet's, and a block that does not parse
  * claims nothing. A head inside one of today's answers is that answer's (`answerOpenAfter`): the answer carries a
- * person's text verbatim, and a person may paste an envelope there. A text with no head and no block is not split.
+ * person's text verbatim, and a person may paste an envelope there. A text that lacks a head or a block is not split.
  */
 function envelopesIn(text: string): { deliveries: SheetDelivery[]; rest: string } {
   if (!text.includes(HEAD) || !text.includes('<sheet-delivery>')) return { deliveries: [], rest: text };
