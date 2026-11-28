@@ -1,0 +1,37 @@
+{
+  "name": "sheet-page",
+  "version": "0.0.0",
+  "private": true,
+  "description": "The question sheet's local page, served by mawsd on loopback (docs/doperpowers/plans/2026-11-24-question-sheet-c4-local-page.md, §P)",
+  "type": "module",
+  "scripts": {
+    "build": "vite build",
+    "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.node.json",
+    "test": "vitest run",
+    "e2e": "pnpm -w run build:main-preload && vite build && playwright test"
+  },
+  "dependencies": {
+    "@noble/hashes": "1.8.0",
+    "radix-ui": "^1.6.7",
+    "react": "^19.3.0",
+    "react-dom": "^19.3.0",
+    "zod": "^4.6.5"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.63.0",
+    "@tailwindcss/vite": "^4.3.3",
+    "@testing-library/react": "^16.3.3",
+    "@types/node": "^24",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@types/ws": "8.18.1",
+    "@vitejs/plugin-react": "^5.2.0",
+    "babel-plugin-react-compiler": "^1.0.0",
+    "happy-dom": "^20.14.5",
+    "tailwindcss": "^4.3.3",
+    "typescript": "^5.9.3",
+    "vite": "^7.3.6",
+    "vitest": "^5.0.2",
+    "ws": "8.22.0"
+  }
+}

@@ -100,16 +100,17 @@ env:
     default artifacts render-host library side tools to-human deliverables panel browser browser-comment browser-import
     settings transcript terminal code agents widgets c7 scm c12 available document document-app presentations
     design-systems browser-cua browser-chrome desk-web design dashboard connectors connectors-direct connectors-oauth delivery
-    discover supervisor-daemon daemon-unit machines lane-a remote
+    discover supervisor-daemon daemon-unit machines lane-a remote sheet-page
   # The groups §3.1's table found green on a Linux runner, the only ones a Linux lane takes (never by default). desk-web
-  # (DC5): the desk's web app in a browser, against its DX3 double, which needs no Electron and no Mac.
-  LINUX_E2E: library artifacts available tools agents desk-web
+  # (DC5): the desk's web app in a browser, against its DX3 double, which needs no Electron and no Mac. sheet-page (the
+  # question sheet's C4, T24): the local page in a browser, against the built mawsd as a process under plain Node.
+  LINUX_E2E: library artifacts available tools agents desk-web sheet-page
   # The Linux groups that drive no Electron, so the pool's containers, where Electron would lose its sandbox, can run
   # them. They never take the Mac, whatever the lane: they run on the pool when class 1a does, else on the hosted Linux
   # runner (Decision Log 68; on a Mac desk-web's suite drives the system Google Chrome, whose TCC prompts held the mini,
   # Decision Log 72). desk-web drives Playwright's own browsers, which Playwright starts without Chromium's sandbox on
-  # every runner (chromiumSandbox).
-  POOL_E2E: desk-web
+  # every runner (chromiumSandbox). sheet-page drives Playwright's own Chromium as desk-web does, and no Electron.
+  POOL_E2E: desk-web sheet-page
   # The groups that render documents through LibreOffice (P3-B's DOCX-to-PDF case, P3-C's render-and-compare).
   LIBREOFFICE_E2E: document presentations
   # Poppler CLI users, derived from the specs and their imports by poppler-dependencies.test.mjs.
@@ -985,6 +986,9 @@ jobs:
       # package pins.
       - if: matrix.group == 'desk-web' && runner.os == 'Linux'
         run: pnpm --filter desk-web exec playwright install chromium webkit
+      # The question sheet's C4 (T24): the local page's suite, Chromium alone, with its own Playwright's browsers.
+      - if: matrix.group == 'sheet-page' && runner.os == 'Linux'
+        run: pnpm --filter sheet-page exec playwright install chromium
       # A measured group's out/, built (or restored from this Mac's disk, where the command below finds it again) before a
       # second guard: the first released the job before the setup and the build, whose load then landed in the measured
       # window (O2's idle-bound runs, 2026-10-28: released at a 1-minute load of 2.33 and 3.32, ended at 7.11 and 9.87).
@@ -1046,7 +1050,8 @@ jobs:
       # Only after this job's own checkout: on the Mac the workspace persists between jobs and only the checkout's clean
       # clears the last job's reports, so a job that failed before it (a refused measured group) would upload another's.
       # A flaky pass keeps the same evidence as a red job, including the failed attempt's attachments.
-      # desk-web's suites (desk-web, desk-web-hub) run under apps/desk-web and write their output there.
+      # desk-web's suites (desk-web, desk-web-hub) run under apps/desk-web and write their output there; sheet-page's
+      # under apps/sheet-page.
       - if: (failure() || needs.plan.outputs.evidence == 'true' || steps.e2e.outputs.flaky == 'true') && steps.checkout.outcome == 'success'
         uses: actions/upload-artifact@v7
         with:
@@ -1055,6 +1060,7 @@ jobs:
             playwright-report/
             test-results/
             apps/desk-web/test-results/
+            apps/sheet-page/test-results/
           retention-days: 7
           if-no-files-found: ignore
       # Measured samples and the engine host's idle-collection log remain re-readable even on green or cancellation,

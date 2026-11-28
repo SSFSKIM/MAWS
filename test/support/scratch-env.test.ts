@@ -23,7 +23,15 @@ describe('launchEnvironment', () => {
       PATH: '/usr/bin', HOME: '/Users/owner', LANG: 'en_GB.UTF-8',
       MAWS_E2E: '1', MAWS_USER_DATA: '/tmp/maws-e2e-x', CLAUDE_CONFIG_DIR: '/tmp/maws-e2e-x/claude-config', MAWS_CLAUDE_USAGE_DIR: '/tmp/maws-e2e-x/claude-usage',
       MAWS_MACHINE_ROLE: 'laptop', // P5 O2 M2: the idle release keeps main's idle time on every runner
+      MAWS_SHEET_PAGE: '0', // the question sheet's C4 (T2)
     });
+  });
+
+  // The question sheet's C4 (T2): a runner whose shell opted in to the sheet's page starts no daemon that serves it
+  it('forces the sheet’s local page off and drops the runner’s port for it', () => {
+    const env = launchEnvironment({ ...RUNNER, MAWS_SHEET_PAGE: '1', MAWS_SHEET_PORT: '47591' }, '/tmp/maws-e2e-x');
+    expect(env.MAWS_SHEET_PAGE).toBe('0');
+    expect(env.MAWS_SHEET_PORT).toBeUndefined();
   });
 
   // P5 O7 M9 (m9-5, the architect's ruling): the machine route reads whatever the machine's environment names, so the

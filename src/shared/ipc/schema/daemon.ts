@@ -64,6 +64,29 @@ export const DaemonRenderSchema = z.strictObject({
 });
 export type DaemonRender = z.infer<typeof DaemonRenderSchema>;
 
+// The question sheet's local page (docs/doperpowers/plans/2026-11-24-question-sheet-c4-local-page.md, §J): the page
+// server in `mawsd`. `state` is its (`off`, `no-bundle`, `port-taken`, `listening`, `stopped`), a string as a host's is;
+// `detail`, one sentence with no path; `url`, the page's origin while it listens; `browsers` and `connections`, the
+// paired browsers and the open live connections, null until its handler's chunk has loaded (a status reads no file and
+// loads nothing); `registered`, whether the last tick wrote the registration (M3).
+export const DaemonSheetPageSchema = z.strictObject({
+  state: z.string(),
+  detail: z.string().nullable(),
+  url: localOnly(z.string().nullable()),
+  browsers: z.number().int().nonnegative().nullable(),
+  connections: z.number().int().nonnegative().nullable(),
+  registered: z.boolean(),
+});
+export type DaemonSheetPage = z.infer<typeof DaemonSheetPageSchema>;
+
+// A browser paired with the page (§K): an id of 8 hex, a label from a fixed set of words, when paired and last seen.
+export const PairedBrowserSchema = z.strictObject({ id: z.string().regex(/^[0-9a-f]{8}$/), label: z.string(), pairedAt: z.string(), lastSeenAt: z.string() });
+// `mawsd sheet pair`'s code (XXXX-XXXX), with when it expires and the page's origin; or why none was made
+export const SheetPairAnswerSchema = z.discriminatedUnion('ok', [
+  z.strictObject({ ok: z.literal(true), code: z.string(), expiresAt: z.string(), url: z.string() }),
+  z.strictObject({ ok: z.literal(false), why: z.string() }),
+]);
+
 export const DaemonStatusSchema = z.strictObject({
   pid: z.number().int(),
   startedAt: z.string(),
@@ -86,6 +109,7 @@ export const DaemonStatusSchema = z.strictObject({
   sessionHosts: z.strictObject({ hosts: z.number().int(), adopted: z.number().int(), failed: z.number().int() }).optional(),
   artifacts: DaemonArtifactsSchema.optional(), // P5 O5 M2: absent from a daemon before it
   render: DaemonRenderSchema.optional(), // P5 O5 M4: absent from a daemon before it
+  sheetPage: DaemonSheetPageSchema.optional(), // the question sheet's C4: absent from a daemon before it
 });
 export type DaemonStatus = z.infer<typeof DaemonStatusSchema>;
 
@@ -97,7 +121,10 @@ export function remoteDaemonStatus(status: DaemonStatus): DaemonStatus {
   return withoutLocalOnly(DaemonStatusSchema, status) as DaemonStatus;
 }
 
-function withoutLocalOnly(schema: z.ZodType, value: unknown): unknown {
+// The walk unwraps an optional or nullable field to the object inside it (`sheetPage` is an optional object holding a
+// local-only `url`), so a mark is honoured at any depth whatever wraps the object that holds it.
+export function withoutLocalOnly(schema: z.ZodType, value: unknown): unknown {
+  while (schema instanceof z.ZodOptional || schema instanceof z.ZodNullable) schema = schema.unwrap() as z.ZodType;
   if (!(schema instanceof z.ZodObject) || typeof value !== 'object' || value === null) return value;
   const shape = schema.shape as Record<string, z.ZodType>;
   const out: Record<string, unknown> = {};
@@ -152,6 +179,17 @@ export const commands = {
       tabId: z.string(),
       frames: z.array(z.strictObject({ seq: z.number().int().min(1), width: z.number().int().min(1), height: z.number().int().min(1), bytes: z.number().int().min(1) })),
     }),
+  ),
+  // The question sheet's C4 (docs/doperpowers/plans/2026-11-24-question-sheet-c4-local-page.md, §K; T11): `mawsd sheet
+  // pair|browsers|unpair`. Three commands and not one with a union for its input, since a member added to a union later
+  // breaks the wire. A code is made only while the page listens; an unpair answers `saved` once the browsers' file was
+  // replaced, and the failure's code (`why`) when it was not (the browser is refused until mawsd restarts). A browsers'
+  // file that could not be read is its error's code (`why`) in both: nobody listed, nothing revoked (`unread`).
+  'daemon.sheetPair': machine(z.void(), SheetPairAnswerSchema),
+  'daemon.sheetBrowsers': machine(z.void(), z.strictObject({ served: z.boolean(), browsers: z.array(PairedBrowserSchema), why: z.string().optional() })),
+  'daemon.sheetUnpair': machine(
+    z.strictObject({ id: z.string().regex(/^[0-9a-f]{8}$/).nullable() }),
+    z.strictObject({ removed: z.number().int().nonnegative(), saved: z.boolean(), why: z.string().optional(), unread: z.literal(true).optional() }),
   ),
 } as const satisfies Record<`daemon.${string}`, CommandSpec<z.ZodType, z.ZodType>>;
 

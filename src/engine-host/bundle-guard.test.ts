@@ -201,6 +201,22 @@ describe.skipIf(graph === null)('the built mawsd’s run path (P5 O5)', () => {
     }
     expect([...run].some(([, text]) => /\bfunction createBrowserRoute\(/.test(text)), 'the route is on the run path').toBe(true);
   });
+
+  // The question sheet's C4 M1 (docs/doperpowers/plans/2026-11-24-question-sheet-c4-local-page.md, §J; T1, T26): what
+  // answers the page's requests (the routes, the three checks, the pairing, the bundle's table, and with them `ws`) is
+  // a chunk the page server loads at the first request or pairing command, never at start; the page server, which is
+  // on the run path, holds none of it
+  it('keep the sheet page’s handler off the run path, in the chunk the page server loads at its first use', () => {
+    const markers = { createSheetPageHandler: /\bfunction createSheetPageHandler\(/, admit: /\bfunction admit\(/, createPairing: /\bfunction createPairing\(/, readBundle: /\bfunction readBundle\(/, createSheetRoutes: /\bfunction createSheetRoutes\(/ /* M3: the sheet's routes */ };
+    const run = runPathOf(MAWSD);
+    for (const [what, marker] of Object.entries(markers)) {
+      expect([...run].filter(([, text]) => marker.test(text)).map(([file]) => file), what).toEqual([]);
+      expect([...graph!].some(([, text]) => marker.test(text)), `${what} beside it`).toBe(true);
+    }
+    expect([...run].some(([, text]) => /\bfunction createSheetPage\(/.test(text)), 'the page server is on the run path').toBe(true);
+    // M3 (T18): the registration's heartbeat needs nothing loaded
+    expect([...run].some(([, text]) => /\bfunction writeRegistration\(/.test(text)), 'the registration is on the run path').toBe(true);
+  });
 });
 
 // P5 O5 M3 (docs/doperpowers/plans/2026-10-31-p5-o5-chromium.md, M3; Interfaces §E): main's entry loads one of two roots.

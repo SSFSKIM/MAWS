@@ -198,8 +198,12 @@ export function SessionSheet({ model, memory, onMemory, host, focus = null, dens
   }
   return (
     <section ref={root} data-sheet-session={model.session} data-density="full" className="flex h-full min-h-0 flex-col bg-bg text-ui text-fg">
-      <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">{content}</div>
-      {!nothing && <div className="flex shrink-0 items-center justify-end gap-2 border-t border-border bg-bg p-3">{foot}</div>}
+      <div data-sheet-scroll="" className="flex min-h-0 flex-1 flex-col overflow-y-auto">{content}</div>
+      {!nothing && (
+        <div data-sheet-foot="" className="flex shrink-0 items-center justify-end gap-2 border-t border-border bg-bg p-3">
+          {foot}
+        </div>
+      )}
     </section>
   );
 }

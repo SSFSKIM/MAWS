@@ -78,7 +78,8 @@ export function discoverGroups(root, ts) {
         if (pkg.name !== workspace[1]) continue;
         const child = pkg.scripts?.[workspace[2]];
         if (!child) throw new Error('workspace script missing');
-        return select(child.replace(/^(?:vite|pnpm) build && /, ''), dirname(pkgFile));
+        // past its leading build steps (`vite build`, `pnpm build`, a root script run with `pnpm -w run`), as many as it has
+        return select(child.replace(/^(?:(?:vite build|pnpm build|pnpm -w run [\w:-]+) && )+/, ''), dirname(pkgFile));
       }
       throw new Error('workspace not found');
     }

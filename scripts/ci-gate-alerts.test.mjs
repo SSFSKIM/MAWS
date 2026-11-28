@@ -48,7 +48,7 @@ test('the Mac jobs of a run, from the flags and the repository variables', () =>
   assert.deepEqual(macJobs({ gates: 'static', class1a: 'pool', variables: { GATE_RUNNER: 'MacOS' } }), ['plan']);
   // A POOL_E2E group never takes a Mac (Decision Log 72): the desk lane's own run shape needs none.
   const offMac = poolE2e(readFileSync(join(root, '.github/workflows/gate.yml'), 'utf8'));
-  assert.deepEqual(offMac, ['desk-web']);
+  assert.deepEqual(offMac, ['desk-web', 'sheet-page']);
   assert.deepEqual(macJobs({ gates: 'static,unit,e2e:desk-web', variables: today, offMac }), []);
   assert.deepEqual(macJobs({ gates: 'e2e:side,e2e:desk-web', class1a: 'linux', variables: today, offMac }), ['e2e:side']);
 });
@@ -242,7 +242,7 @@ test("gate.yml's env: scalars and folded lists are read, anything else throws", 
   for (const bad of ['  A: [side, tools]', '  A: {x: 1}', '  A:\n    nested: 1', '  A: &anchor side', '  A: "a\\nb"', '  A: side # note', '  A: *x', '  A: !!str side']) assert.throws(() => env(bad), /gate\.yml env/, bad);
   assert.deepEqual(workflowEnv('name: gate\n'), {});
   const own = workflowEnv(readFileSync(join(root, '.github/workflows/gate.yml'), 'utf8'));
-  assert.equal(own.POOL_E2E, 'desk-web');
+  assert.equal(own.POOL_E2E, 'desk-web sheet-page');
   assert.equal(own.PEER_E2E, 'cross-build');
   assert.ok(own.CLASS1_E2E.split(' ').includes('library'));
   assert.equal(own.MAC_VM_E2E, 'document-app widgets to-human transcript panel c7 code scm library document settings tools dashboard side presentations deliverables browser browser-comment browser-import agents c12 available design-systems browser-chrome composer layout delivery connectors-oauth artifacts browser-cua connectors connectors-direct default');

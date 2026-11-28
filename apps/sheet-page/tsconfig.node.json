@@ -1,0 +1,11 @@
+{
+  // What runs under Node: the build and test configs, the unit suites (which also reach the page's modules), and the
+  // browser suite with its rig.
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "types": ["node", "vite/client"],
+    "allowJs": true // e2e/second-origin.mjs, plain JavaScript so it also runs as a command
+  },
+  "include": ["*.config.ts", "src/**/*.ts", "src/**/*.tsx", "e2e/**/*.ts", "e2e/**/*.mjs"],
+  "exclude": []
+}

@@ -306,7 +306,7 @@ const scoped = (m: BenchMachine) => `--profile ${quote(m.profile)} --label ${quo
  * Variables a remote shell may carry in that would point a scratch process at another profile, store, endpoint or engine:
  * unset in every program the runner runs there, unless the program's own environment sets them.
  */
-export const INHERITED_OVERRIDES = ['MAWS_USER_DATA', 'MAWS_MAWSD_LABEL', 'MAWS_ENDPOINT_DIRECT', 'MAWS_ENDPOINT_PORT', 'MAWS_MACHINE_NAME', 'MAWS_DEV_ORG', 'MAWS_E2E', 'MAWS_E2E_ENGINE_BIN', 'MAWS_CLAUDE_USAGE_DIR', 'CLAUDE_CONFIG_DIR', 'SMINOS_RL10', 'SMINOS_HOME', 'DAEMON_HOME', 'ZDOTDIR', 'HISTFILE', 'NODE_OPTIONS', 'PNPM_HOME', 'npm_config_prefix', 'COREPACK_HOME'] as const;
+export const INHERITED_OVERRIDES = ['MAWS_USER_DATA', 'MAWS_MAWSD_LABEL', 'MAWS_ENDPOINT_DIRECT', 'MAWS_ENDPOINT_PORT', 'MAWS_MACHINE_NAME', 'MAWS_DEV_ORG', 'MAWS_E2E', 'MAWS_E2E_ENGINE_BIN', 'MAWS_CLAUDE_USAGE_DIR', 'CLAUDE_CONFIG_DIR', 'SMINOS_RL10', 'SMINOS_HOME', 'DAEMON_HOME', 'ZDOTDIR', 'HISTFILE', 'NODE_OPTIONS', 'PNPM_HOME', 'npm_config_prefix', 'COREPACK_HOME', 'MAWS_SHEET_PAGE', 'MAWS_SHEET_PORT'] as const;
 
 /**
  * Every remote program's environment: a home, temporary directory, XDG directories, pnpm store, npm and Electron caches
@@ -350,6 +350,7 @@ export function daemonEnv(m: BenchMachine): Record<string, string> {
     MAWS_ENDPOINT_DIRECT: '1',
     MAWS_ENDPOINT_PORT: String(m.port),
     MAWS_MACHINE_NAME: m.name,
+    MAWS_SHEET_PAGE: '0', // the question sheet's C4 (T2): a test's daemon serves no sheet page; MAWS_SHEET_PORT is unset with the overrides
   };
 }
 const envWords = (env: Record<string, string>) => Object.entries(env).map(([k, v]) => `${k}=${quote(v)}`).join(' ');
@@ -1139,8 +1140,8 @@ export const archiveProblems = (entries: readonly string[]): string[] => entries
 const sizeOf = (dir: string): number => readdirSync(dir, { withFileTypes: true }).reduce((sum, entry) => sum + (entry.isDirectory() ? sizeOf(join(dir, entry.name)) : entry.isFile() ? statSync(join(dir, entry.name)).size : 0), 0);
 
 /**
- * Builds the head bundle in `out` from `repo` at `commit` (its HEAD, with no tracked change): `pnpm mawsd:pack --no-build`
- * (main's build, the externals' closure with node-pty's N-API prebuild, the session host's prebuild, no runtime on a Mac), the
+ * Builds the head bundle in `out` from `repo` at `commit` (its HEAD, with no tracked change): `pnpm mawsd:pack --no-build
+ * --no-page` (main's build, the externals' closure with node-pty's N-API prebuild, the session host's prebuild, no runtime on a Mac), the
  * latency stub and its fixtures beside it as the checkout lays them out, `bench-head.json` (the commit and the pinned
  * Electron, which the machine's runtime must be), and the tarball of it all, its entries checked.
  */
@@ -1149,8 +1150,9 @@ export async function buildHeadBundle(repo: string, out: string, runner: Command
   if (head.stdout.trim() !== commit) throw new Error(`the head bundle is built from ${commit.slice(0, 9)}, and ${repo} is at ${head.stdout.trim().slice(0, 9) || '?'}`);
   if ((await runner.run(['git', '-C', repo, 'diff', '--quiet', 'HEAD'])).code !== 0) throw new Error(`${repo} has tracked changes: the head bundle is its commit's alone`);
   // --no-build: the bench's own `scripts/e2e-build.sh plain` built out/, which the bench app runs too (a main-only
-  // rebuild here would change it under the app)
-  const packed = await runner.run(['pnpm', '--dir', repo, '--silent', 'mawsd:pack', '--no-build', '--out', join(out, 'pack')], { timeoutMs: 20 * 60_000 });
+  // rebuild here would change it under the app); --no-page: an e2e build makes no sheet page (the question sheet's C4, T23),
+  // and one an earlier build left is not this commit's
+  const packed = await runner.run(['pnpm', '--dir', repo, '--silent', 'mawsd:pack', '--no-build', '--no-page', '--out', join(out, 'pack')], { timeoutMs: 20 * 60_000 });
   const pack = packed.stdout.trim().split('\n').at(-1) ?? '';
   if (packed.code !== 0 || !pack.startsWith(join(out, 'pack'))) throw new Error(`pnpm mawsd:pack failed (exit ${packed.code}): ${packed.stderr.trim().slice(-600)}`);
   const stub = 'test/support/latency-engine-stub.mjs';

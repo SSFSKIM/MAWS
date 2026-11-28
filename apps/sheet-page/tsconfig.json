@@ -1,0 +1,21 @@
+{
+  // The page, typed against the browser: no Node, no Electron. It draws MAWS's renderer modules as they stand (R/ui
+  // today, C3's R/sheet from M4), under MAWS's own `@shared` and `@artifacts` aliases. Its configs, its tests and its
+  // browser suite are tsconfig.node.json's.
+  "compilerOptions": {
+    "target": "ES2023",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "lib": ["ES2023", "DOM", "DOM.Iterable"],
+    "jsx": "react-jsx",
+    "types": ["vite/client"],
+    "strict": true,
+    "isolatedModules": true,
+    "noEmit": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "paths": { "@shared/*": ["../../src/shared/*"], "@artifacts/*": ["../../src/artifacts/*"] }
+  },
+  "include": ["src/**/*.ts", "src/**/*.tsx"],
+  "exclude": ["src/**/*.test.ts", "src/**/*.test.tsx"]
+}

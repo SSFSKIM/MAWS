@@ -152,6 +152,7 @@ const DESK_ONE_LOCALE = [
 ];
 const DESK_WEB = 'apps/desk-web/src/ runs in a browser (the DC5 plan): no Node or Electron module.'; // DC5
 const DESK_WEB_NO_PRELOAD = 'apps/desk-web/src/ runs in a browser with no MAWS preload: `window.maws` does not exist there (the desk composite, DC6).'; // DC6
+const SHEET_PAGE = 'apps/sheet-page/src/ is the question sheet’s local page, in a browser beside the terminal (its C4 plan, §P): no Node or Electron module, no store of the app, nothing under its ipc/, and no `window.maws`, which does not exist there.'; // the question sheet's C4
 const DESK_PROTOCOL = 'apps/desk-hub/src/protocol/ is runtime-neutral (the DC3 plan, Constraints): WebCrypto and plain TypeScript, no Workers, Node, or DOM API.'; // DC3
 // L154 (P2-F W-V): code built under the React Compiler (the renderer; the desk's web app) never reads a postfix ++/--.
 const COMPILED_POSTFIX = {
@@ -440,4 +441,34 @@ module.exports = defineConfig(
     },
   },
   // DC6 end
+  // The question sheet's C4 start: the local page (apps/sheet-page) runs in a browser, as desk-web does, built under the
+  // React Compiler; it draws MAWS's renderer modules but reaches no store of the app and nothing of its bridge (§P).
+  {
+    files: ['apps/sheet-page/src/**/*.{ts,tsx}'],
+    languageOptions: { globals: globals.browser },
+    ...reactHooks.configs.flat.recommended,
+  },
+  { files: ['apps/sheet-page/src/**/*.{ts,tsx}'], rules: { 'no-restricted-syntax': ['error', COMPILED_POSTFIX] } },
+  {
+    files: ['apps/sheet-page/src/**/*.{ts,tsx}'],
+    ignores: ['apps/sheet-page/src/**/*.test.{ts,tsx}'],
+    plugins: { 'maws-dates': mawsDatesPlugin },
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        {
+          paths: ['electron', ...NODE_MODULES].map((name) => ({ name, message: SHEET_PAGE })),
+          patterns: [{ group: ['node:*', '**/renderer/src/stores/*', '**/renderer/src/ipc/*'], message: SHEET_PAGE }],
+        },
+      ],
+      'no-restricted-properties': [
+        'error',
+        { object: 'window', property: 'maws', message: SHEET_PAGE },
+        { object: 'globalThis', property: 'maws', message: SHEET_PAGE },
+      ],
+      'maws-dates/one-locale': ['error', ...DESK_ONE_LOCALE],
+    },
+  },
+  { files: ['apps/sheet-page/e2e/**/*.{ts,mjs}', 'apps/sheet-page/*.config.ts'], languageOptions: { globals: globals.node } },
+  // The question sheet's C4 end
 );

@@ -104,6 +104,10 @@ export class IndexSessionSource implements SessionSource {
   private scanRetry: ReturnType<typeof setTimeout> | null = null; // SCAN_RETRY_MS: the failed sync's next run
   private readonly scanListeners = new Set<() => void>();
   private readonly appliedListeners = new Set<() => void>(); // P5 O3-D M6: who waits for a scan's discoveries applied
+  // C4 M3 (T29): whether a sync has read the registry and folded its holders since the latest transition, and who waits
+  // to hear of it (or of a read that failed before one did)
+  private folded = false;
+  private readonly foldedListeners = new Set<(ok: boolean) => void>();
   private readonly bridged = new Map<AppSessionId, BridgedPhase>(); // P5 O9 M6: what the bridges MAWS drives say
 
   constructor(
@@ -166,6 +170,7 @@ export class IndexSessionSource implements SessionSource {
       this.host.onState('engine-host', () => {
         this.generation += 1; // l1-sessions-13: what the store holds is unknown again until the next scan answers
         this.scanned = false;
+        this.folded = false;
         this.dropScanRetry(); // the next host's streaming syncs afresh
         this.applyBefore([...this.holders.keys()]); // E11: what the host sent before it went (P4 W2-B: a record made later would miss the holder forgotten here)
         this.resetSearch(); // the new host's scan requeues every unfinished stamp
@@ -195,6 +200,7 @@ export class IndexSessionSource implements SessionSource {
       stopped = true;
       this.stopped = true;
       this.scanned = false;
+      this.folded = false;
       this.dropScanRetry();
       this.resetSearch();
       this.discoveries = []; // W-B review M3: the next launch's fs.scan reports them again
@@ -242,6 +248,25 @@ export class IndexSessionSource implements SessionSource {
   private tellApplied(): void {
     if (!this.discoveryApplied()) return;
     for (const listener of [...this.appliedListeners]) listener();
+  }
+
+  // C4 M3 (T29; mawsd's discovery wake, besides `applied`): whether the registry's holders are folded into the index since
+  // the engine host's latest transition. Told once each generation when they come to be (`true`), and at each read that
+  // fails before then (`false`), so a waiter waits for no fold that will not come and tells the two apart. `applied`
+  // keeps its moment, the scan's answer: this comes after it, at the end of the sync's registry read, so a read that
+  // waits for both, in one generation, sees a session a terminal holds as held.
+  holdersFolded(): boolean {
+    return this.folded && !this.stopped;
+  }
+
+  onHoldersFolded(listener: (ok: boolean) => void): () => void {
+    this.foldedListeners.add(listener);
+    return () => void this.foldedListeners.delete(listener);
+  }
+
+  // The generation both signals are told in: each engine-host transition moves it.
+  discoveryGeneration(): number {
+    return this.generation;
   }
 
   // Whether a client shows the session, so what reaches it now is seen (the attention service's unseen rule, the owner's
@@ -497,6 +522,10 @@ export class IndexSessionSource implements SessionSource {
       }
       const state = await this.command('fs.state', undefined);
       if (state !== null) this.foldHolders(state.holders);
+      if (!this.folded && generation === this.generation && !this.stopped) {
+        this.folded = state !== null;
+        for (const listener of [...this.foldedListeners]) listener(state !== null);
+      }
       if (scan === null) this.retrySync(generation, attempt);
     });
     return this.syncs;

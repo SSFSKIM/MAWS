@@ -22,6 +22,9 @@ type Env = Record<string, string | undefined>;
 // P5 O7 M9 (m9-5, the architect's ruling): nor the runner's ANTHROPIC_* variables (a parent session's or the owner's
 // shell's base URL, token and model aliases), which the machine route would read as the machine's own inference, so a
 // scene's settings alone decide it; `keep` names any a spec needs from the runner, kept as the runner has them.
+// The question sheet's C4 (T2): the sheet's local page forced off, and no port of the runner's, so a suite run from a
+// shell that opted in (MAWS_SHEET_PAGE=1), beside a bundle an earlier build left, opens no port and takes no
+// registration; the page's own rig is the one launcher that turns it on, with a scratch home and a port of its own.
 export function launchEnvironment(runner: Env, userData: string, sminosHome?: string, keep: readonly string[] = []): Record<string, string> {
   const env = withoutClaudeVariables(runner);
   for (const key of Object.keys(env)) if (key.startsWith('ANTHROPIC_') && !keep.includes(key)) delete env[key];
@@ -29,6 +32,7 @@ export function launchEnvironment(runner: Env, userData: string, sminosHome?: st
   delete env.ELECTRON_RUN_AS_NODE;
   delete env.SMINOS_HOME; // P5 O9 M5: the runner's, which may be the owner's
   delete env.DAEMON_HOME;
+  delete env.MAWS_SHEET_PORT; // the question sheet's C4 (T2)
   return {
     ...env,
     MAWS_E2E: '1',
@@ -36,6 +40,7 @@ export function launchEnvironment(runner: Env, userData: string, sminosHome?: st
     CLAUDE_CONFIG_DIR: join(userData, 'claude-config'),
     MAWS_CLAUDE_USAGE_DIR: join(userData, 'claude-usage'),
     MAWS_MACHINE_ROLE: 'laptop',
+    MAWS_SHEET_PAGE: '0', // the question sheet's C4 (T2)
     ...(sminosHome !== undefined && { SMINOS_HOME: sminosHome }),
   };
 }

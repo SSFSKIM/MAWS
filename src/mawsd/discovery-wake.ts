@@ -1,6 +1,7 @@
 // The discovery wake (P5 O3-D M6 fix rounds 1 and 2, the architect's ruling (a) on discovery): a read whose answer
 // depends on the index's discovery, from a client that is not the app (the CLI, another machine's link, the endpoint),
-// on a parked engine host, wakes it and waits for its first discovery pass (the scan, its discoveries applied) before
+// on a parked engine host, wakes it and waits for its first discovery pass (the scan, its discoveries applied, and the
+// registry's holders folded: C4 M3, T29) before
 // answering, at most until DISCOVERY_WAKE_BOUND_MS after the read's arrival. Reads meanwhile join that wake, and no
 // park of the host is asked until it ends (fix round 3). The host the wake woke is asked to park again
 // (DaemonClocks.parkNow: only with no app attached or being admitted and no interest) once the pass is heard, and
@@ -29,7 +30,10 @@ export const DISCOVERY_FRESH_MS = 30_000;
 export const DISCOVERY_WAKE_GIVE_UP_MS = 60_000;
 
 export interface DiscoverySignal {
+  generation(): number; // the index's, moved by each engine-host transition: both signals of one pass are told in one
   onApplied(listener: () => void): () => void; // SpineRoot.discovery: a pass's discoveries are in the index
+  // and its registry's holders, after them (C4 M3, T29); `ok` false when the registry's read failed
+  onHoldersFolded(listener: (ok: boolean) => void): () => void;
 }
 
 export interface DiscoveryWakeOptions {
@@ -52,21 +56,34 @@ export function discoveryWake(options: DiscoveryWakeOptions): (name: string, app
     log(`[spine] discovery: ${name} wakes the parked engine host for its discovery pass`);
     const started = Date.now();
     return new Promise<void>((resolve) => {
-      let off = () => {};
-      const done = (heard: boolean) => {
-        off();
+      let offs: (() => void)[] = [];
+      // 'heard' alone makes a read within DISCOVERY_FRESH_MS wake nothing; each end asks the park
+      const done = (end: 'heard' | 'unread' | 'given-up') => {
+        for (const off of offs) off();
         clearTimeout(giveUp);
         inFlight = null;
-        if (heard) {
+        if (end === 'heard') {
           heardAt = Date.now();
           log(`[spine] discovery: the pass is heard ${heardAt - started} ms after the wake`);
-        } else log(`[spine] discovery: no pass heard within ${DISCOVERY_WAKE_GIVE_UP_MS / 1000} s of the wake: the engine host is asked to park, and a read after it parked wakes it again`);
+        } else if (end === 'unread') log('[spine] discovery: the registry could not be read in the pass: the reads answer what the index holds, the engine host is asked to park, and a read after it parked wakes it again');
+        else log(`[spine] discovery: no pass heard within ${DISCOVERY_WAKE_GIVE_UP_MS / 1000} s of the wake: the engine host is asked to park, and a read after it parked wakes it again`);
         options.parkNow();
         resolve();
       };
-      const giveUp = setTimeout(() => done(false), DISCOVERY_WAKE_GIVE_UP_MS);
+      const giveUp = setTimeout(() => done('given-up'), DISCOVERY_WAKE_GIVE_UP_MS);
       giveUp.unref?.();
-      off = discovery.onApplied(() => done(true));
+      // a pass is both signals in one generation: a fold of the host before a transition does not end a later scan's.
+      // A failed registry read ends the wake unheard only once `applied` has come in its generation too; when the scan
+      // fails as well, the reads' bound and the give-up govern, as for a scan alone.
+      let appliedIn: number | null = null;
+      let folded: { generation: number; ok: boolean } | null = null;
+      const settle = () => {
+        if (appliedIn !== null && folded !== null && appliedIn === folded.generation) done(folded.ok ? 'heard' : 'unread');
+      };
+      offs = [
+        discovery.onApplied(() => void ((appliedIn = discovery.generation()), settle())),
+        discovery.onHoldersFolded((ok) => void ((folded = { generation: discovery.generation(), ok }), settle())),
+      ];
       options.waking();
       options.wake();
     });

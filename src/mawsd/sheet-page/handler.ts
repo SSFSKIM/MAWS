@@ -1,0 +1,423 @@
+// What answers the page server's requests (docs/doperpowers/plans/2026-11-24-question-sheet-c4-local-page.md, §J, §L;
+// T7 to T13, T28): the routes, the pairing, the bundle's table and the opening of the live connection. A chunk serve.ts
+// loads at the first request or the first pairing command, never at the daemon's start; `ws` comes with it.
+//
+// Each request meets the three checks (checks.ts) in their fixed order before anything else of it is read. The live
+// connection (§L's opening): the tab speaks first with its browser's id and a fresh nonce, the server answers the MAC
+// only the `mawsd` that browser was paired with can make (pairing.ts's `prove`), and only then does the tab send its
+// credential; the server says nothing before the hello and nothing of any sheet before the credential was checked. Each
+// step has `helloMs`; at most LIVE_MAX connections, LIVE_UNPAIRED_MAX of them not yet paired on the connection; frames
+// of at most FRAME_MAX bytes; a ping every `pingMs`, and one silent for `silentMs` is ended. A browser revoked while
+// connected is closed with 4403. A connection the server closes is ended CLOSE_GRACE_MS later whether or not the peer
+// answered the close (`ws` would wait 30 s for a peer that never does).
+//
+// Once paired (M3, §N; T14, T15, T29), a connection is a standing hold on the daemon, and is sent a snapshot of every
+// record's summary and then one `changed` for each change. A snapshot is made in a fixed order: the hold, the spine
+// (the sheets' service), the daemon's discovery brought up to date (a parked engine host woken for one pass, so a
+// session's running or stopped is the index's fact as of now), the connection's subscription to `sheet.changed`, and only
+// then the list, so a change during the list is delivered after the snapshot and none is lost. Sheets that cannot be had
+// are said as `unavailable`, and the connection stays: it is also the tab's proof of the server. The sheet's HTTP routes
+// are sheet-routes.ts's.
+//
+// Whether a session is running is the index's fact, and no `sheet.changed` is announced when it changes (a terminal
+// session that exits or resumes). So while at least one paired connection is open, every `refreshMs` (the discovery
+// wake's own freshness) each ready connection is given a quiet snapshot: the same steps, discovery brought up to date
+// again, and the snapshot sent only when it differs from what that connection was last told; nothing runs with no paired
+// connection open.
+import { randomBytes } from 'node:crypto';
+import type { IncomingMessage, ServerResponse } from 'node:http';
+import type { Duplex } from 'node:stream';
+import { WebSocketServer, type RawData, type WebSocket } from 'ws';
+import type { SpineState } from '../spine-seam';
+import { admit } from './checks';
+import { isRefusal, pageOrigin, refusal, refusalBytes, refusalHeaders, STANDING_HEADERS, type Refusal } from './headers';
+import { createPairing, type BrowserList } from './pairing';
+import { sendBytes } from './respond';
+import { createSheetRoutes, isSheetRoute } from './sheet-routes';
+import { unavailableWhy, type SheetAccess } from './sheets';
+import { readBundle, type BundleFile, type BundleTable } from './static';
+import type { SheetPageTiming } from './timing';
+
+export const LIVE_MAX = 32;
+export const LIVE_UNPAIRED_MAX = 8;
+export const FRAME_MAX = 4 * 1024;
+export const CODE_BODY_MAX = 1024; // the exchange's `{ "code" }`, and unpair's (empty) body
+export const CLOSE_GRACE_MS = 1_000; // a connection the server closed is ended this long after, answered or not
+
+// §L's close codes
+export const CLOSE = { refused: 4401, unpaired: 4403, unexpected: 1008, stopping: 1001 } as const;
+
+export interface HandlerDeps {
+  port(): number; // the page's port when it answers (a handler a command loaded may come before the bind)
+  bundleDir: string;
+  file: string; // <profile>/mawsd/sheet-page.json
+  sheets: SheetAccess;
+  discovery(): Promise<void>; // T29: the daemon's discovery brought up to date, as for a session.list that is not the app's
+  onEvent(listener: (owner: 'engine-host' | 'pty-host' | 'machine', message: { name: string; payload: unknown }) => void): () => void; // the spine's events, owner `machine`, across loads
+  hold(reason: string, standing?: boolean): () => void; // T15: the daemon is not quiet while one is out
+  spine: SpineState; // the spine's state when the chunk loaded
+  log(line: string): void;
+  now(): number;
+  write?(file: string, text: string): void; // a test's replace of the browsers' file that fails
+  timing: SheetPageTiming;
+}
+
+export interface SheetPageHandler {
+  request(req: IncomingMessage, res: ServerResponse): void;
+  upgrade(req: IncomingMessage, socket: Duplex, head: Buffer): void;
+  pair(): { code: string; expiresAt: string };
+  browsers(): BrowserList;
+  count(): number | null; // the status's: memory alone, never the file
+  unpair(id: string | null): { removed: number; saved: boolean; why?: string; unread?: true };
+  connections(): number; // the live connections paired on the connection
+  spineState(state: SpineState): void;
+  tick(): void; // the page server's timer: a replace of the browsers' file still owed
+  close(): void; // every live connection closed, 1001
+}
+
+export type SheetPageChunk = { createSheetPageHandler(deps: HandlerDeps): Promise<SheetPageHandler> };
+
+// Closes with `code`, and ends the socket after the grace whatever the peer does
+function closeWith(ws: WebSocket, code: number, reason: string): void {
+  ws.close(code, reason);
+  setTimeout(() => ws.terminate(), CLOSE_GRACE_MS).unref();
+}
+
+const BROWSER_ID = /^[0-9a-f]{8}$/;
+const NONCE = /^[A-Za-z0-9_-]{43}$/; // 32 bytes in base64url, unpadded
+const WEBSOCKET_KEY = /^[+/0-9A-Za-z]{22}==$/;
+
+interface Live {
+  ws: WebSocket;
+  step: 'hello' | 'credential' | 'paired';
+  browser: string | null; // the id its hello named
+  heard: number;
+  listed: number; // when it last asked for a snapshot
+  release: (() => void) | null; // its standing hold, taken at its first snapshot
+  unsubscribe: (() => void) | null; // its subscription to `sheet.changed`, made once
+  ready: boolean; // a snapshot was sent since the spine was last lost: a change goes out as it comes
+  held: { t: string; session: string; summary: unknown }[] | null; // the changes heard while a list is out, sent after its snapshot
+  generation: number; // moved on when the spine is lost: a snapshot begun before then sends nothing
+  told: Map<string, string> | null; // what the connection was last told of each session (its summary as JSON) and of the door ('')
+  quiet: boolean; // the snapshot out is the holders' refresh alone: no request of the tab's has joined it
+}
+
+export async function createSheetPageHandler(deps: HandlerDeps): Promise<SheetPageHandler> {
+  const { timing, log } = deps;
+  // the bundle's table, read at the first request that needs it: a command loads this chunk in any state, no-bundle too
+  let table: Promise<BundleTable> | null = null;
+  const bundle = (): Promise<BundleTable> =>
+    (table ??= readBundle(deps.bundleDir).catch((error: unknown) => {
+      table = null;
+      throw error;
+    }));
+  const pairing = createPairing({ file: deps.file, ...(deps.write && { write: deps.write }), now: deps.now, random: randomBytes, log, timing });
+  const live = new Set<Live>();
+  let spine = deps.spine;
+  const sheetRoutes = createSheetRoutes({ port: deps.port, sheets: deps.sheets, hold: deps.hold, readBody: (req, max) => readBody(req, max), json: (res, status, value) => json(res, status, value), refuse: (res, refused) => refuse(res, refused) });
+  const wss = new WebSocketServer({ noServer: true, maxPayload: FRAME_MAX, perMessageDeflate: false, clientTracking: false });
+  wss.on('headers', (headers: string[]) => {
+    for (const [name, value] of Object.entries(STANDING_HEADERS(deps.port()))) headers.push(`${name}: ${value}`); // the 101 too
+  });
+  pairing.onRevoked((id) => {
+    for (const connection of live) if (connection.browser === id && connection.step === 'paired') closeWith(connection.ws, CLOSE.unpaired, 'unpaired');
+  });
+
+  const refuse = (res: ServerResponse, refused: Refusal) => void res.writeHead(refused.status, refusalHeaders(deps.port(), refused)).end(refused.body);
+  // in slices as a file is: a model can be far larger than the socket's buffers, and one write of it would leave the
+  // queue full however fast its peer reads, which the stall watch takes for no progress (serve.ts)
+  const json = (res: ServerResponse, status: number, value: unknown) =>
+    sendBytes(res, status, { ...STANDING_HEADERS(deps.port()), 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' }, Buffer.from(JSON.stringify(value), 'utf8'));
+
+  async function sendFile(req: IncomingMessage, res: ServerResponse, file: BundleFile): Promise<void> {
+    const headers = { ...STANDING_HEADERS(deps.port()), 'Cache-Control': 'no-cache', ETag: file.etag };
+    if (req.headers['if-none-match'] === file.etag) return void res.writeHead(304, headers).end();
+    let bytes: Buffer;
+    try {
+      bytes = await file.read();
+    } catch {
+      return refuse(res, refusal(404)); // gone from under the table
+    }
+    sendBytes(res, 200, { ...headers, 'Content-Type': file.type }, bytes); // the one buffer, in slices
+  }
+
+  // The body, refused as soon as it is known to pass `max`; 'aborted' when the request ended before its body did, after
+  // which nothing changes and nothing is answered. A request already gone (it left while the handler loaded, its abort
+  // heard before anyone listened) is 'aborted' at once: its events will not come again.
+  function readBody(req: IncomingMessage, max: number): Promise<Buffer | 'too-large' | 'aborted'> {
+    if (req.destroyed) return Promise.resolve('aborted');
+    if (Number(req.headers['content-length'] ?? 0) > max) return Promise.resolve('too-large');
+    return new Promise((resolve) => {
+      const chunks: Buffer[] = [];
+      let size = 0;
+      req.on('data', (chunk: Buffer) => {
+        size += chunk.length;
+        if (size > max) {
+          req.removeAllListeners('data');
+          req.pause();
+          return resolve('too-large');
+        }
+        chunks.push(chunk);
+      });
+      req.once('end', () => resolve(Buffer.concat(chunks)));
+      req.once('error', () => resolve('aborted'));
+      req.once('close', () => {
+        if (!req.complete) resolve('aborted');
+      });
+    });
+  }
+
+  async function exchange(req: IncomingMessage, res: ServerResponse): Promise<void> {
+    const body = await readBody(req, CODE_BODY_MAX);
+    if (body === 'aborted') return;
+    if (body === 'too-large') return refuse(res, refusal(413));
+    let code: unknown;
+    try {
+      code = (JSON.parse(body.toString('utf8')) as { code?: unknown }).code;
+    } catch {
+      return refuse(res, refusal(400));
+    }
+    if (typeof code !== 'string') return refuse(res, refusal(400));
+    const answer = pairing.exchange(code, req.headers['user-agent'] ?? '');
+    if (answer.ok) return json(res, 200, { id: answer.id, credential: answer.credential });
+    if (answer.why === 'busy') return json(res, 429, { why: 'busy' });
+    if (answer.why === 'not-saved') return json(res, 503, { why: 'not-saved' });
+    json(res, 403, { why: answer.why, ...(answer.left !== undefined && { left: answer.left }) });
+  }
+
+  async function unpair(req: IncomingMessage, res: ServerResponse, credential: string): Promise<void> {
+    const browser = pairing.check(credential);
+    if (browser === null) return refuse(res, refusal(401));
+    const body = await readBody(req, CODE_BODY_MAX);
+    if (body === 'aborted') return;
+    if (body === 'too-large') return refuse(res, refusal(413));
+    const { saved } = pairing.revoke(browser.id);
+    if (saved) return void res.writeHead(204, { ...STANDING_HEADERS(deps.port()), 'Cache-Control': 'no-store' }).end();
+    json(res, 500, { why: 'not-saved' });
+  }
+
+  // --- the live connection ------------------------------------------------------------------------------------------
+  const send = (connection: Live, message: object) => {
+    if (connection.ws.readyState === connection.ws.OPEN) connection.ws.send(JSON.stringify(message));
+  };
+  const toldOf = (sessions: { session: string }[], door: unknown) => new Map([['', JSON.stringify(door)], ...sessions.map((each) => [each.session, JSON.stringify(each)] as [string, string])]);
+  const sameAs = (told: Map<string, string> | null, now: Map<string, string>) => told !== null && told.size === now.size && [...now].every(([key, value]) => told.get(key) === value);
+  // A change sent, and what the connection now holds
+  const sendChange = (connection: Live, message: { t: string; session: string; summary: unknown }) => {
+    send(connection, message);
+    if (message.summary === null) connection.told?.delete(message.session);
+    else connection.told?.set(message.session, JSON.stringify(message.summary));
+  };
+  // A change, as the spine's service announced it: sent at once after a snapshot, held while a list is out
+  const changed = (connection: Live, payload: unknown) => {
+    const { session, summary } = (payload ?? {}) as { session?: unknown; summary?: unknown };
+    if (typeof session !== 'string') return;
+    const message = { t: 'changed', session, summary: summary ?? null };
+    if (connection.held) connection.held.push(message);
+    else if (connection.ready) sendChange(connection, message);
+  };
+  // A snapshot, in §N's order: the hold, the service, discovery, the subscription, then the list. One begun before the
+  // spine was lost reads a root that is gone (a yield releases it under the connection's
+  // hold, and its service's list does not reject at its stop): it sends nothing, and leaves the connection to the next.
+  // `quiet` (the holders' refresh): the snapshot is sent only when it differs from what the connection was last told,
+  // unless a request of the tab's joined it while it was out, which is answered whatever it finds.
+  async function snapshot(connection: Live, quiet = false): Promise<void> {
+    if (!live.has(connection)) return;
+    if (connection.held) {
+      if (!quiet) connection.quiet = false; // one is out: its answer is the snapshot asked for
+      return;
+    }
+    const { generation } = connection;
+    const current = () => live.has(connection) && connection.generation === generation;
+    connection.held = [];
+    connection.quiet = quiet;
+    try {
+      connection.release ??= deps.hold('the sheet page: a live connection', true);
+      const service = await deps.sheets.service();
+      await deps.discovery();
+      if (!current()) return;
+      connection.unsubscribe ??= deps.onEvent((owner, message) => {
+        if (owner === 'machine' && message.name === 'sheet.changed') changed(connection, message.payload);
+      });
+      const sessions = await service.list();
+      const door = service.door();
+      if (!current()) return;
+      const held = connection.held;
+      connection.held = null;
+      const now = toldOf(sessions, door);
+      if (!(connection.quiet && connection.ready && sameAs(connection.told, now))) {
+        connection.ready = true;
+        connection.told = now;
+        send(connection, { t: 'ready', v: 1, sessions, door });
+      }
+      for (const message of held) sendChange(connection, message);
+    } catch (error) {
+      if (!current()) return;
+      connection.held = null; // what it heard is in the next snapshot
+      send(connection, { t: 'unavailable', why: unavailableWhy(error) });
+    }
+  }
+  // The spine lost: what is out is stale, and no change goes out before the next snapshot
+  const lost = (connection: Live, why: string) => {
+    connection.generation += 1;
+    connection.held = null;
+    connection.ready = false;
+    connection.told = null;
+    send(connection, { t: 'unavailable', why });
+  };
+  // The holders' refresh: one timer while a paired connection is open, none otherwise
+  let refreshTimer: NodeJS.Timeout | null = null;
+  let closing = false;
+  const refreshing = () => {
+    const any = !closing && [...live].some((connection) => connection.step === 'paired');
+    if (any && refreshTimer === null) {
+      refreshTimer = setInterval(() => {
+        for (const connection of live) if (connection.step === 'paired' && connection.ready) void snapshot(connection, true);
+      }, timing.refreshMs);
+      refreshTimer.unref();
+    } else if (!any && refreshTimer !== null) {
+      clearInterval(refreshTimer);
+      refreshTimer = null;
+    }
+  };
+  const ended = (connection: Live) => {
+    live.delete(connection);
+    connection.unsubscribe?.();
+    connection.release?.();
+    connection.unsubscribe = connection.release = null;
+    refreshing();
+  };
+
+  function open(ws: WebSocket): void {
+    const connection: Live = { ws, step: 'hello', browser: null, heard: Date.now(), listed: 0, release: null, unsubscribe: null, ready: false, held: null, generation: 0, told: null, quiet: false };
+    live.add(connection);
+    const late = () => closeWith(ws, CLOSE.refused, 'too late');
+    let deadline = setTimeout(late, timing.helloMs);
+    const ping = setInterval(() => {
+      if (Date.now() - connection.heard >= timing.silentMs) return void ws.terminate();
+      // a browser no longer paired (aged past its idle bound) leaves no socket paired; a live one's presence is its use
+      if (connection.step === 'paired' && !pairing.seen(connection.browser!)) return closeWith(ws, CLOSE.unpaired, 'unpaired');
+      ws.ping();
+    }, timing.pingMs);
+    ws.on('pong', () => void (connection.heard = Date.now()));
+    ws.on('error', () => {});
+    ws.on('close', () => {
+      clearTimeout(deadline);
+      clearInterval(ping);
+      ended(connection);
+    });
+    ws.on('message', (data: RawData, binary: boolean) => {
+      connection.heard = Date.now();
+      const message = binary ? null : parsed(data);
+      if (message === null) return closeWith(ws, CLOSE.unexpected, 'unexpected');
+      if (connection.step === 'hello') {
+        const { t, v, id, nonce } = message;
+        if (t !== 'hello' || v !== 1 || typeof id !== 'string' || !BROWSER_ID.test(id) || typeof nonce !== 'string' || !NONCE.test(nonce)) return closeWith(ws, CLOSE.unexpected, 'unexpected');
+        const mac = pairing.prove(id, nonce, pageOrigin(deps.port())); // the origin under the MAC: a proof is worth nothing to a tab of another port
+        if (mac === null) return closeWith(ws, CLOSE.refused, 'not known');
+        connection.browser = id;
+        connection.step = 'credential';
+        clearTimeout(deadline);
+        deadline = setTimeout(late, timing.helloMs);
+        return send(connection, { t: 'proof', mac });
+      }
+      if (connection.step === 'credential') {
+        if (message.t !== 'credential' || typeof message.credential !== 'string') return closeWith(ws, CLOSE.unexpected, 'unexpected');
+        if (pairing.check(message.credential)?.id !== connection.browser) return closeWith(ws, CLOSE.refused, 'refused');
+        clearTimeout(deadline);
+        connection.step = 'paired';
+        connection.listed = Date.now();
+        send(connection, { t: 'paired' });
+        refreshing();
+        return void snapshot(connection);
+      }
+      if (message.t !== 'list') return closeWith(ws, CLOSE.unexpected, 'unexpected');
+      if (Date.now() - connection.listed < 1_000) return; // one sooner than a second after the last is ignored (§N)
+      connection.listed = Date.now();
+      void snapshot(connection);
+    });
+  }
+
+  const unpaired = () => [...live].filter((connection) => connection.step !== 'paired').length;
+
+  return {
+    request(req, res) {
+      const verdict = admit({ method: req.method ?? '', target: req.url ?? '', rawHeaders: req.rawHeaders, upgrade: false }, deps.port());
+      if (isRefusal(verdict)) return refuse(res, verdict);
+      const { route, credential } = verdict;
+      const failed = (error: unknown) => {
+        log(`a request failed: ${error instanceof Error ? error.message : String(error)}`);
+        if (!res.headersSent) refuse(res, refusal(500));
+      };
+      switch (route.kind) {
+        case 'shell':
+        case 'file':
+          return void bundle().then(
+            (read) => {
+              const file = route.kind === 'shell' ? read.shell : read.get(route.path);
+              return file === null ? refuse(res, refusal(404)) : sendFile(req, res, file);
+            },
+            () => refuse(res, refusal(503)),
+          ).catch(failed);
+        case 'pair':
+          return void exchange(req, res).catch(failed);
+        case 'unpair':
+          return void unpair(req, res, credential!).catch(failed);
+        case 'live':
+          return refuse(res, refusal(400)); // admit refuses it first: a live connection arrives as an upgrade
+      }
+      if (!isSheetRoute(route)) return;
+      // rule 1: everything that reads or changes a sheet requires a credential this server knows, and nothing of the
+      // sheets is asked before it is checked
+      if (pairing.check(credential!) === null) return refuse(res, refusal(401));
+      sheetRoutes(route, req, res, () => pairing.check(credential!) !== null).catch(failed); // a write asks again before its mutation
+    },
+
+    upgrade(req, socket, head) {
+      socket.on('error', () => {});
+      const end = (refused: Refusal) => void socket.end(refusalBytes(deps.port(), refused), () => socket.destroy());
+      const verdict = admit({ method: req.method ?? '', target: req.url ?? '', rawHeaders: req.rawHeaders, upgrade: true }, deps.port());
+      if (isRefusal(verdict)) return end(verdict);
+      // what `ws` would refuse with an answer of its own, refused here first, with the standing headers
+      const { upgrade, 'sec-websocket-version': version, 'sec-websocket-key': key, 'sec-websocket-protocol': protocol } = req.headers;
+      if (upgrade?.toLowerCase() !== 'websocket' || version !== '13' || typeof key !== 'string' || !WEBSOCKET_KEY.test(key) || protocol !== undefined) return end(refusal(400));
+      if (live.size >= LIVE_MAX || unpaired() >= LIVE_UNPAIRED_MAX) return end(refusal(503));
+      wss.handleUpgrade(req, socket, head, open);
+    },
+
+    pair: () => pairing.mint(),
+    browsers: () => pairing.list(),
+    count: () => pairing.count(),
+    unpair(id) {
+      const { ids, saved, why, unread } = pairing.revoke(id);
+      return { removed: ids.length, saved, ...(why !== undefined && { why }), ...(unread && { unread }) };
+    },
+    connections: () => [...live].filter((connection) => connection.step === 'paired').length,
+    spineState(state) {
+      const was = spine;
+      spine = state;
+      // T15: a spine that cannot be had, or that leaves `loaded`, is said on every paired connection, which stays open
+      // (it is the tab's proof); the tab asks for the snapshot again
+      if (state !== 'refused' && state !== 'yielded' && !(was === 'loaded' && state !== 'loaded')) return;
+      const why = state === 'refused' || state === 'yielded' ? state : 'no-service';
+      for (const connection of live) if (connection.step === 'paired') lost(connection, why);
+    },
+    tick: () => void pairing.retry(),
+    close() {
+      closing = true;
+      refreshing();
+      for (const connection of live) closeWith(connection.ws, CLOSE.stopping, 'mawsd is stopping');
+    },
+  };
+}
+
+// A text frame's one JSON object, or null
+function parsed(data: RawData): Record<string, unknown> | null {
+  try {
+    const value: unknown = JSON.parse(Buffer.isBuffer(data) ? data.toString('utf8') : Buffer.concat(data as Buffer[]).toString('utf8'));
+    return typeof value === 'object' && value !== null && !Array.isArray(value) ? (value as Record<string, unknown>) : null;
+  } catch {
+    return null;
+  }
+}
+

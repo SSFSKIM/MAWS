@@ -820,7 +820,7 @@ test("Lane: hosted hosts every eligible group of the run, gate.yml's whole defau
   const today = { ...own, GATE_RUNNER: 'pool', GATE_E2E_RUNNER: 'macos' };
   const before = plan({ ...today, HEAD_MESSAGE: 'ci-gate: test' });
   const laned = plan({ ...today, HEAD_MESSAGE: 'ci-gate: test\n\nLane: hosted' });
-  const kept = { default: 'default', 'desk-web': 'pool', 'connectors-oauth': 'secret', discover: 'secret, home' };
+  const kept = { default: 'default', 'desk-web': 'pool', 'connectors-oauth': 'secret', discover: 'secret, home', 'sheet-page': 'pool' };
   const was = placement(before.outputs);
   const groups = Object.keys(was);
   assert.ok(groups.length > 30, `the class-1 set (${groups.length} groups)`);
@@ -832,7 +832,7 @@ test("Lane: hosted hosts every eligible group of the run, gate.yml's whole defau
   assert.deepEqual(JSON.parse(laned.outputs.e2e_build), ['plain']);
   const hostedGroups = groups.filter((group) => !(group in kept));
   assert.deepEqual(JSON.parse(laned.outputs.e2e_hosted).map((entry) => entry.group), hostedGroups);
-  assert.ok(laned.summary.endsWith(`${hostedNote(hostedGroups)} Lane: hosted, but never on a hosted Mac, so where it would be: e2e:default (default), e2e:desk-web (pool), e2e:connectors-oauth (secret), e2e:discover (secret, home).\n`), laned.summary);
+  assert.ok(laned.summary.endsWith(`${hostedNote(hostedGroups)} Lane: hosted, but never on a hosted Mac, so where it would be: e2e:default (default), e2e:desk-web (pool), e2e:connectors-oauth (secret), e2e:discover (secret, home), e2e:sheet-page (pool).\n`), laned.summary);
 });
 
 test("gate.yml's HOSTED_MAC_E2E groups are waiters on the default macOS set; every other group is where an empty list puts it", () => {

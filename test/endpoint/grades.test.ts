@@ -293,6 +293,24 @@ describe('only what is offered crosses', () => {
     expect(await call(a, 'session.send', { appSessionId: 'app-own', content: 'hi' })).toBe('act-required');
   });
 
+  // The question sheet's C4 (T11): no caller through the endpoint mints a pairing code, lists or unpairs a browser of
+  // the sheet's local page. The machine's owner asks each, as a call and as an act: none is offered. Were one offered by
+  // mistake, its `internal` grade is a routing class no remote caller is admitted at.
+  it('refuses the sheet page’s pairing commands to a remote caller, the machine’s owner included', async () => {
+    const sheet = ['daemon.sheetPair', 'daemon.sheetBrowsers', 'daemon.sheetUnpair'] as const;
+    const inputs: Record<(typeof sheet)[number], unknown> = { 'daemon.sheetPair': null, 'daemon.sheetBrowsers': null, 'daemon.sheetUnpair': { id: null } };
+    const f = await start();
+    const a = await open(f, a1, A);
+    for (const name of sheet) {
+      expect(await call(a, name, inputs[name]), name).toBe('not-offered');
+      expect(await send(a, a.device.action({ machine: f.ref, action: name, args: (inputs[name] ?? {}) as Record<string, unknown> })), name).toBe('not-offered');
+    }
+    const offered: Offers = { ...OFFERS, commands: { ...OFFERS.commands, ...Object.fromEntries(sheet.map((name) => [name, { kind: 'call', executor: 'machine', target: 'machine' }])) } };
+    const g = await start({ offers: offered });
+    const owner = await open(g, a1, A);
+    for (const name of sheet) expect(await call(owner, name, inputs[name]), name).toBe('grade');
+  });
+
   it('refuses an offered name its namespace declares no grade for (`ungraded`), until it declares one', async () => {
     const declared: { grade?: GradeSpec } = {};
     const registry: WireRegistry = { ...REGISTRY, commands: { ...REGISTRY.commands, 'fixture.read': { input: z.strictObject({ appSessionId: z.string() }), output: z.unknown(), owner: 'engine-host' } } };

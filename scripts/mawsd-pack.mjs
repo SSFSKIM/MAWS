@@ -1,12 +1,16 @@
 #!/usr/bin/env node
 // `pnpm mawsd:pack` (docs/doperpowers/plans/2026-10-27-p5-o2-mawsd.md, M8 "The pack", "The Linux runtime and the Node
-// floor"): runs `pnpm build:main-preload`, then assembles `dist/mawsd/<version>-<commit>-<content>/`, the package
+// floor"): runs `pnpm build:main-preload` and builds the question sheet's page, then assembles `dist/mawsd/<version>-<commit>-<content>/`, the package
 // `mawsd install` installs as a Linux release (src/mawsd/release.ts). `<content>` is 8 hex of the SHA-256 of everything
 // in it but its package.json (each file's path, kind and bytes, in path order), so the release name is its content's:
 // the same content is the same release, which an install copies once and never rewrites, and a rebuild of one commit
 // that changed anything is another release.
 //
 //   out/main/**                  main's build, whose second input is mawsd.js (and the host bundles it spawns)
+//   out/sheet-page/**            the question sheet's local page (docs/doperpowers/plans/2026-11-24-question-sheet-c4-local-page.md,
+//                                T23), which mawsd serves from one directory above its own entry; a tree without its
+//                                index.html is refused unless --no-page packs without it (a mawsd of such a pack reads
+//                                `no-bundle`), for the callers that pack what a main-only or an e2e build made
 //   node_modules/…               the production closure of the externals the bundle guard allows (zod, the MCP SDK,
 //                                node-pty), copied from the installed tree as Node would resolve them
 //   bin/maws-session-host        the session host for the pack's platform (docs/doperpowers/plans/2026-10-31-p5-o16-holder.md,
@@ -26,7 +30,7 @@
 //
 // A mismatch, a failed smoke check or a missing dependency refuses the pack and leaves none. The pack's path is the one
 // line printed on stdout; the build's output goes to stderr. Options: --out <dir> (default dist/mawsd), --no-build,
-// --render.
+// --no-page, --render.
 import { Buffer } from 'node:buffer';
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
@@ -229,6 +233,7 @@ export async function pack({
   arch = process.arch,
   commit = commitOf(root),
   build = true,
+  page = true, // the question sheet's C4: false (--no-page) packs without out/sheet-page
   manifest = join(root, 'packaging', 'mawsd', 'node.json'),
   electronManifest = join(root, 'packaging', 'mawsd', 'electron.json'), // P5 O5 M6
   render = false,
@@ -239,14 +244,20 @@ export async function pack({
   if (build) {
     const built = spawnSync('pnpm', ['build:main-preload'], { cwd: root, stdio: ['ignore', 2, 2] });
     if (built.status !== 0) throw new Error(`pnpm build:main-preload failed (${built.status ?? built.signal})`);
+    if (page) {
+      const paged = spawnSync('pnpm', ['--filter', 'sheet-page', 'build'], { cwd: root, stdio: ['ignore', 2, 2] });
+      if (paged.status !== 0) throw new Error(`pnpm --filter sheet-page build failed (${paged.status ?? paged.signal})`);
+    }
   }
   if (!existsSync(join(root, 'out', 'main', 'mawsd.js'))) throw new Error(`${root}/out/main/mawsd.js is not built`);
+  if (page && !existsSync(join(root, 'out', 'sheet-page', 'index.html'))) throw new Error(`${root}/out/sheet-page/index.html is not built (pnpm --filter sheet-page build); pack with --no-page to leave the page out`);
   const { version } = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'));
   mkdirSync(out, { recursive: true });
   const staged = mkdtempSync(join(out, '.staging.'));
   let release;
   try {
     cpSync(join(root, 'out', 'main'), join(staged, 'out', 'main'), { recursive: true });
+    if (page) cpSync(join(root, 'out', 'sheet-page'), join(staged, 'out', 'sheet-page'), { recursive: true });
     for (const dir of closure(root, EXTERNALS)) {
       // each package without its own node_modules: what it needs from there is in the closure, under its own path
       const from = join(root, dir);
@@ -281,9 +292,10 @@ function options(argv) {
   const parsed = {};
   for (let i = 0; i < argv.length; i++) {
     if (argv[i] === '--no-build') parsed.build = false;
+    else if (argv[i] === '--no-page') parsed.page = false;
     else if (argv[i] === '--render') parsed.render = true;
     else if (argv[i] === '--out' && argv[i + 1]) parsed.out = resolve(argv[++i]);
-    else throw new Error(`mawsd:pack does not take ${argv[i]}; usage: mawsd-pack.mjs [--out <dir>] [--no-build] [--render]`);
+    else throw new Error(`mawsd:pack does not take ${argv[i]}; usage: mawsd-pack.mjs [--out <dir>] [--no-build] [--no-page] [--render]`);
   }
   return parsed;
 }

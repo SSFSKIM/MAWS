@@ -1,0 +1,38 @@
+/* The page's styles (§P; F3): MAWS's tokens and Tailwind theme as they stand, light only (the page has no settings of its
+   own and does not follow the system's dark mode), the Markdown's two stylesheets as C3's components ask of a consumer,
+   and the renderer directories it draws from named for Tailwind, which scans only this app's own directory unless
+   told. */
+@import "../../../../src/renderer/src/styles/app.css";
+/* Markdown's prose styles (`transcript-prose`, and the badge a card's "Updated" wears), and Streamdown's own */
+@import "../../../../src/renderer/src/transcript/view/transcript.css";
+@import "streamdown/styles.css";
+
+@source "../";
+@source "../../../../src/renderer/src/ui";
+@source "../../../../src/renderer/src/sheet";
+@source "../../../../src/renderer/src/request-card";
+@source "../../../../src/renderer/src/transcript/view/markdown";
+
+/* How the page widens C3's sheet (§P, the composite's writer's ruling of 2026-11-24): the section takes the whole width
+   the outline leaves and the height under the bar, so the foot's band and the scrollbar reach the window's edge, and
+   the cards and the foot's content stay one column of the transcript's measure, centred by inline padding. Reached by
+   the two attributes C3's full-density markup carries, never by its child order, and nothing here styles the app. The
+   scroller and the foot reserve the same scrollbar gutter, the app's rule for a scroller with a footer aligned under it
+   (R/styles/app.css, `.scroll-gutter`), so under classic scrollbars Send's right edge stays the cards'. */
+[data-sheet-page] [data-sheet-session] {
+  flex: 1 1 0;
+  min-height: 0;
+}
+[data-sheet-page] [data-sheet-scroll] {
+  padding-inline: max(0px, calc((100% - var(--measure)) / 2));
+  scrollbar-gutter: stable;
+}
+[data-sheet-page] [data-sheet-page-note] {
+  padding-inline: calc(max(0px, calc((100% - var(--measure)) / 2)) + 12px);
+  scrollbar-gutter: stable;
+}
+[data-sheet-page] [data-sheet-foot] {
+  padding-inline: calc(max(0px, calc((100% - var(--measure)) / 2)) + 12px);
+  overflow: hidden;
+  scrollbar-gutter: stable;
+}

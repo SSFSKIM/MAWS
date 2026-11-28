@@ -1,3 +1,4 @@
+import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { findTokenViolations, scanRendererSources } from './tokens-guard';
 
@@ -34,6 +35,12 @@ describe('renderer uses tokens only', () => {
 
   it('holds for every renderer source outside tokens.css', () => {
     const violations = scanRendererSources();
+    expect(violations.map((v) => `${v.file}:${v.line} ${v.match}`)).toEqual([]);
+  });
+
+  // The question sheet's C4: the local page's own components draw with the app's tokens too (§P)
+  it("holds for the sheet page's own sources", () => {
+    const violations = scanRendererSources(join(__dirname, '../../apps/sheet-page/src'));
     expect(violations.map((v) => `${v.file}:${v.line} ${v.match}`)).toEqual([]);
   });
 });
