@@ -7,6 +7,11 @@
 // table's (charter §4.3 as amended 2026-10-01); every other live record is a foreign holder. Own records are never
 // holders, but they count as live processes (`liveCount`) and they make a foreign holder of the same session a
 // contest. `jobs/<short>/state.json` adds the job's facts, never liveness.
+// The `sessions/` watch is the fast path to a new or changed record; the poll is the floor under it. While a holder is
+// known the poll re-reads the registry outright, since a killed process leaves its record behind and only liveness ends
+// it. While none is known it lists `sessions/` and stats each record, and re-reads only when that differs from what the
+// last read listed or that read failed: a record whose event FSEvents delayed or dropped (an overloaded fseventsd loses some outright) is
+// found within one period, for a readdir and a stat per record rather than a read of each and a `ps`.
 // Read-only: registry and job files are read, never written or removed.
 import { execFile } from 'node:child_process';
 import { readdir, realpath, stat } from 'node:fs/promises';
@@ -24,7 +29,7 @@ export type ContestSink = (sessionId: SessionId, by: ForeignHolder | null, start
 
 export interface HolderDeps {
   ps?: string; // the ps binary; tests point it somewhere that cannot spawn
-  pollMs?: number; // liveness poll while at least one holder is known
+  pollMs?: number; // the poll's period (POLL_MS)
   // W7: the pids of MAWS's own live engine processes (the engine host's process table); absent, none
   ownPids?: () => ReadonlySet<number>;
   contests?: ContestSink;
@@ -47,10 +52,14 @@ export function ownsTranscriptRecord(record: Writer, sessionId: SessionId, live:
   return writers.length > 0 && writers.every((writer) => isOwnWriter(writer, ownPids));
 }
 
+// The poll's period, holder or none. Idle, a tick costs a readdir of `sessions/` and a stat per record (a few dozen
+// files at most), well under a millisecond of I/O, so the bound on finding a first holder whose event was lost can be
+// the held poll's own: 2 s, at the wakeup rate that poll already has.
 export const POLL_MS = 2_000;
 export const JOB_STATE_MAX_BYTES = 8 * 1024 * 1024; // the engine's own cap; a larger state.json is treated as absent
 const NONE: Holder = { kind: 'none' };
 const REGISTRY_FILE = /^(\d+)\.json$/;
+const UNLISTABLE = 'unlistable:';
 
 interface Held {
   holder: Holder;
@@ -72,6 +81,7 @@ export class HolderRegistry {
   private foreign: LiveSessionRecord[] = []; // the live records that are not MAWS's own: what fs.holders filters (W7)
   private chain: Promise<unknown> = Promise.resolve();
   private queuedRefresh: Promise<Error | null> | null = null;
+  private listed: string | null = null; // `sessions/` as the last registry read listed it (listing())
   private poll: ReturnType<typeof setInterval> | null = null;
   private stopped = false;
 
@@ -93,6 +103,9 @@ export class HolderRegistry {
   async start(): Promise<void> {
     await this.serial(() => this.readAllJobs());
     await this.refresh();
+    if (this.stopped) return;
+    this.poll = setInterval(() => void this.tick(), this.pollMs);
+    this.poll.unref();
   }
 
   // Re-reads every registry record, re-checks liveness and emits each holder that changed. Runs on every `sessions/`
@@ -108,7 +121,13 @@ export class HolderRegistry {
     if (this.queuedRefresh) return this.queuedRefresh;
     const run = this.serial(async () => {
       this.queuedRefresh = null;
+      // Listed before the read, so a change made during it differs at the next tick, and kept only once the read
+      // succeeds, so the next idle tick retries a read that failed; a directory that cannot be listed at all is retried
+      // when that changes, not on every tick.
+      const listed = await this.listing();
+      this.listed = listed.startsWith(UNLISTABLE) ? listed : null;
       const unreadable = await this.readRegistry();
+      if (unreadable === null) this.listed = listed;
       await this.recompute(); // the poll's view carries on from the records it could read and the ones it kept
       // A record the filesystem refused is not an answer about that process: an on-demand query must not pass it off.
       return unreadable === null ? null : Object.assign(new Error(`registry record unreadable: ${unreadable}`), { code: unreadable });
@@ -171,6 +190,34 @@ export class HolderRegistry {
       if (matches) answer.push({ sessionId, holder: this.holderFor(record, sessionId), cwd, ...(record.entrypoint === undefined ? {} : { entrypoint: record.entrypoint }) });
     }
     return answer;
+  }
+
+  // One poll period: a full refresh while a holder is known, otherwise one only when `sessions/` changed since the last.
+  private async tick(): Promise<void> {
+    if (this.held.size > 0 || (await this.listing()) !== this.listed) await this.refresh();
+  }
+
+  // `sessions/` as each record's name, inode, size, mtime and ctime: a record added, removed, replaced or rewritten in
+  // place changes it (ctime too, which no writer can set back). A record that cannot be statted is its name and errno,
+  // beside the others; a directory that cannot be listed is UNLISTABLE and its errno.
+  private async listing(): Promise<string> {
+    try {
+      const names = (await listNames(this.paths.sessions)).filter((name) => REGISTRY_FILE.test(name)).sort();
+      const entries = await Promise.all(
+        names.map(async (name) => {
+          try {
+            const { ino, size, mtimeMs, ctimeMs } = await stat(join(this.paths.sessions, name));
+            return `${name}:${ino}:${size}:${mtimeMs}:${ctimeMs}`;
+          } catch (error) {
+            if (isMissing(error)) return null; // unlinked since the readdir
+            return `${name}:${(error as NodeJS.ErrnoException).code ?? String(error)}`;
+          }
+        }),
+      );
+      return entries.filter((entry) => entry !== null).join('\n');
+    } catch (error) {
+      return `${UNLISTABLE}${(error as NodeJS.ErrnoException).code ?? String(error)}`;
+    }
   }
 
   // Runs `step` after every earlier one; resolves with the error that stopped it (logged here), or with the failure the
@@ -293,14 +340,6 @@ export class HolderRegistry {
       if (by === null) this.contested.delete(sessionId);
       else this.contested.set(sessionId, by);
       if (!sameHolder(before ?? NONE, by ?? NONE)) this.contestSink(sessionId, by, by === null ? null : (this.held.get(sessionId)?.registry.startedAt ?? null));
-    }
-
-    if (this.held.size > 0 && !this.poll) {
-      this.poll = setInterval(() => void this.refresh(), this.pollMs);
-      this.poll.unref();
-    } else if (this.held.size === 0 && this.poll) {
-      clearInterval(this.poll);
-      this.poll = null;
     }
   }
 
