@@ -91,22 +91,27 @@ const distanceFromEnd = (page: Page) =>
     const scroller = document.querySelector<HTMLElement>('[data-transcript-scroller]')!;
     return scroller.scrollHeight - scroller.clientHeight - scroller.scrollTop;
   });
-// The same distance as the next frame paints it. A batch commits its text in the player's tick, and the list follows
-// that growth in its resize observers at the next frame, before paint; a read between the two sees the batch's growth
-// not yet followed, a state no frame shows (hosted Macs read 144 to 176 px there). This read is made in a resize
-// observer created after the list's, so its report follows theirs and the follow they run.
-const paintedDistanceFromEnd = (page: Page) =>
-  page.evaluate(
-    () =>
+// The same distance as the next frame paints it, the largest over `frames` consecutive frames. A batch commits its text
+// in the player's tick, and the list follows that growth in its resize observers at the next frame, before paint; a
+// read between the two sees the batch's growth not yet followed, a state no frame shows (hosted Macs read 144 to 176 px
+// there). Each read here is made in a resize observer created after the list's, so it follows theirs and the follow they
+// run; so a frame that paints the end off by more than the bound is caught, and a read between a batch's commit and the
+// next frame is not taken.
+const paintedDistanceFromEnd = (page: Page, frames = 30) =>
+  page.evaluate(async (count) => {
+    const scroller = document.querySelector<HTMLElement>('[data-transcript-scroller]')!;
+    const painted = () =>
       new Promise<number>((resolve) => {
-        const scroller = document.querySelector<HTMLElement>('[data-transcript-scroller]')!;
         const observer = new ResizeObserver(() => {
           observer.disconnect();
           resolve(scroller.scrollHeight - scroller.clientHeight - scroller.scrollTop);
         });
         observer.observe(scroller);
-      }),
-  );
+      });
+    let largest = Number.NEGATIVE_INFINITY;
+    for (let frame = 0; frame < count; frame++) largest = Math.max(largest, await painted());
+    return largest;
+  }, frames);
 // A list row by its X3 id.
 const rowSelector = (rowId: string) => `[data-row-id="${rowId}"]`;
 
@@ -3339,8 +3344,9 @@ test('zoom: at 110 % and 80 % a streaming transcript keeps following while a key
       // `INPUT_SCROLL_SETTLE_MS` (250 ms, Transcript.tsx) after a page key, and a step out can clamp the offset onto a
       // rounded end, so a step inside that window is the row's condition met by the zoom rather than by this scene's own
       // clamp (a loaded guest's renderer runs that timer late). A renderer timer of that length set after the key runs
-      // after the list's.
+      // after the list's, and the follow is checked there, so a release made by the settle itself reads apart from the zoom's.
       await page.evaluate(() => new Promise((resolve) => setTimeout(resolve, 250)));
+      await following(`at ${f}, before the window zooms, the last key's settle passed and the reader follows`);
       await zoomTo(s.maws.app, page, f);
       const before = (await heights()).sizer;
       await send();
