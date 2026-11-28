@@ -349,7 +349,7 @@ describe('a session whose sheet questions wait', () => {
 
   // M4's review: a stopped session's one question answered from its card is queued and waits no more; the card keeps its
   // sheet, which reads the answer queued with Take back; taken back, the question is open and waits again. The branch
-  // review of #890 (R1): the session is read and exited, so only its held sheet keeps its card on the board.
+  // review of pull request 890 (R1): the session is read and exited, so only its held sheet keeps its card on the board.
   it('keeps a stopped session’s compact sheet once its one question is answered from it: queued with Take back, which opens it again', async () => {
     const id = idOf('Fix sidebar drag');
     let model = sheetOf([FIXTURE]);

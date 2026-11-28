@@ -171,7 +171,7 @@ describe('a sheet call’s row, from the transcript alone', () => {
     expect(sheetOf(b, 'toolu_three').lines[2]!.outcome).toEqual({ how: 'answered', receipt: ' '.repeat(80) });
   });
 
-  // The branch review of #890 (R2): a fork whose id floor could not be read starts again at q1 (§I, the writer's fork
+  // The branch review of pull request 890 (R2): a fork whose id floor could not be read starts again at q1 (§I, the writer's fork
   // ruling), so a fresh add can name an id the copied history already holds. It is a new question: the copied row keeps
   // its own line and outcome, and what comes after (a revise, a delivery) is the new one's.
   it('takes a repeated id in an add for a new question: the earlier row keeps its outcome, later revises and deliveries are the new one’s', () => {

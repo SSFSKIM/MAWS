@@ -32,7 +32,7 @@ export interface OverviewInput {
   // P5 O7 M6 (M6c fix wave 1): other machines' listed sessions; one with no record is carded in Needs you from its
   // listing and its item (as the toolbar counts it), and in no other group, which needs a record's directory and digest.
   listed?: ReadonlyMap<AppSessionId, unknown>;
-  // The question sheet's C3 (the branch review of #890): whether the session's sheet holds what the person did on its
+  // The question sheet's C3 (the branch review of pull request 890): whether the session's sheet holds what the person did on its
   // card (`selectSheetHeld`), which keeps the card on the board, in its own group, so the receipt and Take back stay
   // where the answer was sent (the composite's §8.1). It waits on nobody: it never puts the card in Needs you.
   held?: (appSessionId: AppSessionId) => boolean;

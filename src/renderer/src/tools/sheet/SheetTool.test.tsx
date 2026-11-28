@@ -183,7 +183,7 @@ describe('the side sheet', () => {
     elsewhere.remove();
   });
 
-  // The branch review of #890 (R3): a destination page over the column, or a collapsed panel, hides the tab without
+  // The branch review of pull request 890 (R3): a destination page over the column, or a collapsed panel, hides the tab without
   // unmounting its body; an ask that landed is used then, and one whose card has not appeared waits for it
   it('uses a landed ask when the tab is hidden without unmounting; one whose card is not listed yet stays pending', async () => {
     await listed(summary());
