@@ -567,7 +567,9 @@ async function w7(){
   const m2=noteSheet(p,r,sid,'after the message');out.pending=(m2?.pending??[]).length;
  }catch(e){p.note({event:'scenario_error',error:e.stack});console.error(e.message);}
  const {debug}=await finish(p,stub,r,sid);out.ringLines=lines(debug,RING_LINES);
- out.landedIn=out.ringTurn?.carried?(out.pendingAfterStop?.length?'neither yet':'the interrupted turn'):'the message';
+ // where the envelope went: landed at the Stop (written into the conversation with the stopped turn, whether or not the
+ // model was asked; nothing pending after it), or pending and carried by the person's message
+ out.landedIn=out.pendingAfterStop?.length===0?'the interrupted turn':'the message';out.modelAsked=(out.ringTurn?.modelCalls??0)>0;
  out.answer=out.history?.length===1&&out.pending===0?'pass':'fail';
  return verdict(p,cell,out);
 }

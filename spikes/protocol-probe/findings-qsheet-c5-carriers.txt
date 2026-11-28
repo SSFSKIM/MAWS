@@ -318,9 +318,10 @@ W7. A ring with an answer pending, interrupted as soon as its command_lifecycle 
 ring is filled"), and the engine ended the frame with a result that names it, error_during_execution, terminal reason
 aborted_streaming, and then cancelled after started. On 2.1.331 the rest is not deterministic: it depends on where the
 interrupt falls. In 4 runs on the same heads: num_turns 0, the model not asked, the key pending and riding the person's
-message, twice (one kept, w7-zero); num_turns 2, the model not asked, after the ring's echo and a "[Request interrupted
-by user]" user frame, the key riding the message, once (w7); num_turns 2, the model asked with the envelope, which
-landed in the stopped turn (pending empty after the Stop), once (w7-landed). Every shape delivered the envelope once.
+message, twice (one kept, w7-zero); num_turns 2, the model not asked: after the ring's echo and a "[Request
+interrupted by user]" user frame, the ring and its envelope were written into the conversation and the key landed at
+the Stop, and the model read them once, in the request after the person's message, once (w7); num_turns 2, the model
+asked with the envelope, which landed in the stopped turn, once (w7-landed). Every shape delivered the envelope once.
 For §V: a frame can end cancelled after started, and an aborted result's num_turns says nothing of whether the model
 ran to an end.
 

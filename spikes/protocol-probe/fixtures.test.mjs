@@ -1747,11 +1747,10 @@ testB('question sheet C5 M2 W7: a ring interrupted as soon as it started ends ab
  for(const n of ['w7','w7-zero','w7-landed']){
   const v=passQ5(n);assert.deepEqual(v.ringLifecycle,['queued','started','cancelled'],n);assert.equal(v.history.length,1,n);
   assert.deepEqual(v.ringTurn.result.map(x=>x.subtype),['error_during_execution'],n);
-  // landed in the stopped turn: nothing pending after the Stop; else the one key pending, then carried by the message
-  assert.equal(v.pendingAfterStop.length,v.landedIn==='the interrupted turn'?0:1,n);
-  shape[n]=[v.ringTurn.result[0].num_turns,v.ringTurn.modelCalls,v.landedIn];
+  // landed at the Stop (nothing pending after it), or the one key pending and then carried by the person's message
+  shape[n]=[v.ringTurn.result[0].num_turns,v.ringTurn.modelCalls,v.pendingAfterStop.length===0?'landed at the Stop':'rode the message'];
  }
- assert.deepEqual(shape,{w7:[2,0,'the message'],'w7-zero':[0,0,'the message'],'w7-landed':[2,1,'the interrupted turn']});
+ assert.deepEqual(shape,{w7:[2,0,'landed at the Stop'],'w7-zero':[0,0,'rode the message'],'w7-landed':[2,1,'landed at the Stop']});
  for(const n of ['w7','w7-zero','w7-landed'])assert.equal(inQ5(loadQ5(n),f=>f.type==='result'&&f.subtype==='error_during_execution')[0].frame.terminal_reason,'aborted_streaming',n);
 });
 testB('question sheet C5 M2 W8: after an interrupt nothing reaches the model until the person writes, and their message carries the answer and the dismissal',()=>{
