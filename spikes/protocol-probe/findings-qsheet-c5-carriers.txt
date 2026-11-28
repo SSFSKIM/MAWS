@@ -236,10 +236,11 @@ the two readers used to tabulate).
 
 ================================================================================================================
 M1's branch on the wire (M2's sitting; docs/doperpowers/plans/2026-11-27-question-sheet-c5-maws-run.md, §S "The wire
-sitting"). DRAFT: the cells below were recorded at doperpowers question-sheet-c5 7040fbae5 (M1, the ring marked);
-the recordings committed beside this, and the heads named here, are replaced by one run of the whole set on the head
-M1's pull request merges. P6 to P8 and the first P9 were recorded at 34e1942ca and stand as the first sitting found
-them.
+sitting"), 2026-11-28 UTC. Every recording beside this but two was made in one run of the whole set on the head M1's
+pull request merges, doperpowers question-sheet-c5 27986ac25, engine 2.1.331, from MAWS 83254042f (`run.sh
+DP=27986ac25`); W7's two variants are repeats of W7 on the same heads (below). The first sitting's P9 (p9-string,
+p9-block) was recorded at 34e1942ca, before the ring was marked, and is kept as it was. An earlier run of the cells at
+7040fbae5 found the same, its W7 in the shape with num_turns 0.
 
 How it runs. scenarios/pass3/qsheet-c5-m1.mjs, through qsheet-c5.mjs with QC5_CELLS=m1 (QC5_ONLY=<cells> for some).
 M1's sminos as it is, no patch, under MAWS's launch line as src/engine-host/launch.ts builds it: the fixed flags,
@@ -313,10 +314,15 @@ W6. B6 on M1: the engine and its three children killed as the request held the e
 resumed start the key left pending, deliveredAt set, before any prompt and with no request; a ring: dropped; a person's
 message after it: the envelope once across both processes' history.
 
-W7. A ring with an answer pending, its turn running a call, interrupted as soon as its command_lifecycle started: the
-mod had filled it ("a ring is filled"), and the engine then ended the frame cancelled after started, with a result
-error_during_execution, num_turns 0, and no model request. The key stayed pending; the person's message carried the
-envelope, once. For §V: a frame can end cancelled after started; that end names no turn the model ran.
+W7. A ring with an answer pending, interrupted as soon as its command_lifecycle started: the mod had filled it ("a
+ring is filled"), and the engine ended the frame with a result that names it, error_during_execution, terminal reason
+aborted_streaming, and then cancelled after started. On 2.1.331 the rest is not deterministic: it depends on where the
+interrupt falls. In 4 runs on the same heads: num_turns 0, the model not asked, the key pending and riding the person's
+message, twice (one kept, w7-zero); num_turns 2, the model not asked, after the ring's echo and a "[Request interrupted
+by user]" user frame, the key riding the message, once (w7); num_turns 2, the model asked with the envelope, which
+landed in the stopped turn (pending empty after the Stop), once (w7-landed). Every shape delivered the envelope once.
+For §V: a frame can end cancelled after started, and an aborted result's num_turns says nothing of whether the model
+ran to an end.
 
 W8. Two questions; a call running; an answer applied; an interrupt; a dismissal: no request between the interrupt and
 the person's message, which carried one envelope with q1's answer and q2's dismissal.

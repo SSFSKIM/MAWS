@@ -1637,7 +1637,7 @@ const mainQ5=rows=>metaQ5(rows,'stub_requests').at(-1).requests.filter(x=>x.main
 const inQ5=(rows,pred)=>rows.filter(r=>r.direction==='in'&&pred(r.frame));
 const RING_Q5='The human answered questions on your sheet.⁠',SENTENCE_Q5='The human answered questions on your sheet.',DROP_Q5='nothing is ready on the sheet';
 const filesQ5=readdirSync(dirQ5).filter(f=>f.startsWith('qsheet-c5-m1-')&&f.endsWith('.jsonl'));
-const PHASE_B_Q5=['p9-mark-string','p9-mark-block','w1','w2','w3','w4a','w4b','w5','w6','w6-resumed','w7','w8','w9','w9-resumed','w10','w11','w12'];
+const PHASE_B_Q5=['p9-mark-string','p9-mark-block','w1','w2','w3','w4a','w4b','w5','w6','w6-resumed','w7','w7-zero','w7-landed','w8','w9','w9-resumed','w10','w11','w12'];
 const haveBQ5=PHASE_B_Q5.some(n=>filesQ5.includes(`qsheet-c5-m1-${n}.jsonl`));
 const testB=(name,fn)=>test(name,{skip:haveBQ5?false:'the phase B recordings are committed with the final run on M1\'s merged head'},fn);
 test('question sheet C5 M2: the phase B recordings are there together or not at all',()=>{
@@ -1740,8 +1740,19 @@ testB('question sheet C5 M2 W6: killed as the envelope landed, the resumed start
  const v=passQ5('w6-resumed');assert.equal(v.pendingAfterKill.length,1);assert.deepEqual([v.pendingAtStart,v.requestsBeforePrompt],[0,0]);
  assert.deepEqual(metaQ5(loadQ5('w6-resumed'),'qc5_sheet').find(s=>s.label.startsWith('after the resumed start')).pending,[]);
 });
-testB('question sheet C5 M2 W7: a ring interrupted as soon as it started; the envelope once, in the turn or with the person\'s message',()=>{
- const v=passQ5('w7');assert.ok(v.ringLifecycle.includes('started'));assert.equal(v.history.length,1);
+// W7's shape is not deterministic on 2.1.331 (where the interrupt falls): three recordings, each held to the cell's
+// own criterion, the envelope once, landed in the stopped turn or pending and riding the person's message.
+testB('question sheet C5 M2 W7: a ring interrupted as soon as it started ends aborted then cancelled; the envelope once, in the stopped turn or with the person\'s message',()=>{
+ const shape={};
+ for(const n of ['w7','w7-zero','w7-landed']){
+  const v=passQ5(n);assert.deepEqual(v.ringLifecycle,['queued','started','cancelled'],n);assert.equal(v.history.length,1,n);
+  assert.deepEqual(v.ringTurn.result.map(x=>x.subtype),['error_during_execution'],n);
+  // landed in the stopped turn: nothing pending after the Stop; else the one key pending, then carried by the message
+  assert.equal(v.pendingAfterStop.length,v.landedIn==='the interrupted turn'?0:1,n);
+  shape[n]=[v.ringTurn.result[0].num_turns,v.ringTurn.modelCalls,v.landedIn];
+ }
+ assert.deepEqual(shape,{w7:[2,0,'the message'],'w7-zero':[0,0,'the message'],'w7-landed':[2,1,'the interrupted turn']});
+ for(const n of ['w7','w7-zero','w7-landed'])assert.equal(inQ5(loadQ5(n),f=>f.type==='result'&&f.subtype==='error_during_execution')[0].frame.terminal_reason,'aborted_streaming',n);
 });
 testB('question sheet C5 M2 W8: after an interrupt nothing reaches the model until the person writes, and their message carries the answer and the dismissal',()=>{
  const v=passQ5('w8');assert.equal(v.requestsBetween,0);assert.equal(v.history.length,1);
