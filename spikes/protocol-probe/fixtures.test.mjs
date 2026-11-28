@@ -1646,10 +1646,15 @@ test('question sheet C5 M2: the phase B recordings are there together or not at 
 for(const file of filesQ5)test(`qsheet/${file}: ordered, its replies correlated, contained under /tmp, nothing left running`,()=>{
  const text=readFileSync(new URL(file,dirQ5),'utf8');const rows=text.trim().split('\n').map(JSON.parse);
  assert.ok(!/\/Users\/[a-z]/.test(text),'no home path');assert.ok(!text.includes('sk-ant-'));
- let seq=0;const pending=new Set();
+ // The engine echoes the host's answer to its own can_use_tool back on the wire (2.1.331, a Bash call in default mode):
+ // an `in` response repeating an `out` one already sent is that echo, not a reply to anything.
+ let seq=0;const pending=new Set(),answered=new Set();
  for(const row of rows){assert.equal(row.seq,++seq);const f=row.frame;
   if(f.type==='control_request')pending.add(row.direction+':'+f.request_id);
-  if(f.type==='control_response')assert.ok(pending.delete((row.direction==='in'?'out':'in')+':'+f.response.request_id));
+  if(f.type==='control_response'){const id=f.response.request_id;
+   if(row.direction==='in'&&answered.has(id))continue;
+   assert.ok(pending.delete((row.direction==='in'?'out':'in')+':'+id),`seq ${row.seq}: a response to nothing pending`);
+   if(row.direction==='out')answered.add(id);}
   assert.notEqual(f.event,'scenario_error');}
  const prov=metaQ5(rows,'provenance')[0];assert.equal(prov.sitting,'M2');assert.match(prov.engineVersion,/^2\.1\.\d+$/);
  assert.ok(rows[0].frame.cwd.startsWith('/private/tmp/'));
@@ -1732,7 +1737,7 @@ testB('question sheet C5 M2 W5: an answer during a long call goes on its result;
  assert.equal(v.results,1);
 });
 testB('question sheet C5 M2 W6: killed as the envelope landed, the resumed start takes the key out before any prompt, and the envelope is once in the history',()=>{
- const v=passQ5('w6');assert.equal(v.pendingAfterKill.length,1);assert.deepEqual([v.pendingAtStart,v.requestsBeforePrompt],[0,0]);
+ const v=passQ5('w6-resumed');assert.equal(v.pendingAfterKill.length,1);assert.deepEqual([v.pendingAtStart,v.requestsBeforePrompt],[0,0]);
  assert.deepEqual(metaQ5(loadQ5('w6-resumed'),'qc5_sheet').find(s=>s.label.startsWith('after the resumed start')).pending,[]);
 });
 testB('question sheet C5 M2 W7: a ring interrupted as soon as it started; the envelope once, in the turn or with the person\'s message',()=>{
@@ -1742,7 +1747,7 @@ testB('question sheet C5 M2 W8: after an interrupt nothing reaches the model unt
  const v=passQ5('w8');assert.equal(v.requestsBetween,0);assert.equal(v.history.length,1);
 });
 testB('question sheet C5 M2 W9: an answer queued while stopped is applied at the resumed start with no frame, and the ring at ready carries it with the start\'s context',()=>{
- const v=passQ5('w9');assert.deepEqual(v.atReady.pending,[{id:'q1',acrossStop:true}]);assert.deepEqual([v.startContext,v.marked,v.second.dropped],[true,true,true]);
+ const v=passQ5('w9-resumed');assert.deepEqual(v.atReady.pending,[{id:'q1',acrossStop:true}]);assert.deepEqual([v.startContext,v.marked,v.second.dropped],[true,true,true]);
 });
 testB('question sheet C5 M2 W10: a running subagent\'s answer goes to it alone; an ended one\'s is noticed once and rings in the main conversation, the asker named',()=>{
  const v=passQ5('w10');assert.deepEqual([v.a.inMain,v.notice,v.noticesInHistory],[0,1,1]);assert.ok(v.a.inSubagent>=1);
