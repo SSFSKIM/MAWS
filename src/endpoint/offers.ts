@@ -147,6 +147,11 @@ const projectAct: OfferRow = { kind: 'act', executor: 'machine', target: 'machin
 /** Over the network a rename takes a name alone: a row's order is its own machine's. */
 const isRenameArgs = (input: unknown): boolean =>
   isFields(input, ['id', 'patch']) && isFields(input.patch, ['name']) && typeof (input.patch as { name?: unknown }).name === 'string';
+/**
+ * The UX wave (obs 4): `engine.models` from another machine: no route of the caller's (the machine's default is the one a
+ * spawn starts on) and no refresh (which would ask a live session's engine), a checkout optional.
+ */
+const isLaunchModels = (input: unknown): boolean => isFields(input, ['refresh', 'cwd']) && input.refresh === false;
 /** P5 O7 M8: `fs.unfollow` from another machine names the agent whose follow it lets go of. */
 const namesAnAgent = (input: unknown): boolean => typeof input === 'object' && input !== null && typeof (input as { agentId?: unknown }).agentId === 'string';
 /**
@@ -310,6 +315,10 @@ export const OFFERS: Offers = {
     // and the projects "+ Session"'s machine menu lists (`list`).
     'session.spawn': { kind: 'act', executor: 'machine', target: 'machine' },
     'session.projects.list': { kind: 'call', executor: 'machine', target: 'machine' },
+    // The UX wave (obs 4): the model list a spawn here starts on, for a New chat aimed at this machine. A spawn names no
+    // route, so the read names none either: the endpoint asks the engine host for the machine's default route's catalogue
+    // (calls.ts), in the checkout named. A read at `list`, as the projects that menu lists, behind `rl2.engine-models`.
+    'engine.models': { kind: 'call', executor: 'engine-host', target: 'machine', grade: 'list', accepts: isLaunchModels },
     // P5 O7 M9: "+ Session" on a machine with no checkout of the project: its folders, the chosen one registered, its trust
     // read for the trust card (whose answer goes as `session.spawn`'s `trust`), each the machine's owners' alone.
     'machine.folders.list': ownersCall,

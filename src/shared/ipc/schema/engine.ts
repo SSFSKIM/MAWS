@@ -49,6 +49,9 @@ export const C3_ENGINE_EVENTS: string[] = []; // the engine host's events are pe
 // `gateway` (debt wave 3, optional) names the route the caller will launch under, whose catalogue is answered; `cwd`
 // (debt wave 5, optional, read only with `gateway`) the directory, whose settings may set a model environment of its own.
 // `route` (P5 O7 M9, optional) is read before `gateway` (src/shared/engine/route.ts), which keeps the legacy route.
+// The UX wave (obs 4): another machine's endpoint answers one with no route, and no refresh, with the catalogue of that
+// machine's default route (the one a spawn there starts on), once its handshake lists ENGINE_MODELS_CAPABILITY.
+export const ENGINE_MODELS_CAPABILITY = 'rl2.engine-models';
 const c10Commands = {
   'engine.models': { input: z.strictObject({ refresh: z.boolean(), gateway: z.enum(['gateway', 'direct']).optional(), route: RouteSchema.optional(), cwd: AbsolutePathSchema.optional() }), output: ModelCatalogueSchema, owner: 'engine-host' },
 } as const;

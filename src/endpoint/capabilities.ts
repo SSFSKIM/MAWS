@@ -86,4 +86,8 @@ export const ENDPOINT_CAPABILITIES = [
   // row (OUTSIDE_FILES_CAPABILITY); a device sends a machine none of them unless its `h2` listed it, since an older one
   // has no row for them and answers `not-offered`.
   'rl2.outside-files',
+  // The UX wave (obs 4): this endpoint offers `engine.models` with no route, answered with the catalogue of the machine's
+  // default route (a New chat's model list for a spawn here); a device asks a machine for it only when its `h2` listed it,
+  // since an older one has no row for it and answers `not-offered` (ENGINE_MODELS_CAPABILITY).
+  'rl2.engine-models',
 ] as const;

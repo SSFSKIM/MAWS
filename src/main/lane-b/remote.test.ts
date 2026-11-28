@@ -359,15 +359,32 @@ describe('the substitutes', () => {
     expect(l.link.calls.at(-1)).toEqual({ name: 'session.pendingRequest', input: { appSessionId: APP, requestId: 'req-1' } });
   });
 
-  it('answers `engine.models` from `session.listModels` of a live session there, the one in the asked directory first; else the built-in list', async () => {
+  it('answers a route’s `engine.models` from `session.listModels` of a live session there, the one in the asked directory first; else the built-in list', async () => {
     const l = lab({ tabs: [APP, 'app-2'] });
-    expect(await l.cmd('engine.models', { refresh: false })).toEqual({ ok: true, value: { models: [...BUILTIN_MODELS], source: 'builtin', at: null } });
+    expect(await l.cmd('engine.models', { refresh: false, gateway: 'gateway' })).toEqual({ ok: true, value: { models: [...BUILTIN_MODELS], source: 'builtin', at: null } });
     await live(l, APP);
     await live(l, 'app-2');
     const models = [{ value: 'opus', resolvedModel: 'claude-opus', displayName: 'Opus', description: 'the big one' }];
     l.link.answers.set('session.listModels', () => ({ ok: true, output: { models } }));
     expect(await l.cmd('engine.models', { refresh: false, gateway: 'gateway', cwd: '/work/app-2' })).toEqual({ ok: true, value: { models, source: 'live', at: expect.any(String) } });
     expect(l.link.calls.at(-1)).toEqual({ name: 'session.listModels', input: { appSessionId: 'app-2' } });
+  });
+
+  // The UX wave (obs 4): a New chat aimed at the machine asks no route, since its spawn names none and starts on the
+  // machine's default: the machine answers it from its own cache when its endpoint lists `rl2.engine-models`; an older
+  // one's is unavailable, never a live session's list of whatever route that session runs
+  it('asks the machine for the list a spawn there starts on, and answers it unavailable from a machine that predates the read', async () => {
+    const l = lab();
+    await live(l);
+    const models = [{ value: 'opus', displayName: 'Opus 5.5' }];
+    l.link.answers.set('session.listModels', () => ({ ok: true, output: { models: [{ value: 'claude/astra', displayName: 'Astra' }] } }));
+    l.link.answers.set('engine.models', () => ({ ok: true, output: { models, source: 'cached', at: null } }));
+    const older = await l.cmd('engine.models', { refresh: false, cwd: '/srv/repo' });
+    expect(older).toMatchObject({ ok: false, error: { code: 'internal', issues: { refusal: 'not-offered' } } });
+    expect(l.link.calls.map((c) => c.name), 'no other route’s list stands in').not.toContain('session.listModels');
+    l.link.relink(['rl2.executor.machine', 'rl2.engine-models']);
+    expect(await l.cmd('engine.models', { refresh: false, cwd: '/srv/repo' })).toEqual({ ok: true, value: { models, source: 'cached', at: null } });
+    expect(l.link.calls.at(-1)).toEqual({ name: 'engine.models', input: { refresh: false, cwd: '/srv/repo' } });
   });
 });
 

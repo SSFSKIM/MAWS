@@ -12,6 +12,13 @@ export const RELAY_WORDS = {
   directRefused: 'Pick a Claude model first',
 } as const;
 
+// A New chat's model list for another machine (the UX wave, obs 4), where it can't be read: that machine's MAWS predates
+// the read, or the read failed (the machine offline, its engine host away). The menu says it in place of "No models".
+export const LAUNCH_MODELS_WORDS = {
+  olderMachine: (machine: string) => `Update MAWS on ${machine} to list its models here.`,
+  unreadable: (machine: string) => `${machine}’s models can’t be read right now.`,
+} as const;
+
 // The archived sessions window's (W151: each row's "…" menu; N172: the read's quiet spinner, named by `reading`).
 export const ARCHIVED_WORDS = {
   actions: (title: string) => `Actions for ${title}`,

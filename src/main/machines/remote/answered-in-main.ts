@@ -16,7 +16,6 @@ const LANE_A = 'lane A’s adapter drives the session through sminos’s RPCs an
 export const ANSWERED_IN_MAIN: Readonly<Partial<Record<CommandName, string>>> = {
   // the lane B adapter's substitutes: reads the pane makes that no row carries, answered from one that does
   'attention.request': 'the lane B adapter reads the pending request with the offered `session.pendingRequest`',
-  'engine.models': 'the lane B adapter asks `session.listModels` of a live session there, else answers the built-in list',
   // a document's open: the window's port bridged here to a `document` stream (the `documents.open` row)
   'artifacts.open': 'the lane B adapter opens the document over a `documents.open` stream and hands the window its port',
   // a terminal's bytes and sizes ride its stream, opened under the offered spawn or attach; the host's state is the link's

@@ -81,6 +81,7 @@ import { randomUUID } from 'node:crypto';
 import { MESSAGE_MAX_BYTES, type CallMessage, type Listing, type Signed } from 'org-protocol';
 import { ACQUIRE_WITHIN_MS, LATE, within } from './acquire';
 import { FOLLOW_OWNERS_CAPABILITY } from '@shared/host/socket-protocol';
+import type { LegacyRoute, Route } from '@shared/engine/route';
 import { gradeOf, type SessionRank } from '@shared/ipc/grades';
 import { remoteDaemonStatus, type DaemonStatus } from '@shared/ipc/schema/daemon';
 import { SESSION_SEARCH_LIMIT, SESSION_SEARCH_SESSIONS_MAX } from '@shared/ipc/schema/session';
@@ -370,6 +371,7 @@ export class Calls {
     else if (m.name === 'session.trust.check' && row?.executor === 'machine') run = this.#setupTrust(dispatch, m, decision);
     else if (m.name === 'session.projects.resolve' && row?.executor === 'machine') run = this.#resolve(dispatch, m, decision);
     else if (m.name === 'session.reader.update' && row?.executor === 'machine') run = this.#readerUpdate(dispatch, channel.member, m, decision);
+    else if (m.name === 'engine.models' && row?.executor === 'engine-host') run = this.#launchModels(dispatch, m);
     else if (row?.executor === 'engine-host' || (row?.executor === 'machine' && m.name !== 'daemon.status')) run = this.#forward(dispatch, row.executor, m);
     else if (row?.executor === 'sminos' && Object.hasOwn(LANE_A, m.name)) run = Promise.resolve(this.#laneA(channel, m));
     else if (row?.executor === 'machine') run = this.#daemonStatus(dispatch);
@@ -418,6 +420,20 @@ export class Calls {
   #resolve(dispatch: EndpointServices['dispatch'], m: CallMessage, decision: Granted): Promise<Result> {
     if (decision.setup === undefined) return Promise.resolve({ ok: false, code: 'unavailable' });
     return this.#forward(dispatch, 'machine', { ...m, input: { directory: decision.setup.directory, opened: decision.setup.opened } });
+  }
+
+  /**
+   * The UX wave (obs 4): the model list of a spawn here. `session.spawn` names no route, so its intent takes the machine's
+   * default as the session service seeds one (the resolved default beside the legacy field, machineSettings.get); the
+   * catalogue is that route's, asked as a New chat on this machine asks its own (renderer's useSetupIntent.ts).
+   */
+  async #launchModels(dispatch: EndpointServices['dispatch'], m: CallMessage): Promise<Result> {
+    const read = await dispatch('machine', 'machineSettings.get', undefined);
+    if (!read.ok) return { ok: false, code: 'unavailable' };
+    const answer = read.value as { settings: { gateway: { defaultRoute: LegacyRoute } }; defaultRoute?: Route };
+    const legacy = answer.settings.gateway.defaultRoute;
+    const route = answer.defaultRoute ?? legacy;
+    return this.#forward(dispatch, 'engine-host', { ...m, input: { ...(m.input as object), ...(route === 'machine' ? { gateway: legacy, route } : { gateway: route }) } });
   }
 
   /** A read its executor answers raw: the engine host's, or the machine's services', a failure with its message (M8). */

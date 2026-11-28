@@ -104,6 +104,7 @@ import type { SessionEvent } from '@shared/graph/events';
 import { ipcError, type IpcErrorCode } from '@shared/ipc/errors';
 import type { CommandInput, CommandName, CommandResult, EventName, EventPayload } from '@shared/ipc/schema';
 import { PROJECT_ACTS_CAPABILITY } from '@shared/ipc/schema/session';
+import { ENGINE_MODELS_CAPABILITY } from '@shared/ipc/schema/engine'; // the UX wave (obs 4)
 import { failureWords, REMOTE_NEEDS } from '@shared/ipc/remote-unavailable';
 import { validateCommandOutput } from '@shared/ipc/validate';
 import type { MachineRef } from '@shared/machine/ref';
@@ -336,7 +337,10 @@ const STEPPED_UP: ReadonlySet<CommandName> = new Set<CommandName>(['session.proj
 const BUDGETED_ACTS: ReadonlySet<CommandName> = new Set<CommandName>(['session.fork']);
 // P5 O7 M5c ("O4's surfaces: the grade"): the six lease reads, sent as calls by name (./remote-connectors.ts)
 export { MACHINE_CALLS } from './remote-connectors';
-/** Reads the pane makes that no row offers, answered here from one that is. */
+/**
+ * Reads the pane makes that no row offers, answered here from one that is. The UX wave (obs 4): `engine.models` with no
+ * route is offered (`rl2.engine-models`) and goes to the machine; with one it is still answered here.
+ */
 export const SUBSTITUTES: ReadonlySet<CommandName> = new Set<CommandName>(['attention.request', 'engine.models']);
 /** Reads offered as calls that the adapter makes in pages the channel carries (./remote-history.ts). */
 export const PAGED_READS: ReadonlySet<CommandName> = new Set<CommandName>(['session.events', 'files.read']); // files.read: M4's milestone review
@@ -930,8 +934,19 @@ export function createRemoteLaneB(deps: RemoteLaneBDeps): RemoteLaneB {
 
   // ---- The substitutes -------------------------------------------------------------------------------------------------------
 
-  /** `engine.models` from a live session on the machine, the one in the asked directory first. */
+  /**
+   * `engine.models` with no route (the UX wave, obs 4: a New chat aimed at the machine, whose spawn names none and starts
+   * on the machine's default): the machine's own answer, from its cache for that route, on an endpoint that lists the read;
+   * an older one's is refused `not-offered`, never another route's list. With a route: a live session's list on the
+   * machine, the one in the asked directory first, else the built-in list.
+   */
   async function models(link: RemoteLink, fields: Fields): Promise<CommandResult<CommandName>> {
+    if (fields.route === undefined && fields.gateway === undefined) {
+      const peers = link.peerCapabilities();
+      if (peers === null) return failure('host_unavailable', `engine.models: machine ${link.name} is not reachable`);
+      if (!peers.includes(ENGINE_MODELS_CAPABILITY)) return refusalResult('engine.models', link.name, 'not-offered');
+      return callOverLink(link, 'engine.models', fields, { oneChannel: true });
+    }
     const live = [...lanesOf(link).values()].filter((lane) => lane.session.context() !== null);
     const directory = (lane: Lane) => [lane.session.state.status?.cwd, lane.session.state.record?.directory];
     const chosen = live.find((lane) => fields.cwd !== undefined && directory(lane).includes(fields.cwd)) ?? live[0];

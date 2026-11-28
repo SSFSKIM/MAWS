@@ -252,20 +252,41 @@ describe('setup intent hook', () => {
   });
 
   // A New chat whose machine menu chose another machine starts there on Send: its list is that machine's, read in the
-  // checkout there, and this Mac's settings say nothing of what it starts on
+  // checkout there for the route the spawn starts on (the machine's default: the spawn names none, so neither does the
+  // read, whatever route this tab holds), and this Mac's settings say nothing of what it starts on
   it('reads the catalogue of the machine the tab will start on, and claims no defaults for another machine', async () => {
     const DEFAULTS = { model: 'haiku', effortLevel: 'low', defaultMode: null };
     withMain({ 'settings.userEngineDefaults': () => DEFAULTS });
-    putIntent(pageIntent());
+    putIntent(pageIntent({ gateway: 'direct', route: 'machine' }));
     const { result } = renderHook(() => useSetupIntent(A), { wrapper });
     await waitFor(() => expect(result.current!.options.defaults).toEqual(DEFAULTS));
     act(() => useRemoteSpawn.getState().choose(A, { machine: OTHER_MACHINE, name: 'Studio', checkout: '/srv/checkouts/repo', key: null }));
     await waitFor(() => expect(fake.machines('engine.models').at(-1)).toBe(OTHER_MACHINE));
-    expect(fake.invoked('engine.models').at(-1)).toEqual({ refresh: false, gateway: 'gateway', cwd: '/srv/checkouts/repo' });
+    expect(fake.invoked('engine.models').at(-1), 'no route of this tab’s').toEqual({ refresh: false, cwd: '/srv/checkouts/repo' });
     expect(result.current!.options.defaults, 'another machine’s settings are unknown here').toBeNull();
     expect(fake.machines('settings.userEngineDefaults'), 'nothing asked of a machine that offers no such read').not.toContain(OTHER_MACHINE);
     act(() => useRemoteSpawn.getState().choose(A, null)); // back to this Mac
     await waitFor(() => expect(result.current!.options.defaults).toEqual(DEFAULTS));
+  });
+
+  // Another machine's list that can't be read is said so in the menu, never another route's list in its place: a machine
+  // whose MAWS predates the read is named as such; this Mac's own failed read lists nothing, as before
+  it('says another machine’s list is unavailable, and why, where its read fails', async () => {
+    withMain({ 'engine.models': undefined });
+    putIntent(pageIntent());
+    act(() => useRemoteSpawn.getState().choose(A, { machine: OTHER_MACHINE, name: 'Studio', checkout: '/srv/checkouts/repo', key: null }));
+    const { result } = renderHook(() => useSetupIntent(A), { wrapper });
+    expect(result.current!.options).toMatchObject({ models: [], modelsLoading: true, modelsUnavailable: null });
+    await act(() => fake.fail('engine.models', 'engine.models: refused not-offered by machine Studio', 'internal', { refusal: 'not-offered' }));
+    await waitFor(() => expect(result.current!.options).toMatchObject({ models: [], modelsLoading: false, modelsUnavailable: 'Update MAWS on Studio to list its models here.' }));
+    act(() => result.current!.options.refreshModels());
+    await waitFor(() => expect(fake.pending('engine.models')).toBe(1));
+    await act(() => fake.fail('engine.models', 'engine.models: machine Studio is not reachable', 'host_unavailable'));
+    await waitFor(() => expect(result.current!.options.modelsUnavailable).toBe('Studio’s models can’t be read right now.'));
+    act(() => useRemoteSpawn.getState().choose(A, null));
+    await waitFor(() => expect(fake.machines('engine.models').at(-1)).not.toBe(OTHER_MACHINE));
+    await act(() => fake.fail('engine.models', 'host unavailable'));
+    await waitFor(() => expect(result.current!.options).toMatchObject({ models: [], modelsLoading: false, modelsUnavailable: null }));
   });
 
   // Debt wave 4: the catalogue's effort levels reach C7's ModelInfo, so the model widget can lower an effort

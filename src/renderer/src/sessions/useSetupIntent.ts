@@ -20,6 +20,8 @@ import { useSettings } from '../stores/settings'; // W3
 import { patchIntent, startIntent, type HookResult } from './setup-actions';
 import { useSpawnTarget, type SpawnTarget } from './remote-spawn';
 import { useSetup } from './store';
+import { LAUNCH_MODELS_WORDS } from './copy';
+import type { IpcError } from '@shared/ipc/errors';
 import { machineOf } from '@shared/machine/address';
 import { readRoute, type Route } from '@shared/engine/route'; // P5 O7 M9
 import type { MachineRef } from '@shared/machine/ref';
@@ -32,6 +34,7 @@ export interface SetupIntentOptions {
   models: ModelInfo[];
   autoModeNote: string | null;
   modelsLoading: boolean; // the observation set 4: no catalogue answered for the launch yet
+  modelsUnavailable: string | null; // why another machine's list can't be read, in words; null otherwise
   refreshModels(): void; // read the catalogue again (the model menu, as it opens)
   defaults: UserEngineDefaults | null; // the user's settings on the machine the launch starts on; null while unknown
 }
@@ -199,24 +202,33 @@ async function readRepository(machine: MachineRef, directory: string): Promise<R
 // What a launch's model list answers to: the machine it starts on (the machine menu's spawn target, else the intent's
 // own), the route and the legacy field beside it, and the directory whose settings it reads, which may set a model
 // environment of its own (debt wave 5): on another machine its checkout there (none for its home or while no place
-// there is chosen).
+// there is chosen). The UX wave (obs 4): a spawn on another machine names no route and starts on that machine's default,
+// so its read names none either (`route` null) and that machine answers for its default (its endpoint's `engine.models`).
 interface LaunchContext {
   machine: MachineRef;
-  route: Route;
+  route: Route | null;
   gateway: SetupIntent['gateway'];
   cwd: string | null;
+  elsewhere: string | null; // the other machine's name, for a spawn there
 }
 
 function launchContextOf(appSessionId: AppSessionId, intent: SetupIntent, target: SpawnTarget | null): LaunchContext {
-  const cwd = target !== null ? (target.checkout === HOME_CHECKOUT ? null : target.checkout) : intent.location ? settingsDirectoryOf(intent.location) : null;
-  return { machine: target?.machine ?? machineOf(appSessionId), route: readRoute(intent), gateway: intent.gateway, cwd };
+  if (target !== null) return { machine: target.machine, route: null, gateway: intent.gateway, cwd: target.checkout === HOME_CHECKOUT ? null : target.checkout, elsewhere: target.name };
+  return { machine: machineOf(appSessionId), route: readRoute(intent), gateway: intent.gateway, cwd: intent.location ? settingsDirectoryOf(intent.location) : null, elsewhere: null };
 }
 
 // P5 O7 M9: the machine's own route is asked by `route` (with the legacy field the intent holds beside it), whose
 // catalogue the host answers from what the machine resolves to; Gateway and Direct by the legacy field alone, as before.
 function catalogueAsk({ route, gateway, cwd }: LaunchContext) {
-  const asked = route === 'machine' ? { refresh: false, gateway, route } : { refresh: false, gateway: route };
+  const asked = route === null ? { refresh: false } : route === 'machine' ? { refresh: false, gateway, route } : { refresh: false, gateway: route };
   return cwd === null ? asked : { ...asked, cwd };
+}
+
+// Why another machine's list can't be read: its MAWS predates the read (its endpoint has no row for it), else any other
+// failure (the machine offline, its engine host away).
+function unavailableWords(machine: string, error: IpcError): string {
+  const refusal = (error.issues as { refusal?: unknown } | undefined)?.refusal;
+  return refusal === 'not-offered' ? LAUNCH_MODELS_WORDS.olderMachine(machine) : LAUNCH_MODELS_WORDS.unreadable(machine);
 }
 
 // The catalogue: the host answers the launch's catalogue from its cache, which every launch's initialize, every
@@ -226,7 +238,7 @@ function catalogueAsk({ route, gateway, cwd }: LaunchContext) {
 // chips and auto-mode note, the model menu): read at every mount, on every change of context and each time the menu
 // opens (`refreshModels`), and one refresh updates them all. Until the context's own read answers nothing is listed (the
 // menu says it is reading), never another context's list nor one built into the app; a failed read keeps what was read
-// for the context, else lists nothing.
+// for the context, else lists nothing (another machine's says why, `modelsUnavailable`).
 // The user's own settings (`settings.userEngineDefaults`, which name the model a session on its default starts on) are
 // read on this machine alone: no other machine offers the read, so another machine's are unknown, never this one's.
 function useSetupOptions(
@@ -250,6 +262,7 @@ function useSetupOptions(
     if (reads) void refetch({ cancelRefetch: false });
   }, [reads, refetch]);
   const catalogue = read.data ?? (read.isError ? NO_CATALOGUE : null);
+  const unavailable = read.data === undefined && read.error !== null && context?.elsewhere != null ? unavailableWords(context.elsewhere, read.error.error) : null;
   const here = context !== null && context.machine === ipc.localMachine;
   const defaultsRead = useCommand('settings.userEngineDefaults', undefined, { enabled: here, staleTime: 30_000 });
   const defaults = here ? (defaultsRead.data ?? null) : null;
@@ -267,10 +280,10 @@ function useSetupOptions(
   }, [machine, base, known]);
 
   const options = useMemo((): SetupIntentOptions => {
-    if (intent === null) return { models: [], autoModeNote: null, modelsLoading: false, refreshModels, defaults: null };
-    if (catalogue === null) return { models: [], autoModeNote: null, modelsLoading: true, refreshModels, defaults };
-    return { models: modelsOf(catalogue), autoModeNote: noteFor(catalogue, intent, fallback), modelsLoading: false, refreshModels, defaults };
-  }, [intent, catalogue, fallback, refreshModels, defaults]);
+    if (intent === null) return { models: [], autoModeNote: null, modelsLoading: false, modelsUnavailable: null, refreshModels, defaults: null };
+    if (catalogue === null) return { models: [], autoModeNote: null, modelsLoading: true, modelsUnavailable: null, refreshModels, defaults };
+    return { models: modelsOf(catalogue), autoModeNote: noteFor(catalogue, intent, fallback), modelsLoading: false, modelsUnavailable: unavailable, refreshModels, defaults };
+  }, [intent, catalogue, fallback, refreshModels, defaults, unavailable]);
   // A failed trust check is read again at Send (the directory may be readable now): the refusal stands only while the
   // check still fails.
   const recheck = useCallback(async () => {

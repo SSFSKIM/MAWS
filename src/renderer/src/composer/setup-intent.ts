@@ -51,8 +51,9 @@ export interface SetupIntentHook {
   intent: SetupIntent;
   // the owner's observation set 4: `modelsLoading` while the catalogue has not answered (no list is shown in its place);
   // `refreshModels` reads it again (the model menu, as it opens). `defaults`: the user's engine settings on the machine the
-  // session will start on, null while they are not known (not read yet, or another machine's); absent, the caller's own
-  options: { models: ModelInfo[]; autoModeNote: string | null; modelsLoading?: boolean; refreshModels?(): void; defaults?: UserEngineDefaults | null };
+  // session will start on, null while they are not known (not read yet, or another machine's); absent, the caller's own.
+  // `modelsUnavailable`: why another machine's list can't be read, in words (the menu says it in place of the list)
+  options: { models: ModelInfo[]; autoModeNote: string | null; modelsLoading?: boolean; modelsUnavailable?: string | null; refreshModels?(): void; defaults?: UserEngineDefaults | null };
   // C10: the running setup's phase in words ("Creating worktree <name>…", "Trusting <key>…", "Starting…"), the submit
   // control's disabled-state reason while it runs; null (or absent) otherwise.
   phase?: string | null;

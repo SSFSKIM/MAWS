@@ -80,6 +80,7 @@ interface Binding {
   fast: { view: FastView; pending: boolean; offered: boolean; closed: string | null; set(on: boolean): Promise<ControlAnswer> } | null;
   unstarted: boolean;
   loading?: boolean; // an unstarted session's catalogue not answered yet
+  unavailable?: string | null; // why an unstarted session's list on another machine can't be read (in place of "No models")
   // an unstarted session on its default whose start model is not known for certain (the settings of the machine it
   // starts on not read, or another machine's): no row is checked, and any pick is written
   startUnknown?: boolean;
@@ -160,6 +161,7 @@ function useIntentBinding(appSessionId: AppSessionId): Binding | null {
     fast: null,
     unstarted: true,
     loading: setup.options.modelsLoading === true,
+    unavailable: setup.options.modelsUnavailable ?? null,
     startUnknown: model === null && defaults === null,
   };
 }
@@ -590,7 +592,7 @@ function SelectorBody({ name, args, binding, state, error, appSessionId, focusSl
       </div>
       {unknown && view === 'model' && <p className="m-0 px-2 text-ui-sm text-warning">{unknown}</p>}
       <div role="menu" aria-label={SELECTOR.models} className="flex max-h-[min(316px,50vh)] flex-col overflow-y-auto">
-        {binding.models.length === 0 && status === null && wait === null && <p className="m-0 px-2 py-1 text-ui-sm text-fg-muted">{MODEL.none}</p>}
+        {binding.models.length === 0 && status === null && wait === null && <p className="m-0 px-2 py-1 text-ui-sm text-fg-muted">{binding.unavailable ?? MODEL.none}</p>}
         {/* a read or a start under way, above whatever rows the catalogue already gives */}
         {wait && (
           <div className="flex px-2 py-1">

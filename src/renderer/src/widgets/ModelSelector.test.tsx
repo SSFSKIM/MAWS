@@ -444,7 +444,7 @@ describe('an unstarted session writes its intent, with no route segment and no D
 
   // `defaults`: the user's settings on the machine the tab starts on, as the hook reads them (null: unknown); by default
   // read, naming no model
-  function stub(over: Partial<SetupIntentHook['intent']> = {}, tab: AppSessionId = INTENT, catalogue: { loading?: boolean; refreshes?: string[]; defaults?: UserEngineDefaults | null } = {}) {
+  function stub(over: Partial<SetupIntentHook['intent']> = {}, tab: AppSessionId = INTENT, catalogue: { loading?: boolean; refreshes?: string[]; defaults?: UserEngineDefaults | null; unavailable?: string } = {}) {
     const patches: unknown[] = [];
     const defaults = catalogue.defaults === undefined ? { model: null, effortLevel: null, defaultMode: null } : catalogue.defaults;
     const refreshModels = catalogue.refreshes ? refreshOnce(catalogue.refreshes) : undefined;
@@ -459,7 +459,7 @@ describe('an unstarted session writes its intent, with no route segment and no D
       id === tab
         ? {
             intent: current,
-            options: { models: catalogue.loading ? [] : models, autoModeNote: null, modelsLoading: catalogue.loading === true, refreshModels, defaults },
+            options: { models: catalogue.loading || catalogue.unavailable !== undefined ? [] : models, autoModeNote: null, modelsLoading: catalogue.loading === true, modelsUnavailable: catalogue.unavailable ?? null, refreshModels, defaults },
             patch: async (p) => {
               patches.push(p);
               current = { ...current, ...p };
@@ -537,6 +537,15 @@ describe('an unstarted session writes its intent, with no route segment and no D
     const list = screen.getByRole('menu', { name: 'Models' });
     expect(await within(list).findByRole('progressbar', { name: 'Reading the models…' })).toBeTruthy();
     expect(within(list).queryAllByRole('menuitemradio')).toEqual([]);
+    expect(screen.queryByText('No models')).toBeNull();
+  });
+
+  // The UX wave (obs 4): another machine's list that can't be read says why where the list would be
+  it('says why another machine’s list is unavailable in place of No models', () => {
+    stub({}, INTENT, { defaults: null, unavailable: 'Update MAWS on Studio to list its models here.' });
+    mount('model', '', INTENT);
+    const list = screen.getByRole('menu', { name: 'Models' });
+    expect(within(list).getByText('Update MAWS on Studio to list its models here.')).toBeTruthy();
     expect(screen.queryByText('No models')).toBeNull();
   });
 });
