@@ -7,7 +7,7 @@
 // O-17, kept: nothing but a person's act adds or activates it. `openSheet` is the one way in (a row's Open, a line of
 // the "Waiting for you" card, a notice's button, Needs you, all through the transcript actions' `openSheet`), and "+".
 // A record that appears, a question added and a `sheet.changed` leave the side column as it was.
-import { useEffect, useRef } from 'react';
+import { useCallback, useEffect, useRef } from 'react';
 import { useStore } from 'zustand';
 import { createStore, type StoreApi } from 'zustand/vanilla';
 import type { AppSessionId } from '@shared/graph/ids';
@@ -87,22 +87,28 @@ function SheetBody({ appSessionId, tabId, state, visible }: { appSessionId: AppS
   const sheet = useSessionSheet(appSessionId, visible);
   const focus = useStore(state.focus);
   // An ask is handed to the sheet while the tab shows, and the sheet puts the keyboard on its card once the card is
-  // listed. It is used for the tab's lifetime when the body goes with the tab out of view (another tab shown, the column
-  // hidden, the tab closed), so the tab shown again moves nothing; a body the host draws again while the tab stays in
-  // view takes it again, as does one that came before the card was listed.
+  // listed. It is used for the tab's lifetime when the tab goes out of view, whether the body goes with it (another tab
+  // shown, the column hidden, the tab closed) or stays mounted unseen (a destination page over the column, a collapsed
+  // panel), so the tab shown again moves nothing; a body the host draws again while the tab stays in view takes it
+  // again, as does one that came before the card was listed.
   const pending = visible && focus !== null && !focus.used ? focus : null;
   const landed = useRef<number | null>(null);
   const listed = pending !== null && sheet.shown === 'sheet' && sheet.model.open.some((question) => question.id === pending.id);
   useEffect(() => {
     if (listed) landed.current = pending.request;
   }, [listed, pending]);
+  const spend = useCallback(() => {
+    const request = landed.current;
+    if (request !== null) state.focus.setState((now) => (now !== null && now.request === request ? { ...now, used: true } : now), true);
+  }, [state.focus]);
+  useEffect(() => {
+    if (!visible) spend();
+  }, [visible, spend]);
   useEffect(
     () => () => {
-      const request = landed.current;
-      if (request === null || tabInView(appSessionId, tabId)) return;
-      state.focus.setState((now) => (now !== null && now.request === request ? { ...now, used: true } : now), true);
+      if (!tabInView(appSessionId, tabId)) spend();
     },
-    [appSessionId, tabId, state.focus],
+    [appSessionId, tabId, spend],
   );
   if (sheet.shown === 'sheet') {
     return <SessionSheet model={sheet.model} memory={sheet.memory} onMemory={sheet.onMemory} host={sheet.host} focus={pending} unavailable={sheet.unavailable} live={sheet.live} />;

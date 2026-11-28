@@ -183,6 +183,32 @@ describe('the side sheet', () => {
     elsewhere.remove();
   });
 
+  // The branch review of #890 (R3): a destination page over the column, or a collapsed panel, hides the tab without
+  // unmounting its body; an ask that landed is used then, and one whose card has not appeared waits for it
+  it('uses a landed ask when the tab is hidden without unmounting; one whose card is not listed yet stays pending', async () => {
+    await listed(summary());
+    const state = sheetTool.createState({ appSessionId: SHOWN, session: record(SHOWN), instanceId: 'sheet:test', params: { at: 'q5' } });
+    const Body = sheetTool.render;
+    const view = render(<Body state={state} ctx={ctx()} />);
+    await act(() => fake.reply('sheet.read', { model: MODEL, door: { known: false } }));
+    expect(document.activeElement?.getAttribute('data-sheet-question')).toBe('q5');
+    view.rerender(<Body state={state} ctx={ctx({ visible: false })} />); // the last watcher gone: the model is dropped
+    const elsewhere = document.body.appendChild(document.createElement('button'));
+    elsewhere.focus();
+    view.rerender(<Body state={state} ctx={ctx({ visible: true })} />);
+    await act(() => fake.reply('sheet.read', { model: MODEL, door: { known: false } }));
+    expect(document.querySelector('[data-sheet-question="q5"]')).not.toBeNull();
+    expect(document.activeElement, 'the keyboard stays where the person left it').toBe(elsewhere);
+
+    act(() => sheetTool.open!(state, { at: 'q9' })); // a question the model does not list yet
+    view.rerender(<Body state={state} ctx={ctx({ visible: false })} />);
+    view.rerender(<Body state={state} ctx={ctx({ visible: true })} />);
+    const added = sheetOf([...MODEL.open, { ...CLASH, id: 'q9', handle: 'q9', header: 'Berth' }], { seq: 2 });
+    await act(() => fake.reply('sheet.read', { model: added, door: { known: false } }));
+    expect(document.activeElement?.getAttribute('data-sheet-question'), 'the pending ask lands once its card is listed').toBe('q9');
+    elsewhere.remove();
+  });
+
   it('keeps an ask made while the column is not on screen until it is, then puts the keyboard on its card', async () => {
     await listed(summary());
     const state = sheetTool.createState({ appSessionId: SHOWN, session: record(SHOWN), instanceId: 'sheet:test', params: { at: 'q7' } });
