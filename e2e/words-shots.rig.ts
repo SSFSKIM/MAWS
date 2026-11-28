@@ -80,6 +80,8 @@ import { PerfSeam } from './support/document-scale';
 import { createDesign, DESIGN_FILES, editDesign, FRAMES, headerAction, threadsOf, toggleComments } from './support/design';
 import { closedPort, startBrowserServer } from './support/browser-server';
 import { ComputerUseJournal, CUA_JS } from './support/computer-use-replay'; // board ticket 852's launch
+import { directStatus, PRELUDE_STATUS_ANSWER } from './support/side-replay'; // the owner's observation set 4
+import { PERMISSION_MODE_LABELS } from '../src/shared/sessions/permission-mode-labels'; // the owner's observation set 4
 import { closeSettings, closeSheet, importThrough, openImportSheet, profilesFile, sheetOf } from './support/browser-import-scene';
 import { buildChromeUserData } from '../test/support/chrome-profile';
 import { CHANNEL_FIXTURE_ENV, WORDS_CHANNEL_COUNTS, WORDS_CHANNEL_PROJECT, WORDS_CHANNEL_PROJECT_ID, wordsChannel, wordsChannelScenario } from './support/words-channel';
@@ -8375,3 +8377,462 @@ function quietOrg({ status, view, grants }: Seeded): OrgSeed {
 }
 // An invented code destination (org-page.spec.ts's shape): where a new delegation's code would be stored
 const DESTINATION = { project: 'maws-example-prod', secret: 'desk-provisioning-v2', account: 'cli-owner@maws-example-prod.iam.gserviceaccount.com' };
+
+// ======================================================================================================================
+// The owner's observation set 4 (UX wave): the four changes the owner asked for after using the app, each in the state
+// it is about, on the branch's build and, as the "before", on master's (the m scenes' way: master's checkout with this
+// file and e2e/support taken from the branch). One launch alone, from either build:
+//
+//   WORDS_OUT=$HOME/maws-words/o4-after pnpm shots:words -g "owner obs 4"
+//
+// A fresh profile on the replay engine, the default route Direct. Four sessions the engine store lists: three started
+// here on replay journals built below (each its handshake, one turn, then what its scene asks of the engine), one never
+// started (an invented transcript):
+//   models  started; its turn done, then the engine's model list (pass2/auto-routed seq 143) for each list_models asked;
+//           the new chat's menu is opened with it running, so a session on this Mac has listed the engine's models
+//   bypass  started; then the engine's answer to set_permission_mode bypassPermissions, recorded on engine 2.1.332 by
+//           uxwave-obs4-bypass: on a build whose launch line carries --allow-dangerously-skip-permissions (the branch:
+//           src/engine-host/launch.ts) the flagged session's success and status (bypass-default seq 42, 43), on one
+//           whose line does not (master) the unflagged session's refusal (bypass-unflagged seq 8). The replay never
+//           reads the launch line, so the rig picks the answer the engine gives that line.
+//   auto    started in auto; its turn's Bash call denied because auto mode is unavailable (tool_result_meta
+//           automode-unavailable, test/fixtures/transcript/denials.jsonl's shape), then the engine's success and status
+//           for set_permission_mode default (uxwave-851-set-mode's shapes)
+//   fold    (invented) one Bash call: a 45-line script written through a heredoc, then its 60 lines of output
+// Every scene starts what it needs (a session once: the replay seam hands each start the next journal, built for the
+// scenes wanted, in their order), so WORDS_ONLY=o4-<id> runs any one alone.
+// ======================================================================================================================
+const O4 = { models: 1, bypass: 2, auto: 3, fold: 4 } as const;
+type O4Key = keyof typeof O4;
+const o4DiskId = (key: O4Key) => `0f7a8b9c-0000-4000-8000-0000000004${String(O4[key]).padStart(2, '0')}`;
+const O4_IDS = ['o4-model-menu-new-chat', 'o4-model-menu-session', 'o4-mode-menu-bypass', 'o4-auto-card-before-press', 'o4-auto-card-after-press', 'o4-tool-block-open', 'o4-tool-block-folded'];
+// The started sessions: the title the store lists, the prompt each start sends, the engine's reply
+const O4_LIVE = {
+  models: { title: 'Review the quota change', prompt: 'Get ready to review the quota change.', reply: 'Ready: the quota change is open.' },
+  bypass: { title: 'Run the release checklist', prompt: 'Set up the release checklist.', reply: 'The checklist is ready; tell me when to run it.' },
+  auto: { title: 'Run the unit tests', prompt: 'Run the unit tests.', reply: 'Auto mode isn’t available for this session, so the tests did not run. Switch to Manual mode and I will ask before running them.' },
+} as const;
+const O4_DENIED = 'toolu_01O4AutoTests';
+const O4_FOLD = 'toolu_01O4FoldScript';
+// Whether this checkout launches every session so Bypass permissions can be chosen later (the branch's first change)
+const o4Build = () => readFileSync(join(REPO_ROOT, 'src/engine-host/launch.ts'), 'utf8').includes("'--allow-dangerously-skip-permissions'");
+
+type O4Row = { seq: number; direction: 'in' | 'out' | 'meta'; at: string; frame: Record<string, unknown> };
+const o4Frame = (path: string, seq: number): Record<string, unknown> =>
+  structuredClone((readFileSync(join(REPO_ROOT, path), 'utf8').trim().split('\n').map((line) => JSON.parse(line) as O4Row).find((row) => row.seq === seq) as O4Row).frame);
+// Every string equal to a key of `swap` becomes its value, at any depth (computer-use-replay.ts's way)
+function o4Swapped<T>(value: T, swap: Record<string, string>): T {
+  if (typeof value === 'string') return (swap[value] ?? value) as T;
+  if (Array.isArray(value)) return value.map((entry) => o4Swapped(entry, swap)) as T;
+  if (value !== null && typeof value === 'object') return Object.fromEntries(Object.entries(value).map(([key, entry]) => [key, o4Swapped(entry, swap)])) as T;
+  return value;
+}
+const O4_FIXTURES = {
+  handshake: 'test/fixtures/engine/replay-handshake.jsonl',
+  routed: 'spikes/protocol-probe/fixtures/pass2/auto-routed.jsonl', // init seq 9 (its session and cwd), list_models seq 142, 143
+  echoed: 'spikes/protocol-probe/fixtures/pass2/bash-context-echoed.jsonl', // assistant text seq 26, result seq 30
+  steer: 'spikes/protocol-probe/fixtures/pass3/steer-next.jsonl', // a Bash tool_use seq 38
+  flagged: 'spikes/protocol-probe/fixtures/uxwave/uxwave-obs4-bypass-default.jsonl', // bypass's success seq 42, status 43
+  unflagged: 'spikes/protocol-probe/fixtures/uxwave/uxwave-obs4-bypass-unflagged.jsonl', // bypass refused, seq 8
+};
+const O4_RECORDED = {
+  init: { session: '9d753242-8280-4bb4-a144-501cf423d6a1', cwd: '/private/tmp/maws-probe2-Gcfvti' },
+  echoed: { session: 'fd4c2f15-a381-402d-a125-a0f08a713e9c', prompt: 'a37362a6-a117-4985-b0f9-cae7bfad6114' },
+  steer: { session: '4e220cb8-9e75-4d8a-b1a9-c37655666eac' },
+  flagged: { session: 'be44870e-c02d-4781-9012-13f7855f0431', request: '07120948-7a92-456a-ab9b-ef8e64d62376' },
+  unflagged: { request: 'f05b1545-f8ea-4b9d-813b-587bd6cca2e6' },
+};
+// One started session's journal: the replay's handshake (its status without the relay's rows), the pin the seam reads,
+// one human turn, then what the scene asks. Ends with no exit row: past its last row the replay holds, answering reads
+// with an empty success.
+class O4Journal {
+  private readonly rows: O4Row[] = [];
+  private minted = 0;
+  constructor(
+    private readonly sessionId: string,
+    private readonly cwd: string,
+  ) {
+    this.push('meta', { event: 'provenance', charter: 'docs/charter.md', source: Object.values(O4_FIXTURES).join(', '), note: 'Synthetic, built by e2e/words-shots.rig.ts for the owner’s observation set 4.' });
+    for (const row of readFileSync(join(REPO_ROOT, O4_FIXTURES.handshake), 'utf8').trim().split('\n').map((line) => JSON.parse(line) as O4Row)) this.push(row.direction, row.seq === PRELUDE_STATUS_ANSWER ? directStatus(row.frame) : row.frame);
+    this.push('meta', { event: 'spawn', args: ['--session-id', sessionId], note: 'the pin the replay seam reads' });
+  }
+  private push(direction: O4Row['direction'], frame: Record<string, unknown>) {
+    this.rows.push({ seq: this.rows.length + 1, direction, at: '2026-11-27T12:00:00.000Z', frame });
+  }
+  private uuid(): string {
+    return `c4${this.sessionId.at(-1)}40000-0000-4000-8000-${String(++this.minted).padStart(12, '0')}`;
+  }
+  // The person's prompt the replay holds at, `started`, the session's init in `mode`, `between` (the turn's work), the
+  // assistant's text, the result and `completed`.
+  turn(text: string, mode: 'auto' | 'default', between: () => void = () => {}): void {
+    const prompt = this.uuid();
+    this.push('out', { type: 'user', uuid: prompt, message: { role: 'user', content: '(written by MAWS)' }, parent_tool_use_id: null, origin: { kind: 'human' } });
+    this.push('in', { type: 'command_lifecycle', command_uuid: prompt, state: 'started', uuid: this.uuid(), session_id: this.sessionId });
+    this.push('in', { ...o4Swapped(o4Frame(O4_FIXTURES.routed, 9), { [O4_RECORDED.init.session]: this.sessionId, [O4_RECORDED.init.cwd]: this.cwd }), permissionMode: mode });
+    between();
+    const swap = { [O4_RECORDED.echoed.session]: this.sessionId, [O4_RECORDED.echoed.prompt]: prompt };
+    const assistant = o4Swapped(o4Frame(O4_FIXTURES.echoed, 26), swap) as Record<string, unknown> & { message: Record<string, unknown> };
+    this.push('in', { ...assistant, uuid: this.uuid(), message: { ...assistant.message, id: `msg_o4${this.uuid().replace(/-/g, '')}`, content: [{ type: 'text', text }] } });
+    this.push('in', { ...o4Swapped(o4Frame(O4_FIXTURES.echoed, 30), swap), result: text, uuid: this.uuid(), user_message_uuid: prompt, user_message_uuids: [prompt] });
+    this.push('in', { type: 'command_lifecycle', command_uuid: prompt, state: 'completed', uuid: this.uuid(), session_id: this.sessionId });
+  }
+  // A Bash call the engine denied because auto mode is unavailable for the session
+  autoDenied(toolUseId: string, input: { command: string; description: string }): void {
+    const call = o4Swapped(o4Frame(O4_FIXTURES.steer, 38), { [O4_RECORDED.steer.session]: this.sessionId }) as Record<string, unknown> & { message: Record<string, unknown> };
+    this.push('in', { ...call, uuid: this.uuid(), message: { ...call.message, id: `msg_o4${this.uuid().replace(/-/g, '')}`, content: [{ type: 'tool_use', id: toolUseId, name: 'Bash', input, caller: { type: 'direct' } }] }, wire_tool_inputs: { [toolUseId]: input } });
+    const words = 'Auto mode is unavailable for this session.';
+    this.push('in', {
+      type: 'user', message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: toolUseId, content: words, is_error: true }] }, parent_tool_use_id: null, uuid: this.uuid(),
+      tool_use_result: `Error: ${words}`, tool_result_meta: [{ id: toolUseId, non_execution_kind: 'automode-unavailable' }], session_id: this.sessionId,
+    });
+  }
+  // set_permission_mode as MAWS writes it, and the engine's answer: its success and the status naming the new mode, or
+  // the recorded answer `answer` (its request id the recorded one, which the replay maps onto MAWS's)
+  setMode(mode: string, answer?: { frame: Record<string, unknown>; request: string }): void {
+    const request = answer?.request ?? this.uuid();
+    this.push('out', { type: 'control_request', request_id: request, request: { subtype: 'set_permission_mode', mode } });
+    if (answer) return this.push('in', answer.frame);
+    this.push('in', { type: 'control_response', response: { subtype: 'success', request_id: request, response: { mode } } });
+    this.push('in', { type: 'system', subtype: 'status', status: null, permissionMode: mode, uuid: this.uuid(), session_id: this.sessionId });
+  }
+  // The engine's status naming its mode, as it follows an accepted set_permission_mode
+  status(frame: Record<string, unknown>): void {
+    this.push('in', { ...frame, uuid: this.uuid(), session_id: this.sessionId });
+  }
+  // `count` list_models asks answered with the engine's list, each taken by the next ask in order; only reads follow,
+  // so one never asked holds nothing up
+  models(count: number): void {
+    const answer = o4Frame(O4_FIXTURES.routed, 143) as { response: Record<string, unknown> };
+    for (let k = 0; k < count; k++) {
+      const request = this.uuid();
+      this.push('out', { type: 'control_request', request_id: request, request: { subtype: 'list_models' } });
+      this.push('in', { type: 'control_response', response: { ...answer.response, request_id: request } });
+    }
+  }
+  write(dir: string, name: string): string {
+    const path = join(dir, `${name}.jsonl`);
+    writeFileSync(path, this.rows.map((row) => JSON.stringify(row)).join('\n') + '\n');
+    return path;
+  }
+}
+function o4Journal(key: Exclude<O4Key, 'fold'>, repo: string, dir: string): string {
+  const journal = new O4Journal(o4DiskId(key), repo);
+  const live = O4_LIVE[key];
+  if (key === 'models') {
+    journal.turn(live.reply, 'auto');
+    journal.models(8);
+  } else if (key === 'bypass') {
+    journal.turn(live.reply, 'auto');
+    if (o4Build()) {
+      journal.setMode('bypassPermissions', { frame: o4Frame(O4_FIXTURES.flagged, 42), request: O4_RECORDED.flagged.request });
+      journal.status(o4Frame(O4_FIXTURES.flagged, 43));
+    } else journal.setMode('bypassPermissions', { frame: o4Frame(O4_FIXTURES.unflagged, 8), request: O4_RECORDED.unflagged.request });
+    journal.models(4);
+  } else {
+    journal.turn(live.reply, 'auto', () => journal.autoDenied(O4_DENIED, { command: 'pnpm test', description: 'Run the unit tests' }));
+    journal.setMode('default');
+    journal.models(4);
+  }
+  return journal.write(dir, `o4-${key}`);
+}
+// The fold session's transcript, as the engine writes one (tcTranscript's shape): the prompt, a note, the Bash call that
+// writes a 45-line script through a heredoc and runs it (a command past Show more's bound), its 60 lines of output, the
+// answer.
+function o4FoldTranscript(repo: string): Record<string, unknown>[] {
+  const engineId = o4DiskId('fold');
+  const rows: Record<string, unknown>[] = [];
+  let parent: string | null = null;
+  let n = 0;
+  let clock = Date.UTC(2026, 10, 27, 9, 0, 0);
+  const add = (type: string, fields: Record<string, unknown>) => {
+    const id = `c4f00000-0000-4000-8000-${String(++n).padStart(12, '0')}`;
+    rows.push({ type, uuid: id, parentUuid: parent, isSidechain: false, cwd: repo, sessionId: engineId, version: '2.1.322', timestamp: new Date((clock += 4_000)).toISOString(), userType: 'external', entrypoint: 'sdk-ts', ...fields });
+    parent = id;
+  };
+  const assistant = (content: unknown[], stop: string) => add('assistant', { message: { id: `msg_o4f${String(n).padStart(4, '0')}`, type: 'message', role: 'assistant', model: 'claude-haiku-4-5-20251001', content, stop_reason: stop, usage: { input_tokens: 1, output_tokens: 1 } } });
+  const windows = Array.from({ length: 20 }, (_, k) => `  { start: '${String(k).padStart(2, '0')}:00', hours: 5 },`);
+  const script = [
+    "cat > scripts/check-quota.ts <<'EOF'",
+    "import { resetAfterMs } from '../src/quota';",
+    '',
+    '// Each five-hour window of a day, and where its reset falls',
+    'const windows = [',
+    ...windows,
+    '];',
+    '',
+    'function resetOf(start: string, hours: number) {',
+    "  const [h, m] = start.split(':').map(Number);",
+    '  const at = (h * 60 + m) * 60_000 + hours * 3_600_000;',
+    '  return at === resetAfterMs + (h * 60 + m) * 60_000;',
+    '}',
+    '',
+    'let failed = 0;',
+    'for (const [k, w] of windows.entries()) {',
+    '  const ok = resetOf(w.start, w.hours);',
+    "  console.log(`window ${String(k + 1).padStart(2, '0')} · ${w.start} · ${ok ? 'ok' : 'off'}`);",
+    '  if (!ok) failed += 1;',
+    '}',
+    'console.log(`${windows.length - failed} of ${windows.length} windows reset on time`);',
+    'process.exit(failed === 0 ? 0 : 1);',
+    'EOF',
+    'pnpm tsx scripts/check-quota.ts',
+  ].join('\n');
+  const output = [
+    ...Array.from({ length: 5 }, (_, day) => Array.from({ length: 12 }, (_, k) => `day ${day + 1} · window ${String(k + 1).padStart(2, '0')} · ok`)).flat(),
+    '60 of 60 windows reset on time',
+  ].join('\n');
+  add('user', { message: { role: 'user', content: 'Check that every five-hour window resets on time.' }, origin: { kind: 'human' }, promptSource: 'sdk', turnOrigin: 'human' });
+  assistant([{ type: 'text', text: 'Writing a small script that walks each window of the day.' }], 'tool_use');
+  assistant([{ type: 'tool_use', id: O4_FOLD, name: 'Bash', input: { command: script, description: 'Check each window’s reset' } }], 'tool_use');
+  add('user', { toolUseResult: { stdout: output, stderr: '', interrupted: false, isImage: false, noOutputExpected: false }, message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: O4_FOLD, content: output, is_error: false }] } });
+  assistant([{ type: 'text', text: 'Every window resets on time: 60 of 60 over five days.' }], 'end_turn');
+  add('system', { subtype: 'turn_duration', durationMs: 42_000 });
+  return rows;
+}
+
+test('owner obs 4: the model menu, Bypass, the Auto card, folding a tool block', async () => {
+  test.setTimeout(600_000);
+  if (!O4_IDS.some(wanted)) return;
+  const repos = REPOS.map((name) => makeRepo(name, name === 'stages' ? 'scheduled' : undefined));
+  const repoOf = (key: O4Key) => repos[O4[key] % repos.length]!;
+  const config = join(SCRATCH, 'claude-config-o4');
+  rmSync(config, { recursive: true, force: true });
+  for (const key of ['models', 'bypass', 'auto'] as const) seedSession(config, repoOf(key), o4DiskId(key), O4_LIVE[key].title, '2026-11-27T08:00:00.000Z');
+  const project = join(config, 'projects', repoOf('fold').replace(/[^a-zA-Z0-9]/g, '-'));
+  mkdirSync(project, { recursive: true });
+  writeFileSync(join(project, `${o4DiskId('fold')}.jsonl`), `${o4FoldTranscript(repoOf('fold')).map((row) => JSON.stringify(row)).join('\n')}\n`);
+  trust(config);
+  // the journals of the sessions the wanted scenes start, in the order the scenes start them
+  const journals = join(SCRATCH, 'journals');
+  mkdirSync(journals, { recursive: true });
+  const needs: [Exclude<O4Key, 'fold'>, string[]][] = [
+    ['models', ['o4-model-menu-new-chat', 'o4-model-menu-session']],
+    ['bypass', ['o4-mode-menu-bypass']],
+    ['auto', ['o4-auto-card-before-press', 'o4-auto-card-after-press']],
+  ];
+  const live = needs.filter(([, scenes]) => scenes.some(wanted)).map(([key]) => o4Journal(key, repoOf(key), journals));
+  const usage = usageFixture();
+  const userData = join(SCRATCH, 'profile-o4');
+  rmSync(userData, { recursive: true, force: true });
+  mkdirSync(userData, { recursive: true });
+  const maws = await launchMaws({ userData, prepare: noGh, env: BASE_ENV({ MAWS_ENGINE_REPLAY: '1', ...(live.length > 0 && { MAWS_E2E_REPLAY_FIXTURES: live.join(',') }), CLAUDE_CONFIG_DIR: config, MAWS_CLAUDE_USAGE_DIR: usage, PATH: NO_GH_PATH }) });
+  const { page } = maws;
+  try {
+    await size(maws);
+    await light(page);
+    value(await invoke(page, 'settings.set', { gateway: { defaultRoute: 'direct' } })); // no relay in the run
+    console.log(`[words] owner obs 4: this checkout ${o4Build() ? 'launches' : 'does not launch'} sessions with --allow-dangerously-skip-permissions`);
+    const keys = Object.keys(O4) as O4Key[];
+    const sid: Partial<Record<O4Key, string>> = {};
+    await expect.poll(async () => {
+      const { sessions } = value(await invoke(page, 'session.list', {}));
+      for (const key of keys) sid[key] = sessions.find((s) => s.engineSessionId === o4DiskId(key))?.appId ?? '';
+      return keys.every((key) => sid[key]);
+    }, { timeout: 30_000 }).toBe(true).catch((error: unknown) => setupFailed(`the obs 4 sessions’ index (${keys.filter((key) => !sid[key]).join(', ')} not listed)`, error));
+    await dismissToasts(page);
+    const idOf = (key: O4Key) => {
+      if (!sid[key]) throw new Error(`the ${key} session was not listed by the index`);
+      return sid[key]!;
+    };
+    const statusOf = async (key: O4Key) => value(await invoke(page, 'session.status', { appSessionId: idOf(key) as never }));
+    // A session opened, and started once with its prompt (a retry never asks the seam for a second journal), its turn's
+    // reply drawn
+    const asked = new Set<O4Key>();
+    const opened = async (key: Exclude<O4Key, 'fold'>) => {
+      await openSession(page, idOf(key));
+      if (!asked.has(key)) {
+        asked.add(key);
+        const { prompt } = O4_LIVE[key];
+        value(await invoke(page, 'session.start', { appSessionId: idOf(key) as never, message: { content: prompt, display: prompt }, options: { gateway: 'direct', trust: 'accepted' } }));
+      }
+      await expect.poll(async () => (await statusOf(key)).process, { message: `the ${key} session ready`, timeout: 60_000 }).toBe('ready');
+      await toEnd(page);
+      await soft(pane(page).getByText(O4_LIVE[key].reply), `the ${key} session’s reply`, 30_000);
+    };
+    const toolbar = () => pane(page).locator('[data-composer] [role="toolbar"]').first();
+    // the model menu's model view as launch 1's and 10's scenes find it (widgets/ModelSelector.tsx: `data-effort-title`
+    // inside the button that names the model, `data-model-selector` the view shown, on both builds)
+    const selector = () => page.locator('[data-model-selector]').first();
+    const modelView = () => page.locator('[data-model-selector="model"]').first();
+    const toModels = async (chip: Locator) => {
+      await chip.click();
+      await expect(selector()).toBeVisible({ timeout: 10_000 });
+      if ((await selector().getAttribute('data-model-selector')) !== 'model') await selector().locator('button:has([data-effort-title])').first().click();
+      await expect(modelView()).toBeVisible({ timeout: 5_000 });
+    };
+    const listShown = async () => {
+      await expect(modelView(), 'the model view').toBeVisible({ timeout: 3_000 });
+      await inView(modelView().locator('[role="menuitemradio"]'), 'its list’s rows');
+    };
+    const META_MODEL = ['widgets', 'composer/frame', 'sessions', 'src/engine-host'];
+
+    // 1. A new chat's model menu before Send, a session running on this Mac (models): New chat as launch 10's
+    // m2-new-chat-model-view makes it (session.create, File › New chat), its tab found by its setup intent
+    const intents = async () => value(await invoke(page, 'session.intent.list', undefined)).intents.map((intent) => intent.appSessionId as string);
+    let before: Set<string> | null = null; // read once, by the first attempt: a retry's New chat reuses its empty chat
+    let chat: string | null = null;
+    const newChat = () => pane(page).locator(`[data-composer="${chat}"]`);
+    await shot(page, m0({ id: 'o4-model-menu-new-chat', title: 'New chat, the model menu before Send', how: 'The session “Review the quota change” started on the replay engine (the engine’s list read once it runs), then File › New chat (⌘N), the model chip under the message box, then the model’s name at the menu’s top (launch o4)', state: 'The models a new chat offers before its first Send. The branch: the engine’s list, the start’s model checked, no Default row and no route segment over it. Master: its own list, with Default and the route segment', folders: META_MODEL }), async () => {
+      await opened('models');
+      await reset(page);
+      const known = (before ??= new Set(await intents()));
+      await menu(maws.app, 'session.new');
+      await expect.poll(async () => {
+        const made = (await intents()).find((id) => !known.has(id));
+        chat = made === undefined ? null : await addressed(page, made);
+        return chat;
+      }, { message: 'New chat’s setup intent', timeout: 10_000 }).not.toBeNull();
+      await expect(newChat(), 'the new chat’s tab shown').toBeVisible({ timeout: 10_000 });
+      await toModels(newChat().locator('[role="toolbar"] button[aria-haspopup="dialog"]:not([data-context-ring])').last());
+      await page.waitForTimeout(1500); // the branch reads the catalogue again as the menu opens, its spinner until it answers
+    }, {
+      check: async () => {
+        await expect(newChat(), 'the new chat’s tab shown').toBeVisible({ timeout: 3_000 });
+        await listShown();
+      },
+      after: () => closeOverlays(page),
+    });
+    await reset(page);
+
+    // 2. The same menu in the running session
+    await shot(page, m0({ id: 'o4-model-menu-session', title: 'The model menu during a session', how: 'The session “Review the quota change” started on the replay engine, its turn done; the model chip under the message box, then the model’s name at the menu’s top (launch o4)', state: 'The engine’s list for a running session, its model checked. The branch: no Default row. Master: the Default row first', folders: META_MODEL }), async () => {
+      await opened('models');
+      await toModels(toolbar().locator('button[aria-haspopup="dialog"]:not([data-context-ring])').last());
+    }, { check: listShown, after: () => closeOverlays(page) });
+    await reset(page);
+
+    // 3. The mode menu, Bypass permissions picked and confirmed (statusline/ModeMenu.tsx: Bypass's row set apart, behind
+    // its inline confirm; a refusal stays in the menu, role alert; a success closes it). The chip is the composer frame's
+    // ModeChip, its label "Permission mode <mode>" (a literal on both builds); the rows' and the confirm's words are the
+    // shared labels'.
+    const modeChip = () => toolbar().getByRole('button', { name: /^Permission mode/ }).first();
+    const modeMenu = () => page.locator('[data-radix-popper-content-wrapper]').filter({ has: page.locator('[role="menuitemradio"]') }).last();
+    let bypassAsked = false;
+    const bypassRow = () => modeMenu().getByRole('menuitemradio', { name: new RegExp(`^${PERMISSION_MODE_LABELS.bypassPermissions}`) }).first();
+    await shot(page, m0({ id: 'o4-mode-menu-bypass', title: 'The mode menu, Bypass permissions picked', how: 'The session “Run the release checklist” started on the replay engine in Auto, its turn done; the mode chip under the message box, Bypass permissions, then its confirm; on the branch the chip pressed again. The engine’s answer is the recorded one for the build’s launch line (launch o4)', state: 'The branch: the chip reads Bypass permissions, the menu open again with Bypass permissions checked. Master: the menu with the engine’s refusal under its rows (not launched with --dangerously-skip-permissions), the mode unchanged', folders: ['statusline', 'composer/frame', 'src/engine-host'], hover: true }), async () => {
+      await opened('bypass');
+      // confirmed once: the journal answers one set_permission_mode, and a second would end the replay as a mismatch
+      if (!bypassAsked && (await statusOf('bypass')).permissionMode.effective !== 'bypassPermissions') {
+        if ((await modeMenu().count()) === 0) await modeChip().click();
+        await expect(bypassRow()).toBeVisible({ timeout: 5_000 });
+        await bypassRow().click();
+        const confirm = modeMenu().getByRole('button', { name: `Switch to ${PERMISSION_MODE_LABELS.bypassPermissions}`, exact: true });
+        await expect(confirm).toBeVisible({ timeout: 5_000 });
+        bypassAsked = true;
+        await confirm.click();
+        await page.waitForTimeout(1500);
+      }
+      if (o4Build()) {
+        await expect.poll(async () => (await statusOf('bypass')).permissionMode.effective, { message: 'the engine’s mode', timeout: 10_000 }).toBe('bypassPermissions');
+        if ((await modeMenu().count()) === 0) await modeChip().click();
+      }
+      await page.mouse.move(W - 2, H - 2); // a hover capture: the pointer aside, the menu left open (a click outside would close it)
+    }, {
+      check: async () => {
+        await expect(modeMenu(), 'the mode menu open').toBeVisible({ timeout: 3_000 });
+        if (o4Build()) {
+          await expect(modeChip(), 'the chip').toHaveAttribute('aria-label', new RegExp(`^Permission mode ${PERMISSION_MODE_LABELS.bypassPermissions}`), { timeout: 3_000 });
+          await expect(bypassRow(), 'Bypass permissions checked').toHaveAttribute('aria-checked', 'true', { timeout: 3_000 });
+        } else {
+          await inView(modeMenu().getByRole('alert'), 'the engine’s refusal in the menu');
+          expect((await statusOf('bypass')).permissionMode.effective, 'the mode unchanged').not.toBe('bypassPermissions');
+        }
+      },
+      after: () => closeOverlays(page),
+    });
+    await reset(page);
+
+    // 4. Auto mode unavailable: the attention item the denied call raises, its card in the opened session
+    // (request-card/variants/Notice.tsx: `data-request-card` its item's id, `<session>:auto_mode_unavailable:<call>`),
+    // then its Switch to Manual mode pressed (the card's one button; its words the shared label's)
+    const autoCard = () => page.locator(`[data-region="main"] [data-request-card$=":auto_mode_unavailable:${O4_DENIED}"]`).first();
+    const autoItem = async () => value(await invoke(page, 'attention.list', undefined)).find((item) => item.appSessionId === sid.auto && item.kind === 'auto_mode_unavailable') ?? null;
+    const META_AUTO = ['request-card', 'request-card/variants', 'src/services/attention', 'composer/frame'];
+    await shot(page, m0({ id: 'o4-auto-card-before-press', title: 'Auto mode unavailable, before its button is pressed', how: 'The session “Run the unit tests” started on the replay engine in Auto; its turn’s `pnpm test` denied because auto mode is unavailable for the session (launch o4)', state: 'The denied call in the transcript and the Auto mode unavailable card with its Switch to Manual mode; the chip reads Auto', folders: META_AUTO }), async () => {
+      await opened('auto');
+      if ((await statusOf('auto')).permissionMode.effective !== 'auto') throw new Error('the auto session left auto mode in an earlier scene: this picture comes before the press');
+      await expect.poll(async () => (await autoItem())?.state ?? 'none', { message: 'the auto mode item', timeout: 15_000 }).not.toBe('none');
+      await toEnd(page);
+    }, { check: () => inView(autoCard(), 'the Auto mode unavailable card') });
+    await shot(page, m0({ id: 'o4-auto-card-after-press', title: 'Auto mode unavailable, after Switch to Manual mode', how: 'The session “Run the unit tests” as in o4-auto-card-before-press, then the card’s Switch to Manual mode pressed; the engine answers the mode change (launch o4)', state: 'The branch: the card gone, the transcript and the chip reading Manual. Master: the mode changed and the card still there until the next prompt', folders: META_AUTO }), async () => {
+      await opened('auto');
+      if ((await statusOf('auto')).permissionMode.effective === 'auto') {
+        await expect(autoCard()).toBeVisible({ timeout: 15_000 });
+        await autoCard().getByRole('button', { name: `Switch to ${PERMISSION_MODE_LABELS.default} mode`, exact: true }).click();
+      }
+      await expect.poll(async () => (await statusOf('auto')).permissionMode.effective, { message: 'the engine’s mode', timeout: 10_000 }).toBe('default');
+      await page.waitForTimeout(1500);
+      await toEnd(page);
+    }, {
+      check: async () => {
+        await expect(modeChip(), 'the chip').toHaveAttribute('aria-label', new RegExp(`^Permission mode ${PERMISSION_MODE_LABELS.default}`), { timeout: 3_000 });
+        if (o4Build()) {
+          await expect(autoCard(), 'the card gone').toHaveCount(0, { timeout: 5_000 });
+          expect((await autoItem())?.state ?? 'retired', 'the item retired').toBe('retired');
+        } else await inView(autoCard(), 'master’s card, still there');
+      },
+    });
+    await reset(page);
+
+    // 5. A tall open tool block: the call's line opened and its whole command shown (ShellDetail's Show more), scrolled so
+    // its output stands mid-list with the call's line above the window; then a click on its blank space (inside the
+    // output's box, in its right padding beside the lines, away from the copy glyph at its top and the scrollbar at its
+    // edge). The branch folds the call there (transcript/view/fold-on-click.ts), its line given the keyboard and brought
+    // into view; master leaves it open.
+    const cellOf = () => pane(page).locator(`[data-cell-id="cell:${O4_FOLD}"]`).first();
+    const lineOf = () => cellOf().locator(':scope > button.transcript-cell-line');
+    const outputOf = () => cellOf().locator('.transcript-shell-output > pre.transcript-output').first();
+    const tall = async () => {
+      await openSession(page, idOf('fold'));
+      await expect(pane(page).locator('.transcript-row[data-kind]').first()).toBeVisible({ timeout: 20_000 });
+      await unfold(page, pane(page).locator('.transcript-row[data-kind="divider"] button.transcript-disclosure[aria-expanded="false"]'), 'a closed turn’s line', 4);
+      await seek(page, cellOf());
+      if ((await lineOf().getAttribute('aria-expanded')) !== 'true') await press(page, lineOf(), 'the call’s line');
+      const more = cellOf().locator('.transcript-shell > button[aria-expanded="false"]');
+      if ((await more.count()) > 0) await press(page, more.first(), 'the command’s Show more');
+      await page.waitForTimeout(800);
+      const [at, list] = await Promise.all([outputOf().boundingBox(), scroller(page).boundingBox()]);
+      if (!at || !list) throw new Error('the call’s output is not drawn');
+      await scroller(page).evaluate((el, dy) => {
+        el.scrollTop += dy;
+        el.dispatchEvent(new Event('scroll'));
+      }, at.y + at.height / 2 - (list.y + list.height * 0.4));
+      await page.waitForTimeout(800);
+    };
+    const blankOf = async () => {
+      const at = await outputOf().boundingBox();
+      if (!at) throw new Error('the call’s output is not drawn');
+      const point = { x: at.x + at.width - 24, y: at.y + at.height / 2 };
+      const inside = await page.evaluate(([x, y, id]) => document.querySelector(`[data-cell-id="cell:${id}"]`)?.contains(document.elementFromPoint(x, y)) ?? false, [point.x, point.y, O4_FOLD] as const);
+      if (!inside) throw new Error(`the point (${Math.round(point.x)}, ${Math.round(point.y)}) is not on the call: something is drawn over it`);
+      return point;
+    };
+    const FOLD_FOLDERS = ['transcript/view', 'transcript/view/cells', 'transcript/view/rows'];
+    await shot(page, m0({ id: 'o4-tool-block-open', title: 'A tall tool block, open', how: 'The session “Check that every five-hour window resets on time” (invented), its turn opened, the Bash call’s line pressed and its command’s Show more, then scrolled to the call’s output (launch o4)', state: 'The call open past the window’s height: its 45-line command whole, its output mid-list, its line scrolled out of view above', folders: FOLD_FOLDERS }), async () => {
+      await tall();
+      await blankOf();
+    }, {
+      check: async () => {
+        await expect(lineOf(), 'the call open').toHaveAttribute('aria-expanded', 'true', { timeout: 3_000 });
+        await inView(outputOf(), 'its output');
+        await expect(lineOf(), 'its line above the window').not.toBeInViewport();
+      },
+    });
+    await shot(page, m0({ id: 'o4-tool-block-folded', title: 'A tall tool block, after a click on its blank space', how: 'The call as in o4-tool-block-open, then a click inside its output’s box beside the lines, on no text and no control (launch o4)', state: 'The branch: the call folded to its line where the reader is, the line in view holding the keyboard. Master: the call still open (only its line folds it)', folders: FOLD_FOLDERS }), async () => {
+      await tall();
+      const point = await blankOf();
+      await page.mouse.click(point.x, point.y);
+      await page.waitForTimeout(1200);
+    }, {
+      check: async () => {
+        if (o4Build()) {
+          await expect(lineOf(), 'the call folded').toHaveAttribute('aria-expanded', 'false', { timeout: 3_000 });
+          await inView(lineOf(), 'its line');
+          await expect.poll(() => lineOf().evaluate((el) => el === document.activeElement), { message: 'its line holds the keyboard', timeout: 3_000 }).toBe(true);
+        } else await expect(lineOf(), 'master’s call still open').toHaveAttribute('aria-expanded', 'true', { timeout: 3_000 });
+      },
+    });
+  } finally {
+    await maws.cleanup();
+  }
+});
