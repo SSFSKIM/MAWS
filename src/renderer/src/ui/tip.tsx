@@ -88,26 +88,16 @@ export function TipsAbove({ children }: { children: ReactNode }) {
 }
 const BELOW_IS_OFF = { top: 8, right: 8, left: 8, bottom: 1_000_000 };
 
-// Keyboard focus: focus opens a tip only where the owner matches :focus-visible and the last input was not a pointer's
-// press. Focus the person did not move with the keyboard (a menu handing its trigger the keyboard back after a pointer
-// pick, a dialog's autofocus after a click) opens nothing, so no tooltip appears unasked and Escape stays the dialog's
-// (board ticket 815's last round). Chromium's :focus-visible is the rule itself; the input it follows is tracked too, for
-// a document that does not implement the selector (happy-dom matches it on any focus), and the selector is read guarded.
-// Before any input the keyboard is assumed.
-let lastInput: 'keyboard' | 'pointer' = 'keyboard';
-let tracking = false;
-function trackInput(doc: Document): void {
-  if (tracking) return;
-  tracking = true;
-  doc.addEventListener('pointerdown', () => (lastInput = 'pointer'), true);
-  doc.addEventListener('keydown', () => (lastInput = 'keyboard'), true);
-}
-function focusedByKeyboard(focused: Element): boolean {
-  if (lastInput === 'pointer') return false;
+// Keyboard focus: focus opens a tip only where the focused element matches :focus-visible, Chromium's own judgment of
+// whether focus should show. Focus the person did not move with the keyboard (a menu handing its trigger the keyboard
+// back after a pointer pick, a dialog's autofocus after a click) opens nothing, so no tooltip appears unasked and Escape
+// stays the dialog's (board ticket 815's last round); focus restored after a keyboard Escape or a Shift+Tab out of a
+// frame matches it, and opens. Read guarded: where the selector throws, focus opens.
+function focusVisible(focused: Element): boolean {
   try {
     return focused.matches(':focus-visible');
   } catch {
-    return true; // a document with no :focus-visible: the input tracked decides
+    return true;
   }
 }
 
@@ -126,7 +116,6 @@ export function Tip({ content, description, pointedWithin, side = 'top', childre
   const descriptionId = useId();
   const boundary = useContext(Boundary);
   const above = useContext(Above);
-  useEffect(() => trackInput(document), []);
   const shows = content !== null && content !== undefined && content !== '';
   const [open, setOpen] = useState(false);
   if (open && !shows) setOpen(false); // the content went away: the tip is closed, not merely undrawn
@@ -246,7 +235,7 @@ export function Tip({ content, description, pointedWithin, side = 'top', childre
           {...guard}
           onPointerMove={cancel}
           onFocus={(event) => {
-            if (!shows || !(event.target instanceof Element) || !focusedByKeyboard(event.target)) cancel(event); // the element focused (a box inside a label owner); focus the keyboard did not move opens nothing
+            if (!shows || !(event.target instanceof Element) || !focusVisible(event.target)) cancel(event); // the element focused (a box inside a label owner); focus the keyboard did not move opens nothing
           }}
           onPointerEnter={pointedWithin ? undefined : point}
           onPointerLeave={pointedWithin ? undefined : stopPointing}

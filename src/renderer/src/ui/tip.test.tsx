@@ -13,10 +13,7 @@ import { focusedTipShowing, Tip, tipBoundaryOf, TipsAbove, UnavailableButton } f
 
 const FACT = 'MAWS falls back to a dock bounce and a toast';
 
-beforeEach(() => {
-  fakeTimeouts();
-  fireEvent.keyDown(document.body, { key: 'Shift' }); // each case starts from the keyboard, the input a tip's focus follows
-});
+beforeEach(fakeTimeouts);
 afterEach(() => {
   cleanup();
   realTimeouts();
@@ -466,9 +463,35 @@ describe('tips held above', () => {
 
 // The coordinator's call on board ticket 815's last round: a tip opens on keyboard focus, not on focus the person did
 // not move with the keyboard (a menu handing focus back to its trigger after a pointer pick, a dialog's autofocus after
-// a click). The owner must match :focus-visible, and the last input must not have been a pointer's press.
+// a click): the focused element must match :focus-visible, Chromium's own judgment. happy-dom matches it on any focus,
+// so the pointer's case stubs the selector.
+const focusVisibleIs = (visible: boolean) => {
+  const matches = Element.prototype.matches;
+  vi.spyOn(Element.prototype, 'matches').mockImplementation(function (this: Element, selector: string) {
+    return selector === ':focus-visible' ? visible : matches.call(this, selector);
+  });
+};
 describe('a tip on focus the keyboard did not move', () => {
-  it('opens nothing on focus after a pointer press, opens at once on keyboard focus, and keeps pointing’s delay', async () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  it('opens nothing on focus that is not :focus-visible (a pointer pick handing the trigger focus back), and Escape there is not the tip’s; pointing keeps its delay', async () => {
+    render(
+      <Tip content="More actions">
+        <button type="button">More</button>
+      </Tip>,
+    );
+    const more = screen.getByRole('button', { name: 'More' });
+    focusVisibleIs(false);
+    act(() => more.focus());
+    expect(tooltip()).toBeNull();
+    keyAt(more, 'Escape');
+    expect(focusedTipShowing()).toBe(false);
+    await user().hover(more);
+    wait(POINTING_DELAY_MS);
+    expect(tooltip()).toBe('More actions');
+  });
+
+  it('opens at once on keyboard focus, and Escape there is the tip’s', async () => {
     const u = user();
     render(
       <>
@@ -478,41 +501,40 @@ describe('a tip on focus the keyboard did not move', () => {
         </Tip>
       </>,
     );
-    const more = screen.getByRole('button', { name: 'More' });
-    await u.click(screen.getByRole('button', { name: 'Elsewhere' }));
-    act(() => more.focus()); // a menu giving its trigger the keyboard back after a pointer pick
-    expect(tooltip()).toBeNull();
-    keyAt(more, 'Escape'); // with no tip showing, Escape is not the tip's
-    expect(focusedTipShowing()).toBe(false);
-    act(() => more.blur());
-    await u.tab(); // Elsewhere
-    await u.tab(); // More, by the keyboard
-    expect(document.activeElement).toBe(more);
+    await u.tab();
+    await u.tab();
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: 'More' }));
     expect(tooltip()).toBe('More actions');
     expect(focusedTipShowing()).toBe(true);
     await u.keyboard('{Escape}');
     expect(tooltip()).toBeNull();
-    await u.click(screen.getByRole('button', { name: 'Elsewhere' }));
-    await u.hover(more);
-    wait(POINTING_DELAY_MS);
-    expect(tooltip()).toBe('More actions');
   });
 
-  it('opens nothing where the owner does not match :focus-visible', () => {
+  it('opens on a focus restored in code where it is :focus-visible (an Escape that hands the opener its focus back), with no key before it', async () => {
+    render(
+      <Tip content="Mark up">
+        <button type="button">Pen</button>
+      </Tip>,
+    );
+    focusVisibleIs(true);
+    act(() => screen.getByRole('button', { name: 'Pen' }).focus());
+    expect(tooltip()).toBe('Mark up');
+    expect(focusedTipShowing()).toBe(true);
+  });
+
+  it('opens on focus where reading :focus-visible throws', () => {
     render(
       <Tip content="More actions">
         <button type="button">More</button>
       </Tip>,
     );
-    const more = screen.getByRole('button', { name: 'More' });
     const matches = Element.prototype.matches;
     vi.spyOn(Element.prototype, 'matches').mockImplementation(function (this: Element, selector: string) {
-      return selector === ':focus-visible' ? false : matches.call(this, selector);
+      if (selector === ':focus-visible') throw new SyntaxError('unsupported');
+      return matches.call(this, selector);
     });
-    fireEvent.keyDown(document.body, { key: 'Tab' });
-    act(() => more.focus());
-    expect(tooltip()).toBeNull();
-    vi.restoreAllMocks();
+    act(() => screen.getByRole('button', { name: 'More' }).focus());
+    expect(tooltip()).toBe('More actions');
   });
 });
 const keyAt = (target: Element, key: string) => fireEvent.keyDown(target, { key });

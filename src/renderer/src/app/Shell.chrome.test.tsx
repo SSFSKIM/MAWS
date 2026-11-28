@@ -36,6 +36,7 @@ afterEach(() => {
   cleanup();
   offs.splice(0).forEach((off) => off());
   resetSlots();
+  vi.restoreAllMocks(); // a case's stub of :focus-visible
 });
 
 describe('the chrome yields to the tab strip', () => {
@@ -277,11 +278,17 @@ it('Settings opened from the gear of the sidebar drawn over the window gives the
   setWidth(620);
   renderShell();
   act(() => useShellView.setState({ sidebarOverlay: true }));
+  // opened by a click, the focus Settings gives its Close is not :focus-visible in Chromium (happy-dom matches it on any
+  // focus, so the case says so)
+  const matches = Element.prototype.matches;
+  vi.spyOn(Element.prototype, 'matches').mockImplementation(function (this: Element, selector: string) {
+    return selector === ':focus-visible' ? false : matches.call(this, selector);
+  });
   await userEvent.click(within(document.getElementById('region-sidebar')!).getByRole('button', { name: 'Workspace settings' }));
   expect(useLayout.getState().settings).toEqual({ section: null });
   expect(useShellView.getState().sidebarOverlay).toBe(false);
-  // no section is drawn here, so the keyboard lands on Close; opened by a click, that focus opens no tooltip (ticket
-  // 815: a tip opens on keyboard focus), so one Esc closes Settings
+  // no section is drawn here, so the keyboard lands on Close; that focus opens no tooltip (ticket 815: a tip opens on
+  // keyboard focus), so one Esc closes Settings
   expect(screen.queryByRole('tooltip')).toBeNull();
   await userEvent.keyboard('{Escape}');
   await act(() => new Promise<void>((resolve) => setTimeout(resolve, 0)));

@@ -489,15 +489,31 @@ async function keyFocus(owner: Locator): Promise<void> {
   await owner.page().keyboard.press('Shift');
   await owner.focus();
 }
-// The check that `trigger`'s own tooltip is open: a tooltip is drawn, one alone (one shows at a time), the scene having
-// pointed at or focused `trigger`. The tooltip itself is read, not the owner's `data-state`, which a component owner
-// (a Radix radio item or trigger) keeps as its own (board ticket 815). On master's, `rest` in view.
+// The check that `trigger`'s own tooltip is open: one tooltip drawn (one shows at a time), and it is the trigger's
+// (`tipOf`). The tooltip itself is read, not the owner's `data-state`, which a component owner (a Radix radio item or
+// trigger) keeps as its own (board ticket 815). On master's, `rest` in view.
 const tipShown = (page: Page, trigger: Locator, what: string, rest: Locator, cutOf: () => boolean = cutBuild) => async () => {
   if (!cutOf()) return inView(rest, `master’s words for the tooltip of ${what}`);
-  await expect(trigger.first(), `the owner of the tooltip of ${what}`).toBeVisible({ timeout: 3_000 });
   await expect(page.getByRole('tooltip'), `one tooltip drawn, ${what}’s`).toHaveCount(1, { timeout: 3_000 });
   await expect(page.getByRole('tooltip'), `the tooltip of ${what}`).toBeVisible({ timeout: 3_000 });
+  await expect.poll(() => tipOf(trigger.first()), { message: `the tooltip drawn is ${what}’s`, timeout: 3_000 }).toBe(true);
 };
+// Whether the tooltip drawn is `owner`'s: Radix names it in the owner's aria-describedby (a tip with no description of
+// its own), or it holds each part of one of the owner's descriptions (a fact, a reason, a shortcut: ui/tip.tsx and
+// glyph.tsx describe the owner by the tip's words; a row note's may stand beside it), or it holds the owner's name (a
+// named glyph's word).
+const tipOf = (owner: Locator) =>
+  owner.evaluate((element) => {
+    const tip = element.ownerDocument.querySelector('[role="tooltip"]');
+    if (tip === null) return false;
+    const ids = (element.getAttribute('aria-describedby') ?? '').split(/\s+/).filter(Boolean);
+    if (tip.id !== '' && ids.includes(tip.id)) return true;
+    const words = tip.textContent ?? '';
+    const described = ids.map((id) => (element.ownerDocument.getElementById(id)?.textContent ?? '').trim()).filter((text) => text !== '');
+    if (described.some((text) => text.split(' · ').every((part) => words.includes(part.trim())))) return true;
+    const name = (element.getAttribute('aria-label') ?? element.textContent ?? '').trim();
+    return name !== '' && words.includes(name);
+  });
 // The check that the row `scope` names has its own note open; on master's, the row's line at rest (a declared row's
 // `data-settings-note`, else the row, whose plain note master draws in it) in view.
 const noteShown = (scope: Locator, what: string) => async () => {
