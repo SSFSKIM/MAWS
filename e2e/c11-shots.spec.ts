@@ -120,6 +120,7 @@ test('the widgets and Session info on the #widgets harness page', async () => {
     for (const theme of THEMES) {
       await setTheme(page, theme, true);
       await info.evaluate((el) => (el.scrollTop = 0));
+      await page.keyboard.press('Shift'); // board ticket 815: a tip opens on keyboard focus, so the keyboard is the last input before the focus moves
       await lane.focus(); // the top shot shows the lane's sentence, its tooltip opened by the keyboard
       await expect(page.getByRole('tooltip')).toContainText('Local (expected)');
       await info.screenshot({ path: join(SHOTS, `c11-session-info-${theme}.png`) });

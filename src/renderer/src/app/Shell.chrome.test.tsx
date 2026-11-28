@@ -280,11 +280,9 @@ it('Settings opened from the gear of the sidebar drawn over the window gives the
   await userEvent.click(within(document.getElementById('region-sidebar')!).getByRole('button', { name: 'Workspace settings' }));
   expect(useLayout.getState().settings).toEqual({ section: null });
   expect(useShellView.getState().sidebarOverlay).toBe(false);
-  // no section is drawn here, so the keyboard lands on Close, whose tooltip its focus opens (ticket 815): the first Esc
-  // closes that tooltip, the next Settings
-  expect(screen.getByRole('tooltip').textContent).toBe('Close');
-  await userEvent.keyboard('{Escape}');
-  expect(useLayout.getState().settings).toEqual({ section: null });
+  // no section is drawn here, so the keyboard lands on Close; opened by a click, that focus opens no tooltip (ticket
+  // 815: a tip opens on keyboard focus), so one Esc closes Settings
+  expect(screen.queryByRole('tooltip')).toBeNull();
   await userEvent.keyboard('{Escape}');
   await act(() => new Promise<void>((resolve) => setTimeout(resolve, 0)));
   expect(useLayout.getState().settings).toBeNull();

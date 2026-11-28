@@ -723,6 +723,7 @@ test('UX2: at 900 the sidebar yields; at 620 a surface is a dismissible sheet', 
   await expect(panel(page)).toHaveCSS('position', 'absolute');
   await expect(main(page)).toHaveJSProperty('inert', true);
   const sheetControl = surface(page, 'files').getByRole('button', { name: 'Refresh', exact: true });
+  await page.keyboard.press('Shift'); // the focus stands for the keyboard's, whose focus opens a tip
   await sheetControl.focus();
   await expect(sheetControl).toBeFocused();
   // board ticket 815: the focused glyph's tip shows, and the first Escape is the tip's (it closes it, the sheet stays); the

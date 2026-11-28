@@ -46,6 +46,7 @@ import { installResizeObserver } from '../test-support/resize';
 import { accessibleDescription, accessibleText } from '../test-support/accessible-text';
 import { registerSidePane } from '../side/register';
 import { closeBtwCard, foldBtwCard, openBtwCard, resetSideQuestions, setBtwQuestion } from '../side/store';
+import { keyboardFocus } from '../test-support/keyboard-focus';
 
 vi.mock('./Diagnostics', () => ({ Diagnostics: () => <section aria-label="Diagnostics">diagnostics</section> }));
 
@@ -121,7 +122,7 @@ describe('shell frame', () => {
     expect(buttons[buttons.indexOf(sidebar) + 1]).toBe(toggle);
     expect(toggle.className).toContain('[-webkit-app-region:no-drag]');
     expect(accessibleDescription(toggle)).toBe('⌘0');
-    act(() => toggle.focus());
+    keyboardFocus(toggle);
     expect(screen.getByRole('tooltip').textContent).toBe('Overview · ⌘0');
     expect(toggle.getAttribute('aria-pressed')).toBe('false');
     expect(screen.queryByRole('dialog', { name: 'Overview' })).toBeNull();
@@ -364,7 +365,7 @@ describe('toolbar', () => {
     renderShell();
     const toggle = screen.getByRole('button', { name: 'Toggle sidebar' });
     expect(accessibleDescription(toggle)).toBe('⌘⌥S');
-    act(() => toggle.focus());
+    keyboardFocus(toggle);
     expect(screen.getByRole('tooltip').textContent).toBe('Toggle sidebar · ⌘⌥S');
     useSettings.setState({ state: null });
   });
@@ -971,7 +972,7 @@ describe('a page beside the sidebar', () => {
     expect(hiddenNow(strips()), 'the strips stay mounted, hidden').toEqual([true, true]);
     const back = within(header()).getByRole('button', { name: 'Back' });
     expect(accessibleDescription(back)).toBe('Esc');
-    act(() => back.focus());
+    keyboardFocus(back);
     expect(screen.getByRole('tooltip').textContent).toBe('Back · Esc');
     await user.click(within(header()).getByRole('button', { name: 'Back' }));
     expect(useLayout.getState().destination).toBeNull();

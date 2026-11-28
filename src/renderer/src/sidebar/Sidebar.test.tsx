@@ -43,6 +43,7 @@ import { Sidebar } from './Sidebar';
 import { Search } from './Search';
 import { formatClock } from '@shared/app/date-format'; // L129
 import { togglePalette, usePalette } from '../palette/CommandPalette';
+import { keyboardFocus } from '../test-support/keyboard-focus';
 
 // P5 O6 M2: a scenario file is main's (bare ids), which `fillStores` and the fake `window.maws` take; the page holds it
 // lifted (`page`), so a test finds a store's, the layout's or the DOM's id through `idOf` or `at`, and main's through
@@ -1562,7 +1563,7 @@ describe('the footer gear', () => {
     expect(gear.getAttribute('aria-disabled')).toBe('true');
     act(() => void offs.push(registerGatewayActions()));
     expect(gear.getAttribute('aria-disabled')).toBeNull();
-    act(() => gear.focus());
+    keyboardFocus(gear);
     expect(screen.getByRole('tooltip').textContent).toBe('Settings · ⌘,');
     act(() => gear.blur());
     const strip = useLayout.getState().main;

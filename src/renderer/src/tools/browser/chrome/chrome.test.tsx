@@ -29,6 +29,7 @@ import { registerSlot, resetSlots } from '../../../app/slots'; // P3-F (F-shell)
 import { browser, connectBrowser, onShowRequest, raiseNotice, resetBrowser } from '../store';
 import { Chrome, type ChromeProps } from './Chrome';
 import { accessibleDescription, accessibleText } from '../../../test-support/accessible-text';
+import { keyboardFocus } from '../../../test-support/keyboard-focus';
 
 // P5 O6 M2: the page's ids are addresses; main (installFakeMain) is asked and answers with the bare MAIN_A.
 const MAIN_A = 'app-a' as AppSessionId;
@@ -238,7 +239,7 @@ describe('the zoom chip', () => {
     const user = userEvent.setup();
     show({ tab: tab({ zoom: 1.25 }), owns: true });
     expect(chip()!.hasAttribute('title')).toBe(false);
-    chip()!.focus();
+    keyboardFocus(chip()!);
     expect((await screen.findByRole('tooltip')).textContent).toBe(BROWSER_COPY.zoom.label);
     await user.keyboard('{Escape}');
   });
@@ -973,7 +974,7 @@ describe('the acting dot', () => {
     expect(chip.contains(dot()[0]!)).toBe(true);
     expect(screen.getByRole('img', { name: BROWSER_COPY.acting })).toBe(dot()[0]);
     // its words a line of the chip's tooltip, which keyboard focus opens (board ticket 815)
-    act(() => within(chip as HTMLElement).getByRole('tab').focus());
+    keyboardFocus(within(chip as HTMLElement).getByRole('tab'));
     expect([...screen.getByRole('tooltip').querySelectorAll('span')].map((line) => line.textContent)).toContain(BROWSER_COPY.acting);
     expect(dot()[0]!.className).toContain('bg-accent');
     expect(dot()[0]!.textContent).toBe('');

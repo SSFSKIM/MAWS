@@ -64,6 +64,7 @@ import {
   type ChangedFile,
 } from './review-model';
 import { currentSet } from '../../../stores/layout-model';
+import { keyboardFocus } from '../../../test-support/keyboard-focus';
 
 // The highlighter would load shiki's grammars; the diff paints plain until it is ready, which here is never.
 vi.mock('@git-diff-view/shiki', () => ({ getDiffViewHighlighter: () => new Promise(() => {}) }));
@@ -1387,7 +1388,7 @@ describe('review tool', () => {
     await waitFor(() => expect(inSection('src/app.ts', '[data-review-viewed]')).not.toBeNull());
     // board ticket 815: each one's words are a tip keyboard focus opens
     const tipOf = async (element: HTMLElement) => {
-      act(() => element.focus());
+      keyboardFocus(element);
       const tip = (await screen.findByRole('tooltip')).textContent;
       act(() => element.blur());
       await waitFor(() => expect(screen.queryByRole('tooltip')).toBeNull());

@@ -6,6 +6,7 @@ import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it } from 'vitest';
 import { LocationChip } from './LocationChip';
 import { accessibleDescription } from '../../test-support/accessible-text';
+import { keyboardFocus } from '../../test-support/keyboard-focus';
 
 const tooltip = () => screen.queryByRole('tooltip')?.textContent ?? null;
 afterEach(cleanup);
@@ -46,7 +47,7 @@ describe('the location chip', () => {
     const list = screen.getByRole('list', { name: 'Additional directories' });
     const copy = within(list).getByRole('button', { name: 'Copy' });
     expect(copy.textContent).toBe(''); // a glyph, no word drawn
-    act(() => copy.focus());
+    keyboardFocus(copy);
     expect(tooltip()).toBe('Copy');
     await user.click(copy);
     expect(await navigator.clipboard.readText()).toBe('/work/extra'); // user-event's clipboard

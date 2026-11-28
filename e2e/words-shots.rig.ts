@@ -479,6 +479,7 @@ async function focusTip(page: Page, owner: Locator, rest: Locator, cutOf: () => 
   if (!cutOf()) return rest.first().scrollIntoViewIfNeeded({ timeout: 10_000 });
   await owner.first().scrollIntoViewIfNeeded({ timeout: 10_000 });
   await page.waitForTimeout(400);
+  await page.keyboard.press('Shift'); // board ticket 815: a tip opens on keyboard focus, so the keyboard is the last input
   await owner.first().focus();
 }
 // The check that `trigger`'s own tooltip is open: the element the tip wraps (the focused word or control, or the label

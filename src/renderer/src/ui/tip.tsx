@@ -1,7 +1,7 @@
 // A word's or a glyph's tooltip that the keyboard reaches (the word cut's rule 5: a secondary fact about one word or
 // glyph may be its tooltip, provided the word takes keyboard focus). The system tooltip (`title`) shows to the pointer
 // alone, so this is Radix's Tooltip, beside the Radix HoverCard, Popover and Dialog the app already draws: shown after
-// POINTING_DELAY_MS of pointing and at once on keyboard focus, closed on Escape, on a press and when focus leaves. Its
+// POINTING_DELAY_MS of pointing and at once on keyboard focus (focus the keyboard moved: below), closed on Escape, on a press and when focus leaves. Its
 // `description` is the owner's accessible description at all times, from an element that stays mounted (Radix names
 // its content only while open), added to whatever the owner is already described by (a row note's id). The owner is
 // the one child, which must take focus: a control, or a plain word given `tabIndex={0}`. A caller adding a fact to an
@@ -88,6 +88,29 @@ export function TipsAbove({ children }: { children: ReactNode }) {
 }
 const BELOW_IS_OFF = { top: 8, right: 8, left: 8, bottom: 1_000_000 };
 
+// Keyboard focus: focus opens a tip only where the owner matches :focus-visible and the last input was not a pointer's
+// press. Focus the person did not move with the keyboard (a menu handing its trigger the keyboard back after a pointer
+// pick, a dialog's autofocus after a click) opens nothing, so no tooltip appears unasked and Escape stays the dialog's
+// (board ticket 815's last round). Chromium's :focus-visible is the rule itself; the input it follows is tracked too, for
+// a document that does not implement the selector (happy-dom matches it on any focus), and the selector is read guarded.
+// Before any input the keyboard is assumed.
+let lastInput: 'keyboard' | 'pointer' = 'keyboard';
+let tracking = false;
+function trackInput(doc: Document): void {
+  if (tracking) return;
+  tracking = true;
+  doc.addEventListener('pointerdown', () => (lastInput = 'pointer'), true);
+  doc.addEventListener('keydown', () => (lastInput = 'keyboard'), true);
+}
+function focusedByKeyboard(focused: Element): boolean {
+  if (lastInput === 'pointer') return false;
+  try {
+    return focused.matches(':focus-visible');
+  } catch {
+    return true; // a document with no :focus-visible: the input tracked decides
+  }
+}
+
 // The tip that shows, closed when another opens (Radix's own signal for that fires only for the openings it makes).
 let showing: { close(): void; owner: RefObject<HTMLElement | null> } | null = null;
 
@@ -103,6 +126,7 @@ export function Tip({ content, description, pointedWithin, side = 'top', childre
   const descriptionId = useId();
   const boundary = useContext(Boundary);
   const above = useContext(Above);
+  useEffect(() => trackInput(document), []);
   const shows = content !== null && content !== undefined && content !== '';
   const [open, setOpen] = useState(false);
   if (open && !shows) setOpen(false); // the content went away: the tip is closed, not merely undrawn
@@ -221,7 +245,9 @@ export function Tip({ content, description, pointedWithin, side = 'top', childre
           asChild
           {...guard}
           onPointerMove={cancel}
-          onFocus={shows ? undefined : cancel}
+          onFocus={(event) => {
+            if (!shows || !(event.target instanceof Element) || !focusedByKeyboard(event.target)) cancel(event); // the element focused (a box inside a label owner); focus the keyboard did not move opens nothing
+          }}
           onPointerEnter={pointedWithin ? undefined : point}
           onPointerLeave={pointedWithin ? undefined : stopPointing}
           onPointerDown={dismissByOwner}

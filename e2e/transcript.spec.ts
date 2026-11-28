@@ -1535,6 +1535,7 @@ test('a browser call’s time shows on pointing along its line and on its phrase
   await expect(tooltip).toHaveCount(0);
   await expect(quiet).toHaveCSS('opacity', '0');
 
+  await page.keyboard.press('Shift'); // board ticket 815: a tip opens on keyboard focus, so the keyboard is the last input before the focus moves
   await phrase.focus(); // the keyboard reaches the same fact, at once
   await expect(phrase).toBeFocused();
   await expect(tooltip).toContainText('60ms');

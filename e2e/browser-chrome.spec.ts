@@ -837,6 +837,7 @@ test('9, 10, 12: the extensions action bar: the probe\'s icon right of the addre
       expect([icon!.width, icon!.height]).toEqual([24, 24]);
       // board ticket 815: a named glyph, its title the name and the tooltip keyboard focus opens
       await expect(probe).toHaveAccessibleName('MAWS probe');
+      await s.page.keyboard.press('Shift'); // board ticket 815: a tip opens on keyboard focus, so the keyboard is the last input before the focus moves
       await probe.focus();
       await expect(s.page.getByRole('tooltip')).toHaveText('MAWS probe');
       await probe.blur();

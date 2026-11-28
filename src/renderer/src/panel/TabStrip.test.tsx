@@ -15,6 +15,7 @@ import { installResizeObserver } from '../test-support/resize';
 import { panelHost, registerPanelTool } from './host';
 import { sideGroups, surfaceTabs } from './surface-model';
 import { fitTabs, ICON_TAB_PX, MIN_TAB_PX, TabStrip } from './TabStrip';
+import { keyboardFocus } from '../test-support/keyboard-focus';
 
 const offs: (() => void)[] = [];
 beforeEach(() => resetPanelStores());
@@ -390,7 +391,7 @@ describe('a file’s tooltip (U6e)', () => {
     expect(document.querySelector<HTMLElement>(`[data-tab-id="${app.id}"]`)!.dataset.tabShape).toBe('icon');
     expect(accessibleDescription(button(app.id))).toBe('/elsewhere/notes/plans/todo.txt');
     expect(button(app.id).getAttribute('aria-label')).toBe('todo.txt');
-    act(() => button(app.id).focus());
+    keyboardFocus(button(app.id));
     expect(screen.getByRole('tooltip').textContent, 'the full path its tooltip, which focus opens').toBe('/elsewhere/notes/plans/todo.txt');
   });
 });

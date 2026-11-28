@@ -25,6 +25,7 @@ import { PanelRegion } from './PanelRegion';
 import type { PanelToolContext } from './tool';
 import { COLUMN_CHROME_PX, EditorHeader, NARROW_HEADER_PX } from './PanelHeader';
 import { NARROW_AUTOMATIC_WIDTH } from '../app/shell-geometry';
+import { keyboardFocus } from '../test-support/keyboard-focus';
 
 const offs: (() => void)[] = [];
 beforeEach(() => {
@@ -329,7 +330,7 @@ describe('the panel header', () => {
     const dot = within(header()).getByRole('img', { name: 'Unsaved changes' });
     expect(saved()?.textContent, 'the dot draws no words at rest').toBe('');
     expect(dot.tabIndex, 'the dot takes the keyboard, so its words are reachable').toBe(0);
-    act(() => dot.focus());
+    keyboardFocus(dot);
     expect((await screen.findByRole('tooltip')).textContent).toBe('Unsaved changes');
 
     act(() => handle.update({ saved: null }));

@@ -42,6 +42,7 @@ import { registerPanelTool } from '../../../panel/host'; // UX wave U6b-1: a lin
 import { filesTool } from '../files/FilesTool';
 import { currentSet } from '../../../stores/layout-model';
 import { accessibleDescription } from '../../../test-support/accessible-text';
+import { keyboardFocus } from '../../../test-support/keyboard-focus';
 
 // UX wave U6b-2: happy-dom knows no `maws-artifact:` scheme, so a file's frame only takes its URL (child-frame navigation off)
 beforeAll(() => void ((window as unknown as { happyDOM: { settings: { navigation: { disableChildFrameNavigation: boolean } } } }).happyDOM.settings.navigation.disableChildFrameNavigation = true));
@@ -3935,7 +3936,7 @@ describe('the file tab’s bar, cut', () => {
     expect(within(bar()).queryByRole('button', { name: 'Wrap' })).toBeNull();
     expect(view.textContent).toBe(''); // a glyph, its word the name
     expect(view.hasAttribute('title')).toBe(false);
-    act(() => view.focus());
+    keyboardFocus(view);
     expect((await screen.findByRole('tooltip')).textContent).toBe('View');
     const wrapped = useViewer.getState().wrap;
     expect(view.getAttribute('aria-expanded')).toBe('false');
@@ -3974,7 +3975,7 @@ describe('the file tab’s bar, cut', () => {
     expect(ring.getAttribute('aria-valuenow')).toBe(String(Math.round((MiB / text.length) * 100)));
     expect(within(bar()).queryByText(/Loading/)).toBeNull(); // no words at rest
     expect(screen.getByRole('progressbar', { description: '1.0 MB of 2.1 MB' })).toBe(ring);
-    act(() => ring.focus());
+    keyboardFocus(ring);
     expect((await screen.findByRole('tooltip')).textContent).toBe('1.0 MB of 2.1 MB');
     await act(async () => gateAt(MiB).resolve());
     await waitFor(() => expect(screen.getByRole('progressbar', { name: 'Loading 2.0 MB of 2.1 MB' })).toBeTruthy());
