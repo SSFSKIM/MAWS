@@ -8420,7 +8420,9 @@ test('board 815: tooltips the keyboard reaches', async () => {
       }
       await expect(tab.locator('[data-deck-editor]').first(), 'the deck editor').toBeVisible({ timeout: 20_000 });
     };
-    const present = () => page.locator('[data-region="main"] [data-editor-header]').filter({ visible: true }).first().locator('[data-editor-action="present"]');
+    // the deck's actions are drawn in its own toolbar ("Deck", its toolbar host: panel/PanelHeader.tsx's portal), not a
+    // header row: Present, the first, as a worded button
+    const present = () => page.locator('[data-region="main"] [data-editor-toolbar]').filter({ visible: true }).first().locator('[data-editor-action="present"]');
     await shot(page, meta('t815-present-greyed', 'A deck with no slides, Present holding the keyboard', 'Artifacts, a deck whose files name no slide; Tab to Present in its header', 'Present greyed and focused: its word, and under it why it is greyed', ['tools/presentation', 'panel', 'ui']), async () => {
       await deckTab();
       await focused(present());

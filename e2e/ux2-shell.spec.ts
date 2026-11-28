@@ -516,8 +516,11 @@ async function iconTipReadsName(page: Page): Promise<void> {
   const name = (await icon.getAttribute('aria-label'))!;
   await icon.hover();
   await expect(page.getByRole('tooltip'), 'an icon’s tip is its title').toHaveText(name);
-  await page.mouse.move(0, 0);
-  await expect(page.getByRole('tooltip')).toHaveCount(0);
+  // the pointer leaves for the main area (the window's corner is the title bar's drag region, where the page hears no
+  // move, so the tip, which stays while the pointer may be crossing into it, would not hear it leave)
+  const away = await box(main(page));
+  await page.mouse.move(away.x + away.width / 2, away.y + away.height / 2);
+  await expect(page.getByRole('tooltip').filter({ hasText: name }), 'the icon’s tip closed').toHaveCount(0);
 }
 
 // UX wave U8b (M2, decision 5: the owner's "Shrink to icons" of 2026-11-12; `fitTabs` in panel/TabStrip.tsx): while a
