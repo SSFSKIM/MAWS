@@ -7,6 +7,16 @@ import type { Holder, JobState, LiveSessionRecord } from '@shared/wire/store';
 import { StoreFixture } from '../../../test/support/store-fixture';
 import { HolderRegistry } from './holders';
 
+// A read of `fault.path` fails as unreadable without touching the file, so nothing in the idle listing changes when it
+// stops failing; every other read is the real one.
+const fault = vi.hoisted(() => ({ path: null as string | null }));
+vi.mock('./sidecars', async (original) => {
+  const actual = await original<typeof import('./sidecars')>();
+  const readJsonWithRetry: typeof actual.readJsonWithRetry = (path, parse, accept) =>
+    path === fault.path ? Promise.resolve({ status: 'unreadable', code: 'EIO' } as const) : actual.readJsonWithRetry(path, parse, accept);
+  return { ...actual, readJsonWithRetry };
+});
+
 const S1 = '11111111-1111-4111-8111-111111111111' as SessionId;
 const S2 = '22222222-2222-4222-8222-222222222222' as SessionId;
 const NO_SUCH_PID = 2 ** 22 - 1;
@@ -235,14 +245,16 @@ describe('holders come from live sessions/<pid>.json records', () => {
     const holders = create({ pollMs: 50 });
     await holders.start();
     const path = join(fixture.paths.sessions, `${process.pid}.json`);
-    await writeFile(path, JSON.stringify({ sessionId: S1, kind: 'interactive' }), { mode: 0o000 }); // the fixture's own temp file
+    fault.path = path;
     const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
     try {
-      await expect.poll(() => errors.mock.calls.some((call) => String(call[0]).includes('unreadable')), { timeout: 2_000, interval: 10 }).toBe(true);
+      await writeFile(path, JSON.stringify({ sessionId: S1, kind: 'interactive' }));
+      await expect.poll(() => errors.mock.calls.some((call) => String(call[0]).includes(`${path} is unreadable`)), { timeout: 2_000, interval: 10 }).toBe(true);
       expect(holders.holderOf(S1)).toEqual({ kind: 'none' });
-      await chmod(path, 0o644);
+      fault.path = null; // the file and its metadata as they were: only a retry of the failed read can find the holder
       await expect.poll(() => holders.holderOf(S1), { timeout: 1_000, interval: 10 }).toEqual({ kind: 'terminal', pid: process.pid });
     } finally {
+      fault.path = null;
       errors.mockRestore();
     }
   });
