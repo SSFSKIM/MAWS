@@ -68,7 +68,7 @@ type View = 'effort' | 'model';
 interface Binding {
   models: readonly ModelRow[];
   current: string | null; // the row the session asked for; null: its default
-  shown: string | null; // the model id the session runs, or will start on (what the effort view names)
+  shown: string | null; // the model id the session runs, or will start on (what the effort view names); null: not known
   pending: boolean; // a set_model accepted, not yet confirmed by an init frame
   effort: Effort | null; // the effort it runs at (or will start at)
   overridden: boolean; // an effort is set explicitly, so Reset has something to clear
@@ -139,6 +139,7 @@ function useIntentBinding(appSessionId: AppSessionId): Binding | null {
   if (!setup) return null;
   const bound = intentBindings(setup, { starting }, defaults).model;
   const { model, effort } = bound.value;
+  const startUnknown = model === null && defaults === null; // the UX wave (obs 4): the effort view names none
   const write = async (next: { model: string | null; effort: Effort | null }): Promise<ControlAnswer> => {
     const result = await bound.set(next);
     return result.ok ? ok : { ok: false, error: result.error, caption: null };
@@ -146,7 +147,7 @@ function useIntentBinding(appSessionId: AppSessionId): Binding | null {
   return {
     models: bound.options,
     current: model,
-    shown: model ?? defaults?.model ?? DEFAULT_ROW,
+    shown: startUnknown ? null : (model ?? defaults?.model ?? DEFAULT_ROW),
     pending: false,
     effort: effort ?? defaults?.effortLevel ?? null,
     overridden: effort !== null,
@@ -162,7 +163,7 @@ function useIntentBinding(appSessionId: AppSessionId): Binding | null {
     unstarted: true,
     loading: setup.options.modelsLoading === true,
     unavailable: setup.options.modelsUnavailable ?? null,
-    startUnknown: model === null && defaults === null,
+    startUnknown,
   };
 }
 

@@ -519,6 +519,19 @@ describe('an unstarted session writes its intent, with no route segment and no D
     await waitFor(() => expect(patches).toEqual([{ model: 'opus', effort: null }]));
   });
 
+  // The UX wave (obs 4): the effort view names no model while the start is unknown, and the one picked once it is
+  it('names no model in the effort view while the start model is unknown, and the model picked once one is', async () => {
+    stub({}, INTENT, { defaults: null });
+    mount('effort', '', INTENT);
+    expect(screen.getByRole('button', { name: 'Model · Select model' })).toBeTruthy();
+    expect(document.querySelector('[data-view="effort"]')?.textContent).not.toMatch(/Opus/); // the list's own rows are the model view's
+    cleanup();
+    offHook();
+    stub({ model: 'opus' }, INTENT, { defaults: null });
+    mount('effort', '', INTENT);
+    expect(screen.getByRole('button', { name: 'Opus 5.5 (1M context) · Select model' })).toBeTruthy();
+  });
+
   it('checks the model the intent names while its start is otherwise unknown, and writes nothing for it', async () => {
     const patches = stub({ model: 'haiku' }, INTENT, { defaults: null });
     mount('model', '', INTENT);

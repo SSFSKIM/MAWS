@@ -97,7 +97,8 @@ export const modelMatches = (option: ModelInfo, model: string | null): boolean =
 
 // What an unstarted tab's chip names (W3): what the engine will use, the intent's own choice first, then the user's
 // settings (`model`, `effortLevel`; read only), then the catalogue's `default` row resolved to its model. No status, so
-// never Fast.
+// never Fast. The UX wave (obs 4): none while the start is unknown (the hook's `defaults` null: another machine's, or
+// not read yet) and the intent names no model, so the chip reads "Model" and the mode chip claims nothing about auto.
 export function intentModelName(intent: Pick<SetupIntentHook['intent'], 'model' | 'effort'>, models: readonly ModelInfo[], defaults: UserEngineDefaults | null): ModelName | null {
   return modelName(intent.model ?? defaults?.model ?? DEFAULT_ROW, models, { effort: intent.effort ?? defaults?.effortLevel ?? null });
 }
@@ -106,7 +107,8 @@ export function intentBindings(hook: SetupIntentHook, gate: { starting: boolean 
   const { intent, options } = hook;
   const gated = gate.starting ? STARTING : intent.message !== null ? MESSAGE_HELD : null;
   const through = <V>(write: (v: V) => Parameters<SetupIntentHook['patch']>[0]) => (gated === null ? (v: V) => hook.patch(write(v)) : refused(gated));
-  const chosen = options.models.find((m) => m.value === (intent.model ?? defaults?.model ?? DEFAULT_ROW));
+  const startUnknown = intent.model === null && options.defaults === null;
+  const chosen = startUnknown ? undefined : options.models.find((m) => m.value === (intent.model ?? defaults?.model ?? DEFAULT_ROW));
   const project = hook.project ?? null;
   return {
     // a hook without project facts (the harness's stub) keeps the toolbar's chip, naming the intent's location
@@ -123,7 +125,7 @@ export function intentBindings(hook: SetupIntentHook, gate: { starting: boolean 
           },
     model: {
       value: { model: intent.model, effort: intent.effort },
-      ...modelWords(intentModelName(intent, options.models, defaults)),
+      ...modelWords(startUnknown ? null : intentModelName(intent, options.models, defaults)),
       options: options.models,
       disabled: gated,
       set: through((m: ModelChoice) => ({ model: m.model, effort: m.effort })),

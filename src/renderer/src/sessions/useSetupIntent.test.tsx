@@ -330,6 +330,23 @@ describe('setup intent hook', () => {
     expect(result.current!.options.autoModeNote).toBeNull();
   });
 
+  // The UX wave (obs 4): the note is about the model the launch starts on: the intent's, else the one the user's settings
+  // on its machine name, else the catalogue's default; none while that is unknown (another machine's). A spawn on another
+  // machine falls back to that machine's mode, which this Mac doesn't know, so the note names none
+  it('notes the model the launch starts on, none while that is unknown, and no fallback mode of this Mac’s for another machine', async () => {
+    const UNHELD: ModelCatalogue = { ...CATALOGUE, models: [{ value: 'default', displayName: 'Default (recommended)', supportsAutoMode: false }, ...CATALOGUE.models.slice(1)] };
+    withMain({ 'engine.models': () => UNHELD, 'settings.userEngineDefaults': () => ({ model: 'haiku', effortLevel: null, defaultMode: null }) });
+    putIntent(pageIntent({ permissionMode: 'auto' }));
+    const { result } = renderHook(() => useSetupIntent(A), { wrapper });
+    await waitFor(() => expect(result.current!.options.autoModeNote).toBe("Auto mode isn't available for Haiku. This session will use Accept edits instead.")); // the settings' model
+    act(() => useRemoteSpawn.getState().choose(A, { machine: OTHER_MACHINE, name: 'Studio', checkout: '/srv/checkouts/repo', key: null }));
+    await waitFor(() => expect(fake.machines('engine.models').at(-1)).toBe(OTHER_MACHINE));
+    await waitFor(() => expect(result.current!.options.models).toHaveLength(3));
+    expect(result.current!.options.autoModeNote, 'what Studio starts on is unknown').toBeNull();
+    act(() => putIntent(pageIntent({ permissionMode: 'auto', model: 'haiku', updatedAt: '2026-09-29T10:00:01.000Z' })));
+    expect(result.current!.options.autoModeNote).toBe("Auto mode isn't available for Haiku. This session will use Studio's fallback mode instead.");
+  });
+
   // L99 (P2-F): the built-in list is the pinned engine's rows without the launch's model environment; the owner's
   // environment makes `haiku` Haiku 5.5, which the engine ran in auto after a change from auto
   // (docs/doperpowers/evidence/p2-finish/l99-model-change-from-auto.jsonl), so the list claims no verdict on auto mode

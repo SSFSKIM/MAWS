@@ -153,12 +153,14 @@ export function modelsOf(catalogue: ModelCatalogue): ModelInfo[] {
   });
 }
 
-// The note beside the mode and model chips for the model the launch would use (`default` when the intent leaves it
-// to the engine).
-export function noteFor(catalogue: ModelCatalogue, intent: Pick<SetupIntent, 'model' | 'permissionMode'>, fallback: PermissionMode = 'acceptEdits'): string | null {
-  const value = intent.model ?? 'default';
+// The note beside the mode and model chips for the model the launch would use: the intent's, else (the UX wave, obs 4)
+// the one the user's settings on its machine name, else `default`; none while that is unknown (`defaults` null: not read
+// yet, or another machine's). `fallback`: the mode MAWS sets when auto is refused, or another machine's, unknown here.
+export function noteFor(catalogue: ModelCatalogue, intent: Pick<SetupIntent, 'model' | 'permissionMode'>, defaults: UserEngineDefaults | null, fallback: PermissionMode | { machine: string } = 'acceptEdits'): string | null {
+  const value = intent.model ?? (defaults === null ? null : (defaults.model ?? 'default'));
+  if (value === null) return null;
   const listed = catalogue.models.find((m) => m.value === value);
-  const entry: ModelCatalogueEntry | null = listed ? autoVerdictOf(catalogue, listed) : intent.model === null ? null : { value: intent.model, displayName: intent.model };
+  const entry: ModelCatalogueEntry | null = listed ? autoVerdictOf(catalogue, listed) : value === 'default' ? null : { value, displayName: value };
   return autoModeNote(entry, intent.permissionMode, fallback); // W3: the mode MAWS sets when auto is refused
 }
 
@@ -262,6 +264,7 @@ function useSetupOptions(
     if (reads) void refetch({ cancelRefetch: false });
   }, [reads, refetch]);
   const catalogue = read.data ?? (read.isError ? NO_CATALOGUE : null);
+  const elsewhere = context?.elsewhere ?? null; // a spawn on another machine: its fallback mode is that machine's
   const unavailable = read.data === undefined && read.error !== null && context?.elsewhere != null ? unavailableWords(context.elsewhere, read.error.error) : null;
   const here = context !== null && context.machine === ipc.localMachine;
   const defaultsRead = useCommand('settings.userEngineDefaults', undefined, { enabled: here, staleTime: 30_000 });
@@ -282,8 +285,8 @@ function useSetupOptions(
   const options = useMemo((): SetupIntentOptions => {
     if (intent === null) return { models: [], autoModeNote: null, modelsLoading: false, modelsUnavailable: null, refreshModels, defaults: null };
     if (catalogue === null) return { models: [], autoModeNote: null, modelsLoading: true, modelsUnavailable: null, refreshModels, defaults };
-    return { models: modelsOf(catalogue), autoModeNote: noteFor(catalogue, intent, fallback), modelsLoading: false, modelsUnavailable: unavailable, refreshModels, defaults };
-  }, [intent, catalogue, fallback, refreshModels, defaults, unavailable]);
+    return { models: modelsOf(catalogue), autoModeNote: noteFor(catalogue, intent, defaults, elsewhere === null ? fallback : { machine: elsewhere }), modelsLoading: false, modelsUnavailable: unavailable, refreshModels, defaults };
+  }, [intent, catalogue, fallback, elsewhere, refreshModels, defaults, unavailable]);
   // A failed trust check is read again at Send (the directory may be readable now): the refusal stands only while the
   // check still fails.
   const recheck = useCallback(async () => {

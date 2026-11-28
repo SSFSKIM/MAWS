@@ -46,6 +46,19 @@ describe('the frame binds its chips to the setup intent or to the live session',
     expect(b.project).toBeNull();
   });
 
+  // The UX wave (obs 4): while the model a tab on its default starts on is unknown (another machine's, or the settings
+  // not read yet: the hook's `defaults` null) the chip names none and the mode chip claims nothing about auto for it
+  it('names no model and claims nothing about auto while the start model is unknown; a picked one is named', () => {
+    const models = [{ value: 'default', displayName: 'Default (recommended)', resolvedModel: 'claude-haiku-4-5' }, { value: 'haiku', displayName: 'Haiku', resolvedModel: 'claude-haiku-4-5', supportsAutoMode: false }];
+    const unknown = { ...hook(), options: { models, autoModeNote: null, defaults: null } };
+    const b = intentBindings(unknown, { starting: false }, { model: null, effortLevel: null, defaultMode: null });
+    expect([b.model.label, b.model.name, b.mode.autoUnavailable]).toEqual(['Model', null, null]);
+    const known = intentBindings({ ...unknown, options: { ...unknown.options, defaults: { model: null, effortLevel: null, defaultMode: null } } }, { starting: false });
+    expect([known.model.label, known.mode.autoUnavailable]).toEqual(['Haiku', 'This model does not support auto mode']); // the default's model, once known
+    const picked = intentBindings({ ...unknown, intent: { ...unknown.intent, model: 'haiku' } }, { starting: false });
+    expect([picked.model.label, picked.mode.autoUnavailable]).toEqual(['Haiku', 'This model does not support auto mode']);
+  });
+
   it('New chat: the project row carries the hook’s project facts and writes through them', async () => {
     const facts = project({ projectId: 'p-1' as SetupProject['projectId'], label: 'repo', path: '/repo', branch: 'main', worktree: false });
     const b = intentBindings(hook({}, facts), { starting: false });
