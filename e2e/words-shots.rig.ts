@@ -42,6 +42,12 @@
 //
 // and on master, as below for the m scenes, into another folder (tc-before).
 //
+// Board ticket 815 (the system tooltips moved onto Tip) added launch 17 and the `t815-` scenes: what keyboard focus now
+// opens (a glyph's word and chord, a greyed glyph's reason, a row's or a line's facts) and a change drawn at rest. A
+// system tooltip never shows in a capture, so these have no before. One launch alone:
+//
+//   WORDS_OUT=$HOME/maws-words/t815 pnpm shots:words -g "board 815"
+//
 // The `m1-` to `m5-` scenes are each their milestone's, so their "before" is this rig run against master's build: in a
 // clean checkout of master, `git checkout <this branch> -- e2e/words-shots.rig.ts e2e/support`, then the command above.
 // Every launch's state is set from this file and e2e/support (fixtures, seams master's main already has). Each m1 to m5
@@ -8145,6 +8151,265 @@ test('the word cut’s M5: the library’s Spaces, opened artifacts, the documen
     stopped(error);
   } finally {
     await maws.cleanup();
+  }
+});
+
+// ======================================================================================================================
+// Launch 17: board ticket 815, the system tooltips moved onto Tip (ui/tip.tsx), which keyboard focus opens, and the
+// greyed glyphs that keep Tab and say why. Each scene focuses its owner as the keyboard does and requires the owner
+// focused and its tip drawn before the capture. Three recorded transcripts read from disk, all on one scratch
+// repository (`tips`): a compacted session (its boundary, the message box's chip, the toolbar, Files, the browser), an
+// agents listing with another session's message, and a session run in a subfolder of a linked worktree on a long branch
+// (the resume chooser's preview); and an empty presentation published through the presentations seam (launch 4's way).
+// ======================================================================================================================
+const T815_LAUNCH = [
+  't815-cards-chord', 't815-boundary-ids', 't815-location-chip', 't815-peer-line', 't815-files-row', 't815-browser-tab', 't815-back-greyed', 't815-resume-worktree',
+  't815-present-greyed', 't815-cards-greyed', 't815-reveal-elsewhere', 't815-request-failure',
+];
+const T815_DISK = [
+  { key: 'compact', file: 'test/fixtures/transcripts/w1-compact.jsonl' },
+  // ListAgents, then a message from another session, its address in the frame (M2's `listing`)
+  { key: 'listing', file: 'spikes/protocol-probe/fixtures/pass3/e7-peer-transcripts/db45d92e-e979-4edf-a62a-61f21dc01acb.jsonl' },
+  { key: 'worktree', file: 'test/fixtures/transcripts/w1-steer-next-disk.jsonl' },
+] as const;
+type T815Key = (typeof T815_DISK)[number]['key'];
+const t815Id = (i: number) => `0e8f1500-0000-4000-8000-0000000008${String(i).padStart(2, '0')}`;
+// Words of renderer modules this project does not compile (tsconfig.e2e.json's list), as this branch has them:
+// resume/copy.ts's RESUME_COPY.facts, and tools/presentation/copy.ts's DECK_COPY.nothingToPresent
+const T815_WORDS = { worktree: 'Worktree', branch: 'Branch', nothingToPresent: 'No slide to show' };
+// long enough to need more than one line of the preview's facts
+const T815_BRANCH = 'ux-wave/815-keyboard-tips-for-every-greyed-glyph-and-every-word-that-held-a-title';
+// The check that the tip `owner` opens for the keyboard is open: the owner focused and a tooltip drawn (one shows at a
+// time), holding `says`
+const tipOpen = (page: Page, owner: () => Locator, what: string, ...says: string[]) => async () => {
+  await expect(owner().first(), `${what} holds the keyboard`).toBeFocused({ timeout: 3_000 });
+  const tip = page.getByRole('tooltip').first();
+  await expect(tip, `the tip of ${what}`).toBeVisible({ timeout: 3_000 });
+  for (const words of says) await expect(tip, `the tip of ${what}`).toContainText(words, { timeout: 3_000 });
+};
+// The check that a glyph is greyed and still in the Tab order (`aria-disabled`, never `disabled`)
+const greyedGlyph = (owner: () => Locator, what: string) => () => expect(owner().first(), `${what} greyed, keeping Tab`).toHaveAttribute('aria-disabled', 'true', { timeout: 3_000 });
+
+test('board 815: tooltips the keyboard reaches', async () => {
+  test.setTimeout(900_000);
+  if (!T815_LAUNCH.some(wanted)) return;
+  const meta = (id: string, title: string, how: string, state: string, folders: string[]) => m0({ id, title, how, state, folders });
+  unreachable(meta('t815-reveal-elsewhere', 'An artifact on another machine, Reveal in Finder holding the keyboard', 'Another machine’s file artifact opened here; Tab to Reveal in Finder', 'Reveal in Finder greyed and focused, “The file is on …” its tooltip', ['tools/artifacts/viewers', 'ui']), 'another machine’s artifact needs a second machine’s daemon (e2e/remote.spec.ts’s two-machine lane), which no launch of this rig has');
+  unreachable(meta('t815-request-failure', 'A request card’s failure words holding the keyboard', 'A waiting request whose answer could not be delivered; Tab to “Couldn’t deliver the answer”', 'The failure’s words focused, why its tooltip', ['request-card', 'ui']), 'no fixture fails an answer’s delivery or a request’s read with a reason: the scenario’s stub always answers, and the replay’s mismatch reports write_failed with no detail, which draws the words with no tip');
+  const repo = makeRepo('tips');
+  // a linked worktree inside the repository, where the engine makes them; its folder kept out of the repository's status
+  const worktree = join(repo, '.claude', 'worktrees', 'word-tips');
+  if (!existsSync(worktree)) {
+    mkdirSync(join(repo, '.git/info'), { recursive: true });
+    appendFileSync(join(repo, '.git/info/exclude'), '.claude/\n');
+    git(repo, 'worktree', 'add', '--quiet', '-b', T815_BRANCH, worktree);
+  }
+  const config = join(SCRATCH, 'claude-config-t815');
+  rmSync(config, { recursive: true, force: true });
+  T815_DISK.forEach((d, i) => {
+    const cwd = d.key === 'worktree' ? join(worktree, 'src') : repo;
+    const file = join(writeDisk(config, d.file, t815Id(i), cwd), `${t815Id(i)}.jsonl`);
+    if (d.key !== 'worktree') return;
+    // the branch the engine records on every row, the worktree's
+    const rows = readFileSync(file, 'utf8').split('\n');
+    writeFileSync(file, rows.map((line) => {
+      if (!line.trim()) return line;
+      const row = JSON.parse(line) as Record<string, unknown>;
+      if ('gitBranch' in row) row.gitBranch = T815_BRANCH;
+      return JSON.stringify(row);
+    }).join('\n'));
+  });
+  trust(config);
+  const usage = usageFixture();
+  const userData = join(SCRATCH, 'profile-t815');
+  rmSync(userData, { recursive: true, force: true });
+  mkdirSync(userData, { recursive: true });
+  const stopped = (error: unknown): never => {
+    launchStopped('launch 17', T815_LAUNCH, error);
+    throw error;
+  };
+  const server = await startBrowserServer();
+  const maws = await launchMaws({ userData, prepare: noGh, env: BASE_ENV({ MAWS_ENGINE_REPLAY: '1', CLAUDE_CONFIG_DIR: config, MAWS_CLAUDE_USAGE_DIR: usage, PATH: NO_GH_PATH }) }).catch(async (error: unknown) => {
+    await server.close();
+    return stopped(error);
+  });
+  const { app, page } = maws;
+  try {
+    await size(maws);
+    await light(page);
+    const ids: Partial<Record<T815Key, string>> = {};
+    await expect.poll(async () => {
+      const { sessions } = value(await invoke(page, 'session.list', {}));
+      T815_DISK.forEach((d, i) => (ids[d.key] = sessions.find((s) => s.engineSessionId === t815Id(i))?.appId ?? ''));
+      return T815_DISK.every((d) => ids[d.key]);
+    }, { timeout: 30_000 }).toBe(true).catch((error: unknown) => setupFailed(`the disk sessions’ index (${T815_DISK.filter((d) => !ids[d.key]).map((d) => d.file).join(', ')} not listed)`, error));
+    await dismissToasts(page);
+    const opened = async (key: T815Key) => {
+      const id = ids[key];
+      if (!id) throw new Error(`the disk session of ${T815_DISK.find((d) => d.key === key)!.file} was not listed by the index`);
+      await openSession(page, id);
+      await expect(pane(page).locator('.transcript-row[data-kind]').first()).toBeVisible({ timeout: 20_000 });
+    };
+    // focused as the keyboard focuses it, from nothing pointed at or focused (focusTip, for this build)
+    const focused = async (owner: Locator) => {
+      await letGo(page);
+      await focusTip(page, owner, owner, () => true);
+    };
+    const toolbar = () => pane(page).locator('[data-composer] [role="toolbar"]').first();
+
+    // A toolbar glyph's word and chord (app/IconButton.tsx through ui/glyph.tsx's NamedGlyph). Session cards by its word,
+    // panel/SurfaceRow.tsx's literal
+    const cardsGlyph = () => page.locator('[data-toolbar] [data-surface-row] button[aria-label="Session cards"]');
+    await shot(page, meta('t815-cards-chord', 'The toolbar’s Session cards holding the keyboard', 'A session in front; Tab to Session cards in the toolbar’s row of surfaces', 'Session cards focused, its word and its shortcut the tooltip', ['app', 'panel', 'ui']), async () => {
+      await opened('compact');
+      await focused(cardsGlyph());
+    }, { check: tipOpen(page, cardsGlyph, 'Session cards', 'Session cards', formatChord(ACTIONS['panel.toggle'].chord!)) });
+
+    // A boundary's words, a new Tab stop: the identifier the compaction continues from is their tip (rows/Boundary.tsx)
+    const boundaryWords = () => pane(page).locator('.transcript-boundary[data-boundary-kind="compaction"] .transcript-boundary-words');
+    await shot(page, meta('t815-boundary-ids', 'A compaction’s line, its words holding the keyboard', 'The compacted session; Tab to the words of its compaction line', 'The line’s words focused (a Tab stop now), the message id the compaction continues from its tooltip', ['transcript/view/rows', 'ui']), async () => {
+      await opened('compact');
+      await seek(page, boundaryWords());
+      await focused(boundaryWords());
+    }, { check: tipOpen(page, boundaryWords, 'the compaction’s words') });
+
+    // The message box's location chip: its folder and branch the tip (composer/frame/LocationChip.tsx, named
+    // `Location <path>`, as m2-location-popover finds it)
+    const locationChip = () => toolbar().locator('button[aria-label^="Location "]');
+    await shot(page, meta('t815-location-chip', 'The message box’s location chip holding the keyboard', 'The compacted session; Tab to the folder chip under the message box', 'The chip focused, its folder and branch the tooltip', ['composer/frame', 'ui']), async () => {
+      await opened('compact');
+      await focused(locationChip());
+    }, { check: tipOpen(page, locationChip, 'the location chip') });
+
+    // Another session's message: its address, owners and summary merged into the line's one tip (rows/AgentMessage.tsx,
+    // the line's `data-address`)
+    const peer = () => pane(page).locator('.transcript-peer[data-peer][data-address]');
+    const peerLine = () => peer().locator('button.transcript-line-words');
+    await shot(page, meta('t815-peer-line', 'A message from another session, its line holding the keyboard', 'The session that listed its peers, every turn and run opened; Tab to the other session’s message', 'The message’s line focused, the sender’s address (and owners and summary where the frame has them) its tooltip', ['transcript/view/rows', 'ui']), async () => {
+      await opened('listing');
+      await unfoldAll(page);
+      await seek(page, peerLine());
+      await focused(peerLine());
+    }, {
+      check: async () => {
+        const address = (await peer().first().getAttribute('data-address')) ?? '';
+        await tipOpen(page, peerLine, 'the message’s line', address)();
+      },
+    });
+
+    // Files: every row's whole path is its tip, opened as the arrows reach it (tools/code/files/FilesTool.tsx)
+    const filesFocus = () => surface(page, 'files').locator('[role="treeitem"]:focus');
+    await shot(page, meta('t815-files-row', 'Files, a row arrowed to', 'The compacted session, Files with src open; focus src’s row, then ↓', 'The row under src focused, its whole path its tooltip: each row opens one as the arrows reach it', ['tools/code/files', 'panel', 'ui']), async () => {
+      await opened('compact');
+      await sideSurface(app, page, 'files');
+      await filesTree(page);
+      const root = surface(page, 'files').locator('[role="treeitem"][data-kind="root"]').first();
+      if ((await root.getAttribute('aria-expanded')) === 'false') await root.click();
+      const src = treeItem(page, `${repo}/src`);
+      if ((await src.getAttribute('aria-expanded')) === 'false') await src.click();
+      await expect(treeItem(page, `${repo}/src/sidebar.ts`)).toBeVisible({ timeout: 10_000 });
+      await focused(src);
+      await page.keyboard.press('ArrowDown');
+      await page.waitForTimeout(600);
+    }, {
+      check: async () => {
+        await tipOpen(page, filesFocus, 'the focused row')();
+        if ((await filesFocus().first().getAttribute('data-path')) === `${repo}/src`) notes.push('↓ left the keyboard on src: its own tip');
+      },
+    });
+
+    // The browser's chrome: its tips open above it and never over the live page (tools/browser/View.tsx, TipsAbove); a
+    // new tab on a scratch page has no page to go back to
+    const browser = () => surface(page, 'browser');
+    const browserTab = async () => {
+      await opened('compact');
+      await sideSurface(app, page, 'browser');
+      value(await invoke(page, 'browser.tabs.open', { appSessionId: ids.compact as never, url: server.url('/a.html'), select: true } as never));
+      await page.waitForTimeout(3000);
+    };
+    const chip = () => browser().locator('[data-browser-chip] [role="tab"][aria-selected="true"]');
+    await shot(page, meta('t815-browser-tab', 'Browser, a tab holding the keyboard', 'The compacted session, Browser, a scratch page open; Tab to its tab in the strip', 'The tab focused, its title and address the tooltip, opened above the strip, never over the page', ['tools/browser/chrome', 'tools/browser', 'ui']), async () => {
+      await browserTab();
+      await focused(chip());
+    }, {
+      check: checks(tipOpen(page, chip, 'the tab', '/a.html'), async () => {
+        const owner = (await chip().first().boundingBox())!;
+        const tipBox = (await page.locator('[data-radix-popper-content-wrapper]').filter({ has: page.getByRole('tooltip') }).first().boundingBox())!;
+        expect(tipBox.y + tipBox.height, 'the tip above the strip').toBeLessThanOrEqual(owner.y + 1);
+      }),
+    });
+    const back = () => browser().getByRole('button', { name: BROWSER_COPY.back, exact: true });
+    await shot(page, meta('t815-back-greyed', 'Browser, Back greyed, holding the keyboard', 'The compacted session, Browser, a new tab on a scratch page; Tab to Back', 'Back greyed and focused: its word, and under it why it is greyed', ['tools/browser/chrome', 'ui']), async () => {
+      await browserTab();
+      await focused(back());
+    }, { check: checks(greyedGlyph(back, 'Back'), tipOpen(page, back, 'Back', BROWSER_COPY.back, BROWSER_COPY.noBack)) });
+    await closeOverlays(page);
+    // the browser's page is a native view over the window: closed, so nothing later is under it
+    if (await browser().isVisible().catch(() => false)) await menu(app, 'surface.browser').catch(() => undefined);
+
+    // The resume chooser's preview, drawn at rest: the Worktree fact of a session run in a worktree's subfolder, and its
+    // branch drawn whole on as many lines as it takes (resume/ResumeChooser.tsx, SessionPreview)
+    const chooser = () => page.locator('[data-resume-chooser]');
+    const fact = (label: string) => chooser().locator('[data-testid="resume-preview"]').locator(`xpath=.//dt[normalize-space()="${label}"]/following-sibling::dd[1]`);
+    await shot(page, meta('t815-resume-worktree', 'The resume chooser, a session in a worktree’s subfolder', 'Type /resume in the compacted session, turn on All worktrees, then type “word-tips”', 'The preview of a session run in src/ of a linked worktree: its Folder, the new Worktree fact (the checkout’s root) and its long branch wrapping', ['resume', 'widgets']), async () => {
+      await opened('compact');
+      await typed(page, 'resume');
+      await expect(dialogOf(page, 'resume')).toBeVisible({ timeout: 15_000 });
+      // the chips run All projects, Current branch, All worktrees, Archived (resume/ResumeChooser.tsx, TOGGLES)
+      const worktrees = chooser().locator('[role="group"] button[aria-pressed]').nth(2);
+      if ((await worktrees.getAttribute('aria-pressed')) !== 'true') await worktrees.click();
+      await chooser().locator('input').first().fill('word-tips');
+      await expect(fact(T815_WORDS.worktree)).toBeVisible({ timeout: 10_000 });
+    }, {
+      check: checks(
+        () => inView(fact(T815_WORDS.worktree), 'the Worktree fact'),
+        () => inView(fact(T815_WORDS.branch), 'the Branch fact'),
+        async () => {
+          const lines = await fact(T815_WORDS.branch).first().evaluate((el) => {
+            const style = getComputedStyle(el);
+            return el.getBoundingClientRect().height / (parseFloat(style.lineHeight) || parseFloat(style.fontSize) * 1.4);
+          });
+          if (lines < 1.5) notes.push('the branch took one line: it did not wrap');
+        },
+      ),
+      after: () => closeOverlays(page),
+    });
+    await reset(page);
+
+    // A deck with no slides: Present greyed with why (tools/presentation/header.ts); with the deck in front no session's
+    // tab is, so Session cards is greyed too (panel/SurfaceRow.tsx)
+    let deck: string | null = null;
+    const deckTab = async () => {
+      if (deck === null) {
+        const made = await invoke(page, 'artifacts.create', { kind: 'presentation', title: 'Empty deck' } as never);
+        if (!made.ok) throw new Error(made.error.message);
+        const id = (made.value as { artifact: { id: string } }).artifact.id;
+        await page.evaluate(([a, f]) => (window as unknown as { __maws_presentations: { seed(id: string, files: Record<string, string>): Promise<void> } }).__maws_presentations.seed(a, f), [id, { 'project/deck.json': deckJson('Empty deck', []) }] as const);
+        deck = id;
+      }
+      const tab = page.locator(`[data-region="main"] [data-artifact-tab="${deck}"]`);
+      if (!(await tab.isVisible().catch(() => false))) {
+        await library(app, page);
+        await page.locator(`[data-library] article[data-artifact-row="${deck}"]`).click();
+        await expect(tab).toBeVisible({ timeout: 20_000 });
+      }
+      await expect(tab.locator('[data-deck-editor]').first(), 'the deck editor').toBeVisible({ timeout: 20_000 });
+    };
+    const present = () => page.locator('[data-region="main"] [data-editor-header]').filter({ visible: true }).first().locator('[data-editor-action="present"]');
+    await shot(page, meta('t815-present-greyed', 'A deck with no slides, Present holding the keyboard', 'Artifacts, a deck whose files name no slide; Tab to Present in its header', 'Present greyed and focused: its word, and under it why it is greyed', ['tools/presentation', 'panel', 'ui']), async () => {
+      await deckTab();
+      await focused(present());
+    }, { check: checks(greyedGlyph(present, 'Present'), tipOpen(page, present, 'Present', T815_WORDS.nothingToPresent)) });
+    await shot(page, meta('t815-cards-greyed', 'The toolbar’s Session cards greyed, holding the keyboard', 'A deck in front; Tab to Session cards in the toolbar’s row of surfaces', 'Session cards greyed and focused: its word and shortcut, and under them why it is greyed', ['app', 'panel', 'ui']), async () => {
+      await deckTab();
+      await focused(cardsGlyph());
+    }, { check: checks(greyedGlyph(cardsGlyph, 'Session cards'), tipOpen(page, cardsGlyph, 'Session cards', 'Session cards')) });
+    await reset(page);
+  } catch (error) {
+    stopped(error);
+  } finally {
+    await maws.cleanup();
+    await server.close();
   }
 });
 
