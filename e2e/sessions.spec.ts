@@ -1345,7 +1345,8 @@ test.describe('sessions', () => {
       const lead = notes.locator('[data-path-lead]');
       await expect(lead).toHaveAttribute('data-outside', 'writable');
       await expect(lead).toHaveAccessibleDescription(`Save writes to ${file('notes.txt')}`);
-      await expect(lead).toHaveAttribute('aria-description', `Save writes to ${file('notes.txt')}`);
+      await expect(lead, 'the path takes Tab for its tip, with no system tooltip (board ticket 815)').toHaveAttribute('tabindex', '0');
+      await expect(lead).not.toHaveAttribute('title');
       await expect(notes).toHaveAttribute('data-editable', 'true');
       await expect(content).not.toHaveAttribute('title');
       await expect(notes).toHaveAttribute('data-dirty', 'false');
@@ -2032,7 +2033,7 @@ test.describe('sessions', () => {
         await expect(content2).toHaveText('Ship the editor first, then Open File. Kept across a relaunch.');
         await sideColumnAt(p2, 320);
         const lead = todo2.locator('[data-path-lead]');
-        await expect(lead).toHaveAttribute('aria-description', `Save writes to ${chosen}`);
+        await expect(lead, 'the path takes Tab for its tip (board ticket 815)').toHaveAttribute('tabindex', '0');
         await expect(lead).toHaveAccessibleDescription(`Save writes to ${chosen}`);
         const drawn = await lead.evaluate((el) => {
           const [folder, , name] = Array.from(el.children) as HTMLElement[];

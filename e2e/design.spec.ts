@@ -725,6 +725,14 @@ test('the comments, history and Export sheet surfaces, wide and narrow: evidence
     const sheet = page.getByRole('dialog', { name: 'Export “Poster” at 91%?' }); // the word cut (G556): rounded down
     await expect(sheet).toBeVisible();
     await keep(`design-export-sheet-${surface}`, body, null);
+    // board ticket 815: narrow, the menu was the header's More glyph, which the menu gives the keyboard back to and whose
+    // tip that focus opens; the first Escape is the tip's, the next the sheet's
+    if (surface === 'narrow') {
+      await expect(page.getByRole('tooltip'), 'the More glyph’s tip, opened by the keyboard it got back').toHaveText('More actions');
+      await page.keyboard.press('Escape');
+      await expect(page.getByRole('tooltip')).toHaveCount(0);
+      await expect(sheet).toBeVisible();
+    }
     await page.keyboard.press('Escape');
     await expect(sheet).toHaveCount(0);
   };
