@@ -387,9 +387,18 @@ function store(storage: Storage, key: string, value: string, { session = null, d
       if (!(error instanceof DOMException) || error.name !== 'QuotaExceededError') throw error;
     }
   }
-  // the store counts otherwise than its keys' and values' lengths: everything given up for the write is put back, in
-  // the room it left, and the write is as one nothing could make room for
-  for (const [evictedKey, text] of evicted) storage.setItem(evictedKey, text);
+  // the store counts otherwise than its keys' and values' lengths: what was given up for the write is put back, each on
+  // its own and only where nothing has been written under its key since (another tab's newer value stands), and the
+  // write is as one nothing could make room for. Not a transaction across tabs: a tab that reads in between sees the
+  // entry gone for that moment.
+  for (const [evictedKey, text] of evicted) {
+    if (storage.getItem(evictedKey) !== null) continue;
+    try {
+      storage.setItem(evictedKey, text);
+    } catch {
+      // the room it left is gone: the rest are still tried
+    }
+  }
   return unkept();
 }
 

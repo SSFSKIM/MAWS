@@ -530,6 +530,41 @@ describe('the stored memory (T19): one entry a thing', () => {
     expect(fresh.noRoom(S, store)).toBe(true);
   });
 
+  it('puts back only what nobody wrote since its eviction: another tab’s newer draft stands (B6)', async () => {
+    vi.resetModules();
+    const fresh = await import('./memory');
+    const store = testStorage();
+    const other = `maws.sheet.draft.${OTHER}.q1`;
+    fresh.writeMemory(OTHER, EMPTY_MEMORY, withDraft(EMPTY_MEMORY, 'q1', draft('y'.repeat(5_000))), 0, store);
+    const setItem = store.setItem.bind(store);
+    vi.spyOn(store, 'setItem').mockImplementation((key, value) => {
+      if (!key.startsWith('maws.sheet.send.')) return setItem(key, value);
+      // between the eviction and the rollback another tab writes the draft that was given up
+      if (store.getItem(other) === null) setItem(other, JSON.stringify({ v: 1, touchedAt: 9, draft: draft('the other tab’s') }));
+      throw new DOMException('The quota has been exceeded.', 'QuotaExceededError');
+    });
+    const lines = [answer('page-000000000000000000000000001', 'q4', 'a')];
+    fresh.updateMemory(S, (current) => startSend(current, lines, 2, 'wa-1', { drafts: current.drafts }), { storage: store, now: 2, target: new EventTarget() });
+    expect(fresh.readMemory(OTHER, store).drafts.get('q1')).toEqual(draft('the other tab’s'));
+  });
+
+  it('tries every rollback on its own: one that fails leaves the others put back (B6)', async () => {
+    vi.resetModules();
+    const fresh = await import('./memory');
+    const store = testStorage();
+    fresh.writeMemory(OTHER, EMPTY_MEMORY, withDraft(EMPTY_MEMORY, 'q1', draft('y'.repeat(5_000))), 0, store);
+    fresh.writeMemory(OTHER, EMPTY_MEMORY, withDraft(EMPTY_MEMORY, 'q2', draft('z'.repeat(5_000))), 1, store);
+    const setItem = store.setItem.bind(store);
+    vi.spyOn(store, 'setItem').mockImplementation((key, value) => {
+      if (key.startsWith('maws.sheet.send.') || key === `maws.sheet.draft.${OTHER}.q1`) throw new DOMException('The quota has been exceeded.', 'QuotaExceededError');
+      setItem(key, value);
+    });
+    const lines = [answer('page-000000000000000000000000001', 'q4', 'a')];
+    fresh.updateMemory(S, (current) => startSend(current, lines, 2, 'wa-1', { drafts: current.drafts }), { storage: store, now: 2, target: new EventTarget() });
+    expect(fresh.readMemory(OTHER, store).drafts.get('q2')).toEqual(draft('z'.repeat(5_000))); // put back, though q1's restore failed before it
+    expect(fresh.noRoom(S, store)).toBe(true);
+  });
+
   it('retires a failure held in this window once its stored Send is gone or another press’s: another tab settled it (B6)', async () => {
     vi.resetModules();
     const fresh = await import('./memory');
