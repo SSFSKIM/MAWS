@@ -6,9 +6,10 @@
 //
 // An archived session's list is empty (the attention service's invariant: an archive leaves nothing of the session
 // needing anyone), and an unarchive tells its questions again, silent, as the owner channel re-projects; an archive
-// moves only the index's flag, so the index's changes are followed here. The questions the service's first scan finds
-// were waiting before the launch, so they are silent wherever they are told (§H: a launch makes no burst), and the
-// notifier counts their calls as told.
+// moves only the index's flag, so the index's changes are followed here. The questions of a record's first projection
+// during the service's first scan were waiting before the launch, so they are silent wherever they are told (§H: a
+// launch makes no burst), and the notifier counts their calls as told; the live watcher runs during the scan, so a
+// question a later change of the record adds, before the scan ends or after, is told.
 //
 // It touches nothing else: a sheet item stops no session, so the session's digest, which counts the lane A list's
 // stopping requests (spine-root.ts, `bridged`), never reads it as waiting on the person.
@@ -34,7 +35,7 @@ export function feedSheetItems(
 ): () => void {
   const lists = new Map<AppSessionId, Map<string, AttentionItem[]>>(); // each app session's items, by record
   const archived = new Set<AppSessionId>(); // the app sessions told as archived
-  const before = new Map<string, AttentionId[]>(); // each record's questions as the first scan found them
+  const before = new Map<string, AttentionId[]>(); // each record's questions as its first projection during the first scan held them
   let scanning = true;
   void service.ready.then(() => (scanning = false));
 
@@ -54,7 +55,7 @@ export function feedSheetItems(
     const now = summary?.appSessionId ?? null;
     const left = was?.appSessionId ?? null;
     const model = service.verified(session);
-    if (scanning && model !== null) before.set(session, questionItems(session, model));
+    if (scanning && model !== null && !before.has(session)) before.set(session, questionItems(session, model)); // its first projection only: the live watcher runs during the scan
     if (left !== null && left !== now) {
       const records = lists.get(left);
       records?.delete(session);

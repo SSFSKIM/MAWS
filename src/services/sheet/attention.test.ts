@@ -129,6 +129,20 @@ describe('feedSheetItems', () => {
     expect(silent.at(-1), 'a dismissal queued before the launch, taken back later, is silent too').toEqual([B, [sheetItemId(S2, 'q3'), sheetItemId(S2, 'q4')]]);
   });
 
+  // Its task review: the live watcher is armed before the first scan ends, so a record changes again before the scan
+  // is done; the first projection of a record is its launch's, and a question a new call adds after it is not
+  it('tells a question added after a record’s first projection aloud, though the scan has not ended', async () => {
+    const { told, silent, change, scan } = harness({ started: false });
+    const fresh = (session: string, ids: string[], call: string) => ({ ...model(session, ids), open: model(session, ids).open.map((q) => (q.id === ids.at(-1) && ids.length > 1 ? { ...q, callId: call } : q)) }) as SheetModel;
+    change(S1, summary(S1, A), null, model(S1, ['q1'])); // the scan's read
+    change(S1, summary(S1, A), summary(S1, A), fresh(S1, ['q1', 'q2'], 'toolu_2')); // the watcher's, before the scan ends
+    expect(told.at(-1)).toEqual([A, [sheetItemId(S1, 'q1'), sheetItemId(S1, 'q2')]]);
+    expect(silent.at(-1)).toEqual([A, [sheetItemId(S1, 'q1')]]);
+    await scan();
+    change(S1, summary(S1, A), summary(S1, A), fresh(S1, ['q1', 'q2', 'q3'], 'toolu_3'));
+    expect(silent.at(-1)).toEqual([A, [sheetItemId(S1, 'q1')]]);
+  });
+
   it('reads an unreadable record as no questions, and stops listening when stopped', () => {
     const { told, change, off, listening } = harness();
     change(S1, { ...summary(S1, A), unreadable: true }, null, null);
