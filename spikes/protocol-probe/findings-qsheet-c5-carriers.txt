@@ -343,3 +343,7 @@ W12. A person's frame written right behind a ring with nothing ready. The frames
 the person's frame queued; system/init; the informational warning (dropped_by_hook); a result (num_turns 0); the
 ring's command_lifecycle completed; then the person's frame started, its replay, the model's reply, its result and its
 completed. The engine itself starts the frame queued behind a dropped one, after the dropped one's completed.
+
+Beside the cells. The engine echoes the host's answer to its own can_use_tool back on the wire, as an in-bound
+control_response with the same request id, a few milliseconds after the host's (a Bash call in default mode; w5, w8,
+w10). A reader that pairs responses with requests takes it as an echo.
