@@ -8716,7 +8716,8 @@ test('owner obs 4: the model menu, Bypass, the Auto card, folding a tool block',
         if ((await modeMenu().count()) === 0) await modeChip().click();
         await expect(bypassRow()).toBeVisible({ timeout: 5_000 });
         await bypassRow().click();
-        const confirm = modeMenu().getByRole('button', { name: `Switch to ${PERMISSION_MODE_LABELS.bypassPermissions}`, exact: true });
+        // the confirm takes the rows' place in the same popover, so it is found by its own group, not by the rows
+        const confirm = page.locator('[data-radix-popper-content-wrapper]').getByRole('group', { name: `Switch to ${PERMISSION_MODE_LABELS.bypassPermissions}`, exact: true }).getByRole('button', { name: `Switch to ${PERMISSION_MODE_LABELS.bypassPermissions}`, exact: true });
         await expect(confirm).toBeVisible({ timeout: 5_000 });
         bypassAsked = true;
         await confirm.click();
