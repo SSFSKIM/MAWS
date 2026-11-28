@@ -66,6 +66,9 @@ function answersIn(text: string): AskAnswer[] {
   return heads.map((head, i) => ({ call: head[1]!, text: text.slice(head.index! + head[0].length, heads[i + 1]?.index ?? text.length).trim() }));
 }
 
+/** Whether a text opens as one of today's answers: the ask's own submission, whole, when a plugin's prompt does. */
+export const opensAsAnswer = (text: string): boolean => text.startsWith('The human responded to your async AskUserQuestion (call ');
+
 /** The plugin's own text of a prompt it submitted that opens with an answer, else null. */
 function promptText(row: Json): string | null {
   const origin = object(row.origin);
@@ -74,7 +77,7 @@ function promptText(row: Json): string | null {
   const text = typeof content === 'string' ? content : Array.isArray(content) && content.length === 1 && object(content[0])?.type === 'text' ? (object(content[0])!.text as string) : null;
   if (typeof text !== 'string') return null;
   const own = text.replace(PLUGIN_PROMPT, '').replace(PLUGIN_PROMPT_END, '');
-  return own.startsWith('The human responded to your async AskUserQuestion (call ') ? own : null;
+  return opensAsAnswer(own) ? own : null;
 }
 
 /** Whether the row is the plugin's prompt delivering answers while the session was idle (it opens a turn). */

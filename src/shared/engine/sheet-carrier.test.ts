@@ -98,6 +98,16 @@ describe('the sheet’s envelope, read on its carriers', () => {
     expect(readArrivals(hookContext(headed)), 'a head with no block before today’s answer').toEqual([answerOf(headed, 'toolu_01Legacy0006')]);
   });
 
+  // Its re-review: a plugin prompt that opens as one of today's answers is the ask's own text, whole, whatever it quotes;
+  // here a person quoted two earlier answers with a sheet's receipt between them, and no sheet arrival is read
+  it('reads no sheet delivery in a plugin prompt that opens as today’s answer, whatever it quotes', () => {
+    const old = (call: string) => `The human responded to your async AskUserQuestion (call ${call}): Your questions have been answered: "Which fruit?"="Mango". You can now continue with these answers in mind.`;
+    const quoting = `The human responded to your async AskUserQuestion (call toolu_01Legacy0007): The user answered: "What happened before?"="As before:\n${old('toolu_01Old0001')}\n${TERMINAL}\n${old('toolu_01Old0002')}". Read the answers carefully — they may request clarification, changes, or that you not proceed — and follow what they actually say.`;
+    const arrivals = readArrivals(pluginPrompt(quoting));
+    expect(arrivals.map((arrival) => (arrival.class === 'answer' ? `answer ${arrival.call}` : arrival.class))).toEqual(['answer toolu_01Legacy0007', 'answer toolu_01Old0001', 'answer toolu_01Old0002']);
+    expect(arrivals.find((arrival) => arrival.class === 'answer' && arrival.call === 'toolu_01Old0001')).toMatchObject({ summary: expect.stringContaining('<sheet-delivery>') });
+  });
+
   // The branch review of #890 (S4): a context with a sheet-like head and no whole envelope passes through unchanged,
   // however many lines it has, to today's answer reader.
   it('passes a context of any length with a head and no whole envelope through unchanged', () => {

@@ -5,7 +5,7 @@
 // reads the block and nothing above it (C2's I7): the prose is the model's, and its labels can be cut where the
 // block's places never are. Never read from text a person typed: no carrier here is the person's. Pure.
 import { parseSheetDeliveries, type SheetDelivery } from '../sheet/delivery';
-import { answerSpan } from './ask-delivery';
+import { answerSpan, opensAsAnswer } from './ask-delivery';
 
 type Json = Record<string, unknown>;
 
@@ -75,13 +75,19 @@ function envelopesIn(text: string): { deliveries: SheetDelivery[]; rest: string 
   return { deliveries, rest: rest.join('\n') };
 }
 
-/** The plugin's own text of a prompt the sminos plugin submitted, else null. */
+/**
+ * The plugin's own text of a prompt the sminos plugin submitted that may carry the sheet's envelopes, else null. A prompt
+ * is one producer's submission: one that opens as one of today's answers is the ask's, whole, whatever its person's text
+ * quotes, so it carries none (the joined text a hook's context can hold is read by `answerSpan` instead).
+ */
 function promptText(row: Json): string | null {
   const origin = object(row.origin);
   if (row.type !== 'user' || origin?.kind !== 'plugin' || origin.name !== 'sminos' || origin.asUser === true || row.isMeta === true) return null;
   const content = object(row.message)?.content;
   const text = typeof content === 'string' ? content : Array.isArray(content) && content.length === 1 && object(content[0])?.type === 'text' ? object(content[0])!.text : null;
-  return typeof text === 'string' ? text.replace(PLUGIN_PROMPT, '').replace(PLUGIN_PROMPT_END, '') : null;
+  if (typeof text !== 'string') return null;
+  const own = text.replace(PLUGIN_PROMPT, '').replace(PLUGIN_PROMPT_END, '');
+  return opensAsAnswer(own) ? null : own;
 }
 
 /** The deliveries a held row or a frame carries, by the plugin's prompt or a hook's context; none for any other. */
